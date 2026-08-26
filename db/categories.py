@@ -9,9 +9,14 @@ Duas tabelas distintas:
   livre. Rename emite UPDATE em cascata nas 5 tabelas que referenciam o
   texto da categoria.
 """
+import logging
+import unicodedata
+
 from .connection import get_conn
 from .users import ensure_user
 from utils_text import normalize_text
+
+log = logging.getLogger(__name__)
 
 
 # ─── Seed das 15 categorias canônicas (Sprint 3) ─────────────────────────────
@@ -224,8 +229,21 @@ def get_uncategorized_launches(user_id: int, limit: int = 20) -> list[dict]:
 
 
 def _normalize_category_name(name: str) -> str:
-    """Normaliza nome de categoria pro storage (lowercase, trim, espaços únicos)."""
-    return " ".join((name or "").lower().strip().split())
+    """Normaliza nome de categoria pro storage (lowercase, trim, espaços únicos).
+
+    Controles (Cc) e formatadores invisíveis (Cf) viram espaço antes do
+    collapse. Cc porque o Postgres RECUSA o NUL em texto (`psycopg.DataError`),
+    e um PATCH com NUL na categoria virava 500 — a `main` respondia 200 porque
+    passava pelo `normalize_text`, que já filtrava. Cf porque zero-width
+    (U+200B) e override bidi (U+202E) são invisíveis: "cafe" e "cafe"+U+200B
+    ficariam como duas fatias idênticas na tela, que é exatamente o bug que
+    esta normalização existe pra matar. `str.split()` só quebra em whitespace —
+    nenhuma das duas classes passa por ela."""
+    limpo = "".join(
+        " " if unicodedata.category(c) in ("Cc", "Cf") else c
+        for c in (name or "")
+    )
+    return " ".join(limpo.lower().split())
 
 
 def ensure_user_categories_seeded(user_id: int) -> None:
@@ -577,3 +595,149 @@ def resolve_category_rule_target(user_id: int, target: str) -> tuple[str, str, i
         return ("category", category, count)
 
     return ("", "", 0)
+
+
+# ─── Texto livre do usuário → nome de categoria ──────────────────────────────
+
+
+# Teto do nome de categoria vindo de texto livre. Uma fonte só — as portas
+# (PATCH /launches, /credit-transactions, /installments, tool da IA, WhatsApp)
+# citam esta constante em vez de repetir o número.
+CATEGORY_NAME_MAX_LEN = 80
+
+
+def user_category_display_map(user_id: int, *, strict: bool = False) -> dict[str, str]:
+    """`normalize_text(name)` → `name` como está gravado em `user_categories`.
+
+    Pré-carregado uma vez pelos importadores de extrato (evita N+1: uma query
+    por transação). Inclui arquivadas — o nome digitado tem de reencontrar a
+    categoria existente em vez de criar uma gêmea.
+
+    READ-ONLY, como o resto do caminho quente da inferência (ver
+    `list_custom_category_names`): NÃO semeia. O seed não muda o resultado —
+    os 15 nomes canônicos são resolvidos no passo 1 de `resolve_category_input`,
+    antes de o mapa ser consultado — e semear aqui punha 15 INSERT em toda
+    inferência que bate em regra do usuário. O desempate é determinístico pela
+    própria ordenação, sem depender do seed.
+
+    Falha de banco devolve mapa vazio em vez de estourar — nas 3 chamadas de
+    importação de extrato uma exceção aqui abortaria o arquivo inteiro por
+    causa de um enfeite de grafia, e o import não dependia desta tabela antes
+    deste PR.
+
+    `strict=True` faz a falha SUBIR, e é o que as portas de correção usam:
+    lá a resposta vira DADO. Mapa vazio numa falha transitória não acha a
+    categoria que o usuário já tem, o nome digitado é aceito como novo e
+    `ensure_user_category` grava a gêmea — exatamente o que este módulo
+    existe pra impedir. Medido: usuário com "Café da Manhã" digitando
+    "Cafe da Manha" ficava com as duas linhas no catálogo.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # Desempate determinístico e independente de id: nomes
+                # distintos podem colapsar no mesmo normalizado ("mcdonald s" e
+                # "mcdonald's"). Vence o do seed (is_system) — é a grafia
+                # oficial — e, entre iguais, o menor nome em ordem alfabética.
+                # Ordenar por id deixava o resultado dependente de quem foi
+                # criado/apagado antes.
+                cur.execute(
+                    "select name from user_categories where user_id=%s "
+                    "order by is_system asc, name desc",
+                    (user_id,),
+                )
+                rows = cur.fetchall() or []
+    except Exception:
+        if strict:
+            raise
+        log.warning("user_category_display_map falhou user=%s", user_id, exc_info=True)
+        return {}
+    return {normalize_text(r["name"]): r["name"] for r in rows if (r["name"] or "").strip()}
+
+
+def resolve_category_input(
+    user_id: int,
+    raw: str,
+    *,
+    create: bool = False,
+    display_map: dict[str, str] | None = None,
+) -> str | None:
+    """Texto livre → nome de categoria pra gravar em `launches.categoria`.
+
+    Normalizado é chave, forma de exibição é valor: devolve o nome que já
+    existe em `user_categories` sempre que houver um, pra não criar fatias
+    gêmeas no dashboard. NÃO escreve no banco: `create=True` só significa
+    "aceito nome novo" e devolve o nome já no formato de storage — quem grava
+    a linha é `ensure_user_category`, DEPOIS de o UPDATE ter dado certo (criar
+    antes deixava categoria órfã quando o lançamento não existia).
+    """
+    from utils_text import CATEGORY_LABELS, canonicalize_category_label
+
+    norm = normalize_text(raw or "")
+    if not norm:
+        return None
+
+    # 1) rótulo do sistema: "Alimentação"/"alimentacao"/"ALIMENTACAO" → "alimentação"
+    if norm in CATEGORY_LABELS or norm.replace(" ", "_") in CATEGORY_LABELS:
+        return canonicalize_category_label(norm)
+
+    # 2) categoria que o usuário já tem, na grafia dele
+    if display_map is None:
+        display_map = user_category_display_map(user_id, strict=create)
+    existing = display_map.get(norm)
+    if existing:
+        return existing
+
+    if not create:
+        return None
+
+    # 3) nome novo. Preservar a grafia só vale pra quem VAI ganhar a linha em
+    #    `user_categories` — é o catálogo que de-duplica as grafias seguintes.
+    #    Sem plano de categoria custom não há catálogo, e preservar faria
+    #    "Padaria do Zé" e "Padaria do Ze" virarem duas fatias no dashboard,
+    #    onde a `main` colapsava as duas. Aí a de-duplicação é o próprio
+    #    `normalize_text`, que é o que a `main` grava.
+    # Mede o que VAI SER GRAVADO, não o normalizado: `normalize_text` tira
+    # acento/emoji/pontuação e ENCOLHE a entrada, então medir por ele deixava
+    # passar nome de 5000 caracteres (emoji + uma letra normaliza pra 1 char).
+    stored = _normalize_category_name(raw) if _custom_categories_allowed(user_id) else norm
+    if not stored or len(stored) > CATEGORY_NAME_MAX_LEN:
+        return None
+    return stored
+
+
+def _custom_categories_allowed(user_id: int) -> bool:
+    """Fonte única do gate de categoria custom fora do HTTP. Mesma feature do
+    `POST /categories` (`require_pro_feature("custom_categories")`)."""
+    from core.services.plan_service import plan_gate_ok  # local: db <-> plan_service
+
+    return plan_gate_ok(user_id, "custom_categories")
+
+
+def ensure_user_category(user_id: int, name: str) -> None:
+    """Garante a linha em `user_categories` do nome que acabou de ser gravado.
+
+    Idempotente e best-effort: roda DEPOIS do UPDATE (senão sobra categoria
+    órfã quando o alvo não existe) e nunca derruba a resposta — a correção já
+    está no banco. No-op pra rótulo do sistema, pra nome que já existe e pra
+    quem não tem plano com categoria custom (aí o texto fica só no lançamento,
+    como era antes da normalização).
+    """
+    from utils_text import CATEGORY_LABELS
+
+    norm = normalize_text(name or "")
+    if not norm or norm in CATEGORY_LABELS or norm.replace(" ", "_") in CATEGORY_LABELS:
+        return
+    try:
+        if norm in user_category_display_map(user_id):
+            return
+        # ponytail: 2ª leitura de plano no mesmo PATCH (a 1ª é o
+        # `resolve_category_input`). Fica porque esta função é pública e GRAVA;
+        # se pesar, passa o veredito como argumento.
+        if not _custom_categories_allowed(user_id):
+            return
+        create_user_category(user_id, name)
+    except ValueError:
+        pass  # CATEGORIA_DUPLICADA/INVALIDA: corrida ou nome vazio
+    except Exception:
+        log.warning("ensure_user_category falhou user=%s name=%r", user_id, name, exc_info=True)

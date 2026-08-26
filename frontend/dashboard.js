@@ -897,8 +897,8 @@ function _renderCardItem(c, idx = 0) {
           </div>` : ""}
         <div class="cc-detail-actions">
           ${c.open_bill?.id ? `<button class="mock-cta" onclick='event.stopPropagation(); openCardBillDetail(${c.id}, ${c.open_bill.id})'><i class="ph ph-file-text" aria-hidden="true"></i> Ver fatura</button>` : ""}
-          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${JSON.stringify(c)})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
-          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${JSON.stringify(c.name || '').replace(/"/g, '&quot;')})"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
+          <button class="mock-cta outline" onclick='event.stopPropagation(); openCardEditModal(${escapeHtmlSafe(JSON.stringify(c))})'><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
+          <button class="inst-delete-btn" onclick="event.stopPropagation(); openCardDeleteModal(${c.id}, ${escapeHtmlSafe(JSON.stringify(c.name || ""))})"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
         </div>
       </div>
     </details>
@@ -1425,7 +1425,7 @@ function _renderInstallmentItem(g, idx = 0) {
 
   const valorParcela = g.valor_parcela || 0;
   const anticipateBtn = g.n_pending > 0
-    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${JSON.stringify(g.group_id)}, ${JSON.stringify(g.name)}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'><i class="ph ph-lightning" aria-hidden="true"></i> Antecipar próxima</button>`
+    ? `<button class="mock-cta outline" onclick='event.stopPropagation(); openInstAnticipateModal(${escapeHtmlSafe(JSON.stringify(g.group_id))}, ${escapeHtmlSafe(JSON.stringify(g.name))}, ${valorParcela}, ${parcelas.find(p => p.is_next)?.installment_no || 0}, ${g.installments_total})'><i class="ph ph-lightning" aria-hidden="true"></i> Antecipar próxima</button>`
     : "";
 
   return `
@@ -1854,7 +1854,7 @@ function _renderCategoryPill(cat, idx = 0) {
     : (cat.is_system ? '<span style="font-size:.62rem;color:var(--text-3);margin-left:6px">padrão</span>' : '');
   const delay = 200 + idx * 30;
   return `
-    <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${JSON.stringify(cat)})'>
+    <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${escapeHtmlSafe(JSON.stringify(cat))})'>
       <span class="cat-dot" style="background:${escapeHtmlSafe(cat.color)}"></span>
       <div class="cat-body">
         <div class="cat-name">${phIcon(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
@@ -2185,7 +2185,7 @@ function _renderBudgetRow(b, idx = 0) {
   } else if (b.status === "amarelo") {
     subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes. Piggy te avisa via WhatsApp.`;
   }
-  const safeCatJson = JSON.stringify(b).replace(/'/g, "&apos;");
+  const safeCatJson = escapeHtmlSafe(JSON.stringify(b));
   const delay = 240 + idx * 60;
   return `
     <div class="bar-row" style="cursor:pointer;animation-delay:${delay}ms" onclick='openBudgetEditModal(${safeCatJson})'>
@@ -3466,7 +3466,7 @@ function _renderRecurringRow(r) {
     }
   }
   const startText = _futureStartHint(r.start_date);
-  const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
+  const safeRecJson = escapeHtmlSafe(JSON.stringify(r));
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringEditModal(${safeRecJson})">
       <div class="tx-icon">${phIcon(_recurringEmoji(r))}</div>
@@ -4196,7 +4196,7 @@ function _renderBillRow(b) {
   const amtLabel = variavel
     ? (temEstimativa ? `~-${_fmtBRL(b.amount)}` : "a confirmar")
     : `-${_fmtBRL(b.amount)}`;
-  const nameSafe = escapeHtmlSafe(b.name || "").replace(/'/g, "\\'");
+  const nameSafe = escapeJsString(b.name || "");
   return `
     <div class="tx-row">
       <div class="tx-icon" style="color:${color}"><i class="ph ph-receipt" aria-hidden="true"></i></div>
@@ -4712,7 +4712,7 @@ function _renderRecurringIncomeRow(r) {
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
-  const safeRecJson = JSON.stringify(r).replace(/"/g, "&quot;");
+  const safeRecJson = escapeHtmlSafe(JSON.stringify(r));
   return `
     <div class="tx-row" style="cursor:pointer" onclick="openRecurringIncomeEditModal(${safeRecJson})">
       <div class="tx-icon">${phIcon(_recurringIncomeEmoji(r))}</div>
@@ -9828,11 +9828,11 @@ function render(d) {
             const hb  = c.budget != null;
             const bw  = hb ? Math.min(c.budget_pct,100) : Math.round(c.total/mx*100);
             const bc  = hb ? (c.budget_pct>100?"var(--red)":c.budget_pct>85?"var(--yellow)":"var(--green)") : catColors()[i%catColors().length];
-            const catSafe = c.categoria.replace(/'/g,"\\'");
+            const catSafe = escapeJsString(c.categoria);
             return `<div class="cat-row">
               <div class="cat-hdr">
-                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":c.categoria}</span>
-                <span class="cat-val" data-num="cat_${c.categoria}" data-val="${c.total}">${fmt(c.total)}</span>
+                <span class="cat-lbl">${c.categoria==="sem categoria"?"<i class='ph ph-warning' aria-hidden='true'></i> Sem Categoria":esc(c.categoria)}</span>
+                <span class="cat-val" data-num="cat_${esc(c.categoria)}" data-val="${c.total}">${fmt(c.total)}</span>
                 <button class="bgt-btn" onclick="openBudget('${catSafe}')" title="Definir limite de orçamento"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
               </div>
               ${hb?`<div class="cat-budget-info">${c.budget_pct}% de ${fmt(c.budget)}</div>`:""}

@@ -21,6 +21,7 @@ from ofxparse import OfxParser
 from utils_date import _tz
 from utils_text import normalize_text, contains_word, LOCAL_RULES, keyword_blocked
 from db import import_credit_ofx_bulk, list_user_category_rules
+from db import resolve_category_input, user_category_display_map
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,9 @@ def import_credit_ofx_bytes(
         for kw, cat in _rules_raw
         if kw and cat
     ]
+    # nomes de categoria do usuário UMA vez (evita N+1): a regra guarda o
+    # normalizado; a transação tem de gravar a forma de exibição.
+    _display_map = user_category_display_map(user_id)
 
     # ── Pré-conta quantas vezes cada FITID aparece ───────────────────────────
     # O Nubank agrupa a antecipação de parcelas sob um único FITID para todas
@@ -310,6 +314,9 @@ def import_credit_ofx_bytes(
         # Categorização
         memo_norm = normalize_text(memo)
         categoria = _categorize(memo_norm, rules_norm)
+        categoria = resolve_category_input(
+            user_id, categoria, display_map=_display_map
+        ) or categoria
 
         # Parcelamento
         installment = _parse_installment(memo)

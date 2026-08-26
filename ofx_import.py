@@ -8,7 +8,7 @@ from unittest import result
 from ofxparse import OfxParser
 from utils_date import _tz
 from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date
-from db import list_user_category_rules
+from db import list_user_category_rules, resolve_category_input, user_category_display_map
 from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES, keyword_blocked
 
 # Hard cap defensivo: parser OFX vira DoS se receber arquivo gigante (memória
@@ -143,6 +143,9 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
 
     # carrega regras UMA vez (evita N+1 no Postgres)
     _rules_norm = load_user_rules_norm(user_id)
+    # nomes de categoria do usuário UMA vez (evita N+1): a regra guarda o
+    # normalizado; o launch tem de gravar a forma de exibição.
+    _display_map = user_category_display_map(user_id)
 
     for trn in txs:
         fitid = getattr(trn, "id", None) or getattr(trn, "fitid", None)
@@ -197,6 +200,9 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
 
         memo_norm = normalize_text(memo)
         categoria = resolve_category(memo_norm, _rules_norm)
+        categoria = resolve_category_input(
+            user_id, categoria, display_map=_display_map
+        ) or categoria
 
         is_internal = normalize_text(categoria) in INTERNAL_MOVEMENT_CATEGORIES
 

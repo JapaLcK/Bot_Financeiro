@@ -24,7 +24,7 @@ from db import init_db, ensure_user, get_conn
 
 
 # ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
-# Sem o pacote, estes 9 arquivos estouram no IMPORT e o pytest aborta a suíte
+# Sem o pacote, estes 10 arquivos estouram no IMPORT e o pytest aborta a suíte
 # inteira antes de rodar um teste — o resultado não é "alguns testes falham",
 # é sinal nenhum, nem verde nem vermelho.
 #
@@ -33,10 +33,11 @@ from db import init_db, ensure_user, get_conn
 # sintaxe recém-introduzido, e o arquivo quebrado nunca mais rodaria.
 #
 # A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
-# requirements.txt, então nada aqui é ignorado e os 9 rodam normalmente.
+# requirements.txt, então nada aqui é ignorado e os 10 rodam normalmente.
 _OFXPARSE_DEPENDENTES = [
     "test_audio_clarification.py",
     "test_audio_multi_launch_ask_value.py",
+    "test_category_normalization.py",
     "test_full_handler_smoke.py",
     "test_handle_incoming_routing.py",
     "test_recurring_value.py",
@@ -383,14 +384,9 @@ def user_id():
     _cleanup_user(uid)
 
 
-@pytest.fixture()
-def pro_user_id(user_id: int):
-    """user_id já promovido para plano Pro — use em testes que precisam criar
-    múltiplas caixinhas/cartões ou exercem features Pro.
-
-    Garante uma row em auth_accounts (necessária pra is_pro() ler o plano)
-    e seta plan='pro'. plan_expires_at=None significa "ilimitado".
-    """
+def promote_to_pro(user_id: int) -> int:
+    """Mesma promoção da fixture `pro_user_id`, chamável no meio de um teste
+    (quando o user vem de outra fixture, ex.: id pequeno pro WhatsApp)."""
     import uuid as _uuid
     from db.connection import get_conn
     fake_email = f"pro-{_uuid.uuid4().hex[:8]}@test.local"
@@ -410,3 +406,10 @@ def pro_user_id(user_id: int):
                 )
         conn.commit()
     return user_id
+
+
+@pytest.fixture()
+def pro_user_id(user_id: int):
+    """user_id já promovido para plano Pro — use em testes que precisam criar
+    múltiplas caixinhas/cartões ou exercem features Pro."""
+    return promote_to_pro(user_id)

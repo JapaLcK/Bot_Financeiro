@@ -67,6 +67,7 @@ from core.sessions import (
     revoke_session,
     touch_session,
 )
+from db.connection import cat_norm_sql
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -287,6 +288,11 @@ async def list_users() -> list:
         async with conn.cursor() as cur:
             await cur.execute("SELECT id FROM users ORDER BY created_at")
             return await cur.fetchall()
+
+# Chave de agrupamento do donut de categorias: case- E acento-insensível, pra
+# "cafe da manha" e "café da manhã" virarem UMA fatia (fonte: db/connection.py).
+_CAT_KEY_DONUT = cat_norm_sql("COALESCE(categoria, 'sem categoria')")
+
 
 def _month_range(year: int, month: int):
     """Returns (start_date, exclusive_end_date) for the given month."""
@@ -548,26 +554,28 @@ async def get_financial_data(
         # 6) Categories (despesas do mês — credit_transactions alocadas por
         # `bill.period_end`, igual query 5).
         _q(
-            """
-            SELECT COALESCE(categoria, 'sem categoria') AS categoria,
+            f"""
+            SELECT (array_agg(COALESCE(categoria, 'sem categoria')
+                              ORDER BY dt DESC))[1] AS categoria,
+                   {_CAT_KEY_DONUT} AS cat_key,
                    SUM(valor) AS total,
                    SUM(cnt)   AS count
             FROM (
-                SELECT categoria, valor, 1 AS cnt
+                SELECT categoria, valor, 1 AS cnt, criado_em AS dt
                 FROM launches
                 WHERE user_id = %s
                   AND tipo = 'despesa'
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 UNION ALL
-                SELECT ct.categoria, ct.valor, 1 AS cnt
+                SELECT ct.categoria, ct.valor, 1 AS cnt, b.period_end::timestamptz
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 WHERE ct.user_id = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
-            GROUP BY COALESCE(categoria, 'sem categoria')
+            GROUP BY {_CAT_KEY_DONUT}
             ORDER BY total DESC
             LIMIT 10
             """,
@@ -657,7 +665,18 @@ async def get_financial_data(
             (user_id, query_start, month_end),
         ),
         # 10) Budgets per category
-        _q("SELECT categoria, budget FROM category_budgets WHERE user_id = %s", (user_id,)),
+        # ORDER BY ... DESC é DE PROPÓSITO, não engano: `budget_by_key` abaixo é
+        # um dict por cat_key, então a ÚLTIMA linha lida vence. Com gêmeas
+        # legadas ('cafe' 100 e 'café' 250 na mesma conta) o donut tem que
+        # mostrar o MESMO limite que o `get_budget` devolve, e esse desempate é
+        # `CAT_CANON_ORDER` (db/connection.py): menor nome alfabético, que em
+        # DESC vem por último e ganha o dict. Trocar para ASC inverte o
+        # desempate: a tela passa a mostrar um limite e o bot a responder outro.
+        _q(
+            f"SELECT categoria, budget, {cat_norm_sql('categoria')} AS cat_key "
+            "FROM category_budgets WHERE user_id = %s ORDER BY categoria DESC",
+            (user_id,),
+        ),
     )
 
     # Desempacota fetchone-style
@@ -714,6 +733,10 @@ async def get_financial_data(
     # Build maps
     monthly_map = {row["tipo"]: float(row["total"]) for row in monthly}
     budget_map  = {r["categoria"]: float(r["budget"]) for r in budget_rows}
+    # Casa gasto×orçamento pela chave normalizada (case- e acento-insensível):
+    # o orçamento pode ter sido criado em "cafe da manha" e o gasto gravado em
+    # "café da manhã" — mesma categoria, e o alerta de 85% tem que disparar.
+    budget_by_key = {r["cat_key"]: float(r["budget"]) for r in budget_rows}
 
     # Merge budgets into categories + detect alerts
     cat_list = []
@@ -723,9 +746,9 @@ async def get_financial_data(
         cat_name = cat["categoria"]
         spent    = float(cat["total"])
         cat["total"] = spent
+        bgt = budget_by_key.get(cat.pop("cat_key", None))
 
-        if cat_name in budget_map:
-            bgt = budget_map[cat_name]
+        if bgt:
             pct = round(spent / bgt * 100, 1)
             cat["budget"]     = bgt
             cat["budget_pct"] = pct
@@ -2226,31 +2249,13 @@ async def _get_current_user(
     return user_id
 
 
-# Planos v2: tier mínimo de cada feature paga na escada. Quase TODAS as features
-# gated são Essencial+ (o corte Plus é OF multi-banco/agentes, gated à parte).
-# "forecast" (previsão de saldo 30/60/90) é a exceção Pro+, como anunciado na
-# /precos. "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
-# ai_chat_allowed, não por tier.
-_FEATURE_MIN_TIER_V2 = {
-    "recurring_expenses": "essencial",
-    "ofx_import": "essencial",
-    "investments": "essencial",
-    "export": "essencial",
-    "custom_categories": "essencial",
-    "forecast": "pro",
-    "generic": "essencial",
-}
-
-
+# Planos v2: o tier mínimo de cada feature paga mora em
+# core.services.plan_service.FEATURE_MIN_TIER_V2 — fonte única, porque gates
+# fora do HTTP (criar categoria custom por correção do WhatsApp/IA) leem a
+# mesma regra. Aqui fica só o wrapper que os endpoints já usavam.
 def _plan_gate_ok(user_id: int, feature: str) -> bool:
-    from core.services.plan_service import (
-        plans_v2_enabled, is_pro, require_min_tier, ai_chat_allowed,
-    )
-    if not plans_v2_enabled():
-        return is_pro(user_id)
-    if feature == "ai_chat":
-        return ai_chat_allowed(user_id)
-    return require_min_tier(user_id, _FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+    from core.services.plan_service import plan_gate_ok
+    return plan_gate_ok(user_id, feature)
 
 
 def require_pro_feature(feature: str = "generic"):
@@ -5036,7 +5041,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     from core.services.category_service import infer_category, learn_from_inference
     from core.services.plan_limits import PlanLimitExceeded
     from core.services.plan_service import check_can_create_launch
-    from utils_text import is_internal_category, canonicalize_category_label
+    from utils_text import is_internal_category
 
     # Teto mensal de lançamentos do tier (Grátis no v2; no-op com v2 off).
     try:
@@ -5089,8 +5094,13 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         card_name = card.get("name") or "cartão"
 
         nota = nota_in or alvo or f"compra no crédito ({card_name})"
+        # Sinal de aprendizado: SÓ o que o usuário escreveu. A nota acima e o
+        # `card_name` trazem o nome do CARTÃO — aprender deles criava a regra
+        # "nubank → <categoria>", que casa por substring e sequestrava todo
+        # gasto que citasse o cartão. Sem texto do usuário, não se aprende.
+        sinal_aprendizado = nota_in or alvo or ""
         inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
-        categoria = canonicalize_category_label(inferred.category) or "outros"
+        categoria = inferred.category or "outros"
 
         purchased_at = await asyncio.to_thread(today_tz)
 
@@ -5110,9 +5120,9 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 await asyncio.to_thread(
                     learn_from_inference,
                     int(user_id),
-                    nota,
+                    sinal_aprendizado,
                     categoria,
-                    target_hint=alvo or card_name,
+                    target_hint=alvo,
                     reason=inferred.reason,
                 )
             except ValueError as exc:
@@ -5151,9 +5161,9 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             await asyncio.to_thread(
                 learn_from_inference,
                 int(user_id),
-                nota,
+                sinal_aprendizado,
                 categoria,
-                target_hint=alvo or card_name,
+                target_hint=alvo,
                 reason=inferred.reason,
             )
         except ValueError as exc:
@@ -5180,7 +5190,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
     inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
-    categoria = canonicalize_category_label(inferred.category) or "outros"
+    categoria = inferred.category or "outros"
     is_internal = is_internal_category(categoria)
 
     try:
@@ -5252,14 +5262,19 @@ async def update_launch_route(
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from utils_text import canonicalize_category_label
+    from db import CATEGORY_NAME_MAX_LEN, ensure_user_category, resolve_category_input
 
     categoria_norm: str | None = None
     if payload.categoria is not None:
         raw = payload.categoria.strip()
         if not raw:
             raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
-        categoria_norm = canonicalize_category_label(raw) or raw.lower()
+        categoria_norm = await asyncio.to_thread(resolve_category_input, user_id, raw, create=True)
+        if not categoria_norm:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoria inválida (máx. {CATEGORY_NAME_MAX_LEN} caracteres).",
+            )
 
     nota_norm: str | None = None
     if payload.nota is not None:
@@ -5291,6 +5306,10 @@ async def update_launch_route(
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    if categoria_norm:
+        # criar a categoria só DEPOIS do UPDATE: antes, um id inexistente
+        # devolvia 404 e ainda assim deixava a categoria órfã no catálogo.
+        await asyncio.to_thread(ensure_user_category, user_id, categoria_norm)
     _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,
@@ -5344,14 +5363,19 @@ async def update_credit_transaction_route(
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from utils_text import canonicalize_category_label
+    from db import CATEGORY_NAME_MAX_LEN, ensure_user_category, resolve_category_input
 
     categoria_norm: str | None = None
     if payload.categoria is not None:
         raw = payload.categoria.strip()
         if not raw:
             raise HTTPException(status_code=400, detail="Categoria não pode ser vazia.")
-        categoria_norm = canonicalize_category_label(raw) or raw.lower()
+        categoria_norm = await asyncio.to_thread(resolve_category_input, user_id, raw, create=True)
+        if not categoria_norm:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoria inválida (máx. {CATEGORY_NAME_MAX_LEN} caracteres).",
+            )
 
     nota_norm: str | None = None
     if payload.nota is not None:
@@ -5371,6 +5395,11 @@ async def update_credit_transaction_route(
     )
     if not changed:
         raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
+    if categoria_norm:
+        # crédito não guarda `alvo` — só a `nota`, que pode ser frase gerada
+        # ("compra no crédito (Nubank)"). Aprender dela ensinava o nome do
+        # CARTÃO como estabelecimento, então aqui só se garante o catálogo.
+        await asyncio.to_thread(ensure_user_category, user_id, categoria_norm)
     _invalidate_dashboard_current_cache(user_id)
     return {
         "ok": True,

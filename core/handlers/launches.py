@@ -1058,7 +1058,7 @@ def add_from_entities(
             # pra "alimentação"). Faz cross-check com as regras determinísticas:
             # um match confiante de regra do usuário / ticker / LOCAL_RULES que
             # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
-            categoria_ai = canonicalize_category_label(categoria) or categoria
+            categoria_ai = infer_category(user_id, "", categoria).category
             local = infer_category(user_id, nota_clean, None, allow_ai=False)
             if local.reason in {"user_rule", "user_category", "ticker_match", "local_rule"} and local.category != categoria_ai:
                 logger.info(
@@ -1070,7 +1070,7 @@ def add_from_entities(
             else:
                 categoria_final = categoria_ai
         else:
-            categoria_final = categoria
+            categoria_final = infer_category(user_id, "", categoria).category
     else:
         res = infer_category(user_id, nota_clean, None)
         categoria_final = res.category or "outros"

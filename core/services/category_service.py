@@ -22,6 +22,7 @@ from db import (
     get_memorized_category,
     upsert_category_rule,
     list_custom_category_names,
+    resolve_category_input,
 )
 
 
@@ -174,7 +175,13 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     pra fazer cross-check, sem gastar uma segunda chamada de LLM.
     """
     if explicit_category:
-        cat = canonicalize_category_label(explicit_category)
+        # Texto livre do usuário (hashtag `#McDonald's`, `categoria` da tool
+        # `add_launch`): tem de virar a grafia do catálogo, senão o lançamento
+        # nasce em `mcdonald s` e abre fatia gêmea da `mcdonald's` que já
+        # existe. `create=False`: inferência é READ-ONLY (ver
+        # `user_category_display_map`); quem grava é a porta.
+        cat = resolve_category_input(user_id, explicit_category, create=False) \
+            or canonicalize_category_label(explicit_category)
         return InferResult(category=cat or "outros", reason="explicit")
 
     # C) ticker BR em MAIÚSCULAS — convenção do mercado, baixíssimo risco
@@ -194,7 +201,16 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     # B) regras do usuário (mesma fonte do comando "criar categoria ... linkar ...")
     cat = get_memorized_category(user_id, t)
     if cat:
-        return InferResult(category=canonicalize_category_label(cat), reason="user_rule")
+        # A regra guarda a categoria NORMALIZADA (sem acento) — é índice interno.
+        # A forma de exibição vem de user_categories; o canonicalize é o
+        # fallback de quando a regra aponta pra categoria que não existe lá.
+        # ponytail: +1 query por inferência que bate em regra do usuário. Se
+        # pesar, o display_map vira cache por request (os importadores já o
+        # pré-carregam uma vez, que é onde o N+1 doeria).
+        return InferResult(
+            category=resolve_category_input(user_id, cat, create=False) or canonicalize_category_label(cat),
+            reason="user_rule",
+        )
 
     # B2) categoria CUSTOM criada pelo usuário (na tela) sem regra de keyword.
     #     Se o lançamento menciona um token distintivo do nome dela, usa. Vem

@@ -22,9 +22,13 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql
+from .connection import get_conn, cat_norm_sql, CAT_META_SQL, CAT_CANON_ORDER
 from .users import ensure_user
 
+
+# Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
+_CAT_EQ    = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
+_CAT_CT_EQ = f"{cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}"
 
 # Mesma lista que `core/budget_alerts.py` filtra como interna.
 _INTERNAL_CATEGORIES = {
@@ -58,7 +62,7 @@ def get_budget(user_id: int, categoria: str) -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria, budget from category_budgets "
-                "where user_id=%s and lower(categoria) = lower(%s)",
+                f"where user_id=%s and {_CAT_EQ}{CAT_CANON_ORDER}",
                 (user_id, categoria),
             )
             row = cur.fetchone()
@@ -86,16 +90,18 @@ def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, boo
         with conn.cursor() as cur:
             cur.execute(
                 "select categoria from category_budgets "
-                "where user_id=%s and lower(categoria) = lower(%s)",
+                f"where user_id=%s and {_CAT_EQ}{CAT_CANON_ORDER}",
                 (user_id, cat),
             )
             existing = cur.fetchone()
             if existing:
                 canon = existing["categoria"]
+                # Pela grafia EXATA da canônica: com gêmeas legadas o
+                # `{_CAT_EQ}` casa as duas e o update apagaria o limite da outra.
                 cur.execute(
                     "update category_budgets set budget=%s "
-                    "where user_id=%s and lower(categoria)=lower(%s)",
-                    (Decimal(str(budget)), user_id, cat),
+                    "where user_id=%s and categoria=%s",
+                    (Decimal(str(budget)), user_id, canon),
                 )
                 conn.commit()
                 return canon, False
@@ -116,7 +122,7 @@ def delete_budget(user_id: int, categoria: str) -> bool:
         with conn.cursor() as cur:
             cur.execute(
                 "delete from category_budgets "
-                "where user_id=%s and lower(categoria) = lower(%s)",
+                f"where user_id=%s and {_CAT_EQ}",
                 (user_id, categoria),
             )
             n = cur.rowcount
@@ -186,13 +192,13 @@ def sum_spent_in_category_this_month(user_id: int, categoria: str) -> float:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select
                   coalesce((
                     select sum(valor) from launches
                     where user_id=%s
                       and tipo in ('despesa', 'saida')
-                      and lower(categoria) = lower(%s)
+                      and {_CAT_EQ}
                       and is_internal_movement = false
                       and date_part('year',  criado_em) = %s
                       and date_part('month', criado_em) = %s
@@ -202,7 +208,7 @@ def sum_spent_in_category_this_month(user_id: int, categoria: str) -> float:
                     from credit_transactions ct
                     join credit_bills b on b.id = ct.bill_id
                     where ct.user_id=%s
-                      and lower(ct.categoria) = lower(%s)
+                      and {_CAT_CT_EQ}
                       and ct.is_refund = false
                       and date_part('year',  b.period_end) = %s
                       and date_part('month', b.period_end) = %s
@@ -314,14 +320,14 @@ def get_budgets_status_for_month(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 with budgets as (
                   select id, categoria, budget
                   from category_budgets
                   where user_id=%s
                 ),
                 spent_launches as (
-                  select lower(categoria) as cat, sum(valor)::numeric as total
+                  select {cat_norm_sql('categoria')} as cat, sum(valor)::numeric as total
                   from launches
                   where user_id=%s
                     and tipo in ('despesa', 'saida')
@@ -329,10 +335,10 @@ def get_budgets_status_for_month(
                     and date_part('year',  criado_em) = %s
                     and date_part('month', criado_em) = %s
                     and categoria is not null
-                  group by lower(categoria)
+                  group by {cat_norm_sql('categoria')}
                 ),
                 spent_cards as (
-                  select lower(ct.categoria) as cat, sum(ct.valor)::numeric as total
+                  select {cat_norm_sql('ct.categoria')} as cat, sum(ct.valor)::numeric as total
                   from credit_transactions ct
                   join credit_bills b on b.id = ct.bill_id
                   where ct.user_id=%s
@@ -340,7 +346,7 @@ def get_budgets_status_for_month(
                     and date_part('year',  b.period_end) = %s
                     and date_part('month', b.period_end) = %s
                     and ct.categoria is not null
-                  group by lower(ct.categoria)
+                  group by {cat_norm_sql('ct.categoria')}
                 ),
                 spent_all as (
                   select cat, sum(total) as total from (
@@ -348,17 +354,20 @@ def get_budgets_status_for_month(
                     union all
                     select * from spent_cards
                   ) s group by cat
+                ),
+                cat_meta as (
+                  {CAT_META_SQL}
                 )
                 select
                   b.categoria,
+                  {cat_norm_sql('b.categoria')} as cat_key,
                   b.budget::float as budget,
                   coalesce(sa.total, 0)::float as spent,
                   uc.emoji,
                   uc.color
                 from budgets b
-                left join spent_all sa on sa.cat = lower(b.categoria)
-                left join user_categories uc
-                  on uc.user_id=%s and uc.name = lower(b.categoria)
+                left join spent_all sa on sa.cat = {cat_norm_sql('b.categoria')}
+                left join cat_meta uc on uc.cat = {cat_norm_sql('b.categoria')}
                 order by lower(b.categoria)
                 """,
                 (
@@ -372,7 +381,12 @@ def get_budgets_status_for_month(
 
     total_budget = 0.0
     total_spent = 0.0
-    at_risk = 0
+    # Gêmeas legadas ('cafe' e 'café' na mesma conta) casam com o MESMO gasto:
+    # cada linha mostra o gasto contra o próprio limite, mas o total soma o
+    # gasto UMA vez por categoria normalizada. `total_budget` NÃO deduplica —
+    # os dois limites foram criados pelo usuário.
+    spent_counted: set[str] = set()
+    at_risk_cats: set[str] = set()
     budgets_out: list[dict[str, Any]] = []
     for r in rows:
         budget = float(r["budget"] or 0)
@@ -385,9 +399,11 @@ def get_budgets_status_for_month(
         else:
             status = "verde"
         if status != "verde":
-            at_risk += 1
+            at_risk_cats.add(r["cat_key"])
         total_budget += budget
-        total_spent += spent
+        if r["cat_key"] not in spent_counted:
+            spent_counted.add(r["cat_key"])
+            total_spent += spent
         budgets_out.append({
             "categoria": r["categoria"],
             "emoji": r["emoji"] or "🏷️",
@@ -408,7 +424,7 @@ def get_budgets_status_for_month(
             "spent": round(total_spent, 2),
             "pct": round(total_pct, 1),
             "remaining": round(total_budget - total_spent, 2),
-            "at_risk": at_risk,
+            "at_risk": len(at_risk_cats),
         },
     }
 

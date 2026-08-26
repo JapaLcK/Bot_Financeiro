@@ -135,3 +135,26 @@ def cat_norm_sql(expr: str) -> str:
     """Fragmento SQL que normaliza `expr` (coluna ou placeholder %s) pra
     comparação de categoria case- e acento-insensível."""
     return f"translate(lower({expr}), '{_CAT_ACCENTS_FROM}', '{_CAT_ACCENTS_TO}')"
+
+
+# Catálogo deduplicado por nome normalizado, pronto pra virar CTE de join.
+# `user_categories` é única só no par EXATO (user_id, name), então 'cafe' e
+# 'café' coexistem: um join por valor normalizado contra a tabela crua devolve
+# a mesma linha de orçamento/gasto duas vezes e dobra dinheiro na tela.
+# Desempate idêntico ao de `user_category_display_map` (db/categories.py):
+# vence a do seed (is_system) e, entre iguais, o menor nome alfabético — não
+# pode depender de `id`, que muda com quem foi criado/apagado antes.
+CAT_META_SQL = (
+    f"select distinct on ({cat_norm_sql('name')}) "
+    f"       {cat_norm_sql('name')} as cat, emoji, color "
+    "  from user_categories where user_id = %s "
+    f" order by {cat_norm_sql('name')}, is_system desc, name asc"
+)
+
+
+# Desempate canônico entre GÊMEAS de `category_budgets` (única só no par EXATO
+# (user_id, categoria): 'cafe' e 'café' coexistem em dado legado). Mesma regra
+# do `CAT_META_SQL` acima, sem o `is_system` — que essa tabela não tem: vence o
+# menor nome alfabético. Fonte única de quem ganha; sem isto cada leitor
+# desempata pela ordem de inserção e o donut mostra um limite e o bot outro.
+CAT_CANON_ORDER = " order by categoria limit 1"

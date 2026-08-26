@@ -414,17 +414,32 @@ async def installment_update_route(
         n = (payload.nome or "").strip()
         if len(n) > 200:
             raise HTTPException(status_code=400, detail="Nome muito longo (máx. 200 caracteres).")
-    if payload.categoria is not None:
-        c = (payload.categoria or "").strip()
-        if len(c) > 80:
-            raise HTTPException(status_code=400, detail="Categoria muito longa (máx. 80 caracteres).")
+    categoria: str | None = payload.categoria
+    if payload.categoria is not None and payload.categoria.strip():
+        from db import CATEGORY_NAME_MAX_LEN, resolve_category_input
+        # vazio/só espaços passa direto: é "limpar o campo", como em `nome`
+        # (o update faz `.strip() or None`). O teto é medido dentro do
+        # resolve, sobre o nome que vai ser gravado.
+        categoria = await asyncio.to_thread(
+            resolve_category_input, user_id, payload.categoria.strip(), create=True
+        )
+        if not categoria:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Categoria inválida (máx. {CATEGORY_NAME_MAX_LEN} caracteres).",
+            )
 
     updated = await asyncio.to_thread(
         update_installment_group_meta, user_id, group_id,
-        nome=payload.nome, categoria=payload.categoria,
+        nome=payload.nome, categoria=categoria,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Parcelamento não encontrado ou nenhum campo alterado.")
+    if categoria:
+        # depois do UPDATE (senão sobra categoria órfã com group_id inexistente).
+        # Não aprende: crédito não tem `alvo`, só `nota` — ver update_credit_transaction_route.
+        from db import ensure_user_category
+        await asyncio.to_thread(ensure_user_category, user_id, categoria)
     shared.invalidate_dashboard_current_cache(user_id)
     return {"ok": True}
 

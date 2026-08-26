@@ -124,6 +124,10 @@ from .categories import (
     resolve_category_rule_target,
     get_uncategorized_launches,
     list_custom_category_names,
+    resolve_category_input,
+    user_category_display_map,
+    ensure_user_category,
+    CATEGORY_NAME_MAX_LEN,
 )
 
 # ── Ações pendentes ───────────────────────────────────────────────────────────
@@ -456,6 +460,8 @@ __all__ = [
     "get_memorized_category", "upsert_category_rule", "list_user_category_rules",
     "resolve_category_rule_target", "get_uncategorized_launches",
     "list_custom_category_names",
+    "resolve_category_input", "user_category_display_map",
+    "ensure_user_category", "CATEGORY_NAME_MAX_LEN",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     "advance_pending_action", "consume_pending_action",

@@ -22,8 +22,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Iterable
 
-from db.connection import get_conn
+from db.connection import get_conn, cat_norm_sql, CAT_CANON_ORDER
 from utils_text import fmt_brl
+
+# Comparacao de categoria case- E acento-insensivel (fonte unica: db/connection.py).
+_CAT_EQ = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
 
 
 THRESHOLDS = (80, 100, 120)
@@ -110,7 +113,7 @@ def evaluate_after_expense(
             with conn.cursor() as cur:
                 cur.execute(
                     "select categoria, budget from category_budgets "
-                    "where user_id = %s and lower(categoria) = lower(%s)",
+                    f"where user_id = %s and {_CAT_EQ}{CAT_CANON_ORDER}",
                     (user_id, cat),
                 )
                 bgt_row = cur.fetchone()
@@ -122,12 +125,12 @@ def evaluate_after_expense(
                     return None
 
                 cur.execute(
-                    """
+                    f"""
                     select coalesce(sum(valor), 0) as total
                     from launches
                     where user_id = %s
                       and tipo in ('despesa', 'saida')
-                      and lower(categoria) = lower(%s)
+                      and {_CAT_EQ}
                       and is_internal_movement = false
                       and date_part('year',  criado_em) = %s
                       and date_part('month', criado_em) = %s
@@ -143,7 +146,7 @@ def evaluate_after_expense(
 
                 cur.execute(
                     "select threshold from budget_alert_sent "
-                    "where user_id = %s and lower(categoria) = lower(%s) and ym = %s",
+                    f"where user_id = %s and {_CAT_EQ} and ym = %s",
                     (user_id, cat_canon, ym),
                 )
                 already = {int(r["threshold"]) for r in cur.fetchall()}
