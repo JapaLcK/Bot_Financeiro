@@ -160,16 +160,19 @@ def claim_pending_action(user_id: int, action_type: str, payload: dict,
     Linha livre → insere (condicional, para duas tarefas simultâneas não se
     apagarem). Ocupada por oferta de conveniência → desaloja, condicionado ao
     que foi lido, para não atropelar algo que chegou no meio. Ocupada por outra
-    pergunta → devolve False, e quem chamou degrada para o texto que funciona
-    sem estado.
+    pergunta → devolve False, e quem chamou degrada para um texto que pede
+    para terminar a pergunta viva primeiro (a forma completa "paguei luz
+    132,50" NÃO funciona nesse estado — ver
+    `core/handlers/bills.py:pergunta_de_valor_sem_contexto`).
 
     Mesmo desenho do `_devolve_head` (core/handlers/launches.py), com a
     diferença de que lá o CAS roda em laço: lá o que se perde é um lançamento
     do usuário, aqui é só o contexto de uma pergunta que tem texto de
     recuperação.
     """
-    # ponytail: uma tentativa só. Perder a corrida cai no texto degradado, que
-    # funciona; virar laço só se aparecer disputa de verdade nessa linha.
+    # ponytail: uma tentativa só. Perder a corrida cai no texto degradado (que
+    # não perde dinheiro, só pede para terminar a pergunta viva); virar laço só
+    # se aparecer disputa de verdade nessa linha.
     atual = get_pending_action(user_id)
     if atual is None:
         return create_pending_action_if_absent(user_id, action_type, payload, minutes)

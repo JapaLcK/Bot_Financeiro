@@ -777,12 +777,14 @@ def process_message(message: InboundMessage) -> None:
                     hint = f" (estimado {fmt_brl(est)})" if est else ""
                     if not guardou:
                         # Perdeu para outra pergunta: sem a pendência, o número
-                        # solto não fecha nada aqui. Pede a forma completa, que
-                        # funciona sem estado nenhum (cai no `try_pay_from_text`).
+                        # solto não fecha nada aqui — e a forma completa
+                        # ("paguei luz 132,50") também não, porque a pergunta
+                        # que sobreviveu é resolvida antes. Texto único em
+                        # core/handlers/bills.py.
+                        from core.handlers.bills import pergunta_de_valor_sem_contexto
                         _send_reply(
                             reply_to,
-                            f"Quanto veio a conta de *{nome_conta}* este mês?{hint}\n"
-                            f"Manda assim: *paguei {str(nome_conta).lower()} 132,50*",
+                            pergunta_de_valor_sem_contexto(uid, nome_conta),
                         )
                         return
                     _send_reply(

@@ -168,8 +168,11 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
             {"bill_id": int(bill["id"]), "bill_name": nome},
         )
         if not guardou:
-            return (f"🐷 A conta de *{nome}* tem valor variável. Quanto veio este mês? "
-                    f"Ex: *paguei {str(nome).lower()} 132,50*")
+            # Quarta cópia da mesma frase pela mesma razão: a forma completa
+            # não funciona quando a pergunta que venceu continua de pé. Texto
+            # único em core/handlers/bills.py.
+            from core.handlers.bills import pergunta_de_valor_sem_contexto
+            return "🐷 " + pergunta_de_valor_sem_contexto(user_id, nome)
         return (f"🐷 A conta de *{nome}* tem valor variável. Quanto veio este mês? "
                 f"Pode mandar só o valor, por exemplo: *132,50*")
 

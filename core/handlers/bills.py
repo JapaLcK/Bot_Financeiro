@@ -26,6 +26,47 @@ _STOP_TOKENS = {
 }
 
 
+
+def pergunta_de_valor_sem_contexto(user_id: int, nome: str) -> str:
+    """Texto da pergunta de valor de conta variável quando o `claim` PERDEU a
+    linha de `pending_actions` para outra pergunta que continua de pé.
+
+    Sem a pendência gravada, o número solto não fecha nada — e a forma completa
+    ("paguei luz 132,50") TAMBÉM não funciona neste estado, então não pode ser
+    anunciada. Medido (19 tipos de pendência que podem estar vivos, texto
+    `paguei luz 132,50` por `route()`): em 8 deles a mensagem é consumida antes
+    de chegar no `try_pay_from_text` — as 3 variantes de `clarification`,
+    `multi_launch_values`, `credit_card_setup`, `credit_card_set_primary`,
+    `credit_delete_card`, `installment_pending`, `pay_bill_choice`, e o
+    `recategorize_launch_text` (que no WhatsApp é consumido em
+    `wa_runtime.py:887`, antes do `handle_incoming`). Na `clarification` de
+    `launches.add` o estrago é dinheiro no lugar errado: o 132,50 vira o valor
+    do lançamento VELHO e a conta fica sem pagar.
+
+    `cancelar` também não serve de conselho universal: limpa a linha em 17 dos
+    19, mas no `recategorize_launch_text` vira o nome da categoria.
+
+    O único caminho que vale em TODOS é terminar a pergunta que está de pé —
+    é só isso que este texto pede. Quando a pendência carrega a pergunta em
+    mãos (toda `clarification` grava `payload["question"]`), ela é citada; nos
+    outros tipos não há rótulo legível e o texto fica genérico.
+    """
+    from db import get_pending_action
+
+    try:
+        pend = get_pending_action(user_id) or {}
+        pergunta = (pend.get("payload") or {}).get("question")
+    except Exception:
+        pergunta = None
+    espera = f'esperando: "{pergunta}"' if pergunta else "esperando resposta."
+    return (
+        f"A conta de *{nome}* tem valor variável, mas antes tem outra pergunta "
+        f"minha {espera}\n"
+        f"Me responde ela primeiro; a *{nome}* fica pendente aqui e a gente "
+        f"resolve o valor em seguida."
+    )
+
+
 def try_pay_from_text(user_id: int, text: str) -> str | None:
     """Se o texto for 'paguei/quitei <conta>' E houver uma conta a pagar
     pendente que casa, marca como paga e retorna a confirmação. Senão None."""
@@ -97,18 +138,16 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         # `claim_pending_action` respeita a ordem de prioridade escrita em
         # db/pending.py: desaloja oferta de conveniência ("categoria errada?"),
         # cede para outra PERGUNTA. Só quando cede é que a pergunta sai sem
-        # contexto salvo — e aí o texto abaixo pede a forma completa, que
-        # funciona sem estado nenhum.
+        # contexto salvo — e aí o texto abaixo pede que ela seja terminada
+        # primeiro (a forma completa NÃO funciona nesse estado; ver
+        # `pergunta_de_valor_sem_contexto`).
         guardou = claim_pending_action(
             user_id,
             "bill_amount_expected",
             {"bill_id": int(best["id"]), "bill_name": nome},
         )
         if not guardou:
-            return (
-                f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
-                f"Manda assim: *paguei {nome.lower()} 132,50*"
-            )
+            return pergunta_de_valor_sem_contexto(user_id, nome)
         return (
             f"A conta de *{nome}* tem valor variável. Quanto veio este mês?\n"
             "Pode mandar só o valor, por exemplo: *132,50*"

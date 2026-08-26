@@ -835,6 +835,9 @@ def test_sim_da_oferta_de_gasto_fixo_sobrevive_a_pergunta_de_conta(ia_espia):
     Este teste também mata a mutação que apaga o ramo `if not guardou:`: sem
     ele a resposta seria "Pode mandar só o valor" com a pergunta NÃO salva, e o
     "132" cairia na IA com a conta em aberto.
+
+    O texto degradado pede para terminar a oferta primeiro — e o final do teste
+    mostra por quê: é DEPOIS do "sim" (linha livre) que a forma completa paga.
     """
     import uuid
     import db
@@ -849,7 +852,8 @@ def test_sim_da_oferta_de_gasto_fixo_sobrevive_a_pergunta_de_conta(ia_espia):
     })
 
     pergunta = _diga(uid, "paguei a luz")
-    assert "Manda assim" in pergunta, f"não degradou: {pergunta!r}"
+    assert "outra pergunta minha" in pergunta, f"não degradou: {pergunta!r}"
+    assert "paguei luz" not in pergunta.lower(), pergunta
     assert (db.get_pending_action(uid) or {}).get("action_type") == \
         "confirm_recurring_offer", "a oferta de gasto fixo foi desalojada"
 
@@ -1127,8 +1131,9 @@ def test_botao_ja_paguei_nao_destroi_pergunta_viva(monkeypatch):
     """C2: `set_pending_action` incondicional apagava QUALQUER pergunta.
 
     Aqui a vítima é uma `clarification` com o valor que o usuário já digitou —
-    perdê-la perde o dinheiro dele. O botão cede e pede a forma completa, que
-    funciona sem estado nenhum.
+    perdê-la perde o dinheiro dele. O botão cede e pede que a pergunta viva
+    seja terminada primeiro — a forma completa não funciona nesse estado
+    (achado do Codex; ver `pergunta_de_valor_sem_contexto`).
     """
     import uuid
     import db
@@ -1142,7 +1147,9 @@ def test_botao_ja_paguei_nao_destroi_pergunta_viva(monkeypatch):
     atual = db.get_pending_action(uid) or {}
     assert atual.get("action_type") == "clarification", atual
     assert atual.get("payload") == {"valor": 77.9}, "o valor já digitado sumiu"
-    assert respostas and "paguei luz" in respostas[-1].lower(), respostas
+    corpo = respostas[-1] if respostas else ""
+    assert "outra pergunta minha" in corpo, respostas
+    assert "paguei luz" not in corpo.lower(), corpo
 
 
 def test_controle_botao_ja_paguei_em_linha_livre_guarda_a_pergunta(monkeypatch):
@@ -1433,3 +1440,100 @@ def test_ponto_mal_agrupado_com_virgula_paga_o_que_a_pessoa_quis(resposta, esper
     limpo = limpa_pontuacao_final(resposta)
     assert agrupamento_de_milhar_ok(limpo), f"{resposta} deveria ser aceito"
     assert parse_money(limpo) == esperado
+
+
+def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia):
+    """Achado do Codex no #133: o texto degradado vendia um comando perigoso.
+
+    Quando o `claim` perde a linha para uma `clarification` que continua de pé,
+    o texto antigo dizia "Manda assim: *paguei luz 132,50*". Esse comando NÃO
+    chega no `try_pay_from_text` neste estado: `route()` resolve a
+    `clarification` antes, e o 132,50 vira o valor do lançamento VELHO — a
+    conta fica sem pagar e o dinheiro entra na descrição errada.
+
+    A segunda metade do teste é a prova de que o perigo é real (registra o
+    lançamento errado); a primeira é a correção (o texto não sugere mais isso).
+    """
+    import uuid
+    import db
+    import db.bills as B
+    from core.handlers.bills import pergunta_de_valor_sem_contexto
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "clarification", {
+        "intent": "launches.add",
+        "entities": {"tipo": "despesa"},
+        "orig_text": "gastei no mercado",
+        "question": "Qual foi o valor?",
+    })
+
+    texto = pergunta_de_valor_sem_contexto(uid, "Luz")
+
+    assert "paguei luz" not in texto.lower(), texto
+    assert "132,50" not in texto, texto
+    assert "Qual foi o valor?" in texto, texto
+
+    # Por que não pode sugerir: mandando a forma completa neste estado, o
+    # dinheiro vai para o lançamento velho e a conta continua pendente.
+    _diga(uid, "paguei luz 132,50")
+
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert conta["status"] == "pending", conta
+    errado = [l for l in db.list_launches(uid, limit=10)
+              if abs(float(l["valor"])) == 132.5]
+    assert errado, "o cenário do Codex parou de reproduzir; reveja o teste"
+
+
+def test_valor_invalido_continua_sugerindo_a_forma_completa(ia_espia):
+    """Controle positivo: onde a forma completa FUNCIONA, ela segue sugerida.
+
+    O `VALOR_INVALIDO` ("paguei luz 0,001") não é estado de claim perdido —
+    chegar nele já prova que nenhuma pendência engoliu a mensagem. Medido
+    abaixo: a mesma frase sugerida paga a conta no turno seguinte.
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    assert db.get_pending_action(uid) is None
+
+    aviso = _diga(uid, "paguei luz 0,001")
+    assert "maior que zero" in aviso, aviso
+    assert "*paguei luz 132,50*" in aviso, aviso
+
+    resposta = _diga(uid, "paguei luz 132,50")
+
+    assert "Conta paga" in resposta, resposta
+    conta = B.list_bills(uid, include_paid=True)[0]
+    assert (conta["status"], float(conta["paid_amount"])) == ("paid", 132.5)
+
+
+def test_botao_ja_paguei_com_pergunta_viva_tambem_nao_anuncia_o_comando(monkeypatch):
+    """O mesmo texto, pela outra porta (wa_runtime.py) — a classe, não a instância.
+
+    Aqui o claim perde SEM corrida: o botão não passa por `route()`, então a
+    `clarification` continua de pé quando o clique chega.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    db.set_pending_action(uid, "clarification", {
+        "intent": "launches.add",
+        "entities": {"tipo": "despesa"},
+        "orig_text": "gastei no mercado",
+        "question": "Qual foi o valor?",
+    })
+
+    respostas = _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    assert respostas, respostas
+    corpo = respostas[-1]
+    assert "paguei luz" not in corpo.lower(), corpo
+    assert "132,50" not in corpo, corpo
+    assert "Qual foi o valor?" in corpo, corpo
+    assert (db.get_pending_action(uid) or {}).get("action_type") == "clarification"
