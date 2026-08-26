@@ -95,7 +95,7 @@ class TestSweep:
         _, connection, deleted = sweep_env
         monkeypatch.setenv("PLANS_V2_ENABLED", "0")  # freio: default agora é LIGADO
 
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
 
         assert res["disabled"] is True
         assert res["paused"] == 0
@@ -108,7 +108,7 @@ class TestSweep:
         # user_id do fixture não tem auth_accounts nem trial → get_plan_tier real = 'free'
         assert plan_service.get_plan_tier(uid) == "free"
 
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
 
         assert res["paused"] == 1
         assert deleted == [connection["provider_item_id"]]
@@ -122,7 +122,7 @@ class TestSweep:
         _, connection, deleted = sweep_env
         monkeypatch.setattr(plan_service, "get_plan_tier", lambda uid: "plus")
 
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
 
         assert res["paused"] == 0
         assert deleted == []
@@ -132,7 +132,7 @@ class TestSweep:
         uid, connection, deleted = sweep_env
         monkeypatch.setattr(plan_service, "_ACCESS_ALLOWLIST", {uid})
 
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
 
         assert res["checked_users"] == 0
         assert res["paused"] == 0
@@ -146,7 +146,7 @@ class TestSweep:
             raise RuntimeError("pluggy fora do ar")
 
         monkeypatch.setattr(ofte, "delete_pluggy_item", _boom)
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
         assert res["paused"] == 0
         assert res["errors"] == 1
         # nunca marca PAUSED com o item ainda vivo na Pluggy (slot pago vazaria)
@@ -154,7 +154,7 @@ class TestSweep:
 
         # próximo tick, Pluggy voltou → pausa
         monkeypatch.setattr(ofte, "delete_pluggy_item", lambda item_id, key=None: deleted.append(item_id) or True)
-        res = ofte.pause_expired_trial_connections()
+        res = ofte.enforce_of_bank_limits()
         assert res["paused"] == 1
         assert _connection_status(connection["id"]) == "PAUSED"
 
@@ -199,3 +199,59 @@ class TestPausedState:
         # deletar o item na Pluggy dispara item/deleted — não pode reabrir o estado
         assert update_pluggy_open_finance_item_status(connection["provider_item_id"], "DELETED") == 0
         assert _connection_status(connection["id"]) == "PAUSED"
+
+
+class TestTetoPorPlano:
+    """Queda ENTRE planos pagos: o teto passou a valer para as conexões que já
+    existem, não só para a próxima.
+
+    Antes, `of_banks_max` só barrava conexão nova (`_enforce_bank_limit`, no
+    `/pluggy-item`). Quem tinha 5 bancos no Pro e descia para o Essencial
+    (teto 1) seguia com os 5 sincronizando e ocupando slot pago na Pluggy.
+
+    Controle negativo (medido): trocando o `[int(limit):]` por `[0:]` — pausar
+    sempre tudo — o teste do teto respeitado fica vermelho; voltando o filtro
+    para `tier == "free"`, os dois primeiros ficam vermelhos e os 9 antigos
+    seguem verdes.
+    """
+
+    def _cinco(self, user_id):
+        # Sufixos a partir de "b": o "a" é o do fixture, e repeti-lo faz UPSERT
+        # na mesma linha em vez de criar conexão nova — a primeira versão deste
+        # teste media 5 conexões achando que media 6.
+        return [_make_pluggy_connection(user_id, suffix=s) for s in "bcdef"]
+
+    def test_cai_do_pro_para_o_essencial_e_sobra_o_mais_antigo(self, sweep_env, monkeypatch):
+        uid, primeira, deleted = sweep_env
+        extras = self._cinco(uid)                      # 1 do fixture + 5 = 6
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda u: {"of_banks_max": 1})
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert res["paused"] == 5, "tinha que sobrar exatamente o teto (1)"
+        # A mais ANTIGA é a do fixture (menor id) — ela sobrevive.
+        assert _connection_status(primeira["id"]) != "PAUSED", "pausou a conexão mais antiga"
+        for c in extras:
+            assert _connection_status(c["id"]) == "PAUSED"
+        assert set(deleted) == {c["provider_item_id"] for c in extras}, (
+            "o item da Pluggy tem que ser apagado junto — senão o slot pago vaza"
+        )
+
+    def test_dentro_do_teto_nao_pausa_nada(self, sweep_env, monkeypatch):
+        """Positivo: sem ele, pausar tudo sempre passaria no grupo."""
+        uid, _, deleted = sweep_env
+        self._cinco(uid)
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda u: {"of_banks_max": 6})
+
+        res = ofte.enforce_of_bank_limits()
+
+        assert res["paused"] == 0
+        assert deleted == []
+
+    def test_teto_none_e_ilimitado(self, sweep_env, monkeypatch):
+        uid, _, deleted = sweep_env
+        self._cinco(uid)
+        monkeypatch.setattr(plan_service, "get_user_limits", lambda u: {"of_banks_max": None})
+
+        assert ofte.enforce_of_bank_limits()["paused"] == 0
+        assert deleted == []
