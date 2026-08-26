@@ -129,6 +129,9 @@ from .categories import (
 from .pending import (
     advance_pending_action,
     consume_pending_action,
+    eh_oferta_de_conveniencia,
+    suprime_fallback_de_ia,
+    sobrevive_a_audio,
     claim_pending_action,
     create_pending_action_if_absent,
     set_pending_action,
@@ -453,6 +456,7 @@ __all__ = [
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
     "advance_pending_action", "consume_pending_action",
+    "eh_oferta_de_conveniencia", "suprime_fallback_de_ia", "sobrevive_a_audio",
     "create_pending_action_if_absent",
     "claim_pending_action",
     # budgets

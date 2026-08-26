@@ -752,7 +752,7 @@ def process_message(message: InboundMessage) -> None:
                 # hora de pagar). Isto não passa pelo `handle_incoming` — o
                 # consumidor está logo abaixo, na linha :896 deste arquivo,
                 # antes da chamada do handle_incoming em :1021 —, então não
-                # precisa de `_RESUMABLE_PENDING_TYPES` e não sofre o sequestro
+                # precisa do `suprime_ia` do registro e não sofre o sequestro
                 # pela IA. Unificar os dois é issue separada: este fluxo tem
                 # "cancelar", valor estimado no texto e re-pergunta própria, e
                 # mexer nele sem teste de botão é troca de bug conhecido por

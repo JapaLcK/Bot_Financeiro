@@ -50,43 +50,14 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 )
 
 
-# Pendências determinísticas que o route() retoma com PRIORIDADE MÁXIMA — o bot
-# fez uma pergunta e está esperando a resposta. Espelha as checagens do topo do
-# route(): clarification de lançamento ("Em que você gastou?") e os fluxos
-# guiados de cartão. Enquanto uma delas está aberta, a resposta do user TEM que
-# passar pelo route() determinístico — nunca pelo fallback de IA. Sem isso, uma
-# resposta curta ("cinema", "dia 5") classifica como baixa confiança e a IA
-# sequestra o turno, perdendo o contexto (ex: o valor 77,90 já informado) e
-# falhando com "valor precisa ser maior que zero".
-#
-# NÃO inclui ofertas one-shot (recategorize_launch_offer, undo_audio): essas não
-# são perguntas e não devem bloquear a IA nas mensagens seguintes.
-#
-# Esta é UMA das três enumerações de "isto é pergunta?" que existem no código;
-# as outras duas (e o que diverge entre elas) estão listadas em db/pending.py,
-# no bloco de ORDEM DE PRIORIDADE.
-_RESUMABLE_PENDING_TYPES: frozenset[str] = frozenset({
-    "clarification",
-    "credit_card_setup",
-    "credit_card_set_primary",
-    "credit_delete_card",
-    "installment_pending",
-    "pay_bill_choice",
-    "funding_source_choice",
-    "investment_pick",
-    # A pergunta de valor de conta variável ("quanto veio este mês?") é
-    # respondida com um número solto, que classifica como out_of_scope. Sem
-    # estar aqui, o usuário Pro tem a resposta sequestrada pela IA e a conta
-    # fica sem pagar — que é o bug da issue #132 sobrevivendo para quem paga.
-    #
-    # Suprime SEMPRE, sem tentar adivinhar antes se a mensagem "parece um
-    # valor". Medido: o refinamento salvava 1 de 5 mudanças de assunto (as
-    # outras 4 já voltam pra IA pelo fallback 6b abaixo) e, em troca, mandava
-    # pra IA as 5 formas faladas de responder o valor ("foi 132", "acho que
-    # 132", "uns 132", "veio 132 reais", "deu 132,50") — que agora o
-    # `resolve_bill_amount` aceita.
-    "bill_amount_expected",
-})
+# "Isto é pergunta?" tem TRÊS respostas diferentes (cede a linha? suprime a
+# IA? sobrevive a um áudio?) e uma fonte só: o `_REGISTRO` de `db/pending.py`.
+# Este arquivo mantinha duas das três enumerações à mão — uma frozenset e um
+# literal inline — e elas divergiam da terceira sem que nada avisasse. Para
+# adicionar uma pendência nova, edite a tabela lá; o
+# `tests/test_pending_registry.py` reprova qualquer tipo que o código grave sem
+# estar nela.
+from db import sobrevive_a_audio, suprime_fallback_de_ia
 
 
 def _looks_like_help_fallback(response: str | None) -> bool:
@@ -358,13 +329,7 @@ def _handle_audio(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # quando a resposta do áudio é um lançamento de fato, não uma pergunta.
         _pend = db.get_pending_action(uid)
         _ptype = _pend.get("action_type") if _pend else None
-        # `bill_pay_amount` é a pergunta de valor do botão "✅ Já paguei"
-        # (adapters/whatsapp/wa_runtime.py) — não está em
-        # `_RESUMABLE_PENDING_TYPES` porque o consumidor dela é o próprio
-        # runtime, então precisa ser nomeada aqui à mão. Terceira enumeração de
-        # "isto é pergunta?"; as três estão listadas em db/pending.py.
-        if _ptype not in _RESUMABLE_PENDING_TYPES and _ptype not in (
-                "multi_launch_values", "confirm_recurring_offer", "bill_pay_amount"):
+        if not sobrevive_a_audio(_ptype):
             db.set_pending_action(uid, "undo_audio", {})
 
     return [OutgoingMessage(text=preview + body + undo_hint)]
@@ -711,7 +676,7 @@ def handle_incoming(msg: IncomingMessage) -> list[OutgoingMessage]:
         has_resumable_pending = False
         try:
             _pend = db.get_pending_action(uid)
-            if _pend and _pend.get("action_type") in _RESUMABLE_PENDING_TYPES:
+            if _pend and suprime_fallback_de_ia(_pend.get("action_type")):
                 has_resumable_pending = True
         except Exception:
             has_resumable_pending = False

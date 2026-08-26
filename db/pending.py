@@ -2,6 +2,7 @@
 db/pending.py — Ações pendentes de confirmação (ex: "apagar lançamento?").
 """
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -126,48 +127,143 @@ def create_pending_action_if_absent(user_id: int, action_type: str, payload: dic
 
 
 # ---------------------------------------------------------------------------
-# ORDEM DE PRIORIDADE DA LINHA ÚNICA DE `pending_actions`
+# REGISTRO DE PENDÊNCIAS — a fonte de verdade dos três predicados
 # ---------------------------------------------------------------------------
 # `pending_actions` tem UMA linha por usuário (`on conflict (user_id)`), então
-# todo fluxo que quer lembrar de algo disputa o mesmo espaço. Só existem dois
-# degraus, porque só isso é preciso para decidir quem cede:
+# todo fluxo que quer lembrar de algo disputa o mesmo espaço. Três decisões
+# diferentes dependem do TIPO da pendência, e até a issue #136 elas viviam em
+# três listas separadas que ninguém importava da outra — cada pendência nova
+# precisava ser lembrada nos três lugares, e esquecer um era silencioso.
 #
-#   1. PERGUNTAS — o bot parou e espera uma resposta que ele NÃO consegue
-#      reconstruir sozinho: quanto veio a conta, qual cartão, confirma apagar,
-#      qual o valor do item da fila. Perder isso perde dinheiro ou trabalho já
-#      feito pelo usuário. É tudo o que NÃO está na lista abaixo. Nunca é
-#      desalojado: quem chega depois é que se vira sem estado.
+# A tabela abaixo é a única lista. As três perguntas continuam SENDO TRÊS (elas
+# divergem de propósito — ver o que cada coluna significa); o que mudou é que se
+# responde as três no mesmo lugar, uma linha por tipo.
 #
-#   2. OFERTAS DE CONVENIÊNCIA (a lista) — o bot já concluiu o trabalho e
-#      anexou um BOTÃO à resposta: "categoria errada?", "quer desfazer?". Elas
-#      são consumidas no mesmo turno em que nascem, pelo
-#      `_send_reply_with_optional_buttons` (adapters/whatsapp/wa_runtime.py:
-#      181-211), que faz `consume_pending_action` antes de enviar. Se ainda
-#      estiverem de pé no turno seguinte é porque o botão não foi tocado —
-#      ignorar é a resposta mais comum, e o usuário refaz pelo comando normal
-#      ("muda a categoria do #12"). Pode ser desalojada por qualquer pergunta.
+# ── as três colunas, e o teste OBSERVÁVEL de cada uma ──────────────────────
 #
-# `confirm_recurring_offer` ESTEVE nesta lista e não é oferta: o nome engana. O
-# bot pergunta "isso virou gasto fixo? (sim ou não)" em TEXTO e ela NÃO é
-# consumida pelo runtime — sobrevive para o turno seguinte de propósito, porque
-# o "sim" é a resposta dela. Desalojando-a, o "sim" seguinte caía em "não
-# entendi bem o que você quis fazer" e derrubava as DUAS pendências: o Spotify
-# não virava gasto fixo e a pergunta da conta morria junto. É pergunta.
+# `oferta` — pode ser desalojada por uma pergunta?
+#     É oferta SÓ SE o `_send_reply_with_optional_buttons`
+#     (adapters/whatsapp/wa_runtime.py) a consome no MESMO turno em que ela
+#     nasce: o bot já concluiu o trabalho e anexou um botão à resposta
+#     ("categoria errada?", "quer desfazer?"). Se ainda estiver de pé no turno
+#     seguinte é porque o botão não foi tocado — ignorar é a resposta mais
+#     comum, e o usuário refaz pelo comando normal.
+#     Se ela ESPERA resposta do usuário, é PERGUNTA — mesmo tendo "offer" no
+#     nome. `confirm_recurring_offer` esteve marcada como oferta e não é: o bot
+#     pergunta "isso virou gasto fixo?" em TEXTO e o "sim" seguinte é a resposta
+#     dela. Desalojando-a, o "sim" caía em "não entendi" e derrubava DUAS
+#     pendências de uma vez.
+#     Marcar uma PERGUNTA como oferta perde o estado sem aviso; marcar uma
+#     OFERTA como pergunta faz ela bloquear a linha por 10 min — foi o que
+#     acontecia com `delete_credit_purchase` (medido: com a oferta de pé, o
+#     `claim_pending_action` de uma pergunta devolvia False).
 #
-# Sem esse degrau, a gravação condicional recusava por causa de QUALQUER linha:
-# um "gastei 50 no mercado" deixava a oferta de recategorizar de pé por 10 min
-# e o "paguei a luz" seguinte já não conseguia guardar de qual conta falava.
-_OFERTAS_DE_CONVENIENCIA: frozenset[str] = frozenset({
-    "recategorize_launch_offer",
-    "undo_audio",
-})
+# `suprime_ia` — enquanto está de pé, o fallback de IA fica desligado?
+#     Sim SÓ SE a resposta natural do usuário chega até o `handle_incoming` E o
+#     classificador não a reconhece. Um número solto ("1200", "132,50") ou um
+#     substantivo ("cinema") sai como `out_of_scope`/baixa confiança, e o
+#     fallback de IA roda ANTES do `route()` — então sem esta coluna a IA
+#     sequestra a resposta da própria pergunta que o bot fez. É o bug da #132.
+#     Fica FORA quem é consumida pelo runtime do WhatsApp ANTES do
+#     `handle_incoming` (`bill_pay_amount`, `recategorize_launch_text`):
+#     incluí-las desligaria a IA do usuário Pro sem motivo.
+#     Fica FORA também quem é respondida com "sim"/"não", que o classificador
+#     reconhece como `confirm.yes`/`confirm.no` com confiança alta.
+#     Suprime SEMPRE, sem tentar adivinhar antes se a mensagem "parece" uma
+#     resposta: medido no #133, o refinamento salvava 1 mudança de assunto em 5
+#     (as outras 4 voltam pra IA pelo fallback pós-route) e, em troca, mandava
+#     pra IA as 5 formas faladas de responder o valor.
+#
+# `sobrevive_audio` — um áudio no meio NÃO pode sobrescrevê-la?
+#     Sim quando perder a pendência custa trabalho já feito pelo usuário. As
+#     confirmações destrutivas ficam de FORA de propósito: perdê-las é
+#     fail-safe (o delete não acontece), e protegê-las reintroduziria o footgun
+#     "apagar #285" → [áudio] → "sim" apaga #285 — o guard anti-órfão do
+#     `intent_router` só dispara com comando de TEXTO, não com áudio.
+#
+# GAPS CONHECIDOS, deixados como estão para não misturar conserto de
+# comportamento com a unificação (issue #136, fatia 2):
+#   - `confirm_media_launch` e `recategorize_launch_text` são perguntas com
+#     `sobrevive_audio=False`: um áudio no meio apaga a confirmação da nota
+#     fiscal escaneada / a categoria que o usuário ia digitar.
+#
+# Tipo AUSENTE da tabela = as três colunas False, que é exatamente o
+# comportamento de hoje para um tipo não listado. Nada muda em silêncio — e o
+# `tests/test_pending_registry.py` reprova qualquer tipo novo que o código grave
+# sem passar por aqui.
+class _Pendencia(NamedTuple):
+    oferta: bool
+    suprime_ia: bool
+    sobrevive_audio: bool
+
+
+_AUSENTE = _Pendencia(False, False, False)
+
+
+_REGISTRO: dict[str, _Pendencia] = {
+    #                                          oferta suprime_ia sobrevive_audio
+    # ── perguntas retomadas pelo route() ──────────────────────────────────
+    "clarification":             _Pendencia(   False,   True,      True),
+    "credit_card_setup":         _Pendencia(   False,   True,      True),
+    "credit_card_set_primary":   _Pendencia(   False,   True,      True),
+    "credit_delete_card":        _Pendencia(   False,   True,      True),
+    "installment_pending":       _Pendencia(   False,   True,      True),
+    "pay_bill_choice":           _Pendencia(   False,   True,      True),
+    "funding_source_choice":     _Pendencia(   False,   True,      True),
+    "investment_pick":           _Pendencia(   False,   True,      True),
+    "bill_amount_expected":      _Pendencia(   False,   True,      True),
+    # "quanto foi *aluguel*?" — a resposta é um número solto, igualzinho à
+    # conta variável. Estava fora do `suprime_ia` e a IA do usuário Pro
+    # sequestrava a resposta (medido: a IA recebia "1200" e o item da fila
+    # ficava sem valor). Já estava na lista do áudio, o que mostra que a
+    # ausência era esquecimento, não decisão.
+    "multi_launch_values":       _Pendencia(   False,   True,      True),
+
+    # ── perguntas respondidas com "sim"/"não" (classificador reconhece) ───
+    "confirm_recurring_offer":   _Pendencia(   False,   False,     True),
+    "confirm_media_launch":      _Pendencia(   False,   False,     False),
+    "delete_launch":             _Pendencia(   False,   False,     False),
+    "delete_launch_bulk":        _Pendencia(   False,   False,     False),
+    "delete_pocket":             _Pendencia(   False,   False,     False),
+    "delete_investment":         _Pendencia(   False,   False,     False),
+
+    # ── perguntas consumidas pelo runtime do WhatsApp antes do handle_incoming
+    "bill_pay_amount":           _Pendencia(   False,   False,     True),
+    "recategorize_launch_text":  _Pendencia(   False,   False,     False),
+
+    # ── ofertas de conveniência (botão anexado, consumido no mesmo turno) ─
+    "recategorize_launch_offer": _Pendencia(   True,    False,     False),
+    "undo_audio":                _Pendencia(   True,    False,     False),
+    # O botão "🗑️ Apagar" pós-compra no crédito. É consumida pelo
+    # `_send_reply_with_optional_buttons` no mesmo turno, como as duas acima —
+    # mas estava fora da lista de ofertas, então uma que ficasse de pé (botão
+    # não tocado) bloqueava QUALQUER pergunta nova por 10 minutos.
+    "delete_credit_purchase":    _Pendencia(   True,    False,     False),
+}
+
+
+def eh_oferta_de_conveniencia(action_type: str | None) -> bool:
+    """Pode ser desalojada por uma pergunta? Ver a coluna `oferta` acima."""
+    return bool(action_type and _REGISTRO.get(action_type, _AUSENTE).oferta)
+
+
+def suprime_fallback_de_ia(action_type: str | None) -> bool:
+    """Desliga o fallback de IA enquanto está de pé? Coluna `suprime_ia`."""
+    return bool(action_type and _REGISTRO.get(action_type, _AUSENTE).suprime_ia)
+
+
+def sobrevive_a_audio(action_type: str | None) -> bool:
+    """Um áudio no meio NÃO pode sobrescrevê-la? Coluna `sobrevive_audio`."""
+    return bool(action_type and _REGISTRO.get(action_type, _AUSENTE).sobrevive_audio)
+
 
 # A MESMA pergunta ("quanto veio a conta este mês?") feita por DUAS portas: por
 # texto/IA ela vira `bill_amount_expected` (core/handlers/bills.py,
 # core/services/ai_chat/tools/bills.py) e pelo botão "✅ Já paguei" vira
 # `bill_pay_amount` (adapters/whatsapp/wa_runtime.py). Os tipos são diferentes
 # só porque cada porta tem o seu consumidor; para decidir quem cede a linha,
-# contam como uma pergunta só.
+# contam como uma pergunta só. Não é uma quarta coluna: é um grupo de
+# equivalência entre dois tipos, não um predicado sobre um tipo.
 #
 # Sem isto o botão perdia o claim para a pergunta de texto de OUTRA conta: quem
 # tinha dito "paguei a luz" e depois tocou "Já paguei" na ÁGUA via a pergunta da
@@ -177,19 +273,6 @@ _PERGUNTA_DE_VALOR_DE_CONTA: frozenset[str] = frozenset({
     "bill_amount_expected",
     "bill_pay_amount",
 })
-
-# OBSERVAÇÃO (não unificado neste PR): "isto é pergunta?" está enumerado em
-# TRÊS lugares, com conteúdos diferentes e nenhum deles importa o outro:
-#   1. esta lista (pelo avesso: pergunta é o que NÃO está aqui);
-#   2. `_RESUMABLE_PENDING_TYPES` (core/handle_incoming.py), que decide se a IA
-#      é suprimida;
-#   3. um literal inline em core/handle_incoming.py (~:357), que decide se o
-#      `undo_audio` pode sobrescrever a pendência.
-# Divergem: `bill_pay_amount` só existe na (3); `multi_launch_values` e
-# `confirm_recurring_offer` só existem na (3). Cada nova pendência precisa ser
-# lembrada nos três. Unificar é issue separada — as três perguntas são
-# diferentes ("cede a linha?", "suprime a IA?", "pode sobrescrever?") e juntar
-# sem enumerar estado × evento troca bug conhecido por bug novo.
 
 
 def claim_pending_action(user_id: int, action_type: str, payload: dict,
@@ -226,7 +309,7 @@ def claim_pending_action(user_id: int, action_type: str, payload: dict,
         or (atual["action_type"] in _PERGUNTA_DE_VALOR_DE_CONTA
             and action_type in _PERGUNTA_DE_VALOR_DE_CONTA)
     )
-    if atual["action_type"] not in _OFERTAS_DE_CONVENIENCIA and not mesma_pergunta:
+    if not eh_oferta_de_conveniencia(atual["action_type"]) and not mesma_pergunta:
         return False
     return advance_pending_action(
         user_id, atual["action_type"], atual.get("payload") or {},
