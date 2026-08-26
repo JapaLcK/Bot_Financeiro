@@ -2,7 +2,8 @@
 db/schema.py — DDL e inicialização do banco de dados.
 """
 from .connection import get_conn
-from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
+from .schema_repairs import (SCHEMA_REPAIRS_LOCK, ensure_plan_trials_user_fk,
+                             repair_user_fk_cascades)
 
 
 def init_db():
@@ -1919,6 +1920,17 @@ def _run_ddl(conn, ddl_statements) -> None:
 
         # Corrige FKs em users(id) que ficaram com on_delete errado
         # porque a tabela já existia antes da FK ser declarada no schema.
+        #
+        # Sob advisory lock: os dois reparos são "olha o catálogo, depois faz
+        # ALTER", e um deploy do Railway sobe o container novo ANTES de o velho
+        # sair (ver o comentário mais acima neste arquivo). Sem serializar, as
+        # duas instâncias passam juntas pela checagem, o primeiro ALTER vence e o
+        # segundo estoura — `duplicate_object` no `ensure_`, `does not exist` no
+        # `repair_` — abortando o init daquela instância.
+        #
+        # Lock de SESSÃO, não de transação: esta conexão está em autocommit, e um
+        # `pg_advisory_xact_lock` soltaria no fim do próprio SELECT que o toma.
+        cur.execute("select pg_advisory_lock(%s)", (SCHEMA_REPAIRS_LOCK,))
         try:
             if ensure_plan_trials_user_fk(cur):
                 print("[init_db] schema_repairs criou a FK de plan_trials.user_id")
@@ -1928,3 +1940,5 @@ def _run_ddl(conn, ddl_statements) -> None:
         except Exception as e:
             print(f"[init_db] schema_repairs falhou: {e}")
             raise
+        finally:
+            cur.execute("select pg_advisory_unlock(%s)", (SCHEMA_REPAIRS_LOCK,))

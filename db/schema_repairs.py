@@ -17,6 +17,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Chave do advisory lock que serializa os reparos de schema entre instâncias.
+# Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
+SCHEMA_REPAIRS_LOCK = 728_531_004
+
 
 # Tabelas cujo FK em users(id) deve ser ON DELETE SET NULL em vez de CASCADE.
 # São logs de auditoria que precisam sobreviver à deleção do user (LGPD permite

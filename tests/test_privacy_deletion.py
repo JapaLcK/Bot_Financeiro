@@ -124,3 +124,22 @@ def test_fk_da_trava_e_set_null_e_nao_cascade():
         f"on delete é {row['confdeltype']!r}, esperado 'n' (SET NULL) — "
         "'c' (CASCADE) apagaria a trava do trial"
     )
+
+
+def test_criar_a_fk_e_idempotente():
+    """A segunda chamada não tenta o ALTER de novo.
+
+    É a metade da corrida entre instâncias que dá para medir aqui: o
+    `duplicate_object` que abortaria o init da segunda instância só aparece se a
+    checagem de catálogo não vir a constraint já criada. A outra metade — as
+    duas passando pela checagem ao mesmo tempo — é fechada pelo
+    `pg_advisory_lock` em `db/schema.py`, e não por este teste.
+    """
+    from db.schema_repairs import ensure_plan_trials_user_fk
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            assert ensure_plan_trials_user_fk(cur) is False, (
+                "a FK já existe (o init_db criou) — a função tentou criar de novo"
+            )
+        conn.commit()
