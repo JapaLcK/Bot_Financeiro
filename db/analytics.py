@@ -21,7 +21,13 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn
+from .connection import get_conn, cat_norm_sql
+
+# Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
+_CAT_EQ = "{} = {}".format(cat_norm_sql("COALESCE(categoria, '')"), cat_norm_sql("%s"))
+_CAT_CT_EQ = "{} = {}".format(
+    cat_norm_sql("COALESCE(ct.categoria, '')"), cat_norm_sql("%s")
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -353,10 +359,10 @@ def compute_categories(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 WITH despesas AS (
                   SELECT COALESCE(NULLIF(categoria, ''), 'sem categoria') AS categoria,
-                         valor
+                         valor, criado_em AS dt
                   FROM launches
                   WHERE user_id = %s
                     AND tipo IN ('despesa', 'saida')
@@ -364,7 +370,7 @@ def compute_categories(
                     AND criado_em >= %s AND criado_em < %s
                   UNION ALL
                   SELECT COALESCE(NULLIF(ct.categoria, ''), 'sem categoria') AS categoria,
-                         ct.valor
+                         ct.valor, b.period_end::timestamptz AS dt
                   FROM credit_transactions ct
                   JOIN credit_bills b ON b.id = ct.bill_id
                   WHERE ct.user_id = %s
@@ -372,11 +378,13 @@ def compute_categories(
                     AND b.period_end >= %s AND b.period_end < %s
                 ),
                 agg AS (
-                  SELECT categoria,
+                  -- rótulo do grupo = grafia do lançamento MAIS RECENTE (as
+                  -- gravações novas já saem na grafia do catálogo).
+                  SELECT (array_agg(categoria ORDER BY dt DESC))[1] AS categoria,
                          SUM(valor) AS total,
                          COUNT(*)   AS count
                   FROM despesas
-                  GROUP BY categoria
+                  GROUP BY {cat_norm_sql('categoria')}
                 )
                 SELECT a.categoria AS name,
                        a.total,
@@ -385,7 +393,7 @@ def compute_categories(
                        uc.color
                 FROM agg a
                 LEFT JOIN user_categories uc
-                  ON uc.user_id = %s AND LOWER(uc.name) = LOWER(a.categoria)
+                  ON uc.user_id = %s AND {cat_norm_sql('uc.name')} = {cat_norm_sql('a.categoria')}
                 ORDER BY a.total DESC
                 LIMIT %s
                 """,
@@ -727,7 +735,7 @@ def list_history(
             clauses.append("criado_em < %s")
             launches_params.append(to_date)
         if categoria:
-            clauses.append("LOWER(COALESCE(categoria, '')) = LOWER(%s)")
+            clauses.append(_CAT_EQ)
             launches_params.append(categoria)
         if uncategorized:
             clauses.append("(categoria IS NULL OR categoria = '')")
@@ -775,7 +783,7 @@ def list_history(
             clauses.append("b.period_end < %s")
             credit_params.append(to_date)
         if categoria:
-            clauses.append("LOWER(COALESCE(ct.categoria, '')) = LOWER(%s)")
+            clauses.append(_CAT_CT_EQ)
             credit_params.append(categoria)
         if uncategorized:
             clauses.append("(ct.categoria IS NULL OR ct.categoria = '')")

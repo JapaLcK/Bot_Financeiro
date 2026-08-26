@@ -67,6 +67,7 @@ from core.sessions import (
     revoke_session,
     touch_session,
 )
+from db.connection import cat_norm_sql
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -287,6 +288,11 @@ async def list_users() -> list:
         async with conn.cursor() as cur:
             await cur.execute("SELECT id FROM users ORDER BY created_at")
             return await cur.fetchall()
+
+# Chave de agrupamento do donut de categorias: case- E acento-insensível, pra
+# "cafe da manha" e "café da manhã" virarem UMA fatia (fonte: db/connection.py).
+_CAT_KEY_DONUT = cat_norm_sql("COALESCE(categoria, 'sem categoria')")
+
 
 def _month_range(year: int, month: int):
     """Returns (start_date, exclusive_end_date) for the given month."""
@@ -548,26 +554,28 @@ async def get_financial_data(
         # 6) Categories (despesas do mês — credit_transactions alocadas por
         # `bill.period_end`, igual query 5).
         _q(
-            """
-            SELECT COALESCE(categoria, 'sem categoria') AS categoria,
+            f"""
+            SELECT (array_agg(COALESCE(categoria, 'sem categoria')
+                              ORDER BY dt DESC))[1] AS categoria,
+                   {_CAT_KEY_DONUT} AS cat_key,
                    SUM(valor) AS total,
                    SUM(cnt)   AS count
             FROM (
-                SELECT categoria, valor, 1 AS cnt
+                SELECT categoria, valor, 1 AS cnt, criado_em AS dt
                 FROM launches
                 WHERE user_id = %s
                   AND tipo = 'despesa'
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 UNION ALL
-                SELECT ct.categoria, ct.valor, 1 AS cnt
+                SELECT ct.categoria, ct.valor, 1 AS cnt, b.period_end::timestamptz
                 FROM credit_transactions ct
                 JOIN credit_bills b ON b.id = ct.bill_id
                 WHERE ct.user_id = %s
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
-            GROUP BY COALESCE(categoria, 'sem categoria')
+            GROUP BY {_CAT_KEY_DONUT}
             ORDER BY total DESC
             LIMIT 10
             """,
@@ -657,7 +665,11 @@ async def get_financial_data(
             (user_id, query_start, month_end),
         ),
         # 10) Budgets per category
-        _q("SELECT categoria, budget FROM category_budgets WHERE user_id = %s", (user_id,)),
+        _q(
+            f"SELECT categoria, budget, {cat_norm_sql('categoria')} AS cat_key "
+            "FROM category_budgets WHERE user_id = %s",
+            (user_id,),
+        ),
     )
 
     # Desempacota fetchone-style
@@ -714,6 +726,10 @@ async def get_financial_data(
     # Build maps
     monthly_map = {row["tipo"]: float(row["total"]) for row in monthly}
     budget_map  = {r["categoria"]: float(r["budget"]) for r in budget_rows}
+    # Casa gasto×orçamento pela chave normalizada (case- e acento-insensível):
+    # o orçamento pode ter sido criado em "cafe da manha" e o gasto gravado em
+    # "café da manhã" — mesma categoria, e o alerta de 85% tem que disparar.
+    budget_by_key = {r["cat_key"]: float(r["budget"]) for r in budget_rows}
 
     # Merge budgets into categories + detect alerts
     cat_list = []
@@ -723,9 +739,9 @@ async def get_financial_data(
         cat_name = cat["categoria"]
         spent    = float(cat["total"])
         cat["total"] = spent
+        bgt = budget_by_key.get(cat.pop("cat_key", None))
 
-        if cat_name in budget_map:
-            bgt = budget_map[cat_name]
+        if bgt:
             pct = round(spent / bgt * 100, 1)
             cat["budget"]     = bgt
             cat["budget_pct"] = pct

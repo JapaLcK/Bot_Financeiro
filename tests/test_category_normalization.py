@@ -1,6 +1,9 @@
 """
 tests/test_category_normalization.py — texto livre de categoria colapsa numa
-forma só (`resolve_category_input`), em TODAS as portas que gravam categoria.
+forma só (`resolve_category_input`) nas portas que CHAMAM esse resolver — não
+em todas as que gravam categoria. Fora daqui, e não coberta: o cobrador de
+recorrentes (`core/services/recurring_charger.py:302,461`) grava
+`recurring_expenses.category` verbatim (`db/recurring.py:212` só faz `.strip()`).
 
 Caso real que originou o arquivo: o usuário corrige um lançamento pelo WhatsApp
 digitando "McDonald's" e o lançamento virava `mcdonald s` — apóstrofo virava
@@ -317,7 +320,7 @@ def test_display_map_desempate_nao_depende_de_id(pro_user_id):
     depois = resolve_category_input(pro_user_id, "cafe")
 
     assert antes == depois
-    assert velha["name"] in {"cafe", "café"}
+    assert velha["name"] == "cafe"   # grafia digitada, minúscula (a "Café" é a nova)
 
 
 def test_display_map_com_banco_fora_degrada_so_na_leitura(pro_user_id, monkeypatch):
