@@ -564,10 +564,31 @@ do usuário passou a matar duas pendências de uma vez.
 > abandonar, gravar e consumir — corrigida uma por rodada porque ninguém varreu os irmãos.
 > Antes de fechar qualquer conserto aqui, `grep` os outros pontos.
 
-**Dívida conhecida:** "isto é pergunta?" está enumerado em **três** lugares divergentes
-(`db/pending.py`, `_RESUMABLE_PENDING_TYPES` em `core/handle_incoming.py`, e um literal
-inline no mesmo arquivo). Pendência nova precisa entrar nos três, e esquecer um é
-silencioso. Issues #130, #134 e #136.
+**Três listas, três perguntas diferentes — avalie o tipo contra cada uma, não copie
+de uma para as outras.** Elas divergem de propósito; pertencer a cada uma significa
+coisas distintas:
+
+| lista | pertencer significa | pergunta nova… |
+|---|---|---|
+| `_OFERTAS_DE_CONVENIENCIA` (`db/pending.py`) | **pode ser desalojada** por uma pergunta | fica **fora** — dentro, o `claim_pending_action` a apaga |
+| `_RESUMABLE_PENDING_TYPES` (`core/handle_incoming.py`) | **suprime o fallback da IA** enquanto está de pé | entra **só se** a resposta chegar pelo `handle_incoming` |
+| literal inline (`core/handle_incoming.py`, no ramo de áudio) | **não é sobrescrita** por `undo_audio` | entra se um áudio no meio dela puder atropelá-la |
+
+O critério de cada uma é observável, não é gosto:
+
+- **é oferta de conveniência?** só se o `_send_reply_with_optional_buttons`
+  (`wa_runtime.py`) a consome no mesmo turno. Se ela espera resposta do usuário, é
+  pergunta — mesmo tendo "offer" no nome.
+- **precisa suprimir a IA?** só se a resposta natural do usuário chega até o
+  `handle_incoming`. `bill_pay_amount` está **fora** de propósito: o runtime do WhatsApp
+  a consome antes, e incluí-la suprimiria a IA sem motivo.
+
+Copiar de uma lista para a outra causa bug silencioso nos dois sentidos: pergunta posta
+em `_OFERTAS_DE_CONVENIENCIA` perde o estado sem aviso; tipo já consumido pelo runtime
+posto em `_RESUMABLE_PENDING_TYPES` tira do usuário Pro a IA que ele paga.
+
+**Dívida:** unificar as três é o pré-requisito das issues #130, #134 e #136 — enquanto
+forem três, cada pendência nova exige avaliar os três predicados à mão.
 
 ### Validação de entrada: o critério é o dano, não a boa digitação
 
