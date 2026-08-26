@@ -191,10 +191,19 @@ def abandona_pergunta_de_valor(text: str) -> bool:
     return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
 
 
-def route(result: IntentResult, msg: IncomingMessage) -> str:
+def route(result: IntentResult, msg: IncomingMessage, *,
+          ignora_pendencias: bool = False) -> str:
     """
     Ponto de entrada único do roteador.
     Retorna o texto de resposta (ainda não formatado por plataforma).
+
+    `ignora_pendencias=True`: roteia a mensagem como comando novo SEM olhar a
+    linha de `pending_actions`. Um chamador só — a porta 4
+    (`adapters/whatsapp/wa_runtime.py`), quando o CAS de abandono dela falha:
+    aí a linha já é de OUTRA tarefa, com uma pergunta que o usuário acabou de
+    ver na tela, e deixar as guardas abaixo rodarem faria o comando velho
+    abandoná-la (o `resolve_bill_amount` a apaga; o `resolve_multi_launch_value`
+    apaga a fila inteira). Ver o mesmo tratamento na porta 2, logo abaixo.
     """
     user_id  = int(msg.user_id)
     text     = (msg.text or "").strip()
@@ -223,7 +232,7 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
     #    Se o bot fez uma pergunta e está esperando resposta, usa esta mensagem
     #    para completar a intent original em vez de classificar do zero.
     # -----------------------------------------------------------------------
-    clarif = h_pending.get_pending_clarification(user_id)
+    clarif = None if ignora_pendencias else h_pending.get_pending_clarification(user_id)
     if clarif:
         if _clarification_abandonada(clarif, text):
             # Porta 2. Mesma escotilha de escape do `investment_pick` e do
@@ -235,11 +244,17 @@ def route(result: IntentResult, msg: IncomingMessage) -> str:
             # `get_pending_clarification` acima e agora, outra tarefa pode ter
             # posto uma pergunta NOVA na linha (é uma linha por usuário) — que
             # já apareceu na tela. Apagar por cima a deixaria órfã.
-            db.consume_pending_action(user_id, clarif)
+            #
+            # E o CAS que falha vale para o TURNO INTEIRO, não só para o
+            # DELETE: a linha agora é da pergunta nova, e sem esta linha o
+            # `get_pending_action` abaixo a recarregava e o comando velho
+            # ("saldo") ia parar no `resolve_bill_amount` dela — deixando
+            # órfã exatamente a pergunta que o CAS protegeu.
+            ignora_pendencias = not db.consume_pending_action(user_id, clarif)
         else:
             return _resolve_clarification(clarif, text, user_id, platform, external_id)
 
-    pending = db.get_pending_action(user_id)
+    pending = None if ignora_pendencias else db.get_pending_action(user_id)
 
     # Resposta à pergunta de valor de uma conta variável. Precisa acontecer
     # antes do roteamento por intent: um número sozinho costuma ser classificado

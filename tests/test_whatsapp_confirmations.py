@@ -81,7 +81,7 @@ def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
         lambda to, body, user_id=None: replies.append((to, body, user_id)),
     )
 
-    def fake_handle_incoming(msg):
+    def fake_handle_incoming(msg, **_kw):   # o runtime pode passar `ignora_pendencias`
         handled.append(msg)
         return [OutgoingMessage(text=f"uid={msg.user_id} text={msg.text}")]
 
@@ -171,7 +171,7 @@ def test_numero_sem_conta_com_codigo_de_vinculo_passa_pro_handler(monkeypatch):
         lambda to, body, user_id=None: replies.append((to, body, user_id)),
     )
 
-    def fake_handle_incoming(msg):
+    def fake_handle_incoming(msg, **_kw):   # o runtime pode passar `ignora_pendencias`
         handled.append(msg)
         return [OutgoingMessage(text="✅ WhatsApp vinculado!")]
 

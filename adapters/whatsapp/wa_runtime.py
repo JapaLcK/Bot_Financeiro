@@ -881,6 +881,8 @@ def process_message(message: InboundMessage) -> None:
                     )
                 return
 
+        ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo
+
         # ---------------------------------------------------------------
         # Interceptação: usuário escolheu "Outra (digitar)" e agora digitou
         # a categoria que quer aplicar ao lançamento.
@@ -918,7 +920,16 @@ def process_message(message: InboundMessage) -> None:
                     # e outra tarefa pode ter posto uma pergunta nova aqui entre
                     # o `get_pending_action` acima e agora — que já apareceu na
                     # tela. Só abandonamos a pergunta se ela ainda for a nossa.
-                    consume_pending_action(uid, pending_recat)
+                    #
+                    # CAS perdido vale para o TURNO: a linha é da pergunta nova,
+                    # e o `handle_incoming` abaixo relê `pending_actions` do
+                    # zero. Sem o `ignora_pendencias`, o comando velho
+                    # ("saldo") entraria na porta 1 ou na porta 3 DELA — a
+                    # porta 3 apaga a fila inteira do multi-lançamento. O
+                    # `bill_pay_amount` nosso, quando o CAS falha por erro de
+                    # banco (except abaixo), não é lido pelo `route()`.
+                    if not consume_pending_action(uid, pending_recat):
+                        ignora_pendencias = True
                 except Exception as exc:
                     logger.warning("WA drop bill_pay_amount pending failed: %s", exc)
                 pending_recat = None  # segue pro roteamento normal
@@ -1076,7 +1087,7 @@ def process_message(message: InboundMessage) -> None:
             attachments=attachments,
         )
 
-        outs = handle_incoming(incoming) or []
+        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")

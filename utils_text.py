@@ -977,13 +977,21 @@ def _espaco_ambiguo(bloco: str) -> bool:
     exatamente 3 dígitos ("1 500"), digitação errada tem outro número deles
     ("132 50"). Só isso é medido aqui.
 
+    EXCEÇÃO, e é a metade que faltava: espaço logo DEPOIS de um separador
+    decimal não é agrupamento nenhum. "132, 50" é R$ 132,50 — o `parse_money`
+    devolve 132.5 e a `main` aceitava —, mas a regra dos 3 dígitos via "50"
+    como milhar malformado e recusava. Idem "132 , 50", "132. 50", "1.234, 56"
+    e "132, 5". Por isso o grupo só é medido quando o pedaço ANTERIOR não
+    termina em `,` ou `.`.
+
     TETO conhecido: "1234 567" (grupo inicial de 4) passa como 1234567, porque
     a regra olha só os grupos depois do primeiro. Não vale código a mais — quem
     digita assim quis mesmo 1.234.567.
     """
     partes = bloco.split()
-    return any(len(re.match(r"\d*", p).group(0)) != 3
-               for p in partes[1:] if p[:1].isdigit())
+    return any(not anterior.endswith((",", "."))
+               and len(re.match(r"\d*", p).group(0)) != 3
+               for anterior, p in zip(partes, partes[1:]) if p[:1].isdigit())
 
 
 def valor_perigoso(texto: str, valor: float | None) -> str | None:

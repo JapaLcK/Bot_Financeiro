@@ -2707,3 +2707,358 @@ def test_as_quatro_portas_nao_ganharam_escrita_incondicional():
     src = inspect.getsource(wr.process_message)
     trecho = src[src.index("Passo 1 da pergunta de valor"):src.index("mark_bill_paid")]
     assert "set_pending_action(" not in trecho, trecho
+
+
+# ---------------------------------------------------------------------------
+# RODADA DO CODEX — P2 #2: espaço DEPOIS do separador decimal.
+#
+# A regra dos 3 dígitos do `_espaco_ambiguo` lia o "50" de "132, 50" como grupo
+# de milhar malformado e recusava — mas o espaço vem depois da VÍRGULA, e o
+# `parse_money` devolve 132.5. As 15 combinações abaixo foram medidas em DUAS
+# COLUNAS (`main` cf54ffb × branch), nas quatro portas, 60 células:
+#
+#   antes do conserto  21 células recusavam o que a `main` aceitava
+#                      (7 formas × portas 2, 3 e 4)
+#   depois             a ÚNICA célula diferente da `main` é o alvo do PR,
+#                      "132 50" → R$ 13.250,00, recusado nas portas 2, 3 e 4.
+#
+# Os testes de espaço que já existiam só tinham espaço ENTRE grupos ("1 500",
+# "12 345"), nunca depois do separador — por isso as 21 células atravessaram
+# quatro ataques.
+# ---------------------------------------------------------------------------
+
+# (texto, valores que a `main` registra na porta 2). A porta 2 recombina a
+# resposta com o texto original ("gastei <resposta> a luz"), e em cinco delas o
+# separador dentro da frase faz o splitter de multi-lançamento criar DOIS
+# lançamentos — é o que a `main` faz, e o branch tem que fazer igual.
+ESPACO_PORTA_2 = [
+    ("132, 50",   [50.0, 132.0]),
+    ("132 , 50",  [50.0, 132.0]),
+    ("132 ,50",   [132.5]),
+    ("132. 50",   [132.5]),
+    ("132 . 50",  [132.5]),
+    ("1.234, 56", [56.0, 1234.0]),
+    ("1 234,56",  [1234.56]),
+    ("1.234 ,56", [1234.56]),
+    ("132, 5",    [5.0, 132.0]),
+    ("132, 500",  [132.0, 500.0]),
+    ("132,50 ",   [132.5]),
+    ("1 500",     [1500.0]),
+    ("12 345",    [12345.0]),
+    ("1 500, 50", [50.0, 1500.0]),
+]
+
+# Portas 3 e 4 recebem a resposta sozinha: um valor só, o mesmo nas duas.
+ESPACO_PORTA_3_E_4 = [
+    ("132, 50", 132.5), ("132 , 50", 132.5), ("132 ,50", 132.5),
+    ("132. 50", 132.5), ("132 . 50", 132.5), ("1.234, 56", 1234.56),
+    ("1 234,56", 1234.56), ("1.234 ,56", 1234.56), ("132, 5", 132.5),
+    ("132, 500", 132.5), ("132,50 ", 132.5), ("1 500", 1500.0),
+    ("12 345", 12345.0), ("1 500, 50", 1500.5),
+]
+
+TODAS_AS_COMBINACOES = [t for t, _ in ESPACO_PORTA_2] + ["132 50"]
+
+
+def _pergunta_e_responde(porta: int, monkeypatch, texto: str):
+    """Arma a pergunta de valor da `porta` e responde `texto`.
+
+    Devolve `(valores registrados, resposta)` — nas portas 1 e 4 o valor pago
+    da conta (lista vazia = não pagou), nas portas 2 e 3 os lançamentos.
+    """
+    import uuid
+    import db
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    if porta == 1:
+        _monta_conta_variavel(uid)
+        assert "só o valor" in _diga(uid, "paguei a luz")
+        resp = _diga(uid, texto)
+    elif porta == 2:
+        assert "Quanto foi" in _diga(uid, "paguei a luz")
+        resp = _diga(uid, texto)
+    elif porta == 3:
+        assert "Faltou o valor de *aluguel*" in _diga(
+            uid, "gastei 30 no mercado e paguei o aluguel")
+        resp = _diga(uid, texto)
+    else:
+        conta = _monta_conta_variavel(uid)
+        _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+        resp = (_manda_texto_no_wa(monkeypatch, uid, texto) or [""])[-1]
+
+    if porta in (1, 4):
+        conta = [b for b in B.list_bills(uid, include_paid=True)
+                 if b["name"] == "Luz"][0]
+        vals = ([float(conta["paid_amount"])]
+                if conta["status"] == "paid" else [])
+    else:
+        vals = sorted(abs(float(l["valor"]))
+                      for l in db.list_launches(uid, limit=6))
+        if porta == 3:
+            vals.remove(30.0)   # o item que já vinha com valor na frase
+    return vals, resp
+
+
+@pytest.mark.parametrize("texto,esperado", ESPACO_PORTA_2)
+def test_espaco_depois_do_separador_registra_na_porta_2(monkeypatch, texto, esperado):
+    vals, resp = _pergunta_e_responde(2, monkeypatch, texto)
+    assert vals == esperado, (texto, resp)
+
+
+@pytest.mark.parametrize("texto,esperado", ESPACO_PORTA_3_E_4)
+def test_espaco_depois_do_separador_registra_na_porta_3(monkeypatch, texto, esperado):
+    vals, resp = _pergunta_e_responde(3, monkeypatch, texto)
+    assert vals == [esperado], (texto, resp)
+
+
+@pytest.mark.parametrize("texto,esperado", ESPACO_PORTA_3_E_4)
+def test_espaco_depois_do_separador_paga_na_porta_4(monkeypatch, texto, esperado):
+    vals, resp = _pergunta_e_responde(4, monkeypatch, texto)
+    assert vals == [esperado], (texto, resp)
+
+
+@pytest.mark.parametrize("texto", TODAS_AS_COMBINACOES)
+def test_porta_1_decide_pela_forma_e_nao_muda_com_o_conserto(monkeypatch, texto):
+    """A porta 1 é inerte ao conserto — medido, não presumido.
+
+    O `_VALOR_RE.fullmatch` não aceita `\\s` dentro do número, então as 15
+    combinações caem no `_NUMERO_AMBIGUO_RE` ANTES de o `valor_perigoso` ser
+    consultado. A única que paga é a que não tem espaço nenhum no meio
+    ("132,50 ", espaço só no fim). Idêntico à `main` nas 15.
+    """
+    vals, resp = _pergunta_e_responde(1, monkeypatch, texto)
+    if texto == "132,50 ":
+        assert vals == [132.5], resp
+    else:
+        assert vals == [] and "Não entendi o valor da *Luz*" in resp, (texto, resp)
+
+
+@pytest.mark.parametrize("porta", [2, 3, 4])
+def test_alvo_132_50_continua_recusado(monkeypatch, porta):
+    """O que o PR foi consertar não pode ter voltado: "132 50" → R$ 13.250,00.
+
+    Na `main` as três portas registram 13250.0 (medido). Aqui, nenhuma.
+    """
+    vals, resp = _pergunta_e_responde(porta, monkeypatch, "132 50")
+    assert vals == [], (porta, resp)
+    assert "ntendi o valor" in resp or "Não peguei o valor" in resp, resp
+
+
+def _espaco_ambiguo_antes_do_conserto(bloco: str) -> bool:
+    """A versão do commit 1cc0955: sem a exceção do separador decimal."""
+    import re
+    partes = bloco.split()
+    return any(len(re.match(r"\d*", p).group(0)) != 3
+               for p in partes[1:] if p[:1].isdigit())
+
+
+@pytest.mark.parametrize("porta", [2, 3, 4])
+def test_controle_negativo_sem_a_excecao_do_decimal_a_porta_recusa(monkeypatch, porta):
+    """Controle negativo, injetado em caso VERDE e uma vez POR PORTA.
+
+    Desliga só a exceção nova e o caso que a `main` aceita fica vermelho nas
+    três portas. Sem este controle, a regressão passava despercebida — foi
+    exatamente o que aconteceu por quatro ataques.
+    """
+    import utils_text
+    monkeypatch.setattr(utils_text, "_espaco_ambiguo",
+                        _espaco_ambiguo_antes_do_conserto)
+
+    vals, resp = _pergunta_e_responde(porta, monkeypatch, "132, 50")
+
+    assert vals == [], (porta, resp)
+
+
+def test_controle_negativo_a_porta_1_nao_muda_com_a_versao_antiga(monkeypatch):
+    """A outra metade do controle: na porta 1 desligar a exceção não muda NADA.
+
+    É a prova de que o portão de forma vem antes — e a razão de não existir
+    controle negativo da porta 1 para este conserto.
+    """
+    import utils_text
+    monkeypatch.setattr(utils_text, "_espaco_ambiguo",
+                        _espaco_ambiguo_antes_do_conserto)
+
+    vals, resp = _pergunta_e_responde(1, monkeypatch, "132, 50")
+
+    assert vals == [] and "Não entendi o valor da *Luz*" in resp, resp
+
+
+# ---------------------------------------------------------------------------
+# RODADA DO CODEX — P2 #1: o CAS que falha vale para o TURNO, não só para o
+# DELETE.
+#
+# Os testes de corrida que já existiam punham como substituta um
+# `bill_pay_amount` — que o `route()` NÃO consome —, então provavam só que a
+# linha não era apagada. A substituta destes é um `multi_launch_values` com
+# fila: se o comando velho ainda alcançar as guardas de pendência, a fila
+# inteira do usuário é apagada pela porta 3, e isso aparece.
+# ---------------------------------------------------------------------------
+
+# `desc` diferente do item que a porta 3 tem em mão de propósito: o CAS compara
+# o PAYLOAD, e uma fila igual à lida faria o compare-and-swap VENCER — a corrida
+# não seria injetada e o teste mediria o caminho normal. Medido: com
+# `desc="aluguel"` (o mesmo item), o teste da porta 3 passa a apagar a fila.
+FILA_DE_OUTRA_TAREFA = {"queue": [{"desc": "internet", "tipo": "despesa"}],
+                        "platform": "whatsapp"}
+
+
+def _corrida_no_cas(monkeypatch, alvo, uid, ignora_resultado=False):
+    """Injeta a pergunta de OUTRA tarefa entre a leitura e o CAS de abandono.
+
+    `ignora_resultado=True` reproduz o código de antes do conserto: o CAS roda
+    (e falha), mas quem chamou trata como se tivesse funcionado.
+
+    Os DOIS bindings do `advance_pending_action`: as quatro portas passam pelo
+    `db.consume_pending_action`, que resolve o nome nos globais de `db.pending`
+    — só o `db` não pega nada. O `db` fica junto porque o CAS da fila
+    (`core/handlers/launches.py`) chama por lá; ele nunca tem `new is None`,
+    então a injeção não dispara nele.
+    """
+    import db
+    import db.pending
+
+    real = db.pending.advance_pending_action
+
+    def com_corrida(u, tipo, old, new, *a, **k):
+        if tipo == alvo and new is None:
+            db.set_pending_action(uid, "multi_launch_values", FILA_DE_OUTRA_TAREFA)
+        ok = real(u, tipo, old, new, *a, **k)
+        return True if ignora_resultado else ok
+
+    monkeypatch.setattr(db.pending, "advance_pending_action", com_corrida)
+    monkeypatch.setattr(db, "advance_pending_action", com_corrida)
+
+
+def _fila_intacta(uid):
+    import db
+    atual = db.get_pending_action(uid) or {}
+    assert atual.get("action_type") == "multi_launch_values", \
+        f"o comando velho encostou na pergunta nova: {atual}"
+    assert atual.get("payload") == FILA_DE_OUTRA_TAREFA, atual
+
+
+def test_cas_perdido_na_porta_2_nao_toca_a_pergunta_nova(monkeypatch):
+    """Porta 2: o CAS falha → o turno roteia "saldo" SEM as guardas de pendência.
+
+    Sem o conserto, o `get_pending_action` seguinte recarregava a substituta e a
+    porta 3 apagava a fila que outra tarefa acabou de mostrar ao usuário.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Quanto foi" in _diga(uid, "paguei a luz")
+
+    _corrida_no_cas(monkeypatch, "clarification", uid)
+    resp = _diga(uid, "saldo")
+
+    _fila_intacta(uid)
+    assert "Conta Corrente" in resp, f"o comando velho não foi respondido: {resp!r}"
+
+
+def test_controle_negativo_porta_2_ignorando_o_cas_a_fila_some(monkeypatch):
+    """Controle negativo da porta 2, injetado no caso VERDE acima."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Quanto foi" in _diga(uid, "paguei a luz")
+
+    _corrida_no_cas(monkeypatch, "clarification", uid, ignora_resultado=True)
+    _diga(uid, "saldo")
+
+    assert db.get_pending_action(uid) is None, \
+        "sem o conserto a fila da outra tarefa TEM que sumir — o controle não mede nada"
+
+
+def test_cas_perdido_na_porta_4_nao_toca_a_pergunta_nova(monkeypatch):
+    """Porta 4: o CAS falha e o `handle_incoming` relê `pending_actions`.
+
+    Sem o `ignora_pendencias`, "saldo" entrava na porta 3 da fila nova e a
+    apagava — a porta 4 roda ANTES do `handle_incoming`, então o `pending_recat`
+    local não protege nada.
+    """
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    _corrida_no_cas(monkeypatch, "bill_pay_amount", uid)
+    respostas = _manda_texto_no_wa(monkeypatch, uid, "saldo")
+
+    _fila_intacta(uid)
+    assert "Conta Corrente" in (respostas[-1] if respostas else ""), respostas
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+
+def test_controle_negativo_porta_4_ignorando_o_cas_a_fila_some(monkeypatch):
+    """Controle negativo da porta 4, injetado no caso VERDE acima."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    _corrida_no_cas(monkeypatch, "bill_pay_amount", uid,
+                    ignora_resultado=True)
+    _manda_texto_no_wa(monkeypatch, uid, "saldo")
+
+    assert db.get_pending_action(uid) is None, \
+        "sem o conserto a fila da outra tarefa TEM que sumir — o controle não mede nada"
+
+
+def test_cas_perdido_na_porta_1_ja_nao_tocava_a_pergunta_nova(monkeypatch):
+    """Porta 1: o irmão que NÃO precisava de conserto — medido, não presumido.
+
+    O `resolve_bill_amount` devolve `None` quando o CAS falha, e o `route()`
+    zera o `pending` local nessa linha, então as guardas seguintes já ficavam
+    de fora. O controle negativo desta porta é o CAS em si: trocá-lo por um
+    `clear_pending_action` apaga a fila (é o `test_abandono_...` acima).
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    _monta_conta_variavel(uid)
+    assert "só o valor" in _diga(uid, "paguei a luz")
+
+    _corrida_no_cas(monkeypatch, "bill_amount_expected", uid)
+    resp = _diga(uid, "saldo")
+
+    _fila_intacta(uid)
+    assert "Conta Corrente" in resp, resp
+
+
+def test_cas_perdido_na_porta_3_ja_nao_tocava_a_pergunta_nova(monkeypatch):
+    """Porta 3: mesmo irmão, mesma medição.
+
+    O ramo `outro_comando` devolve `None` e o `route()` zera o `pending` local.
+    A substituta aqui é uma fila DIFERENTE (payload diferente), que é o que o
+    CAS compara.
+
+    O comando é "saldo", não "apagar 42": medido, o `launches.delete` arma a
+    SUA própria confirmação com `set_pending_action` e sobrescreve a linha
+    sozinho — escrita incondicional herdada (~48 no repositório, ver
+    `db/pending.py`), fora das quatro portas e fora deste PR.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Faltou o valor de *aluguel*" in _diga(
+        uid, "gastei 30 no mercado e paguei o aluguel")
+
+    _corrida_no_cas(monkeypatch, "multi_launch_values", uid)
+    resp = _diga(uid, "saldo")
+
+    _fila_intacta(uid)
+    assert "Conta Corrente" in resp, resp
