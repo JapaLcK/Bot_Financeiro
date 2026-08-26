@@ -880,3 +880,201 @@ def test_controle_negativo_porta_3_sem_limpar_a_pontuacao_recusa(
     assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
     pend = _pendencia(uid)
     assert pend and pend["action_type"] == "multi_launch_values", pend
+
+
+# ---------------------------------------------------------------------------
+# Rodada 5: PROSA. O buraco de teste que deixou passar as quatro rodadas
+# anteriores — todas a mesma classe ("o filtro de dano recusa entrada que a
+# `main` aceita"), todas descobertas por revisor e não por teste.
+#
+# O motivo é sempre o mesmo: os casos testavam o NÚMERO SOZINHO. O fuzz de
+# 42.157 entradas da rodada 3 varreu o alfabeto `0-9 , .` — sem uma palavra
+# sequer. Prefixo e sufixo de prosa nunca entraram, e é exatamente ali que os
+# quatro defeitos moravam:
+#
+#   rodada 2  "132, 50"                espaço depois do separador decimal
+#   rodada 4  "132."                   ponto final sem vírgula
+#   rodada 5  "paguei 132 - da luz"    traço de prosa lido como sinal negativo
+#   rodada 5  "paguei 132. foi isso"   ponto de prosa lido como milhar torto
+#
+# Este bloco fecha o buraco com o produto cartesiano prefixo × número × sufixo.
+# Medido em duas colunas contra a `main` `e8b9875` (1.572 células, quatro
+# portas): zero células em que a `main` aceita e o branch recusa, zero em que
+# os dois aceitam com valores diferentes. As divergências que sobraram são as
+# duas intencionais — o perigoso que o PR aperta, e o `132,50.` que a `main`
+# paga como R$ 13.250,00.
+#
+# A varredura vive na porta 3 porque `valor_perigoso` e `limpa_pontuacao_final`
+# são compartilhados pelas quatro; as outras entram logo abaixo com os
+# reprodutores, que é onde a ACEITAÇÃO de cada porta difere.
+# ---------------------------------------------------------------------------
+
+_PREFIXOS = ["", "paguei ", "acho que foi "]
+_NUMEROS = [("132", 132.0), ("132,50", 132.5), ("1.234,56", 1234.56),
+            ("1 500", 1500.0), ("10 mil", 10000.0)]
+# " -" fica de FORA de propósito: traço que TERMINA a expressão é sinal
+# negativo ("132 -"), e continua recusado — ver `_PROSA_PERIGOSA` abaixo.
+_SUFIXOS = ["", " da luz", " - da luz", " — luz", ". foi isso", " no mercado",
+            ", foi isso", " reais", ".", " total"]
+
+
+def _novo_free_uid() -> int:
+    import uuid as _uuid
+    import db as _db
+    uid = int(_uuid.uuid4().int % 1_000_000_000)
+    _db.ensure_user(uid)
+    return uid
+
+
+def test_corpus_de_prosa_registra_o_valor_certo(spy_ai):
+    """150 células de prosa na porta 3: nenhuma recusa, nenhum valor torto."""
+    import db
+
+    falhas = []
+    for prefixo in _PREFIXOS:
+        for numero, esperado in _NUMEROS:
+            for sufixo in _SUFIXOS:
+                texto = f"{prefixo}{numero}{sufixo}"
+                uid = _novo_free_uid()
+                _fila_de_dois(uid)
+                resp = _send(uid, texto)
+                lancs = db.list_launches(uid, limit=1)
+                valor = abs(float(lancs[0]["valor"])) if lancs else None
+                if valor != esperado:
+                    falhas.append((texto, esperado, valor, resp[:60]))
+    assert not falhas, f"{len(falhas)}/150 células: {falhas[:8]}"
+
+
+# Os reprodutores exatos dos dois P2 da rodada 5, mais o terceiro que a
+# varredura achou sozinha (traço ANTES do número), nas portas 2 e 4 — as duas
+# que têm aceitação própria.
+_PROSA = [("paguei 132 - da luz", 132.0), ("132 — luz", 132.0),
+          ("gastei 50 - mercado", 50.0), ("luz - 132", 132.0),
+          ("paguei 132. foi isso", 132.0), ("132. da luz", 132.0),
+          ("paguei 132,50. foi isso", 132.5), ("1.234,56, foi isso", 1234.56)]
+
+
+@pytest.mark.parametrize("resposta,esperado", _PROSA)
+def test_clarification_prosa_registra_o_valor_certo(pro_uid, spy_ai, resposta, esperado):
+    """Porta 2. `gastei 50 - mercado` é o " - " que ESTE PR pôs no combinado."""
+    uid = pro_uid
+    import db
+    _pergunta_de_valor(uid)
+
+    _send(uid, resposta)
+
+    lancs = db.list_launches(uid, limit=1)
+    assert lancs, f"{resposta!r} não registrou nada"
+    assert abs(float(lancs[0]["valor"])) == esperado, (resposta, lancs[0])
+
+
+@pytest.mark.parametrize("resposta,esperado", _PROSA)
+def test_botao_ja_paguei_prosa_paga_o_valor_certo(monkeypatch, resposta, esperado):
+    """Porta 4, pelo `process_message` real — a que roda antes do handler."""
+    import uuid
+    import db.bills as B
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    from tests.test_bill_amount_pending import (_monta_conta_variavel,
+                                                _manda_texto_no_wa,
+                                                _toca_ja_paguei)
+    conta = _monta_conta_variavel(uid)
+    _toca_ja_paguei(monkeypatch, uid, int(conta["id"]))
+
+    respostas = _manda_texto_no_wa(monkeypatch, uid, resposta)
+
+    paga = B.list_bills(uid, include_paid=True)[0]
+    assert paga["status"] == "paid", (resposta, respostas)
+    assert float(paga["paid_amount"]) == esperado, (resposta, paga)
+
+
+# --- Controles negativos, um por CAUSA, injetados em caso VERDE -------------
+
+@pytest.mark.parametrize("resposta", ["paguei 132 - da luz", "132 — luz",
+                                      "gastei 50 - mercado", "luz - 132"])
+def test_controle_negativo_traco_de_prosa_como_sinal_recusa(
+        free_uid, spy_ai, monkeypatch, resposta):
+    """Volta a regra antiga do sinal: os quatro casos verdes ficam vermelhos.
+
+    A regra antiga era "traço de qualquer lado do bloco = negativo", e ela
+    cobria as duas metades: o traço DEPOIS ("paguei 132 - da luz") e o traço
+    ANTES ("luz - 132"), que o Codex não apontou e a varredura achou.
+    """
+    import db
+    import re as _re
+    import utils_text
+
+    real = utils_text.valor_perigoso
+
+    def regra_antiga(texto, valor):
+        t = (texto or "").translate(utils_text._TRACOS)
+        bloco = utils_text._BLOCO_NUM_RE.search(t)
+        if bloco:
+            antes = _re.sub(r"r\$\s*$", "", t[:bloco.start()].rstrip(),
+                            flags=_re.I).rstrip().lower()
+            if antes.endswith("-") or t[bloco.end():].lstrip().startswith("-"):
+                return "nao_positivo"
+        return real(texto, valor)
+
+    uid = free_uid
+    _fila_de_dois(uid)
+    monkeypatch.setattr(utils_text, "valor_perigoso", regra_antiga)
+
+    resp = _send(uid, resposta)
+
+    assert "maior que zero" in resp, (resposta, resp)
+    assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
+
+
+@pytest.mark.parametrize("resposta,inflado", [
+    ("paguei 132. foi isso", None), ("132. da luz", None),
+    ("paguei 132,50. foi isso", 13250.0), ("1.234,56, foi isso", None),
+])
+def test_controle_negativo_pontuacao_so_no_fim_da_mensagem(
+        free_uid, spy_ai, monkeypatch, resposta, inflado):
+    """Volta o `rstrip(" .!")` sozinho — que não alcança a prosa DEPOIS.
+
+    Dois estragos diferentes, e o controle prende os dois: sem vírgula o
+    número vira "milhar malformado" e a resposta é recusada (`inflado is
+    None`); com vírgula o `parse_money` lê a vírgula como milhar e registra
+    R$ 13.250,00 no lugar de R$ 132,50.
+    """
+    import db
+    import utils_text
+
+    uid = free_uid
+    _fila_de_dois(uid)
+    monkeypatch.setattr(utils_text, "limpa_pontuacao_final",
+                        lambda raw: (raw or "").rstrip(" .!"))
+
+    resp = _send(uid, resposta)
+
+    lancs = db.list_launches(uid, limit=1)
+    valor = abs(float(lancs[0]["valor"])) if lancs else None
+    assert valor == inflado, (resposta, resp[:80], lancs)
+
+
+# --- Controle positivo do aperto: o perigoso segue recusado, pergunta viva --
+
+_PROSA_PERIGOSA = [
+    ("132 -", "maior que zero"),      # traço que TERMINA a expressão = sinal
+    ("paguei 132 -", "maior que zero"),
+    ("(10)", "maior que zero"),       # negativo contábil
+    ("132 50 no mercado", "Não entendi o valor"),
+    ("paguei 1.23.456 da luz", "Não entendi o valor"),
+]
+
+
+@pytest.mark.parametrize("resposta,recusa", _PROSA_PERIGOSA)
+def test_prosa_perigosa_recusada_com_a_fila_viva(free_uid, spy_ai, resposta, recusa):
+    uid = free_uid
+    import db
+    _fila_de_dois(uid)
+
+    resp = _send(uid, resposta)
+
+    assert recusa in resp, (resposta, resp)
+    assert "Faltou o valor de *aluguel*" in resp, (resposta, resp)
+    assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
+    pend = _pendencia(uid)
+    assert pend and pend["action_type"] == "multi_launch_values", pend

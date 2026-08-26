@@ -2418,13 +2418,22 @@ def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
                           if not c[0].startswith("paguei")])
 def test_controle_negativo_sem_limpar_a_pontuacao_a_porta_1_recusa(
         monkeypatch, resposta, esperado):
-    """Controle: desliga a limpeza NA PORTA 1 e o caso verde fica vermelho."""
+    """Controle: desliga a limpeza NA PORTA 1 e o caso verde fica vermelho.
+
+    Dois alvos porque a limpeza é usada em dois pontos do mesmo turno: o
+    `import` do topo de `core/handlers/bills.py` (o valor que vai ao
+    `parse_money` — sem ele "1.500." vira `None`) e a chamada que o
+    `valor_perigoso` faz por dentro, no `utils_text` (a FORMA — sem ela "132."
+    vira milhar malformado). Desligar só um deixa o outro cobrindo o furo.
+    """
     import uuid
     import db
     import db.bills as B
+    import utils_text
     import core.handlers.bills as BH
 
     monkeypatch.setattr(BH, "limpa_pontuacao_final", lambda s: s or "")
+    monkeypatch.setattr(utils_text, "limpa_pontuacao_final", lambda s: s or "")
 
     uid = int(uuid.uuid4().int % 1_000_000_000)
     _monta_conta_variavel(uid)
@@ -2465,17 +2474,24 @@ def test_controle_negativo_sem_limpar_a_pontuacao_a_porta_4_recusa(monkeypatch):
 #   'apagar 0'                 zero            -> nao_positivo
 #   'quanto gastei em 12 05'   espaço ambíguo  -> nao_entendi
 #   'resumo do mes 08 2026'    espaço ambíguo  -> nao_entendi
-#   'extrato 01-2026'          traço à direita -> nao_positivo
-#   'relatorio 2026-08'        traço à direita -> nao_positivo
 #   'apagar 1.23.456'          milhar torto    -> nao_entendi
 COMANDOS_QUE_O_DANO_PRENDIA = [
     "apagar 0", "quanto gastei em 12 05", "resumo do mes 08 2026",
-    "extrato 01-2026", "relatorio 2026-08", "apagar 1.23.456",
-    "pix 11-99999-8888", "boleto 12-2026",
+    "apagar 1.23.456",
+]
+# Estes quatro TAMBÉM eram presos, pelo traço à direita do primeiro bloco
+# ('01-2026' -> `depois.startswith("-")` -> nao_positivo). A rodada 5 tirou-os
+# do perigoso: traço só é sinal quando TERMINA a expressão, e numa data ou num
+# telefone ele separa dois números. Continuam aqui porque o portão de forma
+# ainda tem de abandoná-los — mas já não servem de controle do DANO, que não os
+# vê mais.
+COMANDOS_COM_TRACO_ENTRE_NUMEROS = [
+    "extrato 01-2026", "relatorio 2026-08", "pix 11-99999-8888", "boleto 12-2026",
 ]
 
 
-@pytest.mark.parametrize("comando", COMANDOS_QUE_O_DANO_PRENDIA)
+@pytest.mark.parametrize("comando", COMANDOS_QUE_O_DANO_PRENDIA
+                         + COMANDOS_COM_TRACO_ENTRE_NUMEROS)
 def test_porta_1_portao_de_forma_vem_antes_do_dano(comando):
     """Preso = a pendência fica na linha e a repetição dá a mesma recusa.
 

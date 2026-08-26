@@ -908,11 +908,30 @@ def limpa_pontuacao_final(raw: str) -> str:
     lugar de R$ 132,50 ("0,50." vira 50, "9,99." vira 999). Quem escreve
     "132,50." está respondendo, não mudando de assunto.
 
+    O mesmo ponto no MEIO da frase faz o mesmo estrago, e o `rstrip` não o
+    alcança: medido nas quatro portas, "paguei 132,50. foi isso" paga
+    R$ 13.250,00 na `main` E no branch, porque a pontuação de prosa fica presa
+    dentro do bloco numérico que o `parse_money` recorta. Por isso a limpeza
+    vale para o fim da MENSAGEM e para o fim do BLOCO — os dois são pontuação,
+    não separador decimal:
+
+        paguei 132,50. foi isso  -> paguei 132,50 foi isso   (132,50, não 13.250)
+        1.234,56, foi isso       -> 1.234,56 foi isso        (antes: nada)
+
+    O que sobra depois do número continua no texto: ele é a descrição que
+    categoriza o lançamento na porta 2.
+
     Não corrigido no `parse_money`: o bug é dele e é anterior a este PR, mas ele
     é chamado por dezenas de fluxos e mexer nele aqui é troca de bug conhecido
     por bug novo. Issue separada.
     """
-    return (raw or "").rstrip(" .!")
+    limpo = (raw or "").rstrip(" .!")
+    bloco = _BLOCO_NUM_RE.search(limpo)
+    if not bloco:
+        return limpo
+    resto = limpo[bloco.end():]
+    return (limpo[:bloco.start()] + bloco.group(0).rstrip(" .,")
+            + (" " if resto else "") + resto)
 
 
 def agrupamento_de_milhar_ok(raw: str) -> bool:
@@ -1027,18 +1046,34 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
     Nenhum dos dois é regressão (a `main` também pagava), e consertar mexe na
     aceitação das portas, não neste predicado. Fica descrito, não corrigido.
     """
-    t = (texto or "").translate(_TRACOS)
+    # A MESMA limpeza que o chamador aplica antes do `parse_money`, e pelo mesmo
+    # motivo: a pontuação no fim do bloco numérico é prosa, não separador. Sem
+    # ela o grupo vazio depois do ponto de "paguei 132. foi isso" virava
+    # "milhar malformado" e recusava o que a `main` registra. Chamar aqui em vez
+    # de confiar no chamador é o que a rodada 4 ensinou — lá o `valor_perigoso`
+    # recebeu o texto cru e "132." foi recusado. É idempotente.
+    t = limpa_pontuacao_final(texto).translate(_TRACOS)
     bloco = _BLOCO_NUM_RE.search(t)
     if bloco:
         if _espaco_ambiguo(bloco.group(0)) or not agrupamento_de_milhar_ok(t):
             return "nao_entendi"
-        # `parse_money` ignora o sinal: sem isto "-10" vira pagamento de R$ 10.
-        antes = re.sub(r"r\$\s*$", "", t[:bloco.start()].rstrip(),
-                       flags=re.I).rstrip().lower()
+        cru = t[:bloco.start()]
+        antes = re.sub(r"r\$\s*$", "", cru.rstrip(), flags=re.I).rstrip().lower()
         depois = t[bloco.end():].lstrip()
+        # `parse_money` ignora o sinal: sem isto "-10" vira pagamento de R$ 10.
+        #
+        # Mas o traço só é SINAL quando encosta nos dígitos ("-10", "R$ -10"),
+        # quando é o prefixo inteiro ("- 10") ou quando TERMINA a expressão
+        # ("132 -", "10-"). Traço com prosa de um dos lados é pontuação:
+        # "paguei 132 - da luz", "132 — luz" e "luz - 132" são R$ 132,00 e a
+        # `main` paga os três. Como o `_TRACOS` normaliza travessão e en dash
+        # para "-", o `startswith("-")` de antes recusava a lista inteira —
+        # inclusive o " - " que ESTE PR pôs no texto combinado da pergunta de
+        # descrição ("gastei 50 - mercado").
         negativo = (
-            antes.endswith("-")
-            or depois.startswith("-")            # "10-"
+            cru.endswith("-")
+            or re.sub(r"r\$", "", antes).strip() == "-"
+            or depois.rstrip() == "-"
             # "menos 10" é negativo; "mais ou menos 10" é "por volta de 10" —
             # `menos` está no `_ENCHIMENTO` da porta 1 justamente por isso.
             or (re.search(r"(?:^|\s)menos$", antes)
