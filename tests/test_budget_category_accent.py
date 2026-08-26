@@ -136,3 +136,92 @@ def test_crud_de_orcamento_acha_a_linha_com_a_outra_grafia(user_id):
     assert len(db.budgets.list_budgets(user_id)) == 1
     assert db.budgets.delete_budget(user_id, "café") is True
     assert db.budgets.list_budgets(user_id) == []
+
+
+# ── catálogo com gêmeas de acento: join normalizado não pode multiplicar ─────
+# `user_categories` é única só no par EXATO (user_id, name), então 'cafe' e
+# 'café' coexistem em dado legado. Com o join de emoji/cor feito por valor
+# NORMALIZADO, as duas casavam com o mesmo orçamento/fatia e dobravam
+# `total_budget`, `total_spent` e `at_risk` (P1 do Codex no PR #143).
+
+def _catalogo(user_id: int, *linhas: tuple[str, str, bool]):
+    """(name, emoji, is_system) direto no catálogo.
+
+    Direto em SQL de propósito: `ensure_user_category` não cria mais gêmea —
+    quem tem duas grafias é dado gravado antes da normalização.
+    """
+    from db.connection import get_conn
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for name, emoji, is_system in linhas:
+                cur.execute(
+                    "insert into user_categories (user_id, name, emoji, color, is_system) "
+                    "values (%s, %s, %s, '#123456', %s)",
+                    (user_id, name, emoji, is_system),
+                )
+        conn.commit()
+
+
+def test_catalogo_com_gemeas_nao_dobra_orcamento(user_id):
+    """Controle negativo: trocando a CTE `cat_meta` de volta pelo
+    `left join user_categories uc on uc.user_id=%s and <norm> = <norm>`
+    (db/budgets.py, db/analytics.py), medido no Postgres local:
+    2 linhas, budget 80.0, spent 74.2, at_risk 2, e o donut com duas fatias
+    de 37.1 (pct 50.0 cada)."""
+    _catalogo(user_id, ("cafe da manha", "🅰️", False), ("café da manhã", "🅱️", False))
+    upsert_budget(user_id, "cafe da manha", 40.0)
+    _gasto(user_id, "café da manhã", 37.10)
+
+    status = get_budgets_status_for_month(user_id)
+    assert len(status["budgets"]) == 1, status["budgets"]
+    linha = status["budgets"][0]
+    assert (linha["budget"], linha["spent"]) == (40.0, 37.1)
+    assert linha["status"] == "amarelo"
+    assert linha["emoji"] == "🅰️"  # metadado veio, não sumiu com a dedup
+    assert status["totals"]["budget"] == 40.0
+    assert status["totals"]["spent"] == 37.1
+    assert status["totals"]["at_risk"] == 1
+
+    hoje = date.today()
+    cats = compute_categories(user_id, hoje.replace(day=1), hoje + timedelta(days=1))
+    assert len(cats) == 1, cats
+    assert (cats[0]["total"], cats[0]["pct"], cats[0]["emoji"]) == (37.1, 100.0, "🅰️")
+
+
+def test_desempate_do_catalogo_e_o_mesmo_do_display_map(user_id):
+    """Uma fonte só pro desempate: vence a do seed (is_system) e, entre iguais,
+    o menor nome — igual a `user_category_display_map` (db/categories.py)."""
+    _catalogo(user_id, ("cafe", "🅰️", False), ("café", "🅱️", True))
+    upsert_budget(user_id, "CAFE", 40.0)
+    _gasto(user_id, "Café", 10.0)
+
+    assert db.categories.user_category_display_map(user_id)["cafe"] == "café"
+    linhas = get_budgets_status_for_month(user_id)["budgets"]
+    assert len(linhas) == 1 and linhas[0]["emoji"] == "🅱️"
+
+    hoje = date.today()
+    cats = compute_categories(user_id, hoje.replace(day=1), hoje + timedelta(days=1))
+    assert len(cats) == 1 and cats[0]["emoji"] == "🅱️"
+
+
+def test_catalogo_normal_continua_trazendo_emoji_de_cada_categoria(user_id):
+    """Controle positivo: sem gêmeas, cada categoria mantém a linha e o
+    metadado dela — a dedup não pode colapsar catálogo legítimo."""
+    _catalogo(user_id, ("cafe", "☕", False), ("carne", "🥩", False))
+    upsert_budget(user_id, "cafe", 100.0)
+    upsert_budget(user_id, "carne", 100.0)
+    _gasto(user_id, "cafe", 11.0)
+    _gasto(user_id, "carne", 73.0)
+
+    linhas = get_budgets_status_for_month(user_id)["budgets"]
+    assert {b["categoria"]: (b["spent"], b["emoji"]) for b in linhas} == {
+        "cafe": (11.0, "☕"), "carne": (73.0, "🥩"),
+    }
+    assert get_budgets_status_for_month(user_id)["totals"]["spent"] == 84.0
+
+    hoje = date.today()
+    cats = compute_categories(user_id, hoje.replace(day=1), hoje + timedelta(days=1))
+    assert {c["name"]: (c["total"], c["emoji"]) for c in cats} == {
+        "cafe": (11.0, "☕"), "carne": (73.0, "🥩"),
+    }

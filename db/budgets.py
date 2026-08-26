@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql
+from .connection import get_conn, cat_norm_sql, CAT_META_SQL
 from .users import ensure_user
 
 
@@ -352,6 +352,9 @@ def get_budgets_status_for_month(
                     union all
                     select * from spent_cards
                   ) s group by cat
+                ),
+                cat_meta as (
+                  {CAT_META_SQL}
                 )
                 select
                   b.categoria,
@@ -361,8 +364,7 @@ def get_budgets_status_for_month(
                   uc.color
                 from budgets b
                 left join spent_all sa on sa.cat = {cat_norm_sql('b.categoria')}
-                left join user_categories uc
-                  on uc.user_id=%s and {cat_norm_sql('uc.name')} = {cat_norm_sql('b.categoria')}
+                left join cat_meta uc on uc.cat = {cat_norm_sql('b.categoria')}
                 order by lower(b.categoria)
                 """,
                 (

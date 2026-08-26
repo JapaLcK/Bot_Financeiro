@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql
+from .connection import get_conn, cat_norm_sql, CAT_META_SQL
 
 # Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
 _CAT_EQ = "{} = {}".format(cat_norm_sql("COALESCE(categoria, '')"), cat_norm_sql("%s"))
@@ -385,6 +385,9 @@ def compute_categories(
                          COUNT(*)   AS count
                   FROM despesas
                   GROUP BY {cat_norm_sql('categoria')}
+                ),
+                cat_meta AS (
+                  {CAT_META_SQL}
                 )
                 SELECT a.categoria AS name,
                        a.total,
@@ -392,8 +395,7 @@ def compute_categories(
                        uc.emoji,
                        uc.color
                 FROM agg a
-                LEFT JOIN user_categories uc
-                  ON uc.user_id = %s AND {cat_norm_sql('uc.name')} = {cat_norm_sql('a.categoria')}
+                LEFT JOIN cat_meta uc ON uc.cat = {cat_norm_sql('a.categoria')}
                 ORDER BY a.total DESC
                 LIMIT %s
                 """,
