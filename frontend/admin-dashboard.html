@@ -268,6 +268,12 @@ button:disabled { opacity: .6; cursor: wait; }
 }
 .detail-event .t { color: var(--soft); font-size: 11px; white-space: nowrap; }
 
+/* Editor de plano do drill-down. Os controles herdam o estilo global de
+   `button, select`; no celular a media query de tela pequena já os deixa 100%. */
+.plan-editor { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+.plan-hint { flex: 1 1 240px; min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.plan-hint.warn { color: #fcd34d; }
+
 /* ── Error list ──────────────────────────────────────────────────────── */
 .error-list  { display: grid; gap: 8px; }
 .error-item  {
@@ -1827,6 +1833,11 @@ function planLabel(p) {
   const k = String(p || 'free').trim().toLowerCase() || 'free';
   return PLAN_LABELS[k] || k;
 }
+// Valores GRAVÁVEIS na coluna plan, na ordem da escada — espelho do
+// ADMIN_PLAN_VALUES de core/admin_dashboard.py, comparado por
+// tests/test_admin_users_panel.py. 'plus' fica de fora de propósito: dá o
+// mesmo tier que 'pro', mas não é o que o webhook da Stripe grava.
+const PLAN_WRITE_VALUES = ['free', 'essencial', 'pro', 'pro_max'];
 // Origem do cadastro (auth_accounts.signup_source). null = conta anterior à coluna.
 const SOURCE_LABELS = { web: 'Web', app: 'App iOS', google: 'Google', google_app: 'Google (app)' };
 function sourceLabel(s) {
@@ -2077,6 +2088,11 @@ function renderUserDetail(data) {
     p.insight_email_opt_out && 'insights',
     p.whatsapp_updates_opt_out && 'updates WA',
   ].filter(Boolean).join(', ') || 'nenhum';
+  // Plano pré-selecionado no editor. 'plus' (valor antigo em algumas contas)
+  // cai no 'pro', que é o mesmo tier e é o valor que gravamos.
+  const stored = String(p.plan || 'free').trim().toLowerCase();
+  const planNow = stored === 'plus' ? 'pro'
+    : (PLAN_WRITE_VALUES.includes(stored) ? stored : 'free');
 
   $id('user-detail').innerHTML = `
     <div class="detail-head" style="display:flex;align-items:center;gap:10px;margin:4px 0 14px">
@@ -2102,6 +2118,23 @@ function renderUserDetail(data) {
       ${item('WhatsApp', (p.has_whatsapp_identity || p.phone_status === 'confirmed') ? 'conectado' : (p.phone_status || 'não conectado'))}
       ${item('IA no mês', fInt(p.ai_messages_this_month))}
       ${item('Opt-outs', optOuts)}
+    </div>
+
+    <div class="detail-section-title">Alterar plano</div>
+    <div class="plan-editor">
+      <select id="plan-new" aria-label="Novo plano"
+              onchange="$id('plan-months').disabled = this.value === 'free'">
+        ${PLAN_WRITE_VALUES.map(v => `
+          <option value="${v}" ${v === planNow ? 'selected' : ''}>${esc(planLabel(v))}</option>`).join('')}
+      </select>
+      <select id="plan-months" aria-label="Validade do plano" ${planNow === 'free' ? 'disabled' : ''}>
+        ${[1, 3, 6, 12, 24, 60].map(m => `
+          <option value="${m}" ${m === 12 ? 'selected' : ''}>${m} ${m === 1 ? 'mês' : 'meses'}</option>`).join('')}
+      </select>
+      <button class="btn-primary" id="plan-apply" onclick="applyPlanChange(${Number(p.user_id)})">Aplicar</button>
+      <span class="plan-hint ${p.stripe_customer_id ? 'warn' : ''}">${p.stripe_customer_id
+        ? 'Conta com cliente na Stripe: isto muda só o banco — a assinatura continua lá e o próximo webhook dela sobrescreve o plano. Cancele/troque no Stripe também.'
+        : 'Vale na hora para os limites do plano. Bancos de Open Finance e agentes acima do teto novo caem na varredura de downgrade (a cada 6h).'}</span>
     </div>
 
     <div class="detail-section-title">Uso (contagens — sem conteúdo financeiro)</div>
@@ -2130,6 +2163,40 @@ function renderUserDetail(data) {
         <span class="t" title="${fDate(lg.created_at)}">${fRelTime(lg.created_at)}</span>
       </div>`).join('') : '<div class="empty">Sem logins registrados.</div>'}
   `;
+}
+
+/* Upgrade/downgrade manual. Só o banco: a assinatura na Stripe segue de pé (é
+   o que o aviso do editor diz), então isto serve a grant/suporte, não a
+   cancelamento de cobrança. */
+async function applyPlanChange(userId) {
+  const plan = $id('plan-new').value;
+  const months = Number($id('plan-months').value) || 12;
+  const validade = plan === 'free'
+    ? 'sem validade'
+    : `por ${months} ${months === 1 ? 'mês' : 'meses'}`;
+  if (!confirm(`Mudar a conta ${userId} para ${planLabel(plan)} (${validade})?\n\n`
+    + 'A assinatura na Stripe NÃO é alterada por aqui.')) return;
+
+  const btn = $id('plan-apply');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/admin/api/users/${userId}/plan`, {
+      method: 'POST',
+      headers: { ...authH(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, months }),
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.detail || 'Erro ao alterar o plano.'); btn.disabled = false; return; }
+    // Redesenha o drill-down (plano/status novos) e a lista atrás dele, que
+    // mostra plano e expiração na linha da conta.
+    await openUserDetail(userId);
+    loadUsers();
+  } catch (e) {
+    console.error('plan-change:', e);
+    alert('Falha de rede ao alterar o plano.');
+    btn.disabled = false;
+  }
 }
 
 /* Listeners do modal */

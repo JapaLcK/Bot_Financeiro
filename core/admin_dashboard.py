@@ -1214,6 +1214,85 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
     }
 
 
+# Valores aceitos na coluna auth_accounts.plan, na ordem da escada. São os
+# MESMOS que o webhook da Stripe grava (_stored_plan_for_price): 'pro' é o
+# alias LEGADO do tier Plus (R$ 19,90) e 'pro_max' é o tier Pro. Gravar 'plus'
+# daria o mesmo tier no plan_service, mas furaria as queries que ainda casam o
+# literal 'pro' (engagement_scheduler) — por isso ele não é oferecido aqui.
+ADMIN_PLAN_VALUES: tuple[str, ...] = ("free", "essencial", "pro", "pro_max")
+ADMIN_PLAN_MONTHS_MAX = 120
+
+
+def set_account_plan(
+    plan: str,
+    months: int = 12,
+    *,
+    user_id: int | None = None,
+    email: str | None = None,
+) -> dict | None:
+    """Grava plano + validade de UMA conta. Síncrono: chame por asyncio.to_thread.
+
+    Fonte única do que "mudar de plano pelo admin" significa — o /admin/grant-pro
+    e o botão do painel de usuários passam os dois por aqui. Descer para 'free'
+    zera a validade; qualquer plano pago põe now() + months.
+
+    NÃO fala com a Stripe: se a conta tem assinatura viva, o próximo webhook
+    dela volta a mandar no par (plan, plan_expires_at). É grant/ajuste manual.
+
+    Devolve a linha atualizada, ou None se a conta não existe. Entrada inválida
+    levanta ValueError.
+    """
+    from db.connection import get_conn
+
+    plan = (plan or "").strip().lower()
+    if plan not in ADMIN_PLAN_VALUES:
+        raise ValueError("plano inválido (use " + ", ".join(ADMIN_PLAN_VALUES) + ").")
+    if (user_id is None) == (email is None):
+        raise ValueError("informe user_id OU email.")
+    if plan == "free":
+        months = 1                       # ignorado pelo CASE; só tipa o parâmetro
+    elif not 1 <= int(months) <= ADMIN_PLAN_MONTHS_MAX:
+        raise ValueError(f"months deve estar entre 1 e {ADMIN_PLAN_MONTHS_MAX}.")
+
+    if user_id is not None:
+        where, target = "user_id = %(target)s", int(user_id)
+    else:
+        where, target = "lower(email) = lower(%(target)s)", (email or "").strip()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                update auth_accounts
+                   set plan = %(plan)s,
+                       plan_expires_at = case
+                           when %(plan)s::text = 'free' then null
+                           else now() + (%(months)s || ' months')::interval
+                       end,
+                       -- Plano pago sobre ex-assinante: status terminal
+                       -- (canceled/unpaid) viraria 'Cancelado' no painel de
+                       -- usuários mesmo com o plano vigente. Status em curso
+                       -- (active/trialing/past_due) fica intacto: a relação
+                       -- Stripe segue viva e os webhooks continuam donos dele.
+                       -- Descer para 'free' não mexe: 'canceled' num
+                       -- ex-assinante é a descrição correta.
+                       last_payment_status = case
+                           when %(plan)s::text <> 'free'
+                                and lower(coalesce(last_payment_status, ''))
+                                    in ('canceled', 'incomplete_expired', 'unpaid')
+                           then 'inactive'
+                           else last_payment_status
+                       end
+                 where {where}
+                returning user_id, email, plan, plan_expires_at, last_payment_status
+                """,
+                {"plan": plan, "months": int(months), "target": target},
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return dict(row) if row else None
+
+
 async def log_admin_startup_warnings() -> None:
     # Coleta todos os avisos primeiro, depois faz UM único insert em batch.
     # Antes eram N chamadas sequenciais a log_system_event(), cada uma abrindo
@@ -1382,41 +1461,14 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
     ):
         """Concede plano Pro a uma conta (por e-mail) por N meses. Uso: conta
         demo do review da Apple / grants manuais.
-        Ex.: /admin/grant-pro?email=teste@teste.com"""
-        import asyncio
+        Ex.: /admin/grant-pro?email=teste@teste.com
 
-        from db.connection import get_conn
-
-        def _grant():
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        update auth_accounts
-                           set plan = 'pro',
-                               plan_expires_at = now() + (%s || ' months')::interval,
-                               -- Grant sobre ex-assinante: status terminal
-                               -- (canceled/unpaid) viraria 'Cancelado' no
-                               -- painel de usuários mesmo com o grant vigente.
-                               -- Status em curso (active/trialing/past_due)
-                               -- fica intacto: a relação Stripe segue viva e
-                               -- os webhooks continuam donos dele.
-                               last_payment_status = case
-                                   when lower(coalesce(last_payment_status, ''))
-                                        in ('canceled', 'incomplete_expired', 'unpaid')
-                                   then 'inactive'
-                                   else last_payment_status
-                               end
-                         where lower(email) = lower(%s)
-                        returning user_id, email, plan, plan_expires_at
-                        """,
-                        (int(months), email.strip()),
-                    )
-                    row = cur.fetchone()
-                conn.commit()
-                return row
-
-        row = await asyncio.to_thread(_grant)
+        A escrita é a mesma do painel de usuários (set_account_plan) — 'pro' é
+        o alias legado do tier Plus."""
+        try:
+            row = await asyncio.to_thread(set_account_plan, "pro", months, email=email)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "email": email}
         if not row:
             return {"ok": False, "error": "conta não encontrada", "email": email}
         return {
@@ -1514,6 +1566,59 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if data is None:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         return JSONResponse(content=_json_safe(data))
+
+    @app.post("/admin/api/users/{user_id}/plan")
+    async def admin_api_user_set_plan(
+        user_id: int, request: Request, username: str = Depends(_get_current_admin)
+    ):
+        """Body: {"plan": "free"|"essencial"|"pro"|"pro_max", "months": 12}.
+
+        Upgrade/downgrade manual pelo painel de usuários. Mexe só no banco: a
+        assinatura na Stripe continua onde estava e o próximo webhook dela
+        volta a mandar no plano — por isso o painel avisa quando a conta tem
+        stripe_customer_id. Os gates que leem get_plan_tier passam a valer na
+        hora; o que já existe acima do teto do plano novo (bancos de Open
+        Finance, agentes) cai na varredura de downgrade, que roda a cada 6h.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        months = payload.get("months")
+        try:
+            months = 12 if months is None else int(months)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="months inválido.")
+        try:
+            row = await asyncio.to_thread(
+                set_account_plan, str(payload.get("plan") or ""), months, user_id=user_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if not row:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        await log_system_event(
+            "info",
+            "admin_plan_changed",
+            f"Plano da conta {user_id} → {row['plan']} (admin {username}).",
+            source="admin",
+            user_id=int(user_id),
+            details={
+                "plan": row["plan"],
+                "months": None if row["plan"] == "free" else months,
+                "expires_at": _json_safe(row["plan_expires_at"]),
+                "admin": username,
+            },
+        )
+        return JSONResponse(content=_json_safe({
+            "ok": True,
+            "user_id": row["user_id"],
+            "plan": row["plan"],
+            "plan_expires_at": row["plan_expires_at"],
+            "last_payment_status": row["last_payment_status"],
+        }))
 
     @app.delete("/admin/api/events/{event_id}")
     async def admin_delete_event(event_id: int, username: str = Depends(_get_current_admin)):

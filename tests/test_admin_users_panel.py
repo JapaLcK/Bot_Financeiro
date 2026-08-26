@@ -563,3 +563,122 @@ def test_user_detail_404_for_unknown_account():
     client = _admin_client()
     response = client.get("/admin/api/users/999999999999")
     assert response.status_code == 404
+
+
+# ── Mudança de plano pelo painel (POST /admin/api/users/{id}/plan) ─────────
+
+def _set_plan(client: TestClient, uid: int, **body):
+    return client.post(
+        f"/admin/api/users/{uid}/plan",
+        headers={dashboard.CSRF_HEADER_NAME: "test-admin-csrf"},
+        json=body,
+    )
+
+
+def _stored_plan(uid: int) -> tuple[str, object, str]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select plan, plan_expires_at, last_payment_status "
+                "from auth_accounts where user_id = %s",
+                (uid,),
+            )
+            row = cur.fetchone()
+    return row["plan"], row["plan_expires_at"], row["last_payment_status"]
+
+
+def test_set_plan_requires_admin_auth(panel_accounts):
+    _tag, uids = panel_accounts
+    client = TestClient(dashboard.app, base_url="https://testserver")
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "test-admin-csrf")
+    assert _set_plan(client, uids["free"], plan="pro_max").status_code == 401
+    assert _stored_plan(uids["free"])[0] == "free"
+
+
+def test_set_plan_sobe_e_desce(panel_accounts):
+    """Upgrade põe validade no futuro; downgrade para Grátis zera a validade —
+    senão a conta continuaria com data de expiração de um plano que ela não
+    tem mais."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+    uid = uids["free"]
+
+    up = _set_plan(client, uid, plan="pro_max", months=3)
+    assert up.status_code == 200, up.text
+    assert up.json()["plan"] == "pro_max"
+    plan, expires, _pay = _stored_plan(uid)
+    assert plan == "pro_max"
+    assert expires is not None
+    assert timedelta(days=80) < (expires - NOW) < timedelta(days=100)
+    assert client.get(f"/admin/api/users/{uid}").json()["profile"]["plan"] == "pro_max"
+
+    down = _set_plan(client, uid, plan="free")
+    assert down.status_code == 200, down.text
+    plan, expires, _pay = _stored_plan(uid)
+    assert plan == "free"
+    assert expires is None
+    assert client.get(f"/admin/api/users/{uid}").json()["profile"]["account_status"] == "free"
+
+
+def test_set_plan_pago_limpa_status_terminal_mas_downgrade_nao(panel_accounts):
+    """Mesma regra do /admin/grant-pro (os dois passam por set_account_plan):
+    plano pago sobre ex-assinante limpa o 'canceled' — senão o painel mostraria
+    'Cancelado' com plano vigente. Descer para Grátis não mexe: 'canceled' num
+    ex-assinante é a descrição correta."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+    uid = uids["canceled"]                      # plan free + last_payment_status canceled
+
+    assert _set_plan(client, uid, plan="essencial", months=1).status_code == 200
+    assert _stored_plan(uid)[2] == "inactive"
+    assert client.get(f"/admin/api/users/{uid}").json()["profile"]["account_status"] == "granted"
+
+    # Assinante em curso não perde o status: o webhook continua dono dele.
+    uid_pagante = uids["paying"]
+    assert _set_plan(client, uid_pagante, plan="pro_max", months=1).status_code == 200
+    assert _stored_plan(uid_pagante)[2] == "active"
+
+    # Descer para Grátis não escreve na coluna: quem estava em trial continua
+    # 'trialing' (o webhook é quem fecha esse ciclo).
+    uid_trial = uids["trial"]
+    assert _set_plan(client, uid_trial, plan="free").status_code == 200
+    assert _stored_plan(uid_trial) == ("free", None, "trialing")
+
+
+@pytest.mark.parametrize("body", [
+    {"plan": "plus"},          # tier certo, valor que o webhook NÃO grava
+    {"plan": "pro-max"},
+    {"plan": ""},
+    {"plan": "pro", "months": 0},
+    {"plan": "pro", "months": 999},
+])
+def test_set_plan_rejeita_entrada_invalida(panel_accounts, body):
+    """A conta não pode ficar com um valor de plan que o resto do código não
+    reconhece — 'plus' é o caso traiçoeiro: dá o mesmo tier, mas some das
+    queries que casam o literal 'pro'."""
+    _tag, uids = panel_accounts
+    client = _admin_client()
+    uid = uids["free"]
+    assert _set_plan(client, uid, **body).status_code == 422
+    assert _stored_plan(uid)[0] == "free"
+
+
+def test_set_plan_404_para_conta_inexistente():
+    client = _admin_client()
+    assert _set_plan(client, 999999999999, plan="pro", months=1).status_code == 404
+
+
+def test_planos_gravaveis_do_html_espelham_o_backend():
+    """O <select> do painel é HTML estático — não importa a lista do Python.
+    Se as duas divergirem, o admin escolhe um plano que a API recusa (ou deixa
+    de ver um que existe)."""
+    import pathlib
+    import re
+
+    html = (pathlib.Path(dashboard.__file__).parent / "admin-dashboard.html").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"const PLAN_WRITE_VALUES = \[([^\]]*)\]", html)
+    assert match, "PLAN_WRITE_VALUES sumiu de frontend/admin-dashboard.html"
+    do_html = tuple(re.findall(r"'([a-z_]+)'", match.group(1)))
+    assert do_html == admin_dashboard.ADMIN_PLAN_VALUES

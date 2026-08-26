@@ -185,6 +185,11 @@ e gestão do programa de afiliados (comissões, payouts, PIX). As páginas
 `admin-login.html` e `admin-dashboard.html` **não carregam app-mode nem o shim de área
 segura**, de propósito.
 
+O drill-down de uma conta troca o plano à mão (`POST /admin/api/users/{id}/plan`
+→ `set_account_plan`, a mesma escrita do `/admin/grant-pro`): grava
+`plan`/`plan_expires_at` no banco e **não fala com a Stripe** — assinatura viva
+continua lá e o próximo webhook dela sobrescreve.
+
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
