@@ -1,8 +1,11 @@
 # core/handlers/pockets.py
 from __future__ import annotations
+import logging
 import re
 import db
 from utils_text import fmt_brl, parse_pocket_deposit_natural
+
+logger = logging.getLogger(__name__)
 
 
 def list_pockets(user_id: int) -> str:
@@ -94,11 +97,35 @@ def deposita_com_origem(user_id: int, pocket_name: str, amount: float, text: str
     """Depósito com a origem já decidida — retomado também pela resposta da pergunta."""
     from core.services import funding
 
+    # ── ANTES do commit: nada se moveu ───────────────────────────────────────
+    # As três recusas abaixo viram TEXTO: repetir a escolha daria o mesmo
+    # resultado, então re-armar a pergunta só prenderia o usuário no fluxo.
+    # O resto SOBE. `pocket_deposit_from_account` é uma transação só, com o
+    # commit no fim: o que estoura nela não tirou dinheiro de lugar nenhum, e
+    # quem chamou precisa da exceção para devolver a pergunta "de onde sai?"
+    # (core/handlers/investments.py::resolve_funding_choice). Enquanto isto
+    # devolvia `f"Erro ao depositar: {e}"`, o `restore_pending_on_error` daquele
+    # site nunca via falha nenhuma — a pendência ficava consumida e responder a
+    # origem de novo não repetia o depósito. Apontado pelo Codex no PR #144.
     try:
         launch_id, new_acc, new_pocket, canon = db.pocket_deposit_from_account(
             user_id, pocket_name, float(amount), text,
             funding_source=funding.to_db_arg(source),
         )
+    except LookupError:
+        return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
+    except ValueError as e:
+        if "OF_POCKET_READONLY" in str(e):
+            return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
+        if "INSUFFICIENT_ACCOUNT" in str(e):
+            return funding.msg_insuficiente(user_id, float(amount), acao="depósito")
+        return "Valor inválido."
+
+    # ── DEPOIS do commit: o dinheiro JÁ ANDOU ────────────────────────────────
+    # Aqui a exceção NÃO pode subir: a devolução re-armaria a pergunta e a
+    # próxima resposta do usuário depositaria de novo. `db.display_id_for` lê o
+    # banco, então este bloco falha pela mesma causa transitória do de cima.
+    try:
         msg = (
             f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}"
             f"{funding.origem_txt(source)}\n"
@@ -108,16 +135,11 @@ def deposita_com_origem(user_id: int, pocket_name: str, amount: float, text: str
         if source["kind"] == funding.BANK:
             msg += "\n\n" + funding.nota_sync()
         return msg
-    except LookupError:
-        return f"Caixinha **{pocket_name}** não encontrada. Use *criar caixinha {pocket_name}*."
-    except ValueError as e:
-        if "OF_POCKET_READONLY" in str(e):
-            return "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
-        if "INSUFFICIENT_ACCOUNT" in str(e):
-            return funding.msg_insuficiente(user_id, float(amount), acao="depósito")
-        return "Valor inválido."
-    except Exception as e:
-        return f"Erro ao depositar: {e}"
+    except Exception:
+        logger.exception(
+            "depósito %s registrado, mas a mensagem falhou (user=%s)", launch_id, user_id)
+        return (f"✅ Depósito de {fmt_brl(float(amount))} na caixinha **{canon}** "
+                f"registrado (ID interno #{launch_id}).")
 
 
 _WITHDRAW_VERBS = [

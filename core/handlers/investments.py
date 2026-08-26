@@ -72,7 +72,8 @@ def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | Non
     norm = normalize_text(resposta)
 
     if norm in ("nao", "n", "cancelar", "cancela"):
-        db.clear_pending_action(user_id)
+        # Abandono: condicional para não apagar pendência de outra tarefa.
+        db.consume_pending_action(user_id, pending)
         return "❌ Beleza, cancelei o aporte."
 
     nomes = payload.get("nomes") or []
@@ -89,12 +90,21 @@ def resolve_investment_pick(user_id: int, text: str, pending: dict) -> str | Non
         return ("Não entendi qual. Responda com o número:\n\n"
                 + "\n".join(linhas) + "\n\nOu *cancelar*.")
 
-    db.clear_pending_action(user_id)
-    return deposit(
-        user_id,
-        payload.get("text") or resposta,
-        {"investment_name": escolhido, "amount": float(payload.get("amount") or 0)},
-    )
+    # Porteiro: o `deposit` movimenta dinheiro. Se a linha já não é a que
+    # lemos, outra tarefa consumiu a pergunta — não aporta duas vezes.
+    if not db.consume_pending_action(user_id, pending):
+        return None
+    # O que sobe até aqui é só o que estoura ANTES de o dinheiro andar: a leitura
+    # da carteira (`db.accrue_all_investments`), a resolução da origem
+    # (`funding.resolve`) e a transação do aporte, que faz commit no fim. O que
+    # falha DEPOIS do commit o `_aporta` engole de propósito — devolver a pergunta
+    # ali faria a próxima resposta aportar duas vezes.
+    with db.restore_pending_on_error(user_id, pending):
+        return deposit(
+            user_id,
+            payload.get("text") or resposta,
+            {"investment_name": escolhido, "amount": float(payload.get("amount") or 0)},
+        )
 
 
 def _pergunta_origem(user_id: int, fontes: list, amount: float, retomar: dict) -> str:
@@ -142,7 +152,7 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
     norm = normalize_text(resposta)
 
     if norm in ("nao", "n", "cancelar", "cancela"):
-        db.clear_pending_action(user_id)
+        db.consume_pending_action(user_id, pending)
         return "❌ Beleza, cancelei."
 
     fontes = payload.get("fontes") or []
@@ -162,7 +172,9 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
         return ("Não entendi de onde sai. Responda com o número:\n\n"
                 + "\n".join(linhas) + "\n\nOu *cancelar*.")
 
-    db.clear_pending_action(user_id)
+    # Porteiro: retoma um fluxo que debita da fonte escolhida.
+    if not db.consume_pending_action(user_id, pending):
+        return None
     retomar = payload.get("retomar") or {}
     amount = float(payload.get("amount") or 0)
     source = {
@@ -171,13 +183,18 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
         "label": escolhida.get("label"),
     }
 
-    if retomar.get("fluxo") == "investment_deposit":
-        return _aporta(user_id, retomar.get("name"), amount,
-                       retomar.get("text") or resposta, source)
-    if retomar.get("fluxo") == "pocket_deposit":
-        from core.handlers import pockets as _pockets
-        return _pockets.deposita_com_origem(
-            user_id, retomar.get("name"), amount, retomar.get("text") or resposta, source)
+    # Mesma regra do site acima: sobe o que estourou antes do commit (e só isso —
+    # `_aporta` e `deposita_com_origem` engolem o que falha depois). Recusa
+    # legítima (saldo insuficiente, caixinha inexistente, valor inválido) volta
+    # como TEXTO e não re-arma: repetir a escolha daria o mesmo resultado.
+    with db.restore_pending_on_error(user_id, pending):
+        if retomar.get("fluxo") == "investment_deposit":
+            return _aporta(user_id, retomar.get("name"), amount,
+                           retomar.get("text") or resposta, source)
+        if retomar.get("fluxo") == "pocket_deposit":
+            from core.handlers import pockets as _pockets
+            return _pockets.deposita_com_origem(
+                user_id, retomar.get("name"), amount, retomar.get("text") or resposta, source)
     return None
 
 
@@ -382,15 +399,32 @@ def _aporta(user_id: int, investment_name: str, amount: float, text: str, source
     except PlanLimitExceeded:
         raise  # handle_incoming responde com a mensagem amigável de upgrade
     except Exception:
+        # SOBE, não vira texto. `investment_deposit_from_account` é uma transação
+        # só, com o commit no fim: o que estoura nela não moveu dinheiro. Enquanto
+        # isto devolvia "Não consegui registrar esse aporte agora", o
+        # `restore_pending_on_error` de `resolve_funding_choice` nunca via a falha
+        # — a pendência ficava consumida e responder a origem de novo não repetia
+        # o aporte. Mesmo defeito da caixinha, apontado pelo Codex no PR #144.
+        # O usuário continua recebendo uma mensagem de "tente em instantes": a do
+        # `handle_incoming`, que ainda registra o erro no dashboard.
         logger.exception("deposit falhou user=%s inv=%s", user_id, investment_name)
-        return "Não consegui registrar esse aporte agora. Tente de novo em instantes."
+        raise
 
-    display_id = db.display_id_for(user_id, launch_id)
-    msg = (f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**"
-           f"{funding.origem_txt(source)}. ID #{display_id}.")
-    if source["kind"] == funding.BANK:
-        msg += "\n\n" + funding.nota_sync()
-    return msg
+    # DEPOIS do commit: o dinheiro JÁ ANDOU e a exceção NÃO pode subir daqui —
+    # a devolução re-armaria a pergunta e a próxima resposta aportaria de novo.
+    # `db.display_id_for` lê o banco, então falha pela mesma causa transitória.
+    try:
+        display_id = db.display_id_for(user_id, launch_id)
+        msg = (f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}**"
+               f"{funding.origem_txt(source)}. ID #{display_id}.")
+        if source["kind"] == funding.BANK:
+            msg += "\n\n" + funding.nota_sync()
+        return msg
+    except Exception:
+        logger.exception(
+            "aporte %s registrado, mas a mensagem falhou (user=%s)", launch_id, user_id)
+        return (f"✅ Aporte de **{fmt_brl(float(amount))}** em **{canon}** "
+                f"registrado (ID interno #{launch_id}).")
 
 
 def check_cdi() -> str:

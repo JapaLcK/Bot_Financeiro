@@ -178,6 +178,16 @@ async function loadUserMenuState() {
   } catch {}
 }
 
+/* Fecha só o que está aberto. Os dois listeners globais de Escape que fechavam
+   os modais de fatura e os de investimento chamavam os `close*` sem checar
+   nada: um Esc destinado a um diálogo aberto por cima derrubava os de baixo
+   junto — foi o que colidiu com a confirmação de antecipar fatura no #73, que
+   precisou de captura + stopPropagation para se defender. */
+function _fechaSeAberto(overlayId, close) {
+  const ov = document.getElementById(overlayId);
+  if (ov && ov.classList.contains("open")) close();
+}
+
 function closeUserMenu() {
   const dropdown = document.getElementById("user-dropdown");
   const button = document.getElementById("user-menu-btn");
@@ -6223,12 +6233,9 @@ document.addEventListener("click", (e) => {
 }, true);  // capture: pega antes dos onclicks inline
 
 // Esc fecha o modal
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    const ov = document.getElementById("upgrade-overlay");
-    if (ov && ov.classList.contains("open")) closeUpgradeModal();
-  }
-});
+// Tinha Esc próprio e nenhum trap de Tab — o foco vazava para o dashboard
+// atrás do overlay. Pelo helper, ganha os dois (issue #76).
+window.pigModalKeys && pigModalKeys("upgrade-overlay", closeUpgradeModal);
 
 // Interceptor global: qualquer fetch que volte 403 com pro_required abre o
 // modal automaticamente. Cobre casos onde o user fura o gate visual (ex:
@@ -7733,12 +7740,16 @@ document.getElementById("bgt-input").addEventListener("keydown", e => {
   if (e.key === "Enter") saveBudget();
   if (e.key === "Escape") closeBudget();
 });
+/* Condicionado a cada overlay, um por um. Antes fechava os três SEMPRE — e
+   fechar o que já está fechado não é inofensivo aqui: o Esc de um diálogo
+   aberto POR CIMA levava junto os de baixo. Irmão do listener das faturas
+   (issue #76); a enumeração dos 8 keydown globais deste arquivo achou este,
+   que a issue não listava. */
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") {
-    closeInvestmentDetail();
-    closeInvestmentHelp();
-    closeLaunchModal();
-  }
+  if (e.key !== "Escape") return;
+  _fechaSeAberto("investment-detail-overlay", closeInvestmentDetail);
+  _fechaSeAberto("investment-help-overlay", closeInvestmentHelp);
+  _fechaSeAberto("launch-overlay", closeLaunchModal);
 });
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -9283,11 +9294,10 @@ document.getElementById("pay-bill-amount").addEventListener("keydown", e => {
   if (e.key === "Enter") submitPayBill();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") {
-    closeBillDetailModal();
-    closePayBillModal();
-    closePayReceiptModal();
-  }
+  if (e.key !== "Escape") return;
+  _fechaSeAberto("bill-detail-overlay", closeBillDetailModal);
+  _fechaSeAberto("pay-bill-overlay", closePayBillModal);
+  _fechaSeAberto("pay-bill-receipt-overlay", closePayReceiptModal);
 });
 
 
@@ -9350,6 +9360,7 @@ function closeOfxResult() {
   const ov = document.getElementById("ofx-result-overlay");
   if (ov) ov.classList.remove("open");
 }
+window.pigModalKeys && pigModalKeys("ofx-result-overlay", closeOfxResult);
 
 function getCsrfToken() {
   const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);

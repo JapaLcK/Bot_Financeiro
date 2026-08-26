@@ -292,6 +292,16 @@ def learn_from_signals(
                 local_cat = local_rule_category(normalize_text(candidate))
                 if local_cat and normalize_text(local_cat) != cat:
                     continue
+                # Não roubar um token que já pertence a uma categoria CUSTOM do
+                # próprio usuário. Sem isso, "namorada cinema" (que casa
+                # cinema→lazer nas LOCAL_RULES) aprendia namorada→lazer e sequestrava
+                # todo lançamento com "namorada" pra lazer — a categoria custom
+                # "gastos com namorada" (passo B2, depois das regras) nunca era
+                # alcançada. O guard local acima não pega: "namorada" não está nas
+                # LOCAL_RULES, mas é o token distintivo da categoria do usuário.
+                custom_cat = custom_category_match(user_id, normalize_text(candidate))
+                if custom_cat and normalize_text(custom_cat) != cat:
+                    continue
             upsert_category_rule(user_id, candidate, cat)
 
 

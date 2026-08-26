@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from db import (
-    get_pending_action, clear_pending_action, set_pending_action,
+    get_pending_action, consume_pending_action, set_pending_action,
     delete_launch_and_rollback, delete_pocket, delete_investment,
     get_conn, get_latest_cdi_aa,
 )
@@ -62,7 +62,9 @@ class GeneralCog(commands.Cog):
 
             if ans in ("nao", "não", "n", "no"):
                 try:
-                    clear_pending_action(uid)
+                    # Abandono, condicional: apaga a pendência que foi lida, não
+                    # o que estiver lá. Perder = não havia nada nosso.
+                    consume_pending_action(uid, pending)
                 except Exception as e:
                     logger.error("Erro ao limpar pending_action: %s", e, exc_info=True)
                 await message.reply("❌ Ação cancelada.")
@@ -126,6 +128,20 @@ class GeneralCog(commands.Cog):
         action = pending["action_type"]
         payload = pending["payload"]
 
+        # Porteiro, ANTES de executar: todos os ramos abaixo apagam dados. O
+        # `finally: clear` que havia aqui rodava DEPOIS do delete — não protegia
+        # nada, e ainda apagava por cima de uma pendência que outra tarefa
+        # tivesse armado no meio-tempo. Falha do CAS = falha fechada.
+        try:
+            reivindicou = consume_pending_action(uid, pending)
+        except Exception as e:
+            logger.error("Erro ao consumir pending_action: %s", e, exc_info=True)
+            await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
+            return
+        if not reivindicou:
+            await message.reply("Essa ação pendente não está mais valendo.")
+            return
+
         try:
             if action == "delete_launch":
                 delete_launch_and_rollback(uid, int(payload["launch_id"]))
@@ -161,11 +177,6 @@ class GeneralCog(commands.Cog):
         except Exception as e:
             logger.error("Erro ao executar ação pendente '%s': %s", action, e, exc_info=True)
             await message.reply("❌ Deu erro ao executar a ação pendente. Veja os logs.")
-        finally:
-            try:
-                clear_pending_action(uid)
-            except Exception as e:
-                logger.error("Erro ao limpar pending_action: %s", e, exc_info=True)
 
 
 async def setup(bot: commands.Bot):

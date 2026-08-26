@@ -9,7 +9,6 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
-from math import isfinite
 from typing import Any
 
 from adapters.whatsapp.wa_client import (
@@ -38,16 +37,18 @@ from adapters.whatsapp.wa_commands_menu import (
     send_commands_section,
 )
 from core.handle_incoming import handle_incoming
+from core.intent_router import abandona_pergunta_de_valor
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.types import IncomingMessage
 from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
-    clear_pending_action,
+    consume_pending_action,
     get_conn,
     get_or_create_canonical_user,
     get_pending_action,
+    restore_pending_on_error,
     set_pending_action,
     set_whatsapp_updates_opt_out,
     update_launch_category,
@@ -184,10 +185,13 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
 
     # Botão de desfazer (one-shot após áudio processado)
     if pending and pending.get("action_type") == "undo_audio":
-        # Limpa imediatamente — só aparece uma vez
+        # Limpa imediatamente — só aparece uma vez. CONDICIONAL: se outra tarefa
+        # já armou uma PERGUNTA nesta linha, apagar por cima a deixaria órfã.
+        # Perder é inofensivo — o botão não depende da linha para funcionar
+        # (`WA_UNDO_LAUNCH_ID` injeta "desfazer" no classificador).
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear undo_audio pending failed: %s", exc)
         logger.info("WA sending undo button to=%s", to_wa_id)
@@ -208,7 +212,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         launch_id = (pending.get("payload") or {}).get("launch_id")
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear recategorize_offer pending failed: %s", exc)
         if launch_id:
@@ -239,7 +243,7 @@ def _send_reply_with_optional_buttons(to_wa_id: str, body: str, user_id: int | N
         tx_id = (pending.get("payload") or {}).get("tx_id")
         if user_id is not None:
             try:
-                clear_pending_action(int(user_id))
+                consume_pending_action(int(user_id), pending)
             except Exception as exc:
                 logger.warning("WA clear delete_credit_purchase pending failed: %s", exc)
         if tx_id:
@@ -757,7 +761,7 @@ def process_message(message: InboundMessage) -> None:
                 # hora de pagar). Isto não passa pelo `handle_incoming` — o
                 # consumidor está logo abaixo, na linha :896 deste arquivo,
                 # antes da chamada do handle_incoming em :1021 —, então não
-                # precisa de `_RESUMABLE_PENDING_TYPES` e não sofre o sequestro
+                # precisa do `suprime_ia` do registro e não sofre o sequestro
                 # pela IA. Unificar os dois é issue separada: este fluxo tem
                 # "cancelar", valor estimado no texto e re-pergunta própria, e
                 # mexer nele sem teste de botão é troca de bug conhecido por
@@ -885,6 +889,8 @@ def process_message(message: InboundMessage) -> None:
                     )
                 return
 
+        ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo
+
         # ---------------------------------------------------------------
         # Interceptação: usuário escolheu "Outra (digitar)" e agora digitou
         # a categoria que quer aplicar ao lançamento.
@@ -896,13 +902,45 @@ def process_message(message: InboundMessage) -> None:
                 pending_recat = None
             if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
                 launch_id = (pending_recat.get("payload") or {}).get("launch_id")
+                # Porteiro: `_apply_recategorize` reescreve a categoria do
+                # lançamento. Se a linha já não é esta, o texto responde a outra
+                # pergunta — cair fora deixa o roteador tratá-lo normalmente.
                 try:
-                    clear_pending_action(uid)
+                    if not consume_pending_action(uid, pending_recat):
+                        pending_recat = None
+                        launch_id = None
                 except Exception as exc:
                     logger.warning("WA clear recat_text pending failed: %s", exc)
                 if launch_id:
                     _send_reply(reply_to, _apply_recategorize(uid, int(launch_id), message.text))
                     return
+
+            # Passo 1 da pergunta de valor, na porta 4 (a numeração das quatro
+            # está em `core/intent_router.py::abandona_pergunta_de_valor`): o
+            # usuário respondeu com outro comando ("saldo", "apagar 42"), e a
+            # decisão é do intent, não da forma — "apagar 42" tem um número e
+            # pagaria a conta com R$ 42,00.
+            if (pending_recat
+                    and pending_recat.get("action_type") == "bill_pay_amount"
+                    and abandona_pergunta_de_valor(message.text or "")):
+                try:
+                    # CAS, não clear: `pending_actions` é uma linha por usuário
+                    # e outra tarefa pode ter posto uma pergunta nova aqui entre
+                    # o `get_pending_action` acima e agora — que já apareceu na
+                    # tela. Só abandonamos a pergunta se ela ainda for a nossa.
+                    #
+                    # CAS perdido vale para o TURNO: a linha é da pergunta nova,
+                    # e o `handle_incoming` abaixo relê `pending_actions` do
+                    # zero. Sem o `ignora_pendencias`, o comando velho
+                    # ("saldo") entraria na porta 1 ou na porta 3 DELA — a
+                    # porta 3 apaga a fila inteira do multi-lançamento. O
+                    # `bill_pay_amount` nosso, quando o CAS falha por erro de
+                    # banco (except abaixo), não é lido pelo `route()`.
+                    if not consume_pending_action(uid, pending_recat):
+                        ignora_pendencias = True
+                except Exception as exc:
+                    logger.warning("WA drop bill_pay_amount pending failed: %s", exc)
+                pending_recat = None  # segue pro roteamento normal
 
             # Conta a pagar de valor variável: o usuário tocou "✅ Já paguei" e
             # agora está mandando o valor real que veio no boleto.
@@ -913,42 +951,61 @@ def process_message(message: InboundMessage) -> None:
                 txt = (message.text or "").strip()
                 if txt.lower() in {"cancelar", "cancela", "nao", "não", "deixa", "depois"}:
                     try:
-                        clear_pending_action(uid)
+                        # Abandono, condicional: se perdeu, não havia nada
+                        # nosso para abandonar.
+                        consume_pending_action(uid, pending_recat)
                     except Exception:
                         pass
                     _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
                     return
-                from core.handlers.bills import (agrupamento_de_milhar_ok,
-                                                 limpa_pontuacao_final)
-                from utils_text import parse_money, fmt_brl
+                from utils_text import (fmt_brl, limpa_pontuacao_final,
+                                        parse_money, valor_perigoso)
+                # Porta 4. A ACEITAÇÃO é o `parse_money` sobre o texto limpo —
+                # a mesma da `main`, que aqui nunca exigiu forma: "paguei 132",
+                # "132 da luz" e "veio 132,50 esse mes" pagam. O filtro de DANO
+                # é o compartilhado: `parse_money("-10")` devolve 10.0, então
+                # sem ele responder "-10" pagava R$ 10,00.
                 try:
-                    # Mesma limpeza do `resolve_bill_amount`: sem ela "132,50."
-                    # vira 13250.0 no `parse_money` e paga R$ 13.250,00. Esta é
-                    # a outra porta da MESMA pergunta, então tem o mesmo furo.
-                    # Idem o milhar malformado: "1.23.456" pagaria R$ 123.456.
+                    # O texto LIMPO por causa do `parse_money`: sem a
+                    # limpeza "1.500." vira `None` e "132,50. foi isso" paga
+                    # R$ 13.250,00. O `valor_perigoso` limpa por dentro.
                     limpo = limpa_pontuacao_final(txt)
-                    amount = parse_money(limpo) if agrupamento_de_milhar_ok(limpo) else None
+                    amount = parse_money(limpo)
+                    perigo = valor_perigoso(limpo, amount)
                 except Exception:
-                    amount = None
-                # Arredonda para centavos e recusa não finito ANTES de pagar:
-                # "0,001" passava no `> 0` e o `mark_bill_paid` respondia com o
-                # erro genérico, perdendo a pendência. Aqui a pergunta fica de
-                # pé e o usuário responde de novo. Mesma regra do
-                # `resolve_bill_amount` (core/handlers/bills.py).
-                if amount is not None and isfinite(amount):
-                    amount = round(amount, 2)
-                if amount is None or not isfinite(amount) or amount <= 0:
-                    # não entendeu o valor → re-pergunta, mantém o pending
-                    _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
+                    amount, perigo = None, "nao_entendi"
+                if perigo or amount is None:
+                    # recusa → re-pergunta, mantém o pending de pé (descartá-lo
+                    # jogaria o usuário no fallback genérico).
+                    if perigo == "nao_positivo":
+                        _send_reply(reply_to, f"O valor da conta de *{name}* precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
+                    else:
+                        _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
                     return
+                amount = round(amount, 2)
+                # REIVINDICA antes de pagar, e condicionado ao que foi lido:
+                # duas respostas concorrentes chegariam as duas ao
+                # `mark_bill_paid` e debitariam o saldo duas vezes. Quem perde
+                # sai sem fazer nada — o vencedor responde. Mesmo desenho do
+                # `resolve_bill_amount` (core/handlers/bills.py), que é a outra
+                # porta da MESMA pergunta.
                 try:
-                    clear_pending_action(uid)
+                    reivindicou = consume_pending_action(uid, pending_recat)
                 except Exception as exc:
                     logger.warning("WA clear bill_pay_amount pending failed: %s", exc)
+                    reivindicou = False
+                if not reivindicou:
+                    return
                 if bill_id:
                     from db.bills import mark_bill_paid
                     try:
-                        paid = mark_bill_paid(uid, int(bill_id), amount)
+                        # Devolve a pergunta se o pagamento estourar: sem isso o
+                        # "Tente em instantes" é mentira — a pendência já foi e o
+                        # próximo número não paga nada. Prazo 30 min, o mesmo com
+                        # que ela foi armada (:773). Mesmo desenho da outra porta
+                        # desta pergunta (core/handlers/bills.py::resolve_bill_amount).
+                        with restore_pending_on_error(uid, pending_recat, 30):
+                            paid = mark_bill_paid(uid, int(bill_id), amount)
                     except Exception as exc:
                         logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
                         _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
@@ -1038,7 +1095,7 @@ def process_message(message: InboundMessage) -> None:
             attachments=attachments,
         )
 
-        outs = handle_incoming(incoming) or []
+        outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
             _send_reply(reply_to, "Nao entendi. Digite ajuda para ver os comandos.")

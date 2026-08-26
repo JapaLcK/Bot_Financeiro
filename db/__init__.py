@@ -48,6 +48,7 @@ from .accounts import (
     add_launch_and_update_balance,
     list_launches,
     list_launches_by_tipo,
+    list_launches_by_category,
     latest_launch_id,
     get_last_inserted_launch,
     resolve_user_seq_to_id,
@@ -132,8 +133,13 @@ from .categories import (
 # ── Ações pendentes ───────────────────────────────────────────────────────────
 from .pending import (
     advance_pending_action,
+    consume_pending_action,
+    eh_oferta_de_conveniencia,
+    suprime_fallback_de_ia,
+    sobrevive_a_audio,
     claim_pending_action,
     create_pending_action_if_absent,
+    restore_pending_on_error,
     set_pending_action,
     get_pending_action,
     clear_pending_action,
@@ -429,7 +435,8 @@ __all__ = [
     "link_platform_identity",
     # accounts
     "get_balance", "set_balance", "add_launch_and_update_balance", "list_launches",
-    "list_launches_by_tipo", "latest_launch_id", "get_last_inserted_launch",
+    "list_launches_by_tipo", "list_launches_by_category",
+    "latest_launch_id", "get_last_inserted_launch",
     "resolve_user_seq_to_id", "get_launch_user_seq", "display_id_for",
     "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "get_top_expense_categories",
@@ -457,7 +464,9 @@ __all__ = [
     "ensure_user_category", "CATEGORY_NAME_MAX_LEN",
     # pending
     "set_pending_action", "get_pending_action", "clear_pending_action",
-    "advance_pending_action", "create_pending_action_if_absent",
+    "advance_pending_action", "consume_pending_action",
+    "eh_oferta_de_conveniencia", "suprime_fallback_de_ia", "sobrevive_a_audio",
+    "create_pending_action_if_absent", "restore_pending_on_error",
     "claim_pending_action",
     # budgets
     "list_budgets", "get_budget", "upsert_budget", "delete_budget",

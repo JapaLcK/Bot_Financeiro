@@ -44,7 +44,10 @@ def test_credit_purchase_pending_renders_delete_button(monkeypatch):
         wr, "get_pending_action",
         lambda uid: {"action_type": "delete_credit_purchase", "payload": {"tx_id": 42}},
     )
-    monkeypatch.setattr(wr, "clear_pending_action", lambda uid: cleared.append(uid))
+    monkeypatch.setattr(
+        wr, "consume_pending_action",
+        lambda uid, pending: cleared.append(uid) or True,
+    )
     monkeypatch.setattr(wr, "send_interactive_buttons", lambda **kw: sent.append(kw))
 
     wr._send_reply_with_optional_buttons("5511999998888", "✅ Compra registrada! CC42", user_id=7)
@@ -78,7 +81,7 @@ def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
         lambda to, body, user_id=None: replies.append((to, body, user_id)),
     )
 
-    def fake_handle_incoming(msg):
+    def fake_handle_incoming(msg, **_kw):   # o runtime pode passar `ignora_pendencias`
         handled.append(msg)
         return [OutgoingMessage(text=f"uid={msg.user_id} text={msg.text}")]
 
@@ -168,7 +171,7 @@ def test_numero_sem_conta_com_codigo_de_vinculo_passa_pro_handler(monkeypatch):
         lambda to, body, user_id=None: replies.append((to, body, user_id)),
     )
 
-    def fake_handle_incoming(msg):
+    def fake_handle_incoming(msg, **_kw):   # o runtime pode passar `ignora_pendencias`
         handled.append(msg)
         return [OutgoingMessage(text="✅ WhatsApp vinculado!")]
 

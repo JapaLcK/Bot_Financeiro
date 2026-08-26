@@ -2158,6 +2158,7 @@ function closeActivityModal() {
   const overlay = document.getElementById("activity-modal-overlay");
   if (overlay) overlay.classList.remove("open");
 }
+window.pigModalKeys && pigModalKeys("activity-modal-overlay", closeActivityModal);
 
 function formatSessionWhen(iso, prefix) {
   if (!iso) return "";
@@ -3267,6 +3268,14 @@ function openMfaSetupModal() {
 function closeMfaSetupModal() {
   document.getElementById("mfa-setup-overlay").classList.remove("open");
 }
+window.pigModalKeys && pigModalKeys("mfa-setup-overlay", function () {
+  // O passo 3 mostra os códigos de backup UMA vez ("Você não verá esses
+  // códigos novamente"). Um Esc por engano ali tranca a pessoa fora da
+  // recuperação de MFA — então o Esc não fecha enquanto eles estão na tela.
+  // O botão "Concluído" continua fechando, e o trap de Tab vale nos 3 passos.
+  if (document.getElementById("mfa-setup-step3").style.display !== "none") return;
+  closeMfaSetupModal();
+});
 
 async function mfaSetupStep1Submit() {
   const password = document.getElementById("mfa-setup-password").value;
@@ -3342,6 +3351,7 @@ function openMfaDisableModal() {
 function closeMfaDisableModal() {
   document.getElementById("mfa-disable-overlay").classList.remove("open");
 }
+window.pigModalKeys && pigModalKeys("mfa-disable-overlay", closeMfaDisableModal);
 
 async function mfaDisableSubmit() {
   const password = document.getElementById("mfa-disable-password").value;
@@ -3378,6 +3388,12 @@ function openMfaRegenerateModal() {
 function closeMfaRegenerateModal() {
   document.getElementById("mfa-regen-overlay").classList.remove("open");
 }
+window.pigModalKeys && pigModalKeys("mfa-regen-overlay", function () {
+  // Mesmo cuidado do setup, e pior: aqui os códigos ANTIGOS já foram
+  // invalidados quando estes aparecem. Perder a tela é perder os dois lados.
+  if (document.getElementById("mfa-regen-result").style.display !== "none") return;
+  closeMfaRegenerateModal();
+});
 
 async function mfaRegenerateSubmit() {
   const password = document.getElementById("mfa-regen-password").value;

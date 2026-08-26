@@ -12,6 +12,13 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     Verifica se existe uma pending_action para o usuário e a resolve.
     Trata: deletes de lançamento/caixinha/investimento e confirmação de lançamento via mídia.
     Retorna mensagem de resposta, ou None se não havia pending reconhecido.
+
+    Todo consumo é CONDICIONAL (`db.consume_pending_action`): apaga a pendência
+    que foi lida, não "o que estiver lá". Perder o compare-and-swap significa
+    que outra tarefa (Discord, ou a outra plataforma do mesmo usuário) já
+    trocou a linha — e aí o "sim" do usuário não é mais deste pedido. Nos
+    caminhos destrutivos o CAS é o porteiro: quem perde NÃO apaga nada e sai
+    como se não houvesse pendência, que é a verdade.
     """
     pending = db.get_pending_action(user_id)
     if not pending:
@@ -22,7 +29,10 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     # ── Confirmação de lançamento extraído de imagem ─────────────────────────
     if action_type == "confirm_media_launch":
         payload = pending.get("payload", {})
-        db.clear_pending_action(user_id)
+        # Porteiro: registra dinheiro. Se a linha já não é a que lemos, outra
+        # tarefa consumiu ou substituiu — não registra em dobro.
+        if not db.consume_pending_action(user_id, pending):
+            return None
 
         if not confirmed:
             return "❌ Lançamento cancelado. Se quiser corrigir, escreva o comando manualmente."
@@ -76,7 +86,9 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     # ── Oferta "virar gasto fixo" (despesa que se repetiu) ───────────────────
     if action_type == "confirm_recurring_offer":
         payload = pending.get("payload", {})
-        db.clear_pending_action(user_id)
+        # Porteiro: cria um gasto fixo que o autopay vai debitar todo mês.
+        if not db.consume_pending_action(user_id, pending):
+            return None
 
         if not confirmed:
             # grava a recusa pra não re-sugerir a mesma combinação (merchant+valor)
@@ -122,7 +134,8 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     payload = pending.get("payload", {})
 
     if not confirmed:
-        db.clear_pending_action(user_id)
+        # Abandono: se perdeu o CAS, não havia nada nosso para cancelar.
+        db.consume_pending_action(user_id, pending)
         return "❌ Ação cancelada."
 
     if action_type == "delete_launch":
@@ -130,17 +143,21 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         # display_id é o user_seq mostrado pro usuário; cai pro id interno
         # quando o pending foi criado em código antigo sem essa key.
         display_id = payload.get("display_id") or launch_id
+        # ANTES de apagar, não depois: o clear posterior não protegeria nada —
+        # as duas tarefas já teriam apagado o lançamento.
+        if not db.consume_pending_action(user_id, pending):
+            return None
         try:
             db.delete_launch_and_rollback(user_id, launch_id)
-            db.clear_pending_action(user_id)
             return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
         except Exception as e:
-            db.clear_pending_action(user_id)
             return f"Erro ao apagar lançamento #{display_id}: {e}"
 
     if action_type == "delete_launch_bulk":
         ids = payload.get("launch_ids", [])
         display_ids_map = payload.get("display_ids") or {}
+        if not db.consume_pending_action(user_id, pending):
+            return None
         failed = []
         for lid in ids:
             try:
@@ -148,7 +165,6 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             except Exception:
                 failed.append(lid)
         ok_ids = [i for i in ids if i not in failed]
-        db.clear_pending_action(user_id)
         # converte ids internos pra user_seq pra exibição (fallback: id interno)
         def _disp(lid):
             return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
@@ -161,25 +177,26 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
 
     if action_type == "delete_pocket":
         pocket_name = payload.get("pocket_name")
+        if not db.consume_pending_action(user_id, pending):
+            return None
         try:
             db.delete_pocket(user_id, pocket_name)
-            db.clear_pending_action(user_id)
             return f"✅ Caixinha **{pocket_name}** deletada."
         except Exception as e:
-            db.clear_pending_action(user_id)
             return f"Erro ao deletar caixinha: {e}"
 
     if action_type == "delete_investment":
         investment_name = payload.get("investment_name")
+        if not db.consume_pending_action(user_id, pending):
+            return None
         try:
             db.delete_investment(user_id, investment_name)
-            db.clear_pending_action(user_id)
             return f"✅ Investimento **{investment_name}** deletado."
         except Exception as e:
-            db.clear_pending_action(user_id)
             return f"Erro ao deletar investimento: {e}"
 
-    db.clear_pending_action(user_id)
+    # Limpeza de estado: tipo destrutivo sem branch acima. Ignora o resultado.
+    db.consume_pending_action(user_id, pending)
     return None
 
 

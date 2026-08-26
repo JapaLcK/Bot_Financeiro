@@ -253,6 +253,59 @@
     }
   };
 
+  /* Registra Esc + trap de Tab para um diálogo que abre e fecha pela classe
+     `.open` no overlay. Um listener persistente, guardado pelo `.open`: não faz
+     nada enquanto o diálogo estiver fechado, e não há `removeEventListener`
+     para alguém esquecer de chamar no fechamento.
+
+     Existe porque o `pigTrapTab` sozinho NÃO fechava a classe. Ele resolve o
+     Tab e deixa para cada chamador o bloco de "o meu overlay está aberto? o Esc
+     fecha?" — que era exatamente o que faltava em SETE diálogos (issue #76).
+     Copiar o bloco pela oitava vez era o erro que este arquivo já tinha
+     aprendido a não cometer.
+
+     Em fase de BOLHA, sem `stopPropagation`, de propósito: quem precisa vencer
+     um listener de baixo (o `#generic-confirm-overlay` do dashboard.js, que
+     abre POR CIMA de um fluxo de pagamento) registra em captura e consome a
+     tecla. Se este helper consumisse o Esc, ele é que atropelaria o diálogo de
+     cima. */
+  window.pigModalKeys = function (overlayId, close) {
+    document.addEventListener("keydown", function (e) {
+      const ov = document.getElementById(overlayId);
+      if (!ov || !ov.classList.contains("open")) return;
+      if (!noTopo(ov)) return;
+      if (e.key === "Escape") { close(); return; }
+      window.pigTrapTab(e, ov);
+    });
+  };
+
+  /* `ov` é o diálogo de cima, ou tem outro cobrindo ele?
+
+     Dois diálogos abertos ao mesmo tempo acontecem de verdade: na Início, um
+     retorno de checkout de quem ainda não tem MFA abre o onboarding de
+     segurança pelo `loadHomeData` e, ~450ms depois, o `openWelcomePro` sobe o
+     card de boas-vindas POR CIMA. Sem esta checagem, um Esc para dispensar o
+     card de cima disparava TAMBÉM o handler de baixo — e ali o Esc faz um POST
+     que marca o onboarding como visto PARA SEMPRE. O usuário dispensaria uma
+     celebração e perderia, calado, o convite de proteger a conta.
+
+     A alternativa seria exigir que todo diálogo que abre por cima registre em
+     captura e consuma a tecla, como faz o `#generic-confirm-overlay` do
+     dashboard. Isso funciona, e é o que já existe lá — mas é convenção que se
+     esquece em silêncio, e agora que registrar um diálogo aqui custa uma linha
+     a chance de esquecer só cresce. A pergunta é respondida no helper.
+
+     Quem responde é o hit-test do próprio navegador: estes overlays cobrem a
+     viewport inteira, então o que está no CENTRO da tela é o de cima. Sem
+     z-index lido à mão, sem pilha para manter em sincronia. `null` (layout
+     ainda não aconteceu) conta como "estou no topo": o custo de errar para esse
+     lado é o comportamento de antes, não um diálogo mudo. */
+  function noTopo(ov) {
+    const el = document.elementFromPoint(
+      Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2));
+    return !el || ov.contains(el);
+  }
+
   window.alertModal = function (message, opts) {
     return openModal({ kind: "alert", message, opts });
   };

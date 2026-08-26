@@ -11,6 +11,8 @@ existentes não precisam mudar.
 """
 import os
 import threading
+from contextvars import ContextVar
+
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -18,6 +20,44 @@ from psycopg_pool import ConnectionPool
 
 _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()
+
+# Quantas vezes um `commit()` LEVANTOU nesta thread. Só isso: commit que volta
+# sem erro não é ambíguo, e falha antes do commit não gravou nada.
+_commits_ambiguos: ContextVar[int] = ContextVar("db_commits_ambiguos", default=0)
+
+
+def commits_ambiguos() -> int:
+    """Contador monotônico de commits que estouraram — leia antes e depois.
+
+    Quando a conexão cai ENQUANTO o Postgres confirma o COMMIT, a chamada
+    levanta mas a transação pode ter sido gravada assim mesmo. De fora, isso é
+    indistinguível de uma falha ANTES do commit, e a diferença decide se dá para
+    repetir o trabalho: repetir um aporte já commitado debita a origem e credita
+    o destino DUAS vezes (Codex, PR #144).
+
+    Quem precisa distinguir compara o valor de antes com o de depois — delta 0
+    significa "nada chegou a ser confirmado", e só aí repetir é seguro. É o que
+    `db.restore_pending_on_error` faz para decidir se devolve a pergunta.
+
+    Contador, e não flag booleana, porque não há onde zerar: um erro engolido
+    lá atrás deixaria a flag ligada para sempre.
+    """
+    return _commits_ambiguos.get()
+
+
+class _Conn(psycopg.Connection):
+    """Conexão que marca o commit ambíguo. Ver `commits_ambiguos`.
+
+    Cobre também o commit implícito do `with get_conn() as conn:` — o
+    `Connection.__exit__` do psycopg chama este mesmo `commit()`.
+    """
+
+    def commit(self) -> None:
+        try:
+            super().commit()
+        except BaseException:
+            _commits_ambiguos.set(_commits_ambiguos.get() + 1)
+            raise
 
 
 def _get_pool() -> ConnectionPool:
@@ -32,6 +72,7 @@ def _get_pool() -> ConnectionPool:
             raise RuntimeError("DATABASE_URL não está definido.")
         _pool = ConnectionPool(
             database_url,
+            connection_class=_Conn,
             min_size=1,
             max_size=int(os.getenv("DB_POOL_MAX_SYNC", "8")),
             timeout=float(os.getenv("DB_CONNECT_TIMEOUT", "30")),
