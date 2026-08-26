@@ -36,12 +36,39 @@ _ESCRITORES = {
 _RAIZ = pathlib.Path(__file__).resolve().parent.parent
 _IGNORADOS = {".venv", ".claude", ".git", "tests", "node_modules"}
 
+# O encanamento genérico: `claim_pending_action` repassa o `action_type` que
+# RECEBEU para o `create_pending_action_if_absent`. Ali o tipo é uma variável de
+# propósito e não há literal para conferir — quem introduz o tipo é o chamador,
+# que a varredura pega. Único arquivo isento, e por esse motivo.
+_ENCANAMENTO = "db/pending.py"
 
-def _tipos_gravados_pelo_codigo() -> dict[str, set[str]]:
-    """tipo → arquivos que o gravam. Por `ast`, não por regex: as chamadas são
-    multilinha e um `grep` de uma linha só perdia 4 dos tipos."""
+
+def _arg_action_type(no: ast.Call) -> ast.expr | None:
+    """O `action_type` da chamada, seja posicional ou por palavra-chave.
+
+    `db.set_pending_action(user_id=uid, action_type="x", payload={})` é uma
+    chamada válida e escapava da varredura, que só olhava `no.args[1]` — o tipo
+    novo ficaria fora do registro, cairia nas três colunas False e o teste que
+    existe para pegar isso passaria. Apontado pelo Codex no PR #142.
+    """
+    if len(no.args) >= 2:
+        return no.args[1]
+    for kw in no.keywords:
+        if kw.arg == "action_type":
+            return kw.value
+    return None
+
+
+def _varre_gravacoes() -> tuple[dict[str, set[str]], list[str]]:
+    """(tipo → arquivos que o gravam, chamadas sem literal).
+
+    Por `ast`, não por regex: as chamadas são multilinha e um `grep` de uma
+    linha só perdia 4 dos tipos.
+    """
     achados: dict[str, set[str]] = {}
+    dinamicas: list[str] = []
     for py in _RAIZ.rglob("*.py"):
+        rel = str(py.relative_to(_RAIZ))
         if _IGNORADOS & set(py.relative_to(_RAIZ).parts):
             continue
         try:
@@ -53,18 +80,28 @@ def _tipos_gravados_pelo_codigo() -> dict[str, set[str]]:
                 continue
             fn = no.func
             nome = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
-            if nome not in _ESCRITORES or len(no.args) < 2:
+            if nome not in _ESCRITORES:
                 continue
-            alvo = no.args[1]
+            alvo = _arg_action_type(no)
             if isinstance(alvo, ast.Constant) and isinstance(alvo.value, str):
-                achados.setdefault(alvo.value, set()).add(
-                    str(py.relative_to(_RAIZ)))
-    return achados
+                achados.setdefault(alvo.value, set()).add(rel)
+            elif rel != _ENCANAMENTO:
+                dinamicas.append(f"{rel}:{no.lineno} ({nome})")
+    return achados, dinamicas
+
+
+def _tipos_gravados_pelo_codigo() -> dict[str, set[str]]:
+    return _varre_gravacoes()[0]
 
 
 def test_todo_tipo_gravado_esta_no_registro():
-    gravados = _tipos_gravados_pelo_codigo()
+    gravados, dinamicas = _varre_gravacoes()
     assert gravados, "a varredura não achou nenhuma gravação — o walk quebrou"
+    assert not dinamicas, (
+        "gravação cujo `action_type` não é literal: a varredura não consegue "
+        "conferir contra o registro, e um tipo novo passaria em silêncio. Use "
+        f"um literal, ou trate o caso aqui de propósito: {dinamicas}"
+    )
     faltando = {t: sorted(f) for t, f in gravados.items() if t not in _REGISTRO}
     assert not faltando, (
         "tipo gravado fora do registro de db/pending.py — as três colunas "
