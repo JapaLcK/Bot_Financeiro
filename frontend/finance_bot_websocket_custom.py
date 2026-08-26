@@ -2226,31 +2226,13 @@ async def _get_current_user(
     return user_id
 
 
-# Planos v2: tier mínimo de cada feature paga na escada. Quase TODAS as features
-# gated são Essencial+ (o corte Plus é OF multi-banco/agentes, gated à parte).
-# "forecast" (previsão de saldo 30/60/90) é a exceção Pro+, como anunciado na
-# /precos. "ai_chat" é especial: no v2 o Grátis tem cota mensal — checada via
-# ai_chat_allowed, não por tier.
-_FEATURE_MIN_TIER_V2 = {
-    "recurring_expenses": "essencial",
-    "ofx_import": "essencial",
-    "investments": "essencial",
-    "export": "essencial",
-    "custom_categories": "essencial",
-    "forecast": "pro",
-    "generic": "essencial",
-}
-
-
+# Planos v2: o tier mínimo de cada feature paga mora em
+# core.services.plan_service.FEATURE_MIN_TIER_V2 — fonte única, porque gates
+# fora do HTTP (criar categoria custom por correção do WhatsApp/IA) leem a
+# mesma regra. Aqui fica só o wrapper que os endpoints já usavam.
 def _plan_gate_ok(user_id: int, feature: str) -> bool:
-    from core.services.plan_service import (
-        plans_v2_enabled, is_pro, require_min_tier, ai_chat_allowed,
-    )
-    if not plans_v2_enabled():
-        return is_pro(user_id)
-    if feature == "ai_chat":
-        return ai_chat_allowed(user_id)
-    return require_min_tier(user_id, _FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+    from core.services.plan_service import plan_gate_ok
+    return plan_gate_ok(user_id, feature)
 
 
 def require_pro_feature(feature: str = "generic"):

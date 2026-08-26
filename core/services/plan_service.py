@@ -387,6 +387,30 @@ def agent_kind_allowed(user_id: int, kind: str) -> bool:
     return agents_energy_budget(int(user_id)) > 0
 
 
+# Tier mínimo de cada feature paga da escada v2. Fonte única: o gate HTTP
+# (_require_pro/require_pro_feature no monólito) e os gates fora do HTTP
+# (ex.: criar categoria custom por uma correção do WhatsApp/IA) leem daqui.
+FEATURE_MIN_TIER_V2 = {
+    "recurring_expenses": "essencial",
+    "ofx_import": "essencial",
+    "investments": "essencial",
+    "export": "essencial",
+    "custom_categories": "essencial",
+    "forecast": "pro",
+    "generic": "essencial",
+}
+
+
+def plan_gate_ok(user_id: int, feature: str) -> bool:
+    """True se o usuário pode usar `feature`. v1: Pro binário. v2: tier mínimo
+    da escada; 'ai_chat' é cota mensal, não tier."""
+    if not plans_v2_enabled():
+        return is_pro(user_id)
+    if feature == "ai_chat":
+        return ai_chat_allowed(user_id)
+    return require_min_tier(user_id, FEATURE_MIN_TIER_V2.get(feature, "essencial"))
+
+
 def require_min_tier(user_id: int, minimum: str) -> bool:
     """True se o tier efetivo do usuário é >= minimum ('essencial'|'plus'|'pro').
     Com v2 off, cai na semântica legada (is_pro pra qualquer exigência paga)."""
