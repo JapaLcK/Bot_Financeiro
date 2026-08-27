@@ -594,8 +594,16 @@ def _sync_item_contido(connection: dict) -> dict:
             # Tira o item do verde na tela: `status=None` é "não mexe" (a chamada
             # falhou, não observamos a saúde do item — só que a tentativa não deu
             # certo), e o motivo pendente faz `connection_ui_state` recusar
-            # "Atualizado" pelo default seguro dele. O motivo cai sozinho no
-            # próximo sync/job de saúde que conseguir ler.
+            # "Atualizado" pelo default seguro dele.
+            #
+            # LIMITE MEDIDO: quem limpa `read_failed` é só um sync que consiga
+            # ler as contas. O job de saúde NÃO lê contas (só `GET /items`), e o
+            # early return `if has_data:` de `resolve_connection_state` devolve
+            # ("ACTIVE","") antes do ramo que preservaria o motivo — então um
+            # banco que 429 de forma persistente volta ao verde em até
+            # OF_HEALTH_MAX_AGE_SEC (12h) com o espelho velho. A pílula não olha
+            # a idade de `last_sync_at`; "Atualizado" quer dizer "o item está
+            # saudável na Pluggy", não "nosso espelho está fresco". Onda 2.
             mark_sync_result(connection["id"], ok=False, status=None,
                              status_reason=READ_FAILED)
         except Exception as exc2:  # banco fora do ar não pode derrubar o lote também
