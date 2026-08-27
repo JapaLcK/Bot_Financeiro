@@ -10,7 +10,9 @@ from psycopg.types.json import Json, Jsonb
 import db_support as _db_support
 from utils_date import _tz, day_tz
 
-from .connection import get_conn, cat_key_sql, TIPO_DESPESA_SQL
+from .connection import (
+    get_conn, cat_key_sql, TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+)
 from .users import ensure_user, ensure_user_tx
 
 
@@ -382,14 +384,19 @@ def get_spending_trend(user_id: int, months: int = 6) -> list[dict]:
                        sum(case when tipo = 'despesa' then valor else 0 end) as despesa,
                        sum(case when tipo = 'receita' then valor else 0 end) as receita
                 from (
+                    -- `TIPO_CANON_SQL` colapsa a forma legada na moderna AQUI, na
+                    -- perna de launches, para o `case when tipo = 'despesa'` de
+                    -- fora continuar valendo sem virar uma segunda lista de
+                    -- aliases. Sem isto, 'saida'/'entrada' eram filtradas fora e
+                    -- a tendência da IA divergia do dashboard no mesmo mês.
                     select extract(year from criado_em at time zone %s)::int as y,
                            extract(month from criado_em at time zone %s)::int as m,
-                           tipo, valor
+                           {TIPO_CANON_SQL} as tipo, valor
                     from launches
                     where user_id = %s
                       and criado_em >= %s
                       and is_internal_movement = false
-                      and tipo in ('despesa', 'receita')
+                      and ({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})
                     union all
                     select extract(year from purchased_at)::int as y,
                            extract(month from purchased_at)::int as m,

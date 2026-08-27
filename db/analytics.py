@@ -26,7 +26,10 @@ from typing import Any
 # (`user_categories.name`, normalizado por `CAT_META_SQL` com a mesma
 # expressão). Trocar só um lado quebraria o join; e o rótulo daquele grupo é
 # a grafia crua do lançamento, não a chave — mudar isso é outro assunto.
-from .connection import get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL
+from .connection import (
+    get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL,
+    TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+)
 
 # Casamento de categoria pela `cat_key_sql` (fonte única, db/connection.py). Isto
 # aqui já colapsava o vazio por conta própria, mas sob o rótulo `''` — então a
@@ -110,15 +113,20 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT tipo, SUM(valor) AS total, SUM(cnt) AS count
                     FROM (
-                      SELECT tipo, valor, 1 AS cnt
+                      -- `TIPO_CANON_SQL` colapsa 'saida'/'entrada' na forma
+                      -- moderna já no SQL: o agregador Python abaixo passa a ver
+                      -- só 'despesa'/'receita' e não precisa repetir a lista de
+                      -- aliases. A versão anterior aceitava 'saida' e esquecia
+                      -- 'entrada' — a receita legada sumia do income.
+                      SELECT {TIPO_CANON_SQL} AS tipo, valor, 1 AS cnt
                       FROM launches
                       WHERE user_id = %s
                         AND criado_em >= %s AND criado_em < %s
                         AND is_internal_movement = false
-                        AND tipo IN ('receita', 'despesa', 'saida')
+                        AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                       UNION ALL
                       SELECT 'despesa' AS tipo, ct.valor, 1 AS cnt
                       FROM credit_transactions ct
@@ -141,9 +149,12 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
             total = _to_float(r["total"])
             cnt = int(r["count"] or 0)
             count += cnt
+            # o SQL já canonizou o tipo (`TIPO_CANON_SQL`): aqui só existem as
+            # duas formas modernas, e repetir os aliases seria a terceira cópia
+            # da mesma regra.
             if t == "receita":
                 income += total
-            elif t in ("despesa", "saida"):
+            elif t == "despesa":
                 expense += total
 
         net = income - expense
