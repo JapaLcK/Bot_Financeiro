@@ -7109,6 +7109,9 @@ function sendRefreshSilent() {
   _doRefresh({ silent: true });
 }
 
+// Agrupa a rajada de `open_finance_synced` (ver ws.onmessage) num refresh só.
+let _ofSyncDebounce;
+
 function _doRefresh({ silent }) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const msg = {
@@ -7195,6 +7198,13 @@ function connect() {
 
       stopSpin();
       setLaunchesLoading(false);
+    } else if (msg.type === "open_finance_synced") {
+      // O backend já mandava este evento e NENHUM arquivo do front o tratava —
+      // o banco sincronizava e o dashboard só mostrava depois de um F5. O
+      // debounce agrupa a rajada de webhooks da Pluggy (item/updated e
+      // transactions/created chegam com segundos de diferença) num pedido só.
+      clearTimeout(_ofSyncDebounce);
+      _ofSyncDebounce = setTimeout(sendRefreshSilent, 1500);
     }
   };
   ws.onclose = () => { setStatus("disconnected"); setTimeout(connect, 3000); };

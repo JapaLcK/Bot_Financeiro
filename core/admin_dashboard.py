@@ -702,10 +702,22 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
     summary["login_success_rate_30d"] = round((login_success_30d / attempts_30d) * 100, 1) if attempts_30d else 0.0
     summary["login_success_rate_7d"] = round((login_success_7d / attempts_7d) * 100, 1) if attempts_7d else 0.0
 
+    # Open Finance: saúde das conexões (contadores agregados, sem PII). Fail-soft —
+    # o painel inteiro não pode cair porque uma contagem de OF falhou.
+    try:
+        from db.open_finance_state import of_health_counters
+        open_finance = await asyncio.to_thread(of_health_counters)
+    except Exception as exc:  # noqa: BLE001
+        # Chave PRÓPRIA: `erro` já é a CONTAGEM de conexões em erro. As duas
+        # semânticas na mesma chave faziam a falha virar tile verde no painel
+        # (fInt("relation não existe") = NaN, NaN > 0 = false).
+        open_finance = {"error": str(exc)[:200]}
+
     return {
         "generated_at": now,
         "window_days": days,
         "summary": summary,
+        "open_finance": open_finance,
         "ops_summary": {
             **ops_summary,
             **whatsapp_activity,

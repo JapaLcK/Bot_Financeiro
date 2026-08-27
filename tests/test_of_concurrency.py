@@ -1,0 +1,371 @@
+"""G4 — concorrência real: threads de verdade, banco de verdade, caminho de verdade.
+
+Fatos medidos em produção: a Pluggy manda `item/updated` e `transactions/created`
+com 0–17s de intervalo, e cada evento criava uma task de sync sem lock nenhum —
+10 `deadlock detected` e 1 violação de `uq_credit_tx_source_external` (o import de
+cartão fazia SELECT-depois-INSERT, que é check-then-act).
+
+CONTROLE NEGATIVO do grupo (os dois primeiros MEDIDOS nesta rodada):
+  • desligar o `pluggy_item_lock` (fazer o contextmanager devolver True sem tomar
+    lock) → `test_dois_syncs_do_mesmo_item_serializam_a_escrita` vermelho, na
+    asserção de sobreposição das janelas de escrita;
+  • devolver o lock para ANTES das leituras remotas (como era) →
+    `test_lock_nao_e_segurado_durante_a_paginacao` vermelho;
+  • tirar o `on conflict ... do nothing` do `add_imported_credit_purchase`
+    → `test_duas_importacoes_do_mesmo_external_id...` vermelho (IntegrityError).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+import time
+from datetime import date
+from decimal import Decimal
+
+import psycopg
+import pytest
+
+import db
+import core.services.pluggy_sync as ps
+import frontend.routes.open_finance as of_routes
+from db.connection import get_conn
+
+ITEM = {
+    "id": "item-conc", "status": "UPDATED", "executionStatus": "SUCCESS",
+    "statusDetail": {"accounts": {"isUpdated": True, "lastUpdatedAt": "2026-08-20T11:00:00Z"}},
+}
+
+
+def _conexao(user_id: int, item_id: str = "item-conc") -> dict:
+    return db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": item_id, "status": "UPDATED", "connector": {"id": 612, "name": "Nubank"}},
+    )
+
+
+def _espelho(connection_id: int) -> tuple[int, int]:
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select count(*) as n from open_finance_accounts where connection_id=%s",
+                        (connection_id,))
+            contas = int(cur.fetchone()["n"])
+            cur.execute(
+                "select count(*) as n from open_finance_transactions t "
+                "join open_finance_accounts a on a.id=t.account_id where a.connection_id=%s",
+                (connection_id,))
+            txs = int(cur.fetchone()["n"])
+    return contas, txs
+
+
+# ── 21. dois syncs do mesmo item em paralelo ─────────────────────────────────
+# O lock deixou de cercar o sync inteiro e passa a cercar SÓ a fase de escrita:
+# segurar um advisory lock de SESSÃO durante `list_pluggy_transactions` (até 60
+# requisições paginadas por conta) retinha uma conexão do pool por minutos —
+# medido, com DB_POOL_MAX_SYNC=2 e 2 locks abertos um `select 1` estourava
+# PoolTimeout em 30s, e em produção max_size=8 travaria o processo inteiro.
+#
+# CONTROLE NEGATIVO deste par: fazer `pluggy_item_lock` devolver True sem tomar
+# lock nenhum → `test_dois_syncs...` vermelho (as janelas de escrita se
+# sobrepõem). Devolver o lock para o começo do sync (como era) →
+# `test_lock_nao_e_segurado_durante_a_paginacao` vermelho.
+
+def _prova_lock_livre(item_id: str) -> bool:
+    """De uma conexão de FORA: ninguém está segurando o lock deste item."""
+    import os
+    import psycopg
+    from db.open_finance_state import _lock_key
+    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as c:
+        got = c.execute("select pg_try_advisory_lock(hashtext(%s)) as g",
+                        (_lock_key(item_id),)).fetchone()[0]
+        if got:
+            c.execute("select pg_advisory_unlock(hashtext(%s))", (_lock_key(item_id),))
+        return bool(got)
+
+
+def test_dois_syncs_do_mesmo_item_serializam_a_escrita(user_id, monkeypatch):
+    conexao = _conexao(user_id)
+    janelas: list[tuple[float, float]] = []
+    real_save = db.save_open_finance_sync
+
+    def _save_lento(connection_id, accounts):
+        inicio = time.monotonic()
+        try:
+            return real_save(connection_id, accounts)
+        finally:
+            time.sleep(0.4)          # segura a fase de ESCRITA
+            janelas.append((inicio, time.monotonic()))
+
+    monkeypatch.setattr(ps, "save_open_finance_sync", _save_lento)
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: ITEM)
+    monkeypatch.setattr(ps, "list_pluggy_accounts", lambda i, k=None: [
+        {"id": "acc-conc", "name": "Conta", "type": "BANK", "currencyCode": "BRL",
+         "balance": "10.00"}])
+    monkeypatch.setattr(ps, "list_pluggy_transactions",
+                        lambda acc, k=None, **kw: [{"id": "tx-conc", "description": "M",
+                                                    "amount": "-1.00", "date": "2026-08-19"}])
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: [])
+
+    barreira = threading.Barrier(2, timeout=10)
+    resultados: list[dict] = []
+    erros: list[BaseException] = []
+
+    def _roda():
+        try:
+            barreira.wait()
+            resultados.append(ps.sync_pluggy_item("item-conc"))
+        except BaseException as exc:   # noqa: BLE001 — o teste decide o que fazer
+            erros.append(exc)
+
+    threads = [threading.Thread(target=_roda) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert erros == [], f"nenhuma exceção era esperada: {erros}"
+    assert len(janelas) == 2, f"as duas escritas tinham que acontecer: {janelas}"
+    (a_ini, a_fim), (b_ini, b_fim) = sorted(janelas)
+    assert b_ini >= a_fim - 0.01, (
+        f"as escritas se sobrepuseram — o lock não serializou: {janelas}")
+    assert all(r.get("ok") for r in resultados), resultados
+    assert _espelho(conexao["id"]) == (1, 1), "espelho gravado uma vez só"
+    assert _prova_lock_livre("item-conc"), "o lock tem que ser solto no fim"
+
+
+def test_lock_nao_e_segurado_durante_a_paginacao(user_id, monkeypatch):
+    """A leitura remota é read-only contra a Pluggy e não pode reter nada.
+
+    Durante a paginação: (1) ninguém segura o advisory lock do item e (2) o pool
+    continua atendendo — que é o que estourava PoolTimeout.
+    """
+    _conexao(user_id, "item-pag")
+    medidas: list[tuple[bool, bool]] = []
+
+    def _txs(account_id, api_key=None, **kw):
+        pool_ok = False
+        try:
+            with get_conn() as c:
+                pool_ok = c.execute("select 1 as x").fetchone()["x"] == 1
+        except Exception:
+            pool_ok = False
+        medidas.append((_prova_lock_livre("item-pag"), pool_ok))
+        return []
+
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: {**ITEM, "id": "item-pag"})
+    monkeypatch.setattr(ps, "list_pluggy_accounts", lambda i, k=None: [
+        {"id": "acc-pag", "name": "Conta", "type": "BANK", "currencyCode": "BRL",
+         "balance": "10.00"}])
+    monkeypatch.setattr(ps, "list_pluggy_transactions", _txs)
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: [])
+
+    ps.sync_pluggy_item("item-pag")
+
+    assert medidas, "a paginação tinha que ter sido exercitada"
+    for lock_livre, pool_ok in medidas:
+        assert lock_livre, "o lock estava tomado DURANTE a leitura remota"
+        assert pool_ok, "o pool não respondeu durante a leitura remota"
+
+
+# ── 22. evento durante o sync → UMA re-execução ──────────────────────────────
+
+def test_evento_durante_o_sync_gera_exatamente_uma_reexecucao(monkeypatch):
+    execucoes: list[str] = []
+    liberado = asyncio.Event()
+
+    async def _sync_lento(item_id):
+        execucoes.append(item_id)
+        if len(execucoes) == 1:
+            await liberado.wait()
+        return None
+
+    monkeypatch.setattr(of_routes, "_run_pluggy_sync_bg", _sync_lento)
+    of_routes._INFLIGHT.clear()
+    of_routes._DIRTY.clear()
+
+    async def _cenario():
+        of_routes._schedule_pluggy_sync("item-x")   # 1º evento: roda
+        await asyncio.sleep(0)
+        of_routes._schedule_pluggy_sync("item-x")   # chega durante o sync → dirty
+        of_routes._schedule_pluggy_sync("item-x")   # e mais um → continua 1 bit
+        liberado.set()
+        for _ in range(10):
+            await asyncio.sleep(0)
+        return list(execucoes)
+
+    feitas = asyncio.run(_cenario())
+
+    assert feitas == ["item-x", "item-x"], f"esperava 1 execução + 1 re-execução: {feitas}"
+    assert of_routes._INFLIGHT == {}
+    assert of_routes._DIRTY == set()
+
+
+# ── 23. duas importações do mesmo external_id ────────────────────────────────
+
+def test_duas_importacoes_do_mesmo_external_id_somam_a_fatura_uma_vez(user_id):
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    compra = date(2026, 8, 5)
+    barreira = threading.Barrier(2, timeout=10)
+    saidas: list[tuple] = []
+    erros: list[BaseException] = []
+
+    def _importa():
+        try:
+            barreira.wait()
+            saidas.append(db.add_imported_credit_purchase(
+                user_id, card_id, "-100.00", "mercado", compra, "ext-dup",
+            ))
+        except BaseException as exc:  # noqa: BLE001
+            erros.append(exc)
+
+    threads = [threading.Thread(target=_importa) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert erros == [], f"a corrida não pode estourar: {erros}"
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from credit_transactions "
+                "where user_id=%s and source='open_finance' and external_id='ext-dup'",
+                (user_id,))
+            assert int(cur.fetchone()["n"]) == 1, "duplicou a transação de cartão"
+            cur.execute(
+                "select total from credit_bills where user_id=%s and card_id=%s",
+                (user_id, card_id))
+            totais = [Decimal(str(r["total"])) for r in cur.fetchall()]
+    assert totais == [Decimal("100.00")], f"a fatura somou {totais} (deveria somar uma vez só)"
+
+
+# ── 24. retry só para erro de concorrência ───────────────────────────────────
+
+def test_retry_dispara_em_deadlock_e_nao_em_erro_de_programacao(monkeypatch):
+    eventos: list[tuple] = []
+
+    async def _log(level, event_type, message, **kw):
+        eventos.append((level, event_type))
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+
+    tentativas = []
+
+    def _sempre_deadlock(item_id):
+        tentativas.append(item_id)
+        raise psycopg.errors.DeadlockDetected("deadlock detected")
+
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _sempre_deadlock)
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-dead"))
+
+    assert len(tentativas) == 3, f"máximo de 3 tentativas: {len(tentativas)}"
+    retries = [e for e in eventos if e[1] == "pluggy_sync_retry"]
+    assert len(retries) == 2, f"um log por RETENTATIVA (2 esperas para 3 tentativas): {eventos}"
+    assert ("error", "pluggy_sync_failed") in eventos
+
+    # erro de programação não é retentado — repetir 3x é o mesmo bug 3x
+    eventos.clear()
+    tentativas.clear()
+
+    def _erro_bobo(item_id):
+        tentativas.append(item_id)
+        raise ValueError("bug de verdade")
+
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _erro_bobo)
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-bug"))
+
+    assert len(tentativas) == 1
+    assert [e for e in eventos if e[1] == "pluggy_sync_retry"] == []
+
+
+# ── RODADA 3: o lock não pode esperar para sempre nem abrir conexão sem teto ──
+
+def test_lock_wait_zero_nao_significa_espera_infinita(user_id, monkeypatch):
+    """`lock_timeout='0ms'` no Postgres significa *desligado*, não *não espere*.
+    Medido antes: `400ms` desistia em 0,48s; `0` seguia bloqueado depois de 3s,
+    com a thread segurando a conexão dedicada."""
+    _conexao(user_id, "item-wait0")
+    monkeypatch.setenv("OF_SYNC_LOCK_WAIT_MS", "0")
+
+    resultado = {}
+
+    def _segundo():
+        t0 = time.monotonic()
+        with db.pluggy_item_lock("item-wait0") as got:
+            resultado["got"] = got
+            resultado["s"] = time.monotonic() - t0
+
+    with db.pluggy_item_lock("item-wait0") as primeiro:
+        assert primeiro is True
+        t = threading.Thread(target=_segundo)
+        t.start()
+        t.join(timeout=5)
+
+    assert not t.is_alive(), "esperou para sempre"
+    assert resultado["got"] is False
+    assert resultado["s"] < 2, f"desistiu em {resultado['s']:.2f}s"
+
+
+def test_teto_de_conexoes_dedicadas(user_id, monkeypatch):
+    """Medido antes: 30 syncs concorrentes = 30 backends extras fora do pool
+    (antes=1, DURANTE=31). Quem não pega vaga volta False — mesmo desfecho de
+    perder o lock, e o chamador já sabe reportar `sync_in_progress`."""
+    import db.open_finance_state as ofs
+
+    monkeypatch.setenv("OF_SYNC_LOCK_MAX_CONN", "2")
+    monkeypatch.setenv("OF_SYNC_LOCK_WAIT_MS", "200")
+    ofs._lock_slots.cache_clear()
+    try:
+        antes = _backends()
+        segurando = threading.Event()
+        soltar = threading.Event()
+        pegos: list[bool] = []
+
+        def _segura(item):
+            with db.pluggy_item_lock(item) as got:
+                pegos.append(got)
+                segurando.set()
+                soltar.wait(timeout=5)
+
+        ts = [threading.Thread(target=_segura, args=(f"item-teto-{n}",)) for n in range(5)]
+        for t in ts:
+            t.start()
+        segurando.wait(timeout=5)
+        time.sleep(0.6)          # tempo de todo mundo tentar e os excedentes desistirem
+        durante = _backends()
+        soltar.set()
+        for t in ts:
+            t.join(timeout=5)
+
+        assert durante - antes <= 2, f"teto furado: {durante - antes} conexões extras"
+        assert pegos.count(False) >= 3, f"quem não pegou vaga tem que voltar False: {pegos}"
+        assert pegos.count(True) >= 1, "CONTROLE POSITIVO: alguém tem que conseguir trabalhar"
+    finally:
+        ofs._lock_slots.cache_clear()
+
+
+def _backends() -> int:
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute("select count(*) as n from pg_stat_activity"
+                        " where datname = current_database()")
+            return int(cur.fetchone()["n"])
+
+
+def test_429_da_pluggy_e_retentado_pelo_webhook():
+    """`_retryable` devolvia False para todo `PluggyApiError`: um 429 no meio do
+    sync não era retentado, e a cota de leitura já tinha sido gasta. 404 fica de
+    fora de propósito — é `item_missing`, e repetir não ressuscita item."""
+    from core.services.pluggy import PluggyApiError
+
+    assert of_routes._retryable(PluggyApiError("rate", status_code=429)) is True
+    assert of_routes._retryable(PluggyApiError("gateway", status_code=502)) is True
+    assert of_routes._retryable(PluggyApiError("sumiu", status_code=404)) is False
+    assert of_routes._retryable(PluggyApiError("chave errada", status_code=401)) is False
+    assert of_routes._retryable(ValueError("bug")) is False

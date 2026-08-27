@@ -694,18 +694,43 @@ def add_imported_credit_purchase(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # O SELECT acima é o caminho rápido; o ON CONFLICT é a rede da CORRIDA.
+            # Dois webhooks da Pluggy (`item/updated` e `transactions/created`, 0–17s
+            # de intervalo) sincronizavam o mesmo item em paralelo e os dois passavam
+            # pelo SELECT antes de qualquer INSERT — 1 `duplicate key` em
+            # `uq_credit_tx_source_external` medido em produção.
+            #
+            # DO NOTHING, nunca DO UPDATE: atualizar `valor` aqui mudaria a compra sem
+            # ajustar `credit_bills.total` nem migrar de fatura — corromperia a fatura
+            # em silêncio. Correção legítima vinda da Pluggy tem caminho próprio
+            # (`sync_imported_open_finance_updates`), que ajusta o total pela diferença
+            # e migra de ciclo. `where external_id is not null` reproduz o predicado do
+            # índice PARCIAL (db/schema.py) — sem ele o Postgres não infere o índice.
             cur.execute(
                 """
                 insert into credit_transactions
                     (bill_id, user_id, card_id, tipo, valor, categoria, nota, purchased_at, is_refund,
                      source, external_id, installment_no, installments_total, group_id)
                 values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                on conflict (user_id, source, external_id) where external_id is not null
+                do nothing
                 returning id
                 """,
                 (bill_id, user_id, card_id, tipo, valor, categoria, None, purchased_at, is_refund,
                  source, external_id, installment_no, installments_total, group_id),
             )
-            tx_id = cur.fetchone()["id"]
+            row = cur.fetchone()
+            if row is None:
+                # A outra transação ganhou: devolve a linha dela e NÃO soma a fatura
+                # de novo (era exatamente assim que o total dobrava).
+                cur.execute(
+                    "select id from credit_transactions where user_id=%s and source=%s and external_id=%s",
+                    (user_id, source, external_id),
+                )
+                existing = cur.fetchone()
+                conn.commit()
+                return (existing["id"] if existing else None), False
+            tx_id = row["id"]
             cur.execute(
                 "update credit_bills set total = total + %s where id=%s and user_id=%s",
                 (valor, bill_id, user_id),  # valor já assinado: compra sobe, estorno desce

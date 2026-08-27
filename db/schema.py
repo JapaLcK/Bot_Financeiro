@@ -426,6 +426,71 @@ def init_db():
         create index if not exists idx_open_finance_transactions_account_date
           on open_finance_transactions(account_id, transaction_date desc)
         """,
+        # Onda 1 (contenção OF): tentativa ≠ sucesso, e saúde medida no servidor.
+        # `last_sync_at` passa a significar SUCESSO (o sync deixou de carimbá-lo
+        # incondicionalmente), então não existe last_success_at — seria a segunda
+        # versão da mesma verdade.
+        """
+        alter table open_finance_connections add column if not exists last_attempt_at timestamptz
+        """,
+        """
+        alter table open_finance_connections add column if not exists status_reason text
+        """,
+        """
+        alter table open_finance_connections add column if not exists health jsonb
+        """,
+        """
+        alter table open_finance_connections add column if not exists next_refresh_at timestamptz
+        """,
+        """
+        alter table open_finance_connections add column if not exists last_refresh_requested_at timestamptz
+        """,
+        """
+        alter table open_finance_connections add column if not exists last_refresh_origin text
+        """,
+        """
+        create index if not exists idx_of_conn_refresh_due
+          on open_finance_connections(next_refresh_at)
+          where provider='pluggy'
+        """,
+        # Um item da Pluggy pertence a UM usuário. A unicidade de hoje é por
+        # (user_id, provider, provider_item_id), o que permite o mesmo item em
+        # duas contas. O índice fecha isso — mas NÃO pode derrubar o boot: se já
+        # houver duplicata em produção, a criação falha e o init_db inteiro
+        # (~200 statements) morreria junto. Warning e segue.
+        """
+        do $$ begin
+          create unique index if not exists uq_of_conn_provider_item
+            on open_finance_connections(provider, provider_item_id);
+        exception when others then
+          raise warning 'uq_of_conn_provider_item nao criado: %', sqlerrm;
+        end $$
+        """,
+        # Rastro de todo item que passou por aqui — inclusive os que nunca viraram
+        # conexão (token emitido e abandonado, webhook de item desconhecido). Sem
+        # isto não há como saber que um item existe na Pluggy: o GET /items (lista)
+        # devolve 401, então o universo remoto não é enumerável.
+        """
+        create table if not exists open_finance_item_registry (
+          id bigserial primary key,
+          -- NULL de propósito: webhook de item DESCONHECIDO (nenhuma conexão
+          -- local) é exatamente o caso que precisa ser registrado, e nele não
+          -- há dono a atribuir. `not null` tornaria esse registro impossível.
+          user_id bigint references users(id) on delete cascade,
+          provider text not null default 'pluggy',
+          provider_item_id text,
+          connect_token_hash text,
+          origin text not null,
+          status text,
+          last_event text,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_of_item_registry_item
+          on open_finance_item_registry(provider, provider_item_id)
+        """,
         # report diário (preferências do usuário)
         """
         create table if not exists daily_report_prefs (

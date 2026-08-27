@@ -143,7 +143,10 @@ Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
 (`/open-finance/{user_id}` e `connect-token`, `connectors`, `sync`, `refresh`,
 `pluggy-item`, `caixinhas`, `caixinhas/bind`, `mock-connect`) mais o webhook
 `/open-finance/pluggy/webhook`. Serviços em `core/services/pluggy*.py` e
-`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`.
+`open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments` mais
+`open_finance_item_registry` — o rastro de todo item que passou por aqui, inclusive o
+que nunca virou conexão (token emitido e abandonado, webhook de item desconhecido); o
+`GET /items` da Pluggy devolve 401, então sem ela o universo remoto não é enumerável.
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o
@@ -193,9 +196,19 @@ continua lá e o próximo webhook dela sobrescreve.
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
-investimento, refresh e expiração de Open Finance, cobrança de recorrentes,
-agendadores de engajamento e de IA proativa, retenção de eventos de login. Em teste e
-no `dashboard_dev.py` ficam desligadas.
+investimento, Open Finance (abaixo), cobrança de recorrentes, agendadores de
+engajamento e de IA proativa, retenção de eventos de login. Em teste e no
+`dashboard_dev.py` ficam desligadas.
+
+O Open Finance tem **três** trabalhos, não dois: expiração de trial
+(`_open_finance_trial_expiry`), refresh proativo e **job de saúde** — os dois últimos no
+mesmo tick de `_open_finance_refresh`. O refresh proativo depende de
+`OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde roda MESMO com ele
+desligado e ESCREVE `status`/`status_reason`/`health` na conexão do usuário. É de
+propósito: ele só faz `GET /items` (não consome cota de coleta) e é o que tira do
+"Atualizado" a conexão cujo item sumiu da Pluggy — sem refresh e sem webhook, nada mais
+faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`).
+(Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---
 

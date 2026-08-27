@@ -243,14 +243,21 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select id, provider, provider_item_id, status, institution_name, last_sync_at
+                select id, provider, provider_item_id, status, institution_name, last_sync_at,
+                       last_attempt_at, status_reason, health
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
                 """,
                 (user_id,),
             )
-            connections = cur.fetchall()
+            connections = [dict(r) for r in (cur.fetchall() or [])]
+            # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
+            # função que o decide. O front deixou de derivar rótulo do `status`:
+            # ele não sabe de produto atrasado nem de item que sumiu.
+            from core.services.pluggy_health import connection_ui_state
+            for c in connections:
+                c["ui"] = connection_ui_state(c)
 
             cur.execute(
                 """
@@ -446,16 +453,30 @@ def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
                 """
                 insert into open_finance_connections (
                     user_id, provider, provider_item_id, status, institution_id,
-                    institution_name, consent_url, consent_expires_at, last_sync_at, raw, updated_at
+                    institution_name, consent_url, consent_expires_at, raw, updated_at
                 )
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 on conflict (user_id, provider, provider_item_id)
                 do update set status = excluded.status,
                               institution_id = excluded.institution_id,
                               institution_name = excluded.institution_name,
-                              last_sync_at = excluded.last_sync_at,
                               raw = excluded.raw,
-                              updated_at = excluded.updated_at
+                              updated_at = excluded.updated_at,
+                              -- Linha G da tabela de estados
+                              -- (core/services/pluggy_health.py): reconectar
+                              -- ZERA motivo e saúde. Sem isto a tela dizia
+                              -- "Conexão perdida / Refaça a conexão" logo depois
+                              -- de o usuário ter refeito — e um health velho com
+                              -- item_status MISSING ainda pintava a tela.
+                              status_reason = null,
+                              health = null
+                -- NÃO carimba last_sync_at: conectar não é sincronizar. Carimbar
+                -- aqui fazia a conexão nascer "Atualizado agora" antes de qualquer
+                -- sync e ligava `user_synced_within`, que segura o e-mail dos
+                -- agentes achando que uma carteira estava se mexendo. Quem carimba
+                -- sucesso é `mark_sync_result`, no fim de um sync real.
+                -- `status` continua sendo escrito: é ele que tira a conexão de
+                -- DELETED quando o usuário reconecta pelo widget.
                 returning id, provider, provider_item_id, status, institution_name, last_sync_at
                 """,
                 (
@@ -467,7 +488,6 @@ def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
                     str(institution_name),
                     None,
                     None,
-                    now,
                     Jsonb(item),
                     now,
                 ),
@@ -489,12 +509,38 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                 """
                 update open_finance_connections
                 set status=%s,
+                    -- O par (status, status_reason) é UM estado só. Este caminho
+                    -- (webhook) não passa pelo `resolve_connection_state` porque
+                    -- ele não observa o item — só repete o que a Pluggy disse —,
+                    -- mas grava o MESMO par que o resolvedor daria: linhas B/C da
+                    -- tabela (item em erro) são ERROR + motivo VAZIO, porque quem
+                    -- conta a história ali é o status/health, não o motivo de
+                    -- ontem. Sem isto, `item/error` sobre ACTIVE/no_accounts
+                    -- produzia ERROR/no_accounts — par incoerente (medido).
+                    -- EXCEÇÃO, `item_missing`: WEBHOOK NÃO É EVIDÊNCIA DE ITEM VIVO.
+                    -- Apagá-lo REBAIXA a mensagem — um `item/error` entregue com
+                    -- atraso (replay) sobre o par que o job de saúde acabou de
+                    -- gravar virava ERROR/None → "Erro temporário / Tentaremos de
+                    -- novo automaticamente" (medido), e o usuário parava de ser
+                    -- mandado refazer a conexão. Aceitar isso seria aceitar até
+                    -- ~12h (OF_HEALTH_MAX_AGE_SEC) mostrando estado saudável numa
+                    -- conexão que exige ação — a mentira que esta onda existe para
+                    -- matar. Quem PODE limpar `item_missing` é só quem OBSERVA o
+                    -- item: o job de saúde (GET /items) e o sync bem-sucedido, os
+                    -- dois pelo `resolve_connection_state`. E o par continua
+                    -- coerente: ERROR/item_missing é exatamente a linha A da tabela,
+                    -- o mesmo par que o job de saúde grava.
+                    status_reason=case
+                        when lower(coalesce(status_reason,'')) = 'item_missing' then status_reason
+                        else null end,
                     raw=coalesce(%s, raw),
                     updated_at=now()
                 where provider='pluggy' and provider_item_id=%s
-                  -- PAUSED é estado local terminal (trial venceu): deletar o item na
-                  -- Pluggy dispara webhook item/deleted, que não pode sobrescrevê-lo.
-                  and upper(coalesce(status,'')) <> 'PAUSED'
+                  -- PAUSED e DELETED são estados locais TERMINAIS: PAUSED = trial
+                  -- vencido (o item nem existe mais na Pluggy), DELETED = conexão
+                  -- removida. Webhook atrasado (item/updated depois do item/deleted)
+                  -- não pode ressuscitar nenhum dos dois.
+                  and upper(coalesce(status,'')) not in ('PAUSED', 'DELETED')
                 """,
                 (status, Jsonb(raw) if raw is not None else None, item_id),
             )
@@ -804,23 +850,20 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:
-    """Localiza a conexão pelo item da Pluggy (o webhook só traz o item, não o user)."""
-    item_id = (provider_item_id or "").strip()
-    if not item_id:
-        return None
+    """A conexão daquele item da Pluggy (o webhook só traz o item, não o user).
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select id, user_id, provider, provider_item_id, status, institution_name
-                from open_finance_connections
-                where provider=%s and provider_item_id=%s
-                limit 1
-                """,
-                (provider, item_id),
-            )
-            return cur.fetchone()
+    Levanta `AmbiguousItemError` quando o item aparece em mais de uma conexão. O
+    `limit 1` sem `order by` que existia aqui escolhia um dono ao acaso — e a
+    tabela permite (user_id, provider, provider_item_id), ou seja, dois usuários
+    PODEM ter o mesmo item. Sincronizar a carteira do usuário sorteado é pior que
+    falhar alto.
+    """
+    from .open_finance_state import AmbiguousItemError, get_connections_by_item_id
+
+    rows = get_connections_by_item_id(provider_item_id, provider)
+    if len(rows) > 1:
+        raise AmbiguousItemError((provider_item_id or "").strip(), rows)
+    return rows[0] if rows else None
 
 
 def delete_open_finance_transactions(
@@ -946,16 +989,12 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
                     )
                     transaction_count += 1
 
-            # Fix (b): sync com sucesso (contas puxadas) já marca a conexão ATIVA —
-            # não depende do webhook item/updated pra sair de "Pendente".
-            cur.execute(
-                """
-                update open_finance_connections
-                set status='ACTIVE', last_sync_at=%s, updated_at=%s
-                where id=%s
-                """,
-                (now, now, connection_id),
-            )
+            # NÃO carimba status/last_sync_at aqui. Esta função é o ESPELHO e só
+            # isso: ela roda igual com 0 contas (item deletado devolve
+            # `/accounts` = 200 + results:[]) e carimbar ACTIVE aqui era o que
+            # ressuscitava conexão morta — DELETED/ERROR viravam ACTIVE com
+            # "sincronizado agora". Quem afirma sucesso é `mark_sync_result`, no
+            # sync, DEPOIS de o `GET /items/{id}` confirmar que o item existe.
         conn.commit()
 
     return {"accounts_synced": account_count, "transactions_synced": transaction_count}
@@ -1739,7 +1778,7 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
 # conexão atual e portanto não podem compor o saldo corrente.
 # Só contas em BRL: o saldo manual é em reais e não há conversão de câmbio —
 # somar USD 100 como R$ 100 mentiria o total.
-_BANK_ACCOUNTS_SQL = """
+BANK_ACCOUNTS_SQL = """
     select * from (
         select distinct on (a.provider_account_id)
             a.id, a.name, a.balance, c.institution_name,
@@ -1757,12 +1796,12 @@ _BANK_ACCOUNTS_SQL = """
 def list_bank_accounts(user_id: int) -> list[dict]:
     """Contas BANK conectadas e ativas, com saldo e rótulo para exibição.
 
-    Mesmo recorte do `get_consolidated_balance` — as duas leem `_BANK_ACCOUNTS_SQL`.
+    Mesmo recorte do `get_consolidated_balance` — as duas leem `BANK_ACCOUNTS_SQL`.
     """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(_BANK_ACCOUNTS_SQL + " order by balance desc nulls last, id", (user_id,))
+            cur.execute(BANK_ACCOUNTS_SQL + " order by balance desc nulls last, id", (user_id,))
             rows = [dict(r) for r in (cur.fetchall() or [])]
 
     for r in rows:
@@ -1884,7 +1923,7 @@ def get_consolidated_balance(user_id: int) -> dict:
             manual = row["b"] if row else Decimal("0")
 
             cur.execute(
-                f"select coalesce(sum(balance), 0) as b, count(*) as n from ({_BANK_ACCOUNTS_SQL}) s",
+                f"select coalesce(sum(balance), 0) as b, count(*) as n from ({BANK_ACCOUNTS_SQL}) s",
                 (user_id,),
             )
             of_row = cur.fetchone()

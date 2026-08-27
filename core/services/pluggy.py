@@ -8,13 +8,25 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from core.services.pluggy_health import safe_code
+
 
 class PluggyConfigError(RuntimeError):
     pass
 
 
 class PluggyApiError(RuntimeError):
-    pass
+    """Erro HTTP da Pluggy. `status_code` existe para distinguir 404 (item some
+    de verdade) de 429/5xx (tenta de novo) sem ninguém fazer regex na mensagem.
+
+    NÃO carrega o corpo da resposta: ele traz PII do titular (ver
+    `_raise_for_pluggy_response`). `code` é o código curto da Pluggy, validado."""
+
+    def __init__(self, message: str, *, status_code: int | None = None,
+                 code: str | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
 
 
 def _pluggy_base_url() -> str:
@@ -38,13 +50,25 @@ def _client_credentials() -> tuple[str, str]:
 
 
 def _raise_for_pluggy_response(resp: httpx.Response, context: str) -> None:
+    """Levanta SEM o corpo da resposta. O corpo de erro da Pluggy carrega nome,
+    CPF e número de conta do titular — medido — e `str(exc)` desta exceção vira
+    `details` de `log_system_event`, PERSISTIDO em `system_event_logs` e lido
+    pelo painel admin, além de sair no `print` do refresh. Sobra o que serve para
+    depurar e não identifica ninguém: o HTTP status e, quando parece código, o
+    `code` da Pluggy (`safe_code` é a mesma regra usada nos warnings do health).
+    """
     if resp.is_success:
         return
     try:
-        detail: Any = resp.json()
+        body: Any = resp.json()
     except ValueError:
-        detail = resp.text
-    raise PluggyApiError(f"{context}: Pluggy retornou HTTP {resp.status_code}: {detail}")
+        body = None
+    code = safe_code(body.get("code")) if isinstance(body, dict) else ""
+    raise PluggyApiError(
+        f"{context}: Pluggy retornou HTTP {resp.status_code}" + (f" (code={code})" if code else ""),
+        status_code=resp.status_code,
+        code=code or None,
+    )
 
 
 def create_pluggy_api_key() -> str:

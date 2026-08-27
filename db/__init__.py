@@ -250,6 +250,21 @@ from .open_finance import (
     update_pluggy_open_finance_item_status,
 )
 
+# ── Open Finance: estado da conexão (tentativa × sucesso, saúde, claim, lock) ──
+from .open_finance_state import (
+    AmbiguousItemError,
+    claim_items_for_refresh,
+    claim_manual_refresh,
+    get_connections_by_item_id,
+    list_connections_for_health_check,
+    mark_sync_attempt,
+    mark_sync_result,
+    of_health_counters,
+    pluggy_item_lock,
+    register_item,
+    token_hash,
+)
+
 # ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
 from .rv import (
     list_rv_positions,
@@ -514,6 +529,10 @@ __all__ = [
     "sync_imported_open_finance_updates", "get_consolidated_balance", "list_bank_accounts", "pending_bank_outflows", "assert_bank_covers",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item", "user_synced_within",
     "update_pluggy_open_finance_item_status",
+    "AmbiguousItemError", "claim_items_for_refresh", "claim_manual_refresh",
+    "get_connections_by_item_id",
+    "list_connections_for_health_check", "mark_sync_attempt", "mark_sync_result",
+    "of_health_counters", "pluggy_item_lock", "register_item", "token_hash",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",

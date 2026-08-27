@@ -633,6 +633,13 @@ html.pb-app .upgrade-toast {
 html.pb-app.pb-root-settings .topbar { display: none !important; }
 html.pb-app body.pb-page-settings { padding-top: env(safe-area-inset-top); }
 
+/* Botão "Atualizar" do Open Finance: no app o gesto de puxar a tela já faz
+   isso (o pull-to-refresh chama o mesmo /refresh), então o botão é um segundo
+   controle para a mesma ação. Some SÓ onde o gesto existe — `html.pb-app` é
+   app iOS ou PWA instalada; no mobile web o botão continua sendo a única
+   maneira de atualizar. Sem sniffer de user-agent e sem media query nova. */
+html.pb-app body.pb-page-settings #of-refresh-btn { display: none !important; }
+
 /* ─── Settings vira "Minha conta" (estilo app) ─────────────────────────── */
 /* Paleta movida pra html.pb-app.pb-root-settings (1º paint); aqui só estrutural. */
 

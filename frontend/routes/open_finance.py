@@ -13,6 +13,8 @@ import hashlib
 import hmac
 import json
 import os
+import random
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -25,6 +27,7 @@ from core.services.pluggy import (
     create_pluggy_api_key,
     create_pluggy_connect_token,
     delete_pluggy_item,
+    get_pluggy_item,
     list_pluggy_connectors,
 )
 from core.services.plan_service import is_pro
@@ -38,10 +41,13 @@ from db import (
     create_mock_open_finance_connection,
     delete_open_finance_transactions,
     disconnect_open_finance_connection,
+    get_connections_by_item_id,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
     list_pluggy_item_ids,
+    register_item,
     save_pluggy_open_finance_item,
+    token_hash,
     update_pluggy_open_finance_item_status,
 )
 from frontend.routes import shared
@@ -62,12 +68,63 @@ PLUGGY_SYNC_EVENTS = {
 }
 
 
-async def _run_pluggy_sync_bg(item_id: str) -> None:
-    """Roda o sync fora do request (fire-and-forget), logando falhas."""
+# Um sync em voo por item + UM bit de "chegou evento enquanto rodava". A Pluggy
+# manda `item/updated` e `transactions/created` com 0–17s de intervalo, e cada
+# evento virava uma task: 10 `deadlock detected` medidos em produção. O dirty é
+# BOOLEANO por item de propósito — fila de eventos aqui só adiaria o mesmo sync
+# N vezes, e o sync é idempotente: uma re-execução cobre qualquer número de
+# eventos que chegaram durante a anterior.
+_INFLIGHT: dict[str, asyncio.Task] = {}
+_DIRTY: set[str] = set()
+
+# Só erro TRANSITÓRIO é retentado. Erro de programação ou de validação repetido
+# 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
+_SYNC_MAX_ATTEMPTS = 3
+
+# HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
+# de fora de propósito (é `item_missing`, tratado no sync), 4xx de credencial
+# também — repetir não conserta chave errada.
+_HTTP_TRANSITORIO = {429, 500, 502, 503, 504}
+
+
+def _retryable(exc: BaseException) -> bool:
+    if isinstance(exc, PluggyApiError) and exc.status_code in _HTTP_TRANSITORIO:
+        return True
     try:
-        result = await asyncio.to_thread(sync_pluggy_item, item_id)
+        from psycopg import errors as pg_errors
+        return isinstance(exc, (pg_errors.DeadlockDetected, pg_errors.SerializationFailure))
+    except Exception:  # psycopg ausente/alterado: não retenta
+        return False
+
+
+async def _run_pluggy_sync_bg(item_id: str) -> None:
+    """Roda o sync fora do request (fire-and-forget), logando o resultado REAL.
+
+    Antes isto logava `pluggy_sync_done` em nível info mesmo com `ok:false` —
+    397 sucessos e 41 falhas na mesma prateleira, e ninguém procurando por elas.
+    """
+    result: dict | None = None
+    try:
+        for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
+            try:
+                result = await asyncio.to_thread(sync_pluggy_item, item_id)
+                break
+            except Exception as exc:
+                if not _retryable(exc) or tentativa == _SYNC_MAX_ATTEMPTS:
+                    raise
+                espera = 0.5 * (2 ** (tentativa - 1)) * (0.75 + random.random() / 2)
+                await log_system_event(
+                    "warning", "pluggy_sync_retry",
+                    f"Sync Pluggy vai repetir ({tentativa}/{_SYNC_MAX_ATTEMPTS}): {item_id}",
+                    source="open_finance",
+                    details={"item_id": item_id, "attempt": tentativa,
+                             "error": type(exc).__name__, "sleep_sec": round(espera, 3)},
+                )
+                await asyncio.sleep(espera)
+
+        result = result if isinstance(result, dict) else {}
         # Atualização ao vivo (PWA): avisa o cliente conectado pra recarregar saldo/timeline.
-        uid = result.get("user_id") if isinstance(result, dict) else None
+        uid = result.get("user_id")
         if uid:
             try:
                 from frontend.finance_bot_websocket_custom import manager
@@ -76,12 +133,31 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
                 )
             except Exception:
                 pass
+
+        ok = bool(result.get("ok"))
+        reason = str(result.get("reason") or "")
+        # Sync que deu certo mas deixou produto pra trás não pode ficar mudo: é
+        # daqui que sai "atualizei o que deu" na tela e a contagem do painel.
+        if ok and result.get("stale_products"):
+            await log_system_event(
+                "warning", "of_product_stale",
+                f"Sync concluído com produto atrasado: {item_id}",
+                source="open_finance",
+                details={"item_id": item_id, "stale_products": result["stale_products"]},
+            )
+        if ok:
+            nivel, evento = "info", "pluggy_sync_done"
+        elif reason in ("item_missing", "owner_conflict"):
+            nivel, evento = "error", "of_item_missing"
+        else:
+            nivel, evento = "warning", "pluggy_sync_done"
         await log_system_event(
-            "info",
-            "pluggy_sync_done",
-            f"Sync Pluggy concluído: {item_id}",
+            nivel,
+            evento,
+            f"Sync Pluggy {'concluído' if ok else 'sem sucesso'}: {item_id}"
+            + (f" ({reason})" if reason else ""),
             source="open_finance",
-            details=result,
+            details={**result, "reason": reason or None},
         )
     except Exception as exc:  # noqa: BLE001 — background, não pode derrubar nada
         await log_system_event(
@@ -89,13 +165,27 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
             "pluggy_sync_failed",
             f"Sync Pluggy falhou: {item_id}: {exc}",
             source="open_finance",
-            details={"item_id": item_id, "error": str(exc)},
+            details={"item_id": item_id, "error": str(exc)[:200]},
         )
 
 
+def _on_sync_done(item_id: str) -> None:
+    """Fim de um sync: solta o slot e, se chegou evento no meio, roda UMA vez mais."""
+    _INFLIGHT.pop(item_id, None)
+    if item_id in _DIRTY:
+        _DIRTY.discard(item_id)
+        _schedule_pluggy_sync(item_id)
+
+
 def _schedule_pluggy_sync(item_id: str) -> None:
-    if item_id:
-        asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
+    if not item_id:
+        return
+    if item_id in _INFLIGHT:
+        _DIRTY.add(item_id)   # coalesce: uma re-execução no fim, não uma task por evento
+        return
+    task = asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
+    _INFLIGHT[item_id] = task
+    task.add_done_callback(lambda _t: _on_sync_done(item_id))
 
 
 def _bank_limit_enabled() -> bool:
@@ -348,6 +438,21 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # Registra que ESTE usuário pediu um token. O `GET /items` da Pluggy devolve
+    # 401, então sem este rastro um item criado e nunca reportado ao /pluggy-item
+    # é invisível para nós. Guarda o HASH: o token bruto abre a conexão e NUNCA
+    # pode ir para o banco.
+    try:
+        await asyncio.to_thread(
+            register_item, user_id,
+            token_hash=token_hash(token_data["accessToken"]), origin="connect_token",
+        )
+    except Exception as exc:  # noqa: BLE001 — rastro nunca derruba a emissão do token
+        await log_system_event(
+            "warning", "of_item_registry_failed", "Falha ao registrar connect token",
+            source="open_finance", details={"error": str(exc)[:200]},
+        )
+
     return {
         "ok": True,
         "accessToken": token_data["accessToken"],
@@ -358,14 +463,71 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
-    shared.authorize_dashboard_access(request, user_id)
+    """Registra o item que o widget da Pluggy acabou de criar.
+
+    O dict `item` vem DO NAVEGADOR: nome do banco, status e id são todos escolhidos
+    pelo cliente. A única coisa aproveitada dele é o `id`, e só para perguntar à
+    Pluggy quem é o dono — o que grava é a resposta REMOTA. Duas checagens:
+
+      • `clientUserId` do item (que nós mesmos setamos ao emitir o connect token)
+        precisa bater com o usuário logado. É ESTA que discrimina: sem ela, o id
+        de um item de outra pessoa vira uma conexão nesta conta;
+      • se o item já pertence a outra conta aqui dentro, 409 e nada é gravado.
+
+    Comparar `session_uid` com o `{user_id}` da URL seria redundante e não é o
+    conserto: `shared.authorize_dashboard_access` já levanta 403 quando os dois
+    diferem (frontend/routes/shared.py), então aqui eles são iguais por
+    construção. `session_uid` é usado abaixo por clareza de origem, não por
+    segurança adicional.
+    """
+    session_uid = shared.authorize_dashboard_access(request, user_id)
     item = payload.item if isinstance(payload.item, dict) else {}
-    new_item_id = item.get("id") or item.get("itemId")
-    await _enforce_bank_limit(user_id, str(new_item_id) if new_item_id else None)
+    new_item_id = str(item.get("id") or item.get("itemId") or "").strip()
+    if not new_item_id:
+        raise HTTPException(status_code=400, detail="Item Pluggy sem id.")
+
     try:
-        connection = await asyncio.to_thread(save_pluggy_open_finance_item, user_id, payload.item)
+        remote = await asyncio.to_thread(get_pluggy_item, new_item_id)
+    except PluggyConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PluggyApiError as exc:
+        if getattr(exc, "status_code", None) == 404:
+            raise HTTPException(status_code=404, detail="Item não existe na Pluggy.") from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    dono_remoto = remote.get("clientUserId")
+    if str(dono_remoto or "") != str(session_uid):
+        await log_system_event(
+            "error", "of_item_owner_conflict",
+            "Item Pluggy não pertence ao usuário da sessão",
+            source="open_finance",
+            details={"item_id": new_item_id, "origin": "pluggy_item_route"},
+        )
+        raise HTTPException(status_code=403, detail="Este item não pertence a esta conta.")
+
+    outros = [c for c in await asyncio.to_thread(get_connections_by_item_id, new_item_id)
+              if int(c["user_id"]) != int(session_uid)]
+    if outros:
+        await log_system_event(
+            "error", "of_item_owner_conflict",
+            "Item Pluggy já vinculado a outra conta",
+            source="open_finance",
+            details={"item_id": new_item_id, "connections": len(outros)},
+        )
+        raise HTTPException(status_code=409, detail="Este item já está vinculado a outra conta.")
+
+    await _enforce_bank_limit(session_uid, new_item_id)
+    try:
+        # Grava o REMOTO: status e instituição vêm da Pluggy, não do navegador.
+        connection = await asyncio.to_thread(save_pluggy_open_finance_item, session_uid, remote)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await asyncio.to_thread(
+        register_item, session_uid,
+        provider_item_id=new_item_id, origin="pluggy_item",
+        status=str(remote.get("status") or "") or None,
+    )
 
     await asyncio.to_thread(
         record_audit_event,
@@ -398,22 +560,57 @@ async def open_finance_sync_route(request: Request, user_id: int):
 
 
 @router.post("/open-finance/{user_id}/refresh")
-async def open_finance_refresh_route(request: Request, user_id: int):
-    """Refresh manual (botão "Atualizar"): pede pra Pluggy re-buscar do banco
-    (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca a
-    conexão ACTIVE e limpa "Pendente". Difere do /sync, que só relê o que a Pluggy
-    já tem sem forçar uma nova busca no banco.
+async def open_finance_refresh_route(request: Request, user_id: int, wait: int | None = None):
+    """Refresh manual (botão "Atualizar" e pull-to-refresh do app): pede pra Pluggy
+    re-buscar do banco (PATCH /items), espera concluir e sincroniza. Difere do
+    /sync, que só relê o que a Pluggy já tem sem forçar nova busca no banco.
+
+    `?wait=` (teto 18s) existe porque o pull-to-refresh do app tem watchdog de 12s:
+    com a espera padrão o gesto virava âmbar mesmo quando tudo dava certo.
     """
     shared.authorize_dashboard_access(request, user_id)
+    espera = max(0, min(int(wait), 18)) if wait is not None else None
+    t0 = time.monotonic()
     try:
-        result = await asyncio.to_thread(refresh_and_sync_pluggy_user, user_id)
+        result = await asyncio.to_thread(refresh_and_sync_pluggy_user, user_id, wait_seconds=espera)
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # Clique registrado com o usuário ANONIMIZADO (hash), sem token, credencial
+    # ou valor — só quem, quando, quanto demorou e como terminou.
+    itens = result.get("items") or []
+    await log_system_event(
+        "info" if result.get("ok") else "warning",
+        "of_manual_refresh",
+        f"Refresh manual de Open Finance ({'ok' if result.get('ok') else 'com pendências'})",
+        source="open_finance",
+        details={
+            "user_hash": hashlib.sha256(str(user_id).encode()).hexdigest()[:16],
+            "ok": bool(result.get("ok")),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "items": [{"item_id": i.get("item_id"), "state": i.get("state"),
+                       "reason": i.get("reason")} for i in itens],
+        },
+    )
+
     snapshot = await asyncio.to_thread(get_open_finance_snapshot, user_id)
+    # `ok` aqui é só "a requisição foi atendida" — NÃO é o veredito do refresh.
+    # Quem diz se deu certo é `sync.ok` (conjunção por item) e `sync.items[]`, que
+    # é o que o settings.html lê. Ler `data.ok` reintroduz o toast verde em cima
+    # de um item perdido.
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
+
+
+def _ip_prefix(request: Request) -> str:
+    """IP do chamador truncado (/24 em v4, /48 em v6) — o suficiente pra ver um
+    padrão de abuso, insuficiente pra identificar alguém."""
+    ip = (request.client.host if request.client else "") or ""
+    if ":" in ip:
+        return ":".join(ip.split(":")[:3]) + "::/48"
+    partes = ip.split(".")
+    return ".".join(partes[:3]) + ".0/24" if len(partes) == 4 else "desconhecido"
 
 
 def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
@@ -480,6 +677,16 @@ async def open_finance_pluggy_webhook(request: Request):
 
     raw_body = await request.body()
     if not _authorize_pluggy_webhook(request, raw_body, secret):
+        # 401 mudo era um buraco de observabilidade: um webhook mal configurado
+        # (ou uma tentativa de fora) não deixava rastro nenhum. O evento NÃO leva
+        # secret, headers, corpo, nomes, contas, CPF, e-mail nem valores — só um
+        # IP truncado e o horário.
+        await log_system_event(
+            "warning", "pluggy_webhook_unauthorized",
+            "Webhook Pluggy recusado (credencial inválida)",
+            source="open_finance",
+            details={"ip_prefix": _ip_prefix(request), "has_token_param": bool(request.query_params.get("token"))},
+        )
         raise HTTPException(status_code=401, detail="Não autorizado.")
 
     try:
@@ -489,9 +696,11 @@ async def open_finance_pluggy_webhook(request: Request):
 
     event_name = str(event.get("event") or event.get("type") or "")
     item_id = str(event.get("itemId") or event.get("item_id") or event.get("item", {}).get("id") or "")
+    # `item/updated` NÃO escreve mais ACTIVE: quem afirma que sincronizou é o sync,
+    # depois de consultar o item e puxar as contas. O webhook só diz o que a Pluggy
+    # disse.
     status_by_event = {
         "item/created": "UPDATING",
-        "item/updated": "ACTIVE",
         "item/error": "ERROR",
         "item/deleted": "DELETED",
     }
@@ -499,15 +708,40 @@ async def open_finance_pluggy_webhook(request: Request):
     if item_id and status:
         await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
 
+    # Antes de qualquer sync, resolve a POSSE do item. O `limit 1` sem `order by`
+    # que existia aqui sorteava um dono quando o item aparecia em duas contas.
+    conexoes = await asyncio.to_thread(get_connections_by_item_id, item_id) if item_id else []
+
     # transactions/deleted: a Pluggy manda os ids removidos — apaga direto, senão ficam
     # órfãos (um re-sync não os removeria, pois não voltam no list_transactions).
     if item_id and event_name == "transactions/deleted":
         deleted_ids = event.get("transactionIds") or event.get("transactionsIds") or []
         if isinstance(deleted_ids, list) and deleted_ids:
             await asyncio.to_thread(delete_open_finance_transactions, item_id, deleted_ids)
-    # Demais eventos com dado novo: dispara o sync pesado fora do request.
     elif item_id and event_name in PLUGGY_SYNC_EVENTS:
-        _schedule_pluggy_sync(item_id)
+        if len(conexoes) == 1:
+            _schedule_pluggy_sync(item_id)
+        elif not conexoes:
+            # Item que não conhecemos: registra (o GET /items lista devolve 401,
+            # então este é o único jeito de saber que ele existe) e NÃO sincroniza.
+            await log_system_event(
+                "warning", "of_webhook_item_unknown",
+                "Webhook de item sem conexão local",
+                source="open_finance", details={"item_id": item_id, "event": event_name},
+            )
+            await asyncio.to_thread(
+                register_item, None, provider_item_id=item_id,
+                origin="webhook", last_event=event_name,
+            )
+        else:
+            # Dois donos possíveis: sincronizar um deles é sincronizar a carteira
+            # do usuário errado. Recusa.
+            await log_system_event(
+                "error", "of_item_owner_conflict",
+                "Item Pluggy ligado a mais de uma conexão — sync recusado",
+                source="open_finance",
+                details={"item_id": item_id, "connections": len(conexoes), "event": event_name},
+            )
 
     await log_system_event(
         "info" if event_name != "item/error" else "warning",
@@ -557,7 +791,7 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
             await log_system_event(
                 "warning", "pluggy_disconnect_auth_failed",
                 f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
-                source="open_finance", details={"user_id": user_id, "error": str(exc)},
+                source="open_finance", details={"user_id": user_id, "error": str(exc)[:200]},
             )
         if api_key:
             for item_id in pluggy_item_ids:
@@ -568,7 +802,7 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
                         "warning", "pluggy_item_delete_failed",
                         f"Falha ao deletar item {item_id} na Pluggy no disconnect: {exc}",
                         source="open_finance",
-                        details={"item_id": item_id, "error": str(exc)},
+                        details={"item_id": item_id, "error": str(exc)[:200]},
                     )
 
     deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
