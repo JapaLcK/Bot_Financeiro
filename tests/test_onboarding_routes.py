@@ -161,8 +161,15 @@ def test_endpoint_nao_aceita_user_id_do_cliente(monkeypatch):
     fora = client.post("/onboarding/7/state", json={"step": 1}, headers=_csrf(client))
     assert fora.status_code == 404, "existe rota de onboarding com user_id no caminho"
 
-    router_src = (REPO / "frontend/routes/onboarding.py").read_text(encoding="utf-8")
-    assert "{user_id}" not in router_src, "o router declara user_id no caminho"
+    # Só as linhas de decorador: procurar no arquivo inteiro pegaria a própria
+    # docstring, que explica que NÃO há {user_id} no caminho.
+    decoradores = [
+        linha for linha in
+        (REPO / "frontend/routes/onboarding.py").read_text(encoding="utf-8").splitlines()
+        if linha.lstrip().startswith("@router.")
+    ]
+    assert decoradores, "nenhuma rota encontrada no router"
+    assert all("{user_id}" not in linha for linha in decoradores), decoradores
 
 
 def test_endpoint_exige_sessao_valida(monkeypatch):
