@@ -11,7 +11,8 @@ import db_support as _db_support
 from utils_date import _tz, day_tz
 
 from .connection import (
-    get_conn, cat_key_sql, TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+    get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
+    TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .users import ensure_user, ensure_user_tx
 
@@ -577,6 +578,8 @@ def list_launches_by_category(
     end_date: date | None = None,
     tipo: str | None = None,
     limit: int = 20,
+    include_internal: bool = True,
+    offset: int = 0,
 ) -> tuple[list[dict], dict]:
     """Lançamentos de UMA categoria, mais recente primeiro (launches + cartão).
 
@@ -607,16 +610,48 @@ def list_launches_by_category(
       vazia (medido). Chega em produção pela importação de cartão do Open
       Finance, que grava `credit_transactions.categoria` NULO.
     - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
-      `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
-      lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
+      `is_internal_movement` é filtrado só quando `include_internal=False`. O
+      default é True (comportamento de sempre): senão "liste os lançamentos em
+      investimento_aporte" voltaria vazio. Consequência do default: numa
       categoria de movimento interno (pagamento_fatura, aporte) o total daqui é
       MAIOR que o de `sum_spent_in_category_period`, que filtra
       `is_internal_movement = false` (`sum_spent_in_category_period`, db/budgets.py).
+      `include_internal=False` existe pro dashboard: quando a lista é aberta
+      CLICANDO numa linha da Distribuição do mês, ela tem que mostrar o mesmo
+      conjunto que aquela linha somou — e o donut (query 6 de
+      finance_bot_websocket_custom.py e `get_top_expense_categories`) filtra
+      `is_internal_movement = false`. Sem isso a linha dizia R$ 50 e o rodapé da
+      lista dizia R$ 750 pela mesma categoria e o mesmo mês.
 
     Retorna `(rows, resumo)`:
-    - rows: [{tipo, valor, categoria, descricao, data, fonte, user_seq}], no
-      máximo `limit`. `fonte` = 'launches' | 'credito'; `user_seq` é None no
-      crédito (não existe "#N" pra apagar). `data` é um `date`.
+    - rows: [{tipo, valor, categoria, descricao, nota, alvo, data, criado_em,
+      posted_at, has_time, fonte, user_seq, id, is_internal_movement}], no
+      máximo `limit`.
+      `fonte` = 'launches' | 'credito'; `user_seq` é None no crédito (não existe
+      "#N" pra apagar). `id` pareia com `user_seq`: é o `launches.id` na perna de
+      launches e NULO na de crédito — de propósito. As duas tabelas têm
+      sequências próprias, então o id COLIDE, e a perna de crédito fixa
+      `tipo='despesa'` (ver acima): um `credit_transactions.id` saindo daqui com
+      tipo='despesa' faria o chamador rotear o delete pro endpoint de launches e
+      apagar OUTRO registro. Nulo na origem = colisão impossível. `data` é um
+      `date` de PAREDE no fuso do app (`day_tz`, utils_date), não o `::date` do
+      fuso da sessão; `criado_em` é o instante cheio (o editor do dashboard
+      preenche "Data e hora" com ele — `data` sozinho abria o campo vazio).
+      `posted_at` + `has_time` são o mesmo par que a Visão Geral usa (query 4 do
+      dashboard, `LAUNCH_HAS_TIME_SQL`): sem eles o front caía sempre no galho
+      "só data" do `fmtLaunchWhen` e a mesma despesa saía "10/03, 00:30" numa
+      tela e "09/03" na outra.
+    - `nota` e `alvo` vêm CRUS, cada um na sua chave. `descricao` continua sendo
+      o rótulo pronto (`coalesce(alvo, nota, '—')`) que o WhatsApp imprime, mas
+      ele NÃO serve pra pré-preencher um formulário de edição: numa linha com os
+      dois preenchidos (recurring_charger.py, db/bills.py, db/cards.py) ele é o
+      ALVO, e salvar o formulário gravava o alvo por cima da nota real.
+    `offset` (default 0, aditivo) é o "carregar mais" do dashboard: os 3
+    chamadores do WhatsApp (core/handlers/launches.py:442, :782, :855) passam
+    `tipo`/`limit` por KEYWORD e nada mais, então nenhum deles muda de
+    comportamento. Ele é seguro porque o `order by` acima é TOTAL — sem
+    desempate estável, OFFSET repete linha numa página e come outra.
+
     - resumo: {"n_total", "despesa", "receita"} sobre TODAS as linhas que casam,
       não só as `limit` devolvidas — os totais vêm de window aggregates, que o
       Postgres calcula ANTES do LIMIT. Sem isso o chamador somaria só as linhas
@@ -637,6 +672,8 @@ def list_launches_by_category(
     if aliases:
         launch_filters += " and tipo = any(%s)"
         params.append(list(aliases))
+    if not include_internal:
+        launch_filters += " and is_internal_movement = false"
     if start_date:
         launch_filters += " and criado_em >= %s"
         params.append(datetime.combine(start_date, datetime.min.time()))
@@ -662,9 +699,24 @@ def list_launches_by_category(
                            ct.valor,
                            coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
                            coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
+                           -- Mesmo texto do `descricao` de propósito: a compra
+                           -- no crédito não tem `alvo` aqui e a linha nunca é
+                           -- editável (id nulo), então `nota` só precisa ser o
+                           -- rótulo que a tela já mostra.
+                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as nota,
+                           null::text as alvo,
                            ct.purchased_at::timestamp as dt,
+                           -- Compra no crédito não tem hora: `purchased_at` é
+                           -- `date` (db/schema.py). has_time=false + posted_at
+                           -- fazem o front imprimir "dd/mm" sem passar por
+                           -- conversão de fuso nenhuma.
+                           ct.purchased_at as posted_at,
+                           false as has_time,
                            'credito' as fonte,
-                           null::int as user_seq
+                           null::int as user_seq,
+                           null::int as id,
+                           ct.id as ord_id,
+                           false as is_internal_movement
                     {credit_from}
                     where ct.user_id = %s
                       and {_cat_ct} = {_arg}
@@ -677,7 +729,9 @@ def list_launches_by_category(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select tipo, valor, categoria, descricao, dt, fonte, user_seq,
+                select tipo, valor, categoria, descricao, nota, alvo, dt,
+                       posted_at, has_time, fonte,
+                       user_seq, id, ord_id, is_internal_movement,
                        count(*) over () as n_total,
                        coalesce(sum(valor) filter (
                            where tipo in ('despesa', 'saida')) over (), 0) as tot_despesa,
@@ -688,9 +742,16 @@ def list_launches_by_category(
                            valor,
                            coalesce(nullif(categoria, ''), 'outros') as categoria,
                            coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
+                           nota,
+                           alvo,
                            criado_em as dt,
+                           posted_at,
+                           {LAUNCH_HAS_TIME_SQL} as has_time,
                            'launches' as fonte,
-                           user_seq
+                           user_seq,
+                           id,
+                           id as ord_id,
+                           is_internal_movement
                     from launches
                     where user_id = %s
                       and {_cat} = {_arg}
@@ -699,10 +760,17 @@ def list_launches_by_category(
                       {launch_filters}
                     {credit_sql}
                 ) agg
-                order by dt desc, user_seq desc nulls last
-                limit %s
+                -- Ordem TOTAL, e é o que torna a paginação por OFFSET honesta:
+                -- `dt desc, user_seq desc` empatava todas as linhas de crédito do
+                -- mesmo dia (user_seq é nulo nelas), e empate + OFFSET faz o
+                -- Postgres repetir uma linha na página 2 e sumir com outra.
+                -- `fonte` separa as duas pernas (id colide entre as tabelas) e
+                -- `ord_id` é a PK dentro de cada uma. A ordem VISÍVEL não muda:
+                -- 'launches' > 'credito' no desc, e user_seq cresce junto com o id.
+                order by dt desc, fonte desc, ord_id desc
+                limit %s offset %s
                 """,
-                (*params, int(limit)),
+                (*params, int(limit), max(0, int(offset))),
             )
             rows = cur.fetchall()
 
@@ -717,6 +785,8 @@ def list_launches_by_category(
             "valor": float(r["valor"] or 0),
             "categoria": r["categoria"],
             "descricao": r["descricao"],
+            "nota": r["nota"],
+            "alvo": r["alvo"],
             # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
             # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São Paulo
             # sairia aqui como o dia SEGUINTE — o MESMO lançamento com dia diferente
@@ -724,8 +794,13 @@ def list_launches_by_category(
             # core/handlers/launches.py, que já usa `day_tz`). A perna do crédito é
             # naive (`purchased_at::timestamp`) e passa direto.
             "data": day_tz(r["dt"]),
+            "criado_em": r["dt"],
+            "posted_at": r["posted_at"],
+            "has_time": bool(r["has_time"]),
             "fonte": r["fonte"],
             "user_seq": r["user_seq"],
+            "id": r["id"],
+            "is_internal_movement": bool(r["is_internal_movement"]),
         }
         for r in rows
     ], resumo

@@ -105,6 +105,7 @@ from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
+from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.push import router as push_router
@@ -5516,6 +5517,13 @@ app.include_router(affiliates_router)
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
 app.include_router(agents_router)
+
+
+# ─── Lançamentos de uma categoria → frontend/routes/categories.py ────────────
+# Antes do CRUD de /categories (abaixo, ainda no monólito): não há GET em
+# /categories/{user_id}/{cat_id}, então não há colisão hoje — registrar aqui
+# garante que um catch-all futuro não engula esta rota.
+app.include_router(categories_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")

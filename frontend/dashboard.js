@@ -1828,14 +1828,39 @@ function _renderCategoriesDistribution(categories) {
   const metaByName = {};
   (categories || []).forEach(c => { metaByName[(c.name || "").toLowerCase()] = c; });
 
+  // Janela do mês VISÍVEL (a distribuição é do mês, não do histórico todo).
+  // getDate() do dia 0 do mês seguinte = último dia; sem toISOString, que
+  // converteria pro fuso e podia voltar um dia.
+  const dy = (lastData && lastData.year) || viewYear;
+  const dm = (lastData && lastData.month) || viewMonth;
+  const mm = String(dm).padStart(2, "0");
+  // `tipo`/`includeInternal` NÃO são enfeite: esta barra soma só despesa e
+  // ignora movimento interno (query 6 de finance_bot_websocket_custom.py). Sem
+  // os dois filtros a lista abria contradizendo o número que acabou de ser
+  // clicado — R$ 50 na barra, R$ 750 no rodapé da lista, mesma categoria.
+  const win = {
+    from: `${dy}-${mm}-01`,
+    to: `${dy}-${mm}-${new Date(dy, dm, 0).getDate()}`,
+    tipo: "despesa",
+    includeInternal: false,
+  };
+
   dist.innerHTML = monthly.map((m, i) => {
     const meta = metaByName[(m.categoria || "").toLowerCase()] || {};
     const emoji = meta.emoji || "🏷️";
     const color = meta.color || "#FF2D8E";
     const pct = total > 0 ? (m.total / total * 100) : 0;
     const fillClass = pct > 30 ? "red" : pct > 15 ? "yellow" : "green";
+    // `m.categoria` é texto de terceiro (a tool da IA escreve em
+    // launches.categoria): JSON.stringify não escapa `'`/`&`, então vai
+    // escapeHtmlSafe por fora — mesmo par de _renderCategoryPill.
+    const argsSafe = escapeHtmlSafe(JSON.stringify(m.categoria) + "," + JSON.stringify(win));
     return `
-      <div class="bar-row" style="animation-delay:${i * 70}ms">
+      <div class="bar-row" style="cursor:pointer;animation-delay:${i * 70}ms"
+           role="button" tabindex="0"
+           aria-label="${escapeHtmlSafe(`Ver todos os lançamentos em ${m.categoria || ""} neste mês`)}"
+           onclick='openCategoryLaunches(${argsSafe})'
+           onkeydown='if(event.key==="Enter"||event.key===" "){event.preventDefault();openCategoryLaunches(${argsSafe});}'>
         <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${phIcon(emoji)}</div>
         <div class="bar-body">
           <div class="bar-head"><span class="name">${escapeHtmlSafe(m.categoria)}</span><span class="val">${_fmtBRL(m.total)}</span></div>
@@ -1864,9 +1889,427 @@ function _renderCategoryPill(cat, idx = 0) {
   `;
 }
 
+// ── Lançamentos de uma categoria ──────────────────────────────────────
+// Duas portas, e elas mostram conjuntos DIFERENTES de propósito:
+//   • linha da Distribuição do mês → janela do mês + tipo=despesa + sem
+//     movimento interno, que é exatamente o que aquela barra soma. A lista não
+//     pode contradizer o número que o usuário acabou de clicar.
+//   • "Ver lançamentos" do modal de edição → a categoria inteira, sem filtro
+//     (não há número clicado); o subtítulo diz que inclui receita e interna.
+//
+// UM overlay por vez, sempre. Todo .overlay é z-index:800 (dashboard.css) e
+// cada modal registra o SEU handler de ESC no document, em bolha: com dois
+// abertos, um ESC fecharia os dois e quem pinta por cima vira sorteio da ordem
+// de inserção no DOM. Por isso este modal FECHA o de edição ao abrir (e reabre
+// ao fechar), e o detalhe de lançamento fecha ESTE ao abrir (e reabre).
+
+const _CL_PAGE = 50;                // tamanho da página do "Carregar mais"
+let _catLaunchesRows = [];          // linhas já adaptadas, na ordem da tela
+let _catLaunchesTotal = 0;          // n_total do servidor (TODAS as que casam)
+let _catLaunchesLoadingMore = false;
+let _catLaunchesCtx = null;         // opts da lista NO AR (null = não há lista pra voltar)
+let _catLaunchesReturnFocus = null;
+// Mesmo canal de fetch do Histórico (makeFetchChannel): aborta o pedido anterior
+// e devolve `undefined` quando este foi superado. Sem ele, clicar "mercado" e
+// depois "saúde" deixava a resposta de mercado chegar por último e pintar as
+// linhas de mercado sob o título "saúde" — e o clique numa linha abria o
+// detalhe (com Excluir) de um lançamento de OUTRA categoria.
+const _catLaunchesChannel = makeFetchChannel();
+
+function _ensureCategoryLaunchesModal() {
+  if (document.getElementById("cat-launches-overlay")) return;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="overlay" id="cat-launches-overlay">
+      <div class="modal wide cl-modal" role="dialog" aria-modal="true" aria-labelledby="cl-title">
+        <h3 id="cl-title">Lançamentos</h3>
+        <div class="msub" id="cl-sub"></div>
+        <div class="cl-sum" id="cl-sum" hidden></div>
+        <div id="cl-list"></div>
+        <div id="cl-more" class="cl-more"></div>
+        <div class="modal-acts cl-acts">
+          <span class="cl-count" id="cl-foot"></span>
+          <button type="button" class="btn-save" id="cl-close">Fechar</button>
+        </div>
+      </div>
+    </div>`);
+  const ov = document.getElementById("cat-launches-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeCategoryLaunches(); });
+  document.getElementById("cl-close").addEventListener("click", closeCategoryLaunches);
+  /* CAPTURA + stopPropagation — o mesmo remédio do #generic-confirm-overlay
+     (:2663, porquê em :2655) e a resposta pra classe que a issue #76 já pagou.
+
+     O eixo que faltava não é "quais overlays estão abertos", é A ORDEM EM QUE OS
+     LISTENERS FORAM REGISTRADOS: os `_ensure*Modal` são preguiçosos, então quem
+     o usuário abriu primeiro na sessão roda primeiro, em bolha, no MESMO
+     `document`. Com o detalhe de lançamento aberto POR CIMA desta lista, um Esc
+     fazia (1) o handler do detalhe fechar e reabrir a lista SINCRONAMENTE e
+     (2) o handler da lista, se registrado depois, ver `open` e fechá-la — um Esc
+     levava os dois. Só acontecia se o usuário tivesse visto algum detalhe antes
+     (Visão Geral/Histórico), que é a ordem de uso normal.
+
+     Em captura este handler decide ANTES de qualquer bolha: com a lista
+     escondida atrás do detalhe ele sai sem fazer nada, e a reabertura não é mais
+     vista por ninguém. Não depende de ordem de registro — fecha a classe, não o
+     caso. `stopPropagation` consome a tecla quando a lista É a de cima, pra não
+     derrubar o que está atrás (o mesmo motivo do :2655). */
+  document.addEventListener("keydown", e => {
+    if (!ov.classList.contains("open")) return;
+    if (e.key === "Escape") { e.stopPropagation(); closeCategoryLaunches(); return; }
+    // Trap de foco: helper compartilhado do modals.js (`window.pigTrapTab`), o
+    // mesmo que o detalhe de lançamento usa. O seletor dele já inclui
+    // `[tabindex]:not([tabindex="-1"])`, então as linhas (role=button
+    // tabindex=0) e o "Carregar mais" entram sozinhos — prender o Tab só no
+    // Fechar tornaria a lista inalcançável por teclado. O `stopPropagation`
+    // continua sendo daqui: é o que impede a tecla de chegar no diálogo de trás
+    // (mesmo motivo do Esc acima).
+    if (e.key !== "Tab") return;
+    e.stopPropagation();
+    if (window.pigTrapTab) window.pigTrapTab(e, ov.querySelector(".modal"));
+  }, true);
+}
+
+function _hideCategoryLaunches() {
+  const ov = document.getElementById("cat-launches-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+/* `_catLaunchesCtx != null` significa UMA coisa só: existe uma lista pra onde
+   voltar (visível, ou escondida atrás do detalhe). Todo caminho que abandona a
+   lista de vez passa por aqui — fechar, e também Editar/Excluir, que trocam o
+   detalhe pelo editor e nunca mais voltam. Sem isto o ctx e o foco guardado
+   ficavam de pé indefinidamente depois de "Editar". Devolve o ctx antigo. */
+function _forgetCategoryLaunches(restoreFocus = true) {
+  const ctx = _catLaunchesCtx;
+  _catLaunchesCtx = null;
+  _catLaunchesRows = [];
+  _catLaunchesTotal = 0;
+  _catLaunchesLoadingMore = false;
+  // `restoreFocus = false` quando outro modal assume a tela (Editar/Excluir):
+  // devolver o foco pra linha do gráfico o deixaria ATRÁS do overlay novo.
+  if (restoreFocus && _catLaunchesReturnFocus
+      && typeof _catLaunchesReturnFocus.focus === "function") {
+    _catLaunchesReturnFocus.focus();
+  }
+  _catLaunchesReturnFocus = null;
+  return ctx;
+}
+
+function closeCategoryLaunches() {
+  _hideCategoryLaunches();
+  const ctx = _forgetCategoryLaunches();
+  // Veio do modal de edição: devolve o usuário pra lá. O formulário é remontado
+  // dos valores persistidos — nome digitado e não salvo se perde, que é o que
+  // openCategoryEditModal já faz em toda abertura.
+  if (ctx && ctx.backToEdit && _catEditCurrent) openCategoryEditModal(_catEditCurrent);
+}
+
+/* Caixa central da lista (carregando / vazio / erro). Mesmo padrão de estado
+   vazio dos Cartões e dos Parcelamentos: sticker do Piggy, título e o que fazer
+   pra sair do zero — aqui o caminho é mandar o gasto pro Piggy no WhatsApp,
+   que é como o lançamento nasce. */
+function _clBox(sticker, titulo, corpo, classe = "empty-sticker") {
+  return `<div class="cl-box">
+    <img class="${classe}" src="/brand/stickers/${sticker}.webp" alt="" />
+    <div class="cl-box-t">${titulo}</div>
+    ${corpo ? `<div>${corpo}</div>` : ""}
+  </div>`;
+}
+
+/* Nome que a HASHTAG consegue carregar inteiro. É a MESMA classe de
+   `_extract_explicit_category` (parsers.py:119, `#([a-zA-ZÀ-ÿ0-9_\-]+)`), e ela
+   casa UM token: fora dela o `#` corta no primeiro caractere estranho e o resto
+   do nome vira texto solto. Medido pelo `handle_incoming`
+   (tests/test_categoria_frase_estado_vazio.py): "gastei 30 na loja
+   #mcdonald's" grava a categoria "mcdonald" — a lista continua vazia E nasce
+   uma categoria FANTASMA, que ainda vira barra na Distribuição. O mesmo com
+   `uber/99` → "uber", `l'occitane` → "l", `cafe & cia` → "cafe".
+   Testar só espaço (o que estava aqui) deixava passar ' / & % ( ) + e emoji. */
+const _CAT_HASHTAG_OK = /^[a-zA-ZÀ-ÿ0-9_-]+$/;
+
+/* A frase que o estado vazio ensina. Fonte única com
+   tests/test_categoria_frase_estado_vazio.py, que a roda pelo `handle_incoming`.
+   Fora da classe da hashtag sobra a MENÇÃO simples, que casa pela categoria do
+   próprio usuário (`custom_category_match`) e — medido — nunca cria categoria
+   fantasma: quando erra, cai em "outros", que já existe. */
+function _catExemploFrase(nome) {
+  return _CAT_HASHTAG_OK.test(nome)
+    ? `gastei 30 na loja #${nome}`
+    : `gastei 30 em ${nome}`;
+}
+
+/* Uma linha da lista. `base` é o índice GLOBAL da primeira: o onclick indexa
+   `_catLaunchesRows`, então o "Carregar mais" tem que continuar a numeração em
+   vez de recomeçar do zero. */
+function _clRowsHtml(rows, base) {
+  return rows.map((l, k) => {
+    const i = base + k;
+    const isCred = l.fonte === "credito";
+    const isIn = l.tipo === "receita" || l.tipo === "entrada";
+    const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
+    // Mesma convenção de cor da Visão Geral: entrada verde, saída vermelha,
+    // movimentação interna apagada (não é gasto, é dinheiro que mudou de lugar).
+    const valClass = l.is_internal_movement ? "" : (isIn ? "g" : "r");
+    // Índice, não o objeto: nenhum texto de usuário entra no atributo onclick.
+    return `
+      <div class="bar-row cl-row" role="button" tabindex="0"
+           aria-label="${escapeHtmlSafe(`${desc}, ${_fmtBRL(l.valor)}, ${fmtLaunchWhen(l)}`)}"
+           onclick="openCategoryLaunchDetail(${i})"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCategoryLaunchDetail(${i});}">
+        <div class="bar-icon">${isCred ? '<i class="ph ph-credit-card" aria-hidden="true"></i>' : phIcon(isIn ? "💰" : "💸")}</div>
+        <div class="bar-body">
+          <div class="bar-head">
+            <span class="name">${escapeHtmlSafe(desc)}</span>
+            <span class="val ${valClass}"${l.is_internal_movement ? ' style="color:var(--text-2)"' : ""}>${_fmtBRL(l.valor)}</span>
+          </div>
+          <div class="bar-sub">${escapeHtmlSafe(fmtLaunchWhen(l))}${isCred ? " • 💳 cartão" : (l.user_seq ? ` • #${l.user_seq}` : "")}${l.is_internal_movement ? " • movimentação interna" : ""}</div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+/* Rodapé da lista: contagem à esquerda do Fechar, e o "Carregar mais" logo
+   abaixo das linhas enquanto sobrar página. O pedido do dono era ver TODOS os
+   lançamentos da categoria; "Mostrando 50 de 312" sem saída não era isso. */
+function _clPintaRodape() {
+  const n = _catLaunchesRows.length;
+  const total = _catLaunchesTotal;
+  document.getElementById("cl-foot").textContent = total > n
+    ? `Mostrando ${n} de ${total} lançamentos`
+    : `${total} lançamento${total === 1 ? "" : "s"}`;
+  const more = document.getElementById("cl-more");
+  more.innerHTML = total > n
+    ? `<button type="button" class="mock-cta outline cl-more-btn" id="cl-more-btn"
+               onclick="loadMoreCategoryLaunches()">Carregar mais ${Math.min(_CL_PAGE, total - n)}</button>`
+    : "";
+}
+
+async function openCategoryLaunches(nome, opts) {
+  _ensureCategoryLaunchesModal();
+  const o = opts || {};
+  // O ctx é o pedido: guarda os MESMOS filtros que foram pro servidor, pra
+  // reabrir igual (voltar do detalhe) e pra servir de identidade da geração.
+  const ctx = {
+    nome,
+    from: o.from || null,
+    to: o.to || null,
+    tipo: o.tipo || null,
+    includeInternal: o.includeInternal !== false,
+    backToEdit: !!o.backToEdit,
+  };
+  _catLaunchesCtx = ctx;
+  _catLaunchesLoadingMore = false;
+  if (!_catLaunchesReturnFocus) _catLaunchesReturnFocus = document.activeElement;
+
+  const list = document.getElementById("cl-list");
+  const sum = document.getElementById("cl-sum");
+  // Aberta pela Distribuição: mesmos filtros do gráfico (só despesa, sem
+  // movimento interno). O subtítulo tem que dizer QUAL conjunto está na tela —
+  // é o que impede a lista de parecer contradizer a barra que foi clicada.
+  const doGrafico = ctx.tipo === "despesa" && !ctx.includeInternal;
+  const mesLabel = ctx.from ? PT_MONTHS[Number(ctx.from.slice(5, 7)) - 1] : "";
+  document.getElementById("cl-title").textContent = `Lançamentos em ${nome}`;
+  // Subtítulo NEUTRO enquanto carrega: qual conjunto está na tela só se sabe
+  // depois da resposta (o plano pode ter cortado a janela — ver `_clSubtitulo`).
+  document.getElementById("cl-sub").textContent = doGrafico
+    ? `Despesas de ${mesLabel}` : "Lançamentos desta categoria";
+  document.getElementById("cl-foot").textContent = "";
+  document.getElementById("cl-more").innerHTML = "";
+  sum.hidden = true;
+  list.innerHTML = _clBox("loading", "Carregando…", "", "loading-sticker");
+  document.getElementById("cat-launches-overlay").classList.add("open");
+  const closeBtn = document.getElementById("cl-close");
+  if (closeBtn) closeBtn.focus();
+
+  let data;
+  try {
+    data = await _catLaunchesChannel.run(
+      (signal) => _catLaunchesFetch(ctx, 0, signal), { force: true });
+  } catch (err) {
+    if (_catLaunchesCtx === ctx) {
+      list.innerHTML = _clBox("thinking", "Não deu pra carregar",
+                              escapeHtmlSafe(String(err.message || err)));
+    }
+    return;
+  }
+  // `undefined` = superado por uma abertura mais nova (o canal já abortou este).
+  // ctx !== o atual = o usuário fechou (ESC) ou trocou de categoria enquanto
+  // carregava: renderizar aqui povoaria um modal fechado, ou pintaria as linhas
+  // de uma categoria sob o título de outra.
+  if (data === undefined || _catLaunchesCtx !== ctx) return;
+
+  // Sem adaptador: a rota manda as MESMAS chaves que a Visão Geral
+  // (`posted_at` + `has_time` + `criado_em`), então `fmtLaunchWhen` imprime
+  // "dd/mm, HH:MM" onde a hora é confiável e "dd/mm" onde só a data é. Mapear
+  // `posted_at: r.data` era o que fazia esta lista nunca mostrar hora e imprimir
+  // o dia do fuso da SESSÃO do Postgres — "09/03" aqui, "10/03, 00:30" na Visão
+  // Geral, mesmo lançamento.
+  // `nota`, `alvo` e `criado_em` vêm CRUS — o editor pré-preenche a partir deles,
+  // e fabricar `nota` a partir de `descricao` (que é o ALVO quando existe)
+  // gravava o alvo por cima da nota real ao salvar. `id` já vem nulo no crédito
+  // (db/accounts.py), então o `editable` de _renderLaunchDetail esconde
+  // Editar/Excluir sozinho.
+  _catLaunchesRows = data.launches || [];
+
+  const resumo = data.resumo || { n_total: 0, despesa: 0, receita: 0 };
+  _catLaunchesTotal = resumo.n_total || 0;
+  const win = data.window || {};
+  document.getElementById("cl-sub").textContent =
+    _clSubtitulo(doGrafico, mesLabel, win);
+
+  if (!_catLaunchesRows.length) {
+    /* A frase tem que produzir o que promete — e a promessa é o que muda aqui.
+       `_catExemploFrase` escolhe hashtag ou menção pelo que o parser aguenta, e
+       a segunda linha diz o que fazer quando ele erra mesmo assim: existe nome
+       (ex.: "b+c") em que nenhuma das duas casa, e aí o gasto cai em "outros".
+       Prometer "e o lançamento aparece aqui" naquele caso era a tela mentindo
+       pela terceira vez. */
+    list.innerHTML = _clBox("point",
+      doGrafico ? `Nada em ${escapeHtmlSafe(nome)} em ${mesLabel}` : "Categoria ainda vazia",
+      `Mande <b>“${escapeHtmlSafe(_catExemploFrase(nome))}”</b> pro Piggy no WhatsApp. ` +
+      `Se ele mandar pra outra categoria, dá pra trocar no próprio lançamento.`);
+    return;
+  }
+
+  list.innerHTML = _clRowsHtml(_catLaunchesRows, 0);
+
+  // O número que o usuário veio buscar fica ACIMA da lista, em corpo grande:
+  // no dashboard clareza financeira ganha da decoração. A contagem é metadado
+  // e desce pro rodapé, ao lado do Fechar.
+  // Categoria só de receita (salário, rendimentos) não abre com "Saídas R$ 0,00"
+  // em corpo grande — o número que importa ali é a entrada.
+  const saidas = resumo.despesa > 0 || resumo.receita === 0
+    ? `<span><span class="cl-k">${doGrafico ? `Gasto em ${mesLabel}` : "Saídas"}</span>` +
+      `<b>${_fmtBRL(resumo.despesa)}</b></span>`
+    : "";
+  sum.innerHTML = saidas + (resumo.receita > 0
+    ? `<span class="cl-in"><span class="cl-k">Entradas</span><b>${_fmtBRL(resumo.receita)}</b></span>`
+    : "");
+  sum.hidden = false;
+  // `resumo` cobre TODAS as linhas que casam (window aggregate ANTES do LIMIT),
+  // não só as que couberam na página — é o que faz "Mostrando 50 de 312" e o
+  // total em cima continuarem verdadeiros com paginação.
+  _clPintaRodape();
+}
+
+/* O pedido, em um lugar só: abertura e "carregar mais" mandam os MESMOS
+   filtros, mudando só o offset. Duas cópias da URL era o jeito de a página 2
+   vir com filtro diferente da 1. */
+async function _catLaunchesFetch(ctx, offset, signal) {
+  const q = new URLSearchParams({ categoria: ctx.nome, limit: String(_CL_PAGE) });
+  if (offset) q.set("offset", String(offset));
+  if (ctx.from) q.set("from", ctx.from);
+  if (ctx.to) q.set("to", ctx.to);
+  if (ctx.tipo) q.set("tipo", ctx.tipo);
+  if (!ctx.includeInternal) q.set("include_internal", "false");
+  const resp = await fetch(`${API}/categories/${USER_ID}/launches?${q}`,
+                           { credentials: "same-origin", signal });
+  // readApiError: o 402 do gate de plano vem como
+  // {"detail":{"error":"subscription_required"}} e resp.text() jogava esse
+  // JSON cru na cara do usuário.
+  if (!resp.ok) throw new Error(await readApiError(resp));
+  return await resp.json();
+}
+
+/* O subtítulo tem que ser VERDADE, e ele deixou de ser quando a rota passou a
+   cortar a janela pelo teto de histórico do plano (`history_earliest_date`,
+   core/services/plan_service.py). Numa conta Grátis o corte é
+   `history_current_month_only` → dia 1 do mês, e a tela dizia "Tudo nesta
+   categoria" mostrando UM MÊS. `capped_by_plan` vem da rota justamente porque
+   `window.from` sozinho não distingue "o usuário pediu este mês" de "o plano
+   cortou". Sem upsell: é o fato e a data, que é o que o dono pediu. */
+function _clSubtitulo(doGrafico, mesLabel, win) {
+  const desde = win.capped_by_plan && win.from
+    ? win.from.split("-").reverse().join("/") : "";
+  if (desde) {
+    return doGrafico
+      ? `Despesas de ${mesLabel} — seu plano guarda o histórico desde ${desde}.`
+      : `Despesas, receitas e movimentações internas desde ${desde} — é até onde seu plano guarda o histórico.`;
+  }
+  return doGrafico
+    ? `Despesas de ${mesLabel} — o mesmo conjunto que a barra do gráfico soma.`
+    : "Tudo nesta categoria: despesas, receitas e movimentações internas.";
+}
+
+/* "Carregar mais": ANEXA a próxima página, nunca substitui.
+
+   As corridas, enumeradas antes de escrever (a lista tem UM canal de fetch, que
+   aborta o pedido anterior — `makeFetchChannel`):
+   • clique repetido em "Carregar mais" → o `_catLaunchesLoadingMore` recusa o
+     segundo antes de chegar no canal. Sem ele os dois pediriam o MESMO offset
+     (a lista ainda não cresceu) e o segundo abortaria o primeiro — não duplica,
+     mas o botão piscava sem motivo.
+   • trocar de categoria com uma página em voo → a abertura nova roda no mesmo
+     canal e aborta esta; se ainda assim a resposta chegar, `_catLaunchesCtx !==
+     ctx` recusa o append. Sem essa guarda, linhas de "mercado" entrariam sob o
+     título "saúde".
+   • fechar (Esc) durante o voo → mesmo `ctx` diferente (o close zera), o append
+     não acontece e o modal fechado não é repovoado.
+   • offset estável: a ordem do SQL é TOTAL (`db/accounts.py`), então a página 2
+     não repete linha da 1 nem pula nenhuma. */
+async function loadMoreCategoryLaunches() {
+  const ctx = _catLaunchesCtx;
+  if (!ctx || _catLaunchesLoadingMore) return;
+  const btn = document.getElementById("cl-more-btn");
+  const offset = _catLaunchesRows.length;
+  _catLaunchesLoadingMore = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Carregando…"; }
+
+  let data;
+  try {
+    data = await _catLaunchesChannel.run(
+      (signal) => _catLaunchesFetch(ctx, offset, signal), { force: true });
+  } catch (err) {
+    _catLaunchesLoadingMore = false;
+    if (_catLaunchesCtx !== ctx) return;   // lista trocou/fechou: não pinta nada
+    // Repinta o botão (o "Carregando…" volta a ser clicável) e põe o motivo
+    // embaixo: o usuário tem que poder tentar de novo sem reabrir a lista.
+    _clPintaRodape();
+    const m = document.getElementById("cl-more");
+    if (m) m.insertAdjacentHTML("beforeend",
+      `<div class="cl-more-err">${escapeHtmlSafe(String(err.message || err))}</div>`);
+    return;
+  }
+  _catLaunchesLoadingMore = false;
+  if (data === undefined || _catLaunchesCtx !== ctx) return;
+
+  const novas = data.launches || [];
+  const base = _catLaunchesRows.length;
+  _catLaunchesRows = _catLaunchesRows.concat(novas);
+  // O total vem do servidor a cada página: se alguém lançou/apagou no meio, o
+  // rodapé segue o número REAL em vez de um contador congelado na 1ª página.
+  _catLaunchesTotal = (data.resumo && data.resumo.n_total) || _catLaunchesTotal;
+  if (novas.length) {
+    document.getElementById("cl-list")
+            .insertAdjacentHTML("beforeend", _clRowsHtml(novas, base));
+  }
+  // Página vazia com total dizendo que havia mais (linha apagada entre os dois
+  // pedidos): sem isto o botão ficaria de pé pedindo uma página que não vem.
+  if (!novas.length) _catLaunchesTotal = _catLaunchesRows.length;
+  _clPintaRodape();
+  // O botão sumiu (acabou) → o foco ficaria no nada, e o trap de Tab devolveria
+  // pro topo do diálogo. Manda pra primeira linha nova, que é o que o usuário
+  // acabou de pedir.
+  const aindaTem = document.getElementById("cl-more-btn");
+  if (aindaTem) aindaTem.focus();
+  else {
+    const linhas = document.querySelectorAll("#cl-list .cl-row");
+    if (linhas[base]) linhas[base].focus();
+  }
+}
+
+function openCategoryLaunchDetail(idx) {
+  const l = _catLaunchesRows[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "category";
+  _hideCategoryLaunches();   // um overlay por vez; closeLaunchDetail reabre
+  _renderLaunchDetail(l);
+}
+
 // ── Modal cadastrar/editar categoria ──────────────────────────────────
 
 let _catEditState = { id: null, emoji: "🏷️", color: "#FF2D8E", is_system: false };
+let _catEditCurrent = null;   // objeto recebido por openCategoryEditModal, pro retorno da lista
 
 function _ensureCategoryModal() {
   if (document.getElementById("cat-edit-overlay")) return;
@@ -1874,6 +2317,13 @@ function _ensureCategoryModal() {
     <div class="overlay" id="cat-edit-overlay">
       <div class="modal wide">
         <h3 id="cat-edit-title">Nova categoria</h3>
+        <!-- Entrada da lista de lançamentos: fica ANTES do formulário de
+             aparência de propósito — "o que tem nesta categoria" vem antes de
+             "que cor ela tem", e embaixo (junto de Salvar/Excluir) parecia uma
+             ação de formulário, que não é. -->
+        <div id="cat-edit-launches-row" class="cl-open-row" style="display:none">
+          <button type="button" class="mock-cta outline" onclick="categoryLaunchesFromModal()"><i class="ph ph-receipt" aria-hidden="true"></i> Ver lançamentos</button>
+        </div>
         <form id="cat-edit-form" onsubmit="event.preventDefault(); saveCategoryFromModal();">
           <div class="invest-form">
             <div class="field">
@@ -1933,6 +2383,7 @@ function _setCatColor(c) { _catEditState.color = c; _renderCategoryPickers(); }
 function openCategoryEditModal(category) {
   _ensureCategoryModal();
   const isEdit = category && category.id;
+  _catEditCurrent = isEdit ? category : null;
   _catEditState = {
     id: isEdit ? category.id : null,
     emoji: isEdit ? category.emoji : "🏷️",
@@ -1947,6 +2398,8 @@ function openCategoryEditModal(category) {
   document.getElementById("cat-edit-archive-btn").style.display = (isEdit && !category.is_archived) ? "" : "none";
   document.getElementById("cat-edit-unarchive-btn").style.display = (isEdit && category.is_archived) ? "" : "none";
   document.getElementById("cat-edit-delete-btn").style.display = (isEdit && !category.is_system) ? "" : "none";
+  // "Nova categoria" não tem lançamento pra listar.
+  document.getElementById("cat-edit-launches-row").style.display = isEdit ? "" : "none";
   _renderCategoryPickers();
   document.getElementById("cat-edit-overlay").classList.add("open");
   setTimeout(() => document.getElementById("cat-edit-name").focus(), 50);
@@ -1955,6 +2408,16 @@ function openCategoryEditModal(category) {
 function closeCategoryEditModal() {
   const el = document.getElementById("cat-edit-overlay");
   if (el) el.classList.remove("open");
+}
+
+// Sem janela de data: a categoria inteira, 50 linhas por página ("Carregar
+// mais" traz o resto). O plano ainda pode cortar o INÍCIO da janela
+// (`history_earliest_date`) — quando corta, o subtítulo diz desde quando.
+function categoryLaunchesFromModal() {
+  const cat = _catEditCurrent;
+  if (!cat) return;
+  closeCategoryEditModal();
+  openCategoryLaunches(cat.name, { backToEdit: true });
 }
 
 async function saveCategoryFromModal() {
@@ -7331,13 +7794,27 @@ function _ensureLaunchDetailModal() {
   document.getElementById("ld-edit").addEventListener("click", _launchDetailEdit);
   document.getElementById("ld-delete").addEventListener("click", _launchDetailDelete);
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape" && ov.classList.contains("open")) closeLaunchDetail();
+    if (!ov.classList.contains("open")) return;
+    if (e.key === "Escape") { closeLaunchDetail(); return; }
+    /* Trap de Tab: sem ele o foco saía do diálogo e chegava no que está ATRÁS do
+       overlay. Deixou de ser só cosmético quando a linha da Distribuição virou
+       `role=button tabindex=0`: o Tab parava nela e o Enter abria a lista de
+       lançamentos POR CIMA do detalhe — dois overlays no mesmo z-index, que é a
+       invariante que esta feature inteira depende. Helper compartilhado do
+       modals.js (`window.pigTrapTab`), não a quinta cópia do bloco. */
+    if (window.pigTrapTab) window.pigTrapTab(e, ov.querySelector(".modal"));
   });
 }
 
 function closeLaunchDetail() {
   const ov = document.getElementById("launch-detail-overlay");
   if (ov) ov.classList.remove("open");
+  // Veio da lista de uma categoria: o detalhe ESCONDEU a lista pra não empilhar
+  // dois .overlay (mesmo z-index, e cada ESC document-level fecha o seu).
+  if (_launchDetailSource === "category" && _catLaunchesCtx) {
+    _launchDetailSource = "overview";
+    openCategoryLaunches(_catLaunchesCtx.nome, _catLaunchesCtx);
+  }
 }
 
 function _renderLaunchDetail(l) {
@@ -7486,6 +7963,11 @@ function _launchDetailEdit() {
   const l = _launchDetailCurrent;
   if (!l || l.id == null) return;
   _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  // Sai da lista da categoria PRA VALER: quem fecha o editor/confirmação volta
+  // pro dashboard, não pra lista. Zerar o ctx (em vez de mexer no
+  // _launchDetailSource) é o que impede closeLaunchDetail de reabri-la por
+  // cima E o que evita o ctx + foco guardado ficarem de pé pra sempre.
+  _forgetCategoryLaunches(false);
   closeLaunchDetail();
   openEditLaunchModal(l.id, l);
 }
@@ -7494,6 +7976,11 @@ function _launchDetailDelete() {
   const l = _launchDetailCurrent;
   if (!l || l.id == null) return;
   _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  // Sai da lista da categoria PRA VALER: quem fecha o editor/confirmação volta
+  // pro dashboard, não pra lista. Zerar o ctx (em vez de mexer no
+  // _launchDetailSource) é o que impede closeLaunchDetail de reabri-la por
+  // cima E o que evita o ctx + foco guardado ficarem de pé pra sempre.
+  _forgetCategoryLaunches(false);
   closeLaunchDetail();
   const descTxt = describeLaunch(l).replace(/<[^>]+>/g, "").trim();
   confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null);
