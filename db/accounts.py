@@ -10,7 +10,7 @@ from psycopg.types.json import Json, Jsonb
 import db_support as _db_support
 from utils_date import _tz, day_tz
 
-from .connection import get_conn, cat_norm_sql
+from .connection import get_conn, cat_norm_sql, cat_key_sql
 from .users import ensure_user, ensure_user_tx
 
 
@@ -587,7 +587,12 @@ def list_launches_by_category(
       `by_bill_month` que `get_largest_expenses` expõe nunca foi chamado com
       False aqui, e uma janela alternativa que ninguém pede é só mais um SQL pra
       manter em sincronia.
-    - Match de categoria case- e acento-insensível (mesmo `cat_norm_sql`).
+    - Match de categoria pela `cat_key_sql` — case- e acento-insensível E com o
+      vazio colapsado em 'sem categoria', a MESMA expressão que o donut do
+      dashboard agrupa. Contra a coluna crua, `norm(NULL)` é NULL e nunca casa
+      com nada: a barra "sem categoria" dizia R$ 100,00 e esta lista abria
+      vazia (medido). Chega em produção pela importação de cartão do Open
+      Finance, que grava `credit_transactions.categoria` NULO.
     - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
       `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
       lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
@@ -606,9 +611,9 @@ def list_launches_by_category(
     """
     ensure_user(user_id)
 
-    _cat = cat_norm_sql("categoria")
-    _cat_ct = cat_norm_sql("ct.categoria")
-    _arg = cat_norm_sql("%s")
+    _cat = cat_key_sql("categoria")
+    _cat_ct = cat_key_sql("ct.categoria")
+    _arg = cat_key_sql("%s")
 
     params: list = [user_id, categoria]
     launch_filters = ""

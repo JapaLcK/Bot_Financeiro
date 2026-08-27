@@ -160,7 +160,7 @@ def cat_key_sql(expr: str) -> str:
 # ── `tipo` de `launches`: a forma legada conta junto ──────────────────────────
 # Nenhum escritor de hoje grava 'saida'/'entrada' (ver o comentário de
 # `_TIPO_ALIASES`, db/accounts.py), mas muito read path ainda trata esses valores
-# como tipo. Fonte ÚNICA em SQL das duas formas — `tests/test_tipo_aliases.py`
+# como tipo. Fonte ÚNICA em SQL das duas formas — `tests/test_tipo_legado_no_dashboard.py`
 # compara esta tabela com o `_TIPO_ALIASES` do Python, que é a mesma regra do
 # outro lado (§0.7: duplicação inevitável exige teste que compare as duas).
 #
@@ -180,10 +180,11 @@ TIPO_CANON_SQL = (
 
 
 # `has_time`: dá pra confiar na HORA do lançamento ou só na data?
-# Fonte única — a Visão Geral (query 4 do dashboard) e a lista de lançamentos de
-# uma categoria (`list_launches_by_category`) precisam responder igual, senão o
-# mesmo gasto aparece "10/03, 00:30" numa tela e "09/03" na outra (o `::date` de
-# um timestamptz sai no fuso da SESSÃO do Postgres, não em America/Sao_Paulo).
+# Quem decide se o front escreve "10/03, 00:30" ou só "10/03" — as duas telas que
+# leem `has_time` (`dashboard.js` e `home.html`) saem daqui. A lista do bot
+# (`list_launches_by_category`) NÃO usa esta expressão: ela nunca imprime hora, e
+# o dia dela vem do `day_tz` em Python (utils_date), não de um `::date` em SQL —
+# que sairia no fuso da SESSÃO do Postgres, não em America/Sao_Paulo.
 LAUNCH_HAS_TIME_SQL = """
         CASE
           WHEN source = 'ofx' THEN false
