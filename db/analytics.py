@@ -1104,17 +1104,28 @@ def _compute_salary_burn(user_id: int, from_date: date, to_date: date) -> dict:
     Considera só meses fechados (exclui o corrente). Se a janela só tem o
     mês corrente, retorna ok=false.
     """
-    # Receita média mensal (todos os meses na janela, incluindo corrente)
+    # Receita média mensal (todos os meses na janela, incluindo corrente).
+    # O SQL abaixo é f-string por causa do `TIPO_RECEITA_SQL` — e por isso não
+    # pode conter o sinal de porcentagem nem dentro de comentário `--`: o psycopg
+    # o lê como início de placeholder e a query estoura antes de rodar
+    # ("incomplete placeholder", medido). Escreva "oitenta por cento" por extenso.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT date_part('year', criado_em)::int AS y,
                        date_part('month', criado_em)::int AS m,
                        SUM(valor)::float AS total
                 FROM launches
                 WHERE user_id=%s
-                  AND tipo = 'receita'
+                  -- a query de despesa logo abaixo já aceita ('despesa','saida');
+                  -- esta fixava a receita moderna, então a linha legada 'entrada'
+                  -- não entrava no `expected_income`. O efeito é assimétrico e
+                  -- silencioso: a renda esperada sai MENOR, o alvo de oitenta por
+                  -- cento cai junto, e o "dia em que você queima o salário" é
+                  -- reportado mais cedo do que a realidade — ou `ok=false` por
+                  -- falta de receita.
+                  AND {TIPO_RECEITA_SQL}
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 GROUP BY 1, 2

@@ -37,11 +37,12 @@ vermelhos, cada um pelo seu lado.
 Controle POSITIVO: `test_base_moderna_responde_o_mesmo_de_sempre` — a base de
 100% da produção hoje, que não pode ter mudado de número.
 """
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import db
 from db.analytics import (
-    compute_evolution, compute_history_quick_stats, compute_kpis, list_history,
+    compute_behavioral_patterns, compute_evolution, compute_history_quick_stats,
+    compute_kpis, list_history,
 )
 from utils_date import month_range_today, today_tz
 
@@ -234,3 +235,44 @@ def test_os_tres_sites_novos_nao_mudam_a_base_moderna(pro_user_id):
     assert list_history(pro_user_id, **janela)["total"] == 2
     assert [i["valor"] for i in
             list_history(pro_user_id, tipo="receita", **janela)["items"]] == [80.0]
+
+
+# ── salary burn: o irmão que ainda lia só a receita moderna ────────────────
+
+def _mes_passado(dia: int) -> date:
+    """Um dia do mês anterior — o `salary_burn` só olha meses FECHADOS."""
+    primeiro = today_tz().replace(day=1)
+    return (primeiro - timedelta(days=1)).replace(day=dia)
+
+
+def test_salary_burn_conta_a_receita_legada(pro_user_id):
+    """`_compute_salary_burn` fixava `tipo = 'receita'` enquanto a query de
+    despesa logo abaixo, no mesmo helper, já aceitava ('despesa','saida').
+
+    A assimetria é silenciosa e enviesa para o lado errado: sem a receita legada
+    o `expected_income` sai MENOR, o alvo de 80% cai junto, e o "dia em que você
+    queima o salário" é reportado mais cedo do que a realidade — ou o helper
+    devolve `ok=false` por achar que não houve receita nenhuma.
+
+    Controle NEGATIVO: `AND {TIPO_RECEITA_SQL}` de volta para
+    `AND tipo = 'receita'` → `expected_income` cai para 0.0 e `ok` vira False.
+    """
+    _grava(pro_user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_passado(5))
+    _grava(pro_user_id, "saida", 900, dia=_mes_passado(3))
+
+    burn = compute_behavioral_patterns(pro_user_id, months=6)["salary_burn"]
+    assert burn["expected_income"] == 1000.0, burn
+    assert burn["ok"] is True, burn
+    assert burn["avg_day_to_80pct"] == 3, burn
+
+
+def test_salary_burn_com_receita_moderna_nao_muda(pro_user_id):
+    """Controle POSITIVO — a base de 100% da produção hoje: mesma cena com as
+    formas modernas responde exatamente o mesmo."""
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_passado(5))
+    _grava(pro_user_id, "despesa", 900, dia=_mes_passado(3))
+
+    burn = compute_behavioral_patterns(pro_user_id, months=6)["salary_burn"]
+    assert burn["expected_income"] == 1000.0, burn
+    assert burn["ok"] is True, burn
+    assert burn["avg_day_to_80pct"] == 3, burn
