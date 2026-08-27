@@ -376,6 +376,64 @@ def test_stale_authorization_nao_vira_laco(user_id, monkeypatch):
     assert [e for e in eventos if e[1] == "pluggy_sync_retry"] == []
 
 
+# ── ONDA 2 / Codex #162 (5º achado, P1): a reconexão participa do lock ──────
+# A relectura da geração não é atômica com as escritas que vêm DEPOIS dela. Uma
+# reconexão caindo nessa fresta deixava o run de geração velha gravar o espelho
+# E rodar `import_open_finance_launches`/`import_open_finance_credit`, que criam
+# LANÇAMENTO e COMPRA DE CARTÃO. O carimbo era recusado, mas nenhum sync
+# posterior remove lançamento — o upsert só acrescenta. Transação fantasma de
+# uma autorização que não vale mais, sobrevivendo à recuperação.
+#
+# Pegar o mesmo lock na reconexão fecha a fresta na origem.
+
+def test_reconexao_grava_dentro_do_lock_de_escrita(user_id, monkeypatch):
+    """O que se mede é a ORDEM: o `save` tem que acontecer entre o enter e o exit
+    do lock. Sem isso o teste passaria com o lock pego e solto ao lado da escrita.
+
+    CONTROLE NEGATIVO: chamar `save_pluggy_open_finance_item` direto (como antes)
+    deixa o evento "save" fora do par enter/exit e este teste vermelho."""
+    from contextlib import contextmanager
+
+    ordem = []
+
+    @contextmanager
+    def _lock_espiao(item_id):
+        ordem.append(("enter", item_id))
+        try:
+            yield True
+        finally:
+            ordem.append(("exit", item_id))
+
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_espiao)
+    monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
+                        lambda uid, remote: ordem.append(("save", uid)) or {"id": 1})
+
+    conexao, sob_lock = of_routes._salva_item_sob_lock(user_id, {"id": "item-lk"}, "item-lk")
+
+    assert sob_lock is True
+    assert ordem == [("enter", "item-lk"), ("save", user_id), ("exit", "item-lk")], ordem
+    assert conexao == {"id": 1}
+
+
+def test_reconexao_grava_mesmo_se_o_lock_estourar(user_id, monkeypatch):
+    """CONTROLE POSITIVO, e não é zelo: recusar a reconexão porque o lock demorou
+    deixaria o banco conectado NA PLUGGY e invisível aqui. Grava e denuncia."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _lock_ocupado(item_id):
+        yield False
+
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_ocupado)
+    monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
+                        lambda uid, remote: {"id": 2})
+
+    conexao, sob_lock = of_routes._salva_item_sob_lock(user_id, {"id": "item-lk2"}, "item-lk2")
+
+    assert conexao == {"id": 2}, "a reconexão NÃO pode ser perdida"
+    assert sob_lock is False, "e o chamador tem que saber, pra logar o aviso"
+
+
 # ── RODADA 3: o lock não pode esperar para sempre nem abrir conexão sem teto ──
 
 def test_lock_wait_zero_nao_significa_espera_infinita(user_id, monkeypatch):

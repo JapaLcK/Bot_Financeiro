@@ -45,6 +45,7 @@ from db import (
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
     list_pluggy_item_ids,
+    pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
     token_hash,
@@ -102,6 +103,31 @@ def _retryable(exc: BaseException) -> bool:
         return isinstance(exc, (pg_errors.DeadlockDetected, pg_errors.SerializationFailure))
     except Exception:  # psycopg ausente/alterado: não retenta
         return False
+
+
+def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict, bool]:
+    """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
+
+    A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
+    escritas que vêm depois dela. Uma reconexão que caísse nessa fresta deixava o
+    run de geração velha gravar o espelho E rodar `import_open_finance_launches` /
+    `import_open_finance_credit` — que criam LANÇAMENTO e COMPRA DE CARTÃO do
+    usuário. O carimbo era recusado, mas nenhum sync posterior remove lançamento:
+    o upsert só acrescenta. Resultado medido pelo Codex (#162, P1): transação
+    fantasma de uma autorização que não vale mais, sobrevivendo à recuperação —
+    tipicamente a conta que o usuário DESMARCOU ao reconectar.
+
+    Pegar o mesmo lock aqui fecha a fresta na origem: enquanto um sync escreve, a
+    reconexão espera; enquanto a reconexão grava, nenhum sync entra na fase de
+    escrita — e o próximo a entrar relê a geração nova e aborta.
+
+    A janela do lock é curta de propósito (só escrita, nunca a leitura remota),
+    então esperar a vez é barato. Estourou o teto (`OF_SYNC_LOCK_WAIT_MS`, 15s):
+    grava assim mesmo e devolve `False`. Recusar seria pior — o item já existe na
+    Pluggy, e não gravar deixaria o banco conectado lá e invisível aqui.
+    """
+    with pluggy_item_lock(item_id) as locked:
+        return save_pluggy_open_finance_item(user_id, remote), bool(locked)
 
 
 async def _run_pluggy_sync_bg(item_id: str) -> None:
@@ -550,10 +576,16 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
 
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
-        # Grava o REMOTO: status e instituição vêm da Pluggy, não do navegador.
-        connection = await asyncio.to_thread(save_pluggy_open_finance_item, session_uid, remote)
+        connection, sob_lock = await asyncio.to_thread(
+            _salva_item_sob_lock, session_uid, remote, new_item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not sob_lock:
+        await log_system_event(
+            "warning", "of_reconnect_sem_lock",
+            f"Reconexão gravada sem o lock de escrita: {new_item_id}",
+            source="open_finance", details={"item_id": new_item_id},
+        )
 
     await asyncio.to_thread(
         register_item, session_uid,
