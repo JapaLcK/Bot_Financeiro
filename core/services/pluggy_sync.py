@@ -351,8 +351,20 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # lock de propósito — ele afirma que as escritas acima valeram.
         status, reason = resolve_connection_state(health=health, has_data=True,
                                                   leitura_completa=investments_ok)
+        # `reconnected_at_visto`: o valor lido em `sync_pluggy_item`, ANTES da
+        # fase de leitura. Se o usuário reconectou no meio dela (minutos, fora do
+        # lock), este run leu sob a autorização velha e não pode se declarar
+        # sucesso — o espelho fica (o dado é real), o carimbo não. A rota de
+        # reconexão agenda um sync novo, então o âmbar é transitório.
+        #
+        # SÃO DOIS MECANISMOS INDEPENDENTES, e quem simplificar um achando que o
+        # outro cobre reabre o buraco: este guarda protege só `last_sync_at` — o
+        # run atrasado AINDA escreve `status`, `status_reason` e `health`, medidos
+        # sob a autorização velha. Quem impede a tela de ficar verde com esse
+        # health é o `sem_sync` de `connection_ui_state`, não este parâmetro.
         mark_sync_result(connection["id"], ok=True, status=status, status_reason=reason,
-                         health=health, at=datetime.now(_tz()))
+                         health=health, at=datetime.now(_tz()),
+                         reconnected_at_visto=connection.get("reconnected_at"))
 
     # Agentes do Piggy — gatilho pós-sync: Xerife roda só sobre o delta deste
     # usuário. IMPORTANTE: depois da reconciliação/import acima (merge-silencioso

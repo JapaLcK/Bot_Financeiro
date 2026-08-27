@@ -93,6 +93,11 @@ def mark_sync_attempt(connection_id: int, *, origin: str = "sync") -> int:
     return updated
 
 
+# Sentinela: `None` é um valor VÁLIDO de `reconnected_at` (nunca reconectou),
+# então não serve de "não checar".
+_SEM_CHECAGEM: Any = object()
+
+
 def mark_sync_result(
     connection_id: int,
     *,
@@ -101,6 +106,7 @@ def mark_sync_result(
     status_reason: str | None = None,
     health: dict | None = None,
     at: datetime | None = None,
+    reconnected_at_visto: Any = _SEM_CHECAGEM,
 ) -> int:
     """Resultado de um sync (ou do job de saúde, com ok=None).
 
@@ -112,6 +118,17 @@ def mark_sync_result(
     existir — com `coalesce` puro, um `item_missing` gravado por um 404
     transitório só saía num sync completo, e o sync periódico é dormente por
     padrão (`OF_REFRESH_ENABLED`): a tela mandava refazer a conexão para sempre.
+
+    `reconnected_at_visto`: o `reconnected_at` que o sync leu ao COMEÇAR. Só o
+    sucesso o consulta, e só para decidir se ainda pode carimbá-lo. A fase de
+    leitura roda FORA do lock e leva minutos (transações paginadas por conta),
+    então um sync que começou antes de o usuário reconectar pode terminar depois
+    — e carimbaria `last_sync_at > reconnected_at` com dado buscado sob a
+    autorização ANTIGA, devolvendo o verde que esta onda existe para tirar.
+    Mesmo idioma otimista de `pending_actions`: só grava se ainda for o que leu.
+    A escrita do espelho continua valendo (o dado é real, só velho); o que se
+    recusa é chamá-la de sucesso — e a própria rota de reconexão agenda um sync
+    novo, então o âmbar é transitório.
     """
     now = at or datetime.now(_tz())
     with get_conn() as conn:
@@ -124,7 +141,9 @@ def mark_sync_result(
                                             else coalesce(%s, status_reason) end,
                        health = coalesce(%s, health),
                        last_attempt_at = case when %s then last_attempt_at else %s end,
-                       last_sync_at = case when %s then %s else last_sync_at end,
+                       last_sync_at = case when %s and (%s or reconnected_at
+                                                        is not distinct from %s)
+                                           then %s else last_sync_at end,
                        updated_at = %s
                  where id=%s
                    and upper(coalesce(status,'')) not in {_TERMINAL}
@@ -134,7 +153,12 @@ def mark_sync_result(
                     status_reason, status_reason,
                     (Jsonb(health) if health is not None else None),
                     ok is None, now,          # job de saúde não é tentativa de sync
-                    bool(ok), now,            # só sucesso avança last_sync_at
+                    # só sucesso avança last_sync_at, e só se ninguém reconectou
+                    # no meio (`is not distinct from` para casar NULL com NULL)
+                    bool(ok),
+                    reconnected_at_visto is _SEM_CHECAGEM,
+                    (None if reconnected_at_visto is _SEM_CHECAGEM else reconnected_at_visto),
+                    now,
                     now,
                     connection_id,
                 ),
