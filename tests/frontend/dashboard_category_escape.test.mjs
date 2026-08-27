@@ -674,6 +674,80 @@ test("A6: sem alvo e sem nota, o editor abre VAZIO (não salva um travessão)", 
   await page.close();
 });
 
+/* ══ C2. Editar um lançamento SEM categoria não pode categorizá-lo ═════════
+   A lista fabricava `coalesce(categoria,'outros')` (rótulo de mensagem de
+   WhatsApp) e o editor mandava esse texto de volta no PATCH: mexer só na data
+   ou na nota GRAVAVA "outros" numa transação que o usuário nunca categorizou.
+   Mesma classe do A1 (o `nota` fabricado a partir de `descricao`) — o campo vai
+   CRU e a tela decide como exibir.
+
+   E o remédio não é só o SQL: com `categoria` nula o `<select>` cai sozinho na
+   PRIMEIRA opção ("alimentação"), que é PIOR que "outros". Por isso a opção
+   "— sem categoria —" (value "") e a omissão da chave no corpo do PATCH.
+
+   Controle NEGATIVO: volte `if (categoria) reqBody.categoria = categoria;` para
+   `const reqBody = { categoria, nota };` — o 1º teste fica vermelho.
+   Controle POSITIVO: o 2º teste (lançamento COM categoria continua mandando a
+   dele). */
+
+/** Edita pela lista, troca a data e devolve o CORPO do PATCH que saiu. */
+const salvarPelaLista = (page, linha) => page.evaluate(async (linha) => {
+  // `document.cookie` é inacessível em about:blank (o setContent do harness) e
+  // o `csrfHeaders` real estoura ANTES do fetch. Só o cookie é falso; o
+  // csrfHeaders e o submitEditLaunch continuam os de produção.
+  window.getCookie = () => "tok";
+  // o toast de sucesso é um elemento real do dashboard.html que o DOM mínimo
+  // do harness não tem — sem ele o `catch` do submit vira um erro fantasma
+  document.body.insertAdjacentHTML("beforeend", '<div id="launch-success-toast"></div>');
+  window.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({
+    ok: true, launches: [linha], resumo: { n_total: 1, despesa: 12, receita: 0 },
+  }) });
+  await openCategoryLaunches("sem categoria", {});
+  document.querySelectorAll("#cl-list .bar-row")[0].click();
+  document.getElementById("ld-edit").click();
+  const selecionado = document.getElementById("edit-launch-categoria").value;
+  const rotulos = [...document.getElementById("edit-launch-categoria").options]
+    .map((o) => o.text);
+  // mexe SÓ na data — o campo que não tem nada a ver com categoria
+  document.getElementById("edit-launch-data").value = "2026-02-11T09:00";
+
+  let corpo = null;
+  window.fetch = (u, o) => {
+    corpo = JSON.parse(o.body);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+  };
+  await submitEditLaunch();
+  return {
+    selecionado, rotulos, corpo,
+    erro: document.getElementById("edit-launch-error").textContent,
+  };
+}, linha);
+
+test("C2: editar só a data de um lançamento SEM categoria não grava categoria",
+  async () => {
+    const page = await loadComEditor();
+    const r = await salvarPelaLista(page, linhaReal({ categoria: null }));
+    assert.equal(r.erro, "", `o editor barrou o salvamento: "${r.erro}"`);
+    assert.ok(r.corpo, "o PATCH não chegou a sair");
+    assert.equal("categoria" in r.corpo, false,
+      `o PATCH levou categoria=${JSON.stringify(r.corpo.categoria)} numa transação `
+      + "que estava sem categoria");
+    assert.equal(r.corpo.criado_em?.slice(0, 10), "2026-02-11", r.corpo);
+    assert.equal(r.selecionado, "", `o <select> abriu em "${r.selecionado}"`);
+    assert.ok(r.rotulos.includes("— sem categoria —"), r.rotulos.join(" | "));
+    await page.close();
+  });
+
+test("C2 controle: lançamento COM categoria continua mandando a dele", async () => {
+  const page = await loadComEditor();
+  const r = await salvarPelaLista(page, linhaReal({ categoria: "mercado" }));
+  assert.equal(r.erro, "", `o editor barrou o salvamento: "${r.erro}"`);
+  assert.equal(r.corpo.categoria, "mercado", r.corpo);
+  assert.equal(r.rotulos.includes("— sem categoria —"), false,
+    "a opção de vazio apareceu num lançamento que TEM categoria");
+  await page.close();
+});
+
 test("A8: depois de Editar, o ctx e o foco guardado da lista morrem", async () => {
   // `_catLaunchesCtx != null` significa "existe lista pra onde voltar". Depois
   // de Editar não existe: quem fecha o editor volta pro dashboard.
@@ -1176,14 +1250,18 @@ test("B3: o estado vazio ensina a hashtag só quando o nome cabe inteiro nela", 
  * Controle POSITIVO: `D1a` também prova que a PRIMEIRA página não muda, e
  * `D1d` que o botão some quando acaba. */
 
-/** Servidor falso com N linhas, que responde por offset como o Postgres. */
+/** Servidor falso com N linhas, que pagina por CURSOR como a rota: o cursor é
+    o índice da última linha entregue e a página seguinte começa DEPOIS dela.
+    (A rota manda `<criado_em>|<fonte>|<ord_id>`; o que o front tem que provar é
+    que devolve o cursor recebido e nunca calcula deslocamento sozinho.) */
 const servidorPaginado = (page, total, pagina) => page.evaluate(([t, p]) => {
   window.__pedidos = [];
   window.fetch = (url) => {
     const u = new URL(url, "http://x");
-    const off = Number(u.searchParams.get("offset") || 0);
+    const cur = u.searchParams.get("cursor");
+    const off = cur === null ? 0 : Number(cur.split("|")[2]) + 1;
     const lim = Number(u.searchParams.get("limit") || 50);
-    window.__pedidos.push(off);
+    window.__pedidos.push(cur);
     const linhas = [];
     for (let i = off; i < Math.min(off + Math.min(lim, p), t); i++) {
       linhas.push({ tipo: "despesa", valor: 10 + i, categoria: "saúde",
@@ -1195,9 +1273,11 @@ const servidorPaginado = (page, total, pagina) => page.evaluate(([t, p]) => {
         criado_em: "2026-02-09T09:00:00-03:00", fonte: "launches",
         user_seq: i + 1, id: 1000 + i, is_internal_movement: false });
     }
+    const ultimo = off + linhas.length - 1;
     return Promise.resolve({ ok: true, json: () => Promise.resolve({
       ok: true, launches: linhas,
       resumo: { n_total: t, despesa: 10 * t, receita: 0 },
+      next_cursor: linhas.length ? `2026-02-09T09:00:00-03:00|launches|${ultimo}` : null,
       window: { from: null, to: null, capped_by_plan: false } }) });
   };
 }, [total, pagina]);
@@ -1223,7 +1303,8 @@ test("D1a: 'Carregar mais' ANEXA a página seguinte, sem repetir nem perder linh
     const p2 = await estadoDaLista(page);
     assert.deepEqual(p2.linhas, ["item 000", "item 001", "item 002", "item 003"],
       JSON.stringify(p2));
-    assert.deepEqual(p2.pedidos, [0, 2], "o offset não acompanhou as linhas na tela");
+    assert.deepEqual(p2.pedidos, [null, "2026-02-09T09:00:00-03:00|launches|1"],
+      "o 'carregar mais' não devolveu o cursor da última linha na tela");
     assert.match(p2.foot, /Mostrando 4 de 5/, p2.foot);
     await page.close();
   });
@@ -1246,7 +1327,7 @@ test("D1b: o clique numa linha ANEXADA abre o lançamento certo", async () => {
 });
 
 test("D1c: clique repetido em 'Carregar mais' não duplica linha", async () => {
-  // Dois cliques seguidos pedem o MESMO offset (a lista ainda não cresceu). O
+  // Dois cliques seguidos pedem o MESMO cursor (a lista ainda não cresceu). O
   // guard recusa o segundo antes do canal de fetch.
   const page = await loadDashboardJs();
   await servidorPaginado(page, 6, 2);
@@ -1295,13 +1376,15 @@ test("D1f: trocar de categoria com uma página em voo não mistura as listas",
     const r = await page.evaluate(async () => {
       let solta;
       window.fetch = (url) => {
-        const off = Number(new URL(url, "http://x").searchParams.get("offset") || 0);
+        const cur = new URL(url, "http://x").searchParams.get("cursor");
+        const off = cur ? 1 : 0;
         const linha = (i, cat) => ({ tipo: "despesa", valor: 10, categoria: cat,
           descricao: `${cat} ${i}`, nota: `${cat} ${i}`, alvo: null, data: "2026-02-09",
           posted_at: null, has_time: true, criado_em: "2026-02-09T09:00:00-03:00",
           fonte: "launches", user_seq: i, id: i, is_internal_movement: false });
         const corpo = (cat, i) => ({ ok: true, launches: [linha(i, cat)],
           resumo: { n_total: 9, despesa: 10, receita: 0 },
+          next_cursor: `2026-02-09T09:00:00-03:00|launches|${i}`,
           window: { from: null, to: null, capped_by_plan: false } });
         if (off === 0 && !window.__abriu) {
           return Promise.resolve({ ok: true, json: () => Promise.resolve(corpo("saude", 0)) });

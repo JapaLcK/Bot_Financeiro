@@ -1907,6 +1907,12 @@ const _CL_PAGE = 50;                // tamanho da página do "Carregar mais"
 let _catLaunchesRows = [];          // linhas já adaptadas, na ordem da tela
 let _catLaunchesTotal = 0;          // n_total do servidor (TODAS as que casam)
 let _catLaunchesLoadingMore = false;
+/* Cursor KEYSET da próxima página (`next_cursor` da rota), opaco: o front
+   devolve o que recebeu. Era `offset = rows.length`, e OFFSET não sobrevive ao
+   cenário NORMAL deste produto — o bot escreve no banco com o dashboard aberto,
+   a linha nova entra ACIMA do corte (a ordem é por data desc) e a página 2
+   repetia a última linha da 1 e comia outra. */
+let _catLaunchesCursor = null;
 let _catLaunchesCtx = null;         // opts da lista NO AR (null = não há lista pra voltar)
 let _catLaunchesReturnFocus = null;
 // Mesmo canal de fetch do Histórico (makeFetchChannel): aborta o pedido anterior
@@ -1983,6 +1989,7 @@ function _forgetCategoryLaunches(restoreFocus = true) {
   _catLaunchesCtx = null;
   _catLaunchesRows = [];
   _catLaunchesTotal = 0;
+  _catLaunchesCursor = null;
   _catLaunchesLoadingMore = false;
   // `restoreFocus = false` quando outro modal assume a tela (Editar/Excluir):
   // devolver o foco pra linha do gráfico o deixaria ATRÁS do overlay novo.
@@ -2077,7 +2084,9 @@ function _clPintaRodape() {
     ? `Mostrando ${n} de ${total} lançamentos`
     : `${total} lançamento${total === 1 ? "" : "s"}`;
   const more = document.getElementById("cl-more");
-  more.innerHTML = total > n
+  // Sem cursor não há próxima página pra pedir (lista vazia, ou o servidor já
+  // devolveu tudo): o botão pediria uma página que nunca vem.
+  more.innerHTML = total > n && _catLaunchesCursor
     ? `<button type="button" class="mock-cta outline cl-more-btn" id="cl-more-btn"
                onclick="loadMoreCategoryLaunches()">Carregar mais ${Math.min(_CL_PAGE, total - n)}</button>`
     : "";
@@ -2097,6 +2106,7 @@ async function openCategoryLaunches(nome, opts) {
     backToEdit: !!o.backToEdit,
   };
   _catLaunchesCtx = ctx;
+  _catLaunchesCursor = null;
   _catLaunchesLoadingMore = false;
   if (!_catLaunchesReturnFocus) _catLaunchesReturnFocus = document.activeElement;
 
@@ -2123,7 +2133,7 @@ async function openCategoryLaunches(nome, opts) {
   let data;
   try {
     data = await _catLaunchesChannel.run(
-      (signal) => _catLaunchesFetch(ctx, 0, signal), { force: true });
+      (signal) => _catLaunchesFetch(ctx, null, signal), { force: true });
   } catch (err) {
     if (_catLaunchesCtx === ctx) {
       list.innerHTML = _clBox("thinking", "Não deu pra carregar",
@@ -2149,6 +2159,7 @@ async function openCategoryLaunches(nome, opts) {
   // (db/accounts.py), então o `editable` de _renderLaunchDetail esconde
   // Editar/Excluir sozinho.
   _catLaunchesRows = data.launches || [];
+  _catLaunchesCursor = data.next_cursor || null;
 
   const resumo = data.resumo || { n_total: 0, despesa: 0, receita: 0 };
   _catLaunchesTotal = resumo.n_total || 0;
@@ -2194,9 +2205,9 @@ async function openCategoryLaunches(nome, opts) {
 /* O pedido, em um lugar só: abertura e "carregar mais" mandam os MESMOS
    filtros, mudando só o offset. Duas cópias da URL era o jeito de a página 2
    vir com filtro diferente da 1. */
-async function _catLaunchesFetch(ctx, offset, signal) {
+async function _catLaunchesFetch(ctx, cursor, signal) {
   const q = new URLSearchParams({ categoria: ctx.nome, limit: String(_CL_PAGE) });
-  if (offset) q.set("offset", String(offset));
+  if (cursor) q.set("cursor", cursor);
   if (ctx.from) q.set("from", ctx.from);
   if (ctx.to) q.set("to", ctx.to);
   if (ctx.tipo) q.set("tipo", ctx.tipo);
@@ -2244,20 +2255,22 @@ function _clSubtitulo(doGrafico, mesLabel, win) {
      título "saúde".
    • fechar (Esc) durante o voo → mesmo `ctx` diferente (o close zera), o append
      não acontece e o modal fechado não é repovoado.
-   • offset estável: a ordem do SQL é TOTAL (`db/accounts.py`), então a página 2
-     não repete linha da 1 nem pula nenhuma. */
+   • lançamento novo pelo WhatsApp com a lista aberta → o cursor é KEYSET
+     (`db/accounts.py`): a próxima página é o que vem DEPOIS da última linha já
+     na tela, então a linha nova (que entra no topo) não desloca fronteira
+     nenhuma. Com OFFSET a página 2 repetia a última da 1 e comia outra. */
 async function loadMoreCategoryLaunches() {
   const ctx = _catLaunchesCtx;
-  if (!ctx || _catLaunchesLoadingMore) return;
+  if (!ctx || _catLaunchesLoadingMore || !_catLaunchesCursor) return;
   const btn = document.getElementById("cl-more-btn");
-  const offset = _catLaunchesRows.length;
+  const cursor = _catLaunchesCursor;
   _catLaunchesLoadingMore = true;
   if (btn) { btn.disabled = true; btn.textContent = "Carregando…"; }
 
   let data;
   try {
     data = await _catLaunchesChannel.run(
-      (signal) => _catLaunchesFetch(ctx, offset, signal), { force: true });
+      (signal) => _catLaunchesFetch(ctx, cursor, signal), { force: true });
   } catch (err) {
     _catLaunchesLoadingMore = false;
     if (_catLaunchesCtx !== ctx) return;   // lista trocou/fechou: não pinta nada
@@ -2275,6 +2288,9 @@ async function loadMoreCategoryLaunches() {
   const novas = data.launches || [];
   const base = _catLaunchesRows.length;
   _catLaunchesRows = _catLaunchesRows.concat(novas);
+  // Página vazia não move o cursor: `next_cursor` vem nulo e o botão some pelo
+  // ajuste do total logo abaixo.
+  _catLaunchesCursor = data.next_cursor || null;
   // O total vem do servidor a cada página: se alguém lançou/apagou no meio, o
   // rodapé segue o número REAL em vez de um contador congelado na 1ª página.
   _catLaunchesTotal = (data.resumo && data.resumo.n_total) || _catLaunchesTotal;
@@ -8195,9 +8211,20 @@ const EDIT_LAUNCH_CUSTOM_VALUE = "__custom__";
 let editingLaunchId = null;
 let editLaunchSubmitting = false;
 
+/* Lançamento SEM categoria (o que a barra "sem categoria" do donut abre) ganha
+   uma opção própria, value "" — e `submitEditLaunch` OMITE `categoria` do PATCH
+   quando ela é a escolhida. Sem isso, um `<select>` sem valor casado cai na
+   PRIMEIRA opção ("alimentação"): editar só a nota ou a data de um lançamento
+   sem categoria gravava "alimentação" (ou, quando o SQL fabricava o rótulo,
+   "outros") numa transação que o usuário nunca categorizou. */
 function _renderEditCategoriaOptions(currentCategoria) {
   const sel = document.getElementById("edit-launch-categoria");
   const opts = [];
+  // Só aparece pra quem JÁ está sem categoria: esta tela não tem "descategorizar"
+  // (a rota recusa categoria vazia — finance_bot_websocket_custom.py).
+  if (!currentCategoria) {
+    opts.push(`<option value="">— sem categoria —</option>`);
+  }
   // Se a categoria atual é "custom" (não está na lista canônica), aparece no topo
   // como opção pré-selecionada, pra não perder o valor existente.
   const isCustomCurrent = currentCategoria
@@ -8210,7 +8237,7 @@ function _renderEditCategoriaOptions(currentCategoria) {
   }
   opts.push(`<option value="${EDIT_LAUNCH_CUSTOM_VALUE}"> Outra (digitar)…</option>`);
   sel.innerHTML = opts.join("");
-  if (currentCategoria) sel.value = currentCategoria;
+  sel.value = currentCategoria || "";
 }
 
 function _onEditCategoriaChange() {
@@ -8310,7 +8337,10 @@ async function submitEditLaunch() {
       return;
     }
   }
-  if (!categoria) { showEditLaunchError("Escolha uma categoria."); return; }
+  // categoria === "" só existe na opção "— sem categoria —", e só num lançamento
+  // que JÁ está sem categoria (`_renderEditCategoriaOptions`). Nesse caso o PATCH
+  // vai sem a chave `categoria` e a rota não toca na coluna — salvar a nota ou a
+  // data não pode inventar categoria pra transação de ninguém.
 
   const nota = document.getElementById("edit-launch-nota").value.trim();
 
@@ -8335,7 +8365,8 @@ async function submitEditLaunch() {
     const url = editingLaunchIsCredit
       ? `${API}/credit-transactions/${USER_ID}/${editingLaunchId}`
       : `${API}/launches/${USER_ID}/${editingLaunchId}`;
-    const reqBody = { categoria, nota };
+    const reqBody = { nota };
+    if (categoria) reqBody.categoria = categoria;
     if (criadoEmISO) reqBody.criado_em = criadoEmISO;
     const r = await fetch(url, {
       method: "PATCH",
@@ -8357,7 +8388,9 @@ async function submitEditLaunch() {
       const oldNota = target.nota;
       const oldAlvo = target.alvo;
       const oldTotal = target.installments_total;
-      target.categoria = categoria;
+      // `categoria` vazia = não foi no PATCH (ver acima): o otimista não pode
+      // fingir uma escrita que o servidor não fez.
+      if (categoria) target.categoria = categoria;
       target.nota = nota;
       if (criadoEmISO) target.criado_em = criadoEmISO;
       if (editingLaunchIsCredit && oldTotal && oldTotal > 1) {
@@ -8366,7 +8399,7 @@ async function submitEditLaunch() {
               && l.alvo === oldAlvo
               && l.nota === oldNota
               && l.installments_total === oldTotal) {
-            l.categoria = categoria;
+            if (categoria) l.categoria = categoria;
             l.nota = nota;
           }
         }

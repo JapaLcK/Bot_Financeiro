@@ -8,7 +8,7 @@ from decimal import Decimal
 from psycopg.types.json import Json, Jsonb
 
 import db_support as _db_support
-from utils_date import _tz, day_tz
+from utils_date import _tz, day_tz, launch_day
 
 from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
@@ -115,8 +115,13 @@ def list_launches(user_id: int, limit: int = 10):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em
+                f"""
+                -- `posted_at` + `has_time`: MESMO par (e mesmo CASE) da lista de
+                -- uma categoria. Sem eles o "meus últimos lançamentos" imprimia
+                -- o dia da IMPORTAÇÃO num extrato e "liste <categoria>" o dia do
+                -- extrato — a divergência que `launch_day` (utils_date) fecha.
+                select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
+                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc
@@ -579,7 +584,7 @@ def list_launches_by_category(
     tipo: str | None = None,
     limit: int = 20,
     include_internal: bool = True,
-    offset: int = 0,
+    after: tuple | None = None,
 ) -> tuple[list[dict], dict]:
     """Lançamentos de UMA categoria, mais recente primeiro (launches + cartão).
 
@@ -641,18 +646,40 @@ def list_launches_by_category(
       dashboard, `LAUNCH_HAS_TIME_SQL`): sem eles o front caía sempre no galho
       "só data" do `fmtLaunchWhen` e a mesma despesa saía "10/03, 00:30" numa
       tela e "09/03" na outra.
+    - `categoria` também vem CRUA (NULL/'' saem como estão), pelo mesmo motivo
+      de `nota`/`alvo` abaixo: o `coalesce(..., 'outros')` era um RÓTULO de
+      mensagem de WhatsApp, e desde que o dashboard abre o editor por esta lista
+      ele virava DADO — quem editasse só a nota ou a data de um lançamento sem
+      categoria mandava 'outros' de volta no PATCH e categorizava a transação
+      sem pedir. A tela decide como mostrar o vazio (dashboard.js), o SELECT não
+      decide o que fica gravado.
     - `nota` e `alvo` vêm CRUS, cada um na sua chave. `descricao` continua sendo
       o rótulo pronto (`coalesce(alvo, nota, '—')`) que o WhatsApp imprime, mas
       ele NÃO serve pra pré-preencher um formulário de edição: numa linha com os
       dois preenchidos (recurring_charger.py, db/bills.py, db/cards.py) ele é o
       ALVO, e salvar o formulário gravava o alvo por cima da nota real.
-    `offset` (default 0, aditivo) é o "carregar mais" do dashboard: os 3
-    chamadores do WhatsApp (core/handlers/launches.py:442, :782, :855) passam
-    `tipo`/`limit` por KEYWORD e nada mais, então nenhum deles muda de
-    comportamento. Ele é seguro porque o `order by` acima é TOTAL — sem
-    desempate estável, OFFSET repete linha numa página e come outra.
+    `after` (default None, aditivo) é o "carregar mais" do dashboard: a tupla
+    `(dt, fonte, ord_id)` da ÚLTIMA linha da página anterior, e a próxima página
+    é `where (dt, fonte, ord_id) < after` na mesma ordem total do `order by`.
+    Os 3 chamadores do WhatsApp (core/handlers/launches.py:442, :782, :855)
+    passam `tipo`/`limit` por KEYWORD e nada mais, então nenhum deles muda de
+    comportamento.
 
-    - resumo: {"n_total", "despesa", "receita"} sobre TODAS as linhas que casam,
+    Era `offset`, e OFFSET não fecha a corrida que este produto tem TODO DIA: o
+    bot escreve no banco enquanto o dashboard está aberto. Uma linha nova entra
+    ACIMA do corte (a ordem é por data desc) e empurra a fronteira — a página 2
+    repete a última linha da 1 e come outra, com o total dizendo que está tudo
+    lá. Ordem total resolve EMPATE, não deslocamento; só o keyset resolve os
+    dois. Deduplicar no cliente também não serve: ele veria a repetida, nunca a
+    que sumiu.
+
+    O filtro do keyset é aplicado FORA da subquery dos window aggregates, senão
+    `n_total`/`tot_*` passariam a contar só o que sobrou depois do corte e o
+    rodapé "N de M" mentiria a partir da página 2.
+
+    - resumo: {"n_total", "despesa", "receita", "next_after"} sobre TODAS as
+      linhas que casam ("next_after" é a tupla da última linha DESTA página, ou
+      None quando a página veio vazia — é o que o chamador devolve como `after`),
       não só as `limit` devolvidas — os totais vêm de window aggregates, que o
       Postgres calcula ANTES do LIMIT. Sem isso o chamador somaria só as linhas
       exibidas e imprimiria um total errado com cara de total certo.
@@ -697,7 +724,7 @@ def list_launches_by_category(
                     union all
                     select 'despesa' as tipo,
                            ct.valor,
-                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
+                           ct.categoria,
                            coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
                            -- Mesmo texto do `descricao` de propósito: a compra
                            -- no crédito não tem `alvo` aqui e a linha nunca é
@@ -725,10 +752,20 @@ def list_launches_by_category(
         """
         params += params_credit
 
+    # Keyset. Fica FORA da subquery dos window aggregates (ver docstring) e usa a
+    # comparação de LINHA do Postgres, que é exatamente o `order by` de baixo.
+    after_sql = ""
+    after_params: list = []
+    if after:
+        after_sql = "where (dt, fonte, ord_id) < (%s, %s, %s)"
+        dt_after, fonte_after, ord_after = after
+        after_params = [dt_after, str(fonte_after), int(ord_after)]
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
+                select * from (
                 select tipo, valor, categoria, descricao, nota, alvo, dt,
                        posted_at, has_time, fonte,
                        user_seq, id, ord_id, is_internal_movement,
@@ -740,7 +777,7 @@ def list_launches_by_category(
                 from (
                     select tipo,
                            valor,
-                           coalesce(nullif(categoria, ''), 'outros') as categoria,
+                           categoria,
                            coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
                            nota,
                            alvo,
@@ -760,17 +797,19 @@ def list_launches_by_category(
                       {launch_filters}
                     {credit_sql}
                 ) agg
-                -- Ordem TOTAL, e é o que torna a paginação por OFFSET honesta:
-                -- `dt desc, user_seq desc` empatava todas as linhas de crédito do
-                -- mesmo dia (user_seq é nulo nelas), e empate + OFFSET faz o
-                -- Postgres repetir uma linha na página 2 e sumir com outra.
-                -- `fonte` separa as duas pernas (id colide entre as tabelas) e
-                -- `ord_id` é a PK dentro de cada uma. A ordem VISÍVEL não muda:
-                -- 'launches' > 'credito' no desc, e user_seq cresce junto com o id.
+                ) w
+                {after_sql}
+                -- Ordem TOTAL, e é o que faz o keyset funcionar: `dt desc,
+                -- user_seq desc` empatava todas as linhas de crédito do mesmo dia
+                -- (user_seq é nulo nelas), e sem desempate a comparação de linha
+                -- pula ou repete. `fonte` separa as duas pernas (id colide entre
+                -- as tabelas) e `ord_id` é a PK dentro de cada uma. A ordem
+                -- VISÍVEL não muda: 'launches' > 'credito' no desc, e user_seq
+                -- cresce junto com o id.
                 order by dt desc, fonte desc, ord_id desc
-                limit %s offset %s
+                limit %s
                 """,
-                (*params, int(limit), max(0, int(offset))),
+                (*params, *after_params, int(limit)),
             )
             rows = cur.fetchall()
 
@@ -778,6 +817,14 @@ def list_launches_by_category(
         "n_total": int(rows[0]["n_total"]) if rows else 0,
         "despesa": float(rows[0]["tot_despesa"] or 0) if rows else 0.0,
         "receita": float(rows[0]["tot_receita"] or 0) if rows else 0.0,
+        # A tupla de ordenação da ÚLTIMA linha desta página = o `after` da
+        # próxima. Sai daqui e não da linha porque `ord_id` é o id CRU da tabela
+        # (o do crédito inclusive), e ele não pode vazar pro cliente: o `id` nulo
+        # na perna de crédito existe justamente pra um id de `credit_transactions`
+        # não virar handle de delete no dashboard.
+        "next_after": (
+            (rows[-1]["dt"], rows[-1]["fonte"], rows[-1]["ord_id"]) if rows else None
+        ),
     }
     return [
         {
@@ -787,13 +834,15 @@ def list_launches_by_category(
             "descricao": r["descricao"],
             "nota": r["nota"],
             "alvo": r["alvo"],
-            # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
-            # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São Paulo
-            # sairia aqui como o dia SEGUINTE — o MESMO lançamento com dia diferente
-            # em "liste <categoria>" e em "meus últimos lançamentos" (`list_launches`,
-            # core/handlers/launches.py, que já usa `day_tz`). A perna do crédito é
-            # naive (`purchased_at::timestamp`) e passa direto.
-            "data": day_tz(r["dt"]),
+            # `launch_day` (utils_date), não `.date()` nem `day_tz` seco: o `.date()`
+            # cru devolve o dia no fuso da SESSÃO do Postgres (UTC na produção) e um
+            # gasto das 21:30 em São Paulo sairia com o dia SEGUINTE — o MESMO
+            # lançamento com dia diferente aqui e em "meus últimos lançamentos"
+            # (`list_launches`, core/handlers/launches.py). E onde não HÁ hora
+            # (compra no crédito, Open Finance importado antes de c474fba) quem
+            # manda é `posted_at` — os dois casos, e por que os importadores de
+            # HOJE ficam de fora, estão no docstring de `launch_day`.
+            "data": launch_day(r["dt"], r["posted_at"], r["has_time"]),
             "criado_em": r["dt"],
             "posted_at": r["posted_at"],
             "has_time": bool(r["has_time"]),

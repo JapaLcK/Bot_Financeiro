@@ -39,6 +39,30 @@ def day_tz(dt):
     return (dt.astimezone(_tz()) if dt.tzinfo else dt).date()
 
 
+def launch_day(dt, posted_at=None, has_time=True):
+    """Dia de um lançamento. Sem hora confiável, quem manda é a DATA.
+
+    `day_tz` converte um INSTANTE — e onde instante não existe ele inventa um.
+    Duas fontes chegam sem hora e as duas pagaram por isso:
+
+    - compra no crédito: `purchased_at` é `date` (db/schema.py) e na UNION de
+      `list_launches_by_category` o Postgres promove `timestamp` → `timestamptz`
+      pelo fuso da SESSÃO. A sessão da PRODUÇÃO é `Etc/UTC` (medido no Railway em
+      27/08/2026 08:46 UTC), então 27/08 00:00 vira 27/08 00:00Z e `day_tz`
+      devolve 26/08: toda compra de cartão está saindo com o DIA ANTERIOR nessa
+      lista hoje — não é risco futuro. Na máquina local a sessão é -04 e o erro
+      some, que é por que só o CI ficou vermelho.
+    - extrato (`source='ofx'`): `criado_em` é a hora da IMPORTAÇÃO e `posted_at`
+      é o dia do extrato. Um extrato de março importado em agosto dizia 27/08.
+
+    `has_time` é o mesmo CASE do SQL (`LAUNCH_HAS_TIME_SQL`, db/connection.py).
+    Sem `posted_at` cai em `day_tz` — o comportamento de hoje.
+    """
+    if not has_time and posted_at is not None:
+        return posted_at
+    return day_tz(dt)
+
+
 # ---------------- feriados nacionais (BR) ----------------
 
 def _easter_sunday(year: int) -> date:

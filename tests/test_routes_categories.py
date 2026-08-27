@@ -5,6 +5,8 @@ protegida pela cadeia de auth do dashboard. Não toca dados — 401 sem token,
 403 com token de outro user, e a validação de entrada que roda ANTES do banco.
 """
 
+from urllib.parse import quote
+
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
@@ -293,7 +295,10 @@ def test_chaves_da_rota_batem_com_a_fixture_do_frontend(pro_user_id):
     }
 
 
-# ══ D1. offset ═════════════════════════════════════════════════════════════
+# ══ D1. cursor (keyset) ════════════════════════════════════════════════════
+# Era `offset`. Trocou porque o bot escreve no banco com o dashboard aberto: uma
+# linha nova entra ACIMA do corte e desloca a fronteira do OFFSET — a página 2
+# repete a última da 1 e come outra (`db/accounts.py`).
 
 def _n_linhas(uid, n):
     import db
@@ -303,16 +308,20 @@ def _n_linhas(uid, n):
         )
 
 
-def test_offset_pagina_a_lista_sem_repetir(pro_user_id):
+def test_cursor_pagina_a_lista_sem_repetir(pro_user_id):
     """Controle POSITIVO do "Carregar mais": p1 + p2 == a lista inteira, e o
     `resumo` continua sendo o total REAL nas duas páginas."""
     _n_linhas(pro_user_id, 5)
     h = _auth(pro_user_id)
     base = f"/categories/{pro_user_id}/launches?categoria=mercado&limit=3"
     p1 = client.get(base, headers=h).json()
-    p2 = client.get(base + "&offset=3", headers=h).json()
+    assert p1["next_cursor"], p1
+    p2 = client.get(f"{base}&cursor={quote(p1['next_cursor'])}", headers=h).json()
 
     assert p1["resumo"]["n_total"] == p2["resumo"]["n_total"] == 5
+    # o `ord_id` (id CRU das duas tabelas) fica dentro do cursor e não vaza no corpo
+    assert "next_after" not in p1["resumo"], p1["resumo"]
+    assert all("ord_id" not in r for r in p1["launches"]), p1["launches"][0]
     d1 = [r["descricao"] for r in p1["launches"]]
     d2 = [r["descricao"] for r in p2["launches"]]
     assert len(d1) == 3 and len(d2) == 2, (d1, d2)
@@ -323,25 +332,48 @@ def test_offset_pagina_a_lista_sem_repetir(pro_user_id):
     assert d1 + d2 == [r["descricao"] for r in inteiro["launches"]]
 
 
-def test_offset_negativo_422(pro_user_id):
-    """Fronteira, mesma classe do `limit` — offset negativo não é "página
-    anterior", é pedido sem sentido."""
-    resp = client.get(
-        f"/categories/{pro_user_id}/launches?categoria=mercado&offset=-1",
-        headers=_auth(pro_user_id),
+def test_cursor_com_lancamento_novo_no_meio_nao_repete_nem_come(pro_user_id):
+    """O cenário de verdade: chega um gasto pelo WhatsApp entre a página 1 e o
+    "Carregar mais". Com OFFSET, `item 02` voltaria repetido e `item 00` sumiria."""
+    import db
+    _n_linhas(pro_user_id, 6)
+    h = _auth(pro_user_id)
+    base = f"/categories/{pro_user_id}/launches?categoria=mercado&limit=3"
+    p1 = client.get(base, headers=h).json()
+
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 99, "intruso", None, categoria="mercado",
     )
-    assert resp.status_code == 422, resp.status_code
+
+    p2 = client.get(f"{base}&cursor={quote(p1['next_cursor'])}", headers=h).json()
+    vistos = [r["descricao"] for r in p1["launches"] + p2["launches"]]
+    assert vistos == ["item 05", "item 04", "item 03", "item 02", "item 01", "item 00"], vistos
 
 
-def test_sem_offset_continua_na_primeira_pagina(pro_user_id):
-    """Aditivo: quem não manda `offset` vê exatamente o que via antes."""
+def test_cursor_corrompido_e_400(pro_user_id):
+    """Fronteira de confiança: texto de query string vira parâmetro de SQL. Não
+    pode virar 500 nem uma página silenciosamente errada."""
+    h = _auth(pro_user_id)
+    for ruim in ("lixo", "2026-01-01T00:00:00+00:00|launches",
+                 "2026-01-01T00:00:00+00:00|launches|abc",
+                 "2026-01-01T00:00:00+00:00|outra|1",
+                 "nao-e-data|launches|1"):
+        resp = client.get(
+            f"/categories/{pro_user_id}/launches?categoria=mercado&cursor={quote(ruim)}",
+            headers=h,
+        )
+        assert resp.status_code == 400, (ruim, resp.status_code, resp.text)
+
+
+def test_sem_cursor_continua_na_primeira_pagina(pro_user_id):
+    """Aditivo: quem não manda `cursor` vê exatamente o que via antes."""
     _n_linhas(pro_user_id, 4)
     h = _auth(pro_user_id)
     sem = client.get(
         f"/categories/{pro_user_id}/launches?categoria=mercado&limit=2", headers=h,
     ).json()
-    zero = client.get(
-        f"/categories/{pro_user_id}/launches?categoria=mercado&limit=2&offset=0",
+    vazio = client.get(
+        f"/categories/{pro_user_id}/launches?categoria=mercado&limit=2&cursor=",
         headers=h,
     ).json()
-    assert sem == zero
+    assert sem == vazio

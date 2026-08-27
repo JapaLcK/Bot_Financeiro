@@ -32,6 +32,12 @@ def _hoje_as(hora: int):
     return datetime.combine(today_tz(), time(hora, 0))
 
 
+def _dinheiro(resumo: dict) -> dict:
+    """O resumo sem o `next_after` (a tupla de paginação keyset) — o que os 3
+    chamadores do WhatsApp leem."""
+    return {k: v for k, v in resumo.items() if k != "next_after"}
+
+
 def _compra_no_credito(user_id: int, texto: str) -> str:
     """Faz a compra no crédito pelo caminho de produção e devolve a CATEGORIA
     que ela recebeu (a inferência escolhe: 'farmacia' vira 'saúde')."""
@@ -117,12 +123,12 @@ def test_resumo_e_ordem_inalterados(pro_user_id):
 
     rows, resumo = db.list_launches_by_category(pro_user_id, "lazer")
     assert [r["descricao"] for r in rows] == ["estorno", "tarde", "manha"], rows
-    assert resumo == {"n_total": 3, "despesa": 30.0, "receita": 40.0}
+    assert _dinheiro(resumo) == {"n_total": 3, "despesa": 30.0, "receita": 40.0}
 
     # limit corta a lista, não o resumo
     rows2, resumo2 = db.list_launches_by_category(pro_user_id, "lazer", limit=1)
     assert len(rows2) == 1
-    assert resumo2 == resumo
+    assert _dinheiro(resumo2) == _dinheiro(resumo)
 
 
 def test_saida_do_whatsapp_nao_mudou(pro_user_id):
@@ -277,7 +283,7 @@ def test_filtro_do_donut_bate_com_a_lista(pro_user_id):
 def test_default_continua_mostrando_tudo(pro_user_id):
     ini, _ = _cenario_donut(pro_user_id)
     rows, resumo = db.list_launches_by_category(pro_user_id, "mercado", ini, today_tz())
-    assert resumo == {"n_total": 3, "despesa": 750.0, "receita": 40.0}, resumo
+    assert _dinheiro(resumo) == {"n_total": 3, "despesa": 750.0, "receita": 40.0}, resumo
     assert len(rows) == 3
 
 
@@ -382,6 +388,10 @@ def test_has_time_e_posted_at_espelham_a_visao_geral(pro_user_id):
     r = db.list_launches_by_category(pro_user_id, "mercado")[0][0]
     assert r["has_time"] is False, r
     assert r["posted_at"] == date(2026, 3, 10), r
+    # Sem hora confiável quem manda é a DATA: `criado_em` aqui é a hora da
+    # IMPORTAÇÃO (hoje), `posted_at` é o dia do extrato. `day_tz(criado_em)`
+    # devolvia HOJE e a linha aparecia meses fora do lugar.
+    assert r["data"] == date(2026, 3, 10), r
 
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 12, "digitado", None,
@@ -390,6 +400,46 @@ def test_has_time_e_posted_at_espelham_a_visao_geral(pro_user_id):
     novo = [x for x in db.list_launches_by_category(pro_user_id, "mercado")[0]
             if x["alvo"] == "digitado"][0]
     assert novo["has_time"] is True, novo
+
+
+def test_credito_e_extrato_dizem_o_dia_da_DATA_e_nao_do_instante(pro_user_id):
+    """A classe inteira do `has_time=false`, em sessão de banco UTC (o Railway).
+
+    A UNION promove `ct.purchased_at::timestamp` (naive) a `timestamptz` pelo
+    fuso da SESSÃO. A sessão da produção é `Etc/UTC` (medido no Railway em
+    27/08/2026 08:46 UTC): 27/08 00:00 vira 27/08 00:00Z e `day_tz` devolvia
+    26/08 — toda compra de cartão sai com o dia anterior HOJE. O irmão dela é o
+    extrato: `criado_em` é a hora da importação, não o dia do lançamento.
+
+    Controle NEGATIVO: troque `launch_day(...)` por `day_tz(r["dt"])` em
+    db/accounts.py e rode com `PGTZ=UTC` — a perna de crédito fica vermelha
+    (26/08 ≠ 27/08) e a de extrato também (hoje ≠ 10/03). Em sessão -03/-04 o
+    crédito passa mesmo quebrado: o teste SÓ discrimina em UTC.
+    """
+    cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")
+    credito = [r for r in db.list_launches_by_category(pro_user_id, cat)[0]
+               if r["fonte"] == "credito"]
+    assert credito, "a compra no crédito sumiu"
+    for r in credito:
+        assert r["data"] == r["posted_at"] == today_tz(), r
+
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 13, "extrato", None,
+        categoria="mercado", criado_em=_hoje_as(9),
+    )
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update launches set source='ofx', posted_at=%s "
+            "where user_id=%s and alvo='extrato'",
+            (date(2026, 3, 10), pro_user_id),
+        )
+        conn.commit()
+    ext = [r for r in db.list_launches_by_category(pro_user_id, "mercado")[0]
+           if r["alvo"] == "extrato"][0]
+    assert ext["data"] == date(2026, 3, 10), ext
+    # e a OUTRA porta (o "meus últimos lançamentos" do WhatsApp) diz o mesmo dia
+    texto = list_launches(pro_user_id, original_text="meus últimos lançamentos")
+    assert "10/03" in texto, texto
 
 
 def test_credito_nao_promete_hora_que_nao_tem(pro_user_id):
@@ -477,6 +527,43 @@ def test_categoria_vazia_string_cai_na_mesma_barra(pro_user_id):
     assert resumo["n_total"] == 2 and resumo["despesa"] == 200.0, resumo
 
 
+def test_categoria_vazia_volta_CRUA_e_nao_como_outros(pro_user_id):
+    """O `coalesce(categoria,'outros')` era rótulo de mensagem de WhatsApp; desde
+    que o dashboard abre o EDITOR por esta lista, ele virou dado — quem editasse
+    só a nota ou a data mandava 'outros' de volta no PATCH e categorizava a
+    transação sem pedir. Mesma classe do `nota` fabricado a partir de `descricao`.
+
+    Controle NEGATIVO: volte `categoria` para
+    `coalesce(nullif(categoria, ''), 'outros') as categoria` (e o mesmo em
+    `ct.categoria`) em db/accounts.py — as duas asserções abaixo ficam vermelhas.
+    Controle POSITIVO: `test_categoria_normal_nao_virou_sem_categoria` (abaixo)
+    e os testes de `describeLaunch`/rótulo continuam provando que categoria REAL
+    sai como está.
+    """
+    # perna do crédito: o caminho de produção (Open Finance sem categoria)
+    _compra_importada_sem_categoria(pro_user_id, None, ext="crua")
+    # perna de launches: `add_launch_and_update_balance` sempre grava alguma
+    # categoria (db/accounts.py:78), então o NULL vem por SQL — é o que o dado
+    # legado e a importação de extrato deixam na coluna.
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 40, "pao", None, categoria="mercado",
+        criado_em=_hoje_as(9),
+    )
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update launches set categoria=null where user_id=%s and alvo='pao'",
+            (pro_user_id,),
+        )
+        conn.commit()
+    rows, _ = db.list_launches_by_category(pro_user_id, "sem categoria")
+    assert len(rows) == 2, rows
+    for r in rows:
+        assert not r["categoria"], (
+            f"a lista fabricou categoria={r['categoria']!r} numa linha sem categoria — "
+            "o editor grava isso de volta"
+        )
+
+
 def test_categoria_normal_nao_virou_sem_categoria(pro_user_id):
     """Controle positivo: o colapso do vazio não pode engolir categoria real."""
     db.add_launch_and_update_balance(
@@ -489,16 +576,23 @@ def test_categoria_normal_nao_virou_sem_categoria(pro_user_id):
     assert vazia["n_total"] == 0, vazia
 
 
-# ══ D1. "Carregar mais": offset ═════════════════════════════════════════════
+# ══ D1. "Carregar mais": keyset ════════════════════════════════════════════
 # A tela escrevia "Mostrando 50 de 312" e não havia como ver o resto — o pedido
 # era ver TODOS os lançamentos da categoria.
 #
-# Controle NEGATIVO: tire o `offset %s` do SQL (ou fixe `offset` em 0) em
-# db/accounts.py e `test_paginas_nao_repetem_nem_pulam_linha` fica vermelho (a
-# página 2 volta igual à 1).
-# Controle POSITIVO: `test_offset_default_nao_muda_os_3_chamadores_do_whatsapp`
-# prova que o parâmetro novo é aditivo — os 3 chamadores do bot passam `tipo` e
-# `limit` por keyword e nada mais.
+# Era OFFSET, e OFFSET não fecha a corrida que este produto tem TODO DIA: o bot
+# escreve no banco com o dashboard aberto. Uma linha nova entra ACIMA do corte
+# (a ordem é por data desc), empurra a fronteira, e a página 2 repete a última
+# linha da 1 E come outra — com o `n_total` dizendo que está tudo lá.
+#
+# Controle NEGATIVO: troque o `where (dt, fonte, ord_id) < (%s, %s, %s)` por
+# `offset` (`limit %s offset %s` com o número de linhas já vistas) em
+# db/accounts.py — `test_lancamento_novo_no_meio_nao_repete_nem_come_linha` fica
+# vermelho.
+# Controle POSITIVO: `test_paginas_nao_repetem_nem_pulam_linha` (sem escrita
+# concorrente, a paginação continua idêntica) e
+# `test_after_default_nao_muda_os_3_chamadores_do_whatsapp` (o parâmetro novo é
+# aditivo — os 3 chamadores do bot passam `tipo`/`limit` por keyword e nada mais).
 
 def _n_lancamentos(user_id, n, categoria="lazer"):
     for i in range(n):
@@ -508,60 +602,98 @@ def _n_lancamentos(user_id, n, categoria="lazer"):
         )
 
 
+def _paginado(user_id, categoria, pagina, **kw):
+    """Percorre a lista inteira pelo cursor, como o "Carregar mais" da tela."""
+    todas, after = [], None
+    while True:
+        pag, res = db.list_launches_by_category(
+            user_id, categoria, limit=pagina, after=after, **kw)
+        todas += pag
+        if not pag:
+            return todas, res
+        after = res["next_after"]
+
+
 def test_paginas_nao_repetem_nem_pulam_linha(pro_user_id):
     """A soma das páginas tem que ser exatamente o conjunto todo — nem linha
-    repetida, nem linha sumida. É o que a ordem TOTAL do `order by` garante:
-    com desempate instável, OFFSET devolve a mesma linha duas vezes."""
+    repetida, nem linha sumida."""
     _n_lancamentos(pro_user_id, 7)
     inteiro, resumo = db.list_launches_by_category(pro_user_id, "lazer", limit=50)
     assert resumo["n_total"] == 7
 
-    paginado = []
-    for off in (0, 3, 6):
-        pag, res = db.list_launches_by_category(pro_user_id, "lazer", limit=3, offset=off)
-        # o resumo é window aggregate ANTES do LIMIT: continua sendo o total REAL
-        assert res == resumo, (off, res, resumo)
-        paginado += pag
-
+    paginado, _ = _paginado(pro_user_id, "lazer", 3)
     chaves = [(r["descricao"], r["valor"]) for r in paginado]
     assert len(chaves) == len(set(chaves)) == 7, chaves
     assert chaves == [(r["descricao"], r["valor"]) for r in inteiro], (chaves, inteiro)
 
 
-def test_primeira_pagina_nao_muda_com_o_carregar_mais(pro_user_id):
-    """Controle POSITIVO: pedir a página 2 não pode mexer na 1."""
-    _n_lancamentos(pro_user_id, 5)
-    p1a, _ = db.list_launches_by_category(pro_user_id, "lazer", limit=2)
-    db.list_launches_by_category(pro_user_id, "lazer", limit=2, offset=2)
-    p1b, _ = db.list_launches_by_category(pro_user_id, "lazer", limit=2)
-    assert [r["descricao"] for r in p1a] == [r["descricao"] for r in p1b]
+def test_o_resumo_e_o_mesmo_em_todas_as_paginas(pro_user_id):
+    """O keyset filtra FORA da subquery dos window aggregates: `n_total` e os
+    totais continuam cobrindo TODAS as linhas, não só as que sobraram do corte.
+    Sem isso o rodapé "N de M" mentiria a partir da página 2."""
+    _n_lancamentos(pro_user_id, 7)
+    _, inteiro = db.list_launches_by_category(pro_user_id, "lazer", limit=50)
+    after = None
+    for _ in range(3):
+        pag, res = db.list_launches_by_category(
+            pro_user_id, "lazer", limit=3, after=after)
+        assert _dinheiro(res) == _dinheiro(inteiro), (res, inteiro)
+        after = res["next_after"]
+        assert pag
 
 
-def test_offset_alem_do_fim_volta_vazio_com_total_certo(pro_user_id):
+def test_lancamento_novo_no_meio_nao_repete_nem_come_linha(pro_user_id):
+    """O cenário NORMAL deste produto: o bot grava enquanto o modal está aberto.
+
+    Com OFFSET, a linha nova (que entra no TOPO) desloca a fronteira: a página 2
+    repete a última linha da 1 e some com outra, e o usuário nunca vê a que
+    sumiu. Com keyset a página 2 é "o que vem depois desta linha aqui" e a linha
+    nova simplesmente não participa."""
+    _n_lancamentos(pro_user_id, 6)
+    p1, res1 = db.list_launches_by_category(pro_user_id, "lazer", limit=3)
+    assert [r["descricao"] for r in p1] == ["item 05", "item 04", "item 03"], p1
+
+    # chega uma transação pelo WhatsApp com a lista aberta (entra no topo)
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 99, "intruso", None,
+        categoria="lazer", criado_em=_hoje_as(9),
+    )
+
+    p2, _ = db.list_launches_by_category(
+        pro_user_id, "lazer", limit=3, after=res1["next_after"])
+    assert [r["descricao"] for r in p2] == ["item 02", "item 01", "item 00"], p2
+    vistos = [r["descricao"] for r in p1 + p2]
+    assert len(vistos) == len(set(vistos)) == 6, vistos
+
+
+def test_after_alem_do_fim_volta_vazio_com_total_certo(pro_user_id):
     _n_lancamentos(pro_user_id, 3)
-    rows, resumo = db.list_launches_by_category(pro_user_id, "lazer", limit=50, offset=99)
+    _, resumo = db.list_launches_by_category(pro_user_id, "lazer", limit=50)
+    rows, vazio = db.list_launches_by_category(
+        pro_user_id, "lazer", limit=50, after=resumo["next_after"])
     assert rows == []
-    # sem linha, não há window aggregate: o resumo zera. O front NÃO recalcula o
-    # total a partir daqui (só sobrescreve quando vem linha), então o rodapé
-    # continua certo.
-    assert resumo["n_total"] == 0, resumo
+    # sem linha, não há window aggregate: o resumo zera e `next_after` some. O
+    # front NÃO recalcula o total a partir daqui (só sobrescreve quando vem
+    # linha), então o rodapé continua certo.
+    assert vazio["n_total"] == 0, vazio
+    assert vazio["next_after"] is None, vazio
 
 
-def test_offset_default_nao_muda_os_3_chamadores_do_whatsapp(pro_user_id):
-    """Aditivo: quem não passa `offset` continua vendo a primeira página.
+def test_after_default_nao_muda_os_3_chamadores_do_whatsapp(pro_user_id):
+    """Aditivo: quem não passa `after` continua vendo a primeira página.
     Os 3 chamadores (core/handlers/launches.py:442, :782, :855) passam
     `tipo`/`limit` por KEYWORD — a assinatura nova não desloca nada."""
     _n_lancamentos(pro_user_id, 4)
     sem, r1 = db.list_launches_by_category(pro_user_id, "lazer", tipo="despesa", limit=2)
     com, r2 = db.list_launches_by_category(
-        pro_user_id, "lazer", tipo="despesa", limit=2, offset=0)
+        pro_user_id, "lazer", tipo="despesa", limit=2, after=None)
     assert [r["descricao"] for r in sem] == [r["descricao"] for r in com]
     assert r1 == r2
 
 
 def test_ordem_e_total_com_credito_e_launches_no_mesmo_dia(pro_user_id):
     """A perna do crédito tem `user_seq` NULO: era ali que o desempate faltava.
-    Duas compras de cartão no mesmo dia empatavam, e OFFSET as embaralhava."""
+    Sem ordem total, o keyset pula ou repete exatamente como o OFFSET."""
     cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 11, "remedio", None,
@@ -570,10 +702,7 @@ def test_ordem_e_total_com_credito_e_launches_no_mesmo_dia(pro_user_id):
     inteiro, resumo = db.list_launches_by_category(pro_user_id, cat, limit=50)
     assert resumo["n_total"] == len(inteiro) >= 2
 
-    por_pagina = []
-    for off in range(0, resumo["n_total"], 1):
-        pag, _ = db.list_launches_by_category(pro_user_id, cat, limit=1, offset=off)
-        por_pagina += pag
+    por_pagina, _ = _paginado(pro_user_id, cat, 1)
     assert ([(r["fonte"], r["valor"]) for r in por_pagina]
             == [(r["fonte"], r["valor"]) for r in inteiro]), (por_pagina, inteiro)
 
