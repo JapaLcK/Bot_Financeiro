@@ -2783,16 +2783,18 @@ function bInitials(name) {
   if (n.includes("bradesco")) return "BR";
   return (name||"?").slice(0,2).toUpperCase();
 }
-// Status da conexão Open Finance → pill. Três estados:
-//  • Conectado    — sincronizando normal (ACTIVE/UPDATED)
-//  • Pendente     — a Pluggy ainda está verificando/buscando (UPDATING/CREATED/WAITING_USER_ACTION)
-//  • Não conectado — parado, precisa reconectar (PAUSED/LOGIN_ERROR/ERROR/OUTDATED/WAITING_USER_INPUT/desconhecido)
-function connStatusPill(status) {
-  const st = String(status || "").toUpperCase();
-  if (st === "ACTIVE" || st === "ATIVO" || st === "UPDATED") return { pc: "active",  pl: "Conectado" };
-  if (st === "UPDATING" || st === "CREATED" || st === "WAITING_USER_ACTION") return { pc: "pending", pl: "Pendente" };
-  return { pc: "error", pl: "Não conectado" };
-}
+// A pílula vem PRONTA do backend (`connection_ui_state`, core/services/pluggy_health.py):
+// é a única função que decide os estados, e ela enxerga o que o status local não
+// enxerga — produto atrasado e item que sumiu da Pluggy. Aqui só se traduz o estado
+// para a classe CSS que já existe (active/pending/error).
+// Estado que não estiver nesta tabela cai no default do `renderConnections`
+// ("pending"), NUNCA em verde.
+const OF_PILL_CLASS = {
+  updated: "active", partial: "pending", updating: "pending",
+  error_recoverable: "error", needs_user_action: "error",
+  item_missing: "error", paused: "error", removed: "error",
+  no_accounts: "pending",
+};
 
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
@@ -2809,14 +2811,19 @@ function renderConnections(list) {
   el.innerHTML = list.map(c => {
     const cls = bClass(c.institution_name);
     const ini = bInitials(c.institution_name);
-    const { pc, pl } = connStatusPill(c.status);
+    const ui = c.ui || {};
+    const pc = OF_PILL_CLASS[ui.state] || "pending";
+    const pl = ui.label || "Pendente";
+    // UMA linha de detalhe, e só quando há atraso/problema a explicar.
+    const detalhe = ui.detail ? `<div class="conn-meta">${esc(ui.detail)}</div>` : "";
     return `<div class="connection-row">
       <div class="conn-logo ${cls}">${esc(ini)}</div>
       <div class="conn-info">
         <div class="conn-name">${esc(c.institution_name)}</div>
         <div class="conn-meta">Última sync: ${esc(fmtDate(c.last_sync_at))}</div>
+        ${detalhe}
       </div>
-      <span class="pill ${pc}">${pl}</span>
+      <span class="pill ${pc}">${esc(pl)}</span>
     </div>`;
   }).join("");
 }
@@ -3032,42 +3039,109 @@ async function bindCaixinha(ofInvestmentId, newPocketVal, currentPocketId) {
   loadCaixinhas();
 }
 
-/* ── Refresh (botão "Atualizar") ─────────────────
+/* ── Refresh (botão "Atualizar" e pull-to-refresh) ─────────────────
    Diferente do loadData (que só relê o snapshot): pede pra Pluggy re-buscar do
-   banco (PATCH /items), espera concluir e sincroniza — puxa transação nova, marca
-   a conexão ATIVA e limpa "Pendente". */
-async function refreshOpenFinance() {
-  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
-  const btn = document.getElementById("of-refresh-btn");
+   banco (PATCH /items), espera concluir e sincroniza.
+
+   `propagate` (vindo do PTR): a falha REJEITA a promise, o que faz o indicador
+   do gesto virar âmbar em vez de fingir sucesso — e o toast/disable do botão
+   ficam de fora, porque nesse caminho o botão nem existe (some no modo app).
+   `wait`: teto de espera mandado na query — o watchdog do PTR é 12s, e o
+   default de 18s do servidor faria todo gesto bem-sucedido terminar em âmbar. */
+async function refreshOpenFinance(opts) {
+  const { propagate = false, wait = null } = opts || {};
+  if (!USER_ID) {
+    const erro = new Error("Sessão inválida. Faça login novamente");
+    if (propagate) throw erro;
+    showToast(erro.message, "error");
+    return;
+  }
+  const btn = propagate ? null : document.getElementById("of-refresh-btn");
   const orig = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
-  showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
+  if (!propagate) showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
   try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh`, authOptions({
+    const qs = wait ? `?wait=${encodeURIComponent(wait)}` : "";
+    const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh${qs}`, authOptions({
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
     }));
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    const c = data.connections  || [];
-    const a = data.accounts     || [];
-    const t = data.transactions || [];
-    updateStats(c, a, t);
-    renderConnections(c);
-    renderAccounts(a);
-    renderTransactions(t);
-    if (c.length > 0) setStep(3);
-    const sync = data.sync || {};
-    if (Number(sync.still_updating) > 0) {
-      showToast("O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.", "error");
+    const veredito = refreshVerdict(data.sync || {});
+    if (propagate) {
+      // Repinta pela porta canônica: `loadData` é quem bumpa `_dataGen`, é dono
+      // do fan-out (caixinhas) e tem a guarda de geração. Pintar aqui direto
+      // deixaria o painel de caixinhas parado no gesto e devolveria a classe de
+      // bug que a guarda existe pra impedir — resposta velha por cima de nova.
+      await loadData({ propagate: true });
     } else {
-      showToast("Tudo em dia!", "ok");
+      const c = data.connections  || [];
+      const a = data.accounts     || [];
+      const t = data.transactions || [];
+      updateStats(c, a, t);
+      renderConnections(c);
+      renderAccounts(a);
+      renderTransactions(t);
+      if (c.length > 0) setStep(3);
+      showToast(veredito.msg, veredito.tone);
     }
+    // Já repintado: agora sim o indicador do gesto pode virar âmbar.
+    if (propagate && veredito.tone === "error") throw new Error(veredito.msg);
   } catch (err) {
+    if (propagate) throw err;
     showToast(err.message || "Erro ao atualizar", "error");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
   }
+}
+
+/* O veredito deixou de ser `still_updating > 0`: esse número era 0 mesmo quando
+   o item tinha sumido da Pluggy, e a tela dizia "Tudo em dia!" para uma conexão
+   morta. Agora lê `sync.items[]`, que traz estado por item.
+
+   REGRA DA TABELA: verde só para estado que está em OF_VERDICT_OK. Estado que
+   este arquivo não conhece — porque o backend ganhou um caso novo — cai no
+   genérico honesto, nunca em "Tudo em dia!". Era exatamente esse buraco que
+   fazia `no_accounts`, `paused` e `removed` virarem verde por baixo. */
+const OF_VERDICT_OK = ["updated", "rate_limited"];
+
+/* Ordem de GRAVIDADE: o primeiro estado desta lista que aparecer manda na
+   mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos. */
+const OF_VERDICT = [
+  ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
+  ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
+  ["paused",            (i) => `A sincronização ${ofBanco(i)} está pausada. Reative seu plano para atualizar.`],
+  ["needs_user_action", (i) => `O ${ofNome(i)} precisa que você reautorize o acesso.`],
+  ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
+  ["updating",          ()  => "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo."],
+  ["partial",           (i) => i.detail
+      ? `Atualizei o que deu: ${i.detail.charAt(0).toLowerCase()}${i.detail.slice(1)}.`
+      : "Atualizei o que deu — parte dos dados não veio."],
+  ["error_recoverable", () => "Não consegui atualizar agora. Tente de novo em instantes."],
+];
+
+function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
+function ofNome(i)  { return i.institution || "banco"; }
+
+function refreshVerdict(sync) {
+  const items = Array.isArray(sync.items) ? sync.items : [];
+  for (const [estado, msg] of OF_VERDICT) {
+    const achado = items.find((i) => i.state === estado);
+    if (achado) return { tone: "error", msg: msg(achado) };
+  }
+  if (Number(sync.still_updating) > 0)
+    return { tone: "error", msg: "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo." };
+  // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
+  // sem item nenhum, não pode terminar em verde.
+  const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));
+  if (desconhecido || (items.length === 0 && sync.ok === false))
+    return { tone: "error", msg: "Não consegui atualizar agora. Tente de novo em instantes." };
+  // Nada foi pedido ao banco porque acabamos de pedir: verde (os dados SÃO
+  // recentes), mas dizendo o que aconteceu em vez de fingir uma busca nova.
+  if (items.length && items.every((i) => i.state === "rate_limited"))
+    return { tone: "ok", msg: "Você acabou de atualizar — já está tudo em dia." };
+  return { tone: "ok", msg: "Tudo em dia!" };
 }
 
 /* ── Connect ─────────────────────────────────── */
@@ -3510,7 +3584,10 @@ window.PBRefresh = () => {
     return Promise.resolve(_notifSave).catch(function () {})
       .then(function () { return loadNotificationSettings({ propagate: true }); });
   if (view === "open-finance")
-    return loadData({ propagate: true });
+    // Puxar a tela ATUALIZA de verdade (PATCH na Pluggy + sync), não só relê o
+    // snapshot. wait=8 porque o watchdog do indicador é 12s (app-mode.js) e o
+    // default do servidor (18s) faria todo sucesso terminar em âmbar.
+    return refreshOpenFinance({ propagate: true, wait: 8 });
   return Promise.resolve();   // data / legal: nada dinâmico a atualizar
 };
 </script>

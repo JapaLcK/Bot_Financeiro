@@ -875,6 +875,17 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     </div>
   </section>
 
+  <!-- ── Open Finance ────────────────────────────────────────────────── -->
+  <section class="grid-2" style="margin-bottom:16px">
+    <div class="card" style="grid-column:1/-1">
+      <div class="section-title">
+        <h2><i class="ph ph-bank" aria-hidden="true"></i> Open Finance</h2>
+        <span class="meta">Saúde das conexões Pluggy</span>
+      </div>
+      <div class="health-grid" id="of-health-grid"></div>
+    </div>
+  </section>
+
   <!-- ── Eventos operacionais ────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
@@ -1468,6 +1479,53 @@ function renderOpsHealthGrid(ops) {
 }
 
 
+/* ── Open Finance ────────────────────────────────────────────────── */
+/* Contadores vêm de `of_health_counters()` (db/open_finance_state.py) — a
+   mesma fonte que o job de saúde alimenta. Sem PII: só contagens. */
+function renderOpenFinanceGrid(of) {
+  of = of || {};
+  // `of.error` é a FALHA de leitura (fail-soft do backend); `of.erro` é a
+  // contagem de conexões em erro. Falha tem que aparecer como falha — antes as
+  // duas dividiam a chave e o painel ficava verde com todos os números zerados.
+  if (of.error) {
+    $id('of-health-grid').innerHTML =
+      `<div class="health-item danger"><div class="health-item-val red">falhou</div>` +
+      `<div class="health-item-label">Contadores de OF indisponíveis</div>` +
+      `<div class="health-item-hint">${esc(of.error)}</div></div>`;
+    return;
+  }
+  const stale = of.stale_por_produto || {};
+  const ev = of.eventos_24h || {};
+  const atrasoH = Math.floor((of.maior_atraso_sec || 0) / 3600);
+  const items = [
+    { label: "Conexões",            val: fInt(of.total),        color: 'blue' },
+    { label: "Saudáveis",           val: fInt(of.ativas),       color: 'green' },
+    { label: "Em erro",             val: fInt(of.erro),         color: of.erro > 0 ? 'red' : 'green', cls: of.erro > 0 ? 'danger' : '' },
+    { label: "Parciais",            val: fInt(of.parciais),     color: of.parciais > 0 ? 'yellow' : 'green', cls: of.parciais > 0 ? 'warning' : '',
+      hint: "Algum produto não atualizou" },
+    { label: "Items ausentes",      val: fInt(of.item_missing), color: of.item_missing > 0 ? 'red' : 'green', cls: of.item_missing > 0 ? 'danger' : '',
+      hint: "GET /items devolveu 404" },
+    { label: "Sem contas",          val: fInt(of.sem_contas),   color: of.sem_contas > 0 ? 'yellow' : 'green', cls: of.sem_contas > 0 ? 'warning' : '' },
+    { label: "Items sem conexão",   val: fInt(of.items_sem_conexao), color: of.items_sem_conexao > 0 ? 'yellow' : 'green', cls: of.items_sem_conexao > 0 ? 'warning' : '',
+      hint: "Vistos no registry, sem conexão local" },
+    { label: "Maior atraso",        val: atrasoH ? `${atrasoH}h` : '—', color: atrasoH > 48 ? 'red' : (atrasoH > 24 ? 'yellow' : 'green'), cls: atrasoH > 48 ? 'danger' : '' },
+    { label: "Conta atrasada",      val: fInt(stale.BANK || 0),        color: (stale.BANK||0) > 0 ? 'yellow' : 'green' },
+    { label: "Cartão atrasado",     val: fInt(stale.CREDIT || 0),      color: (stale.CREDIT||0) > 0 ? 'yellow' : 'green' },
+    { label: "Investim. atrasados", val: fInt(stale.INVESTMENTS || 0), color: (stale.INVESTMENTS||0) > 0 ? 'yellow' : 'green' },
+    { label: "Retries 24h",         val: fInt(ev.pluggy_sync_retry || 0), color: (ev.pluggy_sync_retry||0) > 0 ? 'yellow' : 'green',
+      hint: "Deadlock/serialização" },
+    { label: "Syncs falhos 24h",    val: fInt(ev.pluggy_sync_failed || 0), color: (ev.pluggy_sync_failed||0) > 0 ? 'red' : 'green', cls: (ev.pluggy_sync_failed||0) > 0 ? 'danger' : '' },
+    { label: "Conflito de dono 24h",val: fInt(ev.of_item_owner_conflict || 0), color: (ev.of_item_owner_conflict||0) > 0 ? 'red' : 'green', cls: (ev.of_item_owner_conflict||0) > 0 ? 'danger' : '' },
+  ];
+  $id('of-health-grid').innerHTML = items.map(it => `
+    <div class="health-item ${it.cls||''}">
+      <div class="health-item-val ${it.color||''}">${it.val}</div>
+      <div class="health-item-label">${it.label}</div>
+      ${it.hint ? `<div class="health-item-hint">${it.hint}</div>` : ''}
+    </div>
+  `).join('');
+}
+
 /* ── Summary cards ───────────────────────────────────────────────── */
 function renderSummary(s) {
   const cards = [
@@ -1736,6 +1794,7 @@ async function loadOverview(force=false) {
   renderErrorList(data.recent_errors);
   renderHealthGrid(data.summary, data.recent_errors, data.ops_summary);
   renderOpsHealthGrid(data.ops_summary);
+  renderOpenFinanceGrid(data.open_finance);
   renderOpsList(data.recent_ops);
   renderEmails(data.email_stats || {}, data.recent_emails || []);
   renderSignups(data.recent_signups);
