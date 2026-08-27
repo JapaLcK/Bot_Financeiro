@@ -8,7 +8,7 @@ from decimal import Decimal
 from psycopg.types.json import Json, Jsonb
 
 import db_support as _db_support
-from utils_date import _tz
+from utils_date import _tz, day_tz
 
 from .connection import get_conn, cat_norm_sql
 from .users import ensure_user, ensure_user_tx
@@ -699,7 +699,13 @@ def list_launches_by_category(
             "valor": float(r["valor"] or 0),
             "categoria": r["categoria"],
             "descricao": r["descricao"],
-            "data": r["dt"].date() if hasattr(r["dt"], "date") else r["dt"],
+            # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
+            # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São Paulo
+            # sairia aqui como o dia SEGUINTE — o MESMO lançamento com dia diferente
+            # em "liste <categoria>" e em "meus últimos lançamentos" (`list_launches`,
+            # core/handlers/launches.py, que já usa `day_tz`). A perna do crédito é
+            # naive (`purchased_at::timestamp`) e passa direto.
+            "data": day_tz(r["dt"]),
             "fonte": r["fonte"],
             "user_seq": r["user_seq"],
         }
