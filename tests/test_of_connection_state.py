@@ -108,6 +108,17 @@ def _espelho(connection_id: int) -> tuple[int, int]:
     return contas, txs
 
 
+def _contas_espelhadas(connection_id: int) -> set[str]:
+    """Os IDs, não a contagem: sobrescrita por snapshot velho troca CONTEÚDO."""
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "select provider_account_id from open_finance_accounts where connection_id=%s",
+                (connection_id,),
+            )
+            return {r["provider_account_id"] for r in (cur.fetchall() or [])}
+
+
 def _mock_pluggy(monkeypatch, *, item, contas=(), txs=()):
     """Mocka o mundo remoto. `item` pode ser um dict ou uma exceção a levantar."""
     def _get_item(item_id, api_key=None):
@@ -568,9 +579,11 @@ def test_reconexao_com_sync_falho_mostra_o_motivo_e_nao_o_generico(
 
 def test_reconexao_no_meio_do_sync_nao_carimba_sucesso(user_id, monkeypatch, relogio_fixo):
     """O sync leu tudo sob a autorização antiga; o usuário reconectou enquanto
-    ele lia. O espelho FICA (o dado é real, só velho) — o que não pode é o
-    carimbo de sucesso, que devolveria "Atualizado" para a autorização nova."""
-    _conexao(user_id, "item-corrida")
+    ele lia. O run inteiro é descartado: nem espelho, nem carimbo.
+
+    A versão anterior deste teste afirmava "o espelho FICA (o dado é real, só
+    velho)". Estava errado, e a rodada 5 do Codex mostrou por quê — ver 11e."""
+    conexao = _conexao(user_id, "item-corrida")
     _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-corrida"},
                  contas=[_conta_pluggy("acc-corrida")], txs=[_tx_pluggy("tx-corrida")])
 
@@ -584,10 +597,11 @@ def test_reconexao_no_meio_do_sync_nao_carimba_sucesso(user_id, monkeypatch, rel
         return real(account_id, api_key, **kw)
     monkeypatch.setattr(ps, "list_pluggy_transactions", reconecta_no_meio)
 
-    ps.sync_pluggy_item("item-corrida")
+    res = ps.sync_pluggy_item("item-corrida")
 
+    assert res["reason"] == "stale_authorization"
     linha = _linha("item-corrida")
-    assert _espelho(linha["id"]) == (1, 1), "o espelho FICA: o dado é real, só velho"
+    assert _espelho(conexao["id"]) == (0, 0), "run de geração velha não escreve espelho"
     assert linha["last_sync_at"] == ANTES, \
         "sync que começou antes da reconexão não carimba sucesso depois dela"
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
@@ -793,3 +807,74 @@ def test_sync_de_item_vazio_tira_o_error_e_diz_sem_dados(user_id, monkeypatch, r
     assert linha["last_sync_at"] == ANTES, "espelho vazio continua não sendo sucesso"
     ui = _ui("item-preso")
     assert (ui["state"], ui["label"]) == ("no_accounts", "Sem dados")
+
+
+# ── 11e. RODADA CODEX 3 (#162, P2): dois workers, o velho chega por último ───
+# O apontamento: o `reconnected_at_visto` recusa só o CARIMBO do run de geração
+# velha — as escritas do espelho acontecem TODAS antes dele, e já foram feitas
+# quando o carimbo é recusado. Com duas réplicas (o deploy do Railway sobe a
+# nova antes de derrubar a velha) a interposição é alcançável:
+#
+#   A começa … R (reconexão) … B começa … B escreve+carimba … A escreve
+#
+# B carimbou um `last_sync_at` legítimo, então `connection_ui_state` diz
+# "Atualizado" — e A, chegando depois, sobrescreve contas, investimentos,
+# `status` e `health` com o snapshot PRÉ-reconexão. Tela verde sobre espelho
+# velho, que é o defeito que esta onda existe para tirar. O `_INFLIGHT` não
+# cobre: é coalescing por PROCESSO.
+#
+# O conserto é reler o `reconnected_at` DENTRO do lock e abortar o run inteiro
+# antes de qualquer escrita (`_sync_pluggy_item_confirmado`).
+#
+# CONTROLE NEGATIVO (medido): remover a relectura + o early-return de
+# `stale_authorization` de `pluggy_sync.py` deixa 2 testes vermelhos — este e o
+# `test_reconexao_no_meio_do_sync_nao_carimba_sucesso` de 11d.
+# CONTROLE POSITIVO: `test_sync_sem_reconexao_no_meio_carimba_normalmente`
+# (11d) prova que o caminho comum — ninguém reconectou — continua escrevendo e
+# carimbando. Sem ele a guarda passaria num código que recusa todo sync.
+
+def test_run_velho_nao_sobrescreve_o_espelho_do_run_novo(user_id, monkeypatch, relogio_fixo):
+    """Worker A (pré-reconexão) chega no lock DEPOIS de o worker B ter
+    reconectado, espelhado e carimbado. A tem de morrer sem escrever."""
+    conexao = _conexao(user_id, "item-2workers")
+    # A leu a linha com `reconnected_at` NULL e traz o snapshot VELHO.
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-2workers"},
+                 contas=[_conta_pluggy("acc-VELHA")], txs=[_tx_pluggy("tx-VELHA")])
+
+    real = ps.list_pluggy_transactions
+
+    def reconecta_e_deixa_o_worker_b_terminar(account_id, api_key=None, **kw):
+        # No meio da leitura remota de A: o usuário reconecta…
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "item-2workers", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        nova = _linha("item-2workers")
+        assert nova["reconnected_at"] == AGORA
+        # …e o worker B, que começou DEPOIS dela, espelha e carimba primeiro.
+        db.save_open_finance_sync(nova["id"], [{
+            "provider_account_id": "acc-NOVA", "name": "Conta", "type": "BANK",
+            "currency": "BRL", "balance": 2000, "raw": {},
+            "transactions": [{"provider_transaction_id": "tx-NOVA",
+                              "description": "Mercado", "amount": -10,
+                              "transaction_date": AGORA.date(), "raw": {}}],
+        }])
+        db.mark_sync_result(nova["id"], ok=True, status="ACTIVE", status_reason="",
+                            health=ps.derive_item_health(ITEM_SAUDAVEL),
+                            reconnected_at_visto=nova["reconnected_at"])
+        return real(account_id, api_key, **kw)
+
+    monkeypatch.setattr(ps, "list_pluggy_transactions",
+                        reconecta_e_deixa_o_worker_b_terminar)
+
+    res = ps.sync_pluggy_item("item-2workers")
+
+    # O espelho PRIMEIRO: é a afirmação forte, e é ela que o controle negativo
+    # tem de derrubar. `ok is False` sozinho passaria num código que só recusa o
+    # retorno depois de já ter escrito.
+    assert _contas_espelhadas(conexao["id"]) == {"acc-NOVA"}, \
+        "o snapshot pré-reconexão não pode voltar ao espelho"
+    linha = _linha("item-2workers")
+    assert linha["last_sync_at"] == AGORA, "o carimbo legítimo do worker B fica"
+    assert res["ok"] is False and res["reason"] == "stale_authorization"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", "e ele está dizendo a verdade: o espelho é o novo"

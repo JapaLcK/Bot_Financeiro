@@ -126,7 +126,11 @@ def mark_sync_result(
     — e carimbaria `last_sync_at > reconnected_at` com dado buscado sob a
     autorização ANTIGA, devolvendo o verde que esta onda existe para tirar.
     Mesmo idioma otimista de `pending_actions`: só grava se ainda for o que leu.
-    A escrita do espelho continua valendo (o dado é real, só velho); o que se
+    NÃO é o guarda principal: quem mata o run de geração velha é a relectura de
+    `reconnected_at` dentro do `pluggy_item_lock` (`_sync_pluggy_item_confirmado`),
+    antes de qualquer escrita. Este aqui fecha a janela que sobra — a rota de
+    reconexão não pega aquele lock, então ela ainda pode cair entre a relectura e
+    este carimbo. Nessa janela o espelho fica (o dado é real, só velho); o que se
     recusa é chamá-la de sucesso — e a própria rota de reconexão agenda um sync
     novo, então o âmbar é transitório.
     """
