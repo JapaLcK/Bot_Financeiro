@@ -284,6 +284,98 @@ def test_retry_dispara_em_deadlock_e_nao_em_erro_de_programacao(monkeypatch):
     assert [e for e in eventos if e[1] == "pluggy_sync_retry"] == []
 
 
+# ── ONDA 2 / Codex #162 (4º P2): `sync_in_progress` travava indefinidamente ──
+# `sync_pluggy_item` devolve `sync_in_progress` como DICT, não como exceção, e o
+# loop de `_run_pluggy_sync_bg` só retentava exceção `_retryable` — então a
+# tarefa encerrava em silêncio e ninguém mais sincronizava aquele item.
+#
+# Por que dói: o run de geração velha segura o `pluggy_item_lock` enquanto
+# escreve; o sync que a RECONEXÃO agendou bate no lock, recebe
+# `sync_in_progress` e desiste. Com `OF_REFRESH_ENABLED` off (o default) nada
+# mais roda sozinho — o espelho velho fica indefinidamente e a tela só sai do
+# âmbar se o usuário tocar "Atualizar" ou puxar a tela.
+
+def test_sync_in_progress_e_retentado(user_id, monkeypatch):
+    """CONTROLE NEGATIVO: com o `break` incondicional de volta, `tentativas`
+    vira 1 e o `pluggy_sync_retry` some — o travamento indefinido volta."""
+    eventos = []
+
+    async def _log(level, event_type, *a, **kw):
+        eventos.append((level, event_type))
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+
+    tentativas = []
+
+    def _lock_ocupado(item_id):
+        tentativas.append(item_id)
+        return {"ok": False, "reason": "sync_in_progress", "item_id": item_id}
+
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _lock_ocupado)
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-ocupado"))
+
+    assert len(tentativas) == 3, f"o lock ocupado tem que ser retentado: {tentativas}"
+    assert len([e for e in eventos if e[1] == "pluggy_sync_retry"]) == 2
+
+
+def test_sync_in_progress_que_libera_para_de_retentar(user_id, monkeypatch):
+    """CONTROLE POSITIVO: o retry existe para ALCANÇAR o sync, não para gastar
+    três tentativas sempre. Liberou o lock na 2ª, a 3ª não acontece."""
+    async def _log(level, event_type, *a, **kw):
+        return None
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+
+    tentativas = []
+
+    def _libera_na_segunda(item_id):
+        tentativas.append(item_id)
+        if len(tentativas) == 1:
+            return {"ok": False, "reason": "sync_in_progress", "item_id": item_id}
+        return {"ok": True, "item_id": item_id, "user_id": None}
+
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _libera_na_segunda)
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-libera"))
+
+    assert len(tentativas) == 2, "parou assim que conseguiu sincronizar"
+
+
+def test_stale_authorization_nao_vira_laco(user_id, monkeypatch):
+    """`stale_authorization` significa "alguém mais novo assumiu", e quem assumiu
+    já agendou o próprio sync. Retentar seria correr atrás de trabalho que já tem
+    dono — e num par de runs que se atropelam, laço. UMA tentativa e pronto."""
+    eventos = []
+
+    async def _log(level, event_type, *a, **kw):
+        eventos.append((level, event_type))
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+
+    tentativas = []
+
+    def _geracao_velha(item_id):
+        tentativas.append(item_id)
+        return {"ok": False, "reason": "stale_authorization", "item_id": item_id}
+
+    monkeypatch.setattr(of_routes, "sync_pluggy_item", _geracao_velha)
+    asyncio.run(of_routes._run_pluggy_sync_bg("item-velho"))
+
+    assert len(tentativas) == 1, f"stale_authorization não se retenta: {tentativas}"
+    assert [e for e in eventos if e[1] == "pluggy_sync_retry"] == []
+
+
 # ── RODADA 3: o lock não pode esperar para sempre nem abrir conexão sem teto ──
 
 def test_lock_wait_zero_nao_significa_espera_infinita(user_id, monkeypatch):

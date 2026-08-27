@@ -87,6 +87,13 @@ _SYNC_MAX_ATTEMPTS = 3
 _HTTP_TRANSITORIO = {429, 500, 502, 503, 504}
 
 
+def _backoff_sec(tentativa: int) -> float:
+    """Espera exponencial com jitter. Dois chamadores: a exceção `_retryable` e o
+    `sync_in_progress`, que NÃO é exceção — duas cópias da fórmula seriam a
+    mesma regra em dois lugares (§0.7)."""
+    return 0.5 * (2 ** (tentativa - 1)) * (0.75 + random.random() / 2)
+
+
 def _retryable(exc: BaseException) -> bool:
     if isinstance(exc, PluggyApiError) and exc.status_code in _HTTP_TRANSITORIO:
         return True
@@ -108,11 +115,36 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
                 result = await asyncio.to_thread(sync_pluggy_item, item_id)
-                break
+                # `sync_in_progress` não é exceção: volta como dict, então o
+                # `break` abaixo encerrava a tarefa em silêncio e NINGUÉM mais
+                # sincronizava. Cenário medido (Codex #162): o run de geração
+                # velha segura o `pluggy_item_lock` enquanto escreve, o sync que
+                # a reconexão agendou bate no lock e desiste — e com
+                # `OF_REFRESH_ENABLED` off (o default) nada mais roda sozinho, o
+                # espelho velho fica indefinidamente e a tela fica em âmbar até
+                # o usuário tocar "Atualizar".
+                #
+                # SÓ `sync_in_progress`. `stale_authorization` NÃO se retenta: ele
+                # significa "alguém mais novo assumiu", e quem assumiu já agendou
+                # o próprio sync — retentar seria correr atrás de um trabalho que
+                # já tem dono, e num par de runs que se atropelam viraria laço.
+                if (result or {}).get("reason") != "sync_in_progress":
+                    break
+                if tentativa == _SYNC_MAX_ATTEMPTS:
+                    break
+                espera = _backoff_sec(tentativa)
+                await log_system_event(
+                    "warning", "pluggy_sync_retry",
+                    f"Sync Pluggy vai repetir ({tentativa}/{_SYNC_MAX_ATTEMPTS}): {item_id}",
+                    source="open_finance",
+                    details={"item_id": item_id, "attempt": tentativa,
+                             "error": "sync_in_progress", "sleep_sec": round(espera, 3)},
+                )
+                await asyncio.sleep(espera)
             except Exception as exc:
                 if not _retryable(exc) or tentativa == _SYNC_MAX_ATTEMPTS:
                     raise
-                espera = 0.5 * (2 ** (tentativa - 1)) * (0.75 + random.random() / 2)
+                espera = _backoff_sec(tentativa)
                 await log_system_event(
                     "warning", "pluggy_sync_retry",
                     f"Sync Pluggy vai repetir ({tentativa}/{_SYNC_MAX_ATTEMPTS}): {item_id}",
