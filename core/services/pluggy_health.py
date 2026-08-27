@@ -375,9 +375,15 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
         return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
-    if sem_sync:
-        # Não é redundante com o `out()`: aqui ele vem ANTES do default seguro,
-        # que é como a base se comporta neste ramo. Sem esta linha, um
-        # `no_accounts` sem health medido trocaria de veredito.
+    if ultimo is None:
+        # `ultimo is None`, NÃO `sem_sync`: este early-return pula o default
+        # seguro do `out()` — é assim na base, e por isso ele só pode valer no
+        # escopo EXATO que a base lhe dava ("nunca sincronizou"). Alargá-lo para
+        # `sem_sync` fez o caso da reconexão descartar `no_accounts`,
+        # `read_failed` e motivo desconhecido: medido, 60 combinações com perda,
+        # e a pílula do `read_failed` caindo de vermelho para âmbar logo depois
+        # de o usuário reconectar e o sync falhar. Quem reconectou desce pelo
+        # `out("updated")` abaixo, onde o motivo fala primeiro e o `sem_sync` só
+        # decide o que restar de verde.
         return out("updating", "Ainda não sincronizou")
     return out("updated")

@@ -491,13 +491,22 @@ def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio
     assert ui["detail"] == "Ainda não sincronizou"
 
 
-def test_sync_depois_da_reconexao_devolve_o_verde(user_id, monkeypatch, relogio_fixo):
+@pytest.mark.parametrize("religado_em, rotulo", [(AGORA, "no mesmo instante"),
+                                                 (ANTES, "estritamente antes")])
+def test_sync_depois_da_reconexao_devolve_o_verde(user_id, monkeypatch, relogio_fixo,
+                                                  religado_em, rotulo):
     """CONTROLE POSITIVO: sem ele a guarda podia recusar para sempre depois de
-    qualquer reconexão — que é pior que o bug."""
+    qualquer reconexão — que é pior que o bug.
+
+    Os dois lados da borda: com o relógio congelado o upsert e o sync carimbam o
+    MESMO instante, que fixa o `<` (um `<=` no lugar dele ficaria vermelho); o
+    segundo caso empurra a reconexão para trás e é a forma comum em produção —
+    reconectou, sincronizou depois."""
     _conexao(user_id, "item-religa-ok")
     db.save_pluggy_open_finance_item(
         user_id, {"id": "item-religa-ok", "status": "UPDATED",
                   "connector": {"id": 612, "name": "Nubank"}})
+    _set_estado(_linha("item-religa-ok")["id"], reconnected_at=religado_em)
 
     _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-religa-ok"},
                  contas=[_conta_pluggy("acc-religa")], txs=[_tx_pluggy("tx-religa")])
@@ -505,9 +514,42 @@ def test_sync_depois_da_reconexao_devolve_o_verde(user_id, monkeypatch, relogio_
 
     linha = _linha("item-religa-ok")
     assert linha["last_sync_at"] == AGORA
-    assert linha["last_sync_at"] >= linha["reconnected_at"], "o sync é POSTERIOR à reconexão"
+    assert linha["last_sync_at"] >= linha["reconnected_at"], rotulo
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
-    assert ui["state"] == "updated", "sincronizou depois de reconectar: verde de novo"
+    assert ui["state"] == "updated", f"sincronizou depois de reconectar ({rotulo})"
+
+
+@pytest.mark.parametrize("motivo, esperado, detalhe", [
+    ("read_failed", "error_recoverable", "Tentaremos de novo automaticamente"),
+    ("no_accounts", "no_accounts", "O banco não devolveu contas nem investimentos"),
+])
+def test_reconexao_com_sync_falho_mostra_o_motivo_e_nao_o_generico(
+        user_id, relogio_fixo, motivo, esperado, detalhe):
+    """O ramo SEM health, que a rodada anterior quebrou: `_sync_item_contido`
+    (`pluggy_sync.py:574`) grava `mark_sync_result(ok=False, status=None,
+    status_reason=...)` SEM passar health, então `coalesce(null, health)` deixa
+    o health NULL e a conexão desce pelo ramo de baixo de `connection_ui_state`.
+
+    Reconectou + sync falhou = o motivo tem que falar. Dizer "Atualizando…" ali
+    é falso (ninguém está atualizando) e, no `read_failed`, rebaixa a pílula de
+    `error` (vermelha) para `pending` (âmbar) — ver OF_PILL_CLASS em
+    frontend/settings.html:2793.
+
+    CONTROLE NEGATIVO: trocar o `ultimo is None` do fim de `connection_ui_state`
+    por `sem_sync` deixa os dois casos vermelhos."""
+    conexao = _conexao(user_id, f"item-religa-{motivo}")   # last_sync_at = ANTES
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": f"item-religa-{motivo}", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+
+    db.mark_sync_result(conexao["id"], ok=False, status=None, status_reason=motivo)
+
+    linha = _linha(f"item-religa-{motivo}")
+    assert linha["health"] is None, "o handler do lote não mede saúde"
+    assert linha["last_sync_at"] == ANTES and linha["reconnected_at"] == AGORA
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == esperado, "o motivo tem que sobreviver à reconexão"
+    assert ui["detail"] == detalhe
 
 
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────
