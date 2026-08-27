@@ -300,16 +300,19 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT mes, tipo, SUM(valor) AS total
                 FROM (
+                  -- mesma canonização do `compute_kpis`: o front busca os dois
+                  -- endpoints para a MESMA tela, então a receita legada não pode
+                  -- entrar no KPI de income e ficar fora da barra do mês.
                   SELECT TO_CHAR(DATE_TRUNC('month', criado_em), 'YYYY-MM') AS mes,
-                         tipo, valor
+                         {TIPO_CANON_SQL} AS tipo, valor
                   FROM launches
                   WHERE user_id = %s
                     AND criado_em >= %s AND criado_em < %s
                     AND is_internal_movement = false
-                    AND tipo IN ('receita', 'despesa', 'saida')
+                    AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                   UNION ALL
                   SELECT TO_CHAR(DATE_TRUNC('month', b.period_end), 'YYYY-MM') AS mes,
                          'despesa' AS tipo, ct.valor
@@ -341,9 +344,10 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
             continue
         t = (r["tipo"] or "").strip().lower()
         v = _to_float(r["total"])
+        # o SQL já canonizou (`TIPO_CANON_SQL`): só as duas formas modernas
         if t == "receita":
             buckets[k]["income"] += v
-        elif t in ("despesa", "saida"):
+        elif t == "despesa":
             buckets[k]["expense"] += v
 
     for b in buckets.values():
@@ -620,18 +624,21 @@ def compute_history_quick_stats(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
-                  SUM(CASE WHEN tipo = 'receita'                      THEN 1 ELSE 0 END) AS receitas,
-                  SUM(CASE WHEN tipo IN ('despesa', 'saida', 'credito') THEN 1 ELSE 0 END) AS despesas,
+                  SUM(CASE WHEN tipo = 'receita'                THEN 1 ELSE 0 END) AS receitas,
+                  SUM(CASE WHEN tipo IN ('despesa', 'credito')  THEN 1 ELSE 0 END) AS despesas,
                   COUNT(*) AS total
                 FROM (
-                  SELECT tipo
+                  -- canonizado na perna de launches: a linha legada 'entrada'
+                  -- ficava fora do filtro e não era contada NEM como receita NEM
+                  -- no total, então a contagem da tela vinha menor que a lista.
+                  SELECT {TIPO_CANON_SQL} AS tipo
                   FROM launches
                   WHERE user_id = %s
                     AND criado_em >= %s AND criado_em < %s
                     AND is_internal_movement = false
-                    AND tipo IN ('despesa', 'receita', 'saida')
+                    AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                   UNION ALL
                   SELECT 'credito' AS tipo
                   FROM credit_transactions ct
@@ -759,12 +766,16 @@ def list_history(
         if uncategorized:
             clauses.append("(categoria IS NULL OR categoria = '')")
         if tipo_norm in ("despesa", "receita"):
-            clauses.append("tipo = %s")
-            launches_params.append(tipo_norm)
+            # a forma legada junto: filtrar `tipo = 'receita'` cru deixava a
+            # linha 'entrada' invisível no histórico, que é a pior classe de
+            # erro num caminho de dinheiro (mesma regra de `_TIPO_ALIASES`).
+            clauses.append(
+                TIPO_DESPESA_SQL if tipo_norm == "despesa" else TIPO_RECEITA_SQL
+            )
         else:
-            # 'all': mantém só despesa/receita (resto é movimentação interna,
-            # criar_caixinha, etc.)
-            clauses.append("tipo IN ('despesa', 'receita', 'saida')")
+            # 'all': mantém só despesa/receita nas duas grafias (resto é
+            # movimentação interna, criar_caixinha, etc.)
+            clauses.append(f"({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})")
         clauses.append("is_internal_movement = false")
         search_sql, search_params = _search_clause("")
         if search_sql:
