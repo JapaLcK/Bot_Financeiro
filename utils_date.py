@@ -52,8 +52,20 @@ def launch_day(dt, posted_at=None, has_time=True):
       devolve 26/08: toda compra de cartão está saindo com o DIA ANTERIOR nessa
       lista hoje — não é risco futuro. Na máquina local a sessão é -04 e o erro
       some, que é por que só o CI ficou vermelho.
-    - extrato (`source='ofx'`): `criado_em` é a hora da IMPORTAÇÃO e `posted_at`
-      é o dia do extrato. Um extrato de março importado em agosto dizia 27/08.
+    - Open Finance importado ANTES de c474fba (18/08/2026): gravava a `date`
+      crua em `criado_em` (timestamptz) → meia-noite no fuso da SESSÃO, que na
+      produção é UTC, e o dia exibido escorregava um pra trás. Essas linhas
+      continuam no banco, sem `time_known` no `efeitos` (logo `has_time=false`),
+      e só o `posted_at` delas está certo.
+
+    NÃO vale para o que os importadores gravam HOJE: extrato OFX/CSV/PDF
+    (`ofx_import.py:209`, `statement_import.py:666`) e Open Finance sem hora
+    (`db/open_finance.py:1197`) já gravam `criado_em` = MEIO-DIA local do
+    `posted_at`, então ali `day_tz(criado_em) == posted_at` e esta função não
+    muda nada — a justificativa "criado_em é a hora da importação" era falsa.
+
+    Editar a data pelo dashboard mexe nos DOIS campos (`update_launch_fields`,
+    db/accounts.py); sem isso `posted_at` velho engolia a edição pra sempre.
 
     `has_time` é o mesmo CASE do SQL (`LAUNCH_HAS_TIME_SQL`, db/connection.py).
     Sem `posted_at` cai em `day_tz` — o comportamento de hoje.

@@ -319,7 +319,10 @@ def test_cursor_pagina_a_lista_sem_repetir(pro_user_id):
     p2 = client.get(f"{base}&cursor={quote(p1['next_cursor'])}", headers=h).json()
 
     assert p1["resumo"]["n_total"] == p2["resumo"]["n_total"] == 5
-    # o `ord_id` (id CRU das duas tabelas) fica dentro do cursor e não vaza no corpo
+    # O `ord_id` (id CRU das duas tabelas) não sai em LINHA nenhuma — é isso que
+    # impede um id de `credit_transactions` de virar handle de delete. Ele está
+    # em texto claro dentro do `next_cursor`, de propósito: marcador de página,
+    # não handle (frontend/routes/categories.py::_parse_cursor).
     assert "next_after" not in p1["resumo"], p1["resumo"]
     assert all("ord_id" not in r for r in p1["launches"]), p1["launches"][0]
     d1 = [r["descricao"] for r in p1["launches"]]

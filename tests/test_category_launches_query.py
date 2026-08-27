@@ -16,6 +16,15 @@ Controle positivo: `test_linha_de_launches_volta_com_id_real` prova que a
 perna que PODE ser apagada continua trazendo o handle certo, e
 `test_saida_do_whatsapp_nao_mudou` prova que os 3 chamadores do bot não viram
 diferença.
+
+FUSO DA SESSÃO (`PGTZ`): os casos com JANELA (`start_date`/`end_date`) pedem uma
+sessão entre UTC-12 e UTC+11 — medido verde em UTC, -03 e +09, vermelho em
+`Pacific/Kiritimati` (+14). Não é a fixture: `list_launches_by_category` monta o
+corte com `datetime.combine(start_date, 00:00)` NAIVE (db/accounts.py), que o
+Postgres lê no fuso da SESSÃO, enquanto o lançamento é gravado no fuso do APP; em
++14 o gasto de hoje 09:00 em São Paulo (12:00Z) cai fora de
+[hoje 00:00+14, amanhã 00:00+14) = [ontem 10:00Z, hoje 10:00Z). A produção roda a
+sessão em `Etc/UTC`, dentro da faixa.
 """
 from __future__ import annotations
 
@@ -25,11 +34,17 @@ from zoneinfo import ZoneInfo
 import db
 from core.handlers.credit import try_handle_natural_credit_purchase
 from core.handlers.launches import list_launches, spend_query
-from utils_date import today_tz
+from utils_date import _tz, today_tz
 
 
 def _hoje_as(hora: int):
-    return datetime.combine(today_tz(), time(hora, 0))
+    """Hoje às `hora` no fuso do APP — aware de propósito.
+
+    Naive, o Postgres lê o instante no fuso da SESSÃO (`PGTZ`): em `Asia/Tokyo`
+    a mesma linha voltava com outro dia de parede e `test_criado_em_traz_o_instante_cheio`
+    ficava vermelho sem nada de errado no produto.
+    """
+    return datetime.combine(today_tz(), time(hora, 0), tzinfo=_tz())
 
 
 def _dinheiro(resumo: dict) -> dict:
@@ -220,8 +235,11 @@ def test_criado_em_traz_o_instante_cheio(pro_user_id):
     )
     r = db.list_launches_by_category(pro_user_id, "mercado")[0][0]
     assert r["data"] == today_tz()
-    assert r["criado_em"].hour == 9, r["criado_em"]
-    assert r["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo")).date() == r["data"]
+    # Lido no fuso do APP: o instante volta do Postgres no fuso da SESSÃO
+    # (`PGTZ`), então comparar `.hour` cru amarrava o teste a rodar em UTC.
+    local = r["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo"))
+    assert local.hour == 9, r["criado_em"]
+    assert local.date() == r["data"]
 
 
 # ── include_internal: a lista não pode contradizer o donut ────────────────
@@ -344,12 +362,13 @@ def test_receita_legada_entrada_nao_entra_no_donut(pro_user_id):
 # o front caía sempre no galho "só data" do `fmtLaunchWhen`: a mesma despesa
 # aparecia "10/03, 00:30" na Visão Geral e "09/03" aqui.
 #
-# Controle NEGATIVO do par abaixo: volte `"data": _dia_app_tz(r["dt"])` para
+# Controle NEGATIVO do par abaixo: volte `"data": launch_day(...)` para
 # `r["dt"].date()` em db/accounts.py — `test_data_e_o_dia_de_parede_em_sao_paulo`
 # fica vermelho em QUALQUER fuso de sessão diferente de America/Sao_Paulo (um
 # dos dois instantes cruza a meia-noite pra leste, o outro pra oeste).
 # Controle POSITIVO: `test_has_time_e_posted_at_espelham_a_visao_geral` prova
-# que o par novo não passou a mentir hora onde ela não existe (OFX).
+# que o par novo não passou a mentir hora onde ela não existe (extrato importado
+# pelo caminho de produção).
 
 _SP = ZoneInfo("America/Sao_Paulo")
 
@@ -371,51 +390,113 @@ def test_data_e_o_dia_de_parede_em_sao_paulo(pro_user_id):
         assert r["criado_em"].astimezone(_SP).date() == r["data"], r
 
 
-def test_has_time_e_posted_at_espelham_a_visao_geral(pro_user_id):
-    """As duas telas leem o mesmo par (`LAUNCH_HAS_TIME_SQL` + `posted_at`)."""
-    db.add_launch_and_update_balance(
-        pro_user_id, "despesa", 11, "manual", None,
-        categoria="mercado", criado_em=_hoje_as(9),
-    )
-    # linha de extrato: só a DATA é confiável (o banco não manda hora)
+def _extrato_do_dia(user_id: int, dia: date) -> tuple[int, str]:
+    """Importa UMA linha de extrato pelo caminho de PRODUÇÃO → (id, categoria).
+
+    `import_statement_bytes` → `import_ofx_launches_bulk` é quem grava
+    `source='ofx'`, `posted_at` = dia do extrato e `criado_em` = MEIO-DIA local
+    DESSE MESMO dia (statement_import.py:666, igual a ofx_import.py:209). Um
+    `update launches set source='ofx', posted_at=...` à mão fabricava uma linha
+    que escritor NENHUM produz (criado_em = hoje): o teste passava e não media o
+    produto.
+    """
+    from statement_import import import_statement_bytes
+
+    csv = f'Data,Descrição,Valor\n{dia:%d/%m/%Y},MERCADO PAGUE MENOS,"-350,00"\n'
+    rep = import_statement_bytes(user_id, csv.encode("utf-8"), f"extrato-{dia}.csv", "csv")
+    assert rep["inserted"] == 1, rep
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "update launches set source='ofx', posted_at=%s "
-            "where user_id=%s and alvo='manual'",
-            (date(2026, 3, 10), pro_user_id),
+            "select id, categoria, criado_em, posted_at from launches "
+            "where user_id=%s and source='ofx' order by id desc limit 1",
+            (user_id,),
         )
-        conn.commit()
-    r = db.list_launches_by_category(pro_user_id, "mercado")[0][0]
+        r = cur.fetchone()
+    # a forma real: os dois campos apontam pro MESMO dia
+    assert r["posted_at"] == dia, r
+    assert r["criado_em"].astimezone(_SP).date() == dia, r
+    return r["id"], r["categoria"]
+
+
+def _cliente_logado(user_id: int):
+    """TestClient com os 3 cookies do dashboard + o header de CSRF."""
+    from fastapi.testclient import TestClient
+
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "cat@t.com"))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(user_id, hours=1))
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "test-csrf-token")
+    return client, {dashboard.CSRF_HEADER_NAME: "test-csrf-token",
+                    "Content-Type": "application/json"}
+
+
+def _linha(user_id: int, categoria: str, launch_id: int) -> dict:
+    return [r for r in db.list_launches_by_category(user_id, categoria)[0]
+            if r["id"] == launch_id][0]
+
+
+def test_has_time_e_posted_at_espelham_a_visao_geral(pro_user_id):
+    """As duas telas leem o mesmo par (`LAUNCH_HAS_TIME_SQL` + `posted_at`)."""
+    lid, cat = _extrato_do_dia(pro_user_id, date(2026, 3, 10))
+    r = _linha(pro_user_id, cat, lid)
     assert r["has_time"] is False, r
     assert r["posted_at"] == date(2026, 3, 10), r
-    # Sem hora confiável quem manda é a DATA: `criado_em` aqui é a hora da
-    # IMPORTAÇÃO (hoje), `posted_at` é o dia do extrato. `day_tz(criado_em)`
-    # devolvia HOJE e a linha aparecia meses fora do lugar.
     assert r["data"] == date(2026, 3, 10), r
 
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 12, "digitado", None,
-        categoria="mercado", criado_em=_hoje_as(10),
+        categoria=cat, criado_em=_hoje_as(10),
     )
-    novo = [x for x in db.list_launches_by_category(pro_user_id, "mercado")[0]
+    novo = [x for x in db.list_launches_by_category(pro_user_id, cat)[0]
             if x["alvo"] == "digitado"][0]
     assert novo["has_time"] is True, novo
 
 
-def test_credito_e_extrato_dizem_o_dia_da_DATA_e_nao_do_instante(pro_user_id):
-    """A classe inteira do `has_time=false`, em sessão de banco UTC (o Railway).
+def _of_legado(user_id: int, dia: date, categoria: str, alvo: str) -> int:
+    """Linha do Open Finance importada ANTES de c474fba (18/08/2026).
 
-    A UNION promove `ct.purchased_at::timestamp` (naive) a `timestamptz` pelo
+    Aquele importador gravava a `date` CRUA em `criado_em` (timestamptz) — meia-
+    noite no fuso da SESSÃO, UTC na produção — e `efeitos` sem `time_known`, o
+    que deixa `has_time=false`. Essas linhas continuam no banco e são a razão de
+    a regra do `posted_at` existir fora do crédito: nelas `day_tz(criado_em)`
+    devolve o DIA ANTERIOR. É SQL porque o importador de hoje não escreve mais
+    assim (grava meio-dia local) — a forma é histórica, não inventada.
+    """
+    db.add_launch_and_update_balance(
+        user_id, "despesa", 13, alvo, None, categoria=categoria, criado_em=_hoje_as(9),
+    )
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update launches set source='open_finance', posted_at=%s, criado_em=%s, "
+            "efeitos='{\"delta_conta\": 0}'::jsonb "
+            "where user_id=%s and alvo=%s returning id",
+            (dia, dia, user_id, alvo),
+        )
+        lid = cur.fetchone()["id"]
+        conn.commit()
+    return lid
+
+
+# As DUAS pernas do `has_time=false`, cada uma no seu teste porque cada uma é um
+# controle negativo separado: com `launch_day` trocado por `day_tz(r["dt"])` em
+# db/accounts.py e `PGTZ=UTC`, as duas ficam vermelhas — juntas num teste só, a
+# primeira esconderia a segunda. Em sessão -03 elas passam mesmo quebradas: o par
+# SÓ discrimina em UTC, que é o fuso da sessão da produção.
+#
+# O extrato OFX/CSV/PDF NÃO está aqui de propósito: os dois escritores gravam
+# `criado_em` = meio-dia local do `posted_at` (statement_import.py:666,
+# ofx_import.py:209), então `day_tz` já acerta e um teste com ele não
+# discriminaria nada — era o que os dois casos antigos, fabricados com
+# `update ... set source='ofx'`, faziam parecer que mediam.
+
+def test_credito_diz_o_dia_da_compra_e_nao_do_instante(pro_user_id):
+    """A UNION promove `ct.purchased_at::timestamp` (naive) a `timestamptz` pelo
     fuso da SESSÃO. A sessão da produção é `Etc/UTC` (medido no Railway em
     27/08/2026 08:46 UTC): 27/08 00:00 vira 27/08 00:00Z e `day_tz` devolvia
-    26/08 — toda compra de cartão sai com o dia anterior HOJE. O irmão dela é o
-    extrato: `criado_em` é a hora da importação, não o dia do lançamento.
-
-    Controle NEGATIVO: troque `launch_day(...)` por `day_tz(r["dt"])` em
-    db/accounts.py e rode com `PGTZ=UTC` — a perna de crédito fica vermelha
-    (26/08 ≠ 27/08) e a de extrato também (hoje ≠ 10/03). Em sessão -03/-04 o
-    crédito passa mesmo quebrado: o teste SÓ discrimina em UTC.
-    """
+    26/08 — toda compra de cartão saía com o dia anterior."""
     cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")
     credito = [r for r in db.list_launches_by_category(pro_user_id, cat)[0]
                if r["fonte"] == "credito"]
@@ -423,23 +504,71 @@ def test_credito_e_extrato_dizem_o_dia_da_DATA_e_nao_do_instante(pro_user_id):
     for r in credito:
         assert r["data"] == r["posted_at"] == today_tz(), r
 
-    db.add_launch_and_update_balance(
-        pro_user_id, "despesa", 13, "extrato", None,
-        categoria="mercado", criado_em=_hoje_as(9),
-    )
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "update launches set source='ofx', posted_at=%s "
-            "where user_id=%s and alvo='extrato'",
-            (date(2026, 3, 10), pro_user_id),
-        )
-        conn.commit()
-    ext = [r for r in db.list_launches_by_category(pro_user_id, "mercado")[0]
-           if r["alvo"] == "extrato"][0]
+
+def test_open_finance_legado_diz_o_dia_da_transacao(pro_user_id):
+    """A irmã da compra no crédito: linha do OF importada antes de c474fba,
+    com a data crua guardada como meia-noite UTC (ver `_of_legado`)."""
+    lid = _of_legado(pro_user_id, date(2026, 3, 10), "mercado", "open finance velho")
+    ext = _linha(pro_user_id, "mercado", lid)
+    assert ext["has_time"] is False, ext
     assert ext["data"] == date(2026, 3, 10), ext
     # e a OUTRA porta (o "meus últimos lançamentos" do WhatsApp) diz o mesmo dia
     texto = list_launches(pro_user_id, original_text="meus últimos lançamentos")
     assert "10/03" in texto, texto
+
+
+def test_editar_a_data_de_um_extrato_vence_o_posted_at(pro_user_id):
+    """O usuário mudou a data pelo dashboard: as duas telas têm que obedecer.
+
+    `posted_at` manda quando não há hora confiável (`launch_day`, utils_date; e
+    `fmtLaunchWhen` no front, dashboard.js:485). E ele era IMUTÁVEL: o PATCH
+    gravava só `criado_em`, devolvia 200, a linha mudava no banco e a lista
+    seguia imprimindo a data VELHA — sem nenhum caminho de conserto depois.
+
+    Controle NEGATIVO: apague o `posted_at = case when ...` de
+    `update_launch_fields` (db/accounts.py) — a lista e o WhatsApp voltam a
+    dizer 10/03 depois de o usuário gravar 15/04.
+    Controle POSITIVO: `test_editar_a_data_de_um_lancamento_manual_continua_valendo`.
+    """
+    lid, cat = _extrato_do_dia(pro_user_id, date(2026, 3, 10))
+
+    client, headers = _cliente_logado(pro_user_id)
+    resp = client.patch(
+        f"/launches/{pro_user_id}/{lid}",
+        json={"nota": "pao", "criado_em": "2026-04-15T09:00:00-03:00"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    r = _linha(pro_user_id, cat, lid)
+    assert r["data"] == date(2026, 4, 15), r
+    assert r["posted_at"] == date(2026, 4, 15), r
+    assert r["criado_em"].astimezone(_SP).date() == date(2026, 4, 15), r
+    # a outra porta não pode contradizer a tela
+    texto = list_launches(pro_user_id, original_text="meus últimos lançamentos")
+    assert "15/04" in texto and "10/03" not in texto, texto
+
+
+def test_editar_a_data_de_um_lancamento_manual_continua_valendo(pro_user_id):
+    """Controle POSITIVO: linha digitada não ganha data de postagem no caminho."""
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 30, "pao", None, categoria="mercado",
+        criado_em=_hoje_as(9),
+    )
+    lid = db.list_launches_by_category(pro_user_id, "mercado")[0][0]["id"]
+
+    client, headers = _cliente_logado(pro_user_id)
+    resp = client.patch(
+        f"/launches/{pro_user_id}/{lid}",
+        json={"criado_em": "2026-04-15T09:00:00-03:00"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    r = _linha(pro_user_id, "mercado", lid)
+    assert r["data"] == date(2026, 4, 15), r
+    assert r["has_time"] is True, r
+    assert r["posted_at"] is None, r
 
 
 def test_credito_nao_promete_hora_que_nao_tem(pro_user_id):

@@ -21,11 +21,20 @@ _FONTES = ("launches", "credito")
 def _parse_cursor(raw: str | None):
     """`<criado_em ISO>|<fonte>|<ord_id>` → a tupla que o keyset compara.
 
-    O cliente não monta nem lê isso: ele devolve o `next_cursor` que recebeu.
+    O cliente devolve o `next_cursor` que recebeu — mas o formato é LEGÍVEL, não
+    cifrado: quem abrir o DevTools lê a data, a perna e o id cru da linha. Isso é
+    aceito de propósito. O id só serve de marcador de página (nenhuma LINHA sai
+    com ele, ver db/accounts.py) e as duas pernas filtram por `user_id`, então
+    cursor forjado no máximo pagina a própria lista de quem forjou.
+
     Fronteira de confiança — o que chega aqui é texto de query string, então dt,
     fonte e id são validados antes de virar parâmetro (`ord_id` vai pro SQL
     como int e `fonte` só pode ser uma das duas pernas). Cursor corrompido é
-    400, não uma página silenciosamente errada.
+    400, não uma página silenciosamente errada. A validação é mais FROUXA do que
+    parece e pode continuar sendo: `int()` aceita espaço em volta e dígito
+    arábico-índico ('١٢٣' = 123), `fromisoformat` aceita várias grafias de data —
+    tudo isso vira um ponto de corte válido numa lista que já é do próprio
+    usuário, e o que não converte cai no 400.
     """
     if not raw:
         return None
@@ -68,9 +77,10 @@ async def category_launches_route(
     manda: sem os dois a lista contradiz o número que o usuário acabou de
     clicar (o donut filtra movimento interno e só conta despesa).
 
-    `cursor` é o "carregar mais" da tela: opaco, sai daqui como `next_cursor` e
-    volta como veio. É KEYSET, não OFFSET, porque o bot escreve no banco
-    enquanto o dashboard está aberto — uma transação que chega pelo WhatsApp
+    `cursor` é o "carregar mais" da tela: sai daqui como `next_cursor` e volta
+    como veio (opaco por CONTRATO, não por cifra — ver `_parse_cursor`). É
+    KEYSET, não OFFSET, porque o bot escreve no banco enquanto o dashboard está
+    aberto — uma transação que chega pelo WhatsApp
     entra ACIMA do corte e desloca a fronteira, e o OFFSET repetia a última
     linha da página anterior e comia outra (`db/accounts.py`). `resumo.n_total`
     continua sendo o total REAL (window aggregate ANTES do LIMIT), então o front
@@ -123,8 +133,9 @@ async def category_launches_route(
         include_internal,
         after,
     )
-    # `next_after` traz `ord_id`, que é o id CRU das duas tabelas — sai do corpo
-    # e volta só dentro do cursor opaco (ver `list_launches_by_category`).
+    # `next_after` traz `ord_id`, que é o id CRU das duas tabelas — sai da LINHA
+    # (onde seria handle de delete) e volta só dentro do cursor, em texto claro e
+    # de propósito (ver `_parse_cursor` e `list_launches_by_category`).
     next_cursor = _fmt_cursor(resumo.pop("next_after", None))
     return {
         "ok": True,

@@ -117,9 +117,9 @@ def list_launches(user_id: int, limit: int = 10):
             cur.execute(
                 f"""
                 -- `posted_at` + `has_time`: MESMO par (e mesmo CASE) da lista de
-                -- uma categoria. Sem eles o "meus últimos lançamentos" imprimia
-                -- o dia da IMPORTAÇÃO num extrato e "liste <categoria>" o dia do
-                -- extrato — a divergência que `launch_day` (utils_date) fecha.
+                -- uma categoria. Sem eles as duas portas divergiam em um dia nas
+                -- linhas sem hora confiável (compra no crédito e Open Finance
+                -- legado) — a divergência que `launch_day` (utils_date) fecha.
                 select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
                        posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
                 from launches
@@ -271,6 +271,19 @@ def update_launch_fields(
     if criado_em is not None:
         sets.append("criado_em=%s")
         params.append(criado_em)
+        # `posted_at` anda JUNTO. Onde não há hora confiável é ele quem manda no
+        # dia exibido — no back (`launch_day`, utils_date) e no front
+        # (`fmtLaunchWhen`: dashboard.js:485, home.html:776, os dois já na main).
+        # Sem isto, editar a data de uma linha importada devolvia 200, mudava o
+        # banco e a tela seguia mostrando a data VELHA, sem caminho de conserto.
+        # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
+        # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
+        # `provider_transaction_id`). Quem lê `posted_at` é a reconciliação do OF
+        # (`coalesce(posted_at, criado_em::date)`, db/open_finance.py), e ela fica
+        # consistente justamente movendo os dois juntos. NULL continua NULL:
+        # lançamento manual não tem data de postagem.
+        sets.append("posted_at = case when posted_at is null then null else %s end")
+        params.append(day_tz(criado_em))
     if not sets:
         return False
 
@@ -818,10 +831,14 @@ def list_launches_by_category(
         "despesa": float(rows[0]["tot_despesa"] or 0) if rows else 0.0,
         "receita": float(rows[0]["tot_receita"] or 0) if rows else 0.0,
         # A tupla de ordenação da ÚLTIMA linha desta página = o `after` da
-        # próxima. Sai daqui e não da linha porque `ord_id` é o id CRU da tabela
-        # (o do crédito inclusive), e ele não pode vazar pro cliente: o `id` nulo
-        # na perna de crédito existe justamente pra um id de `credit_transactions`
-        # não virar handle de delete no dashboard.
+        # próxima. Sai daqui e não da LINHA porque `ord_id` é o id CRU da tabela
+        # (o do crédito inclusive): o `id` nulo na perna de crédito existe pra um
+        # `credit_transactions.id` não virar handle de delete no dashboard, e uma
+        # chave `ord_id` na linha desfaria isso. O cursor CARREGA esse id em
+        # texto claro (`_fmt_cursor`, frontend/routes/categories.py) — ele é
+        # marcador de página, não handle de linha, e as rotas de crédito são
+        # escopadas por `user_id`, então cursor de terceiro não devolve linha
+        # alheia. Segredo ele não é; sigilo aqui seria criptografia caseira.
         "next_after": (
             (rows[-1]["dt"], rows[-1]["fonte"], rows[-1]["ord_id"]) if rows else None
         ),
