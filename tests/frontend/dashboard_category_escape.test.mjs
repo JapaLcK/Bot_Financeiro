@@ -1561,3 +1561,158 @@ test("D1g: 'Carregar mais' que falha mostra o motivo E volta a ser clicável",
     assert.equal(r.linhasDepoisDaRetentativa, 4, "a retentativa não trouxe a página");
     await page.close();
   });
+
+/* ══════════════════════════════════════════════════════════════════════
+ * Rodada 4 — voltar do detalhe REEXIBE a lista, não a refaz.
+ *
+ * O detalhe ESCONDE a lista (um .overlay por vez). O `closeLaunchDetail`
+ * chamava `openCategoryLaunches` de novo: zerava o cursor e o array, pedia a
+ * PRIMEIRA página e pintava por cima — 150 linhas carregadas viravam 50, o
+ * scroll ia pro topo, e um refetch que falhasse trocava uma lista boa por
+ * "Não deu pra carregar". Agora `_showCategoryLaunches` reexibe o que já está
+ * montado; o refetch continua sendo o FALLBACK (E4).
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** Abre a lista, carrega a 2ª página e clica na linha `idx`. */
+const duasPaginasEDetalhe = (page, idx) => page.evaluate(async (i) => {
+  await openCategoryLaunches("saúde", {});
+  await loadMoreCategoryLaunches();
+  document.querySelectorAll("#cl-list .cl-row")[i].click();
+}, idx);
+
+test("E1: voltar do detalhe mantém as DUAS páginas e não pede nada ao servidor",
+  async () => {
+    const page = await loadDashboardJs();
+    await servidorPaginado(page, 120, 50);
+    await duasPaginasEDetalhe(page, 3);
+    const r = await page.evaluate(() => {
+      const antes = window.__pedidos.length;
+      document.getElementById("ld-close").click();
+      return {
+        antes, depois: window.__pedidos.length,
+        linhas: document.querySelectorAll("#cl-list .cl-row").length,
+        primeira: (document.querySelector("#cl-list .cl-row .name") || {}).textContent,
+        foot: document.getElementById("cl-foot").textContent,
+        lista: document.getElementById("cat-launches-overlay").classList.contains("open"),
+        detalhe: document.getElementById("launch-detail-overlay").classList.contains("open"),
+        temBotao: !!document.getElementById("cl-more-btn"),
+      };
+    });
+    assert.equal(r.antes, 2, "o cenário não carregou as duas páginas");
+    assert.equal(r.depois, 2, `fechar o detalhe disparou ${r.depois - r.antes} pedido(s)`);
+    assert.equal(r.linhas, 100, "as páginas anexadas foram descartadas");
+    assert.equal(r.primeira, "item 000", r.primeira);
+    assert.match(r.foot, /Mostrando 100 de 120/, r.foot);
+    assert.equal(r.lista, true, "a lista não voltou");
+    assert.equal(r.detalhe, false, "o detalhe continuou aberto");
+    assert.ok(r.temBotao, "o 'Carregar mais' sumiu com 20 linhas ainda por vir");
+    await page.close();
+  });
+
+test("E2: o scroll da lista e o foco da linha voltam de onde saíram", async () => {
+  // Precisa da CSS de verdade: é `.cl-modal #cl-list{overflow-y:auto}` que faz
+  // a lista rolar, e o `display:none` do .overlay que zerava o scrollTop.
+  const page = await paginaComModals();
+  await servidorPaginado(page, 120, 50);
+  const r = await page.evaluate(async () => {
+    await openCategoryLaunches("saúde", {});
+    await loadMoreCategoryLaunches();
+    const list = document.getElementById("cl-list");
+    const linha = document.querySelectorAll("#cl-list .cl-row")[12];
+    // Foco ANTES de rolar: focar puxa a linha pra viewport e mexeria no scroll
+    // que este teste está medindo.
+    linha.focus();
+    list.scrollTop = 900;
+    const antes = list.scrollTop;
+    linha.click();
+    document.getElementById("ld-close").click();
+    return {
+      antes, depois: document.getElementById("cl-list").scrollTop,
+      focoNaLinha: document.activeElement === linha,
+    };
+  });
+  assert.ok(r.antes > 0, `#cl-list não rolou (scrollTop=${r.antes}) — cenário inválido`);
+  assert.equal(r.depois, r.antes, `scroll voltou em ${r.depois}, era ${r.antes}`);
+  assert.equal(r.focoNaLinha, true, "o foco não voltou pra linha que abriu o detalhe");
+  await page.close();
+});
+
+test("E3 controle: detalhe aberto pela Visão Geral não abre lista de categoria",
+  async () => {
+    const page = await loadDashboardJs();
+    await servidorPaginado(page, 120, 50);
+    const r = await page.evaluate(async () => {
+      await openCategoryLaunches("saúde", {});   // deixa estado montado…
+      closeCategoryLaunches();                   // …e sai dela pra valer
+      _renderedLaunches = [{ tipo: "despesa", valor: 9, categoria: "saúde",
+        nota: "de fora", data: "2026-02-09", criado_em: "2026-02-09T09:00:00-03:00",
+        fonte: "launches", id: 7, is_internal_movement: false }];
+      openLaunchDetail(0);
+      const detalhe = document.getElementById("launch-detail-overlay").classList.contains("open");
+      document.getElementById("ld-close").click();
+      return { detalhe,
+        lista: document.getElementById("cat-launches-overlay").classList.contains("open"),
+        pedidos: window.__pedidos.length };
+    });
+    assert.equal(r.detalhe, true, "o detalhe da Visão Geral não abriu");
+    assert.equal(r.lista, false, "fechar o detalhe da Visão Geral abriu a lista de categoria");
+    assert.equal(r.pedidos, 1, "houve refetch da lista");
+    await page.close();
+  });
+
+test("E4 controle: sem lista montada, voltar do detalhe ainda mostra a lista (refetch)",
+  async () => {
+    // Fallback: o conserto não pode trocar o bug por um modal vazio.
+    const page = await loadDashboardJs();
+    await servidorPaginado(page, 120, 50);
+    await duasPaginasEDetalhe(page, 3);
+    const r = await page.evaluate(async () => {
+      document.getElementById("cl-list").innerHTML = "";   // estado montado se perde
+      document.getElementById("ld-close").click();
+      await new Promise((r) => setTimeout(r, 0));
+      return { linhas: document.querySelectorAll("#cl-list .cl-row").length,
+        pedidos: window.__pedidos.length,
+        lista: document.getElementById("cat-launches-overlay").classList.contains("open") };
+    });
+    assert.equal(r.lista, true, "o usuário ficou sem lista");
+    assert.equal(r.pedidos, 3, "o fallback não refez o pedido");
+    assert.equal(r.linhas, 50, "o refetch não repintou a primeira página");
+    await page.close();
+  });
+
+test("E5 controle: 'Carregar mais' continua funcionando depois de voltar do detalhe",
+  async () => {
+    const page = await loadDashboardJs();
+    await servidorPaginado(page, 120, 50);
+    const r = await page.evaluate(async () => {
+      await openCategoryLaunches("saúde", {});
+      document.querySelectorAll("#cl-list .cl-row")[0].click();
+      document.getElementById("ld-close").click();
+      await loadMoreCategoryLaunches();
+      return { linhas: [...document.querySelectorAll("#cl-list .cl-row .name")].map((e) => e.textContent),
+        pedidos: window.__pedidos };
+    });
+    assert.equal(r.linhas.length, 100, `voltaram ${r.linhas.length} linhas`);
+    assert.equal(r.linhas[50], "item 050", r.linhas[50]);
+    assert.deepEqual(r.pedidos, [null, "2026-02-09T09:00:00-03:00|launches|49"],
+      "o cursor não continuou de onde a lista parou");
+    await page.close();
+  });
+
+test("E6 controle: ESC no detalhe fecha só o detalhe, sem refetch", async () => {
+  const page = await loadDashboardJs();
+  await servidorPaginado(page, 120, 50);
+  await duasPaginasEDetalhe(page, 3);
+  const r = await page.evaluate(() => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return { detalhe: document.getElementById("launch-detail-overlay").classList.contains("open"),
+      lista: document.getElementById("cat-launches-overlay").classList.contains("open"),
+      linhas: document.querySelectorAll("#cl-list .cl-row").length,
+      pedidos: window.__pedidos.length };
+  });
+  assert.equal(r.detalhe, false, "o ESC não fechou o detalhe");
+  assert.equal(r.lista, true, "o ESC levou a lista junto");
+  assert.equal(r.linhas, 100, "o ESC descartou as páginas anexadas");
+  assert.equal(r.pedidos, 2, "o ESC disparou refetch");
+  await page.close();
+});

@@ -1915,6 +1915,8 @@ let _catLaunchesLoadingMore = false;
 let _catLaunchesCursor = null;
 let _catLaunchesCtx = null;         // opts da lista NO AR (null = não há lista pra voltar)
 let _catLaunchesReturnFocus = null;
+let _catLaunchesScroll = 0;         // scroll do #cl-list enquanto o detalhe está por cima
+let _catLaunchesHiddenFocus = null; // linha que abriu o detalhe, pro voltar devolver o foco
 // Mesmo canal de fetch do Histórico (makeFetchChannel): aborta o pedido anterior
 // e devolve `undefined` quando este foi superado. Sem ele, clicar "mercado" e
 // depois "saúde" deixava a resposta de mercado chegar por último e pintar as
@@ -1976,7 +1978,39 @@ function _ensureCategoryLaunchesModal() {
 
 function _hideCategoryLaunches() {
   const ov = document.getElementById("cat-launches-overlay");
-  if (ov) ov.classList.remove("open");
+  if (!ov) return;
+  // O .overlay some com `display:none`, e display:none ZERA o scrollTop do
+  // #cl-list. Guardar aqui (e não no show) é o único instante em que o valor
+  // ainda existe.
+  const list = document.getElementById("cl-list");
+  _catLaunchesScroll = list ? list.scrollTop : 0;
+  _catLaunchesHiddenFocus = ov.contains(document.activeElement) ? document.activeElement : null;
+  ov.classList.remove("open");
+}
+
+/* Par do _hide: reexibe a lista QUE JÁ ESTÁ MONTADA, sem pedir nada ao
+   servidor. É o caminho de volta do detalhe (o detalhe esconde a lista, não
+   fecha). Reabrir por `openCategoryLaunches` jogava fora toda página anexada
+   pelo "Carregar mais" (150 linhas voltavam a ser 50), o scroll ia pro topo e
+   um refetch que falhasse trocava uma lista boa por uma mensagem de erro.
+   Devolve false quando não sobrou o que reexibir (ctx zerado por
+   Editar/Excluir, DOM sem linhas) — aí quem chama refaz o caminho antigo, que
+   é o fallback, não o normal. */
+function _showCategoryLaunches() {
+  const ov = document.getElementById("cat-launches-overlay");
+  if (!ov || !_catLaunchesCtx || !ov.querySelector(".cl-row")) return false;
+  ov.classList.add("open");
+  // Volta pra linha de onde o detalhe saiu; sem ela (linha some numa recarga),
+  // o Fechar — o mesmo alvo que a abertura usa. `preventScroll` porque focar
+  // rola o contêiner sozinho: medido, o scroll restaurado virava 518 em vez dos
+  // 900 guardados (o foco puxava a linha pro topo).
+  const alvo = _catLaunchesHiddenFocus && ov.contains(_catLaunchesHiddenFocus)
+    ? _catLaunchesHiddenFocus : document.getElementById("cl-close");
+  if (alvo) alvo.focus({ preventScroll: true });
+  const list = document.getElementById("cl-list");
+  if (list) list.scrollTop = _catLaunchesScroll;
+  _catLaunchesHiddenFocus = null;
+  return true;
 }
 
 /* `_catLaunchesCtx != null` significa UMA coisa só: existe uma lista pra onde
@@ -1991,6 +2025,7 @@ function _forgetCategoryLaunches(restoreFocus = true) {
   _catLaunchesTotal = 0;
   _catLaunchesCursor = null;
   _catLaunchesLoadingMore = false;
+  _catLaunchesHiddenFocus = null;
   // `restoreFocus = false` quando outro modal assume a tela (Editar/Excluir):
   // devolver o foco pra linha do gráfico o deixaria ATRÁS do overlay novo.
   if (restoreFocus && _catLaunchesReturnFocus
@@ -7829,7 +7864,9 @@ function closeLaunchDetail() {
   // dois .overlay (mesmo z-index, e cada ESC document-level fecha o seu).
   if (_launchDetailSource === "category" && _catLaunchesCtx) {
     _launchDetailSource = "overview";
-    openCategoryLaunches(_catLaunchesCtx.nome, _catLaunchesCtx);
+    // Reexibe o que já está na tela (páginas do "Carregar mais", scroll, cursor)
+    // e NÃO pede nada ao servidor. Refetch só quando não sobrou lista montada.
+    if (!_showCategoryLaunches()) openCategoryLaunches(_catLaunchesCtx.nome, _catLaunchesCtx);
   }
 }
 
