@@ -22,7 +22,9 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER
+from .connection import (
+    get_conn, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER, TIPO_DESPESA_SQL,
+)
 from .users import ensure_user
 
 
@@ -237,7 +239,9 @@ def sum_spent_in_category_period(
 
     Usado pela resposta "quanto gastei na categoria X" do bot — espelha a
     atribuição do DASHBOARD pra os números baterem:
-      - launches: tipo='despesa', is_internal_movement=false, por criado_em
+      - launches: `TIPO_DESPESA_SQL` (a moderna e a legada 'saida' — mesma
+        forma da lista, senão a diferença entre os dois vira "movimentação
+        interna" no `_total_despesa`), is_internal_movement=false, por criado_em
       - cartão: is_refund=false, atribuído ao período pelo MÊS DA FATURA
         (credit_bills.period_end). Assim um gasto parcelado conta uma parcela
         por mês, e não os R$ totais na data da compra.
@@ -265,7 +269,7 @@ def sum_spent_in_category_period(
                   coalesce((
                     select sum(valor) from launches
                     where user_id=%s
-                      and tipo = 'despesa'
+                      and {TIPO_DESPESA_SQL}
                       and {_cat} = {_arg}
                       and is_internal_movement = false
                       and criado_em >= %s

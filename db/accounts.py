@@ -10,7 +10,7 @@ from psycopg.types.json import Json, Jsonb
 import db_support as _db_support
 from utils_date import _tz, day_tz
 
-from .connection import get_conn, cat_key_sql
+from .connection import get_conn, cat_key_sql, TIPO_DESPESA_SQL
 from .users import ensure_user, ensure_user_tx
 
 
@@ -435,7 +435,8 @@ def get_largest_expenses(
     retorna os lançamentos/compras de maior valor, um por um.
 
     Fontes:
-      - launches.tipo='despesa' AND is_internal_movement=false (por criado_em)
+      - launches: `TIPO_DESPESA_SQL` (a moderna e a legada 'saida', mesma
+        forma do total e da lista) AND is_internal_movement=false (por criado_em)
       - credit_transactions onde is_refund=false
 
     `by_bill_month`:
@@ -503,7 +504,7 @@ def get_largest_expenses(
                            'launches' as fonte
                     from launches
                     where user_id = %s
-                      and tipo = 'despesa'
+                      and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
                       {cat_filter}
                       and criado_em >= %s and criado_em < %s
