@@ -115,6 +115,34 @@ test("botão Atualizar do OF: some no modo app, fica no mobile web", async () =>
     assert.equal(await noWeb.evaluate(() => document.documentElement.classList.contains("pb-app")), false);
     assert.equal(await botaoVisivel(noWeb), true, "no mobile web o botão CONTINUA");
   } finally { await noWeb.__ctx.close(); }
+
+  // ONDA 2: as outras duas superfícies da lista. Desktop web é a mais óbvia e a
+  // que ninguém media; a PWA instalada entra pelo `display-mode: standalone` do
+  // app-mode.js, um ramo do gate que o caso do UA acima NUNCA exercita —
+  // esconder o botão lá depende dele, e só dele.
+  const desktop = await newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    await desktop.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await sleep(300);
+    assert.equal(await desktop.evaluate(() => document.documentElement.classList.contains("pb-app")), false);
+    assert.equal(await botaoVisivel(desktop), true, "no desktop web o botão CONTINUA");
+  } finally { await desktop.__ctx.close(); }
+
+  const pwa = await newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  try {
+    // `navigator.standalone` é EXATAMENTE o que o Safari do iOS expõe numa PWA
+    // na tela de início — não é um mock meu, é o sinal real que o gate lê.
+    // A outra porta do gate, `matchMedia("(display-mode: standalone)")`, NÃO é
+    // alcançável aqui: medido, o Chromium não emula `display-mode` nem por CDP
+    // (`Emulation.setEmulatedMedia` devolve `matches: false` nas duas formas).
+    // Sem UA de app de propósito — a PWA é Safari puro, e é esse o ponto.
+    await pwa.addInitScript(() =>
+      Object.defineProperty(window.navigator, "standalone", { value: true, configurable: true }));
+    await pwa.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => pwa.evaluate(() => document.documentElement.classList.contains("pb-app")),
+                  "html.pb-app na PWA instalada");
+    assert.equal(await botaoVisivel(pwa), false, "na PWA o botão some igual ao app (o gesto substitui)");
+  } finally { await pwa.__ctx.close(); }
 });
 
 /**
@@ -159,6 +187,99 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       ok: true, items: [{ item_id: "a", state: "rate_limited" }] }));
     assert.equal(cooldown.tone, "ok");
     assert.match(cooldown.msg, /acabou de atualizar/i, cooldown.msg);
+  } finally { await page.__ctx.close(); }
+});
+
+/**
+ * ONDA 2, regressão dos dois invariantes do gesto que ainda não tinham teste:
+ *
+ *  a) puxar a tela em `?view=open-finance` chama o REFRESH (POST .../refresh =
+ *     PATCH na Pluggy + sync), não só o `loadData` que relê o snapshot. Antes da
+ *     Onda 1 era loadData: o gesto repintava dado velho e parecia ter funcionado.
+ *  b) `settings.html` NÃO abre WebSocket. O auto-update ao vivo é só do
+ *     dashboard, que já tem a conexão; abrir uma segunda aqui dobra socket por
+ *     usuário sem ninguém escutar do outro lado.
+ *
+ * Discrimina: trocar o corpo do PBRefresh de open-finance por `loadData(...)`
+ * deixa (a) vermelho; um `new WebSocket(...)` em qualquer script da página
+ * deixa (b) vermelho.
+ */
+test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () => {
+  const page = await newPage({ userAgent: APP_UA, viewport: { width: 390, height: 844 },
+                               hasTouch: true, isMobile: true });
+  try {
+    await page.addInitScript(() => {
+      window.__ws = [];
+      const Real = window.WebSocket;
+      window.WebSocket = function (url, ...rest) { window.__ws.push(String(url)); return new Real(url, ...rest); };
+      window.WebSocket.prototype = Real.prototype;
+    });
+    // A aba de OF só existe com a flag de rollout ligada; sem ela o
+    // `showSettingsSection` cai em `security` e o gesto não tem o que atualizar.
+    await page.route("**/auth/me", (route) =>
+      route.fulfill(json({ app_access: true, plan_tier: "pro", of_ui_enabled: true })));
+    const chamadas = [];
+    await page.route("**/open-finance/**", (route) => {
+      const req = route.request();
+      chamadas.push(`${req.method()} ${new URL(req.url()).pathname}`);
+      return route.fulfill(json({ sync: { ok: true, still_updating: 0, items: [] },
+                                  connections: [], accounts: [], transactions: [] }));
+    });
+
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.PBRefresh === "function"),
+                  "PBRefresh existir");
+    await waitFor(() => page.evaluate(() =>
+      new URLSearchParams(location.search).get("view") === "open-finance"),
+      "a aba de Open Finance ficar ativa");
+    await sleep(300);
+    chamadas.length = 0;                       // ignora o load inicial
+    await page.evaluate(() => window.PBRefresh());
+
+    const refresh = chamadas.filter((c) => c.startsWith("POST") && c.endsWith("/refresh"));
+    assert.equal(refresh.length, 1, `o gesto tem que pedir refresh real, veio: ${chamadas.join(", ")}`);
+
+    // (b) nenhuma das duas portas: nem WebSocket nativo, nem socket.io.
+    assert.deepEqual(await page.evaluate(() => window.__ws), [],
+                     "settings.html não pode abrir WebSocket — o ao vivo é do dashboard");
+  } finally { await page.__ctx.close(); }
+});
+
+/**
+ * ONDA 2: o backend já prova que `connection_ui_state` devolve
+ * `updating`/"Ainda não sincronizou"; isto prova o que o USUÁRIO vê. A linha da
+ * conexão mostra `Última sync: pendente` (fmtDate(null)) e a pílula tem que
+ * concordar com ela — dizer "Tudo em dia!" logo acima de "pendente" foi
+ * exatamente o sintoma desta onda.
+ *
+ * Discrimina: com `OF_PILL_CLASS[ui.state]` caindo em "ok" para `updating`, ou
+ * com a pílula pintada de verde, a 2ª asserção fica vermelha.
+ */
+test("linha da conexão sem sync: pílula pendente e 'Última sync: pendente'", async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.renderConnections === "function"),
+                  "renderConnections existir");
+
+    const linha = await page.evaluate(() => {
+      window.renderConnections([{
+        institution_name: "Nubank", provider_item_id: "i1", last_sync_at: null,
+        ui: { state: "updating", label: "Atualizando…", detail: "Ainda não sincronizou" },
+      }]);
+      const row = document.querySelector("#connections-list .connection-row");
+      const pill = row.querySelector(".pill");
+      return { texto: row.innerText, pill: pill.className, label: pill.textContent.trim() };
+    });
+
+    assert.match(linha.texto, /Última sync: pendente/, linha.texto);
+    assert.match(linha.texto, /Ainda não sincronizou/, linha.texto);
+    assert.equal(linha.label, "Atualizando…");
+    // "active" é a classe VERDE do mapa (OF_PILL_CLASS, settings.html:2792) — a
+    // única que o estado sem sync não pode receber.
+    assert.ok(!/\bactive\b/.test(linha.pill),
+              `a pílula não pode ser verde ao lado de "pendente" (veio "${linha.pill}")`);
+    assert.match(linha.pill, /pending/, linha.pill);
   } finally { await page.__ctx.close(); }
 });
 

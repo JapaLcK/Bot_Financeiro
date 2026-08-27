@@ -310,6 +310,19 @@ def connection_ui_state(connection_row: dict) -> dict:
         if state == "updated" and reason not in _REASONS_OK:
             state = reason if reason in _LABELS else "error_recoverable"
             detail = _FIXED_DETAIL.get(state)
+        # ONDA 2: "Atualizado" exige SYNC REAL, não só item saudável. O job de
+        # saúde grava `health` com `ok=None` (só faz GET /items, nunca toca em
+        # last_sync_at), então um banco recém-conectado/reconectado caía no ramo
+        # do health e ficava verde antes de qualquer sync — com "Última sync:
+        # pendente" logo abaixo, na mesma linha da tela.
+        # Vem DEPOIS do default seguro, e a ordem foi medida: com ela na frente,
+        # `no_accounts` e `read_failed` de uma conexão nova (que também têm
+        # last_sync_at NULL, porque `mark_sync_result(ok=False)` não carimba)
+        # perdiam o motivo e viravam "Atualizando…" — "Sem dados" sumia da tela e
+        # a pílula do `read_failed` descia de vermelho para âmbar. Só o verde SEM
+        # motivo é que vira "Ainda não sincronizou".
+        elif state == "updated" and row.get("last_sync_at") is None:
+            state, detail = "updating", "Ainda não sincronizou"
         return {
             "state": state,
             "label": _LABELS[state],
@@ -355,5 +368,8 @@ def connection_ui_state(connection_row: dict) -> dict:
         # temporário" (linha legada gravada antes desta onda também cai aqui).
         return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
     if row.get("last_sync_at") is None:
+        # Não é redundante com o `out()`: aqui ele vem ANTES do default seguro,
+        # que é como a base se comporta neste ramo. Sem esta linha, um
+        # `no_accounts` sem health medido trocaria de veredito.
         return out("updating", "Ainda não sincronizou")
     return out("updated")

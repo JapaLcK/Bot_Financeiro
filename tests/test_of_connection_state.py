@@ -357,6 +357,105 @@ def test_reconexao_saindo_de_deleted_continua_funcionando(user_id, monkeypatch, 
     assert _linha("item-volta")["last_sync_at"] == AGORA
 
 
+# ── 11b. ONDA 2: o job de saúde não pode pintar de verde o que nunca sincronizou
+# Caminho medido, todo em código deste repositório: o upsert zera `health`, o job
+# de saúde é elegível na hora (`health is null`), o `GET /items` volta saudável e
+# `mark_sync_result(ok=None)` grava o health SEM tocar em `last_sync_at`. O ramo
+# do health de `connection_ui_state` devolvia "updated" — a conexão nascia
+# "Tudo em dia!" com "Última sync: pendente" na linha de baixo e zero contas
+# espelhadas. Este teste é o par negativo+positivo da guarda: sem ela a 1ª metade
+# fica vermelha; se ela recusasse tudo, a 2ª metade ficaria.
+
+def test_recem_conectado_com_item_saudavel_nao_e_atualizado(user_id, monkeypatch, relogio_fixo):
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-fresco", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item",
+                        lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+
+    ps.run_of_health_check()
+
+    linha = _linha("item-fresco")
+    assert linha["health"], "o job mediu a saúde (é o que torna o bug alcançável)"
+    assert linha["last_sync_at"] is None, "medir saúde não é sincronizar"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated", "item vivo na Pluggy não é espelho nosso"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+    # CONTROLE POSITIVO: o sync real é que libera o verde.
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-fresco"},
+                 contas=[_conta_pluggy("acc-fresco")], txs=[_tx_pluggy("tx-fresco")])
+    assert ps.sync_pluggy_item("item-fresco")["ok"] is True
+
+    assert _linha("item-fresco")["last_sync_at"] == AGORA
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", "sync concluído: agora sim"
+
+
+def test_conexao_nova_sem_contas_mostra_sem_dados_e_nao_o_generico(user_id, monkeypatch, relogio_fixo):
+    """O helper `_conexao()` carimba `last_sync_at=ANTES`, então TODO teste de
+    `no_accounts` da Onda 1 nasce do lado da tabela onde a guarda desta onda não
+    age — a categoria era inobservável pela suíte. Aqui a conexão é NOVA
+    (last_sync_at NULL, que é o que `mark_sync_result(ok=False)` deixa) e o
+    motivo concreto tem de sobreviver: "Sem dados", não "Ainda não sincronizou"."""
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-novo-vazio", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-novo-vazio"}, contas=[])
+
+    res = ps.sync_pluggy_item("item-novo-vazio")
+
+    assert res["ok"] is False and res["reason"] == "no_accounts"
+    linha = _linha("item-novo-vazio")
+    assert linha["last_sync_at"] is None, "sync sem espelho não é sucesso"
+    assert linha["status_reason"] == "no_accounts"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "no_accounts", "o motivo fala mais alto que a falta de sync"
+    assert ui["label"] == "Sem dados"
+
+
+def test_conexao_nova_com_leitura_pela_metade_continua_vermelha(user_id, monkeypatch, relogio_fixo):
+    """Irmão do de cima para `read_failed` — a pílula dele é `error` (vermelha) em
+    OF_PILL_CLASS, e virar `updating` a rebaixaria para âmbar numa conexão nova."""
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-novo-429", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-novo-429"}, contas=[])
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: (_ for _ in ()).throw(
+        PluggyApiError("rate limit", status_code=429)))
+
+    assert ps.sync_pluggy_item("item-novo-429")["reason"] == "read_failed"
+
+    linha = _linha("item-novo-429")
+    assert linha["last_sync_at"] is None
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "error_recoverable"
+    assert ui["detail"] == "Tentaremos de novo automaticamente"
+
+
+def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fixo):
+    """Reconectar zera `status_reason` e `health` (linha G) — o que ele NÃO pode
+    fazer é devolver o veredito verde antes de um sync novo."""
+    conexao = _conexao(user_id, "item-reconecta")
+    _set_estado(conexao["id"], status="ERROR", status_reason="item_missing",
+                last_sync_at=None)
+
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-reconecta", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item",
+                        lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+    ps.run_of_health_check()
+
+    linha = _linha("item-reconecta")
+    assert linha["last_sync_at"] is None, "reconectar não é sincronizar"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────
 # A tabela vive no topo de `core/services/pluggy_health.py`. Estes testes são a
 # tabela executável — cada um é uma linha dela.
