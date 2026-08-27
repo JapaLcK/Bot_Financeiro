@@ -685,13 +685,18 @@ test("A6: sem alvo e sem nota, o editor abre VAZIO (não salva um travessão)", 
    PRIMEIRA opção ("alimentação"), que é PIOR que "outros". Por isso a opção
    "— sem categoria —" (value "") e a omissão da chave no corpo do PATCH.
 
-   Controle NEGATIVO: volte `if (categoria) reqBody.categoria = categoria;` para
-   `const reqBody = { categoria, nota };` — o 1º teste fica vermelho.
-   Controle POSITIVO: o 2º teste (lançamento COM categoria continua mandando a
-   dele). */
+   A regra virou de CLASSE: o PATCH leva só o campo que o usuário MEXEU — os
+   três, não só a categoria (ver edit_launch_patch_body.test.mjs, e o porquê:
+   reenviar `criado_em` igual movia o `posted_at` um dia pra trás). Por isso o
+   controle abaixo TROCA a categoria em vez de conferir a que já estava lá.
 
-/** Edita pela lista, troca a data e devolve o CORPO do PATCH que saiu. */
-const salvarPelaLista = (page, linha) => page.evaluate(async (linha) => {
+   Controle NEGATIVO: volte `if (categoriaMudou) reqBody.categoria = categoria;`
+   para `const reqBody = { categoria, nota };` — o 1º teste fica vermelho.
+   Controle POSITIVO: o 2º teste (a categoria ESCOLHIDA continua chegando). */
+
+/** Edita pela lista, troca a data (e opcionalmente a categoria) e devolve o
+    CORPO do PATCH que saiu. */
+const salvarPelaLista = (page, linha, novaCategoria = null) => page.evaluate(async ([linha, novaCategoria]) => {
   // `document.cookie` é inacessível em about:blank (o setContent do harness) e
   // o `csrfHeaders` real estoura ANTES do fetch. Só o cookie é falso; o
   // csrfHeaders e o submitEditLaunch continuam os de produção.
@@ -710,6 +715,7 @@ const salvarPelaLista = (page, linha) => page.evaluate(async (linha) => {
     .map((o) => o.text);
   // mexe SÓ na data — o campo que não tem nada a ver com categoria
   document.getElementById("edit-launch-data").value = "2026-02-11T09:00";
+  if (novaCategoria) document.getElementById("edit-launch-categoria").value = novaCategoria;
 
   let corpo = null;
   window.fetch = (u, o) => {
@@ -721,7 +727,7 @@ const salvarPelaLista = (page, linha) => page.evaluate(async (linha) => {
     selecionado, rotulos, corpo,
     erro: document.getElementById("edit-launch-error").textContent,
   };
-}, linha);
+}, [linha, novaCategoria]);
 
 test("C2: editar só a data de um lançamento SEM categoria não grava categoria",
   async () => {
@@ -738,11 +744,12 @@ test("C2: editar só a data de um lançamento SEM categoria não grava categoria
     await page.close();
   });
 
-test("C2 controle: lançamento COM categoria continua mandando a dele", async () => {
+test("C2 controle: a categoria ESCOLHIDA pelo usuário continua indo no PATCH", async () => {
   const page = await loadComEditor();
-  const r = await salvarPelaLista(page, linhaReal({ categoria: "mercado" }));
+  const r = await salvarPelaLista(page, linhaReal({ categoria: "mercado" }), "lazer");
   assert.equal(r.erro, "", `o editor barrou o salvamento: "${r.erro}"`);
-  assert.equal(r.corpo.categoria, "mercado", r.corpo);
+  assert.equal(r.selecionado, "mercado", `o <select> abriu em "${r.selecionado}"`);
+  assert.equal(r.corpo.categoria, "lazer", r.corpo);
   assert.equal(r.rotulos.includes("— sem categoria —"), false,
     "a opção de vazio apareceu num lançamento que TEM categoria");
   await page.close();

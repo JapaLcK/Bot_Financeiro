@@ -571,6 +571,155 @@ def test_editar_a_data_de_um_lancamento_manual_continua_valendo(pro_user_id):
     assert r["posted_at"] is None, r
 
 
+# ══ Quem é dono da data de uma linha do Open Finance ═════════════════════════
+# O PROVEDOR. `sync_imported_open_finance_updates` (db/open_finance.py:1559-1588)
+# compara `coalesce(posted_at, criado_em::date)` com o `transaction_date` do
+# espelho e REESCREVE `posted_at` quando diferem — em toda sincronização Pluggy
+# (core/services/pluggy_sync.py:218). Por isso `update_launch_fields` RECUSA
+# `criado_em` nessas linhas (409) em vez de gravar e deixar a sync desfazer.
+#
+# Controle NEGATIVO do grupo: apague o `raise LaunchDateLockedError` de
+# `update_launch_fields` (db/accounts.py) →
+# `test_editar_a_nota_de_uma_linha_do_open_finance_nao_move_o_dia` fica VERMELHO
+# (o PATCH volta 200 e o dia anda 10/03 → 09/03).
+# Controle POSITIVO: `test_editar_a_data_de_um_extrato_vence_o_posted_at` e
+# `test_editar_a_data_de_um_lancamento_manual_continua_valendo` (acima) provam
+# que a recusa é SÓ do Open Finance, e
+# `test_editar_so_a_nota_de_uma_linha_do_open_finance_grava` prova que o resto
+# do formulário continua editável nessas linhas.
+
+def _of_do_dia(user_id: int, dia: date, *, legado: bool = False,
+               valor: str = "137.77", categoria: str = "mercado") -> tuple[int, int]:
+    """Linha do Open Finance pelo caminho de PRODUÇÃO → (launch_id, of_tx_id).
+
+    Espelho real (`save_pluggy_open_finance_item` + `save_open_finance_sync`) →
+    `import_open_finance_launches`. É o vínculo `imported_launch_id` que sai daí
+    que faz a sync do OF rodar de verdade no teste — com `update ... set
+    source='open_finance'` à mão não existe espelho, e a sync não vê a linha.
+
+    `legado=True` envelhece a linha para a forma de ANTES de c474fba
+    (18/08/2026): `criado_em` = a `date` CRUA (meia-noite no fuso da SESSÃO, UTC
+    na produção) e `efeitos` sem `time_known` (logo `has_time=false`). São
+    EXATAMENTE as duas colunas que aquele commit mudou (`git show
+    c474fba^:db/open_finance.py`); todo o resto — source, external_id,
+    posted_at, o vínculo com o espelho — continua vindo do importador de hoje.
+    """
+    from decimal import Decimal
+
+    conexao = db.save_pluggy_open_finance_item(
+        user_id,
+        {"id": f"item-of-{user_id}-{dia}", "connector": {"id": 612, "name": "Nubank"},
+         "status": "UPDATED"},
+    )
+    tx_id = f"of-tx-{user_id}-{dia}"
+    db.save_open_finance_sync(conexao["id"], [{
+        "provider_account_id": f"acc-of-{user_id}",
+        "name": "Nubank Conta", "type": "BANK", "subtype": "CHECKING_ACCOUNT",
+        "currency": "BRL", "balance": Decimal("1000.00"), "raw": {},
+        "transactions": [{
+            "provider_transaction_id": tx_id,
+            "description": "MERCADO PAGUE MENOS",
+            "amount": Decimal("-" + valor),
+            "transaction_date": dia,
+            "transacted_at": None,
+            "category": categoria,
+            "raw": {},
+        }],
+    }])
+    rep = db.import_open_finance_launches(user_id, conexao["id"])
+    assert rep["inserted"] == 1, rep
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select id, imported_launch_id from open_finance_transactions "
+            "where provider_transaction_id=%s",
+            (tx_id,),
+        )
+        r = cur.fetchone()
+        lid, of_tx_id = r["imported_launch_id"], r["id"]
+        if legado:
+            cur.execute(
+                "update launches set criado_em=%s, efeitos = efeitos - 'time_known' "
+                "where id=%s",
+                (dia, lid),
+            )
+        conn.commit()
+    return lid, of_tx_id
+
+
+def test_a_sync_do_open_finance_e_dona_da_data(pro_user_id):
+    """A MEDIÇÃO por trás da recusa: o provedor reescreve `posted_at`.
+
+    Sem isto, "a data da linha do OF é do banco" seria opinião. Aqui o espelho
+    muda de 10/03 pra 12/03 e a linha importada segue o espelho — é o mesmo
+    caminho que desfazia a edição do usuário.
+    """
+    lid, of_tx_id = _of_do_dia(pro_user_id, date(2026, 3, 10))
+    assert _linha(pro_user_id, "mercado", lid)["data"] == date(2026, 3, 10)
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update open_finance_transactions set transaction_date=%s where id=%s",
+                    (date(2026, 3, 12), of_tx_id))
+        conn.commit()
+    assert db.sync_imported_open_finance_updates(pro_user_id)["launches_updated"] == 1
+    assert _linha(pro_user_id, "mercado", lid)["data"] == date(2026, 3, 12)
+
+
+def test_editar_a_nota_de_uma_linha_do_open_finance_nao_move_o_dia(pro_user_id):
+    """O corpo EXATO que o modal antigo mandava ao salvar só a descrição.
+
+    `criado_em` reenviado igual ao que já estava no banco (o modal pré-preenche
+    o campo e mandava sempre). Numa linha do OF legado — `criado_em` = meia-noite
+    UTC — `day_tz` devolve o DIA ANTERIOR, e era ele que ia parar no `posted_at`,
+    justamente o único campo certo daquela linha. Agora a rota recusa (409).
+    """
+    lid, _ = _of_do_dia(pro_user_id, date(2026, 3, 10), legado=True)
+    antes = _linha(pro_user_id, "mercado", lid)
+    assert antes["has_time"] is False and antes["data"] == date(2026, 3, 10), antes
+
+    client, headers = _cliente_logado(pro_user_id)
+    resp = client.patch(
+        f"/launches/{pro_user_id}/{lid}",
+        # 2026-03-09T21:00-03:00 == 2026-03-10T00:00Z: o MESMO instante que já
+        # está gravado, que é o que `toLocalDatetimeInput` pré-preenche.
+        json={"nota": "corrigindo so a descricao", "criado_em": "2026-03-09T21:00:00-03:00"},
+        headers=headers,
+    )
+    # O DANO primeiro: com a guarda desligada isto falha com 09/03 (o dia
+    # anterior), que é o bug relatado — e não só com "200 != 409".
+    depois = _linha(pro_user_id, "mercado", lid)
+    assert depois["data"] == date(2026, 3, 10), depois
+    assert depois["posted_at"] == date(2026, 3, 10), depois
+    # e a rota diz POR QUE recusou, em vez de fingir sucesso
+    assert resp.status_code == 409, resp.text
+    assert "banco conectado" in resp.json()["detail"], resp.text
+
+
+def test_editar_so_a_nota_de_uma_linha_do_open_finance_grava(pro_user_id):
+    """Controle POSITIVO: a recusa é da DATA, não do formulário inteiro.
+
+    É este o caminho que o modal usa hoje (só manda o campo que mudou), e a
+    sync do OF não toca em `nota`/`alvo` — então a edição sobrevive.
+    """
+    lid, _ = _of_do_dia(pro_user_id, date(2026, 3, 10), legado=True)
+
+    client, headers = _cliente_logado(pro_user_id)
+    resp = client.patch(
+        f"/launches/{pro_user_id}/{lid}",
+        json={"nota": "mercado do bairro"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    r = _linha(pro_user_id, "mercado", lid)
+    assert r["nota"] == "mercado do bairro", r
+    assert r["data"] == date(2026, 3, 10), r
+    # e a sync seguinte não tem o que desfazer
+    db.sync_imported_open_finance_updates(pro_user_id)
+    r = _linha(pro_user_id, "mercado", lid)
+    assert r["nota"] == "mercado do bairro" and r["data"] == date(2026, 3, 10), r
+
+
 def test_credito_nao_promete_hora_que_nao_tem(pro_user_id):
     """`credit_transactions.purchased_at` é `date` — a lista imprime "dd/mm"."""
     cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")

@@ -8255,6 +8255,7 @@ function _onEditCategoriaChange() {
 }
 
 let editingLaunchIsCredit = false;
+let editingLaunchOriginal = { categoria: "", nota: "", data: "" };
 
 // ISO instant → "YYYY-MM-DDTHH:MM" no fuso local do navegador (formato do
 // input datetime-local). Espelha o que o fmtDate mostra na lista.
@@ -8293,6 +8294,12 @@ function openEditLaunchModal(launchId, launchObj = null) {
 
   // Data — só editável em lançamentos normais. Crédito não muda data aqui
   // (alteraria a janela de fechamento da fatura).
+  // ponytail: o campo também é INÚTIL numa linha do Open Finance (a data é do
+  // provedor e a rota devolve 409, db/accounts.py) — mas ele continua visível,
+  // e o usuário só descobre ao salvar. Desabilitar exigiria `source` nos TRÊS
+  // payloads que abrem este modal (Visão Geral, Histórico e detalhe de
+  // categoria), e nenhum deles traz a coluna hoje. Fazer quando alguém
+  // reclamar, ou junto do próximo PR que já mexa nessas queries.
   const dataRow = document.getElementById("edit-launch-data-row");
   const dataInp = document.getElementById("edit-launch-data");
   if (editingLaunchIsCredit) {
@@ -8300,8 +8307,28 @@ function openEditLaunchModal(launchId, launchObj = null) {
     dataInp.value = "";
   } else {
     dataRow.style.display = "";
-    dataInp.value = launch.criado_em ? toLocalDatetimeInput(launch.criado_em) : "";
+    // Sem hora confiável quem manda no DIA é o `posted_at` — a MESMA regra do
+    // `fmtLaunchWhen` (dashboard.js:485), que escreve o resumo três linhas
+    // acima nesta caixa. Sem isto o modal se contradizia sozinho: cabeçalho
+    // "10/03" e campo "09/03, 21:00" numa linha do Open Finance legado, cujo
+    // `criado_em` é meia-noite UTC (medido em 390x844). 12:00 é a hora que os
+    // importadores gravam quando o dia vem sem hora (statement_import.py:666).
+    dataInp.value = (launch.has_time === false && launch.posted_at)
+      ? `${String(launch.posted_at).slice(0, 10)}T12:00`
+      : (launch.criado_em ? toLocalDatetimeInput(launch.criado_em) : "");
   }
+
+  // Estado ORIGINAL do formulário, lido do próprio DOM depois do preenchimento
+  // (e não do objeto `launch`): é exatamente o que o usuário está vendo, então
+  // a comparação no submit não depende da regra de preenchimento acima.
+  // A data é comparada como STRING do input (`YYYY-MM-DDTHH:MM`): o
+  // datetime-local é de minuto, e comparar instante cru marcaria como
+  // "mudou" todo lançamento com segundos != 0.
+  editingLaunchOriginal = {
+    categoria: document.getElementById("edit-launch-categoria").value,
+    nota: document.getElementById("edit-launch-nota").value.trim(),
+    data: dataInp.value,
+  };
 
   hideEditLaunchError();
   document.getElementById("edit-launch-overlay").classList.add("open");
@@ -8340,22 +8367,37 @@ async function submitEditLaunch() {
   // categoria === "" só existe na opção "— sem categoria —", e só num lançamento
   // que JÁ está sem categoria (`_renderEditCategoriaOptions`). Nesse caso o PATCH
   // vai sem a chave `categoria` e a rota não toca na coluna — salvar a nota ou a
-  // data não pode inventar categoria pra transação de ninguém.
+  // data não pode inventar categoria pra transação de ninguém. Mesma disciplina
+  // vale agora pros outros dois campos (ver `notaMudou`/`criadoEmISO` abaixo).
 
   const nota = document.getElementById("edit-launch-nota").value.trim();
+
+  // O PATCH carrega SÓ o campo que o usuário mexeu. Reenviar um valor igual ao
+  // que já está no banco não é inócuo: `criado_em` reescreve `posted_at`
+  // (db/accounts.py) e, numa linha importada sem hora confiável, o `posted_at`
+  // é o único campo certo — editar só a descrição jogava o dia pra trás.
+  const notaMudou = nota !== editingLaunchOriginal.nota;
+  const categoriaMudou = !!categoria && categoria !== editingLaunchOriginal.categoria;
 
   // Data — só pra lançamentos normais. Converte o wall-clock local do input
   // pra um instante ISO (com fuso) que o backend grava direto.
   let criadoEmISO = null;
   if (!editingLaunchIsCredit) {
     const dataVal = document.getElementById("edit-launch-data").value;
-    if (dataVal) {
+    if (dataVal && dataVal !== editingLaunchOriginal.data) {
       // O input é hora de parede em APP_TZ (mesmo fuso do display/edição).
       // Converte pro instante UTC correto — não usa new Date(dataVal), que
       // interpretaria no fuso do device (UTC no WebView iOS) e deslocaria 3h.
       criadoEmISO = appTzWallClockToISO(dataVal);
       if (!criadoEmISO) { showEditLaunchError("Data inválida."); return; }
     }
+  }
+
+  if (!notaMudou && !categoriaMudou && !criadoEmISO) {
+    // Nada mudou: PATCH nenhum. Fechar é o feedback honesto — um toast de
+    // "atualizado" afirmaria uma escrita que não aconteceu.
+    closeEditLaunchModal();
+    return;
   }
 
   const btn = document.getElementById("edit-launch-submit-btn");
@@ -8365,8 +8407,9 @@ async function submitEditLaunch() {
     const url = editingLaunchIsCredit
       ? `${API}/credit-transactions/${USER_ID}/${editingLaunchId}`
       : `${API}/launches/${USER_ID}/${editingLaunchId}`;
-    const reqBody = { nota };
-    if (categoria) reqBody.categoria = categoria;
+    const reqBody = {};
+    if (notaMudou) reqBody.nota = nota;
+    if (categoriaMudou) reqBody.categoria = categoria;
     if (criadoEmISO) reqBody.criado_em = criadoEmISO;
     const r = await fetch(url, {
       method: "PATCH",
@@ -8390,8 +8433,8 @@ async function submitEditLaunch() {
       const oldTotal = target.installments_total;
       // `categoria` vazia = não foi no PATCH (ver acima): o otimista não pode
       // fingir uma escrita que o servidor não fez.
-      if (categoria) target.categoria = categoria;
-      target.nota = nota;
+      if (categoriaMudou) target.categoria = categoria;
+      if (notaMudou) target.nota = nota;
       if (criadoEmISO) target.criado_em = criadoEmISO;
       if (editingLaunchIsCredit && oldTotal && oldTotal > 1) {
         for (const l of items) {
@@ -8399,8 +8442,8 @@ async function submitEditLaunch() {
               && l.alvo === oldAlvo
               && l.nota === oldNota
               && l.installments_total === oldTotal) {
-            if (categoria) l.categoria = categoria;
-            l.nota = nota;
+            if (categoriaMudou) l.categoria = categoria;
+            if (notaMudou) l.nota = nota;
           }
         }
       }

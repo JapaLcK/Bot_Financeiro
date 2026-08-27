@@ -236,6 +236,10 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
     return changed
 
 
+class LaunchDateLockedError(ValueError):
+    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
+
+
 def update_launch_fields(
     user_id: int,
     launch_id: int,
@@ -271,17 +275,19 @@ def update_launch_fields(
     if criado_em is not None:
         sets.append("criado_em=%s")
         params.append(criado_em)
-        # `posted_at` anda JUNTO. Onde não há hora confiável é ele quem manda no
-        # dia exibido — no back (`launch_day`, utils_date) e no front
-        # (`fmtLaunchWhen`: dashboard.js:485, home.html:776, os dois já na main).
-        # Sem isto, editar a data de uma linha importada devolvia 200, mudava o
-        # banco e a tela seguia mostrando a data VELHA, sem caminho de conserto.
+        # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
+        # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
+        # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
+        # editar a data de um extrato devolvia 200, mudava o banco e a tela
+        # seguia mostrando a data VELHA, sem caminho de conserto.
+        # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
+        # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
+        # nesta mesma pasta) e o importador do Open Finance
+        # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
         # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
         # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
-        # `provider_transaction_id`). Quem lê `posted_at` é a reconciliação do OF
-        # (`coalesce(posted_at, criado_em::date)`, db/open_finance.py), e ela fica
-        # consistente justamente movendo os dois juntos. NULL continua NULL:
-        # lançamento manual não tem data de postagem.
+        # `provider_transaction_id`). NULL continua NULL: lançamento manual não
+        # tem data de postagem.
         sets.append("posted_at = case when posted_at is null then null else %s end")
         params.append(day_tz(criado_em))
     if not sets:
@@ -291,6 +297,28 @@ def update_launch_fields(
     sql = f"update launches set {', '.join(sets)} where user_id=%s and id=%s"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if criado_em is not None:
+                # DONO DA DATA numa linha do Open Finance é o PROVEDOR, não o
+                # usuário. `sync_imported_open_finance_updates`
+                # (db/open_finance.py:1559-1588) compara
+                # `coalesce(posted_at, criado_em::date)` com o
+                # `transaction_date` do espelho e, quando diferem, REESCREVE
+                # `posted_at` com a data do banco — e isso roda em TODA
+                # sincronização Pluggy (core/services/pluggy_sync.py:218).
+                # Medido: editar 10/03 → 15/04 devolvia 200 e a sync seguinte
+                # voltava pra 10/03. Aceitar seria fingir sucesso; recusar é o
+                # que a tela consegue explicar. (Nota/descrição continuam
+                # editáveis: a sync não toca em `nota`/`alvo`.)
+                cur.execute(
+                    "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
+                    (user_id, launch_id),
+                )
+                row = cur.fetchone()
+                if row and row["source"] == "open_finance":
+                    raise LaunchDateLockedError(
+                        "A data deste lançamento vem do banco conectado e é "
+                        "atualizada por ele. Dá pra editar a descrição e a categoria."
+                    )
             cur.execute(sql, tuple(params))
             changed = (cur.rowcount or 0) == 1
         conn.commit()
