@@ -18,8 +18,9 @@ Com uma linha legada na base, a soma das barras e o gráfico diário PASSAVAM do
 "Gastos do mês", e o "sobrou" saía maior do que é — dinheiro a mais na cara do
 usuário, sem erro nenhum.
 
-Medido na produção (Railway, 27/08/2026 08:46 UTC): ZERO linhas
-'saida'/'entrada' em `launches`, então nenhum número de usuário muda hoje. O
+Reconferido na produção (Railway) em 27/08/2026 21:50 UTC, sobre o head final
+deste PR: `count(*) filter (where tipo='saida')` = 0 e o mesmo para 'entrada' em
+`launches` — ZERO linhas legadas, então nenhum número de usuário muda hoje. O
 conserto é da convenção, não de um incêndio.
 
 Controle NEGATIVO: volte a query 5 para `SELECT tipo, ... GROUP BY tipo` em
@@ -127,7 +128,8 @@ def test_evolucao_por_mes_bate_com_o_gasto_do_mes(pro_user_id):
 
 def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
     """Controle POSITIVO — é a base da produção inteira hoje (zero linhas
-    legadas, medido em 27/08/2026): os mesmos números de sempre."""
+    legadas; mesma medição do topo do arquivo, 27/08/2026 21:50 UTC): os mesmos
+    números de sempre."""
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 50, "compra", None,
         categoria="mercado", criado_em=_hoje_as(10),
