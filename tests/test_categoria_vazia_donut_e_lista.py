@@ -25,8 +25,9 @@ import asyncio
 from datetime import datetime, time
 
 import db
+from core.handlers import launches as h
 from db.connection import CAT_VAZIA_LABEL
-from utils_date import today_tz
+from utils_date import month_range_today, today_tz
 import frontend.finance_bot_websocket_custom as dashboard
 
 
@@ -73,3 +74,38 @@ def test_categoria_normal_continua_casando(pro_user_id):
 
     rows, resumo = db.list_launches_by_category(pro_user_id, CAT_VAZIA_LABEL)
     assert len(rows) == 1 and resumo["despesa"] == 100.0, (rows, resumo)
+
+
+def test_o_total_da_categoria_nao_chama_gasto_de_movimentacao_interna(pro_user_id):
+    """O total e a lista têm que descrever as MESMAS linhas.
+
+    `_total_despesa` (core/handlers/launches.py) subtrai
+    `sum_spent_in_category_period` do resumo da lista e atribui a diferença a
+    movimentação interna. Com a chave crua só de um lado, a despesa sem
+    categoria dava total 0 × lista R$ 120,00, e o bot respondia — medido, com a
+    lista já consertada e o total ainda não:
+
+        🔁 R$ 120,00 movimentados em **sem categoria** neste mês.
+        Não conta como gasto — é movimentação interna.
+
+    sobre um gasto de verdade. Pior que a lista vazia de antes: número certo com
+    explicação errada. Controle NEGATIVO: volte as três `cat_key_sql` de
+    `sum_spent_in_category_period` (db/budgets.py) para `cat_norm_sql` — este
+    teste fica vermelho.
+    """
+    _grava_sem_categoria(pro_user_id, 120, None)
+    start, end = month_range_today()
+
+    total = db.sum_spent_in_category_period(pro_user_id, CAT_VAZIA_LABEL, start, end)
+    _, resumo = db.list_launches_by_category(
+        pro_user_id, CAT_VAZIA_LABEL, start, end, tipo="despesa", limit=1,
+    )
+    assert total == resumo["despesa"] == 120.0, (total, resumo)
+
+    # os "5 maiores" saem ao lado desse total na mesma resposta
+    maiores = db.get_largest_expenses(pro_user_id, start, end, categoria=CAT_VAZIA_LABEL)
+    assert len(maiores) == 1 and maiores[0]["valor"] == 120.0, maiores
+
+    resposta = h._total_despesa(pro_user_id, CAT_VAZIA_LABEL, start, end, "neste mês")
+    assert "movimenta" not in resposta.lower(), resposta
+    assert "120,00" in resposta, resposta

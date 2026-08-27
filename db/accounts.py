@@ -10,7 +10,7 @@ from psycopg.types.json import Json, Jsonb
 import db_support as _db_support
 from utils_date import _tz, day_tz
 
-from .connection import get_conn, cat_norm_sql, cat_key_sql
+from .connection import get_conn, cat_key_sql
 from .users import ensure_user, ensure_user_tx
 
 
@@ -459,11 +459,16 @@ def get_largest_expenses(
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
+    # `cat_key_sql` e não `cat_norm_sql`: mesma chave da lista e do total da
+    # categoria (`list_launches_by_category`; `sum_spent_in_category_period`,
+    # db/budgets.py). Os "5 maiores" saem ao lado daquele total na resposta do
+    # bot — com a chave crua, a categoria SEM nome trazia total e lista com
+    # valor e nenhum "maior gasto".
     cat_filter = (
-        f"and {cat_norm_sql('categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+        f"and {cat_key_sql('categoria')} = {cat_key_sql('%s')}" if categoria else ""
     )
     cat_filter_ct = (
-        f"and {cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+        f"and {cat_key_sql('ct.categoria')} = {cat_key_sql('%s')}" if categoria else ""
     )
 
     if by_bill_month:

@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql, CAT_META_SQL, CAT_CANON_ORDER
+from .connection import get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER
 from .users import ensure_user
 
 
@@ -234,15 +234,22 @@ def sum_spent_in_category_period(
       - cartão: is_refund=false, atribuído ao período pelo MÊS DA FATURA
         (credit_bills.period_end). Assim um gasto parcelado conta uma parcela
         por mês, e não os R$ totais na data da compra.
-    Comparação de categoria case- e acento-insensível.
+    Comparação de categoria pela `cat_key_sql`: case-, acento-insensível E com o
+    vazio colapsado em 'sem categoria', a MESMA chave da lista
+    (`list_launches_by_category`) e do donut. Tem que ser a mesma porque o
+    `_total_despesa` do bot (core/handlers/launches.py) subtrai um do outro e
+    chama a diferença de movimentação interna: com `cat_norm_sql` cru aqui, uma
+    despesa SEM categoria dava total 0 contra lista R$ 120,00, e o bot respondia
+    "não conta como gasto — é movimentação interna" sobre um gasto de verdade.
+    Para categoria escrita as duas expressões são idênticas; só o vazio muda.
     """
     ensure_user(user_id)
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
-    _cat = cat_norm_sql("categoria")
-    _cat_ct = cat_norm_sql("ct.categoria")
-    _arg = cat_norm_sql("%s")
+    _cat = cat_key_sql("categoria")
+    _cat_ct = cat_key_sql("ct.categoria")
+    _arg = cat_key_sql("%s")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
