@@ -302,6 +302,14 @@ def connection_ui_state(connection_row: dict) -> dict:
     health = row.get("health") if isinstance(row.get("health"), dict) else None
     stale = list((health or {}).get("stale_products") or [])
 
+    # "Sincronizou" tem que significar "sincronizou DEPOIS da autorização atual".
+    # O upsert preserva o `last_sync_at` velho numa reconexão de propósito
+    # (reconectar não é sincronizar), então só olhar se ele existe deixava o
+    # espelho ANTERIOR à reconexão voltar à tela como "Atualizado" assim que o
+    # job de saúde media o item novo como saudável — apontado pelo Codex no #162.
+    ultimo, religado = row.get("last_sync_at"), row.get("reconnected_at")
+    sem_sync = ultimo is None or (religado is not None and ultimo < religado)
+
     def out(state: str, detail: str | None = None) -> dict:
         # DEFAULT SEGURO: estado desconhecido nunca é verde. Um `status_reason`
         # pendente que este arquivo não conhece (gravado por um caminho novo)
@@ -321,7 +329,7 @@ def connection_ui_state(connection_row: dict) -> dict:
         # perdiam o motivo e viravam "Atualizando…" — "Sem dados" sumia da tela e
         # a pílula do `read_failed` descia de vermelho para âmbar. Só o verde SEM
         # motivo é que vira "Ainda não sincronizou".
-        elif state == "updated" and row.get("last_sync_at") is None:
+        elif state == "updated" and sem_sync:
             state, detail = "updating", "Ainda não sincronizou"
         return {
             "state": state,
@@ -367,7 +375,7 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
         return out("no_accounts" if reason == "no_accounts" else "error_recoverable")
-    if row.get("last_sync_at") is None:
+    if sem_sync:
         # Não é redundante com o `out()`: aqui ele vem ANTES do default seguro,
         # que é como a base se comporta neste ramo. Sem esta linha, um
         # `no_accounts` sem health medido trocaria de veredito.

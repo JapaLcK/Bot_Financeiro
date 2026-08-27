@@ -55,6 +55,11 @@ class _Relogio(datetime):
 def relogio_fixo(monkeypatch):
     monkeypatch.setattr(ps, "datetime", _Relogio)
     monkeypatch.setattr("db.open_finance_state.datetime", _Relogio)
+    # `db.open_finance` também carimba hora nesta tabela (o `reconnected_at` do
+    # upsert). Deixá-lo no relógio real fazia a reconexão nascer DEPOIS de um
+    # sync com hora fixa, e a comparação `last_sync_at >= reconnected_at`
+    # invertia — armadilha para quem viesse depois.
+    monkeypatch.setattr("db.open_finance.datetime", _Relogio)
 
 
 def _conexao(user_id: int, item_id: str = "item-g1", status: str = "UPDATED") -> dict:
@@ -454,6 +459,55 @@ def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fix
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
     assert ui["state"] != "updated"
     assert ui["detail"] == "Ainda não sincronizou"
+
+
+# ── 11c. RODADA CODEX (#162, P2): reconexão de quem JÁ tinha sincronizado ────
+# O apontamento: o upsert preserva o `last_sync_at` velho de propósito, então uma
+# guarda que só pergunta "existe last_sync_at?" aceita o carimbo PRÉ-reconexão —
+# e o espelho velho volta à tela como "Atualizado" assim que o job de saúde mede
+# o item novo como saudável, antes de a nova autorização ter sincronizado nada.
+# O meu teste da rodada anterior escapava disso por acidente: ele zerava o
+# `last_sync_at`, que é justamente o caso fácil.
+# CONTROLE NEGATIVO: trocar `sem_sync` por `ultimo is None` em
+# `connection_ui_state` deixa o 1º teste vermelho.
+
+def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio_fixo):
+    _conexao(user_id, "item-religa")                    # nasce com last_sync_at=ANTES
+    assert _linha("item-religa")["last_sync_at"] == ANTES
+
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-religa", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    linha = _linha("item-religa")
+    assert linha["last_sync_at"] == ANTES, "reconectar não pode MEXER no last_sync_at"
+    assert linha["reconnected_at"] is not None, "mas tem que registrar a reconexão"
+
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+    ps.run_of_health_check()
+
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated", "espelho de antes da reconexão não é 'Atualizado'"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+
+def test_sync_depois_da_reconexao_devolve_o_verde(user_id, monkeypatch, relogio_fixo):
+    """CONTROLE POSITIVO: sem ele a guarda podia recusar para sempre depois de
+    qualquer reconexão — que é pior que o bug."""
+    _conexao(user_id, "item-religa-ok")
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-religa-ok", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-religa-ok"},
+                 contas=[_conta_pluggy("acc-religa")], txs=[_tx_pluggy("tx-religa")])
+    assert ps.sync_pluggy_item("item-religa-ok")["ok"] is True
+
+    linha = _linha("item-religa-ok")
+    assert linha["last_sync_at"] == AGORA
+    assert linha["last_sync_at"] >= linha["reconnected_at"], "o sync é POSTERIOR à reconexão"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", "sincronizou depois de reconectar: verde de novo"
 
 
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────

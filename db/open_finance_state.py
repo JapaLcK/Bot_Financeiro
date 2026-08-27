@@ -63,7 +63,7 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy") -> list[d
                 """
                 select id, user_id, provider, provider_item_id, status, institution_name,
                        last_sync_at, last_attempt_at, status_reason, health,
-                       next_refresh_at, last_refresh_origin
+                       next_refresh_at, last_refresh_origin, reconnected_at
                 from open_finance_connections
                 where provider=%s and provider_item_id=%s
                 order by id

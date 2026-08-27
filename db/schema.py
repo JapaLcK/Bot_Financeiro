@@ -448,6 +448,14 @@ def init_db():
         """
         alter table open_finance_connections add column if not exists last_refresh_origin text
         """,
+        # Onda 2: quando o usuário refez a autorização. O upsert preserva o
+        # `last_sync_at` velho de propósito (reconectar não é sincronizar), então
+        # sem esta coluna não dá para distinguir "sincronizou" de "sincronizou
+        # DEPOIS de reconectar" — e o espelho pré-reconexão voltava à tela como
+        # atual assim que o job de saúde media o item novo como saudável.
+        """
+        alter table open_finance_connections add column if not exists reconnected_at timestamptz
+        """,
         """
         create index if not exists idx_of_conn_refresh_due
           on open_finance_connections(next_refresh_at)
