@@ -156,10 +156,13 @@ def test_endpoint_nao_aceita_user_id_do_cliente(monkeypatch):
     assert resp.status_code == 200
     assert store == {7: {"step": 3}}, "escreveu no usuário errado"
 
-    # E a rota não expõe user_id no caminho.
-    paths = [r.path for r in dashboard.app.routes if "onboarding/state" in getattr(r, "path", "")]
-    assert paths, "rota /onboarding/state não registrada"
-    assert all("{user_id}" not in p for p in paths)
+    # E não existe variante com user_id no caminho — comportamental, não por
+    # introspecção do Starlette: o que importa é que essa URL não responda.
+    fora = client.post("/onboarding/7/state", json={"step": 1}, headers=_csrf(client))
+    assert fora.status_code == 404, "existe rota de onboarding com user_id no caminho"
+
+    router_src = (REPO / "frontend/routes/onboarding.py").read_text(encoding="utf-8")
+    assert "{user_id}" not in router_src, "o router declara user_id no caminho"
 
 
 def test_endpoint_exige_sessao_valida(monkeypatch):
