@@ -20,6 +20,25 @@ def today_tz() -> date:
     return now_tz().date()
 
 
+def day_tz(dt):
+    """Dia de PAREDE de um instante, no fuso do app.
+
+    `dt.date()` cru devolve o dia no fuso da SESSÃO do Postgres — UTC no
+    Railway. Um gasto de 26/08 21:30 em São Paulo saía como 27/08 por esse
+    caminho, enquanto o dashboard, que formata o instante no navegador, dizia
+    26/08. Fonte única das DUAS listagens que imprimem o dia de um
+    `criado_em` (`list_launches_by_category`, db/accounts.py; `list_launches`,
+    core/handlers/launches.py): com uma cópia em cada lado, "liste lazer" e
+    "meus últimos lançamentos" divergiam em um dia para o mesmo lançamento.
+
+    Naive (a perna do crédito, `purchased_at::timestamp`) já é dia de parede:
+    passa direto. Sem `.date()` (str, None) volta como veio — quem chama trata.
+    """
+    if dt is None or not hasattr(dt, "date"):
+        return dt
+    return (dt.astimezone(_tz()) if dt.tzinfo else dt).date()
+
+
 # ---------------- feriados nacionais (BR) ----------------
 
 def _easter_sunday(year: int) -> date:

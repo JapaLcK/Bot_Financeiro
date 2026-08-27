@@ -137,6 +137,40 @@ def cat_norm_sql(expr: str) -> str:
     return f"translate(lower({expr}), '{_CAT_ACCENTS_FROM}', '{_CAT_ACCENTS_TO}')"
 
 
+# Rótulo de quem está SEM categoria. NULL e '' são a mesma coisa pro usuário —
+# `db/analytics.py` já colapsa os dois assim.
+CAT_VAZIA_LABEL = "sem categoria"
+
+
+def cat_key_sql(expr: str) -> str:
+    """Chave de AGRUPAMENTO e de CASAMENTO de categoria: `cat_norm_sql` com o
+    vazio colapsado em `CAT_VAZIA_LABEL`.
+
+    Existe porque as duas pontas tinham que ser a MESMA expressão e não eram: o
+    donut do dashboard agrupava por `COALESCE(categoria,'sem categoria')` e a
+    lista de lançamentos casava contra a coluna CRUA. Resultado: a barra "sem
+    categoria" dizia R$ 100 e a lista abria vazia — `norm(NULL)` não é
+    'sem categoria'. Chega em produção pela importação de cartão do Open Finance
+    sem categoria do provedor (`db/open_finance.py` → `add_imported_credit_purchase`,
+    que grava `credit_transactions.categoria` NULO).
+    """
+    return cat_norm_sql(f"coalesce(nullif({expr}, ''), '{CAT_VAZIA_LABEL}')")
+
+
+# `has_time`: dá pra confiar na HORA do lançamento ou só na data?
+# Fonte única — a Visão Geral (query 4 do dashboard) e a lista de lançamentos de
+# uma categoria (`list_launches_by_category`) precisam responder igual, senão o
+# mesmo gasto aparece "10/03, 00:30" numa tela e "09/03" na outra (o `::date` de
+# um timestamptz sai no fuso da SESSÃO do Postgres, não em America/Sao_Paulo).
+LAUNCH_HAS_TIME_SQL = """
+        CASE
+          WHEN source = 'ofx' THEN false
+          WHEN source = 'open_finance'
+            THEN COALESCE((efeitos->>'time_known')::boolean, false)
+          ELSE true
+        END"""
+
+
 # Catálogo deduplicado por nome normalizado, pronto pra virar CTE de join.
 # `user_categories` é única só no par EXATO (user_id, name), então 'cafe' e
 # 'café' coexistem: um join por valor normalizado contra a tabela crua devolve

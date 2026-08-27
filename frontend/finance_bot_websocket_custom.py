@@ -67,7 +67,7 @@ from core.sessions import (
     revoke_session,
     touch_session,
 )
-from db.connection import cat_norm_sql
+from db.connection import CAT_VAZIA_LABEL, LAUNCH_HAS_TIME_SQL, cat_key_sql, cat_norm_sql
 from db.open_finance import BANK_ACCOUNTS_SQL
 from db import (
     accrue_all_pockets,
@@ -291,8 +291,10 @@ async def list_users() -> list:
             return await cur.fetchall()
 
 # Chave de agrupamento do donut de categorias: case- E acento-insensível, pra
-# "cafe da manha" e "café da manhã" virarem UMA fatia (fonte: db/connection.py).
-_CAT_KEY_DONUT = cat_norm_sql("COALESCE(categoria, 'sem categoria')")
+# "cafe da manha" e "café da manhã" virarem UMA fatia. É a MESMA expressão que
+# `list_launches_by_category` usa pra casar — clicar numa barra tem que abrir
+# exatamente as linhas que ela somou (fonte: db/connection.py::cat_key_sql).
+_CAT_KEY_DONUT = cat_key_sql("categoria")
 
 
 def _month_range(year: int, month: int):
@@ -505,12 +507,7 @@ async def get_financial_data(
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
                        posted_at,
-                       CASE
-                         WHEN source = 'ofx' THEN false
-                         WHEN source = 'open_finance'
-                           THEN COALESCE((efeitos->>'time_known')::boolean, false)
-                         ELSE true
-                       END AS has_time
+                       {LAUNCH_HAS_TIME_SQL} AS has_time
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -556,7 +553,7 @@ async def get_financial_data(
         # `bill.period_end`, igual query 5).
         _q(
             f"""
-            SELECT (array_agg(COALESCE(categoria, 'sem categoria')
+            SELECT (array_agg(COALESCE(NULLIF(categoria, ''), '{CAT_VAZIA_LABEL}')
                               ORDER BY dt DESC))[1] AS categoria,
                    {_CAT_KEY_DONUT} AS cat_key,
                    SUM(valor) AS total,
@@ -565,7 +562,14 @@ async def get_financial_data(
                 SELECT categoria, valor, 1 AS cnt, criado_em AS dt
                 FROM launches
                 WHERE user_id = %s
-                  AND tipo = 'despesa'
+                  -- Plural: a linha LEGADA `tipo='saida'` é despesa e entrava
+                  -- na LISTA da categoria (`_TIPO_ALIASES`, db/accounts.py) sem
+                  -- entrar nesta barra. Uma 'saida' de R$ 100 + uma 'despesa' de
+                  -- R$ 5 davam donut R$ 5 × lista R$ 105 na mesma categoria e
+                  -- mês. Nenhum escritor de hoje grava 'saida' (db/accounts.py:540),
+                  -- então em base nova isto não muda número nenhum; em base com
+                  -- linha antiga, o donut passa a mostrar o valor completo.
+                  AND tipo IN ('despesa', 'saida')
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 UNION ALL
