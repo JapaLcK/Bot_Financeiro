@@ -690,6 +690,57 @@ def gate_plan_selection(request: Request):
     return None
 
 
+def gate_onboarding(request: Request):
+    """Gate de PÁGINA do wizard de primeira configuração (/onboarding).
+
+    Roda SEMPRE depois de gate_plan_selection: quem ainda não escolheu plano tem
+    de ir pra /precos primeiro, e só quem já escolheu pode ser desviado pro
+    wizard. Aplicado em /app e /home.
+
+    NÃO aplicar em /settings. Dois motivos duros:
+      1. O passo "onde está seu dinheiro" manda o usuário pra
+         /settings?view=open-finance&onb=1 pra conectar o banco. Gatear /settings
+         vira loop de redirect: settings → onboarding → settings.
+      2. /settings é pra onde um usuário travado vai consertar a conta. Nunca
+         trancar a saída de emergência.
+
+    O app iOS NÃO é isento, ao contrário do gate de plano. A isenção de lá
+    (_is_pigbank_app) existe pela diretriz 3.1.1 da App Store, que é sobre TELA
+    DE COMPRA. O wizard não é: é saldo, cartão, WhatsApp e resumo. Isentar o app
+    significaria que nenhum usuário de iPhone jamais veria o onboarding. O
+    cuidado fica no conteúdo da página — os CTAs de upgrade são <a href="/precos">,
+    que o auth-refresh.js esconde sozinho dentro do app.
+
+    `?upgrade=success` É isento, espelhando o gate de plano, mas por um motivo
+    mais caro: /home?upgrade=success roda handleUpgradeReturn(), que dispara a
+    conversão do Meta Pixel, mais awaitCheckoutConfirmation() e o modal
+    welcome-pro. Redirecionar essa URL queima a conversão de anúncio e a tela de
+    quem acabou de pagar. O flag continua NULL e o wizard aparece no /home
+    seguinte.
+
+    Retorna None quando pode servir (deslogado, já concluiu, ou erro no gate);
+    RedirectResponse pra /onboarding quando falta. Nunca levanta — é navegação
+    de browser."""
+    from fastapi.responses import RedirectResponse
+
+    if request.query_params.get("upgrade") == "success":
+        return None
+
+    user_id = _resolve_page_user_id(request)
+    # Deslogado / sessão inválida: deixa o HTML carregar e redirecionar pro login.
+    if user_id is None:
+        return None
+    try:
+        from db import needs_onboarding
+        if needs_onboarding(user_id):
+            return RedirectResponse(url="/onboarding", status_code=302)
+    except Exception:
+        # Fail-open: onboarding é UX, não paywall. Erro aqui nunca pode trancar
+        # o usuário fora do próprio produto.
+        logging.getLogger(__name__).warning("gate_onboarding falhou", exc_info=True)
+    return None
+
+
 # ─── Janela de análise (rotas de analytics e history) ────────────────────────
 
 def parse_date_param(value: str | None, name: str) -> date | None:

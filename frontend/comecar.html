@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Primeiros passos · PigBank</title>
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/site.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/comecar.css?v=1" />
+<script src="/safe-area.js?v=1"></script>
+<script src="/static/auth-refresh.js?v=1"></script>
+<script src="/modals.js?v=1" defer></script>
+<script src="/comecar.js?v=1" defer></script>
+</head>
+<body>
+<div class="glow"></div>
+
+<div class="wrap onb-wrap">
+  <div class="onb-card">
+
+    <!-- Cabeçalho: marca + progresso -------------------------------------- -->
+    <header class="onb-head">
+      <img class="onb-logo" src="/brand/logo.png?v=1" alt="PigBank" />
+      <p class="onb-stepline">PASSO <span data-role="step-current">1</span> DE <span data-role="step-total">5</span></p>
+      <div class="onb-bar"><div class="onb-bar-fill" data-role="progress"></div></div>
+    </header>
+
+    <div class="auth-error" data-role="error" role="alert" aria-live="polite"></div>
+
+    <!-- 1 · Boas-vindas ---------------------------------------------------- -->
+    <section class="onb-step" data-step="1" hidden>
+      <img class="onb-mascot" src="/brand/mascot.webp" alt="" />
+      <h1>Bem-vindo<span data-role="greet-name"></span>!</h1>
+      <p class="onb-sub">
+        Em alguns passos rápidos sua conta fica pronta pra usar. Dá pra pular
+        qualquer um e ajustar depois.
+      </p>
+      <div class="onb-acts">
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="next">Vamos lá →</button>
+      </div>
+    </section>
+
+    <!-- 2 · Onde está seu dinheiro ----------------------------------------- -->
+    <section class="onb-step" data-step="2" hidden>
+      <h1>Onde está seu dinheiro?</h1>
+      <p class="onb-sub">
+        Assim eu sei de onde sai e pra onde vai cada lançamento que você me
+        mandar no WhatsApp.
+      </p>
+
+      <div class="onb-block">
+        <h2 class="onb-block-title">Saldo de hoje</h2>
+        <div data-role="balance-form">
+          <div class="field">
+            <label for="onb-balance">Quanto você tem na conta agora (R$)</label>
+            <input type="number" id="onb-balance" min="0" step="0.01" inputmode="decimal" placeholder="0,00" />
+          </div>
+          <button type="button" class="btn btn-outline btn-block" data-action="save-balance">Salvar saldo</button>
+        </div>
+        <p class="onb-done" data-role="balance-done" hidden>
+          <i class="ph ph-check-circle" aria-hidden="true"></i> Você já tem saldo lançado.
+        </p>
+      </div>
+
+      <div class="onb-block">
+        <h2 class="onb-block-title">Cartões de crédito</h2>
+        <ul class="onb-list" data-role="cards-list"></ul>
+        <p class="onb-limit" data-role="cards-limit" hidden></p>
+        <div class="onb-card-form" data-role="card-form" hidden>
+          <div class="field">
+            <label for="onb-card-name">Nome do cartão</label>
+            <input type="text" id="onb-card-name" maxlength="40" placeholder="Ex: Nubank" />
+          </div>
+          <div class="onb-row">
+            <div class="field">
+              <label for="onb-card-closing">Fecha dia</label>
+              <input type="number" id="onb-card-closing" min="1" max="31" inputmode="numeric" placeholder="10" />
+            </div>
+            <div class="field">
+              <label for="onb-card-due">Vence dia</label>
+              <input type="number" id="onb-card-due" min="1" max="31" inputmode="numeric" placeholder="17" />
+            </div>
+          </div>
+          <div class="onb-row">
+            <div class="field">
+              <label for="onb-card-flag">Bandeira</label>
+              <select id="onb-card-flag" data-role="card-flag"></select>
+            </div>
+            <div class="field">
+              <label for="onb-card-color">Cor</label>
+              <select id="onb-card-color" data-role="card-color"></select>
+            </div>
+          </div>
+          <div class="onb-row onb-row-acts">
+            <button type="button" class="btn btn-outline" data-action="cancel-card">Cancelar</button>
+            <button type="button" class="btn btn-primary" data-action="save-card">Salvar cartão</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline btn-block" data-action="add-card" data-role="add-card-btn">+ Adicionar cartão</button>
+      </div>
+
+      <div class="onb-block">
+        <h2 class="onb-block-title">Conectar seu banco</h2>
+        <p class="onb-hint">
+          Pelo Open Finance eu leio seus lançamentos sozinho, sem você digitar nada.
+        </p>
+        <a class="btn btn-outline btn-block" href="/settings?view=open-finance&amp;onb=1">Conectar meu banco</a>
+      </div>
+
+      <div class="onb-acts">
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="next">Continuar →</button>
+        <button type="button" class="onb-skip" data-action="skip">Pular por enquanto</button>
+      </div>
+    </section>
+
+    <!-- 3 · WhatsApp -------------------------------------------------------- -->
+    <section class="onb-step" data-step="3" hidden>
+      <h1>Conecte seu WhatsApp</h1>
+
+      <div data-role="wa-pending" hidden>
+        <p class="onb-sub">
+          É por lá que eu vivo. Abra a conversa e mande a mensagem abaixo — a
+          conexão aparece aqui sozinha.
+        </p>
+        <div class="onb-code">
+          <span class="onb-code-label">SUA MENSAGEM</span>
+          <strong data-role="wa-code">—</strong>
+        </div>
+        <a class="btn btn-primary btn-block btn-lg" data-role="wa-link" href="#" target="_blank" rel="noopener" hidden>
+          <i class="ph ph-whatsapp-logo" aria-hidden="true"></i> Abrir o WhatsApp
+        </a>
+        <p class="onb-hint" data-role="wa-status">Esperando você mandar a mensagem…</p>
+      </div>
+
+      <p class="onb-done" data-role="wa-linked" hidden>
+        <i class="ph ph-check-circle" aria-hidden="true"></i> WhatsApp já conectado.
+      </p>
+
+      <div class="onb-acts">
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="next">Continuar →</button>
+        <button type="button" class="onb-skip" data-action="skip">Pular por enquanto</button>
+      </div>
+    </section>
+
+    <!-- 4 · Resumo ---------------------------------------------------------- -->
+    <section class="onb-step" data-step="4" hidden>
+      <h1>Resumo no WhatsApp</h1>
+      <p class="onb-sub">Com que frequência você quer um resumo das suas finanças?</p>
+      <p class="onb-hint" data-role="report-current"></p>
+
+      <div class="onb-choices" data-role="report-choices" role="radiogroup" aria-label="Frequência do resumo"></div>
+
+      <div class="field onb-hour" data-role="report-hour-wrap" hidden>
+        <label for="onb-report-hour">Horário</label>
+        <select id="onb-report-hour" data-role="report-hour"></select>
+      </div>
+
+      <div class="onb-acts">
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="save-report" data-role="save-report" disabled>Salvar</button>
+        <button type="button" class="onb-skip" data-action="skip">Continuar sem mudar</button>
+      </div>
+    </section>
+
+    <!-- 5 · Pronto ---------------------------------------------------------- -->
+    <section class="onb-step" data-step="5" hidden>
+      <div class="onb-check"><i class="ph ph-check" aria-hidden="true"></i></div>
+      <h1>Tudo pronto<span data-role="greet-name-end"></span>!</h1>
+      <p class="onb-sub">Daqui em diante é só falar comigo no WhatsApp ou usar o app.</p>
+      <ul class="onb-next">
+        <li>Lance sua primeira receita ou despesa</li>
+        <li>Confira seus cartões e faturas</li>
+        <li>Peça <code>resumo</code> a qualquer momento</li>
+      </ul>
+      <div class="onb-acts">
+        <button type="button" class="btn btn-primary btn-block btn-lg" data-action="finish">Ir para o app →</button>
+      </div>
+    </section>
+
+    <footer class="onb-foot">
+      <button type="button" class="onb-skip-all" data-action="skip-all">Pular tudo e ir para o app</button>
+    </footer>
+
+  </div>
+</div>
+</body>
+</html>

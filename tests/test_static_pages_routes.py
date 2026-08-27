@@ -21,6 +21,7 @@ HTML_PAGES = [
     "/settings",
     "/reset-password",
     "/onboarding",
+    "/completar-cadastro",
     "/privacy",
     "/termos",
     "/whatsapp",

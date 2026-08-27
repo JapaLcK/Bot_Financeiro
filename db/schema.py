@@ -1690,6 +1690,20 @@ def init_db():
         # avaliado uma vez, sem reescrever a tabela.
         """alter table auth_accounts add column if not exists plan_selected_at timestamptz default now()""",
         """alter table auth_accounts alter column plan_selected_at drop default""",
+        # Wizard de primeira configuração (/onboarding). onboarding_completed_at
+        # NULL = ainda não passou pelo wizard → o gate_onboarding manda pra lá.
+        # Usa EXATAMENTE o mesmo truque de backfill do plan_selected_at acima
+        # (ver o comentário longo dele): o ADD COLUMN com DEFAULT now() carimba
+        # todas as contas que já existem no instante da migration, e o DROP
+        # DEFAULT seguinte faz todo cadastro novo nascer NULL. Sem isso, o
+        # primeiro deploy jogaria 100% da base num wizard de primeira
+        # configuração.
+        """alter table auth_accounts add column if not exists onboarding_completed_at timestamptz default now()""",
+        """alter table auth_accounts alter column onboarding_completed_at drop default""",
+        # Passo em que o usuário parou, pra retomar de onde fechou em vez de
+        # recomeçar. Não precisa do truque acima: 0 serve pra todo mundo, porque
+        # quem já está carimbado em onboarding_completed_at nunca lê esta coluna.
+        """alter table auth_accounts add column if not exists onboarding_step smallint not null default 0""",
         # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
         # no painel de admin quem se cadastrou pela web (passa pelo gate da
         # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1

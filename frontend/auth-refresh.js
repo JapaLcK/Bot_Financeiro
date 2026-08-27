@@ -9,6 +9,9 @@
  *
  * Servido como arquivo externo em /static/auth-refresh.js — incluído via <script>
  * no <head> das páginas autenticadas (dashboard, home, settings, onboarding).
+ *
+ * Também expõe `window.pbCsrfHeaders` — a implementação compartilhada do header
+ * de CSRF, pra código novo não virar mais uma cópia (ver o bloco no fim).
  */
 (() => {
   const _origFetch = window.fetch;
@@ -88,4 +91,24 @@
     st.textContent = 'html.pb-app a[href^="/precos"]:not(.pb-keep-in-app){display:none !important}';
     (document.head || document.documentElement).appendChild(st);
   }
+
+  // ── CSRF ────────────────────────────────────────────────────────────────
+  // Implementação única, exposta pras páginas que carregam este arquivo. O
+  // helper está copiado em 8 lugares hoje (home.html, dashboard.js,
+  // completar-cadastro.html, cadastro.html, login.html, reset-password.html,
+  // nav-auth.js, admin-login.html); esta é a versão compartilhada pro código
+  // novo não virar a nona cópia. Consolidar as 8 é PR de limpeza próprio.
+  window.pbGetCookie = function (name) {
+    const hit = document.cookie
+      .split("; ")
+      .find((row) => row.indexOf(name + "=") === 0);
+    return hit ? hit.split("=")[1] : "";
+  };
+
+  window.pbCsrfHeaders = function (extra) {
+    const headers = Object.assign({}, extra || {});
+    const token = decodeURIComponent(window.pbGetCookie("csrf_token") || "");
+    if (token) headers["X-CSRF-Token"] = token;
+    return headers;
+  };
 })();

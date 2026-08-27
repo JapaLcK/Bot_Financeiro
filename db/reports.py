@@ -158,6 +158,76 @@ def mark_plan_selected(user_id: int) -> None:
     return _db_support.mark_plan_selected_impl(get_conn, user_id)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Onboarding (wizard de primeira configuração, /onboarding)
+# ──────────────────────────────────────────────────────────────────────────────
+# SELECT próprio e enxuto de propósito — NÃO passa por get_auth_user. Aquele
+# SELECT traz PII cifrada e chama decrypt_pii_optional, com registro em
+# pii_access_log; como o gate roda em TODA navegação de /home e /app, usá-lo
+# duplicaria a auditoria de PII por page view.
+
+def get_onboarding_state(user_id: int) -> dict:
+    """{'step': int, 'completed': bool} do wizard. Conta inexistente → passo 0
+    e não-concluído (o gate decide o resto)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select onboarding_step, onboarding_completed_at "
+                "from auth_accounts where user_id=%s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    if not row:
+        return {"step": 0, "completed": False}
+    return {
+        "step": int(row["onboarding_step"] or 0),
+        "completed": row["onboarding_completed_at"] is not None,
+    }
+
+
+def needs_onboarding(user_id: int) -> bool:
+    """True se a conta ainda não passou pelo wizard.
+
+    Conta inexistente devolve False: sem linha em auth_accounts não há cadastro
+    web pra onboardar, e mandar pro wizard só daria um redirect sem saída."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select onboarding_completed_at from auth_accounts where user_id=%s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    if not row:
+        return False
+    return row["onboarding_completed_at"] is None
+
+
+def set_onboarding_step(user_id: int, step: int) -> None:
+    """Grava o passo alcançado. Só avança — voltar no wizard não regride o
+    progresso salvo, senão fechar depois de voltar perderia o que já foi feito."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set onboarding_step=%s "
+                "where user_id=%s and onboarding_step < %s",
+                (int(step), int(user_id), int(step)),
+            )
+        conn.commit()
+
+
+def mark_onboarding_completed(user_id: int) -> None:
+    """Carimba a conclusão. Idempotente pelo `is null` — chamar de novo não
+    reescreve o timestamp original (mesmo padrão de mark_mfa_onboarding_shown)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set onboarding_completed_at=now() "
+                "where user_id=%s and onboarding_completed_at is null",
+                (int(user_id),),
+            )
+        conn.commit()
+
+
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
     return _db_support.get_user_by_stripe_customer_impl(get_conn, stripe_customer_id)
 

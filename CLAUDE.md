@@ -423,12 +423,12 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   #56 era `"automatic"` e o WebView reservava a área segura sozinho. Saiba em qual
   dos dois mundos você está antes de somar `padding`: com `automatic`, inset em CSS
   **duplica** o espaçamento; com `never`, a falta dele deixa conteúdo sob o notch.
-- **Quem carrega o CSS ≠ quem é alcançável.** Das **26** páginas em `frontend/`:
+- **Quem carrega o CSS ≠ quem é alcançável.** Das **27** páginas em `frontend/`:
 
   | quantas | o que carregam | quem |
   |---|---|---|
   | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
-  | 15 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `onboarding`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
+  | 16 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
   | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `_dash_mockup`, `preview_agentes`, e o `ddf99f17-…` |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
@@ -493,7 +493,7 @@ Três mundos convivem, e confundi-los produz bug:
 | | como navega | quem |
 |---|---|---|
 | **Páginas públicas** | MPA clássico, request por clique | `index`, `precos`, `funcionalidades`, `termos`, `privacy`, `suporte`, `blog/*`, `whatsapp`, … |
-| **Área logada** | MPA clássico **também**, com muito JS por página | `dashboard`, `settings`, `home`, `onboarding` |
+| **Área logada** | MPA clássico **também**, com muito JS por página | `dashboard`, `settings`, `home`, `comecar` (servida em `/onboarding`) |
 | **POC de SPA** | `fetch` + troca de DOM, **desligado por padrão** | só `/home` e `/comandos-app`, só no app |
 
 **O POC de SPA é o `frontend/pb-nav.js`, e ele NÃO está ligado em produção.** Ler o

@@ -1,0 +1,322 @@
+/* ==========================================================================
+   comecar.css — wizard de primeira configuração, servido em /onboarding.
+
+   Só o que é específico desta tela. Tipografia, cores, botões (.btn,
+   .btn-primary, .btn-outline, .btn-block, .btn-lg), campos (.field) e o fundo
+   (.glow, .wrap) vêm de brand.css + site.css — não redeclarar nada disso aqui.
+
+   Servido por @router.get("/comecar.css") em frontend/routes/static_pages.py.
+   ========================================================================== */
+
+/* .auth-error mora inline em cada página de auth (site.css não tem) — mesma
+   convenção de login/cadastro/completar-cadastro, repetida aqui. */
+.auth-error {
+  display: none;
+  background: rgba(255, 45, 45, .1);
+  border: 1px solid rgba(255, 45, 45, .3);
+  color: #ffb4b4;
+  padding: 10px 13px;
+  border-radius: 10px;
+  font-size: .82rem;
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+.auth-error.show { display: block; }
+
+/* ── Moldura ─────────────────────────────────────────────────────────────── */
+
+.onb-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 0 56px;
+}
+
+.onb-card {
+  width: min(520px, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 30px 26px 22px;
+  box-shadow: var(--shadow);
+}
+
+/* ── Cabeçalho e progresso ───────────────────────────────────────────────── */
+
+.onb-head { margin-bottom: 22px; }
+
+.onb-logo {
+  height: 26px;
+  width: auto;
+  display: block;
+  margin-bottom: 18px;
+}
+
+.onb-stepline {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  color: var(--neon);
+  margin-bottom: 8px;
+}
+
+.onb-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+
+.onb-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--neon);
+  transition: width .28s ease;
+}
+
+/* ── Passo ───────────────────────────────────────────────────────────────── */
+
+.onb-step h1 {
+  font-size: 1.62rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+
+.onb-sub {
+  color: var(--ink-2);
+  font-size: .93rem;
+  line-height: 1.55;
+  margin-bottom: 20px;
+}
+
+.onb-hint {
+  color: var(--ink-3);
+  font-size: .8rem;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.onb-mascot {
+  width: 110px;
+  height: auto;
+  display: block;
+  margin: 0 auto 10px;
+  filter: drop-shadow(0 8px 22px rgba(0, 0, 0, .45));
+}
+
+.onb-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neon-ink, var(--neon));
+  font-size: .88rem;
+  font-weight: 600;
+  padding: 12px 14px;
+  background: rgba(198, 241, 26, .08);
+  border: 1px solid rgba(198, 241, 26, .22);
+  border-radius: 12px;
+}
+
+/* ── Blocos dentro do passo "onde está seu dinheiro" ─────────────────────── */
+
+.onb-block {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+.onb-block:first-of-type { border-top: 0; padding-top: 0; }
+
+.onb-block-title {
+  font-size: .95rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.onb-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.onb-row-acts { grid-template-columns: 1fr 1fr; margin-top: 4px; }
+
+.onb-card-form {
+  padding: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+
+.onb-list { list-style: none; margin: 0 0 12px; padding: 0; }
+
+.onb-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  font-size: .88rem;
+}
+.onb-list li span { color: var(--ink-3); font-size: .74rem; margin-left: auto; }
+
+.onb-limit {
+  font-size: .8rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  padding: 11px 13px;
+  background: rgba(255, 45, 142, .07);
+  border: 1px solid rgba(255, 45, 142, .2);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.onb-limit a { color: var(--pink); font-weight: 600; }
+
+/* ── Código do WhatsApp ──────────────────────────────────────────────────── */
+
+.onb-code {
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.onb-code-label {
+  display: block;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+
+.onb-code strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.28rem;
+  font-weight: 700;
+  color: var(--neon);
+  letter-spacing: .04em;
+  overflow-wrap: anywhere;
+}
+
+/* ── Escolha única do resumo ─────────────────────────────────────────────── */
+
+.onb-choices { display: grid; gap: 10px; margin-bottom: 16px; }
+
+.onb-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: .93rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.onb-choice small {
+  display: block;
+  font-weight: 400;
+  font-size: .78rem;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+.onb-choice:hover { border-color: var(--ink-3); }
+.onb-choice[aria-checked="true"] {
+  border-color: var(--neon);
+  background: rgba(198, 241, 26, .08);
+}
+
+.onb-hour { margin-bottom: 16px; }
+
+/* ── Tela final ──────────────────────────────────────────────────────────── */
+
+.onb-check {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 2px solid var(--neon);
+  color: var(--neon);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.9rem;
+  margin-bottom: 16px;
+}
+
+.onb-next {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 16px 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+}
+.onb-next li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--ink-2);
+  font-size: .88rem;
+  line-height: 1.7;
+}
+.onb-next li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--neon);
+}
+.onb-next code {
+  background: rgba(255, 255, 255, .08);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: .82rem;
+}
+
+/* ── Ações e rodapé ──────────────────────────────────────────────────────── */
+
+.onb-acts { margin-top: 22px; display: grid; gap: 10px; }
+
+/* min-height 44px: são alvos de toque de verdade — esta página abre dentro do
+   app iOS, e o app-mode.css (que impõe esse mínimo no resto do app) não é
+   carregado aqui. Medido em 375×812: com padding 8px davam 34px. */
+.onb-skip,
+.onb-skip-all {
+  background: none;
+  border: 0;
+  color: var(--ink-3);
+  font-family: inherit;
+  font-size: .84rem;
+  min-height: 44px;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.onb-skip:hover,
+.onb-skip-all:hover { color: var(--ink-2); }
+
+.onb-foot {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
+/* Botão em requisição: o JS marca [aria-busy] enquanto a chamada está em voo,
+   pra clique duplo não criar cartão nem saldo em dobro. */
+[aria-busy="true"] { opacity: .6; pointer-events: none; }
+
+@media (max-width: 480px) {
+  .onb-card { border: 0; border-radius: 0; padding: 24px 18px 20px; box-shadow: none; }
+  .onb-wrap { padding: 0 0 40px; }
+  .onb-step h1 { font-size: 1.42rem; }
+}

@@ -3559,6 +3559,19 @@ async function initSettings() {
     url.searchParams.delete("autoOpenMfa");
     window.history.replaceState({}, "", url);
   }
+
+  // Veio do wizard de primeira configuracao (/onboarding, passo "onde esta seu
+  // dinheiro") pra conectar o banco: mostra um caminho de volta. `onb` e
+  // booleano, nao URL — destino fixo, sem risco de open redirect.
+  if (params.get("onb") === "1") {
+    const back = document.createElement("a");
+    back.className = "onb-back-link";
+    back.href = "/onboarding?step=2";
+    back.textContent = "\u2190 Voltar para os primeiros passos";
+    back.style.cssText = "display:block;margin:0 0 16px;color:var(--pink);font-size:.86rem";
+    const host = document.querySelector("main.main") || document.body;
+    host.insertBefore(back, host.firstChild);
+  }
 }
 initSettings();
 
