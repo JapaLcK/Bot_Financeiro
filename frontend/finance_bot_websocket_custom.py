@@ -74,7 +74,6 @@ from db.connection import (
     TIPO_DESPESA_SQL,
     TIPO_RECEITA_SQL,
     cat_key_sql,
-    cat_norm_sql,
 )
 from db.open_finance import BANK_ACCOUNTS_SQL
 from db import (
@@ -691,7 +690,7 @@ async def get_financial_data(
         # DESC vem por último e ganha o dict. Trocar para ASC inverte o
         # desempate: a tela passa a mostrar um limite e o bot a responder outro.
         _q(
-            f"SELECT categoria, budget, {cat_norm_sql('categoria')} AS cat_key "
+            f"SELECT categoria, budget, {cat_key_sql('categoria')} AS cat_key "
             "FROM category_budgets WHERE user_id = %s ORDER BY categoria DESC",
             (user_id,),
         ),

@@ -31,14 +31,15 @@ from utils_date import month_range_today, today_tz
 import frontend.finance_bot_websocket_custom as dashboard
 
 
-def _grava_sem_categoria(user_id, valor, categoria):
+def _grava_sem_categoria(user_id, valor, categoria, interna=False):
     """`add_launch_and_update_balance` sempre grava alguma categoria; a linha sem
     categoria entra por SQL, que é como o importador do Open Finance a cria."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "insert into launches (user_id, tipo, valor, categoria, nota, "
-            "criado_em, is_internal_movement) values (%s,'despesa',%s,%s,%s,%s,false)",
-            (user_id, valor, categoria, "importado", datetime.combine(today_tz(), time(10, 0))),
+            "criado_em, is_internal_movement) values (%s,'despesa',%s,%s,%s,%s,%s)",
+            (user_id, valor, categoria, "importado",
+             datetime.combine(today_tz(), time(10, 0)), interna),
         )
         conn.commit()
 
@@ -109,3 +110,55 @@ def test_o_total_da_categoria_nao_chama_gasto_de_movimentacao_interna(pro_user_i
     resposta = h._total_despesa(pro_user_id, CAT_VAZIA_LABEL, start, end, "neste mês")
     assert "movimenta" not in resposta.lower(), resposta
     assert "120,00" in resposta, resposta
+
+
+def test_spend_query_soma_gasto_real_e_deixa_interna_de_fora(pro_user_id):
+    """A pergunta como o usuário digita, com as duas linhas que precisam se
+    separar: uma despesa REAL sem categoria e uma movimentação INTERNA sem
+    categoria, no mesmo mês e na mesma categoria.
+
+    O gasto real tem que entrar no "você gastou"; a interna tem que ficar fora
+    dele e ser anunciada à parte. Antes da chave compartilhada o total dava 0 e
+    as DUAS viravam "movimentação interna" — os R$ 120,00 reais junto.
+
+    Controle NEGATIVO: `_CAT_EQ`/`_CAT_CT_EQ` ou as três `cat_key_sql` de
+    `sum_spent_in_category_period` (db/budgets.py) de volta para `cat_norm_sql`
+    → este teste fica vermelho.
+    """
+    _grava_sem_categoria(pro_user_id, 120, None)
+    _grava_sem_categoria(pro_user_id, 80, None, interna=True)
+
+    resposta = h.spend_query(pro_user_id, "quanto gastei em sem categoria")
+
+    # (2) a despesa real conta como GASTO
+    assert "R$ 120,00" in resposta, resposta
+    # (3) a interna fica FORA do gasto, e aparece separada
+    assert "R$ 80,00" in resposta and "movimenta" in resposta.lower(), resposta
+    # e o total do gasto não é a soma das duas
+    assert "R$ 200,00" not in resposta, resposta
+
+    start, end = month_range_today()
+    assert db.sum_spent_in_category_period(pro_user_id, CAT_VAZIA_LABEL, start, end) == 120.0
+
+
+def test_orcamento_sem_categoria_ve_o_mesmo_gasto_do_donut(pro_user_id):
+    """Um orçamento PODE se chamar "sem categoria" — `upsert_budget` aceita.
+
+    Medido antes do conserto: o donut mostrava `budget 500,00 / 20%` sobre
+    R$ 100,00, e `sum_spent_in_category_this_month('sem categoria')` devolvia
+    `0.0` no mesmo mês. Duas telas, o mesmo orçamento, consumo diferente.
+
+    Controle NEGATIVO: `_CAT_EQ`/`_CAT_CT_EQ` (db/budgets.py) de volta para
+    `cat_norm_sql` → o assert do `this_month` fica vermelho.
+    """
+    db.upsert_budget(pro_user_id, CAT_VAZIA_LABEL, 500)
+    _grava_sem_categoria(pro_user_id, 100, "")
+
+    barras = _donut(pro_user_id)
+    assert barras == {CAT_VAZIA_LABEL: 100.0}, barras
+
+    assert db.sum_spent_in_category_this_month(pro_user_id, CAT_VAZIA_LABEL) == 100.0
+
+    status = db.get_budgets_status_for_month(pro_user_id)
+    linha = [c for c in status["budgets"] if c["categoria"] == CAT_VAZIA_LABEL]
+    assert linha and linha[0]["spent"] == 100.0, status

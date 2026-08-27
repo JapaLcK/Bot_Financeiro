@@ -22,13 +22,20 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER
+from .connection import get_conn, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER
 from .users import ensure_user
 
 
-# Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
-_CAT_EQ    = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
-_CAT_CT_EQ = f"{cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}"
+# Casamento de categoria: `cat_key_sql` (fonte única, db/connection.py) — case-,
+# acento-insensível E com o vazio colapsado em 'sem categoria'. Para categoria
+# escrita é idêntico ao `cat_norm_sql`; só o vazio muda, e ele precisa mudar: o
+# donut rotula a linha sem categoria como "sem categoria" e anexa o orçamento de
+# mesmo nome, então um leitor que casasse a coluna crua dizia "0 gasto" no mesmo
+# mês em que o donut mostrava a barra em 20% do orçamento (medido). Vale também
+# para `category_budgets.categoria`, onde as duas expressões dão o mesmo valor —
+# usar uma só evita a próxima divergência.
+_CAT_EQ    = f"{cat_key_sql('categoria')} = {cat_key_sql('%s')}"
+_CAT_CT_EQ = f"{cat_key_sql('ct.categoria')} = {cat_key_sql('%s')}"
 
 # Mesma lista que `core/budget_alerts.py` filtra como interna.
 _INTERNAL_CATEGORIES = {
@@ -334,26 +341,24 @@ def get_budgets_status_for_month(
                   where user_id=%s
                 ),
                 spent_launches as (
-                  select {cat_norm_sql('categoria')} as cat, sum(valor)::numeric as total
+                  select {cat_key_sql('categoria')} as cat, sum(valor)::numeric as total
                   from launches
                   where user_id=%s
                     and tipo in ('despesa', 'saida')
                     and is_internal_movement = false
                     and date_part('year',  criado_em) = %s
                     and date_part('month', criado_em) = %s
-                    and categoria is not null
-                  group by {cat_norm_sql('categoria')}
+                  group by {cat_key_sql('categoria')}
                 ),
                 spent_cards as (
-                  select {cat_norm_sql('ct.categoria')} as cat, sum(ct.valor)::numeric as total
+                  select {cat_key_sql('ct.categoria')} as cat, sum(ct.valor)::numeric as total
                   from credit_transactions ct
                   join credit_bills b on b.id = ct.bill_id
                   where ct.user_id=%s
                     and ct.is_refund = false
                     and date_part('year',  b.period_end) = %s
                     and date_part('month', b.period_end) = %s
-                    and ct.categoria is not null
-                  group by {cat_norm_sql('ct.categoria')}
+                  group by {cat_key_sql('ct.categoria')}
                 ),
                 spent_all as (
                   select cat, sum(total) as total from (
@@ -367,14 +372,14 @@ def get_budgets_status_for_month(
                 )
                 select
                   b.categoria,
-                  {cat_norm_sql('b.categoria')} as cat_key,
+                  {cat_key_sql('b.categoria')} as cat_key,
                   b.budget::float as budget,
                   coalesce(sa.total, 0)::float as spent,
                   uc.emoji,
                   uc.color
                 from budgets b
-                left join spent_all sa on sa.cat = {cat_norm_sql('b.categoria')}
-                left join cat_meta uc on uc.cat = {cat_norm_sql('b.categoria')}
+                left join spent_all sa on sa.cat = {cat_key_sql('b.categoria')}
+                left join cat_meta uc on uc.cat = {cat_key_sql('b.categoria')}
                 order by lower(b.categoria)
                 """,
                 (
