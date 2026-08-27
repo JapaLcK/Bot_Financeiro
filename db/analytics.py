@@ -782,7 +782,13 @@ def list_history(
             clauses.append(search_sql)
             launches_params.extend(search_params)
         launches_sql = f"""
-          SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+          -- `TIPO_CANON_SQL` também na PROJEÇÃO, não só no filtro: o front
+          -- decide a cor, o sinal e o ícone com `i.tipo === "receita"` estrito
+          -- (`_historyRowHTML`, frontend/dashboard.js:5932 — outras partes do
+          -- mesmo arquivo tratam 'entrada', esta não). Devolver o tipo cru fazia
+          -- a receita legada, agora visível, ser desenhada em vermelho com sinal
+          -- de menos e ícone de despesa — inclusive sob o filtro "Receitas".
+          SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em,
                  -- launches não tem parcelamento (isso só existe em
                  -- credit_transactions); NULL mantém as colunas do UNION.
                  NULL::int AS installments_total, NULL::int AS installment_no,

@@ -203,6 +203,16 @@ def test_historico_lista_a_linha_legada_nos_dois_filtros(pro_user_id):
     despesas = list_history(pro_user_id, tipo="despesa", **janela)
     assert [i["valor"] for i in despesas["items"]] == [100.0], despesas
 
+    # e o `tipo` DEVOLVIDO tem que vir na forma moderna: o front decide cor,
+    # sinal e ícone com `i.tipo === "receita"` estrito (`_historyRowHTML`,
+    # frontend/dashboard.js:5932). Cru, a receita legada — agora visível — era
+    # desenhada como despesa, inclusive sob o filtro "Receitas".
+    assert [i["tipo"] for i in receitas["items"]] == ["receita"], receitas
+    assert [i["tipo"] for i in despesas["items"]] == ["despesa"], despesas
+    assert sorted(i["tipo"] for i in list_history(pro_user_id, **janela)["items"]) == [
+        "despesa", "receita",
+    ]
+
 
 def test_os_tres_sites_novos_nao_mudam_a_base_moderna(pro_user_id):
     """Controle POSITIVO dos três — a base de 100% da produção hoje."""
