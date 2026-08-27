@@ -6,6 +6,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 
 import asyncio
 import html as _html
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from frontend.routes.shared import (
     FRONTEND_DIR,
+    gate_onboarding,
     gate_plan_selection,
     gate_pro_page,
     html_file,
@@ -42,7 +44,12 @@ async def serve_landing():
 async def serve_dashboard(request: Request):
     # Gate server-side: cadastro sem plano escolhido é mandado pra /precos antes
     # de receber o HTML do app (não depende do redirect em JS, que é burlável).
+    # Plano primeiro, onboarding depois — a ordem importa: quem ainda não
+    # escolheu plano não pode ser desviado da /precos pro wizard.
     gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    gate = gate_onboarding(request)
     if gate is not None:
         return gate
     return html_file(FRONTEND_DIR / "dashboard.html", pixel=False)
@@ -53,11 +60,18 @@ async def serve_home(request: Request):
     gate = gate_plan_selection(request)
     if gate is not None:
         return gate
+    gate = gate_onboarding(request)
+    if gate is not None:
+        return gate
     return html_file(FRONTEND_DIR / "home.html")
 
 
 @router.get("/settings")
 async def serve_settings(request: Request):
+    # SEM gate_onboarding de propósito: o passo "onde está seu dinheiro" manda o
+    # usuário pra cá (?view=open-finance&onb=1) pra conectar o banco, e gatear
+    # aqui viraria loop settings → onboarding → settings. Além disso /settings é
+    # a saída de emergência de quem travou a conta.
     gate = gate_plan_selection(request)
     if gate is not None:
         return gate
@@ -70,11 +84,39 @@ async def serve_reset_password():
 
 
 @router.get("/onboarding")
-async def serve_onboarding():
+async def serve_onboarding(request: Request):
+    """Duas páginas na mesma rota, e o ramo do `token` é compatibilidade dura.
+
+    `mobile/ios/App/App/AppDelegate.swift:177` monta `<site>/onboarding?token=T`
+    em Swift COMPILADO ao receber o deeplink `pigbankai://auth?onboarding=T` do
+    login com Google. Todo app já instalado constrói essa URL sozinho, e só um
+    build novo na App Store mudaria isso — o que nunca alcança 100% da base.
+    Por isso `/onboarding?token=` redireciona pra `/completar-cadastro` em vez
+    de ter sido simplesmente movido: sem esse 302, o cadastro por Google quebra
+    em toda a base instalada.
+
+    Sem token é o wizard de primeira configuração. Recebe o pixel (funil de
+    ativação) — a checagem do token vem ANTES do gate de plano de propósito: o
+    usuário do Google ainda não está logado e não pode cair em gate nenhum.
+    """
+    token = (request.query_params.get("token") or "").strip()
+    if token:
+        return RedirectResponse(
+            url=f"/completar-cadastro?token={quote(token, safe='')}",
+            status_code=302,
+        )
+    gate = gate_plan_selection(request)
+    if gate is not None:
+        return gate
+    return html_file(FRONTEND_DIR / "comecar.html")
+
+
+@router.get("/completar-cadastro")
+async def serve_completar_cadastro():
     # Página de conclusão do cadastro via Google → parte do funil de aquisição.
     # Recebe o pixel pra o CompleteRegistration client-side (dedup com o CAPI e
     # cobertura do modo pixel-only, sem token da Conversions API).
-    return html_file(FRONTEND_DIR / "onboarding.html")
+    return html_file(FRONTEND_DIR / "completar-cadastro.html")
 
 
 @router.get("/login")
@@ -291,6 +333,7 @@ async def serve_robots_txt():
         "Disallow: /home",
         "Disallow: /settings",
         "Disallow: /onboarding",
+        "Disallow: /completar-cadastro",
         "Disallow: /reset-password",
         "Disallow: /auth/",
         "Disallow: /admin",
@@ -463,6 +506,29 @@ async def serve_dashboard_css():
     no-cache: revalida via etag pra não dessincronizar do HTML em deploys."""
     return FileResponse(
         FRONTEND_DIR / "dashboard.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/comecar.js")
+async def serve_comecar_js():
+    """Comportamento do wizard de primeira configuração servido em /onboarding.
+    Sem esta rota o arquivo dá 404 — não há StaticFiles mount neste projeto e o
+    sintoma só aparece no navegador. no-cache: revalida via etag pra não
+    dessincronizar do HTML (servido no-store) em deploys."""
+    return FileResponse(
+        FRONTEND_DIR / "comecar.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/comecar.css")
+async def serve_comecar_css():
+    """CSS do wizard de primeira configuração (ver /comecar.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "comecar.css",
         media_type="text/css",
         headers={"Cache-Control": "no-cache"},
     )

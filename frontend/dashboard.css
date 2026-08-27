@@ -589,32 +589,6 @@ body.light .inst-tab.active {
   background: #ffffff;
 }
 
-/* Wizard de Setup */
-.wizard-modal {
-  max-width: 480px;
-}
-.wizard-progress {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-.wizard-progress .wizard-dot {
-  width: 9px; height: 9px;
-  border-radius: 50%;
-  background: rgba(255,255,255,.15);
-  transition: all .25s var(--ease);
-}
-.wizard-progress .wizard-dot.done {
-  background: var(--green);
-  opacity: .55;
-}
-.wizard-progress .wizard-dot.active {
-  background: #FF2D8E;
-  width: 26px;
-  border-radius: 6px;
-}
-.wizard-step h3 { margin: 0 0 6px; font-size: 1.2rem; }
 
 /* Corpo do fichário — onde as parcelas vivem */
 .inst-folder {

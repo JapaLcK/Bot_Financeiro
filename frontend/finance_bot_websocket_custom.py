@@ -101,6 +101,7 @@ from frontend.routes.cards import router as cards_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.push import router as push_router
+from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
 from frontend.routes.shared import (
     AUTH_COOKIE_NAME,
@@ -3509,13 +3510,17 @@ async def auth_google_callback(
                 await asyncio.to_thread(link_google_identity, existing, sub, email)
                 user_id = existing
 
-        # 3) Conta totalmente nova → cria pendente e manda pra /onboarding
+        # 3) Conta totalmente nova → cria pendente e manda pra /completar-cadastro
         if not user_id:
             token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
-            # App: devolve o token de onboarding pelo scheme (o app abre o
-            # /onboarding no WebView). Web: redirect normal.
+            # App: devolve o token pelo scheme. O AppDelegate monta
+            # "<site>/onboarding?token=T" em Swift COMPILADO, então esse caminho
+            # NÃO pode mudar aqui — quem resolve é o 302 de /onboarding?token=
+            # pra /completar-cadastro (frontend/routes/static_pages.py), que é o
+            # que mantém o cadastro por Google funcionando nos apps já
+            # instalados. Web: vai direto pro destino final.
             onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
-                       else f"/onboarding?token={token}")
+                       else f"/completar-cadastro?token={token}")
             signup_response = RedirectResponse(url=onb_url, status_code=302)
             signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
             return signup_response
@@ -3627,7 +3632,7 @@ async def auth_google_complete_signup(
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
-    # pixel do /onboarding pro Meta deduplicar.
+    # pixel do /completar-cadastro pro Meta deduplicar.
     try:
         from core.services.meta_capi import capi_configured, registration_event_id, send_event
         if capi_configured():
@@ -3637,7 +3642,7 @@ async def auth_google_complete_signup(
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=email,
-                event_source_url=f"{DASHBOARD_URL}/onboarding",
+                event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
             )
     except Exception as exc:
         print(f"[auth] meta capi registration (google) falhou user={user_id}: {exc}")
@@ -6670,6 +6675,9 @@ app.include_router(open_finance_router)
 
 # ─── Push notifications (app iOS) → frontend/routes/push.py ──────────────────
 app.include_router(push_router)
+
+# ─── Onboarding (wizard de primeira configuração) → frontend/routes/onboarding.py ─
+app.include_router(onboarding_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

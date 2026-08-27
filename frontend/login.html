@@ -88,7 +88,7 @@
   // ?next= interno (allowlist anti open-redirect) tem prioridade sobre o destino padrão
   function nextParam(){
     var n=new URLSearchParams(location.search).get('next')||'';
-    var ok=['/precos','/conta','/app','/home','/settings'];
+    var ok=['/precos','/conta','/app','/home','/settings','/onboarding'];
     return (n.charAt(0)==='/'&&ok.some(function(p){return n.indexOf(p)===0}))?n:null;
   }
   function err(id,m,ok){var e=document.getElementById(id);e.textContent=m;e.classList.toggle('ok',!!ok);e.classList.add('show')}
