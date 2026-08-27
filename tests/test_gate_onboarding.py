@@ -143,7 +143,10 @@ def test_settings_nao_tem_gate_de_onboarding():
     vermelho.
     """
     import inspect
-    assert "gate_onboarding" not in inspect.getsource(static_pages.serve_settings)
+    # Compara a CHAMADA, não a palavra: o handler cita `gate_onboarding` num
+    # comentário explicando por que ele NÃO está lá, e procurar pelo nome cru
+    # daria vermelho justamente por causa da explicação.
+    assert "gate_onboarding(request)" not in inspect.getsource(static_pages.serve_settings)
 
 
 @pytest.mark.parametrize("handler", ["serve_home", "serve_dashboard"])

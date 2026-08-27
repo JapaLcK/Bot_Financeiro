@@ -73,8 +73,11 @@ test("cada opção de resumo manda os três booleanos", () => {
   };
   for (const [id, [d, w, m]] of Object.entries(esperado)) {
     const prefs = api.reportPrefsFor(id);
+    // Espalha antes de comparar: o objeto nasce DENTRO do vm, então carrega o
+    // Object.prototype daquele realm e o deepEqual (strict) reprovaria por
+    // protótipo diferente mesmo com os valores idênticos.
     assert.deepEqual(
-      prefs,
+      { ...prefs },
       { daily_report_enabled: d, weekly_report_enabled: w, monthly_report_enabled: m },
       `opção ${id}`,
     );

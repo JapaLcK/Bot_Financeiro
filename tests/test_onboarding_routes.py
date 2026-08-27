@@ -24,6 +24,14 @@ client = TestClient(dashboard.app)
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
+def _csrf(c: TestClient) -> dict[str, str]:
+    """Cookie + header de CSRF, como o csrf_middleware exige de todo método
+    não-seguro. Mesma convenção de tests/test_auth_cookie.py."""
+    token = "test-csrf-token"
+    c.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
+    return {dashboard.CSRF_HEADER_NAME: token}
+
+
 # ── Compatibilidade com o app iOS já instalado ───────────────────────────────
 
 def test_onboarding_com_token_redireciona_pro_completar_cadastro():
@@ -144,7 +152,7 @@ def test_endpoint_nao_aceita_user_id_do_cliente(monkeypatch):
     _stub_db(monkeypatch, store)
     monkeypatch.setattr(onboarding_routes.shared, "resolve_dashboard_user_id", lambda req: 7)
 
-    resp = client.post("/onboarding/state", json={"step": 3, "user_id": 99})
+    resp = client.post("/onboarding/state", json={"step": 3, "user_id": 99}, headers=_csrf(client))
     assert resp.status_code == 200
     assert store == {7: {"step": 3}}, "escreveu no usuário errado"
 
@@ -161,15 +169,15 @@ def test_endpoint_exige_sessao_valida(monkeypatch):
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
 
     monkeypatch.setattr(onboarding_routes.shared, "resolve_dashboard_user_id", _no_session)
-    assert client.post("/onboarding/state", json={"step": 2}).status_code == 401
+    assert client.post("/onboarding/state", json={"step": 2}, headers=_csrf(client)).status_code == 401
     assert client.get("/onboarding/state").status_code == 401
 
 
 def test_passo_fora_da_faixa_e_recusado(monkeypatch):
     _stub_db(monkeypatch, {})
     monkeypatch.setattr(onboarding_routes.shared, "resolve_dashboard_user_id", lambda req: 7)
-    assert client.post("/onboarding/state", json={"step": 99}).status_code == 400
-    assert client.post("/onboarding/state", json={"step": -1}).status_code == 400
+    assert client.post("/onboarding/state", json={"step": 99}, headers=_csrf(client)).status_code == 400
+    assert client.post("/onboarding/state", json={"step": -1}, headers=_csrf(client)).status_code == 400
 
 
 def test_passo_nao_regride(monkeypatch):
@@ -181,8 +189,8 @@ def test_passo_nao_regride(monkeypatch):
     store = {}
     _stub_db(monkeypatch, store)
     monkeypatch.setattr(onboarding_routes.shared, "resolve_dashboard_user_id", lambda req: 7)
-    client.post("/onboarding/state", json={"step": 4})
-    client.post("/onboarding/state", json={"step": 2})
+    client.post("/onboarding/state", json={"step": 4}, headers=_csrf(client))
+    client.post("/onboarding/state", json={"step": 2}, headers=_csrf(client))
     assert store[7]["step"] == 4
     # E o SQL real carrega a guarda (o stub acima só imita o comportamento).
     src = (REPO / "db/reports.py").read_text(encoding="utf-8")
@@ -208,7 +216,7 @@ def test_telemetria_nao_derruba_a_escrita(monkeypatch):
         raise RuntimeError("log fora")
 
     monkeypatch.setattr(admin, "log_system_event", _boom)
-    resp = client.post("/onboarding/state", json={"step": 2, "event": "view"})
+    resp = client.post("/onboarding/state", json={"step": 2, "event": "view"}, headers=_csrf(client))
     assert resp.status_code == 200
     assert store[7]["step"] == 2
 
