@@ -8,6 +8,18 @@
    Servido por @router.get("/comecar.css") em frontend/routes/static_pages.py.
    ========================================================================== */
 
+/* O atributo `hidden` só esconde por causa de `[hidden]{display:none}` na folha
+   do NAVEGADOR, e qualquer regra de autor que declare `display` ganha dela — não
+   por especificidade (as duas são 0,1,0), mas porque folha de autor vence folha
+   de user-agent. Como `.onb-done` declara `display:flex` e `.btn` declara
+   `display:inline-flex`, os quatro elementos que o JS controla por `hidden`
+   ficavam SEMPRE visíveis: "já tem saldo lançado", "WhatsApp já conectado", o
+   botão do WhatsApp e o "+ Adicionar cartão".
+
+   O `!important` é necessário: sem ele, `.btn{display:inline-flex}` (mesma
+   especificidade, declarada depois no site.css) continuaria ganhando. */
+[hidden] { display: none !important; }
+
 /* .auth-error mora inline em cada página de auth (site.css não tem) — mesma
    convenção de login/cadastro/completar-cadastro, repetida aqui. */
 .auth-error {
