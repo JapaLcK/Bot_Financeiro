@@ -415,10 +415,17 @@ def test_reconexao_grava_dentro_do_lock_de_escrita(user_id, monkeypatch):
     assert conexao == {"id": 1}
 
 
-def test_reconexao_grava_mesmo_se_o_lock_estourar(user_id, monkeypatch):
-    """CONTROLE POSITIVO, e não é zelo: recusar a reconexão porque o lock demorou
-    deixaria o banco conectado NA PLUGGY e invisível aqui. Grava e denuncia."""
+def test_sem_lock_nao_grava(user_id, monkeypatch):
+    """Sem o lock, NÃO grava. A 1ª versão gravava assim mesmo e só logava — e é
+    justamente a escrita que o lock existe para serializar (Codex #162, P1): se o
+    teto estourou é porque um sync ESTÁ escrevendo, já passou pela checagem de
+    geração, e vai importar lançamento da autorização velha.
+
+    CONTROLE NEGATIVO: devolver `save_pluggy_open_finance_item(...)` no ramo sem
+    lock deixa este teste vermelho."""
     from contextlib import contextmanager
+
+    salvou = []
 
     @contextmanager
     def _lock_ocupado(item_id):
@@ -426,12 +433,72 @@ def test_reconexao_grava_mesmo_se_o_lock_estourar(user_id, monkeypatch):
 
     monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_ocupado)
     monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
-                        lambda uid, remote: {"id": 2})
+                        lambda uid, remote: salvou.append(uid) or {"id": 2})
 
     conexao, sob_lock = of_routes._salva_item_sob_lock(user_id, {"id": "item-lk2"}, "item-lk2")
 
-    assert conexao == {"id": 2}, "a reconexão NÃO pode ser perdida"
-    assert sob_lock is False, "e o chamador tem que saber, pra logar o aviso"
+    assert (conexao, sob_lock) == (None, False)
+    assert salvou == [], "sem lock não se escreve nada"
+
+
+def test_reconexao_retenta_o_lock_antes_de_desistir(user_id, monkeypatch):
+    """A terceira opção: nem gravar sem lock, nem recusar de primeira. A janela
+    do lock é só a fase de escrita de um sync, então ela passa em segundos.
+
+    CONTROLE POSITIVO do grupo: sem o retry, um lock ocupado por um instante
+    viraria 503 na cara do usuário."""
+    tentativas = []
+
+    async def _log(level, event_type, *a, **kw):
+        return None
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+
+    def _libera_na_segunda(uid, remote, item_id):
+        tentativas.append(item_id)
+        if len(tentativas) == 1:
+            return None, False
+        return {"id": 7}, True
+
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _libera_na_segunda)
+
+    conexao = asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-retry"))
+
+    assert conexao == {"id": 7}
+    assert len(tentativas) == 2, "esperou a vez em vez de desistir ou gravar solto"
+
+
+def test_lock_ocupado_ate_o_fim_recusa_com_503(user_id, monkeypatch):
+    """Esgotadas as tentativas, RECUSA — não grava solto. 503 é recuperável: o
+    item continua na Pluggy e o mesmo POST reaproveita. Lançamento fantasma não
+    seria recuperável, e é essa a troca.
+
+    CONTROLE NEGATIVO: voltar a gravar sem lock no fim deixa este teste vermelho."""
+    from fastapi import HTTPException
+
+    eventos = []
+
+    async def _log(level, event_type, *a, **kw):
+        eventos.append((level, event_type))
+
+    async def _sleep_rapido(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock",
+                        lambda uid, remote, item_id: (None, False))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-preso"))
+
+    assert exc.value.status_code == 503
+    assert "tente de novo" in str(exc.value.detail).lower()
+    assert ("error", "of_reconnect_lock_timeout") in eventos
 
 
 # ── RODADA 3: o lock não pode esperar para sempre nem abrir conexão sem teto ──

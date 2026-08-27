@@ -82,6 +82,11 @@ _DIRTY: set[str] = set()
 # 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
 _SYNC_MAX_ATTEMPTS = 3
 
+# Tentativas de pegar o lock ao gravar uma reconexão. Cada uma já espera até
+# `OF_SYNC_LOCK_WAIT_MS` (15s) lá dentro, então 2 é o teto do que cabe num
+# request HTTP — a janela do lock é só a fase de escrita e passa em segundos.
+_RECONNECT_LOCK_ATTEMPTS = 2
+
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
 # de fora de propósito (é `item_missing`, tratado no sync), 4xx de credencial
 # também — repetir não conserta chave errada.
@@ -121,13 +126,54 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict
     reconexão espera; enquanto a reconexão grava, nenhum sync entra na fase de
     escrita — e o próximo a entrar relê a geração nova e aborta.
 
-    A janela do lock é curta de propósito (só escrita, nunca a leitura remota),
-    então esperar a vez é barato. Estourou o teto (`OF_SYNC_LOCK_WAIT_MS`, 15s):
-    grava assim mesmo e devolve `False`. Recusar seria pior — o item já existe na
-    Pluggy, e não gravar deixaria o banco conectado lá e invisível aqui.
+    Sem o lock NÃO grava. A primeira versão disto gravava assim mesmo e só logava
+    o aviso — e essa é exatamente a escrita que o lock existe para serializar
+    (Codex #162, P1): se o teto estourou é porque um sync ESTÁ na fase de
+    escrita, já passou pela checagem de geração, e vai importar lançamento e
+    compra de cartão da autorização velha. O fallback anulava o conserto no único
+    caso em que ele importa.
     """
     with pluggy_item_lock(item_id) as locked:
-        return save_pluggy_open_finance_item(user_id, remote), bool(locked)
+        if not locked:
+            return None, False
+        return save_pluggy_open_finance_item(user_id, remote), True
+
+
+async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:
+    """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
+
+    Não é escolha entre dois males. Gravar sem lock cria lançamento fantasma;
+    recusar de primeira deixa o banco conectado na Pluggy e invisível aqui. O
+    passo que faltava é esperar de novo: a janela do lock é só a fase de escrita
+    de um sync (nunca a leitura remota), então ela passa em segundos e a segunda
+    tentativa quase sempre entra.
+
+    Esgotou: 503 com mensagem de "tente de novo". O item continua existindo na
+    Pluggy e o mesmo POST reaproveita, então a reconexão é recuperável — o
+    lançamento fantasma não seria.
+    """
+    for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
+        connection, sob_lock = await asyncio.to_thread(
+            _salva_item_sob_lock, user_id, remote, item_id)
+        if sob_lock:
+            return connection
+        if tentativa < _RECONNECT_LOCK_ATTEMPTS:
+            await log_system_event(
+                "warning", "of_reconnect_lock_retry",
+                f"Lock ocupado ao gravar reconexão ({tentativa}/{_RECONNECT_LOCK_ATTEMPTS}): {item_id}",
+                source="open_finance", details={"item_id": item_id, "attempt": tentativa},
+            )
+            await asyncio.sleep(_backoff_sec(tentativa))
+
+    await log_system_event(
+        "error", "of_reconnect_lock_timeout",
+        f"Reconexão NÃO gravada: lock do item ocupado: {item_id}",
+        source="open_finance", details={"item_id": item_id},
+    )
+    raise HTTPException(
+        status_code=503,
+        detail="Não foi possível concluir a conexão agora. Tente de novo em alguns segundos.",
+    )
 
 
 async def _run_pluggy_sync_bg(item_id: str) -> None:
@@ -576,16 +622,9 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
 
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
-        connection, sob_lock = await asyncio.to_thread(
-            _salva_item_sob_lock, session_uid, remote, new_item_id)
+        connection = await _grava_reconexao(session_uid, remote, new_item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not sob_lock:
-        await log_system_event(
-            "warning", "of_reconnect_sem_lock",
-            f"Reconexão gravada sem o lock de escrita: {new_item_id}",
-            source="open_finance", details={"item_id": new_item_id},
-        )
 
     await asyncio.to_thread(
         register_item, session_uid,
