@@ -878,3 +878,80 @@ def test_run_velho_nao_sobrescreve_o_espelho_do_run_novo(user_id, monkeypatch, r
     assert res["ok"] is False and res["reason"] == "stale_authorization"
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
     assert ui["state"] == "updated", "e ele está dizendo a verdade: o espelho é o novo"
+
+
+# ── 11f. ONDA 3: a janela que a relectura NÃO fecha ─────────────────────────
+# Desde que o run de geração velha morre na relectura dentro do lock (11e),
+# NENHUM teste que passa por `sync_pluggy_item` chega mais ao
+# `reconnected_at_visto` — o controle negativo de 11d ("tirar o
+# `reconnected_at_visto` do call site") passou a não derrubar nada, ou seja, o
+# parâmetro ficaria sem cobertura nenhuma. Ele não é redundante: a rota de
+# reconexão (`/pluggy/item` → `save_pluggy_open_finance_item`) NÃO pega o
+# `pluggy_item_lock`, então uma reconexão ainda cabe entre a relectura e o
+# carimbo. Este teste ataca essa fresta direto no `mark_sync_result`.
+#
+# CONTROLE NEGATIVO: omitir o `reconnected_at_visto` na 1ª chamada deixa este
+# teste vermelho. CONTROLE POSITIVO: a 2ª chamada, com o valor que de fato está
+# no banco, carimba — sem ela a guarda passaria recusando todo carimbo.
+
+def test_reconexao_entre_a_relectura_e_o_carimbo_ainda_e_recusada(user_id, relogio_fixo):
+    conexao = _conexao(user_id, "item-janela")
+    visto = _linha("item-janela")["reconnected_at"]
+    assert visto is None, "a relectura de dentro do lock leu isto"
+
+    # …e só DEPOIS dela o usuário reconecta, fora do lock.
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-janela", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    assert _linha("item-janela")["reconnected_at"] == AGORA
+
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="",
+                        reconnected_at_visto=visto)
+    assert _linha("item-janela")["last_sync_at"] == ANTES, \
+        "carimbo com autorização velha não pode avançar o last_sync_at"
+
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="",
+                        reconnected_at_visto=AGORA)
+    assert _linha("item-janela")["last_sync_at"] == AGORA, \
+        "quem leu a autorização ATUAL carimba normalmente"
+
+
+def test_reconexao_dentro_do_lock_ainda_recusa_o_carimbo(user_id, monkeypatch, relogio_fixo):
+    """A mesma janela residual, agora pelo CAMINHO REAL — o call site em
+    `pluggy_sync`, não o `mark_sync_result` na mão.
+
+    Este teste existe por causa de uma medição: depois da relectura de 11e, a
+    sabotagem "tirar o `reconnected_at_visto` do call site" passou a deixar ZERO
+    vermelhos. O parâmetro continuava certo e continuava necessário, mas nada
+    mais o exercitava — e parâmetro sem controle negativo é parâmetro que a
+    próxima pessoa apaga achando que é resíduo.
+
+    A reconexão é interposta DENTRO do lock (o `import_open_finance_launches`
+    roda entre a escrita do espelho e o carimbo), que é exatamente a fresta que
+    a relectura não fecha: a rota `/pluggy/item` não pega o `pluggy_item_lock`.
+
+    CONTROLE NEGATIVO: tirar o `reconnected_at_visto` do call site deixa este
+    teste vermelho — e volta a dar 1, como na Onda 2."""
+    conexao = _conexao(user_id, "item-janela-lock")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-janela-lock"},
+                 contas=[_conta_pluggy("acc-jl")], txs=[_tx_pluggy("tx-jl")])
+
+    real = ps.import_open_finance_launches
+
+    def reconecta_dentro_do_lock(uid, cid, *a, **kw):
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "item-janela-lock", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        return real(uid, cid, *a, **kw)
+
+    monkeypatch.setattr(ps, "import_open_finance_launches", reconecta_dentro_do_lock)
+
+    res = ps.sync_pluggy_item("item-janela-lock")
+
+    assert res["ok"] is True, "passou pela relectura: na entrada do lock era a geração certa"
+    linha = _linha("item-janela-lock")
+    assert _espelho(conexao["id"]) == (1, 1), "o espelho FICA: o dado é real"
+    assert linha["last_sync_at"] == ANTES, \
+        "reconectaram entre a relectura e o carimbo — o carimbo não vale"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated"
