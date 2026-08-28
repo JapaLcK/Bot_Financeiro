@@ -469,6 +469,13 @@ def _delete_all_launches_validate(user_id: int, args: dict[str, Any]) -> str | N
     return None
 
 
+def _amostra_ids(ids: list) -> str:
+    """'#3, #7, #9 e mais 4' — amostra de 5 em user_seq (o #N que o user vê)."""
+    resto = len(ids) - 5
+    amostra = ", ".join(f"#{i}" for i in ids[:5])
+    return f"{amostra} e mais {resto}" if resto > 0 else amostra
+
+
 def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         result = db.delete_all_launches_and_rollback(user_id)
@@ -476,22 +483,41 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
         return f"🐷 Não consegui apagar: {e}"
 
     deleted = int(result.get("deleted") or 0)
-    failed = int(result.get("failed") or 0)
-    if deleted == 0 and failed == 0:
+    antigos = result.get("kept_no_effects") or []
+    erros = result.get("errors") or []
+    sobraram = int(result.get("remaining") or 0)
+
+    # "não havia nada" SÓ quando não havia mesmo: com linha contada antes,
+    # dizer isso é fingir sucesso.
+    if not deleted and not antigos and not erros and not sobraram:
         return "🐷 Não havia nenhum lançamento pra apagar."
 
-    plural = "s" if deleted != 1 else ""
-    msg = (
-        f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
-        f"saldo. Suas caixinhas e investimentos seguem intactos."
-    )
-    if failed:
-        fp = "s" if failed != 1 else ""
-        msg += (
-            f"\n⚠️ {failed} lançamento{fp} antigo{fp} não pôde ser revertido "
-            f"automaticamente e foi mantido."
+    partes = []
+    if deleted:
+        plural = "s" if deleted != 1 else ""
+        partes.append(
+            f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
+            f"saldo. Suas caixinhas e investimentos seguem intactos."
         )
-    return msg
+    # Duas frases distintas: "antigo demais pra reverter" e "erro técnico" são
+    # causas diferentes, e uma queda de banco não pode sair como lançamento antigo.
+    if antigos:
+        p = "s" if len(antigos) != 1 else ""
+        partes.append(
+            f"⚠️ {len(antigos)} lançamento{p} antigo{p} não guarda o que precisaria ser "
+            f"revertido, então mantive intacto pra não bagunçar seu saldo: "
+            f"{_amostra_ids(antigos)}."
+        )
+    if erros:
+        p = "s" if len(erros) != 1 else ""
+        partes.append(
+            f"❌ {len(erros)} lançamento{p} deu erro técnico e continua aí: "
+            f"{_amostra_ids(erros)}. Já registrei a falha — tenta de novo em alguns minutos."
+        )
+    if sobraram:
+        p = "s" if sobraram != 1 else ""
+        partes.append(f"Não apaguei tudo: sobrou {sobraram} lançamento{p}.")
+    return "\n".join(partes)
 
 
 TOOLS: list[Tool] = [

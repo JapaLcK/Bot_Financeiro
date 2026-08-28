@@ -3,8 +3,12 @@
 Resolve ações pendentes: confirmações de delete, lançamentos de mídia e esclarecimentos.
 """
 from __future__ import annotations
+import logging
+
 import db
 from utils_text import fmt_brl
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
@@ -162,8 +166,13 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
-            except Exception:
+            except Exception as e:
                 failed.append(lid)
+                # Sem str(e): o texto do psycopg pode trazer o valor da linha.
+                logger.warning(
+                    "delete_launch_bulk: falha user_id=%s launch_id=%s causa=%s sqlstate=%s",
+                    user_id, lid, type(e).__name__, getattr(e, "sqlstate", None),
+                )
         ok_ids = [i for i in ids if i not in failed]
         # converte ids internos pra user_seq pra exibição (fallback: id interno)
         def _disp(lid):

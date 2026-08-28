@@ -38,7 +38,7 @@ def test_delete_all_launches_db_reverte_saldo(user_id: int):
     assert db.count_launches(user_id) == 3
 
     result = db.delete_all_launches_and_rollback(user_id)
-    assert result == {"deleted": 3, "failed": 0}
+    assert result == {"deleted": 3, "kept_no_effects": [], "errors": [], "remaining": 0}
     assert db.count_launches(user_id) == 0
     assert _bal(user_id) == 0.0, "saldo deve voltar ao estado pré-lançamentos"
 
@@ -144,10 +144,101 @@ def test_delete_all_launches_preserva_caixinha_e_investimento(user_id: int):
     assert inv_before is not None and inv_before >= 250.0
 
     result = db.delete_all_launches_and_rollback(user_id)
-    assert result == {"deleted": 2, "failed": 0}
+    assert result == {"deleted": 2, "kept_no_effects": [], "errors": [], "remaining": 0}
 
     # o ponto do teste: caixinha e investimento INTACTOS (registro + saldo).
     assert _pocket_balance(user_id, "viagem") == pocket_before, "caixinha não pode ser tocada"
     assert _investment_balance(user_id, "CDB Teste") == inv_before, "investimento não pode ser tocado"
     # as despesas/receitas sumiram.
     assert db.count_launches(user_id) == 0
+
+
+def _set_efeitos_null(user_id: int, launch_id: int):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update launches set efeitos = null where id=%s and user_id=%s",
+                (launch_id, user_id),
+            )
+        conn.commit()
+
+
+def test_falha_prevista_e_erro_tecnico_sao_distinguiveis(user_id, monkeypatch, caplog):
+    """Antes, `failed += 1` sem log: banco caído e lançamento legado davam o
+    MESMO número e a MESMA frase. Agora são duas listas e o erro técnico tem
+    log — com user_id e launch_id, e sem dado sensível."""
+    import logging
+    from db import accounts as accounts_mod
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    legado, seq_legado, _ = add_launch_and_update_balance(
+        user_id, "despesa", 300, "aluguel", "paguei 300 aluguel"
+    )
+    quebrado, seq_quebrado, _ = add_launch_and_update_balance(
+        user_id, "despesa", 77, "mercadinho segredo", "gastei 77 no mercadinho segredo"
+    )
+    _set_efeitos_null(user_id, legado)
+
+    real = accounts_mod.delete_launch_and_rollback
+
+    def falha_num_id(uid, lid):
+        if lid == quebrado:
+            raise RuntimeError("boom")
+        return real(uid, lid)
+
+    monkeypatch.setattr(accounts_mod, "delete_launch_and_rollback", falha_num_id)
+
+    with caplog.at_level(logging.ERROR, logger="db.accounts"):
+        result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result["deleted"] == 1, result           # só a receita seed passou
+    assert result["kept_no_effects"] == [seq_legado], result
+    assert result["errors"] == [seq_quebrado], result
+    assert result["remaining"] == 2, "recontagem tem de ver os dois que ficaram"
+
+    linhas = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("delete_all_launches:")]
+    assert len(linhas) == 1, linhas
+    # Igualdade EXATA é a assertiva de não-vazamento: qualquer valor,
+    # descrição, categoria ou alvo que entrasse no log quebraria aqui.
+    # (Comparar por substring seria flaky: o user_id é um número aleatório de
+    # 10 dígitos e pode conter "77" ou "300" por acaso.)
+    assert linhas[0] == (
+        f"delete_all_launches: falha inesperada user_id={user_id} "
+        f"launch_id={quebrado} causa=RuntimeError sqlstate=None"
+    ), linhas[0]
+    assert "boom" not in linhas[0], "str(e) não pode entrar no log"
+
+
+def test_mensagem_nao_finge_sucesso_quando_sobrou(user_id, monkeypatch):
+    """A tool não pode dizer 'não havia nada' nem omitir o que ficou."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 0, "kept_no_effects": [3], "errors": [7, 8], "remaining": 3,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "não havia nenhum" not in msg.lower(), msg
+    assert "#3" in msg and "#7" in msg and "#8" in msg, msg
+    assert "erro técnico" in msg.lower(), "erro técnico tem frase própria"
+    assert "antigo" in msg.lower(), "lançamento antigo tem frase própria"
+    assert "sobrou 3" in msg.lower(), msg
+
+    # amostra de 5 + "e mais N"
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 2, "kept_no_effects": [1, 2, 3, 4, 5, 6, 7], "errors": [], "remaining": 7,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "#1, #2, #3, #4, #5 e mais 2" in msg, msg
+    assert "#6" not in msg and "#7 " not in msg, msg
+
+
+def test_mensagem_vazio_continua_dizendo_que_nao_havia_nada(user_id, monkeypatch):
+    """Controle positivo: o caso legítimo 'histórico já vazio' não regrediu."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 0, "kept_no_effects": [], "errors": [], "remaining": 0,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "não havia nenhum lançamento" in msg.lower(), msg

@@ -2,6 +2,7 @@
 db/accounts.py — Saldo, lançamentos e importação OFX.
 """
 import json
+import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 
@@ -15,6 +16,8 @@ from .connection import (
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .users import ensure_user, ensure_user_tx
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1311,30 +1314,63 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "failed": M}. `failed` cobre lançamentos legados
-    sem `efeitos` (não dá pra reverter com segurança) — esses são mantidos
-    intactos pra não corromper o saldo, em vez de apagados às cegas.
+    Retorna {"deleted": N, "kept_no_effects": [...], "errors": [...],
+    "remaining": M}, com os ids em `user_seq` (o "#N" que o usuário vê).
+
+    As duas listas são causas DIFERENTES e a mensagem ao usuário precisa
+    distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos` (não
+    dá pra reverter com segurança — mantidos intactos de propósito, em vez de
+    apagados às cegas); `errors` é falha técnica inesperada (conexão, deadlock,
+    permissão, bug). O `failed` único de antes dizia "lançamento antigo" para
+    um banco caído.
+
+    `remaining` é uma RECONTAGEM depois do loop: é a única checagem que pega o
+    caso em que o delete casou zero linhas e ninguém levantou.
     """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from launches "
+                "select id, user_seq, efeitos from launches "
                 f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER} "
                 "order by id desc",
                 (user_id,),
             )
-            ids = [row["id"] for row in cur.fetchall()]
+            rows = cur.fetchall()
+
+    # Falha PREVISTA, separada antes do loop: sem `efeitos` o
+    # delete_launch_and_rollback levantaria ValueError de qualquer jeito, então
+    # o comportamento é idêntico — e a mensagem ao usuário deixa de depender de
+    # string-sniffing do texto da exceção.
+    def _seq(r):
+        return r["user_seq"] or r["id"]
+
+    kept_no_effects = [_seq(r) for r in rows if r["efeitos"] is None]
+    apagaveis = [(r["id"], _seq(r)) for r in rows if r["efeitos"] is not None]
 
     deleted = 0
-    failed = 0
-    for lid in ids:
+    errors: list = []
+    for lid, seq in apagaveis:
         try:
             delete_launch_and_rollback(user_id, lid)
             deleted += 1
-        except Exception:
-            failed += 1
-    return {"deleted": deleted, "failed": failed}
+        except Exception as e:
+            errors.append(seq)
+            # Sem str(e) e sem exc_info: o texto do psycopg pode trazer o valor
+            # da linha que violou a constraint. Nome do tipo + sqlstate já
+            # separam conexão (08006), deadlock (40P01), permissão (42501) e
+            # bug de código (TypeError/AttributeError).
+            logger.error(
+                "delete_all_launches: falha inesperada user_id=%s launch_id=%s causa=%s sqlstate=%s",
+                user_id, lid, type(e).__name__, getattr(e, "sqlstate", None),
+            )
+
+    return {
+        "deleted": deleted,
+        "kept_no_effects": kept_no_effects,
+        "errors": errors,
+        "remaining": count_launches(user_id),
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
