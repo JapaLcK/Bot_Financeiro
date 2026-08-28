@@ -21,13 +21,19 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn, cat_norm_sql, CAT_META_SQL
+# `cat_norm_sql` continua aqui de propósito: o GROUP BY do `get_top_categories`
+# e o join com `cat_meta` (linhas ~388/399) casam contra o CATÁLOGO
+# (`user_categories.name`, normalizado por `CAT_META_SQL` com a mesma
+# expressão). Trocar só um lado quebraria o join; e o rótulo daquele grupo é
+# a grafia crua do lançamento, não a chave — mudar isso é outro assunto.
+from .connection import get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL
 
-# Comparação de categoria case- E acento-insensível (fonte única: db/connection.py).
-_CAT_EQ = "{} = {}".format(cat_norm_sql("COALESCE(categoria, '')"), cat_norm_sql("%s"))
-_CAT_CT_EQ = "{} = {}".format(
-    cat_norm_sql("COALESCE(ct.categoria, '')"), cat_norm_sql("%s")
-)
+# Casamento de categoria pela `cat_key_sql` (fonte única, db/connection.py). Isto
+# aqui já colapsava o vazio por conta própria, mas sob o rótulo `''` — então a
+# pergunta "sem categoria" (o nome que o donut mostra) não casava. A chave
+# compartilhada mantém o `''` casando e passa a aceitar o rótulo também.
+_CAT_EQ = f"{cat_key_sql('categoria')} = {cat_key_sql('%s')}"
+_CAT_CT_EQ = f"{cat_key_sql('ct.categoria')} = {cat_key_sql('%s')}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

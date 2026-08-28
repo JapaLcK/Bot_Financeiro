@@ -137,6 +137,63 @@ def cat_norm_sql(expr: str) -> str:
     return f"translate(lower({expr}), '{_CAT_ACCENTS_FROM}', '{_CAT_ACCENTS_TO}')"
 
 
+# Rótulo de quem está SEM categoria. NULL e '' são a mesma coisa pro usuário —
+# `db/analytics.py` já colapsa os dois assim.
+CAT_VAZIA_LABEL = "sem categoria"
+
+
+def cat_key_sql(expr: str) -> str:
+    """Chave de AGRUPAMENTO e de CASAMENTO de categoria: `cat_norm_sql` com o
+    vazio colapsado em `CAT_VAZIA_LABEL`.
+
+    Existe porque as duas pontas tinham que ser a MESMA expressão e não eram: o
+    donut do dashboard agrupava por `COALESCE(categoria,'sem categoria')` e a
+    lista de lançamentos casava contra a coluna CRUA. Resultado: a barra "sem
+    categoria" dizia R$ 100 e a lista abria vazia — `norm(NULL)` não é
+    'sem categoria'. Chega em produção pela importação de cartão do Open Finance
+    sem categoria do provedor (`db/open_finance.py` → `add_imported_credit_purchase`,
+    que grava `credit_transactions.categoria` NULO).
+    """
+    return cat_norm_sql(f"coalesce(nullif({expr}, ''), '{CAT_VAZIA_LABEL}')")
+
+
+# ── `tipo` de `launches`: a forma legada conta junto ──────────────────────────
+# Nenhum escritor de hoje grava 'saida'/'entrada' (ver o comentário de
+# `_TIPO_ALIASES`, db/accounts.py), mas muito read path ainda trata esses valores
+# como tipo. Fonte ÚNICA em SQL das duas formas — `tests/test_tipo_legado_no_dashboard.py`
+# compara esta tabela com o `_TIPO_ALIASES` do Python, que é a mesma regra do
+# outro lado (§0.7: duplicação inevitável exige teste que compare as duas).
+#
+# Por que importa: as barras de categoria do dashboard contam
+# `tipo IN ('despesa','saida')` e o "Gastos do mês" lia só `despesa`. Com uma
+# linha legada na base, a soma das barras e o gráfico diário passavam do total
+# exibido, e o "sobrou este mês" saía maior do que é.
+TIPO_DESPESA_SQL = "tipo IN ('despesa', 'saida')"
+TIPO_RECEITA_SQL = "tipo IN ('receita', 'entrada')"
+
+# Colapsa a forma legada na moderna. Para quem AGRUPA por tipo (o "Gastos do
+# mês", a evolução por mês); quem só FILTRA usa os dois de cima.
+TIPO_CANON_SQL = (
+    f"CASE WHEN {TIPO_DESPESA_SQL} THEN 'despesa' "
+    f"WHEN {TIPO_RECEITA_SQL} THEN 'receita' ELSE tipo END"
+)
+
+
+# `has_time`: dá pra confiar na HORA do lançamento ou só na data?
+# Quem decide se o front escreve "10/03, 00:30" ou só "10/03" — as duas telas que
+# leem `has_time` (`dashboard.js` e `home.html`) saem daqui. A lista do bot
+# (`list_launches_by_category`) NÃO usa esta expressão: ela nunca imprime hora, e
+# o dia dela vem do `day_tz` em Python (utils_date), não de um `::date` em SQL —
+# que sairia no fuso da SESSÃO do Postgres, não em America/Sao_Paulo.
+LAUNCH_HAS_TIME_SQL = """
+        CASE
+          WHEN source = 'ofx' THEN false
+          WHEN source = 'open_finance'
+            THEN COALESCE((efeitos->>'time_known')::boolean, false)
+          ELSE true
+        END"""
+
+
 # Catálogo deduplicado por nome normalizado, pronto pra virar CTE de join.
 # `user_categories` é única só no par EXATO (user_id, name), então 'cafe' e
 # 'café' coexistem: um join por valor normalizado contra a tabela crua devolve

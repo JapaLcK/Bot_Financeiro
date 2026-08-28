@@ -22,11 +22,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Iterable
 
-from db.connection import get_conn, cat_norm_sql, CAT_CANON_ORDER
+from db.connection import get_conn, cat_key_sql, CAT_CANON_ORDER
 from utils_text import fmt_brl
 
-# Comparacao de categoria case- E acento-insensivel (fonte unica: db/connection.py).
-_CAT_EQ = f"{cat_norm_sql('categoria')} = {cat_norm_sql('%s')}"
+# Casamento de categoria pela `cat_key_sql` (fonte unica: db/connection.py) — a
+# mesma chave do donut, do total e da lista. Sem ela o orcamento chamado
+# "sem categoria" nunca dispararia alerta, por mais que a barra do dashboard
+# passasse de 100%.
+_CAT_EQ = f"{cat_key_sql('categoria')} = {cat_key_sql('%s')}"
 
 
 THRESHOLDS = (80, 100, 120)

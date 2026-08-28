@@ -8,9 +8,9 @@ from decimal import Decimal
 from psycopg.types.json import Json, Jsonb
 
 import db_support as _db_support
-from utils_date import _tz
+from utils_date import _tz, day_tz
 
-from .connection import get_conn, cat_norm_sql
+from .connection import get_conn, cat_key_sql, TIPO_DESPESA_SQL
 from .users import ensure_user, ensure_user_tx
 
 
@@ -435,7 +435,8 @@ def get_largest_expenses(
     retorna os lançamentos/compras de maior valor, um por um.
 
     Fontes:
-      - launches.tipo='despesa' AND is_internal_movement=false (por criado_em)
+      - launches: `TIPO_DESPESA_SQL` (a moderna e a legada 'saida', mesma
+        forma do total e da lista) AND is_internal_movement=false (por criado_em)
       - credit_transactions onde is_refund=false
 
     `by_bill_month`:
@@ -459,11 +460,16 @@ def get_largest_expenses(
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
     end_date_excl = end_date + timedelta(days=1)  # janela meio-aberta em period_end
 
+    # `cat_key_sql` e não `cat_norm_sql`: mesma chave da lista e do total da
+    # categoria (`list_launches_by_category`; `sum_spent_in_category_period`,
+    # db/budgets.py). Os "5 maiores" saem ao lado daquele total na resposta do
+    # bot — com a chave crua, a categoria SEM nome trazia total e lista com
+    # valor e nenhum "maior gasto".
     cat_filter = (
-        f"and {cat_norm_sql('categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+        f"and {cat_key_sql('categoria')} = {cat_key_sql('%s')}" if categoria else ""
     )
     cat_filter_ct = (
-        f"and {cat_norm_sql('ct.categoria')} = {cat_norm_sql('%s')}" if categoria else ""
+        f"and {cat_key_sql('ct.categoria')} = {cat_key_sql('%s')}" if categoria else ""
     )
 
     if by_bill_month:
@@ -498,7 +504,7 @@ def get_largest_expenses(
                            'launches' as fonte
                     from launches
                     where user_id = %s
-                      and tipo = 'despesa'
+                      and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
                       {cat_filter}
                       and criado_em >= %s and criado_em < %s
@@ -587,7 +593,12 @@ def list_launches_by_category(
       `by_bill_month` que `get_largest_expenses` expõe nunca foi chamado com
       False aqui, e uma janela alternativa que ninguém pede é só mais um SQL pra
       manter em sincronia.
-    - Match de categoria case- e acento-insensível (mesmo `cat_norm_sql`).
+    - Match de categoria pela `cat_key_sql` — case- e acento-insensível E com o
+      vazio colapsado em 'sem categoria', a MESMA expressão que o donut do
+      dashboard agrupa. Contra a coluna crua, `norm(NULL)` é NULL e nunca casa
+      com nada: a barra "sem categoria" dizia R$ 100,00 e esta lista abria
+      vazia (medido). Chega em produção pela importação de cartão do Open
+      Finance, que grava `credit_transactions.categoria` NULO.
     - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
       `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
       lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
@@ -606,9 +617,9 @@ def list_launches_by_category(
     """
     ensure_user(user_id)
 
-    _cat = cat_norm_sql("categoria")
-    _cat_ct = cat_norm_sql("ct.categoria")
-    _arg = cat_norm_sql("%s")
+    _cat = cat_key_sql("categoria")
+    _cat_ct = cat_key_sql("ct.categoria")
+    _arg = cat_key_sql("%s")
 
     params: list = [user_id, categoria]
     launch_filters = ""
@@ -699,7 +710,13 @@ def list_launches_by_category(
             "valor": float(r["valor"] or 0),
             "categoria": r["categoria"],
             "descricao": r["descricao"],
-            "data": r["dt"].date() if hasattr(r["dt"], "date") else r["dt"],
+            # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
+            # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São Paulo
+            # sairia aqui como o dia SEGUINTE — o MESMO lançamento com dia diferente
+            # em "liste <categoria>" e em "meus últimos lançamentos" (`list_launches`,
+            # core/handlers/launches.py, que já usa `day_tz`). A perna do crédito é
+            # naive (`purchased_at::timestamp`) e passa direto.
+            "data": day_tz(r["dt"]),
             "fonte": r["fonte"],
             "user_seq": r["user_seq"],
         }

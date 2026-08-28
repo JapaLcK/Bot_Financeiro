@@ -67,7 +67,14 @@ from core.sessions import (
     revoke_session,
     touch_session,
 )
-from db.connection import cat_norm_sql
+from db.connection import (
+    CAT_VAZIA_LABEL,
+    LAUNCH_HAS_TIME_SQL,
+    TIPO_CANON_SQL,
+    TIPO_DESPESA_SQL,
+    TIPO_RECEITA_SQL,
+    cat_key_sql,
+)
 from db.open_finance import BANK_ACCOUNTS_SQL
 from db import (
     accrue_all_pockets,
@@ -292,8 +299,10 @@ async def list_users() -> list:
             return await cur.fetchall()
 
 # Chave de agrupamento do donut de categorias: case- E acento-insensível, pra
-# "cafe da manha" e "café da manhã" virarem UMA fatia (fonte: db/connection.py).
-_CAT_KEY_DONUT = cat_norm_sql("COALESCE(categoria, 'sem categoria')")
+# "cafe da manha" e "café da manhã" virarem UMA fatia. É a MESMA expressão que
+# `list_launches_by_category` usa pra casar — clicar numa barra tem que abrir
+# exatamente as linhas que ela somou (fonte: db/connection.py::cat_key_sql).
+_CAT_KEY_DONUT = cat_key_sql("categoria")
 
 
 def _month_range(year: int, month: int):
@@ -506,12 +515,7 @@ async def get_financial_data(
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
                        posted_at,
-                       CASE
-                         WHEN source = 'ofx' THEN false
-                         WHEN source = 'open_finance'
-                           THEN COALESCE((efeitos->>'time_known')::boolean, false)
-                         ELSE true
-                       END AS has_time
+                       {LAUNCH_HAS_TIME_SQL} AS has_time
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
@@ -531,8 +535,13 @@ async def get_financial_data(
         # em vez de tudo no mês da compra. Pagamento da fatura é launch interna,
         # então não dobra.
         _q(
-            """
-            SELECT tipo, SUM(valor) AS total FROM (
+            f"""
+            -- `TIPO_CANON_SQL`: a linha legada 'saida' é despesa e 'entrada' é
+            -- receita. As barras de categoria (query 6) e o gráfico diário
+            -- (query 9) já contam as duas formas; se este total lesse só
+            -- 'despesa', a soma das barras PASSARIA do "Gastos do mês" e o
+            -- "sobrou este mês" sairia maior do que é.
+            SELECT {TIPO_CANON_SQL} AS tipo, SUM(valor) AS total FROM (
                 SELECT tipo, valor
                 FROM launches
                 WHERE user_id = %s
@@ -546,7 +555,7 @@ async def get_financial_data(
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
             ) merged
-            GROUP BY tipo
+            GROUP BY 1
             """,
             (
                 user_id, query_start, month_end,
@@ -557,7 +566,7 @@ async def get_financial_data(
         # `bill.period_end`, igual query 5).
         _q(
             f"""
-            SELECT (array_agg(COALESCE(categoria, 'sem categoria')
+            SELECT (array_agg(COALESCE(NULLIF(categoria, ''), '{CAT_VAZIA_LABEL}')
                               ORDER BY dt DESC))[1] AS categoria,
                    {_CAT_KEY_DONUT} AS cat_key,
                    SUM(valor) AS total,
@@ -566,7 +575,14 @@ async def get_financial_data(
                 SELECT categoria, valor, 1 AS cnt, criado_em AS dt
                 FROM launches
                 WHERE user_id = %s
-                  AND tipo = 'despesa'
+                  -- Plural: a linha LEGADA `tipo='saida'` é despesa e entrava
+                  -- na LISTA da categoria (`_TIPO_ALIASES`, db/accounts.py) sem
+                  -- entrar nesta barra. Uma 'saida' de R$ 100 + uma 'despesa' de
+                  -- R$ 5 davam donut R$ 5 × lista R$ 105 na mesma categoria e
+                  -- mês. Nenhum escritor de hoje grava 'saida' (db/accounts.py:540),
+                  -- então em base nova isto não muda número nenhum; em base com
+                  -- linha antiga, o donut passa a mostrar o valor completo.
+                  AND tipo IN ('despesa', 'saida')
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 UNION ALL
@@ -588,7 +604,7 @@ async def get_financial_data(
         ),
         # 7) Allocations (aportes do mês)
         _q(
-            """
+            f"""
             SELECT
                 CASE
                     WHEN tipo IN ('deposito_caixinha', 'saque_caixinha') THEN 'pockets'
@@ -605,7 +621,7 @@ async def get_financial_data(
               AND (
                 tipo IN ('aporte_investimento', 'deposito_caixinha',
                          'saque_caixinha', 'resgate_investimento')
-                OR (tipo = 'despesa' AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
+                OR ({TIPO_DESPESA_SQL} AND LOWER(REPLACE(COALESCE(categoria, ''), ' ', '_')) IN (
                     'investimentos', 'investimento_aporte', 'criptomoedas'
                 ))
               )
@@ -675,7 +691,7 @@ async def get_financial_data(
         # DESC vem por último e ganha o dict. Trocar para ASC inverte o
         # desempate: a tela passa a mostrar um limite e o bot a responder outro.
         _q(
-            f"SELECT categoria, budget, {cat_norm_sql('categoria')} AS cat_key "
+            f"SELECT categoria, budget, {cat_key_sql('categoria')} AS cat_key "
             "FROM category_budgets WHERE user_id = %s ORDER BY categoria DESC",
             (user_id,),
         ),
@@ -916,15 +932,20 @@ async def get_monthly_history(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
+                -- `TIPO_CANON_SQL` pelo mesmo motivo do "Gastos do mês"
+                -- (query 5 de `get_financial_data`): a barra do mês corrente
+                -- desta evolução tem que bater com aquele número, e com
+                -- `tipo IN ('receita','despesa')` a linha legada 'saida' ficava
+                -- de fora só aqui.
                 SELECT TO_CHAR(DATE_TRUNC('month', criado_em), 'YYYY-MM') AS mes,
-                       tipo, SUM(valor) AS total
+                       {TIPO_CANON_SQL} AS tipo, SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
                   AND criado_em >= DATE_TRUNC('month', NOW()) - INTERVAL '{n_months - 1} months'
                   {limit_clause}
-                  AND tipo IN ('receita', 'despesa')
+                  AND ({TIPO_RECEITA_SQL} OR {TIPO_DESPESA_SQL})
                   AND is_internal_movement = false
-                GROUP BY mes, tipo
+                GROUP BY mes, 2
                 ORDER BY mes
                 """,
                 params,
