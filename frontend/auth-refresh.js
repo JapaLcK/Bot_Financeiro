@@ -60,11 +60,43 @@
     return _refreshPromise;
   }
 
+  /** URL desta request, para as duas checagens abaixo. "" quando não dá. */
+  function _caminho(input) {
+    try {
+      const u = typeof input === "string" ? input : (input && input.url) || "";
+      return new URL(u, location.origin).pathname;
+    } catch (_) { return ""; }
+  }
+
+  /**
+   * Logout bem-sucedido → manda o service worker apagar o Cache Storage.
+   *
+   * AQUI, e não nos botões: há QUATRO caminhos de logout (dashboard.js:386,
+   * nav-auth.js:30, home.html, settings.html) e todos passam por este
+   * `POST /auth/logout`. Um helper chamado de cada botão seria a mesma linha
+   * em quatro lugares, e o quinto botão nasceria sem ela.
+   *
+   * Cinto e suspensório sobre a allowlist do service-worker.js: com ela, só
+   * asset estático entra no cache, e asset estático não tem dado de ninguém.
+   * Isto alcança o que ficou de versões anteriores num aparelho que ainda não
+   * ativou o worker novo — e o `controller` é null justamente quando não há
+   * worker no controle, caso em que não há nada a limpar.
+   */
+  function _limpaCacheNoLogout() {
+    try {
+      const sw = navigator.serviceWorker;
+      if (sw && sw.controller) sw.controller.postMessage({ type: "pb-logout" });
+    } catch (_) { /* sem SW, ou storage bloqueado: não há cache a limpar */ }
+  }
+
   window.fetch = async function(input, init) {
     // Requests pra fora da própria origem (Stripe, CDN, etc) seguem direto
     if (!_isOwnApi(input)) return _origFetch(input, init);
 
     let resp = await _origFetch(input, init);
+
+    if (resp.ok && _caminho(input) === "/auth/logout") _limpaCacheNoLogout();
+
     if (resp.status !== 401) return resp;
 
     // 401 no próprio refresh: não tenta de novo — caller redireciona pro login
