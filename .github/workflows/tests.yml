@@ -10,9 +10,19 @@ on:
 
 # Cancela runs anteriores do mesmo ref quando um novo push chega — vários
 # commits seguidos numa branch deixam de acumular runs paralelos até o fim.
+#
+# Só em `pull_request`, e isso NÃO é economia de minutos: em `push` na main o
+# `github.ref` é `refs/heads/main` para TODO push, então os merges caem no mesmo
+# grupo e cada um cancelava o anterior. Medido com `gh run list --branch main`:
+# `pytest` cancelado em fc38f31 (#143), e4b19b2 (#122) e 0db01b3 (#140), e o job
+# `frontend` vermelho em 26a111d (#123) — quatro dos dez últimos pushes sem
+# veredito, incluindo os dois PRs de dinheiro mais densos do lote. Um commit na
+# main sem suíte concluída é um commit que ninguém testou.
+# Em PR o `github.ref` é `refs/pull/N/merge`, único por PR, então lá o
+# cancelamento continua fazendo o que se espera dele.
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pytest:
