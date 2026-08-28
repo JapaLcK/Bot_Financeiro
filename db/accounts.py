@@ -118,8 +118,12 @@ def list_launches(user_id: int, limit: int = 10):
                 f"""
                 -- `posted_at` + `has_time`: MESMO par (e mesmo CASE) da lista de
                 -- uma categoria. Sem eles as duas portas divergiam em um dia nas
-                -- linhas sem hora confiável (compra no crédito e Open Finance
-                -- legado) — a divergência que `launch_day` (utils_date) fecha.
+                -- linhas sem hora confiável — aqui elas são exatamente as que o
+                -- CASE de `LAUNCH_HAS_TIME_SQL` marca como falsas. Compra no
+                -- crédito não é uma delas: ela não grava linha nenhuma em
+                -- `launches` (`add_credit_purchase`, db/cards.py), e esta query
+                -- lê só `launches`. A divergência é a que `launch_day`
+                -- (utils_date) fecha.
                 select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
                        posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
                 from launches
@@ -679,14 +683,25 @@ def list_launches_by_category(
       sequências próprias, então o id COLIDE, e a perna de crédito fixa
       `tipo='despesa'` (ver acima): um `credit_transactions.id` saindo daqui com
       tipo='despesa' faria o chamador rotear o delete pro endpoint de launches e
-      apagar OUTRO registro. Nulo na origem = colisão impossível. `data` é um
-      `date` de PAREDE no fuso do app (`day_tz`, utils_date), não o `::date` do
-      fuso da sessão; `criado_em` é o instante cheio (o editor do dashboard
+      apagar OUTRO registro. Nulo na origem = colisão impossível. `data` é o dia
+      por `launch_day` (utils_date): o `posted_at` gravado quando `has_time` é
+      falso, senão o dia de PAREDE de `criado_em` (`day_tz`); nunca o `::date`
+      do fuso da sessão. `criado_em` é o instante cheio (o editor do dashboard
       preenche "Data e hora" com ele — `data` sozinho abria o campo vazio).
-      `posted_at` + `has_time` são o mesmo par que a Visão Geral usa (query 4 do
-      dashboard, `LAUNCH_HAS_TIME_SQL`): sem eles o front caía sempre no galho
-      "só data" do `fmtLaunchWhen` e a mesma despesa saía "10/03, 00:30" numa
-      tela e "09/03" na outra.
+      Na perna de `launches`, `posted_at` + `has_time` são o mesmo par (e o mesmo
+      `LAUNCH_HAS_TIME_SQL`) que a Visão Geral usa na query 4 do dashboard: sem
+      eles o front caía sempre no galho "só data" do `fmtLaunchWhen` e a mesma
+      despesa saía "10/03, 00:30" numa tela e "09/03" na outra. Na perna de
+      CRÉDITO as duas queries DIVERGEM: aqui `has_time=false` e o dia é o da
+      COMPRA (`posted_at` = `purchased_at`, que é `date`); lá
+      (finance_bot_websocket_custom.py:461) é `true` com `posted_at` nulo e
+      `criado_em` = `credit_transactions.created_at`, o instante em que a LINHA
+      foi gravada (`created_at timestamptz default now()`, db/schema.py:604).
+      Quando os dois caem em dias diferentes — compra lançada depois, importação
+      de cartão do Open Finance — a MESMA compra sai com dia diferente nas duas
+      telas (medido: compra em 25/08 gravada em 28/08 → "25/08" aqui, "28/08,
+      HH:MM" na Visão Geral). Alinhar as duas é mudança de COMPORTAMENTO, não
+      deste comentário.
     - `categoria` também vem CRUA (NULL/'' saem como estão), pelo mesmo motivo
       de `nota`/`alvo` abaixo: o `coalesce(..., 'outros')` era um RÓTULO de
       mensagem de WhatsApp, e desde que o dashboard abre o editor por esta lista
@@ -702,9 +717,13 @@ def list_launches_by_category(
     `after` (default None, aditivo) é o "carregar mais" do dashboard: a tupla
     `(dt, fonte, ord_id)` da ÚLTIMA linha da página anterior, e a próxima página
     é `where (dt, fonte, ord_id) < after` na mesma ordem total do `order by`.
-    Os 3 chamadores do WhatsApp (core/handlers/launches.py:442, :782, :855)
-    passam `tipo`/`limit` por KEYWORD e nada mais, então nenhum deles muda de
-    comportamento.
+    `after` é seguro porque entrou no FIM da assinatura: nenhum parâmetro que já
+    existia mudou de posição, então nenhum dos 4 chamadores muda de
+    comportamento. São eles `_listar_categoria`, `_total_despesa` e
+    `_total_categoria` (core/handlers/launches.py), que passam
+    `user_id, categoria, start, end` posicionais e `tipo`/`limit` por keyword, e
+    `category_launches_route` (frontend/routes/categories.py), que passa TUDO
+    por keyword.
 
     Era `offset`, e OFFSET não fecha a corrida que este produto tem TODO DIA: o
     bot escreve no banco enquanto o dashboard está aberto. Uma linha nova entra
@@ -883,10 +902,10 @@ def list_launches_by_category(
             # cru devolve o dia no fuso da SESSÃO do Postgres (UTC na produção) e um
             # gasto das 21:30 em São Paulo sairia com o dia SEGUINTE — o MESMO
             # lançamento com dia diferente aqui e em "meus últimos lançamentos"
-            # (`list_launches`, core/handlers/launches.py). E onde não HÁ hora
-            # (compra no crédito, Open Finance importado antes de c474fba) quem
-            # manda é `posted_at` — os dois casos, e por que os importadores de
-            # HOJE ficam de fora, estão no docstring de `launch_day`.
+            # (`list_launches`, core/handlers/launches.py). E onde `has_time` é
+            # falso quem manda é `posted_at` — QUAIS linhas são essas, e por que
+            # os importadores de HOJE ficam de fora, estão no docstring de
+            # `launch_day` (utils_date), que é o dono dessa enumeração.
             "data": launch_day(r["dt"], r["posted_at"], r["has_time"]),
             "criado_em": r["dt"],
             "posted_at": r["posted_at"],

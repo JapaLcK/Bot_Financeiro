@@ -2188,6 +2188,13 @@ async function openCategoryLaunches(nome, opts) {
   // `posted_at: r.data` era o que fazia esta lista nunca mostrar hora e imprimir
   // o dia do fuso da SESSÃO do Postgres — "09/03" aqui, "10/03, 00:30" na Visão
   // Geral, mesmo lançamento.
+  // Isso vale para as linhas de `launches`. A compra no CRÉDITO CONTINUA
+  // divergindo, e não é o front: a Visão Geral manda `has_time=true` +
+  // `criado_em` = quando a LINHA foi gravada; esta lista manda `has_time=false`
+  // + `posted_at` = quando a COMPRA aconteceu (docstring de
+  // `list_launches_by_category`, db/accounts.py). Compra em 25/08 gravada em
+  // 28/08 sai "25/08" aqui e "28/08, HH:MM" lá — medido. Alinhar as duas é
+  // mudança de comportamento, não de comentário.
   // `nota`, `alvo` e `criado_em` vêm CRUS — o editor pré-preenche a partir deles,
   // e fabricar `nota` a partir de `descricao` (que é o ALVO quando existe)
   // gravava o alvo por cima da nota real ao salvar. `id` já vem nulo no crédito

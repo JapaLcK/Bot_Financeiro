@@ -28,10 +28,12 @@ sessão em `Etc/UTC`, dentro da faixa.
 """
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import db
+from db.connection import close_pool
 from core.handlers.credit import try_handle_natural_credit_purchase
 from core.handlers.launches import list_launches, spend_query
 from utils_date import _tz, today_tz
@@ -867,10 +869,17 @@ def test_categoria_normal_nao_virou_sem_categoria(pro_user_id):
 # `offset` (`limit %s offset %s` com o número de linhas já vistas) em
 # db/accounts.py — `test_lancamento_novo_no_meio_nao_repete_nem_come_linha` fica
 # vermelho.
+# Controle NEGATIVO da ORDEM TOTAL, medido nos dois planos: as três mutações do
+# `order by` (`fonte desc`→`fonte asc`, `fonte` REMOVIDO e `ord_id desc`→
+# `ord_id asc`) deixam `test_ordem_e_total_com_credito_e_launches_no_mesmo_dia`
+# vermelho; e o `<` do keyset virado `<=` deixa 4 dos 34 testes deste ARQUIVO
+# vermelhos em 2,1s (na suíte inteira são 6, com os 2 de tests/
+# test_routes_categories.py) — em vez de pendurar, que era o comportamento antigo.
 # Controle POSITIVO: `test_paginas_nao_repetem_nem_pulam_linha` (sem escrita
 # concorrente, a paginação continua idêntica) e
-# `test_after_default_nao_muda_os_3_chamadores_do_whatsapp` (o parâmetro novo é
-# aditivo — os 3 chamadores do bot passam `tipo`/`limit` por keyword e nada mais).
+# `test_after_default_nao_muda_os_3_chamadores_do_whatsapp` (o parâmetro novo
+# entrou no FIM da assinatura — nenhum posicional que já existia mudou de lugar,
+# e os 4 chamadores continuam vendo a primeira página).
 
 def _n_lancamentos(user_id, n, categoria="lazer"):
     for i in range(n):
@@ -881,7 +890,21 @@ def _n_lancamentos(user_id, n, categoria="lazer"):
 
 
 def _paginado(user_id, categoria, pagina, **kw):
-    """Percorre a lista inteira pelo cursor, como o "Carregar mais" da tela."""
+    """Percorre a lista inteira pelo cursor, como o "Carregar mais" da tela.
+
+    O que faz o laço terminar é o CURSOR ANDAR: `next_after` é a chave da última
+    linha da página, e `where (dt, fonte, ord_id) < after` só pode devolver
+    chave ESTRITAMENTE MENOR. Um `<`→`<=` no keyset devolve a última linha de
+    novo — na página final o cursor para de andar e o `while True:` PENDURA até
+    o timeout do job do CI, que é sinal pior que vermelho. Afirmar o avanço
+    estrito para o laço nomeando a causa certa.
+
+    Um teto de LINHAS (`n_total` da primeira página) não serve: uma linha que
+    entra ABAIXO do cursor no meio da paginação — lançamento retroativo, import
+    de extrato/OFX, a corrida normal deste produto — faz a soma das páginas
+    passar do `n_total` da primeira SEM bug nenhum, e a mensagem culparia o
+    keyset por algo que ele acertou.
+    """
     todas, after = [], None
     while True:
         pag, res = db.list_launches_by_category(
@@ -889,6 +912,13 @@ def _paginado(user_id, categoria, pagina, **kw):
         todas += pag
         if not pag:
             return todas, res
+        assert after is None or res["next_after"] < after, (
+            "o CURSOR NÃO ANDOU — isto não é asserção de conteúdo. "
+            f"{after} → {res['next_after']}, com limit={pagina} e a página "
+            f"{[(r['fonte'], r['valor']) for r in pag]}. O keyset está "
+            "devolvendo a mesma linha: o `<` de `(dt, fonte, ord_id)` virou "
+            "`<=`? (db/accounts.py, `after_sql`)"
+        )
         after = res["next_after"]
 
 
@@ -959,8 +989,14 @@ def test_after_alem_do_fim_volta_vazio_com_total_certo(pro_user_id):
 
 def test_after_default_nao_muda_os_3_chamadores_do_whatsapp(pro_user_id):
     """Aditivo: quem não passa `after` continua vendo a primeira página.
-    Os 3 chamadores (core/handlers/launches.py:442, :782, :855) passam
-    `tipo`/`limit` por KEYWORD — a assinatura nova não desloca nada."""
+
+    O que torna a mudança segura é `after` ter entrado no FIM da assinatura, não
+    o estilo de chamada: os 3 do WhatsApp (`_listar_categoria`, `_total_despesa`
+    e `_total_categoria`, core/handlers/launches.py) passam
+    `user_id, categoria, start, end` posicionais e só `tipo`/`limit` por
+    keyword. O 4º chamador é a rota (`category_launches_route`,
+    frontend/routes/categories.py), que passa tudo por keyword.
+    """
     _n_lancamentos(pro_user_id, 4)
     sem, r1 = db.list_launches_by_category(pro_user_id, "lazer", tipo="despesa", limit=2)
     com, r2 = db.list_launches_by_category(
@@ -969,20 +1005,155 @@ def test_after_default_nao_muda_os_3_chamadores_do_whatsapp(pro_user_id):
     assert r1 == r2
 
 
+def _ordem_sob_plano(user_id, categoria, pgoptions):
+    """A lista inteira relida com o PLANNER forçado.
+
+    `PGOPTIONS` é lido pelo libpq na hora de CONECTAR, então o pool precisa ser
+    reaberto — `close_pool` (db/connection.py) existe pra suíte e faz a próxima
+    chamada reabrir. Os dois planos são passados EXPLÍCITOS (`on` e `off`, não
+    "o ambiente" e `off`) pra medição não virar tautologia quando quem roda o
+    pytest já exportou `PGOPTIONS`.
+
+    A mutação que PRECISA deste helper é o DESEMPATE REMOVIDO (`order by dt desc,
+    user_seq desc nulls last`): ali as linhas de crédito ficam genuinamente
+    empatadas e a permutação depende do plano. As três do bloco "Controle
+    NEGATIVO da ORDEM TOTAL" (`fonte asc`, `fonte` removido, `ord_id asc`) NÃO
+    dependem dele — elas ficam vermelhas já no assert de ordem estrita, com
+    plano nenhum forçado.
+    """
+    antes = os.environ.get("PGOPTIONS")
+    try:
+        # dentro do try: um `close_pool()` que levantasse aqui vazaria o
+        # `PGOPTIONS` deste teste para o resto da suíte.
+        os.environ["PGOPTIONS"] = pgoptions
+        close_pool()
+        rows, _ = db.list_launches_by_category(user_id, categoria, limit=50)
+        return [(r["fonte"], r["valor"]) for r in rows]
+    finally:
+        if antes is None:
+            os.environ.pop("PGOPTIONS", None)
+        else:
+            os.environ["PGOPTIONS"] = antes
+        close_pool()
+
+
 def test_ordem_e_total_com_credito_e_launches_no_mesmo_dia(pro_user_id):
     """A perna do crédito tem `user_seq` NULO: era ali que o desempate faltava.
-    Sem ordem total, o keyset pula ou repete exatamente como o OFFSET."""
-    cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")
-    db.add_launch_and_update_balance(
-        pro_user_id, "despesa", 11, "remedio", None,
-        categoria=cat, criado_em=_hoje_as(9),
-    )
-    inteiro, resumo = db.list_launches_by_category(pro_user_id, cat, limit=50)
-    assert resumo["n_total"] == len(inteiro) >= 2
+    Sem ordem total, o keyset pula ou repete exatamente como o OFFSET.
 
-    por_pagina, _ = _paginado(pro_user_id, cat, 1)
-    assert ([(r["fonte"], r["valor"]) for r in por_pagina]
-            == [(r["fonte"], r["valor"]) for r in inteiro]), (por_pagina, inteiro)
+    TRÊS compras no MESMO `purchased_at`, o launch semeado no MESMO instante
+    delas e com o MESMO `id` de uma delas — o empate é o cenário inteiro, e cada
+    peça do seed exercita um componente da chave `(dt, fonte, ord_id)` (o mapa
+    está no comentário do seed, abaixo). Com duas pernas em horas diferentes (o
+    que este teste fazia antes) `fonte` nunca desempata nada: medido,
+    `fonte desc`→`fonte asc` passava pelos 5071 testes E perdia linha de
+    verdade na paginação.
+    """
+    cat = _compra_no_credito(pro_user_id, "gastei 11 no crédito na farmacia")
+    for texto in ("gastei 22 no crédito na farmacia",
+                  "gastei 33 no crédito na farmacia"):
+        assert try_handle_natural_credit_purchase(pro_user_id, texto) is not None
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select categoria, purchased_at from credit_transactions "
+                    "where user_id=%s", (pro_user_id,))
+        compras = cur.fetchall()
+    # O empate é o cenário; se a inferência espalhar as 3 em categorias
+    # diferentes, ou se as datas divergirem, o teste deixa de medir o que promete.
+    assert len(compras) == 3, compras
+    assert {(r["categoria"], r["purchased_at"]) for r in compras} == {
+        (cat, compras[0]["purchased_at"])}, compras
+
+    # O launch entra no MESMO instante das compras. O `dt` da perna de crédito é
+    # `purchased_at::timestamp`, que o Postgres lê no fuso da SESSÃO (`PGTZ`):
+    # uma hora fixa em Python (`_hoje_as(9)`) empatava com ele só por
+    # coincidência de fuso — sob `TZ=Asia/Tokyo` empatava, em São Paulo não.
+    # Lendo o `dt` de volta e semeando com ELE, o empate existe em qualquer
+    # `TZ`/`PGTZ`.
+    so_credito, _ = db.list_launches_by_category(pro_user_id, cat, limit=1)
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 99, "remedio", None,
+        categoria=cat, criado_em=so_credito[0]["criado_em"],
+    )
+
+    # E o `id` do launch passa a COLIDIR com o da compra do MEIO (22) — o 3º
+    # componente da chave, que nenhum seed produzia: `launches` e
+    # `credit_transactions` têm sequências próprias e os números não batem por
+    # acaso. Sem a colisão, tirar `fonte` INTEIRO do `order by`
+    # (`order by dt desc, ord_id desc`) passava pelos 34 testes deste arquivo E
+    # perdia linha na paginação de verdade — medido nos dois planos. Ela tem que
+    # ser no MEIO: o keyset compara `(dt, fonte, ord_id)` e 'launches' > 'credito',
+    # então o launch só se perde quando existe uma compra ACIMA dele virando
+    # cursor (a de 33). Colidido no topo, a paginação sobrevive e o teste volta a
+    # não medir.
+    #
+    # A porta de produção não deixa escolher `id`, daí o UPDATE cru. Os números
+    # saem de max+1 das DUAS tabelas, pra não esbarrar em linha de outro teste no
+    # banco compartilhado, e a compra de 33 sobe junto pra perna de crédito
+    # manter `valor` crescendo com `ord_id` (11 < 22 < 33) — é isso que o assert
+    # de ordem estrita lê.
+    #
+    # QUEM MEDE O QUÊ no seed, pra ninguém "simplificar" e voltar a não medir:
+    # as 3 compras no mesmo `purchased_at` + o launch no mesmo `dt` medem `dt`
+    # (sem elas o `order by` desempata sozinho e o resto é decoração); as 3
+    # compras com ids distintos medem `ord_id`; ESTA colisão mede `fonte`.
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select greatest((select max(id) from launches), "
+                    "(select max(id) from credit_transactions)) + 1 as novo")
+        novo = cur.fetchone()["novo"]
+        for tabela, valor, id_novo in (("credit_transactions", 33, novo + 1),
+                                       ("credit_transactions", 22, novo),
+                                       ("launches", 99, novo)):
+            cur.execute(f"update {tabela} set id=%s where user_id=%s and valor=%s",
+                        (id_novo, pro_user_id, valor))
+            assert cur.rowcount == 1, (
+                f"o seed não colidiu o id: {cur.rowcount} linha(s) de {tabela} "
+                f"com valor={valor}")
+
+    inteiro, resumo = db.list_launches_by_category(pro_user_id, cat, limit=50)
+    assert resumo["n_total"] == len(inteiro) == 4, (resumo, inteiro)
+    assert len({r["criado_em"] for r in inteiro}) == 1, (
+        "as 4 linhas deviam empatar em `dt` — sem empate `fonte` e `ord_id` não "
+        f"desempatam nada e o teste deixa de medir: {[r['criado_em'] for r in inteiro]}")
+
+    # A chave do keyset é `(dt, fonte, ord_id)`. `ord_id` não sai na LINHA (é o
+    # id cru das duas tabelas, ver a docstring de `list_launches_by_category`),
+    # então `valor` entra como proxy: 11 < 22 < 33 crescem junto com o id das
+    # três compras. Estritamente decrescente = a ordem é TOTAL, que é o que o
+    # `order by` promete — e isso não depende de paginação nenhuma.
+    chaves = [(r["criado_em"], r["fonte"], r["valor"]) for r in inteiro]
+    assert all(a > b for a, b in zip(chaves, chaves[1:])), (
+        "a ordem não é total — ou duas linhas têm a mesma chave de keyset, ou a "
+        f"lista não desce por (dt, fonte, ord_id): {chaves}")
+
+    esperado = [(r["fonte"], r["valor"]) for r in inteiro]
+    paginado = [(r["fonte"], r["valor"]) for r in _paginado(pro_user_id, cat, 1)[0]]
+    assert paginado == esperado, f"paginação perdeu/repetiu: {paginado} != {esperado}"
+
+    # A MESMA lista sob dois planos. Isto AUMENTA a chance de pegar a ordem
+    # instável; não a garante — e não é "estrutural". Sem desempate as linhas de
+    # crédito ficam GENUINAMENTE empatadas e o Postgres pode emitir qualquer
+    # permutação, inclusive a certa: com
+    # `enable_indexscan=off enable_bitmapscan=off` o Sort devolve exatamente a
+    # decrescente e o assert de cima fica VERDE por acaso (medido para N = 3, 5,
+    # 8, 13, 21 e 34 linhas empatadas — aumentar o seed não compra nada, o
+    # planner não sorteia permutação, é determinístico por plano). Ler sob dois
+    # planos pega o caso em que eles DISCORDAM — no seed deste teste eles
+    # discordam e o negativo fica vermelho (medido: 1 failed, 33 passed nos DOIS
+    # planos, com `order by dt desc, user_seq desc nulls last`). Mas a ordem de um
+    # empate depende do plano E do estado físico/estatístico da tabela, e existe
+    # estado em que os dois CONCORDAM e o negativo fica VERDE: medido num seed sem
+    # a colisão de `id`, um `ANALYZE` nas três tabelas colapsou dez opções de
+    # planner na mesma permutação, e com o heap em ordem física decrescente (três
+    # `UPDATE` + `ANALYZE`, o que dado de produção sofre) o negativo passou. Com o
+    # seed que ficou o `ANALYZE` já não vira o teste — mas isso é uma medição, não
+    # garantia. Postgres 15 local; o CI é 16.
+    com_indice = _ordem_sob_plano(
+        pro_user_id, cat, "-c enable_indexscan=on -c enable_bitmapscan=on")
+    sem_indice = _ordem_sob_plano(
+        pro_user_id, cat, "-c enable_indexscan=off -c enable_bitmapscan=off")
+    assert com_indice == sem_indice == esperado, (
+        "a ordem depende do PLANO, logo o `order by` não é total: "
+        f"com índice {com_indice}, sem índice {sem_indice}, esperado {esperado}")
 
 
 # ══ D3b. As DUAS listagens têm que dizer o mesmo dia ════════════════════════

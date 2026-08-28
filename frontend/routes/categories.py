@@ -122,16 +122,19 @@ async def category_launches_route(
         start = earliest
 
     after = _parse_cursor(cursor)
+    # Tudo por KEYWORD: `list_launches_by_category` tem 8 parâmetros e 6 deles
+    # são opcionais — posicional, inserir um parâmetro na assinatura troca
+    # `tipo` por `limit` sem erro nenhum, e a rota devolve outra lista calada.
     rows, resumo = await asyncio.to_thread(
         list_launches_by_category,
-        user_id,
-        cat,
-        start,
-        end,
-        tipo,
-        min(int(limit), 100),
-        include_internal,
-        after,
+        user_id=user_id,
+        categoria=cat,
+        start_date=start,
+        end_date=end,
+        tipo=tipo,
+        limit=min(int(limit), 100),
+        include_internal=include_internal,
+        after=after,
     )
     # `next_after` traz `ord_id`, que é o id CRU das duas tabelas — sai da LINHA
     # (onde seria handle de delete) e volta só dentro do cursor, em texto claro e
