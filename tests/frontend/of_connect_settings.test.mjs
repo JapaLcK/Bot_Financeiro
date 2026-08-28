@@ -368,14 +368,18 @@ test("o CTA do modal não estica pelo rodapé nem espreme o nome do banco", asyn
     return {
       botao: Math.round(r(go).width),
       rodape: Math.round(r(go.parentElement).width),
-      alturaRotulo: Math.round(r(cnt).height),
+      rotulo: Math.round(r(cnt).width),
     };
   });
 
+  // Proporções, não pixels: altura de linha e largura de texto mudam com a
+  // fonte, e um limiar em px passa no Windows e reprova no Ubuntu do CI (foi o
+  // que aconteceu — 24px aqui, 32px lá, com o layout correto nos dois). O que
+  // não depende de fonte é quanto do rodapé cada um ocupa.
   assert.ok(m.botao < m.rodape / 2,
     `o CTA ocupou ${m.botao}px de um rodapé de ${m.rodape}px — voltou a esticar`);
-  assert.ok(m.alturaRotulo <= 24,
-    `o nome do banco quebrou em mais de uma linha (${m.alturaRotulo}px)`);
+  assert.ok(m.rotulo > m.rodape * 0.4,
+    `sobrou só ${m.rotulo}px de ${m.rodape}px pro nome do banco — o CTA espremeu o rótulo`);
   await page.__ctx.close();
 });
 
