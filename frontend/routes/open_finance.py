@@ -16,6 +16,9 @@ import os
 import random
 import time
 
+import psycopg
+from psycopg_pool import PoolTimeout
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -192,7 +195,16 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # num prazo que já venceu.
         resto = None if budget_ms is None else max(
             1, budget_ms - int((time.monotonic() - t0) * 1000))
-        return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
+        try:
+            return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
+        except (PoolTimeout, psycopg.errors.QueryCanceled):
+            # O teto da escrita estourando é o caminho ESPERADO de sobrecarga, e
+            # sem isto ele virava 500 — enquanto o teto do lock, que é o mesmo
+            # fenômeno, dava o 503 recuperável documentado (Codex #166, P2).
+            # `QueryCanceled` desfaz a transação, então nada ficou pela metade:
+            # devolver "não gravou" é honesto, e o chamador já sabe retentar e
+            # terminar em 503.
+            return None, False
 
 
 async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:

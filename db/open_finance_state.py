@@ -557,6 +557,20 @@ def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
         _lock_slots().release()
         raise
     try:
+        if budget_ms is not None:
+            # RECONTA depois do connect. Dar ao advisory o mesmo `restante_ms`
+            # de antes de conectar fazia as duas etapas somarem quase o DOBRO da
+            # cota — o mesmo erro de "cada etapa ganha o orçamento inteiro" que
+            # o teto total veio consertar, um nível abaixo (Codex #166, P2).
+            restante_ms = teto_ms - int((time.monotonic() - t0) * 1000)
+            if restante_ms < 1:
+                # Sem `close`/`release` aqui: o `finally` abaixo faz os dois. A
+                # primeira versão fazia à mão E deixava o `finally` repetir —
+                # fechar duas vezes é inócuo, mas `Semaphore.release()` duplo
+                # AUMENTA o contador e afrouxa o teto de conexões dedicadas para
+                # sempre. Pego por teste, não por leitura.
+                yield False
+                return
         conn.execute("select set_config('lock_timeout', %s, false)", (f"{restante_ms}ms",))
         try:
             conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))

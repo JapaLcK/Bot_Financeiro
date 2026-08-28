@@ -2,6 +2,7 @@ import re
 import unicodedata
 from decimal import Decimal
 from datetime import datetime, time, timedelta
+from time import monotonic
 from uuid import NAMESPACE_OID, uuid5
 
 from psycopg.types.json import Jsonb
@@ -459,9 +460,15 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
     now = datetime.now(_tz())
 
     espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
+    t0 = monotonic()
     with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
             if budget_ms is not None:
+                # RECONTA depois de pegar a conexão: dar à query o `budget_ms`
+                # cheio de novo deixava as duas esperas somarem quase o dobro da
+                # cota (Codex #166, P2). Piso de 1ms — com a conexão na mão, o
+                # que se garante é que ela não fica parada para sempre.
+                budget_ms = max(1, budget_ms - int((monotonic() - t0) * 1000))
                 # A espera do POOL é só metade do problema: a query em si pode
                 # ficar parada numa linha travada. O terceiro argumento `true`
                 # é o LOCAL — morre com a transação, então não vaza para a

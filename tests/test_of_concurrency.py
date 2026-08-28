@@ -924,3 +924,205 @@ def test_gravar_reconexao_usa_UMA_conexao_do_pool(user_id, monkeypatch):
 
     assert len(aberturas) == 1, f"a escrita pegou {len(aberturas)} conexões do pool"
     assert aberturas == [5.0], f"o prazo tem de chegar ao pool: {aberturas}"
+
+
+# ── Codex #166, 3 apontamentos de uma vez: etapa sequencial não pode ganhar o
+# orçamento de novo ────────────────────────────────────────────────────────────
+# Mesma classe, três lugares. Um teto "total" que cada etapa reinicia não é teto:
+# duas etapas em sequência somam o dobro. Eu tinha enumerado as esperas da ROTA e
+# não as de DENTRO de cada função — o `connect` antes do advisory, e o pool antes
+# da query.
+
+def test_advisory_lock_desconta_o_tempo_do_connect(monkeypatch):
+    """O `lock_timeout` sai do que sobrou DEPOIS do connect, não do que havia
+    antes dele.
+
+    CONTROLE NEGATIVO: não recontar (usar o `restante_ms` pré-connect) devolve
+    `9000ms` em vez de `6000ms` — a soma das duas etapas quase dobra a cota."""
+    from db import open_finance_state as ofs
+
+    relogio = _RelogioFake()
+    executados = []
+
+    class _ConnFake:
+        def execute(self, sql, params=None):
+            executados.append((sql, params))
+
+        def close(self):
+            pass
+
+    class _Vaga:
+        def acquire(self, timeout=None):
+            relogio.anda(1.0)            # a vaga levou 1s
+            return True
+
+        def release(self):
+            pass
+
+    def _connect_lento(*a, **kw):
+        relogio.anda(3.0)                # o connect levou mais 3s
+        return _ConnFake()
+
+    monkeypatch.setattr(ofs.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(ofs, "_lock_slots", lambda: _Vaga())
+    monkeypatch.setattr(ofs.psycopg, "connect", _connect_lento)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+
+    with ofs.pluggy_item_lock("item-reconta", budget_ms=10000) as got:
+        assert got is True
+
+    timeouts = [p[0] for sql, p in executados if p and "lock_timeout" in sql]
+    assert timeouts == ["6000ms"], \
+        f"10000 − 1000 (vaga) − 3000 (connect) = 6000; veio {timeouts}"
+
+
+def test_connect_que_come_o_orcamento_nao_tenta_o_advisory(monkeypatch):
+    """Se o connect esgota a cota, não sobra lock para pedir — e pedir com
+    `0ms` seria espera INFINITA no Postgres."""
+    from db import open_finance_state as ofs
+
+    relogio = _RelogioFake()
+    executados = []
+    fechou = []
+
+    class _ConnFake:
+        def execute(self, sql, params=None):
+            executados.append(sql)
+
+        def close(self):
+            fechou.append(True)
+
+    vagas = 0
+
+    class _Vaga:
+        def acquire(self, timeout=None):
+            return True
+
+        def release(self):
+            nonlocal vagas
+            vagas += 1
+
+    def _connect_lentissimo(*a, **kw):
+        relogio.anda(9.0)
+        return _ConnFake()
+
+    monkeypatch.setattr(ofs.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(ofs, "_lock_slots", lambda: _Vaga())
+    monkeypatch.setattr(ofs.psycopg, "connect", _connect_lentissimo)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+
+    with ofs.pluggy_item_lock("item-sem-tempo", budget_ms=5000) as got:
+        assert got is False
+
+    assert executados == [], f"não podia nem configurar o lock: {executados}"
+    # UMA vez. A primeira versão fechava à mão E deixava o `finally` repetir —
+    # o `close` duplo é inócuo, mas o `Semaphore.release()` que vinha junto
+    # AUMENTA o contador e afrouxa o teto de conexões dedicadas para sempre.
+    assert fechou == [True], f"a conexão foi fechada {len(fechou)}× : {fechou}"
+    assert vagas == 1, f"o semáforo foi liberado {vagas}× — release duplo vaza vaga"
+
+
+def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
+    """O `statement_timeout` sai do que sobrou DEPOIS do pool.
+
+    CONTROLE NEGATIVO: não recontar manda `5000ms` em vez de `3000ms` — as duas
+    esperas somariam quase o dobro da cota."""
+    from contextlib import contextmanager
+
+    import db.open_finance as ofdb
+    import db.users as usersdb
+
+    relogio = _RelogioFake()
+    real = ofdb.get_conn
+    vistos = []
+
+    class _CursorEspiao:
+        def __init__(self, cur):
+            self._cur = cur
+
+        def execute(self, sql, params=None):
+            if params and "statement_timeout" in str(sql):
+                vistos.append(params[0])
+            return self._cur.execute(sql, params)
+
+        def __getattr__(self, nome):
+            return getattr(self._cur, nome)
+
+        def __enter__(self):
+            self._cur.__enter__()
+            return self
+
+        def __exit__(self, *a):
+            return self._cur.__exit__(*a)
+
+    class _ConnEspiao:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def cursor(self, *a, **kw):
+            return _CursorEspiao(self._conn.cursor(*a, **kw))
+
+        def __getattr__(self, nome):
+            return getattr(self._conn, nome)
+
+    @contextmanager
+    def _pool_lento(timeout=None):
+        relogio.anda(2.0)                # o pool levou 2s do orçamento
+        with real() as conn:
+            yield _ConnEspiao(conn)
+
+    monkeypatch.setattr(ofdb, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(ofdb, "get_conn", _pool_lento)
+    monkeypatch.setattr(usersdb, "get_conn", _pool_lento)
+
+    ofdb.save_pluggy_open_finance_item(
+        user_id, {"id": f"item-stmt-{user_id}", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}},
+        budget_ms=5000)
+
+    assert vistos == ["3000ms"], \
+        f"5000 − 2000 (espera do pool) = 3000; veio {vistos}"
+
+
+@pytest.mark.parametrize("erro", [
+    "pool",
+    "query",
+])
+def test_teto_da_escrita_estourado_vira_503_e_nao_500(user_id, monkeypatch, erro):
+    """Estourar o teto da ESCRITA é o mesmo fenômeno que estourar o do lock, e
+    tem de terminar igual: 503 recuperável, não 500.
+
+    CONTROLE NEGATIVO: tirar o `except (PoolTimeout, QueryCanceled)` de
+    `_salva_item_sob_lock` faz os dois casos subirem como 500."""
+    from contextlib import contextmanager
+
+    import psycopg
+    from fastapi import HTTPException
+    from psycopg_pool import PoolTimeout
+
+    from db.open_finance_state import _lock_key  # noqa: F401  (documenta a origem)
+
+    @contextmanager
+    def _lock_livre(item_id, *, budget_ms=None):
+        yield True
+
+    def _estoura(uid, remote, **kw):
+        raise (PoolTimeout("pool cheio") if erro == "pool"
+               else psycopg.errors.QueryCanceled("statement timeout"))
+
+    async def _log(*a, **kw):
+        return None
+
+    async def _dorme(_s):
+        return None
+
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_livre)
+    monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item", _estoura)
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-503"))
+
+    assert exc.value.status_code == 503
+    assert "tente de novo" in str(exc.value.detail).lower()
