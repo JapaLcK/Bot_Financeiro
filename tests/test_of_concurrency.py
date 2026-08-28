@@ -406,7 +406,7 @@ def test_reconexao_grava_dentro_do_lock_de_escrita(user_id, monkeypatch):
 
     monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_espiao)
     monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
-                        lambda uid, remote: ordem.append(("save", uid)) or {"id": 1})
+                        lambda uid, remote, **kw: ordem.append(("save", uid)) or {"id": 1})
 
     conexao, sob_lock = of_routes._salva_item_sob_lock(user_id, {"id": "item-lk"}, "item-lk")
 
@@ -856,3 +856,71 @@ def test_prazo_de_reconexao_recusa_config_sem_sentido(monkeypatch, valor, espera
     primeiros casos vermelhos."""
     monkeypatch.setenv("OF_RECONNECT_DEADLINE_MS", valor)
     assert of_routes._prazo_reconexao_ms() == esperado, porque
+
+
+def test_escrita_da_reconexao_herda_o_que_sobrou_do_prazo(user_id, monkeypatch):
+    """O orçamento não para no lock: o que sobra vai para a ESCRITA.
+
+    Sem isto, `save_pluggy_open_finance_item` esperava o pool (até
+    `DB_CONNECT_TIMEOUT`, 30s) FORA do prazo prometido — e podia commitar depois
+    de o cliente ter desistido (Codex #166, P2).
+
+    CONTROLE NEGATIVO: chamar `save_pluggy_open_finance_item(user_id, remote)`
+    sem o `budget_ms` deixa este teste vermelho.
+    CONTROLE POSITIVO: o caso `budget_ms=None` prova que quem não pede prazo
+    (o sync, os scripts) continua sem nenhum."""
+    from contextlib import contextmanager
+
+    recebidos = []
+    relogio = _RelogioFake()
+
+    @contextmanager
+    def _lock_que_demora(item_id, *, budget_ms=None):
+        if budget_ms is not None:
+            relogio.anda(3.0)          # o lock comeu 3s do orçamento
+        yield True
+
+    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_que_demora)
+    monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
+                        lambda uid, remote, **kw: recebidos.append(kw.get("budget_ms")) or {"id": 9})
+
+    of_routes._salva_item_sob_lock(user_id, {"id": "i"}, "item-esc", 10000)
+    of_routes._salva_item_sob_lock(user_id, {"id": "i"}, "item-esc", None)
+
+    assert recebidos[0] == 7000, \
+        f"a escrita devia herdar 10000-3000, veio {recebidos[0]}"
+    assert recebidos[1] is None, "sem prazo pedido, a escrita não ganha teto"
+
+
+def test_gravar_reconexao_usa_UMA_conexao_do_pool(user_id, monkeypatch):
+    """`ensure_user` abria a própria conexão antes do upsert: duas aquisições,
+    cada uma podendo esperar `DB_CONNECT_TIMEOUT` fora do prazo. Agora é
+    `ensure_user_tx` na MESMA transação — metade das esperas, e o par virou
+    atômico.
+
+    CONTROLE NEGATIVO: voltar a chamar `ensure_user(user_id)` antes do `with`
+    deixa a contagem em 2."""
+    import db.open_finance as ofdb
+    import db.users as usersdb
+
+    aberturas = []
+    real = ofdb.get_conn
+
+    def _espiao(timeout=None):
+        aberturas.append(timeout)
+        return real(timeout=timeout)
+
+    # Os DOIS módulos: `db/users.py` faz `from .connection import get_conn`, e o
+    # nome já está ligado lá — espionar só o `db.open_finance` deixava o
+    # `ensure_user` invisível, e o controle negativo passava verde (medido).
+    monkeypatch.setattr(ofdb, "get_conn", _espiao)
+    monkeypatch.setattr(usersdb, "get_conn", _espiao)
+
+    ofdb.save_pluggy_open_finance_item(
+        user_id, {"id": f"item-1conn-{user_id}", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}},
+        budget_ms=5000)
+
+    assert len(aberturas) == 1, f"a escrita pegou {len(aberturas)} conexões do pool"
+    assert aberturas == [5.0], f"o prazo tem de chegar ao pool: {aberturas}"

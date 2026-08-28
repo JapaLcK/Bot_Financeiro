@@ -161,10 +161,23 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     compra de cartão da autorização velha. O fallback anulava o conserto no único
     caso em que ele importa.
     """
+    t0 = time.monotonic()
     with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
-        return save_pluggy_open_finance_item(user_id, remote), True
+        # O que sobrou DEPOIS de pegar o lock vai para a escrita. Sem isto o
+        # orçamento parava aqui: `save_pluggy_open_finance_item` esperava o pool
+        # (até `DB_CONNECT_TIMEOUT`) fora do prazo, e podia COMMITAR depois de o
+        # cliente ter desistido — o mesmo defeito que o prazo veio consertar, um
+        # degrau adiante (Codex #166, P2).
+        #
+        # Piso de 1ms em vez de desistir: já temos o lock, e abrir mão dele aqui
+        # deixaria a reconexão sem gravar tendo pago o preço todo. O que se
+        # garante é que a escrita não espera INDEFINIDAMENTE, não que ela caiba
+        # num prazo que já venceu.
+        resto = None if budget_ms is None else max(
+            1, budget_ms - int((time.monotonic() - t0) * 1000))
+        return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
 
 
 async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:

@@ -16,7 +16,7 @@ from .cards import (
     remove_single_credit_transaction,
 )
 from .connection import get_conn
-from .users import ensure_user
+from .users import ensure_user, ensure_user_tx
 
 
 def _rollback_imported_of(rows: list[dict]) -> None:
@@ -418,8 +418,19 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
             return cur.fetchall()
 
 
-def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
-    ensure_user(user_id)
+def save_pluggy_open_finance_item(user_id: int, item: dict, *,
+                                  budget_ms: int | None = None) -> dict:
+    """Grava (ou reconecta) o item da Pluggy.
+
+    `budget_ms` é o teto de espera desta escrita, para quem tem cliente HTTP
+    esperando — a rota de reconexão. Sem ele, comportamento de sempre.
+
+    O `ensure_user` saiu daqui e virou `ensure_user_tx` DENTRO da mesma
+    transação do upsert: eram duas aquisições de conexão do pool (até 30s cada,
+    fora do prazo prometido), e o `ensure_user_tx` já existia exatamente para
+    isto. De quebra o par vira atômico — antes, a linha de `users` podia ser
+    criada e o upsert falhar em seguida.
+    """
 
     if not isinstance(item, dict):
         raise ValueError("Item Pluggy inválido.")
@@ -447,8 +458,20 @@ def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
     status = item.get("status") or item.get("executionStatus") or "UPDATING"
     now = datetime.now(_tz())
 
-    with get_conn() as conn:
+    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
+    with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
+            if budget_ms is not None:
+                # A espera do POOL é só metade do problema: a query em si pode
+                # ficar parada numa linha travada. O terceiro argumento `true`
+                # é o LOCAL — morre com a transação, então não vaza para a
+                # próxima vez que esta conexão for usada.
+                # `SET` cru não serve: não aceita parâmetro (medido, `syntax
+                # error at or near "$1"`). É o mesmo idioma que o
+                # `pluggy_item_lock` já usa para o `lock_timeout`.
+                cur.execute("select set_config('statement_timeout', %s, true)",
+                            (f"{budget_ms}ms",))
+            ensure_user_tx(cur, user_id)
             cur.execute(
                 """
                 insert into open_finance_connections (

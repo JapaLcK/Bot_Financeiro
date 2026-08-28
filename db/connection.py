@@ -99,9 +99,20 @@ def _reset_conn(conn) -> None:
         conn.autocommit = False
 
 
-def get_conn():
-    """Retorna um conn do pool. Compatível com `with get_conn() as conn:`."""
-    return _get_pool().connection()
+def get_conn(timeout: float | None = None):
+    """Retorna um conn do pool. Compatível com `with get_conn() as conn:`.
+
+    `timeout` (segundos) é o teto de espera POR ESTA aquisição; `None` usa o do
+    pool (`DB_CONNECT_TIMEOUT`, 30s), que é o comportamento de sempre e o de
+    todos os chamadores menos um.
+
+    Existe para quem tem cliente HTTP esperando: a rota de reconexão do Open
+    Finance promete um prazo único para a operação inteira, e sem isto a espera
+    do pool ficava fora dele — o POST podia estourar o prazo em até 30s por
+    conexão, e ainda COMMITAR depois de o cliente ter desistido (Codex #166,
+    P2). Quem não passa nada não muda em nada.
+    """
+    return _get_pool().connection(timeout=timeout)
 
 
 def close_pool() -> None:
