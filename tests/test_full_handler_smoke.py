@@ -392,6 +392,221 @@ def test_clarification_de_recorrente_nao_vira_despesa_avulsa(pro_uid, spy_ai):
 
 
 # ---------------------------------------------------------------------------
+# Porta 2 COM a IA de contexto — o caminho que a suíte nunca exercitou.
+#
+# Os casos acima passam há meses e não provavam nada sobre produção: o
+# `classify_with_context` (`core/intent_router.py`, dentro de
+# `_resolve_clarification`) é INERTE na suíte. `_classify_llm_call` devolve
+# `out_of_scope 0.0` sem `OPENAI_API_KEY` (core/intent_classifier.py), o
+# `conftest.py` não define a variável, e a fixture autouse
+# `_block_outbound_network` ainda troca `openai.OpenAI` por um cliente que
+# levanta em qualquer atributo — então exportar a chave também não resolveria.
+# `grep classify_with_context tests/` devolvia ZERO. O `if` que consome o
+# resultado nunca era entrado, e a suíte exercitava sempre o ramo protegido.
+#
+# Em produção, para conta Pro, é o outro ramo que roda. O prompt manda o
+# classificador extrair `valor` (core/intent_classifier.py), então o LLM quase
+# sempre preenche; `_ja_tem_o_valor` virava True sobre o dicionário JÁ mesclado
+# e o fluxo entrava no ramo "a resposta é a DESCRIÇÃO", que pula o filtro de
+# dano do #140 inteiro. Medido no WhatsApp: "paguei a luz" seguido de "-10"
+# gravava R$ 10,00; "132 50" gravava R$ 13.250,00; e "fatura" virava descrição
+# do gasto — a pergunta voltava como "Quanto foi no *luz - fatura*?".
+#
+# Todo teste deste bloco afirma que a IA FOI consultada. Sem isso a bateria
+# volta a ser verde e vazia, que é exatamente como o defeito sobreviveu.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def ia_de_esclarecimento(monkeypatch):
+    """Instala um `classify_with_context` que responde como o LLM responde.
+
+    Devolve a lista de chamadas — vazia significa que o caminho da IA não foi
+    tocado e o teste não mede nada.
+
+    O patch é em `core.intent_classifier`, NÃO em `core.intent_router`: o
+    import lá é dentro da função, então não existe binding de módulo no router
+    para substituir. Um `monkeypatch.setattr(router, "classify_with_context",
+    ...)` cria um atributo que ninguém lê e o teste passa sem exercitar nada.
+    """
+    chamadas: list[dict] = []
+
+    def instala(**entities):
+        import core.intent_classifier as ic
+
+        def fake(orig_text, question, answer, user_id=None):
+            chamadas.append({"orig_text": orig_text, "question": question,
+                             "answer": answer, "user_id": user_id})
+            return ic.IntentResult(
+                intent="launches.add",
+                confidence=0.9,
+                entities={"tipo": "despesa", **entities},
+                needs_clarification=False,
+            )
+
+        monkeypatch.setattr(ic, "classify_with_context", fake)
+        return chamadas
+
+    return instala
+
+
+def test_ia_de_contexto_e_mesmo_chamada_no_caminho_de_producao(pro_uid, monkeypatch):
+    """Fiação: a resposta a uma pergunta de valor chega ao LLM com o contexto.
+
+    Seam FUNDO (`_classify_llm_call`), de propósito: prova que o
+    `classify_with_context` é montado e chamado de verdade a partir do
+    `handle_incoming`, e não que o mock foi instalado. Os demais testes do
+    bloco usam o seam estreito, que dá controle sobre as entities.
+    """
+    import core.intent_classifier as ic
+
+    vistos: list[str] = []
+
+    def fake_llm(user_content, user_id):
+        vistos.append(user_content)
+        return ic.IntentResult(intent="out_of_scope", confidence=0.0)
+
+    uid = pro_uid
+    _pergunta_de_valor(uid)
+    monkeypatch.setattr(ic, "_classify_llm_call", fake_llm)
+
+    _send(uid, "132")
+
+    contexto = [c for c in vistos if "CONTEXTO DE ESCLARECIMENTO" in c]
+    assert contexto, f"o classify_with_context não foi montado: {vistos}"
+    assert "paguei a luz" in contexto[0], contexto[0]
+    assert "Quanto foi" in contexto[0], contexto[0]
+    assert '"132"' in contexto[0], contexto[0]
+
+
+# As seis formas medidas em produção. A fixture é o DISCRIMINANTE, não a
+# entrada: os mesmos textos já são verdes sem ela (bloco acima), porque sem IA
+# o fluxo cai no ramo protegido. Com `valor` preenchido pela IA, o código
+# anterior desviava para o ramo da descrição e gravava dinheiro errado.
+@pytest.mark.parametrize("resposta,esperado,medido", [
+    ("-10",       "maior que zero",       "gravava R$ 10,00"),
+    ("0,001",     "maior que zero",       "gravava R$ 0,00"),
+    ("132 50",    "Não entendi o valor",  "gravava R$ 13.250,00"),
+    ("1.23.456",  "Não entendi o valor",  "gravava R$ 123.456,00"),
+    (",50",       "Não entendi o valor",  "gravava R$ 50,00 — 100x"),
+])
+def test_ia_com_valor_nao_desvia_a_pergunta_para_o_ramo_da_descricao(
+    pro_uid, ia_de_esclarecimento, resposta, esperado, medido,
+):
+    """A recusa vale mesmo quando a IA devolve `valor` nas entities."""
+    import db
+
+    uid = pro_uid
+    _pergunta_de_valor(uid)
+    chamadas = ia_de_esclarecimento(valor=132.5)
+
+    resp = _send(uid, resposta)
+
+    assert chamadas, "a IA não foi consultada — o teste não mede nada"
+    assert esperado in resp, f"{medido}: {resp}"
+    assert "Quanto foi" in resp, f"pergunta não voltou: {resp}"
+    pend = _pendencia(uid)
+    assert pend is not None, "a pergunta morreu — usuário cai no fallback genérico"
+    assert pend["payload"]["orig_text"] == "paguei a luz", pend["payload"]
+    assert not db.list_launches(uid, limit=5), f"{medido}: gravou lançamento"
+
+
+def test_ia_com_valor_um_lancamento_so_para_virgula_com_espaco(
+    pro_uid, ia_de_esclarecimento,
+):
+    """"132, 50" é R$ 132,50 — e UM lançamento, não dois.
+
+    A porta 2 é a única das quatro que re-serializa o valor aceito de volta
+    para texto, e o `split_financial_transactions` quebra em `,\\s+` seguido de
+    dígito. Medido: `"paguei a luz - 132, 50"` virava
+    `['paguei a luz - 132', 'paguei 50']` → R$ 132 em *moradia* e R$ 50 em
+    *outros*. Este caso é o que obriga o `_cola_separador_decimal`; só a guarda
+    do ramo INVERTE os dois lançamentos em vez de eliminá-los.
+    """
+    import db
+
+    uid = pro_uid
+    _pergunta_de_valor(uid)
+    chamadas = ia_de_esclarecimento(valor=132.5)
+
+    resp = _send(uid, "132, 50")
+
+    assert chamadas, "a IA não foi consultada — o teste não mede nada"
+    lancamentos = db.list_launches(uid, limit=5)
+    assert len(lancamentos) == 1, f"esperado 1 lançamento, veio {len(lancamentos)}: {lancamentos}"
+    assert float(lancamentos[0]["valor"]) == 132.50, lancamentos[0]
+    assert "132,50" in resp, resp
+
+
+def test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta(pro_uid, ia_de_esclarecimento):
+    """"fatura" não pode virar descrição do gasto.
+
+    Medido no WhatsApp: "gastei no mercado" → "Quanto foi no *mercado*?" →
+    "fatura" → "Quanto foi no *mercado - fatura*?". O `orig_text` crescia a
+    cada turno e a palavra do usuário ficava gravada como alvo do lançamento.
+    """
+    import db
+
+    uid = pro_uid
+    _pergunta_de_valor(uid, "gastei no mercado")
+    chamadas = ia_de_esclarecimento(valor=44.0)
+
+    resp = _send(uid, "fatura")
+
+    assert chamadas, "a IA não foi consultada — o teste não mede nada"
+    assert "mercado - fatura" not in resp, f"o alvo engordou: {resp}"
+    pend = _pendencia(uid)
+    assert pend is not None, resp
+    assert pend["payload"]["orig_text"] == "gastei no mercado", pend["payload"]
+    assert not db.list_launches(uid, limit=5), "gravou com a resposta como alvo"
+
+
+def test_ia_com_valor_o_caminho_legitimo_segue_registrando(pro_uid, ia_de_esclarecimento):
+    """CONTROLE POSITIVO: pergunta de DESCRIÇÃO continua no ramo da descrição.
+
+    "gastei 50" grava `valor` no payload (core/handlers/launches.py), então a
+    pergunta é "Em que você gastou R$ 50,00?" e a resposta É a descrição. A
+    guarda lê o payload GRAVADO, então este caso não muda — e é a primeira vez
+    que ele roda com a IA no caminho, que é como ele roda em produção.
+    """
+    import db
+
+    uid = pro_uid
+    pergunta = _send(uid, "gastei 50")
+    assert "Em que você" in pergunta, pergunta
+    chamadas = ia_de_esclarecimento(valor=50.0, alvo="mercado")
+
+    resp = _send(uid, "mercado")
+
+    assert chamadas, "a IA não foi consultada — o teste não mede nada"
+    lancamentos = db.list_launches(uid, limit=5)
+    assert len(lancamentos) == 1, lancamentos
+    assert float(lancamentos[0]["valor"]) == 50.0, lancamentos[0]
+    assert "mercado" in (lancamentos[0].get("alvo") or "").lower(), lancamentos[0]
+    assert "50,00" in resp, resp
+
+
+def test_ia_com_valor_valor_legitimo_continua_passando(pro_uid, ia_de_esclarecimento):
+    """CONTROLE POSITIVO: a guarda não fechou a porta para o valor bom.
+
+    Sem este caso, o grupo passaria num código que recusa tudo — que é pior
+    que o bug (CLAUDE.md §3).
+    """
+    import db
+
+    uid = pro_uid
+    _pergunta_de_valor(uid)
+    chamadas = ia_de_esclarecimento(valor=132.5)
+
+    resp = _send(uid, "132,50")
+
+    assert chamadas, "a IA não foi consultada — o teste não mede nada"
+    lancamentos = db.list_launches(uid, limit=5)
+    assert len(lancamentos) == 1, lancamentos
+    assert float(lancamentos[0]["valor"]) == 132.50, lancamentos[0]
+    assert "132,50" in resp, resp
+
+
+# ---------------------------------------------------------------------------
 # Porta 3 (numeração em `core/intent_router.py`): a fila do `multi_launch_values`
 # (`core/handlers/launches.py::resolve_multi_launch_value`).
 #

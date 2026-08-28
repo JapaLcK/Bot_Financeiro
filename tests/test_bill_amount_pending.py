@@ -2759,25 +2759,44 @@ def test_as_quatro_portas_nao_ganharam_escrita_incondicional():
 # quatro ataques.
 # ---------------------------------------------------------------------------
 
-# (texto, valores que a `main` registra na porta 2). A porta 2 recombina a
-# resposta com o texto original ("gastei <resposta> a luz"), e em cinco delas o
-# separador dentro da frase faz o splitter de multi-lançamento criar DOIS
-# lançamentos — é o que a `main` faz, e o branch tem que fazer igual.
+# (texto, valores registrados na porta 2). A porta 2 recombina a resposta com o
+# texto original ("gastei <resposta> a luz") — é a ÚNICA das quatro que
+# re-serializa o valor de volta para texto.
+#
+# ESTA TABELA MUDOU, e a mudança é deliberada. A versão do #140 congelava seis
+# destas linhas com DOIS valores, pela regra "é o que a `main` faz, e o branch
+# tem que fazer igual". A regra era certa para o que o #140 mediu — recusa —,
+# mas aqui ela congelou um defeito: o splitter de multi-lançamento corta em
+# `,\s+` seguido de dígito (parsers.py), então uma resposta a uma pergunta de
+# UM valor virava DOIS lançamentos. Medido em produção pelo dono: "paguei a
+# luz" seguido de "132, 50" gravava R$ 132 em *moradia* e R$ 50 em *outros*.
+#
+# O princípio que decide: `"132,500"` SEM espaço já dá 132.5 hoje. O espaço
+# depois do separador não pode mudar o significado — e o `valor_perigoso` já
+# aceitou a forma como decimal uma linha antes (`_espaco_ambiguo` tem exceção
+# explícita para ela). O `_cola_separador_decimal`
+# (core/intent_router.py) apenas faz o texto entregue adiante dizer o que a
+# porta já tinha decidido.
+#
+# Monotonicidade MEDIDA sobre as 14 linhas: 6 saem de dois lançamentos para um,
+# 8 ficam idênticas, ZERO pioram — e nenhuma linha que já era um só lançamento
+# muda de valor. Só existe transformação de "dois lançamentos" em "um com o
+# valor que a pessoa quis dizer".
 ESPACO_PORTA_2 = [
-    ("132, 50",   [50.0, 132.0]),
-    ("132 , 50",  [50.0, 132.0]),
+    ("132, 50",   [132.5]),      # era [50.0, 132.0]
+    ("132 , 50",  [132.5]),      # era [50.0, 132.0]
     ("132 ,50",   [132.5]),
     ("132. 50",   [132.5]),
     ("132 . 50",  [132.5]),
-    ("1.234, 56", [56.0, 1234.0]),
+    ("1.234, 56", [1234.56]),    # era [56.0, 1234.0]
     ("1 234,56",  [1234.56]),
     ("1.234 ,56", [1234.56]),
-    ("132, 5",    [5.0, 132.0]),
-    ("132, 500",  [132.0, 500.0]),
+    ("132, 5",    [132.5]),      # era [5.0, 132.0]
+    ("132, 500",  [132.5]),      # era [132.0, 500.0]
     ("132,50 ",   [132.5]),
     ("1 500",     [1500.0]),
     ("12 345",    [12345.0]),
-    ("1 500, 50", [50.0, 1500.0]),
+    ("1 500, 50", [1500.5]),     # era [50.0, 1500.0]
 ]
 
 # Portas 3 e 4 recebem a resposta sozinha: um valor só, o mesmo nas duas.

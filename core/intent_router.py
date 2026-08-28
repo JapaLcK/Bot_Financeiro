@@ -661,6 +661,15 @@ def _ja_tem_o_valor(entities: dict | None) -> bool:
     divergirem, uma pergunta de descrição vira pergunta de valor e o dinheiro já
     digitado some.
 
+    SEMPRE sobre o payload como foi GRAVADO — as entities da pendência que o
+    usuário viu na tela —, nunca sobre um dicionário já enriquecido por outra
+    fonte. Os dois chamadores obedecem: `_clarification_abandonada` lê
+    `clarif["payload"]["entities"]`, e o `_resolve_clarification` decide no topo
+    da função (`pedia_o_valor`), antes do merge das entities da IA. Foi por
+    consultar o dicionário pós-merge que a mesma pergunta era classificada de
+    dois jeitos no mesmo turno, e o ramo da descrição pulava o filtro de dano —
+    dinheiro errado gravado sem confirmação. O detalhe está no `pedia_o_valor`.
+
     São 5 produtores de `clarification`, e 4 deles foram lidos um a um:
 
       grava `entities["valor"]`  →  pede DESCRIÇÃO/destino, nunca abandona
@@ -723,6 +732,44 @@ def _clarification_abandonada(clarif: dict, text: str) -> bool:
     return abandona_pergunta_de_valor(text)
 
 
+_SO_NUMERO_RE = re.compile(r"[\d.,\s]+")
+_ESPACO_NO_SEPARADOR_RE = re.compile(r"(?<=\d)\s*([.,])\s*(?=\d)")
+
+
+def _cola_separador_decimal(resposta: str) -> str:
+    """"132, 50" vira "132,50" antes de o texto seguir para o `launches.add`.
+
+    A porta 2 é a ÚNICA das quatro que re-serializa o valor aceito de volta para
+    TEXTO — as portas 1, 3 e 4 registram por entities/`mark_bill_paid` e nunca
+    passam pelo `split_financial_transactions`. É por isso que só ela precisa
+    disto, e é por isso que o problema pertence a este conserto.
+
+    O `valor_perigoso` já decidiu, uma linha acima, que aquela vírgula é
+    separador DECIMAL — `_espaco_ambiguo` tem exceção explícita para a forma
+    (utils_text.py). O texto entregue adiante tem de dizer a mesma coisa. Sem
+    isto, medido: `split_financial_transactions("gastei 132, 50 a luz")` devolve
+    `['gastei 132', 'gastei 50 a luz']` (`,\\s+` seguido de dígito, parsers.py;
+    o pedaço sem verbo herda o anterior) e um valor vira DOIS lançamentos. Com
+    a colagem, `"gastei 132,50 a luz"` volta a ser uma parte só.
+
+    Só quando a resposta é NUMÉRICA por inteiro. O recorte é o mesmo predicado
+    da porta 1 (`_NUMERO_AMBIGUO_RE`, core/handlers/bills.py): sem letras não há
+    palavra do usuário para danificar, e o comentário logo abaixo do chamador
+    registra que a palavra digitada é o que categoriza. Resposta com letra
+    ("mercado, 20") sai intocada, como hoje.
+
+    Inócuo para o dinheiro: `parse_money` já apaga espaço dentro do bloco
+    numérico, então o valor lido é idêntico antes e depois — o que muda é só o
+    ponto onde o splitter corta.
+
+    Fora do alcance, medido: "1, 2, 3" nunca chega aqui, porque
+    `_extract_valor` devolve None e o chamador re-pergunta antes.
+    """
+    if not _SO_NUMERO_RE.fullmatch(resposta):
+        return resposta
+    return _ESPACO_NO_SEPARADOR_RE.sub(r"\1", resposta)
+
+
 def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
     """
     O bot tinha feito uma pergunta e está esperando a resposta do usuário.
@@ -734,6 +781,21 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     original_intent  = payload.get("intent", "launches.list")
     original_entities = dict(payload.get("entities") or {})
     orig_text        = payload.get("orig_text", "")
+
+    # A pergunta que o usuário VIU pedia o valor ou a descrição? Decidido AQUI,
+    # sobre o payload como foi GRAVADO, e não lá embaixo sobre o
+    # `original_entities` — que a essa altura já foi reescrito com as entities
+    # que a IA devolveu (:780). O prompt manda o classificador extrair `valor`
+    # (core/intent_classifier.py:832-834), então numa conta Pro ele quase sempre
+    # preenche: `_ja_tem_o_valor` virava True, o fluxo entrava no ramo "a
+    # resposta é a DESCRIÇÃO" e pulava o filtro de dano do #140 inteiro. Medido
+    # em produção: "paguei a luz" + "-10" gravava R$ 10,00, "132 50" gravava
+    # R$ 13.250,00, e "fatura" virava descrição do gasto ("mercado - fatura").
+    #
+    # Isto RESTAURA a fonte única em vez de quebrá-la: o outro consumidor,
+    # `_clarification_abandonada` (:721), já lia `clarif["payload"]["entities"]`
+    # cru. Os dois discordavam sobre a mesma pergunta, no mesmo turno.
+    pedia_o_valor = not _ja_tem_o_valor(original_entities)
 
     # Consome ANTES de executar, e condicionado ao que foi lido: a intent
     # original é re-executada abaixo (pode registrar/gastar). Se a linha já não
@@ -825,7 +887,7 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         tipo = (original_entities.get("tipo") or "despesa").lower()
         verbo = "recebi" if tipo == "receita" else "gastei"
         resposta = limpa_pontuacao_final(user_response.strip())
-        if _ja_tem_o_valor(original_entities):
+        if not pedia_o_valor:
             # já tínhamos o valor → a resposta é a descrição/alvo que faltava.
             # Testado ANTES de parsear a resposta como valor: "gastei 50" +
             # "mercado 20" tem um número na resposta e virava R$ 2.050,00.
@@ -878,7 +940,7 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
                 r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei)\b",
                 "", orig_text, flags=re.IGNORECASE,
             ).strip()
-            combined = f"{verbo} {resposta} {desc}".strip()
+            combined = f"{verbo} {_cola_separador_decimal(resposta)} {desc}".strip()
         return _execute("launches.add", user_id, combined, original_entities, platform, external_id)
 
     # demais intents (ex: launches.list "dia 4 de qual mês?") → extrai data
