@@ -35,7 +35,7 @@ from typing import Any
 from utils_text import fmt_brl
 
 from .budgets import get_budgets_status_for_month
-from .connection import get_conn
+from .connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
 from .recurring import list_recurring_expenses
 from .users import ensure_user
 
@@ -142,7 +142,7 @@ def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 with spent_per_month as (
                   select lower(categoria) as cat,
                          date_part('year',  criado_em)::int as y,
@@ -150,7 +150,7 @@ def _detect_category_spike(user_id: int) -> list[dict[str, Any]]:
                          sum(valor)::float as total
                   from launches
                   where user_id=%s
-                    and tipo in ('despesa', 'saida')
+                    and {TIPO_DESPESA_SQL}
                     and is_internal_movement = false
                     and categoria is not null
                     and criado_em >= make_date(%s, %s, 1) - interval '4 months'
@@ -278,8 +278,10 @@ def _detect_recurring_increase(user_id: int) -> list[dict[str, Any]]:
 def _detect_salary_burn_fast(user_id: int) -> list[dict[str, Any]]:
     """Despesas do mês > % do mês decorrido + 15pp vs receita esperada.
 
-    Usa média de receita dos 3 meses anteriores como proxy de "salário esperado"
-    (não dá pra confiar só na receita do mês corrente — pode ainda não ter caído).
+    Usa a média de receita dos meses anteriores presentes na janela de 4 meses da
+    query como proxy de "salário esperado" (não dá pra confiar só na receita do
+    mês corrente — pode ainda não ter caído). Ver a nota na query abaixo: o
+    `_prev_n_months(today, 3)` não recorta essa janela.
 
     Ex: dia 10 (33% do mês), gastou 50% da receita esperada → alerta.
     """
@@ -294,17 +296,24 @@ def _detect_salary_burn_fast(user_id: int) -> list[dict[str, Any]]:
     if len(prev_months) < 2:
         return []
 
-    # Receita média mensal dos 3 meses anteriores
+    # Receita média mensal dos meses anteriores presentes na janela: a query pega
+    # 4 meses (`- interval '4 months'` até o 1º do mês corrente), não 3. O
+    # `_prev_n_months(today, 3)` acima só alimenta o guard `len < 2`, que com n=3
+    # nunca dispara — divergência PREEXISTENTE, não mexida neste PR (mudar a
+    # janela mudaria número em produção).
+    # A forma legada 'entrada' conta: sem ela o `expected_income` sai menor (ou os
+    # meses reconhecidos caem abaixo de 2 e o alerta some), enquanto o endpoint de
+    # patterns reporta a renda certa — o mesmo painel, dois números.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select date_part('year', criado_em)::int as y,
                        date_part('month', criado_em)::int as m,
                        sum(valor)::float as total
                 from launches
                 where user_id=%s
-                  and tipo = 'receita'
+                  and {TIPO_RECEITA_SQL}
                   and is_internal_movement = false
                   and criado_em >= make_date(%s, %s, 1) - interval '4 months'
                   and criado_em <  make_date(%s, %s, 1)
@@ -329,12 +338,12 @@ def _detect_salary_burn_fast(user_id: int) -> list[dict[str, Any]]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select
                   coalesce((
                     select sum(valor) from launches
                     where user_id=%s
-                      and tipo in ('despesa', 'saida')
+                      and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
                       and date_part('year',  criado_em) = %s
                       and date_part('month', criado_em) = %s

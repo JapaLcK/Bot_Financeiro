@@ -40,6 +40,7 @@ Controle POSITIVO: `test_base_moderna_responde_o_mesmo_de_sempre` — a base de
 from datetime import date, datetime, time, timedelta
 
 import db
+from db import insights
 from db.analytics import (
     compute_behavioral_patterns, compute_evolution, compute_history_quick_stats,
     compute_kpis, list_history,
@@ -239,10 +240,12 @@ def test_os_tres_sites_novos_nao_mudam_a_base_moderna(pro_user_id):
 
 # ── salary burn: o irmão que ainda lia só a receita moderna ────────────────
 
-def _mes_passado(dia: int) -> date:
-    """Um dia do mês anterior — o `salary_burn` só olha meses FECHADOS."""
-    primeiro = today_tz().replace(day=1)
-    return (primeiro - timedelta(days=1)).replace(day=dia)
+def _mes_passado(dia: int, meses: int = 1, hoje: date | None = None) -> date:
+    """Um dia de N meses atrás — o `salary_burn` só olha meses FECHADOS."""
+    primeiro = (hoje or today_tz()).replace(day=1)
+    for _ in range(meses):
+        primeiro = (primeiro - timedelta(days=1)).replace(day=1)
+    return primeiro.replace(day=dia)
 
 
 def test_salary_burn_conta_a_receita_legada(pro_user_id):
@@ -276,3 +279,179 @@ def test_salary_burn_com_receita_moderna_nao_muda(pro_user_id):
     assert burn["expected_income"] == 1000.0, burn
     assert burn["ok"] is True, burn
     assert burn["avg_day_to_80pct"] == 3, burn
+
+
+# ── e o irmão do salary_burn no caminho de FALLBACK ────────────────────────
+#
+# `_detect_salary_burn_fast` (db/insights.py) é o que o painel de Análise mostra
+# quando o LLM cai — mesma pergunta, outro caminho. A receita lá era
+# `tipo = 'receita'` cru enquanto a despesa, na função de baixo, já aceitava as
+# duas formas.
+#
+# Chamado DIRETO de propósito: `compute_active_insights` engole exceção de
+# detector (`except Exception: continue`, db/insights.py), então um teste que
+# passasse por ele ficaria verde com a query quebrada.
+#
+# REFERENCIAL DE DATA — por que estes testes usam `date.today()` e não
+# `today_tz()` como os de cima: `_detect_salary_burn_fast` lê `date.today()`
+# (db/insights.py:288), que é o fuso do PROCESSO — UTC no CI, America/Sao_Paulo
+# na máquina local. Entre 00:00 e 03:00 UTC do dia 1º os dois referenciais
+# apontam meses DIFERENTES (31/08 23:30 em SP já é 01/09 em UTC), e um teste que
+# gravasse em `today_tz()` ficaria vermelho nessa janela de ~3h por mês sem
+# regressão nenhuma. Gravar no referencial que a função LÊ é o que os torna
+# determinísticos.
+#     O descasamento em si é defeito PREEXISTENTE de outra classe, fora do
+# escopo deste PR: `db/insights.py` chama `date.today()` em 6 lugares — neste
+# working tree 57, 85, 133, 235, 288, 415; no HEAD 57, 85, 133, 235, 286, 406 — e não
+# importa `today_tz` em lugar nenhum. Quem for consertar essa classe: os CINCO
+# testes ancorados aqui voltam para `today_tz()` junto — os quatro `burn_fast`
+# abaixo mais o `spike` no fim do arquivo (`_mes_utc`/`date.today()`, :448-450).
+#     A CLASSE NÃO ESTÁ FECHADA. Sete testes deste arquivo seguem
+# gravando em `today_tz()` e lendo por `date.today()`, mas isso NÃO os derruba
+# todos. Medido na borda que este bloco descreve (processo em UTC, 01:00 do dia
+# 1º: `date.today()` já virou o mês nos módulos leitores, `today_tz()` não),
+# falham CINCO — `test_tendencia_conta_as_duas_formas`,
+# `test_as_duas_telas_dao_o_mesmo_numero`,
+# `test_base_moderna_responde_o_mesmo_de_sempre`, `test_evolucao_conta_as_duas_formas`
+# e `test_os_tres_sites_novos_nao_mudam_a_base_moderna`.
+#     Os dois `test_salary_burn_*` usam o mesmo referencial misto
+# (`db/analytics.py:77` e `:1144` leem `date.today()`) e PASSAM nessa borda: a
+# janela de 6 meses CHEIOS do `compute_behavioral_patterns` continua contendo o
+# mês gravado depois do deslocamento de um mês. Mesmo referencial, outra
+# sensibilidade — quem fechar a classe mexe nos sete, mas só os cinco de cima
+# quebram nesta janela.
+#     A janela é entre 00:00 e 03:00 UTC do dia 1º de cada mês num processo em
+# UTC — a condição do CI. Num processo em −03 os dois referenciais coincidem
+# (`today_tz` lê `REPORT_TIMEZONE` ou `TZ` ou America/Sao_Paulo, utils_date.py:13),
+# então não há "direção oposta": lá eles simplesmente não divergem. Isso é
+# preexistente e idêntico no HEAD, medido: o conjunto de falhas é o mesmo com e sem
+# este diff. Não foi consertado aqui para não alargar o PR.
+
+_MSG_70_EM_50 = (
+    "Já consumiu 70% da sua receita média mensal "
+    "e só 50% do mês passou. Vale dar uma freada."
+)
+
+
+def _mes_utc(meses: int, dia: int = 5) -> date:
+    """`_mes_passado`, mas ancorado no `date.today()` que a função lê."""
+    return _mes_passado(dia, meses, hoje=date.today())
+
+
+def _burn_fast(user_id, monkeypatch, progresso=50.0):
+    """Fixa o progresso do mês; sem isso o gate 25–90 faz o teste passar ou
+    falhar conforme o DIA em que a suíte roda."""
+    monkeypatch.setattr(insights, "_month_progress_pct", lambda *_a, **_k: progresso)
+    return insights._detect_salary_burn_fast(user_id)
+
+
+def _renda_legada(user_id):
+    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_utc(1))
+    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_utc(2))
+
+
+def test_burn_fast_conta_a_receita_legada(pro_user_id, monkeypatch):
+    """Com a receita legada fora, `incomes` fica com menos de 2 meses e a função
+    devolve [] — o alerta some do painel enquanto o endpoint de patterns segue
+    reportando a renda. Duas telas, o mesmo número, respostas diferentes.
+
+    Discrimina o lado da RECEITA sozinho: a despesa aqui é moderna de propósito,
+    então reverter `{TIPO_DESPESA_SQL}` não mexe neste teste.
+
+    Controle NEGATIVO: `{TIPO_RECEITA_SQL}` de volta para `tipo = 'receita'` →
+    lista vazia aqui.
+    """
+    _renda_legada(pro_user_id)
+    _grava(pro_user_id, "despesa", 700, dia=date.today())
+
+    alertas = _burn_fast(pro_user_id, monkeypatch)
+    assert len(alertas) == 1, alertas
+    assert alertas[0]["type"] == "salary_burn_fast", alertas
+    assert alertas[0]["severity"] == "warning", alertas
+    # 700/1000 = 70% da receita esperada contra 50% do mês → gap de 20pp.
+    # A mensagem carrega DOIS percentuais; comparar a string inteira é o que
+    # separa "imprimiu 70 e 50" de "imprimiu o gasto nas duas posições".
+    assert alertas[0]["message"] == _MSG_70_EM_50, alertas
+
+
+def test_burn_fast_despesa_legada_segue_contando(pro_user_id, monkeypatch):
+    """GUARDA, não conserto: o lado da despesa desta função nunca esteve quebrado.
+    O predicado já era `tipo in ('despesa','saida')` e a troca por
+    `{TIPO_DESPESA_SQL}` é no-op — este teste passa COM e SEM este diff.
+
+    Ele existe para o depois: fica vermelho se alguém tirar o `'saida'` da
+    constante compartilhada, ou quebrar a f-string desta query.
+    """
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(1))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(2))
+    _grava(pro_user_id, "saida", 700, dia=date.today())
+
+    alertas = _burn_fast(pro_user_id, monkeypatch)
+    assert len(alertas) == 1, alertas
+    assert alertas[0]["message"] == _MSG_70_EM_50, alertas
+
+
+def test_burn_fast_com_a_base_moderna_nao_muda(pro_user_id, monkeypatch):
+    """Controle POSITIVO — a base de 100% da produção hoje (zero linhas legadas):
+    a mesma cena nas formas modernas tem que dar o MESMO alerta. Um alias que
+    mexesse neste número seria pior que o descasamento que ele conserta."""
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(1))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(2))
+    _grava(pro_user_id, "despesa", 700, dia=date.today())
+
+    alertas = _burn_fast(pro_user_id, monkeypatch)
+    assert len(alertas) == 1, alertas
+    assert alertas[0]["type"] == "salary_burn_fast", alertas
+    assert alertas[0]["severity"] == "warning", alertas
+    assert alertas[0]["message"] == _MSG_70_EM_50, alertas
+
+
+def test_burn_fast_sem_gap_nao_alerta(pro_user_id, monkeypatch):
+    """Controle POSITIVO do outro lado: aceitar a forma legada não pode virar
+    alerta em quem gasta no ritmo do mês (gap de 10pp, abaixo do corte de 15).
+
+    O `[]` sozinho NÃO provaria isso — com a receita legada invisível a função
+    também devolve [], por `len(incomes) < 2`. Por isso os dois passos no mesmo
+    teste, sobre a MESMA renda legada: o segundo mostra que ela foi reconhecida,
+    e aí o `[]` do primeiro só pode ter vindo do gap.
+    """
+    _renda_legada(pro_user_id)
+    _grava(pro_user_id, "despesa", 600, dia=date.today())
+
+    # 600/1000 = 60% contra 50% do mês → gap de 10pp, abaixo do corte
+    assert _burn_fast(pro_user_id, monkeypatch) == []
+
+    # +100 → 70%, gap de 20pp: agora alerta. Este passo é o controle negativo
+    # embutido — com a receita legada fora do filtro ele fica vermelho.
+    _grava(pro_user_id, "despesa", 100, dia=date.today())
+    alertas = _burn_fast(pro_user_id, monkeypatch)
+    assert len(alertas) == 1, alertas
+    assert alertas[0]["message"] == _MSG_70_EM_50, alertas
+
+
+# ── e o irmão convertido junto: _detect_category_spike ─────────────────────
+
+def test_spike_query_convertida_ainda_executa(pro_user_id, monkeypatch):
+    """GUARDA da f-string, não conserto: em `_detect_category_spike` o predicado já
+    era `tipo in ('despesa','saida')` e a troca por `{TIPO_DESPESA_SQL}` é no-op —
+    este teste passa COM e SEM este diff.
+
+    Ele existe porque a conversão para f-string é o risco real: uma chave ou um
+    `%` a mais e a query estoura, e `compute_active_insights` engole exceção de
+    detector (`except Exception: continue`), então o insight sumiria do painel SEM
+    erro nenhum. Chamado direto, é o mínimo que fica vermelho aí — e também se
+    alguém tirar o `'saida'` da constante compartilhada.
+
+    Mesmo referencial de data dos `burn_fast`: a função lê `date.today()`.
+    """
+    monkeypatch.setattr(insights, "_month_progress_pct", lambda *_a, **_k: 87.0)
+    _grava(pro_user_id, "saida", 100, dia=_mes_utc(1))
+    _grava(pro_user_id, "saida", 100, dia=_mes_utc(2))
+    _grava(pro_user_id, "saida", 500, dia=date.today())
+
+    spikes = insights._detect_category_spike(pro_user_id)
+    assert len(spikes) == 1, spikes
+    # 500 contra média de 100 nos dois meses anteriores com dado = +400%
+    assert spikes[0]["type"] == "category_spike", spikes
+    assert spikes[0]["key"] == "spike:mercado", spikes
+    assert spikes[0]["title"] == "Mercado subiu 400% no mês", spikes
