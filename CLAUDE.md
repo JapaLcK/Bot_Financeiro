@@ -358,6 +358,23 @@ Nunca deixe thread sem resposta e nunca afirme que threads estão respondidas se
 abrir e conferir. **Se você pediu revisão, é sua obrigação ir ler o parecer** — não
 espere alguém perguntar.
 
+**Apontamento do Codex não é ordem de mudança — é hipótese a verificar.** Ele não
+tem contexto de negócio, lê a árvore do branch (§3) e erra. Antes de tocar no código,
+para cada apontamento:
+
+1. **localize o trecho citado** e confirme que o problema existe mesmo ali;
+2. **leia o contexto inteiro** e o comportamento anterior — não só as linhas do diff;
+3. **verifique se o caso é alcançável em produção** (quem chama, com que entrada);
+4. **avalie o risco da correção**: ela pode introduzir regressão pior que o achado?
+5. **procure proteção que já exista** — validação, guarda ou função que já resolve (§0.1);
+6. **decida**: corrigir, simplificar, manter como está, ou apenas documentar.
+
+Só implemente com evidência de que a correção é necessária e melhora o sistema. Se o
+apontamento estiver errado, for só teórico, ou custar mais complexidade que benefício,
+**explique na thread e não altere o código** — resposta com evidência fecha a thread
+tão bem quanto um commit. Vale sempre a menor mudança segura: nada de abstração,
+tratamento ou teste criado só para satisfazer o revisor.
+
 **Ataque antes de empurrar. O parecer do Codex tem de ser confirmação, não descoberta.**
 Se ele está achando coisa, o ataque não foi feito. Rode o Tester (e o Manager) **antes**
 do push, não depois do apontamento — é a diferença entre revisar e terceirizar a revisão.
