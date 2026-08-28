@@ -278,6 +278,40 @@ test("estado de plano indisponível não deixa CONECTAR", async () => {
   await page.__ctx.close();
 });
 
+test("fechar durante a espera cancela o confirmar", async () => {
+  // Mover a espera dos limites pro confirmar criou uma janela que o confirmar
+  // original (síncrono) não tinha: Esc, clique no fundo ou o X fecham o picker
+  // enquanto os limites ainda vêm — e sem a checagem a Pluggy abriria depois,
+  // sozinha, sobre uma tela que o usuário já dispensou.
+  //
+  // Controle negativo: remover o `if (!root || !root.classList...) return;` de
+  // depois do await deixa este caso vermelho.
+  const page = await abrirSettings();
+  let liberar;
+  const presa = new Promise((r) => { liberar = r; });
+  await page.route("**/auth/me", async (route) => {
+    await presa;
+    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: 2 }));
+  });
+  // Conta quantas vezes o fluxo seguiu pra Pluggy.
+  let tokens = 0;
+  await page.route("**/open-finance/1/connect-token", (route) => {
+    tokens += 1;
+    route.fulfill(json({ accessToken: "x" }));
+  });
+
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");     // limites ainda presos
+  await page.keyboard.press("Escape");  // usuário desiste
+  await liberar();
+  await sleep(600);
+
+  assert.equal(tokens, 0, "seguiu pra Pluggy depois de o usuário fechar o picker");
+  assert.equal(await pickerAberto(page), false);
+  await page.__ctx.close();
+});
+
 test("mensagem estruturada do backend chega ao usuário", async () => {
   // Apontamento P2 do Codex: o detail do FastAPI vem string OU objeto. Aceitar
   // só string trocaria a mensagem acionável do limite de plano por um genérico.

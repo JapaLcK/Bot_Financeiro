@@ -52,12 +52,18 @@
   // terminar fora de ordem e a mais VELHA sobrescrever a mais nova pouco antes
   // de o confirmar ler — decidindo teto e reconexão com dado vencido.
   var limitsPromise = null;   // busca em voo, iniciada no open()
-  var ultimoTeto = null;      // só pro atalho do Free no open(); não é autoridade
 
   function noop() {}
 
-  function conf(name, fallback) {
-    return (cfg && typeof cfg[name] === "function") ? cfg[name] : (fallback || noop);
+  /**
+   * Resolve um callback do host. `host` permite fixar QUAL configuração recebe
+   * o aviso: o fluxo de conexão captura a sua no início e despacha por ela, pra
+   * o resultado de quem iniciou não ser pintado na tela de quem estiver
+   * configurado quando a Pluggy terminar. Sem `host`, usa a atual.
+   */
+  function conf(name, host) {
+    var c = host || cfg;
+    return (c && typeof c[name] === "function") ? c[name] : noop;
   }
 
   /* ─── Helpers de texto (vindos do settings.html sem mudança) ──────────── */
@@ -385,10 +391,13 @@
   function open() {
     if (!cfg) return;
 
-    // Free (limite 0): mesma defesa do original — o applyOfConnectButton do
-    // host já roteia o botão pra /precos nesse caso.
-    if (ultimoTeto === 0) { window.location.href = "/precos"; return; }
-
+    // Sem atalho de plano aqui. O original tinha um, mas lendo um valor que a
+    // PÁGINA acabara de buscar; aqui a única fonte seria um cache do módulo, e
+    // um cache que decide vira armadilha: gravado 0, ele redirecionaria pra
+    // /precos antes de qualquer busca nova, e quem fizesse upgrade em outra aba
+    // nunca sairia disso. Quem decide é o confirmar, com dado fresco. No
+    // Settings o caso nem chega aqui — o applyOfConnectButton já roteia o botão
+    // pra /precos quando o teto é 0.
     ensureRoot();
     lastFocus = document.activeElement;
     root.classList.add("open");
@@ -403,10 +412,7 @@
     syncFoot();
 
     // Estado do plano em paralelo: quem espera é o confirmar.
-    limitsPromise = refreshLimits().then(function (snap) {
-      if (snap) ultimoTeto = snap.banksMax;   // alimenta só o atalho da próxima abertura
-      return snap;
-    });
+    limitsPromise = refreshLimits();
 
     if (connectors) { renderList(""); return; }
     carregarBancos();
@@ -455,6 +461,7 @@
    */
   async function confirmPick() {
     if (!selected) return;
+    var escolhido = selected;          // pra detectar troca/cancelamento no await
     var go = q("#bankpick-go");
     // Desabilita durante a espera: sem isso um segundo clique passaria antes de
     // os limites chegarem. Na prática a busca começou lá no open() e já
@@ -464,6 +471,13 @@
       // O retrato que ESTE confirmar esperou — não um objeto de módulo que uma
       // busca mais velha pudesse ter sobrescrito no caminho.
       var plano = await (limitsPromise || refreshLimits());
+
+      // Mover a espera pra cá criou uma janela de cancelamento que o confirmar
+      // original (síncrono) não tinha: Esc, clique no fundo ou o X fecham o
+      // picker enquanto os limites ainda vêm, e sem esta checagem a Pluggy
+      // abriria depois, sozinha, sobre uma tela que o usuário já dispensou.
+      if (!root || !root.classList.contains("open") || selected !== escolhido) return;
+
       if (!plano) {
         conf("notify")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.", "error");
         return;
@@ -501,17 +515,17 @@
    * init() trocasse de usuário enquanto o widget estava aberto — e isolamento
    * por usuário é regra dura deste repositório.
    */
-  async function savePluggyItem(itemData, uid) {
+  async function savePluggyItem(itemData, uid, host) {
     var item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
     var data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
-    conf("onConnected")(data);
+    conf("onConnected", host)(data);
     return data;
   }
 
-  async function openWidget(uid) {
+  async function openWidget(uid, host) {
     var data = await post("/open-finance/" + uid + "/connect-token", {});
     var accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
@@ -537,20 +551,20 @@
       theme: "dark",
       onSuccess: async function (itemData) {
         try {
-          await savePluggyItem(itemData, uid);
-          conf("notify")("Banco conectado com sucesso!", "ok");
+          await savePluggyItem(itemData, uid, host);
+          conf("notify", host)("Banco conectado com sucesso!", "ok");
         } catch (err) {
           // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
           // autorizado na Pluggy mas o plano não comporta mais conexões.
-          conf("onError")(String((err && err.message) || err) || "Não foi possível salvar a conexão.");
+          conf("onError", host)(String((err && err.message) || err) || "Não foi possível salvar a conexão.");
         }
       },
       onError: function (error) {
         console.error("Pluggy Connect error", error);
-        conf("onError")("Não foi possível concluir a conexão.");
+        conf("onError", host)("Não foi possível concluir a conexão.");
       },
       onClose: function () {
-        conf("onClose")();
+        conf("onClose", host)();
       },
     });
 
@@ -560,16 +574,19 @@
   }
 
   async function connect() {
-    // Fixa o usuário AQUI e carrega ele por todo o fluxo: o widget da Pluggy
-    // fica aberto por minutos, e reler cfg.userId depois gravaria o item de
-    // quem iniciou na conta de quem estiver configurado no fim.
-    var uid = cfg && cfg.userId;
-    if (!uid) { conf("onError")("Sessão inválida. Faça login novamente"); return; }
-    conf("onConnectStart")();
+    // Fixa AQUI as duas pontas do fluxo — o usuário e o host — e carrega as
+    // duas até o fim. O widget da Pluggy fica aberto por minutos: reler `cfg`
+    // depois gravaria o item de quem iniciou na conta de quem estiver
+    // configurado no fim, e pintaria as contas e transações de um na tela do
+    // outro. Fixar só a URL resolvia metade.
+    var host = cfg;
+    var uid = host && host.userId;
+    if (!uid) { conf("onError", host)("Sessão inválida. Faça login novamente"); return; }
+    conf("onConnectStart", host)();
     try {
-      await openWidget(uid);
+      await openWidget(uid, host);
     } catch (err) {
-      conf("onError")((err && err.message) || "Erro ao abrir a conexão Pluggy");
+      conf("onError", host)((err && err.message) || "Erro ao abrir a conexão Pluggy");
     }
   }
 
