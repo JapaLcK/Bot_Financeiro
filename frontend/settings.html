@@ -6,9 +6,10 @@
 <title>Configurações · PigBank</title>
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <meta name="theme-color" content="#111111" />
-<!-- Widget da Pluggy: só é instanciado quando o usuário abre "conectar banco"
-     (openPluggyConnect). defer tira o download do caminho bloqueante do parse;
-     o factory (window.PluggyConnect) já estará pronto muito antes do clique. -->
+<!-- Widget da Pluggy: só é instanciado quando o usuário confirma o banco no
+     modal (open-finance-connect.js). defer tira o download do caminho
+     bloqueante do parse; o factory (window.PluggyConnect) já estará pronto
+     muito antes do clique. -->
 <link rel="preconnect" href="https://cdn.pluggy.ai" crossorigin />
 <script defer src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js" integrity="sha384-EfJtVYPBw2vssrS8cou8sSUccnxm72OwXqa4V+b1injWH0avP4mtCJr2XM6Sb2/7" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/brand.css" />
@@ -380,63 +381,6 @@ a { color: inherit; text-decoration: none; }
   gap: 14px;
 }
 
-/* ─── Bank picker ────────────────────────────── */
-.bank-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }
-
-.bank-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-md);
-  background: rgba(255,255,255,.04);
-  padding: 11px 12px;
-  text-align: left;
-  transition: background .16s var(--ease), border-color .16s var(--ease), transform .15s var(--ease-spring), box-shadow .16s var(--ease);
-}
-.bank-row:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
-
-.bank-row[data-bank="nubank"].active   { border-color: var(--nubank);   background: var(--nubank-soft);   }
-.bank-row[data-bank="itau"].active     { border-color: var(--itau);     background: var(--itau-soft);     }
-.bank-row[data-bank="bradesco"].active { border-color: var(--bradesco); background: var(--bradesco-soft); }
-
-.bank-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-weight: 860;
-  font-size: .78rem;
-  color: #fff;
-  flex-shrink: 0;
-}
-.bank-logo.nubank   { background: var(--nubank); }
-.bank-logo.itau     { background: var(--itau); }
-.bank-logo.bradesco { background: var(--bradesco); }
-
-.bank-info { flex: 1; min-width: 0; }
-.bank-name { font-weight: 780; font-size: .88rem; color: var(--ink); }
-.bank-meta { font-size: .71rem; color: var(--faint); margin-top: 2px; }
-
-.bank-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
-  display: grid;
-  place-items: center;
-  font-size: .6rem;
-  color: transparent;
-  flex-shrink: 0;
-  transition: all .18s var(--ease-spring);
-}
-.bank-row.active .bank-check {
-  background: var(--green);
-  border-color: var(--green);
-  color: #fff;
-}
 
 /* ─── Buttons ────────────────────────────────── */
 .btn-connect {
@@ -1105,8 +1049,17 @@ body.balance-hidden .account-balance {
   .pb-protect button { width: 100%; }
 }
 </style>
+
+<!-- DEPOIS do <style> de cima, e não antes: `.bankpick-go{width:auto}` e
+     `.btn-connect{width:100%}` têm a MESMA especificidade (0,1,0), então quem
+     ganha é quem vem por último. Com o link no topo, o botão do modal esticava
+     por todo o rodapé e espremia o "Selecionado: <banco>" em duas linhas
+     (medido: botão 330px, rótulo 180px quebrado). Antes da extração as duas
+     regras moravam no mesmo bloco, com a do modal depois. -->
+<link rel="stylesheet" href="/open-finance-connect.css?v=1" />
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
+<script src="/open-finance-connect.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
 </head>
@@ -1258,7 +1211,7 @@ body.balance-hidden .account-balance {
               <span id="connect-status-text">Simulando autorização...</span>
             </div>
 
-            <button class="btn-connect" type="button" onclick="openBankPicker()" id="connect-btn">
+            <button class="btn-connect" type="button" id="connect-btn">
               Conectar Open Finance
             </button>
 
@@ -1275,10 +1228,11 @@ body.balance-hidden .account-balance {
           </div>
         </div>
 
-        <!-- O #bankpick-overlay mora FORA do .page (no fim do body, junto dos
-             mfa-overlays): é position:fixed e o pull-to-refresh transforma o
-             .page, o que o tornaria contêiner de bloco de um fixed descendente
-             e deslocaria o overlay se aberto durante um refresh lento. -->
+        <!-- O modal de escolher banco é injetado pelo open-finance-connect.js
+             direto no <body>, e tem de continuar assim: ele é position:fixed e
+             o pull-to-refresh transforma o .page, o que tornaria o .page
+             contêiner de bloco de um fixed descendente e deslocaria o overlay
+             se ele estivesse aberto durante um refresh lento. -->
 
         <!-- Status card -->
         <div class="card">
@@ -2534,21 +2488,58 @@ async function requestAccountDeletion() {
 }
 
 /* ── Bank select ─────────────────────────────── */
-// A escolha do banco acontece dentro do widget da Pluggy. Não pré-selecionamos
-// nada aqui (null = o widget lista todos os bancos disponíveis).
-let selectedConnectorId = null;
-
 /* ── Estado do plano (Open Finance) ──────────── */
 // Teto de bancos do plano, vindo de /auth/me. 0 = Free/sem OF (pós-trial): o botão
 // vira CTA de upgrade e não abre o widget. null = ainda não carregou OU ilimitado.
+// Só a COPY do botão depende disto: a regra de teto e de reconexão mora no
+// open-finance-connect.js, que rebusca o estado a cada abertura do modal.
 let OF_BANKS_MAX = null;
 let OF_HAS_CONNECTION = false; // há alguma conexão (mesmo pausada)? refina a copy do CTA
-let OF_CONN_COUNT = 0;        // bancos que contam no teto (PAUSED não conta, igual ao backend)
-let OF_CONN_NAMES = [];       // nomes das instituições que contam no teto — reconexão
 
-function _ofCountsTowardBankLimit(conn) {
-  return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
-}
+/* ── Modal de conectar banco → frontend/open-finance-connect.js ──────────
+   O picker, o trap de foco e o widget da Pluggy saíram daqui pra serem
+   compartilhados com o wizard de primeira configuração. Tudo que é específico
+   desta tela entra por callback. */
+PBOpenFinance.init({
+  apiBase: API,
+  get userId() { return USER_ID; },   // resolvido no validateSettingsSession
+  // Free: mantém o comportamento desta tela, que é levar pra /precos.
+  onUpgradeNeeded: () => { window.location.href = "/precos"; },
+  onConnectStart: () => {
+    const btn = document.getElementById("connect-btn");
+    const statusEl = document.getElementById("connect-status");
+    const statusText = document.getElementById("connect-status-text");
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.classList.add("show");
+    if (statusText) statusText.textContent = "Abrindo conexão segura da Pluggy...";
+    setStep(2);
+  },
+  onConnected: (data) => {
+    const c = data.connections  || [];
+    const a = data.accounts     || [];
+    const t = data.transactions || [];
+    updateStats(c, a, t);
+    renderConnections(c);
+    renderAccounts(a);
+    renderTransactions(t);
+    setStep(3);
+  },
+  onError: (msg) => {
+    const btn = document.getElementById("connect-btn");
+    const statusEl = document.getElementById("connect-status");
+    if (statusEl) statusEl.classList.remove("show");
+    setStep(1);
+    showToast(msg || "Erro ao abrir a conexão Pluggy", "error");
+    if (btn) btn.disabled = false;
+  },
+  onClose: () => {
+    const btn = document.getElementById("connect-btn");
+    const statusEl = document.getElementById("connect-status");
+    if (statusEl) statusEl.classList.remove("show");
+    if (btn) btn.disabled = false;
+  },
+  notify: (msg, type) => showToast(msg, type),
+});
 
 // Reconfigura o botão "Conectar Open Finance" conforme o plano. No Free (limite 0),
 // não faz sentido abrir a Pluggy (o /pluggy-item recusaria com 402): troca por um
@@ -2565,7 +2556,7 @@ function applyOfConnectButton() {
     btn.textContent = "Conectar Open Finance";
     // A escolha do banco acontece no site: abre a modal com a lista de todos os
     // bancos do Open Finance; ao confirmar, o widget da Pluggy abre já no banco escolhido.
-    btn.onclick = () => openBankPicker();
+    btn.onclick = () => PBOpenFinance.open();
     btn.classList.remove("btn-connect--upgrade");
   }
 }
@@ -2576,177 +2567,6 @@ function setStep(n) {
     const s = document.getElementById(`step-${i}`);
     s.className = i < n ? "step done" : i===n ? "step active" : "step";
   }
-}
-
-/* ── Modal "Conectar banco" (lista completa da Pluggy) ──────── */
-let _bankConnectors = null;   // cache da lista da Pluggy
-let _bankPickSelected = null; // {id, name}
-
-function _stripAccent(s) {
-  return (s||"").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-function _bankInitials(name) {
-  const small = new Set(["de","do","da","dos","das","e","-"]);
-  const parts = (name||"").replace(/[^\wÀ-ÿ\s-]/g,"").split(/\s+/).filter(w => w && !small.has(w.toLowerCase()));
-  if (parts.length >= 2) return (parts[0][0]+parts[1][0]).toUpperCase();
-  return (name||"?").replace(/[^A-Za-zÀ-ÿ]/g,"").slice(0,2).toUpperCase();
-}
-function _bankColor(hex) {
-  const c = String(hex||"").replace("#","");
-  return /^[0-9a-f]{6}$/i.test(c) ? "#"+c : "#5f6470";
-}
-
-async function openBankPicker() {
-  // Free (limite 0): não abre o picker — leva pro upgrade (defesa; applyOfConnectButton
-  // já roteia o botão pra /precos nesse caso).
-  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
-  const ov = document.getElementById("bankpick-overlay");
-  _bankPickLastFocus = document.activeElement;
-  ov.classList.add("open");
-  // registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
-  // caminhos: lista em cache, lista carregada do servidor e erro de fetch
-  document.addEventListener("keydown", _bankPickOnKey);
-  const q = document.getElementById("bankpick-search");
-  q.value = "";
-  /* Foco ANTES do await, não depois: o `q.focus()` só existia no ramo do cache e
-     no de sucesso, então enquanto a lista carregava — e para sempre, se o fetch
-     falhasse — o foco ficava no botão "Conectar banco" ATRÁS do overlay. O trap
-     de Tab conserta isso na tecla seguinte, mas Enter não passa pelo trap: ele
-     reativaria o botão obscurecido e chamaria openBankPicker() de novo. Assim os
-     estados de carregando e de erro também começam dentro do modal. */
-  q.focus();
-  _bankPickSelected = null;
-  _syncBankPickFoot();
-  if (_bankConnectors) { renderBankPicker(""); return; }
-  document.getElementById("bankpick-list").innerHTML =
-    `<div class="bankpick-empty">Carregando bancos…</div>`;
-  try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}/connectors`, authOptions({ headers: authHeaders() }));
-    if (!resp.ok) throw new Error(await readApiError(resp));
-    const data = await resp.json();
-    _bankConnectors = (data.connectors || []).filter(b => b && b.name);
-    renderBankPicker("");
-    // sem q.focus() aqui: o foco já entrou no modal antes do await, e refocar
-    // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
-  } catch (err) {
-    document.getElementById("bankpick-list").innerHTML =
-      `<div class="bankpick-empty">Não deu pra carregar a lista de bancos. Tente de novo.</div>`;
-    console.error("connectors fetch:", err);
-  }
-}
-/* O modal declara aria-modal="true", que AFIRMA pro leitor de tela que o resto
-   da página não está disponível enquanto ele está aberto. Isso era mentira em
-   dois níveis: este arquivo não tinha NENHUM handler de keydown (nem Esc), e o
-   Tab saía da lista de bancos direto pros controles das Configurações atrás do
-   overlay — sem sinal nenhum, porque o overlay continua cobrindo tudo. Mesmo
-   defeito que o Codex apontou no modal da Início (PR #70).
-
-   Os alvos são consultados a cada Tab, e não uma vez na abertura, porque a
-   lista de instituições é remontada a cada tecla digitada na busca. */
-let _bankPickLastFocus = null;
-
-function _bankPickFocaveis() {
-  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
-  if (!modal) return [];
-  const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
-            + ' select:not([disabled]), textarea:not([disabled]),'
-            + ' [tabindex]:not([tabindex="-1"])';
-  return [...modal.querySelectorAll(sel)].filter(
-    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0,
-  );
-}
-
-function _bankPickOnKey(e) {
-  if (e.key === "Escape") { closeBankPicker(); return; }
-  if (e.key !== "Tab") return;
-
-  const modal = document.querySelector("#bankpick-overlay .bankpick-modal");
-  const alvos = _bankPickFocaveis();
-  if (!modal || !alvos.length) return;
-
-  const primeiro = alvos[0];
-  const ultimo = alvos[alvos.length - 1];
-  const proximo = e.shiftKey ? ultimo : primeiro;
-  const borda = e.shiftKey ? primeiro : ultimo;
-
-  // `foco fora` cobre o caso de já ter escapado (clique no fundo, foco no body)
-  if (!modal.contains(document.activeElement) || document.activeElement === borda) {
-    e.preventDefault();
-    proximo.focus();
-  }
-}
-
-function closeBankPicker() {
-  document.getElementById("bankpick-overlay").classList.remove("open");
-  document.removeEventListener("keydown", _bankPickOnKey);
-  // devolve o foco pra quem abriu, senão o teclado volta pro topo da página
-  if (_bankPickLastFocus && document.contains(_bankPickLastFocus)) _bankPickLastFocus.focus();
-  _bankPickLastFocus = null;
-}
-function renderBankPicker(filter) {
-  const f = _stripAccent(filter).trim();
-  const items = (_bankConnectors||[]).filter(b => _stripAccent(b.name).includes(f));
-  const el = document.getElementById("bankpick-list");
-  if (!items.length) {
-    el.innerHTML = `<div class="bankpick-empty">Nenhum banco encontrado para "${esc(filter)}".</div>`;
-    return;
-  }
-  let html = "", letter = "";
-  for (const b of items) {
-    const L = (b.name[0]||"#").toUpperCase();
-    if (L !== letter) { letter = L; html += `<div class="bankpick-alpha">${esc(L)}</div>`; }
-    const sel = _bankPickSelected && _bankPickSelected.id === b.id ? " active" : "";
-    const meta = b.inv ? "Conta, cartão · caixinha/investimentos" : "Conta corrente e cartão";
-    const ini = esc(_bankInitials(b.name));
-    const logo = b.logo
-      ? `<img src="${esc(b.logo)}" alt="" loading="lazy" onerror="this.remove()">`
-      : "";
-    html += `<button type="button" class="bank-row bankpick-row${sel}" onclick="pickBank(${Number(b.id)}, this)" data-name="${esc(b.name)}">
-      <span class="bank-logo bankpick-logo" style="color:${_bankColor(b.color)}">${ini}${logo}</span>
-      <span class="bank-info"><span class="bank-name">${esc(b.name)}</span><span class="bank-meta">${meta}</span></span>
-      <span class="bank-check">${sel ? '<i class="ph ph-check" aria-hidden="true"></i>' : ""}</span>
-    </button>`;
-  }
-  el.innerHTML = html;
-}
-function pickBank(id, node) {
-  const name = node ? node.getAttribute("data-name") : "";
-  _bankPickSelected = { id, name };
-  document.querySelectorAll("#bankpick-list .bankpick-row").forEach(r => {
-    const on = r === node;
-    r.classList.toggle("active", on);
-    const chk = r.querySelector(".bank-check");
-    if (chk) chk.innerHTML = on ? '<i class="ph ph-check" aria-hidden="true"></i>' : "";
-  });
-  _syncBankPickFoot();
-}
-function _syncBankPickFoot() {
-  const cnt = document.getElementById("bankpick-count");
-  const go = document.getElementById("bankpick-go");
-  if (_bankPickSelected) {
-    cnt.innerHTML = `Selecionado: <strong>${esc(_bankPickSelected.name)}</strong>`;
-    go.disabled = false;
-  } else {
-    cnt.textContent = "Nenhum banco selecionado";
-    go.disabled = true;
-  }
-}
-function confirmBankPicker() {
-  if (!_bankPickSelected) return;
-  // Teto do plano atingido: só deixa seguir se for RECONEXÃO de um banco já
-  // conectado (mesmo nome). Banco novo abriria o widget da Pluggy só pra tomar 402
-  // no /pluggy-item — deixando item/consentimento órfão. Bloqueia antes de abrir.
-  if (OF_BANKS_MAX !== null && OF_BANKS_MAX > 0 && OF_CONN_COUNT >= OF_BANKS_MAX) {
-    const isReconnect = OF_CONN_NAMES.includes(_stripAccent(_bankPickSelected.name || ""));
-    if (!isReconnect) {
-      const n = OF_BANKS_MAX;
-      showToast(`Seu plano conecta até ${n} banco${n > 1 ? "s" : ""}. Faça upgrade pra conectar mais: /precos`, "error");
-      return;
-    }
-  }
-  selectedConnectorId = _bankPickSelected.id;
-  closeBankPicker();
-  connectOpenFinance();
 }
 
 /* ── Category icons ──────────────────────────── */
@@ -2799,9 +2619,10 @@ const OF_PILL_CLASS = {
 /* ── Render ──────────────────────────────────── */
 function renderConnections(list) {
   OF_HAS_CONNECTION = Array.isArray(list) && list.length > 0;
-  const countedConnections = (Array.isArray(list) ? list : []).filter(_ofCountsTowardBankLimit);
-  OF_CONN_COUNT = countedConnections.length;
-  OF_CONN_NAMES = countedConnections.map(c => _stripAccent(c.institution_name || ""));
+  // A contagem e os nomes que alimentavam a regra de teto/reconexão saíram
+  // daqui junto com o picker: o open-finance-connect.js busca esse estado do
+  // servidor toda vez que o modal abre, em vez de depender do que esta página
+  // leu no load. Aqui fica só o que a própria tela usa.
   applyOfConnectButton(); // refina a copy do CTA de upgrade (reative vs assine)
   const el = document.getElementById("connections-list");
   if (!list.length) {
@@ -3142,111 +2963,6 @@ function refreshVerdict(sync) {
   if (items.length && items.every((i) => i.state === "rate_limited"))
     return { tone: "ok", msg: "Você acabou de atualizar — já está tudo em dia." };
   return { tone: "ok", msg: "Tudo em dia!" };
-}
-
-/* ── Connect ─────────────────────────────────── */
-function getPluggyConnectFactory() {
-  return window.PluggyConnect || window.pluggyConnect || window.PluggyConnectWidget;
-}
-
-async function savePluggyItem(itemData) {
-  const item = itemData?.item || itemData || {};
-  if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
-  const resp = await fetch(`${API}/open-finance/${USER_ID}/pluggy-item`, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: authHeaders({ "Content-Type":"application/json" }),
-    body: JSON.stringify({ item }),
-  });
-  if (!resp.ok) throw new Error(await readApiError(resp));
-  const data = await resp.json();
-  const c = data.connections  || [];
-  const a = data.accounts     || [];
-  const t = data.transactions || [];
-  updateStats(c, a, t);
-  renderConnections(c);
-  renderAccounts(a);
-  renderTransactions(t);
-  setStep(3);
-}
-
-async function openPluggyConnect() {
-  const resp = await fetch(`${API}/open-finance/${USER_ID}/connect-token`, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: authHeaders(),
-  });
-  if (!resp.ok) throw new Error(await readApiError(resp));
-  const data = await resp.json();
-  const accessToken = data.accessToken;
-  if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
-
-  const PluggyConnect = getPluggyConnectFactory();
-  if (!PluggyConnect) {
-    throw new Error("Widget da Pluggy não carregou. Recarregue a página e tente novamente.");
-  }
-
-  const connectorTypes = ["PERSONAL_BANK", "BUSINESS_BANK"];
-  if (data.includeSandbox) connectorTypes.push("SANDBOX");
-
-  const widget = new PluggyConnect({
-    connectToken: accessToken,
-    includeSandbox: Boolean(data.includeSandbox),
-    connectorTypes,
-    selectedConnectorId: selectedConnectorId || undefined,
-    // INVESTMENTS incluído: o sync lê /investments pra achar a Caixinha (FIXED_INCOME/CDB).
-    // Precisa casar com PLUGGY_PRODUCTS do connect-token, senão o produto não é coletado.
-    products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS", "INVESTMENTS"],
-    language: "pt",
-    theme: "dark",
-    onSuccess: async (itemData) => {
-      try {
-        await savePluggyItem(itemData);
-        showToast("Banco conectado com sucesso!", "ok");
-      } catch (err) {
-        // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi autorizado na
-        // Pluggy mas o plano não comporta mais conexões. Mostra o porquê pro usuário.
-        showToast(String(err && err.message ? err.message : err) || "Não foi possível salvar a conexão.", "error");
-        setStep(1);
-      }
-    },
-    onError: (error) => {
-      console.error("Pluggy Connect error", error);
-      showToast("Não foi possível concluir a conexão.", "error");
-      setStep(1);
-    },
-    onClose: () => {
-      document.getElementById("connect-status").classList.remove("show");
-      document.getElementById("connect-btn").disabled = false;
-    },
-  });
-
-  if (typeof widget.init === "function") widget.init();
-  else if (typeof widget.open === "function") widget.open();
-  else throw new Error("Widget da Pluggy carregou em um formato inesperado.");
-}
-
-async function connectOpenFinance() {
-  if (!USER_ID) { showToast("Sessão inválida. Faça login novamente", "error"); return; }
-  // Free (limite 0): não abre o widget — o /pluggy-item recusaria. Leva pro upgrade.
-  if (OF_BANKS_MAX === 0) { window.location.href = "/precos"; return; }
-  const btn = document.getElementById("connect-btn");
-  const statusEl = document.getElementById("connect-status");
-  const statusText = document.getElementById("connect-status-text");
-  btn.disabled = true;
-  statusEl.classList.add("show");
-  statusText.textContent = "Abrindo conexão segura da Pluggy...";
-  setStep(2);
-
-  try {
-    await openPluggyConnect();
-  } catch (err) {
-    console.error("Pluggy Connect indisponível:", err);
-    statusEl.classList.remove("show");
-    setStep(1);
-    showToast(err.message || "Erro ao abrir a conexão Pluggy", "error");
-    btn.disabled = false;
-  }
 }
 
 /* ── Disconnect ──────────────────────────────── */
@@ -3605,34 +3321,6 @@ window.PBRefresh = () => {
 };
 </script>
 
-<!-- Seletor de banco do Open Finance — FORA do .page (position:fixed; o
-     pull-to-refresh transforma o .page). Populado por JS via getElementById,
-     então a posição no DOM não importa pro comportamento. -->
-<div class="bankpick-overlay" id="bankpick-overlay" onclick="if(event.target===this)closeBankPicker()">
-  <div class="bankpick-modal" role="dialog" aria-modal="true" aria-label="Conectar banco">
-    <div class="bankpick-head">
-      <div class="bankpick-head-row">
-        <div>
-          <div class="bankpick-title">Conectar banco</div>
-          <div class="bankpick-sub">Busque entre as instituições disponíveis</div>
-        </div>
-        <button class="bankpick-x" type="button" onclick="closeBankPicker()" aria-label="Fechar"><i class="ph ph-x" aria-hidden="true"></i></button>
-      </div>
-      <div class="bankpick-search-wrap">
-        <span aria-hidden="true"><i class="ph ph-magnifying-glass" aria-hidden="true"></i></span>
-        <input id="bankpick-search" type="text" placeholder="Buscar banco (ex: Nubank, Itaú, C6…)"
-               autocomplete="off" oninput="renderBankPicker(this.value)">
-      </div>
-    </div>
-    <div class="bankpick-list" id="bankpick-list"></div>
-    <div class="bankpick-foot">
-      <div class="bankpick-count" id="bankpick-count">Nenhum banco selecionado</div>
-      <button class="btn-connect bankpick-go" id="bankpick-go" type="button" onclick="confirmBankPicker()" disabled>
-        Conectar Open Finance
-      </button>
-    </div>
-  </div>
-</div>
 
 <!-- ── MFA Modais ─────────────────────────────────────────────────────────── -->
 <style>
@@ -3649,61 +3337,6 @@ window.PBRefresh = () => {
   background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .8rem;
 }
 .caix-select:focus { border-color: var(--accent); outline: none; }
-.bankpick-open-btn {
-  width: 100%; padding: 13px; border-radius: var(--radius-md);
-  background: var(--surface-2); border: 1px dashed var(--border-hover);
-  color: var(--ink); font-size: .9rem; font-weight: 780; cursor: pointer;
-  display: flex; gap: 8px; align-items: center; justify-content: center;
-  transition: border-color .15s var(--ease), transform .15s var(--ease);
-}
-.bankpick-open-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
-.bankpick-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
-  display: none; align-items: center; justify-content: center; padding: 20px;
-}
-.bankpick-overlay.open { display: flex; }
-.bankpick-modal {
-  width: 100%; max-width: 560px; max-height: 82vh; background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius-xl);
-  display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-md);
-}
-.bankpick-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--border); }
-.bankpick-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.bankpick-title { font-weight: 860; font-size: 1.1rem; color: var(--ink); }
-.bankpick-sub { font-size: .78rem; color: var(--faint); margin-top: 2px; }
-.bankpick-x {
-  width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--surface-2);
-  border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 1rem; flex-shrink: 0;
-}
-.bankpick-x:hover { border-color: var(--border-hover); color: var(--ink); }
-.bankpick-search-wrap { margin-top: 14px; position: relative; }
-.bankpick-search-wrap > span { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--faint); }
-.bankpick-search-wrap input {
-  width: 100%; padding: 12px 14px 12px 40px; border-radius: var(--radius-md);
-  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .9rem; outline: none;
-}
-.bankpick-search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.bankpick-list { overflow-y: auto; padding: 6px 12px 10px; flex: 1 1 auto; min-height: 0; }
-.bankpick-alpha {
-  position: sticky; top: 0; background: var(--surface); color: var(--faint);
-  font-size: .72rem; font-weight: 860; letter-spacing: .06em; padding: 10px 8px 5px; z-index: 2;
-}
-.bankpick-row { width: 100%; margin-bottom: 4px; text-align: left; }
-.bankpick-row.active { border-color: var(--accent); background: var(--accent-soft); }
-.bankpick-logo { position: relative; overflow: hidden; background: #fff; }
-.bankpick-logo img {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: contain; padding: 5px; background: #fff; border-radius: inherit;
-}
-.bankpick-empty { padding: 34px 18px; text-align: center; color: var(--faint); font-size: .88rem; }
-.bankpick-foot {
-  padding: 14px 18px; border-top: 1px solid var(--border);
-  display: flex; align-items: center; gap: 12px; background: var(--surface-2);
-}
-.bankpick-count { font-size: .82rem; color: var(--muted); }
-.bankpick-count strong { color: var(--ink); }
-.bankpick-go { margin: 0 0 0 auto; width: auto; padding: 12px 22px; }
-.bankpick-go:disabled { opacity: .45; cursor: not-allowed; }
 .mfa-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
   display: none; align-items: center; justify-content: center; padding: 20px;

@@ -548,6 +548,29 @@ async def serve_comecar_css():
     )
 
 
+@router.get("/open-finance-connect.js")
+async def serve_of_connect_js():
+    """Modal de conectar banco (Open Finance), compartilhado entre a tela de
+    Configurações e o wizard de primeira configuração. Extraído do inline do
+    settings.html. Sem esta rota o arquivo dá 404 e o sintoma só aparece no
+    navegador — não há StaticFiles mount neste projeto."""
+    return FileResponse(
+        FRONTEND_DIR / "open-finance-connect.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/open-finance-connect.css")
+async def serve_of_connect_css():
+    """CSS do modal de conectar banco (ver /open-finance-connect.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "open-finance-connect.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard-mobile.css")
 async def serve_dashboard_mobile_css():
     """Overrides mobile do dashboard (o <link> só baixa em viewport ≤900px)."""
