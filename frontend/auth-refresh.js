@@ -69,24 +69,33 @@
   }
 
   /**
-   * Logout bem-sucedido → manda o service worker apagar o Cache Storage.
+   * Logout bem-sucedido → apaga o Cache Storage deste dispositivo.
    *
-   * AQUI, e não nos botões: há QUATRO caminhos de logout (dashboard.js:386,
-   * nav-auth.js:30, home.html, settings.html) e todos passam por este
-   * `POST /auth/logout`. Um helper chamado de cada botão seria a mesma linha
-   * em quatro lugares, e o quinto botão nasceria sem ela.
+   * DA PÁGINA, não por mensagem ao service worker. O caso que justifica esta
+   * limpeza é justamente o aparelho ainda controlado por um worker ANTIGO —
+   * que é onde o cache privado está —, e worker antigo não tem listener de
+   * `message`: o `postMessage` cairia no vazio exatamente quando importa
+   * (Codex, #170). A CacheStorage é acessível da janela, então apagar daqui
+   * funciona com worker velho, com worker novo e sem worker nenhum.
    *
-   * Cinto e suspensório sobre a allowlist do service-worker.js: com ela, só
+   * Este helper existe em DOIS arquivos, de propósito: aqui, para as páginas
+   * autenticadas (dashboard, home, settings, comecar), e em `nav-auth.js`,
+   * para as 12 páginas públicas — que carregam o nav-auth e NÃO carregam este
+   * arquivo, então o logout do menu de conta delas não passa por aqui. A
+   * duplicação é comparada por `tests/frontend/sw_cache_privado.test.mjs`
+   * (§0.7): se um dos dois parar de limpar, o teste fica vermelho.
+   *
+   * Cinto e suspensório sobre a allowlist do `service-worker.js` — com ela só
    * asset estático entra no cache, e asset estático não tem dado de ninguém.
-   * Isto alcança o que ficou de versões anteriores num aparelho que ainda não
-   * ativou o worker novo — e o `controller` é null justamente quando não há
-   * worker no controle, caso em que não há nada a limpar.
+   * O que esta limpeza alcança é o que ficou gravado ANTES.
    */
   function _limpaCacheNoLogout() {
     try {
-      const sw = navigator.serviceWorker;
-      if (sw && sw.controller) sw.controller.postMessage({ type: "pb-logout" });
-    } catch (_) { /* sem SW, ou storage bloqueado: não há cache a limpar */ }
+      if (!window.caches) return;
+      caches.keys()
+        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+        .catch(function () {});
+    } catch (_) { /* CacheStorage indisponível: não há cache a limpar */ }
   }
 
   window.fetch = async function(input, init) {

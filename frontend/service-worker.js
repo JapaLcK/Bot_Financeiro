@@ -128,17 +128,11 @@ self.addEventListener("fetch", event => {
   );
 });
 
-/* ── Logout: apaga o Cache Storage deste dispositivo ─────────────────── */
-// Cinto e suspensório sobre a allowlist. As duas telas de logout
-// (dashboard.js, nav-auth.js) mandam esta mensagem; o worker responde apagando
-// tudo. Sem isto, o que já estivesse cacheado sobrevivia ao logout indexado
-// por URL — e a URL carrega o `user_id`.
-self.addEventListener("message", event => {
-  if (!event.data || event.data.type !== "pb-logout") return;
-  event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k))))
-  );
-});
+// A limpeza de logout NÃO mora aqui, e isso é decisão, não esquecimento: o
+// aparelho que tem cache privado é o controlado por um worker ANTIGO, e worker
+// antigo não escuta `message` nenhum — a mensagem cairia no vazio exatamente
+// quando importa (Codex, #170). Quem apaga é a página, pela CacheStorage:
+// `auth-refresh.js` nas telas autenticadas e `nav-auth.js` nas públicas.
 
 /* ── Push notifications (optional, for budget alerts) ───────────────── */
 self.addEventListener("push", event => {

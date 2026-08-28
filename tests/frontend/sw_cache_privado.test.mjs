@@ -180,26 +180,97 @@ test("o activate apaga todo cache de nome diferente", async () => {
   assert.deepEqual(apagados.sort(), ["pigbank-v7", "pigbank-v8"]);
 });
 
-test("a mensagem de logout apaga o Cache Storage inteiro", async () => {
+// ── A limpeza no logout ──────────────────────────────────────────────────
+//
+// Ela mora na PÁGINA, não no worker: o aparelho que tem cache privado é o
+// controlado por um worker ANTIGO, que não escuta `message` — o postMessage
+// cairia no vazio exatamente quando importa (Codex, #170).
+//
+// E mora em DOIS arquivos: `auth-refresh.js` (dashboard, home, settings,
+// comecar) e `nav-auth.js` (as 12 páginas públicas, que NÃO carregam o
+// auth-refresh). Os dois são dirigidos aqui — é o teste que compara a
+// duplicação inevitável (§0.7).
+
+/** Roda um JS de página num contexto falso e devolve o que ele apagou. */
+function paginaComCache(arquivo, prepara) {
   const apagados = [];
-  const { ctx, handlers } = carregaSW();
-  ctx.caches.keys = async () => ["pigbank-v9"];
-  ctx.caches.delete = async (k) => { apagados.push(k); return true; };
+  const ctx = {
+    console,
+    URL, Promise, Set, Date, JSON,
+    caches: {
+      keys: async () => ["pigbank-v8", "pigbank-v9"],
+      delete: async (k) => { apagados.push(k); return true; },
+    },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    location: { origin: ORIGEM, pathname: "/", href: ORIGEM, reload: () => {}, replace: () => {} },
+    navigator: { serviceWorker: { controller: null } },
+    document: {
+      cookie: "", readyState: "complete",
+      addEventListener: () => {}, querySelector: () => null, querySelectorAll: () => [],
+      createElement: () => ({ style: {}, classList: { add() {}, remove() {} }, appendChild() {} }),
+    },
+    setTimeout, clearTimeout, fetch: async () => ({ ok: true, status: 200 }),
+    addEventListener: () => {},
+  };
+  ctx.window = ctx;
+  ctx.self = ctx;
+  vm.createContext(ctx);
+  if (prepara) prepara(ctx);
+  vm.runInContext(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", arquivo), "utf-8"), ctx);
+  return { ctx, apagados };
+}
 
-  let pendente;
-  await handlers.message({ data: { type: "pb-logout" }, waitUntil: (p) => { pendente = p; } });
-  await pendente;
+test("auth-refresh apaga o Cache Storage num logout bem-sucedido", async () => {
+  const { ctx, apagados } = paginaComCache("auth-refresh.js");
 
-  assert.deepEqual(apagados, ["pigbank-v9"]);
+  await ctx.fetch("/auth/logout", { method: "POST" });
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "o logout nao limpou o cache do aparelho");
 });
 
-test("mensagem de outro tipo não apaga nada", async () => {
-  const apagados = [];
-  const { ctx, handlers } = carregaSW();
-  ctx.caches.delete = async (k) => { apagados.push(k); return true; };
+test("auth-refresh nao apaga nada em request comum nem em logout que falhou", async () => {
+  const { ctx, apagados } = paginaComCache("auth-refresh.js");
+  ctx.fetch = ctx.window.fetch;
 
-  await handlers.message({ data: { type: "outra-coisa" }, waitUntil: () => {} });
-  await handlers.message({ data: null, waitUntil: () => {} });
+  await ctx.window.fetch("/data/42");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(apagados, [], "apagou o cache numa request qualquer");
+});
 
-  assert.deepEqual(apagados, []);
+test("nav-auth tambem limpa — as 12 paginas publicas nao carregam o auth-refresh", () => {
+  // Comparação da duplicação (§0.7). O `doLogout` do nav-auth é interno ao
+  // IIFE e depende de DOM para ser alcançado pelo clique; o que este caso
+  // prende é que ele CHAMA a limpeza — se alguém tirar a chamada de um dos
+  // dois arquivos, aqui fica vermelho.
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+  const nav = readFileSync(join(dir, "nav-auth.js"), "utf-8");
+  const refresh = readFileSync(join(dir, "auth-refresh.js"), "utf-8");
+
+  for (const [nome, fonte] of [["nav-auth.js", nav], ["auth-refresh.js", refresh]]) {
+    assert.ok(/caches\s*\.\s*keys\s*\(/.test(fonte),
+              `${nome} parou de apagar o Cache Storage no logout`);
+    assert.ok(/caches\s*\.\s*delete\s*\(/.test(fonte), `${nome} nao apaga nada`);
+  }
+
+  // Dentro do CORPO do doLogout, não no arquivo inteiro. Um `test(/limpa.../)`
+  // sobre o arquivo casa a própria DEFINIÇÃO (`function limpaCacheNoLogout()`)
+  // e fica cego à chamada sumir — medido: tirando a chamada, aquela versão
+  // seguia verde. É o teste que lê o texto do arquivo e afirma que um nome
+  // existe, contra o qual o CLAUDE.md §3 avisa.
+  const i = nav.indexOf("function doLogout()");
+  assert.ok(i > 0, "doLogout sumiu do nav-auth.js");
+  const corpo = nav.slice(i, nav.indexOf("\n  }", i));
+  assert.ok(/limpaCacheNoLogout\s*\(\s*\)/.test(corpo),
+            "nav-auth.js define a limpeza mas o doLogout nao a chama — sair pela landing deixa o cache privado intacto");
+});
+
+test("o worker NAO tem listener de message — a limpeza e' da pagina", () => {
+  // Regressão do achado do Codex: um worker antigo nao escuta `message`, entao
+  // depender dele deixaria o cache privado intacto justamente no aparelho que
+  // ainda nao ativou a versao nova.
+  const fonte = readFileSync(SW, "utf-8");
+  assert.ok(!/addEventListener\(\s*["']message["']/.test(fonte),
+            "a limpeza voltou para o worker: nao alcanca aparelho com worker antigo");
 });

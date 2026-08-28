@@ -27,6 +27,27 @@
     return h;
   }
 
+  /**
+   * Apaga o Cache Storage deste dispositivo no logout.
+   *
+   * Gêmeo do `_limpaCacheNoLogout` de `auth-refresh.js`. As 12 páginas
+   * públicas carregam ESTE arquivo e NÃO carregam o auth-refresh, então o
+   * logout do menu de conta delas não passa pelo interceptor de fetch de lá —
+   * sem esta cópia, sair pela landing deixava o cache privado intacto (Codex,
+   * #170). `tests/frontend/sw_cache_privado.test.mjs` compara os dois (§0.7).
+   *
+   * Da PÁGINA, não por `postMessage` ao worker: o aparelho que ainda tem cache
+   * privado é o controlado por um worker antigo, que não escuta `message`.
+   */
+  function limpaCacheNoLogout() {
+    try {
+      if (!window.caches) return;
+      caches.keys()
+        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+        .catch(function () {});
+    } catch (e) { /* CacheStorage indisponível: não há cache a limpar */ }
+  }
+
   function doLogout() {
     fetch("/auth/logout", {
       method: "POST",
@@ -35,6 +56,7 @@
     })
       .catch(function () {})
       .finally(function () {
+        limpaCacheNoLogout();
         try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
         location.reload(); // CTAs voltam ao padrão deslogado
       });
