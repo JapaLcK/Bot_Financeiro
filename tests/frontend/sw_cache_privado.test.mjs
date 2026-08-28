@@ -299,7 +299,7 @@ const PREFERENCIA_DO_APARELHO = {
   "finbot_logout_at": "1756400000000",
 };
 
-function comStorageCheio(arquivo) {
+function comStorageCheio(arquivo, prepara) {
   const local = new Map(Object.entries({ ...DERIVADO_DE_CONTA, ...PREFERENCIA_DO_APARELHO }));
   const sessao = new Map(Object.entries({ "pb_home_42": "x", "pb_snap_42_2026_08": "y", "pbSpa": "1" }));
   // Proxy, não snapshot: `Object.keys(storage)` tem que refletir o Map VIVO,
@@ -321,6 +321,7 @@ function comStorageCheio(arquivo) {
   const { ctx } = paginaComCache(arquivo, (c) => {
     c.localStorage = mapa(local);
     c.sessionStorage = mapa(sessao);
+    if (prepara) prepara(c);
   });
   return { ctx, local, sessao };
 }
@@ -460,6 +461,72 @@ test("refresh interno que falha (401) limpa — deslogue involuntario", async ()
   assert.equal(resp.status, 401);
   assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
                    "refresh 401 e' fim de sessao e nao limpou o cache");
+});
+
+// Os DOIS ramos de falha do /auth/refresh. O status dessa rota responde "a
+// sessao acabou?", nao classifica o erro: 401 e' refresh invalidado, ou
+// ausente sem access valido; 400 e' ausente com a sessao de pe. O caso acima
+// cobre o 401; os tres abaixo cobrem o 400 e o teto de renovacoes (#173).
+
+test("refresh interno que devolve 400 NAO limpa — a sessao esta' de pe", async () => {
+  // Senha errada no MFA leva 401 de APLICACAO. O interceptor renova por
+  // reflexo (#176), o backend responde 400 porque o access token ainda vale, e
+  // tratar isso como fim de sessao apagava o aparelho de quem so' errou a senha.
+  const apagados = [];
+  const falso = fetchPorRota({ "/auth/mfa/setup": 401, "/auth/refresh": 400 });
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
+    c.fetch = falso.fn;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const resp = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+
+  assert.ok(falso.chamadas.some((c) => c.caminho === "/auth/refresh"),
+            "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
+  assert.equal(resp.status, 401, "o 401 da senha errada tem que chegar ao chamador");
+  assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao viva");
+});
+
+test("senha errada com refresh ausente: o estado fica E a chamada seguinte funciona", async () => {
+  // O cenario inteiro, ponta a ponta: nao basta nao apagar, a sessao tem que
+  // seguir utilizavel depois. Sem a segunda metade o caso passaria num
+  // interceptor que engoliu a sessao de outro jeito.
+  const apagados = [];
+  const falso = fetchPorRota({
+    "/auth/mfa/setup": 401, "/auth/refresh": 400, "/data/42": 200,
+  });
+  const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = falso.fn;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const erro = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+  assert.equal(erro.status, 401);
+
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado com a sessao viva`);
+  }
+  assert.equal(sessao.has("pb_home_42"), true, "pb_home_ foi apagado da sessao");
+  assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao viva");
+
+  const ok = await ctx.window.fetch("/data/42");
+  assert.equal(ok.ok, true, "a chamada autenticada seguinte parou de funcionar");
+  assert.deepEqual(apagados, [], "a chamada seguinte apagou o Cache Storage");
+});
+
+test("uma renovacao por 401 interceptado, e nenhum retry quando ela falha", async () => {
+  // O teto. O interceptor renova em QUALQUER 401 (#176), entao o que segura o
+  // custo e' nao haver recursao: uma renovacao, e a request original refeita
+  // so' quando a renovacao da' certo.
+  const falso = fetchPorRota({ "/auth/mfa/setup": 401, "/auth/refresh": 400 });
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => { c.fetch = falso.fn; });
+
+  await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+
+  const refresh = falso.chamadas.filter((c) => c.caminho === "/auth/refresh");
+  const setup = falso.chamadas.filter((c) => c.caminho === "/auth/mfa/setup");
+  assert.equal(refresh.length, 1, `esperado 1 refresh, vieram ${refresh.length}`);
+  assert.equal(setup.length, 1, "a request original foi refeita com o refresh falhando");
 });
 
 test("retry pos-refresh que encerra a sessao limpa", async () => {

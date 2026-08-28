@@ -123,6 +123,87 @@ def test_login_sets_auth_token_cookie(monkeypatch):
     assert "secure" in refresh
 
 
+# ── /auth/refresh: o status responde "a sessão acabou?" ──────────────────────
+#
+# O `frontend/static/auth-refresh.js` apaga o estado do aparelho (storage
+# derivado de conta, Cache Storage inteiro, service worker) quando ESTA rota
+# devolve 401. Por isso o ramo do refresh ausente escolhe o status pela validade
+# do access token, e não pelo tipo do erro: 401 para os dois casos apagava o
+# aparelho de quem só errou a senha noutra rota, com a sessão de pé (#173).
+#
+# "Sem cookie de refresh" NÃO é sinônimo de sessão viva — os dois primeiros
+# casos abaixo têm o mesmo `detail` e estados opostos.
+
+
+def _post_refresh(client: TestClient):
+    return client.post("/auth/refresh", headers=_csrf_headers(client))
+
+
+def test_refresh_sem_cookie_com_access_valido_nao_encerra_sessao():
+    client = TestClient(dashboard.app)
+    client.cookies.set(
+        dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(123, "user@example.com"),
+    )
+
+    response = _post_refresh(client)
+
+    assert response.status_code == 400, (
+        "401 aqui faz o auth-refresh.js apagar o estado do aparelho com a sessão viva"
+    )
+    assert response.json()["detail"] == "missing_refresh_token"
+
+
+def test_refresh_sem_cookie_com_access_expirado_encerra_sessao():
+    # O outro lado do mesmo ramo, e o caminho COMUM: o cookie de refresh vence
+    # em 14d e some do jar do navegador junto com o access. Aí a sessão é
+    # irrecuperável e a limpeza do aparelho tem de continuar acontecendo.
+    from datetime import datetime, timedelta, timezone
+
+    import jwt as pyjwt
+
+    vencido = pyjwt.encode(
+        {
+            "sub": "123",
+            "email": "user@example.com",
+            "type": "auth",
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+        },
+        dashboard.JWT_SECRET,
+        algorithm="HS256",
+    )
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, vencido)
+
+    response = _post_refresh(client)
+
+    assert response.status_code == 401, (
+        "sessão irrecuperável: 400 aqui deixaria o estado privado no aparelho"
+    )
+    assert response.json()["detail"] == "missing_refresh_token"
+
+
+def test_refresh_sem_cookie_nenhum_encerra_sessao():
+    client = TestClient(dashboard.app)
+
+    response = _post_refresh(client)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "missing_refresh_token"
+
+
+def test_refresh_com_token_desconhecido_continua_encerrando_sessao():
+    # O ramo que já era fim de sessão, intocado: refresh inválido/revogado/
+    # replay. Controle positivo do par — sem ele o grupo passaria num backend
+    # que nunca devolve 401.
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.REFRESH_COOKIE_NAME, "rt_naoexiste")
+
+    response = _post_refresh(client)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid_refresh_token"
+
+
 def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
     token = dashboard._make_jwt(123, "user@example.com")
     client = TestClient(dashboard.app)

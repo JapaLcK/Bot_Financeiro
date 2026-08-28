@@ -50,8 +50,9 @@
           headers,
         });
         // O refresh interno não passa pelo wrapper, então a limpeza é aplicada
-        // aqui: um 401 nele é deslogue involuntário, e o backend limpa o cookie
-        // de sessão nesse mesmo ramo (finance_bot_websocket_custom.py).
+        // aqui. Só o 401 conta: o backend responde 400 quando o cookie de
+        // refresh falta mas o access token ainda vale — sessão de pé, nada a
+        // apagar (finance_bot_websocket_custom.py, #173).
         await _comLimpeza("/auth/refresh", r);
         return r.ok;
       } catch (_) {
@@ -81,9 +82,19 @@
    *
    *   POST   /auth/logout    encerra quando dá certo
    *   DELETE /auth/account   idem — a exclusão agendada desloga na hora
-   *   POST   /auth/refresh   encerra quando FALHA (401): refresh inválido é
-   *                          deslogue involuntário, e o backend limpa o cookie
-   *                          nesse mesmo ramo
+   *   POST   /auth/refresh   encerra quando dá 401, e SÓ 401. O status desta
+   *                          rota responde "a sessão acabou?", não classifica
+   *                          o erro: 400 é refresh ausente com access ainda
+   *                          válido (sessão de pé, nada a apagar), 401 é
+   *                          refresh invalidado/revogado ou ausente sem access
+   *                          válido. Tratar todo 401 como fim de sessão
+   *                          apagava o aparelho de quem só errou a senha
+   *                          noutra rota (#173).
+   *
+   * Por que 401 aqui justifica apagar: o refresh token acabou, então não há
+   * como renovar de novo — o que estiver no aparelho é lixo de uma sessão que
+   * não volta. NÃO é "a sessão já acabou no servidor": o cookie de access pode
+   * sobreviver até 15 min (e o backend nem o expira aqui — #175).
    *
    * `tests/test_static_pages_routes.py` compara esta lista com as rotas que o
    * Python realmente tem, por `ast`. Duplicação inevitável — JS não importa
