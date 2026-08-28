@@ -130,6 +130,19 @@ select status, status_reason, last_sync_at, reconnected_at, health->>'item_statu
 | B11 | qualquer um dos acima | `settings.html` **não** abre WebSocket nenhum (hoje: zero ocorrências de `new WebSocket`) | — |
 | B12 | reconectar **enquanto** um sync escreve | a reconexão espera o `pluggy_item_lock`; só devolve 503 se as duas tentativas falharem | erro só no 503, e o mesmo POST reaproveita |
 | B13 | frequência real do 503 de B12 | contar `of_reconnect_lock_timeout` nos logs por uma semana | — |
+| B14 | que status a Pluggy JÁ nos devolveu | `select distinct status from open_finance_connections where provider='"'"'pluggy'"'"'` — leitura pura | — |
+| B15 | existe conector com QR / autorização por dispositivo na base? | `WAITING_USER_ACTION` no resultado de B14, ou nos logs | decide o tamanho real da mudança da Onda 3 |
+
+**B14 é o que fecha a última faixa de dúvida da taxonomia.** Linha gravada
+ANTES da Onda 1 tem exatamente `health` NULL, `last_sync_at` preenchido e
+`reconnected_at` NULL — porque naquele código o upsert carimbava `last_sync_at` e
+as outras duas colunas não existiam. O `status` dela é o que a Pluggy disse na
+hora, sem filtro. Se algum dia veio um valor fora dos conjuntos conhecidos,
+aquela linha mostra "Atualizado" até hoje. Nenhum caminho de escrita ATUAL
+produz essa combinação (os quatro escritores foram varridos: upsert,
+`mark_sync_result`, `update_pluggy_open_finance_item_status` com seu mapa fixo de
+três, e a pausa) — mas o passado não passou por eles. É hipótese estrutural, não
+achado, e uma query de leitura resolve.
 
 **B8 é o caso central das Ondas 1–3.** Foi ele que produzia "Tudo em dia!" com
 "Última sync: pendente" na linha logo abaixo e zero contas espelhadas.

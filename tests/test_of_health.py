@@ -625,6 +625,41 @@ def test_execution_status_de_erro_nao_e_status_de_item(item, esperado, rotulo):
 # CONTROLE NEGATIVO: tirar `INVALID_CREDENTIALS` de `_NEEDS_USER` ou `CREATED`
 # de `_UPDATING` deixa um caso vermelho cada.
 
+# ── Codex #166: "Ação necessária" não diz QUAL ação ─────────────────────────
+# `_NEEDS_USER` é um balde só, e o detalhe fixo do estado é "Reautorize o banco".
+# Para `WAITING_USER_ACTION` isso manda a pessoa REFAZER a conexão quando o que
+# ela precisa é autorizar o dispositivo / ler o QR antes do `expiresAt` — ou
+# seja, a instrução errada faz perder exatamente a janela que importa.
+#
+# CONTROLE NEGATIVO: tirar a entrada de `_DETALHE_POR_STATUS` deixa os dois
+# casos abaixo vermelhos (o detalhe volta a ser "Reautorize o banco").
+# CONTROLE POSITIVO: `LOGIN_ERROR` prova que os OUTROS membros do balde seguem
+# com o detalhe compartilhado — senão a exceção teria virado regra.
+
+@pytest.mark.parametrize("origem", ["health", "status_local"])
+@pytest.mark.parametrize("item_status, detalhe_esperado", [
+    ("WAITING_USER_ACTION", "Autorize o acesso no app do banco"),
+    ("LOGIN_ERROR", "Reautorize o banco"),
+])
+def test_detalhe_da_acao_necessaria_e_especifico_quando_precisa(
+        origem, item_status, detalhe_esperado):
+    """Os dois ramos: com `health` medido e caindo no `status` LOCAL — o upsert
+    grava `item.get("status") or item.get("executionStatus")`, então o valor
+    chega pelos dois caminhos."""
+    linha = {"status_reason": "", "last_sync_at": AGORA, "reconnected_at": None}
+    if origem == "health":
+        linha |= {"status": "ERROR",
+                  "health": {"item_status": item_status, "products": {},
+                             "stale_products": []}}
+    else:
+        linha |= {"status": item_status, "health": None}
+
+    ui = connection_ui_state(linha)
+    assert ui["state"] == "needs_user_action"
+    assert ui["label"] == "Ação necessária"
+    assert ui["detail"] == detalhe_esperado
+
+
 @pytest.mark.parametrize("status_local, estado_esperado", [
     ("INVALID_CREDENTIALS", "needs_user_action"),
     ("CREATED", "updating"),

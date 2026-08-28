@@ -119,6 +119,16 @@ _LABELS = {
     "no_accounts": "Sem dados",
 }
 
+# Detalhe POR STATUS, quando o do estado manda a ação errada. `_NEEDS_USER` é um
+# balde só ("Ação necessária"), mas a ação não é a mesma para todo mundo:
+# `WAITING_USER_ACTION` pede autorizar o dispositivo / ler o QR no app do banco,
+# dentro do `userAction.expiresAt` — e o detalhe fixo do estado, "Reautorize o
+# banco", empurra o usuário a REFAZER a conexão, que é justamente perder a
+# janela. Apontado pelo Codex no #166.
+_DETALHE_POR_STATUS = {
+    "WAITING_USER_ACTION": "Autorize o acesso no app do banco",
+}
+
 _FIXED_DETAIL = {
     "error_recoverable": "Tentaremos de novo automaticamente",
     "needs_user_action": "Reautorize o banco",
@@ -402,7 +412,7 @@ def connection_ui_state(connection_row: dict) -> dict:
     if health:
         item_status = str(health.get("item_status") or "").upper()
         if item_status in _NEEDS_USER:
-            return out("needs_user_action")
+            return out("needs_user_action", _DETALHE_POR_STATUS.get(item_status))
         if item_status in _UPDATING:
             return out("updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
@@ -424,7 +434,10 @@ def connection_ui_state(connection_row: dict) -> dict:
     if status in _UPDATING:
         return out("updating")
     if status in _NEEDS_USER:
-        return out("needs_user_action")
+        # O status LOCAL também pode trazer `WAITING_USER_ACTION` (o upsert grava
+        # `item.get("status") or item.get("executionStatus")`), então o detalhe
+        # específico vale nos dois ramos.
+        return out("needs_user_action", _DETALHE_POR_STATUS.get(status))
     if status == "ERROR":
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
