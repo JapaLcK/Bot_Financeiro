@@ -98,33 +98,97 @@
   };
 
   /**
-   * Fim de sessão → apaga o Cache Storage deste dispositivo.
+   * O que SOBREVIVE ao fim de sessão. Tudo o mais é apagado.
    *
-   * DA PÁGINA, não por mensagem ao service worker. O caso que justifica esta
-   * limpeza é justamente o aparelho ainda controlado por um worker ANTIGO —
-   * que é onde o cache privado está —, e worker antigo não tem listener de
-   * `message`: o `postMessage` cairia no vazio exatamente quando importa
-   * (Codex, #170). A CacheStorage é acessível da janela, então apagar daqui
-   * funciona com worker velho, com worker novo e sem worker nenhum.
+   * Lista do que PRESERVAR, não do que apagar, e a inversão é o ponto: uma
+   * lista de "apagar isto" falha ABERTO — a próxima chave derivada de conta
+   * nasce sobrevivendo ao logout, e ninguém percebe. Mesma lição da allowlist
+   * do `service-worker.js`.
    *
-   * Este helper existe em DOIS arquivos, de propósito: aqui, para as páginas
-   * autenticadas (dashboard, home, settings, comecar), e em `nav-auth.js`,
-   * para as 12 páginas públicas — que carregam o nav-auth e NÃO carregam este
-   * arquivo, então o logout do menu de conta delas não passa por aqui. A
-   * duplicação é comparada por `tests/frontend/sw_cache_privado.test.mjs`
-   * (§0.7): se um dos dois parar de limpar, o teste fica vermelho.
+   * O critério é observável: preferência DO APARELHO fica; qualquer coisa
+   * derivada da CONTA sai. Apagar o tema no logout seria hostil, e manter o
+   * "esconder saldo" é mais seguro que limpá-lo.
    *
-   * Cinto e suspensório sobre a allowlist do `service-worker.js` — com ela só
-   * asset estático entra no cache, e asset estático não tem dado de ninguém.
-   * O que esta limpeza alcança é o que ficou gravado ANTES.
+   *   pigbank_theme          claro/escuro — preferência do aparelho
+   *   pigbank_hide_balance   olho de esconder saldo — idem, e manter é o lado
+   *                          seguro
+   *   pbFabPos               posição da bolinha do chat
+   *   pbDebug                flag de cronômetro do pb-nav
+   *   pbSpa                  flag do motor SPA (sessionStorage, morre com a aba)
+   *   finbot_logout_at       MECANISMO: outras abas escutam o storage event
+   *                          desta chave para se deslogarem juntas. Apagá-la
+   *                          quebraria o logout entre abas.
    */
-  function _limpaCacheNoLogout() {
+  const _PRESERVA = new Set([
+    "pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa",
+    "finbot_logout_at",
+  ]);
+
+  function _apagaStorage(store) {
     try {
-      if (!window.caches) return Promise.resolve();
-      return caches.keys()
-        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+      Object.keys(store).forEach(function (k) {
+        if (!_PRESERVA.has(k)) store.removeItem(k);
+      });
+    } catch (_) { /* storage bloqueado (Safari privado): nada a apagar */ }
+  }
+
+  /**
+   * Fim de sessão → apaga o estado privado deste dispositivo.
+   *
+   * ENUMERADO, não remendado. Os quatro logouts limpavam subconjuntos
+   * diferentes e nenhum limpava tudo:
+   *
+   *                     pigbank_menu_v1   pb_snap_*   pb_home_*
+   *   dashboard.js           limpa          limpa       DEIXA
+   *   home.html              DEIXA          limpa       limpa
+   *   settings.html          DEIXA          DEIXA       DEIXA
+   *   nav-auth.js            DEIXA          DEIXA       DEIXA
+   *
+   * E o que sobrava não é pouco: `pigbank_menu_v1` guarda e-mail, nome e plano;
+   * `pb_home_<uid>` guarda snapshot, histórico, e-mail e nome. Sair pelo
+   * Ajustes não limpava nada. As limpezas por página continuam onde estão —
+   * são inofensivas e tirá-las seria outro PR.
+   */
+  function _limpaEstadoDoDispositivo() {
+    _apagaStorage(window.localStorage);
+    _apagaStorage(window.sessionStorage);
+    // ORDEM: desregistra ANTES de apagar. Um worker ANTIGO ainda no controle
+    // tem `cache.put` assíncrono no handler de fetch dele, e uma request em voo
+    // noutra aba podia recriar o cache DEPOIS do delete (Codex, #170). O
+    // unregister não mata o worker que já controla os clientes abertos — isso
+    // só acontece quando eles descarregam, e o logout descarrega este —, mas
+    // garante que nenhum load futuro pegue o worker velho.
+    return _desregistraWorkers()
+      .then(function () {
+        if (!window.caches) return;
+        return caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        });
+      })
+      .catch(function () { /* sem SW ou sem CacheStorage: nada a limpar */ });
+  }
+
+  /**
+   * Tira todo service worker do ar antes da limpeza.
+   *
+   * Custo aceito: o worker é re-registrado no próximo load de página
+   * autenticada (`dashboard.js`, `home.html`), então a PWA fica sem offline
+   * entre o logout e essa volta. Fim de sessão é exatamente quando esse custo
+   * é barato — não há dado do usuário para servir offline.
+   *
+   * NÃO fecha a corrida sozinho, e isso está dito de propósito: o worker
+   * desregistrado continua controlando os clientes já abertos até eles
+   * descarregarem. O que fecha o caso residual é o `activate` do worker novo,
+   * que apaga todo cache de nome diferente no próximo load do site.
+   */
+  function _desregistraWorkers() {
+    try {
+      var sw = navigator.serviceWorker;
+      if (!sw || !sw.getRegistrations) return Promise.resolve();
+      return sw.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
         .catch(function () {});
-    } catch (_) { /* CacheStorage indisponível: não há cache a limpar */ }
+    } catch (_) { /* sem service worker: nada a desregistrar */ }
     return Promise.resolve();
   }
 
@@ -154,7 +218,7 @@
    */
   async function _comLimpeza(caminho, resp) {
     const fim = _SESSAO_ENCERRADA[caminho];
-    if (fim && fim(resp)) await _limpaCacheNoLogout();
+    if (fim && fim(resp)) await _limpaEstadoDoDispositivo();
     return resp;
   }
 

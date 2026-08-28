@@ -203,7 +203,7 @@ function paginaComCache(arquivo, prepara) {
     },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     location: { origin: ORIGEM, pathname: "/", href: ORIGEM, reload: () => {}, replace: () => {} },
-    navigator: { serviceWorker: { controller: null } },
+    navigator: { serviceWorker: { controller: null, getRegistrations: async () => [] } },
     document: {
       cookie: "", readyState: "complete",
       addEventListener: () => {}, querySelector: () => null, querySelectorAll: () => [],
@@ -265,6 +265,163 @@ test("auth-refresh AGUARDA o delete antes de devolver a resposta do logout", asy
 
   assert.equal(resolveu, true);
   assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"]);
+});
+
+// ── O estado do DISPOSITIVO no fim de sessão ─────────────────────────────
+//
+// Enumeração, não remendo. Os quatro logouts limpavam subconjuntos diferentes
+// e nenhum limpava tudo — sair pelo Ajustes não limpava nada:
+//
+//                   pigbank_menu_v1   pb_snap_*   pb_home_*
+//   dashboard.js         limpa          limpa       DEIXA
+//   home.html            DEIXA          limpa       limpa
+//   settings.html        DEIXA          DEIXA       DEIXA
+//   nav-auth.js          DEIXA          DEIXA       DEIXA
+//
+// `pigbank_menu_v1` guarda e-mail, nome e plano; `pb_home_<uid>` guarda
+// snapshot, histórico, e-mail e nome.
+//
+// A regra é lista do que PRESERVAR, não do que apagar: chave nova derivada de
+// conta é apagada por default (falha fechada, como a allowlist do worker).
+
+const DERIVADO_DE_CONTA = {
+  "pigbank_menu_v1": '{"email":"a@b.c","displayName":"Fulano","plan":"pro"}',
+  "pb_home_42": '{"snapshot":{},"email":"a@b.c"}',
+  "pb_snap_42_2026_08": '{"total":1234}',
+  "pbNewsTab": "1",
+  "_pigInsightsDismissed": "3",
+  "pigbank_trial_banner_snooze": "1756400000000",
+};
+const PREFERENCIA_DO_APARELHO = {
+  "pigbank_theme": "dark",
+  "pigbank_hide_balance": "1",
+  "pbFabPos": '{"side":"right","top":300}',
+  "finbot_logout_at": "1756400000000",
+};
+
+function comStorageCheio(arquivo) {
+  const local = new Map(Object.entries({ ...DERIVADO_DE_CONTA, ...PREFERENCIA_DO_APARELHO }));
+  const sessao = new Map(Object.entries({ "pb_home_42": "x", "pb_snap_42_2026_08": "y", "pbSpa": "1" }));
+  // Proxy, não snapshot: `Object.keys(storage)` tem que refletir o Map VIVO,
+  // como o localStorage de verdade. Com `Object.fromEntries` as chaves ficam
+  // congeladas na criação e o caso da chave nova fica cego — medido: ele
+  // passava sem medir nada.
+  const API_STORAGE = (m) => ({
+    getItem: (key) => (m.has(key) ? m.get(key) : null),
+    setItem: (key, v) => m.set(key, String(v)),
+    removeItem: (key) => m.delete(key),
+    key: (i) => [...m.keys()][i],
+  });
+  const mapa = (m) => new Proxy({}, {
+    get: (_, k) => (k === "length" ? m.size : (API_STORAGE(m)[k] ?? m.get(k))),
+    has: (_, k) => m.has(k),
+    ownKeys: () => [...m.keys()],
+    getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+  });
+  const { ctx } = paginaComCache(arquivo, (c) => {
+    c.localStorage = mapa(local);
+    c.sessionStorage = mapa(sessao);
+  });
+  return { ctx, local, sessao };
+}
+
+test("fim de sessao apaga TUDO que e' derivado de conta", async () => {
+  const { ctx, local, sessao } = comStorageCheio("auth-refresh.js");
+
+  await ctx.fetch("/auth/logout", { method: "POST" });
+  await new Promise((r) => setTimeout(r, 0));
+
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), false, `${k} sobreviveu ao logout — e' derivado de conta`);
+  }
+  assert.equal(sessao.has("pb_home_42"), false, "pb_home_ sobreviveu na sessao");
+  assert.equal(sessao.has("pb_snap_42_2026_08"), false, "pb_snap_ sobreviveu na sessao");
+});
+
+test("preferencia do aparelho SOBREVIVE — apagar o tema seria hostil", async () => {
+  const { ctx, local, sessao } = comStorageCheio("auth-refresh.js");
+
+  await ctx.fetch("/auth/logout", { method: "POST" });
+  await new Promise((r) => setTimeout(r, 0));
+
+  for (const k of Object.keys(PREFERENCIA_DO_APARELHO)) {
+    assert.equal(local.get(k), PREFERENCIA_DO_APARELHO[k],
+                 `${k} foi apagado — e' preferencia do aparelho, nao da conta`);
+  }
+  // `finbot_logout_at` e' MECANISMO: outras abas escutam o storage event dele
+  // para se deslogarem juntas. Apaga-lo quebraria o logout entre abas.
+  assert.equal(local.has("finbot_logout_at"), true);
+  assert.equal(sessao.has("pbSpa"), true);
+});
+
+test("chave NOVA derivada de conta e' apagada por default (falha fechada)", async () => {
+  const { ctx, local } = comStorageCheio("auth-refresh.js");
+  local.set("pigbank_alguma_coisa_nova_v2", "dado do usuario");
+
+  await ctx.fetch("/auth/logout", { method: "POST" });
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.equal(local.has("pigbank_alguma_coisa_nova_v2"), false,
+               "chave nao listada sobreviveu: a regra virou lista do que apagar e falha aberta");
+});
+
+test("desregistra o worker ANTES de apagar, nao depois", async () => {
+  // Ordem. Um worker ANTIGO ainda no controle tem `cache.put` assincrono no
+  // handler de fetch dele: uma request em voo noutra aba recriava o cache
+  // DEPOIS do delete (Codex, #170). Desregistrar primeiro nao mata o worker
+  // que ja controla os clientes abertos, mas garante que nenhum load futuro
+  // pegue o velho.
+  const ordem = [];
+  let liberaUnregister;
+  const bloqueado = new Promise((r) => { liberaUnregister = r; });
+
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.navigator.serviceWorker.getRegistrations = async () => [{
+      unregister: async () => { await bloqueado; ordem.push("unregister"); return true; },
+    }];
+    c.caches.delete = async (k) => { ordem.push("delete:" + k); return true; };
+  });
+
+  const chamada = ctx.fetch("/auth/logout", { method: "POST" });
+  await new Promise((r) => setTimeout(r, 10));
+
+  assert.deepEqual(ordem, [], "apagou o cache antes de desregistrar o worker");
+
+  liberaUnregister();
+  await chamada;
+
+  assert.equal(ordem[0], "unregister", `esperado unregister primeiro, veio ${ordem[0]}`);
+  assert.ok(ordem.slice(1).every((o) => o.startsWith("delete:")), ordem);
+});
+
+test("sem service worker no navegador, a limpeza segue e apaga o cache", async () => {
+  // Controle: `getRegistrations` ausente (Safari antigo, contexto inseguro) nao
+  // pode abortar a limpeza inteira.
+  const apagados = [];
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.navigator.serviceWorker = undefined;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await ctx.fetch("/auth/logout", { method: "POST" });
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "sem SW a limpeza de cache foi abortada junto");
+});
+
+test("nav-auth preserva a mesma lista que o auth-refresh", () => {
+  // §0.7: duplicacao inevitavel entre publico e logado, entao um teste compara.
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+  const lista = (fonte, marca) => {
+    const i = fonte.indexOf(marca);
+    assert.ok(i > 0, `${marca} sumiu`);
+    const bloco = fonte.slice(i, fonte.indexOf("]", i));
+    return new Set(bloco.match(/"([^"]+)"/g).map((s) => s.slice(1, -1)));
+  };
+  const a = lista(readFileSync(join(dir, "auth-refresh.js"), "utf-8"), "_PRESERVA = new Set([");
+  const b = lista(readFileSync(join(dir, "nav-auth.js"), "utf-8"), "PRESERVA = [");
+  assert.deepEqual([...a].sort(), [...b].sort(),
+                   "as duas listas divergiram: um logout preserva o que o outro apaga");
 });
 
 // Os dois caminhos INTERNOS do interceptor. Ele produz resposta em tres

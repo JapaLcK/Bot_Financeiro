@@ -39,14 +39,46 @@
    * Da PÁGINA, não por `postMessage` ao worker: o aparelho que ainda tem cache
    * privado é o controlado por um worker antigo, que não escuta `message`.
    */
-  function limpaCacheNoLogout() {
+  // Gêmeo do `_PRESERVA` de `auth-refresh.js` — preferência do APARELHO fica,
+  // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
+  // apagar, para falhar fechado: chave nova derivada de conta é apagada por
+  // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
+  var PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
+                  "pbDebug", "pbSpa", "finbot_logout_at"];
+
+  function apagaStorage(store) {
     try {
-      if (!window.caches) return Promise.resolve();
-      return caches.keys()
-        .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+      Object.keys(store).forEach(function (k) {
+        if (PRESERVA.indexOf(k) === -1) store.removeItem(k);
+      });
+    } catch (e) { /* storage bloqueado (Safari privado): nada a apagar */ }
+  }
+
+  // Gêmeo do `_desregistraWorkers` de `auth-refresh.js`. Desregistra ANTES de
+  // apagar: um worker antigo ainda no controle tem `cache.put` assíncrono e uma
+  // request em voo noutra aba podia recriar o cache depois do delete.
+  function desregistraWorkers() {
+    try {
+      var sw = navigator.serviceWorker;
+      if (!sw || !sw.getRegistrations) return Promise.resolve();
+      return sw.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
         .catch(function () {});
-    } catch (e) { /* CacheStorage indisponível: não há cache a limpar */ }
+    } catch (e) { /* sem service worker: nada a desregistrar */ }
     return Promise.resolve();
+  }
+
+  function limpaCacheNoLogout() {
+    apagaStorage(window.localStorage);
+    apagaStorage(window.sessionStorage);
+    return desregistraWorkers()
+      .then(function () {
+        if (!window.caches) return;
+        return caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        });
+      })
+      .catch(function () { /* sem SW ou sem CacheStorage: nada a limpar */ });
   }
 
   function doLogout() {
