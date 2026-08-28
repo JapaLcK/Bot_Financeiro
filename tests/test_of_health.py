@@ -462,10 +462,20 @@ _HTML = (pathlib.Path(__file__).resolve().parent.parent
          / "frontend" / "settings.html").read_text(encoding="utf-8")
 
 
+# Comentário JS é ruído para TODAS as leituras abaixo, e ele derrota as quatro
+# nos DOIS sentidos (medido): um `// paused nao usa i.detail` acima de uma
+# entrada deixa a paridade VERMELHA sem defeito, e — pior — um comentário logo
+# ABAIXO de uma entrada que parou de ler `i.detail` a deixa VERDE, que é o bug
+# que a guarda existe para pegar. Some para a entrada anterior no `re.split` e
+# casa dentro do próprio texto no `re.search`. Some aqui, uma vez, em vez de em
+# cada leitor: `(?<!:)` para não comer o `//` de uma URL (`https://`).
+_SEM_COMENTARIO = re.compile(r"/\*.*?\*/|(?<!:)//[^\n]*", re.S)
+
+
 def _bloco(nome: str, abre: str, fecha: str) -> str:
     m = re.search(rf"const {nome} = \{abre}(.*?)\{fecha};", _HTML, re.S)
     assert m, f"{nome} sumiu/foi renomeado no settings.html — a paridade ficou cega"
-    return m.group(1)
+    return _SEM_COMENTARIO.sub("", m.group(1))
 
 
 def _js_pill_states() -> set[str]:
@@ -670,3 +680,131 @@ def test_execution_status_no_status_local_ainda_e_lido(status_local, estado_espe
         "last_sync_at": AGORA, "reconnected_at": None,
     })
     assert ui["state"] == estado_esperado
+
+
+# ── Codex #166, 3ª rodada: a instrução do toast também vem do backend ────────
+# O mesmo defeito bateu três vezes na mesma classe (status em `_UPDATING`;
+# detalhe da LINHA da conexão; e o TOAST do refresh). O que fecha a classe não é
+# consertar o terceiro caso: é prender a REGRA — estado cujo `detail` pode
+# VARIAR entre itens tem de ler `i.detail` no `OF_VERDICT`, senão o JS
+# sobrescreve a instrução que o backend calculou por uma frase fixa.
+#
+# Este teste DERIVA os dois lados em vez de declará-los: roda o
+# `connection_ui_state` sobre a matriz de entradas e vê quem tem detalhe
+# variável; lê o `OF_VERDICT` e vê quem consome `i.detail`.
+#
+# CONTROLES NEGATIVOS, os dois medidos AQUI (e não "ver relato"):
+#   • `["updating", () => OF_UPDATING_LOTE]` — o JS para de ler o detalhe de um
+#     estado que tem detalhe variável → 1 vermelho, este teste;
+#   • dar detalhe variável a `error_recoverable` no backend sem tocar no JS
+#     (a simulação da 4ª rodada) → 3 vermelhos: este teste, o de cobertura
+#     comportamental, e o `test_erro_sem_motivo_e_recuperavel` (que já existia e
+#     afirma o detalhe daquele estado).
+#
+# O QUE **NÃO** SERVE, e chegou a estar escrito aqui como se tivesse sido
+# medido: acrescentar chave a `_DETALHE_POR_STATUS` para um status fora de
+# `_NEEDS_USER`. Aquele dict só é lido dentro do ramo `needs_user_action`
+# (`pluggy_health.py`), então a chave vira código morto e o teste fica VERDE —
+# controle que não executa a linha mutada não é controle. Foi assim que a
+# afirmação "a classe fechou" quase entrou sem prova.
+
+def _detalhe_por_estado() -> dict[str, set]:
+    """estado → conjunto dos `detail` que ele consegue produzir."""
+    from core.services.pluggy_health import (
+        _LABELS, _NEEDS_USER, _UPDATING, READ_FAILED)
+
+    mapa: dict[str, set] = {}
+
+    def anota(linha: dict) -> None:
+        ui = connection_ui_state(linha)
+        mapa.setdefault(ui["state"], set()).add(ui["detail"])
+
+    for item_status in sorted(_NEEDS_USER | _UPDATING | {"ERROR", "UPDATED"}):
+        for reason in sorted(set(_LABELS) | {"", READ_FAILED}):
+            for sync in (AGORA, None):
+                for status_local in ("ACTIVE", "ERROR", "DELETED", "PAUSED", item_status):
+                    base = {"status": status_local, "status_reason": reason,
+                            "last_sync_at": sync, "reconnected_at": None}
+                    anota(base | {"health": {"item_status": item_status, "products": {},
+                                             "stale_products": []}})
+                    anota(base | {"health": None})
+
+    # `partial` só nasce de um health com produto atrasado — o detalhe dele é
+    # calculado ("Cartão desatualizado desde 12/08"), nunca fixo.
+    anota({"status": "ACTIVE", "status_reason": "", "last_sync_at": AGORA,
+           "reconnected_at": None, "health": derive_item_health(ITEM_PARCIAL, now=AGORA)})
+    return mapa
+
+
+# `i.detail`, `i?.detail` e `i["detail"]` são a MESMA leitura. Casar só a
+# primeira forma deixava a paridade VERMELHA num refactor inócuo (medido: trocar
+# `i.detail` por `i?.detail` nas três entradas reprovava as três).
+_LE_DETALHE = re.compile(r"""i\??(?:\.detail\b|\[['"]detail['"]\])""")
+
+
+def _js_verdict_le_detail() -> set[str]:
+    bloco = _bloco("OF_VERDICT", "[", "]")
+    partes = re.split(r'^\s*\["(\w+)",', bloco, flags=re.M)[1:]
+    entradas = dict(zip(partes[::2], partes[1::2]))
+    assert entradas, "OF_VERDICT ficou ilegível — a paridade do detalhe está cega"
+    return {estado for estado, corpo in entradas.items() if _LE_DETALHE.search(corpo)}
+
+
+def _mjs_estados_com_caso_comportamental() -> set[str]:
+    """Os estados que `of_refresh_ui.test.mjs` exercita com detalhe de verdade."""
+    caminho = pathlib.Path(__file__).parent / "frontend" / "of_refresh_ui.test.mjs"
+    texto = caminho.read_text(encoding="utf-8")
+    ini = texto.index("for (const [state, detail, proibido] of [")
+    fim = texto.index("]) {", ini)
+    return set(re.findall(r'^\s*\["(\w+)",', texto[ini:fim], re.M))
+
+
+def test_todo_estado_de_detalhe_variavel_tem_caso_comportamental():
+    """A guarda ESTRUTURAL abaixo é cega para "menciona `i.detail` e ignora" —
+    ela mesma diz isso. Quem pega é o caso comportamental do Playwright, e a
+    lista de lá é escrita à mão: um estado de detalhe variável NOVO nasceria com
+    guarda estrutural só, que é exatamente a rodada 4 esperando acontecer.
+
+    Este teste tira a lista da mão de quem escreve: o conjunto derivado do
+    backend tem de ser o mesmo que o `.mjs` exercita.
+
+    CONTROLE NEGATIVO: apagar uma das linhas do laço no `.mjs` deixa isto
+    vermelho nomeando o estado que ficou sem cobertura comportamental."""
+    from core.services.pluggy_health import _FIXED_DETAIL
+
+    variavel = {estado for estado, detalhes in _detalhe_por_estado().items()
+                if detalhes != {_FIXED_DETAIL.get(estado)}}
+    mjs = _mjs_estados_com_caso_comportamental()
+    assert variavel == mjs, (
+        f"estado de detalhe variável SEM caso comportamental (só a guarda "
+        f"estrutural, que é cega para menciona-e-ignora): {sorted(variavel - mjs)}; "
+        f"caso comportamental para estado de detalhe constante: {sorted(mjs - variavel)}")
+
+
+def test_estado_de_detalhe_variavel_le_i_detail_no_of_verdict():
+    """Guarda ESTRUTURAL: o conjunto dos estados de detalhe VARIÁVEL tem de ser
+    o mesmo que o `OF_VERDICT` lê.
+
+    O QUE ELA NÃO PEGA: mede MENÇÃO a `i.detail`, não USO. Uma entrada escrita
+    como `(i) => i.detail ? "frase fixa" : "frase fixa"` — o jeito plausível de
+    a classe reabrir, alguém encurtando a frase e mantendo a condição — passa
+    aqui (medido: mutar `updating` e `partial` assim deixa este arquivo verde).
+    Quem pega isso é a guarda COMPORTAMENTAL: um caso por estado de detalhe
+    variável no teste "veredito do refresh" de
+    `tests/frontend/of_refresh_ui.test.mjs`, que afirma que a mensagem CONTÉM o
+    detalhe do item E o nome da instituição. Esta aqui é a rede contra o estado NOVO que o JS nem
+    menciona; aquela é a rede contra o estado conhecido que menciona e ignora.
+    Um não substitui o outro.
+    """
+    from core.services.pluggy_health import _FIXED_DETAIL
+
+    mapa = _detalhe_por_estado()
+    assert set(mapa) >= {"needs_user_action", "updating", "partial"}, sorted(mapa)
+    variaveis = {e for e, d in mapa.items() if d != {_FIXED_DETAIL.get(e)}}
+    lidos = _js_verdict_le_detail()
+
+    assert variaveis == lidos, (
+        "estado com detalhe VARIÁVEL que o OF_VERDICT ignora (o toast troca a "
+        f"instrução do backend por frase fixa): {sorted(variaveis - lidos)}; "
+        "estado que o JS lê `i.detail` mas cujo detalhe é sempre o fixo (a "
+        f"leitura não serve para nada): {sorted(lidos - variaveis)}")

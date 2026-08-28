@@ -123,14 +123,22 @@ _LABELS = {
 # balde só ("Ação necessária"), mas a ação não é a mesma para todo mundo:
 # `WAITING_USER_ACTION` pede autorizar o dispositivo / ler o QR no app do banco,
 # dentro do `userAction.expiresAt` — e o detalhe fixo do estado, "Reautorize o
-# banco", empurra o usuário a REFAZER a conexão, que é justamente perder a
-# janela. Apontado pelo Codex no #166.
+# acesso", manda o usuário refazer a autorização daqui, que é justamente deixar
+# a janela expirar. Apontado pelo Codex no #166.
+#
+# SÓ É LIDO no ramo `needs_user_action` (abaixo, nos dois caminhos). Chave para
+# status fora de `_NEEDS_USER` é código morto — não sirva de controle negativo.
 _DETALHE_POR_STATUS = {
     "WAITING_USER_ACTION": "Autorize o acesso no app do banco",
 }
 
 _FIXED_DETAIL = {
     "error_recoverable": "Tentaremos de novo automaticamente",
+    # DUAS superfícies leem esta frase: a linha da conexão ("Ação necessária" +
+    # esta linha) e o toast do refresh ("Ação necessária no Nubank: reautorize o
+    # acesso."). Era "Reautorize o banco", que no toast virava a instrução mais
+    # fraca do caso MAJORITÁRIO — os quatro status de `_NEEDS_USER` que não são
+    # `WAITING_USER_ACTION`. Uma frase só nas duas: não duplique instrução no JS.
     "needs_user_action": "Reautorize o banco",
     "item_missing": "Refaça a conexão com o banco",
     "paused": "Reative seu plano para voltar a sincronizar",

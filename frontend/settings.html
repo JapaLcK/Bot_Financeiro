@@ -1004,9 +1004,22 @@ body.balance-hidden .account-balance {
 /* ─── Toast ──────────────────────────────────── */
 #toast {
   position: fixed;
-  left: 50%;
+  /* Centrado por `translate` sobre 100vw. As duas formas óbvias erram, cada
+     uma de um jeito, e as duas contra o MESMO fato: esta página tem overflow
+     horizontal pré-existente (`.top-actions`), então o bloco-contêiner do
+     `fixed` é 379px mesmo numa tela de 320 — `100vw` (= clientWidth) é o único
+     que vale o que se vê.
+       `left:50%`             → espaço disponível = meia tela, o `fit-content`
+                                para numa coluna de 195px a 390.
+       `margin-inline:auto`   → centraliza nos 379, não nos 320: medido
+         entre left/right       45..333 a 320, 13px cortados. Com `translate`:
+                                16..304. */
+  left: 0;
+  right: auto;
+  width: fit-content;
+  translate: calc(50vw - 50%);
   bottom: 28px;
-  transform: translateX(-50%) translateY(14px);
+  transform: translateY(14px);
   opacity: 0;
   pointer-events: none;
   background: #2a2d36;
@@ -1017,14 +1030,31 @@ body.balance-hidden .account-balance {
   font-size: .8rem;
   font-weight: 760;
   z-index: 50;
-  white-space: nowrap;
+  /* `nowrap` + `left:50%` sem teto = frase longa sai da viewport pelos DOIS
+     lados, e `scrollWidth` continua o da tela: não há scroll que revele o
+     final. Medido a 390x844: 11 das 12 mensagens do toast cortavam, inclusive
+     as instruções do Open Finance ("...autorize o acesso no app do ban"). */
+  max-width: min(420px, calc(100vw - 32px));
+  white-space: normal;
+  /* `normal` quebra em espaço, e o UA ainda quebra depois de "/" — uma URL
+     longa se vira sozinha (medido: scrollWidth 356 = clientWidth). Quem NÃO se
+     vira é o token sem oportunidade de quebra: token de sessão, id sem hífen,
+     palavra emendada. 21 `showToast(err.message …)` desta página despejam
+     `detail` do servidor aqui. Medido a 390 com um JWT: scrollWidth 508 numa
+     caixa de 356, texto vazando por dentro (a caixa fica em 16..374 e mente
+     que está tudo bem). Mesma proteção que o modo app já dá em
+     `app-mode.css` (html.pb-app body) e que o web não tinha. */
+  overflow-wrap: anywhere;
+  line-height: 1.45;
   box-shadow: var(--shadow-md);
   transition: opacity .2s var(--ease), transform .2s var(--ease);
   display: flex;
   align-items: center;
   gap: 7px;
 }
-#toast.show  { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* o ícone não encolhe quando o texto quebra em duas linhas */
+#toast > span:first-child { flex: none; display: flex; }
+#toast.show  { opacity: 1; transform: translateY(0); }
 #toast.ok    { border-color: rgba(5,150,105,.25); color: var(--green); }
 #toast.error { border-color: rgba(220,38,38,.25); color: var(--red); }
 
@@ -3107,22 +3137,65 @@ async function refreshOpenFinance(opts) {
 const OF_VERDICT_OK = ["updated", "rate_limited"];
 
 /* Ordem de GRAVIDADE: o primeiro estado desta lista que aparecer manda na
-   mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos. */
+   mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos.
+
+   QUEM MANDA NA INSTRUÇÃO É O BACKEND, não esta tabela. Estado cujo `detail`
+   VARIA entre itens (hoje `needs_user_action`, `updating` e `partial`) TEM de
+   ler `i.detail` — a frase fixa aqui só vale para estado de detalhe constante.
+   Terceira rodada do mesmo defeito: "Ação necessária" é um balde só, e um
+   `WAITING_USER_ACTION` (autorizar o dispositivo / ler o QR antes do
+   `userAction.expiresAt`) que ouve "reautorize o acesso" perde a janela.
+   `tests/test_of_health.py` compara os dois conjuntos (guarda ESTRUTURAL, pega
+   estado novo que ignora o detalhe) e `tests/frontend/of_refresh_ui.test.mjs`
+   afirma o texto de cada estado de detalhe variável (guarda COMPORTAMENTAL,
+   pega a frase que menciona `i.detail` e não o usa).
+
+   ONDE ISTO APARECE: só no mobile web e no desktop web. No app iOS / PWA o
+   botão "Atualizar" some (app-mode.css) e o gesto chama
+   `refreshOpenFinance({propagate:true})`, que NÃO chama `showToast` — o
+   `finish(ok)` do app-mode.js só pinta verde/âmbar e descarta a string. Antes
+   de "consertar o toast do app", saiba que ele não existe lá. */
+// SEM item: é o ramo `still_updating > 0`, que fala do lote, não de um banco.
+// Por isso ela é a única frase deste bloco sem `ofNome` — e por isso ela NÃO
+// serve de fallback do `updating`, que tem item na mão.
+const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
+
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
   ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
   ["paused",            (i) => `A sincronização ${ofBanco(i)} está pausada. Reative seu plano para atualizar.`],
-  ["needs_user_action", (i) => `O ${ofNome(i)} precisa que você reautorize o acesso.`],
+  // Sem instrução própria no fallback DE PROPÓSITO: o `_FIXED_DETAIL` do
+  // backend sempre preenche o detalhe deste estado, e repetir a instrução aqui
+  // é a duplicação que já mandou "reautorize" para quem precisava autorizar.
+  ["needs_user_action", (i) => i.detail
+      ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Ação necessária no ${ofNome(i)}.`],
   ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
-  ["updating",          ()  => "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo."],
+  ["updating",          (i) => i.detail
+      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
+      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
+  // O `ofNome(i)` NÃO é enfeite: com dois bancos conectados, "cartão
+  // desatualizado desde 12/08" não diz de qual. **As oito entradas desta tabela
+  // falam de UM item e as oito nomeiam o item** — a única frase sem nome é a do
+  // lote (`OF_UPDATING_LOTE`), que fala de `still_updating` e não tem item.
+  // Exceção por entrada é o buraco por onde esta classe reabriu três vezes.
   ["partial",           (i) => i.detail
-      ? `Atualizei o que deu: ${i.detail.charAt(0).toLowerCase()}${i.detail.slice(1)}.`
-      : "Atualizei o que deu — parte dos dados não veio."],
-  ["error_recoverable", () => "Não consegui atualizar agora. Tente de novo em instantes."],
+      ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
+  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
 ];
 
 function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
 function ofNome(i)  { return i.institution || "banco"; }
+// O detalhe do backend começa em maiúscula ("Autorize o acesso…"); aqui ele
+// entra no meio da frase. `showToast` faz o `esc()`.
+// `String(d)` porque TRÊS estados chamam isto agora (era um), e um `detail`
+// não-string — número, objeto, array — estourava `d.charAt is not a function`
+// subindo pelo `refreshVerdict`, sem `try` em nenhum ponto do caminho. Não é
+// alcançável pelo backend de hoje (as três fontes devolvem literal ou f-string).
+// Latentes que sobram, também não alcançáveis: acrônimo é destruído ("MFA" →
+// "mFA"); detalhe terminado em ponto dá ponto duplo.
+function ofInstrucao(d) { const s = String(d); return `${s.charAt(0).toLowerCase()}${s.slice(1)}`; }
 
 function refreshVerdict(sync) {
   const items = Array.isArray(sync.items) ? sync.items : [];
@@ -3131,7 +3204,7 @@ function refreshVerdict(sync) {
     if (achado) return { tone: "error", msg: msg(achado) };
   }
   if (Number(sync.still_updating) > 0)
-    return { tone: "error", msg: "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo." };
+    return { tone: "error", msg: OF_UPDATING_LOTE };
   // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
   // sem item nenhum, não pode terminar em verde.
   const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));
