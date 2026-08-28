@@ -32,6 +32,7 @@ from core.services.pluggy import (
 )
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
+    _env_int,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
     sync_pluggy_user,
@@ -82,10 +83,36 @@ _DIRTY: set[str] = set()
 # 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
 _SYNC_MAX_ATTEMPTS = 3
 
-# Tentativas de pegar o lock ao gravar uma reconexão. Cada uma já espera até
-# `OF_SYNC_LOCK_WAIT_MS` (15s) lá dentro, então 2 é o teto do que cabe num
-# request HTTP — a janela do lock é só a fase de escrita e passa em segundos.
+# Tentativas de pegar o lock ao gravar uma reconexão. A janela do lock é só a
+# fase de escrita e passa em segundos, então a segunda quase sempre entra.
 _RECONNECT_LOCK_ATTEMPTS = 2
+
+# PRAZO ÚNICO da operação inteira — lock, backoff e a segunda tentativa cabem
+# TODOS aqui dentro. Antes, cada `pluggy_item_lock` reiniciava o relógio: até
+# 15s de vaga MAIS 15s de advisory lock, vezes 2 tentativas, mais backoff — o
+# POST `/pluggy/item` passava de um minuto sob contenção e o proxy derrubava
+# antes (Codex #166, P2). O pior caso não era só lento: a gravação podia
+# acontecer DEPOIS do timeout do cliente, então o usuário via erro num fluxo que
+# tinha dado certo, e reconectava de novo.
+#
+# 20s é o orçamento, não o alvo: no caminho comum o lock está livre e isto não
+# custa nada. Quem estoura leva 503, que é recuperável — o item continua na
+# Pluggy e o mesmo POST reaproveita.
+def _prazo_reconexao_ms() -> int:
+    """Prazo da reconexão, com config sem sentido voltando para o default.
+
+    `0` é como se escreve "desligado" numa env. Com um piso de 1ms — que foi a
+    primeira versão disto — `OF_RECONNECT_DEADLINE_MS=0` virava "TODA reconexão
+    do Open Finance falha com 503", de lock LIVRE, e o log ainda dizia "lock do
+    item ocupado", que é diagnóstico falso. Valor negativo idem. Abaixo de 1s
+    não há reconexão possível (só o `connect` já leva mais que isso), então
+    tratar como engano é mais honesto que obedecer.
+    """
+    ms = _env_int("OF_RECONNECT_DEADLINE_MS", 20000)
+    return ms if ms >= 1000 else 20000
+
+
+_RECONNECT_DEADLINE_MS = _prazo_reconexao_ms()
 
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
 # de fora de propósito (é `item_missing`, tratado no sync), 4xx de credencial
@@ -110,7 +137,8 @@ def _retryable(exc: BaseException) -> bool:
         return False
 
 
-def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict, bool]:
+def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
+                         budget_ms: int | None = None) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -133,7 +161,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict
     compra de cartão da autorização velha. O fallback anulava o conserto no único
     caso em que ele importa.
     """
-    with pluggy_item_lock(item_id) as locked:
+    with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
         return save_pluggy_open_finance_item(user_id, remote), True
@@ -151,24 +179,50 @@ async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:
     Esgotou: 503 com mensagem de "tente de novo". O item continua existindo na
     Pluggy e o mesmo POST reaproveita, então a reconexão é recuperável — o
     lançamento fantasma não seria.
+
+    PRAZO ÚNICO (Codex #166, P2). O relógio começa aqui e vale para a operação
+    inteira: cada tentativa recebe só o que SOBROU, e o backoff sai do mesmo
+    bolso. Antes, cada `pluggy_item_lock` reiniciava o teto — 15s de vaga + 15s
+    de advisory, vezes 2, mais backoff — e o POST passava de um minuto sob
+    contenção. O `_RECONNECT_LOCK_ATTEMPTS` continua como segunda trava, para o
+    laço não girar quando o lock falha instantaneamente; quem manda no tempo é
+    o prazo.
     """
+    fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
+        folga_ms = int((fim - time.monotonic()) * 1000)
+        if folga_ms < 1:
+            break
+        # O que sobra do prazo, DIVIDIDO pelas tentativas que ainda cabem. Dar o
+        # prazo inteiro à primeira parecia certo e matava o retry: sob contenção
+        # real ela esperava os 20s no `pg_advisory_lock`, voltava sem folga, e a
+        # segunda nunca acontecia — medido, 1 tentativa e ZERO
+        # `of_reconnect_lock_retry` no log, que é o sinal que separa "ocupado
+        # mas recuperou" de "desistiu". A trava de tentativas virava código
+        # morto e ninguém via, porque os testes stubam o lock e voltam na hora.
+        restante_ms = max(1, folga_ms // (_RECONNECT_LOCK_ATTEMPTS - tentativa + 1))
         connection, sob_lock = await asyncio.to_thread(
-            _salva_item_sob_lock, user_id, remote, item_id)
+            _salva_item_sob_lock, user_id, remote, item_id, restante_ms)
         if sob_lock:
             return connection
-        if tentativa < _RECONNECT_LOCK_ATTEMPTS:
+        # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
+        # estourar é exatamente o que o deadline existe para impedir.
+        folga = fim - time.monotonic()
+        if tentativa < _RECONNECT_LOCK_ATTEMPTS and folga > 0:
             await log_system_event(
                 "warning", "of_reconnect_lock_retry",
                 f"Lock ocupado ao gravar reconexão ({tentativa}/{_RECONNECT_LOCK_ATTEMPTS}): {item_id}",
-                source="open_finance", details={"item_id": item_id, "attempt": tentativa},
+                source="open_finance",
+                details={"item_id": item_id, "attempt": tentativa,
+                         "restante_ms": int(folga * 1000)},
             )
-            await asyncio.sleep(_backoff_sec(tentativa))
+            await asyncio.sleep(min(_backoff_sec(tentativa), folga))
 
     await log_system_event(
         "error", "of_reconnect_lock_timeout",
         f"Reconexão NÃO gravada: lock do item ocupado: {item_id}",
-        source="open_finance", details={"item_id": item_id},
+        source="open_finance",
+        details={"item_id": item_id, "deadline_ms": _RECONNECT_DEADLINE_MS},
     )
     raise HTTPException(
         status_code=503,

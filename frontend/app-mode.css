@@ -613,8 +613,10 @@ html.pb-app #toast {
   bottom: calc(88px + env(safe-area-inset-bottom)) !important;
 }
 /* Só o toast do dashboard é ancorado à direita. O do settings é centralizado
-   por `left:0` + `translate: calc(50vw - 50%)` — dar um "right" a ele reabre o
-   `fit-content` contra o bloco-contêiner do fixo e desloca esse centro. */
+   por `left: 50vw` + `transform: translateX(-50%)` — dar um "right" a ele
+   reabre o `fit-content` contra o bloco-contêiner do fixo e desloca esse
+   centro. (O settings usava `translate: calc(50vw - 50%)`; trocado porque a
+   propriedade individual não existe no WKWebView do iOS 14.) */
 html.pb-app body.pb-page-app #toast {
   right: calc(26px + env(safe-area-inset-right)) !important;
 }

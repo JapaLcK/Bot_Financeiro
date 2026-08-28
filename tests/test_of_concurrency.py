@@ -311,7 +311,7 @@ def test_sync_in_progress_e_retentado(user_id, monkeypatch):
 
     tentativas = []
 
-    def _lock_ocupado(item_id):
+    def _lock_ocupado(item_id, *, budget_ms=None):
         tentativas.append(item_id)
         return {"ok": False, "reason": "sync_in_progress", "item_id": item_id}
 
@@ -397,7 +397,7 @@ def test_reconexao_grava_dentro_do_lock_de_escrita(user_id, monkeypatch):
     ordem = []
 
     @contextmanager
-    def _lock_espiao(item_id):
+    def _lock_espiao(item_id, *, budget_ms=None):
         ordem.append(("enter", item_id))
         try:
             yield True
@@ -428,7 +428,7 @@ def test_sem_lock_nao_grava(user_id, monkeypatch):
     salvou = []
 
     @contextmanager
-    def _lock_ocupado(item_id):
+    def _lock_ocupado(item_id, *, budget_ms=None):
         yield False
 
     monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_ocupado)
@@ -458,7 +458,7 @@ def test_reconexao_retenta_o_lock_antes_de_desistir(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
 
-    def _libera_na_segunda(uid, remote, item_id):
+    def _libera_na_segunda(uid, remote, item_id, budget_ms=None):
         tentativas.append(item_id)
         if len(tentativas) == 1:
             return None, False
@@ -491,7 +491,7 @@ def test_lock_ocupado_ate_o_fim_recusa_com_503(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock",
-                        lambda uid, remote, item_id: (None, False))
+                        lambda uid, remote, item_id, budget_ms=None: (None, False))
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-preso"))
@@ -586,3 +586,273 @@ def test_429_da_pluggy_e_retentado_pelo_webhook():
     assert of_routes._retryable(PluggyApiError("sumiu", status_code=404)) is False
     assert of_routes._retryable(PluggyApiError("chave errada", status_code=401)) is False
     assert of_routes._retryable(ValueError("bug")) is False
+
+
+# ── ONDA 3 (Codex #166, P2): a reconexão inteira cabe num prazo só ──────────
+# O `_grava_reconexao` retenta o lock, e cada `pluggy_item_lock` reiniciava o
+# relógio: até `OF_SYNC_LOCK_WAIT_MS` esperando vaga no semáforo MAIS o mesmo
+# tanto no advisory lock, vezes 2 tentativas, mais backoff. Sob contenção o POST
+# `/pluggy/item` passava de um minuto e o proxy derrubava antes — com o
+# agravante de a gravação poder acontecer DEPOIS do timeout do cliente, ou seja,
+# erro na cara do usuário num fluxo que deu certo.
+#
+# Agora o prazo é único e a tentativa seguinte recebe só o que sobrou.
+#
+# CONTROLES NEGATIVOS, os três medidos:
+#   • tirar o `budget_ms=restante_ms` do call site → 2 vermelhos
+#     (`test_prazo_nao_reinicia...` e `test_lock_livre...`);
+#   • tirar a checagem `restante_ms < 1` do laço → 1
+#     (`test_prazo_estourado_nem_tenta_de_novo`);
+#   • tirar o repasse do orçamento dentro do `pluggy_item_lock` (usar
+#     `_lock_wait_ms()` no `lock_timeout` mesmo com `budget_ms`) → 1
+#     (`test_lock_reparte_o_orcamento...`).
+# CONTROLE POSITIVO: `test_lock_livre_grava_na_primeira...` prova que o prazo não
+# atrapalha o caminho comum — sem ele, um deadline pequeno demais passaria
+# despercebido recusando tudo.
+
+class _RelogioFake:
+    """Relógio controlável: o teste decide quanto tempo cada etapa 'gasta'."""
+
+    def __init__(self):
+        self.agora = 1000.0
+
+    def monotonic(self):
+        return self.agora
+
+    def anda(self, segundos):
+        self.agora += segundos
+
+
+def test_prazo_nao_reinicia_a_cada_tentativa(user_id, monkeypatch):
+    """Cada tentativa recebe o RESTANTE, não o teto cheio de novo."""
+    relogio = _RelogioFake()
+    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 20000)
+
+    orcamentos = []
+
+    async def _log(*a, **kw):
+        return None
+
+    async def _dorme(s):
+        relogio.anda(s)          # o backoff também sai do mesmo bolso
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+
+    inicio = relogio.agora
+
+    def _ocupado(uid, remote, item_id, budget_ms=None):
+        orcamentos.append((budget_ms, relogio.agora - inicio))
+        # Gasta METADE do que recebeu: se gastasse tudo não haveria 2ª tentativa
+        # (e é assim mesmo — `test_prazo_estourado_nem_tenta_de_novo` cobre esse
+        # caso). Aqui o que se quer medir é que a 2ª recebe o RESTO.
+        relogio.anda(budget_ms / 2000.0)
+        return None, False
+
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _ocupado)
+
+    with pytest.raises(of_routes.HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-prazo"))
+
+    assert exc.value.status_code == 503
+    assert len(orcamentos) == 2, orcamentos
+    # O invariante: cada tentativa recebe o que RESTA do prazo dividido pelas
+    # tentativas que ainda cabem. Dar o prazo inteiro à primeira parecia certo e
+    # matava o retry — sob contenção real ela esperava tudo e a segunda nunca
+    # acontecia. Somar os orçamentos não faz sentido: o 2º é o resto do 1º.
+    for i, (orcamento, decorrido) in enumerate(orcamentos):
+        folga = 20000 - int(decorrido * 1000)
+        esperado = folga // (2 - i)
+        # ±2ms: os dois lados truncam float em ponto diferente. A tolerância é
+        # de arredondamento, não de comportamento — o relógio reiniciando daria
+        # 20000 cravado na 2ª, que está a 10s de distância.
+        assert abs(orcamento - esperado) <= 2, (
+            f"tentativa {i + 1} recebeu {orcamento}ms com {decorrido:.3f}s já "
+            f"gastos (folga {folga}, esperado {esperado}) — o relógio reiniciou")
+    assert orcamentos[0][0] < 20000, \
+        "a 1ª tentativa NÃO pode levar o prazo inteiro: sobra zero para a 2ª"
+    assert relogio.agora - inicio <= 20.0, \
+        f"a operação inteira estourou o prazo: {relogio.agora - inicio:.3f}s"
+
+
+def test_prazo_estourado_nem_tenta_de_novo(user_id, monkeypatch):
+    """Sem folga, não há segunda tentativa — nem uma 'rapidinha'."""
+    relogio = _RelogioFake()
+    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 20000)
+
+    chamadas = []
+
+    async def _log(*a, **kw):
+        return None
+
+    async def _dorme(s):
+        relogio.anda(s)
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+
+    def _come_tudo(uid, remote, item_id, budget_ms=None):
+        chamadas.append(budget_ms)
+        relogio.anda(30.0)               # estourou o prazo sozinha
+        return None, False
+
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _come_tudo)
+
+    with pytest.raises(of_routes.HTTPException):
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-estourado"))
+
+    assert len(chamadas) == 1, f"tentou de novo com o prazo vencido: {chamadas}"
+
+
+def test_lock_livre_grava_na_primeira_sem_esperar_nada(user_id, monkeypatch):
+    """CONTROLE POSITIVO: com o lock livre nada muda — grava de primeira, sem
+    503, e a tentativa recebe o prazo cheio."""
+    relogio = _RelogioFake()
+    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 20000)
+
+    vistos = []
+
+    def _livre(uid, remote, item_id, budget_ms=None):
+        vistos.append(budget_ms)
+        return {"id": 42}, True
+
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _livre)
+
+    conexao = asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-livre"))
+
+    assert conexao == {"id": 42}
+    # Metade do prazo, porque a outra metade fica reservada para a 2ª tentativa.
+    # O caminho comum não espera nada — o lock está livre e ele volta na hora.
+    assert vistos == [10000]
+
+
+def test_lock_reparte_o_orcamento_entre_a_vaga_e_o_advisory(monkeypatch):
+    """O `budget_ms` é o teto TOTAL da aquisição: o que a vaga do semáforo
+    consumiu sai do `lock_timeout` do Postgres.
+
+    Sem isso, "teto total" seria teto POR ETAPA e uma chamada custaria 2× — que
+    é metade da razão de o POST passar de um minuto."""
+    from db import open_finance_state as ofs
+
+    relogio = _RelogioFake()
+    executados = []
+
+    class _ConnFake:
+        def execute(self, sql, params=None):
+            executados.append((sql, params))
+
+        def close(self):
+            pass
+
+    esperas = []
+
+    class _VagaLenta:
+        def acquire(self, timeout=None):
+            esperas.append(timeout)
+            relogio.anda(4.0)            # a vaga custou 4s do orçamento
+            return True
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(ofs.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(ofs, "_lock_slots", lambda: _VagaLenta())
+    monkeypatch.setattr(ofs.psycopg, "connect", lambda *a, **kw: _ConnFake())
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+
+    with ofs.pluggy_item_lock("item-orc", budget_ms=10000) as got:
+        assert got is True
+
+    timeouts = [p[0] for sql, p in executados if p and "lock_timeout" in sql]
+    assert timeouts == ["6000ms"], \
+        f"o advisory lock devia herdar o que sobrou (10000-4000), veio {timeouts}"
+    # A VAGA também obedece o orçamento — é metade do bug reportado ("até 15s de
+    # vaga MAIS 15s de advisory"). Sem esta linha, trocar o `teto_ms` do
+    # `acquire` por `_lock_wait_ms()` passava verde (medido).
+    assert esperas == [10.0], \
+        f"a vaga do semáforo tem de esperar o orçamento, não o teto fixo: {esperas}"
+
+
+def test_lock_ocupado_de_verdade_ainda_retenta_e_loga(user_id, monkeypatch):
+    """O caminho COMPOSTO — prazo × `pluggy_item_lock` real × Postgres real.
+
+    Os outros quatro testes desta seção trocam `_salva_item_sob_lock` por stub
+    ou mockam o `psycopg.connect`, e por isso nenhum deles viu o defeito que o
+    ataque achou: dando o prazo INTEIRO à primeira tentativa, ela esperava tudo
+    no `pg_advisory_lock`, voltava sem folga, e a segunda nunca acontecia —
+    `_RECONNECT_LOCK_ATTEMPTS` virava código morto e o `of_reconnect_lock_retry`
+    nunca mais era emitido. Ops perde justamente o sinal que separa "ficou
+    ocupado mas recuperou" de "desistiu".
+
+    Aqui o lock é segurado por OUTRA conexão, de verdade.
+
+    CONTROLE NEGATIVO: dar o prazo inteiro à 1ª tentativa (tirar a divisão por
+    `_RECONNECT_LOCK_ATTEMPTS - tentativa + 1`) deixa este teste vermelho com
+    1 tentativa e zero eventos de retry.
+    CONTROLE POSITIVO: `test_lock_livre_grava_na_primeira_sem_esperar_nada`
+    prova que o caminho comum não paga nada por isto."""
+    import os
+
+    from fastapi import HTTPException
+
+    from db.open_finance_state import _lock_key
+
+    item_id = f"item-lock-real-{user_id}"
+    eventos = []
+    orcamentos = []
+
+    async def _log(level, event_type, *a, **kw):
+        eventos.append(event_type)
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    # Prazo curto de propósito: o teste não pode custar 20s. 2s é o piso que
+    # ainda deixa a 2ª tentativa acontecer — o backoff (`_backoff_sec`, 375–625ms
+    # na 1ª) sai do mesmo bolso, então com 600ms ele comia a metade restante e o
+    # teste media o contrário do que quer (medido: 1 tentativa, orçamento 299).
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 2000)
+
+    real = of_routes._salva_item_sob_lock
+
+    def _espiao(uid, remote, iid, budget_ms=None):
+        orcamentos.append(budget_ms)
+        return real(uid, remote, iid, budget_ms)
+
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _espiao)
+
+    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as segurador:
+        segurador.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item_id),))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                asyncio.run(of_routes._grava_reconexao(user_id, {"id": item_id}, item_id))
+        finally:
+            segurador.execute("select pg_advisory_unlock(hashtext(%s))",
+                              (_lock_key(item_id),))
+
+    assert exc.value.status_code == 503
+    assert len(orcamentos) == 2, \
+        f"a 2ª tentativa não aconteceu — a 1ª comeu o prazo: {orcamentos}"
+    assert "of_reconnect_lock_retry" in eventos, \
+        f"o warning de retry sumiu do log: {eventos}"
+    assert eventos[-1] == "of_reconnect_lock_timeout"
+    assert _prova_lock_livre(item_id), "o lock ficou preso depois do 503"
+
+
+@pytest.mark.parametrize("valor, esperado, porque", [
+    ("0", 20000, "`0` é como se escreve 'desligado' — não pode virar 503 em tudo"),
+    ("-5", 20000, "negativo idem"),
+    ("500", 20000, "abaixo de 1s não há reconexão possível: só o connect leva mais"),
+    ("abc", 20000, "lixo cai no default, como no resto do repo"),
+    ("", 20000, "vazio idem"),
+    ("30000", 30000, "CONTROLE POSITIVO: valor legítimo é obedecido"),
+])
+def test_prazo_de_reconexao_recusa_config_sem_sentido(monkeypatch, valor, esperado, porque):
+    """A primeira versão usava `max(1, ...)`, e aí `OF_RECONNECT_DEADLINE_MS=0`
+    derrubava toda reconexão com um log que culpava o lock.
+
+    CONTROLE NEGATIVO: voltar para `max(1, _env_int(...))` deixa os três
+    primeiros casos vermelhos."""
+    monkeypatch.setenv("OF_RECONNECT_DEADLINE_MS", valor)
+    assert of_routes._prazo_reconexao_ms() == esperado, porque

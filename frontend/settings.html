@@ -1004,22 +1004,35 @@ body.balance-hidden .account-balance {
 /* ─── Toast ──────────────────────────────────── */
 #toast {
   position: fixed;
-  /* Centrado por `translate` sobre 100vw. As duas formas óbvias erram, cada
-     uma de um jeito, e as duas contra o MESMO fato: esta página tem overflow
-     horizontal pré-existente (`.top-actions`), então o bloco-contêiner do
-     `fixed` é 379px mesmo numa tela de 320 — `100vw` (= clientWidth) é o único
-     que vale o que se vê.
-       `left:50%`             → espaço disponível = meia tela, o `fit-content`
-                                para numa coluna de 195px a 390.
-       `margin-inline:auto`   → centraliza nos 379, não nos 320: medido
-         entre left/right       45..333 a 320, 13px cortados. Com `translate`:
-                                16..304. */
-  left: 0;
+  /* Ancorado em `50vw` e centrado por `-50%` do PRÓPRIO toast. Duas coisas
+     que custaram medição e não são óbvias:
+
+     1. `vw`, e não `50%`/`margin:auto`. Esta página tem overflow horizontal
+        pré-existente (`.top-actions`), então o bloco-contêiner do `fixed` é
+        379px numa tela de 320 — qualquer centragem relativa ao contêiner mira
+        os 379 e joga o toast para fora. `vw` vale o que se vê.
+     2. `transform`, e NÃO a propriedade individual `translate`. Ela resolve o
+        mesmo, mas não existe no WKWebView do iOS 14 inicial, e o alvo de deploy
+        do app é iOS 14.0 (`mobile/ios/App/App.xcodeproj`): lá a declaração é
+        ignorada e o toast ancora em `left: 0`, colado na borda esquerda
+        (Codex #166, P2). Sem `@supports` e sem fallback duplicado — esta forma
+        é universal.
+
+     O X é constante entre o estado oculto e o `.show`, então a `transition` do
+     `transform` só anima o Y (amostrado a cada 25ms durante a animação: X fixo,
+     Y de 8.94 a 0).
+
+     Ressalva de honestidade: uma versão anterior deste comentário afirmava, como
+     medido, que `translateX(calc(50vw - 50%))` "resolve para zero no Chromium".
+     É falso — aquilo centra igual (`matrix(1,0,0,1,16,0)` a 390). O número veio
+     de ler `getComputedStyle().transform` no meio da `transition`, que devolve o
+     valor interpolado em t=0, ou seja, o transform ANTIGO. A forma compacta
+     funcionaria; o motivo de não usá-la é só o item 2. */
+  left: 50vw;
   right: auto;
   width: fit-content;
-  translate: calc(50vw - 50%);
   bottom: 28px;
-  transform: translateY(14px);
+  transform: translateX(-50%) translateY(14px);
   opacity: 0;
   pointer-events: none;
   background: #2a2d36;
@@ -1054,7 +1067,7 @@ body.balance-hidden .account-balance {
 }
 /* o ícone não encolhe quando o texto quebra em duas linhas */
 #toast > span:first-child { flex: none; display: flex; }
-#toast.show  { opacity: 1; transform: translateY(0); }
+#toast.show  { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.ok    { border-color: rgba(5,150,105,.25); color: var(--green); }
 #toast.error { border-color: rgba(220,38,38,.25); color: var(--red); }
 

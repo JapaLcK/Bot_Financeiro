@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from functools import lru_cache
@@ -460,7 +461,7 @@ def _lock_slots() -> threading.Semaphore:
 
 
 @contextmanager
-def pluggy_item_lock(item_id: str):
+def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
     """Serializa a FASE DE ESCRITA de um item da Pluggy. Devolve True se adquiriu.
 
     Duas decisões, e as duas custaram caro na versão anterior:
@@ -483,6 +484,19 @@ def pluggy_item_lock(item_id: str):
     depois, e todas as escritas são idempotentes. Estourou o teto, devolve False
     e o chamador reporta `sync_in_progress`.
 
+    `budget_ms` é o TETO TOTAL desta aquisição, dividido entre as duas esperas.
+    Sem ele, cada uma tem o seu próprio teto — o que significa que uma chamada
+    pode custar 2× `OF_SYNC_LOCK_WAIT_MS`. Isso é aceitável no sync, que roda
+    fora de request; **não** é aceitável numa rota HTTP, e foi o apontamento do
+    Codex (#166, P2): com 2 tentativas e backoff, o POST `/pluggy/item` podia
+    passar de um minuto e o proxy derrubava antes — inclusive quando a gravação
+    dava certo logo depois, ou seja, erro na cara do usuário num fluxo que
+    funcionou. Quem passa `budget_ms` recebe a garantia de que ESTA chamada não
+    excede esse total.
+
+    O default continua sendo o comportamento de antes, de propósito: mudar o
+    teto do sync não estava no escopo e o sync não tem cliente esperando.
+
     ponytail: a chave é por ITEM. Se aparecer deadlock entre items DO MESMO
     usuário (import de cartão + launches disputam as mesmas linhas de
     credit_bills), a correção é subir a chave para `of_sync_user:<user_id>` —
@@ -498,20 +512,52 @@ def pluggy_item_lock(item_id: str):
     if not url:
         raise RuntimeError("DATABASE_URL não está definido.")
 
-    espera = _lock_wait_ms() / 1000.0
+    teto_ms = _lock_wait_ms() if budget_ms is None else max(1, int(budget_ms))
+    t0 = time.monotonic()
     # Vaga ANTES de abrir o socket: o teto só vale se ninguém conectar sem passar
     # por aqui. Mesmo teto de tempo do lock — quem espera demais desiste igual.
-    if not _lock_slots().acquire(timeout=espera):
+    if not _lock_slots().acquire(timeout=teto_ms / 1000.0):
         yield False
         return
 
+    # COM orçamento: o que a vaga consumiu sai do que sobra para o advisory lock,
+    # senão "teto total" seria teto por etapa e a soma dobraria. SEM orçamento:
+    # cada etapa tem o seu, que é o comportamento que o sync já tinha.
+    if budget_ms is None:
+        restante_ms = _lock_wait_ms()
+    else:
+        restante_ms = teto_ms - int((time.monotonic() - t0) * 1000)
+        if restante_ms < 1:
+            # A vaga comeu o orçamento inteiro: não há tempo para o lock, e
+            # esperar "só mais um pouquinho" é o que o deadline existe para
+            # impedir. Devolve False, que o chamador já sabe tratar.
+            # NÃO é só zelo: sem esta guarda, `restante_ms` chega a 0 e o
+            # `set_config('lock_timeout','0ms')` lá embaixo significa espera
+            # INFINITA no Postgres (o mesmo fato documentado em
+            # `_lock_wait_ms`), ou negativo e o Postgres recusa.
+            _lock_slots().release()
+            yield False
+            return
+
     try:
-        conn = psycopg.connect(url, autocommit=True)
+        # O `connect` TAMBÉM sai do orçamento. Sem `connect_timeout` o libpq
+        # espera para sempre, e "prazo único" viraria mentira exatamente no
+        # cenário que ele existe para cobrir — banco ou rede sob pressão.
+        # Medido: com um host inalcançável e prazo de 1s, a chamada seguia
+        # bloqueada aos 30s. Só no caminho COM orçamento; sem ele o
+        # comportamento é o de antes, incluindo esta lacuna (o sync não tem
+        # cliente esperando, e mudar o teto dele não estava no escopo).
+        extra = {} if budget_ms is None else {
+            # libpq conta em segundos inteiros e trata 0 como "sem limite";
+            # o piso de 1s é dele, não nosso.
+            "connect_timeout": max(1, restante_ms // 1000),
+        }
+        conn = psycopg.connect(url, autocommit=True, **extra)
     except Exception:
         _lock_slots().release()
         raise
     try:
-        conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
+        conn.execute("select set_config('lock_timeout', %s, false)", (f"{restante_ms}ms",))
         try:
             conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
             got = True
