@@ -34,6 +34,17 @@
   var connecting = false;  // uma conexão em voo por vez
   var opening = false;     // uma abertura em voo por vez (ver open())
 
+  // Geração do ciclo de vida: init() e destroy() a incrementam. Toda operação
+  // assíncrona guarda a sua no começo e desiste se ela ficou velha. Sem isso,
+  // um destroy() durante um open() em voo (ex.: troca de rota client-side) não
+  // impede nada: quando os fetches resolvem, o open() segue, RECRIA o modal que
+  // acabou de ser destruído e reinstala o listener no document — e, se houve um
+  // init() novo no meio, ainda usa limites velhos com os callbacks novos.
+  var generation = 0;
+
+  /** A operação que começou na geração `gen` ainda vale? */
+  function stale(gen) { return gen !== generation; }
+
   // Limites do plano e conexões atuais. Recarregados a CADA open() — confiar no
   // que a página leu no load faz quem acabou de fazer upgrade em outra aba
   // continuar batendo no teto antigo.
@@ -373,10 +384,13 @@
 
     // Quem abriu, guardado ANTES de qualquer await, pelo mesmo motivo.
     var opener = document.activeElement;
+    var myGen = generation;
 
     try {
       // Estado fresco ANTES de decidir qualquer coisa sobre plano.
-      if (!await refreshLimits()) {
+      var ok = await refreshLimits();
+      if (stale(myGen)) return;          // destroy()/init() no meio: desiste
+      if (!ok) {
         conf("onError")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.");
         return;
       }
@@ -414,11 +428,13 @@
     }
     try {
       var data = await get("/open-finance/" + cfg.userId + "/connectors");
+      if (stale(myGen)) return;          // destruído enquanto a lista carregava
       connectors = (data.connectors || []).filter(function (b) { return b && b.name; });
       renderList("");
       // sem focar de novo: o foco já entrou no modal antes do await, e refocar
       // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
     } catch (err) {
+      if (stale(myGen)) return;
       if (listEl) {
         listEl.innerHTML = "";
         listEl.appendChild(el("div", "bankpick-empty",
@@ -469,18 +485,25 @@
     return window.PluggyConnect || window.pluggyConnect || window.PluggyConnectWidget;
   }
 
-  async function savePluggyItem(itemData) {
+  async function savePluggyItem(itemData, gen) {
     var item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
     var data = await post("/open-finance/" + cfg.userId + "/pluggy-item", { item: item });
+    if (gen !== undefined && stale(gen)) return data;   // host já foi embora
     conf("onConnected")(data);
     return data;
   }
 
   async function openWidget() {
+    // Mesma geração do open(): os callbacks abaixo disparam MUITO depois (o
+    // usuário passa pelo fluxo do banco), e um destroy()/init() no meio não
+    // pode deixá-los avisar callbacks de um ciclo que já acabou.
+    var myGen = generation;
+
     var data = await post("/open-finance/" + cfg.userId + "/connect-token", {});
+    if (stale(myGen)) return;
     var accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
 
@@ -505,9 +528,14 @@
       theme: "dark",
       onSuccess: async function (itemData) {
         try {
-          await savePluggyItem(itemData);
+          // A persistência acontece de qualquer jeito — o banco já autorizou, e
+          // largar o item sem salvar é pior que avisar um host que saiu. O que
+          // a geração corta é só o retorno pra UI que não existe mais.
+          await savePluggyItem(itemData, myGen);
+          if (stale(myGen)) return;
           conf("notify")("Banco conectado com sucesso!", "ok");
         } catch (err) {
+          if (stale(myGen)) return;
           // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
           // autorizado na Pluggy mas o plano não comporta mais conexões.
           conf("onError")(String((err && err.message) || err) || "Não foi possível salvar a conexão.");
@@ -518,10 +546,12 @@
       onError: function (error) {
         console.error("Pluggy Connect error", error);
         connecting = false;
+        if (stale(myGen)) return;
         conf("onError")("Não foi possível concluir a conexão.");
       },
       onClose: function () {
         connecting = false;
+        if (stale(myGen)) return;
         conf("onClose")();
       },
     });
@@ -550,16 +580,27 @@
     // Idempotente: chamar de novo troca a configuração e NÃO soma listener —
     // os listeners vivem no root (um só, criado sob demanda) e no document
     // apenas enquanto o modal está aberto.
+    //
+    // Incrementa a geração: qualquer operação da configuração ANTERIOR que
+    // ainda esteja em voo desiste em vez de avisar os callbacks novos com
+    // resultado velho.
+    generation += 1;
     cfg = options || {};
     return api;
   }
 
   function destroy() {
+    // Antes de tudo: invalida o que estiver em voo. Sem isto, um open() que
+    // ainda espera o refreshLimits() voltaria depois, recriaria o root que
+    // acabamos de remover e reinstalaria o listener no document — um modal
+    // fantasma numa tela que já saiu.
+    generation += 1;
     close();
     if (root && root.parentNode) root.parentNode.removeChild(root);
     root = null;
     selected = null;
     connecting = false;
+    opening = false;
     // `connectors` é cache de dado remoto que não muda entre telas; mantido de
     // propósito pra reabrir sem novo fetch da lista.
   }

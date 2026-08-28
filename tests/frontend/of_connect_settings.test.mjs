@@ -383,6 +383,42 @@ test("o CTA do modal não estica pelo rodapé nem espreme o nome do banco", asyn
   await page.__ctx.close();
 });
 
+test("destroy() no meio de um open() não ressuscita o modal", async () => {
+  // Apontamento do Codex. O open() espera dois fetches antes de montar nada; um
+  // destroy() nessa janela (troca de rota client-side, por exemplo) removia o
+  // root, mas a operação em voo seguia: ao resolver, ela chamava ensureRoot(),
+  // RECRIAVA o modal recém-destruído e reinstalava o listener no document — um
+  // modal fantasma numa tela que já saiu.
+  //
+  // Controle negativo: tirar o `if (stale(myGen)) return;` de depois do
+  // refreshLimits() deixa este caso vermelho.
+  const page = await abrirSettings();
+
+  // Segura o /auth/me pra garantir que o destroy() cai DENTRO da janela.
+  let liberar;
+  const presa = new Promise((r) => { liberar = r; });
+  await page.route("**/auth/me", async (route) => {
+    await presa;
+    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: 2 }));
+  });
+
+  await page.evaluate(() => { window.PBOpenFinance.open(); });   // não espera
+  await page.evaluate(() => { window.PBOpenFinance.destroy(); });
+  await liberar();
+  await sleep(500);
+
+  const estado = await page.evaluate(() => ({
+    overlays: document.querySelectorAll("#bankpick-overlay").length,
+    aberto: (() => {
+      const el = document.getElementById("bankpick-overlay");
+      return !!el && getComputedStyle(el).display !== "none";
+    })(),
+  }));
+  assert.equal(estado.overlays, 0, "o open() em voo recriou o modal destruído");
+  assert.equal(estado.aberto, false);
+  await page.__ctx.close();
+});
+
 test("conexão PAUSED não consome o teto do plano", async () => {
   // Espelha a contagem do backend (_ofCountsTowardBankLimit).
   const page = await abrirSettings({
