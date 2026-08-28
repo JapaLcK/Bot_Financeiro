@@ -32,6 +32,7 @@
   var connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
   var selected = null;     // {id, name}
   var connecting = false;  // uma conexão em voo por vez
+  var opening = false;     // uma abertura em voo por vez (ver open())
 
   // Limites do plano e conexões atuais. Recarregados a CADA open() — confiar no
   // que a página leu no load faz quem acabou de fazer upgrade em outra aba
@@ -74,11 +75,21 @@
     return (cfg && cfg.apiBase ? cfg.apiBase : "") + path;
   }
 
+  /**
+   * O `detail` do FastAPI vem string OU objeto estruturado — o limite de bancos
+   * por plano, por exemplo, chega como {code:"OF_BANK_LIMIT", message:"… /precos"}.
+   * Aceitar só string jogaria fora justamente a mensagem acionável e mostraria
+   * um genérico no lugar. Mesma regra do readApiError() que havia no
+   * settings.html antes desta extração.
+   */
   async function apiError(resp) {
     var data = null;
     try { data = await resp.json(); } catch (e) { /* corpo não-JSON */ }
     var detail = data && data.detail;
-    var err = new Error(typeof detail === "string" ? detail : "Não foi possível concluir agora.");
+    var msg;
+    if (typeof detail === "string" && detail) msg = detail;
+    else if (detail && typeof detail === "object") msg = detail.message || detail.code;
+    var err = new Error(msg || "Não foi possível concluir agora.");
     err.status = resp.status;
     err.detail = detail;
     return err;
@@ -106,20 +117,36 @@
     return String((conn && conn.status) || "").toUpperCase() !== "PAUSED";
   }
 
+  /**
+   * Recarrega teto do plano e conexões. Devolve true só quando os DOIS vieram.
+   *
+   * Falha aqui NÃO pode ser silenciosa. Se o /auth/me ou o snapshot do Open
+   * Finance cair, os valores permissivos do estado inicial (banksMax null,
+   * count 0) fariam o modal abrir como se não houvesse teto — e um usuário no
+   * limite autorizaria a instituição na Pluggy antes de o /pluggy-item recusar
+   * com 402, deixando o consentimento órfão. É exatamente o que esta checagem
+   * existe pra evitar; na dúvida, não abrir.
+   */
   async function refreshLimits() {
-    var me = null, of = null;
-    try { me = await get("/auth/me"); } catch (e) { /* mantém o que havia */ }
-    try { of = await get("/open-finance/" + cfg.userId); } catch (e) { /* idem */ }
-
-    if (me && me.of_banks_max !== undefined) limits.banksMax = me.of_banks_max;
-    if (of) {
-      var list = of.connections || [];
-      var counted = list.filter(countsTowardLimit);
-      limits.hasConnection = list.length > 0;
-      limits.count = counted.length;
-      limits.names = counted.map(function (c) { return stripAccent(c.institution_name || ""); });
+    var me, of;
+    try {
+      var both = await Promise.all([
+        get("/auth/me"),
+        get("/open-finance/" + cfg.userId),
+      ]);
+      me = both[0];
+      of = both[1];
+    } catch (e) {
+      return false;
     }
-    return limits;
+
+    limits.banksMax = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
+    var list = (of && of.connections) || [];
+    var counted = list.filter(countsTowardLimit);
+    limits.hasConnection = list.length > 0;
+    limits.count = counted.length;
+    limits.names = counted.map(function (c) { return stripAccent(c.institution_name || ""); });
+    return true;
   }
 
   /* ─── Markup ──────────────────────────────────────────────────────────── */
@@ -336,19 +363,37 @@
   async function open() {
     if (!cfg) return;
 
-    // Estado fresco ANTES de decidir qualquer coisa sobre plano.
-    await refreshLimits();
+    // Uma abertura por vez. Sem isto, um segundo clique enquanto o
+    // refreshLimits() da primeira ainda está no ar dispara os fetches de novo E
+    // grava o campo de busca (já focado pela primeira) como `lastFocus` — aí
+    // fechar devolveria o foco pra um input escondido em vez do botão que
+    // abriu, quebrando o fluxo de teclado.
+    if (opening || (root && root.classList.contains("open"))) return;
+    opening = true;
 
-    // Sem Open Finance no plano: quem decide o que fazer é o host. O settings
-    // manda pra /precos (comportamento de hoje); o wizard mostra upgrade sem
-    // navegar, senão abortaria o onboarding no meio.
-    if (limits.banksMax === 0) {
-      conf("onUpgradeNeeded")(limits);
-      return;
+    // Quem abriu, guardado ANTES de qualquer await, pelo mesmo motivo.
+    var opener = document.activeElement;
+
+    try {
+      // Estado fresco ANTES de decidir qualquer coisa sobre plano.
+      if (!await refreshLimits()) {
+        conf("onError")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.");
+        return;
+      }
+
+      // Sem Open Finance no plano: quem decide o que fazer é o host. O settings
+      // manda pra /precos (comportamento de hoje); o wizard mostra upgrade sem
+      // navegar, senão abortaria o onboarding no meio.
+      if (limits.banksMax === 0) {
+        conf("onUpgradeNeeded")(limits);
+        return;
+      }
+    } finally {
+      opening = false;
     }
 
     ensureRoot();
-    lastFocus = document.activeElement;
+    lastFocus = opener;
     root.classList.add("open");
     // Registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
     // caminhos: lista em cache, lista carregada do servidor e erro de fetch.
@@ -385,8 +430,18 @@
   function close() {
     if (root) root.classList.remove("open");
     if (onKeyRef) { document.removeEventListener("keydown", onKeyRef); onKeyRef = null; }
-    // devolve o foco pra quem abriu, senão o teclado volta pro topo da página
-    if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+
+    // Tira o foco de DENTRO do modal antes de qualquer coisa. Sem isto, quando
+    // não há um alvo focável pra devolver (o `body` não é focável e o .focus()
+    // nele é ignorado), o foco ficava preso num subárvore display:none — pior
+    // que cair no topo da página, porque o teclado some sem sinal nenhum.
+    if (root && document.activeElement && root.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    // Devolve o foco pra quem abriu, senão o teclado volta pro topo da página.
+    var alvo = (lastFocus && lastFocus !== document.body && document.contains(lastFocus))
+      ? lastFocus : null;
+    if (alvo) alvo.focus();
     lastFocus = null;
   }
 

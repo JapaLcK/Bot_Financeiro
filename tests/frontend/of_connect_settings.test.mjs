@@ -50,9 +50,14 @@ const BANCOS = [
   { id: 601, name: "Itaú",            color: "ec7000", logo: "", inv: false },
 ];
 
+// No Ubuntu do CI o interpretador é `python3`; no Windows esse nome resolve pro
+// stub da Microsoft Store e o servidor morre na hora, com todos os casos
+// vermelhos por "porta ocupada" — que é o sintoma errado da causa certa.
+const PY = process.env.PB_PYTHON || (process.platform === "win32" ? "python" : "python3");
+
 async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
-                                 "--directory", FRONTEND], { stdio: "ignore" });
+  const proc = spawn(PY, ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
+                          "--directory", FRONTEND], { stdio: "ignore" });
   for (let i = 0; i < 100; i++) {
     await sleep(100);
     if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
@@ -248,6 +253,95 @@ test("teto atingido AINDA permite reconectar o mesmo banco", async () => {
     !document.getElementById("bankpick-overlay").classList.contains("open"));
   assert.equal(await pickerAberto(page), false,
     "reconexão do mesmo banco tem de passar pelo bloqueio");
+  await page.__ctx.close();
+});
+
+test("estado de plano indisponível NÃO abre o picker", async () => {
+  // Apontamento P1 do Codex. Antes, um /auth/me ou snapshot fora do ar deixava
+  // os valores permissivos do estado inicial (sem teto, zero conexões) e o
+  // modal abria assim mesmo — um usuário no limite autorizaria o banco na
+  // Pluggy antes de o /pluggy-item recusar com 402, que é o consentimento
+  // órfão que esta checagem existe pra evitar. Na dúvida, não abrir.
+  const page = await abrirSettings({ banksMax: 1 });
+  await page.route("**/auth/me", (route) => route.fulfill({ status: 500, body: "{}" }));
+
+  await page.click("#connect-btn");
+  await sleep(600);
+  assert.equal(await pickerAberto(page), false,
+    "abriu sem conhecer o teto do plano");
+  await page.__ctx.close();
+});
+
+test("clique duplo não rouba o foco de volta nem duplica a busca de estado", async () => {
+  // Apontamento P3 do Codex. O segundo open() gravava o campo de busca (já
+  // focado pelo primeiro) como "quem abriu"; fechar devolvia o foco pra um
+  // input escondido em vez do botão.
+  const page = await abrirSettings();
+  let chamadas = 0;
+  await page.route("**/auth/me", (route) => {
+    chamadas += 1;
+    route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: 2 }));
+  });
+
+  // Foca antes: `.click()` programático NÃO move o foco, e sem isso "quem
+  // abriu" seria o <body> — o cenário do usuário é o botão focado pelo clique.
+  await page.focus("#connect-btn");
+  // Os dois cliques SÍNCRONOS, via evaluate: o page.click do Playwright espera
+  // o alvo ficar clicável, e depois do primeiro o overlay já cobre o botão —
+  // o segundo esperaria 30s e morreria por timeout, medindo outra coisa.
+  await page.evaluate(() => {
+    const b = document.getElementById("connect-btn");
+    b.click();
+    b.click();
+  });
+  await page.waitForFunction(() =>
+    document.querySelectorAll("#bankpick-list .bank-row").length > 0);
+  await page.keyboard.press("Escape");
+
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "connect-btn",
+    "o foco não voltou pro botão que abriu");
+  assert.equal(chamadas, 1, "o segundo clique refez a busca de estado");
+  await page.__ctx.close();
+});
+
+test("fechar nunca deixa o foco preso dentro do modal escondido", async () => {
+  // Quando não há alvo focável pra devolver (o <body> não é focável e o
+  // .focus() nele é ignorado pelo navegador), o foco ficava no campo de busca
+  // de um subárvore display:none — o teclado sumia sem sinal nenhum.
+  // Medido antes do conserto: activeElement continuava "bankpick-search".
+  const page = await abrirSettings();
+  await page.evaluate(() => document.getElementById("connect-btn").click()); // sem focar
+  await page.waitForFunction(() =>
+    document.querySelectorAll("#bankpick-list .bank-row").length > 0);
+  await page.keyboard.press("Escape");
+
+  const dentro = await page.evaluate(() => {
+    const ov = document.getElementById("bankpick-overlay");
+    return !!(ov && document.activeElement && ov.contains(document.activeElement));
+  });
+  assert.equal(dentro, false, "o foco ficou preso dentro do modal fechado");
+  await page.__ctx.close();
+});
+
+test("mensagem estruturada do backend chega ao usuário", async () => {
+  // Apontamento P2 do Codex: o detail do FastAPI vem string OU objeto. Aceitar
+  // só string trocaria a mensagem acionável do limite de plano por um genérico.
+  const page = await abrirSettings();
+  await page.route("**/open-finance/1/connect-token", (route) =>
+    route.fulfill({
+      status: 402,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: { code: "OF_BANK_LIMIT", message: "Seu plano acabou: /precos" } }),
+    }));
+
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+
+  await page.waitForFunction(() => {
+    const t = document.getElementById("toast");
+    return t && /Seu plano acabou/.test(t.textContent || "");
+  }, { timeout: 8000 });
   await page.__ctx.close();
 });
 
