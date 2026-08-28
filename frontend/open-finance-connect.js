@@ -115,8 +115,35 @@
     }
   }
 
+  /**
+   * Toda requisição do módulo entra neste controlador, e `destroy()` o aborta.
+   *
+   * É o que fecha, de uma vez, a classe inteira de "operação em voo sobrevive
+   * ao destroy": em vez de uma checagem de propriedade depois de cada await —
+   * que precisa ser lembrada em cada await novo, e não foi em três deles —, o
+   * próprio fetch é cancelado e a continuação nunca roda. Mecanismo da
+   * plataforma no lugar de disciplina de quem escreve.
+   */
+  var inflight = null;
+
+  function signal() {
+    if (!inflight) inflight = new AbortController();
+    return inflight.signal;
+  }
+
+  function abortInflight() {
+    if (inflight) { inflight.abort(); inflight = null; }
+  }
+
+  /** Erro de cancelamento não é falha: ninguém precisa ser avisado. */
+  function foiAbortado(err) {
+    return !!err && (err.name === "AbortError" || err.__abort);
+  }
+
   async function get(path) {
-    var resp = await fetch(url(path), { credentials: "same-origin", headers: headers() });
+    var resp = await fetch(url(path), {
+      credentials: "same-origin", headers: headers(), signal: signal(),
+    });
     if (!resp.ok) throw await apiError(resp);
     return resp.json();
   }
@@ -127,6 +154,7 @@
       credentials: "same-origin",
       headers: headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(body || {}),
+      signal: signal(),
     });
     if (!resp.ok) throw await apiError(resp);
     return resp.json();
@@ -160,11 +188,9 @@
       return null;
     }
 
-    var list = (of && of.connections) || [];
-    var counted = list.filter(countsTowardLimit);
+    var counted = ((of && of.connections) || []).filter(countsTowardLimit);
     return {
       banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
-      hasConnection: list.length > 0,
       count: counted.length,
       names: counted.map(function (c) { return stripAccent(c.institution_name || ""); }),
     };
@@ -436,6 +462,7 @@
       // sem focar de novo: o foco já entrou no modal antes do await, e refocar
       // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
     } catch (err) {
+      if (foiAbortado(err)) return;   // destruído no meio: nada a mostrar
       var alvo = q("#bankpick-list");
       if (alvo) {
         alvo.innerHTML = "";
@@ -586,6 +613,7 @@
     try {
       await openWidget(uid, host);
     } catch (err) {
+      if (foiAbortado(err)) return;   // destruído no meio: o widget nem chegou a abrir
       conf("onError", host)((err && err.message) || "Erro ao abrir a conexão Pluggy");
     }
   }
@@ -601,9 +629,11 @@
   }
 
   function destroy() {
-    // Não precisa invalidar nada em voo: nenhum caminho assíncrono recria o
-    // root. O único await que sobra é o da lista de bancos, e ele só escreve
-    // via q(), que devolve null quando o root não existe mais.
+    // Cancela o que estiver em voo ANTES de desmontar. Sem isto, uma requisição
+    // pendente volta depois com a tela já desfeita — e o caso que mais dói é o
+    // /connect-token: a continuação abriria o widget da Pluggy sozinha, sobre
+    // uma página que não existe mais.
+    abortInflight();
     close();
     if (root && root.parentNode) root.parentNode.removeChild(root);
     root = null;

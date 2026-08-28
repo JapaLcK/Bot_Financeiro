@@ -312,6 +312,47 @@ test("fechar durante a espera cancela o confirmar", async () => {
   await page.__ctx.close();
 });
 
+test("destroy() cancela o que está em voo e a Pluggy não abre depois", async () => {
+  // Quatro rodadas de revisão bateram nesta mesma classe — "operação em voo
+  // sobrevive ao destroy()" — uma fronteira assíncrona por vez. A resposta aqui
+  // não é mais uma guarda depois do await: `destroy()` ABORTA as requisições,
+  // então a continuação nem roda. Este caso fixa a pior delas, o /connect-token,
+  // cuja continuação abriria o widget da Pluggy sobre uma tela desmontada.
+  //
+  // Controle negativo: tirar o `abortInflight()` do destroy() deixa este caso
+  // vermelho.
+  const page = await abrirSettings();
+  // Fábrica falsa da Pluggy: registra se alguém tentou construir o widget.
+  await page.addInitScript(() => {
+    window.__widgets = 0;
+    window.PluggyConnect = function () { window.__widgets += 1; this.init = function () {}; };
+  });
+  await page.reload();
+  await page.waitForFunction(() => {
+    const b = document.getElementById("connect-btn");
+    const l = document.getElementById("connections-list");
+    return !!(b && b.onclick && l && l.children.length > 0);
+  });
+
+  let liberar;
+  const presa = new Promise((r) => { liberar = r; });
+  await page.route("**/open-finance/1/connect-token", async (route) => {
+    await presa;
+    route.fulfill(json({ accessToken: "x" }));
+  });
+
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");                       // dispara o connect-token
+  await page.evaluate(() => window.PBOpenFinance.destroy());
+  await liberar();
+  await sleep(600);
+
+  assert.equal(await page.evaluate(() => window.__widgets), 0,
+    "a Pluggy abriu depois do destroy()");
+  await page.__ctx.close();
+});
+
 test("mensagem estruturada do backend chega ao usuário", async () => {
   // Apontamento P2 do Codex: o detail do FastAPI vem string OU objeto. Aceitar
   // só string trocaria a mensagem acionável do limite de plano por um genérico.
