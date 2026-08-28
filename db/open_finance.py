@@ -244,7 +244,7 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
             cur.execute(
                 """
                 select id, provider, provider_item_id, status, institution_name, last_sync_at,
-                       last_attempt_at, status_reason, health
+                       last_attempt_at, status_reason, health, reconnected_at
                 from open_finance_connections
                 where user_id=%s
                 order by updated_at desc, id desc
@@ -469,15 +469,24 @@ def save_pluggy_open_finance_item(user_id: int, item: dict) -> dict:
                               -- de o usuário ter refeito — e um health velho com
                               -- item_status MISSING ainda pintava a tela.
                               status_reason = null,
-                              health = null
+                              health = null,
+                              -- Só no ramo do CONFLITO: conexão nova nasce com
+                              -- isto NULL e já é barrada pelo `last_sync_at`
+                              -- NULL. O único chamador de produção é a rota
+                              -- /pluggy/item (o widget), então isto carimba uma
+                              -- vez por reconexão — webhook e sync não passam aqui.
+                              reconnected_at = excluded.updated_at
                 -- NÃO carimba last_sync_at: conectar não é sincronizar. Carimbar
                 -- aqui fazia a conexão nascer "Atualizado agora" antes de qualquer
                 -- sync e ligava `user_synced_within`, que segura o e-mail dos
                 -- agentes achando que uma carteira estava se mexendo. Quem carimba
                 -- sucesso é `mark_sync_result`, no fim de um sync real.
                 -- `status` continua sendo escrito: é ele que tira a conexão de
-                -- DELETED quando o usuário reconecta pelo widget.
-                returning id, provider, provider_item_id, status, institution_name, last_sync_at
+                -- DELETED quando o usuário reconecta pelo widget. E o
+                -- `reconnected_at` acima é o que impede o espelho ANTERIOR à
+                -- reconexão de voltar à tela como "Atualizado".
+                returning id, provider, provider_item_id, status, institution_name,
+                          last_sync_at, reconnected_at
                 """,
                 (
                     user_id,

@@ -207,6 +207,79 @@ def test_motivo_ok_ou_vazio_continua_verde():
         assert ui["state"] == "updated", motivo
 
 
+# ── ONDA 2: item saudável na Pluggy NÃO é sync concluído ────────────────────
+# O job de saúde só faz `GET /items` e grava `health` com `ok=None` — nunca toca
+# em `last_sync_at`. O ramo do health devolvia "updated" sem olhar o sucesso,
+# então um banco recém-conectado/reconectado ficava "Tudo em dia!" com
+# "Última sync: pendente" escrito na linha logo abaixo, na mesma tela.
+# CONTROLE NEGATIVO: tirar a branch `last_sync_at is None` do `out()` deixa os
+# dois primeiros testes deste bloco vermelhos.
+# CONTROLE POSITIVO: `test_tudo_atualizado_vira_updated` e
+# `test_motivo_ok_ou_vazio_continua_verde` (mesmo health, COM last_sync_at)
+# continuam verdes — a guarda não recusa quem sincronizou de verdade.
+
+_SAUDAVEL = {"status": "UPDATED", "executionStatus": "SUCCESS",
+             "statusDetail": {"accounts": {"isUpdated": True}}}
+
+
+def test_item_saudavel_sem_sync_nunca_e_atualizado():
+    health = derive_item_health(_SAUDAVEL, now=AGORA)
+    ui = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": None})
+    assert ui["state"] == "updating", "item vivo não é espelho fresco"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+
+def test_nunca_sincronizou_vale_para_todo_status_local_verde():
+    """Reconexão: o upsert escreve o `status` que a Pluggy mandou e zera health.
+    Nenhum desses status pode virar verde enquanto não houver sync.
+
+    Só o ramo COM health entra aqui: sem health, as duas linhas que a Onda 1 já
+    tinha no fim da função respondem igual — incluir `h=None` seria um caso que
+    passa na base e não mede a guarda."""
+    health = derive_item_health(_SAUDAVEL, now=AGORA)
+    for status in ("ACTIVE", "UPDATED", "UPDATING", "LOGIN_ERROR"):
+        ui = connection_ui_state({"status": status, "health": health, "last_sync_at": None})
+        assert ui["state"] != "updated", status
+        assert ui["detail"] == "Ainda não sincronizou"
+
+
+def test_sem_sync_nao_rebaixa_estado_que_ja_era_pior():
+    """A guarda mira SÓ o verde: quem já tinha veredito próprio o mantém, senão
+    ela apagaria "Refaça a conexão" e "Reautorize o banco" de toda conexão nova."""
+    doente = derive_item_health({"status": "LOGIN_ERROR"}, now=AGORA)
+    casos = [
+        ({"status": "ERROR", "status_reason": "item_missing"}, "item_missing"),
+        ({"status": "PAUSED"}, "paused"),
+        ({"status": "DELETED"}, "removed"),
+        ({"status": "ACTIVE", "health": doente}, "needs_user_action"),
+        ({"status": "ERROR"}, "error_recoverable"),
+    ]
+    for linha, esperado in casos:
+        assert connection_ui_state({**linha, "last_sync_at": None})["state"] == esperado, linha
+
+
+def test_sem_sync_nao_engole_o_motivo_do_default_seguro():
+    """O caso que os 5 acima NÃO alcançam: todos eles saem da função antes de
+    chegar em `out("updated")`, então nenhum passa pelo ramo onde a guarda pode
+    causar dano. Aqui o item está SAUDÁVEL — o veredito seria verde — e é o
+    `status_reason` que tem de falar mais alto que "Ainda não sincronizou".
+
+    Alcançável: conexão nova cujo 1º sync não espelhou nada grava
+    `mark_sync_result(ok=False, status="ACTIVE", status_reason="no_accounts")`,
+    que NÃO carimba last_sync_at. Medido: com a guarda ANTES do default seguro,
+    os três casos abaixo viram "Atualizando…/Ainda não sincronizou" — "Sem dados"
+    some da tela e a pílula do `read_failed` cai de vermelho (error) para âmbar
+    (pending), ver OF_PILL_CLASS em frontend/settings.html."""
+    saudavel = derive_item_health(_SAUDAVEL, now=AGORA)
+    for motivo, esperado in (("no_accounts", "no_accounts"),
+                             ("read_failed", "error_recoverable"),
+                             ("motivo_que_ninguem_escreveu_ainda", "error_recoverable")):
+        ui = connection_ui_state({"status": "ACTIVE", "status_reason": motivo,
+                                  "health": saudavel, "last_sync_at": None})
+        assert ui["state"] == esperado, f"{motivo} perdeu o veredito por falta de sync"
+        assert ui["detail"] != "Ainda não sincronizou", motivo
+
+
 # ── RODADA 4: espelho vazio NÃO pode deixar o ERROR grudado ─────────────────
 # Defeito medido: `resolve_connection_state` só corrigia o `status` no ramo
 # `has_data=True`; com o espelho vazio devolvia `None` ("não mexe"), e `None` não

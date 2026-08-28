@@ -45,6 +45,7 @@ from db import (
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
     list_pluggy_item_ids,
+    pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
     token_hash,
@@ -81,10 +82,22 @@ _DIRTY: set[str] = set()
 # 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
 _SYNC_MAX_ATTEMPTS = 3
 
+# Tentativas de pegar o lock ao gravar uma reconexão. Cada uma já espera até
+# `OF_SYNC_LOCK_WAIT_MS` (15s) lá dentro, então 2 é o teto do que cabe num
+# request HTTP — a janela do lock é só a fase de escrita e passa em segundos.
+_RECONNECT_LOCK_ATTEMPTS = 2
+
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
 # de fora de propósito (é `item_missing`, tratado no sync), 4xx de credencial
 # também — repetir não conserta chave errada.
 _HTTP_TRANSITORIO = {429, 500, 502, 503, 504}
+
+
+def _backoff_sec(tentativa: int) -> float:
+    """Espera exponencial com jitter. Dois chamadores: a exceção `_retryable` e o
+    `sync_in_progress`, que NÃO é exceção — duas cópias da fórmula seriam a
+    mesma regra em dois lugares (§0.7)."""
+    return 0.5 * (2 ** (tentativa - 1)) * (0.75 + random.random() / 2)
 
 
 def _retryable(exc: BaseException) -> bool:
@@ -95,6 +108,72 @@ def _retryable(exc: BaseException) -> bool:
         return isinstance(exc, (pg_errors.DeadlockDetected, pg_errors.SerializationFailure))
     except Exception:  # psycopg ausente/alterado: não retenta
         return False
+
+
+def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict, bool]:
+    """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
+
+    A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
+    escritas que vêm depois dela. Uma reconexão que caísse nessa fresta deixava o
+    run de geração velha gravar o espelho E rodar `import_open_finance_launches` /
+    `import_open_finance_credit` — que criam LANÇAMENTO e COMPRA DE CARTÃO do
+    usuário. O carimbo era recusado, mas nenhum sync posterior remove lançamento:
+    o upsert só acrescenta. Resultado medido pelo Codex (#162, P1): transação
+    fantasma de uma autorização que não vale mais, sobrevivendo à recuperação —
+    tipicamente a conta que o usuário DESMARCOU ao reconectar.
+
+    Pegar o mesmo lock aqui fecha a fresta na origem: enquanto um sync escreve, a
+    reconexão espera; enquanto a reconexão grava, nenhum sync entra na fase de
+    escrita — e o próximo a entrar relê a geração nova e aborta.
+
+    Sem o lock NÃO grava. A primeira versão disto gravava assim mesmo e só logava
+    o aviso — e essa é exatamente a escrita que o lock existe para serializar
+    (Codex #162, P1): se o teto estourou é porque um sync ESTÁ na fase de
+    escrita, já passou pela checagem de geração, e vai importar lançamento e
+    compra de cartão da autorização velha. O fallback anulava o conserto no único
+    caso em que ele importa.
+    """
+    with pluggy_item_lock(item_id) as locked:
+        if not locked:
+            return None, False
+        return save_pluggy_open_finance_item(user_id, remote), True
+
+
+async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:
+    """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
+
+    Não é escolha entre dois males. Gravar sem lock cria lançamento fantasma;
+    recusar de primeira deixa o banco conectado na Pluggy e invisível aqui. O
+    passo que faltava é esperar de novo: a janela do lock é só a fase de escrita
+    de um sync (nunca a leitura remota), então ela passa em segundos e a segunda
+    tentativa quase sempre entra.
+
+    Esgotou: 503 com mensagem de "tente de novo". O item continua existindo na
+    Pluggy e o mesmo POST reaproveita, então a reconexão é recuperável — o
+    lançamento fantasma não seria.
+    """
+    for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
+        connection, sob_lock = await asyncio.to_thread(
+            _salva_item_sob_lock, user_id, remote, item_id)
+        if sob_lock:
+            return connection
+        if tentativa < _RECONNECT_LOCK_ATTEMPTS:
+            await log_system_event(
+                "warning", "of_reconnect_lock_retry",
+                f"Lock ocupado ao gravar reconexão ({tentativa}/{_RECONNECT_LOCK_ATTEMPTS}): {item_id}",
+                source="open_finance", details={"item_id": item_id, "attempt": tentativa},
+            )
+            await asyncio.sleep(_backoff_sec(tentativa))
+
+    await log_system_event(
+        "error", "of_reconnect_lock_timeout",
+        f"Reconexão NÃO gravada: lock do item ocupado: {item_id}",
+        source="open_finance", details={"item_id": item_id},
+    )
+    raise HTTPException(
+        status_code=503,
+        detail="Não foi possível concluir a conexão agora. Tente de novo em alguns segundos.",
+    )
 
 
 async def _run_pluggy_sync_bg(item_id: str) -> None:
@@ -108,11 +187,36 @@ async def _run_pluggy_sync_bg(item_id: str) -> None:
         for tentativa in range(1, _SYNC_MAX_ATTEMPTS + 1):
             try:
                 result = await asyncio.to_thread(sync_pluggy_item, item_id)
-                break
+                # `sync_in_progress` não é exceção: volta como dict, então o
+                # `break` abaixo encerrava a tarefa em silêncio e NINGUÉM mais
+                # sincronizava. Cenário medido (Codex #162): o run de geração
+                # velha segura o `pluggy_item_lock` enquanto escreve, o sync que
+                # a reconexão agendou bate no lock e desiste — e com
+                # `OF_REFRESH_ENABLED` off (o default) nada mais roda sozinho, o
+                # espelho velho fica indefinidamente e a tela fica em âmbar até
+                # o usuário tocar "Atualizar".
+                #
+                # SÓ `sync_in_progress`. `stale_authorization` NÃO se retenta: ele
+                # significa "alguém mais novo assumiu", e quem assumiu já agendou
+                # o próprio sync — retentar seria correr atrás de um trabalho que
+                # já tem dono, e num par de runs que se atropelam viraria laço.
+                if (result or {}).get("reason") != "sync_in_progress":
+                    break
+                if tentativa == _SYNC_MAX_ATTEMPTS:
+                    break
+                espera = _backoff_sec(tentativa)
+                await log_system_event(
+                    "warning", "pluggy_sync_retry",
+                    f"Sync Pluggy vai repetir ({tentativa}/{_SYNC_MAX_ATTEMPTS}): {item_id}",
+                    source="open_finance",
+                    details={"item_id": item_id, "attempt": tentativa,
+                             "error": "sync_in_progress", "sleep_sec": round(espera, 3)},
+                )
+                await asyncio.sleep(espera)
             except Exception as exc:
                 if not _retryable(exc) or tentativa == _SYNC_MAX_ATTEMPTS:
                     raise
-                espera = 0.5 * (2 ** (tentativa - 1)) * (0.75 + random.random() / 2)
+                espera = _backoff_sec(tentativa)
                 await log_system_event(
                     "warning", "pluggy_sync_retry",
                     f"Sync Pluggy vai repetir ({tentativa}/{_SYNC_MAX_ATTEMPTS}): {item_id}",
@@ -518,8 +622,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
 
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
-        # Grava o REMOTO: status e instituição vêm da Pluggy, não do navegador.
-        connection = await asyncio.to_thread(save_pluggy_open_finance_item, session_uid, remote)
+        connection = await _grava_reconexao(session_uid, remote, new_item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

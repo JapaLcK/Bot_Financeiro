@@ -483,6 +483,7 @@ def test_item_que_volta_limpa_status_e_motivo_juntos(user_id, monkeypatch):
 
     conexao = _conexao(user_id, "item-volta-inteiro")
     _espelha_uma_conta(conexao["id"])
+    _set_last_sync(conexao["id"])   # ONDA 2: voltar ao verde exige sync real no passado
     monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
     monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: (_ for _ in ()).throw(
         PluggyApiError("sumiu", status_code=404)))
