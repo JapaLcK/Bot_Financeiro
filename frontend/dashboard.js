@@ -6237,10 +6237,28 @@ function iofRate(days) {
 async function readApiError(resp) {
   try {
     const data = await resp.json();
-    return data.detail || JSON.stringify(data);
-  } catch (_) {
-    return await resp.text();
-  }
+    // `detail` chega em três formas nesta API e só duas são texto pra usuário:
+    //   • STRING — o caso comum;
+    //   • OBJETO com `message`/`code` — plan_limit (:5059), same_plan (:4114),
+    //     no_change (:4198); ignorá-lo trocava "Você atingiu o limite de 50
+    //     lançamentos" por "erro 403";
+    //   • LISTA — o 422 do FastAPI, diagnóstico de programador ({loc, msg,
+    //     type}), e objeto sem message/code: caem no genérico, senão vira
+    //     `{"detail":…}` cru ou "[object Object]" na tela.
+    const d = data && data.detail;
+    if (typeof d === "string" && d.trim()) return d;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const m = d.message || d.code;
+      if (typeof m === "string" && m.trim()) return m;
+    }
+  } catch (_) { /* corpo não-JSON (HTML de proxy, vazio): cai no genérico */ }
+  /* A cópia irmã em settings.html:1773 NÃO está alinhada com esta, e o
+     alinhamento não é deste PR: lá o teste é `typeof detail === "object"`, que é
+     TRUE para array, então o 422 do FastAPI (detail = lista de {loc,msg,type})
+     cai em `detail.message || detail.code || raw` e sai JSON cru na tela. Aqui o
+     `!Array.isArray` fecha esse buraco. Consertar settings.html toca 10 fluxos
+     que nada têm a ver com categorias — PR separado. */
+  return `Não foi possível concluir agora (erro ${resp.status}).`;
 }
 
 async function refreshDashboardAfterInvestment(msg) {
