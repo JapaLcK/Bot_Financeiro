@@ -91,11 +91,12 @@
    */
   function _limpaCacheNoLogout() {
     try {
-      if (!window.caches) return;
-      caches.keys()
+      if (!window.caches) return Promise.resolve();
+      return caches.keys()
         .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
         .catch(function () {});
     } catch (_) { /* CacheStorage indisponível: não há cache a limpar */ }
+    return Promise.resolve();
   }
 
   window.fetch = async function(input, init) {
@@ -104,7 +105,13 @@
 
     let resp = await _origFetch(input, init);
 
-    if (resp.ok && _caminho(input) === "/auth/logout") _limpaCacheNoLogout();
+    // AGUARDA antes de devolver a resposta. Quem chama o logout navega assim
+    // que o fetch resolve (`location.replace`/`reload`), e navegação descarta
+    // o documento: uma limpeza disparada e esquecida não tem garantia de
+    // terminar, e o cache privado sobrevive ao logout no aparelho compartilhado
+    // — o cenário inteiro que justifica esta limpeza (Codex, #170). Segurar o
+    // `await` aqui é o que empurra a navegação para depois do delete.
+    if (resp.ok && _caminho(input) === "/auth/logout") await _limpaCacheNoLogout();
 
     if (resp.status !== 401) return resp;
 

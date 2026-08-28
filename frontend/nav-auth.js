@@ -41,11 +41,12 @@
    */
   function limpaCacheNoLogout() {
     try {
-      if (!window.caches) return;
-      caches.keys()
+      if (!window.caches) return Promise.resolve();
+      return caches.keys()
         .then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
         .catch(function () {});
     } catch (e) { /* CacheStorage indisponível: não há cache a limpar */ }
+    return Promise.resolve();
   }
 
   function doLogout() {
@@ -55,10 +56,15 @@
       headers: csrfHeaders(),
     })
       .catch(function () {})
+      // A limpeza é AGUARDADA antes do reload: navegação descarta o documento,
+      // e uma limpeza disparada e esquecida não tem garantia de terminar — o
+      // cache privado sobreviveria ao logout justamente no aparelho
+      // compartilhado (Codex, #170).
       .finally(function () {
-        limpaCacheNoLogout();
-        try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
-        location.reload(); // CTAs voltam ao padrão deslogado
+        return limpaCacheNoLogout().then(function () {
+          try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
+          location.reload(); // CTAs voltam ao padrão deslogado
+        });
       });
   }
 

@@ -239,6 +239,51 @@ test("auth-refresh nao apaga nada em request comum nem em logout que falhou", as
   assert.deepEqual(apagados, [], "apagou o cache numa request qualquer");
 });
 
+test("auth-refresh AGUARDA o delete antes de devolver a resposta do logout", async () => {
+  // Ordem, não só efeito. Quem chama o logout navega assim que o fetch resolve
+  // (`location.replace`/`reload`), e navegação descarta o documento: uma
+  // limpeza disparada e esquecida nao tem garantia de terminar, e o cache
+  // privado sobrevive ao logout no aparelho compartilhado (Codex, #170).
+  let liberaDelete;
+  const bloqueado = new Promise((r) => { liberaDelete = r; });
+  const apagados = [];
+
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.caches.delete = async (k) => { await bloqueado; apagados.push(k); return true; };
+  });
+
+  let resolveu = false;
+  const chamada = ctx.fetch("/auth/logout", { method: "POST" }).then(() => { resolveu = true; });
+
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(resolveu, false,
+               "o fetch do logout resolveu antes do delete: o chamador navega e a limpeza morre no meio");
+  assert.deepEqual(apagados, [], "nada deveria ter sido apagado ainda");
+
+  liberaDelete();
+  await chamada;
+
+  assert.equal(resolveu, true);
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"]);
+});
+
+test("nav-auth so' recarrega DEPOIS de apagar", async () => {
+  // Mesmo invariante do caso acima, no outro dono. Aqui o `doLogout` nao e'
+  // exposto pelo IIFE, entao a ordem e' prendida na FORMA: o `location.reload`
+  // tem que estar DENTRO da continuacao da limpeza, nao ao lado da chamada.
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+  const nav = readFileSync(join(dir, "nav-auth.js"), "utf-8");
+  const i = nav.indexOf("function doLogout()");
+  const corpo = nav.slice(i, nav.indexOf("\n  }", i));
+
+  const chamada = corpo.indexOf("limpaCacheNoLogout()");
+  const reload = corpo.indexOf("location.reload()");
+  assert.ok(chamada > 0 && reload > 0, "doLogout perdeu a limpeza ou o reload");
+  assert.ok(/limpaCacheNoLogout\(\)\s*\.then\(/.test(corpo),
+            "o reload nao espera a limpeza: navegacao descarta o documento e o delete morre no meio");
+  assert.ok(chamada < reload, "a limpeza tem que vir antes do reload");
+});
+
 test("nav-auth tambem limpa — as 12 paginas publicas nao carregam o auth-refresh", () => {
   // Comparação da duplicação (§0.7). O `doLogout` do nav-auth é interno ao
   // IIFE e depende de DOM para ser alcançado pelo clique; o que este caso
