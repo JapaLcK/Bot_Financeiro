@@ -36,17 +36,23 @@
   var lastFocus = null;    // quem tinha o foco antes de abrir
   var connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
   var selected = null;     // {id, name}
-  // Limites do plano e conexões atuais, recarregados a cada open() — confiar no
-  // que a página leu no load faz quem acabou de fazer upgrade em outra aba
-  // continuar batendo no teto antigo.
+  // Limites do plano e conexões, rebuscados a cada open() — confiar no que a
+  // página leu no load faz quem acabou de fazer upgrade em outra aba continuar
+  // batendo no teto antigo.
   //
   // A busca roda EM PARALELO com a abertura, não antes dela: quem espera é o
   // confirmar, que é onde a decisão importa (é ali que se abre a Pluggy e nasce
   // o risco de consentimento órfão). Bloquear a abertura punha dois fetches na
   // frente do modal e abria uma janela de corrida que o fluxo original não
   // tinha — ele mostrava o modal na hora e só o preenchimento era assíncrono.
-  var limits = { banksMax: null, hasConnection: false, count: 0, names: [] };
+  //
+  // O resultado NÃO vira estado compartilhado: `refreshLimits()` devolve um
+  // retrato, e quem decide usa o retrato que ele mesmo esperou. Com um objeto
+  // mutável no módulo, duas buscas concorrentes (abre, fecha, abre) podiam
+  // terminar fora de ordem e a mais VELHA sobrescrever a mais nova pouco antes
+  // de o confirmar ler — decidindo teto e reconexão com dado vencido.
   var limitsPromise = null;   // busca em voo, iniciada no open()
+  var ultimoTeto = null;      // só pro atalho do Free no open(); não é autoridade
 
   function noop() {}
 
@@ -126,14 +132,14 @@
   }
 
   /**
-   * Recarrega teto do plano e conexões. Devolve true só quando os DOIS vieram.
+   * Retrato do teto do plano e das conexões, devolvido a quem pediu — nunca
+   * escrito num objeto do módulo, pra duas buscas concorrentes não terminarem
+   * fora de ordem e a mais velha decidir pela mais nova.
    *
-   * Falha aqui NÃO pode ser silenciosa. Se o /auth/me ou o snapshot do Open
-   * Finance cair, os valores permissivos do estado inicial (banksMax null,
-   * count 0) fariam o modal abrir como se não houvesse teto — e um usuário no
-   * limite autorizaria a instituição na Pluggy antes de o /pluggy-item recusar
-   * com 402, deixando o consentimento órfão. É exatamente o que esta checagem
-   * existe pra evitar; na dúvida, não abrir.
+   * Devolve null se qualquer um dos dois lados não vier, e o confirmar trata
+   * null como "não dá pra seguir". Falha aqui não pode virar permissão: com um
+   * default permissivo, quem está no teto autorizaria a instituição na Pluggy
+   * antes de o /pluggy-item recusar com 402, deixando o consentimento órfão.
    */
   async function refreshLimits() {
     var me, of;
@@ -145,16 +151,17 @@
       me = both[0];
       of = both[1];
     } catch (e) {
-      return false;
+      return null;
     }
 
-    limits.banksMax = (me && me.of_banks_max !== undefined) ? me.of_banks_max : null;
     var list = (of && of.connections) || [];
     var counted = list.filter(countsTowardLimit);
-    limits.hasConnection = list.length > 0;
-    limits.count = counted.length;
-    limits.names = counted.map(function (c) { return stripAccent(c.institution_name || ""); });
-    return true;
+    return {
+      banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
+      hasConnection: list.length > 0,
+      count: counted.length,
+      names: counted.map(function (c) { return stripAccent(c.institution_name || ""); }),
+    };
   }
 
   /* ─── Markup ──────────────────────────────────────────────────────────── */
@@ -380,7 +387,7 @@
 
     // Free (limite 0): mesma defesa do original — o applyOfConnectButton do
     // host já roteia o botão pra /precos nesse caso.
-    if (limits.banksMax === 0) { window.location.href = "/precos"; return; }
+    if (ultimoTeto === 0) { window.location.href = "/precos"; return; }
 
     ensureRoot();
     lastFocus = document.activeElement;
@@ -396,7 +403,10 @@
     syncFoot();
 
     // Estado do plano em paralelo: quem espera é o confirmar.
-    limitsPromise = refreshLimits();
+    limitsPromise = refreshLimits().then(function (snap) {
+      if (snap) ultimoTeto = snap.banksMax;   // alimenta só o atalho da próxima abertura
+      return snap;
+    });
 
     if (connectors) { renderList(""); return; }
     carregarBancos();
@@ -451,20 +461,22 @@
     // resolveu, mas "na prática" não é garantia.
     if (go) go.disabled = true;
     try {
-      var ok = await (limitsPromise || refreshLimits());
-      if (!ok) {
+      // O retrato que ESTE confirmar esperou — não um objeto de módulo que uma
+      // busca mais velha pudesse ter sobrescrito no caminho.
+      var plano = await (limitsPromise || refreshLimits());
+      if (!plano) {
         conf("notify")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.", "error");
         return;
       }
-      if (limits.banksMax === 0) { window.location.href = "/precos"; return; }
+      if (plano.banksMax === 0) { window.location.href = "/precos"; return; }
 
       // Teto atingido: só segue se for RECONEXÃO de um banco já conectado (mesmo
       // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
       // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
-      if (limits.banksMax !== null && limits.banksMax > 0 && limits.count >= limits.banksMax) {
-        var isReconnect = limits.names.indexOf(stripAccent(selected.name || "")) !== -1;
+      if (plano.banksMax !== null && plano.banksMax > 0 && plano.count >= plano.banksMax) {
+        var isReconnect = plano.names.indexOf(stripAccent(selected.name || "")) !== -1;
         if (!isReconnect) {
-          var n = limits.banksMax;
+          var n = plano.banksMax;
           conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
                          ". Faça upgrade pra conectar mais: /precos", "error");
           return;
@@ -483,18 +495,24 @@
     return window.PluggyConnect || window.pluggyConnect || window.PluggyConnectWidget;
   }
 
-  async function savePluggyItem(itemData) {
+  /**
+   * `uid` é o usuário de QUEM INICIOU o fluxo, fixado lá no connect(). Ler
+   * `cfg.userId` aqui gravaria o item autorizado por A na conta de B se um
+   * init() trocasse de usuário enquanto o widget estava aberto — e isolamento
+   * por usuário é regra dura deste repositório.
+   */
+  async function savePluggyItem(itemData, uid) {
     var item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
-    var data = await post("/open-finance/" + cfg.userId + "/pluggy-item", { item: item });
+    var data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
     conf("onConnected")(data);
     return data;
   }
 
-  async function openWidget() {
-    var data = await post("/open-finance/" + cfg.userId + "/connect-token", {});
+  async function openWidget(uid) {
+    var data = await post("/open-finance/" + uid + "/connect-token", {});
     var accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
 
@@ -519,7 +537,7 @@
       theme: "dark",
       onSuccess: async function (itemData) {
         try {
-          await savePluggyItem(itemData);
+          await savePluggyItem(itemData, uid);
           conf("notify")("Banco conectado com sucesso!", "ok");
         } catch (err) {
           // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
@@ -542,10 +560,14 @@
   }
 
   async function connect() {
-    if (!cfg || !cfg.userId) { conf("onError")("Sessão inválida. Faça login novamente"); return; }
+    // Fixa o usuário AQUI e carrega ele por todo o fluxo: o widget da Pluggy
+    // fica aberto por minutos, e reler cfg.userId depois gravaria o item de
+    // quem iniciou na conta de quem estiver configurado no fim.
+    var uid = cfg && cfg.userId;
+    if (!uid) { conf("onError")("Sessão inválida. Faça login novamente"); return; }
     conf("onConnectStart")();
     try {
-      await openWidget();
+      await openWidget(uid);
     } catch (err) {
       conf("onError")((err && err.message) || "Erro ao abrir a conexão Pluggy");
     }
