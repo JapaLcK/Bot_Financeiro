@@ -8,8 +8,13 @@
  * alternativa era copiar ~550 linhas para a segunda tela.
  *
  *   PBOpenFinance.init({ apiBase, userId, onConnected, ... });
- *   PBOpenFinance.open();      // busca estado fresco, injeta o modal e abre
+ *   PBOpenFinance.open();      // abre o modal na hora; preenche depois
  *   PBOpenFinance.destroy();   // remove markup e listeners; idempotente
+ *
+ * A ordem do original é preservada de propósito: o modal aparece SÍNCRONO e só
+ * o preenchimento é assíncrono. O estado do plano é rebuscado em paralelo e
+ * quem espera por ele é o confirmar — que é onde a decisão importa, porque é
+ * dali que se abre a Pluggy.
  *
  * Servido por @router.get("/open-finance-connect.js") em
  * frontend/routes/static_pages.py — sem essa rota o arquivo dá 404 e o sintoma
@@ -31,24 +36,17 @@
   var lastFocus = null;    // quem tinha o foco antes de abrir
   var connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
   var selected = null;     // {id, name}
-  var connecting = false;  // uma conexão em voo por vez
-  var opening = false;     // uma abertura em voo por vez (ver open())
-
-  // Geração do ciclo de vida: init() e destroy() a incrementam. Toda operação
-  // assíncrona guarda a sua no começo e desiste se ela ficou velha. Sem isso,
-  // um destroy() durante um open() em voo (ex.: troca de rota client-side) não
-  // impede nada: quando os fetches resolvem, o open() segue, RECRIA o modal que
-  // acabou de ser destruído e reinstala o listener no document — e, se houve um
-  // init() novo no meio, ainda usa limites velhos com os callbacks novos.
-  var generation = 0;
-
-  /** A operação que começou na geração `gen` ainda vale? */
-  function stale(gen) { return gen !== generation; }
-
-  // Limites do plano e conexões atuais. Recarregados a CADA open() — confiar no
+  // Limites do plano e conexões atuais, recarregados a cada open() — confiar no
   // que a página leu no load faz quem acabou de fazer upgrade em outra aba
   // continuar batendo no teto antigo.
+  //
+  // A busca roda EM PARALELO com a abertura, não antes dela: quem espera é o
+  // confirmar, que é onde a decisão importa (é ali que se abre a Pluggy e nasce
+  // o risco de consentimento órfão). Bloquear a abertura punha dois fetches na
+  // frente do modal e abria uma janela de corrida que o fluxo original não
+  // tinha — ele mostrava o modal na hora e só o preenchimento era assíncrono.
   var limits = { banksMax: null, hasConnection: false, count: 0, names: [] };
+  var limitsPromise = null;   // busca em voo, iniciada no open()
 
   function noop() {}
 
@@ -94,16 +92,15 @@
    * settings.html antes desta extração.
    */
   async function apiError(resp) {
-    var data = null;
-    try { data = await resp.json(); } catch (e) { /* corpo não-JSON */ }
-    var detail = data && data.detail;
-    var msg;
-    if (typeof detail === "string" && detail) msg = detail;
-    else if (detail && typeof detail === "object") msg = detail.message || detail.code;
-    var err = new Error(msg || "Não foi possível concluir agora.");
-    err.status = resp.status;
-    err.detail = detail;
-    return err;
+    var raw = "";
+    try { raw = await resp.text(); } catch (e) { /* corpo ilegível */ }
+    try {
+      var detail = JSON.parse(raw).detail;
+      if (detail && typeof detail === "object") return new Error(detail.message || detail.code || raw);
+      return new Error(detail || raw);
+    } catch (e) {
+      return new Error(raw || "Erro inesperado");
+    }
   }
 
   async function get(path) {
@@ -371,43 +368,22 @@
 
   /* ─── Abrir / fechar ──────────────────────────────────────────────────── */
 
-  async function open() {
+  /**
+   * Abre o picker. SÍNCRONO até o modal estar na tela — nada de await antes,
+   * como no fluxo original: o modal aparece na hora e só o preenchimento é
+   * assíncrono. Pôr fetch na frente disso criava uma janela em que um segundo
+   * clique disparava tudo de novo e o `lastFocus` era capturado depois do foco
+   * já ter ido pro campo de busca.
+   */
+  function open() {
     if (!cfg) return;
 
-    // Uma abertura por vez. Sem isto, um segundo clique enquanto o
-    // refreshLimits() da primeira ainda está no ar dispara os fetches de novo E
-    // grava o campo de busca (já focado pela primeira) como `lastFocus` — aí
-    // fechar devolveria o foco pra um input escondido em vez do botão que
-    // abriu, quebrando o fluxo de teclado.
-    if (opening || (root && root.classList.contains("open"))) return;
-    opening = true;
-
-    // Quem abriu, guardado ANTES de qualquer await, pelo mesmo motivo.
-    var opener = document.activeElement;
-    var myGen = generation;
-
-    try {
-      // Estado fresco ANTES de decidir qualquer coisa sobre plano.
-      var ok = await refreshLimits();
-      if (stale(myGen)) return;          // destroy()/init() no meio: desiste
-      if (!ok) {
-        conf("onError")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.");
-        return;
-      }
-
-      // Sem Open Finance no plano: quem decide o que fazer é o host. O settings
-      // manda pra /precos (comportamento de hoje); o wizard mostra upgrade sem
-      // navegar, senão abortaria o onboarding no meio.
-      if (limits.banksMax === 0) {
-        conf("onUpgradeNeeded")(limits);
-        return;
-      }
-    } finally {
-      opening = false;
-    }
+    // Free (limite 0): mesma defesa do original — o applyOfConnectButton do
+    // host já roteia o botão pra /precos nesse caso.
+    if (limits.banksMax === 0) { window.location.href = "/precos"; return; }
 
     ensureRoot();
-    lastFocus = opener;
+    lastFocus = document.activeElement;
     root.classList.add("open");
     // Registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
     // caminhos: lista em cache, lista carregada do servidor e erro de fetch.
@@ -419,8 +395,19 @@
     selected = null;
     syncFoot();
 
-    if (connectors) { renderList(""); return; }
+    // Estado do plano em paralelo: quem espera é o confirmar.
+    limitsPromise = refreshLimits();
 
+    if (connectors) { renderList(""); return; }
+    carregarBancos();
+  }
+
+  /**
+   * Preenche a lista. Depois do await não recria nada: se o modal foi destruído
+   * no meio, `q()` devolve null com o root ausente e tudo aqui sai cedo — é o
+   * que dispensa qualquer controle de ciclo de vida.
+   */
+  async function carregarBancos() {
     var listEl = q("#bankpick-list");
     if (listEl) {
       listEl.innerHTML = "";
@@ -428,16 +415,15 @@
     }
     try {
       var data = await get("/open-finance/" + cfg.userId + "/connectors");
-      if (stale(myGen)) return;          // destruído enquanto a lista carregava
       connectors = (data.connectors || []).filter(function (b) { return b && b.name; });
       renderList("");
       // sem focar de novo: o foco já entrou no modal antes do await, e refocar
       // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
     } catch (err) {
-      if (stale(myGen)) return;
-      if (listEl) {
-        listEl.innerHTML = "";
-        listEl.appendChild(el("div", "bankpick-empty",
+      var alvo = q("#bankpick-list");
+      if (alvo) {
+        alvo.innerHTML = "";
+        alvo.appendChild(el("div", "bankpick-empty",
           "Não deu pra carregar a lista de bancos. Tente de novo."));
       }
     }
@@ -447,36 +433,48 @@
     if (root) root.classList.remove("open");
     if (onKeyRef) { document.removeEventListener("keydown", onKeyRef); onKeyRef = null; }
 
-    // Tira o foco de DENTRO do modal antes de qualquer coisa. Sem isto, quando
-    // não há um alvo focável pra devolver (o `body` não é focável e o .focus()
-    // nele é ignorado), o foco ficava preso num subárvore display:none — pior
-    // que cair no topo da página, porque o teclado some sem sinal nenhum.
-    if (root && document.activeElement && root.contains(document.activeElement)) {
-      document.activeElement.blur();
-    }
-    // Devolve o foco pra quem abriu, senão o teclado volta pro topo da página.
-    var alvo = (lastFocus && lastFocus !== document.body && document.contains(lastFocus))
-      ? lastFocus : null;
-    if (alvo) alvo.focus();
+    // devolve o foco pra quem abriu, senão o teclado volta pro topo da página
+    if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
     lastFocus = null;
   }
 
-  function confirmPick() {
+  /**
+   * É AQUI que o estado do plano precisa estar fresco: o passo seguinte abre a
+   * Pluggy, e é dali que sai o consentimento órfão se o teto já estiver cheio.
+   * Por isso o await mora neste ponto, e não na abertura do modal.
+   */
+  async function confirmPick() {
     if (!selected) return;
-    // Teto atingido: só segue se for RECONEXÃO de um banco já conectado (mesmo
-    // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
-    // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
-    if (limits.banksMax !== null && limits.banksMax > 0 && limits.count >= limits.banksMax) {
-      var isReconnect = limits.names.indexOf(stripAccent(selected.name || "")) !== -1;
-      if (!isReconnect) {
-        var n = limits.banksMax;
-        conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
-                       ". Faça upgrade pra conectar mais: /precos", "error");
+    var go = q("#bankpick-go");
+    // Desabilita durante a espera: sem isso um segundo clique passaria antes de
+    // os limites chegarem. Na prática a busca começou lá no open() e já
+    // resolveu, mas "na prática" não é garantia.
+    if (go) go.disabled = true;
+    try {
+      var ok = await (limitsPromise || refreshLimits());
+      if (!ok) {
+        conf("notify")("Não deu pra confirmar seu plano agora. Tente de novo em instantes.", "error");
         return;
       }
+      if (limits.banksMax === 0) { window.location.href = "/precos"; return; }
+
+      // Teto atingido: só segue se for RECONEXÃO de um banco já conectado (mesmo
+      // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
+      // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
+      if (limits.banksMax !== null && limits.banksMax > 0 && limits.count >= limits.banksMax) {
+        var isReconnect = limits.names.indexOf(stripAccent(selected.name || "")) !== -1;
+        if (!isReconnect) {
+          var n = limits.banksMax;
+          conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
+                         ". Faça upgrade pra conectar mais: /precos", "error");
+          return;
+        }
+      }
+      close();
+      connect();
+    } finally {
+      if (go) go.disabled = false;
     }
-    close();
-    connect();
   }
 
   /* ─── Widget da Pluggy ────────────────────────────────────────────────── */
@@ -485,25 +483,18 @@
     return window.PluggyConnect || window.pluggyConnect || window.PluggyConnectWidget;
   }
 
-  async function savePluggyItem(itemData, gen) {
+  async function savePluggyItem(itemData) {
     var item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
     var data = await post("/open-finance/" + cfg.userId + "/pluggy-item", { item: item });
-    if (gen !== undefined && stale(gen)) return data;   // host já foi embora
     conf("onConnected")(data);
     return data;
   }
 
   async function openWidget() {
-    // Mesma geração do open(): os callbacks abaixo disparam MUITO depois (o
-    // usuário passa pelo fluxo do banco), e um destroy()/init() no meio não
-    // pode deixá-los avisar callbacks de um ciclo que já acabou.
-    var myGen = generation;
-
     var data = await post("/open-finance/" + cfg.userId + "/connect-token", {});
-    if (stale(myGen)) return;
     var accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
 
@@ -528,30 +519,19 @@
       theme: "dark",
       onSuccess: async function (itemData) {
         try {
-          // A persistência acontece de qualquer jeito — o banco já autorizou, e
-          // largar o item sem salvar é pior que avisar um host que saiu. O que
-          // a geração corta é só o retorno pra UI que não existe mais.
-          await savePluggyItem(itemData, myGen);
-          if (stale(myGen)) return;
+          await savePluggyItem(itemData);
           conf("notify")("Banco conectado com sucesso!", "ok");
         } catch (err) {
-          if (stale(myGen)) return;
           // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
           // autorizado na Pluggy mas o plano não comporta mais conexões.
           conf("onError")(String((err && err.message) || err) || "Não foi possível salvar a conexão.");
-        } finally {
-          connecting = false;
         }
       },
       onError: function (error) {
         console.error("Pluggy Connect error", error);
-        connecting = false;
-        if (stale(myGen)) return;
         conf("onError")("Não foi possível concluir a conexão.");
       },
       onClose: function () {
-        connecting = false;
-        if (stale(myGen)) return;
         conf("onClose")();
       },
     });
@@ -563,13 +543,10 @@
 
   async function connect() {
     if (!cfg || !cfg.userId) { conf("onError")("Sessão inválida. Faça login novamente"); return; }
-    if (connecting) return;                      // uma conexão em voo por vez
-    connecting = true;
     conf("onConnectStart")();
     try {
       await openWidget();
     } catch (err) {
-      connecting = false;
       conf("onError")((err && err.message) || "Erro ao abrir a conexão Pluggy");
     }
   }
@@ -580,27 +557,18 @@
     // Idempotente: chamar de novo troca a configuração e NÃO soma listener —
     // os listeners vivem no root (um só, criado sob demanda) e no document
     // apenas enquanto o modal está aberto.
-    //
-    // Incrementa a geração: qualquer operação da configuração ANTERIOR que
-    // ainda esteja em voo desiste em vez de avisar os callbacks novos com
-    // resultado velho.
-    generation += 1;
     cfg = options || {};
     return api;
   }
 
   function destroy() {
-    // Antes de tudo: invalida o que estiver em voo. Sem isto, um open() que
-    // ainda espera o refreshLimits() voltaria depois, recriaria o root que
-    // acabamos de remover e reinstalaria o listener no document — um modal
-    // fantasma numa tela que já saiu.
-    generation += 1;
+    // Não precisa invalidar nada em voo: nenhum caminho assíncrono recria o
+    // root. O único await que sobra é o da lista de bancos, e ele só escreve
+    // via q(), que devolve null quando o root não existe mais.
     close();
     if (root && root.parentNode) root.parentNode.removeChild(root);
     root = null;
     selected = null;
-    connecting = false;
-    opening = false;
     // `connectors` é cache de dado remoto que não muda entre telas; mantido de
     // propósito pra reabrir sem novo fetch da lista.
   }
