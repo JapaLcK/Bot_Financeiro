@@ -1080,7 +1080,14 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
                   "connector": {"id": 612, "name": "Nubank"}},
         budget_ms=5000)
 
-    assert vistos == ["3000ms"], \
+    # DOIS: o `statement_timeout` do Postgres vale por STATEMENT, não pela
+    # transação, e esta tem os inserts do `ensure_user_tx` mais o upsert. Setar
+    # uma vez só deixava cada um esperar quase o teto inteiro — o triplo da cota
+    # com três linhas contendidas (Codex #166, P2). O relógio é fake e não anda
+    # entre eles, então os dois valores batem; o que discrimina é a CONTAGEM.
+    assert len(vistos) == 2, \
+        f"o teto tem de ser reajustado antes de CADA statement; veio {vistos}"
+    assert set(vistos) == {"3000ms"}, \
         f"5000 − 2000 (espera do pool) = 3000; veio {vistos}"
 
 

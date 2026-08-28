@@ -26,6 +26,8 @@ import pytest
 import db
 import core.services.pluggy_sync as ps
 from core.services.pluggy import PluggyApiError
+from psycopg.types.json import Jsonb
+
 from db.connection import get_conn
 from utils_date import _tz
 
@@ -955,3 +957,38 @@ def test_reconexao_dentro_do_lock_ainda_recusa_o_carimbo(user_id, monkeypatch, r
         "reconectaram entre a relectura e o carimbo — o carimbo não vale"
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
     assert ui["state"] != "updated"
+
+
+# ── Codex #166: quem espera QR não recebe "reconecte seu banco" ──────────────
+# `WAITING_USER_ACTION` grava `status='ERROR'` como os outros de `_NEEDS_USER`,
+# então caía em `list_connections_needing_reconnect` e receberia o template
+# proativo de reconexão — quando a ação certa é autorizar o dispositivo / ler o
+# QR no app do banco, antes do `userAction.expiresAt`. Mandar reconectar é
+# empurrar a pessoa para o único caminho que faz PERDER a janela.
+#
+# Esta superfície estava ENUMERADA e eu tinha decidido não consertá-la ("fluxo
+# dormente, template na Meta"). Dormente não é inexistente: quando ligarem o
+# `OF_RECONNECT_TEMPLATE_NAME`, o aviso sai errado.
+#
+# CONTROLE NEGATIVO: tirar o filtro `health->>'item_status' <> 'WAITING_USER_ACTION'`
+# da query deixa o 1º caso vermelho.
+# CONTROLE POSITIVO: o 2º caso — `LOGIN_ERROR` CONTINUA sendo avisado, senão o
+# filtro teria calado o aviso inteiro.
+
+@pytest.mark.parametrize("item_status, deve_avisar", [
+    ("WAITING_USER_ACTION", False),
+    ("LOGIN_ERROR", True),
+])
+def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
+        user_id, relogio_fixo, item_status, deve_avisar):
+    conexao = _conexao(user_id, f"item-aviso-{item_status}")
+    _set_estado(conexao["id"], status="ERROR",
+                health=Jsonb({"item_status": item_status, "products": {},
+                              "stale_products": []}))
+
+    avisadas = {c["provider_item_id"]
+                for c in db.list_connections_needing_reconnect(user_id)}
+
+    assert (f"item-aviso-{item_status}" in avisadas) is deve_avisar, (
+        f"{item_status}: aviso proativo de reconexão "
+        f"{'devia' if deve_avisar else 'NÃO devia'} sair")

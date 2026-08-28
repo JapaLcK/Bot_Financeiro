@@ -397,12 +397,25 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
 
     Base pra um aviso proativo de 'reconectar/renovar' (P1 #5/#6). Sem isso, o dado
     para de atualizar em silêncio — pior que não ter dado.
+
+    `WAITING_USER_ACTION` fica DE FORA, e é o único de erro que fica. Ele grava
+    `status='ERROR'` como os outros de `_NEEDS_USER`, então cairia aqui e
+    receberia o template de "reconecte seu banco" — quando a ação certa é
+    autorizar o dispositivo ou ler o QR no app do banco, antes do
+    `userAction.expiresAt`. Mandar reconectar é empurrar a pessoa para o único
+    caminho que faz PERDER a janela (Codex #166, P2).
+
+    O filtro é pelo `health`, não pelo `status`: o status local não distingue,
+    os cinco de `_NEEDS_USER` viram `ERROR` igual. Enquanto não existir template
+    próprio para device/QR, NÃO avisar é melhor que avisar errado — o estado
+    continua visível na tela do Open Finance, com a instrução certa.
     """
     sql = """
         select id, user_id, provider_item_id, institution_name, status,
                consent_expires_at, last_sync_at
         from open_finance_connections
         where provider = 'pluggy'
+          and coalesce(health->>'item_status', '') <> 'WAITING_USER_ACTION'
           and (
             upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
             or (consent_expires_at is not null
@@ -463,22 +476,36 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
     t0 = monotonic()
     with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
-            if budget_ms is not None:
-                # RECONTA depois de pegar a conexão: dar à query o `budget_ms`
-                # cheio de novo deixava as duas esperas somarem quase o dobro da
-                # cota (Codex #166, P2). Piso de 1ms — com a conexão na mão, o
-                # que se garante é que ela não fica parada para sempre.
-                budget_ms = max(1, budget_ms - int((monotonic() - t0) * 1000))
-                # A espera do POOL é só metade do problema: a query em si pode
-                # ficar parada numa linha travada. O terceiro argumento `true`
-                # é o LOCAL — morre com a transação, então não vaza para a
-                # próxima vez que esta conexão for usada.
-                # `SET` cru não serve: não aceita parâmetro (medido, `syntax
-                # error at or near "$1"`). É o mesmo idioma que o
-                # `pluggy_item_lock` já usa para o `lock_timeout`.
+            def _rebudget() -> None:
+                """Reajusta o teto ANTES de cada statement, com o que sobrou.
+
+                O `statement_timeout` do Postgres vale POR STATEMENT, não pela
+                transação — e esta tem TRÊS (os dois inserts do `ensure_user_tx`
+                e o upsert). Setando uma vez só, cada um esperava quase o teto
+                inteiro: três linhas contendidas somavam o TRIPLO da cota, e a
+                escrita podia commitar depois de o cliente ter desistido
+                (Codex #166, P2). Mesma classe do "cada etapa reinicia o
+                orçamento", um nível abaixo ainda.
+
+                A espera do POOL é só a primeira metade; a query parada numa
+                linha travada é a segunda. O terceiro argumento `true` é o
+                LOCAL — morre com a transação, então não vaza para a próxima vez
+                que esta conexão for usada. `SET` cru não serve: não aceita
+                parâmetro (medido, `syntax error at or near "$1"`). Mesmo idioma
+                que o `pluggy_item_lock` usa para o `lock_timeout`.
+
+                Piso de 1ms: com a conexão na mão, o que se garante é que ela não
+                fica parada para sempre — não que caiba num prazo já vencido.
+                """
+                if budget_ms is None:
+                    return
+                resta = max(1, budget_ms - int((monotonic() - t0) * 1000))
                 cur.execute("select set_config('statement_timeout', %s, true)",
-                            (f"{budget_ms}ms",))
+                            (f"{resta}ms",))
+
+            _rebudget()
             ensure_user_tx(cur, user_id)
+            _rebudget()
             cur.execute(
                 """
                 insert into open_finance_connections (
