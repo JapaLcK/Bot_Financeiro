@@ -27,6 +27,60 @@
     return h;
   }
 
+  /**
+   * Apaga o Cache Storage deste dispositivo no logout.
+   *
+   * Gêmeo do `_limpaCacheNoLogout` de `auth-refresh.js`. As 12 páginas
+   * públicas carregam ESTE arquivo e NÃO carregam o auth-refresh, então o
+   * logout do menu de conta delas não passa pelo interceptor de fetch de lá —
+   * sem esta cópia, sair pela landing deixava o cache privado intacto (Codex,
+   * #170). `tests/frontend/sw_cache_privado.test.mjs` compara os dois (§0.7).
+   *
+   * Da PÁGINA, não por `postMessage` ao worker: o aparelho que ainda tem cache
+   * privado é o controlado por um worker antigo, que não escuta `message`.
+   */
+  // Gêmeo do `_PRESERVA` de `auth-refresh.js` — preferência do APARELHO fica,
+  // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
+  // apagar, para falhar fechado: chave nova derivada de conta é apagada por
+  // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
+  var PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
+                  "pbDebug", "pbSpa", "finbot_logout_at"];
+
+  function apagaStorage(store) {
+    try {
+      Object.keys(store).forEach(function (k) {
+        if (PRESERVA.indexOf(k) === -1) store.removeItem(k);
+      });
+    } catch (e) { /* storage bloqueado (Safari privado): nada a apagar */ }
+  }
+
+  // Gêmeo do `_desregistraWorkers` de `auth-refresh.js`. Desregistra ANTES de
+  // apagar: um worker antigo ainda no controle tem `cache.put` assíncrono e uma
+  // request em voo noutra aba podia recriar o cache depois do delete.
+  function desregistraWorkers() {
+    try {
+      var sw = navigator.serviceWorker;
+      if (!sw || !sw.getRegistrations) return Promise.resolve();
+      return sw.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+        .catch(function () {});
+    } catch (e) { /* sem service worker: nada a desregistrar */ }
+    return Promise.resolve();
+  }
+
+  function limpaCacheNoLogout() {
+    apagaStorage(window.localStorage);
+    apagaStorage(window.sessionStorage);
+    return desregistraWorkers()
+      .then(function () {
+        if (!window.caches) return;
+        return caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        });
+      })
+      .catch(function () { /* sem SW ou sem CacheStorage: nada a limpar */ });
+  }
+
   function doLogout() {
     fetch("/auth/logout", {
       method: "POST",
@@ -34,9 +88,15 @@
       headers: csrfHeaders(),
     })
       .catch(function () {})
+      // A limpeza é AGUARDADA antes do reload: navegação descarta o documento,
+      // e uma limpeza disparada e esquecida não tem garantia de terminar — o
+      // cache privado sobreviveria ao logout justamente no aparelho
+      // compartilhado (Codex, #170).
       .finally(function () {
-        try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
-        location.reload(); // CTAs voltam ao padrão deslogado
+        return limpaCacheNoLogout().then(function () {
+          try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
+          location.reload(); // CTAs voltam ao padrão deslogado
+        });
       });
   }
 

@@ -88,7 +88,7 @@ async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS 
   });
   await page.route("**/static/auth-refresh.js", (route) =>
     route.fulfill({ status: 200, contentType: "application/javascript",
-                    body: readFileSync(join(FRONTEND, "auth-refresh.js"), "utf8") }));
+                    body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
   await page.route("**/auth/me", (route) =>
     route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax })));

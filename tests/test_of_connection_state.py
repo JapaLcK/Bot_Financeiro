@@ -55,6 +55,11 @@ class _Relogio(datetime):
 def relogio_fixo(monkeypatch):
     monkeypatch.setattr(ps, "datetime", _Relogio)
     monkeypatch.setattr("db.open_finance_state.datetime", _Relogio)
+    # `db.open_finance` também carimba hora nesta tabela (o `reconnected_at` do
+    # upsert). Deixá-lo no relógio real fazia a reconexão nascer DEPOIS de um
+    # sync com hora fixa, e a comparação `last_sync_at >= reconnected_at`
+    # invertia — armadilha para quem viesse depois.
+    monkeypatch.setattr("db.open_finance.datetime", _Relogio)
 
 
 def _conexao(user_id: int, item_id: str = "item-g1", status: str = "UPDATED") -> dict:
@@ -101,6 +106,17 @@ def _espelho(connection_id: int) -> tuple[int, int]:
             )
             txs = int(cur.fetchone()["n"])
     return contas, txs
+
+
+def _contas_espelhadas(connection_id: int) -> set[str]:
+    """Os IDs, não a contagem: sobrescrita por snapshot velho troca CONTEÚDO."""
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                "select provider_account_id from open_finance_accounts where connection_id=%s",
+                (connection_id,),
+            )
+            return {r["provider_account_id"] for r in (cur.fetchall() or [])}
 
 
 def _mock_pluggy(monkeypatch, *, item, contas=(), txs=()):
@@ -357,6 +373,257 @@ def test_reconexao_saindo_de_deleted_continua_funcionando(user_id, monkeypatch, 
     assert _linha("item-volta")["last_sync_at"] == AGORA
 
 
+# ── 11b. ONDA 2: o job de saúde não pode pintar de verde o que nunca sincronizou
+# Caminho medido, todo em código deste repositório: o upsert zera `health`, o job
+# de saúde é elegível na hora (`health is null`), o `GET /items` volta saudável e
+# `mark_sync_result(ok=None)` grava o health SEM tocar em `last_sync_at`. O ramo
+# do health de `connection_ui_state` devolvia "updated" — a conexão nascia
+# "Tudo em dia!" com "Última sync: pendente" na linha de baixo e zero contas
+# espelhadas. Este teste é o par negativo+positivo da guarda: sem ela a 1ª metade
+# fica vermelha; se ela recusasse tudo, a 2ª metade ficaria.
+
+def test_recem_conectado_com_item_saudavel_nao_e_atualizado(user_id, monkeypatch, relogio_fixo):
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-fresco", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item",
+                        lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+
+    ps.run_of_health_check()
+
+    linha = _linha("item-fresco")
+    assert linha["health"], "o job mediu a saúde (é o que torna o bug alcançável)"
+    assert linha["last_sync_at"] is None, "medir saúde não é sincronizar"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated", "item vivo na Pluggy não é espelho nosso"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+    # CONTROLE POSITIVO: o sync real é que libera o verde.
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-fresco"},
+                 contas=[_conta_pluggy("acc-fresco")], txs=[_tx_pluggy("tx-fresco")])
+    assert ps.sync_pluggy_item("item-fresco")["ok"] is True
+
+    assert _linha("item-fresco")["last_sync_at"] == AGORA
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", "sync concluído: agora sim"
+
+
+def test_conexao_nova_sem_contas_mostra_sem_dados_e_nao_o_generico(user_id, monkeypatch, relogio_fixo):
+    """O helper `_conexao()` carimba `last_sync_at=ANTES`, então TODO teste de
+    `no_accounts` da Onda 1 nasce do lado da tabela onde a guarda desta onda não
+    age — a categoria era inobservável pela suíte. Aqui a conexão é NOVA
+    (last_sync_at NULL, que é o que `mark_sync_result(ok=False)` deixa) e o
+    motivo concreto tem de sobreviver: "Sem dados", não "Ainda não sincronizou"."""
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-novo-vazio", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-novo-vazio"}, contas=[])
+
+    res = ps.sync_pluggy_item("item-novo-vazio")
+
+    assert res["ok"] is False and res["reason"] == "no_accounts"
+    linha = _linha("item-novo-vazio")
+    assert linha["last_sync_at"] is None, "sync sem espelho não é sucesso"
+    assert linha["status_reason"] == "no_accounts"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "no_accounts", "o motivo fala mais alto que a falta de sync"
+    assert ui["label"] == "Sem dados"
+
+
+def test_conexao_nova_com_leitura_pela_metade_continua_vermelha(user_id, monkeypatch, relogio_fixo):
+    """Irmão do de cima para `read_failed` — a pílula dele é `error` (vermelha) em
+    OF_PILL_CLASS, e virar `updating` a rebaixaria para âmbar numa conexão nova."""
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-novo-429", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-novo-429"}, contas=[])
+    monkeypatch.setattr(ps, "list_pluggy_investments", lambda i, k=None: (_ for _ in ()).throw(
+        PluggyApiError("rate limit", status_code=429)))
+
+    assert ps.sync_pluggy_item("item-novo-429")["reason"] == "read_failed"
+
+    linha = _linha("item-novo-429")
+    assert linha["last_sync_at"] is None
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "error_recoverable"
+    assert ui["detail"] == "Tentaremos de novo automaticamente"
+
+
+def test_reconexao_nao_devolve_o_verde_sozinha(user_id, monkeypatch, relogio_fixo):
+    """Reconectar zera `status_reason` e `health` (linha G) — o que ele NÃO pode
+    fazer é devolver o veredito verde antes de um sync novo."""
+    conexao = _conexao(user_id, "item-reconecta")
+    _set_estado(conexao["id"], status="ERROR", status_reason="item_missing",
+                last_sync_at=None)
+
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-reconecta", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item",
+                        lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+    ps.run_of_health_check()
+
+    linha = _linha("item-reconecta")
+    assert linha["last_sync_at"] is None, "reconectar não é sincronizar"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+
+# ── 11c. RODADA CODEX (#162, P2): reconexão de quem JÁ tinha sincronizado ────
+# O apontamento: o upsert preserva o `last_sync_at` velho de propósito, então uma
+# guarda que só pergunta "existe last_sync_at?" aceita o carimbo PRÉ-reconexão —
+# e o espelho velho volta à tela como "Atualizado" assim que o job de saúde mede
+# o item novo como saudável, antes de a nova autorização ter sincronizado nada.
+# O meu teste da rodada anterior escapava disso por acidente: ele zerava o
+# `last_sync_at`, que é justamente o caso fácil.
+# CONTROLE NEGATIVO: trocar `sem_sync` por `ultimo is None` em
+# `connection_ui_state` deixa o 1º teste vermelho.
+
+def test_reconexao_nao_reaproveita_o_sync_anterior(user_id, monkeypatch, relogio_fixo):
+    _conexao(user_id, "item-religa")                    # nasce com last_sync_at=ANTES
+    assert _linha("item-religa")["last_sync_at"] == ANTES
+
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-religa", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    linha = _linha("item-religa")
+    assert linha["last_sync_at"] == ANTES, "reconectar não pode MEXER no last_sync_at"
+    assert linha["reconnected_at"] is not None, "mas tem que registrar a reconexão"
+
+    monkeypatch.setattr(ps, "create_pluggy_api_key", lambda: "k")
+    monkeypatch.setattr(ps, "get_pluggy_item", lambda i, k=None: {**ITEM_SAUDAVEL, "id": i})
+    ps.run_of_health_check()
+
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated", "espelho de antes da reconexão não é 'Atualizado'"
+    assert ui["detail"] == "Ainda não sincronizou"
+
+
+@pytest.mark.parametrize("religado_em, rotulo", [(AGORA, "no mesmo instante"),
+                                                 (ANTES, "estritamente antes")])
+def test_sync_depois_da_reconexao_devolve_o_verde(user_id, monkeypatch, relogio_fixo,
+                                                  religado_em, rotulo):
+    """CONTROLE POSITIVO: sem ele a guarda podia recusar para sempre depois de
+    qualquer reconexão — que é pior que o bug.
+
+    Os dois lados da borda: com o relógio congelado o upsert e o sync carimbam o
+    MESMO instante, que fixa o `<` (um `<=` no lugar dele ficaria vermelho); o
+    segundo caso empurra a reconexão para trás e é a forma comum em produção —
+    reconectou, sincronizou depois."""
+    _conexao(user_id, "item-religa-ok")
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-religa-ok", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    _set_estado(_linha("item-religa-ok")["id"], reconnected_at=religado_em)
+
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-religa-ok"},
+                 contas=[_conta_pluggy("acc-religa")], txs=[_tx_pluggy("tx-religa")])
+    assert ps.sync_pluggy_item("item-religa-ok")["ok"] is True
+
+    linha = _linha("item-religa-ok")
+    assert linha["last_sync_at"] == AGORA
+    assert linha["last_sync_at"] >= linha["reconnected_at"], rotulo
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", f"sincronizou depois de reconectar ({rotulo})"
+
+
+@pytest.mark.parametrize("motivo, esperado, detalhe", [
+    ("read_failed", "error_recoverable", "Tentaremos de novo automaticamente"),
+    ("no_accounts", "no_accounts", "O banco não devolveu contas nem investimentos"),
+])
+def test_reconexao_com_sync_falho_mostra_o_motivo_e_nao_o_generico(
+        user_id, relogio_fixo, motivo, esperado, detalhe):
+    """O ramo SEM health, que a rodada anterior quebrou: `_sync_item_contido`
+    (`pluggy_sync.py:574`) grava `mark_sync_result(ok=False, status=None,
+    status_reason=...)` SEM passar health, então `coalesce(null, health)` deixa
+    o health NULL e a conexão desce pelo ramo de baixo de `connection_ui_state`.
+
+    Reconectou + sync falhou = o motivo tem que falar. Dizer "Atualizando…" ali
+    é falso (ninguém está atualizando) e, no `read_failed`, rebaixa a pílula de
+    `error` (vermelha) para `pending` (âmbar) — ver OF_PILL_CLASS em
+    frontend/settings.html:2793.
+
+    CONTROLE NEGATIVO: trocar o `ultimo is None` do fim de `connection_ui_state`
+    por `sem_sync` deixa os dois casos vermelhos."""
+    conexao = _conexao(user_id, f"item-religa-{motivo}")   # last_sync_at = ANTES
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": f"item-religa-{motivo}", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+
+    db.mark_sync_result(conexao["id"], ok=False, status=None, status_reason=motivo)
+
+    linha = _linha(f"item-religa-{motivo}")
+    assert linha["health"] is None, "o handler do lote não mede saúde"
+    assert linha["last_sync_at"] == ANTES and linha["reconnected_at"] == AGORA
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == esperado, "o motivo tem que sobreviver à reconexão"
+    assert ui["detail"] == detalhe
+
+
+# ── 11d. RODADA CODEX 2 (#162, P2): reconexão NO MEIO de um sync ────────────
+# A fase de leitura roda FORA do lock (`pluggy_sync.py:263-300`, transações
+# paginadas por conta) e o carimbo de tentativa só vem DEPOIS dele (`:312`),
+# então `last_attempt_at` não serve de início de corrida. Enumerando sync ×
+# reconexão sobram quatro interposições, e só uma estava aberta:
+#
+#   R … início … fim   → fim > R, verde                        ok
+#   início … fim … R   → fim < R, não-verde                    ok (commit d1550ed)
+#   início … R … fim   → fim > R com dado da autorização VELHA  ← este teste
+#   início … R … falha → sem carimbo, o motivo fala            ok
+#
+# CONTROLE NEGATIVO: tirar o `reconnected_at_visto` do `mark_sync_result` em
+# `pluggy_sync.py` deixa o 1º teste vermelho.
+
+def test_reconexao_no_meio_do_sync_nao_carimba_sucesso(user_id, monkeypatch, relogio_fixo):
+    """O sync leu tudo sob a autorização antiga; o usuário reconectou enquanto
+    ele lia. O run inteiro é descartado: nem espelho, nem carimbo.
+
+    A versão anterior deste teste afirmava "o espelho FICA (o dado é real, só
+    velho)". Estava errado, e a rodada 5 do Codex mostrou por quê — ver 11e."""
+    conexao = _conexao(user_id, "item-corrida")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-corrida"},
+                 contas=[_conta_pluggy("acc-corrida")], txs=[_tx_pluggy("tx-corrida")])
+
+    # A reconexão acontece DEPOIS de o sync ler a linha e no meio da leitura
+    # remota — que é onde ela cabe na vida real (a leitura leva minutos).
+    real = ps.list_pluggy_transactions
+    def reconecta_no_meio(account_id, api_key=None, **kw):
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "item-corrida", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        return real(account_id, api_key, **kw)
+    monkeypatch.setattr(ps, "list_pluggy_transactions", reconecta_no_meio)
+
+    res = ps.sync_pluggy_item("item-corrida")
+
+    assert res["reason"] == "stale_authorization"
+    linha = _linha("item-corrida")
+    assert _espelho(conexao["id"]) == (0, 0), "run de geração velha não escreve espelho"
+    assert linha["last_sync_at"] == ANTES, \
+        "sync que começou antes da reconexão não carimba sucesso depois dela"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated"
+
+
+def test_sync_sem_reconexao_no_meio_carimba_normalmente(user_id, monkeypatch, relogio_fixo):
+    """CONTROLE POSITIVO: a checagem otimista não pode recusar o caso comum —
+    ninguém reconectou, o `reconnected_at` continua o mesmo (aqui, NULL), e o
+    sucesso é carimbado. Sem isto, a guarda passaria num código que recusa tudo."""
+    _conexao(user_id, "item-sem-corrida")
+    assert _linha("item-sem-corrida")["reconnected_at"] is None
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-sem-corrida"},
+                 contas=[_conta_pluggy("acc-sc")], txs=[_tx_pluggy("tx-sc")])
+
+    assert ps.sync_pluggy_item("item-sem-corrida")["ok"] is True
+
+    assert _linha("item-sem-corrida")["last_sync_at"] == AGORA
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated"
+
+
 # ── 12. RODADA 3: a máquina de estados, evento por evento ───────────────────
 # A tabela vive no topo de `core/services/pluggy_health.py`. Estes testes são a
 # tabela executável — cada um é uma linha dela.
@@ -540,3 +807,151 @@ def test_sync_de_item_vazio_tira_o_error_e_diz_sem_dados(user_id, monkeypatch, r
     assert linha["last_sync_at"] == ANTES, "espelho vazio continua não sendo sucesso"
     ui = _ui("item-preso")
     assert (ui["state"], ui["label"]) == ("no_accounts", "Sem dados")
+
+
+# ── 11e. RODADA CODEX 3 (#162, P2): dois workers, o velho chega por último ───
+# O apontamento: o `reconnected_at_visto` recusa só o CARIMBO do run de geração
+# velha — as escritas do espelho acontecem TODAS antes dele, e já foram feitas
+# quando o carimbo é recusado. Com duas réplicas (o deploy do Railway sobe a
+# nova antes de derrubar a velha) a interposição é alcançável:
+#
+#   A começa … R (reconexão) … B começa … B escreve+carimba … A escreve
+#
+# B carimbou um `last_sync_at` legítimo, então `connection_ui_state` diz
+# "Atualizado" — e A, chegando depois, sobrescreve contas, investimentos,
+# `status` e `health` com o snapshot PRÉ-reconexão. Tela verde sobre espelho
+# velho, que é o defeito que esta onda existe para tirar. O `_INFLIGHT` não
+# cobre: é coalescing por PROCESSO.
+#
+# O conserto é reler o `reconnected_at` DENTRO do lock e abortar o run inteiro
+# antes de qualquer escrita (`_sync_pluggy_item_confirmado`).
+#
+# CONTROLE NEGATIVO (medido): remover a relectura + o early-return de
+# `stale_authorization` de `pluggy_sync.py` deixa 2 testes vermelhos — este e o
+# `test_reconexao_no_meio_do_sync_nao_carimba_sucesso` de 11d.
+# CONTROLE POSITIVO: `test_sync_sem_reconexao_no_meio_carimba_normalmente`
+# (11d) prova que o caminho comum — ninguém reconectou — continua escrevendo e
+# carimbando. Sem ele a guarda passaria num código que recusa todo sync.
+
+def test_run_velho_nao_sobrescreve_o_espelho_do_run_novo(user_id, monkeypatch, relogio_fixo):
+    """Worker A (pré-reconexão) chega no lock DEPOIS de o worker B ter
+    reconectado, espelhado e carimbado. A tem de morrer sem escrever."""
+    conexao = _conexao(user_id, "item-2workers")
+    # A leu a linha com `reconnected_at` NULL e traz o snapshot VELHO.
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-2workers"},
+                 contas=[_conta_pluggy("acc-VELHA")], txs=[_tx_pluggy("tx-VELHA")])
+
+    real = ps.list_pluggy_transactions
+
+    def reconecta_e_deixa_o_worker_b_terminar(account_id, api_key=None, **kw):
+        # No meio da leitura remota de A: o usuário reconecta…
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "item-2workers", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        nova = _linha("item-2workers")
+        assert nova["reconnected_at"] == AGORA
+        # …e o worker B, que começou DEPOIS dela, espelha e carimba primeiro.
+        db.save_open_finance_sync(nova["id"], [{
+            "provider_account_id": "acc-NOVA", "name": "Conta", "type": "BANK",
+            "currency": "BRL", "balance": 2000, "raw": {},
+            "transactions": [{"provider_transaction_id": "tx-NOVA",
+                              "description": "Mercado", "amount": -10,
+                              "transaction_date": AGORA.date(), "raw": {}}],
+        }])
+        db.mark_sync_result(nova["id"], ok=True, status="ACTIVE", status_reason="",
+                            health=ps.derive_item_health(ITEM_SAUDAVEL),
+                            reconnected_at_visto=nova["reconnected_at"])
+        return real(account_id, api_key, **kw)
+
+    monkeypatch.setattr(ps, "list_pluggy_transactions",
+                        reconecta_e_deixa_o_worker_b_terminar)
+
+    res = ps.sync_pluggy_item("item-2workers")
+
+    # O espelho PRIMEIRO: é a afirmação forte, e é ela que o controle negativo
+    # tem de derrubar. `ok is False` sozinho passaria num código que só recusa o
+    # retorno depois de já ter escrito.
+    assert _contas_espelhadas(conexao["id"]) == {"acc-NOVA"}, \
+        "o snapshot pré-reconexão não pode voltar ao espelho"
+    linha = _linha("item-2workers")
+    assert linha["last_sync_at"] == AGORA, "o carimbo legítimo do worker B fica"
+    assert res["ok"] is False and res["reason"] == "stale_authorization"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] == "updated", "e ele está dizendo a verdade: o espelho é o novo"
+
+
+# ── 11f. ONDA 3: a janela que a relectura NÃO fecha ─────────────────────────
+# Desde que o run de geração velha morre na relectura dentro do lock (11e),
+# NENHUM teste que passa por `sync_pluggy_item` chega mais ao
+# `reconnected_at_visto` — o controle negativo de 11d ("tirar o
+# `reconnected_at_visto` do call site") passou a não derrubar nada, ou seja, o
+# parâmetro ficaria sem cobertura nenhuma. Ele não é redundante: a rota de
+# reconexão (`/pluggy/item` → `save_pluggy_open_finance_item`) NÃO pega o
+# `pluggy_item_lock`, então uma reconexão ainda cabe entre a relectura e o
+# carimbo. Este teste ataca essa fresta direto no `mark_sync_result`.
+#
+# CONTROLE NEGATIVO: omitir o `reconnected_at_visto` na 1ª chamada deixa este
+# teste vermelho. CONTROLE POSITIVO: a 2ª chamada, com o valor que de fato está
+# no banco, carimba — sem ela a guarda passaria recusando todo carimbo.
+
+def test_reconexao_entre_a_relectura_e_o_carimbo_ainda_e_recusada(user_id, relogio_fixo):
+    conexao = _conexao(user_id, "item-janela")
+    visto = _linha("item-janela")["reconnected_at"]
+    assert visto is None, "a relectura de dentro do lock leu isto"
+
+    # …e só DEPOIS dela o usuário reconecta, fora do lock.
+    db.save_pluggy_open_finance_item(
+        user_id, {"id": "item-janela", "status": "UPDATED",
+                  "connector": {"id": 612, "name": "Nubank"}})
+    assert _linha("item-janela")["reconnected_at"] == AGORA
+
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="",
+                        reconnected_at_visto=visto)
+    assert _linha("item-janela")["last_sync_at"] == ANTES, \
+        "carimbo com autorização velha não pode avançar o last_sync_at"
+
+    db.mark_sync_result(conexao["id"], ok=True, status="ACTIVE", status_reason="",
+                        reconnected_at_visto=AGORA)
+    assert _linha("item-janela")["last_sync_at"] == AGORA, \
+        "quem leu a autorização ATUAL carimba normalmente"
+
+
+def test_reconexao_dentro_do_lock_ainda_recusa_o_carimbo(user_id, monkeypatch, relogio_fixo):
+    """A mesma janela residual, agora pelo CAMINHO REAL — o call site em
+    `pluggy_sync`, não o `mark_sync_result` na mão.
+
+    Este teste existe por causa de uma medição: depois da relectura de 11e, a
+    sabotagem "tirar o `reconnected_at_visto` do call site" passou a deixar ZERO
+    vermelhos. O parâmetro continuava certo e continuava necessário, mas nada
+    mais o exercitava — e parâmetro sem controle negativo é parâmetro que a
+    próxima pessoa apaga achando que é resíduo.
+
+    A reconexão é interposta DENTRO do lock (o `import_open_finance_launches`
+    roda entre a escrita do espelho e o carimbo), que é exatamente a fresta que
+    a relectura não fecha: a rota `/pluggy/item` não pega o `pluggy_item_lock`.
+
+    CONTROLE NEGATIVO: tirar o `reconnected_at_visto` do call site deixa este
+    teste vermelho — e volta a dar 1, como na Onda 2."""
+    conexao = _conexao(user_id, "item-janela-lock")
+    _mock_pluggy(monkeypatch, item={**ITEM_SAUDAVEL, "id": "item-janela-lock"},
+                 contas=[_conta_pluggy("acc-jl")], txs=[_tx_pluggy("tx-jl")])
+
+    real = ps.import_open_finance_launches
+
+    def reconecta_dentro_do_lock(uid, cid, *a, **kw):
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "item-janela-lock", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        return real(uid, cid, *a, **kw)
+
+    monkeypatch.setattr(ps, "import_open_finance_launches", reconecta_dentro_do_lock)
+
+    res = ps.sync_pluggy_item("item-janela-lock")
+
+    assert res["ok"] is True, "passou pela relectura: na entrada do lock era a geração certa"
+    linha = _linha("item-janela-lock")
+    assert _espelho(conexao["id"]) == (1, 1), "o espelho FICA: o dado é real"
+    assert linha["last_sync_at"] == ANTES, \
+        "reconectaram entre a relectura e o carimbo — o carimbo não vale"
+    ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
+    assert ui["state"] != "updated"

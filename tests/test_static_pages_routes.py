@@ -95,11 +95,44 @@ def test_commands_catalog():
     assert "catalog" in resp.json()
 
 
-def test_auth_refresh_js_com_cache_publico():
+def test_auth_refresh_js_revalida_a_cada_load():
+    """`no-cache` no header E `?v=<hash>` na URL — os dois, e por motivos
+    diferentes.
+
+    O header protege dali para a frente. Ele NÃO invalida o que já está no
+    cache do cliente: quem buscou o arquivo pouco antes do deploy carrega a
+    entrada com o `max-age=300` antigo e roda a versão anterior por até 5
+    minutos. Aqui isso tem consequência de segurança — este arquivo carrega a
+    limpeza de estado no fim de sessão (Codex, #170).
+
+    Quem invalida na hora é a URL versionada: `?v=<hash>` é outra chave de
+    cache, então a entrada velha deixa de ser consultada.
+    """
     resp = client.get("/static/auth-refresh.js")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/javascript")
-    assert resp.headers["cache-control"] == "public, max-age=300"
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
+    """As 4 páginas que o carregam pedem `?v=<hash>`, não a URL nua.
+
+    Três delas referenciavam sem `?v=` nenhum, e o `?v=1` da quarta era um
+    cache-buster MORTO: o `_ASSET_VER_RE` não aceitava `/` no meio do caminho,
+    então `/static/auth-refresh.js` nem casava a forma. O arquivo mudou para
+    `frontend/static/` para o caminho da URL bater com o do disco e o lookup do
+    `stamp_asset_versions` resolver sem caso especial.
+    """
+    hash_esperado = _asset_hash(
+        "static/auth-refresh.js",
+        (FRONTEND_DIR / "static" / "auth-refresh.js").stat().st_mtime_ns,
+    )
+    for page in ["/app", "/home", "/settings", "/onboarding"]:
+        html = client.get(page).text
+        assert "/static/auth-refresh.js" in html, page
+        m = re.search(r"/static/auth-refresh\.js\?v=([0-9a-f]+)", html)
+        assert m, f"{page} pede a URL nua — a entrada velha do cache continua valendo"
+        assert m.group(1) == hash_esperado, page
 
 
 def test_pb_nav_js_com_cache_publico():
@@ -129,3 +162,63 @@ def test_assets_estaticos():
         resp = client.get(path)
         assert resp.status_code == 200, path
         assert resp.headers["content-type"].startswith(content_type), path
+
+
+def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
+    """§0.7: o JS não importa Python, então um teste compara as duas listas.
+
+    A limpeza do Cache Storage no fim de sessão (`auth-refresh.js`) precisa
+    conhecer TODA rota cujo backend chama `_clear_session_cookies` — não só o
+    logout. Foi assim que a exclusão de conta ficou de fora: eu consertei a
+    instância e não a classe (Codex, #170).
+
+    A varredura é por `ast`, não por texto: procura as funções de rota que
+    contêm uma chamada a `_clear_session_cookies` e devolve o caminho do
+    decorador. Uma quarta rota que limpe cookie e não esteja no JS deixa isto
+    vermelho.
+    """
+    import ast
+    import pathlib
+    import re as _re
+
+    fonte = (pathlib.Path(__file__).resolve().parents[1]
+             / "frontend" / "finance_bot_websocket_custom.py").read_text(encoding="utf-8")
+    arvore = ast.parse(fonte)
+
+    do_python: set[str] = set()
+    for no in ast.walk(arvore):
+        if not isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        limpa = any(
+            isinstance(c, ast.Call)
+            and getattr(c.func, "id", None) == "_clear_session_cookies"
+            for c in ast.walk(no)
+        )
+        if not limpa:
+            continue
+        for dec in no.decorator_list:
+            # Só o decorador de ROTA (`@app.post("/x")`). Sem este recorte
+            # entram os `@limiter.limit("30/minute")`, que também são Call com
+            # string no primeiro argumento — medido.
+            if not (isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and getattr(dec.func.value, "id", None) == "app"
+                    and dec.func.attr in {"get", "post", "put", "patch", "delete"}):
+                continue
+            if (dec.args and isinstance(dec.args[0], ast.Constant)
+                    and isinstance(dec.args[0].value, str)):
+                do_python.add(dec.args[0].value)
+
+    assert do_python, "a varredura não achou rota nenhuma — o walk quebrou"
+
+    js = (pathlib.Path(__file__).resolve().parents[1]
+          / "frontend" / "static" / "auth-refresh.js").read_text(encoding="utf-8")
+    bloco = js[js.index("_SESSAO_ENCERRADA = {"):]
+    bloco = bloco[:bloco.index("};")]
+    do_js = set(_re.findall(r'"(/[^"]+)":', bloco))
+
+    assert do_python == do_js, (
+        "rota que encerra sessão fora da limpeza de cache do auth-refresh.js — "
+        "o cache privado sobrevive nesse fluxo. "
+        f"só no Python: {sorted(do_python - do_js)}; só no JS: {sorted(do_js - do_python)}"
+    )

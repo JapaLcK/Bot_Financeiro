@@ -39,6 +39,42 @@ def day_tz(dt):
     return (dt.astimezone(_tz()) if dt.tzinfo else dt).date()
 
 
+def launch_day(dt, posted_at=None, has_time=True):
+    """Dia de um lançamento. Sem hora confiável, quem manda é a DATA.
+
+    `day_tz` converte um INSTANTE — e onde instante não existe ele inventa um.
+    Duas fontes chegam sem hora e as duas pagaram por isso:
+
+    - compra no crédito: `purchased_at` é `date` (db/schema.py) e na UNION de
+      `list_launches_by_category` o Postgres promove `timestamp` → `timestamptz`
+      pelo fuso da SESSÃO. A sessão da PRODUÇÃO é `Etc/UTC` (medido no Railway em
+      27/08/2026 08:46 UTC), então 27/08 00:00 vira 27/08 00:00Z e `day_tz`
+      devolve 26/08: toda compra de cartão está saindo com o DIA ANTERIOR nessa
+      lista hoje — não é risco futuro. Na máquina local a sessão é -04 e o erro
+      some, que é por que só o CI ficou vermelho.
+    - Open Finance importado ANTES de c474fba (18/08/2026): gravava a `date`
+      crua em `criado_em` (timestamptz) → meia-noite no fuso da SESSÃO, que na
+      produção é UTC, e o dia exibido escorregava um pra trás. Essas linhas
+      continuam no banco, sem `time_known` no `efeitos` (logo `has_time=false`),
+      e só o `posted_at` delas está certo.
+
+    NÃO vale para o que os importadores gravam HOJE: extrato OFX/CSV/PDF
+    (`ofx_import.py:209`, `statement_import.py:666`) e Open Finance sem hora
+    (`db/open_finance.py:1197`) já gravam `criado_em` = MEIO-DIA local do
+    `posted_at`, então ali `day_tz(criado_em) == posted_at` e esta função não
+    muda nada — a justificativa "criado_em é a hora da importação" era falsa.
+
+    Editar a data pelo dashboard mexe nos DOIS campos (`update_launch_fields`,
+    db/accounts.py); sem isso `posted_at` velho engolia a edição pra sempre.
+
+    `has_time` é o mesmo CASE do SQL (`LAUNCH_HAS_TIME_SQL`, db/connection.py).
+    Sem `posted_at` cai em `day_tz` — o comportamento de hoje.
+    """
+    if not has_time and posted_at is not None:
+        return posted_at
+    return day_tz(dt)
+
+
 # ---------------- feriados nacionais (BR) ----------------
 
 def _easter_sunday(year: int) -> date:

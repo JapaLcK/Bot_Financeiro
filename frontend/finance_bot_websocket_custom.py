@@ -97,6 +97,7 @@ from db import (
     investment_deposit_from_account,
     investment_withdraw_to_account,
     update_launch_fields,
+    LaunchDateLockedError,
     update_credit_transaction_fields,
     undo_credit_transaction,
     delete_launch_and_rollback,
@@ -105,6 +106,7 @@ from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
+from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
 from frontend.routes.push import router as push_router
@@ -5352,14 +5354,19 @@ async def update_launch_route(
     if categoria_norm is None and nota_norm is None and criado_em_dt is None:
         raise HTTPException(status_code=400, detail="Nada para atualizar.")
 
-    changed = await asyncio.to_thread(
-        update_launch_fields,
-        user_id,
-        launch_id,
-        categoria=categoria_norm,
-        nota=nota_norm,
-        criado_em=criado_em_dt,
-    )
+    try:
+        changed = await asyncio.to_thread(
+            update_launch_fields,
+            user_id,
+            launch_id,
+            categoria=categoria_norm,
+            nota=nota_norm,
+            criado_em=criado_em_dt,
+        )
+    except LaunchDateLockedError as e:
+        # Data de linha do Open Finance é do PROVEDOR (db/accounts.py). 409 e não
+        # 400: o pedido está bem formado, o estado do recurso é que não permite.
+        raise HTTPException(status_code=409, detail=str(e))
     if not changed:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
     if categoria_norm:
@@ -5516,6 +5523,13 @@ app.include_router(affiliates_router)
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
 app.include_router(agents_router)
+
+
+# ─── Lançamentos de uma categoria → frontend/routes/categories.py ────────────
+# Antes do CRUD de /categories (abaixo, ainda no monólito): não há GET em
+# /categories/{user_id}/{cat_id}, então não há colisão hoje — registrar aqui
+# garante que um catch-all futuro não engula esta rota.
+app.include_router(categories_router)
 
 
 @app.get("/debug/ai/{user_id}/payload")

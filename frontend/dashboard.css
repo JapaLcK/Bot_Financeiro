@@ -2243,3 +2243,90 @@ body.balance-hidden #bill-detail-summary .v {
   user-select: none;
   transition: filter .15s ease;
 }
+
+/* ═══ Lançamentos de uma categoria (modal .wide, ids cl-*) ═══════════════
+   Aberto pela barra da Distribuição do mês ou pelo "Ver lançamentos" da
+   edição de categoria. O que manda aqui é leitura financeira rápida: o total
+   em corpo grande no topo, as linhas densas embaixo, contagem como metadado.
+   Tudo em cima de .modal.wide/.bar-row — sem componente novo. */
+.modal.cl-modal { display:flex; flex-direction:column; overflow:hidden; }
+/* Só a LISTA rola: com o modal inteiro rolando (overflow do .modal.wide), 50
+   linhas empurravam o Fechar pra fora da tela no celular. */
+.cl-modal #cl-list { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.cl-modal .msub { margin-bottom:12px; }
+.cl-sum {
+  display:flex; align-items:flex-end; gap:8px 26px; flex-wrap:wrap;
+  padding-bottom:14px; margin-bottom:2px; border-bottom:1px solid var(--div);
+}
+/* `hidden` sozinho não some: o display:flex acima vence a regra de UA, e o
+   resumo da categoria ANTERIOR ficava na tela durante o carregamento e no
+   estado vazio — número velho sob título novo. */
+.cl-sum[hidden] { display:none; }
+.cl-sum > span { display:flex; flex-direction:column; gap:3px; }
+.cl-sum b { font-size:1.45rem; font-weight:700; line-height:1; color:var(--text);
+            font-variant-numeric:tabular-nums; }
+.cl-sum .cl-in b { color:var(--green); }
+.cl-k { font-size:.66rem; font-weight:650; letter-spacing:.07em; text-transform:uppercase;
+        color:var(--text-2); }
+/* Sem sangria horizontal: #cl-list é contêiner de rolagem (overflow-y:auto
+   clipa os DOIS eixos), então uma linha mais larga que o conteúdo perdia as
+   bordas laterais do anel de foco — sobrava um traço em cima e outro embaixo. */
+.cl-row { border-radius:10px; cursor:pointer; transition:background .16s var(--ease); }
+/* Branco a 5,5% nos DOIS temas, e é medido: `.modal` é
+   `rgba(14,16,30,.94)` com e sem `body.light` — não existe regra
+   `body.light .modal`/`.overlay` na dashboard.css inteira. A linha desta lista
+   está SEMPRE sobre superfície escura, então o par `body.light` que a barra da
+   Distribuição tem (fim do arquivo) seria errado aqui: aquela barra fica na
+   PÁGINA, que no tema claro é `--bg-page:#F6F4F1`. Aplicar
+   `rgba(15,23,42,.05)` aqui apaga o hover em vez de consertá-lo.
+   (O tema claro dos MODAIS é um buraco pré-existente e geral — `--text` vira
+   `#0f172a` dentro de um modal que continua escuro, o que atinge `.modal h3`,
+   `.ld-desc` e todo o resto. Não é desta feature.) */
+.cl-row:hover { background:rgba(255,255,255,.055); }
+.cl-row:focus-visible { outline:2px solid rgba(255,45,142,.55); outline-offset:-2px; }
+.cl-row .bar-head { align-items:baseline; }
+.cl-row .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Mesma leitura da Visão Geral: entrada verde, saída vermelha, movimentação
+   interna apagada. Sem isto o `.g`/`.r` (0,1,0) perde pro `.bar-head .val`
+   (0,2,0) e a lista inteira sai da mesma cor — não dá pra distinguir de relance
+   o que entrou do que saiu. */
+.cl-row .val { white-space:nowrap; font-weight:600; }
+.cl-row .val.g { color:var(--green); }
+.cl-row .val.r { color:var(--red); }
+.cl-modal button:focus-visible { outline:2px solid rgba(255,45,142,.55); outline-offset:2px; }
+/* Fica FORA do #cl-list (que rola) de propósito: dentro, o botão só aparecia
+   depois de rolar as 50 linhas — que é justamente quem não achou o que queria. */
+.cl-more:empty { display:none; }
+.cl-more { padding-top:12px; text-align:center; }
+.cl-more-btn { width:100%; justify-content:center; }
+.cl-more-btn[disabled] { opacity:.6; cursor:default; }
+.cl-more-err { margin-top:8px; font-size:.76rem; color:var(--red); }
+.cl-acts { justify-content:space-between; align-items:center; gap:14px;
+           padding-top:14px; margin-top:2px; }
+.cl-count { font-size:.72rem; color:var(--text-2); min-width:0;
+            overflow:hidden; text-overflow:ellipsis; }
+.cl-box { padding:34px 18px; text-align:center; color:var(--text-2); font-size:.84rem;
+          background:var(--glass-bg); border:1px dashed var(--glass-border);
+          border-radius:var(--radius); margin:16px 0; }
+.cl-box-t { font-size:1.02rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+.cl-box b { color:var(--text); font-weight:600; }
+@media (max-width:560px) {
+  .cl-sum b { font-size:1.25rem; }
+  .cl-box { padding:26px 14px; }
+}
+/* Entrada da lista, no topo do modal de edição de categoria. */
+.cl-open-row { margin:2px 0 18px; padding-bottom:16px; border-bottom:1px solid var(--div); }
+/* A barra da Distribuição do mês virou botão (abre os lançamentos da
+   categoria): precisa dizer que é clicável e ter foco visível. */
+#categories-distribution .bar-row[role="button"] {
+  border-radius:10px; transition:background .16s var(--ease);
+}
+#categories-distribution .bar-row[role="button"]:hover { background:rgba(255,255,255,.05); }
+#categories-distribution .bar-row[role="button"]:focus-visible {
+  outline:2px solid rgba(255,45,142,.55); outline-offset:2px;
+}
+body.light #categories-distribution .bar-row[role="button"]:hover { background:rgba(15,23,42,.05); }
+@media (prefers-reduced-motion: reduce) {
+  .cl-row, .cl-more-btn,
+  #categories-distribution .bar-row[role="button"] { transition:none; }
+}
