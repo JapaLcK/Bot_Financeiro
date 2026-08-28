@@ -20,18 +20,54 @@ de sempre; ele passa com o conserto e passaria sem ele. Está aqui porque a
 mudança RESTRINGE o casamento, e uma chave que só achasse o vazio — ou que
 varresse a linha sem categoria para dentro de 'alimentação' — seria pior que o
 bug original.
+
+DUAS ÂNCORAS DE DATA, de propósito — a escolha é da produção, não do teste.
+Dois leitores derivam ano/mês de `date.today()` por DENTRO, sem parâmetro de
+janela: `sum_spent_in_category_this_month` (db/budgets.py:200) e
+`get_budgets_status_for_month(month=None)` (via `_parse_ym`, :300-302). Os
+outros caminhos daqui caem em `month_range_today()` → `today_tz()` — é o que
+`spend_query` e `_responder_categoria` (core/handlers/launches.py:924, :851)
+usam quando não há período no texto. Nesses dois primeiros a chamada é SEM
+janela de propósito, para exercitar o caminho default da produção:
+`sum_spent_in_category_this_month(user_id, categoria)` não tem parâmetro de
+janela nenhum, e `get_budgets_status_for_month(user_id, month=None)` tem
+(`month="YYYY-MM"` realinha o mês) e o teste não o usa. Nos dois, o único ponto
+que o teste alcança é a data de GRAVAÇÃO, e por isso eles são gravados em
+`date.today()`; os outros leitores aceitam janela,
+o teste a controla (o donut por ano/mês, os de período pelo `resolve_window`) e a
+gravação deles vai em `today_tz()`. As duas âncoras divergem sempre que o fuso
+do APP ≠ o fuso do PROCESSO: `date.today()` não conhece `REPORT_TIMEZONE`, então
+definir só ela já separa as duas (medido, `REPORT_TIMEZONE=Etc/GMT+12` às
+08:52 UTC de 2026-08-28: `date.today()=2026-08-28`, `today_tz()=2026-08-27`), e o
+CI, que não define nenhuma das duas, roda em UTC contra o default
+America/Sao_Paulo de `today_tz()` — já `TZ` sozinha NÃO separa, porque o `_tz()`
+(utils_date.py:13) a lê no fallback e move as duas pontas juntas.
+
+Divergir como DATA não basta para o teste ficar vermelho: os dois leitores
+ancorados em `date.today()` filtram por `date_part('year'/'month')`, então
+divergência de DIA dentro do mesmo mês não muda o resultado — só a que cruza
+virada de MÊS ou de ANO derruba. Em `tests/test_tipo_legado_na_tendencia.py` é o
+contrário, e a frase de lá ("não precisa da virada do mês") vale só lá: as
+janelas daquele arquivo são diárias, e qualquer divergência basta.
+
+Quem monta janela AQUI monta com fim INCLUSIVO (`db/budgets.py:259-260`,
+`db/accounts.py:467-468`, `db/accounts.py:645,658`). Por isso o `resolve_window`
+entra com `- timedelta(days=1)`: ele devolve fim EXCLUSIVO, e entregá-lo cru
+alargaria a janela em um dia. É o oposto de `tests/test_tipo_legado_na_tendencia.py`,
+onde o fim vai para leitores exclusivos e o `resolve_window` entra inteiro.
 """
 import asyncio
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 
 import db
 from core.handlers import launches as h
+from db.analytics import resolve_window
 from db.connection import CAT_VAZIA_LABEL
 from utils_date import month_range_today, today_tz
 import frontend.finance_bot_websocket_custom as dashboard
 
 
-def _grava(user_id, valor, categoria, tipo="despesa", interna=False):
+def _grava(user_id, valor, categoria, tipo="despesa", interna=False, dia=None):
     """`add_launch_and_update_balance` sempre grava alguma categoria; a linha sem
     categoria entra por SQL, que é como o importador do Open Finance a cria."""
     with db.get_conn() as conn, conn.cursor() as cur:
@@ -39,13 +75,13 @@ def _grava(user_id, valor, categoria, tipo="despesa", interna=False):
             "insert into launches (user_id, tipo, valor, categoria, nota, "
             "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,%s)",
             (user_id, tipo, valor, categoria, "importado",
-             datetime.combine(today_tz(), time(10, 0)), interna),
+             datetime.combine(dia or today_tz(), time(10, 0)), interna),
         )
         conn.commit()
 
 
-def _donut(user_id):
-    hoje = today_tz()
+def _donut(user_id, dia=None):
+    hoje = dia or today_tz()
     d = asyncio.run(dashboard.get_financial_data(user_id, year=hoje.year, month=hoje.month))
     return {c["categoria"]: c["total"] for c in d["expense_categories"]}
 
@@ -152,9 +188,13 @@ def test_orcamento_sem_categoria_ve_o_mesmo_gasto_do_donut(pro_user_id):
     `cat_norm_sql` → o assert do `this_month` fica vermelho.
     """
     db.upsert_budget(pro_user_id, CAT_VAZIA_LABEL, 500)
-    _grava(pro_user_id, 100, "")
+    # `date.today()`: `sum_spent_in_category_this_month` não tem parâmetro de
+    # janela, e `get_budgets_status_for_month` tem (`month`) mas é chamada sem
+    # ele de propósito — as duas fixam o mês por dentro, e o donut é o leitor
+    # daqui que dá para realinhar com elas.
+    _grava(pro_user_id, 100, "", dia=date.today())
 
-    barras = _donut(pro_user_id)
+    barras = _donut(pro_user_id, dia=date.today())
     assert barras == {CAT_VAZIA_LABEL: 100.0}, barras
 
     assert db.sum_spent_in_category_this_month(pro_user_id, CAT_VAZIA_LABEL) == 100.0
@@ -207,13 +247,18 @@ def test_despesa_moderna_responde_exatamente_o_mesmo(pro_user_id):
     devolveram; um alias que mudasse o número da despesa moderna seria pior que
     o descasamento que ele conserta.
     """
+    # `date.today()` nas TRÊS: o último assert é `sum_spent_in_category_this_month`,
+    # que fixa o mês por dentro. Inclusive a interna — fora da janela, o
+    # `== 45.0` passaria sem provar o filtro `is_internal_movement`.
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 45, "compra", None, categoria="mercado",
-        criado_em=datetime.combine(today_tz(), time(12, 0)),
+        criado_em=datetime.combine(date.today(), time(12, 0)),
     )
-    _grava(pro_user_id, 30, None)                     # moderna, sem categoria
-    _grava(pro_user_id, 25, "mercado", interna=True)  # interna: fora do gasto
-    start, end = month_range_today()
+    _grava(pro_user_id, 30, None, dia=date.today())   # moderna, sem categoria
+    _grava(pro_user_id, 25, "mercado", interna=True,  # interna: fora do gasto
+           dia=date.today())
+    start, end_excl = resolve_window(months=1)  # fim EXCLUSIVO
+    end = end_excl - timedelta(days=1)          # os leitores daqui querem INCLUSIVO
 
     assert db.sum_spent_in_category_period(pro_user_id, "mercado", start, end) == 45.0
     assert db.sum_spent_in_category_period(pro_user_id, CAT_VAZIA_LABEL, start, end) == 30.0

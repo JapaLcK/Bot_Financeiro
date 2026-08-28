@@ -26,7 +26,10 @@ from typing import Any
 # (`user_categories.name`, normalizado por `CAT_META_SQL` com a mesma
 # expressão). Trocar só um lado quebraria o join; e o rótulo daquele grupo é
 # a grafia crua do lançamento, não a chave — mudar isso é outro assunto.
-from .connection import get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL
+from .connection import (
+    get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL,
+    TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+)
 
 # Casamento de categoria pela `cat_key_sql` (fonte única, db/connection.py). Isto
 # aqui já colapsava o vazio por conta própria, mas sob o rótulo `''` — então a
@@ -110,15 +113,20 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT tipo, SUM(valor) AS total, SUM(cnt) AS count
                     FROM (
-                      SELECT tipo, valor, 1 AS cnt
+                      -- `TIPO_CANON_SQL` colapsa 'saida'/'entrada' na forma
+                      -- moderna já no SQL: o agregador Python abaixo passa a ver
+                      -- só 'despesa'/'receita' e não precisa repetir a lista de
+                      -- aliases. A versão anterior aceitava 'saida' e esquecia
+                      -- 'entrada' — a receita legada sumia do income.
+                      SELECT {TIPO_CANON_SQL} AS tipo, valor, 1 AS cnt
                       FROM launches
                       WHERE user_id = %s
                         AND criado_em >= %s AND criado_em < %s
                         AND is_internal_movement = false
-                        AND tipo IN ('receita', 'despesa', 'saida')
+                        AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                       UNION ALL
                       SELECT 'despesa' AS tipo, ct.valor, 1 AS cnt
                       FROM credit_transactions ct
@@ -141,9 +149,12 @@ def compute_kpis(user_id: int, from_date: date, to_date: date) -> dict:
             total = _to_float(r["total"])
             cnt = int(r["count"] or 0)
             count += cnt
+            # o SQL já canonizou o tipo (`TIPO_CANON_SQL`): aqui só existem as
+            # duas formas modernas, e repetir os aliases seria a terceira cópia
+            # da mesma regra.
             if t == "receita":
                 income += total
-            elif t in ("despesa", "saida"):
+            elif t == "despesa":
                 expense += total
 
         net = income - expense
@@ -289,16 +300,19 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT mes, tipo, SUM(valor) AS total
                 FROM (
+                  -- mesma canonização do `compute_kpis`: o front busca os dois
+                  -- endpoints para a MESMA tela, então a receita legada não pode
+                  -- entrar no KPI de income e ficar fora da barra do mês.
                   SELECT TO_CHAR(DATE_TRUNC('month', criado_em), 'YYYY-MM') AS mes,
-                         tipo, valor
+                         {TIPO_CANON_SQL} AS tipo, valor
                   FROM launches
                   WHERE user_id = %s
                     AND criado_em >= %s AND criado_em < %s
                     AND is_internal_movement = false
-                    AND tipo IN ('receita', 'despesa', 'saida')
+                    AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                   UNION ALL
                   SELECT TO_CHAR(DATE_TRUNC('month', b.period_end), 'YYYY-MM') AS mes,
                          'despesa' AS tipo, ct.valor
@@ -330,9 +344,10 @@ def compute_evolution(user_id: int, months: int = 6) -> list[dict]:
             continue
         t = (r["tipo"] or "").strip().lower()
         v = _to_float(r["total"])
+        # o SQL já canonizou (`TIPO_CANON_SQL`): só as duas formas modernas
         if t == "receita":
             buckets[k]["income"] += v
-        elif t in ("despesa", "saida"):
+        elif t == "despesa":
             buckets[k]["expense"] += v
 
     for b in buckets.values():
@@ -609,18 +624,21 @@ def compute_history_quick_stats(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
-                  SUM(CASE WHEN tipo = 'receita'                      THEN 1 ELSE 0 END) AS receitas,
-                  SUM(CASE WHEN tipo IN ('despesa', 'saida', 'credito') THEN 1 ELSE 0 END) AS despesas,
+                  SUM(CASE WHEN tipo = 'receita'                THEN 1 ELSE 0 END) AS receitas,
+                  SUM(CASE WHEN tipo IN ('despesa', 'credito')  THEN 1 ELSE 0 END) AS despesas,
                   COUNT(*) AS total
                 FROM (
-                  SELECT tipo
+                  -- canonizado na perna de launches: a linha legada 'entrada'
+                  -- ficava fora do filtro e não era contada NEM como receita NEM
+                  -- no total, então a contagem da tela vinha menor que a lista.
+                  SELECT {TIPO_CANON_SQL} AS tipo
                   FROM launches
                   WHERE user_id = %s
                     AND criado_em >= %s AND criado_em < %s
                     AND is_internal_movement = false
-                    AND tipo IN ('despesa', 'receita', 'saida')
+                    AND ({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})
                   UNION ALL
                   SELECT 'credito' AS tipo
                   FROM credit_transactions ct
@@ -748,19 +766,29 @@ def list_history(
         if uncategorized:
             clauses.append("(categoria IS NULL OR categoria = '')")
         if tipo_norm in ("despesa", "receita"):
-            clauses.append("tipo = %s")
-            launches_params.append(tipo_norm)
+            # a forma legada junto: filtrar `tipo = 'receita'` cru deixava a
+            # linha 'entrada' invisível no histórico, que é a pior classe de
+            # erro num caminho de dinheiro (mesma regra de `_TIPO_ALIASES`).
+            clauses.append(
+                TIPO_DESPESA_SQL if tipo_norm == "despesa" else TIPO_RECEITA_SQL
+            )
         else:
-            # 'all': mantém só despesa/receita (resto é movimentação interna,
-            # criar_caixinha, etc.)
-            clauses.append("tipo IN ('despesa', 'receita', 'saida')")
+            # 'all': mantém só despesa/receita nas duas grafias (resto é
+            # movimentação interna, criar_caixinha, etc.)
+            clauses.append(f"({TIPO_DESPESA_SQL} OR {TIPO_RECEITA_SQL})")
         clauses.append("is_internal_movement = false")
         search_sql, search_params = _search_clause("")
         if search_sql:
             clauses.append(search_sql)
             launches_params.extend(search_params)
         launches_sql = f"""
-          SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
+          -- `TIPO_CANON_SQL` também na PROJEÇÃO, não só no filtro: o front
+          -- decide a cor, o sinal e o ícone com `i.tipo === "receita"` estrito
+          -- (`_historyRowHTML`, frontend/dashboard.js:5932 — outras partes do
+          -- mesmo arquivo tratam 'entrada', esta não). Devolver o tipo cru fazia
+          -- a receita legada, agora visível, ser desenhada em vermelho com sinal
+          -- de menos e ícone de despesa — inclusive sob o filtro "Receitas".
+          SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em,
                  -- launches não tem parcelamento (isso só existe em
                  -- credit_transactions); NULL mantém as colunas do UNION.
                  NULL::int AS installments_total, NULL::int AS installment_no,
@@ -1076,17 +1104,28 @@ def _compute_salary_burn(user_id: int, from_date: date, to_date: date) -> dict:
     Considera só meses fechados (exclui o corrente). Se a janela só tem o
     mês corrente, retorna ok=false.
     """
-    # Receita média mensal (todos os meses na janela, incluindo corrente)
+    # Receita média mensal (todos os meses na janela, incluindo corrente).
+    # O SQL abaixo é f-string por causa do `TIPO_RECEITA_SQL` — e por isso não
+    # pode conter o sinal de porcentagem nem dentro de comentário `--`: o psycopg
+    # o lê como início de placeholder e a query estoura antes de rodar
+    # ("incomplete placeholder", medido). Escreva "oitenta por cento" por extenso.
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT date_part('year', criado_em)::int AS y,
                        date_part('month', criado_em)::int AS m,
                        SUM(valor)::float AS total
                 FROM launches
                 WHERE user_id=%s
-                  AND tipo = 'receita'
+                  -- a query de despesa logo abaixo já aceita ('despesa','saida');
+                  -- esta fixava a receita moderna, então a linha legada 'entrada'
+                  -- não entrava no `expected_income`. O efeito é assimétrico e
+                  -- silencioso: a renda esperada sai MENOR, o alvo de oitenta por
+                  -- cento cai junto, e o "dia em que você queima o salário" é
+                  -- reportado mais cedo do que a realidade — ou `ok=false` por
+                  -- falta de receita.
+                  AND {TIPO_RECEITA_SQL}
                   AND is_internal_movement = false
                   AND criado_em >= %s AND criado_em < %s
                 GROUP BY 1, 2
