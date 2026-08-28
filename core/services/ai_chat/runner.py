@@ -132,19 +132,24 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     pending = db.ai_get_pending_action(user_id)
     if pending:
         if is_confirm(user_text):
+            # ANTES de executar, não depois: o clear posterior não protegeria nada
+            # — dois POSTs simultâneos em /ai/chat já teriam executado os dois.
+            if not db.ai_consume_pending_action(user_id, pending):
+                return "🐷 Essa confirmação já foi processada."
             result = _execute_pending(user_id, pending)
-            db.ai_clear_pending_action(user_id)
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", result)
             return result
         if is_cancel(user_text):
-            db.ai_clear_pending_action(user_id)
+            # Abandono: se perdeu o CAS, não havia nada nosso pra cancelar.
+            db.ai_consume_pending_action(user_id, pending)
             msg = "👍 Beleza, não fiz nada."
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", msg)
             return msg
         # User mudou de assunto — descarta pending e segue com nova msg
-        db.ai_clear_pending_action(user_id)
+        # (abandono: retorno ignorado, idem acima).
+        db.ai_consume_pending_action(user_id, pending)
 
     # 2. Rate limit mensal
     used = db.ai_get_usage_this_month(user_id)

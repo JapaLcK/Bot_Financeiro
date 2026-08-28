@@ -17,7 +17,7 @@ Estrutura dos cenários:
   - Texto vazio → None
   - IA falha (exception) → mensagem de erro padrão
 
-Mocka `is_pro`, `db.ai_get_pending_action`/`ai_clear_pending_action` e o
+Mocka `is_pro`, `db.ai_get_pending_action`/`ai_consume_pending_action` e o
 `ai_chat.chat` real pra isolar o gate. Não toca em DB nem em LLM.
 """
 from __future__ import annotations
@@ -49,8 +49,12 @@ def patches(monkeypatch):
     def fake_get_pending(user_id):
         return state["pending"]
 
-    def fake_clear_pending(user_id):
+    def fake_consume_pending(user_id, pending):
+        # `ai_consume_pending_action` é CAS: apaga só se a linha ainda for a
+        # lida. Aqui só registramos a chamada — o caso "perdeu o CAS" é medido
+        # em tests/test_ai_chat_concurrent_confirm.py, com banco real.
         state["clear_pending_called"] = True
+        return True
 
     # ai_chat.chat é importado dentro da função; intercepta via sys.modules
     fake_ai_chat_mod = types.ModuleType("core.services.ai_chat")
@@ -71,7 +75,7 @@ def patches(monkeypatch):
     monkeypatch.setattr(mod, "ai_chat_allowed", fake_is_pro)
     monkeypatch.setattr(mod, "ai_monthly_limit_for", lambda uid: 1000)
     monkeypatch.setattr(mod.db, "ai_get_pending_action", fake_get_pending)
-    monkeypatch.setattr(mod.db, "ai_clear_pending_action", fake_clear_pending)
+    monkeypatch.setattr(mod.db, "ai_consume_pending_action", fake_consume_pending)
 
     return state
 
