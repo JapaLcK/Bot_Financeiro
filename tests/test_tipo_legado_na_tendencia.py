@@ -29,6 +29,31 @@ Medido na produção (Railway) em 27/08/2026 21:50 UTC: `count(*) filter (where
 tipo='saida')` = 0 e o mesmo para 'entrada' em `launches`. Nenhum número de
 usuário muda hoje; isto fecha a classe, não apaga um incêndio.
 
+Referencial de data: `date.today()` — fuso do PROCESSO — governa a JANELA, não o
+rótulo do mês. É dele que saem o `range_start` do `get_spending_trend`
+(`db/accounts.py:367,377`), o `resolve_window` (`db/analytics.py:77`) e as chaves
+de bucket do `compute_evolution` (`db/analytics.py:335`). Por isso o arquivo
+inteiro grava e lê por ele, com janela explícita de `resolve_window(months=1)` em
+vez de `month_range_today()`: gravar em `today_tz()` — que cai em
+`America/Sao_Paulo` quando ninguém define `REPORT_TIMEZONE`/`TZ`, e o workflow do
+CI não define (`utils_date.py:13`) — e ler por uma janela de `date.today()` põe a
+escrita fora da janela e fora do mês procurado quando os dois apontam dias
+diferentes (31/08 23:30 em São Paulo já é 01/09 em UTC). Era essa a flakiness que
+este commit fecha, e ela não precisa da virada do mês para existir.
+
+O RÓTULO do mês, esse, vem de outro lugar em cada leitor, e em nenhum deles é o
+processo: `get_spending_trend` converte `criado_em at time zone
+'America/Sao_Paulo'`, hardcoded (`db/accounts.py:392-393`, o parâmetro em `:413`),
+e `compute_evolution` usa `DATE_TRUNC('month', criado_em)` sobre um `timestamptz`
+(`db/schema.py:216`), isto é, o fuso da SESSÃO do Postgres (`db/analytics.py:309`)
+— o mesmo instante pode sair em meses diferentes nos dois. O que protege os
+testes disso é a HORA de escrita: sempre no meio do dia (10h a 14h), com folga
+larga sobre os offsets em jogo. Quem mexer nessas horas mexe nessa folga.
+
+Ou seja, não há um referencial só: este arquivo ancora a JANELA, que é o que está
+ao alcance dele. O `America/Sao_Paulo` hardcoded e o fuso da sessão continuam
+fora — consertá-los é mudança em `db/*`, não aqui.
+
 Controle NEGATIVO: volte `{TIPO_CANON_SQL} as tipo` + o filtro para
 `tipo, valor` + `and tipo in ('despesa','receita')` em `get_spending_trend`
 (db/accounts.py), ou o par equivalente em `compute_kpis` (db/analytics.py) —
@@ -43,9 +68,8 @@ import db
 from db import insights
 from db.analytics import (
     compute_behavioral_patterns, compute_evolution, compute_history_quick_stats,
-    compute_kpis, list_history,
+    compute_kpis, list_history, resolve_window,
 )
-from utils_date import month_range_today, today_tz
 
 
 def _grava(user_id, tipo, valor, categoria="mercado", dia=None):
@@ -56,13 +80,13 @@ def _grava(user_id, tipo, valor, categoria="mercado", dia=None):
             "insert into launches (user_id, tipo, valor, categoria, nota, "
             "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,false)",
             (user_id, tipo, valor, categoria, "legado",
-             datetime.combine(dia or today_tz(), time(10, 0))),
+             datetime.combine(dia or date.today(), time(10, 0))),
         )
         conn.commit()
 
 
 def _mes_corrente(trend):
-    hoje = today_tz()
+    hoje = date.today()
     linha = [t for t in trend if t["year"] == hoje.year and t["month"] == hoje.month]
     assert linha, trend
     return linha[0]
@@ -91,8 +115,8 @@ def test_kpis_contam_as_duas_formas(pro_user_id):
     _grava(pro_user_id, "receita", 200, categoria="rendimentos")
     _grava(pro_user_id, "entrada", 300, categoria="rendimentos")
 
-    start, end = month_range_today()
-    k = compute_kpis(pro_user_id, start, end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    k = compute_kpis(pro_user_id, start, end)
 
     assert k["total_expense"] == 150.0, k
     assert k["total_income"] == 500.0, k
@@ -106,8 +130,8 @@ def test_as_duas_telas_dao_o_mesmo_numero(pro_user_id):
     _grava(pro_user_id, "saida", 100)
     _grava(pro_user_id, "entrada", 300, categoria="rendimentos")
 
-    start, end = month_range_today()
-    k = compute_kpis(pro_user_id, start, end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    k = compute_kpis(pro_user_id, start, end)
     linha = _mes_corrente(db.get_spending_trend(pro_user_id, months=1))
 
     assert (k["total_expense"], k["total_income"]) == (linha["despesa"], linha["receita"])
@@ -125,22 +149,22 @@ def test_base_moderna_responde_o_mesmo_de_sempre(pro_user_id):
     """
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 45, "compra", None, categoria="mercado",
-        criado_em=datetime.combine(today_tz(), time(12, 0)),
+        criado_em=datetime.combine(date.today(), time(12, 0)),
     )
     db.add_launch_and_update_balance(
         pro_user_id, "receita", 80, "freela", None, categoria="rendimentos",
-        criado_em=datetime.combine(today_tz(), time(13, 0)),
+        criado_em=datetime.combine(date.today(), time(13, 0)),
     )
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 500, "aporte", None, categoria="investimento_aporte",
-        criado_em=datetime.combine(today_tz(), time(14, 0)), is_internal_movement=True,
+        criado_em=datetime.combine(date.today(), time(14, 0)), is_internal_movement=True,
     )
 
     linha = _mes_corrente(db.get_spending_trend(pro_user_id, months=1))
     assert (linha["despesa"], linha["receita"]) == (45.0, 80.0), linha
 
-    start, end = month_range_today()
-    k = compute_kpis(pro_user_id, start, end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    k = compute_kpis(pro_user_id, start, end)
     assert (k["total_expense"], k["total_income"]) == (45.0, 80.0), k
 
 
@@ -163,14 +187,14 @@ def test_evolucao_conta_as_duas_formas(pro_user_id):
     _grava(pro_user_id, "saida", 100)
     _grava(pro_user_id, "entrada", 300, categoria="rendimentos")
 
-    mes = today_tz().strftime("%Y-%m")
+    mes = date.today().strftime("%Y-%m")
     linha = [b for b in compute_evolution(pro_user_id, months=1) if b["month"] == mes]
     assert linha, compute_evolution(pro_user_id, months=1)
     assert (linha[0]["income"], linha[0]["expense"]) == (300.0, 100.0), linha
     assert linha[0]["net"] == 200.0, linha
 
-    start, end = month_range_today()
-    k = compute_kpis(pro_user_id, start, end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    k = compute_kpis(pro_user_id, start, end)
     assert (k["total_income"], k["total_expense"]) == (300.0, 100.0), k
 
 
@@ -183,8 +207,8 @@ def test_contagem_do_historico_nao_perde_a_linha_legada(pro_user_id):
     _grava(pro_user_id, "receita", 200, categoria="rendimentos")
     _grava(pro_user_id, "entrada", 300, categoria="rendimentos")
 
-    start, end = month_range_today()
-    st = compute_history_quick_stats(pro_user_id, start, end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    st = compute_history_quick_stats(pro_user_id, start, end)
     assert st["total_count"] == 4, st
 
 
@@ -194,8 +218,8 @@ def test_historico_lista_a_linha_legada_nos_dois_filtros(pro_user_id):
     no histórico, que é a pior classe de erro num caminho de dinheiro."""
     _grava(pro_user_id, "saida", 100)
     _grava(pro_user_id, "entrada", 300, categoria="rendimentos")
-    start, end = month_range_today()
-    janela = dict(from_date=start, to_date=end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    janela = dict(from_date=start, to_date=end)
 
     assert list_history(pro_user_id, **janela)["total"] == 2
 
@@ -220,16 +244,16 @@ def test_os_tres_sites_novos_nao_mudam_a_base_moderna(pro_user_id):
     """Controle POSITIVO dos três — a base de 100% da produção hoje."""
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 45, "compra", None, categoria="mercado",
-        criado_em=datetime.combine(today_tz(), time(12, 0)),
+        criado_em=datetime.combine(date.today(), time(12, 0)),
     )
     db.add_launch_and_update_balance(
         pro_user_id, "receita", 80, "freela", None, categoria="rendimentos",
-        criado_em=datetime.combine(today_tz(), time(13, 0)),
+        criado_em=datetime.combine(date.today(), time(13, 0)),
     )
-    start, end = month_range_today()
-    janela = dict(from_date=start, to_date=end + timedelta(days=1))
+    start, end = resolve_window(months=1)
+    janela = dict(from_date=start, to_date=end)
 
-    mes = today_tz().strftime("%Y-%m")
+    mes = date.today().strftime("%Y-%m")
     linha = [b for b in compute_evolution(pro_user_id, months=1) if b["month"] == mes][0]
     assert (linha["income"], linha["expense"]) == (80.0, 45.0), linha
     assert compute_history_quick_stats(pro_user_id, **janela)["total_count"] == 2
@@ -242,7 +266,7 @@ def test_os_tres_sites_novos_nao_mudam_a_base_moderna(pro_user_id):
 
 def _mes_passado(dia: int, meses: int = 1, hoje: date | None = None) -> date:
     """Um dia de N meses atrás — o `salary_burn` só olha meses FECHADOS."""
-    primeiro = (hoje or today_tz()).replace(day=1)
+    primeiro = (hoje or date.today()).replace(day=1)
     for _ in range(meses):
         primeiro = (primeiro - timedelta(days=1)).replace(day=1)
     return primeiro.replace(day=dia)
@@ -291,51 +315,11 @@ def test_salary_burn_com_receita_moderna_nao_muda(pro_user_id):
 # Chamado DIRETO de propósito: `compute_active_insights` engole exceção de
 # detector (`except Exception: continue`, db/insights.py), então um teste que
 # passasse por ele ficaria verde com a query quebrada.
-#
-# REFERENCIAL DE DATA — por que estes testes usam `date.today()` e não
-# `today_tz()` como os de cima: `_detect_salary_burn_fast` lê `date.today()`
-# (db/insights.py:288), que é o fuso do PROCESSO — UTC no CI, America/Sao_Paulo
-# na máquina local. Entre 00:00 e 03:00 UTC do dia 1º os dois referenciais
-# apontam meses DIFERENTES (31/08 23:30 em SP já é 01/09 em UTC), e um teste que
-# gravasse em `today_tz()` ficaria vermelho nessa janela de ~3h por mês sem
-# regressão nenhuma. Gravar no referencial que a função LÊ é o que os torna
-# determinísticos.
-#     O descasamento em si é defeito PREEXISTENTE de outra classe, fora do
-# escopo deste PR: `db/insights.py` chama `date.today()` em 6 lugares — neste
-# working tree 57, 85, 133, 235, 288, 415; no HEAD 57, 85, 133, 235, 286, 406 — e não
-# importa `today_tz` em lugar nenhum. Quem for consertar essa classe: os CINCO
-# testes ancorados aqui voltam para `today_tz()` junto — os quatro `burn_fast`
-# abaixo mais o `spike` no fim do arquivo (`_mes_utc`/`date.today()`, :448-450).
-#     A CLASSE NÃO ESTÁ FECHADA. Sete testes deste arquivo seguem
-# gravando em `today_tz()` e lendo por `date.today()`, mas isso NÃO os derruba
-# todos. Medido na borda que este bloco descreve (processo em UTC, 01:00 do dia
-# 1º: `date.today()` já virou o mês nos módulos leitores, `today_tz()` não),
-# falham CINCO — `test_tendencia_conta_as_duas_formas`,
-# `test_as_duas_telas_dao_o_mesmo_numero`,
-# `test_base_moderna_responde_o_mesmo_de_sempre`, `test_evolucao_conta_as_duas_formas`
-# e `test_os_tres_sites_novos_nao_mudam_a_base_moderna`.
-#     Os dois `test_salary_burn_*` usam o mesmo referencial misto
-# (`db/analytics.py:77` e `:1144` leem `date.today()`) e PASSAM nessa borda: a
-# janela de 6 meses CHEIOS do `compute_behavioral_patterns` continua contendo o
-# mês gravado depois do deslocamento de um mês. Mesmo referencial, outra
-# sensibilidade — quem fechar a classe mexe nos sete, mas só os cinco de cima
-# quebram nesta janela.
-#     A janela é entre 00:00 e 03:00 UTC do dia 1º de cada mês num processo em
-# UTC — a condição do CI. Num processo em −03 os dois referenciais coincidem
-# (`today_tz` lê `REPORT_TIMEZONE` ou `TZ` ou America/Sao_Paulo, utils_date.py:13),
-# então não há "direção oposta": lá eles simplesmente não divergem. Isso é
-# preexistente e idêntico no HEAD, medido: o conjunto de falhas é o mesmo com e sem
-# este diff. Não foi consertado aqui para não alargar o PR.
 
 _MSG_70_EM_50 = (
     "Já consumiu 70% da sua receita média mensal "
     "e só 50% do mês passou. Vale dar uma freada."
 )
-
-
-def _mes_utc(meses: int, dia: int = 5) -> date:
-    """`_mes_passado`, mas ancorado no `date.today()` que a função lê."""
-    return _mes_passado(dia, meses, hoje=date.today())
 
 
 def _burn_fast(user_id, monkeypatch, progresso=50.0):
@@ -346,8 +330,8 @@ def _burn_fast(user_id, monkeypatch, progresso=50.0):
 
 
 def _renda_legada(user_id):
-    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_utc(1))
-    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_utc(2))
+    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_passado(5, 1))
+    _grava(user_id, "entrada", 1000, categoria="rendimentos", dia=_mes_passado(5, 2))
 
 
 def test_burn_fast_conta_a_receita_legada(pro_user_id, monkeypatch):
@@ -382,8 +366,8 @@ def test_burn_fast_despesa_legada_segue_contando(pro_user_id, monkeypatch):
     Ele existe para o depois: fica vermelho se alguém tirar o `'saida'` da
     constante compartilhada, ou quebrar a f-string desta query.
     """
-    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(1))
-    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(2))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_passado(5, 1))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_passado(5, 2))
     _grava(pro_user_id, "saida", 700, dia=date.today())
 
     alertas = _burn_fast(pro_user_id, monkeypatch)
@@ -395,8 +379,8 @@ def test_burn_fast_com_a_base_moderna_nao_muda(pro_user_id, monkeypatch):
     """Controle POSITIVO — a base de 100% da produção hoje (zero linhas legadas):
     a mesma cena nas formas modernas tem que dar o MESMO alerta. Um alias que
     mexesse neste número seria pior que o descasamento que ele conserta."""
-    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(1))
-    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_utc(2))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_passado(5, 1))
+    _grava(pro_user_id, "receita", 1000, categoria="rendimentos", dia=_mes_passado(5, 2))
     _grava(pro_user_id, "despesa", 700, dia=date.today())
 
     alertas = _burn_fast(pro_user_id, monkeypatch)
@@ -445,8 +429,8 @@ def test_spike_query_convertida_ainda_executa(pro_user_id, monkeypatch):
     Mesmo referencial de data dos `burn_fast`: a função lê `date.today()`.
     """
     monkeypatch.setattr(insights, "_month_progress_pct", lambda *_a, **_k: 87.0)
-    _grava(pro_user_id, "saida", 100, dia=_mes_utc(1))
-    _grava(pro_user_id, "saida", 100, dia=_mes_utc(2))
+    _grava(pro_user_id, "saida", 100, dia=_mes_passado(5, 1))
+    _grava(pro_user_id, "saida", 100, dia=_mes_passado(5, 2))
     _grava(pro_user_id, "saida", 500, dia=date.today())
 
     spikes = insights._detect_category_spike(pro_user_id)
