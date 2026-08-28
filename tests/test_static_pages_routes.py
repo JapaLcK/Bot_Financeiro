@@ -140,3 +140,63 @@ def test_assets_estaticos():
         resp = client.get(path)
         assert resp.status_code == 200, path
         assert resp.headers["content-type"].startswith(content_type), path
+
+
+def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
+    """§0.7: o JS não importa Python, então um teste compara as duas listas.
+
+    A limpeza do Cache Storage no fim de sessão (`auth-refresh.js`) precisa
+    conhecer TODA rota cujo backend chama `_clear_session_cookies` — não só o
+    logout. Foi assim que a exclusão de conta ficou de fora: eu consertei a
+    instância e não a classe (Codex, #170).
+
+    A varredura é por `ast`, não por texto: procura as funções de rota que
+    contêm uma chamada a `_clear_session_cookies` e devolve o caminho do
+    decorador. Uma quarta rota que limpe cookie e não esteja no JS deixa isto
+    vermelho.
+    """
+    import ast
+    import pathlib
+    import re as _re
+
+    fonte = (pathlib.Path(__file__).resolve().parents[1]
+             / "frontend" / "finance_bot_websocket_custom.py").read_text(encoding="utf-8")
+    arvore = ast.parse(fonte)
+
+    do_python: set[str] = set()
+    for no in ast.walk(arvore):
+        if not isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        limpa = any(
+            isinstance(c, ast.Call)
+            and getattr(c.func, "id", None) == "_clear_session_cookies"
+            for c in ast.walk(no)
+        )
+        if not limpa:
+            continue
+        for dec in no.decorator_list:
+            # Só o decorador de ROTA (`@app.post("/x")`). Sem este recorte
+            # entram os `@limiter.limit("30/minute")`, que também são Call com
+            # string no primeiro argumento — medido.
+            if not (isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and getattr(dec.func.value, "id", None) == "app"
+                    and dec.func.attr in {"get", "post", "put", "patch", "delete"}):
+                continue
+            if (dec.args and isinstance(dec.args[0], ast.Constant)
+                    and isinstance(dec.args[0].value, str)):
+                do_python.add(dec.args[0].value)
+
+    assert do_python, "a varredura não achou rota nenhuma — o walk quebrou"
+
+    js = (pathlib.Path(__file__).resolve().parents[1]
+          / "frontend" / "auth-refresh.js").read_text(encoding="utf-8")
+    bloco = js[js.index("_SESSAO_ENCERRADA = {"):]
+    bloco = bloco[:bloco.index("};")]
+    do_js = set(_re.findall(r'"(/[^"]+)":', bloco))
+
+    assert do_python == do_js, (
+        "rota que encerra sessão fora da limpeza de cache do auth-refresh.js — "
+        "o cache privado sobrevive nesse fluxo. "
+        f"só no Python: {sorted(do_python - do_js)}; só no JS: {sorted(do_js - do_python)}"
+    )

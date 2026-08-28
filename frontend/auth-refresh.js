@@ -69,7 +69,32 @@
   }
 
   /**
-   * Logout bem-sucedido → apaga o Cache Storage deste dispositivo.
+   * As rotas que ENCERRAM A SESSÃO, e como se reconhece que encerraram.
+   *
+   * A lista não é "logout": é toda rota cujo backend chama
+   * `_clear_session_cookies` (finance_bot_websocket_custom.py). São três, e o
+   * critério de cada uma difere — por isso um mapa e não um array:
+   *
+   *   POST   /auth/logout    encerra quando dá certo
+   *   DELETE /auth/account   idem — a exclusão agendada desloga na hora
+   *   POST   /auth/refresh   encerra quando FALHA (401): refresh inválido é
+   *                          deslogue involuntário, e o backend limpa o cookie
+   *                          nesse mesmo ramo
+   *
+   * `tests/test_static_pages_routes.py` compara esta lista com as rotas que o
+   * Python realmente tem, por `ast`. Duplicação inevitável — JS não importa
+   * Python — então um teste prende as duas (§0.7). Uma quarta rota que limpe
+   * cookie e não esteja aqui deixa o teste vermelho. Foi assim que a exclusão
+   * de conta ficou de fora: consertei a instância e não a classe (Codex, #170).
+   */
+  const _SESSAO_ENCERRADA = {
+    "/auth/logout":  function (resp) { return resp.ok; },
+    "/auth/account": function (resp) { return resp.ok; },
+    "/auth/refresh": function (resp) { return resp.status === 401; },
+  };
+
+  /**
+   * Fim de sessão → apaga o Cache Storage deste dispositivo.
    *
    * DA PÁGINA, não por mensagem ao service worker. O caso que justifica esta
    * limpeza é justamente o aparelho ainda controlado por um worker ANTIGO —
@@ -105,13 +130,14 @@
 
     let resp = await _origFetch(input, init);
 
-    // AGUARDA antes de devolver a resposta. Quem chama o logout navega assim
-    // que o fetch resolve (`location.replace`/`reload`), e navegação descarta
-    // o documento: uma limpeza disparada e esquecida não tem garantia de
-    // terminar, e o cache privado sobrevive ao logout no aparelho compartilhado
-    // — o cenário inteiro que justifica esta limpeza (Codex, #170). Segurar o
+    // AGUARDA antes de devolver a resposta. Quem encerra a sessão navega assim
+    // que o fetch resolve (`location.replace`/`reload`/`href`), e navegação
+    // descarta o documento: uma limpeza disparada e esquecida não tem garantia
+    // de terminar, e o cache privado sobrevive no aparelho compartilhado — o
+    // cenário inteiro que justifica esta limpeza (Codex, #170). Segurar o
     // `await` aqui é o que empurra a navegação para depois do delete.
-    if (resp.ok && _caminho(input) === "/auth/logout") await _limpaCacheNoLogout();
+    const _fim = _SESSAO_ENCERRADA[_caminho(input)];
+    if (_fim && _fim(resp)) await _limpaCacheNoLogout();
 
     if (resp.status !== 401) return resp;
 
