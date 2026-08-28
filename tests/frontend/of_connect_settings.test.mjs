@@ -111,8 +111,23 @@ async function abrirSettings({ banksMax = 2, conexoes = [] } = {}) {
   return page;
 }
 
+/**
+ * O picker está VISÍVEL? Nó ausente conta como fechado.
+ *
+ * Perguntar pelo nó ("existe e não tem .open") seria asserção sobre
+ * implementação: antes da extração o overlay morava no HTML e nascia escondido;
+ * depois, o módulo o injeta na primeira abertura. As duas coisas são o mesmo
+ * fato para quem usa a tela — não há picker na frente dele —, e é esse fato que
+ * o teste tem de fixar para valer antes e depois.
+ *
+ * Mede display computado, não a classe: `.bankpick-overlay` é `display:none` e
+ * só `.open` a torna `flex`, então é o computado que diz a verdade.
+ */
 const pickerAberto = (page) =>
-  page.$eval("#bankpick-overlay", (e) => e.classList.contains("open"));
+  page.evaluate(() => {
+    const el = document.getElementById("bankpick-overlay");
+    return !!el && getComputedStyle(el).display !== "none";
+  });
 
 const linhasVisiveis = (page) =>
   page.$$eval("#bankpick-list .bank-row", (rs) => rs.map((r) => r.getAttribute("data-name")));
