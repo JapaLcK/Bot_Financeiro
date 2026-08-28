@@ -95,11 +95,22 @@ def test_commands_catalog():
     assert "catalog" in resp.json()
 
 
-def test_auth_refresh_js_com_cache_publico():
+def test_auth_refresh_js_revalida_a_cada_load():
+    """`no-cache`, não `max-age`: o cache-buster não alcança esta rota.
+
+    O `_ASSET_VER_RE` (routes/shared.py) não aceita `/` no meio do caminho, e o
+    `stamp_asset_versions` procuraria o arquivo em `frontend/static/`, que não
+    existe. Três das quatro páginas que o carregam nem põem `?v=`, e o `?v=1`
+    do comecar.html é um cache-buster morto.
+
+    Com `max-age=300` um cliente rodava a versão anterior por até 5 minutos
+    depois do deploy. Aqui isso tem consequência de segurança: este arquivo
+    carrega a limpeza do Cache Storage no logout (Codex, #170).
+    """
     resp = client.get("/static/auth-refresh.js")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/javascript")
-    assert resp.headers["cache-control"] == "public, max-age=300"
+    assert resp.headers["cache-control"] == "no-cache"
 
 
 def test_pb_nav_js_com_cache_publico():

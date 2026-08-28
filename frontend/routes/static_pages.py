@@ -132,9 +132,23 @@ async def serve_cadastro():
 @router.get("/static/auth-refresh.js")
 async def serve_auth_refresh_js():
     """Interceptor de fetch que renova access em 401. Incluído nas páginas
-    autenticadas (dashboard, home, settings, onboarding)."""
+    autenticadas (dashboard, home, settings, onboarding).
+
+    `no-cache`, mesmo motivo do `dashboard.js` abaixo: revalida por etag a cada
+    load para não dessincronizar do HTML, que é servido `no-store`. Aqui o
+    dessincronismo tem consequência de segurança — este arquivo carrega a
+    limpeza do Cache Storage no logout, e uma versão velha dele não limpa nada.
+
+    E o cache-buster NÃO alcança esta rota, por dois motivos independentes: o
+    `_ASSET_VER_RE` (routes/shared.py) não aceita `/` no meio do caminho, então
+    `/static/auth-refresh.js` nem casa a forma; e, se casasse, o
+    `stamp_asset_versions` procuraria o arquivo em `frontend/static/`, que não
+    existe — o arquivo mora em `frontend/auth-refresh.js`. Efeito colateral
+    disso: o `?v=1` do comecar.html:16 é um cache-buster MORTO, que parece
+    funcionar e não faz nada. Três das quatro páginas nem tentam versionar.
+    """
     path = FRONTEND_DIR / "auth-refresh.js"
-    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/privacy")
