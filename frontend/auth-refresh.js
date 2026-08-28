@@ -49,6 +49,10 @@
           credentials: "same-origin",
           headers,
         });
+        // O refresh interno não passa pelo wrapper, então a limpeza é aplicada
+        // aqui: um 401 nele é deslogue involuntário, e o backend limpa o cookie
+        // de sessão nesse mesmo ramo (finance_bot_websocket_custom.py).
+        await _comLimpeza("/auth/refresh", r);
         return r.ok;
       } catch (_) {
         return false;
@@ -124,20 +128,48 @@
     return Promise.resolve();
   }
 
+  /**
+   * Passa TODA resposta da nossa origem por aqui antes de devolvê-la.
+   *
+   * Este arquivo tem quatro `_origFetch`, e três produzem resposta nossa:
+   *
+   *   :n  refresh interno do `_doRefresh`   ← não passava (401 = deslogue
+   *                                            involuntário e o backend limpa
+   *                                            o cookie nesse ramo)
+   *   :n  passagem cross-origin              não é rota nossa, fica de fora
+   *   :n  request inicial                    já passava
+   *   :n  retry depois do refresh OK         ← não passava (um
+   *                                            `DELETE /auth/account` que leva
+   *                                            401, renova e é refeito com
+   *                                            sucesso encerra a sessão aqui)
+   *
+   * Os dois marcados eram buracos: a limpeza rodava num ponto só e as respostas
+   * INTERNAS do interceptor saíam por baixo dela (Codex, #170). Enumerados em
+   * vez de remendados um a um — é a terceira rodada deste PR na mesma classe,
+   * e o CLAUDE.md §4 manda parar de remendar e enumerar quando isso acontece.
+   *
+   * Não limpa duas vezes no mesmo turno: cada ponto avalia o predicado da SUA
+   * resposta, e os caminhos são exclusivos (ou o inicial encerrou, ou o refresh
+   * falhou, ou o retry encerrou).
+   */
+  async function _comLimpeza(caminho, resp) {
+    const fim = _SESSAO_ENCERRADA[caminho];
+    if (fim && fim(resp)) await _limpaCacheNoLogout();
+    return resp;
+  }
+
   window.fetch = async function(input, init) {
     // Requests pra fora da própria origem (Stripe, CDN, etc) seguem direto
     if (!_isOwnApi(input)) return _origFetch(input, init);
 
-    let resp = await _origFetch(input, init);
+    const caminho = _caminho(input);
 
-    // AGUARDA antes de devolver a resposta. Quem encerra a sessão navega assim
-    // que o fetch resolve (`location.replace`/`reload`/`href`), e navegação
-    // descarta o documento: uma limpeza disparada e esquecida não tem garantia
-    // de terminar, e o cache privado sobrevive no aparelho compartilhado — o
-    // cenário inteiro que justifica esta limpeza (Codex, #170). Segurar o
-    // `await` aqui é o que empurra a navegação para depois do delete.
-    const _fim = _SESSAO_ENCERRADA[_caminho(input)];
-    if (_fim && _fim(resp)) await _limpaCacheNoLogout();
+    // A limpeza é AGUARDADA antes de a resposta chegar a quem chamou. Quem
+    // encerra a sessão navega assim que o fetch resolve
+    // (`location.replace`/`reload`/`href`), e navegação descarta o documento:
+    // uma limpeza disparada e esquecida não tem garantia de terminar, e o cache
+    // privado sobrevive no aparelho compartilhado (Codex, #170).
+    let resp = await _comLimpeza(caminho, await _origFetch(input, init));
 
     if (resp.status !== 401) return resp;
 
@@ -147,7 +179,7 @@
     // Tenta renovar e refazer a request original
     const ok = await _doRefresh();
     if (!ok) return resp;
-    return _origFetch(input, init);
+    return _comLimpeza(caminho, await _origFetch(input, init));
   };
 
   // ── Modo app (iOS/Capacitor) ─────────────────────────────────────────────

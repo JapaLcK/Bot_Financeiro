@@ -267,6 +267,86 @@ test("auth-refresh AGUARDA o delete antes de devolver a resposta do logout", asy
   assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"]);
 });
 
+// Os dois caminhos INTERNOS do interceptor. Ele produz resposta em tres
+// pontos (request inicial, refresh interno do _doRefresh, retry pos-refresh) e
+// a limpeza rodava so' no primeiro: as respostas internas saiam por baixo dela
+// (Codex, #170). Nenhum dos casos acima os alcanca.
+
+/** fetch falso que responde por caminho, e conta as chamadas. */
+function fetchPorRota(mapa) {
+  const chamadas = [];
+  return {
+    chamadas,
+    fn: async (input, init) => {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      const caminho = new URL(url, ORIGEM).pathname;
+      chamadas.push({ caminho, method: (init && init.method) || "GET" });
+      const r = mapa[caminho];
+      const status = typeof r === "function" ? r(chamadas) : r;
+      return { ok: status >= 200 && status < 300, status };
+    },
+  };
+}
+
+test("refresh interno que falha (401) limpa — deslogue involuntario", async () => {
+  const apagados = [];
+  const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 401 });
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.fetch = falso.fn;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const resp = await ctx.window.fetch("/data/42");
+
+  assert.ok(falso.chamadas.some((c) => c.caminho === "/auth/refresh"),
+            "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
+  assert.equal(resp.status, 401);
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "refresh 401 e' fim de sessao e nao limpou o cache");
+});
+
+test("retry pos-refresh que encerra a sessao limpa", async () => {
+  // DELETE /auth/account leva 401, o refresh renova, o retry da' certo — e o
+  // retry e' que encerra a sessao. Ele saia por baixo da limpeza.
+  const apagados = [];
+  let tentativas = 0;
+  const falso = fetchPorRota({
+    "/auth/account": () => (++tentativas === 1 ? 401 : 200),
+    "/auth/refresh": 200,
+  });
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.fetch = falso.fn;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const resp = await ctx.window.fetch("/auth/account", { method: "DELETE" });
+
+  assert.equal(tentativas, 2, "o retry nao aconteceu — o teste nao mede o caminho certo");
+  assert.equal(resp.ok, true);
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "o retry encerrou a sessao e nao limpou o cache");
+});
+
+test("request comum que renova e da' certo NAO limpa", async () => {
+  // Controle positivo do par acima: renovar sessao nao e' encerrar sessao.
+  const apagados = [];
+  let tentativas = 0;
+  const falso = fetchPorRota({
+    "/data/42": () => (++tentativas === 1 ? 401 : 200),
+    "/auth/refresh": 200,
+  });
+  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+    c.fetch = falso.fn;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const resp = await ctx.window.fetch("/data/42");
+
+  assert.equal(tentativas, 2);
+  assert.equal(resp.ok, true);
+  assert.deepEqual(apagados, [], "apagou o cache num refresh bem-sucedido");
+});
+
 test("nav-auth so' recarrega DEPOIS de apagar", async () => {
   // Mesmo invariante do caso acima, no outro dono. Aqui o `doLogout` nao e'
   // exposto pelo IIFE, entao a ordem e' prendida na FORMA: o `location.reload`
