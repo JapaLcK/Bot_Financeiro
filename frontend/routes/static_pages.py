@@ -147,7 +147,7 @@ async def serve_auth_refresh_js():
     disso: o `?v=1` do comecar.html:16 é um cache-buster MORTO, que parece
     funcionar e não faz nada. Três das quatro páginas nem tentam versionar.
     """
-    path = FRONTEND_DIR / "auth-refresh.js"
+    path = FRONTEND_DIR / "static" / "auth-refresh.js"
     return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 

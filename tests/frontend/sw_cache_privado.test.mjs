@@ -221,7 +221,7 @@ function paginaComCache(arquivo, prepara) {
 }
 
 test("auth-refresh apaga o Cache Storage num logout bem-sucedido", async () => {
-  const { ctx, apagados } = paginaComCache("auth-refresh.js");
+  const { ctx, apagados } = paginaComCache("static/auth-refresh.js");
 
   await ctx.fetch("/auth/logout", { method: "POST" });
   await new Promise((r) => setTimeout(r, 0));
@@ -231,7 +231,7 @@ test("auth-refresh apaga o Cache Storage num logout bem-sucedido", async () => {
 });
 
 test("auth-refresh nao apaga nada em request comum nem em logout que falhou", async () => {
-  const { ctx, apagados } = paginaComCache("auth-refresh.js");
+  const { ctx, apagados } = paginaComCache("static/auth-refresh.js");
   ctx.fetch = ctx.window.fetch;
 
   await ctx.window.fetch("/data/42");
@@ -248,7 +248,7 @@ test("auth-refresh AGUARDA o delete antes de devolver a resposta do logout", asy
   const bloqueado = new Promise((r) => { liberaDelete = r; });
   const apagados = [];
 
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.caches.delete = async (k) => { await bloqueado; apagados.push(k); return true; };
   });
 
@@ -326,7 +326,7 @@ function comStorageCheio(arquivo) {
 }
 
 test("fim de sessao apaga TUDO que e' derivado de conta", async () => {
-  const { ctx, local, sessao } = comStorageCheio("auth-refresh.js");
+  const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js");
 
   await ctx.fetch("/auth/logout", { method: "POST" });
   await new Promise((r) => setTimeout(r, 0));
@@ -339,7 +339,7 @@ test("fim de sessao apaga TUDO que e' derivado de conta", async () => {
 });
 
 test("preferencia do aparelho SOBREVIVE — apagar o tema seria hostil", async () => {
-  const { ctx, local, sessao } = comStorageCheio("auth-refresh.js");
+  const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js");
 
   await ctx.fetch("/auth/logout", { method: "POST" });
   await new Promise((r) => setTimeout(r, 0));
@@ -355,7 +355,7 @@ test("preferencia do aparelho SOBREVIVE — apagar o tema seria hostil", async (
 });
 
 test("chave NOVA derivada de conta e' apagada por default (falha fechada)", async () => {
-  const { ctx, local } = comStorageCheio("auth-refresh.js");
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js");
   local.set("pigbank_alguma_coisa_nova_v2", "dado do usuario");
 
   await ctx.fetch("/auth/logout", { method: "POST" });
@@ -375,7 +375,7 @@ test("desregistra o worker ANTES de apagar, nao depois", async () => {
   let liberaUnregister;
   const bloqueado = new Promise((r) => { liberaUnregister = r; });
 
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.navigator.serviceWorker.getRegistrations = async () => [{
       unregister: async () => { await bloqueado; ordem.push("unregister"); return true; },
     }];
@@ -398,7 +398,7 @@ test("sem service worker no navegador, a limpeza segue e apaga o cache", async (
   // Controle: `getRegistrations` ausente (Safari antigo, contexto inseguro) nao
   // pode abortar a limpeza inteira.
   const apagados = [];
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.navigator.serviceWorker = undefined;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
@@ -418,7 +418,7 @@ test("nav-auth preserva a mesma lista que o auth-refresh", () => {
     const bloco = fonte.slice(i, fonte.indexOf("]", i));
     return new Set(bloco.match(/"([^"]+)"/g).map((s) => s.slice(1, -1)));
   };
-  const a = lista(readFileSync(join(dir, "auth-refresh.js"), "utf-8"), "_PRESERVA = new Set([");
+  const a = lista(readFileSync(join(dir, "static", "auth-refresh.js"), "utf-8"), "_PRESERVA = new Set([");
   const b = lista(readFileSync(join(dir, "nav-auth.js"), "utf-8"), "PRESERVA = [");
   assert.deepEqual([...a].sort(), [...b].sort(),
                    "as duas listas divergiram: um logout preserva o que o outro apaga");
@@ -448,7 +448,7 @@ function fetchPorRota(mapa) {
 test("refresh interno que falha (401) limpa — deslogue involuntario", async () => {
   const apagados = [];
   const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 401 });
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
@@ -471,7 +471,7 @@ test("retry pos-refresh que encerra a sessao limpa", async () => {
     "/auth/account": () => (++tentativas === 1 ? 401 : 200),
     "/auth/refresh": 200,
   });
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
@@ -492,7 +492,7 @@ test("request comum que renova e da' certo NAO limpa", async () => {
     "/data/42": () => (++tentativas === 1 ? 401 : 200),
     "/auth/refresh": 200,
   });
-  const { ctx } = paginaComCache("auth-refresh.js", (c) => {
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
@@ -528,7 +528,7 @@ test("nav-auth tambem limpa — as 12 paginas publicas nao carregam o auth-refre
   // dois arquivos, aqui fica vermelho.
   const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
   const nav = readFileSync(join(dir, "nav-auth.js"), "utf-8");
-  const refresh = readFileSync(join(dir, "auth-refresh.js"), "utf-8");
+  const refresh = readFileSync(join(dir, "static", "auth-refresh.js"), "utf-8");
 
   for (const [nome, fonte] of [["nav-auth.js", nav], ["auth-refresh.js", refresh]]) {
     assert.ok(/caches\s*\.\s*keys\s*\(/.test(fonte),

@@ -72,7 +72,7 @@ async function abrirWizard({ balance = 0, waLinked = false } = {}) {
   });
   await page.route("**/static/auth-refresh.js", (route) =>
     route.fulfill({ status: 200, contentType: "application/javascript",
-                    body: readFileSync(join(FRONTEND, "auth-refresh.js"), "utf8") }));
+                    body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/dashboard-profile", (route) =>
     route.fulfill(json({ user_id: 1, display_name: "Lucas", plan: "free" })));
   await page.route("**/onboarding/state", (route) =>

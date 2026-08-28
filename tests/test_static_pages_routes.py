@@ -96,21 +96,43 @@ def test_commands_catalog():
 
 
 def test_auth_refresh_js_revalida_a_cada_load():
-    """`no-cache`, não `max-age`: o cache-buster não alcança esta rota.
+    """`no-cache` no header E `?v=<hash>` na URL — os dois, e por motivos
+    diferentes.
 
-    O `_ASSET_VER_RE` (routes/shared.py) não aceita `/` no meio do caminho, e o
-    `stamp_asset_versions` procuraria o arquivo em `frontend/static/`, que não
-    existe. Três das quatro páginas que o carregam nem põem `?v=`, e o `?v=1`
-    do comecar.html é um cache-buster morto.
+    O header protege dali para a frente. Ele NÃO invalida o que já está no
+    cache do cliente: quem buscou o arquivo pouco antes do deploy carrega a
+    entrada com o `max-age=300` antigo e roda a versão anterior por até 5
+    minutos. Aqui isso tem consequência de segurança — este arquivo carrega a
+    limpeza de estado no fim de sessão (Codex, #170).
 
-    Com `max-age=300` um cliente rodava a versão anterior por até 5 minutos
-    depois do deploy. Aqui isso tem consequência de segurança: este arquivo
-    carrega a limpeza do Cache Storage no logout (Codex, #170).
+    Quem invalida na hora é a URL versionada: `?v=<hash>` é outra chave de
+    cache, então a entrada velha deixa de ser consultada.
     """
     resp = client.get("/static/auth-refresh.js")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/javascript")
     assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
+    """As 4 páginas que o carregam pedem `?v=<hash>`, não a URL nua.
+
+    Três delas referenciavam sem `?v=` nenhum, e o `?v=1` da quarta era um
+    cache-buster MORTO: o `_ASSET_VER_RE` não aceitava `/` no meio do caminho,
+    então `/static/auth-refresh.js` nem casava a forma. O arquivo mudou para
+    `frontend/static/` para o caminho da URL bater com o do disco e o lookup do
+    `stamp_asset_versions` resolver sem caso especial.
+    """
+    hash_esperado = _asset_hash(
+        "static/auth-refresh.js",
+        (FRONTEND_DIR / "static" / "auth-refresh.js").stat().st_mtime_ns,
+    )
+    for page in ["/app", "/home", "/settings", "/onboarding"]:
+        html = client.get(page).text
+        assert "/static/auth-refresh.js" in html, page
+        m = re.search(r"/static/auth-refresh\.js\?v=([0-9a-f]+)", html)
+        assert m, f"{page} pede a URL nua — a entrada velha do cache continua valendo"
+        assert m.group(1) == hash_esperado, page
 
 
 def test_pb_nav_js_com_cache_publico():
@@ -190,7 +212,7 @@ def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
     assert do_python, "a varredura não achou rota nenhuma — o walk quebrou"
 
     js = (pathlib.Path(__file__).resolve().parents[1]
-          / "frontend" / "auth-refresh.js").read_text(encoding="utf-8")
+          / "frontend" / "static" / "auth-refresh.js").read_text(encoding="utf-8")
     bloco = js[js.index("_SESSAO_ENCERRADA = {"):]
     bloco = bloco[:bloco.index("};")]
     do_js = set(_re.findall(r'"(/[^"]+)":', bloco))
