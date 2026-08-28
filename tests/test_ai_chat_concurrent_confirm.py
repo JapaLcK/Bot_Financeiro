@@ -105,3 +105,64 @@ def test_controle_negativo_sem_cas_executa_duas_vezes(user_id: int, monkeypatch)
     monkeypatch.setattr(db, "ai_consume_pending_action", lambda uid, p: True)
     _, execucoes = _corrida(user_id, monkeypatch)
     assert execucoes == 2, "controle negativo não reproduziu a corrida — o teste não mede nada"
+
+
+def test_for_update_serializa_reversao_do_mesmo_lancamento(user_id: int):
+    """Duas reversões do MESMO lançamento não podem reverter o saldo duas vezes.
+
+    Sem o `for update`, o perdedor NÃO espera a linha: lê o `efeitos` do
+    snapshot anterior ao commit do vencedor e segue revertendo em cima de dado
+    velho — é assim que dois POSTs de /ai/chat levaram o saldo de 700,00 a
+    -700,00. Medido aqui com o lock removido: `DeadlockDetected` no perdedor
+    (ele já segurava locks quando o vencedor tentou apagar a linha).
+
+    Com o lock, ele espera ANTES de ler, relê depois do commit, não acha a
+    linha e levanta LookupError("NOT_FOUND") — que todos os chamadores já
+    tratam. É o `DELETE /launches/...` do dashboard passando de "200 duas
+    vezes, saldo errado" para "200 + 404, saldo certo".
+
+    O vencedor é a transação do próprio teste (efeitos aplicados à mão), pra a
+    ordem ser determinística e não sorte de escalonamento.
+    """
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid, _seq, _novo = add_launch_and_update_balance(
+        user_id, "despesa", 300, "aluguel", "paguei 300 aluguel"
+    )
+    assert _bal(user_id) == 700.0
+
+    erro: list[BaseException] = []
+    chamou = threading.Event()
+
+    def apagar():
+        chamou.set()
+        try:
+            db.delete_launch_and_rollback(user_id, lid)
+        except BaseException as e:  # noqa: BLE001 — inspecionado nos asserts
+            erro.append(e)
+
+    t = threading.Thread(target=apagar)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id from launches where id=%s and user_id=%s for update",
+                (lid, user_id),
+            )
+            assert cur.fetchone() is not None
+            t.start()
+            assert chamou.wait(timeout=5)
+            t.join(timeout=0.5)
+            assert t.is_alive(), "o perdedor não bloqueou em nada — teste não sequencia"
+            # vencedor: reverte o saldo e apaga a linha, como faria a outra
+            # execução de delete_launch_and_rollback.
+            cur.execute(
+                "update accounts set balance = balance + 300 where user_id=%s", (user_id,)
+            )
+            cur.execute("delete from launches where id=%s and user_id=%s", (lid, user_id))
+        conn.commit()
+
+    t.join(timeout=10)
+    assert not t.is_alive(), "a reversão não destravou depois do commit do vencedor"
+    assert _bal(user_id) == 1000.0, "saldo revertido duas vezes (falta `for update`)"
+    assert erro and isinstance(erro[0], LookupError), (
+        f"o perdedor devia levantar NOT_FOUND, veio {erro!r}"
+    )

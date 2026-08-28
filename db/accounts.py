@@ -1011,8 +1011,15 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # `for update`: serializa duas reversões do MESMO lançamento. Sem
+            # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
+            # `delete` da segunda casa zero linhas sem levantar — o dinheiro
+            # sai em dobro. Com ele, quem perde relê depois do commit do
+            # vencedor, não acha a linha e levanta LookupError("NOT_FOUND"),
+            # que todos os chamadores já tratam.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos from launches where id=%s and user_id=%s",
+                "select id, tipo, valor, alvo, efeitos from launches "
+                "where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()
