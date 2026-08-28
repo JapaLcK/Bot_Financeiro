@@ -75,7 +75,7 @@ after(async () => { await browser?.close(); server?.kill(); });
  * Abre o Settings já na aba de Open Finance, com o backend simulado.
  * `banksMax` é o teto do plano; `conexoes` são as conexões existentes.
  */
-async function abrirSettings({ banksMax = 2, conexoes = [] } = {}) {
+async function abrirSettings({ banksMax = 2, conexoes = [], conectores = BANCOS } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
 
@@ -93,7 +93,7 @@ async function abrirSettings({ banksMax = 2, conexoes = [] } = {}) {
   await page.route("**/auth/me", (route) =>
     route.fulfill(json({ app_access: true, of_ui_enabled: true, of_banks_max: banksMax })));
   await page.route("**/open-finance/1/connectors", (route) =>
-    route.fulfill(json({ connectors: BANCOS })));
+    route.fulfill(json({ connectors: conectores })));
   await page.route("**/open-finance/1", (route) =>
     route.fulfill(json({ connections: conexoes, accounts: [], transactions: [] })));
   // A /precos é destino real do CTA de upgrade no Free: serve uma página inerte
@@ -342,6 +342,40 @@ test("mensagem estruturada do backend chega ao usuário", async () => {
     const t = document.getElementById("toast");
     return t && /Seu plano acabou/.test(t.textContent || "");
   }, { timeout: 8000 });
+  await page.__ctx.close();
+});
+
+test("o CTA do modal não estica pelo rodapé nem espreme o nome do banco", async () => {
+  // Ordem da cascata, não especificidade: `.bankpick-go{width:auto}` (no CSS do
+  // componente) e `.btn-connect{width:100%}` (inline do settings) empatam em
+  // 0,1,0, então vence a última declarada. Com o <link> antes do <style>, o
+  // botão passou a ocupar o rodapé inteiro e quebrar o "Selecionado: <banco>"
+  // em duas linhas — medido: botão 330px e rótulo 180px quebrado, contra
+  // 207px/301px numa linha depois do conserto.
+  //
+  // Controle negativo: mover o <link> pra antes do <style> no settings.html
+  // deixa este caso vermelho.
+  const page = await abrirSettings({
+    conectores: [{ id: 612, name: "Banco com Nome Bem Longo S.A.", color: "820ad1", logo: "", inv: true }],
+  });
+  await abrirPicker(page);
+  await page.click("#bankpick-list .bank-row");
+
+  const m = await page.evaluate(() => {
+    const go = document.getElementById("bankpick-go");
+    const cnt = document.getElementById("bankpick-count");
+    const r = (e) => e.getBoundingClientRect();
+    return {
+      botao: Math.round(r(go).width),
+      rodape: Math.round(r(go.parentElement).width),
+      alturaRotulo: Math.round(r(cnt).height),
+    };
+  });
+
+  assert.ok(m.botao < m.rodape / 2,
+    `o CTA ocupou ${m.botao}px de um rodapé de ${m.rodape}px — voltou a esticar`);
+  assert.ok(m.alturaRotulo <= 24,
+    `o nome do banco quebrou em mais de uma linha (${m.alturaRotulo}px)`);
   await page.__ctx.close();
 });
 

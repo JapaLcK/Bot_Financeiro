@@ -14,7 +14,6 @@
 <script defer src="https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js" integrity="sha384-EfJtVYPBw2vssrS8cou8sSUccnxm72OwXqa4V+b1injWH0avP4mtCJr2XM6Sb2/7" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/open-finance-connect.css?v=1" />
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1050,6 +1049,14 @@ body.balance-hidden .account-balance {
   .pb-protect button { width: 100%; }
 }
 </style>
+
+<!-- DEPOIS do <style> de cima, e não antes: `.bankpick-go{width:auto}` e
+     `.btn-connect{width:100%}` têm a MESMA especificidade (0,1,0), então quem
+     ganha é quem vem por último. Com o link no topo, o botão do modal esticava
+     por todo o rodapé e espremia o "Selecionado: <banco>" em duas linhas
+     (medido: botão 330px, rótulo 180px quebrado). Antes da extração as duas
+     regras moravam no mesmo bloco, com a do modal depois. -->
+<link rel="stylesheet" href="/open-finance-connect.css?v=1" />
 <script src="/static/auth-refresh.js"></script>
 <script src="/modals.js"></script>
 <script src="/open-finance-connect.js?v=1"></script>
