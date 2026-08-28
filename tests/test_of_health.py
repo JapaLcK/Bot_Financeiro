@@ -508,3 +508,130 @@ def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
     assert esperado == js, (
         f"estado sem mensagem em OF_VERDICT: {sorted(esperado - js)}; "
         f"mensagem para estado que não existe no backend: {sorted(js - esperado)}")
+
+
+# ── ONDA 3, item 3: a taxonomia da Pluggy deixou de ser um chute ─────────────
+# A Onda 1 registrou "um `item_status` que não esteja em `_NEEDS_USER` nem seja
+# ERROR cai adiante como saudável" como LIMITAÇÃO CONHECIDA, porque a taxonomia
+# do provedor não era observável daqui e adivinhá-la seria pior que a lacuna.
+#
+# A evidência apareceu, e é documentação oficial — não log nosso, não payload
+# observado: https://docs.pluggy.ai/docs/item-lifecycle enumera o campo `status`
+# do Item em CINCO valores, e só esses cinco:
+#
+#   UPDATED             sucesso
+#   UPDATING            transitório
+#   WAITING_USER_INPUT  transitório, mas depende do usuário (MFA)
+#   LOGIN_ERROR         erro, exige credencial nova
+#   OUTDATED            erro, retentável
+#
+# O que a mesma página mostra e é a armadilha aqui: `ERROR`, `MERGE_ERROR`,
+# `INVALID_CREDENTIALS`, `SITE_NOT_AVAILABLE` e companhia são valores de
+# `executionStatus`, um campo DIFERENTE — não são status de Item. Por isso a
+# Onda 3 não acrescenta MERGE_ERROR a lista nenhuma: ele nunca chega em
+# `health["item_status"]`, que sai de `item.get("status")`
+# (`pluggy_health.py:196`). Colocá-lo lá seria exatamente o "inventar status
+# externo" que esta onda proíbe.
+#
+# Este teste não muda comportamento: ele PRENDE o que já é verdade, agora que dá
+# para dizer que a lista está fechada. Se a Pluggy publicar um sexto status, ele
+# não falha sozinho — quem falha é a revisão. O que ele pega é a regressão:
+# alguém tirar um dos cinco de `_NEEDS_USER`/`_UPDATING` por engano.
+#
+# CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa 1 vermelho
+# (o caso OUTDATED); tirar "UPDATING" de `_UPDATING` deixa 2 (o caso UPDATING e o
+# `test_updating_e_updating`, que já existia).
+# CONTROLE POSITIVO: o caso UPDATED prova que a guarda não recusa tudo.
+
+_STATUS_DOCUMENTADOS = [
+    # (item_status, (status, reason) esperados do resolve, estado da tela)
+    ("UPDATED",            ("ACTIVE", ""), "updated"),
+    ("UPDATING",           ("ACTIVE", ""), "updating"),
+    ("WAITING_USER_INPUT", ("ERROR",  ""), "needs_user_action"),
+    ("LOGIN_ERROR",        ("ERROR",  ""), "needs_user_action"),
+    ("OUTDATED",           ("ERROR",  ""), "needs_user_action"),
+    # O SEXTO, que a tabela do `item-lifecycle` não lista mas os payloads de
+    # `docs/connect-an-account` (Safra, Banco Inter PF) e `docs/sandbox` (QR
+    # Login) trazem: `"status": "WAITING_USER_ACTION"`. Autorizar dispositivo /
+    # ler QR no app do banco. Estava em `_UPDATING` e a tela dizia
+    # "Atualizando…" numa conexão que só anda se a pessoa AGIR.
+    # CONTROLE NEGATIVO: devolvê-lo a `_UPDATING` deixa este caso vermelho.
+    ("WAITING_USER_ACTION", ("ERROR", ""), "needs_user_action"),
+]
+
+
+@pytest.mark.parametrize("item_status, resolve_esperado, estado_esperado",
+                         _STATUS_DOCUMENTADOS)
+def test_os_status_de_item_da_pluggy_estao_cobertos(
+        item_status, resolve_esperado, estado_esperado):
+    """Os valores conhecidos do campo `status` do Item, ponta a ponta: o que o
+    backend grava (`resolve_connection_state`) e o que a tela mostra
+    (`connection_ui_state`).
+
+    O par `(status, status_reason)` inteiro, não só o `status`: o módulo declara
+    que os dois são UM estado só, e afirmar metade deixaria passar um caminho
+    que devolvesse `ERROR, "item_missing"` para um `LOGIN_ERROR`."""
+    health = {"item_status": item_status, "products": {}, "stale_products": []}
+
+    assert resolve_connection_state(
+        health=health, has_data=True,
+        leitura_completa=True) == resolve_esperado, f"{item_status} → estado local"
+    status = resolve_esperado[0]
+
+    ui = connection_ui_state({
+        "status": status, "status_reason": "", "health": health,
+        # sync real posterior à autorização atual: sem isto o `sem_sync` da
+        # Onda 2 devolve "updating" para todo mundo e o teste não mede nada.
+        "last_sync_at": AGORA, "reconnected_at": None,
+    })
+    assert ui["state"] == estado_esperado, f"{item_status} → tela"
+
+
+@pytest.mark.parametrize("item, esperado, rotulo", [
+    ({"status": "UPDATED", "executionStatus": "MERGE_ERROR"}, "UPDATED",
+     "com os dois campos, vence o `status`"),
+    # O caso que discrimina de verdade: SEM `status`, um `or` para o
+    # `executionStatus` (o padrão que `db/open_finance.py` usa no upsert)
+    # deixaria `MERGE_ERROR` entrar como se fosse status de Item. A versão
+    # anterior deste teste mandava `status: "UPDATED"` e por isso passava
+    # mesmo COM a mutação aplicada — medido, 4957 verdes com o `or` no lugar.
+    # Com estes dois casos, a mesma mutação dá 2 vermelhos.
+    ({"executionStatus": "MERGE_ERROR"}, None, "sem `status`, NÃO cai no outro campo"),
+    ({"status": "", "executionStatus": "SITE_NOT_AVAILABLE"}, None,
+     "`status` vazio também não cai"),
+])
+def test_execution_status_de_erro_nao_e_status_de_item(item, esperado, rotulo):
+    """`MERGE_ERROR` e irmãos são `executionStatus`, não `status` do Item.
+
+    Prende a decisão de NÃO os mapear: eles não chegam a `health["item_status"]`
+    porque `derive_item_health` lê `item["status"]` e SÓ ele."""
+    saude = derive_item_health({"id": "item-x", **item}, now=AGORA)
+    assert saude["item_status"] == esperado, rotulo
+    assert saude["execution_status"] == ((item.get("executionStatus") or "").upper() or None)
+
+
+# ── ONDA 3: os membros de `executionStatus` nos conjuntos são LOAD-BEARING ───
+# `_NEEDS_USER` tem `INVALID_CREDENTIALS` e `_UPDATING` tem `CREATED` — os dois
+# são `executionStatus`, não status de Item, e por isso NUNCA chegam pelo
+# `health["item_status"]`. Parecem resíduo. Não são: `connection_ui_state`
+# compara os mesmos conjuntos com o `status` LOCAL da conexão, e o upsert de
+# `db/open_finance.py` grava `item.get("status") or item.get("executionStatus")`
+# ali. Sem eles, uma conexão em `INVALID_CREDENTIALS` deixa de dizer "Ação
+# necessária" e uma em `CREATED` deixa de dizer "Atualizando…".
+#
+# Medido antes deste teste existir: tirar os dois dos conjuntos deixava a suíte
+# INTEIRA verde (4957 passed). Era instrução de deleção sem rede.
+#
+# CONTROLE NEGATIVO: tirar `INVALID_CREDENTIALS` de `_NEEDS_USER` ou `CREATED`
+# de `_UPDATING` deixa um caso vermelho cada.
+
+@pytest.mark.parametrize("status_local, estado_esperado", [
+    ("INVALID_CREDENTIALS", "needs_user_action"),
+    ("CREATED", "updating"),
+])
+def test_execution_status_no_status_local_ainda_e_lido(status_local, estado_esperado):
+    ui = connection_ui_state({
+        "status": status_local, "status_reason": "", "health": None,
+        "last_sync_at": AGORA, "reconnected_at": None,
+    })
+    assert ui["state"] == estado_esperado

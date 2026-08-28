@@ -83,10 +83,29 @@ _PRODUCT_PT = {
     "TRANSACTIONS": "Transações",
 }
 
+# DOIS CONSUMIDORES, DUAS ENTRADAS DIFERENTES — e é por isso que estes conjuntos
+# misturam campos da Pluggy de propósito. Não "limpe" a mistura sem ler isto:
+#
+#   • `resolve_connection_state` compara com `health["item_status"]`, que sai de
+#     `item["status"]` (`derive_item_health`). Aí só cabem status de Item.
+#   • `connection_ui_state` (ramo sem `health`) compara com o `status` LOCAL da
+#     conexão — e esse pode receber um `executionStatus`, porque o upsert faz
+#     `item.get("status") or item.get("executionStatus")` (`db/open_finance.py`).
+#
+# Daí `INVALID_CREDENTIALS` e `CREATED` estarem aqui: eles são `executionStatus`,
+# nunca chegam pelo primeiro caminho, e são LOAD-BEARING no segundo. Medido: com
+# eles fora, um `status` local `INVALID_CREDENTIALS` deixa de virar "Ação
+# necessária". `tests/test_of_health.py` prende os dois.
+#
+# O que NÃO fazer: acrescentar `executionStatus` novo "por precaução". Os dois
+# que estão aqui têm caminho medido; um terceiro sem caminho é adivinhação.
+
 # Status do item que significam "a Pluggy ainda está buscando".
-_UPDATING = {"UPDATING", "CREATED", "WAITING_USER_ACTION"}
-# Status que só o usuário resolve (reautorizar / responder MFA no banco).
-_NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS", "OUTDATED"}
+_UPDATING = {"UPDATING", "CREATED"}
+# Status que só o usuário resolve (reautorizar / responder MFA no banco, ou
+# autorizar o dispositivo / ler o QR — ver `WAITING_USER_ACTION` abaixo).
+_NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
+               "OUTDATED", "WAITING_USER_ACTION"}
 
 _LABELS = {
     "updated": "Atualizado",
@@ -240,15 +259,50 @@ def resolve_connection_state(
     if item_status in _NEEDS_USER or item_status == "ERROR":
         return "ERROR", ""
 
-    # LIMITAÇÃO CONHECIDA (Onda 1, não corrigida de propósito): um `item_status`
-    # de erro que não esteja em `_NEEDS_USER` nem seja "ERROR" cai adiante como
-    # item saudável. Não é regressão: com `has_data=True` o resolvedor SEMPRE
-    # tratou status desconhecido como saudável; esta onda só estendeu isso ao
-    # `has_data=False` para destravar o ERROR terminal. Não ampliamos a lista
-    # porque a taxonomia da Pluggy não é observável daqui — nenhum status desse
-    # tipo aparece no repositório e ninguém tem acesso ao provedor para
-    # confirmá-lo. Adivinhar a lista é pior que a lacuna. Vira item de Onda 2
-    # SÓ com evidência real de um status externo assim.
+    # ONDA 3 — a lacuna da Onda 1 foi REAVALIADA com doc oficial, e o resultado
+    # tem duas metades. A tabela "Item Status" de
+    # https://docs.pluggy.ai/docs/item-lifecycle lista cinco valores — UPDATED /
+    # UPDATING / WAITING_USER_INPUT / LOGIN_ERROR / OUTDATED — e os cinco estão
+    # cobertos e presos por teste (`tests/test_of_health.py`).
+    #
+    # A outra metade: **aquela tabela não é a enumeração fechada do campo.** Um
+    # SEXTO valor aparece em payloads de Item completos em duas páginas vigentes
+    # da mesma doc — `docs/connect-an-account` (Safra e Banco Inter PF) e
+    # `docs/sandbox` (fluxo "QR Login"):
+    #
+    #     "status": "WAITING_USER_ACTION", "executionStatus": "WAITING_USER_ACTION"
+    #
+    # Ele significa "o usuário precisa autorizar o dispositivo / ler o QR no app
+    # do banco", com um `userAction.expiresAt` curto. Estava em `_UPDATING`, e
+    # por isso a tela dizia "Atualizando…" numa conexão que só anda se a pessoa
+    # AGIR — a mesma mentira de fiapo girando que a Onda 1 existiu para matar.
+    # Movido para `_NEEDS_USER`, junto do irmão `WAITING_USER_INPUT`, que já
+    # estava lá. É a única mudança de comportamento desta onda.
+    #
+    # A lição fica: a lista de cinco veio de UMA tabela, e a tabela não é a
+    # fonte. O OpenAPI de `reference/items-retrieve` declara `status` como string
+    # SEM `enum`, então nenhuma leitura de doc fecha esse campo.
+    #
+    # `item_status` aqui tem DUAS origens, e só duas: `item["status"]` (em
+    # `derive_item_health`) e o `MISSING` que nós mesmos sintetizamos em
+    # `_HEALTH_MISSING`
+    # (`pluggy_sync.py`) — este último sempre pareado com
+    # `status_reason='item_missing'`, que `connection_ui_state` trata antes de
+    # olhar o `item_status`. `MERGE_ERROR` e companhia são `executionStatus` e
+    # não chegam por nenhuma das duas (ver o bloco em cima de `_UPDATING`, que
+    # explica por que os conjuntos ainda assim têm membros daquele campo).
+    #
+    # Duas limitações sobram, e são de revisão, não de código:
+    #   • status de Item fora dos SEIS conhecidos — seja publicado depois desta
+    #     leitura, seja já existente numa página que ninguém varreu — cai
+    #     adiante como saudável. Foi assim que o sexto passou despercebido;
+    #   • um `executionStatus` de erro que caia no `status` LOCAL pela via do
+    #     upsert e não esteja nos conjuntos lê como saudável ali. Medido:
+    #     `MERGE_ERROR` no status local devolve "Atualizado" — MAS só com
+    #     `last_sync_at` preenchido E `reconnected_at` NULL, combinação que o
+    #     upsert de hoje não produz (o ramo de conflito sempre carimba
+    #     `reconnected_at`; o de insert nasce com `last_sync_at` NULL). É
+    #     armadilha latente, não sangramento.
 
     if has_data:
         return "ACTIVE", ""

@@ -66,6 +66,8 @@ mobile/                   — app iOS (Capacitor) que carrega https://pigbankai.
 scripts/                  — utilitários operacionais e de build de assets
 tests/                    — pytest (backend) e tests/frontend/*.mjs (node --test)
 docs/refactor_plan.md     — plano de quebra do monólito FastAPI
+docs/open_finance_validacao_manual.md — o que do Open Finance só se valida em
+                            aparelho ou com Pluggy real, e o roteiro para isso
 ```
 
 ---
