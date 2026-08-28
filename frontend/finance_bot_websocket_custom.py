@@ -2746,10 +2746,13 @@ async def auth_refresh(request: Request, response: Response):
 
     "Sem cookie de refresh" não é sinônimo de sessão viva: os dois primeiros
     ramos têm o mesmo `detail` e estados opostos. O que os separa é a checagem
-    do access — que valida assinatura, `exp` e `type`, e NÃO a revogação de
-    sessão por `jti` nem exclusão agendada de conta. Sessão revogada com JWT
-    ainda no prazo cai em 400, e tudo bem: quem revogou (logout, exclusão) já
-    limpou o aparelho na mesma origem.
+    do **cookie** de access — que valida assinatura, `exp` e `type`, e NÃO a
+    revogação de sessão por `jti` nem exclusão agendada de conta. Duas
+    consequências, as duas de propósito: sessão revogada com JWT ainda no prazo
+    cai em 400 (tudo bem — quem revogou, logout ou exclusão, já limpou o
+    aparelho na mesma origem), e quem se autentica por `Authorization: Bearer`
+    cai em 401 (é o comportamento de sempre; os dois clientes desta rota,
+    `login.html` e o interceptor, são de cookie).
 
     O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
     `HTTPException` descarta os headers do sub-response (medido, #175). Está
