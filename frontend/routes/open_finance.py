@@ -87,17 +87,32 @@ _SYNC_MAX_ATTEMPTS = 3
 # fase de escrita e passa em segundos, então a segunda quase sempre entra.
 _RECONNECT_LOCK_ATTEMPTS = 2
 
-# PRAZO ÚNICO da operação inteira — lock, backoff e a segunda tentativa cabem
-# TODOS aqui dentro. Antes, cada `pluggy_item_lock` reiniciava o relógio: até
-# 15s de vaga MAIS 15s de advisory lock, vezes 2 tentativas, mais backoff — o
-# POST `/pluggy/item` passava de um minuto sob contenção e o proxy derrubava
-# antes (Codex #166, P2). O pior caso não era só lento: a gravação podia
+# PRAZO ÚNICO da GRAVAÇÃO da reconexão — lock, backoff, segunda tentativa e a
+# escrita cabem todos aqui dentro. Antes, cada `pluggy_item_lock` reiniciava o
+# relógio: até 15s de vaga MAIS 15s de advisory lock, vezes 2 tentativas, mais
+# backoff — e depois disso a escrita ainda esperava o pool fora de qualquer teto
+# (Codex #166, dois P2 seguidos). O pior caso não era só lento: a gravação podia
 # acontecer DEPOIS do timeout do cliente, então o usuário via erro num fluxo que
 # tinha dado certo, e reconectava de novo.
 #
 # 20s é o orçamento, não o alvo: no caminho comum o lock está livre e isto não
 # custa nada. Quem estoura leva 503, que é recuperável — o item continua na
 # Pluggy e o mesmo POST reaproveita.
+#
+# ESCOPO, porque a palavra "operação" enganou uma vez: isto NÃO é o teto do
+# request. A rota inteira tem quatro esperas, e o prazo cobre a última:
+#
+#   | etapa                                   | teto                            |
+#   |-----------------------------------------|---------------------------------|
+#   | `get_pluggy_item` (HTTP, + o token)     | `PLUGGY_TIMEOUT` (20s), 2×      |
+#   | `get_connections_by_item_id` (leitura)  | `DB_CONNECT_TIMEOUT` (30s)      |
+#   | `_enforce_bank_limit` (leituras)        | `DB_CONNECT_TIMEOUT` (30s)      |
+#   | `_grava_reconexao` (lock + escrita)     | **este prazo**                  |
+#
+# Somadas, elas ainda passam do que um proxy aguenta. Um teto de REQUEST é outra
+# decisão — e o lugar dela provavelmente não é aqui, é o servidor. O que esta
+# onda fecha é a etapa que estava SEM teto nenhum e que escrevia no banco; as
+# outras três já tinham o seu, e nenhuma delas commita nada.
 def _prazo_reconexao_ms() -> int:
     """Prazo da reconexão, com config sem sentido voltando para o default.
 
