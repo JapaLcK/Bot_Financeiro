@@ -1,8 +1,9 @@
 import os
+import time as time_module
 import re
 import calendar
 import unicodedata
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 
@@ -12,6 +13,151 @@ from dateutil.relativedelta import relativedelta
 def _tz():
     tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or "America/Sao_Paulo"
     return ZoneInfo(tz_name)
+
+
+def _agora() -> datetime:
+    """Instante atual em UTC. Existe para a guarda de `align_process_tz` poder
+    comparar os dois lados sem depender do fuso que ela está validando."""
+    return datetime.now(timezone.utc)
+
+
+def tz_name() -> str:
+    """Nome IANA do fuso do app, derivado do MESMO `_tz()`.
+
+    Sem `getenv` próprio de propósito: um segundo lugar lendo o ambiente
+    divergiria de `_tz()` no dia em que alguém setasse só uma das variáveis.
+    """
+    return _tz().key
+
+
+# O que o AMBIENTE REAL trouxe, antes de este módulo escrever qualquer coisa em
+# `TZ`. `config/env.py::load_app_env` usa isto para saber se o `TZ` que está no
+# ambiente é do operador (e então tem precedência sobre o `.env`) ou é o que
+# `align_process_tz` acabou de escrever aqui embaixo (e então não pode roubar do
+# `.env` a chance de ser lido).
+_TZ_ENV_ORIGINAL = os.environ.get("TZ")
+
+
+def align_process_tz() -> str:
+    """Põe PROCESSO, APP e SESSÃO DO POSTGRES no mesmo fuso. Fonte única.
+
+    São três relógios que precisam concordar, e até aqui não concordavam:
+
+    - o APP já lia `_tz()` (`REPORT_TIMEZONE` → `TZ` → America/Sao_Paulo);
+    - o PROCESSO seguia o `TZ` do sistema — UTC no Railway e no CI. É o que
+      `date.today()` e `datetime.now()` NAIVE respondem: 52 e 5 chamadas em
+      29/08/2026, nenhuma delas tocada por este conserto. Entre elas
+      `core/handlers/greeting.py:108`, que dizia "boa noite" às 15h de
+      Brasília — corrigido de graça aqui. Os dois números saem DAQUI, e não de
+      `grep`: `ast` conta CHAMADA, o `grep` conta texto e soma comentário e
+      docstring (`grep -rn "[.]today()"` devolve 170, com `tests/` dentro):
+
+          python3 - <<'EOF'
+          import ast, pathlib
+          for attr in ("today", "now"):
+              print(attr, sum(
+                  isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == attr and not n.args and not n.keywords
+                  for p in pathlib.Path(".").rglob("*.py")
+                  if p.parts[0] not in {"tests", "scripts", "mobile", ".venv", ".claude"}
+                  for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))))
+          EOF
+    - a SESSÃO do Postgres seguia o fuso do servidor, também UTC. É por ela que
+      o banco resolve `::date`, `date_trunc` e a promoção de um `timestamp`
+      NAIVE a `timestamptz` — o que desloca em 3h as dezenas de cortes de janela do
+      tipo `criado_em < datetime.combine(fim + 1 dia, 00:00)` (db/accounts.py,
+      db/plans.py, core/budget_alerts.py, forecast, admin). Um gasto de 31/08
+      às 22:00 em São Paulo era lido como setembro.
+
+    A ESCRITA de `criado_em` sempre esteve certa (`datetime.now(_tz())`, aware,
+    coluna `timestamptz`): o defeito é de LEITURA, e não há dado corrompido
+    nessa coluna. Consertar só a sessão não bastaria — o processo continuaria em
+    UTC e as duas pontas divergiriam entre 00:00 e 03:00 UTC.
+
+    `PGTZ` é o que fixa o fuso da sessão: a libpq o lê em TODA conexão nova, o
+    que cobre as portas do processo inteiro (o pool síncrono e o `reset` de
+    `db/connection.py`, o async de `frontend/routes/shared.py`, o
+    `core/admin_dashboard.py`) sem uma linha de código em nenhuma delas. Medido:
+    sobrescreve inclusive um `PGTZ` hostil já posto pelo operador.
+
+    O `except Exception` de quem chama isto no import (logo abaixo) é largo de
+    propósito. Não é só `ImportError` de `tzset` e `ZoneInfoNotFoundError`:
+    `ZoneInfo` levanta `ValueError` para nome com travessia de caminho, esta
+    função levanta `RuntimeError` quando a libc não aceita o nome (abaixo), e a
+    lista não é fechada. Estreitar deixa um traceback cru subir do import e torna
+    INALCANÇÁVEL a guarda legível de `config/env.py::load_app_env`, que é quem
+    recusa fuso inválido no boot com `exit(1)`.
+    """
+    name = _tz().key
+    os.environ["TZ"] = name
+    os.environ["PGTZ"] = name
+
+    # `time.tzset` é POSIX e NÃO EXISTE no Windows, que o `docs/readme.md`
+    # lista como sistema suportado. Sem esta guarda o `ImportError` sobe até o
+    # `except` de `load_app_env` e vira `sys.exit(1)`: TODO entrypoint deixaria
+    # de subir no Windows, com a mensagem de "fuso inválido" — que ali seria
+    # mentira, porque o `ZoneInfo` resolveu o nome sem problema (Codex, #180).
+    #
+    # O que se perde lá, dito com todas as letras: sem `tzset` o PROCESSO fica
+    # no fuso do sistema, então `date.today()` e os `datetime.now()` naive não
+    # são alinhados e a divergência processo × app continua existindo no
+    # Windows. O que É alinhado lá é a SESSÃO do banco, via `PGTZ` — que é a
+    # metade que causa o bug da #178. Windows é ambiente de desenvolvimento
+    # aqui; produção é Linux (Railway) e o dev de referência é macOS, e nos dois
+    # o alinhamento é completo. Fechar a metade que falta no Windows exigiria
+    # não usar `date.today()` em lugar nenhum — que é o PR que este evitou.
+    tzset = getattr(time_module, "tzset", None)
+    if tzset is None:
+        return name
+    tzset()
+
+    # `tzset()` NÃO levanta quando a libc não conhece o nome: ela cai para UTC
+    # CALADA (medido no macOS em 29/08/2026 com um `Fake/Zone`). Sem esta
+    # comparação a função retornava com sucesso deixando o PROCESSO em UTC e o
+    # app/sessão no fuso pedido — o invariante desta função quebrado em
+    # silêncio, que é o pior modo de falha possível para ela. É `ZoneInfo`
+    # (banco do Python) contra a libc (banco do sistema): duas leituras
+    # diferentes do mesmo nome.
+    #
+    # Alcançável só quando as duas divergem — hoje elas não divergem porque
+    # `tzdata` (o banco em pip) NÃO está no requirements.txt, e o do sistema
+    # existe: `_tz()` roda em TODA escrita de lançamento (`now_tz()`) e a
+    # produção grava, logo /usr/share/zoneinfo está lá. É por isso que este PR
+    # não acrescenta `tzdata` — a dependência criaria justamente a divergência
+    # que esta guarda existe para pegar.
+    # Só faz sentido onde o `tzset` acima RODOU: sem ele o processo fica no fuso
+    # do sistema de propósito (Windows), e esta comparação acusaria uma
+    # divergência que é conhecida e documentada, não um defeito.
+    #
+    # TRÊS instantes, não só "agora": comparar um só instante deixa passar a
+    # zona cujo offset COINCIDE com o do fallback hoje e diverge depois. O
+    # exemplo é do Codex (#180, P2), e é concreto: um `Fake/Zone` com o conteúdo
+    # de `Europe/London` subindo no inverno dá +00:00 nos dois lados — a guarda
+    # passa —, e em março o app vai para +01:00 enquanto `date.today()` fica em
+    # UTC, recriando a divergência de fronteira de dia que esta função existe
+    # para fechar, já em produção e sem sinal. Janeiro e julho pegam os dois
+    # sentidos de horário de verão (norte e sul); `agora` pega o caso em que a
+    # zona mudou de regra sem mudar de nome.
+    for instante in (datetime(_agora().year, 1, 15, 12, tzinfo=timezone.utc),
+                     datetime(_agora().year, 7, 15, 12, tzinfo=timezone.utc),
+                     _agora()):
+        do_processo = instante.astimezone().utcoffset()
+        do_app = instante.astimezone(_tz()).utcoffset()
+        if do_processo != do_app:
+            raise RuntimeError(
+                f"a libc não aceitou o fuso {name!r}: em {instante:%d/%m} o "
+                f"processo diz {do_processo} e o app diz {do_app}"
+            )
+    return name
+
+
+try:
+    align_process_tz()
+except Exception:
+    # Nada é engolido de vez: sem fuso válido o primeiro `_tz()` levanta do
+    # mesmo jeito, e o boot já recusou antes (config/env.py).
+    pass
+
 
 def now_tz() -> datetime:
     return datetime.now(_tz())
@@ -23,10 +169,13 @@ def today_tz() -> date:
 def day_tz(dt):
     """Dia de PAREDE de um instante, no fuso do app.
 
-    `dt.date()` cru devolve o dia no fuso da SESSÃO do Postgres — UTC no
-    Railway. Um gasto de 26/08 21:30 em São Paulo saía como 27/08 por esse
-    caminho, enquanto o dashboard, que formata o instante no navegador, dizia
-    26/08. Fonte única das DUAS listagens que imprimem o dia de um
+    `dt.date()` cru devolve o dia no fuso da SESSÃO do Postgres. Essa sessão
+    ERA UTC no Railway, e um gasto de 26/08 21:30 em São Paulo saía como 27/08
+    por esse caminho, enquanto o dashboard, que formata o instante no navegador,
+    dizia 26/08. Desde `align_process_tz` (acima) a sessão roda no fuso do app e
+    os dois caminhos coincidem — o que não promove `.date()` cru a correto: ele
+    continua dependendo de configuração de servidor, e esta função não.
+    Fonte única das DUAS listagens que imprimem o dia de um
     `criado_em` (`list_launches_by_category`, db/accounts.py; `list_launches`,
     core/handlers/launches.py): com uma cópia em cada lado, "liste lazer" e
     "meus últimos lançamentos" divergiam em um dia para o mesmo lançamento.
@@ -47,15 +196,20 @@ def launch_day(dt, posted_at=None, has_time=True):
 
     - compra no crédito: `purchased_at` é `date` (db/schema.py) e na UNION de
       `list_launches_by_category` o Postgres promove `timestamp` → `timestamptz`
-      pelo fuso da SESSÃO. A sessão da PRODUÇÃO é `Etc/UTC` (medido no Railway em
-      27/08/2026 08:46 UTC), então 27/08 00:00 vira 27/08 00:00Z e `day_tz`
-      devolve 26/08: toda compra de cartão está saindo com o DIA ANTERIOR nessa
-      lista hoje — não é risco futuro. Na máquina local a sessão é -04 e o erro
-      some, que é por que só o CI ficou vermelho.
+      pelo fuso da SESSÃO. Enquanto a sessão da PRODUÇÃO era `Etc/UTC` (medido
+      no Railway em 27/08/2026 08:46 UTC), 27/08 00:00 virava 27/08 00:00Z e
+      `day_tz` devolvia 26/08: toda compra de cartão saía com o DIA ANTERIOR
+      nessa lista, e só o CI ficava vermelho porque a sessão da máquina local
+      era -04 e o erro sumia. Desde `align_process_tz` (acima) a sessão é o fuso
+      do app e a promoção cai na meia-noite certa. O que mantém esta função
+      necessária é a REGRA, não o fuso: sem hora confiável quem manda é a DATA,
+      venha ela de que sessão vier.
     - Open Finance importado ANTES de c474fba (18/08/2026): gravava a `date`
       crua em `criado_em` (timestamptz) → meia-noite no fuso da SESSÃO, que na
-      produção é UTC, e o dia exibido escorregava um pra trás. Essas linhas
-      continuam no banco, sem `time_known` no `efeitos` (logo `has_time=false`),
+      época era UTC na produção, e o dia exibido escorregava um pra trás. Essas
+      linhas continuam no banco com MEIA-NOITE UTC gravada em disco: o instante
+      é absoluto e não muda com o fuso da sessão, então `align_process_tz` não
+      as conserta. Seguem sem `time_known` no `efeitos` (logo `has_time=false`),
       e só o `posted_at` delas está certo.
 
     NÃO vale para o que os importadores gravam HOJE: extrato OFX/CSV/PDF

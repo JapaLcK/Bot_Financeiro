@@ -612,8 +612,9 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         if criado is not None:
             try:
                 # `launch_day` (utils_date), não `.date()` nem `day_tz` cru: o
-                # `.date()` devolve o dia no fuso da SESSÃO do Postgres (UTC no
-                # Railway) — 21:30 em São Paulo saía como o dia SEGUINTE — e o
+                # `.date()` devolve o dia no fuso da SESSÃO do Postgres, que ERA
+                # UTC no Railway — 21:30 em São Paulo saía como o dia SEGUINTE
+                # (hoje a sessão segue o app, `utils_date.align_process_tz`) — e o
                 # `day_tz` sozinho converte um instante que a linha SEM HORA não
                 # tem (Open Finance legado, ver `launch_day`). Mesma função de
                 # `list_launches_by_category`, senão as duas portas divergem.

@@ -204,8 +204,12 @@ TIPO_CANON_SQL = (
 # do home.html (frontend/home.html:774), e o texto do WhatsApp
 # (core/handlers/launches.py:620).
 #
-# O dia nunca sai de um `::date` em SQL: ele sairia no fuso da SESSÃO do
-# Postgres, não em America/Sao_Paulo. Quem calcula é `launch_day`, em Python.
+# O dia continua saindo de `launch_day`, em Python, e não de um `::date`: o
+# `has_time`/`posted_at` decide QUAL campo manda (data × instante), coisa que
+# nenhum cast resolve. O que mudou é o motivo — desde
+# `utils_date.align_process_tz` a sessão do Postgres roda no fuso do app (via
+# `PGTZ`, sem uma linha aqui), então um `::date` já não devolveria o dia errado;
+# ele só continuaria respondendo a pergunta errada.
 LAUNCH_HAS_TIME_SQL = """
         CASE
           WHEN source = 'ofx' THEN false

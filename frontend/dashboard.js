@@ -2186,8 +2186,10 @@ async function openCategoryLaunches(nome, opts) {
   // (`posted_at` + `has_time` + `criado_em`), então `fmtLaunchWhen` imprime
   // "dd/mm, HH:MM" onde a hora é confiável e "dd/mm" onde só a data é. Mapear
   // `posted_at: r.data` era o que fazia esta lista nunca mostrar hora e imprimir
-  // o dia do fuso da SESSÃO do Postgres — "09/03" aqui, "10/03, 00:30" na Visão
-  // Geral, mesmo lançamento.
+  // o dia do fuso da SESSÃO do Postgres, que na época era UTC — "09/03" aqui,
+  // "10/03, 00:30" na Visão Geral, mesmo lançamento. A sessão hoje segue o fuso
+  // do app (utils_date.align_process_tz), mas o mapeamento errado voltaria a
+  // esconder a hora do mesmo jeito.
   // Isso vale para as linhas de `launches`. A compra no CRÉDITO CONTINUA
   // divergindo, e não é o front: a Visão Geral manda `has_time=true` +
   // `criado_em` = quando a LINHA foi gravada; esta lista manda `has_time=false`
