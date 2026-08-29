@@ -17,14 +17,17 @@ perna que PODE ser apagada continua trazendo o handle certo, e
 `test_saida_do_whatsapp_nao_mudou` prova que os 3 chamadores do bot não viram
 diferença.
 
-FUSO DA SESSÃO (`PGTZ`): os casos com JANELA (`start_date`/`end_date`) pedem uma
-sessão entre UTC-12 e UTC+11 — medido verde em UTC, -03 e +09, vermelho em
-`Pacific/Kiritimati` (+14). Não é a fixture: `list_launches_by_category` monta o
-corte com `datetime.combine(start_date, 00:00)` NAIVE (db/accounts.py), que o
-Postgres lê no fuso da SESSÃO, enquanto o lançamento é gravado no fuso do APP; em
-+14 o gasto de hoje 09:00 em São Paulo (12:00Z) cai fora de
-[hoje 00:00+14, amanhã 00:00+14) = [ontem 10:00Z, hoje 10:00Z). A produção roda a
-sessão em `Etc/UTC`, dentro da faixa.
+FUSO DA SESSÃO: deixou de ser uma variável deste arquivo.
+`utils_date.align_process_tz` escreve `PGTZ` = fuso do app no import e isso
+SOBRESCREVE um `PGTZ` posto na linha de comando (medido) — processo, app e sessão
+do Postgres são o mesmo fuso, sempre. Enquanto não eram, os casos com JANELA
+(`start_date`/`end_date`) exigiam uma sessão entre UTC-12 e UTC+11 (medido verde
+em UTC, -03 e +09, vermelho em `Pacific/Kiritimati`, +14): não era a fixture —
+`list_launches_by_category` monta o corte com `datetime.combine(start_date,
+00:00)` NAIVE (db/accounts.py), que o Postgres lia no fuso da SESSÃO enquanto o
+lançamento era gravado no fuso do APP. Quem PROVA o alinhamento é
+`tests/test_fuso_do_app.py`; aqui ele é premissa, e é por isso que estes casos
+não trazem mais `PGTZ` no comando.
 """
 from __future__ import annotations
 
@@ -42,11 +45,26 @@ from utils_date import _tz, today_tz
 def _hoje_as(hora: int):
     """Hoje às `hora` no fuso do APP — aware de propósito.
 
-    Naive, o Postgres lê o instante no fuso da SESSÃO (`PGTZ`): em `Asia/Tokyo`
-    a mesma linha voltava com outro dia de parede e `test_criado_em_traz_o_instante_cheio`
-    ficava vermelho sem nada de errado no produto.
+    Naive, o instante seria lido no fuso da SESSÃO: em `Asia/Tokyo` a mesma linha
+    voltava com outro dia de parede e `test_criado_em_traz_o_instante_cheio`
+    ficava vermelho sem nada de errado no produto. A sessão hoje é a do app
+    (`utils_date.align_process_tz`), mas aware é o que torna o instante
+    independente de configuração — que é a única forma honesta de testá-lo.
     """
     return datetime.combine(today_tz(), time(hora, 0), tzinfo=_tz())
+
+
+def _meia_noite_utc(dia: date) -> datetime:
+    """O instante que a PRODUÇÃO tem em disco nas linhas legadas do Open Finance.
+
+    Aquele importador mandava a `date` CRUA para uma coluna `timestamptz`, e o
+    Postgres a promovia pelo fuso da SESSÃO — `Etc/UTC` na produção. O que ficou
+    gravado é um instante ABSOLUTO: meia-noite UTC, e ele não muda mais com o
+    fuso de quem lê. Passar a `date` crua daqui reproduziria a meia-noite do fuso
+    da SESSÃO DO TESTE, que hoje é o fuso do app — em -03 `day_tz` devolveria o
+    dia CERTO e os casos abaixo passariam mesmo com `launch_day` quebrado.
+    """
+    return datetime.combine(dia, time(0, 0), tzinfo=ZoneInfo("Etc/UTC"))
 
 
 def _dinheiro(resumo: dict) -> dict:
@@ -237,8 +255,9 @@ def test_criado_em_traz_o_instante_cheio(pro_user_id):
     )
     r = db.list_launches_by_category(pro_user_id, "mercado")[0][0]
     assert r["data"] == today_tz()
-    # Lido no fuso do APP: o instante volta do Postgres no fuso da SESSÃO
-    # (`PGTZ`), então comparar `.hour` cru amarrava o teste a rodar em UTC.
+    # Lido explicitamente em São Paulo: o instante volta do Postgres no fuso da
+    # SESSÃO, e comparar `.hour` cru amarraria o teste ao fuso da sessão — hoje o
+    # do app, mas o teste não pode depender disso para medir o produto.
     local = r["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo"))
     assert local.hour == 9, r["criado_em"]
     assert local.date() == r["data"]
@@ -364,10 +383,15 @@ def test_receita_legada_entrada_nao_entra_no_donut(pro_user_id):
 # o front caía sempre no galho "só data" do `fmtLaunchWhen`: a mesma despesa
 # aparecia "10/03, 00:30" na Visão Geral e "09/03" aqui.
 #
-# Controle NEGATIVO do par abaixo: volte `"data": launch_day(...)` para
-# `r["dt"].date()` em db/accounts.py — `test_data_e_o_dia_de_parede_em_sao_paulo`
-# fica vermelho em QUALQUER fuso de sessão diferente de America/Sao_Paulo (um
-# dos dois instantes cruza a meia-noite pra leste, o outro pra oeste).
+# `test_data_e_o_dia_de_parede_em_sao_paulo` virou controle POSITIVO declarado.
+# O negativo dele era: volte `"data": launch_day(...)` para `r["dt"].date()` em
+# db/accounts.py, e ele ficava vermelho em qualquer sessão diferente de São
+# Paulo. Desde `utils_date.align_process_tz` a sessão É São Paulo — medido: com
+# esse `.date()` de volta ele passa. O HAZARD que ele media deixou de existir
+# (não é `launch_day` que ficou sem cobertura: os 4 casos de `has_time=false`
+# abaixo continuam vermelhos com o mesmo negativo). O que ele ainda prova, e é
+# por isso que fica: a lista continua imprimindo o dia que o usuário viu para os
+# dois instantes que cruzam a meia-noite em sentidos opostos.
 # Controle POSITIVO: `test_has_time_e_posted_at_espelham_a_visao_geral` prova
 # que o par novo não passou a mentir hora onde ela não existe (extrato importado
 # pelo caminho de produção).
@@ -466,6 +490,10 @@ def _of_legado(user_id: int, dia: date, categoria: str, alvo: str) -> int:
     a regra do `posted_at` existir fora do crédito: nelas `day_tz(criado_em)`
     devolve o DIA ANTERIOR. É SQL porque o importador de hoje não escreve mais
     assim (grava meio-dia local) — a forma é histórica, não inventada.
+
+    O `criado_em` vai pelo `_meia_noite_utc`, não pela `date` crua: é o instante
+    que está EM DISCO na produção, e é o que faz este caso discriminar agora que
+    a sessão do teste roda no fuso do app.
     """
     db.add_launch_and_update_balance(
         user_id, "despesa", 13, alvo, None, categoria=categoria, criado_em=_hoje_as(9),
@@ -475,7 +503,7 @@ def _of_legado(user_id: int, dia: date, categoria: str, alvo: str) -> int:
             "update launches set source='open_finance', posted_at=%s, criado_em=%s, "
             "efeitos='{\"delta_conta\": 0}'::jsonb "
             "where user_id=%s and alvo=%s returning id",
-            (dia, dia, user_id, alvo),
+            (dia, _meia_noite_utc(dia), user_id, alvo),
         )
         lid = cur.fetchone()["id"]
         conn.commit()
@@ -483,10 +511,27 @@ def _of_legado(user_id: int, dia: date, categoria: str, alvo: str) -> int:
 
 
 # As DUAS pernas do `has_time=false`, cada uma no seu teste porque cada uma é um
-# controle negativo separado: com `launch_day` trocado por `day_tz(r["dt"])` em
-# db/accounts.py e `PGTZ=UTC`, as duas ficam vermelhas — juntas num teste só, a
-# primeira esconderia a segunda. Em sessão -03 elas passam mesmo quebradas: o par
-# SÓ discrimina em UTC, que é o fuso da sessão da produção.
+# controle negativo separado — juntas num teste só, a primeira esconderia a
+# segunda.
+#
+# Controle NEGATIVO do grupo, medido em 29/08/2026 na configuração NORMAL (sem
+# `PGTZ` na linha de comando, que desde `utils_date.align_process_tz` não muda
+# mais nada): troque `"data": launch_day(...)` por `r["dt"].date()` em
+# db/accounts.py → 4 vermelhos, todos da perna do Open Finance
+# (`test_open_finance_legado_diz_o_dia_da_transacao`,
+# `test_a_sync_do_open_finance_e_dona_da_data`,
+# `test_editar_a_nota_de_uma_linha_do_open_finance_nao_move_o_dia`,
+# `test_editar_so_a_nota_de_uma_linha_do_open_finance_grava`). Eram 1 antes de os
+# fabricadores gravarem `criado_em` como MEIA-NOITE UTC absoluta
+# (`_meia_noite_utc`), que é o que a produção tem em disco.
+#
+# A perna do CRÉDITO (`test_credito_diz_o_dia_da_compra_e_nao_do_instante` e
+# `test_credito_nao_promete_hora_que_nao_tem`) é controle POSITIVO declarado, não
+# negativo: ela media a promoção de `ct.purchased_at::timestamp` (naive) pelo
+# fuso da SESSÃO, e com a sessão no fuso do app essa promoção cai na meia-noite
+# certa — o hazard sumiu, e não há instante a fabricar que o traga de volta
+# (`purchased_at` é `date`, sem hora nenhuma). O que os dois continuam provando é
+# a REGRA: sem hora confiável, o dia é o da COMPRA e não se promete hora.
 #
 # O extrato OFX/CSV/PDF NÃO está aqui de propósito: os dois escritores gravam
 # `criado_em` = meio-dia local do `posted_at` (statement_import.py:666,
@@ -496,9 +541,11 @@ def _of_legado(user_id: int, dia: date, categoria: str, alvo: str) -> int:
 
 def test_credito_diz_o_dia_da_compra_e_nao_do_instante(pro_user_id):
     """A UNION promove `ct.purchased_at::timestamp` (naive) a `timestamptz` pelo
-    fuso da SESSÃO. A sessão da produção é `Etc/UTC` (medido no Railway em
-    27/08/2026 08:46 UTC): 27/08 00:00 vira 27/08 00:00Z e `day_tz` devolvia
-    26/08 — toda compra de cartão saía com o dia anterior."""
+    fuso da SESSÃO. Enquanto a sessão da produção era `Etc/UTC` (medido no
+    Railway em 27/08/2026 08:46 UTC), 27/08 00:00 virava 27/08 00:00Z e `day_tz`
+    devolvia 26/08 — toda compra de cartão saía com o dia anterior. Hoje a sessão
+    é a do app (`utils_date.align_process_tz`) e este caso é POSITIVO: prova que
+    o dia continua sendo o da COMPRA, não o do instante."""
     cat = _compra_no_credito(pro_user_id, "gastei 90 no crédito na farmacia")
     credito = [r for r in db.list_launches_by_category(pro_user_id, cat)[0]
                if r["fonte"] == "credito"]
@@ -600,8 +647,9 @@ def _of_do_dia(user_id: int, dia: date, *, legado: bool = False,
     source='open_finance'` à mão não existe espelho, e a sync não vê a linha.
 
     `legado=True` envelhece a linha para a forma de ANTES de c474fba
-    (18/08/2026): `criado_em` = a `date` CRUA (meia-noite no fuso da SESSÃO, UTC
-    na produção) e `efeitos` sem `time_known` (logo `has_time=false`). São
+    (18/08/2026): `criado_em` = meia-noite UTC (o instante que a `date` CRUA
+    daquele importador virava sob a sessão da produção, ver `_meia_noite_utc`) e
+    `efeitos` sem `time_known` (logo `has_time=false`). São
     EXATAMENTE as duas colunas que aquele commit mudou (`git show
     c474fba^:db/open_finance.py`); todo o resto — source, external_id,
     posted_at, o vínculo com o espelho — continua vindo do importador de hoje.
@@ -643,7 +691,7 @@ def _of_do_dia(user_id: int, dia: date, *, legado: bool = False,
             cur.execute(
                 "update launches set criado_em=%s, efeitos = efeitos - 'time_known' "
                 "where id=%s",
-                (dia, lid),
+                (_meia_noite_utc(dia), lid),
             )
         conn.commit()
     return lid, of_tx_id
@@ -1064,11 +1112,11 @@ def test_ordem_e_total_com_credito_e_launches_no_mesmo_dia(pro_user_id):
         (cat, compras[0]["purchased_at"])}, compras
 
     # O launch entra no MESMO instante das compras. O `dt` da perna de crédito é
-    # `purchased_at::timestamp`, que o Postgres lê no fuso da SESSÃO (`PGTZ`):
-    # uma hora fixa em Python (`_hoje_as(9)`) empatava com ele só por
-    # coincidência de fuso — sob `TZ=Asia/Tokyo` empatava, em São Paulo não.
-    # Lendo o `dt` de volta e semeando com ELE, o empate existe em qualquer
-    # `TZ`/`PGTZ`.
+    # `purchased_at::timestamp`, que o Postgres lê no fuso da SESSÃO: uma hora
+    # fixa em Python (`_hoje_as(9)`) empatava com ele só por coincidência de fuso
+    # — sob `TZ=Asia/Tokyo` empatava, em São Paulo não. Lendo o `dt` de volta e
+    # semeando com ELE, o empate existe em qualquer fuso, inclusive nos que
+    # `align_process_tz` passa a impor às duas pontas de uma vez.
     so_credito, _ = db.list_launches_by_category(pro_user_id, cat, limit=1)
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 99, "remedio", None,
@@ -1165,11 +1213,14 @@ def test_ordem_e_total_com_credito_e_launches_no_mesmo_dia(pro_user_id):
 # lançamentos" dizia 27/08. O bug do `.date()` era PRÉ-EXISTENTE; a divergência
 # entre as duas portas nasceu aqui, e §2 pede a classe, não o caso.
 #
-# Controle NEGATIVO: volte `day_tz(criado)` para `criado.date()` em
-# core/handlers/launches.py e este teste fica vermelho em qualquer sessão fora
-# de America/Sao_Paulo (um dos dois instantes cruza a meia-noite pra cada lado).
-# Controle POSITIVO: `test_data_e_o_dia_de_parede_em_sao_paulo` (acima) prova que
-# a outra porta não mudou de resposta.
+# Este teste virou controle POSITIVO declarado. O negativo dele era: volte
+# `day_tz(criado)` para `criado.date()` em core/handlers/launches.py, e ele
+# ficava vermelho em qualquer sessão fora de America/Sao_Paulo. Desde
+# `utils_date.align_process_tz` a sessão É a do app, e `.date()` cru passa a
+# devolver o mesmo dia — o hazard deixou de existir, medido. Fica porque a
+# pergunta que ele responde não é a do fuso: as DUAS portas têm de imprimir o
+# mesmo dia para o mesmo lançamento, e isso quebraria de novo se alguém mudasse
+# só uma delas.
 
 def test_as_duas_listagens_dizem_o_mesmo_dia(pro_user_id):
     # 00:30 cruza a meia-noite pra oeste, 21:30 pra leste: em qualquer fuso de

@@ -685,8 +685,10 @@ def list_launches_by_category(
       tipo='despesa' faria o chamador rotear o delete pro endpoint de launches e
       apagar OUTRO registro. Nulo na origem = colisão impossível. `data` é o dia
       por `launch_day` (utils_date): o `posted_at` gravado quando `has_time` é
-      falso, senão o dia de PAREDE de `criado_em` (`day_tz`); nunca o `::date`
-      do fuso da sessão. `criado_em` é o instante cheio (o editor do dashboard
+      falso, senão o dia de PAREDE de `criado_em` (`day_tz`); nunca um `::date`
+      em SQL, que responderia a pergunta errada onde a linha não tem hora
+      (mesmo agora que a sessão do Postgres roda no fuso do app, por
+      `utils_date.align_process_tz`). `criado_em` é o instante cheio (o editor do dashboard
       preenche "Data e hora" com ele — `data` sozinho abria o campo vazio).
       Na perna de `launches`, `posted_at` + `has_time` são o mesmo par (e o mesmo
       `LAUNCH_HAS_TIME_SQL`) que a Visão Geral usa na query 4 do dashboard: sem
@@ -899,10 +901,10 @@ def list_launches_by_category(
             "nota": r["nota"],
             "alvo": r["alvo"],
             # `launch_day` (utils_date), não `.date()` nem `day_tz` seco: o `.date()`
-            # cru devolve o dia no fuso da SESSÃO do Postgres (UTC na produção) e um
-            # gasto das 21:30 em São Paulo sairia com o dia SEGUINTE — o MESMO
-            # lançamento com dia diferente aqui e em "meus últimos lançamentos"
-            # (`list_launches`, core/handlers/launches.py). E onde `has_time` é
+            # cru devolve o dia no fuso da SESSÃO do Postgres, que ERA UTC na
+            # produção, e um gasto das 21:30 em São Paulo saía com o dia SEGUINTE
+            # — o MESMO lançamento com dia diferente aqui e em "meus últimos
+            # lançamentos" (`list_launches`, core/handlers/launches.py). E onde `has_time` é
             # falso quem manda é `posted_at` — QUAIS linhas são essas, e por que
             # os importadores de HOJE ficam de fora, estão no docstring de
             # `launch_day` (utils_date), que é o dono dessa enumeração.

@@ -242,7 +242,10 @@ def test_nota_alvo_e_criado_em_saem_na_resposta(pro_user_id):
     assert row["alvo"] == "recorrente:Netflix"
     # `data` é o dia de PAREDE em São Paulo; `criado_em` sai no fuso da sessão do
     # Postgres. Comparar as duas STRINGS cruas dava falso vermelho toda noite
-    # depois das 21h (ou toda madrugada, dependendo do fuso da sessão).
+    # depois das 21h (ou toda madrugada, dependendo do fuso da sessão). Desde
+    # `utils_date.align_process_tz` a sessão é a do app e as duas strings
+    # coincidiriam; a conversão explícita fica porque o que o endpoint promete é
+    # o dia de São Paulo, não "o dia de qualquer fuso que o servidor tenha".
     from datetime import datetime
     from zoneinfo import ZoneInfo
     inst = datetime.fromisoformat(row["criado_em"])
