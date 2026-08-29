@@ -2749,10 +2749,12 @@ async def auth_refresh(request: Request, response: Response):
     do **cookie** de access — que valida assinatura, `exp` e `type`, e NÃO a
     revogação de sessão por `jti` nem exclusão agendada de conta. Duas
     consequências, as duas de propósito: sessão revogada com JWT ainda no prazo
-    cai em 400 (tudo bem — quem revogou, logout ou exclusão, já limpou o
-    aparelho na mesma origem), e quem se autentica por `Authorization: Bearer`
-    cai em 401 (é o comportamento de sempre; os dois clientes desta rota,
-    `login.html` e o interceptor, são de cookie).
+    cai em 400 — e tudo bem, porque chegar neste ramo exige ter perdido o cookie
+    de refresh TAMBÉM. Enquanto ele estiver no jar a revogação é vista pelo
+    `consume_refresh_token` e o ramo é 401, mesmo quando quem revogou foi outro
+    aparelho (reset de senha → `revoke_user_refresh_tokens`). E quem se autentica
+    por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
+    clientes desta rota, `login.html` e o interceptor, são de cookie).
 
     O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
     `HTTPException` descarta os headers do sub-response (medido, #175). Está
