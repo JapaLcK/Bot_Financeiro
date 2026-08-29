@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
-from time import tzset
+import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -73,7 +73,37 @@ def _restaura_fuso():
     # reaplicaria a cada teardown e deixaria `test_o_processo_roda_no_fuso_do_app`
     # verde mesmo com o conserto revertido — teste tautológico por efeito de
     # ordem. `tzset()` só relê o `TZ` que a linha acima acabou de restaurar.
-    tzset()
+    #
+    # Acesso GUARDADO, igual ao que `align_process_tz` faz: `time.tzset` é POSIX
+    # e não existe no Windows, que o `docs/readme.md:18` lista como suportado.
+    # Como `from time import tzset` no topo levantava na COLETA, o arquivo
+    # inteiro morria lá — inclusive os dois casos que existem para provar que o
+    # Windows está tratado. Consertar a produção e esquecer o teste é a mesma
+    # instância-em-vez-de-categoria de sempre (Codex #180, P2).
+    tzset = getattr(time_module, "tzset", None)
+    if tzset is not None:
+        tzset()
+
+
+def _tzif(*partes: str) -> bytes:
+    """Bytes de um TZif real, achado pelo `TZPATH` do próprio Python.
+
+    `/usr/share/zoneinfo` é layout de Unix e não existe no Windows — que o
+    `docs/readme.md:18` lista como suportado —, nem numa imagem slim sem banco
+    de fusos do sistema. O `zoneinfo.TZPATH` é onde o Python de verdade procura,
+    então é a única fonte portátil (Codex #180, P2).
+
+    `skip` e não falha: sem banco de fusos no disco não há como montar o cenário
+    "o `ZoneInfo` resolve e a libc não", e um ERROR ali acusaria o ambiente, não
+    o código.
+    """
+    import zoneinfo
+
+    for raiz in zoneinfo.TZPATH:
+        alvo = pathlib.Path(raiz).joinpath(*partes)
+        if alvo.is_file():
+            return alvo.read_bytes()
+    pytest.skip(f"sem TZif de {'/'.join(partes)} no TZPATH: {zoneinfo.TZPATH}")
 
 
 # ── 1. As três portas do banco ───────────────────────────────────────────────
@@ -498,7 +528,7 @@ def test_libc_que_nao_conhece_o_fuso_nao_passa_calada(tmp_path, monkeypatch):
     # arquivo real para não depender de gerar TZif à mão.
     (tmp_path / "Fake").mkdir()
     (tmp_path / "Fake" / "Zone").write_bytes(
-        (pathlib.Path("/usr/share/zoneinfo") / "Asia" / "Tokyo").read_bytes()
+        _tzif("Asia", "Tokyo")
     )
     monkeypatch.setenv("REPORT_TIMEZONE", "Fake/Zone")
     zoneinfo.reset_tzpath(to=[str(tmp_path)])
@@ -527,7 +557,7 @@ def test_libc_que_diverge_so_no_verao_tambem_e_pega(tmp_path, monkeypatch):
 
     (tmp_path / "Fake").mkdir()
     (tmp_path / "Fake" / "Zone").write_bytes(
-        (pathlib.Path("/usr/share/zoneinfo") / "Europe" / "London").read_bytes()
+        _tzif("Europe", "London")
     )
     monkeypatch.setenv("REPORT_TIMEZONE", "Fake/Zone")
     zoneinfo.reset_tzpath(to=[str(tmp_path)])
