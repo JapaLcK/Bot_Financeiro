@@ -239,6 +239,16 @@ def test_mensagem_nao_finge_sucesso_quando_sobrou(user_id, monkeypatch):
     assert "#6" not in msg and "#7 " not in msg, msg
 
 
+def test_amostra_ids_produz_os_exemplos_da_propria_docstring():
+    """A docstring de `_amostra_ids` já mentiu uma vez ('#3, #7, #9 e mais 4' —
+    não produzível: com 3 ids `resto` dá -2 e a cauda nem aparece). Os dois
+    exemplos que ela cita agora ficam presos aqui."""
+    from core.services.ai_chat.tools.launches import _amostra_ids
+
+    assert _amostra_ids([3, 7, 9]) == "#3, #7, #9"
+    assert _amostra_ids([3, 7, 9, 11, 12, 15, 20]) == "#3, #7, #9, #11, #12 e mais 2"
+
+
 def test_mensagem_vazio_continua_dizendo_que_nao_havia_nada(user_id, monkeypatch):
     """Controle positivo: o caso legítimo 'histórico já vazio' não regrediu."""
     from core.services.ai_chat.tools import launches as tool_mod
