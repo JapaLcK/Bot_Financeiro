@@ -180,6 +180,37 @@ def clear_pending_action(user_id: int) -> None:
         conn.commit()
 
 
+def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
+    """Apaga a pendência SÓ SE ela ainda for a que você leu. True se apagou.
+
+    Irmã do `consume_pending_action` de `db/pending.py:79` — outra tabela,
+    mesmo contrato. `created_at` é o token de versão: toda gravação o reescreve
+    (`set_pending_action`), então ele fecha o ABA (a mesma pergunta armada de
+    novo nasce com created_at novo e o CAS atrasado perde).
+
+    False significa "a linha que eu li não está mais lá". Quem perde:
+
+    - **destrutivo / dinheiro** — NÃO executa. Sem esse porteiro, dois POSTs
+      simultâneos em `/ai/chat` executam a mesma confirmação duas vezes.
+    - **cancelamento explícito ("não")** — perder NÃO é "não havia nada": quem
+      consumiu a linha foi a outra requisição. Mas NÃO dá pra saber o que ela
+      fez: os três consumidores abaixo apagam a mesma linha e o retorno é um
+      bool. Quem perde não pode dizer "não fiz nada" nem "já foi executada" —
+      só que a pendência já foi resolvida (`_CAS_PERDIDO` em
+      `ai_chat/runner.py`, a mesma frase do "sim" perdedor).
+    - **abandono por mudança de assunto** — ignora o retorno: não há resposta
+      a corrigir, a mensagem nova é atendida igual.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "delete from ai_pending_actions where user_id = %s and created_at = %s",
+            (int(user_id), pending.get("created_at")),
+        )
+        apagou = cur.rowcount == 1
+        conn.commit()
+        return apagou
+
+
 # ─── Rate limit mensal ──────────────────────────────────────────────────────
 
 def _current_month_start() -> date:

@@ -2,6 +2,7 @@
 db/accounts.py — Saldo, lançamentos e importação OFX.
 """
 import json
+import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 
@@ -15,6 +16,8 @@ from .connection import (
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .users import ensure_user, ensure_user_tx
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -242,6 +245,26 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
 
 class LaunchDateLockedError(ValueError):
     """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
+
+
+# As duas condições PERMANENTES de `delete_launch_and_rollback` que o usuário
+# precisa distinguir. São `ValueError` por tipo, não por código, porque o texto
+# em PT-BR é user-facing por um caminho: o `HTTPException(400, detail=str(exc))`
+# do dashboard (`frontend/finance_bot_websocket_custom.py`). Trocar por código
+# faria o modal do app mostrar `LAUNCH_NO_EFFECTS` cru; discriminar pelo tipo
+# mantém `str(e)` byte a byte igual.
+#
+# Os outros `ValueError` da função (delta_pocket/delta_invest sem nome, dado
+# corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma causa
+# inesperada — ramo técnico, com log e retry — então nomeá-los seria classe sem
+# chamador.
+
+class LaunchNoEffects(ValueError):
+    """O lançamento não guarda `efeitos`, então não dá pra reverter o saldo."""
+
+
+class InvestmentLotHasWithdrawal(ValueError):
+    """O lote do aporte já teve resgate. TEMPORÁRIA: apagar o resgate destrava."""
 
 
 def update_launch_fields(
@@ -1013,8 +1036,15 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # `for update`: serializa duas reversões do MESMO lançamento. Sem
+            # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
+            # `delete` da segunda casa zero linhas sem levantar — o dinheiro
+            # sai em dobro. Com ele, quem perde relê depois do commit do
+            # vencedor, não acha a linha e levanta LookupError("NOT_FOUND"),
+            # que todos os chamadores já tratam.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos from launches where id=%s and user_id=%s",
+                "select id, tipo, valor, alvo, efeitos from launches "
+                "where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()
@@ -1023,7 +1053,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
             efeitos = row.get("efeitos")
             if efeitos is None:
-                raise ValueError("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
+                raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
             if isinstance(efeitos, str):
                 efeitos = json.loads(efeitos)
@@ -1160,7 +1190,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                         lot["status"] != "open"
                         or Decimal(str(lot["principal_remaining"])) != Decimal(str(lot["principal_initial"]))
                     ):
-                        raise ValueError("Não é possível desfazer este aporte: o lote já teve resgate.")
+                        raise InvestmentLotHasWithdrawal(
+                            "Não é possível desfazer este aporte: o lote já teve resgate."
+                        )
                     if lot and not investment_id:
                         investment_id = lot["investment_id"]
                     cur.execute(
@@ -1306,30 +1338,78 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "failed": M}. `failed` cobre lançamentos legados
-    sem `efeitos` (não dá pra reverter com segurança) — esses são mantidos
-    intactos pra não corromper o saldo, em vez de apagados às cegas.
+    Retorna {"deleted": N, "kept_no_effects": [...], "errors": [...],
+    "remaining": M | None}, com os ids em `user_seq` (o "#N" que o usuário vê).
+
+    As duas listas são causas DIFERENTES e a mensagem ao usuário precisa
+    distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos` (não
+    dá pra reverter com segurança — mantidos intactos de propósito, em vez de
+    apagados às cegas); `errors` é falha técnica inesperada (conexão, deadlock,
+    permissão, bug). O `failed` único de antes dizia "lançamento antigo" para
+    um banco caído.
+
+    `remaining` é uma RECONTAGEM depois do loop: é a única checagem que pega o
+    caso em que o delete casou zero linhas e ninguém levantou. É uma
+    CONFERÊNCIA, não um fato do trabalho — se ela mesma falhar (blip de
+    conexão, timeout de pool), vem `None` ("não conferi") e o que já foi
+    apagado continua sendo relatado. Deixar a exceção subir daqui fazia o
+    usuário ler "não consegui apagar" DEPOIS de tudo apagado.
     """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from launches "
+                "select id, user_seq, efeitos from launches "
                 f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER} "
                 "order by id desc",
                 (user_id,),
             )
-            ids = [row["id"] for row in cur.fetchall()]
+            rows = cur.fetchall()
+
+    # Falha PREVISTA, separada antes do loop: sem `efeitos` o
+    # delete_launch_and_rollback levantaria ValueError de qualquer jeito, então
+    # o comportamento é idêntico — e a mensagem ao usuário deixa de depender de
+    # string-sniffing do texto da exceção.
+    def _seq(r):
+        return r["user_seq"] or r["id"]
+
+    kept_no_effects = [_seq(r) for r in rows if r["efeitos"] is None]
+    apagaveis = [(r["id"], _seq(r)) for r in rows if r["efeitos"] is not None]
 
     deleted = 0
-    failed = 0
-    for lid in ids:
+    errors: list = []
+    for lid, seq in apagaveis:
         try:
             delete_launch_and_rollback(user_id, lid)
             deleted += 1
-        except Exception:
-            failed += 1
-    return {"deleted": deleted, "failed": failed}
+        except Exception as e:
+            errors.append(seq)
+            # Sem str(e) e sem exc_info: o texto do psycopg pode trazer o valor
+            # da linha que violou a constraint. Nome do tipo + sqlstate já
+            # separam conexão (08006), deadlock (40P01), permissão (42501) e
+            # bug de código (TypeError/AttributeError).
+            # launch_id (interno) E user_seq: a queixa do usuário cita "#2",
+            # o log cita 19616 — sem os dois, suporte não correlaciona.
+            logger.error(
+                "delete_all_launches: falha inesperada user_id=%s launch_id=%s user_seq=%s causa=%s sqlstate=%s",
+                user_id, lid, seq, type(e).__name__, getattr(e, "sqlstate", None),
+            )
+
+    try:
+        remaining = count_launches(user_id)
+    except Exception as e:
+        remaining = None
+        logger.error(
+            "delete_all_launches: recontagem falhou user_id=%s causa=%s sqlstate=%s",
+            user_id, type(e).__name__, getattr(e, "sqlstate", None),
+        )
+
+    return {
+        "deleted": deleted,
+        "kept_no_effects": kept_no_effects,
+        "errors": errors,
+        "remaining": remaining,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -23,14 +23,29 @@ Write (PEDE confirmação — destrutivo):
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time
 from typing import Any
 
 import db
+# Helper ÚNICO das três portas, com o nível por parâmetro (a doc dele explica o
+# critério). `core/handlers/credit.py` já importava daqui; a cópia local desta
+# tool era a única sobrando, e ela logava ERROR onde o WhatsApp logava WARNING —
+# a mesma condição contava como erro no admin por uma porta e não pela outra.
+from core.handlers.pending import _log_falha
 from utils_date import _tz
 
 from .._context import CURRENT_PLATFORM
 from ._base import Tool
+
+# A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
+# e a descrição da linha (`DETAIL: Key (…)=(…)`), e "connection to server was
+# lost" não diz nada pra quem só quer apagar um gasto. A mensagem genérica ainda
+# tem de dizer o que fazer — sem isso o usuário fica sem ação.
+_ERRO_APAGAR = (
+    "🐷 Não consegui apagar agora — deu um erro do meu lado. "
+    "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
+)
 
 
 def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -419,14 +434,39 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
             except LookupError:
                 return f"🐷 Não achei o lançamento #{lid}."
+            except db.LaunchNoEffects as e:
+                # Lançamento sem `efeitos`: condição PERMANENTE, não erro
+                # técnico. `_ERRO_APAGAR` manda tentar de novo em alguns
+                # minutos — conselho que nunca ia funcionar aqui. Mesma
+                # distinção do `delete_all_launches` (`kept_no_effects` ×
+                # `errors`).
+                _log_falha("delete_launch_sem_efeitos", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return (
+                    f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
+                    f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
+                )
+            except db.InvestmentLotHasWithdrawal as e:
+                # TEMPORÁRIA e com contorno: apagar o resgate reabre o lote.
+                # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
+                # (o dado está inteiro) servem aqui.
+                _log_falha("delete_launch_lote_com_resgate", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return (
+                    f"🐷 Não dá pra desfazer o aporte #{lid}: esse lote já teve "
+                    f"resgate. Apaga o resgate primeiro e depois volta aqui pra "
+                    f"apagar o aporte."
+                )
             except Exception as e:
-                return f"🐷 Não consegui apagar: {e}"
+                _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
+                return _ERRO_APAGAR
 
         # 2. id de credit_transaction
         try:
             result = db.undo_credit_transaction(user_id, lid)
         except Exception as e:
-            return f"🐷 Não consegui apagar: {e}"
+            _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=lid)
+            return _ERRO_APAGAR
         if result is not None:
             removed = int(result.get("removed_count") or 1)
             if removed > 1:
@@ -439,7 +479,8 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         try:
             result = db.undo_installment_group(user_id, group_id)
         except Exception as e:
-            return f"🐷 Não consegui apagar: {e}"
+            _log_falha("undo_installment_group", user_id, e, group_id=group_id)
+            return _ERRO_APAGAR
         if result:
             removed = int(result.get("removed_count") or 0)
             return f"🗑️ Parcelamento {raw_id.upper()} apagado ({removed} parcelas)."
@@ -469,29 +510,68 @@ def _delete_all_launches_validate(user_id: int, args: dict[str, Any]) -> str | N
     return None
 
 
+def _amostra_ids(ids: list) -> str:
+    """Amostra de 5 em user_seq (o #N que o user vê), com cauda só quando sobra:
+    7 ids → '#3, #7, #9, #11, #12 e mais 2'; 3 ids → '#3, #7, #9' (sem cauda).
+    Exemplo medido chamando a função — o anterior ('#3, #7, #9 e mais 4') não
+    era produzível: com 3 ids `resto` dá -2 e a cauda nem aparece."""
+    resto = len(ids) - 5
+    amostra = ", ".join(f"#{i}" for i in ids[:5])
+    return f"{amostra} e mais {resto}" if resto > 0 else amostra
+
+
 def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         result = db.delete_all_launches_and_rollback(user_id)
     except Exception as e:
-        return f"🐷 Não consegui apagar: {e}"
+        _log_falha("delete_all_launches", user_id, e)
+        return _ERRO_APAGAR
 
     deleted = int(result.get("deleted") or 0)
-    failed = int(result.get("failed") or 0)
-    if deleted == 0 and failed == 0:
+    antigos = result.get("kept_no_effects") or []
+    erros = result.get("errors") or []
+    # None = a recontagem falhou ("não conferi"), NÃO "sobrou zero".
+    sobraram = result.get("remaining")
+
+    # "não havia nada" SÓ quando não havia mesmo: com linha contada antes,
+    # dizer isso é fingir sucesso.
+    if not deleted and not antigos and not erros and not sobraram:
         return "🐷 Não havia nenhum lançamento pra apagar."
 
-    plural = "s" if deleted != 1 else ""
-    msg = (
-        f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
-        f"saldo. Suas caixinhas e investimentos seguem intactos."
-    )
-    if failed:
-        fp = "s" if failed != 1 else ""
-        msg += (
-            f"\n⚠️ {failed} lançamento{fp} antigo{fp} não pôde ser revertido "
-            f"automaticamente e foi mantido."
+    partes = []
+    if deleted:
+        plural = "s" if deleted != 1 else ""
+        partes.append(
+            f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
+            f"saldo. Suas caixinhas e investimentos seguem intactos."
         )
-    return msg
+    # Duas frases distintas: "antigo demais pra reverter" e "erro técnico" são
+    # causas diferentes, e uma queda de banco não pode sair como lançamento antigo.
+    if antigos:
+        p = "s" if len(antigos) != 1 else ""
+        partes.append(
+            f"⚠️ {len(antigos)} lançamento{p} antigo{p} não guarda o que precisaria ser "
+            f"revertido, então mantive intacto pra não bagunçar seu saldo: "
+            f"{_amostra_ids(antigos)}."
+        )
+    if erros:
+        p = "s" if len(erros) != 1 else ""
+        partes.append(
+            f"❌ {len(erros)} lançamento{p} deu erro técnico e continua aí: "
+            f"{_amostra_ids(erros)}. Já registrei a falha — tenta de novo em alguns minutos."
+        )
+    # `remaining` é conferência, não fato novo: quando bate com o que as duas
+    # listas já disseram, repetir "sobrou N" só duplica a mensagem. Fala apenas
+    # quando DISCORDA — que é o caso que a recontagem existe pra pegar (delete
+    # casou zero linhas e ninguém levantou). `None` não discorda de nada.
+    esperado = len(antigos) + len(erros)
+    if sobraram is not None and sobraram != esperado:
+        p = "s" if sobraram != 1 else ""
+        partes.append(
+            f"⚠️ A conferência não bateu: ainda tem {sobraram} lançamento{p} no "
+            f"histórico, e eu esperava {esperado}. Dá uma olhada no seu extrato."
+        )
+    return "\n".join(partes)
 
 
 TOOLS: list[Tool] = [

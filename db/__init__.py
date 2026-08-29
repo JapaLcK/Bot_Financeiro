@@ -57,6 +57,8 @@ from .accounts import (
     update_launch_category,
     update_launch_fields,
     LaunchDateLockedError,
+    LaunchNoEffects,
+    InvestmentLotHasWithdrawal,
     update_launch_categories_bulk,
     export_launches,
     get_launches_by_period,
@@ -403,6 +405,7 @@ from .ai_chat import (
     set_pending_action as ai_set_pending_action,
     get_pending_action as ai_get_pending_action,
     clear_pending_action as ai_clear_pending_action,
+    consume_pending_action as ai_consume_pending_action,
     get_usage_this_month as ai_get_usage_this_month,
     increment_usage as ai_increment_usage,
     log_ai_fallback,
@@ -458,7 +461,7 @@ __all__ = [
     "list_launches_by_tipo", "list_launches_by_category",
     "latest_launch_id", "get_last_inserted_launch",
     "resolve_user_seq_to_id", "get_launch_user_seq", "display_id_for",
-    "update_launch_category", "update_launch_fields", "LaunchDateLockedError", "update_launch_categories_bulk", "export_launches",
+    "update_launch_category", "update_launch_fields", "LaunchDateLockedError", "LaunchNoEffects", "InvestmentLotHasWithdrawal", "update_launch_categories_bulk", "export_launches",
     "get_launches_by_period", "get_summary_by_period", "get_top_expense_categories",
     "get_largest_expenses", "get_spending_trend", "get_internal_movement_total",
     "delete_launch_and_rollback", "count_launches", "delete_all_launches_and_rollback",
@@ -583,6 +586,7 @@ __all__ = [
     # ai chat
     "ai_append_message", "ai_get_recent_messages",
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
+    "ai_consume_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",
     "AI_DEFAULT_CONTEXT_WINDOW",
     # analytics (Sprint 6 + 7)

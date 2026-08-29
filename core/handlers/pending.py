@@ -3,8 +3,46 @@
 Resolve ações pendentes: confirmações de delete, lançamentos de mídia e esclarecimentos.
 """
 from __future__ import annotations
+import logging
+
 import db
 from utils_text import fmt_brl
+
+logger = logging.getLogger(__name__)
+
+
+def _log_falha(op: str, user_id: int, e: Exception, *,
+               nivel: int = logging.ERROR, **extra) -> None:
+    """Causa no log, nunca na mensagem: `str(e)` do psycopg pode trazer o valor
+    e a descrição da linha (`DETAIL: Key (…)=(…)`). Nome do tipo + sqlstate já
+    separam conexão (08006), deadlock (40P01), permissão (42501) e bug de
+    código. Sem `exc_info` pelo mesmo motivo.
+
+    Helper ÚNICO das três portas (esta, `core/handlers/credit.py` e
+    `core/services/ai_chat/tools/launches.py`): duas cópias com níveis
+    diferentes faziam a MESMA condição contar como erro numa porta e não na
+    outra. O nível importa fora do log — `_DashboardHandler`
+    (`core/observability.py`) espelha WARNING e ERROR em `system_event_logs`
+    com `level=levelname.lower()`, e `core/admin_dashboard.py` conta
+    `backend_errors_24h WHERE level='error'`.
+
+    `nivel` segue a MESMA distinção dos `except` daqui, não outra:
+      - condição de domínio ESPERADA (`LaunchNoEffects`,
+        `InvestmentLotHasWithdrawal`) → `logging.WARNING`. Inflar o contador de
+        erros do admin com aporte que teve resgate é ruído, não incidente.
+      - falha técnica/inesperada (`except Exception`, `ValueError` sem código
+        conhecido) → `logging.ERROR`, que é o default: quem esquecer de
+        classificar erra para o lado barulhento, não para o lado silencioso.
+
+    `nivel` é keyword-only por isso não colide com `**extra`; um campo extra
+    chamado "nivel" seria engolido (nenhum call site usa).
+    """
+    logger.log(
+        nivel,
+        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
+        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
+        type(e).__name__, getattr(e, "sqlstate", None),
+    )
 
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
@@ -134,7 +172,17 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     payload = pending.get("payload", {})
 
     if not confirmed:
-        # Abandono: se perdeu o CAS, não havia nada nosso para cancelar.
+        # Retorno IGNORADO de propósito: esta porta é o WhatsApp, serializado
+        # por worker único, então "outra tarefa executou entre a leitura e o
+        # cancelamento" não é alcançável aqui. No `/ai/chat` é, e lá o retorno
+        # é checado (`ai_chat/runner.py`) — perder o CAS num cancelamento
+        # significa que a outra requisição EXECUTOU, não que não havia nada.
+        # A premissa depende de `/wa/dev/simulate` continuar fora do ar: ela
+        # chama `process_payload` direto, furando a `_queue` do worker único
+        # (`adapters/whatsapp/wa_app.py`). Hoje a rota só é registrada com
+        # `ENABLE_DEV_ENDPOINTS` ligado (default OFF) e em produção responde
+        # 404 (medido 2026-08-28). Ligar essa flag em produção quebra esta
+        # premissa — e a rota não tem auth própria.
         db.consume_pending_action(user_id, pending)
         return "❌ Ação cancelada."
 
@@ -147,27 +195,77 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         # as duas tarefas já teriam apagado o lançamento.
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui apagar o lançamento #{display_id} agora — deu "
+            f"erro do meu lado. Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_launch_and_rollback(user_id, launch_id)
             return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
+        except LookupError:
+            # NOT_FOUND (`db/accounts.py`): o lançamento sumiu entre a pergunta
+            # e o "sim" — outra porta (dashboard, /ai/chat) apagou dentro da
+            # janela de 10 min da pendência. Condição PERMANENTE: mandar tentar
+            # de novo é conselho que nunca vai funcionar.
+            return f"🐷 O lançamento **#{display_id}** já não está no seu histórico."
+        except db.LaunchNoEffects as e:
+            # Sem `efeitos` não dá pra reverter o saldo com segurança — também
+            # permanente. É a MESMA distinção do "apagar tudo", que separa
+            # `kept_no_effects` de `errors` (`db/accounts.py`); aqui a porta é
+            # um lançamento só, mas a causa e a frase são as mesmas.
+            _log_falha("delete_launch_sem_efeitos", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"⚠️ O lançamento **#{display_id}** é antigo e não guarda o que "
+                f"precisaria ser revertido, então mantive ele intacto pra não "
+                f"bagunçar seu saldo."
+            )
+        except db.InvestmentLotHasWithdrawal as e:
+            # TEMPORÁRIA, e é a única aqui que tem contorno: apagar o resgate
+            # reabre o lote. "Tenta de novo em alguns minutos" seria falso (o
+            # tempo não destrava nada), e "é antigo" também — o dado está
+            # inteiro. A frase tem de dizer O QUE destrava.
+            _log_falha("delete_launch_lote_com_resgate", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"🐷 Não dá pra desfazer o aporte **#{display_id}**: esse lote já "
+                f"teve resgate. Apaga o resgate primeiro e depois volta aqui pra "
+                f"apagar o aporte."
+            )
         except Exception as e:
-            return f"Erro ao apagar lançamento #{display_id}: {e}"
+            _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)
+            return erro_tecnico
 
     if action_type == "delete_launch_bulk":
         ids = payload.get("launch_ids", [])
         display_ids_map = payload.get("display_ids") or {}
         if not db.consume_pending_action(user_id, pending):
             return None
+
+        # converte ids internos pra user_seq pra exibição (fallback: id interno)
+        def _disp(lid):
+            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
+
         failed = []
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
-            except Exception:
+            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal) as e:
+                # MESMA função e MESMAS condições de domínio do delete_launch
+                # singular (`:211` e `:223`) — sem este ramo, "apaga #2, #5 e #7"
+                # com um lançamento antigo no meio contava como incidente em
+                # `backend_errors_24h` e "apaga #2" sozinho não contava.
+                # A mensagem ao usuário não muda: no bulk é "⚠️ Falha: #N" pras
+                # duas, e ela não promete retry.
                 failed.append(lid)
+                _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
+                           launch_id=lid, user_seq=_disp(lid))
+            except Exception as e:
+                failed.append(lid)
+                # os DOIS ids: a queixa cita "#2", o log cita o id interno.
+                _log_falha("delete_launch_bulk", user_id, e,
+                           launch_id=lid, user_seq=_disp(lid))
         ok_ids = [i for i in ids if i not in failed]
-        # converte ids internos pra user_seq pra exibição (fallback: id interno)
-        def _disp(lid):
-            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
         parts = []
         if ok_ids:
             parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
@@ -179,21 +277,67 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         pocket_name = payload.get("pocket_name")
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui deletar a caixinha **{pocket_name}** agora. "
+            f"Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_pocket(user_id, pocket_name)
             return f"✅ Caixinha **{pocket_name}** deletada."
+        except LookupError:
+            # POCKET_NOT_FOUND: alcançável dentro da janela de 10 min — o
+            # usuário pede pra apagar no WhatsApp, apaga pelo dashboard e só
+            # então responde "sim". Permanente, sem "tenta de novo".
+            return f"🐷 Não achei a caixinha **{pocket_name}** — parece que ela já não existe."
+        except ValueError as e:
+            # POCKET_NOT_ZERO / EMPTY_NAME são CÓDIGOS, não texto de usuário.
+            # Mesma tradução que `core/services/ai_chat/tools/pockets.py` e
+            # `frontend/routes/pockets.py` já fazem. Os dois são permanentes.
+            if "POCKET_NOT_ZERO" in str(e):
+                return (
+                    f"🐷 A caixinha **{pocket_name}** ainda tem saldo. "
+                    f"Saca o que tem dentro antes de apagar."
+                )
+            if "EMPTY_NAME" in str(e):
+                return "🐷 Faltou o nome da caixinha — me diz qual você quer apagar."
+            _log_falha("delete_pocket", user_id, e, pocket=pocket_name)
+            return erro_tecnico
         except Exception as e:
-            return f"Erro ao deletar caixinha: {e}"
+            _log_falha("delete_pocket", user_id, e, pocket=pocket_name)
+            return erro_tecnico
 
     if action_type == "delete_investment":
         investment_name = payload.get("investment_name")
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui deletar o investimento **{investment_name}** "
+            f"agora. Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_investment(user_id, investment_name)
             return f"✅ Investimento **{investment_name}** deletado."
+        except LookupError:
+            # INV_NOT_FOUND: mesma janela de 10 min da caixinha. Permanente.
+            return (
+                f"🐷 Não achei o investimento **{investment_name}** — parece que "
+                f"ele já não existe."
+            )
+        except ValueError as e:
+            # INV_NOT_ZERO / EMPTY_NAME: códigos. Mesma tradução de
+            # `core/services/ai_chat/tools/investments.py`.
+            if "INV_NOT_ZERO" in str(e):
+                return (
+                    f"🐷 O investimento **{investment_name}** ainda tem saldo — "
+                    f"resgata tudo antes de apagar."
+                )
+            if "EMPTY_NAME" in str(e):
+                return "🐷 Faltou o nome do investimento — me diz qual você quer apagar."
+            _log_falha("delete_investment", user_id, e, investment=investment_name)
+            return erro_tecnico
         except Exception as e:
-            return f"Erro ao deletar investimento: {e}"
+            _log_falha("delete_investment", user_id, e, investment=investment_name)
+            return erro_tecnico
 
     # Limpeza de estado: tipo destrutivo sem branch acima. Ignora o resultado.
     db.consume_pending_action(user_id, pending)
