@@ -11,6 +11,18 @@ from utils_text import fmt_brl
 logger = logging.getLogger(__name__)
 
 
+def _log_falha(op: str, user_id: int, e: Exception, **extra) -> None:
+    """Causa no log, nunca na mensagem: `str(e)` do psycopg pode trazer o valor
+    e a descrição da linha (`DETAIL: Key (…)=(…)`). Nome do tipo + sqlstate já
+    separam conexão (08006), deadlock (40P01), permissão (42501) e bug de
+    código. Sem `exc_info` pelo mesmo motivo."""
+    logger.warning(
+        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
+        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
+        type(e).__name__, getattr(e, "sqlstate", None),
+    )
+
+
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     """
     Verifica se existe uma pending_action para o usuário e a resolve.
@@ -138,7 +150,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     payload = pending.get("payload", {})
 
     if not confirmed:
-        # Abandono: se perdeu o CAS, não havia nada nosso para cancelar.
+        # Retorno IGNORADO de propósito: esta porta é o WhatsApp, serializado
+        # por worker único, então "outra tarefa executou entre a leitura e o
+        # cancelamento" não é alcançável aqui. No `/ai/chat` é, e lá o retorno
+        # é checado (`ai_chat/runner.py`) — perder o CAS num cancelamento
+        # significa que a outra requisição EXECUTOU, não que não havia nada.
         db.consume_pending_action(user_id, pending)
         return "❌ Ação cancelada."
 
@@ -155,28 +171,32 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             db.delete_launch_and_rollback(user_id, launch_id)
             return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
         except Exception as e:
-            return f"Erro ao apagar lançamento #{display_id}: {e}"
+            _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"❌ Não consegui apagar o lançamento #{display_id} agora — deu "
+                f"erro do meu lado. Tenta de novo em alguns minutos."
+            )
 
     if action_type == "delete_launch_bulk":
         ids = payload.get("launch_ids", [])
         display_ids_map = payload.get("display_ids") or {}
         if not db.consume_pending_action(user_id, pending):
             return None
+
+        # converte ids internos pra user_seq pra exibição (fallback: id interno)
+        def _disp(lid):
+            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
+
         failed = []
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
             except Exception as e:
                 failed.append(lid)
-                # Sem str(e): o texto do psycopg pode trazer o valor da linha.
-                logger.warning(
-                    "delete_launch_bulk: falha user_id=%s launch_id=%s causa=%s sqlstate=%s",
-                    user_id, lid, type(e).__name__, getattr(e, "sqlstate", None),
-                )
+                # os DOIS ids: a queixa cita "#2", o log cita o id interno.
+                _log_falha("delete_launch_bulk", user_id, e,
+                           launch_id=lid, user_seq=_disp(lid))
         ok_ids = [i for i in ids if i not in failed]
-        # converte ids internos pra user_seq pra exibição (fallback: id interno)
-        def _disp(lid):
-            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
         parts = []
         if ok_ids:
             parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
@@ -192,7 +212,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             db.delete_pocket(user_id, pocket_name)
             return f"✅ Caixinha **{pocket_name}** deletada."
         except Exception as e:
-            return f"Erro ao deletar caixinha: {e}"
+            _log_falha("delete_pocket", user_id, e, pocket=pocket_name)
+            return (
+                f"❌ Não consegui deletar a caixinha **{pocket_name}** agora. "
+                f"Tenta de novo em alguns minutos."
+            )
 
     if action_type == "delete_investment":
         investment_name = payload.get("investment_name")
@@ -202,7 +226,11 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             db.delete_investment(user_id, investment_name)
             return f"✅ Investimento **{investment_name}** deletado."
         except Exception as e:
-            return f"Erro ao deletar investimento: {e}"
+            _log_falha("delete_investment", user_id, e, investment=investment_name)
+            return (
+                f"❌ Não consegui deletar o investimento **{investment_name}** "
+                f"agora. Tenta de novo em alguns minutos."
+            )
 
     # Limpeza de estado: tipo destrutivo sem branch acima. Ignora o resultado.
     db.consume_pending_action(user_id, pending)

@@ -177,3 +177,61 @@ def test_consumo_nao_apaga_pendencia_identica_recriada(user_id):
     ainda = db.get_pending_action(user_id)
     assert ainda is not None, "consumiu a instância nova achando que era a velha"
     assert ainda["created_at"] == nova["created_at"]
+
+
+# ── log do bulk: causa no log, nada sensível ────────────────────────────────
+
+def test_delete_launch_bulk_loga_a_falha_sem_vazar_str_da_excecao(user_id, monkeypatch, caplog):
+    """O `failed` do bulk perdia a causa: banco caído, deadlock e bug de código
+    saíam como o mesmo "⚠️ Falha: #N". Agora vai pro log — com os DOIS ids
+    (interno e user_seq) e sem `str(e)`, que pode trazer valor/descrição da
+    linha no texto do psycopg."""
+    import logging
+
+    lid = _um_lancamento(user_id)
+    db.set_pending_action(user_id, "delete_launch_bulk",
+                          {"launch_ids": [lid], "display_ids": {str(lid): 7}})
+
+    def explode(uid, launch_id):
+        raise RuntimeError("mercadinho segredo 77,50")
+
+    monkeypatch.setattr(h_pending.db, "delete_launch_and_rollback", explode)
+
+    with caplog.at_level(logging.WARNING, logger="core.handlers.pending"):
+        resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert "⚠️ Falha: #7" in resp, resp
+    assert len(db.list_launches(user_id, limit=10)) == 1, "nada podia ser apagado"
+
+    linhas = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("delete_launch_bulk:")]
+    assert len(linhas) == 1, linhas
+    # Igualdade EXATA é a assertiva de não-vazamento: qualquer valor ou
+    # descrição que entrasse no log quebraria aqui.
+    assert linhas[0] == (
+        f"delete_launch_bulk: falha user_id={user_id} launch_id={lid} "
+        f"user_seq=7 causa=RuntimeError sqlstate=None"
+    ), linhas[0]
+    assert "segredo" not in linhas[0] and "77,50" not in linhas[0]
+
+
+def test_erro_ao_apagar_nao_devolve_str_da_excecao_ao_usuario(user_id, monkeypatch, caplog):
+    """A mensagem ao usuário não pode carregar o texto do psycopg — mas tem de
+    dizer O QUE FAZER (a antiga fazia isso mal, mas fazia)."""
+    import logging
+
+    lid = _um_lancamento(user_id)
+    db.set_pending_action(user_id, "delete_launch", {"launch_id": lid, "display_id": 3})
+
+    def explode(uid, launch_id):
+        raise RuntimeError('DETAIL: Key (descricao)=(mercadinho segredo) valor=77,50')
+
+    monkeypatch.setattr(h_pending.db, "delete_launch_and_rollback", explode)
+
+    with caplog.at_level(logging.WARNING, logger="core.handlers.pending"):
+        resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert "segredo" not in resp and "DETAIL" not in resp and "77,50" not in resp, resp
+    assert "#3" in resp, "o usuário precisa saber QUAL lançamento falhou"
+    assert "de novo" in resp.lower(), "mensagem genérica sem ação deixa o usuário parado"
+    assert any(r.getMessage().startswith("delete_launch: falha") for r in caplog.records)
