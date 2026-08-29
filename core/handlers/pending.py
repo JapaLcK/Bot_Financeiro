@@ -186,7 +186,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             # janela de 10 min da pendência. Condição PERMANENTE: mandar tentar
             # de novo é conselho que nunca vai funcionar.
             return f"🐷 O lançamento **#{display_id}** já não está no seu histórico."
-        except ValueError as e:
+        except db.LaunchNoEffects as e:
             # Sem `efeitos` não dá pra reverter o saldo com segurança — também
             # permanente. É a MESMA distinção do "apagar tudo", que separa
             # `kept_no_effects` de `errors` (`db/accounts.py`); aqui a porta é
@@ -197,6 +197,18 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 f"⚠️ O lançamento **#{display_id}** é antigo e não guarda o que "
                 f"precisaria ser revertido, então mantive ele intacto pra não "
                 f"bagunçar seu saldo."
+            )
+        except db.InvestmentLotHasWithdrawal as e:
+            # TEMPORÁRIA, e é a única aqui que tem contorno: apagar o resgate
+            # reabre o lote. "Tenta de novo em alguns minutos" seria falso (o
+            # tempo não destrava nada), e "é antigo" também — o dado está
+            # inteiro. A frase tem de dizer O QUE destrava.
+            _log_falha("delete_launch_lote_com_resgate", user_id, e,
+                       launch_id=launch_id, user_seq=display_id)
+            return (
+                f"🐷 Não dá pra desfazer o aporte **#{display_id}**: esse lote já "
+                f"teve resgate. Apaga o resgate primeiro e depois volta aqui pra "
+                f"apagar o aporte."
             )
         except Exception as e:
             _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)

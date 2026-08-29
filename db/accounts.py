@@ -247,6 +247,26 @@ class LaunchDateLockedError(ValueError):
     """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
 
 
+# As duas condições PERMANENTES de `delete_launch_and_rollback` que o usuário
+# precisa distinguir. São `ValueError` por tipo, não por código, porque o texto
+# em PT-BR é user-facing por um caminho: o `HTTPException(400, detail=str(exc))`
+# do dashboard (`frontend/finance_bot_websocket_custom.py`). Trocar por código
+# faria o modal do app mostrar `LAUNCH_NO_EFFECTS` cru; discriminar pelo tipo
+# mantém `str(e)` byte a byte igual.
+#
+# Os outros `ValueError` da função (delta_pocket/delta_invest sem nome, dado
+# corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma causa
+# inesperada — ramo técnico, com log e retry — então nomeá-los seria classe sem
+# chamador.
+
+class LaunchNoEffects(ValueError):
+    """O lançamento não guarda `efeitos`, então não dá pra reverter o saldo."""
+
+
+class InvestmentLotHasWithdrawal(ValueError):
+    """O lote do aporte já teve resgate. TEMPORÁRIA: apagar o resgate destrava."""
+
+
 def update_launch_fields(
     user_id: int,
     launch_id: int,
@@ -1031,7 +1051,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
             efeitos = row.get("efeitos")
             if efeitos is None:
-                raise ValueError("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
+                raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
             if isinstance(efeitos, str):
                 efeitos = json.loads(efeitos)
@@ -1168,7 +1188,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                         lot["status"] != "open"
                         or Decimal(str(lot["principal_remaining"])) != Decimal(str(lot["principal_initial"]))
                     ):
-                        raise ValueError("Não é possível desfazer este aporte: o lote já teve resgate.")
+                        raise InvestmentLotHasWithdrawal(
+                            "Não é possível desfazer este aporte: o lote já teve resgate."
+                        )
                     if lot and not investment_id:
                         investment_id = lot["investment_id"]
                     cur.execute(

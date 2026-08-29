@@ -221,3 +221,25 @@ def test_delete_launch_sem_efeitos_nao_promete_retry_no_ai_chat(user_id):
     assert "de novo" not in msg.lower(), f"condição permanente prometendo retry: {msg!r}"
     assert "antigo" in msg.lower() and f"#{user_seq}" in msg, msg
     assert db.resolve_user_seq_to_id(user_id, user_seq) == internal, "não podia apagar"
+
+
+def test_delete_launch_aporte_com_resgate_diz_o_que_destrava_no_ai_chat(user_id):
+    """Porta `/ai/chat`: lote já resgatado é condição TEMPORÁRIA com contorno.
+
+    Antes do tipo próprio ela caía no mesmo `except ValueError` do "sem
+    efeitos" e o usuário ouvia "é antigo" sobre um aporte de hoje, sem saber
+    que apagar o resgate destrava.
+    """
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment_db(user_id, "CDB Lote", rate=0.01, period="monthly", nota="t")
+    aporte_id, *_ = db.investment_deposit_from_account(user_id, "CDB Lote", 200, "aporte")
+    db.investment_withdraw_to_account(user_id, "CDB Lote", 50, "resgate")
+    seq = db.get_launch_user_seq(user_id, int(aporte_id))
+
+    msg = _delete_launch_execute(user_id, {"launch_id": str(seq)})
+
+    assert "antigo" not in msg.lower(), f"condição temporária vendida como permanente: {msg!r}"
+    assert "de novo" not in msg.lower(), f"retry que nunca funciona: {msg!r}"
+    assert "resgate" in msg.lower(), f"não diz o que destrava: {msg!r}"
+    assert f"#{seq}" in msg, msg
+    assert db.resolve_user_seq_to_id(user_id, seq) == int(aporte_id), "o aporte não podia sumir"

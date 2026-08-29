@@ -439,7 +439,7 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
             except LookupError:
                 return f"🐷 Não achei o lançamento #{lid}."
-            except ValueError as e:
+            except db.LaunchNoEffects as e:
                 # Lançamento sem `efeitos`: condição PERMANENTE, não erro
                 # técnico. `_ERRO_APAGAR` manda tentar de novo em alguns
                 # minutos — conselho que nunca ia funcionar aqui. Mesma
@@ -450,6 +450,17 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 return (
                     f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
                     f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
+                )
+            except db.InvestmentLotHasWithdrawal as e:
+                # TEMPORÁRIA e com contorno: apagar o resgate reabre o lote.
+                # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
+                # (o dado está inteiro) servem aqui.
+                _log_falha("delete_launch_lote_com_resgate", user_id, e,
+                           launch_id=internal_id, user_seq=lid)
+                return (
+                    f"🐷 Não dá pra desfazer o aporte #{lid}: esse lote já teve "
+                    f"resgate. Apaga o resgate primeiro e depois volta aqui pra "
+                    f"apagar o aporte."
                 )
             except Exception as e:
                 _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
