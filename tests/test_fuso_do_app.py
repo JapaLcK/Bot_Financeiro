@@ -513,6 +513,49 @@ def test_libc_que_nao_conhece_o_fuso_nao_passa_calada(tmp_path, monkeypatch):
         zoneinfo.ZoneInfo.clear_cache()
 
 
+# O caso do P2 do Codex (#180): a zona cujo offset COINCIDE com o do fallback no
+# instante do boot. `Europe/London` no inverno é +00:00, igual ao UTC em que a
+# libc cai — uma guarda que olhasse só "agora" passaria em janeiro e o app
+# divergiria em março, já em produção. Este caso é o que exige os TRÊS instantes.
+#
+# CONTROLE NEGATIVO: reduzir a guarda de `align_process_tz` a um instante só
+# (`agora`) deixa ESTE caso vermelho e o de cima (Tóquio) verde — é a diferença
+# exata entre as duas versões da guarda.
+
+def test_libc_que_diverge_so_no_verao_tambem_e_pega(tmp_path, monkeypatch):
+    import zoneinfo
+
+    (tmp_path / "Fake").mkdir()
+    (tmp_path / "Fake" / "Zone").write_bytes(
+        (pathlib.Path("/usr/share/zoneinfo") / "Europe" / "London").read_bytes()
+    )
+    monkeypatch.setenv("REPORT_TIMEZONE", "Fake/Zone")
+    zoneinfo.reset_tzpath(to=[str(tmp_path)])
+    zoneinfo.ZoneInfo.clear_cache()
+    try:
+        assert utils_date._tz().key == "Fake/Zone"
+        # O BOOT acontece no INVERNO — é o que torna o caso discriminante. Sem
+        # fixar isto o teste passa por acidente de calendário: rodando em
+        # agosto, Londres já diverge no instante presente e a guarda de um
+        # instante só bastaria. (Medido: com `_agora` livre, reduzir a guarda a
+        # um instante deixava este caso VERDE — teste tautológico.)
+        janeiro = datetime(2026, 1, 15, 12, tzinfo=timezone.utc)
+        monkeypatch.setattr(utils_date, "_agora", lambda: janeiro)
+
+        # A premissa: em janeiro o app dá +00:00, e o fallback da libc é UTC —
+        # logo os dois lados CONCORDAM no instante do boot, e só um instante de
+        # outra estação pode acusar a divergência. (O lado do processo só vira
+        # UTC depois do `tzset()` lá dentro; por isso não dá para afirmá-lo
+        # aqui, e afirmar antes era o que quebrava este caso.)
+        assert janeiro.astimezone(utils_date._tz()).utcoffset() == timedelta(0)
+
+        with pytest.raises(RuntimeError, match="libc"):
+            utils_date.align_process_tz()
+    finally:
+        zoneinfo.reset_tzpath()
+        zoneinfo.ZoneInfo.clear_cache()
+
+
 # ── 14. `load_app_env` roda em processo JÁ SERVINDO: `TZ` nunca some ─────────
 # `adapters/whatsapp/wa_app.py:39` chama `load_app_env()` no import, e esse import
 # é tardio de propósito (`frontend/finance_bot_websocket_custom.py:1952-1963`, 1ª

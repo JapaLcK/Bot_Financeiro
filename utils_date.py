@@ -3,7 +3,7 @@ import time as time_module
 import re
 import calendar
 import unicodedata
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 
@@ -13,6 +13,12 @@ from dateutil.relativedelta import relativedelta
 def _tz():
     tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or "America/Sao_Paulo"
     return ZoneInfo(tz_name)
+
+
+def _agora() -> datetime:
+    """Instante atual em UTC. Existe para a guarda de `align_process_tz` poder
+    comparar os dois lados sem depender do fuso que ela está validando."""
+    return datetime.now(timezone.utc)
 
 
 def tz_name() -> str:
@@ -122,12 +128,26 @@ def align_process_tz() -> str:
     # Só faz sentido onde o `tzset` acima RODOU: sem ele o processo fica no fuso
     # do sistema de propósito (Windows), e esta comparação acusaria uma
     # divergência que é conhecida e documentada, não um defeito.
-    agora = datetime.now(_tz())
-    if agora.astimezone().utcoffset() != agora.utcoffset():
-        raise RuntimeError(
-            f"a libc não aceitou o fuso {name!r}: o processo ficou em "
-            f"{agora.astimezone().tzname()} enquanto o app está em {name}"
-        )
+    #
+    # TRÊS instantes, não só "agora": comparar um só instante deixa passar a
+    # zona cujo offset COINCIDE com o do fallback hoje e diverge depois. O
+    # exemplo é do Codex (#180, P2), e é concreto: um `Fake/Zone` com o conteúdo
+    # de `Europe/London` subindo no inverno dá +00:00 nos dois lados — a guarda
+    # passa —, e em março o app vai para +01:00 enquanto `date.today()` fica em
+    # UTC, recriando a divergência de fronteira de dia que esta função existe
+    # para fechar, já em produção e sem sinal. Janeiro e julho pegam os dois
+    # sentidos de horário de verão (norte e sul); `agora` pega o caso em que a
+    # zona mudou de regra sem mudar de nome.
+    for instante in (datetime(_agora().year, 1, 15, 12, tzinfo=timezone.utc),
+                     datetime(_agora().year, 7, 15, 12, tzinfo=timezone.utc),
+                     _agora()):
+        do_processo = instante.astimezone().utcoffset()
+        do_app = instante.astimezone(_tz()).utcoffset()
+        if do_processo != do_app:
+            raise RuntimeError(
+                f"a libc não aceitou o fuso {name!r}: em {instante:%d/%m} o "
+                f"processo diz {do_processo} e o app diz {do_app}"
+            )
     return name
 
 
