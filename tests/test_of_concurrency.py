@@ -1035,6 +1035,7 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
     relogio = _RelogioFake()
     real = ofdb.get_conn
     vistos = []
+    ordem = []
 
     class _CursorEspiao:
         def __init__(self, cur):
@@ -1043,6 +1044,9 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
         def execute(self, sql, params=None):
             if params and "statement_timeout" in str(sql):
                 vistos.append(params[0])
+                ordem.append("TETO")
+            else:
+                ordem.append(" ".join(str(sql).split())[:40])
             return self._cur.execute(sql, params)
 
         def __getattr__(self, nome):
@@ -1080,13 +1084,21 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
                   "connector": {"id": 612, "name": "Nubank"}},
         budget_ms=5000)
 
-    # DOIS: o `statement_timeout` do Postgres vale por STATEMENT, não pela
-    # transação, e esta tem os inserts do `ensure_user_tx` mais o upsert. Setar
-    # uma vez só deixava cada um esperar quase o teto inteiro — o triplo da cota
-    # com três linhas contendidas (Codex #166, P2). O relógio é fake e não anda
-    # entre eles, então os dois valores batem; o que discrimina é a CONTAGEM.
-    assert len(vistos) == 2, \
-        f"o teto tem de ser reajustado antes de CADA statement; veio {vistos}"
+    # O `statement_timeout` do Postgres vale por STATEMENT, não pela transação.
+    # A invariante é INTERCALAÇÃO, não contagem: TODO statement de verdade tem
+    # de vir logo depois de um reajuste. Asserção por número (`len == 2`) dava
+    # verde numa versão que reajustava só 2 dos 3 statements, porque os dois
+    # inserts do `ensure_user_tx` moram em `db/users.py` e o reajuste daqui não
+    # os alcançava (Codex do @hiago no #166).
+    #
+    # CONTROLE NEGATIVO: trocar o `_CursorComTeto` por chamadas soltas de
+    # reajuste deixa `insert into accounts` sem "TETO" antes — vermelho aqui.
+    reais = [(i, sql) for i, sql in enumerate(ordem) if sql != "TETO"]
+    sem_teto = [sql for i, sql in reais if i == 0 or ordem[i - 1] != "TETO"]
+    assert not sem_teto, \
+        f"statement sem reajuste imediatamente antes: {sem_teto}\nordem: {ordem}"
+    assert len(reais) == 3, \
+        f"esperado users+accounts+upsert; veio {[s for _, s in reais]}"
     assert set(vistos) == {"3000ms"}, \
         f"5000 − 2000 (espera do pool) = 3000; veio {vistos}"
 

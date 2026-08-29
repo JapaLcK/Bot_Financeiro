@@ -31,6 +31,15 @@ conclusão falsa de que o campo estava fechado em cinco. Um SEXTO
 tabela numa página não é a enumeração de um campo — varra a doc inteira, ou
 diga que não varreu.
 
+E a lição teve segunda metade, achada pelo Codex de um colaborador depois: nem
+todo estado de "autorize o dispositivo" chega pelo campo `status`. A autorização
+da Caixa (PF & PJ) chega como `"status": "OUTDATED"` com
+`"executionStatus": "USER_AUTHORIZATION_PENDING"` — varredura das 183 páginas
+via `docs.pluggy.ai/llms.txt`, seis páginas com o valor, nenhuma delas o
+mostrando como `status` de Item. Por isso o B15 abaixo pergunta por DOIS campos:
+procurar só em `status` devolveria "não há conector de device/QR na base" numa
+base cheia deles.
+
 ---
 
 ## A. Roteiro de aparelho (depois do build)
@@ -131,7 +140,7 @@ select status, status_reason, last_sync_at, reconnected_at, health->>'item_statu
 | B12 | reconectar **enquanto** um sync escreve | a reconexão espera o `pluggy_item_lock`; só devolve 503 se as duas tentativas falharem | erro só no 503, e o mesmo POST reaproveita |
 | B13 | frequência real do 503 de B12 | contar `of_reconnect_lock_timeout` nos logs por uma semana | — |
 | B14 | que status a Pluggy JÁ nos devolveu | `select distinct status from open_finance_connections where provider='"'"'pluggy'"'"'` — leitura pura | — |
-| B15 | existe conector com QR / autorização por dispositivo na base? | `WAITING_USER_ACTION` no resultado de B14, ou nos logs | decide o tamanho real da mudança da Onda 3 |
+| B15 | existe conector com QR / autorização por dispositivo na base? | DOIS campos, não um: `WAITING_USER_ACTION` no resultado de B14 **e** `select distinct health->>'execution_status' from open_finance_connections where provider='pluggy'` procurando `USER_AUTHORIZATION_PENDING` | decide o tamanho real da mudança da Onda 3 |
 
 **B14 é o que fecha a última faixa de dúvida da taxonomia.** Linha gravada
 ANTES da Onda 1 tem exatamente `health` NULL, `last_sync_at` preenchido e

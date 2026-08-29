@@ -970,25 +970,72 @@ def test_reconexao_dentro_do_lock_ainda_recusa_o_carimbo(user_id, monkeypatch, r
 # dormente, template na Meta"). Dormente não é inexistente: quando ligarem o
 # `OF_RECONNECT_TEMPLATE_NAME`, o aviso sai errado.
 #
-# CONTROLE NEGATIVO: tirar o filtro `health->>'item_status' <> 'WAITING_USER_ACTION'`
-# da query deixa o 1º caso vermelho.
-# CONTROLE POSITIVO: o 2º caso — `LOGIN_ERROR` CONTINUA sendo avisado, senão o
-# filtro teria calado o aviso inteiro.
+# São DOIS campos: `WAITING_USER_ACTION` chega como status de Item (Safra,
+# Inter PF), e a Caixa chega como `"status": "OUTDATED"` +
+# `"executionStatus": "USER_AUTHORIZATION_PENDING"` — o 2º achado do Codex do
+# @hiago. Filtrar só o `item_status` deixava a Caixa recebendo "reconecte".
+#
+# CONTROLE NEGATIVO: tirar QUALQUER uma das duas condições da query deixa o caso
+# correspondente (1º ou 2º) vermelho.
+# CONTROLE POSITIVO: os casos 3 e 4 — `OUTDATED` sozinho e `LOGIN_ERROR`
+# CONTINUAM sendo avisados. Sem o 3º, filtrar `OUTDATED` inteiro passaria, e o
+# aviso sumiria para todo mundo que só precisa reautorizar.
 
-@pytest.mark.parametrize("item_status, deve_avisar", [
-    ("WAITING_USER_ACTION", False),
-    ("LOGIN_ERROR", True),
+@pytest.mark.parametrize("item_status, execution_status, deve_avisar", [
+    ("WAITING_USER_ACTION", None, False),
+    ("OUTDATED", "USER_AUTHORIZATION_PENDING", False),
+    ("OUTDATED", "SUCCESS", True),
+    ("LOGIN_ERROR", None, True),
 ])
 def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
-        user_id, relogio_fixo, item_status, deve_avisar):
-    conexao = _conexao(user_id, f"item-aviso-{item_status}")
+        user_id, relogio_fixo, item_status, execution_status, deve_avisar):
+    item = f"item-aviso-{item_status}-{execution_status}"
+    conexao = _conexao(user_id, item)
     _set_estado(conexao["id"], status="ERROR",
-                health=Jsonb({"item_status": item_status, "products": {},
-                              "stale_products": []}))
+                health=Jsonb({"item_status": item_status,
+                              "execution_status": execution_status,
+                              "products": {}, "stale_products": []}))
 
     avisadas = {c["provider_item_id"]
                 for c in db.list_connections_needing_reconnect(user_id)}
 
-    assert (f"item-aviso-{item_status}" in avisadas) is deve_avisar, (
-        f"{item_status}: aviso proativo de reconexão "
+    assert (item in avisadas) is deve_avisar, (
+        f"{item_status}/{execution_status}: aviso proativo de reconexão "
         f"{'devia' if deve_avisar else 'NÃO devia'} sair")
+
+
+# A exclusão de device/QR vale para o `where` INTEIRO, inclusive para a perna do
+# consentimento vencendo — e isso é DELIBERADO, não descuido. Eu tinha
+# restringido à perna de erro, argumentando que são janelas diferentes (~30 min
+# contra 7 dias); o Manager derrubou com dois fatos medidos:
+#
+#   • `run_reconnect_notifications` manda UM template só, com o nome do banco,
+#     para toda linha devolvida — não existe "aviso de renovação" separado. Uma
+#     conexão que passasse pela perna do consentimento receberia exatamente o
+#     "reconecte seu banco" que este filtro existe para evitar;
+#   • a perna do consentimento é morta para `provider='pluggy'`: o upsert grava
+#     `consent_expires_at = None` e o ramo de conflito não toca a coluna.
+#
+# Este teste prende a decisão. Se alguém restringir o filtro à perna de erro
+# "consertando" o que parece um efeito colateral, ele fica vermelho.
+#
+# LIMITE HONESTO: o estado abaixo é montado com UPDATE cru e HOJE é inalcançável
+# em produção (nenhum escritor põe `consent_expires_at` numa linha 'pluggy').
+# Ele guarda a decisão, não um caminho vivo.
+
+def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentimento(
+        user_id, relogio_fixo):
+    item = "item-consent-device"
+    conexao = _conexao(user_id, item)
+    _set_estado(conexao["id"], status="ACTIVE",
+                consent_expires_at=datetime.now(_tz()) + timedelta(days=2),
+                health=Jsonb({"item_status": "OUTDATED",
+                              "execution_status": "USER_AUTHORIZATION_PENDING",
+                              "products": {}, "stale_products": []}))
+
+    avisadas = {c["provider_item_id"]
+                for c in db.list_connections_needing_reconnect(user_id)}
+
+    assert item not in avisadas, (
+        "o template é UM só e diz 'reconecte seu banco': deixar passar pela "
+        "perna do consentimento entrega a instrução que faz perder a janela")

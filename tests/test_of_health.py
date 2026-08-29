@@ -670,6 +670,87 @@ def test_detalhe_da_acao_necessaria_e_especifico_quando_precisa(
     assert ui["detail"] == detalhe_esperado
 
 
+# ── Codex do @hiago no #166: o MESMO defeito pela via do `executionStatus` ──
+# A autorização de dispositivo da Caixa (PF & PJ) NÃO chega como status de Item:
+# a doc mostra `"status": "OUTDATED"` com `"executionStatus":
+# "USER_AUTHORIZATION_PENDING"` (`docs/connect-an-account`, mais cinco páginas).
+# `OUTDATED` já estava em `_NEEDS_USER`, então o BALDE sempre acertou — quem
+# errava era o DETALHE, que mandava "Reautorize o banco" para quem só precisa
+# liberar o dispositivo no internet banking e esperar.
+#
+# CONTROLE NEGATIVO: tirar a consulta ao `execution_status` de `_detalhe_de_acao`
+# (ou a chave do dicionário) deixa o 1º caso vermelho.
+# CONTROLE POSITIVO: o 2º caso — `OUTDATED` SOZINHO continua com o detalhe
+# compartilhado. Sem ele, bastaria mapear `OUTDATED` inteiro para passar, e aí
+# quem só precisa reautorizar receberia a instrução de dispositivo.
+
+@pytest.mark.parametrize("execution_status, detalhe_esperado", [
+    ("USER_AUTHORIZATION_PENDING", "Autorize o acesso no app do banco"),
+    ("SUCCESS", "Reautorize o banco"),
+])
+def test_detalhe_olha_o_execution_status_quando_o_item_e_outdated(
+        execution_status, detalhe_esperado):
+    ui = connection_ui_state({
+        "status": "ERROR", "status_reason": "", "last_sync_at": AGORA,
+        "reconnected_at": None,
+        "health": {"item_status": "OUTDATED", "execution_status": execution_status,
+                   "products": {}, "stale_products": []}})
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == detalhe_esperado, ui
+
+
+# O payload REAL da Caixa, copiado de `docs.pluggy.ai/docs/connect-an-account`.
+# Os sete casos acima montam o `health` À MÃO, e por isso são todos cegos à
+# cadeia que o produz: o Tester sabotou `derive_item_health` para parar de gravar
+# `execution_status` e os sete continuaram VERDES, com a tela quebrada. Este
+# parte do item cru e vai até o detalhe — é o único que enxerga essa metade.
+#
+# CONTROLE NEGATIVO: tirar `execution_status` do dict de `derive_item_health`
+# (ou renomear a chave) deixa SÓ este vermelho.
+
+ITEM_CAIXA_DEVICE = {
+    "id": "item-caixa",
+    "status": "OUTDATED",
+    "executionStatus": "USER_AUTHORIZATION_PENDING",
+    "error": {
+        "code": "USER_AUTHORIZATION_PENDING",
+        "message": "The user needs to grant necessary permissions for their account.",
+        "attributes": {"deviceNickname": "nick-name", "qrCodes": "cHJ1ZWJh"},
+    },
+}
+
+
+def test_item_cru_da_caixa_chega_na_tela_com_a_instrucao_certa():
+    health = derive_item_health(ITEM_CAIXA_DEVICE, now=AGORA)
+    assert health["item_status"] == "OUTDATED"
+    assert health["execution_status"] == "USER_AUTHORIZATION_PENDING"
+
+    ui = connection_ui_state({"status": "ERROR", "status_reason": "",
+                              "health": health, "last_sync_at": AGORA,
+                              "reconnected_at": None})
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == "Autorize o acesso no app do banco", (
+        "quem espera liberar o dispositivo no banco não pode ser mandado a "
+        f"refazer a conexão; veio {ui}")
+
+
+def test_execution_status_de_device_nao_vira_status_de_item():
+    """`USER_AUTHORIZATION_PENDING` NÃO entra em `_NEEDS_USER`/`_UPDATING`.
+
+    Ele é `executionStatus` e nunca `status` — acrescentá-lo aos conjuntos seria
+    o `executionStatus` "por precaução" que o bloco do módulo proíbe. O que ele
+    ganhou foi UM detalhe, e nada mais."""
+    from core.services import pluggy_health as ph
+
+    assert "USER_AUTHORIZATION_PENDING" not in ph._NEEDS_USER
+    assert "USER_AUTHORIZATION_PENDING" not in ph._UPDATING
+    assert ph._DETALHE_POR_STATUS["USER_AUTHORIZATION_PENDING"] == \
+        ph._DETALHE_POR_STATUS["WAITING_USER_ACTION"], \
+        "os dois estados de device/QR pedem a MESMA ação — uma frase só"
+
+
 @pytest.mark.parametrize("status_local, estado_esperado", [
     ("INVALID_CREDENTIALS", "needs_user_action"),
     ("CREATED", "updating"),

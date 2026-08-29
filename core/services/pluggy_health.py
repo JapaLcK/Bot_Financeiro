@@ -100,12 +100,20 @@ _PRODUCT_PT = {
 # O que NÃO fazer: acrescentar `executionStatus` novo "por precaução". Os dois
 # que estão aqui têm caminho medido; um terceiro sem caminho é adivinhação.
 
+# Os dois estados de "autorize o DISPOSITIVO / leia o QR no app do banco" — a
+# explicação completa (campos diferentes, páginas da doc) está no bloco do
+# `_DETALHE_POR_STATUS`, abaixo. Ficam aqui em cima porque `_NEEDS_USER` precisa
+# do primeiro: repetir a string crua nos dois lugares é a §0.7 sendo violada no
+# mesmo arquivo que a invoca.
+ITEM_STATUS_AUTORIZA_DISPOSITIVO = "WAITING_USER_ACTION"
+EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
+
 # Status do item que significam "a Pluggy ainda está buscando".
 _UPDATING = {"UPDATING", "CREATED"}
 # Status que só o usuário resolve (reautorizar / responder MFA no banco, ou
-# autorizar o dispositivo / ler o QR — ver `WAITING_USER_ACTION` abaixo).
+# autorizar o dispositivo / ler o QR — ver `_DETALHE_POR_STATUS` abaixo).
 _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
-               "OUTDATED", "WAITING_USER_ACTION"}
+               "OUTDATED", ITEM_STATUS_AUTORIZA_DISPOSITIVO}
 
 _LABELS = {
     "updated": "Atualizado",
@@ -121,24 +129,94 @@ _LABELS = {
 
 # Detalhe POR STATUS, quando o do estado manda a ação errada. `_NEEDS_USER` é um
 # balde só ("Ação necessária"), mas a ação não é a mesma para todo mundo:
-# `WAITING_USER_ACTION` pede autorizar o dispositivo / ler o QR no app do banco,
-# dentro do `userAction.expiresAt` — e o detalhe fixo do estado, "Reautorize o
-# acesso", manda o usuário refazer a autorização daqui, que é justamente deixar
-# a janela expirar. Apontado pelo Codex no #166.
+# autorizar o DISPOSITIVO / ler o QR no app do banco é agir AGORA, numa janela
+# curta — e o detalhe fixo do estado, "reautorize o acesso", manda refazer a
+# autorização daqui, que é justamente deixar a janela expirar.
 #
-# SÓ É LIDO no ramo `needs_user_action` (abaixo, nos dois caminhos). Chave para
-# status fora de `_NEEDS_USER` é código morto — não sirva de controle negativo.
+# São DOIS valores em DOIS CAMPOS diferentes, e é por isso que não viram um
+# conjunto só. Varredura das 183 páginas da doc (`docs.pluggy.ai/llms.txt`), não
+# de uma tabela:
+#
+#   • `WAITING_USER_ACTION` é `status` de Item — Safra e Banco Inter PF
+#     (`docs/connect-an-account`) e o "QR Login" do `docs/sandbox`;
+#   • `USER_AUTHORIZATION_PENDING` é `executionStatus` e NUNCA `status`: o Item
+#     vem com `"status": "OUTDATED"` ao lado dele (Caixa PF/PJ, autorização de
+#     dispositivo com 30' de espera). Aparece em SEIS páginas —
+#     `connect-an-account`, `errors-validations`, `item-lifecycle`, `webhooks`,
+#     `sandbox` e `environments-and-configurations`. Como `OUTDATED` já está em
+#     `_NEEDS_USER`, o BALDE sempre acertou; era só o DETALHE que errava, e por
+#     isso acrescentá-lo a `_NEEDS_USER` seria o `executionStatus` "por
+#     precaução" que o bloco lá em cima proíbe. Codex do @hiago no #166.
+#
+# Os dois nomes são exportados porque `list_connections_needing_reconnect`
+# (`db/open_finance.py`) precisa PULAR estas conexões: o aviso proativo manda
+# "reconecte seu banco", o único caminho que faz PERDER a janela.
+# SÓ É LIDO no ramo `needs_user_action` (abaixo, nos dois caminhos), via
+# `_detalhe_de_acao`. As DUAS chaves são load-bearing, e por motivos diferentes:
+# a de `item_status` porque está em `_NEEDS_USER`; a de `execution_status`
+# porque é consultada como SEGUNDO campo, e de propósito NÃO está em
+# `_NEEDS_USER` (`tests/test_of_health.py` prende a ausência). Uma versão
+# anterior deste comentário dizia que chave fora de `_NEEDS_USER` era código
+# morto — o que mandava apagar exatamente a chave que o conserto acabara de
+# acrescentar. Não é: o que é código morto aqui é chave que nenhum dos dois
+# campos pode assumir.
 _DETALHE_POR_STATUS = {
-    "WAITING_USER_ACTION": "Autorize o acesso no app do banco",
+    ITEM_STATUS_AUTORIZA_DISPOSITIVO: "Autorize o acesso no app do banco",
+    EXEC_STATUS_AUTORIZA_DISPOSITIVO: "Autorize o acesso no app do banco",
 }
+
+
+def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None:
+    """A instrução específica quando "Ação necessária" sozinha mandaria a errada.
+
+    Consulta os DOIS campos porque os dois estados de device/QR chegam por
+    campos diferentes (ver acima).
+
+    LIMITE MEDIDO, e ele NÃO é só o caso legado: sem `health` não existe
+    `execution_status`, então o ramo de baixo do `connection_ui_state` só tem o
+    primeiro campo — e ali a Caixa (`status` local `OUTDATED`) continua ouvindo
+    o detalhe fixo "Reautorize o banco". Esse ramo é o caminho de TODA conexão
+    recém-gravada (o upsert zera `health`, e o `POST /pluggy-item` monta o
+    snapshot antes de o sync de fundo escrever saúde), não uma sobra de linha
+    antiga. É defeito PRÉ-EXISTENTE — antes deste PR a Caixa errava nos dois
+    ramos — e fechá-lo exige decidir de onde tirar o `executionStatus` ali
+    (selecionar `raw` no snapshot, gravar saúde no upsert contra a decisão da
+    Onda 2, ou coluna própria). Mexe na máquina de estados: PR próprio.
+
+    Precedência: o `item_status` ganha. As duas diagonais fora do par medido,
+    enumeradas porque enumerar só a inofensiva foi apontado:
+
+      • `_NEEDS_USER` (ex.: `LOGIN_ERROR`) + `execution_status` de device/QR →
+        mostra a instrução de dispositivo. Benigna: o BALDE continua certo, só o
+        detalhe é discutível;
+      • `_UPDATING` (`UPDATING`/`CREATED`) + `execution_status` de device/QR →
+        esta função NEM É CHAMADA: `connection_ui_state` testa `_UPDATING` antes
+        e devolve "Atualizando…" direto. Seria a mentira de fiapo girando que
+        esta onda existe para matar — e por isso vale a pena dizer o que
+        sustenta não fechá-la.
+
+    O que sustenta: a varredura das 183 páginas (`docs.pluggy.ai/llms.txt`) achou
+    `USER_AUTHORIZATION_PENDING` em seis páginas, e em TODAS o `status` ao lado é
+    `OUTDATED` — nenhuma o pareia com `UPDATING` ou `CREATED`. Fechar a diagonal
+    exigiria consultar `execution_status` antes do teste de `_UPDATING`, que é
+    mudar a ordem da máquina de estados por um par que a doc não produz — o
+    "`executionStatus` por precaução" que o bloco do módulo proíbe. Se algum dia
+    aparecer, o conserto é ESTE, e ele vai bater no teste que prende a ausência
+    em `_NEEDS_USER`/`_UPDATING`: isso é sinal, não regressão.
+    """
+    return (_DETALHE_POR_STATUS.get(item_status)
+            or _DETALHE_POR_STATUS.get(execution_status))
 
 _FIXED_DETAIL = {
     "error_recoverable": "Tentaremos de novo automaticamente",
     # DUAS superfícies leem esta frase: a linha da conexão ("Ação necessária" +
     # esta linha) e o toast do refresh ("Ação necessária no Nubank: reautorize o
     # acesso."). Era "Reautorize o banco", que no toast virava a instrução mais
-    # fraca do caso MAJORITÁRIO — os quatro status de `_NEEDS_USER` que não são
-    # `WAITING_USER_ACTION`. Uma frase só nas duas: não duplique instrução no JS.
+    # fraca do caso MAJORITÁRIO — quem cai aqui é `_NEEDS_USER` menos os casos de
+    # device/QR, que o `_detalhe_de_acao` desvia antes. Atenção: `OUTDATED` cai
+    # nos DOIS lados — sozinho é reautorização, acompanhado de
+    # `execution_status = USER_AUTHORIZATION_PENDING` é dispositivo.
+    # Uma frase só nas duas superfícies: não duplique instrução no JS.
     "needs_user_action": "Reautorize o banco",
     "item_missing": "Refaça a conexão com o banco",
     "paused": "Reative seu plano para voltar a sincronizar",
@@ -420,7 +498,8 @@ def connection_ui_state(connection_row: dict) -> dict:
     if health:
         item_status = str(health.get("item_status") or "").upper()
         if item_status in _NEEDS_USER:
-            return out("needs_user_action", _DETALHE_POR_STATUS.get(item_status))
+            return out("needs_user_action", _detalhe_de_acao(
+                item_status, str(health.get("execution_status") or "").upper()))
         if item_status in _UPDATING:
             return out("updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
@@ -445,7 +524,7 @@ def connection_ui_state(connection_row: dict) -> dict:
         # O status LOCAL também pode trazer `WAITING_USER_ACTION` (o upsert grava
         # `item.get("status") or item.get("executionStatus")`), então o detalhe
         # específico vale nos dois ramos.
-        return out("needs_user_action", _DETALHE_POR_STATUS.get(status))
+        return out("needs_user_action", _detalhe_de_acao(status))
     if status == "ERROR":
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
