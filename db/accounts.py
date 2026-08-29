@@ -1315,7 +1315,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
     Retorna {"deleted": N, "kept_no_effects": [...], "errors": [...],
-    "remaining": M}, com os ids em `user_seq` (o "#N" que o usuário vê).
+    "remaining": M | None}, com os ids em `user_seq` (o "#N" que o usuário vê).
 
     As duas listas são causas DIFERENTES e a mensagem ao usuário precisa
     distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos` (não
@@ -1325,7 +1325,11 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     um banco caído.
 
     `remaining` é uma RECONTAGEM depois do loop: é a única checagem que pega o
-    caso em que o delete casou zero linhas e ninguém levantou.
+    caso em que o delete casou zero linhas e ninguém levantou. É uma
+    CONFERÊNCIA, não um fato do trabalho — se ela mesma falhar (blip de
+    conexão, timeout de pool), vem `None` ("não conferi") e o que já foi
+    apagado continua sendo relatado. Deixar a exceção subir daqui fazia o
+    usuário ler "não consegui apagar" DEPOIS de tudo apagado.
     """
     ensure_user(user_id)
     with get_conn() as conn:
@@ -1360,16 +1364,27 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
             # da linha que violou a constraint. Nome do tipo + sqlstate já
             # separam conexão (08006), deadlock (40P01), permissão (42501) e
             # bug de código (TypeError/AttributeError).
+            # launch_id (interno) E user_seq: a queixa do usuário cita "#2",
+            # o log cita 19616 — sem os dois, suporte não correlaciona.
             logger.error(
-                "delete_all_launches: falha inesperada user_id=%s launch_id=%s causa=%s sqlstate=%s",
-                user_id, lid, type(e).__name__, getattr(e, "sqlstate", None),
+                "delete_all_launches: falha inesperada user_id=%s launch_id=%s user_seq=%s causa=%s sqlstate=%s",
+                user_id, lid, seq, type(e).__name__, getattr(e, "sqlstate", None),
             )
+
+    try:
+        remaining = count_launches(user_id)
+    except Exception as e:
+        remaining = None
+        logger.error(
+            "delete_all_launches: recontagem falhou user_id=%s causa=%s sqlstate=%s",
+            user_id, type(e).__name__, getattr(e, "sqlstate", None),
+        )
 
     return {
         "deleted": deleted,
         "kept_no_effects": kept_no_effects,
         "errors": errors,
-        "remaining": count_launches(user_id),
+        "remaining": remaining,
     }
 
 

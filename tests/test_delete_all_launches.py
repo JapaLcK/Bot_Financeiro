@@ -90,7 +90,10 @@ def test_delete_all_launches_confirmacao_nao_cancela(user_id: int):
 
     assert db.count_launches(user_id) == 1, "cancelar não pode apagar nada"
     assert db.ai_get_pending_action(user_id) is None
-    assert resp  # alguma mensagem de "não fiz nada"
+    # Controle positivo do cancelamento: quem VENCE o CAS continua ouvindo
+    # "não fiz nada" (o perdedor tem a frase oposta, em
+    # test_ai_chat_concurrent_confirm.py).
+    assert "não fiz nada" in resp.lower(), resp
 
 
 def _pocket_balance(user_id: int, name: str):
@@ -205,7 +208,7 @@ def test_falha_prevista_e_erro_tecnico_sao_distinguiveis(user_id, monkeypatch, c
     # 10 dígitos e pode conter "77" ou "300" por acaso.)
     assert linhas[0] == (
         f"delete_all_launches: falha inesperada user_id={user_id} "
-        f"launch_id={quebrado} causa=RuntimeError sqlstate=None"
+        f"launch_id={quebrado} user_seq={seq_quebrado} causa=RuntimeError sqlstate=None"
     ), linhas[0]
     assert "boom" not in linhas[0], "str(e) não pode entrar no log"
 
@@ -222,7 +225,9 @@ def test_mensagem_nao_finge_sucesso_quando_sobrou(user_id, monkeypatch):
     assert "#3" in msg and "#7" in msg and "#8" in msg, msg
     assert "erro técnico" in msg.lower(), "erro técnico tem frase própria"
     assert "antigo" in msg.lower(), "lançamento antigo tem frase própria"
-    assert "sobrou 3" in msg.lower(), msg
+    # remaining CONCORDA com 1 antigo + 2 erros: repetir "sobrou 3" seria dizer
+    # duas vezes a mesma coisa.
+    assert "conferência" not in msg.lower(), f"cauda redundante voltou: {msg!r}"
 
     # amostra de 5 + "e mais N"
     monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
@@ -242,3 +247,53 @@ def test_mensagem_vazio_continua_dizendo_que_nao_havia_nada(user_id, monkeypatch
     })
     msg = get_tool("delete_all_launches").execute(user_id, {})
     assert "não havia nenhum lançamento" in msg.lower(), msg
+
+
+def test_recontagem_que_falha_nao_apaga_o_trabalho_feito(user_id, monkeypatch, caplog):
+    """O recount roda DEPOIS do loop destrutivo. Se ele estourar (blip de
+    conexão, timeout de pool) e a exceção subir, o usuário lê "não consegui
+    apagar" com tudo já apagado — a mentira oposta à que a mensagem existe pra
+    matar. `remaining` é conferência: falhou, vem None ("não conferi"), e os
+    fatos medidos continuam sendo relatados."""
+    import logging
+    from db import accounts as accounts_mod
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    assert _bal(user_id) == 700.0
+
+    def sem_banco(uid):
+        raise ConnectionError("connection to server was lost")
+
+    monkeypatch.setattr(accounts_mod, "count_launches", sem_banco)
+
+    with caplog.at_level(logging.ERROR, logger="db.accounts"):
+        msg = get_tool("delete_all_launches").execute(user_id, {})
+
+    assert "apaguei 2" in msg.lower(), f"trabalho feito sumiu do relato: {msg!r}"
+    assert "não consegui apagar" not in msg.lower(), msg
+    assert "conferência" not in msg.lower(), "sem recontagem não há discordância a relatar"
+    assert _bal(user_id) == 0.0
+    assert any("recontagem falhou" in r.getMessage() for r in caplog.records), \
+        "a falha da conferência tem de ir pro log"
+    assert not any("connection to server was lost" in r.getMessage()
+                   for r in caplog.records), "str(e) não pode entrar no log"
+
+
+def test_conferencia_fala_so_quando_discorda(user_id, monkeypatch):
+    """O caso que a recontagem existe pra pegar: o delete casou zero linhas e
+    ninguém levantou — `remaining` maior que as listas explicam."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 4, "kept_no_effects": [], "errors": [], "remaining": 4,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "conferência não bateu" in msg.lower(), f"discordância silenciada: {msg!r}"
+    assert "ainda tem 4" in msg.lower(), msg
+
+    # E não fala quando bate (mesmo resultado, remaining coerente).
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 4, "kept_no_effects": [], "errors": [], "remaining": 0,
+    })
+    assert "conferência" not in get_tool("delete_all_launches").execute(user_id, {}).lower()

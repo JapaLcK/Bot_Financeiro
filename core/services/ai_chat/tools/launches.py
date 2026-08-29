@@ -23,6 +23,7 @@ Write (PEDE confirmação — destrutivo):
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time
 from typing import Any
 
@@ -31,6 +32,25 @@ from utils_date import _tz
 
 from .._context import CURRENT_PLATFORM
 from ._base import Tool
+
+logger = logging.getLogger(__name__)
+
+# A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
+# e a descrição da linha (`DETAIL: Key (…)=(…)`), e "connection to server was
+# lost" não diz nada pra quem só quer apagar um gasto. A mensagem genérica ainda
+# tem de dizer o que fazer — sem isso o usuário fica sem ação.
+_ERRO_APAGAR = (
+    "🐷 Não consegui apagar agora — deu um erro do meu lado. "
+    "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
+)
+
+
+def _log_falha(op: str, user_id: int, e: Exception, **extra) -> None:
+    logger.error(
+        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
+        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
+        type(e).__name__, getattr(e, "sqlstate", None),
+    )
 
 
 def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -420,13 +440,15 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
             except LookupError:
                 return f"🐷 Não achei o lançamento #{lid}."
             except Exception as e:
-                return f"🐷 Não consegui apagar: {e}"
+                _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
+                return _ERRO_APAGAR
 
         # 2. id de credit_transaction
         try:
             result = db.undo_credit_transaction(user_id, lid)
         except Exception as e:
-            return f"🐷 Não consegui apagar: {e}"
+            _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=lid)
+            return _ERRO_APAGAR
         if result is not None:
             removed = int(result.get("removed_count") or 1)
             if removed > 1:
@@ -439,7 +461,8 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         try:
             result = db.undo_installment_group(user_id, group_id)
         except Exception as e:
-            return f"🐷 Não consegui apagar: {e}"
+            _log_falha("undo_installment_group", user_id, e, group_id=group_id)
+            return _ERRO_APAGAR
         if result:
             removed = int(result.get("removed_count") or 0)
             return f"🗑️ Parcelamento {raw_id.upper()} apagado ({removed} parcelas)."
@@ -480,12 +503,14 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         result = db.delete_all_launches_and_rollback(user_id)
     except Exception as e:
-        return f"🐷 Não consegui apagar: {e}"
+        _log_falha("delete_all_launches", user_id, e)
+        return _ERRO_APAGAR
 
     deleted = int(result.get("deleted") or 0)
     antigos = result.get("kept_no_effects") or []
     erros = result.get("errors") or []
-    sobraram = int(result.get("remaining") or 0)
+    # None = a recontagem falhou ("não conferi"), NÃO "sobrou zero".
+    sobraram = result.get("remaining")
 
     # "não havia nada" SÓ quando não havia mesmo: com linha contada antes,
     # dizer isso é fingir sucesso.
@@ -514,9 +539,17 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
             f"❌ {len(erros)} lançamento{p} deu erro técnico e continua aí: "
             f"{_amostra_ids(erros)}. Já registrei a falha — tenta de novo em alguns minutos."
         )
-    if sobraram:
+    # `remaining` é conferência, não fato novo: quando bate com o que as duas
+    # listas já disseram, repetir "sobrou N" só duplica a mensagem. Fala apenas
+    # quando DISCORDA — que é o caso que a recontagem existe pra pegar (delete
+    # casou zero linhas e ninguém levantou). `None` não discorda de nada.
+    esperado = len(antigos) + len(erros)
+    if sobraram is not None and sobraram != esperado:
         p = "s" if sobraram != 1 else ""
-        partes.append(f"Não apaguei tudo: sobrou {sobraram} lançamento{p}.")
+        partes.append(
+            f"⚠️ A conferência não bateu: ainda tem {sobraram} lançamento{p} no "
+            f"histórico, e eu esperava {esperado}. Dá uma olhada no seu extrato."
+        )
     return "\n".join(partes)
 
 
