@@ -28,12 +28,15 @@ from datetime import date, datetime, time
 from typing import Any
 
 import db
+# Helper ÚNICO das três portas, com o nível por parâmetro (a doc dele explica o
+# critério). `core/handlers/credit.py` já importava daqui; a cópia local desta
+# tool era a única sobrando, e ela logava ERROR onde o WhatsApp logava WARNING —
+# a mesma condição contava como erro no admin por uma porta e não pela outra.
+from core.handlers.pending import _log_falha
 from utils_date import _tz
 
 from .._context import CURRENT_PLATFORM
 from ._base import Tool
-
-logger = logging.getLogger(__name__)
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
 # e a descrição da linha (`DETAIL: Key (…)=(…)`), e "connection to server was
@@ -43,14 +46,6 @@ _ERRO_APAGAR = (
     "🐷 Não consegui apagar agora — deu um erro do meu lado. "
     "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
 )
-
-
-def _log_falha(op: str, user_id: int, e: Exception, **extra) -> None:
-    logger.error(
-        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
-        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
-        type(e).__name__, getattr(e, "sqlstate", None),
-    )
 
 
 def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -446,7 +441,7 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 # distinção do `delete_all_launches` (`kept_no_effects` ×
                 # `errors`).
                 _log_falha("delete_launch_sem_efeitos", user_id, e,
-                           launch_id=internal_id, user_seq=lid)
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
                 return (
                     f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
                     f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
@@ -456,7 +451,7 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
                 # (o dado está inteiro) servem aqui.
                 _log_falha("delete_launch_lote_com_resgate", user_id, e,
-                           launch_id=internal_id, user_seq=lid)
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
                 return (
                     f"🐷 Não dá pra desfazer o aporte #{lid}: esse lote já teve "
                     f"resgate. Apaga o resgate primeiro e depois volta aqui pra "
@@ -516,7 +511,10 @@ def _delete_all_launches_validate(user_id: int, args: dict[str, Any]) -> str | N
 
 
 def _amostra_ids(ids: list) -> str:
-    """'#3, #7, #9 e mais 4' — amostra de 5 em user_seq (o #N que o user vê)."""
+    """Amostra de 5 em user_seq (o #N que o user vê), com cauda só quando sobra:
+    7 ids → '#3, #7, #9, #11, #12 e mais 2'; 3 ids → '#3, #7, #9' (sem cauda).
+    Exemplo medido chamando a função — o anterior ('#3, #7, #9 e mais 4') não
+    era produzível: com 3 ids `resto` dá -2 e a cauda nem aparece."""
     resto = len(ids) - 5
     amostra = ", ".join(f"#{i}" for i in ids[:5])
     return f"{amostra} e mais {resto}" if resto > 0 else amostra

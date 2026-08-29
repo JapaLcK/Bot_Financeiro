@@ -11,12 +11,34 @@ from utils_text import fmt_brl
 logger = logging.getLogger(__name__)
 
 
-def _log_falha(op: str, user_id: int, e: Exception, **extra) -> None:
+def _log_falha(op: str, user_id: int, e: Exception, *,
+               nivel: int = logging.ERROR, **extra) -> None:
     """Causa no log, nunca na mensagem: `str(e)` do psycopg pode trazer o valor
     e a descrição da linha (`DETAIL: Key (…)=(…)`). Nome do tipo + sqlstate já
     separam conexão (08006), deadlock (40P01), permissão (42501) e bug de
-    código. Sem `exc_info` pelo mesmo motivo."""
-    logger.warning(
+    código. Sem `exc_info` pelo mesmo motivo.
+
+    Helper ÚNICO das três portas (esta, `core/handlers/credit.py` e
+    `core/services/ai_chat/tools/launches.py`): duas cópias com níveis
+    diferentes faziam a MESMA condição contar como erro numa porta e não na
+    outra. O nível importa fora do log — `_DashboardHandler`
+    (`core/observability.py`) espelha WARNING e ERROR em `system_event_logs`
+    com `level=levelname.lower()`, e `core/admin_dashboard.py` conta
+    `backend_errors_24h WHERE level='error'`.
+
+    `nivel` segue a MESMA distinção dos `except` daqui, não outra:
+      - condição de domínio ESPERADA (`LaunchNoEffects`,
+        `InvestmentLotHasWithdrawal`) → `logging.WARNING`. Inflar o contador de
+        erros do admin com aporte que teve resgate é ruído, não incidente.
+      - falha técnica/inesperada (`except Exception`, `ValueError` sem código
+        conhecido) → `logging.ERROR`, que é o default: quem esquecer de
+        classificar erra para o lado barulhento, não para o lado silencioso.
+
+    `nivel` é keyword-only por isso não colide com `**extra`; um campo extra
+    chamado "nivel" seria engolido (nenhum call site usa).
+    """
+    logger.log(
+        nivel,
         "%s: falha user_id=%s%s causa=%s sqlstate=%s",
         op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
         type(e).__name__, getattr(e, "sqlstate", None),
@@ -192,7 +214,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             # `kept_no_effects` de `errors` (`db/accounts.py`); aqui a porta é
             # um lançamento só, mas a causa e a frase são as mesmas.
             _log_falha("delete_launch_sem_efeitos", user_id, e,
-                       launch_id=launch_id, user_seq=display_id)
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
             return (
                 f"⚠️ O lançamento **#{display_id}** é antigo e não guarda o que "
                 f"precisaria ser revertido, então mantive ele intacto pra não "
@@ -204,7 +226,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
             # tempo não destrava nada), e "é antigo" também — o dado está
             # inteiro. A frase tem de dizer O QUE destrava.
             _log_falha("delete_launch_lote_com_resgate", user_id, e,
-                       launch_id=launch_id, user_seq=display_id)
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
             return (
                 f"🐷 Não dá pra desfazer o aporte **#{display_id}**: esse lote já "
                 f"teve resgate. Apaga o resgate primeiro e depois volta aqui pra "
