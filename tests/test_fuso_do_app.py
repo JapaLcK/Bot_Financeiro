@@ -647,6 +647,131 @@ def test_load_app_env_nunca_deixa_o_ambiente_sem_tz(tmp_path, monkeypatch):
     assert real["PGTZ"] == "Asia/Tokyo"
 
 
+# ── 16. A MÁQUINA INTEIRA: 16 combinações × as três pontas ───────────────────
+# Cinco rodadas de revisão bateram no mesmo subsistema, cada uma consertando UMA
+# transição: `pop` (janela sem `TZ`), atribuição do `TZ` do arquivo (janela com o
+# `TZ` errado quando o `REPORT_TIMEZONE` manda), Windows, DST. O §4 do CLAUDE.md
+# manda parar de remendar e enumerar estados × eventos. Isto é a enumeração.
+#
+# Entradas: `REPORT_TIMEZONE` e `TZ`, cada um podendo vir do ambiente REAL ou do
+# `.env`, presentes ou ausentes — 2^4 = 16 estados. Precedência documentada:
+# `REPORT_TIMEZONE` ganha de `TZ`; dentro de cada um, ambiente real ganha do
+# arquivo.
+#
+# O invariante afirmado em CADA um dos 16: processo, app e sessão do Postgres
+# valem o MESMO fuso, e é o efetivo da tabela.
+#
+# CONTROLE NEGATIVO: trocar a resolução de `config/env.py` de volta por
+# `os.environ["TZ"] = merged["TZ"]` deixa vermelhos os estados em que o
+# `REPORT_TIMEZONE` do arquivo convive com um `TZ` (de qualquer origem).
+# CONTROLE POSITIVO: os estados sem nada setado continuam em America/Sao_Paulo —
+# sem eles, um conserto que fixasse tudo num fuso passaria.
+
+_SP_DEFAULT = "America/Sao_Paulo"
+
+
+@pytest.mark.parametrize("r_env, r_file, t_env, t_file, efetivo", [
+    # R real manda, sempre
+    ("Asia/Tokyo", None, None, None, "Asia/Tokyo"),
+    ("Asia/Tokyo", "Europe/Lisbon", None, None, "Asia/Tokyo"),
+    ("Asia/Tokyo", None, "Europe/Lisbon", None, "Asia/Tokyo"),
+    ("Asia/Tokyo", None, None, "Europe/Lisbon", "Asia/Tokyo"),
+    ("Asia/Tokyo", "Europe/Lisbon", "Etc/GMT+12", "Pacific/Kiritimati", "Asia/Tokyo"),
+    ("Asia/Tokyo", "Europe/Lisbon", "Etc/GMT+12", None, "Asia/Tokyo"),
+    ("Asia/Tokyo", "Europe/Lisbon", None, "Etc/GMT+12", "Asia/Tokyo"),
+    ("Asia/Tokyo", None, "Europe/Lisbon", "Etc/GMT+12", "Asia/Tokyo"),
+    # sem R real: o R do ARQUIVO ganha de qualquer TZ
+    (None, "Europe/Lisbon", None, None, "Europe/Lisbon"),
+    (None, "Europe/Lisbon", "Asia/Tokyo", None, "Europe/Lisbon"),
+    (None, "Europe/Lisbon", None, "Asia/Tokyo", "Europe/Lisbon"),
+    (None, "Europe/Lisbon", "Asia/Tokyo", "Etc/GMT+12", "Europe/Lisbon"),
+    # sem R nenhum: TZ real ganha do TZ de arquivo
+    (None, None, "Asia/Tokyo", None, "Asia/Tokyo"),
+    (None, None, "Asia/Tokyo", "Europe/Lisbon", "Asia/Tokyo"),
+    (None, None, None, "Europe/Lisbon", "Europe/Lisbon"),
+    # nada em lugar nenhum: o default do produto (controle POSITIVO)
+    (None, None, None, None, _SP_DEFAULT),
+])
+def test_as_tres_pontas_batem_nos_16_estados(
+        tmp_path, monkeypatch, r_env, r_file, t_env, t_file, efetivo):
+    monkeypatch.delenv("REPORT_TIMEZONE", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    if r_env:
+        monkeypatch.setenv("REPORT_TIMEZONE", r_env)
+    if t_env:
+        monkeypatch.setenv("TZ", t_env)
+    # o que o ambiente REAL trazia — é o que `utils_date` captura no import
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", t_env)
+
+    linhas = ""
+    if r_file:
+        linhas += f"REPORT_TIMEZONE={r_file}\n"
+    if t_file:
+        linhas += f"TZ={t_file}\n"
+    _com_env(tmp_path, monkeypatch, linhas)
+
+    assert utils_date.tz_name() == efetivo, "o APP"
+    assert os.environ["PGTZ"] == efetivo, "a SESSÃO do Postgres"
+    assert os.environ["TZ"] == efetivo, "o PROCESSO"
+    # e o processo de verdade, não só a variável
+    epoch = datetime.fromtimestamp(0, timezone.utc)
+    assert epoch.astimezone().utcoffset() == epoch.astimezone(ZoneInfo(efetivo)).utcoffset()
+
+
+# ── 17. Nenhuma escrita INTERMEDIÁRIA de `TZ` é observável com valor errado ──
+# É a generalização do caso 14: ele provava que `TZ` nunca some; este prova que
+# `TZ` nunca vale outra coisa. O apontamento que o motivou: com
+# `REPORT_TIMEZONE` (precedência maior) setado e um `TZ` no `.env`, a versão
+# anterior escrevia o `TZ` do arquivo por um instante — e uma thread concorrente
+# chamando `date.today()` nesse instante lia o dia errado (Codex #180, P2).
+#
+# CONTROLE NEGATIVO: repor `os.environ["TZ"] = merged["TZ"]` antes do
+# `setdefault` deixa este caso vermelho, com o valor intruso na mensagem.
+
+def test_tz_nunca_assume_valor_intermediario_errado(tmp_path, monkeypatch):
+    from collections.abc import MutableMapping
+
+    real = os.environ
+    escritas: list[str] = []
+
+    class _Vigia(MutableMapping):
+        def __getitem__(self, k):
+            return real[k]
+
+        def __setitem__(self, k, v):
+            if k == "TZ":
+                escritas.append(v)
+            real[k] = v
+
+        def __delitem__(self, k):
+            if k == "TZ":
+                escritas.append("<APAGADO>")
+            del real[k]
+
+        def __iter__(self):
+            return iter(real)
+
+        def __len__(self):
+            return len(real)
+
+    # O SETUP É O CAMINHO DO DEFEITO, e errar nele foi o que quase deixou este
+    # teste medir nada: a escrita intermediária da versão anterior só acontecia
+    # com `_TZ_ENV_ORIGINAL is None` — ou seja, `TZ` AUSENTE do ambiente real.
+    # Com `TZ` presente, aquele ramo nem executava e o controle negativo dava
+    # verde (medido).
+    monkeypatch.setenv("REPORT_TIMEZONE", "Asia/Tokyo")
+    monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", None)
+    monkeypatch.setattr(os, "environ", _Vigia())
+
+    # o `.env` traz um `TZ` de precedência MENOR: ele não pode ser observado
+    _com_env(tmp_path, monkeypatch, "TZ=Europe/Lisbon\n")
+
+    assert set(escritas) <= {"Asia/Tokyo"}, (
+        f"`TZ` passou por valor intermediário observável: {escritas}")
+    assert real["TZ"] == "Asia/Tokyo"
+
+
 # ── 15. Windows: sem `time.tzset`, o boot não pode morrer ───────────────────
 # `time.tzset` é POSIX. O `docs/readme.md` lista Windows como sistema suportado,
 # e sem guarda o `ImportError` subia até o `except` de `load_app_env` e virava

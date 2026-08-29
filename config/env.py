@@ -35,28 +35,72 @@ def load_app_env() -> str:
     if env_file.exists():
         merged.update({k: v for k, v in dotenv_values(env_file, interpolate=False).items() if v is not None})
 
-    # `utils_date` é importado ANTES de o `.env` ser lido e já escreveu `TZ` no
-    # ambiente (`align_process_tz`). Se o operador NÃO tinha `TZ` no ambiente
-    # real, esse `TZ` é nosso, não dele — e o `setdefault` de baixo o veria como
-    # valor já existente, transformando `TZ` no `.env` (documentado em
-    # `.env.example`) num no-op. Esta linha devolve ao arquivo a vez dele; `TZ`
-    # vindo do ambiente REAL não é tocado e continua ganhando.
+    # ── O FUSO: uma escrita só, já com o valor final ─────────────────────────
     #
-    # É ATRIBUIÇÃO, e nunca `pop`, porque isto NÃO roda só no boot: o import de
-    # `adapters/whatsapp/wa_app.py` (que chama `load_app_env` na linha 39) é
-    # tardio de propósito — `frontend/finance_bot_websocket_custom.py:1952-1963`
-    # o faz na 1ª requisição e `:1632-1656` 1 s depois do startup, com event
-    # loop, threadpool e WebSockets já ativos. A glibc relê `TZ` a cada
-    # `localtime()`, então um `pop` abriria uma janela (até o `align_process_tz`
-    # do fim) em que uma thread concorrente chamando `date.today()` cairia no
-    # fuso do contêiner — UTC no Railway, que é o bug deste PR de volta por
-    # microssegundos. Quem prova a ausência da janela é o caso 14 de
-    # `tests/test_fuso_do_app.py`.
-    if utils_date._TZ_ENV_ORIGINAL is None and "TZ" in merged:
-        os.environ["TZ"] = merged["TZ"]
+    # ISTO NÃO RODA SÓ NO BOOT. `adapters/whatsapp/wa_app.py:39` chama
+    # `load_app_env` no import, e esse import é tardio de propósito
+    # (`frontend/finance_bot_websocket_custom.py:1952-1963`, 1ª requisição;
+    # `:1632-1656`, 1 s depois do startup). Então isto executa com event loop,
+    # threadpool e WebSockets ativos — e a glibc relê `TZ` a cada `localtime()`.
+    # Consequência dura: **todo valor intermediário de `TZ` é observável por uma
+    # thread concorrente chamando `date.today()`**, e um valor intermediário
+    # errado é o bug da #178 de volta por microssegundos.
+    #
+    # Três versões desta função já falharam por escrever `TZ` mais de uma vez:
+    # `pop` (janela SEM `TZ`), e depois `os.environ["TZ"] = merged["TZ"]`
+    # (janela com o `TZ` do arquivo quando o `REPORT_TIMEZONE`, de precedência
+    # MAIOR, é quem manda). Por isso agora o valor efetivo é RESOLVIDO ANTES e
+    # escrito UMA VEZ.
+    #
+    # A máquina inteira, enumerada — `R` = REPORT_TIMEZONE, `T` = TZ,
+    # `env` = ambiente real (`_TZ_ENV_ORIGINAL` para o `T`), `f` = vindo do
+    # `.env`. Precedência: R ganha de T; dentro de cada um, ambiente real ganha
+    # do arquivo. `efetivo` é o que as TRÊS pontas (processo, app e sessão do
+    # Postgres) têm de valer, do começo ao fim:
+    #
+    #   R_env  R_f  T_env  T_f   efetivo        por quê
+    #   ────────────────────────────────────────────────────────────────────
+    #     •     -     -     -    R_env          R ganha, ambiente real
+    #     •     •     -     -    R_env          ambiente real ganha do arquivo
+    #     •     -     •     -    R_env          R ganha de T
+    #     •     •     •     •    R_env          idem, todos presentes
+    #     -     •     -     -    R_f            R do arquivo, sem R real
+    #     -     •     •     -    R_f            R ganha de T mesmo vindo de arquivo
+    #     -     •     -     •    R_f            idem
+    #     -     •     •     •    R_f            idem
+    #     -     -     •     -    T_env          sem R, T do ambiente real
+    #     -     -     •     •    T_env          ambiente real ganha do arquivo
+    #     -     -     -     •    T_f            sem R e sem T real: o arquivo vale
+    #     -     -     -     -    default        America/Sao_Paulo
+    #
+    # (São 16 combinações; as 12 acima cobrem todas — as 4 que faltam repetem
+    # linha por o `R_env` tornar o resto irrelevante. `tests/test_fuso_do_app.py`
+    # parametriza as 16 e afirma as três pontas em cada uma.)
+    #
+    # `_TZ_ENV_ORIGINAL` é o `TZ` que o ambiente REAL trazia, capturado no import
+    # de `utils_date` ANTES de a nossa própria escrita existir — sem ele não há
+    # como distinguir "o operador setou `TZ`" de "nós setamos `TZ`".
+    efetivo = (os.environ.get("REPORT_TIMEZONE")
+               or merged.get("REPORT_TIMEZONE")
+               or utils_date._TZ_ENV_ORIGINAL
+               or merged.get("TZ"))
 
+    # `TZ` e `REPORT_TIMEZONE` saem do `setdefault` genérico: a precedência
+    # delas é a da tabela acima, não a de "quem já está no ambiente ganha" — o
+    # import já escreveu `TZ`, então o `setdefault` o veria como valor do
+    # operador e o `TZ` do `.env` (documentado em `.env.example`) seria no-op.
     for key, value in merged.items():
-        os.environ.setdefault(key, value)
+        if key not in ("TZ", "REPORT_TIMEZONE"):
+            os.environ.setdefault(key, value)
+
+    # `REPORT_TIMEZONE` precisa estar no ambiente para o `_tz()` enxergá-lo.
+    if "REPORT_TIMEZONE" not in os.environ and "REPORT_TIMEZONE" in merged:
+        os.environ["REPORT_TIMEZONE"] = merged["REPORT_TIMEZONE"]
+
+    # A ÚNICA escrita de `TZ` aqui, e já com o valor final: nenhum instante
+    # observável tem `TZ` ausente nem `TZ` diferente do efetivo.
+    if efetivo:
+        os.environ["TZ"] = efetivo
 
     os.environ.setdefault("APP_ENV", app_env)
 
