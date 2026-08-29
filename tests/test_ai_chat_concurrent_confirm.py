@@ -214,9 +214,12 @@ def test_cancelamento_que_perde_o_cas_nao_diz_que_nao_fez_nada(user_id: int, mon
     responder "👍 Beleza, não fiz nada" — tudo já foi apagado.
 
     Perder o CAS num cancelamento significa que a outra requisição consumiu a
-    linha, e o caminho que consome é o que EXECUTA. O raciocínio antigo ("não
-    havia nada nosso pra cancelar") só vale onde a porta é serializada
-    (WhatsApp), não no /ai/chat.
+    linha. O raciocínio antigo ("não havia nada nosso pra cancelar") só vale
+    onde a porta é serializada (WhatsApp), não no /ai/chat. Mas o oposto ("já
+    tinha sido executada") também é falso: são TRÊS os consumidores da linha
+    (executar, cancelar, abandonar) e o CAS devolve um bool — este teste monta
+    o caso em que a outra requisição de fato executou, e os dois seguintes
+    montam os casos em que ela NÃO executou.
 
     Interleaving montado à mão em vez de threads: a requisição do "não" já leu
     a linha (`pending`) quando a outra consome e executa. É o mesmo estado da
@@ -242,7 +245,7 @@ def test_cancelamento_que_perde_o_cas_nao_diz_que_nao_fez_nada(user_id: int, mon
     assert "não fiz nada" not in resp.lower(), (
         f"apagou tudo e disse que não fez nada: {resp!r}"
     )
-    assert "já tinha sido executada" in resp.lower(), resp
+    assert "já foi resolvida" in resp.lower(), resp
     assert _bal(user_id) == 0.0, "o cancelamento não podia mexer em saldo"
 
 
@@ -277,3 +280,55 @@ def test_sim_que_perde_o_cas_pro_cancelamento_nao_diz_que_executou(user_id: int,
         assert mentira not in resp.lower(), (
             f"nada foi apagado e a resposta afirma o desfecho ({mentira!r}): {resp!r}"
         )
+
+
+def _nao_perdendo_o_cas(user_id: int, monkeypatch, vencedor) -> str:
+    """Semeia 2 lançamentos + pending, deixa `vencedor` consumir a linha e só
+    então manda o "não" com a linha que ele já tinha lido."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    db.ai_set_pending_action(
+        user_id, "delete_all_launches", {}, "apagar TODOS os seus lançamentos"
+    )
+    pending = db.ai_get_pending_action(user_id)
+    vencedor(pending)
+    monkeypatch.setattr(db, "ai_get_pending_action", lambda uid: pending)
+    return chat(user_id, "não", monthly_limit=1000, platform="whatsapp")
+
+
+def test_nao_que_perde_o_cas_pro_abandono_nao_diz_que_executou(user_id: int, monkeypatch):
+    """O terceiro consumidor: a outra requisição MUDOU DE ASSUNTO.
+
+    `_chat_inner` abandona a pendência (`db.ai_consume_pending_action` com o
+    retorno ignorado) antes de responder "quanto gastei?". Nada foi apagado —
+    e é o caso em que "essa ação já tinha sido executada antes do seu 'não'"
+    era mentira pura: o usuário lê que perdeu tudo, vai conferir e o extrato
+    está intacto. Foi ele que sustentou a frase antiga, porque o grupo só
+    cobria o vencedor que executa.
+    """
+    def outra_requisicao_muda_de_assunto(pending):
+        assert db.ai_consume_pending_action(user_id, pending), "o vencedor tinha de levar a linha"
+
+    resp = _nao_perdendo_o_cas(user_id, monkeypatch, outra_requisicao_muda_de_assunto)
+
+    assert "executada" not in resp.lower(), (
+        f"nada foi apagado e a resposta afirma que foi: {resp!r}"
+    )
+    assert "não fiz nada" not in resp.lower(), (
+        f"tampouco pode garantir o oposto — o CAS não diz quem consumiu: {resp!r}"
+    )
+    assert db.count_launches(user_id) == 2, "o abandono não podia apagar nada"
+    assert _bal(user_id) == 700.0
+
+
+def test_nao_que_perde_o_cas_pro_outro_nao_nao_diz_que_executou(user_id: int, monkeypatch):
+    """Dois "não" simultâneos: o vencedor cancela, o perdedor não pode dizer
+    que alguma coisa foi executada."""
+    def outro_cancelamento(pending):
+        assert db.ai_consume_pending_action(user_id, pending)
+
+    resp = _nao_perdendo_o_cas(user_id, monkeypatch, outro_cancelamento)
+
+    assert "executada" not in resp.lower(), resp
+    assert db.count_launches(user_id) == 2, "cancelar não podia apagar nada"
+    assert _bal(user_id) == 700.0

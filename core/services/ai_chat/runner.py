@@ -122,6 +122,18 @@ def chat(
         CURRENT_PLATFORM.reset(token_pf)
 
 
+# Quem PERDE o CAS do `ai_consume_pending_action` sabe exatamente um fato: a
+# linha que ele leu não está mais lá. Não sabe qual dos TRÊS consumidores a
+# levou — executar, cancelar ou abandonar por mudança de assunto — então nenhuma
+# frase pode afirmar desfecho. Vale igual pro "sim" e pro "não" perdedores: os
+# dois conhecem o mesmo fato, e duas frases diferentes pro mesmo fato só existem
+# pra uma delas estar errada.
+_CAS_PERDIDO = (
+    "🐷 Essa confirmação já foi resolvida em outra janela — "
+    "dá uma olhada no seu extrato pra ver como ficou."
+)
+
+
 def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     user_id = int(user_id)
     user_text = (user_text or "").strip()
@@ -140,31 +152,27 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
             # o "sim" seguinte do usuário caía no vazio. Não "conserte" de
             # volta pondo o consumo depois.
             if not db.ai_consume_pending_action(user_id, pending):
-                # Não afirma o desfecho: quem perde o CAS não sabe se a outra
-                # requisição EXECUTOU ou CANCELOU, e o cancel vence na maioria
-                # das corridas (17 de 20, medido). Dizer "já foi processada"
-                # fazia o usuário acreditar que o histórico sumiu quando estava
-                # intacto — e relançar tudo à mão duplica dado.
-                return (
-                    "🐷 Essa confirmação já foi resolvida em outra janela — "
-                    "dá uma olhada no seu extrato pra ver como ficou."
-                )
+                # Dizer "já foi processada" fazia o usuário acreditar que o
+                # histórico sumiu quando estava intacto — e relançar tudo à mão
+                # duplica dado. O cancel vence a maioria das corridas (17 de 20,
+                # medido).
+                return _CAS_PERDIDO
             result = _execute_pending(user_id, pending)
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", result)
             return result
         if is_cancel(user_text):
-            # Perder o CAS aqui NÃO é "não havia nada pra cancelar": significa
-            # que outra requisição simultânea do mesmo usuário já consumiu a
-            # linha — e o caminho que consome é o que EXECUTA. Dizer "não fiz
-            # nada" depois de apagar tudo é a pior mentira possível.
+            # Perder o CAS aqui NÃO é "não havia nada pra cancelar": outra
+            # requisição do mesmo usuário consumiu a linha. Mas ela pode ter
+            # EXECUTADO, CANCELADO ou só ABANDONADO por mudança de assunto —
+            # três consumidores, e o bool não diz qual. Nem "não fiz nada" (a
+            # mentira de quem apagou tudo) nem "já tinha sido executada" (a
+            # mentira de quem não apagou nada) servem: é o mesmo fato do "sim"
+            # perdedor, e por isso a mesma frase.
             if db.ai_consume_pending_action(user_id, pending):
                 msg = "👍 Beleza, não fiz nada."
             else:
-                msg = (
-                    "🐷 Cheguei tarde: essa ação já tinha sido executada antes "
-                    "do seu 'não'. Confere no seu extrato."
-                )
+                msg = _CAS_PERDIDO
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", msg)
             return msg

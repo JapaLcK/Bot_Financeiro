@@ -91,7 +91,8 @@ def test_delete_all_launches_confirmacao_nao_cancela(user_id: int):
     assert db.count_launches(user_id) == 1, "cancelar não pode apagar nada"
     assert db.ai_get_pending_action(user_id) is None
     # Controle positivo do cancelamento: quem VENCE o CAS continua ouvindo
-    # "não fiz nada" (o perdedor tem a frase oposta, em
+    # "não fiz nada" — é o único que sabe que nada aconteceu. O perdedor não
+    # afirma desfecho nenhum (`_CAS_PERDIDO`, em
     # test_ai_chat_concurrent_confirm.py).
     assert "não fiz nada" in resp.lower(), resp
 
