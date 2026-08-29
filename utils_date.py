@@ -1,4 +1,5 @@
 import os
+import time as time_module
 import re
 import calendar
 import unicodedata
@@ -81,11 +82,27 @@ def align_process_tz() -> str:
     INALCANÇÁVEL a guarda legível de `config/env.py::load_app_env`, que é quem
     recusa fuso inválido no boot com `exit(1)`.
     """
-    from time import tzset
-
     name = _tz().key
     os.environ["TZ"] = name
     os.environ["PGTZ"] = name
+
+    # `time.tzset` é POSIX e NÃO EXISTE no Windows, que o `docs/readme.md`
+    # lista como sistema suportado. Sem esta guarda o `ImportError` sobe até o
+    # `except` de `load_app_env` e vira `sys.exit(1)`: TODO entrypoint deixaria
+    # de subir no Windows, com a mensagem de "fuso inválido" — que ali seria
+    # mentira, porque o `ZoneInfo` resolveu o nome sem problema (Codex, #180).
+    #
+    # O que se perde lá, dito com todas as letras: sem `tzset` o PROCESSO fica
+    # no fuso do sistema, então `date.today()` e os `datetime.now()` naive não
+    # são alinhados e a divergência processo × app continua existindo no
+    # Windows. O que É alinhado lá é a SESSÃO do banco, via `PGTZ` — que é a
+    # metade que causa o bug da #178. Windows é ambiente de desenvolvimento
+    # aqui; produção é Linux (Railway) e o dev de referência é macOS, e nos dois
+    # o alinhamento é completo. Fechar a metade que falta no Windows exigiria
+    # não usar `date.today()` em lugar nenhum — que é o PR que este evitou.
+    tzset = getattr(time_module, "tzset", None)
+    if tzset is None:
+        return name
     tzset()
 
     # `tzset()` NÃO levanta quando a libc não conhece o nome: ela cai para UTC
@@ -102,6 +119,9 @@ def align_process_tz() -> str:
     # produção grava, logo /usr/share/zoneinfo está lá. É por isso que este PR
     # não acrescenta `tzdata` — a dependência criaria justamente a divergência
     # que esta guarda existe para pegar.
+    # Só faz sentido onde o `tzset` acima RODOU: sem ele o processo fica no fuso
+    # do sistema de propósito (Windows), e esta comparação acusaria uma
+    # divergência que é conhecida e documentada, não um defeito.
     agora = datetime.now(_tz())
     if agora.astimezone().utcoffset() != agora.utcoffset():
         raise RuntimeError(

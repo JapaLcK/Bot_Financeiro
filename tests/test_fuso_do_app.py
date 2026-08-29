@@ -574,6 +574,39 @@ def test_load_app_env_nunca_deixa_o_ambiente_sem_tz(tmp_path, monkeypatch):
     assert real["PGTZ"] == "Asia/Tokyo"
 
 
+# ── 15. Windows: sem `time.tzset`, o boot não pode morrer ───────────────────
+# `time.tzset` é POSIX. O `docs/readme.md` lista Windows como sistema suportado,
+# e sem guarda o `ImportError` subia até o `except` de `load_app_env` e virava
+# `sys.exit(1)`: NENHUM entrypoint subiria lá, com a mensagem de "fuso inválido"
+# — que seria mentira, porque o `ZoneInfo` resolveu o nome. Apontado como P1
+# pelo Codex no #180.
+#
+# CONTROLE NEGATIVO: tirar o `if tzset is None: return name` de
+# `align_process_tz` deixa os DOIS casos abaixo vermelhos — o 1º com
+# `ImportError`/`AttributeError`, o 2º com `SystemExit`.
+# CONTROLE POSITIVO: `test_o_processo_roda_no_fuso_do_app` (caso 2) continua
+# verde no Unix, provando que a guarda não desligou o alinhamento onde ele vale.
+
+def test_sem_tzset_o_alinhamento_nao_levanta(monkeypatch):
+    """No Windows a SESSÃO ainda é alinhada; o processo, não — e é assumido."""
+    monkeypatch.delattr(utils_date.time_module, "tzset", raising=False)
+
+    nome = utils_date.align_process_tz()
+
+    assert nome == utils_date.tz_name()
+    assert os.environ["PGTZ"] == nome, "a metade que conserta a #178 tem de valer"
+
+
+def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
+    """O que o P1 quebrava: `load_app_env` matando o processo com exit(1)."""
+    monkeypatch.delattr(utils_date.time_module, "tzset", raising=False)
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", None)
+
+    _com_env(tmp_path, monkeypatch, "REPORT_TIMEZONE=America/Sao_Paulo\n")
+
+    assert utils_date.tz_name() == "America/Sao_Paulo"
+
+
 def _cliente():
     from fastapi.testclient import TestClient
 
