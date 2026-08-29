@@ -2728,12 +2728,45 @@ async def auth_refresh(request: Request, response: Response):
       3. Emite novo access token (15min) + dashboard_token.
       4. Atualiza auth_sessions.last_seen_at.
 
-    Falhas (token revogado, expirado, replay, idle, sessão revogada): retorna 401
-    e limpa cookies. Frontend deve mandar pro login.
+    Os DOIS ramos de falha, e por que o status difere entre eles. Aqui o status
+    não classifica o erro: responde "a sessão acabou?", porque é isso que o
+    `frontend/static/auth-refresh.js` lê — um 401 nesta rota faz o interceptor
+    apagar o estado do aparelho (storage derivado de conta, Cache Storage,
+    service worker).
+
+      400 missing_refresh_token  sem cookie de refresh, mas com access token
+                                 ainda válido: não dá para renovar e a sessão
+                                 está de pé. 401 aqui apagaria o aparelho de
+                                 quem só errou a senha noutra rota (#173).
+      401 missing_refresh_token  sem cookie de refresh e sem access válido: não
+                                 há sessão. É o fim de vida natural — o cookie
+                                 de refresh vence em 14d e some do jar.
+      401 invalid_refresh_token  revogado, expirado, replay, idle ou sessão
+                                 revogada. Fim de sessão.
+
+    "Sem cookie de refresh" não é sinônimo de sessão viva: os dois primeiros
+    ramos têm o mesmo `detail` e estados opostos. O que os separa é a checagem
+    do **cookie** de access — que valida assinatura, `exp` e `type`, e NÃO a
+    revogação de sessão por `jti` nem exclusão agendada de conta. Duas
+    consequências, as duas de propósito: sessão revogada com JWT ainda no prazo
+    cai em 400 — e tudo bem, porque chegar neste ramo exige ter perdido o cookie
+    de refresh TAMBÉM. Enquanto ele estiver no jar a revogação é vista pelo
+    `consume_refresh_token` e o ramo é 401, mesmo quando quem revogou foi outro
+    aparelho (reset de senha → `revoke_user_refresh_tokens`). E quem se autentica
+    por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
+    clientes desta rota, `login.html` e o interceptor, são de cookie).
+
+    O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
+    `HTTPException` descarta os headers do sub-response (medido, #175). Está
+    fora do escopo deste conserto, mas não é para ser lido como funcionando.
     """
     refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
     if not refresh_in_cookie:
-        raise HTTPException(status_code=401, detail="missing_refresh_token")
+        token = _get_auth_token_from_request(request, None)
+        sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
+        raise HTTPException(
+            status_code=400 if sessao_viva else 401, detail="missing_refresh_token",
+        )
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
