@@ -332,3 +332,45 @@ def test_nao_que_perde_o_cas_pro_outro_nao_nao_diz_que_executou(user_id: int, mo
     assert "executada" not in resp.lower(), resp
     assert db.count_launches(user_id) == 2, "cancelar não podia apagar nada"
     assert _bal(user_id) == 700.0
+
+
+def test_pendencia_rearmada_pela_propria_tool_sobrevive_ao_turno(user_id: int):
+    """Guarda do efeito colateral DESEJADO de consumir o CAS ANTES do execute
+    (`runner.py:149-153`, declarado em 8bc76a8): a tool que REARMA uma pendência
+    DURANTE o `_execute_pending` tem a pergunta nova preservada. Na main o clear
+    posterior apagava a pergunta recém-feita e o "sim" seguinte caía no vazio.
+
+    Isto precisava de teste porque a proteção era só um comentário: mover o
+    consumo pra depois quebra `test_dois_sim_simultaneos_executam_uma_vez`, mas
+    ACRESCENTAR um `clear` depois do execute deixa a suíte inteira verde e mata
+    o rearme em silêncio.
+
+    Caminho real, sem mock: o runner arma `set_budget` SEM `_confirmed`
+    (`runner.py:388`); o "sim" executa `_set_budget_execute`, que vê
+    `existing and not confirmed` e rearma com `_confirmed: True`
+    (`tools/budgets.py:204`).
+    """
+    db.upsert_budget(user_id, "alimentação", 500)
+    db.ai_set_pending_action(
+        user_id, "set_budget",
+        {"categoria": "alimentação", "budget": 800},
+        "definir orçamento de alimentação em R$ 800,00",
+    )
+
+    resp = chat(user_id, "sim", monthly_limit=1000, platform="whatsapp")
+
+    rearmada = db.ai_get_pending_action(user_id)
+    assert rearmada is not None, (
+        f"o rearme foi apagado — o 'sim' seguinte do usuário cai no vazio: {resp!r}"
+    )
+    assert rearmada["tool_name"] == "set_budget"
+    assert rearmada["tool_args"]["_confirmed"] is True, rearmada["tool_args"]
+    assert "confirma" in resp.lower(), f"a pergunta nova tem de chegar ao usuário: {resp!r}"
+    assert db.get_budget(user_id, "alimentação")["budget"] == 500.0, \
+        "a pergunta ainda não foi respondida; nada podia ser gravado"
+
+    # Controle POSITIVO: o "sim" seguinte fecha o ciclo — o rearme não é linha
+    # presa, é pergunta viva.
+    resp2 = chat(user_id, "sim", monthly_limit=1000, platform="whatsapp")
+    assert db.get_budget(user_id, "alimentação")["budget"] == 800.0, resp2
+    assert db.ai_get_pending_action(user_id) is None, "consumida a pergunta respondida"
