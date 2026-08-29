@@ -250,6 +250,16 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
+            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal) as e:
+                # MESMA função e MESMAS condições de domínio do delete_launch
+                # singular (`:211` e `:223`) — sem este ramo, "apaga #2, #5 e #7"
+                # com um lançamento antigo no meio contava como incidente em
+                # `backend_errors_24h` e "apaga #2" sozinho não contava.
+                # A mensagem ao usuário não muda: no bulk é "⚠️ Falha: #N" pras
+                # duas, e ela não promete retry.
+                failed.append(lid)
+                _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
+                           launch_id=lid, user_seq=_disp(lid))
             except Exception as e:
                 failed.append(lid)
                 # os DOIS ids: a queixa cita "#2", o log cita o id interno.

@@ -95,3 +95,41 @@ def test_falha_tecnica_continua_error_nas_duas_portas(user_id, monkeypatch, capl
     niveis = _niveis(caplog, "delete_launch:")
     assert niveis == ["ERROR", "ERROR"], niveis
     assert "lost" not in resp_wa and "lost" not in resp_ai, "str(e) não vai pro usuário"
+
+
+def _lancamento(user_id: int, nota: str) -> int:
+    db.add_launch_and_update_balance(user_id, "despesa", 50.0, nota, nota)
+    return int(db.list_launches(user_id, limit=1)[0]["id"])
+
+
+def test_bulk_condicao_de_dominio_loga_warning_e_apaga_o_resto(user_id, caplog):
+    """"apaga #2, #5 e #7" com um lançamento antigo no meio não pode contar
+    como incidente do backend enquanto "apaga #2" sozinho conta como warning —
+    é a MESMA função (`delete_launch_and_rollback`) e a MESMA condição.
+
+    O controle POSITIVO está no mesmo bulk de propósito: o `except` novo não
+    pode engolir o laço: o lançamento saudável tem de ser apagado.
+    """
+    antigo = _lancamento(user_id, "antigo sem efeitos")
+    normal = _lancamento(user_id, "normal")
+    from db.connection import get_conn
+    with get_conn() as conn:  # o que LaunchNoEffects enxerga: `efeitos` nulo
+        with conn.cursor() as cur:
+            cur.execute("update launches set efeitos=null where id=%s and user_id=%s",
+                        (antigo, user_id))
+        conn.commit()
+
+    db.set_pending_action(user_id, "delete_launch_bulk", {
+        "launch_ids": [antigo, normal],
+        "display_ids": {str(antigo): 2, str(normal): 5},
+    })
+
+    with caplog.at_level(logging.WARNING, logger="core.handlers.pending"):
+        resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert _niveis(caplog, "delete_launch_bulk:") == ["WARNING"], \
+        [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert "⚠️ Falha: #2" in resp, resp
+    assert "**#5**" in resp, resp
+    restantes = [int(r["id"]) for r in db.list_launches(user_id, limit=10)]
+    assert restantes == [antigo], f"o bulk parou no lançamento de domínio: {restantes}"
