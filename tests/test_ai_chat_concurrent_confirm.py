@@ -91,9 +91,9 @@ def test_dois_sim_simultaneos_executam_uma_vez(user_id: int, monkeypatch):
     assert db.ai_get_pending_action(user_id) is None
 
     apagou = [r for r in respostas if "apaguei" in r.lower()]
-    ja_foi = [r for r in respostas if "já foi processada" in r.lower()]
+    ja_foi = [r for r in respostas if "já foi resolvida" in r.lower()]
     assert len(apagou) == 1, f"esperava 1 'apaguei', veio {respostas!r}"
-    assert len(ja_foi) == 1, f"esperava 1 'já foi processada', veio {respostas!r}"
+    assert len(ja_foi) == 1, f"esperava 1 'já foi resolvida', veio {respostas!r}"
 
 
 def test_controle_negativo_sem_cas_executa_duas_vezes(user_id: int, monkeypatch):
@@ -244,3 +244,36 @@ def test_cancelamento_que_perde_o_cas_nao_diz_que_nao_fez_nada(user_id: int, mon
     )
     assert "já tinha sido executada" in resp.lower(), resp
     assert _bal(user_id) == 0.0, "o cancelamento não podia mexer em saldo"
+
+
+def test_sim_que_perde_o_cas_pro_cancelamento_nao_diz_que_executou(user_id: int, monkeypatch):
+    """Espelho do teste acima, e o desfecho MAJORITÁRIO da corrida real: medido
+    em 20 corridas "sim" × "não", o cancelamento venceu 17.
+
+    O perdedor não sabe qual dos dois caminhos venceu — o CAS devolve um bool e
+    a linha já não existe. Então a frase dele não pode AFIRMAR desfecho nenhum.
+    A antiga ("essa confirmação já foi processada") dizia que executou; nas 17
+    corridas em que o cancel vence, nada foi apagado e o usuário que acredita
+    nela relança tudo à mão — dado duplicado e saldo errado.
+    """
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    db.ai_set_pending_action(
+        user_id, "delete_all_launches", {}, "apagar TODOS os seus lançamentos"
+    )
+    pending = db.ai_get_pending_action(user_id)
+
+    # a OUTRA requisição ("não") vence o CAS e CANCELA — nada é apagado
+    assert db.ai_consume_pending_action(user_id, pending)
+    assert _bal(user_id) == 700.0
+
+    # a requisição do "sim" segue com a linha que leu antes
+    monkeypatch.setattr(db, "ai_get_pending_action", lambda uid: pending)
+    resp = chat(user_id, "sim", monthly_limit=1000, platform="whatsapp")
+
+    assert _bal(user_id) == 700.0, "o perdedor do CAS não podia executar nada"
+    assert db.count_launches(user_id) == 2, "nada podia ser apagado"
+    for mentira in ("processada", "apaguei", "executada", "foi feita"):
+        assert mentira not in resp.lower(), (
+            f"nada foi apagado e a resposta afirma o desfecho ({mentira!r}): {resp!r}"
+        )

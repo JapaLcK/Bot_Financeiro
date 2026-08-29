@@ -140,7 +140,15 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
             # o "sim" seguinte do usuário caía no vazio. Não "conserte" de
             # volta pondo o consumo depois.
             if not db.ai_consume_pending_action(user_id, pending):
-                return "🐷 Essa confirmação já foi processada."
+                # Não afirma o desfecho: quem perde o CAS não sabe se a outra
+                # requisição EXECUTOU ou CANCELOU, e o cancel vence na maioria
+                # das corridas (17 de 20, medido). Dizer "já foi processada"
+                # fazia o usuário acreditar que o histórico sumiu quando estava
+                # intacto — e relançar tudo à mão duplica dado.
+                return (
+                    "🐷 Essa confirmação já foi resolvida em outra janela — "
+                    "dá uma olhada no seu extrato pra ver como ficou."
+                )
             result = _execute_pending(user_id, pending)
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", result)

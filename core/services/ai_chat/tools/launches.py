@@ -439,6 +439,18 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                 return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
             except LookupError:
                 return f"🐷 Não achei o lançamento #{lid}."
+            except ValueError as e:
+                # Lançamento sem `efeitos`: condição PERMANENTE, não erro
+                # técnico. `_ERRO_APAGAR` manda tentar de novo em alguns
+                # minutos — conselho que nunca ia funcionar aqui. Mesma
+                # distinção do `delete_all_launches` (`kept_no_effects` ×
+                # `errors`).
+                _log_falha("delete_launch_sem_efeitos", user_id, e,
+                           launch_id=internal_id, user_seq=lid)
+                return (
+                    f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
+                    f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
+                )
             except Exception as e:
                 _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
                 return _ERRO_APAGAR

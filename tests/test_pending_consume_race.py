@@ -216,8 +216,13 @@ def test_delete_launch_bulk_loga_a_falha_sem_vazar_str_da_excecao(user_id, monke
 
 
 def test_erro_ao_apagar_nao_devolve_str_da_excecao_ao_usuario(user_id, monkeypatch, caplog):
-    """A mensagem ao usuário não pode carregar o texto do psycopg — mas tem de
-    dizer O QUE FAZER (a antiga fazia isso mal, mas fazia)."""
+    """Causa INESPERADA (banco caído, deadlock, bug): a mensagem não pode
+    carregar o texto do psycopg, mas tem de dizer O QUE FAZER.
+
+    Só esta forma leva "tenta de novo": ela é a única em que tentar de novo
+    pode funcionar. As duas formas PERMANENTES estão nos testes abaixo, e é a
+    ausência delas aqui que fazia o grupo cimentar o conselho errado pra toda
+    causa."""
     import logging
 
     lid = _um_lancamento(user_id)
@@ -235,3 +240,112 @@ def test_erro_ao_apagar_nao_devolve_str_da_excecao_ao_usuario(user_id, monkeypat
     assert "#3" in resp, "o usuário precisa saber QUAL lançamento falhou"
     assert "de novo" in resp.lower(), "mensagem genérica sem ação deixa o usuário parado"
     assert any(r.getMessage().startswith("delete_launch: falha") for r in caplog.records)
+
+
+# ── condição PERMANENTE ≠ erro técnico: as três formas ──────────────────────
+#
+# `delete_launch_and_rollback` levanta duas exceções PREVISTAS
+# (`db/accounts.py`): `LookupError("NOT_FOUND")` e `ValueError("lançamento sem
+# 'efeitos'…")`. As duas são permanentes — "tenta de novo em alguns minutos"
+# nunca vai funcionar. Uma varredura que trata as três formas pelo tipo do
+# `str(e)` funde as três numa só; estes testes discriminam.
+#
+# Controle negativo medido: trocando os `except LookupError` / `except
+# ValueError` de `resolve_delete` por um `except Exception` único (o estado do
+# HEAD anterior), os 4 testes desta seção falham e o
+# `test_erro_ao_apagar_nao_devolve_str_da_excecao_ao_usuario` (causa
+# inesperada) continua verde.
+
+def _sql(q, *args):
+    from db.connection import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(q, args)
+        conn.commit()
+
+
+def test_lancamento_ja_apagado_por_outra_porta_nao_promete_retry(user_id):
+    """NOT_FOUND real: o usuário pede pra apagar no WhatsApp, apaga pelo
+    dashboard e só então responde "sim" (a pendência vive 10 min)."""
+    lid = _um_lancamento(user_id)
+    db.set_pending_action(user_id, "delete_launch", {"launch_id": lid, "display_id": 3})
+    _sql("delete from launches where id=%s and user_id=%s", lid, user_id)  # a outra porta
+
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert "#3" in resp, resp
+    assert "de novo" not in resp.lower(), f"condição permanente prometendo retry: {resp!r}"
+    assert "histórico" in resp.lower(), resp
+
+
+def test_lancamento_sem_efeitos_nao_promete_retry_nem_vaza_str(user_id):
+    """ValueError do domínio: mensagem em PT-BR escrita PRO USUÁRIO. Também
+    permanente — sem `efeitos` gravados, a reversão não fica possível com o
+    tempo. A frase é a mesma do "apagar tudo" (`kept_no_effects`)."""
+    lid = _um_lancamento(user_id)
+    db.set_pending_action(user_id, "delete_launch", {"launch_id": lid, "display_id": 4})
+    _sql("update launches set efeitos=null where id=%s and user_id=%s", lid, user_id)
+
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+
+    assert "#4" in resp, resp
+    assert "de novo" not in resp.lower(), f"condição permanente prometendo retry: {resp!r}"
+    assert "antigo" in resp.lower(), resp
+    assert len(db.list_launches(user_id, limit=10)) == 1, "sem efeitos, nada podia ser apagado"
+
+
+def test_caixinha_com_saldo_e_caixinha_sumida_nao_prometem_retry(user_id, monkeypatch):
+    """POCKET_NOT_ZERO (ValueError) e POCKET_NOT_FOUND (LookupError): as duas
+    permanentes, as duas com resposta acionável própria."""
+    db.set_pending_action(user_id, "delete_pocket", {"pocket_name": "viagem"})
+
+    def saldo(uid, nome):
+        raise ValueError("POCKET_NOT_ZERO")
+
+    monkeypatch.setattr(h_pending.db, "delete_pocket", saldo)
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+    assert "de novo" not in resp.lower(), resp
+    assert "saldo" in resp.lower() and "POCKET_NOT_ZERO" not in resp, resp
+
+    db.set_pending_action(user_id, "delete_pocket", {"pocket_name": "viagem"})
+
+    def sumiu(uid, nome):
+        raise LookupError("POCKET_NOT_FOUND")
+
+    monkeypatch.setattr(h_pending.db, "delete_pocket", sumiu)
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+    assert "de novo" not in resp.lower(), resp
+    assert "POCKET_NOT_FOUND" not in resp and "viagem" in resp, resp
+
+
+def test_investimento_com_saldo_e_sumido_nao_prometem_retry(user_id, monkeypatch):
+    """INV_NOT_ZERO / INV_NOT_FOUND (`db/investments.py`) — o irmão que o
+    varredor esqueceu."""
+    db.set_pending_action(user_id, "delete_investment", {"investment_name": "cdb"})
+    monkeypatch.setattr(h_pending.db, "delete_investment",
+                        lambda uid, n: (_ for _ in ()).throw(ValueError("INV_NOT_ZERO")))
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+    assert "de novo" not in resp.lower(), resp
+    assert "saldo" in resp.lower() and "INV_NOT_ZERO" not in resp, resp
+
+    db.set_pending_action(user_id, "delete_investment", {"investment_name": "cdb"})
+    monkeypatch.setattr(h_pending.db, "delete_investment",
+                        lambda uid, n: (_ for _ in ()).throw(LookupError("INV_NOT_FOUND")))
+    resp = h_pending.resolve_delete(user_id, confirmed=True)
+    assert "de novo" not in resp.lower(), resp
+    assert "INV_NOT_FOUND" not in resp and "cdb" in resp, resp
+
+
+def test_erro_inesperado_em_caixinha_e_investimento_continua_mandando_tentar(user_id, monkeypatch):
+    """Controle positivo do par acima: o caminho técnico NÃO pode perder o
+    "tenta de novo". Sem ele, um conserto que recusasse tudo passaria."""
+    for tipo, payload, fn in (
+        ("delete_pocket", {"pocket_name": "viagem"}, "delete_pocket"),
+        ("delete_investment", {"investment_name": "cdb"}, "delete_investment"),
+    ):
+        db.set_pending_action(user_id, tipo, payload)
+        monkeypatch.setattr(h_pending.db, fn,
+                            lambda uid, n: (_ for _ in ()).throw(RuntimeError("boom 77,50")))
+        resp = h_pending.resolve_delete(user_id, confirmed=True)
+        assert "de novo" in resp.lower(), f"{tipo}: erro técnico sem ação: {resp!r}"
+        assert "77,50" not in resp and "boom" not in resp, resp

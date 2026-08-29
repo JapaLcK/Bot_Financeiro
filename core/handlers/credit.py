@@ -4,6 +4,9 @@ import logging
 import re
 from collections import defaultdict
 
+# Irmão de pacote: reusa o helper em vez de uma 3ª cópia do `logger.error`
+# com sqlstate. Ele nunca põe `str(e)` no log.
+from core.handlers.pending import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
 from db import (
@@ -1550,7 +1553,15 @@ def handle(user_id: int, text: str) -> str | None:
                     f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
                 )
             except Exception as e:
-                return f"❌ Erro ao desfazer grupo: {e}"
+                # `undo_installment_group` não levanta exceção prevista: "não
+                # achei" volta como None e já foi tratado acima. Então tudo que
+                # cai aqui é inesperado — genérica + log, sem `str(e)` (o texto
+                # do psycopg pode trazer valor e descrição da linha).
+                _log_falha("undo_installment_group", user_id, e, group_id=group_id)
+                return (
+                    "❌ Não consegui desfazer o parcelamento agora — deu erro do "
+                    "meu lado. Tenta de novo em alguns minutos."
+                )
 
         ct_id = _extract_credit_transaction_id(t)
         if ct_id is not None:
@@ -1568,7 +1579,13 @@ def handle(user_id: int, text: str) -> str | None:
                     f"Removido: {fmt_brl(res['removed_total'])}."
                 )
             except Exception as e:
-                return f"❌ Erro ao apagar a compra CC{ct_id}: {e}"
+                # Idem: `undo_credit_transaction` devolve None pra "não achei"
+                # (tratado acima) e não levanta exceção prevista.
+                _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=ct_id)
+                return (
+                    f"❌ Não consegui apagar a compra CC{ct_id} agora — deu erro "
+                    f"do meu lado. Tenta de novo em alguns minutos."
+                )
 
     natural_credit = try_handle_natural_credit_purchase(user_id, t)
     if natural_credit is not None:
