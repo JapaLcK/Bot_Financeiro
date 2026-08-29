@@ -192,8 +192,12 @@ def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
 
     - **destrutivo / dinheiro** — NÃO executa. Sem esse porteiro, dois POSTs
       simultâneos em `/ai/chat` executam a mesma confirmação duas vezes.
-    - **abandono / limpeza de estado** — segue e ignora o retorno: se perdeu,
-      não havia nada seu para abandonar.
+    - **cancelamento explícito ("não")** — perder NÃO é "não havia nada":
+      quem consumiu a linha foi a outra requisição, e ela EXECUTOU. Quem perde
+      tem de dizer que a ação já aconteceu, nunca "não fiz nada"
+      (`ai_chat/runner.py`).
+    - **abandono por mudança de assunto** — ignora o retorno: não há resposta
+      a corrigir, a mensagem nova é atendida igual.
     """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(

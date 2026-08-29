@@ -134,6 +134,11 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
         if is_confirm(user_text):
             # ANTES de executar, não depois: o clear posterior não protegeria nada
             # — dois POSTs simultâneos em /ai/chat já teriam executado os dois.
+            # Efeito colateral DESEJADO de consumir antes: pendência que a
+            # própria tool REARMA durante o `_execute_pending` sobrevive ao
+            # turno. Antes, o clear posterior apagava a pergunta recém-feita e
+            # o "sim" seguinte do usuário caía no vazio. Não "conserte" de
+            # volta pondo o consumo depois.
             if not db.ai_consume_pending_action(user_id, pending):
                 return "🐷 Essa confirmação já foi processada."
             result = _execute_pending(user_id, pending)
@@ -141,14 +146,24 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
             db.ai_append_message(user_id, "assistant", result)
             return result
         if is_cancel(user_text):
-            # Abandono: se perdeu o CAS, não havia nada nosso pra cancelar.
-            db.ai_consume_pending_action(user_id, pending)
-            msg = "👍 Beleza, não fiz nada."
+            # Perder o CAS aqui NÃO é "não havia nada pra cancelar": significa
+            # que outra requisição simultânea do mesmo usuário já consumiu a
+            # linha — e o caminho que consome é o que EXECUTA. Dizer "não fiz
+            # nada" depois de apagar tudo é a pior mentira possível.
+            if db.ai_consume_pending_action(user_id, pending):
+                msg = "👍 Beleza, não fiz nada."
+            else:
+                msg = (
+                    "🐷 Cheguei tarde: essa ação já tinha sido executada antes "
+                    "do seu 'não'. Confere no seu extrato."
+                )
             db.ai_append_message(user_id, "user", user_text)
             db.ai_append_message(user_id, "assistant", msg)
             return msg
-        # User mudou de assunto — descarta pending e segue com nova msg
-        # (abandono: retorno ignorado, idem acima).
+        # User mudou de assunto — descarta pending e segue com nova msg.
+        # Aqui o retorno é ignorado DE PROPÓSITO: perder o CAS significa que
+        # outra requisição consumiu a linha, e não há resposta a corrigir — a
+        # mensagem nova do usuário é atendida do mesmo jeito.
         db.ai_consume_pending_action(user_id, pending)
 
     # 2. Rate limit mensal

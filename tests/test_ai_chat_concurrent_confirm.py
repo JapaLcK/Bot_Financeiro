@@ -162,7 +162,85 @@ def test_for_update_serializa_reversao_do_mesmo_lancamento(user_id: int):
 
     t.join(timeout=10)
     assert not t.is_alive(), "a reversão não destravou depois do commit do vencedor"
-    assert _bal(user_id) == 1000.0, "saldo revertido duas vezes (falta `for update`)"
+    # Este assert NÃO discrimina o `for update` (sem o lock o perdedor morre de
+    # DeadlockDetected e também não soma nada) — quem mede o dinheiro é
+    # test_duas_reversoes_do_mesmo_lancamento_nao_devolvem_o_dobro. Aqui ele só
+    # garante que o perdedor não aplicou a reversão por cima do vencedor.
+    assert _bal(user_id) == 1000.0, "o perdedor aplicou a reversão de novo"
     assert erro and isinstance(erro[0], LookupError), (
         f"o perdedor devia levantar NOT_FOUND, veio {erro!r}"
     )
+
+
+def test_duas_reversoes_do_mesmo_lancamento_nao_devolvem_o_dobro(user_id: int):
+    """O bug de DINHEIRO do `for update`, medido pelo saldo.
+
+    Duas `delete_launch_and_rollback` no MESMO lançamento (dois cliques no
+    dashboard, dois POSTs de /ai/chat). Sem o lock, as duas leem o mesmo
+    `efeitos` do snapshot e as duas somam +300: saldo 1300,00 — R$ 300
+    inventados — e NENHUMA levanta exceção, as duas dizem "apagado".
+
+    Controle negativo medido: removendo o `for update` de
+    `delete_launch_and_rollback`, 15/15 execuções deram 1300,00 aqui.
+    """
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid, _seq, _novo = add_launch_and_update_balance(
+        user_id, "despesa", 300, "aluguel", "paguei 300 aluguel"
+    )
+    assert _bal(user_id) == 700.0
+
+    barrier = threading.Barrier(2, timeout=10)
+
+    def apagar():
+        barrier.wait()  # as duas entram na função antes de qualquer commit
+        try:
+            db.delete_launch_and_rollback(user_id, lid)
+        except Exception:
+            pass  # a perdedora pode levantar NOT_FOUND — o que importa é o saldo
+
+    threads = [threading.Thread(target=apagar) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert all(not t.is_alive() for t in threads), "thread travou (pool de DB pequeno?)"
+
+    assert _bal(user_id) == 1000.0, "saldo revertido duas vezes — R$ 300 inventados"
+    assert db.count_launches(user_id) == 1, "só a receita seed devia sobrar"
+
+
+def test_cancelamento_que_perde_o_cas_nao_diz_que_nao_fez_nada(user_id: int, monkeypatch):
+    """"sim" e "não" simultâneos: quando o "sim" vence, o "não" NÃO pode
+    responder "👍 Beleza, não fiz nada" — tudo já foi apagado.
+
+    Perder o CAS num cancelamento significa que a outra requisição consumiu a
+    linha, e o caminho que consome é o que EXECUTA. O raciocínio antigo ("não
+    havia nada nosso pra cancelar") só vale onde a porta é serializada
+    (WhatsApp), não no /ai/chat.
+
+    Interleaving montado à mão em vez de threads: a requisição do "não" já leu
+    a linha (`pending`) quando a outra consome e executa. É o mesmo estado da
+    corrida com Barrier, mas determinístico — a corrida real elege o vencedor
+    por escalonamento (medido: o "sim" venceu 2 de 12).
+    """
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    db.ai_set_pending_action(
+        user_id, "delete_all_launches", {}, "apagar TODOS os seus lançamentos"
+    )
+    pending = db.ai_get_pending_action(user_id)
+
+    # a OUTRA requisição ("sim") vence o CAS e executa
+    assert db.ai_consume_pending_action(user_id, pending)
+    db.delete_all_launches_and_rollback(user_id)
+    assert _bal(user_id) == 0.0
+
+    # a requisição do "não" segue com a linha que leu antes
+    monkeypatch.setattr(db, "ai_get_pending_action", lambda uid: pending)
+    resp = chat(user_id, "não", monthly_limit=1000, platform="whatsapp")
+
+    assert "não fiz nada" not in resp.lower(), (
+        f"apagou tudo e disse que não fez nada: {resp!r}"
+    )
+    assert "já tinha sido executada" in resp.lower(), resp
+    assert _bal(user_id) == 0.0, "o cancelamento não podia mexer em saldo"
