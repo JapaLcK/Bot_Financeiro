@@ -41,7 +41,16 @@ ROTAS_PUBLICAS = [
 # Estava na lista de públicas seguindo o redirect, então o smoke media a página
 # de login achando que media o changelog — e os assets contados eram os dela.
 ROTAS_COM_GATE = [("/changelog", "/login")]
-ROTAS_TEXTO = ["/robots.txt", "/sitemap.xml", "/api/commands-catalog"]
+# Rotas que não são página: (caminho, pedaço do content-type, sentinela no corpo).
+# 200 sozinho não diz nada aqui — uma página de fallback em HTML com status 200
+# passa, e quem consome quebra: o /comandos lê o catálogo e para de montar a
+# lista, sem erro de servidor em lugar nenhum. Medido em produção: text/plain,
+# application/xml e application/json, com estas sentinelas.
+ROTAS_TEXTO = [
+    ("/robots.txt", "text/plain", "Disallow: /app"),
+    ("/sitemap.xml", "xml", "<urlset"),
+    ("/api/commands-catalog", "application/json", '"catalog"'),
+]
 
 # O 404 do Railway quando o serviço não está no ar. Ele responde no lugar do
 # app, com cara de erro de aplicação — foi o que apareceu dentro do card
@@ -165,13 +174,20 @@ def confere_paginas(sessao: requests.Session, base: str, falhas: list[str]) -> s
             falhas.append(f"{caminho}: esperado desvio para {destino}, veio HTTP {r.status_code}")
         elif not r.headers.get("location", "").startswith(destino):
             falhas.append(f"{caminho}: desviou para {r.headers.get('location')!r}, esperado {destino}")
-    for caminho in ROTAS_TEXTO:
+    for caminho, tipo_esperado, sentinela in ROTAS_TEXTO:
         try:
             r = _get(sessao, base, caminho)
-            if r.status_code != 200:
-                falhas.append(f"{caminho}: HTTP {r.status_code}")
         except Exception as e:
             falhas.append(f"{caminho}: {type(e).__name__}: {e}")
+            continue
+        if r.status_code != 200:
+            falhas.append(f"{caminho}: HTTP {r.status_code}")
+            continue
+        tipo = r.headers.get("content-type", "").lower()
+        if tipo_esperado not in tipo:
+            falhas.append(f"{caminho}: content-type {tipo!r}, esperado {tipo_esperado!r}")
+        elif sentinela not in r.text:
+            falhas.append(f"{caminho}: 200 e content-type certos, mas sem {sentinela!r} no corpo")
     return assets
 
 
