@@ -15,7 +15,7 @@ Arquiteto + o diff atual + os achados/apontamentos até aqui.**
 **TODA chamada leva o PACOTE inteiro** — primeira rodada e rodada de correção,
 sem exceção. A única exceção é o passo 1, e só porque plano e diff ainda não
 existem. Por isso os passos abaixo NÃO repetem o que passar: cada lista
-própria por passo é uma cópia que diverge, e as três que existiam divergiram.
+própria por passo é uma cópia que diverge, e as que existiam divergiram.
 
 Não é formalidade — cada pedaço que falta cega um agente de um jeito
 específico:
@@ -33,6 +33,29 @@ Antes de começar, se o diretório atual for um repo git com CLAUDE.md, leia-o
 — as regras desse arquivo (fluxo de PR, como rodar testes, o que não fazer)
 valem por cima deste fluxo genérico.
 
+## Paradas — valem no ciclo inteiro, nunca por passo
+
+Checadas em **toda** rodada de correção, venha ela do Tester (passo 5) ou de
+uma reentrada do Manager (passo 7). Ficam aqui e não dentro de um passo por um
+motivo medido: regra escrita dentro de um passo já divergiu do passo irmão em
+todas as rodadas de revisão deste arquivo.
+
+1. **Achado bloqueante repetido → pare AGORA.** Se um achado bloqueante já
+   apontado numa rodada anterior reaparece, escale para o usuário sem gastar as
+   rodadas que sobraram. É a regra do `CLAUDE.md` §4 ("duas rodadas seguidas
+   batem no mesmo subsistema, pare de remendar"). Achado que sobrevive a uma
+   correção honesta quase sempre é o que este ambiente não resolve — aparelho,
+   deploy, WhatsApp real, `reportlab` ausente (§6) — e aí quem decide é o
+   usuário, não mais uma rodada.
+2. **Teto de 3 rodadas de correção no ciclo inteiro.** Contador único para as
+   rodadas do Tester e as reentradas do Manager, que **nunca zera** no meio.
+   Dois tetos separados não resolveriam: 3 rodadas por reentrada, vezes N
+   reentradas, continua ilimitado. Estourou com bloqueante de pé: pare e escale.
+
+E o critério de saída do loop é **nenhum achado bloqueante de pé** — nunca
+"nada NOVO". Bloqueante repetido não é "nada novo", e ler assim manda o fluxo
+para o Manager com o defeito em pé: avançar calado é pior que rodar demais.
+
 ## Sequência
 
 1. **Arquiteto**: chame com a ideia completa do usuário. Ele pode fazer
@@ -48,31 +71,15 @@ valem por cima deste fluxo genérico.
    foi provado rodando ou é hipótese.
 5. **Loop Coder ↔ Tester**: se o Tester achou algo real (severidade que
    bloqueia), volte ao Coder para corrigir e rode o Tester de novo, apontando
-   o que mudou desde a rodada anterior. Repita até o Tester não achar nada
-   novo que bloqueie.
-
-   **Teto: 3 rodadas de correção no ciclo inteiro** — um contador só, que vale
-   tanto para as rodadas do Tester aqui quanto para as reentradas do Manager
-   (passo 7), e que **nunca zera** no meio do ciclo. Dois tetos separados não
-   resolveriam: 3 rodadas por reentrada, vezes N reentradas, continua sendo
-   ilimitado. Estourou o teto com achado bloqueante de pé: pare e escale para
-   o usuário, em vez de insistir sozinho.
+   o que mudou desde a rodada anterior. Repita até **não haver achado
+   bloqueante de pé**, respeitando as **Paradas** acima.
 6. **Manager**: chame por último. Ele audita a consistência entre plano,
    código e achados — inclusive os já corrigidos — e não repete achados do
    Tester.
 7. Se o Manager reprovar algo, volte para o agente específico que ele apontou
    (não necessariamente o Coder) com o apontamento exato, e repita a partir do
-   passo relevante. **Cada reentrada consome uma das 3 rodadas do passo 5** —
-   sem isso, o Manager reprovando em loop consome a sessão inteira sem nunca
-   escalar.
-
-   E antes do teto vale a parada seca: **se o MESMO apontamento bloqueante
-   voltar, pare na hora**, não gaste as rodadas que sobraram. É a regra do
-   `CLAUDE.md` §4 ("duas rodadas seguidas no mesmo subsistema: pare de
-   remendar"). Apontamento que sobrevive a uma correção honesta quase sempre é
-   o que este ambiente não consegue resolver — aparelho, deploy, WhatsApp
-   real, `reportlab` ausente (§6) — e aí a saída é o usuário decidir, não mais
-   uma rodada.
+   passo relevante. A reentrada é uma rodada de correção como qualquer outra:
+   consome do contador e passa pelas **Paradas** acima.
 
 ## Regras do orquestrador
 
