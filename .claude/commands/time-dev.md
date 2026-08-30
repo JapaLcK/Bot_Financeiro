@@ -40,29 +40,42 @@ uma reentrada do Manager (passo 7). Ficam aqui e não dentro de um passo por um
 motivo medido: regra escrita dentro de um passo já divergiu do passo irmão em
 todas as rodadas de revisão deste arquivo.
 
-1. **Achado bloqueante repetido → pare de REMENDAR.** Se um achado bloqueante
-   já apontado numa rodada anterior reaparece, a rodada seguinte **não pode ser
-   outro remendo**. O que fazer no lugar não é escolha deste arquivo: o
-   `CLAUDE.md` §4 manda **enumerar estados × eventos por escrito e fechar a
-   classe inteira num commit**, e ele vale por cima daqui. No histórico do repo
-   essa enumeração achou 2 bugs que o revisor ainda não tinha apontado — ela é
-   recuperação, não cerimônia.
+**Subsistema é decidível aqui, não é impressão:** dois achados são do mesmo
+subsistema quando apontam **o mesmo arquivo ou a mesma função/fluxo**. Por isso
+o Tester e o Manager são obrigados a rotular cada achado com o subsistema e a
+dizer se ele repete achado de rodada anterior — sem esses dois campos a tabela
+abaixo não é avaliável, e a regra vira palpite.
 
-   A enumeração é **escrita, não código**: faça-a sempre, mesmo sem rodada
-   sobrando. É ela que revela se a causa é alcançável neste ambiente.
+| a rodada atual… | ação |
+|---|---|
+| é a primeira correção do ciclo | remendo pontual |
+| bate no **mesmo subsistema** da rodada imediatamente anterior — achados iguais **ou diferentes** | **recuperação §4** |
+| traz achado bloqueante **repetido literalmente**, mesmo não consecutivo | **recuperação §4** (política nossa, ver abaixo) |
+| bate em subsistema diferente, sem repetição | remendo pontual |
+| qualquer linha acima, com o teto estourado | **escale** |
 
-   **Só então escale**, e nos três casos em que a recuperação do §4 não fecha:
-   (a) a enumeração mostra que a causa está fora do que este ambiente resolve —
-   aparelho e `reportlab` ausente (§6), deploy e WhatsApp real (§3); (b) o achado
-   sobrevive também à enumeração; (c) o teto não deixa rodada para implementá-la.
-   Nos três, entregue a enumeração ao usuário: ela vale mesmo com o ciclo parado.
+**Recuperação §4** (`CLAUDE.md:412-415`, que vale por cima daqui): pare de
+remendar, **enumere estados × eventos por escrito** e feche a classe inteira num
+commit. A enumeração é escrita, não código — faça-a sempre, mesmo sem rodada
+sobrando; é ela que revela se a causa é alcançável neste ambiente. No histórico
+do repo ela achou 2 bugs que o revisor não tinha apontado.
 
-   Escalar **não substitui** o §4 — o §4 é a tentativa obrigatória, escalar é o
-   que vem depois dela.
-2. **Teto de 3 rodadas de correção no ciclo inteiro.** Contador único para as
-   rodadas do Tester e as reentradas do Manager, que **nunca zera** no meio.
-   Dois tetos separados não resolveriam: 3 rodadas por reentrada, vezes N
-   reentradas, continua ilimitado. Estourou com bloqueante de pé: pare e escale.
+**O gatilho do §4 é "duas rodadas seguidas no mesmo subsistema", não "o mesmo
+achado de novo".** É a diferença que fez a chave Pix consumir três rodadas com
+três achados DIFERENTES no mesmo fluxo (§4). A linha do achado repetido
+não-consecutivo é **política deste arquivo**, mais dura que o §4 de propósito —
+não a atribua a ele.
+
+**Escale ao usuário** quando: (a) a enumeração mostra causa fora deste ambiente
+— aparelho e `reportlab` ausente (§6), deploy e WhatsApp real (§3); (b) o achado
+sobrevive à rodada que implementou a enumeração; (c) o teto não deixa rodada
+para implementá-la. Nos três, entregue a enumeração junto: ela vale com o ciclo
+parado. Escalar **não substitui** a recuperação — vem depois dela.
+
+**Teto: 3 rodadas de correção no ciclo inteiro.** Contador único para as rodadas
+do Tester e as reentradas do Manager, que **nunca zera** no meio. Dois tetos
+separados não resolveriam: 3 rodadas por reentrada, vezes N reentradas, continua
+ilimitado. Estourou com bloqueante de pé: pare e escale.
 
 E o critério de saída do loop é **nenhum achado bloqueante de pé** — nunca
 "nada NOVO". Bloqueante repetido não é "nada novo", e ler assim manda o fluxo
@@ -92,6 +105,11 @@ para o Manager com o defeito em pé: avançar calado é pior que rodar demais.
    (não necessariamente o Coder) com o apontamento exato, e repita a partir do
    passo relevante. A reentrada é uma rodada de correção como qualquer outra:
    consome do contador e passa pelas **Paradas** acima.
+
+   Se ela voltar ao **Arquiteto** e o plano mudar, **o passo 2 roda de novo**:
+   o PACOTE exige plano *aprovado*, e plano reescrito depois da aprovação não
+   é aprovado. Sem isso o ciclo seguiria sobre um escopo que o usuário nunca
+   viu — o oposto do que o passo 2 existe para impedir.
 
 ## Regras do orquestrador
 

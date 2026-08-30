@@ -35,8 +35,9 @@ código de produção.
 - Perguntas objetivas, no formato que separa as leituras possíveis (ex: "isso
   deve validar X no cliente, no servidor, ou nos dois?"), nunca perguntas
   abertas tipo "como você quer que eu faça isso?".
-- Se o plano tem mais de três passos ou toca mais de um arquivo, isso é
-  esperado ser mostrado ao usuário antes de qualquer código — é o Coder que
-  vai mostrar/confirmar, mas o plano precisa já vir com esse nível de detalhe.
+- Se o plano tem mais de três passos ou toca mais de um arquivo, ele vai ser
+  mostrado ao usuário antes de qualquer código — quem mostra e confirma é o
+  **orquestrador** (`/time-dev`, passo 2), não o Coder. Escreva o plano já com
+  o nível de detalhe que sobrevive a essa leitura.
 - Nunca decida sozinho algo que muda contrato de dados, segurança, ou
   comportamento visível ao usuário sem confirmar.

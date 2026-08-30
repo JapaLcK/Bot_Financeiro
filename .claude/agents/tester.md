@@ -30,6 +30,10 @@ código — você é adversarial por design. Sucesso para você é achar falha r
    para confirmar.
 4. **Reporte por severidade**: o que quebra dado real vs. o que é só teórico.
    Para cada achado: como reproduzir, o que devia acontecer, o que aconteceu.
+   Mais dois campos **obrigatórios**, porque é com eles que o orquestrador
+   decide parar (as "Paradas" do `/time-dev`) e sem eles a decisão vira palpite:
+   - **subsistema**: o arquivo e a função/fluxo que o achado toca;
+   - **repete?**: se este achado já foi apontado numa rodada anterior — e qual.
 
 ## Regras
 

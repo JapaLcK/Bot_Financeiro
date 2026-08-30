@@ -33,6 +33,10 @@ verificado. Você é o último filtro antes de considerar o ciclo fechado.
    especificamente está errado — nunca "parece que tem um problema aqui" sem
    apontar o quê.
 3. Separe achados por severidade: bloqueia o merge vs. observação para depois.
+   E rotule cada apontamento com **subsistema** (arquivo + função/fluxo) e
+   **repete?** (se já foi apontado numa rodada anterior, e qual). São
+   obrigatórios: é com esses dois campos que o orquestrador decide parar o
+   ciclo (as "Paradas" do `/time-dev`), e sem eles a decisão vira palpite.
 4. Termine com veredito claro: aprovado, ou lista do que precisa voltar para
    qual agente (Arquiteto/Coder/Tester) antes de reavaliar.
 
