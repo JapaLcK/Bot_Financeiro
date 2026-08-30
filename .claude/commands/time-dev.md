@@ -10,16 +10,8 @@ ao nome de cada um. Cada chamada de agente começa sem contexto — o prompt
 precisa levar tudo que esse agente precisa saber.
 
 Chame isso de **PACOTE**: **a ideia original do usuário + o plano aprovado do
-Arquiteto + o diff atual + os achados/apontamentos até aqui.**
-
-**Antes de qualquer chamada, registre a BASELINE**: `git rev-parse HEAD` e
-`git status --porcelain`. "Diff atual" quer dizer *o que mudou em relação a
-ela* — nunca `git diff` cru. Sem esse marco, trabalho que já estava na árvore
-entra no PACOTE como se fosse do Coder: o Tester ataca código que ninguém pediu,
-o Manager classifica como escopo vazado, e o resumo final credita ao ciclo
-mudança que não é dele. Se a árvore começar suja, **liste os arquivos
-pré-existentes no PACOTE** para os dois poderem excluí-los — ou peça ao usuário
-para limpar antes, que é o mais barato.
+Arquiteto + o diff atual + os achados/apontamentos até aqui + a BASELINE
+(abaixo).**
 
 **TODA chamada leva o PACOTE inteiro** — primeira rodada e rodada de correção,
 sem exceção. A única exceção é o passo 1, e só porque plano e diff ainda não
@@ -42,6 +34,30 @@ Antes de começar, se o diretório atual for um repo git com CLAUDE.md, leia-o
 — as regras desse arquivo (fluxo de PR, como rodar testes, o que não fazer)
 valem por cima deste fluxo genérico.
 
+## Baseline — capturada antes de QUALQUER mutação
+
+Estado inicial se registra antes de o Coder tocar em arquivo. Depois não dá
+para reconstruir: `git status --porcelain` devolve caminho e letra de status,
+**nunca hunks**, então trabalho pré-existente no mesmo arquivo que o Coder edita
+fica indistinguível do dele.
+
+1. **Árvore limpa é pré-requisito, não preferência.** Se `git status --porcelain`
+   não vier vazio, **pare antes da primeira chamada**, liste os arquivos e peça
+   decisão ao usuário. **Nunca use `git stash`**: ele é compartilhado entre os
+   worktrees do repositório, e você estaria mexendo em trabalho de outra sessão.
+   Commit WIP é a saída, e a decisão é do usuário.
+2. **Registre `git rev-parse HEAD`.** "Diff atual", no PACOTE, é o que mudou em
+   relação a esse commit — nunca `git diff` cru.
+3. **Rode a suíte ANTES do passo 3** e guarde a **lista de NOMES** dos testes que
+   já falhavam — nunca a contagem. É exigência da skill `baseline-testes`
+   ("Tire a baseline ANTES de mexer. Falha que já existia não é regressão sua"),
+   e contagem igual não prova ausência de regressão: um teste novo mascara um
+   quebrado. Sem essa medição o Tester credita ao Coder falha que já existia, ou
+   não vê um teste que passou a falhar — e ele só roda DEPOIS do Coder, quando o
+   estado anterior já não existe.
+
+   **Meça no momento.** Nunca reaproveite número de baseline escrito em documento.
+
 ## Paradas — valem no ciclo inteiro, nunca por passo
 
 Checadas em **toda** rodada de correção, venha ela do Tester (passo 5) ou de
@@ -61,13 +77,20 @@ tem rodada anterior com que comparar. E as linhas são avaliadas **em ordem, a
 primeira que casar decide** — sem essa precedência, duas linhas casam com ações
 diferentes já no primeiro caso aplicável.
 
+**PRÉ-CONDIÇÃO, avaliada ANTES da tabela: teto de 3 rodadas de correção no ciclo
+inteiro.** Contador único para as rodadas do Tester e as reentradas do Manager,
+que **nunca zera** no meio — dois tetos separados não resolveriam, porque 3
+rodadas por reentrada vezes N reentradas continua ilimitado. Estourou com achado
+bloqueante de pé: **escale, e não consulte a tabela**. O teto não pode ser linha
+dela: as linhas abaixo são exaustivas e ordenadas, então uma linha de teto no fim
+nunca seria alcançada.
+
 | a rodada atual… | ação |
 |---|---|
 | é a primeira correção do ciclo (não há rodada anterior) | remendo pontual |
 | bate no **mesmo subsistema** da rodada imediatamente anterior — achados iguais **ou diferentes** | **recuperação §4** |
 | traz achado bloqueante **repetido literalmente**, mesmo não consecutivo | **recuperação §4** (política nossa, ver abaixo) |
 | bate em subsistema diferente, sem repetição | remendo pontual |
-| qualquer linha acima, com o teto estourado | **escale** |
 
 **Recuperação §4** (`CLAUDE.md:412-415`, que vale por cima daqui): pare de
 remendar, **enumere estados × eventos por escrito** e feche a classe inteira num
@@ -86,11 +109,6 @@ não a atribua a ele.
 sobrevive à rodada que implementou a enumeração; (c) o teto não deixa rodada
 para implementá-la. Nos três, entregue a enumeração junto: ela vale com o ciclo
 parado. Escalar **não substitui** a recuperação — vem depois dela.
-
-**Teto: 3 rodadas de correção no ciclo inteiro.** Contador único para as rodadas
-do Tester e as reentradas do Manager, que **nunca zera** no meio. Dois tetos
-separados não resolveriam: 3 rodadas por reentrada, vezes N reentradas, continua
-ilimitado. Estourou com bloqueante de pé: pare e escale.
 
 E o critério de saída do loop é **nenhum achado bloqueante de pé** — nunca
 "nada NOVO". Bloqueante repetido não é "nada novo", e ler assim manda o fluxo
