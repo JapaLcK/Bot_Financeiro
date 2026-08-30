@@ -383,6 +383,26 @@ def pergunta_guardando_contexto(
     Uma pergunta não pode atropelar outra pergunta que o usuário já está lendo
     na tela — foi o erro que o #133 cometeu e custou um commit de correção.
     """
+    # GUARDA antes do claim: o `claim_pending_action` considera "mesma pergunta"
+    # o que tem o MESMO `action_type`, e as nove perguntas daqui usam todas o
+    # tipo genérico `clarification` (`db/pending.py:355`). Sem esta guarda, a
+    # pergunta de valor de um DEPÓSITO desalojaria a de um SAQUE como se fosse
+    # repetição, e a resposta do usuário iria para a operação financeira errada.
+    # Apontado pelo Codex no #184 (P1).
+    #
+    # "Mesma pergunta" aqui é a mesma intent pedindo a mesma entidade — o caso de
+    # o usuário refazer o comando. Qualquer outra `clarification` é pergunta
+    # ALHEIA, que ele já está lendo na tela, e cede a vez.
+    #
+    # Consultiva de propósito: o `claim` relê a linha e faz o próprio CAS, então
+    # a janela entre as duas leituras fecha lá. O pior caso é o texto degradado,
+    # não dinheiro na operação errada.
+    atual = db.get_pending_action(user_id) or {}
+    if atual.get("action_type") == "clarification":
+        anterior = atual.get("payload") or {}
+        if (anterior.get("intent"), anterior.get("falta")) != (intent, falta):
+            return _peca_para_terminar_a_outra(user_id, intent)
+
     ok = db.claim_pending_action(user_id, "clarification", {
         "intent": intent,
         "entities": dict(entities or {}),
@@ -407,6 +427,11 @@ def pergunta_guardando_contexto(
     # `recategorize_launch_text` vira nome de categoria). O único caminho que
     # vale em todos é terminar a pergunta viva. Aquela função é a gêmea
     # especializada em contas; a redação difere, a regra é a mesma.
+    return _peca_para_terminar_a_outra(user_id, intent)
+
+
+def _peca_para_terminar_a_outra(user_id: int, intent: str) -> str:
+    """A linha é de OUTRA pergunta, que o usuário já viu na tela."""
     logger.info("pergunta sem contexto (claim perdido) intent=%s uid=%s", intent, user_id)
     viva = (db.get_pending_action(user_id) or {}).get("payload") or {}
     outra = viva.get("question")

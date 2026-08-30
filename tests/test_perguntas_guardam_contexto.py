@@ -193,10 +193,88 @@ def test_nome_do_alvo_preserva_nome_legitimo():
     from core.intent_router import _nome_do_alvo
 
     assert _nome_do_alvo("reserva de emergencia") == "reserva de emergencia"
+    # catálogo desempata quando o nome literal contém o substantivo
+    assert _nome_do_alvo("minha caixinha viagem", ["minha caixinha viagem"]) == "minha caixinha viagem"
     assert _nome_do_alvo("viagem") == "viagem"
     assert _nome_do_alvo("caixinha viagem") == "viagem"
     assert _nome_do_alvo("retirei 100 da caixinha viagem") == "viagem"
     assert _nome_do_alvo("investimento cdb nubank") == "cdb nubank"
+
+
+# ── Uma pergunta não desaloja OUTRA pergunta (Codex P1 no #184) ─────────────
+
+def test_pergunta_nao_desaloja_pergunta_alheia(uid):
+    """As nove perguntas usam o tipo genérico `clarification`, e o
+    `claim_pending_action` trata tipo igual como "a mesma pergunta de novo"
+    (`db/pending.py:355`). Sem a guarda, a pergunta de valor de um SAQUE
+    substituía a de um DEPÓSITO e a resposta ia para a operação errada.
+    """
+    import db as _db
+
+    _db.claim_pending_action(uid, "clarification", {
+        "intent": "pockets.deposit", "entities": {"pocket_name": "viagem"},
+        "question": "Qual o valor? (deposito)", "orig_text": "guardei na caixinha viagem",
+        "falta": "amount",
+    })
+
+    from core.handlers import pending as h_pending
+    resposta = h_pending.pergunta_guardando_contexto(
+        uid, "pockets.withdraw", {"pocket_name": "viagem"},
+        "Qual o valor? (saque)", "tirar da caixinha viagem", falta="amount")
+
+    viva = _db.get_pending_action(uid)
+    assert viva["payload"]["intent"] == "pockets.deposit", "a pergunta do saque atropelou a do depósito"
+    assert viva["payload"]["question"] == "Qual o valor? (deposito)"
+    # E o usuário é avisado, em vez de receber uma pergunta que não vai ser ouvida.
+    assert "outra pergunta minha" in resposta
+
+
+def test_mesma_pergunta_de_novo_pode_substituir(uid):
+    """CONTROLE POSITIVO da guarda acima: refazer o MESMO comando não pode
+    travar o usuário — senão a guarda vira cadeado de 10 minutos."""
+    import db as _db
+    from core.handlers import pending as h_pending
+
+    for alvo in ("viagem", "carro"):
+        h_pending.pergunta_guardando_contexto(
+            uid, "pockets.deposit", {"pocket_name": alvo},
+            f"Qual o valor? ({alvo})", f"guardei na caixinha {alvo}", falta="amount")
+
+    viva = _db.get_pending_action(uid)
+    assert viva["payload"]["entities"]["pocket_name"] == "carro", "a repetição não substituiu"
+
+
+# ── want_all e nome literal (Codex P2 no #184) ──────────────────────────────
+
+def test_esvaziar_preserva_o_marcador_de_tudo(uid):
+    """`want_all` é derivado do `text` pelos handlers de saque. Passar a resposta
+    curta como texto perdia "esvaziar" e o bot pedia um valor."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+    respostas = _conversa(uid, "esvaziar caixinha", "viagem")
+
+    assert "esvaziada" in respostas[-1], respostas[-1]
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("viagem") == 0.00
+
+
+def test_nome_literal_com_a_palavra_caixinha(uid):
+    """Caixinha criada pelo dashboard com "caixinha" DENTRO do nome. Recortar
+    sempre respondia "Caixinha *viagem* não encontrada"; quem desempata é o
+    catálogo do usuário."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    respostas = _conversa(uid, "criar caixinha minha caixinha viagem",
+                          "guardei na caixinha viagem", "minha caixinha viagem", "200")
+
+    assert "Depósito na caixinha" in respostas[-1], respostas[-1]
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("minha caixinha viagem") == 200.00
 
 
 # ── As duas pontas da fonte única (§0.7) ────────────────────────────────────

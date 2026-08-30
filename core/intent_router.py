@@ -10,6 +10,7 @@ Recebe um IntentResult + mensagem original e decide o que fazer:
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import db
@@ -34,6 +35,8 @@ from core.handlers import (
     recurring  as h_recurring,
     bills      as h_bills,
 )
+
+logger = logging.getLogger(__name__)
 
 # Limiar de confiança para executar sem pedir confirmação
 CONFIDENCE_EXECUTE = 0.85
@@ -788,8 +791,37 @@ _PREP_RE = re.compile(r"^(?:d[aeo]|n[ao]|para|pra|em)\s+", re.I)
 _SUBST_ALVO_RE = re.compile(r"(?:caixinha|investimento)\s+(.+)$", re.I)
 
 
-def _nome_do_alvo(resposta: str) -> str:
+def _alvos_existentes(user_id: int, intent: str) -> list[str]:
+    """Nomes de caixinha/investimento do usuário, conforme o que a intent move."""
+    nomes: list[str] = []
+    try:
+        if intent in ("pockets.deposit", "pockets.withdraw", "funds.withdraw"):
+            nomes += [p.get("name") or "" for p in (db.list_pockets(user_id) or [])]
+        if intent in ("investments.deposit", "investments.withdraw", "funds.withdraw"):
+            nomes += [i.get("name") or "" for i in (db.accrue_all_investments(user_id) or [])]
+    except Exception:
+        logger.exception("falha ao listar alvos do usuario %s", user_id)
+    return [n for n in nomes if n]
+
+
+def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
+    """O nome do alvo dentro da resposta do usuário.
+
+    "caixinha" no MEIO da string é ambíguo: em "retirei 100 da caixinha viagem"
+    é prefixo sintático e o nome é "viagem"; em "minha caixinha viagem" — nome
+    literal de uma caixinha criada pelo dashboard — faz parte do nome. Recortar
+    sempre respondia "Caixinha *viagem* não encontrada" (medido); não recortar
+    nunca fazia o comando completo funcionar (medido). Apontado pelo Codex no
+    #184, as duas pontas.
+
+    Quem desempata é o CATÁLOGO do usuário, que é definitivo: se a resposta
+    inteira já é um alvo dele, ela é o nome e não se toca. Só quando não é é que
+    o recorte vale.
+    """
     t = resposta.strip()
+    alvo = normalize_text(t)
+    if alvo and any(normalize_text(n) == alvo for n in (existentes or [])):
+        return t
     achou = _SUBST_ALVO_RE.search(t)
     if achou:
         t = achou.group(1)
@@ -914,8 +946,22 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         # (`parse_pocket_deposit_natural`, `_parse_pocket_withdraw_natural`)
         # extrai nome E valor do comando completo, e a entity abaixo só vale
         # quando esse parse não acha nada — o caso da resposta curta.
-        ents[falta] = _nome_do_alvo(resposta_h)
-        return _execute(original_intent, user_id, resposta_h, ents, platform, external_id)
+        ents[falta] = _nome_do_alvo(resposta_h, _alvos_existentes(user_id, original_intent))
+        # O comando completo ("retirei 100 da caixinha viagem") traz o valor
+        # junto: aproveita e poupa um turno. Passa pelo MESMO filtro de dano do
+        # ramo de cima — um valor perigoso aqui e a pergunta do valor volta.
+        if not ents.get("amount"):
+            from parsers import _extract_valor
+            v = _extract_valor(resposta_h)
+            if v is not None and not valor_perigoso(resposta_h, v):
+                ents["amount"] = v
+        # `orig_text` e NAO a resposta: `want_all` ("esvaziar", "zerar", "tudo")
+        # e derivado do `text` pelos dois handlers de saque, entao trocar o texto
+        # pela resposta curta perdia o marcador e o bot pedia um valor em vez de
+        # esvaziar a caixinha. Medido; apontado pelo Codex no #184. O nome e o
+        # valor chegam pelas entities, que e o que o handler consulta quando o
+        # parse do texto nao acha nada.
+        return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
