@@ -20,7 +20,11 @@ on:
 # nunca mais vai estar no ar — ele ficaria esperando o gate até o timeout e
 # reprovaria por algo que não é defeito.
 concurrency:
-  group: smoke-prod
+  # TEMPORÁRIO: `-${{ github.event_name }}` enquanto o gatilho `pull_request`
+  # existe. Sem isso o evento de PR entra no MESMO grupo do push na main e o
+  # cancela — e o job do PR ainda é pulado pelo `if`, então aquele deploy fica
+  # sem smoke nenhum (Codex, P1). Volta a ser `smoke-prod` quando o gatilho sair.
+  group: smoke-prod-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

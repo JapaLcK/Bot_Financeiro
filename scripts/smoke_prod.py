@@ -34,8 +34,13 @@ TIMEOUT = 20
 ROTAS_PUBLICAS = [
     "/", "/login", "/cadastro", "/precos", "/funcionalidades", "/como-funciona",
     "/comandos", "/termos", "/privacy", "/suporte", "/whatsapp", "/agents",
-    "/changelog",
 ]
+
+# Rotas que EXIGEM sessão: o contrato delas é o desvio, não o conteúdo. Medido:
+# /changelog responde 302 -> /login?next=/changelog para anônimo (gate_pro_page).
+# Estava na lista de públicas seguindo o redirect, então o smoke media a página
+# de login achando que media o changelog — e os assets contados eram os dela.
+ROTAS_COM_GATE = [("/changelog", "/login")]
 ROTAS_TEXTO = ["/robots.txt", "/sitemap.xml", "/api/commands-catalog"]
 
 # O 404 do Railway quando o serviço não está no ar. Ele responde no lugar do
@@ -50,7 +55,9 @@ RE_ASSET = re.compile(r'(?:src|href)="([^"]+\.(?:css|js)\?v=[0-9a-f]+)"')
 
 
 def _get(sessao: requests.Session, base: str, caminho: str) -> requests.Response:
-    return sessao.get(urljoin(base, caminho), timeout=TIMEOUT, allow_redirects=True)
+    # Sem seguir redirect: uma rota que passe a desviar para outra página
+    # saudável satisfaria o 200 e o <title> sem nunca ter sido medida.
+    return sessao.get(urljoin(base, caminho), timeout=TIMEOUT, allow_redirects=False)
 
 
 def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool:
@@ -77,13 +84,14 @@ def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool
                                  headers={"X-Smoke-Token": token}).json()
             visto = str(corpo.get("commit", "<sem campo commit>"))
             if visto == "<sem campo commit>":
-                falhas.append(
-                    "/health respondeu sem o campo `commit`. Ou o SMOKE_HEALTH_TOKEN "
-                    "daqui não bate com o do serviço, ou a variável não está no "
-                    "ambiente da produção."
-                )
-                return False
-            if visto == "unknown":
+                # NÃO é erro de configuração: é o estado esperado enquanto a
+                # produção ainda serve a versão anterior de /health, que não
+                # tinha o campo. Falhar aqui reprovaria justamente o primeiro
+                # run depois deste merge — antes de o deploy sequer começar.
+                # Continua tentando; se persistir até o prazo, o timeout abaixo
+                # reporta, e aí a hipótese do token entra na mensagem.
+                pass
+            elif visto == "unknown":
                 falhas.append(
                     "/health devolveu commit='unknown': RAILWAY_GIT_COMMIT_SHA não "
                     "chegou ao processo. Sem isso não dá para saber QUAL código está "
@@ -97,7 +105,12 @@ def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool
             visto = f"<{type(e).__name__}>"
         print(f"aguardando deploy de {sha[:8]} (no ar: {visto})…", flush=True)
         time.sleep(15)
-    falhas.append(f"deploy de {sha[:8]} não subiu em {limite_s}s (último: {visto})")
+    falhas.append(
+        f"deploy de {sha[:8]} não subiu em {limite_s}s (último: {visto}). "
+        "Se o último for `<sem campo commit>`, as causas são: o deploy não "
+        "aconteceu, ou o SMOKE_HEALTH_TOKEN daqui não bate com o do serviço, "
+        "ou a variável não está no ambiente da produção."
+    )
     return False
 
 
@@ -120,6 +133,16 @@ def confere_paginas(sessao: requests.Session, base: str, falhas: list[str]) -> s
             falhas.append(f"{caminho}: 200 sem <title> ({len(r.text)} bytes) — não é a página")
             continue
         assets.update(RE_ASSET.findall(r.text))
+    for caminho, destino in ROTAS_COM_GATE:
+        try:
+            r = _get(sessao, base, caminho)
+        except Exception as e:
+            falhas.append(f"{caminho}: {type(e).__name__}: {e}")
+            continue
+        if r.status_code not in (301, 302, 303, 307, 308):
+            falhas.append(f"{caminho}: esperado desvio para {destino}, veio HTTP {r.status_code}")
+        elif not r.headers.get("location", "").startswith(destino):
+            falhas.append(f"{caminho}: desviou para {r.headers.get('location')!r}, esperado {destino}")
     for caminho in ROTAS_TEXTO:
         try:
             r = _get(sessao, base, caminho)
@@ -197,7 +220,7 @@ def main() -> int:
     confere_assets(sessao, args.base, assets, falhas)
     confere_pagina_de_erro(sessao, args.base, falhas)
 
-    total = len(ROTAS_PUBLICAS) + len(ROTAS_TEXTO) + len(assets) + 2
+    total = len(ROTAS_PUBLICAS) + len(ROTAS_COM_GATE) + len(ROTAS_TEXTO) + len(assets) + 2
     if falhas:
         print(f"\n{len(falhas)} falha(s) em {total} verificações:", file=sys.stderr)
         print("\n".join(f"  FALHA: {f}" for f in falhas), file=sys.stderr)

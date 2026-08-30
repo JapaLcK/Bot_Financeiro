@@ -32,9 +32,14 @@ const TELAS = ["/app", "/home", "/settings"];
  * asserção negativa.
  *
  * O alvo de cada aba é o contêiner de STATS, não a lista: ele é preenchido pelo
- * render de sucesso mesmo com a conta vazia (as tiles mostram zero), e continua
- * vazio quando o fetch falha — que é exatamente o que discrimina. Uma asserção
- * de "tem itens" reprovaria na conta de automação, que não tem dado nenhum.
+ * render de sucesso mesmo com a conta vazia (as tiles mostram zero). Uma
+ * asserção de "tem itens" reprovaria na conta de automação, que não tem dado.
+ *
+ * E o alvo dentro dele é `.stat-value`, não o texto do contêiner: o
+ * loadBudgetsView (dashboard.js:2623) escreve um ESQUELETO síncrono antes do
+ * fetch, com os rótulos já preenchidos — "tem texto" passava nele, e um fetch
+ * pendurado para sempre saía verde. O esqueleto põe `.sk`; só o render de
+ * sucesso põe `.stat-value` com número dentro.
  *
  * São duas abas, não as onze: `categories` é a que quebrou de verdade e
  * `budgets` é a irmã de outro endpoint. Amplia-se quando houver motivo medido,
@@ -133,6 +138,14 @@ try {
       falhas.push(`[${tela}] a página respondeu ${resp ? resp.status() : "nada"}`);
       continue;
     }
+    // `goto` segue redirect e devolve a resposta FINAL: 200 sozinho não prova
+    // que chegou onde pediu. Se /home passar a desviar para /app, a tela some
+    // e o loop passa — nenhuma das marcas de erro está numa página saudável.
+    const chegou = new URL(pagina.url()).pathname;
+    if (chegou !== tela) {
+      falhas.push(`[${tela}] desviou para ${chegou} — a rota pedida não foi servida`);
+      continue;
+    }
     // Os cards enchem por fetch depois do load. networkidle sozinho é frágil
     // (o WebSocket do dashboard nunca fica idle), então: idle com teto, e segue.
     await pagina.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
@@ -159,10 +172,14 @@ try {
       continue;
     }
     try {
-      const alvo = pagina.locator(seletor);
-      await alvo.waitFor({ state: "visible", timeout: 20000 });
+      await pagina.locator(seletor).waitFor({ state: "visible", timeout: 20000 });
       await pagina.waitForFunction(
-        (s) => (document.querySelector(s)?.innerText || "").trim().length > 0,
+        (s) => {
+          const caixa = document.querySelector(s);
+          if (!caixa || caixa.querySelector(".sk")) return false; // ainda no esqueleto
+          const valores = [...caixa.querySelectorAll(".stat-value")];
+          return valores.length > 0 && valores.every((v) => v.innerText.trim().length > 0);
+        },
         seletor,
         { timeout: 20000 },
       );
