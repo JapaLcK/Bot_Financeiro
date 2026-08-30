@@ -70,7 +70,46 @@ def test_home_serve_app_mode_com_cache_buster_de_hash():
 def test_health():
     resp = client.get("/health")
     assert resp.status_code == 200
+    # Resposta pública inalterada: o test_health_endpoint_does_not_expose_
+    # infrastructure (tests/test_auth_cookie.py) afirma o mesmo por outro
+    # ângulo, e foi ele que pegou a versão que vazava o commit para qualquer um.
     assert resp.json() == {"status": "ok"}
+    # Sem no-store, uma borda que cacheie /health devolve o SHA do deploy
+    # anterior e o gate do smoke abre em cima do código velho.
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_health_entrega_o_commit_so_com_o_token(monkeypatch):
+    """O gate do smoke (scripts/smoke_prod.py) precisa do SHA; mais ninguém.
+
+    Os três casos importam: com token certo o campo aparece (senão o gate nunca
+    abre e o smoke morre no timeout), com token errado e sem token ele não
+    aparece (senão está vazando infraestrutura em endpoint público).
+    """
+    monkeypatch.setenv("SMOKE_HEALTH_TOKEN", "token-de-teste-32-bytes-ou-mais!!")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc123def456")
+
+    com_token = client.get("/health", headers={"X-Smoke-Token": "token-de-teste-32-bytes-ou-mais!!"})
+    assert com_token.json() == {"status": "ok", "commit": "abc123def456"}
+
+    errado = client.get("/health", headers={"X-Smoke-Token": "token-errado"})
+    assert errado.json() == {"status": "ok"}
+
+    assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_health_sem_token_configurado_nao_aceita_header_vazio(monkeypatch):
+    """Sem SMOKE_HEALTH_TOKEN no ambiente, NADA abre o campo — nem o header vazio.
+
+    `compare_digest("", "")` é True: se a guarda fosse só a comparação, um
+    ambiente sem a variável entregaria o commit a quem mandasse o header em
+    branco, que é todo mundo.
+    """
+    monkeypatch.delenv("SMOKE_HEALTH_TOKEN", raising=False)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc123def456")
+
+    assert client.get("/health", headers={"X-Smoke-Token": ""}).json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok"}
 
 
 def test_robots_txt():

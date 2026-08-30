@@ -5,11 +5,13 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 import asyncio
+import hmac
 import html as _html
+import os
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from frontend.routes.shared import (
@@ -743,5 +745,23 @@ async def contact_submit(request: Request, body: ContactBody):
 
 
 @router.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(request: Request):
+    # A resposta pública é EXATAMENTE a de sempre. O SHA do deploy é
+    # infraestrutura, e o test_health_endpoint_does_not_expose_infrastructure
+    # (tests/test_auth_cookie.py) existe para impedir que ele vaze daqui — foi
+    # ele que reprovou a primeira versão desta mudança, que devolvia o commit a
+    # qualquer um.
+    #
+    # O gate do smoke pós-deploy (.github/workflows/smoke.yml) não precisa que
+    # o SHA seja público: precisa que QUEM manda o token certo consiga saber
+    # qual código está no ar, para não medir o deploy anterior e passar verde
+    # sobre código que ninguém testou. Sem token — e sem SMOKE_HEALTH_TOKEN no
+    # ambiente — nada muda.
+    #
+    # `no-store` porque uma borda que cacheie esta resposta devolveria o SHA do
+    # deploy ANTERIOR, e o gate abriria cedo: o verde falso que ele impede.
+    corpo = {"status": "ok"}
+    esperado = os.getenv("SMOKE_HEALTH_TOKEN", "")
+    if esperado and hmac.compare_digest(request.headers.get("x-smoke-token", ""), esperado):
+        corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
+    return JSONResponse(corpo, headers={"Cache-Control": "no-store"})
