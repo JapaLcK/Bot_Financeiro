@@ -394,16 +394,18 @@ def pergunta_guardando_contexto(
     # o usuário refazer o comando. Qualquer outra `clarification` é pergunta
     # ALHEIA, que ele já está lendo na tela, e cede a vez.
     #
-    # Consultiva de propósito: o `claim` relê a linha e faz o próprio CAS, então
-    # a janela entre as duas leituras fecha lá. O pior caso é o texto degradado,
-    # não dinheiro na operação errada.
-    atual = db.get_pending_action(user_id) or {}
-    if atual.get("action_type") == "clarification":
-        anterior = atual.get("payload") or {}
-        if (anterior.get("intent"), anterior.get("falta")) != (intent, falta):
-            return _peca_para_terminar_a_outra(user_id, intent)
-
-    ok = db.claim_pending_action(user_id, "clarification", {
+    # A DECISÃO E A ESCRITA no MESMO compare-and-swap. Uma versão anterior
+    # checava e depois chamava o `claim`, e o Codex mostrou que isso não fecha:
+    # entre as duas, outra tarefa pode pôr uma pergunta nova na linha, e aí o
+    # `claim` a relê, vê `clarification == clarification`, conclui "mesma
+    # pergunta" e SOBRESCREVE a pergunta que o usuário acabou de ver — o CAS de
+    # dentro dele compara o payload da substituta, não o que eu inspecionei.
+    #
+    # Aqui o `advance_pending_action` recebe o payload E o `created_at` da linha
+    # que EU li: se ela mudou no meio, o CAS não pega e o usuário recebe o texto
+    # que pede para terminar a outra pergunta. A distinção intent/falta passa a
+    # participar da atualização atômica, que era o que faltava.
+    payload = {
         "intent": intent,
         "entities": dict(entities or {}),
         "question": question,
@@ -414,7 +416,24 @@ def pergunta_guardando_contexto(
         # partir do que falta nas `entities` daria a resposta errada em metade
         # dos casos. Quem sabe é quem perguntou.
         "falta": falta,
-    })
+    }
+    atual = db.get_pending_action(user_id)
+    if atual is None:
+        ok = db.create_pending_action_if_absent(user_id, "clarification", payload)
+    elif atual.get("action_type") == "clarification":
+        anterior = atual.get("payload") or {}
+        if (anterior.get("intent"), anterior.get("falta")) != (intent, falta):
+            return _peca_para_terminar_a_outra(user_id, intent)
+        # Mesma pergunta de novo (o usuário refez o comando): avança a linha que
+        # eu li, e só ela.
+        ok = db.advance_pending_action(
+            user_id, "clarification", anterior, payload,
+            old_created_at=atual.get("created_at"),
+        )
+    else:
+        # Outro tipo na linha: quem decide se cede é a ordem de prioridade do
+        # `db/pending.py` (oferta de conveniência cede, pergunta não).
+        ok = db.claim_pending_action(user_id, "clarification", payload)
     if ok:
         return question
 

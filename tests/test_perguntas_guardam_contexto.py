@@ -342,6 +342,70 @@ def test_saque_generico_a_resposta_nao_vira_despesa(uid):
     assert round(float(db.get_balance(uid)), 2) == 0.00
 
 
+# ── 3a rodada do Codex (#184) ───────────────────────────────────────────────
+
+def test_nome_de_alvo_com_digitos_nao_vira_valor(uid):
+    """Caixinha "meta 2028": o 2028 é parte do NOME, não o valor do saque.
+
+    Medido antes do conserto, com R$ 500 na caixinha: o bot respondia "Saldo
+    insuficiente na caixinha *meta 2028*" — ou seja, tentou sacar R$ 2.028 sem
+    perguntar quanto. Com saldo maior teria sacado. Codex P1.
+    """
+    db.add_launch_and_update_balance(
+        uid, "receita", 1000.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    _conversa(uid, "criar caixinha meta 2028", "coloquei 500 na caixinha meta 2028")
+    respostas = _conversa(uid, "tirar da caixinha", "meta 2028")
+
+    assert "Qual o valor" in respostas[-1], respostas[-1]
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("meta 2028") == 500.00, "sacou sem perguntar o valor"
+
+
+def test_claim_perde_para_pergunta_que_chegou_no_meio(uid):
+    """A decisão e a escrita têm de ser o MESMO compare-and-swap.
+
+    Simula a corrida: entre a leitura da linha e a gravação, outra tarefa põe uma
+    pergunta nova. Sem o CAS sobre a linha lida, o `claim_pending_action` a
+    releria, veria `clarification == clarification` e sobrescreveria a pergunta
+    que o usuário acabou de ver. Codex P1, 3a rodada.
+    """
+    import db as _db
+    from core.handlers import pending as h_pending
+
+    # A linha que a nossa pergunta VAI ler: mesma intent+falta, então passa na guarda.
+    _db.claim_pending_action(uid, "clarification", {
+        "intent": "pockets.deposit", "entities": {}, "question": "Qual caixinha? (velha)",
+        "orig_text": "guardei", "falta": "pocket_name",
+    })
+    lida = _db.get_pending_action(uid)
+
+    # ... e outra tarefa troca a linha DEPOIS dessa leitura.
+    original = _db.get_pending_action
+
+    def _le_e_depois_atropela(u):
+        _db.get_pending_action = original          # só intercepta a 1a leitura
+        _db.set_pending_action(u, "clarification", {
+            "intent": "investments.withdraw", "entities": {},
+            "question": "De qual investimento? (nova)", "orig_text": "resgatar",
+            "falta": "investment_name",
+        })
+        return lida
+
+    _db.get_pending_action = _le_e_depois_atropela
+    try:
+        resposta = h_pending.pergunta_guardando_contexto(
+            uid, "pockets.deposit", {}, "Qual caixinha? (nossa)", "guardei",
+            falta="pocket_name")
+    finally:
+        _db.get_pending_action = original
+
+    viva = _db.get_pending_action(uid)
+    assert viva["payload"]["question"] == "De qual investimento? (nova)",         "a pergunta que chegou no meio foi sobrescrita"
+    assert "outra pergunta minha" in resposta
+
+
 # ── As duas pontas da fonte única (§0.7) ────────────────────────────────────
 
 _ARQUIVOS_COM_PERGUNTA = (

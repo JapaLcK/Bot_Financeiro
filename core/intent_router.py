@@ -804,6 +804,12 @@ def _alvos_existentes(user_id: int, intent: str) -> list[str]:
     return [n for n in nomes if n]
 
 
+def _eh_nome_do_catalogo(resposta: str, existentes: list[str] | None = None) -> bool:
+    """A resposta INTEIRA já é um alvo do usuário? Fonte única do desempate."""
+    alvo = normalize_text((resposta or "").strip())
+    return bool(alvo) and any(normalize_text(n) == alvo for n in (existentes or []))
+
+
 def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     """O nome do alvo dentro da resposta do usuário.
 
@@ -819,8 +825,7 @@ def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     o recorte vale.
     """
     t = resposta.strip()
-    alvo = normalize_text(t)
-    if alvo and any(normalize_text(n) == alvo for n in (existentes or [])):
+    if _eh_nome_do_catalogo(t, existentes):
         return t
     achou = _SUBST_ALVO_RE.search(t)
     if achou:
@@ -946,11 +951,18 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         # (`parse_pocket_deposit_natural`, `_parse_pocket_withdraw_natural`)
         # extrai nome E valor do comando completo, e a entity abaixo só vale
         # quando esse parse não acha nada — o caso da resposta curta.
-        ents[falta] = _nome_do_alvo(resposta_h, _alvos_existentes(user_id, original_intent))
+        existentes = _alvos_existentes(user_id, original_intent)
+        ents[falta] = _nome_do_alvo(resposta_h, existentes)
         # O comando completo ("retirei 100 da caixinha viagem") traz o valor
         # junto: aproveita e poupa um turno. Passa pelo MESMO filtro de dano do
         # ramo de cima — um valor perigoso aqui e a pergunta do valor volta.
-        if not ents.get("amount"):
+        #
+        # MAS não quando a resposta é, ela inteira, um nome do catálogo: uma
+        # caixinha "meta 2028" fazia `_extract_valor` devolver 2028 e o saque
+        # levava R$ 2.028 SEM PERGUNTAR quanto. Medido (com R$ 500 na caixinha:
+        # "Saldo insuficiente na caixinha *meta 2028*" — com saldo maior teria
+        # sacado). Nome é nome; dígito dentro dele não é valor. Codex P1, #184.
+        if not _eh_nome_do_catalogo(resposta_h, existentes) and not ents.get("amount"):
             from parsers import _extract_valor
             v = _extract_valor(resposta_h)
             if v is not None and not valor_perigoso(resposta_h, v):
