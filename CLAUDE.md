@@ -6,7 +6,7 @@
 >
 > | leia quando | onde |
 > |---|---|
-> | for mexer no frontend, no service worker, em `pending_actions`, no monólito | `docs/armadilhas.md` (§5) |
+> | for mexer em frontend, navegação, `dashboard.js`, assets, service worker, `pending_actions`, validação de entrada, ou no backend (`db/`, routers, monólito) | `docs/armadilhas.md` (§5) |
 > | for rodar a suíte, ou interpretar uma falha de ambiente | `docs/ambiente.md` (§6) |
 > | precisar de domínio: tabelas, endpoints, cadastro, e-mail, roadmap | `docs/CLAUDE.md` |
 > | quiser o guia de desenvolvimento | `docs/dev_guide.md` |
@@ -18,6 +18,17 @@
 **Estas regras valem para toda alteração de código deste repositório**, sem exceção:
 implementação, correção, refatoração, arquivo novo. Não são um checklist de abertura
 — elas valem durante o trabalho inteiro, e de novo a cada nova tarefa da mesma sessão.
+
+> **Isolamento por usuário é regra dura, e mora aqui de propósito.** Toda query
+> filtra por `WHERE user_id = %s`. **Nunca vaze dado entre usuários** — nem numa
+> listagem, nem num agregado, nem num "só para debug". Vale em qualquer módulo:
+> `db/`, os routers de `frontend/routes/`, o monólito, os handlers.
+>
+> Esta é a única armadilha que ficou no arquivo auto-carregado em vez de ir para o
+> `docs/armadilhas.md`, e a razão é o custo do erro: instrução de segurança que
+> depende de alguém abrir outro documento é instrução que não chega. Foi assim que
+> ela quase se perdeu — este bloco existe porque a revisão pegou a regra do lado
+> errado da divisão.
 
 **Antes de começar, leia o `CLAUDE.md` relevante.** Este arquivo para processo;
 `docs/CLAUDE.md` para domínio (tabelas, endpoints, integrações). Se existir um

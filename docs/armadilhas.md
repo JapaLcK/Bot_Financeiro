@@ -255,8 +255,9 @@ fixo de toda mudança de layout.
   `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
   por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
   para o monólito. O plano completo está em `docs/refactor_plan.md`.
-- **Isolamento por usuário é regra dura**: toda query com `WHERE user_id = %s`.
-  Nunca vazar dado entre usuários.
+- **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
+  `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
+  alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
 - **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
   `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
