@@ -60,13 +60,34 @@ const pagina = await contexto.newPage();
 
 let telaAtual = "/login";
 
+/**
+ * Respostas >= 400 que são o comportamento CORRETO do produto, não defeito.
+ * Cada uma é (caminho, status, quando) — o par exato, nunca o caminho inteiro:
+ * um 500 em /auth/validate continua reprovando.
+ */
+const ESPERADOS = [
+  // nav-auth.js:242 pergunta "estou logado?" com um fetch. Na tela de login a
+  // resposta certa é 401 — só ali, para não engolir sessão caindo em tela logada.
+  { caminho: "/auth/validate", status: 401, so_em: "/login" },
+  { caminho: "/auth/refresh", status: 401, so_em: "/login" },
+  // frontend/routes/affiliates.py:4, no próprio docstring do módulo: "404 se o
+  // user não é afiliado". A conta de automação não é, e nunca vai ser.
+  { caminho: "/api/affiliate/me", status: 404, so_em: null },
+];
+
+const esperado = (caminho, status) =>
+  ESPERADOS.some(
+    (e) => e.caminho === caminho && e.status === status && (e.so_em === null || e.so_em === telaAtual),
+  );
+
 // Rede: só o que a NOSSA origem serve. Um 4xx de CDN, do Meta Pixel ou de
 // fonte externa não é regressão do PigBank e deixaria o smoke instável — o
 // preço de reprovar por isso é o teste virar ruído e parar de ser lido.
 pagina.on("response", (r) => {
-  if (r.status() >= 400 && r.url().startsWith(BASE)) {
-    falhas.push(`[${telaAtual}] HTTP ${r.status()} em ${r.url().replace(BASE, "")}`);
-  }
+  if (r.status() < 400 || !r.url().startsWith(BASE)) return;
+  const caminho = new URL(r.url()).pathname;
+  if (esperado(caminho, r.status())) return;
+  falhas.push(`[${telaAtual}] HTTP ${r.status()} em ${r.url().replace(BASE, "")}`);
 });
 
 // pageerror = exceção que subiu até o topo e interrompeu a execução do script
@@ -79,6 +100,10 @@ pagina.on("pageerror", (e) => falhas.push(`[${telaAtual}] erro de JS: ${e.messag
 // de contexto que o CDP não atribui) o registro é ambíguo — não reprova.
 pagina.on("console", (m) => {
   if (m.type() !== "error") return;
+  // "Failed to load resource" é o navegador narrando a MESMA resposta que o
+  // listener acima já tratou — e sem o status nem a URL, que ele tem. Contar
+  // os dois dobra toda falha de rede e ressuscita as que ali são esperadas.
+  if (m.text().startsWith("Failed to load resource")) return;
   const origem = m.location()?.url || "";
   if (origem.startsWith(BASE)) {
     falhas.push(`[${telaAtual}] console.error: ${m.text().slice(0, 200)}`);
