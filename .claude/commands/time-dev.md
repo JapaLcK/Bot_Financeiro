@@ -46,8 +46,16 @@ fica indistinguível do dele.
    decisão ao usuário. **Nunca use `git stash`**: ele é compartilhado entre os
    worktrees do repositório, e você estaria mexendo em trabalho de outra sessão.
    Commit WIP é a saída, e a decisão é do usuário.
-2. **Registre `git rev-parse HEAD`.** "Diff atual", no PACOTE, é o que mudou em
-   relação a esse commit — nunca `git diff` cru.
+2. **Registre `git rev-parse HEAD`.** "Diff atual", no PACOTE, é `git diff
+   <esse SHA>` **mais os arquivos que `git status --porcelain` marca com `??`,
+   com o conteúdo deles** — nunca `git diff` cru, e nunca só o `git diff`.
+
+   Medido: com um arquivo novo não rastreado, `git diff <SHA>` devolve **zero
+   linhas** e o `--porcelain` o mostra como `??`. Só com o diff, arquivo NOVO do
+   Coder fica fora do PACOTE e o Tester e o Manager aprovam código que nunca
+   viram — e arquivo novo é metade do trabalho aqui. Como o item 1 exige árvore
+   limpa no início, **todo `??` que aparecer depois é do Coder**, sem ambiguidade
+   de autoria. A lista de `??` respeita o `.gitignore`, então não arrasta lixo.
 3. **Rode a suíte ANTES do passo 3** e guarde a **lista de NOMES** dos testes que
    já falhavam — nunca a contagem. É exigência da skill `baseline-testes`
    ("Tire a baseline ANTES de mexer. Falha que já existia não é regressão sua"),
