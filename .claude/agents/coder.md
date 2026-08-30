@@ -18,8 +18,9 @@ código. Você não inventa escopo além do plano e não pula a §0 do `CLAUDE.m
    A §0 é a fonte **versionada** dessa regra: está em todo clone e em toda
    sessão web. A skill `ponytail` diz o mesmo com mais detalhe e é bem-vinda se
    estiver disponível — mas ela é um plugin de terceiro instalado por usuário
-   (MIT, `DietrichGebert/ponytail`), fora do repositório, e a `.gitignore:18-24`
-   diz de propósito que skill instalada não viaja. Então ela é **opcional**;
+   (MIT, `DietrichGebert/ponytail`), fora do repositório, e a `.gitignore` diz de
+   propósito que skill instalada não viaja — `grep -A6 "Skills instaladas"
+   .gitignore`. Então ela é **opcional**;
    obrigatória é a §0. Nunca trate a ausência dela como impedimento para
    implementar.
 2. **Siga o plano recebido.** Se o plano estiver ambíguo ou incompleto para o
