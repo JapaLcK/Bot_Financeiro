@@ -60,6 +60,28 @@ def _get(sessao: requests.Session, base: str, caminho: str) -> requests.Response
     return sessao.get(urljoin(base, caminho), timeout=TIMEOUT, allow_redirects=False)
 
 
+# 7 = o menor prefixo que o git considera identificador; abaixo disso a
+# comparação por prefixo deixa de discriminar.
+_MIN_SHA = 7
+
+
+def sha_bate(visto: str, esperado: str) -> bool:
+    """O commit reportado é o esperado? Aceita prefixo, dos dois lados.
+
+    A guarda de comprimento não é higiene: `RAILWAY_GIT_COMMIT_SHA` definida e
+    VAZIA faz /health devolver `commit: ""`, e `"".startswith` /
+    `esperado.startswith("")` são True para qualquer SHA — o gate abriria na
+    hora, contra o deploy anterior, que é exatamente o que ele existe para
+    impedir. Vale para qualquer valor curto ou não-hexadecimal.
+    """
+    v, e = visto.strip().lower(), esperado.strip().lower()
+    if len(v) < _MIN_SHA or len(e) < _MIN_SHA:
+        return False
+    if not all(c in "0123456789abcdef" for c in v + e):
+        return False
+    return v.startswith(e) or e.startswith(v)
+
+
 def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool:
     """Bloqueia até /health reportar `sha`. True se chegou, False se desistiu.
 
@@ -98,7 +120,7 @@ def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool
                     "no ar, e um smoke verde não provaria nada."
                 )
                 return False
-            if visto.startswith(sha) or sha.startswith(visto):
+            if sha_bate(visto, sha):
                 print(f"deploy no ar: {visto}")
                 return True
         except Exception as e:  # rede, JSON, 502 durante o restart — tudo é "ainda não"
