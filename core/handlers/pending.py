@@ -352,3 +352,66 @@ def get_pending_clarification(user_id: int) -> dict | None:
     if pending and pending.get("action_type") == "clarification":
         return pending
     return None
+
+
+def pergunta_guardando_contexto(
+    user_id: int, intent: str, entities: dict, question: str, orig_text: str,
+    *, falta: str,
+) -> str:
+    """Faz a pergunta E lembra que a fez. Devolve a pergunta, para o `return`.
+
+    O lado ESCRITOR do `get_pending_clarification` acima — os dois vivem juntos
+    porque a forma do payload é uma só (§0.7). Quem lê é o
+    `core.intent_router._resolve_clarification`.
+
+    Sem isto, um handler que devolve "Qual o valor?" como string crua não guarda
+    nada: a resposta seguinte é classificada do zero, e um número solto vira
+    `launches.add` com confiança 0,95. Medido na `main` c917f1c, conta nova, com
+    o LLM fora do caminho (o classificador determinístico basta):
+
+        criar caixinha viagem       -> caixinha criada
+        guardei na caixinha viagem  -> "Qual caixinha?"
+        200 reais                   -> "Em que você gastou R$ 200,00?"
+        viagem                      -> despesa R$ 200 'lazer', SALDO -200,00,
+                                       caixinha intacta em 0
+
+    No saque o sinal ainda inverte: quem pede para TIRAR R$ 100 da caixinha
+    termina com o saldo R$ 100 MENOR.
+
+    `claim_pending_action` e não `set_pending_action`: a linha de pendências é
+    uma por usuário e a ordem de prioridade do `db/pending.py` decide quem cede.
+    Uma pergunta não pode atropelar outra pergunta que o usuário já está lendo
+    na tela — foi o erro que o #133 cometeu e custou um commit de correção.
+    """
+    ok = db.claim_pending_action(user_id, "clarification", {
+        "intent": intent,
+        "entities": dict(entities or {}),
+        "question": question,
+        "orig_text": orig_text or "",
+        # QUAL entidade a pergunta pediu — gravado, não inferido. Cada handler
+        # checa numa ordem diferente (o aporte pergunta o valor primeiro, a
+        # caixinha pergunta o nome primeiro), então deduzir isso no leitor a
+        # partir do que falta nas `entities` daria a resposta errada em metade
+        # dos casos. Quem sabe é quem perguntou.
+        "falta": falta,
+    })
+    if ok:
+        return question
+
+    # Claim PERDIDO: outra pergunta continua de pé, e repetir a nossa seria
+    # mentira — a resposta do usuário seria consumida pela OUTRA pendência.
+    # `core/handlers/bills.py:pergunta_de_valor_sem_contexto` mediu o estrago
+    # nos 19 tipos vivos: em 8 a mensagem é consumida antes de chegar ao
+    # destino, e na `clarification` de `launches.add` o número vira o valor do
+    # lançamento VELHO. `cancelar` também não serve de conselho universal (no
+    # `recategorize_launch_text` vira nome de categoria). O único caminho que
+    # vale em todos é terminar a pergunta viva. Aquela função é a gêmea
+    # especializada em contas; a redação difere, a regra é a mesma.
+    logger.info("pergunta sem contexto (claim perdido) intent=%s uid=%s", intent, user_id)
+    viva = (db.get_pending_action(user_id) or {}).get("payload") or {}
+    outra = viva.get("question")
+    espera = f'esperando: "{outra}"' if outra else "esperando resposta."
+    return (
+        f"Antes disso tem outra pergunta minha {espera}\n"
+        "Me responde ela primeiro e a gente volta pra esta em seguida."
+    )

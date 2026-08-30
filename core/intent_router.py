@@ -770,6 +770,19 @@ def _cola_separador_decimal(resposta: str) -> str:
     return _ESPACO_NO_SEPARADOR_RE.sub(r"\1", resposta)
 
 
+# As intents cujos handlers PERGUNTAM por uma entidade que falta e guardam o
+# contexto via `h_pending.pergunta_guardando_contexto` (#136). Fonte única: quem
+# entra aqui tem de gravar `falta` no payload, e quem grava `falta` tem de estar
+# aqui. O `tests/test_perguntas_guardam_contexto.py` compara as duas pontas.
+_INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
+    "pockets.deposit",
+    "pockets.withdraw",
+    "investments.deposit",
+    "investments.withdraw",
+    "funds.withdraw",
+})
+
+
 def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
     """
     O bot tinha feito uma pergunta e está esperando a resposta do usuário.
@@ -823,6 +836,52 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         db.set_pending_action(user_id, "clarification", payload)
         return ("Não entendi o destino. Responda: *saldo*, *caixinha NOME* ou "
                 "*investimento NOME* (ou *cancelar*).")
+
+    # ── Perguntas feitas por HANDLER (#136) ──────────────────────────────────
+    # Caixinha, investimento e saque genérico. O payload diz QUAL entidade foi
+    # pedida (`falta`), gravado por quem perguntou — não inferido aqui: cada
+    # handler checa numa ordem diferente e deduzir daria a resposta errada em
+    # metade dos casos.
+    #
+    # ANTES da reclassificação por IA, de propósito. Já sabemos o que
+    # perguntamos e o que fazer com a resposta; deixar o LLM redecidir
+    # reintroduziria exatamente o sequestro que esta issue fecha — e só para o
+    # usuário PRO, que é quem paga. O caminho determinístico é o certo aqui.
+    #
+    # A escotilha de abandono NÃO é responsabilidade deste bloco: outro comando
+    # claro já foi desviado pelo `_clarification_abandonada` lá no `route()`,
+    # antes de chegarmos aqui.
+    falta = payload.get("falta")
+    if falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER:
+        ents = dict(original_entities)
+        resposta_h = limpa_pontuacao_final(user_response.strip())
+        if falta == "amount":
+            from parsers import _extract_valor
+            valor = _extract_valor(resposta_h)
+            perigo = valor_perigoso(resposta_h, valor)
+            if perigo or valor is None:
+                # Recusa MANTÉM a pergunta viva — mesmo contrato das 4 portas do
+                # #140. Descartar jogaria o usuário no fallback genérico e a
+                # caixinha/investimento que ele já escolheu sumiria.
+                #
+                # `create_pending_action_if_absent` e não `set_pending_action`:
+                # o `consume_pending_action` no topo desta função já apagou a
+                # linha, e entre lá e aqui outra tarefa pode ter posto uma
+                # pergunta NOVA — que o usuário já viu. O upsert a atropelaria.
+                db.create_pending_action_if_absent(user_id, "clarification", payload)
+                recusa = ("O valor precisa ser maior que zero."
+                          if perigo == "nao_positivo"
+                          else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+                return f"{recusa}\n\n{payload.get('question') or 'Qual o valor?'}"
+            ents["amount"] = valor
+        else:
+            # Nome de caixinha/investimento/alvo: o texto do usuário É a resposta.
+            ents[falta] = resposta_h
+        # `orig_text` e não o combinado: medido, "tirar da caixinha viagem" +
+        # "100 reais" concatenado faz o parser de saque ler o nome como
+        # "viagem 100 reais" e a caixinha não é encontrada. O valor entra pela
+        # entity, que é o que o handler consulta quando o parse do texto falha.
+        return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
@@ -984,10 +1043,14 @@ def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
         return h_investments.withdraw(user_id, text, {"investment_name": target_name, "amount": amount})
 
     if not amount or float(amount) <= 0:
-        return "Qual o valor? Tente: *saquei 200 da reserva de emergência*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "funds.withdraw", entities,
+            "Qual o valor? Tente: *saquei 200 da reserva de emergência*", text, falta="amount")
 
     if not target_name:
-        return "Você quer retirar de qual caixinha ou investimento?"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "funds.withdraw", {**(entities or {}), "amount": amount},
+            "Você quer retirar de qual caixinha ou investimento?", text, falta="target_name")
 
     norm_target = normalize_text(target_name)
 
