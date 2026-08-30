@@ -91,6 +91,49 @@ def sha_bate(visto: str, esperado: str) -> bool:
     return v.startswith(e) or e.startswith(v)
 
 
+def veredito_do_health(cache_control: str, corpo: dict, sha: str) -> tuple[str, str]:
+    """Uma resposta do /health vira um de três vereditos: abre, espera, falha.
+
+    O caso que obriga a existir esta função: `{"status":"ok"}` **sem** o campo
+    `commit` cobre DOIS estados que exigem reações opostas —
+
+      1. a produção ainda serve o código anterior, que não tinha o campo:
+         é o estado normal enquanto o deploy não terminou → esperar;
+      2. o código novo já está no ar e o token não bate: nada vai mudar até
+         alguém arrumar a variável → reprovar agora.
+
+    Tratar os dois como "espera" custa 15 minutos de timeout em toda
+    configuração errada. Tratar os dois como "falha" reprova o primeiro run
+    depois do merge, antes de o deploy começar.
+
+    O que os separa é o `Cache-Control`, medido em produção: a versão anterior
+    de /health não manda header nenhum; a nova sempre manda `no-store`. Não é
+    detalhe estético — é o mesmo header que impede uma borda de cachear o SHA.
+    """
+    tem_no_store = "no-store" in (cache_control or "").lower()
+    visto = str(corpo.get("commit", "")).strip()
+
+    if not visto:
+        if tem_no_store:
+            return "falha", (
+                "/health já é a versão nova (responde `no-store`) mas não devolveu "
+                "`commit`: o X-Smoke-Token não casou com o SMOKE_HEALTH_TOKEN do "
+                "serviço. Esperar não resolve — confira os dois valores."
+            )
+        return "espera", "<sem campo commit — produção ainda no código anterior>"
+
+    if visto == "unknown":
+        return "falha", (
+            "/health devolveu commit='unknown': RAILWAY_GIT_COMMIT_SHA não chegou "
+            "ao processo. Sem isso não dá para saber QUAL código está no ar, e um "
+            "smoke verde não provaria nada."
+        )
+
+    if sha_bate(visto, sha):
+        return "abre", visto
+    return "espera", visto
+
+
 def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool:
     """Bloqueia até /health reportar `sha`. True se chegou, False se desistiu.
 
@@ -111,36 +154,25 @@ def espera_deploy(base: str, sha: str, limite_s: int, falhas: list[str]) -> bool
     visto = "<sem resposta>"
     while time.monotonic() < prazo:
         try:
-            corpo = requests.get(urljoin(base, "/health"), timeout=TIMEOUT,
-                                 headers={"X-Smoke-Token": token}).json()
-            visto = str(corpo.get("commit", "<sem campo commit>"))
-            if visto == "<sem campo commit>":
-                # NÃO é erro de configuração: é o estado esperado enquanto a
-                # produção ainda serve a versão anterior de /health, que não
-                # tinha o campo. Falhar aqui reprovaria justamente o primeiro
-                # run depois deste merge — antes de o deploy sequer começar.
-                # Continua tentando; se persistir até o prazo, o timeout abaixo
-                # reporta, e aí a hipótese do token entra na mensagem.
-                pass
-            elif visto == "unknown":
-                falhas.append(
-                    "/health devolveu commit='unknown': RAILWAY_GIT_COMMIT_SHA não "
-                    "chegou ao processo. Sem isso não dá para saber QUAL código está "
-                    "no ar, e um smoke verde não provaria nada."
-                )
-                return False
-            if sha_bate(visto, sha):
+            r = requests.get(urljoin(base, "/health"), timeout=TIMEOUT,
+                             headers={"X-Smoke-Token": token})
+            veredito, visto = veredito_do_health(
+                r.headers.get("cache-control", ""), r.json(), sha
+            )
+            if veredito == "abre":
                 print(f"deploy no ar: {visto}")
                 return True
+            if veredito == "falha":
+                falhas.append(visto)
+                return False
         except Exception as e:  # rede, JSON, 502 durante o restart — tudo é "ainda não"
             visto = f"<{type(e).__name__}>"
         print(f"aguardando deploy de {sha[:8]} (no ar: {visto})…", flush=True)
         time.sleep(15)
     falhas.append(
         f"deploy de {sha[:8]} não subiu em {limite_s}s (último: {visto}). "
-        "Se o último for `<sem campo commit>`, as causas são: o deploy não "
-        "aconteceu, ou o SMOKE_HEALTH_TOKEN daqui não bate com o do serviço, "
-        "ou a variável não está no ambiente da produção."
+        "Com `<sem campo commit>` até o fim, o deploy não aconteceu — o token já "
+        "teria sido acusado assim que a versão nova entrasse no ar."
     )
     return False
 
