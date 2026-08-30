@@ -81,7 +81,7 @@ responsabilidades diferentes, divida por assunto:
 
 ```text
 dashboard/                 em vez de     dashboard.js
-  boletos.js                             // 10.587 linhas, 414 funções
+  boletos.js                             // grande demais para caber num arquivo
   cartoes.js
   investimentos.js
 ```
@@ -157,6 +157,15 @@ responsabilidade para todo o produto.
 Mudança transversal (CSS global, config nativa, middleware, schema, helper usado em
 muitos lugares) **começa por uma varredura, não por uma edição**. O inventário se faz
 com `grep`, nunca de memória.
+
+**E não vira número escrito aqui.** Contagem que um comando responde — linhas de um
+arquivo, funções num escopo, quantos testes passam, qual é a versão de uma constante
+— **não é fato de documentação**: ela envelhece em silêncio a cada commit e passa a
+mentir com cara de medição. A preferência é **remover** a contagem e deixar o comando
+no lugar dela. Se um número precisar mesmo ser documentado, ele vem com **a data em
+que foi medido, o comando que o produziu e o aviso de remedir antes de reusar** — e
+quem lê remede. Esta regra nasceu de quatro números deste próprio arquivo que ficaram
+errados sem ninguém notar, um deles por mais de 2×.
 
 Perguntas que se respondem com busca, não com raciocínio:
 
@@ -535,12 +544,15 @@ Ao escrever qualquer coisa nova, o default é **MPA**. Não descreva nem trate a
 logada como SPA, e não presuma que uma migração para framework aconteceu: ela não
 aconteceu, nem está decidida.
 
-### `dashboard.js`: 10.587 linhas num arquivo só
+### `dashboard.js`: o arquivo grande demais
 
-É o maior passivo de organização do repositório e o exemplo vivo da §0.5: **414
-funções e 159 `const/let` no escopo global**, 35 seções demarcadas por comentário,
-491 KB. Nasceu de um `<script>` inline extraído do `dashboard.html` ("refactor Fase 1:
-CSP script-src").
+É o maior passivo de organização do repositório e o exemplo vivo da §0.5: milhares
+de linhas, centenas de funções e de `const/let` **no escopo global**, dezenas de
+seções demarcadas por comentário. Nasceu de um `<script>` inline extraído do
+`dashboard.html` ("refactor Fase 1: CSP script-src").
+
+Se for decidir com base no tamanho, remeça — não confie no número que estiver
+escrito aqui: `wc -l frontend/dashboard.js`.
 
 Três fatos que decidem qualquer mexida ali:
 
@@ -570,7 +582,8 @@ outro módulo não pode receber `immutable` enquanto não tiver hash no nome.
 
 ### Service worker e PWA
 
-`frontend/service-worker.js` (`CACHE_NAME` versionado à mão, hoje `pigbank-v7`):
+`frontend/service-worker.js` (`CACHE_NAME` versionado à mão — o valor atual sai de
+`grep CACHE_NAME frontend/service-worker.js`):
 HTML e auth nunca são cacheados, assets são network-first com fallback de cache,
 API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e a
 `index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
@@ -668,8 +681,10 @@ fixo de toda mudança de layout.
   todas as tabelas vive em `db/schema.py::init_db()` — é a fonte de verdade do schema
   (§0.7), e o `docs/CLAUDE.md` aponta para lá em vez de repetir a lista.
 - **O monólito ainda existe e ainda cresce.**
-  `frontend/finance_bot_websocket_custom.py` tem ~14,5 mil linhas e concentra auth,
-  MFA, billing, WebSocket, dashboard e o `ConnectionManager`. Parte das rotas já saiu
+  `frontend/finance_bot_websocket_custom.py` é o maior arquivo do backend e ainda
+  cresce; concentra auth, MFA, billing, WebSocket, dashboard e o `ConnectionManager`.
+  Antes de decidir com base no tamanho, remeça:
+  `wc -l frontend/finance_bot_websocket_custom.py`. Parte das rotas já saiu
   para `frontend/routes/` (`static_pages`, `settings`, `pockets`, `cards`,
   `analytics`, `open_finance`, `push`, `agents`, `affiliates`, `shared`), registradas
   por `include_router`. **Rota nova vai para um router de `frontend/routes/`** — não
@@ -779,8 +794,11 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
   causa acusou `tests/test_recurring_value.py | File "...", line 137`. Por isso o
   bloco acima pareia arquivo **e** causa.
 
-  Com esses 9 fora, a suíte roda em ~70s: **981–984 passam**, e as falhas restantes
-  incluem sempre os **7** de `tests/test_statement_import.py`. Esses 7 **não vêm todos
+  Com esses 9 fora a suíte roda em pouco mais de um minuto, e as falhas restantes
+  incluem sempre os de `tests/test_statement_import.py`. **Não guarde aqui quantos
+  passam:** esse número é a sua baseline de comparação, e baseline lida de documento
+  é pior que baseline nenhuma — ela parece medição. Meça a sua no início do trabalho
+  e compare por NOME de teste (§3). Esses 7 **não vêm todos
   do `ofxparse`** — são dois grupos, e vale saber qual é qual, porque só o primeiro
   desaparece se o `ofxparse` voltar:
 
