@@ -47,15 +47,36 @@ fica indistinguível do dele.
    worktrees do repositório, e você estaria mexendo em trabalho de outra sessão.
    Commit WIP é a saída, e a decisão é do usuário.
 2. **Registre `git rev-parse HEAD`.** "Diff atual", no PACOTE, é `git diff
-   <esse SHA>` **mais os arquivos que `git status --porcelain` marca com `??`,
-   com o conteúdo deles** — nunca `git diff` cru, e nunca só o `git diff`.
+   <esse SHA>` **mais todo arquivo não rastreado, com conteúdo** — nunca
+   `git diff` cru, e nunca só o `git diff`.
 
-   Medido: com um arquivo novo não rastreado, `git diff <SHA>` devolve **zero
-   linhas** e o `--porcelain` o mostra como `??`. Só com o diff, arquivo NOVO do
-   Coder fica fora do PACOTE e o Tester e o Manager aprovam código que nunca
-   viram — e arquivo novo é metade do trabalho aqui. Como o item 1 exige árvore
-   limpa no início, **todo `??` que aparecer depois é do Coder**, sem ambiguidade
-   de autoria. A lista de `??` respeita o `.gitignore`, então não arrasta lixo.
+   Colete os não rastreados com:
+
+   ```
+   git status --porcelain=v1 -z --untracked-files=all
+   ```
+
+   As três partes importam, e foram medidas: `git diff <SHA>` devolve **zero
+   linhas** para arquivo não rastreado; o `--porcelain` **padrão** colapsa um
+   diretório novo numa entrada só (`?? dir/`) e esconde o que há dentro, enquanto
+   `--untracked-files=all` lista cada arquivo, inclusive aninhado; e o `-z`
+   separa por NUL, para caminho com espaço ou quebra de linha não virar duas
+   entradas. **Nunca trate `?? diretorio/` como suficiente** — expanda até os
+   arquivos e considere o conteúdo de cada um.
+
+   Sem isso o Tester e o Manager aprovam código que nunca viram, e arquivo novo
+   é metade do trabalho aqui — o §0.5 do `CLAUDE.md` chega a recomendar dividir
+   `dashboard.js` num diretório `dashboard/`, exatamente o caso que o
+   `--porcelain` padrão esconderia.
+
+   **Descreva esses arquivos como artefatos surgidos DURANTE O CICLO, não como
+   arquivos do Coder.** O que a árvore limpa do item 1 garante é a janela de
+   tempo, não a autoria: os quatro agentes têm `Bash`, o Tester também tem
+   `Write`, e a enumeração do §4 é por escrito. Só atribua a um agente quando
+   houver registro explícito de quem escreveu — se a autoria importar, registre
+   o estado da árvore depois de cada agente.
+
+   A lista respeita o `.gitignore`, então não arrasta lixo.
 3. **Rode a suíte ANTES do passo 3** e guarde a **lista de NOMES** dos testes que
    já falhavam — nunca a contagem. É exigência da skill `baseline-testes`
    ("Tire a baseline ANTES de mexer. Falha que já existia não é regressão sua"),
