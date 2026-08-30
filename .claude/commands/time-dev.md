@@ -40,13 +40,25 @@ uma reentrada do Manager (passo 7). Ficam aqui e não dentro de um passo por um
 motivo medido: regra escrita dentro de um passo já divergiu do passo irmão em
 todas as rodadas de revisão deste arquivo.
 
-1. **Achado bloqueante repetido → pare AGORA.** Se um achado bloqueante já
-   apontado numa rodada anterior reaparece, escale para o usuário sem gastar as
-   rodadas que sobraram. É a regra do `CLAUDE.md` §4 ("duas rodadas seguidas
-   batem no mesmo subsistema, pare de remendar"). Achado que sobrevive a uma
-   correção honesta quase sempre é o que este ambiente não resolve — aparelho,
-   deploy, WhatsApp real, `reportlab` ausente (§6) — e aí quem decide é o
-   usuário, não mais uma rodada.
+1. **Achado bloqueante repetido → pare de REMENDAR.** Se um achado bloqueante
+   já apontado numa rodada anterior reaparece, a rodada seguinte **não pode ser
+   outro remendo**. O que fazer no lugar não é escolha deste arquivo: o
+   `CLAUDE.md` §4 manda **enumerar estados × eventos por escrito e fechar a
+   classe inteira num commit**, e ele vale por cima daqui. No histórico do repo
+   essa enumeração achou 2 bugs que o revisor ainda não tinha apontado — ela é
+   recuperação, não cerimônia.
+
+   A enumeração é **escrita, não código**: faça-a sempre, mesmo sem rodada
+   sobrando. É ela que revela se a causa é alcançável neste ambiente.
+
+   **Só então escale**, e nos três casos em que a recuperação do §4 não fecha:
+   (a) a enumeração mostra que a causa está fora do que este ambiente resolve —
+   aparelho e `reportlab` ausente (§6), deploy e WhatsApp real (§3); (b) o achado
+   sobrevive também à enumeração; (c) o teto não deixa rodada para implementá-la.
+   Nos três, entregue a enumeração ao usuário: ela vale mesmo com o ciclo parado.
+
+   Escalar **não substitui** o §4 — o §4 é a tentativa obrigatória, escalar é o
+   que vem depois dela.
 2. **Teto de 3 rodadas de correção no ciclo inteiro.** Contador único para as
    rodadas do Tester e as reentradas do Manager, que **nunca zera** no meio.
    Dois tetos separados não resolveriam: 3 rodadas por reentrada, vezes N
