@@ -1,0 +1,89 @@
+name: Smoke (produção)
+
+# Roda DEPOIS que o deploy da main está no ar. Não é um segundo CI: o
+# tests.yml mede o código, este mede o SITE. As falhas que ele existe para
+# pegar (rota que some, asset que não chega, card renderizando o 404 do
+# proxy) passam por 984 testes verdes sem uma linha vermelha.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancelar o run velho aqui é CORRETO, ao contrário do tests.yml (que agrupa
+# por SHA justamente para não cancelar nada). O motivo é a diferença de alvo:
+# só existe UMA produção, e quando um segundo merge sobe, o SHA do run velho
+# nunca mais vai estar no ar — ele ficaria esperando o gate até o timeout e
+# reprovaria por algo que não é defeito.
+concurrency:
+  # Grupo por REF, não fixo: um `workflow_dispatch` lançado de uma branch de
+  # feature entrava no mesmo grupo do push na main, cancelava o run de produção
+  # pelo `cancel-in-progress` e depois ficava esperando um SHA que a produção
+  # nunca vai servir — o deploy real ficava sem smoke (Codex, P2). Com o ref no
+  # grupo, só runs do mesmo ref competem entre si. Push e dispatch a partir da
+  # main continuam no mesmo grupo, que é o desejado: os dois medem a mesma
+  # produção e o mais novo é o que vale.
+  group: smoke-prod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    # 15 min de gate + as duas baterias. Sem teto, um deploy travado queimaria
+    # 6 horas de runner (default do GitHub).
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # Só `requests`. Instalar o requirements.txt inteiro aqui seria 2 min por
+      # run para rodar um script que não importa nada do projeto.
+      - name: Install requests
+        run: pip install "requests==2.34.2"
+
+      # Este passo é também o GATE: espera /health reportar o SHA deste push
+      # antes de medir qualquer coisa. Sem ele o smoke poderia medir o deploy
+      # ANTERIOR e passar verde sobre código que nunca foi testado.
+      - name: Smoke HTTP (público) + gate do deploy
+        env:
+          # O /health só devolve o commit para quem manda este token — ele é
+          # infraestrutura e o endpoint é público. O MESMO valor tem de estar
+          # como variável SMOKE_HEALTH_TOKEN no serviço do Railway.
+          SMOKE_HEALTH_TOKEN: ${{ secrets.SMOKE_HEALTH_TOKEN }}
+        run: |
+          if [ -z "$SMOKE_HEALTH_TOKEN" ]; then
+            echo "::error title=Gate do deploy sem token::Secret SMOKE_HEALTH_TOKEN ausente. Sem ele não há como saber qual código está no ar, e medir sem saber é o verde falso que este workflow existe para impedir."
+            exit 1
+          fi
+          python scripts/smoke_prod.py --wait-sha "${{ github.sha }}"
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Credencial ausente REPROVA o job. Um warning verde diria "smoke passou"
+      # sobre uma rodada que não abriu uma única tela logada — que é a metade
+      # onde estava o card renderizando o 404 do proxy. Verde sem medição é o
+      # falso positivo que este workflow inteiro existe para impedir.
+      - name: Smoke de UI (telas logadas)
+        env:
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          if [ -z "$SMOKE_EMAIL" ] || [ -z "$SMOKE_PASSWORD" ]; then
+            echo "::error title=Smoke de UI não rodou::Secrets SMOKE_EMAIL/SMOKE_PASSWORD ausentes. Cadastre em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          node scripts/smoke_prod_ui.mjs
