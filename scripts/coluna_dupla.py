@@ -193,18 +193,29 @@ def main() -> int:
                  "                o fix, ou as colunas divergiram e a diferenca entre elas nao e so o fix.\n"
                  "                Para uma correcao ja mergeada, use --antes <base do PR> --depois <merge do PR>.")
 
-    # ── O que copiar: so teste, e so .py ─────────────────────────────────────
+    # ── O que copiar: so teste, mas TUDO que mudou sob tests/ ────────────────
     # A coluna antiga recebe o TESTE novo por cima do CODIGO velho. Nenhum
     # arquivo de producao atravessa — o pathspec `tests/` garante isso.
-    mudados = [p for p in git("diff", "--name-only", "--diff-filter=AM", antes, depois, "--", "tests/").splitlines()
-               if p.endswith(".py")]
-    if not mudados:
+    # `R` na lista de filtros: sem ele, um arquivo de teste RENOMEADO junto com o
+    # caso novo some do overlay em silencio — medido, num rename `R096` o
+    # `--diff-filter=AM` devolve VAZIO e o `AMR` devolve o destino.
+    # E copiamos tudo, nao so `.py`: se o teste novo le uma fixture de dados
+    # adicionada junto, sem ela a coluna antiga quebra por arquivo faltando, sai
+    # `FAILED`, e o gate carimbaria FORTE tendo medido a ausencia do insumo — nao
+    # o comportamento antigo. Hoje `tests/` nao tem fixture de dados nenhuma (os
+    # 12 nao-`.py` sao `.test.mjs`, que o pytest ignora), entao isto e guarda
+    # contra a convencao que ainda nao existe, ao custo de copiar arquivo inerte.
+    mudados = git("diff", "--name-only", "--diff-filter=AMR", antes, depois, "--", "tests/").splitlines()
+    # A guarda e os alvos continuam presos ao `.py`: um `.test.mjs` sozinho nao da
+    # o que provar aqui, e alvo vazio faria o `pytest -q` rodar a SUITE INTEIRA.
+    py_mudados = [p for p in mudados if p.endswith(".py")]
+    if not py_mudados:
         sys.exit(f"[coluna-dupla] nenhum teste .py mudou entre {antes[:8]} e {depois[:8]}. Nada a provar.")
     # O conftest carrega as chaves de PII e o skip de dependencia ausente; sem
     # a versao nova dele, a coluna antiga pode falhar por ambiente, nao por bug.
     if "tests/conftest.py" not in mudados:
         mudados.append("tests/conftest.py")
-    alvos = a.testes or [p for p in mudados if p != "tests/conftest.py"]
+    alvos = a.testes or [p for p in py_mudados if p != "tests/conftest.py"]
 
     py = a.python or os.path.join(raiz_principal(), ".venv", "bin", "python")
     if not os.path.exists(py):
