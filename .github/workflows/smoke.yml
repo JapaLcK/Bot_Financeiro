@@ -8,6 +8,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # TEMPORÁRIO — sai no próximo commit. Uma rodada para provar o listener de
+  # `requestfailed` (risco: ERR_ABORTED de navegação virando vermelho falso).
+  pull_request:
+    branches: [main]
 
 # Cancelar o run velho aqui é CORRETO, ao contrário do tests.yml (que agrupa
 # por SHA justamente para não cancelar nada). O motivo é a diferença de alvo:
@@ -15,12 +19,14 @@ on:
 # nunca mais vai estar no ar — ele ficaria esperando o gate até o timeout e
 # reprovaria por algo que não é defeito.
 concurrency:
-  group: smoke-prod
+  group: smoke-prod-${{ github.event_name }}  # TEMPORÁRIO, junto com o gatilho
   cancel-in-progress: true
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    # TEMPORÁRIO — sai junto com o gatilho.
+    if: github.event_name != 'pull_request' || github.head_ref == 'claude/automate-pr-tests-92bb58'
     # 15 min de gate + as duas baterias. Sem teto, um deploy travado queimaria
     # 6 horas de runner (default do GitHub).
     timeout-minutes: 25
@@ -49,11 +55,15 @@ jobs:
           # como variável SMOKE_HEALTH_TOKEN no serviço do Railway.
           SMOKE_HEALTH_TOKEN: ${{ secrets.SMOKE_HEALTH_TOKEN }}
         run: |
-          if [ -z "$SMOKE_HEALTH_TOKEN" ]; then
+          if [ -z "$SMOKE_HEALTH_TOKEN" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "::error title=Gate do deploy sem token::Secret SMOKE_HEALTH_TOKEN ausente. Sem ele não há como saber qual código está no ar, e medir sem saber é o verde falso que este workflow existe para impedir."
             exit 1
           fi
-          python scripts/smoke_prod.py --wait-sha "${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python scripts/smoke_prod.py            # TEMPORÁRIO: PR não está deployado
+          else
+            python scripts/smoke_prod.py --wait-sha "${{ github.sha }}"
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

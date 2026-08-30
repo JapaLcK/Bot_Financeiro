@@ -153,6 +153,14 @@ def confere_paginas(sessao: requests.Session, base: str, falhas: list[str]) -> s
     return assets
 
 
+# O que cada extensão TEM de responder. 200 sozinho não basta: um proxy ou uma
+# página de fallback devolvendo HTML com status 200 satisfaz o código e o
+# navegador recusa o arquivo — a folha de estilo não aplica, o script não
+# executa, e a página fica quebrada com o smoke verde. Medido em produção:
+# .css → `text/css; charset=utf-8`, .js → `application/javascript`.
+TIPOS_DE_ASSET = {".css": ("text/css",), ".js": ("javascript",)}
+
+
 def confere_assets(sessao: requests.Session, base: str, assets: set[str], falhas: list[str]) -> None:
     if not assets:
         falhas.append("nenhum asset com ?v=<hash> encontrado no HTML — o stamp parou de agir")
@@ -165,6 +173,14 @@ def confere_assets(sessao: requests.Session, base: str, assets: set[str], falhas
             continue
         if r.status_code != 200:
             falhas.append(f"asset {asset}: HTTP {r.status_code}")
+            continue
+        ext = ".css" if ".css?" in asset else ".js" if ".js?" in asset else None
+        tipo = r.headers.get("content-type", "").lower()
+        if ext and not any(t in tipo for t in TIPOS_DE_ASSET[ext]):
+            falhas.append(
+                f"asset {asset}: content-type {tipo!r} — o navegador não usa isto como "
+                f"{ext.lstrip('.')}, mesmo com HTTP 200"
+            )
 
 
 def confere_pagina_de_erro(sessao: requests.Session, base: str, falhas: list[str]) -> None:

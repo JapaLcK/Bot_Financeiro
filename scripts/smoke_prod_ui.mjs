@@ -95,6 +95,20 @@ pagina.on("response", (r) => {
   falhas.push(`[${telaAtual}] HTTP ${r.status()} em ${r.url().replace(BASE, "")}`);
 });
 
+// Falha de TRANSPORTE (DNS, TLS, conexão resetada) não emite `response`, emite
+// `requestfailed` — e o console.error correspondente é justamente o que o
+// listener abaixo descarta. Sem isto, um .css da nossa origem morrendo na
+// conexão passaria batido com a página ainda navegável.
+//
+// ERR_ABORTED fica de fora: é o navegador cancelando request em voo quando a
+// própria navegação troca de página, o que este script faz de propósito quatro
+// vezes. Reprovar por isso encheria o smoke de vermelho de mentira.
+pagina.on("requestfailed", (req) => {
+  const erro = req.failure()?.errorText || "desconhecido";
+  if (!req.url().startsWith(BASE) || erro.includes("ERR_ABORTED")) return;
+  falhas.push(`[${telaAtual}] request falhou (${erro}) em ${req.url().replace(BASE, "")}`);
+});
+
 // pageerror = exceção que subiu até o topo e interrompeu a execução do script
 // que a lançou. Vale mesmo vindo de terceiro: Chart.js estourando deixa o
 // gráfico sem desenhar, e isso É a tela quebrada (o P1-05 do roteiro).
