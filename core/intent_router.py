@@ -774,6 +774,28 @@ def _cola_separador_decimal(resposta: str) -> str:
 # contexto via `h_pending.pergunta_guardando_contexto` (#136). Fonte única: quem
 # entra aqui tem de gravar `falta` no payload, e quem grava `falta` tem de estar
 # aqui. O `tests/test_perguntas_guardam_contexto.py` compara as duas pontas.
+# "da caixinha viagem" e "caixinha viagem" são a MESMA caixinha que "viagem" —
+# o usuário repete o substantivo da pergunta. Mesma limpeza do
+# `_pocket_name_from_text` (core/handlers/pockets.py), sem exigir a palavra
+# "caixinha" no texto, porque aqui a resposta curta ("viagem") é o caso comum.
+#
+# NÃO tira "reserva": "reserva de emergência" é nome legítimo de caixinha, e o
+# exemplo da própria pergunta do saque genérico usa esse nome.
+_PREP_RE = re.compile(r"^(?:d[aeo]|n[ao]|para|pra|em)\s+", re.I)
+# Mesma jogada do `_pocket_name_from_text` (core/handlers/pockets.py): o nome é
+# o que vem DEPOIS do substantivo. Generalizado para não EXIGIR o substantivo,
+# porque aqui a resposta curta ("viagem") é o caso comum.
+_SUBST_ALVO_RE = re.compile(r"(?:caixinha|investimento)\s+(.+)$", re.I)
+
+
+def _nome_do_alvo(resposta: str) -> str:
+    t = resposta.strip()
+    achou = _SUBST_ALVO_RE.search(t)
+    if achou:
+        t = achou.group(1)
+    return _PREP_RE.sub("", t).strip() or resposta.strip()
+
+
 _INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
     "pockets.deposit",
     "pockets.withdraw",
@@ -874,14 +896,26 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
                           else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
                 return f"{recusa}\n\n{payload.get('question') or 'Qual o valor?'}"
             ents["amount"] = valor
-        else:
-            # Nome de caixinha/investimento/alvo: o texto do usuário É a resposta.
-            ents[falta] = resposta_h
-        # `orig_text` e não o combinado: medido, "tirar da caixinha viagem" +
-        # "100 reais" concatenado faz o parser de saque ler o nome como
-        # "viagem 100 reais" e a caixinha não é encontrada. O valor entra pela
-        # entity, que é o que o handler consulta quando o parse do texto falha.
-        return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
+            # `orig_text` e não o combinado: medido, "tirar da caixinha viagem"
+            # + "100 reais" concatenado faz o parser de saque ler o nome como
+            # "viagem 100 reais" e a caixinha não é encontrada. O valor entra
+            # pela entity, que é o que o handler consulta quando o parse falha.
+            return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
+
+        # NOME de caixinha/investimento/alvo. A RESPOSTA vira o `text`, não o
+        # `orig_text`: a própria pergunta sugere o comando completo ("Tente:
+        # *coloquei 200 na caixinha viagem*"), e tomar a resposta verbatim como
+        # nome fazia o bot RECUSAR o texto que ele acabou de recomendar —
+        # "Caixinha *coloquei 200 na caixinha viagem* não encontrada". Regressão
+        # apontada pelo Codex no #184 e confirmada medindo; na `main` o comando
+        # completo era reclassificado e funcionava.
+        #
+        # Passando a resposta como `text`, o parser natural do próprio handler
+        # (`parse_pocket_deposit_natural`, `_parse_pocket_withdraw_natural`)
+        # extrai nome E valor do comando completo, e a entity abaixo só vale
+        # quando esse parse não acha nada — o caso da resposta curta.
+        ents[falta] = _nome_do_alvo(resposta_h)
+        return _execute(original_intent, user_id, resposta_h, ents, platform, external_id)
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve

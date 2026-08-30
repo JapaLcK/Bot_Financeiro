@@ -143,6 +143,62 @@ def test_deposito_legitimo_ainda_funciona(uid):
     assert _despesas(uid) == [], "depósito em caixinha não é despesa"
 
 
+# ── Resposta em linguagem natural ao nome (Codex P2 no #184) ────────────────
+
+@pytest.mark.parametrize("resposta", [
+    "viagem",                            # nome pelado
+    "caixinha viagem",                   # repete o substantivo da pergunta
+    "da caixinha viagem",                # com preposição
+    "coloquei 200 na caixinha viagem",   # o comando COMPLETO que a pergunta sugere
+])
+def test_resposta_natural_ao_nome_da_caixinha(uid, resposta):
+    """A pergunta sugere "Tente: *coloquei 200 na caixinha viagem*" — recusar esse
+    texto seria o bot rejeitar o que ele mesmo recomendou.
+
+    A primeira versão deste PR tomava a resposta VERBATIM como nome e respondia
+    "Caixinha *coloquei 200 na caixinha viagem* não encontrada" — regressão que o
+    Codex apontou e que a medição confirmou. Na `main` o comando completo era
+    reclassificado e funcionava, então era regressão de verdade, não teoria.
+    """
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    respostas = _conversa(uid, "criar caixinha viagem",
+                          "guardei na caixinha viagem", resposta, "200")
+
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("viagem") == 200.00, respostas[-2:]
+    assert _despesas(uid) == []
+
+
+def test_saque_com_comando_completo_como_resposta(uid):
+    """Mesmo caso na porta do saque, onde a entity VENCE o parser do handler
+    (`pocket_name or _p`) — por isso um nome mal extraído envenena o fluxo lá,
+    e não no depósito."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+    _conversa(uid, "tirar da caixinha viagem", "retirei 100 da caixinha viagem")
+
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("viagem") == 200.00, "o saque de 100 sobre 300 não fechou"
+
+
+def test_nome_do_alvo_preserva_nome_legitimo():
+    """`reserva de emergência` é nome de caixinha, não preposição + substantivo —
+    e é o exemplo que a própria pergunta do saque genérico usa."""
+    from core.intent_router import _nome_do_alvo
+
+    assert _nome_do_alvo("reserva de emergencia") == "reserva de emergencia"
+    assert _nome_do_alvo("viagem") == "viagem"
+    assert _nome_do_alvo("caixinha viagem") == "viagem"
+    assert _nome_do_alvo("retirei 100 da caixinha viagem") == "viagem"
+    assert _nome_do_alvo("investimento cdb nubank") == "cdb nubank"
+
+
 # ── As duas pontas da fonte única (§0.7) ────────────────────────────────────
 
 _ARQUIVOS_COM_PERGUNTA = (
