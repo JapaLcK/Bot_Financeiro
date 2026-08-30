@@ -10,6 +10,7 @@ Recebe um IntentResult + mensagem original e decide o que fazer:
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import db
@@ -34,6 +35,8 @@ from core.handlers import (
     recurring  as h_recurring,
     bills      as h_bills,
 )
+
+logger = logging.getLogger(__name__)
 
 # Limiar de confiança para executar sem pedir confirmação
 CONFIDENCE_EXECUTE = 0.85
@@ -770,6 +773,75 @@ def _cola_separador_decimal(resposta: str) -> str:
     return _ESPACO_NO_SEPARADOR_RE.sub(r"\1", resposta)
 
 
+# As intents cujos handlers PERGUNTAM por uma entidade que falta e guardam o
+# contexto via `h_pending.pergunta_guardando_contexto` (#136). Fonte única: quem
+# entra aqui tem de gravar `falta` no payload, e quem grava `falta` tem de estar
+# aqui. O `tests/test_perguntas_guardam_contexto.py` compara as duas pontas.
+# "da caixinha viagem" e "caixinha viagem" são a MESMA caixinha que "viagem" —
+# o usuário repete o substantivo da pergunta. Mesma limpeza do
+# `_pocket_name_from_text` (core/handlers/pockets.py), sem exigir a palavra
+# "caixinha" no texto, porque aqui a resposta curta ("viagem") é o caso comum.
+#
+# NÃO tira "reserva": "reserva de emergência" é nome legítimo de caixinha, e o
+# exemplo da própria pergunta do saque genérico usa esse nome.
+_PREP_RE = re.compile(r"^(?:d[aeo]|n[ao]|para|pra|em)\s+", re.I)
+# Mesma jogada do `_pocket_name_from_text` (core/handlers/pockets.py): o nome é
+# o que vem DEPOIS do substantivo. Generalizado para não EXIGIR o substantivo,
+# porque aqui a resposta curta ("viagem") é o caso comum.
+_SUBST_ALVO_RE = re.compile(r"(?:caixinha|investimento)\s+(.+)$", re.I)
+
+
+def _alvos_existentes(user_id: int, intent: str) -> list[str]:
+    """Nomes de caixinha/investimento do usuário, conforme o que a intent move."""
+    nomes: list[str] = []
+    try:
+        if intent in ("pockets.deposit", "pockets.withdraw", "funds.withdraw"):
+            nomes += [p.get("name") or "" for p in (db.list_pockets(user_id) or [])]
+        if intent in ("investments.deposit", "investments.withdraw", "funds.withdraw"):
+            nomes += [i.get("name") or "" for i in (db.accrue_all_investments(user_id) or [])]
+    except Exception:
+        logger.exception("falha ao listar alvos do usuario %s", user_id)
+    return [n for n in nomes if n]
+
+
+def _eh_nome_do_catalogo(resposta: str, existentes: list[str] | None = None) -> bool:
+    """A resposta INTEIRA já é um alvo do usuário? Fonte única do desempate."""
+    alvo = normalize_text((resposta or "").strip())
+    return bool(alvo) and any(normalize_text(n) == alvo for n in (existentes or []))
+
+
+def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
+    """O nome do alvo dentro da resposta do usuário.
+
+    "caixinha" no MEIO da string é ambíguo: em "retirei 100 da caixinha viagem"
+    é prefixo sintático e o nome é "viagem"; em "minha caixinha viagem" — nome
+    literal de uma caixinha criada pelo dashboard — faz parte do nome. Recortar
+    sempre respondia "Caixinha *viagem* não encontrada" (medido); não recortar
+    nunca fazia o comando completo funcionar (medido). Apontado pelo Codex no
+    #184, as duas pontas.
+
+    Quem desempata é o CATÁLOGO do usuário, que é definitivo: se a resposta
+    inteira já é um alvo dele, ela é o nome e não se toca. Só quando não é é que
+    o recorte vale.
+    """
+    t = resposta.strip()
+    if _eh_nome_do_catalogo(t, existentes):
+        return t
+    achou = _SUBST_ALVO_RE.search(t)
+    if achou:
+        t = achou.group(1)
+    return _PREP_RE.sub("", t).strip() or resposta.strip()
+
+
+_INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
+    "pockets.deposit",
+    "pockets.withdraw",
+    "investments.deposit",
+    "investments.withdraw",
+    "funds.withdraw",
+})
+
+
 def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
     """
     O bot tinha feito uma pergunta e está esperando a resposta do usuário.
@@ -823,6 +895,85 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         db.set_pending_action(user_id, "clarification", payload)
         return ("Não entendi o destino. Responda: *saldo*, *caixinha NOME* ou "
                 "*investimento NOME* (ou *cancelar*).")
+
+    # ── Perguntas feitas por HANDLER (#136) ──────────────────────────────────
+    # Caixinha, investimento e saque genérico. O payload diz QUAL entidade foi
+    # pedida (`falta`), gravado por quem perguntou — não inferido aqui: cada
+    # handler checa numa ordem diferente e deduzir daria a resposta errada em
+    # metade dos casos.
+    #
+    # ANTES da reclassificação por IA, de propósito. Já sabemos o que
+    # perguntamos e o que fazer com a resposta; deixar o LLM redecidir
+    # reintroduziria exatamente o sequestro que esta issue fecha — e só para o
+    # usuário PRO, que é quem paga. O caminho determinístico é o certo aqui.
+    #
+    # A escotilha de abandono NÃO é responsabilidade deste bloco: outro comando
+    # claro já foi desviado pelo `_clarification_abandonada` lá no `route()`,
+    # antes de chegarmos aqui.
+    falta = payload.get("falta")
+    if falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER:
+        ents = dict(original_entities)
+        resposta_h = limpa_pontuacao_final(user_response.strip())
+        if falta == "amount":
+            from parsers import _extract_valor
+            valor = _extract_valor(resposta_h)
+            perigo = valor_perigoso(resposta_h, valor)
+            if perigo or valor is None:
+                # Recusa MANTÉM a pergunta viva — mesmo contrato das 4 portas do
+                # #140. Descartar jogaria o usuário no fallback genérico e a
+                # caixinha/investimento que ele já escolheu sumiria.
+                #
+                # `create_pending_action_if_absent` e não `set_pending_action`:
+                # o `consume_pending_action` no topo desta função já apagou a
+                # linha, e entre lá e aqui outra tarefa pode ter posto uma
+                # pergunta NOVA — que o usuário já viu. O upsert a atropelaria.
+                db.create_pending_action_if_absent(user_id, "clarification", payload)
+                recusa = ("O valor precisa ser maior que zero."
+                          if perigo == "nao_positivo"
+                          else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+                return f"{recusa}\n\n{payload.get('question') or 'Qual o valor?'}"
+            ents["amount"] = valor
+            # `orig_text` e não o combinado: medido, "tirar da caixinha viagem"
+            # + "100 reais" concatenado faz o parser de saque ler o nome como
+            # "viagem 100 reais" e a caixinha não é encontrada. O valor entra
+            # pela entity, que é o que o handler consulta quando o parse falha.
+            return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
+
+        # NOME de caixinha/investimento/alvo. A RESPOSTA vira o `text`, não o
+        # `orig_text`: a própria pergunta sugere o comando completo ("Tente:
+        # *coloquei 200 na caixinha viagem*"), e tomar a resposta verbatim como
+        # nome fazia o bot RECUSAR o texto que ele acabou de recomendar —
+        # "Caixinha *coloquei 200 na caixinha viagem* não encontrada". Regressão
+        # apontada pelo Codex no #184 e confirmada medindo; na `main` o comando
+        # completo era reclassificado e funcionava.
+        #
+        # Passando a resposta como `text`, o parser natural do próprio handler
+        # (`parse_pocket_deposit_natural`, `_parse_pocket_withdraw_natural`)
+        # extrai nome E valor do comando completo, e a entity abaixo só vale
+        # quando esse parse não acha nada — o caso da resposta curta.
+        existentes = _alvos_existentes(user_id, original_intent)
+        ents[falta] = _nome_do_alvo(resposta_h, existentes)
+        # O comando completo ("retirei 100 da caixinha viagem") traz o valor
+        # junto: aproveita e poupa um turno. Passa pelo MESMO filtro de dano do
+        # ramo de cima — um valor perigoso aqui e a pergunta do valor volta.
+        #
+        # MAS não quando a resposta é, ela inteira, um nome do catálogo: uma
+        # caixinha "meta 2028" fazia `_extract_valor` devolver 2028 e o saque
+        # levava R$ 2.028 SEM PERGUNTAR quanto. Medido (com R$ 500 na caixinha:
+        # "Saldo insuficiente na caixinha *meta 2028*" — com saldo maior teria
+        # sacado). Nome é nome; dígito dentro dele não é valor. Codex P1, #184.
+        if not _eh_nome_do_catalogo(resposta_h, existentes) and not ents.get("amount"):
+            from parsers import _extract_valor
+            v = _extract_valor(resposta_h)
+            if v is not None and not valor_perigoso(resposta_h, v):
+                ents["amount"] = v
+        # `orig_text` e NAO a resposta: `want_all` ("esvaziar", "zerar", "tudo")
+        # e derivado do `text` pelos dois handlers de saque, entao trocar o texto
+        # pela resposta curta perdia o marcador e o bot pedia um valor em vez de
+        # esvaziar a caixinha. Medido; apontado pelo Codex no #184. O nome e o
+        # valor chegam pelas entities, que e o que o handler consulta quando o
+        # parse do texto nao acha nada.
+        return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
@@ -984,10 +1135,14 @@ def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
         return h_investments.withdraw(user_id, text, {"investment_name": target_name, "amount": amount})
 
     if not amount or float(amount) <= 0:
-        return "Qual o valor? Tente: *saquei 200 da reserva de emergência*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "funds.withdraw", entities,
+            "Qual o valor? Tente: *saquei 200 da reserva de emergência*", text, falta="amount")
 
     if not target_name:
-        return "Você quer retirar de qual caixinha ou investimento?"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "funds.withdraw", {**(entities or {}), "amount": amount},
+            "Você quer retirar de qual caixinha ou investimento?", text, falta="target_name")
 
     norm_target = normalize_text(target_name)
 
