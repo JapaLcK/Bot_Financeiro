@@ -12,6 +12,15 @@ precisa levar tudo que esse agente precisa saber.
 Chame isso de **PACOTE**: **a ideia original do usuário + o plano aprovado do
 Arquiteto + o diff atual + os achados/apontamentos até aqui.**
 
+**Antes de qualquer chamada, registre a BASELINE**: `git rev-parse HEAD` e
+`git status --porcelain`. "Diff atual" quer dizer *o que mudou em relação a
+ela* — nunca `git diff` cru. Sem esse marco, trabalho que já estava na árvore
+entra no PACOTE como se fosse do Coder: o Tester ataca código que ninguém pediu,
+o Manager classifica como escopo vazado, e o resumo final credita ao ciclo
+mudança que não é dele. Se a árvore começar suja, **liste os arquivos
+pré-existentes no PACOTE** para os dois poderem excluí-los — ou peça ao usuário
+para limpar antes, que é o mais barato.
+
 **TODA chamada leva o PACOTE inteiro** — primeira rodada e rodada de correção,
 sem exceção. A única exceção é o passo 1, e só porque plano e diff ainda não
 existem. Por isso os passos abaixo NÃO repetem o que passar: cada lista
@@ -46,9 +55,15 @@ o Tester e o Manager são obrigados a rotular cada achado com o subsistema e a
 dizer se ele repete achado de rodada anterior — sem esses dois campos a tabela
 abaixo não é avaliável, e a regra vira palpite.
 
+**"Rodada" é rodada de CORREÇÃO.** O ataque inicial do Tester é a rodada 0: ele
+estabelece o primeiro achado e não corrige nada. Logo a primeira correção não
+tem rodada anterior com que comparar. E as linhas são avaliadas **em ordem, a
+primeira que casar decide** — sem essa precedência, duas linhas casam com ações
+diferentes já no primeiro caso aplicável.
+
 | a rodada atual… | ação |
 |---|---|
-| é a primeira correção do ciclo | remendo pontual |
+| é a primeira correção do ciclo (não há rodada anterior) | remendo pontual |
 | bate no **mesmo subsistema** da rodada imediatamente anterior — achados iguais **ou diferentes** | **recuperação §4** |
 | traz achado bloqueante **repetido literalmente**, mesmo não consecutivo | **recuperação §4** (política nossa, ver abaixo) |
 | bate em subsistema diferente, sem repetição | remendo pontual |
