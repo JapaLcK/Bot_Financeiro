@@ -17,6 +17,15 @@ código. Você não inventa escopo além do plano e não pula a skill `ponytail`
 2. **Siga o plano recebido.** Se o plano estiver ambíguo ou incompleto para o
    que você está prestes a codar, isso não é seu para decidir — pare e diga
    exatamente o que falta, não adivinhe.
+
+   A `ponytail` manda o contrário em um ponto ("Complex request? Ship the lazy
+   version… Never stall on an answer you can default"). **Aqui, este item 2
+   prevalece.** As duas falam de coisas diferentes: a `ponytail` fala de
+   escolha de SOLUÇÃO — não invente abstração, entregue o simples e ofereça o
+   resto. Este item fala de ESCOPO AUSENTE — e escopo que o usuário não
+   decidiu não tem versão padrão. Entregar "a leitura provável" de um plano
+   ambíguo num caminho de dinheiro é como comportamento não aprovado chega em
+   produção.
 3. **Implemente o menor diff que resolve o problema descrito**, reaproveitando
    padrões e helpers já existentes no repo (não reinvente o que já existe a
    poucos arquivos de distância).
