@@ -277,6 +277,71 @@ def test_nome_literal_com_a_palavra_caixinha(uid):
     assert pockets.get("minha caixinha viagem") == 200.00
 
 
+# ── As 5 portas que a conversa determinística não alcança ───────────────────
+#
+# `investments.deposit`, `investments.withdraw` e as duas de `funds.withdraw`
+# ficavam cobertas SÓ pelo teste de `ast` lá embaixo — que prova que a porta está
+# LIGADA, não que ela funciona. É a mesma armadilha do teste tautológico que o
+# controle negativo pegou mais acima, num eixo diferente.
+#
+# Medido: nenhuma de 9 frases ("aportar", "quero aportar no cdb", "resgatar do
+# cdb", "sacar da reserva"…) classifica para as intents de investimento sem o
+# LLM — todas caem em `out_of_scope`. Então a 1ª mensagem é injetada com a intent
+# já resolvida, que é o que o classificador entregaria numa conta Pro.
+#
+# A RESPOSTA — a 2ª mensagem, onde o bug desta issue vive — passa pelo
+# `handle_incoming` de verdade. É o trecho que importa.
+
+def _pergunta_injetada(uid: int, intent: str, entities: dict, texto: str) -> str:
+    from core.intent_classifier import IntentResult
+    from core.intent_router import route
+
+    return route(IntentResult(intent=intent, confidence=0.95, entities=entities),
+                 IncomingMessage(platform="whatsapp", user_id=uid, text=texto))
+
+
+@pytest.mark.parametrize("intent,entities,texto,pergunta", [
+    ("investments.deposit",  {},                            "aportar",  "Qual valor você quer aportar?"),
+    ("investments.withdraw", {},                            "resgatar", "De qual investimento"),
+    ("investments.withdraw", {"investment_name": "cdb tst"}, "resgatar", "Qual valor você quer resgatar?"),
+    ("funds.withdraw",       {},                            "sacar",    "Qual o valor?"),
+    ("funds.withdraw",       {"amount": 50},                "sacar",    "retirar de qual"),
+])
+def test_portas_de_investimento_e_saque_armam_pendencia(uid, intent, entities, texto, pergunta):
+    """Cada uma das 5 portas restantes pergunta E guarda o contexto."""
+    resposta = _pergunta_injetada(uid, intent, entities, texto)
+
+    assert pergunta in resposta, resposta
+    pend = db.get_pending_action(uid)
+    assert pend is not None, "a pergunta saiu sem guardar contexto"
+    assert pend["action_type"] == "clarification"
+    assert pend["payload"]["intent"] == intent
+    assert pend["payload"]["falta"] in ("amount", "investment_name", "target_name")
+
+
+def test_aporte_a_resposta_nao_vira_despesa(uid):
+    """O bug da issue na porta do APORTE: a resposta ao "Qual valor?" era
+    reclassificada do zero e virava `launches.add`."""
+    # A 3a mensagem NAO e decorativa: sem a pendencia, "500 reais" vira uma
+    # clarification de `launches.add` pedindo a DESCRICAO, e a despesa so e
+    # gravada quando ela chega. Sem este turno o teste passa na `main` — foi
+    # assim que ele nasceu, e o controle negativo pegou.
+    _pergunta_injetada(uid, "investments.deposit", {}, "aportar")
+    _conversa(uid, "500 reais", "cdb")
+
+    assert _despesas(uid) == [], "a resposta ao aporte virou despesa avulsa"
+    assert round(float(db.get_balance(uid)), 2) == 0.00
+
+
+def test_saque_generico_a_resposta_nao_vira_despesa(uid):
+    """Mesma coisa na porta do saque genérico (`funds.withdraw`)."""
+    _pergunta_injetada(uid, "funds.withdraw", {}, "sacar")
+    _conversa(uid, "200 reais", "reserva")
+
+    assert _despesas(uid) == []
+    assert round(float(db.get_balance(uid)), 2) == 0.00
+
+
 # ── As duas pontas da fonte única (§0.7) ────────────────────────────────────
 
 _ARQUIVOS_COM_PERGUNTA = (
