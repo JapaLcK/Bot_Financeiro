@@ -23,6 +23,15 @@ register_whatsapp.json
 # viajar: valem para quem clonar e para as sessões na web, que não enxergam
 # o ~/.claude/ de ninguém.
 !.claude/skills/baseline-testes/
+# `ponytail` é a ÚNICA exceção à regra acima, e é deliberada: o `coder.md` a
+# torna OBRIGATÓRIA, e obrigação que não viaja não é obrigação — num clone
+# limpo ou numa sessão web o Coder ficava preso a uma regra que nunca chegava
+# até ele. Não é skill nossa: é cópia verbatim do plugin MIT
+# github.com/DietrichGebert/ponytail, upstream `2ed6c52` (2026-08-07), com a
+# LICENSE ao lado como o MIT exige. Para conferir drift:
+#   diff .claude/skills/ponytail/SKILL.md \
+#        ~/.claude/plugins/marketplaces/ponytail/skills/ponytail/SKILL.md
+!.claude/skills/ponytail/
 skills-lock.json
 
 # Harness de testes de frontend (tests/frontend/): dependência local, não viaja.
