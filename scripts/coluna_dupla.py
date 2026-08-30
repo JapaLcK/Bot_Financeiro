@@ -36,8 +36,9 @@ import tempfile
 # 1 = asserção falhou (o comportamento antigo estava errado — e o que queremos);
 # 2 = coleta interrompida (ImportError/erro de sintaxe) — o teste so provou que
 #     um simbolo novo nao existia, nao que o comportamento estava errado;
-# 5 = nenhum teste coletado — nao mede nada, e reprovado como guarda.
-PYTEST_FALHA, PYTEST_COLETA, PYTEST_VAZIO = 1, 2, 5
+# Qualquer outro codigo (3, 4, 5) e reprovado: o pytest reclamando de si mesmo
+# nao e vermelho de teste.
+PYTEST_FALHA, PYTEST_COLETA = 1, 2
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -130,12 +131,20 @@ def main() -> int:
         rc_antes, saida_antes = roda_pytest(wt_antes, py, alvos)
         rc_depois, _ = roda_pytest(wt_depois, py, alvos)
 
-        if rc_antes == PYTEST_VAZIO:
-            print("[coluna-dupla] REPROVADO: nenhum teste coletado na coluna antiga — nao mede nada.")
-            return 1
+        # A ORDEM importa: o verde (tautologia) e diagnostico proprio e tem de
+        # ser lido antes da faixa de codigos invalidos, senao vira "pytest saiu 0,
+        # isso nao e falha de teste" e a mensagem que interessa se perde.
         if rc_antes == 0:
             print("[coluna-dupla] REPROVADO: o grupo PASSA no codigo antigo. Teste tautologico —\n"
                   "               ele afirma o que o codigo faz, e ficaria verde com e sem o fix.")
+            return 1
+        # Vermelho VALIDO e so 1 (asserção) ou 2 (coleta). Qualquer outro codigo
+        # e o pytest reclamando de si mesmo, nao do codigo: 3 interno, 4 uso
+        # (alvo inexistente — medido: rc=4), 5 nada coletado. Aceitar "!= 0"
+        # como vermelho daria APROVADO a um alvo digitado errado.
+        if rc_antes not in (PYTEST_FALHA, PYTEST_COLETA):
+            print(f"[coluna-dupla] REPROVADO: pytest saiu {rc_antes} na coluna antiga — isso nao e falha\n"
+                  "               de teste (3=interno, 4=uso/alvo inexistente, 5=nada coletado).")
             return 1
         if rc_depois != 0:
             print(f"[coluna-dupla] REPROVADO: o grupo falha tambem no codigo corrigido (rc={rc_depois}).")
@@ -154,8 +163,11 @@ def main() -> int:
     finally:
         for wt in (wt_antes, wt_depois):
             subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True)
-        subprocess.run(["git", "worktree", "prune"], capture_output=True)
+        # rmtree ANTES do prune: o prune so descarta registro cujo diretorio ja
+        # sumiu. Na ordem inversa, um `remove` que falhasse deixaria registro
+        # orfao para sempre — e o repositorio ja carrega 10 desses.
         shutil.rmtree(tmp, ignore_errors=True)
+        subprocess.run(["git", "worktree", "prune"], capture_output=True)
 
 
 if __name__ == "__main__":
