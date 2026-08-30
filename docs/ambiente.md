@@ -28,7 +28,7 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
 
   Vale também a partir de um worktree de `.claude/worktrees/` — o venv da raiz serve
   os dois.
-- **As variáveis de ambiente continuam obrigatórias** (§3). Sem elas o import de
+- **As variáveis de ambiente continuam obrigatórias** (§3 do `CLAUDE.md`). Sem elas o import de
   `frontend/finance_bot_websocket_custom.py` chama `sys.exit(1)` na linha 277
   (`DATABASE_URL`) e o pytest morre com `INTERNALERROR` — de novo, não é falha de
   teste.
@@ -100,7 +100,7 @@ python3 -c "import fastapi" 2>&1 | tail -1     # ModuleNotFoundError → não é
   incluem sempre os de `tests/test_statement_import.py`. **Não guarde aqui quantos
   passam:** esse número é a sua baseline de comparação, e baseline lida de documento
   é pior que baseline nenhuma — ela parece medição. Meça a sua no início do trabalho
-  e compare por NOME de teste (§3). Esses 7 **não vêm todos
+  e compare por NOME de teste (§3 do `CLAUDE.md`). Esses 7 **não vêm todos
   do `ofxparse`** — são dois grupos, e vale saber qual é qual, porque só o primeiro
   desaparece se o `ofxparse` voltar:
 

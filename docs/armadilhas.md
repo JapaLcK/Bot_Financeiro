@@ -112,7 +112,7 @@ aconteceu, nem está decidida.
 
 ### `dashboard.js`: o arquivo grande demais
 
-É o maior passivo de organização do repositório e o exemplo vivo da §0.5: milhares
+É o maior passivo de organização do repositório e o exemplo vivo da §0.5 do `CLAUDE.md`: milhares
 de linhas, centenas de funções e de `const/let` **no escopo global**, dezenas de
 seções demarcadas por comentário. Nasceu de um `<script>` inline extraído do
 `dashboard.html` ("refactor Fase 1: CSP script-src").
@@ -245,7 +245,7 @@ fixo de toda mudança de layout.
 
 - **`db/` é um pacote** com ~30 módulos por domínio, não um `db.py` único. O DDL de
   todas as tabelas vive em `db/schema.py::init_db()` — é a fonte de verdade do schema
-  (§0.7), e o `docs/CLAUDE.md` aponta para lá em vez de repetir a lista.
+  (§0.7 do `CLAUDE.md`), e o `docs/CLAUDE.md` aponta para lá em vez de repetir a lista.
 - **O monólito ainda existe e ainda cresce.**
   `frontend/finance_bot_websocket_custom.py` é o maior arquivo do backend e ainda
   cresce; concentra auth, MFA, billing, WebSocket, dashboard e o `ConnectionManager`.

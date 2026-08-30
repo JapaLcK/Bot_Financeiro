@@ -1,10 +1,15 @@
 # PigBank — como trabalhar neste repositório
 
-> **Contexto de domínio** (tabelas, endpoints, fluxos de cadastro, e-mail, roadmap):
-> `docs/CLAUDE.md`. Guia de desenvolvimento: `docs/dev_guide.md`.
->
 > **Este arquivo é sobre o processo**: o que fazer antes de escrever, como validar,
-> e as armadilhas deste código que já custaram caro.
+> e como reportar. Ele é carregado em toda sessão e em toda chamada de subagente,
+> então o que é *referência* mora fora dele e se lê sob demanda:
+>
+> | leia quando | onde |
+> |---|---|
+> | for mexer no frontend, no service worker, em `pending_actions`, no monólito | `docs/armadilhas.md` (§5) |
+> | for rodar a suíte, ou interpretar uma falha de ambiente | `docs/ambiente.md` (§6) |
+> | precisar de domínio: tabelas, endpoints, cadastro, e-mail, roadmap | `docs/CLAUDE.md` |
+> | quiser o guia de desenvolvimento | `docs/dev_guide.md` |
 
 ---
 
