@@ -1252,6 +1252,7 @@ async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
 
 def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) -> bytes:
     from datetime import datetime as _dt
+    from html import escape
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -1278,7 +1279,17 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     base = getSampleStyleSheet()
 
     def par(text, size=9, color=INK, bold=False, align=TA_LEFT):
-        return Paragraph(str(text), ParagraphStyle(
+        # `Paragraph` interpreta mini-XML, e TODO texto livre do extrato passa por
+        # aqui — `categoria`, `alvo`, `nota`, nome do cartão. Medido no reportlab
+        # 5.0.0, sem escape: `"<b>gastos"` na nota estoura `ValueError` e a
+        # exportação do MÊS INTEIRO vira 500 permanente (o usuário não tem como
+        # saber qual lançamento culpar), e `"<img src='/etc/hosts'/>"` faz o
+        # processo ABRIR o arquivo do servidor — com URL no lugar do caminho, a
+        # request sai. Escapa no funil e não nos 4 call sites: diff menor e o
+        # próximo call site já nasce coberto. Nenhum `par()` passa markup de
+        # propósito — o negrito é o `fontName` abaixo. `quote=False` porque isto é
+        # conteúdo de elemento, não valor de atributo.
+        return Paragraph(escape(str(text), quote=False), ParagraphStyle(
             "p", parent=base["Normal"],
             fontName="Helvetica-Bold" if bold else "Helvetica",
             fontSize=size, textColor=color, alignment=align, leading=size + 3,
