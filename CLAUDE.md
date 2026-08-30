@@ -196,33 +196,18 @@ Isso gerou dois apontamentos separados.
 
 ## 3. Testar e validar antes de empurrar
 
-**Nunca empurrar sem rodar a suíte.** Ela precisa de Postgres no ar e das variáveis
-de ambiente — sem isso o pytest morre com `INTERNALERROR` no import, o que **não** é
-falha de teste e não deve ser lido como tal:
+**Nunca empurrar sem rodar a suíte.** Se ela morrer com `INTERNALERROR` no import,
+isso **não** é falha de teste — é ambiente, e não se lê como tal.
 
-```bash
-export DATABASE_URL="postgresql://…"     # Postgres acessível
-export JWT_SECRET="…"                    # 32+ bytes
-export PII_ENCRYPTION_KEY="…" PII_HASH_PEPPER="…"
-export PII_AUDIT_DISABLED=1 RUN_BACKGROUND_TASKS=0
-
-PY=/Users/<user>/Desktop/bot/bot_wa/.venv/bin/python   # na máquina local; ver §6a
-PYTHONPATH=. $PY -m pytest -q                 # tudo
-PYTHONPATH=. $PY -m pytest tests/test_x.py -q # durante o desenvolvimento
-```
-
-Use `<interpretador> -m pytest`, nunca `pytest` solto — o binário no PATH costuma ser
-de outro interpretador, sem as dependências. **Na máquina local o `python3` do PATH
-(Homebrew) não tem nem `fastapi` nem `pytest`**: use o do `.venv` da raiz, que tem
-tudo (§6a). No sandbox da web o interpretador é o `python3` mesmo, e aí valem as
-exclusões do §6b.
+**Como rodar é assunto da skill `baseline-testes`, e só dela.** Invoque-a antes de
+qualquer `pytest` neste repositório: ela tem o interpretador certo, a única variável
+que você precisa exportar, e por que não passar `--ignore`. Este arquivo não repete
+os comandos de propósito — quando repetia, as duas versões divergiram (§0.7).
 
 **Frontend:** `npm run test:frontend` (`node --test tests/frontend/*.test.mjs`, com
 Playwright). O `package.json` da raiz existe só para isso — não há build de JS.
 
-O CI (`.github/workflows/tests.yml`) sobe seu próprio Postgres 16 e roda `pytest`
-(bloqueante) e `audit` de CVEs (não-bloqueante) em todo push e PR. Não use o CI como
-primeiro teste — ele é a confirmação, não a descoberta.
+Não use o CI como primeiro teste — ele é a confirmação, não a descoberta.
 
 **Antes de afirmar que algo "não existe", confirme contra qual árvore.** Um branch
 atrasado em relação à `main` mente com toda a confiança do mundo: o `grep` não acha o
@@ -241,9 +226,11 @@ conferir `main` sem trocar de branch. Vale o mesmo para revisores automáticos: 
 lê a árvore **do branch**, então um achado de "isso não existe" num branch atrasado
 pode ser artefato do atraso, não um defeito. Cheque antes de aceitar.
 
-**Compare com a baseline, não com zero.** Rode a suíte **antes** de mexer e guarde o
-número. Falha que já existia não é regressão sua; falha nova é. Sem a baseline não dá
-para distinguir as duas, e sobra "os testes estão vermelhos" sem conclusão.
+**Compare com a baseline, não com zero.** Rode a suíte **antes** de mexer e guarde a
+**lista de nomes** que falharam — nunca a contagem. Falha que já existia não é
+regressão sua; falha nova é. Contagem igual não prova ausência de regressão: um teste
+novo mascara um quebrado. Como ler o resultado, quando a baseline deixa de valer e
+como isolar uma falha: skill `baseline-testes`.
 
 **Teste de regressão escrito para provar um conserto precisa dos DOIS controles.**
 Vale para o **grupo** de testes daquele conserto, não para cada teste isolado:
@@ -278,35 +265,6 @@ banco. Um teste vale quando manda **duas mensagens de assuntos diferentes** pelo
 **Varredura combinatória se roda em DUAS COLUNAS** (`main` × branch). Uma tabela de
 "122.014 erros → 652" parecia um conserto enorme; medida contra a `main`, os grupos já
 valiam zero lá — a varredura comparava o branch com uma versão anterior dele mesmo.
-
-**A baseline local oscila — compare por nome de teste, não por contagem.** Duas
-execuções idênticas, seguidas, deram resultados diferentes:
-
-```
-execução A:   9 failed, 984 passed
-execução B:  12 failed, 981 passed
-```
-
-O núcleo estável são os **7** de `tests/test_statement_import.py`, e eles **não têm uma
-causa só** — são dois grupos de dependência ausente (§6). Os demais —
-`test_export_email`, `test_nlp_and_pending_flow`,
-`test_security_alerts` — aparecem e somem entre execuções: há dependência de ordem ou
-de estado compartilhado no banco de teste. **Consequência prática:** um número de
-falhas maior que o da sua baseline não prova regressão, e um igual não prova ausência
-dela. Compare a **lista de nomes**, e na dúvida rode o arquivo suspeito isolado
-(`pytest tests/test_x.py -q`). Isso corta a interferência **dos outros arquivos**, e só
-isso: os testes de dentro do arquivo continuam no mesmo processo, na ordem de definição,
-compartilhando estado global e as mesmas linhas de banco. Se a falha persistir isolada,
-ainda pode ser ordem interna. Para descartar, desça mais um nível: rode o teste
-**sozinho** (`pytest "tests/test_x.py::test_y" -q`) e depois varie a ordem passando os
-node IDs explicitamente na linha de comando — o pytest executa na ordem em que você os
-lista (não há plugin de ordenação instalado aqui; o único plugin é o `anyio`):
-
-```bash
-pytest -v "tests/test_x.py::test_b" "tests/test_x.py::test_a"
-```
-
-"Passou isolado" nunca é prova de que não há efeito de ordem.
 
 **Frontend também se testa.** Há Chromium com Playwright disponível
 (`/opt/pw-browsers/`, use `NODE_PATH=$(npm root -g)`). Mudou layout, mediu; não
