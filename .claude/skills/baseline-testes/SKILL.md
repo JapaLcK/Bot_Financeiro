@@ -1,6 +1,6 @@
 ---
 name: baseline-testes
-description: Como rodar a suíte do PigBank e ler o resultado — qual interpretador usar, quais variáveis a suíte exige, qual número esperar, e como distinguir regressão sua de falha preexistente. Use ANTES de rodar pytest neste repositório, antes de afirmar que "os testes passam/falham", e antes de abrir PR. Também cobre o ambiente remoto (Claude Code na web), que tem procedimento diferente do local.
+description: Como rodar a suíte do PigBank e ler o resultado — qual interpretador usar, quais variáveis a suíte exige, e como distinguir regressão sua de falha preexistente. Use ANTES de rodar pytest neste repositório, antes de afirmar que "os testes passam/falham", e antes de abrir PR. Também cobre o ambiente remoto (Claude Code na web), que tem procedimento diferente do local.
 ---
 
 # Rodar a suíte do PigBank
@@ -13,8 +13,10 @@ export PYTHONPATH=.
 .venv/bin/python -m pytest -q        # suíte inteira, sem exclusão nenhuma
 ```
 
-**Esperado: `1202 passed` em ~58s.** Medido quatro vezes seguidas em 2026-08-20,
-sempre idêntico.
+**Não há número esperado aqui, de propósito.** Rode e anote o SEU resultado: ele é a
+baseline deste trabalho. Um número guardado neste arquivo envelhece em silêncio e
+convida a comparar contra ele em vez de medir — e aí você compara a sua árvore com
+a de outra pessoa, em outra data.
 
 Extrai só o `DATABASE_URL` em vez de `set -a; source .env` de propósito: o `.env`
 tem uma linha com valor não-quotado contendo espaço (`EMAIL_FROM_NAME`, linha
@@ -113,8 +115,8 @@ rebase parecia +32 de ganho e era só 3 arquivos de teste que chegaram no rebase
 Refaça a baseline depois de trocar de base.
 
 **Compare por nome de teste, não por contagem.** Contagem igual não prova ausência
-de regressão (um teste novo pode mascarar um quebrado). Hoje a suíte é estável em
-1202, mas a regra vale de qualquer forma.
+de regressão (um teste novo pode mascarar um quebrado). Mesmo com a suíte estável, a
+regra vale.
 
 **Isolar um arquivo corta a interferência dos outros, e só isso.** Os testes de
 dentro do arquivo continuam no mesmo processo, na ordem de definição. Para
