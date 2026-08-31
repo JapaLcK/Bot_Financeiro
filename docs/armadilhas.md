@@ -162,8 +162,10 @@ com `Cache-Control: no-cache` (`frontend/routes/static_pages.py`), o `install` e
 `install` complete, o worker novo assume com ou sem bump.
 
 O que o bump faz é apagar o **conteúdo**: o `activate` só apaga cache de nome DIFERENTE
-do atual. Sem bumpar, a lista nova de precache só impede gravação NOVA, e o que a versão
-anterior guardou — inclusive dado privado — continua no aparelho.
+do atual. Sem bumpar, a regra nova só alcança gravação NOVA — e quem decide o que entra é
+a allowlist do `podeCachear`, não o `PRECACHE`: item tirado do precache que a allowlist
+ainda aceita volta a ser cacheado em runtime, e é o caso do Chart.js. O que a versão
+anterior já guardou — inclusive dado privado — continua no aparelho.
 
 ### `pending_actions`: uma linha por usuário, ~100 lugares mexendo nela
 
