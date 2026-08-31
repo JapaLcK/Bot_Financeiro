@@ -42,13 +42,26 @@ filtram o resumo impresso e nao alcancam o XML. E o gate ficando certo, mas quem
 lia aquele REPROVADO como "seu ambiente esta torto" perde o aviso.
 
 Limites conhecidos, medidos e DECLARADOS: quase todos abortam ou reprovam. Os
-DOIS que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
-(acidente) e o teste que le o proprio `sys.argv` (ator deliberado); um terceiro
-APROVA com o veredito certo e a NOTA inflada (a ultima celula) — a lista nao
-esta em ordem de gravidade, entao eles vao nomeados. Nao valem conserto enquanto
-nao aparecerem:
+TRES que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
+(acidente), o teste que le o proprio `sys.argv` (ator deliberado) e o arquivo de
+apoio apagado que o overlay nao remove (a primeira celula); um QUARTO, de
+categoria DIFERENTE, APROVA com o veredito certo e a NOTA inflada (a ultima
+celula) — a lista nao esta em ordem de gravidade, entao eles vao nomeados. Nao
+valem conserto enquanto nao aparecerem:
     - teste apagado (`D`) nao entra no overlay nem nos alvos, logo nunca roda
-      (3 na historia de `tests/`); `D` do proprio conftest da FileNotFoundError.
+      (3 na historia de `tests/`, os tres `.py`); `D` do proprio conftest da
+      FileNotFoundError. E o overlay COPIA, nunca REMOVE: um arquivo de APOIO
+      apagado entre as colunas PERMANECE na antiga, e se o teste alterado depende
+      da AUSENCIA dele, o vermelho de la vem do arquivo obsoleto e NAO do codigo
+      de producao -> `APROVADO, prova FORTE` sem regressao nenhuma exercitada.
+      E uma das celulas que viram APROVADO falso em vez de abortar — quais e
+      quantas sao, quem diz e o preambulo; a contagem nao se repete aqui. Zero
+      alcancavel neste repo: os 3 `D` da historia sao todos teste, e fixture de
+      dados nunca existiu em `tests/` — todo nao-`.py` que ja passou por la e
+      `.test.mjs` do harness de frontend (12, todos vivos hoje), que o pytest nem
+      coleta. Nao esta consertado por congelamento, nao por impossibilidade: o
+      conserto conhecido e incluir `D` no `--diff-filter` e REMOVER esses caminhos
+      da coluna antiga em vez de copiar — fica para quando aparecer em uso real.
     - `T` (`.py` virou symlink) some do `--diff-filter=AMR` -> "nada a provar",
       zero na historia; `C` o `git diff` sem `-C` nunca emite (o destino sai `A`);
       `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
@@ -64,8 +77,9 @@ nao aparecerem:
     - alvo de `--testes` que o pytest EXPANDE e mesmo assim termina em `.py`: a
       guarda abaixo so olha o NOME, entao um diretorio chamado `pasta.py`, ou um
       symlink `x.py` -> `tests/`, passa e a coleta varre o que houver dentro —
-      medido nos dois: rc=0 e `APROVADO, prova FORTE` citando teste alheio. E a
-      UNICA celula desta lista que vira APROVADO falso em vez de abortar. Zero
+      medido nos dois: rc=0 e `APROVADO, prova FORTE` citando teste alheio. E
+      uma das celulas que viram APROVADO falso em vez de abortar — quais e
+      quantas sao, quem diz e o preambulo; a contagem nao se repete aqui. Zero
       alcancavel neste repo: zero diretorios com nome terminado em `.py` e zero
       symlinks rastreados (modo 120000) na arvore. `os.path.isfile` seria pior:
       a guarda roda ANTES de os worktrees existirem, mediria contra o cwd e
@@ -102,8 +116,11 @@ nao aparecerem:
       implicar "o teste que voce escreveu rodou e falhou". NAO e consertavel: o
       overlay copia o teste novo para dentro da coluna antiga, entao as duas
       colunas coletam nodeids IDENTICOS por construcao (medido: DEPOIS - ANTES =
-      []) e o gate nao tem como saber qual e o teste do PR. O `(e mais N que nem
-      chegaram a rodar)` da linha do FORTE e a UNICA pista que o operador recebe.
+      []) e o gate nao tem como saber qual e o teste do PR. O que o operador
+      recebe e a CONTAGEM da linha do FORTE (`N teste(s) RODARAM e falharam`),
+      sempre impressa e confrontavel com o unico nodeid citado; o `(e mais N que
+      nem chegaram a rodar)` so entra quando houve `<error>` — e o caso medido
+      acima, mas com dois `<failure>` e zero `<error>` ele nao sai.
 """
 from __future__ import annotations
 
