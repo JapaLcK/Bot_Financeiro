@@ -963,6 +963,9 @@ def _fmt_brl_date(value) -> str:
             value = _dt.fromisoformat(value)
         except Exception:
             return str(value)
+    # DÍVIDA (#179): `_tz` AQUI é o `datetime.timezone` (não o `utils_date._tz`),
+    # e o offset BRT abaixo é cravado, fora da fonte única. Só formata data em
+    # e-mail.
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     if hasattr(value, "tzinfo"):
         if value.tzinfo is None:

@@ -33,6 +33,16 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
+# DÍVIDA (#179): o offset BRT do comentário abaixo é cravado, fora da fonte
+# única `utils_date._tz()`. Diferente dos outros três sites de dívida, este
+# NÃO é exibição: é a HORA DE PAREDE em que o bot fala com o usuário. Com
+# `REPORT_TIMEZONE` diferente de São Paulo, a rodada "diária" cai numa hora
+# errada do dia local (3h UTC = 0h em BRT, mas 17h em Kiritimati). Os outros
+# agendadores não têm o problema — `engagement_scheduler`,
+# `investment_scheduler`, `news_bot` e `recurring_charger` dormem por
+# INTERVALO, não por hora de parede; este é o único. Consertar é trocar a
+# variável por hora LOCAL (`_seconds_until_next_run` usa `datetime.now(utc)`),
+# o que muda o contrato de `PROACTIVE_AI_HOUR_UTC` — PR próprio.
 RUN_HOUR_UTC = int(os.getenv("PROACTIVE_AI_HOUR_UTC", "3"))  # 3h UTC = 0h BRT
 ACTIVE_DAYS = 7
 MAX_USERS_PER_RUN = 200  # guardrail defensivo

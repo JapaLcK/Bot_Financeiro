@@ -30,7 +30,6 @@ import time as _startup_time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
-from zoneinfo import ZoneInfo
 from typing import Dict
 
 from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
@@ -138,12 +137,12 @@ from frontend.routes.shared import (
     wants_html,
 )
 from frontend.routes.static_pages import router as static_pages_router
+from utils_date import today_tz, tz_name
 
 load_app_env()
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
-TZ                = os.getenv("TZ", "America/Sao_Paulo")
 # JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
 # DASHBOARD_URL é https → Secure=True. Blindagem: se APP_ENV=prod, força Secure
@@ -672,7 +671,7 @@ async def get_financial_data(
         # 9) Daily expenses (bar chart)
         _q(
             f"""
-            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
+            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{tz_name()}')::int AS dia,
                    SUM(valor) AS total
             FROM launches
             WHERE user_id = %s
@@ -976,7 +975,7 @@ async def get_daily_expenses_window(
     primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
     do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
     if start_date:
-        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{TZ}') >= %s"
+        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{tz_name()}') >= %s"
         params = (user_id, start_date)
     else:
         limit_clause = f"AND criado_em >= NOW() - INTERVAL '{int(days)} days'"
@@ -985,7 +984,7 @@ async def get_daily_expenses_window(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
-                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{TZ}'), 'YYYY-MM-DD') AS dia,
+                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{tz_name()}'), 'YYYY-MM-DD') AS dia,
                        SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
@@ -5109,7 +5108,7 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
     from core.services.plan_service import history_earliest_date
-    local_today = datetime.now(ZoneInfo(TZ)).date()
+    local_today = today_tz()
     requested_start = local_today - timedelta(days=days)
     earliest = await asyncio.to_thread(history_earliest_date, user_id)
     start_date = max(requested_start, earliest) if earliest else requested_start
@@ -5174,7 +5173,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     # ── Crédito → add_credit_purchase (à vista) ou installments (parcelado) ─
     if tipo == "credito":
         from db import add_credit_purchase, add_credit_purchase_installments, get_card_by_id
-        from utils_date import today_tz
 
         card_id = payload.card_id
         if not card_id:

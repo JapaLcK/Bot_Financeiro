@@ -417,9 +417,20 @@ const fmtShort = n => {
     : "R$" + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
 };
 
-// Fuso do app (o backend agrupa tudo em America/Sao_Paulo). Exibimos as datas
-// SEMPRE nesse fuso pra não depender do timezone do dispositivo — no WebView do
-// iOS ele costuma vir em UTC, o que fazia a hora aparecer ~3h adiantada.
+// Fuso do app, CRAVADO aqui. Exibimos as datas SEMPRE nesse fuso pra não
+// depender do timezone do dispositivo — no WebView do iOS ele costuma vir em
+// UTC, o que fazia a hora aparecer ~3h adiantada.
+//
+// DÍVIDA (#179): o backend NÃO agrupa mais "tudo em America/Sao_Paulo" — ele
+// agrupa no fuso do app (`REPORT_TIMEZONE` → `TZ` → São Paulo,
+// `utils_date.tz_name()`). Com as duas variáveis iguais — que é o que o
+// `.env.example:31-32` documenta, e o que NÃO foi verificado no Railway — os
+// dois lados coincidem e nada diverge. No dia em que `REPORT_TIMEZONE` apontar
+// para outro fuso, este literal passa a mentir — e o caso grave não é o display
+// e sim a ESCRITA: `appTzWallClockToISO` (abaixo) converte o input de data da edição
+// de lançamento tratando-o como hora de parede em APP_TZ, então gravaria um
+// instante de outro dia. Fechar isso é mudança de CONTRATO (o backend teria de
+// mandar o fuso junto com os dados), logo PR próprio — não este.
 const APP_TZ = "America/Sao_Paulo";
 
 // Normaliza uma string de data: se vier sem timezone (naive), a coluna é

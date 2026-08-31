@@ -23,9 +23,9 @@ _get_current_user — ela usa os helpers daqui.
 
 import os
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from db import get_auth_user
+from utils_date import _tz
 
 from .plan_limits import (
     PlanLimits,
@@ -325,10 +325,11 @@ def history_earliest_date(user_id: int, now: datetime | None = None) -> date | N
     """Primeiro dia que o tier pode consultar; None significa sem limite."""
     limits = get_user_limits(user_id)
     current = now or datetime.now(timezone.utc)
-    try:
-        local_now = current.astimezone(ZoneInfo(os.getenv("TZ", "America/Sao_Paulo")))
-    except ZoneInfoNotFoundError:
-        local_now = current.astimezone(timezone.utc)
+    # Sem try/except de fuso inválido: era resíduo de quando esta linha lia o
+    # ambiente sozinha. Todo entrypoint passa por `load_app_env`, que recusa
+    # fuso inválido no boot com `exit(1)` (config/env.py) — e o fallback calado
+    # para UTC aqui devolveria uma JANELA DE HISTÓRICO errada em vez de falhar.
+    local_now = current.astimezone(_tz())
 
     if limits.get("history_current_month_only", False):
         return local_now.date().replace(day=1)

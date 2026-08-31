@@ -9,7 +9,7 @@ from decimal import Decimal
 from psycopg.types.json import Json, Jsonb
 
 import db_support as _db_support
-from utils_date import _tz, day_tz, launch_day
+from utils_date import _tz, day_tz, launch_day, tz_name
 
 from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
@@ -484,7 +484,7 @@ def get_spending_trend(user_id: int, months: int = 6) -> list[dict]:
                 order by y, m
                 """,
                 (
-                    "America/Sao_Paulo", "America/Sao_Paulo",
+                    tz_name(), tz_name(),
                     user_id, range_start,
                     user_id, range_start.date(),
                 ),
