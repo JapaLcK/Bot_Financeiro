@@ -179,10 +179,24 @@ jobs:
       #    do 'Re-run jobs': o re-run repete o payload do evento, então
       #    head.sha e merge ref vêm do mesmo lugar e não se defasam por isso.
       #
-      # Estes dois são os limites de ESCOPO. Os limites de LEITURA do arquivo
+      # 3. REMOVER o service worker não é barrado aqui, e sim por um irmão.
+      #    O ramo que sai 0 quando o `$SW` não está na árvore do head parece
+      #    autorizar apagar ou renomear o worker — não autoriza, mas quem
+      #    garante é outro check: `tests/frontend/sw_cache_privado.test.mjs` faz
+      #    `readFileSync` de caminho fixo, então some o arquivo e o step
+      #    `Run frontend tests` (mesmo job, três steps adiante) fica vermelho.
+      #    Medido: 11 dos 28 testes daquele arquivo quebram com ENOENT, tanto
+      #    apagando quanto renomeando. Se um dia aquele teste deixar de ler o
+      #    arquivo, este ramo passa a ser um buraco de verdade.
+      #    O risco de fundo continua sem dono: `CacheStorage` sobrevive à
+      #    desregistração do worker, então remover o SW deixa o conteúdo do
+      #    cache atual no aparelho. Isso não se resolve por gate de CI — pede um
+      #    deploy de limpeza, que é código de runtime.
+      #
+      # Estes três são os limites de ESCOPO. Os limites de LEITURA do arquivo
       # ficam onde doem, no corpo do step: o comentário `ponytail:` no ramo da
-      # base (`export const` e BOM não são reconhecidos) e o teto do
-      # `CACHE_NAME = ""` na comparação final.
+      # base (três formas não são reconhecidas) e o teto do `CACHE_NAME = ""` na
+      # comparação final.
       # ────────────────────────────────────────────────────────────────────
       - name: Gate do CACHE_NAME do service worker
         if: github.event_name == 'pull_request'
@@ -330,11 +344,17 @@ jobs:
             # isso o aviso não afirma que o valor era indeterminável. rc 1 (não
             # consegui LER) continua reprovando.
             #
-            # ponytail: heurística de grep ancorado, não parser de JS. Teto:
-            # `export const` e BOM antes da declaração passam sem comparação. Alargar o DECL
-            # reintroduz a classe do A2 (comentário casando como declaração); se
-            # o teto incomodar, o upgrade é ler a constante com node, que este
-            # job já tem instalado para o `npm run test:frontend`.
+            # ponytail: heurística de grep ancorado, não parser de JS. Três
+            # formas de base passam sem comparação: `export const`, BOM antes da
+            # declaração, e declaração MORTA dentro de bloco `/* */` com valor
+            # divergente — esta última é a que dói, porque o JS ignora a linha e
+            # o grep não, então um bump de verdade se perde no ::warning. Só é
+            # alcançável se a BASE já estiver assim (pelo head o gate reprova com
+            # DUAS_DECL), e a única porta para isso é push direto na main, onde o
+            # `if:` deste step o desliga. Alargar o DECL reintroduz a classe do
+            # A2 (comentário casando como declaração); se o teto incomodar, o
+            # upgrade é ler a constante com node, que este job já tem instalado
+            # para o `npm run test:frontend`.
             case "$RC" in
               0) ;;
               3|4)
@@ -346,6 +366,30 @@ jobs:
 
           if [ "$NOVA" = "$VELHA" ]; then
             echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a lista nova só impede gravação NOVA e o dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN ou justifique na thread do PR."
+            exit 1
+          fi
+
+          # Exigir AVANÇO, e não só mudança. Só vale quando os DOIS lados usam
+          # o esquema `pigbank-vN`: fora dele não existe ordem definida, e
+          # inventar uma faria o gate reprovar bump legítimo no dia em que o
+          # esquema mudar (`pigbank-2026-08`, um hash de build) — que é o modo
+          # de falha que o ramo do ::warning acima existe para evitar. Fora do
+          # esquema, desigualdade continua sendo o que se exige.
+          #
+          # O `10#` força base decimal: sem ele um `pigbank-v09` estouraria como
+          # octal inválido em vez de comparar. Ele também é o que faz `v9` e
+          # `v09` colidirem em 9 e caírem no `-le` — dois nomes de texto
+          # diferente para a MESMA versão não são bump.
+          versao() {
+            case "$1" in pigbank-v*) ;; *) return 1 ;; esac
+            local n=${1#pigbank-v}
+            case "$n" in ''|*[!0-9]*) return 1 ;; esac
+            printf '%s' "$((10#$n))"
+          }
+          NN=$(versao "$NOVA") && RCN=0 || RCN=$?
+          VN=$(versao "$VELHA") && RCV=0 || RCV=$?
+          if [ "$RCN" -eq 0 ] && [ "$RCV" -eq 0 ] && [ "$NN" -le "$VN" ]; then
+            echo "::error file=$SW,title=CACHE_NAME regrediu::$SW mudou neste PR e o CACHE_NAME foi de \"$VELHA\" para \"$NOVA\", que não avança. O activate só apaga cache de nome DIFERENTE do atual, então voltar para um nome já usado faz o aparelho que ainda tem aquele cache reusar o conteúdo antigo — inclusive o dado privado que o bump anterior tinha tirado de circulação. Bumpe para um pigbank-vN maior que $VN. (Nomes de texto diferente e mesmo número, como v9 e v09, contam como a mesma versão: o cache tem UM nome só, e não é o texto da declaração.)"
             exit 1
           fi
 
