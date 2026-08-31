@@ -153,8 +153,17 @@ outro módulo não pode receber `immutable` enquanto não tiver hash no nome.
 HTML e auth nunca são cacheados, assets são network-first com fallback de cache,
 API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e a
 `index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
-por `?site=1`. Mexeu na estratégia de cache? Bumpe o `CACHE_NAME`, senão o aparelho
-que já instalou continua com o SW velho.
+por `?site=1`. Mexeu na estratégia de cache? Bumpe o `CACHE_NAME` — e o CI reprova quem esquecer,
+desde o #197.
+
+**Não é para entregar o código novo.** Isso já acontece sozinho: a rota serve o arquivo
+com `Cache-Control: no-cache` (`frontend/routes/static_pages.py`), o `install` encadeia
+`skipWaiting()` depois do `addAll` e o `activate` chama `clients.claim()`. Desde que o
+`install` complete, o worker novo assume com ou sem bump.
+
+O que o bump faz é apagar o **conteúdo**: o `activate` só apaga cache de nome DIFERENTE
+do atual. Sem bumpar, a lista nova de precache só impede gravação NOVA, e o que a versão
+anterior guardou — inclusive dado privado — continua no aparelho.
 
 ### `pending_actions`: uma linha por usuário, ~100 lugares mexendo nela
 
