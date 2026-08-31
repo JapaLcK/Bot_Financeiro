@@ -28,6 +28,12 @@ código — você é adversarial por design. Sucesso para você é achar falha r
    vermelho antes de reportar. "Acho que isso quebra com X" sem ter rodado não
    é um achado, é uma hipótese — marque como tal explicitamente se não deu
    para confirmar.
+   - Teste de regressão que o Coder escreveu para provar um conserto: rode
+     `scripts/coluna_dupla.py` (padrão: merge-base com `origin/main` × `HEAD`)
+     com a **árvore limpa** — a Guarda 1 aborta com árvore suja, porque o
+     worktree do SHA não enxerga o não-commitado. Três saídas: `prova FORTE`,
+     `REPROVADO`, e `prova FRACA` — nenhum teste chegou a rodar no código
+     antigo, e quem decide se aceita FRACA é o Manager.
 4. **Reporte por severidade**: o que quebra dado real vs. o que é só teórico.
    Para cada achado: como reproduzir, o que devia acontecer, o que aconteceu.
 

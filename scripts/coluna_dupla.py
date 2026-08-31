@@ -27,6 +27,33 @@ Sai 1 quando um teste PASSA no antes (tautologico), quando falha no depois,
 quando o vermelho e valido mas o resumo do pytest nao trouxe desfecho — nem
 `FAILED` nem `ERROR`, tipico de um `PYTEST_ADDOPTS` com `-rN`/`-rs` —, ou quando
 uma guarda dispara.
+
+Limites conhecidos, medidos e DECLARADOS: todos abortam ou reprovam, MENOS o
+ultimo — o unico que pode virar APROVADO falso. Nao valem conserto enquanto nao
+aparecerem:
+    - teste apagado (`D`) nao entra no overlay nem nos alvos, logo nunca roda
+      (3 na historia de `tests/`); `D` do proprio conftest da FileNotFoundError.
+    - `T` (`.py` virou symlink) some do `--diff-filter=AMR` -> "nada a provar",
+      zero na historia; `C` o `git diff` sem `-C` nunca emite (o destino sai `A`);
+      `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
+    - arquivo <-> diretorio no mesmo caminho: FileExistsError/IsADirectoryError.
+    - symlink em `tests/`: zero na historia, e o `copyfile` segue o link.
+    - interpretador sem pytest: as DUAS colunas dao rc=1, entao quem dispara e o
+      ramo `rc_depois != 0` ("falha tambem no codigo corrigido") — a guarda de
+      desfecho nunca chega a ser alcancada aqui; o `No module named pytest` sai
+      repassado pelo nosso stderr, duas vezes.
+    - `--testes` fora do overlay: alvo inexistente da rc=4 -> REPROVADO.
+    - banco compartilhado pelas duas colunas: residuo da vermelha pode tingir a
+      verde -> REPROVADO (fecha, nao mente).
+    - alvo de `--testes` que o pytest EXPANDE e mesmo assim termina em `.py`: a
+      guarda abaixo so olha o NOME, entao um diretorio chamado `pasta.py`, ou um
+      symlink `x.py` -> `tests/`, passa e a coleta varre o que houver dentro —
+      medido nos dois: rc=0 e `APROVADO, prova FORTE` citando teste alheio. E a
+      UNICA celula desta lista que vira APROVADO falso em vez de abortar. Zero
+      alcancavel neste repo: zero diretorios com nome terminado em `.py` e zero
+      symlinks rastreados (modo 120000) na arvore. `os.path.isfile` seria pior:
+      a guarda roda ANTES de os worktrees existirem, mediria contra o cwd e
+      recusaria alvo que so existe em `--depois` — a fixture historica do Uso.
 """
 from __future__ import annotations
 
@@ -205,21 +232,70 @@ def main() -> int:
     # o comportamento antigo. Hoje `tests/` nao tem fixture de dados nenhuma (os
     # 12 nao-`.py` sao `.test.mjs`, que o pytest ignora), entao isto e guarda
     # contra a convencao que ainda nao existe, ao custo de copiar arquivo inerte.
-    mudados = git("diff", "--name-only", "--diff-filter=AMR", antes, depois, "--", "tests/").splitlines()
-    # A guarda e os alvos continuam presos ao `.py`: um `.test.mjs` sozinho nao da
-    # o que provar aqui, e alvo vazio faria o `pytest -q` rodar a SUITE INTEIRA.
+    # `-z` porque o `core.quotePath` (padrao `true`) devolve nome nao-ASCII entre
+    # aspas e com escape octal — medido: `"tests/test_transfer\303\252ncia.py"`.
+    # Sozinho, esse nome nao passa no `endswith(".py")` e o gate abortava com
+    # "nenhum teste .py mudou", mensagem FALSA; junto de outro `.py`, dava
+    # `FileNotFoundError` no copyfile. O `-z` entrega o byte cru. O `git()` faz
+    # `.strip()`, que NAO remove `\0` — dai o `if p`, que descarta o vazio final.
+    mudados = [p for p in git("diff", "--name-only", "-z", "--diff-filter=AMR", antes, depois,
+                              "--", "tests/").split("\0") if p]
+    # Os alvos continuam presos ao `.py`: um `.test.mjs` sozinho nao da o que
+    # provar aqui.
     py_mudados = [p for p in mudados if p.endswith(".py")]
-    if not py_mudados:
-        sys.exit(f"[coluna-dupla] nenhum teste .py mudou entre {antes[:8]} e {depois[:8]}. Nada a provar.")
     # O conftest carrega as chaves de PII e o skip de dependencia ausente; sem
     # a versao nova dele, a coluna antiga pode falhar por ambiente, nao por bug.
     if "tests/conftest.py" not in mudados:
         mudados.append("tests/conftest.py")
-    alvos = a.testes or [p for p in py_mudados if p != "tests/conftest.py"]
+    # O criterio e "alvo que aponta para UM arquivo `.py`" — nao "elemento truthy"
+    # nem "lista nao vazia". Duas entradas passavam e mandavam o pytest coletar a
+    # arvore INTEIRA, que e o bug que a guarda abaixo declara fechado: `--testes ""`
+    # (wrapper com `--testes "$VAR"` e `$VAR` vazia) dava `alvos == [""]`, e
+    # `--testes tests/` — o atalho humano, e o que um `$(dirname "$ARQ")` produz —
+    # dava um DIRETORIO; medido nos dois: rc=0 e `APROVADO, prova FORTE` citando um
+    # `test_alheio` que nada tem com a mudanca. Os dois casos NAO sao o mesmo: vazio
+    # e ausencia, cai fora aqui e o resto segue (`--testes "" tests/test_x.py` mantem
+    # o alvo); nao-`.py` e intencao errada e ABORTA logo abaixo, com o nome do alvo.
+    alvos = [t for t in a.testes if t] or [p for p in py_mudados if p != "tests/conftest.py"]
+    # Uma guarda so, no ALVO — nao no que mudou. No caminho PADRAO `py_mudados`
+    # vazio implica `alvos` vazio, entao ali a guarda antiga (`if not py_mudados`)
+    # virou subconjunto desta; o que ela nao pegava e o conftest mudando SOZINHO,
+    # que dava `alvos == []` e mandava o `pytest -q` rodar a SUITE INTEIRA.
+    # Com `--testes` NAO e subconjunto: o gate mudou de comportamento de proposito.
+    # A guarda antiga abortava ("nenhum teste .py mudou") sempre que o diff nao
+    # tocava teste, o que matava a escotilha justamente quando ela serve; hoje o
+    # alvo explicito e provado. Medido num diff sem teste nenhum, com `--testes`
+    # de um teste pre-existente: `f7a4daf` abortava, hoje sai APROVADO/FORTE.
+    if not alvos:
+        sys.exit(f"[coluna-dupla] nenhum teste .py alem do conftest mudou entre {antes[:8]} e {depois[:8]}.\n"
+                 "                Nada a provar — e sem alvo o `pytest -q` roda a SUITE INTEIRA, onde o\n"
+                 "                vermelho de qualquer teste alheio viraria 'prova'. Ou passe --testes.")
 
-    py = a.python or os.path.join(raiz_principal(), ".venv", "bin", "python")
-    if not os.path.exists(py):
+    # Descartar o alvo ruim em silencio seria pior que recusar: pelo `or`, o gate
+    # passaria a provar OUTRO conjunto (o padrao) sem o operador pedir. O `split`
+    # aceita node id, que e alvo legitimo e carrega `::` — `tests/x.py::test_y` e
+    # `tests/x.py::Classe::test_y` valem, quem decide e o arquivo antes do `::`.
+    mau = next((t for t in alvos if not t.split("::", 1)[0].endswith(".py")), None)
+    if mau is not None:
+        sys.exit(f"[coluna-dupla] --testes {mau!r} nao aponta para um arquivo de teste .py.\n"
+                 "                Esta guarda so checa o NOME (ver os limites no topo do arquivo): um\n"
+                 "                diretorio como `tests/` faz a coleta varrer a ARVORE INTEIRA, onde o\n"
+                 "                vermelho de um teste alheio viraria 'prova'.\n"
+                 "                Passe o arquivo (`tests/test_x.py`) ou o node id (`tests/x.py::test_y`).")
+
+    # `shutil.which` cobre as duas formas de `--python` numa chamada: nome no PATH
+    # (`python3`) e caminho (relativo ou absoluto), e exige X_OK — o
+    # `os.path.exists` de antes aceitava arquivo sem bit de execucao. O fallback
+    # silencioso para o `sys.executable` fica SO no padrao, que ja e impresso;
+    # `--python` que nao resolve aborta em vez de rodar outro interpretador calado.
+    # `abspath`, nao `realpath`: o cwd do subprocesso e o worktree, entao o caminho
+    # PRECISA ser absoluto — e o abspath mantem legivel o que o operador escreveu.
+    py = shutil.which(a.python or os.path.join(raiz_principal(), ".venv", "bin", "python"))
+    if not py:
+        if a.python:
+            sys.exit(f"[coluna-dupla] --python {a.python!r}: nao e executavel nem como caminho nem como nome no PATH.")
         py = sys.executable
+    py = os.path.abspath(py)
 
     tmp = tempfile.mkdtemp(prefix="coluna-dupla-")
     wt_antes, wt_depois = os.path.join(tmp, "antes"), os.path.join(tmp, "depois")
@@ -231,9 +307,18 @@ def main() -> int:
         git("worktree", "add", "--detach", "--quiet", wt_depois, depois)
 
         for rel in mudados:
-            dst = os.path.join(wt_antes, rel)
+            src, dst = os.path.join(wt_depois, rel), os.path.join(wt_antes, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copyfile(os.path.join(wt_depois, rel), dst)
+            # `copyfile` NAO leva o modo, e o destino herda o do arquivo antigo:
+            # um teste que ganhou bit de execucao (ou um conftest que perdeu o de
+            # leitura) rodava na coluna antiga com a permissao errada. `copymode`
+            # depois da copia resolve, e SEM `shutil.copy`: ele tem um ramo
+            # `if os.path.isdir(dst)` que passaria a copiar PARA DENTRO do
+            # diretorio, em silencio, na celula diretorio->arquivo — trocaria um
+            # `IsADirectoryError` que fecha por um overlay errado que pode virar
+            # FORTE falso.
+            shutil.copyfile(src, dst)
+            shutil.copymode(src, dst)
 
         print(f"[coluna-dupla] antes  = {antes}")
         print(f"[coluna-dupla] depois = {depois}")
