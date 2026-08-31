@@ -6,43 +6,10 @@ from __future__ import annotations
 import logging
 
 import db
+from core.observability import _log_falha
 from utils_text import fmt_brl
 
 logger = logging.getLogger(__name__)
-
-
-def _log_falha(op: str, user_id: int, e: Exception, *,
-               nivel: int = logging.ERROR, **extra) -> None:
-    """Causa no log, nunca na mensagem: `str(e)` do psycopg pode trazer o valor
-    e a descrição da linha (`DETAIL: Key (…)=(…)`). Nome do tipo + sqlstate já
-    separam conexão (08006), deadlock (40P01), permissão (42501) e bug de
-    código. Sem `exc_info` pelo mesmo motivo.
-
-    Helper ÚNICO das três portas (esta, `core/handlers/credit.py` e
-    `core/services/ai_chat/tools/launches.py`): duas cópias com níveis
-    diferentes faziam a MESMA condição contar como erro numa porta e não na
-    outra. O nível importa fora do log — `_DashboardHandler`
-    (`core/observability.py`) espelha WARNING e ERROR em `system_event_logs`
-    com `level=levelname.lower()`, e `core/admin_dashboard.py` conta
-    `backend_errors_24h WHERE level='error'`.
-
-    `nivel` segue a MESMA distinção dos `except` daqui, não outra:
-      - condição de domínio ESPERADA (`LaunchNoEffects`,
-        `InvestmentLotHasWithdrawal`) → `logging.WARNING`. Inflar o contador de
-        erros do admin com aporte que teve resgate é ruído, não incidente.
-      - falha técnica/inesperada (`except Exception`, `ValueError` sem código
-        conhecido) → `logging.ERROR`, que é o default: quem esquecer de
-        classificar erra para o lado barulhento, não para o lado silencioso.
-
-    `nivel` é keyword-only por isso não colide com `**extra`; um campo extra
-    chamado "nivel" seria engolido (nenhum call site usa).
-    """
-    logger.log(
-        nivel,
-        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
-        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
-        type(e).__name__, getattr(e, "sqlstate", None),
-    )
 
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
@@ -220,6 +187,17 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                 f"precisaria ser revertido, então mantive ele intacto pra não "
                 f"bagunçar seu saldo."
             )
+        except db.LaunchUnsafeRollback as e:
+            # `efeitos` existe, mas não dá pra revertê-lo POR INTEIRO (chave de
+            # escritor novo, `{}` degenerado, lote de caixinha que o
+            # `_sync_pocket_from_lots` ressuscita). PERMANENTE também: "é
+            # antigo" seria falso (o dado está inteiro) e retry não destrava.
+            _log_falha("delete_launch_inseguro", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"⚠️ Não consigo reverter o lançamento **#{display_id}** com "
+                f"segurança, então mantive ele intacto pra não bagunçar seu saldo."
+            )
         except db.InvestmentLotHasWithdrawal as e:
             # TEMPORÁRIA, e é a única aqui que tem contorno: apagar o resgate
             # reabre o lote. "Tenta de novo em alguns minutos" seria falso (o
@@ -250,13 +228,14 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
-            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal) as e:
-                # MESMA função e MESMAS condições de domínio do delete_launch
-                # singular (`:211` e `:223`) — sem este ramo, "apaga #2, #5 e #7"
-                # com um lançamento antigo no meio contava como incidente em
-                # `backend_errors_24h` e "apaga #2" sozinho não contava.
+            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal,
+                    db.LaunchUnsafeRollback) as e:
+                # MESMA função e MESMAS condições de domínio dos três `except`
+                # do delete_launch singular acima — sem este ramo, "apaga #2, #5
+                # e #7" com um lançamento antigo no meio contava como incidente
+                # em `backend_errors_24h` e "apaga #2" sozinho não contava.
                 # A mensagem ao usuário não muda: no bulk é "⚠️ Falha: #N" pras
-                # duas, e ela não promete retry.
+                # três, e ela não promete retry.
                 failed.append(lid)
                 _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
                            launch_id=lid, user_seq=_disp(lid))

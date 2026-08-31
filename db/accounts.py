@@ -247,12 +247,13 @@ class LaunchDateLockedError(ValueError):
     """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
 
 
-# As duas condições PERMANENTES de `delete_launch_and_rollback` que o usuário
-# precisa distinguir. São `ValueError` por tipo, não por código, porque o texto
-# em PT-BR é user-facing por um caminho: o `HTTPException(400, detail=str(exc))`
-# do dashboard (`frontend/finance_bot_websocket_custom.py`). Trocar por código
-# faria o modal do app mostrar `LAUNCH_NO_EFFECTS` cru; discriminar pelo tipo
-# mantém `str(e)` byte a byte igual.
+# As condições PERMANENTES de `delete_launch_and_rollback` que o usuário precisa
+# distinguir. São `ValueError` por tipo, não por código, porque quem discrimina
+# é o TIPO em cada porta (WhatsApp, /ai/chat, dashboard) — e cada porta escreve
+# a própria frase. O `str(exc)` NÃO é mais user-facing: o dashboard mandava
+# `HTTPException(400, detail=str(exc))` e o modal do app mostrava "lançamento
+# sem 'efeitos'" cru; hoje ele mapeia tipo → frase (`_MSG_DELETE_LAUNCH`,
+# `frontend/finance_bot_websocket_custom.py`).
 #
 # Os outros `ValueError` da função (delta_pocket/delta_invest sem nome, dado
 # corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma causa
@@ -265,6 +266,36 @@ class LaunchNoEffects(ValueError):
 
 class InvestmentLotHasWithdrawal(ValueError):
     """O lote do aporte já teve resgate. TEMPORÁRIA: apagar o resgate destrava."""
+
+    motivo = "lote_com_resgate"
+
+
+class LaunchUnsafeRollback(ValueError):
+    """`efeitos` existe mas esta função não sabe revertê-lo POR INTEIRO: chave
+    fora da allowlist, `efeitos` degenerado (sem `delta_conta`), ou — só no
+    "apagar tudo" — efeito de caixinha/investimento, que está fora do escopo
+    daquele comando. Falha FECHADA: mantém a linha em vez de apagar dinheiro
+    em silêncio.
+
+    `motivo` é um CÓDIGO CURTO ENUMERADO, escolhido no `raise` — nunca
+    derivado da mensagem, que é texto livre e pode passar a carregar dado do
+    cliente. Sem ele o log de `delete_all_launches` colapsava as recusas num
+    `causa=LaunchUnsafeRollback` só, e a comum (`lote_ausente`, lote gravado
+    antes de `79bd52f`, que dispara em todo depósito de caixinha antigo) ficava
+    indistinguível da rara e grave (`chave_desconhecida`, escritor novo
+    gravando efeito que ninguém sabe reverter). Os quatro valores:
+
+      - `sem_delta_conta`     — `efeitos` sem a chave (degenerado, ex.: `{}`)
+      - `chave_desconhecida`  — chave fora de `_EFEITOS_REVERSIVEIS`
+      - `lote_ausente`        — `delta_pocket`/`delta_invest` sem a chave do lote
+      - `fora_do_escopo`      — caixinha/investimento no "apagar tudo"
+
+    Obrigatório no construtor de propósito: `raise` novo tem de escolher um
+    código, em vez de herdar um genérico em silêncio."""
+
+    def __init__(self, mensagem: str, motivo: str):
+        super().__init__(mensagem)
+        self.motivo = motivo
 
 
 def update_launch_fields(
@@ -1027,10 +1058,94 @@ def get_top_expense_categories(
 # Desfazer lançamento
 # ──────────────────────────────────────────────────────────────────────────────
 
-def delete_launch_and_rollback(user_id: int, launch_id: int):
+# Chaves de `efeitos` que `delete_launch_and_rollback` sabe tratar: as que ela
+# reverte + as informativas (nada a reverter). ALLOWLIST, não denylist: chave
+# nova de escritor novo faz o delete falhar FECHADO (mantém a linha) em vez de
+# apagar dinheiro em silêncio. `tests/test_efeitos_allowlist.py` varre os
+# escritores com `ast` e reprova chave não classificada aqui — o ALCANCE da
+# varredura e as cegueiras dela estão na docstring do teste, não repetidos aqui.
+_EFEITOS_REVERSIVEIS = frozenset({
+    # revertidas por esta função
+    "delta_conta", "bill_id", "paid_amount_added",
+    "create_pocket", "create_investment", "delete_pocket", "delete_investment",
+    "delta_pocket", "delta_invest",
+    "investment_lot_create", "investment_lot_withdrawals",
+    # informativas: ficam só no histórico, não há efeito a desfazer
+    "funding_source", "tax_summary", "investment_meta",
+    "ofx", "open_finance", "time_known",
+})
+
+# Classificadas e DE FORA da allowlist de propósito: são gravadas
+# (`db/pockets.py`, depósito e saque de caixinha) e NUNCA revertidas. Apagar um
+# `deposito_caixinha` reverte `pockets.balance` pelo `delta_pocket`, mas a linha
+# em `pocket_lots` fica — e `_sync_pocket_from_lots` (`db/pockets.py`) recalcula
+# `balance = sum(pocket_lots.balance)` no próximo depósito/saque/accrual, então
+# o dinheiro desfeito VOLTA. Enquanto a reversão do lote não existir, apagar
+# depósito/saque de caixinha RECUSA em todas as portas — mudança de
+# comportamento visível e desejada.
+#
+# Lida só pelo teste da allowlist (`tests/test_efeitos_allowlist.py`): a recusa
+# em produção vem do `desconhecidas` (não estão em `_EFEITOS_REVERSIVEIS`), não
+# desta constante. Ela existe pra separar "fora da allowlist DE PROPÓSITO" de
+# "chave nova que ninguém classificou" — sem isso a varredura reprovaria as duas.
+_EFEITOS_SEM_REVERSAO = frozenset({"pocket_lot_create", "pocket_lot_withdrawals"})
+
+# `delta_pocket`/`delta_invest` mexem em saldo de LOTE, e a reversão do saldo
+# agregado (`pockets.balance`/`investments.balance`) só está completa quando a
+# função também sabe QUAL lote desfazer. Cada delta é pareado com as chaves que
+# nomeiam o lote; delta != 0 sem nenhuma delas é linha LEGADA (gravada antes de
+# `79bd52f`, 16/05/2026, quando os lotes passaram a ser registrados no `efeitos`).
+# Legada não quer dizer sem lote: `_ensure_pocket_lots` (`db/pockets.py`) e
+# `_ensure_investment_lots` (`db/investments.py`) fazem backfill preguiçoso e
+# criam um lote com o saldo inteiro no primeiro movimento posterior. Reverter só
+# o agregado deixa o lote de pé, e o `_sync_*_from_lots` traz o dinheiro
+# desfeito de volta no movimento seguinte — o mesmo estrago do `pocket_lot_*`,
+# sem a chave que o denunciava.
+_DELTA_EXIGE_LOTE = (
+    ("delta_pocket", ("pocket_lot_create", "pocket_lot_withdrawals")),
+    ("delta_invest", ("investment_lot_create", "investment_lot_withdrawals")),
+)
+
+# Efeitos que o "apagar tudo" não pode tocar: a mensagem promete "suas caixinhas
+# e investimentos NÃO são afetados". Guarda de ESCOPO, não de segurança — o
+# delete de UM lançamento continua podendo desfazer um "criar caixinha", que é
+# reversível. É a guarda EXPLÍCITA que faltava: o filtro por `tipo`
+# (`_CONTA_CORRENTE_LAUNCH_FILTER`) protege isso só por tabela, e um `tipo`
+# reescrito o fura.
+_EFEITOS_FORA_DO_APAGAR_TUDO = (
+    "create_pocket", "create_investment", "delete_pocket", "delete_investment",
+    "delta_pocket", "delta_invest",
+)
+
+
+def delete_launch_and_rollback(user_id: int, launch_id: int, *,
+                              escopo_conta_corrente: bool = False):
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
+
+    Recusa (sem tocar em saldo) o que não sabe reverter por inteiro:
+    `LaunchNoEffects` sem `efeitos`, `LaunchUnsafeRollback` com `efeitos`
+    degenerado, com chave fora de `_EFEITOS_REVERSIVEIS` ou com delta de lote
+    sem a chave que nomeia o lote (`_DELTA_EXIGE_LOTE`).
+
+    `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
+    o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
+
+    QUEM CHAMA — são OITO pontos, não as 4 portas de usuário. A recusa chega ao
+    usuário como frase de produto em cinco deles e como SILÊNCIO em três:
+      - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
+      - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
+      - `frontend/finance_bot_websocket_custom.py:5470` (DELETE /launches);
+      - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
+      - `db/open_finance.py:43`, `:1329` e `:1418` — os três dentro de
+        `except Exception: pass`. Ali uma recusa não vira mensagem nem log: o
+        lançamento duplicado do Open Finance sobrevive à reconciliação e o saldo
+        conta duas vezes, calado. HOJE inalcançável (as chaves que o importador
+        do OF grava estão todas em `_EFEITOS_REVERSIVEIS`, e ele não grava delta
+        de lote), mas qualquer chave nova de OF vira perda silenciosa antes de
+        virar recusa visível. Os `except` de lá são o próximo conserto, não este.
+    (`adapters/discord/` também chama; o adaptador está morto e fora do escopo.)
     """
     ensure_user(user_id)
 
@@ -1040,8 +1155,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
             # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
             # `delete` da segunda casa zero linhas sem levantar — o dinheiro
             # sai em dobro. Com ele, quem perde relê depois do commit do
-            # vencedor, não acha a linha e levanta LookupError("NOT_FOUND"),
-            # que todos os chamadores já tratam.
+            # vencedor, não acha a linha e levanta LookupError("NOT_FOUND").
+            # Os chamadores de UM lançamento tratam isso como 404/"não achei";
+            # o `delete_all_launches_and_rollback` (abaixo) NÃO — a linha que
+            # sumiu por outra porta cai no `except Exception` dele e o usuário
+            # lê "erro técnico, continua aí" sobre algo que já não existe. É o
+            # comportamento da `main` também; o balde que falta é outro PR.
             cur.execute(
                 "select id, tipo, valor, alvo, efeitos from launches "
                 "where id=%s and user_id=%s for update",
@@ -1052,13 +1171,64 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                 raise LookupError("NOT_FOUND")
 
             efeitos = row.get("efeitos")
-            if efeitos is None:
+            if isinstance(efeitos, str):
+                try:
+                    efeitos = json.loads(efeitos)
+                except ValueError:
+                    efeitos = None
+            # jsonb aceita lista, escalar e string: `not isinstance(dict)` cobre
+            # o `null` de hoje e os degenerados no mesmo ramo.
+            if not isinstance(efeitos, dict):
                 raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
-            if isinstance(efeitos, str):
-                efeitos = json.loads(efeitos)
-
+            # Daqui pra baixo NENHUM `update` ainda rodou — as recusas são antes
+            # de mexer em saldo, de propósito.
+            #
+            # Presença de chave, não valor: os escritores gravam `delta_conta`
+            # explicitamente, inclusive os que legitimamente gravam 0
+            # (open_finance, criar_caixinha). `efeitos = '{}'::jsonb` NÃO é
+            # `null`, então não cai em LaunchNoEffects, e `.get("delta_conta", 0)`
+            # devolvia 0: a linha era apagada e o dinheiro não voltava.
+            if "delta_conta" not in efeitos:
+                raise LaunchUnsafeRollback(
+                    "lançamento com 'efeitos' incompleto (sem delta_conta).",
+                    "sem_delta_conta",
+                )
+            desconhecidas = set(efeitos) - _EFEITOS_REVERSIVEIS
+            if desconhecidas:
+                raise LaunchUnsafeRollback(
+                    f"efeitos que não sei reverter: {sorted(desconhecidas)}",
+                    "chave_desconhecida",
+                )
             delta_conta = Decimal(str(efeitos.get("delta_conta", 0)))
+            # `delta == 0` NÃO entra: `create_investment` (`db/investments.py`)
+            # grava `delta_invest` com delta 0 num investimento que ainda não
+            # tem lote nenhum, e continua apagável. Mas só quando o lançamento
+            # não move a conta TAMBÉM: `delta` 0 com `delta_conta` -300 é
+            # dinheiro saindo da conta pra um lote que a reversão não desfaz —
+            # o saldo volta e o lote fica, criando 300. Não alcançável hoje (o
+            # único escritor de delta 0 grava `delta_conta` 0), fechado de
+            # graça porque ele continua apagável.
+            for delta_key, lot_keys in _DELTA_EXIGE_LOTE:
+                delta_val = efeitos.get(delta_key)
+                if not isinstance(delta_val, dict):
+                    continue
+                if Decimal(str(delta_val.get("delta") or 0)) == 0 and delta_conta == 0:
+                    continue
+                if not any(efeitos.get(k) for k in lot_keys):
+                    raise LaunchUnsafeRollback(
+                        f"'{delta_key}' sem chave de lote (lançamento legado): "
+                        f"a reversão não desfaz o lote.",
+                        "lote_ausente",
+                    )
+            if escopo_conta_corrente and any(
+                efeitos.get(k) is not None for k in _EFEITOS_FORA_DO_APAGAR_TUDO
+            ):
+                raise LaunchUnsafeRollback(
+                    "lançamento mexe em caixinha/investimento — fora do 'apagar tudo'.",
+                    "fora_do_escopo",
+                )
+
             delta_pocket = efeitos.get("delta_pocket")
             delta_invest = efeitos.get("delta_invest")
             create_pocket = efeitos.get("create_pocket")
@@ -1338,15 +1508,26 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "kept_no_effects": [...], "errors": [...],
-    "remaining": M | None}, com os ids em `user_seq` (o "#N" que o usuário vê).
+    Retorna {"deleted": N, "kept_no_effects": [...], "kept_unsafe": [...],
+    "errors": [...], "remaining": M | None}, com os ids em `user_seq` (o "#N"
+    que o usuário vê).
 
-    As duas listas são causas DIFERENTES e a mensagem ao usuário precisa
-    distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos` (não
-    dá pra reverter com segurança — mantidos intactos de propósito, em vez de
-    apagados às cegas); `errors` é falha técnica inesperada (conexão, deadlock,
-    permissão, bug). O `failed` único de antes dizia "lançamento antigo" para
-    um banco caído.
+    As três listas são causas DIFERENTES e a mensagem ao usuário precisa
+    distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos`;
+    `kept_unsafe` tem `efeitos`, mas não dá pra revertê-lo por inteiro
+    (degenerado, chave desconhecida, lote ausente, ou fora do escopo do
+    "apagar tudo") — a sub-causa vai pro LOG como um CÓDIGO ENUMERADO
+    (`motivo=`, atributo da exceção; nunca a mensagem dela), não pro usuário,
+    que não pode agir sobre ela;
+    `errors` é falha técnica inesperada (conexão, deadlock, permissão, bug). O
+    `failed` único de antes dizia "lançamento antigo" para um banco caído.
+
+    A classificação é do `delete_launch_and_rollback`, não daqui: separar
+    `efeitos is null` ANTES do loop mantinha a MESMA regra em dois lugares que
+    podiam divergir — e divergiram (o `{}` moderno passava aqui e era apagado
+    lá dentro com delta 0). Custo de colapsar: um lançamento sem `efeitos` abre
+    e aborta uma transação. Com exceções tipadas, a mensagem ao usuário não
+    depende de string-sniffing de jeito nenhum.
 
     `remaining` é uma RECONTAGEM depois do loop: é a única checagem que pega o
     caso em que o delete casou zero linhas e ninguém levantou. É uma
@@ -1359,29 +1540,47 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, user_seq, efeitos from launches "
+                "select id, user_seq from launches "
                 f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER} "
                 "order by id desc",
                 (user_id,),
             )
             rows = cur.fetchall()
 
-    # Falha PREVISTA, separada antes do loop: sem `efeitos` o
-    # delete_launch_and_rollback levantaria ValueError de qualquer jeito, então
-    # o comportamento é idêntico — e a mensagem ao usuário deixa de depender de
-    # string-sniffing do texto da exceção.
-    def _seq(r):
-        return r["user_seq"] or r["id"]
-
-    kept_no_effects = [_seq(r) for r in rows if r["efeitos"] is None]
-    apagaveis = [(r["id"], _seq(r)) for r in rows if r["efeitos"] is not None]
+    candidatos = [(r["id"], r["user_seq"] or r["id"]) for r in rows]
 
     deleted = 0
+    kept_no_effects: list = []
+    kept_unsafe: list = []
     errors: list = []
-    for lid, seq in apagaveis:
+    for lid, seq in candidatos:
         try:
-            delete_launch_and_rollback(user_id, lid)
+            delete_launch_and_rollback(user_id, lid, escopo_conta_corrente=True)
             deleted += 1
+        except LaunchNoEffects:
+            kept_no_effects.append(seq)
+        except (LaunchUnsafeRollback, InvestmentLotHasWithdrawal) as e:
+            # Condição de DOMÍNIO, não incidente: warning (o `_DashboardHandler`
+            # espelha ERROR em `backend_errors_24h`). O usuário lê uma frase só,
+            # porque não pode agir na diferença entre "chave desconhecida" e
+            # "efeitos degenerado".
+            # Sem `str(e)`, igual aos outros logs deste arquivo: hoje as
+            # mensagens destas exceções são texto nosso, mas nada prende essa
+            # invariante — um `raise LaunchUnsafeRollback(f"... {row[...]}")`
+            # amanhã persistiria dado do cliente em `system_event_logs`, e a
+            # guarda por `ast` só olha `com_traceback`. Qual das 5 recusas
+            # disparou vem no `motivo=`: CÓDIGO CURTO ENUMERADO que nasce no
+            # `raise` (atributo da exceção), nunca inferido da mensagem. Sem
+            # ele as cinco colapsavam num `causa=LaunchUnsafeRollback` só e a
+            # comum (`lote_ausente`) ficava igual à rara e grave
+            # (`chave_desconhecida`). Os valores estão na docstring de
+            # `LaunchUnsafeRollback`; `InvestmentLotHasWithdrawal` traz o dela
+            # como atributo de classe.
+            kept_unsafe.append(seq)
+            logger.warning(
+                "delete_all_launches: mantido sem reverter user_id=%s launch_id=%s user_seq=%s causa=%s motivo=%s",
+                user_id, lid, seq, type(e).__name__, e.motivo,
+            )
         except Exception as e:
             errors.append(seq)
             # Sem str(e) e sem exc_info: o texto do psycopg pode trazer o valor
@@ -1407,6 +1606,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     return {
         "deleted": deleted,
         "kept_no_effects": kept_no_effects,
+        "kept_unsafe": kept_unsafe,
         "errors": errors,
         "remaining": remaining,
     }
