@@ -30,6 +30,13 @@ import vm from "node:vm";
 const SW = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "service-worker.js");
 const ORIGEM = "https://pigbankai.com";
 
+// A versão que este arquivo assume ser o cache ATUAL. Um número só, num lugar
+// só: bumpar o CACHE_NAME sem mexer aqui derruba o teste da declaração, logo
+// abaixo. Antes havia um piso (`>= 9`) que precisava ser levantado à mão e
+// deixava de significar "não regrediu" no bump seguinte — número fixo que
+// envelhece em silêncio é o que o CLAUDE.md §2 manda não escrever.
+const VERSAO_ATUAL = 9;
+
 /**
  * Roda o service-worker.js num contexto falso e devolve o que precisamos:
  * o `podeCachear`, os handlers registrados e o CACHE_NAME.
@@ -155,22 +162,36 @@ test("o CDN saiu do PRECACHE — addAll rejeita inteiro se um item falhar", () =
   assert.ok(!bloco.includes("cdnjs"), "o CDN voltou pro PRECACHE: a queda dele impede a instalação do worker");
 });
 
-test("CACHE_NAME subiu — é o que apaga do aparelho o que a versão anterior guardou", () => {
+test("CACHE_NAME tem UMA declaração e é a versão que este arquivo assume", () => {
   // Lido do FONTE: `const` no `vm.runInContext` fica no escopo léxico e não
   // vira propriedade do contexto (a `function podeCachear` vira, por ser
-  // declaração de função). Sem o bump, a allowlist só impede gravação nova e o
-  // dado privado que o v8 guardou continua no aparelho.
+  // declaração de função).
+  //
+  // ANCORADA em início de linha, e `matchAll` no lugar de `.match()`: sem as
+  // duas coisas a regex casava declaração COMENTADA (`// const CACHE_NAME =
+  // "pigbank-v8";`) e, como `.match()` devolve a PRIMEIRA ocorrência, uma linha
+  // morta acima da viva fazia o teste ler o valor errado sem reclamar.
+  //
+  // A tolerância de espaçamento é a MESMA do gate de CI (`.github/workflows/
+  // tests.yml`), para os dois não divergirem em silêncio. Sobra de propósito uma
+  // diferença: aqui o esquema `pigbank-vN` é exigido, lá não — lá exigir esquema
+  // travaria o repositório no dia em que o esquema mudasse.
+  //
+  // Que a versão AVANCE quem prova é aquele gate, a cada PR, contra a base de
+  // verdade. Aqui só se prova que ela é UMA, legível, e a que os outros testes
+  // deste arquivo assumem.
   const fonte = readFileSync(SW, "utf-8");
-  const m = fonte.match(/const CACHE_NAME = "(pigbank-v\d+)"/);
-  assert.ok(m, "CACHE_NAME sumiu ou mudou de forma");
-  assert.ok(Number(m[1].replace("pigbank-v", "")) >= 9,
-            `CACHE_NAME precisa passar de v8 para apagar o cache antigo, veio ${m[1]}`);
+  const achados = [...fonte.matchAll(/^[ \t]*const[ \t]+CACHE_NAME[ \t]*=[ \t]*"(pigbank-v\d+)"/gm)];
+  assert.equal(achados.length, 1,
+               `esperava UMA declaração 'const CACHE_NAME = "pigbank-vN"' em início de linha no service-worker.js, achei ${achados.length}`);
+  assert.equal(achados[0][1], `pigbank-v${VERSAO_ATUAL}`,
+               `o CACHE_NAME é ${achados[0][1]} e este arquivo assume pigbank-v${VERSAO_ATUAL}: bumpou o worker, atualize o VERSAO_ATUAL junto`);
 });
 
 test("o activate apaga todo cache de nome diferente", async () => {
   const apagados = [];
   const { ctx, handlers } = carregaSW();
-  ctx.caches.keys = async () => ["pigbank-v7", "pigbank-v8", "pigbank-v9"];
+  ctx.caches.keys = async () => ["pigbank-v7", "pigbank-v8", `pigbank-v${VERSAO_ATUAL}`];
   ctx.caches.delete = async (k) => { apagados.push(k); return true; };
 
   let pendente;
