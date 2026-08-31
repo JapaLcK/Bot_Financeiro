@@ -35,7 +35,7 @@ const ORIGEM = "https://pigbankai.com";
 // abaixo. Antes havia um piso (`>= 9`) que precisava ser levantado à mão e
 // deixava de significar "não regrediu" no bump seguinte — número fixo que
 // envelhece em silêncio é o que o CLAUDE.md §2 manda não escrever.
-const VERSAO_ATUAL = 9;
+const VERSAO_ATUAL = 6;
 
 /**
  * Roda o service-worker.js num contexto falso e devolve o que precisamos:
