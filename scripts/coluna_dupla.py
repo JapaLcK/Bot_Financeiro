@@ -42,27 +42,12 @@ corridas internas do gate perde isso — de proposito: opcao herdada muda QUANTO
 testes rodam, e um ALVO posto ali entrava antes do `--` e virava prova falsa.
 
 Limites conhecidos, medidos e DECLARADOS: quase todos abortam ou reprovam. Os
-TRES que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
-(acidente), o teste que le o proprio `sys.argv` (ator deliberado) e o arquivo de
-apoio apagado que o overlay nao remove (a primeira celula); um QUARTO, de
-categoria DIFERENTE, APROVA com o veredito certo e a NOTA inflada (a ultima
+DOIS que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
+(acidente) e o teste que le o proprio `sys.argv` (ator deliberado); um TERCEIRO,
+de categoria DIFERENTE, APROVA com o veredito certo e a NOTA inflada (a ultima
 celula) — a lista nao esta em ordem de gravidade, entao eles vao nomeados. Nao
 valem conserto enquanto nao aparecerem:
-    - teste apagado (`D`) nao entra no overlay nem nos alvos, logo nunca roda
-      (3 na historia de `tests/`, os tres `.py`); `D` do proprio conftest da
-      FileNotFoundError. E o overlay COPIA, nunca REMOVE: um arquivo de APOIO
-      apagado entre as colunas PERMANECE na antiga, e se o teste alterado depende
-      da AUSENCIA dele, o vermelho de la vem do arquivo obsoleto e NAO do codigo
-      de producao -> `APROVADO, prova FORTE` sem regressao nenhuma exercitada.
-      E uma das celulas que viram APROVADO falso em vez de abortar — quais e
-      quantas sao, quem diz e o preambulo; a contagem nao se repete aqui. Zero
-      alcancavel neste repo: os 3 `D` da historia sao todos teste, e fixture de
-      dados nunca existiu em `tests/` — todo nao-`.py` que ja passou por la e
-      `.test.mjs` do harness de frontend (12, todos vivos hoje), que o pytest nem
-      coleta. Nao esta consertado por congelamento, nao por impossibilidade: o
-      conserto conhecido e incluir `D` no `--diff-filter` e REMOVER esses caminhos
-      da coluna antiga em vez de copiar — fica para quando aparecer em uso real.
-    - `T` (`.py` virou symlink) some do `--diff-filter=AMR` -> "nada a provar",
+    - `T` (`.py` virou symlink) some do `--diff-filter=AMRD` -> "nada a provar",
       zero na historia; `C` o `git diff` sem `-C` nunca emite (o destino sai `A`);
       `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
     - arquivo <-> diretorio no mesmo caminho: FileExistsError/IsADirectoryError.
@@ -401,12 +386,12 @@ def main() -> int:
                  "                o fix, ou as colunas divergiram e a diferenca entre elas nao e so o fix.\n"
                  "                Para uma correcao ja mergeada, use --antes <base do PR> --depois <merge do PR>.")
 
-    # ── O que copiar: so teste, mas TUDO que mudou sob tests/ ────────────────
+    # ── Overlay: reproduz a arvore corrigida de tests/ sobre o codigo antigo ──
     # A coluna antiga recebe o TESTE novo por cima do CODIGO velho. Nenhum
     # arquivo de producao atravessa — o pathspec `tests/` garante isso.
-    # `R` na lista de filtros: sem ele, um arquivo de teste RENOMEADO junto com o
-    # caso novo some do overlay em silencio — medido, num rename `R096` o
-    # `--diff-filter=AM` devolve VAZIO e o `AMR` devolve o destino.
+    # `R` leva o destino e remove a origem; `D` remove o caminho apagado. Sem a
+    # remocao, arquivo de apoio obsoleto permanecia na coluna antiga e podia ser a
+    # unica causa do vermelho — APROVADO falso sem exercitar producao.
     # E copiamos tudo, nao so `.py`: se o teste novo le uma fixture de dados
     # adicionada junto, sem ela a coluna antiga quebra por arquivo faltando, sai
     # `FAILED`, e o gate carimbaria FORTE tendo medido a ausencia do insumo — nao
@@ -418,15 +403,29 @@ def main() -> int:
     # Sozinho, esse nome nao passa no `endswith(".py")` e o gate abortava com
     # "nenhum teste .py mudou", mensagem FALSA; junto de outro `.py`, dava
     # `FileNotFoundError` no copyfile. O `-z` entrega o byte cru. O `git()` faz
-    # `.strip()`, que NAO remove `\0` — dai o `if p`, que descarta o vazio final.
-    mudados = [p for p in git("diff", "--name-only", "-z", "--diff-filter=AMR", antes, depois,
-                              "--", "tests/").split("\0") if p]
+    # `.strip()`, que NAO remove `\0` — dai o descarte do vazio final.
+    itens = [p for p in git("diff", "--name-status", "-z", "--diff-filter=AMRD",
+                            antes, depois, "--", "tests/").split("\0") if p]
+    mudados, removidos = [], []
+    i = 0
+    while i < len(itens):
+        status = itens[i]
+        i += 1
+        if status.startswith("R"):
+            origem, destino = itens[i], itens[i + 1]
+            i += 2
+            removidos.append(origem)
+            mudados.append(destino)
+        else:
+            caminho = itens[i]
+            i += 1
+            (removidos if status == "D" else mudados).append(caminho)
     # Os alvos continuam presos ao `.py`: um `.test.mjs` sozinho nao da o que
     # provar aqui.
     py_mudados = [p for p in mudados if p.endswith(".py")]
     # O conftest carrega as chaves de PII e o skip de dependencia ausente; sem
     # a versao nova dele, a coluna antiga pode falhar por ambiente, nao por bug.
-    if "tests/conftest.py" not in mudados:
+    if "tests/conftest.py" not in mudados and "tests/conftest.py" not in removidos:
         mudados.append("tests/conftest.py")
     # O criterio e "alvo que aponta para UM arquivo `.py`" — nao "elemento truthy"
     # nem "lista nao vazia". Duas entradas passavam e mandavam o pytest coletar a
@@ -486,6 +485,11 @@ def main() -> int:
         # repositorio inteiro estar limpo, so de ESTA arvore estar.
         git("worktree", "add", "--detach", "--quiet", wt_antes, antes)
         git("worktree", "add", "--detach", "--quiet", wt_depois, depois)
+
+        # Remover antes de copiar tambem cobre rename cujo destino reutiliza uma
+        # arvore antiga. `os.remove` falha fechado em diretorio/tipo inesperado.
+        for rel in removidos:
+            os.remove(os.path.join(wt_antes, rel))
 
         for rel in mudados:
             src, dst = os.path.join(wt_depois, rel), os.path.join(wt_antes, rel)

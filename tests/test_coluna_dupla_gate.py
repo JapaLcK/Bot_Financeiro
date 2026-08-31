@@ -380,6 +380,49 @@ def test_caso_comum_com_fixture_de_dados_aprova_forte(tmp_path):
     assert "assert 0 == 42" in r.stdout  # a fixture atravessou legivel
 
 
+def test_fixture_apagada_some_da_coluna_antiga(tmp_path):
+    """O overlay antigo so copiava A/M/R. Uma fixture apagada permanecia na
+    coluna vermelha; o teste novo falhava por ela existir e o gate aprovava FORTE
+    sem chegar ao comportamento de producao. A causa agora e o valor antigo."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    assert not (pathlib.Path(__file__).parent / "obsoleto.txt").exists()
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/obsoleto.txt": "velho\n"})
+    (lab / "tests" / "obsoleto.txt").unlink()
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_sem_obsoleto.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+    assert "assert not True" not in r.stdout
+
+
+def test_origem_de_fixture_renomeada_some_da_coluna_antiga(tmp_path):
+    """Rename precisa de duas operacoes: copiar o destino e remover a origem.
+    Deixar a origem mede a arvore errada do mesmo modo que um `D` omitido."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    pasta = pathlib.Path(__file__).parent
+    assert not (pasta / "velho.txt").exists()
+    assert (pasta / "novo.txt").read_text() == "dado\\n"
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/velho.txt": "dado\n"})
+    (lab / "tests" / "velho.txt").rename(lab / "tests" / "novo.txt")
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_rename.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+    assert "assert not True" not in r.stdout
+
+
 def test_conftest_sozinho_nao_libera_a_suite_inteira(tmp_path):
     """O conftest e o UNICO `.py` a mudar: `alvos` fica vazio e o `pytest -q` sem
     alvo roda a SUITE INTEIRA. Medido sem a guarda: o `test_alheio` (vermelho no
