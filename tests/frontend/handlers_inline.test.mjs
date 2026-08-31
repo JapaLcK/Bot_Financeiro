@@ -46,9 +46,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Páginas públicas: fingir sessão VÁLIDA manda o login embora para /home. */
 const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos.html"]);
 
-// Aspa dupla, simples, crase — e a ESCAPADA (`onclick=\\"x()\\"`), que é como um .js
-// escreve handler dentro de string ao gerar markup.
-const HANDLER = /\bon[a-z]+\s*=\s*(?:\\?["'`])([^"'`\\]*)/gi;
+// Um grupo POR DELIMITADOR — aspa dupla, simples, crase, e a ESCAPADA
+// (`onclick=\\"x()\\"`, que é como um .js escreve handler dentro de string).
+//
+// Uma classe única com os três cortaria o handler na primeira aspa DE DENTRO:
+// `onclick="foo(${bar('x')})"` viraria `foo(${bar(`, e aí o
+// `semInterpolacao` não teria mais o `}` para casar — a interpolação ficaria, e o
+// `bar` seria cobrado como se fosse ponto de entrada. É o mesmo erro que o extrator
+// de URL do gate de rotas cometeu, pela mesma razão.
+const HANDLER = /\bon[a-z]+\s*=\s*(?:\\"((?:[^"\\]|\\[^"])*)\\"|"([^"]*)"|'([^']*)'|`([^`]*)`)/gi;
 // Handler MONTADO, fora de atributo literal: `{ click: "openUsersModal(event)" }`
 // no admin-dashboard.html e `el.onclick = "..."`. São 10 nomes hoje, todos em
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
@@ -97,7 +103,9 @@ function nomesDe(trechos) {
 }
 
 const trechosDe = (texto) => [
-  ...[...texto.matchAll(HANDLER)].map((m) => m[1]),
+  // `m.slice(1).find(Boolean)`: só um dos quatro grupos casa; os outros vêm
+  // undefined, e um `m[1]` cego pegaria sempre o da aspa escapada.
+  ...[...texto.matchAll(HANDLER)].map((m) => m.slice(1).find(Boolean) || ""),
   ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
 ];
 
