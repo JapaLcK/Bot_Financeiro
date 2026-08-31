@@ -170,8 +170,16 @@ def _rotas():
             f"{sorted(set(descartadas))}. O FastAPI mudou de forma — conserte "
             "_expandir() em vez de deixar o teste medir menos em silêncio."
         )
+        # `APIWebSocketRoute` tem `methods = None`. O fallback ingênuo `or {"GET"}`
+        # fazia `/ws/{user_id}` valer como destino HTTP, e aí um
+        # `<script src="/ws/qualquer-coisa">` passava. Websocket ganha um método que
+        # nenhuma referência HTTP pede.
         _ROTAS = [
-            (r.path, {m.upper() for m in (getattr(r, "methods", None) or {"GET"})}, r.path_regex)
+            (
+                r.path,
+                {m.upper() for m in getattr(r, "methods", None)} if getattr(r, "methods", None) else {"WEBSOCKET"},
+                r.path_regex,
+            )
             for r in achadas
         ]
     return _ROTAS
@@ -284,11 +292,14 @@ def test_toda_referencia_absoluta_tem_ROTA():
     # depois é caminho absoluto, e é o que interessa aqui.
     ORIGEM_NO_COMECO = re.compile(r"^\$\{[A-Za-z_$][\w$]*\}(?=/)")
 
-    def resolve(u: str, metodo: str) -> bool:
+    def resolve(u: str, metodo: str, concatenavel: bool) -> bool:
         u = ORIGEM_NO_COMECO.sub("", u).split("?")[0].split("#")[0]
         if not u.startswith("/") or u.startswith("//"):
             return True
-        base = u.endswith("/") and len(u) > 1
+        # Barra no fim só indica concatenação em CHAMADA — `fetch("/x/" + id)`. Num
+        # atributo, o valor É a URL inteira: `<script src="/fonts/">` é 404, e tratar
+        # a barra como base fazia ele casar `/fonts/{name}` e passar.
+        base = concatenavel and u.endswith("/") and len(u) > 1
         alvo = u.rstrip("/") if base else u
         for caminho, metodos, regex in rotas:
             if metodo is not None and metodo not in metodos:
@@ -314,16 +325,16 @@ def test_toda_referencia_absoluta_tem_ROTA():
         if not p.is_file() or _ignorado(p) or p.suffix.lower() not in {".html", ".css", ".js"}:
             continue
         texto = sem_data_uri.sub('""', p.read_text(errors="replace"))
-        achados = [(m.group(1), "GET") for m in NAVEGA.finditer(texto)]
-        achados += [(m.group(1), "GET") for m in CSS_URL.finditer(texto)]
+        achados = [(m.group(1), "GET", False) for m in NAVEGA.finditer(texto)]
+        achados += [(m.group(1), "GET", False) for m in CSS_URL.finditer(texto)]
         for m in CHAMADA.finditer(texto):
             fim = PROXIMA.search(texto, m.end())
             janela = texto[m.end():min(fim.start() if fim else len(texto), m.end() + 500)]
             met = METODO.search(janela)
-            achados.append((m.group(1), met.group(1).upper() if met else "GET"))
-        for u, metodo in achados:
+            achados.append((m.group(1), met.group(1).upper() if met else "GET", True))
+        for u, metodo, concatenavel in achados:
             u = u.strip()
-            if not resolve(u, metodo):
+            if not resolve(u, metodo, concatenavel):
                 quebradas.append(f"{u} [{metodo or 'qualquer'}] (em {p.relative_to(RAIZ)})")
     assert not quebradas, (
         "referência absoluta que nenhuma rota atende NAQUELE MÉTODO — isto é 404 ou "
