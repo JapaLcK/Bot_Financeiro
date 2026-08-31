@@ -47,6 +47,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos.html"]);
 
 const HANDLER = /\bon[a-z]+\s*=\s*"([^"]*)"/gi;
+// Handler MONTADO, fora de atributo literal: `{ click: "openUsersModal(event)" }`
+// no admin-dashboard.html e `el.onclick = "..."`. São 10 nomes hoje, todos em
+// código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
+// forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
+const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
 const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
 
 /** Nome que o navegador já traz, ou que não é chamada de função do autor. */
@@ -67,14 +72,23 @@ const NATIVO = new Set([
  */
 const semStrings = (s) => s.replace(/'[^']*'/g, "''").replace(/&quot;[^&]*&quot;/g, "");
 
-function nomesChamados(html) {
+function nomesDe(trechos) {
   const nomes = new Set();
-  for (const m of html.matchAll(HANDLER)) {
-    for (const c of semStrings(m[1]).matchAll(CHAMADA)) {
+  for (const t of trechos) {
+    for (const c of semStrings(t).matchAll(CHAMADA)) {
       if (!NATIVO.has(c[1])) nomes.add(c[1]);
     }
   }
-  return [...nomes].sort();
+  return nomes;
+}
+
+/** Do FONTE: atributo literal (inclusive dentro de template string) e handler montado. */
+function nomesChamados(html) {
+  const trechos = [
+    ...[...html.matchAll(HANDLER)].map((m) => m[1]),
+    ...[...html.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
+  ];
+  return [...nomesDe(trechos)].sort();
 }
 
 async function startServer() {
@@ -108,11 +122,19 @@ test("há páginas com handler inline para verificar", () => {
 });
 
 for (const [pagina, nomes] of PAGINAS) {
-  test(`${pagina}: os ${nomes.length} nomes dos handlers inline existem no escopo global`, async () => {
+  test(`${pagina}: todo handler inline resolve no escopo global`, async () => {
     const page = await browser.newPage();
     const autenticado = !SEM_SESSAO.has(pagina);
     // O alvo é o ESCOPO, não a autenticação nem a rede: sem estes stubs a página
     // navega para o login e o teste mediria uma página que nem carregou.
+    //
+    // Os stubs são MÍNIMOS de propósito, e o teto disso está medido: com `{}` em
+    // toda API, o `admin-dashboard.html` renderiza 3 handlers no DOM contra os 27
+    // que o fonte tem — quase tudo dele é gerado a partir de dados. Isso não
+    // enfraquece o teste, porque a lista principal vem do FONTE; a leitura do DOM
+    // é adição. Devolver dados plausíveis por página seria fixture por página, e o
+    // que ela compraria é só a parte que já está coberta pelo outro lado.
+    // (Medido também: com estes stubs, zero erro de página nas três maiores.)
     await page.route("**/auth/**", (r) => r.fulfill({
       status: autenticado ? 200 : 401,
       contentType: "application/json",
@@ -136,16 +158,30 @@ for (const [pagina, nomes] of PAGINAS) {
       const scripts = await page.evaluate(() => document.scripts.length);
       assert.ok(scripts > 0, `${pagina} carregou 0 scripts — nada a medir`);
 
+      // E o que o DOM tiver DEPOIS de renderizar, que o fonte não mostra: handler
+      // posto por script em elemento criado na hora. Só soma — o que não renderizou
+      // com estes stubs mínimos continua coberto pela leitura do fonte.
+      const doDom = await page.evaluate(() => {
+        const out = [];
+        for (const el of document.querySelectorAll("*")) {
+          for (const a of el.attributes) if (/^on[a-z]+$/i.test(a.name)) out.push(a.value);
+        }
+        return out;
+      });
+      const todos = [...new Set([...nomes, ...nomesDe(doDom)])].sort();
+
       // `typeof <nome>`, e não `window[nome]`: const/let no topo de script
       // clássico não viram propriedade de window, mas o handler inline os vê.
       const faltando = await page.evaluate(
         (ns) => ns.filter((n) => {
           try { return new Function(`return typeof ${n}`)() !== "function"; } catch { return true; }
         }),
-        nomes,
+        todos,
       );
       assert.deepEqual(faltando, [],
-        `handler inline de ${pagina} chama nome que não existe no escopo global: ${faltando.join(", ")}. ` +
+        `${pagina}: dos ${todos.length} nomes verificados (${nomes.length} do fonte, ` +
+        `${todos.length - nomes.length} só no DOM), estes não existem no escopo global: ` +
+        `${faltando.join(", ")}. ` +
         "O clique falha em silêncio. Se o script virou módulo ou ganhou IIFE, devolva os nomes ao escopo global.");
     } finally {
       await page.close();
