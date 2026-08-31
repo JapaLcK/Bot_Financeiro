@@ -444,3 +444,25 @@ def test_falha_ao_checar_obsolescencia_nao_derruba_o_lancamento(monkeypatch):
     assert normalize_text(resultado.category) == "alimentacao", (
         f"a falha de metadado mudou o resultado: {resultado.category!r}"
     )
+
+
+def test_rename_faz_a_categoria_adquirir_os_termos_novos():
+    """Renomear é o momento em que a categoria passa a ser dona do termo novo.
+
+    Cenário: existe a categoria "viagens"; o bot aprende `cafe -> alimentação`;
+    o usuário renomeia "viagens" para "cafe". Com o `created_at` original da
+    categoria, a regra pareceria posterior — escolha deliberada — e os gastos
+    com café continuariam em alimentação, exatamente depois de o usuário ter
+    renomeado a categoria para recebê-los.
+    """
+    uid = _uid()
+    cat = create_user_category(uid, "viagens")
+    upsert_category_rule(uid, "cafe", "alimentacao")
+
+    update_user_category(uid, cat["id"], new_name="cafe")
+
+    resultado = infer_category(uid, "gastei 15 com cafe", allow_ai=False)
+    assert normalize_text(resultado.category) == "cafe", (
+        f"depois do rename o gasto foi para {resultado.category!r} "
+        f"(reason={resultado.reason})"
+    )

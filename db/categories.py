@@ -630,15 +630,37 @@ def update_user_category(
                     (next_name, user_id, old_name),
                 )
 
+            # `created_at` renovado QUANDO O NOME MUDA, e só aí. O campo responde
+            # "desde quando esta categoria é dona deste termo", e num rename a
+            # resposta é agora: a categoria acabou de adquirir tokens novos.
+            # Sem isso, renomear "viagens" para "cafe" deixaria uma regra
+            # `cafe -> alimentação` mais nova que a data ORIGINAL da categoria,
+            # o guard a trataria como escolha deliberada, e os gastos com café
+            # continuariam indo para alimentação depois de o usuário ter
+            # renomeado a categoria justamente para recebê-los.
+            renomeou = next_name != old_name
             cur.execute(
                 """
                 update user_categories
-                   set name=%s, emoji=%s, color=%s
+                   set name=%s, emoji=%s, color=%s,
+                       created_at = case when %s then now() else created_at end
                  where user_id=%s and id=%s
                 """,
-                (next_name, next_emoji, next_color, user_id, int(cat_id)),
+                (next_name, next_emoji, next_color, renomeou, user_id, int(cat_id)),
             )
         conn.commit()
+
+    if renomeou:
+        # Best-effort pelo mesmo motivo da criação: o rename já foi commitado, e
+        # higiene de regra não pode derrubar um PATCH que deu certo. Quem garante
+        # o comportamento é o guard de leitura.
+        try:
+            from core.services.category_service import reconciliar_regras_com_categoria
+
+            reconciliar_regras_com_categoria(user_id, next_name)
+        except Exception:
+            log.warning("reconciliacao pos-rename falhou para user=%s categoria=%r",
+                        user_id, next_name, exc_info=True)
     return get_user_category(user_id, cat_id)
 
 
