@@ -88,13 +88,39 @@ function valorDoHandler(texto, i) {
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
 // forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
 const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
-// POSIÇÃO DE CHAMADA: início do handler, ou depois de `;` — o que o clique de fato
-// invoca. Pegar todo identificador seguido de `(` cobrava também o ajudante aninhado
-// num argumento (`entry(${ajuda(x)})`), que roda na geração. Medido: restringir NÃO
-// perde nada — 150, 16, 31 e 8 nomes continuam iguais — e torna inofensiva qualquer
-// imperfeição do `semInterpolacao`, porque o que está dentro de argumento nunca
-// chega a ser cobrado.
-const CHAMADA = /(?:^|;)\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/g;
+const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/y;
+
+/**
+ * As funções que o CLIQUE invoca: identificador seguido de `(` em profundidade ZERO
+ * de parênteses.
+ *
+ * Pegar todo identificador seguido de `(` cobrava o ajudante aninhado num argumento
+ * (`entry(${ajuda(x)})`), que roda na geração — falso positivo. Exigir início de
+ * comando ou `;` corrigia isso mas perdia a chamada GUARDADA, que é comum aqui:
+ * `onclick="if(event.key==='Enter') quickAddBoleto()"`.
+ *
+ * Profundidade de parênteses resolve os dois: o `if(...)` abre e fecha antes do
+ * `quickAddBoleto`, que fica no nível zero; o `ajuda` de dentro do argumento está no
+ * nível um. Medido nas duas trocas: nenhuma mudou o conjunto de nomes — 150, 31, 16,
+ * 8 e 3 nas cinco páginas —, então isto é robustez, não cobertura nova.
+ */
+function funcoesInvocadas(handler) {
+  const achadas = new Set();
+  let d = 0, i = 0;
+  while (i < handler.length) {
+    CHAMADA.lastIndex = i;
+    const m = CHAMADA.exec(handler);
+    if (m && m.index === i) {
+      if (d === 0 && !NATIVO.has(m[1])) achadas.add(m[1]);
+      i = CHAMADA.lastIndex; d++;
+      continue;
+    }
+    if (handler[i] === "(") d++;
+    else if (handler[i] === ")") d = Math.max(0, d - 1);
+    i++;
+  }
+  return achadas;
+}
 
 /**
  * Identificador NU passado como argumento: `startCheckout(currentCycle, this, 'x')`.
@@ -142,7 +168,7 @@ function nomesDe(trechos) {
   const variaveis = new Set();
   for (const t of trechos) {
     const limpo = semInterpolacao(semStrings(t));
-    for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
+    for (const n of funcoesInvocadas(limpo)) funcoes.add(n);
     for (const a of limpo.matchAll(ARGUMENTO)) {
       for (const tok of a[1].split(",")) {
         const n = tok.trim();
