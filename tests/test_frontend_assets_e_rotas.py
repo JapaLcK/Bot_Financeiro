@@ -19,6 +19,7 @@ versão destes testes aceitava as duas coisas e passava em quatro defeitos reais
 todos apontados na revisão do PR #209 e reproduzidos antes de serem consertados.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -38,8 +39,6 @@ PAGINAS_SEM_ROTA_OK = {
 # A cadeia INTEIRA é capturada de propósito: pegando só o primeiro literal, a rota de
 # `FRONTEND_DIR / "static" / "auth-refresh.js"` virava uma checagem sobre o DIRETÓRIO
 # `static`, que existe sempre — apagar o arquivo deixava o teste verde.
-_CADEIA = re.compile(r'\b(?:FRONTEND_DIR|frontend_dir)\s*((?:/\s*"[^"]+"\s*)+)')
-_PECA = re.compile(r'"([^"]+)"')
 
 
 def _ignorado(p: Path) -> bool:
@@ -53,89 +52,129 @@ def _ignorado(p: Path) -> bool:
     return bool(IGNORADOS & set(p.relative_to(RAIZ).parts))
 
 
-_LINHA_COMENTADA = re.compile(r"(?m)^[ \t]*#.*$")
+
+def _cadeia_frontend_dir(no):
+    """`FRONTEND_DIR / "a" / "b"` -> `["a", "b"]`. Qualquer outra coisa -> None."""
+    partes = []
+    while isinstance(no, ast.BinOp) and isinstance(no.op, ast.Div):
+        if not (isinstance(no.right, ast.Constant) and isinstance(no.right.value, str)):
+            return None
+        partes.insert(0, no.right.value)
+        no = no.left
+    if isinstance(no, ast.Name) and no.id in {"FRONTEND_DIR", "frontend_dir"} and partes:
+        return partes
+    return None
 
 
-def _fontes_python():
-    """O texto vem SEM as linhas comentadas.
+class _Coletor(ast.NodeVisitor):
+    """Junta as cadeias `FRONTEND_DIR / ...` de um módulo.
 
-    Rota desligada por comentário continuava contando nas duas pontas: o
-    `@router.get` comentado entrava na lista de rotas e o `html_file(FRONTEND_DIR /
-    "x.html")` comentado dava a página por servida. Só linha inteira comentada sai —
-    `#` dentro de string fica, e não atrapalha nenhum dos padrões.
+    `ast` e não regex, e a diferença não é estética: o regex lia TEXTO, então uma
+    docstring contendo `html_file(FRONTEND_DIR / "doc.html")` dava a página por
+    servida — medido, enganava. O `ast` vê docstring como string literal e comentário
+    como nada, então as duas classes somem sem filtro nenhum.
+
+    Não desce na cadeia que casou, senão `FRONTEND_DIR / "static" / "auth-refresh.js"`
+    registraria também o pedaço `static`.
     """
+
+    def __init__(self):
+        self.achados = []
+
+    def visit_BinOp(self, no):
+        partes = _cadeia_frontend_dir(no)
+        if partes:
+            self.achados.append("/".join(partes))
+        else:
+            self.generic_visit(no)
+
+
+def _servidos():
+    """Caminhos de `frontend/` que o Python de fato entrega, por construção.
+
+    Teto aceito: a construção conta esteja onde estiver no código de produção, sem
+    exigir que esteja dentro de um handler decorado. Exigir o decorator dá falso
+    positivo MEDIDO — o `error.html` é montado em `shared.error_page_response()`, um
+    helper sem rota própria, e é servido do mesmo jeito.
+    """
+    achados = {}
     for p in RAIZ.rglob("*.py"):
         rel = p.relative_to(RAIZ)
         if _ignorado(p) or "tests" in rel.parts:
             continue
-        yield p, _LINHA_COMENTADA.sub("", p.read_text(errors="replace"))
-
-
-def _servidos():
-    """Caminhos de `frontend/` que o Python de fato entrega, por construção."""
-    achados = {}
-    for p, texto in _fontes_python():
-        for m in _CADEIA.finditer(texto):
-            rel = "/".join(_PECA.findall(m.group(1)))
-            achados.setdefault(rel, set()).add(str(p.relative_to(RAIZ)))
+        try:
+            arvore = ast.parse(p.read_text(errors="replace"))
+        except SyntaxError:
+            continue
+        coletor = _Coletor()
+        coletor.visit(arvore)
+        for caminho in coletor.achados:
+            achados.setdefault(caminho, set()).add(str(rel))
     return achados
 
 
+
+_ROTAS = None
+
+
 def _rotas():
-    """path -> métodos. O método importa: o navegador faz GET num `src`/`href`.
+    """As rotas REAIS do app, não as que um regex acha no fonte.
 
-    Sem separar, `<script src="/billing/create-checkout">` passava porque aquele
-    caminho tem um decorator POST — e no navegador aquilo é 405.
+    Foi assim que este teste parou de crescer. Parseando o fonte, cada detalhe do
+    Python virava um remendo: `@router.get` comentado contava como rota, docstring
+    citando um decorator contaria também, o método tinha de ser adivinhado, e o
+    curinga precisava de um casador escrito à mão — que errava justamente o caso de
+    `/pockets/{user_id}/{pocket_name:path}/history`, aprovando qualquer sufixo porque
+    o `:path` devolvia cedo demais.
+
+    O app responde tudo isso de graça: caminho, métodos e a `path_regex` que o
+    próprio Starlette compila. Custa ~0,5 s de import, uma vez.
     """
-    metodos = {}
-    padrao = re.compile(
-        r'@(?:app|router)\.(get|post|put|patch|delete|websocket)\(\s*["\']([^"\']+)["\']'
-    )
-    for p, texto in _fontes_python():
-        if p.name == "mock_dashboard.py":  # script de mock, não sobe com o app
-            continue
-        for met, u in padrao.findall(texto):
-            metodos.setdefault(u, set()).add(met)
-    return metodos
+    global _ROTAS
+    if _ROTAS is None:
+        from frontend.finance_bot_websocket_custom import app  # noqa: PLC0415
+        _ROTAS = [
+            (r.path, {m.upper() for m in (getattr(r, "methods", None) or {"GET"})}, r.path_regex)
+            for r in app.routes
+            if hasattr(r, "path_regex")
+        ]
+    return _ROTAS
 
 
-_CURINGA = "\x00"   # marca de "qualquer segmento", nos DOIS lados
-_CAUDA = "\x01"     # marca de "o resto do caminho" ({x:path})
 
+def _casa_com_interpolacao(ref: str, rota: str) -> bool:
+    """Compara padrão com padrão, segmento a segmento.
 
-def _segmentos_da_rota(rota: str):
-    """`/cards/{id}` -> ['cards', CURINGA]; `/b/{p:path}` -> ['b', CAUDA]."""
-    saida = []
-    for seg in rota.strip("/").split("/"):
-        if seg.startswith("{") and seg.endswith("}"):
-            saida.append(_CAUDA if seg[1:-1].endswith(":path") else _CURINGA)
-        else:
-            saida.append(seg)
-    return saida
-
-
-def _segmentos_da_referencia(ref: str):
-    """`/a/${id}/plan` -> ['a', CURINGA, 'plan'].
-
-    O `${...}` vira curinga e NÃO um valor inventado: em
-    `/admin/api/affiliates/payouts/${id}/${action}` o `action` vale 'paid' ou
-    'reject', que são LITERAIS da rota. Trocar por um texto qualquer reprovava uma
-    chamada perfeitamente válida — o certo é casar padrão com padrão.
+    Só para referência com `${...}`, onde o valor de runtime é desconhecido — e é
+    preciso, porque em `/admin/api/affiliates/payouts/${id}/${action}` o `action`
+    vale 'paid' ou 'reject', que são LITERAIS da rota. Trocar a interpolação por um
+    texto inventado e comparar reprovava uma chamada correta.
     """
-    return [_CURINGA if "${" in seg else seg for seg in ref.strip("/").split("/")]
+    a = ref.strip("/").split("/")
+    b = rota.strip("/").split("/")
 
+    def igual(seg_ref, seg_rota):
+        return seg_rota.startswith("{") or "${" in seg_ref or seg_rota == seg_ref
 
-def _casa(ref, rota):
-    """Interseção de dois padrões de segmento. Curinga de qualquer lado casa."""
-    for i, sr in enumerate(rota):
-        if sr == _CAUDA:
-            return len(ref) >= i          # a cauda come o resto (inclusive vazio)
-        if i >= len(ref):
+    for i, sr in enumerate(b):
+        if sr.startswith("{") and sr[1:-1].endswith(":path"):
+            # A cauda come um ou mais segmentos, MAS o que vem depois dela na rota
+            # continua obrigatório: `/pockets/{u}/{nome:path}/history` exige o
+            # `/history` no fim. Devolver True aqui aprovava qualquer sufixo — foi o
+            # bug que o casador escrito à mão tinha, e ele sobreviveu neste ramo
+            # quando as rotas passaram a vir do app (a regex do Starlette só é usada
+            # quando a referência NÃO tem interpolação).
+            resto = b[i + 1:]
+            if len(a) < i + 1 + len(resto):
+                return False
+            cauda = a[len(a) - len(resto):] if resto else []
+            return all(igual(x, y) for x, y in zip(cauda, resto))
+        if i >= len(a):
             return False
-        se = ref[i]
-        if sr != _CURINGA and se != _CURINGA and sr != se:
+        if not igual(a[i], sr):
             return False
-    return len(ref) == len(rota)
+    return len(a) == len(b)
+
 
 
 def test_toda_pagina_html_tem_rota_que_a_serve():
@@ -170,47 +209,58 @@ def test_toda_referencia_absoluta_tem_ROTA():
     Sem `StaticFiles`, `frontend/novo.js` existir não faz `/novo.js` responder. A
     primeira versão aceitava o arquivo como prova e aprovava exatamente esse 404.
 
-    O que cada extrator enxerga, e por quê:
-
-    | origem                      | método exigido | ruído tratado            |
-    |-----------------------------|----------------|--------------------------|
-    | `src`/`href`/`poster`       | GET            | data URI                 |
-    | `url(...)` do CSS           | GET            | data URI (`url()` dentro)|
-    | `fetch`/`import`/`register` | qualquer       | template literal, `${}`  |
+    | origem                      | método exigido            |
+    |-----------------------------|---------------------------|
+    | `src`/`href`/`poster`       | GET (é o que o navegador faz) |
+    | `url(...)` do CSS           | GET                       |
+    | `fetch`/`import`/`register` | o `method:` da chamada, GET quando omitido |
     """
-    metodos = _rotas()
+    rotas = _rotas()
 
     # Data URI carrega `url(...)` DENTRO dele (`url(%23n)` de filtro SVG). Sem tirar
     # antes, o casamento pega o de dentro e inventa referência quebrada — foram 4
     # falsos positivos na primeira medição.
     sem_data_uri = re.compile(r'(?:"|\')data:[^"\']*(?:"|\')')
 
-    # `["\']` nos dois primeiros; o terceiro aceita CRASE também, porque
-    # `fetch(`/admin/api/users/${id}`)` é como o admin-dashboard.html chama a API —
-    # 13 chamadas que a versão anterior simplesmente não enxergava.
-    NAVEGA = [
-        re.compile(r"""(?:src|href|poster|data-src)\s*=\s*["\']([^"\'>]+)["\']"""),
-        re.compile(r"""url\(\s*["\']?([^"\')]+)["\']?\s*\)"""),
-    ]
-    CHAMA = [re.compile(r"""(?:fetch|import|register)\(\s*["\'`]([^"\'`]+)["\'`]""")]
+    # Crase incluída de propósito: `fetch(`${API}/auth/validate`)` é como o frontend
+    # chama a API — 108 chamadas que a versão anterior não enxergava, porque só lia
+    # aspas e porque `${API}` no começo não parecia caminho absoluto.
+    NAVEGA = re.compile(r"""(?:src|href|poster|data-src)\s*=\s*["\']([^"\'>]+)["\']""")
+    CSS_URL = re.compile(r"""url\(\s*["\']?([^"\')]+)["\']?\s*\)""")
+    CHAMADA = re.compile(r"""(?:fetch|import|register)\(\s*["\'`]([^"\'`]+)["\'`]""")
+    METODO = re.compile(r"""method\s*:\s*["\']([A-Za-z]+)["\']""")
+    # As opções nem sempre vêm como `{` logo depois da vírgula: este repositório
+    # escreve `fetch(url, authOptions({ method: "POST", ... }))`. Exigir a chave
+    # colada dava GET a uma chamada POST e inventava referência quebrada. A janela
+    # vai até a PRÓXIMA chamada (ou 500 caracteres), para não pegar o método de outra.
+    PROXIMA = re.compile(r"(?:fetch|import|register)\(")
 
-    rotas_seg = {u: _segmentos_da_rota(u) for u in metodos}
+    # `${API}` e irmãos valem a origem do site: `const API = BASE_HTTP`. O que vem
+    # depois é caminho absoluto, e é o que interessa aqui.
+    ORIGEM_NO_COMECO = re.compile(r"^\$\{[A-Za-z_$][\w$]*\}(?=/)")
 
-    def resolve(u, exige_get):
-        u = u.split("?")[0].split("#")[0]
+    def resolve(u: str, metodo: str) -> bool:
+        u = ORIGEM_NO_COMECO.sub("", u).split("?")[0].split("#")[0]
         if not u.startswith("/") or u.startswith("//"):
             return True
-        base = u.endswith("/")            # base de concatenação: `".../pending/" + tok`
-        ref = _segmentos_da_referencia(u.rstrip("/") if base else u)
-        for rota, seg in rotas_seg.items():
-            if exige_get and "get" not in metodos[rota]:
+        base = u.endswith("/") and len(u) > 1
+        alvo = u.rstrip("/") if base else u
+        for caminho, metodos, regex in rotas:
+            if metodo not in metodos:
                 continue
-            if _casa(ref, seg):
+            if "${" in alvo:
+                if _casa_com_interpolacao(alvo, caminho):
+                    return True
+            elif regex.match(alvo):
                 return True
-            # `"/auth/google/pending/" + token` casa `/auth/google/pending/{token}`:
-            # um segmento a mais. `/cards/123/typo/` continua reprovando — nem com o
-            # segmento extra ele casa `/cards/{id}`.
-            if base and _casa(ref + [_CURINGA], seg):
+            # Base de concatenação: `"/auth/google/pending/" + token` para a rota
+            # `/auth/google/pending/{token}`. Um segmento a mais, e só isso —
+            # `/cards/123/typo/` continua reprovando.
+            if base and (
+                regex.match(alvo + "/x")
+                if "${" not in alvo
+                else _casa_com_interpolacao(alvo + "/x", caminho)
+            ):
                 return True
         return False
 
@@ -219,14 +269,19 @@ def test_toda_referencia_absoluta_tem_ROTA():
         if not p.is_file() or _ignorado(p) or p.suffix.lower() not in {".html", ".css", ".js"}:
             continue
         texto = sem_data_uri.sub('""', p.read_text(errors="replace"))
-        for extratores, exige_get in ((NAVEGA, True), (CHAMA, False)):
-            for extrator in extratores:
-                for m in extrator.finditer(texto):
-                    u = m.group(1).strip()
-                    if not resolve(u, exige_get):
-                        onde = "GET" if exige_get else "qualquer método"
-                        quebradas.append(f"{u} (em {p.relative_to(RAIZ)}, precisa de {onde})")
+        achados = [(m.group(1), "GET") for m in NAVEGA.finditer(texto)]
+        achados += [(m.group(1), "GET") for m in CSS_URL.finditer(texto)]
+        for m in CHAMADA.finditer(texto):
+            fim = PROXIMA.search(texto, m.end())
+            janela = texto[m.end():min(fim.start() if fim else len(texto), m.end() + 500)]
+            met = METODO.search(janela)
+            achados.append((m.group(1), met.group(1).upper() if met else "GET"))
+        for u, metodo in achados:
+            u = u.strip()
+            if not resolve(u, metodo):
+                quebradas.append(f"{u} [{metodo}] (em {p.relative_to(RAIZ)})")
     assert not quebradas, (
-        "referência absoluta que nenhuma rota atende — isto é 404 (ou 405) em "
-        f"produção, e o arquivo existir não muda nada sem StaticFiles: {sorted(set(quebradas))}"
+        "referência absoluta que nenhuma rota atende NAQUELE MÉTODO — isto é 404 ou "
+        f"405 em produção, e o arquivo existir não muda nada sem StaticFiles: "
+        f"{sorted(set(quebradas))}"
     )
