@@ -74,10 +74,22 @@ const NATIVO = new Set([
  */
 const semStrings = (s) => s.replace(/'[^']*'/g, "''").replace(/&quot;[^&]*&quot;/g, "");
 
+/**
+ * Tira as interpolações `${...}`: o que está DENTRO delas roda na GERAÇÃO do
+ * markup, no escopo de quem gera, e não no clique.
+ *
+ * Em `onclick="openCardEditModal(${escapeHtmlSafe(JSON.stringify(c))})"` só
+ * `openCardEditModal` precisa existir no escopo global; o `escapeHtmlSafe` é
+ * ajudante do gerador. Sem tirar, o dia em que o `dashboard.js` virar módulo com os
+ * pontos de entrada exportados, o teste reprovaria por causa dos ajudantes — que é
+ * falso positivo, e falso positivo trava PR legítimo.
+ */
+const semInterpolacao = (s) => s.replace(/\$\{[^}]*\}/g, "");
+
 function nomesDe(trechos) {
   const nomes = new Set();
   for (const t of trechos) {
-    for (const c of semStrings(t).matchAll(CHAMADA)) {
+    for (const c of semInterpolacao(semStrings(t)).matchAll(CHAMADA)) {
       if (!NATIVO.has(c[1])) nomes.add(c[1]);
     }
   }
