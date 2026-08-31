@@ -30,6 +30,8 @@ IGNORADOS = {".venv", "node_modules", "__pycache__", ".claude", ".git"}
 
 # Páginas que existem de propósito sem rota. Entrada nova aqui exige o PORQUÊ na
 # mesma linha — sem isso a allowlist vira o lugar onde o defeito se esconde.
+# Caminho RELATIVO a `frontend/`, não nome de arquivo: por nome, a isenção vazaria
+# para um órfão homônimo em qualquer subdiretório.
 PAGINAS_SEM_ROTA_OK = {
     # Preview de desenvolvimento da arte dos agentes; `docs/agente_faria_limer.md`
     # a cita como o lugar onde o set `_AGENT_ART` é conferido a olho.
@@ -125,7 +127,7 @@ def test_toda_pagina_html_tem_rota_que_a_serve():
         if f.is_file()
         and f.suffix.lower() in {".html", ".js", ".css"}
         and not _ignorado(f)
-        and f.name not in PAGINAS_SEM_ROTA_OK
+        and str(f.relative_to(FRONTEND)) not in PAGINAS_SEM_ROTA_OK
         and str(f.relative_to(FRONTEND)) not in servidos
     ]
     assert not orfas, (

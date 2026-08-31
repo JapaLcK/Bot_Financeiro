@@ -15,13 +15,14 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   #56 era `"automatic"` e o WebView reservava a área segura sozinho. Saiba em qual
   dos dois mundos você está antes de somar `padding`: com `automatic`, inset em CSS
   **duplica** o espaçamento; com `never`, a falta dele deixa conteúdo sob o notch.
-- **Quem carrega o CSS ≠ quem é alcançável.** Das **27** páginas em `frontend/`:
+- **Quem carrega o CSS ≠ quem é alcançável.** Das páginas em `frontend/`
+  (`ls frontend/*.html | wc -l`; a soma das linhas abaixo tem de bater com ela):
 
   | quantas | o que carregam | quem |
   |---|---|---|
   | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
   | 16 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
-  | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `_dash_mockup`, `preview_agentes`, e o `ddf99f17-…` |
+  | 4 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
   `env(safe-area-inset-*)` aparece em **seis** arquivos de `frontend/`
