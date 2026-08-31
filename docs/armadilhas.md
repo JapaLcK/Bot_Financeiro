@@ -128,13 +128,22 @@ escrito aqui: `wc -l frontend/dashboard.js`.
 
 Três fatos que decidem qualquer mexida ali:
 
-- **`dashboard.html` tem 139 handlers inline** (`onclick="abrirX()"`) chamando **86
-  nomes** distintos. Eles funcionam porque o arquivo é script clássico e tudo no topo
-  é global. `settings.html` tem 61 handlers inline e `home.html` tem 11.
-- **Trocar por `<script type="module">` sem mais nada quebra os 139** — módulo tem
-  escopo próprio, os nomes somem do `window`, o botão para de funcionar **sem erro
-  visível**. Enquanto os handlers inline existirem, qualquer divisão precisa devolver
-  os 86 nomes ao `window` e ter teste que compare a lista com o HTML.
+- **O `dashboard.html` é quase todo handler inline** (`onclick="abrirX()"`), e o
+  `settings.html`, o `admin-dashboard.html` e o `home.html` também têm. Eles funcionam
+  porque os arquivos são script clássico e tudo no topo é global. Quantos são sai de
+  `grep -oE 'on[a-z]+="' frontend/<pagina>.html | wc -l`; os números que estavam
+  escritos aqui diziam 139 e 61 quando o real era 144 e 55.
+- **Trocar por `<script type="module">` sem mais nada quebra todos eles** — módulo tem
+  escopo próprio, os nomes somem do escopo global, e o botão para de funcionar **sem
+  erro visível**: nada no console, só o clique que não faz nada. Um IIFE em volta do
+  arquivo faz o mesmo.
+
+  **Esse teste agora existe**: `tests/frontend/handlers_inline.test.mjs` sobe cada
+  página no Chromium e pergunta ao motor se cada nome resolve. Duas armadilhas de
+  medição estão pagas lá dentro, e valem para quem for mexer: `typeof window[nome]`
+  dá falso negativo (`const` no topo não vira propriedade de `window`, mas o handler
+  o enxerga), e página que redireciona sem backend mede zero — o teste reprova nos
+  dois casos em vez de aprovar calado.
 - **Esses handlers inline são também o que segura o `'unsafe-inline'`** no
   `script-src` da CSP. A Fase 1 já tirou o `<script>` inline; matar os handlers é o
   que falta para fechar o `script-src`.
