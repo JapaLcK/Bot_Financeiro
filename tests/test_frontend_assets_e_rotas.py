@@ -53,12 +53,22 @@ def _ignorado(p: Path) -> bool:
     return bool(IGNORADOS & set(p.relative_to(RAIZ).parts))
 
 
+_LINHA_COMENTADA = re.compile(r"(?m)^[ \t]*#.*$")
+
+
 def _fontes_python():
+    """O texto vem SEM as linhas comentadas.
+
+    Rota desligada por comentário continuava contando nas duas pontas: o
+    `@router.get` comentado entrava na lista de rotas e o `html_file(FRONTEND_DIR /
+    "x.html")` comentado dava a página por servida. Só linha inteira comentada sai —
+    `#` dentro de string fica, e não atrapalha nenhum dos padrões.
+    """
     for p in RAIZ.rglob("*.py"):
         rel = p.relative_to(RAIZ)
         if _ignorado(p) or "tests" in rel.parts:
             continue
-        yield p, p.read_text(errors="replace")
+        yield p, _LINHA_COMENTADA.sub("", p.read_text(errors="replace"))
 
 
 def _servidos():
@@ -72,31 +82,60 @@ def _servidos():
 
 
 def _rotas():
-    literais, curingas = set(), set()
+    """path -> métodos. O método importa: o navegador faz GET num `src`/`href`.
+
+    Sem separar, `<script src="/billing/create-checkout">` passava porque aquele
+    caminho tem um decorator POST — e no navegador aquilo é 405.
+    """
+    metodos = {}
     padrao = re.compile(
-        r'@(?:app|router)\.(?:get|post|put|patch|delete|websocket)\(\s*["\']([^"\']+)["\']'
+        r'@(?:app|router)\.(get|post|put|patch|delete|websocket)\(\s*["\']([^"\']+)["\']'
     )
     for p, texto in _fontes_python():
         if p.name == "mock_dashboard.py":  # script de mock, não sobe com o app
             continue
-        for u in padrao.findall(texto):
-            (curingas if "{" in u else literais).add(u)
-    return literais, curingas
+        for met, u in padrao.findall(texto):
+            metodos.setdefault(u, set()).add(met)
+    return metodos
 
 
-def _regex_do_curinga(rota: str) -> re.Pattern:
-    """`/cards/{user_id}` casa UM segmento; `{x:path}` casa o resto.
+_CURINGA = "\x00"   # marca de "qualquer segmento", nos DOIS lados
+_CAUDA = "\x01"     # marca de "o resto do caminho" ({x:path})
 
-    Comparar só o prefixo aprovava `/cards/123/typo/not-a-route`, que o FastAPI não
-    atende: o parâmetro consome um segmento, não uma cauda inteira.
+
+def _segmentos_da_rota(rota: str):
+    """`/cards/{id}` -> ['cards', CURINGA]; `/b/{p:path}` -> ['b', CAUDA]."""
+    saida = []
+    for seg in rota.strip("/").split("/"):
+        if seg.startswith("{") and seg.endswith("}"):
+            saida.append(_CAUDA if seg[1:-1].endswith(":path") else _CURINGA)
+        else:
+            saida.append(seg)
+    return saida
+
+
+def _segmentos_da_referencia(ref: str):
+    """`/a/${id}/plan` -> ['a', CURINGA, 'plan'].
+
+    O `${...}` vira curinga e NÃO um valor inventado: em
+    `/admin/api/affiliates/payouts/${id}/${action}` o `action` vale 'paid' ou
+    'reject', que são LITERAIS da rota. Trocar por um texto qualquer reprovava uma
+    chamada perfeitamente válida — o certo é casar padrão com padrão.
     """
-    partes, i = [], 0
-    for m in re.finditer(r"\{([^}]+)\}", rota):
-        partes.append(re.escape(rota[i:m.start()]))
-        partes.append(".+" if m.group(1).endswith(":path") else "[^/]+")
-        i = m.end()
-    partes.append(re.escape(rota[i:]))
-    return re.compile("^" + "".join(partes) + "$")
+    return [_CURINGA if "${" in seg else seg for seg in ref.strip("/").split("/")]
+
+
+def _casa(ref, rota):
+    """Interseção de dois padrões de segmento. Curinga de qualquer lado casa."""
+    for i, sr in enumerate(rota):
+        if sr == _CAUDA:
+            return len(ref) >= i          # a cauda come o resto (inclusive vazio)
+        if i >= len(ref):
+            return False
+        se = ref[i]
+        if sr != _CURINGA and se != _CURINGA and sr != se:
+            return False
+    return len(ref) == len(rota)
 
 
 def test_toda_pagina_html_tem_rota_que_a_serve():
@@ -130,40 +169,64 @@ def test_toda_referencia_absoluta_tem_ROTA():
 
     Sem `StaticFiles`, `frontend/novo.js` existir não faz `/novo.js` responder. A
     primeira versão aceitava o arquivo como prova e aprovava exatamente esse 404.
+
+    O que cada extrator enxerga, e por quê:
+
+    | origem                      | método exigido | ruído tratado            |
+    |-----------------------------|----------------|--------------------------|
+    | `src`/`href`/`poster`       | GET            | data URI                 |
+    | `url(...)` do CSS           | GET            | data URI (`url()` dentro)|
+    | `fetch`/`import`/`register` | qualquer       | template literal, `${}`  |
     """
-    literais, curingas = _rotas()
-    padroes = [_regex_do_curinga(c) for c in curingas]
+    metodos = _rotas()
 
     # Data URI carrega `url(...)` DENTRO dele (`url(%23n)` de filtro SVG). Sem tirar
     # antes, o casamento pega o de dentro e inventa referência quebrada — foram 4
     # falsos positivos na primeira medição.
     sem_data_uri = re.compile(r'(?:"|\')data:[^"\']*(?:"|\')')
-    extratores = [
-        re.compile(r"""(?:src|href|poster|data-src)\s*=\s*["']([^"'>]+)["']"""),
-        re.compile(r"""url\(\s*["']?([^"')]+)["']?\s*\)"""),
-        re.compile(r"""(?:fetch|import|register)\(\s*["']([^"']+)["']"""),
+
+    # `["\']` nos dois primeiros; o terceiro aceita CRASE também, porque
+    # `fetch(`/admin/api/users/${id}`)` é como o admin-dashboard.html chama a API —
+    # 13 chamadas que a versão anterior simplesmente não enxergava.
+    NAVEGA = [
+        re.compile(r"""(?:src|href|poster|data-src)\s*=\s*["\']([^"\'>]+)["\']"""),
+        re.compile(r"""url\(\s*["\']?([^"\')]+)["\']?\s*\)"""),
     ]
+    CHAMA = [re.compile(r"""(?:fetch|import|register)\(\s*["\'`]([^"\'`]+)["\'`]""")]
+
+    rotas_seg = {u: _segmentos_da_rota(u) for u in metodos}
+
+    def resolve(u, exige_get):
+        u = u.split("?")[0].split("#")[0]
+        if not u.startswith("/") or u.startswith("//"):
+            return True
+        base = u.endswith("/")            # base de concatenação: `".../pending/" + tok`
+        ref = _segmentos_da_referencia(u.rstrip("/") if base else u)
+        for rota, seg in rotas_seg.items():
+            if exige_get and "get" not in metodos[rota]:
+                continue
+            if _casa(ref, seg):
+                return True
+            # `"/auth/google/pending/" + token` casa `/auth/google/pending/{token}`:
+            # um segmento a mais. `/cards/123/typo/` continua reprovando — nem com o
+            # segmento extra ele casa `/cards/{id}`.
+            if base and _casa(ref + [_CURINGA], seg):
+                return True
+        return False
 
     quebradas = []
     for p in sorted(FRONTEND.rglob("*")):
         if not p.is_file() or _ignorado(p) or p.suffix.lower() not in {".html", ".css", ".js"}:
             continue
         texto = sem_data_uri.sub('""', p.read_text(errors="replace"))
-        for extrator in extratores:
-            for m in extrator.finditer(texto):
-                u = m.group(1).strip().split("?")[0].split("#")[0]
-                if not u.startswith("/") or u.startswith("//"):
-                    continue
-                if u in literais or any(r.match(u) for r in padroes):
-                    continue
-                # Base de concatenação: o JS escreve `"/auth/google/pending/" + token`
-                # para a rota `/auth/google/pending/{token}`. Vale só quando termina em
-                # "/" e UM segmento a mais casaria a rota — assim `/cards/123/typo/x`
-                # continua reprovando, porque nem com sufixo ele casa `/cards/{id}`.
-                if u.endswith("/") and any(r.match(u + "x") for r in padroes):
-                    continue
-                quebradas.append(f"{u} (em {p.relative_to(RAIZ)})")
+        for extratores, exige_get in ((NAVEGA, True), (CHAMA, False)):
+            for extrator in extratores:
+                for m in extrator.finditer(texto):
+                    u = m.group(1).strip()
+                    if not resolve(u, exige_get):
+                        onde = "GET" if exige_get else "qualquer método"
+                        quebradas.append(f"{u} (em {p.relative_to(RAIZ)}, precisa de {onde})")
     assert not quebradas, (
-        "referência absoluta que nenhuma rota atende — isto é 404 em produção, e "
-        f"o arquivo existir não muda nada sem StaticFiles: {sorted(set(quebradas))}"
+        "referência absoluta que nenhuma rota atende — isto é 404 (ou 405) em "
+        f"produção, e o arquivo existir não muda nada sem StaticFiles: {sorted(set(quebradas))}"
     )
