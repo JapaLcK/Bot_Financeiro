@@ -55,8 +55,12 @@ frontend/
   routes/                 — routers já extraídos: static_pages, settings, pockets,
                             cards, analytics, open_finance, push, agents, affiliates,
                             shared (html_file, stamp_asset_versions, página de erro)
-  *.html (26 páginas)     — servidas por static_pages.py; ver o §5 do CLAUDE.md da raiz
-  *.css / *.js            — cada arquivo tem uma rota própria; não há StaticFiles mount
+  *.html                  — servidas por static_pages.py (quantas: `ls frontend/*.html
+                            | wc -l`; o número que estava aqui dizia 26 e eram 27);
+                            ver o §5 do CLAUDE.md da raiz
+  *.css / *.js            — cada arquivo tem uma rota própria; não há StaticFiles mount.
+                            Página ou asset sem rota é código morto que ninguém alcança:
+                            tests/test_frontend_assets_e_rotas.py reprova os dois casos
 
 adapters/
   whatsapp/               — webhook + cliente da API oficial (Cloud API)
