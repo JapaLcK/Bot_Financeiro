@@ -638,7 +638,6 @@ def update_user_category(
             # o guard a trataria como escolha deliberada, e os gastos com café
             # continuariam indo para alimentação depois de o usuário ter
             # renomeado a categoria justamente para recebê-los.
-            renomeou = next_name != old_name
             cur.execute(
                 """
                 update user_categories
@@ -646,11 +645,11 @@ def update_user_category(
                        created_at = case when %s then now() else created_at end
                  where user_id=%s and id=%s
                 """,
-                (next_name, next_emoji, next_color, renomeou, user_id, int(cat_id)),
+                (next_name, next_emoji, next_color, rename, user_id, int(cat_id)),
             )
         conn.commit()
 
-    if renomeou:
+    if rename:
         # Best-effort pelo mesmo motivo da criação: o rename já foi commitado, e
         # higiene de regra não pode derrubar um PATCH que deu certo. Quem garante
         # o comportamento é o guard de leitura.

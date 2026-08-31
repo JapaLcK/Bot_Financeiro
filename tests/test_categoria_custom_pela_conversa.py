@@ -466,3 +466,32 @@ def test_rename_faz_a_categoria_adquirir_os_termos_novos():
         f"depois do rename o gasto foi para {resultado.category!r} "
         f"(reason={resultado.reason})"
     )
+
+
+def test_editar_so_emoji_e_cor_nao_estoura():
+    """Edição que NÃO renomeia continua funcionando.
+
+    A primeira versão do conserto de rename derivava a condição de uma variável
+    que só existe dentro do ramo do rename — então uma edição de emoji ou cor
+    estourava com UnboundLocalError e o PATCH devolvia erro de servidor. Nenhum
+    teste do grupo cobria esse caminho, que é o mais comum da tela.
+    """
+    uid = _uid()
+    cat = create_user_category(uid, "cafe")
+
+    def _criada_em():
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select created_at from user_categories where id=%s", (cat["id"],))
+            return cur.fetchone()["created_at"]
+
+    antes = _criada_em()
+
+    atualizada = update_user_category(uid, cat["id"], emoji="☕", color="#123456")
+
+    assert atualizada["emoji"] == "☕"
+    assert atualizada["color"] == "#123456"
+    assert atualizada["name"] == "cafe"
+    assert _criada_em() == antes, (
+        "edição sem rename não pode mexer no created_at — ele marca desde quando "
+        "a categoria é dona do termo, e o termo não mudou"
+    )
