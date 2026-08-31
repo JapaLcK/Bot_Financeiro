@@ -129,14 +129,13 @@ import tempfile
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
 
-# Codigos de saida do pytest. Sao a FAIXA de vermelho valido, NAO o criterio de
-# prova: 1 = "Tests failed", 2 = coleta interrompida (ImportError/erro de sintaxe).
-# Medido com pytest 9.0.2: rc=1 engloba tanto a asserção que falhou quanto o erro
-# de setup/fixture, em que NENHUM corpo de teste chegou a rodar — por isso o exit
-# code sozinho nao separa prova FORTE de FRACA. Quem separa e o `<failure>` x
-# `<error>` do XML, lido pela `le_junit`. Qualquer outro codigo (3, 4, 5) e
-# reprovado: o pytest reclamando de si mesmo nao e vermelho de teste.
-PYTEST_FALHA, PYTEST_COLETA = 1, 2
+# Codigos de saida do pytest que chegam a carregar um vermelho real no XML.
+# 1 = "Tests failed"; 2 = "Interrupted". O rc=2 TAMBEM aparece quando a coleta
+# para por ImportError/erro de sintaxe, mas nao prova isso sozinho: um
+# KeyboardInterrupt depois de uma falha deixa XML parcial e tambem sai 2. Quem
+# distingue a coleta legitima da execucao interrompida e o formato dos desfechos
+# lidos pela `le_junit`. Qualquer outro codigo (3, 4, 5) e reprovado.
+PYTEST_FALHA, PYTEST_INTERROMPIDO = 1, 2
 
 
 def git(*args: str, check: bool = True) -> str:
@@ -258,11 +257,10 @@ def veredito(rc_antes: int, antes: Desfechos | None,
     if rc_antes == 0:
         return 1, ("REPROVADO: o grupo PASSA no codigo antigo. Teste tautologico —\n"
                    "               ele afirma o que o codigo faz, e ficaria verde com e sem o fix.")
-    # Vermelho VALIDO e so 1 (falha) ou 2 (coleta). Qualquer outro codigo e o
-    # pytest reclamando de si mesmo, nao do codigo: 3 interno, 4 uso (alvo
-    # inexistente — medido: rc=4), 5 nada coletado. Aceitar "!= 0" como vermelho
-    # daria APROVADO a um alvo digitado errado.
-    if rc_antes not in (PYTEST_FALHA, PYTEST_COLETA):
+    # So 1 (falha) e 2 (interrompido, incluindo coleta abortada) podem carregar
+    # vermelho util. Qualquer outro codigo e o pytest reclamando de si mesmo:
+    # 3 interno, 4 uso (alvo inexistente — medido: rc=4), 5 nada coletado.
+    if rc_antes not in (PYTEST_FALHA, PYTEST_INTERROMPIDO):
         return 1, (f"REPROVADO: pytest saiu {rc_antes} na coluna antiga — isso nao e falha\n"
                    "               de teste (3=interno, 4=uso/alvo inexistente, 5=nada coletado).")
     # Sem XML nao ha desfecho nenhum para ler, e tratar arquivo ausente como
@@ -273,6 +271,17 @@ def veredito(rc_antes: int, antes: Desfechos | None,
         qual = "antiga" if antes is None else "corrigida"
         return 1, (f"REPROVADO: o pytest nao escreveu o relatorio XML da coluna {qual}.\n"
                    "               Sem desfecho nao ha prova — veja o stderr repassado acima.")
+    # ExitCode 2 significa INTERRUPTED, nao "erro de coleta". A coleta legitima
+    # tambem usa esse codigo, e no JUnit ela e reconhecivel: so existem `<error>`
+    # impareaveis, com `classname` vazio; nenhum teste passou nem falhou no corpo.
+    # Se uma falha vier antes de KeyboardInterrupt, o XML parcial preserva essa
+    # `<failure>` — sem esta guarda o gate carimbava FORTE uma coluna incompleta.
+    if rc_antes == PYTEST_INTERROMPIDO:
+        coleta_pura = (bool(antes.errados) and not antes.falhados and not antes.passados
+                       and all(not chave[0] for chave in antes.errados))
+        if not coleta_pura:
+            return 1, ("REPROVADO: a coluna antiga foi interrompida (rc=2).\n"
+                       "               XML parcial nao prova o comportamento antigo.")
     if rc_depois != 0:
         return 1, f"REPROVADO: o grupo falha tambem no codigo corrigido (rc={rc_depois})."
 

@@ -55,6 +55,14 @@ def test_roda_e_falha():
     assert 1 == 2
 '''
 
+_FALHA_DEPOIS_INTERROMPE = '''
+def test_1_falha_antes_da_interrupcao():
+    assert 1 == 2
+
+def test_2_interrompe_a_coluna():
+    raise KeyboardInterrupt()
+'''
+
 # O mesmo ataque pela SEGUNDA porta: um `atexit` escreve o cabecalho falso depois
 # de a captura do pytest ja ter sido desmontada, entao ele sai por baixo de
 # qualquer fatiamento do texto. Houve uma TERCEIRA porta (o mesmo `atexit`, no
@@ -125,6 +133,21 @@ def test_assercao_que_falha_e_prova_FORTE(monkeypatch, tmp_path):
     assert codigo == 0
     assert "prova FORTE" in relatorio
     assert "test_assercao_falha.py::test_roda_e_falha" in relatorio  # nodeid colavel
+
+
+def test_coluna_antiga_interrompida_reprova_mesmo_com_falha_no_xml(monkeypatch, tmp_path):
+    """O pytest usa rc=2 tanto para erro de coleta quanto para interrupcao. Se um
+    teste falha antes de outro levantar KeyboardInterrupt, o JUnit preserva a
+    falha anterior e o gate antigo a carimbava como prova FORTE apesar de a
+    coluna nao ter terminado. O XML parcial nao transforma interrupcao em prova."""
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_interrompe.py",
+                               _FALHA_DEPOIS_INTERROMPE)
+    assert rc == 2
+    assert len(desfechos.falhados) == 1  # existe vermelho suficiente para enganar o gate antigo
+    codigo, relatorio = coluna_dupla.veredito(rc, desfechos, 0, _verde(desfechos))
+    assert codigo == 1
+    assert "interrompida" in relatorio
+    assert "prova FORTE" not in relatorio
 
 
 def test_texto_dos_streams_nao_alimenta_o_veredito(monkeypatch, tmp_path):
