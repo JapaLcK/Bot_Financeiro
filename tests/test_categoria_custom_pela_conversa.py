@@ -224,7 +224,13 @@ def test_conta_legada_regra_de_meses_atras_perde_sem_script():
     create_user_category(uid, "cafe")
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "update user_category_rules set category='alimentacao' "
+            # A data velha faz parte da simulação: é uma regra de MESES atrás.
+            # Sem ela a reconciliação da criação (que renova o created_at) teria
+            # deixado a regra mais nova que a categoria, e o guard a trataria
+            # como escolha deliberada — que é o comportamento certo para uma
+            # regra nova, e errado para a conta legada que este teste representa.
+            "update user_category_rules "
+            "   set category='alimentacao', created_at = now() - interval '90 days' "
             " where user_id=%s and keyword='cafe'",
             (uid,),
         )
@@ -237,4 +243,60 @@ def test_conta_legada_regra_de_meses_atras_perde_sem_script():
     )
     assert _regras(uid).get("cafe") == "alimentacao", (
         "o guard de leitura não pode reescrever a tabela — ele só decide"
+    )
+
+
+def test_override_deliberado_depois_da_categoria_vence():
+    """O usuário muda de ideia DEPOIS de criar a categoria — a escolha dele vale.
+
+    Sequência: regra aprendida antiga → cria a categoria (a regra é reapontada)
+    → o usuário manda explicitamente linkar `cafe` a outra categoria. Isso passa
+    por `upsert_category_rule` (é o que a tool de categorias da IA usa), e a
+    regra tem de nascer NOVA — senão herda a data velha, o guard a julga
+    obsoleta, e o bot confirma a mudança enquanto continua classificando como
+    antes: o pior tipo de falha, silenciosa e contrária ao que foi confirmado.
+    """
+    uid = _uid()
+    _diga(uid, "gastei 20 com cafe")
+    create_user_category(uid, "cafe")
+    create_user_category(uid, "lazer do fim de semana")
+
+    upsert_category_rule(uid, "cafe", "lazer do fim de semana")   # a escolha explícita
+
+    resultado = infer_category(uid, "gastei 15 com cafe", allow_ai=False)
+    assert normalize_text(resultado.category) == "lazer do fim de semana", (
+        f"o override explícito foi ignorado: veio {resultado.category!r} "
+        f"(reason={resultado.reason})"
+    )
+
+
+def test_falha_na_limpeza_nao_apaga_a_categoria(monkeypatch):
+    """Delete é atômico: se a limpeza das regras estourar, a categoria continua lá.
+
+    O contrário deixaria a categoria apagada, o endpoint devolvendo erro, e a
+    retentativa dando CATEGORIA_NAO_ENCONTRADA — sem nenhum caminho de API para
+    limpar as regras órfãs que sobraram.
+    """
+    import psycopg
+
+    uid = _uid()
+    _diga(uid, "gastei 20 com cafe")
+    nova = create_user_category(uid, "cafe")
+
+    original = psycopg.Cursor.execute
+
+    def _explode(self, query, *a, **k):
+        q = str(query).lower()
+        if "delete from user_category_rules" in " ".join(q.split()):
+            raise RuntimeError("falha simulada na limpeza")
+        return original(self, query, *a, **k)
+
+    monkeypatch.setattr(psycopg.Cursor, "execute", _explode)
+    with pytest.raises(RuntimeError):
+        delete_user_category(uid, nova["id"])
+    monkeypatch.undo()
+
+    from db.categories import get_user_category
+    assert get_user_category(uid, nova["id"]) is not None, (
+        "a categoria foi apagada mesmo com a limpeza falhando — não é atômico"
     )

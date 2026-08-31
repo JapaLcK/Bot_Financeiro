@@ -62,15 +62,7 @@ def add_category_rule(user_id: int, keyword: str, category: str) -> None:
         raise ValueError("keyword vazio")
     if not category:
         raise ValueError("category vazia")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO user_category_rules (user_id, keyword, category) VALUES (%s, %s, %s) "
-                "ON CONFLICT (user_id, keyword) DO UPDATE SET category = EXCLUDED.category",
-                (user_id, keyword, category),
-            )
-        conn.commit()
+    _grava_regra(user_id, keyword, category)
 
 
 def delete_category_rule(user_id: int, keyword: str) -> int:
@@ -164,16 +156,39 @@ def get_memorized_rule(user_id: int, memo: str):
     return None
 
 
-def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
-    keyword = (keyword or "").strip().lower()
+def _grava_regra(user_id: int, keyword: str, category: str) -> None:
+    """O único INSERT em `user_category_rules`.
+
+    Existia escrito duas vezes — em `add_category_rule` e em
+    `upsert_category_rule`, que diferem só no tratamento do keyword (uma valida
+    e chama `ensure_user`, a outra faz `lower()`). As duas cópias custaram caro:
+    a renovação do `created_at` foi aplicada numa e a outra continuou como
+    estava, e o defeito só apareceu porque um teste mediu o timestamp.
+
+    `created_at` renovado no conflito é necessário, não cosmético: ele é o
+    critério que separa regra OBSOLETA de regra DELIBERADA
+    (`_regra_ficou_obsoleta`). Sem renovar, quem manda "aprender cafe como
+    lazer" DEPOIS de criar a categoria Café recebe a confirmação e continua
+    sendo classificado como Café — a regra nova herdaria a data velha e seria
+    descartada por antiga.
+
+    O caminho automático não chega aqui quando há conflito: o guard do #123
+    (`learn_from_signals`, `guard_local_conflict`) recusa aprender token que já
+    pertence a categoria custom. Então renovar só afeta ação deliberada.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO user_category_rules (user_id, keyword, category) VALUES (%s, %s, %s) "
-                "ON CONFLICT (user_id, keyword) DO UPDATE SET category = EXCLUDED.category",
+                "ON CONFLICT (user_id, keyword) DO UPDATE "
+                "   SET category = EXCLUDED.category, created_at = now()",
                 (user_id, keyword, category),
             )
         conn.commit()
+
+
+def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
+    _grava_regra(user_id, (keyword or "").strip().lower(), category)
 
 
 def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
@@ -465,9 +480,18 @@ def create_user_category(
     # criar a categoria Café. Sem isto, a regra velha vence no passo B de
     # `infer_category` e a categoria recém-criada nunca é usada. Import local
     # porque `category_service` importa deste módulo.
-    from core.services.category_service import reconciliar_regras_com_categoria
+    # BEST-EFFORT de propósito: a categoria já foi commitada acima, e falhar
+    # aqui devolveria 500 num POST que deu certo — o usuário veria erro e a
+    # retentativa daria CATEGORIA_DUPLICADA. A correção do comportamento não
+    # depende disto: quem garante que a regra obsoleta perde é o guard de
+    # LEITURA em `infer_category`. Isto é só higiene do dado.
+    try:
+        from core.services.category_service import reconciliar_regras_com_categoria
 
-    reconciliar_regras_com_categoria(user_id, norm)
+        reconciliar_regras_com_categoria(user_id, norm)
+    except Exception:
+        log.warning("reconciliacao de regras falhou para user=%s categoria=%r",
+                    user_id, norm, exc_info=True)
     return get_user_category(user_id, new_id)
 
 
@@ -609,13 +633,18 @@ def delete_user_category(user_id: int, cat_id: int) -> None:
                 "delete from user_categories where user_id=%s and id=%s",
                 (user_id, int(cat_id)),
             )
+            # Na MESMA transação, antes do commit: se a limpeza falhasse depois,
+            # a categoria já estaria apagada, o endpoint devolveria erro e a
+            # retentativa daria CATEGORIA_NAO_ENCONTRADA — não sobraria caminho
+            # de API para limpar as regras órfãs. Sem isto elas apontam para um
+            # nome que não existe mais e o passo B de `infer_category` devolve
+            # categoria fantasma. O rename já era tratado; faltava o delete.
+            cur.execute(
+                "delete from user_category_rules "
+                " where user_id=%s and lower(category)=lower(%s)",
+                (user_id, current["name"]),
+            )
         conn.commit()
-
-    # Sem isto, as regras que apontavam para ela sobram apontando para um nome
-    # que não existe mais — e o passo B de `infer_category` passa a devolver uma
-    # categoria fantasma. O rename já é tratado (o update acima reaponta as
-    # regras); faltava o delete.
-    delete_category_rules_by_category(user_id, current["name"])
 
 
 def resolve_category_rule_target(user_id: int, target: str) -> tuple[str, str, int]:
