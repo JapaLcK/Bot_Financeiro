@@ -123,6 +123,7 @@ from .categories import (
     list_categories,
     get_memorized_category,
     get_memorized_rule,
+    get_memorized_rules,
     upsert_category_rule,
     list_user_category_rules,
     resolve_category_rule_target,
@@ -481,7 +482,7 @@ __all__ = [
     # categories
     "list_category_rules", "add_category_rule", "delete_category_rule",
     "delete_category_rules_by_category", "list_categories",
-    "get_memorized_category", "get_memorized_rule", "upsert_category_rule", "list_user_category_rules",
+    "get_memorized_category", "get_memorized_rule", "get_memorized_rules", "upsert_category_rule", "list_user_category_rules",
     "resolve_category_rule_target", "get_uncategorized_launches",
     "list_custom_category_names",
     "resolve_category_input", "user_category_display_map",

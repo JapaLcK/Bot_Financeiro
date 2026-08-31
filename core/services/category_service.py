@@ -21,6 +21,7 @@ from utils_text import (
 from db import (
     get_memorized_category,
     get_memorized_rule,
+    get_memorized_rules,
     upsert_category_rule,
     list_custom_category_names,
     resolve_category_input,
@@ -111,7 +112,8 @@ def custom_category_match(user_id: int, text_norm: str, *, nomes: list[str] | No
     return best_name
 
 
-def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em) -> bool:
+def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em,
+                          *, nomes: list[str] | None = None) -> bool:
     """A regra aprendida envelheceu porque o usuário criou a categoria DEPOIS?
 
     Duas condições, e as duas importam:
@@ -129,7 +131,7 @@ def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em) -
     A 2ª consulta só roda quando há colisão — no caminho quente, sem categoria
     custom conflitante, o custo é o de sempre.
     """
-    dona = custom_category_match(user_id, normalize_text(keyword or ""))
+    dona = custom_category_match(user_id, normalize_text(keyword or ""), nomes=nomes)
     if not dona or normalize_text(dona) == normalize_text(destino or ""):
         return False
     from db.categories import categoria_criada_depois_de
@@ -277,9 +279,42 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     #
     # Isto conserta conta ANTIGA sem script: a regra envenenada há meses deixa
     # de vencer na primeira classificação depois deste código subir.
-    regra = get_memorized_rule(user_id, t)
-    if regra is not None and _regra_ficou_obsoleta(user_id, regra[0], regra[1], regra[2]):
-        regra = None
+    # Percorre TODAS as regras que casam, na ordem de precedência, e fica com a
+    # primeira que não estiver obsoleta. Descartar só a primeira e desistir do
+    # passo faria uma regra deliberada mais curta perder a vez para o B2.
+    #
+    # A lista de categorias é carregada UMA vez e passada adiante: sem isso a
+    # verificação consultaria o banco por candidata.
+    #
+    # E o bloco inteiro degrada: se a consulta de metadado falhar, a regra vale.
+    # É o mesmo contrato do B2 abaixo, que já trata exceção devolvendo None — e
+    # a alternativa é deixar a exceção subir pelo handler e o lançamento do
+    # usuário não ser gravado por causa de um hiccup de banco.
+    regra = None
+    try:
+        candidatas = get_memorized_rules(user_id, t)
+    except Exception:
+        candidatas = []
+
+    if candidatas:
+        # Degradação: se a checagem de obsolescência falhar, vale a regra de
+        # maior precedência — o comportamento de antes deste guard. É o mesmo
+        # contrato do B2 abaixo, que já devolve None em exceção; a alternativa
+        # seria a exceção subir pelo handler e o lançamento do usuário não ser
+        # gravado por causa de um hiccup de banco.
+        regra = candidatas[0]
+        try:
+            nomes_custom = list_custom_category_names(user_id) or []
+            for cand in candidatas:
+                if not _regra_ficou_obsoleta(user_id, cand[0], cand[1], cand[2],
+                                             nomes=nomes_custom):
+                    regra = cand
+                    break
+            else:
+                regra = None          # todas obsoletas: cede ao B2
+        except Exception:
+            pass
+
     cat = regra[1] if regra else None
     if cat:
         # A regra guarda a categoria NORMALIZADA (sem acento) — é índice interno.

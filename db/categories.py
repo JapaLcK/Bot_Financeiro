@@ -119,19 +119,34 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
 
 
 def get_memorized_rule(user_id: int, memo: str):
-    """A regra memorizada que bate com o texto: `(keyword, categoria, criada_em)`.
+    """A PRIMEIRA regra memorizada que bate com o texto, na ordem de precedência."""
+    todas = get_memorized_rules(user_id, memo)
+    return todas[0] if todas else None
 
-    Existe porque quem consome precisa do KEYWORD, não só do destino: é ele que
-    diz se a regra ficou obsoleta depois que o usuário criou uma categoria que
-    passou a ser dona daquele termo (`infer_category`, passo B). O
-    `get_memorized_category` delega para cá — a busca é uma só (§0.7).
+
+def get_memorized_rules(user_id: int, memo: str) -> list[tuple[str, str, object]]:
+    """TODAS as regras que batem com o texto: `(keyword, categoria, criada_em)`.
+
+    Ordenadas por comprimento do keyword, que é a precedência de sempre. A lista
+    inteira — e não só a primeira — porque quem consome precisa poder DESCARTAR
+    a primeira sem perder as seguintes: uma regra obsoleta (a categoria que hoje
+    é dona daquele termo nasceu depois dela) não pode fazer o passo B inteiro
+    ser pulado, senão uma regra deliberada mais curta que também casa perde a
+    vez para o passo B2.
+
+    O `keyword` vem junto porque é ele que responde a pergunta da obsolescência,
+    e o `created_at` porque é ele que separa regra velha de escolha deliberada.
+    `get_memorized_category` e `get_memorized_rule` delegam para cá — a busca é
+    uma só (§0.7).
     """
     from utils_text import normalize_text, contains_word  # import local pra evitar loop circular
 
     ensure_user(user_id)
     memo_norm = normalize_text(memo or "")
     if not memo_norm:
-        return None
+        return []
+
+    achadas: list[tuple[str, str, object]] = []
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -151,9 +166,10 @@ def get_memorized_rule(user_id: int, memo: str):
         if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
             destino = (category or "").strip()
             criada_em = r.get("created_at") if isinstance(r, dict) else r[2]
-            return (keyword, destino, criada_em) if destino else None
+            if destino:
+                achadas.append((keyword, destino, criada_em))
 
-    return None
+    return achadas
 
 
 def _grava_regra(user_id: int, keyword: str, category: str) -> None:

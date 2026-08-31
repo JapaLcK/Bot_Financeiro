@@ -393,3 +393,54 @@ def test_reconciliacao_nao_consulta_categorias_por_regra():
         f"{len(leituras_de_categoria)} leituras de user_categories para 12 regras — "
         f"está consultando por regra"
     )
+
+
+def test_regra_obsoleta_nao_apaga_a_regra_valida_mais_curta():
+    """Descartar a primeira regra não pode pular o passo B inteiro.
+
+    As regras são consultadas por comprimento de keyword. Se a mais longa está
+    obsoleta e uma mais curta é escolha deliberada, quem tem de ganhar é a
+    deliberada — não o passo B2. Antes, o passo inteiro era pulado.
+    """
+    uid = _uid()
+    upsert_category_rule(uid, "cafe especial", "alimentacao")   # antiga, vai obsoletar
+    create_user_category(uid, "cafe")                            # passa a ser dona do termo
+    create_user_category(uid, "lazer do fim de semana")
+    upsert_category_rule(uid, "cafe", "lazer do fim de semana")  # deliberada, posterior
+
+    # desfaz a reconciliação da regra longa, para ela continuar obsoleta
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update user_category_rules "
+            "   set category='alimentacao', created_at = now() - interval '90 days' "
+            " where user_id=%s and keyword='cafe especial'",
+            (uid,),
+        )
+        conn.commit()
+
+    resultado = infer_category(uid, "gastei 15 com cafe especial", allow_ai=False)
+    assert normalize_text(resultado.category) == "lazer do fim de semana", (
+        f"a regra deliberada mais curta perdeu a vez: {resultado.category!r} "
+        f"(reason={resultado.reason})"
+    )
+
+
+def test_falha_ao_checar_obsolescencia_nao_derruba_o_lancamento(monkeypatch):
+    """Hiccup na consulta de metadado não pode impedir o gasto de ser gravado.
+
+    O passo B2 já degrada devolvendo None em exceção. O guard novo tem de ter o
+    mesmo contrato: na dúvida, vale a regra — nunca estourar pelo handler.
+    """
+    import core.services.category_service as cs
+
+    uid = _uid()
+    upsert_category_rule(uid, "cafe", "alimentacao")
+
+    def _explode(*a, **k):
+        raise RuntimeError("falha transitória de banco")
+
+    monkeypatch.setattr(cs, "list_custom_category_names", _explode)
+    resultado = cs.infer_category(uid, "gastei 15 com cafe", allow_ai=False)
+    assert normalize_text(resultado.category) == "alimentacao", (
+        f"a falha de metadado mudou o resultado: {resultado.category!r}"
+    )
