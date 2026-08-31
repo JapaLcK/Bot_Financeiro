@@ -478,10 +478,11 @@ def cena_9_quanto_gastei():
         DISCREPANCIAS.append(
             "Item 9: 'qto gastei ontem' respondeu 'você não teve gastos ontem' com um gasto real "
             "seedado pra ontem (via 'ontem gastei 90 no mercado', mesmo user, turno anterior). "
-            "CAUSA RAIZ (investigada e confirmada, não corrigida — mudança de infra fora do escopo "
-            "deste piloto): a sessão do Postgres não tem timezone fixado em NENHUM lugar do app "
-            "(sem `SET TIME ZONE` em db/connection.py). O app grava datas relativas ('ontem') "
-            "usando America/Sao_Paulo (utils_date.today_tz()), mas ao ler de volta um `timestamptz`, "
+            "CAUSA RAIZ (diagnosticada aqui; CORRIGIDA depois em utils_date.align_process_tz, "
+            "que escreve PGTZ = fuso do app e põe a sessão de TODA conexão libpq nesse fuso): na "
+            "época a sessão do Postgres não tinha timezone fixado em lugar nenhum do app. O app "
+            "grava datas relativas ('ontem') usando America/Sao_Paulo (utils_date.today_tz()), "
+            "mas ao ler de volta um `timestamptz`, "
             "psycopg reinterpreta o instante sob o timezone DA SESSÃO — nesta máquina, "
             "America/New_York (herdado do SO, `SHOW timezone` confirma). Medido direto: um "
             "lançamento gravado com criado_em='2026-08-19 00:00 -03:00' (correto, meia-noite em "
@@ -489,8 +490,8 @@ def cena_9_quanto_gastei():
             "Isso não é específico da IA: qualquer código que compara `criado_em.date()` (relatórios, "
             "'hoje'/'ontem', vencimento de fatura, contas a pagar) está sujeito ao mesmo erro sempre "
             "que o timezone da sessão do Postgres divergir de America/Sao_Paulo o suficiente pra "
-            "cruzar meia-noite. Não verificado se produção (Railway) tem esse problema — depende do "
-            "timezone configurado lá, que não foi possível checar deste ambiente."
+            "cruzar meia-noite. A produção TINHA o problema: a sessão do Railway era `Etc/UTC` "
+            "(medido em 27/08/2026 08:46 UTC), a pior faixa possível para o -03 de São Paulo."
         )
 
     sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "🔍")

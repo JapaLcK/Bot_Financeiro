@@ -10,7 +10,10 @@ from utils_text import (
     fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
     merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS,
 )
-from utils_date import day_tz, extract_date_from_text, today_tz, parse_period_from_text, month_range_today
+from utils_date import (
+    launch_day, extract_date_from_text, today_tz, parse_period_from_text,
+    month_range_today,
+)
 from core.services.category_service import infer_category, learn_from_inference
 from parsers import (
     parse_receita_despesa_natural,
@@ -608,11 +611,16 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         # formata data de forma amigável
         if criado is not None:
             try:
-                # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
-                # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São
-                # Paulo saía aqui como o dia SEGUINTE — enquanto "liste <categoria>"
-                # (`list_launches_by_category`, mesma fonte) dizia o dia certo.
-                d = day_tz(criado) if hasattr(criado, "date") else __import__("datetime").datetime.fromisoformat(str(criado)).date()
+                # `launch_day` (utils_date), não `.date()` nem `day_tz` cru: o
+                # `.date()` devolve o dia no fuso da SESSÃO do Postgres, que ERA
+                # UTC no Railway — 21:30 em São Paulo saía como o dia SEGUINTE
+                # (hoje a sessão segue o app, `utils_date.align_process_tz`) — e o
+                # `day_tz` sozinho converte um instante que a linha SEM HORA não
+                # tem (Open Finance legado, ver `launch_day`). Mesma função de
+                # `list_launches_by_category`, senão as duas portas divergem.
+                d = (launch_day(criado, r.get("posted_at"), r.get("has_time", True))
+                     if hasattr(criado, "date")
+                     else __import__("datetime").datetime.fromisoformat(str(criado)).date())
                 if d == today:
                     data_str = "hoje"
                 elif d == today - timedelta(days=1):

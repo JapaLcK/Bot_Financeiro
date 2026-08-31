@@ -1025,8 +1025,10 @@ def test_route_clarification_valor_completa_lancamento(user_id):
     assert "despesa registrada" in response.lower()
     assert round(float(get_balance(user_id)), 2) == -150.00
     assert get_pending_action(user_id) is None  # clarification consumida
-    # data preservada (02/06) — normaliza pro fuso do app, já que o driver
-    # devolve o timestamptz no fuso da sessão (varia por máquina/CI).
+    # data preservada (02/06) — normaliza pro fuso do app. O driver devolve o
+    # timestamptz no fuso da SESSÃO, que desde `utils_date.align_process_tz` é o
+    # do app em qualquer máquina; a conversão explícita fica porque o que se
+    # afirma aqui é o dia de São Paulo, não o dia da configuração do servidor.
     from zoneinfo import ZoneInfo
     sp = list_launches(user_id, limit=1)[0]["criado_em"].astimezone(ZoneInfo("America/Sao_Paulo"))
     assert sp.month == 6 and sp.day == 2

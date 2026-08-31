@@ -35,13 +35,18 @@ janela nenhum, e `get_budgets_status_for_month(user_id, month=None)` tem
 que o teste alcança é a data de GRAVAÇÃO, e por isso eles são gravados em
 `date.today()`; os outros leitores aceitam janela,
 o teste a controla (o donut por ano/mês, os de período pelo `resolve_window`) e a
-gravação deles vai em `today_tz()`. As duas âncoras divergem sempre que o fuso
+gravação deles vai em `today_tz()`. As duas âncoras divergiam sempre que o fuso
 do APP ≠ o fuso do PROCESSO: `date.today()` não conhece `REPORT_TIMEZONE`, então
-definir só ela já separa as duas (medido, `REPORT_TIMEZONE=Etc/GMT+12` às
+definir só ela separava as duas (medido, `REPORT_TIMEZONE=Etc/GMT+12` às
 08:52 UTC de 2026-08-28: `date.today()=2026-08-28`, `today_tz()=2026-08-27`), e o
-CI, que não define nenhuma das duas, roda em UTC contra o default
-America/Sao_Paulo de `today_tz()` — já `TZ` sozinha NÃO separa, porque o `_tz()`
-(utils_date.py:13) a lê no fallback e move as duas pontas juntas.
+CI, que não define nenhuma das duas, rodava em UTC contra o default
+America/Sao_Paulo de `today_tz()` — já `TZ` sozinha NÃO separava, porque o `_tz()`
+a lê no fallback e movia as duas pontas juntas.
+`utils_date.align_process_tz` fechou essa divergência na raiz: ele escreve
+`TZ` = fuso do app no ambiente e chama `tzset()`, então `date.today()` PASSA a
+conhecer o `REPORT_TIMEZONE` e as duas âncoras concordam por construção — nesta
+máquina, no CI e na produção. O parágrafo acima descreve por que a distinção
+entre as duas âncoras existe no arquivo, não um risco vivo.
 
 Divergir como DATA não basta para o teste ficar vermelho: os dois leitores
 ancorados em `date.today()` filtram por `date_part('year'/'month')`, então

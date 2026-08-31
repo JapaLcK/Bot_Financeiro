@@ -29,30 +29,36 @@ Medido na produção (Railway) em 27/08/2026 21:50 UTC: `count(*) filter (where
 tipo='saida')` = 0 e o mesmo para 'entrada' em `launches`. Nenhum número de
 usuário muda hoje; isto fecha a classe, não apaga um incêndio.
 
-Referencial de data: `date.today()` — fuso do PROCESSO — governa a JANELA, não o
-rótulo do mês. É dele que saem o `range_start` do `get_spending_trend`
+Referencial de data: `date.today()` governa a JANELA, não o rótulo do mês. Ele é
+o fuso do PROCESSO, que desde `utils_date.align_process_tz` é o mesmo do app —
+antes disso os dois divergiam, e é essa divergência que o parágrafo abaixo
+descreve. É dele que saem o `range_start` do `get_spending_trend`
 (`db/accounts.py:367,377`), o `resolve_window` (`db/analytics.py:77`) e as chaves
 de bucket do `compute_evolution` (`db/analytics.py:335`). Por isso o arquivo
 inteiro grava e lê por ele, com janela explícita de `resolve_window(months=1)` em
 vez de `month_range_today()`: gravar em `today_tz()` — que cai em
 `America/Sao_Paulo` quando ninguém define `REPORT_TIMEZONE`/`TZ`, e o workflow do
-CI não define (`utils_date.py:13`) — e ler por uma janela de `date.today()` põe a
-escrita fora da janela e fora do mês procurado quando os dois apontam dias
+CI não define (`utils_date._tz`) — e ler por uma janela de `date.today()` punha a
+escrita fora da janela e fora do mês procurado quando os dois apontavam dias
 diferentes (31/08 23:30 em São Paulo já é 01/09 em UTC). Era essa a flakiness que
-este commit fecha, e ela não precisa da virada do mês para existir.
+este commit fechou, e ela não precisava da virada do mês para existir. Hoje as
+duas âncoras concordam por construção (`align_process_tz` escreve `TZ` e chama
+`tzset()`), então a disciplina deste arquivo virou defesa em profundidade.
 
 O RÓTULO do mês, esse, vem de outro lugar em cada leitor, e em nenhum deles é o
 processo: `get_spending_trend` converte `criado_em at time zone
 'America/Sao_Paulo'`, hardcoded (`db/accounts.py:392-393`, o parâmetro em `:413`),
 e `compute_evolution` usa `DATE_TRUNC('month', criado_em)` sobre um `timestamptz`
 (`db/schema.py:216`), isto é, o fuso da SESSÃO do Postgres (`db/analytics.py:309`)
-— o mesmo instante pode sair em meses diferentes nos dois. O que protege os
-testes disso é a HORA de escrita: sempre no meio do dia (10h a 14h), com folga
+— que desde `align_process_tz` também é `America/Sao_Paulo`, então os dois agora
+concordam; antes o mesmo instante podia sair em meses diferentes. O que protege
+os testes disso é a HORA de escrita: sempre no meio do dia (10h a 14h), com folga
 larga sobre os offsets em jogo. Quem mexer nessas horas mexe nessa folga.
 
 Ou seja, não há um referencial só: este arquivo ancora a JANELA, que é o que está
-ao alcance dele. O `America/Sao_Paulo` hardcoded e o fuso da sessão continuam
-fora — consertá-los é mudança em `db/*`, não aqui.
+ao alcance dele. O `America/Sao_Paulo` hardcoded do `get_spending_trend` continua
+fora — consertá-lo é mudança em `db/*`, não aqui. O fuso da SESSÃO saiu de fora:
+ele passou a ser o do app, imposto pelo processo (`align_process_tz`).
 
 Controle NEGATIVO: volte `{TIPO_CANON_SQL} as tipo` + o filtro para
 `tipo, valor` + `and tipo in ('despesa','receita')` em `get_spending_trend`

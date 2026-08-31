@@ -4,6 +4,7 @@ import re
 import db
 from utils_text import fmt_brl, fmt_rate
 from core.dashboard_links import build_dashboard_link
+from core.handlers import pending as h_pending
 from core.services.plan_limits import PlanLimitExceeded
 import logging
 
@@ -330,7 +331,12 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
     amount = entities.get("amount")
 
     if not amount or float(amount) <= 0:
-        return list_investments(user_id, "Qual valor você quer aportar?")
+        # #136: a pergunta guarda o contexto. Sem isso "500 reais" era
+        # reclassificado do zero e virava despesa avulsa. O NOME do investimento
+        # (logo abaixo) já armava pendência desde antes — era só o valor que não.
+        return list_investments(user_id, h_pending.pergunta_guardando_contexto(
+            user_id, "investments.deposit", entities,
+            "Qual valor você quer aportar?", text, falta="amount"))
 
     # Resolve o NOME antes de qualquer coisa. Sem nome, ou com nome que não bate,
     # o bot pergunta E FICA ESPERANDO (pendência armada) — antes ele perguntava e
@@ -474,9 +480,14 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     want_all = bool(_WITHDRAW_ALL_RX.search(text or ""))
 
     if not investment_name:
-        return list_investments(user_id, "De qual investimento você quer resgatar?")
+        return list_investments(user_id, h_pending.pergunta_guardando_contexto(
+            user_id, "investments.withdraw", entities,
+            "De qual investimento você quer resgatar?", text, falta="investment_name"))
     if not want_all and (not amount or float(amount) <= 0):
-        return list_investments(user_id, "Qual valor você quer resgatar?")
+        return list_investments(user_id, h_pending.pergunta_guardando_contexto(
+            user_id, "investments.withdraw",
+            {**(entities or {}), "investment_name": investment_name},
+            "Qual valor você quer resgatar?", text, falta="amount"))
 
     from core.services import funding
 

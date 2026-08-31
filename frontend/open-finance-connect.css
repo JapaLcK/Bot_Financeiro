@@ -1,0 +1,120 @@
+/* ==========================================================================
+   open-finance-connect.css — modal de "conectar banco" do Open Finance.
+
+   Extraído do <style> inline do settings.html para que a tela de Configurações
+   e o wizard de primeira configuração compartilhem o mesmo componente.
+
+   Servido por @router.get("/open-finance-connect.css") em
+   frontend/routes/static_pages.py.
+
+   Só vieram as regras VIVAS. Ficaram para trás nove que nenhum markup do
+   repositório aplica (medido: zero ocorrências em frontend/*.html e *.js):
+   `.bank-list`, as três `.bank-row[data-bank="…"]`, as três
+   `.bank-logo.nubank|.itau|.bradesco` e `.bankpick-open-btn` (+ :hover) —
+   resquícios de um desenho anterior em que a escolha do banco era uma lista
+   fixa de três instituições, antes de a lista passar a vir da Pluggy.
+
+   Depende dos tokens da página hospedeira (--surface, --border, --ink, --accent,
+   --radius-*, --ease…). O settings.html já os declara; a página do wizard
+   precisa declará-los quando passar a usar este arquivo (PR2).
+   ========================================================================== */
+
+/* ── Linha de banco ──────────────────────────────────────────────────────── */
+
+.bank-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,.04);
+  padding: 11px 12px;
+  text-align: left;
+  transition: background .16s var(--ease), border-color .16s var(--ease), transform .15s var(--ease-spring), box-shadow .16s var(--ease);
+}
+.bank-row:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+
+.bank-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-weight: 860;
+  font-size: .78rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.bank-info { flex: 1; min-width: 0; }
+.bank-name { font-weight: 780; font-size: .88rem; color: var(--ink); }
+.bank-meta { font-size: .71rem; color: var(--faint); margin-top: 2px; }
+
+.bank-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: .6rem;
+  color: transparent;
+  flex-shrink: 0;
+  transition: all .18s var(--ease-spring);
+}
+.bank-row.active .bank-check {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+
+.bankpick-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9999;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.bankpick-overlay.open { display: flex; }
+.bankpick-modal {
+  width: 100%; max-width: 560px; max-height: 82vh; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-md);
+}
+.bankpick-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--border); }
+.bankpick-head-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.bankpick-title { font-weight: 860; font-size: 1.1rem; color: var(--ink); }
+.bankpick-sub { font-size: .78rem; color: var(--faint); margin-top: 2px; }
+.bankpick-x {
+  width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 1rem; flex-shrink: 0;
+}
+.bankpick-x:hover { border-color: var(--border-hover); color: var(--ink); }
+.bankpick-search-wrap { margin-top: 14px; position: relative; }
+.bankpick-search-wrap > span { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+.bankpick-search-wrap input {
+  width: 100%; padding: 12px 14px 12px 40px; border-radius: var(--radius-md);
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: .9rem; outline: none;
+}
+.bankpick-search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bankpick-list { overflow-y: auto; padding: 6px 12px 10px; flex: 1 1 auto; min-height: 0; }
+.bankpick-alpha {
+  position: sticky; top: 0; background: var(--surface); color: var(--faint);
+  font-size: .72rem; font-weight: 860; letter-spacing: .06em; padding: 10px 8px 5px; z-index: 2;
+}
+.bankpick-row { width: 100%; margin-bottom: 4px; text-align: left; }
+.bankpick-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.bankpick-logo { position: relative; overflow: hidden; background: #fff; }
+.bankpick-logo img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; padding: 5px; background: #fff; border-radius: inherit;
+}
+.bankpick-empty { padding: 34px 18px; text-align: center; color: var(--faint); font-size: .88rem; }
+.bankpick-foot {
+  padding: 14px 18px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; background: var(--surface-2);
+}
+.bankpick-count { font-size: .82rem; color: var(--muted); }
+.bankpick-count strong { color: var(--ink); }
+.bankpick-go { margin: 0 0 0 auto; width: auto; padding: 12px 22px; }
+.bankpick-go:disabled { opacity: .45; cursor: not-allowed; }

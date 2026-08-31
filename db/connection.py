@@ -191,11 +191,36 @@ TIPO_CANON_SQL = (
 
 
 # `has_time`: dá pra confiar na HORA do lançamento ou só na data?
-# Quem decide se o front escreve "10/03, 00:30" ou só "10/03" — as duas telas que
-# leem `has_time` (`dashboard.js` e `home.html`) saem daqui. A lista do bot
-# (`list_launches_by_category`) NÃO usa esta expressão: ela nunca imprime hora, e
-# o dia dela vem do `day_tz` em Python (utils_date), não de um `::date` em SQL —
-# que sairia no fuso da SESSÃO do Postgres, não em America/Sao_Paulo.
+# Decide se quem lê escreve "10/03, 00:30" ou só "10/03". QUAIS linhas caem em
+# cada galho está no docstring de `launch_day` (utils_date), que é o dono dessa
+# enumeração — aqui não se repete a lista, porque as cópias divergiram (§0.7).
+#
+# Quem PRODUZ `has_time` — 3 queries, 5 sites, e só 3 deles passam por este CASE:
+#   - Visão Geral do dashboard (query 4): a perna de `launches` usa o CASE
+#     (frontend/finance_bot_websocket_custom.py:520); a de CRÉDITO fixa `true` à
+#     mão, com `posted_at` NULO e `criado_em` = `credit_transactions.created_at`
+#     (:461, dentro do `credit_union_sql`);
+#   - `list_launches` (db/accounts.py:128), que lê só `launches`;
+#   - `list_launches_by_category`: a perna de `launches` usa o CASE
+#     (db/accounts.py:836); a de CRÉDITO fixa `false`, com
+#     `posted_at` = `purchased_at` (:791).
+# As duas pernas de CRÉDITO respondem coisas DIFERENTES sobre a mesma compra
+# (instante em que a linha foi gravada × dia em que a compra aconteceu), então o
+# dia pode divergir entre as duas telas — medido, e descrito onde cada uma mora
+# (docstring de `list_launches_by_category`; frontend/dashboard.js).
+# Há um 6º site, morto: `true AS has_time` dentro do `COUNT(*)` da query 3
+# (fbwc:498) — a coluna nunca sai da subquery.
+# Quem LÊ — 4 sites em 3 arquivos, e um deles NÃO é tela: `fmtLaunchWhen` mais o
+# editor do dashboard (frontend/dashboard.js:483 e :8353), o `fmtLaunchTimeHome`
+# do home.html (frontend/home.html:774), e o texto do WhatsApp
+# (core/handlers/launches.py:620).
+#
+# O dia continua saindo de `launch_day`, em Python, e não de um `::date`: o
+# `has_time`/`posted_at` decide QUAL campo manda (data × instante), coisa que
+# nenhum cast resolve. O que mudou é o motivo — desde
+# `utils_date.align_process_tz` a sessão do Postgres roda no fuso do app (via
+# `PGTZ`, sem uma linha aqui), então um `::date` já não devolveria o dia errado;
+# ele só continuaria respondendo a pergunta errada.
 LAUNCH_HAS_TIME_SQL = """
         CASE
           WHEN source = 'ofx' THEN false

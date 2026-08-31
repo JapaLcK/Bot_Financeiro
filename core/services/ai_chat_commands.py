@@ -125,7 +125,8 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             if (not _is_confirm
                     and _res.intent != "out_of_scope"
                     and _res.confidence >= 0.55):
-                db.ai_clear_pending_action(user_id)
+                # Abandono: se perdeu o CAS, não havia nada nosso pra abandonar.
+                db.ai_consume_pending_action(user_id, pending)
                 return None
         except Exception as exc:
             logger.warning("guard anti-sequestro do ai_pending falhou: %s", exc)
@@ -164,7 +165,8 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
             # Edge case: tinha pending e o user perdeu o acesso no meio. Limpa
             # pra não deixar o estado preso.
             try:
-                db.ai_clear_pending_action(user_id)
+                # Abandono: retorno ignorado (`pending` garantido não-None por has_pending).
+                db.ai_consume_pending_action(user_id, pending)
             except Exception:
                 pass
         try:

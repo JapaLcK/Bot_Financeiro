@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import db
+from core.handlers import pending as h_pending
 from utils_text import fmt_brl, parse_pocket_deposit_natural
 
 logger = logging.getLogger(__name__)
@@ -70,10 +71,17 @@ def deposit(user_id: int, text: str, entities: dict) -> str:
         pocket_name = entities.get("pocket_name")
         amount      = entities.get("amount")
 
+    # As duas perguntas GUARDAM o contexto (#136). Sem isso a resposta seguinte
+    # era classificada do zero: "200 reais" virava `launches.add` com confiança
+    # 0,95 e gravava uma despesa que ninguém pediu, com a caixinha intacta.
     if not pocket_name:
-        return "Qual caixinha? Tente: *coloquei 200 na caixinha viagem*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "pockets.deposit", entities,
+            "Qual caixinha? Tente: *coloquei 200 na caixinha viagem*", text, falta="pocket_name")
     if not amount or float(amount) <= 0:
-        return "Qual o valor? Tente: *coloquei 200 na caixinha viagem*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "pockets.deposit", {**(entities or {}), "pocket_name": pocket_name},
+            "Qual o valor? Tente: *coloquei 200 na caixinha viagem*", text, falta="amount")
 
     from core.handlers.investments import _pergunta_origem
     from core.services import funding
@@ -219,7 +227,9 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         pocket_name = _pocket_name_from_text(text)
 
     if not pocket_name:
-        return "Qual caixinha? Tente: *retirei 100 da caixinha viagem*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "pockets.withdraw", entities,
+            "Qual caixinha? Tente: *retirei 100 da caixinha viagem*", text, falta="pocket_name")
 
     if want_all:
         try:
@@ -241,7 +251,9 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True, nota=nota_destino)
 
     if not amount or float(amount) <= 0:
-        return "Qual o valor? Tente: *retirei 100 da caixinha viagem*"
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "pockets.withdraw", {**(entities or {}), "pocket_name": pocket_name},
+            "Qual o valor? Tente: *retirei 100 da caixinha viagem*", text, falta="amount")
 
     try:
         launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(

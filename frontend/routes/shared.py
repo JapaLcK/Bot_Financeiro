@@ -110,7 +110,13 @@ def inject_meta_pixel(html_text: str) -> str:
 # Agora o número no HTML é ignorado: reescrevemos `?v=N` no serve-time com um
 # hash do conteúdo do próprio arquivo. Zero bump manual → zero conflito, e a
 # invalidação passa a ser exata (só muda quando o arquivo muda de verdade).
-_ASSET_VER_RE = re.compile(r"(/[A-Za-z0-9_.-]+\.(?:css|js))\?v=\d+")
+# A barra no meio existe por UM asset: `/static/auth-refresh.js`, o único
+# css/js com caminho aninhado em todo o HTML (medido). Sem ela o stamper
+# não alcançava aquela URL, e um cliente rodava o interceptor anterior por
+# até 5 min depois do deploy — com a limpeza de sessão dele desatualizada
+# (Codex, #170). O arquivo mora em `frontend/static/` para o caminho da
+# URL bater com o do disco, e o lookup abaixo resolver sem caso especial.
+_ASSET_VER_RE = re.compile(r"(/[A-Za-z0-9_./-]+\.(?:css|js))\?v=\d+")
 
 
 @functools.lru_cache(maxsize=256)

@@ -2,18 +2,22 @@
 db/accounts.py — Saldo, lançamentos e importação OFX.
 """
 import json
+import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 from psycopg.types.json import Json, Jsonb
 
 import db_support as _db_support
-from utils_date import _tz, day_tz
+from utils_date import _tz, day_tz, launch_day
 
 from .connection import (
-    get_conn, cat_key_sql, TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+    get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
+    TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .users import ensure_user, ensure_user_tx
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -114,8 +118,17 @@ def list_launches(user_id: int, limit: int = 10):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em
+                f"""
+                -- `posted_at` + `has_time`: MESMO par (e mesmo CASE) da lista de
+                -- uma categoria. Sem eles as duas portas divergiam em um dia nas
+                -- linhas sem hora confiável — aqui elas são exatamente as que o
+                -- CASE de `LAUNCH_HAS_TIME_SQL` marca como falsas. Compra no
+                -- crédito não é uma delas: ela não grava linha nenhuma em
+                -- `launches` (`add_credit_purchase`, db/cards.py), e esta query
+                -- lê só `launches`. A divergência é a que `launch_day`
+                -- (utils_date) fecha.
+                select id, user_seq, tipo, valor, alvo, nota, categoria, source, criado_em,
+                       posted_at, {LAUNCH_HAS_TIME_SQL} as has_time
                 from launches
                 where user_id=%s
                 order by criado_em desc, id desc
@@ -230,6 +243,30 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
     return changed
 
 
+class LaunchDateLockedError(ValueError):
+    """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance)."""
+
+
+# As duas condições PERMANENTES de `delete_launch_and_rollback` que o usuário
+# precisa distinguir. São `ValueError` por tipo, não por código, porque o texto
+# em PT-BR é user-facing por um caminho: o `HTTPException(400, detail=str(exc))`
+# do dashboard (`frontend/finance_bot_websocket_custom.py`). Trocar por código
+# faria o modal do app mostrar `LAUNCH_NO_EFFECTS` cru; discriminar pelo tipo
+# mantém `str(e)` byte a byte igual.
+#
+# Os outros `ValueError` da função (delta_pocket/delta_invest sem nome, dado
+# corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma causa
+# inesperada — ramo técnico, com log e retry — então nomeá-los seria classe sem
+# chamador.
+
+class LaunchNoEffects(ValueError):
+    """O lançamento não guarda `efeitos`, então não dá pra reverter o saldo."""
+
+
+class InvestmentLotHasWithdrawal(ValueError):
+    """O lote do aporte já teve resgate. TEMPORÁRIA: apagar o resgate destrava."""
+
+
 def update_launch_fields(
     user_id: int,
     launch_id: int,
@@ -265,6 +302,21 @@ def update_launch_fields(
     if criado_em is not None:
         sets.append("criado_em=%s")
         params.append(criado_em)
+        # `posted_at` anda JUNTO com `criado_em`. Onde não há hora confiável é
+        # ELE quem manda no dia exibido — no back (`launch_day`, utils_date) e no
+        # front (`fmtLaunchWhen`: dashboard.js:485, home.html:776). Sem isto,
+        # editar a data de um extrato devolvia 200, mudava o banco e a tela
+        # seguia mostrando a data VELHA, sem caminho de conserto.
+        # Depois da recusa abaixo sobra só o extrato: `posted_at` não-nulo é
+        # gravado por dois escritores, `import_ofx_launches_bulk` (source='ofx',
+        # nesta mesma pasta) e o importador do Open Finance
+        # (db/open_finance.py:1247) — e a linha do OF nem chega aqui.
+        # Não é chave de idempotência de importador nenhum (OFX/extrato dedupam
+        # por `external_id`, montado a partir do ARQUIVO; o Open Finance por
+        # `provider_transaction_id`). NULL continua NULL: lançamento manual não
+        # tem data de postagem.
+        sets.append("posted_at = case when posted_at is null then null else %s end")
+        params.append(day_tz(criado_em))
     if not sets:
         return False
 
@@ -272,6 +324,28 @@ def update_launch_fields(
     sql = f"update launches set {', '.join(sets)} where user_id=%s and id=%s"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if criado_em is not None:
+                # DONO DA DATA numa linha do Open Finance é o PROVEDOR, não o
+                # usuário. `sync_imported_open_finance_updates`
+                # (db/open_finance.py:1559-1588) compara
+                # `coalesce(posted_at, criado_em::date)` com o
+                # `transaction_date` do espelho e, quando diferem, REESCREVE
+                # `posted_at` com a data do banco — e isso roda em TODA
+                # sincronização Pluggy (core/services/pluggy_sync.py:218).
+                # Medido: editar 10/03 → 15/04 devolvia 200 e a sync seguinte
+                # voltava pra 10/03. Aceitar seria fingir sucesso; recusar é o
+                # que a tela consegue explicar. (Nota/descrição continuam
+                # editáveis: a sync não toca em `nota`/`alvo`.)
+                cur.execute(
+                    "select coalesce(source,'') as source from launches where user_id=%s and id=%s",
+                    (user_id, launch_id),
+                )
+                row = cur.fetchone()
+                if row and row["source"] == "open_finance":
+                    raise LaunchDateLockedError(
+                        "A data deste lançamento vem do banco conectado e é "
+                        "atualizada por ele. Dá pra editar a descrição e a categoria."
+                    )
             cur.execute(sql, tuple(params))
             changed = (cur.rowcount or 0) == 1
         conn.commit()
@@ -577,6 +651,8 @@ def list_launches_by_category(
     end_date: date | None = None,
     tipo: str | None = None,
     limit: int = 20,
+    include_internal: bool = True,
+    after: tuple | None = None,
 ) -> tuple[list[dict], dict]:
     """Lançamentos de UMA categoria, mais recente primeiro (launches + cartão).
 
@@ -607,17 +683,88 @@ def list_launches_by_category(
       vazia (medido). Chega em produção pela importação de cartão do Open
       Finance, que grava `credit_transactions.categoria` NULO.
     - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
-      `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
-      lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
+      `is_internal_movement` é filtrado só quando `include_internal=False`. O
+      default é True (comportamento de sempre): senão "liste os lançamentos em
+      investimento_aporte" voltaria vazio. Consequência do default: numa
       categoria de movimento interno (pagamento_fatura, aporte) o total daqui é
       MAIOR que o de `sum_spent_in_category_period`, que filtra
       `is_internal_movement = false` (`sum_spent_in_category_period`, db/budgets.py).
+      `include_internal=False` existe pro dashboard: quando a lista é aberta
+      CLICANDO numa linha da Distribuição do mês, ela tem que mostrar o mesmo
+      conjunto que aquela linha somou — e o donut (query 6 de
+      finance_bot_websocket_custom.py e `get_top_expense_categories`) filtra
+      `is_internal_movement = false`. Sem isso a linha dizia R$ 50 e o rodapé da
+      lista dizia R$ 750 pela mesma categoria e o mesmo mês.
 
     Retorna `(rows, resumo)`:
-    - rows: [{tipo, valor, categoria, descricao, data, fonte, user_seq}], no
-      máximo `limit`. `fonte` = 'launches' | 'credito'; `user_seq` é None no
-      crédito (não existe "#N" pra apagar). `data` é um `date`.
-    - resumo: {"n_total", "despesa", "receita"} sobre TODAS as linhas que casam,
+    - rows: [{tipo, valor, categoria, descricao, nota, alvo, data, criado_em,
+      posted_at, has_time, fonte, user_seq, id, is_internal_movement}], no
+      máximo `limit`.
+      `fonte` = 'launches' | 'credito'; `user_seq` é None no crédito (não existe
+      "#N" pra apagar). `id` pareia com `user_seq`: é o `launches.id` na perna de
+      launches e NULO na de crédito — de propósito. As duas tabelas têm
+      sequências próprias, então o id COLIDE, e a perna de crédito fixa
+      `tipo='despesa'` (ver acima): um `credit_transactions.id` saindo daqui com
+      tipo='despesa' faria o chamador rotear o delete pro endpoint de launches e
+      apagar OUTRO registro. Nulo na origem = colisão impossível. `data` é o dia
+      por `launch_day` (utils_date): o `posted_at` gravado quando `has_time` é
+      falso, senão o dia de PAREDE de `criado_em` (`day_tz`); nunca um `::date`
+      em SQL, que responderia a pergunta errada onde a linha não tem hora
+      (mesmo agora que a sessão do Postgres roda no fuso do app, por
+      `utils_date.align_process_tz`). `criado_em` é o instante cheio (o editor do dashboard
+      preenche "Data e hora" com ele — `data` sozinho abria o campo vazio).
+      Na perna de `launches`, `posted_at` + `has_time` são o mesmo par (e o mesmo
+      `LAUNCH_HAS_TIME_SQL`) que a Visão Geral usa na query 4 do dashboard: sem
+      eles o front caía sempre no galho "só data" do `fmtLaunchWhen` e a mesma
+      despesa saía "10/03, 00:30" numa tela e "09/03" na outra. Na perna de
+      CRÉDITO as duas queries DIVERGEM: aqui `has_time=false` e o dia é o da
+      COMPRA (`posted_at` = `purchased_at`, que é `date`); lá
+      (finance_bot_websocket_custom.py:461) é `true` com `posted_at` nulo e
+      `criado_em` = `credit_transactions.created_at`, o instante em que a LINHA
+      foi gravada (`created_at timestamptz default now()`, db/schema.py:604).
+      Quando os dois caem em dias diferentes — compra lançada depois, importação
+      de cartão do Open Finance — a MESMA compra sai com dia diferente nas duas
+      telas (medido: compra em 25/08 gravada em 28/08 → "25/08" aqui, "28/08,
+      HH:MM" na Visão Geral). Alinhar as duas é mudança de COMPORTAMENTO, não
+      deste comentário.
+    - `categoria` também vem CRUA (NULL/'' saem como estão), pelo mesmo motivo
+      de `nota`/`alvo` abaixo: o `coalesce(..., 'outros')` era um RÓTULO de
+      mensagem de WhatsApp, e desde que o dashboard abre o editor por esta lista
+      ele virava DADO — quem editasse só a nota ou a data de um lançamento sem
+      categoria mandava 'outros' de volta no PATCH e categorizava a transação
+      sem pedir. A tela decide como mostrar o vazio (dashboard.js), o SELECT não
+      decide o que fica gravado.
+    - `nota` e `alvo` vêm CRUS, cada um na sua chave. `descricao` continua sendo
+      o rótulo pronto (`coalesce(alvo, nota, '—')`) que o WhatsApp imprime, mas
+      ele NÃO serve pra pré-preencher um formulário de edição: numa linha com os
+      dois preenchidos (recurring_charger.py, db/bills.py, db/cards.py) ele é o
+      ALVO, e salvar o formulário gravava o alvo por cima da nota real.
+    `after` (default None, aditivo) é o "carregar mais" do dashboard: a tupla
+    `(dt, fonte, ord_id)` da ÚLTIMA linha da página anterior, e a próxima página
+    é `where (dt, fonte, ord_id) < after` na mesma ordem total do `order by`.
+    `after` é seguro porque entrou no FIM da assinatura: nenhum parâmetro que já
+    existia mudou de posição, então nenhum dos 4 chamadores muda de
+    comportamento. São eles `_listar_categoria`, `_total_despesa` e
+    `_total_categoria` (core/handlers/launches.py), que passam
+    `user_id, categoria, start, end` posicionais e `tipo`/`limit` por keyword, e
+    `category_launches_route` (frontend/routes/categories.py), que passa TUDO
+    por keyword.
+
+    Era `offset`, e OFFSET não fecha a corrida que este produto tem TODO DIA: o
+    bot escreve no banco enquanto o dashboard está aberto. Uma linha nova entra
+    ACIMA do corte (a ordem é por data desc) e empurra a fronteira — a página 2
+    repete a última linha da 1 e come outra, com o total dizendo que está tudo
+    lá. Ordem total resolve EMPATE, não deslocamento; só o keyset resolve os
+    dois. Deduplicar no cliente também não serve: ele veria a repetida, nunca a
+    que sumiu.
+
+    O filtro do keyset é aplicado FORA da subquery dos window aggregates, senão
+    `n_total`/`tot_*` passariam a contar só o que sobrou depois do corte e o
+    rodapé "N de M" mentiria a partir da página 2.
+
+    - resumo: {"n_total", "despesa", "receita", "next_after"} sobre TODAS as
+      linhas que casam ("next_after" é a tupla da última linha DESTA página, ou
+      None quando a página veio vazia — é o que o chamador devolve como `after`),
       não só as `limit` devolvidas — os totais vêm de window aggregates, que o
       Postgres calcula ANTES do LIMIT. Sem isso o chamador somaria só as linhas
       exibidas e imprimiria um total errado com cara de total certo.
@@ -637,6 +784,8 @@ def list_launches_by_category(
     if aliases:
         launch_filters += " and tipo = any(%s)"
         params.append(list(aliases))
+    if not include_internal:
+        launch_filters += " and is_internal_movement = false"
     if start_date:
         launch_filters += " and criado_em >= %s"
         params.append(datetime.combine(start_date, datetime.min.time()))
@@ -660,11 +809,26 @@ def list_launches_by_category(
                     union all
                     select 'despesa' as tipo,
                            ct.valor,
-                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
+                           ct.categoria,
                            coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
+                           -- Mesmo texto do `descricao` de propósito: a compra
+                           -- no crédito não tem `alvo` aqui e a linha nunca é
+                           -- editável (id nulo), então `nota` só precisa ser o
+                           -- rótulo que a tela já mostra.
+                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as nota,
+                           null::text as alvo,
                            ct.purchased_at::timestamp as dt,
+                           -- Compra no crédito não tem hora: `purchased_at` é
+                           -- `date` (db/schema.py). has_time=false + posted_at
+                           -- fazem o front imprimir "dd/mm" sem passar por
+                           -- conversão de fuso nenhuma.
+                           ct.purchased_at as posted_at,
+                           false as has_time,
                            'credito' as fonte,
-                           null::int as user_seq
+                           null::int as user_seq,
+                           null::int as id,
+                           ct.id as ord_id,
+                           false as is_internal_movement
                     {credit_from}
                     where ct.user_id = %s
                       and {_cat_ct} = {_arg}
@@ -673,11 +837,23 @@ def list_launches_by_category(
         """
         params += params_credit
 
+    # Keyset. Fica FORA da subquery dos window aggregates (ver docstring) e usa a
+    # comparação de LINHA do Postgres, que é exatamente o `order by` de baixo.
+    after_sql = ""
+    after_params: list = []
+    if after:
+        after_sql = "where (dt, fonte, ord_id) < (%s, %s, %s)"
+        dt_after, fonte_after, ord_after = after
+        after_params = [dt_after, str(fonte_after), int(ord_after)]
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select tipo, valor, categoria, descricao, dt, fonte, user_seq,
+                select * from (
+                select tipo, valor, categoria, descricao, nota, alvo, dt,
+                       posted_at, has_time, fonte,
+                       user_seq, id, ord_id, is_internal_movement,
                        count(*) over () as n_total,
                        coalesce(sum(valor) filter (
                            where tipo in ('despesa', 'saida')) over (), 0) as tot_despesa,
@@ -686,11 +862,18 @@ def list_launches_by_category(
                 from (
                     select tipo,
                            valor,
-                           coalesce(nullif(categoria, ''), 'outros') as categoria,
+                           categoria,
                            coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
+                           nota,
+                           alvo,
                            criado_em as dt,
+                           posted_at,
+                           {LAUNCH_HAS_TIME_SQL} as has_time,
                            'launches' as fonte,
-                           user_seq
+                           user_seq,
+                           id,
+                           id as ord_id,
+                           is_internal_movement
                     from launches
                     where user_id = %s
                       and {_cat} = {_arg}
@@ -699,10 +882,19 @@ def list_launches_by_category(
                       {launch_filters}
                     {credit_sql}
                 ) agg
-                order by dt desc, user_seq desc nulls last
+                ) w
+                {after_sql}
+                -- Ordem TOTAL, e é o que faz o keyset funcionar: `dt desc,
+                -- user_seq desc` empatava todas as linhas de crédito do mesmo dia
+                -- (user_seq é nulo nelas), e sem desempate a comparação de linha
+                -- pula ou repete. `fonte` separa as duas pernas (id colide entre
+                -- as tabelas) e `ord_id` é a PK dentro de cada uma. A ordem
+                -- VISÍVEL não muda: 'launches' > 'credito' no desc, e user_seq
+                -- cresce junto com o id.
+                order by dt desc, fonte desc, ord_id desc
                 limit %s
                 """,
-                (*params, int(limit)),
+                (*params, *after_params, int(limit)),
             )
             rows = cur.fetchall()
 
@@ -710,6 +902,18 @@ def list_launches_by_category(
         "n_total": int(rows[0]["n_total"]) if rows else 0,
         "despesa": float(rows[0]["tot_despesa"] or 0) if rows else 0.0,
         "receita": float(rows[0]["tot_receita"] or 0) if rows else 0.0,
+        # A tupla de ordenação da ÚLTIMA linha desta página = o `after` da
+        # próxima. Sai daqui e não da LINHA porque `ord_id` é o id CRU da tabela
+        # (o do crédito inclusive): o `id` nulo na perna de crédito existe pra um
+        # `credit_transactions.id` não virar handle de delete no dashboard, e uma
+        # chave `ord_id` na linha desfaria isso. O cursor CARREGA esse id em
+        # texto claro (`_fmt_cursor`, frontend/routes/categories.py) — ele é
+        # marcador de página, não handle de linha, e as rotas de crédito são
+        # escopadas por `user_id`, então cursor de terceiro não devolve linha
+        # alheia. Segredo ele não é; sigilo aqui seria criptografia caseira.
+        "next_after": (
+            (rows[-1]["dt"], rows[-1]["fonte"], rows[-1]["ord_id"]) if rows else None
+        ),
     }
     return [
         {
@@ -717,15 +921,24 @@ def list_launches_by_category(
             "valor": float(r["valor"] or 0),
             "categoria": r["categoria"],
             "descricao": r["descricao"],
-            # `day_tz` (utils_date), não `.date()`: o cru devolve o dia no fuso da
-            # SESSÃO do Postgres (UTC no Railway), e um gasto das 21:30 em São Paulo
-            # sairia aqui como o dia SEGUINTE — o MESMO lançamento com dia diferente
-            # em "liste <categoria>" e em "meus últimos lançamentos" (`list_launches`,
-            # core/handlers/launches.py, que já usa `day_tz`). A perna do crédito é
-            # naive (`purchased_at::timestamp`) e passa direto.
-            "data": day_tz(r["dt"]),
+            "nota": r["nota"],
+            "alvo": r["alvo"],
+            # `launch_day` (utils_date), não `.date()` nem `day_tz` seco: o `.date()`
+            # cru devolve o dia no fuso da SESSÃO do Postgres, que ERA UTC na
+            # produção, e um gasto das 21:30 em São Paulo saía com o dia SEGUINTE
+            # — o MESMO lançamento com dia diferente aqui e em "meus últimos
+            # lançamentos" (`list_launches`, core/handlers/launches.py). E onde `has_time` é
+            # falso quem manda é `posted_at` — QUAIS linhas são essas, e por que
+            # os importadores de HOJE ficam de fora, estão no docstring de
+            # `launch_day` (utils_date), que é o dono dessa enumeração.
+            "data": launch_day(r["dt"], r["posted_at"], r["has_time"]),
+            "criado_em": r["dt"],
+            "posted_at": r["posted_at"],
+            "has_time": bool(r["has_time"]),
             "fonte": r["fonte"],
             "user_seq": r["user_seq"],
+            "id": r["id"],
+            "is_internal_movement": bool(r["is_internal_movement"]),
         }
         for r in rows
     ], resumo
@@ -823,8 +1036,15 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # `for update`: serializa duas reversões do MESMO lançamento. Sem
+            # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
+            # `delete` da segunda casa zero linhas sem levantar — o dinheiro
+            # sai em dobro. Com ele, quem perde relê depois do commit do
+            # vencedor, não acha a linha e levanta LookupError("NOT_FOUND"),
+            # que todos os chamadores já tratam.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos from launches where id=%s and user_id=%s",
+                "select id, tipo, valor, alvo, efeitos from launches "
+                "where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()
@@ -833,7 +1053,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
 
             efeitos = row.get("efeitos")
             if efeitos is None:
-                raise ValueError("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
+                raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
             if isinstance(efeitos, str):
                 efeitos = json.loads(efeitos)
@@ -970,7 +1190,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int):
                         lot["status"] != "open"
                         or Decimal(str(lot["principal_remaining"])) != Decimal(str(lot["principal_initial"]))
                     ):
-                        raise ValueError("Não é possível desfazer este aporte: o lote já teve resgate.")
+                        raise InvestmentLotHasWithdrawal(
+                            "Não é possível desfazer este aporte: o lote já teve resgate."
+                        )
                     if lot and not investment_id:
                         investment_id = lot["investment_id"]
                     cur.execute(
@@ -1116,30 +1338,78 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "failed": M}. `failed` cobre lançamentos legados
-    sem `efeitos` (não dá pra reverter com segurança) — esses são mantidos
-    intactos pra não corromper o saldo, em vez de apagados às cegas.
+    Retorna {"deleted": N, "kept_no_effects": [...], "errors": [...],
+    "remaining": M | None}, com os ids em `user_seq` (o "#N" que o usuário vê).
+
+    As duas listas são causas DIFERENTES e a mensagem ao usuário precisa
+    distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos` (não
+    dá pra reverter com segurança — mantidos intactos de propósito, em vez de
+    apagados às cegas); `errors` é falha técnica inesperada (conexão, deadlock,
+    permissão, bug). O `failed` único de antes dizia "lançamento antigo" para
+    um banco caído.
+
+    `remaining` é uma RECONTAGEM depois do loop: é a única checagem que pega o
+    caso em que o delete casou zero linhas e ninguém levantou. É uma
+    CONFERÊNCIA, não um fato do trabalho — se ela mesma falhar (blip de
+    conexão, timeout de pool), vem `None` ("não conferi") e o que já foi
+    apagado continua sendo relatado. Deixar a exceção subir daqui fazia o
+    usuário ler "não consegui apagar" DEPOIS de tudo apagado.
     """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id from launches "
+                "select id, user_seq, efeitos from launches "
                 f"where user_id=%s and {_CONTA_CORRENTE_LAUNCH_FILTER} "
                 "order by id desc",
                 (user_id,),
             )
-            ids = [row["id"] for row in cur.fetchall()]
+            rows = cur.fetchall()
+
+    # Falha PREVISTA, separada antes do loop: sem `efeitos` o
+    # delete_launch_and_rollback levantaria ValueError de qualquer jeito, então
+    # o comportamento é idêntico — e a mensagem ao usuário deixa de depender de
+    # string-sniffing do texto da exceção.
+    def _seq(r):
+        return r["user_seq"] or r["id"]
+
+    kept_no_effects = [_seq(r) for r in rows if r["efeitos"] is None]
+    apagaveis = [(r["id"], _seq(r)) for r in rows if r["efeitos"] is not None]
 
     deleted = 0
-    failed = 0
-    for lid in ids:
+    errors: list = []
+    for lid, seq in apagaveis:
         try:
             delete_launch_and_rollback(user_id, lid)
             deleted += 1
-        except Exception:
-            failed += 1
-    return {"deleted": deleted, "failed": failed}
+        except Exception as e:
+            errors.append(seq)
+            # Sem str(e) e sem exc_info: o texto do psycopg pode trazer o valor
+            # da linha que violou a constraint. Nome do tipo + sqlstate já
+            # separam conexão (08006), deadlock (40P01), permissão (42501) e
+            # bug de código (TypeError/AttributeError).
+            # launch_id (interno) E user_seq: a queixa do usuário cita "#2",
+            # o log cita 19616 — sem os dois, suporte não correlaciona.
+            logger.error(
+                "delete_all_launches: falha inesperada user_id=%s launch_id=%s user_seq=%s causa=%s sqlstate=%s",
+                user_id, lid, seq, type(e).__name__, getattr(e, "sqlstate", None),
+            )
+
+    try:
+        remaining = count_launches(user_id)
+    except Exception as e:
+        remaining = None
+        logger.error(
+            "delete_all_launches: recontagem falhou user_id=%s causa=%s sqlstate=%s",
+            user_id, type(e).__name__, getattr(e, "sqlstate", None),
+        )
+
+    return {
+        "deleted": deleted,
+        "kept_no_effects": kept_no_effects,
+        "errors": errors,
+        "remaining": remaining,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

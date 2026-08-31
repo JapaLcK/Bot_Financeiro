@@ -5,11 +5,13 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 import asyncio
+import hmac
 import html as _html
+import os
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from frontend.routes.shared import (
@@ -132,9 +134,23 @@ async def serve_cadastro():
 @router.get("/static/auth-refresh.js")
 async def serve_auth_refresh_js():
     """Interceptor de fetch que renova access em 401. Incluído nas páginas
-    autenticadas (dashboard, home, settings, onboarding)."""
-    path = FRONTEND_DIR / "auth-refresh.js"
-    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
+    autenticadas (dashboard, home, settings, onboarding).
+
+    `no-cache`, mesmo motivo do `dashboard.js` abaixo: revalida por etag a cada
+    load para não dessincronizar do HTML, que é servido `no-store`. Aqui o
+    dessincronismo tem consequência de segurança — este arquivo carrega a
+    limpeza do Cache Storage no logout, e uma versão velha dele não limpa nada.
+
+    E o cache-buster NÃO alcança esta rota, por dois motivos independentes: o
+    `_ASSET_VER_RE` (routes/shared.py) não aceita `/` no meio do caminho, então
+    `/static/auth-refresh.js` nem casa a forma; e, se casasse, o
+    `stamp_asset_versions` procuraria o arquivo em `frontend/static/`, que não
+    existe — o arquivo mora em `frontend/auth-refresh.js`. Efeito colateral
+    disso: o `?v=1` do comecar.html:16 é um cache-buster MORTO, que parece
+    funcionar e não faz nada. Três das quatro páginas nem tentam versionar.
+    """
+    path = FRONTEND_DIR / "static" / "auth-refresh.js"
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/privacy")
@@ -534,6 +550,29 @@ async def serve_comecar_css():
     )
 
 
+@router.get("/open-finance-connect.js")
+async def serve_of_connect_js():
+    """Modal de conectar banco (Open Finance), compartilhado entre a tela de
+    Configurações e o wizard de primeira configuração. Extraído do inline do
+    settings.html. Sem esta rota o arquivo dá 404 e o sintoma só aparece no
+    navegador — não há StaticFiles mount neste projeto."""
+    return FileResponse(
+        FRONTEND_DIR / "open-finance-connect.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/open-finance-connect.css")
+async def serve_of_connect_css():
+    """CSS do modal de conectar banco (ver /open-finance-connect.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "open-finance-connect.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard-mobile.css")
 async def serve_dashboard_mobile_css():
     """Overrides mobile do dashboard (o <link> só baixa em viewport ≤900px)."""
@@ -706,5 +745,23 @@ async def contact_submit(request: Request, body: ContactBody):
 
 
 @router.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(request: Request):
+    # A resposta pública é EXATAMENTE a de sempre. O SHA do deploy é
+    # infraestrutura, e o test_health_endpoint_does_not_expose_infrastructure
+    # (tests/test_auth_cookie.py) existe para impedir que ele vaze daqui — foi
+    # ele que reprovou a primeira versão desta mudança, que devolvia o commit a
+    # qualquer um.
+    #
+    # O gate do smoke pós-deploy (.github/workflows/smoke.yml) não precisa que
+    # o SHA seja público: precisa que QUEM manda o token certo consiga saber
+    # qual código está no ar, para não medir o deploy anterior e passar verde
+    # sobre código que ninguém testou. Sem token — e sem SMOKE_HEALTH_TOKEN no
+    # ambiente — nada muda.
+    #
+    # `no-store` porque uma borda que cacheie esta resposta devolveria o SHA do
+    # deploy ANTERIOR, e o gate abriria cedo: o verde falso que ele impede.
+    corpo = {"status": "ok"}
+    esperado = os.getenv("SMOKE_HEALTH_TOKEN", "")
+    if esperado and hmac.compare_digest(request.headers.get("x-smoke-token", ""), esperado):
+        corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
+    return JSONResponse(corpo, headers={"Cache-Control": "no-store"})

@@ -194,3 +194,52 @@ def test_get_card_limit_usage_por_nome(pro_user_id):
 def test_get_card_limit_usage_sem_cartao(user_id):
     result = _get_card_limit_usage(user_id, {})
     assert "error" in result
+
+
+def test_delete_launch_sem_efeitos_nao_promete_retry_no_ai_chat(user_id):
+    """Porta `/ai/chat`, mesma ação do WhatsApp: lançamento sem `efeitos` é
+    condição PERMANENTE (`ValueError` de `db/accounts.py`), não erro técnico.
+
+    O `_ERRO_APAGAR` genérico manda "tenta de novo em alguns minutos" — que
+    aqui nunca vai funcionar. É o mesmo defeito do `resolve_delete`, e a mesma
+    distinção que o `delete_all_launches` já faz (`kept_no_effects` × `errors`).
+
+    Controle negativo (medido): tirando o `except ValueError` de
+    `_delete_launch_execute` este teste falha; o
+    `test_delete_launch_lancamento_normal_por_user_seq` (caminho legítimo)
+    continua verde.
+    """
+    _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "compra")
+    internal = db.resolve_user_seq_to_id(user_id, user_seq)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update launches set efeitos=null where id=%s", (internal,))
+        conn.commit()
+
+    msg = _delete_launch_execute(user_id, {"launch_id": str(user_seq)})
+
+    assert "de novo" not in msg.lower(), f"condição permanente prometendo retry: {msg!r}"
+    assert "antigo" in msg.lower() and f"#{user_seq}" in msg, msg
+    assert db.resolve_user_seq_to_id(user_id, user_seq) == internal, "não podia apagar"
+
+
+def test_delete_launch_aporte_com_resgate_diz_o_que_destrava_no_ai_chat(user_id):
+    """Porta `/ai/chat`: lote já resgatado é condição TEMPORÁRIA com contorno.
+
+    Antes do tipo próprio ela caía no mesmo `except ValueError` do "sem
+    efeitos" e o usuário ouvia "é antigo" sobre um aporte de hoje, sem saber
+    que apagar o resgate destrava.
+    """
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_investment_db(user_id, "CDB Lote", rate=0.01, period="monthly", nota="t")
+    aporte_id, *_ = db.investment_deposit_from_account(user_id, "CDB Lote", 200, "aporte")
+    db.investment_withdraw_to_account(user_id, "CDB Lote", 50, "resgate")
+    seq = db.get_launch_user_seq(user_id, int(aporte_id))
+
+    msg = _delete_launch_execute(user_id, {"launch_id": str(seq)})
+
+    assert "antigo" not in msg.lower(), f"condição temporária vendida como permanente: {msg!r}"
+    assert "de novo" not in msg.lower(), f"retry que nunca funciona: {msg!r}"
+    assert "resgate" in msg.lower(), f"não diz o que destrava: {msg!r}"
+    assert f"#{seq}" in msg, msg
+    assert db.resolve_user_seq_to_id(user_id, seq) == int(aporte_id), "o aporte não podia sumir"

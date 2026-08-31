@@ -3,8 +3,46 @@
 Resolve ações pendentes: confirmações de delete, lançamentos de mídia e esclarecimentos.
 """
 from __future__ import annotations
+import logging
+
 import db
 from utils_text import fmt_brl
+
+logger = logging.getLogger(__name__)
+
+
+def _log_falha(op: str, user_id: int, e: Exception, *,
+               nivel: int = logging.ERROR, **extra) -> None:
+    """Causa no log, nunca na mensagem: `str(e)` do psycopg pode trazer o valor
+    e a descrição da linha (`DETAIL: Key (…)=(…)`). Nome do tipo + sqlstate já
+    separam conexão (08006), deadlock (40P01), permissão (42501) e bug de
+    código. Sem `exc_info` pelo mesmo motivo.
+
+    Helper ÚNICO das três portas (esta, `core/handlers/credit.py` e
+    `core/services/ai_chat/tools/launches.py`): duas cópias com níveis
+    diferentes faziam a MESMA condição contar como erro numa porta e não na
+    outra. O nível importa fora do log — `_DashboardHandler`
+    (`core/observability.py`) espelha WARNING e ERROR em `system_event_logs`
+    com `level=levelname.lower()`, e `core/admin_dashboard.py` conta
+    `backend_errors_24h WHERE level='error'`.
+
+    `nivel` segue a MESMA distinção dos `except` daqui, não outra:
+      - condição de domínio ESPERADA (`LaunchNoEffects`,
+        `InvestmentLotHasWithdrawal`) → `logging.WARNING`. Inflar o contador de
+        erros do admin com aporte que teve resgate é ruído, não incidente.
+      - falha técnica/inesperada (`except Exception`, `ValueError` sem código
+        conhecido) → `logging.ERROR`, que é o default: quem esquecer de
+        classificar erra para o lado barulhento, não para o lado silencioso.
+
+    `nivel` é keyword-only por isso não colide com `**extra`; um campo extra
+    chamado "nivel" seria engolido (nenhum call site usa).
+    """
+    logger.log(
+        nivel,
+        "%s: falha user_id=%s%s causa=%s sqlstate=%s",
+        op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
+        type(e).__name__, getattr(e, "sqlstate", None),
+    )
 
 
 def resolve_delete(user_id: int, confirmed: bool) -> str | None:
@@ -134,7 +172,17 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
     payload = pending.get("payload", {})
 
     if not confirmed:
-        # Abandono: se perdeu o CAS, não havia nada nosso para cancelar.
+        # Retorno IGNORADO de propósito: esta porta é o WhatsApp, serializado
+        # por worker único, então "outra tarefa executou entre a leitura e o
+        # cancelamento" não é alcançável aqui. No `/ai/chat` é, e lá o retorno
+        # é checado (`ai_chat/runner.py`) — perder o CAS num cancelamento
+        # significa que a outra requisição EXECUTOU, não que não havia nada.
+        # A premissa depende de `/wa/dev/simulate` continuar fora do ar: ela
+        # chama `process_payload` direto, furando a `_queue` do worker único
+        # (`adapters/whatsapp/wa_app.py`). Hoje a rota só é registrada com
+        # `ENABLE_DEV_ENDPOINTS` ligado (default OFF) e em produção responde
+        # 404 (medido 2026-08-28). Ligar essa flag em produção quebra esta
+        # premissa — e a rota não tem auth própria.
         db.consume_pending_action(user_id, pending)
         return "❌ Ação cancelada."
 
@@ -147,27 +195,77 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         # as duas tarefas já teriam apagado o lançamento.
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui apagar o lançamento #{display_id} agora — deu "
+            f"erro do meu lado. Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_launch_and_rollback(user_id, launch_id)
             return f"✅ Lançamento **#{display_id}** apagado e saldo revertido."
+        except LookupError:
+            # NOT_FOUND (`db/accounts.py`): o lançamento sumiu entre a pergunta
+            # e o "sim" — outra porta (dashboard, /ai/chat) apagou dentro da
+            # janela de 10 min da pendência. Condição PERMANENTE: mandar tentar
+            # de novo é conselho que nunca vai funcionar.
+            return f"🐷 O lançamento **#{display_id}** já não está no seu histórico."
+        except db.LaunchNoEffects as e:
+            # Sem `efeitos` não dá pra reverter o saldo com segurança — também
+            # permanente. É a MESMA distinção do "apagar tudo", que separa
+            # `kept_no_effects` de `errors` (`db/accounts.py`); aqui a porta é
+            # um lançamento só, mas a causa e a frase são as mesmas.
+            _log_falha("delete_launch_sem_efeitos", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"⚠️ O lançamento **#{display_id}** é antigo e não guarda o que "
+                f"precisaria ser revertido, então mantive ele intacto pra não "
+                f"bagunçar seu saldo."
+            )
+        except db.InvestmentLotHasWithdrawal as e:
+            # TEMPORÁRIA, e é a única aqui que tem contorno: apagar o resgate
+            # reabre o lote. "Tenta de novo em alguns minutos" seria falso (o
+            # tempo não destrava nada), e "é antigo" também — o dado está
+            # inteiro. A frase tem de dizer O QUE destrava.
+            _log_falha("delete_launch_lote_com_resgate", user_id, e,
+                       nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
+            return (
+                f"🐷 Não dá pra desfazer o aporte **#{display_id}**: esse lote já "
+                f"teve resgate. Apaga o resgate primeiro e depois volta aqui pra "
+                f"apagar o aporte."
+            )
         except Exception as e:
-            return f"Erro ao apagar lançamento #{display_id}: {e}"
+            _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)
+            return erro_tecnico
 
     if action_type == "delete_launch_bulk":
         ids = payload.get("launch_ids", [])
         display_ids_map = payload.get("display_ids") or {}
         if not db.consume_pending_action(user_id, pending):
             return None
+
+        # converte ids internos pra user_seq pra exibição (fallback: id interno)
+        def _disp(lid):
+            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
+
         failed = []
         for lid in ids:
             try:
                 db.delete_launch_and_rollback(user_id, lid)
-            except Exception:
+            except (db.LaunchNoEffects, db.InvestmentLotHasWithdrawal) as e:
+                # MESMA função e MESMAS condições de domínio do delete_launch
+                # singular (`:211` e `:223`) — sem este ramo, "apaga #2, #5 e #7"
+                # com um lançamento antigo no meio contava como incidente em
+                # `backend_errors_24h` e "apaga #2" sozinho não contava.
+                # A mensagem ao usuário não muda: no bulk é "⚠️ Falha: #N" pras
+                # duas, e ela não promete retry.
                 failed.append(lid)
+                _log_falha("delete_launch_bulk", user_id, e, nivel=logging.WARNING,
+                           launch_id=lid, user_seq=_disp(lid))
+            except Exception as e:
+                failed.append(lid)
+                # os DOIS ids: a queixa cita "#2", o log cita o id interno.
+                _log_falha("delete_launch_bulk", user_id, e,
+                           launch_id=lid, user_seq=_disp(lid))
         ok_ids = [i for i in ids if i not in failed]
-        # converte ids internos pra user_seq pra exibição (fallback: id interno)
-        def _disp(lid):
-            return display_ids_map.get(str(lid), display_ids_map.get(lid, lid))
         parts = []
         if ok_ids:
             parts.append("✅ Apagados: " + ", ".join(f"**#{_disp(i)}**" for i in ok_ids))
@@ -179,21 +277,67 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         pocket_name = payload.get("pocket_name")
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui deletar a caixinha **{pocket_name}** agora. "
+            f"Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_pocket(user_id, pocket_name)
             return f"✅ Caixinha **{pocket_name}** deletada."
+        except LookupError:
+            # POCKET_NOT_FOUND: alcançável dentro da janela de 10 min — o
+            # usuário pede pra apagar no WhatsApp, apaga pelo dashboard e só
+            # então responde "sim". Permanente, sem "tenta de novo".
+            return f"🐷 Não achei a caixinha **{pocket_name}** — parece que ela já não existe."
+        except ValueError as e:
+            # POCKET_NOT_ZERO / EMPTY_NAME são CÓDIGOS, não texto de usuário.
+            # Mesma tradução que `core/services/ai_chat/tools/pockets.py` e
+            # `frontend/routes/pockets.py` já fazem. Os dois são permanentes.
+            if "POCKET_NOT_ZERO" in str(e):
+                return (
+                    f"🐷 A caixinha **{pocket_name}** ainda tem saldo. "
+                    f"Saca o que tem dentro antes de apagar."
+                )
+            if "EMPTY_NAME" in str(e):
+                return "🐷 Faltou o nome da caixinha — me diz qual você quer apagar."
+            _log_falha("delete_pocket", user_id, e, pocket=pocket_name)
+            return erro_tecnico
         except Exception as e:
-            return f"Erro ao deletar caixinha: {e}"
+            _log_falha("delete_pocket", user_id, e, pocket=pocket_name)
+            return erro_tecnico
 
     if action_type == "delete_investment":
         investment_name = payload.get("investment_name")
         if not db.consume_pending_action(user_id, pending):
             return None
+        erro_tecnico = (
+            f"❌ Não consegui deletar o investimento **{investment_name}** "
+            f"agora. Tenta de novo em alguns minutos."
+        )
         try:
             db.delete_investment(user_id, investment_name)
             return f"✅ Investimento **{investment_name}** deletado."
+        except LookupError:
+            # INV_NOT_FOUND: mesma janela de 10 min da caixinha. Permanente.
+            return (
+                f"🐷 Não achei o investimento **{investment_name}** — parece que "
+                f"ele já não existe."
+            )
+        except ValueError as e:
+            # INV_NOT_ZERO / EMPTY_NAME: códigos. Mesma tradução de
+            # `core/services/ai_chat/tools/investments.py`.
+            if "INV_NOT_ZERO" in str(e):
+                return (
+                    f"🐷 O investimento **{investment_name}** ainda tem saldo — "
+                    f"resgata tudo antes de apagar."
+                )
+            if "EMPTY_NAME" in str(e):
+                return "🐷 Faltou o nome do investimento — me diz qual você quer apagar."
+            _log_falha("delete_investment", user_id, e, investment=investment_name)
+            return erro_tecnico
         except Exception as e:
-            return f"Erro ao deletar investimento: {e}"
+            _log_falha("delete_investment", user_id, e, investment=investment_name)
+            return erro_tecnico
 
     # Limpeza de estado: tipo destrutivo sem branch acima. Ignora o resultado.
     db.consume_pending_action(user_id, pending)
@@ -208,3 +352,110 @@ def get_pending_clarification(user_id: int) -> dict | None:
     if pending and pending.get("action_type") == "clarification":
         return pending
     return None
+
+
+def pergunta_guardando_contexto(
+    user_id: int, intent: str, entities: dict, question: str, orig_text: str,
+    *, falta: str,
+) -> str:
+    """Faz a pergunta E lembra que a fez. Devolve a pergunta, para o `return`.
+
+    O lado ESCRITOR do `get_pending_clarification` acima — os dois vivem juntos
+    porque a forma do payload é uma só (§0.7). Quem lê é o
+    `core.intent_router._resolve_clarification`.
+
+    Sem isto, um handler que devolve "Qual o valor?" como string crua não guarda
+    nada: a resposta seguinte é classificada do zero, e um número solto vira
+    `launches.add` com confiança 0,95. Medido na `main` c917f1c, conta nova, com
+    o LLM fora do caminho (o classificador determinístico basta):
+
+        criar caixinha viagem       -> caixinha criada
+        guardei na caixinha viagem  -> "Qual caixinha?"
+        200 reais                   -> "Em que você gastou R$ 200,00?"
+        viagem                      -> despesa R$ 200 'lazer', SALDO -200,00,
+                                       caixinha intacta em 0
+
+    No saque o sinal ainda inverte: quem pede para TIRAR R$ 100 da caixinha
+    termina com o saldo R$ 100 MENOR.
+
+    `claim_pending_action` e não `set_pending_action`: a linha de pendências é
+    uma por usuário e a ordem de prioridade do `db/pending.py` decide quem cede.
+    Uma pergunta não pode atropelar outra pergunta que o usuário já está lendo
+    na tela — foi o erro que o #133 cometeu e custou um commit de correção.
+    """
+    # GUARDA antes do claim: o `claim_pending_action` considera "mesma pergunta"
+    # o que tem o MESMO `action_type`, e as nove perguntas daqui usam todas o
+    # tipo genérico `clarification` (`db/pending.py:355`). Sem esta guarda, a
+    # pergunta de valor de um DEPÓSITO desalojaria a de um SAQUE como se fosse
+    # repetição, e a resposta do usuário iria para a operação financeira errada.
+    # Apontado pelo Codex no #184 (P1).
+    #
+    # "Mesma pergunta" aqui é a mesma intent pedindo a mesma entidade — o caso de
+    # o usuário refazer o comando. Qualquer outra `clarification` é pergunta
+    # ALHEIA, que ele já está lendo na tela, e cede a vez.
+    #
+    # A DECISÃO E A ESCRITA no MESMO compare-and-swap. Uma versão anterior
+    # checava e depois chamava o `claim`, e o Codex mostrou que isso não fecha:
+    # entre as duas, outra tarefa pode pôr uma pergunta nova na linha, e aí o
+    # `claim` a relê, vê `clarification == clarification`, conclui "mesma
+    # pergunta" e SOBRESCREVE a pergunta que o usuário acabou de ver — o CAS de
+    # dentro dele compara o payload da substituta, não o que eu inspecionei.
+    #
+    # Aqui o `advance_pending_action` recebe o payload E o `created_at` da linha
+    # que EU li: se ela mudou no meio, o CAS não pega e o usuário recebe o texto
+    # que pede para terminar a outra pergunta. A distinção intent/falta passa a
+    # participar da atualização atômica, que era o que faltava.
+    payload = {
+        "intent": intent,
+        "entities": dict(entities or {}),
+        "question": question,
+        "orig_text": orig_text or "",
+        # QUAL entidade a pergunta pediu — gravado, não inferido. Cada handler
+        # checa numa ordem diferente (o aporte pergunta o valor primeiro, a
+        # caixinha pergunta o nome primeiro), então deduzir isso no leitor a
+        # partir do que falta nas `entities` daria a resposta errada em metade
+        # dos casos. Quem sabe é quem perguntou.
+        "falta": falta,
+    }
+    atual = db.get_pending_action(user_id)
+    if atual is None:
+        ok = db.create_pending_action_if_absent(user_id, "clarification", payload)
+    elif atual.get("action_type") == "clarification":
+        anterior = atual.get("payload") or {}
+        if (anterior.get("intent"), anterior.get("falta")) != (intent, falta):
+            return _peca_para_terminar_a_outra(user_id, intent)
+        # Mesma pergunta de novo (o usuário refez o comando): avança a linha que
+        # eu li, e só ela.
+        ok = db.advance_pending_action(
+            user_id, "clarification", anterior, payload,
+            old_created_at=atual.get("created_at"),
+        )
+    else:
+        # Outro tipo na linha: quem decide se cede é a ordem de prioridade do
+        # `db/pending.py` (oferta de conveniência cede, pergunta não).
+        ok = db.claim_pending_action(user_id, "clarification", payload)
+    if ok:
+        return question
+
+    # Claim PERDIDO: outra pergunta continua de pé, e repetir a nossa seria
+    # mentira — a resposta do usuário seria consumida pela OUTRA pendência.
+    # `core/handlers/bills.py:pergunta_de_valor_sem_contexto` mediu o estrago
+    # nos 19 tipos vivos: em 8 a mensagem é consumida antes de chegar ao
+    # destino, e na `clarification` de `launches.add` o número vira o valor do
+    # lançamento VELHO. `cancelar` também não serve de conselho universal (no
+    # `recategorize_launch_text` vira nome de categoria). O único caminho que
+    # vale em todos é terminar a pergunta viva. Aquela função é a gêmea
+    # especializada em contas; a redação difere, a regra é a mesma.
+    return _peca_para_terminar_a_outra(user_id, intent)
+
+
+def _peca_para_terminar_a_outra(user_id: int, intent: str) -> str:
+    """A linha é de OUTRA pergunta, que o usuário já viu na tela."""
+    logger.info("pergunta sem contexto (claim perdido) intent=%s uid=%s", intent, user_id)
+    viva = (db.get_pending_action(user_id) or {}).get("payload") or {}
+    outra = viva.get("question")
+    espera = f'esperando: "{outra}"' if outra else "esperando resposta."
+    return (
+        f"Antes disso tem outra pergunta minha {espera}\n"
+        "Me responde ela primeiro e a gente volta pra esta em seguida."
+    )

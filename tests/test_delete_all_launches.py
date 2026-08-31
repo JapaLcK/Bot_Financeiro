@@ -38,7 +38,7 @@ def test_delete_all_launches_db_reverte_saldo(user_id: int):
     assert db.count_launches(user_id) == 3
 
     result = db.delete_all_launches_and_rollback(user_id)
-    assert result == {"deleted": 3, "failed": 0}
+    assert result == {"deleted": 3, "kept_no_effects": [], "errors": [], "remaining": 0}
     assert db.count_launches(user_id) == 0
     assert _bal(user_id) == 0.0, "saldo deve voltar ao estado pré-lançamentos"
 
@@ -90,7 +90,11 @@ def test_delete_all_launches_confirmacao_nao_cancela(user_id: int):
 
     assert db.count_launches(user_id) == 1, "cancelar não pode apagar nada"
     assert db.ai_get_pending_action(user_id) is None
-    assert resp  # alguma mensagem de "não fiz nada"
+    # Controle positivo do cancelamento: quem VENCE o CAS continua ouvindo
+    # "não fiz nada" — é o único que sabe que nada aconteceu. O perdedor não
+    # afirma desfecho nenhum (`_CAS_PERDIDO`, em
+    # test_ai_chat_concurrent_confirm.py).
+    assert "não fiz nada" in resp.lower(), resp
 
 
 def _pocket_balance(user_id: int, name: str):
@@ -144,10 +148,163 @@ def test_delete_all_launches_preserva_caixinha_e_investimento(user_id: int):
     assert inv_before is not None and inv_before >= 250.0
 
     result = db.delete_all_launches_and_rollback(user_id)
-    assert result == {"deleted": 2, "failed": 0}
+    assert result == {"deleted": 2, "kept_no_effects": [], "errors": [], "remaining": 0}
 
     # o ponto do teste: caixinha e investimento INTACTOS (registro + saldo).
     assert _pocket_balance(user_id, "viagem") == pocket_before, "caixinha não pode ser tocada"
     assert _investment_balance(user_id, "CDB Teste") == inv_before, "investimento não pode ser tocado"
     # as despesas/receitas sumiram.
     assert db.count_launches(user_id) == 0
+
+
+def _set_efeitos_null(user_id: int, launch_id: int):
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update launches set efeitos = null where id=%s and user_id=%s",
+                (launch_id, user_id),
+            )
+        conn.commit()
+
+
+def test_falha_prevista_e_erro_tecnico_sao_distinguiveis(user_id, monkeypatch, caplog):
+    """Antes, `failed += 1` sem log: banco caído e lançamento legado davam o
+    MESMO número e a MESMA frase. Agora são duas listas e o erro técnico tem
+    log — com user_id e launch_id, e sem dado sensível."""
+    import logging
+    from db import accounts as accounts_mod
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    legado, seq_legado, _ = add_launch_and_update_balance(
+        user_id, "despesa", 300, "aluguel", "paguei 300 aluguel"
+    )
+    quebrado, seq_quebrado, _ = add_launch_and_update_balance(
+        user_id, "despesa", 77, "mercadinho segredo", "gastei 77 no mercadinho segredo"
+    )
+    _set_efeitos_null(user_id, legado)
+
+    real = accounts_mod.delete_launch_and_rollback
+
+    def falha_num_id(uid, lid):
+        if lid == quebrado:
+            raise RuntimeError("boom")
+        return real(uid, lid)
+
+    monkeypatch.setattr(accounts_mod, "delete_launch_and_rollback", falha_num_id)
+
+    with caplog.at_level(logging.ERROR, logger="db.accounts"):
+        result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result["deleted"] == 1, result           # só a receita seed passou
+    assert result["kept_no_effects"] == [seq_legado], result
+    assert result["errors"] == [seq_quebrado], result
+    assert result["remaining"] == 2, "recontagem tem de ver os dois que ficaram"
+
+    linhas = [r.getMessage() for r in caplog.records
+              if r.getMessage().startswith("delete_all_launches:")]
+    assert len(linhas) == 1, linhas
+    # Igualdade EXATA é a assertiva de não-vazamento: qualquer valor,
+    # descrição, categoria ou alvo que entrasse no log quebraria aqui.
+    # (Comparar por substring seria flaky: o user_id é um número aleatório de
+    # 10 dígitos e pode conter "77" ou "300" por acaso.)
+    assert linhas[0] == (
+        f"delete_all_launches: falha inesperada user_id={user_id} "
+        f"launch_id={quebrado} user_seq={seq_quebrado} causa=RuntimeError sqlstate=None"
+    ), linhas[0]
+    assert "boom" not in linhas[0], "str(e) não pode entrar no log"
+
+
+def test_mensagem_nao_finge_sucesso_quando_sobrou(user_id, monkeypatch):
+    """A tool não pode dizer 'não havia nada' nem omitir o que ficou."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 0, "kept_no_effects": [3], "errors": [7, 8], "remaining": 3,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "não havia nenhum" not in msg.lower(), msg
+    assert "#3" in msg and "#7" in msg and "#8" in msg, msg
+    assert "erro técnico" in msg.lower(), "erro técnico tem frase própria"
+    assert "antigo" in msg.lower(), "lançamento antigo tem frase própria"
+    # remaining CONCORDA com 1 antigo + 2 erros: repetir "sobrou 3" seria dizer
+    # duas vezes a mesma coisa.
+    assert "conferência" not in msg.lower(), f"cauda redundante voltou: {msg!r}"
+
+    # amostra de 5 + "e mais N"
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 2, "kept_no_effects": [1, 2, 3, 4, 5, 6, 7], "errors": [], "remaining": 7,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "#1, #2, #3, #4, #5 e mais 2" in msg, msg
+    assert "#6" not in msg and "#7 " not in msg, msg
+
+
+def test_amostra_ids_produz_os_exemplos_da_propria_docstring():
+    """A docstring de `_amostra_ids` já mentiu uma vez ('#3, #7, #9 e mais 4' —
+    não produzível: com 3 ids `resto` dá -2 e a cauda nem aparece). Os dois
+    exemplos que ela cita agora ficam presos aqui."""
+    from core.services.ai_chat.tools.launches import _amostra_ids
+
+    assert _amostra_ids([3, 7, 9]) == "#3, #7, #9"
+    assert _amostra_ids([3, 7, 9, 11, 12, 15, 20]) == "#3, #7, #9, #11, #12 e mais 2"
+
+
+def test_mensagem_vazio_continua_dizendo_que_nao_havia_nada(user_id, monkeypatch):
+    """Controle positivo: o caso legítimo 'histórico já vazio' não regrediu."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 0, "kept_no_effects": [], "errors": [], "remaining": 0,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "não havia nenhum lançamento" in msg.lower(), msg
+
+
+def test_recontagem_que_falha_nao_apaga_o_trabalho_feito(user_id, monkeypatch, caplog):
+    """O recount roda DEPOIS do loop destrutivo. Se ele estourar (blip de
+    conexão, timeout de pool) e a exceção subir, o usuário lê "não consegui
+    apagar" com tudo já apagado — a mentira oposta à que a mensagem existe pra
+    matar. `remaining` é conferência: falhou, vem None ("não conferi"), e os
+    fatos medidos continuam sendo relatados."""
+    import logging
+    from db import accounts as accounts_mod
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    add_launch_and_update_balance(user_id, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    assert _bal(user_id) == 700.0
+
+    def sem_banco(uid):
+        raise ConnectionError("connection to server was lost")
+
+    monkeypatch.setattr(accounts_mod, "count_launches", sem_banco)
+
+    with caplog.at_level(logging.ERROR, logger="db.accounts"):
+        msg = get_tool("delete_all_launches").execute(user_id, {})
+
+    assert "apaguei 2" in msg.lower(), f"trabalho feito sumiu do relato: {msg!r}"
+    assert "não consegui apagar" not in msg.lower(), msg
+    assert "conferência" not in msg.lower(), "sem recontagem não há discordância a relatar"
+    assert _bal(user_id) == 0.0
+    assert any("recontagem falhou" in r.getMessage() for r in caplog.records), \
+        "a falha da conferência tem de ir pro log"
+    assert not any("connection to server was lost" in r.getMessage()
+                   for r in caplog.records), "str(e) não pode entrar no log"
+
+
+def test_conferencia_fala_so_quando_discorda(user_id, monkeypatch):
+    """O caso que a recontagem existe pra pegar: o delete casou zero linhas e
+    ninguém levantou — `remaining` maior que as listas explicam."""
+    from core.services.ai_chat.tools import launches as tool_mod
+
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 4, "kept_no_effects": [], "errors": [], "remaining": 4,
+    })
+    msg = get_tool("delete_all_launches").execute(user_id, {})
+    assert "conferência não bateu" in msg.lower(), f"discordância silenciada: {msg!r}"
+    assert "ainda tem 4" in msg.lower(), msg
+
+    # E não fala quando bate (mesmo resultado, remaining coerente).
+    monkeypatch.setattr(tool_mod.db, "delete_all_launches_and_rollback", lambda uid: {
+        "deleted": 4, "kept_no_effects": [], "errors": [], "remaining": 0,
+    })
+    assert "conferência" not in get_tool("delete_all_launches").execute(user_id, {}).lower()
