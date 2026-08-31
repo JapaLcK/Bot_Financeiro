@@ -51,32 +51,40 @@ const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos
 const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`])/gi;
 
 /**
- * O valor do handler que começa em `i`, indo até o delimitador que o fecha.
+ * O valor do handler que começa em `i`, **sem** as interpolações.
  *
- * Isto é um scanner e não um regex, e a razão está medida: regex por classe de
- * aspas cortava na primeira aspa de dentro; regex por delimitador cortava quando a
- * aspa de dentro era IGUAL à de fora — que é o caso de
- * `onclick="... openCardDeleteModal(${escapeHtmlSafe(JSON.stringify(c.name || ""))})"`
- * no dashboard.js. Cada versão de regex fechou uma borda e abriu a seguinte; foram
- * cinco rodadas de revisão até ficar claro que a forma certa é varrer.
+ * Um scanner, não regex, e cada detalhe aqui foi pago numa rodada de revisão:
  *
- * `${...}` é opaco: conta profundidade de chave e não olha aspas lá dentro. Quem
- * remove o conteúdo é o `semInterpolacao`, depois — aqui só importa não terminar o
- * handler no meio dele.
+ * - varrer até o delimitador de fechamento, porque regex por classe de aspas cortava
+ *   na primeira aspa de dentro, e regex por delimitador cortava quando a aspa de
+ *   dentro era igual à de fora — o caso real é
+ *   `openCardDeleteModal(${escapeHtmlSafe(JSON.stringify(c.name || ""))})`;
+ * - DESCARTAR `${...}`: o que está lá dentro roda na GERAÇÃO do markup, no escopo de
+ *   quem gera, e não no clique. Cobrar isso é falso positivo;
+ * - contar chave respeitando STRING dentro da interpolação, senão um `{` de dentro de
+ *   uma string desequilibra a conta e a interpolação "vaza" para o texto do handler.
+ *
+ * Depois disto o que sobra é literal, e TUDO que sobra roda no clique — inclusive o
+ * `inner` de `outer(inner())`. Por isso a extração seguinte não precisa (e não deve)
+ * filtrar por posição: uma versão anterior filtrava por profundidade de parênteses e
+ * perdia exatamente esse caso.
  */
 function valorDoHandler(texto, i) {
   const escapado = texto[i] === "\\";
   const delim = texto[escapado ? i + 1 : i];
-  let j = (escapado ? i + 2 : i + 1), prof = 0, out = "";
+  let j = escapado ? i + 2 : i + 1;
+  let prof = 0, aspa = null, out = "";
   while (j < texto.length) {
     const c = texto[j];
-    if (prof === 0 && c === "$" && texto[j + 1] === "{") { prof = 1; out += "${"; j += 2; continue; }
     if (prof > 0) {
-      if (c === "{") prof++;
+      if (aspa) { if (c === aspa) aspa = null; }
+      else if (c === '"' || c === "'" || c === "`") aspa = c;
+      else if (c === "{") prof++;
       else if (c === "}") prof--;
-      out += c; j++; continue;
+      j++;
+      continue;                       // conteúdo da interpolação NÃO entra
     }
-    if (c === "\\" && escapado && texto[j + 1] === delim) break;
+    if (c === "$" && texto[j + 1] === "{") { prof = 1; j += 2; continue; }
     if (c === delim) break;
     out += c; j++;
   }
@@ -88,39 +96,7 @@ function valorDoHandler(texto, i) {
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
 // forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
 const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
-const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/y;
-
-/**
- * As funções que o CLIQUE invoca: identificador seguido de `(` em profundidade ZERO
- * de parênteses.
- *
- * Pegar todo identificador seguido de `(` cobrava o ajudante aninhado num argumento
- * (`entry(${ajuda(x)})`), que roda na geração — falso positivo. Exigir início de
- * comando ou `;` corrigia isso mas perdia a chamada GUARDADA, que é comum aqui:
- * `onclick="if(event.key==='Enter') quickAddBoleto()"`.
- *
- * Profundidade de parênteses resolve os dois: o `if(...)` abre e fecha antes do
- * `quickAddBoleto`, que fica no nível zero; o `ajuda` de dentro do argumento está no
- * nível um. Medido nas duas trocas: nenhuma mudou o conjunto de nomes — 150, 31, 16,
- * 8 e 3 nas cinco páginas —, então isto é robustez, não cobertura nova.
- */
-function funcoesInvocadas(handler) {
-  const achadas = new Set();
-  let d = 0, i = 0;
-  while (i < handler.length) {
-    CHAMADA.lastIndex = i;
-    const m = CHAMADA.exec(handler);
-    if (m && m.index === i) {
-      if (d === 0 && !NATIVO.has(m[1])) achadas.add(m[1]);
-      i = CHAMADA.lastIndex; d++;
-      continue;
-    }
-    if (handler[i] === "(") d++;
-    else if (handler[i] === ")") d = Math.max(0, d - 1);
-    i++;
-  }
-  return achadas;
-}
+const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
 
 /**
  * Identificador NU passado como argumento: `startCheckout(currentCycle, this, 'x')`.
@@ -151,24 +127,13 @@ const NATIVO = new Set([
  */
 const semStrings = (s) => s.replace(/'[^']*'/g, "''").replace(/&quot;[^&]*&quot;/g, "");
 
-/**
- * Tira as interpolações `${...}`: o que está DENTRO delas roda na GERAÇÃO do
- * markup, no escopo de quem gera, e não no clique.
- *
- * Em `onclick="openCardEditModal(${escapeHtmlSafe(JSON.stringify(c))})"` só
- * `openCardEditModal` precisa existir no escopo global; o `escapeHtmlSafe` é
- * ajudante do gerador. Sem tirar, o dia em que o `dashboard.js` virar módulo com os
- * pontos de entrada exportados, o teste reprovaria por causa dos ajudantes — que é
- * falso positivo, e falso positivo trava PR legítimo.
- */
-const semInterpolacao = (s) => s.replace(/\$\{[^}]*\}/g, "");
 
 function nomesDe(trechos) {
   const funcoes = new Set();
   const variaveis = new Set();
   for (const t of trechos) {
-    const limpo = semInterpolacao(semStrings(t));
-    for (const n of funcoesInvocadas(limpo)) funcoes.add(n);
+    const limpo = semStrings(t);
+    for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
     for (const a of limpo.matchAll(ARGUMENTO)) {
       for (const tok of a[1].split(",")) {
         const n = tok.trim();
