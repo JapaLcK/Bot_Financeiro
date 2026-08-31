@@ -1,0 +1,240 @@
+"""A categoria que o usuário criou na tela vale quando o gasto chega pelo WhatsApp?
+
+O `test_custom_category_infer.py` tem 73 testes desta área e **nenhum** passa
+pela conversa — todos chamam `infer_category` / `custom_category_match` direto.
+É o ponto cego do CLAUDE.md §3 ("rode a conversa, não a função"): o caminho real
+percorre classify → route → handler → infer_category, e cada camada pode
+atravessar a decisão da seguinte.
+
+Foi por aí que o defeito apareceu na auditoria de 2026-08-26: com a categoria
+`café da manhã` criada, `gastei ... cafe da manha` pelo WhatsApp caía em
+alimentação. Este arquivo mede a conversa; o que ele reprovar, reprova no
+caminho que o usuário usa.
+"""
+from __future__ import annotations
+
+import uuid
+
+import pytest
+
+import db
+from db.categories import create_user_category
+from db.connection import get_conn
+from core.intent_classifier import classify
+from core.intent_router import route
+from core.types import IncomingMessage
+from utils_text import normalize_text
+
+
+def _uid() -> int:
+    uid = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(uid)
+    return uid
+
+
+def _diga(uid: int, texto: str) -> str | None:
+    m = IncomingMessage(platform="whatsapp", user_id=uid, text=texto,
+                        message_id="x", attachments=[], external_id="e", raw={})
+    return route(classify(texto, user_id=uid), m)
+
+
+def _categoria_do_ultimo_lancamento(uid: int) -> str | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select categoria from launches where user_id = %s order by id desc limit 1",
+            (uid,),
+        )
+        row = cur.fetchone()
+    return None if row is None else row["categoria"]
+
+
+@pytest.mark.parametrize("nome_criado,frase", [
+    ("cafe", "gastei 37,50 em cafe"),
+    ("café", "gastei 37,50 em cafe"),          # criou com acento, digitou sem
+    ("cafe", "gastei 37,50 em café"),          # criou sem acento, digitou com
+])
+def test_categoria_criada_na_tela_vence_a_regra_generica(nome_criado, frase):
+    """O caso que falhou na auditoria: `cafe` existe no catálogo e o gasto some.
+
+    Sem a categoria criada, `cafe` cai em alimentação pelas LOCAL_RULES — e está
+    certo. Com ela criada, a personalização explícita do usuário tem de ganhar:
+    é a razão de `custom_category_match` vir antes das LOCAL_RULES em
+    `category_service.py:214`.
+    """
+    uid = _uid()
+    create_user_category(uid, nome_criado)
+
+    resposta = _diga(uid, frase)
+    assert resposta, "o bot não respondeu ao lançamento"
+
+    categoria = _categoria_do_ultimo_lancamento(uid)
+    assert categoria is not None, f"nenhum lançamento foi gravado; resposta: {resposta!r}"
+    assert "cafe" in (categoria or "").lower() or "café" in (categoria or "").lower(), (
+        f"o gasto foi para {categoria!r} em vez da categoria criada {nome_criado!r}"
+    )
+
+
+def test_controle_sem_categoria_criada_cai_na_regra_generica():
+    """Controle positivo do grupo: sem categoria criada, o comportamento antigo
+    continua valendo. Sem isto, um conserto que mandasse TUDO para uma categoria
+    nova passaria no teste de cima e quebraria o produto."""
+    uid = _uid()
+    _diga(uid, "gastei 37,50 em cafe")
+    categoria = _categoria_do_ultimo_lancamento(uid)
+    assert categoria is not None, "nenhum lançamento foi gravado"
+    assert "cafe" not in categoria.lower(), (
+        f"sem categoria criada, {categoria!r} deveria ser a genérica das LOCAL_RULES"
+    )
+
+
+def test_categoria_criada_DEPOIS_de_o_bot_ja_ter_aprendido(caplog):
+    """A ordem real dos acontecimentos — e a que reproduz o defeito relatado.
+
+    Os testes acima criam a categoria e mandam a mensagem em seguida. Ninguém
+    usa o produto assim: o usuário gasta com "cafe" por meses (o bot aprende
+    `cafe -> alimentação` pelas LOCAL_RULES e GRAVA como regra dele), e só
+    depois cria a categoria na tela. A partir daí a regra aprendida vence no
+    passo B de `infer_category`, antes de o `custom_category_match` (B2) ser
+    consultado — e a categoria nova nunca é usada.
+
+    É o estado que OUTRO fluxo deixou no banco: a classe de bug que o CLAUDE.md
+    §3 diz que teste de função isolada nunca vê.
+    """
+    uid = _uid()
+
+    _diga(uid, "gastei 50 em cafe")               # 1) o bot aprende
+    create_user_category(uid, "cafe")              # 2) o usuário cria a categoria
+    _diga(uid, "gastei 37,50 em cafe")             # 3) o gasto seguinte
+
+    categoria = _categoria_do_ultimo_lancamento(uid)
+    assert categoria is not None, "nenhum lançamento foi gravado"
+    assert "cafe" in categoria.lower() or "café" in categoria.lower(), (
+        f"o gasto foi para {categoria!r}: a regra aprendida antes venceu a "
+        f"categoria criada depois"
+    )
+
+
+# ── As regressões da correção em dois pontos ────────────────────────────────
+# O conserto NÃO inverte a precedência global entre a regra aprendida (passo B)
+# e a categoria custom (B2). A regra continua ganhando quando é válida; ela só
+# perde quando ficou OBSOLETA — o usuário criou depois uma categoria que, pelo
+# mesmo `custom_category_match` que o B2 usa, passou a ser dona do keyword.
+
+from db.categories import (                                       # noqa: E402
+    delete_user_category,
+    list_user_category_rules,
+    update_user_category,
+    upsert_category_rule,
+)
+from core.services.category_service import infer_category, learn_from_inference  # noqa: E402
+
+
+def _regras(uid: int) -> dict[str, str]:
+    return {k: v for k, v in (list_user_category_rules(uid) or [])}
+
+
+@pytest.mark.parametrize("grafia_categoria,grafia_gasto", [
+    ("Cafe", "cafe"), ("café", "cafe"), ("CAFÉ", "café"), ("cafe", "CAFE"),
+])
+def test_caixa_e_acento_usam_a_mesma_normalizacao(grafia_categoria, grafia_gasto):
+    """Caixa e acento não podem produzir vereditos diferentes: o critério é o
+    `normalize_text` que o resto do sistema já usa."""
+    uid = _uid()
+    _diga(uid, "gastei 20 com cafe")
+    create_user_category(uid, grafia_categoria)
+
+    resultado = infer_category(uid, f"gastei 15 com {grafia_gasto}", allow_ai=False)
+    assert "cafe" in normalize_text(resultado.category), (
+        f"categoria {grafia_categoria!r} + gasto {grafia_gasto!r} → {resultado.category!r}"
+    )
+
+
+def test_regra_aprendida_sem_conflito_continua_valendo():
+    """Controle positivo do grupo — o que NÃO pode mudar.
+
+    Sem ele, um conserto que simplesmente ignorasse todas as regras aprendidas
+    passaria em todos os testes acima e quebraria o aprendizado do bot inteiro.
+    """
+    uid = _uid()
+    upsert_category_rule(uid, "padoca do ze", "alimentacao")
+    create_user_category(uid, "cafe")          # categoria que NÃO casa com a regra
+
+    resultado = infer_category(uid, "gastei 12 na padoca do ze", allow_ai=False)
+    assert normalize_text(resultado.category) == "alimentacao", (
+        f"a regra sem conflito deveria continuar vencendo, veio {resultado.category!r}"
+    )
+    assert resultado.reason == "user_rule"
+    assert _regras(uid).get("padoca do ze") == "alimentacao", "a regra não podia ser tocada"
+
+
+def test_categoria_existente_continua_bloqueando_aprendizado_conflitante():
+    """O guard do #123 não foi enfraquecido: com a categoria já criada, o bot
+    não pode gravar regra roubando o token dela."""
+    uid = _uid()
+    create_user_category(uid, "cafe")
+    learn_from_inference(uid, "gastei 20 com cafe", "alimentacao", reason="local_rule")
+
+    assert normalize_text(_regras(uid).get("cafe", "")) != "alimentacao", (
+        f"o guard deixou gravar regra envenenada: {_regras(uid)}"
+    )
+
+
+def test_renomear_categoria_nao_deixa_regra_incoerente():
+    uid = _uid()
+    _diga(uid, "gastei 20 com cafe")
+    nova = create_user_category(uid, "cafe")
+    assert normalize_text(_regras(uid).get("cafe", "")) == "cafe", _regras(uid)
+
+    update_user_category(uid, nova["id"], new_name="cafezinho")
+    destino = _regras(uid).get("cafe", "")
+    assert normalize_text(destino) == "cafezinho", (
+        f"depois do rename a regra aponta para {destino!r}, que não existe mais"
+    )
+
+
+def test_apagar_categoria_nao_deixa_regra_apontando_pro_vazio():
+    uid = _uid()
+    _diga(uid, "gastei 20 com cafe")
+    nova = create_user_category(uid, "cafe")
+    assert "cafe" in _regras(uid)
+
+    delete_user_category(uid, nova["id"])
+    destino = _regras(uid).get("cafe")
+    assert normalize_text(destino or "") != "cafe", (
+        f"a regra sobrou apontando para a categoria apagada: {destino!r}"
+    )
+
+
+def test_conta_legada_regra_de_meses_atras_perde_sem_script():
+    """O estado que já existe em produção HOJE, e o requisito explícito:
+    consertar sem rodar script manual.
+
+    Aqui a regra é semeada DIRETO na tabela, com a categoria já criada — é a
+    conta de quem usou o bot por meses antes deste código existir. A
+    reconciliação da criação (ponto 1) não alcança esse usuário: ele criou a
+    categoria antes. Quem o conserta é o guard de LEITURA (ponto 2), na
+    primeira classificação depois do deploy.
+    """
+    uid = _uid()
+    # A ordem importa e é a do mundo real: a regra nasceu ANTES da categoria.
+    # Depois desfaço a reconciliação da criação por SQL, para simular a conta
+    # que criou a categoria quando este código ainda não existia — é o único
+    # jeito de isolar o guard de LEITURA do conserto de escrita.
+    upsert_category_rule(uid, "cafe", "alimentacao")
+    create_user_category(uid, "cafe")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update user_category_rules set category='alimentacao' "
+            " where user_id=%s and keyword='cafe'",
+            (uid,),
+        )
+        conn.commit()
+    assert _regras(uid).get("cafe") == "alimentacao", "o estado legado não foi montado"
+
+    resultado = infer_category(uid, "gastei 15 com cafe", allow_ai=False)
+    assert normalize_text(resultado.category) == "cafe", (
+        f"a regra legada venceu: {resultado.category!r} (reason={resultado.reason})"
+    )
+    assert _regras(uid).get("cafe") == "alimentacao", (
+        "o guard de leitura não pode reescrever a tabela — ele só decide"
+    )

@@ -122,6 +122,18 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
     """
     Retorna categoria memorizada se alguma keyword bater com o texto.
     """
+    achado = get_memorized_rule(user_id, memo)
+    return None if achado is None else achado[1]
+
+
+def get_memorized_rule(user_id: int, memo: str):
+    """A regra memorizada que bate com o texto: `(keyword, categoria, criada_em)`.
+
+    Existe porque quem consome precisa do KEYWORD, não só do destino: é ele que
+    diz se a regra ficou obsoleta depois que o usuário criou uma categoria que
+    passou a ser dona daquele termo (`infer_category`, passo B). O
+    `get_memorized_category` delega para cá — a busca é uma só (§0.7).
+    """
     from utils_text import normalize_text, contains_word  # import local pra evitar loop circular
 
     ensure_user(user_id)
@@ -132,7 +144,7 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT keyword, category FROM user_category_rules "
+                "SELECT keyword, category, created_at FROM user_category_rules "
                 "WHERE user_id = %s ORDER BY LENGTH(keyword) DESC",
                 (user_id,),
             )
@@ -145,7 +157,9 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
         if not kw_norm:
             continue
         if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
-            return (category or "").strip() or None
+            destino = (category or "").strip()
+            criada_em = r.get("created_at") if isinstance(r, dict) else r[2]
+            return (keyword, destino, criada_em) if destino else None
 
     return None
 
@@ -350,6 +364,31 @@ def list_user_categories_full(
     return out
 
 
+def categoria_criada_depois_de(user_id: int, name: str, quando) -> bool:
+    """A categoria custom `name` nasceu depois de `quando`?
+
+    É o que separa regra OBSOLETA de regra DELIBERADA: quem linkou uma keyword
+    tendo a categoria já na tela fez uma escolha, e ela continua valendo. Quem
+    tinha a regra aprendida antes de a categoria existir tem uma regra que
+    envelheceu — o `user_category_rules` não guarda de onde a regra veio, mas
+    guarda QUANDO, e a ordem responde a pergunta sem inventar coluna nova.
+
+    Sem `quando` (regra antiga de antes do default de created_at) devolve True:
+    o caso conhecido é justamente a regra velha, e o fallback erra para o lado
+    de respeitar a categoria que o usuário criou na tela.
+    """
+    if quando is None:
+        return True
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from user_categories "
+                " where user_id=%s and lower(name)=lower(%s) and created_at > %s limit 1",
+                (user_id, (name or "").strip(), quando),
+            )
+            return cur.fetchone() is not None
+
+
 def list_custom_category_names(user_id: int) -> list[str]:
     """Nomes das categorias CUSTOMIZADAS (is_system=false) e não arquivadas.
 
@@ -420,6 +459,15 @@ def create_user_category(
             )
             new_id = cur.fetchone()["id"]
         conn.commit()
+
+    # A categoria nova pode ser a dona legítima de keywords que o bot aprendeu
+    # ANTES de ela existir — o caso "gastei com cafe" por meses e só depois
+    # criar a categoria Café. Sem isto, a regra velha vence no passo B de
+    # `infer_category` e a categoria recém-criada nunca é usada. Import local
+    # porque `category_service` importa deste módulo.
+    from core.services.category_service import reconciliar_regras_com_categoria
+
+    reconciliar_regras_com_categoria(user_id, norm)
     return get_user_category(user_id, new_id)
 
 
@@ -562,6 +610,12 @@ def delete_user_category(user_id: int, cat_id: int) -> None:
                 (user_id, int(cat_id)),
             )
         conn.commit()
+
+    # Sem isto, as regras que apontavam para ela sobram apontando para um nome
+    # que não existe mais — e o passo B de `infer_category` passa a devolver uma
+    # categoria fantasma. O rename já é tratado (o update acima reaponta as
+    # regras); faltava o delete.
+    delete_category_rules_by_category(user_id, current["name"])
 
 
 def resolve_category_rule_target(user_id: int, target: str) -> tuple[str, str, int]:
