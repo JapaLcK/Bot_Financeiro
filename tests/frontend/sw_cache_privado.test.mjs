@@ -170,14 +170,14 @@ test("CACHE_NAME subiu — é o que apaga do aparelho o que a versão anterior g
 test("o activate apaga todo cache de nome diferente", async () => {
   const apagados = [];
   const { ctx, handlers } = carregaSW();
-  ctx.caches.keys = async () => ["pigbank-v7", "pigbank-v8", "pigbank-v9"];
+  ctx.caches.keys = async () => ["pigbank-v8", "pigbank-v9", "pigbank-v10"];
   ctx.caches.delete = async (k) => { apagados.push(k); return true; };
 
   let pendente;
   await handlers.activate({ waitUntil: (p) => { pendente = p; } });
   await pendente;
 
-  assert.deepEqual(apagados.sort(), ["pigbank-v7", "pigbank-v8"]);
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"]);
 });
 
 // ── A limpeza no logout ──────────────────────────────────────────────────
