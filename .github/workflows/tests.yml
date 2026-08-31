@@ -114,8 +114,10 @@ jobs:
       # Mexeu no service-worker.js e não bumpou o CACHE_NAME? O `activate` apaga
       # todo cache de nome diferente do atual (`service-worker.js:89`), então
       # bumpar é o que REMOVE do aparelho o que a versão anterior já guardou.
-      # Sem o bump, a lista nova só impede gravação NOVA e o dado privado que já
-      # está lá continua lá. A regra era só prosa no CLAUDE.md; aqui ela reprova.
+      # Sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é
+      # a allowlist do `podeCachear`, não o `PRECACHE`: item tirado do precache
+      # que a allowlist ainda aceita volta a ser cacheado em runtime, como o
+      # Chart.js. O dado privado que já está lá continua lá. A regra era só prosa no CLAUDE.md; aqui ela reprova.
       #
       # O que o bump NÃO faz: entregar o código novo. Isso já acontece sozinho —
       # a rota serve o arquivo com `Cache-Control: no-cache`
@@ -365,7 +367,7 @@ jobs:
           fi
 
           if [ "$NOVA" = "$VELHA" ]; then
-            echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a lista nova só impede gravação NOVA e o dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN ou justifique na thread do PR."
+            echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é a allowlist do podeCachear, não o PRECACHE: item tirado do precache que a allowlist ainda aceita volta a ser cacheado em runtime, como o Chart.js. O dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN ou justifique na thread do PR."
             exit 1
           fi
 
@@ -384,6 +386,13 @@ jobs:
             case "$1" in pigbank-v*) ;; *) return 1 ;; esac
             local n=${1#pigbank-v}
             case "$n" in ''|*[!0-9]*) return 1 ;; esac
+            # Teto de 18 dígitos: o inteiro do shell é 64 bits com sinal e
+            # ESTOURA EM SILÊNCIO. Medido: 19 noves viram -8446744073709551617,
+            # e aí o `-le` inverte a ordem — reprovaria um avanço legítimo, ou
+            # aprovaria uma regressão. Acima do teto o nome cai fora do esquema
+            # e volta a valer só desigualdade: melhor não comparar do que
+            # comparar errado.
+            [ "${#n}" -le 18 ] || return 1
             printf '%s' "$((10#$n))"
           }
           NN=$(versao "$NOVA") && RCN=0 || RCN=$?
