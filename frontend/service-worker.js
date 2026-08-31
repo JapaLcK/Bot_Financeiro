@@ -15,11 +15,8 @@
 // versão é o que REMOVE do aparelho o que o v8 já tinha guardado. Não é
 // cosmético — sem o bump, a lista nova só impede gravação NOVA e o dado
 // privado que já está lá continua lá.
+// (head normaliza a forma e mexe no SW; a base é que está malformada)
 const CACHE_NAME = "pigbank-v9";
-
-/* linha morta de prova (o JS ignora, o grep do gate não):
-const CACHE_NAME = "pigbank-v0";
-*/
 
 // Pré-cache do casco. O Chart.js do cdnjs SAIU daqui de propósito:
 // `cache.addAll` rejeita INTEIRO se qualquer item falhar, então CDN fora do ar,
