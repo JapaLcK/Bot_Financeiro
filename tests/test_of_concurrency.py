@@ -18,6 +18,7 @@ CONTROLE NEGATIVO do grupo (os dois primeiros MEDIDOS nesta rodada):
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from datetime import date
@@ -25,9 +26,18 @@ from decimal import Decimal
 
 import psycopg
 import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+# Garante MFA_ENCRYPTION_KEY antes de importar o dashboard (que cacheia Fernet).
+# No TOPO, como nos irmãos do repo (tests/test_mfa.py:18): dentro de um teste
+# isto seria env global escrita no meio da suíte, e esta suíte tem dependência de
+# ordem conhecida.
+os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import core.services.pluggy_sync as ps
+import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from db.connection import get_conn
 
@@ -676,6 +686,55 @@ def test_prazo_nao_reinicia_a_cada_tentativa(user_id, monkeypatch):
         f"a operação inteira estourou o prazo: {relogio.agora - inicio:.3f}s"
 
 
+def test_backoff_nao_dorme_por_cima_do_que_o_log_gastou(user_id, monkeypatch):
+    """A folga do backoff é recontada DEPOIS do `log_system_event` do retry.
+
+    Aquele log abre conexão async NOVA e faz INSERT SEM `statement_timeout`,
+    DENTRO da janela do prazo — é o maior componente do estouro. A conta e as
+    constantes ficam num lugar só, no comentário de `_prazo_reconexao_ms`
+    (frontend/routes/open_finance.py): o `connect_timeout` do log é o
+    `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48` (default 5), o INSERT
+    não tem teto, e por isso o pior caso do log é ILIMITADO — não se repete
+    número solto aqui, porque a versão anterior deste arquivo dizia "~82s"
+    enquanto o comentário dizia "70,4s" e nenhum dos dois tinha receita.
+
+    O log em si continua FORA do teto (limitá-lo mexe na `log_system_event`, que
+    serve o produto inteiro); o que este teste garante é o que dá para garantir
+    aqui: o sono não pode ser dimensionado por uma folga que o log já consumiu.
+
+    CONTROLE NEGATIVO: medir a `folga` ANTES do log (como era) manda dormir o
+    backoff cheio (0,375–0,625s) tendo 0,2s de prazo — vermelho aqui."""
+    relogio = _RelogioFake()
+    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 20000)
+
+    sonos = []
+
+    async def _log(*a, **kw):
+        relogio.anda(10.0)               # o log custa 10s do prazo
+
+    async def _dorme(s):
+        sonos.append(s)
+        relogio.anda(s)
+
+    def _ocupado(uid, remote, item_id, budget_ms=None):
+        relogio.anda(9.8)
+        return None, False
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _ocupado)
+
+    with pytest.raises(of_routes.HTTPException):
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-log"))
+
+    # 20,0 − 9,8 (tentativa) − 10,0 (log) = 0,2s de prazo real quando o sono é
+    # decidido. O backoff da 1ª tentativa vale 0,375–0,625s, então o `min` só
+    # pode devolver a folga.
+    assert sonos and sonos[0] <= 0.21, \
+        f"dormiu {sonos[0]:.3f}s com 0,200s de prazo — a folga foi medida antes do log"
+
+
 def test_prazo_estourado_nem_tenta_de_novo(user_id, monkeypatch):
     """Sem folga, não há segunda tentativa — nem uma 'rapidinha'."""
     relogio = _RelogioFake()
@@ -1106,13 +1165,37 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
 @pytest.mark.parametrize("erro", [
     "pool",
     "query",
+    "connect",
+    "commit",
 ])
 def test_teto_da_escrita_estourado_vira_503_e_nao_500(user_id, monkeypatch, erro):
-    """Estourar o teto da ESCRITA é o mesmo fenômeno que estourar o do lock, e
-    tem de terminar igual: 503 recuperável, não 500.
+    """"Não deu tempo" tem UM desfecho, por qualquer porta: 503 recuperável.
 
-    CONTROLE NEGATIVO: tirar o `except (PoolTimeout, QueryCanceled)` de
-    `_salva_item_sob_lock` faz os dois casos subirem como 500."""
+    As quatro portas são a mesma categoria — `psycopg.OperationalError` — e as
+    duas últimas escapavam como 500 porque o `try` antigo cobria só a chamada do
+    `save_`, e não o `with pluggy_item_lock(...)` acima dela:
+
+      • `pool`    — `PoolTimeout`, a vaga do pool não veio;
+      • `query`   — `QueryCanceled`, o `statement_timeout` cortou a escrita;
+      • `connect` — `ConnectionTimeout` do `psycopg.connect` DEDICADO do
+        `pluggy_item_lock` (verificado à mão: com o `try` antigo, 500);
+      • `commit`  — o commit estoura como `OperationalError`; ele fica fora do
+        `statement_timeout` por limitação do Postgres (ver `_CursorComTeto`),
+        então o desfecho é a única coisa que dá para garantir.
+
+    O `except` mora no `_grava_reconexao`, em volta do `await to_thread(...)` —
+    não dentro do `_salva_item_sob_lock`. É lá que existe o `log_system_event`
+    para dizer QUAL foi o erro (ver
+    `test_log_diz_QUAL_falha_e_nao_so_lock_ocupado`).
+
+    CONTROLE NEGATIVO (medido): restaurar
+    `except (PoolTimeout, psycopg.errors.QueryCanceled)` no lugar antigo (dentro
+    do `_salva_item_sob_lock`, só em volta do `save_`) → `connect` e `commit`
+    vermelhos, subindo como `ConnectionTimeout`/`OperationalError` em vez de
+    503; `pool` e `query` seguem verdes, que é o que os torna incapazes de
+    discriminar sozinhos.
+    CONTROLE POSITIVO: `test_erro_de_bug_na_escrita_nao_vira_503` — o `except`
+    NÃO pode transformar tudo em 503."""
     from contextlib import contextmanager
 
     import psycopg
@@ -1122,12 +1205,21 @@ def test_teto_da_escrita_estourado_vira_503_e_nao_500(user_id, monkeypatch, erro
     from db.open_finance_state import _lock_key  # noqa: F401  (documenta a origem)
 
     @contextmanager
-    def _lock_livre(item_id, *, budget_ms=None):
+    def _lock(item_id, *, budget_ms=None):
+        if erro == "connect":
+            # O `psycopg.connect` da conexão dedicada estourando o
+            # `connect_timeout` — dentro do `with`, fora do `try` antigo.
+            raise psycopg.errors.ConnectionTimeout("connect timeout")
         yield True
 
+    _ERROS = {
+        "pool": lambda: PoolTimeout("pool cheio"),
+        "query": lambda: psycopg.errors.QueryCanceled("statement timeout"),
+        "commit": lambda: psycopg.OperationalError("commit não voltou"),
+    }
+
     def _estoura(uid, remote, **kw):
-        raise (PoolTimeout("pool cheio") if erro == "pool"
-               else psycopg.errors.QueryCanceled("statement timeout"))
+        raise _ERROS[erro]()
 
     async def _log(*a, **kw):
         return None
@@ -1135,7 +1227,7 @@ def test_teto_da_escrita_estourado_vira_503_e_nao_500(user_id, monkeypatch, erro
     async def _dorme(_s):
         return None
 
-    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_livre)
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock)
     monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item", _estoura)
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
@@ -1145,3 +1237,344 @@ def test_teto_da_escrita_estourado_vira_503_e_nao_500(user_id, monkeypatch, erro
 
     assert exc.value.status_code == 503
     assert "tente de novo" in str(exc.value.detail).lower()
+
+
+@pytest.mark.parametrize("erro, esperado", [
+    (lambda: ValueError("meta ou caixinha inválida"), 400),
+    (lambda: psycopg.errors.UniqueViolation("uq_of_conn_provider_item"), 500),
+    (lambda: psycopg.ProgrammingError('column "x" does not exist'), 500),
+])
+def test_erro_de_bug_na_escrita_nao_vira_503(user_id, monkeypatch, erro, esperado):
+    """CONTROLE POSITIVO do grupo: o `except` da categoria não pode engolir BUG.
+
+    Sem esta prova, o grupo acima passaria num código que transforma tudo em 503
+    — pior que o defeito, porque o usuário retentaria para sempre um erro que
+    nunca vai passar, e o log de erro sumiria.
+
+    A fronteira é a hierarquia do psycopg, medida: `UniqueViolation`,
+    `ProgrammingError` e `ValueError` NÃO são `psycopg.OperationalError`. Por
+    isso continuam subindo — `ValueError` vira o 400 da rota
+    (open_finance.py:855) e os outros dois o 500 de sempre.
+
+    CONTROLE NEGATIVO: trocar o `except psycopg.OperationalError` do
+    `_grava_reconexao` por `except psycopg.Error` → os dois casos de psycopg
+    viram 503 aqui (o de `ValueError` continua 400, e é por isso que ele sozinho
+    não discrimina)."""
+    def _estoura(uid, remote, **kw):
+        raise erro()
+
+    async def _log(*a, **kw):
+        return None
+
+    monkeypatch.setattr(
+        of_routes, "get_pluggy_item",
+        lambda item_id, api_key=None: {
+            "id": item_id, "status": "UPDATED", "clientUserId": str(user_id),
+            "connector": {"id": 612, "name": "Nubank"}})
+    monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item", _estoura)
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda item_id: None)
+
+    client = TestClient(dashboard.app, raise_server_exceptions=False)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "of@t.com"))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(user_id, hours=1))
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "test-csrf-token")
+
+    resp = client.post(
+        f"/open-finance/{user_id}/pluggy-item",
+        json={"item": {"id": f"item-bug-{user_id}"}},
+        headers={dashboard.CSRF_HEADER_NAME: "test-csrf-token",
+                 "Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == esperado, resp.text
+
+
+def test_conexao_dedicada_leva_statement_timeout_so_com_orcamento(monkeypatch):
+    """A conexão dedicada do lock ganha `statement_timeout` — e ele é RECONTADO
+    depois do connect, igual ao `lock_timeout`.
+
+    O `options` do connect é parâmetro de STARTUP: só existe antes do connect e
+    carrega o `restante_ms` PRÉ-connect. Sozinho, ele repetia o erro que a
+    recontagem do `lock_timeout` já tinha consertado uma linha abaixo — connect
+    que come quase a cota deixava a etapa seguinte com o orçamento INTEIRO de
+    teto, e a etapa somava quase o DOBRO da cota. Por isso o `set_config`
+    reescreve os dois com o valor recontado.
+
+    O relógio anda de propósito (vaga 1s + connect 3s numa cota de 10s): com o
+    `psycopg.connect` de custo ZERO da versão anterior deste teste, o valor
+    pré-connect e o recontado eram o MESMO número e o teste não discriminava
+    nada. Mesmo padrão do irmão `test_advisory_lock_desconta_o_tempo_do_connect` (:995).
+
+    CONTROLE NEGATIVO: tirar o `set_config('statement_timeout', ...)` (deixando
+    só o do `options`) → vermelho na asserção dos `9000ms` vs `6000ms`.
+    CONTROLE POSITIVO na terceira parte: SEM `budget_ms` (o caminho do sync, que
+    não tem cliente HTTP esperando) nada muda — nem `options`, nem
+    `connect_timeout`, nem `statement_timeout` no `set_config`."""
+    from db import open_finance_state as ofs
+
+    relogio = _RelogioFake()
+    kwargs: list[dict] = []
+    executados: list[tuple] = []
+
+    class _ConnFake:
+        def execute(self, sql, params=None):
+            executados.append((sql, params))
+
+        def close(self):
+            pass
+
+    class _Vaga:
+        def acquire(self, timeout=None):
+            relogio.anda(1.0)            # a vaga levou 1s
+            return True
+
+        def release(self):
+            pass
+
+    def _connect_lento(*a, **kw):
+        kwargs.append(kw)
+        relogio.anda(3.0)                # o connect levou mais 3s
+        return _ConnFake()
+
+    monkeypatch.setattr(ofs.time, "monotonic", relogio.monotonic)
+    monkeypatch.setattr(ofs, "_lock_slots", lambda: _Vaga())
+    monkeypatch.setattr(ofs.psycopg, "connect", _connect_lento)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+
+    with ofs.pluggy_item_lock("item-opts", budget_ms=10000) as got:
+        assert got is True
+
+    # 10000 − 1000 (vaga) = 9000 no instante do connect. É o que o `options`
+    # PODE saber, e o `connect_timeout` arredonda para segundos inteiros.
+    assert kwargs[0].get("options") == "-c statement_timeout=9000ms", kwargs[0]
+    assert kwargs[0].get("connect_timeout") == 9, kwargs[0]
+
+    # 10000 − 1000 (vaga) − 3000 (connect) = 6000 depois do connect. Os DOIS
+    # tetos têm de valer isto — 9000 aqui é o bug que este teste existe para
+    # pegar (a etapa somaria 9000 + 3000 numa cota de 10000).
+    cfg = [(sql, p) for sql, p in executados if p and "set_config" in sql]
+    assert len(cfg) == 1, executados
+    sql, params = cfg[0]
+    assert "lock_timeout" in sql and "statement_timeout" in sql, sql
+    assert list(params) == ["6000ms", "6000ms"], params
+
+    executados.clear()
+    with ofs.pluggy_item_lock("item-sem-orc") as got:
+        assert got is True
+    assert "options" not in kwargs[1] and "connect_timeout" not in kwargs[1], \
+        f"o caminho do sync não pode mudar: {kwargs[1]}"
+    assert all("statement_timeout" not in sql for sql, _ in executados), \
+        f"o SQL do sync tem de ficar byte a byte o de antes: {executados}"
+
+
+@pytest.mark.parametrize("modo, erro_esperado, msg_esperada", [
+    ("infra", "TooManyConnections", "TooManyConnections"),
+    ("lock", None, "lock do item ocupado"),
+])
+def test_log_diz_QUAL_falha_e_nao_so_lock_ocupado(
+        user_id, monkeypatch, modo, erro_esperado, msg_esperada):
+    """503 tem DUAS causas e os logs têm de separá-las.
+
+    Engolir `psycopg.OperationalError` dentro do `_salva_item_sob_lock` devolvia
+    `(None, False)`, que o `_grava_reconexao` só sabe ler como "lock ocupado":
+    DiskFull, InvalidPassword, TooManyConnections, AdminShutdown — a categoria
+    inteira — saía com o MESMO texto, e o tipo não aparecia nem no `details`. É o
+    diagnóstico falso que o docstring do `_prazo_reconexao_ms` já registrou uma
+    vez.
+
+    CONTROLE NEGATIVO (o que este teste realmente discrimina): apagar a
+    atribuição `causa = f"{type(exc).__name__}: {exc}"` do `except` do
+    `_grava_reconexao` → o caso `infra` fica vermelho nos dois logs (volta a
+    dizer "lock do item ocupado" com `erro: None`). "Voltar a capturar dentro do
+    `_salva_item_sob_lock`" NÃO é executável aqui: este teste stuba
+    `_salva_item_sob_lock` inteiro (abaixo), então o `except` de lá nem existe no
+    caminho — quem cobre a porta de dentro é
+    `test_teto_da_escrita_estourado_vira_503_e_nao_500`.
+    CONTROLE POSITIVO: o caso `lock` — lock genuinamente ocupado continua
+    dizendo "lock do item ocupado" e `erro=None`, senão o conserto seria só
+    trocar uma mentira por outra.
+
+    Cobre também o campo do log (achado 4): o `restante_ms` do retry era medido
+    ANTES do `log_system_event` que gasta prazo, e chegava ao banco vencido
+    (`10000` valendo `-20000`). O nome agora diz o que o número é.
+    CONTROLE NEGATIVO: manter a chave `restante_ms` → vermelho nos dois casos."""
+    eventos = []
+
+    async def _log(level, event_type, msg, **kw):
+        eventos.append((event_type, msg, kw.get("details") or {}))
+
+    async def _dorme(_s):
+        return None
+
+    def _falha(uid, remote, item_id, budget_ms=None):
+        if modo == "infra":
+            raise psycopg.errors.TooManyConnections("sorry, too many clients already")
+        return None, False
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
+
+    with pytest.raises(of_routes.HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-diag"))
+
+    assert exc.value.status_code == 503
+    assert [e for e, _, _ in eventos] == [
+        "of_reconnect_lock_retry", "of_reconnect_lock_timeout"], eventos
+
+    for evento, msg, det in eventos:
+        assert msg_esperada in msg, f"{evento}: {msg}"
+        if erro_esperado is None:
+            assert det.get("erro") is None, f"{evento}: {det}"
+        else:
+            assert (det.get("erro") or "").startswith(erro_esperado + ":"), \
+                f"{evento} não identifica o erro: {det}"
+            assert "lock do item ocupado" not in msg, \
+                f"{evento} mente sobre a causa: {msg}"
+
+    retry = eventos[0][2]
+    assert "restante_ms" not in retry, \
+        f"o número vencido não pode voltar com o nome antigo: {retry}"
+    assert "restante_ms_antes_do_log" in retry, retry
+
+
+def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
+    """Infra na 1ª tentativa + lock ocupado na 2ª: o log FINAL diz "lock", não a
+    infra — e a infra fica registrada no log do retry.
+
+    É o comportamento documentado no `except` do `_grava_reconexao` ("`causa` é a
+    da ÚLTIMA tentativa, de propósito"), e sem este teste era só comentário. O
+    preço aparece aqui: quem lê SÓ o `of_reconnect_lock_timeout` não vê o
+    `TooManyConnections` que aconteceu antes.
+
+    CONTROLE NEGATIVO: tirar o `causa = None` do caminho de sucesso do `try` (a
+    linha logo depois do `to_thread`) → a infra da 1ª tentativa gruda e o log
+    final passa a acusar `TooManyConnections`, vermelho na última asserção."""
+    eventos = []
+    tentativas = []
+
+    async def _log(level, event_type, msg, **kw):
+        eventos.append((event_type, msg, kw.get("details") or {}))
+
+    async def _dorme(_s):
+        return None
+
+    def _falha(uid, remote, item_id, budget_ms=None):
+        tentativas.append(item_id)
+        if len(tentativas) == 1:
+            raise psycopg.errors.TooManyConnections("sorry, too many clients already")
+        return None, False          # 2ª: lock genuinamente ocupado
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
+
+    with pytest.raises(of_routes.HTTPException) as exc:
+        asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-mix"))
+
+    assert exc.value.status_code == 503
+    assert len(tentativas) == 2, tentativas
+
+    retry, final = eventos[0], eventos[1]
+    assert "TooManyConnections" in (retry[2].get("erro") or ""), retry
+    assert final[2].get("erro") is None, \
+        f"a causa da 2ª tentativa é lock ocupado, não a infra da 1ª: {final}"
+    assert "lock do item ocupado" in final[1], final
+
+
+def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, caplog):
+    """O canal que diagnostica o 503 não pode depender do banco que caiu.
+
+    `log_system_event` (core/admin_dashboard.py:190-201) abre conexão NOVA para
+    gravar e engole TODA exceção com um `print` que não carrega nem `message` nem
+    `details`. Na família "o banco recusa conexão" — `TooManyConnections`,
+    `DiskFull`, `AdminShutdown`, `InvalidPassword` — a conexão do log é
+    EXATAMENTE o que está quebrado, então `system_event_logs` fica vazio e a
+    `causa` sumiria. Que é a família que o `test_log_diz_QUAL_falha_...` usa como
+    exemplar: lá o `_log` stub SEMPRE grava, então ele prova composição, não
+    gravação. Aqui o stub modela o desfecho real (engole e não grava nada).
+
+    CONTROLE NEGATIVO: apagar o `logging.getLogger(__name__).warning(...)` do
+    `_grava_reconexao` → vermelho na asserção do `caplog`, porque não sobra canal
+    nenhum com a causa.
+    CONTROLE POSITIVO: o 503 continua saindo com o log mudo — o diagnóstico não
+    pode virar um segundo modo de falha."""
+    import logging as _logging
+
+    async def _log_que_engole(*a, **kw):
+        # Desfecho de produção sob banco fora: a exceção morre dentro da
+        # `log_system_event` (except Exception + print), o fluxo segue, e
+        # `system_event_logs` NÃO recebe linha nenhuma.
+        return None
+
+    async def _dorme(_s):
+        return None
+
+    def _falha(uid, remote, item_id, budget_ms=None):
+        raise psycopg.errors.TooManyConnections("sorry, too many clients already")
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log_que_engole)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
+
+    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
+        with pytest.raises(of_routes.HTTPException) as exc:
+            asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-mudo"))
+
+    assert exc.value.status_code == 503          # CONTROLE POSITIVO
+
+    texto = "\n".join(r.getMessage() for r in caplog.records)
+    assert "item-mudo" in texto and "TooManyConnections" in texto, \
+        f"a causa sumiu junto com o banco: {texto!r}"
+
+
+def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, caplog):
+    """O caso que o log FINAL não cobre, porque ele não acontece.
+
+    Infra na 1ª tentativa + sucesso na 2ª → a rota devolve 200 e o
+    `of_reconnect_lock_timeout` NUNCA roda. O único portador da causa da 1ª é o
+    `of_reconnect_lock_retry` — e é justamente ele que, na família "o banco
+    recusa conexão", o `log_system_event` não consegue gravar. Sem o canal local
+    no ramo do retry, um `TooManyConnections` que some na tentativa seguinte
+    desaparece por completo: o usuário recebe 200 e ops nunca soube que o banco
+    piscou.
+
+    CONTROLE NEGATIVO: apagar o `logging.getLogger(__name__).warning(...)` do
+    ramo do retry (o `if tentativa < _RECONNECT_LOCK_ATTEMPTS`) → vermelho aqui,
+    e o `test_causa_sobrevive_ao_log_system_event_que_nao_grava` continua VERDE,
+    porque lá as duas tentativas falham e o log final salva o diagnóstico.
+    CONTROLE POSITIVO: o 200 continua saindo — o rastro não pode custar o
+    caminho de sucesso."""
+    import logging as _logging
+
+    async def _log_que_engole(*a, **kw):
+        return None
+
+    async def _dorme(_s):
+        return None
+
+    tentativas = {"n": 0}
+
+    def _falha_depois_grava(uid, remote, item_id, budget_ms=None):
+        tentativas["n"] += 1
+        if tentativas["n"] == 1:
+            raise psycopg.errors.TooManyConnections("sorry, too many clients already")
+        # `_salva_item_sob_lock` devolve (connection, sob_lock) — a 2ª entra.
+        return {"id": 1, "provider_item_id": item_id}, True
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log_que_engole)
+    monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha_depois_grava)
+
+    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
+        conexao = asyncio.run(
+            of_routes._grava_reconexao(user_id, {"id": "i"}, "item-piscou"))
+
+    assert conexao["provider_item_id"] == "item-piscou"   # CONTROLE POSITIVO
+    assert tentativas["n"] == 2, "a 2ª tentativa tem de ter acontecido"
+
+    texto = "\n".join(r.getMessage() for r in caplog.records)
+    assert "item-piscou" in texto and "TooManyConnections" in texto, \
+        f"a infra da 1ª tentativa sumiu sem deixar rastro: {texto!r}"

@@ -551,6 +551,27 @@ def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
             # libpq conta em segundos inteiros e trata 0 como "sem limite";
             # o piso de 1s é dele, não nosso.
             "connect_timeout": max(1, restante_ms // 1000),
+            # Backstop de SESSÃO para o PRIMEIRO statement desta conexão
+            # dedicada — o `set_config` logo abaixo, que sem isto não teria teto
+            # nenhum: o `connect_timeout` cobre só o handshake, então um servidor
+            # que aceita o socket e não responde penduraria o `set_config` para
+            # sempre, DENTRO da janela do prazo.
+            # `options` é parâmetro de STARTUP: só existe ANTES do connect, então
+            # carrega o `restante_ms` PRÉ-connect — o mesmo valor inflado que a
+            # recontagem lá embaixo existe para corrigir. Por isso ele NÃO é o
+            # teto do advisory: o `set_config` abaixo REESCREVE
+            # `statement_timeout` com o valor recontado, e daí em diante fino
+            # (`lock_timeout`) e grosso (`statement_timeout`) valem os dois o que
+            # sobrou. O cancelamento chega como `QueryCanceled`, que o `except`
+            # do `pg_advisory_lock` abaixo já trata como `got=False`.
+            # Medido: `options` e `connect_timeout` convivem — `show
+            # statement_timeout` devolveu `1500ms` e um `pg_sleep(5)` foi
+            # cancelado em 1,57s.
+            # ponytail: o kwarg SOBRESCREVE um `options` que venha na URL
+            # (medido: `application_name` da URL virou vazio). Hoje a
+            # `DATABASE_URL` não traz `options`; se um dia trouxer, o conserto é
+            # concatenar em vez de substituir.
+            "options": f"-c statement_timeout={restante_ms}ms",
         }
         conn = psycopg.connect(url, autocommit=True, **extra)
     except Exception:
@@ -571,7 +592,28 @@ def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
                 # sempre. Pego por teste, não por leitura.
                 yield False
                 return
-        conn.execute("select set_config('lock_timeout', %s, false)", (f"{restante_ms}ms",))
+        # `statement_timeout` vai JUNTO com o `lock_timeout`, no valor RECONTADO.
+        # Sem esta segunda metade o teto grosso ficava valendo o `restante_ms`
+        # pré-connect que o `options` carregou — exatamente o erro que a
+        # recontagem acima consertou para o `lock_timeout`: um connect de 9,9s
+        # numa cota de 10s deixava a etapa seguinte com 10s de teto, e a etapa
+        # somava ~20s numa cota de 10s.
+        # Só no caminho COM orçamento, pelo mesmo motivo do `extra` lá em cima: o
+        # sync não tem cliente esperando e o SQL dele fica byte a byte o de antes.
+        # Medido no Postgres local: com `options=-c statement_timeout=9000ms` no
+        # connect, este `set_config` levou o `show statement_timeout` de `9s` para
+        # `1200ms` na mesma sessão, e um `pg_sleep(5)` seguinte foi cancelado em
+        # 1,28s com `QueryCanceled` — que é o que o `except` abaixo já trata.
+        # ponytail: sobra UM statement fora da recontagem — este próprio
+        # `set_config`, que roda sob o `statement_timeout` de startup (o valor
+        # inflado). É configuração, sem I/O de tabela; se um dia importar, o
+        # conserto é mandar no `options` um piso pequeno e subir aqui.
+        sql = "select set_config('lock_timeout', %s, false)"
+        params = [f"{restante_ms}ms"]
+        if budget_ms is not None:
+            sql += ", set_config('statement_timeout', %s, false)"
+            params.append(f"{restante_ms}ms")
+        conn.execute(sql, params)
         try:
             conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
             got = True

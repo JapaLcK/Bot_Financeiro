@@ -499,6 +499,25 @@ class _CursorComTeto:
 
     Piso de 1ms: com a conexão na mão, o que se garante é que ela não fica
     parada para sempre — não que caiba num prazo já vencido.
+
+    O COMMIT fica FORA do teto, e por limitação do Postgres, não por descuido
+    (Codex #166, achado B): `statement_timeout` não interrompe a espera de
+    replicação síncrona e o libpq não tem timeout por query. Não há knob que o
+    cubra — passar o commit para dentro deste wrapper só cobriria o que o
+    `statement_timeout` já cobre. O que existe é o desfecho: desde que
+    `_grava_reconexao` (frontend/routes/open_finance.py) passou a capturar
+    `psycopg.OperationalError`, um commit que estoura vira 503 recuperável em vez
+    de 500 — com a ressalva registrada lá: `TransactionResolutionUnknown` é
+    desfecho DESCONHECIDO, então o 503 pode chegar a um commit que passou.
+
+    FURO CONHECIDO pelo mesmo motivo, e também NÃO fechado nesta onda: o
+    ROLLBACK. Quando o `statement_timeout` corta um statement, o
+    `with get_conn(...)` de `save_pluggy_open_finance_item` desfaz a transação na
+    saída do contexto, e esse rollback não está sob teto nenhum — banco que não
+    responde pendura ali, DEPOIS do prazo já vencido. Mesma limitação do commit
+    (não há timeout por query no libpq); o que muda é que aqui o desfecho não
+    importa, porque a transação não gravou de qualquer jeito. Fechar exigiria
+    cancelar a conexão de fora (`conn.cancel()` num watchdog) — outro PR.
     """
 
     def __init__(self, cur, budget_ms: int, t0: float):
