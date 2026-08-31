@@ -117,6 +117,35 @@ def _servidos():
 _ROTAS = None
 
 
+def _expandir(rotas, vistos=None, descartadas=None):
+    """Achata `app.routes`, entrando nos routers incluídos.
+
+    Isto NÃO é zelo: com o `fastapi==0.141.1` do requirements, cada
+    `include_router()` vira um `_IncludedRouter` que **não** tem `path_regex`, e as
+    rotas dele moram em `.original_router.routes` (já com o prefixo aplicado). Um
+    filtro ingênuo por `hasattr(r, "path_regex")` descarta os 11 routers do projeto
+    em silêncio — o teste fica verde no venv local, que está no 0.115.6, e vermelho
+    no CI. Foi exatamente o que aconteceu.
+
+    `descartadas` recolhe o que não foi nem rota nem container, para o teste poder
+    reprovar em vez de medir menos sem avisar.
+    """
+    vistos = set() if vistos is None else vistos
+    for r in rotas:
+        if id(r) in vistos:
+            continue
+        vistos.add(id(r))
+        if hasattr(r, "path_regex"):
+            yield r
+            continue
+        sub = getattr(r, "original_router", None) or getattr(r, "router", None) or r
+        subrotas = getattr(sub, "routes", None)
+        if subrotas:
+            yield from _expandir(subrotas, vistos, descartadas)
+        elif descartadas is not None:
+            descartadas.append(type(r).__name__)
+
+
 def _rotas():
     """As rotas REAIS do app, não as que um regex acha no fonte.
 
@@ -133,13 +162,19 @@ def _rotas():
     global _ROTAS
     if _ROTAS is None:
         from frontend.finance_bot_websocket_custom import app  # noqa: PLC0415
+
+        descartadas = []
+        achadas = list(_expandir(app.routes, descartadas=descartadas))
+        assert not descartadas, (
+            "há entrada em app.routes que não é rota nem container conhecido: "
+            f"{sorted(set(descartadas))}. O FastAPI mudou de forma — conserte "
+            "_expandir() em vez de deixar o teste medir menos em silêncio."
+        )
         _ROTAS = [
             (r.path, {m.upper() for m in (getattr(r, "methods", None) or {"GET"})}, r.path_regex)
-            for r in app.routes
-            if hasattr(r, "path_regex")
+            for r in achadas
         ]
     return _ROTAS
-
 
 
 def _casa_com_interpolacao(ref: str, rota: str) -> bool:
@@ -214,6 +249,16 @@ def test_toda_referencia_absoluta_tem_ROTA():
     | `src`/`href`/`poster`       | GET (é o que o navegador faz) |
     | `url(...)` do CSS           | GET                       |
     | `fetch`/`import`/`register` | o `method:` da chamada, GET quando omitido |
+
+    **Teto aceito, medido**: 16 dos 174 `fetch` do frontend recebem a URL numa
+    VARIÁVEL (`const url = ...; fetch(url, {...})`) e ficam fora. Cobrir isso é
+    seguir fluxo de dados, não casar padrão — e nos casos reais deste repositório a
+    variável é composta em dois níveis (`const base = ...; fetch(`${base}/kpis`)`) e o
+    método é ternário (`isEdit ? "PATCH" : "POST"`). A tentativa barata — conferir
+    todo literal absoluto atribuído a variável — foi medida e descartada: acusava
+    `/></svg>` de dentro de markup e as bases compostas, ou seja, trocava um ponto
+    cego por ruído. O modo de falha do que ficou de fora é um 404 não detectado, não
+    um verde falso sobre outra coisa.
     """
     rotas = _rotas()
 
@@ -246,7 +291,7 @@ def test_toda_referencia_absoluta_tem_ROTA():
         base = u.endswith("/") and len(u) > 1
         alvo = u.rstrip("/") if base else u
         for caminho, metodos, regex in rotas:
-            if metodo not in metodos:
+            if metodo is not None and metodo not in metodos:
                 continue
             if "${" in alvo:
                 if _casa_com_interpolacao(alvo, caminho):
@@ -279,7 +324,7 @@ def test_toda_referencia_absoluta_tem_ROTA():
         for u, metodo in achados:
             u = u.strip()
             if not resolve(u, metodo):
-                quebradas.append(f"{u} [{metodo}] (em {p.relative_to(RAIZ)})")
+                quebradas.append(f"{u} [{metodo or 'qualquer'}] (em {p.relative_to(RAIZ)})")
     assert not quebradas, (
         "referência absoluta que nenhuma rota atende NAQUELE MÉTODO — isto é 404 ou "
         f"405 em produção, e o arquivo existir não muda nada sem StaticFiles: "
