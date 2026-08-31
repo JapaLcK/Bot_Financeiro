@@ -223,10 +223,18 @@ def _casa_com_interpolacao(ref: str, rota: str) -> bool:
 def test_toda_pagina_html_tem_rota_que_a_serve():
     """Página que nenhuma construção entrega é página que ninguém consegue abrir."""
     servidos = _servidos()
+    # `.js` e `.css` também: um `frontend/unused.js` sem rota é código morto que
+    # ninguém alcança, exatamente como uma página órfã. Medido em 2026-08-31 antes de
+    # ampliar: zero órfãos desses dois tipos, então a ampliação não custou allowlist.
     orfas = [
-        f.name
-        for f in sorted(FRONTEND.glob("*.html"))
-        if f.name not in PAGINAS_SEM_ROTA_OK and f.name not in servidos
+        str(f.relative_to(FRONTEND))
+        for f in sorted(FRONTEND.rglob("*"))
+        if f.is_file()
+        and f.suffix.lower() in {".html", ".js", ".css"}
+        and not _ignorado(f)
+        and "routes" not in f.relative_to(RAIZ).parts
+        and f.name not in PAGINAS_SEM_ROTA_OK
+        and str(f.relative_to(FRONTEND)) not in servidos
     ]
     assert not orfas, (
         "estas páginas existem em frontend/ e nenhuma rota as entrega: "
@@ -244,6 +252,26 @@ def test_toda_rota_aponta_para_arquivo_que_existe():
         if not (FRONTEND / rel).exists()
     ]
     assert not faltando, f"rota apontando para arquivo inexistente: {faltando}"
+
+
+def _argumentos(texto: str, i: int) -> str:
+    """O que ainda está DENTRO da chamada aberta antes de `i`, até fechar.
+
+    As opções nem sempre vêm como `{` colado na vírgula — este repositório escreve
+    `fetch(url, authOptions({ method: "POST" }))` —, então não dá para exigir a chave.
+    Mas parar por caractere contado deixava o método de OUTRA chamada entrar na
+    janela. Contar parênteses fecha exatamente onde a chamada acaba.
+    """
+    prof = 1
+    for j in range(i, min(len(texto), i + 2000)):
+        c = texto[j]
+        if c == "(":
+            prof += 1
+        elif c == ")":
+            prof -= 1
+            if prof == 0:
+                return texto[i:j]
+    return texto[i:i + 2000]
 
 
 def test_toda_referencia_absoluta_tem_ROTA():
@@ -280,13 +308,15 @@ def test_toda_referencia_absoluta_tem_ROTA():
     # aspas e porque `${API}` no começo não parecia caminho absoluto.
     NAVEGA = re.compile(r"""(?:src|href|poster|data-src)\s*=\s*["\']([^"\'>]+)["\']""")
     CSS_URL = re.compile(r"""url\(\s*["\']?([^"\')]+)["\']?\s*\)""")
-    CHAMADA = re.compile(r"""(?:fetch|import|register)\(\s*["\'`]([^"\'`]+)["\'`]""")
+    # Um grupo por delimitador, e não uma classe com os três: com `["\'`]` o
+    # casamento parava no primeiro `"` DENTRO da crase, e truncava — medido, 2
+    # chamadas deste repositório, uma delas com `|| ""` no meio da interpolação.
+    # O `(\s*\+)?` diz se um operando segue: só então a barra final pode ser base de
+    # concatenação. `fetch("/fonts/")` é a URL inteira, e é 404.
+    CHAMADA = re.compile(
+        r"""(?:fetch|import|register)\(\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)(\s*\+)?"""
+    )
     METODO = re.compile(r"""method\s*:\s*["\']([A-Za-z]+)["\']""")
-    # As opções nem sempre vêm como `{` logo depois da vírgula: este repositório
-    # escreve `fetch(url, authOptions({ method: "POST", ... }))`. Exigir a chave
-    # colada dava GET a uma chamada POST e inventava referência quebrada. A janela
-    # vai até a PRÓXIMA chamada (ou 500 caracteres), para não pegar o método de outra.
-    PROXIMA = re.compile(r"(?:fetch|import|register)\(")
 
     # `${API}` e irmãos valem a origem do site: `const API = BASE_HTTP`. O que vem
     # depois é caminho absoluto, e é o que interessa aqui.
@@ -328,10 +358,9 @@ def test_toda_referencia_absoluta_tem_ROTA():
         achados = [(m.group(1), "GET", False) for m in NAVEGA.finditer(texto)]
         achados += [(m.group(1), "GET", False) for m in CSS_URL.finditer(texto)]
         for m in CHAMADA.finditer(texto):
-            fim = PROXIMA.search(texto, m.end())
-            janela = texto[m.end():min(fim.start() if fim else len(texto), m.end() + 500)]
-            met = METODO.search(janela)
-            achados.append((m.group(1), met.group(1).upper() if met else "GET", True))
+            url = next(g for g in m.groups()[:3] if g is not None)
+            met = METODO.search(_argumentos(texto, m.end()))
+            achados.append((url, met.group(1).upper() if met else "GET", bool(m.group(4))))
         for u, metodo, concatenavel in achados:
             u = u.strip()
             if not resolve(u, metodo, concatenavel):
