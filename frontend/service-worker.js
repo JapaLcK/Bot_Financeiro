@@ -14,6 +14,7 @@
 // v9: o `activate` apaga todo cache de nome diferente deste, então bumpar a
 // versão é o que REMOVE do aparelho o que o v8 já tinha guardado. Não é
 // cosmético — sem o bump, a lista nova só impede gravação NOVA e o dado
+// (linha de prova do gate — este commit NÃO bumpa de propósito)
 // privado que já está lá continua lá.
 const CACHE_NAME = "pigbank-v9";
 
