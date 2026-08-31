@@ -128,6 +128,7 @@ from .categories import (
     list_user_category_rules,
     resolve_category_rule_target,
     get_uncategorized_launches,
+    list_custom_categories_com_data,
     list_custom_category_names,
     resolve_category_input,
     user_category_display_map,
@@ -484,7 +485,7 @@ __all__ = [
     "delete_category_rules_by_category", "list_categories",
     "get_memorized_category", "get_memorized_rule", "get_memorized_rules", "upsert_category_rule", "list_user_category_rules",
     "resolve_category_rule_target", "get_uncategorized_launches",
-    "list_custom_category_names",
+    "list_custom_categories_com_data", "list_custom_category_names",
     "resolve_category_input", "user_category_display_map",
     "ensure_user_category", "CATEGORY_NAME_MAX_LEN",
     # pending

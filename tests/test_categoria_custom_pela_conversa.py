@@ -495,3 +495,48 @@ def test_editar_so_emoji_e_cor_nao_estoura():
         "edição sem rename não pode mexer no created_at — ele marca desde quando "
         "a categoria é dona do termo, e o termo não mudou"
     )
+
+
+def test_obsolescencia_nao_consulta_categorias_por_candidata():
+    """O caminho quente não pode crescer com o número de regras que colidem.
+
+    Uma frase pode casar várias regras (a busca é por comprimento de keyword).
+    Avaliar a obsolescência de cada uma consultando o banco fazia a inferência —
+    que roda em TODA mensagem — custar uma conexão por candidata. Medido antes
+    do conserto: 6 leituras de `user_categories` com 5 regras colidindo; depois,
+    2, e sem crescer com a quantidade.
+    """
+    import psycopg
+
+    uid = _uid()
+    for termo in ["cafe especial da manha", "cafe especial da", "cafe especial",
+                  "cafe da", "cafe"]:
+        upsert_category_rule(uid, termo, "alimentacao")
+    create_user_category(uid, "cafe")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update user_category_rules set category='alimentacao', "
+            "       created_at = now() - interval '90 days' where user_id=%s",
+            (uid,),
+        )
+        conn.commit()
+
+    consultas: list[str] = []
+    original = psycopg.Cursor.execute
+
+    def _spy(self, query, *a, **k):
+        consultas.append(" ".join(str(query).lower().split()))
+        return original(self, query, *a, **k)
+
+    psycopg.Cursor.execute = _spy
+    try:
+        resultado = infer_category(uid, "gastei 15 com cafe especial da manha", allow_ai=False)
+    finally:
+        psycopg.Cursor.execute = original
+
+    leituras = [q for q in consultas if "from user_categories" in q]
+    assert normalize_text(resultado.category) == "cafe", resultado.category
+    assert len(leituras) <= 2, (
+        f"{len(leituras)} leituras de user_categories para 5 regras colidindo — "
+        f"está consultando por candidata"
+    )

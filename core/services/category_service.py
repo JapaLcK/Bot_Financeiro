@@ -23,6 +23,7 @@ from db import (
     get_memorized_rule,
     get_memorized_rules,
     upsert_category_rule,
+    list_custom_categories_com_data,
     list_custom_category_names,
     resolve_category_input,
 )
@@ -113,7 +114,7 @@ def custom_category_match(user_id: int, text_norm: str, *, nomes: list[str] | No
 
 
 def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em,
-                          *, nomes: list[str] | None = None) -> bool:
+                          *, catalogo: list[tuple[str, object]]) -> bool:
     """A regra aprendida envelheceu porque o usuário criou a categoria DEPOIS?
 
     Duas condições, e as duas importam:
@@ -131,12 +132,22 @@ def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em,
     A 2ª consulta só roda quando há colisão — no caminho quente, sem categoria
     custom conflitante, o custo é o de sempre.
     """
+    nomes = [nome for nome, _ in catalogo]
     dona = custom_category_match(user_id, normalize_text(keyword or ""), nomes=nomes)
     if not dona or normalize_text(dona) == normalize_text(destino or ""):
         return False
-    from db.categories import categoria_criada_depois_de
 
-    return categoria_criada_depois_de(user_id, dona, criada_em)
+    # A data vem do catálogo já carregado: sem isso era uma consulta por
+    # candidata que colide, no caminho quente da inferência.
+    dona_norm = normalize_text(dona)
+    nascimento = next((quando for nome, quando in catalogo
+                       if normalize_text(nome) == dona_norm), None)
+    if nascimento is None or criada_em is None:
+        # Sem uma das datas não dá para afirmar que a regra envelheceu; o caso
+        # conhecido é a regra velha, então erra para o lado de respeitar a
+        # categoria que o usuário criou na tela.
+        return True
+    return nascimento > criada_em
 
 
 def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
@@ -304,10 +315,10 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         # gravado por causa de um hiccup de banco.
         regra = candidatas[0]
         try:
-            nomes_custom = list_custom_category_names(user_id) or []
+            catalogo = list_custom_categories_com_data(user_id) or []
             for cand in candidatas:
                 if not _regra_ficou_obsoleta(user_id, cand[0], cand[1], cand[2],
-                                             nomes=nomes_custom):
+                                             catalogo=catalogo):
                     regra = cand
                     break
             else:

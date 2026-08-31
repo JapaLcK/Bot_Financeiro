@@ -435,29 +435,32 @@ def reaponta_regra_se_anterior(user_id: int, keyword: str, nova_categoria: str) 
     return mudou
 
 
-def categoria_criada_depois_de(user_id: int, name: str, quando) -> bool:
-    """A categoria custom `name` nasceu depois de `quando`?
+def list_custom_categories_com_data(user_id: int) -> list[tuple[str, object]]:
+    """As categorias custom ativas com a data em que passaram a ter esse nome.
 
-    É o que separa regra OBSOLETA de regra DELIBERADA: quem linkou uma keyword
-    tendo a categoria já na tela fez uma escolha, e ela continua valendo. Quem
-    tinha a regra aprendida antes de a categoria existir tem uma regra que
-    envelheceu — o `user_category_rules` não guarda de onde a regra veio, mas
-    guarda QUANDO, e a ordem responde a pergunta sem inventar coluna nova.
+    Uma consulta só, para quem precisa avaliar várias regras de uma vez: sem
+    ela, o passo B do `infer_category` abria uma conexão POR CANDIDATA que
+    colide (medido: 1 leitura de `user_categories` no caminho comum, 6 com
+    cinco regras colidindo). Substituiu uma função que consultava a data de uma
+    categoria por vez — o catálogo já vinha pré-carregado, faltava trazer a data
+    junto.
 
-    Sem `quando` (regra antiga de antes do default de created_at) devolve True:
-    o caso conhecido é justamente a regra velha, e o fallback erra para o lado
-    de respeitar a categoria que o usuário criou na tela.
+    SEM `ensure_user`, igual à `list_custom_category_names` logo abaixo: é
+    leitura no caminho quente da inferência, e o `ensure_user` são dois INSERT
+    que o `test_inferencia_nao_escreve_no_banco` conta — e que já foram feitos
+    pelo `get_memorized_rules` antes desta chamada.
     """
-    if quando is None:
-        return True
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select 1 from user_categories "
-                " where user_id=%s and lower(name)=lower(%s) and created_at > %s limit 1",
-                (user_id, (name or "").strip(), quando),
+                "select name, created_at from user_categories "
+                " where user_id=%s and is_system=false and is_archived=false "
+                " order by name",
+                (user_id,),
             )
-            return cur.fetchone() is not None
+            rows = cur.fetchall() or []
+    return [((r["name"] if isinstance(r, dict) else r[0]),
+             (r["created_at"] if isinstance(r, dict) else r[1])) for r in rows]
 
 
 def list_custom_category_names(user_id: int) -> list[str]:
