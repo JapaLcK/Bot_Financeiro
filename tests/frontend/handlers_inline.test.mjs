@@ -46,15 +46,43 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Páginas públicas: fingir sessão VÁLIDA manda o login embora para /home. */
 const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos.html"]);
 
-// Um grupo POR DELIMITADOR — aspa dupla, simples, crase, e a ESCAPADA
-// (`onclick=\\"x()\\"`, que é como um .js escreve handler dentro de string).
-//
-// Uma classe única com os três cortaria o handler na primeira aspa DE DENTRO:
-// `onclick="foo(${bar('x')})"` viraria `foo(${bar(`, e aí o
-// `semInterpolacao` não teria mais o `}` para casar — a interpolação ficaria, e o
-// `bar` seria cobrado como se fosse ponto de entrada. É o mesmo erro que o extrator
-// de URL do gate de rotas cometeu, pela mesma razão.
-const HANDLER = /\bon[a-z]+\s*=\s*(?:\\"((?:[^"\\]|\\[^"])*)\\"|"([^"]*)"|'([^']*)'|`([^`]*)`)/gi;
+// Onde um handler COMEÇA. O valor não sai daqui — sai do `valorDoHandler`, que
+// varre até o delimitador de fechamento tratando `${...}` como opaco.
+const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`])/gi;
+
+/**
+ * O valor do handler que começa em `i`, indo até o delimitador que o fecha.
+ *
+ * Isto é um scanner e não um regex, e a razão está medida: regex por classe de
+ * aspas cortava na primeira aspa de dentro; regex por delimitador cortava quando a
+ * aspa de dentro era IGUAL à de fora — que é o caso de
+ * `onclick="... openCardDeleteModal(${escapeHtmlSafe(JSON.stringify(c.name || ""))})"`
+ * no dashboard.js. Cada versão de regex fechou uma borda e abriu a seguinte; foram
+ * cinco rodadas de revisão até ficar claro que a forma certa é varrer.
+ *
+ * `${...}` é opaco: conta profundidade de chave e não olha aspas lá dentro. Quem
+ * remove o conteúdo é o `semInterpolacao`, depois — aqui só importa não terminar o
+ * handler no meio dele.
+ */
+function valorDoHandler(texto, i) {
+  const escapado = texto[i] === "\\";
+  const delim = texto[escapado ? i + 1 : i];
+  let j = (escapado ? i + 2 : i + 1), prof = 0, out = "";
+  while (j < texto.length) {
+    const c = texto[j];
+    if (prof === 0 && c === "$" && texto[j + 1] === "{") { prof = 1; out += "${"; j += 2; continue; }
+    if (prof > 0) {
+      if (c === "{") prof++;
+      else if (c === "}") prof--;
+      out += c; j++; continue;
+    }
+    if (c === "\\" && escapado && texto[j + 1] === delim) break;
+    if (c === delim) break;
+    out += c; j++;
+  }
+  return out;
+}
+
 // Handler MONTADO, fora de atributo literal: `{ click: "openUsersModal(event)" }`
 // no admin-dashboard.html e `el.onclick = "..."`. São 10 nomes hoje, todos em
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
@@ -103,9 +131,7 @@ function nomesDe(trechos) {
 }
 
 const trechosDe = (texto) => [
-  // `m.slice(1).find(Boolean)`: só um dos quatro grupos casa; os outros vêm
-  // undefined, e um `m[1]` cego pegaria sempre o da aspa escapada.
-  ...[...texto.matchAll(HANDLER)].map((m) => m.slice(1).find(Boolean) || ""),
+  ...[...texto.matchAll(INICIO_HANDLER)].map((m) => valorDoHandler(texto, m.index + m[0].length - m[1].length)),
   ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
 ];
 
