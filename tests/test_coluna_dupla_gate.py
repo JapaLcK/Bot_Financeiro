@@ -317,13 +317,16 @@ def _commita(lab, arquivos):
     _git(lab, "commit", "-qm", "corrigido")
 
 
-def _gate(lab, *args):
+def _gate(lab, *args, addopts=""):
     """O gate de verdade, sobre o laboratorio. `PYTEST_ADDOPTS` e fixado pelo mesmo
     motivo do `_pytest_em`: herdado, mudaria a corrida das DUAS colunas. O
     `COLUMNS` que estava aqui saiu junto com a leitura do resumo — era o pytest
-    que CORTAVA a linha do resumo na largura do terminal; o XML nao corta nada."""
+    que CORTAVA a linha do resumo na largura do terminal; o XML nao corta nada.
+
+    `addopts` existe para o teste que prova que o gate IGNORA a variavel: zerar
+    aqui, sempre, esconderia justamente esse caso de todos os outros testes."""
     return subprocess.run([sys.executable, str(_CAMINHO), "--antes", "HEAD~1", "--depois", "HEAD", *args],
-                          cwd=lab, env={**os.environ, "PYTEST_ADDOPTS": ""},
+                          cwd=lab, env={**os.environ, "PYTEST_ADDOPTS": addopts},
                           capture_output=True, text=True)
 
 
@@ -584,3 +587,64 @@ def test_prova_FRACA_nao_afirma_que_ninguem_rodou():
     assert codigo == 0 and "prova FRACA" in relatorio
     assert "NENHUM teste chegou a RODAR" not in relatorio
     assert "1 passado(s) ao lado" in relatorio  # o que a frase antiga escondia
+
+
+def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
+    """Alvo que o pytest nao trata como ALVO. A guarda de nome checa so o SUFIXO,
+    entao `--basetemp=<x>.py` termina em `.py`, passa por ela, e o pytest o consome
+    como OPCAO — sobra ZERO alvo posicional e a coleta varre a arvore inteira,
+    palavra por palavra o bug do `--testes tests/`.
+
+    O laboratorio e o do achado, literal: o teste PEDIDO e tautologico (verde nas
+    duas colunas) e o irmao NAO relacionado e vermelho->verde. Medido sem o `--`:
+    exit 0 e `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor` — o
+    gate carimba como provado um conserto que o teste pedido nunca exercitou.
+
+    A segunda metade e o controle positivo, e e obrigatoria: um `--` mal posto
+    (antes do `--junitxml`) quebraria TODOS os alvos, os dois casos sairiam rc=4 e
+    o negativo acima passaria verde do mesmo jeito."""
+    lab = _lab(tmp_path, {"tests/test_irmao.py": _TESTE_DO_FIX})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_taut.py": "def test_taut():\n    assert True\n"})
+
+    r = _gate(lab, f"--testes=--basetemp={tmp_path / 'base.py'}")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "pytest saiu 4 na coluna antiga" in r.stdout
+    assert "prova FORTE" not in r.stdout and "test_irmao" not in r.stdout
+
+    r = _gate(lab, "--testes", "tests/test_taut.py")  # arquivo: chega ao veredito...
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "tautologico" in r.stdout and "test_irmao" not in r.stdout
+
+    r = _gate(lab, "--testes", "tests/test_irmao.py::test_valor")  # ...e node id tambem
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_irmao.py::test_valor - assert 0 == 42" in r.stdout
+
+
+def test_addopts_do_ambiente_nao_injeta_alvo(tmp_path):
+    """A porta que o `--` NAO alcanca: o pytest PREPENDE o `PYTEST_ADDOPTS`, entao
+    um ALVO posto ali entra ANTES do nosso `--` e nada o barra. Mesmo laboratorio
+    do teste acima, mesmo alvo pedido — so muda a variavel de ambiente.
+
+    Medido sem o `"PYTEST_ADDOPTS": ""` da `roda_pytest`: exit 0 e `APROVADO, prova
+    FORTE` citando `test_irmao`, enquanto a linha `testes = ...` impressa continua
+    dizendo `tests/test_taut.py` — o gate mente sobre o que rodou. Nao e regressao
+    deste PR; e pre-existente, e o proprio harness deste arquivo zerava a variavel,
+    o que escondia o caso de todos os outros testes.
+
+    A segunda metade e o controle positivo: uma OPCAO (nao um alvo) tambem deixa de
+    alcancar o gate, e o veredito continua o mesmo. Sem ela, um conserto que
+    quebrasse a corrida inteira passaria no negativo."""
+    lab = _lab(tmp_path, {"tests/test_irmao.py": _TESTE_DO_FIX})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_taut.py": "def test_taut():\n    assert True\n"})
+
+    r = _gate(lab, "--testes", "tests/test_taut.py", addopts="tests/test_irmao.py")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "tautologico" in r.stdout
+    assert "prova FORTE" not in r.stdout and "test_irmao" not in r.stdout
+
+    r = _gate(lab, "--testes", "tests/test_taut.py", addopts="-rN")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "tautologico" in r.stdout

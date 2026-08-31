@@ -36,10 +36,10 @@ Sai 1 quando um teste PASSA no antes (tautologico), quando falha no depois,
 quando a coluna corrigida nao prova o conserto, quando o pytest nao escreveu o
 XML, ou quando uma guarda dispara.
 
-MUDANCA VISIVEL de comportamento: `PYTEST_ADDOPTS=-rN`/`-rs`/`--no-summary` iam
-para REPROVADO ("sem desfecho") e agora saem `APROVADO, prova FORTE` — eles
-filtram o resumo impresso e nao alcancam o XML. E o gate ficando certo, mas quem
-lia aquele REPROVADO como "seu ambiente esta torto" perde o aviso.
+MUDANCA VISIVEL de comportamento: o `PYTEST_ADDOPTS` do ambiente deixou de
+alcancar as duas colunas (ver `roda_pytest`). Quem o usava para afinar as
+corridas internas do gate perde isso — de proposito: opcao herdada muda QUANTOS
+testes rodam, e um ALVO posto ali entrava antes do `--` e virava prova falsa.
 
 Limites conhecidos, medidos e DECLARADOS: quase todos abortam ou reprovam. Os
 TRES que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
@@ -103,10 +103,6 @@ valem conserto enquanto nao aparecerem:
       E o desfecho certo — `xfail` nao e conserto —, mas o relatorio o chama de
       "NAO passou" sem dizer que foi `xfail`; sem irmao passando, o caso nem chega
       ao ramo do orfao: cai no "0 passaram, 1 pularam".
-    - `PYTEST_ADDOPTS=--co`: as duas colunas so coletam, o XML sai sem desfecho e o
-      rc da antiga e 0 -> REPROVADO por "o grupo PASSA no codigo antigo. Teste
-      tautologico". O veredito e o certo; o diagnostico impresso e falso, porque
-      nada chegou a rodar.
     - a nota FORTE exige que ALGUM vermelho tenha `<failure>`, nao que o teste DO
       FIX tenha falhado. Medido: o teste do fix erra na fixture no antigo e um
       irmao pre-existente falha -> `APROVADO, prova FORTE` citando o IRMAO; sem o
@@ -219,11 +215,26 @@ def le_junit(caminho: str) -> Desfechos | None:
 
 
 def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str) -> tuple[int, Desfechos | None]:
-    env = {**os.environ, "PYTHONPATH": "."}
-    # `-o junit_family=xunit1` so pelo `file=` de cada `<testcase>`. Um
-    # `PYTEST_ADDOPTS` com outro `--junitxml` nao vence a linha de comando.
+    # `PYTEST_ADDOPTS` ZERADO: o pytest o PREPENDE, entao um ALVO posto ali entra
+    # ANTES do nosso `--` e nada o barra — medido, com `PYTEST_ADDOPTS=<um teste>`
+    # o mesmo lab que dava REPROVADO/tautologico passou a `APROVADO, prova FORTE`
+    # citando um teste que o operador nao pediu, com a linha `testes = ...` impressa
+    # mentindo sobre o que rodou. Nada no repo exporta a variavel, e o harness deste
+    # gate ja a zerava pelo mesmo motivo: opcao herdada muda QUANTOS testes rodam,
+    # que e justamente o que uma prova nao pode deixar variar.
+    env = {**os.environ, "PYTHONPATH": ".", "PYTEST_ADDOPTS": ""}
+    # `-o junit_family=xunit1` so pelo `file=` de cada `<testcase>`.
+    # O `--` encerra o parsing de opcoes para os ALVOS: sem ele, alvo com cara de
+    # opcao era consumido COMO opcao e o pytest ficava sem alvo nenhum -> coleta a
+    # arvore inteira, o mesmo modo de falha do `--testes tests/`. Medido:
+    # `--testes=--basetemp=<x>.py` passa pela guarda de nome (termina em `.py`) e
+    # saia `APROVADO, prova FORTE` citando teste alheio; com o `--` vira alvo
+    # inexistente -> rc=4 -> REPROVADO. NAO fecha a classe inteira: o
+    # `consider_preparse` do pytest varre `args` linearmente e IGNORA o `--`, entao
+    # `-p<algo>.py` ainda chega la — medido, e os tres casos (`-p=x.py`, `-pxml.py`,
+    # `-pno:x.py`) fecham pela guarda do XML ausente ou por rc=4, nao pelo `--`.
     r = subprocess.run([py, "-m", "pytest", "-q", "-o", "junit_family=xunit1",
-                        f"--junitxml={relatorio}", *alvos],
+                        f"--junitxml={relatorio}", "--", *alvos],
                        cwd=cwd, env=env, capture_output=True, text=True)
     # O stderr continua repassado — e o unico diagnostico dos rc 3/4/5 e do
     # `No module named pytest`, que nao chegam a escrever XML. Ele nao alimenta

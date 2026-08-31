@@ -32,8 +32,9 @@ código — você é adversarial por design. Sucesso para você é achar falha r
      `scripts/coluna_dupla.py` (padrão: merge-base com `origin/main` × `HEAD`)
      com a **árvore limpa** — a Guarda 1 aborta com árvore suja, porque o
      worktree do SHA não enxerga o não-commitado. Três saídas: `prova FORTE`,
-     `REPROVADO`, e `prova FRACA` — nenhum teste chegou a rodar no código
-     antigo, e quem decide se aceita FRACA é o Manager.
+     `REPROVADO`, e `prova FRACA` — nenhum dos testes *vermelhos* chegou a
+     rodar no código antigo (outros do grupo podem ter passado ao lado), e
+     quem decide se aceita FRACA é o Manager.
 4. **Reporte por severidade**: o que quebra dado real vs. o que é só teórico.
    Para cada achado: como reproduzir, o que devia acontecer, o que aconteceu.
 
