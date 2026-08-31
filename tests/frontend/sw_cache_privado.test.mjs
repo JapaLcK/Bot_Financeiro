@@ -191,14 +191,19 @@ test("CACHE_NAME tem UMA declaração e é a versão que este arquivo assume", (
 test("o activate apaga todo cache de nome diferente", async () => {
   const apagados = [];
   const { ctx, handlers } = carregaSW();
-  ctx.caches.keys = async () => ["pigbank-v7", "pigbank-v8", `pigbank-v${VERSAO_ATUAL}`];
+  // Os nomes antigos saem do VERSAO_ATUAL, não fixos: com "pigbank-v7" e
+  // "pigbank-v8" escritos à mão ao lado de um atual derivado, VERSAO_ATUAL em 7
+  // ou 8 COLIDIA — o cache atual aparecia duas vezes na lista, o activate não o
+  // apagava, e o teste ficava vermelho sem ter nada a ver com o que ele mede.
+  const ANTIGOS = [`pigbank-v${VERSAO_ATUAL - 2}`, `pigbank-v${VERSAO_ATUAL - 1}`];
+  ctx.caches.keys = async () => [...ANTIGOS, `pigbank-v${VERSAO_ATUAL}`];
   ctx.caches.delete = async (k) => { apagados.push(k); return true; };
 
   let pendente;
   await handlers.activate({ waitUntil: (p) => { pendente = p; } });
   await pendente;
 
-  assert.deepEqual(apagados.sort(), ["pigbank-v7", "pigbank-v8"]);
+  assert.deepEqual(apagados.sort(), [...ANTIGOS].sort());
 });
 
 // ── A limpeza no logout ──────────────────────────────────────────────────
