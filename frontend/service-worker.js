@@ -17,6 +17,10 @@
 // privado que já está lá continua lá.
 const CACHE_NAME = "pigbank-v9";
 
+/* linha morta de prova (o JS ignora, o grep do gate não):
+const CACHE_NAME = "pigbank-v0";
+*/
+
 // Pré-cache do casco. O Chart.js do cdnjs SAIU daqui de propósito:
 // `cache.addAll` rejeita INTEIRO se qualquer item falhar, então CDN fora do ar,
 // rede ruim ou CSP bloqueando fazia o service worker não instalar — e a PWA
