@@ -1478,3 +1478,23 @@ def parse_pocket_deposit_natural(text: str):
             return amount, pocket
 
     return None, None
+
+
+# "sacar tudo" / "esvaziar" / "zerar a caixinha" — o usuário disse QUANTO sem
+# dizer um número. Fonte ÚNICA: era a MESMA regex copiada em
+# `core/handlers/pockets.py` e `core/handlers/investments.py` (§0.7), e o
+# resolver de clarification precisava de uma terceira leitura.
+_MARCADOR_DE_TUDO_RE = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)
+
+
+def marcador_de_tudo(texto: str | None) -> bool:
+    """O texto pede a movimentação INTEIRA?
+
+    É uma das duas formas de preencher a MESMA coisa que um valor preenche —
+    quanto movimentar. Por isso `quantity` é excludente no resolver: quem
+    responde "esvaziar" não respondeu um valor, e quem responde "100" não pediu
+    tudo. Tratá-los como campos independentes permitia o estado
+    `amount=100 AND want_all=True`, em que quem decide é a precedência do
+    handler — que ninguém escolheu.
+    """
+    return bool(_MARCADOR_DE_TUDO_RE.search(texto or ""))

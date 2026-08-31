@@ -455,3 +455,173 @@ def test_conjunto_nao_tem_intent_orfa():
 
     usadas = {intent for _, _, intent, _ in _chamadas_de_pergunta()}
     assert _INTENTS_PERGUNTA_DE_HANDLER - usadas == set()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A TABELA estados × eventos do resolver (#186)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Por que uma tabela e não mais um caso por bug: o resolver levou QUATRO rodadas
+# de revisão, cada uma consertando a transição que a anterior deixou aberta. A
+# causa era `falta` acumular dois papéis — decidir o que LER da resposta e o que
+# RE-PERGUNTAR. Como seletor de leitura, cada sub-ramo aprendia um pedaço
+# diferente do mundo. Rebaixado a decisor de re-pergunta, sobra UMA leitura, e o
+# produto estados × eventos vira soma: esta tabela.
+#
+# `_funde_a_resposta` é PURA (o catálogo entra por parâmetro), então o eixo dos
+# eventos se testa aqui sem conversa nenhuma — e adicionar célula = adicionar
+# LINHA, que é o antídoto contra a rodada 6. As conversas logo abaixo cobrem a
+# integração de verdade, que a tabela sozinha não prova.
+
+_CATALOGO = ["viagem", "carro", "meta 2028", "minha caixinha viagem",
+             "reserva de emergencia"]
+
+
+@pytest.mark.parametrize("resposta,nome,valor,tudo,recusa", [
+    ("100",                            None,           100.0, None, None),
+    ("200 reais",                      None,           200.0, None, None),
+    ("viagem",                         "viagem",       None,  None, None),
+    ("caixinha viagem",                "viagem",       None,  None, None),
+    ("da caixinha viagem",             "viagem",       None,  None, None),
+    # nome literal com o substantivo dentro: o catálogo desempata
+    ("minha caixinha viagem",          "minha caixinha viagem", None, None, None),
+    # nome do catálogo COM DÍGITOS: é nome, não valor (Codex P1, rodada 3)
+    ("meta 2028",                      "meta 2028",    None,  None, None),
+    # nome legítimo que parece preposição + substantivo
+    ("reserva de emergencia",          "reserva de emergencia", None, None, None),
+    # comando completo: nome E valor da mesma resposta
+    ("retirei 100 da caixinha viagem", "viagem",       100.0, None, None),
+    # comando completo SEM o substantivo — o catálogo acha o nome dentro
+    ("tira 100 da viagem",             "viagem",       100.0, None, None),
+    # alvo FORA do catálogo: o portão barra, o nome guardado permanece
+    ("retirei 100 do salario",         "carro",        100.0, None, None),
+    # marcador de tudo: quantidade sem número
+    ("esvaziar",                       None,           None,  True, None),
+    ("zerar",                          None,           None,  True, None),
+    # valores perigosos: recusa
+    ("-10",                            None,           None,  None, "nao_positivo"),
+    ("0",                              None,           None,  None, "nao_positivo"),
+    ("132 50",                         None,           None,  None, "nao_entendi"),
+])
+def test_tabela_de_eventos(resposta, nome, valor, tudo, recusa):
+    """Um evento por linha. O estado é sempre o mesmo — alvo `carro` guardado,
+    sem quantidade — porque a LEITURA da resposta não depende do estado; é o
+    ponto inteiro do conserto."""
+    from core.intent_router import _funde_a_resposta
+
+    ents, motivo = _funde_a_resposta(
+        "pockets.withdraw", {"pocket_name": "carro"}, resposta, _CATALOGO)
+
+    assert motivo == recusa
+    assert ents.get("pocket_name") == (nome or "carro")
+    assert ents.get("amount") == valor
+    assert bool(ents.get("want_all")) is bool(tudo)
+
+
+@pytest.mark.parametrize("guardado,resposta,amount,tudo", [
+    # A EXCLUSIVIDADE, nas duas direções. `quantity` é um valor de soma
+    # (QUANTIA | TUDO | ausente), não dois campos independentes: união
+    # permitiria `amount=100 AND want_all=True`, e aí quem decide é a
+    # precedência do handler — que ninguém escolheu.
+    ({"want_all": True}, "tira 100 da viagem", 100.0, False),   # TUDO -> quantia
+    ({"amount": 100.0},  "esvaziar",           None,  True),    # quantia -> TUDO
+    # sem quantidade na resposta, a guardada permanece
+    ({"amount": 100.0},  "viagem",             100.0, False),
+    ({"want_all": True}, "viagem",             None,  True),
+])
+def test_quantidade_e_excludente(guardado, resposta, amount, tudo):
+    from core.intent_router import _funde_a_resposta
+
+    ents, _ = _funde_a_resposta(
+        "pockets.withdraw", {"pocket_name": "carro", **guardado}, resposta, _CATALOGO)
+
+    assert ents.get("amount") == amount
+    assert bool(ents.get("want_all")) is tudo
+    assert not (ents.get("amount") and ents.get("want_all")), "as duas ao mesmo tempo"
+
+
+# ── As células, pela conversa real ──────────────────────────────────────────
+
+@pytest.fixture
+def sem_teto_de_caixinha(monkeypatch):
+    """O plano Grátis limita a 1 caixinha e estas células precisam de duas."""
+    monkeypatch.setattr(
+        "core.services.plan_service.check_can_create_pocket", lambda uid: None)
+
+
+def _duas_caixinhas(uid, saldo=2000.0):
+    db.add_launch_and_update_balance(
+        uid, "receita", saldo, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    db.create_pocket(uid, "carro")
+    db.create_pocket(uid, "viagem")
+    _conversa(uid, "coloquei 300 na caixinha carro", "coloquei 300 na caixinha viagem")
+
+
+def _saldos(uid):
+    return {x["name"]: float(x["balance"]) for x in (db.list_pockets(uid) or [])}
+
+
+def test_186_alvo_da_resposta_vence_o_guardado(uid, sem_teto_de_caixinha):
+    """O bug da #186, confirmado em produção com dinheiro real: a resposta nomeia
+    OUTRA caixinha e o bot debitava a guardada."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+
+    p = _saldos(uid)
+    assert p["viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
+    assert p["carro"] == 300.00, "saiu da caixinha ERRADA"
+
+
+def test_alvo_fora_do_catalogo_nao_sobrescreve(uid, sem_teto_de_caixinha):
+    """CONTROLE do portão: "explícito" não é o mesmo que "existente". Sem o
+    catálogo, `salario` sobrescreveria a caixinha certa e o usuário receberia
+    "não encontrada" no lugar de um saque perfeitamente executável."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 do salario")
+
+    assert _saldos(uid)["carro"] == 200.00, "o alvo inexistente atropelou o guardado"
+
+
+def test_nota_do_lancamento_nao_cita_o_alvo_velho(uid, sem_teto_de_caixinha):
+    """A descrição é auditoria: extrato, suporte e a IA lendo o histórico depois.
+    Gravar "tirar da caixinha carro" num lançamento que debitou `viagem`
+    envenena os três."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+
+    saque = next(l for l in db.list_launches(uid, limit=20)
+                 if l.get("tipo") == "saque_caixinha")
+    assert saque["alvo"] == "viagem"
+    assert "carro" not in (saque.get("nota") or ""), "a nota cita a caixinha errada"
+
+
+def test_esvaziar_respondido_a_pergunta_de_valor(uid):
+    """`esvaziar` não tem número: o `_extract_valor` devolvia None e a pergunta
+    voltava em laço, sem nunca esvaziar."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+
+    respostas = _conversa(uid, "tirar da caixinha viagem", "viagem", "esvaziar")
+
+    assert "esvaziada" in respostas[-1], respostas[-1]
+    assert _saldos(uid)["viagem"] == 0.00
+
+
+def test_tudo_guardado_mais_quantia_nova_nao_esvazia(uid):
+    """A célula que o dono levantou revisando o plano. Com `want_all` e `amount`
+    como campos independentes (união), a caixinha era ESVAZIADA quando o usuário
+    acabou de dizer R$ 100 — medido: dava 0,00."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+
+    assert _saldos(uid)["viagem"] == 200.00, "esvaziou apesar de o usuário ter dito 100"

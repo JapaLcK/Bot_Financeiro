@@ -2,7 +2,7 @@
 from __future__ import annotations
 import re
 import db
-from utils_text import fmt_brl, fmt_rate
+from utils_text import fmt_brl, fmt_rate, marcador_de_tudo
 from core.dashboard_links import build_dashboard_link
 from core.handlers import pending as h_pending
 from core.services.plan_limits import PlanLimitExceeded
@@ -471,13 +471,12 @@ def check_cdi() -> str:
         )
 
 
-_WITHDRAW_ALL_RX = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)
-
-
 def withdraw(user_id: int, text: str, entities: dict) -> str:
     investment_name = entities.get("investment_name")
     amount = entities.get("amount")
-    want_all = bool(_WITHDRAW_ALL_RX.search(text or ""))
+    # Entity antes do texto — ver o gêmeo em core/handlers/pockets.py.
+    want_all = (bool(entities["want_all"]) if "want_all" in (entities or {})
+                else marcador_de_tudo(text))
 
     if not investment_name:
         return list_investments(user_id, h_pending.pergunta_guardando_contexto(
