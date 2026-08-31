@@ -72,7 +72,7 @@ def _distinctive_tokens(category_name: str) -> list[str]:
     return out
 
 
-def custom_category_match(user_id: int, text_norm: str) -> str | None:
+def custom_category_match(user_id: int, text_norm: str, *, nomes: list[str] | None = None) -> str | None:
     """Casa um texto JÁ normalizado com uma categoria CUSTOM do usuário.
 
     O usuário pode criar uma categoria na tela (ex.: "gastos com minha
@@ -90,7 +90,11 @@ def custom_category_match(user_id: int, text_norm: str) -> str | None:
     best_name: str | None = None
     best_score = 0
     best_len = 0
-    for name in list_custom_category_names(user_id) or []:
+    # `nomes` pré-carregado existe para quem chama em laço: sem ele a
+    # reconciliação fazia uma consulta (e uma conexão) POR REGRA do usuário, e
+    # quem acumulou centenas de keywords veria o POST de criar categoria
+    # estourar o tempo. Sem o parâmetro, o comportamento é o de sempre.
+    for name in (nomes if nomes is not None else list_custom_category_names(user_id) or []):
         tokens = _distinctive_tokens(name)
         if not tokens:
             continue
@@ -144,15 +148,20 @@ def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
 
     Devolve quantas regras foram reapontadas.
     """
-    from db.categories import list_user_category_rules, reaponta_regra_se_anterior
+    from db.categories import (
+        list_custom_category_names,
+        list_user_category_rules,
+        reaponta_regra_se_anterior,
+    )
 
     alvo_norm = normalize_text(nome_categoria or "")
     if not alvo_norm:
         return 0
 
+    nomes = list_custom_category_names(user_id) or []   # uma vez, não por regra
     n = 0
     for keyword, destino in list_user_category_rules(user_id) or []:
-        dona = custom_category_match(user_id, normalize_text(keyword or ""))
+        dona = custom_category_match(user_id, normalize_text(keyword or ""), nomes=nomes)
         if not dona or normalize_text(dona) != alvo_norm:
             continue                                   # não é desta categoria
         if normalize_text(destino or "") == alvo_norm:

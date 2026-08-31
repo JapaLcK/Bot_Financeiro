@@ -321,3 +321,75 @@ def test_reconciliacao_nao_sobrescreve_override_concorrente():
     assert _regras(uid).get("cafe") == "lazer do fim de semana", (
         f"a reconciliação atropelou a escolha explícita: {_regras(uid)}"
     )
+
+
+def test_seed_de_conta_legada_nao_reverte_regra_deliberada():
+    """A conta que nunca abriu a tela: o seed importa o histórico como categoria.
+
+    Se essas linhas nascessem com a data de hoje, ficariam "mais novas" que
+    todas as regras da conta e o guard descartaria até a regra deliberada — o
+    usuário veria sua escolha revertida no primeiro acesso ao dashboard, sem
+    nada ter mudado. Elas não são uma escolha feita agora; são o espelho do
+    histórico, e por isso entram com data de época.
+    """
+    from db.categories import ensure_user_categories_seeded
+
+    uid = _uid()
+    # Histórico direto na tabela: um lançamento JÁ categorizado como "cafe",
+    # que é o que o seed vai importar. Passar pelo `_diga` não serve — ele
+    # categoriza como "alimentação" pelas LOCAL_RULES, o seed importaria
+    # "alimentação", não haveria conflito nenhum e o teste passaria sozinho
+    # (medido: passava com e sem o conserto).
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into launches (user_id, tipo, valor, categoria) "
+            "values (%s, 'gasto', 20, 'cafe')",
+            (uid,),
+        )
+        conn.commit()
+    upsert_category_rule(uid, "cafe", "lazer")        # escolha deliberada, antes do seed
+
+    ensure_user_categories_seeded(uid)                # primeiro acesso à tela
+    assert "cafe" in [normalize_text(n) for n in
+                      __import__("db").list_custom_category_names(uid)], (
+        "o seed não importou a categoria do histórico — o teste não mede nada"
+    )
+
+    resultado = infer_category(uid, "gastei 15 com cafe", allow_ai=False)
+    assert normalize_text(resultado.category) == "lazer", (
+        f"o seed reverteu a escolha do usuário: {resultado.category!r}"
+    )
+
+
+def test_reconciliacao_nao_consulta_categorias_por_regra():
+    """Criar categoria não pode custar uma consulta POR REGRA acumulada.
+
+    Quem usa o bot há tempo tem centenas de keywords; uma consulta por regra
+    (cada uma abrindo conexão) faz o POST do dashboard estourar o tempo.
+    """
+    import psycopg
+    from core.services.category_service import reconciliar_regras_com_categoria
+
+    uid = _uid()
+    for i in range(12):
+        upsert_category_rule(uid, f"termo{i}", "outros")
+    create_user_category(uid, "cafe")
+
+    consultas: list[str] = []
+    original = psycopg.Cursor.execute
+
+    def _spy(self, query, *a, **k):
+        consultas.append(" ".join(str(query).lower().split()))
+        return original(self, query, *a, **k)
+
+    psycopg.Cursor.execute = _spy
+    try:
+        reconciliar_regras_com_categoria(uid, "cafe")
+    finally:
+        psycopg.Cursor.execute = original
+
+    leituras_de_categoria = [q for q in consultas if "from user_categories" in q]
+    assert len(leituras_de_categoria) <= 2, (
+        f"{len(leituras_de_categoria)} leituras de user_categories para 12 regras — "
+        f"está consultando por regra"
+    )

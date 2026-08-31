@@ -310,8 +310,15 @@ def ensure_user_categories_seeded(user_id: int) -> None:
             # Importa categorias customizadas já presentes em launches.
             cur.execute(
                 """
-                insert into user_categories (user_id, name, emoji, color, is_system)
-                select %s, lower(trim(categoria)), '🏷️', '#7c3aed', false
+                -- `created_at` epoch de propósito, não `now()`: estas linhas não são
+                -- uma categoria que o usuário CRIOU agora, são o espelho do
+                -- histórico dele. Com a data de hoje, toda regra de uma conta
+                -- legada passaria a parecer anterior à categoria e o guard de
+                -- `_regra_ficou_obsoleta` a descartaria — inclusive uma regra
+                -- deliberada, revertida em silêncio no primeiro acesso à tela.
+                -- O campo não é exibido nem ordenado em lugar nenhum (medido).
+                insert into user_categories (user_id, name, emoji, color, is_system, created_at)
+                select %s, lower(trim(categoria)), '🏷️', '#7c3aed', false, to_timestamp(0)
                 from (
                     select distinct categoria from launches
                     where user_id=%s and categoria is not null
