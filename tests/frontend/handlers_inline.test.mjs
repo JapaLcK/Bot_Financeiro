@@ -27,7 +27,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright";
@@ -46,7 +46,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Páginas públicas: fingir sessão VÁLIDA manda o login embora para /home. */
 const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos.html"]);
 
-const HANDLER = /\bon[a-z]+\s*=\s*"([^"]*)"/gi;
+// Aspa dupla, simples, crase — e a ESCAPADA (`onclick=\\"x()\\"`), que é como um .js
+// escreve handler dentro de string ao gerar markup.
+const HANDLER = /\bon[a-z]+\s*=\s*(?:\\?["'`])([^"'`\\]*)/gi;
 // Handler MONTADO, fora de atributo literal: `{ click: "openUsersModal(event)" }`
 // no admin-dashboard.html e `el.onclick = "..."`. São 10 nomes hoje, todos em
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
@@ -82,12 +84,29 @@ function nomesDe(trechos) {
   return nomes;
 }
 
-/** Do FONTE: atributo literal (inclusive dentro de template string) e handler montado. */
+const trechosDe = (texto) => [
+  ...[...texto.matchAll(HANDLER)].map((m) => m[1]),
+  ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
+];
+
+/** `<script src="/x.js">` -> os arquivos de `frontend/` que a página carrega. */
+function scriptsDaPagina(html) {
+  return [...html.matchAll(/<script[^>]+src="\/?([^"?]+\.js)/gi)]
+    .map((m) => join(FRONTEND, m[1]))
+    .filter((f) => existsSync(f));
+}
+
+/**
+ * Do FONTE: o HTML **e os .js que ele carrega**.
+ *
+ * Ler só o HTML deixava de fora a maior lista de todas: o `dashboard.js` EMITE 72
+ * nomes em markup gerado a partir de dados (`onclick=\"payBill(...)\"`), que o HTML
+ * não mostra e que o DOM também não, porque sem dados aquilo não renderiza. Era o
+ * maior ponto cego do teste, maior que o próprio HTML da página.
+ */
 function nomesChamados(html) {
-  const trechos = [
-    ...[...html.matchAll(HANDLER)].map((m) => m[1]),
-    ...[...html.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
-  ];
+  const trechos = [...trechosDe(html)];
+  for (const js of scriptsDaPagina(html)) trechos.push(...trechosDe(readFileSync(js, "utf-8")));
   return [...nomesDe(trechos)].sort();
 }
 
