@@ -1,9 +1,11 @@
-"""O criterio de prova FORTE do gate de coluna dupla: `FAILED` x `ERROR`.
+"""O criterio de prova do gate de coluna dupla, lido no XML de cada coluna.
 
-Vale um teste porque o modo de falha e SILENCIOSO e ja aconteceu: um grupo em que
-NENHUM corpo de teste chegou a rodar (21 erros de fixture, zero asserções) saia
-`APROVADO, prova FORTE`. O exit code nao separa os dois casos — erro de fixture e
-asserção que falha saem os DOIS com rc=1 —, entao a regra le o resumo do pytest.
+Vale um teste porque os dois modos de falha sao SILENCIOSOS e os dois ja
+aconteceram: um grupo em que NENHUM corpo de teste chegou a rodar (21 erros de
+fixture, zero asserções) saia `APROVADO, prova FORTE`; e uma coluna corrigida com
+TUDO pulado sai rc=0, que o gate lia como verde. O exit code nao separa nenhum
+dos dois — erro de fixture e asserção que falha saem os DOIS com rc=1, e "tudo
+pulado" sai igual a "tudo passou" —, entao a regra le o XML do `--junitxml`.
 
 Testa a `veredito`, que e onde mora TODA a decisao do gate: o `main()` so imprime
 o que ela devolve. Sem isso o teste passaria por fora da linha que decide.
@@ -31,10 +33,11 @@ _spec = importlib.util.spec_from_file_location("coluna_dupla", _CAMINHO)
 coluna_dupla = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(coluna_dupla)
 
-# O `print` na fixture e o ataque: ele cai em `Captured stdout setup`, na coluna 0,
-# com o formato exato de uma linha de resumo. Sem fatiar pelo cabecalho do resumo,
-# o gate le esse print como "um teste rodou e falhou" — no caso EXATO em que zero
-# corpos de teste executaram, que e o que a regra existe para pegar.
+# O `print` na fixture e a PRIMEIRA porta da isca: ele cai em `Captured stdout
+# setup`, na coluna 0, com o formato exato de uma linha de resumo. Enquanto o
+# desfecho vinha do texto, o gate lia esse print como "um teste rodou e falhou" —
+# no caso EXATO em que zero corpos de teste executaram, que e o que a regra existe
+# para pegar.
 _FIXTURE_QUE_ESTOURA_E_ENGANA = '''
 import pytest
 
@@ -52,27 +55,11 @@ def test_roda_e_falha():
     assert 1 == 2
 '''
 
-# Para o `-rs` do teste de cabecalho-sem-desfecho: o `-r` PARCIAL so imprime o
-# cabecalho se sobrar algo a reportar na letra pedida — medido, `-rs` num arquivo
-# so com a asserção que falha nao imprime cabecalho nenhum e cai no outro ramo. O
-# skip da ao `-rs` o que reportar, e a asserção e o teste que RODOU e falhou sem
-# aparecer no resumo: rc=1, cabecalho de pe, zero FAILED e zero ERROR.
-_SKIP_MAIS_ASSERCAO_QUE_FALHA = '''
-import pytest
-
-@pytest.mark.skip(reason="so para o -rs ter o que reportar")
-def test_pulado():
-    pass
-
-def test_roda_e_falha():
-    assert 1 == 2
-'''
-
-# O mesmo ataque pelo OUTRO canal, e pior: o stderr do pytest sai INTEIRO depois
-# do stdout, logo sempre depois do ultimo cabecalho de resumo. Um cabecalho falso
-# escrito la MOVE o corte do `rpartition`, o resumo verdadeiro (com a linha ERROR)
-# some junto, e o gate aprovaria como FORTE citando um teste que nao existe. O
-# `atexit` escreve depois de a captura do pytest ja ter sido desmontada.
+# O mesmo ataque pela SEGUNDA porta: um `atexit` escreve o cabecalho falso depois
+# de a captura do pytest ja ter sido desmontada, entao ele sai por baixo de
+# qualquer fatiamento do texto. Houve uma TERCEIRA porta (o mesmo `atexit`, no
+# stdout), e e por isso que hoje nenhum dos dois streams decide: o desfecho vem do
+# XML, que o pytest fecha antes de o teste voltar a escrever.
 _ATEXIT_QUE_ENGANA_PELO_STDERR = '''
 import atexit, sys, pytest
 
@@ -89,100 +76,87 @@ def test_nunca_chega_a_rodar(db):
 '''
 
 
-def _pytest_em(tmp_path, nome, fonte, addopts=""):
-    """Roda o pytest de verdade em `tmp_path`. `PYTEST_ADDOPTS` e fixado sempre —
-    herdado do ambiente, ele mudaria a saida e o teste mediria outra coisa."""
+def _pytest_em(monkeypatch, tmp_path, nome, fonte):
+    """Roda o pytest de verdade em `tmp_path`, PELA `roda_pytest`: e ela que monta a
+    linha de comando do XML, e uma copia dela aqui seria uma segunda fonte de
+    verdade. `PYTEST_ADDOPTS` e zerado — herdado do ambiente, mudaria a corrida e o
+    teste mediria outra coisa. O XML fica em `tmp_path/relatorio.xml`."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
     (tmp_path / nome).write_text(fonte)
-    r = subprocess.run([sys.executable, "-m", "pytest", "-q", nome], cwd=tmp_path,
-                       env={**os.environ, "PYTEST_ADDOPTS": addopts},
-                       capture_output=True, text=True)
-    return r.returncode, r.stdout  # so o stdout, igual ao que a `roda_pytest` entrega
+    return coluna_dupla.roda_pytest(str(tmp_path), sys.executable, [nome],
+                                    str(tmp_path / "relatorio.xml"))
 
 
-def test_erro_de_fixture_e_prova_FRACA_mesmo_imprimindo_FAILED(tmp_path):
-    """rc=1 igual ao da asserção, e um `FAILED ` na coluna 0 vindo do stdout da
-    fixture. Ainda assim: nenhum corpo de teste rodou, entao prova FRACA."""
-    rc, saida = _pytest_em(tmp_path, "test_engana.py", _FIXTURE_QUE_ESTOURA_E_ENGANA)
+def _verde(antes=None):
+    """A coluna CORRIGIDA das chamadas unitarias: um teste que passou, mais tudo o
+    que ficou VERMELHO no antigo — falha E erro — agora passando. O criterio de
+    verde e PAREADO e varre os dois, entao sem isto o caso sairia REPROVADO por um
+    motivo que ele nao quer medir."""
+    vermelhos = {**antes.falhados, **antes.errados} if antes else {}
+    passados = {("lab", "test_verde"): "lab.py::test_verde",
+                **{chave: nodeid for chave, (nodeid, _) in vermelhos.items()}}
+    return coluna_dupla.Desfechos(len(passados), 0, {}, {}, passados)
+
+
+def test_erro_de_fixture_e_prova_FRACA_mesmo_imprimindo_FAILED(monkeypatch, tmp_path):
+    """rc=1 igual ao da asserção, e a isca `FAILED ...` impressa pela fixture. Ela
+    chega ate DENTRO do XML (no corpo do `<error>`, que traz a fonte da fixture), e
+    ainda assim nao vira desfecho: quem conta e a TAG, nao o texto."""
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_engana.py",
+                               _FIXTURE_QUE_ESTOURA_E_ENGANA)
     assert rc == coluna_dupla.PYTEST_FALHA  # o exit code NAO delata que nada rodou
-    assert "\nFAILED " in saida  # o print enganoso esta mesmo la, na coluna 0
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
+    xml = (tmp_path / "relatorio.xml").read_text()
+    assert "FAILED tests/test_engana.py" in xml  # a isca esta mesmo dentro do XML
+    assert (len(desfechos.falhados), len(desfechos.errados)) == (0, 1)  # nao virou `<failure>`
+    codigo, relatorio = coluna_dupla.veredito(rc, desfechos, 0, _verde(desfechos))
     assert codigo == 0
     assert "prova FRACA" in relatorio
+    assert "- AttributeError: db" not in relatorio  # a citacao e a causa real, nao a isca
 
 
-def test_assercao_que_falha_e_prova_FORTE(tmp_path):
-    """Controle positivo: sem ele, um criterio que devolvesse [] sempre passaria no
-    teste acima e o gate classificaria TODA prova como fraca — pior que o bug."""
-    rc, saida = _pytest_em(tmp_path, "test_assercao_falha.py", _ASSERCAO_QUE_FALHA)
-    assert rc == coluna_dupla.PYTEST_FALHA  # o mesmo rc do caso acima; o resumo e que difere
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
+def test_assercao_que_falha_e_prova_FORTE(monkeypatch, tmp_path):
+    """Controle positivo: sem ele, um criterio que nunca contasse `<failure>`
+    passaria no teste acima e o gate classificaria TODA prova como fraca — pior
+    que o bug."""
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_assercao_falha.py",
+                               _ASSERCAO_QUE_FALHA)
+    assert rc == coluna_dupla.PYTEST_FALHA  # o mesmo rc do caso acima; o XML e que difere
+    codigo, relatorio = coluna_dupla.veredito(rc, desfechos, 0, _verde(desfechos))
     assert codigo == 0
     assert "prova FORTE" in relatorio
-    assert "test_roda_e_falha" in relatorio
+    assert "test_assercao_falha.py::test_roda_e_falha" in relatorio  # nodeid colavel
 
 
-def test_sem_resumo_o_gate_reprova_em_vez_de_carimbar_FRACA(tmp_path):
-    """`-rN` herdado do ambiente apaga o resumo inteiro. Sem ramo proprio, o gate
-    degradaria para sempre-FRACA em silencio: um APROVADO que nao mediu nada."""
-    rc, saida = _pytest_em(tmp_path, "test_assercao_falha.py", _ASSERCAO_QUE_FALHA,
-                           addopts="-rN")
-    assert rc == coluna_dupla.PYTEST_FALHA
-    assert coluna_dupla.CABECALHO_RESUMO not in saida  # o resumo sumiu mesmo
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
-    assert codigo == 1
-    assert "REPROVADO" in relatorio and "PYTEST_ADDOPTS" in relatorio
-
-
-def test_sem_resumo_a_isca_da_fixture_nao_vira_desfecho(tmp_path):
-    """A subguarda `if achou` do `rpartition`: sem cabecalho, a cauda e a saida
-    INTEIRA e o `print("FAILED ...")` da fixture passaria a valer por desfecho.
-
-    E o unico caso do grupo em que ela decide — o `-rN` do teste acima reprova com
-    e sem a guarda, porque aquela saida nao tem nenhuma linha `FAILED ` na coluna
-    0. Medido: sem o `if achou`, aqui sai `APROVADO, prova FORTE` (exit 0) citando
-    um teste que nunca chegou a rodar."""
-    rc, saida = _pytest_em(tmp_path, "test_engana.py", _FIXTURE_QUE_ESTOURA_E_ENGANA,
-                           addopts="-rN")
-    assert rc == coluna_dupla.PYTEST_FALHA
-    assert coluna_dupla.CABECALHO_RESUMO not in saida  # sem cabecalho...
-    assert "\nFAILED " in saida  # ...e com a isca na coluna 0, vinda do stdout da fixture
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
-    assert codigo == 1
-    assert "REPROVADO" in relatorio
-
-
-def test_cabecalho_sem_desfecho_reprova(tmp_path):
-    """`-rs` e um `-r` PARCIAL: mantem o cabecalho e tira as linhas de desfecho.
-    O caso acima (cabecalho ausente) nao cobre este — aqui o cabecalho esta de pe,
-    e mesmo assim zero FAILED e zero ERROR. Um teste RODOU e falhou; carimbar
-    FRACA ("nenhum chegou a rodar") seria mentira, e APROVADO sem ter medido."""
-    rc, saida = _pytest_em(tmp_path, "test_skip_e_falha.py", _SKIP_MAIS_ASSERCAO_QUE_FALHA,
-                           addopts="-rs")
-    assert rc == coluna_dupla.PYTEST_FALHA
-    assert coluna_dupla.CABECALHO_RESUMO in saida  # o cabecalho continua la...
-    resumo = saida.rpartition(coluna_dupla.CABECALHO_RESUMO)[2]
-    assert "FAILED " not in resumo and "ERROR " not in resumo  # ...sem desfecho nenhum
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
-    assert codigo == 1
-    assert "REPROVADO" in relatorio
-
-
-def test_stderr_nao_alimenta_o_veredito(monkeypatch, tmp_path):
+def test_texto_dos_streams_nao_alimenta_o_veredito(monkeypatch, tmp_path):
     """Exercita a `roda_pytest`, nao so a `veredito`: o furo estava na linha que
-    junta os streams, e um teste que monta a string a mao nunca o veria.
+    entregava TEXTO ao veredito, e um teste que monta a string a mao nunca o veria.
 
-    O payload escreve pelo `atexit` um cabecalho de resumo FALSO no stderr. Com
-    `stdout + stderr` esse cabecalho vira o ultimo, o corte do `rpartition` anda
-    para depois dele e o gate aprova FORTE citando `test_que_nunca_existiu`."""
-    monkeypatch.setenv("PYTEST_ADDOPTS", "")  # a `roda_pytest` herda o ambiente
-    (tmp_path / "test_hdr.py").write_text(_ATEXIT_QUE_ENGANA_PELO_STDERR)
-    rc, saida = coluna_dupla.roda_pytest(str(tmp_path), sys.executable, ["test_hdr.py"])
+    O payload escreve pelo `atexit` um cabecalho de resumo FALSO com uma linha
+    `FAILED` de um teste inventado. Enquanto o desfecho vinha do texto, isso
+    aprovava FORTE citando `test_que_nunca_existiu`; com o XML, o que os streams
+    dizem nao entra em lugar nenhum."""
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_hdr.py",
+                               _ATEXIT_QUE_ENGANA_PELO_STDERR)
     assert rc == coluna_dupla.PYTEST_FALHA
-    assert "test_que_nunca_existiu" not in saida  # o stderr ficou fora do que decide
-    codigo, relatorio = coluna_dupla.veredito(rc, saida, 0)
+    assert "test_que_nunca_existiu" not in str(desfechos.errados)
+    assert (len(desfechos.falhados), len(desfechos.errados)) == (0, 1)  # o `FAILED` nao contou
+    codigo, relatorio = coluna_dupla.veredito(rc, desfechos, 0, _verde(desfechos))
     assert codigo == 0
     assert "prova FRACA" in relatorio
     assert "test_que_nunca_existiu" not in relatorio
+
+
+def test_xml_ausente_reprova(tmp_path):
+    """Sem XML nao ha desfecho, e ler zeros de um arquivo que nao existe seria
+    aprovar no escuro. Carga real: interpretador sem pytest sai rc=1 — vermelho
+    VALIDO, que passa pela faixa de codigos — e nao escreve arquivo nenhum."""
+    assert coluna_dupla.le_junit(str(tmp_path / "nao_existe.xml")) is None
+    truncado = tmp_path / "truncado.xml"
+    truncado.write_text('<testsuites><testsuite tests="1"')
+    assert coluna_dupla.le_junit(str(truncado)) is None
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, None, 0, _verde())
+    assert codigo == 1
+    assert "nao escreveu o relatorio XML" in relatorio
 
 
 # ── O gate INTEIRO, num repo-laboratorio ────────────────────────────────────
@@ -226,6 +200,93 @@ def test_ferramenta():
 '''
 
 
+# A forma exata do `tests/conftest.py:99`: um `pytest_collection_modifyitems` que
+# PULA por condicao de ambiente. No laboratorio a unica coisa que difere entre as
+# colunas e o `lib.py`, entao o valor NOVO faz o papel da dependencia ausente — a
+# coluna corrigida pula tudo e sai rc=0, que era lido como verde.
+_CONFTEST_QUE_PULA_NO_CORRIGIDO = '''
+import pytest
+
+import lib
+
+
+def pytest_collection_modifyitems(items):
+    if lib.valor() != 42:
+        return
+    for item in items:
+        item.add_marker(pytest.mark.skip(reason="dependencia ausente"))
+'''
+
+# O mesmo, pulando SO o teste do fix — o irmao continua passando no corrigido.
+_CONFTEST_QUE_PULA_SO_O_FIX = '''
+import pytest
+
+import lib
+
+
+def pytest_collection_modifyitems(items):
+    if lib.valor() != 42:
+        return
+    for item in items:
+        if item.name == "test_valor":
+            item.add_marker(pytest.mark.skip(reason="dependencia ausente"))
+'''
+
+_TESTE_DO_FIX_COM_IRMAO = _TESTE_DO_FIX + "\n\ndef test_irmao():\n    assert True\n"
+
+# O teste do fix ERRA na fixture no antigo (a fixture depende do codigo corrigido)
+# e o irmao pre-existente FALHA. Os dois desfechos vermelhos na mesma coluna, que e
+# o que separa a varredura de orfaos por falha da varredura por vermelho.
+_TESTE_QUE_ERRA_COM_IRMAO_VERMELHO = '''
+import pytest
+
+import lib
+
+
+@pytest.fixture
+def dado():
+    if lib.valor() != 42:
+        raise RuntimeError("o fix nao esta no lugar")
+    return lib.valor()
+
+
+def test_novo(dado):
+    assert dado == 42
+
+
+def test_ja_vermelho():
+    assert lib.valor() == 42
+'''
+
+# O mesmo `pytest_collection_modifyitems` do `_CONFTEST_QUE_PULA_SO_O_FIX`, mirando
+# o `test_novo`: no corrigido ele e PULADO, e o irmao continua passando.
+_CONFTEST_QUE_PULA_SO_O_NOVO = _CONFTEST_QUE_PULA_SO_O_FIX.replace('"test_valor"', '"test_novo"')
+
+# Teste novo que importa um modulo de PRODUCAO existente so no corrigido: no antigo
+# nao ha teste nenhum para parear — o pytest emite UM `<testcase>` com
+# `classname=""` e `name` = o modulo pontilhado. E o exemplo do `Uso` do script.
+_TESTE_QUE_IMPORTA_MODULO_NOVO = "import lib_novo\n\n\ndef test_a():\n    assert lib_novo.valor() == 42\n"
+
+# `skipif` de plataforma: vale IGUAL nas duas colunas, entao o caso pulado no
+# verde tambem foi pulado no vermelho e nunca entra no conjunto exigido.
+_TESTE_DO_FIX_COM_SKIPIF = '''
+import sys
+
+import pytest
+
+import lib
+
+
+@pytest.mark.skipif(sys.platform != "plan9", reason="so no Plan 9")
+def test_so_em_outra_plataforma():
+    assert False
+
+
+def test_valor():
+    assert lib.valor() == 42
+'''
+
+
 def _escreve(raiz, arquivos):
     for rel, conteudo in arquivos.items():
         alvo = raiz / rel
@@ -258,12 +319,11 @@ def _commita(lab, arquivos):
 
 def _gate(lab, *args):
     """O gate de verdade, sobre o laboratorio. `PYTEST_ADDOPTS` e fixado pelo mesmo
-    motivo do `_pytest_em`: herdado, mudaria a saida das DUAS colunas. `COLUMNS`
-    porque o pytest CORTA a linha do resumo na largura do terminal — medido: sem
-    ele, o padrao de 80 devolvia `- AssertionError: assert 0 =...` e o assert sobre
-    o motivo do vermelho falhava por formatacao, nao por comportamento."""
+    motivo do `_pytest_em`: herdado, mudaria a corrida das DUAS colunas. O
+    `COLUMNS` que estava aqui saiu junto com a leitura do resumo — era o pytest
+    que CORTAVA a linha do resumo na largura do terminal; o XML nao corta nada."""
     return subprocess.run([sys.executable, str(_CAMINHO), "--antes", "HEAD~1", "--depois", "HEAD", *args],
-                          cwd=lab, env={**os.environ, "PYTEST_ADDOPTS": "", "COLUMNS": "200"},
+                          cwd=lab, env={**os.environ, "PYTEST_ADDOPTS": ""},
                           capture_output=True, text=True)
 
 
@@ -421,3 +481,106 @@ def test_bit_de_execucao_atravessa_o_overlay(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "AssertionError: assert 0 == 42" in r.stdout  # a fixture EXECUTOU...
     assert "PermissionError" not in r.stdout  # ...em vez de bater no bit de execucao
+
+
+def test_coluna_verde_inteiramente_pulada_reprova(tmp_path):
+    """rc=0 e tambem o que o pytest devolve quando TUDO foi PULADO, e o gate lia
+    rc=0 como verde. Nao e caso teorico: o `tests/conftest.py:99` pula assim, por
+    dependencia ausente. Medido sem o criterio pareado: `APROVADO, prova FORTE`
+    com exit 0 — a coluna corrigida nao rodou UMA linha de teste."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/conftest.py": _CONFTEST_QUE_PULA_NO_CORRIGIDO,
+                   "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "nao provou o conserto" in r.stdout
+    assert "0 passaram, 1 pularam, de 1" in r.stdout
+    assert "prova FORTE" not in r.stdout
+
+
+def test_verde_que_pula_SO_o_teste_do_fix_reprova(tmp_path):
+    """O caso que separa o criterio PAREADO da CONTAGEM: no corrigido o teste DO
+    FIX e pulado e um irmao passa. Medido: com "pelo menos um passou" sai
+    `APROVADO, prova FORTE` — o mesmo carimbo do caso legitimo —, e so o
+    pareamento por (classname, name) reprova, nomeando o orfao."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/conftest.py": _CONFTEST_QUE_PULA_SO_O_FIX,
+                   "tests/test_valor.py": _TESTE_DO_FIX_COM_IRMAO})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 teste(s) vermelhos no antigo NAO passaram no corrigido" in r.stdout
+    assert "tests/test_valor.py::test_valor" in r.stdout  # o orfao, pelo nodeid
+    assert "prova FORTE" not in r.stdout
+
+
+def test_verde_com_skip_parcial_continua_aprovando(tmp_path):
+    """Controle positivo dos dois casos acima: um `skipif` de plataforma vale igual
+    nas duas colunas, entao o caso que ele pula no verde tambem foi pulado no
+    vermelho e nunca entra no conjunto exigido. Sem este teste, um criterio
+    "nenhum skip na coluna verde" passaria nos dois acima e recusaria trabalho
+    honesto — que e pior que o bug."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_valor.py": _TESTE_DO_FIX_COM_SKIPIF})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_valor.py::test_valor" in r.stdout
+
+
+def test_verde_que_pula_o_teste_que_ERROU_no_antigo_reprova(tmp_path):
+    """A porta lateral pela qual o furo do `test_verde_que_pula_SO_o_teste_do_fix`
+    voltava a passar inteiro: a varredura de
+    orfaos olhava so `<failure>`, e o teste que ERRA no antigo — o mecanismo que
+    motivou este script inteiro, 21 erros de fixture — nao entrava nela. Aqui o
+    `test_novo` erra na fixture no antigo e e PULADO no corrigido, enquanto o irmao
+    pre-existente (vermelho no antigo, verde no corrigido) carrega o vermelho
+    sozinho.
+
+    Medido com a varredura voltando a olhar so `antes.falhados`: `APROVADO, prova
+    FORTE` com exit 0, citando `tests/test_x.py::test_ja_vermelho - assert 0 == 42`
+    — o irmao carimbando como provado um conserto que o teste do fix nunca
+    exercitou."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/conftest.py": _CONFTEST_QUE_PULA_SO_O_NOVO,
+                   "tests/test_x.py": _TESTE_QUE_ERRA_COM_IRMAO_VERMELHO})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "1 teste(s) vermelhos no antigo NAO passaram no corrigido" in r.stdout
+    assert "tests/test_x.py::test_novo" in r.stdout  # o orfao e o teste do FIX
+    assert "prova FORTE" not in r.stdout
+
+
+def test_erro_de_coleta_impareavel_continua_aprovando(tmp_path):
+    """Controle positivo do caso acima, e ele NAO e teorico: e o exemplo de prova
+    FRACA que o `Uso` do script traz. Teste novo importando modulo de producao que
+    so existe no corrigido nao coleta no antigo, e o pytest emite UM `<testcase>`
+    com `classname=""` e `name` igual ao MODULO pontilhado — identidade que a
+    coluna verde nunca tem, porque la o modulo vira testes de verdade.
+
+    Medido sem a excecao do impareavel (`if chave[0] and ...`): `REPROVADO: a
+    coluna corrigida nao provou o conserto`, citando `tests/test_novo.py::
+    tests.test_novo` como orfao. A varredura ampliada recusaria o caminho legitimo
+    inteiro — que e pior que o furo que ela fecha."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib_novo.py": _LIB_CORRIGIDA,
+                   "tests/test_novo.py": _TESTE_QUE_IMPORTA_MODULO_NOVO})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FRACA" in r.stdout
+    assert "No module named 'lib_novo'" in r.stdout
+    assert "nao provou o conserto" not in r.stdout
+
+
+def test_prova_FRACA_nao_afirma_que_ninguem_rodou():
+    """A frase da prova FRACA e a linha que o Manager le para decidir se aceita, e
+    ela dizia "NENHUM teste chegou a RODAR no codigo antigo" olhando so o contador
+    de falhas — falsa sempre que a coluna antiga tinha teste PASSANDO ao lado do
+    que errou. Aqui o antigo tem 1 erro e 1 passado, e a frase passa a ser sobre os
+    VERMELHOS, nao sobre o grupo."""
+    antes = coluna_dupla.Desfechos(
+        2, 0, {}, {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")},
+        {("lab", "test_passa"): "lab.py::test_passa"})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, _verde(antes))
+    assert codigo == 0 and "prova FRACA" in relatorio
+    assert "NENHUM teste chegou a RODAR" not in relatorio
+    assert "1 passado(s) ao lado" in relatorio  # o que a frase antiga escondia

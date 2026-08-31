@@ -22,15 +22,31 @@ Uso:
     # o mesmo, num caso que sai prova FRACA: nenhum teste chega a RODAR no antigo
     scripts/coluna_dupla.py --antes f95e485 --depois 17f3b49 --testes tests/test_ai_chat_commands.py
 
-Sai 0 quando o grupo fica vermelho no antes e verde no depois.
-Sai 1 quando um teste PASSA no antes (tautologico), quando falha no depois,
-quando o vermelho e valido mas o resumo do pytest nao trouxe desfecho — nem
-`FAILED` nem `ERROR`, tipico de um `PYTEST_ADDOPTS` com `-rN`/`-rs` —, ou quando
-uma guarda dispara.
+O desfecho de cada teste vem do XML do `--junitxml`, lido com a `ElementTree` da
+stdlib — nao mais do texto do resumo. Isso fecha de uma vez a classe de furo que
+ja apareceu TRES vezes (um `print` em fixture, um `atexit` no stderr, um `atexit`
+no stdout): nenhum dos dois streams decide mais coisa alguma.
 
-Limites conhecidos, medidos e DECLARADOS: todos abortam ou reprovam, MENOS o
-ultimo — o unico que pode virar APROVADO falso. Nao valem conserto enquanto nao
-aparecerem:
+Sai 0 quando o grupo fica vermelho no antes e verde no depois — e verde aqui e
+PAREADO, nao `rc=0`: todo teste que ficou VERMELHO no antigo (falha OU erro) tem
+de ter passado no corrigido. rc=0 e tambem o que o pytest devolve quando TUDO foi
+PULADO (o `tests/conftest.py:99` pula por dependencia ausente), e grupo pulado nao
+prova conserto nenhum.
+Sai 1 quando um teste PASSA no antes (tautologico), quando falha no depois,
+quando a coluna corrigida nao prova o conserto, quando o pytest nao escreveu o
+XML, ou quando uma guarda dispara.
+
+MUDANCA VISIVEL de comportamento: `PYTEST_ADDOPTS=-rN`/`-rs`/`--no-summary` iam
+para REPROVADO ("sem desfecho") e agora saem `APROVADO, prova FORTE` — eles
+filtram o resumo impresso e nao alcancam o XML. E o gate ficando certo, mas quem
+lia aquele REPROVADO como "seu ambiente esta torto" perde o aviso.
+
+Limites conhecidos, medidos e DECLARADOS: quase todos abortam ou reprovam. Os
+DOIS que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
+(acidente) e o teste que le o proprio `sys.argv` (ator deliberado); um terceiro
+APROVA com o veredito certo e a NOTA inflada (a ultima celula) — a lista nao
+esta em ordem de gravidade, entao eles vao nomeados. Nao valem conserto enquanto
+nao aparecerem:
     - teste apagado (`D`) nao entra no overlay nem nos alvos, logo nunca roda
       (3 na historia de `tests/`); `D` do proprio conftest da FileNotFoundError.
     - `T` (`.py` virou symlink) some do `--diff-filter=AMR` -> "nada a provar",
@@ -38,10 +54,10 @@ aparecerem:
       `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
     - arquivo <-> diretorio no mesmo caminho: FileExistsError/IsADirectoryError.
     - symlink em `tests/`: zero na historia, e o `copyfile` segue o link.
-    - interpretador sem pytest: as DUAS colunas dao rc=1, entao quem dispara e o
-      ramo `rc_depois != 0` ("falha tambem no codigo corrigido") — a guarda de
-      desfecho nunca chega a ser alcancada aqui; o `No module named pytest` sai
-      repassado pelo nosso stderr, duas vezes.
+    - interpretador sem pytest: as DUAS colunas dao rc=1 e NENHUMA escreve o XML,
+      entao quem dispara e o ramo do relatorio ausente ("o pytest nao escreveu o
+      relatorio XML da coluna antiga"); o `No module named pytest` sai repassado
+      pelo nosso stderr, duas vezes.
     - `--testes` fora do overlay: alvo inexistente da rc=4 -> REPROVADO.
     - banco compartilhado pelas duas colunas: residuo da vermelha pode tingir a
       verde -> REPROVADO (fecha, nao mente).
@@ -54,6 +70,40 @@ aparecerem:
       symlinks rastreados (modo 120000) na arvore. `os.path.isfile` seria pior:
       a guarda roda ANTES de os worktrees existirem, mediria contra o cwd e
       recusaria alvo que so existe em `--depois` — a fixture historica do Uso.
+    - teste que le o PROPRIO `sys.argv`: ele acha ali o caminho do `--junitxml` e
+      pode reescrever o arquivo depois que o pytest o fechou — e, pela mesma
+      porta, forjar o exit code de dentro (`os._exit(1)` num `atexit`), que e o
+      outro insumo do veredito. Medido: um teste TAUTOLOGICO (`assert True`, verde
+      nas duas colunas) sai `APROVADO, prova FORTE` reescrevendo o XML e o rc.
+      Declarado, nao blindado: e a barra que a troca do texto pelo XML SUBIU — de
+      "um `print` acidental engana o gate" para "o teste tem de ler o argv de
+      proposito" —, e o caminho vive num `mkdtemp` sorteado, fora das duas
+      arvores. Ator deliberado, nao acidente.
+    - erro de COLETA no antigo e IMPAREAVEL: ele sai com `classname=""` e `name` =
+      o modulo pontilhado, identidade que nao existe na coluna verde. Ele conta
+      como vermelho (prova FRACA) e nunca como orfao — senao o caminho legitimo do
+      Uso acima (teste novo importando modulo que so existe no corrigido) seria
+      REPROVADO. Nessa forma o pareamento nao alcanca, e vale o criterio de grupo.
+    - `xfail` na coluna VERDE conta como nao-passou (sai `<skipped>`): um teste que
+      ficou vermelho no antigo e virou `xfail` no corrigido sai orfao -> REPROVADO.
+      E o desfecho certo — `xfail` nao e conserto —, mas o relatorio o chama de
+      "NAO passou" sem dizer que foi `xfail`; sem irmao passando, o caso nem chega
+      ao ramo do orfao: cai no "0 passaram, 1 pularam".
+    - `PYTEST_ADDOPTS=--co`: as duas colunas so coletam, o XML sai sem desfecho e o
+      rc da antiga e 0 -> REPROVADO por "o grupo PASSA no codigo antigo. Teste
+      tautologico". O veredito e o certo; o diagnostico impresso e falso, porque
+      nada chegou a rodar.
+    - a nota FORTE exige que ALGUM vermelho tenha `<failure>`, nao que o teste DO
+      FIX tenha falhado. Medido: o teste do fix erra na fixture no antigo e um
+      irmao pre-existente falha -> `APROVADO, prova FORTE` citando o IRMAO; sem o
+      irmao o mesmo caso sairia FRACA, que e o caminho onde o Manager decide se
+      aceita. O veredito se sustenta (o irmao foi vermelho->verde sob o fix, e
+      evidencia legitima); o que se perde e o significado de FORTE, que deixa de
+      implicar "o teste que voce escreveu rodou e falhou". NAO e consertavel: o
+      overlay copia o teste novo para dentro da coluna antiga, entao as duas
+      colunas coletam nodeids IDENTICOS por construcao (medido: DEPOIS - ANTES =
+      []) e o gate nao tem como saber qual e o teste do PR. O `(e mais N que nem
+      chegaram a rodar)` da linha do FORTE e a UNICA pista que o operador recebe.
 """
 from __future__ import annotations
 
@@ -63,13 +113,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
+from typing import NamedTuple
 
 # Codigos de saida do pytest. Sao a FAIXA de vermelho valido, NAO o criterio de
 # prova: 1 = "Tests failed", 2 = coleta interrompida (ImportError/erro de sintaxe).
 # Medido com pytest 9.0.2: rc=1 engloba tanto a asserção que falhou quanto o erro
 # de setup/fixture, em que NENHUM corpo de teste chegou a rodar — por isso o exit
-# code sozinho nao separa prova FORTE de FRACA. Quem separa e o desfecho impresso
-# no resumo do pytest, lido pelo `veredito`. Qualquer outro codigo (3, 4, 5) e
+# code sozinho nao separa prova FORTE de FRACA. Quem separa e o `<failure>` x
+# `<error>` do XML, lido pela `le_junit`. Qualquer outro codigo (3, 4, 5) e
 # reprovado: o pytest reclamando de si mesmo nao e vermelho de teste.
 PYTEST_FALHA, PYTEST_COLETA = 1, 2
 
@@ -86,42 +138,91 @@ def raiz_principal() -> str:
     return os.path.dirname(git("rev-parse", "--path-format=absolute", "--git-common-dir"))
 
 
-def roda_pytest(cwd: str, py: str, alvos: list[str]) -> tuple[int, str]:
+class Desfechos(NamedTuple):
+    """O que o XML de uma coluna diz. Registro, nao camada — sem metodos.
+
+    `falhados` e `errados` sao `{(classname, name): (nodeid, causa)}` e `passados`
+    e `{(classname, name): nodeid}`: a chave e a identidade que PAREIA as duas
+    colunas — unica mesmo com classe, que o nome sozinho nao e —, e o valor
+    carrega o que entra no relatorio.
+
+    Os contadores saem dos `<testcase>`, nao dos atributos do `<testsuite>`: o
+    cabecalho conta DUAS vezes o caso com `<failure>` E `<error>` (falhou no corpo,
+    estourou no teardown), e o `int()` de um atributo forjado (`tests="abc"`)
+    estourava `ValueError` numa funcao que promete `None`.
+    """
+    total: int
+    pulados: int
+    falhados: dict
+    errados: dict
+    passados: dict
+
+
+def le_junit(caminho: str) -> Desfechos | None:
+    """Le o XML do `--junitxml`. `None` quando ele nao existe ou nao e XML valido.
+
+    O XML e imune ao que qualquer teste imprima: `-rN`/`-rs`/`--no-summary` nao o
+    alcancam e um `atexit` escrevendo num stream nao entra aqui. Era o texto do
+    resumo que decidia, e a mesma classe de furo apareceu tres vezes.
+
+    A raiz e `<testsuites>`, com um `<testsuite>` dentro; o `iter` acha os dois
+    casos e o `None` cobre o XML sem suite (medido: rc=4/5 escreve o arquivo).
+    """
+    try:
+        suite = next(ET.parse(caminho).iter("testsuite"), None)
+    except (OSError, ET.ParseError):
+        return None
+    if suite is None:
+        return None
+
+    total = pulados = 0
+    falhados, errados, passados = {}, {}, {}
+    for caso in suite.iter("testcase"):
+        total += 1
+        chave = (caso.get("classname", ""), caso.get("name", ""))
+        # O `file` vem do `junit_family=xunit1`; sem ele a citacao sairia com o
+        # modulo pontilhado (`tests.test_x::test_y`), que nao se cola no pytest.
+        nodeid = f"{caso.get('file') or chave[0]}::{chave[1]}"
+        falha, erro = caso.find("failure"), caso.find("error")
+        no = falha if falha is not None else erro
+        if no is None:
+            # Passou = nem falha, nem erro, nem `skipped` (e o `xfail` sai
+            # `<skipped>`, entao ele nao conta como passado).
+            if caso.find("skipped") is None:
+                passados[chave] = nodeid
+            else:
+                pulados += 1
+            continue
+        # A causa e a primeira linha `E ` do corpo, com o `message` de reserva: e o
+        # que faltava na citacao de coleta, que saia sem dizer o que quebrou.
+        causa = next((l[1:].strip() for l in (no.text or "").splitlines() if l.startswith("E ")),
+                     no.get("message", "")).strip()
+        (falhados if falha is not None else errados)[chave] = (nodeid, causa)
+    return Desfechos(total, pulados, falhados, errados, passados)
+
+
+def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str) -> tuple[int, Desfechos | None]:
     env = {**os.environ, "PYTHONPATH": "."}
-    r = subprocess.run([py, "-m", "pytest", "-q", *alvos],
+    # `-o junit_family=xunit1` so pelo `file=` de cada `<testcase>`. Um
+    # `PYTEST_ADDOPTS` com outro `--junitxml` nao vence a linha de comando.
+    r = subprocess.run([py, "-m", "pytest", "-q", "-o", "junit_family=xunit1",
+                        f"--junitxml={relatorio}", *alvos],
                        cwd=cwd, env=env, capture_output=True, text=True)
-    # SO o stdout alimenta o veredito. Concatenar os dois streams punha o stderr
-    # INTEIRO depois do ultimo cabecalho de resumo, entao qualquer linha escrita
-    # la (atexit, __del__ no shutdown, thread que sobrevive a captura, plugin)
-    # passava por baixo do fatiamento; um cabecalho falso ali chegava a MOVER o
-    # corte do `rpartition` e o gate carimbava FORTE citando um teste inexistente.
-    # O resumo do pytest nunca sai pelo stderr, entao nada de decisao se perde —
-    # e o texto continua visivel no NOSSO stderr, onde serve de diagnostico para
-    # os rc 3/4/5, cuja mensagem so mostra o numero.
+    # O stderr continua repassado — e o unico diagnostico dos rc 3/4/5 e do
+    # `No module named pytest`, que nao chegam a escrever XML. Ele nao alimenta
+    # decisao nenhuma: quem decide e o arquivo.
     if r.stderr:
         sys.stderr.write(r.stderr)
-    return r.returncode, r.stdout
+    return r.returncode, le_junit(relatorio)
 
 
-# O `-q` fecha a saida com este cabecalho, e SO depois dele vem o desfecho de
-# cada teste. As secoes `Captured stdout` aparecem ANTES. Fatiar aqui e o que
-# separa o desfecho REAL de um `print("FAILED ...")` dentro de um teste ou de uma
-# fixture — medido com pytest 9.0.2: um print desses no setup sai em `Captured
-# stdout setup`, na coluna 0, e sem o fatiamento invertia o veredito para FORTE
-# no caso exato em que NADA rodou. Medido tambem: o cabecalho aparece nos tres
-# vermelhos validos (rc=1 por asserção, rc=1 por fixture, rc=2 por coleta) e
-# some com `-rN`/`--no-summary` — mas some tambem SO o desfecho, com o cabecalho
-# de pe (`-rs`), entao quem reprova e a ausencia de desfecho, nao a do cabecalho.
-CABECALHO_RESUMO = "= short test summary info ="
-
-
-def veredito(rc_antes: int, saida_antes: str, rc_depois: int) -> tuple[int, str]:
+def veredito(rc_antes: int, antes: Desfechos | None,
+             rc_depois: int, depois: Desfechos | None) -> tuple[int, str]:
     """Classifica as duas colunas: devolve (codigo de saida, relatorio).
 
-    Nao escreve nada e nenhum codigo de saida depende do ambiente; so LE
-    `PYTEST_ADDOPTS` para montar a mensagem de diagnostico. O `main()` apenas
-    imprime o que sai daqui — e onde mora TODA a decisao do gate, entao e o que o
-    teste consegue cobrir sem git nem worktree.
+    Funcao pura dos quatro argumentos: nao escreve nada e nao le ambiente. O
+    `main()` apenas imprime o que sai daqui — e onde mora TODA a decisao do gate,
+    entao e o que o teste consegue cobrir sem git nem worktree.
     """
     # A ORDEM importa: o verde (tautologia) e diagnostico proprio e tem de ser
     # lido antes da faixa de codigos invalidos, senao vira "pytest saiu 0, isso
@@ -136,47 +237,90 @@ def veredito(rc_antes: int, saida_antes: str, rc_depois: int) -> tuple[int, str]
     if rc_antes not in (PYTEST_FALHA, PYTEST_COLETA):
         return 1, (f"REPROVADO: pytest saiu {rc_antes} na coluna antiga — isso nao e falha\n"
                    "               de teste (3=interno, 4=uso/alvo inexistente, 5=nada coletado).")
+    # Sem XML nao ha desfecho nenhum para ler, e tratar arquivo ausente como
+    # "zero falhas" seria decidir no escuro. Carga real: um interpretador sem
+    # pytest sai rc=1 — vermelho VALIDO, que passa pela faixa acima — e nao
+    # escreve arquivo.
+    if antes is None or depois is None:
+        qual = "antiga" if antes is None else "corrigida"
+        return 1, (f"REPROVADO: o pytest nao escreveu o relatorio XML da coluna {qual}.\n"
+                   "               Sem desfecho nao ha prova — veja o stderr repassado acima.")
     if rc_depois != 0:
         return 1, f"REPROVADO: o grupo falha tambem no codigo corrigido (rc={rc_depois})."
 
-    # `rpartition`: o resumo de verdade e sempre o ULTIMO: qualquer texto que um
-    # teste imprima ja foi despejado antes dele. Sem o cabecalho o `rpartition`
-    # devolve a saida INTEIRA na cauda, por isso `linhas` fica vazia ali: senao um
-    # `print("FAILED ...")` de dentro de um teste passaria a valer por desfecho.
-    _, achou, resumo = saida_antes.rpartition(CABECALHO_RESUMO)
-    linhas = resumo.splitlines() if achou else []
+    # Verde e PAREADO, nao `rc=0`: rc=0 e tambem o que o pytest devolve quando
+    # TUDO foi pulado, e grupo pulado nao prova conserto (o `tests/conftest.py:99`
+    # pula por dependencia ausente — o caso e alcancavel, nao teorico). Contar
+    # ("algum passou") tambem nao fecha: medido num lab de dois testes, com o teste
+    # DO FIX pulado no corrigido e um irmao passando, a contagem carimbava
+    # `APROVADO, prova FORTE`. Quem discrimina e o pareamento por (classname,
+    # name): quem ficou VERMELHO no antigo tem de ter passado no corrigido.
+    #
+    # Vermelho aqui e falha E erro. Varrer so a falha deixava a porta lateral pela
+    # qual o mesmo furo voltava: o teste que ERRA na fixture no antigo — o
+    # mecanismo que motivou este script, 21 erros de fixture — e e PULADO no
+    # corrigido nao entrava na varredura, e um irmao carregava o carimbo FORTE
+    # sozinho. Medido no lab: `APROVADO, prova FORTE`, exit 0.
+    #
+    # Excecao MEDIDA, e a unica: o erro de COLETA sai com `classname=""` e `name`
+    # igual ao MODULO pontilhado (`pac.test_x`, `file=pac/test_x.py`) — identidade
+    # que nao existe na coluna verde, onde o modulo vira testes de verdade. Ele e
+    # impareavel por construcao, e exigir o par dele reprovaria o caminho FRACA
+    # legitimo: teste novo importando modulo de producao que so existe no
+    # corrigido, que e o exemplo do Uso la em cima. Por isso o `chave[0]` — so
+    # entra na varredura quem tem classname, ou seja, um teste de verdade.
+    #
+    # Isto nao recusa trabalho honesto: um `skipif` de plataforma, ou o skip por
+    # dependencia ausente do `tests/conftest.py:99` (que depende de ambiente +
+    # pacote, iguais nas duas colunas), vale igual nos dois lados — o teste pulado
+    # no verde tambem foi pulado no vermelho, e quem foi pulado nunca fica
+    # vermelho para comecar.
+    vermelhos = {**antes.falhados, **antes.errados}
+    orfaos = sorted(nodeid for chave, (nodeid, _) in vermelhos.items()
+                    if chave[0] and chave not in depois.passados)
+    if not depois.passados or orfaos:
+        # "Nenhum passou" vem antes do orfao: quando a coluna verde inteira foi
+        # pulada, a contagem e o diagnostico, e a lista de orfaos seria so a
+        # consequencia dela.
+        detalhe = (f"{len(depois.passados)} passaram, {depois.pulados} pularam, de {depois.total}."
+                   if not depois.passados else
+                   f"{len(orfaos)} teste(s) vermelhos no antigo NAO passaram no corrigido: "
+                   f"{', '.join(orfaos)}")
+        return 1, ("REPROVADO: a coluna corrigida nao provou o conserto (rc=0).\n"
+                   f"               {detalhe}")
+
+    # Falha fechada: vermelho valido cujo XML nao traz falha nem erro. Sem desfecho
+    # o gate nao pode carimbar FORTE nem FRACA.
+    if not vermelhos:
+        return 1, (f"REPROVADO: a coluna antiga ficou vermelha (rc={rc_antes}) e o XML nao trouxe\n"
+                   f"               falha nem erro ({antes.total} caso(s), {antes.pulados} pulado(s)).")
 
     # Prova FORTE = algum teste RODOU e falhou no codigo antigo. Nao e o tipo da
     # excecao que decide (o #182 tinha vermelho legitimo por ValueError, zero
-    # asserções): e se o corpo do teste chegou a executar. `FAILED` = executou e
-    # explodiu; `ERROR` = nunca rodou (coleta, setup, fixture ou teardown), e ai
+    # asserções): e se o corpo do teste chegou a executar. `<failure>` = executou e
+    # explodiu; `<error>` = nunca rodou (coleta, setup, fixture ou teardown), e ai
     # o vermelho so prova que o ambiente nao montou. Medido: erro de fixture sai
-    # rc=1 com `ERROR` e ZERO `FAILED` — igual ao rc=2 da coleta.
-    falharam = [l for l in linhas if l.startswith("FAILED ")]
-    erros = [l for l in linhas if l.startswith("ERROR ")]
-    # NENHUM desfecho = o gate nao mediu nada, e APROVAR aqui seria carimbar prova
-    # sem prova. Duas causas caem no mesmo estado, por isso um ramo so: cabecalho
-    # ausente (`-rN`, `--no-summary`, `-p no:terminal`) ou cabecalho presente com
-    # as linhas de desfecho filtradas (medido: `-rs` da rc=1, cabecalho, e zero
-    # FAILED/ERROR — um teste falhou e o gate diria "nenhum chegou a rodar").
-    if not falharam and not erros:
-        return 1, (f"REPROVADO: a coluna antiga ficou vermelha (rc={rc_antes}), mas o resumo do\n"
-                   "               pytest nao trouxe uma linha FAILED nem ERROR — sem desfecho nao\n"
-                   "               da para saber se algum teste chegou a RODAR, e o gate nao pode\n"
-                   "               carimbar FORTE nem FRACA.\n"
-                   f"               PYTEST_ADDOPTS={os.environ.get('PYTEST_ADDOPTS', '')!r} — `-rN`/`-rs`/`--no-summary`\n"
-                   "               filtram o resumo e `-p no:terminal` tira a saida toda.\n"
-                   "               Rode `unset PYTEST_ADDOPTS` e repita.")
-    if falharam:
-        extra = f" (e mais {len(erros)} que nem chegaram a rodar)" if erros else ""
-        return 0, (f"APROVADO, prova FORTE: {len(falharam)} teste(s) RODARAM e falharam no codigo\n"
+    # rc=1 com `<error>` e ZERO `<failure>` — igual ao rc=2 da coleta.
+    # A citacao sai do proprio conjunto vermelho: depois da varredura acima, todo
+    # vermelho pareavel PASSOU no corrigido. Isso NAO garante que o citado seja o
+    # teste do PR — um irmao pre-existente pode carregar a nota sozinho (ultima
+    # celula dos limites, no topo do arquivo).
+    if antes.falhados:
+        nodeid, causa = next(iter(antes.falhados.values()))
+        extra = f" (e mais {len(antes.errados)} que nem chegaram a rodar)" if antes.errados else ""
+        return 0, (f"APROVADO, prova FORTE: {len(antes.falhados)} teste(s) RODARAM e falharam no codigo\n"
                    f"               antigo{extra}; o grupo fica verde no corrigido.\n"
-                   f"               {falharam[0].strip()}")
-    # Aqui `erros` e nao-vazio por construcao: o ramo acima ja devolveu quando as
-    # duas listas estavam vazias. Nao ha mais desfecho que o gate nao saiba nomear.
-    return 0, ("APROVADO, prova FRACA: NENHUM teste chegou a RODAR no codigo antigo —\n"
+                   f"               {nodeid} - {causa}")
+    # Aqui `antes.errados` e nao-vazio por construcao: o ramo da falha fechada ja
+    # devolveu quando os dois mapas estavam vazios. A frase e sobre os VERMELHOS, e
+    # nao sobre o grupo: dizer "NENHUM teste chegou a RODAR" era falso sempre que a
+    # coluna antiga tinha teste passando ao lado do que errou — e e esta a linha
+    # que o Manager le para decidir se aceita prova fraca.
+    nodeid, causa = next(iter(antes.errados.values()))
+    return 0, (f"APROVADO, prova FRACA: nenhum dos {len(antes.errados)} teste(s) VERMELHOS chegou a\n"
+               f"               RODAR no codigo antigo ({len(antes.passados)} passado(s) ao lado) —\n"
                "               coleta, setup ou fixture quebrou antes do corpo do teste.\n"
-               f"               {erros[0].strip()}\n"
+               f"               {nodeid} - {causa}\n"
                "               Isso prova que o ambiente nao montou, nao que o comportamento\n"
                "               antigo estava errado. O Manager decide se aceita.")
 
@@ -325,12 +469,16 @@ def main() -> int:
         print(f"[coluna-dupla] testes = {' '.join(alvos)}")
         print(f"[coluna-dupla] python = {py}\n")
 
-        rc_antes, saida_antes = roda_pytest(wt_antes, py, alvos)
-        rc_depois, _ = roda_pytest(wt_depois, py, alvos)
+        # Os XML vivem no `mkdtemp`, fora das duas arvores — nenhum worktree fica
+        # sujo — e morrem com ele no `rmtree` do `finally`.
+        rc_antes, desf_antes = roda_pytest(wt_antes, py, alvos, os.path.join(tmp, "antes.xml"))
+        rc_depois, desf_depois = roda_pytest(wt_depois, py, alvos, os.path.join(tmp, "depois.xml"))
 
-        # Por palavra-chave: sao dois `int` na mesma assinatura e nenhum teste passa
-        # por este call site, entao trocar a ordem seria indetectavel.
-        rc, relatorio = veredito(rc_antes=rc_antes, saida_antes=saida_antes, rc_depois=rc_depois)
+        # Por palavra-chave: os dois `int` e os dois `Desfechos` se alternam na
+        # assinatura e nenhum teste passa por este call site, entao trocar a ordem
+        # seria indetectavel.
+        rc, relatorio = veredito(rc_antes=rc_antes, antes=desf_antes,
+                                 rc_depois=rc_depois, depois=desf_depois)
         print(f"[coluna-dupla] {relatorio}")
         return rc
     finally:
