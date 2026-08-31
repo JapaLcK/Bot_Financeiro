@@ -300,3 +300,24 @@ def test_falha_na_limpeza_nao_apaga_a_categoria(monkeypatch):
     assert get_user_category(uid, nova["id"]) is not None, (
         "a categoria foi apagada mesmo com a limpeza falhando — não é atômico"
     )
+
+
+def test_reconciliacao_nao_sobrescreve_override_concorrente():
+    """A criação da categoria commita antes da reconciliação rodar.
+
+    Nesse intervalo um comando explícito pode gravar a mesma keyword — e ele já
+    foi confirmado ao usuário. A reconciliação só pode alcançar regra ANTERIOR à
+    categoria; aqui a regra é posterior e tem de sobreviver.
+    """
+    from core.services.category_service import reconciliar_regras_com_categoria
+
+    uid = _uid()
+    create_user_category(uid, "cafe")
+    create_user_category(uid, "lazer do fim de semana")
+    upsert_category_rule(uid, "cafe", "lazer do fim de semana")   # posterior às duas
+
+    reconciliar_regras_com_categoria(uid, "cafe")                 # roda atrasada
+
+    assert _regras(uid).get("cafe") == "lazer do fim de semana", (
+        f"a reconciliação atropelou a escolha explícita: {_regras(uid)}"
+    )

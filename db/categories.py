@@ -379,6 +379,39 @@ def list_user_categories_full(
     return out
 
 
+def reaponta_regra_se_anterior(user_id: int, keyword: str, nova_categoria: str) -> bool:
+    """Reaponta a regra para `nova_categoria` — SÓ se ela for anterior à categoria.
+
+    A condição vai no próprio UPDATE, não em leitura seguida de escrita: a
+    criação da categoria já foi commitada quando a reconciliação roda, e nesse
+    intervalo um comando explícito pode ter gravado a mesma keyword de
+    propósito. Sem a condição, a reconciliação sobrescreveria uma escolha que o
+    usuário acabou de fazer e que já foi confirmada para ele.
+
+    É o mesmo critério do guard de leitura (`_regra_ficou_obsoleta`): regra
+    ANTERIOR à categoria envelheceu; regra posterior é escolha deliberada.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update user_category_rules r
+                   set category = %s, created_at = now()
+                 where r.user_id = %s and r.keyword = %s
+                   and r.created_at < (
+                         select c.created_at from user_categories c
+                          where c.user_id = r.user_id
+                            and lower(c.name) = lower(%s)
+                          limit 1
+                       )
+                """,
+                (nova_categoria, user_id, keyword, nova_categoria),
+            )
+            mudou = cur.rowcount > 0
+        conn.commit()
+    return mudou
+
+
 def categoria_criada_depois_de(user_id: int, name: str, quando) -> bool:
     """A categoria custom `name` nasceu depois de `quando`?
 

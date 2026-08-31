@@ -136,15 +136,15 @@ def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em) -
 def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
     """Reaponta para `nome_categoria` as regras que ela passou a possuir.
 
-    Chamado quando a categoria é criada. Reaponta em vez de apagar porque aqui
-    não há adivinhação: `custom_category_match` sobre o keyword devolveu ESTA
+    Chamado quando a categoria é criada, e só alcança regra ANTERIOR a ela.
+    Reaponta em vez de apagar porque aqui não há adivinhação: `custom_category_match` sobre o keyword devolveu ESTA
     categoria, então o destino novo é o mesmo match que o sistema faria pelo B2
     de qualquer forma. Quando a resposta for outra categoria, ou nenhuma, a
     regra não é tocada — ambiguidade não vira palpite.
 
     Devolve quantas regras foram reapontadas.
     """
-    from db.categories import list_user_category_rules, upsert_category_rule
+    from db.categories import list_user_category_rules, reaponta_regra_se_anterior
 
     alvo_norm = normalize_text(nome_categoria or "")
     if not alvo_norm:
@@ -157,8 +157,11 @@ def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
             continue                                   # não é desta categoria
         if normalize_text(destino or "") == alvo_norm:
             continue                                   # já aponta pra cá
-        upsert_category_rule(user_id, keyword, nome_categoria)
-        n += 1
+        # O UPDATE é condicional: regra posterior à categoria é escolha
+        # deliberada feita no intervalo entre o commit da criação e esta linha,
+        # e não pode ser sobrescrita.
+        if reaponta_regra_se_anterior(user_id, keyword, nome_categoria):
+            n += 1
     return n
 
 
