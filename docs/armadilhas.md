@@ -32,9 +32,14 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   últimos são páginas que, de propósito, não carregam nem o app-mode nem o shim.
 
   Isso importa porque **qualquer rota do domínio abre no app**: o "Ver planos" do
-  dashboard leva ao `/precos`, que é uma das 14 — coberta pelo shim, não pelo
-  app-mode. Se alguma das **5** virar rota alcançável pelo app, precisa entrar no
-  shim; ela não herda nada.
+  dashboard leva ao `/precos`, que está na linha do shim — coberta por ele, não pelo
+  app-mode. Se alguma da linha "nada, de propósito" virar rota alcançável pelo app,
+  precisa entrar no shim; ela não herda nada.
+
+  As duas contagens que este parágrafo trazia **divergiam da tabela acima**: diziam
+  14 onde ela diz 16, e 5 depois de o `_dash_mockup` sair. Número repetido fora da
+  sua fonte envelhece sozinho (§0.7 e §2), então o texto passou a citar a LINHA —
+  quem quiser o número lê a tabela.
 - **Existe HTML gerado em Python**, fora de qualquer template:
   `frontend/finance_bot_websocket_custom.py` devolve duas páginas standalone
   (link expirado do `/d/{code}`, descadastro). O `AppDelegate.swift` carrega o
