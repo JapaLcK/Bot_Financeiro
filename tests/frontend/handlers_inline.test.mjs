@@ -88,7 +88,24 @@ function valorDoHandler(texto, i) {
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
 // forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
 const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
-const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+// POSIÇÃO DE CHAMADA: início do handler, ou depois de `;` — o que o clique de fato
+// invoca. Pegar todo identificador seguido de `(` cobrava também o ajudante aninhado
+// num argumento (`entry(${ajuda(x)})`), que roda na geração. Medido: restringir NÃO
+// perde nada — 150, 16, 31 e 8 nomes continuam iguais — e torna inofensiva qualquer
+// imperfeição do `semInterpolacao`, porque o que está dentro de argumento nunca
+// chega a ser cobrado.
+const CHAMADA = /(?:^|;)\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/g;
+
+/**
+ * Identificador NU passado como argumento: `startCheckout(currentCycle, this, 'x')`.
+ *
+ * Ele não é chamado, mas é lido no clique — e some do escopo global pelo mesmo
+ * caminho que as funções. Uma instância hoje, no `precos.html`. Só precisa EXISTIR,
+ * não ser função, então a verificação é `typeof !== "undefined"`.
+ */
+const ARGUMENTO = /\(([^()]*)\)/g;
+const SO_NOME = /^[A-Za-z_$][\w$]*$/;
+const NAO_E_NOME = new Set(["this", "event", "true", "false", "null", "undefined"]);
 
 /** Nome que o navegador já traz, ou que não é chamada de função do autor. */
 const NATIVO = new Set([
@@ -121,13 +138,19 @@ const semStrings = (s) => s.replace(/'[^']*'/g, "''").replace(/&quot;[^&]*&quot;
 const semInterpolacao = (s) => s.replace(/\$\{[^}]*\}/g, "");
 
 function nomesDe(trechos) {
-  const nomes = new Set();
+  const funcoes = new Set();
+  const variaveis = new Set();
   for (const t of trechos) {
-    for (const c of semInterpolacao(semStrings(t)).matchAll(CHAMADA)) {
-      if (!NATIVO.has(c[1])) nomes.add(c[1]);
+    const limpo = semInterpolacao(semStrings(t));
+    for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
+    for (const a of limpo.matchAll(ARGUMENTO)) {
+      for (const tok of a[1].split(",")) {
+        const n = tok.trim();
+        if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n)) variaveis.add(n);
+      }
     }
   }
-  return nomes;
+  return { funcoes, variaveis };
 }
 
 const trechosDe = (texto) => [
@@ -153,7 +176,8 @@ function scriptsDaPagina(html) {
 function nomesChamados(html) {
   const trechos = [...trechosDe(html)];
   for (const js of scriptsDaPagina(html)) trechos.push(...trechosDe(readFileSync(js, "utf-8")));
-  return [...nomesDe(trechos)].sort();
+  const { funcoes, variaveis } = nomesDe(trechos);
+  return { funcoes: [...funcoes].sort(), variaveis: [...variaveis].sort() };
 }
 
 async function startServer() {
@@ -179,14 +203,14 @@ after(async () => { await browser?.close(); server?.kill(); });
 const PAGINAS = readdirSync(FRONTEND)
   .filter((f) => f.endsWith(".html"))
   .map((f) => [f, nomesChamados(readFileSync(join(FRONTEND, f), "utf-8"))])
-  .filter(([, nomes]) => nomes.length);
+  .filter(([, { funcoes, variaveis }]) => funcoes.length || variaveis.length);
 
 test("há páginas com handler inline para verificar", () => {
   // Se o extrator quebrar, os testes abaixo passariam medindo lista vazia.
   assert.ok(PAGINAS.length >= 5, `esperava várias páginas com handler inline, achei ${PAGINAS.length}`);
 });
 
-for (const [pagina, nomes] of PAGINAS) {
+for (const [pagina, { funcoes, variaveis }] of PAGINAS) {
   test(`${pagina}: todo handler inline resolve no escopo global`, async () => {
     const page = await browser.newPage();
     const autenticado = !SEM_SESSAO.has(pagina);
@@ -233,19 +257,32 @@ for (const [pagina, nomes] of PAGINAS) {
         }
         return out;
       });
-      const todos = [...new Set([...nomes, ...nomesDe(doDom)])].sort();
+      const doDomNomes = nomesDe(doDom);
+      const todasFuncoes = [...new Set([...funcoes, ...doDomNomes.funcoes])].sort();
+      const todasVariaveis = [...new Set([...variaveis, ...doDomNomes.variaveis])]
+        .filter((v) => !todasFuncoes.includes(v)).sort();
 
       // `typeof <nome>`, e não `window[nome]`: const/let no topo de script
       // clássico não viram propriedade de window, mas o handler inline os vê.
       const faltando = await page.evaluate(
-        (ns) => ns.filter((n) => {
-          try { return new Function(`return typeof ${n}`)() !== "function"; } catch { return true; }
-        }),
-        todos,
+        ([fns, vars]) => {
+          const resolve = (n, tipo) => {
+            try {
+              const t = new Function(`return typeof ${n}`)();
+              return tipo === "function" ? t === "function" : t !== "undefined";
+            } catch { return false; }
+          };
+          return [
+            ...fns.filter((n) => !resolve(n, "function")),
+            // Argumento nu só precisa EXISTIR — é lido, não chamado.
+            ...vars.filter((n) => !resolve(n, "qualquer")).map((n) => `${n} (argumento)`),
+          ];
+        },
+        [todasFuncoes, todasVariaveis],
       );
       assert.deepEqual(faltando, [],
-        `${pagina}: dos ${todos.length} nomes verificados (${nomes.length} do fonte, ` +
-        `${todos.length - nomes.length} só no DOM), estes não existem no escopo global: ` +
+        `${pagina}: de ${todasFuncoes.length} funções e ${todasVariaveis.length} ` +
+        `argumentos verificados, estes não existem no escopo global: ` +
         `${faltando.join(", ")}. ` +
         "O clique falha em silêncio. Se o script virou módulo ou ganhou IIFE, devolva os nomes ao escopo global.");
     } finally {
