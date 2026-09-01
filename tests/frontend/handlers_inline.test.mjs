@@ -155,9 +155,19 @@ const NATIVO = new Set([
  * simples com `"` dentro (linhas 1464 e 1863).
  *
  * `\\.` cobre o delimitador escapado dentro da própria string.
+ *
+ * ENTIDADE VIRA ASPA ANTES DE TUDO. O navegador decodifica `&quot;`, `&#34;`,
+ * `&#x22;`, `&apos;`, `&#39;` e `&#x27;` para aspa comum antes de executar o handler,
+ * e reconhecer só uma dessas formas rendia nome inventado nas outras — `&#39;` sozinho
+ * aparece 9× neste frontend. Decodificar primeiro fecha a categoria inteira, em vez de
+ * um padrão por entidade: depois disso existe só o caso das três aspas literais.
  */
+const ENTIDADE_ASPA = /&(?:quot|#0*34|#[xX]0*22);/g;
+const ENTIDADE_APOS = /&(?:apos|#0*39|#[xX]0*27);/g;
+
 const semStrings = (s) => s
-  .replace(/&quot;(?:(?!&quot;)[\s\S])*&quot;/g, "")
+  .replace(ENTIDADE_ASPA, '"')
+  .replace(ENTIDADE_APOS, "'")
   .replace(/'(?:\\.|[^'\\])*'/g, "''")
   .replace(/"(?:\\.|[^"\\])*"/g, '""')
   .replace(/`(?:\\.|[^`\\])*`/g, "``");
@@ -191,8 +201,12 @@ function scriptsDaPagina(html) {
   // As DUAS aspas: `src='...'` é HTML equivalente, e reconhecer só a dupla deixaria
   // uma troca neutra de marcação desligar o teste em silêncio — some a cobertura dos
   // nomes que só existem no .js, e a página continua verde.
-  return [...html.matchAll(/<script[^>]+src\s*=\s*(["'])\/?([^"'?]+\.js)/gi)]
-    .map((m) => join(FRONTEND, m[2]))
+  // As TRÊS formas de valor de atributo que o HTML aceita — dupla, simples e SEM
+  // aspas —, as mesmas que o INICIO_HANDLER reconhece. Faltar qualquer uma deixa uma
+  // edição de formatação neutra desligar a cobertura em silêncio, e foi assim que a
+  // aspa simples e o espaço em volta do `=` chegaram aqui, um apontamento por vez.
+  return [...html.matchAll(/<script[^>]+src\s*=\s*(?:"\/?([^"?]+\.js)|'\/?([^'?]+\.js)|\/?([^\s"'>?]+\.js))/gi)]
+    .map((m) => join(FRONTEND, m[1] ?? m[2] ?? m[3]))
     .filter((f) => existsSync(f));
 }
 
