@@ -50,18 +50,29 @@ after(async () => { await browser?.close(); });
 
 // Sobe uma página REAL (URL http, pra location.replace funcionar) com rotas
 // stubadas: validate responde na hora; /auth/me demora ME_DELAY_MS.
-async function bootApp({ me, meDelayMs = 400 }) {
+// wsMode: "silent" = conecta e fica (default) | "reject" = handshake cai 30ms
+// depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
+async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent" }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.addInitScript(() => {
+  await page.addInitScript((mode) => {
     window._t0 = Date.now();
     window._wsCreatedAt = null;
+    window._wsCount = 0;
     window.WebSocket = class FakeWS {
       static OPEN = 1;
-      constructor() { window._ws = this; window._wsCreatedAt = Date.now() - window._t0; this.readyState = 1; }
-      close() {} send() {}
+      constructor() {
+        window._ws = this; window._wsCount++;
+        window._wsCreatedAt = Date.now() - window._t0; this.readyState = 1;
+        if (mode === "reject") {
+          setTimeout(() => { this.readyState = 3; this.onclose?.({ code: 1006 }); }, 30);
+        } else if (mode === "open") {
+          setTimeout(() => { this.onopen?.(); }, 30);
+        }
+      }
+      close() { this.readyState = 3; } send() {}
     };
-  });
+  }, wsMode);
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/app") {
@@ -75,7 +86,7 @@ async function bootApp({ me, meDelayMs = 400 }) {
     }
     if (url.pathname === "/auth/me") {
       await new Promise((r) => setTimeout(r, meDelayMs));
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(me) });
+      return route.fulfill({ status: meStatus, contentType: "application/json", body: JSON.stringify(me) });
     }
     if (url.pathname.startsWith("/precos")) {
       return route.fulfill({ contentType: "text/html", body: "<title>precos</title>PRECOS" });
@@ -97,6 +108,27 @@ test("sem plano ativo: continua caindo em /precos quando o /me chega", async () 
 test("cadastro sem plano escolhido: cai em /precos?escolha=1", async () => {
   const { ctx, page } = await bootApp({ me: { needs_plan_selection: true } });
   await page.waitForURL("**/precos?escolha=1", { timeout: 5000 });
+  await ctx.close();
+});
+
+test("handshake rejeitado + /auth/me 500: retry com backoff, sockets ≤2 em 15s", async () => {
+  // Codex-2 do PR #218: sem o backoff eram ~5 sockets em 15s (3s fixos),
+  // martelando /ws para sempre numa outage de auth.
+  const { ctx, page } = await bootApp({ me: { detail: "boom" }, meStatus: 500, meDelayMs: 50, wsMode: "reject" });
+  await new Promise((r) => setTimeout(r, 15000));
+  const n = await page.evaluate(() => window._wsCount);
+  assert.ok(n <= 2, `${n} sockets em 15s — retry sem backoff (esperado ≤2)`);
+  await ctx.close();
+});
+
+test("queda transitória DEPOIS de aberto: reconexão legítima segue em ~3s", async () => {
+  const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 50, wsMode: "open" });
+  await page.waitForFunction(() => window._wsCount === 1, { timeout: 5000 });
+  await page.waitForTimeout(100); // deixa o onopen (30ms) rodar
+  await page.evaluate(() => { window._ws.onclose({ code: 1006 }); }); // queda
+  await page.waitForFunction(() => window._wsCount >= 2, { timeout: 4500 });
+  const n = await page.evaluate(() => window._wsCount);
+  assert.ok(n >= 2, "socket que já abriu tem que reconectar em ~3s");
   await ctx.close();
 });
 

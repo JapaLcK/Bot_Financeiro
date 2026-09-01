@@ -20,11 +20,13 @@ logger = logging.getLogger(__name__)
 _warned_bcb_requests: set[tuple] = set()
 
 # Cache-primeiro nas taxas do BCB (CLAUDE.md §5 — caminho do dashboard):
-# séries diárias só publicam em dia útil, então 4 dias corridos cobrem
-# fim de semana + feriado; IPCA_12M é mensal com ~2 semanas de atraso.
+# série DIÁRIA é fresca enquanto não existe dia útil BR publicável depois do
+# ponto mais novo (sexta cobre o fim de semana e feriadão; a segunda publicada
+# invalida — regra de calendário, não de "N dias corridos", senão o accrual
+# ficava até 2 dias úteis atrás servindo cache "fresco"). IPCA_12M é mensal
+# com ~2 semanas de atraso: frescor por idade + memo de confirmação.
 # ponytail: dia já cacheado é FINAL — revisão retroativa do BCB é ignorada;
 # se um dia precisar ser recarregado, apague a linha de market_rates à mão.
-SGS_DAILY_FRESH_DAYS = 4
 SGS_MONTHLY_FRESH_DAYS = 45
 # Timeout das chamadas SGS. Era 20 s; com cache-primeiro a rede só entra em
 # cache frio, e 20 s pendurados seguravam o /data do dashboard inteiro.
@@ -170,6 +172,17 @@ def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict] | No
         return None  # mesmo contrato da _fetch_sgs_series_json: None = falha
 
 
+def _sgs_tail_is_fresh(newest: date, end: date) -> bool:
+    """Cauda completa: nenhum dia útil BR publicável em (newest, end].
+    Sexta→domingo é fresco (0 fetch); sexta→segunda já não é."""
+    d = newest + timedelta(days=1)
+    while d <= end:
+        if is_br_business_day(d):
+            return False
+        d += timedelta(days=1)
+    return True
+
+
 def _sgs_cache_covers(cached: dict[date, float], start: date, newest: date) -> bool:
     """True se TODO dia útil BR de [start, newest] está no cache.
 
@@ -206,7 +219,7 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     if cached:
         newest = max(cached)
         if _sgs_cache_covers(cached, start, newest):
-            if (end - newest).days <= SGS_DAILY_FRESH_DAYS or \
+            if _sgs_tail_is_fresh(newest, end) or \
                     _sgs_confirmed_on.get("CDI") == date.today():
                 return cached  # janela coberta e cauda fresca/confirmada hoje
             fetch_start = newest + timedelta(days=1)  # só a cauda falta
@@ -266,7 +279,7 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     if cached:
         newest = max(cached)
         if _sgs_cache_covers(cached, start, newest):
-            if (end - newest).days <= SGS_DAILY_FRESH_DAYS or \
+            if _sgs_tail_is_fresh(newest, end) or \
                     _sgs_confirmed_on.get(code) == date.today():
                 return cached  # janela coberta e cauda fresca/confirmada hoje
             fetch_start = newest + timedelta(days=1)  # só a cauda falta
@@ -357,24 +370,28 @@ def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
 
 
 def get_latest_market_rate(
-    cur, code: str, series_code: int, fresh_days: int = SGS_DAILY_FRESH_DAYS
+    cur, code: str, series_code: int, fresh_days: int | None = None
 ) -> tuple[date, float] | None:
     """Retorna a taxa mais recente de uma série SGS: cache local fresco primeiro,
-    rede em cache frio, e cache stale como fallback quando a rede falha."""
+    rede em cache frio, e cache stale como fallback quando a rede falha.
+
+    fresh_days=None (séries DIÁRIAS): fresco enquanto não existe dia útil BR
+    publicável depois do ref_date. fresh_days=N (mensais, ex. IPCA_12M):
+    fresco por idade. Nos dois casos o memo de confirmação da rede vale por
+    cima (confirmou hoje que não há ponto novo ⇒ fresco até amanhã) — sem
+    ele, série sem ponto novo pagaria um fetch idêntico a cada chamada."""
     cur.execute(
         "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
         (code,),
     )
     row = cur.fetchone()
-    # Fresco por idade do dado OU por confirmação da rede hoje: o ref_date do
-    # ponto mais novo do BCB passa boa parte do mês além do frescor (IPCA_12M:
-    # 40-70 dias; diárias num feriadão) — sem o memo, TODA chamada pagaria um
-    # fetch que devolve o mesmo valor.
-    if row and (
-        (date.today() - row["ref_date"]).days <= fresh_days
-        or _sgs_confirmed_on.get(code) == date.today()
-    ):
-        return (row["ref_date"], float(row["value"]))
+    if row:
+        if fresh_days is None:
+            fresh = _sgs_tail_is_fresh(row["ref_date"], date.today())
+        else:
+            fresh = (date.today() - row["ref_date"]).days <= fresh_days
+        if fresh or _sgs_confirmed_on.get(code) == date.today():
+            return (row["ref_date"], float(row["value"]))
 
     latest = _parse_sgs_latest(
         _fetch_sgs_latest_json(series_code), series=f"{code} ({series_code})"

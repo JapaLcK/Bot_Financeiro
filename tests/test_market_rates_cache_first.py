@@ -95,8 +95,8 @@ def test_mapa_diario_janela_cacheada_zero_http_e_busca_so_o_faltante():
             {"data": start.strftime("%d/%m/%Y"), "valor": "0,09"},
         ]
 
-    end = date(2026, 4, 21)  # gap de 5 dias após o cache (16) ⇒ stale
-    cached_days = [date(2026, 4, 14), date(2026, 4, 15), date(2026, 4, 16)]
+    # Abril/2026: 15-17 = qua-sex; 18-19 = fim de semana; 20 = segunda útil.
+    cached_days = [date(2026, 4, 15), date(2026, 4, 16), date(2026, 4, 17)]
     original = investments_db._fetch_sgs_series_json
     investments_db._fetch_sgs_series_json = stub_series
     try:
@@ -110,30 +110,32 @@ def test_mapa_diario_janela_cacheada_zero_http_e_busca_so_o_faltante():
                         (d, 0.05),
                     )
 
-                # Positivo 1: max(cache)=16 e end=18 ⇒ dentro de 4 dias ⇒ 0 HTTP.
-                out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 14), date(2026, 4, 18))
+                # Positivo 1 (sexta→domingo): cauda sem dia útil ⇒ 0 HTTP.
+                out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 15), date(2026, 4, 19))
                 assert calls == [], f"janela coberta foi à rede: {calls}"
                 assert out == {d: 0.05 for d in cached_days}
 
-                # Positivo 2: end=21 ⇒ stale ⇒ busca SÓ o faltante (17..21),
-                # e os dias cacheados permanecem com o valor cacheado (finais).
-                out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 14), end)
-                assert calls == [(12, date(2026, 4, 17), end)]
-                assert out[date(2026, 4, 14)] == 0.05  # dia cacheado é final
-                assert out[date(2026, 4, 17)] == 0.09  # dia novo veio da rede
+                # Positivo 2 (sexta→segunda): dia útil publicável na cauda ⇒
+                # busca SÓ o faltante (18..20); dia cacheado permanece (final).
+                out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 15), date(2026, 4, 20))
+                assert calls == [(12, date(2026, 4, 18), date(2026, 4, 20))]
+                assert out[date(2026, 4, 15)] == 0.05  # dia cacheado é final
+                assert out[date(2026, 4, 18)] == 0.09  # dia novo veio da rede
 
-                # Negativo: fix desligado (frescor -1) ⇒ mesma janela coberta
-                # do Positivo 1 volta a ir à rede. Memo limpo (o fetch do
-                # Positivo 2 confirmou hoje, e confirmação segura a rede).
+                # Negativo: fix desligado (cauda "sempre fresca") ⇒ a mesma
+                # célula sexta→segunda deixa de ir à rede. Memo limpo (o fetch
+                # do Positivo 2 confirmou hoje, e confirmação segura a rede).
                 calls.clear()
                 investments_db._sgs_confirmed_on.clear()
-                original_fresh = investments_db.SGS_DAILY_FRESH_DAYS
-                investments_db.SGS_DAILY_FRESH_DAYS = -1
+                original_fresh = investments_db._sgs_tail_is_fresh
+                investments_db._sgs_tail_is_fresh = lambda newest, end: True
                 try:
-                    investments_db._get_cdi_daily_map(cur, date(2026, 4, 14), date(2026, 4, 18))
+                    investments_db._get_cdi_daily_map(cur, date(2026, 4, 15), date(2026, 4, 20))
                 finally:
-                    investments_db.SGS_DAILY_FRESH_DAYS = original_fresh
-                assert len(calls) == 1, "sem o fix a janela coberta tinha de ir à rede"
+                    investments_db._sgs_tail_is_fresh = original_fresh
+                assert calls == [], "sanidade do toggle: com 'sempre fresco' não podia buscar"
+                investments_db._get_cdi_daily_map(cur, date(2026, 4, 15), date(2026, 4, 20))
+                assert len(calls) == 1, "com o fix a segunda publicável tinha de ir à rede"
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original
@@ -153,14 +155,15 @@ def test_mapa_sgs_generico_tem_o_mesmo_cache_primeiro():
         with db.get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("delete from market_rates where code='SELIC_DAILY'")
-                for d in (date(2026, 4, 14), date(2026, 4, 15), date(2026, 4, 16)):
+                for d in (date(2026, 4, 15), date(2026, 4, 16), date(2026, 4, 17)):
                     cur.execute(
                         "insert into market_rates(code, ref_date, value) values ('SELIC_DAILY', %s, %s)",
                         (d, 0.04),
                     )
-                out = investments_db._get_selic_daily_map(cur, date(2026, 4, 14), date(2026, 4, 18))
+                # sexta (17) no cache, fim de semana na cauda ⇒ 0 fetch
+                out = investments_db._get_selic_daily_map(cur, date(2026, 4, 15), date(2026, 4, 19))
                 assert calls == []
-                assert out == {d: 0.04 for d in (date(2026, 4, 14), date(2026, 4, 15), date(2026, 4, 16))}
+                assert out == {d: 0.04 for d in (date(2026, 4, 15), date(2026, 4, 16), date(2026, 4, 17))}
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original
@@ -230,6 +233,54 @@ def test_buraco_no_meio_forca_janela_inteira():
                 out = investments_db._get_cdi_daily_map(cur, start, end)
                 assert calls == [(12, start, end)], "buraco no meio tinha que buscar a janela inteira"
                 assert date(2026, 4, 15) in out, "o dia do buraco tem que existir no mapa"
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_series_json = original
+
+
+def test_segunda_publicada_invalida_cache_que_termina_na_sexta():
+    """Codex-1 do PR #218: cache até SEXTA e accrual na TERÇA ⇒ a segunda já
+    publicada tem de ser buscada. A condição antiga ('fresco por ≤4 dias
+    corridos') servia o cache e o accrual parava na sexta — juro DEFERIDO por
+    até 2 dias úteis no valor exibido."""
+    calls: list[tuple] = []
+    original = investments_db._fetch_sgs_series_json
+    investments_db._fetch_sgs_series_json = _stub_series_biz(calls)
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code='CDI' and ref_date >= %s", (date(2026, 4, 1),))
+                d = date(2026, 4, 13)
+                while d <= date(2026, 4, 24):  # contíguo até sexta 24/04
+                    if investments_db.is_br_business_day(d):
+                        cur.execute(
+                            "insert into market_rates(code, ref_date, value) values ('CDI', %s, %s)",
+                            (d, 0.05),
+                        )
+                    d += timedelta(days=1)
+                sexta, terca = date(2026, 4, 24), date(2026, 4, 28)
+
+                # Positivo: terça busca a cauda [25..28] e a SEGUNDA (27) entra.
+                out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 14), terca)
+                assert calls == [(12, date(2026, 4, 25), terca)], (
+                    "segunda publicável na cauda tinha de ir à rede"
+                )
+                assert date(2026, 4, 27) in out and date(2026, 4, 28) in out
+
+                # Negativo: condição ANTIGA reinjetada ((end-newest).days<=4 ⇒
+                # 'fresco') ⇒ a mesma terça serve o cache sem a segunda.
+                calls.clear()
+                investments_db._sgs_confirmed_on.clear()
+                cur.execute("delete from market_rates where code='CDI' and ref_date > %s", (sexta,))
+                original_fresh = investments_db._sgs_tail_is_fresh
+                investments_db._sgs_tail_is_fresh = lambda newest, end: (end - newest).days <= 4
+                try:
+                    out = investments_db._get_cdi_daily_map(cur, date(2026, 4, 14), terca)
+                finally:
+                    investments_db._sgs_tail_is_fresh = original_fresh
+                assert calls == [] and date(2026, 4, 27) not in out, (
+                    "com a condição antiga o bug tinha de reaparecer — o teste não discrimina"
+                )
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original

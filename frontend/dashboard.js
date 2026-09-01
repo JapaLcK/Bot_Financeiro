@@ -250,6 +250,13 @@ let ws, lastData = null;
 // CANCELAR explicitamente — hoje o retry na tela de erro só morria porque
 // setStatus() estourava no DOM apagado; um `?.` inocente ali criaria loop.
 let wsReconnectTimer = null;
+// Reconexão em duas velocidades (Codex-2 do PR #218): socket que JÁ abriu
+// nesta sessão cai e volta em 3 s fixos (queda transitória — retry legítimo);
+// socket que NUNCA abriu (handshake rejeitado: gate de plano no servidor,
+// outage de auth) usa backoff dobrado até 60 s — sem isso, boot sem plano com
+// /auth/me fora do ar martelava /ws a cada 3 s para sempre.
+let wsEverOpened = false;
+let wsRetryDelay = 3000;
 let filterType   = "all";
 let bgtTarget    = null;
 let chartCat     = null, chartDay = null, chartHistory = null;
@@ -7494,6 +7501,8 @@ function connect() {
   setStatus("connecting");
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
+    wsEverOpened = true;
+    wsRetryDelay = 3000;
     setStatus("connected");
     // Server já manda snapshot automático ao conectar (linha 5368 do backend).
     // O get_month aqui era redundante — gerava 2 chamadas a get_financial_data
@@ -7550,7 +7559,11 @@ function connect() {
       _ofSyncDebounce = setTimeout(sendRefreshSilent, 1500);
     }
   };
-  ws.onclose = () => { setStatus("disconnected"); wsReconnectTimer = setTimeout(connect, 3000); };
+  ws.onclose = () => {
+    setStatus("disconnected");
+    if (!wsEverOpened) wsRetryDelay = Math.min(wsRetryDelay * 2, 60000);
+    wsReconnectTimer = setTimeout(connect, wsEverOpened ? 3000 : wsRetryDelay);
+  };
   ws.onerror = () => ws.close();
 }
 
