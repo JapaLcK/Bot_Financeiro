@@ -80,6 +80,40 @@ def test_disconnect_deleta_item_remoto_e_local(user_id, monkeypatch):
     assert _conexoes(user_id) == 0
 
 
+def test_disconnect_com_lock_de_reconexao_ocupado_recusa_com_503(user_id, monkeypatch):
+    """Fecha o interleaving da rodada 5: o disconnect deletava a conexão SEM o
+    lock do item, então entre a releitura do guard da reconexão
+    (`_salva_item_sob_lock`) e o insert cabia um disconnect — e a conexão
+    ressuscitava. Com o lock, o interleaving não existe mais: ou o disconnect
+    espera a reconexão (janela de ms; aqui o teto estoura → 503 e NADA é
+    tocado), ou completa antes e o guard responde 409
+    (tests/test_account_reset.py).
+
+    CONTROLE NEGATIVO: no código sem o lock, este teste fica vermelho
+    (200, conexão deletada e Pluggy tocada por baixo do lock)."""
+    from db.open_finance_state import pluggy_item_lock
+
+    item = f"disc-route-lk-{user_id}"
+    _semeia_conexao_pluggy(user_id, item)
+    monkeypatch.setenv("OF_SYNC_LOCK_WAIT_MS", "100")
+
+    tocada: list[str] = []
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key",
+                        lambda: (tocada.append("auth") or "api-key"))
+    monkeypatch.setattr(of_routes, "delete_pluggy_item",
+                        lambda item_id, api_key=None: tocada.append(item_id))
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    with pluggy_item_lock(item) as segurei:  # a reconexão está com o lock
+        assert segurei, "pré-condição: o teste precisa estar segurando o lock"
+        resp = client.delete(f"/open-finance/{user_id}", headers=headers)
+
+    assert resp.status_code == 503, resp.text
+    assert _conexoes(user_id) == 1, "com o lock ocupado nada local podia ser deletado"
+    assert tocada == [], "com o lock ocupado a Pluggy não podia ter sido tocada"
+
+
 def test_falha_remota_nao_impede_o_disconnect_local(user_id, monkeypatch):
     _semeia_conexao_pluggy(user_id, f"disc-route2-{user_id}")
 

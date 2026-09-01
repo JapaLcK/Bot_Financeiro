@@ -641,6 +641,73 @@ def test_reset_com_mais_items_que_o_teto_de_slots(user_id, monkeypatch):
     assert all(n == 0 for n in _contagens(user_id).values())
 
 
+# ── 7c. reconexão que esperava o lock do reset não ressuscita a conexão ─────
+
+def test_reconexao_esperando_o_lock_do_reset_nao_recria_a_conexao(user_id, monkeypatch):
+    """Codex PR #217 (P2, 4º): /pluggy-item de um item JÁ conectado espera o
+    lock que o reset segura e escreve DEPOIS do commit — recriando a conexão
+    que o reset acabou de apagar (e agendando sync que repopula). A correção:
+    sob o lock, se a conexão própria que existia na validação sumiu, um
+    reset/disconnect interveio → 409, nada gravado, nada agendado."""
+    from contextlib import contextmanager
+
+    from db.open_finance_state import pluggy_item_lock as lock_real
+
+    _semeia(user_id)
+    item = _item_de(user_id)
+
+    monkeypatch.setattr(
+        of_routes, "get_pluggy_item",
+        lambda item_id, api_key=None: {
+            "id": item_id, "status": "UPDATED", "clientUserId": str(user_id),
+            "connector": {"id": 612, "name": "Nubank"},
+        },
+    )
+    agendados: list[str] = []
+    monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda i: agendados.append(i))
+
+    # Interleaving determinístico do cenário: a reconexão "espera" o lock do
+    # reset = o reset completa inteiro antes de o lock ser adquirido.
+    estado = {"resetou": False}
+
+    @contextmanager
+    def lock_apos_o_reset(item_id):
+        if not estado["resetou"]:
+            estado["resetou"] = True
+            reset_user_data(user_id, SENHA)
+        with lock_real(item_id) as got:
+            yield got
+
+    monkeypatch.setattr(of_routes, "pluggy_item_lock", lock_apos_o_reset)
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post(f"/open-finance/{user_id}/pluggy-item",
+                       json={"item": {"id": item}}, headers=headers)
+
+    assert resp.status_code == 409, resp.text
+    assert db.get_connections_by_item_id(item) == [], \
+        "a reconexão atrasada ressuscitou a conexão que o reset apagou"
+    assert agendados == [], "sync agendado repopularia os dados apagados"
+
+
+def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
+    """Instância irmã (conexão de item NOVO na janela do reset): linha inserida
+    ANTES do delete do reset é varrida pelo `where user_id`, e o sync inicial
+    agendado aborta em connection_not_found ANTES de qualquer chamada à Pluggy
+    (core/services/pluggy_sync.py) — nada é recriado."""
+    from core.services.pluggy_sync import sync_pluggy_item
+
+    _semeia(user_id)
+    item = _item_de(user_id)
+    reset_user_data(user_id, SENHA)
+
+    resultado = sync_pluggy_item(item)
+
+    assert resultado == {"ok": False, "reason": "connection_not_found", "item_id": item}
+    assert _contagens(user_id)["open_finance_connections"] == 0
+
+
 # ── 8. webhook pós-reset não ressuscita nada ─────────────────────────────────
 
 def test_webhook_pos_reset_nao_recria_conexao(user_id, monkeypatch):

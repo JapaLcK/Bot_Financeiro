@@ -110,7 +110,9 @@ def _retryable(exc: BaseException) -> bool:
         return False
 
 
-def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict, bool]:
+def _salva_item_sob_lock(
+    user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
+) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -136,10 +138,39 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str) -> tuple[dict
     with pluggy_item_lock(item_id) as locked:
         if not locked:
             return None, False
+        # Revalidação SOB o lock (Codex PR #217, 4º): se a conexão própria que
+        # existia na validação da rota sumiu enquanto esperávamos o lock, quem
+        # a apagou foi um reset de conta ou um disconnect — os dois únicos
+        # fluxos que deletam conexão. Gravar agora ressuscitaria a linha que o
+        # usuário acabou de mandar apagar, e o sync inicial repopularia os
+        # dados. Aborta terminal (sem retry: o estado não volta sozinho).
+        # Item NOVO (sem conexão própria antes) não passa por aqui: conectar
+        # banco DEPOIS de um reset é fluxo legítimo e não pode ser bloqueado.
+        if tinha_conexao_propria:
+            propria_ainda_existe = any(
+                int(c["user_id"]) == int(user_id)
+                for c in get_connections_by_item_id(item_id)
+            )
+            if not propria_ainda_existe:
+                from core.observability import log_system_event_sync
+
+                log_system_event_sync(
+                    "warning", "of_reconnect_aborted_state_gone",
+                    f"Reconexão abortada: conexão do item {item_id} sumiu na espera do lock "
+                    "(reset/disconnect concorrente)",
+                    source="open_finance", user_id=user_id, details={"item_id": item_id},
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
+                           "a conexão era concluída. Conecte o banco de novo.",
+                )
         return save_pluggy_open_finance_item(user_id, remote), True
 
 
-async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:
+async def _grava_reconexao(
+    user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
+) -> dict:
     """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
 
     Não é escolha entre dois males. Gravar sem lock cria lançamento fantasma;
@@ -154,7 +185,7 @@ async def _grava_reconexao(user_id: int, remote: dict, item_id: str) -> dict:
     """
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         connection, sob_lock = await asyncio.to_thread(
-            _salva_item_sob_lock, user_id, remote, item_id)
+            _salva_item_sob_lock, user_id, remote, item_id, tinha_conexao_propria)
         if sob_lock:
             return connection
         if tentativa < _RECONNECT_LOCK_ATTEMPTS:
@@ -609,8 +640,12 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         )
         raise HTTPException(status_code=403, detail="Este item não pertence a esta conta.")
 
-    outros = [c for c in await asyncio.to_thread(get_connections_by_item_id, new_item_id)
-              if int(c["user_id"]) != int(session_uid)]
+    conexoes_do_item = await asyncio.to_thread(get_connections_by_item_id, new_item_id)
+    outros = [c for c in conexoes_do_item if int(c["user_id"]) != int(session_uid)]
+    # Fato pré-lock reutilizado pela revalidação em _salva_item_sob_lock: se a
+    # conexão própria existia AQUI e sumir durante a espera do lock, um
+    # reset/disconnect interveio e a gravação é abortada (409).
+    tinha_conexao_propria = any(int(c["user_id"]) == int(session_uid) for c in conexoes_do_item)
     if outros:
         await log_system_event(
             "error", "of_item_owner_conflict",
@@ -622,7 +657,8 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
 
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
-        connection = await _grava_reconexao(session_uid, remote, new_item_id)
+        connection = await _grava_reconexao(
+            session_uid, remote, new_item_id, tinha_conexao_propria)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -915,14 +951,36 @@ def delete_pluggy_items_best_effort(user_id: int) -> None:
                 )
 
 
+def _disconnect_sob_lock(user_id: int) -> int:
+    """Disconnect segurando os locks dos items, na MESMA ordem do reset
+    (locks → remoto → local; trade-off da rede dentro do lock documentado em
+    db/privacy.reset_user_data — operação rara, disparada pelo usuário).
+
+    Sem o lock, o disconnect deletava a conexão por baixo da reconexão: entre
+    a releitura do guard de `_salva_item_sob_lock` e o insert cabia um delete,
+    e a conexão ressuscitava com sync agendado. Com o lock o interleaving não
+    existe: ou o disconnect espera a janela de ms da reconexão, ou completa
+    antes e o guard responde 409. Lock ocupado até o teto → 503 "tente de
+    novo", mesmo contrato do reset e do `_grava_reconexao`.
+    """
+    from db.open_finance_state import pluggy_items_lock
+
+    with pluggy_items_lock(list_pluggy_item_ids(user_id)) as locked:
+        if not locked:
+            raise HTTPException(
+                status_code=503,
+                detail="Não foi possível desconectar agora: uma sincronização "
+                       "bancária está em andamento. Tente de novo em alguns segundos.",
+            )
+        delete_pluggy_items_best_effort(user_id)
+        return disconnect_open_finance_connection(user_id)
+
+
 @router.delete("/open-finance/{user_id}")
 async def open_finance_disconnect_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
 
-    # Deleta os items na Pluggy ANTES do disconnect local (best-effort).
-    await asyncio.to_thread(delete_pluggy_items_best_effort, user_id)
-
-    deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
+    deleted = await asyncio.to_thread(_disconnect_sob_lock, user_id)
 
     if deleted:
         await asyncio.to_thread(

@@ -458,7 +458,7 @@ def test_reconexao_retenta_o_lock_antes_de_desistir(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
 
-    def _libera_na_segunda(uid, remote, item_id):
+    def _libera_na_segunda(uid, remote, item_id, tinha_conexao_propria=False):
         tentativas.append(item_id)
         if len(tentativas) == 1:
             return None, False
@@ -491,7 +491,7 @@ def test_lock_ocupado_ate_o_fim_recusa_com_503(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock",
-                        lambda uid, remote, item_id: (None, False))
+                        lambda uid, remote, item_id, tinha_conexao_propria=False: (None, False))
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-preso"))
