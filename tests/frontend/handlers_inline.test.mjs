@@ -48,7 +48,7 @@ const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos
 
 // Onde um handler COMEÇA. O valor não sai daqui — sai do `valorDoHandler`, que
 // varre até o delimitador de fechamento tratando `${...}` como opaco.
-const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`]|(?=[A-Za-z_$]))/gi;
+const INICIO_HANDLER = /(?<![-\w$.])on[a-z]+\s*=\s*(\\?["'`]|(?=[A-Za-z_$]))/gi;
 
 /**
  * O valor do handler que começa em `i`, **sem** as interpolações.
@@ -210,8 +210,13 @@ const NOMEADAS = {
   // não-delimitadores comuns, para o guarda do `nomesDe` não descartar trecho legítimo
   amp: "&", lt: "<", gt: ">", nbsp: "\u00a0",
 };
-const REFERENCIA = /&(?:([A-Za-z][A-Za-z0-9]*)|#(\d+)|#[xX]([0-9a-fA-F]+));/g;
-const NOMEADA_DESCONHECIDA = /&([A-Za-z][A-Za-z0-9]*);/g;
+// O `;` é OPCIONAL na numérica — medido no Chromium: `entry(&#39Press (Y)&#39)`
+// chega ao handler como `entry('Press (Y)')`. Na NOMEADA sem `;` a regra do HTML é
+// condicional (`&quotPress` não decodifica, `&quot` no fim decodifica), e regra
+// condicional é exatamente onde minhas listas erram — então ela cai no guarda de
+// desconhecida em vez de eu adivinhar.
+const REFERENCIA = /&(?:([A-Za-z][A-Za-z0-9]*);|#(\d+);?|#[xX]([0-9a-fA-F]+);?)/g;
+const NOMEADA_DESCONHECIDA = /&([A-Za-z][A-Za-z0-9]*);?/g;
 
 const decodificaDelimitador = (s) =>
   s.replace(REFERENCIA, (inteira, nome, dec, hex) => {
@@ -221,7 +226,7 @@ const decodificaDelimitador = (s) =>
 
 /** Sobrou nome que não está no mapa? Então não sei separar string de código aqui. */
 const temReferenciaDesconhecida = (s) =>
-  [...s.matchAll(NOMEADA_DESCONHECIDA)].some((m) => !(m[1] in NOMEADAS));
+  [...s.matchAll(NOMEADA_DESCONHECIDA)].some((m) => !m[0].endsWith(";") || !(m[1] in NOMEADAS));
 
 const semStrings = (s) => decodificaDelimitador(s)
   .replace(/'(?:\\.|[^'\\])*'/g, "''")
