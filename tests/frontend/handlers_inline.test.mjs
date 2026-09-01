@@ -172,8 +172,11 @@ const trechosDe = (texto) => [
 
 /** `<script src="/x.js">` -> os arquivos de `frontend/` que a página carrega. */
 function scriptsDaPagina(html) {
-  return [...html.matchAll(/<script[^>]+src="\/?([^"?]+\.js)/gi)]
-    .map((m) => join(FRONTEND, m[1]))
+  // As DUAS aspas: `src='...'` é HTML equivalente, e reconhecer só a dupla deixaria
+  // uma troca neutra de marcação desligar o teste em silêncio — some a cobertura dos
+  // nomes que só existem no .js, e a página continua verde.
+  return [...html.matchAll(/<script[^>]+src=(["'])\/?([^"'?]+\.js)/gi)]
+    .map((m) => join(FRONTEND, m[2]))
     .filter((f) => existsSync(f));
 }
 
@@ -185,9 +188,46 @@ function scriptsDaPagina(html) {
  * não mostra e que o DOM também não, porque sem dados aquilo não renderiza. Era o
  * maior ponto cego do teste, maior que o próprio HTML da página.
  */
+/**
+ * Remove COMENTÁRIO antes de procurar handler.
+ *
+ * `trechosDe` varre o .js inteiro, e não sabe distinguir markup gerado de prosa: o
+ * `comecar.js:6` já tem `` `onclick=` `` num comentário de bloco, e um exemplo de
+ * documentação como `onclick="privateHelper()"` faria o teste exigir `privateHelper`
+ * no escopo global sem que exista handler nenhum. É falso positivo — a classe que
+ * reprova código correto.
+ *
+ * A armadilha aqui, e a razão de isto ser um scanner: **o markup gerado mora dentro
+ * de template literal**. Tratar a crase como string a ser descartada apagaria os 72
+ * nomes que o `dashboard.js` emite. Então o scanner só usa o estado de string para
+ * decidir se um `/` inicia comentário — nunca para descartar o conteúdo.
+ *
+ * TETO: literal de expressão regular contendo aspa (`/["']/g`) confunde o estado de
+ * string, e comentário dentro de `${...}` de um template não é visto. Os dois são
+ * raros, e o conjunto de nomes das 7 páginas é idêntico com e sem esta função —
+ * medido, não suposto.
+ */
+function semComentarios(txt) {
+  let out = "", i = 0, aspa = null;
+  while (i < txt.length) {
+    const c = txt[i], d = txt[i + 1];
+    if (aspa) {
+      if (c === "\\") { out += c + (d ?? ""); i += 2; continue; }
+      if (c === aspa) aspa = null;
+      out += c; i++; continue;
+    }
+    if (c === "'" || c === '"' || c === "`") { aspa = c; out += c; i++; continue; }
+    if (c === "/" && d === "*") { i = txt.indexOf("*/", i + 2); i = i < 0 ? txt.length : i + 2; continue; }
+    if (c === "/" && d === "/") { const n = txt.indexOf("\n", i); i = n < 0 ? txt.length : n; continue; }
+    if (txt.startsWith("<!--", i)) { const n = txt.indexOf("-->", i); i = n < 0 ? txt.length : n + 3; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
 function nomesChamados(html) {
-  const trechos = [...trechosDe(html)];
-  for (const js of scriptsDaPagina(html)) trechos.push(...trechosDe(readFileSync(js, "utf-8")));
+  const trechos = [...trechosDe(semComentarios(html))];
+  for (const js of scriptsDaPagina(html)) trechos.push(...trechosDe(semComentarios(readFileSync(js, "utf-8"))));
   const { funcoes, variaveis } = nomesDe(trechos);
   return { funcoes: [...funcoes].sort(), variaveis: [...variaveis].sort() };
 }
