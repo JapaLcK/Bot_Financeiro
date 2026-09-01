@@ -187,21 +187,41 @@ const NATIVO = new Set([
  * caractere antes de compilar o handler, então `&#39;` e `'` são a mesma coisa para
  * ele — e reconhecer só algumas formas rendia nome inventado nas outras.
  *
- * ENUMERAR AS FORMAS FALHOU DUAS VEZES. Primeiro listei só `&quot;`; depois listei as
- * seis de `"` e `'` e esqueci a CRASE, apesar de o código tratar três delimitadores.
- * Então aqui não há lista: decodifica-se QUALQUER referência numérica e, se o
- * resultado for um dos três delimitadores, ela vira o caractere. O resto fica intacto.
- * É a regra, não a enumeração — e não tem como esquecer um membro dela.
+ * ENUMERAR AS FORMAS FALHOU TRÊS VEZES: `&quot;` sozinho; depois as seis de `"` e `'`
+ * sem a CRASE; depois sem os aliases `&QUOT;` e `&grave;`. A lição não é "a lista está
+ * certa agora" — é que uma lista minha não é confiável aqui. Então há DUAS defesas:
+ *
+ * 1. NUMÉRICA é regra, não lista: qualquer `&#N;`/`&#xN;` decodifica de verdade.
+ * 2. NOMEADA é lista MEDIDA NO NAVEGADOR (não de memória) — ver o teste
+ *    "o mapa de referências nomeadas casa com o navegador", que falha se um alias
+ *    novo aparecer ou se um destes deixar de valer.
+ *
+ * E se mesmo assim sobrar uma referência nomeada que eu não conheça, o `nomesDe`
+ * DESCARTA o trecho inteiro em vez de adivinhar (ver lá). O modo de falha vira perder
+ * cobertura, nunca inventar nome — é o lado seguro de errar.
  */
 const DELIMITADORES = new Set(['"', "'", "`"]);
-const NOMEADAS = { quot: '"', apos: "'", DiacriticalGrave: "`" };
+
+/** Medido no Chromium: `&APOS;` e `&GRAVE;` NÃO existem; estes cinco decodificam. */
+const NOMEADAS = {
+  quot: '"', QUOT: '"',
+  apos: "'",
+  grave: "`", DiacriticalGrave: "`",
+  // não-delimitadores comuns, para o guarda do `nomesDe` não descartar trecho legítimo
+  amp: "&", lt: "<", gt: ">", nbsp: "\u00a0",
+};
 const REFERENCIA = /&(?:([A-Za-z][A-Za-z0-9]*)|#(\d+)|#[xX]([0-9a-fA-F]+));/g;
+const NOMEADA_DESCONHECIDA = /&([A-Za-z][A-Za-z0-9]*);/g;
 
 const decodificaDelimitador = (s) =>
   s.replace(REFERENCIA, (inteira, nome, dec, hex) => {
     const c = nome ? NOMEADAS[nome] : String.fromCharCode(parseInt(dec ?? hex, dec ? 10 : 16));
     return c && DELIMITADORES.has(c) ? c : inteira;
   });
+
+/** Sobrou nome que não está no mapa? Então não sei separar string de código aqui. */
+const temReferenciaDesconhecida = (s) =>
+  [...s.matchAll(NOMEADA_DESCONHECIDA)].some((m) => !(m[1] in NOMEADAS));
 
 const semStrings = (s) => decodificaDelimitador(s)
   .replace(/'(?:\\.|[^'\\])*'/g, "''")
@@ -214,6 +234,10 @@ function nomesDe(trechos) {
   const variaveis = new Set();
   for (const t of trechos) {
     const limpo = semStrings(t);
+    // Referência nomeada que o mapa não conhece pode ser um delimitador não
+    // decodificado, e aí o que parece chamada é texto. Descartar o trecho perde
+    // cobertura; adivinhar reprova handler correto. Escolho perder.
+    if (temReferenciaDesconhecida(limpo)) continue;
     for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
     for (const c of limpo.matchAll(CHAMADA_WINDOW)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
     for (const tok of argumentosDe(limpo)) {
@@ -329,6 +353,53 @@ const PAGINAS = readdirSync(FRONTEND)
 test("há páginas com handler inline para verificar", () => {
   // Se o extrator quebrar, os testes abaixo passariam medindo lista vazia.
   assert.ok(PAGINAS.length >= 5, `esperava várias páginas com handler inline, achei ${PAGINAS.length}`);
+});
+
+/**
+ * O `NOMEADAS` duplica um pedaço da tabela de referências do HTML, e o §0.7 do
+ * CLAUDE.md diz que duplicação inevitável precisa de um teste comparando as duas.
+ *
+ * Este é ele — e ele existe porque a lista escrita de memória já saiu errada TRÊS
+ * vezes neste mesmo arquivo. Se um alias novo passar a decodificar para delimitador,
+ * ou se um destes deixar de valer, aqui fica vermelho em vez de virar falso positivo
+ * no gate.
+ */
+test("o mapa de referências nomeadas casa com o navegador", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent("<div></div>");
+    const real = await page.evaluate((nomes) => {
+      const out = {};
+      for (const n of nomes) {
+        const d = document.createElement("div");
+        d.innerHTML = `&${n};`;
+        out[n] = d.textContent;
+      }
+      return out;
+    }, Object.keys(NOMEADAS));
+
+    for (const [nome, esperado] of Object.entries(NOMEADAS)) {
+      assert.equal(real[nome], esperado, `&${nome}; decodifica para ${JSON.stringify(real[nome])}, não ${JSON.stringify(esperado)}`);
+    }
+
+    // E o outro lado: nomes que eu NÃO tenho não podem ser delimitador.
+    const foraDoMapa = ["APOS", "GRAVE", "Quot", "acute", "prime", "lsquo", "rsquo", "ldquo", "rdquo", "sol", "num", "commat"];
+    const deFora = await page.evaluate((nomes) => {
+      const out = {};
+      for (const n of nomes) {
+        const d = document.createElement("div");
+        d.innerHTML = `&${n};`;
+        out[n] = d.textContent;
+      }
+      return out;
+    }, foraDoMapa);
+    for (const [nome, valor] of Object.entries(deFora)) {
+      assert.ok(!DELIMITADORES.has(valor),
+        `&${nome}; decodifica para o delimitador ${JSON.stringify(valor)} e não está no NOMEADAS`);
+    }
+  } finally {
+    await page.close();
+  }
 });
 
 for (const [pagina, { funcoes, variaveis }] of PAGINAS) {
