@@ -109,6 +109,7 @@ from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
+from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
@@ -1856,6 +1857,9 @@ CSRF_EXEMPT_PATHS = {
     # One-click unsubscribe (RFC 8058): POST server-to-server do Gmail/Yahoo,
     # sem cookie de sessão — autenticado pelo token HMAC da própria URL.
     "/unsubscribe",
+    # Consulta do lead engine: server-to-server, sem cookie de sessão —
+    # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
+    "/api/prospect/status",
 }
 
 _SECURITY_HEADERS = {
@@ -2479,6 +2483,29 @@ async def _apply_referral_attribution(request: Request, response: Response, user
         response.delete_cookie("ref_code")
 
 
+async def _apply_prospect_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio de um link de prospecção (cookie prospect_code do
+    /i/{code}), grava a atribuição e consome o cookie. Nunca pode quebrar o signup."""
+    code = (request.cookies.get("prospect_code") or "").strip()
+    if not code:
+        return
+    try:
+        from db.prospects import record_prospect_referral
+        attributed = await asyncio.to_thread(record_prospect_referral, code, int(user_id))
+        if attributed:
+            await log_system_event(
+                "info",
+                "prospect_referral_recorded",
+                f"Cadastro atribuido ao funil de prospeccao (code={code}).",
+                source="prospects",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {exc}")
+    finally:
+        response.delete_cookie("prospect_code")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -2567,6 +2594,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     await _apply_referral_attribution(request, response, int(user_id))
+    await _apply_prospect_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
@@ -3696,6 +3724,7 @@ async def auth_google_complete_signup(
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await _apply_referral_attribution(request, response, user_id)
+    await _apply_prospect_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
@@ -5563,6 +5592,10 @@ app.include_router(analytics_router)
 
 # ─── Programa de afiliados → frontend/routes/affiliates.py ───────────────────
 app.include_router(affiliates_router)
+
+
+# ─── Funil de prospecção → frontend/routes/prospects.py ──────────────────────
+app.include_router(prospects_router)
 
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
