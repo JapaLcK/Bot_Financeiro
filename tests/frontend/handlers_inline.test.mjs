@@ -133,8 +133,20 @@ const NATIVO = new Set([
  * Sem isto, `'Use exatamente 4 números (ou deixe vazio).'` rendia o
  * "identificador" `meros`: o `\w` do JavaScript é ASCII, então o `ú` corta o
  * nome e o `(` logo depois completa o engano.
+ *
+ * As TRÊS aspas, não só a simples: um handler delimitado por `'` pode conter `"`
+ * à vontade, e `onclick='alert("Press (Y)")'` rendia a função `Press` e a variável
+ * `Y`. Esse é o modo de falha que importa — nome INVENTADO reprova handler correto,
+ * enquanto nome perdido só reduz cobertura. O `dashboard.js` já usa handler de aspa
+ * simples com `"` dentro (linhas 1464 e 1863).
+ *
+ * `\\.` cobre o delimitador escapado dentro da própria string.
  */
-const semStrings = (s) => s.replace(/'[^']*'/g, "''").replace(/&quot;[^&]*&quot;/g, "");
+const semStrings = (s) => s
+  .replace(/&quot;[^&]*&quot;/g, "")
+  .replace(/'(?:\\.|[^'\\])*'/g, "''")
+  .replace(/"(?:\\.|[^"\\])*"/g, '""')
+  .replace(/`(?:\\.|[^`\\])*`/g, "``");
 
 
 function nomesDe(trechos) {
