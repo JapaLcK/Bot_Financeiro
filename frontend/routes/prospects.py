@@ -55,12 +55,20 @@ class ProspectStatusBody(BaseModel):
 @shared.limiter.limit("60/minute")
 async def prospect_status(request: Request, body: ProspectStatusBody):
     """Consulta do lead engine: quais códigos viraram cadastro e se a conta
-    está ativa (pagante ou trial). Resposta sem PII por contrato."""
+    está ativa (pagante ou trial). Resposta sem PII por contrato.
+
+    Code repetido → 1 entrada, do PRIMEIRO cadastro (list_prospect_status).
+    Máximo 500 codes por chamada; excedente é ignorado — o consumidor pagina.
+    """
     expected = (os.getenv("PROSPECT_API_KEY") or "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="Serviço não configurado.")
     provided = request.headers.get("X-Prospect-Key") or ""
-    if not secrets.compare_digest(provided, expected):
+    # compare em bytes: compare_digest com str levanta TypeError se o header
+    # vier não-ASCII (viraria 500 sem autenticação; tem de ser 401).
+    if not secrets.compare_digest(
+        provided.encode("utf-8", "replace"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Chave inválida.")
 
     codes = (body.codes or [])[:_STATUS_CODES_CAP]

@@ -74,7 +74,8 @@ def test_record_idempotente_e_primeiro_ganha(user_id):
 
 
 def test_record_rejeita_codigo_malformado(user_id):
-    for bad in ("", "abc", "a" * 21, "tem espaco", "inje'cao--", "até-com-acento"):
+    for bad in ("", "abc", "a" * 21, "tem espaco", "inje'cao--", "até-com-acento",
+                "abc12345\n"):  # `$` do re aceitaria o \n final; fullmatch não
         assert record_prospect_referral(bad, user_id) is False
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -117,6 +118,41 @@ def test_list_prospect_status_active_por_status_da_conta(user_id):
         _cleanup_codes(*codes.values())
 
 
+def test_list_prospect_status_code_repetido_vale_o_primeiro(user_id):
+    """2 cadastros com o mesmo code → 1 entrada, com o registered_at do PRIMEIRO."""
+    code = _code("dup")
+    uid2 = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(uid2)
+    try:
+        assert record_prospect_referral(code, user_id) is True
+        assert record_prospect_referral(code, uid2) is True  # outro user, mesmo code
+        # separa os created_at pra ordem ser observável
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    update prospect_referrals
+                       set created_at = created_at - interval '1 hour'
+                     where code = %s and referred_user_id = %s
+                    """,
+                    (code, user_id),
+                )
+            conn.commit()
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select created_at from prospect_referrals where code = %s and referred_user_id = %s",
+                    (code, user_id),
+                )
+                first_at = cur.fetchone()["created_at"]
+
+        rows = list_prospect_status([code])
+        assert len(rows) == 1
+        assert rows[0]["registered_at"] == first_at.isoformat()
+    finally:
+        _cleanup_codes(code)
+
+
 # ─── GET /i/{code} ────────────────────────────────────────────────────────────
 
 def test_link_valido_seta_cookie():
@@ -135,7 +171,7 @@ def test_link_valido_seta_cookie():
 
 def test_link_invalido_nao_seta_cookie():
     client = TestClient(dashboard.app)
-    for bad in ("injecao'--%22", "abc", "a" * 21):
+    for bad in ("injecao'--%22", "abc", "a" * 21, "abc12345%0A"):
         resp = client.get(f"/i/{bad}", follow_redirects=False)
         assert resp.status_code == 302
         assert not any(
@@ -163,6 +199,19 @@ def test_status_chave_errada_401(monkeypatch):
     assert resp.status_code == 401
     # sem header nenhum também é 401
     resp = client.post("/api/prospect/status", json={"codes": ["abc12345"]})
+    assert resp.status_code == 401
+
+
+def test_status_chave_nao_ascii_401_nao_500(monkeypatch):
+    """compare_digest com str não-ASCII levanta TypeError → seria 500 sem
+    autenticação; o compare em bytes devolve o 401 normal."""
+    monkeypatch.setenv("PROSPECT_API_KEY", "chave-certa")
+    client = TestClient(dashboard.app)
+    resp = client.post(
+        "/api/prospect/status",
+        json={"codes": ["abc12345"]},
+        headers={"X-Prospect-Key": "café".encode("latin-1")},
+    )
     assert resp.status_code == 401
 
 

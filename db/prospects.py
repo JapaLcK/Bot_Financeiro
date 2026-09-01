@@ -20,7 +20,9 @@ _CODE_RE = re.compile(r"^[A-Za-z0-9]{4,20}$")
 
 
 def is_valid_prospect_code(code: str) -> bool:
-    return bool(_CODE_RE.match(code or ""))
+    # fullmatch, não match: com `$` o re aceita "\n" final ("abc12345\n"
+    # passaria e o cookie sairia com %0A).
+    return bool(_CODE_RE.fullmatch(code or ""))
 
 
 def record_prospect_referral(code: str, referred_user_id: int) -> bool:
@@ -29,7 +31,8 @@ def record_prospect_referral(code: str, referred_user_id: int) -> bool:
     Silenciosamente não faz nada (return False) se o código é malformado ou o
     usuário já tem atribuição (primeiro ganha) — nunca pode quebrar o cadastro.
     """
-    code = (code or "").strip()
+    # Sem strip aqui: o caller (_apply_prospect_attribution) já normaliza, e
+    # "abc12345\n" tem de ser rejeitado, não consertado em silêncio.
     if not is_valid_prospect_code(code):
         return False
     with get_conn() as conn:
@@ -52,6 +55,9 @@ def list_prospect_status(codes: list[str]) -> list[dict]:
     active = conta pagante OU em trial (account_status derivado ∈ paying/trial —
     decisão do dono, 2026-08-31). Só devolve códigos encontrados. SEM e-mail,
     SEM user_id, SEM PII: a resposta vai para um serviço externo.
+
+    Code repetido (lead compartilhou o link): 1 linha por code, e vale o
+    PRIMEIRO cadastro (distinct on + created_at asc).
     """
     codes = [c for c in (codes or []) if is_valid_prospect_code(c)]
     if not codes:
@@ -63,13 +69,14 @@ def list_prospect_status(codes: list[str]) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select p.code,
+                select distinct on (p.code)
+                       p.code,
                        p.created_at as registered_at,
                        coalesce({_ACCOUNT_STATUS_SQL} in ('paying', 'trial'), false) as active
                   from prospect_referrals p
                   left join auth_accounts a on a.user_id = p.referred_user_id
                  where p.code = any(%s)
-                 order by p.created_at desc
+                 order by p.code, p.created_at asc
                 """,
                 (codes,),
             )
