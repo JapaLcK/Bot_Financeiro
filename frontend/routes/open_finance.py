@@ -877,36 +877,50 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
+def delete_pluggy_items_best_effort(user_id: int) -> None:
+    """Deleta os items do usuário na Pluggy (best-effort). Sem isso, remover
+    a conexão apagava só o nosso registro e o item ficava órfão na Pluggy,
+    bloqueando a reconexão ("já possui conexão com este acesso"). Falha por
+    item: loga system_event e segue — não impede a limpeza local.
+
+    SÍNCRONO de propósito: o reset de conta (POST /settings/reset) o roda como
+    hook de `reset_user_data`, DENTRO dos locks de item e numa thread — rota
+    async chama via asyncio.to_thread. Extraído do disconnect
+    (DELETE /open-finance/{user_id}) sem mudança de comportamento.
+    """
+    from core.observability import log_system_event_sync
+
+    pluggy_item_ids = list_pluggy_item_ids(user_id)
+    if not pluggy_item_ids:
+        return
+    api_key = None
+    try:
+        api_key = create_pluggy_api_key()
+    except Exception as exc:  # noqa: BLE001 — best-effort; segue pra limpeza local
+        log_system_event_sync(
+            "warning", "pluggy_disconnect_auth_failed",
+            f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
+            source="open_finance", details={"user_id": user_id, "error": str(exc)[:200]},
+        )
+    if api_key:
+        for item_id in pluggy_item_ids:
+            try:
+                delete_pluggy_item(item_id, api_key)
+            except Exception as exc:  # noqa: BLE001 — best-effort por item
+                log_system_event_sync(
+                    "warning", "pluggy_item_delete_failed",
+                    f"Falha ao deletar item {item_id} na Pluggy no disconnect: {exc}",
+                    source="open_finance",
+                    details={"item_id": item_id, "error": str(exc)[:200]},
+                )
+
+
 @router.delete("/open-finance/{user_id}")
 async def open_finance_disconnect_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
 
-    # Deleta os items na Pluggy ANTES do disconnect local (best-effort). Sem isso, remover
-    # a conexão apagava só o nosso registro e o item ficava órfão na Pluggy, bloqueando a
-    # reconexão ("já possui conexão com este acesso"). Falha por item não impede o
-    # disconnect local (não pioramos o comportamento antigo).
-    pluggy_item_ids = await asyncio.to_thread(list_pluggy_item_ids, user_id)
-    if pluggy_item_ids:
-        api_key = None
-        try:
-            api_key = await asyncio.to_thread(create_pluggy_api_key)
-        except Exception as exc:  # noqa: BLE001 — best-effort; segue pro disconnect local
-            await log_system_event(
-                "warning", "pluggy_disconnect_auth_failed",
-                f"Sem apiKey pra deletar items no disconnect do user {user_id}: {exc}",
-                source="open_finance", details={"user_id": user_id, "error": str(exc)[:200]},
-            )
-        if api_key:
-            for item_id in pluggy_item_ids:
-                try:
-                    await asyncio.to_thread(delete_pluggy_item, item_id, api_key)
-                except Exception as exc:  # noqa: BLE001 — best-effort por item
-                    await log_system_event(
-                        "warning", "pluggy_item_delete_failed",
-                        f"Falha ao deletar item {item_id} na Pluggy no disconnect: {exc}",
-                        source="open_finance",
-                        details={"item_id": item_id, "error": str(exc)[:200]},
-                    )
+    # Deleta os items na Pluggy ANTES do disconnect local (best-effort).
+    await asyncio.to_thread(delete_pluggy_items_best_effort, user_id)
 
     deleted = await asyncio.to_thread(disconnect_open_finance_connection, user_id)
 

@@ -1600,6 +1600,32 @@ body.balance-hidden .account-balance {
         <div class="card">
           <div class="card-head">
             <div>
+              <div class="card-title">Recomeçar do zero</div>
+              <div class="card-sub">Apaga lançamentos, cartões, contas, conexões bancárias, metas e configurações — sua conta, assinatura e login continuam</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="danger-panel">
+              <div class="danger-title">Ação imediata e irreversível</div>
+              <div class="danger-copy">
+                Esta ação é imediata e não pode ser desfeita: os dados apagados não voltam. Se quiser uma cópia, use a exportação acima antes de continuar.
+              </div>
+              <div style="height:12px"></div>
+              <button class="btn-danger" type="button" id="reset-start-btn" onclick="showResetConfirm()" style="max-width:220px">
+                Recomeçar do zero
+              </button>
+              <div class="delete-confirm" id="reset-confirm">
+                <input class="privacy-input" id="reset-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
+                <button class="btn-danger" type="button" id="reset-confirm-btn" onclick="requestAccountReset()">Apagar e recomeçar</button>
+                <button class="btn-sm" type="button" onclick="hideResetConfirm()">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
               <div class="card-title">Excluir conta</div>
               <div class="card-sub">Agende a remoção definitiva da conta e dos dados financeiros</div>
             </div>
@@ -2431,6 +2457,56 @@ async function requestDataExport() {
   } catch (err) {
     showToast(err.message || "Erro ao solicitar exportação", "error");
   } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function showResetConfirm() {
+  document.getElementById("reset-confirm").classList.add("show");
+  document.getElementById("reset-password").focus();
+}
+
+function hideResetConfirm() {
+  document.getElementById("reset-confirm").classList.remove("show");
+  document.getElementById("reset-password").value = "";
+}
+
+async function requestAccountReset() {
+  const password = document.getElementById("reset-password").value;
+  if (!password) {
+    showToast("Confirme sua senha", "error");
+    return;
+  }
+  const ok = await confirmModal(
+    "Todos os seus dados financeiros serão apagados agora, definitivamente. Login, assinatura e segurança são mantidos.",
+    {
+      title: "Recomeçar do zero?",
+      confirmText: "Apagar tudo e recomeçar",
+      destructive: true,
+    },
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("reset-confirm-btn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Apagando...";
+  try {
+    const resp = await fetch(`${API}/settings/reset`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({ password }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    // Snapshots pré-reset em sessionStorage sobrevivem à navegação e o
+    // dashboard os pintaria por ~1s (restoreSnapshotFromSession) — dado
+    // apagado não pode voltar nem por um flash. Mesmo loop do logoutDashboard.
+    try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+    window.location.href = "/onboarding";
+  } catch (err) {
+    showToast(err.message || "Erro ao recomeçar do zero", "error");
     btn.disabled = false;
     btn.textContent = original;
   }

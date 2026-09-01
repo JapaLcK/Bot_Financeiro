@@ -45,6 +45,10 @@ class SecurityContactPayload(BaseModel):
     display_name: str | None = None
 
 
+class AccountResetPayload(BaseModel):
+    password: str
+
+
 class NotificationSettingsPayload(BaseModel):
     engagement_email_enabled: bool | None = None
     tip_email_enabled: bool | None = None
@@ -124,6 +128,59 @@ def _current_session_jti(request: Request) -> str | None:
     if not payload or payload.get("type") != "auth":
         return None
     return payload.get("jti")
+
+
+@router.post("/settings/reset")
+@shared.limiter.limit("5/minute")
+async def account_reset_route(request: Request, payload: AccountResetPayload):
+    """Recomeçar do zero: apaga dados financeiros e de uso, preserva a conta.
+
+    O user_id vem EXCLUSIVAMENTE da sessão (sem {user_id} no path, padrão de
+    frontend/routes/onboarding.py) e NÃO usa authorize_dashboard_access: o
+    subscription gate devolveria 402 e travaria a conta free de resetar.
+    """
+    user_id = shared.resolve_dashboard_user_id(request)
+    shared.raise_if_account_scheduled_for_deletion(user_id)
+
+    # Imports na função (padrão do arquivo p/ dependências fora do caminho quente).
+    from core.observability import log_system_event_sync
+    from db.privacy import ResetLockUnavailableError, reset_user_data
+    from frontend.routes.open_finance import delete_pluggy_items_best_effort
+
+    def _limpeza_remota() -> None:
+        # Hook rodado por reset_user_data DEPOIS da senha e dos locks e ANTES
+        # dos deletes locais (invariante: lock ocupado → Pluggy não tocada;
+        # ver comentário em db/privacy.py). Best-effort: falha remota loga e
+        # segue — mesmo contrato do disconnect. O helper já trata falha por
+        # item; este try cobre falha do helper inteiro.
+        try:
+            delete_pluggy_items_best_effort(user_id)
+        except Exception as exc:  # noqa: BLE001
+            log_system_event_sync(
+                "warning", "account_reset_pluggy_cleanup_failed",
+                f"Reset do user {user_id}: limpeza remota na Pluggy falhou: {exc}",
+                source="settings", user_id=user_id, details={"error": str(exc)[:200]},
+            )
+
+    try:
+        result = await asyncio.to_thread(
+            reset_user_data, user_id, payload.password, remote_cleanup=_limpeza_remota,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ResetLockUnavailableError as exc:
+        # Mesmo desfecho do lock ocupado na reconexão (_grava_reconexao): 503
+        # e o usuário tenta de novo — o reset é recuperável, escrita suja não.
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível recomeçar agora: uma sincronização bancária "
+                   "está em andamento. Tente de novo em alguns segundos.",
+        ) from exc
+
+    await asyncio.to_thread(
+        record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,
+    )
+    return json.loads(shared.jdump({"ok": True, **result}))
 
 
 @router.get("/settings/{user_id}/security")
