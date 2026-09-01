@@ -107,7 +107,7 @@ function valorDoHandler(texto, i, semAspas = false) {
 // no admin-dashboard.html e `el.onclick = "..."`. São 10 nomes hoje, todos em
 // código que gera markup a partir de dados. Isto NÃO é parsear JS — é casar uma
 // forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
-const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
+const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*(["'`])((?:\\.|(?!\1)[\s\S])*)\1/gi;
 const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
 
 /**
@@ -128,7 +128,34 @@ const CHAMADA_WINDOW = /\bwindow\.([A-Za-z_$][\w$]*)\s*\(/g;
  * caminho que as funções. Uma instância hoje, no `precos.html`. Só precisa EXISTIR,
  * não ser função, então a verificação é `typeof !== "undefined"`.
  */
-const ARGUMENTO = /\(([^()]*)\)/g;
+/**
+ * Percorre TODA lista de argumento, em todo nível de aninhamento, e devolve os
+ * trechos separados por vírgula do nível de cada uma.
+ *
+ * Era um regex `/\(([^()]*)\)/g`, que só casa a lista mais interna: em
+ * `outer(currentCycle, inner())` ele achava o `()` do `inner` e perdia o
+ * `currentCycle` — justamente o argumento nu que o teste existe para cobrar.
+ * Aninhamento não se resolve com expressão regular; resolve-se com uma pilha.
+ */
+function argumentosDe(t) {
+  const fora = [];
+  const pilha = [];
+  let seg = "";
+  for (const c of t) {
+    if (c === "(") { pilha.push([]); seg = ""; continue; }
+    if (c === ")") {
+      if (!pilha.length) { seg = ""; continue; }
+      const lista = pilha.pop();
+      lista.push(seg);
+      fora.push(...lista);
+      seg = "";
+      continue;
+    }
+    if (c === "," && pilha.length) { pilha[pilha.length - 1].push(seg); seg = ""; continue; }
+    seg += c;
+  }
+  return fora;
+}
 const SO_NOME = /^[A-Za-z_$][\w$]*$/;
 const NAO_E_NOME = new Set(["this", "event", "true", "false", "null", "undefined"]);
 
@@ -156,18 +183,27 @@ const NATIVO = new Set([
  *
  * `\\.` cobre o delimitador escapado dentro da própria string.
  *
- * ENTIDADE VIRA ASPA ANTES DE TUDO. O navegador decodifica `&quot;`, `&#34;`,
- * `&#x22;`, `&apos;`, `&#39;` e `&#x27;` para aspa comum antes de executar o handler,
- * e reconhecer só uma dessas formas rendia nome inventado nas outras — `&#39;` sozinho
- * aparece 9× neste frontend. Decodificar primeiro fecha a categoria inteira, em vez de
- * um padrão por entidade: depois disso existe só o caso das três aspas literais.
+ * ENTIDADE VIRA DELIMITADOR ANTES DE TUDO. O navegador decodifica a referência de
+ * caractere antes de compilar o handler, então `&#39;` e `'` são a mesma coisa para
+ * ele — e reconhecer só algumas formas rendia nome inventado nas outras.
+ *
+ * ENUMERAR AS FORMAS FALHOU DUAS VEZES. Primeiro listei só `&quot;`; depois listei as
+ * seis de `"` e `'` e esqueci a CRASE, apesar de o código tratar três delimitadores.
+ * Então aqui não há lista: decodifica-se QUALQUER referência numérica e, se o
+ * resultado for um dos três delimitadores, ela vira o caractere. O resto fica intacto.
+ * É a regra, não a enumeração — e não tem como esquecer um membro dela.
  */
-const ENTIDADE_ASPA = /&(?:quot|#0*34|#[xX]0*22);/g;
-const ENTIDADE_APOS = /&(?:apos|#0*39|#[xX]0*27);/g;
+const DELIMITADORES = new Set(['"', "'", "`"]);
+const NOMEADAS = { quot: '"', apos: "'", DiacriticalGrave: "`" };
+const REFERENCIA = /&(?:([A-Za-z][A-Za-z0-9]*)|#(\d+)|#[xX]([0-9a-fA-F]+));/g;
 
-const semStrings = (s) => s
-  .replace(ENTIDADE_ASPA, '"')
-  .replace(ENTIDADE_APOS, "'")
+const decodificaDelimitador = (s) =>
+  s.replace(REFERENCIA, (inteira, nome, dec, hex) => {
+    const c = nome ? NOMEADAS[nome] : String.fromCharCode(parseInt(dec ?? hex, dec ? 10 : 16));
+    return c && DELIMITADORES.has(c) ? c : inteira;
+  });
+
+const semStrings = (s) => decodificaDelimitador(s)
   .replace(/'(?:\\.|[^'\\])*'/g, "''")
   .replace(/"(?:\\.|[^"\\])*"/g, '""')
   .replace(/`(?:\\.|[^`\\])*`/g, "``");
@@ -180,11 +216,9 @@ function nomesDe(trechos) {
     const limpo = semStrings(t);
     for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
     for (const c of limpo.matchAll(CHAMADA_WINDOW)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
-    for (const a of limpo.matchAll(ARGUMENTO)) {
-      for (const tok of a[1].split(",")) {
-        const n = tok.trim();
-        if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n)) variaveis.add(n);
-      }
+    for (const tok of argumentosDe(limpo)) {
+      const n = tok.trim();
+      if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n)) variaveis.add(n);
     }
   }
   return { funcoes, variaveis };
@@ -193,7 +227,7 @@ function nomesDe(trechos) {
 const trechosDe = (texto) => [
   ...[...texto.matchAll(INICIO_HANDLER)].map((m) =>
     valorDoHandler(texto, m.index + m[0].length - m[1].length, m[1] === "")),
-  ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
+  ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[2]),
 ];
 
 /** `<script src="/x.js">` -> os arquivos de `frontend/` que a página carrega. */
@@ -205,7 +239,7 @@ function scriptsDaPagina(html) {
   // aspas —, as mesmas que o INICIO_HANDLER reconhece. Faltar qualquer uma deixa uma
   // edição de formatação neutra desligar a cobertura em silêncio, e foi assim que a
   // aspa simples e o espaço em volta do `=` chegaram aqui, um apontamento por vez.
-  return [...html.matchAll(/<script[^>]+src\s*=\s*(?:"\/?([^"?]+\.js)|'\/?([^'?]+\.js)|\/?([^\s"'>?]+\.js))/gi)]
+  return [...html.matchAll(/<script[^>]*\ssrc\s*=\s*(?:"\/?([^"?]+\.js)|'\/?([^'?]+\.js)|\/?([^\s"'>?]+\.js))/gi)]
     .map((m) => join(FRONTEND, m[1] ?? m[2] ?? m[3]))
     .filter((f) => existsSync(f));
 }
