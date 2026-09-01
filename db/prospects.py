@@ -76,7 +76,7 @@ def list_prospect_status(codes: list[str]) -> list[dict]:
                   from prospect_referrals p
                   left join auth_accounts a on a.user_id = p.referred_user_id
                  where p.code = any(%s)
-                 order by p.code, p.created_at asc
+                 order by p.code, p.created_at asc, p.id asc
                 """,
                 (codes,),
             )

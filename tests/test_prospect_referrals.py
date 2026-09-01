@@ -153,6 +153,50 @@ def test_list_prospect_status_code_repetido_vale_o_primeiro(user_id):
         _cleanup_codes(code)
 
 
+def test_list_prospect_status_empate_de_created_at_desempata_por_id(user_id):
+    """created_at idêntico nas duas linhas do mesmo code → vale o menor id
+    (pino de contrato: sem o `p.id` no ORDER BY o Postgres fica livre pra
+    escolher qualquer linha e o active pode oscilar entre chamadas)."""
+    code = _code("tie")
+    uid2 = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(uid2)
+    tag = uuid.uuid4().hex[:8]
+    # active divergente entre as linhas: se a escolha oscilar, o teste vê.
+    _mk_account(user_id, f"prospect-{tag}-tie1@test.local", plan="pro", pay="active")
+    _mk_account(uid2, f"prospect-{tag}-tie2@test.local")  # free
+    try:
+        assert record_prospect_referral(code, user_id) is True
+        assert record_prospect_referral(code, uid2) is True
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # empata os created_at no mesmo instante exato
+                cur.execute(
+                    """
+                    update prospect_referrals
+                       set created_at = (select min(created_at)
+                                           from prospect_referrals where code = %s)
+                     where code = %s
+                    """,
+                    (code, code),
+                )
+            conn.commit()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select referred_user_id from prospect_referrals where code = %s order by id asc limit 1",
+                    (code,),
+                )
+                min_id_user = cur.fetchone()["referred_user_id"]
+
+        assert int(min_id_user) == int(user_id)  # bigserial: 1º insert = menor id
+        first = list_prospect_status([code])
+        second = list_prospect_status([code])
+        assert len(first) == 1
+        assert first[0]["active"] is True   # a linha de menor id é a paying
+        assert first == second              # estável entre chamadas
+    finally:
+        _cleanup_codes(code)
+
+
 # ─── GET /i/{code} ────────────────────────────────────────────────────────────
 
 def test_link_valido_seta_cookie():
