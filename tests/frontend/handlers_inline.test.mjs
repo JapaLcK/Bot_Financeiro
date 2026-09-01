@@ -48,7 +48,7 @@ const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos
 
 // Onde um handler COMEÇA. O valor não sai daqui — sai do `valorDoHandler`, que
 // varre até o delimitador de fechamento tratando `${...}` como opaco.
-const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`])/gi;
+const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`]|(?=[A-Za-z_$]))/gi;
 
 /**
  * O valor do handler que começa em `i`, **sem** as interpolações.
@@ -77,10 +77,13 @@ const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`])/gi;
  * filtrar por posição: uma versão anterior filtrava por profundidade de parênteses e
  * perdia exatamente esse caso.
  */
-function valorDoHandler(texto, i) {
-  const escapado = texto[i] === "\\";
-  const delim = texto[escapado ? i + 1 : i];
-  let j = escapado ? i + 2 : i + 1;
+function valorDoHandler(texto, i, semAspas = false) {
+  const escapado = !semAspas && texto[i] === "\\";
+  // HTML aceita valor sem aspas (`onclick=doLogin(event)`), e o navegador executa
+  // igual. Sem este ramo, trocar a forma citada pela não-citada tirava o handler da
+  // extração sem uma linha vermelha. Aí o fim do valor é espaço em branco ou `>`.
+  const delim = semAspas ? null : texto[escapado ? i + 1 : i];
+  let j = semAspas ? i : escapado ? i + 2 : i + 1;
   let prof = 0, aspa = null, out = "";
   while (j < texto.length) {
     const c = texto[j];
@@ -94,7 +97,7 @@ function valorDoHandler(texto, i) {
       continue;                       // conteúdo da interpolação NÃO entra
     }
     if (c === "$" && texto[j + 1] === "{") { prof = 1; j += 2; continue; }
-    if (c === delim) break;
+    if (delim === null ? /[\s>]/.test(c) : c === delim) break;
     out += c; j++;
   }
   return out;
@@ -106,6 +109,17 @@ function valorDoHandler(texto, i) {
 // forma literal específica, e o modo de falha é deixar de achar, nunca inventar.
 const HANDLER_MONTADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*["'`]([^"'`]+)["'`]/gi;
 const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+
+/**
+ * `window.algumaCoisa()` num handler É um global, e o `CHAMADA` o descartava junto com
+ * `event.stopPropagation()` — o lookbehind não distingue receptor nativo de `window`.
+ *
+ * Só `window.`, de propósito: cobrar toda chamada de membro acusaria
+ * `this.setCustomValidity()`, `parcelas.find()` e `document.getElementById()`, que são
+ * 22 dos 24 membros chamados nos handlers de hoje e não são globais nenhum. O ganho
+ * está em `window.X`, onde o `X` é exatamente o que some quando o script vira módulo.
+ */
+const CHAMADA_WINDOW = /\bwindow\.([A-Za-z_$][\w$]*)\s*\(/g;
 
 /**
  * Identificador NU passado como argumento: `startCheckout(currentCycle, this, 'x')`.
@@ -143,7 +157,7 @@ const NATIVO = new Set([
  * `\\.` cobre o delimitador escapado dentro da própria string.
  */
 const semStrings = (s) => s
-  .replace(/&quot;[^&]*&quot;/g, "")
+  .replace(/&quot;(?:(?!&quot;)[\s\S])*&quot;/g, "")
   .replace(/'(?:\\.|[^'\\])*'/g, "''")
   .replace(/"(?:\\.|[^"\\])*"/g, '""')
   .replace(/`(?:\\.|[^`\\])*`/g, "``");
@@ -155,6 +169,7 @@ function nomesDe(trechos) {
   for (const t of trechos) {
     const limpo = semStrings(t);
     for (const c of limpo.matchAll(CHAMADA)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
+    for (const c of limpo.matchAll(CHAMADA_WINDOW)) if (!NATIVO.has(c[1])) funcoes.add(c[1]);
     for (const a of limpo.matchAll(ARGUMENTO)) {
       for (const tok of a[1].split(",")) {
         const n = tok.trim();
@@ -166,7 +181,8 @@ function nomesDe(trechos) {
 }
 
 const trechosDe = (texto) => [
-  ...[...texto.matchAll(INICIO_HANDLER)].map((m) => valorDoHandler(texto, m.index + m[0].length - m[1].length)),
+  ...[...texto.matchAll(INICIO_HANDLER)].map((m) =>
+    valorDoHandler(texto, m.index + m[0].length - m[1].length, m[1] === "")),
   ...[...texto.matchAll(HANDLER_MONTADO)].map((m) => m[1]),
 ];
 
@@ -175,7 +191,7 @@ function scriptsDaPagina(html) {
   // As DUAS aspas: `src='...'` é HTML equivalente, e reconhecer só a dupla deixaria
   // uma troca neutra de marcação desligar o teste em silêncio — some a cobertura dos
   // nomes que só existem no .js, e a página continua verde.
-  return [...html.matchAll(/<script[^>]+src=(["'])\/?([^"'?]+\.js)/gi)]
+  return [...html.matchAll(/<script[^>]+src\s*=\s*(["'])\/?([^"'?]+\.js)/gi)]
     .map((m) => join(FRONTEND, m[2]))
     .filter((f) => existsSync(f));
 }
@@ -226,8 +242,13 @@ function semComentarios(txt) {
 }
 
 function nomesChamados(html) {
-  const trechos = [...trechosDe(semComentarios(html))];
-  for (const js of scriptsDaPagina(html)) trechos.push(...trechosDe(semComentarios(readFileSync(js, "utf-8"))));
+  const limpo = semComentarios(html);
+  const trechos = [...trechosDe(limpo)];
+  // `scriptsDaPagina(limpo)`, não `(html)`: um `<script src>` dentro de comentário HTML
+  // o navegador NÃO carrega, e ler o arquivo mesmo assim cobraria nomes que a página
+  // não tem — falso positivo. Era regressão minha, introduzida junto com o próprio
+  // `semComentarios`.
+  for (const js of scriptsDaPagina(limpo)) trechos.push(...trechosDe(semComentarios(readFileSync(js, "utf-8"))));
   const { funcoes, variaveis } = nomesDe(trechos);
   return { funcoes: [...funcoes].sort(), variaveis: [...variaveis].sort() };
 }
