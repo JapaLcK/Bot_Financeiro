@@ -690,17 +690,17 @@ def test_backoff_nao_dorme_por_cima_do_que_o_log_gastou(user_id, monkeypatch):
     """A folga do backoff é recontada DEPOIS do `log_system_event` do retry.
 
     Aquele log abre conexão async NOVA e faz INSERT SEM `statement_timeout`,
-    DENTRO da janela do prazo — é o maior componente do estouro. A conta e as
-    constantes ficam num lugar só, no comentário de `_prazo_reconexao_ms`
-    (frontend/routes/open_finance.py): o `connect_timeout` do log é o
-    `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48` (default 5), o INSERT
-    não tem teto, e por isso o pior caso do log é ILIMITADO — não se repete
-    número solto aqui, porque a versão anterior deste arquivo dizia "~82s"
-    enquanto o comentário dizia "70,4s" e nenhum dos dois tinha receita.
+    DENTRO da janela do prazo — é o maior componente do que sobra dela. A conta e
+    as constantes ficam num lugar só, no comentário de `_prazo_reconexao_ms`
+    (frontend/routes/open_finance.py). Não se repete número solto aqui, porque a
+    versão anterior deste arquivo dizia "~82s" enquanto o comentário dizia
+    "70,4s" e nenhum dos dois tinha receita.
 
-    O log em si continua FORA do teto (limitá-lo mexe na `log_system_event`, que
-    serve o produto inteiro); o que este teste garante é o que dá para garantir
-    aqui: o sono não pode ser dimensionado por uma folga que o log já consumiu.
+    O log passou a ter teto próprio (`_log_com_teto`, `_LOG_DIAG_TIMEOUT_S`) —
+    mas teto não é o mesmo que custo zero: ele ainda pode comer 2s do prazo, e
+    quem prova que o sono não é dimensionado por uma folga já consumida é este
+    teste. O teto é assunto do `test_log_do_diagnostico_nao_fura_o_prazo`; aqui
+    o `_log` gasta 10s do relógio FAKE, que o `asyncio.wait_for` não enxerga.
 
     CONTROLE NEGATIVO: medir a `folga` ANTES do log (como era) manda dormir o
     backoff cheio (0,375–0,625s) tendo 0,2s de prazo — vermelho aqui."""
@@ -1578,3 +1578,59 @@ def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, cap
     texto = "\n".join(r.getMessage() for r in caplog.records)
     assert "item-piscou" in texto and "TooManyConnections" in texto, \
         f"a infra da 1ª tentativa sumiu sem deixar rastro: {texto!r}"
+
+
+def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
+    """Banco que aceita a conexão do log e trava no INSERT não pendura o 503.
+
+    `log_system_event` (`core/admin_dashboard.py:180`) não tem
+    `statement_timeout`: o `connect_timeout` limita o handshake e nada limita o
+    INSERT nem o commit. Sem o `_log_com_teto`, os DOIS logs
+    (`of_reconnect_lock_retry` e `of_reconnect_lock_timeout`) eram aguardados
+    síncronos, e o teto anunciado de 20s continuava ILIMITADO exatamente sob
+    sobrecarga do banco — que é quando o teto importa.
+
+    Relógio REAL de propósito: o `asyncio.wait_for` mede pelo loop, então um
+    `_RelogioFake` não exercitaria nada. Por isso os números são pequenos —
+    prazo de 0,3s e teto de log de 0,05s.
+
+    CONTROLE NEGATIVO: tirar o `asyncio.wait_for` do `_log_com_teto` → os dois
+    logs dormem 5s cada e a asserção de tempo fica vermelha (o teste passa a
+    levar ~10s).
+    CONTROLE POSITIVO: o 503 continua saindo E o `caplog` continua com a causa —
+    o `logging.warning` local roda ANTES do log com teto, então o diagnóstico
+    sobrevive ao log que estourou. Sem isso, limitar o log teria trocado
+    lentidão por cegueira."""
+    import logging as _logging
+
+    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 300)
+    monkeypatch.setattr(of_routes, "_LOG_DIAG_TIMEOUT_S", 0.05)
+
+    logs = []
+
+    async def _log_travado(*a, **kw):
+        logs.append(a[1] if len(a) > 1 else None)
+        await asyncio.sleep(5)          # INSERT que não volta
+
+    def _falha(uid, remote, item_id, budget_ms=None):
+        raise psycopg.errors.TooManyConnections("sorry, too many clients already")
+
+    monkeypatch.setattr(of_routes, "log_system_event", _log_travado)
+    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _falha)
+
+    t0 = time.monotonic()
+    with caplog.at_level(_logging.WARNING, logger="frontend.routes.open_finance"):
+        with pytest.raises(of_routes.HTTPException) as exc:
+            asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-log-preso"))
+    gasto = time.monotonic() - t0
+
+    assert exc.value.status_code == 503                       # CONTROLE POSITIVO
+    assert logs == ["of_reconnect_lock_retry", "of_reconnect_lock_timeout"], \
+        f"os dois logs têm de ser TENTADOS, não pulados: {logs}"
+    # 0,3s de prazo + 0,05s do log final. Folga de 3× para máquina carregada;
+    # sem o `wait_for` seriam ~10s, então a margem não come o sinal.
+    assert gasto < 1.0, f"o 503 levou {gasto:.2f}s — os logs furaram o prazo"
+
+    texto = "\n".join(r.getMessage() for r in caplog.records)
+    assert "item-log-preso" in texto and "TooManyConnections" in texto, \
+        f"o log estourou e levou a causa junto: {texto!r}"

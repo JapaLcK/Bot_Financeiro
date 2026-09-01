@@ -244,6 +244,28 @@ def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
+                -- `raw` NÃO entra aqui, e isso tem consequência: enquanto o
+                -- `health` é NULL (logo depois de uma reconexão), o
+                -- `connection_ui_state` recebe a linha pronta e não tem como ver
+                -- o `executionStatus` do item. E o que a TELA de quem espera
+                -- device/QR mostra nessa janela NÃO é um rótulo vago — é a MESMA
+                -- instrução errada que o aviso proativo foi calado para não
+                -- mandar. MEDIDO, com `status='OUTDATED'` e `health=None`:
+                --   {'state': 'needs_user_action', 'label': 'Ação necessária',
+                --    'detail': 'Reautorize o banco'}
+                -- ou seja, "Reautorize o banco" no minuto em que a pessoa
+                -- deveria estar lendo o QR (com `health` medido o mesmo estado
+                -- diz 'Autorize o acesso no app do banco', que é o certo).
+                -- Metade PENDENTE do achado do Codex #166, e de PR próprio —
+                -- pendente de TEXTO ERRADO, não de cosmética.
+                --
+                -- O aviso proativo, esse sim, está fechado:
+                -- `list_connections_needing_reconnect` lê o `raw`
+                -- direto (ver lá). Fechar a tela exige uma das duas mudanças de
+                -- contrato: trazer o `raw` (payload inteiro da Pluggy em TODA
+                -- leitura de tela) ou gravar `health` no upsert — contra a
+                -- decisão da Onda 2 de que reconectar ZERA a saúde até um sync
+                -- real provar o contrário.
                 select id, provider, provider_item_id, status, institution_name, last_sync_at,
                        last_attempt_at, status_reason, health, reconnected_at
                 from open_finance_connections
@@ -448,8 +470,69 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
                consent_expires_at, last_sync_at
         from open_finance_connections
         where provider = 'pluggy'
+          -- SEM fallback de `raw` aqui, e por dois fatos, não por esquecimento:
+          -- (1) o único caminho que deixa `health` NULL é o upsert, e ele grava
+          -- a coluna `status` a partir do MESMO item — `WAITING_USER_ACTION`
+          -- vira `status='WAITING_USER_ACTION'`, que NÃO está na cláusula de
+          -- erro abaixo, então a linha nem chega ao filtro; (2) o outro escritor
+          -- de `raw` é o webhook (`update_pluggy_open_finance_item_status`), e
+          -- lá `raw` é o ENVELOPE do evento, não o item — `raw->>'status'` não
+          -- seria um `item_status`. O `executionStatus` abaixo não tem nenhum
+          -- dos dois problemas: o `OUTDATED` da Caixa casa com a cláusula de
+          -- erro, e o envelope não carrega `executionStatus`.
           and coalesce(health->>'item_status', '') <> %s
-          and coalesce(health->>'execution_status', '') <> %s
+          -- `health` NULL cai no `raw`, que o upsert JÁ persiste (`Jsonb(item)`,
+          -- nos dois ramos). Sem isto havia uma janela: a reconexão zera o
+          -- `health` (`health = null`, acima) e quem escreve de volta é o sync
+          -- de fundo — no meio, a Caixa (`status=OUTDATED` +
+          -- `executionStatus=USER_AUTHORIZATION_PENDING`) casava com a cláusula
+          -- de erro pelo `OUTDATED` e um tique do aviso proativo mandava
+          -- "reconecte seu banco", a instrução que faz PERDER a janela do QR
+          -- (Codex #166, P2). Os nomes divergem de propósito: `execution_status`
+          -- é o do `derive_item_health` (snake_case, já em maiúscula);
+          -- `executionStatus` é como a Pluggy manda — daí o `upper`.
+          --
+          -- ASSIMETRIA com o predicado irmão de cima (`item_status`, SEM
+          -- `upper`), de propósito e não por descuido: aqui o `upper` envolve
+          -- TAMBÉM o ramo do `health`, e isso É mudança de comportamento — um
+          -- `health.execution_status` em minúscula passava pelo filtro antes e
+          -- agora cala o aviso. Hoje é INALCANÇÁVEL: o único escritor de
+          -- `health` é o `derive_item_health`, que já grava em maiúscula
+          -- (`core/services/pluggy_health.py:311-312`, nas DUAS chaves). Fica
+          -- assim, e não em dois `coalesce` separados, porque a direção é a
+          -- barata: se um dia entrar minúscula, calar é errar para o lado de não
+          -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —
+          -- não há entrada que chegue lá.
+          --
+          -- ALCANCE, para ninguém ler isto como "o buraco fechou": o `raw` fecha
+          -- a superfície do AVISO PROATIVO, e SÓ ela. A TELA continua aberta —
+          -- `get_open_finance_snapshot` (acima, na mesma tabela) NÃO seleciona
+          -- `raw`, então o `connection_ui_state` não enxerga o `executionStatus`
+          -- na mesma janela. O buraco ENCOLHEU; a metade da tela é PR próprio, e
+          -- o motivo está no comentário do snapshot.
+          --
+          -- E o silêncio dura MUITO mais que a janela do QR (~30 min), o que é a
+          -- outra ponta do mesmo trade: quem escreve `health` de volta é o
+          -- `run_of_health_check` (`core/services/pluggy_sync.py:492`), num tique
+          -- de `OF_REFRESH_INTERVAL_SEC` — default **6 h**
+          -- (`frontend/finance_bot_websocket_custom.py:1503`) — que processa
+          -- `limit=200` linhas por passada, `order by id`
+          -- (`list_connections_for_health_check`), e PULA a linha sem gravar nada
+          -- quando o `GET /items` falha por algo que não seja 404. Ou seja: o
+          -- piso do silêncio é UM tique (até 6 h), e com mais de 200 linhas de
+          -- saúde vencida ele estica por `ceil(posição/200)` tiques. Enquanto
+          -- isso a TELA repete "Reautorize o banco" (ver o snapshot). O `raw`
+          -- troca um aviso ERRADO em ~30 min por nenhum aviso durante horas —
+          -- escolha deliberada, não empate.
+          --
+          -- O `case` NÃO é enfeite: `raw` só vale enquanto `health` é NULL. Com
+          -- `coalesce(health->>…, raw->>…)` puro, um `health` observado DEPOIS
+          -- sem `execution_status` (o usuário autorizou, virou LOGIN_ERROR)
+          -- caía no `raw` VELHO da reconexão — `mark_sync_result` não toca em
+          -- `raw` — e calava o aviso para sempre.
+          and upper(coalesce(health->>'execution_status',
+                             case when health is null
+                                  then raw->>'executionStatus' end, '')) <> %s
           and (
             upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
             or (consent_expires_at is not null
