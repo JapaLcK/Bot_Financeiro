@@ -2500,10 +2500,12 @@ async function requestAccountReset() {
       body: JSON.stringify({ password }),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
-    // Snapshots pré-reset em sessionStorage sobrevivem à navegação e o
-    // dashboard os pintaria por ~1s (restoreSnapshotFromSession) — dado
-    // apagado não pode voltar nem por um flash. Mesmo loop do logoutDashboard.
-    try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+    // Snapshots pré-reset em sessionStorage sobrevivem à navegação e seriam
+    // pintados na hora (restoreSnapshotFromSession no dashboard, pb_snap_;
+    // restoreHomeCache na /home, pb_home_) — dado apagado não pode voltar nem
+    // por um flash. Mesmo par de prefixos do clearHomeCache (home.html), que
+    // é função inline de outra página e não é alcançável daqui.
+    try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_") || k.startsWith("pb_home_")) sessionStorage.removeItem(k); }); } catch {}
     window.location.href = "/onboarding";
   } catch (err) {
     showToast(err.message || "Erro ao recomeçar do zero", "error");

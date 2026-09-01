@@ -177,6 +177,11 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
                    "está em andamento. Tente de novo em alguns segundos.",
         ) from exc
 
+    # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,
+    # o snapshot "mês corrente" (TTL 45s) seguia servindo pockets/cartões/OF
+    # apagados a outra aba com o dashboard aberto.
+    shared.invalidate_dashboard_current_cache(user_id)
+
     await asyncio.to_thread(
         record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,
     )

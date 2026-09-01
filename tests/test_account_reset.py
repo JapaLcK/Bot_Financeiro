@@ -495,6 +495,8 @@ def test_rota_recusa_conta_agendada_para_exclusao(user_id):
 # ── 7. limpeza remota na Pluggy ──────────────────────────────────────────────
 
 def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
+    from frontend.routes import shared as routes_shared
+
     _semeia(user_id)
     deletados: list[str] = []
     monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
@@ -502,6 +504,9 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
         of_routes, "delete_pluggy_item",
         lambda item_id, api_key=None: deletados.append(item_id),
     )
+    # Cache do "mês corrente" (TTL 45s) com dado pré-reset: o reset tem de
+    # derrubá-lo, senão outra aba segue vendo pockets/cartões/OF apagados.
+    routes_shared.dashboard_current_cache[user_id] = (0.0, {"pre": "reset"}, None, None)
 
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
@@ -510,6 +515,8 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert deletados == [_item_de(user_id)], "a limpeza remota não recebeu os items do usuário"
     assert all(n == 0 for n in _contagens(user_id).values())
+    assert user_id not in routes_shared.dashboard_current_cache, \
+        "o snapshot cacheado do dashboard sobreviveu ao reset (Codex PR #217, rodada 2)"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
