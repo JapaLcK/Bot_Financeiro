@@ -365,6 +365,15 @@ def _auto_cleanup_orphan_users():
     Roda em todo teste (autouse) pra evitar leaks que quebram testes
     seguintes via FK accounts_user_id_fkey.
     """
+    # Testes escrevem auth_accounts com SQL cru (sem passar pelos writers que
+    # invalidam) — zera o cache TTL do get_auth_user pra um teste não ler o
+    # estado que o anterior deixou cacheado.
+    import db_support
+    db_support.invalidate_auth_user_cache()
+    # Mesmo motivo para o memo "rede confirmou hoje" das séries do BCB: um
+    # teste que stuba a rede não pode herdar a confirmação do teste anterior.
+    import db.investments
+    db.investments._sgs_confirmed_on.clear()
     before = _all_user_ids()
     yield
     after = _all_user_ids()

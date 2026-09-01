@@ -163,6 +163,11 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
 
         conn.commit()
 
+    # A conta pode ter trocado de user_id — os dois lados saem do cache.
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(from_user_id)
+    invalidate_auth_user_cache(to_user_id)
+
 
 def user_score(user_id: int) -> int:
     with get_conn() as conn, conn.cursor() as cur:

@@ -275,9 +275,14 @@ def br_national_holidays(year: int) -> set[date]:
         date(year, 10, 12),                     # Nossa Senhora Aparecida
         date(year, 11, 2),                      # Finados
         date(year, 11, 15),                     # Proclamação da República
-        date(year, 11, 20),                     # Consciência Negra
         date(year, 12, 25),                     # Natal
     }
+    if year >= 2024:
+        # Consciência Negra virou feriado nacional pela Lei 14.759/2023, a
+        # partir de 2024 — antes disso o BCB publicava CDI em 20/11, e marcar
+        # o dia como feriado em ano antigo faria a checagem de cobertura do
+        # accrual (db/investments.py) engolir um dia útil de juro.
+        holidays.add(date(year, 11, 20))
     _BR_HOLIDAYS_CACHE[year] = holidays
     return holidays
 

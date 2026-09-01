@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import secrets
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -457,6 +459,7 @@ def register_auth_user_impl(
                  encrypt_pii_optional(email)),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)
 
@@ -499,7 +502,37 @@ def login_auth_user_impl(get_conn, check_password, email: str, password: str) ->
     }
 
 
+# ─── Cache TTL do get_auth_user ──────────────────────────────────────────────
+# Uma abertura de dashboard lia auth_accounts ~17× (4×/auth/me, 4×/history,
+# 4×/dashboard-profile, 4×/data frio, 2×/expenses/daily). TTL curto por
+# user_id + invalidação nos writers de auth_accounts — mesmo desenho do
+# dashboard_current_cache (frontend/routes/shared.py).
+#
+# Exceções DELIBERADAS de invalidação (caminho quente, colunas que o SELECT
+# do get_auth_user não serve — invalidar ali zeraria o hit rate a cada
+# mensagem): db/reports.py::update_last_activity e
+# db/ai_chat.py::get_usage_this_month/increment_usage. Se alguma dessas
+# colunas entrar no SELECT abaixo, a exceção dela cai junto.
+# Cross-process (bot.py do Discord): sem invalidação remota; o TTL de 10 s é
+# o teto do atraso.
+AUTH_USER_CACHE_TTL_SECONDS = 10
+_auth_user_cache: dict[int, tuple[float, dict | None]] = {}
+
+
+def invalidate_auth_user_cache(user_id: int | None = None) -> None:
+    """Chame após QUALQUER escrita em auth_accounts (None = limpa tudo)."""
+    if user_id is None:
+        _auth_user_cache.clear()
+    else:
+        _auth_user_cache.pop(int(user_id), None)
+
+
 def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
+    hit = _auth_user_cache.get(int(user_id))
+    if hit and time.monotonic() - hit[0] < AUTH_USER_CACHE_TTL_SECONDS:
+        # deepcopy nos dois sentidos: caller que mutar o dict não pode
+        # envenenar o cache (plan/plan_expires_at decidem acesso pago).
+        return copy.deepcopy(hit[1])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -538,6 +571,7 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
             ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
                                  subject_user_id=user_id, field="name"),
         )
+    _auth_user_cache[int(user_id)] = (time.monotonic(), copy.deepcopy(row))
     return row
 
 
@@ -589,6 +623,7 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
                 (plan, expires_at, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def mark_plan_selected_impl(get_conn, user_id: int) -> None:
@@ -603,6 +638,7 @@ def mark_plan_selected_impl(get_conn, user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
@@ -617,6 +653,7 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
                 (status, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def get_user_by_stripe_customer_impl(get_conn, stripe_customer_id: str) -> int | None:
@@ -638,6 +675,7 @@ def set_stripe_customer_impl(get_conn, user_id: int, stripe_customer_id: str) ->
                 (stripe_customer_id, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 class AccountAlreadyExistsError(Exception):
@@ -803,6 +841,7 @@ def confirm_email_verification_impl(
                 (verification_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)
 
@@ -929,6 +968,7 @@ def attempt_whatsapp_phone_link_impl(
                 (target_user_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(target_user_id)
 
     return {
         "status": "already_linked" if current_user_id == target_user_id and existing_current_wa else "linked",
@@ -1012,6 +1052,7 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
                 (now, token),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     return user_id
 

@@ -19,6 +19,26 @@ from .users import ensure_user
 logger = logging.getLogger(__name__)
 _warned_bcb_requests: set[tuple] = set()
 
+# Cache-primeiro nas taxas do BCB (CLAUDE.md §5 — caminho do dashboard):
+# séries diárias só publicam em dia útil, então 4 dias corridos cobrem
+# fim de semana + feriado; IPCA_12M é mensal com ~2 semanas de atraso.
+# ponytail: dia já cacheado é FINAL — revisão retroativa do BCB é ignorada;
+# se um dia precisar ser recarregado, apague a linha de market_rates à mão.
+SGS_DAILY_FRESH_DAYS = 4
+SGS_MONTHLY_FRESH_DAYS = 45
+# Timeout das chamadas SGS. Era 20 s; com cache-primeiro a rede só entra em
+# cache frio, e 20 s pendurados seguravam o /data do dashboard inteiro.
+SGS_TIMEOUT_SECONDS = 3
+
+# Memo por série: último dia (UTC) em que a REDE respondeu para a série.
+# Sem isso, série sem ponto novo (IPCA_12M passa 40-70 dias com o mesmo
+# ref_date; CDI fica >4 dias parado num feriadão) fica "stale para sempre"
+# e paga um fetch de rede A CADA chamada, devolvendo sempre o mesmo valor.
+# Confirmou hoje que não há ponto mais novo ⇒ fresco até amanhã (UTC).
+# ponytail: memo por processo (reseta no restart, não cruza workers) — teto
+# de 1 fetch/série/dia/processo; mover para o banco se isso incomodar.
+_sgs_confirmed_on: dict[str, date] = {}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers de dias úteis e datas
@@ -63,7 +83,10 @@ def _is_sgs_no_values_payload(payload) -> bool:
     return "Value(s) not found" in detail
 
 
-def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict]:
+def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict] | None:
+    """None = payload não-decodificável/inesperado (trata-se como falha: não
+    alimenta o memo _sgs_confirmed_on, re-tenta na próxima chamada);
+    [] = resposta legítima "sem valores no período" (confirma o memo)."""
     try:
         payload = r.json()
     except Exception as e:
@@ -73,7 +96,7 @@ def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tup
             series_code,
             e,
         )
-        return []
+        return None
 
     if isinstance(payload, list):
         return payload
@@ -88,14 +111,18 @@ def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tup
         series_code,
         payload,
     )
-    return []
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CDI — BCB SGS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict]:
+def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict] | None:
+    """None = falha (rede/HTTP/timeout OU 200 com payload lixo — nada disso
+    confirma o memo, re-tenta na próxima chamada); lista = resposta do BCB
+    (vazia inclusive — "sem valores no período" é resposta, e alimenta o memo
+    _sgs_confirmed_on)."""
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados"
     params = {
         "formato": "json",
@@ -103,7 +130,7 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
         "dataFinal": _fmt_ddmmyyyy(end),
     }
     try:
-        r = requests.get(url, params=params, timeout=20)
+        r = requests.get(url, params=params, timeout=SGS_TIMEOUT_SECONDS)
         if r.status_code == 404:
             data = _decode_sgs_response(r, series_code, context=("fetch_sgs_series_json", series_code, start, end))
             if data or _is_sgs_no_values_payload(r.json()):
@@ -119,14 +146,14 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
             end.isoformat(),
             e,
         )
-        return []
+        return None
 
 
-def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict]:
+def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict] | None:
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados/ultimos/{limit}"
     params = {"formato": "json"}
     try:
-        r = requests.get(url, params=params, timeout=20)
+        r = requests.get(url, params=params, timeout=SGS_TIMEOUT_SECONDS)
         if r.status_code == 404:
             data = _decode_sgs_response(r, series_code, context=("fetch_sgs_latest_json", series_code, limit))
             if data or _is_sgs_no_values_payload(r.json()):
@@ -140,7 +167,24 @@ def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict]:
             series_code,
             e,
         )
-        return []
+        return None  # mesmo contrato da _fetch_sgs_series_json: None = falha
+
+
+def _sgs_cache_covers(cached: dict[date, float], start: date, newest: date) -> bool:
+    """True se TODO dia útil BR de [start, newest] está no cache.
+
+    Buraco na CABEÇA ou no MEIO é juro não computado: o accrual avança
+    last_date por cima dos dias faltantes e o rendimento some sem retentativa
+    (dinheiro exibido). Cobertura furada ⇒ a janela inteira vai à rede
+    (comportamento antigo), que cura o buraco. Falso-negativo possível: dia
+    que o nosso calendário chama de útil mas o BCB não publica vira fetch da
+    janela toda — correto, só não otimizado."""
+    d = start
+    while d <= newest:
+        if is_br_business_day(d) and d not in cached:
+            return False
+        d += timedelta(days=1)
+    return True
 
 
 def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
@@ -158,7 +202,19 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     )
     cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
 
-    data = _fetch_sgs_series_json(12, start, end)
+    fetch_start = start
+    if cached:
+        newest = max(cached)
+        if _sgs_cache_covers(cached, start, newest):
+            if (end - newest).days <= SGS_DAILY_FRESH_DAYS or \
+                    _sgs_confirmed_on.get("CDI") == date.today():
+                return cached  # janela coberta e cauda fresca/confirmada hoje
+            fetch_start = newest + timedelta(days=1)  # só a cauda falta
+        # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
+
+    data = _fetch_sgs_series_json(12, fetch_start, end)
+    if isinstance(data, list):
+        _sgs_confirmed_on["CDI"] = date.today()
     if not isinstance(data, list) or not data:
         return cached
 
@@ -206,7 +262,21 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     )
     cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
 
-    data = _fetch_sgs_series_json(series_code, start, end)
+    fetch_start = start
+    if cached:
+        newest = max(cached)
+        if _sgs_cache_covers(cached, start, newest):
+            if (end - newest).days <= SGS_DAILY_FRESH_DAYS or \
+                    _sgs_confirmed_on.get(code) == date.today():
+                return cached  # janela coberta e cauda fresca/confirmada hoje
+            fetch_start = newest + timedelta(days=1)  # só a cauda falta
+        # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
+        # (séries mensais nunca "cobrem" dias úteis ⇒ sempre janela inteira,
+        #  que é o comportamento antigo — correto, só não otimizado)
+
+    data = _fetch_sgs_series_json(series_code, fetch_start, end)
+    if isinstance(data, list):
+        _sgs_confirmed_on[code] = date.today()
     if not isinstance(data, list) or not data:
         return cached
 
@@ -278,49 +348,40 @@ def _parse_sgs_latest(data, *, series: str) -> tuple[date, float] | None:
 
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """Retorna (data, valor_percent_ao_dia) da CDI mais recente."""
-    latest = _parse_sgs_latest(_fetch_sgs_latest_json(12), series="CDI (12)")
-
-    if latest:
-        cur.execute(
-            "insert into market_rates(code, ref_date, value) values ('CDI', %s, %s) "
-            "on conflict (code, ref_date) do update set value = excluded.value",
-            latest,
-        )
-        return latest
-
-    cur.execute(
-        "select ref_date, value from market_rates where code = 'CDI' order by ref_date desc limit 1"
-    )
-    row = cur.fetchone()
-    return (row["ref_date"], float(row["value"])) if row else None
+    return get_latest_market_rate(cur, "CDI", 12)
 
 
 def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     """CDI a.a. (base 252) direto do SGS/BCB (série 4389)."""
-    latest = _parse_sgs_latest(_fetch_sgs_latest_json(4389), series="CDI_AA (4389)")
+    return get_latest_market_rate(cur, "CDI_AA", 4389)
 
-    if latest:
-        cur.execute(
-            "insert into market_rates(code, ref_date, value) values ('CDI_AA', %s, %s) "
-            "on conflict (code, ref_date) do update set value = excluded.value",
-            latest,
-        )
-        return latest
 
+def get_latest_market_rate(
+    cur, code: str, series_code: int, fresh_days: int = SGS_DAILY_FRESH_DAYS
+) -> tuple[date, float] | None:
+    """Retorna a taxa mais recente de uma série SGS: cache local fresco primeiro,
+    rede em cache frio, e cache stale como fallback quando a rede falha."""
     cur.execute(
-        "select ref_date, value from market_rates where code = 'CDI_AA' order by ref_date desc limit 1"
+        "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
+        (code,),
     )
     row = cur.fetchone()
-    return (row["ref_date"], float(row["value"])) if row else None
+    # Fresco por idade do dado OU por confirmação da rede hoje: o ref_date do
+    # ponto mais novo do BCB passa boa parte do mês além do frescor (IPCA_12M:
+    # 40-70 dias; diárias num feriadão) — sem o memo, TODA chamada pagaria um
+    # fetch que devolve o mesmo valor.
+    if row and (
+        (date.today() - row["ref_date"]).days <= fresh_days
+        or _sgs_confirmed_on.get(code) == date.today()
+    ):
+        return (row["ref_date"], float(row["value"]))
 
-
-def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, float] | None:
-    """Retorna a taxa mais recente de uma série SGS, usando cache local como fallback."""
     latest = _parse_sgs_latest(
         _fetch_sgs_latest_json(series_code), series=f"{code} ({series_code})"
     )
 
     if latest:
+        _sgs_confirmed_on[code] = date.today()
         cur.execute(
             "insert into market_rates(code, ref_date, value) values (%s, %s, %s) "
             "on conflict (code, ref_date) do update set value = excluded.value",
@@ -328,11 +389,7 @@ def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, floa
         )
         return latest
 
-    cur.execute(
-        "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
-        (code,),
-    )
-    row = cur.fetchone()
+    # Rede falhou: cache stale (já lido acima) é melhor que nada.
     return (row["ref_date"], float(row["value"])) if row else None
 
 
@@ -343,7 +400,7 @@ def get_latest_selic_aa(cur) -> tuple[date, float] | None:
 
 def get_latest_ipca_12m(cur) -> tuple[date, float] | None:
     """IPCA acumulado em 12 meses no SGS/BCB (série 13522)."""
-    return get_latest_market_rate(cur, "IPCA_12M", 13522)
+    return get_latest_market_rate(cur, "IPCA_12M", 13522, fresh_days=SGS_MONTHLY_FRESH_DAYS)
 
 
 def get_dashboard_market_rates() -> dict:

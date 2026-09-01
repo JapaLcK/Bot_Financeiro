@@ -1,0 +1,111 @@
+/**
+ * Boot do dashboard sem esperar o /auth/me (O1-4) — e o paywall continua valendo.
+ *
+ * Antes, o IIFE de boot aguardava validate E me antes do connect(): o WebSocket
+ * (que traz o snapshot que pinta a tela) pagava a latência do /auth/me inteira.
+ * Agora o connect() dispara com o USER_ID em mãos e o bloco do /me vira .then.
+ *
+ * O que NÃO pode regredir (fail-closed de dinheiro): usuário sem plano
+ * continua caindo em /precos quando o /me chegar — mesmo com o /me lento.
+ *
+ * Rodar:  npm run test:frontend
+ */
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { chromium } from "playwright";
+
+const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+const DASHBOARD_JS = readFileSync(join(FRONTEND, "dashboard.js"), "utf8");
+
+const IDS = [
+  "grid", "bgt-overlay", "bgt-input", "investment-detail-overlay",
+  "investment-help-overlay", "edit-launch-overlay", "launch-overlay",
+  "launch-valor", "pocket-overlay", "pocket-name", "pocket-history-overlay",
+  "card-overlay", "card-name", "card-closing-day", "card-due-day",
+  "bill-detail-overlay", "pay-bill-overlay", "pay-bill-receipt-overlay",
+  "pay-bill-amount", "overview-heading", "launches-title", "launches-wrap",
+  "charts-title", "charts-grid", "alert-banner", "last-update",
+  "categories-distribution", "month-label", "btn-next", "btn-prev",
+  "dot", "status-text", "refresh-btn",
+];
+
+const PAGE_HTML = `<!doctype html><html><body>
+${IDS.map((i) => `<div id="${i}"></div>`).join("")}
+<!-- o boot chama updateInvestmentRateHint/TaxHint antes do connect(); eles
+     leem .value destes campos e um throw ali abortaria o IIFE inteiro -->
+<select id="inv-period"><option value="pct_cdi" selected></option></select>
+<span id="inv-rate-label"></span><input id="inv-rate">
+<select id="inv-asset-type"><option value="CDB" selected></option></select>
+<select id="inv-frequency"><option value="none" selected></option></select>
+<input id="inv-issuer"><input id="inv-name"><span id="inv-tax-hint"></span>
+<script src="/dashboard.js"></script>
+</body></html>`;
+
+let browser;
+before(async () => { browser = await chromium.launch(); });
+after(async () => { await browser?.close(); });
+
+// Sobe uma página REAL (URL http, pra location.replace funcionar) com rotas
+// stubadas: validate responde na hora; /auth/me demora ME_DELAY_MS.
+async function bootApp({ me, meDelayMs = 400 }) {
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    window._t0 = Date.now();
+    window._wsCreatedAt = null;
+    window.WebSocket = class FakeWS {
+      static OPEN = 1;
+      constructor() { window._ws = this; window._wsCreatedAt = Date.now() - window._t0; this.readyState = 1; }
+      close() {} send() {}
+    };
+  });
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/app") {
+      return route.fulfill({ contentType: "text/html; charset=utf-8", body: PAGE_HTML });
+    }
+    if (url.pathname === "/dashboard.js") {
+      return route.fulfill({ contentType: "application/javascript; charset=utf-8", body: DASHBOARD_JS });
+    }
+    if (url.pathname === "/auth/validate") {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ user_id: 42 }) });
+    }
+    if (url.pathname === "/auth/me") {
+      await new Promise((r) => setTimeout(r, meDelayMs));
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(me) });
+    }
+    if (url.pathname.startsWith("/precos")) {
+      return route.fulfill({ contentType: "text/html", body: "<title>precos</title>PRECOS" });
+    }
+    // /auth/dashboard-profile, /history, /insights, etc.: pendura (nunca resolve)
+    return new Promise(() => {});
+  });
+  await page.goto("http://pb.test/app", { waitUntil: "domcontentloaded" });
+  return { ctx, page };
+}
+
+test("sem plano ativo: continua caindo em /precos quando o /me chega", async () => {
+  const { ctx, page } = await bootApp({ me: { app_access: false } });
+  await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
+  assert.match(page.url(), /\/precos\?ativar=1/);
+  await ctx.close();
+});
+
+test("cadastro sem plano escolhido: cai em /precos?escolha=1", async () => {
+  const { ctx, page } = await bootApp({ me: { needs_plan_selection: true } });
+  await page.waitForURL("**/precos?escolha=1", { timeout: 5000 });
+  await ctx.close();
+});
+
+test("connect() dispara ANTES de o /auth/me resolver (não paga mais essa RTT)", async () => {
+  const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 600 });
+  await page.waitForFunction(() => window._wsCreatedAt !== null, { timeout: 5000 });
+  const wsAt = await page.evaluate(() => window._wsCreatedAt);
+  assert.ok(wsAt < 600, `WebSocket só nasceu em ${wsAt}ms — ainda espera o /auth/me (600ms)`);
+  // e o PBRefresh (contrato do puxar-pra-atualizar) só nasce depois do /me:
+  await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
+  await ctx.close();
+});
