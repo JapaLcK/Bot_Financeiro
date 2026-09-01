@@ -62,7 +62,15 @@ const INICIO_HANDLER = /\bon[a-z]+\s*=\s*(\\?["'`])/gi;
  * - DESCARTAR `${...}`: o que está lá dentro roda na GERAÇÃO do markup, no escopo de
  *   quem gera, e não no clique. Cobrar isso é falso positivo;
  * - contar chave respeitando STRING dentro da interpolação, senão um `{` de dentro de
- *   uma string desequilibra a conta e a interpolação "vaza" para o texto do handler.
+ *   uma string desequilibra a conta e a interpolação "vaza" para o texto do handler;
+ * - e respeitar a BARRA INVERTIDA dentro dessa string, senão `\"` fecha a string cedo,
+ *   o `}` seguinte zera a profundidade e o resto do handler é perdido.
+ *
+ * TETO DECLARADO: isto é um scanner de uma forma literal, não um lexer de JavaScript.
+ * Ele trata escape um nível fundo, dentro de string dentro de interpolação — o que
+ * cobre o que um gerador de markup escreve. Interpolação aninhada dentro de template
+ * literal dentro de interpolação está fora, e o modo de falha nesse caso é DEIXAR DE
+ * COBRAR um nome, nunca inventar um: o teste não trava PR legítimo por este caminho.
  *
  * Depois disto o que sobra é literal, e TUDO que sobra roda no clique — inclusive o
  * `inner` de `outer(inner())`. Por isso a extração seguinte não precisa (e não deve)
@@ -77,6 +85,7 @@ function valorDoHandler(texto, i) {
   while (j < texto.length) {
     const c = texto[j];
     if (prof > 0) {
+      if (aspa && c === "\\") { j += 2; continue; }   // \" não fecha a string
       if (aspa) { if (c === aspa) aspa = null; }
       else if (c === '"' || c === "'" || c === "`") aspa = c;
       else if (c === "{") prof++;
