@@ -314,11 +314,14 @@ before(async () => { server = await startServer(); browser = await chromium.laun
 after(async () => { await browser?.close(); server?.kill(); });
 
 /**
- * Tudo que uma página exige do escopo global, com o navegador parseando o HTML.
+ * Uma navegação por página, não duas.
  *
- * `document.scripts` é a lista que o navegador REALMENTE carregou — não uma
- * varredura minha de `<script src>`. Comentado, `data-src`, sem aspas, com espaço
- * em volta do `=`: não importa, quem responde é ele.
+ * Os dois testes de cada página precisam da MESMA página carregada: um compara o
+ * levantamento com a baseline, o outro pergunta `typeof` no escopo dela. Carregar
+ * duas vezes dobra o trabalho de um arquivo que já é o mais pesado da suíte — e
+ * medido, isso derrubava vizinhos: 3/3 execuções limpas sem este arquivo contra
+ * 4/5 com ele, com as falhas sempre em `http.server` de OUTRO arquivo não subindo.
+ * As páginas ficam abertas até o `after`, que fecha o navegador inteiro.
  */
 const cache = new Map();
 const levantar = (pagina) => {
@@ -326,6 +329,13 @@ const levantar = (pagina) => {
   return cache.get(pagina);
 };
 
+/**
+ * Tudo que uma página exige do escopo global, com o navegador parseando o HTML.
+ *
+ * `document.scripts` é a lista que o navegador REALMENTE carregou — não uma
+ * varredura minha de `<script src>`. Comentado, `data-src`, sem aspas, com espaço
+ * em volta do `=`: não importa, quem responde é ele.
+ */
 async function levantarUmaVez(pagina) {
   const page = await browser.newPage();
   const perdidos = [];
@@ -399,12 +409,14 @@ async function levantarUmaVez(pagina) {
 
     const { funcoes, variaveis } = nomesDe([...doDom, ...doMarkup]);
     return {
+      page,
       funcoes: [...funcoes].sort(),
       variaveis: [...variaveis].filter((v) => !funcoes.has(v)).sort(),
       scripts, perdidos,
     };
-  } finally {
+  } catch (e) {
     await page.close();
+    throw e;
   }
 }
 
@@ -454,14 +466,10 @@ for (const pagina of Object.keys(baseline)) {
 
   test(`${pagina}: todo handler inline resolve no escopo global`, async () => {
     const r = await levantar(pagina);
-    const page = await browser.newPage();
-    try {
-      await comStubs(page, pagina);
-      await page.goto(`${ORIGIN}/${pagina}`, { waitUntil: "load" }).catch(() => {});
-      await sleep(700);
+    {
       // `typeof <nome>`, não `window[nome]`: const/let no topo de script clássico
       // não viram propriedade de window, mas o handler inline os enxerga.
-      const faltando = await page.evaluate(
+      const faltando = await r.page.evaluate(
         ([fns, vars]) => {
           const resolve = (n, exigeFuncao) => {
             try {
@@ -481,8 +489,6 @@ for (const pagina of Object.keys(baseline)) {
         `verificados, estes não existem no escopo global: ${faltando.join(", ")}. ` +
         "O clique falha em silêncio. Se o script virou módulo ou ganhou IIFE, " +
         "devolva os nomes ao escopo global.");
-    } finally {
-      await page.close();
     }
   });
 }
