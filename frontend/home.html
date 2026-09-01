@@ -1404,7 +1404,7 @@ function persistHomeCache(userId, snapshot, history, email, displayName) {
   if (!userId) return;
   try {
     sessionStorage.setItem(_homeCacheKey(userId),
-      JSON.stringify({ userId, snapshot, history, email, displayName }));
+      JSON.stringify({ userId, snapshot, history, email, displayName, savedAt: Date.now() }));
   } catch {}
 }
 // Restaura SÓ do usuário já validado (chave escopada ao userId) — nunca pinta
@@ -1417,6 +1417,17 @@ function restoreHomeCache(userId) {
     if (!raw) return;
     const c = JSON.parse(raw);
     if (!c || !c.snapshot || String(c.userId) !== String(userId)) return;
+    // "Recomeçar do zero" em OUTRA aba: sessionStorage é por aba, então o
+    // reset não alcança o snapshot desta. O marker finbot_reset_at (gravado
+    // pelo settings, mesmo padrão do finbot_logout_at) diz quando foi o
+    // último reset: snapshot que não for comprovadamente POSTERIOR a ele é
+    // dado apagado — descarta em vez de pintar. Sem marker (nunca resetou) e
+    // snapshot novo pós-reset restauram normal.
+    const resetAt = Number(localStorage.getItem("finbot_reset_at") || 0);
+    if (resetAt && !(Number(c.savedAt) > resetAt)) {
+      sessionStorage.removeItem(_homeCacheKey(userId));
+      return;
+    }
     // Só os renders que dependem de snapshot/history (não de `me`/plano): a
     // passagem fresca logo abaixo revalida e completa (onboarding, banner).
     renderGreeting(c.snapshot, c.email || "", c.displayName || "");

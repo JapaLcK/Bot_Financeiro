@@ -2506,6 +2506,10 @@ async function requestAccountReset() {
     // por um flash. Mesmo par de prefixos do clearHomeCache (home.html), que
     // é função inline de outra página e não é alcançável daqui.
     try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_") || k.startsWith("pb_home_")) sessionStorage.removeItem(k); }); } catch {}
+    // sessionStorage é POR ABA: o loop acima só limpa esta. O marker abaixo
+    // (mesmo padrão do finbot_logout_at) faz as OUTRAS abas descartarem o
+    // próprio snapshot no restore (home.html/dashboard.js comparam savedAt).
+    try { localStorage.setItem("finbot_reset_at", String(Date.now())); } catch {}
     window.location.href = "/onboarding";
   } catch (err) {
     showToast(err.message || "Erro ao recomeçar do zero", "error");

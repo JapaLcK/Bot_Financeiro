@@ -366,7 +366,7 @@ function persistSnapshotToSession(data) {
   const type = data.launches_pagination?.filter_type || "all";
   const text = data.launches_pagination?.query || "";
   if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
-  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
+  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify({ ...data, pb_saved_at: Date.now() })); } catch {}
 }
 function restoreSnapshotFromSession() {
   if (!USER_ID) return false;
@@ -374,6 +374,14 @@ function restoreSnapshotFromSession() {
     const raw = sessionStorage.getItem(_snapSessionKey(viewYear, viewMonth));
     if (!raw) return false;
     const data = JSON.parse(raw);
+    // "Recomeçar do zero" em OUTRA aba (sessionStorage é por aba): snapshot
+    // que não for comprovadamente POSTERIOR ao finbot_reset_at é dado apagado
+    // — descarta em vez de pintar. Mesma regra do restoreHomeCache (home.html).
+    const resetAt = Number(localStorage.getItem("finbot_reset_at") || 0);
+    if (resetAt && !(Number(data.pb_saved_at) > resetAt)) {
+      sessionStorage.removeItem(_snapSessionKey(viewYear, viewMonth));
+      return false;
+    }
     if (!isCurrentViewData(data)) return false;
     lastData = data;
     cacheMonthData(data);
