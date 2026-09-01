@@ -492,14 +492,12 @@ def reset_user_data(
     lançamento chegando pelo WhatsApp) sobrevive — o usuário continua existindo
     e escrita nova dele é dado novo, não resíduo do passado.
     """
-    import contextlib
-
     if not verify_user_password(user_id, password):
         raise PermissionError("Senha incorreta.")
 
     # Import na função: db/privacy não importa módulos irmãos no topo (ciclo).
     from .open_finance import list_pluggy_item_ids
-    from .open_finance_state import pluggy_item_lock
+    from .open_finance_state import pluggy_items_lock
 
     counts: dict[str, int] = {}
 
@@ -514,15 +512,18 @@ def reset_user_data(
         counts[table] = counts.get(table, 0) + cur.rowcount
 
     # Locks dos items Pluggy ANTES de qualquer delete: um sync na fase de
-    # escrita re-inseriria contas/transações no meio da limpeza. O ExitStack
-    # solta todos os locks na saída, inclusive em exceção (o "finally").
-    with contextlib.ExitStack() as locks:
-        for item_id in list_pluggy_item_ids(user_id):
-            if not locks.enter_context(pluggy_item_lock(item_id)):
-                raise ResetLockUnavailableError(
-                    f"Sincronização bancária em andamento (item {item_id}). "
-                    "Tente de novo em alguns segundos."
-                )
+    # escrita re-inseriria contas/transações no meio da limpeza. Todos os
+    # locks entram numa ÚNICA sessão dedicada (`pluggy_items_lock`) — N
+    # `pluggy_item_lock` aninhados retinham N slots do semáforo e, com mais
+    # itens que OF_SYNC_LOCK_MAX_CONN, o reset esperava um slot que ele mesmo
+    # segurava (503 pra sempre; Codex, PR #217). A saída do `with` libera
+    # todos, inclusive em exceção.
+    with pluggy_items_lock(list_pluggy_item_ids(user_id)) as locked:
+        if not locked:
+            raise ResetLockUnavailableError(
+                "Sincronização bancária em andamento. "
+                "Tente de novo em alguns segundos."
+            )
 
         # Limpeza remota SOB os locks e ANTES de qualquer delete local. Rede
         # dentro do lock viola de propósito a disciplina de janela curta do

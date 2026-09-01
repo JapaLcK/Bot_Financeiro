@@ -599,6 +599,41 @@ def test_aborto_por_lock_libera_os_locks_ja_adquiridos(user_id, monkeypatch):
     assert all(n == 0 for n in _contagens(user_id).values())
 
 
+def test_reset_com_mais_items_que_o_teto_de_slots(user_id, monkeypatch):
+    """Codex PR #217 (P2): usuário com mais itens Pluggy que OF_SYNC_LOCK_MAX_CONN.
+
+    Com um `pluggy_item_lock` por item, o reset retinha um slot do semáforo por
+    lock e o (teto+1)-ésimo esperava um slot que o PRÓPRIO reset segurava —
+    False sempre, 503 em toda retentativa, conta impossível de resetar.
+    Com os N locks numa única sessão (`pluggy_items_lock`), 1 slot basta.
+    CONTROLE NEGATIVO: no código antigo (ExitStack de locks singulares) este
+    teste fica vermelho — verificado por mutação nesta sessão.
+    """
+    from db import open_finance_state
+
+    _semeia(user_id)  # 1º item
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for n in (2, 3):
+                cur.execute(
+                    "insert into open_finance_connections "
+                    "(user_id, provider, provider_item_id, status, institution_id, institution_name) "
+                    "values (%s, 'pluggy', %s, 'UPDATED', %s, 'Banco N')",
+                    (user_id, f"{_item_de(user_id)}-{n}", str(600 + n)),
+                )
+        conn.commit()
+
+    monkeypatch.setenv("OF_SYNC_LOCK_MAX_CONN", "2")   # teto < nº de itens (3)
+    monkeypatch.setenv("OF_SYNC_LOCK_WAIT_MS", "100")  # o auto-bloqueio viraria 100ms, não 15s
+    open_finance_state._lock_slots.cache_clear()       # o teto é lru_cache — relê o env
+    try:
+        reset_user_data(user_id, SENHA)
+    finally:
+        open_finance_state._lock_slots.cache_clear()   # próximos testes voltam ao default
+
+    assert all(n == 0 for n in _contagens(user_id).values())
+
+
 # ── 8. webhook pós-reset não ressuscita nada ─────────────────────────────────
 
 def test_webhook_pos_reset_nao_recria_conexao(user_id, monkeypatch):

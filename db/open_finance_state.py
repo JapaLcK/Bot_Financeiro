@@ -523,3 +523,64 @@ def pluggy_item_lock(item_id: str):
         # esquecer, e um processo morto no meio não deixa o item travado.
         conn.close()
         _lock_slots().release()
+
+
+@contextmanager
+def pluggy_items_lock(item_ids: list[str]):
+    """Versão N-itens do `pluggy_item_lock`: todos os advisory locks numa
+    ÚNICA sessão dedicada — 1 slot do semáforo e 1 conexão para N itens.
+
+    Existe por causa do reset de conta (`db/privacy.reset_user_data`), que
+    segura os locks de TODOS os itens do usuário ao mesmo tempo. N
+    `pluggy_item_lock` aninhados retinham N slots — e com
+    N > OF_SYNC_LOCK_MAX_CONN o (teto+1)-ésimo esperava um slot que o próprio
+    chamador segurava: False sempre, reset impossível (Codex, PR #217).
+
+    A semântica contra um sync concorrente é IDÊNTICA à do singular: mesma
+    chave por item (`_lock_key`), mesmo `lock_timeout` — sync com a chave
+    ocupada leva LockNotAvailable → False → reporta sync_in_progress.
+
+    Devolve True só se TODOS os locks entraram (lista vazia → True: nada a
+    serializar). Fechar a conexão libera todos de uma vez — não há unlock
+    parcial a esquecer.
+
+    `sorted(set(...))`: a lista de entrada não tem ordem estável
+    (`list_pluggy_item_ids` é sem ORDER BY) — dois chamadores adquirindo em
+    ordens cruzadas podiam se deadlockar; ordem consistente elimina o ciclo
+    por construção, e a dedup torna explícito que item repetido não conta duas
+    vezes. DeadlockDetected no except é o cinto-e-suspensório: se um ciclo
+    aparecer por outro caminho, o desfecho é o mesmo False→"tente de novo",
+    não um 500.
+    """
+    itens = sorted({i.strip() for i in (item_ids or []) if i and i.strip()})
+    if not itens:
+        yield True
+        return
+
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL não está definido.")
+
+    espera = _lock_wait_ms() / 1000.0
+    if not _lock_slots().acquire(timeout=espera):
+        yield False
+        return
+    try:
+        conn = psycopg.connect(url, autocommit=True)
+    except Exception:
+        _lock_slots().release()
+        raise
+    try:
+        conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
+        got = True
+        for item in itens:
+            try:
+                conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
+            except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
+                    psycopg.errors.DeadlockDetected):
+                got = False
+                break
+        yield got
+    finally:
+        conn.close()
+        _lock_slots().release()
