@@ -96,6 +96,40 @@ def test_cache_e_por_usuario_sem_vazamento(user_id):
         _rm_auth(outro)
 
 
+def test_teto_e_poda_do_cache(user_id):
+    """Codex-4: o dict guarda PII decifrada — expirado tem que sair na poda
+    oportunista e o tamanho tem que respeitar o teto."""
+    import time
+    _mk_auth(user_id)
+    try:
+        db_support.invalidate_auth_user_cache()
+        now = time.monotonic()
+        for i in range(300):  # expiradas (ts além do TTL)
+            db_support._auth_user_cache[10_000_000 + i] = (now - 999, {"plan": "x"})
+        for i in range(300):  # frescas
+            db_support._auth_user_cache[20_000_000 + i] = (now, {"plan": "x"})
+
+        db_support.get_auth_user_impl(_CountingGetConn(), user_id)  # insert ⇒ poda
+        cache = db_support._auth_user_cache
+        assert len(cache) <= db_support.AUTH_USER_CACHE_MAX, f"teto furado: {len(cache)}"
+        assert all(u >= 20_000_000 or u == user_id for u in cache), "entrada expirada sobreviveu à poda"
+
+        # Negativo: sem o teto (MAX=inf ⇒ poda nunca dispara), cresce sem limite.
+        db_support.invalidate_auth_user_cache()
+        original_max = db_support.AUTH_USER_CACHE_MAX
+        db_support.AUTH_USER_CACHE_MAX = float("inf")
+        try:
+            for i in range(600):
+                db_support._auth_user_cache[30_000_000 + i] = (now - 999, {})
+            db_support.get_auth_user_impl(_CountingGetConn(), user_id)
+            assert len(db_support._auth_user_cache) == 601, "sem a poda tinha de passar de 512"
+        finally:
+            db_support.AUTH_USER_CACHE_MAX = original_max
+            db_support.invalidate_auth_user_cache()
+    finally:
+        _rm_auth(user_id)
+
+
 def test_mutacao_do_caller_nao_envenena_o_cache(user_id):
     """plan/plan_expires_at decidem acesso pago — caller que muta o dict
     devolvido não pode contaminar a próxima leitura."""

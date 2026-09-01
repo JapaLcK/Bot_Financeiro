@@ -52,9 +52,22 @@ after(async () => { await browser?.close(); });
 // stubadas: validate responde na hora; /auth/me demora ME_DELAY_MS.
 // wsMode: "silent" = conecta e fica (default) | "reject" = handshake cai 30ms
 // depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
-async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent" }) {
+async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent", seedSnap = false }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
+  if (seedSnap) {
+    // Snapshot que a "aba anterior" gravou (USER_ID 42, mês corrente) — o que
+    // o restoreSnapshotFromSession consome no boot.
+    await page.addInitScript(() => {
+      if (location.pathname !== "/app") return;
+      const d = new Date();
+      const key = `pb_snap_42_${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, "0")}`;
+      sessionStorage.setItem(key, JSON.stringify({
+        year: d.getFullYear(), month: d.getMonth() + 1, launches: [],
+        launches_pagination: { page: 1, filter_type: "all", query: "" },
+      }));
+    });
+  }
   await page.addInitScript((mode) => {
     window._t0 = Date.now();
     window._wsCreatedAt = null;
@@ -108,6 +121,24 @@ test("sem plano ativo: continua caindo em /precos quando o /me chega", async () 
 test("cadastro sem plano escolhido: cai em /precos?escolha=1", async () => {
   const { ctx, page } = await bootApp({ me: { needs_plan_selection: true } });
   await page.waitForURL("**/precos?escolha=1", { timeout: 5000 });
+  await ctx.close();
+});
+
+test("paywall NEGA: pb_snap_* some — reload da aba não repinta saldo", async () => {
+  const { ctx, page } = await bootApp({ me: { app_access: false }, seedSnap: true });
+  await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
+  const chaves = await page.evaluate(
+    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
+  assert.deepEqual(chaves, [], `snapshot sobreviveu ao veredito negativo: ${chaves}`);
+  await ctx.close();
+});
+
+test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", async () => {
+  const { ctx, page } = await bootApp({ me: { app_access: true }, seedSnap: true });
+  await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
+  const chaves = await page.evaluate(
+    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
+  assert.equal(chaves.length, 1, "snapshot de sessão não pode ser apagado no caminho aprovado");
   await ctx.close();
 });
 

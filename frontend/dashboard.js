@@ -386,6 +386,14 @@ function persistSnapshotToSession(data) {
   if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
   try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
 }
+// Limpa os snapshots pb_snap_* da aba. Chamada no logout e quando o paywall
+// NEGA (meGate): o restore pinta o snapshot que a PRÓPRIA aba gravou antes do
+// veredito do /me — aceitável (o navegador do usuário já possui o dado, e
+// gatear o restore custaria ~1 RTT no caminho quente) — mas depois de um
+// veredito negativo um reload da aba não deve repintar saldo.
+function clearSessionSnapshots() {
+  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+}
 function restoreSnapshotFromSession() {
   if (!USER_ID) return false;
   try {
@@ -411,7 +419,7 @@ async function logoutDashboard() {
   } catch {}
   clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
   // Limpa os snapshots da sessão (defense-in-depth; já são escopados ao userId).
-  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+  clearSessionSnapshots();
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
@@ -10701,10 +10709,12 @@ function _showAccessError(title, msg) {
         // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
         // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
         if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+          clearSessionSnapshots(); // veredito negativo: reload não repinta saldo
           window.location.replace("/precos?escolha=1");
           return false;
         }
         if (me && me.app_access === false) {
+          clearSessionSnapshots(); // veredito negativo: reload não repinta saldo
           if (window.PB_IN_APP) {
             // App iOS: tela neutra, sem link de compra (diretriz 3.1.1).
             // O connect() já disparou — mata o socket E o timer de reconexão

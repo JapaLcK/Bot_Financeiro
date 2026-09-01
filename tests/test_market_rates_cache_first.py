@@ -52,7 +52,7 @@ def test_get_latest_cache_fresco_zero_http_e_mesmo_valor():
                 # a contagem de HTTP volta a 3. O memo de confirmação (setado
                 # pelos fetches frios acima) é limpo — senão ele seguraria a rede.
                 calls.clear()
-                investments_db._sgs_confirmed_on.clear()
+                investments_db._sgs_confirmed_until.clear()
                 investments_db.get_latest_market_rate(cur, "CDI_AA", 4389, fresh_days=-1)
                 investments_db.get_latest_market_rate(cur, "SELIC_AA", 432, fresh_days=-1)
                 investments_db.get_latest_market_rate(cur, "IPCA_12M", 13522, fresh_days=-1)
@@ -126,7 +126,7 @@ def test_mapa_diario_janela_cacheada_zero_http_e_busca_so_o_faltante():
                 # célula sexta→segunda deixa de ir à rede. Memo limpo (o fetch
                 # do Positivo 2 confirmou hoje, e confirmação segura a rede).
                 calls.clear()
-                investments_db._sgs_confirmed_on.clear()
+                investments_db._sgs_confirmed_until.clear()
                 original_fresh = investments_db._sgs_tail_is_fresh
                 investments_db._sgs_tail_is_fresh = lambda newest, end: True
                 try:
@@ -270,7 +270,7 @@ def test_segunda_publicada_invalida_cache_que_termina_na_sexta():
                 # Negativo: condição ANTIGA reinjetada ((end-newest).days<=4 ⇒
                 # 'fresco') ⇒ a mesma terça serve o cache sem a segunda.
                 calls.clear()
-                investments_db._sgs_confirmed_on.clear()
+                investments_db._sgs_confirmed_until.clear()
                 cur.execute("delete from market_rates where code='CDI' and ref_date > %s", (sexta,))
                 original_fresh = investments_db._sgs_tail_is_fresh
                 investments_db._sgs_tail_is_fresh = lambda newest, end: (end - newest).days <= 4
@@ -284,6 +284,93 @@ def test_segunda_publicada_invalida_cache_que_termina_na_sexta():
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original
+
+
+def test_confirmacao_curta_pre_publicacao_pega_o_ponto_da_noite():
+    """Codex-3: célula 4b da máquina — manhã de dia útil, cauda publicável,
+    resposta vazia ⇒ confirmação CURTA (≤2h); quando ela vence, o ponto
+    publicado à noite entra AINDA no mesmo dia. Resposta que COMPLETA a
+    cauda ⇒ confirmação de dia cheio (meia-noite UTC)."""
+    from datetime import datetime, timezone
+
+    calls: list[tuple] = []
+    payload: dict = {"itens": []}  # muda de "vazio" (manhã) p/ ponto (noite)
+
+    def stub(series_code, start, end):
+        calls.append((start, end))
+        return list(payload["itens"])
+
+    original = investments_db._fetch_sgs_series_json
+    investments_db._fetch_sgs_series_json = stub
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code='CDI' and ref_date >= %s", (date(2026, 4, 1),))
+                d = date(2026, 4, 13)
+                while d <= date(2026, 4, 17):
+                    if investments_db.is_br_business_day(d):
+                        cur.execute(
+                            "insert into market_rates(code, ref_date, value) values ('CDI', %s, 0.05)", (d,)
+                        )
+                    d += timedelta(days=1)
+                win = (date(2026, 4, 13), date(2026, 4, 20))  # 20 = segunda publicável
+
+                # manhã: vazio ⇒ 1 fetch + confirmação CURTA (não meia-noite)
+                out = investments_db._get_cdi_daily_map(cur, *win)
+                assert len(calls) == 1 and date(2026, 4, 20) not in out
+                now = datetime.now(timezone.utc)
+                until = investments_db._sgs_confirmed_until["CDI"]
+                assert until - now <= investments_db.SGS_CONFIRM_SHORT, (
+                    f"vazio pré-publicação confirmou até {until} — era pra ser curto"
+                )
+                # memo vigente segura a rede
+                investments_db._get_cdi_daily_map(cur, *win)
+                assert len(calls) == 1
+
+                # "2h depois": confirmação venceu; o BCB publicou o ponto
+                investments_db._sgs_confirmed_until["CDI"] = now
+                payload["itens"] = [{"data": "20/04/2026", "valor": "0.06"}]
+                out = investments_db._get_cdi_daily_map(cur, *win)
+                assert len(calls) == 2 and out[date(2026, 4, 20)] == 0.06, (
+                    "o ponto da noite tinha de entrar no MESMO dia"
+                )
+                # cauda agora completa ⇒ confirmação de dia cheio
+                meia_noite = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                assert investments_db._sgs_confirmed_until["CDI"] == meia_noite
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_series_json = original
+
+
+def test_get_latest_confirma_curto_na_diaria_e_dia_cheio_na_mensal():
+    """Diária com ponto velho (pré-publicação) ⇒ curta; mensal ⇒ dia cheio
+    (o ponto mais novo É a resposta — teto de 1 fetch/dia preservado)."""
+    from datetime import datetime, timezone
+
+    calls: list[int] = []
+    original = investments_db._fetch_sgs_latest_json
+    investments_db._fetch_sgs_latest_json = _stub_latest(
+        calls, [{"data": "01/07/2026", "valor": "4,85"}]
+    )
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code in ('CDI_AA','IPCA_12M')")
+                now = datetime.now(timezone.utc)
+                meia_noite = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+                investments_db.get_latest_cdi_aa(cur)  # diária, ponto de 01/07 = velho
+                assert investments_db._sgs_confirmed_until["CDI_AA"] - now <= (
+                    investments_db.SGS_CONFIRM_SHORT + timedelta(seconds=5)
+                )
+
+                investments_db.get_latest_ipca_12m(cur)  # mensal
+                assert investments_db._sgs_confirmed_until["IPCA_12M"] == meia_noite
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_latest_json = original
 
 
 def test_payload_lixo_nao_confirma_o_memo():
@@ -371,6 +458,59 @@ def test_20_nov_pre_2024_e_dia_util_e_conta_como_buraco():
         investments_db._fetch_sgs_series_json = original
 
 
+def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
+    """Célula 5 da máquina: NADA cacheado na janela + memo vigente ⇒ 0 fetch.
+    O check do memo vivia sob `if cached:` — com janela vazia (manhã de
+    segunda, lote acruado na sexta, BCB ainda não publicou) toda abertura
+    pagava um fetch, o dia inteiro."""
+    calls: list[tuple] = []
+
+    def stub_vazio(series_code, start, end):
+        calls.append((series_code, start, end))
+        return []  # BCB: "sem valores no período" — confirma (curto)
+
+    original = investments_db._fetch_sgs_series_json
+    investments_db._fetch_sgs_series_json = stub_vazio
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code='CDI' and ref_date >= %s", (date(2026, 4, 1),))
+                investments_db._sgs_confirmed_until.pop("CDI", None)
+                win = (date(2026, 4, 18), date(2026, 4, 20))  # sáb..seg, cache vazio
+
+                # 1ª chamada: sem memo ⇒ busca (e a resposta vazia confirma).
+                assert investments_db._get_cdi_daily_map(cur, *win) == {}
+                assert len(calls) == 1
+
+                # Positivo: memo vigente + cache vazio ⇒ 0 fetch novo.
+                assert investments_db._get_cdi_daily_map(cur, *win) == {}
+                investments_db._get_cdi_daily_map(cur, *win)
+                assert len(calls) == 1, f"cache vazio ignorou o memo: {len(calls)} fetches"
+
+                # Negativo: check antigo (memo só sob `if cached:`) ⇒ 2 fetches.
+                calls.clear()
+                original_confirmed = investments_db._sgs_confirmed
+                investments_db._sgs_confirmed = lambda code: False  # inalcançável na célula 5
+                try:
+                    investments_db._get_cdi_daily_map(cur, *win)
+                    investments_db._get_cdi_daily_map(cur, *win)
+                finally:
+                    investments_db._sgs_confirmed = original_confirmed
+                assert len(calls) == 2, "sem consultar o memo tinham de ser 2 fetches"
+
+                # Célula 1 intacta: com dado cacheado FURADO o memo não segura.
+                calls.clear()
+                for d in (date(2026, 4, 13), date(2026, 4, 16)):  # falta 14 e 15 (úteis)
+                    cur.execute(
+                        "insert into market_rates(code, ref_date, value) values ('CDI', %s, 0.05)", (d,)
+                    )
+                investments_db._get_cdi_daily_map(cur, date(2026, 4, 13), date(2026, 4, 16))
+                assert len(calls) == 1, "cobertura furada tem de ir à rede mesmo com memo vigente"
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_series_json = original
+
+
 def test_memo_de_confirmacao_segura_a_rede_no_mesmo_dia():
     """Cauda stale mas rede já consultada hoje ⇒ 0 fetch (série parada num
     feriadão não paga um fetch por chamada); sem o memo ⇒ fetch de novo."""
@@ -405,7 +545,7 @@ def test_memo_de_confirmacao_segura_a_rede_no_mesmo_dia():
                 investments_db._fetch_sgs_latest_json = _stub_latest(
                     calls_latest, [{"data": "01/07/2026", "valor": "4,85"}]
                 )
-                investments_db._sgs_confirmed_on.clear()
+                investments_db._sgs_confirmed_until.clear()
                 try:
                     cur.execute("delete from market_rates where code='IPCA_12M'")
                     cur.execute(

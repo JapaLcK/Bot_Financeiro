@@ -516,6 +516,16 @@ def login_auth_user_impl(get_conn, check_password, email: str, password: str) ->
 # Cross-process (bot.py do Discord): sem invalidação remota; o TTL de 10 s é
 # o teto do atraso.
 AUTH_USER_CACHE_TTL_SECONDS = 10
+# Teto de entradas: o dict guarda PII decifrada (email/telefone/nome) e sem
+# teto uma entrada expirada só saía da memória quando o MESMO usuário fosse
+# consultado de novo. No insert acima do teto: poda expirados; se ainda
+# estourar, despeja o mais antigo. Dois limites aceitos de propósito: a poda
+# só roda NO INSERT (processo ocioso retém até 512 entradas expiradas até a
+# próxima leitura), e a ordem de despejo é por timestamp de INSERT, não de
+# uso — com TTL de 10 s, despejar um usuário ativo custa ≤10 s de cache.
+# ponytail: varredura O(n) no teto (512) — ordenar por timestamp se o teto
+# crescer 10x; poda por tempo (task periódica) se o ocioso incomodar.
+AUTH_USER_CACHE_MAX = 512
 _auth_user_cache: dict[int, tuple[float, dict | None]] = {}
 
 
@@ -571,7 +581,15 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
             ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
                                  subject_user_id=user_id, field="name"),
         )
-    _auth_user_cache[int(user_id)] = (time.monotonic(), copy.deepcopy(row))
+    now = time.monotonic()
+    if len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+        cutoff = now - AUTH_USER_CACHE_TTL_SECONDS
+        for uid in [u for u, (ts, _) in _auth_user_cache.items() if ts < cutoff]:
+            _auth_user_cache.pop(uid, None)
+        while len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+            oldest = min(_auth_user_cache, key=lambda u: _auth_user_cache[u][0])
+            _auth_user_cache.pop(oldest, None)
+    _auth_user_cache[int(user_id)] = (now, copy.deepcopy(row))
     return row
 
 
