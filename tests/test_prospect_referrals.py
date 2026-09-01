@@ -169,6 +169,19 @@ def test_link_valido_seta_cookie():
     assert f"max-age={30 * 24 * 3600}" in cookie.lower()
 
 
+def test_link_honra_cookie_secure_do_app(monkeypatch):
+    """O cookie usa o COOKIE_SECURE do app, que inclui a blindagem APP_ENV=prod
+    (Secure mesmo com DASHBOARD_URL http por engano). Mesmo padrão de
+    test_auth_cookie.py: força a constante e confere o atributo."""
+    monkeypatch.setattr(dashboard, "COOKIE_SECURE", True)
+    client = TestClient(dashboard.app)
+    resp = client.get("/i/abc12345", follow_redirects=False)
+    cookie = next(
+        h for h in resp.headers.get_list("set-cookie") if h.startswith("prospect_code=")
+    )
+    assert "secure" in cookie.lower()
+
+
 def test_link_invalido_nao_seta_cookie():
     client = TestClient(dashboard.app)
     for bad in ("injecao'--%22", "abc", "a" * 21, "abc12345%0A"):

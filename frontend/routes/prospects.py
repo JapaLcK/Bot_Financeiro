@@ -26,7 +26,6 @@ from frontend.routes import shared
 router = APIRouter()
 
 PROSPECT_COOKIE_NAME = "prospect_code"
-_COOKIE_SECURE = shared.DASHBOARD_URL.startswith("https://")
 _STATUS_CODES_CAP = 500
 
 
@@ -36,12 +35,17 @@ async def prospect_link(code: str):
     malformado → só redireciona (sem cookie)."""
     response = RedirectResponse(url="/", status_code=302)
     if is_valid_prospect_code(code):
+        # COOKIE_SECURE do app inclui a blindagem APP_ENV=prod (Secure mesmo
+        # com DASHBOARD_URL http por engano). Import tardio porque o monólito
+        # importa este router antes de definir a constante (precedente:
+        # open_finance.py importa `manager` do mesmo jeito).
+        from frontend.finance_bot_websocket_custom import COOKIE_SECURE
         response.set_cookie(
             PROSPECT_COOKIE_NAME,
             code,
             max_age=PROSPECT_COOKIE_MAX_AGE_DAYS * 24 * 3600,
             httponly=True,
-            secure=_COOKIE_SECURE,
+            secure=COOKIE_SECURE,
             samesite="lax",
         )
     return response
