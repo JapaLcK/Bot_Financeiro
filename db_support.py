@@ -4,6 +4,7 @@ import copy
 import logging
 import os
 import secrets
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
@@ -527,14 +528,22 @@ AUTH_USER_CACHE_TTL_SECONDS = 10
 # crescer 10x; poda por tempo (task periódica) se o ocioso incomodar.
 AUTH_USER_CACHE_MAX = 512
 _auth_user_cache: dict[int, tuple[float, dict | None]] = {}
+# get_auth_user roda em THREADS (dezenas de `asyncio.to_thread(get_auth_user,
+# ...)` no monólito), então poda+evict+insert — que ITERAM o dict — podem
+# correr com um insert/clear de outra thread e levantar "dictionary changed
+# size during iteration" numa request de auth legítima. O lock protege só as
+# seções COMPOSTAS; o lookup segue fora dele (dict.get é atômico sob o GIL e
+# o caminho quente não paga contenção).
+_auth_user_cache_lock = threading.Lock()
 
 
 def invalidate_auth_user_cache(user_id: int | None = None) -> None:
     """Chame após QUALQUER escrita em auth_accounts (None = limpa tudo)."""
-    if user_id is None:
-        _auth_user_cache.clear()
-    else:
-        _auth_user_cache.pop(int(user_id), None)
+    with _auth_user_cache_lock:
+        if user_id is None:
+            _auth_user_cache.clear()
+        else:
+            _auth_user_cache.pop(int(user_id), None)
 
 
 def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
@@ -582,14 +591,15 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
                                  subject_user_id=user_id, field="name"),
         )
     now = time.monotonic()
-    if len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
-        cutoff = now - AUTH_USER_CACHE_TTL_SECONDS
-        for uid in [u for u, (ts, _) in _auth_user_cache.items() if ts < cutoff]:
-            _auth_user_cache.pop(uid, None)
-        while len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
-            oldest = min(_auth_user_cache, key=lambda u: _auth_user_cache[u][0])
-            _auth_user_cache.pop(oldest, None)
-    _auth_user_cache[int(user_id)] = (now, copy.deepcopy(row))
+    with _auth_user_cache_lock:  # poda+evict ITERAM o dict: ver comentário do lock
+        if len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+            cutoff = now - AUTH_USER_CACHE_TTL_SECONDS
+            for uid in [u for u, (ts, _) in _auth_user_cache.items() if ts < cutoff]:
+                _auth_user_cache.pop(uid, None)
+            while len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+                oldest = min(_auth_user_cache, key=lambda u: _auth_user_cache[u][0])
+                _auth_user_cache.pop(oldest, None)
+        _auth_user_cache[int(user_id)] = (now, copy.deepcopy(row))
     return row
 
 

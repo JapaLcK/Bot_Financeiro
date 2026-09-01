@@ -49,11 +49,14 @@ SGS_TIMEOUT_SECONDS = 3
 #      à noite ainda no mesmo dia
 #    c falha de rede/timeout (None) ou 200+lixo (None) → NÃO confirma;
 #      re-tenta na chamada seguinte
-#  5 cache VAZIO na janela (nada cacheado): memo VIGENTE → 0 fetch, devolve {}
-#    (mesmo efeito observável do fetch vazio, sem a ida à rede); memo vencido
-#    → fetch da janela e confirma como a célula 4. Instância real: manhã de
-#    segunda com lote acruado na sexta (janela [sáb, seg] vazia até o BCB
-#    publicar) — sem esta célula era 1 fetch por abertura, o dia inteiro.
+#  5 cache VAZIO na janela (nada cacheado): a rede já disse que UM INTERVALO
+#    CONTENDO [start, end] está vazio (_sgs_empty_window, ≤2h) → 0 fetch,
+#    devolve {}; senão → fetch da janela e confirma como a célula 4.
+#    Instância real: manhã de segunda com lote acruado na sexta (janela
+#    [sáb, seg] vazia até o BCB publicar) — sem a célula era 1 fetch por
+#    abertura (~210 ms cada), o dia inteiro. O escopo por INTERVALO é o que
+#    impede uma janela estreita vazia de calar uma janela histórica sem
+#    cache (que ficaria sem render até a confirmação vencer).
 #  get_latest_*: mesmas células com "cauda" = (ref_date, hoje] nas diárias;
 #  na mensal (IPCA_12M) frescor é por idade (≤45d) e a resposta é completa
 #  por definição (o ponto mais novo É a resposta) → confirmação de dia cheio.
@@ -66,6 +69,22 @@ SGS_TIMEOUT_SECONDS = 3
 # em dia pré-publicação com tráfego contínuo (típico ≤ 6). Banco, se incomodar.
 SGS_CONFIRM_SHORT = timedelta(hours=2)
 _sgs_confirmed_until: dict[str, datetime] = {}
+# Duas perguntas DIFERENTES, dois memos (não unificar):
+#   _sgs_confirmed_until → "existe ponto mais novo que o meu?" — afirmação
+#     sobre a CAUDA da série, válida para qualquer janela (células 3 e
+#     get_latest_*).
+#   _sgs_empty_window    → "a janela [start, end] veio VAZIA" — afirmação
+#     sobre AQUELE intervalo. Confundir as duas foi o bug da célula 5: uma
+#     janela estreita vazia (sáb-dom) confirmava a série e fazia uma janela
+#     histórica sem cache receber {} sem ir à rede.
+_sgs_empty_window: dict[str, tuple[datetime, date, date]] = {}
+
+
+def _sgs_empty_window_covers(code: str, start: date, end: date) -> bool:
+    """A rede já disse, há pouco, que um intervalo CONTENDO [start, end] está
+    vazio? Só então o atalho de cache vazio pode pular o fetch."""
+    w = _sgs_empty_window.get(code)
+    return bool(w) and datetime.now(timezone.utc) < w[0] and w[1] <= start and end <= w[2]
 
 
 def _sgs_confirm(code: str, *, complete: bool) -> None:
@@ -263,13 +282,15 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
                 return cached  # janela coberta e cauda fresca/confirmada
             fetch_start = newest + timedelta(days=1)  # só a cauda falta
         # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
-    elif _sgs_confirmed("CDI"):
-        return cached  # célula 5: janela vazia e a rede já disse que não há dado
+    elif _sgs_empty_window_covers("CDI", start, end):
+        return cached  # célula 5: ESTA janela já veio vazia da rede há pouco
 
     data = _fetch_sgs_series_json(12, fetch_start, end)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_confirm("CDI", complete=False)
+            _sgs_empty_window["CDI"] = (
+                datetime.now(timezone.utc) + SGS_CONFIRM_SHORT, fetch_start, end)
         return cached
 
     to_upsert = []
@@ -328,13 +349,15 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
         # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
         # (séries mensais nunca "cobrem" dias úteis ⇒ sempre janela inteira,
         #  que é o comportamento antigo — correto, só não otimizado)
-    elif _sgs_confirmed(code):
-        return cached  # célula 5: janela vazia e a rede já disse que não há dado
+    elif _sgs_empty_window_covers(code, start, end):
+        return cached  # célula 5: ESTA janela já veio vazia da rede há pouco
 
     data = _fetch_sgs_series_json(series_code, fetch_start, end)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
             _sgs_confirm(code, complete=False)
+            _sgs_empty_window[code] = (
+                datetime.now(timezone.utc) + SGS_CONFIRM_SHORT, fetch_start, end)
         return cached
 
     to_upsert = []

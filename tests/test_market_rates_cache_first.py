@@ -487,15 +487,15 @@ def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
                 investments_db._get_cdi_daily_map(cur, *win)
                 assert len(calls) == 1, f"cache vazio ignorou o memo: {len(calls)} fetches"
 
-                # Negativo: check antigo (memo só sob `if cached:`) ⇒ 2 fetches.
+                # Negativo: sem o memo de janela vazia ⇒ 2 fetches.
                 calls.clear()
-                original_confirmed = investments_db._sgs_confirmed
-                investments_db._sgs_confirmed = lambda code: False  # inalcançável na célula 5
+                original_covers = investments_db._sgs_empty_window_covers
+                investments_db._sgs_empty_window_covers = lambda code, s, e: False
                 try:
                     investments_db._get_cdi_daily_map(cur, *win)
                     investments_db._get_cdi_daily_map(cur, *win)
                 finally:
-                    investments_db._sgs_confirmed = original_confirmed
+                    investments_db._sgs_empty_window_covers = original_covers
                 assert len(calls) == 2, "sem consultar o memo tinham de ser 2 fetches"
 
                 # Célula 1 intacta: com dado cacheado FURADO o memo não segura.
@@ -506,6 +506,60 @@ def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
                     )
                 investments_db._get_cdi_daily_map(cur, date(2026, 4, 13), date(2026, 4, 16))
                 assert len(calls) == 1, "cobertura furada tem de ir à rede mesmo com memo vigente"
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_series_json = original
+
+
+def test_janela_estreita_vazia_nao_cala_janela_historica():
+    """Codex-6 (regressão da célula 5): uma janela estreita que veio vazia
+    confirmava a SÉRIE inteira, e uma janela histórica sem cache recebia {}
+    sem ir à rede — o lote antigo ficava sem render até a confirmação vencer.
+    A confirmação de vazio é escopada ao INTERVALO consultado."""
+    calls: list[tuple] = []
+    vazio = {"on": True}
+
+    def stub(series_code, start, end):
+        calls.append((start, end))
+        if vazio["on"]:
+            return []
+        out, d = [], start
+        while d <= end:
+            if investments_db.is_br_business_day(d):
+                out.append({"data": d.strftime("%d/%m/%Y"), "valor": "0.05"})
+            d += timedelta(days=1)
+        return out
+
+    original = investments_db._fetch_sgs_series_json
+    investments_db._fetch_sgs_series_json = stub
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code='CDI'")
+                investments_db._sgs_empty_window.pop("CDI", None)
+
+                # 1) janela estreita (sáb..dom) volta vazia e confirma SÓ ela
+                assert investments_db._get_cdi_daily_map(cur, date(2026, 4, 18), date(2026, 4, 19)) == {}
+                assert len(calls) == 1
+
+                # 2) POSITIVO do achado: janela histórica sem cache TEM de ir
+                # à rede (antes recebia {} calada) e trazer os dias.
+                vazio["on"] = False
+                out = investments_db._get_cdi_daily_map(cur, date(2026, 1, 2), date(2026, 4, 1))
+                assert len(calls) == 2, "janela histórica foi calada pela confirmação da estreita"
+                assert len(out) > 50, f"janela histórica veio com {len(out)} dias"
+
+                # 3) Positivo de perf preservado: repetir a MESMA janela
+                # estreita (⊆ intervalo confirmado) segue sem rede.
+                vazio["on"] = True
+                cur.execute("delete from market_rates where code='CDI'")
+                investments_db._sgs_empty_window.pop("CDI", None)
+                calls.clear()
+                win = (date(2026, 4, 18), date(2026, 4, 20))
+                investments_db._get_cdi_daily_map(cur, *win)
+                investments_db._get_cdi_daily_map(cur, *win)
+                investments_db._get_cdi_daily_map(cur, date(2026, 4, 19), date(2026, 4, 20))  # ⊆
+                assert len(calls) == 1, f"janela contida devia usar o memo: {calls}"
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original

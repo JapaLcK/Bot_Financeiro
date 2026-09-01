@@ -130,6 +130,77 @@ def test_teto_e_poda_do_cache(user_id):
         _rm_auth(user_id)
 
 
+def test_cache_no_teto_sob_concorrencia_nao_estoura():
+    """Codex-7: get_auth_user roda em THREADS (asyncio.to_thread). Com o cache
+    no teto, a poda e o evict ITERAM o dict — sem sincronização isso levanta
+    'dictionary keys changed during iteration' numa request de auth legítima.
+
+    O teto é elevado no teste de propósito: com 512 entradas a iteração dura
+    microssegundos e a corrida quase nunca aparece; com o cache grande ela é
+    reproduzível (medido: sem lock 1+ exceção, com lock 0).
+    """
+    import contextlib
+    import threading
+    import time as _time
+
+    class _FakeConn:
+        """get_conn leve: exercita o caminho do impl sem I/O de banco."""
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return self
+        def execute(self, *a, **k): return None
+        def fetchone(self): return {"email": "x@test.local", "plan": "free"}
+
+    original_max = db_support.AUTH_USER_CACHE_MAX
+    db_support.AUTH_USER_CACHE_MAX = 200_000
+    parar = threading.Event()
+    erros: list[str] = []
+    try:
+        db_support.invalidate_auth_user_cache()
+        velho = _time.monotonic() - 999
+        for i in range(db_support.AUTH_USER_CACHE_MAX):  # no teto, tudo expirado
+            db_support._auth_user_cache[40_000_000 + i] = (velho, {"plan": "x"})
+
+        # As threads usam SÓ as APIs reais (impl e invalidate) — é o que os
+        # `asyncio.to_thread(get_auth_user, ...)` fazem. Escrita crua no dict
+        # não existe em produção e criaria uma corrida que nenhum lock cobre.
+        def lendo_e_inserindo(base):
+            try:
+                uid = base
+                while not parar.is_set():
+                    # user NOVO a cada giro: sempre cache MISS, então a poda
+                    # (que ITERA o dict) roda em todo giro. Com id fixo o 2º
+                    # giro seria hit e a seção crítica não seria exercitada.
+                    uid += 1
+                    db_support.get_auth_user_impl(lambda: _FakeConn(), uid)
+            except BaseException as e:  # noqa: BLE001 — o teste É sobre a exceção
+                erros.append(repr(e)[:120])
+
+        def invalidando(base):
+            try:
+                n = 0
+                while not parar.is_set():
+                    n += 1
+                    db_support.invalidate_auth_user_cache(base + (n % 5000))
+            except BaseException as e:  # noqa: BLE001
+                erros.append(repr(e)[:120])
+
+        threads = [threading.Thread(target=lendo_e_inserindo, args=(60_000_000 + i * 1_000_000,))
+                   for i in range(3)]
+        threads += [threading.Thread(target=invalidando, args=(40_000_000 + i * 10_000,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        _time.sleep(3.0)
+        parar.set()
+        for t in threads:
+            t.join(timeout=15)
+        assert not erros, f"mutação concorrente estourou: {erros[:3]}"
+    finally:
+        parar.set()
+        db_support.AUTH_USER_CACHE_MAX = original_max
+        db_support.invalidate_auth_user_cache()
+
+
 def test_mutacao_do_caller_nao_envenena_o_cache(user_id):
     """plan/plan_expires_at decidem acesso pago — caller que muta o dict
     devolvido não pode contaminar a próxima leitura."""
