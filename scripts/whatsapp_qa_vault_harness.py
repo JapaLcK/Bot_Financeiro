@@ -1104,12 +1104,31 @@ def roda_pares():
         if inventados:
             sc.note("valores que só a forma solta afirma: "
                      + ", ".join(f"R$ {v/100:.2f}" for v in sorted(inventados)))
+        # Máquina de estados do veredito, enumerada de uma vez (CLAUDE.md §4:
+        # dois achados no mesmo subsistema = parar de remendar). Dois estados
+        # davam ✅ sem terem comparado nada:
+        #   - chamada de IA FALHOU nos dois lados → tudo vazio → passava;
+        #   - nenhum dos lados afirmou valor → nada foi medido → passava.
+        chamadas_do_par = sc.turns[-2][2] + sc.turns[-1][2]
+        falhas_openai = sorted({c["erro"] for c in chamadas_do_par if c.get("erro")})
+        sc.check(not falhas_openai, "nenhuma chamada à OpenAI falhou neste par")
+
         if faltando:
             sc.note("valores que a forma curta traz e a solta não: "
                      + ", ".join(f"R$ {v/100:.2f}" for v in sorted(faltando)))
         if v_cmd and not v_ia:
             sc.note(f"a forma curta trouxe {len(v_cmd)} valor(es) e a solta não trouxe nenhum")
-        sc.set_veredict("✅" if (sem_invencao and trouxe_dado and guarda_ok) else "❌")
+        if falhas_openai:
+            # Não é ❌: ❌ acusa o produto, e aqui quem quebrou foi a chamada.
+            sc.set_veredict("⚠️")
+            sc.note("chamada à OpenAI falhou (" + ", ".join(falhas_openai)
+                     + ") — o par não comparou nada, o resultado não vale")
+        elif not v_cmd and not v_ia:
+            sc.set_veredict("🔍")
+            sc.note("nenhum dos dois lados afirmou valor em R$ — o par não mediu nada; "
+                     "ou o caso não é numérico, ou os dois falharam em responder")
+        else:
+            sc.set_veredict("✅" if (sem_invencao and trouxe_dado and guarda_ok) else "❌")
         SCENARIOS.append(sc)
 
 

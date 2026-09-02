@@ -607,8 +607,20 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_signature_invalid') AS billing_signature_invalid_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_payment_failed') AS billing_payment_failed_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'engagement_loop_error') AS engagement_errors_7d,
-                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'ai_claim_unsupported') AS ai_claim_unsupported_24h,
-                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'ai_claim_unsupported') AS ai_claim_unsupported_7d,
+                    -- SOMA as afirmações, não conta as linhas: uma resposta com
+                    -- três valores sem dado grava UM evento, e contar linhas
+                    -- subnotificaria por 3x justo na resposta mais grave. O
+                    -- `~ '^[0-9]+$'` é o fallback pra linha malformada — cast
+                    -- direto estouraria a query inteira do dashboard por causa
+                    -- de um `details` estranho.
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_24h,
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_7d,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_webhook_received') AS last_whatsapp_webhook_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_send_success') AS last_whatsapp_send_success_at,
                     MAX(created_at) FILTER (WHERE event_type LIKE 'category_ai_%') AS last_category_ai_at,

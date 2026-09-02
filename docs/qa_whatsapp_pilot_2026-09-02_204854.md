@@ -1,14 +1,14 @@
 # QA piloto — vault WhatsApp (23 interações, 3 domínios)
 
-Gerado em 2026-09-02_2024 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
+Gerado em 2026-09-02_204854 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 11 interações — ✅ 7 · ❌ 4 · ⚠️ 0 · 🔍 0
+**Sumário:** 11 interações — ✅ 5 · ❌ 4 · ⚠️ 0 · 🔍 2
 
-**Caminho:** 10 turno(s) resolvido(s) pela IA · 12 por comando/regex (sem chamada nenhuma) — 47 chamadas OpenAI no total.
+**Caminho:** 10 turno(s) resolvido(s) pela IA · 12 por comando/regex (sem chamada nenhuma) — 46 chamadas OpenAI no total.
 
-**Custo:** US$ 0.0148 nesta rodada · US$ 0.0648 acumulado no mês pelos harnesses. 163763 tokens de entrada, 135680 cacheados (83%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
+**Custo:** US$ 0.0138 nesta rodada · US$ 0.0786 acumulado no mês pelos harnesses. 151208 tokens de entrada, 123264 cacheados (82%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
 
-**Guarda de afirmações:** 6 afirmação(ões) numérica(s) em resposta de IA · **0 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
+**Guarda de afirmações:** 8 afirmação(ões) numérica(s) em resposta de IA · **0 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
 
 ## Discrepâncias entre vault e código
 
@@ -31,9 +31,9 @@ Gerado em 2026-09-02_2024 por `scripts/whatsapp_qa_vault_harness.py`, chamando `
 > _caminho: comando (0 chamadas)_
 >
 > Você: qto sobrou pra mim
-> PigBank: 🐷 Sobrou R$ *1.736,65* pra você! 
+> PigBank: 🐷 Sobrou R$ *1.736,65* pra você. 
 
-Se precisar de mais alguma coisa, é só avisar!
+Se precisar de mais alguma coisa, é só falar!
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
@@ -45,6 +45,7 @@ Se precisar de mais alguma coisa, é só avisar!
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
 - valores que a forma curta traz e a solta não: R$ 50.00, R$ 89.90, R$ 123.45, R$ 263.35
@@ -84,6 +85,7 @@ Se precisar de mais alguma coisa, é só avisar!
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
 
@@ -103,12 +105,12 @@ Se precisar de mais alguma coisa, é só avisar!
 > Você: me mostra meus ultimos lancamentos
 > PigBank: 🐷 Aqui estão seus últimos lançamentos:
 
-1. *R$ 89,90* - Gastei 89,90 com uber (Transporte)
-2. *R$ 2.000,00* - Recebi 2000 de salário (Rendimentos)
-3. *R$ 123,45* - Gastei 123,45 na farmácia (Saúde)
-4. *R$ 50,00* - Gastei 50 no mercado (Mercado)
+1. *R$ 89,90* - Gastei com uber (transporte)
+2. *R$ 2.000,00* - Recebi de salário (rendimentos)
+3. *R$ 123,45* - Gastei na farmácia (saúde)
+4. *R$ 50,00* - Gastei no mercado (mercado)
 
-Se precisar de mais alguma coisa, é só avisar!
+Se precisar de mais detalhes ou quiser fazer algo com esses lançamentos, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 4 afirmação(ões), todas sustentadas_
 >
@@ -120,6 +122,7 @@ Se precisar de mais alguma coisa, é só avisar!
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
 - valores que a forma curta traz e a solta não: R$ 263.35
@@ -150,6 +153,7 @@ Se precisar de mais alguma coisa, é só avisar!
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
 - valores que a forma curta traz e a solta não: R$ 50.00, R$ 89.90, R$ 123.45, R$ 263.35
@@ -181,6 +185,7 @@ Se precisar de mais alguma coisa, é só avisar!
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
 - valores que a forma curta traz e a solta não: R$ 50.00, R$ 89.90, R$ 123.45, R$ 263.35
@@ -210,6 +215,7 @@ ID: #5
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
 - valores que a forma curta traz e a solta não: R$ 30.00, R$ 1706.65
@@ -242,6 +248,7 @@ ID: #5
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
 
@@ -249,11 +256,16 @@ ID: #5
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: gastos com saúde
-> PigBank: 🐷 Nos últimos dias, você gastou R$ *123,45* com saúde. 
+> PigBank: 🐷 Nos últimos dias, você gastou com saúde:
 
-Se precisar de mais detalhes ou quiser ver outras categorias, é só avisar!
-> _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
-> _guarda: ✅ 1 afirmação(ões), todas sustentadas_
+R$ 123,45
+
+• Total de gastos em saúde
+• Outras categorias: transporte (R$ 89,90) e mercado (R$ 50,00)
+
+Se precisar de mais detalhes ou quiser ver outros gastos, é só falar!
+> _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
+> _guarda: ✅ 3 afirmação(ões), todas sustentadas_
 >
 > Você: quanto eu gastei com remedio e farmacia
 > PigBank: 🐷 Você não teve gastos em *remedio e farmacia* neste mês.
@@ -267,10 +279,11 @@ Se precisar de mais detalhes ou quiser ver outras categorias, é só avisar!
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
-- valores que a forma curta traz e a solta não: R$ 123.45
-- a forma curta trouxe 1 valor(es) e a solta não trouxe nenhum
+- valores que a forma curta traz e a solta não: R$ 50.00, R$ 89.90, R$ 123.45
+- a forma curta trouxe 3 valor(es) e a solta não trouxe nenhum
 
 ---
 
@@ -278,21 +291,25 @@ Se precisar de mais detalhes ou quiser ver outras categorias, é só avisar!
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: limite nubank
-> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. Pra ver quanto sobra, você precisa cadastrar o limite do cartão no dashboard. Quer que eu abra o link pra você?
+> PigBank: 🐷 O limite do seu cartão Nubank não tá cadastrado. Pra saber quanto você tem disponível, é só cadastrar o limite no dashboard. Quer que eu te mande o link?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 > Você: quanto ainda posso gastar no nubank
-> PigBank: 🐷 Parece que o limite do seu cartão Nubank não tá cadastrado. Pra saber quanto você pode gastar, é só cadastrar o limite no dashboard. Quer que eu te mande o link?
+> PigBank: 🐷 Parece que o limite do seu cartão Nubank não tá cadastrado. Pra ver quanto você ainda pode gastar, é só cadastrar o limite no dashboard. Quer que eu te mande o link pra lá?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 
-**Veredito:** ✅
+**Veredito:** 🔍
 
 **Checklist do vault:**
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
+
+**Notas:**
+- nenhum dos dois lados afirmou valor em R$ — o par não mediu nada; ou o caso não é numérico, ou os dois falharam em responder
 
 ---
 
@@ -319,6 +336,7 @@ Total: R$ 0,00 | Pago: R$ 0,00 | Em aberto: R$ 0,00
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
 
@@ -346,12 +364,16 @@ Total: R$ 0,00 | Pago: R$ 0,00 | Em aberto: R$ 0,00
 > _caminho: comando (0 chamadas)_
 >
 
-**Veredito:** ✅
+**Veredito:** 🔍
 
 **Checklist do vault:**
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
+- [x] nenhuma chamada à OpenAI falhou neste par
+
+**Notas:**
+- nenhum dos dois lados afirmou valor em R$ — o par não mediu nada; ou o caso não é numérico, ou os dois falharam em responder
 
 ---
