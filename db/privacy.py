@@ -267,6 +267,9 @@ def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) 
 
         conn.commit()
 
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+
     return {
         "user_id": user_id,
         "status": "scheduled",
@@ -595,6 +598,8 @@ def delete_user_data(user_id: int) -> dict:
             f"user_exists={user_still_exists}; leftovers={leftovers}"
         )
 
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)  # a conta saiu do banco; sai do cache junto
     return {"user_id": user_id, "deleted": bool(deleted), "email": primary_email}
 
 
@@ -638,6 +643,10 @@ def _claim_due_account_deletions(limit: int, stale_after_minutes: int) -> list[i
 
         conn.commit()
 
+    from db_support import invalidate_auth_user_cache
+    for uid in due_user_ids:
+        invalidate_auth_user_cache(uid)
+
     return due_user_ids
 
 
@@ -654,6 +663,8 @@ def _restore_account_deletion_schedule(user_id: int) -> None:
             (user_id,),
         )
         conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
 
 
 def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 120) -> list[dict]:
