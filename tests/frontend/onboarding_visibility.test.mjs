@@ -24,7 +24,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -32,29 +32,13 @@ import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
-// Porta própria: 8899 settings_security_fanout, 8901 hiw_rail, 8903 modal_keys,
-// 8905 of_refresh_ui. Repetir uma faz o http.server morrer com "Address already
-// in use" e o arquivo fica vermelho por colisão, não por defeito.
-const PORT = Number(process.env.PB_ONB_TEST_PORT || 8907);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", FRONTEND],
-    { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/comecar.html`)).ok) return proc; } catch { /* ainda subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
-
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Abre o wizard com o backend simulado. `waLinked` troca o cenário do passo 3. */

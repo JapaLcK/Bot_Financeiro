@@ -33,6 +33,33 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
+# DÍVIDA (#179): o offset BRT do comentário abaixo é cravado, fora da fonte
+# única `utils_date._tz()`. Diferente dos outros três sites de dívida, este
+# NÃO é exibição: é a HORA DE PAREDE em que o bot fala com o usuário. Com
+# `REPORT_TIMEZONE` diferente de São Paulo, a rodada "diária" cai numa hora
+# errada do dia local (3h UTC = 0h em BRT, mas 17h em Kiritimati).
+#
+# INVENTÁRIO para quem for fechar isto (enumerado a partir dos 15
+# `asyncio.create_task` do startup — `grep -n create_task
+# frontend/finance_bot_websocket_custom.py` — e do `grep -rn '\.hour'` sobre o
+# código de produção). Agendador por HORA DE PAREDE são QUATRO, não um:
+#
+#   `_daily_report_tick`, `_bill_reminder_tick` e `_periodic_report_tick`
+#   (adapters/whatsapp/wa_app.py) comparam `now.hour` com uma hora
+#   configurada, exatamente como este — e NÃO têm o problema porque leem o
+#   relógio por `now_tz()`, a fonte única. São eles o padrão a copiar aqui,
+#   não os loops de intervalo.
+#
+#   Os outros 11 `create_task` não têm hora de parede nenhuma: `_wa_worker` é
+#   fila, e `_open_finance_refresh`, `_open_finance_proactive`,
+#   `_open_finance_trial_expiry`, `_account_deletion_worker` (os quatro no
+#   monólito), `engagement_scheduler`, `investment_scheduler`,
+#   `recurring_charger`, `news_bot`, `piggy_agents` e
+#   `login_events_retention` dormem por INTERVALO — fuso não os alcança.
+#
+# Consertar aqui é trocar a variável por hora LOCAL (`_seconds_until_next_run`
+# usa `datetime.now(utc)`), o que muda o contrato de `PROACTIVE_AI_HOUR_UTC` —
+# PR próprio.
 RUN_HOUR_UTC = int(os.getenv("PROACTIVE_AI_HOUR_UTC", "3"))  # 3h UTC = 0h BRT
 ACTIVE_DAYS = 7
 MAX_USERS_PER_RUN = 200  # guardrail defensivo

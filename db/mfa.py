@@ -401,3 +401,5 @@ def mark_mfa_onboarding_shown(user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)

@@ -948,7 +948,33 @@ body.balance-hidden .account-balance {
 /* ─── Toast ──────────────────────────────────── */
 #toast {
   position: fixed;
-  left: 50%;
+  /* Ancorado em `50vw` e centrado por `-50%` do PRÓPRIO toast. Duas coisas
+     que custaram medição e não são óbvias:
+
+     1. `vw`, e não `50%`/`margin:auto`. Esta página tem overflow horizontal
+        pré-existente (`.top-actions`), então o bloco-contêiner do `fixed` é
+        379px numa tela de 320 — qualquer centragem relativa ao contêiner mira
+        os 379 e joga o toast para fora. `vw` vale o que se vê.
+     2. `transform`, e NÃO a propriedade individual `translate`. Ela resolve o
+        mesmo, mas não existe no WKWebView do iOS 14 inicial, e o alvo de deploy
+        do app é iOS 14.0 (`mobile/ios/App/App.xcodeproj`): lá a declaração é
+        ignorada e o toast ancora em `left: 0`, colado na borda esquerda
+        (Codex #166, P2). Sem `@supports` e sem fallback duplicado — esta forma
+        é universal.
+
+     O X é constante entre o estado oculto e o `.show`, então a `transition` do
+     `transform` só anima o Y (amostrado a cada 25ms durante a animação: X fixo,
+     Y de 8.94 a 0).
+
+     Ressalva de honestidade: uma versão anterior deste comentário afirmava, como
+     medido, que `translateX(calc(50vw - 50%))` "resolve para zero no Chromium".
+     É falso — aquilo centra igual (`matrix(1,0,0,1,16,0)` a 390). O número veio
+     de ler `getComputedStyle().transform` no meio da `transition`, que devolve o
+     valor interpolado em t=0, ou seja, o transform ANTIGO. A forma compacta
+     funcionaria; o motivo de não usá-la é só o item 2. */
+  left: 50vw;
+  right: auto;
+  width: fit-content;
   bottom: 28px;
   transform: translateX(-50%) translateY(14px);
   opacity: 0;
@@ -961,13 +987,30 @@ body.balance-hidden .account-balance {
   font-size: .8rem;
   font-weight: 760;
   z-index: 50;
-  white-space: nowrap;
+  /* `nowrap` + `left:50%` sem teto = frase longa sai da viewport pelos DOIS
+     lados, e `scrollWidth` continua o da tela: não há scroll que revele o
+     final. Medido a 390x844: 11 das 12 mensagens do toast cortavam, inclusive
+     as instruções do Open Finance ("...autorize o acesso no app do ban"). */
+  max-width: min(420px, calc(100vw - 32px));
+  white-space: normal;
+  /* `normal` quebra em espaço, e o UA ainda quebra depois de "/" — uma URL
+     longa se vira sozinha (medido: scrollWidth 356 = clientWidth). Quem NÃO se
+     vira é o token sem oportunidade de quebra: token de sessão, id sem hífen,
+     palavra emendada. 21 `showToast(err.message …)` desta página despejam
+     `detail` do servidor aqui. Medido a 390 com um JWT: scrollWidth 508 numa
+     caixa de 356, texto vazando por dentro (a caixa fica em 16..374 e mente
+     que está tudo bem). Mesma proteção que o modo app já dá em
+     `app-mode.css` (html.pb-app body) e que o web não tinha. */
+  overflow-wrap: anywhere;
+  line-height: 1.45;
   box-shadow: var(--shadow-md);
   transition: opacity .2s var(--ease), transform .2s var(--ease);
   display: flex;
   align-items: center;
   gap: 7px;
 }
+/* o ícone não encolhe quando o texto quebra em duas linhas */
+#toast > span:first-child { flex: none; display: flex; }
 #toast.show  { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.ok    { border-color: rgba(5,150,105,.25); color: var(--green); }
 #toast.error { border-color: rgba(220,38,38,.25); color: var(--red); }
@@ -1087,7 +1130,7 @@ body.balance-hidden .account-balance {
       <h1>Minha conta</h1>
       <p>Gerencie sua conta e segurança</p>
     </div>
-    <img src="/brand/icon.png?v=1" alt="" />
+    <img src="/brand/icon.png?v=2" alt="" />
   </div>
 
   <!-- Banner de segurança -->
@@ -1432,7 +1475,7 @@ body.balance-hidden .account-balance {
         <div class="card">
           <div class="card-head">
             <div>
-              <div class="card-title">Resetar senha por e-mail</div>
+              <div class="card-title" id="security-reset-title">Resetar senha por e-mail</div>
               <div class="card-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha</div>
             </div>
             <button class="btn-connect" type="button" id="security-reset-btn" onclick="sendPasswordResetEmail()" style="width:auto; min-width:190px; padding:0 18px">
@@ -1600,6 +1643,32 @@ body.balance-hidden .account-balance {
         <div class="card">
           <div class="card-head">
             <div>
+              <div class="card-title">Recomeçar do zero</div>
+              <div class="card-sub">Apaga lançamentos, cartões, contas, conexões bancárias, metas e configurações — sua conta, assinatura e login continuam</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="danger-panel">
+              <div class="danger-title">Ação imediata e irreversível</div>
+              <div class="danger-copy">
+                Esta ação é imediata e não pode ser desfeita: os dados apagados não voltam. Se quiser uma cópia, use a exportação acima antes de continuar.
+              </div>
+              <div style="height:12px"></div>
+              <button class="btn-danger" type="button" id="reset-start-btn" onclick="showResetConfirm()" style="max-width:220px">
+                Recomeçar do zero
+              </button>
+              <div class="delete-confirm" id="reset-confirm">
+                <input class="privacy-input" id="reset-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
+                <button class="btn-danger" type="button" id="reset-confirm-btn" onclick="requestAccountReset()">Apagar e recomeçar</button>
+                <button class="btn-sm" type="button" onclick="hideResetConfirm()">Cancelar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
               <div class="card-title">Excluir conta</div>
               <div class="card-sub">Agende a remoção definitiva da conta e dos dados financeiros</div>
             </div>
@@ -1679,6 +1748,51 @@ body.balance-hidden .account-balance {
 const API = window.location.origin;
 const params = new URLSearchParams(window.location.search);
 let USER_ID = null;
+// Conta criada só via Google não tem senha: pedir senha é pedir o que não
+// existe. Só `has_password === false` bloqueia — ausente/undefined (falha do
+// /auth/me, stub de teste) degrada pro comportamento de sempre. A AUTORIDADE é
+// o servidor (409); isto aqui é advisory, pra o campo de senha nem aparecer.
+// Lido no boot E rebuscado no PBRefresh (a senha é definida FORA desta página).
+let HAS_PASSWORD = true;
+// Geração, mesmo padrão de _securityGen/_mfaGen — mas na ESCRITA, porque as três
+// buscas de has_password (o /auth/me do boot e os dois PBRefresh, security e
+// data) terminam nesta mesma função. Quem busca bumpa ANTES do fetch e passa o
+// myGen aqui: só a busca mais recente assenta. Sem isso, dois /auth/me em voo e
+// o VELHO chegando por último RE-TRANCAVA os 6 fluxos até o próximo PTR — não é
+// o repaint que se cura sozinho na pintura seguinte (app-mode.js:869-873).
+// A janela do boot é larga: window.PBRefresh já existe (é atribuído no parse)
+// enquanto o initSettings ainda espera o /auth/validate + /auth/me dele.
+let _hasPwGen = 0;
+function setHasPassword(me, myGen) {
+  if (myGen !== _hasPwGen) return;   // superado: preserva a busca mais nova
+  HAS_PASSWORD = !(me && me.has_password === false);
+}
+/* HAS_PASSWORD — estados × eventos, enumerados de uma vez (§4 do CLAUDE.md:
+   duas rodadas de revisão seguidas bateram neste subsistema, e é remendando
+   uma transição por vez que nasce a terceira). Está escrito para ninguém fechar
+   um quarto caso sem ver o mapa inteiro. As corridas de ESCRITA estão fechadas
+   (_hasPwGen cobre os três emissores); o que sobra é tudo da mesma família —
+   cobertura do rebusque por aba e por ciclo de vida —, e "teto aceito" é
+   decisão, não esquecimento: nenhum custa mais que um puxão de tela ou um toast.
+
+     boot com /auth/me ok .......... escreve, com geração: initSettings bumpa o
+       _hasPwGen antes do fetch e passa o meGen para o setHasPassword.
+     boot com /auth/me não-ok, ou exceção .... NÃO escreve, fica `true` — o lado
+       permissivo, por decisão; a autoridade é o 409 do servidor.
+     PTR na aba `security` ......... rebusca ANTES dos loaders, porque
+       applySecuritySettings lê HAS_PASSWORD para escolher a copy do card; falha
+       do /auth/me não pula os loaders, vira âmbar no fim.
+     PTR na aba `data` ............. rebusca; falha rejeita (PTR âmbar).
+     dois /auth/me sobrepostos (PTR×PTR, boot×PTR) .... sim, o _hasPwGen aí em
+       cima: só a busca mais nova assenta.
+     PTR em `notifications`, `open-finance` ou `legal` .... NÃO rebusca (teto).
+     troca de aba (showSettingsSection) ...... NÃO rebusca (teto).
+     volta do app ao foreground .... NÃO rebusca (teto), e é o caminho MAIS
+       provável no iPhone: o link do e-mail abre o Safari e a pessoa volta para
+       o app. Coberto pela copy, que manda puxar esta tela.
+     servidor devolve 409 num submit .... o toast mostra a mensagem certa, mas
+       HAS_PASSWORD não vira false (teto): a autoridade discorda do advisory e o
+       cliente não aprende. */
 
 /* ── Helpers ─────────────────────────────────── */
 function esc(v) {
@@ -1937,6 +2051,19 @@ function applySecuritySettings(data) {
   document.getElementById("security-reset-copy").textContent = hasEmail
     ? `O link será enviado para ${data.email} e expira em 30 minutos.`
     : "Vincule um e-mail à conta antes de solicitar reset de senha.";
+  // Conta só-Google: não é "resetar", é DEFINIR a primeira senha. Mesmo fluxo
+  // e mesmo endpoint — o token de reset já grava password_hash partindo de
+  // NULL. O flag vem do módulo, não do payload de /settings/{id}/security.
+  // Os DOIS lados são escritos sempre: o PBRefresh rebusca has_password, então
+  // este repaint tem de saber voltar quando a senha passa a existir.
+  document.getElementById("security-reset-title").textContent =
+    HAS_PASSWORD ? "Resetar senha por e-mail" : "Definir senha";
+  document.getElementById("security-reset-btn").textContent =
+    HAS_PASSWORD ? "Enviar e-mail de reset" : "Enviar e-mail";
+  if (!HAS_PASSWORD && hasEmail) {
+    document.getElementById("security-reset-copy").textContent =
+      `Sua conta foi criada com o Google e ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
+  }
 }
 
 // propagate=true (pull-to-refresh): rejeita em falha pro indicador do PTR virar
@@ -2395,7 +2522,43 @@ async function updateNotificationSettings(patch) {
   }
 }
 
+/* A senha é definida FORA desta página (o link do e-mail abre outra aba, e no
+   app abre o navegador): sem rebuscar, quem voltava continuava barrado nos 6
+   fluxos. O PTR do app NÃO recarrega o documento (é esse o ponto do PBRefresh),
+   então "atualize a página" não existe como gesto ali. */
+async function refreshHasPassword() {
+  const myGen = ++_hasPwGen;
+  const resp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+  if (!resp.ok) throw new Error("Não foi possível atualizar o estado da conta");
+  setHasPassword(await resp.json(), myGen);
+}
+
+/* Guarda dos 6 fluxos que re-autenticam por senha. Fica nos ABRIDORES pra o
+   campo de senha nem aparecer. Retorna true quando pode seguir; o diálogo é
+   disparado SEM await de propósito — os abridores são síncronos (chamados por
+   onclick) e só precisam abortar. */
+function requireSenhaDefinida() {
+  if (HAS_PASSWORD) return true;
+  confirmModal(
+    "Sua conta foi criada com o Google e ainda não tem senha, então nenhuma senha funciona aqui. "
+    + "Defina uma senha por e-mail e volte para concluir.\n\n"
+    // No app o gesto é puxar a tela (não há recarregar); na web é recarregar.
+    // O PBRefresh rebusca o has_password nas duas abas que têm ponto barrado.
+    + (window.PB_IN_APP
+       ? "Já definiu a senha em outra aba? Puxe esta tela para baixo para atualizar."
+       : "Já definiu a senha em outra aba? Atualize a página."),
+    { title: "Defina uma senha primeiro", confirmText: "Definir senha", cancelText: "Agora não" },
+  ).then(function (ok) {
+    if (!ok) return;
+    showSettingsSection("security");
+    const btn = document.getElementById("security-reset-btn");
+    if (btn) btn.focus();
+  });
+  return false;
+}
+
 function showExportConfirm() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("export-confirm").classList.add("show");
   document.getElementById("export-password").focus();
 }
@@ -2436,7 +2599,65 @@ async function requestDataExport() {
   }
 }
 
+function showResetConfirm() {
+  if (!requireSenhaDefinida()) return;
+  document.getElementById("reset-confirm").classList.add("show");
+  document.getElementById("reset-password").focus();
+}
+
+function hideResetConfirm() {
+  document.getElementById("reset-confirm").classList.remove("show");
+  document.getElementById("reset-password").value = "";
+}
+
+async function requestAccountReset() {
+  const password = document.getElementById("reset-password").value;
+  if (!password) {
+    showToast("Confirme sua senha", "error");
+    return;
+  }
+  const ok = await confirmModal(
+    "Todos os seus dados financeiros serão apagados agora, definitivamente. Login, assinatura e segurança são mantidos.",
+    {
+      title: "Recomeçar do zero?",
+      confirmText: "Apagar tudo e recomeçar",
+      destructive: true,
+    },
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("reset-confirm-btn");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Apagando...";
+  try {
+    const resp = await fetch(`${API}/settings/reset`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({ password }),
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    // Snapshots pré-reset em sessionStorage sobrevivem à navegação e seriam
+    // pintados na hora (restoreSnapshotFromSession no dashboard, pb_snap_;
+    // restoreHomeCache na /home, pb_home_) — dado apagado não pode voltar nem
+    // por um flash. Mesmo par de prefixos do clearHomeCache (home.html), que
+    // é função inline de outra página e não é alcançável daqui.
+    try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_") || k.startsWith("pb_home_")) sessionStorage.removeItem(k); }); } catch {}
+    // sessionStorage é POR ABA: o loop acima só limpa esta. O marker abaixo
+    // (mesmo padrão do finbot_logout_at) faz as OUTRAS abas descartarem o
+    // próprio snapshot no restore (home.html/dashboard.js comparam savedAt).
+    try { localStorage.setItem("finbot_reset_at", String(Date.now())); } catch {}
+    window.location.href = "/onboarding";
+  } catch (err) {
+    showToast(err.message || "Erro ao recomeçar do zero", "error");
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 function showDeleteConfirm() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("delete-confirm").classList.add("show");
   document.getElementById("delete-password").focus();
 }
@@ -2928,22 +3149,65 @@ async function refreshOpenFinance(opts) {
 const OF_VERDICT_OK = ["updated", "rate_limited"];
 
 /* Ordem de GRAVIDADE: o primeiro estado desta lista que aparecer manda na
-   mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos. */
+   mensagem. Trocar a ordem muda o que o usuário vê quando tem dois bancos.
+
+   QUEM MANDA NA INSTRUÇÃO É O BACKEND, não esta tabela. Estado cujo `detail`
+   VARIA entre itens (hoje `needs_user_action`, `updating` e `partial`) TEM de
+   ler `i.detail` — a frase fixa aqui só vale para estado de detalhe constante.
+   Terceira rodada do mesmo defeito: "Ação necessária" é um balde só, e um
+   `WAITING_USER_ACTION` (autorizar o dispositivo / ler o QR antes do
+   `userAction.expiresAt`) que ouve "reautorize o acesso" perde a janela.
+   `tests/test_of_health.py` compara os dois conjuntos (guarda ESTRUTURAL, pega
+   estado novo que ignora o detalhe) e `tests/frontend/of_refresh_ui.test.mjs`
+   afirma o texto de cada estado de detalhe variável (guarda COMPORTAMENTAL,
+   pega a frase que menciona `i.detail` e não o usa).
+
+   ONDE ISTO APARECE: só no mobile web e no desktop web. No app iOS / PWA o
+   botão "Atualizar" some (app-mode.css) e o gesto chama
+   `refreshOpenFinance({propagate:true})`, que NÃO chama `showToast` — o
+   `finish(ok)` do app-mode.js só pinta verde/âmbar e descarta a string. Antes
+   de "consertar o toast do app", saiba que ele não existe lá. */
+// SEM item: é o ramo `still_updating > 0`, que fala do lote, não de um banco.
+// Por isso ela é a única frase deste bloco sem `ofNome` — e por isso ela NÃO
+// serve de fallback do `updating`, que tem item na mão.
+const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
+
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
   ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
   ["paused",            (i) => `A sincronização ${ofBanco(i)} está pausada. Reative seu plano para atualizar.`],
-  ["needs_user_action", (i) => `O ${ofNome(i)} precisa que você reautorize o acesso.`],
+  // Sem instrução própria no fallback DE PROPÓSITO: o `_FIXED_DETAIL` do
+  // backend sempre preenche o detalhe deste estado, e repetir a instrução aqui
+  // é a duplicação que já mandou "reautorize" para quem precisava autorizar.
+  ["needs_user_action", (i) => i.detail
+      ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Ação necessária no ${ofNome(i)}.`],
   ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
-  ["updating",          ()  => "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo."],
+  ["updating",          (i) => i.detail
+      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
+      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
+  // O `ofNome(i)` NÃO é enfeite: com dois bancos conectados, "cartão
+  // desatualizado desde 12/08" não diz de qual. **As oito entradas desta tabela
+  // falam de UM item e as oito nomeiam o item** — a única frase sem nome é a do
+  // lote (`OF_UPDATING_LOTE`), que fala de `still_updating` e não tem item.
+  // Exceção por entrada é o buraco por onde esta classe reabriu três vezes.
   ["partial",           (i) => i.detail
-      ? `Atualizei o que deu: ${i.detail.charAt(0).toLowerCase()}${i.detail.slice(1)}.`
-      : "Atualizei o que deu — parte dos dados não veio."],
-  ["error_recoverable", () => "Não consegui atualizar agora. Tente de novo em instantes."],
+      ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
+  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
 ];
 
 function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
 function ofNome(i)  { return i.institution || "banco"; }
+// O detalhe do backend começa em maiúscula ("Autorize o acesso…"); aqui ele
+// entra no meio da frase. `showToast` faz o `esc()`.
+// `String(d)` porque TRÊS estados chamam isto agora (era um), e um `detail`
+// não-string — número, objeto, array — estourava `d.charAt is not a function`
+// subindo pelo `refreshVerdict`, sem `try` em nenhum ponto do caminho. Não é
+// alcançável pelo backend de hoje (as três fontes devolvem literal ou f-string).
+// Latentes que sobram, também não alcançáveis: acrônimo é destruído ("MFA" →
+// "mFA"); detalhe terminado em ponto dá ponto duplo.
+function ofInstrucao(d) { const s = String(d); return `${s.charAt(0).toLowerCase()}${s.slice(1)}`; }
 
 function refreshVerdict(sync) {
   const items = Array.isArray(sync.items) ? sync.items : [];
@@ -2952,7 +3216,7 @@ function refreshVerdict(sync) {
     if (achado) return { tone: "error", msg: msg(achado) };
   }
   if (Number(sync.still_updating) > 0)
-    return { tone: "error", msg: "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo." };
+    return { tone: "error", msg: OF_UPDATING_LOTE };
   // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
   // sem item nenhum, não pode terminar em verde.
   const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));
@@ -3047,6 +3311,9 @@ function onMfaToggleClick() {
 
 /* ── Modal: Setup ─────────────────────────────── */
 function openMfaSetupModal() {
+  // A guarda vive AQUI e não no onMfaToggleClick: a /home manda
+  // ?view=security&autoOpenMfa=1 e o initSettings chama este abridor direto.
+  if (!requireSenhaDefinida()) return;
   const overlay = document.getElementById("mfa-setup-overlay");
   document.getElementById("mfa-setup-step1").style.display = "";
   document.getElementById("mfa-setup-step2").style.display = "none";
@@ -3134,6 +3401,7 @@ function copyRegenBackupCodes() { copyCodesFromList("mfa-regen-codes-list"); }
 
 /* ── Modal: Disable ──────────────────────────── */
 function openMfaDisableModal() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("mfa-disable-password").value = "";
   document.getElementById("mfa-disable-code").value = "";
   document.getElementById("mfa-disable-overlay").classList.add("open");
@@ -3169,6 +3437,7 @@ async function mfaDisableSubmit() {
 
 /* ── Modal: Regenerate backup codes ──────────── */
 function openMfaRegenerateModal() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("mfa-regen-password").value = "";
   document.getElementById("mfa-regen-code").value = "";
   document.getElementById("mfa-regen-result").style.display = "none";
@@ -3223,10 +3492,12 @@ async function initSettings() {
   }
   // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
   let me = null;
+  const meGen = ++_hasPwGen;
   try {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       me = await meResp.json();
+      setHasPassword(me, meGen);
       // Gate de escolha de plano: cadastro novo passa pela /precos antes de
       // acessar qualquer tela do app (só na web; app iOS fica de fora — 3.1.1).
       if (me && me.needs_plan_selection && !window.PB_IN_APP) {
@@ -3299,14 +3570,21 @@ window.PBRefresh = () => {
   // toda aba apagava OF numa view onde nem aparece). Cada loader propaga falha
   // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
   const view = new URLSearchParams(location.search).get("view") || "security";
-  if (view === "security")
+  if (view === "security") {
     // Encadeia atrás de um save de contato em voo; espera TODAS as branches
     // (security + MFA, e dentro da security, atividade + sessões) antes de soltar.
+    // O /auth/me vem ANTES dos loaders porque applySecuritySettings lê
+    // HAS_PASSWORD pra decidir a copy do card ("Definir senha" × "Resetar").
+    // Falha dele NÃO pula os loaders: vira erro propagado no fim (PTR âmbar).
+    let meErr = null;
     return Promise.resolve(_securitySave).catch(function () {})
+      .then(function () { return refreshHasPassword().catch(function (e) { meErr = e; }); })
       .then(function () { return awaitAllPropagate([
         loadSecuritySettings({ propagate: true }),
         loadMfaStatus({ propagate: true }),
-      ]); });
+      ]); })
+      .then(function () { if (meErr) throw meErr; });
+  }
   if (view === "notifications")
     // Encadeia atrás de um save de notificação em voo: o GET só roda depois que
     // o PATCH assentar, então não repinta com estado pré-PATCH.
@@ -3317,7 +3595,12 @@ window.PBRefresh = () => {
     // snapshot. wait=8 porque o watchdog do indicador é 12s (app-mode.js) e o
     // default do servidor (18s) faria todo sucesso terminar em âmbar.
     return refreshOpenFinance({ propagate: true, wait: 8 });
-  return Promise.resolve();   // data / legal: nada dinâmico a atualizar
+  if (view === "data")
+    // Exportar, recomeçar do zero e excluir conta moram AQUI e são 3 dos 6
+    // pontos barrados por falta de senha — sem esta linha, quem definiu a senha
+    // e está nesta aba continuava trancado. Rejeita em falha (PTR âmbar).
+    return refreshHasPassword();
+  return Promise.resolve();   // legal: nada dinâmico a atualizar
 };
 </script>
 

@@ -181,14 +181,14 @@ def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date
 
 
 def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
-    """Fim do trial de 30 dias sem assinatura → downsell pro Essencial.
+    """Fim do trial de 15 dias sem assinatura → downsell pro Essencial.
 
     Parte da escada v2: o teste dá o Plus completo; quem não assina cai pro
     Grátis (banco pausa, agentes silenciam) e este e-mail oferece a saída de
     R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at)."""
     base = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
-      <p>Oi! Seus <strong>30 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
+      <p>Oi! Seus <strong>15 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
       <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
       mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
       <p>Pra continuar de onde parou:</p>
@@ -631,7 +631,7 @@ def send_reengagement_email(to: str, user_id: int | None = None) -> bool:
 
 def send_free_upgrade_nudge_email(to: str, user_id: int | None = None, dashboard_url: str = "") -> bool:
     """Nudge de conversão (B2) pro usuário Grátis ativo: mostra o que o Plus
-    destrava e convida pros 30 dias de teste. Piggy: entusiasmado, sem pressão."""
+    destrava e convida pros 15 dias de teste. Piggy: entusiasmado, sem pressão."""
     unsub = make_unsub_url(user_id, to) if user_id else ""
     base = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
@@ -643,21 +643,21 @@ def send_free_upgrade_nudge_email(to: str, user_id: int | None = None, dashboard
         <li><strong>Agentes do Piggy</strong> — Xerife, Repórter e Carteiro trabalhando por você</li>
         <li><strong>Histórico ilimitado</strong>, caixinhas e cartões sem limite</li>
       </ul>
-      <p>Dá pra <strong>testar 30 dias grátis</strong> — se não curtir, é só cancelar antes do
+      <p>Dá pra <strong>testar 15 dias grátis</strong> — se não curtir, é só cancelar antes do
          fim e você não paga nada.</p>
       <p style="text-align:center;margin:24px 0"><a class="btn" href="{base}/precos">Testar o Plus grátis</a></p>
       <p class="sig">Te espero lá,<br/><strong>Piggy 🐷</strong></p>
     """
-    html = _piggy_html("Destrave o Plus — 30 dias grátis", content, unsub)
+    html = _piggy_html("Destrave o Plus — 15 dias grátis", content, unsub)
     text = (
         "Oi! Piggy aqui.\n\n"
         "No Plus você destrava Open Finance, os agentes do Piggy e histórico ilimitado. "
-        f"Dá pra testar 30 dias grátis: {base}/precos\n\nTe espero lá, Piggy"
+        f"Dá pra testar 15 dias grátis: {base}/precos\n\nTe espero lá, Piggy"
     )
     headers = unsub_headers(unsub) if unsub else {}
     return send_email(
         to=to,
-        subject="🐷 Destrave o Plus — 30 dias grátis",
+        subject="🐷 Destrave o Plus — 15 dias grátis",
         html_body=html,
         text_body=text,
         from_addr=EMAIL_FROM_PIGGY,
@@ -963,6 +963,9 @@ def _fmt_brl_date(value) -> str:
             value = _dt.fromisoformat(value)
         except Exception:
             return str(value)
+    # DÍVIDA (#179): `_tz` AQUI é o `datetime.timezone` (não o `utils_date._tz`),
+    # e o offset BRT abaixo é cravado, fora da fonte única. Só formata data em
+    # e-mail.
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     if hasattr(value, "tzinfo"):
         if value.tzinfo is None:
@@ -979,7 +982,7 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
     content = f"""
       <p>🐷✨ <strong>Tá dentro do PigBank+!</strong></p>
-      <p>Sua assinatura começou agora. Os <strong>30 dias grátis</strong> vão até <strong>{trial_end}</strong> —
+      <p>Sua assinatura começou agora. Os <strong>15 dias grátis</strong> vão até <strong>{trial_end}</strong> —
       só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
       <p>Agora você desbloqueou:</p>
       <ul>
@@ -995,7 +998,7 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
     html = _base_html("Bem-vindo ao PigBank+", content)
     text = (
         f"PigBank+ ativado!\n\n"
-        f"Sua assinatura começou. 30 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
+        f"Sua assinatura começou. 15 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
         f"Abra o dashboard: {dash}/app\n"
         f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
     )

@@ -99,6 +99,315 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 2, não 0: a profundidade conta a partir do merge commit que o
+          # checkout traz, e os dois pais que o gate usa (HEAD^1 e HEAD^2) estão
+          # a UM passo dele — o tamanho da história da base não entra na conta.
+          # Medido neste repositório: --depth=2 em 1,03 s / 21 M contra 3,75 s /
+          # 27 M com 0. O default é 1, que não traz pai nenhum e faria o gate
+          # reprovar PR legítimo.
+          #
+          # Valor FIXO. Não condicione com `${{ cond && 0 || 1 }}`: em expressão
+          # do GitHub o 0 é falsy, então esse idioma devolve 1 SEMPRE.
+          fetch-depth: 2
+
+      # Mexeu no service-worker.js e não bumpou o CACHE_NAME? O `activate` apaga
+      # todo cache de nome diferente do atual (`service-worker.js:89`), então
+      # bumpar é o que REMOVE do aparelho o que a versão anterior já guardou.
+      # Sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é
+      # a allowlist do `podeCachear`, não o `PRECACHE`: item tirado do precache
+      # que a allowlist ainda aceita volta a ser cacheado em runtime, como o
+      # Chart.js. O dado privado que já está lá continua lá. A regra era só prosa no CLAUDE.md; aqui ela reprova.
+      #
+      # O que o bump NÃO faz: entregar o código novo. Isso já acontece sozinho —
+      # a rota serve o arquivo com `Cache-Control: no-cache`
+      # (`routes/static_pages.py:408`), o `install` chama `skipWaiting()` (`:79`)
+      # e o `activate` chama `clients.claim()` (`:92`). O worker novo assume o
+      # controle com ou sem bump, desde que o `install` complete — o
+      # `skipWaiting()` está encadeado DEPOIS do `addAll` (`:78`), que rejeita
+      # inteiro se qualquer item do PRECACHE falhar. O que sobrevive sem o bump
+      # é o CONTEÚDO cacheado sob o mesmo nome.
+      #
+      # Antes do `npm ci` + Chromium de propósito: violação reprova em segundos
+      # em vez de esperar o job inteiro.
+      #
+      # Compara com HEAD^1 (o primeiro pai do merge ref), não com
+      # `base.sha`: a proteção da main tem `strict: false`, então um bump feito
+      # na main com o PR aberto faria `base.sha` aprovar um PR que não bumpou —
+      # falso NEGATIVO. Falso positivo é tolerado de propósito: mexer só num
+      # comentário do arquivo reprova, e o conserto é bumpar ou justificar na
+      # thread.
+      #
+      # ────────────────────────────────────────────────────────────────────
+      # LIMITES ACEITOS — o que este gate NÃO garante
+      #
+      # Decididos pelo dono, não são dívida a pagar. Quem for editar o step
+      # precisa saber que já foram vistos e escolhidos, senão "conserta" um
+      # deles e muda o que o gate promete sem perceber.
+      #
+      # 1. A garantia é contra a main NA HORA DO RUN, não na hora do merge.
+      #    A proteção da main tem `strict: false` (medido na API), então o
+      #    GitHub não exige o PR atualizado para mergear. Dois PRs que mexem no
+      #    SW e bumpam para o MESMO valor (v9 -> v10) passam os dois: o segundo
+      #    foi medido contra a main de antes, `strict: false` não obriga a
+      #    re-rodar, e no merge o git resolve a linha limpo porque os dois lados
+      #    escreveram o mesmo texto. A main termina com DUAS alterações de SW
+      #    sob UM cache name — o bug que este gate existe para pegar.
+      #    O espelho disto (main bumpa, PR não) está fechado, e é o motivo de a
+      #    comparação ser com HEAD^1 e não com `base.sha`. Esta metade não.
+      #    Fechar custaria `strict: true`, que muda o fluxo de merge do
+      #    repositório inteiro, ou rodar no `push: main`, que está fora do
+      #    escopo que o dono definiu para este gate.
+      #
+      # 2. O raio de alcance é TODO PR, não só quem toca o service worker.
+      #    O guard de premissa (HEAD^2 == head.sha) roda antes de saber se o SW
+      #    mudou, e não tem como ser diferente: descobrir "mudou" já exige
+      #    HEAD^1, que é o que o guard valida. Consequência: todo PR do
+      #    repositório passou a depender de o `refs/pull/N/merge` estar em dia
+      #    com o head.sha do run. O caso permanente é PR em CONFLITO com a
+      #    main — o check required `frontend` pode ficar vermelho num PR que
+      #    não toca frontend nenhum, e a saída é resolver o conflito. Metade
+      #    disso o gate NÃO acrescenta: se o GitHub não deixar merge ref
+      #    nenhum, o `actions/checkout` acima já falha hoje, sem este PR. O
+      #    que o gate acrescenta é reprovar sobre merge ref DEFASADO.
+      #    Fechar exigiria decidir "o SW mudou?" sem HEAD^1, que é o próprio
+      #    dado que falta nesse estado.
+      #    Ressalva de evidência: essa causa (a de número 4 na mensagem do
+      #    guard) é RACIOCÍNIO sobre o comportamento do GitHub, não medição —
+      #    ninguém aqui forjou um PR em conflito para observar o merge ref. As
+      #    causas 1 e 2 foram exercitadas como cenário; da 3, só o MECANISMO
+      #    (head.sha != HEAD^2, com o SHA injetado à mão), não a circunstância
+      #    do GitHub que o produz. Pelo mesmo motivo saiu da causa 3 o exemplo
+      #    do 'Re-run jobs': o re-run repete o payload do evento, então
+      #    head.sha e merge ref vêm do mesmo lugar e não se defasam por isso.
+      #
+      # 3. REMOVER o service worker não é barrado aqui, e sim por um irmão.
+      #    O ramo que sai 0 quando o `$SW` não está na árvore do head parece
+      #    autorizar apagar ou renomear o worker — não autoriza, mas quem
+      #    garante é outro check: `tests/frontend/sw_cache_privado.test.mjs` faz
+      #    `readFileSync` de caminho fixo, então some o arquivo e o step
+      #    `Run frontend tests` (mesmo job, três steps adiante) fica vermelho.
+      #    Medido: 11 dos 28 testes daquele arquivo quebram com ENOENT, tanto
+      #    apagando quanto renomeando. Se um dia aquele teste deixar de ler o
+      #    arquivo, este ramo passa a ser um buraco de verdade.
+      #    O risco de fundo continua sem dono: `CacheStorage` sobrevive à
+      #    desregistração do worker, então remover o SW deixa o conteúdo do
+      #    cache atual no aparelho. Isso não se resolve por gate de CI — pede um
+      #    deploy de limpeza, que é código de runtime.
+      #
+      # Estes três são os limites de ESCOPO. Os limites de LEITURA do arquivo
+      # ficam onde doem, no corpo do step: o comentário `ponytail:` no ramo da
+      # base (três formas não são reconhecidas) e o teto do `CACHE_NAME = ""` na
+      # comparação final.
+      # ────────────────────────────────────────────────────────────────────
+      - name: Gate do CACHE_NAME do service worker
+        if: github.event_name == 'pull_request'
+        env:
+          # Dado de PR NUNCA entra no corpo do `run:` por `${{ }}`: vem por env e
+          # é lido como variável. Serve só para VALIDAR a premissa do checkout —
+          # a comparação continua sendo HEAD^1 x HEAD, nunca `base.sha`.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          SW=frontend/service-worker.js
+
+          # Âncora na DECLARAÇÃO — `const` no início da linha —, não em qualquer
+          # ocorrência do nome: o arquivo TEM um bloco de comentário sobre a
+          # versão logo acima da const, e casar o comentário quebra nos dois
+          # sentidos (aprova sem bump se o comentário citar outra versão;
+          # reprova bump legítimo se citar a versão velha).
+          #
+          # Isto é grep, não parser de JS: linha que COMEÇA com `//` ou `*` fica
+          # de fora, mas uma declaração comentada dentro de bloco `/* */` casa e
+          # vira a 2ª declaração. Ensinar o shell a entender bloco não paga o
+          # preço; o caso cai em "forma quebrada" e a mensagem diz onde olhar.
+          # O `\\.` deixa passar aspa escapada dentro do valor.
+          DECL='^[[:space:]]*const[[:space:]]+CACHE_NAME[[:space:]]*=[[:space:]]*"([^"\\]|\\.)*"'
+
+          # Função e não string: a anotação tem de dizer QUAL lado não deu para
+          # ler. "deste PR" mandava olhar o head quando quem falhou era a base.
+          falhou() { echo "::error title=Gate do CACHE_NAME não pôde rodar::Não deu para ler o $SW em $1 (motivo no log acima). Isto NÃO é aprovação."; exit 1; }
+          SEM_DECL="::error file=$SW,title=CACHE_NAME sumiu ou mudou de forma::Não achei nenhuma declaração 'const CACHE_NAME = \"...\"' em início de linha no $SW. Restaure a forma da declaração. O tests/frontend/sw_cache_privado.test.mjs lê a mesma constante com uma regex MAIS ESTRITA que esta, e as duas divergem nos dois sentidos: 'export const' passa lá e reprova aqui; espaçamento fora do padrão passa aqui e reprova lá. Não deduza o veredito de um pelo do outro."
+          DUAS_DECL="::error file=$SW,title=CACHE_NAME sumiu ou mudou de forma::Achei mais de uma linha 'const CACHE_NAME = \"...\"' no $SW e o gate não escolhe uma. ATENÇÃO: declaração comentada dentro de bloco /* */ TAMBÉM conta — isto é grep, não parser de JS, e só linha que começa com // ou * fica de fora. Se a sua declaração está certa, o que sobra é linha morta comentada em bloco: apague-a."
+
+          # Premissa quebrada é erro explícito, nunca verde silencioso.
+          #
+          # A premissa é o checkout do merge ref (refs/pull/N/merge), onde HEAD^1
+          # é a base e HEAD^2 é o head do PR. "HEAD tem dois pais" NÃO prova
+          # isso: quem roda `git merge main` na própria branch deixa o head do PR
+          # sendo ele mesmo um merge commit, e aí HEAD^1 é o commit anterior da
+          # branch, não a base — o gate diria "não mudou" sobre um SW alterado.
+          # Por isso o guard confere o SHA, e não a contagem de pais.
+          if [ -z "${PR_HEAD_SHA:-}" ]; then
+            echo "::error title=Gate do CACHE_NAME não pôde rodar::O payload do PR veio sem head.sha, então não dá para provar que o checkout é o merge ref. Isto NÃO é aprovação."
+            exit 1
+          fi
+          HEAD2=$(git rev-parse --verify --quiet HEAD^2) || HEAD2=""
+          if [ "$HEAD2" != "$PR_HEAD_SHA" ]; then
+            echo "::error title=Gate do CACHE_NAME não pôde rodar::O checkout não é o merge ref deste PR: esperava HEAD^2 = $PR_HEAD_SHA e achei ${HEAD2:-nada, HEAD não é merge commit}. Sem o merge ref, HEAD^1 não é a base e a comparação mediria a coisa errada. Quatro causas: (1) 'ref:' acrescentado ao actions/checkout, que troca o merge ref pelo head do PR; (2) fetch-depth raso demais para trazer os pais — o default do actions/checkout é 1; (3) o merge ref e o head.sha deste run estarem defasados entre si, sem culpa da configuração — acontece num 'synchronize' cujo refs/pull/N/merge ainda não foi recalculado; (4) o PR estar em CONFLITO com a main — permanente, não passa esperando. Cuidado com a causalidade aqui: se nesse estado o GitHub não deixar merge ref NENHUM, quem falha é o actions/checkout acima e este step nem chega a rodar; o que chega até esta mensagem é o merge ref DEFASADO. Não foi medido qual das duas formas o GitHub produz. Nos casos (1) e (2) conserte o checkout; no (3) empurre de novo ou re-rode a partir do head atual; no (4) resolva o conflito com a main. Isto NÃO é aprovação."
+            exit 1
+          fi
+
+          # `git ls-tree` lê a ÁRVORE e não o blob: saída vazia com rc 0 = o
+          # arquivo não está ali; rc != 0 = não consegui ler. O `git cat-file -e`
+          # funde os dois num rc só, e fundir fazia objeto ausente virar "arquivo
+          # novo no PR" e APROVAR.
+          naarvore() { git ls-tree --name-only "$1" -- "$SW"; }
+
+          # Ecoa o VALOR entre aspas da ÚNICA declaração. rc 3 = nenhuma
+          # declaração, rc 4 = mais de uma, rc 1 = não consegui ler — cada uma
+          # tem mensagem própria, porque o conserto é outro. Compara-se o
+          # valor, nunca o texto casado: `CACHE_NAME  =  "v9"` e
+          # `CACHE_NAME = "v9"` são o mesmo v9 e não podem passar por bump.
+          valor() {
+            local blob achados rc
+            # `git show` FORA do pipe do grep: no mesmo pipe o pipefail devolve o
+            # 1 do grep e "comando quebrou" viraria "não casou".
+            blob=$(git show "$1:$SW") || { echo "git show $1:$SW falhou." >&2; return 1; }
+            achados=$(printf '%s\n' "$blob" | grep -oE "$DECL") && rc=0 || rc=$?
+            [ "$rc" -le 1 ] || { echo "grep saiu $rc lendo $1:$SW." >&2; return 1; }
+            case "$achados" in
+              "")      echo "nenhuma declaração de CACHE_NAME em $1:$SW." >&2; return 3 ;;
+              *$'\n'*)
+                echo "mais de uma declaração de CACHE_NAME em $1:$SW." >&2
+                # rc 4, mas ecoa os valores DISTINTOS em vez de nada: duas
+                # declarações com o MESMO valor não têm o que escolher, e quem
+                # chama aproveita. Uma linha só na saída = houve consenso.
+                #
+                # O `||` NÃO é decoração: `valor` é chamada em contexto `||`, o
+                # que suspende o set -e no corpo inteiro dela. Sem checar esta
+                # pipeline, um sed/sort que falhasse devolvia rc 4 com saída
+                # VAZIA, o chamador lia "uma linha só" como consenso e comparava
+                # contra "" — verde silencioso, e o log ainda dizia "ausente"
+                # sobre uma base que tinha o valor. Falha aqui é rc 1.
+                achados=$(printf '%s\n' "$achados" | sed -e 's/^[^"]*"//' -e 's/"$//' | sort -u) \
+                  || { echo "sed/sort falhou extraindo os valores de $1:$SW." >&2; return 1; }
+                printf '%s' "$achados"
+                return 4 ;;
+            esac
+            achados=${achados#*\"}
+            printf '%s' "${achados%\"}"
+          }
+
+          reprova() {
+            case "$1" in 3) echo "$SEM_DECL" ;; 4) echo "$DUAS_DECL" ;; *) falhou "HEAD (o head deste PR)" ;; esac
+            exit 1
+          }
+
+          ENTRADA=$(naarvore HEAD) || falhou "HEAD (o head deste PR)"
+          if [ -z "$ENTRADA" ]; then
+            echo "$SW não existe no head deste PR — não há CACHE_NAME a bumpar."
+            exit 0
+          fi
+
+          # `git diff --quiet` tem TRÊS saídas: 0 = igual, 1 = diferente,
+          # >= 2 = erro. Ler "não é 0" como "mudou" faz o gate anunciar que um
+          # arquivo intocado mudou — a mesma classe do `git cat-file -e` que
+          # fundia "não existe" com "não consigo ler". Cada rc no seu ramo.
+          # O `&&`/`||` também é o que segura o set -e, que mataria o step no
+          # rc 1 se isto fosse um comando solto.
+          git diff --quiet HEAD^1 HEAD -- "$SW" && RCD=0 || RCD=$?
+          case "$RCD" in
+            0) echo "$SW não mudou neste PR."; exit 0 ;;
+            1) ;;
+            *) echo "::error title=Gate do CACHE_NAME não pôde rodar::git diff --quiet HEAD^1 HEAD -- $SW saiu $RCD; 0 e 1 são respostas, o resto é erro. Não dá para saber se o $SW mudou neste PR. Isto NÃO é aprovação."
+               exit 1 ;;
+          esac
+
+          NOVA=$(valor HEAD) && RC=0 || RC=$?
+          [ "$RC" -eq 0 ] || reprova "$RC"
+
+          # Arquivo novo no PR: não está na árvore de HEAD^1, lado velho fica
+          # vazio e difere do novo, então passa.
+          VELHA=""
+          ENTRADA=$(naarvore HEAD^1) || falhou "HEAD^1 (a base deste PR)"
+          if [ -n "$ENTRADA" ]; then
+            VELHA=$(valor HEAD^1) && RC=0 || RC=$?
+            # Várias declarações na base, TODAS no mesmo valor: o valor antigo é
+            # conhecido e não há nada de indeterminável — compara normalmente em
+            # vez de passar com aviso. É o caso mais provável dos três: linha
+            # morta comentada em bloco repetindo a declaração viva.
+            # Saída vazia AQUI é consenso, não ausência: depois que a pipeline
+            # do `valor` passou a checar o próprio status, a única forma de
+            # chegar vazio com rc 4 é a base ter todas as declarações no valor
+            # "". Tratar isso como "não dá para comparar" custava duas detecções
+            # reais e não protegia contra nada alcançável.
+            if [ "$RC" -eq 4 ]; then
+              case "$VELHA" in *$'\n'*) ;; *) RC=0 ;; esac
+            fi
+            # Base cuja forma o gate não reconhece (rc 3, ou rc 4 com valores
+            # divergentes) NÃO reprova quando o head está bom: reprovar travaria
+            # o repositório, porque nem o PR que normaliza a forma passaria.
+            # Aprovação ruidosa, não silenciosa.
+            #
+            # CUIDADO ao mexer aqui: "não reconheci a forma" NÃO é "o valor
+            # antigo não existe". `export const` e BOM antes da declaração têm
+            # valor perfeitamente legível e caem neste ramo do mesmo jeito — por
+            # isso o aviso não afirma que o valor era indeterminável. rc 1 (não
+            # consegui LER) continua reprovando.
+            #
+            # ponytail: heurística de grep ancorado, não parser de JS. Três
+            # formas de base passam sem comparação: `export const`, BOM antes da
+            # declaração, e declaração MORTA dentro de bloco `/* */` com valor
+            # divergente — esta última é a que dói, porque o JS ignora a linha e
+            # o grep não, então um bump de verdade se perde no ::warning. Só é
+            # alcançável se a BASE já estiver assim (pelo head o gate reprova com
+            # DUAS_DECL), e a única porta para isso é push direto na main, onde o
+            # `if:` deste step o desliga. Alargar o DECL reintroduz a classe do
+            # A2 (comentário casando como declaração); se o teto incomodar, o
+            # upgrade é ler a constante com node, que este job já tem instalado
+            # para o `npm run test:frontend`.
+            case "$RC" in
+              0) ;;
+              3|4)
+                echo "::warning file=$SW,title=O gate não reconheceu a declaração do CACHE_NAME na base::Na base deste PR (HEAD^1) o gate não reconheceu UMA declaração 'const CACHE_NAME = \"...\"' (motivo no log acima), então não comparou o valor e está aprovando SEM verificar o bump. ATENÇÃO: isto não significa que a base não tivesse um CACHE_NAME legível — significa que a forma dela está fora do que este grep casa. Caem aqui, entre outros, 'export const', BOM ou outro byte invisível antes da declaração, e declarações repetidas com valores divergentes. Este step só chegou aqui porque o $SW mudou neste PR — o gatilho é qualquer diff que mantenha o arquivo, typo em comentário incluso, não só mudança na estratégia de cache. Confirme na thread do PR que o CACHE_NAME foi bumpado."
+                exit 0 ;;
+              *) falhou "HEAD^1 (a base deste PR)" ;;
+            esac
+          fi
+
+          if [ "$NOVA" = "$VELHA" ]; then
+            echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é a allowlist do podeCachear, não o PRECACHE: item tirado do precache que a allowlist ainda aceita volta a ser cacheado em runtime, como o Chart.js. O dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN — e ponha o mesmo N no VERSAO_ATUAL de tests/frontend/sw_cache_privado.test.mjs, senão o npm run test:frontend fica vermelho — ou justifique na thread do PR."
+            exit 1
+          fi
+
+          # Exigir AVANÇO, e não só mudança. Só vale quando os DOIS lados usam
+          # o esquema `pigbank-vN`: fora dele não existe ordem definida, e
+          # inventar uma faria o gate reprovar bump legítimo no dia em que o
+          # esquema mudar (`pigbank-2026-08`, um hash de build) — que é o modo
+          # de falha que o ramo do ::warning acima existe para evitar. Fora do
+          # esquema, desigualdade continua sendo o que se exige.
+          #
+          # O `10#` força base decimal: sem ele um `pigbank-v09` estouraria como
+          # octal inválido em vez de comparar. Ele também é o que faz `v9` e
+          # `v09` colidirem em 9 e caírem no `-le` — dois nomes de texto
+          # diferente para a MESMA versão não são bump.
+          versao() {
+            case "$1" in pigbank-v*) ;; *) return 1 ;; esac
+            local n=${1#pigbank-v}
+            case "$n" in ''|*[!0-9]*) return 1 ;; esac
+            # Teto de 18 dígitos: o inteiro do shell é 64 bits com sinal e
+            # ESTOURA EM SILÊNCIO. Medido: 19 noves viram -8446744073709551617,
+            # e aí o `-le` inverte a ordem — reprovaria um avanço legítimo, ou
+            # aprovaria uma regressão. Acima do teto o nome cai fora do esquema
+            # e volta a valer só desigualdade: melhor não comparar do que
+            # comparar errado.
+            [ "${#n}" -le 18 ] || return 1
+            printf '%s' "$((10#$n))"
+          }
+          NN=$(versao "$NOVA") && RCN=0 || RCN=$?
+          VN=$(versao "$VELHA") && RCV=0 || RCV=$?
+          if [ "$RCN" -eq 0 ] && [ "$RCV" -eq 0 ] && [ "$NN" -le "$VN" ]; then
+            echo "::error file=$SW,title=CACHE_NAME regrediu::$SW mudou neste PR e o CACHE_NAME foi de \"$VELHA\" para \"$NOVA\", que não avança. O activate só apaga cache de nome DIFERENTE do atual, então voltar para um nome já usado faz o aparelho que ainda tem aquele cache reusar o conteúdo antigo — inclusive o dado privado que o bump anterior tinha tirado de circulação. Bumpe para um pigbank-vN maior que $VN, e ponha o mesmo N no VERSAO_ATUAL de tests/frontend/sw_cache_privado.test.mjs, senão o npm run test:frontend fica vermelho. (Nomes de texto diferente e mesmo número, como v9 e v09, contam como a mesma versão: o cache tem UM nome só, e não é o texto da declaração.)"
+            exit 1
+          fi
+
+          # `ENTRADA` ainda guarda o lookup de HEAD^1: com ele o log não chama
+          # de "ausente" uma base que existia e tinha o CACHE_NAME vazio. A
+          # comparação acima continua tratando os dois casos como "" — é o teto
+          # conhecido do `CACHE_NAME = ""`, fora do escopo deste PR.
+          if [ -n "$ENTRADA" ]; then ANTES="[$VELHA]"; else ANTES="(a base não tinha o arquivo)"; fi
+          echo "OK: $SW mudou e o CACHE_NAME foi de $ANTES para [$NOVA]."
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

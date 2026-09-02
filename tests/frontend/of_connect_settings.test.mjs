@@ -27,7 +27,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -35,11 +35,7 @@ import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
-// Porta própria: 8899 fanout, 8901 hiw_rail, 8903 modais, 8905 of_refresh,
-// 8907 onboarding_visibility. O `node --test` roda os arquivos em PARALELO e
-// duas suítes na mesma porta se matam.
-const PORT = Number(process.env.PB_OFCONN_TEST_PORT || 8909);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -50,25 +46,9 @@ const BANCOS = [
   { id: 601, name: "Itaú",            color: "ec7000", logo: "", inv: false },
 ];
 
-// No Ubuntu do CI o interpretador é `python3`; no Windows esse nome resolve pro
-// stub da Microsoft Store e o servidor morre na hora, com todos os casos
-// vermelhos por "porta ocupada" — que é o sintoma errado da causa certa.
-const PY = process.env.PB_PYTHON || (process.platform === "win32" ? "python" : "python3");
-
-async function startServer() {
-  const proc = spawn(PY, ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
-                          "--directory", FRONTEND], { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/settings.html`)).ok) return proc; } catch { /* subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
-
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /**
@@ -371,7 +351,7 @@ test("mensagem estruturada do backend chega ao usuário", async () => {
   await page.waitForFunction(() => {
     const t = document.getElementById("toast");
     return t && /Seu plano acabou/.test(t.textContent || "");
-  }, { timeout: 8000 });
+  }, undefined, { timeout: 15000 });
   await page.__ctx.close();
 });
 

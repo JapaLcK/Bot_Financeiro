@@ -23,6 +23,12 @@ register_whatsapp.json
 # viajar: valem para quem clonar e para as sessões na web, que não enxergam
 # o ~/.claude/ de ninguém.
 !.claude/skills/baseline-testes/
+# `pigbank-frontend` viaja pelo mesmo motivo: a memória do projeto a torna
+# obrigatória para toda programação do agente `coder`, e obrigação que não viaja
+# não é obrigação. Ela existia só no worktree que a criou (`df55f71`, branch
+# `pigbank-frontend-audit-7fdef7`, nunca mergeada) mais uma cópia — nem a raiz a
+# tinha, então a instrução de "copie da raiz" apontava para o vazio.
+!.claude/skills/pigbank-frontend/
 # `ponytail` é a ÚNICA exceção à regra acima, e é deliberada: o `coder.md` a
 # torna OBRIGATÓRIA, e obrigação que não viaja não é obrigação — num clone
 # limpo ou numa sessão web o Coder ficava preso a uma regra que nunca chegava
