@@ -1138,9 +1138,12 @@ _DELTA_EXIGE_LOTE = (
 #     e a fatura fica `paid` com o pagamento apagado.
 #   `lot_id` que não é id (`"abc"`, `1.9`, `[1]`): o delete do lote não casa
 #     linha nenhuma, o agregado é revertido assim mesmo e o lote fica DE PÉ —
-#     conta 700->1000 com o investimento em 300, R$300 criados do nada. O
-#     `rowcount` do delete (em `delete_launch_and_rollback`) fecha o resto desta
-#     classe: `lot_id` bem formado que não casa linha AUTORIZADA.
+#     conta 700->1000 com o investimento em 300, R$300 criados do nada.
+#     `"93"` e `93.0` NÃO entram nesta classe: o Postgres coage os dois e o
+#     delete CASA a linha (medido), então `_id` os aceita — recusar o que a
+#     reversão sabe reverter é falso positivo, e `kept_unsafe` é permanente.
+#     O `rowcount` (em `delete_launch_and_rollback`, nos DOIS caminhos de lote)
+#     fecha o resto da classe: `lot_id` bem formado sem linha AUTORIZADA.
 #   `nome` que não é string (`["a"]`, `42`): o `lower(%s)` não casa e a caixinha
 #     não é deletada/recriada, com o lançamento apagado.
 #   CONTAINER trocado (`delta_invest` como lista, `investment_lot_withdrawals`
@@ -1173,9 +1176,25 @@ def _dinheiro(v) -> bool:
 
 
 def _id(v) -> bool:
-    """Id de linha: inteiro positivo. `bool` é `int` em Python e `True` viraria
-    id 1; `1.9` não casa linha nenhuma e o `if lot_id:` seguia em frente."""
-    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+    """Id de linha POSITIVO, na largura que a reversão de fato usa. `bool` é
+    `int` em Python e `True` viraria id 1; `1.9` não casa linha nenhuma e o
+    `if lot_id:` seguia em frente.
+
+    String de dígitos e float INTEGRAL passam de propósito: medido no
+    `pigbank_ci_test`, `where id=%s` casa a linha com `"93"` e com `93.0` (o
+    Postgres coage o parâmetro), e o `int(paid_bill_id)` do delete da fatura
+    aceita os dois. Recusá-los é FALSO POSITIVO — vira `kept_unsafe` num
+    lançamento que a reversão sabe reverter, e `kept_unsafe` é permanente.
+    ASCII exigido: `"١٢٣".isdigit()` é `True` e `int()` devolve 123, mas o
+    Postgres estoura `invalid input syntax for type integer` (medido)."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, str):
+        v = v.strip()
+        return v.isascii() and v.isdigit() and int(v) > 0
+    if isinstance(v, float):
+        return v.is_integer() and v > 0
+    return isinstance(v, int) and v > 0
 
 
 def _nome(v) -> bool:
@@ -1194,14 +1213,24 @@ def _texto(v) -> bool:
 
 
 def _data(v) -> bool:
-    """`date.fromisoformat` é literalmente o que a reversão chama em
-    `last_date`; as outras datas vão cruas pro Postgres, que exige o mesmo.
-    `null` passa porque as quatro são null-safe a jusante (`if last_date_str
-    else hoje`, ou `NULL` na coluna)."""
+    """Data que os QUATRO destinos aceitam. `null` passa porque as quatro são
+    null-safe a jusante (`if last_date_str else hoje`, ou `NULL` na coluna).
+
+    O `[:10]` é o mesmo recorte que o resto do repo já faz
+    (`core/services/cashflow.py:30`, `core/services/ai_chat/tools/bills.py:214`)
+    e existe porque `date.fromisoformat` NÃO aceita ISO com hora no 3.13
+    (`'2026-09-02T15:04:05.123456-03:00'` -> `ValueError`, medido) enquanto a
+    coluna `date` do Postgres aceita e corta a hora (medido). Sem ele, um
+    escritor que serialize `datetime.isoformat()` num dos quatro campos vira
+    `kept_unsafe` permanente. `last_date` passa pelo mesmo recorte na reversão.
+
+    TETO: `"2026-W01-1"` passa aqui (o Python entende) e o Postgres recusa, então
+    `purchase_date`/`maturity_date`/`closed_at` ainda estouram CRU nessa grafia.
+    Nenhum escritor a produz; fechar isso é apertar o predicado, não afrouxá-lo."""
     if v is None:
         return True
     try:
-        date.fromisoformat(v)
+        date.fromisoformat(str(v)[:10])
         return True
     except (TypeError, ValueError):
         return False
@@ -1405,8 +1434,19 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     (`_DELTA_EXIGE_LOTE`), ou com a chave PRESENTE e um valor que não reverte
     nada — container, dinheiro, id, nome ou data fora de `_EFEITOS_FORMA`, ou
     `bill_id`/`paid_amount_added` desemparelhados. O que a FORMA não alcança
-    (`lot_id` bem formado sem linha autorizada) é o `rowcount` do delete do
-    lote que fecha, abaixo.
+    (`lot_id` bem formado sem linha autorizada) é o `rowcount` que fecha, nos
+    DOIS caminhos de lote — o delete do `investment_lot_create` e o update do
+    `investment_lot_withdrawals`.
+
+    TETO CONHECIDO da recusa por `rowcount`: ela é PERMANENTE. O lote pode
+    sumir por caminho de produto legítimo (o `ON DELETE CASCADE` de
+    `investment_lots_investment_id_fkey` leva os lotes junto quando o
+    investimento é apagado), e a partir daí o lançamento cai em `kept_unsafe`
+    em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
+    recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
+    produto, medido). Nas 3 portas do Open Finance a recusa é SILÊNCIO — em
+    `db/open_finance.py:1329` e `:1418` o código segue e marca `auto_merged`
+    mesmo com o delete recusado. Consertar isso é o PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1530,7 +1570,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 tax_profile = delete_investment.get("tax_profile") or "regressive_ir_iof"
                 if nome:
                     from datetime import date as _date
-                    ld = _date.fromisoformat(last_date_str) if last_date_str else datetime.now(_tz()).date()
+                    # `[:10]`: `date.fromisoformat` recusa ISO com hora e a
+                    # coluna `date` aceita — sem o recorte, `last_date` seria o
+                    # ÚNICO dos quatro campos de data que a reversão não sabe
+                    # usar. É o recorte que `_data` valida e que o resto do repo
+                    # já faz (`core/services/cashflow.py:30`).
+                    ld = _date.fromisoformat(str(last_date_str)[:10]) if last_date_str else datetime.now(_tz()).date()
                     cur.execute(
                         """
                         insert into investments(
@@ -1682,9 +1727,43 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         ),
                     )
                     restored = cur.fetchone()
-                    if restored:
-                        restored_investment_ids.add(restored["investment_id"])
-                        investment_lots_handled = True
+                    # MESMA regra do `investment_lot_create` acima, e o irmão
+                    # que ficou aberto no `91493d8`: marcar por SUCESSO DO FETCH
+                    # é marcar por formato. `restored is None` (lote sumiu, ou é
+                    # de outro usuário) deixava `investment_lots_handled=False`
+                    # e o `delta_invest` subtraía por cima de um agregado sem
+                    # lote atrás. Aqui o gatilho é de PRODUTO, não forjado — o
+                    # `ON DELETE CASCADE` de `investment_lots_investment_id_fkey`
+                    # leva os lotes junto quando o investimento é apagado, e
+                    # cinco toques de produto bastam (medido no
+                    # `pigbank_ci_test`): receita 1000 -> aporte 300 -> resgate
+                    # total -> apagar o investimento -> apagar o lançamento do
+                    # resgate => conta 1000 -> 700, TOTAL 1000 -> 700. R$300
+                    # destruídos para sempre, pelas 4 portas do delete singular.
+                    #
+                    # UM item podre entre bons RECUSA a lista inteira, de
+                    # propósito: com `rowcount` por item e sem recusa global, o
+                    # primeiro item bom já liga `investment_lots_handled=True`,
+                    # o `delta_invest` é pulado e o agregado é recalculado só do
+                    # que restaurou — medido no multi-lote PEPS (1 bom + 1
+                    # podre): conta 1000/inv 0 -> conta 300/inv 300, TOTAL 1000
+                    # -> 600, R$400 destruídos. Reverter meio resgate não é
+                    # reverter; o único fail-closed coerente é não reverter nada.
+                    if cur.rowcount > 1:
+                        # `id` é PK: `where id=%s and user_id=%s` casa 0 ou 1.
+                        # Invariante do banco, não caso de uso — sai CRU.
+                        raise RuntimeError(
+                            f"invariante: update de investment_lots id={lot_id} "
+                            f"casou {cur.rowcount} linhas"
+                        )
+                    if cur.rowcount == 0:
+                        raise LaunchUnsafeRollback(
+                            "'investment_lot_withdrawals.lot_id' não aponta pra "
+                            "lote deste usuário: a reversão não desfaz o resgate.",
+                            "efeito_incompleto",
+                        )
+                    restored_investment_ids.add(restored["investment_id"])
+                    investment_lots_handled = True
 
                 for investment_id in restored_investment_ids:
                     cur.execute(

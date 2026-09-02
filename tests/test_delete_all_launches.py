@@ -992,24 +992,24 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     # soma nenhuma: apaga E corrompe.
     ("dinheiro/delta_conta NaN",
      '{"delta_conta": "NaN", "delta_invest": {"nome": "cdb", "delta": 300.0}, '
-     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+     '"investment_lot_create": {"lot_id": LOTE, "investment_id": INVEST}}'),
     ("dinheiro/delta_conta 1e400 (inf fora do double)",
      '{"delta_conta": -1e400, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
-     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+     '"investment_lot_create": {"lot_id": LOTE, "investment_id": INVEST}}'),
     ("dinheiro/paid_amount_added Infinity",
      '{"delta_conta": -200.0, "bill_id": 1, "paid_amount_added": "Infinity"}'),
     ("dinheiro/before.balance NaN",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": "NaN", "principal_remaining": 300.0}}]}'),
     # ── dinheiro: NÃO-NUMÉRICO. Hoje estoura CRU (`InvalidOperation`/
     # `TypeError`) — balde `errors` em vez de recusa, e SILÊNCIO nos três
     # `except Exception: pass` de `db/open_finance.py`.
     ("dinheiro/before.principal_remaining texto",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": 300.0, "principal_remaining": "abc"}}]}'),
     ("dinheiro/delta_invest.delta lista",
      '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": [300.0]}, '
-     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+     '"investment_lot_create": {"lot_id": LOTE, "investment_id": INVEST}}'),
     # `.get("balance", 0)` devolve o `null` GRAVADO, não o default 0 — por isso
     # `null` num campo opcional de dinheiro é recusado, e AUSENTE não é.
     ("dinheiro/delete_investment.balance null",
@@ -1019,24 +1019,37 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     # ── id: `lot_id` que não casa linha nenhuma. O delete do lote não remove
     # nada, o agregado é revertido assim mesmo e o lote fica DE PÉ.
     ("id/lot_id texto",
-     '{' + _APORTE + ', "investment_lot_create": {"lot_id": "abc", "investment_id": 1}}'),
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": "abc", "investment_id": INVEST}}'),
+    # única célula da matriz que continua verde com `_id` desligado (medido):
+    # o `rowcount == 0` é a SEGUNDA linha e pega `1.9` sozinho, porque o
+    # Postgres compara `id = 1.9` sem casar nada. Quem discrimina `_id` no
+    # não-integral é o `bill_id` logo abaixo, que não tem `rowcount` atrás.
     ("id/lot_id 1.9",
-     '{' + _APORTE + ', "investment_lot_create": {"lot_id": 1.9, "investment_id": 1}}'),
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": 1.9, "investment_id": INVEST}}'),
+    # `int(1.9)` == 1: sem `_id`, o update vai pra fatura ERRADA (ou nenhuma) e
+    # o pagamento é apagado assim mesmo. Não há segunda linha aqui.
+    ("id/bill_id 1.9", '{"delta_conta": -200.0, "bill_id": 1.9, "paid_amount_added": 200.0}'),
     ("id/lot_id lista",
      '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": [1], "before": '
      '{"balance": 300.0, "principal_remaining": 300.0}}]}'),
     ("id/investment_id false",
-     '{' + _APORTE + ', "investment_lot_create": {"lot_id": 1, "investment_id": false}}'),
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": LOTE, "investment_id": false}}'),
     # ── id OCO: `bill_id` falsy passava pelo par (os dois não-nulos) e o
     # `if paid_bill_id` pulava a reversão — fatura `paid` com o pagamento apagado.
     ("id/bill_id 0", '{"delta_conta": -200.0, "bill_id": 0, "paid_amount_added": 200.0}'),
     ("id/bill_id false", '{"delta_conta": -200.0, "bill_id": false, "paid_amount_added": 200.0}'),
-    ("id/bill_id texto", '{"delta_conta": -200.0, "bill_id": "7", "paid_amount_added": 200.0}'),
+    # `"7"` NÃO entra aqui: o Postgres coage a string de dígitos e o
+    # `int(paid_bill_id)` também — é reversível, e virou controle POSITIVO
+    # (`test_positivo_bill_id_como_string_e_float_continua_revertendo`). O que
+    # não reverte é o texto que não é número.
+    ("id/bill_id texto", '{"delta_conta": -200.0, "bill_id": "sete", "paid_amount_added": 200.0}'),
+    ("id/bill_id dígito não-ASCII",
+     '{"delta_conta": -200.0, "bill_id": "١٢٣", "paid_amount_added": 200.0}'),
     # ── nome: o `lower(%s)` não casa e a caixinha/o investimento não é
     # deletado nem recriado, com o lançamento apagado.
     ("nome/delta_invest.nome lista",
      '{"delta_conta": -300.0, "delta_invest": {"nome": ["cdb"], "delta": 300.0}, '
-     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+     '"investment_lot_create": {"lot_id": LOTE, "investment_id": INVEST}}'),
     ("nome/create_pocket.nome número",
      '{"delta_conta": 0.0, "create_pocket": {"nome": 42}}'),
     ("nome/delete_pocket.nome vazio",
@@ -1048,19 +1061,19 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     ("data/maturity_date não-ISO",
      '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", "maturity_date": "ontem"}}'),
     ("data/before.closed_at número",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": 300.0, "principal_remaining": 300.0, "closed_at": 123}}]}'),
     # ── texto: só o TRUTHY não-string quebra (o falsy vira "open" no `or`).
     ("texto/before.status número",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": 300.0, "principal_remaining": 300.0, "status": 42}}]}'),
     ("texto/before.status lista",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": 300.0, "principal_remaining": 300.0, "status": ["open"]}}]}'),
     # ── container trocado: `AttributeError` cru lá embaixo, balde `errors`.
     ("container/delta_invest como lista",
      '{"delta_conta": -300.0, "delta_invest": [{"nome": "cdb", "delta": 300.0}], '
-     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+     '"investment_lot_create": {"lot_id": LOTE, "investment_id": INVEST}}'),
     ("container/create_pocket como lista",
      '{"delta_conta": 0.0, "create_pocket": [{"nome": "viagem"}]}'),
     # o único caso que a checagem de CONTAINER pega sozinha: escalar não
@@ -1070,14 +1083,23 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     ("container/withdrawals como número",
      '{' + _APORTE + ', "investment_lot_withdrawals": 42}'),
     ("container/before como lista",
-     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, '
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, '
      '"before": [{"balance": 300.0, "principal_remaining": 300.0}]}]}'),
 ])
 def test_forma_do_efeito_recusa_em_vez_de_apagar(user_id: int, caso: str, efeitos: str):
     """Um caso por classe da matriz. O estado é sempre o mesmo aporte real
     (conta 700 / investimento 300 / 1 lote de 300) com o `efeitos` reescrito
-    depois, então a recusa tem de deixar TUDO como estava."""
-    lid = _aporte_forjado(user_id, efeitos)
+    depois, então a recusa tem de deixar TUDO como estava.
+
+    `LOTE`/`INVEST` viram os ids REAIS do aporte de propósito. Com `"lot_id": 1`
+    fixo, cinco células passavam com o predicado que elas NOMEIAM desligado: o
+    id 1 não casa lote do usuário, e o `rowcount == 0` recusava com o MESMO
+    `motivo="efeito_incompleto"` que o teste espera — verde por construção
+    (`CLAUDE.md` §3). Com o id real, o vermelho só pode vir do predicado."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid,
+                 efeitos.replace("LOTE", str(lot_id)).replace("INVEST", str(inv_id)))
     with pytest.raises(db.LaunchUnsafeRollback) as exc:
         db.delete_launch_and_rollback(user_id, lid)
     assert exc.value.motivo == "efeito_incompleto", caso
@@ -1303,3 +1325,182 @@ def test_rowcount_maior_que_1_interrompe_e_reverte_a_transacao(user_id: int, mon
     assert _lotes(user_id, "investment_lots") == (1, 300.0), "o lote não pode sair"
     assert _investment_balance(user_id, "cdb") == 300.0
     assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+
+
+# ── `investment_lot_withdrawals`: o irmão que ficou aberto ───────────────────
+#
+# O `91493d8` fechou `rowcount == 0` só no `investment_lot_create`. O bloco do
+# `investment_lot_withdrawals` continuava marcando `investment_lots_handled` por
+# SUCESSO DO FETCH (`restored = cur.fetchone(); if restored:`) — `None` deixava
+# a flag em `False` e o `delta_invest` subtraía por cima de um agregado sem lote
+# atrás. Diferente do irmão, este é alcançável por CAMINHO DE PRODUTO: o
+# `ON DELETE CASCADE` de `investment_lots_investment_id_fkey` (`confdeltype='c'`,
+# medido em `pg_constraint`) leva os lotes junto quando o investimento é apagado.
+
+def test_produto_lote_sumiu_por_cascade_recusa_em_vez_de_destruir(user_id: int):
+    """PONTA A PONTA pelos escritores REAIS, sem `efeitos` forjado: aporte →
+    resgate total → apagar o investimento → apagar o lançamento do resgate.
+
+    Sem a guarda (medido, com o `rowcount == 0` do bloco de `withdrawals`
+    desligado): APAGOU, conta 1000 → 700 e TOTAL 1000 → 700 — R$300 destruídos
+    para sempre, por 5 toques de produto, pelas 4 portas do delete singular."""
+    from db.investments import (create_investment, delete_investment,
+                                investment_deposit_from_account,
+                                investment_withdraw_to_account)
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aportando")
+    investment_withdraw_to_account(user_id, "cdb", 300, "resgatando tudo")
+    resgate = int(db.list_launches(user_id, limit=1)[0]["id"])
+    assert _bal(user_id) == 1000.0, "resgate total devolve o dinheiro pra conta"
+
+    delete_investment(user_id, "cdb")
+    assert _lotes(user_id, "investment_lots") == (0, 0.0), \
+        "o CASCADE leva os lotes junto — é o gatilho, não um `efeitos` forjado"
+
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, resgate)
+    assert exc.value.motivo == "efeito_incompleto"
+    assert _bal(user_id) == 1000.0, "a recusa é ANTES de qualquer update"
+    assert any(int(r["id"]) == resgate for r in db.list_launches(user_id, limit=20))
+
+
+def test_multi_lote_com_um_podre_recusa_a_lista_inteira(user_id: int):
+    """A DECISÃO explícita: um item podre entre bons recusa o lançamento inteiro.
+
+    Sem ela (medido, com o `rowcount == 0` desligado), o primeiro item bom já
+    liga `investment_lots_handled=True`, o `delta_invest` é pulado inteiro e o
+    agregado é recalculado só do que restaurou:
+      antes    conta=1000 inv=0   lotes=[(A,0,closed),(B,0,closed)]  TOTAL=1000
+      APAGOU
+      depois   conta= 300 inv=300 lotes=[(A,300,open),(B,0,closed)]  TOTAL= 600
+    R$400 destruídos. Reverter METADE de um resgate não é reverter — o único
+    fail-closed coerente é não reverter nada.
+
+    Forjado de propósito: o CASCADE tira os lotes de um investimento TODOS de
+    uma vez, então "um bom + um podre" não é alcançável pelos escritores de
+    hoje. É a mesma blindagem fail-closed do resto da matriz."""
+    from db.investments import (create_investment, investment_deposit_from_account,
+                                investment_withdraw_to_account)
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aporte 1")
+    investment_deposit_from_account(user_id, "cdb", 400, "aporte 2")
+    investment_withdraw_to_account(user_id, "cdb", 700, "resgatando tudo")
+    resgate = int(db.list_launches(user_id, limit=1)[0]["id"])
+    lot_a, _inv = _ids_do_aporte(user_id)
+    assert _bal(user_id) == 1000.0 and _lotes(user_id, "investment_lots") == (2, 0.0)
+
+    # item 1 casa linha de verdade; item 2 aponta pra lote que não existe
+    _set_efeitos(user_id, resgate,
+                 '{"delta_conta": 700.0, "delta_invest": {"nome": "cdb", "delta": -700.0}, '
+                 '"investment_lot_withdrawals": ['
+                 '{"lot_id": %d, "before": {"balance": 300.0, "principal_remaining": 300.0, '
+                 '"status": "open"}}, '
+                 '{"lot_id": %d, "before": {"balance": 400.0, "principal_remaining": 400.0, '
+                 '"status": "open"}}]}' % (lot_a, lot_a + 1_000_000))
+
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, resgate)
+    assert exc.value.motivo == "efeito_incompleto"
+    assert _bal(user_id) == 1000.0, "nada creditado nem debitado"
+    assert _investment_balance(user_id, "cdb") == 0.0
+    assert _lotes(user_id, "investment_lots") == (2, 0.0), \
+        "o item BOM também não pode ser restaurado — meia reversão destrói R$400"
+
+
+# ── CONTROLES POSITIVOS do afrouxamento de `_id` e `_data` ───────────────────
+#
+# Regressão medida do `91493d8` contra o `b4d0085` (varredura em duas colunas,
+# 435 formas): 4 formas que o `b4d0085` revertia CERTO viraram `kept_unsafe`.
+# `kept_unsafe` é PERMANENTE e é SILÊNCIO em 3 das 8 portas — falso positivo
+# aqui custa mais que a forma que ele recusa.
+
+@pytest.mark.parametrize("caso,bill", [
+    ("bill_id string de dígitos", '"%d"'),
+    ("bill_id float integral", '%d.0'),
+])
+def test_positivo_bill_id_como_string_e_float_continua_revertendo(user_id: int,
+                                                                  caso: str, bill: str):
+    """O Postgres coage `"93"` e `93.0` no `where id=%s` e o `int(paid_bill_id)`
+    aceita os dois (medido). No `91493d8` isso virava RECUSA com a fatura presa
+    em `paid` e o pagamento de pé; no `b4d0085` revertia certo."""
+    from datetime import date as _date
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    _tx, _due, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", _date.today())
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+    pgto = int(db.list_launches(user_id, limit=1)[0]["id"])
+    assert _bal(user_id) == 900.0 and _bill_status(bill_id) == "paid"
+
+    _set_efeitos(user_id, pgto,
+                 '{"delta_conta": -100.0, "bill_id": %s, "paid_amount_added": 100.0}'
+                 % (bill % bill_id))
+
+    db.delete_launch_and_rollback(user_id, pgto)
+
+    assert _bal(user_id) == 1000.0, caso
+    assert _bill_status(bill_id) == "open", caso
+
+
+@pytest.mark.parametrize("caso,lot", [
+    ("lot_id string de dígitos", '"%d"'),
+    ("lot_id float integral", '%d.0'),
+])
+def test_positivo_lot_id_como_string_e_float_apaga_o_lote(user_id: int,
+                                                          caso: str, lot: str):
+    """Mesmo afrouxamento no `investment_lot_create`: o `delete from
+    investment_lots where id=%s` casa a linha com os dois, o `rowcount` vem 1 e
+    o lote SAI. No `91493d8` era recusa; na base o lote saía certo."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid,
+                 '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_create": {"lot_id": %s, "investment_id": %d}}'
+                 % (lot % lot_id, inv_id))
+
+    db.delete_launch_and_rollback(user_id, lid)
+
+    assert _lotes(user_id, "investment_lots") == (0, 0.0), caso
+    assert _bal(user_id) == 1000.0, caso
+
+
+_ISO_COM_HORA = "2026-09-02T15:04:05.123456-03:00"
+
+
+@pytest.mark.parametrize("campo", ["last_date", "purchase_date", "maturity_date"])
+def test_positivo_delete_investment_com_data_iso_completa_recria(user_id: int, campo: str):
+    """`date.fromisoformat` recusa ISO com hora no 3.13 (medido) e a coluna
+    `date` do Postgres aceita, cortando a hora (medido). O `91493d8` recusava os
+    três campos; `last_date` era o único que a reversão de fato não sabia usar,
+    e o `[:10]` (padrão já usado em `core/services/cashflow.py:30`) fecha."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid, _seq, _b = add_launch_and_update_balance(user_id, "despesa", 0, None, "apaguei cdb")
+    _set_efeitos(user_id, lid,
+                 '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", '
+                 '"balance": 300.0, "%s": "%s"}}' % (campo, _ISO_COM_HORA))
+
+    db.delete_launch_and_rollback(user_id, lid)
+
+    assert _investment_balance(user_id, "cdb") == 300.0, "o investimento tem de voltar"
+    assert not any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+
+
+def test_positivo_before_closed_at_iso_completo_restaura_o_lote(user_id: int):
+    """Mesmo afrouxamento no `before.closed_at`, que vai CRU pra coluna `date`."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, _inv = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid,
+                 '{"delta_conta": 0.0, "investment_lot_withdrawals": [{"lot_id": %d, '
+                 '"before": {"balance": 300.0, "principal_remaining": 300.0, '
+                 '"status": "closed", "closed_at": "%s"}}]}' % (lot_id, _ISO_COM_HORA))
+
+    db.delete_launch_and_rollback(user_id, lid)
+
+    assert not any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+    assert _bal(user_id) == 700.0
