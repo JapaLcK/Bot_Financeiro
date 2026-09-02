@@ -678,6 +678,14 @@ async def get_financial_data(
             (query_start, month_end, user_id),
         ),
         # 9) Daily expenses (bar chart)
+        # `tz_name()` interpolado em f-string aqui e nos dois `AT TIME ZONE` de
+        # `get_daily_expenses_window` — forma HERDADA (era a constante `TZ`).
+        # Não é injeção: `tz_name()` é `_tz().key`, nome IANA que o `ZoneInfo`
+        # já validou (o boot recusa inválido em `config/env.py::load_app_env`).
+        # Para SQL NOVO, prefira o bind param: `get_spending_trend`
+        # (db/accounts.py) passa `at time zone %s` com `tz_name()` no
+        # parâmetro. Trocar estes três é mudança de SQL de produção — PR
+        # próprio, não o que unificou a leitura do fuso (#179).
         _q(
             f"""
             SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{tz_name()}')::int AS dia,
@@ -5173,9 +5181,13 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
     from core.services.plan_service import history_earliest_date
-    local_today = today_tz()
+    # UM instante para os dois relógios desta rota (#166): `today_tz()` aqui e
+    # `datetime.now(utc)` lá dentro abriam dois, e na virada do dia a janela
+    # começava num dia e era cortada por outro. Mesmo par de `get_financial_data`.
+    agora = now_tz()
+    local_today = agora.date()
     requested_start = local_today - timedelta(days=days)
-    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, agora)
     start_date = max(requested_start, earliest) if earliest else requested_start
     effective = max(1, (local_today - start_date).days + 1)
     data = await get_daily_expenses_window(user_id, effective, start_date=start_date)

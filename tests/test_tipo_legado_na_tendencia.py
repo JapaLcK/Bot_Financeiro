@@ -46,8 +46,8 @@ duas âncoras concordam por construção (`align_process_tz` escreve `TZ` e cham
 `tzset()`), então a disciplina deste arquivo virou defesa em profundidade.
 
 O RÓTULO do mês, esse, vem de outro lugar em cada leitor, e em nenhum deles é o
-processo: `get_spending_trend` converte `criado_em at time zone %s`
-(`db/accounts.py:466-467`, o parâmetro em `:487`), e `compute_evolution` usa
+processo: `get_spending_trend` (db/accounts.py) converte `criado_em at time
+zone %s`, com `tz_name()` no parâmetro, e `compute_evolution` usa
 `DATE_TRUNC('month', criado_em)` sobre um `timestamptz`
 (`db/schema.py:216`), isto é, o fuso da SESSÃO do Postgres (`db/analytics.py:309`)
 — que desde `align_process_tz` também é `America/Sao_Paulo`, então os dois agora
@@ -57,11 +57,15 @@ larga sobre os offsets em jogo. Quem mexer nessas horas mexe nessa folga.
 
 Ou seja, não há um referencial só: este arquivo ancora a JANELA, que é o que está
 ao alcance dele. O `America/Sao_Paulo` que estava hardcoded no `get_spending_trend`
-NÃO está mais lá: a #179 trocou os dois literais por `tz_name()` (db/accounts.py:487),
+NÃO está mais lá: a #179 trocou os dois literais por `tz_name()` (db/accounts.py),
 e era, DOS CINCO QUE A #179 CONVERTEU, o único que ignorava `REPORT_TIMEZONE` e
-`TZ` ao mesmo tempo — os quatro que ficaram de dívida (`billing_commands.py:75`,
-`email_service.py:973`, `proactive_ai_scheduler.py:36`, `dashboard.js:433`) também
-ignoram as duas.
+`TZ` ao mesmo tempo — os quatro que ficaram de dívida também ignoram as duas, e
+cada um traz um comentário `DÍVIDA (#179)` no próprio local:
+`billing_commands.py::_format_plan_expires`, `email_service.py::_fmt_brl_date`,
+`proactive_ai_scheduler.py::RUN_HOUR_UTC` e o `const APP_TZ` de `dashboard.js`
+(`grep -rn 'DÍVIDA (#179)'` acha os quatro). Sem número de linha de propósito —
+símbolo greppável não apodrece, e este próprio PR empurrou o `RUN_HOUR_UTC` dez
+linhas para baixo no mesmo commit em que a referência foi escrita.
 Hoje o rótulo do mês segue o fuso do app como todo o resto — o que não muda nada
 neste arquivo, que escreve no meio do dia justamente para não depender disso. O
 fuso da SESSÃO também saiu de fora: ele passou a ser o do app, imposto pelo

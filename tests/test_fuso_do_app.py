@@ -171,10 +171,23 @@ def _no_pool_do_dashboard(chamada):
     `asyncio.run(get_financial_data(...))` (`grep -rn get_financial_data
     tests/`) pareados com este, e `pytest -k "fuso or donut"` termina.
 
-    Prender o lock a ESTE loop e devolvê-lo ao módulo não resolve: MEDIDO com
-    `shared._db_pool_lock = asyncio.Lock()` no lugar desta linha, os 4 vizinhos
-    passam quando rodam ANTES e travam quando rodam DEPOIS — o veneno só troca
-    de direção, porque o gather daqui prende o lock novo ao loop daqui.
+    Trocar o lock por um novo e NÃO devolvê-lo ao final não resolve: MEDIDO com
+    `shared._db_pool_lock = asyncio.Lock()` no lugar desta linha (sem restaurar
+    o original no `finally`), os 4 vizinhos passam quando rodam ANTES e travam
+    quando rodam DEPOIS — o veneno só troca de direção, porque o gather daqui
+    prende o lock novo ao loop daqui e ele fica no módulo. A variante que SALVA
+    e RESTAURA o lock no `finally` não foi medida; pode funcionar, e só não foi
+    tentada porque a linha acima já resolve com menos estado.
+
+    TETO deste conserto (`ponytail:`): ele DESVIA da armadilha, não a remove.
+    O `_db_pool_lock` de `frontend/routes/shared.py` é criado uma vez, no
+    import, e o `_LoopBoundMixin` o prende PARA SEMPRE ao loop da primeira
+    contenção do processo. Aqui ele nunca chega a ser contendido — mas qualquer
+    teste futuro que zere `shared._db_pool` e depois dispare concorrência
+    (`asyncio.gather` de duas leituras) sem abrir o pool antes pendura a suíte
+    de novo, do mesmo jeito. O conserto de verdade é em `shared._get_db_pool`
+    (lock criado por loop, ou nenhum lock), e é mudança de produção — PR
+    próprio, não este.
     """
     import frontend.routes.shared as shared
 
@@ -876,17 +889,35 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 # aqui porque a `main` não cobre essa função (o `test_virada_de_mes.py` só a
 # toca de raspão) — e continuam discriminando o `day_tz` do mesmo jeito.
 #
+# O que este PR consolidou no monólito foi o `today_tz` (o import local de
+# `create_launch_route` saiu). O monólito continua com DOIS imports de
+# `utils_date`, não um: o do topo (`now_tz, today_tz, tz_name`) e um
+# `from utils_date import _tz` local, dentro da rota de EDIÇÃO de lançamento
+# (`grep -n utils_date frontend/finance_bot_websocket_custom.py`). O segundo é
+# a mesma fonte única por outro nome, então não é dívida de fuso — mas quem
+# contar imports vai achar dois.
+#
 # Sem número de linha de propósito: cite símbolo greppável. Uma tabela de
 # referências de linha já apodreceu 3× no #166, e este merge sozinho deslocou
 # todas as do monólito em +1.
 #
 # LEIA ISTO ANTES DOS CASOS: quatro dos cinco pontos fechados NÃO mudam um
-# byte de saída em produção. Estes casos são GUARDA DE ACOPLAMENTO (§0.7) —
-# "quem precisa de fuso lê `utils_date`, e só ele" —, não prova de bug
-# consertado. Só o 18.5 cobre um defeito que o usuário via.
+# byte de saída em produção — SOB UMA CONDIÇÃO, que vale escrever porque é ela
+# que os testes quebram de propósito: o ambiente tem de ser ESTÁTICO depois do
+# boot. Antes, o fuso interpolado no SQL (`'{TZ}'`, constante de módulo) e o
+# `PGTZ` da sessão eram congelados no MESMO instante (o import) e não podiam
+# divergir. Agora a f-string chama `tz_name()` POR REQUISIÇÃO enquanto o `PGTZ`
+# só é relido em CONEXÃO NOVA — se alguém trocar o fuso com o pool aberto, as
+# duas metades da mesma query passam a discordar. Em produção o ambiente é
+# estático e a diferença é nula; nos testes é exatamente esse mecanismo que
+# obriga a fixture `_fuso_de_sao_paulo` (tests/test_virada_de_mes.py) a refazer
+# os DOIS pools depois de mexer no ambiente.
+# Fora essa condição, estes casos são GUARDA DE ACOPLAMENTO (§0.7) — "quem
+# precisa de fuso lê `utils_date`, e só ele" —, não prova de bug consertado. Só
+# o 18.5 cobre um defeito que o usuário via.
 #
-# Medido no boot real (31/08/2026): `load_app_env` escreve
-# `os.environ["TZ"] = <fuso efetivo>` (config/env.py:103) ANTES de qualquer
+# Medido no boot real (31/08/2026): `load_app_env` (config/env.py) escreve
+# `os.environ["TZ"] = efetivo` ANTES de qualquer
 # leitura — a constante `TZ` do monólito saía de um `os.getenv` logo depois do
 # `load_app_env()`, e `plan_service` só é chamado bem depois.
 # Com `REPORT_TIMEZONE=Asia/Tokyo TZ=Etc/UTC`, a leitura ANTIGA
@@ -906,6 +937,12 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 # oscila entre execuções nas DUAS árvores (é a oscilação de baseline que o
 # CLAUDE.md §3 descreve), então o número estável é 15.
 #
+# ATENÇÃO à validade dessa contraprova: a `main` ANDOU desde ela. Em 02/09/2026
+# são 20 commits (14 sem merge, 5 PRs) entre a `e1b4633` medida e a `main` da
+# época — entre eles o "Recomeçar do zero", o trial de 15 dias e três consertos
+# do `/auth/refresh`. Os 15 vermelhos e o 5.329 → 5.336 valem para AQUELA
+# árvore; quem for reusar o número re-mede as duas colunas antes.
+#
 # O ponto com efeito observável é UM: o literal `'America/Sao_Paulo'` cravado
 # em `get_spending_trend` (db/accounts.py), que ignorava as duas variáveis
 # (caso 18.5). Os outros quatro — `history_earliest_date` (18.1/18.2),
@@ -915,7 +952,7 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 #
 # Como eles conseguem discriminar, então: o `TZ` é setado À MÃO depois do
 # import, o que desfaz a reescrita do `load_app_env` e recria uma divergência
-# entre as duas variáveis. O `.env.example:31-32` traz as duas PRESENTES E
+# entre as duas variáveis. O `.env.example` traz as duas PRESENTES E
 # IGUAIS, então essa divergência é montada aqui, não herdada — o que o Railway
 # tem de fato NÃO foi verificado por ninguém. Sem essa reescrita todo caso aqui
 # ficaria tautológico — e é por isso que cada um importa o módulo ANTES do
@@ -948,8 +985,10 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 # ignorar o `TZ` derrubaria só ele.
 
 def _limites_do_tier(monkeypatch, tier: str) -> None:
-    """Fixa os limites do plano sem tocar no banco (padrão de
-    tests/test_plan_tiers.py:250-269, que patcha a leitura do usuário)."""
+    """Fixa os limites do plano sem tocar no banco. Mesmo alvo do
+    `tests/test_plan_tiers.py::TestLimits` (que chega lá pelo `_patch_user`,
+    patchando `get_auth_user`); aqui o atalho é patchar `get_user_limits`
+    direto, que é o que este arquivo precisa."""
     from core.services import plan_service
 
     monkeypatch.setattr(
@@ -1040,7 +1079,8 @@ def _janela_diaria(uid: int, start_date: date) -> list[dict]:
 
 def test_a_janela_diaria_do_grafico_segue_o_report_timezone(pro_user_id, monkeypatch):
     # Importar ANTES do monkeypatch: `load_app_env()` roda no import do monólito
-    # e reescreve `TZ` e `REPORT_TIMEZONE` (config/env.py:98,103). Importado
+    # e reescreve `TZ` e `REPORT_TIMEZONE` (as duas escritas em
+    # `config/env.py::load_app_env`). Importado
     # depois, ele apagaria a divergência e o caso passaria até revertido —
     # medido em 31/08/2026, foi exatamente o que aconteceu na primeira versão.
     import frontend.finance_bot_websocket_custom  # noqa: F401

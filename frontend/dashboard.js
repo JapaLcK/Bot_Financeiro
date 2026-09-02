@@ -478,7 +478,8 @@ const fmtShort = n => {
 // DÍVIDA (#179): o backend NÃO agrupa mais "tudo em America/Sao_Paulo" — ele
 // agrupa no fuso do app (`REPORT_TIMEZONE` → `TZ` → São Paulo,
 // `utils_date.tz_name()`). Com as duas variáveis iguais — que é o que o
-// `.env.example:31-32` documenta, e o que NÃO foi verificado no Railway — os
+// `.env.example` documenta (as linhas `REPORT_TIMEZONE=` e `TZ=`), e o que NÃO
+// foi verificado no Railway — os
 // dois lados coincidem e nada diverge. No dia em que `REPORT_TIMEZONE` apontar
 // para outro fuso, este literal passa a mentir — e o caso grave não é o display
 // e sim a ESCRITA: `appTzWallClockToISO` (abaixo) converte o input de data da edição
