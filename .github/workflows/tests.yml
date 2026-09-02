@@ -360,14 +360,14 @@ jobs:
             case "$RC" in
               0) ;;
               3|4)
-                echo "::warning file=$SW,title=O gate não reconheceu a declaração do CACHE_NAME na base::Na base deste PR (HEAD^1) o gate não reconheceu UMA declaração 'const CACHE_NAME = \"...\"' (motivo no log acima), então não comparou o valor e está aprovando SEM verificar o bump. ATENÇÃO: isto não significa que a base não tivesse um CACHE_NAME legível — significa que a forma dela está fora do que este grep casa. Caem aqui, entre outros, 'export const', BOM ou outro byte invisível antes da declaração, e declarações repetidas com valores divergentes. Se você mexeu na estratégia de cache, confirme na thread do PR que o CACHE_NAME foi bumpado."
+                echo "::warning file=$SW,title=O gate não reconheceu a declaração do CACHE_NAME na base::Na base deste PR (HEAD^1) o gate não reconheceu UMA declaração 'const CACHE_NAME = \"...\"' (motivo no log acima), então não comparou o valor e está aprovando SEM verificar o bump. ATENÇÃO: isto não significa que a base não tivesse um CACHE_NAME legível — significa que a forma dela está fora do que este grep casa. Caem aqui, entre outros, 'export const', BOM ou outro byte invisível antes da declaração, e declarações repetidas com valores divergentes. Este step só chegou aqui porque o $SW mudou neste PR — o gatilho é QUALQUER diff no arquivo, typo em comentário incluso, não só mudança na estratégia de cache. Confirme na thread do PR que o CACHE_NAME foi bumpado."
                 exit 0 ;;
               *) falhou "HEAD^1 (a base deste PR)" ;;
             esac
           fi
 
           if [ "$NOVA" = "$VELHA" ]; then
-            echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é a allowlist do podeCachear, não o PRECACHE: item tirado do precache que a allowlist ainda aceita volta a ser cacheado em runtime, como o Chart.js. O dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN ou justifique na thread do PR."
+            echo "::error file=$SW,title=CACHE_NAME não foi bumpado::$SW mudou neste PR e o CACHE_NAME continua \"$NOVA\". O activate apaga todo cache de nome diferente do atual, então bumpar a versão é o que REMOVE do aparelho o que a anterior já tinha guardado: sem o bump, a regra nova só alcança gravação NOVA — e quem decide isso é a allowlist do podeCachear, não o PRECACHE: item tirado do precache que a allowlist ainda aceita volta a ser cacheado em runtime, como o Chart.js. O dado privado que já está lá continua lá. Não confunda com entregar o código novo — isso já acontece sozinho, por no-cache na rota mais skipWaiting e clients.claim. Bumpe para o próximo pigbank-vN — e ponha o mesmo N no VERSAO_ATUAL de tests/frontend/sw_cache_privado.test.mjs, senão o npm run test:frontend fica vermelho — ou justifique na thread do PR."
             exit 1
           fi
 
@@ -398,7 +398,7 @@ jobs:
           NN=$(versao "$NOVA") && RCN=0 || RCN=$?
           VN=$(versao "$VELHA") && RCV=0 || RCV=$?
           if [ "$RCN" -eq 0 ] && [ "$RCV" -eq 0 ] && [ "$NN" -le "$VN" ]; then
-            echo "::error file=$SW,title=CACHE_NAME regrediu::$SW mudou neste PR e o CACHE_NAME foi de \"$VELHA\" para \"$NOVA\", que não avança. O activate só apaga cache de nome DIFERENTE do atual, então voltar para um nome já usado faz o aparelho que ainda tem aquele cache reusar o conteúdo antigo — inclusive o dado privado que o bump anterior tinha tirado de circulação. Bumpe para um pigbank-vN maior que $VN. (Nomes de texto diferente e mesmo número, como v9 e v09, contam como a mesma versão: o cache tem UM nome só, e não é o texto da declaração.)"
+            echo "::error file=$SW,title=CACHE_NAME regrediu::$SW mudou neste PR e o CACHE_NAME foi de \"$VELHA\" para \"$NOVA\", que não avança. O activate só apaga cache de nome DIFERENTE do atual, então voltar para um nome já usado faz o aparelho que ainda tem aquele cache reusar o conteúdo antigo — inclusive o dado privado que o bump anterior tinha tirado de circulação. Bumpe para um pigbank-vN maior que $VN, e ponha o mesmo N no VERSAO_ATUAL de tests/frontend/sw_cache_privado.test.mjs, senão o npm run test:frontend fica vermelho. (Nomes de texto diferente e mesmo número, como v9 e v09, contam como a mesma versão: o cache tem UM nome só, e não é o texto da declaração.)"
             exit 1
           fi
 
