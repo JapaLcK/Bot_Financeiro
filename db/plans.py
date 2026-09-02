@@ -1,7 +1,7 @@
 """
 Camada de banco do sistema de planos v2 (escada Grátis/Essencial/Plus/Pro).
 
-Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
+Trial de 15 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
 trava de 1 trial por TELEFONE na vida: `plan_trials` é keyed por phone_hash e
 sobrevive à deleção da conta — recriar conta com o mesmo número herda o
 started_at original (trial já queimado). A elegibilidade é checada na criação
@@ -30,7 +30,7 @@ class TrialClaimError(RuntimeError):
 def claim_trial_for_user(user_id: int) -> datetime | None:
     """Ancora o trial do usuário no telefone dele (idempotente).
 
-    Regra fechada: o contador é UM SÓ — 30 dias por telefone, na vida.
+    Regra fechada: o contador é UM SÓ — 15 dias por telefone, na vida.
     - Telefone nunca usou trial → registra now() em plan_trials e ancora a conta.
     - Telefone JÁ usou trial (nesta ou noutra conta, mesmo deletada) → a conta
       herda o started_at ORIGINAL; se o trial já venceu, days_left = 0.
@@ -91,7 +91,7 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
 
 
 def is_trial_eligible_for_user(user_id: int) -> bool:
-    """O telefone deste usuário ainda tem direito ao trial de 30 dias?
+    """O telefone deste usuário ainda tem direito ao trial de 15 dias?
 
     Regra: 1 trial por telefone na vida. Elegível = o phone_hash NUNCA apareceu
     em plan_trials (nesta conta ou em outra, mesmo deletada). Usado na criação

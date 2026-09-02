@@ -538,7 +538,7 @@ def delete_user_data(user_id: int) -> dict:
                     cur.execute("delete from credit_bills where user_id = %s", (user_id,))
 
             # `plan_trials` não aparece em `user_owned_tables` de propósito: a
-            # linha é keyed por phone_hash e segura a trava de 30 dias de teste
+            # linha é keyed por phone_hash e segura a trava de 15 dias de teste
             # por telefone, na vida — apagar devolveria um trial novo a cada
             # conta recriada com o mesmo número. O `user_id` dela é desvinculado
             # pela FK `on delete set null` (db/schema_repairs.py), e não por um

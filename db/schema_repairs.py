@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     "auth_login_events",
     # Trava de 1 trial por telefone, na vida. A linha é keyed por phone_hash e
-    # PRECISA sobreviver à deleção da conta — cascatear devolveria 30 dias novos
+    # PRECISA sobreviver à deleção da conta — cascatear devolveria 15 dias novos
     # a cada conta recriada com o mesmo número. Estar nesta lista não é detalhe:
     # sem ela, o `repair_user_fk_cascades` abaixo converteria a FK nova para
     # CASCADE na primeira subida e apagaria a trava em silêncio.

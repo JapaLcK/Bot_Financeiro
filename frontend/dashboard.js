@@ -10789,7 +10789,7 @@ function _showAccessError(title, msg) {
         // Paywall/escolha de plano: mesmo veredito da revalidação por WS
         // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
         if (!applyAccessVerdict(me)) return false;
-        // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
+        // Banner de trial (B1): oferta dos 15d de Plus pro Grátis sem trial ativo.
         // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
         if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {
           maybeShowTrialBanner();

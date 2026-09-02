@@ -10,8 +10,8 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
     o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
     (has_app_access sempre True) e os gates viram por-feature/por-tier.
-    Trial (2026-08-06): 30 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
-    (subscription trialing → cobra no dia 31). Escolheu Pro? 30 dias de Pro.
+    Trial (2026-08-06): 15 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
+    (subscription trialing → cobra no dia 16). Escolheu Pro? 15 dias de Pro.
     Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
     Durante o trial o tier vem da coluna `plan` (assinatura vigente), com os
     limites cheios do plano assinado — cadastro novo sem assinatura = Grátis.
@@ -45,7 +45,7 @@ _STORED_PLAN_TO_TIER = {
     "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
 }
 
-TRIAL_DAYS_DEFAULT = 30
+TRIAL_DAYS_DEFAULT = 15
 
 
 def plans_v2_enabled() -> bool:
@@ -82,7 +82,7 @@ def get_trial_status(user_id: int, user: dict | None = None) -> dict:
     """{"active": bool, "days_left": int, "started_at": datetime|None}.
 
     Fonte: auth_accounts.trial_started_at (ancorado por telefone via
-    db.plans.claim_trial_for_user — 30 dias únicos por phone_hash, na vida;
+    db.plans.claim_trial_for_user — 15 dias únicos por phone_hash, na vida;
     cartão não zera nem estica)."""
     started = None
     if user is not None and "trial_started_at" in user:
