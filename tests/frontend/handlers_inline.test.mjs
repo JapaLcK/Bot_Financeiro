@@ -31,14 +31,13 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
 const BASELINE = join(REPO, "tests", "frontend", "handlers_inline.baseline.json");
-const PORT = Number(process.env.PB_HANDLERS_TEST_PORT || 8911);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Páginas públicas: com sessão fingida elas redirecionam para dentro do app. */
@@ -485,16 +484,6 @@ const LE_HANDLERS = `(raiz) => {
   return out;
 }`;
 
-async function startServer() {
-  const p = spawn("python3", ["-m", "http.server", String(PORT)], { cwd: FRONTEND, stdio: "ignore" });
-  for (let i = 0; i < 40; i++) {
-    await sleep(100);
-    try { await fetch(`${ORIGIN}/login.html`); return p; } catch { /* subindo */ }
-  }
-  p.kill();
-  throw new Error(`http.server não subiu na porta ${PORT} (ocupada?)`);
-}
-
 async function comStubs(page, pagina) {
   const autenticado = !SEM_SESSAO.has(pagina);
   await page.route("**/auth/**", (r) => r.fulfill({
@@ -511,7 +500,8 @@ async function comStubs(page, pagina) {
 }
 
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /**
