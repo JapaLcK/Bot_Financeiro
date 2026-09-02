@@ -61,19 +61,42 @@ let server, browser;
 before(async () => { server = await startServer(); browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
+// Liberadores de rotas presas (o teste do t0 registra o dele aqui): o
+// `fechar()` os solta ANTES do unroute/close, então um assert que estoure no
+// meio nunca deixa handler estacionado com request pendente.
+const liberadores = [];
+
+/** Ação de rota que NUNCA rejeita: reload/close no meio do handler cancela a
+ *  request e o fulfill/continue/abort estoura — no runner (mais lento) isso
+ *  apanhava fetches em voo e virava "atividade assíncrona depois do teste"
+ *  (o assert(!this.paused) do CI). Engolir aqui é seguro: request cancelada
+ *  não tem mais consumidor. */
+const acaoSegura = async (fn) => { try { await fn(); } catch { /* navegou/fechou */ } };
+
 /** Página com as rotas de API neutralizadas (asset vai pro http.server). */
 async function newPage() {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
-    if (url.origin !== ORIGIN) return route.abort();     // CDN fora
-    if (/\.[a-z0-9]+$/i.test(url.pathname)) return route.continue();
-    return route.fulfill(json({}));
+    if (url.origin !== ORIGIN) return acaoSegura(() => route.abort());     // CDN fora
+    if (/\.[a-z0-9]+$/i.test(url.pathname)) return acaoSegura(() => route.continue());
+    return acaoSegura(() => route.fulfill(json({})));
   });
-  await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
+  await page.route("**/auth/validate",
+                   (route) => acaoSegura(() => route.fulfill(json({ user_id: 1 }))));
   page.__ctx = ctx;
   return page;
+}
+
+/** Teardown blindado, na ordem que não deixa request pausada: solta os
+ *  liberadores pendentes → desregistra as rotas sem esperar handlers
+ *  (`ignoreErrors`) → fecha o contexto. Cada passo tolera o anterior já ter
+ *  derrubado a página. */
+async function fechar(page) {
+  while (liberadores.length) { try { liberadores.pop()(); } catch { /* já liberado */ } }
+  try { await page.unrouteAll({ behavior: "ignoreErrors" }); } catch { /* página já fechada */ }
+  try { await page.__ctx.close(); } catch { /* contexto já fechado */ }
 }
 
 /** Boota a home REAL (contrato pb-nav: restoreHomeCache é closure do init —
@@ -107,7 +130,7 @@ test("home: snapshot anterior ao finbot_reset_at é descartado no restore", asyn
   try {
     await bootHomeComSnapshot(page, { savedAt: 1000, resetAt: 2000 });
     await waitFor(() => chaveFoiRemovida(page), "descarte do pb_home_1 pré-reset");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("home: snapshot gravado DEPOIS do reset restaura normal", async () => {
@@ -117,7 +140,7 @@ test("home: snapshot gravado DEPOIS do reset restaura normal", async () => {
     await sleep(1500);   // janela em que o teste acima prova que o restore roda
     assert.equal(await chaveFoiRemovida(page), false,
                  "snapshot pós-reset é legítimo — não pode ser descartado");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("home: sem marker (nunca resetou), o restore segue como antes", async () => {
@@ -127,7 +150,7 @@ test("home: sem marker (nunca resetou), o restore segue como antes", async () =>
     await sleep(1500);
     assert.equal(await chaveFoiRemovida(page), false,
                  "sem finbot_reset_at nada muda no restore");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("home: resposta em voo durante o reset é carimbada com o t0 do request", async () => {
@@ -143,6 +166,7 @@ test("home: resposta em voo durante o reset é carimbada com o t0 do request", a
   let liberar = () => {};
   try {
     const preso = new Promise((r) => { liberar = r; });
+    liberadores.push(() => liberar());   // o fechar() solta mesmo se um assert estourar antes
     await page.route("**/data/**", async (route) => {
       await preso;
       try { await route.fulfill(json({})); } catch { /* contexto já fechado */ }
@@ -165,7 +189,7 @@ test("home: resposta em voo durante o reset é carimbada com o t0 do request", a
       () => JSON.parse(sessionStorage.getItem("pb_home_1")).savedAt);
     assert.ok(Number(savedAt) < marker,
               `savedAt (${savedAt}) tinha que ser o t0 do request, anterior ao marker (${marker})`);
-  } finally { liberar(); await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("dashboard: snapshot anterior ao finbot_reset_at é descartado no restore", async () => {
@@ -185,7 +209,7 @@ test("dashboard: snapshot anterior ao finbot_reset_at é descartado no restore",
     });
     assert.equal(resultado.restaurou, false, "restore de snapshot pré-reset tinha que devolver false");
     assert.equal(resultado.ficou, false, "a chave pré-reset tinha que ser removida");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 async function abaRecarregaNoEvento(page, url, prontoQuando) {
@@ -216,7 +240,7 @@ test("dashboard: storage event do finbot_reset_at recarrega a aba aberta", async
   try {
     await abaRecarregaNoEvento(page, `${ORIGIN}/dashboard.html`,
       () => typeof restoreSnapshotFromSession === "function");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("home: storage event do finbot_reset_at recarrega a aba aberta", async () => {
@@ -224,7 +248,7 @@ test("home: storage event do finbot_reset_at recarrega a aba aberta", async () =
   try {
     await abaRecarregaNoEvento(page, `${ORIGIN}/home.html`,
       () => window.__pbResetAtListener === true);
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
 
 test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", async () => {
@@ -251,5 +275,5 @@ test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", as
     assert.ok(Number(estado.marker) > 0, "o reset tinha que gravar finbot_reset_at");
     assert.equal(estado.snap, null, "pb_snap_* da própria aba tinha que sumir");
     assert.equal(estado.home, null, "pb_home_* da própria aba tinha que sumir");
-  } finally { await page.__ctx.close(); }
+  } finally { await fechar(page); }
 });
