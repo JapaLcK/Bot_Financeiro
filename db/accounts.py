@@ -1580,6 +1580,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
             logger.warning(
                 "delete_all_launches: mantido sem reverter user_id=%s launch_id=%s user_seq=%s causa=%s motivo=%s",
                 user_id, lid, seq, type(e).__name__, e.motivo,
+                extra={"user_id": user_id},
             )
         except Exception as e:
             errors.append(seq)
@@ -1592,6 +1593,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
             logger.error(
                 "delete_all_launches: falha inesperada user_id=%s launch_id=%s user_seq=%s causa=%s sqlstate=%s",
                 user_id, lid, seq, type(e).__name__, getattr(e, "sqlstate", None),
+                extra={"user_id": user_id},
             )
 
     try:
@@ -1601,6 +1603,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
         logger.error(
             "delete_all_launches: recontagem falhou user_id=%s causa=%s sqlstate=%s",
             user_id, type(e).__name__, getattr(e, "sqlstate", None),
+            extra={"user_id": user_id},
         )
 
     return {

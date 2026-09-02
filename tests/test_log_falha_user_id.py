@@ -532,3 +532,214 @@ def test_porta_nova_com_id_errado_nao_passa_em_silencio():
         "    except Exception as exc:\n"
         "        await asyncio.to_thread(observability._log_falha, 'x', user_id, exc,\n"
         "                                card_id=card_id)\n", rel) == []
+
+
+# ── D. o irmão do `_log_falha`: `logger.*` DIRETO ────────────────────────────
+#
+# `delete_all_launches_and_rollback` não usa `_log_falha` — loga por `logger.*`
+# direto, então não herdava o `extra={"user_id": …}` e caía no MESMO bug por
+# outra porta: id do titular na `message`, coluna NULL, linha fora da
+# exportação (`db/privacy.py:366`) e SOBREVIVENDO à exclusão de conta (`:485`).
+# Foi regressão DESTE PR, achada na revisão.
+#
+# RECORTE: só `db/accounts.py`. Medido, não estimado: o arquivo tem 1729 linhas
+# e EXATAMENTE 3 chamadas de logging em qualquer nível — as 3 desta função —,
+# então a guarda é apertada e não colide com código alheio. Os outros
+# `logger.warning/error` de produção que interpolam identificador ficam FORA de
+# propósito: são a issue #220, que o dono manteve fora deste PR; varrer o repo
+# inteiro os reprovaria e arrastaria a #220 para dentro.
+#
+# A REGRA não é "todo `logger.*` precisa de `extra=`" — um log que não fala de
+# usuário não deve inventar coluna. É: **`logger.*` que põe o IDENTIFICADOR no
+# TEXTO tem de pôr também na COLUNA**. É essa a classe, e é ela que pega o site
+# futuro.
+_RECORTE_LOGGER = "db/accounts.py"
+_NIVEIS_ESPELHADOS = {"warning", "error", "exception", "critical"}
+
+# Allowlist ESTRUTURAL (arquivo, função), no padrão de `_ALLOWLIST_USER_ID`.
+# Vazia: nenhum site de hoje precisa. Entrada nova aqui é decisão consciente de
+# deixar o id do titular no texto com a coluna vazia.
+_ALLOWLIST_LOGGER: set[tuple[str, str]] = set()
+
+
+def _loggers_do_recorte(fonte: str, rel: str) -> list[tuple[str, str, int, bool]]:
+    """(arquivo, função, linha, tem_extra_user_id) de cada `logger.<nível>` do
+    recorte que FALA de `user_id` — seja no formato (`"… user_id=%s …"`) ou
+    passando a variável como argumento.
+
+    Só níveis espelhados em `system_event_logs`: o `_DashboardHandler` ignora
+    abaixo de WARNING (`core/observability.py:55-56`), então `logger.info` não
+    cria linha e não tem coluna a preencher.
+
+    TETO: lê a chamada escrita no lugar, como as varreduras irmãs — `partial`,
+    `to_thread` e logger com outro nome não são vistos. Aceitável no recorte de
+    UM arquivo, cujas 3 chamadas o caso de vacuidade abaixo conta."""
+    if rel.replace("\\", "/") != _RECORTE_LOGGER:
+        return []
+    arvore = ast.parse(fonte)
+    dono: dict[ast.AST, ast.AST] = {}
+    for no in ast.walk(arvore):
+        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for filho in ast.walk(no):
+                dono[filho] = no
+
+    achados = []
+    for no in ast.walk(arvore):
+        f = getattr(no, "func", None)
+        if not (isinstance(no, ast.Call) and isinstance(f, ast.Attribute)
+                and f.attr in _NIVEIS_ESPELHADOS):
+            continue
+        fala_de_user = any(
+            (isinstance(a, ast.Constant) and isinstance(a.value, str)
+             and "user_id" in a.value)
+            or (isinstance(a, ast.Name) and a.id == "user_id")
+            for a in no.args
+        )
+        if not fala_de_user:
+            continue
+        extra = next((k.value for k in no.keywords if k.arg == "extra"), None)
+        # `extra=` COM a chave `user_id` — e na MESMA chamada. Um `extra=` três
+        # linhas abaixo é outra chamada e não conta.
+        tem = isinstance(extra, ast.Dict) and any(
+            isinstance(c, ast.Constant) and c.value == "user_id"
+            for c in extra.keys)
+        achados.append((rel, getattr(dono.get(no), "name", "<módulo>"),
+                        no.lineno, tem))
+    return achados
+
+
+def test_logger_direto_com_id_no_texto_leva_o_id_na_coluna():
+    """A CLASSE, não os 3 sites: um `logger.warning`/`error` NOVO em
+    `db/accounts.py` que interpole o identificador no texto sem `extra=` grava
+    linha com `user_id` NULL — que `db/privacy.py` não enxerga nem para exportar
+    (`:366`) nem para apagar na exclusão de conta (`:485`)."""
+    achados = _varre_repo(_loggers_do_recorte)
+    fora = sorted({(r, fn) for r, fn, _ln, tem in achados if not tem}
+                  - _ALLOWLIST_LOGGER)
+    assert not fora, (
+        f"`logger.*` com o id do titular no TEXTO e a coluna VAZIA: {fora}. "
+        "A linha sobrevive à exclusão da conta carregando o id. Passe "
+        "`extra={'user_id': user_id}` na MESMA chamada."
+    )
+
+
+def test_o_recorte_do_logger_fecha_a_conta():
+    """Sem isto o teste acima passaria por VACUIDADE (varredura vendo zero).
+    A soma é o controle: `com_extra + sem_extra == total`, e `total >= 1`.
+    Sem número fixo de propósito (§2) — acrescentar um `logger.*` CORRETO ao
+    arquivo não pode ficar vermelho."""
+    achados = _varre_repo(_loggers_do_recorte)
+    com = [a for a in achados if a[3]]
+    sem = [a for a in achados if not a[3]]
+    assert len(com) + len(sem) == len(achados)
+    assert len(achados) >= 1, (
+        f"a varredura enxerga ZERO `logger.*` em {_RECORTE_LOGGER} — ou o "
+        "arquivo mudou de forma, ou a varredura quebrou e o teste da classe "
+        "está verde à toa")
+    assert not sem, f"sites sem a coluna: {[(a[0], a[2]) for a in sem]}"
+
+
+def test_logger_novo_sem_extra_e_acusado():
+    """Negativo da VARREDURA: o site futuro, sem editar o repositório."""
+    rel = _RECORTE_LOGGER
+    base = ("import logging\nlogger = logging.getLogger(__name__)\n"
+            "def apaga_tudo(user_id):\n"
+            "    logger.error('falhou user_id=%s', user_id{})\n")
+
+    sem_extra = _loggers_do_recorte(base.format(""), rel)
+    assert sem_extra == [(rel, "apaga_tudo", 4, False)], sem_extra
+
+    com_extra = _loggers_do_recorte(
+        base.format(", extra={'user_id': user_id}"), rel)
+    assert com_extra == [(rel, "apaga_tudo", 4, True)], com_extra
+
+    # `extra=` SEM a chave certa não vale
+    outra_chave = _loggers_do_recorte(
+        base.format(", extra={'launch_id': 1}"), rel)
+    assert outra_chave == [(rel, "apaga_tudo", 4, False)], outra_chave
+
+    # log que NÃO fala de usuário não é acusado (senão a guarda exigiria coluna
+    # de todo log do arquivo, e passaria a mentir sobre o que mede)
+    assert _loggers_do_recorte(
+        "import logging\nlogger = logging.getLogger(__name__)\n"
+        "def sobe():\n    logger.error('pool indisponível')\n", rel) == []
+
+    # `logger.info` não é espelhado em `system_event_logs` — fora da classe
+    assert _loggers_do_recorte(
+        "import logging\nlogger = logging.getLogger(__name__)\n"
+        "def f(user_id):\n    logger.info('oi user_id=%s', user_id)\n", rel) == []
+
+    # fora do recorte, nada é acusado (é a issue #220, não este PR)
+    assert _loggers_do_recorte(base.format(""), "core/handlers/pending.py") == []
+
+
+# ── D2. comportamento: os 3 sites dirigidos, coluna conferida ────────────────
+#
+# Varredura `ast` não mede o que CHEGA na coluna — é a mesma divisão A × C.
+# Aqui os 3 `logger.*` são alcançados de verdade e a coluna é lida.
+
+
+def _evento_accounts(coletor: list[dict], trecho: str) -> dict:
+    achados = [g for g in coletor if trecho in g["message"]]
+    assert len(achados) == 1, \
+        f"esperava 1 evento com {trecho!r}, veio {[g['message'][:70] for g in coletor]}"
+    return achados[0]
+
+
+def test_kept_unsafe_grava_o_user_id_na_coluna(coletor):
+    """`db/accounts.py:1580` — o `logger.warning` do `kept_unsafe`, que é o
+    caminho COMUM da recusa. Dirigido de verdade: um `efeitos` com chave fora
+    de `_EFEITOS_REVERSIVEIS` faz `delete_launch_and_rollback` levantar
+    `LaunchUnsafeRollback`, o lançamento é MANTIDO e o aviso é logado."""
+    from test_delete_all_launches import _set_efeitos
+
+    uid = _uid()
+    lid, seq, _bal = db.add_launch_and_update_balance(
+        uid, "despesa", 300, "aluguel", "paguei 300 aluguel")
+    _set_efeitos(uid, lid, '{"delta_conta": -300.0, "chave_que_ninguem_reverte": 1}')
+
+    resultado = db.delete_all_launches_and_rollback(uid)
+
+    assert resultado["kept_unsafe"] == [seq], resultado
+    assert resultado["deleted"] == 0, resultado
+    evento = _evento_accounts(coletor, "mantido sem reverter")
+    assert evento["user_id"] == uid, (
+        f"coluna user_id={evento['user_id']!r} (esperado {uid}) — sem ela a "
+        "linha some da exportação e SOBREVIVE à exclusão de conta")
+    assert evento["level"] == "warning", evento
+    assert f"user_id={uid}" in evento["message"]
+
+
+def test_errors_grava_o_user_id_na_coluna(monkeypatch, coletor):
+    """`db/accounts.py:1592` — o `logger.error` do `errors`, quando a exclusão
+    de UM lançamento estoura por falha inesperada."""
+    import db.accounts as accounts
+
+    uid = _uid()
+    _lid, seq, _bal = db.add_launch_and_update_balance(
+        uid, "despesa", 40, "cafe", "gastei 40 cafe")
+    monkeypatch.setattr(accounts, "delete_launch_and_rollback", _explode)
+
+    resultado = db.delete_all_launches_and_rollback(uid)
+
+    assert resultado["errors"] == [seq], resultado
+    evento = _evento_accounts(coletor, "falha inesperada")
+    assert evento["user_id"] == uid, evento
+    # a isca não vaza pro texto: o id vem do `extra=`, não de `str(e)`
+    assert _ISCA_ID not in evento["message"], evento["message"]
+    assert _ISCA_TELEFONE not in evento["message"], evento["message"]
+
+
+def test_recontagem_falha_grava_o_user_id_na_coluna(monkeypatch, coletor):
+    """`db/accounts.py:1601` — o `logger.error` da recontagem."""
+    import db.accounts as accounts
+
+    uid = _uid()
+    db.add_launch_and_update_balance(uid, "despesa", 40, "cafe", "gastei 40 cafe")
+    monkeypatch.setattr(accounts, "count_launches", _explode)
+
+    resultado = db.delete_all_launches_and_rollback(uid)
+
+    assert resultado["remaining"] is None, resultado
+    evento = _evento_accounts(coletor, "recontagem falhou")
+    assert evento["user_id"] == uid, evento
