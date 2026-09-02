@@ -2824,6 +2824,13 @@ async def auth_refresh(request: Request, response: Response):
         # olha o dashboard_token, não o access. Nem assinava, nem relogava.
         resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
         _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
         return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
@@ -2837,6 +2844,13 @@ async def auth_refresh(request: Request, response: Response):
         # do ramo acima para montar a resposta em vez de dar raise (#175).
         resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
         _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
         return _no_store(resp)
 
     user_id = int(result["user_id"])
