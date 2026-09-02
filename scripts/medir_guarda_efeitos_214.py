@@ -15,14 +15,19 @@ SEGURANÇA
     numa transação vazia e read-only, mas não era o que este texto prometia);
   - a saída é SÓ contagem agregada. Nenhum `user_id`, `launch_id`, nome,
     valor ou pedaço de payload sai daqui — nem em amostra, nem em exemplo.
-  - **toda** saída do processo passa por `executar()`, que imprime TIPO e LOCAL
-    de uma falha e NUNCA `str(exc)` nem a cadeia de mensagens. Não é zelo
-    teórico: a mensagem de `chave_desconhecida` é
+  - a saída é fechada nos DESCRITORES 1 e 2, não num `try` só. `executar()`
+    imprime TIPO e LOCAL de uma falha e NUNCA `str(exc)`; mas o próprio
+    tratador pode falhar (2º Ctrl-C durante o aviso, stderr em EIO/disco
+    cheio), e aí o traceback PADRÃO do interpretador imprimia a cadeia inteira.
+    Por isso o tratador roda dentro de `_calado`, e `sys.excepthook`,
+    `sys.unraisablehook` e o `logging.lastResort` ficam mudos. Quem mais
+    escreve nesses dois descritores, e o que fecha cada um, está enumerado no
+    bloco da fronteira (`grep -n "descritores 1 e 2"`). Não é zelo teórico: a
+    mensagem de `chave_desconhecida` é
     `f"efeitos que não sei reverter: {sorted(desconhecidas)}"` — chave CRUA de
-    payload — e qualquer traceback que escapasse a imprimia, inclusive vindo de
-    outra exceção pelo `During handling of the above exception` (medido: Ctrl-C
-    dentro do `except` do `classificar` vazou em 2 de 15 execuções). Ctrl-C,
-    import quebrado e `RecursionError` fecham todos no mesmo ponto.
+    payload — e ela vazava em 2 de 15 execuções por Ctrl-C dentro do `except`
+    do `classificar`, e em 100% das execuções por Ctrl-C duplo ou stderr
+    quebrado. Ctrl-C, import quebrado e `RecursionError` fecham no mesmo ponto.
   - é a única query deste repositório sem `WHERE user_id` de propósito
     (`CLAUDE.md` §0): a pergunta é agregada sobre a base inteira, e o que sai
     do processo é contagem, não linha.
@@ -59,6 +64,16 @@ USO
     python scripts/medir_guarda_efeitos_214.py --autoteste   # sem banco
     python scripts/medir_guarda_efeitos_214.py --help        # sem banco
 
+CÓDIGOS DE SAÍDA
+    0  medição feita.
+    2  flag inválida — do argparse, e SÓ dele.
+    3  a medição falhou; o relato (tipo + arquivo:linha) saiu em stderr.
+    4  recusa ANTES de ler: sem `DATABASE_URL`, ou o servidor não confirmou
+       `transaction_read_only=on`. Era 2 também, e quem automatizava
+       `if rc == 2` não distinguia typo de flag de recusa do servidor.
+    5  falhou DENTRO do tratador: nada pôde ser impresso com segurança, então
+       o código de saída é o único aviso que sobra.
+
 QUANDO ALGO FALHA
     A saída é TIPO + arquivo:linha + a linha de CÓDIGO de cada quadro, sem
     mensagem nenhuma (`executar`/`_relatar_falha`). Dá para localizar a falha,
@@ -70,6 +85,7 @@ QUANDO ALGO FALHA
 ponytail: artefato de medição descartável. Apagar quando o #214 for decidido.
 """
 import json
+import logging
 import os
 import re
 import sys
@@ -439,7 +455,7 @@ def main():
     dsn = (os.getenv("DATABASE_URL") or "").strip()
     if not dsn:
         print("DATABASE_URL não definido.", file=sys.stderr)
-        return 2
+        return 4  # 2 é do argparse (flag inválida); ver CÓDIGOS DE SAÍDA
     # O que a medição importa, ANTES de conectar. Rodando de outro diretório sem
     # `PYTHONPATH=.` o `ModuleNotFoundError` só aparecia depois de conectar,
     # passar no read-only e buscar o primeiro FETCH. E `_caminhos_do_esquema()`
@@ -458,7 +474,7 @@ def main():
         if somente_leitura != "on":
             print(f"ABORTADO: transaction_read_only={somente_leitura!r}, "
                   "esperado 'on'. Nada foi lido.", file=sys.stderr)
-            return 2
+            return 4  # recusa do servidor, não flag inválida
         info = f"read_only={somente_leitura} pg_is_in_recovery={replica}"
         # cursor server-side: 50k linhas não sobem de uma vez.
         with conn.cursor(name="medir_guarda_214") as cur:
@@ -476,6 +492,58 @@ def main():
 # ---------------------------------------------------------------------------
 # Fronteira de saída — o único caminho por onde este processo termina
 # ---------------------------------------------------------------------------
+# A fronteira NÃO é o `except` de `executar`: é o par de descritores 1 e 2.
+# Um `except` na borda, por definição, não pega o que nasce DENTRO dele. Quem
+# escreve nos dois descritores, e o que fecha cada um:
+#   1. os `print` deste arquivo — nenhum passa `str(exc)`, e o relato de falha
+#      é tipo + arquivo:linha + linha de código (`_relatar_falha`);
+#   2. o próprio tratador, quando FALHA (2º Ctrl-C durante o aviso, stderr em
+#      EIO): a exceção nova escapa com a antiga no `__context__` e o traceback
+#      padrão imprime a cadeia toda, com a mensagem — `_calado`;
+#   3. `sys.excepthook`, para qualquer escape do main thread que os dois de
+#      cima não previram, inclusive de dentro do `_calado` — `_encerrar_calado`;
+#   4. `sys.unraisablehook`: exceção em `__del__`/finalizador na saída do
+#      interpretador; imprime `str(exc)` e NÃO passa por `except` nenhum;
+#   5. `logging`: root sem handler cai no `logging.lastResort`, que escreve a
+#      mensagem em stderr. Hoje nada no caminho da medição loga — `logging`
+#      cobre o dia em que `db/accounts.py` ganhar um `logger.exception`;
+#   6. `threading.excepthook` — este script não cria thread nenhuma. Se um dia
+#      criar, este item vira código;
+#   7. sinal fatal (SIGSEGV) e `faulthandler` escrevem em C, sem `str(exc)`.
+_RC_TRATADOR = 5
+
+
+def _encerrar_calado(*_args, _saida=os._exit):
+    """`sys.excepthook` que não imprime NADA — nem o seu próprio erro.
+
+    Corpo de uma chamada só, a um syscall que não levanta exceção, com o
+    `os._exit` preso em `default` (nem busca de global sobra para falhar). É de
+    propósito: um `excepthook` que estoura faz o interpretador imprimir
+    `Error in sys.excepthook:` e, em seguida, `Original exception was:` com a
+    cadeia inteira — exatamente o vazamento que este hook existe para evitar.
+
+    `os._exit` pula o flush do stdout: perde-se o que estivesse em buffer. É o
+    preço certo — se chegamos aqui, o relatório já não é confiável, e o flush é
+    justamente a operação que estava falhando no caso de stderr em EIO.
+    """
+    _saida(_RC_TRATADOR)
+
+
+def _calado(aviso, codigo):
+    """Roda `aviso()`; se ELE falhar, o processo cala a boca e muda o código.
+
+    `BaseException` de propósito: o gatilho medido é um SEGUNDO Ctrl-C chegando
+    durante o aviso do primeiro. Não vira silêncio total — o dono continua
+    sabendo que algo falhou pelo código de saída (`_RC_TRATADOR`), que é
+    diferente do código do caminho que conseguiu relatar.
+    """
+    try:
+        aviso()
+        return codigo
+    except BaseException:  # noqa: BLE001 — ver docstring
+        return _RC_TRATADOR
+
+
 def _relatar_falha(exc):
     """Imprime TIPO e LOCAL de cada exceção da cadeia, NUNCA a mensagem.
 
@@ -509,22 +577,38 @@ def _relatar_falha(exc):
 
 
 def executar(fn):
-    """Roda `fn` e devolve o código de saída. Nenhuma exceção passa daqui."""
+    """Roda `fn` e devolve o código de saída.
+
+    Nada sai daqui com `str(exc)`: nem a falha (`_relatar_falha`), nem a falha
+    DO RELATO da falha (`_calado`), nem o que escapar por um caminho que a
+    enumeração acima não previu (`_encerrar_calado`). Efeito colateral de
+    propósito: os três hooks são globais do processo e ficam instalados — este
+    script existe para ser um processo só, e quem chamar `executar` de dentro
+    de outro (a suíte) restaura o que precisar.
+    """
+    sys.excepthook = _encerrar_calado
+    sys.unraisablehook = lambda _args: None
+    logging.disable(logging.CRITICAL)
     try:
         for stream in (sys.stdout, sys.stderr):
             # stdout ASCII não pode custar o run inteiro depois do scan: o `—`
             # do relatório sai `\u2014` em vez de estourar `UnicodeEncodeError`.
-            stream.reconfigure(errors="backslashreplace")
+            # `getattr`: sob pytest, console de IDE ou qualquer captura o stream
+            # não é `TextIOWrapper` e não tem `reconfigure`. Chamar direto era
+            # `AttributeError` na PRIMEIRA linha da fronteira — a medição nunca
+            # começava e o dono lia "FALHA na medicao" (medido: rc=3, relatório
+            # nenhum, e um re-teste inteiro saiu limpo porque nada rodou).
+            getattr(stream, "reconfigure", lambda **_: None)(
+                errors="backslashreplace")
         return fn() or 0
     except KeyboardInterrupt:
         # sem traceback: o `__context__` de um Ctrl-C no meio do laço é a
         # recusa que estava sendo tratada, com o payload na mensagem.
-        print("interrompido (Ctrl-C). Nada foi escrito no banco.",
-              file=sys.stderr)
-        return 130
+        return _calado(lambda: print(
+            "interrompido (Ctrl-C). Nada foi escrito no banco.",
+            file=sys.stderr), 130)
     except Exception as exc:  # noqa: BLE001 — é a fronteira; ver `_relatar_falha`
-        _relatar_falha(exc)
-        return 3
+        return _calado(lambda: _relatar_falha(exc), 3)
 
 
 if __name__ == "__main__":
