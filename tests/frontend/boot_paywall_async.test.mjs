@@ -20,6 +20,13 @@ import { chromium } from "playwright";
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
 const DASHBOARD_JS = readFileSync(join(FRONTEND, "dashboard.js"), "utf8");
 
+// Mês do seed, lido UMA vez: o seed (dentro do navegador) e a expectativa
+// (aqui) têm de ser a mesma chave, ou uma suíte que começa segundos antes da
+// virada de mês semeia um mês e espera outro.
+const _SEED_D = new Date();
+const SEED_ANO = _SEED_D.getFullYear();
+const SEED_MES = String(_SEED_D.getMonth() + 1).padStart(2, "0");
+
 const IDS = [
   "grid", "bgt-overlay", "bgt-input", "investment-detail-overlay",
   "investment-help-overlay", "edit-launch-overlay", "launch-overlay",
@@ -59,16 +66,20 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
   let meCalls = 0;
   if (seedSnap) {
     // Snapshot que a "aba anterior" gravou (USER_ID 42, mês corrente) — o que
-    // o restoreSnapshotFromSession consome no boot.
-    await page.addInitScript(() => {
+    // o restoreSnapshotFromSession consome no boot. pb_home_42 é o par dele: a
+    // MESMA aba pinta a /home com essa chave, e o clearSessionSnapshots limpava
+    // só o pb_snap_.
+    // O mês vem de FORA (SEED_ANO/SEED_MES): calculá-lo aqui dentro daria uma
+    // segunda `new Date()`, e uma suíte que começa segundos antes da virada de
+    // mês semearia um mês e esperaria outro (Codex, este PR).
+    await page.addInitScript(([ano, mes]) => {
       if (location.pathname !== "/app") return;
-      const d = new Date();
-      const key = `pb_snap_42_${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, "0")}`;
-      sessionStorage.setItem(key, JSON.stringify({
-        year: d.getFullYear(), month: d.getMonth() + 1, launches: [],
+      sessionStorage.setItem(`pb_snap_42_${ano}_${mes}`, JSON.stringify({
+        year: ano, month: Number(mes), launches: [],
         launches_pagination: { page: 1, filter_type: "all", query: "" },
       }));
-    });
+      sessionStorage.setItem("pb_home_42", JSON.stringify({ userId: 42, snapshot: { total: 1 } }));
+    }, [SEED_ANO, SEED_MES]);
   }
   await page.addInitScript((mode) => {
     window._t0 = Date.now();
@@ -142,11 +153,21 @@ test("cadastro sem plano escolhido: cai em /precos?escolha=1", async () => {
   await ctx.close();
 });
 
-test("paywall NEGA: pb_snap_* some — reload da aba não repinta saldo", async () => {
+// Os dois prefixos que a aba usa para pintar dinheiro na hora.
+const snapKeys = (page) => page.evaluate(
+  () => Object.keys(sessionStorage)
+              .filter((k) => k.startsWith("pb_snap_") || k.startsWith("pb_home_")).sort());
+
+// As duas chaves do seed, por NOME. Contar (`length === 2`) passava com as duas
+// semeadas apagadas e duas outras no lugar — e isso é alcançável: qualquer
+// payload entregue pelo WS grava um pb_snap_ novo pelo persistSnapshotToSession.
+// Já ordenadas ("pb_home_" < "pb_snap_"), como o snapKeys devolve.
+const SEED_KEYS = ["pb_home_42", `pb_snap_42_${SEED_ANO}_${SEED_MES}`];
+
+test("paywall NEGA: pb_snap_* E pb_home_* somem — reload da aba não repinta saldo", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: false }, seedSnap: true });
   await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
-  const chaves = await page.evaluate(
-    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
+  const chaves = await snapKeys(page);
   assert.deepEqual(chaves, [], `snapshot sobreviveu ao veredito negativo: ${chaves}`);
   await ctx.close();
 });
@@ -154,9 +175,9 @@ test("paywall NEGA: pb_snap_* some — reload da aba não repinta saldo", async 
 test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: true }, seedSnap: true });
   await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
-  const chaves = await page.evaluate(
-    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
-  assert.equal(chaves.length, 1, "snapshot de sessão não pode ser apagado no caminho aprovado");
+  const chaves = await snapKeys(page);
+  assert.deepEqual(chaves, SEED_KEYS,
+                   "as chaves semeadas não podem ser apagadas no caminho aprovado");
   await ctx.close();
 });
 
