@@ -913,11 +913,16 @@ async def open_finance_mock_connect_route(request: Request, user_id: int, payloa
     return json.loads(shared.jdump({"ok": True, "sync": result, **snapshot}))
 
 
-def delete_pluggy_items_best_effort(user_id: int) -> None:
+def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = None) -> list[str]:
     """Deleta os items do usuário na Pluggy (best-effort). Sem isso, remover
     a conexão apagava só o nosso registro e o item ficava órfão na Pluggy,
     bloqueando a reconexão ("já possui conexão com este acesso"). Falha por
     item: loga system_event e segue — não impede a limpeza local.
+
+    Devolve os item ids que tentou deletar (a ENUMERAÇÃO): o reset compara
+    com o que o DELETE local varreu e faz um 2º passe no que ficou de fora
+    (item salvo entre a enumeração e o DELETE — Codex PR #217, 11º).
+    `item_ids` explícito é esse 2º passe: pula a enumeração e deleta os dados.
 
     SÍNCRONO de propósito: o reset de conta (POST /settings/reset) o roda como
     hook de `reset_user_data`, DENTRO dos locks de item e numa thread — rota
@@ -926,9 +931,10 @@ def delete_pluggy_items_best_effort(user_id: int) -> None:
     """
     from core.observability import log_system_event_sync
 
-    pluggy_item_ids = list_pluggy_item_ids(user_id)
+    pluggy_item_ids = (list_pluggy_item_ids(user_id) if item_ids is None
+                       else [i for i in item_ids if i])
     if not pluggy_item_ids:
-        return
+        return []
     api_key = None
     try:
         api_key = create_pluggy_api_key()
@@ -949,6 +955,7 @@ def delete_pluggy_items_best_effort(user_id: int) -> None:
                     source="open_finance",
                     details={"item_id": item_id, "error": str(exc)[:200]},
                 )
+    return pluggy_item_ids
 
 
 def _disconnect_sob_lock(user_id: int) -> int:

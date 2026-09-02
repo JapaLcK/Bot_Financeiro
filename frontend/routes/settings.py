@@ -147,14 +147,20 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
     from db.privacy import ResetLockUnavailableError, reset_user_data
     from frontend.routes.open_finance import delete_pluggy_items_best_effort
 
+    # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
+    # local varreu (RETURNING), para o 2º passe pegar item salvo na janela.
+    enumerados: list[str] = []
+
     def _limpeza_remota() -> None:
         # Hook rodado por reset_user_data DEPOIS da senha e dos locks e ANTES
         # dos deletes locais (invariante: lock ocupado → Pluggy não tocada;
         # ver comentário em db/privacy.py). Best-effort: falha remota loga e
         # segue — mesmo contrato do disconnect. O helper já trata falha por
-        # item; este try cobre falha do helper inteiro.
+        # item; este try cobre falha do helper inteiro (e aí `enumerados`
+        # fica vazio, o que manda TUDO que foi varrido para o 2º passe —
+        # a retentativa certa).
         try:
-            delete_pluggy_items_best_effort(user_id)
+            enumerados.extend(delete_pluggy_items_best_effort(user_id))
         except Exception as exc:  # noqa: BLE001
             log_system_event_sync(
                 "warning", "account_reset_pluggy_cleanup_failed",
@@ -176,6 +182,26 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
             detail="Não foi possível recomeçar agora: uma sincronização bancária "
                    "está em andamento. Tente de novo em alguns segundos.",
         ) from exc
+
+    # 2º passe remoto (Codex PR #217, 11º): item Pluggy salvo ENTRE a
+    # enumeração da limpeza remota e o DELETE local foi varrido do banco sem
+    # ser deletado na Pluggy — órfão que bloqueia a reconexão ("já possui
+    # conexão com este acesso"). O RETURNING do reset diz o que foi varrido;
+    # deleta o que a enumeração não viu (normalmente vazio). Falha aqui cai
+    # no teto já documentado: órfão vai ao registry via webhook e a saúde
+    # marca ERROR/item_missing.
+    tardios = sorted(set(result.pop("pluggy_items_swept", []) or []) - set(enumerados))
+    if tardios:
+        try:
+            await asyncio.to_thread(delete_pluggy_items_best_effort, user_id, tardios)
+        except Exception as exc:  # noqa: BLE001 — best-effort, como o 1º passe
+            await asyncio.to_thread(
+                log_system_event_sync,
+                "warning", "account_reset_pluggy_cleanup_failed",
+                f"Reset do user {user_id}: 2º passe remoto falhou: {exc}",
+                source="settings", user_id=user_id,
+                details={"items": tardios, "error": str(exc)[:200]},
+            )
 
     # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,
     # o snapshot "mês corrente" (TTL 45s) seguia servindo pockets/cartões/OF

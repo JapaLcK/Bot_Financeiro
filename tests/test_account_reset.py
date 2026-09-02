@@ -320,6 +320,17 @@ def _contagens(uid: int) -> dict[str, int]:
     return out
 
 
+@pytest.fixture(autouse=True)
+def _zera_rate_limit():
+    """O arquivo soma 6+ POSTs em /settings/reset (limite 5/minute, mesmo IP
+    do TestClient) — sem zerar o storage do limiter entre testes, o 6º levaria
+    429 no lugar do status que o teste mede."""
+    from frontend.routes import shared as routes_shared
+
+    routes_shared.limiter.reset()
+    yield
+
+
 def _auth(client: TestClient, uid: int, email: str = "reset@t.com") -> dict:
     client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(uid, email))
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dashboard.make_dashboard_token(uid, hours=1))
@@ -718,6 +729,54 @@ def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
 
     assert resultado == {"ok": False, "reason": "connection_not_found", "item_id": item}
     assert _contagens(user_id)["open_finance_connections"] == 0
+
+
+# ── 7c-bis. item salvo entre a enumeração remota e o DELETE local ───────────
+
+def test_item_salvo_durante_a_janela_do_reset_e_deletado_na_pluggy(user_id, monkeypatch):
+    """Codex PR #217 (P2, 11º): item Pluggy salvo DEPOIS de a limpeza remota
+    enumerar os items (T1) e ANTES do DELETE local (T2) era varrido do banco
+    sem nunca ser deletado na Pluggy — órfão que bloqueia reconexão ("já
+    possui conexão com este acesso", frontend/routes/open_finance.py:919).
+    O segundo passe compara o RETURNING do DELETE com a enumeração e deleta
+    o que ela não viu. CONTROLE NEGATIVO: sem o segundo passe (código
+    anterior), este teste fica vermelho (item novo nunca deletado)."""
+    _semeia(user_id)
+    item_velho = _item_de(user_id)
+    item_novo = f"{item_velho}-tardio"
+
+    deletados: list[str] = []
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
+    monkeypatch.setattr(
+        of_routes, "delete_pluggy_item",
+        lambda item_id, api_key=None: deletados.append(item_id),
+    )
+
+    # Interleaving determinístico: o save do item novo acontece LOGO APÓS a
+    # enumeração da limpeza remota (T1) — dentro da janela até o DELETE (T2).
+    real_list = of_routes.list_pluggy_item_ids
+    injetado = {"feito": False}
+
+    def _lista_e_injeta(uid):
+        itens = real_list(uid)
+        if not injetado["feito"]:
+            injetado["feito"] = True
+            db.save_pluggy_open_finance_item(
+                uid, {"id": item_novo, "status": "UPDATED",
+                      "connector": {"id": 613, "name": "Inter"}})
+        return itens
+
+    monkeypatch.setattr(of_routes, "list_pluggy_item_ids", _lista_e_injeta)
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert all(n == 0 for n in _contagens(user_id).values()), "o DELETE local tinha que varrer o item novo"
+    assert item_velho in deletados, "o item enumerado tinha que ser deletado no 1º passe"
+    assert item_novo in deletados, \
+        "item salvo na janela T1→T2 ficou órfão na Pluggy (bloqueia reconexão)"
 
 
 # ── 7d. fill do cache em voo não republica dado pré-reset ───────────────────

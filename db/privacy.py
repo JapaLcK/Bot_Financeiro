@@ -566,7 +566,29 @@ def reset_user_data(
                     where a.connection_id = c.id
                       and c.user_id = %s
                     """)
-                _delete(cur, "open_finance_connections")
+                # RETURNING: o que ESTE delete varreu. Item salvo entre a
+                # enumeração do remote_cleanup e este delete não foi deletado
+                # na Pluggy — o chamador compara os dois conjuntos e faz um 2º
+                # passe (Codex PR #217, 11º). PAUSED fica fora do capture: o
+                # item já foi deletado na Pluggy (mesma regra do
+                # list_pluggy_item_ids).
+                pluggy_items_swept: list[str] = []
+                if _table_exists(cur, "open_finance_connections"):
+                    cur.execute(
+                        """
+                        delete from open_finance_connections
+                        where user_id = %s
+                        returning provider, provider_item_id, status
+                        """,
+                        (user_id,),
+                    )
+                    rows = cur.fetchall()
+                    counts["open_finance_connections"] = len(rows)
+                    pluggy_items_swept = sorted({
+                        r["provider_item_id"] for r in rows
+                        if r["provider"] == "pluggy" and r["provider_item_id"]
+                        and str(r["status"] or "").upper() != "PAUSED"
+                    })
 
                 # Crédito: transações → faturas (via card E via coluna user_id,
                 # padrão de delete_user_data) → cartões.
@@ -615,7 +637,8 @@ def reset_user_data(
 
             conn.commit()
 
-    return {"user_id": user_id, "deleted": counts}
+    return {"user_id": user_id, "deleted": counts,
+            "pluggy_items_swept": pluggy_items_swept}
 
 
 def delete_user_data(user_id: int) -> dict:
