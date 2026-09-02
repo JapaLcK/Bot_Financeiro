@@ -140,23 +140,66 @@ def _tz_da_sessao_sincrona() -> str:
         return cur.fetchone()["tz"]
 
 
-def _tz_da_sessao_async_do_dashboard() -> str:
+def _no_pool_do_dashboard(chamada):
+    """Roda uma corrotina do monólito com pool próprio DESTE event loop.
+
+    O pool novo é aberto num `await` SOZINHO, antes da corrotina — mesmo passo
+    que o `_fuso_de_sao_paulo` (tests/test_virada_de_mes.py) dá com
+    `asyncio.run(shared._get_db_pool())` — e não é detalhe de estilo: são DOIS
+    globais de `frontend/routes/shared.py` presos a um event loop, o `_db_pool`
+    e o `_db_pool_lock`. Zerar só o pool basta enquanto a corrotina abre UMA
+    conexão por vez (caso 1); quebra no `get_financial_data` (18.6), que abre
+    várias em `asyncio.gather` — aí duas `_q` chamam `_get_db_pool` com o pool
+    ainda em `None`, o `asyncio.Lock` fica CONTENDIDO e só então ele resolve o
+    loop (`asyncio.locks.Lock.acquire` só chama `_get_loop()` no ramo com
+    espera; o ramo sem contenção nunca liga o lock a loop nenhum). Abrindo o
+    pool antes, o gather encontra `_db_pool` já preenchido e nem chega no lock,
+    que assim nunca se prende a loop nenhum — nem ao daqui.
+
+    O que a contenção causa: o `_LoopBoundMixin` guarda o loop da PRIMEIRA vez,
+    o `asyncio.run` seguinte estoura `RuntimeError: is bound to a different
+    event loop` DENTRO do gather, a `_q` que ganhou o lock fica pendurada em
+    `pool.open()`, o pool novo nunca chega a `shared._db_pool` (logo o `finally`
+    não fecha nada) e os workers dele sobrevivem ao teste — o `asyncio.run`
+    seguinte PENDURA PARA SEMPRE em `asyncio.runners._cancel_all_tasks`, a mesma
+    armadilha que o docstring do `_fuso_de_sao_paulo` descreve para o portal do
+    TestClient.
+
+    MEDIDO em 01/09/2026, com a linha do `_get_db_pool()` removida e pytest de 2
+    node IDs (18.6 × `test_lista_encontra_o_que_o_donut_mostra`): trava nas DUAS
+    ordens. Com ela, passam nas duas ordens os 4 arquivos que rodam
+    `asyncio.run(get_financial_data(...))` (`grep -rn get_financial_data
+    tests/`) pareados com este, e `pytest -k "fuso or donut"` termina.
+
+    Prender o lock a ESTE loop e devolvê-lo ao módulo não resolve: MEDIDO com
+    `shared._db_pool_lock = asyncio.Lock()` no lugar desta linha, os 4 vizinhos
+    passam quando rodam ANTES e travam quando rodam DEPOIS — o veneno só troca
+    de direção, porque o gather daqui prende o lock novo ao loop daqui.
+    """
     import frontend.routes.shared as shared
 
     async def _ler():
-        # Pool NOVO neste event loop e devolvido depois: o `_db_pool` global pode
-        # ter sido aberto por outro teste, num loop já encerrado.
         anterior, shared._db_pool = shared._db_pool, None
         try:
-            async with await shared.db_connect() as conn:
-                cur = await conn.execute("select current_setting('TimeZone') as tz")
-                return (await cur.fetchone())["tz"]
+            await shared._get_db_pool()
+            return await chamada()
         finally:
             if shared._db_pool is not None:
                 await shared._db_pool.close()
             shared._db_pool = anterior
 
     return asyncio.run(_ler())
+
+
+def _tz_da_sessao_async_do_dashboard() -> str:
+    import frontend.routes.shared as shared
+
+    async def _ler():
+        async with await shared.db_connect() as conn:
+            cur = await conn.execute("select current_setting('TimeZone') as tz")
+            return (await cur.fetchone())["tz"]
+
+    return _no_pool_do_dashboard(_ler)
 
 
 def _tz_da_sessao_do_admin() -> str:
@@ -848,11 +891,20 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 # `load_app_env()`, e `plan_service` só é chamado bem depois.
 # Com `REPORT_TIMEZONE=Asia/Tokyo TZ=Etc/UTC`, a leitura ANTIGA
 # (`os.getenv("TZ")`) e a NOVA (`tz_name()`) devolvem as duas `Asia/Tokyo`.
-# Contraprova em duas colunas com `REPORT_TIMEZONE=Pacific/Kiritimati`: `main`
-# = 11 failed, branch = 8 failed, e os 3 que ficaram verdes são exatamente os
-# do `get_spending_trend`. Zero vermelhos novos. Não é verdade, portanto, que
-# "`REPORT_TIMEZONE` sozinho passou a mover as três pontas": ele já movia todas
-# menos uma.
+# É essa medição do boot — não a contraprova abaixo — que sustenta o "não é
+# verdade que `REPORT_TIMEZONE` sozinho passou a mover as três pontas": ele já
+# movia todas menos uma.
+#
+# Contraprova em duas colunas com `REPORT_TIMEZONE=Pacific/Kiritimati`, suíte
+# CHEIA, medida em 01/09/2026 na árvore já mergeada com a `main` e1b4633:
+# `main` e branch dão os MESMOS 15 vermelhos, com listas idênticas por NOME nos
+# dois sentidos (`comm` vazio dos dois lados). Zero vermelho novo, e zero
+# vermelho da `main` virando verde — os 7 casos novos desta seção somam-se aos
+# verdes (5.329 → 5.336) sem trocar a cor de nenhum caso antigo. Uma das quatro
+# execuções deu 16 na `main`:
+# `test_routes_categories.py::test_nota_alvo_e_criado_em_saem_na_resposta`
+# oscila entre execuções nas DUAS árvores (é a oscilação de baseline que o
+# CLAUDE.md §3 descreve), então o número estável é 15.
 #
 # O ponto com efeito observável é UM: o literal `'America/Sao_Paulo'` cravado
 # em `get_spending_trend` (db/accounts.py), que ignorava as duas variáveis
@@ -873,10 +925,13 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 # (`date.today()`, para o rótulo do mês) e o 18.7 (`datetime.now`, para o dia
 # corrente em dois fusos) — os comentários de cada um dizem por quê.
 #
-# CONTROLE contra hardcode (rodada 3, medido em 31/08/2026): os SETE casos
-# ficam VERMELHOS se o ponto de produção correspondente cravar
-# `ZoneInfo("America/Sao_Paulo")` — por isso o fuso ESPERADO de todos eles é um
-# fuso que NÃO é São Paulo. A matriz, por implementação:
+# CONTROLE contra hardcode (rodada 3, medido em 31/08/2026; RE-MEDIDO em
+# 02/09/2026 na árvore mergeada): SEIS dos sete casos ficam VERMELHOS se o
+# ponto de produção correspondente cravar `ZoneInfo("America/Sao_Paulo")` — por
+# isso o fuso ESPERADO de todos eles é um fuso que NÃO é São Paulo. O sétimo
+# (18.7) fica vermelho em 17 das 24 horas do dia, pela razão que o comentário
+# dele mede; o controle dele que vale a qualquer hora é a coluna da direita. A
+# matriz, por implementação:
 #
 #   caso            árvore atual       hardcode SP   leitura antiga `TZ`
 #   18.1/18.2       verde              VERMELHO      VERMELHO
@@ -884,7 +939,9 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
 #   18.4            verde              VERMELHO      VERMELHO
 #   18.5            verde              VERMELHO      VERMELHO
 #   18.6            verde              VERMELHO      VERMELHO
-#   18.7            verde              VERMELHO      VERMELHO
+#   18.7            verde              VERMELHO (*)  VERMELHO
+#
+#   (*) só entre 07:00 e 24:00 de São Paulo — ver o comentário do 18.7.
 #
 # O 18.3 verde na coluna do meio é o CONTROLE POSITIVO do grupo: ele afirma que
 # sem `REPORT_TIMEZONE` o `TZ` continua valendo. Um conserto que passasse a
@@ -954,23 +1011,6 @@ def test_sem_report_timezone_o_historico_segue_o_tz(monkeypatch):
     monkeypatch.setenv("TZ", "Pacific/Kiritimati")
     assert _historico_desde("free", monkeypatch) == date(2026, 9, 1)
     assert _historico_desde("essencial", monkeypatch) == date(2026, 6, 3)
-
-
-def _no_pool_do_dashboard(chamada):
-    """Roda uma corrotina do monólito com pool próprio DESTE event loop (mesmo
-    cuidado do caso 1) e devolve o pool anterior no fim."""
-    import frontend.routes.shared as shared
-
-    async def _ler():
-        anterior, shared._db_pool = shared._db_pool, None
-        try:
-            return await chamada()
-        finally:
-            if shared._db_pool is not None:
-                await shared._db_pool.close()
-            shared._db_pool = anterior
-
-    return asyncio.run(_ler())
 
 
 # 18.4 — A janela diária do gráfico (`AT TIME ZONE` interpolado no SQL do
@@ -1095,7 +1135,13 @@ def test_o_grafico_de_gastos_por_dia_segue_o_report_timezone(pro_user_id, monkey
 #     "America/Sao_Paulo"))).date()` → `start_date` sai um ou dois dias mais
 #     cedo, VERMELHO;
 #   - hardcode, `datetime.now(ZoneInfo("America/Sao_Paulo")).date()` →
-#     VERMELHO pelo mesmo motivo (SP nunca está na data de Kiritimati).
+#     VERMELHO em 17 das 24 horas, VERDE nas outras 7. SP (−3) e Kiritimati
+#     (+14) estão a 17 horas de distância, não a 26: eles COMPARTILHAM a data
+#     enquanto o relógio de SP marca entre 00:00 e 07:00. MEDIDO em 02/09/2026
+#     às 00:06 de SP (mesma data nos dois): este foi o ÚNICO dos sete casos a
+#     passar sob o hardcode. Quem discrimina a QUALQUER hora é a leitura antiga
+#     acima — `TZ=Etc/GMT+12` está a 26h de Kiritimati, datas sempre diferentes
+#     —, e é ela o controle negativo declarado deste caso.
 
 def test_a_janela_rolante_comeca_no_dia_local(pro_user_id, monkeypatch):
     import frontend.finance_bot_websocket_custom as dashboard  # antes do monkeypatch (18.4)
