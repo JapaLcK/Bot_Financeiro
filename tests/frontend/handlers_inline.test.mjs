@@ -69,6 +69,7 @@ const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos
  */
 export function markupDe(js) {
   const trechos = [];
+  const dados = [];
   const perdidos = [];
   let i = 0;
 
@@ -92,18 +93,21 @@ export function markupDe(js) {
     if (c === '"' || c === "'") {
       const fim = fimDeString(js, i, c);
       if (fim < 0) { perdidos.push(`string ${c} sem fechamento`); break; }
-      trechos.push(js.slice(i + 1, fim));
+      const texto = js.slice(i + 1, fim);
+      trechos.push(texto);
+      if (ehHandlerEmDado(js, i)) dados.push(texto);
       i = fim + 1; continue;
     }
     if (c === "`") {
       const r = leTemplate(js, i);
       if (!r) { perdidos.push("template literal sem fechamento"); break; }
       trechos.push(r.texto, ...r.aninhados);
+      if (ehHandlerEmDado(js, i)) dados.push(r.texto);
       i = r.fim + 1; continue;
     }
     i++;
   }
-  return { trechos, perdidos };
+  return { trechos, dados, perdidos };
 }
 
 /**
@@ -129,15 +133,35 @@ const PALAVRA_OPERADOR = new Set([
   "return", "typeof", "case", "in", "of", "new", "delete", "void", "do", "else",
   "yield", "await", "instanceof", "throw",
 ]);
+/** `if (x) /re/.test(y)`: o `)` fecha CABEÇALHO, não chamada — logo, operador. */
+const CABECALHO = new Set(["if", "for", "while", "switch", "catch", "with"]);
+
+/** A palavra que termina em `j`, ou "". */
+function palavraAte(s, j) {
+  let k = j;
+  while (k >= 0 && /[\w$]/.test(s[k])) k--;
+  return s.slice(k + 1, j + 1);
+}
 
 function ehRegex(s, i) {
   let j = i - 1;
   while (j >= 0 && /\s/.test(s[j])) j--;
   if (j < 0) return true;
   if (!/[\w$)\]]/.test(s[j])) return true;
-  let k = j;
-  while (k >= 0 && /[\w$]/.test(s[k])) k--;
-  return PALAVRA_OPERADOR.has(s.slice(k + 1, j + 1));
+  if (s[j] === ")") {
+    // Volta até o `(` que casa, e pergunta o que vinha antes dele.
+    let prof = 0, k = j;
+    for (; k >= 0; k--) {
+      if (s[k] === ")") prof++;
+      else if (s[k] === "(" && --prof === 0) break;
+    }
+    if (k < 0) return false;
+    let m = k - 1;
+    while (m >= 0 && /\s/.test(s[m])) m--;
+    return CABECALHO.has(palavraAte(s, m));
+  }
+  if (s[j] === "]") return false;
+  return PALAVRA_OPERADOR.has(palavraAte(s, j));
 }
 
 /** Fim do literal de regex: `/` não escapada e fora de `[...]`. */
@@ -230,6 +254,33 @@ const NAO_E_NOME = new Set(["this", "event", "true", "false", "null", "undefined
 const SO_NOME = /^[A-Za-z_$][\w$]*$/;
 
 /**
+ * Nome declarado DENTRO do próprio handler não é global.
+ *
+ * `onclick="const value = event.target.value; submit(value)"` resolve `value`
+ * sozinho, e exigi-lo no escopo global reprovaria handler correto — falso positivo.
+ *
+ * TETO DECLARADO: pega `const`/`let`/`var` e parâmetro de função/arrow, que é o que
+ * cabe num atributo. Desestruturação (`const {a} = x`) fica de fora, e o efeito aí é
+ * cobrar a mais — por isso a lista é generosa: qualquer nome que apareça depois de
+ * uma dessas palavras sai da conta.
+ */
+const DECLARACAO_LOCAL = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)|\bfunction\s*[A-Za-z_$\w$]*\s*\(([^)]*)\)|\(([^)]*)\)\s*=>|\b([A-Za-z_$][\w$]*)\s*=>/g;
+
+function locaisDe(v) {
+  const fora = new Set();
+  for (const m of v.matchAll(DECLARACAO_LOCAL)) {
+    for (const parte of [m[1], m[2], m[3], m[4]]) {
+      if (!parte) continue;
+      for (const tok of parte.split(",")) {
+        const n = tok.trim().replace(/[=:].*$/, "").trim();
+        if (SO_NOME.test(n)) fora.add(n);
+      }
+    }
+  }
+  return fora;
+}
+
+/**
  * Esvazia STRING e LITERAL DE REGEX antes de procurar chamada.
  *
  * String: `'Use 4 números (ou vazio)'` rendia o identificador `meros`, porque o `\w`
@@ -299,19 +350,22 @@ function argumentosDe(t) {
 }
 
 /**
- * Handler que só existe como DADO, e por isso o navegador não pode vê-lo.
+ * Este literal é um handler guardado como DADO?
  *
  * O `admin-dashboard.html` guarda `{ click: "openUsersModal(event)" }` numa lista de
- * cards e injeta esse valor num `onclick=` só na hora de renderizar. Sem executar o
- * código com dado real, não há DOM onde ler isso — é a única coisa que sobrou
+ * cards e injeta o valor num `onclick=` só na hora de renderizar. Sem executar o
+ * código com dado real não há DOM onde ler isso — é a única coisa que sobrou
  * precisando de reconhecimento de forma no texto.
  *
- * O modo de falha é DEIXAR DE ACHAR, nunca inventar: se a forma mudar, o nome some
- * do levantamento e a baseline fica vermelha nomeando-o.
+ * A pergunta é feita DE DENTRO do `markupDe`, no índice onde um literal de verdade
+ * começa, e essa é a diferença que importa: comentário, expressão regular e string
+ * aninhada já foram puladas pela varredura, então `// click: "inventado()"` nunca
+ * chega aqui. Rodar um regex sobre o texto cru cobraria os três.
  */
-const HANDLER_EM_DADO = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*(["'`])((?:\\.|(?!\1)[\s\S])*)\1/gi;
+const ANTES_DE_HANDLER = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*$/i;
 
-export const handlersEmDado = (js) => [...js.matchAll(HANDLER_EM_DADO)].map((m) => m[2]);
+const ehHandlerEmDado = (js, i) =>
+  ANTES_DE_HANDLER.test(js.slice(Math.max(0, i - 48), i));
 
 export function nomesDe(valores) {
   const funcoes = new Set(), variaveis = new Set();
@@ -322,9 +376,12 @@ export function nomesDe(valores) {
     for (const m of limpo.matchAll(RAIZ_DE_MEMBRO)) {
       if (!NATIVO.has(m[1]) && !NAO_E_NOME.has(m[1])) variaveis.add(m[1]);
     }
+    const locais = locaisDe(limpo);
     for (const tok of argumentosDe(limpo)) {
       const n = tok.trim();
-      if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n)) variaveis.add(n);
+      if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n) && !locais.has(n)) {
+        variaveis.add(n);
+      }
     }
   }
   return { funcoes, variaveis };
@@ -404,9 +461,9 @@ const levantar = (pagina) => {
 async function handlersDoMarkup(page, fontes, perdidos) {
   const out = [];
   for (const [nome, js] of fontes) {
-    const { trechos, perdidos: p } = markupDe(js);
+    const { trechos, dados, perdidos: p } = markupDe(js);
     for (const m of p) perdidos.push(`${nome}: ${m}`);
-    out.push(...handlersEmDado(js));
+    out.push(...dados);
     // Condição NECESSÁRIA para haver handler, não um parser: trecho sem `on…=`
     // não tem como conter atributo de evento. Corta ~5200 strings do dashboard.js
     // para dezenas, e o custo importa — sem isto o arquivo compete por CPU com os
