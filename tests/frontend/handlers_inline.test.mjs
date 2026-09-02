@@ -330,7 +330,23 @@ const CHAMADA_WINDOW = /\bwindow\??\.([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
  */
 const RAIZ_DE_MEMBRO = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\??\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.)?\s*\(/g;
 
-/** Toda lista de argumento, em todo nível — regex só casa a mais interna. */
+/**
+ * Toda lista de argumento, em todo nível — regex só casa a mais interna.
+ *
+ * TETO DECLARADO, e escolhido com medição: só o argumento que é um identificador
+ * INTEIRO entra. `submit(missing + 1)` não rende `missing`, e isso é cobertura
+ * perdida de propósito.
+ *
+ * O motivo é que a alternativa é pior. Medi o que "todo identificador da expressão"
+ * exigiria a mais neste frontend, já com string esvaziada e declaração local
+ * excluída: **8 nomes, e os 8 são chave de objeto literal** —
+ * `updateNotificationSettings({ daily_report_enabled: this.checked })` e irmãos no
+ * settings.html. Cobrá-los reprovaria 8 handlers CORRETOS.
+ *
+ * Distinguir chave de referência exige análise sintática de verdade, e errar ali
+ * produz nome inventado — a classe que trava PR legítimo. Perder `missing` só reduz
+ * cobertura. Entre as duas, esta é a falha certa a escolher.
+ */
 function argumentosDe(t) {
   const fora = [], pilha = [];
   let seg = "";
