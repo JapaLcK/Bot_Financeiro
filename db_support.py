@@ -552,6 +552,15 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
         # deepcopy nos dois sentidos: caller que mutar o dict não pode
         # envenenar o cache (plan/plan_expires_at decidem acesso pago).
         return copy.deepcopy(hit[1])
+    # Timestamp do INÍCIO da leitura, não do fim: um leitor em cache-miss pode
+    # publicar uma linha que ficou velha durante a própria leitura (escritor
+    # commitou e invalidou no meio). Contando do início, esse stale continua
+    # limitado ao TTL — com o timestamp do fim, ele duraria TTL + a duração da
+    # leitura, ou seja MAIS que o teto que o design documenta.
+    # ponytail: não há generation counter — o efeito residual é exatamente o
+    # TTL de 10 s que o cache já assume; contador por usuário só se algum dia
+    # a promessa de invalidação precisar ser dura (aí o certo é não cachear).
+    lido_em = time.monotonic()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -590,7 +599,7 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
             ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
                                  subject_user_id=user_id, field="name"),
         )
-    now = time.monotonic()
+    now = lido_em
     with _auth_user_cache_lock:  # poda+evict ITERAM o dict: ver comentário do lock
         if len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
             cutoff = now - AUTH_USER_CACHE_TTL_SECONDS

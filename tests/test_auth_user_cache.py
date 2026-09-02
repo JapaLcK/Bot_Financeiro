@@ -201,6 +201,37 @@ def test_cache_no_teto_sob_concorrencia_nao_estoura():
         db_support.invalidate_auth_user_cache()
 
 
+def test_ttl_conta_do_inicio_da_leitura(user_id):
+    """Codex-9: leitor em cache-miss que publica uma linha que ficou velha
+    durante a leitura não pode RENOVAR o TTL a partir do fim dela — senão o
+    stale dura TTL + duração da leitura, mais que o teto documentado."""
+    import time
+
+    _mk_auth(user_id)
+    try:
+        db_support.invalidate_auth_user_cache()
+
+        class _LentoConn:
+            """Leitura que demora: simula o escritor commitando no meio."""
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return self
+            def execute(self, *a, **k): return None
+            def fetchone(self):
+                time.sleep(0.3)  # a linha "envelhece" aqui
+                return {"email": "x@test.local", "plan": "free"}
+
+        t0 = time.monotonic()
+        db_support.get_auth_user_impl(lambda: _LentoConn(), user_id)
+        ts = db_support._auth_user_cache[int(user_id)][0]
+        assert ts <= t0 + 0.05, (
+            f"TTL renovado a partir do FIM da leitura (ts-t0={ts - t0:.3f}s): "
+            "o stale passaria do teto de 10 s"
+        )
+    finally:
+        _rm_auth(user_id)
+
+
 def test_mutacao_do_caller_nao_envenena_o_cache(user_id):
     """plan/plan_expires_at decidem acesso pago — caller que muta o dict
     devolvido não pode contaminar a próxima leitura."""

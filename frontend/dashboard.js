@@ -250,12 +250,19 @@ let ws, lastData = null;
 // CANCELAR explicitamente — hoje o retry na tela de erro só morria porque
 // setStatus() estourava no DOM apagado; um `?.` inocente ali criaria loop.
 let wsReconnectTimer = null;
-// Reconexão em duas velocidades (Codex-2 do PR #218): socket que JÁ abriu
-// nesta sessão cai e volta em 3 s fixos (queda transitória — retry legítimo);
-// socket que NUNCA abriu (handshake rejeitado: gate de plano no servidor,
-// outage de auth) usa backoff dobrado até 60 s — sem isso, boot sem plano com
-// /auth/me fora do ar martelava /ws a cada 3 s para sempre.
-let wsEverOpened = false;
+// Reconexão em duas velocidades: tentativa que ABRIU cai e volta em 3 s
+// (queda transitória — retry legítimo); tentativa que NÃO chegou a abrir
+// (handshake rejeitado pelo gate de plano, outage de auth) usa backoff
+// dobrado até 60 s. O critério é a ÚLTIMA tentativa, não "alguma vez abriu":
+// assinatura revogada no meio da sessão rejeita as reconexões de um socket
+// que já tinha aberto, e com "alguma vez" o retry ficava fixo em 3 s para
+// sempre (Codex-8). Depois de WS_REVALIDATE_AFTER falhas seguidas o cliente
+// re-executa o gate de acesso (/auth/me) — é assim que ele DESCOBRE que
+// perdeu o plano, já que o close(4402) é pré-accept e chega como 1006.
+const WS_REVALIDATE_AFTER = 2;
+let wsOpenedLastAttempt = false;
+let wsFailStreak = 0;
+let wsRetryStopped = false;
 let wsRetryDelay = 3000;
 let filterType   = "all";
 let bgtTarget    = null;
@@ -7505,11 +7512,57 @@ function setStatus(s) {
   if (s === "disconnected") { txt.textContent = "Desconectado – reconectando…"; }
 }
 
+// Veredito de acesso do /auth/me: false = a tela vai embora (paywall/erro), e
+// o que essa saída exige já foi executado aqui. Uma fonte só, usada pelo boot
+// e pela revalidação disparada por reconexões rejeitadas.
+function applyAccessVerdict(me) {
+  if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+    clearSessionSnapshots();  // veredito negativo: reload não repinta saldo
+    stopWsRetries();
+    window.location.replace("/precos?escolha=1");
+    return false;
+  }
+  if (me && me.app_access === false) {
+    clearSessionSnapshots();
+    // O socket já pode estar conectado/reconectando — para tudo antes de
+    // trocar de tela, senão a tela de erro fica reconectando por baixo.
+    stopWsRetries();
+    if (window.PB_IN_APP) {
+      // App iOS: tela neutra, sem link de compra (diretriz 3.1.1).
+      _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
+    } else {
+      window.location.replace("/precos?ativar=1");
+    }
+    return false;
+  }
+  return true;
+}
+
+// Reconexões seguidas rejeitadas: pergunta ao /auth/me se o acesso caiu.
+// Falha de rede aqui não decide nada (segue tentando; o 402 protege os dados).
+async function revalidateAccess() {
+  try {
+    const r = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    if (r.ok) applyAccessVerdict(await r.json());
+  } catch {}
+}
+
+// Para de reconectar e mata o socket em voo. Usada quando o veredito de
+// acesso NEGA — sem a flag, um onclose já disparado reagendaria o retry.
+function stopWsRetries() {
+  wsRetryStopped = true;
+  clearTimeout(wsReconnectTimer);
+  try { if (ws) { ws.onclose = null; ws.onmessage = null; ws.close(); } } catch {}
+}
+
 function connect() {
+  if (wsRetryStopped) return;
   setStatus("connecting");
+  wsOpenedLastAttempt = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
-    wsEverOpened = true;
+    wsOpenedLastAttempt = true;
+    wsFailStreak = 0;
     wsRetryDelay = 3000;
     setStatus("connected");
     // Server já manda snapshot automático ao conectar (linha 5368 do backend).
@@ -7569,8 +7622,17 @@ function connect() {
   };
   ws.onclose = () => {
     setStatus("disconnected");
-    if (!wsEverOpened) wsRetryDelay = Math.min(wsRetryDelay * 2, 60000);
-    wsReconnectTimer = setTimeout(connect, wsEverOpened ? 3000 : wsRetryDelay);
+    if (wsRetryStopped) return;
+    let delay = 3000;
+    if (!wsOpenedLastAttempt) {          // não chegou a abrir: rejeitado/outage
+      wsFailStreak++;
+      wsRetryDelay = Math.min(wsRetryDelay * 2, 60000);
+      delay = wsRetryDelay;
+      // Rejeição repetida pode ser plano revogado no meio da sessão — o
+      // cliente não lê o motivo (1006), então PERGUNTA ao /auth/me.
+      if (wsFailStreak % WS_REVALIDATE_AFTER === 0) revalidateAccess();
+    }
+    wsReconnectTimer = setTimeout(connect, delay);
   };
   ws.onerror = () => ws.close();
 }
@@ -10708,27 +10770,9 @@ function _showAccessError(title, msg) {
         // Gate de escolha de plano: cadastro novo passa pela /precos antes de
         // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
         // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
-        if (me && me.needs_plan_selection && !window.PB_IN_APP) {
-          clearSessionSnapshots(); // veredito negativo: reload não repinta saldo
-          window.location.replace("/precos?escolha=1");
-          return false;
-        }
-        if (me && me.app_access === false) {
-          clearSessionSnapshots(); // veredito negativo: reload não repinta saldo
-          if (window.PB_IN_APP) {
-            // App iOS: tela neutra, sem link de compra (diretriz 3.1.1).
-            // O connect() já disparou — mata o socket E o timer de reconexão
-            // já armado (o gate do servidor derruba o WS antes do /me chegar,
-            // então o onclose já reagendou), senão a tela de erro fica
-            // reconectando a cada 3s.
-            clearTimeout(wsReconnectTimer);
-            try { if (ws) { ws.onclose = null; ws.onmessage = null; ws.close(); } } catch {}
-            _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
-            return false;
-          }
-          window.location.replace("/precos?ativar=1");
-          return false;
-        }
+        // Paywall/escolha de plano: mesmo veredito da revalidação por WS
+        // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
+        if (!applyAccessVerdict(me)) return false;
         // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
         // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
         if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {

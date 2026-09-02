@@ -52,9 +52,11 @@ after(async () => { await browser?.close(); });
 // stubadas: validate responde na hora; /auth/me demora ME_DELAY_MS.
 // wsMode: "silent" = conecta e fica (default) | "reject" = handshake cai 30ms
 // depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
-async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent", seedSnap = false }) {
+async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
+                         seedSnap = false, meAfter = null }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
+  let meCalls = 0;
   if (seedSnap) {
     // Snapshot que a "aba anterior" gravou (USER_ID 42, mês corrente) — o que
     // o restoreSnapshotFromSession consome no boot.
@@ -81,6 +83,18 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
           setTimeout(() => { this.readyState = 3; this.onclose?.({ code: 1006 }); }, 30);
         } else if (mode === "open") {
           setTimeout(() => { this.onopen?.(); }, 30);
+        } else if (mode === "open-then-reject") {
+          // 1º socket abre (plano ainda válido) e cai; os seguintes são
+          // rejeitados pelo gate (plano revogado no meio da sessão).
+          const primeiro = window._wsCount === 1;
+          setTimeout(() => {
+            if (primeiro) {
+              this.readyState = 1; this.onopen?.();
+              setTimeout(() => { this.readyState = 3; this.onclose?.({ code: 1006 }); }, 300);
+            } else {
+              this.readyState = 3; this.onclose?.({ code: 1006 });
+            }
+          }, 30);
         }
       }
       close() { this.readyState = 3; } send() {}
@@ -99,7 +113,11 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
     }
     if (url.pathname === "/auth/me") {
       await new Promise((r) => setTimeout(r, meDelayMs));
-      return route.fulfill({ status: meStatus, contentType: "application/json", body: JSON.stringify(me) });
+      meCalls += 1;
+      // meAfter: resposta das chamadas seguintes (assinatura revogada no meio
+      // da sessão) — a 1ª continua sendo `me`.
+      const corpo = meCalls === 1 || !meAfter ? me : meAfter;
+      return route.fulfill({ status: meStatus, contentType: "application/json", body: JSON.stringify(corpo) });
     }
     if (url.pathname.startsWith("/precos")) {
       return route.fulfill({ contentType: "text/html", body: "<title>precos</title>PRECOS" });
@@ -149,6 +167,22 @@ test("handshake rejeitado + /auth/me 500: retry com backoff, sockets ≤2 em 15s
   await new Promise((r) => setTimeout(r, 15000));
   const n = await page.evaluate(() => window._wsCount);
   assert.ok(n <= 2, `${n} sockets em 15s — retry sem backoff (esperado ≤2)`);
+  await ctx.close();
+});
+
+test("plano revogado no meio da sessão: revalida, redireciona e PARA de reconectar", async () => {
+  // Codex-8: socket abre com plano válido; a assinatura é revogada e as
+  // reconexões passam a ser rejeitadas (1006, pré-accept — o cliente não lê
+  // o motivo). Antes: retry fixo de 3 s para sempre, /auth/me nunca refeito.
+  const { ctx, page } = await bootApp({
+    me: { app_access: true }, meAfter: { app_access: false },
+    meDelayMs: 30, wsMode: "open-then-reject",
+  });
+  await page.waitForURL("**/precos?ativar=1", { timeout: 15000 });
+  const antes = await page.evaluate(() => window._wsCount || 0);
+  await page.waitForTimeout(5000);
+  const depois = await page.evaluate(() => window._wsCount || 0);
+  assert.equal(depois, antes, `continuou reconectando após o veredito: ${antes} -> ${depois}`);
   await ctx.close();
 });
 
