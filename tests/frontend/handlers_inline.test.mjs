@@ -93,7 +93,7 @@ export function markupDe(js) {
     if (c === '"' || c === "'") {
       const fim = fimDeString(js, i, c);
       if (fim < 0) { perdidos.push(`string ${c} sem fechamento`); break; }
-      const texto = js.slice(i + 1, fim);
+      const texto = semEscape(js.slice(i + 1, fim));
       trechos.push(texto);
       if (ehHandlerEmDado(js, i)) dados.push(texto);
       i = fim + 1; continue;
@@ -177,6 +177,22 @@ function fimDeRegex(s, i) {
   }
   return -1;
 }
+
+/**
+ * Desfaz o escape de string do JavaScript.
+ *
+ * `const html = "<button onclick=\\"missing()\\">"` chega ao navegador, em tempo de
+ * execução, com aspas de verdade — o motor tira as barras. Entregar o fatiamento cru
+ * ao parser daria um atributo malformado (`\\"missing()\\"`), e o nome sumiria da
+ * cobertura sem nenhum aviso.
+ *
+ * Só os escapes que mudam o texto do markup: aspa, barra, e as quebras usuais.
+ * `\\u` e `\\x` ficam de fora de propósito — não aparecem em delimitador de atributo,
+ * e decodificá-los mal seria pior que não decodificar.
+ */
+const ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" };
+const semEscape = (s) =>
+  s.replace(/\\([\s\S])/g, (_, c) => (c in ESCAPES ? ESCAPES[c] : c));
 
 /** Índice da aspa de fechamento, ou -1. A barra invertida consome o próximo. */
 function fimDeString(s, i, aspa) {
@@ -295,6 +311,19 @@ function semLiterais(s) {
   let out = "";
   for (let i = 0; i < s.length; ) {
     const c = s[i];
+    // COMENTÁRIO primeiro, senão o `//` vira "regex vazia" e o corpo do comentário
+    // segue sendo lido como código — `// const missing` fazia `missing` virar
+    // declaração local e sumir da cobertura.
+    if (c === "/" && s[i + 1] === "/") {
+      const n = s.indexOf("\n", i);
+      if (n < 0) return out;
+      i = n + 1; continue;
+    }
+    if (c === "/" && s[i + 1] === "*") {
+      const n = s.indexOf("*/", i + 2);
+      if (n < 0) return out;
+      i = n + 2; continue;
+    }
     if (c === '"' || c === "'" || c === "`") {
       const fim = fimDeString(s, i, c);
       if (fim < 0) return out;                 // literal aberto: para, não adivinha
@@ -327,8 +356,12 @@ const CHAMADA_WINDOW = /\bwindow\??\.([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
  *
  * Entra como VARIÁVEL, não função: `dialogs` só precisa existir. Os receptores
  * nativos (`this`, `event`, `JSON`, `Math`, `document`, `window`) já caem nas listas.
+ *
+ * E vale para QUALQUER profundidade: `app.dialogs.open()` e `app?.dialogs?.open()`
+ * precisam de `app` do mesmo jeito. Exigir exatamente um nível deixava esses de fora.
  */
-const RAIZ_DE_MEMBRO = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\??\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.)?\s*\(/g;
+const RAIZ_DE_MEMBRO =
+  /(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:\??\.\s*[A-Za-z_$][\w$]*\s*)+(?:\?\.)?\s*\(/g;
 
 /**
  * Toda lista de argumento, em todo nível — regex só casa a mais interna.
