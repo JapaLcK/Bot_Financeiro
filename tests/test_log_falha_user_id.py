@@ -554,7 +554,29 @@ def test_porta_nova_com_id_errado_nao_passa_em_silencio():
 # TEXTO tem de pôr também na COLUNA**. É essa a classe, e é ela que pega o site
 # futuro.
 _RECORTE_LOGGER = "db/accounts.py"
-_NIVEIS_ESPELHADOS = {"warning", "error", "exception", "critical"}
+
+
+def _niveis_espelhados() -> set[str]:
+    """Níveis que o `_DashboardHandler` espelha, MEDIDOS nele em vez de
+    copiados: `emit` sai cedo abaixo do limiar, então quem não grava não tem
+    coluna a preencher. Copiar o conjunto fazia o guarda mentir em silêncio se
+    o limiar caísse para INFO (§0.7) — os nomes saem do próprio
+    `record.levelname.lower()` do handler. `exception` não é nível: é o método
+    que loga em ERROR, e por isso entra à mão."""
+    gravou: list[str] = []
+    handler, real = observability._DashboardHandler(), observability.log_system_event_sync
+    observability.log_system_event_sync = lambda level, **kw: gravou.append(level)
+    try:
+        for nome in ("debug", "info", "warning", "error", "critical"):
+            handler.emit(logging.LogRecord(
+                "t", getattr(logging, nome.upper()), __file__, 1, "x", None, None))
+    finally:
+        observability.log_system_event_sync = real
+    assert gravou, "handler não espelhou nível nenhum — a varredura não mediria nada"
+    return set(gravou) | {"exception"}
+
+
+_NIVEIS_ESPELHADOS = _niveis_espelhados()
 
 # Allowlist ESTRUTURAL (arquivo, função), no padrão de `_ALLOWLIST_USER_ID`.
 # Vazia: nenhum site de hoje precisa. Entrada nova aqui é decisão consciente de

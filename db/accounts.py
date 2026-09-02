@@ -1132,7 +1132,9 @@ _DELTA_EXIGE_LOTE = (
 # campos no mesmo insert atômico, e nenhum código reescreve `efeitos` depois —,
 # mas a tese deste PR é recusar o que não sabe reverter, e um dos oito destrói
 # dinheiro. `bill_id` fica de fora desta tabela: é PAR com `paid_amount_added`,
-# tratado no laço.
+# tratado no laço. `delta_invest`/`delta_pocket` PRESENTES sem `nome` são da
+# MESMA classe (chave presente e oca) e também ficam de fora: seguem crus, como
+# `ValueError` sem `motivo`, pela decisão documentada em `:258-261`.
 _EFEITOS_CAMPOS_EXIGIDOS = (
     ("investment_lot_create", ("lot_id",)),
     ("investment_lot_withdrawals", ("lot_id", "before")),
@@ -1166,8 +1168,11 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 
     Recusa (sem tocar em saldo) o que não sabe reverter por inteiro:
     `LaunchNoEffects` sem `efeitos`, `LaunchUnsafeRollback` com `efeitos`
-    degenerado, com chave fora de `_EFEITOS_REVERSIVEIS` ou com delta de lote
-    sem a chave que nomeia o lote (`_DELTA_EXIGE_LOTE`).
+    degenerado, com chave fora de `_EFEITOS_REVERSIVEIS`, com delta de lote
+    sem a chave que nomeia o lote (`_DELTA_EXIGE_LOTE`), ou com a chave
+    PRESENTE e oca — sem o campo que a torna reversível
+    (`_EFEITOS_CAMPOS_EXIGIDOS`), no container errado, com `before` sem
+    `_BEFORE_CAMPOS`, ou com `bill_id`/`paid_amount_added` desemparelhados.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1250,8 +1255,18 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 valor = efeitos.get(chave)
                 if valor is None:
                     continue
-                itens = valor if isinstance(valor, list) else [valor]
-                for item in itens:
+                # Container POR CHAVE: só `investment_lot_withdrawals` é lido
+                # como LISTA (o `for effect in …` abaixo); as outras cinco levam
+                # `.get` direto no dict. Aceitar os dois deixava o swap passar
+                # aqui e estourar `AttributeError` cru lá embaixo — balde
+                # `errors` e SILÊNCIO nos três `except Exception: pass` do OF.
+                lista = chave == "investment_lot_withdrawals"
+                if isinstance(valor, list) != lista:
+                    raise LaunchUnsafeRollback(
+                        f"'{chave}' com forma inesperada ({type(valor).__name__}).",
+                        "efeito_incompleto",
+                    )
+                for item in (valor if lista else [valor]):
                     if not isinstance(item, dict):
                         raise LaunchUnsafeRollback(
                             f"'{chave}' com forma inesperada ({type(item).__name__}).",
@@ -1262,8 +1277,11 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     # único dos oito que DESTRÓI dinheiro, então checa por dentro.
                     if not faltando and "before" in campos:
                         antes = item.get("before")
+                        # VALOR, não presença: `{"balance": null}` passava pelo
+                        # `c not in antes` e virava `Decimal(str(None))` —
+                        # `InvalidOperation` cru, mesmo balde do swap acima.
                         if not isinstance(antes, dict) or any(
-                            c not in antes for c in _BEFORE_CAMPOS
+                            antes.get(c) is None for c in _BEFORE_CAMPOS
                         ):
                             faltando = ["before.%s" % "/".join(_BEFORE_CAMPOS)]
                     if faltando:

@@ -848,6 +848,53 @@ def test_E2_before_presente_mas_oco_tambem_recusa(user_id: int):
     _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
 
 
+def test_F1_withdrawals_como_dict_recusa_em_vez_de_estourar(user_id: int):
+    """FORMA do CONTAINER, não só do item. Sem a guarda o swap passava a
+    validação (o dict vira `[valor]`, item bem formado) e estourava LÁ EMBAIXO,
+    cru: `for effect in dict` itera as CHAVES → `AttributeError: 'str' object
+    has no attribute 'get'`. Cai no `except Exception` (balde `errors`, não
+    `kept_unsafe`) e em SILÊNCIO nos três `except Exception: pass` de
+    `db/open_finance.py`."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_withdrawals": {"lot_id": 1, "before": '
+                 '{"balance": 300.0, "principal_remaining": 300.0}}}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_F2_lot_create_como_lista_recusa_em_vez_de_estourar(user_id: int):
+    """O swap contrário: `investment_lot_create` é lido com `.get` direto, então
+    a lista estoura `AttributeError: 'list' object has no attribute 'get'` —
+    mesmo balde `errors`, mesmo silêncio no OF."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_create": [{"lot_id": 1, "investment_id": 1}]}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_G_before_com_valor_nulo_recusa(user_id: int):
+    """`{"balance": null}` é chave PRESENTE com valor nulo: passava pelo
+    `c not in antes` e virava `Decimal(str(None))` → `InvalidOperation:
+    [ConversionSyntax]` cru, mesmo balde `errors` do swap acima."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_withdrawals": [{"lot_id": 1, "before": '
+                 '{"balance": null, "principal_remaining": 300.0}}]}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
 def test_site4_bill_id_sem_paid_amount_added_recusa(user_id: int):
     """Site 4 do inventário: `:1248` exige o PAR. Com um só, a reversão do
     pagamento é pulada e a fatura fica `paid` com o lançamento apagado."""
@@ -861,6 +908,32 @@ def test_site4_bill_id_sem_paid_amount_added_recusa(user_id: int):
     assert exc.value.motivo == "efeito_incompleto"
     assert _bal(user_id) == 800.0
     assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+
+
+def test_positivo_resgate_multi_lote_e_total_continua_apagavel(user_id: int):
+    """CONTROLE POSITIVO das guardas novas, na forma que elas mais poderiam
+    recusar por engano: `investment_lot_withdrawals` com VÁRIOS itens (resgate
+    PEPS que atravessa dois lotes) e resgate TOTAL (os dois lotes fechados).
+    Nenhum outro teste apagava um resgate multi-lote — a lista de um item só
+    não discrimina container errado de container certo."""
+    from db.investments import (create_investment, investment_deposit_from_account,
+                                investment_withdraw_to_account)
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aporte 1")
+    investment_deposit_from_account(user_id, "cdb", 400, "aporte 2")
+    assert _lotes(user_id, "investment_lots") == (2, 700.0)
+
+    investment_withdraw_to_account(user_id, "cdb", 700, "resgatando tudo")
+    resgate = int(db.list_launches(user_id, limit=1)[0]["id"])
+    assert _lotes(user_id, "investment_lots") == (2, 0.0), "resgate total fecha os dois"
+
+    db.delete_launch_and_rollback(user_id, resgate)
+
+    assert _lotes(user_id, "investment_lots") == (2, 700.0), \
+        "os dois `before` da lista têm de restaurar os dois lotes"
+    assert _investment_balance(user_id, "cdb") == 700.0
 
 
 def test_positivo_aporte_e_resgate_integros_continuam_apagaveis(user_id: int):
