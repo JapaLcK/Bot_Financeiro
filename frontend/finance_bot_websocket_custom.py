@@ -88,6 +88,7 @@ from db import (
     get_auth_user,
     build_user_export_zip,
     verify_user_password,
+    PasswordNotSetError,
     get_user_email,
     create_data_export_token,
     consume_data_export_token,
@@ -2967,7 +2968,10 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import get_auth_user, should_show_mfa_onboarding, get_mfa_status
+    from db import (
+        auth_account_has_password, get_auth_user, should_show_mfa_onboarding,
+        get_mfa_status,
+    )
 
     user = get_auth_user(user_id)
     if not user:
@@ -3006,6 +3010,10 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "user_id": user_id,
         **safe_user,
         "show_mfa_onboarding": show_onboarding,
+        # False = conta criada só via Google (password_hash NULL): a UI manda
+        # DEFINIR senha em vez de mostrar campo de senha que nunca aceita nada.
+        # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
+        "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "needs_plan_selection": needs_plan_selection(user_id, user_dict),
@@ -3018,6 +3026,20 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
     }
+
+
+async def _reauth_password_ok(user_id: int, password: str) -> bool:
+    """Re-autenticação por senha nos endpoints já autenticados.
+
+    Devolve False para senha ERRADA (cada chamador mantém o próprio 401 e o
+    próprio log). Conta SEM senha (criada só via Google) vira 409 aqui: a
+    PasswordNotSetError atravessando o asyncio.to_thread viraria 500 no handler
+    global de Exception (:2138), não 401.
+    """
+    try:
+        return await asyncio.to_thread(verify_user_password, user_id, password)
+    except PasswordNotSetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ── MFA (TOTP) ───────────────────────────────────────────────────────────────
@@ -3078,7 +3100,7 @@ async def auth_mfa_setup(request: Request, body: MFASetupBody, user_id: int = De
     """Inicia setup do MFA: pede senha, gera secret, retorna QR + URI."""
     _block_setup_if_unsupported_user(user_id)
 
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3132,7 +3154,7 @@ async def auth_mfa_enable(request: Request, body: MFAEnableBody, user_id: int = 
 @limiter.limit("5/hour")
 async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
     """Desativa MFA (pede senha + codigo TOTP atual ou backup code)."""
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3169,7 +3191,7 @@ async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int 
 @limiter.limit("3/hour")
 async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
     """Gera novos backup codes (invalida os antigos). Pede senha + TOTP."""
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3290,7 +3312,7 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     # 1) Re-auth por senha
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         await log_system_event(
             "warning",
@@ -3453,6 +3475,10 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     email = (auth_user or {}).get("email")
     try:
         result = await asyncio.to_thread(schedule_account_deletion, user_id, body.password, 7)
+    except PasswordNotSetError as exc:
+        # ANTES do except PermissionError (é subclasse dele): invertido, o
+        # genérico engole e o 409 nunca acontece.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LookupError as exc:
