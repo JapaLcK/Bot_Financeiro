@@ -1,17 +1,28 @@
 """Mede, contra produção, quantas linhas de `launches` o #214 passa a RECUSAR
 que o `b4d0085` (comportamento de hoje) apagava.
 
-Roda a guarda de VERDADE, em Python (`_validar_efeitos`, `db/accounts.py`), numa
-amostra de `efeitos` lida do banco. NÃO reimplementa a regra em SQL: o `falsy`
+Roda a guarda de VERDADE, em Python (`_validar_efeitos`, `db/accounts.py`), na
+tabela `launches` INTEIRA — a query não tem `WHERE` nem `LIMIT`, então não é
+amostra: é todo `efeitos` que existe. NÃO reimplementa a regra em SQL: o `falsy`
 do SQL não é o do Python (`[]`, `{}`, `0.00` são recusados aqui e invisíveis lá)
 e duas fontes de verdade da mesma regra é o que `CLAUDE.md` §0.7 proíbe.
 
 SEGURANÇA
   - conexão read-only pelo SERVIDOR (`default_transaction_read_only=on`), não
     pela disciplina do script; sai com código 2 se o servidor não confirmar;
-  - um SELECT só (`tipo`, `efeitos`), cursor server-side, `rollback` no fim;
+  - um SELECT só (`tipo`, `efeitos`), cursor server-side, `rollback` e `close`
+    no fim (o `with psycopg.connect` mandava COMMIT no `__exit__`; era inócuo
+    numa transação vazia e read-only, mas não era o que este texto prometia);
   - a saída é SÓ contagem agregada. Nenhum `user_id`, `launch_id`, nome,
     valor ou pedaço de payload sai daqui — nem em amostra, nem em exemplo.
+  - **toda** saída do processo passa por `executar()`, que imprime TIPO e LOCAL
+    de uma falha e NUNCA `str(exc)` nem a cadeia de mensagens. Não é zelo
+    teórico: a mensagem de `chave_desconhecida` é
+    `f"efeitos que não sei reverter: {sorted(desconhecidas)}"` — chave CRUA de
+    payload — e qualquer traceback que escapasse a imprimia, inclusive vindo de
+    outra exceção pelo `During handling of the above exception` (medido: Ctrl-C
+    dentro do `except` do `classificar` vazou em 2 de 15 execuções). Ctrl-C,
+    import quebrado e `RecursionError` fecham todos no mesmo ponto.
   - é a única query deste repositório sem `WHERE user_id` de propósito
     (`CLAUDE.md` §0): a pergunta é agregada sobre a base inteira, e o que sai
     do processo é contagem, não linha.
@@ -22,10 +33,15 @@ O QUE ESTA MEDIÇÃO **NÃO** RESPONDE
      SILÊNCIO nos três `except Exception: pass` de `db/open_finance.py`) em vez
      de apagar. A coluna `b4d0085 apaga / #214 recusa` é portanto um TETO do
      falso positivo, não o número exato.
-  2. O #214 tem uma recusa FORA de `_validar_efeitos`: o `rowcount==0` do delete
-     de `investment_lots` (`lot_id` bem formado que não casa lote do usuário).
-     Ela não é medida aqui — exigiria ler `investment_lots`. O falso positivo
-     real pode ser MAIOR que o daqui, por essa via.
+  2. O #214 tem TRÊS recusas FORA de `_validar_efeitos`, todas por
+     `rowcount == 0` no corpo da reversão
+     (`grep -n "rowcount == 0" db/accounts.py`, conferidas uma a uma): o update
+     de `credit_bills` (`bill_id` bem formado que casa fatura de OUTRO
+     usuário), o delete de `investment_lots` (`lot_id` que não casa lote do
+     usuário) e o update do resgate (`investment_lot_withdrawals.lot_id`).
+     Nenhuma é medida aqui — exigiria ler as outras tabelas. Por essas três
+     vias o falso positivo real pode ser MAIOR que o daqui: as células
+     `apaga/apaga` são um PISO, não o número exato.
   3. Nada do corpo da reversão é exercitado (saldos, faturas, lotes,
      `InvestmentLotHasWithdrawal`). Isto mede o PRÉ-VOO, não o delete.
   4. Não diz QUAIS linhas nem de quem — por requisito do dono. Nem QUAL
@@ -41,6 +57,15 @@ USO
     PYTHONPATH=. python scripts/medir_guarda_efeitos_214.py
 
     python scripts/medir_guarda_efeitos_214.py --autoteste   # sem banco
+    python scripts/medir_guarda_efeitos_214.py --help        # sem banco
+
+QUANDO ALGO FALHA
+    A saída é TIPO + arquivo:linha + a linha de CÓDIGO de cada quadro, sem
+    mensagem nenhuma (`executar`/`_relatar_falha`). Dá para localizar a falha,
+    e nada do banco aparece. Se o que falhou foi o `--autoteste`, o CASO exato
+    sai em `pytest tests/test_medir_guarda_efeitos.py`: a suíte chama
+    `_autoteste()` direto, sem a fronteira, e ali o `assert` só tem literal
+    deste arquivo.
 
 ponytail: artefato de medição descartável. Apagar quando o #214 for decidido.
 """
@@ -301,6 +326,10 @@ def _autoteste():
     casos = [
         # (efeitos, tipo, velho, novo)
         ({"delta_conta": -50.0}, "despesa", "apaga", "apaga"),
+        # jsonb entregue como STRING: o único caso que mata o `json.loads` do
+        # `_normalizar`. Sem ele a linha vira `sem_efeitos` e o relatório conta
+        # zero onde havia lançamento.
+        ('{"delta_conta": -50}', "despesa", "apaga", "apaga"),
         ({"delta_conta": -50, "bill_id": 93, "paid_amount_added": 50},
          "despesa", "apaga", "apaga"),
         # CONTROLE POSITIVO do afrouxamento de `_id`: id como string de
@@ -411,8 +440,17 @@ def main():
     if not dsn:
         print("DATABASE_URL não definido.", file=sys.stderr)
         return 2
-    with psycopg.connect(dsn, options=_OPTIONS, connect_timeout=10,
-                         autocommit=False) as conn:
+    # O que a medição importa, ANTES de conectar. Rodando de outro diretório sem
+    # `PYTHONPATH=.` o `ModuleNotFoundError` só aparecia depois de conectar,
+    # passar no read-only e buscar o primeiro FETCH. E `_caminhos_do_esquema()`
+    # é aquecido aqui pelo mesmo motivo: dentro do `except` do `classificar` a
+    # falha dele nascia com um `efeitos` no `__context__`.
+    from db.accounts import LaunchUnsafeRollback, _validar_efeitos  # noqa: F401
+    _caminhos_do_esquema()
+
+    conn = psycopg.connect(dsn, options=_OPTIONS, connect_timeout=10,
+                           autocommit=False)
+    try:
         with conn.cursor() as cur:
             cur.execute("select current_setting('transaction_read_only'), "
                         "pg_is_in_recovery()")
@@ -428,12 +466,77 @@ def main():
             cur.execute("select tipo, efeitos from launches")
             cruz, detalhe, total = medir(cur)
         conn.rollback()
+    finally:
+        # `close()` no lugar do `__exit__` do `with`, que mandava COMMIT.
+        conn.close()
     relatar(cruz, detalhe, total, info)
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Fronteira de saída — o único caminho por onde este processo termina
+# ---------------------------------------------------------------------------
+def _relatar_falha(exc):
+    """Imprime TIPO e LOCAL de cada exceção da cadeia, NUNCA a mensagem.
+
+    A mensagem é o canal: `chave_desconhecida` carrega `sorted(desconhecidas)`,
+    que é payload cru. Traceback encadeado traz a mensagem de volta mesmo
+    quando a exceção que escapou é outra, então o corte é na mensagem, não no
+    `except`. Fica o que o dono precisa para diagnosticar (que erro, em que
+    arquivo e linha) e sai o que ele nunca pode ver.
+
+    Texto e formato em ASCII de propósito: este relatório não pode morrer no
+    próprio `print` (é o mesmo motivo do `reconfigure` em `executar`).
+    """
+    import traceback
+
+    print("FALHA na medicao. As mensagens sao omitidas de proposito: elas "
+          "podem conter payload. Tipo e local:", file=sys.stderr)
+    vistas = set()
+    while exc is not None and id(exc) not in vistas:
+        vistas.add(id(exc))
+        print(f"  {type(exc).__module__}.{type(exc).__qualname__}",
+              file=sys.stderr)
+        for quadro in traceback.extract_tb(exc.__traceback__):
+            print(f"    {os.path.basename(quadro.filename)}:{quadro.lineno}"
+                  f" em {quadro.name}", file=sys.stderr)
+            # a LINHA DE CÓDIGO (do arquivo, não do banco) fica: é o que torna
+            # a falha diagnosticável sem a mensagem. Texto de arquivo `.py`
+            # nunca contém payload; `str(exc)` contém.
+            if quadro.line:
+                print(f"      {quadro.line}", file=sys.stderr)
+        exc = exc.__cause__ or exc.__context__
+
+
+def executar(fn):
+    """Roda `fn` e devolve o código de saída. Nenhuma exceção passa daqui."""
+    try:
+        for stream in (sys.stdout, sys.stderr):
+            # stdout ASCII não pode custar o run inteiro depois do scan: o `—`
+            # do relatório sai `\u2014` em vez de estourar `UnicodeEncodeError`.
+            stream.reconfigure(errors="backslashreplace")
+        return fn() or 0
+    except KeyboardInterrupt:
+        # sem traceback: o `__context__` de um Ctrl-C no meio do laço é a
+        # recusa que estava sendo tratada, com o payload na mensagem.
+        print("interrompido (Ctrl-C). Nada foi escrito no banco.",
+              file=sys.stderr)
+        return 130
+    except Exception as exc:  # noqa: BLE001 — é a fronteira; ver `_relatar_falha`
+        _relatar_falha(exc)
+        return 3
+
+
 if __name__ == "__main__":
-    if "--autoteste" in sys.argv:
-        _autoteste()
-    else:
-        sys.exit(main())
+    import argparse
+
+    # `"--autoteste" in sys.argv` era casamento exato: `--help`, `-h`,
+    # `--dry-run`, `--autoteste=1` e `--auto-teste` caíam TODOS no ramo de
+    # produção e escaneavam a base. O argparse recusa o que não conhece (exit 2)
+    # e responde `--help` sem conectar.
+    _p = argparse.ArgumentParser(
+        description="Mede a guarda de 'efeitos' (b4d0085 x HEAD) contra o "
+                    "banco de DATABASE_URL. Somente leitura, saida agregada.")
+    _p.add_argument("--autoteste", action="store_true",
+                    help="roda os casos embutidos, sem banco")
+    sys.exit(executar(_autoteste if _p.parse_args().autoteste else main))
