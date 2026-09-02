@@ -121,6 +121,7 @@ from frontend.routes.shared import (
     JWT_SECRET,
     authorize_dashboard_access as _authorize_dashboard_access,
     dashboard_current_cache as _dashboard_current_cache,
+    dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
@@ -324,6 +325,12 @@ async def _get_dashboard_current_state(user_id: int):
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
         return cached[1], cached[2], cached[3], cached[4], cached[5]
 
+    # Época ANTES dos gathers: se uma invalidação (reset, escrita de pocket/
+    # cartão/launch) rodar enquanto este fill espera o banco, publicar o
+    # resultado seria regravar dado pré-mutação por cima do pop (até 45s de
+    # TTL). Fill concorrente legítimo publica normal (mesma época).
+    fill_epoch = _dashboard_current_cache_epoch.get(int(user_id), 0)
+
     # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
     # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
     # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
@@ -341,14 +348,15 @@ async def _get_dashboard_current_state(user_id: int):
     if not require_min_tier(user_id, "essencial"):
         rv_positions = []
         of_fixed_income = []
-    _dashboard_current_cache[int(user_id)] = (
-        _startup_time.monotonic(),
-        current_pockets,
-        current_investments,
-        market_rates,
-        rv_positions,
-        of_fixed_income,
-    )
+    if _dashboard_current_cache_epoch.get(int(user_id), 0) == fill_epoch:
+        _dashboard_current_cache[int(user_id)] = (
+            _startup_time.monotonic(),
+            current_pockets,
+            current_investments,
+            market_rates,
+            rv_positions,
+            of_fixed_income,
+        )
     return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 
@@ -2794,17 +2802,34 @@ async def auth_refresh(request: Request, response: Response):
     por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
     clientes desta rota, `login.html` e o interceptor, são de cookie).
 
-    O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
-    `HTTPException` descarta os headers do sub-response (medido, #175). Está
-    fora do escopo deste conserto, mas não é para ser lido como funcionando.
+    Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
+    `HTTPException` descarta os headers do sub-response injetado (medido,
+    #175), então o `_clear_session_cookies` não chegava ao cliente e o
+    dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
+    ver o comentário no primeiro ramo.
     """
     refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
     if not refresh_in_cookie:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
-        raise HTTPException(
-            status_code=400 if sessao_viva else 401, detail="missing_refresh_token",
-        )
+        if sessao_viva:
+            raise HTTPException(status_code=400, detail="missing_refresh_token")
+        # O Set-Cookie da limpeza precisa CHEGAR ao cliente: `raise
+        # HTTPException` descarta os headers do sub-response injetado (#175).
+        # Sem isto o dashboard_token (12h) sobrevivia ao refresh morto e o
+        # usuário ficava preso — o nav mostrava a conta logada, todo /billing
+        # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
+        # olha o dashboard_token, não o access. Nem assinava, nem relogava.
+        resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
@@ -2813,9 +2838,18 @@ async def auth_refresh(request: Request, response: Response):
         consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
     )
     if not result:
-        # Limpa cookies — qualquer motivo de falha vira deslogue.
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+        # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
+        # do ramo acima para montar a resposta em vez de dar raise (#175).
+        resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     user_id = int(result["user_id"])
     session_jti = result["session_jti"]
@@ -3952,7 +3986,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
         trial_days = trial_days_total() if eligible else 0
     else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "15"))
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global

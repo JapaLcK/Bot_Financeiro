@@ -229,6 +229,7 @@
       "disconnectAll",
       "hideDeleteConfirm",
       "hideExportConfirm",
+      "hideResetConfirm",
       "loadSecuritySettings",
       "logoutSettings",
       "mfaDisableSubmit",
@@ -240,6 +241,7 @@
       "openMfaRegenerateModal",
       "refreshOpenFinance",
       "requestAccountDeletion",
+      "requestAccountReset",
       "requestDataExport",
       "revokeOtherSessions",
       "revokeSingleSession",
@@ -247,6 +249,7 @@
       "sendPasswordResetEmail",
       "showDeleteConfirm",
       "showExportConfirm",
+      "showResetConfirm",
       "showSettingsSection",
       "toggleSecurityEdit",
       "updateNotificationSettings"

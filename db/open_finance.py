@@ -2163,12 +2163,22 @@ def get_consolidated_balance(user_id: int) -> dict:
     }
 
 
-def disconnect_open_finance_connection(user_id: int, connection_id: int | None = None) -> int:
+def disconnect_open_finance_connection(
+    user_id: int, connection_id: int | None = None, *,
+    swept_out: list[str] | None = None,
+) -> int:
     """Desconecta banco(s) e LIMPA o que foi importado (P0 integridade).
 
     Política: reverte launches OF + transações de fatura, apaga os cartões auto-criados
     que ficaram vazios, e só então remove a conexão (cascade nas contas/transações OF).
     Lançamentos MANUAIS que foram auto-mesclados são preservados (só desvinculados).
+
+    `swept_out` (opcional, saída): recebe os provider_item_id Pluggy das
+    conexões que ESTE delete varreu (sem PAUSED — item já morto na Pluggy).
+    A rota do disconnect compara com o que a limpeza remota enumerou e faz um
+    2º passe no que ficou de fora (item salvo entre a enumeração e o delete —
+    Codex PR #217, 12º). Out-param em vez de mudar o retorno: o `int` é
+    contrato de 3 chamadores.
     """
     ensure_user(user_id)
 
@@ -2213,13 +2223,25 @@ def disconnect_open_finance_connection(user_id: int, connection_id: int | None =
                     cur.execute("delete from credit_cards where id=%s and user_id=%s", (cid, user_id))
 
             if connection_id is None:
-                cur.execute("delete from open_finance_connections where user_id=%s", (user_id,))
+                cur.execute(
+                    "delete from open_finance_connections where user_id=%s "
+                    "returning provider, provider_item_id, status",
+                    (user_id,),
+                )
             else:
                 cur.execute(
-                    "delete from open_finance_connections where user_id=%s and id=%s",
+                    "delete from open_finance_connections where user_id=%s and id=%s "
+                    "returning provider, provider_item_id, status",
                     (user_id, connection_id),
                 )
-            deleted = cur.rowcount
+            varridas = cur.fetchall()
+            deleted = len(varridas)
+            if swept_out is not None:
+                swept_out.extend(sorted({
+                    r["provider_item_id"] for r in varridas
+                    if r["provider"] == "pluggy" and r["provider_item_id"]
+                    and str(r["status"] or "").upper() != "PAUSED"
+                }))
         conn.commit()
 
     return deleted

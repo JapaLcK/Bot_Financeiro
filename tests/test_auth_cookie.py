@@ -139,6 +139,30 @@ def _post_refresh(client: TestClient):
     return client.post("/auth/refresh", headers=_csrf_headers(client))
 
 
+def _csrf_do_jar(client: TestClient) -> str:
+    """O csrf_token que o navegador mandaria. O jar guarda uma entrada por
+    domínio (a limpeza escreve para host e .host), então `cookies.get` estoura
+    com CookieConflict — aqui vale a que tem valor."""
+    valores = {c.value for c in client.cookies.jar
+               if c.name == dashboard.CSRF_COOKIE_NAME and c.value}
+    return valores.pop() if len(valores) == 1 else ""
+
+
+def _cookies_expirados(response) -> set:
+    """Nomes de cookie que ESTA resposta manda o navegador apagar.
+
+    Só o Set-Cookie conta. O `_clear_session_cookies` era chamado num
+    sub-response e o `raise HTTPException` descartava os headers (#175): o
+    servidor "limpava" e nada chegava ao cliente.
+    """
+    apagados = set()
+    for header in response.headers.get_list("set-cookie"):
+        nome, _, resto = header.partition("=")
+        if "max-age=0" in resto.lower() or "01 jan 1970" in resto.lower():
+            apagados.add(nome.strip())
+    return apagados
+
+
 def test_refresh_sem_cookie_com_access_valido_nao_encerra_sessao():
     client = TestClient(dashboard.app)
     client.cookies.set(
@@ -180,6 +204,10 @@ def test_refresh_sem_cookie_com_access_expirado_encerra_sessao():
         "sessão irrecuperável: 400 aqui deixaria o estado privado no aparelho"
     )
     assert response.json()["detail"] == "missing_refresh_token"
+    # O dashboard_token dura 12h e sobrevive ao access de 15min. Se ele não for
+    # apagado AQUI, o /auth/validate continua passando: o nav mostra a conta
+    # logada, todo /billing dá 401 e o /login rebate de volta — preso.
+    assert dashboard.DASHBOARD_COOKIE_NAME in _cookies_expirados(response)
 
 
 def test_refresh_sem_cookie_nenhum_encerra_sessao():
@@ -202,6 +230,7 @@ def test_refresh_com_token_desconhecido_continua_encerrando_sessao():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_refresh_token"
+    assert dashboard.DASHBOARD_COOKIE_NAME in _cookies_expirados(response)
 
 
 def test_dashboard_token_accepts_auth_cookie_without_authorization_header():
@@ -701,3 +730,44 @@ def test_email_rate_limit_blocks_same_email_even_when_case_changes():
         asyncio.run(dashboard._check_persistent_rate_limit("login", other_identifier, 5, 60))
     finally:
         _clear_rate_limits(email_identifier, *ip_identifiers, locals().get("other_identifier", ""))
+
+
+def test_refresh_que_encerra_sessao_ainda_permite_logar_em_seguida():
+    """Fim de sessão não pode levar junto a credencial do formulário de login.
+
+    O caminho é o da /login com sessão morta: o boot chama /auth/refresh, leva
+    401, e o usuário digita e-mail e senha NA MESMA página — sem nenhum GET no
+    meio para o middleware reemitir o csrf_token. Sem o CSRF novo na resposta do
+    401, esse POST sai sem token e o middleware devolve 403: login impossível
+    para todo mundo, não só para quem tinha sessão degradada. Foi o que o smoke
+    de produção pegou no #224 ("HTTP 403 em /auth/login").
+    """
+    client = TestClient(dashboard.app)
+    client.get("/login")  # middleware emite o csrf da primeira visita
+    antigo = _csrf_do_jar(client)
+    assert antigo
+
+    # Sem _post_refresh de propósito: ele injeta um csrf fixo no jar, e aqui o
+    # que está em teste é justamente o que o jar carrega antes e depois.
+    encerrou = client.post(
+        "/auth/refresh", headers={dashboard.CSRF_HEADER_NAME: antigo},
+    )
+
+    assert encerrou.status_code == 401
+    assert dashboard.DASHBOARD_COOKIE_NAME in _cookies_expirados(encerrou)
+    # O jar é o que o navegador teria: o csrf antigo saiu e um novo entrou.
+    atual = _csrf_do_jar(client)
+    assert atual and atual != antigo, (
+        "sem csrf novo o formulário de login fica sem credencial"
+    )
+
+    # O POST que o formulário faz em seguida, sem nenhum GET no meio.
+    entrar = client.post(
+        "/auth/login",
+        json={"email": "naoexiste@example.com", "password": "seja-o-que-for"},
+        headers={dashboard.CSRF_HEADER_NAME: atual},
+    )
+
+    assert entrar.status_code != 403, (
+        "403 aqui é o CSRF barrando o login, não credencial errada"
+    )

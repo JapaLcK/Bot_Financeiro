@@ -468,7 +468,7 @@ def test_reconexao_retenta_o_lock_antes_de_desistir(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
 
-    def _libera_na_segunda(uid, remote, item_id, budget_ms=None):
+    def _libera_na_segunda(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         tentativas.append(item_id)
         if len(tentativas) == 1:
             return None, False
@@ -501,7 +501,7 @@ def test_lock_ocupado_ate_o_fim_recusa_com_503(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _sleep_rapido)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock",
-                        lambda uid, remote, item_id, budget_ms=None: (None, False))
+                        lambda uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False: (None, False))
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(of_routes._grava_reconexao(user_id, {"id": "i"}, "item-preso"))
@@ -652,7 +652,7 @@ def test_prazo_nao_reinicia_a_cada_tentativa(user_id, monkeypatch):
 
     inicio = relogio.agora
 
-    def _ocupado(uid, remote, item_id, budget_ms=None):
+    def _ocupado(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         orcamentos.append((budget_ms, relogio.agora - inicio))
         # Gasta METADE do que recebeu: se gastasse tudo não haveria 2ª tentativa
         # (e é assim mesmo — `test_prazo_estourado_nem_tenta_de_novo` cobre esse
@@ -717,7 +717,7 @@ def test_backoff_nao_dorme_por_cima_do_que_o_log_gastou(user_id, monkeypatch):
         sonos.append(s)
         relogio.anda(s)
 
-    def _ocupado(uid, remote, item_id, budget_ms=None):
+    def _ocupado(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         relogio.anda(9.8)
         return None, False
 
@@ -752,7 +752,7 @@ def test_prazo_estourado_nem_tenta_de_novo(user_id, monkeypatch):
     monkeypatch.setattr(of_routes, "log_system_event", _log)
     monkeypatch.setattr(of_routes.asyncio, "sleep", _dorme)
 
-    def _come_tudo(uid, remote, item_id, budget_ms=None):
+    def _come_tudo(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         chamadas.append(budget_ms)
         relogio.anda(30.0)               # estourou o prazo sozinha
         return None, False
@@ -774,7 +774,7 @@ def test_lock_livre_grava_na_primeira_sem_esperar_nada(user_id, monkeypatch):
 
     vistos = []
 
-    def _livre(uid, remote, item_id, budget_ms=None):
+    def _livre(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         vistos.append(budget_ms)
         return {"id": 42}, True
 
@@ -875,9 +875,9 @@ def test_lock_ocupado_de_verdade_ainda_retenta_e_loga(user_id, monkeypatch):
 
     real = of_routes._salva_item_sob_lock
 
-    def _espiao(uid, remote, iid, budget_ms=None):
+    def _espiao(uid, remote, iid, budget_ms=None, tinha_conexao_propria=False):
         orcamentos.append(budget_ms)
-        return real(uid, remote, iid, budget_ms)
+        return real(uid, remote, iid, budget_ms, tinha_conexao_propria)
 
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _espiao)
 
@@ -1408,7 +1408,7 @@ def test_log_diz_QUAL_falha_e_nao_so_lock_ocupado(
     async def _dorme(_s):
         return None
 
-    def _falha(uid, remote, item_id, budget_ms=None):
+    def _falha(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         if modo == "infra":
             raise psycopg.errors.TooManyConnections("sorry, too many clients already")
         return None, False
@@ -1461,7 +1461,7 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
     async def _dorme(_s):
         return None
 
-    def _falha(uid, remote, item_id, budget_ms=None):
+    def _falha(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         tentativas.append(item_id)
         if len(tentativas) == 1:
             raise psycopg.errors.TooManyConnections("sorry, too many clients already")
@@ -1512,7 +1512,7 @@ def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch,
     async def _dorme(_s):
         return None
 
-    def _falha(uid, remote, item_id, budget_ms=None):
+    def _falha(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         raise psycopg.errors.TooManyConnections("sorry, too many clients already")
 
     monkeypatch.setattr(of_routes, "log_system_event", _log_que_engole)
@@ -1557,7 +1557,7 @@ def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, cap
 
     tentativas = {"n": 0}
 
-    def _falha_depois_grava(uid, remote, item_id, budget_ms=None):
+    def _falha_depois_grava(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         tentativas["n"] += 1
         if tentativas["n"] == 1:
             raise psycopg.errors.TooManyConnections("sorry, too many clients already")
@@ -1612,7 +1612,7 @@ def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
         logs.append(a[1] if len(a) > 1 else None)
         await asyncio.sleep(5)          # INSERT que não volta
 
-    def _falha(uid, remote, item_id, budget_ms=None):
+    def _falha(uid, remote, item_id, budget_ms=None, tinha_conexao_propria=False):
         raise psycopg.errors.TooManyConnections("sorry, too many clients already")
 
     monkeypatch.setattr(of_routes, "log_system_event", _log_travado)

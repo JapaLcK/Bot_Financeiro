@@ -323,6 +323,11 @@ const PREFERENCIA_DO_APARELHO = {
   "pigbank_hide_balance": "1",
   "pbFabPos": '{"side":"right","top":300}',
   "finbot_logout_at": "1756400000000",
+  // MECANISMO como o logout_at: carimbo do último "Recomeçar do zero". Se o
+  // wipe do logout o apagasse, a cadeia reset → logout → relogin na MESMA aba
+  // reabria o flash de snapshot pré-reset (a aba nunca limpou o sessionStorage
+  // e o marker que o descartaria teria sumido).
+  "finbot_reset_at": "1756400000001",
 };
 
 function comStorageCheio(arquivo, prepara) {
