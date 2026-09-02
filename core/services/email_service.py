@@ -780,20 +780,37 @@ def send_new_login_alert(
     )
 
 
-def send_password_reset_email(to: str, reset_url: str) -> bool:
-    """Envia e-mail com link de recuperação de senha."""
+def send_password_reset_email(to: str, reset_url: str, has_password: bool = True) -> bool:
+    """Envia e-mail com link de senha.
+
+    `has_password=False` (conta criada só via Google, sem `password_hash`) troca a
+    copy de "redefinir" para "definir" — ela nunca teve senha para redefinir.
+    """
+    if has_password:
+        intro = "Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank</strong>."
+        button = "🔑 Redefinir minha senha"
+        title = "Redefinição de senha — PigBank"
+        subject = "🔑 Redefinir senha — PigBank"
+    else:
+        intro = (
+            "Sua conta no <strong>PigBank</strong> foi criada com o Google e ainda não tem senha. "
+            "Use o link abaixo para definir uma."
+        )
+        button = "🔑 Definir minha senha"
+        title = "Definir senha — PigBank"
+        subject = "🔑 Definir sua senha — PigBank"
     content = f"""
       <p>Olá!</p>
-      <p>Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank</strong>.</p>
-      <p style="text-align:center"><a class="btn" href="{reset_url}">🔑 Redefinir minha senha</a></p>
+      <p>{intro}</p>
+      <p style="text-align:center"><a class="btn" href="{reset_url}">{button}</a></p>
       <p class="warn">⚠️ Este link expira em <strong>30 minutos</strong> e só pode ser usado uma vez.<br/>
         Se você não solicitou isso, ignore este e-mail.</p>
       <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
         Link: {reset_url}</p>
     """
-    html = _base_html("Redefinição de senha — PigBank", content)
-    text = f"Redefinição de senha — PigBank\n\nLink (expira em 30 min):\n{reset_url}"
-    return send_email(to=to, subject="🔑 Redefinir senha — PigBank", html_body=html, text_body=text)
+    html = _base_html(title, content)
+    text = f"{title}\n\nLink (expira em 30 min):\n{reset_url}"
+    return send_email(to=to, subject=subject, html_body=html, text_body=text)
 
 
 def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:
