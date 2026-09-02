@@ -44,7 +44,7 @@
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
   var PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
-                  "pbDebug", "pbSpa", "finbot_logout_at"];
+                  "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
   function apagaStorage(store) {
     try {

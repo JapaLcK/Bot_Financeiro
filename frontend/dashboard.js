@@ -391,7 +391,12 @@ function persistSnapshotToSession(data) {
   const type = data.launches_pagination?.filter_type || "all";
   const text = data.launches_pagination?.query || "";
   if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
-  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
+  // pb_saved_at é o RECEBIMENTO do payload WS — push do servidor não tem "t0
+  // de request" para capturar (a home, que usa fetch, carimba o t0). Teto
+  // aceito: payload gerado ANTES de um reset e entregue DEPOIS do marker
+  // passaria pelo predicado do restore; a janela é geração→entrega num socket
+  // vivo (ms) e não há replay — a reconexão re-GERA o snapshot no connect.
+  try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify({ ...data, pb_saved_at: Date.now() })); } catch {}
 }
 // Limpa os snapshots pb_snap_* da aba. Chamada no logout e quando o paywall
 // NEGA (meGate): o restore pinta o snapshot que a PRÓPRIA aba gravou antes do
@@ -407,6 +412,14 @@ function restoreSnapshotFromSession() {
     const raw = sessionStorage.getItem(_snapSessionKey(viewYear, viewMonth));
     if (!raw) return false;
     const data = JSON.parse(raw);
+    // "Recomeçar do zero" em OUTRA aba (sessionStorage é por aba): snapshot
+    // que não for comprovadamente POSTERIOR ao finbot_reset_at é dado apagado
+    // — descarta em vez de pintar. Mesma regra do restoreHomeCache (home.html).
+    const resetAt = Number(localStorage.getItem("finbot_reset_at") || 0);
+    if (resetAt && !(Number(data.pb_saved_at) > resetAt)) {
+      sessionStorage.removeItem(_snapSessionKey(viewYear, viewMonth));
+      return false;
+    }
     if (!isCurrentViewData(data)) return false;
     lastData = data;
     cacheMonthData(data);
@@ -434,6 +447,14 @@ async function logoutDashboard() {
 window.addEventListener('storage', (event) => {
   if (event.key === 'finbot_logout_at') {
     window.location.replace('/?logout=1');
+  }
+  // "Recomeçar do zero" noutra aba: os saldos renderizados aqui são dado
+  // apagado e nada mais repinta sozinho. Reação ao EVENTO (storage não
+  // dispara na própria aba nem pela mera presença da chave — sem loop de
+  // reload); newValue estrito ignora remoção. O reload cai no gate, que
+  // decide (needs_onboarding → /onboarding).
+  if (event.key === 'finbot_reset_at' && event.newValue) {
+    window.location.reload();
   }
 });
 

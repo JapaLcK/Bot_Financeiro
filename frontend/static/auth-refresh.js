@@ -129,10 +129,16 @@
    *   finbot_logout_at       MECANISMO: outras abas escutam o storage event
    *                          desta chave para se deslogarem juntas. Apagá-la
    *                          quebraria o logout entre abas.
+   *   finbot_reset_at        MECANISMO: carimbo do último "Recomeçar do zero";
+   *                          home/dashboard descartam snapshot mais velho que
+   *                          ele no restore. Apagá-lo no logout reabria o
+   *                          flash na cadeia reset → logout → relogin na
+   *                          mesma aba. Não é dado de conta: é um timestamp,
+   *                          e a validação de userId do restore vem antes.
    */
   const _PRESERVA = new Set([
     "pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa",
-    "finbot_logout_at",
+    "finbot_logout_at", "finbot_reset_at",
   ]);
 
   function _apagaStorage(store) {

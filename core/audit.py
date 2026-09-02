@@ -32,6 +32,7 @@ class AuditEvent:
     OPEN_FINANCE_CONNECTED = "open_finance_connected"
     OPEN_FINANCE_DISCONNECTED = "open_finance_disconnected"
     LOGIN_FROM_NEW_IP = "login_from_new_ip"
+    ACCOUNT_RESET = "account_reset"
 
 
 # Texto humano apresentado na tela "Atividade da conta" (settings → Segurança).
@@ -45,6 +46,7 @@ EVENT_LABELS_PT_BR: dict[str, str] = {
     AuditEvent.OPEN_FINANCE_CONNECTED: "Conta bancária conectada via Open Finance",
     AuditEvent.OPEN_FINANCE_DISCONNECTED: "Conta bancária desconectada do Open Finance",
     AuditEvent.LOGIN_FROM_NEW_IP: "Login a partir de um novo dispositivo",
+    AuditEvent.ACCOUNT_RESET: "Conta reiniciada do zero",
 }
 
 

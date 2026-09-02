@@ -1393,6 +1393,19 @@ function showAccessError() {
   `;
 }
 
+/* "Recomeçar do zero" noutra aba: esta tela fica com saldos apagados
+   renderizados e nada repinta sozinho (a home não tem WebSocket). Reação ao
+   EVENTO de storage (não dispara na própria aba nem pela presença da chave —
+   sem loop); newValue estrito ignora remoção. Guard contra re-registro: o
+   init pb-nav pode rodar de novo num mount client-side. Mesmo padrão do
+   listener de finbot_logout_at do dashboard.js. */
+if (!window.__pbResetAtListener) {
+  window.__pbResetAtListener = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key === "finbot_reset_at" && event.newValue) window.location.reload();
+  });
+}
+
 /* ─── Instant-paint via sessionStorage ────────────────────────────────────
    O app troca /home <-> /app com reload de página inteira; sem isso a tela
    Início mostrava skeleton e esperava /data + /history a cada abertura.
@@ -1400,11 +1413,17 @@ function showAccessError() {
    gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
 const _HOME_CACHE_PREFIX = "pb_home_";
 function _homeCacheKey(userId) { return _HOME_CACHE_PREFIX + userId; }
-function persistHomeCache(userId, snapshot, history, email, displayName) {
+function persistHomeCache(userId, snapshot, history, email, displayName, requestedAt) {
   if (!userId) return;
   try {
+    // savedAt = INÍCIO do request (t0), não o momento do persist: uma resposta
+    // cujo request começou antes de um reset pode carregar dado pré-reset, e
+    // carimbá-la no recebimento a faria passar pelo predicado do restore como
+    // se fosse pós-reset. t0 é conservador (≤ geração no servidor) — no pior
+    // caso descarta um snapshot legítimo e a próxima carga refaz.
     sessionStorage.setItem(_homeCacheKey(userId),
-      JSON.stringify({ userId, snapshot, history, email, displayName }));
+      JSON.stringify({ userId, snapshot, history, email, displayName,
+                       savedAt: requestedAt || Date.now() }));
   } catch {}
 }
 // Restaura SÓ do usuário já validado (chave escopada ao userId) — nunca pinta
@@ -1417,6 +1436,17 @@ function restoreHomeCache(userId) {
     if (!raw) return;
     const c = JSON.parse(raw);
     if (!c || !c.snapshot || String(c.userId) !== String(userId)) return;
+    // "Recomeçar do zero" em OUTRA aba: sessionStorage é por aba, então o
+    // reset não alcança o snapshot desta. O marker finbot_reset_at (gravado
+    // pelo settings, mesmo padrão do finbot_logout_at) diz quando foi o
+    // último reset: snapshot que não for comprovadamente POSTERIOR a ele é
+    // dado apagado — descarta em vez de pintar. Sem marker (nunca resetou) e
+    // snapshot novo pós-reset restauram normal.
+    const resetAt = Number(localStorage.getItem("finbot_reset_at") || 0);
+    if (resetAt && !(Number(c.savedAt) > resetAt)) {
+      sessionStorage.removeItem(_homeCacheKey(userId));
+      return;
+    }
     // Só os renders que dependem de snapshot/history (não de `me`/plano): a
     // passagem fresca logo abaixo revalida e completa (onboarding, banner).
     renderGreeting(c.snapshot, c.email || "", c.displayName || "");
@@ -1533,6 +1563,7 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
 async function loadHomeData({ initial = false } = {}) {
   const me = _homeMe;
   let snapshot = null, history = [];
+  const requestedAt = Date.now();   // t0 do request — vira o savedAt do persist
   try {
     const [dataRes, histRes] = await Promise.all([
       fetch(`${API}/data/${USER_ID}`, { credentials: "same-origin" }),
@@ -1578,7 +1609,7 @@ async function loadHomeData({ initial = false } = {}) {
   renderFreeBanner(me);
 
   // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
-  persistHomeCache(USER_ID, snapshot, history, email, displayName);
+  persistHomeCache(USER_ID, snapshot, history, email, displayName, requestedAt);
 
   // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh — mas só
   // AGORA, com a carga assentada e render bom na tela. Expor na definição do

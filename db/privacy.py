@@ -412,6 +412,238 @@ def build_user_export_zip(user_id: int) -> bytes:
     return buffer.getvalue()
 
 
+class ResetLockUnavailableError(RuntimeError):
+    """Lock de um item Pluggy ocupado no reset — o reset inteiro aborta.
+
+    Mesmo contrato do sync (`_grava_reconexao`): quem não adquiriu dentro do
+    teto não escreve; o chamador devolve "tente de novo" (503). A janela do
+    lock é só a fase de escrita de um sync, então a retentativa quase sempre
+    entra."""
+
+
+# Tabelas apagadas pelo reset "Recomeçar do zero", na ordem (child-first).
+# As FKs reais são cascade/set null — a ordem é cinto-e-suspensório contra um
+# banco antigo sem elas. Fora desta lista ficam as três tabelas OF que exigem
+# join (deletadas à parte em reset_user_data) e a credit_bills (via card +
+# coluna user_id, padrão de delete_user_data).
+_RESET_TABLES = (
+    # Recorrentes
+    "recurring_income_credits",
+    "bill_instances",
+    "recurring_charges",
+    "recurring_expenses",
+    "recurring_incomes",
+    "recurring_suggestion_dismissed",
+    # Investimentos / caixinhas / orçamentos
+    "investment_lots",
+    "investments",
+    "pocket_lots",
+    "pockets",
+    "budget_alert_sent",
+    "category_budgets",
+    # Categorias (regra ≠ categoria: tabelas diferentes, as duas somem)
+    "user_category_rules",
+    "user_category_triggers",
+    "user_trigger_candidates",
+    "user_category_feedback",
+    "user_categories",
+    # Agentes
+    "agent_events",
+    "agents",
+    # IA / conversa. O delete CRU de pending_actions é EXCEÇÃO justificada às
+    # escritas condicionais de docs/armadilhas.md (§ pending_actions): no reset
+    # TODA pendência do usuário é obsoleta por definição — não há pendência a
+    # preservar, então não há leitura anterior a respeitar.
+    "ai_messages",
+    "ai_pending_actions",
+    "ai_fallback_log",
+    "ai_proactive_cache",
+    "pending_actions",
+    # Uso / lançamentos. launches ANTES de financial_spaces: deletar o filho
+    # primeiro evita o set null inútil da FK composta (user_id, space_id).
+    "ofx_imports",
+    "daily_report_prefs",
+    "launches",
+    "financial_spaces",
+    "accounts",
+)
+
+
+def reset_user_data(
+    user_id: int,
+    password: str,
+    remote_cleanup: "Callable[[], None] | None" = None,
+) -> dict:
+    """Recomeçar do zero: apaga dados financeiros e de uso, PRESERVA a conta.
+
+    `remote_cleanup` (opcional) roda DEPOIS da senha e dos locks e ANTES de
+    qualquer delete local — é onde a rota deleta os items na Pluggy. O
+    invariante: se o reset local não vai acontecer (lock ocupado → aborto),
+    a Pluggy não foi tocada. O hook é responsável pelo próprio best-effort
+    (exceção dele aborta o reset com nada apagado localmente).
+
+    Ficam intactos: users (a linha), auth_accounts (login, plano, Stripe,
+    opt-outs, contadores de IA, deletion_*), auth_identities, user_identities
+    (vínculo WhatsApp/Discord — decisão do dono), MFA e sessões, tokens,
+    plan_trials, push_tokens, open_finance_item_registry, audit_events,
+    pii_access_log, system_event_logs, affiliate*, checkout_funnel_events.
+
+    Uma transação só: falha no meio → nada mudou (sem carência, sem meio-termo).
+
+    SEM a re-varredura pós-commit que delete_user_data faz: por decisão do
+    dono, dado criado DURANTE a janela do reset por outro fluxo (ex.: um
+    lançamento chegando pelo WhatsApp) sobrevive — o usuário continua existindo
+    e escrita nova dele é dado novo, não resíduo do passado.
+    """
+    if not verify_user_password(user_id, password):
+        raise PermissionError("Senha incorreta.")
+
+    # Import na função: db/privacy não importa módulos irmãos no topo (ciclo).
+    from .open_finance import list_pluggy_item_ids
+    from .open_finance_state import pluggy_items_lock
+
+    counts: dict[str, int] = {}
+
+    def _delete(cur, table: str, sql: str | None = None) -> None:
+        if not _table_exists(cur, table):
+            return
+        if sql is None:
+            if not _column_exists(cur, table, "user_id"):
+                return
+            sql = f"delete from {table} where user_id = %s"
+        cur.execute(sql, (user_id,))
+        counts[table] = counts.get(table, 0) + cur.rowcount
+
+    # Locks dos items Pluggy ANTES de qualquer delete: um sync na fase de
+    # escrita re-inseriria contas/transações no meio da limpeza. Todos os
+    # locks entram numa ÚNICA sessão dedicada (`pluggy_items_lock`) — N
+    # `pluggy_item_lock` aninhados retinham N slots do semáforo e, com mais
+    # itens que OF_SYNC_LOCK_MAX_CONN, o reset esperava um slot que ele mesmo
+    # segurava (503 pra sempre; Codex, PR #217). A saída do `with` libera
+    # todos, inclusive em exceção.
+    with pluggy_items_lock(list_pluggy_item_ids(user_id)) as locked:
+        if not locked:
+            raise ResetLockUnavailableError(
+                "Sincronização bancária em andamento. "
+                "Tente de novo em alguns segundos."
+            )
+
+        # Limpeza remota SOB os locks e ANTES de qualquer delete local. Rede
+        # dentro do lock viola de propósito a disciplina de janela curta do
+        # `pluggy_item_lock` (ver docstring dele): aqui a operação é rara,
+        # disparada pelo usuário, e segurar o lock é exatamente o que impede
+        # um sync de escrever durante a deleção remota + limpeza local — o
+        # pior caso pra um sync concorrente é esperar o teto e reportar
+        # sync_in_progress, o mesmo desfecho de perder o lock pra outro sync.
+        #
+        # Janela residual (trade-off documentado): exceção DEPOIS daqui (ex.:
+        # erro de DB no meio dos deletes) deixa item já removido na Pluggy com
+        # a conexão local viva. Não é silencioso nem terminal: o próximo
+        # sync/job de saúde consulta GET /items/{id}, leva 404 (item_missing)
+        # e marca a conexão ERROR/item_missing com CTA "Refaça a conexão com o
+        # banco" (core/services/pluggy_sync.py, pluggy_health.py) — e o
+        # próprio reset, retentado, termina a limpeza local.
+        if remote_cleanup is not None:
+            remote_cleanup()
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # Open Finance, child-first (accounts/transactions/investments
+                # não têm user_id — o isolamento entra pelo join na connection).
+                _delete(cur, "open_finance_transactions", """
+                    delete from open_finance_transactions t
+                    using open_finance_accounts a, open_finance_connections c
+                    where t.account_id = a.id
+                      and a.connection_id = c.id
+                      and c.user_id = %s
+                    """)
+                _delete(cur, "open_finance_investments", """
+                    delete from open_finance_investments i
+                    using open_finance_connections c
+                    where i.connection_id = c.id
+                      and c.user_id = %s
+                    """)
+                _delete(cur, "open_finance_accounts", """
+                    delete from open_finance_accounts a
+                    using open_finance_connections c
+                    where a.connection_id = c.id
+                      and c.user_id = %s
+                    """)
+                # RETURNING: o que ESTE delete varreu. Item salvo entre a
+                # enumeração do remote_cleanup e este delete não foi deletado
+                # na Pluggy — o chamador compara os dois conjuntos e faz um 2º
+                # passe (Codex PR #217, 11º). PAUSED fica fora do capture: o
+                # item já foi deletado na Pluggy (mesma regra do
+                # list_pluggy_item_ids).
+                pluggy_items_swept: list[str] = []
+                if _table_exists(cur, "open_finance_connections"):
+                    cur.execute(
+                        """
+                        delete from open_finance_connections
+                        where user_id = %s
+                        returning provider, provider_item_id, status
+                        """,
+                        (user_id,),
+                    )
+                    rows = cur.fetchall()
+                    counts["open_finance_connections"] = len(rows)
+                    pluggy_items_swept = sorted({
+                        r["provider_item_id"] for r in rows
+                        if r["provider"] == "pluggy" and r["provider_item_id"]
+                        and str(r["status"] or "").upper() != "PAUSED"
+                    })
+
+                # Crédito: transações → faturas (via card E via coluna user_id,
+                # padrão de delete_user_data) → cartões.
+                _delete(cur, "credit_transactions")
+                if _table_exists(cur, "credit_bills"):
+                    if _table_exists(cur, "credit_cards"):
+                        cur.execute(
+                            """
+                            delete from credit_bills b
+                            using credit_cards c
+                            where b.card_id = c.id
+                              and c.user_id = %s
+                            """,
+                            (user_id,),
+                        )
+                        counts["credit_bills"] = counts.get("credit_bills", 0) + cur.rowcount
+                    if _column_exists(cur, "credit_bills", "user_id"):
+                        cur.execute("delete from credit_bills where user_id = %s", (user_id,))
+                        counts["credit_bills"] = counts.get("credit_bills", 0) + cur.rowcount
+                _delete(cur, "credit_cards")
+
+                for table in _RESET_TABLES:
+                    _delete(cur, table)
+
+                # Mesma transação: zera as preferências que apontavam para o que
+                # sumiu e reabre o onboarding (needs_onboarding volta a True).
+                cur.execute(
+                    """
+                    update users
+                    set default_card_id = null,
+                        reminders_enabled = false,
+                        reminders_days_before = 3
+                    where id = %s
+                    """,
+                    (user_id,),
+                )
+                cur.execute(
+                    """
+                    update auth_accounts
+                    set onboarding_step = 0,
+                        onboarding_completed_at = null
+                    where user_id = %s
+                    """,
+                    (user_id,),
+                )
+
+            conn.commit()
+
+    return {"user_id": user_id, "deleted": counts,
+            "pluggy_items_swept": pluggy_items_swept}
+
+
 def delete_user_data(user_id: int) -> dict:
     primary_email = None
     user_owned_tables = (
