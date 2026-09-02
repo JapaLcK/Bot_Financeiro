@@ -10006,13 +10006,23 @@ function buildExpenseChart(series, days) {
 // (Não é o makeFetchChannel: a semântica dele é abortar/superar, não juntar.)
 let _expenseChartFlight = null; // { days, promise }
 function loadExpenseChart(days) {
-  if (_expenseChartFlight && _expenseChartFlight.days === days) return _expenseChartFlight.promise;
+  // Antes do dedup: `_expensePeriod` é SEMPRE o último período pedido, mesmo
+  // quando a chamada só reaproveita um voo em curso. É ele que a guarda
+  // abaixo usa para decidir o que pode pintar.
   _expensePeriod = days;
+  if (_expenseChartFlight && _expenseChartFlight.days === days) return _expenseChartFlight.promise;
   const promise = (async () => {
     try {
       const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
       if (!r.ok) return;
       const payload = await r.json();
+      // Pedido superado não sobrescreve resposta mais nova — mesmo princípio
+      // do monthRequestSeq no fetchMonthHttp, sem contador próprio porque
+      // `_expensePeriod` já é a fonte da verdade do período selecionado.
+      // Sem isto, trocar 7D→30D→7D com a 1ª pendente deixava o gráfico com a
+      // série de 30D na aba 7D (last-writer-wins — comportamento que já
+      // existia antes do dedup desta Onda).
+      if (days !== _expensePeriod) return;
       _expenseSeries = payload.data || [];
       buildExpenseChart(_expenseSeries, days);
     } catch (e) { console.warn("[expenses] fetch error:", e); }

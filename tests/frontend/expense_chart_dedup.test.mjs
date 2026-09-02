@@ -57,6 +57,56 @@ async function bootPage() {
   return page;
 }
 
+/** Página com fetch por período: resolve só quando o teste mandar. */
+async function bootPagePorPeriodo() {
+  const page = await bootPage();
+  await page.evaluate(() => {
+    window._pend = [];
+    window.fetch = (url) => new Promise((resolve) => {
+      const days = Number(new URL(url, "http://x").searchParams.get("days"));
+      window._pend.push({ days, resolve });
+    });
+    window._painted = [];
+    window.buildExpenseChart = (serie, days) => window._painted.push({ days, serie });
+    window._solta = async (days) => {
+      for (const f of window._pend.filter((x) => x.days === days)) {
+        f.resolve({ ok: true, json: async () => ({ data: [`dados-${days}`] }) });
+      }
+      window._pend = window._pend.filter((x) => x.days !== days);
+      await new Promise((r) => setTimeout(r, 0));
+    };
+  });
+  return page;
+}
+
+test("7D→30D→7D com a 1ª pendente: a resposta de 30D não pinta na aba 7D", async () => {
+  const page = await bootPagePorPeriodo();
+  const out = await page.evaluate(async () => {
+    loadExpenseChart(7);
+    loadExpenseChart(30);
+    loadExpenseChart(7);
+    await window._solta(7);
+    await window._solta(30);   // resposta do período abandonado chega POR ÚLTIMO
+    return { pintados: window._painted.map((x) => x.days), ep: _expensePeriod };
+  });
+  assert.ok(!out.pintados.includes(30),
+    `série de 30D pintada com 7D selecionado: ${out.pintados}`);
+  assert.equal(out.ep, 7, "_expensePeriod tem que ser o último período pedido");
+});
+
+test("troca simples 7D→30D: pinta 30D (caminho normal intacto)", async () => {
+  const page = await bootPagePorPeriodo();
+  const out = await page.evaluate(async () => {
+    loadExpenseChart(7);
+    await window._solta(7);
+    loadExpenseChart(30);
+    await window._solta(30);
+    return { pintados: window._painted.map((x) => x.days), ep: _expensePeriod };
+  });
+  assert.deepEqual(out.pintados, [7, 30], `esperava pintar 7 e depois 30: ${out.pintados}`);
+  assert.equal(out.ep, 30);
+});
+
 test("2 renders na mesma abertura ⇒ 1 request a /expenses/daily; período novo ⇒ nova", async () => {
   const page = await bootPage();
 
