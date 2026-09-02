@@ -744,7 +744,7 @@ def test_delta_de_lote_zero_com_delta_conta_nao_zero_recusa(user_id: int):
 # chave PRESENTE sem o campo que a torna reversível — cada `if <campo>:` a
 # jusante vira no-op e o `delete` acontece assim mesmo.
 #
-# Sonda REMEDIDA aqui, no `pigbank_ci_test`, com o `_EFEITOS_CAMPOS_EXIGIDOS`
+# Sonda REMEDIDA aqui, no `pigbank_ci_test`, com o `_EFEITOS_FORMA`
 # esvaziado e o `efeitos` EXATO que cada caso abaixo forja (aporte de 300 real,
 # `efeitos` reescrito depois). Estado = conta / inv / lotes:
 #
@@ -822,7 +822,7 @@ def test_C_lot_withdrawals_sem_lot_id_recusa(user_id: int):
 
 def test_E_lot_withdrawals_com_lot_id_e_sem_before_recusa(user_id: int):
     """O PIOR dos oito, e o que o Codex não apontou: `before` ausente faz o
-    `.get("balance", 0)` de `db/accounts.py:1404` escrever ZERO no lote. Sem a
+    `.get("balance", 0)` da restauração do lote escrever ZERO nele. Sem a
     guarda: APAGOU e o lote foi ZERADO — dinheiro destruído, sem volta."""
     import pytest
     lid = _aporte_forjado(
@@ -837,7 +837,7 @@ def test_E_lot_withdrawals_com_lot_id_e_sem_before_recusa(user_id: int):
 def test_E2_before_presente_mas_oco_tambem_recusa(user_id: int):
     """`before` PRESENTE e sem `balance`/`principal_remaining` cai no mesmo
     default 0. Exigir só a chave `before` deixaria este caso aberto — é por
-    isso que `_BEFORE_CAMPOS` existe."""
+    isso que `_BEFORE_FORMA` existe."""
     import pytest
     lid = _aporte_forjado(
         user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
@@ -961,3 +961,345 @@ def test_positivo_aporte_e_resgate_integros_continuam_apagaveis(user_id: int):
         "aporte íntegro apagado tem de levar o lote junto"
     assert _investment_balance(user_id, "cdb") == 0.0
     assert _bal(user_id) == 1000.0, "o dinheiro tem de voltar inteiro pra conta"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A MATRIZ DE FORMA — `_EFEITOS_FORMA` (`db/accounts.py`)
+#
+# Os grupos acima nasceram um remendo por vez (chave oca, depois container,
+# depois `before` nulo) e o revisor achou irmão nas duas rodadas. Aqui a matriz
+# fecha por CLASSE, não célula a célula: um caso representativo por invariante
+# × forma. Os quatro invariantes são `_dinheiro` (Decimal FINITO), `_id`
+# (inteiro positivo), `_nome` (str não vazia) e `_data` (`date.fromisoformat`).
+#
+# NENHUMA destas formas é alcançável pelos escritores de hoje: `Json(efeitos)`
+# serializa `NaN`/`Infinity` NUS e o jsonb os recusa no INSERT (medido), e os
+# cinco escritores gravam os campos no mesmo insert atômico. O veneno entra como
+# a STRING `"NaN"`, como número JSON fora do double (`1e400`) ou como linha
+# mexida à mão — é blindagem fail-closed contra escritor futuro e importador de
+# Open Finance, não conserto de incêndio.
+import uuid
+
+import pytest
+
+
+_APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}'
+
+
+@pytest.mark.parametrize("caso,efeitos", [
+    # ── dinheiro: NÃO-FINITO. É o pior da matriz — sem a guarda o `numeric` do
+    # Postgres ACEITA `NaN`, o saldo vira `NaN` e não volta a ser número por
+    # soma nenhuma: apaga E corrompe.
+    ("dinheiro/delta_conta NaN",
+     '{"delta_conta": "NaN", "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+    ("dinheiro/delta_conta 1e400 (inf fora do double)",
+     '{"delta_conta": -1e400, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+    ("dinheiro/paid_amount_added Infinity",
+     '{"delta_conta": -200.0, "bill_id": 1, "paid_amount_added": "Infinity"}'),
+    ("dinheiro/before.balance NaN",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{"balance": "NaN", "principal_remaining": 300.0}}]}'),
+    # ── dinheiro: NÃO-NUMÉRICO. Hoje estoura CRU (`InvalidOperation`/
+    # `TypeError`) — balde `errors` em vez de recusa, e SILÊNCIO nos três
+    # `except Exception: pass` de `db/open_finance.py`.
+    ("dinheiro/before.principal_remaining texto",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{"balance": 300.0, "principal_remaining": "abc"}}]}'),
+    ("dinheiro/delta_invest.delta lista",
+     '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": [300.0]}, '
+     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+    # `.get("balance", 0)` devolve o `null` GRAVADO, não o default 0 — por isso
+    # `null` num campo opcional de dinheiro é recusado, e AUSENTE não é.
+    ("dinheiro/delete_investment.balance null",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", "balance": null}}'),
+    ("dinheiro/delete_pocket.balance texto",
+     '{"delta_conta": 0.0, "delete_pocket": {"nome": "viagem", "balance": "muito"}}'),
+    # ── id: `lot_id` que não casa linha nenhuma. O delete do lote não remove
+    # nada, o agregado é revertido assim mesmo e o lote fica DE PÉ.
+    ("id/lot_id texto",
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": "abc", "investment_id": 1}}'),
+    ("id/lot_id 1.9",
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": 1.9, "investment_id": 1}}'),
+    ("id/lot_id lista",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": [1], "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0}}]}'),
+    ("id/investment_id false",
+     '{' + _APORTE + ', "investment_lot_create": {"lot_id": 1, "investment_id": false}}'),
+    # ── id OCO: `bill_id` falsy passava pelo par (os dois não-nulos) e o
+    # `if paid_bill_id` pulava a reversão — fatura `paid` com o pagamento apagado.
+    ("id/bill_id 0", '{"delta_conta": -200.0, "bill_id": 0, "paid_amount_added": 200.0}'),
+    ("id/bill_id false", '{"delta_conta": -200.0, "bill_id": false, "paid_amount_added": 200.0}'),
+    ("id/bill_id texto", '{"delta_conta": -200.0, "bill_id": "7", "paid_amount_added": 200.0}'),
+    # ── nome: o `lower(%s)` não casa e a caixinha/o investimento não é
+    # deletado nem recriado, com o lançamento apagado.
+    ("nome/delta_invest.nome lista",
+     '{"delta_conta": -300.0, "delta_invest": {"nome": ["cdb"], "delta": 300.0}, '
+     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+    ("nome/create_pocket.nome número",
+     '{"delta_conta": 0.0, "create_pocket": {"nome": 42}}'),
+    ("nome/delete_pocket.nome vazio",
+     '{"delta_conta": 0.0, "delete_pocket": {"nome": "   "}}'),
+    # ── data: `date.fromisoformat` cru no meio da reversão, ou tipo que a
+    # coluna `date` recusa.
+    ("data/last_date número",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", "last_date": 42}}'),
+    ("data/maturity_date não-ISO",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", "maturity_date": "ontem"}}'),
+    ("data/before.closed_at número",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0, "closed_at": 123}}]}'),
+    # ── texto: só o TRUTHY não-string quebra (o falsy vira "open" no `or`).
+    ("texto/before.status número",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0, "status": 42}}]}'),
+    ("texto/before.status lista",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0, "status": ["open"]}}]}'),
+    # ── container trocado: `AttributeError` cru lá embaixo, balde `errors`.
+    ("container/delta_invest como lista",
+     '{"delta_conta": -300.0, "delta_invest": [{"nome": "cdb", "delta": 300.0}], '
+     '"investment_lot_create": {"lot_id": 1, "investment_id": 1}}'),
+    ("container/create_pocket como lista",
+     '{"delta_conta": 0.0, "create_pocket": [{"nome": "viagem"}]}'),
+    # o único caso que a checagem de CONTAINER pega sozinha: escalar não
+    # iterável na chave que é lida como lista -> `TypeError: 'int' object is not
+    # iterable`, cru. Com dict/lista/string o `isinstance(item, dict)` de dentro
+    # do laço já pegaria.
+    ("container/withdrawals como número",
+     '{' + _APORTE + ', "investment_lot_withdrawals": 42}'),
+    ("container/before como lista",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": 1, '
+     '"before": [{"balance": 300.0, "principal_remaining": 300.0}]}]}'),
+])
+def test_forma_do_efeito_recusa_em_vez_de_apagar(user_id: int, caso: str, efeitos: str):
+    """Um caso por classe da matriz. O estado é sempre o mesmo aporte real
+    (conta 700 / investimento 300 / 1 lote de 300) com o `efeitos` reescrito
+    depois, então a recusa tem de deixar TUDO como estava."""
+    lid = _aporte_forjado(user_id, efeitos)
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto", caso
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_delta_conta_nulo_e_efeitos_degenerado(user_id: int):
+    """`{"delta_conta": null}` não é `{}`: a chave está lá. A checagem era de
+    PRESENÇA, então isto passava e `Decimal(str(None))` estourava
+    `InvalidOperation` cru — balde `errors`, não recusa. Motivo `sem_delta_conta`
+    (e não `efeito_incompleto`): o que falta é quanto reverter na conta."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": null}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "sem_delta_conta"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+# ── CONTROLES POSITIVOS da matriz ────────────────────────────────────────────
+# A guarda RESTRINGE, e todo falso positivo vira `kept_unsafe`: recusa visível
+# em 5 portas e SILÊNCIO em 3. Estes são os valores que um predicado escrito
+# com `if not valor:` (em vez de `is None`) mataria.
+
+def _ids_do_aporte(user_id: int) -> tuple[int, int]:
+    """(lot_id, investment_id) REAIS do aporte — o id do lote vem da sequence
+    global, então forjar `"lot_id": 1` não serve pro caminho que TEM de passar."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select min(id) as i from investment_lots where user_id=%s", (user_id,))
+            lot = cur.fetchone()["i"]
+            cur.execute("select min(id) as i from investments where user_id=%s", (user_id,))
+            return int(lot), int(cur.fetchone()["i"])
+
+
+@pytest.mark.parametrize("caso,before", [
+    ("lote drenado a zero", '{"balance": 0, "principal_remaining": 0}'),
+    ("dinheiro como string numérica", '{"balance": "300.00", "principal_remaining": "300.00"}'),
+    ("status vazio", '{"balance": 300.0, "principal_remaining": 300.0, "status": ""}'),
+    ("status null", '{"balance": 300.0, "principal_remaining": 300.0, "status": null}'),
+    ("status false", '{"balance": 300.0, "principal_remaining": 300.0, "status": false}'),
+    ("status 0", '{"balance": 300.0, "principal_remaining": 300.0, "status": 0}'),
+    ("closed_at null", '{"balance": 300.0, "principal_remaining": 300.0, "closed_at": null}'),
+])
+def test_positivo_before_valido_continua_apagando(user_id: int, caso: str, before: str):
+    """`Decimal(0)` é FALSY: um `if not valor:` no lugar de `_dinheiro` recusaria
+    o lote drenado a zero. E `status` falsy já vira "open" no `or` da restauração
+    — fechar o falsy seria recusar o que hoje funciona."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, _inv = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid,
+                 '{"delta_conta": 0.0, "investment_lot_withdrawals": '
+                 '[{"lot_id": %d, "before": %s}]}' % (lot_id, before))
+
+    db.delete_launch_and_rollback(user_id, lid)
+
+    assert not any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10)), caso
+    assert _bal(user_id) == 700.0, caso
+
+
+def test_positivo_withdrawals_lista_vazia_continua_apagando(user_id: int):
+    """`[]` é container CERTO com zero itens: a checagem de forma não pode
+    confundir "lista vazia" com "container errado"."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": -50.0, "investment_lot_withdrawals": []}')
+    db.delete_launch_and_rollback(user_id, lid)
+    assert _bal(user_id) == 750.0
+    assert not any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+
+
+# ── `investment_lots_handled` só quando o DELETE removeu a linha ─────────────
+#
+# `_EFEITOS_FORMA` não alcança esta classe: forma não sabe se a linha EXISTE.
+# Marcando por formato (o que a `main` faz), medido no `pigbank_ci_test` com o
+# `efeitos` de um aporte real (conta/investimento/lotes):
+#
+#   lot_id inexistente     700/300/(1,300) -> APAGOU 1000/300/(1,300)  TOTAL 1300
+#   lot_id de OUTRO user   700/300/(1,300) -> APAGOU 1000/300/(1,300)  TOTAL 1300
+#
+# R$300 criados do nada nos dois, com o lote de pé. O `and user_id=%s` já
+# impedia MEXER no lote alheio; o que faltava era não CREDITAR por causa dele.
+#
+# Por que RECUSAR em vez de "seguir sem marcar": seguir faz o agregado ser
+# recalculado dos lotes E o `delta_invest` subtrair por cima. Medido, com o lote
+# já removido por fora: investimento ia a -300.00 e o TOTAL de 1000 pra 700 —
+# dinheiro destruído num caso que a `main` acerta. Recusando, nenhum update roda.
+
+def _efeitos_de_aporte(lot_id: int, investment_id: int) -> str:
+    return ('{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+            '"investment_lot_create": {"lot_id": %d, "investment_id": %d}}'
+            % (lot_id, investment_id))
+
+
+def test_rowcount_1_apaga_o_lote_e_devolve_o_dinheiro(user_id: int):
+    """CONTROLE POSITIVO do `rowcount`: lote válido e DO usuário — uma linha
+    removida e o saldo correto. Sem ele o grupo passaria numa versão que recusa
+    todo aporte, que é pior que o bug."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid, _efeitos_de_aporte(lot_id, inv_id))
+
+    db.delete_launch_and_rollback(user_id, lid)
+
+    assert _lotes(user_id, "investment_lots") == (0, 0.0), "a linha do lote tem de sair"
+    assert _investment_balance(user_id, "cdb") == 0.0
+    assert _bal(user_id) == 1000.0, "o dinheiro volta inteiro pra conta"
+
+
+@pytest.mark.parametrize("caso", ["inexistente", "ja_removido", "de_outro_usuario"])
+def test_rowcount_0_recusa_e_nao_cria_nem_credita_nada(user_id: int, caso: str):
+    """`lot_id` formalmente válido — inteiro positivo — sem correspondência
+    AUTORIZADA. O de outro usuário é a regra dura do `CLAUDE.md` §0: o
+    `and user_id=%s` tem de segurar, e o lote alheio não pode ser tocado."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+
+    if caso == "inexistente":
+        alvo = lot_id + 1_000_000
+    elif caso == "ja_removido":
+        alvo = lot_id
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from investment_lots where id=%s", (lot_id,))
+            conn.commit()
+    else:
+        outro = int(uuid.uuid4().int % 10_000_000_000)
+        db.ensure_user(outro)
+        _aporte_forjado(outro, '{"delta_conta": 0.0}')
+        alvo, _ = _ids_do_aporte(outro)
+
+    _set_efeitos(user_id, lid, _efeitos_de_aporte(alvo, inv_id))
+    lotes_antes = _lotes(user_id, "investment_lots")
+
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+
+    # nenhuma quantia criada, creditada ou somada — nem no dono, nem no outro
+    assert _bal(user_id) == 700.0, caso
+    assert _investment_balance(user_id, "cdb") == 300.0, caso
+    assert _lotes(user_id, "investment_lots") == lotes_antes, caso
+    assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+    if caso == "de_outro_usuario":
+        assert _lotes(outro, "investment_lots") == (1, 300.0), "lote alheio intacto"
+        assert _bal(outro) == 700.0
+
+
+class _CursorMentiroso:
+    """Proxy que responde `rowcount=2` no delete do lote. É a ÚNICA forma de
+    alcançar a violação de invariante: `id` é PK, então o banco casa 0 ou 1 e
+    nenhum `efeitos` forjado chega lá."""
+
+    def __init__(self, cur):
+        self._cur = cur
+        self._mentir = False
+
+    def __getattr__(self, nome):
+        return getattr(self._cur, nome)
+
+    def __enter__(self):
+        self._cur.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._cur.__exit__(*args)
+
+    def execute(self, query, params=None, **kw):
+        r = self._cur.execute(query, params, **kw)
+        self._mentir = "delete from investment_lots" in " ".join(str(query).split())
+        return r
+
+    @property
+    def rowcount(self):
+        return 2 if self._mentir else self._cur.rowcount
+
+
+class _ConnMentirosa:
+    """Embrulha o CONTEXT MANAGER do pool, não a conexão: devolver a conexão pro
+    pool é o `__exit__` dele. Fechando a conexão na mão, o pool ficava sem ela e
+    o logger de observabilidade do teste seguinte quebrava."""
+
+    def __init__(self, cm):
+        self._cm = cm
+        self._conn = None
+
+    def __getattr__(self, nome):
+        return getattr(self._conn, nome)
+
+    def __enter__(self):
+        self._conn = self._cm.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._cm.__exit__(*args)
+
+    def cursor(self, *a, **kw):
+        return _CursorMentiroso(self._conn.cursor(*a, **kw))
+
+
+def test_rowcount_maior_que_1_interrompe_e_reverte_a_transacao(user_id: int, monkeypatch):
+    """`rowcount > 1` é invariante do banco quebrada, não caso de uso: sai CRU
+    (balde `errors`, com log de ERROR), nunca como `LaunchUnsafeRollback`, que é
+    recusa PREVISTA e vira frase de produto.
+
+    E a transação DESTRUTIVA reverte: quando o erro sobe, o
+    `update accounts set balance = balance - delta_conta` JÁ RODOU (a reversão
+    da conta vem antes do bloco do lote). Os asserts abaixo provam pelo estado,
+    não pela dedução — conta de volta em 700, lote de pé, lançamento listado."""
+    import db.accounts as accounts
+
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid, _efeitos_de_aporte(lot_id, inv_id))
+
+    real = accounts.get_conn
+    monkeypatch.setattr(accounts, "get_conn", lambda: _ConnMentirosa(real()))
+
+    with pytest.raises(RuntimeError) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert "invariante" in str(exc.value)
+    assert not isinstance(exc.value, db.LaunchUnsafeRollback)
+
+    monkeypatch.undo()
+    assert _bal(user_id) == 700.0, "a reversão da conta tem de ter sido desfeita"
+    assert _lotes(user_id, "investment_lots") == (1, 300.0), "o lote não pode sair"
+    assert _investment_balance(user_id, "cdb") == 300.0
+    assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))

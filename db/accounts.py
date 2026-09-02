@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+from math import isfinite
 
 from psycopg.types.json import Json, Jsonb
 
@@ -255,10 +256,11 @@ class LaunchDateLockedError(ValueError):
 # sem 'efeitos'" cru; hoje ele mapeia tipo → frase (`_MSG_DELETE_LAUNCH`,
 # `frontend/finance_bot_websocket_custom.py`).
 #
-# Os outros `ValueError` da função (delta_pocket/delta_invest sem nome, dado
-# corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma causa
-# inesperada — ramo técnico, com log e retry — então nomeá-los seria classe sem
-# chamador.
+# Os outros `ValueError`/`RuntimeError` da função (invariante do banco quebrada,
+# dado corrompido) seguem crus DE PROPÓSITO: o destino deles é o mesmo de uma
+# causa inesperada — ramo técnico, com log e retry — então nomeá-los seria classe
+# sem chamador. `delta_pocket`/`delta_invest` sem `nome` já não chegam lá: o
+# pré-voo (`_EFEITOS_FORMA`) recusa antes, com `motivo`.
 
 class LaunchNoEffects(ValueError):
     """O lançamento não guarda `efeitos`, então não dá pra reverter o saldo."""
@@ -289,8 +291,11 @@ class LaunchUnsafeRollback(ValueError):
       - `chave_desconhecida`  — chave fora de `_EFEITOS_REVERSIVEIS`
       - `lote_ausente`        — `delta_pocket`/`delta_invest` sem a chave do lote
       - `efeito_incompleto`   — chave PRESENTE sem o campo que a torna
-                                reversível (`_EFEITOS_CAMPOS_EXIGIDOS`); o
-                                irmão do `lote_ausente`, que é a chave ausente
+                                reversível, com ele numa forma que a reversão
+                                não sabe usar (`_EFEITOS_FORMA`), ou com um
+                                `lot_id` bem formado que não casa lote deste
+                                usuário; o irmão do `lote_ausente`, que é a
+                                chave ausente
       - `fora_do_escopo`      — caixinha/investimento no "apagar tudo"
 
     Obrigatório no construtor de propósito: `raise` novo tem de escolher um
@@ -1109,44 +1114,174 @@ _DELTA_EXIGE_LOTE = (
     ("delta_invest", ("investment_lot_create", "investment_lot_withdrawals")),
 )
 
-# Chave PRESENTE mas sem o campo que a torna reversível. É outra falha que
+# Chave PRESENTE mas com valor que não reverte nada. É outra falha que
 # `_DELTA_EXIGE_LOTE` não pega: lá a chave do lote está AUSENTE (linha legada);
-# aqui ela está lá e vazia por dentro, e cada `if <campo>:` a jusante vira um
-# no-op silencioso — o efeito não é desfeito e o `delete` acontece assim mesmo.
+# aqui ela está lá, e ou o `if <campo>:` a jusante vira no-op silencioso — o
+# efeito não é desfeito e o `delete` acontece assim mesmo —, ou a conversão
+# (`Decimal(str(...))`, `date.fromisoformat`, `.get`) estoura CRU, que no
+# `delete_all_launches_and_rollback` cai no balde `errors` em vez de virar
+# recusa visível, e nos três `except Exception: pass` de `db/open_finance.py`
+# vira SILÊNCIO.
 #
-# O inventário dos 8 sites, medido no `pigbank_ci_test` com `efeitos` forjado e
-# `delete_launch_and_rollback` real (o motivo de cada linha estar aqui):
-#   investment_lot_create sem `lot_id`     -> :1348 pula o delete do lote, mas
-#       :1373 reverte o agregado: conta 700->1000, inv 300->0, lote de 300 DE PÉ;
-#       o `_sync_*_from_lots` traz os 300 de volta no movimento seguinte.
-#   investment_lot_withdrawals sem `lot_id`-> :1394 `continue`, lote não restaurado.
-#   investment_lot_withdrawals sem `before`-> PIOR: :1404 escreve o default 0 e
-#       ZERA o lote. O dinheiro some do lote E do agregado, sem volta.
-#   bill_id sem `paid_amount_added`        -> :1248 pula a reversão, a fatura
-#       fica `paid` com o pagamento apagado.
-#   create_pocket/create_investment sem `nome`  -> :1447/:1274 não deletam.
-#   delete_pocket/delete_investment sem `nome`  -> :1317/:1283 não recriam.
+# UMA tabela, QUATRO invariantes (dinheiro, id, nome, data). A guarda nasceu um
+# remendo por vez e o revisor achou irmão nas duas rodadas; `CLAUDE.md` §4 manda
+# parar de remendar e enumerar a matriz de uma vez.
 #
-# `InvestmentLotHasWithdrawal` (:1363) NÃO cobre nada disso: mora DENTRO do
-# `if lot_id:`. Inalcançável pelos escritores de hoje — os cinco gravam os
-# campos no mesmo insert atômico, e nenhum código reescreve `efeitos` depois —,
-# mas a tese deste PR é recusar o que não sabe reverter, e um dos oito destrói
-# dinheiro. `bill_id` fica de fora desta tabela: é PAR com `paid_amount_added`,
-# tratado no laço. `delta_invest`/`delta_pocket` PRESENTES sem `nome` são da
-# MESMA classe (chave presente e oca) e também ficam de fora: seguem crus, como
-# `ValueError` sem `motivo`, pela decisão documentada em `:258-261`.
-_EFEITOS_CAMPOS_EXIGIDOS = (
-    ("investment_lot_create", ("lot_id",)),
-    ("investment_lot_withdrawals", ("lot_id", "before")),
-    ("create_pocket", ("nome",)),
-    ("create_investment", ("nome",)),
-    ("delete_pocket", ("nome",)),
-    ("delete_investment", ("nome",)),
-)
+# O que cada invariante fecha — medido no `pigbank_ci_test` com `efeitos`
+# forjado e `delete_launch_and_rollback` real:
+#   dinheiro NÃO-FINITO (`"NaN"`, `"Infinity"`, `1e400`) em `delta_conta`,
+#     `paid_amount_added`, `before.balance`, `before.principal_remaining` ou
+#     `delete_*.balance`: APAGAVA E CORROMPIA. O `numeric` do Postgres aceita
+#     `NaN`, e saldo `NaN` não volta a ser número por soma nenhuma.
+#   dinheiro NÃO-NUMÉRICO (`"abc"`, `[1]`, `null`): `InvalidOperation`/`TypeError`.
+#   `bill_id` OCO (`0`, `false`, `""`, `[]`): o `if paid_bill_id` pula a reversão
+#     e a fatura fica `paid` com o pagamento apagado.
+#   `lot_id` que não é id (`"abc"`, `1.9`, `[1]`): o delete do lote não casa
+#     linha nenhuma, o agregado é revertido assim mesmo e o lote fica DE PÉ —
+#     conta 700->1000 com o investimento em 300, R$300 criados do nada. O
+#     `rowcount` do delete (em `delete_launch_and_rollback`) fecha o resto desta
+#     classe: `lot_id` bem formado que não casa linha AUTORIZADA.
+#   `nome` que não é string (`["a"]`, `42`): o `lower(%s)` não casa e a caixinha
+#     não é deletada/recriada, com o lançamento apagado.
+#   CONTAINER trocado (`delta_invest` como lista, `investment_lot_withdrawals`
+#     como dict): `AttributeError` cru.
+#   data com tipo errado: `date.fromisoformat` cru no meio da reversão.
+#
+# Nenhuma forma venenosa é alcançável pelos escritores de HOJE: `Json(efeitos)`
+# serializa `NaN`/`Infinity` nus e o jsonb os RECUSA no INSERT (medido), e os
+# cinco escritores gravam os campos no mesmo insert atômico. Isto é blindagem
+# fail-closed contra escritor futuro, importador de Open Finance e linha mexida
+# à mão — o veneno entra como a STRING `"NaN"` ou como inteiro Python gigante.
+#
+# FORA de propósito: o DOMÍNIO de `before.status` (`open`/`closed`) é da coluna,
+# e `investment_lots.status` não tem CHECK hoje — pôr um é PR de schema (§0.6);
+# os campos `text` de `delete_investment` (`period`, `asset_type`, `indexer`,
+# `issuer`, `tax_profile`, `interest_payment_frequency`), que o Postgres coage
+# sem ninguém perder dinheiro; e as 6 chaves informativas, inertes na reversão.
 
-# `before` sem estes dois faz o `.get(campo, 0)` de :1404-1405 escrever ZERO no
-# lote. Exigir a chave `before` sozinha deixaria o pior dos oito aberto.
-_BEFORE_CAMPOS = ("balance", "principal_remaining")
+
+def _dinheiro(v) -> bool:
+    """`Decimal` FINITO. É a MESMA conversão que a reversão faz a jusante
+    (`Decimal(str(v))`), então "válido" aqui quer dizer "não estoura lá
+    embaixo"; `isfinite` é o mesmo invariante que `db/bills.py` aplica na
+    ESCRITA. `InvalidOperation` (texto que não é número) e o `OverflowError` do
+    inteiro Python gigante herdam os dois de `ArithmeticError`."""
+    try:
+        return isfinite(float(Decimal(str(v))))
+    except (ArithmeticError, ValueError, TypeError):
+        return False
+
+
+def _id(v) -> bool:
+    """Id de linha: inteiro positivo. `bool` é `int` em Python e `True` viraria
+    id 1; `1.9` não casa linha nenhuma e o `if lot_id:` seguia em frente."""
+    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+
+
+def _nome(v) -> bool:
+    """Nome que vai pro `lower(%s)`: string não vazia."""
+    return isinstance(v, str) and v.strip() != ""
+
+
+def _texto(v) -> bool:
+    """Só a FORMA, e só do que a reversão USA: `status` entra no update como
+    `before.get("status") or "open"`, então qualquer FALSY (`null`, `""`,
+    `false`, `0`) já vira "open" e é inofensivo; o que quebra é o TRUTHY que
+    não é texto (`42`, `["open"]`), que o `text` da coluna recusa. O DOMÍNIO
+    (`open`/`closed`) é da COLUNA, não daqui — `investment_lots.status` não tem
+    CHECK hoje, e pôr um é PR de schema."""
+    return isinstance(v, str) or not v
+
+
+def _data(v) -> bool:
+    """`date.fromisoformat` é literalmente o que a reversão chama em
+    `last_date`; as outras datas vão cruas pro Postgres, que exige o mesmo.
+    `null` passa porque as quatro são null-safe a jusante (`if last_date_str
+    else hoje`, ou `NULL` na coluna)."""
+    if v is None:
+        return True
+    try:
+        date.fromisoformat(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+# Tabela ANINHADA de `investment_lot_withdrawals[].before`. Sem `balance` e
+# `principal_remaining` o `.get(campo, 0)` da restauração escreve ZERO no lote —
+# o único caso que DESTRÓI dinheiro em vez de só deixar o lote de pé.
+_BEFORE_FORMA = {
+    "balance": (_dinheiro, True),
+    "principal_remaining": (_dinheiro, True),
+    "status": (_texto, False),
+    "closed_at": (_data, False),
+}
+
+# chave -> (container, campos)
+#   container: `"valor"` = escalar, e `campos` é o predicado do próprio valor;
+#              `"dict"` = objeto; `"lista"` = lista de objetos. O container POR
+#              CHAVE importa: só `investment_lot_withdrawals` é lido como LISTA
+#              (o `for effect in ...`), as outras levam `.get` direto no dict.
+#   campos: `{campo: (predicado, obrigatorio)}`. `obrigatorio=False` = campo
+#           AUSENTE é legítimo (o `.get(campo, default)` a jusante está correto);
+#           PRESENTE — inclusive `null` — tem de passar no predicado, e cada
+#           predicado sabe se `null` é seguro no SEU destino (`_data` e `_texto`
+#           aceitam, `_dinheiro` e `_id` não). Uma tabela no lugar do predicado
+#           é sub-objeto (`before`).
+#   Chave com valor `null` é pulada inteira: os escritores gravam
+#   `"delta_pocket": None` explicitamente, e isso não é efeito a reverter.
+_EFEITOS_FORMA = {
+    "delta_conta": ("valor", _dinheiro),
+    "bill_id": ("valor", _id),
+    "paid_amount_added": ("valor", _dinheiro),
+    "create_pocket": ("dict", {"nome": (_nome, True)}),
+    "create_investment": ("dict", {"nome": (_nome, True)}),
+    "delete_pocket": ("dict", {"nome": (_nome, True), "balance": (_dinheiro, False)}),
+    "delete_investment": ("dict", {
+        "nome": (_nome, True), "balance": (_dinheiro, False),
+        "rate": (_dinheiro, False), "last_date": (_data, False),
+        "purchase_date": (_data, False), "maturity_date": (_data, False),
+    }),
+    "delta_pocket": ("dict", {"nome": (_nome, True), "delta": (_dinheiro, False)}),
+    "delta_invest": ("dict", {"nome": (_nome, True), "delta": (_dinheiro, False)}),
+    "investment_lot_create": ("dict", {"lot_id": (_id, True),
+                                       "investment_id": (_id, False)}),
+    "investment_lot_withdrawals": ("lista", {"lot_id": (_id, True),
+                                             "before": (_BEFORE_FORMA, True)}),
+}
+
+
+def _checar_forma(item: dict, campos: dict, onde: str) -> None:
+    """Aplica uma linha de `_EFEITOS_FORMA` a um objeto do `efeitos`.
+    Mensagem sem o VALOR de propósito: ela vai pro log, e `nome` é dado do
+    cliente — quem discrimina é o `motivo`, não o texto."""
+    for campo, (predicado, obrigatorio) in campos.items():
+        if campo not in item:
+            # AUSENTE, não `null`: é aqui que o `.get(campo, default)` a jusante
+            # está certo. `"balance": null` NÃO cai aqui de propósito — o
+            # `.get("balance", 0)` devolve o `None` gravado, não o default, e
+            # `Decimal(str(None))` estoura; quem recusa isso é o predicado.
+            if obrigatorio:
+                raise LaunchUnsafeRollback(
+                    f"'{onde}' sem '{campo}': a reversão não desfaz o efeito.",
+                    "efeito_incompleto",
+                )
+            continue
+        valor = item[campo]
+        if isinstance(predicado, dict):
+            if not isinstance(valor, dict):
+                raise LaunchUnsafeRollback(
+                    f"'{onde}.{campo}' com forma inesperada ({type(valor).__name__}).",
+                    "efeito_incompleto",
+                )
+            _checar_forma(valor, predicado, f"{onde}.{campo}")
+            continue
+        if not predicado(valor):
+            raise LaunchUnsafeRollback(
+                f"'{onde}.{campo}' com valor que a reversão não sabe usar "
+                f"({type(valor).__name__}).",
+                "efeito_incompleto",
+            )
 
 # Efeitos que o "apagar tudo" não pode tocar: a mensagem promete "suas caixinhas
 # e investimentos NÃO são afetados". Guarda de ESCOPO, não de segurança — o
@@ -1160,19 +1295,118 @@ _EFEITOS_FORA_DO_APAGAR_TUDO = (
 )
 
 
+def _validar_efeitos(efeitos: dict, *, escopo_conta_corrente: bool) -> Decimal:
+    """Pré-voo de `delete_launch_and_rollback`: recusa o que a reversão não
+    sabe desfazer e devolve o `delta_conta` já convertido.
+
+    PURO de propósito — não toca em `conn` nem em `cur`, só no `efeitos` e
+    nas tabelas acima. Fora da função, a REGRA pode ser medida sozinha (numa
+    amostra de `efeitos` de produção, por exemplo) em vez de reimplementada
+    em SQL, que seriam duas fontes de verdade (`CLAUDE.md` §0.7)."""
+    # VALOR, não `truthy`: os escritores gravam `delta_conta`
+    # explicitamente, inclusive os que legitimamente gravam 0
+    # (open_finance, criar_caixinha). `efeitos = '{}'::jsonb` NÃO é `null`,
+    # então não cai em LaunchNoEffects, e `.get("delta_conta", 0)` devolvia
+    # 0: a linha era apagada e o dinheiro não voltava. `"delta_conta": null`
+    # cai aqui junto — nenhum escritor grava isso, e `Decimal(str(None))`
+    # estourava `InvalidOperation` cru (balde `errors`, não recusa).
+    if efeitos.get("delta_conta") is None:
+        raise LaunchUnsafeRollback(
+            "lançamento com 'efeitos' incompleto (sem delta_conta).",
+            "sem_delta_conta",
+        )
+    desconhecidas = set(efeitos) - _EFEITOS_REVERSIVEIS
+    if desconhecidas:
+        raise LaunchUnsafeRollback(
+            f"efeitos que não sei reverter: {sorted(desconhecidas)}",
+            "chave_desconhecida",
+        )
+    # FORMA antes de regra de negócio, e antes do `_DELTA_EXIGE_LOTE` de
+    # propósito: a linha legada de verdade (chave AUSENTE) tem de continuar
+    # saindo com `lote_ausente`, que é o motivo comum e o que os testes já
+    # prendem. Aqui a chave está PRESENTE e o valor é que não reverte.
+    for chave, (container, campos) in _EFEITOS_FORMA.items():
+        valor = efeitos.get(chave)
+        if valor is None:
+            continue
+        if container == "valor":
+            if not campos(valor):
+                raise LaunchUnsafeRollback(
+                    f"'{chave}' com valor que a reversão não sabe usar "
+                    f"({type(valor).__name__}).",
+                    "efeito_incompleto",
+                )
+            continue
+        # Aceitar dict e lista indistintamente deixava o swap passar aqui e
+        # estourar `AttributeError` lá embaixo — balde `errors`, não recusa.
+        lista = container == "lista"
+        if isinstance(valor, list) != lista:
+            raise LaunchUnsafeRollback(
+                f"'{chave}' com forma inesperada ({type(valor).__name__}).",
+                "efeito_incompleto",
+            )
+        for item in (valor if lista else [valor]):
+            if not isinstance(item, dict):
+                raise LaunchUnsafeRollback(
+                    f"'{chave}' com forma inesperada ({type(item).__name__}).",
+                    "efeito_incompleto",
+                )
+            _checar_forma(item, campos, chave)
+    # `bill_id` e `paid_amount_added` são PAR (o `if paid_bill_id and
+    # paid_amount_added is not None` da reversão exige os dois): um sem o
+    # outro pula a reversão e a fatura fica `paid` sem pagamento.
+    if (efeitos.get("bill_id") is None) != (efeitos.get("paid_amount_added") is None):
+        raise LaunchUnsafeRollback(
+            "'bill_id'/'paid_amount_added' incompletos: a reversão não "
+            "desfaz o pagamento da fatura.",
+            "efeito_incompleto",
+        )
+    delta_conta = Decimal(str(efeitos["delta_conta"]))
+    # `delta == 0` NÃO entra: `create_investment` (`db/investments.py`)
+    # grava `delta_invest` com delta 0 num investimento que ainda não
+    # tem lote nenhum, e continua apagável. Mas só quando o lançamento
+    # não move a conta TAMBÉM: `delta` 0 com `delta_conta` -300 é
+    # dinheiro saindo da conta pra um lote que a reversão não desfaz —
+    # o saldo volta e o lote fica, criando 300. Não alcançável hoje (o
+    # único escritor de delta 0 grava `delta_conta` 0), fechado de
+    # graça porque ele continua apagável.
+    for delta_key, lot_keys in _DELTA_EXIGE_LOTE:
+        delta_val = efeitos.get(delta_key)
+        if not isinstance(delta_val, dict):
+            continue
+        if Decimal(str(delta_val.get("delta") or 0)) == 0 and delta_conta == 0:
+            continue
+        if not any(efeitos.get(k) for k in lot_keys):
+            raise LaunchUnsafeRollback(
+                f"'{delta_key}' sem chave de lote (lançamento legado): "
+                f"a reversão não desfaz o lote.",
+                "lote_ausente",
+            )
+    if escopo_conta_corrente and any(
+        efeitos.get(k) is not None for k in _EFEITOS_FORA_DO_APAGAR_TUDO
+    ):
+        raise LaunchUnsafeRollback(
+            "lançamento mexe em caixinha/investimento — fora do 'apagar tudo'.",
+            "fora_do_escopo",
+        )
+    return delta_conta
+
+
 def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                               escopo_conta_corrente: bool = False):
     """
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
 
-    Recusa (sem tocar em saldo) o que não sabe reverter por inteiro:
-    `LaunchNoEffects` sem `efeitos`, `LaunchUnsafeRollback` com `efeitos`
-    degenerado, com chave fora de `_EFEITOS_REVERSIVEIS`, com delta de lote
-    sem a chave que nomeia o lote (`_DELTA_EXIGE_LOTE`), ou com a chave
-    PRESENTE e oca — sem o campo que a torna reversível
-    (`_EFEITOS_CAMPOS_EXIGIDOS`), no container errado, com `before` sem
-    `_BEFORE_CAMPOS`, ou com `bill_id`/`paid_amount_added` desemparelhados.
+    Recusa (sem tocar em saldo) o que não sabe reverter por inteiro — o
+    pré-voo inteiro é `_validar_efeitos`: `LaunchNoEffects` sem `efeitos`,
+    `LaunchUnsafeRollback` com `efeitos` degenerado, com chave fora de
+    `_EFEITOS_REVERSIVEIS`, com delta de lote sem a chave que nomeia o lote
+    (`_DELTA_EXIGE_LOTE`), ou com a chave PRESENTE e um valor que não reverte
+    nada — container, dinheiro, id, nome ou data fora de `_EFEITOS_FORMA`, ou
+    `bill_id`/`paid_amount_added` desemparelhados. O que a FORMA não alcança
+    (`lot_id` bem formado sem linha autorizada) é o `rowcount` do delete do
+    lote que fecha, abaixo.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
     o que mexe em caixinha/investimento (`_EFEITOS_FORA_DO_APAGAR_TUDO`).
@@ -1181,7 +1415,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     usuário como frase de produto em cinco deles e como SILÊNCIO em três:
       - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
       - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
-      - `frontend/finance_bot_websocket_custom.py:5470` (DELETE /launches);
+      - `frontend/finance_bot_websocket_custom.py:5490` (DELETE /launches);
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
       - `db/open_finance.py:43`, `:1329` e `:1418` — os três dentro de
         `except Exception: pass`. Ali uma recusa não vira mensagem nem log: o
@@ -1226,105 +1460,10 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if not isinstance(efeitos, dict):
                 raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
-            # Daqui pra baixo NENHUM `update` ainda rodou — as recusas são antes
-            # de mexer em saldo, de propósito.
-            #
-            # Presença de chave, não valor: os escritores gravam `delta_conta`
-            # explicitamente, inclusive os que legitimamente gravam 0
-            # (open_finance, criar_caixinha). `efeitos = '{}'::jsonb` NÃO é
-            # `null`, então não cai em LaunchNoEffects, e `.get("delta_conta", 0)`
-            # devolvia 0: a linha era apagada e o dinheiro não voltava.
-            if "delta_conta" not in efeitos:
-                raise LaunchUnsafeRollback(
-                    "lançamento com 'efeitos' incompleto (sem delta_conta).",
-                    "sem_delta_conta",
-                )
-            desconhecidas = set(efeitos) - _EFEITOS_REVERSIVEIS
-            if desconhecidas:
-                raise LaunchUnsafeRollback(
-                    f"efeitos que não sei reverter: {sorted(desconhecidas)}",
-                    "chave_desconhecida",
-                )
-            # FORMA antes de regra de negócio, e antes do `_DELTA_EXIGE_LOTE` de
-            # propósito: a linha legada de verdade (chave AUSENTE) tem de
-            # continuar saindo com `lote_ausente`, que é o motivo comum e o que
-            # os testes já prendem. Aqui a chave está PRESENTE e oca.
-            # `None` é ignorado: os escritores gravam `"delta_pocket": None`
-            # explicitamente, e isso não é efeito nenhum a reverter.
-            for chave, campos in _EFEITOS_CAMPOS_EXIGIDOS:
-                valor = efeitos.get(chave)
-                if valor is None:
-                    continue
-                # Container POR CHAVE: só `investment_lot_withdrawals` é lido
-                # como LISTA (o `for effect in …` abaixo); as outras cinco levam
-                # `.get` direto no dict. Aceitar os dois deixava o swap passar
-                # aqui e estourar `AttributeError` cru lá embaixo — balde
-                # `errors` e SILÊNCIO nos três `except Exception: pass` do OF.
-                lista = chave == "investment_lot_withdrawals"
-                if isinstance(valor, list) != lista:
-                    raise LaunchUnsafeRollback(
-                        f"'{chave}' com forma inesperada ({type(valor).__name__}).",
-                        "efeito_incompleto",
-                    )
-                for item in (valor if lista else [valor]):
-                    if not isinstance(item, dict):
-                        raise LaunchUnsafeRollback(
-                            f"'{chave}' com forma inesperada ({type(item).__name__}).",
-                            "efeito_incompleto",
-                        )
-                    faltando = [c for c in campos if not item.get(c)]
-                    # `before` presente mas oco escreve 0 no lote (:1404) — é o
-                    # único dos oito que DESTRÓI dinheiro, então checa por dentro.
-                    if not faltando and "before" in campos:
-                        antes = item.get("before")
-                        # VALOR, não presença: `{"balance": null}` passava pelo
-                        # `c not in antes` e virava `Decimal(str(None))` —
-                        # `InvalidOperation` cru, mesmo balde do swap acima.
-                        if not isinstance(antes, dict) or any(
-                            antes.get(c) is None for c in _BEFORE_CAMPOS
-                        ):
-                            faltando = ["before.%s" % "/".join(_BEFORE_CAMPOS)]
-                    if faltando:
-                        raise LaunchUnsafeRollback(
-                            f"'{chave}' sem {faltando}: a reversão não desfaz o efeito.",
-                            "efeito_incompleto",
-                        )
-            # `bill_id` e `paid_amount_added` são PAR (:1248 exige os dois): um
-            # sem o outro pula a reversão e a fatura fica `paid` sem pagamento.
-            if (efeitos.get("bill_id") is None) != (efeitos.get("paid_amount_added") is None):
-                raise LaunchUnsafeRollback(
-                    "'bill_id'/'paid_amount_added' incompletos: a reversão não "
-                    "desfaz o pagamento da fatura.",
-                    "efeito_incompleto",
-                )
-            delta_conta = Decimal(str(efeitos.get("delta_conta", 0)))
-            # `delta == 0` NÃO entra: `create_investment` (`db/investments.py`)
-            # grava `delta_invest` com delta 0 num investimento que ainda não
-            # tem lote nenhum, e continua apagável. Mas só quando o lançamento
-            # não move a conta TAMBÉM: `delta` 0 com `delta_conta` -300 é
-            # dinheiro saindo da conta pra um lote que a reversão não desfaz —
-            # o saldo volta e o lote fica, criando 300. Não alcançável hoje (o
-            # único escritor de delta 0 grava `delta_conta` 0), fechado de
-            # graça porque ele continua apagável.
-            for delta_key, lot_keys in _DELTA_EXIGE_LOTE:
-                delta_val = efeitos.get(delta_key)
-                if not isinstance(delta_val, dict):
-                    continue
-                if Decimal(str(delta_val.get("delta") or 0)) == 0 and delta_conta == 0:
-                    continue
-                if not any(efeitos.get(k) for k in lot_keys):
-                    raise LaunchUnsafeRollback(
-                        f"'{delta_key}' sem chave de lote (lançamento legado): "
-                        f"a reversão não desfaz o lote.",
-                        "lote_ausente",
-                    )
-            if escopo_conta_corrente and any(
-                efeitos.get(k) is not None for k in _EFEITOS_FORA_DO_APAGAR_TUDO
-            ):
-                raise LaunchUnsafeRollback(
-                    "lançamento mexe em caixinha/investimento — fora do 'apagar tudo'.",
-                    "fora_do_escopo",
-                )
+            # Daqui pra baixo NENHUM `update` ainda rodou — as recusas são
+            # antes de mexer em saldo, de propósito.
+            delta_conta = _validar_efeitos(
+                efeitos, escopo_conta_corrente=escopo_conta_corrente)
 
             delta_pocket = efeitos.get("delta_pocket")
             delta_invest = efeitos.get("delta_invest")
@@ -1466,6 +1605,42 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         "delete from investment_lots where id=%s and user_id=%s",
                         (lot_id, user_id),
                     )
+                    # Sucesso = a linha SAIU, não "o `lot_id` tinha cara de
+                    # id". É a cauda que `_EFEITOS_FORMA` não alcança: forma não
+                    # sabe se a linha existe, só o `rowcount` sabe. Medido no
+                    # `pigbank_ci_test`, marcando por FORMATO (o que a `main`
+                    # faz), com um `lot_id` bem formado que não casa linha
+                    # autorizada — conta/investimento/lotes antes -> depois:
+                    #   lot_id inexistente     700/300/(1,300) -> 1000/300/(1,300)
+                    #   lot_id de OUTRO user   700/300/(1,300) -> 1000/300/(1,300)
+                    # nos dois o TOTAL sobe de 1000 pra 1300: R$300 criados do
+                    # nada, com o lote de pé. `and user_id=%s` já impedia mexer
+                    # no lote alheio; o que faltava era não CREDITAR por isso.
+                    if cur.rowcount > 1:
+                        # `id` é PK: `where id=%s and user_id=%s` casa 0 ou 1.
+                        # Invariante do banco quebrada, não caso de uso — sai
+                        # CRU (balde `errors`, com log de ERROR), nunca como
+                        # `LaunchUnsafeRollback`, que é recusa PREVISTA, vira
+                        # frase de produto e teria de mentir um dos cinco
+                        # `motivo`. A transação reverte nos dois casos: o
+                        # `conn.commit()` só vem no fim da função.
+                        raise RuntimeError(
+                            f"invariante: delete de investment_lots id={lot_id} "
+                            f"casou {cur.rowcount} linhas"
+                        )
+                    if cur.rowcount == 0:
+                        # RECUSA, não "segue sem marcar": seguir faz o agregado
+                        # ser recalculado dos lotes E o `delta_invest` subtrair
+                        # por cima. Medido: com o lote já removido por fora, o
+                        # investimento ia a -300.00 e o TOTAL de 1000 pra 700 —
+                        # dinheiro destruído num caso que a `main` acerta.
+                        # Recusando, NENHUM update roda: nada é criado, creditado
+                        # ou somado, que é o requisito inteiro.
+                        raise LaunchUnsafeRollback(
+                            "'investment_lot_create.lot_id' não aponta pra lote "
+                            "deste usuário: a reversão não desfaz o aporte.",
+                            "efeito_incompleto",
+                        )
                     investment_lots_handled = True
                 if investment_id:
                     cur.execute(

@@ -709,7 +709,8 @@ def _evento_accounts(coletor: list[dict], trecho: str) -> dict:
 
 
 def test_kept_unsafe_grava_o_user_id_na_coluna(coletor):
-    """`db/accounts.py:1580` — o `logger.warning` do `kept_unsafe`, que é o
+    """o `logger.warning` do `kept_unsafe` em
+    `delete_all_launches_and_rollback`, que é o
     caminho COMUM da recusa. Dirigido de verdade: um `efeitos` com chave fora
     de `_EFEITOS_REVERSIVEIS` faz `delete_launch_and_rollback` levantar
     `LaunchUnsafeRollback`, o lançamento é MANTIDO e o aviso é logado."""
@@ -733,7 +734,7 @@ def test_kept_unsafe_grava_o_user_id_na_coluna(coletor):
 
 
 def test_errors_grava_o_user_id_na_coluna(monkeypatch, coletor):
-    """`db/accounts.py:1592` — o `logger.error` do `errors`, quando a exclusão
+    """o `logger.error` do `errors` em `delete_all_launches_and_rollback`, quando a exclusão
     de UM lançamento estoura por falha inesperada."""
     import db.accounts as accounts
 
@@ -753,7 +754,7 @@ def test_errors_grava_o_user_id_na_coluna(monkeypatch, coletor):
 
 
 def test_recontagem_falha_grava_o_user_id_na_coluna(monkeypatch, coletor):
-    """`db/accounts.py:1601` — o `logger.error` da recontagem."""
+    """O `logger.error` da recontagem, em `delete_all_launches_and_rollback`."""
     import db.accounts as accounts
 
     uid = _uid()
