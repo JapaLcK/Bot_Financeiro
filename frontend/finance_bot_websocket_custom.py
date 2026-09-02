@@ -47,6 +47,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from token_utils import decode_dashboard_token_full, make_dashboard_token
+from utils_date import now_tz
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
     ensure_admin_tables,
@@ -401,12 +402,12 @@ async def get_financial_data(
     are scoped to that month. Balance, pockets and investments
     always reflect the current state.
     """
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     y   = year  or now.year
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
     from core.services.plan_service import history_earliest_date
-    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id, now)
     query_start = max(month_start, earliest_history_date) if earliest_history_date else month_start
     is_current = (y == now.year and m == now.month)
     page = max(int(page or 1), 1)
@@ -1465,7 +1466,7 @@ class ConnectionManager:
         if info:
             return info["year"], info["month"]
 
-        now = datetime.now(timezone.utc)
+        now = now_tz()
         return now.year, now.month
 
     async def send_to(self, ws: WebSocket, payload: str):
@@ -5769,7 +5770,7 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
     """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     y = year  or now.year
     m = month or now.month
 
@@ -6808,7 +6809,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
             await ws.close(code=1008)
             return
 
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     if not await manager.connect(ws, user_id, now.year, now.month):
         return
     print(f"Connected: user={user_id} total={len(manager.active.get(user_id, {}))}")
@@ -6834,7 +6835,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 elif t == "get_month":
                     # Data for a specific month (month selector navigation)
-                    now = datetime.now(timezone.utc)
+                    now = now_tz()
                     y   = int(payload.get("year", now.year))
                     m   = int(payload.get("month", now.month))
                     page  = int(payload.get("page", 1))
