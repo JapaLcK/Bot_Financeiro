@@ -10808,9 +10808,10 @@ function _showAccessError(title, msg) {
         if (me && me.agents_ui_enabled === false) {
           document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
         }
-        // Gate de escolha de plano: cadastro novo passa pela /precos antes de
-        // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
-        // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
+        // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
+        // plano pago antes de acessar o app (o Grátis não é mais uma escolha
+        // oferecida na /precos). Só na web — no app iOS o gate fica de fora pra
+        // não forçar a tela de planos/compra (diretriz 3.1.1).
         // Paywall/escolha de plano: mesmo veredito da revalidação por WS
         // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
         if (!applyAccessVerdict(me)) return false;

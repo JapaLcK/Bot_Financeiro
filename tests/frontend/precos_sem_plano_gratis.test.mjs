@@ -14,6 +14,9 @@
  *     gate} × {com ?escolha=1, sem marcador}: quem decide é o
  *     needs_plan_selection do /auth/me, não a URL (o marcador se perde num
  *     clique no "Planos" do próprio nav);
+ *   · app iOS — mais 2 células com a UA PigBankApp: lá o gate não existe
+ *     (routes/shared.py isenta o app), então o mandato "Escolha um plano pra
+ *     continuar" seria falso pra quem não está travado;
  *   · controle POSITIVO — "Assinar Plus" ainda dispara EXATAMENTE 1
  *     POST /billing/create-checkout. Sem ele o grupo passaria numa página com
  *     todos os botões quebrados, que é pior que o bug.
@@ -25,6 +28,11 @@ import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
+// UA do WebView do app (auth-refresh.js:274 casa a SUBSTRING PigBankApp) — é o
+// mecanismo real que liga window.PB_IN_APP, e não injeção da variável.
+const APP_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+  + "AppleWebKit/605.1.15 Safari/604.1 PigBankApp/1.0";
+
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
                      browser = await chromium.launch(); });
@@ -35,8 +43,9 @@ after(async () => { await browser?.close(); server?.kill(); });
  * (`null` = 401, o visitante deslogado). Devolve a página e os contadores de
  * requisição por rota — a contagem é por INTERCEPTAÇÃO, não por efeito visível.
  */
-async function abrirPrecos({ me = null, query = "" } = {}) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+async function abrirPrecos({ me = null, query = "", app = false } = {}) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 },
+                                       ...(app ? { userAgent: APP_UA } : {}) });
   const chamadas = { selectFree: 0, checkout: 0 };
   const corposCheckout = [];
 
@@ -158,6 +167,29 @@ for (const [estado, me] of [
       await page.close();
     });
   }
+}
+
+// ── app iOS: o gate não se aplica, então a copy de mandato seria falsa ───────
+// routes/shared.py isenta o _is_pigbank_app do gate, e a /precos é alcançável de
+// dentro do app pelo "Ver planos" .pb-keep-in-app do paywall (dashboard.html:858)
+// — dizer "Escolha um plano pra continuar" a quem não está travado é errado.
+// 2 células, não 6: as 4 de {deslogado, logado sem gate} × marcador saem da
+// função pelo mesmo `!me.needs_plan_selection`, com e sem app — a guarda não
+// alcança nenhuma delas. A coluna do marcador fica porque é o mesmo invariante
+// das células web: a URL não decide nada.
+for (const query of ["?escolha=1", ""]) {
+  const rotulo = query ? "com marcador" : "sem marcador";
+  test(`copy do subtítulo: app iOS, logado com gate, ${rotulo}`, async () => {
+    const { page } = await abrirPrecos({
+      me: { user_id: 42, needs_plan_selection: true }, query, app: true,
+    });
+    assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true,
+      "a UA do app não ligou window.PB_IN_APP — a célula não mediria o app");
+    const sub = await page.textContent("#precos-sub");
+    assert.match(sub, COPY_PADRAO,
+      `app iOS ${rotulo} devia ler a copy padrão e leu: "${sub}"`);
+    await page.close();
+  });
 }
 
 // ── controle POSITIVO: o caminho legítimo continua funcionando ───────────────

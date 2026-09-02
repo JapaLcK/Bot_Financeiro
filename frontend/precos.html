@@ -851,7 +851,10 @@ async function cancelChange(btn) {
     if (!r.ok) return;            // deslogado (401): a copy padrão está certa
     me = await r.json();
   } catch { return; }             // rede caiu: copy padrão, sem travar a página
-  if (!me || !me.needs_plan_selection) return;  // já escolheu: copy padrão
+  // No app iOS o gate nem se aplica (_is_pigbank_app isenta, routes/shared.py),
+  // e a /precos é alcançável de lá pelo "Ver planos" .pb-keep-in-app do paywall:
+  // o mandato seria falso pra quem não está travado. Mesma guarda dos irmãos.
+  if (!me || !me.needs_plan_selection || window.PB_IN_APP) return;  // copy padrão
   const sub = document.getElementById("precos-sub");
   if (sub) sub.textContent =
     "Escolha um plano pra continuar: 15 dias grátis pra testar, cancele antes do fim e não paga nada.";
