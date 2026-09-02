@@ -273,9 +273,9 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
     a classe que ela nasceu pra pegar.
     """
     try:
-        from core.services.ai_guard import check
+        from core.services.ai_guard import check, tool_results
 
-        evidencia = [m.get("content") or "" for m in messages if m.get("role") == "tool"]
+        evidencia = tool_results(messages)
         nao_sustentadas = [
             c for c in check(reply, evidencia, user_text=CURRENT_USER_MESSAGE.get())
             if not c.supported

@@ -91,6 +91,17 @@ def _evidence_cents(raw: str) -> set[int]:
     return out
 
 
+def tool_results(messages: list[dict]) -> list[str]:
+    """Os resultados de tool de uma lista de mensagens — a evidência.
+
+    Mora aqui pra ter UMA definição: o runner e o harness de QA precisam
+    concordar sobre o que conta como evidência, e quando divergiram foi
+    defeito (o wiring de produção lia o histórico inteiro enquanto o harness
+    fatiava por turno). Quem chama é responsável por passar só as mensagens
+    do turno."""
+    return [m.get("content") or "" for m in (messages or []) if m.get("role") == "tool"]
+
+
 def money_cents(text: str) -> set[int]:
     """Todo valor em R$ afirmado num texto, em centavos (módulo).
 
@@ -208,6 +219,13 @@ if __name__ == "__main__":
     # saldo negativo é afirmação também
     assert check("🏦 Saldo: R$ -50,00", TOOLS)[0].supported, "negativo tem que ser checado"
     assert not check("🏦 Saldo: R$ -77,00", TOOLS)[0].supported
+
+    # tool_results: só as mensagens de tool, na ordem
+    assert tool_results([{"role": "system", "content": "s"},
+                         {"role": "tool", "content": "a"},
+                         {"role": "user", "content": "u"},
+                         {"role": "tool", "content": "b"}]) == ["a", "b"]
+    assert tool_results([]) == [] and tool_results(None) == []
 
     # money_cents: mesma leitura, servindo à comparação entre duas respostas
     assert money_cents("Saldo: R$ 1.826,55 · Receita R$ 2.000,00") == {182655, 200000}

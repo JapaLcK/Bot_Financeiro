@@ -133,33 +133,26 @@ import db  # noqa: E402
 from core.services import ai_guard  # noqa: E402
 import core.services.ai_chat.runner as _runner  # noqa: E402
 
-TOOL_RESULTS: list[str] = []
-_orig_dispatch = _runner._dispatch_tool
+# Espiona a PRÓPRIA função de produção em vez de redefinir aqui o que é
+# "resposta escrita pelo modelo". A versão anterior contava entrada no
+# `_run_tool_loop`, e o loop também retorna pelo `terminal_msg` — template
+# determinístico de write auto-executado, que o modelo não escreveu. Aquilo
+# inflava a contagem de afirmações de IA com confirmação gerada por código.
+#
+# `_log_unsupported_claims` é chamada exatamente no ramo em que o modelo
+# escreveu o texto, e recebe as mensagens JÁ fatiadas por turno. Espionando
+# ela, harness e produção não têm como divergir — que é o defeito que o Codex
+# pegou na rodada anterior, quando eu tinha duas definições.
+GUARD_CALLS: list[tuple[str, list[dict]]] = []
+_orig_guard = _runner._log_unsupported_claims
 
 
-def _dispatch_tool_spy(user_id, name, args):
-    out = _orig_dispatch(user_id, name, args)
-    TOOL_RESULTS.append(out[0] or "")
-    return out
+def _guard_spy(user_id, reply, messages):
+    GUARD_CALLS.append((reply, list(messages)))
+    return _orig_guard(user_id, reply, messages)
 
 
-_runner._dispatch_tool = _dispatch_tool_spy
-
-# "gastou chamada" NÃO é o mesmo que "o modelo escreveu a resposta": o Tier 3
-# do classificador gasta uma chamada e o texto sai de handler determinístico.
-# Medido: com o gatilho errado, 14 das 17 afirmações "não sustentadas" eram
-# extrato escrito por código, não pelo modelo. Quem responde de verdade é o
-# `_run_tool_loop` — se ele não rodou no turno, não há afirmação de IA.
-CHAT_RUNS = [0]
-_orig_loop = _runner._run_tool_loop
-
-
-def _run_tool_loop_spy(*a, **kw):
-    CHAT_RUNS[0] += 1
-    return _orig_loop(*a, **kw)
-
-
-_runner._run_tool_loop = _run_tool_loop_spy
+_runner._log_unsupported_claims = _guard_spy
 
 
 def msg(uid, text, platform="whatsapp"):
@@ -216,8 +209,7 @@ class Scenario:
 
     def turn(self, uid, text, platform="whatsapp"):
         mark = meter.snapshot()
-        tmark = len(TOOL_RESULTS)
-        cmark = CHAT_RUNS[0]
+        gmark = len(GUARD_CALLS)
         try:
             resp = send(uid, text, platform=platform)
         except Exception as e:
@@ -231,10 +223,12 @@ class Scenario:
         # A guarda só faz sentido em resposta de MODELO. No caminho
         # determinístico não há tool nenhuma pra servir de evidência, e todo
         # ID viraria falso positivo — o código que imprime `#1` é o mesmo que
-        # gravou a linha.
-        escrita_pela_ia = CHAT_RUNS[0] > cmark
-        claims = (ai_guard.check(resp, TOOL_RESULTS[tmark:], user_text=text)
-                  if escrita_pela_ia else [])
+        # gravou a linha. Quem diz se o modelo escreveu é a produção, não eu.
+        claims = []
+        for resposta_do_modelo, msgs_do_turno in GUARD_CALLS[gmark:]:
+            claims += ai_guard.check(resposta_do_modelo,
+                                      ai_guard.tool_results(msgs_do_turno),
+                                      user_text=text)
         self.turns.append((text, resp, chamadas, claims))
         return resp
 
@@ -1091,8 +1085,17 @@ def roda_pares():
 
         sem_invencao = not inventados
         trouxe_dado = bool(v_ia) or not v_cmd
+        faltando = v_cmd - v_ia
         sc.check(sem_invencao, "todo valor da forma solta aparece na resposta da forma curta")
         sc.check(trouxe_dado, "a forma solta trouxe o dado numérico que a curta traz")
+        # Terceiro item, e NÃO entra no veredito: exigir todos os valores
+        # reprovaria resposta legítima. "limite nubank" devolve total, usado e
+        # disponível; "quanto posso gastar" responder só o disponível é uma
+        # resposta boa, não um defeito. Mas `trouxe_dado` sozinho passa com UM
+        # valor de três, então a omissão precisa aparecer em algum lugar —
+        # aqui, como `[?]` no checklist, pra quem lê o relatório julgar.
+        sc.check(None if faltando else True,
+                 "a forma solta trouxe TODOS os valores da curta (informativo)")
 
         claims_ia = sc.turns[-1][3]
         guarda_ok = all(c.supported for c in claims_ia)
@@ -1101,6 +1104,9 @@ def roda_pares():
         if inventados:
             sc.note("valores que só a forma solta afirma: "
                      + ", ".join(f"R$ {v/100:.2f}" for v in sorted(inventados)))
+        if faltando:
+            sc.note("valores que a forma curta traz e a solta não: "
+                     + ", ".join(f"R$ {v/100:.2f}" for v in sorted(faltando)))
         if v_cmd and not v_ia:
             sc.note(f"a forma curta trouxe {len(v_cmd)} valor(es) e a solta não trouxe nenhum")
         sc.set_veredict("✅" if (sem_invencao and trouxe_dado and guarda_ok) else "❌")

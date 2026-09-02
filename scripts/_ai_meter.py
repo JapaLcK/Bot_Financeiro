@@ -44,9 +44,25 @@ _PRICES_USD_PER_MTOK = {
     "gpt-4o": (2.50, 1.25, 10.00),
 }
 
-# Ledger fica no checkout REAL, não no worktree: acumula entre worktrees
-# (que é o que "acumulado do mês" quer dizer) e nunca entra no git.
-DEFAULT_LEDGER = "/Users/lucaskuramoti/Desktop/bot/bot_wa/.qa_ai_cost.jsonl"
+# Ledger fora do worktree: acumula entre worktrees, que é o que "acumulado do
+# mês" quer dizer, e nunca entra no git.
+_LEDGER_PREFERIDO = "/Users/lucaskuramoti/Desktop/bot/bot_wa/.qa_ai_cost.jsonl"
+
+
+def _default_ledger() -> str:
+    """O caminho preferido é a raiz do checkout real — mas só se ela existir.
+    Cravado, ele quebrava a rodada em qualquer outra máquina, e desde que o
+    append passou a rodar ANTES do relatório isso custaria a rodada inteira,
+    já paga."""
+    do_ambiente = os.getenv("PIGBANK_QA_LEDGER")
+    if do_ambiente:
+        return do_ambiente
+    if os.path.isdir(os.path.dirname(_LEDGER_PREFERIDO)):
+        return _LEDGER_PREFERIDO
+    return os.path.join(os.path.expanduser("~"), ".pigbank_qa_ai_cost.jsonl")
+
+
+DEFAULT_LEDGER = _default_ledger()
 
 CALLS: list[dict] = []
 _installed = False
@@ -62,6 +78,7 @@ def _record(requested: str | None, served: str | None, usage) -> None:
         "in": int(getattr(usage, "prompt_tokens", 0) or 0),
         "cached": cached,
         "out": int(getattr(usage, "completion_tokens", 0) or 0),
+        "erro": None,
     })
 
 
@@ -80,7 +97,18 @@ def install() -> None:
 
     @functools.wraps(original)
     def create(self, *args, **kwargs):
-        resp = original(self, *args, **kwargs)
+        try:
+            resp = original(self, *args, **kwargs)
+        except Exception as e:
+            # A tentativa que FALHOU também é uma chamada. Sem esta linha, um
+            # modelo inválido, credencial vencida ou API fora do ar deixava o
+            # turno com zero chamadas — e o relatório o rotulava
+            # "comando (0 chamadas)", escondendo exatamente a falha de IA que o
+            # harness existe pra diagnosticar. ZERO tem que significar "não
+            # chegou na OpenAI", nunca "chegou e quebrou".
+            CALLS.append({"requested": kwargs.get("model") or "?", "served": "(falhou)",
+                          "in": 0, "cached": 0, "out": 0, "erro": e.__class__.__name__})
+            raise
         _record(kwargs.get("model"), getattr(resp, "model", None), getattr(resp, "usage", None))
         return resp
 
@@ -102,8 +130,12 @@ def path_label(calls: list[dict]) -> str:
     """Como o turno foi resolvido. É a coluna comando × IA do relatório."""
     if not calls:
         return "comando (0 chamadas)"
+    falhas = [c for c in calls if c.get("erro")]
     models = sorted({c["served"] for c in calls})
-    return f"IA ({len(calls)} chamada{'s' if len(calls) > 1 else ''}: {', '.join(models)})"
+    rotulo = f"IA ({len(calls)} chamada{'s' if len(calls) > 1 else ''}: {', '.join(models)})"
+    if falhas:
+        rotulo += f" — {len(falhas)} FALHOU: {', '.join(sorted({c['erro'] for c in falhas}))}"
+    return rotulo
 
 
 def cost_usd(calls: list[dict]) -> tuple[float, list[str]]:
@@ -138,10 +170,17 @@ def check_models(models: list[str]) -> list[str]:
     return [f"modelo {m!r} NÃO existe para esta chave" for m in models if m not in available]
 
 
-def append_ledger(usd: float, label: str, ledger: str = DEFAULT_LEDGER) -> None:
-    with open(ledger, "a") as f:
-        f.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"),
-                            "usd": round(usd, 6), "label": label}) + "\n")
+def append_ledger(usd: float, label: str, ledger: str = DEFAULT_LEDGER) -> bool:
+    """True se gravou. NUNCA levanta: contabilidade de custo não pode derrubar
+    uma rodada de QA que já foi paga em dólar e em minutos."""
+    try:
+        with open(ledger, "a") as f:
+            f.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"),
+                                "usd": round(usd, 6), "label": label}) + "\n")
+        return True
+    except OSError as e:
+        print(f"[_ai_meter] AVISO: não deu pra gravar o ledger {ledger}: {e}")
+        return False
 
 
 def month_total_usd(ledger: str = DEFAULT_LEDGER, month: str | None = None) -> float:
@@ -210,10 +249,23 @@ if __name__ == "__main__":
     _record("gpt-4o", "gpt-4o", None)
     assert since(mark)[-1]["in"] == 0 and since(mark)[-1]["cached"] == 0
 
+    # Chamada que FALHOU continua sendo chamada — se virar zero, o relatório
+    # rotula o turno como "comando" e esconde a falha de IA.
+    mark_f = snapshot()
+    CALLS.append({"requested": "gpt-4o-mini", "served": "(falhou)",
+                  "in": 0, "cached": 0, "out": 0, "erro": "APITimeoutError"})
+    rot = path_label(since(mark_f))
+    assert not rot.startswith("comando"), rot
+    assert "FALHOU" in rot and "APITimeoutError" in rot, rot
+
+    # Ledger num caminho impossível AVISA e devolve False — nunca levanta, pra
+    # não derrubar uma rodada de QA já paga.
+    assert append_ledger(1.0, "x", "/nao/existe/mesmo/ledger.jsonl") is False
+
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as tf:
         led = tf.name
     assert month_total_usd(led + ".naoexiste") == 0.0, "ledger ausente = 0, não estoura"
-    append_ledger(1.25, "t1", led)
+    assert append_ledger(1.25, "t1", led) is True
     append_ledger(0.75, "t2", led)
     assert abs(month_total_usd(led) - 2.0) < 1e-9, month_total_usd(led)
     assert month_total_usd(led, month="1999-01") == 0.0, "mês diferente não soma"
