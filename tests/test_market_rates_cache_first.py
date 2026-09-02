@@ -52,7 +52,7 @@ def test_get_latest_cache_fresco_zero_http_e_mesmo_valor():
                 # a contagem de HTTP volta a 3. O memo de confirmação (setado
                 # pelos fetches frios acima) é limpo — senão ele seguraria a rede.
                 calls.clear()
-                investments_db._sgs_confirmed_until.clear()
+                investments_db._sgs_answered.clear()
                 investments_db.get_latest_market_rate(cur, "CDI_AA", 4389, fresh_days=-1)
                 investments_db.get_latest_market_rate(cur, "SELIC_AA", 432, fresh_days=-1)
                 investments_db.get_latest_market_rate(cur, "IPCA_12M", 13522, fresh_days=-1)
@@ -126,7 +126,7 @@ def test_mapa_diario_janela_cacheada_zero_http_e_busca_so_o_faltante():
                 # célula sexta→segunda deixa de ir à rede. Memo limpo (o fetch
                 # do Positivo 2 confirmou hoje, e confirmação segura a rede).
                 calls.clear()
-                investments_db._sgs_confirmed_until.clear()
+                investments_db._sgs_answered.clear()
                 original_fresh = investments_db._sgs_tail_is_fresh
                 investments_db._sgs_tail_is_fresh = lambda newest, end: True
                 try:
@@ -270,7 +270,7 @@ def test_segunda_publicada_invalida_cache_que_termina_na_sexta():
                 # Negativo: condição ANTIGA reinjetada ((end-newest).days<=4 ⇒
                 # 'fresco') ⇒ a mesma terça serve o cache sem a segunda.
                 calls.clear()
-                investments_db._sgs_confirmed_until.clear()
+                investments_db._sgs_answered.clear()
                 cur.execute("delete from market_rates where code='CDI' and ref_date > %s", (sexta,))
                 original_fresh = investments_db._sgs_tail_is_fresh
                 investments_db._sgs_tail_is_fresh = lambda newest, end: (end - newest).days <= 4
@@ -319,7 +319,7 @@ def test_confirmacao_curta_pre_publicacao_pega_o_ponto_da_noite():
                 out = investments_db._get_cdi_daily_map(cur, *win)
                 assert len(calls) == 1 and date(2026, 4, 20) not in out
                 now = datetime.now(timezone.utc)
-                until = investments_db._sgs_confirmed_until["CDI"]
+                until = investments_db._sgs_answered["CDI"][0]
                 assert until - now <= investments_db.SGS_CONFIRM_SHORT, (
                     f"vazio pré-publicação confirmou até {until} — era pra ser curto"
                 )
@@ -328,7 +328,7 @@ def test_confirmacao_curta_pre_publicacao_pega_o_ponto_da_noite():
                 assert len(calls) == 1
 
                 # "2h depois": confirmação venceu; o BCB publicou o ponto
-                investments_db._sgs_confirmed_until["CDI"] = now
+                investments_db._sgs_answered["CDI"] = (now,) + investments_db._sgs_answered["CDI"][1:]
                 payload["itens"] = [{"data": "20/04/2026", "valor": "0.06"}]
                 out = investments_db._get_cdi_daily_map(cur, *win)
                 assert len(calls) == 2 and out[date(2026, 4, 20)] == 0.06, (
@@ -338,7 +338,7 @@ def test_confirmacao_curta_pre_publicacao_pega_o_ponto_da_noite():
                 meia_noite = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
                     hour=0, minute=0, second=0, microsecond=0
                 )
-                assert investments_db._sgs_confirmed_until["CDI"] == meia_noite
+                assert investments_db._sgs_answered["CDI"][0] == meia_noite
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original
@@ -362,12 +362,12 @@ def test_get_latest_confirma_curto_na_diaria_e_dia_cheio_na_mensal():
                 meia_noite = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
                 investments_db.get_latest_cdi_aa(cur)  # diária, ponto de 01/07 = velho
-                assert investments_db._sgs_confirmed_until["CDI_AA"] - now <= (
+                assert investments_db._sgs_answered["CDI_AA"][0] - now <= (
                     investments_db.SGS_CONFIRM_SHORT + timedelta(seconds=5)
                 )
 
                 investments_db.get_latest_ipca_12m(cur)  # mensal
-                assert investments_db._sgs_confirmed_until["IPCA_12M"] == meia_noite
+                assert investments_db._sgs_answered["IPCA_12M"][0] == meia_noite
             conn.rollback()
     finally:
         investments_db._fetch_sgs_latest_json = original
@@ -475,7 +475,7 @@ def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
         with db.get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("delete from market_rates where code='CDI' and ref_date >= %s", (date(2026, 4, 1),))
-                investments_db._sgs_confirmed_until.pop("CDI", None)
+                investments_db._sgs_answered.pop("CDI", None)
                 win = (date(2026, 4, 18), date(2026, 4, 20))  # sáb..seg, cache vazio
 
                 # 1ª chamada: sem memo ⇒ busca (e a resposta vazia confirma).
@@ -489,13 +489,13 @@ def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
 
                 # Negativo: sem o memo de janela vazia ⇒ 2 fetches.
                 calls.clear()
-                original_covers = investments_db._sgs_empty_window_covers
-                investments_db._sgs_empty_window_covers = lambda code, s, e: False
+                original_covers = investments_db._sgs_answered_covers
+                investments_db._sgs_answered_covers = lambda code, s, e: False
                 try:
                     investments_db._get_cdi_daily_map(cur, *win)
                     investments_db._get_cdi_daily_map(cur, *win)
                 finally:
-                    investments_db._sgs_empty_window_covers = original_covers
+                    investments_db._sgs_answered_covers = original_covers
                 assert len(calls) == 2, "sem consultar o memo tinham de ser 2 fetches"
 
                 # Célula 1 intacta: com dado cacheado FURADO o memo não segura.
@@ -506,6 +506,76 @@ def test_cache_vazio_com_memo_vigente_nao_vai_a_rede():
                     )
                 investments_db._get_cdi_daily_map(cur, date(2026, 4, 13), date(2026, 4, 16))
                 assert len(calls) == 1, "cobertura furada tem de ir à rede mesmo com memo vigente"
+            conn.rollback()
+    finally:
+        investments_db._fetch_sgs_series_json = original
+
+
+def test_memo_de_cauda_nao_cala_janela_historica_com_cache_parcial():
+    """Bloco B do Tester (a CLASSE do Codex-6, não só a instância): uma janela
+    estreita vazia gravava um memo de CAUDA global; uma janela histórica com
+    cache parcial (quinta presente, SEXTA publicada ausente) tinha cobertura
+    ok até quinta, cauda não fresca e memo vigente ⇒ devolvia o cache sem ir à
+    rede, deixando a sexta de fora (defere ~R$ 10,01/10k, não perde).
+    Com o memo escopado ao intervalo respondido, a cauda (qui, seg] não está
+    contida em [sáb, seg] ⇒ vai à rede."""
+    calls: list[tuple] = []
+    vazio = {"on": True}
+
+    def stub(series_code, start, end):
+        calls.append((start, end))
+        if vazio["on"]:
+            return []
+        out, d = [], start
+        while d <= end:
+            if investments_db.is_br_business_day(d):
+                out.append({"data": d.strftime("%d/%m/%Y"), "valor": "0.05"})
+            d += timedelta(days=1)
+        return out
+
+    QUI, SEX, SAB, SEG = (date(2026, 8, 27), date(2026, 8, 28),
+                          date(2026, 8, 29), date(2026, 8, 31))
+    original = investments_db._fetch_sgs_series_json
+    investments_db._fetch_sgs_series_json = stub
+    try:
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from market_rates where code='CDI'")
+                investments_db._sgs_answered.pop("CDI", None)
+                cur.execute(
+                    "insert into market_rates(code, ref_date, value) values ('CDI', %s, 0.05)", (QUI,)
+                )  # sexta AUSENTE de propósito (publicada, mas não cacheada)
+
+                # 1) janela estreita [sáb, seg] volta vazia e grava o memo
+                assert investments_db._get_cdi_daily_map(cur, SAB, SEG) == {}
+                assert len(calls) == 1
+
+                # 2) POSITIVO: janela histórica [qui, seg] tem de ir à rede e
+                # trazer a sexta (antes: 0 fetch e sexta fora do mapa).
+                vazio["on"] = False
+                calls.clear()
+                out = investments_db._get_cdi_daily_map(cur, QUI, SEG)
+                assert calls, "memo de cauda calou a janela histórica"
+                assert SEX in out, f"sexta publicada ficou fora do mapa: {sorted(out)}"
+
+                # 3) NEGATIVO: memo global de novo (ignora o intervalo) ⇒ a
+                # sexta some e nenhum fetch acontece.
+                cur.execute("delete from market_rates where code='CDI' and ref_date > %s", (QUI,))
+                vazio["on"] = True
+                investments_db._sgs_answered.pop("CDI", None)
+                investments_db._get_cdi_daily_map(cur, SAB, SEG)  # re-arma o memo
+                vazio["on"] = False
+                calls.clear()
+                original_covers = investments_db._sgs_answered_covers
+                investments_db._sgs_answered_covers = (
+                    lambda code, s, e: code in investments_db._sgs_answered)  # global
+                try:
+                    out = investments_db._get_cdi_daily_map(cur, QUI, SEG)
+                finally:
+                    investments_db._sgs_answered_covers = original_covers
+                assert calls == [] and SEX not in out, (
+                    "com memo global o bug tinha de reaparecer — o teste não discrimina"
+                )
             conn.rollback()
     finally:
         investments_db._fetch_sgs_series_json = original
@@ -536,7 +606,7 @@ def test_janela_estreita_vazia_nao_cala_janela_historica():
         with db.get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("delete from market_rates where code='CDI'")
-                investments_db._sgs_empty_window.pop("CDI", None)
+                investments_db._sgs_answered.pop("CDI", None)
 
                 # 1) janela estreita (sáb..dom) volta vazia e confirma SÓ ela
                 assert investments_db._get_cdi_daily_map(cur, date(2026, 4, 18), date(2026, 4, 19)) == {}
@@ -553,7 +623,7 @@ def test_janela_estreita_vazia_nao_cala_janela_historica():
                 # estreita (⊆ intervalo confirmado) segue sem rede.
                 vazio["on"] = True
                 cur.execute("delete from market_rates where code='CDI'")
-                investments_db._sgs_empty_window.pop("CDI", None)
+                investments_db._sgs_answered.pop("CDI", None)
                 calls.clear()
                 win = (date(2026, 4, 18), date(2026, 4, 20))
                 investments_db._get_cdi_daily_map(cur, *win)
@@ -599,7 +669,7 @@ def test_memo_de_confirmacao_segura_a_rede_no_mesmo_dia():
                 investments_db._fetch_sgs_latest_json = _stub_latest(
                     calls_latest, [{"data": "01/07/2026", "valor": "4,85"}]
                 )
-                investments_db._sgs_confirmed_until.clear()
+                investments_db._sgs_answered.clear()
                 try:
                     cur.execute("delete from market_rates where code='IPCA_12M'")
                     cur.execute(

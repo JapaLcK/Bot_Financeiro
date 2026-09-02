@@ -373,8 +373,7 @@ def _auto_cleanup_orphan_users():
     # Mesmo motivo para o memo "rede confirmou hoje" das séries do BCB: um
     # teste que stuba a rede não pode herdar a confirmação do teste anterior.
     import db.investments
-    db.investments._sgs_confirmed_until.clear()
-    db.investments._sgs_empty_window.clear()
+    db.investments._sgs_answered.clear()
     before = _all_user_ids()
     yield
     after = _all_user_ids()

@@ -35,70 +35,68 @@ SGS_TIMEOUT_SECONDS = 3
 # ── Máquina de estados do cache de séries SGS (mapas diários) ────────────────
 # cobertura = todo dia útil BR de [start, max(cache)] no cache (_sgs_cache_covers)
 # cauda     = nenhum dia útil publicável em (max(cache), end] (_sgs_tail_is_fresh)
+# memo      = a rede respondeu, e a resposta ainda vale, sobre um intervalo que
+#             CONTÉM o que eu preciso perguntar (_sgs_answered_covers)
 #
-#  célula                                  → ação            → confirmação
-#  1 cobertura FURADA (cabeça/meio)        → fetch a janela INTEIRA, sempre —
-#    dinheiro nunca depende do memo        →   confirma como a célula 4
-#  2 cobertura ok + cauda completa         → 0 fetch (memo irrelevante;
-#    inclui end==newest e ref futura: cauda vazia é completa)
-#  3 cobertura ok + cauda incompleta + memo VIGENTE → 0 fetch
-#  4 cobertura ok + cauda incompleta + memo vencido → fetch [newest+1, end]:
-#    a dados que COMPLETAM a cauda → upsert; confirma até o fim do dia UTC
-#    b dados PARCIAIS ou vazia (pré-publicação do dia) → upsert o que veio;
-#      confirma CURTO (SGS_CONFIRM_SHORT) — re-checa e pega o ponto publicado
-#      à noite ainda no mesmo dia
-#    c falha de rede/timeout (None) ou 200+lixo (None) → NÃO confirma;
-#      re-tenta na chamada seguinte
-#  5 cache VAZIO na janela (nada cacheado): a rede já disse que UM INTERVALO
-#    CONTENDO [start, end] está vazio (_sgs_empty_window, ≤2h) → 0 fetch,
-#    devolve {}; senão → fetch da janela e confirma como a célula 4.
+#  célula                                          → ação (o que o código faz)
+#  1 cobertura FURADA (cabeça/meio)                → fetch da janela INTEIRA,
+#    sempre; memo NUNCA consultado — dinheiro não depende dele
+#  2 cobertura ok + cauda completa                 → 0 fetch (inclui end==newest
+#    e ref futura: cauda vazia é completa). Nada é adiado: não há dia publicável.
+#  3 cobertura ok + cauda incompleta + memo cobrindo (newest, end] → 0 fetch.
+#    RESSALVA: se o BCB publicar dentro da validade do memo, esse dia entra na
+#    próxima chamada após o vencimento — defere ≤2h (parcial/vazia) ou até a
+#    meia-noite UTC (resposta completa), NUNCA perde: o accrual só avança
+#    last_date até o último dia que ele viu.
+#  4 cobertura ok + cauda incompleta + memo não cobre → fetch [newest+1, end]:
+#    a dados que COMPLETAM a cauda → upsert; memo vale até a meia-noite UTC
+#    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
+#      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
+#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já
+#  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
+#    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
 #    Instância real: manhã de segunda com lote acruado na sexta (janela
 #    [sáb, seg] vazia até o BCB publicar) — sem a célula era 1 fetch por
-#    abertura (~210 ms cada), o dia inteiro. O escopo por INTERVALO é o que
-#    impede uma janela estreita vazia de calar uma janela histórica sem
-#    cache (que ficaria sem render até a confirmação vencer).
-#  get_latest_*: mesmas células com "cauda" = (ref_date, hoje] nas diárias;
-#  na mensal (IPCA_12M) frescor é por idade (≤45d) e a resposta é completa
-#  por definição (o ponto mais novo É a resposta) → confirmação de dia cheio.
+#    abertura (~318 ms cada), o dia inteiro.
+#  get_latest_*: mesma máquina, perguntando por (ref_date, hoje]; o /ultimos/N
+#  responde sobre [ponto mais novo, hoje] e é isso que fica no memo. Na mensal
+#  (IPCA_12M) o frescor é por idade (≤45d).
 #
-# Sem o memo, série sem ponto novo (IPCA_12M passa 40-70 dias com o mesmo
+# Todo memo é ESCOPADO ao intervalo que a rede respondeu — um memo global
+# ("não há ponto mais novo") parece equivalente e não é: ele cala uma janela
+# histórica que nunca foi consultada. Isso já mordeu duas vezes (Codex-6 na
+# janela vazia, e o mesmo padrão no memo de cauda), então existe UMA estrutura
+# só e ela sempre carrega o intervalo.
+#
+# Sem memo, série sem ponto novo (IPCA_12M passa 40-70 dias com o mesmo
 # ref_date; CDI parado num feriadão) pagaria um fetch idêntico A CADA chamada.
 # ponytail: memo por processo (reseta no restart, não cruza workers). Teto de
-# rede por série/dia/processo, válido para TODAS as células (a 5 inclusive,
-# desde que ela consulte o memo): 1 fetch em dia já publicado; ≤ 24h/2h = 12
-# em dia pré-publicação com tráfego contínuo (típico ≤ 6). Banco, se incomodar.
+# rede por série/dia/processo: 1 fetch em dia já publicado; ≤ 24h/2h = 12 em
+# dia pré-publicação com tráfego contínuo (típico ≤ 6). Banco, se incomodar.
 SGS_CONFIRM_SHORT = timedelta(hours=2)
-_sgs_confirmed_until: dict[str, datetime] = {}
-# Duas perguntas DIFERENTES, dois memos (não unificar):
-#   _sgs_confirmed_until → "existe ponto mais novo que o meu?" — afirmação
-#     sobre a CAUDA da série, válida para qualquer janela (células 3 e
-#     get_latest_*).
-#   _sgs_empty_window    → "a janela [start, end] veio VAZIA" — afirmação
-#     sobre AQUELE intervalo. Confundir as duas foi o bug da célula 5: uma
-#     janela estreita vazia (sáb-dom) confirmava a série e fazia uma janela
-#     histórica sem cache receber {} sem ir à rede.
-_sgs_empty_window: dict[str, tuple[datetime, date, date]] = {}
+# code → (validade, start, end) do último intervalo que a rede respondeu.
+_sgs_answered: dict[str, tuple[datetime, date, date]] = {}
 
 
-def _sgs_empty_window_covers(code: str, start: date, end: date) -> bool:
-    """A rede já disse, há pouco, que um intervalo CONTENDO [start, end] está
-    vazio? Só então o atalho de cache vazio pode pular o fetch."""
-    w = _sgs_empty_window.get(code)
-    return bool(w) and datetime.now(timezone.utc) < w[0] and w[1] <= start and end <= w[2]
-
-
-def _sgs_confirm(code: str, *, complete: bool) -> None:
+def _sgs_remember(code: str, start: date, end: date, *, complete: bool) -> None:
+    """Guarda que a rede respondeu sobre [start, end]. `complete` = a resposta
+    fechou a cauda pedida (vale até a meia-noite UTC); parcial/vazia vale
+    SGS_CONFIRM_SHORT, para pegar a publicação do fim do dia."""
     now = datetime.now(timezone.utc)
     if complete:
         until = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         until = now + SGS_CONFIRM_SHORT
-    _sgs_confirmed_until[code] = until
+    _sgs_answered[code] = (until, start, end)
 
 
-def _sgs_confirmed(code: str) -> bool:
-    until = _sgs_confirmed_until.get(code)
-    return until is not None and datetime.now(timezone.utc) < until
+def _sgs_answered_covers(code: str, start: date, end: date) -> bool:
+    """A rede já respondeu, e a resposta ainda vale, sobre um intervalo que
+    CONTÉM [start, end]? Só então dá para pular o fetch."""
+    a = _sgs_answered.get(code)
+    return bool(a) and datetime.now(timezone.utc) < a[0] and a[1] <= start and end <= a[2]
+
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -146,7 +144,7 @@ def _is_sgs_no_values_payload(payload) -> bool:
 
 def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict] | None:
     """None = payload não-decodificável/inesperado (trata-se como falha: não
-    alimenta o memo _sgs_confirmed_until, re-tenta na próxima chamada);
+    alimenta o memo _sgs_answered, re-tenta na próxima chamada);
     [] = resposta legítima "sem valores no período" (confirma o memo)."""
     try:
         payload = r.json()
@@ -183,7 +181,7 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
     """None = falha (rede/HTTP/timeout OU 200 com payload lixo — nada disso
     confirma o memo, re-tenta na próxima chamada); lista = resposta do BCB
     (vazia inclusive — "sem valores no período" é resposta, e alimenta o memo
-    _sgs_confirmed_until)."""
+    _sgs_answered)."""
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados"
     params = {
         "formato": "json",
@@ -278,19 +276,19 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     if cached:
         newest = max(cached)
         if _sgs_cache_covers(cached, start, newest):
-            if _sgs_tail_is_fresh(newest, end) or _sgs_confirmed("CDI"):
-                return cached  # janela coberta e cauda fresca/confirmada
             fetch_start = newest + timedelta(days=1)  # só a cauda falta
-        # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
-    elif _sgs_empty_window_covers("CDI", start, end):
-        return cached  # célula 5: ESTA janela já veio vazia da rede há pouco
+            if _sgs_tail_is_fresh(newest, end) or \
+                    _sgs_answered_covers("CDI", fetch_start, end):
+                return cached  # cauda completa, ou a rede já respondeu por ela
+        # cobertura furada: fetch_start segue em `start` (janela inteira),
+        # e o memo NÃO é consultado — dinheiro não depende dele.
+    elif _sgs_answered_covers("CDI", start, end):
+        return cached  # célula 5: a rede já respondeu por ESTA janela
 
     data = _fetch_sgs_series_json(12, fetch_start, end)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
-            _sgs_confirm("CDI", complete=False)
-            _sgs_empty_window["CDI"] = (
-                datetime.now(timezone.utc) + SGS_CONFIRM_SHORT, fetch_start, end)
+            _sgs_remember("CDI", fetch_start, end, complete=False)
         return cached
 
     to_upsert = []
@@ -323,7 +321,8 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
         )
 
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
-    _sgs_confirm("CDI", complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
+    _sgs_remember("CDI", fetch_start, end,
+                  complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
     return cached
 
 
@@ -343,21 +342,20 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     if cached:
         newest = max(cached)
         if _sgs_cache_covers(cached, start, newest):
-            if _sgs_tail_is_fresh(newest, end) or _sgs_confirmed(code):
-                return cached  # janela coberta e cauda fresca/confirmada
             fetch_start = newest + timedelta(days=1)  # só a cauda falta
-        # cobertura furada: cai no fetch da janela inteira (fetch_start=start)
-        # (séries mensais nunca "cobrem" dias úteis ⇒ sempre janela inteira,
-        #  que é o comportamento antigo — correto, só não otimizado)
-    elif _sgs_empty_window_covers(code, start, end):
-        return cached  # célula 5: ESTA janela já veio vazia da rede há pouco
+            if _sgs_tail_is_fresh(newest, end) or \
+                    _sgs_answered_covers(code, fetch_start, end):
+                return cached  # cauda completa, ou a rede já respondeu por ela
+        # cobertura furada: fetch_start segue em `start` (janela inteira), e o
+        # memo NÃO é consultado. (Séries mensais nunca "cobrem" dias úteis ⇒
+        # sempre janela inteira — comportamento antigo, correto.)
+    elif _sgs_answered_covers(code, start, end):
+        return cached  # célula 5: a rede já respondeu por ESTA janela
 
     data = _fetch_sgs_series_json(series_code, fetch_start, end)
     if not isinstance(data, list) or not data:
         if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
-            _sgs_confirm(code, complete=False)
-            _sgs_empty_window[code] = (
-                datetime.now(timezone.utc) + SGS_CONFIRM_SHORT, fetch_start, end)
+            _sgs_remember(code, fetch_start, end, complete=False)
         return cached
 
     to_upsert = []
@@ -385,7 +383,8 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
         )
 
     # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
-    _sgs_confirm(code, complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
+    _sgs_remember(code, fetch_start, end,
+                  complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
     return cached
 
 
@@ -459,7 +458,8 @@ def get_latest_market_rate(
             fresh = _sgs_tail_is_fresh(row["ref_date"], date.today())
         else:
             fresh = (date.today() - row["ref_date"]).days <= fresh_days
-        if fresh or _sgs_confirmed(code):
+        # Memo escopado: a pergunta aqui é sobre (ref_date, hoje].
+        if fresh or _sgs_answered_covers(code, row["ref_date"] + timedelta(days=1), date.today()):
             return (row["ref_date"], float(row["value"]))
 
     latest = _parse_sgs_latest(
@@ -467,12 +467,15 @@ def get_latest_market_rate(
     )
 
     if latest:
+        # O /ultimos/N responde sobre [ponto mais novo, hoje] — é esse o
+        # intervalo que vai para o memo, nunca "a série inteira".
         if fresh_days is None:
             # Diária: ponto do último dia útil ⇒ completa (dia cheio); ponto
             # velho (pré-publicação de hoje) ⇒ curta, re-checa ainda hoje.
-            _sgs_confirm(code, complete=_sgs_tail_is_fresh(latest[0], date.today()))
-        else:
-            _sgs_confirm(code, complete=True)  # mensal: o mais novo É a resposta
+            _sgs_remember(code, latest[0], date.today(),
+                          complete=_sgs_tail_is_fresh(latest[0], date.today()))
+        else:  # mensal: o mais novo É a resposta
+            _sgs_remember(code, latest[0], date.today(), complete=True)
         cur.execute(
             "insert into market_rates(code, ref_date, value) values (%s, %s, %s) "
             "on conflict (code, ref_date) do update set value = excluded.value",
