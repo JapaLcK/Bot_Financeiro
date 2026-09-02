@@ -19,17 +19,49 @@ from .connection import get_conn
 from .users import _check_password
 
 
+# Conta criada só via Google não tem password_hash: NENHUMA senha funciona, e
+# devolver "Senha incorreta." mandava o usuário tentar de novo pra sempre. A
+# mensagem aqui é EXPLÍCITA de propósito — ao contrário da vagueza de
+# /auth/login ("E-mail ou senha incorretos.",
+# frontend/finance_bot_websocket_custom.py:2646-2659), que existe contra
+# enumeração de e-mails por chamador ANÔNIMO. Nos endpoints que re-autenticam,
+# o usuário já está logado como ele mesmo: não há e-mail alheio a enumerar.
+PASSWORD_NOT_SET_MSG = (
+    "Sua conta foi criada com o Google e ainda não tem senha. "
+    "Defina uma senha para continuar."
+)
+
+
+class PasswordNotSetError(PermissionError):
+    """Conta sem password_hash (login só via OAuth) — não é senha errada.
+
+    Herda de PermissionError de propósito: as rotas que já capturam
+    PermissionError continuam recusando a operação mesmo sem tratar este caso.
+    Quem quiser o 409 captura ANTES do except PermissionError.
+    """
+
+
 def verify_user_password(user_id: int, password: str) -> bool:
-    """Confirma que `password` corresponde ao hash atual da conta do usuário."""
-    if not password:
-        return False
+    """Confirma que `password` corresponde ao hash atual da conta do usuário.
+
+    Levanta PasswordNotSetError quando a conta não tem senha nenhuma. Senha
+    ERRADA continua devolvendo False (contrato preservado pelos chamadores).
+    """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "select password_hash from auth_accounts where user_id = %s limit 1",
             (user_id,),
         )
         row = cur.fetchone()
-    if not row or not row.get("password_hash"):
+    if not row:
+        return False
+    if not row.get("password_hash"):
+        raise PasswordNotSetError(PASSWORD_NOT_SET_MSG)
+    # DEPOIS do estado da conta, de propósito: o que o cliente mandou não muda o
+    # fato de a conta não ter senha. Enquanto esta linha era a primeira do corpo,
+    # senha vazia numa conta só-Google voltava False e virava o 401 "Senha
+    # incorreta." que esta função existe pra parar de mentir.
+    if not password:
         return False
     return _check_password(password, row["password_hash"])
 
@@ -221,9 +253,6 @@ def is_account_scheduled_for_deletion(user_id: int) -> dict | None:
 
 
 def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) -> dict:
-    if not password:
-        raise ValueError("Informe sua senha para confirmar a exclusão.")
-
     now = datetime.now(timezone.utc)
     scheduled_for = now + timedelta(days=grace_days)
 
@@ -241,6 +270,17 @@ def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) 
             account = cur.fetchone()
             if not account:
                 raise LookupError("Conta de login não encontrada.")
+            # Este caminho NÃO passa por verify_user_password (select próprio):
+            # sem esta guarda, _check_password(password, None) estoura
+            # AttributeError, é engolido em db/users.py:350-354 e vira
+            # "Senha incorreta." — mesma raiz, segundo caminho de código.
+            if not account["password_hash"]:
+                raise PasswordNotSetError(PASSWORD_NOT_SET_MSG)
+            # O "informe a senha" vem DEPOIS do estado da conta (era a primeira
+            # linha da função): senha vazia numa conta só-Google devolvia 400
+            # "Informe sua senha", terceiro status para o mesmo estado.
+            if not password:
+                raise ValueError("Informe sua senha para confirmar a exclusão.")
             if not _check_password(password, account["password_hash"]):
                 raise PermissionError("Senha incorreta.")
 

@@ -1475,7 +1475,7 @@ body.balance-hidden .account-balance {
         <div class="card">
           <div class="card-head">
             <div>
-              <div class="card-title">Resetar senha por e-mail</div>
+              <div class="card-title" id="security-reset-title">Resetar senha por e-mail</div>
               <div class="card-sub" id="security-reset-copy">O link expira em 30 minutos e abre uma página segura para definir a nova senha</div>
             </div>
             <button class="btn-connect" type="button" id="security-reset-btn" onclick="sendPasswordResetEmail()" style="width:auto; min-width:190px; padding:0 18px">
@@ -1748,6 +1748,51 @@ body.balance-hidden .account-balance {
 const API = window.location.origin;
 const params = new URLSearchParams(window.location.search);
 let USER_ID = null;
+// Conta criada só via Google não tem senha: pedir senha é pedir o que não
+// existe. Só `has_password === false` bloqueia — ausente/undefined (falha do
+// /auth/me, stub de teste) degrada pro comportamento de sempre. A AUTORIDADE é
+// o servidor (409); isto aqui é advisory, pra o campo de senha nem aparecer.
+// Lido no boot E rebuscado no PBRefresh (a senha é definida FORA desta página).
+let HAS_PASSWORD = true;
+// Geração, mesmo padrão de _securityGen/_mfaGen — mas na ESCRITA, porque as três
+// buscas de has_password (o /auth/me do boot e os dois PBRefresh, security e
+// data) terminam nesta mesma função. Quem busca bumpa ANTES do fetch e passa o
+// myGen aqui: só a busca mais recente assenta. Sem isso, dois /auth/me em voo e
+// o VELHO chegando por último RE-TRANCAVA os 6 fluxos até o próximo PTR — não é
+// o repaint que se cura sozinho na pintura seguinte (app-mode.js:869-873).
+// A janela do boot é larga: window.PBRefresh já existe (é atribuído no parse)
+// enquanto o initSettings ainda espera o /auth/validate + /auth/me dele.
+let _hasPwGen = 0;
+function setHasPassword(me, myGen) {
+  if (myGen !== _hasPwGen) return;   // superado: preserva a busca mais nova
+  HAS_PASSWORD = !(me && me.has_password === false);
+}
+/* HAS_PASSWORD — estados × eventos, enumerados de uma vez (§4 do CLAUDE.md:
+   duas rodadas de revisão seguidas bateram neste subsistema, e é remendando
+   uma transição por vez que nasce a terceira). Está escrito para ninguém fechar
+   um quarto caso sem ver o mapa inteiro. As corridas de ESCRITA estão fechadas
+   (_hasPwGen cobre os três emissores); o que sobra é tudo da mesma família —
+   cobertura do rebusque por aba e por ciclo de vida —, e "teto aceito" é
+   decisão, não esquecimento: nenhum custa mais que um puxão de tela ou um toast.
+
+     boot com /auth/me ok .......... escreve, com geração: initSettings bumpa o
+       _hasPwGen antes do fetch e passa o meGen para o setHasPassword.
+     boot com /auth/me não-ok, ou exceção .... NÃO escreve, fica `true` — o lado
+       permissivo, por decisão; a autoridade é o 409 do servidor.
+     PTR na aba `security` ......... rebusca ANTES dos loaders, porque
+       applySecuritySettings lê HAS_PASSWORD para escolher a copy do card; falha
+       do /auth/me não pula os loaders, vira âmbar no fim.
+     PTR na aba `data` ............. rebusca; falha rejeita (PTR âmbar).
+     dois /auth/me sobrepostos (PTR×PTR, boot×PTR) .... sim, o _hasPwGen aí em
+       cima: só a busca mais nova assenta.
+     PTR em `notifications`, `open-finance` ou `legal` .... NÃO rebusca (teto).
+     troca de aba (showSettingsSection) ...... NÃO rebusca (teto).
+     volta do app ao foreground .... NÃO rebusca (teto), e é o caminho MAIS
+       provável no iPhone: o link do e-mail abre o Safari e a pessoa volta para
+       o app. Coberto pela copy, que manda puxar esta tela.
+     servidor devolve 409 num submit .... o toast mostra a mensagem certa, mas
+       HAS_PASSWORD não vira false (teto): a autoridade discorda do advisory e o
+       cliente não aprende. */
 
 /* ── Helpers ─────────────────────────────────── */
 function esc(v) {
@@ -2006,6 +2051,19 @@ function applySecuritySettings(data) {
   document.getElementById("security-reset-copy").textContent = hasEmail
     ? `O link será enviado para ${data.email} e expira em 30 minutos.`
     : "Vincule um e-mail à conta antes de solicitar reset de senha.";
+  // Conta só-Google: não é "resetar", é DEFINIR a primeira senha. Mesmo fluxo
+  // e mesmo endpoint — o token de reset já grava password_hash partindo de
+  // NULL. O flag vem do módulo, não do payload de /settings/{id}/security.
+  // Os DOIS lados são escritos sempre: o PBRefresh rebusca has_password, então
+  // este repaint tem de saber voltar quando a senha passa a existir.
+  document.getElementById("security-reset-title").textContent =
+    HAS_PASSWORD ? "Resetar senha por e-mail" : "Definir senha";
+  document.getElementById("security-reset-btn").textContent =
+    HAS_PASSWORD ? "Enviar e-mail de reset" : "Enviar e-mail";
+  if (!HAS_PASSWORD && hasEmail) {
+    document.getElementById("security-reset-copy").textContent =
+      `Sua conta foi criada com o Google e ainda não tem senha. O link vai para ${data.email} e expira em 30 minutos.`;
+  }
 }
 
 // propagate=true (pull-to-refresh): rejeita em falha pro indicador do PTR virar
@@ -2464,7 +2522,43 @@ async function updateNotificationSettings(patch) {
   }
 }
 
+/* A senha é definida FORA desta página (o link do e-mail abre outra aba, e no
+   app abre o navegador): sem rebuscar, quem voltava continuava barrado nos 6
+   fluxos. O PTR do app NÃO recarrega o documento (é esse o ponto do PBRefresh),
+   então "atualize a página" não existe como gesto ali. */
+async function refreshHasPassword() {
+  const myGen = ++_hasPwGen;
+  const resp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+  if (!resp.ok) throw new Error("Não foi possível atualizar o estado da conta");
+  setHasPassword(await resp.json(), myGen);
+}
+
+/* Guarda dos 6 fluxos que re-autenticam por senha. Fica nos ABRIDORES pra o
+   campo de senha nem aparecer. Retorna true quando pode seguir; o diálogo é
+   disparado SEM await de propósito — os abridores são síncronos (chamados por
+   onclick) e só precisam abortar. */
+function requireSenhaDefinida() {
+  if (HAS_PASSWORD) return true;
+  confirmModal(
+    "Sua conta foi criada com o Google e ainda não tem senha, então nenhuma senha funciona aqui. "
+    + "Defina uma senha por e-mail e volte para concluir.\n\n"
+    // No app o gesto é puxar a tela (não há recarregar); na web é recarregar.
+    // O PBRefresh rebusca o has_password nas duas abas que têm ponto barrado.
+    + (window.PB_IN_APP
+       ? "Já definiu a senha em outra aba? Puxe esta tela para baixo para atualizar."
+       : "Já definiu a senha em outra aba? Atualize a página."),
+    { title: "Defina uma senha primeiro", confirmText: "Definir senha", cancelText: "Agora não" },
+  ).then(function (ok) {
+    if (!ok) return;
+    showSettingsSection("security");
+    const btn = document.getElementById("security-reset-btn");
+    if (btn) btn.focus();
+  });
+  return false;
+}
+
 function showExportConfirm() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("export-confirm").classList.add("show");
   document.getElementById("export-password").focus();
 }
@@ -2506,6 +2600,7 @@ async function requestDataExport() {
 }
 
 function showResetConfirm() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("reset-confirm").classList.add("show");
   document.getElementById("reset-password").focus();
 }
@@ -2562,6 +2657,7 @@ async function requestAccountReset() {
 }
 
 function showDeleteConfirm() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("delete-confirm").classList.add("show");
   document.getElementById("delete-password").focus();
 }
@@ -3215,6 +3311,9 @@ function onMfaToggleClick() {
 
 /* ── Modal: Setup ─────────────────────────────── */
 function openMfaSetupModal() {
+  // A guarda vive AQUI e não no onMfaToggleClick: a /home manda
+  // ?view=security&autoOpenMfa=1 e o initSettings chama este abridor direto.
+  if (!requireSenhaDefinida()) return;
   const overlay = document.getElementById("mfa-setup-overlay");
   document.getElementById("mfa-setup-step1").style.display = "";
   document.getElementById("mfa-setup-step2").style.display = "none";
@@ -3302,6 +3401,7 @@ function copyRegenBackupCodes() { copyCodesFromList("mfa-regen-codes-list"); }
 
 /* ── Modal: Disable ──────────────────────────── */
 function openMfaDisableModal() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("mfa-disable-password").value = "";
   document.getElementById("mfa-disable-code").value = "";
   document.getElementById("mfa-disable-overlay").classList.add("open");
@@ -3337,6 +3437,7 @@ async function mfaDisableSubmit() {
 
 /* ── Modal: Regenerate backup codes ──────────── */
 function openMfaRegenerateModal() {
+  if (!requireSenhaDefinida()) return;
   document.getElementById("mfa-regen-password").value = "";
   document.getElementById("mfa-regen-code").value = "";
   document.getElementById("mfa-regen-result").style.display = "none";
@@ -3391,10 +3492,12 @@ async function initSettings() {
   }
   // Paywall: sem assinatura ativa → vai pro paywall (settings é gated).
   let me = null;
+  const meGen = ++_hasPwGen;
   try {
     const meResp = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
     if (meResp.ok) {
       me = await meResp.json();
+      setHasPassword(me, meGen);
       // Gate de escolha de plano: cadastro novo passa pela /precos antes de
       // acessar qualquer tela do app (só na web; app iOS fica de fora — 3.1.1).
       if (me && me.needs_plan_selection && !window.PB_IN_APP) {
@@ -3467,14 +3570,21 @@ window.PBRefresh = () => {
   // toda aba apagava OF numa view onde nem aparece). Cada loader propaga falha
   // (propagate:true) pro indicador do PTR virar âmbar em vez de fingir sucesso.
   const view = new URLSearchParams(location.search).get("view") || "security";
-  if (view === "security")
+  if (view === "security") {
     // Encadeia atrás de um save de contato em voo; espera TODAS as branches
     // (security + MFA, e dentro da security, atividade + sessões) antes de soltar.
+    // O /auth/me vem ANTES dos loaders porque applySecuritySettings lê
+    // HAS_PASSWORD pra decidir a copy do card ("Definir senha" × "Resetar").
+    // Falha dele NÃO pula os loaders: vira erro propagado no fim (PTR âmbar).
+    let meErr = null;
     return Promise.resolve(_securitySave).catch(function () {})
+      .then(function () { return refreshHasPassword().catch(function (e) { meErr = e; }); })
       .then(function () { return awaitAllPropagate([
         loadSecuritySettings({ propagate: true }),
         loadMfaStatus({ propagate: true }),
-      ]); });
+      ]); })
+      .then(function () { if (meErr) throw meErr; });
+  }
   if (view === "notifications")
     // Encadeia atrás de um save de notificação em voo: o GET só roda depois que
     // o PATCH assentar, então não repinta com estado pré-PATCH.
@@ -3485,7 +3595,12 @@ window.PBRefresh = () => {
     // snapshot. wait=8 porque o watchdog do indicador é 12s (app-mode.js) e o
     // default do servidor (18s) faria todo sucesso terminar em âmbar.
     return refreshOpenFinance({ propagate: true, wait: 8 });
-  return Promise.resolve();   // data / legal: nada dinâmico a atualizar
+  if (view === "data")
+    // Exportar, recomeçar do zero e excluir conta moram AQUI e são 3 dos 6
+    // pontos barrados por falta de senha — sem esta linha, quem definiu a senha
+    // e está nesta aba continuava trancado. Rejeita em falha (PTR âmbar).
+    return refreshHasPassword();
+  return Promise.resolve();   // legal: nada dinâmico a atualizar
 };
 </script>
 

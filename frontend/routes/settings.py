@@ -144,7 +144,7 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
 
     # Imports na função (padrão do arquivo p/ dependências fora do caminho quente).
     from core.observability import log_system_event_sync
-    from db.privacy import ResetLockUnavailableError, reset_user_data
+    from db.privacy import PasswordNotSetError, ResetLockUnavailableError, reset_user_data
     from frontend.routes.open_finance import delete_pluggy_items_best_effort
 
     # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
@@ -172,6 +172,10 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         result = await asyncio.to_thread(
             reset_user_data, user_id, payload.password, remote_cleanup=_limpeza_remota,
         )
+    except PasswordNotSetError as exc:
+        # ANTES do except PermissionError (é subclasse dele): invertido, o
+        # genérico engole e o 409 nunca acontece.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except ResetLockUnavailableError as exc:
