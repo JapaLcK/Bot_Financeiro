@@ -1009,6 +1009,104 @@ def cena_23_pendencia_abandonada():
 # Execução sequencial e determinística
 # ═══════════════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# PARES COMANDO × IA
+#
+# As 23 cenas acima quase não exercitam o modelo: medido, 84 dos 90 turnos
+# não fazem chamada nenhuma, e só 2 respostas foram ESCRITAS pela IA. Elas
+# cobrem o mesmo caminho determinístico que o pytest já cobre de graça.
+#
+# Aqui a pergunta é outra: a mesma intenção, dita CURTA e dita SOLTA, chega no
+# mesmo lugar? Não escrevo resultado esperado à mão — é o que tornaria isto
+# caro e frágil. A asserção é que os dois lados afirmam os mesmos valores.
+#
+# A forma curta TENDE a ser determinística e servir de gabarito, mas não é
+# garantido e o harness não assume: qual caminho cada lado tomou sai MEDIDO no
+# rótulo do turno. Medido em 2026-09-02, o par "Gasto por categoria" inverteu —
+# "gastos com saúde" foi pra IA e "quanto eu gastei com remedio e farmacia"
+# ficou no determinístico.
+#
+# Dois usuários Pro com seed IDÊNTICO, um pra cada lado: mesma base de dados,
+# duas formas de perguntar. Se divergirem, ou a IA alucinou ou achou um bug —
+# foi assim que a cena 18 apareceu.
+# ═══════════════════════════════════════════════════════════════════════
+
+SEED_PAR = (
+    "gastei 50 no mercado",
+    "gastei 123,45 na farmacia",
+    "recebi 2000 de salario",
+    "gastei 89,90 com uber",
+)
+
+# (rótulo, forma CURTA, forma SOLTA como o usuário falaria)
+PARES = [
+    ("Saldo",            "saldo",             "qto sobrou pra mim"),
+    ("Saldo (2)",        "saldo",             "quanto eu tenho de dinheiro agora"),
+    ("Extrato",          "extrato",           "me mostra meus ultimos lancamentos"),
+    ("Gasto do mês",     "quanto gastei",     "quanto eu torrei esse mes"),
+    ("Gasto do mês (2)", "quanto gastei",     "somando tudo, quanto saiu da minha conta"),
+    ("Registrar gasto",  "gastei 30 no ifood", "torrei trinta reais no ifood hoje"),
+    ("Registrar receita", "recebi 500 freela", "caiu quinhentos de freela na conta"),
+    ("Gasto por categoria", "gastos com saúde", "quanto eu gastei com remedio e farmacia"),
+    ("Limite do cartão", "limite nubank",     "quanto ainda posso gastar no nubank"),
+    ("Fatura",           "fatura nubank",     "quanto ta a fatura do nubank"),
+    ("Listar cartões",   "cartoes",           "quais cartoes eu tenho cadastrados"),
+]
+
+
+def _seed_par(com_cartao: bool) -> int:
+    """Usuário Pro com base idêntica dos dois lados. Semeia pelo caminho de
+    comando de propósito: é determinístico e (quase) não gasta chamada."""
+    uid = new_pro_uid()
+    for t in SEED_PAR:
+        send(uid, t)
+    if com_cartao:
+        seed_card(uid)
+        send(uid, "comprei 200 no nubank")
+    return uid
+
+
+def roda_pares():
+    precisa_cartao = ("nubank", "cartoes", "fatura", "cartao")
+    for rotulo, cmd, ia in PARES:
+        com_cartao = any(k in (cmd + " " + ia).lower() for k in precisa_cartao)
+        sc = Scenario(f"PAR — {rotulo}", "comando × IA",
+                      "dois users Pro com seed idêntico; caminho de cada lado é medido")
+        try:
+            uid_c = _seed_par(com_cartao)
+            uid_i = _seed_par(com_cartao)
+        except Exception:
+            sc.exception = traceback.format_exc()
+            sc.set_veredict("⚠️")
+            SCENARIOS.append(sc)
+            continue
+
+        r_cmd = sc.turn(uid_c, cmd)
+        r_ia = sc.turn(uid_i, ia)
+
+        v_cmd = ai_guard.money_cents(r_cmd)
+        v_ia = ai_guard.money_cents(r_ia)
+        inventados = v_ia - v_cmd
+
+        sem_invencao = not inventados
+        trouxe_dado = bool(v_ia) or not v_cmd
+        sc.check(sem_invencao, "todo valor da forma solta aparece na resposta da forma curta")
+        sc.check(trouxe_dado, "a forma solta trouxe o dado numérico que a curta traz")
+
+        claims_ia = sc.turns[-1][3]
+        guarda_ok = all(c.supported for c in claims_ia)
+        sc.check(guarda_ok, "guarda: nenhum número da IA veio de fora das tools")
+
+        if inventados:
+            sc.note("valores que só a forma solta afirma: "
+                     + ", ".join(f"R$ {v/100:.2f}" for v in sorted(inventados)))
+        if v_cmd and not v_ia:
+            sc.note(f"a forma curta trouxe {len(v_cmd)} valor(es) e a solta não trouxe nenhum")
+        sc.set_veredict("✅" if (sem_invencao and trouxe_dado and guarda_ok) else "❌")
+        SCENARIOS.append(sc)
+
+
 def main():
     t0 = time.time()
 
@@ -1040,6 +1138,10 @@ def main():
         cena_23_pendencia_abandonada,
     ]
 
+    so_pares = "--pares" in sys.argv
+    if so_pares:
+        ordered = []
+
     for fn in ordered:
         print(f"[harness] rodando {fn.__name__} ...")
         try:
@@ -1052,8 +1154,11 @@ def main():
             sc.set_veredict("⚠️")
             SCENARIOS.append(sc)
 
+    print(f"[harness] rodando {len(PARES)} pares comando × IA ...")
+    roda_pares()
+
     elapsed = time.time() - t0
-    print(f"[harness] execução das 23 funções de cena concluída em {elapsed:.1f}s "
+    print(f"[harness] execução concluída em {elapsed:.1f}s "
           f"({len(SCENARIOS)} cenários registrados).")
 
     write_report()

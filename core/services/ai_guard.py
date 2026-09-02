@@ -91,6 +91,21 @@ def _evidence_cents(raw: str) -> set[int]:
     return out
 
 
+def money_cents(text: str) -> set[int]:
+    """Todo valor em R$ afirmado num texto, em centavos (módulo).
+
+    Existe separado do `check()` porque serve a OUTRA pergunta: comparar duas
+    respostas entre si — a do comando (determinística, é o gabarito) contra a
+    da IA. Mesmo regex, mesma leitura estrita: se as duas divergirem, é porque
+    uma delas está afirmando um valor que a outra não afirma."""
+    out: set[int] = set()
+    for m in _CLAIM_MONEY_RE.finditer(text or ""):
+        v = _brl_to_cents(m.group(1))
+        if v is not None:
+            out.add(abs(v))
+    return out
+
+
 @dataclass
 class Claim:
     kind: str          # "dinheiro" | "id" | "codigo"
@@ -193,6 +208,12 @@ if __name__ == "__main__":
     # saldo negativo é afirmação também
     assert check("🏦 Saldo: R$ -50,00", TOOLS)[0].supported, "negativo tem que ser checado"
     assert not check("🏦 Saldo: R$ -77,00", TOOLS)[0].supported
+
+    # money_cents: mesma leitura, servindo à comparação entre duas respostas
+    assert money_cents("Saldo: R$ 1.826,55 · Receita R$ 2.000,00") == {182655, 200000}
+    assert money_cents("Sobrou R$ *1.826,55* pra você") == {182655}
+    assert money_cents("nenhum número aqui") == set()
+    assert money_cents("Saldo: R$ -50,00") == {5000}, "negativo entra em módulo"
 
     # resposta sem número não vira lobo
     assert verdict(check("Seu maior gasto foi no mercado.", TOOLS)).startswith("🈳")
