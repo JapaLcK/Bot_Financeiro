@@ -115,15 +115,29 @@ export function markupDe(js) {
  * Foi o primeiro erro real que a baseline pegou.
  *
  * A heurística é a usual: depois de valor (identificador, número, `)`, `]`) o `/`
- * é divisão; depois de operador ou pontuação, é regex. Ela erra em construção
- * exótica (`a = b /c/ d`), e é por isso que a perda não é silenciosa — a baseline
- * nome a nome fica vermelha.
+ * é divisão; depois de operador ou pontuação, é regex.
+ *
+ * COM UMA EXCEÇÃO QUE NÃO É OPCIONAL: palavra-chave termina em letra, e `return
+ * /^x/.test(v)` é JavaScript comuníssimo. Tratá-la como valor faria o `/` virar
+ * divisão, a regex virar texto, e uma aspa lá dentro abrir uma string falsa — que é
+ * como o extrator INVENTARIA um handler. Falso positivo, a classe pior.
+ *
+ * Ainda erra em construção exótica (`a = b /c/ d`), e é por isso que a perda não é
+ * silenciosa — a baseline nome a nome fica vermelha.
  */
+const PALAVRA_OPERADOR = new Set([
+  "return", "typeof", "case", "in", "of", "new", "delete", "void", "do", "else",
+  "yield", "await", "instanceof", "throw",
+]);
+
 function ehRegex(s, i) {
   let j = i - 1;
   while (j >= 0 && /\s/.test(s[j])) j--;
   if (j < 0) return true;
-  return !/[\w$)\]]/.test(s[j]);
+  if (!/[\w$)\]]/.test(s[j])) return true;
+  let k = j;
+  while (k >= 0 && /[\w$]/.test(s[k])) k--;
+  return PALAVRA_OPERADOR.has(s.slice(k + 1, j + 1));
 }
 
 /** Fim do literal de regex: `/` não escapada e fora de `[...]`. */
@@ -221,9 +235,12 @@ const semStrings = (s) => s
   .replace(/"(?:\\.|[^"\\])*"/g, '""')
   .replace(/`(?:\\.|[^`\\])*`/g, "``");
 
-const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+// `?.` entre o nome e o parêntese: `openDialog?.()` chama `openDialog` do mesmo
+// jeito, e some do escopo global do mesmo jeito. O lookbehind continua barrando
+// membro (`a?.b()` -> `b` vem depois de `.`, e não é global).
+const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
 /** `window.X()` É global; `this.x()` e `parcelas.find()` não são. */
-const CHAMADA_WINDOW = /\bwindow\.([A-Za-z_$][\w$]*)\s*\(/g;
+const CHAMADA_WINDOW = /\bwindow\??\.([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
 
 /** Toda lista de argumento, em todo nível — regex só casa a mais interna. */
 function argumentosDe(t) {
@@ -336,6 +353,82 @@ const levantar = (pagina) => {
  * varredura minha de `<script src>`. Comentado, `data-src`, sem aspas, com espaço
  * em volta do `=`: não importa, quem responde é ele.
  */
+/**
+ * Handlers de um conjunto de fontes JavaScript, com o navegador parseando.
+ *
+ * Compartilhado entre o levantamento COM navegação (que usa `document.scripts` para
+ * saber o que foi carregado) e o SEM navegação (que usa o `DOMParser` sobre o
+ * arquivo cru). Os dois precisam do mesmo tratamento; ter duas cópias seria a
+ * duplicação que o §0.7 proíbe.
+ */
+async function handlersDoMarkup(page, fontes, perdidos) {
+  const out = [];
+  for (const [nome, js] of fontes) {
+    const { trechos, perdidos: p } = markupDe(js);
+    for (const m of p) perdidos.push(`${nome}: ${m}`);
+    out.push(...handlersEmDado(js));
+    // Condição NECESSÁRIA para haver handler, não um parser: trecho sem `on…=`
+    // não tem como conter atributo de evento. Corta ~5200 strings do dashboard.js
+    // para dezenas, e o custo importa — sem isto o arquivo compete por CPU com os
+    // outros testes e derruba os vizinhos. Se o filtro errar, perde-se cobertura e
+    // a baseline acusa; ele não pode inventar nada.
+    const candidatos = trechos.filter((t) => /on[a-z]+\s*=/i.test(t));
+    out.push(...await page.evaluate(
+      ([html, ler]) => {
+        const f = new Function("return " + ler)();
+        const t = document.createElement("template");
+        const o = [];
+        for (const frag of html) {
+          // `<template>` e não `innerHTML` de body: o parser aceita `<tr>` solto,
+          // que fora de `<table>` seria descartado. E DUAS leituras, porque metade
+          // dos trechos gerados é fragmento de ATRIBUTO, sem tag nenhuma
+          // (` style="…" onclick="openHistoryDetail(1)"`) — envolver num elemento
+          // é o que faz o parser enxergá-los como atributos.
+          t.innerHTML = frag;
+          o.push(...f(t.content));
+          t.innerHTML = `<i ${frag}></i>`;
+          o.push(...f(t.content));
+        }
+        return o;
+      }, [candidatos, LE_HANDLERS]));
+  }
+  return out;
+}
+
+/**
+ * O mesmo levantamento, mas SEM navegar — só do texto do arquivo.
+ *
+ * Existe para a varredura de cobertura: são 26 páginas em `frontend/` e a baseline
+ * cobre 7, então as outras 19 precisam ser olhadas de algum jeito, e navegar em
+ * todas custaria caro demais. Aqui o `DOMParser` faz o papel do navegador — inclusive
+ * entregando `doc.scripts`, que dá os `<script>` inline e os `src` sem eu parsear tag.
+ */
+async function levantarDoTexto(page, pagina) {
+  const cru = readFileSync(join(FRONTEND, pagina), "utf-8");
+  const { doDom, srcs, inline } = await page.evaluate(
+    ([html, ler]) => {
+      const f = new Function("return " + ler)();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      return {
+        doDom: f(doc),
+        srcs: [...doc.scripts].filter((s) => s.getAttribute("src")).map((s) => s.getAttribute("src")),
+        inline: [...doc.scripts].filter((s) => !s.getAttribute("src")).map((s) => s.textContent),
+      };
+    }, [cru, LE_HANDLERS]);
+
+  const fontes = [
+    ...srcs
+      .map((c) => [basename(c), join(FRONTEND, c.replace(/^\//, "").replace(/\?.*$/, ""))])
+      .filter(([, arq]) => existsSync(arq))
+      .map(([nome, arq]) => [nome, readFileSync(arq, "utf-8")]),
+    ...inline.map((txt, n) => [`${pagina} <script> #${n + 1}`, txt]),
+  ];
+  const perdidos = [];
+  const doMarkup = await handlersDoMarkup(page, fontes, perdidos);
+  const { funcoes, variaveis } = nomesDe([...doDom, ...doMarkup]);
+  return { funcoes: [...funcoes], variaveis: [...variaveis], perdidos };
+}
+
 async function levantarUmaVez(pagina) {
   const page = await browser.newPage();
   const perdidos = [];
@@ -375,38 +468,7 @@ async function levantarUmaVez(pagina) {
       ...inline.map((txt, n) => [`${pagina} <script> #${n + 1}`, txt]),
     ];
 
-    const doMarkup = [];
-    for (const [nome, js] of fontes) {
-      const { trechos, perdidos: p } = markupDe(js);
-      for (const m of p) perdidos.push(`${nome}: ${m}`);
-      doMarkup.push(...handlersEmDado(js));
-      // Condição NECESSÁRIA para haver handler, não um parser: trecho sem `on…=`
-      // não tem como conter atributo de evento. Corta ~5200 strings do dashboard.js
-      // para dezenas, e o custo importa — sem isto o arquivo compete por CPU com os
-      // outros testes e derruba os vizinhos. Se o filtro errar, perde-se cobertura e
-      // a baseline acusa; ele não pode inventar nada.
-      const candidatos = trechos.filter((t) => /on[a-z]+\s*=/i.test(t));
-      // O parser do navegador, no markup gerado — mesmo motor, sem precisar de dado.
-      doMarkup.push(...await page.evaluate(
-        ([html, ler]) => {
-          const f = new Function("return " + ler)();
-          const t = document.createElement("template");
-          const out = [];
-          for (const frag of html) {
-            // `<template>` e não `innerHTML` de body: o parser aceita `<tr>` solto,
-            // que fora de `<table>` seria descartado. E DUAS leituras, porque metade
-            // dos trechos gerados é fragmento de ATRIBUTO, sem tag nenhuma
-            // (` style="…" onclick="openHistoryDetail(1)"`) — envolver num elemento
-            // é o que faz o parser enxergá-los como atributos.
-            t.innerHTML = frag;
-            out.push(...f(t.content));
-            t.innerHTML = `<i ${frag}></i>`;
-            out.push(...f(t.content));
-          }
-          return out;
-        }, [candidatos, LE_HANDLERS]));
-    }
-
+    const doMarkup = await handlersDoMarkup(page, fontes, perdidos);
     const { funcoes, variaveis } = nomesDe([...doDom, ...doMarkup]);
     return {
       page,
@@ -423,11 +485,41 @@ async function levantarUmaVez(pagina) {
 const PAGINAS = readdirSync(FRONTEND).filter((f) => f.endsWith(".html")).sort();
 const baseline = JSON.parse(readFileSync(BASELINE, "utf-8"));
 
-test("a baseline cobre as páginas que o repositório tem", () => {
+/**
+ * Toda página com handler inline está na baseline?
+ *
+ * A pergunta invertida é a que importa. Conferir só que as chaves da baseline ainda
+ * existem deixa uma página NOVA entrar sem entrada, e aí ela nunca é navegada nem
+ * inspecionada — o handler não resolvido dela passa em silêncio, que é exatamente o
+ * bug que este arquivo existe para pegar.
+ *
+ * São 26 páginas em `frontend/` e a baseline cobre 7; navegar em todas custaria caro
+ * demais, então aqui o levantamento é feito só do TEXTO, com o `DOMParser` no papel
+ * do navegador. Mais barato e suficiente: se a página tem nome a cobrar, ela precisa
+ * estar na baseline — quem decide entrar é a revisão, não o silêncio.
+ */
+test("toda página com handler inline está na baseline", async () => {
   for (const pagina of Object.keys(baseline)) {
     assert.ok(PAGINAS.includes(pagina), `a baseline cita ${pagina}, que não existe mais em frontend/`);
   }
-  assert.ok(Object.keys(baseline).length >= 5, "baseline pequena demais para provar alguma coisa");
+  const page = await browser.newPage();
+  try {
+    const fora = [];
+    for (const pagina of PAGINAS) {
+      if (baseline[pagina]) continue;
+      const r = await levantarDoTexto(page, pagina);
+      if (r.funcoes.length || r.variaveis.length) {
+        fora.push(`${pagina} (${r.funcoes.length}f/${r.variaveis.length}v: ${[...r.funcoes, ...r.variaveis].slice(0, 5).join(", ")}…)`);
+      }
+    }
+    assert.deepEqual(fora, [],
+      `${fora.length} página(s) têm handler inline e não estão na baseline: ${fora.join("; ")}. ` +
+      "Sem entrada na baseline elas não são navegadas nem verificadas, e um handler " +
+      "quebrado nelas passaria verde. Adicione-as a " +
+      "tests/frontend/handlers_inline.baseline.json.");
+  } finally {
+    await page.close();
+  }
 });
 
 for (const pagina of Object.keys(baseline)) {
