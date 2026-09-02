@@ -247,6 +247,57 @@ def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:
         return ERROR_MSG
 
 
+def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, Any]]) -> None:
+    """Guarda de afirmações em modo SÓ LOG.
+
+    Pergunta: todo número que a IA afirmou veio de algum resultado de tool
+    deste turno (ou da própria mensagem do user)? Número que não veio de lugar
+    nenhum o modelo produziu sozinho — foi assim que apareceu o limite de
+    cartão repetido depois de alterado (`docs/qa_whatsapp_pilot_*`).
+
+    NÃO altera a resposta e NÃO levanta, em nenhuma hipótese: a guarda tem um
+    falso positivo conhecido (conta feita pelo modelo — se as tools deram 100 e
+    50 e ele escreve "R$ 150,00", o 150 não está na evidência), e segurar
+    resposta correta seria pior que o defeito que ela caça. Modo log existe
+    justamente pra medir essa taxa antes de qualquer decisão mais dura.
+
+    Só o texto ESCRITO pelo modelo passa por aqui. Os outros retornos do loop
+    são `ERROR_MSG` e o `terminal_msg` de write auto-executado — template de
+    código, não afirmação de IA.
+    """
+    try:
+        from core.services.ai_guard import check
+
+        evidencia = [m.get("content") or "" for m in messages if m.get("role") == "tool"]
+        nao_sustentadas = [
+            c for c in check(reply, evidencia, user_text=CURRENT_USER_MESSAGE.get())
+            if not c.supported
+        ]
+        if not nao_sustentadas:
+            return
+
+        from core.observability import log_system_event_sync
+
+        log_system_event_sync(
+            "warning",
+            "ai_claim_unsupported",
+            f"{len(nao_sustentadas)} afirmação(ões) numérica(s) sem evidência de tool",
+            source="ai_chat/guard",
+            user_id=user_id,
+            details={
+                # Os tokens, não a resposta inteira: são o que torna o log
+                # acionável, e limitar a eles evita despejar texto livre na
+                # tabela de observabilidade.
+                "tokens": [c.token for c in nao_sustentadas][:10],
+                "kinds": sorted({c.kind for c in nao_sustentadas}),
+                "n_afirmacoes": len(nao_sustentadas),
+                "n_resultados_de_tool": len(evidencia),
+            },
+        )
+    except Exception:
+        logger.debug("guarda de afirmações falhou — ignorado", exc_info=True)
+
+
 def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
     for _ in range(MAX_TOOL_LOOPS):
         try:
@@ -266,6 +317,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
+            _log_unsupported_claims(user_id, final, messages)
             return final or ERROR_MSG
 
         # Persistir assistant message com tool_calls — limpa `###`
