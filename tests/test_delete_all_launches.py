@@ -736,3 +736,155 @@ def test_delta_de_lote_zero_com_delta_conta_nao_zero_recusa(user_id: int):
     assert _bal(user_id) == 700.0, "recusa não pode mexer na conta"
     assert _pocket_balance(user_id, "viagem") == 300.0
     assert _bal(user_id) + _pocket_balance(user_id, "viagem") == total_antes
+
+
+# ── chave PRESENTE e OCA: o irmão do `lote_ausente` ──────────────────────────
+#
+# `_DELTA_EXIGE_LOTE` pega a chave AUSENTE (linha legada). Este grupo pega a
+# chave PRESENTE sem o campo que a torna reversível — cada `if <campo>:` a
+# jusante vira no-op e o `delete` acontece assim mesmo.
+#
+# Sonda REMEDIDA aqui, no `pigbank_ci_test`, com o `_EFEITOS_CAMPOS_EXIGIDOS`
+# esvaziado e o `efeitos` EXATO que cada caso abaixo forja (aporte de 300 real,
+# `efeitos` reescrito depois). Estado = conta / inv / lotes:
+#
+#   A) investment_lot_create={"investment_id":1}
+#        antes  700.00 / 300.00 / (1, 300.00)
+#        APAGOU 1000.00 /  0.00 / (1, 300.00)   <- agregado revertido, lote DE PÉ;
+#        o `_sync_*_from_lots` traz os 300 de volta no movimento seguinte.
+#   C) investment_lot_withdrawals=[{}]
+#        idem A: o `continue` de :1394 não restaura, e o lote fica de pé.
+#   E) investment_lot_withdrawals=[{"lot_id": <lote real>}]
+#        antes  700.00 / 300.00 / (1, 300.00)
+#        APAGOU 1000.00 /  0.00 / (1,   0.00)   <- lote ZERADO pelo default do
+#        `.get("balance", 0)` (:1404).
+#
+#   E na variante com resgate parcial (aporte 300 + resgate 100, `before`
+#   ausente no resgate), que é onde o zero DESTRÓI dinheiro:
+#        antes  800.00 / 200.00 / (1, 200.00)
+#        APAGOU 700.00 /   0.00 / (1,   0.00)
+#        certo seria 700.00 / 300.00 / (1, 300.00) — os 200 que estavam no lote
+#        somem e os 100 do resgate não voltam. Não há sincronização que traga:
+#        sumiu do lote E do agregado.
+#
+# E) não estava no apontamento do Codex e é o pior dos oito.
+# `InvestmentLotHasWithdrawal` não pega — mora dentro do `if lot_id:` (:1363).
+#
+# Inalcançável pelos escritores de hoje (os cinco gravam os campos no mesmo
+# insert atômico; nada reescreve `efeitos` depois). Fechado porque é a tese do
+# PR e um dos oito destrói dinheiro.
+
+
+def _aporte_forjado(user_id: int, efeitos_jsonb: str) -> int:
+    """Aporte REAL (lote de verdade em `investment_lots`), com `efeitos`
+    reescrito depois para a forma oca. Devolve o id do lançamento."""
+    from db.investments import create_investment, investment_deposit_from_account
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aportando")
+    lid = int(db.list_launches(user_id, limit=1)[0]["id"])
+    _set_efeitos(user_id, lid, efeitos_jsonb)
+    return lid
+
+
+def _recusa_nao_mexe_em_nada(user_id: int, lid: int, conta: float, inv: float, lotes):
+    assert _bal(user_id) == conta, "a recusa é ANTES de qualquer update"
+    assert _investment_balance(user_id, "cdb") == inv, "saldo do investimento mexeu"
+    assert _lotes(user_id, "investment_lots") == lotes, "o lote tem de ficar intacto"
+    assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10)), \
+        "o lançamento tem de continuar listado"
+
+
+def test_A_lot_create_sem_lot_id_recusa(user_id: int):
+    """Sem a guarda: APAGOU, conta 700→1000 e o lote de 300 de pé."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_create": {"investment_id": 1}}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_C_lot_withdrawals_sem_lot_id_recusa(user_id: int):
+    """Sem a guarda: APAGOU e o lote não era restaurado."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_withdrawals": [{}]}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_E_lot_withdrawals_com_lot_id_e_sem_before_recusa(user_id: int):
+    """O PIOR dos oito, e o que o Codex não apontou: `before` ausente faz o
+    `.get("balance", 0)` de `db/accounts.py:1404` escrever ZERO no lote. Sem a
+    guarda: APAGOU e o lote foi ZERADO — dinheiro destruído, sem volta."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_withdrawals": [{"lot_id": 1}]}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_E2_before_presente_mas_oco_tambem_recusa(user_id: int):
+    """`before` PRESENTE e sem `balance`/`principal_remaining` cai no mesmo
+    default 0. Exigir só a chave `before` deixaria este caso aberto — é por
+    isso que `_BEFORE_CAMPOS` existe."""
+    import pytest
+    lid = _aporte_forjado(
+        user_id, '{"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0}, '
+                 '"investment_lot_withdrawals": [{"lot_id": 1, "before": {"status": "open"}}]}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    _recusa_nao_mexe_em_nada(user_id, lid, 700.0, 300.0, (1, 300.0))
+
+
+def test_site4_bill_id_sem_paid_amount_added_recusa(user_id: int):
+    """Site 4 do inventário: `:1248` exige o PAR. Com um só, a reversão do
+    pagamento é pulada e a fatura fica `paid` com o lançamento apagado."""
+    import pytest
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid, _seq, _b = add_launch_and_update_balance(
+        user_id, "despesa", 200, "fatura", "paguei fatura")
+    _set_efeitos(user_id, lid, '{"delta_conta": -200.0, "bill_id": 1}')
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, lid)
+    assert exc.value.motivo == "efeito_incompleto"
+    assert _bal(user_id) == 800.0
+    assert any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
+
+
+def test_positivo_aporte_e_resgate_integros_continuam_apagaveis(user_id: int):
+    """CONTROLE POSITIVO, obrigatório: a guarda RESTRINGE, e todo falso
+    positivo vira `kept_unsafe` — recusa visível em 5 portas e SILÊNCIO em 3
+    (`db/open_finance.py`, dentro de `except Exception: pass`). Sem este caso o
+    grupo passaria numa versão que recusa tudo, que é pior que o bug."""
+    from db.investments import (create_investment, investment_deposit_from_account,
+                                investment_withdraw_to_account)
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aportando")
+    aporte = int(db.list_launches(user_id, limit=1)[0]["id"])
+
+    # resgate íntegro: escreve `investment_lot_withdrawals` com lot_id + before
+    investment_withdraw_to_account(user_id, "cdb", 100, "resgatando")
+    resgate = int(db.list_launches(user_id, limit=1)[0]["id"])
+
+    # as duas portas continuam apagando o que É reversível
+    db.delete_launch_and_rollback(user_id, resgate)
+    db.delete_launch_and_rollback(user_id, aporte)
+
+    assert _lotes(user_id, "investment_lots") == (0, 0.0), \
+        "aporte íntegro apagado tem de levar o lote junto"
+    assert _investment_balance(user_id, "cdb") == 0.0
+    assert _bal(user_id) == 1000.0, "o dinheiro tem de voltar inteiro pra conta"

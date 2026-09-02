@@ -272,10 +272,10 @@ class InvestmentLotHasWithdrawal(ValueError):
 
 class LaunchUnsafeRollback(ValueError):
     """`efeitos` existe mas esta função não sabe revertê-lo POR INTEIRO: chave
-    fora da allowlist, `efeitos` degenerado (sem `delta_conta`), ou — só no
-    "apagar tudo" — efeito de caixinha/investimento, que está fora do escopo
-    daquele comando. Falha FECHADA: mantém a linha em vez de apagar dinheiro
-    em silêncio.
+    fora da allowlist, `efeitos` degenerado (sem `delta_conta`), chave presente
+    mas sem o campo que a torna reversível, ou — só no "apagar tudo" — efeito
+    de caixinha/investimento, que está fora do escopo daquele comando. Falha
+    FECHADA: mantém a linha em vez de apagar dinheiro em silêncio.
 
     `motivo` é um CÓDIGO CURTO ENUMERADO, escolhido no `raise` — nunca
     derivado da mensagem, que é texto livre e pode passar a carregar dado do
@@ -283,11 +283,14 @@ class LaunchUnsafeRollback(ValueError):
     `causa=LaunchUnsafeRollback` só, e a comum (`lote_ausente`, lote gravado
     antes de `79bd52f`, que dispara em todo depósito de caixinha antigo) ficava
     indistinguível da rara e grave (`chave_desconhecida`, escritor novo
-    gravando efeito que ninguém sabe reverter). Os quatro valores:
+    gravando efeito que ninguém sabe reverter). Os cinco valores:
 
       - `sem_delta_conta`     — `efeitos` sem a chave (degenerado, ex.: `{}`)
       - `chave_desconhecida`  — chave fora de `_EFEITOS_REVERSIVEIS`
       - `lote_ausente`        — `delta_pocket`/`delta_invest` sem a chave do lote
+      - `efeito_incompleto`   — chave PRESENTE sem o campo que a torna
+                                reversível (`_EFEITOS_CAMPOS_EXIGIDOS`); o
+                                irmão do `lote_ausente`, que é a chave ausente
       - `fora_do_escopo`      — caixinha/investimento no "apagar tudo"
 
     Obrigatório no construtor de propósito: `raise` novo tem de escolher um
@@ -1106,6 +1109,43 @@ _DELTA_EXIGE_LOTE = (
     ("delta_invest", ("investment_lot_create", "investment_lot_withdrawals")),
 )
 
+# Chave PRESENTE mas sem o campo que a torna reversível. É outra falha que
+# `_DELTA_EXIGE_LOTE` não pega: lá a chave do lote está AUSENTE (linha legada);
+# aqui ela está lá e vazia por dentro, e cada `if <campo>:` a jusante vira um
+# no-op silencioso — o efeito não é desfeito e o `delete` acontece assim mesmo.
+#
+# O inventário dos 8 sites, medido no `pigbank_ci_test` com `efeitos` forjado e
+# `delete_launch_and_rollback` real (o motivo de cada linha estar aqui):
+#   investment_lot_create sem `lot_id`     -> :1348 pula o delete do lote, mas
+#       :1373 reverte o agregado: conta 700->1000, inv 300->0, lote de 300 DE PÉ;
+#       o `_sync_*_from_lots` traz os 300 de volta no movimento seguinte.
+#   investment_lot_withdrawals sem `lot_id`-> :1394 `continue`, lote não restaurado.
+#   investment_lot_withdrawals sem `before`-> PIOR: :1404 escreve o default 0 e
+#       ZERA o lote. O dinheiro some do lote E do agregado, sem volta.
+#   bill_id sem `paid_amount_added`        -> :1248 pula a reversão, a fatura
+#       fica `paid` com o pagamento apagado.
+#   create_pocket/create_investment sem `nome`  -> :1447/:1274 não deletam.
+#   delete_pocket/delete_investment sem `nome`  -> :1317/:1283 não recriam.
+#
+# `InvestmentLotHasWithdrawal` (:1363) NÃO cobre nada disso: mora DENTRO do
+# `if lot_id:`. Inalcançável pelos escritores de hoje — os cinco gravam os
+# campos no mesmo insert atômico, e nenhum código reescreve `efeitos` depois —,
+# mas a tese deste PR é recusar o que não sabe reverter, e um dos oito destrói
+# dinheiro. `bill_id` fica de fora desta tabela: é PAR com `paid_amount_added`,
+# tratado no laço.
+_EFEITOS_CAMPOS_EXIGIDOS = (
+    ("investment_lot_create", ("lot_id",)),
+    ("investment_lot_withdrawals", ("lot_id", "before")),
+    ("create_pocket", ("nome",)),
+    ("create_investment", ("nome",)),
+    ("delete_pocket", ("nome",)),
+    ("delete_investment", ("nome",)),
+)
+
+# `before` sem estes dois faz o `.get(campo, 0)` de :1404-1405 escrever ZERO no
+# lote. Exigir a chave `before` sozinha deixaria o pior dos oito aberto.
+_BEFORE_CAMPOS = ("balance", "principal_remaining")
+
 # Efeitos que o "apagar tudo" não pode tocar: a mensagem promete "suas caixinhas
 # e investimentos NÃO são afetados". Guarda de ESCOPO, não de segurança — o
 # delete de UM lançamento continua podendo desfazer um "criar caixinha", que é
@@ -1199,6 +1239,45 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 raise LaunchUnsafeRollback(
                     f"efeitos que não sei reverter: {sorted(desconhecidas)}",
                     "chave_desconhecida",
+                )
+            # FORMA antes de regra de negócio, e antes do `_DELTA_EXIGE_LOTE` de
+            # propósito: a linha legada de verdade (chave AUSENTE) tem de
+            # continuar saindo com `lote_ausente`, que é o motivo comum e o que
+            # os testes já prendem. Aqui a chave está PRESENTE e oca.
+            # `None` é ignorado: os escritores gravam `"delta_pocket": None`
+            # explicitamente, e isso não é efeito nenhum a reverter.
+            for chave, campos in _EFEITOS_CAMPOS_EXIGIDOS:
+                valor = efeitos.get(chave)
+                if valor is None:
+                    continue
+                itens = valor if isinstance(valor, list) else [valor]
+                for item in itens:
+                    if not isinstance(item, dict):
+                        raise LaunchUnsafeRollback(
+                            f"'{chave}' com forma inesperada ({type(item).__name__}).",
+                            "efeito_incompleto",
+                        )
+                    faltando = [c for c in campos if not item.get(c)]
+                    # `before` presente mas oco escreve 0 no lote (:1404) — é o
+                    # único dos oito que DESTRÓI dinheiro, então checa por dentro.
+                    if not faltando and "before" in campos:
+                        antes = item.get("before")
+                        if not isinstance(antes, dict) or any(
+                            c not in antes for c in _BEFORE_CAMPOS
+                        ):
+                            faltando = ["before.%s" % "/".join(_BEFORE_CAMPOS)]
+                    if faltando:
+                        raise LaunchUnsafeRollback(
+                            f"'{chave}' sem {faltando}: a reversão não desfaz o efeito.",
+                            "efeito_incompleto",
+                        )
+            # `bill_id` e `paid_amount_added` são PAR (:1248 exige os dois): um
+            # sem o outro pula a reversão e a fatura fica `paid` sem pagamento.
+            if (efeitos.get("bill_id") is None) != (efeitos.get("paid_amount_added") is None):
+                raise LaunchUnsafeRollback(
+                    "'bill_id'/'paid_amount_added' incompletos: a reversão não "
+                    "desfaz o pagamento da fatura.",
+                    "efeito_incompleto",
                 )
             delta_conta = Decimal(str(efeitos.get("delta_conta", 0)))
             # `delta == 0` NÃO entra: `create_investment` (`db/investments.py`)
