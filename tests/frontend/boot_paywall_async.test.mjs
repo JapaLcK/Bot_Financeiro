@@ -59,7 +59,9 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
   let meCalls = 0;
   if (seedSnap) {
     // Snapshot que a "aba anterior" gravou (USER_ID 42, mês corrente) — o que
-    // o restoreSnapshotFromSession consome no boot.
+    // o restoreSnapshotFromSession consome no boot. pb_home_42 é o par dele: a
+    // MESMA aba pinta a /home com essa chave, e o clearSessionSnapshots limpava
+    // só o pb_snap_.
     await page.addInitScript(() => {
       if (location.pathname !== "/app") return;
       const d = new Date();
@@ -68,6 +70,7 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
         year: d.getFullYear(), month: d.getMonth() + 1, launches: [],
         launches_pagination: { page: 1, filter_type: "all", query: "" },
       }));
+      sessionStorage.setItem("pb_home_42", JSON.stringify({ userId: 42, snapshot: { total: 1 } }));
     });
   }
   await page.addInitScript((mode) => {
@@ -142,11 +145,15 @@ test("cadastro sem plano escolhido: cai em /precos?escolha=1", async () => {
   await ctx.close();
 });
 
-test("paywall NEGA: pb_snap_* some — reload da aba não repinta saldo", async () => {
+// Os dois prefixos que a aba usa para pintar dinheiro na hora.
+const snapKeys = (page) => page.evaluate(
+  () => Object.keys(sessionStorage)
+              .filter((k) => k.startsWith("pb_snap_") || k.startsWith("pb_home_")).sort());
+
+test("paywall NEGA: pb_snap_* E pb_home_* somem — reload da aba não repinta saldo", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: false }, seedSnap: true });
   await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
-  const chaves = await page.evaluate(
-    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
+  const chaves = await snapKeys(page);
   assert.deepEqual(chaves, [], `snapshot sobreviveu ao veredito negativo: ${chaves}`);
   await ctx.close();
 });
@@ -154,9 +161,8 @@ test("paywall NEGA: pb_snap_* some — reload da aba não repinta saldo", async 
 test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: true }, seedSnap: true });
   await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
-  const chaves = await page.evaluate(
-    () => Object.keys(sessionStorage).filter((k) => k.startsWith("pb_snap_")));
-  assert.equal(chaves.length, 1, "snapshot de sessão não pode ser apagado no caminho aprovado");
+  const chaves = await snapKeys(page);
+  assert.equal(chaves.length, 2, "snapshot de sessão não pode ser apagado no caminho aprovado");
   await ctx.close();
 });
 
