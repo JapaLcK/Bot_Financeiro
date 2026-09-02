@@ -150,6 +150,15 @@ const snapKeys = (page) => page.evaluate(
   () => Object.keys(sessionStorage)
               .filter((k) => k.startsWith("pb_snap_") || k.startsWith("pb_home_")).sort());
 
+// As duas chaves do seed, por NOME. Contar (`length === 2`) passava com as duas
+// semeadas apagadas e duas outras no lugar — e isso é alcançável: qualquer
+// payload entregue pelo WS grava um pb_snap_ novo pelo persistSnapshotToSession.
+const SEED_KEYS = (() => {
+  const d = new Date();
+  return ["pb_home_42",
+          `pb_snap_42_${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, "0")}`];
+})();
+
 test("paywall NEGA: pb_snap_* E pb_home_* somem — reload da aba não repinta saldo", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: false }, seedSnap: true });
   await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
@@ -162,7 +171,8 @@ test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", asy
   const { ctx, page } = await bootApp({ me: { app_access: true }, seedSnap: true });
   await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
   const chaves = await snapKeys(page);
-  assert.equal(chaves.length, 2, "snapshot de sessão não pode ser apagado no caminho aprovado");
+  assert.deepEqual(chaves, SEED_KEYS,
+                   "as chaves semeadas não podem ser apagadas no caminho aprovado");
   await ctx.close();
 });
 
