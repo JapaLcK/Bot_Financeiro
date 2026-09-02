@@ -139,6 +139,21 @@ def _post_refresh(client: TestClient):
     return client.post("/auth/refresh", headers=_csrf_headers(client))
 
 
+def _cookies_expirados(response) -> set:
+    """Nomes de cookie que ESTA resposta manda o navegador apagar.
+
+    Só o Set-Cookie conta. O `_clear_session_cookies` era chamado num
+    sub-response e o `raise HTTPException` descartava os headers (#175): o
+    servidor "limpava" e nada chegava ao cliente.
+    """
+    apagados = set()
+    for header in response.headers.get_list("set-cookie"):
+        nome, _, resto = header.partition("=")
+        if "max-age=0" in resto.lower() or "01 jan 1970" in resto.lower():
+            apagados.add(nome.strip())
+    return apagados
+
+
 def test_refresh_sem_cookie_com_access_valido_nao_encerra_sessao():
     client = TestClient(dashboard.app)
     client.cookies.set(
@@ -180,6 +195,10 @@ def test_refresh_sem_cookie_com_access_expirado_encerra_sessao():
         "sessão irrecuperável: 400 aqui deixaria o estado privado no aparelho"
     )
     assert response.json()["detail"] == "missing_refresh_token"
+    # O dashboard_token dura 12h e sobrevive ao access de 15min. Se ele não for
+    # apagado AQUI, o /auth/validate continua passando: o nav mostra a conta
+    # logada, todo /billing dá 401 e o /login rebate de volta — preso.
+    assert dashboard.DASHBOARD_COOKIE_NAME in _cookies_expirados(response)
 
 
 def test_refresh_sem_cookie_nenhum_encerra_sessao():
@@ -202,6 +221,7 @@ def test_refresh_com_token_desconhecido_continua_encerrando_sessao():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid_refresh_token"
+    assert dashboard.DASHBOARD_COOKIE_NAME in _cookies_expirados(response)
 
 
 def test_dashboard_token_accepts_auth_cookie_without_authorization_header():

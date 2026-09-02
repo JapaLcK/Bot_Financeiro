@@ -2804,17 +2804,27 @@ async def auth_refresh(request: Request, response: Response):
     por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
     clientes desta rota, `login.html` e o interceptor, são de cookie).
 
-    O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
-    `HTTPException` descarta os headers do sub-response (medido, #175). Está
-    fora do escopo deste conserto, mas não é para ser lido como funcionando.
+    Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
+    `HTTPException` descarta os headers do sub-response injetado (medido,
+    #175), então o `_clear_session_cookies` não chegava ao cliente e o
+    dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
+    ver o comentário no primeiro ramo.
     """
     refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
     if not refresh_in_cookie:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
-        raise HTTPException(
-            status_code=400 if sessao_viva else 401, detail="missing_refresh_token",
-        )
+        if sessao_viva:
+            raise HTTPException(status_code=400, detail="missing_refresh_token")
+        # O Set-Cookie da limpeza precisa CHEGAR ao cliente: `raise
+        # HTTPException` descarta os headers do sub-response injetado (#175).
+        # Sem isto o dashboard_token (12h) sobrevivia ao refresh morto e o
+        # usuário ficava preso — o nav mostrava a conta logada, todo /billing
+        # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
+        # olha o dashboard_token, não o access. Nem assinava, nem relogava.
+        resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
+        _clear_session_cookies(resp)
+        return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
@@ -2823,9 +2833,11 @@ async def auth_refresh(request: Request, response: Response):
         consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
     )
     if not result:
-        # Limpa cookies — qualquer motivo de falha vira deslogue.
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+        # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
+        # do ramo acima para montar a resposta em vez de dar raise (#175).
+        resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
+        _clear_session_cookies(resp)
+        return _no_store(resp)
 
     user_id = int(result["user_id"])
     session_jti = result["session_jti"]
