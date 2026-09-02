@@ -4183,11 +4183,25 @@ async def billing_select_free(
     devolveria 404/405 (HTML da página de erro, sem `detail`) a um cliente
     antigo em cache, e o front trata 4xx lendo `detail.message`.
 
-    Ninguém no frontend chama isto: o `[data-free-cta]` e o `selectFree` saíram
-    da precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e
-    o único caminho que fecha o gate hoje é o `mark_plan_selected` do webhook
-    `checkout.session.completed`. Então a recusa não vira erro na tela de
-    ninguém — é rede de segurança contra chamada direta.
+    O front NOVO não chama mais: o `[data-free-cta]` e o `selectFree` saíram da
+    precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e quem
+    fecha o gate hoje são os dois ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`,
+    os dois chamando `mark_plan_selected`).
+
+    Sobra UM chamador real, e é ele que sustenta o parágrafo acima: a aba com a
+    /precos ANTIGA já carregada no instante do deploy, de usuário em
+    `needs_plan_selection`. O JS velho dessa aba já converteu o CTA em
+    "Continuar com o plano Grátis"; o clique faz o POST, leva 410, e o
+    `selectFree` antigo cai no `showToast(msg, "err")` — ou seja, a recusa VIRA
+    um toast vermelho com a mensagem daqui, que por isso é escrita pra ser lida
+    por humano. Não é beco sem saída: os CTAs pagos da mesma aba continuam
+    funcionando, e um reload traz a página nova.
+
+    Os outros vetores estão fechados: link salvo, e-mail, deep link e sitemap
+    não alcançam a rota (é `@app.post` só, atrás de `_get_current_user` e do
+    CSRF — um GET dá 405), e HTML velho servido por PWA ou por cache HTTP não
+    existe (o service worker não intercepta navegação e o HTML sai `no-store`).
 
     O tier `free` continua existindo como ESTADO (fallback após falha de
     cobrança); o que sumiu é a ESCOLHA."""

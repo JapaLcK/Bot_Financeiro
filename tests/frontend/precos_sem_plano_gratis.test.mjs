@@ -28,7 +28,8 @@ import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
-// UA do WebView do app (auth-refresh.js:274 casa a SUBSTRING PigBankApp) — é o
+// UA do WebView do app (o `/PigBankApp/.test(navigator.userAgent)` de
+// frontend/static/auth-refresh.js casa a SUBSTRING PigBankApp) — é o
 // mecanismo real que liga window.PB_IN_APP, e não injeção da variável.
 const APP_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
   + "AppleWebKit/605.1.15 Safari/604.1 PigBankApp/1.0";
@@ -171,7 +172,8 @@ for (const [estado, me] of [
 
 // ── app iOS: o gate não se aplica, então a copy de mandato seria falsa ───────
 // routes/shared.py isenta o _is_pigbank_app do gate, e a /precos é alcançável de
-// dentro do app pelo "Ver planos" .pb-keep-in-app do paywall (dashboard.html:858)
+// dentro do app pelo "Ver planos" .pb-keep-in-app do paywall (`#upg-cta` em
+// frontend/dashboard.html)
 // — dizer "Escolha um plano pra continuar" a quem não está travado é errado.
 // 2 células, não 6: as 4 de {deslogado, logado sem gate} × marcador saem da
 // função pelo mesmo `!me.needs_plan_selection`, com e sem app — a guarda não

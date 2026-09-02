@@ -211,12 +211,15 @@ def test_assinatura_invalida_da_400(user_id, monkeypatch):
 
 
 def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
-    """A ÚNICA saída do funil de cadastro: só o checkout concluído fecha o gate.
+    """A saída do funil de cadastro é pagar: só o checkout concluído fecha o gate.
 
-    Depois de o Grátis sair da /precos (2026-09-02), `mark_plan_selected` tem um
-    chamador de verdade — o webhook `checkout.session.completed` (o
-    /billing/select-free só recusa com 410). Se este caminho não fechar o gate,
-    o cadastro novo paga e continua sendo devolvido pra /precos.
+    Depois de o Grátis sair da /precos (2026-09-02), `mark_plan_selected` tem
+    DOIS chamadores — os ramos `checkout.session.completed` e
+    `invoice.paid`/`invoice.payment_succeeded` do webhook (o /billing/select-free
+    só recusa com 410). Não são duas saídas do funil: o `invoice.paid` pressupõe
+    subscription, que pressupõe uma sessão de checkout antes, então quem sai do
+    cadastro passa pelo ramo testado aqui. Se este caminho não fechar o gate, o
+    cadastro novo paga e continua sendo devolvido pra /precos.
 
     O que DISCRIMINA é a 2ª metade. Logo depois do checkout,
     `needs_plan_selection` já é False de graça: o webhook grava plan='pro' com
@@ -226,10 +229,14 @@ def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
     depois do `customer.subscription.deleted` o plano volta pra 'free' e só o
     carimbo mantém o gate fechado. Sem ele, quem já pagou uma vez e cancelou
     cairia no gate de ESCOLHA (que não tem mais o que escolher) em vez do
-    paywall. Controle negativo: desligue o `mark_plan_selected` do ramo
-    checkout.session.completed do webhook
-    (`git grep -n "mark_plan_selected, user_id" -- frontend/`) e este teste fica
-    vermelho — os outros 5 do arquivo continuam verdes.
+    paywall.
+
+    Controle negativo: `git grep -n "mark_plan_selected, user_id" -- frontend/`
+    devolve DUAS linhas (um ramo cada). Mute a do ramo
+    `checkout.session.completed` — a primeira das duas, logo abaixo do
+    comentário "Checkout concluído = plano escolhido" — e este teste fica
+    vermelho na 2ª metade; os outros 5 do arquivo continuam verdes. Mutar a do
+    ramo `invoice.paid` não discrimina nada: este teste não emite invoice.
     """
     uid, client, fake = _setup(monkeypatch, f"gate-{user_id}")
     # O gate de escolha só existe sob a escada v2 (o conftest fixa 0 pra suíte).
