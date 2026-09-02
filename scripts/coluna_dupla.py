@@ -50,7 +50,6 @@ valem conserto enquanto nao aparecerem:
     - `T` (`.py` virou symlink) some do `--diff-filter=AMRD` -> "nada a provar",
       zero na historia; `C` o `git diff` sem `-C` nunca emite (o destino sai `A`);
       `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
-    - arquivo <-> diretorio no mesmo caminho: FileExistsError/IsADirectoryError.
     - symlink em `tests/`: zero na historia, e o `copyfile` segue o link.
     - interpretador sem pytest: as DUAS colunas dao rc=1 e NENHUMA escreve o XML,
       entao quem dispara e o ramo do relatorio ausente ("o pytest nao escreveu o
@@ -490,6 +489,19 @@ def main() -> int:
         # arvore antiga. `os.remove` falha fechado em diretorio/tipo inesperado.
         for rel in removidos:
             os.remove(os.path.join(wt_antes, rel))
+            # Diretorio que ficou vazio nao existe na arvore corrigida: um teste
+            # que checa a ausencia dele falha na coluna antiga por ARTEFATO do
+            # overlay e passa na corrigida — `APROVADO, prova FORTE` falsa. O
+            # `rmdir` falha fechado em diretorio nao vazio (OSError -> break), e a
+            # subida para quando o `dirname` do caminho RELATIVO esvazia, entao a
+            # raiz do worktree nunca chega a ser argumento — por construcao.
+            pai = os.path.dirname(rel)
+            while pai:
+                try:
+                    os.rmdir(os.path.join(wt_antes, pai))
+                except OSError:
+                    break
+                pai = os.path.dirname(pai)
 
         for rel in mudados:
             src, dst = os.path.join(wt_depois, rel), os.path.join(wt_antes, rel)
@@ -497,11 +509,12 @@ def main() -> int:
             # `copyfile` NAO leva o modo, e o destino herda o do arquivo antigo:
             # um teste que ganhou bit de execucao (ou um conftest que perdeu o de
             # leitura) rodava na coluna antiga com a permissao errada. `copymode`
-            # depois da copia resolve, e SEM `shutil.copy`: ele tem um ramo
-            # `if os.path.isdir(dst)` que passaria a copiar PARA DENTRO do
-            # diretorio, em silencio, na celula diretorio->arquivo — trocaria um
-            # `IsADirectoryError` que fecha por um overlay errado que pode virar
-            # FORTE falso.
+            # depois da copia resolve, e SEM `shutil.copy`: o ramo
+            # `if os.path.isdir(dst)` dele copiaria PARA DENTRO do diretorio, em
+            # silencio — overlay errado que pode virar FORTE falso. Hoje esse ramo
+            # e INALCANCAVEL, e quem o impede e a poda acima (o diretorio so
+            # sobreviveria vazio, e ela o apaga antes da copia): mexeu na poda,
+            # esta rede cai junto.
             shutil.copyfile(src, dst)
             shutil.copymode(src, dst)
 

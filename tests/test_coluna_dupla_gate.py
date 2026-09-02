@@ -423,6 +423,100 @@ def test_valor():
     assert "assert not True" not in r.stdout
 
 
+def test_diretorio_esvaziado_some_da_coluna_antiga(tmp_path):
+    """Controle NEGATIVO do grupo. Apagar o ultimo arquivo rastreado de um
+    diretorio deixava a PASTA vazia na coluna antiga — pasta que nao existe na
+    arvore corrigida. O teste falhava na coluna vermelha por artefato do overlay
+    e passava na verde: `APROVADO, prova FORTE` sem tocar em producao. Aninhado
+    de proposito: poda de UM nivel so deixaria `tests/obsoleto` de pe."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    assert not (pathlib.Path(__file__).parent / "obsoleto").exists()
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/obsoleto/sub/dado.txt": "velho\n"})
+    (lab / "tests" / "obsoleto" / "sub" / "dado.txt").unlink()
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_sem_pasta.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+    assert "assert not True" not in r.stdout
+
+
+def test_diretorio_com_irmao_vivo_nao_e_podado(tmp_path):
+    """Controle POSITIVO da poda: `fica.txt` sobrevive a remocao do irmao. A
+    assercao esta no TEXTO da falha porque e ela que morde — uma poda gulosa
+    levaria o irmao junto e o vermelho viraria `FileNotFoundError`, ainda rc=0,
+    ainda FORTE."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    pasta = pathlib.Path(__file__).parent / "pasta"
+    assert (pasta / "fica.txt").read_text() == "vivo\\n"
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/pasta/velho.txt": "dado\n", "tests/pasta/fica.txt": "vivo\n"})
+    (lab / "tests" / "pasta" / "velho.txt").unlink()
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_irmao_vivo.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+
+
+def test_diretorio_que_virou_arquivo_atravessa_o_overlay(tmp_path):
+    """Trava a ORDEM: a poda roda logo apos cada remocao, portanto ANTES da
+    copia. Mover a poda para depois devolve o `IsADirectoryError` desta celula em
+    silencio. Com o bullet apagado, este teste e o unico registro no repo de que
+    a celula `diretorio -> arquivo` e suportada."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    p = pathlib.Path(__file__).parent / "obsoleto"
+    assert p.is_file()
+    assert p.read_text() == "agora arquivo\\n"
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/obsoleto/dado.txt": "velho\n"})
+    shutil.rmtree(lab / "tests" / "obsoleto")
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/obsoleto": "agora arquivo\n",
+                   "tests/test_virou_arquivo.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+
+
+def test_arquivo_que_virou_diretorio_atravessa_o_overlay(tmp_path):
+    """A direcao inversa da celula acima, que tambem atravessa: o laco dos
+    removidos roda INTEIRO antes do de copia, entao o `os.remove` do arquivo
+    velho abre caminho para o `os.makedirs` do diretorio novo. Quem sustenta esta
+    celula e a ORDEM dos dois lacos — trocada, o `makedirs` bate no arquivo que
+    ainda esta la."""
+    teste = '''
+import pathlib
+import lib
+
+def test_valor():
+    p = pathlib.Path(__file__).parent / "obsoleto"
+    assert p.is_dir()
+    assert (p / "dado.txt").read_text() == "agora diretorio\\n"
+    assert lib.valor() == 42
+'''
+    lab = _lab(tmp_path, {"tests/obsoleto": "velho\n"})
+    (lab / "tests" / "obsoleto").unlink()
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/obsoleto/dado.txt": "agora diretorio\n",
+                   "tests/test_virou_diretorio.py": teste})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "assert 0 == 42" in r.stdout
+
+
 def test_conftest_sozinho_nao_libera_a_suite_inteira(tmp_path):
     """O conftest e o UNICO `.py` a mudar: `alvos` fica vazio e o `pytest -q` sem
     alvo roda a SUITE INTEIRA. Medido sem a guarda: o `test_alheio` (vermelho no
