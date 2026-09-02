@@ -247,8 +247,13 @@ test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", as
       document.getElementById("reset-password").value = "senha";
       requestAccountReset();                    // POST stubado (200) → marker → /onboarding
     });
-    await waitFor(() => page.evaluate(() => location.pathname === "/onboarding"),
-                  "redirect pro /onboarding");
+    // `waitForURL`, e não sondar `location` com `evaluate`: o redirect do
+    // `requestAccountReset` DESTRÓI o contexto no meio da sondagem, e o teste
+    // morria com "Execution context was destroyed" — medido em ~1 de cada 6
+    // rodadas, na `main` também. O `abaRecarregaNoEvento` deste mesmo arquivo
+    // já tratava a corrida idêntica com try/catch; esta era a instância que
+    // ficou de fora.
+    await page.waitForURL("**/onboarding");
     const estado = await page.evaluate(() => ({
       marker: localStorage.getItem("finbot_reset_at"),
       snap: sessionStorage.getItem("pb_snap_1_2026_01"),
