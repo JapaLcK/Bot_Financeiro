@@ -23,7 +23,8 @@ _get_current_user — ela usa os helpers daqui.
 
 import os
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from utils_date import day_tz
 
 from db import get_auth_user
 
@@ -324,16 +325,20 @@ def history_current_month_only(user_id: int) -> bool:
 def history_earliest_date(user_id: int, now: datetime | None = None) -> date | None:
     """Primeiro dia que o tier pode consultar; None significa sem limite."""
     limits = get_user_limits(user_id)
-    current = now or datetime.now(timezone.utc)
-    try:
-        local_now = current.astimezone(ZoneInfo(os.getenv("TZ", "America/Sao_Paulo")))
-    except ZoneInfoNotFoundError:
-        local_now = current.astimezone(timezone.utc)
+    # `day_tz`: fonte única do fuso do app (utils_date) — um segundo leitor de
+    # ambiente a menos, não conserto de comportamento. O `os.getenv("TZ")` de
+    # antes JÁ valia `REPORT_TIMEZONE`: `align_process_tz` escreve `TZ` =
+    # `_tz().key` no import de utils_date, e `_tz()` lê `REPORT_TIMEZONE`
+    # primeiro. O conserto de comportamento é o `now` que `get_financial_data`
+    # passou a repassar — sem ele esta função abria um segundo relógio, em UTC.
+    # O fallback para UTC saiu junto: com nome de zona inválido `_tz()` levanta,
+    # e o boot já recusa isso antes (`config/env.py::load_app_env`, `exit(1)`).
+    hoje = day_tz(now or datetime.now(timezone.utc))
 
     if limits.get("history_current_month_only", False):
-        return local_now.date().replace(day=1)
+        return hoje.replace(day=1)
     days = limits.get("history_days")
-    return None if days is None else local_now.date() - timedelta(days=int(days))
+    return None if days is None else hoje - timedelta(days=int(days))
 
 
 def history_months_cap(user_id: int) -> int | None:

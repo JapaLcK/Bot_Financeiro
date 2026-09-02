@@ -1,21 +1,24 @@
 /**
- * Virada de mês UTC × local: o snapshot do WebSocket não pode ser descartado.
+ * Virada de mês servidor × dispositivo: o snapshot não pode ser descartado.
  *
- * O servidor fecha o mês em UTC (finance_bot_websocket_custom.py); o
- * `isCurrentViewData` do dashboard compara com o relógio do NAVEGADOR
- * (viewYear/viewMonth nascem de `new Date()`). Na janela ~21h–00h locais do
- * último dia do mês (fusos −03/−04), o snapshot chega com o mês "seguinte",
- * era descartado, e a Visão Geral ficava em skeleton permanente.
+ * A causa PRIMÁRIA foi resolvida no SERVIDOR (main 8ea113a, #215): o snapshot
+ * passou a usar `now_tz()` em vez de UTC cru, o que zera a divergência para
+ * quem está no fuso do app. Este grupo cobre o RESÍDUO, que continua vivo:
+ * `now_tz()` é um fuso ÚNICO do servidor (TZ/REPORT_TIMEZONE, default
+ * America/Sao_Paulo) e o dashboard calcula viewYear/viewMonth no relógio do
+ * DISPOSITIVO. Quem está em outro fuso ainda diverge no último dia do mês —
+ * 31/08 12:00 em São Paulo já é 01/09 em Tóquio (+12 h) e em Auckland (+15 h).
+ * Divergiu, `isCurrentViewData` descartava e a Visão Geral ficava em skeleton.
  *
- * O conserto: no branch `snapshot` do ws.onmessage, se o usuário ainda NÃO
- * navegou de mês manualmente, o mês do snapshot É a visão corrente — adota
- * viewYear/viewMonth em vez de descartar.
+ * O conserto (cliente): no branch `snapshot` do ws.onmessage, se o usuário
+ * ainda NÃO navegou de mês manualmente, o mês do snapshot É a visão corrente
+ * — o servidor é a fonte da verdade do mês (decisão do 8ea113a).
  *
  * Determinístico: não depende do dia real. A divergência é sintetizada — um
  * FakeWebSocket entrega um snapshot do mês SEGUINTE ao do relógio do
- * navegador (fuso America/Cuiaba, −04, o do repro original), qualquer que
- * seja a data de hoje. `render` é stubado: o teste mede a DECISÃO
- * (adotar × descartar), não o innerHTML.
+ * navegador (contexto em Asia/Tokyo, o caso residual), qualquer que seja a
+ * data de hoje. `render` é stubado: o teste mede a DECISÃO (adotar ×
+ * descartar), não o innerHTML.
  *
  * Rodar:  npm run test:frontend
  *         (ou só este: node --test tests/frontend/snapshot_virada_de_mes.test.mjs)
@@ -48,7 +51,7 @@ before(async () => { browser = await chromium.launch(); });
 after(async () => { await browser?.close(); });
 
 async function bootPage() {
-  const ctx = await browser.newContext({ timezoneId: "America/Cuiaba" });
+  const ctx = await browser.newContext({ timezoneId: "Asia/Tokyo" });
   const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));

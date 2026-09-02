@@ -7574,11 +7574,17 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === "snapshot" || msg.type === "month_data") {
-      // Virada de mês UTC×local: o servidor fecha o mês em UTC e o navegador
-      // no relógio local — na janela ~21h–00h do último dia do mês o snapshot
-      // chegava com o mês "seguinte", era descartado e a tela ficava em
-      // skeleton permanente. Se o usuário ainda não navegou de mês
-      // manualmente, o mês do snapshot É a visão corrente: adota.
+      // Virada de mês servidor×dispositivo. A causa PRIMÁRIA foi resolvida no
+      // servidor (main 8ea113a, #215): o snapshot passou a usar now_tz() — o
+      // fuso do APP — em vez de UTC cru, o que zera a divergência para quem
+      // está no fuso do app (era ~3 h/mês para todo mundo).
+      // Este guard cobre o RESÍDUO: now_tz() é um fuso único do servidor, e o
+      // dashboard calcula viewYear/viewMonth no relógio do DISPOSITIVO — quem
+      // está em outro fuso (viagem, aparelho configurado diferente) ainda
+      // diverge no último dia do mês (ex.: Tóquio +12 h de São Paulo). Sem
+      // adotar, o snapshot é descartado e a tela fica em skeleton.
+      // O servidor é a fonte da verdade do mês (é a decisão do 8ea113a), então
+      // se o usuário ainda não navegou manualmente, o mês do snapshot vence.
       // (month_data fica de fora: é resposta a um get_month explícito, e
       // um mês que não é mais o da visão tem mesmo que ser descartado.)
       if (msg.type === "snapshot" && !userNavigatedMonth &&
