@@ -320,7 +320,10 @@ def test_logout_expires_auth_and_dashboard_cookies():
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["clear-site-data"] == '"cookies", "storage"'
+    # `"storage"` NÃO pode voltar: ele apaga o storage inteiro e atropela o
+    # `_PRESERVA` do auth-refresh.js/nav-auth.js (fonte de verdade do que
+    # sobrevive ao logout), levando junto o MECANISMO `finbot_reset_at`.
+    assert response.headers["clear-site-data"] == '"cookies"'
     set_cookie = response.headers.get_list("set-cookie")
     assert any(cookie.startswith("auth_token=") and "Max-Age=0" in cookie for cookie in set_cookie)
     assert any(cookie.startswith("dashboard_token=") and "Max-Age=0" in cookie for cookie in set_cookie)

@@ -2767,7 +2767,16 @@ async def auth_logout(request: Request, response: Response):
             )
 
     _clear_session_cookies(response)
-    response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    # SEM `"storage"`, e a ausência é a regra — não esquecimento. O diretivo é
+    # tudo-ou-nada (não tem granularidade por chave) e apagava localStorage,
+    # sessionStorage, Cache Storage e service workers INTEIROS, atropelando o
+    # `_PRESERVA` de `frontend/static/auth-refresh.js` (e o gêmeo do
+    # `nav-auth.js`), que é a fonte de verdade do que sobrevive ao fim de
+    # sessão. Medido em Chromium 151: `finbot_reset_at` sumia e reabria o flash
+    # de snapshot pré-reset na cadeia reset → logout → relogin; tema, esconder-
+    # saldo e posição do FAB sumiam junto. Quem apaga o estado do aparelho é o
+    # JS — todo chamador de POST /auth/logout carrega um dos dois arquivos.
+    response.headers["Clear-Site-Data"] = '"cookies"'
     _no_store(response)
     return {"ok": True}
 
