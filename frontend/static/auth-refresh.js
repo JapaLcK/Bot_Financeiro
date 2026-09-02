@@ -58,7 +58,7 @@
         // aqui. Só o 401 conta: o backend responde 400 quando o cookie de
         // refresh falta mas o access token ainda vale — sessão de pé, nada a
         // apagar (finance_bot_websocket_custom.py, #173).
-        await _comLimpeza("/auth/refresh", r);
+        await _comLimpeza("/auth/refresh", r, "POST");
         return r.ok;
       } catch (_) {
         return false;
@@ -102,6 +102,14 @@
    *                          a limpeza ao `resp.ok` deixava esse caso e o 429
    *                          do `@limiter.limit("30/minute")` do lado errado.
    *
+   *                          O MÉTODO entra na conta porque o predicado é
+   *                          incondicional: um GET nesse pathname leva 405 e
+   *                          não navega para lugar nenhum, então limpar ali
+   *                          apagaria o aparelho de quem continua na página,
+   *                          logado (Codex). Os outros dois não precisam da
+   *                          checagem — o status já os prende, e um 405 não é
+   *                          `ok` nem 401.
+   *
    *                          O que isto NÃO faz: os cookies de sessão são
    *                          `httponly`, então JS nenhum os apaga, e num
    *                          logout que não chegou ao servidor a sessão
@@ -136,7 +144,7 @@
    * de conta ficou de fora: consertei a instância e não a classe (Codex, #170).
    */
   const _SESSAO_ENCERRADA = {
-    "/auth/logout":  function ()     { return true; },
+    "/auth/logout":  function (resp, metodo) { return metodo === "POST"; },
     "/auth/account": function (resp) { return !!resp && resp.ok; },
     "/auth/refresh": function (resp) { return !!resp && resp.status === 401; },
   };
@@ -280,9 +288,17 @@
    * (`finance_bot_websocket_custom.py`). Se um dia responder, a limpeza é
    * idempotente e a segunda passada é desperdício, não dano.
    */
-  async function _comLimpeza(caminho, resp) {
+  /** O método desta request, como o navegador o veria. */
+  function _metodo(input, init) {
+    const m = (init && init.method)
+      || (input && typeof input !== "string" && input.method)
+      || "GET";
+    return String(m).toUpperCase();
+  }
+
+  async function _comLimpeza(caminho, resp, metodo) {
     const fim = _SESSAO_ENCERRADA[caminho];
-    if (fim && fim(resp)) await _limpaEstadoDoDispositivo();
+    if (fim && fim(resp, metodo)) await _limpaEstadoDoDispositivo();
     return resp;
   }
 
@@ -312,10 +328,10 @@
       // ninguém ficar sabendo, falha ABERTA, e a guarda de `null` de cada
       // predicado pararia de ser medida por teste nenhum. O que protege o erro
       // do chamador são as guardas, que falham fechado.
-      await _comLimpeza(caminho, null);
+      await _comLimpeza(caminho, null, _metodo(input, init));
       throw e;
     }
-    return _comLimpeza(caminho, resp);
+    return _comLimpeza(caminho, resp, _metodo(input, init));
   }
 
   window.fetch = async function(input, init) {

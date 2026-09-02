@@ -951,3 +951,67 @@ test("caminho relativo comum continua sendo interceptado sem o fast-path", async
   assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
                    "tirar o fast-path derrubou a interceptacao do caminho relativo");
 });
+
+// ── O METODO importa quando o predicado e' incondicional ────────────────
+//
+// `_caminho()` guarda so' o pathname, entao com o logout limpando em qualquer
+// resposta um GET no mesmo caminho tambem limpava. O backend so' define
+// `POST /auth/logout`, entao um GET leva 405 — e, ao contrario dos cinco donos
+// de logout, ele NAO navega para lugar nenhum: o usuario fica na pagina, com a
+// sessao viva no servidor e o aparelho apagado. Achado do Codex no #230.
+//
+// Os outros dois nao precisam da checagem: o status ja os prende, e um 405 nao
+// e' `ok` nem 401.
+
+for (const metodo of ["GET", "HEAD", "PUT"]) {
+  test(`${metodo} em /auth/logout NAO limpa — 405 e o usuario fica na pagina`, async () => {
+    const apagados = [];
+    const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js", (c) => {
+      c.fetch = async () => ({ ok: false, status: 405 });
+      c.caches.delete = async (k) => { apagados.push(k); return true; };
+    });
+
+    const opcoes = metodo === "GET" ? undefined : { method: metodo };
+    const resp = await ctx.window.fetch("/auth/logout", opcoes);
+
+    assert.equal(resp.status, 405);
+    assert.deepEqual(apagados, [], `${metodo} apagou o Cache Storage de quem continua logado`);
+    for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+      assert.equal(local.has(k), true, `${k} foi apagado por um ${metodo} que levou 405`);
+    }
+    assert.equal(sessao.has("pb_home_42"), true, "pb_home_ foi apagado da sessao");
+  });
+}
+
+test("o metodo sai do objeto Request quando nao vem no init", async () => {
+  // `fetch(new Request(url, {method}))` nao passa `init`. Sem ler o `.method` do
+  // objeto o metodo cairia para o default GET e o logout legitimo pararia de
+  // limpar — regressao pior que o bug que a checagem conserta.
+  const apagados = [];
+  const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async () => ({ ok: true, status: 200 });
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await ctx.window.fetch({ url: "/auth/logout", method: "POST" });
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "o metodo do objeto Request foi ignorado e o logout parou de limpar");
+});
+
+test("metodo em minusculo ainda e' POST — `fetch(url, {method:\"post\"})` e' valido", async () => {
+  // O navegador aceita o metodo em qualquer caixa. Sem normalizar, um chamador
+  // que escrevesse "post" faria o logout parar de limpar em silencio —
+  // regressao pior que o 405 que a checagem de metodo conserta.
+  const apagados = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async () => ({ ok: true, status: 200 });
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await ctx.window.fetch("/auth/logout", { method: "post" });
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "o logout com o metodo em minusculo parou de limpar o cache");
+  assert.equal(local.has("pigbank_menu_v1"), false, "o menu sobreviveu ao logout");
+});
