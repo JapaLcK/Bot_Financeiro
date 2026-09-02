@@ -229,11 +229,35 @@ const NATIVO = new Set([
 const NAO_E_NOME = new Set(["this", "event", "true", "false", "null", "undefined"]);
 const SO_NOME = /^[A-Za-z_$][\w$]*$/;
 
-/** Esvazia string antes de procurar chamada: `'4 números (ou vazio)'` rendia `meros`. */
-const semStrings = (s) => s
-  .replace(/'(?:\\.|[^'\\])*'/g, "''")
-  .replace(/"(?:\\.|[^"\\])*"/g, '""')
-  .replace(/`(?:\\.|[^`\\])*`/g, "``");
+/**
+ * Esvazia STRING e LITERAL DE REGEX antes de procurar chamada.
+ *
+ * String: `'Use 4 números (ou vazio)'` rendia o identificador `meros`, porque o `\w`
+ * do JavaScript é ASCII e o `ú` corta o nome.
+ *
+ * Regex: `onclick="return /fake()/.test(v)"` é handler válido, e o `fake` lá dentro
+ * NUNCA é chamado — cobrá-lo é inventar nome, a classe que reprova código correto.
+ * Um `replace` por vez não resolve, porque uma barra dentro de string e uma aspa
+ * dentro de regex se confundem; é uma passada só, com estado.
+ */
+function semLiterais(s) {
+  let out = "";
+  for (let i = 0; i < s.length; ) {
+    const c = s[i];
+    if (c === '"' || c === "'" || c === "`") {
+      const fim = fimDeString(s, i, c);
+      if (fim < 0) return out;                 // literal aberto: para, não adivinha
+      out += c + c; i = fim + 1; continue;
+    }
+    if (c === "/" && ehRegex(s, i)) {
+      const fim = fimDeRegex(s, i);
+      if (fim < 0) return out;
+      out += "/x/"; i = fim + 1; continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
 
 // `?.` entre o nome e o parêntese: `openDialog?.()` chama `openDialog` do mesmo
 // jeito, e some do escopo global do mesmo jeito. O lookbehind continua barrando
@@ -241,6 +265,19 @@ const semStrings = (s) => s
 const CHAMADA = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
 /** `window.X()` É global; `this.x()` e `parcelas.find()` não são. */
 const CHAMADA_WINDOW = /\bwindow\??\.([A-Za-z_$][\w$]*)\s*(?:\?\.)?\s*\(/g;
+
+/**
+ * A RAIZ de uma chamada de membro precisa existir.
+ *
+ * Em `onclick="dialogs?.open()"` nenhum dos dois nomes entrava: `dialogs` não é
+ * seguido de `(`, e `open` vem depois de ponto. Mas o clique avalia `dialogs` no
+ * escopo global, e sem ele é `ReferenceError` — o encadeamento opcional protege a
+ * propriedade, nunca a raiz.
+ *
+ * Entra como VARIÁVEL, não função: `dialogs` só precisa existir. Os receptores
+ * nativos (`this`, `event`, `JSON`, `Math`, `document`, `window`) já caem nas listas.
+ */
+const RAIZ_DE_MEMBRO = /(?<![.\w$])([A-Za-z_$][\w$]*)\s*\??\.\s*[A-Za-z_$][\w$]*\s*(?:\?\.)?\s*\(/g;
 
 /** Toda lista de argumento, em todo nível — regex só casa a mais interna. */
 function argumentosDe(t) {
@@ -279,9 +316,12 @@ export const handlersEmDado = (js) => [...js.matchAll(HANDLER_EM_DADO)].map((m) 
 export function nomesDe(valores) {
   const funcoes = new Set(), variaveis = new Set();
   for (const v of valores) {
-    const limpo = semStrings(v);
+    const limpo = semLiterais(v);
     for (const m of limpo.matchAll(CHAMADA)) if (!NATIVO.has(m[1])) funcoes.add(m[1]);
     for (const m of limpo.matchAll(CHAMADA_WINDOW)) if (!NATIVO.has(m[1])) funcoes.add(m[1]);
+    for (const m of limpo.matchAll(RAIZ_DE_MEMBRO)) {
+      if (!NATIVO.has(m[1]) && !NAO_E_NOME.has(m[1])) variaveis.add(m[1]);
+    }
     for (const tok of argumentosDe(limpo)) {
       const n = tok.trim();
       if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n)) variaveis.add(n);
@@ -508,6 +548,14 @@ test("toda página com handler inline está na baseline", async () => {
     for (const pagina of PAGINAS) {
       if (baseline[pagina]) continue;
       const r = await levantarDoTexto(page, pagina);
+      // O fail-safe vale aqui também: trecho que o scanner desistiu de ler pode ser
+      // justamente o que tinha o handler. Zero nomes COM perda declarada não é
+      // "página sem handler" — é página não medida, e deixá-la fora da baseline em
+      // silêncio anularia a garantia anunciada.
+      assert.deepEqual(r.perdidos, [],
+        `${pagina}: o scanner desistiu de um trecho (${r.perdidos.join("; ")}), então ` +
+        "não dá para afirmar que ela não tem handler inline. Conserte o scanner antes " +
+        "de deixá-la fora da baseline.");
       if (r.funcoes.length || r.variaveis.length) {
         fora.push(`${pagina} (${r.funcoes.length}f/${r.variaveis.length}v: ${[...r.funcoes, ...r.variaveis].slice(0, 5).join(", ")}…)`);
       }
