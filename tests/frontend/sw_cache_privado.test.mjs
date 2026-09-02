@@ -1015,3 +1015,24 @@ test("metodo em minusculo ainda e' POST — `fetch(url, {method:\"post\"})` e' v
                    "o logout com o metodo em minusculo parou de limpar o cache");
   assert.equal(local.has("pigbank_menu_v1"), false, "o menu sobreviveu ao logout");
 });
+
+test("mesmo host, esquema diferente NAO e' a nossa origem", async () => {
+  // `host` ignora o esquema. Numa pagina HTTPS o `http://mesmo-host/auth/logout`
+  // passava por nosso; o navegador recusa por conteudo misto, a request REJEITA,
+  // e a rejeicao vira fim de sessao — o aparelho apagado por um logout que nunca
+  // saiu do navegador. Achado do Codex no #230.
+  const apagados = [];
+  const repassadas = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async (input) => { repassadas.push(input); throw new TypeError("Failed to fetch"); };
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const inseguro = `${ORIGEM.replace("https:", "http:")}/auth/logout`;
+  await assert.rejects(() => ctx.window.fetch(inseguro, { method: "POST" }), TypeError);
+
+  assert.deepEqual(repassadas, [inseguro],
+                   "a request nem chegou ao fetch original — o teste nao mede o caminho certo");
+  assert.deepEqual(apagados, [], "conteudo misto apagou o Cache Storage deste aparelho");
+  assert.equal(local.has("pigbank_menu_v1"), true, "conteudo misto apagou o menu deste aparelho");
+});

@@ -24,11 +24,16 @@
     // com essa forma, e `//host/x` e `/\host/x` apontam para OUTRO host — a
     // segunda porque a WHATWG normaliza `\` como `/`. Bastava uma delas
     // terminando em `/auth/logout` para o pathname bater e a limpeza apagar
-    // este aparelho. O parse abaixo compara HOST, e cobre as duas formas, o
-    // caminho relativo comum e a URL absoluta com uma regra só.
+    // este aparelho. O parse abaixo cobre as duas formas, o caminho relativo
+    // comum e a URL absoluta com uma regra só.
+    //
+    // ORIGEM, não host: host ignora o esquema, então numa página HTTPS o
+    // `http://mesmo-host/auth/logout` passava por nosso. O navegador recusa
+    // essa request por conteúdo misto, ela REJEITA, e a rejeição virou fim de
+    // sessão — o aparelho seria apagado por um logout que nunca saiu (Codex).
+    // "Mesma origem" é a definição certa aqui e é a que o cookie de sessão usa.
     try {
-      const u = new URL(url, window.location.origin);
-      return u.host === window.location.host;
+      return new URL(url, window.location.origin).origin === window.location.origin;
     } catch (_) { return false; }
   }
 
