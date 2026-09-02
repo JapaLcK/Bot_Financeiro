@@ -1460,6 +1460,12 @@ function renderOpsHealthGrid(ops) {
       hint: "Erros ao enviar para a API do WhatsApp" },
     { label: "Token inválido WA 7d",val: fInt(ops.whatsapp_token_invalid_7d), color: ops.whatsapp_token_invalid_7d > 0 ? 'red' : 'green', cls: ops.whatsapp_token_invalid_7d > 0 ? 'danger' : '' },
     { label: "Erros backend 24h",   val: fInt(ops.backend_errors_24h),        color: ops.backend_errors_24h > 0 ? 'red' : 'green', cls: ops.backend_errors_24h > 0 ? 'danger' : '' },
+    // Azul fixo, nunca vermelho: um número > 0 aqui NÃO é incidente. A guarda
+    // reprova conta feita pelo modelo (tools deram 100 e 50, resposta diz
+    // R$ 150,00), e a taxa desse falso positivo é o que este contador existe
+    // pra medir. Pintar de vermelho seria afirmar um veredito que ninguém tem.
+    { label: "Afirm. IA sem dado 24h", val: fInt(ops.ai_claim_unsupported_24h), color: 'blue',
+      hint: "Números que a IA afirmou sem vir de nenhuma tool — inclui conta feita por ela" },
     { label: "Drops fila WA 24h",   val: fInt(ops.whatsapp_queue_drop_24h),   color: ops.whatsapp_queue_drop_24h > 0 ? 'red' : 'green', cls: ops.whatsapp_queue_drop_24h > 0 ? 'danger' : '' },
     { label: "WA conectados",       val: fInt(ops.whatsapp_connected_users),  color: 'blue' },
     { label: "WA pendentes",        val: fInt(ops.whatsapp_pending_users),    color: ops.whatsapp_pending_users > 0 ? 'yellow' : 'green', cls: ops.whatsapp_pending_users > 0 ? 'warning' : '' },

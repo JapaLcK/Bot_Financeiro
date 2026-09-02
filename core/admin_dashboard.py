@@ -598,11 +598,14 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_signature_invalid') AS billing_signature_invalid_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_payment_failed') AS billing_payment_failed_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'engagement_loop_error') AS engagement_errors_7d,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'ai_claim_unsupported') AS ai_claim_unsupported_24h,
+                    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'ai_claim_unsupported') AS ai_claim_unsupported_7d,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_webhook_received') AS last_whatsapp_webhook_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_send_success') AS last_whatsapp_send_success_at,
                     MAX(created_at) FILTER (WHERE event_type LIKE 'category_ai_%') AS last_category_ai_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_token_invalid') AS last_whatsapp_token_invalid_at,
-                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at
+                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at,
+                    MAX(created_at) FILTER (WHERE event_type = 'ai_claim_unsupported') AS last_ai_claim_unsupported_at
                 FROM system_event_logs
                 """
             )
@@ -661,6 +664,11 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                    OR event_type LIKE 'billing_%'
                    OR event_type LIKE 'engagement_%'
                    OR event_type = 'http_unhandled_exception'
+                   -- Guarda de afirmações da IA: lugar próprio aqui em vez de
+                   -- disputar as 100 linhas de `recent_errors` com erro de
+                   -- verdade. A frequência dela é desconhecida por enquanto —
+                   -- é justamente o que o modo log existe pra medir.
+                   OR event_type = 'ai_claim_unsupported'
                 ORDER BY created_at DESC
                 LIMIT 25
                 """

@@ -52,7 +52,10 @@ def test_valor_sem_evidencia_de_tool_vira_log(user_id, monkeypatch):
     assert resp == texto, "modo log NUNCA altera a resposta"
     assert len(capturado) == 1
     args, kwargs = capturado[0]
-    assert args[0] == "warning"
+    # `info`, não `warning`: warning entra em `backend_warnings_24h` no painel
+    # do admin, que é lido como "problemas de backend". Este evento tem
+    # contador próprio (`ai_claim_unsupported_24h`).
+    assert args[0] == "info"
     assert args[1] == "ai_claim_unsupported"
     assert kwargs["user_id"] == user_id
     assert "R$ 999,99" in kwargs["details"]["tokens"]

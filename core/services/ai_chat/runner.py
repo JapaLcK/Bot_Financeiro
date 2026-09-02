@@ -279,7 +279,12 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
         from core.observability import log_system_event_sync
 
         log_system_event_sync(
-            "warning",
+            # `info`, não `warning`: o painel de saúde do admin lê
+            # `backend_warnings_24h` como "problemas de backend", e isto não é
+            # um. É observação sobre a IA, e tem contador próprio
+            # (`ai_claim_unsupported_24h`). Warning aqui poluía o número que o
+            # dono usa pra saber se o servidor está mal.
+            "info",
             "ai_claim_unsupported",
             f"{len(nao_sustentadas)} afirmação(ões) numérica(s) sem evidência de tool",
             source="ai_chat/guard",
