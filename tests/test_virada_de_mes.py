@@ -215,24 +215,31 @@ def _fuso_de_sao_paulo():
     fora do alcance do monkeypatch, e deixar o processo num fuso inventado
     contamina os arquivos seguintes da suíte. O teardown refaz os pools pelo
     mesmo motivo, e o critério é a baseline do vizinho — o que ele dá SOZINHO.
-    MEDIDO em 01/09/2026 com `pytest tests/test_virada_de_mes.py
-    tests/test_fuso_do_app.py`:
+    RE-MEDIDO em 01/09/2026 DEPOIS do merge da `main` (o vizinho passou de 21
+    para 28 funções / 43 casos), com `REPORT_TIMEZONE=<zona> pytest
+    tests/test_virada_de_mes.py tests/test_fuso_do_app.py`:
 
     | medição                          | Yangon | UTC | Lisbon | Manaus |
     |----------------------------------|--------|-----|--------|--------|
-    | vizinho SOZINHO (a baseline)     |   5    |  5  |   5    |   1    |
-    | juntos, com o teardown refazendo |   5    |  5  |   5    |   1    |
-    | juntos, SEM refazer              |   3    |  3  |   3    |   1    |
+    | vizinho SOZINHO (a baseline)     |   6    |  6  |   6    |   2    |
+    | juntos, com o teardown refazendo |   6    |  6  |   6    |   2    |
+    | juntos, SEM refazer              |   4    |  4  |   4    |   2    |
+
+    Os números anteriores (5/5/5/1 e 3/3/3/1) tinham UM vermelho a menos em cada
+    coluna: `test_sem_tzset_o_boot_continua_subindo`, que cai em TODAS as quatro
+    zonas. Ele NÃO veio do merge — a `main` pura (ed9bb71) dá as mesmas listas de
+    6 e de 2 nomes, medido em 01/09/2026. É baseline do vizinho, não regressão.
 
     Com o teardown, batem as LISTAS de nomes, não só as contagens. Sem ele o
     estrago é dos DOIS lados, e é por isso que a contagem de Manaus engana ao
-    ficar em 1: este arquivo deixaria a conexão em São Paulo no pool e pintaria
+    ficar igual: este arquivo deixaria a conexão em São Paulo no pool e pintaria
     de VERDE 3 vermelhos legítimos do vizinho em Yangon/UTC/Lisbon
     (`test_a_janela_de_hoje_nao_engole_as_23h_de_ontem`,
     `test_o_resumo_do_periodo_ve_o_gasto_das_23h`,
     `test_a_conversa_responde_pelo_dia_de_sao_paulo`) e 1 em Manaus (o primeiro
     deles) — e ainda INVENTARIA, nos quatro, um vermelho que o vizinho não tem
-    sozinho: `test_as_tres_portas_do_banco_estao_no_fuso_do_app`.
+    sozinho: `test_as_tres_portas_do_banco_estao_no_fuso_do_app`. Em Manaus os
+    dois se cancelam na contagem (2 → 2) e só a LISTA mostra a troca.
     """
     antes = {k: os.environ.get(k) for k in ("TZ", "PGTZ", "REPORT_TIMEZONE")}
 
@@ -269,7 +276,8 @@ def _fuso_de_sao_paulo():
     # arquivo ou outro. Quem move essa agulha é o `close_pool`, não o
     # `align_process_tz`; e não fechar custa os vermelhos legítimos do vizinho
     # que a tabela do docstring da fixture mede acima — 3 em Yangon/UTC/Lisbon e
-    # 1 em Manaus. (Os 26 desta medição foram reconferidos em 01/09/2026: as
+    # 1 em Manaus (o vizinho vai de 6 para 4, e de 2 para 2 com a lista trocada).
+    # (Os 26 desta medição foram reconferidos em 01/09/2026: as
     # duas ordens e o vizinho sozinho dão listas idênticas, de 26 nomes.)
     tzset = getattr(time_module, "tzset", None)
     if tzset is not None:
