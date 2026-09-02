@@ -46,9 +46,9 @@ duas âncoras concordam por construção (`align_process_tz` escreve `TZ` e cham
 `tzset()`), então a disciplina deste arquivo virou defesa em profundidade.
 
 O RÓTULO do mês, esse, vem de outro lugar em cada leitor, e em nenhum deles é o
-processo: `get_spending_trend` converte `criado_em at time zone
-'America/Sao_Paulo'`, hardcoded (`db/accounts.py:392-393`, o parâmetro em `:413`),
-e `compute_evolution` usa `DATE_TRUNC('month', criado_em)` sobre um `timestamptz`
+processo: `get_spending_trend` (db/accounts.py) converte `criado_em at time
+zone %s`, com `tz_name()` no parâmetro, e `compute_evolution` usa
+`DATE_TRUNC('month', criado_em)` sobre um `timestamptz`
 (`db/schema.py:216`), isto é, o fuso da SESSÃO do Postgres (`db/analytics.py:309`)
 — que desde `align_process_tz` também é `America/Sao_Paulo`, então os dois agora
 concordam; antes o mesmo instante podia sair em meses diferentes. O que protege
@@ -56,9 +56,20 @@ os testes disso é a HORA de escrita: sempre no meio do dia (10h a 14h), com fol
 larga sobre os offsets em jogo. Quem mexer nessas horas mexe nessa folga.
 
 Ou seja, não há um referencial só: este arquivo ancora a JANELA, que é o que está
-ao alcance dele. O `America/Sao_Paulo` hardcoded do `get_spending_trend` continua
-fora — consertá-lo é mudança em `db/*`, não aqui. O fuso da SESSÃO saiu de fora:
-ele passou a ser o do app, imposto pelo processo (`align_process_tz`).
+ao alcance dele. O `America/Sao_Paulo` que estava hardcoded no `get_spending_trend`
+NÃO está mais lá: a #179 trocou os dois literais por `tz_name()` (db/accounts.py),
+e era, DOS CINCO QUE A #179 CONVERTEU, o único que ignorava `REPORT_TIMEZONE` e
+`TZ` ao mesmo tempo — os quatro que ficaram de dívida também ignoram as duas, e
+cada um traz um comentário `DÍVIDA (#179)` no próprio local:
+`billing_commands.py::_format_plan_expires`, `email_service.py::_fmt_brl_date`,
+`proactive_ai_scheduler.py::RUN_HOUR_UTC` e o `const APP_TZ` de `dashboard.js`
+(`grep -rn 'DÍVIDA (#179)'` acha os quatro). Sem número de linha de propósito —
+símbolo greppável não apodrece, e este próprio PR empurrou o `RUN_HOUR_UTC` dez
+linhas para baixo no mesmo commit em que a referência foi escrita.
+Hoje o rótulo do mês segue o fuso do app como todo o resto — o que não muda nada
+neste arquivo, que escreve no meio do dia justamente para não depender disso. O
+fuso da SESSÃO também saiu de fora: ele passou a ser o do app, imposto pelo
+processo (`align_process_tz`).
 
 Controle NEGATIVO: volte `{TIPO_CANON_SQL} as tipo` + o filtro para
 `tipo, valor` + `and tipo in ('despesa','receita')` em `get_spending_trend`

@@ -30,7 +30,6 @@ import time as _startup_time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
-from zoneinfo import ZoneInfo
 from typing import Dict
 
 from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
@@ -47,7 +46,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from token_utils import decode_dashboard_token_full, make_dashboard_token
-from utils_date import now_tz
+from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
     ensure_admin_tables,
@@ -147,7 +146,6 @@ load_app_env()
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
-TZ                = os.getenv("TZ", "America/Sao_Paulo")
 # JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
 # DASHBOARD_URL é https → Secure=True. Blindagem: se APP_ENV=prod, força Secure
@@ -681,9 +679,17 @@ async def get_financial_data(
             (query_start, month_end, user_id),
         ),
         # 9) Daily expenses (bar chart)
+        # `tz_name()` interpolado em f-string aqui e nos dois `AT TIME ZONE` de
+        # `get_daily_expenses_window` — forma HERDADA (era a constante `TZ`).
+        # Não é injeção: `tz_name()` é `_tz().key`, nome IANA que o `ZoneInfo`
+        # já validou (o boot recusa inválido em `config/env.py::load_app_env`).
+        # Para SQL NOVO, prefira o bind param: `get_spending_trend`
+        # (db/accounts.py) passa `at time zone %s` com `tz_name()` no
+        # parâmetro. Trocar estes três é mudança de SQL de produção — PR
+        # próprio, não o que unificou a leitura do fuso (#179).
         _q(
             f"""
-            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
+            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{tz_name()}')::int AS dia,
                    SUM(valor) AS total
             FROM launches
             WHERE user_id = %s
@@ -987,7 +993,7 @@ async def get_daily_expenses_window(
     primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
     do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
     if start_date:
-        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{TZ}') >= %s"
+        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{tz_name()}') >= %s"
         params = (user_id, start_date)
     else:
         limit_clause = f"AND criado_em >= NOW() - INTERVAL '{int(days)} days'"
@@ -996,7 +1002,7 @@ async def get_daily_expenses_window(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
-                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{TZ}'), 'YYYY-MM-DD') AS dia,
+                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{tz_name()}'), 'YYYY-MM-DD') AS dia,
                        SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
@@ -2762,7 +2768,16 @@ async def auth_logout(request: Request, response: Response):
             )
 
     _clear_session_cookies(response)
-    response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    # SEM `"storage"`, e a ausência é a regra — não esquecimento. O diretivo é
+    # tudo-ou-nada (não tem granularidade por chave) e apagava localStorage,
+    # sessionStorage, Cache Storage e service workers INTEIROS, atropelando o
+    # `_PRESERVA` de `frontend/static/auth-refresh.js` (e o gêmeo do
+    # `nav-auth.js`), que é a fonte de verdade do que sobrevive ao fim de
+    # sessão. Medido em Chromium 151: `finbot_reset_at` sumia e reabria o flash
+    # de snapshot pré-reset na cadeia reset → logout → relogin; tema, esconder-
+    # saldo e posição do FAB sumiam junto. Quem apaga o estado do aparelho é o
+    # JS — todo chamador de POST /auth/logout carrega um dos dois arquivos.
+    response.headers["Clear-Site-Data"] = '"cookies"'
     _no_store(response)
     return {"ok": True}
 
@@ -5207,9 +5222,13 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
     from core.services.plan_service import history_earliest_date
-    local_today = datetime.now(ZoneInfo(TZ)).date()
+    # UM instante para os dois relógios desta rota (#166): `today_tz()` aqui e
+    # `datetime.now(utc)` lá dentro abriam dois, e na virada do dia a janela
+    # começava num dia e era cortada por outro. Mesmo par de `get_financial_data`.
+    agora = now_tz()
+    local_today = agora.date()
     requested_start = local_today - timedelta(days=days)
-    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, agora)
     start_date = max(requested_start, earliest) if earliest else requested_start
     effective = max(1, (local_today - start_date).days + 1)
     data = await get_daily_expenses_window(user_id, effective, start_date=start_date)
@@ -5272,7 +5291,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     # ── Crédito → add_credit_purchase (à vista) ou installments (parcelado) ─
     if tipo == "credito":
         from db import add_credit_purchase, add_credit_purchase_installments, get_card_by_id
-        from utils_date import today_tz
 
         card_id = payload.card_id
         if not card_id:

@@ -112,6 +112,35 @@ test("snapshot do mês 'seguinte' é ADOTADO (antes: descartado, skeleton)", asy
   await ctx.close();
 });
 
+// Mês ANTERIOR ao do relógio do navegador = a metade oposta da divergência
+// (navegador à frente do servidor: Lisboa +01 contra São Paulo −03).
+function prevMonthOf(page) {
+  return page.evaluate(() => {
+    const y = viewYear, m = viewMonth;
+    return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 };
+  });
+}
+
+test("servidor ATRÁS do navegador: adota e BAIXA o teto do btn-next", async () => {
+  // A outra metade da divergência. O teto era `Math.max`, que só subia: ele
+  // ficava no mês do NAVEGADOR e deixava o btn-next aberto para um mês que o
+  // servidor ainda não começou. Clicar ali manda `year`/`month` explícitos, a
+  // resposta vem com `is_current_month: false`, o render trata como histórico
+  // (`ofBank = hist ? 0 : ...`) e o saldo dos bancos do Open Finance some do
+  // "Saldo consolidado".
+  //
+  // Controle NEGATIVO: repondo `Math.max(latestKnownMonth, ...)` em
+  // dashboard.js, `nextDisabled` volta a `false` e este teste fica vermelho.
+  const { ctx, page } = await bootPage();
+  const pm = await prevMonthOf(page);
+  const out = await send(page, { type: "snapshot", data: { year: pm.year, month: pm.month, launches: [] } });
+  assert.deepEqual(out.view, [pm.year, pm.month], "não adotou o mês (anterior) do servidor");
+  const nextDisabled = await page.evaluate(() => document.getElementById("btn-next").disabled);
+  assert.equal(nextDisabled, true,
+               "btn-next aberto para um mês que o servidor ainda não começou");
+  await ctx.close();
+});
+
 test("depois de navegar de mês manualmente, snapshot divergente volta a ser descartado", async () => {
   const { ctx, page } = await bootPage();
   const nm = await nextMonthOf(page);

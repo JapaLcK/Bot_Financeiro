@@ -51,6 +51,13 @@ ${IDS.map((i) => `<div id="${i}"></div>`).join("")}
 <script src="/dashboard.js"></script>
 </body></html>`;
 
+// A assinatura é waitForFunction(fn, ARG, options): todo `{ timeout }` aqui
+// estava na posição do ARG, ignorado, e valia o padrão de 30s. Corrigida a
+// posição, o valor é um LIMITE para falhar — não um orçamento a medir. Os 5s
+// e 4,5s originais, agora que passariam a valer de verdade, ficariam vermelhos
+// com a suíte saturada (um boot medido levou 8,4s sem nada ter mudado).
+const LIMITE_MS = 15000;
+
 let browser;
 before(async () => { browser = await chromium.launch(); });
 after(async () => { await browser?.close(); });
@@ -60,10 +67,15 @@ after(async () => { await browser?.close(); });
 // wsMode: "silent" = conecta e fica (default) | "reject" = handshake cai 30ms
 // depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
 async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
-                         seedSnap = false, meAfter = null }) {
+                         seedSnap = false, meAfter = null, meGate = false }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   let meCalls = 0;
+  // Com `meGate`, o /auth/me fica PENDENTE até o teste chamar `liberaMe()`.
+  // É o que separa "o boot não espera o /me" de "o boot foi rápido": prazo em
+  // milissegundos mede o relógio de parede, e a suíte saturada o estoura.
+  let liberaMe;
+  const portao = new Promise((r) => { liberaMe = r; });
   if (seedSnap) {
     // Snapshot que a "aba anterior" gravou (USER_ID 42, mês corrente) — o que
     // o restoreSnapshotFromSession consome no boot. pb_home_42 é o par dele: a
@@ -123,7 +135,7 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({ user_id: 42 }) });
     }
     if (url.pathname === "/auth/me") {
-      await new Promise((r) => setTimeout(r, meDelayMs));
+      await (meGate ? portao : new Promise((r) => setTimeout(r, meDelayMs)));
       meCalls += 1;
       // meAfter: resposta das chamadas seguintes (assinatura revogada no meio
       // da sessão) — a 1ª continua sendo `me`.
@@ -137,7 +149,7 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
     return new Promise(() => {});
   });
   await page.goto("http://pb.test/app", { waitUntil: "domcontentloaded" });
-  return { ctx, page };
+  return { ctx, page, liberaMe };
 }
 
 test("sem plano ativo: continua caindo em /precos quando o /me chega", async () => {
@@ -174,7 +186,7 @@ test("paywall NEGA: pb_snap_* E pb_home_* somem — reload da aba não repinta s
 
 test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: true }, seedSnap: true });
-  await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
+  await page.waitForFunction(() => !!window.PBRefresh, undefined, { timeout: LIMITE_MS });
   const chaves = await snapKeys(page);
   assert.deepEqual(chaves, SEED_KEYS,
                    "as chaves semeadas não podem ser apagadas no caminho aprovado");
@@ -209,21 +221,28 @@ test("plano revogado no meio da sessão: revalida, redireciona e PARA de reconec
 
 test("queda transitória DEPOIS de aberto: reconexão legítima segue em ~3s", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 50, wsMode: "open" });
-  await page.waitForFunction(() => window._wsCount === 1, { timeout: 5000 });
+  await page.waitForFunction(() => window._wsCount === 1, undefined, { timeout: LIMITE_MS });
   await page.waitForTimeout(100); // deixa o onopen (30ms) rodar
   await page.evaluate(() => { window._ws.onclose({ code: 1006 }); }); // queda
-  await page.waitForFunction(() => window._wsCount >= 2, { timeout: 4500 });
+  await page.waitForFunction(() => window._wsCount >= 2, undefined, { timeout: LIMITE_MS });
   const n = await page.evaluate(() => window._wsCount);
   assert.ok(n >= 2, "socket que já abriu tem que reconectar em ~3s");
   await ctx.close();
 });
 
 test("connect() dispara ANTES de o /auth/me resolver (não paga mais essa RTT)", async () => {
-  const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 600 });
-  await page.waitForFunction(() => window._wsCreatedAt !== null, { timeout: 5000 });
-  const wsAt = await page.evaluate(() => window._wsCreatedAt);
-  assert.ok(wsAt < 600, `WebSocket só nasceu em ${wsAt}ms — ainda espera o /auth/me (600ms)`);
+  // O /auth/me fica PENDENTE o teste inteiro até o `liberaMe()`. A versão
+  // anterior media prazo (`wsAt < 600`) e ficava vermelha com a suíte saturada
+  // — 1562ms num boot que não tinha mudado nada. Comparar dois CARIMBOS (o do
+  // ws e o do /me) também não resolve: medido, um run saturado deu
+  // ws=1362ms × me=1361ms, inversão de 1ms sem regressão nenhuma. Com o portão
+  // não há relógio: o único jeito de o ws não nascer é o boot esperar o /me.
+  const { ctx, page, liberaMe } = await bootApp({ me: { app_access: true }, meGate: true });
+  await page.waitForFunction(() => window._wsCreatedAt !== null, undefined, { timeout: LIMITE_MS });
   // e o PBRefresh (contrato do puxar-pra-atualizar) só nasce depois do /me:
-  await page.waitForFunction(() => !!window.PBRefresh, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => !!window.PBRefresh), false,
+               "PBRefresh nasceu com o /auth/me ainda pendente");
+  liberaMe();
+  await page.waitForFunction(() => !!window.PBRefresh, undefined, { timeout: LIMITE_MS });
   await ctx.close();
 });

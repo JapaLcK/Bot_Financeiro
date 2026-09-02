@@ -475,9 +475,21 @@ const fmtShort = n => {
     : "R$" + Number(n).toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
 };
 
-// Fuso do app (o backend agrupa tudo em America/Sao_Paulo). Exibimos as datas
-// SEMPRE nesse fuso pra não depender do timezone do dispositivo — no WebView do
-// iOS ele costuma vir em UTC, o que fazia a hora aparecer ~3h adiantada.
+// Fuso do app, CRAVADO aqui. Exibimos as datas SEMPRE nesse fuso pra não
+// depender do timezone do dispositivo — no WebView do iOS ele costuma vir em
+// UTC, o que fazia a hora aparecer ~3h adiantada.
+//
+// DÍVIDA (#179): o backend NÃO agrupa mais "tudo em America/Sao_Paulo" — ele
+// agrupa no fuso do app (`REPORT_TIMEZONE` → `TZ` → São Paulo,
+// `utils_date.tz_name()`). Com as duas variáveis iguais — que é o que o
+// `.env.example` documenta (as linhas `REPORT_TIMEZONE=` e `TZ=`), e o que NÃO
+// foi verificado no Railway — os
+// dois lados coincidem e nada diverge. No dia em que `REPORT_TIMEZONE` apontar
+// para outro fuso, este literal passa a mentir — e o caso grave não é o display
+// e sim a ESCRITA: `appTzWallClockToISO` (abaixo) converte o input de data da edição
+// de lançamento tratando-o como hora de parede em APP_TZ, então gravaria um
+// instante de outro dia. Fechar isso é mudança de CONTRATO (o backend teria de
+// mandar o fuso junto com os dados), logo PR próprio — não este.
 const APP_TZ = "America/Sao_Paulo";
 
 // Normaliza uma string de data: se vier sem timezone (naive), a coluna é
@@ -7616,9 +7628,20 @@ function connect() {
           msg.data?.year && msg.data?.month && !isCurrentViewData(msg.data)) {
         viewYear = Number(msg.data.year);
         viewMonth = Number(msg.data.month);
-        // O servidor conhece um mês mais novo que o relógio local: o teto do
-        // btn-next avança junto (senão "próximo mês" abre um mês vazio).
-        latestKnownMonth = Math.max(latestKnownMonth, viewYear * 12 + viewMonth);
+        // O teto do btn-next passa a ser o mês do SERVIDOR — atribuição, não
+        // `Math.max`. O `max` só sabia SUBIR o teto, e resolvia meia divergência:
+        // servidor À FRENTE do relógio local (Manaus −04 contra São Paulo −03),
+        // onde sem subir o "próximo mês" abriria um mês vazio.
+        // Na metade oposta — navegador à frente do servidor (Lisboa +01) — o teto
+        // ficava no mês do NAVEGADOR e deixava o btn-next aberto para um mês que o
+        // servidor ainda não começou. Quem clicasse ia parar num pedido explícito
+        // (`year`/`month` na requisição) que volta com `is_current_month: false`,
+        // e aí o render trata como mês histórico: `ofBank = hist ? 0 : ...`, e o
+        // saldo dos bancos do Open Finance SOME do "Saldo consolidado" — dinheiro
+        // a menos na tela, sem explicação, nas 3h após a virada do dia 1º.
+        // Descer o teto junto é a mesma regra já declarada duas linhas acima ("o
+        // servidor é a fonte da verdade do mês"), agora nas duas direções.
+        latestKnownMonth = viewYear * 12 + viewMonth;
         updateMonthLabel();
       }
       if (!isCurrentViewData(msg.data)) return;
