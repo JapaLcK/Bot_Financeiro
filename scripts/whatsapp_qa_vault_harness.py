@@ -89,6 +89,27 @@ if not os.environ.get("OPENAI_API_KEY"):
     print("[harness] AVISO: OPENAI_API_KEY não encontrada — chamadas de IA vão falhar.")
 
 # ─────────────────────────────────────────────────────────────────────────
+# 3b) Medidor de chamadas OpenAI (custo + coluna comando × IA)
+# ─────────────────────────────────────────────────────────────────────────
+import scripts._ai_meter as meter  # noqa: E402
+
+meter.install()
+
+# Modelos que ESTE código usa de fato: o do .env (6 módulos leem a mesma env)
+# e os dois fixos do media_service. Conferir antes vira erro de apelido aqui,
+# em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
+_MODELOS_USADOS = [
+    os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+    "whisper-1",  # core/services/media_service.py:102
+    "gpt-4o",     # core/services/media_service.py:187
+]
+MODEL_PROBLEMS = meter.check_models(_MODELOS_USADOS)
+for _p in MODEL_PROBLEMS:
+    print(f"[harness] MODELO: {_p}")
+if not MODEL_PROBLEMS:
+    print(f"[harness] modelos conferidos em /v1/models: {', '.join(_MODELOS_USADOS)}")
+
+# ─────────────────────────────────────────────────────────────────────────
 # 4) init_db()
 # ─────────────────────────────────────────────────────────────────────────
 from db import init_db  # noqa: E402
@@ -102,6 +123,43 @@ print("[harness] schema inicializado.")
 from core.types import IncomingMessage  # noqa: E402
 import core.handle_incoming as hi  # noqa: E402
 import db  # noqa: E402
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Guarda de afirmações: coleta o que as tools devolveram (a evidência que o
+# modelo teve na mão) pra conferir número inventado na resposta.
+# `_dispatch_tool` é o ÚNICO ponto por onde todo resultado de tool passa.
+# ─────────────────────────────────────────────────────────────────────────
+from core.services import ai_guard  # noqa: E402
+import core.services.ai_chat.runner as _runner  # noqa: E402
+
+TOOL_RESULTS: list[str] = []
+_orig_dispatch = _runner._dispatch_tool
+
+
+def _dispatch_tool_spy(user_id, name, args):
+    out = _orig_dispatch(user_id, name, args)
+    TOOL_RESULTS.append(out[0] or "")
+    return out
+
+
+_runner._dispatch_tool = _dispatch_tool_spy
+
+# "gastou chamada" NÃO é o mesmo que "o modelo escreveu a resposta": o Tier 3
+# do classificador gasta uma chamada e o texto sai de handler determinístico.
+# Medido: com o gatilho errado, 14 das 17 afirmações "não sustentadas" eram
+# extrato escrito por código, não pelo modelo. Quem responde de verdade é o
+# `_run_tool_loop` — se ele não rodou no turno, não há afirmação de IA.
+CHAT_RUNS = [0]
+_orig_loop = _runner._run_tool_loop
+
+
+def _run_tool_loop_spy(*a, **kw):
+    CHAT_RUNS[0] += 1
+    return _orig_loop(*a, **kw)
+
+
+_runner._run_tool_loop = _run_tool_loop_spy
 
 
 def msg(uid, text, platform="whatsapp"):
@@ -150,13 +208,16 @@ class Scenario:
         self.name = name
         self.domain = domain
         self.scenario_desc = scenario_desc
-        self.turns: list[tuple[str, str]] = []  # (você, pigbank)
+        self.turns: list[tuple[str, str, list[dict], list]] = []  # (você, pigbank, chamadas, claims)
         self.checklist: list[tuple[bool | None, str]] = []
         self.veredict = "🔍"
         self.notes: list[str] = []
         self.exception = None
 
     def turn(self, uid, text, platform="whatsapp"):
+        mark = meter.snapshot()
+        tmark = len(TOOL_RESULTS)
+        cmark = CHAT_RUNS[0]
         try:
             resp = send(uid, text, platform=platform)
         except Exception as e:
@@ -164,7 +225,17 @@ class Scenario:
             resp = f"(EXCEÇÃO: {e.__class__.__name__}: {e})"
             self.exception = tb
             self.veredict = "⚠️"
-        self.turns.append((text, resp))
+        # A marca é lida MESMO no caminho da exceção: chamada que já saiu foi
+        # cobrada, e o turno que quebrou depois dela não é "comando".
+        chamadas = meter.since(mark)
+        # A guarda só faz sentido em resposta de MODELO. No caminho
+        # determinístico não há tool nenhuma pra servir de evidência, e todo
+        # ID viraria falso positivo — o código que imprime `#1` é o mesmo que
+        # gravou a linha.
+        escrita_pela_ia = CHAT_RUNS[0] > cmark
+        claims = (ai_guard.check(resp, TOOL_RESULTS[tmark:], user_text=text)
+                  if escrita_pela_ia else [])
+        self.turns.append((text, resp, chamadas, claims))
         return resp
 
     def check(self, ok, label):
@@ -698,7 +769,9 @@ def cena_15_parcelamento():
     sc.note(f"PC capturado (celular): {pc2}")
     C14_STATE["pc_celular"] = pc2
 
-    limit_blocked = any("excede o limite" in r.lower() for _, r in sc.turns)
+    # Indexa em vez de desempacotar: `turns` ganhou campos (chamadas, claims) e
+    # o `for _, r in` daqui quebrava a cena inteira a cada campo novo.
+    limit_blocked = any("excede o limite" in t[1].lower() for t in sc.turns)
     if limit_blocked and not all(x[0] for x in sc.checklist):
         sc.set_veredict("🔍")
         sc.note("Veredito 🔍 em vez de ❌: bloqueio por limite (ver aviso acima), não erro de "
@@ -991,9 +1064,46 @@ def main():
     print(f"[harness] resumo: ✅{counts['✅']} ❌{counts['❌']} ⚠️{counts['⚠️']} 🔍{counts['🔍']} "
           f"de {len(SCENARIOS)}")
 
+    usd, unknown = meter.cost_usd(meter.CALLS)
+    ia, cmd = _split_paths()
+    print(f"[harness] caminho: {ia} turno(s) por IA, {cmd} por comando "
+          f"({len(meter.CALLS)} chamadas OpenAI)")
+    print(f"[harness] custo desta rodada: US$ {usd:.4f}")
+    if unknown:
+        print(f"[harness] AVISO: modelo(s) sem preço na tabela, FORA do custo: {', '.join(unknown)}")
+    todas = [c for sc in SCENARIOS for _, _, _, cl in sc.turns for c in cl]
+    nao_sust = [c for c in todas if not c.supported]
+    print(f"[harness] guarda: {len(todas)} afirmação(ões) numérica(s) em resposta de IA, "
+          f"{len(nao_sust)} NÃO sustentada(s)")
+    for c in nao_sust:
+        print(f"[harness]   🚨 {c.token} ({c.kind}) — {c.detail}")
+    meter.append_ledger(usd, "whatsapp_qa_vault_harness")
+    print(f"[harness] acumulado dos harnesses no mês: US$ {meter.month_total_usd():.4f}")
+
+
+def _split_paths() -> tuple[int, int]:
+    """(turnos que chamaram IA, turnos resolvidos por comando)."""
+    ia = cmd = 0
+    for sc in SCENARIOS:
+        for _, _, chamadas, _ in sc.turns:
+            if chamadas:
+                ia += 1
+            else:
+                cmd += 1
+    return ia, cmd
+
 
 def write_report():
-    path = os.path.join(WORKTREE_ROOT, "docs", "qa_whatsapp_pilot_2026-08-20.md")
+    # Data do dia, não fixa: com o nome cravado em 2026-08-20 toda rodada nova
+    # sobrescrevia em silêncio o relatório da rodada anterior — que é o único
+    # registro do que a IA respondeu naquele dia, e não se reproduz sem pagar
+    # a suíte de novo.
+    # Com HORA, não só data: duas rodadas no mesmo dia é o caso NORMAL (rodar,
+    # consertar, rodar de novo) e só a data ainda sobrescrevia. Custou uma
+    # comparação real — a 1ª rodada de 02/09 sumiu debaixo da 2ª, e era ela que
+    # provava que o defeito da cena 18 é intermitente.
+    hoje = datetime.now().strftime("%Y-%m-%d_%H%M")
+    path = os.path.join(WORKTREE_ROOT, "docs", f"qa_whatsapp_pilot_{hoje}.md")
     counts = {"✅": 0, "❌": 0, "⚠️": 0, "🔍": 0}
     for sc in SCENARIOS:
         counts[sc.veredict] = counts.get(sc.veredict, 0) + 1
@@ -1001,13 +1111,43 @@ def write_report():
     lines = []
     lines.append("# QA piloto — vault WhatsApp (23 interações, 3 domínios)")
     lines.append("")
-    lines.append(f"Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando "
+    lines.append(f"Gerado em {hoje} por `scripts/whatsapp_qa_vault_harness.py`, chamando "
                   f"`core.handle_incoming.handle_incoming()` direto contra um Postgres isolado "
                   f"e descartável, sem mockar a IA (chamadas OpenAI reais).")
     lines.append("")
     lines.append(f"**Sumário:** {len(SCENARIOS)} interações — "
                   f"✅ {counts['✅']} · ❌ {counts['❌']} · ⚠️ {counts['⚠️']} · 🔍 {counts['🔍']}")
     lines.append("")
+    usd, unknown = meter.cost_usd(meter.CALLS)
+    ia, cmd = _split_paths()
+    lines.append(f"**Caminho:** {ia} turno(s) resolvido(s) pela IA · {cmd} por comando/regex "
+                  f"(sem chamada nenhuma) — {len(meter.CALLS)} chamadas OpenAI no total.")
+    lines.append("")
+    tin = sum(c["in"] for c in meter.CALLS)
+    tcached = sum(c["cached"] for c in meter.CALLS)
+    pct = (100 * tcached / tin) if tin else 0
+    lines.append(f"**Custo:** US$ {usd:.4f} nesta rodada · US$ {meter.month_total_usd():.4f} "
+                  f"acumulado no mês pelos harnesses. {tin} tokens de entrada, "
+                  f"{tcached} cacheados ({pct:.0f}%), cobrados à metade. "
+                  f"Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) "
+                  f"— reconfira antes de citar fora daqui.")
+    if unknown:
+        lines.append("")
+        lines.append(f"⚠️ **Fora do custo:** modelo(s) sem preço na tabela: {', '.join(unknown)}.")
+    if MODEL_PROBLEMS:
+        lines.append("")
+        lines.append("⚠️ **Modelos:** " + " · ".join(MODEL_PROBLEMS))
+    lines.append("")
+    todas = [c for sc in SCENARIOS for _, _, _, cl in sc.turns for c in cl]
+    nao_sust = [c for c in todas if not c.supported]
+    if todas:
+        lines.append(f"**Guarda de afirmações:** {len(todas)} afirmação(ões) numérica(s) "
+                      f"em resposta de IA · **{len(nao_sust)} não sustentada(s)** "
+                      f"(número que não veio de nenhuma tool nem da mensagem do usuário).")
+        for c in nao_sust:
+            lines.append(f"- 🚨 `{c.token}` ({c.kind}) — {c.detail}")
+        lines.append("")
+
     lines.append("## Discrepâncias entre vault e código")
     lines.append("")
     if DISCREPANCIAS:
@@ -1023,9 +1163,12 @@ def write_report():
         lines.append(f"## {sc.name}")
         lines.append(f"**Domínio:** {sc.domain} · **Cenário/usuário:** {sc.scenario_desc}")
         lines.append("")
-        for texto, resposta in sc.turns:
+        for texto, resposta, chamadas, claims in sc.turns:
             lines.append(f"> Você: {texto}")
             lines.append(f"> PigBank: {resposta}")
+            lines.append(f"> _caminho: {meter.path_label(chamadas)}_")
+            if claims:
+                lines.append(f"> _guarda: {ai_guard.verdict(claims)}_")
             lines.append(">")
         lines.append("")
         lines.append(f"**Veredito:** {sc.veredict}")
