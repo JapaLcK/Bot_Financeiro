@@ -71,6 +71,8 @@ export function markupDe(js) {
   const trechos = [];
   const dados = [];
   const perdidos = [];
+  const pilha = [];          // para cada `(` aberto: era cabeçalho de controle?
+  let ultimoCabecalho = false;
   let i = 0;
 
   while (i < js.length) {
@@ -85,7 +87,14 @@ export function markupDe(js) {
       const fim = js.indexOf("\n", i);
       i = fim < 0 ? js.length : fim + 1; continue;
     }
-    if (c === "/" && ehRegex(js, i)) {
+    if (c === "(") {
+      let m = i - 1;
+      while (m >= 0 && /\s/.test(js[m])) m--;
+      pilha.push(CABECALHO.has(palavraAte(js, m)));
+      i++; continue;
+    }
+    if (c === ")") { ultimoCabecalho = pilha.pop() ?? false; i++; continue; }
+    if (c === "/" && ehRegex(js, i, ultimoCabecalho)) {
       const fim = fimDeRegex(js, i);
       if (fim < 0) { perdidos.push("literal de expressão regular sem fechamento"); break; }
       i = fim + 1; continue;
@@ -143,22 +152,18 @@ function palavraAte(s, j) {
   return s.slice(k + 1, j + 1);
 }
 
-function ehRegex(s, i) {
+function ehRegex(s, i, ultimoCabecalho = false) {
   let j = i - 1;
   while (j >= 0 && /\s/.test(s[j])) j--;
   if (j < 0) return true;
   if (!/[\w$)\]]/.test(s[j])) return true;
   if (s[j] === ")") {
-    // Volta até o `(` que casa, e pergunta o que vinha antes dele.
-    let prof = 0, k = j;
-    for (; k >= 0; k--) {
-      if (s[k] === ")") prof++;
-      else if (s[k] === "(" && --prof === 0) break;
-    }
-    if (k < 0) return false;
-    let m = k - 1;
-    while (m >= 0 && /\s/.test(s[m])) m--;
-    return CABECALHO.has(palavraAte(s, m));
+    // Quem responde é a VARREDURA, não uma volta cega pelo texto: contar parêntese
+    // de trás para frente atravessa `if (foo(")")) /re/…` e conta o `)` que está
+    // DENTRO da string. A varredura já sabe o que é literal, então ela guarda, a
+    // cada `(` que abre, a palavra que vinha antes — e `ultimoCabecalho` diz se o
+    // `)` recém-fechado fechava um cabeçalho de controle.
+    return ultimoCabecalho;
   }
   if (s[j] === "]") return false;
   return PALAVRA_OPERADOR.has(palavraAte(s, j));
@@ -186,13 +191,18 @@ function fimDeRegex(s, i) {
  * ao parser daria um atributo malformado (`\\"missing()\\"`), e o nome sumiria da
  * cobertura sem nenhum aviso.
  *
- * Só os escapes que mudam o texto do markup: aspa, barra, e as quebras usuais.
- * `\\u` e `\\x` ficam de fora de propósito — não aparecem em delimitador de atributo,
- * e decodificá-los mal seria pior que não decodificar.
+ * TODOS eles, inclusive `\\xNN` e `\\uNNNN`. Eu tinha deixado os dois de fora "de
+ * propósito", e o propósito estava errado: `"<button \\x6f\\x6eclick=…>"` vira um
+ * `onclick=` de verdade em tempo de execução, e não decodificar significa não ver o
+ * handler — o filtro de candidatos nem enxerga `on…=` ali.
  */
 const ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" };
 const semEscape = (s) =>
-  s.replace(/\\([\s\S])/g, (_, c) => (c in ESCAPES ? ESCAPES[c] : c));
+  s.replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|([\s\S]))/g,
+    (_, hex, chaves, uni, outro) => {
+      if (hex ?? chaves ?? uni) return String.fromCodePoint(parseInt(hex ?? chaves ?? uni, 16));
+      return outro in ESCAPES ? ESCAPES[outro] : outro;
+    });
 
 /** Índice da aspa de fechamento, ou -1. A barra invertida consome o próximo. */
 function fimDeString(s, i, aspa) {
@@ -309,6 +319,8 @@ function locaisDe(v) {
  */
 function semLiterais(s) {
   let out = "";
+  const pilha = [];
+  let ultimoCabecalho = false;
   for (let i = 0; i < s.length; ) {
     const c = s[i];
     // COMENTÁRIO primeiro, senão o `//` vira "regex vazia" e o corpo do comentário
@@ -329,7 +341,14 @@ function semLiterais(s) {
       if (fim < 0) return out;                 // literal aberto: para, não adivinha
       out += c + c; i = fim + 1; continue;
     }
-    if (c === "/" && ehRegex(s, i)) {
+    if (c === "(") {
+      let m = i - 1;
+      while (m >= 0 && /\s/.test(s[m])) m--;
+      pilha.push(CABECALHO.has(palavraAte(s, m)));
+      out += c; i++; continue;
+    }
+    if (c === ")") { ultimoCabecalho = pilha.pop() ?? false; out += c; i++; continue; }
+    if (c === "/" && ehRegex(s, i, ultimoCabecalho)) {
       const fim = fimDeRegex(s, i);
       if (fim < 0) return out;
       out += "/x/"; i = fim + 1; continue;
@@ -413,22 +432,31 @@ function argumentosDe(t) {
  */
 const ANTES_DE_HANDLER = /(?:\bclick|\.on[a-z]+)\s*[:=]\s*$/i;
 
+/** Tira comentário do sufixo antes de casar: `{ click: /* nota *\/ "x()" }`. */
+const semComentarioNoFim = (t) =>
+  t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*\n/g, " ");
+
 const ehHandlerEmDado = (js, i) =>
-  ANTES_DE_HANDLER.test(js.slice(Math.max(0, i - 48), i));
+  ANTES_DE_HANDLER.test(semComentarioNoFim(js.slice(Math.max(0, i - 160), i)));
 
 export function nomesDe(valores) {
   const funcoes = new Set(), variaveis = new Set();
   for (const v of valores) {
     const limpo = semLiterais(v);
-    for (const m of limpo.matchAll(CHAMADA)) if (!NATIVO.has(m[1])) funcoes.add(m[1]);
-    for (const m of limpo.matchAll(CHAMADA_WINDOW)) if (!NATIVO.has(m[1])) funcoes.add(m[1]);
-    for (const m of limpo.matchAll(RAIZ_DE_MEMBRO)) {
-      if (!NATIVO.has(m[1]) && !NAO_E_NOME.has(m[1])) variaveis.add(m[1]);
-    }
+    // `locais` PRIMEIRO, e valendo para tudo: um handler auto-contido como
+    // `onclick="const helper = () => {}; helper()"` é correto, e exigir `helper` no
+    // escopo global reprovaria código que funciona. Vale para chamada, para raiz de
+    // membro e para argumento — antes valia só para argumento.
     const locais = locaisDe(limpo);
+    const global = (n) => !NATIVO.has(n) && !locais.has(n);
+    for (const m of limpo.matchAll(CHAMADA)) if (global(m[1])) funcoes.add(m[1]);
+    for (const m of limpo.matchAll(CHAMADA_WINDOW)) if (global(m[1])) funcoes.add(m[1]);
+    for (const m of limpo.matchAll(RAIZ_DE_MEMBRO)) {
+      if (global(m[1]) && !NAO_E_NOME.has(m[1])) variaveis.add(m[1]);
+    }
     for (const tok of argumentosDe(limpo)) {
       const n = tok.trim();
-      if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && !NATIVO.has(n) && !locais.has(n)) {
+      if (SO_NOME.test(n) && !NAO_E_NOME.has(n) && global(n)) {
         variaveis.add(n);
       }
     }
