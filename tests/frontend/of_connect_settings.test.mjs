@@ -351,7 +351,7 @@ test("mensagem estruturada do backend chega ao usuário", async () => {
   await page.waitForFunction(() => {
     const t = document.getElementById("toast");
     return t && /Seu plano acabou/.test(t.textContent || "");
-  }, { timeout: 8000 });
+  }, undefined, { timeout: 15000 });
   await page.__ctx.close();
 });
 
