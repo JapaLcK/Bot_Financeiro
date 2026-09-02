@@ -415,6 +415,14 @@ window.addEventListener('storage', (event) => {
   if (event.key === 'finbot_logout_at') {
     window.location.replace('/?logout=1');
   }
+  // "Recomeçar do zero" noutra aba: os saldos renderizados aqui são dado
+  // apagado e nada mais repinta sozinho. Reação ao EVENTO (storage não
+  // dispara na própria aba nem pela mera presença da chave — sem loop de
+  // reload); newValue estrito ignora remoção. O reload cai no gate, que
+  // decide (needs_onboarding → /onboarding).
+  if (event.key === 'finbot_reset_at' && event.newValue) {
+    window.location.reload();
+  }
 });
 
 /* ═══════════════════════════════════════════════════════════════════════

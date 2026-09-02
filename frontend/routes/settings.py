@@ -182,6 +182,20 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
     # apagados a outra aba com o dashboard aberto.
     shared.invalidate_dashboard_current_cache(user_id)
 
+    # Dashboards conectados — inclusive noutro DISPOSITIVO, onde o storage
+    # event do finbot_reset_at não chega — refazem o mês na hora: reuso
+    # deliberado do evento que o dashboard.js já trata (dispara get_month),
+    # mesmo best-effort do sync (frontend/routes/open_finance.py). A /home
+    # não tem WebSocket — teto aceito: lá a recarga cai no gate.
+    try:
+        from frontend.finance_bot_websocket_custom import manager
+
+        await manager.broadcast_to_user(
+            user_id, json.dumps({"type": "open_finance_synced", "item_id": "account_reset"}),
+        )
+    except Exception:  # noqa: BLE001 — atualização ao vivo é conveniência, nunca bloqueia o reset
+        pass
+
     await asyncio.to_thread(
         record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,
     )

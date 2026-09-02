@@ -1393,6 +1393,19 @@ function showAccessError() {
   `;
 }
 
+/* "Recomeçar do zero" noutra aba: esta tela fica com saldos apagados
+   renderizados e nada repinta sozinho (a home não tem WebSocket). Reação ao
+   EVENTO de storage (não dispara na própria aba nem pela presença da chave —
+   sem loop); newValue estrito ignora remoção. Guard contra re-registro: o
+   init pb-nav pode rodar de novo num mount client-side. Mesmo padrão do
+   listener de finbot_logout_at do dashboard.js. */
+if (!window.__pbResetAtListener) {
+  window.__pbResetAtListener = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key === "finbot_reset_at" && event.newValue) window.location.reload();
+  });
+}
+
 /* ─── Instant-paint via sessionStorage ────────────────────────────────────
    O app troca /home <-> /app com reload de página inteira; sem isso a tela
    Início mostrava skeleton e esperava /data + /history a cada abertura.

@@ -508,6 +508,16 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
     # derrubá-lo, senão outra aba segue vendo pockets/cartões/OF apagados.
     routes_shared.dashboard_current_cache[user_id] = (0.0, {"pre": "reset"}, None, None)
 
+    # Dashboards noutro dispositivo só sabem do reset pelo WS: a rota tem de
+    # emitir o broadcast por usuário (reuso do open_finance_synced).
+    avisados: list[int] = []
+
+    async def _broadcast(uid, payload):
+        avisados.append(int(uid))
+        return 0
+
+    monkeypatch.setattr(dashboard.manager, "broadcast_to_user", _broadcast)
+
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id)
     resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
@@ -517,6 +527,8 @@ def test_rota_deleta_os_items_do_usuario_na_pluggy(user_id, monkeypatch):
     assert all(n == 0 for n in _contagens(user_id).values())
     assert user_id not in routes_shared.dashboard_current_cache, \
         "o snapshot cacheado do dashboard sobreviveu ao reset (Codex PR #217, rodada 2)"
+    assert avisados == [user_id], \
+        "o reset tinha que avisar os dashboards conectados via broadcast_to_user"
 
     with get_conn() as conn:
         with conn.cursor() as cur:

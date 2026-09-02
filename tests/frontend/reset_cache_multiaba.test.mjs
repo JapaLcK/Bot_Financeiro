@@ -137,10 +137,16 @@ test("home: resposta em voo durante o reset é carimbada com o t0 do request", a
   // e o próximo restore a descarta. CONTROLE NEGATIVO: com o carimbo no
   // persist (código anterior), savedAt > marker → vermelho.
   const page = await newPage();
+  // fora do try: se um assert/timeout estourar antes do liberar(), o handler
+  // da rota ficaria estacionado no `await preso` com request pendente e o
+  // close do contexto viraria "atividade assíncrona depois do teste" no CI.
+  let liberar = () => {};
   try {
-    let liberar;
     const preso = new Promise((r) => { liberar = r; });
-    await page.route("**/data/**", async (route) => { await preso; route.fulfill(json({})); });
+    await page.route("**/data/**", async (route) => {
+      await preso;
+      try { await route.fulfill(json({})); } catch { /* contexto já fechado */ }
+    });
 
     const pedido = page.waitForRequest("**/data/**");
     await page.goto(`${ORIGIN}/home.html`);
@@ -159,7 +165,7 @@ test("home: resposta em voo durante o reset é carimbada com o t0 do request", a
       () => JSON.parse(sessionStorage.getItem("pb_home_1")).savedAt);
     assert.ok(Number(savedAt) < marker,
               `savedAt (${savedAt}) tinha que ser o t0 do request, anterior ao marker (${marker})`);
-  } finally { await page.__ctx.close(); }
+  } finally { liberar(); await page.__ctx.close(); }
 });
 
 test("dashboard: snapshot anterior ao finbot_reset_at é descartado no restore", async () => {
@@ -179,6 +185,45 @@ test("dashboard: snapshot anterior ao finbot_reset_at é descartado no restore",
     });
     assert.equal(resultado.restaurou, false, "restore de snapshot pré-reset tinha que devolver false");
     assert.equal(resultado.ficou, false, "a chave pré-reset tinha que ser removida");
+  } finally { await page.__ctx.close(); }
+});
+
+async function abaRecarregaNoEvento(page, url, prontoQuando) {
+  await page.goto(url);
+  await waitFor(() => page.evaluate(prontoQuando), `listener pronto em ${url}`);
+  // negativo primeiro: chave alheia NÃO pode recarregar (comparação estrita)
+  await page.evaluate(() => {
+    window.__viva = 1;
+    window.dispatchEvent(new StorageEvent("storage", { key: "pbNewsTab", newValue: "1" }));
+  });
+  await sleep(400);
+  assert.equal(await page.evaluate(() => window.__viva), 1,
+               "storage event de OUTRA chave recarregou a aba");
+  // o evento do reset recarrega (a aba renderizada tem saldos apagados)
+  await page.evaluate(() => {
+    window.dispatchEvent(new StorageEvent("storage", { key: "finbot_reset_at", newValue: "123" }));
+  });
+  await waitFor(async () => {
+    // o reload destrói o contexto no meio do evaluate — é o próprio sucesso
+    // em curso; tenta de novo até o documento novo (sem __viva) responder.
+    try { return await page.evaluate(() => window.__viva === undefined); }
+    catch { return false; }
+  }, "reload da aba após o evento do reset");
+}
+
+test("dashboard: storage event do finbot_reset_at recarrega a aba aberta", async () => {
+  const page = await newPage();
+  try {
+    await abaRecarregaNoEvento(page, `${ORIGIN}/dashboard.html`,
+      () => typeof restoreSnapshotFromSession === "function");
+  } finally { await page.__ctx.close(); }
+});
+
+test("home: storage event do finbot_reset_at recarrega a aba aberta", async () => {
+  const page = await newPage();
+  try {
+    await abaRecarregaNoEvento(page, `${ORIGIN}/home.html`,
+      () => window.__pbResetAtListener === true);
   } finally { await page.__ctx.close(); }
 });
 
