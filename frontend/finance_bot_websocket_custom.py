@@ -120,6 +120,7 @@ from frontend.routes.shared import (
     JWT_SECRET,
     authorize_dashboard_access as _authorize_dashboard_access,
     dashboard_current_cache as _dashboard_current_cache,
+    dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
@@ -324,6 +325,12 @@ async def _get_dashboard_current_state(user_id: int):
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
         return cached[1], cached[2], cached[3], cached[4], cached[5]
 
+    # Época ANTES dos gathers: se uma invalidação (reset, escrita de pocket/
+    # cartão/launch) rodar enquanto este fill espera o banco, publicar o
+    # resultado seria regravar dado pré-mutação por cima do pop (até 45s de
+    # TTL). Fill concorrente legítimo publica normal (mesma época).
+    fill_epoch = _dashboard_current_cache_epoch.get(int(user_id), 0)
+
     # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
     # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
     # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
@@ -341,14 +348,15 @@ async def _get_dashboard_current_state(user_id: int):
     if not require_min_tier(user_id, "essencial"):
         rv_positions = []
         of_fixed_income = []
-    _dashboard_current_cache[int(user_id)] = (
-        _startup_time.monotonic(),
-        current_pockets,
-        current_investments,
-        market_rates,
-        rv_positions,
-        of_fixed_income,
-    )
+    if _dashboard_current_cache_epoch.get(int(user_id), 0) == fill_epoch:
+        _dashboard_current_cache[int(user_id)] = (
+            _startup_time.monotonic(),
+            current_pockets,
+            current_investments,
+            market_rates,
+            rv_positions,
+            of_fixed_income,
+        )
     return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 

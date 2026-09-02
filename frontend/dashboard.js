@@ -366,6 +366,11 @@ function persistSnapshotToSession(data) {
   const type = data.launches_pagination?.filter_type || "all";
   const text = data.launches_pagination?.query || "";
   if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
+  // pb_saved_at é o RECEBIMENTO do payload WS — push do servidor não tem "t0
+  // de request" para capturar (a home, que usa fetch, carimba o t0). Teto
+  // aceito: payload gerado ANTES de um reset e entregue DEPOIS do marker
+  // passaria pelo predicado do restore; a janela é geração→entrega num socket
+  // vivo (ms) e não há replay — a reconexão re-GERA o snapshot no connect.
   try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify({ ...data, pb_saved_at: Date.now() })); } catch {}
 }
 function restoreSnapshotFromSession() {

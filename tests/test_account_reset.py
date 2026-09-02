@@ -708,6 +708,52 @@ def test_sync_de_item_varrido_pelo_reset_nao_recria_nada(user_id):
     assert _contagens(user_id)["open_finance_connections"] == 0
 
 
+# ── 7d. fill do cache em voo não republica dado pré-reset ───────────────────
+
+def test_fill_em_voo_nao_republica_cache_pre_reset(user_id, monkeypatch):
+    """Codex PR #217 (P2): um `_get_dashboard_current_state` que já perdeu o
+    cache e está aguardando o banco quando a invalidação roda acordava e
+    gravava o resultado pré-reset de volta (até 45s de TTL servindo dado
+    apagado). Com a época: o fill captura antes dos gathers e só publica se
+    ela não mudou. CONTROLE NEGATIVO: com a publicação incondicional (código
+    anterior), este teste fica vermelho — verificado por mutação na sessão."""
+    import asyncio
+    import threading
+
+    from frontend.routes import shared as routes_shared
+
+    liberar = threading.Event()
+    comecou = threading.Event()
+    original = dashboard.accrue_all_pockets
+
+    def _trava(uid):
+        comecou.set()
+        assert liberar.wait(timeout=10), "orquestração: ninguém liberou o fill"
+        return original(uid)
+
+    monkeypatch.setattr(dashboard, "accrue_all_pockets", _trava)
+    routes_shared.invalidate_dashboard_current_cache(user_id)  # estado limpo
+
+    async def _cenario():
+        tarefa = asyncio.create_task(dashboard._get_dashboard_current_state(user_id))
+        await asyncio.to_thread(comecou.wait, 5)
+        # o reset completa enquanto o fill espera o banco
+        routes_shared.invalidate_dashboard_current_cache(user_id)
+        liberar.set()
+        await tarefa
+
+    asyncio.run(_cenario())
+    assert user_id not in routes_shared.dashboard_current_cache, \
+        "fill iniciado antes da invalidação republicou o resultado pré-reset"
+
+    # Positivo: sem invalidação no meio, o fill publica normal (a época não
+    # pode virar um cache que nunca enche).
+    liberar.set()
+    asyncio.run(dashboard._get_dashboard_current_state(user_id))
+    assert user_id in routes_shared.dashboard_current_cache
+    routes_shared.invalidate_dashboard_current_cache(user_id)
+
+
 # ── 8. webhook pós-reset não ressuscita nada ─────────────────────────────────
 
 def test_webhook_pos_reset_nao_recria_conexao(user_id, monkeypatch):

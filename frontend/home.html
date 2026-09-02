@@ -1400,11 +1400,17 @@ function showAccessError() {
    gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
 const _HOME_CACHE_PREFIX = "pb_home_";
 function _homeCacheKey(userId) { return _HOME_CACHE_PREFIX + userId; }
-function persistHomeCache(userId, snapshot, history, email, displayName) {
+function persistHomeCache(userId, snapshot, history, email, displayName, requestedAt) {
   if (!userId) return;
   try {
+    // savedAt = INÍCIO do request (t0), não o momento do persist: uma resposta
+    // cujo request começou antes de um reset pode carregar dado pré-reset, e
+    // carimbá-la no recebimento a faria passar pelo predicado do restore como
+    // se fosse pós-reset. t0 é conservador (≤ geração no servidor) — no pior
+    // caso descarta um snapshot legítimo e a próxima carga refaz.
     sessionStorage.setItem(_homeCacheKey(userId),
-      JSON.stringify({ userId, snapshot, history, email, displayName, savedAt: Date.now() }));
+      JSON.stringify({ userId, snapshot, history, email, displayName,
+                       savedAt: requestedAt || Date.now() }));
   } catch {}
 }
 // Restaura SÓ do usuário já validado (chave escopada ao userId) — nunca pinta
@@ -1544,6 +1550,7 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
 async function loadHomeData({ initial = false } = {}) {
   const me = _homeMe;
   let snapshot = null, history = [];
+  const requestedAt = Date.now();   // t0 do request — vira o savedAt do persist
   try {
     const [dataRes, histRes] = await Promise.all([
       fetch(`${API}/data/${USER_ID}`, { credentials: "same-origin" }),
@@ -1589,7 +1596,7 @@ async function loadHomeData({ initial = false } = {}) {
   renderFreeBanner(me);
 
   // Guarda pra próxima abertura pintar na hora (troca de aba /home <-> /app).
-  persistHomeCache(USER_ID, snapshot, history, email, displayName);
+  persistHomeCache(USER_ID, snapshot, history, email, displayName, requestedAt);
 
   // Contrato com o app-mode.js: quem sabe se refazer expõe PBRefresh — mas só
   // AGORA, com a carga assentada e render bom na tela. Expor na definição do

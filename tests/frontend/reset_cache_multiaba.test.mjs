@@ -130,6 +130,38 @@ test("home: sem marker (nunca resetou), o restore segue como antes", async () =>
   } finally { await page.__ctx.close(); }
 });
 
+test("home: resposta em voo durante o reset é carimbada com o t0 do request", async () => {
+  // Codex PR #217 (P2): o carimbo era do RECEBIMENTO — uma resposta gerada
+  // antes do reset mas tratada depois ganhava savedAt > marker e o predicado
+  // a tratava como pós-reset. Com o t0 (início do request), ela fica < marker
+  // e o próximo restore a descarta. CONTROLE NEGATIVO: com o carimbo no
+  // persist (código anterior), savedAt > marker → vermelho.
+  const page = await newPage();
+  try {
+    let liberar;
+    const preso = new Promise((r) => { liberar = r; });
+    await page.route("**/data/**", async (route) => { await preso; route.fulfill(json({})); });
+
+    const pedido = page.waitForRequest("**/data/**");
+    await page.goto(`${ORIGIN}/home.html`);
+    await pedido;                                    // request em voo
+    const marker = await page.evaluate(() => {       // o reset completa agora
+      const t = Date.now();
+      localStorage.setItem("finbot_reset_at", String(t));
+      return t;
+    });
+    await sleep(50);                                 // recebimento vem DEPOIS do marker
+    liberar();
+
+    await waitFor(() => page.evaluate(() => sessionStorage.getItem("pb_home_1") !== null),
+                  "persist do snapshot da home");
+    const savedAt = await page.evaluate(
+      () => JSON.parse(sessionStorage.getItem("pb_home_1")).savedAt);
+    assert.ok(Number(savedAt) < marker,
+              `savedAt (${savedAt}) tinha que ser o t0 do request, anterior ao marker (${marker})`);
+  } finally { await page.__ctx.close(); }
+});
+
 test("dashboard: snapshot anterior ao finbot_reset_at é descartado no restore", async () => {
   const page = await newPage();
   try {
