@@ -39,6 +39,26 @@ valem por cima deste fluxo genérico.
    apontou (não necessariamente o Coder) com o apontamento exato, e repita a
    partir do passo relevante.
 
+## Gates deste repositório
+
+- **Verde local não é verde no CI: o venv local não é o `requirements.txt`.** Em
+  2026-09-02, `fastapi` 0.115.6 aqui × 0.141.1 no `requirements.txt`; remeça, não reuse
+  (na raiz do repo, que é onde mora o `.venv` — worktree não tem o seu):
+  `.venv/bin/python -c "import fastapi; print(fastapi.__version__)"` × `grep -i '^fastapi' requirements.txt`.
+  Teste que toca a superfície de API passa aqui e falha lá. Mande o **Tester** comparar
+  as duas versões, com o interpretador que a skill `baseline-testes` manda usar.
+- **Diff toca `frontend/service-worker.js` → mande o Coder bumpar o `CACHE_NAME` E o par
+  dele**: `VERSAO_ATUAL`, em `tests/frontend/sw_cache_privado.test.mjs`, para o mesmo N.
+  Os dois números são um só — bumpar o `CACHE_NAME` sozinho derruba 2 de 28 em
+  `node --test tests/frontend/sw_cache_privado.test.mjs` (medido em 2026-09-02, v9→v10:
+  28/28 → 26/28; remeça, não reuse). O gatilho é QUALQUER diff no arquivo, typo em
+  comentário incluso; o gate compara a base com o PR inteiro
+  (`git diff --quiet HEAD^1 HEAD -- "$SW"`, `.github/workflows/tests.yml:309`), então
+  bump em commit posterior do mesmo PR passa. A suíte local participa pela metade, e o
+  step só roda em `pull_request`: quem ESQUECE o bump passa local e só o CI pega; quem
+  bumpa SEM o par fica vermelho local. Por que o bump importa: `docs/armadilhas.md`,
+  § "Service worker e PWA".
+
 ## Regras do orquestrador
 
 - Nunca pule uma etapa para economizar tempo — o valor do time é justamente
