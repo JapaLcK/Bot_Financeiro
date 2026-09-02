@@ -223,14 +223,18 @@ def _chamadas_com_traceback(fonte: str, rel: str) -> list[tuple[str, str]]:
     return achados
 
 
-def _varre_repo() -> list[tuple[str, str]]:
+def _varre_repo(extrator=None) -> list[tuple[str, str]]:
+    """`extrator(fonte, rel) -> [(arquivo, funcao)]`. Parametrizado para que
+    `tests/test_log_falha_user_id.py` reuse ESTA varredura (mesma raiz, mesmos
+    ignorados, mesmo tratamento de `SyntaxError`) em vez de duplicá-la."""
+    extrator = extrator or _chamadas_com_traceback
     achados = []
     for py in _RAIZ.rglob("*.py"):
         rel = py.relative_to(_RAIZ)
         if _IGNORADOS & set(rel.parts):
             continue
         try:
-            achados += _chamadas_com_traceback(py.read_text(encoding="utf-8"), str(rel))
+            achados += extrator(py.read_text(encoding="utf-8"), str(rel))
         except SyntaxError:                                    # pragma: no cover
             continue
     return achados
@@ -396,7 +400,7 @@ def test_todo_connect_do_observability_tem_timeout():
 def test_traceback_persistido_tem_o_mesmo_teto_da_main():
     """Paridade com o `admin_error_logging_middleware`, o caminho que este PR
     diz restaurar: ele grava `tb_str[-2000:]`
-    (`core/admin_dashboard.py:1378`). Sem teto, um traceback fundo (recursão,
+    (`core/admin_dashboard.py:1383`). Sem teto, um traceback fundo (recursão,
     stack de framework) cresce sem limite dentro do JSONB.
 
     Uma `str`, não a lista do `format_exception`: o

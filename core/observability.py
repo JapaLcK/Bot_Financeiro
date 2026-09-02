@@ -63,7 +63,7 @@ class _DashboardHandler(logging.Handler):
         if record.exc_info:
             import traceback as _tb
             # `[-2000:]` é o mesmo teto do `admin_error_logging_middleware`
-            # (`core/admin_dashboard.py:1378`), o caminho que este PR restaura;
+            # (`core/admin_dashboard.py:1383`), o caminho que este PR restaura;
             # sem ele um traceback fundo cresce sem limite dentro do JSONB.
             # `"".join(...)`: a lista virava `"['Traceback…', …]"` no
             # `esc(row.details.traceback)` do `admin-dashboard.html:1308`.
@@ -75,6 +75,7 @@ class _DashboardHandler(logging.Handler):
             event_type=f"logger.{level}",
             message=message[:1000],
             source=source,
+            user_id=getattr(record, "user_id", None),
             details=details,
         )
 
@@ -164,6 +165,7 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
         op, user_id, "".join(f" {k}={v}" for k, v in extra.items()),
         type(e).__name__, getattr(e, "sqlstate", None),
         exc_info=e if com_traceback else None,
+        extra={"user_id": user_id},
     )
 
 
@@ -235,6 +237,41 @@ def log_system_event_sync(
                 )
             conn.commit()
     except Exception as exc:
+        # ponytail: teto conhecido — `user_id` fora de `users` derruba o INSERT
+        # INTEIRO pela `system_event_logs_user_id_fkey` e o evento se PERDE; antes
+        # deste PR ele ficava gravado com a coluna NULL. Caminho medido: token de
+        # dashboard LEGADO (sem `jti`) de conta já apagada: o ramo
+        # `frontend/routes/shared.py:538-543` só invalida via
+        # `get_password_changed_at` (`:542`), que numa conta apagada não devolve
+        # nada, e a rota roda com um `user_id` sem linha em `users`. Token COM
+        # `jti` cai no `:533-536`, onde `auth_sessions` já foi apagado junto com
+        # a conta (`db/privacy.py:429`) e vira 401 ANTES da rota.
+        # Quem ainda emite token de dashboard SEM `jti` HOJE, já depois do
+        # rollout: `POST /auth/dashboard-token` e `POST /auth/dashboard-link`
+        # (`frontend/finance_bot_websocket_custom.py:3440` e `:3453`), que leem
+        # `request.state.session_jti` com `getattr(…, None)` (`:3443`, `:3467`)
+        # — e esse atributo só é setado DENTRO do ramo `if jti:` (`shared.py:537`
+        # e `finance_bot_websocket_custom.py:2325`), nunca no ramo legado de
+        # `_get_current_user` (`finance_bot_websocket_custom.py:2328-2335`).
+        # Então a janela é a UNIÃO de dois conjuntos, não só a dos tokens
+        # pré-rollout: (a) token de dashboard pré-rollout, teto de 12h
+        # (`DASHBOARD_SESSION_HOURS`, `finance_bot_websocket_custom.py:298`); e (b)
+        # token de dashboard novo mintado a partir de um JWT de auth LEGADO.
+        # Esse JWT vive 15 MINUTOS (`frontend/routes/shared.py:472`, que é o
+        # único lugar que minta `"type": "auth"`; espelhado em
+        # `AUTH_COOKIE_MAX_AGE`, `finance_bot_websocket_custom.py:2169`), e JWT
+        # legado novo não nasce — todo `_make_jwt` de produção passa `jti` real
+        # (`:2190`, `:2829`, `:4969`). Nem estica: rotacionar exige
+        # `session_jti` (`core/refresh_tokens.py:51`, coluna `not null` em
+        # `db/schema.py:1485`), que um JWT sem `jti` não tem. Logo (b) só é
+        # MINTADO nos 15 min seguintes ao rollout, e o último token dele morre
+        # 12h depois: 15min + 12h — a união fecha em ~12h15. Os dois prazos
+        # vieram do `timedelta`/`max_age`, não de comentário que fale deles.
+        # A perda é DECISÃO REGISTRADA, não esquecimento: retry com `user_id=None`
+        # gravaria linha órfã com o id do titular no texto, nascida DEPOIS da
+        # exclusão de conta e fora do alcance de qualquer `delete` — a mesma forma
+        # de bug que este PR fecha (#220). O rastro que sobra é o `print` abaixo,
+        # no stderr, e é de propósito.
         print(f"[observability] failed to record {event_type}: {exc}", file=sys.stderr)
 
 
