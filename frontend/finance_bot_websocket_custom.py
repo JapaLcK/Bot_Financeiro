@@ -3954,7 +3954,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
         trial_days = trial_days_total() if eligible else 0
     else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "15"))
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global

@@ -627,7 +627,7 @@ async def _enforce_bank_limit(user_id: int, new_item_id: str | None = None) -> N
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
                     "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
                 },
             )
         count = await asyncio.to_thread(count_open_finance_connections, user_id)
@@ -684,7 +684,7 @@ async def _ensure_of_access_allowed(user_id: int) -> None:
                     "code": "OF_BANK_LIMIT",
                     "limit": 0,
                     "message": "Conectar banco faz parte dos planos pagos — no Grátis a conexão "
-                               "vale durante os 30 dias de teste. Assine pra reativar: /precos",
+                               "vale durante os 15 dias de teste. Assine pra reativar: /precos",
                 },
             )
         return

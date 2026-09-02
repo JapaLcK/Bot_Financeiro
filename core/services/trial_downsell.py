@@ -1,7 +1,7 @@
 """
 Downsell do fim do trial (escada v2).
 
-Trial de 30 dias venceu sem virar assinatura → um único e-mail oferecendo o
+Trial de 15 dias venceu sem virar assinatura → um único e-mail oferecendo o
 Essencial (R$ 9,90) antes do churn. Roda junto do tick de expiração de trial
 (mesmo loop do of_trial_expiry). Inerte com PLANS_V2_ENABLED off.
 
