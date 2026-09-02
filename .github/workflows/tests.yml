@@ -360,7 +360,7 @@ jobs:
             case "$RC" in
               0) ;;
               3|4)
-                echo "::warning file=$SW,title=O gate não reconheceu a declaração do CACHE_NAME na base::Na base deste PR (HEAD^1) o gate não reconheceu UMA declaração 'const CACHE_NAME = \"...\"' (motivo no log acima), então não comparou o valor e está aprovando SEM verificar o bump. ATENÇÃO: isto não significa que a base não tivesse um CACHE_NAME legível — significa que a forma dela está fora do que este grep casa. Caem aqui, entre outros, 'export const', BOM ou outro byte invisível antes da declaração, e declarações repetidas com valores divergentes. Este step só chegou aqui porque o $SW mudou neste PR — o gatilho é QUALQUER diff no arquivo, typo em comentário incluso, não só mudança na estratégia de cache. Confirme na thread do PR que o CACHE_NAME foi bumpado."
+                echo "::warning file=$SW,title=O gate não reconheceu a declaração do CACHE_NAME na base::Na base deste PR (HEAD^1) o gate não reconheceu UMA declaração 'const CACHE_NAME = \"...\"' (motivo no log acima), então não comparou o valor e está aprovando SEM verificar o bump. ATENÇÃO: isto não significa que a base não tivesse um CACHE_NAME legível — significa que a forma dela está fora do que este grep casa. Caem aqui, entre outros, 'export const', BOM ou outro byte invisível antes da declaração, e declarações repetidas com valores divergentes. Este step só chegou aqui porque o $SW mudou neste PR — o gatilho é qualquer diff que mantenha o arquivo, typo em comentário incluso, não só mudança na estratégia de cache. Confirme na thread do PR que o CACHE_NAME foi bumpado."
                 exit 0 ;;
               *) falhou "HEAD^1 (a base deste PR)" ;;
             esac
