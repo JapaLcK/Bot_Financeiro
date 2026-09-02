@@ -583,7 +583,7 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     ele, um cadastro novo poderia pular a /precos batendo direto numa API
     autenticada (ex.: /data/{id}) ou navegando pro /settings. Retorna 402 pro
     front mandar ao paywall/escolha. As rotas de /billing, /auth e /conta são
-    isentas (são elas que resolvem o gate — checkout, /auth/me, select-free)."""
+    isentas (são elas que resolvem o gate — checkout, /auth/me)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return

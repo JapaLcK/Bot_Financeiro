@@ -4055,11 +4055,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
                 f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
-            # Abandonou o checkout → volta pra /precos escolher um plano (pago
-            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
-            # "Escolha um plano pra começar" (needs_plan_selection segue true,
-            # pois o gate não fechou) — não anexo upgrade=cancelled porque
-            # /precos não consome esse marcador (o toast vive só na /home).
+            # Abandonou o checkout → volta pra /precos escolher um plano PAGO
+            # (o Grátis não é mais escolha). O escolha=1 é o que a precos.html
+            # lê pra trocar o subtítulo por "Escolha um plano pra continuar"
+            # (needs_plan_selection segue true, pois o gate não fechou) — não
+            # anexo upgrade=cancelled porque /precos não consome esse marcador
+            # (o toast vive só na /home).
             cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4158,24 +4159,27 @@ async def billing_select_free(
     request: Request,
     user_id: int = Depends(_get_current_user),
 ):
-    """Escolha do plano Grátis no fim do cadastro.
+    """Escolha do plano Grátis no fim do cadastro — DESATIVADA.
 
-    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
-    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
-    aí a troca é pela /precos normal, não por aqui."""
-    from db import mark_plan_selected
-    from core.services.plan_service import get_plan_tier
+    O Grátis morreu como porta de entrada: quem se cadastra pela web tem de
+    assinar pra entrar. A rota continua existindo só pra RECUSAR — apagá-la
+    devolveria 404/405 (HTML da página de erro, sem `detail`) a um cliente
+    antigo em cache, e o front trata 4xx lendo `detail.message`.
 
-    tier = await asyncio.to_thread(get_plan_tier, user_id)
-    if tier != "free":
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "already_subscribed",
-                    "message": "Você já tem um plano pago ativo."},
-        )
+    Ninguém no frontend chama isto: o `[data-free-cta]` e o `selectFree` saíram
+    da precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e
+    o único caminho que fecha o gate hoje é o `mark_plan_selected` do webhook
+    `checkout.session.completed`. Então a recusa não vira erro na tela de
+    ninguém — é rede de segurança contra chamada direta.
 
-    await asyncio.to_thread(mark_plan_selected, user_id)
-    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+    O tier `free` continua existindo como ESTADO (fallback após falha de
+    cobrança); o que sumiu é a ESCOLHA."""
+    raise HTTPException(
+        status_code=410,
+        detail={"error": "free_plan_discontinued",
+                "message": "O plano Grátis não está mais disponível. "
+                           "Escolha um plano pago pra continuar."},
+    )
 
 
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
