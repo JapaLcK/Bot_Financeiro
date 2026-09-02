@@ -1215,11 +1215,12 @@ def write_report():
     # sobrescrevia em silêncio o relatório da rodada anterior — que é o único
     # registro do que a IA respondeu naquele dia, e não se reproduz sem pagar
     # a suíte de novo.
-    # Com HORA, não só data: duas rodadas no mesmo dia é o caso NORMAL (rodar,
-    # consertar, rodar de novo) e só a data ainda sobrescrevia. Custou uma
-    # comparação real — a 1ª rodada de 02/09 sumiu debaixo da 2ª, e era ela que
-    # provava que o defeito da cena 18 é intermitente.
-    hoje = datetime.now().strftime("%Y-%m-%d_%H%M")
+    # Com data, hora, minuto E SEGUNDO. Só data sobrescrevia entre rodadas do
+    # mesmo dia (custou a comparação que provava que o defeito da cena 18 é
+    # intermitente); e só até o minuto ainda sobrescreve, porque a rodada
+    # completa leva 11,6s medidos — duas dentro do mesmo minuto é rotina, não
+    # exceção.
+    hoje = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     path = os.path.join(WORKTREE_ROOT, "docs", f"qa_whatsapp_pilot_{hoje}.md")
     counts = {"✅": 0, "❌": 0, "⚠️": 0, "🔍": 0}
     for sc in SCENARIOS:

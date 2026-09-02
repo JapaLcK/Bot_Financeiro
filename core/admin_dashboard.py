@@ -673,16 +673,28 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                    OR event_type LIKE 'billing_%'
                    OR event_type LIKE 'engagement_%'
                    OR event_type = 'http_unhandled_exception'
-                   -- Guarda de afirmações da IA: lugar próprio aqui em vez de
-                   -- disputar as 100 linhas de `recent_errors` com erro de
-                   -- verdade. A frequência dela é desconhecida por enquanto —
-                   -- é justamente o que o modo log existe pra medir.
-                   OR event_type = 'ai_claim_unsupported'
                 ORDER BY created_at DESC
                 LIMIT 25
                 """
             )
             recent_ops = [dict(row) for row in await cur.fetchall()]
+
+            # Consulta PRÓPRIA, e não mais uma linha no filtro do `recent_ops`.
+            # A guarda roda em toda resposta de IA e tem frequência ainda
+            # desconhecida; nas duas listas compartilhadas ela podia expulsar
+            # evento operacional — primeiro nas 100 de `recent_errors`, depois
+            # nas 25 daqui. Trocar de balde não resolve quem é limitado: só
+            # balde próprio resolve.
+            await cur.execute(
+                """
+                SELECT level, event_type, message, source, user_id, details, created_at
+                FROM system_event_logs
+                WHERE event_type = 'ai_claim_unsupported'
+                ORDER BY created_at DESC
+                LIMIT 15
+                """
+            )
+            recent_ai_claims = [dict(row) for row in await cur.fetchall()]
 
             await cur.execute(
                 """
@@ -756,6 +768,7 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
         "recent_logins": recent_logins,
         "recent_errors": recent_errors,
         "recent_ops": recent_ops,
+        "recent_ai_claims": recent_ai_claims,
         "email_stats": email_stats,
         "recent_emails": recent_emails,
     }
