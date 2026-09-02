@@ -51,10 +51,11 @@ valem por cima deste fluxo genérico.
   dele**: `VERSAO_ATUAL`, em `tests/frontend/sw_cache_privado.test.mjs`, para o mesmo N.
   Os dois números são um só — bumpar o `CACHE_NAME` sozinho derruba 2 de 28 em
   `node --test tests/frontend/sw_cache_privado.test.mjs` (medido em 2026-09-02, v9→v10:
-  28/28 → 26/28; remeça, não reuse). O gatilho é QUALQUER diff no arquivo, typo em
+  28/28 → 26/28; remeça, não reuse). O gatilho é qualquer diff que MANTENHA o arquivo, typo em
   comentário incluso; o gate compara a base com o PR inteiro
   (`git diff --quiet HEAD^1 HEAD -- "$SW"`, `.github/workflows/tests.yml:309`), então
-  bump em commit posterior do mesmo PR passa. A suíte local participa pela metade, e o
+  bump em commit posterior do mesmo PR passa. PR que APAGA ou renomeia o arquivo sai
+  antes disso (`tests.yml:297-300`, "não existe no head") — não há constante a bumpar. A suíte local participa pela metade, e o
   step só roda em `pull_request`: quem ESQUECE o bump passa local e só o CI pega; quem
   bumpa SEM o par fica vermelho local. Por que o bump importa: `docs/armadilhas.md`,
   § "Service worker e PWA".

@@ -159,7 +159,7 @@ outro módulo não pode receber `immutable` enquanto não tiver hash no nome.
 HTML e auth nunca são cacheados, assets são network-first com fallback de cache,
 API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e a
 `index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
-por `?site=1`. Mexeu no `frontend/service-worker.js` — QUALQUER diff, typo em comentário
+por `?site=1`. Mexeu no `frontend/service-worker.js` sem apagá-lo — qualquer diff, typo em comentário
 incluso? Bumpe o `CACHE_NAME` **e o `VERSAO_ATUAL` de
 `tests/frontend/sw_cache_privado.test.mjs`**, para o mesmo N — um sem o outro fica
 vermelho em `node --test tests/frontend/sw_cache_privado.test.mjs`. O CI normalmente reprova quem
