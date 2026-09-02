@@ -227,6 +227,8 @@ async def update_security_contact_route(
                         (display_name, encrypt_pii_optional(display_name), user_id),
                     )
             await conn.commit()
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(user_id)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
 

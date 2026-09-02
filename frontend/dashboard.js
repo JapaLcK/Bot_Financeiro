@@ -246,6 +246,24 @@ async function connectWhatsAppFromDashboard(event) {
    STATE
 ═══════════════════════════════════════════════════════════════════════ */
 let ws, lastData = null;
+// Timer da reconexão do WS. Guardado para o caminho de erro do paywall poder
+// CANCELAR explicitamente — hoje o retry na tela de erro só morria porque
+// setStatus() estourava no DOM apagado; um `?.` inocente ali criaria loop.
+let wsReconnectTimer = null;
+// Reconexão em duas velocidades: tentativa que ABRIU cai e volta em 3 s
+// (queda transitória — retry legítimo); tentativa que NÃO chegou a abrir
+// (handshake rejeitado pelo gate de plano, outage de auth) usa backoff
+// dobrado até 60 s. O critério é a ÚLTIMA tentativa, não "alguma vez abriu":
+// assinatura revogada no meio da sessão rejeita as reconexões de um socket
+// que já tinha aberto, e com "alguma vez" o retry ficava fixo em 3 s para
+// sempre (Codex-8). Depois de WS_REVALIDATE_AFTER falhas seguidas o cliente
+// re-executa o gate de acesso (/auth/me) — é assim que ele DESCOBRE que
+// perdeu o plano, já que o close(4402) é pré-accept e chega como 1006.
+const WS_REVALIDATE_AFTER = 2;
+let wsOpenedLastAttempt = false;
+let wsFailStreak = 0;
+let wsRetryStopped = false;
+let wsRetryDelay = 3000;
 let filterType   = "all";
 let bgtTarget    = null;
 let chartCat     = null, chartDay = null, chartHistory = null;
@@ -310,6 +328,13 @@ let filterDebounceTimer = null;
 const NOW = new Date();
 let viewYear = NOW.getFullYear(), viewMonth = NOW.getMonth() + 1;
 let historyEarliestDate = null;
+// True depois que o usuário troca de mês pelo seletor. Enquanto false, o
+// snapshot do WebSocket pode corrigir viewYear/viewMonth (virada UTC×local).
+let userNavigatedMonth = false;
+// Mês mais novo alcançável (ano*12+mês). Nasce do relógio local e AVANÇA se o
+// servidor mandar snapshot de mês mais novo — sem isso, após adotar o mês da
+// virada UTC o btn-next ficava habilitado para um mês seguinte vazio.
+let latestKnownMonth = NOW.getFullYear() * 12 + (NOW.getMonth() + 1);
 
 const PT_MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -368,6 +393,14 @@ function persistSnapshotToSession(data) {
   if (page !== 1 || (type && type !== "all") || text) return; // só o estado padrão
   try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify(data)); } catch {}
 }
+// Limpa os snapshots pb_snap_* da aba. Chamada no logout e quando o paywall
+// NEGA (meGate): o restore pinta o snapshot que a PRÓPRIA aba gravou antes do
+// veredito do /me — aceitável (o navegador do usuário já possui o dado, e
+// gatear o restore custaria ~1 RTT no caminho quente) — mas depois de um
+// veredito negativo um reload da aba não deve repintar saldo.
+function clearSessionSnapshots() {
+  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+}
 function restoreSnapshotFromSession() {
   if (!USER_ID) return false;
   try {
@@ -393,7 +426,7 @@ async function logoutDashboard() {
   } catch {}
   clearMenuCache();  // não deixa o chrome de um usuário vazar pro próximo login
   // Limpa os snapshots da sessão (defense-in-depth; já são escopados ao userId).
-  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+  clearSessionSnapshots();
   localStorage.setItem('finbot_logout_at', String(Date.now()));
   window.location.replace('/?logout=1');
 }
@@ -7327,7 +7360,7 @@ function animateCounters() {
 function updateMonthLabel() {
   document.getElementById("month-label").textContent =
     PT_MONTHS[viewMonth - 1] + " " + viewYear;
-  const isCurrent = viewYear === NOW.getFullYear() && viewMonth === NOW.getMonth() + 1;
+  const isCurrent = viewYear * 12 + viewMonth >= latestKnownMonth;
   document.getElementById("btn-next").disabled = isCurrent;
   const earliestMonth = historyEarliestDate
     ? Number(historyEarliestDate.slice(0, 4)) * 12 + Number(historyEarliestDate.slice(5, 7))
@@ -7346,6 +7379,7 @@ function changeMonth(d) {
   }
   viewYear = targetYear;
   viewMonth = targetMonth;
+  userNavigatedMonth = true; // a partir daqui o snapshot não corrige mais o mês
 
   launchesPage = 1;
   updateMonthLabel();
@@ -7489,10 +7523,58 @@ function setStatus(s) {
   if (s === "disconnected") { txt.textContent = "Desconectado – reconectando…"; }
 }
 
+// Veredito de acesso do /auth/me: false = a tela vai embora (paywall/erro), e
+// o que essa saída exige já foi executado aqui. Uma fonte só, usada pelo boot
+// e pela revalidação disparada por reconexões rejeitadas.
+function applyAccessVerdict(me) {
+  if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+    clearSessionSnapshots();  // veredito negativo: reload não repinta saldo
+    stopWsRetries();
+    window.location.replace("/precos?escolha=1");
+    return false;
+  }
+  if (me && me.app_access === false) {
+    clearSessionSnapshots();
+    // O socket já pode estar conectado/reconectando — para tudo antes de
+    // trocar de tela, senão a tela de erro fica reconectando por baixo.
+    stopWsRetries();
+    if (window.PB_IN_APP) {
+      // App iOS: tela neutra, sem link de compra (diretriz 3.1.1).
+      _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
+    } else {
+      window.location.replace("/precos?ativar=1");
+    }
+    return false;
+  }
+  return true;
+}
+
+// Reconexões seguidas rejeitadas: pergunta ao /auth/me se o acesso caiu.
+// Falha de rede aqui não decide nada (segue tentando; o 402 protege os dados).
+async function revalidateAccess() {
+  try {
+    const r = await fetch(`${API}/auth/me`, { credentials: "same-origin" });
+    if (r.ok) applyAccessVerdict(await r.json());
+  } catch {}
+}
+
+// Para de reconectar e mata o socket em voo. Usada quando o veredito de
+// acesso NEGA — sem a flag, um onclose já disparado reagendaria o retry.
+function stopWsRetries() {
+  wsRetryStopped = true;
+  clearTimeout(wsReconnectTimer);
+  try { if (ws) { ws.onclose = null; ws.onmessage = null; ws.close(); } } catch {}
+}
+
 function connect() {
+  if (wsRetryStopped) return;
   setStatus("connecting");
+  wsOpenedLastAttempt = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
+    wsOpenedLastAttempt = true;
+    wsFailStreak = 0;
+    wsRetryDelay = 3000;
     setStatus("connected");
     // Server já manda snapshot automático ao conectar (linha 5368 do backend).
     // O get_month aqui era redundante — gerava 2 chamadas a get_financial_data
@@ -7503,6 +7585,28 @@ function connect() {
     const msg = JSON.parse(e.data);
 
     if (msg.type === "snapshot" || msg.type === "month_data") {
+      // Virada de mês servidor×dispositivo. A causa PRIMÁRIA foi resolvida no
+      // servidor (main 8ea113a, #215): o snapshot passou a usar now_tz() — o
+      // fuso do APP — em vez de UTC cru, o que zera a divergência para quem
+      // está no fuso do app (era ~3 h/mês para todo mundo).
+      // Este guard cobre o RESÍDUO: now_tz() é um fuso único do servidor, e o
+      // dashboard calcula viewYear/viewMonth no relógio do DISPOSITIVO — quem
+      // está em outro fuso (viagem, aparelho configurado diferente) ainda
+      // diverge no último dia do mês (ex.: Tóquio +12 h de São Paulo). Sem
+      // adotar, o snapshot é descartado e a tela fica em skeleton.
+      // O servidor é a fonte da verdade do mês (é a decisão do 8ea113a), então
+      // se o usuário ainda não navegou manualmente, o mês do snapshot vence.
+      // (month_data fica de fora: é resposta a um get_month explícito, e
+      // um mês que não é mais o da visão tem mesmo que ser descartado.)
+      if (msg.type === "snapshot" && !userNavigatedMonth &&
+          msg.data?.year && msg.data?.month && !isCurrentViewData(msg.data)) {
+        viewYear = Number(msg.data.year);
+        viewMonth = Number(msg.data.month);
+        // O servidor conhece um mês mais novo que o relógio local: o teto do
+        // btn-next avança junto (senão "próximo mês" abre um mês vazio).
+        latestKnownMonth = Math.max(latestKnownMonth, viewYear * 12 + viewMonth);
+        updateMonthLabel();
+      }
       if (!isCurrentViewData(msg.data)) return;
       lastData = msg.data;
       cacheMonthData(msg.data);
@@ -7533,7 +7637,20 @@ function connect() {
       _ofSyncDebounce = setTimeout(sendRefreshSilent, 1500);
     }
   };
-  ws.onclose = () => { setStatus("disconnected"); setTimeout(connect, 3000); };
+  ws.onclose = () => {
+    setStatus("disconnected");
+    if (wsRetryStopped) return;
+    let delay = 3000;
+    if (!wsOpenedLastAttempt) {          // não chegou a abrir: rejeitado/outage
+      wsFailStreak++;
+      wsRetryDelay = Math.min(wsRetryDelay * 2, 60000);
+      delay = wsRetryDelay;
+      // Rejeição repetida pode ser plano revogado no meio da sessão — o
+      // cliente não lê o motivo (1006), então PERGUNTA ao /auth/me.
+      if (wsFailStreak % WS_REVALIDATE_AFTER === 0) revalidateAccess();
+    }
+    wsReconnectTimer = setTimeout(connect, delay);
+  };
   ws.onerror = () => ws.close();
 }
 
@@ -9900,15 +10017,38 @@ function buildExpenseChart(series, days) {
   });
 }
 
-async function loadExpenseChart(days) {
+// Dedup de VOO: no quente há 2 render() na mesma abertura ⇒ 2 fetches
+// idênticos a /expenses/daily. Mesma janela já em voo devolve a promise em
+// curso; período diferente (7D/30D/3M) ou nada em voo segue no fetch novo.
+// (Não é o makeFetchChannel: a semântica dele é abortar/superar, não juntar.)
+let _expenseChartFlight = null; // { days, promise }
+function loadExpenseChart(days) {
+  // Antes do dedup: `_expensePeriod` é SEMPRE o último período pedido, mesmo
+  // quando a chamada só reaproveita um voo em curso. É ele que a guarda
+  // abaixo usa para decidir o que pode pintar.
   _expensePeriod = days;
-  try {
-    const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
-    if (!r.ok) return;
-    const payload = await r.json();
-    _expenseSeries = payload.data || [];
-    buildExpenseChart(_expenseSeries, days);
-  } catch (e) { console.warn("[expenses] fetch error:", e); }
+  if (_expenseChartFlight && _expenseChartFlight.days === days) return _expenseChartFlight.promise;
+  const promise = (async () => {
+    try {
+      const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
+      if (!r.ok) return;
+      const payload = await r.json();
+      // Pedido superado não sobrescreve resposta mais nova — mesmo princípio
+      // do monthRequestSeq no fetchMonthHttp, sem contador próprio porque
+      // `_expensePeriod` já é a fonte da verdade do período selecionado.
+      // Sem isto, trocar 7D→30D→7D com a 1ª pendente deixava o gráfico com a
+      // série de 30D na aba 7D (last-writer-wins — comportamento que já
+      // existia antes do dedup desta Onda).
+      if (days !== _expensePeriod) return;
+      _expenseSeries = payload.data || [];
+      buildExpenseChart(_expenseSeries, days);
+    } catch (e) { console.warn("[expenses] fetch error:", e); }
+    finally {
+      if (_expenseChartFlight && _expenseChartFlight.promise === promise) _expenseChartFlight = null;
+    }
+  })();
+  _expenseChartFlight = { days, promise };
+  return promise;
 }
 
 function setExpensePeriod(days, btn) {
@@ -10636,48 +10776,43 @@ function _showAccessError(title, msg) {
     return;
   }
 
-  // Paywall: sem assinatura ativa → manda pro paywall antes de carregar o app.
-  // (As rotas de dados também devolvem 402 como reforço server-side.)
-  try {
-    const meResp = await mePromise;
-    if (meResp && meResp.ok) {
-      const me = await meResp.json();
-      historyEarliestDate = me?.history_earliest_date || null;
-      updateMonthLabel();
-      // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
-      if (me && me.agents_ui_enabled === false) {
-        document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
-      }
-      // Gate de escolha de plano: cadastro novo passa pela /precos antes de
-      // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
-      // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
-      if (me && me.needs_plan_selection && !window.PB_IN_APP) {
-        window.location.replace("/precos?escolha=1");
-        return;
-      }
-      if (me && me.app_access === false) {
-        if (window.PB_IN_APP) {
-          // App iOS: tela neutra, sem link de compra (diretriz 3.1.1)
-          _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
-          return;
-        }
-        window.location.replace("/precos?ativar=1");
-        return;
-      }
-      // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
-      // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
-      if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {
-        maybeShowTrialBanner();
-      }
-    }
-  } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
-
   WS_URL = `${BASE_WS}/ws/${USER_ID}`;
 
-  // Puxar pra atualizar: o contrato só nasce com a sessão validada e o
-  // paywall vencido — os returns acima (_showAccessError, /precos) saem antes
-  // daqui e o puxão nessas telas cai no reload, que é o que elas pedem.
-  window.PBRefresh = _pbDashboardRefresh;
+  // Paywall: o boot NÃO espera mais o /auth/me pra conectar — com o USER_ID em
+  // mãos, connect()/menu/afiliados saem já (corta ~1 RTT do caminho crítico).
+  // O bloco do /me virou .then: redirects/gates aplicam quando ele chegar.
+  // (As rotas de dados também devolvem 402 como reforço server-side.)
+  // Resolve `false` quando a tela vai embora (paywall/erro) — o deep-link de
+  // ?view espera esse veredito antes de navegar.
+  const meGate = mePromise.then(async (meResp) => {
+    try {
+      if (meResp && meResp.ok) {
+        const me = await meResp.json();
+        historyEarliestDate = me?.history_earliest_date || null;
+        updateMonthLabel();
+        // Beta dos Agentes: fora do allowlist, a nav some (a API também dá 404).
+        if (me && me.agents_ui_enabled === false) {
+          document.querySelectorAll('[data-nav="agentes"]').forEach(el => { el.style.display = "none"; });
+        }
+        // Gate de escolha de plano: cadastro novo passa pela /precos antes de
+        // acessar o app (mesmo escolhendo o Grátis). Só na web — no app iOS o gate
+        // fica de fora pra não forçar a tela de planos/compra (diretriz 3.1.1).
+        // Paywall/escolha de plano: mesmo veredito da revalidação por WS
+        // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
+        if (!applyAccessVerdict(me)) return false;
+        // Banner de trial (B1): oferta dos 30d de Plus pro Grátis sem trial ativo.
+        // Nunca no app iOS (CTA de compra externa fere a diretriz 3.1.1 da Apple).
+        if (me && me.plan_tier === "free" && !(me.trial && me.trial.active) && !window.PB_IN_APP) {
+          maybeShowTrialBanner();
+        }
+      }
+    } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
+    // Puxar pra atualizar: o contrato só nasce com o paywall vencido — nos
+    // returns acima ele nunca é registrado e o puxão nessas telas cai no
+    // reload, que é o que elas pedem (mesma regra de antes, agora async).
+    window.PBRefresh = _pbDashboardRefresh;
+    return true;
+  });
 
 	  updateInvestmentRateHint();
 	  updateInvestmentTaxHint();
@@ -10692,7 +10827,11 @@ function _showAccessError(title, msg) {
 	  // O if (view === "investments") precisa do USER_PLAN — defere pra depois
 	  // do profile resolver.
 	  connect();
-	  loadUserMenuState().then(() => {
+	  Promise.all([loadUserMenuState(), meGate]).then(([, meOk]) => {
+	    // O deep-link espera o veredito do /me (meGate): antes do O1-4 o /me
+	    // resolvia inteiro antes do loadUserMenuState, então o check de
+	    // visibilidade abaixo nunca corria com os beta-gates — preservado.
+	    if (!meOk) return; // paywall/erro: a tela está indo embora, não navega
 	    // Deep-link por ?view=X (gaveta da /home aponta pra cá). investments
 	    // mantém o caminho antigo (setMainView direto); overview é o default.
 	    // Os demais abrem via navigateTo — mas só se o item do sidenav existir

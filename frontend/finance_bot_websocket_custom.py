@@ -5026,6 +5026,8 @@ async def _apply_unsubscribe(uid: int, token: str) -> bool:
                 (uid,),
             )
         await conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(uid)
     return True
 
 
@@ -6806,6 +6808,22 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
             await ws.close(code=1008)
             return
 
+    # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
+    # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
+    # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
+    # primitivas e mesma isenção do app iOS (diretriz 3.1.1: o app não pode
+    # ser empurrado pra tela de compra; fica no acesso base).
+    from core.services.plan_service import has_app_access, needs_plan_selection
+    in_app = "PigBankApp" in (ws.headers.get("user-agent") or "")
+    sem_plano = await asyncio.to_thread(
+        lambda: (not in_app and needs_plan_selection(user_id)) or not has_app_access(user_id)
+    )
+    if sem_plano:
+        await ws.close(code=4402, reason="subscription_required")
+        return
+
+    # now_tz() (main, 8ea113a): o mês do snapshot é o do USUÁRIO, não o do UTC
+    # — senão o dashboard descarta o snapshot nas 3 h após a virada em UTC.
     now = now_tz()
     if not await manager.connect(ws, user_id, now.year, now.month):
         return
