@@ -28,7 +28,12 @@ O QUE ESTA MEDIÇÃO **NÃO** RESPONDE
      real pode ser MAIOR que o daqui, por essa via.
   3. Nada do corpo da reversão é exercitado (saldos, faturas, lotes,
      `InvestmentLotHasWithdrawal`). Isto mede o PRÉ-VOO, não o delete.
-  4. Não diz QUAIS linhas nem de quem — por requisito do dono.
+  4. Não diz QUAIS linhas nem de quem — por requisito do dono. Nem QUAL
+     chave desconhecida: a chave crua é texto de payload (um escritor futuro
+     pode gravar `cliente_<nome>_<cpf>`), então ela sai `?` e o que o dono lê é
+     a CONTAGEM da linha `chave_desconhecida`, que já responde "existe chave
+     nova em produção, em N linhas" — o suficiente para decidir; qual é ele
+     descobre no código do escritor, não no terminal.
   5. É um retrato do instante da leitura.
 
 USO
@@ -45,6 +50,7 @@ import re
 import sys
 from collections import Counter
 from decimal import Decimal
+from functools import lru_cache
 
 # ---------------------------------------------------------------------------
 # GUARDA CONGELADA — `git show b4d0085:db/accounts.py`, pré-voo de
@@ -139,16 +145,41 @@ def _guarda_b4d0085(efeitos, *, escopo_conta_corrente):
 # "apagar tudo" só conta essas linhas.
 _TIPOS_APAGAR_TUDO = ("despesa", "receita")
 
-# Só a FORMA do caminho ('bill_id', 'delete_pocket.nome'). O `_validar_efeitos`
-# já não põe VALOR na mensagem; o filtro é o cinto: se o texto entre aspas não
-# for um caminho de esquema, sai '?' em vez de sair para o terminal do dono.
-_CAMPO_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,60}$")
+# Só a FORMA do caminho ('bill_id', 'delete_pocket.nome'), e só de um conjunto
+# FECHADO deles. Regex de identificador não servia: a mensagem de
+# `chave_desconhecida` é `f"...: {sorted(desconhecidas)}"`, e chave desconhecida
+# é TEXTO DE PAYLOAD — `cliente_joao_12345678900` e `nome.do.cliente` casam
+# `^[A-Za-z_][A-Za-z0-9_.]*$` inteiro e iam parar no terminal do dono, contra a
+# garantia deste script ("nenhum pedaço de payload sai daqui"). Formato não
+# distingue esquema de chave que um escritor futuro inventou; só a lista
+# distingue. Ela é DERIVADA de `_EFEITOS_FORMA`/`_BEFORE_FORMA` (`CLAUDE.md`
+# §0.7): chave nova no esquema entra sozinha, chave nova no payload não entra
+# nunca. Fora dela sai '?'.
+@lru_cache(maxsize=1)
+def _caminhos_do_esquema():
+    """{'bill_id', 'delete_pocket.nome', 'investment_lot_withdrawals.before',
+    'investment_lot_withdrawals.before.balance', ...} — os caminhos que as
+    mensagens de `_validar_efeitos`/`_checar_forma` podem nomear."""
+    from db.accounts import _EFEITOS_FORMA
+
+    def campos(tabela, prefixo):
+        # `{campo: (predicado, obrigatorio)}`; predicado `dict` é sub-objeto.
+        for campo, (predicado, _obrigatorio) in tabela.items():
+            yield f"{prefixo}.{campo}"
+            if isinstance(predicado, dict):
+                yield from campos(predicado, f"{prefixo}.{campo}")
+
+    caminhos = set()
+    for chave, (container, forma) in _EFEITOS_FORMA.items():
+        caminhos.add(chave)
+        if container != "valor":  # em "valor", `forma` é o predicado, não tabela
+            caminhos.update(campos(forma, chave))
+    return frozenset(caminhos)
 
 
 def _campo_da_msg(msg):
     m = re.search(r"'([^']*)'", str(msg))
-    campo = m.group(1) if m else ""
-    return campo if _CAMPO_OK.match(campo) else "?"
+    return m.group(1) if m and m.group(1) in _caminhos_do_esquema() else "?"
 
 
 def _normalizar(efeitos):
@@ -321,7 +352,46 @@ def _autoteste():
     v, n = classificar({"delta_conta": 0, "create_pocket": {"nome": "x"}},
                        "deposito_caixinha")
     assert (v[0], n[0]) == ("apaga", "apaga"), (v, n)
-    print(f"autoteste: {len(casos) + 1} casos ok")
+
+    # O QUE SAI NA COLUNA `campo` (allowlist de caminhos, nao regex de formato).
+    # Os dois primeiros sao o CONTROLE NEGATIVO: com a regex `_CAMPO_OK` de
+    # volta no lugar de `_caminhos_do_esquema`, os dois passam a imprimir a
+    # chave do payload e este bloco fica VERMELHO.
+    casos_campo = [
+        # (efeitos, tipo, motivo, campo)
+        ({"delta_conta": 0, "cliente_joao_12345678900": 1},
+         "despesa", "chave_desconhecida", "?"),
+        ({"delta_conta": 0, "nome.do.cliente": 1},
+         "despesa", "chave_desconhecida", "?"),
+        # positivos: caminho de esquema continua saindo com NOME, senao a
+        # quebra por motivo perde o valor de diagnostico.
+        ({"delta_conta": 0, "bill_id": 93}, "despesa", "efeito_incompleto",
+         "bill_id"),
+        ({"delta_conta": 0, "delete_pocket": {"nome": ""}},
+         "aporte", "efeito_incompleto", "delete_pocket.nome"),
+        ({"delta_conta": 0, "investment_lot_create": {"lot_id": "abc"}},
+         "aporte", "efeito_incompleto", "investment_lot_create.lot_id"),
+        ({"delta_conta": 0,
+          "investment_lot_withdrawals": [{"lot_id": 1, "before": "x"}]},
+         "aporte", "efeito_incompleto", "investment_lot_withdrawals.before"),
+        ({"delta_conta": 0, "investment_lot_withdrawals": [
+            {"lot_id": 1, "before": {"balance": "abc",
+                                     "principal_remaining": 1}}]},
+         "aporte", "efeito_incompleto",
+         "investment_lot_withdrawals.before.balance"),
+        ({"delta_conta": -300, "delta_pocket": {"nome": "x", "delta": -300}},
+         "deposito_caixinha", "lote_ausente", "delta_pocket"),
+        # motivos que nao nomeiam campo de esquema: o texto entre aspas e
+        # 'apagar tudo' e 'efeitos', que nao sao caminhos -> '?'. O `motivo` ja
+        # diz tudo o que o dono precisa nos dois.
+        ({"delta_conta": 0, "create_pocket": {"nome": "x"}},
+         "despesa", "fora_do_escopo", "?"),
+        ({}, "despesa", "sem_delta_conta", "?"),
+    ]
+    for ef, tipo, motivo, campo in casos_campo:
+        _v, n = classificar(ef, tipo)
+        assert n == ("recusa", motivo, campo), (ef, tipo, n)
+    print(f"autoteste: {len(casos) + len(casos_campo) + 1} casos ok")
 
 
 # ---------------------------------------------------------------------------
