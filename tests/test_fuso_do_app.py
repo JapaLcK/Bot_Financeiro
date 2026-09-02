@@ -13,9 +13,12 @@ processo em UTC contra app em São Paulo é a MESMA divergência por outra porta
 `utils_date.align_process_tz` fecha as duas de uma vez, escrevendo `TZ` (processo)
 e `PGTZ` (toda conexão libpq) com o mesmo nome e chamando `tzset()`.
 
-Este arquivo é o único que PROVA o alinhamento; os outros o tomam como premissa
-(ver o cabeçalho de tests/test_category_launches_query.py). Controle negativo de
-cada caso está no comentário logo acima dele.
+Este arquivo PROVA o alinhamento dos três referenciais acima; os outros o tomam
+como premissa (ver o cabeçalho de tests/test_category_launches_query.py). Existe
+um QUARTO referencial fora do alcance de `align_process_tz` — o UTC cru chamado à
+mão como CALENDÁRIO (`datetime.now(timezone.utc).year/.month`) — e quem o prova é
+tests/test_virada_de_mes.py, com instante congelado na virada do mês. Controle
+negativo de cada caso está no comentário logo acima dele.
 
 O que os casos leem do ambiente são DUAS coisas, e elas não andam juntas:
 
