@@ -24,32 +24,16 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const FRONTEND = join(REPO, "frontend");
-const PORT = Number(process.env.PB_HIW_TEST_PORT || 8901);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", FRONTEND],
-    { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/index.html`)).ok) return proc; } catch { /* ainda subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
-
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Desktop: o trilho só vira linha (flex-grow) a partir de 900px. */

@@ -21,32 +21,13 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const FRONTEND = join(REPO, "frontend");
-// porta própria: o node --test roda os arquivos em paralelo (8899/8901/8903/
-// 8905/8907/8909 já têm dono).
-const PORT = Number(process.env.PB_RESET_TEST_PORT || 8911);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
-                                 "--directory", FRONTEND], { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/home.html`)).ok) return proc; } catch { /* subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
 
 async function waitFor(cond, what, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
@@ -70,7 +51,8 @@ const avaliaTolerandoNavegacao = (page, fn) => page.evaluate(fn).catch((e) => {
 });
 
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 // Liberadores de rotas presas (o teste do t0 registra o dele aqui): o
