@@ -228,7 +228,11 @@ function paginaComCache(arquivo, prepara) {
       delete: async (k) => { apagados.push(k); return true; },
     },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-    location: { origin: ORIGEM, pathname: "/", href: ORIGEM, reload: () => {}, replace: () => {} },
+    // `host` nao e' decoracao: `_isOwnApi` compara POR ELE. Sem o campo, toda
+    // URL absoluta batia contra `undefined` e o interceptor tratava a PROPRIA
+    // origem como terceiro — o harness ficava cego a metade do `_isOwnApi`.
+    location: { origin: ORIGEM, host: new URL(ORIGEM).host, pathname: "/", href: ORIGEM,
+                reload: () => {}, replace: () => {} },
     navigator: { serviceWorker: { controller: null, getRegistrations: async () => [] } },
     document: {
       cookie: "", readyState: "complete",
@@ -256,7 +260,10 @@ test("auth-refresh apaga o Cache Storage num logout bem-sucedido", async () => {
                    "o logout nao limpou o cache do aparelho");
 });
 
-test("auth-refresh nao apaga nada em request comum nem em logout que falhou", async () => {
+test("auth-refresh nao apaga nada numa request comum", async () => {
+  // O titulo antigo prometia "nem em logout que falhou" e o corpo so' chamava
+  // `/data/42` — nunca houve logout aqui. O logout que falha tem os seus casos
+  // proprios no fim do arquivo, e o comportamento e' o OPOSTO: ele limpa.
   const { ctx, apagados } = paginaComCache("static/auth-refresh.js");
   ctx.fetch = ctx.window.fetch;
 
@@ -714,33 +721,6 @@ test("offline em rota comum NAO limpa — o interceptor renova e a sessao segue"
   }
 });
 
-test("offline no /auth/refresh NAO limpa — rejeicao nao e' o 401 do fim de sessao", async () => {
-  // O refresh e' disparado por reflexo em qualquer 401 (#176). Se a rejeicao
-  // dele contasse como fim de sessao, bastava um 401 de aplicacao com a rede
-  // instavel para apagar o aparelho.
-  const apagados = [];
-  const chamadas = [];
-  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
-    c.fetch = async (input) => {
-      const caminho = new URL(typeof input === "string" ? input : input.url, ORIGEM).pathname;
-      chamadas.push(caminho);
-      if (caminho === "/auth/refresh") throw new TypeError("Failed to fetch");
-      return { ok: false, status: 401 };
-    };
-    c.caches.delete = async (k) => { apagados.push(k); return true; };
-  });
-
-  const resp = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
-
-  assert.ok(chamadas.includes("/auth/refresh"),
-            "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
-  assert.equal(resp.status, 401, "o 401 tem que chegar ao chamador");
-  assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao de pe");
-  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
-    assert.equal(local.has(k), true, `${k} foi apagado por uma renovacao sem rede`);
-  }
-});
-
 test("offline no DELETE /auth/account NAO limpa — a exclusao nao aconteceu", async () => {
   // O chamador (settings.html, ~:2605) mostra o toast e NAO navega nessa
   // falha: o usuario continua logado na propria pagina. Apagar o aparelho dele
@@ -779,4 +759,195 @@ test("offline no /auth/refresh chamado DIRETO nao limpa nem estoura no predicado
   for (const k of Object.keys(DERIVADO_DE_CONTA)) {
     assert.equal(local.has(k), true, `${k} foi apagado por um refresh sem rede`);
   }
+});
+
+// ── Logout que RESPONDE ERRO: a outra metade da mesma classe ─────────────
+//
+// O primeiro corte deste PR prendia a limpeza ao `resp.ok` e so' abria excecao
+// para a rejeicao. Era consertar a instancia: o argumento que justifica limpar
+// sem resposta ("o chamador navega para a tela deslogada de qualquer jeito")
+// nao depende de HAVER resposta — vale igual para 403, 429 e 500.
+//
+// E o 403 nao precisa de modo aviao: o cookie `csrf_token` dura 24h
+// (CSRF_COOKIE_MAX_AGE) e so' e' reemitido em metodo SEGURO quando falta, entao
+// uma aba deixada aberta mais de um dia manda o POST sem o header e leva 403 do
+// `csrf_middleware` — antes da rota, sem o backend limpar cookie nenhum. O 429
+// vem do `@limiter.limit("30/minute")` da propria rota.
+
+for (const status of [403, 429, 500]) {
+  test(`logout que responde ${status} limpa — o chamador navega igual`, async () => {
+    const apagados = [];
+    const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js", (c) => {
+      c.fetch = async () => ({ ok: false, status });
+      c.caches.delete = async (k) => { apagados.push(k); return true; };
+    });
+
+    const resp = await ctx.window.fetch("/auth/logout", { method: "POST" });
+
+    assert.equal(resp.status, status, "o status tem que chegar ao chamador");
+    assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                     `logout ${status} deixou o Cache Storage no aparelho`);
+    for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+      assert.equal(local.has(k), false, `${k} sobreviveu a um logout ${status}`);
+    }
+    assert.equal(sessao.has("pb_home_42"), false, "pb_home_ sobreviveu na sessao");
+  });
+}
+
+test("URL protocolo-relativa de terceiro NAO e' a nossa origem", async () => {
+  // `_isOwnApi` aceitava qualquer string comecando com "/", inclusive `//host/`,
+  // ANTES de tentar parsear — e ai `_caminho()` resolvia
+  // `//cdn-de-terceiro/auth/logout` para o pathname `/auth/logout`. Com a
+  // limpeza agora disparando tambem sem resposta, e fetch cross-origin sem CORS
+  // SEMPRE rejeitando, bastaria uma dessas URLs para apagar o aparelho.
+  const apagados = [];
+  const repassadas = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async (input) => { repassadas.push(input); throw new TypeError("Failed to fetch"); };
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await assert.rejects(() => ctx.window.fetch("//cdn-de-terceiro.example.com/auth/logout",
+                                              { method: "POST" }), TypeError);
+
+  assert.deepEqual(repassadas, ["//cdn-de-terceiro.example.com/auth/logout"],
+                   "a request nem chegou ao fetch original — o teste nao mede o caminho certo");
+  assert.deepEqual(apagados, [], "um host de terceiro apagou o Cache Storage deste aparelho");
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado por uma URL de terceiro`);
+  }
+});
+
+test("caminho absoluto da PROPRIA origem continua sendo interceptado", async () => {
+  // Controle positivo do caso acima: a guarda do `//` nao pode derrubar a
+  // deteccao por HOST, que e' o que faz `https://pigbankai.com/auth/logout`
+  // (URL absoluta, mesma origem) continuar passando pela limpeza.
+  const apagados = [];
+  const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async () => ({ ok: true, status: 200 });
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await ctx.window.fetch(`${ORIGEM}/auth/logout`, { method: "POST" });
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "a guarda do // derrubou a interceptacao da propria origem");
+});
+
+// ── Storage BLOQUEADO: o getter que lanca antes de qualquer try ─────────
+//
+// `window.localStorage` nao e' um campo, e' um GETTER, e ele LANCA
+// `SecurityError` quando o site esta' com dados bloqueados (Chrome) ou o
+// WKWebView nega storage. O `try` do `apagaStorage` protegia o `forEach`, mas a
+// avaliacao do ARGUMENTO acontecia fora dele — entao o erro subia por
+// `_limpaEstadoDoDispositivo` e derrubava a limpeza inteira ANTES do Cache
+// Storage e do service worker, que sao justamente o residuo que ela existe para
+// remover. De quebra, o chamador recebia `SecurityError` no lugar do erro real.
+
+/**
+ * `paginaComCache` com um dos storages lancando no ACESSO, como o navegador.
+ *
+ * O getter TEM que morar num `window` separado do global do vm: definido no
+ * proprio global, o Node engole a excecao e devolve `undefined` — medido, e foi
+ * assim que a primeira versao destes tres casos passou sem medir nada.
+ */
+function comStorageBloqueado(qual, prepara) {
+  const apagados = [];
+  const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
+    const win = Object.create(c);
+    Object.defineProperty(win, qual, {
+      configurable: true,
+      get() { const e = new Error("Access is denied for this document."); e.name = "SecurityError"; throw e; },
+    });
+    c.window = win;
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+    if (prepara) prepara(c);
+  });
+  return { ctx, apagados };
+}
+
+for (const qual of ["localStorage", "sessionStorage"]) {
+  test(`${qual} bloqueado nao derruba a limpeza do cache no logout`, async () => {
+    const { ctx, apagados } = comStorageBloqueado(qual);
+
+    const resp = await ctx.window.fetch("/auth/logout", { method: "POST" });
+
+    assert.equal(resp.ok, true, "o logout nem devolveu resposta ao chamador");
+    assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                     `com ${qual} bloqueado o Cache Storage ficou no aparelho`);
+  });
+}
+
+test("storage bloqueado no logout OFFLINE: limpa o cache E devolve o erro DA REDE", async () => {
+  // Os dois danos de uma vez. Sem o conserto o chamador recebia o SecurityError
+  // do getter em vez do TypeError da rede, e nada era apagado.
+  const desregistrados = [];
+  const { ctx, apagados } = comStorageBloqueado("localStorage", (c) => {
+    c.fetch = async () => { throw new TypeError("Failed to fetch"); };
+    c.navigator.serviceWorker.getRegistrations = async () => [
+      { unregister: async () => { desregistrados.push(1); return true; } },
+    ];
+  });
+
+  await assert.rejects(() => ctx.window.fetch("/auth/logout", { method: "POST" }),
+                       (e) => e instanceof TypeError && /Failed to fetch/.test(e.message),
+                       "o chamador recebeu o erro do storage, nao o da rede");
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"], "o cache ficou no aparelho");
+  assert.equal(desregistrados.length, 1, "o service worker nao foi desregistrado");
+});
+
+test("nav-auth tem a mesma correcao — o Sair das publicas parava de recarregar", () => {
+  // §0.7 de novo: o `apagaStorage` do nav-auth e' a copia do outro e tinha o
+  // mesmo `try` no lugar errado. La o dano e' pior: o `.finally` do `doLogout`
+  // rejeitava e o `location.reload()` NUNCA rodava — o botao "Sair" das 12
+  // paginas publicas nao fazia nada visivel. O `doLogout` e' interno ao IIFE e
+  // so' e' alcancado por clique, entao o que se prende aqui e' a FORMA: nenhum
+  // dos dois pode avaliar o getter fora do try.
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
+  for (const [nome, caminho] of [["nav-auth.js", ["nav-auth.js"]],
+                                 ["auth-refresh.js", ["static", "auth-refresh.js"]]]) {
+    const fonte = readFileSync(join(dir, ...caminho), "utf-8");
+    assert.ok(!/apagaStorage\(\s*window\./i.test(fonte),
+              `${nome} volta a avaliar o getter de storage FORA do try: com dados do site bloqueados a limpeza inteira morre antes do Cache Storage`);
+    assert.ok(/pagaStorage\("localStorage"\)/.test(fonte) && /pagaStorage\("sessionStorage"\)/.test(fonte),
+              `${nome} parou de limpar um dos dois storages`);
+  }
+});
+
+test("URL com barra invertida tambem aponta para outro host", async () => {
+  // `//host/x` era o caso obvio; `/\host/x` resolve para o MESMO lugar porque a
+  // WHATWG normaliza `\` como `/`, e nao comeca com `//`. Consertar so' o
+  // primeiro era consertar a instancia: por esta ainda dava para apagar o
+  // aparelho de quem carregasse a URL. O conserto foi tirar o fast-path e
+  // deixar a comparacao por HOST decidir.
+  for (const url of ["//evil.example.com/auth/logout",
+                     "/\\evil.example.com/auth/logout",
+                     "/\\/evil.example.com/auth/logout"]) {
+    const apagados = [];
+    const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+      c.fetch = async () => { throw new TypeError("Failed to fetch"); };
+      c.caches.delete = async (k) => { apagados.push(k); return true; };
+    });
+
+    await assert.rejects(() => ctx.window.fetch(url, { method: "POST" }), TypeError);
+
+    assert.deepEqual(apagados, [], `${url} apagou o Cache Storage deste aparelho`);
+    assert.equal(local.has("pigbank_menu_v1"), true, `${url} apagou o menu deste aparelho`);
+  }
+});
+
+test("caminho relativo comum continua sendo interceptado sem o fast-path", async () => {
+  // Controle positivo de tirar o fast-path: `/auth/logout` cru e' a forma que
+  // TODOS os cinco donos de logout usam, e ela nao pode deixar de ser nossa.
+  const apagados = [];
+  const { ctx } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async () => ({ ok: true, status: 200 });
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await ctx.window.fetch("/auth/logout", { method: "POST" });
+
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "tirar o fast-path derrubou a interceptacao do caminho relativo");
 });

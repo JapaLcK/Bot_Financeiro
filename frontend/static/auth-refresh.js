@@ -20,7 +20,12 @@
   function _isOwnApi(url) {
     if (typeof url !== "string") url = (url && url.url) || "";
     if (!url) return false;
-    if (url.startsWith("/")) return true;
+    // Sem fast-path por "começa com /". Ele aceitava como nossa qualquer URL
+    // com essa forma, e `//host/x` e `/\host/x` apontam para OUTRO host — a
+    // segunda porque a WHATWG normaliza `\` como `/`. Bastava uma delas
+    // terminando em `/auth/logout` para o pathname bater e a limpeza apagar
+    // este aparelho. O parse abaixo compara HOST, e cobre as duas formas, o
+    // caminho relativo comum e a URL absoluta com uma regra só.
     try {
       const u = new URL(url, window.location.origin);
       return u.host === window.location.host;
@@ -80,13 +85,29 @@
    * `_clear_session_cookies` (finance_bot_websocket_custom.py). São três, e o
    * critério de cada uma difere — por isso um mapa e não um array:
    *
-   *   POST   /auth/logout    encerra quando dá certo — E quando não houve
-   *                          resposta nenhuma (`resp === null`, o fetch
-   *                          REJEITOU: offline, DNS, captive portal). Sair
-   *                          sem rede é sair deste aparelho do mesmo jeito:
-   *                          todo chamador navega no `.finally`, o usuário vê
-   *                          a tela deslogada, e o que ficasse para trás é
-   *                          resíduo privado no aparelho compartilhado.
+   *   POST   /auth/logout    encerra SEMPRE — 2xx, erro, ou resposta nenhuma
+   *                          (`resp === null`, o fetch REJEITOU: offline, DNS,
+   *                          captive portal). O critério não é o servidor, é o
+   *                          chamador: os cinco donos de logout navegam para a
+   *                          tela deslogada no `.finally`, sem olhar o status.
+   *                          Se o estado ficasse, ele ficaria num aparelho que
+   *                          mostra "saí" — resíduo privado no aparelho
+   *                          compartilhado.
+   *
+   *                          Não é hipotético e não precisa de modo avião: o
+   *                          cookie `csrf_token` dura 24h e só é reemitido em
+   *                          método SEGURO quando falta, então uma aba aberta
+   *                          mais de um dia manda o POST sem header e leva
+   *                          403 do `csrf_middleware` — antes da rota. Prender
+   *                          a limpeza ao `resp.ok` deixava esse caso e o 429
+   *                          do `@limiter.limit("30/minute")` do lado errado.
+   *
+   *                          O que isto NÃO faz: os cookies de sessão são
+   *                          `httponly`, então JS nenhum os apaga, e num
+   *                          logout que não chegou ao servidor a sessão
+   *                          continua VIVA (`revoke_session` não rodou). O que
+   *                          se ganha é não deixar e-mail, nome, plano e
+   *                          snapshot na tela do próximo dono — não "deslogou".
    *   DELETE /auth/account   encerra quando dá certo, e SÓ com resposta. Numa
    *                          rejeição a exclusão não aconteceu, o chamador
    *                          (settings.html) mostra o toast e NÃO navega:
@@ -115,7 +136,7 @@
    * de conta ficou de fora: consertei a instância e não a classe (Codex, #170).
    */
   const _SESSAO_ENCERRADA = {
-    "/auth/logout":  function (resp) { return !resp || resp.ok; },
+    "/auth/logout":  function ()     { return true; },
     "/auth/account": function (resp) { return !!resp && resp.ok; },
     "/auth/refresh": function (resp) { return !!resp && resp.status === 401; },
   };
@@ -153,8 +174,18 @@
     "finbot_logout_at", "finbot_reset_at",
   ]);
 
-  function _apagaStorage(store) {
+  /**
+   * Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
+   * quando o site está com dados bloqueados (Chrome), e a avaliação do
+   * argumento acontecia fora do `try`. O comentário prometia sobreviver a isso
+   * e não sobrevivia — o erro subia por `_limpaEstadoDoDispositivo`, o Cache
+   * Storage e o service worker ficavam intactos (o resíduo que esta limpeza
+   * existe para remover) e o chamador recebia `SecurityError` no lugar do erro
+   * de rede.
+   */
+  function _apagaStorage(nome) {
     try {
+      const store = window[nome];
       Object.keys(store).forEach(function (k) {
         if (!_PRESERVA.has(k)) store.removeItem(k);
       });
@@ -179,8 +210,8 @@
    * são inofensivas e tirá-las seria outro PR.
    */
   function _limpaEstadoDoDispositivo() {
-    _apagaStorage(window.localStorage);
-    _apagaStorage(window.sessionStorage);
+    _apagaStorage("localStorage");
+    _apagaStorage("sessionStorage");
     // ORDEM: desregistra ANTES de apagar. Um worker ANTIGO ainda no controle
     // tem `cache.put` assíncrono no handler de fetch dele, e uma request em voo
     // noutra aba podia recriar o cache DEPOIS do delete (Codex, #170). O
@@ -241,9 +272,13 @@
    * vez de remendados um a um — é a terceira rodada deste PR na mesma classe,
    * e o CLAUDE.md §4 manda parar de remendar e enumerar quando isso acontece.
    *
-   * Não limpa duas vezes no mesmo turno: cada ponto avalia o predicado da SUA
-   * resposta, e os caminhos são exclusivos (ou o inicial encerrou, ou o refresh
-   * falhou, ou o retry encerrou).
+   * Cada ponto avalia o predicado da SUA resposta, e a limpeza roda uma vez:
+   * ou o inicial encerrou, ou o refresh falhou, ou o retry encerrou. A cadeia
+   * `logout → 401 → refresh OK → retry` limparia duas vezes agora que o logout
+   * encerra em qualquer resposta, mas ela não existe — a rota não tem
+   * dependência de auth, é no-op sem token e nunca responde 401
+   * (`finance_bot_websocket_custom.py`). Se um dia responder, a limpeza é
+   * idempotente e a segunda passada é desperdício, não dano.
    */
   async function _comLimpeza(caminho, resp) {
     const fim = _SESSAO_ENCERRADA[caminho];
@@ -256,7 +291,7 @@
    *
    * `await _origFetch(...)` estourava antes do `_comLimpeza`, então fetch que
    * REJEITA (offline, DNS, captive portal, abort) saía por baixo da limpeza —
-   * e é o pior caso, não o mais raro: `logoutSettings` (settings.html) não tem
+   * e não é o caso raro: `logoutSettings` (settings.html) não tem
    * limpeza própria nenhuma e navega no `.finally` mesmo com a rejeição, então
    * sair do Ajustes em modo avião deixava `pigbank_menu_v1` (e-mail, nome,
    * plano), `pb_home_<uid>` e o Cache Storage inteiro no aparelho, com cara de
@@ -272,6 +307,11 @@
     try {
       resp = await _origFetch(input, init);
     } catch (e) {
+      // Sem `try` em volta de propósito. Um `catch` aqui engoliria também o
+      // erro de um predicado quebrado — a limpeza deixaria de acontecer sem
+      // ninguém ficar sabendo, falha ABERTA, e a guarda de `null` de cada
+      // predicado pararia de ser medida por teste nenhum. O que protege o erro
+      // do chamador são as guardas, que falham fechado.
       await _comLimpeza(caminho, null);
       throw e;
     }
