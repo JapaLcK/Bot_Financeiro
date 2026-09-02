@@ -80,6 +80,8 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
                     (started_at, int(user_id), started_at),
                 )
             conn.commit()
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(user_id)
         return started_at
     except TrialClaimError:
         raise
@@ -166,6 +168,8 @@ def mark_trial_downsell_sent(user_id: int) -> None:
                 (int(user_id),),
             )
         conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
 
 
 def count_launches_this_month(user_id: int) -> int:

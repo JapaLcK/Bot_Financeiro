@@ -694,11 +694,11 @@ def test_reconexao_esperando_o_lock_do_reset_nao_recria_a_conexao(user_id, monke
     estado = {"resetou": False}
 
     @contextmanager
-    def lock_apos_o_reset(item_id):
+    def lock_apos_o_reset(item_id, *, budget_ms=None):
         if not estado["resetou"]:
             estado["resetou"] = True
             reset_user_data(user_id, SENHA)
-        with lock_real(item_id) as got:
+        with lock_real(item_id, budget_ms=budget_ms) as got:
             yield got
 
     monkeypatch.setattr(of_routes, "pluggy_item_lock", lock_apos_o_reset)

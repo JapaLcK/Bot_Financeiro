@@ -1302,6 +1302,9 @@ def set_account_plan(
             )
             row = cur.fetchone()
         conn.commit()
+        if row:
+            from db_support import invalidate_auth_user_cache
+            invalidate_auth_user_cache(row["user_id"])
         return dict(row) if row else None
 
 

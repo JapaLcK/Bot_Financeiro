@@ -65,3 +65,5 @@ pyotp==2.10.0
 qrcode==8.2
 reportlab==5.0.0
 pillow==12.3.0
+fonttools==4.64.0
+brotli==1.2.0

@@ -12,9 +12,12 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import random
 import time
+
+import psycopg
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -32,6 +35,7 @@ from core.services.pluggy import (
 )
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
+    _env_int,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
     sync_pluggy_user,
@@ -82,10 +86,155 @@ _DIRTY: set[str] = set()
 # 3x é o mesmo erro 3x — e ainda esconde o defeito no log.
 _SYNC_MAX_ATTEMPTS = 3
 
-# Tentativas de pegar o lock ao gravar uma reconexão. Cada uma já espera até
-# `OF_SYNC_LOCK_WAIT_MS` (15s) lá dentro, então 2 é o teto do que cabe num
-# request HTTP — a janela do lock é só a fase de escrita e passa em segundos.
+# Tentativas de pegar o lock ao gravar uma reconexão. A janela do lock é só a
+# fase de escrita e passa em segundos, então a segunda quase sempre entra.
 _RECONNECT_LOCK_ATTEMPTS = 2
+
+# PRAZO ÚNICO da GRAVAÇÃO da reconexão — lock, backoff, segunda tentativa e a
+# escrita cabem todos aqui dentro. Antes, cada `pluggy_item_lock` reiniciava o
+# relógio: até 15s de vaga MAIS 15s de advisory lock, vezes 2 tentativas, mais
+# backoff — e depois disso a escrita ainda esperava o pool fora de qualquer teto
+# (Codex #166, dois P2 seguidos). O pior caso não era só lento: a gravação podia
+# acontecer DEPOIS do timeout do cliente, então o usuário via erro num fluxo que
+# tinha dado certo, e reconectava de novo.
+#
+# 20s é o orçamento, não o alvo: no caminho comum o lock está livre e isto não
+# custa nada. Quem estoura leva 503, que é recuperável — o item continua na
+# Pluggy e o mesmo POST reaproveita.
+#
+# ESCOPO, porque a palavra "operação" enganou uma vez: isto NÃO é o teto do
+# request. A rota (`pluggy_item_route`) tem SETE esperas, e o prazo cobre a
+# QUARTA — as três de depois ficam fora dele:
+#
+#   | # | etapa                                   | teto                       |
+#   |---|-----------------------------------------|----------------------------|
+#   | 1 | `get_pluggy_item` (HTTP, + o token)     | `PLUGGY_TIMEOUT` (20s), 2× |
+#   | 2 | `get_connections_by_item_id` (leitura)  | pool sync (ver abaixo)     |
+#   | 3 | `_enforce_bank_limit` (leituras)        | pool sync (ver abaixo)     |
+#   | 4 | `_grava_reconexao` (lock + escrita)     | **este prazo**             |
+#   | 5 | `register_item` (escrita)               | pool sync (ver abaixo)     |
+#   | 6 | `record_audit_event` (escrita)          | pool sync (ver abaixo)     |
+#   | 7 | `get_open_finance_snapshot` (leitura)   | pool sync (ver abaixo)     |
+#
+# SEM número de linha, de propósito: esta tabela apodreceu TRÊS vezes neste
+# mesmo PR (uma vez por rodada que inseriu linhas acima dela), e na última o
+# erro uniforme de −5 denunciou que foi "corrigida" por aritmética, não por
+# busca. Os sete nomes são únicos neste arquivo — `grep -n "<nome>"
+# frontend/routes/open_finance.py` acha cada um sem ambiguidade, e não
+# envelhece. Número de linha em comentário só se paga quando o alvo é NOUTRO
+# arquivo, onde a busca custa mais.
+#
+# "pool sync" = espera de vaga no `ConnectionPool` de `db/connection.py:78`,
+# `timeout=DB_CONNECT_TIMEOUT` com default **30**. Depois da vaga não há
+# `statement_timeout`: 2, 3, 5, 6 e 7 não têm teto de execução, e 5 e 6 COMMITAM.
+#
+# Somadas, elas passam do que um proxy aguenta. Um teto de REQUEST é outra
+# decisão — e o lugar dela provavelmente não é aqui, é o servidor. O que esta
+# onda fecha é a etapa 4, que estava SEM teto nenhum e escrevia no banco.
+#
+# CUIDADO com `DB_CONNECT_TIMEOUT`: são QUATRO definições da mesma env var com
+# DOIS defaults. `db/connection.py:78` = "30" (o pool sync, o da tabela acima);
+# `core/admin_dashboard.py:48`, `frontend/routes/shared.py:51` e
+# `frontend/finance_bot_websocket_custom.py:275` = "5". Ler o número do vizinho
+# errado já produziu uma conta 3× maior neste mesmo comentário.
+#
+# Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
+# `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
+# um abre conexão async NOVA (`core.admin_dashboard.db_connect`, com o
+# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48` — default **5**) e faz um
+# INSERT SEM `statement_timeout`. O `connect_timeout` limita o handshake e nada
+# limita o INSERT nem o commit, então o pior caso de cada log era ILIMITADO e
+# qualquer número fechado aqui era PISO. Os dois passaram a ir pelo
+# `_log_com_teto` (`asyncio.wait_for`), e aí o número vira TETO (Codex #166, P2):
+#
+#     ≤ 20,0s   o prazo INTEIRO      = as duas tentativas + o log do RETRY
+#                                      (`min(_LOG_DIAG_TIMEOUT_S, folga)`) + o
+#                                      backoff (`min(_backoff_sec, folga)`),
+#                                      todos saindo do mesmo bolso
+#   +  ≤ 2,0s   log FINAL            = _LOG_DIAG_TIMEOUT_S; roda com o prazo já
+#                                      vencido, então é o único que soma por cima
+#   =  ≈ 22,0s + o que está FORA (a lista no fim deste bloco)
+#                  22,0s = _RECONNECT_DEADLINE_MS + _LOG_DIAG_TIMEOUT_S, e é o
+#                  teto SÓ das duas escritas de diagnóstico. Não é o teto do
+#                  `_grava_reconexao`: o commit/rollback do
+#                  `save_pluggy_open_finance_item` e a fila do executor do
+#                  `to_thread` somam por cima, sem número.
+#
+# Repartição típica DENTRO dos 20s, deduzida das constantes (nada aqui foi
+# cronometrado em produção), com as duas tentativas estourando: 10,0s a 1ª
+# (`folga // 2`), ≤ 2,0s o log do retry, ~0,4s de backoff (`_backoff_sec(1)`,
+# 0,375–0,625s) e o resto na 2ª.
+#
+# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:48` SAIU da conta: o
+# `wait_for` corta em 2,0s independentemente dele. Era dele que vinham o piso de
+# 25,0s desta conta (5 + 5 nos dois logs) e o de 70s da versão anterior dela — o
+# cenário "e se o Railway definir 30?", que `.env.example` não define (grep vazio)
+# e ninguém verificou. A pergunta deixou de importar aqui.
+#
+# A recontagem do backoff que este PR fez continua valendo: ela existe para o caso
+# em que o log come quase toda a folga, e aí o sono antigo dormia por cima de
+# tempo já gasto (`test_backoff_nao_dorme_por_cima_do_que_o_log_gastou`).
+#
+# O QUE CONTINUA FORA do teto, e é furo NOMEADO: o commit e o rollback do
+# `save_pluggy_open_finance_item` (não há timeout por query no libpq — ver o
+# `_CursorComTeto` em `db/open_finance.py`) e o tempo na fila do executor do
+# `to_thread` (o FURO CONHECIDO no laço, abaixo). `wait_for` também não
+# interrompe thread: quem limita a TENTATIVA é o orçamento que ela leva, não este
+# teto — ele cobre só as duas escritas de diagnóstico.
+def _prazo_reconexao_ms() -> int:
+    """Prazo da reconexão, com config sem sentido voltando para o default.
+
+    `0` é como se escreve "desligado" numa env. Com um piso de 1ms — que foi a
+    primeira versão disto — `OF_RECONNECT_DEADLINE_MS=0` virava "TODA reconexão
+    do Open Finance falha com 503", de lock LIVRE, e o log ainda dizia "lock do
+    item ocupado", que é diagnóstico falso. Valor negativo idem. Abaixo de 1s
+    não há reconexão possível (só o `connect` já leva mais que isso), então
+    tratar como engano é mais honesto que obedecer.
+    """
+    ms = _env_int("OF_RECONNECT_DEADLINE_MS", 20000)
+    return ms if ms >= 1000 else 20000
+
+
+_RECONNECT_DEADLINE_MS = _prazo_reconexao_ms()
+
+# Teto de CADA log de diagnóstico do `_grava_reconexao`. A conta completa está no
+# bloco acima; o resumo é que sem ele o prazo prometido não era teto de nada.
+_LOG_DIAG_TIMEOUT_S = 2.0
+
+
+async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
+    """`log_system_event` que não pode furar o prazo da reconexão.
+
+    `log_system_event` (`core/admin_dashboard.py:180`) abre conexão async NOVA e
+    faz um INSERT sem `statement_timeout`: o `connect_timeout` limita o
+    handshake e NADA limita o INSERT nem o commit. Era o que deixava o teto do
+    `_grava_reconexao` ilimitado exatamente sob sobrecarga do banco, que é
+    quando ele importa (Codex #166, P2).
+
+    Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
+    diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
+    NÃO se perde — os dois chamadores emitem o `logging.getLogger(...).warning`
+    local ANTES desta chamada, e esse canal não depende do banco (é o mesmo
+    motivo pelo qual ele existe: ver o `except` do `_grava_reconexao`).
+
+    Só `asyncio.TimeoutError` é engolido. `CancelledError` de fora (cliente
+    desistiu, shutdown) continua subindo — o `wait_for` só converte em
+    `TimeoutError` o cancelamento que ELE mesmo causou.
+
+    Destacar com `asyncio.create_task` em vez de limitar seria pior nas duas
+    pontas: sem ninguém aguardando, a exceção vira "task exception was never
+    retrieved" e o log some em silêncio, e a escrita pendurada continua sem teto
+    — só que agora fora da vista.
+
+    Piso de 1ms pelo mesmo motivo do `_CursorComTeto`: com o prazo já vencido, o
+    que se garante é que não fica parado para sempre, não que caiba.
+    """
+    try:
+        await asyncio.wait_for(log_system_event(*args, **kwargs),
+                               max(0.001, segundos))
+    except asyncio.TimeoutError:
+        pass
+
 
 # HTTP da Pluggy que some sozinho: cota estourada e erro do lado dela. 404 fica
 # de fora de propósito (é `item_missing`, tratado no sync), 4xx de credencial
@@ -110,9 +259,9 @@ def _retryable(exc: BaseException) -> bool:
         return False
 
 
-def _salva_item_sob_lock(
-    user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
-) -> tuple[dict, bool]:
+def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
+                         budget_ms: int | None = None,
+                         tinha_conexao_propria: bool = False) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -135,7 +284,8 @@ def _salva_item_sob_lock(
     compra de cartão da autorização velha. O fallback anulava o conserto no único
     caso em que ele importa.
     """
-    with pluggy_item_lock(item_id) as locked:
+    t0 = time.monotonic()
+    with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
         # Revalidação SOB o lock (Codex PR #217, 4º): se a conexão própria que
@@ -143,9 +293,12 @@ def _salva_item_sob_lock(
         # a apagou foi um reset de conta ou um disconnect — os dois únicos
         # fluxos que deletam conexão. Gravar agora ressuscitaria a linha que o
         # usuário acabou de mandar apagar, e o sync inicial repopularia os
-        # dados. Aborta terminal (sem retry: o estado não volta sozinho).
+        # dados. Aborta terminal (sem retry: o estado não volta sozinho; a
+        # HTTPException passa por cima do except de infra do _grava_reconexao).
         # Item NOVO (sem conexão própria antes) não passa por aqui: conectar
         # banco DEPOIS de um reset é fluxo legítimo e não pode ser bloqueado.
+        # Roda ANTES do cálculo do `resto`: o tempo gasto aqui sai do orçamento
+        # da escrita sozinho (o monotonic é relido lá embaixo).
         if tinha_conexao_propria:
             propria_ainda_existe = any(
                 int(c["user_id"]) == int(user_id)
@@ -165,7 +318,27 @@ def _salva_item_sob_lock(
                     detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
                            "a conexão era concluída. Conecte o banco de novo.",
                 )
-        return save_pluggy_open_finance_item(user_id, remote), True
+        # O que sobrou DEPOIS de pegar o lock vai para a escrita. Sem isto o
+        # orçamento parava aqui: `save_pluggy_open_finance_item` esperava o pool
+        # (até `DB_CONNECT_TIMEOUT`) fora do prazo, e podia COMMITAR depois de o
+        # cliente ter desistido — o mesmo defeito que o prazo veio consertar, um
+        # degrau adiante (Codex #166, P2).
+        #
+        # Piso de 1ms em vez de desistir: já temos o lock, e abrir mão dele aqui
+        # deixaria a reconexão sem gravar tendo pago o preço todo. O que se
+        # garante é que a escrita não espera INDEFINIDAMENTE, não que ela caiba
+        # num prazo que já venceu.
+        #
+        # `psycopg.OperationalError` sobe daqui de propósito — quem trata é o
+        # `_grava_reconexao`. Tratar AQUI só sabia devolver `(None, False)`, que
+        # o chamador lê como "lock ocupado": a CATEGORIA inteira (toda subclasse
+        # de `psycopg.OperationalError` em `psycopg.errors`, mais `PoolTimeout`,
+        # `PoolClosed` e `TooManyRequests` do `psycopg_pool`) virava o mesmo log
+        # falso, e o tipo do erro não aparecia em lugar nenhum. Sem contagem de
+        # propósito: o número muda com a versão do psycopg e envelhece errado.
+        resto = None if budget_ms is None else max(
+            1, budget_ms - int((time.monotonic() - t0) * 1000))
+        return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
 
 
 async def _grava_reconexao(
@@ -182,24 +355,155 @@ async def _grava_reconexao(
     Esgotou: 503 com mensagem de "tente de novo". O item continua existindo na
     Pluggy e o mesmo POST reaproveita, então a reconexão é recuperável — o
     lançamento fantasma não seria.
+
+    PRAZO ÚNICO (Codex #166, P2). O relógio começa aqui e vale para a operação
+    inteira: cada tentativa recebe só o que SOBROU, e o backoff sai do mesmo
+    bolso. Antes, cada `pluggy_item_lock` reiniciava o teto — 15s de vaga + 15s
+    de advisory, vezes 2, mais backoff — e o POST passava de um minuto sob
+    contenção. O `_RECONNECT_LOCK_ATTEMPTS` continua como segunda trava, para o
+    laço não girar quando o lock falha instantaneamente; quem manda no tempo é
+    o prazo.
     """
+    fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
+    causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
-        connection, sob_lock = await asyncio.to_thread(
-            _salva_item_sob_lock, user_id, remote, item_id, tinha_conexao_propria)
+        folga_ms = int((fim - time.monotonic()) * 1000)
+        if folga_ms < 1:
+            break
+        # O que sobra do prazo, DIVIDIDO pelas tentativas que ainda cabem. Dar o
+        # prazo inteiro à primeira parecia certo e matava o retry: sob contenção
+        # real ela esperava os 20s no `pg_advisory_lock`, voltava sem folga, e a
+        # segunda nunca acontecia — medido, 1 tentativa e ZERO
+        # `of_reconnect_lock_retry` no log, que é o sinal que separa "ocupado
+        # mas recuperou" de "desistiu". A trava de tentativas virava código
+        # morto e ninguém via, porque os testes stubam o lock e voltam na hora.
+        restante_ms = max(1, folga_ms // (_RECONNECT_LOCK_ATTEMPTS - tentativa + 1))
+        # FURO CONHECIDO, não fechado nesta onda: o `restante_ms` é fixado AQUI,
+        # antes do dispatch, e o `t0` de `_salva_item_sob_lock` só começa a
+        # contar quando a thread REALMENTE roda. O tempo na fila do executor
+        # (default do asyncio, `min(32, cpus+4)` workers, e este request sozinho
+        # já usa 6 `to_thread`) fica fora do orçamento. Fechar isso é medir o
+        # `monotonic` dos dois lados e descontar — mudança no contrato de todos
+        # os `to_thread` da rota, outro PR.
+        try:
+            connection, sob_lock = await asyncio.to_thread(
+                _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
+                tinha_conexao_propria)
+            causa = None
+        except psycopg.OperationalError as exc:
+            # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
+            # O Codex apontou oito vezes o mesmo fenômeno por portas diferentes,
+            # e todas subiam como 500: `ConnectionTimeout` do `psycopg.connect`
+            # dedicado do `pluggy_item_lock`, o `set_config('lock_timeout')` sem
+            # teto, `PoolTimeout`, `PoolClosed`, `DeadlockDetected`, e o commit
+            # da escrita. Todas são "a infra não respondeu" — o MESMO fenômeno
+            # que, pela porta do lock, já dava o 503 recuperável documentado
+            # (Codex #166, P2).
+            #
+            # Por que `OperationalError` e NÃO `psycopg.Error`: a fronteira é
+            # medida. São subclasse de `OperationalError` — `PoolTimeout`,
+            # `PoolClosed`, `QueryCanceled`, `LockNotAvailable`,
+            # `ConnectionTimeout`, `DeadlockDetected`, `SerializationFailure`.
+            # NÃO são — `UniqueViolation`, `ProgrammingError`, `ValueError`. A
+            # hierarquia do psycopg já separa "não deu tempo" de "o código/a
+            # entrada está errado", e o segundo grupo continua subindo:
+            # `ValueError` vira o 400 da rota e o resto vira 500. `psycopg.Error`
+            # engoliria bug de verdade — o usuário retentando para sempre um erro
+            # que nunca vai passar.
+            #
+            # Retentar é seguro porque o upsert é `on conflict do update`,
+            # idempotente. O que NÃO se pode prometer é "nada ficou pela metade":
+            # vale para `QueryCanceled` (o cancelamento desfaz a transação), não
+            # para o commit — `TransactionResolutionUnknown` e
+            # `StatementCompletionUnknown` são desfecho DESCONHECIDO, e aí o
+            # usuário pode levar 503 num fluxo que gravou. Não é regressão (na
+            # `main` era 500 com o mesmo desfecho ambíguo), e a retentativa
+            # idempotente converge; o que muda é o código de status.
+            #
+            # `causa` existe porque `(None, False)` sozinho é indistinguível de
+            # "lock ocupado", e o log dizia isso para a categoria inteira — o
+            # diagnóstico falso que o `_prazo_reconexao_ms` já tinha registrado
+            # uma vez. Ela vai para os dois `log_system_event` abaixo E para o
+            # `logging` local, e a segunda parte NÃO é redundância:
+            # `log_system_event` (core/admin_dashboard.py:190-201) abre conexão
+            # NOVA para gravar e engole TODA exceção com um `print` que não
+            # carrega nem `message` nem `details`. Na família "o banco recusa
+            # conexão" — `TooManyConnections`, `DiskFull`, `AdminShutdown`,
+            # `InvalidPassword` — o canal do log é EXATAMENTE o que está
+            # quebrado: `system_event_logs` fica vazio e a `causa` sumiria. Ela
+            # só chega ao banco nas que não dependem de conexão nova
+            # (`PoolTimeout`, `QueryCanceled`, `LockNotAvailable`).
+            #
+            # `causa` é a da ÚLTIMA tentativa, de propósito (é ela que decide o
+            # desfecho): infra na 1ª + lock ocupado na 2ª faz o log FINAL dizer
+            # "lock do item ocupado" com `erro: None`, e a infra da 1ª aparece só
+            # no `of_reconnect_lock_retry`. Testado em
+            # `test_causa_e_a_da_ultima_tentativa`.
+            #
+            # ponytail: o teto é a política de retry sob infra — sob
+            # `TooManyConnections` este POST ainda tenta até 6 conexões (2
+            # tentativas × dedicada do lock + pool da escrita + o log) num
+            # servidor que acabou de recusar uma. Mudar isso é decidir não
+            # retentar quando `causa` é da família de conexão; o gancho já existe
+            # (é a própria `causa`), a decisão é de outro PR.
+            connection, sob_lock = None, False
+            causa = f"{type(exc).__name__}: {exc}"
         if sob_lock:
             return connection
-        if tentativa < _RECONNECT_LOCK_ATTEMPTS:
-            await log_system_event(
+        # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
+        # estourar é exatamente o que o deadline existe para impedir.
+        folga = fim - time.monotonic()
+        if tentativa < _RECONNECT_LOCK_ATTEMPTS and folga > 0:
+            # MESMO canal local do log final (abaixo), e pela mesma razão — mas
+            # aqui ele importa MAIS: este é o único log que carrega a causa da
+            # 1ª tentativa, e se a 2ª pegar o lock e gravar, o `of_reconnect_
+            # lock_timeout` nem acontece. Sem esta linha, uma infra na 1ª que
+            # some na 2ª desaparece por completo justamente na família
+            # (`TooManyConnections`/`DiskFull`/`AdminShutdown`) em que o
+            # `log_system_event` não consegue gravar.
+            logging.getLogger(__name__).warning(
+                "of_reconnect_lock_retry item_id=%s tentativa=%s causa=%s",
+                item_id, tentativa, causa or "lock do item ocupado")
+            await _log_com_teto(
+                min(_LOG_DIAG_TIMEOUT_S, fim - time.monotonic()),
                 "warning", "of_reconnect_lock_retry",
-                f"Lock ocupado ao gravar reconexão ({tentativa}/{_RECONNECT_LOCK_ATTEMPTS}): {item_id}",
-                source="open_finance", details={"item_id": item_id, "attempt": tentativa},
+                f"Reconexão não gravada ({tentativa}/{_RECONNECT_LOCK_ATTEMPTS}), "
+                f"vai retentar — {causa or 'lock do item ocupado'}: {item_id}",
+                source="open_finance",
+                # `_antes_do_log` no nome porque é o que ele é: a folga medida
+                # ANTES desta chamada. Este `log_system_event` gasta prazo (ver a
+                # recontagem abaixo), então no instante em que a linha chega ao
+                # banco o número já venceu — gravava `10000` valendo `-20000`.
+                details={"item_id": item_id, "attempt": tentativa,
+                         "restante_ms_antes_do_log": int(folga * 1000),
+                         "erro": causa},
             )
-            await asyncio.sleep(_backoff_sec(tentativa))
+            # RECONTA depois do log. Ele abre conexão async NOVA (o
+            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48`, default 5) e
+            # faz INSERT SEM `statement_timeout`, dentro da janela do prazo — é o
+            # maior componente do que sobra dentro do prazo (a conta está em
+            # `_prazo_reconexao_ms`). Medir a folga antes fazia o backoff dormir
+            # POR CIMA de tempo já gasto. A recontagem NÃO é o que limita o log —
+            # quem limita é o `_log_com_teto` acima, com `min(_LOG_DIAG_TIMEOUT_S,
+            # folga)`; esta linha só divide o que sobrou depois dele.
+            # Sem guarda de sinal: `asyncio.sleep` de valor negativo é no-op.
+            await asyncio.sleep(min(_backoff_sec(tentativa), fim - time.monotonic()))
 
-    await log_system_event(
+    # ANTES do `log_system_event`, e não em vez dele: este é o único canal que
+    # sobrevive à família de erro que o `causa` existe para diagnosticar. O
+    # `log_system_event` precisa de conexão NOVA para gravar (§ o comentário no
+    # `except` acima), então sob `TooManyConnections`/`AdminShutdown` ele não
+    # grava nada e engole a exceção. Mesmo padrão de `frontend/routes/shared.py:695`.
+    logging.getLogger(__name__).warning(
+        "of_reconnect_lock_timeout item_id=%s causa=%s", item_id,
+        causa or "lock do item ocupado")
+    await _log_com_teto(
+        _LOG_DIAG_TIMEOUT_S,
         "error", "of_reconnect_lock_timeout",
-        f"Reconexão NÃO gravada: lock do item ocupado: {item_id}",
-        source="open_finance", details={"item_id": item_id},
+        f"Reconexão NÃO gravada — {causa or 'lock do item ocupado'}: {item_id}",
+        source="open_finance",
+        details={"item_id": item_id, "deadline_ms": _RECONNECT_DEADLINE_MS,
+                 "erro": causa},
     )
     raise HTTPException(
         status_code=503,
