@@ -979,8 +979,28 @@ def _disconnect_sob_lock(user_id: int) -> int:
                 detail="Não foi possível desconectar agora: uma sincronização "
                        "bancária está em andamento. Tente de novo em alguns segundos.",
             )
-        delete_pluggy_items_best_effort(user_id)
-        return disconnect_open_finance_connection(user_id)
+        enumerados = delete_pluggy_items_best_effort(user_id)
+        varridos: list[str] = []
+        deleted = disconnect_open_finance_connection(user_id, swept_out=varridos)
+        # 2º passe (Codex PR #217, 12º — irmão do 11º no reset): item salvo
+        # ENTRE a enumeração acima e o delete local ficou órfão na Pluggy
+        # ("já possui conexão com este acesso"). `varridos` só existe se o
+        # delete commitou; deleta o que a enumeração não viu (normalmente
+        # vazio). Best-effort — o helper já loga por item.
+        tardios = sorted(set(varridos) - set(enumerados))
+        if tardios:
+            try:
+                delete_pluggy_items_best_effort(user_id, tardios)
+            except Exception as exc:  # noqa: BLE001 — mesmo contrato do 1º passe
+                from core.observability import log_system_event_sync
+
+                log_system_event_sync(
+                    "warning", "pluggy_item_delete_failed",
+                    f"2º passe do disconnect do user {user_id} falhou: {exc}",
+                    source="open_finance",
+                    details={"items": tardios, "error": str(exc)[:200]},
+                )
+        return deleted
 
 
 @router.delete("/open-finance/{user_id}")

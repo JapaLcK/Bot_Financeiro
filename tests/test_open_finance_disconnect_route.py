@@ -114,6 +114,52 @@ def test_disconnect_com_lock_de_reconexao_ocupado_recusa_com_503(user_id, monkey
     assert tocada == [], "com o lock ocupado a Pluggy não podia ter sido tocada"
 
 
+def test_item_salvo_durante_a_janela_do_disconnect_e_deletado_na_pluggy(user_id, monkeypatch):
+    """Codex PR #217 (P2, 12º — irmão do 11º no reset): item salvo DEPOIS de a
+    limpeza remota enumerar (T1) e ANTES do delete local (T2) era varrido do
+    banco sem ser deletado na Pluggy — órfão que bloqueia reconexão. O 2º
+    passe compara o varrido (RETURNING) com a enumeração e deleta o que ela
+    não viu. A injeção vai na 2ª chamada de list_pluggy_item_ids: a 1ª é a
+    dos locks (antes de T1), a 2ª é a enumeração do helper (T1).
+    CONTROLE NEGATIVO: sem o 2º passe (código anterior), fica vermelho."""
+    import db
+
+    item_velho = f"disc-janela-{user_id}"
+    item_novo = f"{item_velho}-tardio"
+    _semeia_conexao_pluggy(user_id, item_velho)
+
+    deletados: list[str] = []
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
+    monkeypatch.setattr(
+        of_routes, "delete_pluggy_item",
+        lambda item_id, api_key=None: deletados.append(item_id),
+    )
+
+    real_list = of_routes.list_pluggy_item_ids
+    chamadas = {"n": 0}
+
+    def _lista_e_injeta(uid):
+        chamadas["n"] += 1
+        itens = real_list(uid)
+        if chamadas["n"] == 2:  # T1: enumeração dentro do helper
+            db.save_pluggy_open_finance_item(
+                uid, {"id": item_novo, "status": "UPDATED",
+                      "connector": {"id": 613, "name": "Inter"}})
+        return itens
+
+    monkeypatch.setattr(of_routes, "list_pluggy_item_ids", _lista_e_injeta)
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.delete(f"/open-finance/{user_id}", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert _conexoes(user_id) == 0, "o delete local tinha que varrer o item novo também"
+    assert item_velho in deletados, "o item enumerado tinha que ser deletado no 1º passe"
+    assert item_novo in deletados, \
+        "item salvo na janela T1→T2 ficou órfão na Pluggy (bloqueia reconexão)"
+
+
 def test_falha_remota_nao_impede_o_disconnect_local(user_id, monkeypatch):
     _semeia_conexao_pluggy(user_id, f"disc-route2-{user_id}")
 
