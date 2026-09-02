@@ -3,7 +3,7 @@ db/accounts.py — Saldo, lançamentos e importação OFX.
 """
 import json
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 from math import isfinite
 
@@ -1185,16 +1185,32 @@ def _id(v) -> bool:
     Postgres coage o parâmetro), e o `int(paid_bill_id)` do delete da fatura
     aceita os dois. Recusá-los é FALSO POSITIVO — vira `kept_unsafe` num
     lançamento que a reversão sabe reverter, e `kept_unsafe` é permanente.
-    ASCII exigido: `"١٢٣".isdigit()` é `True` e `int()` devolve 123, mas o
-    Postgres estoura `invalid input syntax for type integer` (medido)."""
+
+    O `isascii()` roda no valor CRU, ANTES do `strip()`: o que vai pro Postgres
+    é a string crua, não a aparada. Medido no `pigbank_ci_test`, com o
+    `.strip()` primeiro: `"\\xa093"` vira `"93"`, passa no ASCII, e o parâmetro
+    CRU estoura `InvalidTextRepresentation` — recusa tipada virava exceção crua
+    (balde `errors`, SILÊNCIO em 3 das 8 portas). Espaço ASCII (`" 93"`,
+    `"93\\n"`) o Postgres aceita (medido), por isso o `strip()` continua
+    valendo para o `isdigit()`.
+
+    LARGURA: `id` é `bigserial`. Acima de 2^63-1 o Postgres estoura
+    `NumericValueOutOfRange` na string (medido) e no int gigante ele compara
+    como `numeric` sem casar linha nenhuma — nos dois casos não existe linha a
+    reverter, então recusar não é falso positivo."""
     if isinstance(v, bool):
         return False
     if isinstance(v, str):
-        v = v.strip()
-        return v.isascii() and v.isdigit() and int(v) > 0
-    if isinstance(v, float):
-        return v.is_integer() and v > 0
-    return isinstance(v, int) and v > 0
+        if not (v.isascii() and v.strip().isdigit()):
+            return False
+        v = int(v)
+    elif isinstance(v, float):
+        if not v.is_integer():
+            return False
+        v = int(v)
+    elif not isinstance(v, int):
+        return False
+    return 0 < v <= 9223372036854775807  # bigint
 
 
 def _nome(v) -> bool:
@@ -1216,24 +1232,44 @@ def _data(v) -> bool:
     """Data que os QUATRO destinos aceitam. `null` passa porque as quatro são
     null-safe a jusante (`if last_date_str else hoje`, ou `NULL` na coluna).
 
-    O `[:10]` é o mesmo recorte que o resto do repo já faz
-    (`core/services/cashflow.py:30`, `core/services/ai_chat/tools/bills.py:214`)
-    e existe porque `date.fromisoformat` NÃO aceita ISO com hora no 3.13
-    (`'2026-09-02T15:04:05.123456-03:00'` -> `ValueError`, medido) enquanto a
-    coluna `date` do Postgres aceita e corta a hora (medido). Sem ele, um
-    escritor que serialize `datetime.isoformat()` num dos quatro campos vira
-    `kept_unsafe` permanente. `last_date` passa pelo mesmo recorte na reversão.
+    O ISO com hora tem de PASSAR: `date.fromisoformat` o recusa no 3.13
+    (`'2026-09-02T15:04:05.123456-03:00'` -> `ValueError`, medido) e a coluna
+    `date` do Postgres o aceita cortando a hora (medido). Um escritor que
+    serialize `datetime.isoformat()` num dos quatro campos não pode virar
+    `kept_unsafe` permanente. `last_date` é o único que a reversão converte em
+    Python (com `[:10]`, o recorte que `core/services/cashflow.py:30` já faz);
+    `purchase_date`, `maturity_date` e `before.closed_at` vão CRUS pro Postgres.
 
-    TETO: `"2026-W01-1"` passa aqui (o Python entende) e o Postgres recusa, então
-    `purchase_date`/`maturity_date`/`closed_at` ainda estouram CRU nessa grafia.
-    Nenhum escritor a produz; fechar isso é apertar o predicado, não afrouxá-lo."""
+    Por isso o predicado é a INTERSEÇÃO, não o `date.fromisoformat(v[:10])` que
+    estava aqui: o recorte aceitava qualquer coisa cujos 10 primeiros caracteres
+    fossem ISO (`'2026-09-02extra'`, `'2026-09-02T'`, `20260902` como int) e as
+    três colunas cruas estouravam `InvalidDatetimeFormat`/`CannotCoerce` —
+    exceção crua no lugar de recusa tipada. As duas formas que o Python aceita e
+    o Postgres NÃO (medido no `pigbank_ci_test`, `select %s::date`) são a data
+    de SEMANA ISO (`'2026-W01-1'`) e a hora sem minuto (`'...T15'`); é o que os
+    dois testes finais fecham.
+
+    TETO deliberado no outro sentido: o Postgres aceita grafias que este
+    predicado recusa (`'02/09/2026'`, `'today'`, `'  2026-09-02  '`, `date` com
+    fuso e sem hora). Nenhum escritor as produz — `date.isoformat()` e
+    `datetime.isoformat()` são as duas únicas grafias de saída do repo —, e
+    predicado ⊆ coluna é o lado seguro: falso positivo aqui seria `kept_unsafe`
+    permanente."""
     if v is None:
         return True
-    try:
-        date.fromisoformat(str(v)[:10])
-        return True
-    except (TypeError, ValueError):
+    if not isinstance(v, str):
         return False
+    dia, sep, hora = v.replace(" ", "T", 1).partition("T")
+    try:
+        date.fromisoformat(dia)
+        if sep:
+            time.fromisoformat(hora)
+    except ValueError:
+        return False
+    # `date.fromisoformat` aceita semana ISO ('2026-W01-1') e
+    # `time.fromisoformat` aceita hora sem minuto ('15'); o Postgres recusa as
+    # duas. Só dígitos e '-' na data; 'HH:MM' no mínimo na hora.
+    return dia.replace("-", "").isdigit() and (not sep or hora[2:3] == ":")
 
 
 # Tabela ANINHADA de `investment_lot_withdrawals[].before`. Sem `balance` e
@@ -1318,9 +1354,23 @@ def _checar_forma(item: dict, campos: dict, onde: str) -> None:
 # reversível. É a guarda EXPLÍCITA que faltava: o filtro por `tipo`
 # (`_CONTA_CORRENTE_LAUNCH_FILTER`) protege isso só por tabela, e um `tipo`
 # reescrito o fura.
+#
+# São as OITO chaves de `_EFEITOS_FORMA` (as que a reversão de fato EXECUTA) que
+# tocam `pockets`/`investments`/`investment_lots`. As três de conta corrente
+# (`delta_conta`, `bill_id`, `paid_amount_added`) e as seis informativas — que
+# `_EFEITOS_FORMA` nem lista, porque a reversão não faz nada com elas — ficam de
+# fora. `investment_lot_create`/`investment_lot_withdrawals` nasceram DEPOIS
+# desta constante (`79bd52f`) e ficaram fora dela; medido no `pigbank_ci_test`,
+# com o `tipo` reescrito para `despesa` (a mesma ameaça de
+# `test_apagar_tudo_nao_toca_caixinha_com_tipo_reescrito`):
+#   investment_lot_create       conta 700 -> -300, inv 300 -> 0, lote DESTRUÍDO
+#   investment_lot_withdrawals  conta 1000 -> 0,   inv 0 -> 300, lote REABERTO
+# Quem fecha a CLASSE (chave nova de caixinha/investimento que não entre aqui) é
+# `tests/test_efeitos_allowlist.py`, comparando com `_EFEITOS_FORMA`.
 _EFEITOS_FORA_DO_APAGAR_TUDO = (
     "create_pocket", "create_investment", "delete_pocket", "delete_investment",
     "delta_pocket", "delta_invest",
+    "investment_lot_create", "investment_lot_withdrawals",
 )
 
 
@@ -1427,7 +1477,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     Deleta um lançamento e reverte seus efeitos no banco atomicamente.
     Usa o campo efeitos (jsonb) para saber o que reverter.
 
-    Recusa (sem tocar em saldo) o que não sabe reverter por inteiro — o
+    Recusa o que não sabe reverter por inteiro, sem deixar saldo mexido — o
+    pré-voo roda antes de qualquer escrita, e as recusas por `rowcount` (que
+    rodam DEPOIS do `update accounts`) voltam pelo rollback da transação. O
     pré-voo inteiro é `_validar_efeitos`: `LaunchNoEffects` sem `efeitos`,
     `LaunchUnsafeRollback` com `efeitos` degenerado, com chave fora de
     `_EFEITOS_REVERSIVEIS`, com delta de lote sem a chave que nomeia o lote
@@ -1500,8 +1552,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             if not isinstance(efeitos, dict):
                 raise LaunchNoEffects("lançamento sem 'efeitos' (não dá pra desfazer com segurança).")
 
-            # Daqui pra baixo NENHUM `update` ainda rodou — as recusas são
-            # antes de mexer em saldo, de propósito.
+            # PRÉ-VOO: aqui nenhum `update` rodou ainda, e as recusas
+            # dele são de fato anteriores a qualquer escrita. As recusas por
+            # `rowcount` (fatura e lotes, mais abaixo) NÃO são — elas vêm
+            # depois do `update accounts`, e quem desfaz é o ROLLBACK da
+            # transação, não a ordem das checagens (medido com um cursor
+            # observador DENTRO da transação: o lote aparece restaurado antes
+            # do `raise` e volta ao estado original depois dele). O efeito
+            # visível é o mesmo — `commit()` só no fim da função.
             delta_conta = _validar_efeitos(
                 efeitos, escopo_conta_corrente=escopo_conta_corrente)
 
@@ -1544,6 +1602,42 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         user_id,
                     ),
                 )
+
+                # A fatura não casou (`rowcount == 0`). Irmão dos dois
+                # `rowcount` de lote — mas aqui a resposta NÃO é recusar, e a
+                # diferença é medida (`pigbank_ci_test`, conta antes -> depois):
+                #
+                #   linha AUSENTE — dois caminhos de PRODUTO chegam aqui, e nos
+                #     dois a DÍVIDA sumiu junto com a fatura, então devolver o
+                #     pagamento é o certo:
+                #       `delete_card` (`db/cards.py:266`, WhatsApp em
+                #         `core/handlers/credit.py`): o cascade de
+                #         `credit_bills.card_id` leva as faturas -> 900/1000,
+                #         nenhuma fatura de pé.
+                #       `merge_users` (`db/users.py:122`): o dedup apaga a
+                #         fatura JÁ PAGA da origem e move o lançamento com o
+                #         `bill_id` morto -> 900/1000, e a fatura que sobra é a
+                #         do destino, com `paid_amount` 0. Nada é criado.
+                #     Recusar aqui seria falso positivo, e `kept_unsafe` é
+                #     PERMANENTE.
+                #
+                #   linha de OUTRO usuário — 900/1000 com a fatura alheia ainda
+                #     `paid`: R$100 creditados por causa de linha que não é do
+                #     usuário. Nenhum caminho de produto produz isto (o
+                #     `merge_users` move `credit_bills.user_id` na MESMA
+                #     transação); é a cauda que `_id` não alcança, e é a regra
+                #     dura do `CLAUDE.md` §0.
+                #
+                # `rowcount > 1` não tem ramo: `id` é PK e o `where` casa 0 ou 1.
+                if cur.rowcount == 0:
+                    cur.execute("select 1 from credit_bills where id=%s",
+                                (int(paid_bill_id),))
+                    if cur.fetchone():
+                        raise LaunchUnsafeRollback(
+                            "'bill_id' não aponta pra fatura deste usuário: a "
+                            "reversão não desfaz o pagamento.",
+                            "efeito_incompleto",
+                        )
 
             # desfazer criação de investimento (zera e deleta)
             if create_invest:
@@ -1679,14 +1773,31 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         # por cima. Medido: com o lote já removido por fora, o
                         # investimento ia a -300.00 e o TOTAL de 1000 pra 700 —
                         # dinheiro destruído num caso que a `main` acerta.
-                        # Recusando, NENHUM update roda: nada é criado, creditado
-                        # ou somado, que é o requisito inteiro.
+                        # Recusando, o ROLLBACK desfaz o que já rodou (o
+                        # `update accounts` vem antes deste bloco): do lado de
+                        # fora nada é criado, creditado ou somado, que é o
+                        # requisito inteiro.
                         raise LaunchUnsafeRollback(
                             "'investment_lot_create.lot_id' não aponta pra lote "
                             "deste usuário: a reversão não desfaz o aporte.",
                             "efeito_incompleto",
                         )
                     investment_lots_handled = True
+                # TETO CONHECIDO, NÃO fechado aqui: `investment_id` vem do
+                # `efeitos` (`_EFEITOS_FORMA` valida a FORMA, não a
+                # CORRESPONDÊNCIA com o lote), e este `update` é o terceiro irmão
+                # dos dois `rowcount` — só que sem `rowcount`. Com um
+                # `investment_id` de outro investimento DO MESMO usuário, o
+                # agregado do investimento errado é recalculado (o `where
+                # i.user_id=%s` segura o isolamento entre usuários; o que ele não
+                # segura é o alvo dentro do usuário). Só é alcançável com
+                # `efeitos` reescrito à mão — o escritor (`db/investments.py`)
+                # grava `lot_id` e `investment_id` no mesmo insert —, e quando o
+                # `lot_id` casa linha, o `investment_id` do lote sobrescreveria o
+                # do `efeitos` se ele viesse VAZIO, não se vier ERRADO. Fechar
+                # isso é confrontar com `lot["investment_id"]`, o que muda o
+                # comportamento de um caminho que hoje ninguém produz: fica
+                # REGISTRADO, não consertado.
                 if investment_id:
                     cur.execute(
                         """

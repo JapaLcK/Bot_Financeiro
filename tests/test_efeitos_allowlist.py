@@ -43,6 +43,7 @@ from db.accounts import (
     _EFEITOS_REVERSIVEIS,
     _EFEITOS_SEM_REVERSAO,
     _EFEITOS_FORA_DO_APAGAR_TUDO,
+    _EFEITOS_FORMA,
 )
 
 _RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -167,3 +168,38 @@ def test_as_duas_listas_nao_se_sobrepoem():
     # a guarda de escopo do "apagar tudo" fala de chaves que a função SABE
     # reverter — se uma delas saísse da allowlist, a guarda 2 viraria letra morta.
     assert set(_EFEITOS_FORA_DO_APAGAR_TUDO) <= _EFEITOS_REVERSIVEIS
+
+
+def test_toda_chave_de_caixinha_ou_investimento_esta_fora_do_apagar_tudo():
+    """Fecha a CLASSE da guarda de escopo, não a instância.
+
+    `investment_lot_create` e `investment_lot_withdrawals` nasceram no `79bd52f`
+    e ficaram DE FORA de `_EFEITOS_FORA_DO_APAGAR_TUDO` por dois commits: o
+    "apagar tudo" prometia "suas caixinhas e investimentos não são afetados" e,
+    com o `tipo` reescrito para `despesa`, destruía um lote (conta 700 -> -300)
+    ou reabria um resgatado (conta 1000 -> 0). Duas strings esquecidas, e nada
+    reprovava.
+
+    A comparação é com `_EFEITOS_FORMA` (as chaves que a reversão EXECUTA), não
+    com `_EFEITOS_REVERSIVEIS`: as seis informativas estão na allowlist e não
+    tocam em tabela nenhuma, então não pertencem à guarda de escopo — e
+    `investment_meta` seria falso positivo pelo nome.
+
+    A constante segue escrita à mão de propósito. Derivá-la com este mesmo
+    `"pocket"/"invest" in k` (§0.7) é 2 linhas a menos, mas põe heurística de
+    SUBSTRING no caminho do dinheiro: uma chave futura com nome fora do padrão
+    sairia da guarda calada, em produção, em vez de reprovar aqui. As duas
+    versões são igualmente cegas a esse nome; a diferença é onde a cegueira
+    aparece — teste vermelho ou caixinha apagada."""
+    tocam = {k for k in _EFEITOS_FORMA if "pocket" in k or "invest" in k}
+    assert tocam == set(_EFEITOS_FORA_DO_APAGAR_TUDO), (
+        "chave de caixinha/investimento fora da guarda de escopo do 'apagar "
+        "tudo' (ou o contrário). O 'apagar tudo' promete não tocar em caixinha "
+        f"nem investimento: {sorted(tocam ^ set(_EFEITOS_FORA_DO_APAGAR_TUDO))}"
+    )
+    # âncora: as duas que faltavam. Sem ela, um `_EFEITOS_FORMA` podado passaria.
+    assert {"investment_lot_create", "investment_lot_withdrawals"} <= tocam
+    # e as de conta corrente NÃO podem entrar — seria recusar o 'apagar tudo'
+    # inteiro, que é o que a função existe para fazer.
+    assert not ({"delta_conta", "bill_id", "paid_amount_added"}
+                & set(_EFEITOS_FORA_DO_APAGAR_TUDO))

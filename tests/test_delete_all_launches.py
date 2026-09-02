@@ -1045,6 +1045,22 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     ("id/bill_id texto", '{"delta_conta": -200.0, "bill_id": "sete", "paid_amount_added": 200.0}'),
     ("id/bill_id dígito não-ASCII",
      '{"delta_conta": -200.0, "bill_id": "١٢٣", "paid_amount_added": 200.0}'),
+    # ── id que PASSA no predicado e estoura CRU no Postgres. Estas duas
+    # células são a cegueira que a matriz tinha: todas as de cima são recusadas
+    # por TIPO, e nenhuma media o que o predicado deixa passar até o banco.
+    # `"\xa093".strip()` vira `"93"` e passava no `isascii()` DEPOIS do strip —
+    # o parâmetro CRU dá `InvalidTextRepresentation` (medido). O `bill_id` é o
+    # campo certo para medir `_id`: o `rowcount` que existe atrás dele não
+    # recusa (a fatura ausente é caminho de produto legítimo), então quem
+    # discrimina aqui é só o predicado.
+    ("id/bill_id espaço não-ASCII antes dos dígitos",
+     '{"delta_conta": -200.0, "bill_id": "\u00a093", "paid_amount_added": 200.0}'),
+    # 30 dígitos: `NumericValueOutOfRange` cru (`id` é bigserial).
+    ("id/bill_id acima de bigint",
+     '{"delta_conta": -200.0, "bill_id": "999999999999999999999999999999", '
+     '"paid_amount_added": 200.0}'),
+    ("id/bill_id float acima de bigint",
+     '{"delta_conta": -200.0, "bill_id": 1e30, "paid_amount_added": 200.0}'),
     # ── nome: o `lower(%s)` não casa e a caixinha/o investimento não é
     # deletado nem recriado, com o lançamento apagado.
     ("nome/delta_invest.nome lista",
@@ -1063,6 +1079,30 @@ _APORTE = '"delta_conta": -300.0, "delta_invest": {"nome": "cdb", "delta": 300.0
     ("data/before.closed_at número",
      '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
      '{"balance": 300.0, "principal_remaining": 300.0, "closed_at": 123}}]}'),
+    # ── data que PASSA no predicado e estoura CRU na coluna. A mesma cegueira
+    # do `_id`: as três células acima são recusadas por TIPO (`42`, `"ontem"`,
+    # `123`), e o `date.fromisoformat(str(v)[:10])` aceitava qualquer coisa
+    # cujos DEZ PRIMEIROS caracteres fossem ISO. `purchase_date`,
+    # `maturity_date` e `before.closed_at` vão CRUS pro Postgres — medido com
+    # `select %s::date`: `InvalidDatetimeFormat` nas quatro grafias abaixo.
+    ("data/maturity_date com sobra depois dos 10 caracteres",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", '
+     '"maturity_date": "2026-09-02extra"}}'),
+    ("data/purchase_date com T e nada depois",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", '
+     '"purchase_date": "2026-09-02T"}}'),
+    # semana ISO: o Python entende, o Postgres não. Era o TETO documentado do
+    # `_data` — e a classe medida era maior que a grafia que ele nomeava.
+    ("data/before.closed_at semana ISO",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0, "closed_at": "2026-W01-1"}}]}'),
+    ("data/maturity_date ISO básico como INT",
+     '{"delta_conta": 0.0, "delete_investment": {"nome": "cdb", '
+     '"maturity_date": 20260902}}'),
+    ("data/before.closed_at hora sem minuto",
+     '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
+     '{"balance": 300.0, "principal_remaining": 300.0, '
+     '"closed_at": "2026-09-02T15"}}]}'),
     # ── texto: só o TRUTHY não-string quebra (o falsy vira "open" no `or`).
     ("texto/before.status número",
      '{' + _APORTE + ', "investment_lot_withdrawals": [{"lot_id": LOTE, "before": '
@@ -1504,3 +1544,189 @@ def test_positivo_before_closed_at_iso_completo_restaura_o_lote(user_id: int):
 
     assert not any(int(r["id"]) == lid for r in db.list_launches(user_id, limit=10))
     assert _bal(user_id) == 700.0
+
+
+# ── o "apagar tudo" e as DUAS chaves de lote ────────────────────────────────
+#
+# `_EFEITOS_FORA_DO_APAGAR_TUDO` listava 6 das 8 chaves que a reversão executa
+# em caixinha/investimento: `investment_lot_create` e `investment_lot_withdrawals`
+# nasceram depois (`79bd52f`) e ficaram fora. A mensagem do "apagar tudo" promete
+# "suas caixinhas e investimentos não são afetados", e o `tipo` reescrito fura o
+# filtro por tabela — é a MESMA ameaça de
+# `test_apagar_tudo_nao_toca_caixinha_com_tipo_reescrito`, cuja docstring já
+# dizia que o filtro "protege isso só por tabela".
+
+def test_apagar_tudo_nao_destroi_o_lote_do_aporte_com_tipo_reescrito(user_id: int):
+    """Controle negativo medido (`investment_lot_create` fora da constante):
+    APAGOU, o lote de 300 foi DESTRUÍDO, o investimento foi a 0 e a conta a -300
+    (a receita da semente também é revertida) — R$300 destruídos dentro de um
+    investimento que o "apagar tudo" jurou não tocar.
+
+    SEM `delta_invest` de propósito: com ele a linha já cairia em
+    `fora_do_escopo` pela chave antiga, e o teste ficaria verde por construção
+    com a chave nova desligada (medido — foi o primeiro rascunho deste teste).
+    Os escritores de hoje gravam as duas juntas; esta é a forma DEGENERADA, o
+    mesmo modelo de ameaça do resto da matriz (linha mexida à mão, e o `tipo`
+    reescrito é a premissa deste grupo inteiro)."""
+    lid = _aporte_forjado(user_id, '{"delta_conta": 0.0}')
+    lot_id, inv_id = _ids_do_aporte(user_id)
+    _set_efeitos(user_id, lid,
+                 '{"delta_conta": 0.0, "investment_lot_create": '
+                 '{"lot_id": %d, "investment_id": %d}}' % (lot_id, inv_id))
+    _set_tipo(user_id, lid, "despesa")   # é o que faz a linha ENTRAR no conjunto
+    assert _lotes(user_id, "investment_lots") == (1, 300.0)
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result["kept_unsafe"] == [_user_seq(user_id, lid)], result
+    assert _lotes(user_id, "investment_lots") == (1, 300.0), "o lote foi destruído"
+    assert _investment_balance(user_id, "cdb") == 300.0
+    assert result["deleted"] == 1, "só a receita da semente sai"
+
+
+def test_apagar_tudo_nao_reabre_o_lote_do_resgate_com_tipo_reescrito(user_id: int):
+    """Irmão do de cima, pelo caminho do resgate e com escritores REAIS.
+
+    Controle negativo medido (as duas chaves fora da constante): APAGOU, o lote
+    fechado voltou a `open` com 300 dentro (investimento 0 -> 300) — dinheiro
+    ressuscitado dentro de um investimento que o "apagar tudo" jurou não tocar."""
+    from db.investments import (create_investment, investment_deposit_from_account,
+                                investment_withdraw_to_account)
+
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    create_investment(user_id, "cdb", 0.01, "monthly")
+    investment_deposit_from_account(user_id, "cdb", 300, "aportando")
+    investment_withdraw_to_account(user_id, "cdb", 300, "resgatando tudo")
+    resgate = int(db.list_launches(user_id, limit=1)[0]["id"])
+    lot_id, _inv = _ids_do_aporte(user_id)
+    # sem `delta_invest`, pelo mesmo motivo do teste acima: a chave antiga
+    # mascararia a nova e o controle negativo ficaria verde por construção.
+    _set_efeitos(user_id, resgate,
+                 '{"delta_conta": 0.0, "investment_lot_withdrawals": [{"lot_id": %d, '
+                 '"before": {"balance": 300.0, "principal_remaining": 300.0, '
+                 '"status": "open"}}]}' % lot_id)
+    _set_tipo(user_id, resgate, "despesa")
+    assert _lotes(user_id, "investment_lots") == (1, 0.0)
+    assert _investment_balance(user_id, "cdb") == 0.0
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert _user_seq(user_id, resgate) in result["kept_unsafe"], result
+    assert _lotes(user_id, "investment_lots") == (1, 0.0), "o lote foi reaberto"
+    assert _investment_balance(user_id, "cdb") == 0.0, "dinheiro ressuscitado no investimento"
+
+
+# ── `bill_id` sem fatura casada: creditar ou não ────────────────────────────
+#
+# O `update credit_bills` é o terceiro irmão dos dois `rowcount` de lote, e é o
+# único em que a resposta NÃO é recusar. Medido no `pigbank_ci_test`, conta
+# antes -> depois, com o `efeitos` gravado pelo escritor real (`pay_bill_amount`):
+#
+#   `delete_card`  (cascade de credit_bills)   900 -> 1000, nenhuma fatura de pé
+#   `merge_users`  (dedup de credit_bills)     900 -> 1000, fatura do destino
+#                                              intacta e com `paid_amount` 0
+#   fatura de OUTRO usuário (forjado)          900 -> 1000, fatura alheia AINDA
+#                                              `paid`  <- R$100 criados
+#
+# Nos dois primeiros a DÍVIDA sumiu junto com a fatura: devolver o pagamento é o
+# certo, e recusar seria falso positivo permanente. No terceiro o crédito sai por
+# causa de linha que não é do usuário — é a cauda que `_id` não alcança.
+
+def _pagamento_de_fatura(user_id: int) -> tuple[int, int, int]:
+    """(card_id, bill_id, launch_id do pagamento) pelos escritores REAIS."""
+    from datetime import date as _date
+
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.set_default_card(user_id, card_id)
+    _tx, _due, bill_id = db.add_credit_purchase(
+        user_id, card_id, 100, "outros", "compra", _date.today())
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "salario")
+    db.pay_bill_amount(user_id, card_id, "Nubank", 100.0)
+    pgto = int(db.list_launches(user_id, limit=1)[0]["id"])
+    assert _bal(user_id) == 900.0 and _bill_status(bill_id) == "paid"
+    return card_id, bill_id, pgto
+
+
+def test_positivo_pagamento_de_cartao_apagado_devolve_o_dinheiro(user_id: int):
+    """CONTROLE POSITIVO da guarda: `delete_card` (`db/cards.py`, chamado do
+    WhatsApp em `core/handlers/credit.py`) leva as faturas pelo cascade de
+    `credit_bills.card_id`. O `bill_id` do pagamento morre — e apagar o
+    pagamento TEM de devolver os R$100, porque a dívida foi embora junto.
+    Recusar aqui seria falso positivo, e `kept_unsafe` é permanente."""
+    card_id, bill_id, pgto = _pagamento_de_fatura(user_id)
+
+    assert db.delete_card(user_id, card_id) is True
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from credit_bills where id=%s", (bill_id,))
+            assert int(cur.fetchone()["n"]) == 0, "o cascade tem de levar a fatura"
+
+    db.delete_launch_and_rollback(user_id, pgto)
+
+    assert _bal(user_id) == 1000.0, "o pagamento de uma dívida que sumiu volta pra conta"
+    assert not any(int(r["id"]) == pgto for r in db.list_launches(user_id, limit=10))
+
+
+def test_positivo_merge_users_deixa_bill_id_morto_e_o_pagamento_continua_apagavel(user_id: int):
+    """A segunda rota de produto, ponta a ponta pelo `merge_users` real.
+
+    O dedup de `credit_bills` (`db/users.py`) apaga a fatura JÁ PAGA da origem
+    quando o destino tem uma do mesmo cartão e período, e o lançamento migra com
+    o `bill_id` morto no `efeitos`. Medido: a fatura que SOBRA é a do destino,
+    com `paid_amount` 0 — nada é criado ao devolver os R$100."""
+    origem = user_id
+    _card_o, bill_origem, pgto = _pagamento_de_fatura(origem)
+    destino = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(destino)
+    card_d = db.create_card(destino, "Nubank", closing_day=10, due_day=17)
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select period_start, period_end from credit_bills where id=%s",
+                        (bill_origem,))
+            per = cur.fetchone()
+            cur.execute(
+                "insert into credit_bills(user_id, card_id, period_start, period_end, "
+                "status, total, paid_amount) values (%s,%s,%s,%s,'closed',100,0) returning id",
+                (destino, card_d, per["period_start"], per["period_end"]))
+            bill_destino = cur.fetchone()["id"]
+        conn.commit()
+
+    db.merge_users(origem, destino)
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from credit_bills where id=%s", (bill_origem,))
+            assert int(cur.fetchone()["n"]) == 0, "o dedup tem de apagar a fatura da origem"
+    assert _bal(destino) == 900.0
+
+    db.delete_launch_and_rollback(destino, pgto)
+
+    assert _bal(destino) == 1000.0
+    assert _bill_status(bill_destino) == "closed", "a fatura do destino não é tocada"
+
+
+def test_bill_id_de_outro_usuario_recusa_em_vez_de_creditar(user_id: int):
+    """CONTROLE NEGATIVO da guarda, e a regra dura do `CLAUDE.md` §0.
+
+    Sem o `rowcount` (medido): APAGOU, conta 900 -> 1000 do dono e a fatura do
+    OUTRO usuário continua `paid` — R$100 creditados por causa de linha alheia.
+    O `and user_id=%s` já impedia MEXER na fatura do outro; o que faltava era
+    não CREDITAR por causa dela."""
+    _card, bill_meu, pgto = _pagamento_de_fatura(user_id)
+    outro = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    _card_o, bill_alheia, _pgto_o = _pagamento_de_fatura(outro)
+    _set_efeitos(user_id, pgto,
+                 '{"delta_conta": -100.0, "bill_id": %d, "paid_amount_added": 100.0}'
+                 % bill_alheia)
+
+    with pytest.raises(db.LaunchUnsafeRollback) as exc:
+        db.delete_launch_and_rollback(user_id, pgto)
+    assert exc.value.motivo == "efeito_incompleto"
+
+    assert _bal(user_id) == 900.0, "nada creditado no dono"
+    assert _bal(outro) == 900.0, "nada mexido no outro"
+    assert _bill_status(bill_alheia) == "paid", "fatura alheia intacta"
+    assert _bill_status(bill_meu) == "paid", "a fatura do dono não é tocada na recusa"
+    assert any(int(r["id"]) == pgto for r in db.list_launches(user_id, limit=10))
+

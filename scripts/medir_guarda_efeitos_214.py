@@ -238,8 +238,23 @@ def _bloco(titulo, alvo, cruz, detalhe):
             print(f"     {v:<7} {motivo:<19} {campo:<34} {qtd}")
 
 
+def _head():
+    """Rotulo da guarda NOVA: ela e importada do checkout, entao o HEAD do
+    checkout E a versao medida. String a mao ja saiu errada uma vez (o relatorio
+    dizia `91493d8` com o codigo de outro commit rodando)."""
+    import subprocess
+    try:
+        return subprocess.run(
+            ["git", "-C", os.path.dirname(os.path.abspath(__file__)),
+             "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True).stdout.strip() or "?"
+    except Exception:  # noqa: BLE001 -- sem git, sem rotulo; a medicao segue
+        return "?"
+
+
 def relatar(cruz, detalhe, total, info_servidor):
-    print("== guarda de 'efeitos': b4d0085 (hoje) x 91493d8 (#214) ==")
+    print(f"== guarda de 'efeitos': b4d0085 (congelado aqui) x {_head()} "
+          "(HEAD do checkout, #214) ==")
     print(f"servidor: {info_servidor}")
     print(f"linhas de 'launches' examinadas: {total}")
     _bloco("apagar tudo (escopo_conta_corrente=True) — tipo in "
@@ -257,9 +272,22 @@ def _autoteste():
         ({"delta_conta": -50.0}, "despesa", "apaga", "apaga"),
         ({"delta_conta": -50, "bill_id": 93, "paid_amount_added": 50},
          "despesa", "apaga", "apaga"),
-        # o risco nomeado no plano: id como string de digitos
+        # CONTROLE POSITIVO do afrouxamento de `_id`: id como string de
+        # digitos. No `91493d8` isto era ("apaga","recusa") -- falso positivo,
+        # e `kept_unsafe` e permanente. O `13fb792` passou a aceitar porque o
+        # Postgres coage `"93"` no `where id=%s` (medido).
         ({"delta_conta": 0, "bill_id": "93", "paid_amount_added": 50},
+         "despesa", "apaga", "apaga"),
+        # e a cauda que continua recusada: nao-ASCII e id acima de bigint
+        # estouravam CRU no Postgres antes do 13fb792+1.
+        ({"delta_conta": 0, "bill_id": "\xa093", "paid_amount_added": 50},
          "despesa", "apaga", "recusa"),
+        ({"delta_conta": 0, "bill_id": "9" * 30, "paid_amount_added": 50},
+         "despesa", "apaga", "recusa"),
+        # `_data`: os 10 primeiros caracteres eram ISO e o resto ia cru.
+        ({"delta_conta": 0,
+          "delete_investment": {"nome": "x", "maturity_date": "2026-09-02extra"}},
+         "aporte", "apaga", "recusa"),
         # `delta_conta: null` NAO era delete no b4d0085: era `InvalidOperation`
         # cru (balde `errors` / silencio no OF). O #214 troca por recusa limpa.
         ({"delta_conta": None}, "despesa", "erro", "recusa"),
