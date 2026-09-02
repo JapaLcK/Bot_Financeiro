@@ -290,9 +290,12 @@ test("waitFor: erro que não é navegação sobe; condição impossível estoura
   // Controle do conserto acima (§3): tolerar a destruição do contexto não pode
   // virar "engole tudo". NEGATIVO — com `catch { return false }` no lugar do
   // filtro, a 1ª rejeição vira timeout genérico e o /bug real/ fica vermelho.
+  // about:blank de propósito: o helper e o waitFor não dependem de página
+  // nenhuma, e bootar a home deixaria fetch em voo quando o fechar() derruba o
+  // contexto — a "atividade assíncrona depois do teste" que o arquivo já
+  // combate (acaoSegura/fechar). Sem request, sem corrida.
   const page = await newPage();
   try {
-    await page.goto(`${ORIGIN}/home.html`);
     await assert.rejects(
       () => waitFor(() => avaliaTolerandoNavegacao(page, () => { throw new TypeError("bug real"); }),
                     "nunca acontece", 300),
