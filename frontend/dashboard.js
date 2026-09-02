@@ -7628,9 +7628,20 @@ function connect() {
           msg.data?.year && msg.data?.month && !isCurrentViewData(msg.data)) {
         viewYear = Number(msg.data.year);
         viewMonth = Number(msg.data.month);
-        // O servidor conhece um mês mais novo que o relógio local: o teto do
-        // btn-next avança junto (senão "próximo mês" abre um mês vazio).
-        latestKnownMonth = Math.max(latestKnownMonth, viewYear * 12 + viewMonth);
+        // O teto do btn-next passa a ser o mês do SERVIDOR — atribuição, não
+        // `Math.max`. O `max` só sabia SUBIR o teto, e resolvia meia divergência:
+        // servidor À FRENTE do relógio local (Manaus −04 contra São Paulo −03),
+        // onde sem subir o "próximo mês" abriria um mês vazio.
+        // Na metade oposta — navegador à frente do servidor (Lisboa +01) — o teto
+        // ficava no mês do NAVEGADOR e deixava o btn-next aberto para um mês que o
+        // servidor ainda não começou. Quem clicasse ia parar num pedido explícito
+        // (`year`/`month` na requisição) que volta com `is_current_month: false`,
+        // e aí o render trata como mês histórico: `ofBank = hist ? 0 : ...`, e o
+        // saldo dos bancos do Open Finance SOME do "Saldo consolidado" — dinheiro
+        // a menos na tela, sem explicação, nas 3h após a virada do dia 1º.
+        // Descer o teto junto é a mesma regra já declarada duas linhas acima ("o
+        // servidor é a fonte da verdade do mês"), agora nas duas direções.
+        latestKnownMonth = viewYear * 12 + viewMonth;
         updateMonthLabel();
       }
       if (!isCurrentViewData(msg.data)) return;
