@@ -1161,6 +1161,13 @@ def main():
     print(f"[harness] execução concluída em {elapsed:.1f}s "
           f"({len(SCENARIOS)} cenários registrados).")
 
+    # Ledger ANTES do relatório: o `write_report()` imprime o acumulado do mês,
+    # e gravando depois o artefato sempre omitia a própria rodada — na primeira
+    # do mês ele mostrava custo > 0 e acumulado 0,0000, contradizendo a si
+    # mesmo. O total do console estava certo só porque roda depois.
+    usd_rodada, _ = meter.cost_usd(meter.CALLS)
+    meter.append_ledger(usd_rodada, "whatsapp_qa_vault_harness")
+
     write_report()
 
     counts = {"✅": 0, "❌": 0, "⚠️": 0, "🔍": 0}
@@ -1182,7 +1189,6 @@ def main():
           f"{len(nao_sust)} NÃO sustentada(s)")
     for c in nao_sust:
         print(f"[harness]   🚨 {c.token} ({c.kind}) — {c.detail}")
-    meter.append_ledger(usd, "whatsapp_qa_vault_harness")
     print(f"[harness] acumulado dos harnesses no mês: US$ {meter.month_total_usd():.4f}")
 
 

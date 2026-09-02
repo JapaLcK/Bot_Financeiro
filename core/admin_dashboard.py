@@ -574,6 +574,15 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                 SELECT id, level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  -- A guarda de afirmações da IA roda em TODA resposta do
+                  -- modelo e tem frequência ainda desconhecida. Nesta lista de
+                  -- 100 linhas ela podia expulsar erro de verdade — um
+                  -- diagnóstico estragando o painel onde mora. Ela tem lugar
+                  -- próprio em `recent_ops` e contador em `ops_summary`.
+                  -- Excluído por TIPO, não restringindo a lista a
+                  -- warning/error: isso mudaria o painel para todo evento
+                  -- `info`, que não é o problema aqui.
+                  AND event_type <> 'ai_claim_unsupported'
                 ORDER BY created_at DESC
                 LIMIT 100
                 """

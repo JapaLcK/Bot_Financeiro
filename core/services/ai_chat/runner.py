@@ -264,6 +264,13 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
     Só o texto ESCRITO pelo modelo passa por aqui. Os outros retornos do loop
     são `ERROR_MSG` e o `terminal_msg` de write auto-executado — template de
     código, não afirmação de IA.
+
+    `messages` tem que ser só o DESTE TURNO (o chamador fatia). O preço dessa
+    escolha é ruído: quando a IA reaproveita legitimamente um dado que uma tool
+    devolveu num turno anterior ("e quanto disso foi salário?"), o valor sai
+    como não sustentado. Aceito de propósito — em modo log ruído se mede, e
+    aceitar o histórico como evidência cega a guarda pra dado obsoleto, que é
+    a classe que ela nasceu pra pegar.
     """
     try:
         from core.services.ai_guard import check
@@ -304,6 +311,14 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
 
 
 def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
+    # Fronteira do turno. `messages` CHEGA aqui já com o histórico persistido,
+    # que inclui as `role="tool"` de turnos anteriores. Passar a lista inteira
+    # pra guarda fazia ela dar como sustentado justamente o valor OBSOLETO que
+    # ela existe pra pegar — reproduzido: com o limite antigo (100.000) no
+    # histórico e o novo (8.000) no turno atual, a resposta que repetia 100.000
+    # não gerava evento nenhum. O harness sempre fatiou por turno; era o wiring
+    # de produção que divergia do que foi validado.
+    inicio_do_turno = len(messages)
     for _ in range(MAX_TOOL_LOOPS):
         try:
             resp = client.chat.completions.create(
@@ -322,7 +337,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
-            _log_unsupported_claims(user_id, final, messages)
+            _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
             return final or ERROR_MSG
 
         # Persistir assistant message com tool_calls — limpa `###`
