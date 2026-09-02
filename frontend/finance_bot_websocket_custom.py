@@ -2271,8 +2271,9 @@ def _post_login_url(user_id: int | None = None) -> str:
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
-    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
-    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
+    só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
+    o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
+    (paywall ligado), idem."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
@@ -4056,11 +4057,12 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
             # Abandonou o checkout → volta pra /precos escolher um plano PAGO
-            # (o Grátis não é mais escolha). O escolha=1 é o que a precos.html
-            # lê pra trocar o subtítulo por "Escolha um plano pra continuar"
-            # (needs_plan_selection segue true, pois o gate não fechou) — não
-            # anexo upgrade=cancelled porque /precos não consome esse marcador
-            # (o toast vive só na /home).
+            # (o Grátis não é mais escolha). O escolha=1 fica como rastro de
+            # origem: a copy "Escolha um plano pra continuar" da precos.html é
+            # decidida pelo needs_plan_selection do /auth/me (que segue true,
+            # pois o gate não fechou), não por este marcador — ele se perde num
+            # clique no "Planos" do próprio nav. Não anexo upgrade=cancelled
+            # porque /precos não consome esse marcador (o toast vive só na /home).
             cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4136,8 +4138,8 @@ async def billing_create_checkout(
         _session_id = result.pop("session_id", None)
         await asyncio.to_thread(record_checkout_started, user_id, _session_id)
         # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
-        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
-        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # plano — quem abandona o Stripe tem de voltar pra /precos e assinar
+        # (só há plano pago lá). O gate só fecha quando o pagamento COMPLETA de fato,
         # no webhook checkout.session.completed (mark_plan_selected lá). O
         # retorno de sucesso (?upgrade=success) é tratado como "webhook em
         # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.

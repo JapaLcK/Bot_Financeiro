@@ -74,6 +74,12 @@ def test_controle_positivo_o_gate_ainda_fecha_pelo_caminho_do_checkout():
 
     Sem este caso, a asserção de cima passaria num sistema onde
     needs_plan_selection é True para sempre e ninguém entra nunca.
+
+    Chama a função de banco direto de propósito — o que este caso prova é só
+    que `needs_plan_selection` sabe virar False. Quem prova que a ÚNICA saída
+    do funil funciona pelo caminho real (POST /billing/webhook) é o
+    `test_checkout_completed_fecha_o_gate_de_escolha`, em
+    tests/test_billing_webhook_lifecycle.py.
     """
     user_id, _ = _cadastro_novo("positivo")
     assert plan_service.needs_plan_selection(user_id) is True

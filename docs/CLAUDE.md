@@ -135,7 +135,9 @@ de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 ### Pagamentos
 
 Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
-`change-plan`, `cancel-change`, `select-free`, `plans-config`.
+`change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
+com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
+sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de

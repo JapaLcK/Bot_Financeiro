@@ -664,9 +664,10 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
 
 
 def mark_plan_selected_impl(get_conn, user_id: int) -> None:
-    """Marca que o usuário já escolheu um plano no cadastro (Grátis ou pago),
-    liberando o acesso ao dashboard. Idempotente: só grava na primeira vez
-    (where plan_selected_at is null) pra preservar o timestamp original."""
+    """Marca que o usuário já escolheu um plano no cadastro, liberando o acesso
+    ao dashboard. Hoje só o webhook checkout.session.completed chama isto (a
+    escolha do Grátis morreu em 2026-09-02). Idempotente: só grava na primeira
+    vez (where plan_selected_at is null) pra preservar o timestamp original."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

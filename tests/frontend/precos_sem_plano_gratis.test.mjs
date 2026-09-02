@@ -10,6 +10,10 @@
  *   · asserção do conserto — nenhum CTA de Grátis, nenhum card "Grátis", e
  *     nenhuma requisição pro /billing/select-free em nenhum dos dois estados
  *     (deslogado e needs_plan_selection);
+ *   · copy do gate — as 6 células de {deslogado, logado sem gate, logado com
+ *     gate} × {com ?escolha=1, sem marcador}: quem decide é o
+ *     needs_plan_selection do /auth/me, não a URL (o marcador se perde num
+ *     clique no "Planos" do próprio nav);
  *   · controle POSITIVO — "Assinar Plus" ainda dispara EXATAMENTE 1
  *     POST /billing/create-checkout. Sem ele o grupo passaria numa página com
  *     todos os botões quebrados, que é pior que o bug.
@@ -124,18 +128,37 @@ test("a coluna Grátis da tabela comparativa fica: 6 colunas, tfoot sem CTA", as
   await page.close();
 });
 
-test("?escolha=1 diz que precisa escolher um plano pra continuar", async () => {
-  const { page } = await abrirPrecos({ me: { user_id: 42, needs_plan_selection: true }, query: "?escolha=1" });
-  const sub = await page.textContent("#precos-sub");
-  assert.match(sub, /Escolha um plano pra continuar/,
-    `quem abandonou o checkout não lê que assinar é obrigatório: "${sub}"`);
-  await page.close();
+// ── copy do subtítulo: as 6 células de estado × marcador ────────────────────
+// A copy do gate é decidida pelo needs_plan_selection do /auth/me, não pelo
+// ?escolha=1: o marcador se perde num clique no "Planos" do próprio nav, no
+// gate_pro_page (routes/shared.py) e nos redirects de /conta. Então as 6
+// células = 3 estados × {com marcador, sem marcador}, e a coluna do marcador
+// não muda NENHUMA linha — é isso que o teste fixa.
+//
+// A célula que discrimina é "logado com gate SEM marcador": com a decisão pela
+// URL ela mostrava a copy de visitante a quem está travado no gate. As duas
+// "sem gate + COM marcador" são o outro lado: marcador velho (bookmark, link
+// compartilhado) não pode inventar gate pra quem já pagou nem pra visitante.
+const COPY_PADRAO = /^15 dias grátis/;
+const COPY_GATE = /Escolha um plano pra continuar/;
 
-  // Par negativo da mesma copy: sem o marcador, o subtítulo padrão continua.
-  const { page: p2 } = await abrirPrecos();
-  assert.match(await p2.textContent("#precos-sub"), /^15 dias grátis/);
-  await p2.close();
-});
+for (const [estado, me] of [
+  ["deslogado", null],
+  ["logado sem gate", { user_id: 42, needs_plan_selection: false }],
+  ["logado com gate", { user_id: 42, needs_plan_selection: true }],
+]) {
+  for (const query of ["?escolha=1", ""]) {
+    const esperado = me && me.needs_plan_selection ? COPY_GATE : COPY_PADRAO;
+    const rotulo = query ? "com marcador" : "sem marcador";
+    test(`copy do subtítulo: ${estado}, ${rotulo}`, async () => {
+      const { page } = await abrirPrecos({ me, query });
+      const sub = await page.textContent("#precos-sub");
+      assert.match(sub, esperado,
+        `${estado} ${rotulo} devia bater ${esperado} e leu: "${sub}"`);
+      await page.close();
+    });
+  }
+}
 
 // ── controle POSITIVO: o caminho legítimo continua funcionando ───────────────
 

@@ -1529,7 +1529,8 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // fail-open. Fora desse caso, o fluxo normal (loadAuthMe sem timeout).
   let me = _justUpgraded ? await awaitCheckoutConfirmation() : await loadAuthMe();
   // Gate de escolha de plano: cadastro novo tem que passar pela /precos e
-  // escolher um plano (mesmo o Grátis) antes de entrar no dashboard.
+  // assinar um plano pago antes de entrar no dashboard (o Grátis não é mais
+  // uma escolha oferecida na /precos).
   if (me && me.needs_plan_selection && !_justUpgraded && !window.PB_IN_APP) {
     window.location.replace("/precos?escolha=1");
     return;

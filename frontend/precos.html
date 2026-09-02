@@ -829,20 +829,33 @@ async function cancelChange(btn) {
   }
 }
 
-// Voltou do gate de escolha de plano (/precos?escolha=1 — cadastro novo,
-// checkout abandonado): assinar é OBRIGATÓRIO pra entrar, e a copy padrão
-// ("15 dias grátis pra testar") não diz isso. O marcador vem na URL, posto por
-// todos os caminhos do gate (routes/shared.py, home.html, dashboard.js,
-// settings.html e o cancel_url do Stripe) — não precisa de /auth/me pra isso.
-// O `if (sub)` é o mesmo do applyOnboardingChoice que saiu daqui, e não é
-// paranoia: isto roda em escopo de módulo, então um TypeError aqui abortaria o
-// resto do <script> — inclusive o IIFE de estado dos botões logo abaixo, que é
-// caminho de dinheiro.
-if (new URLSearchParams(location.search).get("escolha") === "1") {
+// Copy do gate de escolha de plano (cadastro novo, checkout abandonado):
+// assinar é OBRIGATÓRIO pra entrar, e a copy padrão ("15 dias grátis pra
+// testar") não diz isso. Quem decide é o ESTADO do servidor —
+// needs_plan_selection do /auth/me, a fonte de verdade (§0.7) —, NUNCA o
+// ?escolha=1 da URL: o marcador se perde em três caminhos alcançáveis em
+// produção (o link "Planos" do nav e do rodapé DESTA página; o gate_pro_page
+// em routes/shared.py, que redireciona pra /precos sem marcador; e os dois
+// redirects de /conta), e aí quem está travado no gate lia a copy de
+// visitante, sem nenhuma indicação de que precisa assinar pra entrar.
+// Sem atalho pela URL de propósito: ele criaria uma 4ª célula (visitante com
+// link velho lendo a copy do gate) pra economizar um flash de subtítulo.
+// É o mesmo fetch que o applyOnboardingChoice fazia aqui antes do commit
+// anterior — nenhuma requisição nova na página —, mas em IIFE próprio em vez de
+// dentro do loadPlansState: lá ele ficava serializado atrás do
+// /billing/subscription, que fala com o Stripe. O `if (sub)` também vem de lá.
+(async function applyPlanGateCopy() {
+  let me = null;
+  try {
+    const r = await fetch("/auth/me", { credentials: "same-origin" });
+    if (!r.ok) return;            // deslogado (401): a copy padrão está certa
+    me = await r.json();
+  } catch { return; }             // rede caiu: copy padrão, sem travar a página
+  if (!me || !me.needs_plan_selection) return;  // já escolheu: copy padrão
   const sub = document.getElementById("precos-sub");
   if (sub) sub.textContent =
     "Escolha um plano pra continuar: 15 dias grátis pra testar, cancele antes do fim e não paga nada.";
-}
+})();
 
 (async function loadPlansState(){
   try {
