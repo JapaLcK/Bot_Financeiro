@@ -57,8 +57,20 @@ _CLAIM_MONEY_RE = re.compile(r"R\$\s*[*_]?\s*(-?\d[\d.]*(?:,\d{2})?)")
 _CLAIM_ID_RE = re.compile(r"#(\d{1,9})\b")
 _CLAIM_CODE_RE = re.compile(r"\b(CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
 
-# Na evidência, qualquer literal numérico serve — as tools devolvem JSON.
+# Na evidência, qualquer literal numérico serve como DINHEIRO — as tools
+# devolvem JSON e o formato varia.
 _ANY_NUM_RE = re.compile(r"\d[\d.,]*")
+
+# ID é outra coisa, e precisa de evidência PRÓPRIA. Derivar ID dividindo os
+# centavos por 100 misturava campos sem relação: `{"user_seq": 1, "valor":
+# 50.0}` fazia um `#50` inventado passar por sustentado, porque 50,00 vira
+# 5000 centavos e 5000/100 = 50. Como resultado de tool quase sempre traz ID e
+# valor juntos, isso SUPRIMIA justamente o evento que a guarda existe pra
+# emitir — o pior modo de falha possível pra ela.
+#
+# Aqui: inteiro que NÃO faz parte de um decimal. `50.0` e `1.768,80` não
+# entram; o `1` de `"user_seq": 1` entra mesmo seguido de vírgula.
+_ID_EVIDENCE_RE = re.compile(r"(?<![\d.,])(\d{1,9})(?![\d]|[.,]\d)")
 
 
 def _brl_to_cents(raw: str) -> int | None:
@@ -125,25 +137,27 @@ class Claim:
     detail: str = ""
 
 
-def collect_evidence(tool_results: list[str], user_text: str = "") -> tuple[set[int], set[str]]:
-    """(centavos vistos, tokens crus vistos) — do que as tools devolveram e
-    do que o próprio usuário escreveu."""
+def collect_evidence(tool_results: list[str],
+                     user_text: str = "") -> tuple[set[int], set[str], set[int]]:
+    """(centavos, códigos crus, IDs) — do que as tools devolveram e do que o
+    próprio usuário escreveu. Os três são COLHIDOS SEPARADAMENTE: um valor não
+    pode sustentar um ID nem vice-versa."""
     cents: set[int] = set()
     raw: set[str] = set()
+    ids: set[int] = set()
     for chunk in list(tool_results) + [user_text or ""]:
         chunk = chunk or ""
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
         for m in _ANY_NUM_RE.finditer(chunk):
             cents |= _evidence_cents(m.group(0))
-    return cents, raw
+        ids.update(int(m.group(1)) for m in _ID_EVIDENCE_RE.finditer(chunk))
+    return cents, raw, ids
 
 
 def check(reply: str, tool_results: list[str], user_text: str = "") -> list[Claim]:
     """Toda afirmação numérica da resposta, marcada como sustentada ou não."""
     reply = reply or ""
-    cents, raw_codes = collect_evidence(tool_results, user_text)
-    # IDs da evidência: o inteiro cru, não centavos (tool escreve `"id": 3`).
-    ev_ints = {c // 100 for c in cents if c % 100 == 0}
+    cents, raw_codes, ev_ints = collect_evidence(tool_results, user_text)
 
     # ponytail: match exato contra a evidência. Soma feita pelo modelo
     # ("100 e 50" → "R$ 150,00") sai como não sustentada. Se o relatório
@@ -198,6 +212,18 @@ if __name__ == "__main__":
     # e o controle que prova que a checagem discrimina: MESMA resposta, mesma
     # guarda, evidência que contém o valor → tem que virar sustentada.
     assert check("Você gastou R$ 230,00 na Amazon.", ['{"valor": 230.0}'])[0].supported
+
+    # ID e dinheiro não se sustentam: o caso do apontamento do Codex no #238.
+    EV = ['{"user_seq": 1, "valor": 50.0}']
+    id50 = check("Apaguei o lançamento #50.", EV)[0]
+    assert not id50.supported, "R$ 50,00 na evidência NÃO pode sustentar o #50"
+    assert check("Apaguei o lançamento #1.", EV)[0].supported, "o #1 real tem que passar"
+    assert check("Gastou R$ 50,00.", EV)[0].supported, "o valor real tem que passar"
+    # Teto conhecido do outro sentido, medido e aceito: um inteiro solto na
+    # evidência ainda sustenta o valor redondo correspondente. Não dá pra
+    # separar sem saber o nome do campo, e excluir inteiro do dinheiro
+    # reprovaria `"valor": 50` legítimo — cria lobo, que é pior.
+    assert check("Anotei R$ 1,00.", EV)[0].supported
 
     # ID inventado
     inv = check("Apaguei o lançamento #47.", TOOLS)

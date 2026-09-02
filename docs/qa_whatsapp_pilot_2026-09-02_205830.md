@@ -1,12 +1,12 @@
 # QA piloto — vault WhatsApp (23 interações, 3 domínios)
 
-Gerado em 2026-09-02_204854 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
+Gerado em 2026-09-02_205830 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
 **Sumário:** 11 interações — ✅ 5 · ❌ 4 · ⚠️ 0 · 🔍 2
 
 **Caminho:** 10 turno(s) resolvido(s) pela IA · 12 por comando/regex (sem chamada nenhuma) — 46 chamadas OpenAI no total.
 
-**Custo:** US$ 0.0138 nesta rodada · US$ 0.0786 acumulado no mês pelos harnesses. 151208 tokens de entrada, 123264 cacheados (82%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
+**Custo:** US$ 0.0127 nesta rodada · US$ 0.0913 acumulado no mês pelos harnesses. 151204 tokens de entrada, 138496 cacheados (92%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
 
 **Guarda de afirmações:** 8 afirmação(ões) numérica(s) em resposta de IA · **0 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
 
@@ -105,12 +105,12 @@ Se precisar de mais alguma coisa, é só falar!
 > Você: me mostra meus ultimos lancamentos
 > PigBank: 🐷 Aqui estão seus últimos lançamentos:
 
-1. *R$ 89,90* - Gastei com uber (transporte)
-2. *R$ 2.000,00* - Recebi de salário (rendimentos)
-3. *R$ 123,45* - Gastei na farmácia (saúde)
-4. *R$ 50,00* - Gastei no mercado (mercado)
+1. *R$ 89,90* - gastei 89,90 com uber (Transporte)
+2. *R$ 2.000,00* - recebi 2000 de salário (Rendimentos)
+3. *R$ 123,45* - gastei 123,45 na farmácia (Saúde)
+4. *R$ 50,00* - gastei 50 no mercado (Mercado)
 
-Se precisar de mais detalhes ou quiser fazer algo com esses lançamentos, é só avisar!
+Se precisar de mais alguma coisa, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 4 afirmação(ões), todas sustentadas_
 >
@@ -256,14 +256,13 @@ ID: #5
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: gastos com saúde
-> PigBank: 🐷 Nos últimos dias, você gastou com saúde:
+> PigBank: 🐷 Em setembro, você gastou com saúde:
 
 R$ 123,45
 
-• Total de gastos em saúde
-• Outras categorias: transporte (R$ 89,90) e mercado (R$ 50,00)
-
-Se precisar de mais detalhes ou quiser ver outros gastos, é só falar!
+• Total de gastos na categoria saúde.
+• Outros gastos do mês: transporte (R$ 89,90) e mercado (R$ 50,00).
+• Se precisar de mais detalhes ou quiser ver outra categoria, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 3 afirmação(ões), todas sustentadas_
 >
@@ -291,11 +290,13 @@ Se precisar de mais detalhes ou quiser ver outros gastos, é só falar!
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: limite nubank
-> PigBank: 🐷 O limite do seu cartão Nubank não tá cadastrado. Pra saber quanto você tem disponível, é só cadastrar o limite no dashboard. Quer que eu te mande o link?
+> PigBank: 🐷 O limite do seu cartão Nubank não tá cadastrado. Pra ver quanto sobra, você precisa cadastrar o limite no dashboard. 
+
+Se precisar de ajuda pra isso, é só avisar!
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 > Você: quanto ainda posso gastar no nubank
-> PigBank: 🐷 Parece que o limite do seu cartão Nubank não tá cadastrado. Pra ver quanto você ainda pode gastar, é só cadastrar o limite no dashboard. Quer que eu te mande o link pra lá?
+> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. Pra ver quanto você ainda pode gastar, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 
