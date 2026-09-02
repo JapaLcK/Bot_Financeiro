@@ -654,3 +654,129 @@ test("o worker NAO tem listener de message — a limpeza e' da pagina", () => {
   assert.ok(!/addEventListener\(\s*["']message["']/.test(fonte),
             "a limpeza voltou para o worker: nao alcanca aparelho com worker antigo");
 });
+
+// ── Logout SEM RESPOSTA: o fetch rejeita (offline, DNS, captive portal) ──
+//
+// O quarto caminho do interceptor, e o unico que nao produzia resposta: o
+// `await _origFetch(...)` estourava ANTES do `_comLimpeza`, entao nada era
+// apagado. Alcancavel de verdade — modo aviao / wifi de aeroporto + "Sair" no
+// Ajustes —, e o pior dos cinco donos de logout: `logoutSettings`
+// (settings.html) nao tem limpeza local nenhuma, grava o `finbot_logout_at`
+// ANTES do fetch (as outras abas caem para /?logout=1) e navega no `.finally`
+// mesmo com a rejeicao. O logout PARECIA ter dado certo com tudo no aparelho.
+//
+// O par de controles: apagar sem resposta vale so' para o /auth/logout. Nas
+// outras duas rotas do mapa a rejeicao e' rede fora com a sessao DE PE, e
+// limpar ali seria pior que o bug.
+
+/** fetch falso que rejeita como o navegador rejeita: TypeError, sem resposta. */
+const fetchOffline = () => async () => { throw new TypeError("Failed to fetch"); };
+
+test("logout OFFLINE limpa o aparelho — e a rejeicao ainda chega ao chamador", async () => {
+  const apagados = [];
+  const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = fetchOffline();
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await assert.rejects(() => ctx.window.fetch("/auth/logout", { method: "POST" }),
+                       TypeError,
+                       "a rejeicao foi engolida: o chamador perde o erro de rede");
+
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), false, `${k} sobreviveu ao logout offline`);
+  }
+  assert.equal(sessao.has("pb_home_42"), false, "pb_home_ sobreviveu na sessao");
+  assert.equal(sessao.has("pb_snap_42_2026_08"), false, "pb_snap_ sobreviveu na sessao");
+  assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"],
+                   "o Cache Storage sobreviveu ao logout offline");
+  for (const k of Object.keys(PREFERENCIA_DO_APARELHO)) {
+    assert.equal(local.get(k), PREFERENCIA_DO_APARELHO[k],
+                 `${k} foi apagado — e' preferencia do aparelho, nao da conta`);
+  }
+});
+
+test("offline em rota comum NAO limpa — o interceptor renova e a sessao segue", async () => {
+  // Controle positivo: o caminho legitimo (perder a rede com a sessao viva)
+  // tem que continuar funcionando. Sem ele, apagar em TODA rejeicao passaria
+  // nos casos acima destruindo o aparelho de quem so' entrou no metro.
+  const apagados = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = fetchOffline();
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await assert.rejects(() => ctx.window.fetch("/data/42"), TypeError);
+
+  assert.deepEqual(apagados, [], "apagou o Cache Storage num GET que so' perdeu a rede");
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado com a sessao viva`);
+  }
+});
+
+test("offline no /auth/refresh NAO limpa — rejeicao nao e' o 401 do fim de sessao", async () => {
+  // O refresh e' disparado por reflexo em qualquer 401 (#176). Se a rejeicao
+  // dele contasse como fim de sessao, bastava um 401 de aplicacao com a rede
+  // instavel para apagar o aparelho.
+  const apagados = [];
+  const chamadas = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = async (input) => {
+      const caminho = new URL(typeof input === "string" ? input : input.url, ORIGEM).pathname;
+      chamadas.push(caminho);
+      if (caminho === "/auth/refresh") throw new TypeError("Failed to fetch");
+      return { ok: false, status: 401 };
+    };
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  const resp = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+
+  assert.ok(chamadas.includes("/auth/refresh"),
+            "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
+  assert.equal(resp.status, 401, "o 401 tem que chegar ao chamador");
+  assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao de pe");
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado por uma renovacao sem rede`);
+  }
+});
+
+test("offline no DELETE /auth/account NAO limpa — a exclusao nao aconteceu", async () => {
+  // O chamador (settings.html, ~:2605) mostra o toast e NAO navega nessa
+  // falha: o usuario continua logado na propria pagina. Apagar o aparelho dele
+  // ali seria pior que o bug que este PR conserta.
+  const apagados = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = fetchOffline();
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await assert.rejects(() => ctx.window.fetch("/auth/account", { method: "DELETE" }), TypeError);
+
+  assert.deepEqual(apagados, [], "apagou o Cache Storage de quem continua logado");
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado numa exclusao que falhou`);
+  }
+});
+
+test("offline no /auth/refresh chamado DIRETO nao limpa nem estoura no predicado", async () => {
+  // O refresh do `_doRefresh` e' interno e nao passa pelo wrapper, entao o
+  // predicado dele so' e' alcancado quando alguem chama a rota direto. Sem o
+  // `!!resp &&`, `resp.status` num `resp` null trocaria o TypeError de rede do
+  // navegador por um TypeError de leitura de null — erro diferente chegando ao
+  // chamador, no meio da limpeza.
+  const apagados = [];
+  const { ctx, local } = comStorageCheio("static/auth-refresh.js", (c) => {
+    c.fetch = fetchOffline();
+    c.caches.delete = async (k) => { apagados.push(k); return true; };
+  });
+
+  await assert.rejects(() => ctx.window.fetch("/auth/refresh", { method: "POST" }),
+                       (e) => e instanceof TypeError && /Failed to fetch/.test(e.message),
+                       "o erro que chegou ao chamador nao e' o da rede");
+
+  assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao de pe");
+  for (const k of Object.keys(DERIVADO_DE_CONTA)) {
+    assert.equal(local.has(k), true, `${k} foi apagado por um refresh sem rede`);
+  }
+});

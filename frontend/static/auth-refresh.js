@@ -80,16 +80,28 @@
    * `_clear_session_cookies` (finance_bot_websocket_custom.py). São três, e o
    * critério de cada uma difere — por isso um mapa e não um array:
    *
-   *   POST   /auth/logout    encerra quando dá certo
-   *   DELETE /auth/account   idem — a exclusão agendada desloga na hora
-   *   POST   /auth/refresh   encerra quando dá 401, e SÓ 401. O status desta
-   *                          rota responde "a sessão acabou?", não classifica
-   *                          o erro: 400 é refresh ausente com access ainda
-   *                          válido (sessão de pé, nada a apagar), 401 é
-   *                          refresh invalidado/revogado ou ausente sem access
-   *                          válido. Tratar todo 401 como fim de sessão
-   *                          apagava o aparelho de quem só errou a senha
-   *                          noutra rota (#173).
+   *   POST   /auth/logout    encerra quando dá certo — E quando não houve
+   *                          resposta nenhuma (`resp === null`, o fetch
+   *                          REJEITOU: offline, DNS, captive portal). Sair
+   *                          sem rede é sair deste aparelho do mesmo jeito:
+   *                          todo chamador navega no `.finally`, o usuário vê
+   *                          a tela deslogada, e o que ficasse para trás é
+   *                          resíduo privado no aparelho compartilhado.
+   *   DELETE /auth/account   encerra quando dá certo, e SÓ com resposta. Numa
+   *                          rejeição a exclusão não aconteceu, o chamador
+   *                          (settings.html) mostra o toast e NÃO navega:
+   *                          apagar o aparelho de quem continua logado seria
+   *                          pior que o bug.
+   *   POST   /auth/refresh   encerra quando dá 401, e SÓ 401 — rejeição é
+   *                          rede fora, não fim de sessão: apagar aí destruía
+   *                          o aparelho de quem só entrou no metrô. O status
+   *                          desta rota responde "a sessão acabou?", não
+   *                          classifica o erro: 400 é refresh ausente com
+   *                          access ainda válido (sessão de pé, nada a
+   *                          apagar), 401 é refresh invalidado/revogado ou
+   *                          ausente sem access válido. Tratar todo 401 como
+   *                          fim de sessão apagava o aparelho de quem só
+   *                          errou a senha noutra rota (#173).
    *
    * Por que 401 aqui justifica apagar: o refresh token acabou, então não há
    * como renovar de novo — o que estiver no aparelho é lixo de uma sessão que
@@ -103,9 +115,9 @@
    * de conta ficou de fora: consertei a instância e não a classe (Codex, #170).
    */
   const _SESSAO_ENCERRADA = {
-    "/auth/logout":  function (resp) { return resp.ok; },
-    "/auth/account": function (resp) { return resp.ok; },
-    "/auth/refresh": function (resp) { return resp.status === 401; },
+    "/auth/logout":  function (resp) { return !resp || resp.ok; },
+    "/auth/account": function (resp) { return !!resp && resp.ok; },
+    "/auth/refresh": function (resp) { return !!resp && resp.status === 401; },
   };
 
   /**
@@ -239,6 +251,33 @@
     return resp;
   }
 
+  /**
+   * A request nossa, com a limpeza aplicada TAMBÉM quando não vem resposta.
+   *
+   * `await _origFetch(...)` estourava antes do `_comLimpeza`, então fetch que
+   * REJEITA (offline, DNS, captive portal, abort) saía por baixo da limpeza —
+   * e é o pior caso, não o mais raro: `logoutSettings` (settings.html) não tem
+   * limpeza própria nenhuma e navega no `.finally` mesmo com a rejeição, então
+   * sair do Ajustes em modo avião deixava `pigbank_menu_v1` (e-mail, nome,
+   * plano), `pb_home_<uid>` e o Cache Storage inteiro no aparelho, com cara de
+   * logout bem-sucedido. As limpezas locais de `dashboard.js` e `home.html`
+   * cobrem só parte disso; o Cache Storage não é coberto por nenhuma.
+   *
+   * QUAL rota limpa sem resposta é decidido pelo predicado de cada uma
+   * (`_SESSAO_ENCERRADA`), não aqui: só o logout. Rejeição no refresh e no
+   * DELETE de conta é rede fora com a sessão de pé.
+   */
+  async function _requestComLimpeza(caminho, input, init) {
+    let resp;
+    try {
+      resp = await _origFetch(input, init);
+    } catch (e) {
+      await _comLimpeza(caminho, null);
+      throw e;
+    }
+    return _comLimpeza(caminho, resp);
+  }
+
   window.fetch = async function(input, init) {
     // Requests pra fora da própria origem (Stripe, CDN, etc) seguem direto
     if (!_isOwnApi(input)) return _origFetch(input, init);
@@ -250,7 +289,7 @@
     // (`location.replace`/`reload`/`href`), e navegação descarta o documento:
     // uma limpeza disparada e esquecida não tem garantia de terminar, e o cache
     // privado sobrevive no aparelho compartilhado (Codex, #170).
-    let resp = await _comLimpeza(caminho, await _origFetch(input, init));
+    let resp = await _requestComLimpeza(caminho, input, init);
 
     if (resp.status !== 401) return resp;
 
@@ -260,7 +299,7 @@
     // Tenta renovar e refazer a request original
     const ok = await _doRefresh();
     if (!ok) return resp;
-    return _comLimpeza(caminho, await _origFetch(input, init));
+    return _requestComLimpeza(caminho, input, init);
   };
 
   // ── Modo app (iOS/Capacitor) ─────────────────────────────────────────────
