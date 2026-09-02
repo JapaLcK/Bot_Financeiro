@@ -37,7 +37,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -45,28 +45,10 @@ import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
-// Porta própria: o node --test roda os arquivos em paralelo. 8899 fanout,
-// 8901 hiw_rail, 8903 modal_keys, 8905 of_refresh, 8907 onboarding,
-// 8909 of_connect, 8911 handlers_inline. Compartilhar porta faz a sonda adotar
-// o servidor alheio e o teste morrer com ERR_CONNECTION_REFUSED quando o dono
-// termina — foi o que aconteceu aqui com a 8903.
-const PORT = Number(process.env.PB_SEMSENHA_TEST_PORT || 8913);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", FRONTEND],
-    { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/settings.html`)).ok) return proc; } catch { /* subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
 
 async function waitFor(cond, what, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
@@ -78,7 +60,8 @@ async function waitFor(cond, what, timeoutMs = 10000) {
 }
 
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 const SECURITY_OK = { ok: true, user_id: 1, email: "a@b.com", plan: "pro", display_name: "Japa", identities: [] };
