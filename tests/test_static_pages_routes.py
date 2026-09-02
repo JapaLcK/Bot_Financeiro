@@ -154,7 +154,7 @@ def test_auth_refresh_js_revalida_a_cada_load():
 
 
 def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
-    """As 4 páginas que o carregam pedem `?v=<hash>`, não a URL nua.
+    """As páginas que o carregam pedem `?v=<hash>`, não a URL nua.
 
     Três delas referenciavam sem `?v=` nenhum, e o `?v=1` da quarta era um
     cache-buster MORTO: o `_ASSET_VER_RE` não aceitava `/` no meio do caminho,
@@ -166,7 +166,7 @@ def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
         "static/auth-refresh.js",
         (FRONTEND_DIR / "static" / "auth-refresh.js").stat().st_mtime_ns,
     )
-    for page in ["/app", "/home", "/settings", "/onboarding"]:
+    for page in ["/app", "/home", "/settings", "/onboarding", "/precos"]:
         html = client.get(page).text
         assert "/static/auth-refresh.js" in html, page
         m = re.search(r"/static/auth-refresh\.js\?v=([0-9a-f]+)", html)

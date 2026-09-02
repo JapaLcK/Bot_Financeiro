@@ -178,6 +178,11 @@
   }
 </style>
 <script src="/safe-area.js?v=1"></script>
+<!-- Renova o access token em 401 e refaz a request. A /precos é logada
+     (checkout, troca de plano, /auth/me) e o cookie de access vale 15 min,
+     enquanto o dashboard_token do nav dura horas: sem isto o nav mostrava a
+     conta logada e o clique em "Assinar" caía em "Faça login". -->
+<script src="/static/auth-refresh.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
