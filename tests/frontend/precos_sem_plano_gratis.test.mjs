@@ -44,7 +44,9 @@ after(async () => { await browser?.close(); server?.kill(); });
  * (`null` = 401, o visitante deslogado). Devolve a página e os contadores de
  * requisição por rota — a contagem é por INTERCEPTAÇÃO, não por efeito visível.
  */
-async function abrirPrecos({ me = null, query = "", app = false } = {}) {
+async function abrirPrecos({ me = null, query = "", app = false,
+                             plansConfig = { essencial_available: true, plus_available: true, pro_available: true },
+                           } = {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 },
                                        ...(app ? { userAgent: APP_UA } : {}) });
   const chamadas = { selectFree: 0, checkout: 0 };
@@ -56,7 +58,7 @@ async function abrirPrecos({ me = null, query = "", app = false } = {}) {
 
   await page.route("**/billing/plans-config", (route) => route.fulfill({
     contentType: "application/json",
-    body: JSON.stringify({ essencial_available: true, pro_available: true }),
+    body: JSON.stringify(plansConfig),
   }));
 
   await page.route("**/billing/subscription", (route) => route.fulfill({
@@ -227,6 +229,32 @@ test("controle positivo: os 6 CTAs pagos continuam habilitados (card e tabela)",
     { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
     { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
     { plano: "plus",      onde: "tabela", desabilitado: false, texto: "Assinar Plus" },
+    { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
+  ]);
+  await page.close();
+});
+
+// ── degradação parcial do Stripe: só o Plus sem price configurado ───────────
+// Sem o Grátis na página, um botão do Plus clicável só produz um toast de erro
+// e nenhuma saída. O par positivo deste caso é o teste dos 6 CTAs habilitados
+// acima: lá o mesmo DOM, com plus_available:true, tem os 6 clicáveis.
+test("plus_available:false marca EXATAMENTE os 2 botões do Plus como indisponíveis", async () => {
+  const { page } = await abrirPrecos({
+    me: { user_id: 42, needs_plan_selection: true },
+    plansConfig: { essencial_available: true, plus_available: false, pro_available: true },
+  });
+  const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({
+    plano: e.dataset.planBtn,
+    onde: e.closest("#plans-v2") ? "card" : "tabela",
+    desabilitado: e.disabled === true,
+    texto: e.textContent.trim(),
+  })));
+  assert.deepEqual(estado, [
+    { plano: "essencial", onde: "card",   desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "card",   desabilitado: true,  texto: "Indisponível" },
+    { plano: "pro",       onde: "card",   desabilitado: false, texto: "Assinar Pro" },
+    { plano: "essencial", onde: "tabela", desabilitado: false, texto: "Assinar Essencial" },
+    { plano: "plus",      onde: "tabela", desabilitado: true,  texto: "Indisponível" },
     { plano: "pro",       onde: "tabela", desabilitado: false, texto: "Assinar Pro" },
   ]);
   await page.close();

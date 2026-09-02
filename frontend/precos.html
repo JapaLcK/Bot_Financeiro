@@ -873,6 +873,7 @@ async function cancelChange(btn) {
         b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1";
       });
       if (!cfg.essencial_available) markUnavailable('[data-plan-btn="essencial"]');
+      if (!cfg.plus_available) markUnavailable('[data-plan-btn="plus"]');
       if (!cfg.pro_available) markUnavailable('[data-plan-btn="pro"]');
     }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
