@@ -398,13 +398,17 @@ function persistSnapshotToSession(data) {
   // vivo (ms) e não há replay — a reconexão re-GERA o snapshot no connect.
   try { sessionStorage.setItem(_snapSessionKey(data.year, data.month), JSON.stringify({ ...data, pb_saved_at: Date.now() })); } catch {}
 }
-// Limpa os snapshots pb_snap_* da aba. Chamada no logout e quando o paywall
-// NEGA (meGate): o restore pinta o snapshot que a PRÓPRIA aba gravou antes do
+// Limpa os snapshots da aba. Chamada no logout e quando o paywall NEGA
+// (meGate): o restore pinta o snapshot que a PRÓPRIA aba gravou antes do
 // veredito do /me — aceitável (o navegador do usuário já possui o dado, e
 // gatear o restore custaria ~1 RTT no caminho quente) — mas depois de um
 // veredito negativo um reload da aba não deve repintar saldo.
+// Os DOIS prefixos: pb_snap_ (esta tela) e pb_home_ (a /home, que a mesma aba
+// pinta). Mesmo par do clearHomeCache (home.html) e do reset (settings.html).
+// O paywall não chama /auth/logout, então a limpeza central do auth-refresh.js
+// não roda neste caminho — aqui é a única que limpa.
 function clearSessionSnapshots() {
-  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_")) sessionStorage.removeItem(k); }); } catch {}
+  try { Object.keys(sessionStorage).forEach(k => { if (k.startsWith("pb_snap_") || k.startsWith("pb_home_")) sessionStorage.removeItem(k); }); } catch {}
 }
 function restoreSnapshotFromSession() {
   if (!USER_ID) return false;

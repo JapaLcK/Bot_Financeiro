@@ -21,32 +21,13 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { startServer } from "./_server.mjs";
 import { chromium } from "playwright";
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const FRONTEND = join(REPO, "frontend");
-// porta própria: o node --test roda os arquivos em paralelo (8899/8901/8903/
-// 8905/8907/8909 já têm dono).
-const PORT = Number(process.env.PB_RESET_TEST_PORT || 8911);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
-                                 "--directory", FRONTEND], { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/home.html`)).ok) return proc; } catch { /* subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
 
 async function waitFor(cond, what, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
@@ -57,8 +38,21 @@ async function waitFor(cond, what, timeoutMs = 15000) {
   throw new Error(`timeout esperando: ${what}`);
 }
 
+/** page.evaluate que devolve false quando a NAVEGAÇÃO destrói o contexto no
+ *  meio — reload/redirect em curso é o próprio sucesso que se está esperando,
+ *  e o waitFor não engole rejeição (a exceção subia e matava o teste no exato
+ *  instante do sucesso: flake do PR #226, run 33644738135). Só o erro de
+ *  contexto morto vira false: qualquer outro SOBE, senão bug real viraria
+ *  timeout mudo (§3) — é o que o teste "waitFor:" no fim do arquivo prova. */
+const avaliaTolerandoNavegacao = (page, fn) => page.evaluate(fn).catch((e) => {
+  if (/Execution context (was destroyed|is not available)|Cannot find context/.test(String(e)))
+    return false;
+  throw e;
+});
+
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 // Liberadores de rotas presas (o teste do t0 registra o dele aqui): o
@@ -227,12 +221,8 @@ async function abaRecarregaNoEvento(page, url, prontoQuando) {
   await page.evaluate(() => {
     window.dispatchEvent(new StorageEvent("storage", { key: "finbot_reset_at", newValue: "123" }));
   });
-  await waitFor(async () => {
-    // o reload destrói o contexto no meio do evaluate — é o próprio sucesso
-    // em curso; tenta de novo até o documento novo (sem __viva) responder.
-    try { return await page.evaluate(() => window.__viva === undefined); }
-    catch { return false; }
-  }, "reload da aba após o evento do reset");
+  await waitFor(() => avaliaTolerandoNavegacao(page, () => window.__viva === undefined),
+                "reload da aba após o evento do reset");
 }
 
 test("dashboard: storage event do finbot_reset_at recarrega a aba aberta", async () => {
@@ -265,7 +255,7 @@ test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", as
       document.getElementById("reset-password").value = "senha";
       requestAccountReset();                    // POST stubado (200) → marker → /onboarding
     });
-    await waitFor(() => page.evaluate(() => location.pathname === "/onboarding"),
+    await waitFor(() => avaliaTolerandoNavegacao(page, () => location.pathname === "/onboarding"),
                   "redirect pro /onboarding");
     const estado = await page.evaluate(() => ({
       marker: localStorage.getItem("finbot_reset_at"),
@@ -275,5 +265,26 @@ test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", as
     assert.ok(Number(estado.marker) > 0, "o reset tinha que gravar finbot_reset_at");
     assert.equal(estado.snap, null, "pb_snap_* da própria aba tinha que sumir");
     assert.equal(estado.home, null, "pb_home_* da própria aba tinha que sumir");
+  } finally { await fechar(page); }
+});
+
+test("waitFor: erro que não é navegação sobe; condição impossível estoura com a mensagem", async () => {
+  // Controle do conserto acima (§3): tolerar a destruição do contexto não pode
+  // virar "engole tudo". NEGATIVO — com `catch { return false }` no lugar do
+  // filtro, a 1ª rejeição vira timeout genérico e o /bug real/ fica vermelho.
+  // about:blank de propósito: o helper e o waitFor não dependem de página
+  // nenhuma, e bootar a home deixaria fetch em voo quando o fechar() derruba o
+  // contexto — a "atividade assíncrona depois do teste" que o arquivo já
+  // combate (acaoSegura/fechar). Sem request, sem corrida.
+  const page = await newPage();
+  try {
+    await assert.rejects(
+      () => waitFor(() => avaliaTolerandoNavegacao(page, () => { throw new TypeError("bug real"); }),
+                    "nunca acontece", 300),
+      /bug real/, "erro real virou timeout mudo — o catch engoliu demais");
+    await assert.rejects(
+      () => waitFor(() => avaliaTolerandoNavegacao(page, () => false), "condição impossível", 300),
+      /timeout esperando: condição impossível/,
+      "a mensagem do timeout tem que dizer o que se esperava");
   } finally { await fechar(page); }
 });
