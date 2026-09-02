@@ -49,23 +49,41 @@ prende a tela (HIPÓTESE lida no código, sem navegador):
 Ou seja: "trava no spinner" vale para o snapshot do WebSocket, NÃO para o
 dashboard inteiro.
 
-RESÍDUO — o que este PR NÃO resolve, e que é a próxima issue. O conserto troca
-"servidor em UTC" por "servidor no fuso do APP": isso casa com o navegador de
-quem está NO fuso do app e com mais ninguém. Para os outros o descarte do
-`isCurrentViewData` continua idêntico (HIPÓTESE lida no código, sem navegador):
+RESÍDUO — FECHADO, e este parágrafo é o registro de que foi. Quando este
+arquivo nasceu, o conserto trocava "servidor em UTC" por "servidor no fuso do
+APP": casava com o navegador de quem está NO fuso do app e com mais ninguém, e
+para os outros o descarte do `isCurrentViewData` continuava idêntico:
 
-| usuário          | instante       | servidor (SP) | navegador | resultado      |
-|------------------|----------------|---------------|-----------|----------------|
-| São Paulo        | 31/08 21:13-03 | agosto        | agosto    | consertado     |
-| Manaus (−04)     | 31/08 23:30-04 | setembro      | agosto    | ainda descarta |
-| Rio Branco (−05) | 31/08 22:30-05 | setembro      | agosto    | ainda descarta |
-| Lisboa (+01)     | 01/09 01:00+01 | agosto        | setembro  | ainda descarta |
+| usuário          | instante       | servidor (SP) | navegador | era        | hoje   |
+|------------------|----------------|---------------|-----------|------------|--------|
+| São Paulo        | 31/08 21:13-03 | agosto        | agosto    | consertado | idem   |
+| Manaus (−04)     | 31/08 23:30-04 | setembro      | agosto    | descartava | adota  |
+| Rio Branco (−05) | 31/08 22:30-05 | setembro      | agosto    | descartava | adota  |
+| Lisboa (+01)     | 01/09 01:00+01 | agosto        | setembro  | descartava | adota  |
 
-Não é regressão: com o servidor em UTC esses três já divergiam. O conserto de
-raiz é no `isCurrentViewData` — não descartar antes do `stopSpin()` —, que é
-frontend e está FORA deste PR. Alívio parcial que já existe: o `_doRefresh`
-manda `year`/`month` explícitos, então quem aperta "atualizar" se recupera; o
-estrago é a carga inicial.
+O conserto do cliente entrou no `c8e3bbe` (Onda 1 de perf), integrado no merge
+`85ea2a4` — posterior ao `8ea113a` deste arquivo, e é por isso que a versão
+original desta tabela dizia "ainda descarta" para as três últimas linhas. Ele
+NÃO é o que este parágrafo previa ("não descartar antes do `stopSpin()`"): no
+branch `snapshot` do `ws.onmessage`, se o usuário ainda não navegou de mês à
+mão, o mês do snapshot é ADOTADO — o servidor é a fonte da verdade do mês —, e
+o teto do `btn-next` (`latestKnownMonth`) avança junto. `month_data` fica de
+fora: é resposta a `get_month` explícito e tem mesmo que ser descartado.
+
+Provado com navegador, não por leitura:
+`tests/frontend/snapshot_virada_de_mes.test.mjs` sintetiza a divergência num
+contexto `Asia/Tokyo` (não depende do dia real) e traz os dois controles — o
+negativo (`userNavigatedMonth` ligado volta a descartar) e o positivo (mês
+corrente segue o caminho de sempre). Rodar:
+
+    NODE_PATH=$(npm root -g) node --test tests/frontend/snapshot_virada_de_mes.test.mjs
+
+Sobra deste caminho, medido e deixado de fora de propósito: o
+`restoreSnapshotFromSession` roda ANTES do `connect()` e lê a chave da sessão
+por `viewYear/viewMonth` (relógio do DISPOSITIVO), enquanto o
+`persistSnapshotToSession` gravou com o mês do SERVIDOR. Na janela a chave não
+casa e a troca /home ↔ /app perde o paint instantâneo até o WS chegar. É
+otimização perdida por ~3 h/mês, não tela presa.
 
 RESÍDUO, 2ª parte — `is_current_month` tem um TERCEIRO consumidor. Além do
 `isCurrentViewData`, o render de frontend/dashboard.js deriva
@@ -78,8 +96,8 @@ condições têm de valer juntas para alcançá-lo:
   1. navegador À FRENTE do fuso do app (Lisboa +01 contra São Paulo −03), E
   2. dentro da janela de 3h do dia 1º, E
   3. navegando EXPLICITAMENTE para o mês do navegador — o `year`/`month` vai na
-     requisição. Sem eles o servidor responde o próprio mês e quem descarta é o
-     `isCurrentViewData` da tabela acima, não isto.
+     requisição. Sem eles o servidor responde o próprio mês e o cliente ADOTA
+     esse mês (tabela acima) em vez de cair aqui.
 
 Aí o servidor responde `is_current_month: false` onde antes respondia `true`, e
 o saldo dos bancos conectados SOME do consolidado. Não é dinheiro errado — nada
