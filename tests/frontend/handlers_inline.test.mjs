@@ -66,6 +66,16 @@ const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos
  * ele NÃO adivinha: para, e devolve o motivo em `perdidos`. Perder cobertura é o
  * lado seguro de errar; inventar nome reprova código correto. E a perda não fica
  * silenciosa — a comparação com a baseline, nome a nome, fica vermelha.
+ *
+ * TETO DECLARADO: markup montado por CONCATENAÇÃO fica de fora. Cada literal é lido
+ * por si, então `'<button on' + 'click="x()">'` não rende handler nenhum — nenhum
+ * dos dois pedaços tem `on…=` inteiro. Fechar isso exigiria AVALIAR expressão (a
+ * concatenação pode ter variável, chamada, ternário, `.join()`), e não há parser nem
+ * motor de JS disponível no projeto; o §0.6 desaconselha adicionar um.
+ *
+ * A escolha é consciente e o modo de falha é o seguro: o handler não entra na conta,
+ * e nada é inventado. Hoje o frontend não tem nenhum atributo partido assim — e se um
+ * nome HOJE coberto passar a ser gerado por concatenação, a baseline fica vermelha.
  */
 export function markupDe(js) {
   const trechos = [];
