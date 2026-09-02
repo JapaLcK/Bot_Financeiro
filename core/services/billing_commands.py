@@ -68,6 +68,9 @@ def _format_plan_expires(expires_at) -> str:
     # Converte pra horario de Brasilia (UTC-3) sem precisar de pytz
     local = expires_at.astimezone(timezone.utc)
     # Usa offset fixo BRT (UTC-3); suficiente pra exibir no chat.
+    # DÍVIDA (#179): offset cravado, fora da fonte única `utils_date._tz()`. Só
+    # exibição (data de validade da assinatura), sem efeito em dinheiro nem em
+    # janela de consulta — por isso ficou fora do PR que unificou as leituras.
     from datetime import timedelta
     brt = local.astimezone(timezone(timedelta(hours=-3)))
     return brt.strftime("%d/%m/%Y às %H:%M")
