@@ -567,7 +567,7 @@
     head.className = "pb-acct-head";
     head.innerHTML =
       '<div><h1>Minha conta</h1><p>Gerencie sua conta e segurança</p></div>' +
-      '<img src="/brand/icon.png?v=1" alt="" />';
+      '<img src="/brand/icon.png?v=2" alt="" />';
     ph.parentNode.insertBefore(head, ph);
 
     const ban = document.createElement("div");

@@ -47,6 +47,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from token_utils import decode_dashboard_token_full, make_dashboard_token
+from utils_date import now_tz
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
     ensure_admin_tables,
@@ -113,6 +114,7 @@ from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
+from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
@@ -124,6 +126,7 @@ from frontend.routes.shared import (
     JWT_SECRET,
     authorize_dashboard_access as _authorize_dashboard_access,
     dashboard_current_cache as _dashboard_current_cache,
+    dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
@@ -348,6 +351,12 @@ async def _get_dashboard_current_state(user_id: int):
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
         return cached[1], cached[2], cached[3], cached[4], cached[5]
 
+    # Época ANTES dos gathers: se uma invalidação (reset, escrita de pocket/
+    # cartão/launch) rodar enquanto este fill espera o banco, publicar o
+    # resultado seria regravar dado pré-mutação por cima do pop (até 45s de
+    # TTL). Fill concorrente legítimo publica normal (mesma época).
+    fill_epoch = _dashboard_current_cache_epoch.get(int(user_id), 0)
+
     # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
     # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
     # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
@@ -365,14 +374,15 @@ async def _get_dashboard_current_state(user_id: int):
     if not require_min_tier(user_id, "essencial"):
         rv_positions = []
         of_fixed_income = []
-    _dashboard_current_cache[int(user_id)] = (
-        _startup_time.monotonic(),
-        current_pockets,
-        current_investments,
-        market_rates,
-        rv_positions,
-        of_fixed_income,
-    )
+    if _dashboard_current_cache_epoch.get(int(user_id), 0) == fill_epoch:
+        _dashboard_current_cache[int(user_id)] = (
+            _startup_time.monotonic(),
+            current_pockets,
+            current_investments,
+            market_rates,
+            rv_positions,
+            of_fixed_income,
+        )
     return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 
@@ -424,12 +434,12 @@ async def get_financial_data(
     are scoped to that month. Balance, pockets and investments
     always reflect the current state.
     """
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     y   = year  or now.year
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
     from core.services.plan_service import history_earliest_date
-    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id, now)
     query_start = max(month_start, earliest_history_date) if earliest_history_date else month_start
     is_current = (y == now.year and m == now.month)
     page = max(int(page or 1), 1)
@@ -1488,7 +1498,7 @@ class ConnectionManager:
         if info:
             return info["year"], info["month"]
 
-        now = datetime.now(timezone.utc)
+        now = now_tz()
         return now.year, now.month
 
     async def send_to(self, ws: WebSocket, payload: str):
@@ -1880,6 +1890,9 @@ CSRF_EXEMPT_PATHS = {
     # One-click unsubscribe (RFC 8058): POST server-to-server do Gmail/Yahoo,
     # sem cookie de sessão — autenticado pelo token HMAC da própria URL.
     "/unsubscribe",
+    # Consulta do lead engine: server-to-server, sem cookie de sessão —
+    # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
+    "/api/prospect/status",
 }
 
 _SECURITY_HEADERS = {
@@ -2503,6 +2516,29 @@ async def _apply_referral_attribution(request: Request, response: Response, user
         response.delete_cookie("ref_code")
 
 
+async def _apply_prospect_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio de um link de prospecção (cookie prospect_code do
+    /i/{code}), grava a atribuição e consome o cookie. Nunca pode quebrar o signup."""
+    code = (request.cookies.get("prospect_code") or "").strip()
+    if not code:
+        return
+    try:
+        from db.prospects import record_prospect_referral
+        attributed = await asyncio.to_thread(record_prospect_referral, code, int(user_id))
+        if attributed:
+            await log_system_event(
+                "info",
+                "prospect_referral_recorded",
+                f"Cadastro atribuido ao funil de prospeccao (code={code}).",
+                source="prospects",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {exc}")
+    finally:
+        response.delete_cookie("prospect_code")
+
+
 @app.post("/auth/register")
 @limiter.limit("3/hour")
 async def auth_register(request: Request, body: RegisterBody):
@@ -2591,6 +2627,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     await _apply_referral_attribution(request, response, int(user_id))
+    await _apply_prospect_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
@@ -2791,17 +2828,34 @@ async def auth_refresh(request: Request, response: Response):
     por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
     clientes desta rota, `login.html` e o interceptor, são de cookie).
 
-    O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
-    `HTTPException` descarta os headers do sub-response (medido, #175). Está
-    fora do escopo deste conserto, mas não é para ser lido como funcionando.
+    Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
+    `HTTPException` descarta os headers do sub-response injetado (medido,
+    #175), então o `_clear_session_cookies` não chegava ao cliente e o
+    dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
+    ver o comentário no primeiro ramo.
     """
     refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
     if not refresh_in_cookie:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
-        raise HTTPException(
-            status_code=400 if sessao_viva else 401, detail="missing_refresh_token",
-        )
+        if sessao_viva:
+            raise HTTPException(status_code=400, detail="missing_refresh_token")
+        # O Set-Cookie da limpeza precisa CHEGAR ao cliente: `raise
+        # HTTPException` descarta os headers do sub-response injetado (#175).
+        # Sem isto o dashboard_token (12h) sobrevivia ao refresh morto e o
+        # usuário ficava preso — o nav mostrava a conta logada, todo /billing
+        # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
+        # olha o dashboard_token, não o access. Nem assinava, nem relogava.
+        resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
@@ -2810,9 +2864,18 @@ async def auth_refresh(request: Request, response: Response):
         consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
     )
     if not result:
-        # Limpa cookies — qualquer motivo de falha vira deslogue.
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+        # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
+        # do ramo acima para montar a resposta em vez de dar raise (#175).
+        resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     user_id = int(result["user_id"])
     session_jti = result["session_jti"]
@@ -3720,6 +3783,7 @@ async def auth_google_complete_signup(
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await _apply_referral_attribution(request, response, user_id)
+    await _apply_prospect_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
@@ -3948,7 +4012,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
         trial_days = trial_days_total() if eligible else 0
     else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "15"))
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
@@ -5022,6 +5086,8 @@ async def _apply_unsubscribe(uid: int, token: str) -> bool:
                 (uid,),
             )
         await conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(uid)
     return True
 
 
@@ -5641,6 +5707,10 @@ app.include_router(analytics_router)
 app.include_router(affiliates_router)
 
 
+# ─── Funil de prospecção → frontend/routes/prospects.py ──────────────────────
+app.include_router(prospects_router)
+
+
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
 app.include_router(agents_router)
 
@@ -5812,7 +5882,7 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
     """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     y = year  or now.year
     m = month or now.month
 
@@ -6851,7 +6921,23 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
             await ws.close(code=1008)
             return
 
-    now = datetime.now(timezone.utc)
+    # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
+    # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
+    # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
+    # primitivas e mesma isenção do app iOS (diretriz 3.1.1: o app não pode
+    # ser empurrado pra tela de compra; fica no acesso base).
+    from core.services.plan_service import has_app_access, needs_plan_selection
+    in_app = "PigBankApp" in (ws.headers.get("user-agent") or "")
+    sem_plano = await asyncio.to_thread(
+        lambda: (not in_app and needs_plan_selection(user_id)) or not has_app_access(user_id)
+    )
+    if sem_plano:
+        await ws.close(code=4402, reason="subscription_required")
+        return
+
+    # now_tz() (main, 8ea113a): o mês do snapshot é o do USUÁRIO, não o do UTC
+    # — senão o dashboard descarta o snapshot nas 3 h após a virada em UTC.
+    now = now_tz()
     if not await manager.connect(ws, user_id, now.year, now.month):
         return
     print(f"Connected: user={user_id} total={len(manager.active.get(user_id, {}))}")
@@ -6877,7 +6963,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 elif t == "get_month":
                     # Data for a specific month (month selector navigation)
-                    now = datetime.now(timezone.utc)
+                    now = now_tz()
                     y   = int(payload.get("year", now.year))
                     m   = int(payload.get("month", now.month))
                     page  = int(payload.get("page", 1))

@@ -45,6 +45,10 @@ class SecurityContactPayload(BaseModel):
     display_name: str | None = None
 
 
+class AccountResetPayload(BaseModel):
+    password: str
+
+
 class NotificationSettingsPayload(BaseModel):
     engagement_email_enabled: bool | None = None
     tip_email_enabled: bool | None = None
@@ -124,6 +128,104 @@ def _current_session_jti(request: Request) -> str | None:
     if not payload or payload.get("type") != "auth":
         return None
     return payload.get("jti")
+
+
+@router.post("/settings/reset")
+@shared.limiter.limit("5/minute")
+async def account_reset_route(request: Request, payload: AccountResetPayload):
+    """Recomeçar do zero: apaga dados financeiros e de uso, preserva a conta.
+
+    O user_id vem EXCLUSIVAMENTE da sessão (sem {user_id} no path, padrão de
+    frontend/routes/onboarding.py) e NÃO usa authorize_dashboard_access: o
+    subscription gate devolveria 402 e travaria a conta free de resetar.
+    """
+    user_id = shared.resolve_dashboard_user_id(request)
+    shared.raise_if_account_scheduled_for_deletion(user_id)
+
+    # Imports na função (padrão do arquivo p/ dependências fora do caminho quente).
+    from core.observability import log_system_event_sync
+    from db.privacy import ResetLockUnavailableError, reset_user_data
+    from frontend.routes.open_finance import delete_pluggy_items_best_effort
+
+    # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
+    # local varreu (RETURNING), para o 2º passe pegar item salvo na janela.
+    enumerados: list[str] = []
+
+    def _limpeza_remota() -> None:
+        # Hook rodado por reset_user_data DEPOIS da senha e dos locks e ANTES
+        # dos deletes locais (invariante: lock ocupado → Pluggy não tocada;
+        # ver comentário em db/privacy.py). Best-effort: falha remota loga e
+        # segue — mesmo contrato do disconnect. O helper já trata falha por
+        # item; este try cobre falha do helper inteiro (e aí `enumerados`
+        # fica vazio, o que manda TUDO que foi varrido para o 2º passe —
+        # a retentativa certa).
+        try:
+            enumerados.extend(delete_pluggy_items_best_effort(user_id))
+        except Exception as exc:  # noqa: BLE001
+            log_system_event_sync(
+                "warning", "account_reset_pluggy_cleanup_failed",
+                f"Reset do user {user_id}: limpeza remota na Pluggy falhou: {exc}",
+                source="settings", user_id=user_id, details={"error": str(exc)[:200]},
+            )
+
+    try:
+        result = await asyncio.to_thread(
+            reset_user_data, user_id, payload.password, remote_cleanup=_limpeza_remota,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ResetLockUnavailableError as exc:
+        # Mesmo desfecho do lock ocupado na reconexão (_grava_reconexao): 503
+        # e o usuário tenta de novo — o reset é recuperável, escrita suja não.
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível recomeçar agora: uma sincronização bancária "
+                   "está em andamento. Tente de novo em alguns segundos.",
+        ) from exc
+
+    # 2º passe remoto (Codex PR #217, 11º): item Pluggy salvo ENTRE a
+    # enumeração da limpeza remota e o DELETE local foi varrido do banco sem
+    # ser deletado na Pluggy — órfão que bloqueia a reconexão ("já possui
+    # conexão com este acesso"). O RETURNING do reset diz o que foi varrido;
+    # deleta o que a enumeração não viu (normalmente vazio). Falha aqui cai
+    # no teto já documentado: órfão vai ao registry via webhook e a saúde
+    # marca ERROR/item_missing.
+    tardios = sorted(set(result.pop("pluggy_items_swept", []) or []) - set(enumerados))
+    if tardios:
+        try:
+            await asyncio.to_thread(delete_pluggy_items_best_effort, user_id, tardios)
+        except Exception as exc:  # noqa: BLE001 — best-effort, como o 1º passe
+            await asyncio.to_thread(
+                log_system_event_sync,
+                "warning", "account_reset_pluggy_cleanup_failed",
+                f"Reset do user {user_id}: 2º passe remoto falhou: {exc}",
+                source="settings", user_id=user_id,
+                details={"items": tardios, "error": str(exc)[:200]},
+            )
+
+    # Mesmo padrão de toda rota de mutação (cards/pockets/launches): sem isto,
+    # o snapshot "mês corrente" (TTL 45s) seguia servindo pockets/cartões/OF
+    # apagados a outra aba com o dashboard aberto.
+    shared.invalidate_dashboard_current_cache(user_id)
+
+    # Dashboards conectados — inclusive noutro DISPOSITIVO, onde o storage
+    # event do finbot_reset_at não chega — refazem o mês na hora: reuso
+    # deliberado do evento que o dashboard.js já trata (dispara get_month),
+    # mesmo best-effort do sync (frontend/routes/open_finance.py). A /home
+    # não tem WebSocket — teto aceito: lá a recarga cai no gate.
+    try:
+        from frontend.finance_bot_websocket_custom import manager
+
+        await manager.broadcast_to_user(
+            user_id, json.dumps({"type": "open_finance_synced", "item_id": "account_reset"}),
+        )
+    except Exception:  # noqa: BLE001 — atualização ao vivo é conveniência, nunca bloqueia o reset
+        pass
+
+    await asyncio.to_thread(
+        record_audit_event, user_id, AuditEvent.ACCOUNT_RESET, request=request,
+    )
+    return json.loads(shared.jdump({"ok": True, **result}))
 
 
 @router.get("/settings/{user_id}/security")
@@ -227,6 +329,8 @@ async def update_security_contact_route(
                         (display_name, encrypt_pii_optional(display_name), user_id),
                     )
             await conn.commit()
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(user_id)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
 

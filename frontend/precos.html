@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Planos · PigBank</title>
-<meta name="description" content="Planos PigBank: Grátis, Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 30 dias grátis pra testar o plano que você escolher." />
+<meta name="description" content="Planos PigBank: Grátis, Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." />
 <link rel="canonical" href="https://pigbankai.com/precos" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
@@ -178,6 +178,11 @@
   }
 </style>
 <script src="/safe-area.js?v=1"></script>
+<!-- Renova o access token em 401 e refaz a request. A /precos é logada
+     (checkout, troca de plano, /auth/me) e o cookie de access vale 15 min,
+     enquanto o dashboard_token do nav dura horas: sem isto o nav mostrava a
+     conta logada e o clique em "Assinar" caía em "Faça login". -->
+<script src="/static/auth-refresh.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -205,7 +210,7 @@
         <img src="/brand/mascot.webp" alt="" style="width:132px;height:auto;display:block;margin:0 auto 18px;filter:drop-shadow(0 10px 26px rgba(0,0,0,.5))" />
         <div class="eyebrow" id="precos-eyebrow">Planos</div>
         <h2 id="precos-title">Escolha seu <span class="grad">PigBank</span></h2>
-        <p id="precos-sub">30 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p>
+        <p id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p>
       </div>
 
       <!-- Escada de planos (Grátis/Essencial/Plus/Pro/Premium) — conteúdo ÚNICO
@@ -315,7 +320,7 @@
 
         <p class="plans-note"><i class="ph ph-piggy-bank" aria-hidden="true"></i> <strong>Preço de fundador:</strong> assinando agora, seu valor fica congelado pra sempre: enquanto a assinatura estiver ativa, ele nunca sobe.</p>
       </div>
-      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>30 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note" id="plans-note-v2"><i class="ph ph-confetti" aria-hidden="true"></i> Todo plano vem com <strong>15 dias grátis pra testar</strong> (um teste por número). A primeira cobrança só acontece depois do trial. Cancele antes pelo dashboard e não paga nada. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
       <p class="plans-cta"><a href="#comparar">Ver a comparação completa, recurso por recurso <i class="ph ph-caret-right" aria-hidden="true"></i></a></p>
     </section>
 
@@ -595,7 +600,7 @@
   <footer class="footer">
     <div class="wrap footer-inner">
       <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
         <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
       </div>
       <div class="footer-cols">
@@ -843,7 +848,7 @@ async function applyOnboardingChoice() {
   if (me && me.needs_plan_selection) {
     // Guia visual: deixa claro que precisa escolher um plano pra começar.
     const sub = document.getElementById("precos-sub");
-    if (sub) sub.textContent = "Escolha um plano pra começar: dá pra seguir no Grátis ou testar um plano pago 30 dias de graça.";
+    if (sub) sub.textContent = "Escolha um plano pra começar: dá pra seguir no Grátis ou testar um plano pago 15 dias de graça.";
     ctas.forEach(cta => {
       cta.removeAttribute("href");
       cta.style.cursor = "pointer";

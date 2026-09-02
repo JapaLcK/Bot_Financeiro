@@ -394,9 +394,20 @@ def months_pt():
 DASHBOARD_CURRENT_CACHE_TTL_SECONDS = 45
 dashboard_current_cache: dict[int, tuple[float, Any, Any, Any]] = {}
 
+# Época por usuário: um fill em voo captura a época ANTES dos gathers e só
+# publica se ela não mudou. Sem isto, invalidar durante o fill era atropelado:
+# o pop rodava e a corrotina acordava e gravava o resultado pré-mutação de
+# volta (até 45s de TTL servindo dado apagado — Codex PR #217). Incrementada
+# DENTRO do helper: toda rota de mutação que já invalida ganha a proteção de
+# graça. Perder uma publicação é barato (o próximo miss refaz); memória: 1 int
+# por usuário com mutação desde o boot do processo.
+dashboard_current_cache_epoch: dict[int, int] = {}
+
 
 def invalidate_dashboard_current_cache(user_id: int) -> None:
-    dashboard_current_cache.pop(int(user_id), None)
+    uid = int(user_id)
+    dashboard_current_cache.pop(uid, None)
+    dashboard_current_cache_epoch[uid] = dashboard_current_cache_epoch.get(uid, 0) + 1
 
 
 # ─── DB helpers (com connection pool) ────────────────────────────────────────
