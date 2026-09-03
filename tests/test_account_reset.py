@@ -492,13 +492,13 @@ def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):
 
     original = privacy._table_exists
 
-    # `accounts` saiu de _RESET_TABLES (#246) — a última do laço passou a ser
-    # `financial_spaces`. Sem trocar aqui, o hook nunca dispara e o teste dá
-    # DID NOT RAISE. Guarda contra a lista mudar de novo:
-    assert privacy._RESET_TABLES[-1] == "financial_spaces", privacy._RESET_TABLES[-1]
+    # `accounts` saiu de _RESET_TABLES (#246); a última do laço vem da própria
+    # lista (§0.7) — hardcodar aqui daria DID NOT RAISE em silêncio no dia em
+    # que alguém acrescentasse uma tabela no fim.
+    ultima = privacy._RESET_TABLES[-1]
 
     def _explode_no_fim(cur, table):
-        if table == "financial_spaces":  # última do laço — meio da transação
+        if table == ultima:  # última do laço — meio da transação
             raise RuntimeError("falha injetada")
         return original(cur, table)
 
@@ -516,15 +516,18 @@ def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):
 # Sem mock de `db`: duas conexões de verdade. A thread abre a própria e chama
 # `add_launch_and_update_balance`, exatamente como o WhatsApp faria.
 
-def _reset_com_lancamento_concorrente(uid: int, monkeypatch) -> None:
+def _reset_com_lancamento_concorrente(uid: int, monkeypatch, gatilho: str | None = None) -> None:
     """`reset_user_data` com um lançamento real de R$250 entrando no meio.
 
-    O gatilho é `financial_spaces` — a ÚLTIMA tabela do laço, portanto DEPOIS
-    do `delete from launches`. É a única posição em que a corrida discrimina:
-    disparada no começo do laço, o lançamento entra e o próprio reset o apaga
-    logo em seguida — nada sobrevive e não há invariante a violar.
+    O gatilho é a ÚLTIMA tabela do laço (`_RESET_TABLES[-1]`), portanto DEPOIS
+    do `delete from launches`: é onde o vermelho sem o conserto é o do DINHEIRO
+    (R$250 criados ao apagar o sobrevivente). Disparada no começo do laço a
+    corrida também fica vermelha, mas na premissa ("tinha que deixar 1
+    lançamento: []") — o reset apaga o recém-chegado e o teste não mede a
+    invariante que interessa. Medido nesta sessão, nas 35 posições.
     """
     original = privacy._table_exists
+    gatilho = gatilho or privacy._RESET_TABLES[-1]
     erro: list[BaseException] = []
     disparou: list[bool] = []
 
@@ -537,7 +540,7 @@ def _reset_com_lancamento_concorrente(uid: int, monkeypatch) -> None:
     t = threading.Thread(target=_lanca)
 
     def _dispara(cur, table):
-        if table == "financial_spaces" and not disparou:
+        if table == gatilho and not disparou:
             disparou.append(True)
             t.start()
             # COM o conserto a thread bloqueia no `update accounts` (o reset
@@ -610,6 +613,37 @@ def test_reset_sem_corrida_zera_a_conta_e_o_caminho_normal_continua(user_id):
     db.delete_launch_and_rollback(user_id, lid)
     assert _saldo(user_id) == 0
     assert _ids_de_launches(user_id) == []
+
+
+def test_reset_de_conta_sem_linha_de_accounts_nao_deixa_divida_fantasma(user_id, monkeypatch):
+    """NEGATIVO do `ensure_user_tx`: sem ele o `update` casa 0 e não trava NADA.
+
+    Estado real e alcançável: `merge_users` apaga accounts do usuário de origem
+    (db/users.py:88) e migra auth_accounts sem recriar a linha (:155-162) — a
+    conta fica com login válido e ZERO linhas em accounts. Todo reset rodado na
+    versão anterior deixava a conta assim também.
+
+    O gatilho aqui é a PRIMEIRA tabela do laço, não a última: é a posição
+    discriminante deste caso. Sem `ensure_user_tx` o lançamento entra livre (não
+    há linha para travar) e o `delete from launches`, que vem DEPOIS, o apaga —
+    sobra saldo -250 com 0 lançamentos, dívida que não existe. Medido: 34 das 35
+    posições do laço terminam assim; só a última (depois de `launches`) escapa,
+    e é por isso que os outros dois testes de corrida não pegam este bug.
+    """
+    _semeia(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from accounts where user_id = %s", (user_id,))
+        conn.commit()
+    assert _linhas_accounts(user_id) == 0, "a pré-condição do teste não montou"
+
+    _reset_com_lancamento_concorrente(user_id, monkeypatch, gatilho=privacy._RESET_TABLES[0])
+
+    assert _linhas_accounts(user_id) == 1, "o reset tinha que ter recriado a linha"
+    assert _soma_delta_conta(user_id) == Decimal("-250"), \
+        f"o lançamento da janela sumiu: {_ids_de_launches(user_id)}"
+    assert _saldo(user_id) == _soma_delta_conta(user_id), \
+        f"saldo {_saldo(user_id)} != soma dos sobreviventes {_soma_delta_conta(user_id)}"
 
 
 # ── 5. senha ─────────────────────────────────────────────────────────────────
