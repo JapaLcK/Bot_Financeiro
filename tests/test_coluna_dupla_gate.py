@@ -97,13 +97,13 @@ def _pytest_em(monkeypatch, tmp_path, nome, fonte):
 
 def _verde(antes=None):
     """A coluna CORRIGIDA das chamadas unitarias: um teste que passou, mais tudo o
-    que ficou VERMELHO no antigo — falha E erro — agora passando. O criterio de
-    verde e PAREADO e varre os dois, entao sem isto o caso sairia REPROVADO por um
-    motivo que ele nao quer medir."""
-    vermelhos = {**antes.falhados, **antes.errados} if antes else {}
+    que ficou VERMELHO no antigo — falha, ambiguo E erro — agora passando. O
+    criterio de verde e PAREADO e varre os TRES, entao sem isto o caso sairia
+    REPROVADO por um motivo que ele nao quer medir."""
+    vermelhos = {**antes.falhados, **antes.ambiguos, **antes.errados} if antes else {}
     passados = {("lab", "test_verde"): "lab.py::test_verde",
                 **{chave: nodeid for chave, (nodeid, _) in vermelhos.items()}}
-    return coluna_dupla.Desfechos(len(passados), 0, {}, {}, passados)
+    return coluna_dupla.Desfechos(len(passados), 0, {}, {}, {}, passados)
 
 
 def test_erro_de_fixture_e_prova_FRACA_mesmo_imprimindo_FAILED(monkeypatch, tmp_path):
@@ -307,6 +307,38 @@ def test_so_em_outra_plataforma():
 
 def test_valor():
     assert lib.valor() == 42
+'''
+
+# `lib.reset()` so existe no CORRIGIDO: no antigo o hook abaixo estoura com
+# `AttributeError` na fase call, ANTES do corpo do teste.
+_LIB_CORRIGIDA_COM_RESET = _LIB_CORRIGIDA + "\n\ndef reset():\n    return None\n"
+
+# Hook com ZERO condicoes, que so chama producao — o acidente, nao o ataque.
+_HOOK_QUE_SO_CHAMA_PRODUCAO = "import lib\n\n\ndef pytest_runtest_call(item):\n    lib.reset()\n"
+
+# Producao que ESTOURA no antigo: o corpo do teste RODA e o traceback termina em
+# `lib.py`, nao no arquivo do teste.
+_LIB_ANTIGA_QUE_ESTOURA = 'def valor():\n    raise ValueError("nao suportado")\n'
+
+# Fixture `yield` que estoura no TEARDOWN: o corpo do teste roda e PASSA, e so
+# depois a fixture quebra. Medido (pytest 9.0.2, `junit_family=xunit1`): sai UM
+# `<testcase>` com SO `<error>`, `message='failed on teardown with "..."'` — ou
+# seja, `<error>` NAO implica "o corpo nao rodou".
+_FIXTURE_QUE_ESTOURA_NO_TEARDOWN = '''
+import pytest
+
+import lib
+
+
+@pytest.fixture
+def recurso():
+    yield 1
+    if lib.valor() != 42:
+        raise RuntimeError("estourou no TEARDOWN, com o corpo ja executado")
+
+
+def test_valor(recurso):
+    assert recurso == 1
 '''
 
 
@@ -734,19 +766,160 @@ def test_erro_de_coleta_impareavel_continua_aprovando(tmp_path):
     assert "nao provou o conserto" not in r.stdout
 
 
-def test_prova_FRACA_nao_afirma_que_ninguem_rodou():
+def test_hook_de_fase_call_que_estoura_antes_do_corpo_e_prova_FRACA(tmp_path):
+    """Controle NEGATIVO da classificacao. Quem escolhe `<failure>` x `<error>` no
+    JUnit e a FASE (`report.when == "call"`), nao a entrada no corpo do teste: um
+    `pytest_runtest_call` que estoure ANTES de chamar o corpo sai `<failure>` do
+    mesmo jeito. E acidente alcancavel, nao ataque — o hook aqui tem ZERO condicoes
+    e so chama producao (`lib.reset()`), que so existe no corrigido.
+
+    Medido com a classificacao pela tag: `APROVADO, prova FORTE` com exit 0,
+    citando `tests/test_valor.py::test_valor - AttributeError` — o carimbo de "o
+    corpo do teste rodou e falhou" sobre um corpo que nunca foi chamado."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA_COM_RESET,
+                   "tests/conftest.py": _HOOK_QUE_SO_CHAMA_PRODUCAO,
+                   "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FRACA" in r.stdout
+    assert "prova FORTE" not in r.stdout
+    assert "has no attribute 'reset'" in r.stdout  # a causa real, e nao o assert do corpo
+    # O balde: e ESTE lab que enche `ambiguos` num pytest de verdade. Sem este
+    # assert, fundir os dois baldes de volta no `le_junit` deixava a suite inteira
+    # verde — a linha do roteamento nao tinha quem a protegesse.
+    assert "1 com <failure> e SEM frame" in r.stdout
+
+
+def test_corpo_que_chama_producao_que_estoura_continua_prova_FORTE(tmp_path):
+    """Controle POSITIVO do caso acima, e o que mata o criterio "o ULTIMO frame tem
+    de ser do arquivo do teste": aqui o corpo RODA, chama producao, e o traceback
+    termina em `lib.py:2: ValueError`. O frame do proprio arquivo existe, mas no
+    MEIO — e o vermelho legitimo do #182, que nao tem um `assert` sequer.
+
+    Sem este teste, um criterio que exigisse o frame no fim reprovaria o caminho
+    honesto e rebaixaria toda prova a FRACA, que e pior que o bug."""
+    lab = _lab(tmp_path, {"lib.py": _LIB_ANTIGA_QUE_ESTOURA})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_valor.py::test_valor - ValueError: nao suportado" in r.stdout
+
+
+def test_erro_de_TEARDOWN_nao_vira_corpo_que_nao_rodou(tmp_path):
+    """`<error>` e a FASE (`report.when != "call"`), e nem toda fase e ANTES do
+    corpo: no teardown o corpo ja rodou e PASSOU. Aqui o `test_valor` passa nas duas
+    colunas e e a fixture que quebra no antigo, depois do `yield`.
+
+    O gate nao tem como saber que o corpo rodou (o XML nao carrega a fase), entao o
+    veredito continua FRACA — o que ele NAO pode fazer e afirmar que o corpo nao
+    rodou. Medido com a frase antiga: `APROVADO, prova FRACA` dizendo "o corpo nem
+    ter chegado a rodar" sobre um corpo que executou e passou. Este e o unico
+    registro mecanico no repo de que `<error>` != "nao rodou"."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_teardown.py": _FIXTURE_QUE_ESTOURA_NO_TEARDOWN})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FRACA" in r.stdout
+    assert "estourou no TEARDOWN" in r.stdout  # a causa real, do teardown
+    assert "o corpo nem ter chegado a rodar" not in r.stdout
+    assert "nem chegaram a rodar" not in r.stdout
+
+
+def test_prova_FRACA_separa_o_erro_do_failure_sem_frame():
     """A frase da prova FRACA e a linha que o Manager le para decidir se aceita, e
-    ela dizia "NENHUM teste chegou a RODAR no codigo antigo" olhando so o contador
-    de falhas — falsa sempre que a coluna antiga tinha teste PASSANDO ao lado do
-    que errou. Aqui o antigo tem 1 erro e 1 passado, e a frase passa a ser sobre os
-    VERMELHOS, nao sobre o grupo."""
+    ela tratava DOIS estados como um so. `<failure>` sem frame do arquivo do caso
+    PODE ter rodado (os quatro gatilhos do item 2 da celula do traceback, no topo
+    do `coluna_dupla.py`) e o gate nao distingue; `<error>` e fase != call, e so em
+    coleta e setup isso implica corpo nao executado — no teardown o corpo JA rodou.
+
+    Os gatilhos nao sao citados pelo NOME aqui de proposito: os tres greps do
+    `coluna_dupla.py` contam ocorrencias deles na arvore, e uma mencao em prosa
+    entraria na conta como se fosse uso.
+
+    Medido com os dois no mesmo balde: os relatorios dos dois grupos saem byte a
+    byte IGUAIS, e o do `<error>` fala de traceback que o gate nunca olhou. O
+    assert que discrimina e o `rel_erro != rel_ambiguo`; os demais nomeiam o que
+    cada um tem de dizer.
+
+    A versao anterior deste teste era quase tautologica: ela asseria a AUSENCIA de
+    "NENHUM teste chegou a RODAR", string que o fonte ja nao continha."""
+    passado = {("lab", "test_passa"): "lab.py::test_passa"}
+    so_erro = coluna_dupla.Desfechos(
+        2, 0, {}, {},
+        {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")}, passado)
+    so_ambiguo = coluna_dupla.Desfechos(
+        2, 0, {}, {("lab", "test_amb"): ("lab.py::test_amb", "Failed: forjado")},
+        {}, passado)
+    misto = coluna_dupla.Desfechos(3, 0, {}, so_ambiguo.ambiguos, so_erro.errados, passado)
+
+    saidas = [coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, d, 0, _verde(d))
+              for d in (so_erro, so_ambiguo, misto)]
+    (_, rel_erro), (_, rel_ambiguo), (_, rel_misto) = saidas
+    assert [codigo for codigo, _ in saidas] == [0, 0, 0]
+    assert all("prova FRACA" in r for _, r in saidas)
+    assert all("1 passado(s) ao lado" in r for _, r in saidas)  # o passado ao lado, literal
+
+    assert rel_erro != rel_ambiguo  # o assert que discrimina: hoje saem iguais
+    # O gate nao olhou traceback nenhum de um `<error>` — dizer "frame" ali e falar
+    # de uma evidencia que ele nao tem.
+    assert "frame do arquivo do caso" not in rel_erro
+    assert "traceback" not in rel_erro
+    assert "<error>" in rel_erro and "<error>" not in rel_ambiguo
+    assert "1 com <failure>" in rel_misto and "1 com <error>" in rel_misto
+
+
+def test_prova_FORTE_nao_chama_de_nao_rodado_o_failure_sem_frame():
+    """O `(e mais N ...)` da linha FORTE dizia "que nem chegaram a rodar" de tudo o
+    que nao fosse `<failure>` COM frame. E falso nos dois baldes que sobram: o
+    `<failure>` sem frame pode ter rodado, e o `<error>` de teardown rodou. Agora
+    ele nomeia e conta os dois, separados."""
     antes = coluna_dupla.Desfechos(
-        2, 0, {}, {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")},
+        5, 0,
+        {("lab", "test_falha"): ("lab.py::test_falha", "assert 0 == 42")},
+        {("lab", "test_amb1"): ("lab.py::test_amb1", "Failed: a"),
+         ("lab", "test_amb2"): ("lab.py::test_amb2", "Failed: b")},
+        {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")},
         {("lab", "test_passa"): "lab.py::test_passa"})
     codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, _verde(antes))
-    assert codigo == 0 and "prova FRACA" in relatorio
-    assert "NENHUM teste chegou a RODAR" not in relatorio
-    assert "1 passado(s) ao lado" in relatorio  # o que a frase antiga escondia
+    assert codigo == 0
+    assert "prova FORTE" in relatorio
+    assert "2 com <failure> sem frame do arquivo do caso" in relatorio
+    assert "1 com <error>" in relatorio
+    assert "que nem chegaram a rodar" not in relatorio
+
+
+def test_o_balde_ambiguo_entra_nas_duas_varreduras():
+    """O balde novo tem de entrar nos DOIS lugares que varrem vermelho — a varredura
+    de orfaos e a guarda de coleta pura —, e esquecer qualquer um dos dois e
+    regressao SILENCIOSA: o `_verde` deste arquivo une os tres baldes, entao nenhum
+    outro teste fica vermelho.
+
+    (a) verde SEM o par do ambiguo: com o balde na varredura sai o orfao nomeado;
+    sem ele o gate cai no ramo da falha fechada, outro rc=1 por outro motivo.
+    (b) rc=2 com um ambiguo ao lado do erro de coleta: com o balde na `coleta_pura`
+    a guarda dispara; sem ele o XML PARCIAL sai `APROVADO, prova FRACA` (rc=0)."""
+    ambiguo = {("lab", "test_amb"): ("lab.py::test_amb", "Failed: forjado")}
+
+    antes = coluna_dupla.Desfechos(2, 0, {}, ambiguo, {},
+                                   {("lab", "test_passa"): "lab.py::test_passa"})
+    verde_sem_o_par = coluna_dupla.Desfechos(1, 0, {}, {}, {},
+                                             {("lab", "test_verde"): "lab.py::test_verde"})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, verde_sem_o_par)
+    assert codigo == 1
+    assert "NAO passaram no corrigido" in relatorio
+    assert "lab.py::test_amb" in relatorio  # o orfao, pelo nodeid
+
+    interrompido = coluna_dupla.Desfechos(
+        2, 0, {}, ambiguo,
+        {("", "tests.test_x"): ("tests/test_x.py::tests.test_x", "ImportError: x")}, {})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_INTERROMPIDO, interrompido,
+                                              0, _verde(interrompido))
+    assert codigo == 1
+    assert "interrompida" in relatorio
+    assert "prova FRACA" not in relatorio
 
 
 def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):

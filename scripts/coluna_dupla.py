@@ -19,7 +19,7 @@ Uso:
     # fixture historica: os dois SHAs explicitos (base e merge do PR)
     scripts/coluna_dupla.py --antes d3ff537f --depois c917f1cf
 
-    # o mesmo, num caso que sai prova FRACA: nenhum teste chega a RODAR no antigo
+    # o mesmo, num caso que sai prova FRACA: no antigo o gate nao ve o corpo rodar
     scripts/coluna_dupla.py --antes f95e485 --depois 17f3b49 --testes tests/test_ai_chat_commands.py
 
 O desfecho de cada teste vem do XML do `--junitxml`, lido com a `ElementTree` da
@@ -41,12 +41,16 @@ alcancar as duas colunas (ver `roda_pytest`). Quem o usava para afinar as
 corridas internas do gate perde isso — de proposito: opcao herdada muda QUANTOS
 testes rodam, e um ALVO posto ali entrava antes do `--` e virava prova falsa.
 
-Limites conhecidos, medidos e DECLARADOS: quase todos abortam ou reprovam. Os
-DOIS que podem virar APROVADO falso sao o alvo de `--testes` que o pytest EXPANDE
-(acidente) e o teste que le o proprio `sys.argv` (ator deliberado); um TERCEIRO,
-de categoria DIFERENTE, APROVA com o veredito certo e a NOTA inflada (a ultima
-celula) — a lista nao esta em ordem de gravidade, entao eles vao nomeados. Nao
-valem conserto enquanto nao aparecerem:
+Limites conhecidos, medidos e DECLARADOS. A lista nao esta em ordem de gravidade,
+entao o que mexe no VEREDITO ou na NOTA vai nomeado em tres categorias; as demais
+celulas abortam, reprovam, ou descrevem comportamento deliberado. (a) APROVADO falso,
+DOIS: o alvo de `--testes` que o pytest EXPANDE (acidente) e o teste que le o proprio
+`sys.argv` (ator deliberado). (b) veredito certo com a NOTA INFLADA (FRACA carimbada
+FORTE), DOIS: o `<failure>` que traz uma linha `arquivo:linha:` do proprio caso (item 3
+da celula do traceback) e a ultima celula. (c) veredito certo com a NOTA DEFLACIONADA
+(FORTE legitima rebaixada a FRACA): o item 1 da celula do traceback e os quatro
+gatilhos do item 2 — todos subnotificam, que e a direcao segura escolhida de proposito,
+e nenhum aprova falso. Nao valem conserto enquanto nao aparecerem:
     - `T` (`.py` virou symlink) some do `--diff-filter=AMRD` -> "nada a provar",
       zero na historia; `C` o `git diff` sem `-C` nunca emite (o destino sai `A`);
       `U` o `git diff <sha> <sha>` nunca devolve, e a Guarda 1 ja barra conflito.
@@ -87,20 +91,60 @@ valem conserto enquanto nao aparecerem:
       E o desfecho certo — `xfail` nao e conserto —, mas o relatorio o chama de
       "NAO passou" sem dizer que foi `xfail`; sem irmao passando, o caso nem chega
       ao ramo do orfao: cai no "0 passaram, 1 pularam".
-    - a nota FORTE exige que ALGUM vermelho tenha `<failure>`, nao que o teste DO
-      FIX tenha falhado. Medido: o teste do fix erra na fixture no antigo e um
-      irmao pre-existente falha -> `APROVADO, prova FORTE` citando o IRMAO; sem o
-      irmao o mesmo caso sairia FRACA, que e o caminho onde o Manager decide se
-      aceita. O veredito se sustenta (o irmao foi vermelho->verde sob o fix, e
-      evidencia legitima); o que se perde e o significado de FORTE, que deixa de
-      implicar "o teste que voce escreveu rodou e falhou". NAO e consertavel: o
-      overlay copia o teste novo para dentro da coluna antiga, entao as duas
-      colunas coletam nodeids IDENTICOS por construcao (medido: DEPOIS - ANTES =
-      []) e o gate nao tem como saber qual e o teste do PR. O que o operador
+    - `<failure>` x `<error>` e a FASE (`report.when == "call"`,
+      `_pytest/junitxml.py`), nao "o corpo rodou": hook de `pytest_runtest_call`
+      que estoure ANTES do corpo sai `<failure>`. Fechado pelo traceback — so vira
+      FORTE se algum frame for do ARQUIVO do proprio caso (`file=`), em QUALQUER
+      posicao e nao no fim: o corpo que chama producao que estoura termina em
+      `lib.py:2:` e e o vermelho legitimo do #182. Sobra, medido: (1)
+      `--tb=no|line|native` apaga os frames e TUDO vira FRACA — subnotifica, nunca
+      aprova falso; zero alcancavel (nenhum `addopts` no repo, `PYTEST_ADDOPTS`
+      zerado). (2) FORTE legitima REBAIXADA a FRACA, quatro gatilhos, cada um com ZERO
+      ocorrencias quando isto foi escrito — os comandos abaixo remedem; o `--exclude`
+      tira as auto-mencoes deste arquivo. O `.` final NAO e enfeite: sem operando de
+      caminho o grep do macOS le STDIN, e colado num shell ele trava — ou, com stdin
+      fechado, devolve `0` para qualquer arvore. (a) `__tracebackhide__` no corpo
+      esconde o proprio frame:
+          grep -rn "__tracebackhide__" --include="*.py" --exclude=coluna_dupla.py .
+      (b) `os.chdir` / `monkeypatch.chdir` no corpo ou em fixture `autouse` muda a base
+      do caminho do frame — e o `monkeypatch` NAO salva: o repr e montado na fase call,
+      antes do teardown que restaura:
+          grep -rn "chdir" --include="*.py" --exclude=coluna_dupla.py .
+      (c) um `pytest.ini`/`setup.cfg`/`tox.ini`/`pyproject.toml` dentro de `tests/`
+      desloca o rootdir e derruba a CATEGORIA INTEIRA de uma vez (zero rastreados e
+      zero nao rastreados em `tests/`). (d) `pytest.fail(msg, pytrace=False)`, que nao
+      emite traceback nenhum:
+          grep -rn "pytrace" --include="*.py" --exclude=coluna_dupla.py .
+      O (b) e o (c) tem UMA raiz: o `file=` do `<testcase>` e `bestrelpath` contra o
+      ROOTDIR e o caminho do frame e `bestrelpath` contra o CWD — duas bases que so
+      coincidem por acidente. Quem monta a segunda e o `FormattedExcinfo._makepath`,
+      em `_pytest/_code/code.py`; a linha dele muda com a versao do pytest, entao ela
+      nao fica escrita aqui:
+          grep -n "def _makepath" .venv/lib/python*/site-packages/_pytest/_code/code.py
+      (3) FRACA carimbada FORTE, e NAO exige ma-fe: basta o
+      texto do `<failure>` trazer em coluna 0 uma linha `arquivo:linha: motivo` com o
+      `file=` do proprio caso. `pytest.fail(msg, pytrace=False)` poe a MENSAGEM CRUA no
+      `longrepr` — nao passa pelo `get_exconly`, entao nao recebe o `E   ` que a
+      indentaria —, e um hook de `pytest_runtest_call` que reporte nesse formato
+      universal sai `APROVADO, prova FORTE` com o corpo NUNCA chamado (medido: um
+      `<failure>` de duas linhas, `boom` e `tests/test_valor.py:1: forjado`, sai FORTE).
+      Nao da para fechar no codigo: a mensagem e texto arbitrario, e separar forjado de
+      real pediria heuristica fragil.
+    - a nota FORTE exige que ALGUM vermelho tenha `<failure>` COM frame do proprio
+      arquivo, nao que o teste DO FIX tenha falhado. Medido: o teste do fix erra na
+      fixture no antigo e um irmao pre-existente falha -> `APROVADO, prova FORTE`
+      citando o IRMAO; sem o irmao o mesmo caso sairia FRACA, que e o caminho onde o
+      Manager decide se aceita. O veredito se sustenta (o irmao foi vermelho->verde
+      sob o fix, e evidencia legitima); o que se perde e o significado de FORTE, que
+      deixa de implicar "o teste que voce escreveu rodou e falhou". NAO e
+      consertavel: o overlay copia o teste novo para dentro da coluna antiga, entao
+      as duas colunas coletam nodeids IDENTICOS por construcao (medido: DEPOIS -
+      ANTES = []) e o gate nao tem como saber qual e o teste do PR. O que o operador
       recebe e a CONTAGEM da linha do FORTE (`N teste(s) RODARAM e falharam`),
-      sempre impressa e confrontavel com o unico nodeid citado; o `(e mais N que
-      nem chegaram a rodar)` so entra quando houve `<error>` — e o caso medido
-      acima, mas com dois `<failure>` e zero `<error>` ele nao sai.
+      sempre impressa e confrontavel com o unico nodeid citado; o `(e mais N ...)` so
+      entra quando ha vermelho FORA de `falhados` — `<failure>` sem frame do arquivo do
+      caso ou `<error>` —, e ele nomeia os dois separadamente; com dois `<failure>` COM
+      frame e nada mais, ele nao sai.
 """
 from __future__ import annotations
 
@@ -137,19 +181,35 @@ def raiz_principal() -> str:
 class Desfechos(NamedTuple):
     """O que o XML de uma coluna diz. Registro, nao camada — sem metodos.
 
-    `falhados` e `errados` sao `{(classname, name): (nodeid, causa)}` e `passados`
-    e `{(classname, name): nodeid}`: a chave e a identidade que PAREIA as duas
-    colunas — unica mesmo com classe, que o nome sozinho nao e —, e o valor
-    carrega o que entra no relatorio.
+    Os TRES baldes de vermelho sao `{(classname, name): (nodeid, causa)}` e
+    `passados` e `{(classname, name): nodeid}`: a chave e a identidade que PAREIA as
+    duas colunas — unica mesmo com classe, que o nome sozinho nao e —, e o valor
+    carrega o que entra no relatorio. Sao tres porque o gate sabe TRES coisas
+    diferentes, e imprimir a mesma frase para duas delas ja saiu falso:
+      - `falhados`: `<failure>` COM frame do arquivo do caso — o corpo rodou.
+      - `ambiguos`: `<failure>` SEM esse frame — pode ter rodado (item 2 da celula
+        do traceback) ou nao (hook de fase call); o gate NAO distingue.
+      - `errados`: `<error>`, ou seja, fase != call. So em coleta e setup isso
+        implica corpo nao executado: no TEARDOWN o corpo ja rodou. Medido (pytest
+        9.0.2, `junit_family=xunit1`): fixture `yield` que estoura no teardown sai
+        um `<testcase>` com SO `<error>`, `message='failed on teardown with "..."'`,
+        com o corpo executado e PASSADO.
 
     Os contadores saem dos `<testcase>`, nao dos atributos do `<testsuite>`: o
     cabecalho conta DUAS vezes o caso com `<failure>` E `<error>` (falhou no corpo,
     estourou no teardown), e o `int()` de um atributo forjado (`tests="abc"`)
-    estourava `ValueError` numa funcao que promete `None`.
+    estourava `ValueError` numa funcao que promete `None`. Esse caso sai em DOIS
+    `<testcase>` com a MESMA chave, e conta em dois baldes — aqui tambem.
+
+    E o teste que PASSA e estoura no teardown nao entra em `passados` (o
+    `<testcase>` dele tem `<error>`): na coluna verde ele vira orfao e o gate
+    REPROVA. Falha fechada, e a direcao certa — a coluna corrigida com fixture
+    quebrando nao provou conserto nenhum.
     """
     total: int
     pulados: int
     falhados: dict
+    ambiguos: dict
     errados: dict
     passados: dict
 
@@ -172,7 +232,7 @@ def le_junit(caminho: str) -> Desfechos | None:
         return None
 
     total = pulados = 0
-    falhados, errados, passados = {}, {}, {}
+    falhados, ambiguos, errados, passados = {}, {}, {}, {}
     for caso in suite.iter("testcase"):
         total += 1
         chave = (caso.get("classname", ""), caso.get("name", ""))
@@ -191,10 +251,21 @@ def le_junit(caminho: str) -> Desfechos | None:
             continue
         # A causa e a primeira linha `E ` do corpo, com o `message` de reserva: e o
         # que faltava na citacao de coleta, que saia sem dizer o que quebrou.
-        causa = next((l[1:].strip() for l in (no.text or "").splitlines() if l.startswith("E ")),
+        texto = no.text or ""
+        causa = next((l[1:].strip() for l in texto.splitlines() if l.startswith("E ")),
                      no.get("message", "")).strip()
-        (falhados if falha is not None else errados)[chave] = (nodeid, causa)
-    return Desfechos(total, pulados, falhados, errados, passados)
+        # A TAG e a FASE (`report.when == "call"`, `_pytest/junitxml.py`), nao "o corpo rodou":
+        # hook de `pytest_runtest_call` que estoure ANTES do corpo tambem sai `<failure>`. Quem
+        # separa e o traceback — frame do ARQUIVO do caso em QUALQUER posicao, nao no fim: o
+        # corpo que chama producao que estoura termina em `lib.py:2:` e e vermelho legitimo.
+        # Sem `file` o prefixo vira `":"`, que frame nenhum casa: fechado por construcao.
+        quadro = f"{caso.get('file') or ''}:"
+        rodou = falha is not None and any(l.startswith(quadro) for l in texto.splitlines())
+        # Tres estados, nao dois: `<error>` (fase != call) e `<failure>` sem frame nao
+        # sao a mesma coisa e nao podem imprimir a mesma frase.
+        destino = falhados if rodou else (ambiguos if falha is not None else errados)
+        destino[chave] = (nodeid, causa)
+    return Desfechos(total, pulados, falhados, ambiguos, errados, passados)
 
 
 def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str) -> tuple[int, Desfechos | None]:
@@ -259,9 +330,13 @@ def veredito(rc_antes: int, antes: Desfechos | None,
     # tambem usa esse codigo, e no JUnit ela e reconhecivel: so existem `<error>`
     # impareaveis, com `classname` vazio; nenhum teste passou nem falhou no corpo.
     # Se uma falha vier antes de KeyboardInterrupt, o XML parcial preserva essa
-    # `<failure>` — sem esta guarda o gate carimbava FORTE uma coluna incompleta.
+    # `<failure>` — sem esta guarda o gate carimbava FORTE uma coluna incompleta. O
+    # `ambiguos` entra na condicao pelo mesmo motivo que o `falhados`: uma coluna
+    # interrompida com um `pytest.fail(pytrace=False)` ao lado dos erros de coleta
+    # nao e coleta pura, e sem a clausula ela passaria pela guarda.
     if rc_antes == PYTEST_INTERROMPIDO:
-        coleta_pura = (bool(antes.errados) and not antes.falhados and not antes.passados
+        coleta_pura = (bool(antes.errados) and not antes.falhados and not antes.ambiguos
+                       and not antes.passados
                        and all(not chave[0] for chave in antes.errados))
         if not coleta_pura:
             return 1, ("REPROVADO: a coluna antiga foi interrompida (rc=2).\n"
@@ -296,7 +371,7 @@ def veredito(rc_antes: int, antes: Desfechos | None,
     # pacote, iguais nas duas colunas), vale igual nos dois lados — o teste pulado
     # no verde tambem foi pulado no vermelho, e quem foi pulado nunca fica
     # vermelho para comecar.
-    vermelhos = {**antes.falhados, **antes.errados}
+    vermelhos = {**antes.falhados, **antes.ambiguos, **antes.errados}
     orfaos = sorted(nodeid for chave, (nodeid, _) in vermelhos.items()
                     if chave[0] and chave not in depois.passados)
     if not depois.passados or orfaos:
@@ -318,32 +393,55 @@ def veredito(rc_antes: int, antes: Desfechos | None,
 
     # Prova FORTE = algum teste RODOU e falhou no codigo antigo. Nao e o tipo da
     # excecao que decide (o #182 tinha vermelho legitimo por ValueError, zero
-    # asserções): e se o corpo do teste chegou a executar. `<failure>` = executou e
-    # explodiu; `<error>` = nunca rodou (coleta, setup, fixture ou teardown), e ai
-    # o vermelho so prova que o ambiente nao montou. Medido: erro de fixture sai
-    # rc=1 com `<error>` e ZERO `<failure>` — igual ao rc=2 da coleta.
+    # asserções): e se o corpo do teste chegou a executar. A TAG do JUnit nao diz
+    # isso — ela e a FASE (`report.when == "call"`), e um hook de fase call que
+    # estoure ANTES do corpo tambem sai `<failure>`. Quem separa e o frame do
+    # proprio arquivo do caso no traceback (ver `le_junit`); sem ele o `<failure>`
+    # cai em `ambiguos`, onde o gate NAO sabe se o corpo rodou. O `<error>` e outro
+    # balde: fase != call. So em COLETA e SETUP ele prova que o ambiente nao montou
+    # — no TEARDOWN o corpo ja rodou. Medido: erro de fixture sai rc=1 com `<error>`
+    # e ZERO `<failure>` — igual ao rc=2 da coleta.
     # A citacao sai do proprio conjunto vermelho: depois da varredura acima, todo
     # vermelho pareavel PASSOU no corrigido. Isso NAO garante que o citado seja o
     # teste do PR — um irmao pre-existente pode carregar a nota sozinho (ultima
     # celula dos limites, no topo do arquivo).
     if antes.falhados:
         nodeid, causa = next(iter(antes.falhados.values()))
-        extra = f" (e mais {len(antes.errados)} que nem chegaram a rodar)" if antes.errados else ""
+        # Chamar de nao-rodado tudo o que nao e `<failure>` COM frame era falso nos
+        # dois baldes: o `<failure>` sem frame pode ter rodado, e o `<error>` de
+        # teardown rodou. Cada um sai nomeado e contado.
+        restos = [f"{len(m)} {rotulo}" for m, rotulo in
+                  ((antes.ambiguos, "com <failure> sem frame do arquivo do caso"),
+                   (antes.errados, "com <error> fora da fase call")) if m]
+        extra = f" (e mais {' e '.join(restos)})" if restos else ""
         return 0, (f"APROVADO, prova FORTE: {len(antes.falhados)} teste(s) RODARAM e falharam no codigo\n"
                    f"               antigo{extra}; o grupo fica verde no corrigido.\n"
                    f"               {nodeid} - {causa}")
-    # Aqui `antes.errados` e nao-vazio por construcao: o ramo da falha fechada ja
-    # devolveu quando os dois mapas estavam vazios. A frase e sobre os VERMELHOS, e
-    # nao sobre o grupo: dizer "NENHUM teste chegou a RODAR" era falso sempre que a
-    # coluna antiga tinha teste passando ao lado do que errou — e e esta a linha
-    # que o Manager le para decidir se aceita prova fraca.
-    nodeid, causa = next(iter(antes.errados.values()))
-    return 0, (f"APROVADO, prova FRACA: nenhum dos {len(antes.errados)} teste(s) VERMELHOS chegou a\n"
-               f"               RODAR no codigo antigo ({len(antes.passados)} passado(s) ao lado) —\n"
-               "               coleta, setup ou fixture quebrou antes do corpo do teste.\n"
+    # Aqui `ambiguos` ou `errados` e nao-vazio por construcao: o ramo da falha
+    # fechada ja devolveu quando os tres mapas estavam vazios. A frase e sobre os
+    # VERMELHOS, e nao sobre o grupo: dizer "NENHUM teste chegou a RODAR" era falso
+    # sempre que a coluna antiga tinha teste passando ao lado do que errou — e e esta
+    # a linha que o Manager le para decidir se aceita prova fraca.
+    # O cabecalho e a afirmacao mais fraca que vale nos DOIS baldes ("o gate nao viu
+    # o corpo rodar"), e cada balde presente ganha a sua linha: sao coisas diferentes,
+    # e a versao que os fundia dizia "o corpo nem chegou a rodar" de um `<error>` de
+    # TEARDOWN, onde o corpo rodou e passou. Um grupo so-`<error>` nao fala de frame
+    # nem de traceback: o gate nao olhou traceback nenhum dele.
+    sobrando = {**antes.ambiguos, **antes.errados}
+    nodeid, causa = next(iter(sobrando.values()))
+    detalhe = ""
+    if antes.ambiguos:
+        detalhe += (f"               {len(antes.ambiguos)} com <failure> e SEM frame do arquivo do caso no traceback: pode ter\n"
+                    "               rodado (pytrace=False, chdir, --tb=no, rootdir deslocado) ou nao (hook\n"
+                    "               de fase call) — o gate nao distingue.\n")
+    if antes.errados:
+        detalhe += (f"               {len(antes.errados)} com <error>, ou seja, fora da fase call: em coleta e setup o corpo\n"
+                    "               NAO rodou; no teardown ele rodou (o gate nao separa os tres).\n")
+    return 0, (f"APROVADO, prova FRACA: em nenhum dos {len(sobrando)} teste(s) VERMELHOS o gate viu o corpo do\n"
+               f"               teste rodar ({len(antes.passados)} passado(s) ao lado). E so isso que ele sabe:\n"
+               f"{detalhe}"
                f"               {nodeid} - {causa}\n"
-               "               Isso prova que o ambiente nao montou, nao que o comportamento\n"
-               "               antigo estava errado. O Manager decide se aceita.")
+               "               O Manager decide se aceita.")
 
 
 def main() -> int:
