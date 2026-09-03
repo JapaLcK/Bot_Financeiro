@@ -69,15 +69,17 @@ def _sub_pago(status="active", *, unit_amount=1990, metadata=None, days=30) -> d
     return sub
 
 
-def _evento_checkout(uid: int, *, session_id="cs_ga4_1", metadata=None) -> dict:
-    return {
-        "type": "checkout.session.completed",
-        "data": {"object": {
-            "id": session_id,
-            "metadata": {"finbot_user_id": str(uid), **(metadata or {})},
-            "subscription": "sub_ga4",
-        }},
+def _evento_checkout(uid: int, *, session_id="cs_ga4_1", metadata=None,
+                     amount_total=None, currency="brl") -> dict:
+    obj = {
+        "id": session_id,
+        "metadata": {"finbot_user_id": str(uid), **(metadata or {})},
+        "subscription": "sub_ga4",
     }
+    if amount_total is not None:
+        obj["amount_total"] = amount_total
+        obj["currency"] = currency
+    return {"type": "checkout.session.completed", "data": {"object": obj}}
 
 
 def _evento_fatura(uid: int, *, invoice_id, billing_reason, amount_paid=1990) -> dict:
@@ -136,6 +138,65 @@ def test_sem_client_id_a_venda_nao_se_perde(user_id, monkeypatch):
         corpo, evento = captura.unico()
         assert corpo["client_id"] == f"pb-{uid}"
         assert evento["params"]["value"] == 19.90
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_cupom_manda_o_valor_pago_e_nao_o_de_tabela(user_id, monkeypatch):
+    """Este checkout aceita cupom (`allow_promotion_codes=True`). O `unit_amount`
+    do plano ignora o desconto; o `amount_total` da sessão não. Mandar o de
+    tabela infla a receita — e o relatório não avisa (Codex, #244)."""
+    uid, client, fake = _setup(monkeypatch, f"ga4-cup-{user_id}")
+    captura = _ligar_ga4(monkeypatch)
+    try:
+        _post(
+            client, fake,
+            # plano de R$ 19,90 com cupom: pagou R$ 9,90
+            _evento_checkout(uid, amount_total=990),
+            subs={"sub_ga4": _sub_pago("active", unit_amount=1990)},
+        )
+        _, evento = captura.unico()
+        assert evento["params"]["value"] == 9.90
+        assert evento["params"]["items"][0]["price"] == 9.90
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_cupom_de_cem_por_cento_registra_zero_e_nao_o_preco_cheio(user_id, monkeypatch):
+    """Zero é resposta legítima, não campo ausente — por isso o código testa
+    `is None` e não falsy. Com o teste errado, a compra de graça viraria receita
+    de preço cheio."""
+    uid, client, fake = _setup(monkeypatch, f"ga4-cup0-{user_id}")
+    captura = _ligar_ga4(monkeypatch)
+    try:
+        _post(
+            client, fake,
+            _evento_checkout(uid, amount_total=0),
+            subs={"sub_ga4": _sub_pago("active", unit_amount=1990)},
+        )
+        _, evento = captura.unico()
+        assert evento["params"]["value"] == 0
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_item_usa_o_nome_publico_do_plano(user_id, monkeypatch):
+    """O `begin_checkout` do navegador manda 'plus'; o banco chama esse tier de
+    'pro' por legado (e o Pro de 'pro_max'). Mandar o nome do banco aqui faria o
+    GA4 tratar checkout e compra como produtos diferentes — e colidiria Plus com
+    Pro no mesmo id 'pro' (Codex, #244)."""
+    uid, client, fake = _setup(monkeypatch, f"ga4-pl-{user_id}")
+    captura = _ligar_ga4(monkeypatch)
+    try:
+        _post(
+            client, fake,
+            _evento_checkout(uid, metadata={"plan": "plus"}, amount_total=1990),
+            subs={"sub_ga4": _sub_pago("active", metadata={"plan": "plus"})},
+        )
+        _, evento = captura.unico()
+        # price_ga4 é desconhecido → _stored_plan_for_price devolve 'pro'. O item
+        # tem de sair 'plus' mesmo assim.
+        assert evento["params"]["items"][0]["item_id"] == "plus"
     finally:
         _cleanup_trial(uid)
 

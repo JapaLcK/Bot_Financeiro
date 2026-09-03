@@ -65,6 +65,18 @@ META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
 # o site sem rastreio, como o pixel já fazia.
 GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
 
+# Parâmetros de query que NUNCA podem viajar dentro do `page_location` do GA4:
+#   token — é credencial. `/completar-cadastro?token=` (cadastro via Google) e o
+#           `/unsubscribe?token=` do rodapé de todo e-mail são páginas rastreadas;
+#           sem esta limpeza o token inteiro ia pro Google.
+#   sid    — a sessão de checkout do Stripe, na volta pro /home?upgrade=success.
+#           Não é segredo, mas é única por compra: cada venda viraria uma "página"
+#           diferente no relatório.
+# A limpeza tem de ser AQUI e não na página: o page_view automático sai junto com
+# o `config`, no <head>, e o JS que apaga a query (home.html, `replaceState`) só
+# roda depois — quando o evento já foi enviado.
+GA4_PARAMS_FORA_DA_URL = ("token", "sid")
+
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -117,7 +129,16 @@ def ga4_snippet() -> str:
         "window.dataLayer = window.dataLayer || [];\n"
         "function gtag(){dataLayer.push(arguments);}\n"
         "gtag('js', new Date());\n"
-        f"gtag('config', '{mid}');\n"
+        "(function(){\n"
+        "  var cfg = {};\n"
+        "  try {\n"
+        "    var u = new URL(location.href);\n"
+        f"    {json.dumps(list(GA4_PARAMS_FORA_DA_URL))}.forEach(function(p)"
+        "{ u.searchParams.delete(p); });\n"
+        "    cfg.page_location = u.href;\n"
+        "  } catch (e) { /* URL exótica: manda sem page_location, nunca sem evento */ }\n"
+        f"  gtag('config', '{mid}', cfg);\n"
+        "})();\n"
         "</script>\n"
         "<!-- End Google Analytics -->\n"
     )

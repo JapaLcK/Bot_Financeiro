@@ -4575,6 +4575,21 @@ async def billing_webhook(request: Request):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
+    def _ga_plano_publico(*objetos) -> str | None:
+        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro'), do metadata do Stripe.
+
+        É o mesmo identificador que o `begin_checkout` manda do navegador.
+        `_stored_plan_for_price` devolve o valor do BANCO, onde Plus é 'pro' por
+        legado e Pro é 'pro_max' — usar aquele no item do GA4 faria checkout e
+        compra virarem produtos diferentes, e ainda colidiria Plus com Pro
+        (Codex, #244). Assinatura antiga, sem o campo, cai no valor do banco.
+        """
+        for obj in objetos:
+            valor = _g(_g(obj, "metadata", {}), "plan")
+            if valor:
+                return valor
+        return None
+
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
         if sub_id:
@@ -4709,7 +4724,18 @@ async def billing_webhook(request: Request):
                 )
                 _ga_sid = _g(session, "id")
                 if mp_configured() and _ga_sid and sub_status != "trialing":
-                    _ga_value, _ga_currency = _subscription_amount(sub)
+                    # Valor REALMENTE cobrado: `amount_total` da sessão já vem
+                    # com cupom aplicado, e o `unit_amount` do plano não — este
+                    # checkout aceita cupom (`allow_promotion_codes=True`), então
+                    # o preço de tabela superestimaria a receita (Codex, #244).
+                    # Zero é resposta legítima (cupom de 100%): o teste é
+                    # `is None`, não falsy. Sem o campo, cai no valor do plano.
+                    _ga_total = _g(session, "amount_total")
+                    if _ga_total is None:
+                        _ga_value, _ga_currency = _subscription_amount(sub)
+                    else:
+                        _ga_value = float(_ga_total) / 100.0
+                        _ga_currency = (_g(session, "currency") or "brl").upper()
                     # O client_id foi gravado no metadata na criação do checkout
                     # (/billing/create-checkout). Sem ele a venda ainda entra, como
                     # usuário novo sem origem — ver fallback_client_id.
@@ -4724,7 +4750,7 @@ async def billing_webhook(request: Request):
                         transaction_id=_ga_sid,
                         value=_ga_value,
                         currency=_ga_currency,
-                        plan=plan_value,
+                        plan=_ga_plano_publico(sub, session) or plan_value,
                         client_id=_ga_cid,
                         user_id=user_id,
                     )
@@ -4841,7 +4867,7 @@ async def billing_webhook(request: Request):
                             transaction_id=_ga_inv,
                             value=amount_brl,
                             currency=(_g(invoice, "currency") or "brl").upper(),
-                            plan=plan_value,
+                            plan=_ga_plano_publico(sub) or plan_value,
                             client_id=_ga_cid,
                             user_id=user_id,
                         )

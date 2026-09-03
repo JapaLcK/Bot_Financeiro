@@ -13,8 +13,13 @@ lembrou de listar.
 """
 
 import ast
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from frontend.routes import shared
 
@@ -124,6 +129,53 @@ def test_paginas_do_funil_nao_sao_servidas_com_pixel_false():
 
     conflito = _paginas_que_disparam_evento() & sem_rastreio
     assert not conflito, f"páginas disparam evento mas são servidas sem rastreio: {conflito}"
+
+
+def _config_do_snippet(url: str) -> dict:
+    """Roda o snippet REAL (saída de `ga4_snippet`) no node, com `location`
+    falsa, e devolve o 3º argumento do `gtag('config', ...)`.
+
+    Executa o código em vez de procurar texto nele: o que interessa é o que o
+    navegador manda pro Google, não o que está escrito no Python.
+    """
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node não disponível nesta máquina")
+    inline = shared.ga4_snippet().split("<script>", 1)[1].split("</script>", 1)[0]
+    programa = (
+        "global.window = global;\n"
+        f"global.location = {{ href: {json.dumps(url)} }};\n"
+        f"{inline}\n"
+        "const cfg = dataLayer.map(a => Array.from(a)).filter(a => a[0] === 'config').pop();\n"
+        "console.log(JSON.stringify(cfg));\n"
+    )
+    saida = subprocess.run([node, "-e", programa], capture_output=True, text=True, timeout=30)
+    assert saida.returncode == 0, saida.stderr
+    return json.loads(saida.stdout)[2]
+
+
+def test_page_view_nao_leva_token_nem_id_de_transacao(monkeypatch):
+    """O page_view automático sai junto com o `config`, no <head> — ANTES de
+    qualquer JS da página limpar a URL. Sem esta limpeza, o `token` do
+    /completar-cadastro (uma credencial) e o `sid` da sessão do Stripe iriam
+    inteiros pro Google, e cada compra viraria uma "página" diferente."""
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", _ID_FALSO)
+
+    cfg = _config_do_snippet(
+        "https://pigbankai.com/home?upgrade=success&sid=cs_test_123&ev=purchase&pl=plus")
+    assert "cs_test_123" not in cfg["page_location"]
+    assert "sid=" not in cfg["page_location"]
+    # O resto da query SOBREVIVE: sem isto, a limpeza podia estar apagando tudo
+    # (inclusive o que separa a volta do checkout de um /home comum).
+    assert "upgrade=success" in cfg["page_location"]
+    assert "ev=purchase" in cfg["page_location"]
+
+    cfg = _config_do_snippet("https://pigbankai.com/completar-cadastro?token=SEGREDO-123")
+    assert "SEGREDO-123" not in cfg["page_location"]
+
+    # Página sem query nenhuma continua com a URL inteira.
+    cfg = _config_do_snippet("https://pigbankai.com/precos")
+    assert cfg["page_location"] == "https://pigbankai.com/precos"
 
 
 def test_csp_libera_o_host_do_gtag():
