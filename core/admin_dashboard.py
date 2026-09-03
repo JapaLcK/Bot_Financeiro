@@ -661,6 +661,11 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                    OR event_type LIKE 'billing_%'
                    OR event_type LIKE 'engagement_%'
                    OR event_type = 'http_unhandled_exception'
+                   -- toda falha do `_log_falha` (`core/observability.py`), que
+                   -- loga `logger.error` com `source` = o logger dele: as 2 rotas
+                   -- de `cards.py` e os 12 ERROR das portas de conversa
+                   -- (`core/handlers/`). O `source` separa isso de terceiros.
+                   OR (event_type = 'logger.error' AND source = 'core.observability')
                 ORDER BY created_at DESC
                 LIMIT 25
                 """

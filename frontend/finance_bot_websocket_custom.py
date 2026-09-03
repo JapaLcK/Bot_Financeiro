@@ -102,7 +102,11 @@ from db import (
     update_credit_transaction_fields,
     undo_credit_transaction,
     delete_launch_and_rollback,
+    LaunchNoEffects,
+    InvestmentLotHasWithdrawal,
+    LaunchUnsafeRollback,
 )
+from core.observability import _log_falha, get_logger
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
@@ -143,6 +147,26 @@ from frontend.routes.shared import (
 from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
+
+# Instala o `_DashboardHandler` no logger RAIZ deste processo — é o que leva
+# WARNING/ERROR (inclusive os `_log_falha` das rotas destrutivas) ao
+# `system_event_logs` e ao `backend_errors_24h` do admin. Aqui e não em
+# `core/observability.py` porque aquele é módulo de BIBLIOTECA: 23 módulos de
+# `adapters/`, `core/` e `frontend/` o importam, mais o
+# `scripts/account_deletion_job.py`. Configurar o root logger no import dele
+# daria INFO no stderr e um handler que escreve no banco a qualquer script.
+# Este módulo é choke point único: os três entrypoints ASGI (`launch.py:28`,
+# `dashboard_dev.py:87` e o `__main__` abaixo) sobem `…custom:app`, e o import
+# roda antes do lifespan e de qualquer requisição. Antes disso, o PRIMEIRO a
+# instalar era o import tardio da cadeia do WhatsApp no `_wa_worker` — que só
+# acontece com RUN_BACKGROUND_TASKS=1, então com RUN_BACKGROUND_TASKS=0 ninguém
+# instalava e a falha de operação destrutiva só saía no stderr.
+# Efeito colateral aceito: o `dashboard_dev.py` (que força RUN_BACKGROUND_TASKS=0)
+# passa a imprimir INFO no stderr e a gravar `system_event_logs` no banco de dev
+# — inclusive WARNING/ERROR de TERCEIROS, que passam a contar em
+# `backend_errors_24h` (medido: `source=asyncio | logger.error`, do event loop do
+# uvicorn). Com RUN_BACKGROUND_TASKS=1 (produção) já era assim; muda só o dev.
+get_logger(__name__)
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
@@ -5564,6 +5588,28 @@ async def update_launch_route(
     }
 
 
+# Frase por condição de domínio de `delete_launch_and_rollback`. O `detail` da
+# HTTPException vira texto na tela (`frontend/dashboard.js` faz
+# `throw new Error(detail.detail)`), então nada de `str(exc)`: jargão de banco
+# ("efeitos") e texto de driver não são mensagem de produto.
+_MSG_DELETE_LAUNCH = {
+    LaunchNoEffects: (
+        "Esse lançamento é antigo e não guarda o que precisaria ser revertido, "
+        "então mantive ele intacto pra não bagunçar seu saldo."
+    ),
+    InvestmentLotHasWithdrawal: (
+        "Não dá pra desfazer esse aporte: o lote já teve resgate. Apague o "
+        "resgate primeiro."
+    ),
+    LaunchUnsafeRollback: (
+        "Não consigo reverter esse lançamento com segurança, então mantive ele "
+        "intacto pra não bagunçar seu saldo."
+    ),
+}
+
+_ERRO_APAGAR_HTTP = "Não consegui apagar agora — deu erro do meu lado. Tenta de novo em alguns minutos."
+
+
 @app.delete("/launches/{user_id}/{launch_id}")
 async def delete_launch_route(
     request: Request,
@@ -5581,10 +5627,35 @@ async def delete_launch_route(
         await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
     except LookupError:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except tuple(_MSG_DELETE_LAUNCH) as exc:
+        # `tuple(...)` do próprio dict: o `except` e as frases não podem
+        # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
+        # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
+        # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
+        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
+        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
+        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                nivel=logging.WARNING, launch_id=int(launch_id))
+        # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
+        # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
+        # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
+        frase = next(m for c, m in _MSG_DELETE_LAUNCH.items() if isinstance(exc, c))
+        raise HTTPException(status_code=400, detail=frase) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar lançamento: {exc}") from exc
+        # `f"...{exc}"` num caminho DESTRUTIVO vazava o texto do psycopg
+        # (`DETAIL: Key (…)=(…)`) pro modal, e não deixava log nenhum. SEM
+        # traceback de propósito (medido em duas colunas): na `main` esta rota
+        # já levantava `HTTPException(500, f"Erro ao apagar…")`, e o
+        # `admin_error_logging_middleware` faz `except HTTPException: raise` —
+        # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
+        # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
+        # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
+        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
+        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                launch_id=int(launch_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": int(launch_id)}
@@ -5670,7 +5741,12 @@ async def delete_credit_transaction_route(
     try:
         result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar compra: {exc}") from exc
+        # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
+        # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
+        # middleware deixa passar — nunca houve pilha gravada aqui para manter.
+        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
+                                credit_tx_id=int(tx_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:
         raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")

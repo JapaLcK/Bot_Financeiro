@@ -189,7 +189,9 @@ _ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o proble
 
 _error_template: str | None = None
 # Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
-# processo web o root logger carrega o _DashboardHandler (core/observability.py:23),
+# processo web o root logger carrega o _DashboardHandler (core/observability.py:23)
+# — instalado no import de frontend/finance_bot_websocket_custom.py, então vale
+# também com RUN_BACKGROUND_TASKS=0 —,
 # que faz psycopg.connect() + INSERT bloqueante dentro do event loop — um connect
 # por registro. Medido aqui, chamando logging.warning() em série com e sem o
 # handler, contra o Postgres em localhost: 11,3 ms na 1ª chamada, 3,7 ms/chamada
