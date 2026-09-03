@@ -56,6 +56,24 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     .plan-solo { padding: 32px 22px 26px; }
     .plan-solo-amount { font-size: 2.6rem; }
   }
+
+  /* ── VSL: vídeo obrigatório antes do cadastro ─────────────────────────
+     O portão em si é JS (busque "vsl-gate" no fim do arquivo). Aqui só o
+     que ele precisa poder mostrar: o quadro do vídeo e o CTA travado. */
+  .vsl-frame {
+    max-width: 860px; margin: 0 auto; overflow: hidden;
+    border: 1px solid rgba(255,45,142,.35);
+    border-radius: var(--radius-lg);
+    background: var(--bg-inset);
+    box-shadow: 0 24px 60px rgba(255,45,142,.16);
+  }
+  .vsl-video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
+  .vsl-status { margin: 16px auto 0; text-align: center; color: var(--text-muted); font-size: .9rem; }
+  .vsl-status.is-ok { color: var(--pig-neon); }
+  .vsl-status.is-alerta { color: var(--pig-pink); font-weight: 600; }
+  /* Travado fica VISÍVEL e legível de propósito: CTA que some deixa a pessoa
+     procurando o botão em vez de assistir ao vídeo. */
+  .btn.is-locked { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
 </style>
 <script src="/safe-area.js?v=1"></script>
 </head>
@@ -155,6 +173,31 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ─── VSL ──────────────────────────────────────────────────── -->
+    <section class="section" id="vsl">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Assista antes de começar</div>
+        <h2>Em 1 minuto você entende<br><span class="grad">tudo que a Piggy faz</span></h2>
+      </div>
+      <div class="vsl-frame" data-reveal>
+        <!-- `src` direto, sem <source>: com o `type` no <source> o navegador
+             filtra o candidato ANTES de buscar, e um navegador que reporta
+             mp4 como "maybe not" nem tenta. Aqui ele busca e decide pelo
+             conteúdo — e o que não tocar cai no `error`, que ABRE o portão.
+             O ?v= é manual: /brand/ serve com cache immutable de 1 ano, e o
+             stamper de conteúdo do serve-time só reescreve css/js. Trocou o
+             vídeo, sobe o número. -->
+        <!-- Sem <track>: o vídeo tem legenda QUEIMADA na imagem, e apontar
+             pra um .vtt que não existe só renderia um 404 por visita. Se um
+             dia houver o arquivo, o <track> volta e o `.vtt` volta pro
+             _BRAND_MEDIA de frontend/routes/static_pages.py. -->
+        <video id="vsl-video" class="vsl-video" controls playsinline
+               preload="metadata" poster="/brand/vsl-poster.jpg?v=1"
+               src="/brand/vsl.mp4?v=1"></video>
+      </div>
+      <p class="vsl-status" id="vsl-status" role="status">Assista ao vídeo para liberar o cadastro.</p>
     </section>
 
     <!-- ─── Faixa de valor ────────────────────────────────────────── -->
@@ -715,6 +758,129 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     } else {
       comecar();
     }
+  })();
+  </script>
+  <script>
+  /* ── vsl-gate: o cadastro só destrava depois do vídeo ──────────────────
+     Pedido explícito do dono: assistir é obrigatório e não dá pra pular.
+
+     Isto é portão de PERSUASÃO, não de segurança. /cadastro continua
+     alcançável por URL direta, pelo botão da /precos e pelo nav das outras
+     páginas — quem quiser desviar, desvia. O que ele faz é não deixar o
+     caminho ÓBVIO da landing pular o vídeo.
+
+     Três decisões que não são detalhe:
+     · FALHA ABERTA. Vídeo que não carrega, formato que o navegador não toca,
+       rede caída — libera. Portão que trava por defeito zera o cadastro do
+       dia em silêncio, e quem está do lado de dentro não vê nada.
+     · Rebobinar pode, adiantar não: `seeking` devolve o cursor pro ponto mais
+       longe já assistido. Sem isso, arrastar a barra pro fim vale por assistir.
+     · Uma vez por navegador. Quem assistiu, foi pro /cadastro e voltou não
+       assiste de novo — senão o portão pune justo quem cumpriu.
+
+     O clique é UM handler no documento, não cinco nos botões: os CTAs de
+     /cadastro são 5 hoje (nav, hero, hiw, tech, fim) e o próximo nasce coberto. */
+  (function () {
+    var video  = document.getElementById("vsl-video");
+    var status = document.getElementById("vsl-status");
+    if (!video) return;
+
+    var CHAVE = "pb_vsl_visto";
+    var liberado = false, assistido = 0, marcos = {};
+    // Capturados UMA vez, e guardados como elementos. Reconsultar por
+    // `a[href="/cadastro"]` na hora de liberar era um bug: o nav-auth.js troca
+    // esse href por /app quando a sessão está viva, e aí a consulta não acha
+    // mais nada — os CTAs de quem já tem conta ficariam cinzas para sempre.
+    var alvos = [].slice.call(document.querySelectorAll('a[href="/cadastro"]'));
+
+    function travar() {
+      alvos.forEach(function (a) {
+        a.classList.add("is-locked");
+        a.setAttribute("aria-disabled", "true");
+      });
+    }
+
+    function liberar(motivo) {
+      if (liberado) return;
+      liberado = true;
+      alvos.forEach(function (a) {
+        a.classList.remove("is-locked");
+        a.removeAttribute("aria-disabled");
+      });
+      if (status) {
+        status.textContent = "Cadastro liberado. É só clicar em começar.";
+        status.className = "vsl-status is-ok";
+      }
+      // Só "assistiu" vira memória. "erro" não: um tropeço de rede não pode
+      // desligar o portão naquele navegador para sempre. "logado" também não:
+      // quem sair da conta depois volta a ser visitante.
+      if (motivo === "assistiu") { try { localStorage.setItem(CHAVE, "1"); } catch (e) {} }
+      // Sem `pbTrack` aqui: nada navega depois deste evento.
+      if (window.gtag) gtag("event", "vsl_unlock", { motivo: motivo });
+    }
+
+    document.addEventListener("click", function (ev) {
+      if (liberado) return;
+      var a = ev.target && ev.target.closest && ev.target.closest("a");
+      // Pelo href VIVO, não pelo seletor de origem: depois do nav-auth.js o
+      // botão aponta pro /app, e barrar quem já tem conta não faz sentido.
+      if (!a || a.getAttribute("href") !== "/cadastro") return;
+      ev.preventDefault();
+      video.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (status) {
+        status.textContent = "Assista ao vídeo até o fim para liberar o cadastro.";
+        status.className = "vsl-status is-alerta";
+      }
+    });
+
+    var visto = false;
+    try { visto = localStorage.getItem(CHAVE) === "1"; } catch (e) {}
+    if (visto) { liberar("memoria"); } else { travar(); }
+
+    // A porta de saída: `error` no <video> cobre os dois jeitos de o vídeo não
+    // existir pro usuário — 404 e codec que o navegador não toca.
+    video.addEventListener("error", function () { liberar("erro"); });
+
+    // A outra porta: o nav-auth.js reescreve o href dos CTAs quando o /auth/validate
+    // responde que a sessão está viva. Quem já tem conta não tem o que assistir
+    // pra se cadastrar. É observador de atributo porque o nav-auth é assíncrono
+    // e não anuncia nada — e sem ele o portão só se abriria pelo vídeo.
+    if (window.MutationObserver && alvos.length) {
+      var obs = new MutationObserver(function () {
+        if (alvos.some(function (a) { return a.getAttribute("href") !== "/cadastro"; })) {
+          obs.disconnect();
+          liberar("logado");
+        }
+      });
+      alvos.forEach(function (a) { obs.observe(a, { attributes: true, attributeFilter: ["href"] }); });
+    }
+
+    video.addEventListener("play", function () {
+      if (window.gtag) gtag("event", "vsl_play", {});
+    }, { once: true });
+
+    video.addEventListener("timeupdate", function () {
+      if (video.currentTime > assistido) assistido = video.currentTime;
+      var d = video.duration;
+      if (!d || !isFinite(d)) return;
+      var pct = Math.floor((assistido / d) * 100);
+      [25, 50, 75].forEach(function (m) {
+        if (pct >= m && !marcos[m]) {
+          marcos[m] = 1;
+          if (window.gtag) gtag("event", "vsl_progress", { percent: m });
+        }
+      });
+      // `ended` não vem em todo navegador quando o arquivo termina raspando;
+      // o teto de 0,5s fecha o buraco sem depender do evento.
+      if (assistido >= d - 0.5) liberar("assistiu");
+    });
+
+    video.addEventListener("seeking", function () {
+      if (liberado) return;
+      if (video.currentTime > assistido + 0.5) video.currentTime = assistido;
+    });
+
+    video.addEventListener("ended", function () { liberar("assistiu"); });
   })();
   </script>
   <script src="/nav-auth.js?v=7" defer></script>
