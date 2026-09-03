@@ -210,6 +210,72 @@ def test_assinatura_invalida_da_400(user_id, monkeypatch):
     assert r.status_code == 400
 
 
+def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
+    """A saída do funil de cadastro é pagar: só o checkout concluído fecha o gate.
+
+    Depois de o Grátis sair da /precos (2026-09-02), `mark_plan_selected` tem
+    DOIS chamadores — os ramos `checkout.session.completed` e
+    `invoice.paid`/`invoice.payment_succeeded` do webhook (o /billing/select-free
+    só recusa com 410). Não são duas saídas do funil: o `invoice.paid` pressupõe
+    subscription, que pressupõe uma sessão de checkout antes, então quem sai do
+    cadastro passa pelo ramo testado aqui. Se este caminho não fechar o gate, o
+    cadastro novo paga e continua sendo devolvido pra /precos.
+
+    O que DISCRIMINA é a 2ª metade. Logo depois do checkout,
+    `needs_plan_selection` já é False de graça: o webhook grava plan='pro' com
+    validade futura, e a função nunca trava assinante pago vigente — a asserção
+    ali seria verde COM ou SEM o mark_plan_selected (tautológica). Quem separa
+    os dois mundos é o `plan_selected_at`, que sobrevive ao fim da assinatura:
+    depois do `customer.subscription.deleted` o plano volta pra 'free' e só o
+    carimbo mantém o gate fechado. Sem ele, quem já pagou uma vez e cancelou
+    cairia no gate de ESCOLHA (que não tem mais o que escolher) em vez do
+    paywall.
+
+    Controle negativo: `git grep -n "mark_plan_selected, user_id" -- frontend/`
+    devolve DUAS linhas (um ramo cada). Mute a do ramo
+    `checkout.session.completed` — a primeira das duas, logo abaixo do
+    comentário "Checkout concluído = plano escolhido" — e este teste fica
+    vermelho na 2ª metade; os outros 5 do arquivo continuam verdes. Mutar a do
+    ramo `invoice.paid` não discrimina nada: este teste não emite invoice.
+    """
+    uid, client, fake = _setup(monkeypatch, f"gate-{user_id}")
+    # O gate de escolha só existe sob a escada v2 (o conftest fixa 0 pra suíte).
+    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
+    from core.services.plan_service import needs_plan_selection
+    try:
+        assert needs_plan_selection(uid) is True, \
+            "pré-condição: cadastro novo tem plan_selected_at NULL"
+
+        r = _post(
+            client, fake,
+            {"type": "checkout.session.completed",
+             "data": {"object": {"id": "cs_test_gate",
+                                  "metadata": {"finbot_user_id": str(uid)},
+                                  "subscription": "sub_gate"}}},
+            subs={"sub_gate": _fake_sub("trialing")},
+        )
+        assert r.status_code == 200, r.text
+        assert needs_plan_selection(uid) is False, "o gate não abriu pra quem pagou"
+
+        # Assinatura cancelada depois → plano volta pra 'free'. O gate de escolha
+        # tem de continuar FECHADO (quem barra agora é o paywall).
+        r = _post(
+            client, fake,
+            {"type": "customer.subscription.deleted",
+             "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}},
+        )
+        assert r.status_code == 200, r.text
+        assert db.get_auth_user(uid)["plan"] == "free", "pré-condição da 2ª metade"
+        assert needs_plan_selection(uid) is False, \
+            "o checkout não carimbou plan_selected_at: cancelou e caiu no gate de escolha"
+    finally:
+        _cleanup_trial(uid)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from checkout_funnel_events where user_id = %s", (uid,))
+            conn.commit()
+
+
 def test_checkout_completed_grava_funil(user_id, monkeypatch):
     """checkout.session.completed grava um 'completed' na tabela do funil, com
     o session_id do evento — é o par do 'started' do endpoint, correlacionado

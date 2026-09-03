@@ -1702,8 +1702,9 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
-        # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
-        # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
+        # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o
+        # Grátis não é mais oferecido lá. plan_selected_at marca o momento dessa
+        # escolha — NULL = ainda não escolheu → cai na /precos.
         #
         # Backfill preciso pela fronteira REAL do rollout (sem cutoff por data
         # chutado): o ADD COLUMN com DEFAULT now() carimba TODAS as contas que já

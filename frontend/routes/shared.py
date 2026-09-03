@@ -559,9 +559,14 @@ _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
 def _is_pigbank_app(request: Request) -> bool:
-    """True se a requisição vem do WebView do app iOS (UA anexa "PigBankApp").
-    Usado pra isentar o app dos gates que forçariam a /precos — diretriz 3.1.1
-    da App Store proíbe empurrar tela de compra; o app fica no acesso base."""
+    """True se a requisição diz vir do WebView do app iOS (UA anexa "PigBankApp").
+
+    Só para TELEMETRIA (signup_source_from_request). NÃO usar para conceder nada:
+    o User-Agent é escolhido pelo cliente, então isto é a alegação do chamador,
+    não um fato verificado. Os gates isentavam o app com base nisto e qualquer
+    conta web entrava sem plano mandando a substring — a isenção saiu por isso.
+    Quando o app for lançado, a 3.1.1 da App Store volta a valer e a isenção
+    precisa de credencial que o servidor consiga verificar, não deste header."""
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
@@ -583,14 +588,14 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     ele, um cadastro novo poderia pular a /precos batendo direto numa API
     autenticada (ex.: /data/{id}) ou navegando pro /settings. Retorna 402 pro
     front mandar ao paywall/escolha. As rotas de /billing, /auth e /conta são
-    isentas (são elas que resolvem o gate — checkout, /auth/me, select-free)."""
+    isentas (são elas que resolvem o gate — checkout, /auth/me)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
     from core.services.plan_service import has_app_access, needs_plan_selection
-    # App iOS não passa pelo gate de escolha (não pode comprar/escolher via web);
-    # segue governado por has_app_access e pelos limites por-feature/tier.
-    if not _is_pigbank_app(request) and needs_plan_selection(user_id):
+    # Sem isenção de app aqui: ela era `not _is_pigbank_app(request) and`, e o UA
+    # é escolhido pelo cliente — bastava mandar "PigBankApp" pra pular o gate.
+    if needs_plan_selection(user_id):
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
@@ -677,12 +682,11 @@ def gate_plan_selection(request: Request):
     from fastapi.responses import RedirectResponse
     from core.services.plan_service import needs_plan_selection
 
-    # App iOS (WebView anexa "PigBankApp" ao UA): não redireciona pra tela de
-    # planos/compra — diretriz 3.1.1 da App Store. Espelha o !window.PB_IN_APP
-    # do cliente. O acesso segue governado pelos gates por-feature/tier.
-    if _is_pigbank_app(request):
-        return None
-
+    # Aqui havia `if _is_pigbank_app(request): return None`, pela diretriz 3.1.1
+    # da App Store. Saiu porque o UA é escolhido pelo cliente: a isenção liberava
+    # o gate pra qualquer um que mandasse "PigBankApp" no header. Quando o app for
+    # lançado ele precisa de credencial que o servidor consiga verificar.
+    #
     # Retorno do checkout com sucesso: o webhook checkout.session.completed
     # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
     # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
@@ -721,12 +725,12 @@ def gate_onboarding(request: Request):
       2. /settings é pra onde um usuário travado vai consertar a conta. Nunca
          trancar a saída de emergência.
 
-    O app iOS NÃO é isento, ao contrário do gate de plano. A isenção de lá
-    (_is_pigbank_app) existe pela diretriz 3.1.1 da App Store, que é sobre TELA
-    DE COMPRA. O wizard não é: é saldo, cartão, WhatsApp e resumo. Isentar o app
-    significaria que nenhum usuário de iPhone jamais veria o onboarding. O
-    cuidado fica no conteúdo da página — os CTAs de upgrade são <a href="/precos">,
-    que o auth-refresh.js esconde sozinho dentro do app.
+    O app iOS NÃO é isento. Isentá-lo significaria que nenhum usuário de iPhone
+    jamais veria o onboarding, e o wizard não é tela de compra: é saldo, cartão,
+    WhatsApp e resumo. O gate de plano também não isenta mais o app — a isenção
+    que existia lá era por User-Agent, escolhido pelo cliente. O cuidado fica no
+    conteúdo da página: os CTAs de upgrade são <a href="/precos">, que o
+    auth-refresh.js esconde sozinho dentro do app.
 
     `?upgrade=success` É isento, espelhando o gate de plano, mas por um motivo
     mais caro: /home?upgrade=success roda handleUpgradeReturn(), que dispara a

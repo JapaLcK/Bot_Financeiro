@@ -272,8 +272,10 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     """True se o cadastro ainda NÃO escolheu um plano na /precos.
 
     Regra de produto (2026-08-11): depois de criar a conta, o usuário é obrigado
-    a passar pela /precos e escolher um plano — mesmo o Grátis — antes de entrar
-    no dashboard. `plan_selected_at` (auth_accounts) marca essa escolha.
+    a passar pela /precos e ASSINAR um plano pago antes de entrar no dashboard
+    (o Grátis saiu da /precos como escolha em 2026-09-02 — segue existindo como
+    ESTADO, no fallback após falha de cobrança). `plan_selected_at`
+    (auth_accounts) marca essa escolha.
 
     Nunca trava quem já tem assinatura paga/trial vigente (escolha implícita no
     checkout) nem contas antigas (backfill em schema.py). Com o v2 desligado

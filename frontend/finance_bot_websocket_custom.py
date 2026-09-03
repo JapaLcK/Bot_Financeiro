@@ -2278,8 +2278,9 @@ def _post_login_url(user_id: int | None = None) -> str:
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
-    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
-    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
+    só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
+    o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
+    (paywall ligado), idem."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
@@ -4075,11 +4076,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
                 f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
-            # Abandonou o checkout → volta pra /precos escolher um plano (pago
-            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
-            # "Escolha um plano pra começar" (needs_plan_selection segue true,
-            # pois o gate não fechou) — não anexo upgrade=cancelled porque
-            # /precos não consome esse marcador (o toast vive só na /home).
+            # Abandonou o checkout → volta pra /precos escolher um plano PAGO
+            # (o Grátis não é mais escolha). O escolha=1 fica como rastro de
+            # origem: a copy "Escolha um plano pra continuar" da precos.html é
+            # decidida pelo needs_plan_selection do /auth/me (que segue true,
+            # pois o gate não fechou), não por este marcador — ele se perde num
+            # clique no "Planos" do próprio nav. Não anexo upgrade=cancelled
+            # porque /precos não consome esse marcador (o toast vive só na /home).
             cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4113,6 +4116,8 @@ async def billing_plans_config():
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "plus_available": bool(_resolve_price_id("plus", "monthly")
+                               or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
     }
@@ -4155,8 +4160,8 @@ async def billing_create_checkout(
         _session_id = result.pop("session_id", None)
         await asyncio.to_thread(record_checkout_started, user_id, _session_id)
         # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
-        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
-        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # plano — quem abandona o Stripe tem de voltar pra /precos e assinar
+        # (só há plano pago lá). O gate só fecha quando o pagamento COMPLETA de fato,
         # no webhook checkout.session.completed (mark_plan_selected lá). O
         # retorno de sucesso (?upgrade=success) é tratado como "webhook em
         # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
@@ -4178,24 +4183,41 @@ async def billing_select_free(
     request: Request,
     user_id: int = Depends(_get_current_user),
 ):
-    """Escolha do plano Grátis no fim do cadastro.
+    """Escolha do plano Grátis no fim do cadastro — DESATIVADA.
 
-    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
-    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
-    aí a troca é pela /precos normal, não por aqui."""
-    from db import mark_plan_selected
-    from core.services.plan_service import get_plan_tier
+    O Grátis morreu como porta de entrada: quem se cadastra pela web tem de
+    assinar pra entrar. A rota continua existindo só pra RECUSAR — apagá-la
+    devolveria 404/405 (HTML da página de erro, sem `detail`) a um cliente
+    antigo em cache, e o front trata 4xx lendo `detail.message`.
 
-    tier = await asyncio.to_thread(get_plan_tier, user_id)
-    if tier != "free":
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "already_subscribed",
-                    "message": "Você já tem um plano pago ativo."},
-        )
+    O front NOVO não chama mais: o `[data-free-cta]` e o `selectFree` saíram da
+    precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e quem
+    fecha o gate hoje são os dois ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`,
+    os dois chamando `mark_plan_selected`).
 
-    await asyncio.to_thread(mark_plan_selected, user_id)
-    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+    Sobra UM chamador real, e é ele que sustenta o parágrafo acima: a aba com a
+    /precos ANTIGA já carregada no instante do deploy, de usuário em
+    `needs_plan_selection`. O JS velho dessa aba já converteu o CTA em
+    "Continuar com o plano Grátis"; o clique faz o POST, leva 410, e o
+    `selectFree` antigo cai no `showToast(msg, "err")` — ou seja, a recusa VIRA
+    um toast vermelho com a mensagem daqui, que por isso é escrita pra ser lida
+    por humano. Não é beco sem saída: os CTAs pagos da mesma aba continuam
+    funcionando, e um reload traz a página nova.
+
+    Os outros vetores estão fechados: link salvo, e-mail, deep link e sitemap
+    não alcançam a rota (é `@app.post` só, atrás de `_get_current_user` e do
+    CSRF — um GET dá 405), e HTML velho servido por PWA ou por cache HTTP não
+    existe (o service worker não intercepta navegação e o HTML sai `no-store`).
+
+    O tier `free` continua existindo como ESTADO (fallback após falha de
+    cobrança); o que sumiu é a ESCOLHA."""
+    raise HTTPException(
+        status_code=410,
+        detail={"error": "free_plan_discontinued",
+                "message": "O plano Grátis não está mais disponível. "
+                           "Escolha um plano pago pra continuar."},
+    )
 
 
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
@@ -6897,12 +6919,12 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
     # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
     # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
-    # primitivas e mesma isenção do app iOS (diretriz 3.1.1: o app não pode
-    # ser empurrado pra tela de compra; fica no acesso base).
+    # primitivas e, como ele, sem isenção de app: a que existia aqui era uma
+    # segunda cópia da checagem de UA (`"PigBankApp" in ws.headers`), e o header
+    # é escolhido pelo cliente — dava pra abrir o WS sem plano só pedindo.
     from core.services.plan_service import has_app_access, needs_plan_selection
-    in_app = "PigBankApp" in (ws.headers.get("user-agent") or "")
     sem_plano = await asyncio.to_thread(
-        lambda: (not in_app and needs_plan_selection(user_id)) or not has_app_access(user_id)
+        lambda: needs_plan_selection(user_id) or not has_app_access(user_id)
     )
     if sem_plano:
         await ws.close(code=4402, reason="subscription_required")
