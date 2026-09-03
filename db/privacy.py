@@ -638,14 +638,14 @@ def reset_user_data(
                 # writer disparado no 1º `_table_exists` — gatilho de
                 # tests/test_account_reset.py::_reset_com_lancamento_concorrente).
                 # REMEÇA antes de reusar: conta vazia 0,05 s; MAIOR CONTA REAL de
-                # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma
-                # acima de 10 mil). Sintético 27× maior: 50k launches sozinhos
-                # 0,58 s, com 20k open_finance_transactions 16,9 s — explode o
-                # PRODUTO das duas, porque `imported_launch_id` referencia
-                # launches com `on delete set null` sem índice
-                # (db/schema.py:416). Conta com dezenas de milhares de
-                # lançamentos E Open Finance muda a decisão; o conserto é o
-                # índice.
+                # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma acima de
+                # 10 mil). Sintético: 50 mil launches sozinhos 0,58 s; os mesmos com
+                # 20 mil open_finance_transactions, 16,9 s. Custo ≈ linhas apagadas ×
+                # tamanho GLOBAL de cada filha que as referencia
+                # (open_finance_transactions conta DUAS vezes p/ launches) — nenhuma
+                # das FKs `on delete set null` p/ launches/credit_transactions é
+                # indexada, então conta pequena também dói se a filha for grande; o
+                # conserto é o índice. FKs, modelo e queries: #253.
                 ensure_user_tx(cur, user_id)
                 cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
                 # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a
