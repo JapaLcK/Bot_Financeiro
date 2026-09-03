@@ -178,6 +178,12 @@ def send_event(
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         if 200 <= resp.status_code < 300:
+            # Sucesso também loga, e não é ruído: sem esta linha, "não apareceu
+            # no Meta" e "nem tentou" ficam indistinguíveis no log — foi
+            # exatamente onde uma investigação empacou. O corpo traz
+            # `events_received`, que é a confirmação do lado do Meta.
+            logger.info("[meta_capi] %s enviado (event_id=%s): %s",
+                        event_name, event_id, resp.text[:200])
             return True
         logger.warning(
             "[meta_capi] %s rejeitado (%s): %s",
