@@ -614,7 +614,7 @@ def reset_user_data(
                 #
                 # ponytail: o lock inverte a ordem accounts×pockets/investments
                 # de 4 fluxos (db/pockets.py:336→467, db/investments.py:
-                # 1041→1096 e :1554→1680, db/accounts.py:1647/1696→1702), que
+                # 1041→1096 e :1554→1680, db/accounts.py:1647/1696→1709), que
                 # tomam a caixinha/investimento primeiro. Pior caso: deadlock
                 # detectado pelo Postgres, um dos dois aborta inteiro (o reset
                 # é tudo-ou-nada; o outro fluxo também) — erro visível, sem
