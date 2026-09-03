@@ -1698,7 +1698,12 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         (user_id, nome, bal0),
                     )
 
-            # reverte conta
+            # reverte conta. NÃO checar `cur.rowcount` aqui (proposta original
+            # da issue #246): o `ensure_user(user_id)` do topo desta função já
+            # criou a linha em transação própria já commitada, então o rowcount
+            # é SEMPRE 1 e a guarda nunca dispararia — guarda morta lendo como
+            # proteção. O #246 era ordem de escrita no reset, e foi consertado
+            # em db/privacy.py (reset_user_data).
             if delta_conta != 0:
                 cur.execute(
                     "update accounts set balance = balance - %s where user_id=%s",

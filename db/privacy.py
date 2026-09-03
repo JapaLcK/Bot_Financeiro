@@ -505,7 +505,9 @@ _RESET_TABLES = (
     "daily_report_prefs",
     "launches",
     "financial_spaces",
-    "accounts",
+    # `accounts` NÃO entra aqui: a linha é preservada e o saldo é zerado no
+    # INÍCIO da transação (ver reset_user_data) — apagar no fim recriava o
+    # bug do #246.
 )
 
 
@@ -521,6 +523,10 @@ def reset_user_data(
     invariante: se o reset local não vai acontecer (lock ocupado → aborto),
     a Pluggy não foi tocada. O hook é responsável pelo próprio best-effort
     (exceção dele aborta o reset com nada apagado localmente).
+
+    A linha de `accounts` é PRESERVADA com `balance = 0` (não é apagada) — ver
+    o comentário no início da transação: é ela que serializa o reset contra um
+    lançamento concorrente (issue #246).
 
     Ficam intactos: users (a linha), auth_accounts (login, plano, Stripe,
     opt-outs, contadores de IA, deletion_*), auth_identities, user_identities
@@ -588,6 +594,35 @@ def reset_user_data(
 
         with get_conn() as conn:
             with conn.cursor() as cur:
+                # PRIMEIRA escrita da transação, e é ela que faz o reset ser
+                # correto sob concorrência (issue #246). O `update` TOMA O LOCK
+                # da linha de accounts e o segura até o commit: um
+                # `add_launch_and_update_balance` que chegue durante o reset
+                # bloqueia no `update accounts` dele (db/accounts.py:94), que
+                # roda ANTES do insert em launches (:99) — então ele só
+                # prossegue depois do commit, sobre saldo 0, e o lançamento
+                # dele nasce com o dinheiro refletido no saldo.
+                #
+                # Sem isso o reset zerava o saldo apagando a linha no FIM do
+                # laço, depois do `delete from launches`: um lançamento que
+                # entrasse no meio sobrevivia (decisão do dono — dado novo não
+                # é resíduo) com `delta_conta` NÃO refletido no saldo. O
+                # `delete_launch_and_rollback` desse sobrevivente então
+                # devolvia dinheiro que nunca tinha sido debitado — R$250 do
+                # nada. O saldo pode ficar NEGATIVO logo após o reset, e isso é
+                # o correto: o lançamento sobreviveu com o dinheiro dele.
+                #
+                # ponytail: o lock inverte a ordem accounts×pockets/investments
+                # de 4 fluxos (db/pockets.py:336→467, db/investments.py:
+                # 1041→1096 e :1554→1680, db/accounts.py:1647/1696→1702), que
+                # tomam a caixinha/investimento primeiro. Pior caso: deadlock
+                # detectado pelo Postgres, um dos dois aborta inteiro (o reset
+                # é tudo-ou-nada; o outro fluxo também) — erro visível, sem
+                # perda. Se aparecer na prática, a saída é uma ordem única de
+                # lock nos writers, não desfazer isto.
+                cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
+                counts["accounts"] = cur.rowcount
+
                 # Open Finance, child-first (accounts/transactions/investments
                 # não têm user_id — o isolamento entra pelo join na connection).
                 _delete(cur, "open_finance_transactions", """

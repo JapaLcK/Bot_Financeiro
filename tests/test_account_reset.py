@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import uuid
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from cryptography.fernet import Fernet
@@ -302,8 +304,44 @@ _TABELAS_SIMPLES = (
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
     "pending_actions",
-    "ofx_imports", "daily_report_prefs", "launches", "financial_spaces", "accounts",
+    "ofx_imports", "daily_report_prefs", "launches", "financial_spaces",
+    # `accounts` NÃO entra: desde o conserto do #246 a linha SOBREVIVE ao reset
+    # com balance = 0 (é o lock dela que serializa o reset contra um lançamento
+    # concorrente). A garantia real virou `balance == 0`, medida em _saldo().
 )
+
+
+def _saldo(uid: int):
+    """Saldo da conta, ou None se a linha não existir."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select balance from accounts where user_id = %s", (uid,))
+            row = cur.fetchone()
+        conn.commit()
+    return None if row is None else Decimal(str(row["balance"]))
+
+
+def _linhas_accounts(uid: int) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from accounts where user_id = %s", (uid,))
+            n = cur.fetchone()["n"]
+        conn.commit()
+    return n
+
+
+def _soma_delta_conta(uid: int) -> Decimal:
+    """Soma de efeitos->>'delta_conta' dos lançamentos SOBREVIVENTES."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select coalesce(sum((efeitos->>'delta_conta')::numeric), 0) as s "
+                "from launches where user_id = %s and efeitos ? 'delta_conta'",
+                (uid,),
+            )
+            s = cur.fetchone()["s"]
+        conn.commit()
+    return Decimal(str(s))
 
 
 def _contagens(uid: int) -> dict[str, int]:
@@ -356,7 +394,11 @@ def test_reset_apaga_tudo_do_usuario_e_isola_o_vizinho(user_id):
     depois_a = _contagens(user_id)
     assert all(n == 0 for n in depois_a.values()), \
         f"sobrou linha após o reset: { {t: n for t, n in depois_a.items() if n} }"
+    # accounts sobrevive — mas ZERADA (a garantia real; ver _TABELAS_SIMPLES).
+    assert _linhas_accounts(user_id) == 1, "a linha de accounts tinha que sobreviver"
+    assert _saldo(user_id) == 0, "a linha sobreviveu, mas o saldo não zerou"
     assert _contagens(vizinho) == antes_b, "o reset de A tocou dados de B"
+    assert _saldo(vizinho) == 100, "o reset de A zerou o saldo de B"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -450,8 +492,13 @@ def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):
 
     original = privacy._table_exists
 
+    # `accounts` saiu de _RESET_TABLES (#246) — a última do laço passou a ser
+    # `financial_spaces`. Sem trocar aqui, o hook nunca dispara e o teste dá
+    # DID NOT RAISE. Guarda contra a lista mudar de novo:
+    assert privacy._RESET_TABLES[-1] == "financial_spaces", privacy._RESET_TABLES[-1]
+
     def _explode_no_fim(cur, table):
-        if table == "accounts":  # última tabela da sequência — meio da transação
+        if table == "financial_spaces":  # última do laço — meio da transação
             raise RuntimeError("falha injetada")
         return original(cur, table)
 
@@ -462,6 +509,107 @@ def test_falha_no_meio_da_transacao_nao_muda_nada(user_id, monkeypatch):
 
     assert _contagens(user_id) == antes, "transação abortada não podia ter apagado nada"
     assert db.needs_onboarding(user_id) is False, "onboarding não podia ter sido reaberto"
+
+
+# ── 4b. corrida: lançamento chegando DURANTE o reset (issue #246) ────────────
+#
+# Sem mock de `db`: duas conexões de verdade. A thread abre a própria e chama
+# `add_launch_and_update_balance`, exatamente como o WhatsApp faria.
+
+def _reset_com_lancamento_concorrente(uid: int, monkeypatch) -> None:
+    """`reset_user_data` com um lançamento real de R$250 entrando no meio.
+
+    O gatilho é `financial_spaces` — a ÚLTIMA tabela do laço, portanto DEPOIS
+    do `delete from launches`. É a única posição em que a corrida discrimina:
+    disparada no começo do laço, o lançamento entra e o próprio reset o apaga
+    logo em seguida — nada sobrevive e não há invariante a violar.
+    """
+    original = privacy._table_exists
+    erro: list[BaseException] = []
+    disparou: list[bool] = []
+
+    def _lanca():
+        try:
+            db.add_launch_and_update_balance(uid, "despesa", 250.0, None, "corrida", "mercado")
+        except BaseException as e:  # noqa: BLE001 - a thread não pode engolir
+            erro.append(e)
+
+    t = threading.Thread(target=_lanca)
+
+    def _dispara(cur, table):
+        if table == "financial_spaces" and not disparou:
+            disparou.append(True)
+            t.start()
+            # COM o conserto a thread bloqueia no `update accounts` (o reset
+            # segura o lock da linha) e o join estoura o teto — é o esperado.
+            # SEM o conserto ela termina em milissegundos.
+            t.join(timeout=2.0)
+        return original(cur, table)
+
+    monkeypatch.setattr(privacy, "_table_exists", _dispara)
+    reset_user_data(uid, SENHA)
+    monkeypatch.setattr(privacy, "_table_exists", original)
+
+    t.join(timeout=10.0)
+    assert disparou, "o gatilho da corrida não disparou"
+    assert not t.is_alive(), "o lançamento concorrente não destravou após o commit"
+    assert not erro, f"o lançamento concorrente falhou: {erro}"
+
+
+def _ids_de_launches(uid: int) -> list[int]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from launches where user_id = %s order by id", (uid,))
+            ids = [r["id"] for r in cur.fetchall()]
+        conn.commit()
+    return ids
+
+
+def test_lancamento_da_janela_nao_vira_dinheiro_ao_ser_apagado(user_id, monkeypatch):
+    """NEGATIVO do grupo: com o reset da `main` isto fecha em R$250 do nada."""
+    _semeia(user_id)
+    _reset_com_lancamento_concorrente(user_id, monkeypatch)
+
+    db.ensure_user(user_id)  # o que qualquer porta faz antes de mexer no saldo
+    sobreviventes = _ids_de_launches(user_id)
+    assert len(sobreviventes) == 1, f"a corrida tinha que deixar 1 lançamento: {sobreviventes}"
+
+    db.delete_launch_and_rollback(user_id, sobreviventes[0])
+    assert _saldo(user_id) == 0, "apagar o lançamento da janela criou dinheiro"
+
+
+def test_reset_deixa_saldo_em_sincronia_com_os_lancamentos_sobreviventes(user_id, monkeypatch):
+    """A CAUSA, não o sintoma: saldo == soma dos delta_conta que sobraram.
+
+    Decisão do dono: o lançamento da janela sobrevive COM o dinheiro dele, e o
+    saldo fica negativo logo após o reset. É o correto.
+    """
+    _semeia(user_id)
+    _reset_com_lancamento_concorrente(user_id, monkeypatch)
+
+    assert _linhas_accounts(user_id) == 1, "a linha de accounts tinha que sobreviver ao reset"
+    assert _soma_delta_conta(user_id) == Decimal("-250"), "o lançamento da janela tinha que sobreviver"
+    assert _saldo(user_id) == _soma_delta_conta(user_id), \
+        f"saldo {_saldo(user_id)} != soma dos sobreviventes {_soma_delta_conta(user_id)}"
+
+
+def test_reset_sem_corrida_zera_a_conta_e_o_caminho_normal_continua(user_id):
+    """POSITIVO do grupo: sem ele, um reset que só travasse passaria nos dois
+    testes de corrida acima."""
+    _semeia(user_id)
+
+    reset_user_data(user_id, SENHA)
+
+    assert _linhas_accounts(user_id) == 1
+    assert _saldo(user_id) == 0
+    assert _ids_de_launches(user_id) == []
+
+    lid, _seq, bal = db.add_launch_and_update_balance(
+        user_id, "despesa", 40.0, None, "pos-reset", "mercado")
+    assert bal == -40
+    db.delete_launch_and_rollback(user_id, lid)
+    assert _saldo(user_id) == 0
+    assert _ids_de_launches(user_id) == []
 
 
 # ── 5. senha ─────────────────────────────────────────────────────────────────
