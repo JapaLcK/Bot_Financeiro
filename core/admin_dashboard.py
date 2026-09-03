@@ -1156,11 +1156,20 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
                     a.engagement_opt_out, a.tip_email_opt_out, a.insight_email_opt_out,
                     a.deletion_status, a.deletion_requested_at, a.signup_source,
                     a.ai_messages_this_month,
+                    -- Trava de trial: plan_trials é keyed por TELEFONE e
+                    -- sobrevive à conta, então ela pode existir com
+                    -- a.trial_started_at NULL (trava herdada de outra conta com
+                    -- o mesmo número). Sem estas duas colunas a tela dizia
+                    -- "Trial iniciado —" numa conta inelegível. phone_hash NÃO
+                    -- é selecionado: é HMAC de PII e o front não precisa.
+                    pt.started_at AS trial_lock_started_at,
+                    pt.user_id    AS trial_lock_user_id,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
                         WHERE ui.user_id = a.user_id AND ui.provider = 'whatsapp'
                     ) AS has_whatsapp_identity
                 FROM auth_accounts a
+                LEFT JOIN plan_trials pt ON pt.phone_hash = a.phone_hash
                 WHERE a.user_id = %s
                 """,
                 (int(user_id),),
@@ -1638,6 +1647,71 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "plan": row["plan"],
             "plan_expires_at": row["plan_expires_at"],
             "last_payment_status": row["last_payment_status"],
+        }))
+
+    @app.post("/admin/api/users/{user_id}/trial-reset")
+    async def admin_api_user_trial_reset(
+        user_id: int, username: str = Depends(_get_current_admin)
+    ):
+        """Sem body: apaga a trava de trial do TELEFONE desta conta.
+
+        Serve a retestar o funil de assinatura com o próprio número. Como o
+        /plan, mexe só no banco — não fala com a Stripe. Por isso recusa com
+        409 quando há assinatura viva lá: apagar a trava não cancelaria nada, e
+        o checkout novo esbarraria na assinatura existente de qualquer forma.
+        """
+        # Uma coluna, sem passar pelo fetch_admin_user_detail: aquele decifra
+        # e-mail/telefone/nome e grava pii_access_log — acesso a PII que esta
+        # ação não precisa.
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT last_payment_status FROM auth_accounts WHERE user_id = %s",
+                    (int(user_id),),
+                )
+                acc = await cur.fetchone()
+        if acc is None:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        pay = (acc.get("last_payment_status") or "").strip().lower()
+        if pay in {"trialing", "active", "past_due"}:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A conta tem assinatura viva na Stripe (status {pay}). "
+                    "Quem manda no trial é a Stripe: liberar a trava aqui não "
+                    "cancela nada e o checkout novo esbarraria na assinatura "
+                    "existente. Cancele no Stripe primeiro e tente de novo."
+                ),
+            )
+        from db.plans import reset_trial_for_user
+        row = await asyncio.to_thread(reset_trial_for_user, user_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        if row["phone"] is False:
+            raise HTTPException(
+                status_code=422,
+                detail=("Conta sem telefone vinculado: a trava é por telefone, "
+                        "não há o que liberar."),
+            )
+        # warning de propósito: é remoção de trava anti-abuso, tem que saltar na
+        # lista de eventos. Nada de telefone nem de phone_hash no details.
+        await log_system_event(
+            "warning",
+            "admin_trial_reset",
+            f"Trava de trial da conta {user_id} removida (admin {username}).",
+            source="admin",
+            user_id=int(user_id),
+            details={
+                "admin": username,
+                "deleted": row["deleted"],
+                "previous_started_at": _json_safe(row["previous_started_at"]),
+            },
+        )
+        return JSONResponse(content=_json_safe({
+            "ok": True,
+            "user_id": int(user_id),
+            "deleted": row["deleted"],
+            "previous_started_at": row["previous_started_at"],
         }))
 
     @app.delete("/admin/api/events/{event_id}")

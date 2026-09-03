@@ -201,6 +201,12 @@ O drill-down de uma conta troca o plano à mão (`POST /admin/api/users/{id}/pla
 `plan`/`plan_expires_at` no banco e **não fala com a Stripe** — assinatura viva
 continua lá e o próximo webhook dela sobrescreve.
 
+A segunda escrita do drill-down libera novo trial
+(`POST /admin/api/users/{id}/trial-reset` → `db.plans.reset_trial_for_user`):
+apaga a linha de `plan_trials` do **telefone** da conta e zera
+`trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
+por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
+
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
