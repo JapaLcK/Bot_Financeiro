@@ -220,13 +220,23 @@ def collect_evidence(tool_results: list[str],
     cents: set[int] = set()
     raw: set[str] = set()
     ids: set[int] = set()
-    for chunk in list(tool_results) + [user_text or ""]:
+    for chunk, e_do_usuario in [(c, False) for c in tool_results] + [(user_text or "", True)]:
         chunk = chunk or ""
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
         # Dinheiro sai do texto SEM os IDs e códigos; ID e código saem do texto
         # original, logo abaixo.
         for m in _ANY_NUM_RE.finditer(_MASCARA_NAO_MONETARIA_RE.sub(" ", chunk)):
-            cents |= _evidence_cents(m.group(0))
+            if e_do_usuario:
+                # A leitura dupla existe porque a TOOL pode escrever em qualquer
+                # formato. O usuário não: ele escreve BRL. Mandar `77,90` pela
+                # via permissiva injetava 7.790 E 779.000 centavos, e uma
+                # resposta afirmando `R$ 7.790,00` passava por sustentada
+                # contra um usuário que disse R$ 77,90 — cem vezes menos.
+                v = _brl_to_cents(m.group(0))
+                if v is not None:
+                    cents.add(v)
+            else:
+                cents |= _evidence_cents(m.group(0))
         # Por CHAVE quando o resultado é JSON (o caso normal); e o `#N`
         # explícito sempre, porque ali o `#` já diz que é ID.
         try:
@@ -376,6 +386,13 @@ if __name__ == "__main__":
     assert money_cents("Saldo: R$ -50,00") == {-5000}, "o sinal tem que sobreviver"
     assert money_cents("Saldo: R$ -50,00") != money_cents("Saldo: R$ 50,00"), \
         "diferir só no sinal não pode dar conjuntos iguais"
+
+    # O usuário escreve BRL: `77,90` é 77,90 e nada mais
+    assert collect_evidence([], "gastei 77,90")[0] == {7790}, collect_evidence([], "gastei 77,90")[0]
+    assert not check("Anotei R$ 7.790,00.", [], user_text="gastei 77,90")[0].supported
+    assert check("Anotei R$ 77,90.", [], user_text="gastei 77,90")[0].supported
+    # a tool CONTINUA com a leitura dupla, que é onde a ambiguidade é real
+    assert 779000 in collect_evidence(['{"valor": "7790"}'])[0]
 
     # ID e código citados pelo usuário NÃO são dinheiro
     assert collect_evidence([], "apague #50")[0] == set(), collect_evidence([], "apague #50")[0]

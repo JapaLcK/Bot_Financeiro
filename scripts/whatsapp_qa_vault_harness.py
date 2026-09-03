@@ -1131,9 +1131,14 @@ def roda_pares():
         sc.check(None if faltando else True,
                  "a forma solta trouxe TODOS os valores da curta (informativo)")
 
-        claims_ia = sc.turns[-1][3]
-        guarda_ok = all(c.supported for c in claims_ia)
-        sc.check(guarda_ok, "guarda: nenhum número da IA veio de fora das tools")
+        # Os DOIS turnos, não só o segundo. A forma curta também pode cair na
+        # IA — o harness permite isso de propósito e mede o caminho de cada
+        # lado —, e olhando só o último turno uma alucinação na curta passava:
+        # `inventados` fica vazio se a solta não repete o valor inventado, a
+        # omissão é só informativa, e o par saía ✅.
+        claims_do_par = sc.turns[-2][3] + sc.turns[-1][3]
+        guarda_ok = all(c.supported for c in claims_do_par)
+        sc.check(guarda_ok, "guarda: nenhum número da IA veio de fora das tools (os dois lados)")
 
         if inventados:
             sc.note("valores que só a forma solta afirma: "

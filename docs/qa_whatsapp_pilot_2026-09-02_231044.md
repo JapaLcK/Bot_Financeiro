@@ -1,24 +1,20 @@
 # QA piloto — vault WhatsApp (23 interações, 3 domínios)
 
-Gerado em 2026-09-02_225732 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
+Gerado em 2026-09-02_231044 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 34 interações — ✅ 27 · ❌ 6 · ⚠️ 0 · 🔍 1
+**Sumário:** 34 interações — ✅ 28 · ❌ 5 · ⚠️ 0 · 🔍 1
 
-**Caminho:** 16 turno(s) resolvido(s) pela IA · 96 por comando/regex (sem chamada nenhuma) — 49 chamadas OpenAI no total.
+**Caminho:** 16 turno(s) resolvido(s) pela IA · 96 por comando/regex (sem chamada nenhuma) — 50 chamadas OpenAI no total.
 
-**Custo:** US$ 0.0163 nesta rodada · US$ 0.1547 acumulado no mês pelos harnesses. 198107 tokens de entrada, 186496 cacheados (94%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
+**Custo:** US$ 0.0172 nesta rodada · US$ 0.1719 acumulado no mês pelos harnesses. 210706 tokens de entrada, 199168 cacheados (95%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
 
-**Guarda de afirmações:** 13 afirmação(ões) numérica(s) em resposta de IA · **3 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
-- 🚨 `R$ 100.000,00` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
-- 🚨 `R$ 1.768,80` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
-- 🚨 `R$ 98.231,20` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
+**Guarda de afirmações:** 13 afirmação(ões) numérica(s) em resposta de IA · **0 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
 
 ## Discrepâncias entre vault e código
 
 - Itens 10/11/12: a confirmação de apagar UM lançamento (pending.py, action_type delete_launch) responde com '✅ Lançamento **#N** apagado e saldo revertido.' — NÃO usa 🗑️. O emoji 🗑️ só aparece nas confirmações de apagar compra/parcelamento no cartão (core/handlers/credit.py). A nota do vault que espera 🗑️ para apagar lançamento (item 10) e para 'desfazer' (item 12) está desalinhada com o código atual.
 - Item 12: 'desfazer' arma uma pendência de confirmação (⚠️ ... sim/não) em vez de desfazer direto num turno só como ↩️ — comportamento intencional (mesma cautela que toda ação destrutiva tem neste bot); a nota do vault está incompleta, faltando o turno de confirmação.
 - Item 16: 'parcelamentos' responde com 📦 (core/handlers/credit.py), não 📆 como o vault documenta. Cosmético — descrição, valores e códigos PC batem certinho.
-- Item 18: 'limite nubank' não bate em NENHUM regex determinístico de credit.handle (só 'limite do <cartão>'/'quanto...limite'/etc, não 'limite <nome>' solto) — cai na IA conversacional (o formato de resposta com '🐷 Seu limite do X tá assim' não é o template determinístico de credit.py). O UPDATE em si funciona e persiste (confirmado direto no banco), mas a IA respondeu de novo com o valor ANTIGO (R$ 100.000,00) depois do 'definir limite' já ter gravado R$ 8.000,00 — parece responder repetindo/parafraseando a resposta anterior da conversa em vez de rebuscar o dado fresco. Achado separado do bug de resolução de nome (esse já corrigido em db/cards.py::get_card_id_by_name) — mais profundo, na camada de IA/tool-calling, não investigado a fundo aqui.
 
 ---
 
@@ -757,9 +753,9 @@ Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*
 🛍️ *Categoria:* moradia
 💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
 🪪 *Cartão:* Nubank
-⚙️ *Código:* PCA6FA3931
+⚙️ *Código:* PC1F691803
 
-Pra apagar: apagar PCA6FA3931
+Pra apagar: apagar PC1F691803
 > _caminho: IA (1 chamada: gpt-4o-mini-2024-07-18)_
 >
 > Você: parcelei 12x de 79,90 celular
@@ -769,9 +765,9 @@ Pra apagar: apagar PCA6FA3931
 🛍️ *Categoria:* outros
 💳 *Valor:* 12x de R$ 79,90 (total R$ 958,80)
 🪪 *Cartão:* padrão
-⚙️ *Código:* PC43A74584
+⚙️ *Código:* PC7DBF2BDA
 
-Pra apagar: apagar PC43A74584
+Pra apagar: apagar PC7DBF2BDA
 > _caminho: IA (1 chamada: gpt-4o-mini-2024-07-18)_
 >
 
@@ -784,8 +780,8 @@ Pra apagar: apagar PC43A74584
 
 **Notas:**
 - Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse estado e não testava compreensão de linguagem de verdade.
-- PC capturado (geladeira): A6FA3931
-- PC capturado (celular): 43A74584
+- PC capturado (geladeira): 1F691803
+- PC capturado (celular): 7DBF2BDA
 
 ---
 
@@ -794,14 +790,14 @@ Pra apagar: apagar PC43A74584
 
 > Você: parcelamentos
 > PigBank: 📦 *Parcelamentos ativos:*
-• Nubank — celular
-  💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
-  🔢 Código: PC43A74584
-  🗑️ Apagar: apagar PC43A74584
 • Nubank — geladeira
   💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
-  🔢 Código: PCA6FA3931
-  🗑️ Apagar: apagar PCA6FA3931
+  🔢 Código: PC1F691803
+  🗑️ Apagar: apagar PC1F691803
+• Nubank — celular
+  💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
+  🔢 Código: PC7DBF2BDA
+  🗑️ Apagar: apagar PC7DBF2BDA
 > _caminho: comando (0 chamadas)_
 >
 
@@ -886,13 +882,11 @@ Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Seu limite no Nubank é de *R$ 100.000,00*.
 
-*Limite total:* R$ 100.000,00  
-*Usado:* R$ 1.768,80  
-*Disponível:* R$ 98.231,20  
+Você já usou *R$ 1.768,80*, então ainda tem *R$ 98.231,20* disponíveis. 
 
-Você tá usando só 1,8% do limite! Se precisar de mais alguma coisa, é só avisar.
+Se precisar de mais alguma coisa, é só avisar!
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 3 afirmação(ões), todas sustentadas_
 >
@@ -901,23 +895,21 @@ Você tá usando só 1,8% do limite! Se precisar de mais alguma coisa, é só av
 > _caminho: comando (0 chamadas)_
 >
 > Você: limite nubank
-> PigBank: 🐷 Seu limite do Nubank tá assim:
+> PigBank: 🐷 Seu limite no Nubank é de *R$ 8.000,00*.
 
-*Limite total:* R$ 100.000,00  
-*Usado:* R$ 1.768,80  
-*Disponível:* R$ 98.231,20  
+Você já usou *R$ 1.768,80*, então ainda tem *R$ 6.231,20* disponíveis. 
 
-Se precisar de mais alguma informação, é só falar!
-> _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
-> _guarda: 🚨 3 de 3 NÃO sustentada(s): R$ 100.000,00 (dinheiro), R$ 1.768,80 (dinheiro), R$ 98.231,20 (dinheiro)_
+Se precisar de mais alguma coisa, é só avisar!
+> _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
+> _guarda: ✅ 3 afirmação(ões), todas sustentadas_
 >
 
-**Veredito:** ❌
+**Veredito:** ✅
 
 **Checklist do vault:**
 - [x] "limite nubank" → mostra limite/usado/disponível
 - [x] "definir limite Nubank 8000" → ✅ + novo limite R$ 8.000,00
-- [ ] "limite nubank" de novo → reflete 8000
+- [x] "limite nubank" de novo → reflete 8000
 
 ---
 
@@ -1025,8 +1017,8 @@ Responda *sim* para confirmar ou *não* para cancelar.
 Removido: R$ 60,00.
 > _caminho: comando (0 chamadas)_
 >
-> Você: apagar PCA6FA3931
-> PigBank: 🗑️ Parcelamento desfeito (PCA6FA3931).
+> Você: apagar PC1F691803
+> PigBank: 🗑️ Parcelamento desfeito (PC1F691803).
 Removido: R$ 600,00 em 3 itens.
 > _caminho: comando (0 chamadas)_
 >
@@ -1038,7 +1030,7 @@ Removido: R$ 600,00 em 3 itens.
 - [x] "apagar PC<código>" → 🗑️ confirmando parcelamento desfeito
 
 **Notas:**
-- usando CC=2 (compra ifood) e PC=A6FA3931 (parcelamento geladeira)
+- usando CC=2 (compra ifood) e PC=1F691803 (parcelamento geladeira)
 
 ---
 
@@ -1172,7 +1164,7 @@ Confirma? Responda *sim* ou *não*.
 > _caminho: comando (0 chamadas)_
 >
 > Você: qto sobrou pra mim
-> PigBank: 🐷 Sobrou R$ *1.736,65* pra você! 
+> PigBank: 🐷 Sobrou R$ *1.736,65* pra você.
 
 Se precisar de mais alguma coisa, é só falar!
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
@@ -1185,7 +1177,7 @@ Se precisar de mais alguma coisa, é só falar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1225,7 +1217,7 @@ Se precisar de mais alguma coisa, é só falar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
@@ -1246,12 +1238,19 @@ Se precisar de mais alguma coisa, é só falar!
 > Você: me mostra meus ultimos lancamentos
 > PigBank: 🐷 Aqui estão seus últimos lançamentos:
 
-1. *R$ 89,90* - Gastei com uber (Transporte)
-2. *R$ 2.000,00* - Recebi de salário (Rendimentos)
-3. *R$ 123,45* - Gastei na farmácia (Saúde)
-4. *R$ 50,00* - Gastei no mercado (Mercado)
+1. *R$ 89,90* - *Transporte*  
+   Gastei 89,90 com uber
 
-Se precisar de mais alguma coisa, é só falar!
+2. *R$ 2.000,00* - *Rendimentos*  
+   Recebi 2000 de salário
+
+3. *R$ 123,45* - *Saúde*  
+   Gastei 123,45 na farmácia
+
+4. *R$ 50,00* - *Mercado*  
+   Gastei 50 no mercado
+
+Se precisar de mais alguma coisa, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 4 afirmação(ões), todas sustentadas_
 >
@@ -1262,7 +1261,7 @@ Se precisar de mais alguma coisa, é só falar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1293,7 +1292,7 @@ Se precisar de mais alguma coisa, é só falar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1325,7 +1324,7 @@ Se precisar de mais alguma coisa, é só falar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1355,7 +1354,7 @@ ID: #5
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1388,7 +1387,7 @@ ID: #5
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
@@ -1397,9 +1396,9 @@ ID: #5
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: gastos com saúde
-> PigBank: 🐷 Você gastou R$ 123,45 com saúde de 01/09 a 02/09/2026. 
+> PigBank: 🐷 Nos últimos dias, você gastou R$ *123,45* com saúde. 
 
-Se precisar de mais detalhes ou quiser ver outro período, é só avisar!
+Se precisar de mais detalhes ou quiser ver outros gastos, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
@@ -1414,7 +1413,7 @@ Se precisar de mais detalhes ou quiser ver outro período, é só avisar!
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1427,14 +1426,16 @@ Se precisar de mais detalhes ou quiser ver outro período, é só avisar!
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: limite nubank
-> PigBank: 🐷 O limite do seu cartão Nubank não tá cadastrado. 
+> PigBank: 🐷 Não tenho o limite do seu cartão Nubank cadastrado. 
 
-Atualmente, você usou R$ 200,00. Pra saber quanto sobra, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
+Atualmente, você usou R$ 200,00. Pra ver quanto sobra, é só cadastrar o limite no dashboard. Quer que eu mande o link?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
 > Você: quanto ainda posso gastar no nubank
-> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. Pra ver quanto você ainda pode gastar, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
+> PigBank: 🐷 Não tenho o limite do seu cartão Nubank cadastrado. 
+
+Pra saber quanto ainda pode gastar, você precisa cadastrar o limite no dashboard. Quer que eu abra o link pra você?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 
@@ -1444,7 +1445,7 @@ Atualmente, você usou R$ 200,00. Pra saber quanto sobra, é só cadastrar o lim
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [ ] a forma solta trouxe o dado numérico que a curta traz
 - [?] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
@@ -1479,7 +1480,7 @@ Total: R$ 200,00 | Pago: R$ 0,00 | Em aberto: R$ 200,00
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 ---
@@ -1514,7 +1515,7 @@ Total: R$ 200,00 | Pago: R$ 0,00 | Em aberto: R$ 200,00
 - [x] todo valor da forma solta aparece na resposta da forma curta
 - [x] a forma solta trouxe o dado numérico que a curta traz
 - [x] a forma solta trouxe TODOS os valores da curta (informativo)
-- [x] guarda: nenhum número da IA veio de fora das tools
+- [x] guarda: nenhum número da IA veio de fora das tools (os dois lados)
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
