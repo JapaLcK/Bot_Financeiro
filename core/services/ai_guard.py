@@ -59,8 +59,12 @@ _CLAIM_ID_RE = re.compile(r"#(\d{1,9})\b")
 _CLAIM_CODE_RE = re.compile(r"\b(CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
 
 # Na evidência, qualquer literal numérico serve como DINHEIRO — as tools
-# devolvem JSON e o formato varia.
-_ANY_NUM_RE = re.compile(r"\d[\d.,]*")
+# devolvem JSON e o formato varia. O `-?` é obrigatório: sem ele a evidência
+# ficava sem sinal, e comparar em módulo tornava `R$ 50,00` e `R$ -50,00`
+# indistinguíveis contra `{"balance": -50.0}`. Um modelo que come o menos diz
+# que você TEM cinquenta reais quando você DEVE cinquenta — e era justamente
+# esse o evento que a guarda deixava de emitir.
+_ANY_NUM_RE = re.compile(r"-?\d[\d.,]*")
 
 # ID precisa de evidência PRÓPRIA, e ela sai da CHAVE do campo — não de um
 # padrão numérico. Duas tentativas anteriores falharam pelo mesmo motivo,
@@ -109,13 +113,15 @@ def _ids_from_json(obj, out: set[int]) -> None:
 
 def _brl_to_cents(raw: str) -> int | None:
     """Como o BOT escreve: `1.234,56` → 123456. Ponto é milhar."""
-    s = raw.strip().lstrip("-").rstrip(".,")
+    s = raw.strip().rstrip(".,")
+    sinal = -1 if s.startswith("-") else 1
+    s = s.lstrip("-")
     if not s:
         return None
     try:
         if "," in s:
-            return round(float(s.replace(".", "").replace(",", ".")) * 100)
-        return round(float(s.replace(".", "")) * 100)
+            return sinal * round(float(s.replace(".", "").replace(",", ".")) * 100)
+        return sinal * round(float(s.replace(".", "")) * 100)
     except ValueError:
         return None
 
@@ -126,12 +132,14 @@ def _evidence_cents(raw: str) -> set[int]:
     aqui é o lado barato."""
     s = raw.strip().rstrip(".,")
     out: set[int] = set()
+    sinal = -1 if s.startswith("-") else 1
+    s = s.lstrip("-")
     if not s:
         return out
     for candidate in {s.replace(".", "").replace(",", "."),  # BR: 1.234,56
                       s.replace(",", "")}:                   # JSON: 1234.56
         try:
-            out.add(round(float(candidate) * 100))
+            out.add(sinal * round(float(candidate) * 100))
         except ValueError:
             pass
     return out
@@ -144,8 +152,29 @@ def tool_results(messages: list[dict]) -> list[str]:
     concordar sobre o que conta como evidência, e quando divergiram foi
     defeito (o wiring de produção lia o histórico inteiro enquanto o harness
     fatiava por turno). Quem chama é responsável por passar só as mensagens
-    do turno."""
-    return [m.get("content") or "" for m in (messages or []) if m.get("role") == "tool"]
+    do turno.
+
+    DESCARTA o payload de confirmação pendente. Numa write que pede "sim/não",
+    o `_dispatch_tool` devolve `{"status": "pending_user_confirmation",
+    "summary": ..., "args": ...}` — e `args`/`summary` são o ECO dos argumentos
+    que o próprio modelo escolheu. Aceitar isso como evidência tornava a
+    invenção auto-validante: se o usuário não disse valor e o modelo chutou
+    100, a confirmação dizendo "R$ 100,00" batia com o eco e não gerava evento.
+    O payload não traz nenhum dado independente, então sai inteiro — e o valor
+    que o usuário de fato disse continua contando, porque `check()` recebe
+    `user_text` à parte."""
+    out: list[str] = []
+    for m in (messages or []):
+        if m.get("role") != "tool":
+            continue
+        chunk = m.get("content") or ""
+        try:
+            if json.loads(chunk).get("status") == "pending_user_confirmation":
+                continue
+        except (ValueError, TypeError, AttributeError):
+            pass
+        out.append(chunk)
+    return out
 
 
 def money_cents(text: str) -> set[int]:
@@ -208,7 +237,6 @@ def check(reply: str, tool_results: list[str], user_text: str = "") -> list[Clai
         val = _brl_to_cents(m.group(1))
         if val is None:
             continue
-        val = abs(val)
         ok = val in cents
         claims.append(Claim("dinheiro", m.group(0), ok,
                             "" if ok else "valor não veio de nenhuma tool nem da mensagem"))
@@ -303,9 +331,22 @@ if __name__ == "__main__":
     assert len(neg) == 1 and neg[0].supported, neg
     assert check("Sobrou R$ *99,99*", TOOLS)[0].supported is False
 
-    # saldo negativo é afirmação também
+    # saldo negativo é afirmação, e o SINAL faz parte dela
     assert check("🏦 Saldo: R$ -50,00", TOOLS)[0].supported, "negativo tem que ser checado"
     assert not check("🏦 Saldo: R$ -77,00", TOOLS)[0].supported
+    NEG = ['{"balance": -50.0}']
+    assert check("Seu saldo é R$ -50,00.", NEG)[0].supported
+    assert not check("Seu saldo é R$ 50,00.", NEG)[0].supported, \
+        "comer o menos inverte o fato: DEVE 50 vira TEM 50"
+
+    # eco de confirmação pendente NÃO é evidência
+    PEND = [{"role": "tool", "content": '{"status": "pending_user_confirmation", '
+             '"summary": "depositar R$ 100,00 na viagem", "args": {"valor": 100.0}}'}]
+    assert tool_results(PEND) == [], "o eco do próprio modelo tem que sair"
+    assert not check("Confirma depositar R$ 100,00?", tool_results(PEND))[0].supported
+    # mas o valor que o USUÁRIO disse continua valendo
+    assert check("Confirma depositar R$ 100,00?", tool_results(PEND),
+                 user_text="guarda 100 na viagem")[0].supported
 
     # tool_results: só as mensagens de tool, na ordem
     assert tool_results([{"role": "system", "content": "s"},
