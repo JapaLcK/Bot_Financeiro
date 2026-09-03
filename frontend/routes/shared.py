@@ -571,8 +571,11 @@ def reset_db_pool() -> AsyncConnectionPool | None:
     porque quem guarda a referência guarda UMA por vez. Guardar N pools segura
     N conexões: se algum dia um chamador acumular, feche o que ele guardou.
 
-    Precondição: ninguém está segurando o `_db_pool_lock` neste instante —
-    chame entre event loops, nunca com um `_get_db_pool` em voo.
+    Precondição, agora IMPOSTA pelo assert abaixo: ninguém está segurando o
+    `_db_pool_lock` neste instante — chame entre event loops, nunca com um
+    `_get_db_pool` em voo. Sem a guarda, trocar o lock por baixo de um
+    `_get_db_pool` em voo é silencioso e MEDIDO em 03/09/2026: dois pools
+    construídos, os dois chamadores com pools DIFERENTES e um pool órfão aberto.
 
     O QUE ISTO FECHA, E O QUE NÃO FECHA. Fecha os call sites que CHAMAM
     `reset_db_pool`. NÃO fecha a categoria: a mina segue armada em 4 arquivos
@@ -591,14 +594,21 @@ def reset_db_pool() -> AsyncConnectionPool | None:
     arma com `_db_pool is None` E lock preso — e o único caminho que zera o
     pool é este, que desarma junto. Ou seja: o invariante vale por COINCIDÊNCIA
     de duas condições, não por construção. Um teste futuro que zere o pool na
-    mão depois de um desses 4 reabre o buraco. O conserto por construção é
-    lock por loop (ou nenhum lock) em `_get_db_pool`, e é mudança de produção.
+    mão depois de um desses 4 reabre o buraco.
+
+    ponytail: o teto é o invariante valer por coincidência das duas condições
+    acima, e não por construção. O conserto por construção é lock por loop (ou
+    nenhum lock) em `_get_db_pool` — mudança de produção, PR próprio.
 
     Existe para a suíte. Em produção não há um único `asyncio.run` /
     `new_event_loop` / `run_until_complete` fora de `tests/` (medido), então
     isto nunca é chamado lá.
     """
     global _db_pool, _db_pool_lock
+    # `assert` e não `RuntimeError`: os 3 call sites estão em `tests/` (medido),
+    # ninguém neste repositório roda com `-O`, e sob `-O` a guarda some voltando
+    # ao comportamento de hoje — o downgrade é para o status quo, não para pior.
+    assert not _db_pool_lock.locked(), "reset_db_pool com _get_db_pool em voo"
     anterior, _db_pool = _db_pool, None
     _db_pool_lock = asyncio.Lock()
     return anterior

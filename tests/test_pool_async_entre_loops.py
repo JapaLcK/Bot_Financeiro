@@ -20,6 +20,8 @@ import os
 import signal
 import sys
 
+import pytest
+
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import frontend.routes.shared as shared
@@ -53,6 +55,13 @@ def _pendurou(*_):
     raise TimeoutError("pendurou: o _db_pool_lock voltou a ficar preso a loop morto")
 
 
+# `signal.SIGALRM` é POSIX-only e `docs/readme.md:18` lista Windows como
+# suportado. A COLETA não quebra (o uso está no corpo, não no import), mas lá o
+# caso daria `AttributeError` em vez de rodar. No CI (ubuntu-latest nos 4 jobs)
+# o skip nunca dispara.
+@pytest.mark.skipif(
+    not hasattr(signal, "SIGALRM"), reason="SIGALRM é POSIX-only (não existe no Windows)"
+)
 def test_o_pool_async_aguenta_dois_event_loops_com_gather():
     """Dois `asyncio.run`, cada um com o pool zerado e DUAS conexões em gather.
 
@@ -70,13 +79,17 @@ def test_o_pool_async_aguenta_dois_event_loops_com_gather():
     # 30s: o caso verde leva 0,55s. Este watchdog cobre só este teste; a pendura
     # de QUALQUER outro é do `timeout-minutes` do job `pytest`
     # (.github/workflows/tests.yml), que fecha a categoria.
-    signal.signal(signal.SIGALRM, _pendurou)
+    # `signal.signal` já DEVOLVE o handler anterior — guardá-lo e repô-lo no
+    # `finally` custa duas palavras e evita deixar `_pendurou` instalado como
+    # handler global para os outros 5578 testes da suíte.
+    handler_anterior = signal.signal(signal.SIGALRM, _pendurou)
     signal.alarm(30)
     try:
         for _ in range(2):
             assert asyncio.run(_duas_conexoes_em_gather()) == [1, 1]
     finally:
         signal.alarm(0)
+        signal.signal(signal.SIGALRM, handler_anterior)
         # `reset_db_pool` de novo antes de restaurar: o gather do último loop
         # prendeu o lock a um loop que acabou de morrer, e deixá-lo no módulo
         # seria plantar aqui a mina que este caso existe para provar apagada.

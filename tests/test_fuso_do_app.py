@@ -188,12 +188,18 @@ def _no_pool_do_dashboard(chamada):
         try:
             return await chamada()
         finally:
-            if shared._db_pool is not None:
-                await shared._db_pool.close()
-            # LOAD-BEARING: o gather acima prendeu o lock a ESTE loop, que morre
-            # em seguida. Sem esta linha a sonda acusa `_loop = <loop morto>`.
-            shared.reset_db_pool()
+            # LOAD-BEARING, e ANTES do `close()`: o gather acima prendeu o lock a
+            # ESTE loop, que morre em seguida; sem esta linha a sonda acusa
+            # `_loop = <loop morto>`. Com o `close()` na frente, uma exceção dele
+            # (fechar pool pode cair em CancelledError — ver o docstring de
+            # `reset_db_pool`) pularia o reset E a restauração, deixando plantada
+            # exatamente a mina que esta função existe para desarmar. Nesta ordem
+            # o pool corrente continua sendo fechado: `reset_db_pool()` DEVOLVE
+            # o que estava em `shared._db_pool`, que é o mesmo objeto de antes.
+            atual = shared.reset_db_pool()
             shared._db_pool = anterior
+            if atual is not None:
+                await atual.close()
 
     return asyncio.run(_ler())
 
