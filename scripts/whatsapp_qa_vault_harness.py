@@ -256,6 +256,12 @@ class Scenario:
 SCENARIOS: list[Scenario] = []
 DISCREPANCIAS: list[str] = []
 
+# O `append_ledger` devolve False quando não consegue gravar (eu o fiz parar de
+# levantar pra não derrubar rodada paga). Ignorar esse retorno fazia o relatório
+# imprimir um "acumulado do mês" que sabidamente não inclui a própria rodada —
+# número errado com cara de medido, que é o que este arquivo inteiro combate.
+LEDGER_OK = True
+
 
 def extract_hash_id(text: str) -> str | None:
     m = re.search(r"#(\d+)", text)
@@ -1065,7 +1071,14 @@ def _seed_par(com_cartao: bool) -> int:
     comando de propósito: é determinístico e (quase) não gasta chamada."""
     uid = new_pro_uid()
     for t in SEED_PAR:
-        send(uid, t)
+        resp = send(uid, t)
+        # Conferir os QUATRO, não só o do cartão. No commit anterior eu escrevi
+        # que estava "corrigindo a classe, não a instância" e validei UM seed —
+        # a classe era "toda resposta de seed". Um lançamento que não entra
+        # deixa os dois usuários com a mesma base incompleta, e o par volta a
+        # ganhar ✅ comparando totais iguais e errados, inclusive R$ 0,00.
+        if extract_hash_id(resp) is None:
+            raise RuntimeError(f"seed {t!r} não gerou lançamento (sem ID #N): {resp[:120]!r}")
     if com_cartao:
         seed_card(uid)
         # "comprei 200 no nubank" registrava DESPESA COMUM, não compra no
@@ -1211,8 +1224,9 @@ def main():
     # e gravando depois o artefato sempre omitia a própria rodada — na primeira
     # do mês ele mostrava custo > 0 e acumulado 0,0000, contradizendo a si
     # mesmo. O total do console estava certo só porque roda depois.
+    global LEDGER_OK
     usd_rodada, _ = meter.cost_usd(meter.CALLS)
-    meter.append_ledger(usd_rodada, "whatsapp_qa_vault_harness")
+    LEDGER_OK = meter.append_ledger(usd_rodada, "whatsapp_qa_vault_harness")
 
     write_report()
 
@@ -1235,7 +1249,10 @@ def main():
           f"{len(nao_sust)} NÃO sustentada(s)")
     for c in nao_sust:
         print(f"[harness]   🚨 {c.token} ({c.kind}) — {c.detail}")
-    print(f"[harness] acumulado dos harnesses no mês: US$ {meter.month_total_usd():.4f}")
+    if LEDGER_OK:
+        print(f"[harness] acumulado dos harnesses no mês: US$ {meter.month_total_usd():.4f}")
+    else:
+        print("[harness] acumulado do mês INDISPONÍVEL — o ledger não pôde ser gravado")
 
 
 def _split_paths() -> tuple[int, int]:
@@ -1284,8 +1301,11 @@ def write_report():
     tin = sum(c["in"] for c in meter.CALLS)
     tcached = sum(c["cached"] for c in meter.CALLS)
     pct = (100 * tcached / tin) if tin else 0
-    lines.append(f"**Custo:** US$ {usd:.4f} nesta rodada · US$ {meter.month_total_usd():.4f} "
-                  f"acumulado no mês pelos harnesses. {tin} tokens de entrada, "
+    mes = (f"US$ {meter.month_total_usd():.4f} acumulado no mês pelos harnesses"
+           if LEDGER_OK else
+           "**acumulado do mês INDISPONÍVEL** — o ledger não pôde ser gravado, "
+           "então esta rodada não entrou nele e o total seria menor que o real")
+    lines.append(f"**Custo:** US$ {usd:.4f} nesta rodada · {mes}. {tin} tokens de entrada, "
                   f"{tcached} cacheados ({pct:.0f}%), cobrados à metade. "
                   f"Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) "
                   f"— reconfira antes de citar fora daqui.")
