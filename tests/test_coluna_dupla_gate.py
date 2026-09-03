@@ -22,6 +22,8 @@ overlay e a escolha do interpretador nao passam pela `veredito`.
 import importlib.util
 import os
 import pathlib
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -84,26 +86,64 @@ def test_nunca_chega_a_rodar(db):
 '''
 
 
+# As QUATRO formas de node id no mesmo arquivo: modulo, classe, classe ANINHADA e
+# parametrizacao. Todas vermelhas — citacao so existe para vermelho.
+_QUATRO_FORMAS_DE_NODEID = '''
+import pytest
+
+
+def test_modulo():
+    assert 1 == 2
+
+
+class TestClasse:
+    def test_metodo(self):
+        assert 1 == 2
+
+    class TestAninhada:
+        def test_fundo(self):
+            assert 1 == 2
+
+
+@pytest.mark.parametrize("v", [1])
+def test_param(v):
+    assert v == 2
+'''
+
+
 def _pytest_em(monkeypatch, tmp_path, nome, fonte):
     """Roda o pytest de verdade em `tmp_path`, PELA `roda_pytest`: e ela que monta a
     linha de comando do XML, e uma copia dela aqui seria uma segunda fonte de
     verdade. `PYTEST_ADDOPTS` e zerado — herdado do ambiente, mudaria a corrida e o
     teste mediria outra coisa. O XML fica em `tmp_path/relatorio.xml`."""
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    (tmp_path / nome).parent.mkdir(parents=True, exist_ok=True)  # `nome` pode ter diretorio
     (tmp_path / nome).write_text(fonte)
-    return coluna_dupla.roda_pytest(str(tmp_path), sys.executable, [nome],
-                                    str(tmp_path / "relatorio.xml"))
+    rc, desf, _ = coluna_dupla.roda_pytest(str(tmp_path), sys.executable, [nome],
+                                           str(tmp_path / "relatorio.xml"))
+    return rc, desf
+
+
+def _reroda(cwd, citacao, xml):
+    """Reroda o pytest com a CITACAO do relatorio, exatamente como ela sai. O que
+    prova "rerodavel" e o rc — assertar a string so provaria que `join` funciona —,
+    e o `shlex.split` faz o papel do shell para onde a citacao e colada.
+
+    O XML sai FORA do `cwd`: quando ele e um repo-laboratorio, escrever la dentro
+    deixa `?? reroda.xml` e um `_gate(lab)` posterior aborta na Guarda 1 ("arvore
+    suja"). Hoje quem salva e a ordem das chamadas, e ordem nao e garantia."""
+    return coluna_dupla.roda_pytest(cwd, sys.executable, shlex.split(citacao), str(xml))[0]
 
 
 def _verde(antes=None):
     """A coluna CORRIGIDA das chamadas unitarias: um teste que passou, mais tudo o
-    que ficou VERMELHO no antigo — falha E erro — agora passando. O criterio de
-    verde e PAREADO e varre os dois, entao sem isto o caso sairia REPROVADO por um
-    motivo que ele nao quer medir."""
-    vermelhos = {**antes.falhados, **antes.errados} if antes else {}
+    que ficou VERMELHO no antigo — falha, ambiguo E erro — agora passando. O
+    criterio de verde e PAREADO e varre os TRES, entao sem isto o caso sairia
+    REPROVADO por um motivo que ele nao quer medir."""
+    vermelhos = {**antes.falhados, **antes.ambiguos, **antes.errados} if antes else {}
     passados = {("lab", "test_verde"): "lab.py::test_verde",
                 **{chave: nodeid for chave, (nodeid, _) in vermelhos.items()}}
-    return coluna_dupla.Desfechos(len(passados), 0, {}, {}, passados)
+    return coluna_dupla.Desfechos(len(passados), 0, {}, {}, {}, passados)
 
 
 def test_erro_de_fixture_e_prova_FRACA_mesmo_imprimindo_FAILED(monkeypatch, tmp_path):
@@ -133,6 +173,61 @@ def test_assercao_que_falha_e_prova_FORTE(monkeypatch, tmp_path):
     assert codigo == 0
     assert "prova FORTE" in relatorio
     assert "test_assercao_falha.py::test_roda_e_falha" in relatorio  # nodeid colavel
+
+
+def test_nodeid_citado_reconstroi_a_classe(monkeypatch, tmp_path):
+    """A citacao tem de ser RERODAVEL, e o node id executavel NAO esta no XML: o
+    `classname` do xunit1 e o modulo pontilhado MAIS a cadeia de classes. Montando
+    so `file::name`, metodo de classe saia `test_ids.py::test_metodo` — node id que
+    nao existe, e o pytest recusa a linha inteira com rc=4.
+
+    Negativo: com a construcao anterior, `test_metodo` e `test_fundo` saem sem a
+    classe e o `_reroda` devolve 4. Positivo: `test_modulo` e `test_param` provam
+    que a reconstrucao nao estraga o caminho da MAIORIA — os node ids fora de
+    classe. Quantos sao, remedir antes de reusar (o `-v` e o que faz a conta bater
+    com a prosa: ele e o ESPELHO do irmao em `scripts/coluna_dupla.py`, que conta os
+    ids EM classe. Sem ele o comando devolve o total, que INCLUI justamente o
+    conjunto que este positivo existe para excluir. E sempre pelo `-m pytest`: o
+    console script `pytest` desta maquina tem shebang morto e sai VAZIO, que o
+    `grep -c` entrega como 0):
+        .venv/bin/python -m pytest tests/ -q --collect-only | grep '::' | grep -vc '::.*::' """
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_ids.py", _QUATRO_FORMAS_DE_NODEID)
+    assert rc == coluna_dupla.PYTEST_FALHA
+    citados = sorted(nodeid for nodeid, _ in desfechos.falhados.values())
+    assert citados == ["'test_ids.py::test_param[1]'",
+                       "test_ids.py::TestClasse::TestAninhada::test_fundo",
+                       "test_ids.py::TestClasse::test_metodo",
+                       "test_ids.py::test_modulo"]
+    # O que fecha o caso: colada de volta, a citacao COLETA os quatro e da rc=1.
+    assert _reroda(str(tmp_path), " ".join(citados),
+                   tmp_path / "reroda.xml") == coluna_dupla.PYTEST_FALHA
+
+
+def test_nodeid_em_subdiretorio_que_repete_o_nome_do_arquivo(monkeypatch, tmp_path):
+    """O caso que a reconstrucao POR PREFIXO existe para fechar, e que nenhum outro
+    teste deste arquivo alcanca: os alvos daqui sao todos arquivos PLANOS em
+    `tests/`, e ali qualquer heuristica de "ache o nome do arquivo dentro do
+    classname" acerta por sorte. Em `test_x/test_x.py` o classname e
+    `test_x.test_x` e o nome aparece DUAS vezes.
+
+    Negativo: com a heuristica anterior (`basename` + `partes.index`) o marco casa
+    na PRIMEIRA ocorrencia, que e o DIRETORIO, e sobra `test_x` como se fosse
+    classe — ate `test_modulo`, funcao solta, sai
+    `test_x/test_x.py::test_x::test_modulo`, node id que nao existe. Medido nesta
+    mesma chamada: `_reroda` da 4 (alvo inexistente) com a heuristica e 1 com o
+    prefixo. Positivo: as duas formas no mesmo arquivo — funcao de MODULO e metodo
+    de CLASSE —, entao um criterio que consertasse a classe quebrando a funcao (ou
+    o contrario) nao passa aqui."""
+    rc, desfechos = _pytest_em(monkeypatch, tmp_path, "test_x/test_x.py",
+                               _QUATRO_FORMAS_DE_NODEID)
+    assert rc == coluna_dupla.PYTEST_FALHA
+    citados = sorted(nodeid for nodeid, _ in desfechos.falhados.values())
+    assert citados == ["'test_x/test_x.py::test_param[1]'",
+                       "test_x/test_x.py::TestClasse::TestAninhada::test_fundo",
+                       "test_x/test_x.py::TestClasse::test_metodo",
+                       "test_x/test_x.py::test_modulo"]
+    assert _reroda(str(tmp_path), " ".join(citados),
+                   tmp_path / "reroda.xml") == coluna_dupla.PYTEST_FALHA
 
 
 def test_coluna_antiga_interrompida_reprova_mesmo_com_falha_no_xml(monkeypatch, tmp_path):
@@ -186,8 +281,12 @@ def test_xml_ausente_reprova(tmp_path):
 # Os testes acima cobrem so a `veredito` e a `roda_pytest`. Os quatro grupos
 # abaixo cobrem o que elas nao veem, tudo dentro do `main()`: quais arquivos
 # atravessam o overlay, com que MODO, e qual interpretador roda as duas colunas.
-# Custo medido: ~1,3 s por caso ponta a ponta (2 worktrees + 2 pytest), ~0,12 s
-# quando o gate aborta cedo. O laboratorio e descartavel e nao encosta no
+# Cada caso ponta a ponta paga 2 worktrees + 2 pytest, e o que aborta cedo paga so
+# a parte do git. O TEMPO nao fica escrito aqui — ele e da maquina (CLAUDE.md §2) —
+# e sai do proprio pytest, da raiz de um checkout que tenha o `.venv` (um worktree
+# de `.claude/worktrees/` nao tem; use o `.venv` da raiz principal):
+#     .venv/bin/python -m pytest tests/test_coluna_dupla_gate.py --durations=0
+# O laboratorio e descartavel e nao encosta no
 # repositorio real: o `_lab` fica no `tmp_path`, e os worktrees que o gate cria
 # nascem e morrem num `mkdtemp(prefix="coluna-dupla-")` proprio, sob o `$TMPDIR`.
 _LIB_ANTIGA = "def valor():\n    return 0\n"
@@ -309,6 +408,91 @@ def test_valor():
     assert lib.valor() == 42
 '''
 
+# `lib.reset()` so existe no CORRIGIDO: no antigo o hook abaixo estoura com
+# `AttributeError` na fase call, ANTES do corpo do teste.
+_LIB_CORRIGIDA_COM_RESET = _LIB_CORRIGIDA + "\n\ndef reset():\n    return None\n"
+
+# Hook com ZERO condicoes, que so chama producao — o acidente, nao o ataque.
+_HOOK_QUE_SO_CHAMA_PRODUCAO = "import lib\n\n\ndef pytest_runtest_call(item):\n    lib.reset()\n"
+
+# Producao que ESTOURA no antigo: o corpo do teste RODA e o traceback termina em
+# `lib.py`, nao no arquivo do teste.
+_LIB_ANTIGA_QUE_ESTOURA = 'def valor():\n    raise ValueError("nao suportado")\n'
+
+# Fixture `yield` que estoura no TEARDOWN: o corpo do teste roda e PASSA, e so
+# depois a fixture quebra. Medido (pytest 9.0.2, `junit_family=xunit1`): sai UM
+# `<testcase>` com SO `<error>`, `message='failed on teardown with "..."'` — ou
+# seja, `<error>` NAO implica "o corpo nao rodou".
+_FIXTURE_QUE_ESTOURA_NO_TEARDOWN = '''
+import pytest
+
+import lib
+
+
+@pytest.fixture
+def recurso():
+    yield 1
+    if lib.valor() != 42:
+        raise RuntimeError("estourou no TEARDOWN, com o corpo ja executado")
+
+
+def test_valor(recurso):
+    assert recurso == 1
+'''
+
+
+# Parametrizacao com virgula E espaco no id: a forma que morre num shell sem
+# aspas. Quantos node ids desta suite precisam delas, remedir antes de reusar
+# (sempre pelo `-m pytest`: o console script `pytest` desta maquina tem shebang
+# morto e sai VAZIO; e `python` nu nao existe no PATH, so `python3`):
+#     .venv/bin/python -m pytest tests/ -q --collect-only | grep '::' \
+#         | .venv/bin/python -c "import shlex,sys; \
+#           print(sum(shlex.quote(l.strip())!=l.strip() for l in sys.stdin))"
+_TESTE_PARAMETRIZADO = '''
+import pytest
+
+import lib
+
+
+@pytest.mark.parametrize("v", ["2,5 mil"])
+def test_valor(v):
+    assert lib.valor() == 42
+'''
+
+# Falha nas DUAS colunas (`0 != 99` e `42 != 99`): o unico caminho em que o gate
+# REPROVA tendo rodado os dois pytest, e onde o traceback e o diagnostico.
+_TESTE_QUE_FALHA_NAS_DUAS = "import lib\n\n\ndef test_valor():\n    assert lib.valor() == 99\n"
+
+# 500 `print` ANTES do assert. No `-q` a captura do stdout sai DEPOIS do
+# traceback, entao sao eles que empurram o resumo — a parte que NOMEIA o que
+# falhou — para o fim da saida, e e por isso que o guardado e a CAUDA.
+_TESTE_QUE_IMPRIME_MUITO_E_FALHA_NAS_DUAS = (
+    "import lib\n\n\ndef test_valor():\n"
+    "    for i in range(500):\n"
+    "        print(f'LINHA_{i:04d}')\n"
+    "    assert lib.valor() == 99\n")
+
+# O MESMO acidente do `_HOOK_QUE_SO_CHAMA_PRODUCAO`, uma fase antes: hook de
+# COLETA, com zero condicoes, chamando producao que so existe no corrigido. A
+# coluna antiga sai rc=3 (INTERNALERROR), e o diagnostico dele vai para o STDOUT.
+_HOOK_DE_COLETA_QUE_SO_CHAMA_PRODUCAO = (
+    "import lib\n\n\ndef pytest_collection_modifyitems(config, items):\n    lib.reset()\n")
+
+# O mesmo acidente uma fase ANTES: `pytest_configure` roda enquanto o
+# `TerminalReporter` ainda nao existe, entao o INTERNALERROR da coluna antiga vai
+# para o STDERR e o stdout fica VAZIO — e o stderr e o unico canal que a
+# `roda_pytest` repassa, LINE-buffered (`line_buffering` True, `write_through`
+# False) e portanto na primeira quebra de linha, ANTES de o cabecalho ter sido
+# descarregado. O TAMANHO do stderr nao fica escrito: ele leva o caminho absoluto
+# do lab no traceback e muda com o `tmp_path` (CLAUDE.md §2).
+_HOOK_DE_CONFIGURE_QUE_SO_CHAMA_PRODUCAO = (
+    "import lib\n\n\ndef pytest_configure(config):\n    lib.reset()\n")
+
+# Oito tautologicos, para o `git` ver SIMILARIDADE suficiente e chamar o arquivo
+# novo de COPIA do antigo (medido: `C083`).
+_OITO_TAUTOLOGICOS = "".join(f"def test_taut_{i}():\n    assert True\n\n\n" for i in range(8))
+_COPIA_COM_FIX = _OITO_TAUTOLOGICOS + "def test_fix():\n    import lib\n    assert lib.valor() == 42\n"
+
 
 def _escreve(raiz, arquivos):
     for rel, conteudo in arquivos.items():
@@ -318,7 +502,7 @@ def _escreve(raiz, arquivos):
 
 
 def _git(lab, *args):
-    subprocess.run(["git", *args], cwd=lab, check=True, capture_output=True)
+    return subprocess.run(["git", *args], cwd=lab, check=True, capture_output=True, text=True)
 
 
 def _lab(tmp_path, arquivos=None):
@@ -340,17 +524,23 @@ def _commita(lab, arquivos):
     _git(lab, "commit", "-qm", "corrigido")
 
 
-def _gate(lab, *args, addopts=""):
+def _gate(lab, *args, addopts="", juntos=False):
     """O gate de verdade, sobre o laboratorio. `PYTEST_ADDOPTS` e fixado pelo mesmo
     motivo do `_pytest_em`: herdado, mudaria a corrida das DUAS colunas. O
     `COLUMNS` que estava aqui saiu junto com a leitura do resumo — era o pytest
     que CORTAVA a linha do resumo na largura do terminal; o XML nao corta nada.
 
     `addopts` existe para o teste que prova que o gate IGNORA a variavel: zerar
-    aqui, sempre, esconderia justamente esse caso de todos os outros testes."""
+    aqui, sempre, esconderia justamente esse caso de todos os outros testes.
+
+    `juntos` funde os canais (`2>&1`) — a configuracao do `> log`, do `| tee` e do
+    CI. Todo o resto le os dois como pipes SEPARADOS, e ali a ordem entre eles nao
+    existe para ser medida; e por isso que `juntos` e opcional em vez de padrao."""
     return subprocess.run([sys.executable, str(_CAMINHO), "--antes", "HEAD~1", "--depois", "HEAD", *args],
                           cwd=lab, env={**os.environ, "PYTEST_ADDOPTS": addopts},
-                          capture_output=True, text=True)
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT if juntos else subprocess.PIPE,
+                          text=True)
 
 
 def test_nome_acentuado_atravessa_o_overlay(tmp_path):
@@ -378,6 +568,7 @@ def test_caso_comum_com_fixture_de_dados_aprova_forte(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "prova FORTE" in r.stdout
     assert "assert 0 == 42" in r.stdout  # a fixture atravessou legivel
+    assert "assert 0 == 42" not in r.stderr  # ...e o stdout das colunas NAO saiu junto
 
 
 def test_fixture_apagada_some_da_coluna_antiga(tmp_path):
@@ -576,6 +767,12 @@ def test_testes_com_diretorio_nao_libera_a_suite_inteira(tmp_path):
     r = _gate(lab, "--testes", "tests/")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "nao aponta para um arquivo de teste .py" in r.stderr
+    # O prefixo acima e a parte COMUM aos dois motivos, entao ele sozinho nao ve a
+    # troca: sao os dois asserts abaixo que prendem o motivo do DIRETORIO a este
+    # caso — invertida a condicao dos motivos, o operador que digitou `tests/` leva
+    # dois paragrafos sobre caminho absoluto e este assert fica vermelho.
+    assert "Um DIRETORIO" in r.stderr
+    assert "Absoluto (ou com `..`)" not in r.stderr
     assert "prova FORTE" not in r.stdout and "test_alheio" not in r.stdout
 
     r = _gate(lab, "--testes", "tests/test_ok.py::test_ok")
@@ -590,10 +787,11 @@ def test_python_relativo_vira_absoluto(tmp_path):
     o `abspath`: `FileNotFoundError` antes de qualquer pytest.
 
     O relativo e um `..` unico, para FORA do repo, e as duas escolhas foram
-    medidas. `os.path.relpath(sys.executable, lab)` nao serve de ataque: ele sai
-    com 10 niveis de `..` e o worktree temporario so tem 7 — os 3 sobrando morrem
-    em `/` (`/.. == /`) e o caminho errado acerta o alvo por acidente, entao o
-    ataque ficaria refem da profundidade do `TMPDIR`. Um relativo para DENTRO do
+    medidas. `os.path.relpath(sys.executable, lab)` nao serve de ataque: ele sai com
+    MAIS niveis de `..` do que o worktree temporario tem, os que sobram morrem em `/`
+    (`/.. == /`) e o caminho errado acerta o alvo por acidente. O ataque ficaria
+    refem da profundidade do `TMPDIR` — que e o que a contagem de niveis mede, e por
+    isso ela nao fica escrita aqui (CLAUDE.md §2). Um relativo para DENTRO do
     repo tambem nao: o mesmo caminho existe no worktree, e o gate rodaria o
     arquivo errado — silenciosamente, se ele fosse executavel la."""
     interpretador = tmp_path / "interpretador"  # fora do repo: o worktree nao tem esse caminho
@@ -732,21 +930,171 @@ def test_erro_de_coleta_impareavel_continua_aprovando(tmp_path):
     assert "prova FRACA" in r.stdout
     assert "No module named 'lib_novo'" in r.stdout
     assert "nao provou o conserto" not in r.stdout
+    # A identidade impareavel nao da node id: `tests/test_novo.py::tests.test_novo`
+    # nao existe em coluna nenhuma. A citacao cai no ARQUIVO, que e colavel.
+    assert "::tests.test_novo" not in r.stdout
+    assert "tests/test_novo.py -" in r.stdout
+    citada = next(l.strip().split(" - ")[0] for l in r.stdout.splitlines()
+                  if "test_novo.py" in l and " - " in l)
+    # o XML vai para o `tmp_path`, e nao para dentro do lab: ver `_reroda`
+    assert _reroda(str(lab), citada,
+                   tmp_path / "reroda.xml") != 4  # o pytest ACEITA o alvo (rc=4 = inexistente)
 
 
-def test_prova_FRACA_nao_afirma_que_ninguem_rodou():
+def test_hook_de_fase_call_que_estoura_antes_do_corpo_e_prova_FRACA(tmp_path):
+    """Controle NEGATIVO da classificacao. Quem escolhe `<failure>` x `<error>` no
+    JUnit e a FASE (`report.when == "call"`), nao a entrada no corpo do teste: um
+    `pytest_runtest_call` que estoure ANTES de chamar o corpo sai `<failure>` do
+    mesmo jeito. E acidente alcancavel, nao ataque — o hook aqui tem ZERO condicoes
+    e so chama producao (`lib.reset()`), que so existe no corrigido.
+
+    Medido com a classificacao pela tag: `APROVADO, prova FORTE` com exit 0,
+    citando `tests/test_valor.py::test_valor - AttributeError` — o carimbo de "o
+    corpo do teste rodou e falhou" sobre um corpo que nunca foi chamado."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA_COM_RESET,
+                   "tests/conftest.py": _HOOK_QUE_SO_CHAMA_PRODUCAO,
+                   "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FRACA" in r.stdout
+    assert "prova FORTE" not in r.stdout
+    assert "has no attribute 'reset'" in r.stdout  # a causa real, e nao o assert do corpo
+    # O balde: e ESTE lab que enche `ambiguos` num pytest de verdade. Sem este
+    # assert, fundir os dois baldes de volta no `le_junit` deixava a suite inteira
+    # verde — a linha do roteamento nao tinha quem a protegesse.
+    assert "1 com <failure> e SEM frame" in r.stdout
+
+
+def test_corpo_que_chama_producao_que_estoura_continua_prova_FORTE(tmp_path):
+    """Controle POSITIVO do caso acima, e o que mata o criterio "o ULTIMO frame tem
+    de ser do arquivo do teste": aqui o corpo RODA, chama producao, e o traceback
+    termina em `lib.py:2: ValueError`. O frame do proprio arquivo existe, mas no
+    MEIO — e o vermelho legitimo do #182, que nao tem um `assert` sequer.
+
+    Sem este teste, um criterio que exigisse o frame no fim reprovaria o caminho
+    honesto e rebaixaria toda prova a FRACA, que e pior que o bug."""
+    lab = _lab(tmp_path, {"lib.py": _LIB_ANTIGA_QUE_ESTOURA})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_valor.py::test_valor - ValueError: nao suportado" in r.stdout
+
+
+def test_erro_de_TEARDOWN_nao_vira_corpo_que_nao_rodou(tmp_path):
+    """`<error>` e a FASE (`report.when != "call"`), e nem toda fase e ANTES do
+    corpo: no teardown o corpo ja rodou e PASSOU. Aqui o `test_valor` passa nas duas
+    colunas e e a fixture que quebra no antigo, depois do `yield`.
+
+    O gate nao tem como saber que o corpo rodou (o XML nao carrega a fase), entao o
+    veredito continua FRACA — o que ele NAO pode fazer e afirmar que o corpo nao
+    rodou. Medido com a frase antiga: `APROVADO, prova FRACA` dizendo "o corpo nem
+    ter chegado a rodar" sobre um corpo que executou e passou. Este e o unico
+    registro mecanico no repo de que `<error>` != "nao rodou"."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_teardown.py": _FIXTURE_QUE_ESTOURA_NO_TEARDOWN})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FRACA" in r.stdout
+    assert "estourou no TEARDOWN" in r.stdout  # a causa real, do teardown
+    assert "o corpo nem ter chegado a rodar" not in r.stdout
+    assert "nem chegaram a rodar" not in r.stdout
+
+
+def test_prova_FRACA_separa_o_erro_do_failure_sem_frame():
     """A frase da prova FRACA e a linha que o Manager le para decidir se aceita, e
-    ela dizia "NENHUM teste chegou a RODAR no codigo antigo" olhando so o contador
-    de falhas — falsa sempre que a coluna antiga tinha teste PASSANDO ao lado do
-    que errou. Aqui o antigo tem 1 erro e 1 passado, e a frase passa a ser sobre os
-    VERMELHOS, nao sobre o grupo."""
+    ela tratava DOIS estados como um so. `<failure>` sem frame do arquivo do caso
+    PODE ter rodado (os quatro gatilhos do item 2 da celula do traceback, no topo
+    do `coluna_dupla.py`) e o gate nao distingue; `<error>` e fase != call, e so em
+    coleta e setup isso implica corpo nao executado — no teardown o corpo JA rodou.
+
+    Os gatilhos nao sao citados pelo NOME aqui de proposito: os tres greps do
+    `coluna_dupla.py` contam ocorrencias deles na arvore, e uma mencao em prosa
+    entraria na conta como se fosse uso.
+
+    Medido com os dois no mesmo balde: os relatorios dos dois grupos saem byte a
+    byte IGUAIS, e o do `<error>` fala de traceback que o gate nunca olhou. O
+    assert que discrimina e o `rel_erro != rel_ambiguo`; os demais nomeiam o que
+    cada um tem de dizer.
+
+    A versao anterior deste teste era quase tautologica: ela asseria a AUSENCIA de
+    "NENHUM teste chegou a RODAR", string que o fonte ja nao continha."""
+    passado = {("lab", "test_passa"): "lab.py::test_passa"}
+    so_erro = coluna_dupla.Desfechos(
+        2, 0, {}, {},
+        {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")}, passado)
+    so_ambiguo = coluna_dupla.Desfechos(
+        2, 0, {}, {("lab", "test_amb"): ("lab.py::test_amb", "Failed: forjado")},
+        {}, passado)
+    misto = coluna_dupla.Desfechos(3, 0, {}, so_ambiguo.ambiguos, so_erro.errados, passado)
+
+    saidas = [coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, d, 0, _verde(d))
+              for d in (so_erro, so_ambiguo, misto)]
+    (_, rel_erro), (_, rel_ambiguo), (_, rel_misto) = saidas
+    assert [codigo for codigo, _ in saidas] == [0, 0, 0]
+    assert all("prova FRACA" in r for _, r in saidas)
+    assert all("1 passado(s) ao lado" in r for _, r in saidas)  # o passado ao lado, literal
+
+    assert rel_erro != rel_ambiguo  # o assert que discrimina: hoje saem iguais
+    # O gate nao olhou traceback nenhum de um `<error>` — dizer "frame" ali e falar
+    # de uma evidencia que ele nao tem.
+    assert "frame do arquivo do caso" not in rel_erro
+    assert "traceback" not in rel_erro
+    assert "<error>" in rel_erro and "<error>" not in rel_ambiguo
+    assert "1 com <failure>" in rel_misto and "1 com <error>" in rel_misto
+
+
+def test_prova_FORTE_nao_chama_de_nao_rodado_o_failure_sem_frame():
+    """O `(e mais N ...)` da linha FORTE dizia "que nem chegaram a rodar" de tudo o
+    que nao fosse `<failure>` COM frame. E falso nos dois baldes que sobram: o
+    `<failure>` sem frame pode ter rodado, e o `<error>` de teardown rodou. Agora
+    ele nomeia e conta os dois, separados."""
     antes = coluna_dupla.Desfechos(
-        2, 0, {}, {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")},
+        5, 0,
+        {("lab", "test_falha"): ("lab.py::test_falha", "assert 0 == 42")},
+        {("lab", "test_amb1"): ("lab.py::test_amb1", "Failed: a"),
+         ("lab", "test_amb2"): ("lab.py::test_amb2", "Failed: b")},
+        {("lab", "test_erra"): ("lab.py::test_erra", "RuntimeError: x")},
         {("lab", "test_passa"): "lab.py::test_passa"})
     codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, _verde(antes))
-    assert codigo == 0 and "prova FRACA" in relatorio
-    assert "NENHUM teste chegou a RODAR" not in relatorio
-    assert "1 passado(s) ao lado" in relatorio  # o que a frase antiga escondia
+    assert codigo == 0
+    assert "prova FORTE" in relatorio
+    assert "2 com <failure> sem frame do arquivo do caso" in relatorio
+    assert "1 com <error>" in relatorio
+    assert "que nem chegaram a rodar" not in relatorio
+
+
+def test_o_balde_ambiguo_entra_nas_duas_varreduras():
+    """O balde novo tem de entrar nos DOIS lugares que varrem vermelho — a varredura
+    de orfaos e a guarda de coleta pura —, e esquecer qualquer um dos dois e
+    regressao SILENCIOSA: o `_verde` deste arquivo une os tres baldes, entao nenhum
+    outro teste fica vermelho.
+
+    (a) verde SEM o par do ambiguo: com o balde na varredura sai o orfao nomeado;
+    sem ele o gate cai no ramo da falha fechada, outro rc=1 por outro motivo.
+    (b) rc=2 com um ambiguo ao lado do erro de coleta: com o balde na `coleta_pura`
+    a guarda dispara; sem ele o XML PARCIAL sai `APROVADO, prova FRACA` (rc=0)."""
+    ambiguo = {("lab", "test_amb"): ("lab.py::test_amb", "Failed: forjado")}
+
+    antes = coluna_dupla.Desfechos(2, 0, {}, ambiguo, {},
+                                   {("lab", "test_passa"): "lab.py::test_passa"})
+    verde_sem_o_par = coluna_dupla.Desfechos(1, 0, {}, {}, {},
+                                             {("lab", "test_verde"): "lab.py::test_verde"})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, verde_sem_o_par)
+    assert codigo == 1
+    assert "NAO passaram no corrigido" in relatorio
+    assert "lab.py::test_amb" in relatorio  # o orfao, pelo nodeid
+
+    interrompido = coluna_dupla.Desfechos(
+        2, 0, {}, ambiguo,
+        {("", "tests.test_x"): ("tests/test_x.py::tests.test_x", "ImportError: x")}, {})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_INTERROMPIDO, interrompido,
+                                              0, _verde(interrompido))
+    assert codigo == 1
+    assert "interrompida" in relatorio
+    assert "prova FRACA" not in relatorio
 
 
 def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
@@ -808,3 +1156,333 @@ def test_addopts_do_ambiente_nao_injeta_alvo(tmp_path):
     r = _gate(lab, "--testes", "tests/test_taut.py", addopts="-rN")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "tautologico" in r.stdout
+
+
+def test_citacao_sobrevive_ao_shell(tmp_path):
+    """A citacao e feita para ser COLADA depois de um `pytest `, e id de
+    parametrizacao carrega virgula e espaco. Sem aspas, o shell parte
+    `test_valor[2,5 mil]` em dois argumentos e o alvo vira lixo.
+
+    (a) o lab prova a aspa na citacao de UM vermelho; (b) a `veredito` direto prova
+    o SEPARADOR da lista de orfaos: com `', '.join` a virgula gruda no fim de cada
+    elemento e a lista inteira deixa de ser colavel, mesmo com cada elemento citado.
+
+    Positivo: os asserts de citacao dos outros testes deste arquivo
+    (`tests/test_valor.py::test_valor - assert 0 == 42`) provam que o node id comum
+    NAO ganhou aspas — `shlex.quote` nao toca em `[a-zA-Z0-9_@%+=:,./-]`."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_param.py": _TESTE_PARAMETRIZADO})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "'tests/test_param.py::test_valor[2,5 mil]' - assert 0 == 42" in r.stdout
+
+    antes = coluna_dupla.Desfechos(
+        2, 0, {}, {},
+        {("lab", "test_a"): ("'lab.py::test_a[2,5 mil]'", "x"),
+         ("lab", "test_b"): ("lab.py::test_b", "y")}, {})
+    verde = coluna_dupla.Desfechos(1, 0, {}, {}, {},
+                                   {("lab", "test_verde"): "lab.py::test_verde"})
+    codigo, relatorio = coluna_dupla.veredito(coluna_dupla.PYTEST_FALHA, antes, 0, verde)
+    assert codigo == 1
+    linha = next(l for l in relatorio.splitlines() if "NAO passaram no corrigido" in l)
+    assert linha.endswith("'lab.py::test_a[2,5 mil]' lab.py::test_b")
+    assert ", " not in linha  # a virgula do `join` sobrevivia DENTRO da lista citada
+
+
+def test_testes_com_caminho_absoluto_nao_escapa_das_colunas(tmp_path):
+    """Alvo absoluto nao e coletado de coluna nenhuma: o `cwd` do pytest e o
+    worktree, mas o caminho aponta para o CHECKOUT ATUAL. Quem decide o veredito
+    passa a ser uma revisao POSTERIOR do teste, com os SHAs das duas colunas
+    impressos por cima.
+
+    O lab tem TRES commits: em c1 e c2 o `tests/test_x.py` e TAUTOLOGICO (`assert
+    True`), e so em c3 ele vira o teste real. O gate roda o par c1 x c2 — o par que
+    tem de sair REPROVADO por tautologia.
+
+    Negativo: sem a guarda, o alvo absoluto puxa a revisao c3 do disco, ela fica
+    vermelha no worktree c1 e verde no c2, e o par tautologico sai `APROVADO, prova
+    FRACA` com exit 0. Positivo: o MESMO par com o alvo RELATIVO — que resolve
+    dentro de cada worktree — sai `REPROVADO: tautologico`, e e ele que mostra o
+    que o absoluto tinha escapado."""
+    lab = _lab(tmp_path, {"tests/test_x.py": "def test_x():\n    assert True\n"})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA})  # c2: nada muda em tests/
+    _commita(lab, {"tests/test_x.py": "import lib\n\n\ndef test_x():\n    assert lib.valor() == 42\n"})
+    par_taut = ("--antes", "HEAD~2", "--depois", "HEAD~1")  # argparse: a ultima ocorrencia vence
+
+    r = _gate(lab, *par_taut, "--testes", str(lab / "tests" / "test_x.py"))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "nao aponta para um arquivo de teste .py" in r.stderr
+    # A outra ponta do par: o prefixo acima e comum aos dois motivos, e sao estes
+    # dois asserts que prendem o motivo do ABSOLUTO a este caso.
+    assert "Absoluto (ou com `..`)" in r.stderr
+    assert "Um DIRETORIO" not in r.stderr
+    assert "APROVADO" not in r.stdout
+
+    r = _gate(lab, *par_taut, "--testes", "tests/test_x.py")  # relativo: dentro do worktree
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "tautologico" in r.stdout
+
+    r = _gate(lab, *par_taut, "--testes", "../lab/tests/test_x.py")  # sai pelo `..`
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "nao aponta para um arquivo de teste .py" in r.stderr
+
+
+def test_stdout_da_coluna_rejeitada_e_repassado(tmp_path):
+    """Quando o grupo falha TAMBEM no codigo corrigido, a linha `(rc=1)` era todo o
+    diagnostico que o operador recebia — o traceback das duas colunas morria no
+    `capture_output` da `roda_pytest`.
+
+    Vai para o STDERR, e nao para o stdout, porque o stdout e o canal do
+    RELATORIO: quatro linhas com os dois SHAs, os alvos, o interpretador e o
+    veredito. Despejar ali o texto de duas corridas do pytest — que um unico teste
+    barulhento faz passar de 500 linhas por coluna, como mede o
+    `test_cauda_do_stdout_corta_o_comeco_e_conta_o_que_omitiu` logo abaixo —
+    enterra o veredito no meio do diagnostico. Sao coisas de natureza diferente e ficam em
+    canais diferentes: quem quer so o veredito le o stdout, quem quer o traceback
+    le o stderr, e um `2>/dev/null` separa os dois sem parser."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "tests/test_valor.py": _TESTE_QUE_FALHA_NAS_DUAS})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "falha tambem no codigo corrigido" in r.stdout
+    assert "assert 0 == 99" in r.stderr   # o traceback da coluna ANTIGA
+    assert "assert 42 == 99" in r.stderr  # e o da CORRIGIDA
+    assert "assert 0 == 99" not in r.stdout  # o stdout continua so o relatorio
+
+
+def test_cauda_do_stdout_corta_o_comeco_e_conta_o_que_omitiu(tmp_path):
+    """O despejo e so a CAUDA, e o cabecalho diz quantas linhas ficaram de fora.
+    Sem o corte, um teste barulhento leva o stderr do gate junto — MEGABYTES com 20
+    mil `print` falhando nas duas colunas (o tamanho e do lab, e por isso nao esta
+    escrito aqui; CLAUDE.md §2).
+
+    Negativo: com `cauda = 0`, `linhas[-0:]` devolve a lista INTEIRA e os tres
+    asserts do laco caem juntos — o bloco vai de 200 linhas para a saida completa,
+    o `LINHA_0000` reaparece, e o cabecalho passa a anunciar como "omitidas" as
+    linhas que estao ali impressas logo abaixo dele. Positivo: o resumo que NOMEIA
+    o teste (`FAILED ... - assert 0 == 99`) sobrevive ao corte nas DUAS colunas —
+    e ele o motivo de a cauda ser o pedaco guardado; um corte pela CABECA passaria
+    nos dois primeiros asserts e jogaria fora justamente o diagnostico.
+
+    A contagem nao e conferida contra numero escrito aqui (CLAUDE.md §2): o total
+    vem de uma SEGUNDA medicao, a mesma corrida feita direto pela `roda_pytest`."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_valor.py": _TESTE_QUE_IMPRIME_MUITO_E_FALHA_NAS_DUAS})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+
+    # `re.split` com UM grupo devolve os separadores: ['', omitidas, bloco, ...].
+    partes = re.split(r"\[coluna-dupla\] stdout da coluna \w+ \((\d+) linha\(s\) "
+                      r"iniciais omitidas\):\n", r.stderr)
+    assert len(partes) == 5 and partes[0] == "", r.stderr
+    # O XML sai FORA do lab (ver `_reroda`), e esta chamada vem DEPOIS do `_gate`.
+    total = len(coluna_dupla.roda_pytest(str(lab), sys.executable, ["tests/test_valor.py"],
+                                         str(tmp_path / "direto.xml"))[2].splitlines())
+    for omitidas, bloco in ((partes[1], partes[2]), (partes[3], partes[4])):
+        assert len(bloco.splitlines()) == 200, len(bloco.splitlines())
+        assert int(omitidas) == total - 200, (omitidas, total)
+        assert "LINHA_0000" not in bloco and "LINHA_0499" in bloco
+    assert "- assert 0 == 99" in partes[2] and "- assert 42 == 99" in partes[4]
+
+
+def test_stdout_de_rc3_e_repassado_e_o_da_coluna_verde_nao(tmp_path):
+    """As duas direcoes da restricao por rc, no mesmo lab.
+
+    O rc=3 e o unico REPROVADO cujo diagnostico inteiro pode viver no stdout: o
+    INTERNALERROR so vai para o stderr enquanto o `TerminalReporter` nao existe
+    (`pytest_configure`); de `pytest_collection_modifyitems` em diante quem o
+    escreve e o `TerminalReporter.pytest_internalerror`. Medido nos dois, mesmo
+    rc=3, e a troca de canal e exata: `pytest_configure` poe o INTERNALERROR no
+    stderr e deixa o stdout VAZIO; o hook de coleta daqui poe no stdout e deixa o
+    stderr VAZIO. QUAL canal fica vazio nao muda de maquina; o TAMANHO do outro muda
+    com o `tmp_path`, e por isso nao esta escrito aqui (CLAUDE.md §2).
+
+    Negativo: com a restricao em `(PYTEST_FALHA, PYTEST_INTERROMPIDO)` — a versao
+    que este teste existe para impedir de voltar — a coluna antiga e pulada e o
+    operador recebe a linha do veredito e mais nada; o assert do `AttributeError`
+    fica vermelho. Positivo/outra direcao: a coluna CORRIGIDA sai rc=0 com stdout
+    (`1 passed`) e nao e despejada — sem a restricao (`if not saida:`), o despejo
+    volta a sair numa coluna que nao tem vermelho nenhum para mostrar."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA_COM_RESET,
+                   "tests/conftest.py": _HOOK_DE_COLETA_QUE_SO_CHAMA_PRODUCAO,
+                   "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "pytest saiu 3 na coluna antiga" in r.stdout
+    assert "stdout da coluna antiga" in r.stderr
+    assert "INTERNALERROR" in r.stderr
+    assert "has no attribute 'reset'" in r.stderr  # o diagnostico, que so o stdout tinha
+    assert "stdout da coluna corrigida" not in r.stderr  # ela saiu rc=0: nada a mostrar
+
+
+def test_veredito_sai_antes_do_despejo_com_os_canais_juntos(tmp_path):
+    """Separar os canais so entrega o veredito primeiro se o stdout for DESCARREGADO
+    antes do despejo. Todo o resto deste grupo le `r.stdout` e `r.stderr` como pipes
+    separados — a unica configuracao em que a ordem entre eles nao existe. Em
+    `> log 2>&1`, `| tee` e no CI eles viram um fluxo so, e ai o stdout em pipe e
+    bloco-bufferizado (descarrega no `sys.exit`) enquanto o stderr e LINE-buffered e
+    sai na quebra de linha.
+
+    Negativo: sem o `flush=True` do `main`, o veredito e as 4 linhas de cabecalho
+    saem no FIM, atras do despejo inteiro — a POSICAO exata e o tamanho do despejo,
+    que e do lab, e por isso nao fica escrita aqui (CLAUDE.md §2). Positivo: o
+    despejo continua saindo (`assert 0 == 99`), ou seja, o `flush` nao trocou um
+    problema de ordem por um de conteudo."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_valor.py": _TESTE_QUE_IMPRIME_MUITO_E_FALHA_NAS_DUAS})
+    r = _gate(lab, juntos=True)
+    assert r.returncode == 1, r.stdout
+    linhas = r.stdout.splitlines()
+    # As 4 do cabecalho, o veredito e a primeira linha do despejo, na ordem em que
+    # tem de aparecer: comparar com o proprio `sorted` prende as seis de uma vez.
+    ordem = [next(i for i, l in enumerate(linhas) if alvo in l)
+             for alvo in ("antes  =", "depois =", "testes =", "python =",
+                          "falha tambem no codigo corrigido", "stdout da coluna")]
+    assert ordem == sorted(ordem), (ordem, len(linhas))
+    assert "assert 0 == 99" in r.stdout  # o despejo nao sumiu no caminho
+
+
+def test_cabecalho_sai_antes_do_stderr_do_pytest_com_os_canais_juntos(tmp_path):
+    """A outra metade da ordem, e o teste acima e CEGO a ela: o lab dele nao produz
+    stderr de pytest nenhum, entao a unica inversao que ele pode ver e a do
+    veredito. O cabecalho e impresso ANTES das duas corridas, e a `roda_pytest`
+    repassa o stderr delas LINE-buffered, na primeira quebra de linha — as 4 linhas
+    que identificam O QUE foi provado (os dois SHA, os alvos, o interpretador) saem
+    debaixo do despejo.
+
+    O lab e o rc=3 de `pytest_configure`: o unico ponto em que o INTERNALERROR
+    ainda vai para o stderr, porque o `TerminalReporter` nao existe para captura-lo
+    (medido: stdout VAZIO, nem XML sai; o TAMANHO do stderr e do `tmp_path` e por
+    isso nao fica escrito aqui).
+
+    Negativo: sem o `flush=True` da linha do `python =`, o cabecalho inteiro fica no
+    buffer de bloco do stdout ate o `sys.exit` e as 4 linhas caem DEPOIS do
+    INTERNALERROR — os quatro asserts de ordem ficam vermelhos. Positivo: o
+    diagnostico repassado continua saindo (`has no attribute 'reset'`), ou seja, o
+    `flush` novo nao trocou ordem por conteudo."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA_COM_RESET,
+                   "tests/conftest.py": _HOOK_DE_CONFIGURE_QUE_SO_CHAMA_PRODUCAO,
+                   "tests/test_valor.py": _TESTE_DO_FIX})
+    r = _gate(lab, juntos=True)
+    assert r.returncode == 1, r.stdout
+    linhas = r.stdout.splitlines()
+    # Sem este par o assert de ordem passaria por AUSENCIA: um lab que deixasse de
+    # estourar nao teria stderr nenhum para vir na frente.
+    assert "has no attribute 'reset'" in r.stdout, r.stdout
+    stderr_repassado = next(i for i, l in enumerate(linhas) if "INTERNALERROR" in l)
+    # O assert de ordem sozinho e CEGO AO CANAL: trocado o
+    # `_HOOK_DE_CONFIGURE_QUE_SO_CHAMA_PRODUCAO` pelo `_HOOK_DE_COLETA_...` (seis
+    # linhas acima dele), o INTERNALERROR chega pelo DESPEJO do stdout, que sai
+    # DEPOIS do veredito e portanto sempre depois do cabecalho — o caso ficaria
+    # verde com e sem o `flush`. "Repassado pela `roda_pytest`" e exatamente isto:
+    # vir ANTES do veredito. Medido: com a troca de constante, este assert e o unico
+    # que fica vermelho.
+    veredito = next(i for i, l in enumerate(linhas) if "pytest saiu 3" in l)
+    assert stderr_repassado < veredito, (stderr_repassado, veredito, r.stdout)
+    cabecalho = [next(i for i, l in enumerate(linhas) if alvo in l)
+                 for alvo in ("antes  =", "depois =", "testes =", "python =")]
+    assert max(cabecalho) < stderr_repassado, (cabecalho, stderr_repassado, r.stdout)
+
+
+def test_copia_detectada_nao_some_do_overlay(tmp_path):
+    """`diff.renames=copies` na config de QUEM RODA faz o `git diff` classificar o
+    arquivo de teste novo como `C` — que o `--diff-filter=AMRD` descarta. O teste
+    novo entao nao atravessa o overlay E nao entra nos alvos, e sobra so o irmao
+    tautologico.
+
+    Negativo: sem o `-c diff.renames=true`, a segunda chamada sai `REPROVADO:
+    tautologico` — o gate acusa de tautologico um teste que nunca foi coletado.
+    Positivo: a primeira chamada, com a config PADRAO, sai FORTE citando
+    `tests/test_novo.py::test_fix`; sem ela, um pino que quebrasse a deteccao de
+    rename passaria verde no negativo.
+
+    A config e local do lab (`.git/config`), nao variavel de ambiente: e assim que
+    ela chega de verdade — `git config --global diff.renames copies` na maquina de
+    quem roda o gate."""
+    lab = _lab(tmp_path, {"tests/test_taut.py": _OITO_TAUTOLOGICOS})
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_taut.py": _OITO_TAUTOLOGICOS + "def test_taut_8():\n    assert True\n",
+                   "tests/test_novo.py": _COPIA_COM_FIX})
+
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_novo.py::test_fix" in r.stdout
+
+    _git(lab, "config", "diff.renames", "copies")
+    # Sem este assert a segunda metade mede ZERO em silencio: um git que deixasse
+    # de classificar como COPIA repetiria o desfecho da primeira e passaria verde.
+    status = _git(lab, "diff", "--name-status", "HEAD~1", "HEAD", "--", "tests/").stdout
+    assert any(l.startswith("C") for l in status.splitlines()), status  # medido: `C083`
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    assert "tests/test_novo.py::test_fix" in r.stdout
+
+
+def test_o_preambulo_conta_as_celulas_que_ele_declara():
+    """A lista de limites e a MESMA regra escrita duas vezes: o preambulo diz
+    QUANTAS celulas caem em cada categoria, e cada celula diz de qual delas ela e.
+    O `CLAUDE.md` §0.7 manda um teste comparar as duas quando a duplicacao e
+    inevitavel — e ela e, porque o preambulo existe justamente para nao repetir a
+    contagem dentro das celulas (a do `--testes` que EXPANDE diz isso com todas as
+    letras).
+
+    Nenhum outro teste deste arquivo olha para o texto, e foi por ai que o defeito
+    entrou em tres rodadas seguidas. O marcador e o proprio rotulo da categoria,
+    escrito literal na celula; a normalizacao de espaco existe porque o preambulo
+    quebra linha no meio da frase. Sem parser e sem heuristica.
+
+    Negativo: a celula do banco compartilhado passou a carimbar `APROVADO falso` e
+    o preambulo continuava em DOIS — medido, este teste fica VERMELHO ate o
+    preambulo virar TRES. Positivo: a categoria (b) ja esta certa em DOIS e passa
+    na mesma rodada, entao o teste nao acusa qualquer contagem.
+
+    TETO, e ele e grande: o que se mede aqui e a DISCIPLINA DE ROTULAR, nao a
+    categoria. As duas direcoes ja foram medidas e as duas erram:
+
+    - celula acrescentada que E um APROVADO falso, escrita SEM a frase literal:
+      passa em SILENCIO (1 passed), com o preambulo dizendo TRES e a categoria
+      tendo QUATRO. Quem nao rotula nao e visto.
+    - a frase colada numa celula que NEGA pertencer a categoria: vermelho, pelo
+      motivo errado. O criterio e a frase, nao o sentido dela.
+
+    E a categoria (c) — a que fala do que o gate NAO garante — esta descoberta dos
+    dois lados: o preambulo nao declara numero para ela e nenhuma celula carrega
+    marcador dela, entao o laco abaixo nem chega a olha-la. NAO tente fechar isso
+    com heuristica: e a mesma classe dos tres furos de texto que a `le_junit`
+    passou o arquivo inteiro fugindo. Quem escreve uma celula escreve o rotulo dela.
+    Nao ha contagem escrita neste docstring de proposito (CLAUDE.md §2): quem quiser
+    os numeros de hoje le a mensagem do `assert` la embaixo, que os imprime — e nao
+    adianta `grep`, porque a celula quebra a frase no meio da linha e so a
+    normalizacao de espaco daqui a remonta.
+
+    O que este teste NAO faz e ler o arquivo: ele importa o modulo e le
+    `coluna_dupla.__doc__`, entao um `read_text()` + `index()` procurando texto —
+    o pecado do CLAUDE.md §3 — nao acontece aqui."""
+    palavras = {"UM": 1, "DOIS": 2, "TRES": 3, "QUATRO": 4}
+    linhas = coluna_dupla.__doc__.splitlines()
+    corte = next(n for n, l in enumerate(linhas) if l.startswith("    - "))
+    preambulo = " ".join(" ".join(linhas[:corte]).split())
+    celulas = []
+    for linha in linhas[corte:]:
+        if linha.startswith("    - "):
+            celulas.append(linha)
+        else:
+            celulas[-1] += " " + linha
+    celulas = [" ".join(c.split()) for c in celulas]
+
+    for marcador in ("APROVADO falso", "FRACA carimbada FORTE"):
+        assert preambulo.count(marcador) == 1, f"{marcador!r} nao e unico no preambulo"
+        # O numero declarado vem entre o marcador e os dois-pontos que abrem a
+        # enumeracao — `(a) APROVADO falso, DOIS: o alvo ...`.
+        entre = preambulo.split(marcador, 1)[1].split(":", 1)[0].split()
+        declarado = next(n for p, n in palavras.items() if p in entre)
+        real = sum(marcador in c for c in celulas)
+        assert real == declarado, (
+            f"o preambulo declara {declarado} celula(s) de {marcador!r}, e ha {real} "
+            f"entre as {len(celulas)} celulas")
