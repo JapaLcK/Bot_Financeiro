@@ -749,8 +749,16 @@ def _set_phone(uid: int, phone: str) -> str:
     return h
 
 
-def _lock_trial(phone_hash: str, uid: int, started_at=None) -> None:
-    """Queima o trial daquele telefone (o que claim_trial_for_user grava)."""
+def _lock_trial(phone_hash: str, uid: int | None, started_at=None,
+                *, ancora: bool = True) -> None:
+    """Queima o trial daquele telefone (o que claim_trial_for_user grava).
+
+    `uid=None` + `ancora=False` monta a TRAVA HERDADA: a conta que queimou o
+    trial foi apagada, a FK é ON DELETE SET NULL (db/schema.py) e a linha
+    sobreviveu sem dono; o número foi recadastrado numa conta nova, que não tem
+    âncora nenhuma. É o caso real do dono e o único em que a data da trava e a
+    âncora da conta divergem — nele a âncora nem existe.
+    """
     started_at = started_at or (NOW - timedelta(days=40))
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -758,14 +766,16 @@ def _lock_trial(phone_hash: str, uid: int, started_at=None) -> None:
                 """
                 insert into plan_trials (phone_hash, user_id, started_at, model_version)
                 values (%s, %s, %s, 2)
-                on conflict (phone_hash) do update set started_at = excluded.started_at
+                on conflict (phone_hash) do update
+                    set started_at = excluded.started_at, user_id = excluded.user_id
                 """,
                 (phone_hash, uid, started_at),
             )
-            cur.execute(
-                "update auth_accounts set trial_started_at = %s where user_id = %s",
-                (started_at, uid),
-            )
+            if ancora:
+                cur.execute(
+                    "update auth_accounts set trial_started_at = %s where user_id = %s",
+                    (started_at, uid),
+                )
         conn.commit()
 
 
@@ -972,10 +982,12 @@ def test_trial_reset_audita_sem_vazar_telefone_nem_hash(panel_accounts, monkeypa
         # (um espaço no meio do número passa batido). Chave nova qualquer, com
         # qualquer conteúdo, derruba este teste e obriga a justificar.
         detalhes = kwargs["details"]
-        assert set(detalhes) == {"admin", "deleted", "previous_started_at"}
+        assert set(detalhes) == {"admin", "deleted", "previous_started_at",
+                                 "previous_lock_started_at"}
         assert isinstance(detalhes["admin"], str)
         assert detalhes["deleted"] == 1
         assert isinstance(detalhes["previous_started_at"], str)
+        assert isinstance(detalhes["previous_lock_started_at"], str)
         # phone_hash é hex de HMAC, não tem variação de formato: substring serve.
         assert h not in repr(detalhes) + message
     finally:
@@ -1063,3 +1075,226 @@ def test_reset_faz_o_checkout_voltar_a_mandar_trial(panel_accounts, monkeypatch)
         assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 15
     finally:
         _drop_locks(h)
+
+
+# ── Trava herdada: o caso do dono, e o único em que as duas datas divergem ──
+
+def test_trial_reset_registra_a_data_da_trava_herdada_que_a_ancora_nao_tem(
+    panel_accounts, monkeypatch
+):
+    """A conta que queimou o trial foi apagada (plan_trials.user_id é
+    ON DELETE SET NULL) e o número foi recadastrado: a linha da trava sobrevive
+    sem dono e a conta ATUAL não tem âncora.
+
+    Aqui `previous_started_at` (a âncora) é null e a ÚNICA data que existe é a
+    da linha destruída. Logar só a âncora — o que a versão anterior fazia —
+    apagava para sempre a data do trial queimado, que é justamente o que se
+    quer saber depois. O `_lock_trial` padrão escondia isso porque sempre
+    gravava as duas iguais.
+    """
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    queimado = NOW - timedelta(days=120)
+    h = _set_phone(uid, f"+5511{uid % 100000000:08d}")
+    _lock_trial(h, None, queimado, ancora=False)   # herdada: sem dono, sem âncora
+
+    eventos = []
+
+    async def _capture(level, event_type, message, **kwargs):
+        eventos.append((level, event_type, message, kwargs))
+
+    monkeypatch.setattr(admin_dashboard, "log_system_event", _capture)
+    try:
+        # Pré-condição: as duas datas DIVERGEM de verdade (senão o teste não
+        # mediria nada — é o defeito que ele existe para pegar).
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select trial_started_at from auth_accounts where user_id = %s",
+                    (uid,),
+                )
+                assert cur.fetchone()["trial_started_at"] is None
+
+        assert _reset_trial(_admin_client(), uid).status_code == 200
+        detalhes = [e for e in eventos if e[1] == "admin_trial_reset"][0][3]["details"]
+        assert detalhes["deleted"] == 1
+        assert detalhes["previous_started_at"] is None
+        assert detalhes["previous_lock_started_at"] is not None
+        assert detalhes["previous_lock_started_at"].startswith(
+            queimado.date().isoformat()
+        ), detalhes
+        assert not _trial_lock_exists(h)
+    finally:
+        _drop_locks(h)
+
+
+def test_reset_libera_a_ancora_velha_mesmo_sem_trava_no_telefone(panel_accounts):
+    """Troca de telefone (frontend/routes/settings.py reescreve phone_hash e
+    deixa trial_started_at para trás): a conta fica SEM trava e COM âncora
+    velha — o estado que faz o próximo trial nascer vencido, porque
+    claim_trial_for_user não sobrescreve âncora mais antiga.
+
+    O reset tem de aceitar e limpar a âncora. É o caminho que o botão do painel
+    recusava.
+    """
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    _set_phone(uid, f"+5511{uid % 100000000:08d}")   # hash NOVO, sem linha em plan_trials
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set trial_started_at = %s where user_id = %s",
+                (NOW - timedelta(days=200), uid),
+            )
+        conn.commit()
+
+    resp = _reset_trial(_admin_client(), uid)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 0          # não havia trava — e não é erro
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select trial_started_at, trial_downsell_sent_at "
+                "from auth_accounts where user_id = %s",
+                (uid,),
+            )
+            depois = cur.fetchone()
+    assert depois["trial_started_at"] is None
+    assert depois["trial_downsell_sent_at"] is None
+
+
+def test_gate_do_reset_recusa_pago_vencido_ainda_que_o_painel_diga_cancelado(
+    panel_accounts,
+):
+    """DIVERGÊNCIA DELIBERADA, fixada aqui para ninguém "consertar" num buraco.
+
+    plan='pro' + plan_expires_at no passado + last_payment_status='active':
+      · o painel rotula 'canceled' (_ACCOUNT_STATUS_SQL põe a expiração ANTES
+        do status, e _derive_account_status idem);
+      · o gate do /trial-reset responde 409 mesmo assim.
+
+    As duas coisas estão certas porque respondem a perguntas diferentes. O
+    rótulo é ENTITLEMENT: plan_expires_at vem de _subscription_period_end
+    (frontend/finance_bot_websocket_custom.py) ou do grant do admin, e um
+    período vencido não pode continuar liberando recurso pago. O gate é
+    LIVENESS na Stripe, e a única evidência dela é last_payment_status, que
+    espelha o status da subscription. Período vencido COM status 'active' é o
+    caso do webhook de renovação perdido — ali a assinatura está mais provável
+    de viva, não de morta, e apagar a trava anti-abuso não cancelaria nada.
+    """
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    h = _set_phone(uid, f"+5511{uid % 100000000:08d}")
+    _lock_trial(h, uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan = 'pro', last_payment_status = 'active',"
+                " plan_expires_at = %s where user_id = %s",
+                (NOW - timedelta(days=3), uid),
+            )
+        conn.commit()
+    try:
+        client = _admin_client()
+        # O rótulo do painel: 'canceled'.
+        assert client.get(f"/admin/api/users/{uid}").json()["profile"][
+            "account_status"] == "canceled"
+        # O gate: 409, e a trava CONTINUA de pé (não basta o status).
+        resp = _reset_trial(client, uid)
+        assert resp.status_code == 409, resp.text
+        assert _trial_lock_exists(h)
+    finally:
+        _drop_locks(h)
+
+
+def _esperar_backend_travado(timeout: float = 15.0) -> bool:
+    """Espera algum backend DESTE database ficar parado esperando um lock.
+
+    É o que torna o teste abaixo determinístico em vez de dependente de sleep:
+    sem isto, uma thread lenta a começar faria o commit da troca acontecer
+    ANTES do SELECT do reset, e o caso passaria verde sem medir nada.
+    """
+    import time
+    fim = time.monotonic() + timeout
+    while time.monotonic() < fim:
+        with get_conn() as c:
+            with c.cursor() as cur:
+                cur.execute(
+                    "select count(*) as n from pg_stat_activity "
+                    "where datname = current_database() and wait_event_type = 'Lock'"
+                )
+                if cur.fetchone()["n"] > 0:
+                    return True
+        time.sleep(0.05)
+    return False
+
+
+def test_reset_apaga_a_trava_do_telefone_NOVO_numa_troca_concorrente(panel_accounts):
+    """O `for update` do SELECT em reset_trial_for_user, medido pelo efeito.
+
+    Cena: a conta tem o telefone A (trava A) e uma troca para o telefone B
+    (trava B) está aberta e ainda não commitada — é o que
+    frontend/routes/settings.py faz. O reset entra no meio.
+
+      · com `for update`: o SELECT espera a troca commitar, relê e enxerga B.
+        Apaga a trava de B — o telefone que a conta REALMENTE tem no fim.
+      · sem ele (READ COMMITTED puro): o SELECT lê o snapshot velho, enxerga A,
+        apaga a trava de A e só depois esbarra no lock no UPDATE. Termina
+        reportando sucesso com o número atual (B) ainda travado.
+
+    A discriminação é a IDENTIDADE da trava apagada, não o tempo: medir só
+    "o reset bloqueia" não separa as duas versões, porque sem `for update` ele
+    bloqueia mesmo assim — um passo adiante, no UPDATE, e depois de já ter
+    apagado a trava errada. (Foi assim que a primeira versão deste teste passou
+    verde com o conserto desligado.)
+    """
+    import threading
+    from db.plans import reset_trial_for_user
+
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    telefone_a = f"+5511{uid % 100000000:08d}"
+    telefone_b = f"+5521{uid % 100000000:08d}"
+    from core.crypto import hash_pii
+    ha, hb = hash_pii(telefone_a, kind="phone"), hash_pii(telefone_b, kind="phone")
+    assert ha != hb
+    _set_phone(uid, telefone_a)
+    _lock_trial(ha, uid)              # trava do número antigo
+    _lock_trial(hb, None, ancora=False)   # o número novo também já queimou o dele
+
+    pronto = threading.Event()
+    resultado = {}
+
+    def _correr():
+        try:
+            resultado["row"] = reset_trial_for_user(uid)
+        except Exception as exc:      # pragma: no cover - só para não pendurar
+            resultado["erro"] = exc
+        finally:
+            pronto.set()
+
+    t = threading.Thread(target=_correr, daemon=True)
+    try:
+        with get_conn() as troca:
+            with troca.cursor() as cur:
+                cur.execute(
+                    "update auth_accounts set phone_e164 = %s, phone_hash = %s "
+                    "where user_id = %s",
+                    (telefone_b, hb, uid),
+                )
+            t.start()
+            assert _esperar_backend_travado(), "o reset nunca chegou a esperar o lock"
+            troca.commit()
+        assert pronto.wait(20), "o reset não destravou depois do commit da troca"
+        t.join(5)
+        assert "erro" not in resultado, resultado.get("erro")
+        # O que separa as duas versões: QUAL trava foi apagada.
+        assert not _trial_lock_exists(hb), (
+            "a trava do telefone ATUAL sobreviveu — o reset leu o hash velho"
+        )
+        assert _trial_lock_exists(ha), (
+            "apagou a trava do telefone ANTIGO, que já não é desta conta"
+        )
+        assert resultado["row"]["deleted"] == 1
+    finally:
+        _drop_locks(ha, hb)

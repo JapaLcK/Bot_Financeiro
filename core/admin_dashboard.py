@@ -1713,7 +1713,12 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             details={
                 "admin": username,
                 "deleted": row["deleted"],
+                # As duas datas, porque divergem no caso que mais importa: na
+                # trava herdada (conta anterior apagada, plan_trials.user_id
+                # nulo) a âncora da conta é nula e a data do trial queimado só
+                # existe na linha destruída — sem registrá-la aqui ela some.
                 "previous_started_at": _json_safe(row["previous_started_at"]),
+                "previous_lock_started_at": _json_safe(row["previous_lock_started_at"]),
             },
         )
         return JSONResponse(content=_json_safe({
