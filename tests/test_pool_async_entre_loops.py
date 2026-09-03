@@ -72,8 +72,8 @@ def test_o_pool_async_aguenta_dois_event_loops_com_gather():
     """
     anterior = shared.reset_db_pool()
     # SIGALRM, e não `faulthandler.dump_traceback_later(30, exit=True)`: o
-    # `exit=True` MATA o processo do pytest e leva junto o relatório dos outros
-    # 5578 testes da suíte. O sinal levanta TimeoutError na main thread e falha
+    # `exit=True` MATA o processo do pytest e leva junto o relatório dos
+    # demais testes da suíte. O sinal levanta TimeoutError na main thread e falha
     # SÓ este caso — MEDIDO com o controle negativo armado: `1 failed, 6 passed
     # in 31,1s`, com o arquivo seguinte rodando e reportando normalmente.
     # 30s: o caso verde leva 0,55s. Este watchdog cobre só este teste; a pendura
@@ -81,7 +81,7 @@ def test_o_pool_async_aguenta_dois_event_loops_com_gather():
     # (.github/workflows/tests.yml), que fecha a categoria.
     # `signal.signal` já DEVOLVE o handler anterior — guardá-lo e repô-lo no
     # `finally` custa duas palavras e evita deixar `_pendurou` instalado como
-    # handler global para os outros 5578 testes da suíte.
+    # handler global para os demais testes da suíte.
     handler_anterior = signal.signal(signal.SIGALRM, _pendurou)
     signal.alarm(30)
     try:
