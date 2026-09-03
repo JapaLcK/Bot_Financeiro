@@ -185,6 +185,39 @@ def test_cookie_forjado_nao_vira_metadata(user_id, monkeypatch):
     assert "fbp" not in fake.last_session_kwargs["metadata"]
 
 
+def test_webhook_diz_o_que_decidiu_sobre_rastreio(user_id, monkeypatch, capsys):
+    """Observabilidade, e não é firula: numa investigação real o log ficou mudo e
+    "não chegou no Meta" era indistinguível de "nem tentou" — as duas davam
+    silêncio. A linha tem de sair SEMPRE, com as flags de configuração, mesmo
+    quando o envio é pulado."""
+    uid, client, fake = _setup(monkeypatch, f"capi-log-{user_id}")
+    _ligar_capi(monkeypatch)
+    try:
+        _post(client, fake, _evento_checkout(uid), subs={"sub_capi": _sub_pago()})
+        saida = capsys.readouterr().out
+        assert "rastreio checkout" in saida
+        assert f"user={uid}" in saida
+        assert "capi=True" in saida          # a flag, não só o rótulo
+    finally:
+        _cleanup_trial(uid)
+
+
+def test_log_de_rastreio_sai_ate_com_a_capi_desligada(user_id, monkeypatch, capsys):
+    """O caso que importa: desconfigurado, nada é enviado — e é justamente aí que
+    o log precisa existir, senão o silêncio volta a não significar nada."""
+    uid, client, fake = _setup(monkeypatch, f"capi-log-off-{user_id}")
+    monkeypatch.delenv("META_PIXEL_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("GA4_API_SECRET", raising=False)
+    try:
+        _post(client, fake, _evento_checkout(uid), subs={"sub_capi": _sub_pago()})
+        saida = capsys.readouterr().out
+        assert "rastreio checkout" in saida
+        assert "capi=False" in saida
+        assert "ga4=False" in saida
+    finally:
+        _cleanup_trial(uid)
+
+
 def test_formato_do_cookie_e_validado():
     assert meta_capi.sanitize_fb_cookie(_FBP) == _FBP
     assert meta_capi.sanitize_fb_cookie(f"  {_FBC}  ") == _FBC

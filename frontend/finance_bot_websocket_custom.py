@@ -4736,6 +4736,20 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
+            # Uma linha dizendo o que este webhook DECIDIU sobre rastreio, antes
+            # de decidir. Sem ela, "não apareceu no Meta" não distinguia
+            # configuração ausente de envio recusado: os dois davam log nenhum, e
+            # foi onde uma investigação real empacou. Nunca pode quebrar o
+            # webhook, daí o try próprio.
+            try:
+                from core.services.ga4_mp import mp_configured as _mp_ok
+                from core.services.meta_capi import capi_configured as _capi_ok
+                print(f"[billing] rastreio checkout user={user_id} "
+                      f"status={sub_status} sid={_g(session, 'id')} "
+                      f"capi={_capi_ok()} ga4={_mp_ok()}")
+            except Exception as exc:
+                print(f"[billing] rastreio checkout: log falhou: {exc}")
+
             # Meta Conversions API — conversão server-side, deduplicada com o
             # pixel via event_id derivado da sessão. Trial → StartTrial; compra
             # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
@@ -4880,6 +4894,20 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         )
                 except Exception as exc:
                     print(f"[affiliates] comissao falhou user={user_id}: {exc}")
+
+                # O par do log do ramo de checkout: `billing_reason` é o que
+                # decide se esta fatura vira Purchase ou é pulada por já ter sido
+                # contada no checkout — sem ele no log, "pulou" e "falhou" são a
+                # mesma linha em branco.
+                try:
+                    from core.services.ga4_mp import mp_configured as _mp_ok
+                    from core.services.meta_capi import capi_configured as _capi_ok
+                    print(f"[billing] rastreio invoice user={user_id} "
+                          f"invoice={_g(invoice, 'id')} "
+                          f"reason={_g(invoice, 'billing_reason')} "
+                          f"capi={_capi_ok()} ga4={_mp_ok()}")
+                except Exception as exc:
+                    print(f"[billing] rastreio invoice: log falhou: {exc}")
 
                 # Meta Conversions API — Purchase da cobrança REAL (fim do trial
                 # e renovações), com o valor efetivamente pago. A primeira fatura
