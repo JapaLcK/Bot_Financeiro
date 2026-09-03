@@ -102,7 +102,11 @@ from db import (
     update_credit_transaction_fields,
     undo_credit_transaction,
     delete_launch_and_rollback,
+    LaunchNoEffects,
+    InvestmentLotHasWithdrawal,
+    LaunchUnsafeRollback,
 )
+from core.observability import _log_falha, get_logger
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
@@ -143,6 +147,26 @@ from frontend.routes.shared import (
 from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
+
+# Instala o `_DashboardHandler` no logger RAIZ deste processo — é o que leva
+# WARNING/ERROR (inclusive os `_log_falha` das rotas destrutivas) ao
+# `system_event_logs` e ao `backend_errors_24h` do admin. Aqui e não em
+# `core/observability.py` porque aquele é módulo de BIBLIOTECA: 23 módulos de
+# `adapters/`, `core/` e `frontend/` o importam, mais o
+# `scripts/account_deletion_job.py`. Configurar o root logger no import dele
+# daria INFO no stderr e um handler que escreve no banco a qualquer script.
+# Este módulo é choke point único: os três entrypoints ASGI (`launch.py:28`,
+# `dashboard_dev.py:87` e o `__main__` abaixo) sobem `…custom:app`, e o import
+# roda antes do lifespan e de qualquer requisição. Antes disso, o PRIMEIRO a
+# instalar era o import tardio da cadeia do WhatsApp no `_wa_worker` — que só
+# acontece com RUN_BACKGROUND_TASKS=1, então com RUN_BACKGROUND_TASKS=0 ninguém
+# instalava e a falha de operação destrutiva só saía no stderr.
+# Efeito colateral aceito: o `dashboard_dev.py` (que força RUN_BACKGROUND_TASKS=0)
+# passa a imprimir INFO no stderr e a gravar `system_event_logs` no banco de dev
+# — inclusive WARNING/ERROR de TERCEIROS, que passam a contar em
+# `backend_errors_24h` (medido: `source=asyncio | logger.error`, do event loop do
+# uvicorn). Com RUN_BACKGROUND_TASKS=1 (produção) já era assim; muda só o dev.
+get_logger(__name__)
 
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
@@ -1888,7 +1912,8 @@ _SECURITY_HEADERS = {
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
-        "https://static.cloudflareinsights.com https://connect.facebook.net; "
+        "https://static.cloudflareinsights.com https://connect.facebook.net "
+        "https://www.googletagmanager.com; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -2277,8 +2302,9 @@ def _post_login_url(user_id: int | None = None) -> str:
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
-    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
-    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
+    só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
+    o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
+    (paywall ligado), idem."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
@@ -2767,7 +2793,16 @@ async def auth_logout(request: Request, response: Response):
             )
 
     _clear_session_cookies(response)
-    response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    # SEM `"storage"`, e a ausência é a regra — não esquecimento. O diretivo é
+    # tudo-ou-nada (não tem granularidade por chave) e apagava localStorage,
+    # sessionStorage, Cache Storage e service workers INTEIROS, atropelando o
+    # `_PRESERVA` de `frontend/static/auth-refresh.js` (e o gêmeo do
+    # `nav-auth.js`), que é a fonte de verdade do que sobrevive ao fim de
+    # sessão. Medido em Chromium 151: `finbot_reset_at` sumia e reabria o flash
+    # de snapshot pré-reset na cadeia reset → logout → relogin; tema, esconder-
+    # saldo e posição do FAB sumiam junto. Quem apaga o estado do aparelho é o
+    # JS — todo chamador de POST /auth/logout carrega um dos dois arquivos.
+    response.headers["Clear-Site-Data"] = '"cookies"'
     _no_store(response)
     return {"ok": True}
 
@@ -2890,7 +2925,7 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_password_reset_token
+    from db import create_password_reset_token, email_has_password
     from core.services.email_service import send_password_reset_email
 
     await _check_auth_rate_limits("forgot-password", request, body.email)
@@ -2898,7 +2933,11 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     token = create_password_reset_token(body.email)
     if token:
         reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-        send_password_reset_email(body.email.strip().lower(), reset_url)
+        # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
+        # instrução por instrução igual, e a resposta abaixo nunca muda
+        send_password_reset_email(
+            body.email.strip().lower(), reset_url, email_has_password(body.email)
+        )
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
     return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
@@ -3886,8 +3925,16 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
     )
 
 
-async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str, price_id: str):
-    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``."""
+async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
+                                     price_id: str, ga_client_id: str | None = None):
+    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
+
+    `ga_client_id` (já validado) entra no metadata da sessão e da assinatura pro
+    webhook conseguir mandar a compra pro GA4 na pessoa certa. Sessão REUTILIZADA
+    mantém o metadata de quando nasceu — o `_checkout_session_matches` não olha
+    este campo de propósito: recriar um checkout só porque o cookie do GA mudou
+    trocaria a URL que o usuário já tem aberta.
+    """
     from db import get_auth_user, set_stripe_customer
 
     user = await asyncio.to_thread(get_auth_user, user_id)
@@ -4037,6 +4084,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "plan": plan,
             "price_id": price_id,
         }
+        if ga_client_id:
+            metadata["ga_client_id"] = ga_client_id
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -4061,11 +4110,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
                 f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
-            # Abandonou o checkout → volta pra /precos escolher um plano (pago
-            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
-            # "Escolha um plano pra começar" (needs_plan_selection segue true,
-            # pois o gate não fechou) — não anexo upgrade=cancelled porque
-            # /precos não consome esse marcador (o toast vive só na /home).
+            # Abandonou o checkout → volta pra /precos escolher um plano PAGO
+            # (o Grátis não é mais escolha). O escolha=1 fica como rastro de
+            # origem: a copy "Escolha um plano pra continuar" da precos.html é
+            # decidida pelo needs_plan_selection do /auth/me (que segue true,
+            # pois o gate não fechou), não por este marcador — ele se perde num
+            # clique no "Planos" do próprio nav. Não anexo upgrade=cancelled
+            # porque /precos não consome esse marcador (o toast vive só na /home).
             cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4099,6 +4150,8 @@ async def billing_plans_config():
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "plus_available": bool(_resolve_price_id("plus", "monthly")
+                               or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
     }
@@ -4127,12 +4180,21 @@ async def billing_create_checkout(
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
+    # client_id do GA4 pro `purchase` do webhook cair na mesma pessoa que
+    # navegou. Sai do cookie `_ga`, que o navegador já manda neste POST — não do
+    # corpo: pedir pro JS ler e enviar era mais código na /precos e mais um campo
+    # de entrada pra validar, pelo mesmo dado. Ausente (visitante novo cujo
+    # gtag.js ainda não criou o cookie, ou bloqueado) → o webhook usa o
+    # `fallback_client_id` e a venda entra sem origem, nunca se perde.
+    from core.services.ga4_mp import client_id_from_ga_cookie
+    ga_client_id = client_id_from_ga_cookie(request.cookies.get("_ga"))
+
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id)
+                stripe, user_id, plan, interval, price_id, ga_client_id)
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
         # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
@@ -4141,8 +4203,8 @@ async def billing_create_checkout(
         _session_id = result.pop("session_id", None)
         await asyncio.to_thread(record_checkout_started, user_id, _session_id)
         # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
-        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
-        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # plano — quem abandona o Stripe tem de voltar pra /precos e assinar
+        # (só há plano pago lá). O gate só fecha quando o pagamento COMPLETA de fato,
         # no webhook checkout.session.completed (mark_plan_selected lá). O
         # retorno de sucesso (?upgrade=success) é tratado como "webhook em
         # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
@@ -4164,24 +4226,41 @@ async def billing_select_free(
     request: Request,
     user_id: int = Depends(_get_current_user),
 ):
-    """Escolha do plano Grátis no fim do cadastro.
+    """Escolha do plano Grátis no fim do cadastro — DESATIVADA.
 
-    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
-    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
-    aí a troca é pela /precos normal, não por aqui."""
-    from db import mark_plan_selected
-    from core.services.plan_service import get_plan_tier
+    O Grátis morreu como porta de entrada: quem se cadastra pela web tem de
+    assinar pra entrar. A rota continua existindo só pra RECUSAR — apagá-la
+    devolveria 404/405 (HTML da página de erro, sem `detail`) a um cliente
+    antigo em cache, e o front trata 4xx lendo `detail.message`.
 
-    tier = await asyncio.to_thread(get_plan_tier, user_id)
-    if tier != "free":
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "already_subscribed",
-                    "message": "Você já tem um plano pago ativo."},
-        )
+    O front NOVO não chama mais: o `[data-free-cta]` e o `selectFree` saíram da
+    precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e quem
+    fecha o gate hoje são os dois ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`,
+    os dois chamando `mark_plan_selected`).
 
-    await asyncio.to_thread(mark_plan_selected, user_id)
-    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+    Sobra UM chamador real, e é ele que sustenta o parágrafo acima: a aba com a
+    /precos ANTIGA já carregada no instante do deploy, de usuário em
+    `needs_plan_selection`. O JS velho dessa aba já converteu o CTA em
+    "Continuar com o plano Grátis"; o clique faz o POST, leva 410, e o
+    `selectFree` antigo cai no `showToast(msg, "err")` — ou seja, a recusa VIRA
+    um toast vermelho com a mensagem daqui, que por isso é escrita pra ser lida
+    por humano. Não é beco sem saída: os CTAs pagos da mesma aba continuam
+    funcionando, e um reload traz a página nova.
+
+    Os outros vetores estão fechados: link salvo, e-mail, deep link e sitemap
+    não alcançam a rota (é `@app.post` só, atrás de `_get_current_user` e do
+    CSRF — um GET dá 405), e HTML velho servido por PWA ou por cache HTTP não
+    existe (o service worker não intercepta navegação e o HTML sai `no-store`).
+
+    O tier `free` continua existindo como ESTADO (fallback após falha de
+    cobrança); o que sumiu é a ESCOLHA."""
+    raise HTTPException(
+        status_code=410,
+        detail={"error": "free_plan_discontinued",
+                "message": "O plano Grátis não está mais disponível. "
+                           "Escolha um plano pago pra continuar."},
+    )
 
 
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
@@ -4402,10 +4481,15 @@ async def billing_cancel_change(request: Request, user_id: int = Depends(_get_cu
 
 
 @app.post("/billing/webhook")
-async def billing_webhook(request: Request):
+async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recebe eventos do Stripe (checkout.session.completed, customer.subscription.*).
     Atualiza o plano do usuário no banco.
+
+    Rastreio (GA4 / Meta CAPI) sai por `background_tasks`, nunca inline: são dois
+    POSTs pra fora, e a Stripe desiste do webhook por timeout — o que faz ela
+    REENVIAR o evento, e aí o e-mail de boas-vindas sai de novo. O padrão já era
+    esse no /auth/verify-email; aqui o await tinha entrado por descuido.
     """
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe não configurado.")
@@ -4496,6 +4580,30 @@ async def billing_webhook(request: Request):
         cur = _g(price, "currency") or "brl"
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
+
+    def _ga_plano_publico(*objetos) -> str | None:
+        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
+
+        É o mesmo identificador que o `begin_checkout` manda do navegador.
+        `_stored_plan_for_price` devolve o valor do BANCO, onde Plus é 'pro' por
+        legado e Pro é 'pro_max' — usar aquele aqui faria checkout e compra
+        virarem produtos diferentes, e ainda colidiria Plus com Pro (Codex, #244).
+
+        O PREÇO ATUAL manda, e o metadata é só o fallback: a troca de plano
+        agendada (`/billing/change-plan`) reescreve apenas o price das fases do
+        SubscriptionSchedule e nunca o `metadata.plan`. Depois que a troca entra
+        em vigor, o metadata aponta pro plano ANTIGO — e toda renovação seria
+        atribuída ao item errado (Codex, #244, 2ª rodada). O fallback continua
+        valendo pro price que não está nas envs (legado).
+        """
+        publico, _ = _plan_interval_for_price(_subscription_price_id(objetos[0]))
+        if publico:
+            return publico
+        for obj in objetos:
+            valor = _g(_g(obj, "metadata", {}), "plan")
+            if valor:
+                return valor
+        return None
 
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
@@ -4605,7 +4713,7 @@ async def billing_webhook(request: Request):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
-                    await asyncio.to_thread(
+                    background_tasks.add_task(
                         send_event,
                         event_name=_ev_name,
                         event_id=_ev_id,
@@ -4617,6 +4725,52 @@ async def billing_webhook(request: Request):
                     )
             except Exception as exc:
                 print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
+            # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
+            # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
+            # entra semanas depois, e o purchase daquele caso sai no invoice.paid.
+            # É server-only de propósito: o navegador manda `start_trial` (que não
+            # tem valor), e deixar os dois mandarem `purchase` criaria duas versões
+            # do mesmo evento, uma delas sem receita.
+            try:
+                from core.services.ga4_mp import (
+                    fallback_client_id,
+                    mp_configured,
+                    send_purchase,
+                )
+                _ga_sid = _g(session, "id")
+                if mp_configured() and _ga_sid and sub_status != "trialing":
+                    # Valor REALMENTE cobrado: `amount_total` da sessão já vem
+                    # com cupom aplicado, e o `unit_amount` do plano não — este
+                    # checkout aceita cupom (`allow_promotion_codes=True`), então
+                    # o preço de tabela superestimaria a receita (Codex, #244).
+                    # Zero é resposta legítima (cupom de 100%): o teste é
+                    # `is None`, não falsy. Sem o campo, cai no valor do plano.
+                    _ga_total = _g(session, "amount_total")
+                    if _ga_total is None:
+                        _ga_value, _ga_currency = _subscription_amount(sub)
+                    else:
+                        _ga_value = float(_ga_total) / 100.0
+                        _ga_currency = (_g(session, "currency") or "brl").upper()
+                    # O client_id foi gravado no metadata na criação do checkout
+                    # (/billing/create-checkout). Sem ele a venda ainda entra, como
+                    # usuário novo sem origem — ver fallback_client_id.
+                    # Os dois metadata são consultados, não um OU outro: a
+                    # assinatura pode existir sem o campo (nasceu antes desta
+                    # versão) e a sessão desta compra ter o valor novo.
+                    _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                               or _g(_g(session, "metadata", {}), "ga_client_id")
+                               or fallback_client_id(user_id))
+                    background_tasks.add_task(
+                        send_purchase,
+                        transaction_id=_ga_sid,
+                        value=_ga_value,
+                        currency=_ga_currency,
+                        plan=_ga_plano_publico(sub, session) or plan_value,
+                        client_id=_ga_cid,
+                        user_id=user_id,
+                    )
+            except Exception as exc:
+                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -4694,7 +4848,7 @@ async def billing_webhook(request: Request):
                     if capi_configured() and _inv_id and _billing_reason != "subscription_create":
                         _capi_email = await _user_email(user_id)
                         _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
-                        await asyncio.to_thread(
+                        background_tasks.add_task(
                             send_event,
                             event_name="Purchase",
                             event_id=purchase_event_id(_inv_id),
@@ -4706,6 +4860,34 @@ async def billing_webhook(request: Request):
                         )
                 except Exception as exc:
                     print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
+
+                # GA4 (Measurement Protocol) — o mesmo purchase, pelo mesmo motivo
+                # e com o mesmo corte: a primeira fatura da compra imediata
+                # (subscription_create) já virou purchase no
+                # checkout.session.completed. Aqui ficam a cobrança do fim do
+                # trial e as renovações — dinheiro que nenhum navegador vê.
+                try:
+                    from core.services.ga4_mp import (
+                        fallback_client_id,
+                        mp_configured,
+                        send_purchase,
+                    )
+                    _ga_inv = _g(invoice, "id")
+                    if (mp_configured() and _ga_inv
+                            and _g(invoice, "billing_reason") != "subscription_create"):
+                        _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                                   or fallback_client_id(user_id))
+                        background_tasks.add_task(
+                            send_purchase,
+                            transaction_id=_ga_inv,
+                            value=amount_brl,
+                            currency=(_g(invoice, "currency") or "brl").upper(),
+                            plan=_ga_plano_publico(sub) or plan_value,
+                            client_id=_ga_cid,
+                            user_id=user_id,
+                        )
+                except Exception as exc:
+                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
@@ -5528,6 +5710,28 @@ async def update_launch_route(
     }
 
 
+# Frase por condição de domínio de `delete_launch_and_rollback`. O `detail` da
+# HTTPException vira texto na tela (`frontend/dashboard.js` faz
+# `throw new Error(detail.detail)`), então nada de `str(exc)`: jargão de banco
+# ("efeitos") e texto de driver não são mensagem de produto.
+_MSG_DELETE_LAUNCH = {
+    LaunchNoEffects: (
+        "Esse lançamento é antigo e não guarda o que precisaria ser revertido, "
+        "então mantive ele intacto pra não bagunçar seu saldo."
+    ),
+    InvestmentLotHasWithdrawal: (
+        "Não dá pra desfazer esse aporte: o lote já teve resgate. Apague o "
+        "resgate primeiro."
+    ),
+    LaunchUnsafeRollback: (
+        "Não consigo reverter esse lançamento com segurança, então mantive ele "
+        "intacto pra não bagunçar seu saldo."
+    ),
+}
+
+_ERRO_APAGAR_HTTP = "Não consegui apagar agora — deu erro do meu lado. Tenta de novo em alguns minutos."
+
+
 @app.delete("/launches/{user_id}/{launch_id}")
 async def delete_launch_route(
     request: Request,
@@ -5545,10 +5749,35 @@ async def delete_launch_route(
         await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
     except LookupError:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except tuple(_MSG_DELETE_LAUNCH) as exc:
+        # `tuple(...)` do próprio dict: o `except` e as frases não podem
+        # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
+        # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
+        # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
+        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
+        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
+        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                nivel=logging.WARNING, launch_id=int(launch_id))
+        # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
+        # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
+        # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
+        frase = next(m for c, m in _MSG_DELETE_LAUNCH.items() if isinstance(exc, c))
+        raise HTTPException(status_code=400, detail=frase) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar lançamento: {exc}") from exc
+        # `f"...{exc}"` num caminho DESTRUTIVO vazava o texto do psycopg
+        # (`DETAIL: Key (…)=(…)`) pro modal, e não deixava log nenhum. SEM
+        # traceback de propósito (medido em duas colunas): na `main` esta rota
+        # já levantava `HTTPException(500, f"Erro ao apagar…")`, e o
+        # `admin_error_logging_middleware` faz `except HTTPException: raise` —
+        # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
+        # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
+        # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
+        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
+        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                launch_id=int(launch_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": int(launch_id)}
@@ -5634,7 +5863,12 @@ async def delete_credit_transaction_route(
     try:
         result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar compra: {exc}") from exc
+        # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
+        # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
+        # middleware deixa passar — nunca houve pilha gravada aqui para manter.
+        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
+                                credit_tx_id=int(tx_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:
         raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
@@ -6883,12 +7117,12 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
     # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
     # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
-    # primitivas e mesma isenção do app iOS (diretriz 3.1.1: o app não pode
-    # ser empurrado pra tela de compra; fica no acesso base).
+    # primitivas e, como ele, sem isenção de app: a que existia aqui era uma
+    # segunda cópia da checagem de UA (`"PigBankApp" in ws.headers`), e o header
+    # é escolhido pelo cliente — dava pra abrir o WS sem plano só pedindo.
     from core.services.plan_service import has_app_access, needs_plan_selection
-    in_app = "PigBankApp" in (ws.headers.get("user-agent") or "")
     sem_plano = await asyncio.to_thread(
-        lambda: (not in_app and needs_plan_selection(user_id)) or not has_app_access(user_id)
+        lambda: needs_plan_selection(user_id) or not has_app_access(user_id)
     )
     if sem_plano:
         await ws.close(code=4402, reason="subscription_required")

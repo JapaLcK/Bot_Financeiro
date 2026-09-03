@@ -20,6 +20,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   location.replace("/login");
 }
 </script>
+<!-- GA4 e Meta Pixel entram aqui no serve-time (frontend/routes/shared.py,
+     inject_tracking) — chumbar de novo no HTML duplicaria o page_view. -->
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />
@@ -337,7 +339,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
       </div>
 
       <div class="hiw-cta" data-reveal>
-        <p>A conta leva alguns segundos e é grátis pra testar.</p>
+        <p>A conta leva alguns segundos. Depois você escolhe um plano pra ativar seus 15 dias grátis — um teste por número de telefone, e o checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.</p>
         <a class="btn btn-primary" href="/cadastro">Criar minha conta <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
 

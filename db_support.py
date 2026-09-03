@@ -664,9 +664,14 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
 
 
 def mark_plan_selected_impl(get_conn, user_id: int) -> None:
-    """Marca que o usuário já escolheu um plano no cadastro (Grátis ou pago),
-    liberando o acesso ao dashboard. Idempotente: só grava na primeira vez
-    (where plan_selected_at is null) pra preservar o timestamp original."""
+    """Marca que o usuário já escolheu um plano no cadastro, liberando o acesso
+    ao dashboard. Hoje quem chama são os DOIS ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`);
+    a escolha do Grátis morreu em 2026-09-02. Não são duas portas de entrada: o
+    `invoice.paid` pressupõe subscription, que pressupõe uma sessão de checkout
+    antes, então o funil de cadastro continua com uma saída só — pagar.
+    Idempotente: só grava na primeira vez (where plan_selected_at is null) pra
+    preservar o timestamp original."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

@@ -305,3 +305,82 @@ test("home: Esc não dispensa o onboarding de MFA quando há diálogo por cima",
       "o diálogo de baixo tinha que continuar de pé");
   } finally { await page.close(); }
 });
+
+// ── o convite de MFA é de uma vez só: quem o gasta e quem não gasta ─────────
+//
+// Os TRÊS abaixo cobrem o lado do navegador. "Ativar agora" NÃO pode marcar: quem
+// abandona o setup no meio perderia o convite sem ter ativado nada. Quem conclui
+// é marcado no servidor, na ATIVAÇÃO (`verify_and_enable`, db/mfa.py) — e não por
+// `not mfa_enabled`, que desfaz sozinho quando a pessoa desliga o MFA e devolvia
+// o convite para sempre. "Agora não" TEM que marcar — sem isso o overlay persegue
+// todo mundo em todo login, que é pior que o bug — e, sendo hoje o único caminho
+// do navegador que o marca, não pode falhar mudo (o terceiro teste).
+// Todos abrem o overlay pela classe porque na home as funções que o abrem não
+// são globais (contrato do PBPages), como nos testes acima.
+
+async function homeComOnboarding(vistos) {
+  const page = await newPage();
+  await page.route("**/auth/mfa/onboarding-seen", (route) => {
+    vistos.push(1);
+    route.fulfill(json({}));
+  });
+  await page.goto(`${ORIGIN}/home.html`);
+  await page.waitForFunction(() => typeof window.mfaOnboardingActivate === "function");
+  await page.evaluate(() =>
+    document.getElementById("mfa-onboarding-overlay").classList.add("open"));
+  return page;
+}
+
+test('home: "Ativar agora" leva ao setup SEM gastar o convite', async () => {
+  const vistos = [];
+  const page = await homeComOnboarding(vistos);
+  try {
+    await page.click("#mfa-onboarding-overlay .mfa-ob-btn-primary");
+    // Espera a navegação: prova que o botão continua funcionando, e não que ele
+    // só ficou mudo. Esperar a URL nova fecha a corrida em vez de torcer contra
+    // ela — o POST tem toda a navegação para acontecer, e `vistos` vive no Node,
+    // sobrevivendo a ela. Medido: pega o `await` de volta, o fire-and-forget sem
+    // await, o `setTimeout`, e marcar DEPOIS do `location.href`.
+    // Timeout curto de propósito: a navegação é local e leva ~300ms; com o
+    // default de 30s, um botão morto custaria 30s de CI para dar a mesma resposta.
+    await page.waitForURL(/autoOpenMfa=1/, { timeout: 5000 });
+    assert.equal(vistos.length, 0,
+      '"Ativar agora" marcou o onboarding como visto: quem abandonar o setup perde o convite');
+  } finally { await page.close(); }
+});
+
+test('home: "Agora não" gasta o convite, como tem que ser', async () => {
+  const vistos = [];
+  const page = await homeComOnboarding(vistos);
+  try {
+    await page.click("#mfa-onboarding-overlay .mfa-ob-btn-secondary");
+    await page.waitForFunction(() =>
+      !document.getElementById("mfa-onboarding-overlay").classList.contains("open"));
+    assert.equal(vistos.length, 1,
+      '"Agora não" fechou sem marcar: o overlay voltaria em todo login');
+  } finally { await page.close(); }
+});
+
+test('home: "Agora não" que o servidor recusa deixa sinal no console', async () => {
+  // O `catch` do `_markMfaOnboardingSeen` só pega erro de REDE, e `fetch` não
+  // lança em 5xx: sem o `if (!r.ok)` o único caminho que ainda queima o convite
+  // falha aberto e MUDO — o overlay fecha e ninguém fica sabendo.
+  const page = await newPage();
+  const avisos = [];
+  try {
+    page.on("console", (m) => { if (m.text().includes("[mfa-onboarding]")) avisos.push(m.text()); });
+    await page.route("**/auth/mfa/onboarding-seen", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
+    await page.goto(`${ORIGIN}/home.html`);
+    await page.waitForFunction(() => typeof window.mfaOnboardingDismiss === "function");
+    await page.evaluate(() =>
+      document.getElementById("mfa-onboarding-overlay").classList.add("open"));
+
+    await page.click("#mfa-onboarding-overlay .mfa-ob-btn-secondary");
+    await page.waitForFunction(() =>
+      !document.getElementById("mfa-onboarding-overlay").classList.contains("open"));
+
+    assert.equal(avisos.length, 1, "o 500 passou sem sinal nenhum no console");
+    assert.match(avisos[0], /500/, "o sinal não diz qual status voltou");
+  } finally { await page.close(); }
+});

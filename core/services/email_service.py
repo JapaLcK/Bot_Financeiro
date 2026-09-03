@@ -262,21 +262,41 @@ def _whatsapp_link(greeting: str = "Oi! Quero ativar minha conta no PigBank 🐷
 
 
 def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool:
-    """Envia e-mail de boas-vindas após o cadastro."""
+    """Envia e-mail de boas-vindas após o cadastro (web).
+
+    A conta recém-criada NÃO entra no bot direto: o gate manda pra /precos
+    (routes/shared.py). Então a ordem aqui é ativar o teste de 15 dias
+    (plan_service.TRIAL_DAYS_DEFAULT, exposto em /billing/plans-config) e só
+    depois mandar o oi no WhatsApp — prometer uso imediato era falso.
+
+    O trial é 1 por telefone na vida (plan_trials, db/schema.py), e quem sabe a
+    resposta pra ESTE usuário é db.plans.is_trial_eligible_for_user — que precisa
+    do user_id e de um telefone vinculado, e este e-mail não tem nenhum dos dois
+    (a assinatura recebe só o e-mail, e o cadastro por senha nem grava telefone).
+    Então a copy NÃO garante quando a primeira cobrança acontece: quem recria a
+    conta com um número já usado é cobrado na hora (_billing_checkout_for_user
+    manda trial_days=0). A oferta dos 15 dias aparece como o que o checkout vai
+    confirmar antes de cobrar, nunca como fato consumado.
+
+    `link_code` e `dashboard_url` chegam dos chamadores e não são usados: os
+    links saem do _public_base_url() e do _whatsapp_link(). A assinatura fica
+    como está — mexer nela são 3 chamadores fora do escopo desta mudança.
+    """
     vincular_wpp = _whatsapp_link()
-    dashboard_url = dashboard_url.rstrip("/") if dashboard_url else ""
-    dashboard_section = f"""<p>Acompanhe tudo no seu dashboard:</p>
-      <p style="text-align:center"><a class="btn" href="{dashboard_url}">📊 Abrir Dashboard</a></p>""" if dashboard_url else ""
+    base = _public_base_url()
 
     content = f"""
       <p>Olá! 👋</p>
-      <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso!
-         Vamos conectar o Piggy ao seu WhatsApp pra você começar.</p>
-      <p><strong>É só abrir o chat e mandar um oi</strong> — o Piggy reconhece o
-         seu número automaticamente e já começa. Sem código, sem prazo. 🎉</p>
+      <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso — falta só
+         escolher o plano que você quer testar por <strong>15 dias grátis</strong>.</p>
+      <p><strong>1. Ative o seu teste</strong>: escolha o plano que quer
+         experimentar. O checkout mostra o que vai ser cobrado, e quando, antes
+         de você confirmar — nada é cobrado sem essa confirmação.</p>
+      <p style="text-align:center"><a class="btn" href="{base}/precos">🐷 Ativar meus 15 dias grátis</a></p>
+      <p><strong>2. Mande um oi pro Piggy no WhatsApp</strong> — com o teste
+         ativo, ele reconhece o seu número automaticamente e já começa a anotar.</p>
       <p style="text-align:center"><a class="btn" href="{vincular_wpp}">📱 Abrir chat no WhatsApp</a></p>
-      {dashboard_section}
-      <p><strong>Primeiros comandos:</strong></p>
+      <p><strong>O que você vai poder fazer por lá:</strong></p>
       <ul>
         <li><code>gastei 50 mercado</code> — registrar despesa</li>
         <li><code>recebi 1000 salário</code> — registrar receita</li>
@@ -288,9 +308,13 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     html = _base_html("Bem-vindo ao PigBank!", content)
     text = (
         "Bem-vindo ao PigBank!\n\n"
-        "Abra o chat com o bot no WhatsApp e mande um oi — reconhecemos seu número automaticamente.\n"
+        "Sua conta foi criada — falta escolher o plano que você quer testar por 15 dias grátis.\n\n"
+        f"1) Ative o teste escolhendo um plano: {base}/precos\n"
+        "   O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.\n"
+        "2) Depois, mande um oi pro Piggy no WhatsApp — ele reconhece seu número automaticamente.\n\n"
+        "Lá você vai poder mandar: gastei 50 mercado, recebi 1000 salário, saldo, ajuda.\n"
     )
-    return send_email(to=to, subject="✅ Bem-vindo ao PigBank — vincule o bot e comece agora", html_body=html, text_body=text)
+    return send_email(to=to, subject="✅ Bem-vindo ao PigBank — ative seus 15 dias grátis", html_body=html, text_body=text)
 
 
 # ─── Unsubscribe helpers ──────────────────────────────────────────────────────
@@ -780,20 +804,37 @@ def send_new_login_alert(
     )
 
 
-def send_password_reset_email(to: str, reset_url: str) -> bool:
-    """Envia e-mail com link de recuperação de senha."""
+def send_password_reset_email(to: str, reset_url: str, has_password: bool = True) -> bool:
+    """Envia e-mail com link de senha.
+
+    `has_password=False` (conta criada só via Google, sem `password_hash`) troca a
+    copy de "redefinir" para "definir" — ela nunca teve senha para redefinir.
+    """
+    if has_password:
+        intro = "Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank</strong>."
+        button = "🔑 Redefinir minha senha"
+        title = "Redefinição de senha — PigBank"
+        subject = "🔑 Redefinir senha — PigBank"
+    else:
+        intro = (
+            "Sua conta no <strong>PigBank</strong> foi criada com o Google e ainda não tem senha. "
+            "Use o link abaixo para definir uma."
+        )
+        button = "🔑 Definir minha senha"
+        title = "Definir senha — PigBank"
+        subject = "🔑 Definir sua senha — PigBank"
     content = f"""
       <p>Olá!</p>
-      <p>Recebemos uma solicitação para redefinir a senha da sua conta no <strong>PigBank</strong>.</p>
-      <p style="text-align:center"><a class="btn" href="{reset_url}">🔑 Redefinir minha senha</a></p>
+      <p>{intro}</p>
+      <p style="text-align:center"><a class="btn" href="{reset_url}">{button}</a></p>
       <p class="warn">⚠️ Este link expira em <strong>30 minutos</strong> e só pode ser usado uma vez.<br/>
         Se você não solicitou isso, ignore este e-mail.</p>
       <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
         Link: {reset_url}</p>
     """
-    html = _base_html("Redefinição de senha — PigBank", content)
-    text = f"Redefinição de senha — PigBank\n\nLink (expira em 30 min):\n{reset_url}"
-    return send_email(to=to, subject="🔑 Redefinir senha — PigBank", html_body=html, text_body=text)
+    html = _base_html(title, content)
+    text = f"{title}\n\nLink (expira em 30 min):\n{reset_url}"
+    return send_email(to=to, subject=subject, html_body=html, text_body=text)
 
 
 def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = "") -> bool:

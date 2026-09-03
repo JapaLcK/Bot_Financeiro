@@ -105,6 +105,24 @@ o saldo dos bancos conectados SOME do consolidado. Não é dinheiro errado — n
 quem está NO fuso do app o conserto MELHORA esse mesmo caminho, pelo mesmo
 mecanismo ao contrário.
 
+FECHADO pela condição 3, que era a única alcançável pela interface. O teto do
+`btn-next` (`latestKnownMonth`) era `Math.max`, e `Math.max` só sabe SUBIR: ele
+cobria a divergência em que o servidor está À FRENTE (Manaus −04) e deixava a
+metade oposta (Lisboa +01) com o teto no mês do NAVEGADOR — botão aberto para um
+mês que o servidor ainda não começou. Virou atribuição: o teto é o mês do
+servidor nas duas direções, que é a regra já declarada no próprio bloco de
+adoção ("o servidor é a fonte da verdade do mês"). Com o botão desabilitado, e
+sendo `changeMonth` chamado só por `btn-prev`/`btn-next` (os demais `fetchMonthHttp`
+usam `viewYear`/`viewMonth`), não há caminho de UI até o pedido explícito.
+Coberto por `tests/frontend/snapshot_virada_de_mes.test.mjs`, com o negativo
+(repondo o `Math.max`, o caso novo fica vermelho) e o positivo (o caso do mês
+SEGUINTE prova que o teto continua subindo quando é o servidor que está à frente).
+
+O que NÃO mudou: o `hist` continua derivado de `!is_current_month`, ou seja,
+segue confundindo "não é o mês corrente" com "é passado". Um mês FUTURO
+alcançado por outro caminho ainda renderizaria com os bancos zerados. Não há
+caminho assim hoje; se algum aparecer, o conserto é no `hist`, não no teto.
+
 EXCEÇÃO CONHECIDA E DELIBERADA — sobra 1 instância da classe em produção, não 0.
 `auth_account_export_download` (o monólito) monta o nome do ZIP com `%Y%m%d` de
 um `datetime.now(timezone.utc)`: export às 21:13 de São Paulo sai com o dia

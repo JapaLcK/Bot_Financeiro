@@ -4,9 +4,9 @@ import logging
 import re
 from collections import defaultdict
 
-# Irmão de pacote: reusa o helper em vez de uma 3ª cópia do `logger.error`
-# com sqlstate. Ele nunca põe `str(e)` no log.
-from core.handlers.pending import _log_falha
+# Helper único das portas destrutivas (a docstring dele lista quais e explica o
+# critério de nível). Ele nunca põe `str(e)` no log.
+from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
 from db import (

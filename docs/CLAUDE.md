@@ -135,7 +135,9 @@ de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 ### Pagamentos
 
 Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
-`change-plan`, `cancel-change`, `select-free`, `plans-config`.
+`change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
+com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
+sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -282,7 +284,9 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
 | Resend | e-mail transacional e de ciclo de vida | `core/services/email_service.py` |
 | APNs | push do app iOS | `core/services/push_service.py` |
-| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_meta_pixel`, `core/services/meta_capi.py` |
+| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_tracking`, `core/services/meta_capi.py` |
+| Google Analytics 4 | medição de funil (mesmas páginas do pixel) | `ga4_snippet`/`inject_tracking`; eventos ao lado de cada `fbq` |
+| GA4 Measurement Protocol | receita server-side (compra, fim do trial, renovação) | `core/services/ga4_mp.py`, no webhook do Stripe |
 
 O webhook do WhatsApp **verifica assinatura** (`X-Hub-Signature-256` com
 `WA_APP_SECRET`) e se recusa a subir em `APP_ENV=prod` sem o segredo.

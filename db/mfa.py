@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .connection import get_conn
 
+logger = logging.getLogger(__name__)
 
 _BACKUP_CODE_COUNT = 10
 _BACKUP_CODE_LENGTH = 10  # caracteres (alfanumerico legivel)
@@ -212,6 +214,26 @@ def verify_and_enable(user_id: int, code: str) -> list[str]:
                     (user_id, _hash_backup_code(code_plain)),
                 )
         conn.commit()
+
+    # O convite da /home some sozinho enquanto o MFA esta ligado, mas `disable_mfa`
+    # apaga a linha e o left join volta a `enabled = NULL` — sem marcar aqui, quem
+    # ativou e depois desligou volta a ser convidado em TODA carga da /home, para
+    # sempre. Marcar na ATIVACAO grava um fato; marcar no clique de "Ativar agora"
+    # gravava uma intencao e punia quem abandonava o setup no meio (por isso o
+    # botao nao marca mais — frontend/home.html).
+    #
+    # O erro e ENGOLIDO de proposito, e isto nao e defensivo demais: o commit
+    # acima ja ligou o MFA, e `backup_codes` so existe em texto puro dentro deste
+    # `return` — sao os 10 codigos mostrados UMA vez, a unica saida de quem perde
+    # o celular. Deixar esta cauda propagar troca "o convite reaparece" (o pior
+    # caso dela falhar) por "MFA ligado, codigos perdidos, 409 na retentativa" —
+    # escrita nova depois do ponto sem volta, a classe do `mark_bill_paid`
+    # (CLAUDE.md §1). O endpoint so trata ValueError, entao qualquer outra virava
+    # 500 em cima de uma ativacao que ja aconteceu.
+    try:
+        mark_mfa_onboarding_shown(user_id)
+    except Exception as exc:  # nunca derruba a resposta do enable
+        logger.warning("mfa onboarding mark falhou user=%s: %s", user_id, exc)
 
     return backup_codes
 

@@ -58,6 +58,25 @@ DASHBOARD_COOKIE_NAME = "dashboard_token"
 # Vazio em dev/staging → nenhum pixel é injetado (site limpo, sem rastreio).
 META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
 
+# Google Analytics 4 — mesmo alcance do pixel (ver `html_file`): páginas
+# públicas + /home, nunca as telas logadas nem a página de erro.
+# O ID vem chumbado porque ele é público de qualquer jeito (sai no fonte de toda
+# página); a env existe para DESLIGAR — `GA4_MEASUREMENT_ID=` vazio em dev deixa
+# o site sem rastreio, como o pixel já fazia.
+GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
+
+# Parâmetros de query que NUNCA podem viajar dentro do `page_location` do GA4:
+#   token — é credencial. `/completar-cadastro?token=` (cadastro via Google) e o
+#           `/unsubscribe?token=` do rodapé de todo e-mail são páginas rastreadas;
+#           sem esta limpeza o token inteiro ia pro Google.
+#   sid    — a sessão de checkout do Stripe, na volta pro /home?upgrade=success.
+#           Não é segredo, mas é única por compra: cada venda viraria uma "página"
+#           diferente no relatório.
+# A limpeza tem de ser AQUI e não na página: o page_view automático sai junto com
+# o `config`, no <head>, e o JS que apaga a query (home.html, `replaceState`) só
+# roda depois — quando o evento já foi enviado.
+GA4_PARAMS_FORA_DA_URL = ("token", "sid")
+
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -89,12 +108,81 @@ def meta_pixel_snippet() -> str:
     )
 
 
-def inject_meta_pixel(html_text: str) -> str:
-    """Insere o Meta Pixel imediatamente antes de </head> (o mais alto possível).
+def ga4_snippet() -> str:
+    """Tag base do GA4 (gtag.js). Vazia quando GA4_MEASUREMENT_ID não está setado.
 
-    No-op quando não há pixel configurado ou a página não tem </head>.
+    O `config` já dispara o `page_view` sozinho; os eventos de funil
+    (`begin_checkout`, `sign_up`, `purchase`…) são disparados pelas páginas, ao
+    lado do `fbq` correspondente — a lista mora no `docs/CLAUDE.md`.
+
+    `googletagmanager.com` precisa estar no `script-src` da CSP
+    (`_SECURITY_HEADERS`, finance_bot_websocket_custom.py) ou isto é bloqueado
+    sem erro visível fora do console.
     """
-    snippet = meta_pixel_snippet()
+    if not GA4_MEASUREMENT_ID:
+        return ""
+    mid = GA4_MEASUREMENT_ID
+    return (
+        "<!-- Google Analytics (GA4) -->\n"
+        f'<script async src="https://www.googletagmanager.com/gtag/js?id={mid}"></script>\n'
+        "<script>\n"
+        "window.dataLayer = window.dataLayer || [];\n"
+        "function gtag(){dataLayer.push(arguments);}\n"
+        "gtag('js', new Date());\n"
+        f"var PB_GA_SUJOS = {json.dumps(list(GA4_PARAMS_FORA_DA_URL))};\n"
+        "function pbLimpaUrl(bruta){\n"
+        "  if (!bruta) return bruta;\n"
+        "  try {\n"
+        "    var u = new URL(bruta);\n"
+        "    PB_GA_SUJOS.forEach(function(p){ u.searchParams.delete(p); });\n"
+        "    return u.href;\n"
+        "  } catch (e) { return null; }\n"
+        "}\n"
+        "(function(){\n"
+        "  var cfg = {};\n"
+        "  var aqui = pbLimpaUrl(location.href);\n"
+        "  if (aqui) cfg.page_location = aqui;\n"
+        "  // O referrer é a OUTRA ponta do mesmo vazamento: sair de\n"
+        "  // /completar-cadastro?token=… (Cancelar, Termos, Privacidade) manda a\n"
+        "  // URL de origem inteira no page_view da página seguinte.\n"
+        "  var veioDe = pbLimpaUrl(document.referrer);\n"
+        "  if (veioDe) cfg.page_referrer = veioDe;\n"
+        f"  gtag('config', '{mid}', cfg);\n"
+        "})();\n"
+        "/* Evento seguido de navegação: sem esperar, o `dataLayer` (que é memória\n"
+        "   da página) morre junto com o documento quando o gtag.js ainda está\n"
+        "   carregando — e a conversão some justo em quem tem conexão ruim.\n"
+        "   `depois` roda UMA vez: no callback do gtag, ou no teto de 1s, o que vier\n"
+        "   primeiro. O teto é o que importa: sem gtag.js carregado, o callback\n"
+        "   nunca vem, e sem ele o usuário ficaria preso. */\n"
+        "window.pbTrack = function(nome, params, depois){\n"
+        "  var fim = function(){ if (depois) { var d = depois; depois = null; d(); } };\n"
+        "  try {\n"
+        "    if (!window.gtag) { fim(); return; }\n"
+        "    var p = {};\n"
+        "    for (var k in (params || {})) p[k] = params[k];\n"
+        "    p.event_callback = fim;\n"
+        "    p.event_timeout = 900;\n"
+        "    gtag('event', nome, p);\n"
+        "    setTimeout(fim, 1000);\n"
+        "  } catch (e) { fim(); }\n"
+        "};\n"
+        "</script>\n"
+        "<!-- End Google Analytics -->\n"
+    )
+
+
+def inject_tracking(html_text: str) -> str:
+    """Insere Meta Pixel + GA4 imediatamente antes de </head> (o mais alto possível).
+
+    Os dois entram pelo MESMO ponto de propósito: enquanto o GA4 morava solto no
+    <head> da index.html, ele existia só na landing — e os eventos de funil
+    disparam na /precos, /cadastro e /home. Página nova nasce coberta pelos dois
+    ou por nenhum; não há terceira opção para esquecer.
+
+    No-op para o que não estiver configurado, ou se a página não tiver </head>.
+    """
+    snippet = meta_pixel_snippet() + ga4_snippet()
     if not snippet:
         return html_text
     idx = html_text.lower().find("</head>")
@@ -149,13 +237,14 @@ def stamp_asset_versions(html_text: str) -> str:
 def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
     """Serve um .html do frontend com cache desligado.
 
-    Com `pixel=True` (padrão) e META_PIXEL_ID setado, injeta o Meta Pixel no
-    <head>. As páginas da área logada (dashboard, settings, onboarding) passam
-    `pixel=False` — o rastreio de marketing fica só nas páginas públicas.
+    Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
+    estiver configurado. As páginas da área logada (dashboard, settings,
+    onboarding) passam `pixel=False`: o rastreio fica nas páginas públicas e na
+    /home, que é onde a volta do checkout (?upgrade=success) dispara a conversão.
     """
     text = path.read_text(encoding="utf-8")
-    if pixel and META_PIXEL_ID:
-        text = inject_meta_pixel(text)
+    if pixel:
+        text = inject_tracking(text)
     response = Response(content=stamp_asset_versions(text),
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"
@@ -189,7 +278,9 @@ _ERROR_DEFAULT_5XX = ("Algo deu errado do nosso lado", "Já registramos o proble
 
 _error_template: str | None = None
 # Já logamos a queda pro fallback? Sem isto o warning sai POR REQUISIÇÃO, e no
-# processo web o root logger carrega o _DashboardHandler (core/observability.py:23),
+# processo web o root logger carrega o _DashboardHandler (core/observability.py:23)
+# — instalado no import de frontend/finance_bot_websocket_custom.py, então vale
+# também com RUN_BACKGROUND_TASKS=0 —,
 # que faz psycopg.connect() + INSERT bloqueante dentro do event loop — um connect
 # por registro. Medido aqui, chamando logging.warning() em série com e sem o
 # handler, contra o Postgres em localhost: 11,3 ms na 1ª chamada, 3,7 ms/chamada
@@ -590,9 +681,14 @@ _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")
 
 
 def _is_pigbank_app(request: Request) -> bool:
-    """True se a requisição vem do WebView do app iOS (UA anexa "PigBankApp").
-    Usado pra isentar o app dos gates que forçariam a /precos — diretriz 3.1.1
-    da App Store proíbe empurrar tela de compra; o app fica no acesso base."""
+    """True se a requisição diz vir do WebView do app iOS (UA anexa "PigBankApp").
+
+    Só para TELEMETRIA (signup_source_from_request). NÃO usar para conceder nada:
+    o User-Agent é escolhido pelo cliente, então isto é a alegação do chamador,
+    não um fato verificado. Os gates isentavam o app com base nisto e qualquer
+    conta web entrava sem plano mandando a substring — a isenção saiu por isso.
+    Quando o app for lançado, a 3.1.1 da App Store volta a valer e a isenção
+    precisa de credencial que o servidor consiga verificar, não deste header."""
     return "PigBankApp" in (request.headers.get("user-agent") or "")
 
 
@@ -614,14 +710,14 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     ele, um cadastro novo poderia pular a /precos batendo direto numa API
     autenticada (ex.: /data/{id}) ou navegando pro /settings. Retorna 402 pro
     front mandar ao paywall/escolha. As rotas de /billing, /auth e /conta são
-    isentas (são elas que resolvem o gate — checkout, /auth/me, select-free)."""
+    isentas (são elas que resolvem o gate — checkout, /auth/me)."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
     from core.services.plan_service import has_app_access, needs_plan_selection
-    # App iOS não passa pelo gate de escolha (não pode comprar/escolher via web);
-    # segue governado por has_app_access e pelos limites por-feature/tier.
-    if not _is_pigbank_app(request) and needs_plan_selection(user_id):
+    # Sem isenção de app aqui: ela era `not _is_pigbank_app(request) and`, e o UA
+    # é escolhido pelo cliente — bastava mandar "PigBankApp" pra pular o gate.
+    if needs_plan_selection(user_id):
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
     if not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
@@ -708,12 +804,11 @@ def gate_plan_selection(request: Request):
     from fastapi.responses import RedirectResponse
     from core.services.plan_service import needs_plan_selection
 
-    # App iOS (WebView anexa "PigBankApp" ao UA): não redireciona pra tela de
-    # planos/compra — diretriz 3.1.1 da App Store. Espelha o !window.PB_IN_APP
-    # do cliente. O acesso segue governado pelos gates por-feature/tier.
-    if _is_pigbank_app(request):
-        return None
-
+    # Aqui havia `if _is_pigbank_app(request): return None`, pela diretriz 3.1.1
+    # da App Store. Saiu porque o UA é escolhido pelo cliente: a isenção liberava
+    # o gate pra qualquer um que mandasse "PigBankApp" no header. Quando o app for
+    # lançado ele precisa de credencial que o servidor consiga verificar.
+    #
     # Retorno do checkout com sucesso: o webhook checkout.session.completed
     # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
     # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
@@ -752,12 +847,12 @@ def gate_onboarding(request: Request):
       2. /settings é pra onde um usuário travado vai consertar a conta. Nunca
          trancar a saída de emergência.
 
-    O app iOS NÃO é isento, ao contrário do gate de plano. A isenção de lá
-    (_is_pigbank_app) existe pela diretriz 3.1.1 da App Store, que é sobre TELA
-    DE COMPRA. O wizard não é: é saldo, cartão, WhatsApp e resumo. Isentar o app
-    significaria que nenhum usuário de iPhone jamais veria o onboarding. O
-    cuidado fica no conteúdo da página — os CTAs de upgrade são <a href="/precos">,
-    que o auth-refresh.js esconde sozinho dentro do app.
+    O app iOS NÃO é isento. Isentá-lo significaria que nenhum usuário de iPhone
+    jamais veria o onboarding, e o wizard não é tela de compra: é saldo, cartão,
+    WhatsApp e resumo. O gate de plano também não isenta mais o app — a isenção
+    que existia lá era por User-Agent, escolhido pelo cliente. O cuidado fica no
+    conteúdo da página: os CTAs de upgrade são <a href="/precos">, que o
+    auth-refresh.js esconde sozinho dentro do app.
 
     `?upgrade=success` É isento, espelhando o gate de plano, mas por um motivo
     mais caro: /home?upgrade=success roda handleUpgradeReturn(), que dispara a

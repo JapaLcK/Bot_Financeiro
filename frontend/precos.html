@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Planos · PigBank</title>
-<meta name="description" content="Planos PigBank: Grátis, Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." />
+<meta name="description" content="Planos PigBank: Essencial R$ 9,90, Plus R$ 19,90 e Pro R$ 49,90. 15 dias grátis pra testar o plano que você escolher." />
 <link rel="canonical" href="https://pigbankai.com/precos" />
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
@@ -42,12 +42,13 @@
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
   .cycle-btn.is-active .cycle-save { background: rgba(255,255,255,.22); color: #fff; }
 
-  /* ── Cards: as 5 listas têm de começar no mesmo Y ──────────────────────
+  /* ── Cards: as 4 listas têm de começar no mesmo Y ──────────────────────
      A regra é a categoria, não o caso: TUDO que fica acima da lista e tem
      altura variável precisa reservar a altura máxima, senão desalinha.
-       · subtítulo — abaixo de ~1330px o card cai pra 230px e "Organize tudo,
-         sem limites"/"Seu dinheiro no automático" viram duas linhas enquanto
-         os outros três ficam em uma (medido: 20px de desalinho);
+       · subtítulo — a 1080px de viewport o card cai pra 243px e "Seu dinheiro
+         no automático" vira duas linhas enquanto os outros três ficam em uma
+         (medido 2026-09-02 em Chromium headless, com min-height desligado:
+         41,3px contra 20,6px — 20,7px de desalinho; remeça antes de reusar);
        · bloco do preço — o Premium mostra "Aguarde" em 1.15rem contra 2.5rem
          dos pagos, e a linha de equivalência mensal só existe no ciclo anual
          (medido: 32px). */
@@ -56,16 +57,22 @@
   #plans-v2 .price-block .price { margin: 0; }
   #plans-v2 .price .per { font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
   #plans-v2 .price-eq { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
-  /* O CTA do Grátis é <a> e os pagos são <button>: o <a> herda line-height 1.5
-     do body e o <button> cai no "normal" da UA, o que deixava a fileira de
-     botões 7px fora de esquadro. Fixar o line-height iguala os dois. */
+  /* Nasceu do CTA do Grátis, que era <a> (line-height 1.5 herdado do body)
+     contra os <button> dos pagos (o "normal" da UA) — 7px fora de esquadro.
+     Com o card do Grátis fora, os quatro CTAs são <button> e já casam entre si;
+     a regra fica porque ainda define a ALTURA da fileira, e tirá-la encolheria
+     os quatro (medido 2026-09-02, Chromium headless: 44,2px com ela contra
+     41,0px sem, nos dois viewports). Isso é mudança visual fora deste escopo. */
   #plans-v2 .plan .btn { line-height: 1.4; }
   /* .btn-outline tem borda de 1px e .btn-primary não tem nenhuma: o CTA do Plus
-     nascia 2px mais baixo que os outros quatro. Borda transparente iguala. */
+     nascia 2px mais baixo que os outros três. Borda transparente iguala. */
   #plans-v2 .plan .btn-primary, .cmp-table tfoot .btn-primary { border: 1px solid transparent; }
   #plans-v2 .plan .btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
   /* O badge é absoluto com left:50%, então a largura disponível é metade do
-     card (131px em 5 colunas) e "Mais popular" quebrava em duas linhas. */
+     card e "Mais popular" quebrava em duas linhas. Com 4 colunas ainda quebra:
+     medido 2026-09-02 em Chromium headless, o badge pede 139,5px e a metade do
+     card dá 121,5px a 1080px de viewport (a 1560px sobra — 181,5px — mas a
+     regra vale a categoria, não o caso). Remeça antes de reusar os números. */
   #plans-v2 .plan-badge { white-space: nowrap; }
 
   /* ── Tabela comparativa ────────────────────────────────────────────────
@@ -213,11 +220,16 @@
         <p id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p>
       </div>
 
-      <!-- Escada de planos (Grátis/Essencial/Plus/Pro/Premium) — conteúdo ÚNICO
+      <!-- Escada de planos (Essencial/Plus/Pro/Premium) — conteúdo ÚNICO
            e hardcoded da página (lançada 2026-08-06, sem flag: nada de flash
            de conteúdo antigo). Sem classes CSS novas de propósito: reusa
-           .plan/.price/.plan-badge + estilos inline. -->
-      <!-- width breakout: a escada de 5 cards precisa de mais que os 1200px do
+           .plan/.price/.plan-badge + estilos inline.
+           O card do Grátis SAIU: assinar virou obrigatório pra entrar pela web,
+           então ele não é mais uma escolha oferecida aqui. O tier `free`
+           continua existindo no backend como ESTADO (fallback após falha de
+           cobrança) e como COLUNA da tabela comparativa abaixo — o que morreu é
+           a escolha, não o plano. -->
+      <!-- width breakout: a escada de 4 cards precisa de mais que os 1200px do
            .wrap pra não ficar espremida; centraliza na página via translate. -->
       <div id="plans-v2-wrap" style="width:min(1560px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
         <div class="cycle-wrap">
@@ -228,22 +240,6 @@
         </div>
 
         <div class="plans" id="plans-v2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
-          <article class="plan">
-            <h3>Grátis</h3>
-            <div class="plan-sub">Pra conhecer a Piggy</div>
-            <div class="price-block">
-              <div class="price">R$ 0 <span>/ sempre</span></div>
-            </div>
-            <ul>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Registro por texto no WhatsApp</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard completo · 30 lançamentos/mês</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico do mês corrente</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> 1 caixinha e 1 cartão</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 20 mensagens/mês</li>
-            </ul>
-            <a class="btn btn-outline btn-block" id="free-cta" data-free-cta href="/cadastro">Criar conta grátis</a>
-          </article>
-
           <article class="plan">
             <h3>Essencial</h3>
             <div class="plan-sub">Organize tudo, sem limites</div>
@@ -576,7 +572,11 @@
               <tfoot>
                 <tr>
                   <td class="cmp-feat"></td>
-                  <td><a class="btn btn-outline" data-free-cta href="/cadastro">Criar conta grátis</a></td>
+                  <!-- Coluna Grátis sem CTA: a coluna FICA (é informação — o que
+                       você perde descendo o degrau), mas o Grátis não é mais
+                       escolhível. Célula vazia, não colspan: as 6 colunas do
+                       colgroup e do tbody continuam valendo. -->
+                  <td></td>
                   <td><button class="btn btn-outline" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button></td>
                   <td class="is-hl"><button class="btn btn-primary" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button></td>
                   <td><button class="btn btn-outline" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button></td>
@@ -643,6 +643,10 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+/* O client_id do GA4 NÃO é lido aqui: o cookie `_ga` já viaja sozinho no POST
+   do /billing/create-checkout, e o backend o lê de lá
+   (`client_id_from_ga_cookie`, core/services/ga4_mp.py). */
+
 // Escada de planos hardcoded (lançada 2026-08-06): a página já carrega com o
 // conteúdo final — o fetch de config abaixo só desabilita botão sem price e
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
@@ -661,6 +665,12 @@ function setCycle(cycle) {
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();
+  // Trocar de ciclo é uma impressão NOVA: outros preços na tela. Sem isto o
+  // `view_item_list` do load (sempre "monthly", que é o estado inicial) seria o
+  // único, e a comparação mensal × anual nunca teria o lado anual.
+  // `setCycle` só é chamada pelos dois botões (medido: não roda no load), então
+  // não há evento em duplicata na abertura da página.
+  if (typeof enviarViewItemList === "function") enviarViewItemList();
 }
 
 // ── Véus das bordas da tabela comparativa ────────────────────────────────────
@@ -695,6 +705,17 @@ const PLAN_PRICES = {
   plus:      { monthly: "R$ 19,90/mês", annual: "R$ 199/ano" },
   pro:       { monthly: "R$ 49,90/mês", annual: "R$ 499/ano" },
 };
+
+/* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
+   PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,
+   e o que o GA4 registra é o mesmo que o usuário viu na tela.
+   "R$ 19,90/mês" → 19.9 · "R$ 199/ano" → 199 · desconhecido → 0. */
+function planValue(plan, cycle) {
+  const label = (PLAN_PRICES[plan] || {})[cycle === "annual" ? "annual" : "monthly"];
+  if (!label) return 0;
+  const n = Number(label.replace(/[^\d,]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
 
 function fmtBrDate(iso) {
   if (!iso) return "a data da renovação";
@@ -829,77 +850,38 @@ async function cancelChange(btn) {
   }
 }
 
-// ── Onboarding: escolha de plano pós-cadastro ────────────────────────────────
-// Cadastro novo é jogado pra cá antes do dashboard. O card Grátis vira
-// "Continuar com o plano Grátis" (fecha o gate via /billing/select-free e entra
-// no app); os pagos seguem no fluxo normal de checkout.
-async function applyOnboardingChoice() {
+// Copy do gate de escolha de plano (cadastro novo, checkout abandonado):
+// assinar é OBRIGATÓRIO pra entrar, e a copy padrão ("15 dias grátis pra
+// testar") não diz isso. Quem decide é o ESTADO do servidor —
+// needs_plan_selection do /auth/me, a fonte de verdade (§0.7) —, NUNCA o
+// ?escolha=1 da URL: o marcador se perde em três caminhos alcançáveis em
+// produção (o link "Planos" do nav e do rodapé DESTA página; o gate_pro_page
+// em routes/shared.py, que redireciona pra /precos sem marcador; e os dois
+// redirects de /conta), e aí quem está travado no gate lia a copy de
+// visitante, sem nenhuma indicação de que precisa assinar pra entrar.
+// Sem atalho pela URL de propósito: ele criaria uma 4ª célula (visitante com
+// link velho lendo a copy do gate) pra economizar um flash de subtítulo.
+// É o mesmo fetch que o applyOnboardingChoice fazia aqui antes do commit
+// anterior — nenhuma requisição nova na página —, mas em IIFE próprio em vez de
+// dentro do loadPlansState: lá ele ficava serializado atrás do
+// /billing/subscription, que fala com o Stripe. O `if (sub)` também vem de lá.
+(async function applyPlanGateCopy() {
   let me = null;
   try {
     const r = await fetch("/auth/me", { credentials: "same-origin" });
-    if (!r.ok) return; // deslogado: mantém "Criar conta grátis" → /cadastro
+    if (!r.ok) return;            // deslogado (401): a copy padrão está certa
     me = await r.json();
-  } catch { return; }
-
-  // São DOIS CTAs de Grátis desde a tabela comparativa (card + rodapé da
-  // tabela). Iterar em [data-free-cta] em vez de #free-cta — com getElementById
-  // só o do card mudava e o da tabela continuava mandando pro /cadastro.
-  const ctas = document.querySelectorAll("[data-free-cta]");
-  if (me && me.needs_plan_selection) {
-    // Guia visual: deixa claro que precisa escolher um plano pra começar.
-    const sub = document.getElementById("precos-sub");
-    if (sub) sub.textContent = "Escolha um plano pra começar: dá pra seguir no Grátis ou testar um plano pago 15 dias de graça.";
-    ctas.forEach(cta => {
-      cta.removeAttribute("href");
-      cta.style.cursor = "pointer";
-      cta.textContent = "Continuar com o plano Grátis";
-      cta.onclick = function (e) { e.preventDefault(); selectFree(cta); };
-    });
-  } else if (me) {
-    // Já logado e com plano escolhido: o card Grátis não leva pro /cadastro.
-    ctas.forEach(cta => {
-      cta.removeAttribute("href");
-      cta.textContent = "Seu cadastro está pronto";
-      cta.classList.add("btn-outline");
-      cta.style.opacity = ".7";
-      cta.style.cursor = "default";
-      cta.onclick = function (e) { e.preventDefault(); };
-    });
-  }
-}
-
-async function selectFree(btn) {
-  if (btn.classList.contains("loading")) return;
-  const orig = btn.textContent;
-  btn.classList.add("loading");
-  btn.textContent = "Ativando…";
-  try {
-    const r = await fetch("/billing/select-free", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "x-csrf-token": getCsrfToken() },
-    });
-    if (r.status === 401) {
-      showToast("Faça login pra continuar.", "err");
-      setTimeout(() => { window.location.href = "/login?next=" + encodeURIComponent("/precos"); }, 900);
-      return;
-    }
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = (d.detail && d.detail.message) ||
-        (typeof d.detail === "string" ? d.detail : "Não consegui ativar o Grátis.");
-      showToast(msg, "err");
-      btn.classList.remove("loading");
-      btn.textContent = orig;
-      return;
-    }
-    window.location.href = d.dashboard_url || "/home";
-  } catch {
-    showToast("Erro de conexão. Tente novamente.", "err");
-    btn.classList.remove("loading");
-    btn.textContent = orig;
-  }
-}
+  } catch { return; }             // rede caiu: copy padrão, sem travar a página
+  // Sem guarda de window.PB_IN_APP: o gate deixou de isentar o app iOS
+  // (routes/shared.py), então quem abre a /precos de dentro dele está travado
+  // como qualquer um. Esconder o mandato deixaria a tela sem explicar por que
+  // o dashboard não abre.
+  if (!me || !me.needs_plan_selection) return;  // copy padrão
+  const sub = document.getElementById("precos-sub");
+  if (sub) sub.textContent =
+    "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
+    + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+})();
 
 (async function loadPlansState(){
   try {
@@ -914,13 +896,12 @@ async function selectFree(btn) {
         b.disabled = true; b.textContent = "Indisponível"; b.dataset.unavailable = "1";
       });
       if (!cfg.essencial_available) markUnavailable('[data-plan-btn="essencial"]');
+      if (!cfg.plus_available) markUnavailable('[data-plan-btn="plus"]');
       if (!cfg.pro_available) markUnavailable('[data-plan-btn="pro"]');
     }
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     await loadSubscription();
     refreshPlanButtons();
-    // Cadastro novo: card Grátis vira "Continuar com o plano Grátis".
-    await applyOnboardingChoice();
   } catch {}
 })();
 
@@ -980,7 +961,22 @@ async function startCheckout(interval, btn, plan) {
     if (data && data.checkout_url) {
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
-      window.location.href = data.checkout_url;
+      // GA4: mesmo momento, nome recomendado (alimenta o funil de compra).
+      // O valor sai do PLAN_PRICES que a própria página já exibe — nada de uma
+      // segunda tabela de preços aqui pra divergir da primeira.
+      // Via `pbTrack` porque a linha seguinte destrói a página: sem esperar o
+      // envio, o evento morre no dataLayer em quem tem conexão lenta.
+      const irPraStripe = () => { window.location.href = data.checkout_url; };
+      if (window.pbTrack) {
+        pbTrack("begin_checkout", {
+          currency: "BRL",
+          value: planValue(plan, interval),
+          items: [{ item_id: plan || "", item_name: PLAN_NAMES[plan] || plan || "",
+                    item_category: interval || "" }],
+        }, irPraStripe);
+      } else {
+        irPraStripe();
+      }
     } else {
       showToast("Resposta inesperada do servidor.", "err");
       btn.classList.remove("loading");
@@ -996,6 +992,22 @@ async function startCheckout(interval, btn, plan) {
 // Meta Ads: visualização da página de planos → público de remarketing
 // "olhou o preço mas não assinou".
 if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
+// GA4: mesma visualização, nome recomendado. Roda na abertura da página e a cada
+// troca de ciclo (chamada no fim do `setCycle`), com o ciclo selecionado AGORA —
+// é o que permite comparar quem olha mensal com quem olha anual.
+// Nada de `pbTrack` aqui: esta página não navega depois do evento.
+function enviarViewItemList() {
+  if (!window.gtag) return;
+  gtag("event", "view_item_list", {
+    item_list_id: "precos",
+    item_list_name: "Planos",
+    items: Object.keys(PLAN_PRICES).map(p => ({
+      item_id: p, item_name: PLAN_NAMES[p] || p,
+      item_category: currentCycle, price: planValue(p, currentCycle),
+    })),
+  });
+}
+enviarViewItemList();
 </script>
   <script src="/nav-auth.js?v=7" defer></script>
 </body>

@@ -18,6 +18,12 @@
  * comentário listando as portas dos outros — uma lista mantida à mão, em oito
  * lugares, que já tinha divergido: `handlers_inline` e `reset_cache_multiaba`
  * apontavam ambos para a 8911.
+ *
+ * O que a porta efêmera CUSTOU, e não estava escrito: um `http.server` órfão
+ * (runner morto por sinal — Ctrl-C, SIGKILL — nunca roda o `after`) agora não
+ * se denuncia mais. Com porta fixa ele quebrava a execução seguinte, ruidoso e
+ * achável; com porta efêmera ele só acumula em silêncio. `pgrep -f "http.server 0"`
+ * acha os órfãos de uma sessão de dev.
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -43,7 +49,11 @@ export function startServer() {
                             "--directory", FRONTEND],
                        { stdio: ["ignore", "pipe", "pipe"] });
 
-    let pronto = false, saida = "";
+    // `saida` é para a MENSAGEM de erro (os dois streams); `banner` é só o
+    // stdout, e é nele que o regex da porta roda. Misturar os dois deixava um
+    // "port 9999" vindo pelo stderr ser adotado como a porta do servidor — o
+    // que um PB_PYTHON apontando para wrapper produz de verdade.
+    let pronto = false, saida = "", banner = "";
     const timer = setTimeout(() => falhar("não anunciou a porta em 30s"), 30_000);
 
     function falhar(motivo) {
@@ -62,7 +72,8 @@ export function startServer() {
     proc.stderr.on("data", ler);
     proc.stdout.on("data", (b) => {
       ler(b);
-      const porta = /port (\d+)/.exec(saida)?.[1];
+      banner += b;
+      const porta = /port (\d+)/.exec(banner)?.[1];
       if (pronto || !porta) return;
       pronto = true;
       clearTimeout(timer);

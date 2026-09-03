@@ -28,11 +28,11 @@ from datetime import date, datetime, time
 from typing import Any
 
 import db
-# Helper ÚNICO das três portas, com o nível por parâmetro (a doc dele explica o
-# critério). `core/handlers/credit.py` já importava daqui; a cópia local desta
-# tool era a única sobrando, e ela logava ERROR onde o WhatsApp logava WARNING —
-# a mesma condição contava como erro no admin por uma porta e não pela outra.
-from core.handlers.pending import _log_falha
+# Helper único das portas destrutivas, com o nível por parâmetro (a docstring
+# dele lista quais portas e explica o critério). Cópia local logava ERROR onde o
+# WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
+# porta e não pela outra.
+from core.observability import _log_falha
 from utils_date import _tz
 
 from .._context import CURRENT_PLATFORM
@@ -446,6 +446,16 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                     f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
                     f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
                 )
+            except db.LaunchUnsafeRollback as e:
+                # `efeitos` existe mas não dá pra revertê-lo por inteiro —
+                # mesma condição PERMANENTE do WhatsApp (`core/handlers/
+                # pending.py`), mesma frase.
+                _log_falha("delete_launch_inseguro", user_id, e,
+                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
+                return (
+                    f"🐷 Não consigo reverter o lançamento #{lid} com segurança, "
+                    f"então mantive ele intacto pra não bagunçar seu saldo."
+                )
             except db.InvestmentLotHasWithdrawal as e:
                 # TEMPORÁRIA e com contorno: apagar o resgate reabre o lote.
                 # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
@@ -529,13 +539,14 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
 
     deleted = int(result.get("deleted") or 0)
     antigos = result.get("kept_no_effects") or []
+    inseguros = result.get("kept_unsafe") or []
     erros = result.get("errors") or []
     # None = a recontagem falhou ("não conferi"), NÃO "sobrou zero".
     sobraram = result.get("remaining")
 
     # "não havia nada" SÓ quando não havia mesmo: com linha contada antes,
     # dizer isso é fingir sucesso.
-    if not deleted and not antigos and not erros and not sobraram:
+    if not deleted and not antigos and not inseguros and not erros and not sobraram:
         return "🐷 Não havia nenhum lançamento pra apagar."
 
     partes = []
@@ -545,8 +556,9 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
             f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
             f"saldo. Suas caixinhas e investimentos seguem intactos."
         )
-    # Duas frases distintas: "antigo demais pra reverter" e "erro técnico" são
-    # causas diferentes, e uma queda de banco não pode sair como lançamento antigo.
+    # Frases distintas: "antigo demais pra reverter", "não sei reverter" e
+    # "erro técnico" são causas diferentes, e uma queda de banco não pode sair
+    # como lançamento antigo.
     if antigos:
         p = "s" if len(antigos) != 1 else ""
         partes.append(
@@ -554,17 +566,28 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
             f"revertido, então mantive intacto pra não bagunçar seu saldo: "
             f"{_amostra_ids(antigos)}."
         )
+    # Terceira causa: o `efeitos` existe, mas não sei revertê-lo por inteiro.
+    # UMA frase só — a sub-causa (chave desconhecida × degenerado × lote
+    # ausente × fora do escopo) vai pro log do `delete_all_launches` como
+    # CÓDIGO ENUMERADO (`motivo=`, atributo da exceção — não a mensagem dela),
+    # e o usuário não pode agir sobre a diferença.
+    if inseguros:
+        p = "s" if len(inseguros) != 1 else ""
+        partes.append(
+            f"⚠️ Mantive {len(inseguros)} lançamento{p} que não consigo reverter "
+            f"com segurança: {_amostra_ids(inseguros)}."
+        )
     if erros:
         p = "s" if len(erros) != 1 else ""
         partes.append(
             f"❌ {len(erros)} lançamento{p} deu erro técnico e continua aí: "
             f"{_amostra_ids(erros)}. Já registrei a falha — tenta de novo em alguns minutos."
         )
-    # `remaining` é conferência, não fato novo: quando bate com o que as duas
+    # `remaining` é conferência, não fato novo: quando bate com o que as três
     # listas já disseram, repetir "sobrou N" só duplica a mensagem. Fala apenas
     # quando DISCORDA — que é o caso que a recontagem existe pra pegar (delete
     # casou zero linhas e ninguém levantou). `None` não discorda de nada.
-    esperado = len(antigos) + len(erros)
+    esperado = len(antigos) + len(inseguros) + len(erros)
     if sobraram is not None and sobraram != esperado:
         p = "s" if sobraram != 1 else ""
         partes.append(
