@@ -143,63 +143,63 @@ def _tz_da_sessao_sincrona() -> str:
 def _no_pool_do_dashboard(chamada):
     """Roda uma corrotina do monólito com pool próprio DESTE event loop.
 
-    O pool novo é aberto num `await` SOZINHO, antes da corrotina — mesmo passo
-    que o `_fuso_de_sao_paulo` (tests/test_virada_de_mes.py) dá com
-    `asyncio.run(shared._get_db_pool())` — e não é detalhe de estilo: são DOIS
-    globais de `frontend/routes/shared.py` presos a um event loop, o `_db_pool`
-    e o `_db_pool_lock`. Zerar só o pool basta enquanto a corrotina abre UMA
-    conexão por vez (caso 1); quebra no `get_financial_data` (18.6), que abre
-    várias em `asyncio.gather` — aí duas `_q` chamam `_get_db_pool` com o pool
-    ainda em `None`, o `asyncio.Lock` fica CONTENDIDO e só então ele resolve o
-    loop (`asyncio.locks.Lock.acquire` só chama `_get_loop()` no ramo com
-    espera; o ramo sem contenção nunca liga o lock a loop nenhum). Abrindo o
-    pool antes, o gather encontra `_db_pool` já preenchido e nem chega no lock,
-    que assim nunca se prende a loop nenhum — nem ao daqui.
+    `reset_db_pool()` nas DUAS pontas, e a de SAÍDA é a que não pode sumir. São
+    dois globais de `frontend/routes/shared.py` presos a um event loop, o
+    `_db_pool` e o `_db_pool_lock`. Zerar só o pool basta enquanto a corrotina
+    abre UMA conexão por vez (caso 1); quebra no `get_financial_data` (18.6),
+    que abre várias em `asyncio.gather` — aí duas `_q` chamam `_get_db_pool`
+    com o pool ainda em `None`, o `asyncio.Lock` fica CONTENDIDO e só então
+    resolve o loop (`asyncio.locks.Lock.acquire` só chama `_get_loop()` no ramo
+    com espera). O `_LoopBoundMixin` guarda esse loop PARA SEMPRE, e o
+    `asyncio.run` seguinte estoura `RuntimeError: is bound to a different event
+    loop` dentro do gather; a `_q` que ganhou o lock fica órfã em `pool.open()`,
+    o pool aberto nunca chega a `shared._db_pool`, e o `asyncio.run` DEPOIS
+    desse pendura em `asyncio.runners._cancel_all_tasks`.
 
-    O que a contenção causa: o `_LoopBoundMixin` guarda o loop da PRIMEIRA vez,
-    o `asyncio.run` seguinte estoura `RuntimeError: is bound to a different
-    event loop` DENTRO do gather, a `_q` que ganhou o lock fica pendurada em
-    `pool.open()`, o pool novo nunca chega a `shared._db_pool` (logo o `finally`
-    não fecha nada) e os workers dele sobrevivem ao teste — o `asyncio.run`
-    seguinte PENDURA PARA SEMPRE em `asyncio.runners._cancel_all_tasks`, a mesma
-    armadilha que o docstring do `_fuso_de_sao_paulo` descreve para o portal do
-    TestClient.
+    Por isso o `reset_db_pool()` do `finally`, e por isso ele é LOAD-BEARING —
+    não é limpeza cosmética. O gather daqui prendeu o lock ao loop que está
+    prestes a morrer; sem recriá-lo na saída, o próximo `asyncio.run` do
+    processo herda um lock preso a loop morto. MEDIDO em 03/09/2026 com a sonda
+    `assert shared._db_pool_lock._loop is None` como último arquivo da rodada:
+    com a linha, `lock._loop = None`, 44 passed; sem ela, `lock._loop =
+    <_UnixSelectorEventLoop closed=True>` com `_db_pool = None` — que é
+    exatamente o par de condições que arma a mina (ver o docstring de
+    `shared.reset_db_pool`).
 
-    MEDIDO em 01/09/2026, com a linha do `_get_db_pool()` removida e pytest de 2
-    node IDs (18.6 × `test_lista_encontra_o_que_o_donut_mostra`): trava nas DUAS
-    ordens. Com ela, passam nas duas ordens os 4 arquivos que rodam
-    `asyncio.run(get_financial_data(...))` (`grep -rn get_financial_data
-    tests/`) pareados com este, e `pytest -k "fuso or donut"` termina.
+    HISTÓRICO, para não voltar às variantes ruins:
+    - até 01/09/2026 isto DESVIAVA da mina com um `await shared._get_db_pool()`
+      antes da chamada: com o pool já aberto, o gather nem chegava no lock.
+      Funcionava, mas dependia de o lock nunca ser contendido — invariante
+      invisível que a próxima faxina apagaria. O reset na saída torna a
+      contenção inofensiva, então a linha saiu.
+    - trocar o lock por um novo e NÃO recriá-lo ao final não resolve: MEDIDO,
+      os 4 vizinhos passam quando rodam ANTES e travam quando rodam DEPOIS — o
+      veneno só troca de direção.
 
-    Trocar o lock por um novo e NÃO devolvê-lo ao final não resolve: MEDIDO com
-    `shared._db_pool_lock = asyncio.Lock()` no lugar desta linha (sem restaurar
-    o original no `finally`), os 4 vizinhos passam quando rodam ANTES e travam
-    quando rodam DEPOIS — o veneno só troca de direção, porque o gather daqui
-    prende o lock novo ao loop daqui e ele fica no módulo. A variante que SALVA
-    e RESTAURA o lock no `finally` não foi medida; pode funcionar, e só não foi
-    tentada porque a linha acima já resolve com menos estado.
-
-    TETO deste conserto (`ponytail:`): ele DESVIA da armadilha, não a remove.
-    O `_db_pool_lock` de `frontend/routes/shared.py` é criado uma vez, no
-    import, e o `_LoopBoundMixin` o prende PARA SEMPRE ao loop da primeira
-    contenção do processo. Aqui ele nunca chega a ser contendido — mas qualquer
-    teste futuro que zere `shared._db_pool` e depois dispare concorrência
-    (`asyncio.gather` de duas leituras) sem abrir o pool antes pendura a suíte
-    de novo, do mesmo jeito. O conserto de verdade é em `shared._get_db_pool`
-    (lock criado por loop, ou nenhum lock), e é mudança de produção — PR
-    próprio, não este.
+    A restauração do pool no `finally` continua um poke no global do módulo, e
+    é de propósito: restaurar um pool não arma o lock (a mina era o lock), e um
+    context manager em `shared.py` só para embrulhar teardown de teste seria
+    scaffolding de teste dentro de módulo de produção.
     """
     import frontend.routes.shared as shared
 
     async def _ler():
-        anterior, shared._db_pool = shared._db_pool, None
+        anterior = shared.reset_db_pool()
         try:
-            await shared._get_db_pool()
             return await chamada()
         finally:
-            if shared._db_pool is not None:
-                await shared._db_pool.close()
+            # LOAD-BEARING, e ANTES do `close()`: o gather acima prendeu o lock a
+            # ESTE loop, que morre em seguida; sem esta linha a sonda acusa
+            # `_loop = <loop morto>`. Com o `close()` na frente, uma exceção dele
+            # (fechar pool pode cair em CancelledError — ver o docstring de
+            # `reset_db_pool`) pularia o reset E a restauração, deixando plantada
+            # exatamente a mina que esta função existe para desarmar. Nesta ordem
+            # o pool corrente continua sendo fechado: `reset_db_pool()` DEVOLVE
+            # o que estava em `shared._db_pool`, que é o mesmo objeto de antes.
+            atual = shared.reset_db_pool()
             shared._db_pool = anterior
+            if atual is not None:
+                await atual.close()
 
     return asyncio.run(_ler())
 
