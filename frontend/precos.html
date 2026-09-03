@@ -857,7 +857,8 @@ async function cancelChange(btn) {
   if (!me || !me.needs_plan_selection || window.PB_IN_APP) return;  // copy padrão
   const sub = document.getElementById("precos-sub");
   if (sub) sub.textContent =
-    "Escolha um plano pra continuar: 15 dias grátis pra testar, cancele antes do fim e não paga nada.";
+    "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
+    + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
 })();
 
 (async function loadPlansState(){

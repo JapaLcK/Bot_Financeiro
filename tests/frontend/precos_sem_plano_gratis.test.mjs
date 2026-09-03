@@ -167,6 +167,20 @@ for (const [estado, me] of [
       const sub = await page.textContent("#precos-sub");
       assert.match(sub, esperado,
         `${estado} ${rotulo} devia bater ${esperado} e leu: "${sub}"`);
+      if (esperado === COPY_GATE) {
+        // A copy do gate é NOSSA (941ffc0) e não pode garantir quando a
+        // cobrança vem: quem recria a conta com um telefone já em plan_trials
+        // é inelegível e o checkout sai com trial_days=0 (Codex, #239). A
+        // oferta fica (o COPY_GATE acima + os "15 dias grátis" daqui são o
+        // controle positivo: sem eles o caso passaria num subtítulo esvaziado).
+        for (const garantia of ["não paga nada", "Nada é cobrado agora",
+                                "primeira cobrança só vem depois"]) {
+          assert.ok(!sub.includes(garantia),
+            `a copy do gate garante a cobrança (${garantia}): "${sub}"`);
+        }
+        assert.ok(sub.includes("15 dias grátis") && sub.includes("checkout"),
+          `a copy do gate perdeu a oferta ou a deferência ao checkout: "${sub}"`);
+      }
       await page.close();
     });
   }
