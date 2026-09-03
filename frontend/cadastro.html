@@ -144,7 +144,13 @@
       // Meta Ads: conta criada. eventID casa com o CompleteRegistration
       // server-side (CAPI) pro Meta deduplicar.
       if(window.fbq&&d.user_id){fbq('track','CompleteRegistration',{},{eventID:'signup_'+d.user_id});}
-      goDash(d.dashboard_url);
+      // GA4: mesma conversão, nome recomendado. `method` separa e-mail de Google.
+      // `pbTrack` porque o goDash troca de página logo em seguida (ver o comentário
+      // no snippet, frontend/routes/shared.py): sem esperar, o cadastro some do
+      // funil de quem tem conexão lenta.
+      var irPraDash=function(){goDash(d.dashboard_url)};
+      if(window.pbTrack&&d.user_id){pbTrack('sign_up',{method:'email'},irPraDash);}
+      else{irPraDash();}
     }catch(e){err('verify-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent='Confirmar'}
   }

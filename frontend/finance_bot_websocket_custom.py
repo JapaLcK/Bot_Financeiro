@@ -3925,8 +3925,16 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
     )
 
 
-async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str, price_id: str):
-    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``."""
+async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
+                                     price_id: str, ga_client_id: str | None = None):
+    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
+
+    `ga_client_id` (já validado) entra no metadata da sessão e da assinatura pro
+    webhook conseguir mandar a compra pro GA4 na pessoa certa. Sessão REUTILIZADA
+    mantém o metadata de quando nasceu — o `_checkout_session_matches` não olha
+    este campo de propósito: recriar um checkout só porque o cookie do GA mudou
+    trocaria a URL que o usuário já tem aberta.
+    """
     from db import get_auth_user, set_stripe_customer
 
     user = await asyncio.to_thread(get_auth_user, user_id)
@@ -4076,6 +4084,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "plan": plan,
             "price_id": price_id,
         }
+        if ga_client_id:
+            metadata["ga_client_id"] = ga_client_id
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -4170,12 +4180,21 @@ async def billing_create_checkout(
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
+    # client_id do GA4 pro `purchase` do webhook cair na mesma pessoa que
+    # navegou. Sai do cookie `_ga`, que o navegador já manda neste POST — não do
+    # corpo: pedir pro JS ler e enviar era mais código na /precos e mais um campo
+    # de entrada pra validar, pelo mesmo dado. Ausente (visitante novo cujo
+    # gtag.js ainda não criou o cookie, ou bloqueado) → o webhook usa o
+    # `fallback_client_id` e a venda entra sem origem, nunca se perde.
+    from core.services.ga4_mp import client_id_from_ga_cookie
+    ga_client_id = client_id_from_ga_cookie(request.cookies.get("_ga"))
+
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id)
+                stripe, user_id, plan, interval, price_id, ga_client_id)
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
         # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
@@ -4462,10 +4481,15 @@ async def billing_cancel_change(request: Request, user_id: int = Depends(_get_cu
 
 
 @app.post("/billing/webhook")
-async def billing_webhook(request: Request):
+async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recebe eventos do Stripe (checkout.session.completed, customer.subscription.*).
     Atualiza o plano do usuário no banco.
+
+    Rastreio (GA4 / Meta CAPI) sai por `background_tasks`, nunca inline: são dois
+    POSTs pra fora, e a Stripe desiste do webhook por timeout — o que faz ela
+    REENVIAR o evento, e aí o e-mail de boas-vindas sai de novo. O padrão já era
+    esse no /auth/verify-email; aqui o await tinha entrado por descuido.
     """
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe não configurado.")
@@ -4556,6 +4580,30 @@ async def billing_webhook(request: Request):
         cur = _g(price, "currency") or "brl"
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
+
+    def _ga_plano_publico(*objetos) -> str | None:
+        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
+
+        É o mesmo identificador que o `begin_checkout` manda do navegador.
+        `_stored_plan_for_price` devolve o valor do BANCO, onde Plus é 'pro' por
+        legado e Pro é 'pro_max' — usar aquele aqui faria checkout e compra
+        virarem produtos diferentes, e ainda colidiria Plus com Pro (Codex, #244).
+
+        O PREÇO ATUAL manda, e o metadata é só o fallback: a troca de plano
+        agendada (`/billing/change-plan`) reescreve apenas o price das fases do
+        SubscriptionSchedule e nunca o `metadata.plan`. Depois que a troca entra
+        em vigor, o metadata aponta pro plano ANTIGO — e toda renovação seria
+        atribuída ao item errado (Codex, #244, 2ª rodada). O fallback continua
+        valendo pro price que não está nas envs (legado).
+        """
+        publico, _ = _plan_interval_for_price(_subscription_price_id(objetos[0]))
+        if publico:
+            return publico
+        for obj in objetos:
+            valor = _g(_g(obj, "metadata", {}), "plan")
+            if valor:
+                return valor
+        return None
 
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
@@ -4665,7 +4713,7 @@ async def billing_webhook(request: Request):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
-                    await asyncio.to_thread(
+                    background_tasks.add_task(
                         send_event,
                         event_name=_ev_name,
                         event_id=_ev_id,
@@ -4677,6 +4725,52 @@ async def billing_webhook(request: Request):
                     )
             except Exception as exc:
                 print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
+            # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
+            # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
+            # entra semanas depois, e o purchase daquele caso sai no invoice.paid.
+            # É server-only de propósito: o navegador manda `start_trial` (que não
+            # tem valor), e deixar os dois mandarem `purchase` criaria duas versões
+            # do mesmo evento, uma delas sem receita.
+            try:
+                from core.services.ga4_mp import (
+                    fallback_client_id,
+                    mp_configured,
+                    send_purchase,
+                )
+                _ga_sid = _g(session, "id")
+                if mp_configured() and _ga_sid and sub_status != "trialing":
+                    # Valor REALMENTE cobrado: `amount_total` da sessão já vem
+                    # com cupom aplicado, e o `unit_amount` do plano não — este
+                    # checkout aceita cupom (`allow_promotion_codes=True`), então
+                    # o preço de tabela superestimaria a receita (Codex, #244).
+                    # Zero é resposta legítima (cupom de 100%): o teste é
+                    # `is None`, não falsy. Sem o campo, cai no valor do plano.
+                    _ga_total = _g(session, "amount_total")
+                    if _ga_total is None:
+                        _ga_value, _ga_currency = _subscription_amount(sub)
+                    else:
+                        _ga_value = float(_ga_total) / 100.0
+                        _ga_currency = (_g(session, "currency") or "brl").upper()
+                    # O client_id foi gravado no metadata na criação do checkout
+                    # (/billing/create-checkout). Sem ele a venda ainda entra, como
+                    # usuário novo sem origem — ver fallback_client_id.
+                    # Os dois metadata são consultados, não um OU outro: a
+                    # assinatura pode existir sem o campo (nasceu antes desta
+                    # versão) e a sessão desta compra ter o valor novo.
+                    _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                               or _g(_g(session, "metadata", {}), "ga_client_id")
+                               or fallback_client_id(user_id))
+                    background_tasks.add_task(
+                        send_purchase,
+                        transaction_id=_ga_sid,
+                        value=_ga_value,
+                        currency=_ga_currency,
+                        plan=_ga_plano_publico(sub, session) or plan_value,
+                        client_id=_ga_cid,
+                        user_id=user_id,
+                    )
+            except Exception as exc:
+                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -4754,7 +4848,7 @@ async def billing_webhook(request: Request):
                     if capi_configured() and _inv_id and _billing_reason != "subscription_create":
                         _capi_email = await _user_email(user_id)
                         _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
-                        await asyncio.to_thread(
+                        background_tasks.add_task(
                             send_event,
                             event_name="Purchase",
                             event_id=purchase_event_id(_inv_id),
@@ -4766,6 +4860,34 @@ async def billing_webhook(request: Request):
                         )
                 except Exception as exc:
                     print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
+
+                # GA4 (Measurement Protocol) — o mesmo purchase, pelo mesmo motivo
+                # e com o mesmo corte: a primeira fatura da compra imediata
+                # (subscription_create) já virou purchase no
+                # checkout.session.completed. Aqui ficam a cobrança do fim do
+                # trial e as renovações — dinheiro que nenhum navegador vê.
+                try:
+                    from core.services.ga4_mp import (
+                        fallback_client_id,
+                        mp_configured,
+                        send_purchase,
+                    )
+                    _ga_inv = _g(invoice, "id")
+                    if (mp_configured() and _ga_inv
+                            and _g(invoice, "billing_reason") != "subscription_create"):
+                        _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                                   or fallback_client_id(user_id))
+                        background_tasks.add_task(
+                            send_purchase,
+                            transaction_id=_ga_inv,
+                            value=amount_brl,
+                            currency=(_g(invoice, "currency") or "brl").upper(),
+                            plan=_ga_plano_publico(sub) or plan_value,
+                            client_id=_ga_cid,
+                            user_id=user_id,
+                        )
+                except Exception as exc:
+                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)

@@ -20,16 +20,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   location.replace("/login");
 }
 </script>
-<!-- Google Analytics (GA4) — depois do redirect de PWA acima de propósito:
-     quem entra pelo app instalado é mandado pro /login e não deve virar
-     pageview da landing. -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-0H8FHNQ3C4"></script>
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', 'G-0H8FHNQ3C4');
-</script>
+<!-- GA4 e Meta Pixel entram aqui no serve-time (frontend/routes/shared.py,
+     inject_tracking) — chumbar de novo no HTML duplicaria o page_view. -->
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />

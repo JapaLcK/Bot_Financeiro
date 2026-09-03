@@ -643,6 +643,10 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+/* O client_id do GA4 NÃO é lido aqui: o cookie `_ga` já viaja sozinho no POST
+   do /billing/create-checkout, e o backend o lê de lá
+   (`client_id_from_ga_cookie`, core/services/ga4_mp.py). */
+
 // Escada de planos hardcoded (lançada 2026-08-06): a página já carrega com o
 // conteúdo final — o fetch de config abaixo só desabilita botão sem price e
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
@@ -661,6 +665,12 @@ function setCycle(cycle) {
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();
+  // Trocar de ciclo é uma impressão NOVA: outros preços na tela. Sem isto o
+  // `view_item_list` do load (sempre "monthly", que é o estado inicial) seria o
+  // único, e a comparação mensal × anual nunca teria o lado anual.
+  // `setCycle` só é chamada pelos dois botões (medido: não roda no load), então
+  // não há evento em duplicata na abertura da página.
+  if (typeof enviarViewItemList === "function") enviarViewItemList();
 }
 
 // ── Véus das bordas da tabela comparativa ────────────────────────────────────
@@ -695,6 +705,17 @@ const PLAN_PRICES = {
   plus:      { monthly: "R$ 19,90/mês", annual: "R$ 199/ano" },
   pro:       { monthly: "R$ 49,90/mês", annual: "R$ 499/ano" },
 };
+
+/* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
+   PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,
+   e o que o GA4 registra é o mesmo que o usuário viu na tela.
+   "R$ 19,90/mês" → 19.9 · "R$ 199/ano" → 199 · desconhecido → 0. */
+function planValue(plan, cycle) {
+  const label = (PLAN_PRICES[plan] || {})[cycle === "annual" ? "annual" : "monthly"];
+  if (!label) return 0;
+  const n = Number(label.replace(/[^\d,]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
 
 function fmtBrDate(iso) {
   if (!iso) return "a data da renovação";
@@ -940,7 +961,22 @@ async function startCheckout(interval, btn, plan) {
     if (data && data.checkout_url) {
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
-      window.location.href = data.checkout_url;
+      // GA4: mesmo momento, nome recomendado (alimenta o funil de compra).
+      // O valor sai do PLAN_PRICES que a própria página já exibe — nada de uma
+      // segunda tabela de preços aqui pra divergir da primeira.
+      // Via `pbTrack` porque a linha seguinte destrói a página: sem esperar o
+      // envio, o evento morre no dataLayer em quem tem conexão lenta.
+      const irPraStripe = () => { window.location.href = data.checkout_url; };
+      if (window.pbTrack) {
+        pbTrack("begin_checkout", {
+          currency: "BRL",
+          value: planValue(plan, interval),
+          items: [{ item_id: plan || "", item_name: PLAN_NAMES[plan] || plan || "",
+                    item_category: interval || "" }],
+        }, irPraStripe);
+      } else {
+        irPraStripe();
+      }
     } else {
       showToast("Resposta inesperada do servidor.", "err");
       btn.classList.remove("loading");
@@ -956,6 +992,22 @@ async function startCheckout(interval, btn, plan) {
 // Meta Ads: visualização da página de planos → público de remarketing
 // "olhou o preço mas não assinou".
 if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
+// GA4: mesma visualização, nome recomendado. Roda na abertura da página e a cada
+// troca de ciclo (chamada no fim do `setCycle`), com o ciclo selecionado AGORA —
+// é o que permite comparar quem olha mensal com quem olha anual.
+// Nada de `pbTrack` aqui: esta página não navega depois do evento.
+function enviarViewItemList() {
+  if (!window.gtag) return;
+  gtag("event", "view_item_list", {
+    item_list_id: "precos",
+    item_list_name: "Planos",
+    items: Object.keys(PLAN_PRICES).map(p => ({
+      item_id: p, item_name: PLAN_NAMES[p] || p,
+      item_category: currentCycle, price: planValue(p, currentCycle),
+    })),
+  });
+}
+enviarViewItemList();
 </script>
   <script src="/nav-auth.js?v=7" defer></script>
 </body>

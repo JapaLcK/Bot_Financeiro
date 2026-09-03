@@ -2151,6 +2151,14 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
         fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
       }
     }
+    // GA4: só o `start_trial`, e de propósito. O `purchase` sai do SERVIDOR
+    // (core/services/ga4_mp.py, no webhook do Stripe), que é o único lugar que
+    // sabe o valor real cobrado — desconto, proporcional, imposto. Disparar aqui
+    // também criaria duas versões do mesmo evento, uma delas sem receita.
+    // O trial não move dinheiro, então este lado basta pra ele.
+    if (window.gtag && sid && ev === "trial") {
+      gtag("event", "start_trial", { transaction_id: sid, plan: pl || "", trial_days: Number(td) || 0 });
+    }
     // Pequeno delay pra dar o "wow effect" depois da pagina carregar.
     // `ev` ausente cai no texto de trial, que era o comportamento anterior:
     // link antigo na caixa de e-mail não deve virar cópia errada pro outro lado.
