@@ -13,6 +13,9 @@ import utils_date
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+# Aviso de fuso divergente: uma vez por processo (ver o fim de `load_app_env`).
+_AVISO_FUSO_EMITIDO = False
+
 
 def load_app_env() -> str:
     """
@@ -139,13 +142,33 @@ def load_app_env() -> str:
     #      padrão, e a técnica `REPORT_TIMEZONE=<zona> pytest` (documentada no
     #      cabeçalho daquele arquivo e no de `tests/test_virada_de_mes.py`)
     #      morreria junto.
-    if utils_date.tz_name() != utils_date.TZ_PADRAO:
+    # UMA VEZ POR PROCESSO. `load_app_env` é chamado no IMPORT de vários módulos do
+    # mesmo processo: medido, `import core.observability, frontend.routes.shared,
+    # adapters.whatsapp.wa_app` imprimia 3 linhas idênticas e agora imprime 1. Um
+    # boot web importa mais que isso.
+    #
+    # A SUÍTE não muda: continua em 22 avisos, todos de `tests/test_fuso_do_app.py`
+    # (medido: sem esse arquivo, 0). É de propósito — a fixture `_restaura_fuso`
+    # zera a flag ANTES de cada caso, senão `test_fuso_divergente_...avisa` ficaria
+    # verde-por-engano ao rodar depois de outro caso que já avisou (medido: sem o
+    # reset, ele passa sozinho e falha em `test_report_timezone_...` + ele).
+    #
+    # ponytail: comparação por NOME, não por offset. Um ALIAS do mesmo fuso —
+    # `Brazil/East`, mesmo TZif de `America/Sao_Paulo`, offset medido idêntico
+    # (−03:00) — dispara aviso falso. Aceito: alias é raro, o aviso não bloqueia
+    # nada, e resolver por identidade de zona custa mais código do que o alarme
+    # cosmético vale. Se incomodar, compare `ZoneInfo(a).utcoffset(now)`.
+    global _AVISO_FUSO_EMITIDO
+    if not _AVISO_FUSO_EMITIDO and utils_date.tz_name() != utils_date.TZ_PADRAO:
+        _AVISO_FUSO_EMITIDO = True
         print(
             f"WARNING: fuso do servidor ({utils_date.tz_name()}) diverge do APP_TZ do "
             f"dashboard ({utils_date.TZ_PADRAO}), que é literal no JS. Lançamento "
             f"criado pelo dashboard perto da meia-noite vai para o DIA errado. "
-            f"Alinhe REPORT_TIMEZONE/TZ com {utils_date.TZ_PADRAO} ou mude o APP_TZ "
-            f"de frontend/dashboard.js junto.",
+            f"Operar noutro fuso exige mudar os TRÊS juntos: o `APP_TZ` de "
+            f"frontend/dashboard.js, o `TZ_PADRAO` de utils_date.py e o ambiente "
+            f"(REPORT_TIMEZONE/TZ). Mexer só no ambiente é o que este aviso está "
+            f"vendo agora.",
             file=sys.stderr,
         )
 

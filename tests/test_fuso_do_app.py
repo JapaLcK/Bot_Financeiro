@@ -73,6 +73,14 @@ def _restaura_fuso():
     """
     antes = {k: os.environ.get(k) for k in ("TZ", "PGTZ", "REPORT_TIMEZONE", "APP_ENV")}
     original = utils_date._TZ_ENV_ORIGINAL
+    # O aviso de fuso divergente sai UMA VEZ por processo (flag de módulo em
+    # `config/env.py`). Zerar ANTES de cada caso é o que impede
+    # `test_fuso_divergente_do_app_tz_avisa_no_stderr` de ficar verde-por-engano
+    # quando roda depois de outro caso que já avisou — a flag transformaria a
+    # guarda numa dependência de ordem.
+    import config.env as cfg
+
+    cfg._AVISO_FUSO_EMITIDO = False
     yield
     for k, v in antes.items():
         if v is None:
@@ -1227,28 +1235,74 @@ def _cliente():
 #   19.2 (boot):   `tz_name()`   == `utils_date.TZ_PADRAO`
 #   ⟹ `tz_name()` == literal do JS, sem o Python nunca ler o frontend em produção.
 
-_APP_TZ_JS = re.compile(r"""APP_TZ\s*=\s*["']([^"']+)["']""")
+# Casar a ATRIBUIÇÃO não basta — foi o falso negativo medido. "Comenta a velha,
+# põe a nova com outro nome" (`// const APP_TZ = ...` + `const APP_TZ_ATIVO =
+# Intl.DateTimeFormat().resolvedOptions().timeZone`) deixava a guarda VERDE com o
+# dashboard já seguindo o fuso do aparelho, que é exatamente o bug da #179. Por
+# isso a guarda casa os três USOS reais do literal, e varre o código SEM
+# comentário.
+#
+# ponytail: stripper ingênuo — não entende `//` dentro de string nem de regex
+# literal. Basta aqui: só as linhas com APP_TZ importam e nenhuma delas tem
+# string com `//`. Trocar por tokenizer de JS se isso deixar de valer.
+def _sem_comentarios(js: str) -> str:
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", js, flags=re.S))
+
+
+# `(?<![\w$])` para `MY_APP_TZ` não contar; `(?!=)` para `APP_TZ ===` não contar.
+_APP_TZ_ATRIBUICAO = re.compile(r"(?<![\w$])APP_TZ\s*=(?!=)")
+# Crase incluída: template literal é atribuição válida e não pode dar vermelho falso.
+_APP_TZ_LITERAL = re.compile(r"""(?<![\w$])APP_TZ\s*=\s*(["'`])([^"'`]+)\1""")
+
+# Os USOS que gastam o literal — os três caminhos que mentem o dia se ele mentir.
+# Comparados com espaço colapsado, então reformatar não derruba a guarda; TROCAR
+# a constante por outra coisa, sim.
+_APP_TZ_USOS = (
+    "_tzOffsetMinutes(new Date(asUTC), APP_TZ)",  # appTzWallClockToISO — a ESCRITA
+    "timeZone: APP_TZ",  # fmtDate — display da lista
+    "_wallPartsInTZ(d, APP_TZ)",  # toLocalDatetimeInput — o campo do formulário
+)
 
 
 # Controle NEGATIVO do valor: troque o `APP_TZ` de dashboard.js para
-# "America/New_York" → vermelho no segundo assert.
-# Controle NEGATIVO da VACUIDADE: renomeie `APP_TZ` para `APP_TIMEZONE` no JS →
-# vermelho no PRIMEIRO assert (0 ocorrências), e não verde por lista vazia. É esse
-# assert que também acusa uma SEGUNDA definição da constante.
+# "America/New_York" → vermelho no último assert.
+# Controle NEGATIVO da VACUIDADE por RENOME: renomeie `APP_TZ` para `APP_TIMEZONE`
+# → vermelho no primeiro assert (0 atribuições), não verde por lista vazia.
+# Controle NEGATIVO da VACUIDADE por COMENTÁRIO: comente a linha da constante e
+# ponha `const APP_TZ_ATIVO = Intl.DateTimeFormat().resolvedOptions().timeZone`
+# usado no lugar dela → vermelho, porque comentário não conta e os usos somem.
 def test_o_app_tz_do_dashboard_e_o_mesmo_fuso_padrao_do_servidor():
     js = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "dashboard.js"
-    achados = _APP_TZ_JS.findall(js.read_text(encoding="utf-8"))
+    codigo = _sem_comentarios(js.read_text(encoding="utf-8"))
+    compacto = re.sub(r"\s+", " ", codigo)
 
-    assert len(achados) == 1, (
-        f"esperava exatamente 1 atribuição de APP_TZ em {js.name}, achei {len(achados)}: "
-        f"{achados}. Se a constante foi renomeada ou duplicada, ajuste _APP_TZ_JS aqui "
-        f"— senão esta guarda fica verde sem medir nada."
+    atribuicoes = _APP_TZ_ATRIBUICAO.findall(codigo)
+    assert len(atribuicoes) == 1, (
+        f"esperava exatamente 1 atribuição de APP_TZ em {js.name} (fora de comentário), "
+        f"achei {len(atribuicoes)}. Uma SEGUNDA atribuição significa que o fuso passou a "
+        f"ser calculado em runtime — que é o bug — ou que a constante foi duplicada."
     )
-    assert achados[0] == utils_date.TZ_PADRAO, (
-        f"APP_TZ do dashboard.js é {achados[0]!r} e utils_date.TZ_PADRAO é "
+
+    literal = _APP_TZ_LITERAL.search(codigo)
+    assert literal, (
+        f"a única atribuição de APP_TZ em {js.name} não é um literal de string. O fuso "
+        f"do dashboard tem de ser CRAVADO; derivá-lo do aparelho "
+        f"(`resolvedOptions().timeZone`) é a #179 de volta."
+    )
+
+    faltando = [u for u in _APP_TZ_USOS if re.sub(r"\s+", " ", u) not in compacto]
+    assert not faltando, (
+        f"o literal APP_TZ existe em {js.name} mas estes USOS sumiram: {faltando}. "
+        f"Constante viva com uso trocado é o falso negativo que esta guarda existe para "
+        f"pegar — se o uso só mudou de forma, atualize _APP_TZ_USOS junto."
+    )
+
+    assert literal.group(2) == utils_date.TZ_PADRAO, (
+        f"APP_TZ do dashboard.js é {literal.group(2)!r} e utils_date.TZ_PADRAO é "
         f"{utils_date.TZ_PADRAO!r}. Os dois interpretam o MESMO datetime-local como "
         f"hora de parede; divergindo, o lançamento perto da meia-noite vai para o dia "
-        f"errado. Mude os DOIS juntos."
+        f"errado. Operar noutro fuso exige mudar os TRÊS juntos: o `APP_TZ` daqui, o "
+        f"`TZ_PADRAO` de utils_date.py e o ambiente (REPORT_TIMEZONE/TZ)."
     )
 
 
