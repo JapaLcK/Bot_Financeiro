@@ -186,6 +186,19 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
             detail="Não foi possível recomeçar agora: uma sincronização bancária "
                    "está em andamento. Tente de novo em alguns segundos.",
         ) from exc
+    except psycopg.errors.DeadlockDetected as exc:
+        # O reset toma accounts primeiro e pockets/investments no laço; um saque
+        # de caixinha faz o contrário, e o Postgres mata quem detectar primeiro
+        # (db/privacy.py, comentário do `update accounts`). Deadlock aborta a
+        # transação INTEIRA — nada local mudou — e é temporário: o mesmo 503
+        # recuperável que a rota do Open Finance já dá
+        # para esta exceção (frontend/routes/open_finance.py:393-401), em vez do
+        # 500 "erro interno" numa condição que a retentativa resolve.
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível recomeçar agora: outra operação na sua conta "
+                   "estava em andamento. Tente de novo em alguns segundos.",
+        ) from exc
 
     # 2º passe remoto (Codex PR #217, 11º): item Pluggy salvo ENTRE a
     # enumeração da limpeza remota e o DELETE local foi varrido do banco sem

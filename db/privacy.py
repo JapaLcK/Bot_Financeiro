@@ -594,78 +594,58 @@ def reset_user_data(
 
         with get_conn() as conn:
             with conn.cursor() as cur:
-                # PRIMEIRAS escritas da transação, e são elas que fazem o
-                # reset ser correto sob concorrência (issue #246).
+                # PRIMEIRAS escritas da transação, e são elas que fazem o reset
+                # ser correto sob concorrência (#246): o `update` segura o lock
+                # de accounts até o commit, então um lançamento concorrente só
+                # escreve depois, sobre saldo 0. Saldo NEGATIVO após o reset é o
+                # certo — o lançamento sobreviveu (decisão do dono) com o
+                # dinheiro dele. `ensure_user_tx` ANTES porque sem a linha o
+                # update casa 0 e não trava nada, e o estado é alcançável
+                # (`merge_users` apaga accounts da origem, db/users.py:88); o
+                # `on conflict do nothing` (:19) é inócuo no caso normal.
                 #
-                # O `update` TOMA O LOCK da linha de accounts e o segura até o
-                # commit: um `add_launch_and_update_balance` concorrente
-                # bloqueia no `update accounts` dele (db/accounts.py:94), que
-                # roda ANTES do insert em launches (:99) — só prossegue depois
-                # do commit, sobre saldo 0, e o lançamento dele nasce com o
-                # dinheiro refletido no saldo. Sem isso o reset zerava o saldo
-                # apagando a linha no FIM do laço, depois do `delete from
-                # launches`: o lançamento da janela sobrevivia (decisão do dono)
-                # com `delta_conta` NÃO refletido, e apagá-lo depois devolvia
-                # dinheiro nunca debitado. O saldo pode ficar NEGATIVO logo após
-                # o reset, e é o correto — o lançamento sobreviveu com o
-                # dinheiro dele.
+                # ponytail: o lock inverte a ordem accounts×pockets/investments
+                # de 4 fluxos (db/pockets.py:336→466, db/investments.py:1041→1096
+                # e :1554→1680, db/accounts.py:1647/1696→1718). Deadlock é REAL e
+                # é novo, e o reset NÃO é imune: ele fecha o ciclo (pede pockets
+                # no `_delete` do laço segurando accounts desde o update), e
+                # morre quem o Postgres detecta primeiro — ordem de chegada, não
+                # estrutura. Dois tetos: nas 3 portas do OF o DeadlockDetected
+                # cai em `except Exception: pass` e some (lista em
+                # db/accounts.py:1500-1512); e o reset morto sobe 500, não o 503
+                # recuperável que frontend/routes/open_finance.py:393-401 já dá
+                # para a MESMA exceção — com o `remote_cleanup` já executado, o
+                # que é gatilho novo para a janela residual documentada acima.
                 #
-                # `ensure_user_tx` vem ANTES porque sem linha de accounts o
-                # update casaria 0 e não travaria NADA — e aí o reset fica PIOR
-                # que a versão antiga: troca "dinheiro criado" por dívida que
-                # não existe (medido: 34 das 35 posições do laço terminam em
-                # saldo -250 com 0 lançamentos; com o ensure_user_tx são 35/35
-                # coerentes nas duas condições). O estado é alcançável:
-                # `merge_users` apaga accounts do usuário de origem
-                # (db/users.py:88) e migra auth_accounts sem recriar a linha
-                # (:154-162), e todo reset da versão antiga deixava a conta
-                # assim. É `insert ... on conflict do nothing` (db/users.py:19):
-                # no caso normal não faz nada e o lock fica com o update; sem a
-                # linha, é o próprio insert que cria e trava a linha nova.
+                # Quem chega DEPOIS do lock não deadlocka, só ESPERA — no
+                # `ensure_user` do writer, que pede accounts em transação
+                # PRÓPRIA antes de qualquer caixinha. Invariante frágil: vale
+                # enquanto todo escritor de accounts chamar `ensure_user` — hoje
+                # os 9 chamam (`grep -rn 'update accounts set' --include='*.py'
+                # db/`, menos o `merge_users`, que é a exceção conhecida). E a
+                # espera não é só do dono da linha — a fila do
+                # WhatsApp tem consumidor único (`_worker_loop`,
+                # adapters/whatsapp/wa_app.py:324), então um writer preso trava
+                # as mensagens de TODOS os usuários durante a janela.
                 #
-                # Preservar a linha ainda fecha uma classe que ninguém tinha
-                # citado: `import_ofx_launches_bulk` chama `ensure_user` em
-                # transação PRÓPRIA (db/accounts.py:2120), insere em launches
-                # (:2146) e só então toca accounts com `update ... returning
-                # balance` + `fetchone()["balance"]` (:2169) — um reset que
-                # apagasse a linha nessa janela fazia o `fetchone()` devolver
-                # None e estourar TypeError. O mesmo padrão está em
-                # accounts:41/94/2169, pockets:469/639 e investments:1476/1680;
-                # com a linha preservada, nenhum deles lê de linha apagada.
+                # Sem `lock_timeout` de propósito: o do repo vive nas conexões
+                # DEDICADAS do `pluggy_item_lock` (db/open_finance_state.py:595,
+                # :611, :676), feitas para ter teto próprio. No pool ele valeria
+                # para TODO write do produto, e espera correta viraria erro. Se
+                # incomodar, a saída é ordem única de lock nos writers.
                 #
-                # ponytail: o lock inverte a ordem accounts×pockets/
-                # investments de 4 fluxos (db/pockets.py:336→466,
-                # db/investments.py:1041→1096 e :1554→1680,
-                # db/accounts.py:1647/1696→1709), que tomam a caixinha/
-                # investimento primeiro. Deadlock é REAL, é novo, e a vítima
-                # NUNCA é o reset: forçando a inversão ao vivo (saque parado
-                # entre :336 e :466, reset entrando em seguida) o Postgres matou
-                # 3/3 `pocket_withdraw_to_account` neste branch e 0/3 em
-                # 3133d90 — o reset é estruturalmente o não-vítima porque toma
-                # accounts como PRIMEIRA escrita e nunca fecha o ciclo. Estado
-                # final coerente (reset commita, o outro fluxo aborta inteiro,
-                # 500 + log), mas em db/open_finance.py:44-46, 1545-1547 e
-                # 1634-1636 o `delete_launch_and_rollback` roda sob
-                # `except Exception: pass` — ali o DeadlockDetected vira
-                # SILÊNCIO, e a frequência dessa classe saiu de zero.
-                #
-                # Aceito com número, não por hipótese: quem chega DEPOIS do
-                # reset ter o lock não deadlocka, só ESPERA (o `ensure_user` do
-                # topo dos writers pede accounts antes de qualquer caixinha) — a
-                # janela do deadlock é só a fatia em que um writer já está entre
-                # os dois locks. A janela da espera é a transação inteira do
-                # reset, medida aqui: 0,04 s numa conta vazia, 0,37 s com 10 mil
-                # linhas, 21,9 s com 90 mil (50k launches + 20k
-                # credit_transactions + 20k open_finance_transactions) — cresce
-                # pior que linear. Bloqueia só o PRÓPRIO usuário (o lock é da
-                # linha dele), que está olhando o spinner do "Recomeçar do
-                # zero", e 21,9 s de espera substituem 21,9 s de corrupção
-                # silenciosa. NÃO mexi em timeout: não há `lock_timeout` nem
-                # `statement_timeout` nas conexões da app, e pôr um seria mudança
-                # em TODO write do produto (espera correta vira erro). Se os
-                # 21,9 s incomodarem, a saída é ordem única de lock nos writers
-                # (accounts primeiro) + `lock_timeout` de conexão — decisão de
-                # produto, não desfazer isto.
+                # Janela MEDIDA 2026-09-03 (Postgres 15.15 local, 3 execuções,
+                # writer disparado no 1º `_table_exists` — gatilho de
+                # tests/test_account_reset.py::_reset_com_lancamento_concorrente).
+                # REMEÇA antes de reusar: conta vazia 0,05 s; MAIOR CONTA REAL de
+                # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma
+                # acima de 10 mil). Sintético 27× maior: 50k launches sozinhos
+                # 0,58 s, com 20k open_finance_transactions 16,9 s — explode o
+                # PRODUTO das duas, porque `imported_launch_id` referencia
+                # launches com `on delete set null` sem índice
+                # (db/schema.py:416). Conta com dezenas de milhares de
+                # lançamentos E Open Finance muda a decisão; o conserto é o
+                # índice.
                 ensure_user_tx(cur, user_id)
                 cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
                 # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a

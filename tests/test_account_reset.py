@@ -21,6 +21,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import psycopg
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -524,7 +525,7 @@ def _reset_com_lancamento_concorrente(uid: int, monkeypatch, gatilho: str | None
     (R$250 criados ao apagar o sobrevivente). Disparada no começo do laço a
     corrida também fica vermelha, mas na premissa ("tinha que deixar 1
     lançamento: []") — o reset apaga o recém-chegado e o teste não mede a
-    invariante que interessa. Medido nesta sessão, nas 35 posições.
+    invariante que interessa.
     """
     original = privacy._table_exists
     gatilho = gatilho or privacy._RESET_TABLES[-1]
@@ -626,9 +627,10 @@ def test_reset_de_conta_sem_linha_de_accounts_nao_deixa_divida_fantasma(user_id,
     O gatilho aqui é a PRIMEIRA tabela do laço, não a última: é a posição
     discriminante deste caso. Sem `ensure_user_tx` o lançamento entra livre (não
     há linha para travar) e o `delete from launches`, que vem DEPOIS, o apaga —
-    sobra saldo -250 com 0 lançamentos, dívida que não existe. Medido: 34 das 35
-    posições do laço terminam assim; só a última (depois de `launches`) escapa,
-    e é por isso que os outros dois testes de corrida não pegam este bug.
+    sobra saldo -250 com 0 lançamentos, dívida que não existe. Só o gatilho na
+    ÚLTIMA posição escapa (o lançamento chega depois do `delete from launches` e
+    sobrevive) — e é justamente o que os outros dois testes de corrida usam, por
+    isso eles não pegam este bug.
     """
     _semeia(user_id)
     with get_conn() as conn:
@@ -1055,6 +1057,48 @@ def test_webhook_pos_reset_nao_recria_conexao(user_id, monkeypatch):
             )
         conn.commit()
     assert n == 1, "item de webhook desconhecido tinha que ir pro registry"
+
+
+def test_deadlock_no_reset_vira_503_e_nao_apaga_nada(user_id, monkeypatch):
+    """Deadlock DENTRO da transação do reset: 503 recuperável, não 500.
+
+    O reset toma accounts na primeira escrita e pockets/investments no laço; um
+    saque de caixinha faz o contrário, e o Postgres mata quem detectar primeiro
+    — o reset NÃO é imune (ver comentário do `update accounts` em db/privacy.py).
+    A exceção é levantada no 1º `_table_exists`, que roda DEPOIS do
+    `update accounts`: o caminho real da rota e da transação é exercitado.
+
+    NEGATIVO: sem o `except psycopg.errors.DeadlockDetected` da rota
+    (frontend/routes/settings.py) a exceção sobe e o teste fica vermelho.
+    """
+    _semeia(user_id)
+    antes = _contagens(user_id)
+
+    tocada: list[str] = []
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
+    monkeypatch.setattr(
+        of_routes, "delete_pluggy_item",
+        lambda item_id, api_key=None: tocada.append(item_id),
+    )
+
+    def _deadlock(cur, table):
+        raise psycopg.errors.DeadlockDetected("deadlock detected")
+
+    monkeypatch.setattr(privacy, "_table_exists", _deadlock)
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
+
+    assert resp.status_code == 503, resp.text
+    assert "Tente de novo" in resp.json()["detail"], resp.text
+    # Deadlock aborta a transação inteira: nada local sumiu.
+    assert _contagens(user_id) == antes
+    # TETO conhecido, e é por isso que ele está num assert: o `remote_cleanup`
+    # roda ANTES dos deletes locais, então os items JÁ foram deletados na Pluggy
+    # com o banco local intacto — a janela residual documentada em
+    # db/privacy.reset_user_data, agora com um gatilho a mais.
+    assert tocada == [_item_de(user_id)]
 
 
 # ── 9. sem sessão ────────────────────────────────────────────────────────────
