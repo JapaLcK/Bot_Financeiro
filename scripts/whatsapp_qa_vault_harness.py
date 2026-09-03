@@ -1166,7 +1166,16 @@ def roda_pares():
                      + ", ".join(f"R$ {v/100:.2f}" for v in sorted(faltando)))
         if v_cmd and not v_ia:
             sc.note(f"a forma curta trouxe {len(v_cmd)} valor(es) e a solta não trouxe nenhum")
-        if falhas_openai:
+        if sc.exception:
+            # Um turno que levantou já marcou ⚠️ e guardou o traceback. Sem
+            # este ramo, o veredito por valores sobrescrevia isso com ❌ ou 🔍 e
+            # o resumo classificava uma comparação INVÁLIDA como resultado de
+            # produto. Enumerei os estados por valores e esqueci o estado que
+            # vem de fora deles.
+            sc.set_veredict("⚠️")
+            sc.note("um turno levantou exceção — o par não comparou nada, "
+                     "o resultado não vale (traceback no fim da cena)")
+        elif falhas_openai:
             # Não é ❌: ❌ acusa o produto, e aqui quem quebrou foi a chamada.
             sc.set_veredict("⚠️")
             sc.note("chamada à OpenAI falhou (" + ", ".join(falhas_openai)

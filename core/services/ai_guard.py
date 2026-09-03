@@ -163,16 +163,25 @@ def _brl_to_cents(raw: str) -> int | None:
         return None
 
 
-# Campo numérico de tool que NÃO é dinheiro. Conjunto ESTRUTURAL e pequeno —
-# dia, data, contagem, hora, id —, ao contrário dos nomes de campo monetários,
-# que são abertos (`valor`, `amount`, `total`, `saldo`, `balance`, `limit`,
-# `credit_limit`, `receita`, `despesa`, `remaining`... medido em
-# `core/services/ai_chat/tools/`). Por isso a lista é de EXCLUSÃO: uma lista de
-# inclusão erraria em todo campo monetário novo, e errar pra "não sustentado"
-# vira lobo — o que faz o relatório deixar de ser lido.
-_CHAVE_NAO_MONETARIA_RE = re.compile(
-    r"(^|_)(id|seq|day|dia|dias|date|data|month|m[eê]s|year|ano|hour|hora|"
-    r"minute|minuto|count|qtd|quantidade|parcelas|start|end|inicio|fim)$",
+# Campo de tool que É dinheiro — lista de INCLUSÃO.
+#
+# A rodada anterior usou lista de EXCLUSÃO, com o argumento de que nomes
+# monetários seriam abertos demais. Enumerei os retornos reais de
+# `core/services/ai_chat/tools/` e o argumento não se sustenta: são ~32 chaves
+# monetárias, e elas seguem padrão. A exclusão, essa sim, era interminável —
+# caiu em `used_pct`, `variacao_pct`, `progress_pct`, `interest_rate`,
+# `upcoming_due_dates`, e cairia no próximo campo novo.
+#
+# O que decide não é qual lista é mais curta, é PARA QUE LADO CADA UMA ERRA:
+#   · exclusão incompleta  -> campo novo vira dinheiro  -> SUPRESSÃO, invisível;
+#   · inclusão incompleta  -> valor real não sustenta   -> afirmação marcada
+#     como não sustentada, que APARECE no relatório e se conserta.
+# Depois de uma série inteira de defeitos de supressão, erro visível é o certo.
+_CHAVE_MONETARIA_RE = re.compile(
+    r"^(valor|amount|total|saldo|balance|budget|available|remaining|spent|used|"
+    r"expenses|receita|despesa|limite|debt)$"
+    r"|(^|_)(amount|total|debt|balance|saldo|valor|value|invested|contributed|limit)$"
+    r"|^(receita|despesa|saidas|aportes|diff|total|saldo|wallet)_",
     re.IGNORECASE,
 )
 
@@ -194,14 +203,19 @@ def _dinheiro_do_json(obj, out: set[int], chave: str = "") -> None:
     elif isinstance(obj, bool):
         return
     elif isinstance(obj, (int, float)):
-        if not _CHAVE_NAO_MONETARIA_RE.search(chave):
+        if _CHAVE_MONETARIA_RE.search(chave):
             out.add(round(float(obj) * 100))
     elif isinstance(obj, str):
-        if _CHAVE_NAO_MONETARIA_RE.search(chave):
+        # String entra se a CHAVE é monetária, ou se o texto traz `R$` — aí o
+        # próprio texto diz que é dinheiro, independentemente do campo.
+        tem_cifrao = "R$" in obj
+        if not (_CHAVE_MONETARIA_RE.search(chave) or tem_cifrao):
             return
         limpo = _MASCARA_NAO_MONETARIA_RE.sub(" ", obj)
-        for m in _ANY_NUM_RE.finditer(limpo):
-            v = _brl_to_cents(m.group(0))
+        iterador = (_CLAIM_MONEY_RE.finditer(limpo) if tem_cifrao
+                    else _ANY_NUM_RE.finditer(limpo))
+        for m in iterador:
+            v = _brl_to_cents(m.group(1) if tem_cifrao else m.group(0))
             if v is not None:
                 out.add(v)
 
@@ -484,6 +498,13 @@ if __name__ == "__main__":
     assert collect_evidence(['{"saldo": 1826.55}'])[0] == {182655}
     assert not check("Total: R$ 182.655,00", ['{"saldo": 1826.55}'])[0].supported
     assert check("Total: R$ 1.826,55", ['{"saldo": 1826.55}'])[0].supported
+    # percentual, taxa e duração NÃO são dinheiro
+    PCT = ['{"used_pct": 25.0, "interest_rate": 12.5, "days_until": 30, "used": 200.0}']
+    assert collect_evidence(PCT)[0] == {20000}, collect_evidence(PCT)[0]
+    for falso in ("R$ 25,00", "R$ 12,50", "R$ 30,00"):
+        assert not check(f"Total: {falso}", PCT)[0].supported, falso
+    assert check("Usado: R$ 200,00", PCT)[0].supported
+
     CARD = ['{"name": "Nubank", "closing_day": 10, "due_day": 17, "credit_limit": 8000.0}']
     assert collect_evidence(CARD)[0] == {800000}, collect_evidence(CARD)[0]
     assert not check("Total: R$ 10,00", CARD)[0].supported, "dia de fechamento não é dinheiro"
