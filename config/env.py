@@ -126,9 +126,20 @@ def load_app_env() -> str:
         )
         sys.exit(1)
 
-    # O `APP_TZ` de `frontend/dashboard.js` é LITERAL e vale `utils_date.TZ_PADRAO`
-    # (a guarda 19 de `tests/test_fuso_do_app.py` prova esse par). Então um fuso
-    # efetivo diferente do padrão quebra o par JS↔servidor: o
+    # O `APP_TZ` de `frontend/dashboard.js` é LITERAL e vale `utils_date.TZ_PADRAO`.
+    # A guarda 19.1 de `tests/test_fuso_do_app.py` prova MENOS desse par do que o
+    # nome sugere: que existe UMA const chamada `APP_TZ` com o valor certo e que
+    # três substrings de uso continuam no arquivo. Ela lê TEXTO — não executa o JS.
+    # Sombrear o nome (`function appTzWallClockToISO(localStr, APP_TZ)` mais
+    # `appTzWallClockToISO(dataVal, Intl.DateTimeFormat().resolvedOptions().timeZone)`
+    # no chamador) a deixa VERDE com o dashboard já seguindo o APARELHO — medido.
+    # Quem prova o USO é `tests/frontend/edit_launch_patch_body.test.mjs`, caso
+    # "navegador em Asia/Tokyo": ele roda o `dashboard.js` de verdade num Chromium
+    # noutro fuso e confere o `criado_em` do PATCH.
+    #
+    # As duas juntas protegem a CONSTANTE e UM caminho de escrita, não a classe:
+    # um segundo formulário chamando `new Date(v).toISOString()` passaria verde nas
+    # duas. Então um fuso efetivo diferente do padrão quebra o par JS↔servidor: o
     # `appTzWallClockToISO` do dashboard continua lendo o datetime-local como hora
     # de parede em São Paulo e grava o lançamento em DIA errado para quem estiver
     # perto da meia-noite.
@@ -165,10 +176,11 @@ def load_app_env() -> str:
             f"WARNING: fuso do servidor ({utils_date.tz_name()}) diverge do APP_TZ do "
             f"dashboard ({utils_date.TZ_PADRAO}), que é literal no JS. Lançamento "
             f"criado pelo dashboard perto da meia-noite vai para o DIA errado. "
-            f"Operar noutro fuso exige mudar os TRÊS juntos: o `APP_TZ` de "
-            f"frontend/dashboard.js, o `TZ_PADRAO` de utils_date.py e o ambiente "
-            f"(REPORT_TIMEZONE/TZ). Mexer só no ambiente é o que este aviso está "
-            f"vendo agora.",
+            f"Operar noutro fuso exige mudar os três de PRODUÇÃO juntos — o `APP_TZ` "
+            f"de frontend/dashboard.js, o `TZ_PADRAO` de utils_date.py e o ambiente "
+            f"(REPORT_TIMEZONE/TZ) — mais os controles que cravam São Paulo em "
+            f"tests/test_fuso_do_app.py (`_SP` e `_SP_DEFAULT`). Mexer só no ambiente "
+            f"é o que este aviso está vendo agora.",
             file=sys.stderr,
         )
 

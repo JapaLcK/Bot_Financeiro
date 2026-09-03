@@ -1228,12 +1228,40 @@ def _cliente():
 # código, e o `appTzWallClockToISO` lê o `datetime-local` do formulário como hora
 # de PAREDE nesse fuso. Nada no servidor o alcança: se o fuso efetivo do processo
 # mudar, o JS continua em São Paulo e um lançamento perto da meia-noite é gravado
-# no DIA errado. Duas guardas fecham isso em MOMENTOS diferentes, e a corrente só
-# fecha com as duas:
+# no DIA errado. TRÊS guardas fecham isso em MOMENTOS diferentes, e a corrente só
+# fecha com as três (a 19.3 está descrita mais abaixo, depois do que a 19.1 NÃO
+# prova):
 #
 #   19.1 (teste):  literal do JS == `utils_date.TZ_PADRAO`
 #   19.2 (boot):   `tz_name()`   == `utils_date.TZ_PADRAO`
 #   ⟹ `tz_name()` == literal do JS, sem o Python nunca ler o frontend em produção.
+#
+# O QUE 19.1 PROVA, LITERALMENTE: que existe UMA const chamada `APP_TZ` com o valor
+# certo e que três substrings de uso existem em algum lugar do arquivo. Ela lê
+# TEXTO; não prova que o JS USA esse valor. Sombrear o nome deixa a corrente acima
+# VERDE com a ESCRITA já no fuso do aparelho — medido:
+#
+#     function appTzWallClockToISO(localStr, APP_TZ) { … }       // era (localStr)
+#     criadoEmISO = appTzWallClockToISO(dataVal, Intl.DateTimeFormat().resolvedOptions().timeZone);
+#
+# Const global intacta, literal intacto, os três `_APP_TZ_USOS` intactos. Irmãos da
+# mesma classe: `let APP_TZ` + `APP_TZ &&= …` (o regex abaixo não casa `&&=`) e
+# `const { APP_TZ } = cfg`. Guarda de TEXTO nenhuma fecha essa categoria — só
+# EXECUTAR o JS fecha, e é o que faz o 19.3:
+#
+#   19.3 (comportamento): `tests/frontend/edit_launch_patch_body.test.mjs`, caso
+#     "navegador em Asia/Tokyo" — Chromium noutro fuso, `dashboard.js` inteiro
+#     injetado, submit real do modal, e o `criado_em` do PATCH tem de ser a parede
+#     de São Paulo. As três mutações acima o deixam VERMELHO. Roda no CI pelo
+#     `npm run test:frontend` (.github/workflows/tests.yml).
+#
+# COMPLEMENTARES, medido mutação a mutação: só a 19.1 pega `timeZone: APP_TZ` e
+# `_wallPartsInTZ(d, APP_TZ)` sumindo (display e campo do form — a 19.3 só exercita
+# a ESCRITA) e `TZ_PADRAO` mudando sozinho no servidor; só a 19.3 pega o
+# sombreamento e o `new Date(dataVal).toISOString()` no chamador.
+#
+# O que 19.1+19.3 protegem é a CONSTANTE e UM caminho de escrita — não a classe: um
+# SEGUNDO formulário fazendo `new Date(v).toISOString()` deixaria as duas verdes.
 
 # Casar a ATRIBUIÇÃO não basta — foi o falso negativo medido. "Comenta a velha,
 # põe a nova com outro nome" (`// const APP_TZ = ...` + `const APP_TZ_ATIVO =
@@ -1301,8 +1329,13 @@ def test_o_app_tz_do_dashboard_e_o_mesmo_fuso_padrao_do_servidor():
         f"APP_TZ do dashboard.js é {literal.group(2)!r} e utils_date.TZ_PADRAO é "
         f"{utils_date.TZ_PADRAO!r}. Os dois interpretam o MESMO datetime-local como "
         f"hora de parede; divergindo, o lançamento perto da meia-noite vai para o dia "
-        f"errado. Operar noutro fuso exige mudar os TRÊS juntos: o `APP_TZ` daqui, o "
-        f"`TZ_PADRAO` de utils_date.py e o ambiente (REPORT_TIMEZONE/TZ)."
+        f"errado. Operar noutro fuso exige mudar os três de PRODUÇÃO juntos — o "
+        f"`APP_TZ` daqui, o `TZ_PADRAO` de utils_date.py e o ambiente "
+        f"(REPORT_TIMEZONE/TZ) — MAIS os controles deste próprio arquivo, que cravam "
+        f"São Paulo: mudando só os três, ficam vermelhos "
+        f"`test_a_janela_de_hoje_nao_engole_as_23h_de_ontem` (`_SP`) e a "
+        f"parametrização default de `test_as_tres_pontas_batem_nos_16_estados` "
+        f"(`_SP_DEFAULT`) — medido com os dois em America/New_York."
     )
 
 
@@ -1318,6 +1351,25 @@ def test_fuso_divergente_do_app_tz_avisa_no_stderr(tmp_path, monkeypatch, capfd)
 
     err = capfd.readouterr().err
     assert "Asia/Tokyo" in err and "APP_TZ" in err, err
+
+
+# Controle NEGATIVO: apague o `_AVISO_FUSO_EMITIDO = False` de config/env.py e o
+# `not _AVISO_FUSO_EMITIDO and` do `if` → este caso fica vermelho (2 linhas em vez
+# de 1). Sem ele o latch NÃO tem guarda: os dois casos vizinhos provam o RESET da
+# fixture, não o latch — apagar a flag inteira os deixa verdes.
+def test_o_aviso_de_fuso_divergente_sai_uma_vez_por_processo(tmp_path, monkeypatch, capfd):
+    monkeypatch.delenv("REPORT_TIMEZONE", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", None)
+
+    # Dois `load_app_env()` no MESMO processo — é o que os imports de
+    # `core.observability`, `frontend.routes.shared` e `adapters.whatsapp.wa_app`
+    # fazem num boot só.
+    _com_env(tmp_path, monkeypatch, "REPORT_TIMEZONE=Asia/Tokyo\n")
+    _com_env(tmp_path, monkeypatch, "REPORT_TIMEZONE=Asia/Tokyo\n")
+
+    err = capfd.readouterr().err
+    assert err.count("diverge do APP_TZ") == 1, err
 
 
 def test_fuso_igual_ao_app_tz_nao_avisa(tmp_path, monkeypatch, capfd):
