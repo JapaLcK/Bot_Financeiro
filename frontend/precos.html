@@ -643,6 +643,19 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+/* client_id do GA4, pra viajar no metadata do Stripe: é ele que faz o `purchase`
+   disparado do webhook (core/services/ga4_mp.py) cair na MESMA pessoa que
+   navegou o site, em vez de num usuário novo sem origem.
+   Cookie `_ga` = "GA1.1.<cid>", e o cid são os DOIS últimos campos. Sem cookie
+   (GA desligado em dev, cookie bloqueado) devolve null e o servidor segue sem
+   ele — a venda entra do mesmo jeito, só sem atribuição. */
+function gaClientId() {
+  const m = document.cookie.match(/(?:^|;\s*)_ga=([^;]+)/);
+  if (!m) return null;
+  const partes = decodeURIComponent(m[1]).split(".");
+  return partes.length >= 4 ? partes.slice(-2).join(".") : null;
+}
+
 // Escada de planos hardcoded (lançada 2026-08-06): a página já carrega com o
 // conteúdo final — o fetch de config abaixo só desabilita botão sem price e
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
@@ -902,6 +915,8 @@ async function startCheckout(interval, btn, plan) {
   btn.textContent = "Carregando…";
   const payload = { interval };
   if (plan) payload.plan = plan;
+  const gaCid = gaClientId();
+  if (gaCid) payload.ga_client_id = gaCid;
 
   try {
     let resp = await fetch("/billing/create-checkout", {

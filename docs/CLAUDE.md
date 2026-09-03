@@ -286,6 +286,7 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | APNs | push do app iOS | `core/services/push_service.py` |
 | Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_tracking`, `core/services/meta_capi.py` |
 | Google Analytics 4 | medição de funil (mesmas páginas do pixel) | `ga4_snippet`/`inject_tracking`; eventos ao lado de cada `fbq` |
+| GA4 Measurement Protocol | receita server-side (compra, fim do trial, renovação) | `core/services/ga4_mp.py`, no webhook do Stripe |
 
 O webhook do WhatsApp **verifica assinatura** (`X-Hub-Signature-256` com
 `WA_APP_SECRET`) e se recusa a subir em `APP_ENV=prod` sem o segredo.
