@@ -3873,11 +3873,6 @@ async def auth_google_complete_signup(
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
     plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
-    # client_id do GA4, lido do cookie `_ga` pela /precos. Viaja no metadata do
-    # Stripe pra que o `purchase` disparado do webhook (core/services/ga4_mp.py)
-    # caia na MESMA pessoa que navegou o site, e não num usuário novo sem origem.
-    # Validado em `sanitize_client_id` antes de sair daqui — é entrada de cliente.
-    ga_client_id: str | None = None
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4185,8 +4180,14 @@ async def billing_create_checkout(
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
-    from core.services.ga4_mp import sanitize_client_id
-    ga_client_id = sanitize_client_id(payload.ga_client_id if payload else None)
+    # client_id do GA4 pro `purchase` do webhook cair na mesma pessoa que
+    # navegou. Sai do cookie `_ga`, que o navegador já manda neste POST — não do
+    # corpo: pedir pro JS ler e enviar era mais código na /precos e mais um campo
+    # de entrada pra validar, pelo mesmo dado. Ausente (visitante novo cujo
+    # gtag.js ainda não criou o cookie, ou bloqueado) → o webhook usa o
+    # `fallback_client_id` e a venda entra sem origem, nunca se perde.
+    from core.services.ga4_mp import client_id_from_ga_cookie
+    ga_client_id = client_id_from_ga_cookie(request.cookies.get("_ga"))
 
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
@@ -4480,10 +4481,15 @@ async def billing_cancel_change(request: Request, user_id: int = Depends(_get_cu
 
 
 @app.post("/billing/webhook")
-async def billing_webhook(request: Request):
+async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recebe eventos do Stripe (checkout.session.completed, customer.subscription.*).
     Atualiza o plano do usuário no banco.
+
+    Rastreio (GA4 / Meta CAPI) sai por `background_tasks`, nunca inline: são dois
+    POSTs pra fora, e a Stripe desiste do webhook por timeout — o que faz ela
+    REENVIAR o evento, e aí o e-mail de boas-vindas sai de novo. O padrão já era
+    esse no /auth/verify-email; aqui o await tinha entrado por descuido.
     """
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe não configurado.")
@@ -4707,7 +4713,7 @@ async def billing_webhook(request: Request):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
-                    await asyncio.to_thread(
+                    background_tasks.add_task(
                         send_event,
                         event_name=_ev_name,
                         event_id=_ev_id,
@@ -4754,7 +4760,7 @@ async def billing_webhook(request: Request):
                     _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
                                or _g(_g(session, "metadata", {}), "ga_client_id")
                                or fallback_client_id(user_id))
-                    await asyncio.to_thread(
+                    background_tasks.add_task(
                         send_purchase,
                         transaction_id=_ga_sid,
                         value=_ga_value,
@@ -4842,7 +4848,7 @@ async def billing_webhook(request: Request):
                     if capi_configured() and _inv_id and _billing_reason != "subscription_create":
                         _capi_email = await _user_email(user_id)
                         _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
-                        await asyncio.to_thread(
+                        background_tasks.add_task(
                             send_event,
                             event_name="Purchase",
                             event_id=purchase_event_id(_inv_id),
@@ -4871,7 +4877,7 @@ async def billing_webhook(request: Request):
                             and _g(invoice, "billing_reason") != "subscription_create"):
                         _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
                                    or fallback_client_id(user_id))
-                        await asyncio.to_thread(
+                        background_tasks.add_task(
                             send_purchase,
                             transaction_id=_ga_inv,
                             value=amount_brl,

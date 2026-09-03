@@ -323,6 +323,65 @@ def test_sem_api_secret_nada_e_enviado(user_id, monkeypatch):
         _cleanup_trial(uid)
 
 
+def test_cookie_ga_vira_metadata_do_checkout(user_id, monkeypatch):
+    """A ponta de entrada do client_id: ele sai do cookie `_ga` que o navegador
+    manda no POST — nenhum JS precisa lê-lo — e tem de chegar no metadata da
+    sessão E da assinatura, que é de onde o webhook o lê depois."""
+    from tests.test_billing_checkout import (
+        _CSRF_HEADERS,
+        _auth_user_setup,
+        _patch_stripe,
+    )
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    _, _, client = _auth_user_setup(f"ga4-cookie-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_m")
+    fake = _patch_stripe(monkeypatch)
+    client.cookies.set("_ga", f"GA1.1.{_CID_REAL}")
+
+    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert r.status_code == 200, r.text
+
+    kwargs = fake.last_session_kwargs
+    assert kwargs["metadata"]["ga_client_id"] == _CID_REAL
+    # A assinatura precisa da cópia: a RENOVAÇÃO só enxerga o metadata dela.
+    assert kwargs["subscription_data"]["metadata"]["ga_client_id"] == _CID_REAL
+
+
+def test_sem_cookie_ga_o_checkout_nasce_sem_o_campo(user_id, monkeypatch):
+    """Visitante com cookie bloqueado (ou cujo gtag.js ainda não criou o `_ga`)
+    não pode ganhar um metadata inventado: o campo simplesmente não vai, e o
+    webhook cai no client_id sintético."""
+    from tests.test_billing_checkout import (
+        _CSRF_HEADERS,
+        _auth_user_setup,
+        _patch_stripe,
+    )
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    _, _, client = _auth_user_setup(f"ga4-nocookie-{user_id}")
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_m")
+    fake = _patch_stripe(monkeypatch)
+    client.cookies.set("_ga", "lixo-que-nao-e-cookie-do-ga")
+
+    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    assert r.status_code == 200, r.text
+    assert "ga_client_id" not in fake.last_session_kwargs["metadata"]
+
+
+def test_cookie_ga_e_traduzido_e_validado():
+    """`GA1.1.<cid>` → `<cid>`. O cookie é dado de cliente (dá pra forjar), então
+    o formato é validado igual ao que vinha pelo corpo antes."""
+    assert ga4_mp.client_id_from_ga_cookie(f"GA1.1.{_CID_REAL}") == _CID_REAL
+    assert ga4_mp.client_id_from_ga_cookie(f"GA1.2.{_CID_REAL}") == _CID_REAL
+
+    for lixo in ["", "GA1.1", f"GA1.1.{_CID_REAL}.extra.x", "GA1.1.abc.def",
+                 _CID_REAL, None, 42, {"a": 1}]:
+        assert ga4_mp.client_id_from_ga_cookie(lixo) is None, lixo
+
+
 def test_client_id_do_navegador_e_validado_antes_de_viajar():
     """Fronteira de confiança: o client_id chega do CLIENTE e vai parar no
     metadata do Stripe. Só o formato do GA passa; o resto é descartado em vez de

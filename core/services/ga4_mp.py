@@ -18,12 +18,13 @@ Configuração (as duas obrigatórias; faltando qualquer uma, tudo vira no-op):
     "Chaves secretas da API do Measurement Protocol" → Criar.
 
 Sobre o `client_id`: é ele que liga esta compra à MESMA pessoa que navegou o
-site. Nasce no cookie `_ga` do navegador, é enviado no corpo do
-/billing/create-checkout, viaja no `metadata` da sessão e da assinatura do
-Stripe, e volta aqui no webhook. Quando não vier (cookie bloqueado, sessão
-criada antes desta versão, renovação de assinatura antiga), cai no
-`fallback_client_id`: a receita é registrada do mesmo jeito, mas como um usuário
-novo sem origem — melhor que perder a venda no relatório.
+site. Nasce no cookie `_ga`, que o navegador manda sozinho no POST do
+/billing/create-checkout; de lá ele viaja no `metadata` da sessão e da
+assinatura do Stripe e volta aqui no webhook. Quando não vier — cookie
+bloqueado, visitante novo cujo gtag.js ainda não criou o cookie, ou assinatura
+criada antes desta versão — cai no `fallback_client_id`: a receita é registrada
+do mesmo jeito, mas como um usuário novo sem origem. Melhor que perder a venda
+no relatório.
 
 Teto conhecido: não mandamos `session_id`. Sem ele o GA4 conta o evento no
 usuário, mas não o costura na sessão de navegação que gerou a compra. Vale
@@ -64,6 +65,24 @@ def measurement_id() -> str:
 def mp_configured() -> bool:
     """True quando measurement id + segredo estão setados (senão tudo é no-op)."""
     return bool(measurement_id() and (os.getenv(_API_SECRET_ENV) or "").strip())
+
+
+def client_id_from_ga_cookie(raw: object) -> str | None:
+    """Cookie `_ga` → client_id. `"GA1.1.1234567890.1712345678"` → os dois últimos
+    campos. Qualquer outra forma → None.
+
+    O cookie chega sozinho no request (mesmo domínio), então o client_id não
+    precisa viajar no corpo do POST: menos JS na /precos, menos um campo de
+    entrada pra validar, e uma fonte a menos pra divergir. Continua sendo dado
+    de cliente — quem quiser pode forjar o cookie —, por isso o formato é
+    validado igual.
+    """
+    if not isinstance(raw, str):
+        return None
+    partes = raw.strip().split(".")
+    if len(partes) < 4:
+        return None
+    return sanitize_client_id(".".join(partes[-2:]))
 
 
 def sanitize_client_id(raw: object) -> str | None:
