@@ -1,14 +1,14 @@
 # QA piloto — vault WhatsApp (23 interações, 3 domínios)
 
-Gerado em 2026-09-02_224522 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
+Gerado em 2026-09-02_225732 por `scripts/whatsapp_qa_vault_harness.py`, chamando `core.handle_incoming.handle_incoming()` direto contra um Postgres isolado e descartável, sem mockar a IA (chamadas OpenAI reais).
 
-**Sumário:** 34 interações — ✅ 27 · ❌ 5 · ⚠️ 0 · 🔍 2
+**Sumário:** 34 interações — ✅ 27 · ❌ 6 · ⚠️ 0 · 🔍 1
 
 **Caminho:** 16 turno(s) resolvido(s) pela IA · 96 por comando/regex (sem chamada nenhuma) — 49 chamadas OpenAI no total.
 
-**Custo:** US$ 0.0172 nesta rodada · US$ 0.1385 acumulado no mês pelos harnesses. 198094 tokens de entrada, 173696 cacheados (88%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
+**Custo:** US$ 0.0163 nesta rodada · US$ 0.1547 acumulado no mês pelos harnesses. 198107 tokens de entrada, 186496 cacheados (94%), cobrados à metade. Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) — reconfira antes de citar fora daqui.
 
-**Guarda de afirmações:** 12 afirmação(ões) numérica(s) em resposta de IA · **3 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
+**Guarda de afirmações:** 13 afirmação(ões) numérica(s) em resposta de IA · **3 não sustentada(s)** (número que não veio de nenhuma tool nem da mensagem do usuário).
 - 🚨 `R$ 100.000,00` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
 - 🚨 `R$ 1.768,80` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
 - 🚨 `R$ 98.231,20` (dinheiro) — valor não veio de nenhuma tool nem da mensagem
@@ -757,9 +757,9 @@ Qual é o nome dessa compra? Ex: *TV Samsung*, *iPhone*, *Curso de inglês*
 🛍️ *Categoria:* moradia
 💳 *Valor:* 3x de R$ 200,00 (total R$ 600,00)
 🪪 *Cartão:* Nubank
-⚙️ *Código:* PC283097E6
+⚙️ *Código:* PCA6FA3931
 
-Pra apagar: apagar PC283097E6
+Pra apagar: apagar PCA6FA3931
 > _caminho: IA (1 chamada: gpt-4o-mini-2024-07-18)_
 >
 > Você: parcelei 12x de 79,90 celular
@@ -769,9 +769,9 @@ Pra apagar: apagar PC283097E6
 🛍️ *Categoria:* outros
 💳 *Valor:* 12x de R$ 79,90 (total R$ 958,80)
 🪪 *Cartão:* padrão
-⚙️ *Código:* PC62509D75
+⚙️ *Código:* PC43A74584
 
-Pra apagar: apagar PC62509D75
+Pra apagar: apagar PC43A74584
 > _caminho: IA (1 chamada: gpt-4o-mini-2024-07-18)_
 >
 
@@ -784,8 +784,8 @@ Pra apagar: apagar PC62509D75
 
 **Notas:**
 - Limite do cartão Nubank resetado pra R$ 100.000,00 antes deste item — o item 14 tinha deixado um limite baixo (R$ 100,00) travado de propósito pra testar o bloqueio de compra à vista; sem o reset, este item ficava contaminado por esse estado e não testava compreensão de linguagem de verdade.
-- PC capturado (geladeira): 283097E6
-- PC capturado (celular): 62509D75
+- PC capturado (geladeira): A6FA3931
+- PC capturado (celular): 43A74584
 
 ---
 
@@ -794,14 +794,14 @@ Pra apagar: apagar PC62509D75
 
 > Você: parcelamentos
 > PigBank: 📦 *Parcelamentos ativos:*
-• Nubank — geladeira
-  💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
-  🔢 Código: PC283097E6
-  🗑️ Apagar: apagar PC283097E6
 • Nubank — celular
   💰 Total: R$ 958,80 | Restante: R$ 958,80 (0/12 pagas)
-  🔢 Código: PC62509D75
-  🗑️ Apagar: apagar PC62509D75
+  🔢 Código: PC43A74584
+  🗑️ Apagar: apagar PC43A74584
+• Nubank — geladeira
+  💰 Total: R$ 600,00 | Restante: R$ 600,00 (0/3 pagas)
+  🔢 Código: PCA6FA3931
+  🗑️ Apagar: apagar PCA6FA3931
 > _caminho: comando (0 chamadas)_
 >
 
@@ -886,11 +886,13 @@ Limite: R$ 100.000,00 | Disponível: R$ 99.510,10 (100%)
 **Domínio:** Cartão de Crédito · **Cenário/usuário:** pro — reusa uid de C14
 
 > Você: limite nubank
-> PigBank: 🐷 Seu limite no Nubank é de *R$ 100.000,00*.
+> PigBank: 🐷 Seu limite do Nubank tá assim:
 
-Você já usou *R$ 1.768,80*, então ainda tem *R$ 98.231,20* disponíveis. 
+*Limite total:* R$ 100.000,00  
+*Usado:* R$ 1.768,80  
+*Disponível:* R$ 98.231,20  
 
-Se precisar de mais alguma coisa, é só falar!
+Você tá usando só 1,8% do limite! Se precisar de mais alguma coisa, é só avisar.
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 3 afirmação(ões), todas sustentadas_
 >
@@ -899,11 +901,13 @@ Se precisar de mais alguma coisa, é só falar!
 > _caminho: comando (0 chamadas)_
 >
 > Você: limite nubank
-> PigBank: 🐷 Seu limite no Nubank é de *R$ 100.000,00*.
+> PigBank: 🐷 Seu limite do Nubank tá assim:
 
-Você já usou *R$ 1.768,80*, então ainda tem *R$ 98.231,20* disponíveis. 
+*Limite total:* R$ 100.000,00  
+*Usado:* R$ 1.768,80  
+*Disponível:* R$ 98.231,20  
 
-Se precisar de mais alguma coisa, é só falar!
+Se precisar de mais alguma informação, é só falar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: 🚨 3 de 3 NÃO sustentada(s): R$ 100.000,00 (dinheiro), R$ 1.768,80 (dinheiro), R$ 98.231,20 (dinheiro)_
 >
@@ -1021,8 +1025,8 @@ Responda *sim* para confirmar ou *não* para cancelar.
 Removido: R$ 60,00.
 > _caminho: comando (0 chamadas)_
 >
-> Você: apagar PC283097E6
-> PigBank: 🗑️ Parcelamento desfeito (PC283097E6).
+> Você: apagar PCA6FA3931
+> PigBank: 🗑️ Parcelamento desfeito (PCA6FA3931).
 Removido: R$ 600,00 em 3 itens.
 > _caminho: comando (0 chamadas)_
 >
@@ -1034,7 +1038,7 @@ Removido: R$ 600,00 em 3 itens.
 - [x] "apagar PC<código>" → 🗑️ confirmando parcelamento desfeito
 
 **Notas:**
-- usando CC=2 (compra ifood) e PC=283097E6 (parcelamento geladeira)
+- usando CC=2 (compra ifood) e PC=A6FA3931 (parcelamento geladeira)
 
 ---
 
@@ -1168,9 +1172,9 @@ Confirma? Responda *sim* ou *não*.
 > _caminho: comando (0 chamadas)_
 >
 > Você: qto sobrou pra mim
-> PigBank: 🐷 Você tem R$ *1.736,65* sobrando. 
+> PigBank: 🐷 Sobrou R$ *1.736,65* pra você! 
 
-Se precisar de mais alguma coisa, é só avisar!
+Se precisar de mais alguma coisa, é só falar!
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
@@ -1242,12 +1246,12 @@ Se precisar de mais alguma coisa, é só avisar!
 > Você: me mostra meus ultimos lancamentos
 > PigBank: 🐷 Aqui estão seus últimos lançamentos:
 
-1. *R$ 89,90* - Gastei com Uber (transporte)
-2. *R$ 2.000,00* - Recebi de salário (rendimentos)
-3. *R$ 123,45* - Gastei na farmácia (saúde)
-4. *R$ 50,00* - Gastei no mercado (mercado)
+1. *R$ 89,90* - Gastei com uber (Transporte)
+2. *R$ 2.000,00* - Recebi de salário (Rendimentos)
+3. *R$ 123,45* - Gastei na farmácia (Saúde)
+4. *R$ 50,00* - Gastei no mercado (Mercado)
 
-Se precisar de mais alguma coisa, é só avisar!
+Se precisar de mais alguma coisa, é só falar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 4 afirmação(ões), todas sustentadas_
 >
@@ -1393,9 +1397,9 @@ ID: #5
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: gastos com saúde
-> PigBank: 🐷 Você gastou R$ 123,45 com saúde nos últimos dias.
+> PigBank: 🐷 Você gastou R$ 123,45 com saúde de 01/09 a 02/09/2026. 
 
-Se precisar de mais detalhes ou quiser ver outras categorias, é só avisar!
+Se precisar de mais detalhes ou quiser ver outro período, é só avisar!
 > _caminho: IA (2 chamadas: gpt-4o-mini-2024-07-18)_
 > _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
@@ -1423,29 +1427,29 @@ Se precisar de mais detalhes ou quiser ver outras categorias, é só avisar!
 **Domínio:** comando × IA · **Cenário/usuário:** dois users Pro com seed idêntico; caminho de cada lado é medido
 
 > Você: limite nubank
-> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. 
+> PigBank: 🐷 O limite do seu cartão Nubank não tá cadastrado. 
 
-Pra saber quanto você tem disponível, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
+Atualmente, você usou R$ 200,00. Pra saber quanto sobra, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
+> _guarda: ✅ 1 afirmação(ões), todas sustentadas_
 >
 > Você: quanto ainda posso gastar no nubank
-> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. 
-
-Pra ver quanto ainda pode gastar, dá uma olhada no dashboard e cadastra o limite do cartão. Se precisar de ajuda com isso, é só me avisar!
+> PigBank: 🐷 Não consegui pegar o limite do seu Nubank porque ele não tá cadastrado. Pra ver quanto você ainda pode gastar, é só cadastrar o limite no dashboard. Quer que eu mande o link pra você?
 > _caminho: IA (3 chamadas: gpt-4o-mini-2024-07-18)_
 >
 
-**Veredito:** 🔍
+**Veredito:** ❌
 
 **Checklist do vault:**
 - [x] todo valor da forma solta aparece na resposta da forma curta
-- [x] a forma solta trouxe o dado numérico que a curta traz
-- [x] a forma solta trouxe TODOS os valores da curta (informativo)
+- [ ] a forma solta trouxe o dado numérico que a curta traz
+- [?] a forma solta trouxe TODOS os valores da curta (informativo)
 - [x] guarda: nenhum número da IA veio de fora das tools
 - [x] nenhuma chamada à OpenAI falhou neste par
 
 **Notas:**
-- nenhum dos dois lados afirmou valor em R$ — o par não mediu nada; ou o caso não é numérico, ou os dois falharam em responder
+- valores que a forma curta traz e a solta não: R$ 200.00
+- a forma curta trouxe 1 valor(es) e a solta não trouxe nenhum
 
 ---
 

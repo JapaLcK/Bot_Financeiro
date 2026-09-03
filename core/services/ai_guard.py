@@ -94,6 +94,13 @@ _ANY_NUM_RE = re.compile(r"-?\d[\d.,]*")
 # O `(^|_)` continua exigido: sem ele, `"paid"` e `"valid"` entrariam.
 _ID_KEY_RE = re.compile(r"(^|_)seq$")
 
+# Antes de ler DINHEIRO, apaga os trechos que já são ID ou código. Sem isto,
+# `apague #50` punha 5000 centavos na evidência e uma resposta afirmando
+# `R$ 50,00` passava por sustentada só porque o usuário citou o ID #50 — a
+# mesma mistura ID×dinheiro do outro sentido, que eu já tinha corrigido só
+# metade.
+_MASCARA_NAO_MONETARIA_RE = re.compile(r"#\d{1,9}|\b(?:CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
+
 
 def _ids_from_json(obj, out: set[int]) -> None:
     """IDs de um resultado de tool já decodificado, só dos campos que SÃO id."""
@@ -181,14 +188,19 @@ def money_cents(text: str) -> set[int]:
     """Todo valor em R$ afirmado num texto, em centavos (módulo).
 
     Existe separado do `check()` porque serve a OUTRA pergunta: comparar duas
-    respostas entre si — a do comando (determinística, é o gabarito) contra a
-    da IA. Mesmo regex, mesma leitura estrita: se as duas divergirem, é porque
-    uma delas está afirmando um valor que a outra não afirma."""
+    respostas entre si — a curta contra a solta. Mesmo regex, mesma leitura
+    estrita: se as duas divergirem, uma delas afirma valor que a outra não.
+
+    COM SINAL. Eu tinha corrigido a polaridade no `check()` e deixado este
+    chamador em módulo — instância em vez de classe. Com `abs()`, duas
+    respostas que diferem SÓ no sinal (`R$ -50,00` × `R$ 50,00`) davam conjuntos
+    idênticos, `inventados` e `faltando` vazios, e o par saía ✅ escondendo
+    justamente a inversão de fato."""
     out: set[int] = set()
     for m in _CLAIM_MONEY_RE.finditer(text or ""):
         v = _brl_to_cents(m.group(1))
         if v is not None:
-            out.add(abs(v))
+            out.add(v)
     return out
 
 
@@ -211,7 +223,9 @@ def collect_evidence(tool_results: list[str],
     for chunk in list(tool_results) + [user_text or ""]:
         chunk = chunk or ""
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
-        for m in _ANY_NUM_RE.finditer(chunk):
+        # Dinheiro sai do texto SEM os IDs e códigos; ID e código saem do texto
+        # original, logo abaixo.
+        for m in _ANY_NUM_RE.finditer(_MASCARA_NAO_MONETARIA_RE.sub(" ", chunk)):
             cents |= _evidence_cents(m.group(0))
         # Por CHAVE quando o resultado é JSON (o caso normal); e o `#N`
         # explícito sempre, porque ali o `#` já diz que é ID.
@@ -359,7 +373,16 @@ if __name__ == "__main__":
     assert money_cents("Saldo: R$ 1.826,55 · Receita R$ 2.000,00") == {182655, 200000}
     assert money_cents("Sobrou R$ *1.826,55* pra você") == {182655}
     assert money_cents("nenhum número aqui") == set()
-    assert money_cents("Saldo: R$ -50,00") == {5000}, "negativo entra em módulo"
+    assert money_cents("Saldo: R$ -50,00") == {-5000}, "o sinal tem que sobreviver"
+    assert money_cents("Saldo: R$ -50,00") != money_cents("Saldo: R$ 50,00"), \
+        "diferir só no sinal não pode dar conjuntos iguais"
+
+    # ID e código citados pelo usuário NÃO são dinheiro
+    assert collect_evidence([], "apague #50")[0] == set(), collect_evidence([], "apague #50")[0]
+    assert not check("Gastou R$ 50,00.", [], user_text="apague #50")[0].supported
+    assert collect_evidence([], "apaga a compra CC12")[0] == set()
+    # mas o ID citado continua sustentando o ID
+    assert check("Apaguei o #50.", [], user_text="apague #50")[0].supported
 
     # resposta sem número não vira lobo
     assert verdict(check("Seu maior gasto foi no mercado.", TOOLS)).startswith("🈳")
