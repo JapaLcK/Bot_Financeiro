@@ -75,11 +75,20 @@ _ANY_NUM_RE = re.compile(r"\d[\d.,]*")
 # Nos dois casos o efeito era SUPRIMIR evento: a guarda ficava silenciosa e
 # parecia estar funcionando, que é o pior estado possível pra ela.
 #
-# `(^|_)(id|seq)$` cobre as chaves que as tools usam de fato — medido em
-# 2026-09-02 em `core/services/ai_chat/tools/`: `id`, `bill_id`, `launch_id`,
-# `card_id`, `group_id`, `user_seq`. E exige `^` ou `_` antes de propósito:
-# sem isso, `"paid"` e `"valid"` entrariam como ID.
-_ID_KEY_RE = re.compile(r"(^|_)(id|seq)$")
+# E não basta a chave ser "de identificação": tem que ser o ID que o USUÁRIO
+# VÊ. `list_recent_launches` devolve `id` (interno) E `user_seq` lado a lado
+# (`tools/launches.py:59-60`), e o `#N` que o usuário digita é o user_seq —
+# `db.resolve_user_seq_to_id` existe exatamente pra traduzir um no outro.
+# Aceitar `id` fazia uma resposta com `#4242` passar por sustentada contra a
+# linha `{"id": 4242, "user_seq": 1}`, sendo que #4242 não existe pro usuário.
+#
+# Medido em `core/services/ai_chat/tools/`: `user_seq` é a ÚNICA chave de ID
+# visível ao usuário. `bill_id`, `card_id`, `group_id` e `id` são internos e
+# nunca aparecem como `#N` — cartão e parcelamento têm sintaxe própria (CC/PC),
+# tratada pelo `_CLAIM_CODE_RE`.
+#
+# O `(^|_)` continua exigido: sem ele, `"paid"` e `"valid"` entrariam.
+_ID_KEY_RE = re.compile(r"(^|_)seq$")
 
 
 def _ids_from_json(obj, out: set[int]) -> None:
@@ -264,7 +273,15 @@ if __name__ == "__main__":
 
     # Chave que TERMINA em "id" sem ser id (`paid`, `valid`) não entra.
     assert collect_evidence(['{"paid": 7, "valid": 9}'])[2] == set()
-    assert collect_evidence(['{"bill_id": 7, "card_id": 9, "group_id": 3}'])[2] == {7, 9, 3}
+
+    # ID INTERNO não sustenta `#N`: a tool devolve os dois lado a lado, e só o
+    # `user_seq` é o que o usuário vê.
+    LINHA = ['{"id": 4242, "user_seq": 1, "valor": 50.0}']
+    assert collect_evidence(LINHA)[2] == {1}, collect_evidence(LINHA)[2]
+    assert not check("Apaguei o lançamento #4242.", LINHA)[0].supported
+    assert check("Apaguei o lançamento #1.", LINHA)[0].supported
+    # ids internos de outras tabelas também não viram `#N`
+    assert collect_evidence(['{"bill_id": 7, "card_id": 9, "group_id": 3}'])[2] == set()
 
     # `#N` cru num resultado de tool conta — ali o `#` já diz que é ID.
     assert check("Apaguei o #4.", ["extrato: [#4] mercado 50,00"])[0].supported

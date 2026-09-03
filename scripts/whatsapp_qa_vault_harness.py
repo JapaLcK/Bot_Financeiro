@@ -1068,7 +1068,17 @@ def _seed_par(com_cartao: bool) -> int:
         send(uid, t)
     if com_cartao:
         seed_card(uid)
-        send(uid, "comprei 200 no nubank")
+        # "comprei 200 no nubank" registrava DESPESA COMUM, não compra no
+        # crédito — medido: a resposta é "💸 Despesa registrada". A fatura
+        # ficava zerada e o par Fatura passava comparando R$ 0,00 com R$ 0,00.
+        resp = send(uid, "comprei 200 no cartao nubank")
+        # E conferir não é redundante com acertar a frase: sem isto, QUALQUER
+        # regressão futura no roteamento volta a produzir par verde comparando
+        # dois zeros. Erro no seed tem que derrubar a cena, não passar calado —
+        # `roda_pares` captura e marca ⚠️.
+        if extract_cc_code(resp) is None:
+            raise RuntimeError(
+                f"seed de compra no crédito não pegou (sem código CC): {resp[:120]!r}")
     return uid
 
 
