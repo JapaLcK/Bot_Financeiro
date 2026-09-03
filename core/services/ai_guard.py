@@ -56,7 +56,13 @@ from dataclasses import dataclass
 # 2026-09-01, 2 de 2 respostas de IA passavam batido.
 _CLAIM_MONEY_RE = re.compile(r"R\$\s*[*_]?\s*(-?\d[\d.]*(?:,\d{2})?)")
 _CLAIM_ID_RE = re.compile(r"#(\d{1,9})\b")
-_CLAIM_CODE_RE = re.compile(r"\b(CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
+# IGNORECASE porque o APP aceita minúsculo: `db.resolve_installment_group_id`
+# faz `.lower()` no identificador, então `pc81524273` é um código válido pro
+# usuário. Casando só maiúsculo, um código minúsculo inventado não gerava
+# afirmação NENHUMA — nem sustentada nem pega, simplesmente invisível. A
+# normalização pra maiúscula continua nos dois lados, então a comparação não
+# depende de como cada um escreveu.
+_CLAIM_CODE_RE = re.compile(r"\b(CC\d{1,9}|PC[0-9A-Fa-f]{8})\b", re.IGNORECASE)
 
 # Na evidência, qualquer literal numérico serve como DINHEIRO — as tools
 # devolvem JSON e o formato varia. O `-?` é obrigatório: sem ele a evidência
@@ -99,7 +105,8 @@ _ID_KEY_RE = re.compile(r"(^|_)seq$")
 # `R$ 50,00` passava por sustentada só porque o usuário citou o ID #50 — a
 # mesma mistura ID×dinheiro do outro sentido, que eu já tinha corrigido só
 # metade.
-_MASCARA_NAO_MONETARIA_RE = re.compile(r"#\d{1,9}|\b(?:CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
+_MASCARA_NAO_MONETARIA_RE = re.compile(
+    r"#\d{1,9}|\b(?:CC\d{1,9}|PC[0-9A-Fa-f]{8})\b", re.IGNORECASE)
 
 # Na mensagem do USUÁRIO, número também vem como data, contagem de parcela e
 # ano — e virava dinheiro: "quais contas vencem dia 20?" sustentava um
@@ -446,5 +453,12 @@ if __name__ == "__main__":
     # código de compra no crédito
     assert check("Compra CC12 apagada.", ['{"codigo": "CC12"}'])[0].supported
     assert not check("Compra CC12 apagada.", ['{"codigo": "CC99"}'])[0].supported
+
+    # minúsculo é código válido pro app, então a guarda tem que enxergá-lo
+    PC = ['{"grupo": "PC81524273"}']
+    assert check("Apaguei o pc81524273.", PC)[0].supported, "minúsculo tem que casar"
+    assert check("Apaguei o PC81524273.", ['{"grupo": "pc81524273"}'])[0].supported
+    inv = check("Apaguei o pc99999999.", PC)
+    assert len(inv) == 1 and not inv[0].supported, "inventado minúsculo tem que ser PEGO"
 
     print("ai_guard: autoteste OK")

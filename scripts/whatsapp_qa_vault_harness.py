@@ -93,12 +93,21 @@ meter.install()
 # Modelos que ESTE código usa de fato: o do .env (6 módulos leem a mesma env)
 # e os dois fixos do media_service. Conferir antes vira erro de apelido aqui,
 # em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
-_MODELOS_USADOS = [
-    os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+# ABORTA só no que este harness realmente alcança. O `msg()` monta TODA
+# mensagem com `attachments=[]` (linha única no arquivo), então nenhuma cena
+# chega no whisper nem no gpt-4o de visão. Barrar a rodada porque a chave não
+# tem acesso a um modelo de mídia que ninguém vai chamar é impedir trabalho
+# válido — defeito que EU introduzi ao fazer o preflight abortar.
+_MODELO_DE_CHAT = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+_MODELOS_DE_MIDIA = [
     "whisper-1",  # core/services/media_service.py:102
     "gpt-4o",     # core/services/media_service.py:187
 ]
-MODEL_PROBLEMS = meter.check_models(_MODELOS_USADOS)
+MODEL_PROBLEMS = meter.check_models([_MODELO_DE_CHAT])
+# Os de mídia continuam conferidos, mas só AVISAM: o dia em que entrar cena
+# com anexo, o aviso vira o lembrete de promovê-los pro bloco que aborta.
+for _p in meter.check_models(_MODELOS_DE_MIDIA):
+    print(f"[harness] AVISO (modelo de mídia, nenhuma cena o alcança hoje): {_p}")
 if MODEL_PROBLEMS:
     # ABORTA, e antes de criar qualquer coisa. O comentário acima prometia
     # "erro de apelido em 1 segundo, não no meio de uma cena com o banco já
@@ -110,7 +119,7 @@ if MODEL_PROBLEMS:
     print("[harness] ABORTANDO antes de criar o database — conserte a chave/modelo "
           "e rode de novo. Nada foi criado, nada foi gasto.")
     sys.exit(1)
-print(f"[harness] modelos conferidos em /v1/models: {', '.join(_MODELOS_USADOS)}")
+print(f"[harness] modelo de chat conferido em /v1/models: {_MODELO_DE_CHAT}")
 
 # ─────────────────────────────────────────────────────────────────────────
 # 3c) DB isolado e descartável — SÓ depois do preflight passar.
