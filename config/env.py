@@ -123,4 +123,30 @@ def load_app_env() -> str:
         )
         sys.exit(1)
 
+    # O `APP_TZ` de `frontend/dashboard.js` é LITERAL e vale `utils_date.TZ_PADRAO`
+    # (a guarda 19 de `tests/test_fuso_do_app.py` prova esse par). Então um fuso
+    # efetivo diferente do padrão quebra o par JS↔servidor: o
+    # `appTzWallClockToISO` do dashboard continua lendo o datetime-local como hora
+    # de parede em São Paulo e grava o lançamento em DIA errado para quem estiver
+    # perto da meia-noite.
+    #
+    # AVISO, não `exit(1)`, por duas razões medidas:
+    #   1. `load_app_env` não roda só no boot — `adapters/whatsapp/wa_app.py:39` o
+    #      chama NO IMPORT, e esse import é tardio de propósito (primeira
+    #      requisição). Sair aqui derrubaria um processo JÁ SERVINDO.
+    #   2. fuso divergente é configuração SUPORTADA e testada: 21 casos de
+    #      `tests/test_fuso_do_app.py` chamam `load_app_env` com fuso efetivo ≠
+    #      padrão, e a técnica `REPORT_TIMEZONE=<zona> pytest` (documentada no
+    #      cabeçalho daquele arquivo e no de `tests/test_virada_de_mes.py`)
+    #      morreria junto.
+    if utils_date.tz_name() != utils_date.TZ_PADRAO:
+        print(
+            f"WARNING: fuso do servidor ({utils_date.tz_name()}) diverge do APP_TZ do "
+            f"dashboard ({utils_date.TZ_PADRAO}), que é literal no JS. Lançamento "
+            f"criado pelo dashboard perto da meia-noite vai para o DIA errado. "
+            f"Alinhe REPORT_TIMEZONE/TZ com {utils_date.TZ_PADRAO} ou mude o APP_TZ "
+            f"de frontend/dashboard.js junto.",
+            file=sys.stderr,
+        )
+
     return app_env

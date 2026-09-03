@@ -10,8 +10,15 @@ from dateutil.relativedelta import relativedelta
 
 # ---------------- timezone helpers ----------------
 
+# Fuso do app quando NADA está configurado. Constante, e não literal solto, porque
+# o `APP_TZ` de `frontend/dashboard.js` tem de valer o mesmo nome: a guarda 19 de
+# `tests/test_fuso_do_app.py` compara os dois, e `config/env.py::load_app_env`
+# avisa quando o fuso EFETIVO diverge daqui.
+TZ_PADRAO = "America/Sao_Paulo"
+
+
 def _tz():
-    tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or "America/Sao_Paulo"
+    tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or TZ_PADRAO
     return ZoneInfo(tz_name)
 
 

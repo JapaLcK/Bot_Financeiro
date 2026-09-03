@@ -46,6 +46,7 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
+import re
 import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1213,3 +1214,63 @@ def _cliente():
 
     return TestClient(dashboard.app)
 
+
+# ── 19. O QUINTO relógio: o `APP_TZ` LITERAL do dashboard.js ─────────────────
+# `frontend/dashboard.js:493` tem `const APP_TZ = "America/Sao_Paulo";` fixo no
+# código, e o `appTzWallClockToISO` lê o `datetime-local` do formulário como hora
+# de PAREDE nesse fuso. Nada no servidor o alcança: se o fuso efetivo do processo
+# mudar, o JS continua em São Paulo e um lançamento perto da meia-noite é gravado
+# no DIA errado. Duas guardas fecham isso em MOMENTOS diferentes, e a corrente só
+# fecha com as duas:
+#
+#   19.1 (teste):  literal do JS == `utils_date.TZ_PADRAO`
+#   19.2 (boot):   `tz_name()`   == `utils_date.TZ_PADRAO`
+#   ⟹ `tz_name()` == literal do JS, sem o Python nunca ler o frontend em produção.
+
+_APP_TZ_JS = re.compile(r"""APP_TZ\s*=\s*["']([^"']+)["']""")
+
+
+# Controle NEGATIVO do valor: troque o `APP_TZ` de dashboard.js para
+# "America/New_York" → vermelho no segundo assert.
+# Controle NEGATIVO da VACUIDADE: renomeie `APP_TZ` para `APP_TIMEZONE` no JS →
+# vermelho no PRIMEIRO assert (0 ocorrências), e não verde por lista vazia. É esse
+# assert que também acusa uma SEGUNDA definição da constante.
+def test_o_app_tz_do_dashboard_e_o_mesmo_fuso_padrao_do_servidor():
+    js = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "dashboard.js"
+    achados = _APP_TZ_JS.findall(js.read_text(encoding="utf-8"))
+
+    assert len(achados) == 1, (
+        f"esperava exatamente 1 atribuição de APP_TZ em {js.name}, achei {len(achados)}: "
+        f"{achados}. Se a constante foi renomeada ou duplicada, ajuste _APP_TZ_JS aqui "
+        f"— senão esta guarda fica verde sem medir nada."
+    )
+    assert achados[0] == utils_date.TZ_PADRAO, (
+        f"APP_TZ do dashboard.js é {achados[0]!r} e utils_date.TZ_PADRAO é "
+        f"{utils_date.TZ_PADRAO!r}. Os dois interpretam o MESMO datetime-local como "
+        f"hora de parede; divergindo, o lançamento perto da meia-noite vai para o dia "
+        f"errado. Mude os DOIS juntos."
+    )
+
+
+# Controle NEGATIVO: apague o `if utils_date.tz_name() != utils_date.TZ_PADRAO`
+# do fim de `load_app_env` → o primeiro caso fica vermelho.
+# O segundo é o POSITIVO: sem ele, um aviso INCONDICIONAL passaria.
+def test_fuso_divergente_do_app_tz_avisa_no_stderr(tmp_path, monkeypatch, capfd):
+    monkeypatch.delenv("REPORT_TIMEZONE", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", None)
+
+    _com_env(tmp_path, monkeypatch, "REPORT_TIMEZONE=Asia/Tokyo\n")
+
+    err = capfd.readouterr().err
+    assert "Asia/Tokyo" in err and "APP_TZ" in err, err
+
+
+def test_fuso_igual_ao_app_tz_nao_avisa(tmp_path, monkeypatch, capfd):
+    monkeypatch.delenv("REPORT_TIMEZONE", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    monkeypatch.setattr(utils_date, "_TZ_ENV_ORIGINAL", None)
+
+    _com_env(tmp_path, monkeypatch, f"REPORT_TIMEZONE={utils_date.TZ_PADRAO}\n")
+
+    assert "APP_TZ" not in capfd.readouterr().err
