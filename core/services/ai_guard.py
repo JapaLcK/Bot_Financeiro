@@ -206,16 +206,27 @@ def _dinheiro_do_json(obj, out: set[int], chave: str = "") -> None:
         if _CHAVE_MONETARIA_RE.search(chave):
             out.add(round(float(obj) * 100))
     elif isinstance(obj, str):
-        # String entra se a CHAVE é monetária, ou se o texto traz `R$` — aí o
-        # próprio texto diz que é dinheiro, independentemente do campo.
+        # Duas licenças independentes, e cada uma tem seu alcance:
+        #   · CHAVE monetária  -> todo número da string conta;
+        #   · `R$` no texto    -> contam os valores marcados com `R$`, mesmo
+        #                         que a chave não seja monetária.
+        # Elas se SOMAM. A primeira versão disto usava só o regex de `R$`
+        # quando o texto tinha cifrão, e com isso perdia número solto na mesma
+        # string mesmo sob chave monetária — `{"valor": "50,00 virou R$ 55,00"}`
+        # deixava de sustentar `R$ 50,00`. Supressão, achada na auto-revisão
+        # deste commit.
+        chave_e_monetaria = bool(_CHAVE_MONETARIA_RE.search(chave))
         tem_cifrao = "R$" in obj
-        if not (_CHAVE_MONETARIA_RE.search(chave) or tem_cifrao):
+        if not (chave_e_monetaria or tem_cifrao):
             return
         limpo = _MASCARA_NAO_MONETARIA_RE.sub(" ", obj)
-        iterador = (_CLAIM_MONEY_RE.finditer(limpo) if tem_cifrao
-                    else _ANY_NUM_RE.finditer(limpo))
-        for m in iterador:
-            v = _brl_to_cents(m.group(1) if tem_cifrao else m.group(0))
+        brutos: list[str] = []
+        if chave_e_monetaria:
+            brutos += [m.group(0) for m in _ANY_NUM_RE.finditer(limpo)]
+        if tem_cifrao:
+            brutos += [m.group(1) for m in _CLAIM_MONEY_RE.finditer(limpo)]
+        for raw in brutos:
+            v = _brl_to_cents(raw)
             if v is not None:
                 out.add(v)
 
@@ -498,6 +509,16 @@ if __name__ == "__main__":
     assert collect_evidence(['{"saldo": 1826.55}'])[0] == {182655}
     assert not check("Total: R$ 182.655,00", ['{"saldo": 1826.55}'])[0].supported
     assert check("Total: R$ 1.826,55", ['{"saldo": 1826.55}'])[0].supported
+    # string sob chave monetária: TODO número conta, com ou sem cifrão junto
+    MIX = ['{"valor": "50,00 virou R$ 55,00 com taxa"}']
+    assert collect_evidence(MIX)[0] == {5000, 5500}, collect_evidence(MIX)[0]
+    assert check("Anotei R$ 50,00.", MIX)[0].supported, "número solto sob chave monetária"
+    assert check("Anotei R$ 55,00.", MIX)[0].supported
+    # e sob chave NÃO monetária, só o que vem marcado com R$
+    NOTA = ['{"nota": "comprei 3 caixas por R$ 12,00"}']
+    assert collect_evidence(NOTA)[0] == {1200}, collect_evidence(NOTA)[0]
+    assert not check("Total: R$ 3,00", NOTA)[0].supported, "a quantidade 3 não é dinheiro"
+
     # percentual, taxa e duração NÃO são dinheiro
     PCT = ['{"used_pct": 25.0, "interest_rate": 12.5, "days_until": 30, "used": 200.0}']
     assert collect_evidence(PCT)[0] == {20000}, collect_evidence(PCT)[0]
