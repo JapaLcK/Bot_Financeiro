@@ -98,10 +98,9 @@
   .cmp-scroll:focus-visible { outline: 2px solid var(--pink); outline-offset: 4px; border-radius: 8px; }
 
   /* table-layout:fixed: no automático as colunas ficam do tamanho do texto
-     mais largo de cada uma (medido: 195/196/155/148/130px), e coluna estreita
-     se lê como plano menos importante — justo o contrário do que a faixa do
-     Plus está dizendo. Fixo, as 5 dividem em partes iguais o que sobra da
-     coluna de recursos. */
+     mais largo de cada uma, e coluna estreita se lê como plano menos
+     importante — justo o contrário do que a faixa do Plus está dizendo. Fixo,
+     as 4 dividem em partes iguais o que sobra da coluna de recursos. */
   .cmp-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: .88rem; font-variant-numeric: tabular-nums; }
   .cmp-table th, .cmp-table td { padding: 13px 12px; text-align: center; vertical-align: middle; border-bottom: 1px solid var(--line); }
   .cmp-table td { color: var(--ink-2); }
@@ -174,8 +173,13 @@
 
   @media (max-width: 900px) {
     .cmp-hint { display: flex; }
+    /* O media query não sabe se a tabela rola: com 4 colunas ela cabe a partir
+       de ~610px, e a dica pedia pra arrastar o que não arrasta. Quem sabe é o
+       updateCmpFade, que já mede o overflow pros véus das bordas. */
+    .cmp-hint.cmp-hint-off { display: none; }
     .cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .cmp-table { min-width: 664px; font-size: .82rem; }
+    /* 154px da coluna de recursos + 4 x 102px dos planos. */
+    .cmp-table { min-width: 562px; font-size: .82rem; }
     .cmp-table th, .cmp-table td { padding: 11px 8px; }
     .cmp-table .cmp-feat { width: 154px; min-width: 154px; padding-left: 0; padding-right: 10px; }
     .cmp-table thead th { position: static; padding: 12px 8px 12px; }
@@ -224,11 +228,10 @@
            e hardcoded da página (lançada 2026-08-06, sem flag: nada de flash
            de conteúdo antigo). Sem classes CSS novas de propósito: reusa
            .plan/.price/.plan-badge + estilos inline.
-           O card do Grátis SAIU: assinar virou obrigatório pra entrar pela web,
-           então ele não é mais uma escolha oferecida aqui. O tier `free`
-           continua existindo no backend como ESTADO (fallback após falha de
-           cobrança) e como COLUNA da tabela comparativa abaixo — o que morreu é
-           a escolha, não o plano. -->
+           O Grátis SAIU inteiro: o card daqui e a coluna da tabela comparativa
+           abaixo. Assinar virou obrigatório pra entrar pela web, então ele não é
+           mais uma escolha nem um degrau de comparação. O tier `free` continua
+           existindo no backend como ESTADO (fallback após falha de cobrança). -->
       <!-- width breakout: a escada de 4 cards precisa de mais que os 1200px do
            .wrap pra não ficar espremida; centraliza na página via translate. -->
       <div id="plans-v2-wrap" style="width:min(1560px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
@@ -340,15 +343,11 @@
             <table class="cmp-table">
               <caption class="sr-only">Recursos incluídos em cada plano do PigBank</caption>
               <colgroup>
-                <col /><col /><col /><col class="cmp-col-hl" /><col /><col />
+                <col /><col /><col class="cmp-col-hl" /><col /><col />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col" class="cmp-feat"><span class="sr-only">Recurso</span></th>
-                  <th scope="col">
-                    <span class="cmp-plan-name">Grátis</span>
-                    <span class="cmp-plan-price">R$&nbsp;0</span>
-                  </th>
                   <th scope="col">
                     <span class="cmp-plan-name">Essencial</span>
                     <span class="cmp-plan-price"><span data-price-monthly>R$&nbsp;9,90/mês</span><span data-price-annual style="display:none">R$&nbsp;99/ano</span></span>
@@ -370,10 +369,9 @@
               </thead>
 
               <tbody>
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Registro no WhatsApp</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Registro no WhatsApp</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Registro por texto</th>
-                  <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -381,7 +379,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Lançamentos por mês</th>
-                  <td><span class="c-val">30</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
@@ -389,7 +386,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Registro por áudio</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -397,7 +393,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Foto de cupom e comprovante</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -405,17 +400,15 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Importar extrato (OFX, CSV, PDF)</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
 
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Contas e organização</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Contas e organização</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Bancos conectados (Open&nbsp;Finance)</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Nenhum</span></span></td>
                   <td><span class="c-val">1</span></td>
                   <td><span class="c-val">2</span></td>
                   <td><span class="c-val">5</span></td>
@@ -423,7 +416,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Investimentos no painel</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -431,7 +423,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Caixinhas e metas</th>
-                  <td><span class="c-val">1</span></td>
                   <td><span class="c-val">Ilimitadas</span></td>
                   <td><span class="c-val">Ilimitadas</span></td>
                   <td><span class="c-val">Ilimitadas</span></td>
@@ -439,7 +430,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Cartões</th>
-                  <td><span class="c-val">1</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
                   <td><span class="c-val">Ilimitados</span></td>
@@ -447,7 +437,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Boletos com lembrete de vencimento</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -455,17 +444,15 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Gastos recorrentes</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
 
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Piggy IA</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Piggy IA</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Mensagens com a Piggy</th>
-                  <td><span class="c-val">20<small>por mês</small></span></td>
                   <td><span class="c-val">200<small>por mês</small></span></td>
                   <!-- Plus/Pro/Premium: `ai_monthly_messages: None` cai no teto GLOBAL
                        AI_CHAT_MONTHLY_LIMIT, não em "ilimitado" (ver o card do Plus). -->
@@ -479,13 +466,11 @@
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
-                  <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
 
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Agentes do Piggy</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Agentes do Piggy</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Agentes liberados</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Nenhum</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Nenhum</span></span></td>
                   <td><span class="c-val">Os 7<small>você escolhe</small></span></td>
                   <td><span class="c-val">Os 7<small>você escolhe</small></span></td>
@@ -493,7 +478,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Energia para mantê-los ligados</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Nenhuma</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Nenhuma</span></span></td>
                   <td><span class="c-val"><i class="ph ph-lightning" aria-hidden="true"></i> 4<small>até 3 agentes</small></span></td>
                   <td><span class="c-val"><i class="ph ph-lightning" aria-hidden="true"></i> 14<small>a equipe inteira</small></span></td>
@@ -504,14 +488,12 @@
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
 
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Histórico e relatórios</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Histórico e relatórios</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Histórico que você enxerga</th>
-                  <td><span class="c-val">Mês corrente</span></td>
                   <td><span class="c-val">90 dias</span></td>
                   <td><span class="c-val">12 meses</span></td>
                   <td><span class="c-val">24 meses</span></td>
@@ -519,7 +501,6 @@
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Exportar seus dados</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
@@ -529,7 +510,6 @@
                   <th scope="row" class="cmp-feat">Previsão de saldo 30/60/90 dias</th>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
@@ -537,15 +517,13 @@
                   <th scope="row" class="cmp-feat">Relatórios semanais</th>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
 
-                <tr class="cmp-group"><th colspan="6" scope="colgroup"><span>Ainda por vir, no Premium</span></th></tr>
+                <tr class="cmp-group"><th colspan="5" scope="colgroup"><span>Ainda por vir, no Premium</span></th></tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Modo família</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
@@ -556,12 +534,10 @@
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-yes"><i class="ph ph-check" aria-hidden="true"></i><span class="sr-only">Incluído</span></span></td>
                 </tr>
                 <tr>
                   <th scope="row" class="cmp-feat">Suporte exclusivo</th>
-                  <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
                   <td><span class="c-no"><i class="ph ph-minus" aria-hidden="true"></i><span class="sr-only">Não incluído</span></span></td>
@@ -572,11 +548,6 @@
               <tfoot>
                 <tr>
                   <td class="cmp-feat"></td>
-                  <!-- Coluna Grátis sem CTA: a coluna FICA (é informação — o que
-                       você perde descendo o degrau), mas o Grátis não é mais
-                       escolhível. Célula vazia, não colspan: as 6 colunas do
-                       colgroup e do tbody continuam valendo. -->
-                  <td></td>
                   <td><button class="btn btn-outline" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button></td>
                   <td class="is-hl"><button class="btn btn-primary" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button></td>
                   <td><button class="btn btn-outline" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button></td>
@@ -683,6 +654,8 @@ function updateCmpFade() {
   const max = sc.scrollWidth - sc.clientWidth;
   wrap.classList.toggle("fade-left", sc.scrollLeft > 2);
   wrap.classList.toggle("fade-right", max > 2 && sc.scrollLeft < max - 2);
+  // Mesmo `max > 2` dos véus: a dica só aparece se houver o que arrastar.
+  document.querySelector(".cmp-hint")?.classList.toggle("cmp-hint-off", max <= 2);
 }
 (function initCmpFade() {
   const sc = document.getElementById("cmp-scroll");
