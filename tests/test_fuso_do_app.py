@@ -179,20 +179,24 @@ def _no_pool_do_dashboard(chamada):
     e RESTAURA o lock no `finally` não foi medida; pode funcionar, e só não foi
     tentada porque a linha acima já resolve com menos estado.
 
-    TETO deste conserto (`ponytail:`): ele DESVIA da armadilha, não a remove.
-    O `_db_pool_lock` de `frontend/routes/shared.py` é criado uma vez, no
-    import, e o `_LoopBoundMixin` o prende PARA SEMPRE ao loop da primeira
-    contenção do processo. Aqui ele nunca chega a ser contendido — mas qualquer
-    teste futuro que zere `shared._db_pool` e depois dispare concorrência
-    (`asyncio.gather` de duas leituras) sem abrir o pool antes pendura a suíte
-    de novo, do mesmo jeito. O conserto de verdade é em `shared._get_db_pool`
-    (lock criado por loop, ou nenhum lock), e é mudança de produção — PR
-    próprio, não este.
+    Quem remove a armadilha (em vez de desviar dela) é `shared.reset_db_pool()`,
+    usado abaixo: ele zera o pool e RECRIA o `_db_pool_lock`, que sem isso fica
+    preso PARA SEMPRE ao loop da primeira contenção do processo. Não é a
+    variante reprovada no parágrafo acima: lá o lock novo SUBSTITUÍA o `await
+    _get_db_pool()` e o gather o prendia a este loop; aqui os dois coexistem, o
+    gather encontra o pool já aberto e o lock novo fica sem loop nenhum. Quem
+    prova a mina apagada é tests/test_pool_async_entre_loops.py, que a reproduz
+    de frente (dois `asyncio.run`, gather em cada um).
+
+    A linha de restauração no `finally` continua um poke no global do módulo, e
+    é de propósito: restaurar um pool não arma o lock (a mina era o lock), e um
+    context manager em `shared.py` só para embrulhar teardown de teste seria
+    scaffolding de teste dentro de módulo de produção.
     """
     import frontend.routes.shared as shared
 
     async def _ler():
-        anterior, shared._db_pool = shared._db_pool, None
+        anterior = shared.reset_db_pool()
         try:
             await shared._get_db_pool()
             return await chamada()

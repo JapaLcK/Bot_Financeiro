@@ -446,6 +446,37 @@ async def _get_db_pool() -> AsyncConnectionPool:
         return _db_pool
 
 
+def reset_db_pool() -> AsyncConnectionPool | None:
+    """Zera o pool async e RECRIA o lock. Devolve o pool anterior SEM fechá-lo.
+
+    Contrapartida do `close_pool()` de db/connection.py, com duas diferenças
+    que não são estilo:
+
+    - não fecha: o pool anterior costuma ter nascido num event loop já
+      encerrado, e `asyncio.run(pool.close())` sobre ele cai em CancelledError.
+      Abandonar pool de loop MORTO é seguro (é o que a suíte já fazia). O que
+      não é seguro é deixar aberto um pool do loop CORRENTE: ele tem task de
+      reconexão nesse loop e o `asyncio.run` pendura em `_cancel_all_tasks` —
+      MEDIDO em 02/09/2026, trava já no fim do 1º loop, sem chegar ao 2º. Logo:
+      quem ainda está no loop do pool fecha-o ANTES de o loop morrer.
+    - recria o `_db_pool_lock`: `asyncio.Lock` só resolve o loop no `acquire`
+      CONTENDIDO (`asyncio.mixins._LoopBoundMixin._get_loop`), e a partir daí
+      fica preso a ele PARA SEMPRE. Zerar só o pool deixa o lock velho: a
+      próxima contenção, vinda de outro loop, PENDURA o processo.
+
+    Precondição: ninguém está segurando o `_db_pool_lock` neste instante —
+    chame entre event loops, nunca com um `_get_db_pool` em voo.
+
+    Existe para a suíte. Em produção não há um único `asyncio.run` /
+    `new_event_loop` / `run_until_complete` fora de `tests/` (medido), então
+    isto nunca é chamado lá.
+    """
+    global _db_pool, _db_pool_lock
+    anterior, _db_pool = _db_pool, None
+    _db_pool_lock = asyncio.Lock()
+    return anterior
+
+
 class _PooledConn:
     """Adapter pra preservar a interface `async with await db_connect() as conn`.
     `pool.connection()` retorna um async-context-manager direto, mas o caller
