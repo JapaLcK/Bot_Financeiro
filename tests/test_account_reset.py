@@ -526,24 +526,39 @@ def _reset_com_lancamento_concorrente(uid: int, monkeypatch, gatilho: str | None
     corrida também fica vermelha, mas na premissa ("tinha que deixar 1
     lançamento: []") — o reset apaga o recém-chegado e o teste não mede a
     invariante que interessa.
+
+    VIZINHO (isolamento, CLAUDE.md §0): um segundo usuário, semeado igual,
+    lança os MESMOS R$250 na MESMA janela. O lock é da linha de A, então B não
+    espera por ele e fecha em 100-250 = -150, com o resto dos dados intacto.
+    Sem o `and user_id = %s` do `update accounts` o reset trava e zera TODAS as
+    linhas: B lê 0 e fecha em -250. É vermelho que o caso sereno
+    (`test_reset_apaga_tudo_do_usuario_e_isola_o_vizinho`) não produz — lá B
+    não escreve durante a janela.
     """
     original = privacy._table_exists
     gatilho = gatilho or privacy._RESET_TABLES[-1]
     erro: list[BaseException] = []
     disparou: list[bool] = []
 
-    def _lanca():
+    vizinho = uid + 1
+    db.ensure_user(vizinho)
+    _semeia(vizinho)
+    antes_vizinho = _contagens(vizinho)
+
+    def _lanca(quem: int):
         try:
-            db.add_launch_and_update_balance(uid, "despesa", 250.0, None, "corrida", "mercado")
+            db.add_launch_and_update_balance(quem, "despesa", 250.0, None, "corrida", "mercado")
         except BaseException as e:  # noqa: BLE001 - a thread não pode engolir
             erro.append(e)
 
-    t = threading.Thread(target=_lanca)
+    t = threading.Thread(target=_lanca, args=(uid,))
+    tv = threading.Thread(target=_lanca, args=(vizinho,))
 
     def _dispara(cur, table):
         if table == gatilho and not disparou:
             disparou.append(True)
             t.start()
+            tv.start()
             # COM o conserto a thread bloqueia no `update accounts` (o reset
             # segura o lock da linha) e o join estoura o teto — é o esperado.
             # SEM o conserto ela termina em milissegundos.
@@ -555,9 +570,15 @@ def _reset_com_lancamento_concorrente(uid: int, monkeypatch, gatilho: str | None
     monkeypatch.setattr(privacy, "_table_exists", original)
 
     t.join(timeout=10.0)
+    tv.join(timeout=10.0)
     assert disparou, "o gatilho da corrida não disparou"
     assert not t.is_alive(), "o lançamento concorrente não destravou após o commit"
+    assert not tv.is_alive(), "o lançamento do vizinho não destravou após o commit"
     assert not erro, f"o lançamento concorrente falhou: {erro}"
+    assert _contagens(vizinho) == dict(antes_vizinho, launches=antes_vizinho["launches"] + 1), \
+        "o reset de A mexeu nas linhas de B durante a corrida"
+    assert _saldo(vizinho) == Decimal("-150"), \
+        f"o vizinho fechou em {_saldo(vizinho)}, não em 100-250 — leu saldo zerado por A"
 
 
 def _ids_de_launches(uid: int) -> list[int]:
@@ -1073,6 +1094,10 @@ def test_deadlock_no_reset_vira_503_e_nao_apaga_nada(user_id, monkeypatch):
     """
     _semeia(user_id)
     antes = _contagens(user_id)
+    vizinho = user_id + 1
+    db.ensure_user(vizinho)
+    _semeia(vizinho)
+    antes_vizinho = _contagens(vizinho)
 
     tocada: list[str] = []
     monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
@@ -1099,6 +1124,12 @@ def test_deadlock_no_reset_vira_503_e_nao_apaga_nada(user_id, monkeypatch):
     # com o banco local intacto — a janela residual documentada em
     # db/privacy.reset_user_data, agora com um gatilho a mais.
     assert tocada == [_item_de(user_id)]
+    # Isolamento sob abort (CLAUDE.md §0): a transação morta não pode ter
+    # tocado B. É POSITIVO, não discrimina a mutação do `and user_id = %s` —
+    # o rollback desfaz o zero global de qualquer jeito; pega conserto futuro
+    # que escreva em accounts fora da transação.
+    assert _contagens(vizinho) == antes_vizinho, "o reset abortado de A tocou dados de B"
+    assert _saldo(vizinho) == 100, "o reset abortado de A mexeu no saldo de B"
 
 
 # ── 9. sem sessão ────────────────────────────────────────────────────────────

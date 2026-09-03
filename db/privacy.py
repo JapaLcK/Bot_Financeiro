@@ -610,12 +610,10 @@ def reset_user_data(
                 # é novo, e o reset NÃO é imune: ele fecha o ciclo (pede pockets
                 # no `_delete` do laço segurando accounts desde o update), e
                 # morre quem o Postgres detecta primeiro — ordem de chegada, não
-                # estrutura. Dois tetos: nas 3 portas do OF o DeadlockDetected
-                # cai em `except Exception: pass` e some (lista em
-                # db/accounts.py:1500-1512); e o reset morto sobe 500, não o 503
-                # recuperável que frontend/routes/open_finance.py:393-401 já dá
-                # para a MESMA exceção — com o `remote_cleanup` já executado, o
-                # que é gatilho novo para a janela residual documentada acima.
+                # estrutura. Teto: nas 3 portas do OF o DeadlockDetected cai em
+                # `except Exception: pass` e some (db/accounts.py:1500-1512). No
+                # reset ele vira 503 (frontend/routes/settings.py:188) com o
+                # `remote_cleanup` já feito — gatilho novo para a janela residual.
                 #
                 # Quem chega DEPOIS do lock não deadlocka, só ESPERA — no
                 # `ensure_user` do writer, que pede accounts em transação
@@ -623,10 +621,9 @@ def reset_user_data(
                 # enquanto todo escritor de accounts chamar `ensure_user` — hoje
                 # os 9 chamam (`grep -rn 'update accounts set' --include='*.py'
                 # db/`, menos o `merge_users`, que é a exceção conhecida). E a
-                # espera não é só do dono da linha — a fila do
-                # WhatsApp tem consumidor único (`_worker_loop`,
-                # adapters/whatsapp/wa_app.py:324), então um writer preso trava
-                # as mensagens de TODOS os usuários durante a janela.
+                # espera não é só do dono da linha — a fila do WhatsApp tem
+                # consumidor único (`_worker_loop`, adapters/whatsapp/wa_app.py:324),
+                # então um writer preso trava as mensagens de TODOS na janela.
                 #
                 # Sem `lock_timeout` de propósito: o do repo vive nas conexões
                 # DEDICADAS do `pluggy_item_lock` (db/open_finance_state.py:595,
@@ -641,11 +638,14 @@ def reset_user_data(
                 # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma acima de
                 # 10 mil). Sintético: 50 mil launches sozinhos 0,58 s; os mesmos com
                 # 20 mil open_finance_transactions, 16,9 s. Custo ≈ linhas apagadas ×
-                # tamanho GLOBAL de cada filha que as referencia
-                # (open_finance_transactions conta DUAS vezes p/ launches) — nenhuma
-                # das FKs `on delete set null` p/ launches/credit_transactions é
-                # indexada, então conta pequena também dói se a filha for grande; o
-                # conserto é o índice. FKs, modelo e queries: #253.
+                # tamanho GLOBAL de cada filha que as referencia (open_finance_
+                # transactions conta DUAS vezes p/ launches) — nenhuma das FKs
+                # `on delete set null` p/ launches/credit_transactions é indexada,
+                # então conta pequena também dói se a filha for grande; o conserto é
+                # o índice. Os 0,08 s são só o 1º fator (linhas-pai) e em banco
+                # LOCAL: o 2º — tamanho das filhas EM PRODUÇÃO — nunca foi medido,
+                # então eles NÃO sustentam "janela pequena em produção". Ele, as
+                # FKs e as queries: #253.
                 ensure_user_tx(cur, user_id)
                 cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
                 # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a
