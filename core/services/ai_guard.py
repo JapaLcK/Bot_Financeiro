@@ -101,6 +101,29 @@ _ID_KEY_RE = re.compile(r"(^|_)seq$")
 # metade.
 _MASCARA_NAO_MONETARIA_RE = re.compile(r"#\d{1,9}|\b(?:CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
 
+# Na mensagem do USUÁRIO, número também vem como data, contagem de parcela e
+# ano — e virava dinheiro: "quais contas vencem dia 20?" sustentava um
+# `R$ 20,00` inventado, "parcelei em 12 vezes" um `R$ 12,00`, "em 2026" um
+# `R$ 2.026,00`. Pergunta de finanças com data é o caso comum, não a exceção.
+#
+# É HEURÍSTICA, e a lista é declaradamente incompleta: o que sobrar continua
+# entrando como dinheiro, ou seja, o erro remanescente é de SUPRESSÃO.
+#
+# Por que não uma regra estrita ("só com R$ ou centavos"): ela quebraria o
+# valor que o usuário diz solto — `guarda 100 na viagem` —, que é justamente
+# o que impede a confirmação pendente de virar falso alarme. Testado nos dois
+# sentidos logo abaixo.
+#
+# E por que não `utils_text.parse_money`, que já existe: medido em 2026-09-02,
+# ela devolve 20.0 pra "dia 20", 12.0 pra "12 vezes" e 2026.0 pra "em 2026" —
+# não faz esta distinção, e ainda por cima só devolve UM valor por mensagem.
+_NAO_MONETARIO_DO_USUARIO_RE = re.compile(
+    r"\bdias?\s+\d{1,2}\b"
+    r"|\b\d{1,3}\s*(?:x|vezes|parcelas?|meses|m[eê]s)\b"
+    r"|\b(?:em|de|desde|at[ée])\s+(?:19|20)\d{2}\b",
+    re.IGNORECASE,
+)
+
 
 def _ids_from_json(obj, out: set[int]) -> None:
     """IDs de um resultado de tool já decodificado, só dos campos que SÃO id."""
@@ -225,7 +248,10 @@ def collect_evidence(tool_results: list[str],
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
         # Dinheiro sai do texto SEM os IDs e códigos; ID e código saem do texto
         # original, logo abaixo.
-        for m in _ANY_NUM_RE.finditer(_MASCARA_NAO_MONETARIA_RE.sub(" ", chunk)):
+        limpo = _MASCARA_NAO_MONETARIA_RE.sub(" ", chunk)
+        if e_do_usuario:
+            limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", limpo)
+        for m in _ANY_NUM_RE.finditer(limpo):
             if e_do_usuario:
                 # A leitura dupla existe porque a TOOL pode escrever em qualquer
                 # formato. O usuário não: ele escreve BRL. Mandar `77,90` pela
@@ -393,6 +419,19 @@ if __name__ == "__main__":
     assert check("Anotei R$ 77,90.", [], user_text="gastei 77,90")[0].supported
     # a tool CONTINUA com a leitura dupla, que é onde a ambiguidade é real
     assert 779000 in collect_evidence(['{"valor": "7790"}'])[0]
+
+    # data, contagem de parcela e ano não são dinheiro
+    for texto, inventado in [("quais contas vencem dia 20?", "R$ 20,00"),
+                             ("parcelei em 12 vezes", "R$ 12,00"),
+                             ("em 2026 eu quero economizar", "R$ 2.026,00")]:
+        assert collect_evidence([], texto)[0] == set(), (texto, collect_evidence([], texto)[0])
+        assert not check(f"Total: {inventado}", [], user_text=texto)[0].supported, texto
+    # e o que É dinheiro continua entrando, inclusive inteiro solto
+    for texto, valor in [("gastei 50 no mercado", "R$ 50,00"),
+                         ("guarda 100 na viagem", "R$ 100,00"),
+                         ("recebi 2000 de salario", "R$ 2.000,00"),
+                         ("paguei 89,90 na farmácia", "R$ 89,90")]:
+        assert check(f"Anotei {valor}.", [], user_text=texto)[0].supported, texto
 
     # ID e código citados pelo usuário NÃO são dinheiro
     assert collect_evidence([], "apague #50")[0] == set(), collect_evidence([], "apague #50")[0]
