@@ -40,6 +40,7 @@ que o `_dispatch_tool` já devolve.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -61,16 +62,40 @@ _CLAIM_CODE_RE = re.compile(r"\b(CC\d{1,9}|PC[0-9A-Fa-f]{8})\b")
 # devolvem JSON e o formato varia.
 _ANY_NUM_RE = re.compile(r"\d[\d.,]*")
 
-# ID é outra coisa, e precisa de evidência PRÓPRIA. Derivar ID dividindo os
-# centavos por 100 misturava campos sem relação: `{"user_seq": 1, "valor":
-# 50.0}` fazia um `#50` inventado passar por sustentado, porque 50,00 vira
-# 5000 centavos e 5000/100 = 50. Como resultado de tool quase sempre traz ID e
-# valor juntos, isso SUPRIMIA justamente o evento que a guarda existe pra
-# emitir — o pior modo de falha possível pra ela.
+# ID precisa de evidência PRÓPRIA, e ela sai da CHAVE do campo — não de um
+# padrão numérico. Duas tentativas anteriores falharam pelo mesmo motivo,
+# olhar só a forma do número:
 #
-# Aqui: inteiro que NÃO faz parte de um decimal. `50.0` e `1.768,80` não
-# entram; o `1` de `"user_seq": 1` entra mesmo seguido de vírgula.
-_ID_EVIDENCE_RE = re.compile(r"(?<![\d.,])(\d{1,9})(?![\d]|[.,]\d)")
+#   1. derivar ID dos centavos (`5000 // 100 == 50`) fazia `"valor": 50.0`
+#      sustentar um `#50` inventado;
+#   2. "inteiro que não faz parte de um decimal" ainda engolia data —
+#      `"start_date": "2026-09-01"` injetava 2026, 9 e 1, e um `#9` inventado
+#      passava.
+#
+# Nos dois casos o efeito era SUPRIMIR evento: a guarda ficava silenciosa e
+# parecia estar funcionando, que é o pior estado possível pra ela.
+#
+# `(^|_)(id|seq)$` cobre as chaves que as tools usam de fato — medido em
+# 2026-09-02 em `core/services/ai_chat/tools/`: `id`, `bill_id`, `launch_id`,
+# `card_id`, `group_id`, `user_seq`. E exige `^` ou `_` antes de propósito:
+# sem isso, `"paid"` e `"valid"` entrariam como ID.
+_ID_KEY_RE = re.compile(r"(^|_)(id|seq)$")
+
+
+def _ids_from_json(obj, out: set[int]) -> None:
+    """IDs de um resultado de tool já decodificado, só dos campos que SÃO id."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, (dict, list)):
+                _ids_from_json(v, out)
+            elif _ID_KEY_RE.search(str(k)):
+                try:
+                    out.add(int(v))
+                except (TypeError, ValueError):
+                    pass
+    elif isinstance(obj, list):
+        for v in obj:
+            _ids_from_json(v, out)
 
 
 def _brl_to_cents(raw: str) -> int | None:
@@ -150,7 +175,13 @@ def collect_evidence(tool_results: list[str],
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
         for m in _ANY_NUM_RE.finditer(chunk):
             cents |= _evidence_cents(m.group(0))
-        ids.update(int(m.group(1)) for m in _ID_EVIDENCE_RE.finditer(chunk))
+        # Por CHAVE quando o resultado é JSON (o caso normal); e o `#N`
+        # explícito sempre, porque ali o `#` já diz que é ID.
+        try:
+            _ids_from_json(json.loads(chunk), ids)
+        except (ValueError, TypeError):
+            pass
+        ids.update(int(m.group(1)) for m in _CLAIM_ID_RE.finditer(chunk))
     return cents, raw, ids
 
 
@@ -224,6 +255,19 @@ if __name__ == "__main__":
     # separar sem saber o nome do campo, e excluir inteiro do dinheiro
     # reprovaria `"valor": 50` legítimo — cria lobo, que é pior.
     assert check("Anotei R$ 1,00.", EV)[0].supported
+
+    # Data NÃO é ID: `2026-09-01` não pode sustentar `#9`, `#1` nem `#2026`.
+    DATA = ['{"start_date": "2026-09-01", "end_date": "2026-09-30", "total": 263.35}']
+    assert collect_evidence(DATA)[2] == set(), collect_evidence(DATA)[2]
+    for falso in ("#9", "#1", "#2026"):
+        assert not check(f"Apaguei o lançamento {falso}.", DATA)[0].supported, falso
+
+    # Chave que TERMINA em "id" sem ser id (`paid`, `valid`) não entra.
+    assert collect_evidence(['{"paid": 7, "valid": 9}'])[2] == set()
+    assert collect_evidence(['{"bill_id": 7, "card_id": 9, "group_id": 3}'])[2] == {7, 9, 3}
+
+    # `#N` cru num resultado de tool conta — ali o `#` já diz que é ID.
+    assert check("Apaguei o #4.", ["extrato: [#4] mercado 50,00"])[0].supported
 
     # ID inventado
     inv = check("Apaguei o lançamento #47.", TOOLS)

@@ -50,17 +50,12 @@ if WORKTREE_ROOT not in sys.path:
     sys.path.insert(0, WORKTREE_ROOT)
 
 # ─────────────────────────────────────────────────────────────────────────
-# 1) DB isolado e descartável
+# 1) Nome do database (a criação vem depois do preflight de modelos)
 # ─────────────────────────────────────────────────────────────────────────
 import psycopg  # noqa: E402
 
 DB_NAME = f"qa_wa_pilot_{_uuid.uuid4().hex[:12]}"
 _ADMIN_DSN = "postgresql://localhost:5432/postgres"
-
-print(f"[harness] criando database isolado {DB_NAME} ...")
-with psycopg.connect(_ADMIN_DSN, autocommit=True) as _conn:
-    _conn.execute(f'create database "{DB_NAME}"')
-os.environ["DATABASE_URL"] = f"postgresql://localhost:5432/{DB_NAME}"
 
 # ─────────────────────────────────────────────────────────────────────────
 # 2) Envs obrigatórias (mesmos valores/padrão de tests/conftest.py)
@@ -104,10 +99,26 @@ _MODELOS_USADOS = [
     "gpt-4o",     # core/services/media_service.py:187
 ]
 MODEL_PROBLEMS = meter.check_models(_MODELOS_USADOS)
-for _p in MODEL_PROBLEMS:
-    print(f"[harness] MODELO: {_p}")
-if not MODEL_PROBLEMS:
-    print(f"[harness] modelos conferidos em /v1/models: {', '.join(_MODELOS_USADOS)}")
+if MODEL_PROBLEMS:
+    # ABORTA, e antes de criar qualquer coisa. O comentário acima prometia
+    # "erro de apelido em 1 segundo, não no meio de uma cena com o banco já
+    # semeado" — e o código só imprimia e seguia, gastando minutos e dólares
+    # pra produzir um relatório inválido. Promessa que o código não cumpre é
+    # pior que promessa nenhuma: dá confiança falsa em quem lê.
+    for _p in MODEL_PROBLEMS:
+        print(f"[harness] MODELO: {_p}")
+    print("[harness] ABORTANDO antes de criar o database — conserte a chave/modelo "
+          "e rode de novo. Nada foi criado, nada foi gasto.")
+    sys.exit(1)
+print(f"[harness] modelos conferidos em /v1/models: {', '.join(_MODELOS_USADOS)}")
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3c) DB isolado e descartável — SÓ depois do preflight passar.
+# ─────────────────────────────────────────────────────────────────────────
+print(f"[harness] criando database isolado {DB_NAME} ...")
+with psycopg.connect(_ADMIN_DSN, autocommit=True) as _conn:
+    _conn.execute(f'create database "{DB_NAME}"')
+os.environ["DATABASE_URL"] = f"postgresql://localhost:5432/{DB_NAME}"
 
 # ─────────────────────────────────────────────────────────────────────────
 # 4) init_db()
