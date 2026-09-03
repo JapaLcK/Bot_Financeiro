@@ -5,6 +5,7 @@ Cobrem: exigência de auth, classificação de assinatura por conta
 e-mail, paginação e o drill-down individual. O resumo Stripe roda com a
 chave vazia (billing.available == False) — a API externa nunca é chamada.
 """
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -174,6 +175,49 @@ class TestDeriveAccountStatus:
         assert self._st(plan="pro", last_payment_status="inactive",
                         stripe_customer_id="cus_x",
                         plan_expires_at=NOW - timedelta(days=1)) == "canceled"
+
+
+# O CASE em SQL não importa constante Python: a regra vive nos dois lados e a
+# única defesa é um teste que os compare (CLAUDE.md §0.7, mesmo precedente de
+# tests/test_phosphor_subset.py). O regex casa os dois formatos usados no CASE,
+# `= 'x'` e `IN ('x', 'y')`, e devolve a categoria do THEN.
+_WHEN_STATUS_RX = re.compile(
+    r"a\.last_payment_status.*?(?:=\s*'([a-z_]+)'|IN\s*\(([^)]*)\))\s*THEN\s*'([a-z_]+)'",
+    re.S,
+)
+
+
+def _status_do_case_sql() -> dict:
+    """Mapa {status cru -> categoria} lido do _ACCOUNT_STATUS_SQL."""
+    sql = admin_dashboard._ACCOUNT_STATUS_SQL
+    ramos = list(_WHEN_STATUS_RX.finditer(sql))
+    # Guarda contra parse cego: cada ramo cita a coluna exatamente uma vez, então
+    # ramo novo numa forma que o regex não casa faz ESTA linha ficar vermelha em
+    # vez de o ramo sumir da comparação em silêncio.
+    assert len(ramos) == sql.count("last_payment_status"), ramos
+    mapa = {}
+    for m in ramos:
+        unico, lista, categoria = m.groups()
+        for st in ([unico] if unico else re.findall(r"'([a-z_]+)'", lista)):
+            assert mapa.setdefault(st, categoria) == categoria, st
+    return mapa
+
+
+def test_status_vivos_do_sql_batem_com_a_constante_python():
+    """Divergir aqui é o bug real que aconteceu: o CASE tratava 'unpaid' e
+    'incomplete' como Past due (assinatura viva) e o gate do /trial-reset não —
+    passavam e a trava era apagada."""
+    mapa = _status_do_case_sql()
+    vivos_sql = {st for st, cat in mapa.items() if cat in ("trial", "paying", "past_due")}
+    assert vivos_sql == set(admin_dashboard._LIVE_PAYMENT_STATUSES)
+    assert {st for st, cat in mapa.items() if cat == "past_due"} == set(
+        admin_dashboard._PAST_DUE_PAYMENT_STATUSES
+    )
+    # Terceiro lugar da mesma regra: a função Python que o SQL espelha.
+    for st, cat in mapa.items():
+        assert admin_dashboard._derive_account_status(
+            {"plan": "pro", "last_payment_status": st}, NOW
+        ) == cat, st
 
 
 # ── Resumo Stripe (MRR / ticket médio) ─────────────────────────────────────
@@ -864,8 +908,23 @@ def test_trial_reset_409_com_assinatura_viva_e_nao_apaga_nada(panel_accounts):
         _drop_locks(h)
 
 
-@pytest.mark.parametrize("pay", ["active", "past_due"])
-def test_trial_reset_409_para_os_outros_status_vivos(panel_accounts, pay):
+@pytest.mark.parametrize("pay,esperado", [
+    # Vivos na Stripe: o gate recusa e a trava fica de pé. 'unpaid' (dunning) e
+    # 'incomplete' (3DS pendente) entram aqui porque o painel já os mostra como
+    # "Past due" — assinatura viva (_LIVE_PAYMENT_STATUSES).
+    ("active", 409),
+    ("past_due", 409),
+    ("unpaid", 409),
+    ("incomplete", 409),
+    # Terminais/ausentes: o botão TEM de funcionar. Controle positivo do grupo —
+    # sem estes, um gate que recusa tudo passaria no teste, e é pior que o bug.
+    ("canceled", 200),
+    ("incomplete_expired", 200),
+    ("inactive", 200),
+    ("", 200),  # NULL não entra: a coluna é NOT NULL (default 'inactive')
+    ("status_novo_que_a_stripe_inventar", 200),
+])
+def test_trial_reset_gate_por_status_de_pagamento(panel_accounts, pay, esperado):
     _tag, uids = panel_accounts
     uid = uids["free"]
     h = _set_phone(uid, f"+5511{uid % 100000000:08d}")
@@ -878,8 +937,9 @@ def test_trial_reset_409_para_os_outros_status_vivos(panel_accounts, pay):
             )
         conn.commit()
     try:
-        assert _reset_trial(_admin_client(), uid).status_code == 409
-        assert _trial_lock_exists(h) is True
+        resp = _reset_trial(_admin_client(), uid)
+        assert resp.status_code == esperado, resp.text
+        assert _trial_lock_exists(h) is (esperado == 409)
     finally:
         _drop_locks(h)
 
@@ -908,12 +968,16 @@ def test_trial_reset_audita_sem_vazar_telefone_nem_hash(panel_accounts, monkeypa
         assert level == "warning"
         assert kwargs["source"] == "admin"
         assert kwargs["user_id"] == uid
-        assert kwargs["details"]["deleted"] == 1
-        blob = repr(kwargs["details"]) + message
-        assert phone not in blob
-        assert phone.lstrip("+") not in blob
-        assert h not in blob
-        assert "phone" not in repr(kwargs["details"]).lower()
+        # Lista BRANCA: procurar o telefone por substring é cego a formato
+        # (um espaço no meio do número passa batido). Chave nova qualquer, com
+        # qualquer conteúdo, derruba este teste e obriga a justificar.
+        detalhes = kwargs["details"]
+        assert set(detalhes) == {"admin", "deleted", "previous_started_at"}
+        assert isinstance(detalhes["admin"], str)
+        assert detalhes["deleted"] == 1
+        assert isinstance(detalhes["previous_started_at"], str)
+        # phone_hash é hex de HMAC, não tem variação de formato: substring serve.
+        assert h not in repr(detalhes) + message
     finally:
         _drop_locks(h)
 

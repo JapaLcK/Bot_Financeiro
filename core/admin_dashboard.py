@@ -754,6 +754,15 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
 _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 
 
+# Status crus de last_payment_status (o webhook grava o do Stripe sem traduzir,
+# db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
+# 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
+# terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
+# regra decide o rótulo do painel e o gate de /trial-reset (§0.7).
+_PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
+_LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
+
+
 def _derive_account_status(row: dict, now: datetime) -> str:
     """Classifica a conta numa categoria única de assinatura.
 
@@ -782,7 +791,7 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         return "trial"
     if pay == "active":
         return "paying"
-    if pay in ("past_due", "unpaid", "incomplete"):
+    if pay in _PAST_DUE_PAYMENT_STATUSES:
         return "past_due"
     if pay in ("canceled", "incomplete_expired"):
         return "canceled"
@@ -1673,7 +1682,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if acc is None:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         pay = (acc.get("last_payment_status") or "").strip().lower()
-        if pay in {"trialing", "active", "past_due"}:
+        if pay in _LIVE_PAYMENT_STATUSES:
             raise HTTPException(
                 status_code=409,
                 detail=(
