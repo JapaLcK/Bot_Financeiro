@@ -173,6 +173,10 @@
 
   @media (max-width: 900px) {
     .cmp-hint { display: flex; }
+    /* O media query não sabe se a tabela rola: com 4 colunas ela cabe a partir
+       de ~610px, e a dica pedia pra arrastar o que não arrasta. Quem sabe é o
+       updateCmpFade, que já mede o overflow pros véus das bordas. */
+    .cmp-hint.cmp-hint-off { display: none; }
     .cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     /* 154px da coluna de recursos + 4 x 102px dos planos. */
     .cmp-table { min-width: 562px; font-size: .82rem; }
@@ -640,6 +644,8 @@ function updateCmpFade() {
   const max = sc.scrollWidth - sc.clientWidth;
   wrap.classList.toggle("fade-left", sc.scrollLeft > 2);
   wrap.classList.toggle("fade-right", max > 2 && sc.scrollLeft < max - 2);
+  // Mesmo `max > 2` dos véus: a dica só aparece se houver o que arrastar.
+  document.querySelector(".cmp-hint")?.classList.toggle("cmp-hint-off", max <= 2);
 }
 (function initCmpFade() {
   const sc = document.getElementById("cmp-scroll");

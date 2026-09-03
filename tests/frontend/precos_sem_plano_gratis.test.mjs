@@ -362,3 +362,38 @@ test("plus_available:false marca EXATAMENTE os 2 botões do Plus como indisponí
   ]);
   await page.close();
 });
+
+// ── a dica de arrastar só aparece onde a tabela realmente rola ───────────────
+// O media query de 900px não sabe medir overflow. Com 4 colunas a tabela cabe
+// a partir de ~610px, então entre ~610 e 900 a página pedia pra arrastar o que
+// não arrasta — faixa que ESTE PR alargou (antes o corte era ~712px). Quem sabe
+// é o updateCmpFade, que já mede o mesmo `max > 2` dos véus das bordas.
+//
+// O par é obrigatório: sem o caso de 390px, a asserção passaria numa página que
+// escondeu a dica pra sempre, que é pior que mostrá-la demais.
+for (const [rotulo, largura, deveAparecer] of [
+  ["390px: a tabela rola, a dica aparece", 390, true],
+  ["800px: a tabela cabe, a dica some", 800, false],
+]) {
+  test(`dica de arrastar — ${rotulo}`, async () => {
+    const { page } = await abrirPrecos({ viewport: { width: largura, height: 844 } });
+
+    const { oculto, visivel } = await page.evaluate(() => {
+      const sc = document.getElementById("cmp-scroll");
+      const hint = document.querySelector(".cmp-hint");
+      return {
+        oculto: sc.scrollWidth - sc.clientWidth,
+        // getComputedStyle, não a classe: é o que o usuário enxerga.
+        visivel: getComputedStyle(hint).display !== "none",
+      };
+    });
+
+    // Âncora do próprio caso: se o overflow não for o esperado, a asserção de
+    // baixo mediria outra coisa e passaria por acidente.
+    assert.equal(oculto > 2, deveAparecer,
+      `${largura}px devia ${deveAparecer ? "" : "não "}ter overflow e tem ${oculto}px`);
+    assert.equal(visivel, deveAparecer,
+      `${largura}px: overflow=${oculto}px mas a dica está ${visivel ? "visível" : "escondida"}`);
+    await page.close();
+  });
+}
