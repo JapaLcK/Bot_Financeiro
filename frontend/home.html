@@ -1650,18 +1650,24 @@ window.pigModalKeys && pigModalKeys("mfa-onboarding-overlay", function () { mfaO
 
 async function _markMfaOnboardingSeen() {
   try {
-    await fetch(`${API}/auth/mfa/onboarding-seen`, {
+    const r = await fetch(`${API}/auth/mfa/onboarding-seen`, {
       method: "POST",
       credentials: "same-origin",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
     });
+    if (!r.ok) console.warn("[mfa-onboarding] servidor recusou marcar como visto", r.status);
+    // `fetch` não lança em 4xx/5xx: sem esta linha o "Agora não" — hoje o único
+    // caminho que queima o convite — falha aberto e sem sinal nenhum.
   } catch (e) {
     console.warn("[mfa-onboarding] erro ao marcar como visto", e);
   }
 }
 
 async function mfaOnboardingActivate() {
-  await _markMfaOnboardingSeen();
+  // Não marca como visto de propósito: marcar no CLIQUE puniria quem abandona o
+  // setup no meio, que perderia o convite sem ter ativado nada. Quem conclui é
+  // marcado na ATIVAÇÃO, dentro de `verify_and_enable` (db/mfa.py) — e não por
+  // `not mfa_enabled`, que desfaz sozinho quando a pessoa desliga o MFA.
   window.location.href = "/settings?view=security&autoOpenMfa=1";
 }
 
@@ -1726,8 +1732,8 @@ Object.assign(window, {
     <h2>Proteja sua conta com 2 etapas</h2>
     <p>
       Adicione uma camada extra de segurança usando um app autenticador
-      (Google Authenticator, Authy, 1Password). Mesmo que sua senha vaze,
-      ninguém entra sem o código do seu celular.
+      (Google Authenticator, Authy, 1Password). Mesmo que alguém descubra
+      seus dados de acesso, ninguém entra sem o código do seu celular.
     </p>
     <ul class="mfa-ob-list">
       <li>Setup leva 1 minuto</li>
