@@ -284,7 +284,8 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
 | Resend | e-mail transacional e de ciclo de vida | `core/services/email_service.py` |
 | APNs | push do app iOS | `core/services/push_service.py` |
-| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_meta_pixel`, `core/services/meta_capi.py` |
+| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_tracking`, `core/services/meta_capi.py` |
+| Google Analytics 4 | medição de funil (mesmas páginas do pixel) | `ga4_snippet`/`inject_tracking`; eventos ao lado de cada `fbq` |
 
 O webhook do WhatsApp **verifica assinatura** (`X-Hub-Signature-256` com
 `WA_APP_SECRET`) e se recusa a subir em `APP_ENV=prod` sem o segredo.

@@ -20,7 +20,7 @@ from frontend.routes.shared import (
     gate_plan_selection,
     gate_pro_page,
     html_file,
-    inject_meta_pixel,
+    inject_tracking,
     limiter,
     public_site_url,
     stamp_asset_versions,
@@ -320,8 +320,8 @@ async def serve_suporte():
     template = (FRONTEND_DIR / "suporte.html").read_text(encoding="utf-8")
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
-    # /suporte é público → recebe o Meta Pixel como as demais páginas públicas.
-    page = stamp_asset_versions(inject_meta_pixel(template.replace("{{FAQ}}", faq)))
+    # /suporte é público → recebe pixel e GA4 como as demais páginas públicas.
+    page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq)))
     return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})

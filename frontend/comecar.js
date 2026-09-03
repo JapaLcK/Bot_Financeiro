@@ -268,7 +268,12 @@
       if (window.fbq && state.userId) {
         window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
       }
-    } catch (_) { /* pixel nunca pode quebrar o fluxo */ }
+      // GA4: evento próprio pelo mesmo motivo do parágrafo acima — `sign_up` já
+      // saiu no cadastro, e reusar aqui contaria a mesma pessoa duas vezes.
+      if (window.gtag && state.userId) {
+        window.gtag("event", "onboarding_complete", { step: state.step });
+      }
+    } catch (_) { /* rastreio nunca pode quebrar o fluxo */ }
   }
 
   /* ─── Passo 2: dinheiro ───────────────────────────────────────────────── */

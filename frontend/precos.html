@@ -696,6 +696,17 @@ const PLAN_PRICES = {
   pro:       { monthly: "R$ 49,90/mês", annual: "R$ 499/ano" },
 };
 
+/* Valor numérico do plano pros eventos do GA4 (`value`/`price`), lido do
+   PLAN_PRICES acima em vez de uma segunda tabela: preço só é editado num lugar,
+   e o que o GA4 registra é o mesmo que o usuário viu na tela.
+   "R$ 19,90/mês" → 19.9 · "R$ 199/ano" → 199 · desconhecido → 0. */
+function planValue(plan, cycle) {
+  const label = (PLAN_PRICES[plan] || {})[cycle === "annual" ? "annual" : "monthly"];
+  if (!label) return 0;
+  const n = Number(label.replace(/[^\d,]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
 function fmtBrDate(iso) {
   if (!iso) return "a data da renovação";
   const [y, m, d] = iso.split("-");
@@ -940,6 +951,17 @@ async function startCheckout(interval, btn, plan) {
     if (data && data.checkout_url) {
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
+      // GA4: mesmo momento, nome recomendado (alimenta o funil de compra).
+      // O valor sai do PLAN_PRICES que a própria página já exibe — nada de uma
+      // segunda tabela de preços aqui pra divergir da primeira.
+      if (window.gtag) {
+        gtag("event", "begin_checkout", {
+          currency: "BRL",
+          value: planValue(plan, interval),
+          items: [{ item_id: plan || "", item_name: PLAN_NAMES[plan] || plan || "",
+                    item_category: interval || "" }],
+        });
+      }
       window.location.href = data.checkout_url;
     } else {
       showToast("Resposta inesperada do servidor.", "err");
@@ -956,6 +978,19 @@ async function startCheckout(interval, btn, plan) {
 // Meta Ads: visualização da página de planos → público de remarketing
 // "olhou o preço mas não assinou".
 if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
+// GA4: mesma visualização, nome recomendado. O ciclo é o que está selecionado
+// AGORA (o segmented control já rodou acima), então dá pra comparar quem olha
+// mensal com quem olha anual.
+if (window.gtag) {
+  gtag("event", "view_item_list", {
+    item_list_id: "precos",
+    item_list_name: "Planos",
+    items: Object.keys(PLAN_PRICES).map(p => ({
+      item_id: p, item_name: PLAN_NAMES[p] || p,
+      item_category: currentCycle, price: planValue(p, currentCycle),
+    })),
+  });
+}
 </script>
   <script src="/nav-auth.js?v=7" defer></script>
 </body>

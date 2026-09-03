@@ -58,6 +58,13 @@ DASHBOARD_COOKIE_NAME = "dashboard_token"
 # Vazio em dev/staging → nenhum pixel é injetado (site limpo, sem rastreio).
 META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
 
+# Google Analytics 4 — mesmo alcance do pixel (ver `html_file`): páginas
+# públicas + /home, nunca as telas logadas nem a página de erro.
+# O ID vem chumbado porque ele é público de qualquer jeito (sai no fonte de toda
+# página); a env existe para DESLIGAR — `GA4_MEASUREMENT_ID=` vazio em dev deixa
+# o site sem rastreio, como o pixel já fazia.
+GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
+
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -89,12 +96,44 @@ def meta_pixel_snippet() -> str:
     )
 
 
-def inject_meta_pixel(html_text: str) -> str:
-    """Insere o Meta Pixel imediatamente antes de </head> (o mais alto possível).
+def ga4_snippet() -> str:
+    """Tag base do GA4 (gtag.js). Vazia quando GA4_MEASUREMENT_ID não está setado.
 
-    No-op quando não há pixel configurado ou a página não tem </head>.
+    O `config` já dispara o `page_view` sozinho; os eventos de funil
+    (`begin_checkout`, `sign_up`, `purchase`…) são disparados pelas páginas, ao
+    lado do `fbq` correspondente — a lista mora no `docs/CLAUDE.md`.
+
+    `googletagmanager.com` precisa estar no `script-src` da CSP
+    (`_SECURITY_HEADERS`, finance_bot_websocket_custom.py) ou isto é bloqueado
+    sem erro visível fora do console.
     """
-    snippet = meta_pixel_snippet()
+    if not GA4_MEASUREMENT_ID:
+        return ""
+    mid = GA4_MEASUREMENT_ID
+    return (
+        "<!-- Google Analytics (GA4) -->\n"
+        f'<script async src="https://www.googletagmanager.com/gtag/js?id={mid}"></script>\n'
+        "<script>\n"
+        "window.dataLayer = window.dataLayer || [];\n"
+        "function gtag(){dataLayer.push(arguments);}\n"
+        "gtag('js', new Date());\n"
+        f"gtag('config', '{mid}');\n"
+        "</script>\n"
+        "<!-- End Google Analytics -->\n"
+    )
+
+
+def inject_tracking(html_text: str) -> str:
+    """Insere Meta Pixel + GA4 imediatamente antes de </head> (o mais alto possível).
+
+    Os dois entram pelo MESMO ponto de propósito: enquanto o GA4 morava solto no
+    <head> da index.html, ele existia só na landing — e os eventos de funil
+    disparam na /precos, /cadastro e /home. Página nova nasce coberta pelos dois
+    ou por nenhum; não há terceira opção para esquecer.
+
+    No-op para o que não estiver configurado, ou se a página não tiver </head>.
+    """
+    snippet = meta_pixel_snippet() + ga4_snippet()
     if not snippet:
         return html_text
     idx = html_text.lower().find("</head>")
@@ -149,13 +188,14 @@ def stamp_asset_versions(html_text: str) -> str:
 def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
     """Serve um .html do frontend com cache desligado.
 
-    Com `pixel=True` (padrão) e META_PIXEL_ID setado, injeta o Meta Pixel no
-    <head>. As páginas da área logada (dashboard, settings, onboarding) passam
-    `pixel=False` — o rastreio de marketing fica só nas páginas públicas.
+    Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
+    estiver configurado. As páginas da área logada (dashboard, settings,
+    onboarding) passam `pixel=False`: o rastreio fica nas páginas públicas e na
+    /home, que é onde a volta do checkout (?upgrade=success) dispara a conversão.
     """
     text = path.read_text(encoding="utf-8")
-    if pixel and META_PIXEL_ID:
-        text = inject_meta_pixel(text)
+    if pixel:
+        text = inject_tracking(text)
     response = Response(content=stamp_asset_versions(text),
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"

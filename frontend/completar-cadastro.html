@@ -117,6 +117,8 @@ document.getElementById("signup-form").addEventListener("submit", async function
     // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
     // server-side (CAPI) pro Meta deduplicar.
     if (window.fbq && data.user_id) { fbq("track", "CompleteRegistration", {}, { eventID: "signup_" + data.user_id }); }
+    // GA4: mesma conversão, nome recomendado. `method` separa e-mail de Google.
+    if (window.gtag && data.user_id) { gtag("event", "sign_up", { method: "google" }); }
     window.location.replace(data.dashboard_url || "/home");
   } catch (err) { showError("Erro de conexão. Tente novamente."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; }
 });
