@@ -26,9 +26,13 @@ from frontend.routes import shared
 RAIZ = Path(__file__).resolve().parent.parent
 FRONTEND = RAIZ / "frontend"
 
-# `gtag("event", ...)` e `gtag('event', ...)`. O `config` do snippet base não
-# casa aqui de propósito: quem precisa da tag é quem dispara evento.
-_CHAMA_EVENTO = re.compile(r"""gtag\(\s*["']event["']""")
+# Os DOIS jeitos de disparar evento neste repositório: `gtag("event", ...)` e o
+# `pbTrack(...)` (que é o mesmo evento, esperando o envio antes de navegar — ver
+# o snippet). O `config` do snippet base não casa aqui de propósito: quem precisa
+# da tag é quem dispara evento.
+# Contar só o `gtag("event"` deixaria de fora justamente as páginas que passaram
+# a usar pbTrack — a varredura encolheria sem ninguém notar.
+_CHAMA_EVENTO = re.compile(r"""gtag\(\s*["']event["']|\bpbTrack\(""")
 
 _ID_FALSO = "G-TESTE00000"
 
@@ -98,7 +102,7 @@ def test_comecar_html_recebe_a_tag(monkeypatch):
     """O `onboarding_complete` mora no `comecar.js`, que a varredura acima não
     alcança (ela lê HTML). A página que carrega esse JS é esta."""
     monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", _ID_FALSO)
-    assert 'gtag("event", "onboarding_complete"' in (
+    assert 'pbTrack("onboarding_complete"' in (
         FRONTEND / "comecar.js").read_text(encoding="utf-8")
     assert _TAG_BASE in shared.html_file(FRONTEND / "comecar.html").body.decode()
 
@@ -131,12 +135,13 @@ def test_paginas_do_funil_nao_sao_servidas_com_pixel_false():
     assert not conflito, f"páginas disparam evento mas são servidas sem rastreio: {conflito}"
 
 
-def _config_do_snippet(url: str) -> dict:
-    """Roda o snippet REAL (saída de `ga4_snippet`) no node, com `location`
-    falsa, e devolve o 3º argumento do `gtag('config', ...)`.
+def _rodar_snippet(url: str, referrer: str = "", depois: str = "") -> dict:
+    """Executa o snippet REAL (saída de `ga4_snippet`) no node, com `location` e
+    `document.referrer` falsos, e devolve o que o programa imprimir.
 
-    Executa o código em vez de procurar texto nele: o que interessa é o que o
-    navegador manda pro Google, não o que está escrito no Python.
+    Executa em vez de procurar texto: o que interessa é o que o navegador manda
+    pro Google, não o que está escrito no Python. `setTimeout` é substituído por
+    uma fila — assim o teto de 1s do `pbTrack` é disparado à mão, sem esperar.
     """
     node = shutil.which("node")
     if not node:
@@ -145,13 +150,17 @@ def _config_do_snippet(url: str) -> dict:
     programa = (
         "global.window = global;\n"
         f"global.location = {{ href: {json.dumps(url)} }};\n"
+        f"global.document = {{ referrer: {json.dumps(referrer)} }};\n"
+        "const agendados = [];\n"
+        "global.setTimeout = function(fn, ms){ agendados.push({fn: fn, ms: ms}); return 0; };\n"
         f"{inline}\n"
-        "const cfg = dataLayer.map(a => Array.from(a)).filter(a => a[0] === 'config').pop();\n"
-        "console.log(JSON.stringify(cfg));\n"
+        "const config = dataLayer.map(a => Array.from(a)).filter(a => a[0] === 'config').pop();\n"
+        "const saida = { config: config ? config[2] : null };\n"
+        f"{depois or 'console.log(JSON.stringify(saida));'}\n"
     )
     saida = subprocess.run([node, "-e", programa], capture_output=True, text=True, timeout=30)
     assert saida.returncode == 0, saida.stderr
-    return json.loads(saida.stdout)[2]
+    return json.loads(saida.stdout)
 
 
 def test_page_view_nao_leva_token_nem_id_de_transacao(monkeypatch):
@@ -161,8 +170,8 @@ def test_page_view_nao_leva_token_nem_id_de_transacao(monkeypatch):
     inteiros pro Google, e cada compra viraria uma "página" diferente."""
     monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", _ID_FALSO)
 
-    cfg = _config_do_snippet(
-        "https://pigbankai.com/home?upgrade=success&sid=cs_test_123&ev=purchase&pl=plus")
+    cfg = _rodar_snippet(
+        "https://pigbankai.com/home?upgrade=success&sid=cs_test_123&ev=purchase&pl=plus")["config"]
     assert "cs_test_123" not in cfg["page_location"]
     assert "sid=" not in cfg["page_location"]
     # O resto da query SOBREVIVE: sem isto, a limpeza podia estar apagando tudo
@@ -170,12 +179,79 @@ def test_page_view_nao_leva_token_nem_id_de_transacao(monkeypatch):
     assert "upgrade=success" in cfg["page_location"]
     assert "ev=purchase" in cfg["page_location"]
 
-    cfg = _config_do_snippet("https://pigbankai.com/completar-cadastro?token=SEGREDO-123")
+    cfg = _rodar_snippet("https://pigbankai.com/completar-cadastro?token=SEGREDO-123")["config"]
     assert "SEGREDO-123" not in cfg["page_location"]
 
     # Página sem query nenhuma continua com a URL inteira.
-    cfg = _config_do_snippet("https://pigbankai.com/precos")
+    cfg = _rodar_snippet("https://pigbankai.com/precos")["config"]
     assert cfg["page_location"] == "https://pigbankai.com/precos"
+
+
+def test_referrer_tambem_e_limpo(monkeypatch):
+    """A outra ponta do mesmo vazamento: sair de `/completar-cadastro?token=…`
+    (Cancelar, Termos, Privacidade) põe a URL de origem INTEIRA no
+    `document.referrer`, e o GA4 tira o `page_referrer` dali. Limpar só o
+    `page_location` deixava o token sair mesmo assim, pela página seguinte."""
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", _ID_FALSO)
+
+    cfg = _rodar_snippet(
+        "https://pigbankai.com/termos",
+        referrer="https://pigbankai.com/completar-cadastro?token=SEGREDO-123",
+    )["config"]
+    assert "SEGREDO-123" not in json.dumps(cfg)
+    assert cfg["page_referrer"].startswith("https://pigbankai.com/completar-cadastro")
+
+    # Sem referrer (visita direta) o campo simplesmente não vai.
+    cfg = _rodar_snippet("https://pigbankai.com/precos")["config"]
+    assert "page_referrer" not in cfg
+
+
+def test_pbtrack_navega_mesmo_quando_o_gtag_js_nao_responde(monkeypatch):
+    """O caso que este helper existe para resolver: `gtag` já está definido pelo
+    snippet, mas o gtag.js ainda não carregou, então o `event_callback` NUNCA é
+    chamado. Sem o teto, o usuário ficaria preso na página; com ele, navega em 1s.
+
+    E o outro lado: quando o gtag.js responde, `depois` roda UMA vez só — o teto
+    não pode disparar uma segunda navegação."""
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", _ID_FALSO)
+
+    programa = """
+    // (1) gtag.js NÃO carregou: o stub do snippet só empilha no dataLayer.
+    let semResposta = 0;
+    pbTrack('begin_checkout', { value: 9.9 }, function(){ semResposta++; });
+    const antesDoTeto = semResposta;
+    const tetoMs = agendados[agendados.length - 1].ms;
+    agendados.pop().fn();                       // o teto de segurança
+    const depoisDoTeto = semResposta;
+
+    // (2) gtag.js carregou e chama o callback.
+    let comResposta = 0;
+    pbTrack('sign_up', { method: 'email' }, function(){ comResposta++; });
+    const evento = dataLayer.map(a => Array.from(a)).filter(a => a[0] === 'event').pop();
+    evento[2].event_callback();
+    const aposCallback = comResposta;
+    agendados.pop().fn();                       // o teto ainda dispara depois
+    const aposTeto = comResposta;
+
+    saida.pb = { antesDoTeto, depoisDoTeto, tetoMs, aposCallback, aposTeto,
+                 params: evento[2], nome: evento[1] };
+    console.log(JSON.stringify(saida));
+    """
+    r = _rodar_snippet("https://pigbankai.com/precos", depois=programa)["pb"]
+
+    # (1) sem resposta do gtag.js, quem navega é o teto — e ele existe
+    assert r["antesDoTeto"] == 0
+    assert r["depoisDoTeto"] == 1
+    assert r["tetoMs"] <= 1000, "teto longo demais trava o usuário na página"
+
+    # (2) com resposta, navega no callback e o teto NÃO repete
+    assert r["aposCallback"] == 1
+    assert r["aposTeto"] == 1
+
+    # os parâmetros do chamador sobrevivem ao empacotamento
+    assert r["nome"] == "sign_up"
+    assert r["params"]["method"] == "email"
+    assert r["params"]["event_timeout"] <= 1000
 
 
 def test_csp_libera_o_host_do_gtag():

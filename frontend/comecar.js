@@ -248,7 +248,16 @@
   async function finish() {
     firePixel();
     await persist({ step: TOTAL_STEPS, completed: true });
-    window.location.replace("/home");
+    // O evento do GA4 sai daqui, e não do firePixel, porque quem navega é esta
+    // função: `pbTrack` espera o envio antes do replace (ver o snippet em
+    // frontend/routes/shared.py). O `await` acima dá alguma folga, mas não é
+    // garantia — gtag.js ainda carregando perde o evento do mesmo jeito.
+    var irPraHome = function () { window.location.replace("/home"); };
+    if (window.pbTrack && state.userId) {
+      window.pbTrack("onboarding_complete", { step: state.step }, irPraHome);
+    } else {
+      irPraHome();
+    }
   }
 
   async function skipAll() {
@@ -268,11 +277,8 @@
       if (window.fbq && state.userId) {
         window.fbq("trackCustom", "OnboardingComplete", {}, { eventID: "onb_" + state.userId });
       }
-      // GA4: evento próprio pelo mesmo motivo do parágrafo acima — `sign_up` já
-      // saiu no cadastro, e reusar aqui contaria a mesma pessoa duas vezes.
-      if (window.gtag && state.userId) {
-        window.gtag("event", "onboarding_complete", { step: state.step });
-      }
+      // O par no GA4 (`onboarding_complete`, evento próprio pelo mesmo motivo do
+      // parágrafo acima) sai no `finish`, que é quem navega logo depois.
     } catch (_) { /* rastreio nunca pode quebrar o fluxo */ }
   }
 
