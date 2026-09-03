@@ -3,18 +3,21 @@
 A mina é o `_db_pool_lock`: um `asyncio.Lock()` de nível de módulo, criado no
 import. `asyncio.Lock` só resolve o event loop no `acquire` CONTENDIDO
 (`asyncio.mixins._LoopBoundMixin._get_loop`) e a partir daí fica preso a ele
-PARA SEMPRE — quem zerar só `shared._db_pool` e depois disparar concorrência
-de outro loop pendura o processo, não falha. Foi o que travou a suíte no #211;
-lá o conserto DESVIOU da mina (abrir o pool antes do gather), aqui ela é
-reproduzida de frente contra `shared.reset_db_pool()`.
+PARA SEMPRE. Quem zerar só `shared._db_pool` e depois disparar concorrência de
+outro loop leva `RuntimeError: ... is bound to a different event loop` DENTRO
+do gather — e a pendura vem daí, de segunda ordem: a corrotina irmã fica órfã
+em `pool.open()`, o pool aberto nunca chega a `_db_pool` e o `asyncio.run`
+seguinte trava em `asyncio.runners._cancel_all_tasks`. Foi o que travou a suíte
+no #211; lá o conserto DESVIOU da mina (abrir o pool antes do gather), aqui ela
+é reproduzida de frente contra `shared.reset_db_pool()`.
 
 Reproduz direto, sem depender de arranjo de arquivo: no #211, 6 arquivos em
 ordem inversa e sem o fix ainda davam 109 passed — arranjo não discrimina.
 """
 
 import asyncio
-import faulthandler
 import os
+import signal
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -45,24 +48,35 @@ async def _duas_conexoes_em_gather():
             await shared._db_pool.close()
 
 
+def _pendurou(*_):
+    """Handler do SIGALRM: transforma a pendura em falha deste teste só."""
+    raise TimeoutError("pendurou: o _db_pool_lock voltou a ficar preso a loop morto")
+
+
 def test_o_pool_async_aguenta_dois_event_loops_com_gather():
     """Dois `asyncio.run`, cada um com o pool zerado e DUAS conexões em gather.
 
     CONTROLE NEGATIVO: apague `_db_pool_lock = asyncio.Lock()` de
-    `shared.reset_db_pool` e este caso passa no loop 1 e PENDURA no loop 2 —
-    dump do faulthandler em `asyncio.runners._cancel_all_tasks`.
+    `shared.reset_db_pool` e este caso passa no loop 1 e PENDURA no loop 2, em
+    `asyncio.runners._cancel_all_tasks`. MEDIDO em 03/09/2026: com o controle
+    armado, `1 failed in 30,7s` — e o arquivo SEGUINTE ainda roda e reporta.
     """
     anterior = shared.reset_db_pool()
-    faulthandler.dump_traceback_later(30, exit=True)   # ponytail: teto — se o
-    # conserto regredir isto MATA o processo do pytest em 30s; sem isto o modo
-    # de falha é travar o runner do GitHub por 6h (foi o do #211). O dump em si
-    # some sob a captura de fd do pytest (ele morre com o processo); para lê-lo,
-    # rode com `-s` — MEDIDO nas duas formas com o controle negativo armado.
+    # SIGALRM, e não `faulthandler.dump_traceback_later(30, exit=True)`: o
+    # `exit=True` MATA o processo do pytest e leva junto o relatório dos outros
+    # 5578 testes da suíte. O sinal levanta TimeoutError na main thread e falha
+    # SÓ este caso — MEDIDO com o controle negativo armado: `1 failed, 6 passed
+    # in 31,1s`, com o arquivo seguinte rodando e reportando normalmente.
+    # 30s: o caso verde leva 0,55s. Este watchdog cobre só este teste; a pendura
+    # de QUALQUER outro é do `timeout-minutes` do job `pytest`
+    # (.github/workflows/tests.yml), que fecha a categoria.
+    signal.signal(signal.SIGALRM, _pendurou)
+    signal.alarm(30)
     try:
         for _ in range(2):
             assert asyncio.run(_duas_conexoes_em_gather()) == [1, 1]
     finally:
-        faulthandler.cancel_dump_traceback_later()
+        signal.alarm(0)
         # `reset_db_pool` de novo antes de restaurar: o gather do último loop
         # prendeu o lock a um loop que acabou de morrer, e deixá-lo no módulo
         # seria plantar aqui a mina que este caso existe para provar apagada.

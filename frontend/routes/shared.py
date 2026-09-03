@@ -552,11 +552,47 @@ def reset_db_pool() -> AsyncConnectionPool | None:
       quem ainda está no loop do pool fecha-o ANTES de o loop morrer.
     - recria o `_db_pool_lock`: `asyncio.Lock` só resolve o loop no `acquire`
       CONTENDIDO (`asyncio.mixins._LoopBoundMixin._get_loop`), e a partir daí
-      fica preso a ele PARA SEMPRE. Zerar só o pool deixa o lock velho: a
-      próxima contenção, vinda de outro loop, PENDURA o processo.
+      fica preso a ele PARA SEMPRE. Zerar só o pool deixa o lock velho, e a
+      próxima contenção vinda de outro loop levanta `RuntimeError: <asyncio.
+      locks.Lock ...> is bound to a different event loop` — MEDIDO. A pendura
+      é de SEGUNDA ordem, não da exceção: o `gather` propaga o RuntimeError, a
+      corrotina irmã fica órfã dentro de `pool.open()`, o pool aberto nunca
+      chega a `_db_pool` (logo ninguém o fecha) e o `asyncio.run` seguinte
+      trava em `asyncio.runners._cancel_all_tasks`.
+
+    ABANDONAR NÃO É DE GRAÇA — vaza uma conexão por pool (`min_size=1`), e o
+    vazamento é LINEAR quando o chamador GUARDA o retorno. MEDIDO em
+    03/09/2026, ciclos de `reset_db_pool()` + gather de duas queries:
+
+        retorno descartado (`reset_db_pool()`)   ciclo 10/20/30/40 -> +2 +2 +2 +2
+        retorno guardado (`x = reset_db_pool()`) ciclo 10/20/30/40 -> +11 +21 +31 +41
+
+    Na suíte não morde (pico de 5 conexões, amostrado 80x numa rodada cheia)
+    porque quem guarda a referência guarda UMA por vez. Guardar N pools segura
+    N conexões: se algum dia um chamador acumular, feche o que ele guardou.
 
     Precondição: ninguém está segurando o `_db_pool_lock` neste instante —
     chame entre event loops, nunca com um `_get_db_pool` em voo.
+
+    O QUE ISTO FECHA, E O QUE NÃO FECHA. Fecha os call sites que CHAMAM
+    `reset_db_pool`. NÃO fecha a categoria: a mina segue armada em 4 arquivos
+    que fazem `asyncio.run(get_financial_data(...))` sem passar por aqui.
+    Sonda (`assert _db_pool_lock._loop is None` como último arquivo da rodada),
+    MEDIDA em 03/09/2026 na árvore SEM este conserto:
+
+        test_virada_de_mes / test_fuso_do_app        lock: None        pool: None
+        test_categoria_vazia_donut_e_lista           lock: loop MORTO  pool: aberto
+        test_category_launches_query                 lock: loop MORTO  pool: aberto
+        test_budget_category_accent                  lock: loop MORTO  pool: aberto
+        test_tipo_legado_no_dashboard                lock: loop MORTO  pool: aberto
+
+    Ninguém explode hoje porque esses 4 deixam `_db_pool` NÃO-NULO: o
+    early-return de `_get_db_pool` devolve o pool e nem toca no lock. A mina só
+    arma com `_db_pool is None` E lock preso — e o único caminho que zera o
+    pool é este, que desarma junto. Ou seja: o invariante vale por COINCIDÊNCIA
+    de duas condições, não por construção. Um teste futuro que zere o pool na
+    mão depois de um desses 4 reabre o buraco. O conserto por construção é
+    lock por loop (ou nenhum lock) em `_get_db_pool`, e é mudança de produção.
 
     Existe para a suíte. Em produção não há um único `asyncio.run` /
     `new_event_loop` / `run_until_complete` fora de `tests/` (medido), então
