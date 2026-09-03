@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 
 import requests
 
@@ -41,11 +42,37 @@ _REQUEST_TIMEOUT_SECONDS = 10.0
 
 _PIXEL_ID_ENV = "META_PIXEL_ID"
 _ACCESS_TOKEN_ENV = "META_PIXEL_ACCESS_TOKEN"
+# Código de teste do Events Manager ("Testar eventos"). Setado → os eventos deste
+# servidor aparecem lá em vez de irem pro relatório. NUNCA deixar setado em
+# produção: evento de teste não conta como conversão.
+_TEST_EVENT_CODE_ENV = "META_TEST_EVENT_CODE"
+
+# Cookies do pixel, no formato `fb.<subdominios>.<timestamp>.<id>`:
+#   _fbp — identifica o NAVEGADOR (o pixel cria em toda visita);
+#   _fbc — identifica o CLIQUE no anúncio (o pixel cria a partir do `fbclid` da
+#          URL de entrada). É ele que amarra a compra à campanha.
+# Sem os dois, o único identificador que sobe é o e-mail com hash — e a
+# qualidade da correspondência do Meta cai junto. Vão CRUS de propósito: ao
+# contrário do e-mail e do telefone, o Meta não aceita esses dois com hash.
+_FB_COOKIE_RE = re.compile(r"^fb\.[0-9]\.\d{10,20}\.[A-Za-z0-9_-]{1,400}$")
 
 
 def _sha256(value: str) -> str:
     """Hash exigido pelo Meta pros dados de contato (email, telefone, etc.)."""
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
+
+
+def sanitize_fb_cookie(raw: object) -> str | None:
+    """Cookie `_fbp`/`_fbc` do navegador → o próprio valor, ou None.
+
+    Fronteira de confiança: o valor vem do cliente e vai parar no metadata do
+    Stripe. Fora do formato do Meta é ruído — descartar é melhor que gravar, e
+    melhor que mandar pro Graph (que rejeitaria o evento inteiro).
+    """
+    if not isinstance(raw, str):
+        return None
+    valor = raw.strip()
+    return valor if _FB_COOKIE_RE.match(valor) else None
 
 
 def capi_configured() -> bool:
@@ -87,6 +114,8 @@ def send_event(
     value: float | None = None,
     currency: str = "BRL",
     email: str | None = None,
+    fbp: str | None = None,
+    fbc: str | None = None,
     event_source_url: str | None = None,
     action_source: str = "website",
 ) -> bool:
@@ -103,11 +132,18 @@ def send_event(
         return False
 
     # user_data precisa de ao menos um identificador pro Meta casar o evento.
-    user_data: dict[str, list[str]] = {}
+    # `em` vai com hash (exigência do Meta pra dado pessoal); `fbp`/`fbc` vão
+    # crus — são identificadores do próprio Meta, e com hash seriam ignorados.
+    user_data: dict = {}
     if email:
         user_data["em"] = [_sha256(email)]
+    if fbp:
+        user_data["fbp"] = fbp
+    if fbc:
+        user_data["fbc"] = fbc
     if not user_data:
-        logger.warning("[meta_capi] %s sem identificador (email) — pulando envio.", event_name)
+        logger.warning(
+            "[meta_capi] %s sem identificador (email/fbp/fbc) — pulando envio.", event_name)
         return False
 
     event: dict = {
@@ -125,12 +161,20 @@ def send_event(
     if event_source_url:
         event["event_source_url"] = event_source_url
 
+    corpo: dict = {"data": [event]}
+    # Com o código setado, o evento vai pra aba "Testar eventos" do Events
+    # Manager em vez do relatório — é o único jeito de validar o server-side
+    # sem esperar uma venda real (a aba de teste não enxerga o CAPI sozinha).
+    codigo_teste = (os.getenv(_TEST_EVENT_CODE_ENV) or "").strip()
+    if codigo_teste:
+        corpo["test_event_code"] = codigo_teste
+
     url = f"https://graph.facebook.com/{_GRAPH_VERSION}/{pixel_id}/events"
     try:
         resp = requests.post(
             url,
             params={"access_token": token},
-            json={"data": [event]},
+            json=corpo,
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         if 200 <= resp.status_code < 300:
