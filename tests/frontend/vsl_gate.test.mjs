@@ -18,7 +18,14 @@
  * /brand/vsl.mp4 não dar 404 e abrir o portão pelo `error` antes da troca.
  *
  * O grupo tem os dois controles do CLAUDE.md §3:
- *   · conserto — os 5 CTAs nascem travados, e o clique NÃO navega;
+ *   · conserto — os 6 CTAs nascem travados, e o clique NÃO navega;
+ *   · o rótulo do botão da VSL — "Assista ao vídeo para liberar" antes,
+ *     "COMECE JÁ" depois;
+ *   · SEM JavaScript o botão continua travado. É o caso que prova o `is-locked`
+ *     escrito no HTML: com JS ligado o `travar()` põe a classe de qualquer jeito,
+ *     então apagá-la do markup não muda nada que os outros casos vejam — e o
+ *     visitante sem JS ficaria com um "COMECE JÁ" rosa e pulsante que promete o
+ *     que a página não pode cumprir;
  *   · anti-pulo — arrastar pro fim volta pro ponto assistido e o portão
  *     continua fechado (é o caso que morre se o `seeking` sair);
  *   · falha ABERTA — vídeo em 404 libera. Portão que trava por defeito zera
@@ -103,7 +110,8 @@ const assistirAteOFim = page => page.evaluate(() => new Promise(ok => {
 test("os CTAs de /cadastro nascem travados, e o clique não navega", async () => {
   const { page, ctx } = await abrirLanding();
   const estados = await travados(page);
-  assert.equal(estados.length, 5, "a landing tem 5 CTAs de /cadastro");
+  assert.equal(estados.length, 6, "a landing tem 6 CTAs de /cadastro (5 + o botão da VSL)");
+  assert.match(await page.textContent("#vsl-cta"), /Assista ao vídeo/);
   assert.ok(estados.every(Boolean), "todo CTA de /cadastro nasce travado");
 
   // `force` porque o Playwright recusa clicar em [aria-disabled=true] por conta
@@ -144,6 +152,7 @@ test("assistindo até o fim, o cadastro abre — e o clique navega", async () =>
   await assistirAteOFim(page);
   assert.ok((await travados(page)).every(e => e === false), "assistiu e continuou travado");
   assert.match(await page.textContent("#vsl-status"), /liberado/);
+  assert.equal((await page.textContent("#vsl-cta")).trim(), "COMECE JÁ");
 
   await Promise.all([
     page.waitForURL(/\/cadastro$/, { timeout: 5000 }),
@@ -178,5 +187,24 @@ test("quem já tem conta não fica com os CTAs travados", async () => {
                "o nav-auth deveria ter reescrito todos os CTAs");
   // E não vira memória: quem sair da conta volta a ser visitante e reassiste.
   assert.equal(await page.evaluate(() => localStorage.getItem("pb_vsl_visto")), null);
+  // Trava o comportamento do NAV-AUTH, não o meu: ele faz `a.textContent = ...`,
+  // que destrói o <span> do rótulo (medido: `parentNode` vira null), então nenhuma
+  // mutação do vsl-gate muda esta linha. Ela fica porque, se o nav-auth um dia
+  // parar de reescrever o texto, o cliente existente passa a ver "COMECE JÁ"
+  // apontando pro /app — e este caso é o que avisa.
+  assert.equal(await page.textContent("#vsl-cta"), "Ir para o dashboard");
+  await ctx.close();
+});
+
+test("sem JavaScript o botão continua travado", async () => {
+  const ctx = await browser.newContext({ javaScriptEnabled: false });
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "domcontentloaded" });
+  const b = await page.$eval("#vsl-cta", el => ({
+    classe: el.className, aria: el.getAttribute("aria-disabled"), texto: el.textContent.trim(),
+  }));
+  assert.ok(b.classe.includes("is-locked"), `o botão veio destravado do servidor: ${b.classe}`);
+  assert.equal(b.aria, "true");
+  assert.match(b.texto, /Assista ao vídeo/);
   await ctx.close();
 });

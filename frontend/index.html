@@ -68,9 +68,37 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     box-shadow: 0 24px 60px rgba(255,45,142,.16);
   }
   .vsl-video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
-  .vsl-status { margin: 16px auto 0; text-align: center; color: var(--text-muted); font-size: .9rem; }
+  .vsl-cta-wrap { margin: 26px auto 0; text-align: center; }
+  /* Reusa .btn/.btn-primary/.btn-lg do site.css — aqui só o que faz ele gritar. */
+  .vsl-cta {
+    font-size: 1.18rem; letter-spacing: .04em; padding: 19px 52px;
+    border: 2px solid rgba(255,255,255,.92);
+    border-radius: var(--radius-pill);
+    box-shadow: 0 16px 44px rgba(255,45,142,.45);
+  }
+  /* Travado NÃO é o .btn.is-locked cinza-desbotado: um botão apagado lê-se como
+     quebrado. Aqui ele vira superfície de espera, com a razão escrita nele. */
+  .vsl-cta.is-locked {
+    background: var(--bg-elev); color: var(--text-muted);
+    border: 2px dashed var(--border-strong);
+    box-shadow: none; opacity: 1; filter: none;
+    font-size: .96rem; letter-spacing: 0; padding: 16px 34px;
+  }
+  .vsl-cta.is-locked:hover { transform: none; box-shadow: none; }
+  /* O pulso só existe no estado liberado — é o que puxa o olho pro clique. */
+  @keyframes vslPulso {
+    0%, 100% { box-shadow: 0 16px 44px rgba(255,45,142,.42), 0 0 0 0 rgba(255,45,142,.45); }
+    50%      { box-shadow: 0 16px 44px rgba(255,45,142,.58), 0 0 0 16px rgba(255,45,142,0); }
+  }
+  .vsl-cta:not(.is-locked) { animation: vslPulso 2.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .vsl-cta:not(.is-locked) { animation: none; } }
+  .vsl-status { margin: 14px auto 0; text-align: center; color: var(--text-muted); font-size: .88rem; min-height: 1.2em; }
   .vsl-status.is-ok { color: var(--pig-neon); }
   .vsl-status.is-alerta { color: var(--pig-pink); font-weight: 600; }
+  @media (max-width: 560px) {
+    .vsl-cta { font-size: 1.05rem; padding: 17px 34px; }
+    .vsl-cta.is-locked { padding: 15px 22px; font-size: .9rem; }
+  }
   /* Travado fica VISÍVEL e legível de propósito: CTA que some deixa a pessoa
      procurando o botão em vez de assistir ao vídeo. */
   .btn.is-locked { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
@@ -197,7 +225,16 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
                preload="metadata" poster="/brand/vsl-poster.jpg?v=1"
                src="/brand/vsl.mp4?v=1"></video>
       </div>
-      <p class="vsl-status" id="vsl-status" role="status">Assista ao vídeo para liberar o cadastro.</p>
+      <!-- É um <a href="/cadastro"> de verdade, e não um <button>: assim ele entra
+           sozinho no `alvos` do vsl-gate e no handler de clique, sem caso especial.
+           Nasce TRAVADO no HTML — se o JS não rodar, o que aparece é o convite a
+           assistir, nunca um botão morto. O rótulo vira "COMECE JÁ" ao liberar. -->
+      <div class="vsl-cta-wrap" data-reveal>
+        <a class="btn btn-primary btn-lg vsl-cta is-locked" id="vsl-cta"
+           href="/cadastro" aria-disabled="true"
+           ><span id="vsl-cta-txt">Assista ao vídeo para liberar</span></a>
+        <p class="vsl-status" id="vsl-status" role="status"></p>
+      </div>
     </section>
 
     <!-- ─── Faixa de valor ────────────────────────────────────────── -->
@@ -783,6 +820,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   (function () {
     var video  = document.getElementById("vsl-video");
     var status = document.getElementById("vsl-status");
+    var rotulo = document.getElementById("vsl-cta-txt");
     if (!video) return;
 
     var CHAVE = "pb_vsl_visto";
@@ -807,8 +845,15 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         a.classList.remove("is-locked");
         a.removeAttribute("aria-disabled");
       });
+      // Quem está logado NÃO recebe "COMECE JÁ": o nav-auth.js já escreveu
+      // "Ir para o dashboard" e o href aponta pro /app. Na prática ele também já
+      // destruiu este <span> (`a.textContent = ...` troca os filhos — medido:
+      // `parentNode` fica null), então a escrita cairia no vazio de qualquer
+      // jeito. A condição fica porque a regra tem de estar dita em algum lugar
+      // que não seja um efeito colateral de outro arquivo.
+      if (motivo !== "logado" && rotulo) rotulo.textContent = "COMECE JÁ";
       if (status) {
-        status.textContent = "Cadastro liberado. É só clicar em começar.";
+        status.textContent = "Cadastro liberado.";
         status.className = "vsl-status is-ok";
       }
       // Só "assistiu" vira memória. "erro" não: um tropeço de rede não pode
