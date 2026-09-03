@@ -560,16 +560,26 @@ def reset_db_pool() -> AsyncConnectionPool | None:
       chega a `_db_pool` (logo ninguém o fecha) e o `asyncio.run` seguinte
       trava em `asyncio.runners._cancel_all_tasks`.
 
-    ABANDONAR NÃO É DE GRAÇA — vaza uma conexão por pool (`min_size=1`), e o
-    vazamento é LINEAR quando o chamador GUARDA o retorno. MEDIDO em
-    03/09/2026, ciclos de `reset_db_pool()` + gather de duas queries:
+    ABANDONAR NÃO É DE GRAÇA — o pool abandonado segura o HIGH-WATER MARK de
+    conexões dele, não `min_size`. RE-MEDIDO em 03/09/2026 (a medição anterior
+    era o dobro de otimista e creditava o custo ao lugar errado), 40 ciclos,
+    delta de `pg_stat_activity`:
 
-        retorno descartado (`reset_db_pool()`)   ciclo 10/20/30/40 -> +2 +2 +2 +2
-        retorno guardado (`x = reset_db_pool()`) ciclo 10/20/30/40 -> +11 +21 +31 +41
+        retorno descartado (`reset_db_pool()`)      10/20/30/40 -> +2  +2  +2  +2
+        padrão de `_no_pool_do_dashboard`           10/20/30/40 -> +0  +0  +0  +0
+        retornos ACUMULADOS numa lista, 1 query     10/20/30/40 -> +11 +21 +31 +41
+        retornos ACUMULADOS numa lista, gather de 2 10/20/30/40 -> +20 +40 +60 +80
 
-    Na suíte não morde (pico de 5 conexões, amostrado 80x numa rodada cheia)
-    porque quem guarda a referência guarda UMA por vez. Guardar N pools segura
-    N conexões: se algum dia um chamador acumular, feche o que ele guardou.
+    Ligar o retorno a uma variável que morre no fim do ciclo NÃO vaza: o
+    `_no_pool_do_dashboard` mede ZERO porque o `finally` dele FECHA o pool
+    corrente — não porque "guarda uma por vez". A acumulação só aparece se
+    alguém segurar os pools num contêiner vivo, o que NENHUM call site faz.
+    E o custo por pool é o pico dele: com `gather` de duas queries são 2, não
+    1 — 80 conexões no ciclo 40, de `max_connections = 100`.
+
+    Na suíte cheia o pico é 11 (moda 8), amostrado 4704x. Confortável, mas o
+    número anterior (5, amostrado 80x) era grosso demais: os picos vivem ~2,5%
+    do tempo e passavam entre as amostras.
 
     Precondição, agora IMPOSTA pelo assert abaixo: ninguém está segurando o
     `_db_pool_lock` neste instante — chame entre event loops, nunca com um
