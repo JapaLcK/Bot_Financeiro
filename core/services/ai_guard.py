@@ -163,6 +163,49 @@ def _brl_to_cents(raw: str) -> int | None:
         return None
 
 
+# Campo numérico de tool que NÃO é dinheiro. Conjunto ESTRUTURAL e pequeno —
+# dia, data, contagem, hora, id —, ao contrário dos nomes de campo monetários,
+# que são abertos (`valor`, `amount`, `total`, `saldo`, `balance`, `limit`,
+# `credit_limit`, `receita`, `despesa`, `remaining`... medido em
+# `core/services/ai_chat/tools/`). Por isso a lista é de EXCLUSÃO: uma lista de
+# inclusão erraria em todo campo monetário novo, e errar pra "não sustentado"
+# vira lobo — o que faz o relatório deixar de ser lido.
+_CHAVE_NAO_MONETARIA_RE = re.compile(
+    r"(^|_)(id|seq|day|dia|dias|date|data|month|m[eê]s|year|ano|hour|hora|"
+    r"minute|minuto|count|qtd|quantidade|parcelas|start|end|inicio|fim)$",
+    re.IGNORECASE,
+)
+
+
+def _dinheiro_do_json(obj, out: set[int], chave: str = "") -> None:
+    """Valores monetários de um resultado de tool JÁ decodificado.
+
+    Número em JSON é INEQUÍVOCO — `1826.55` é mil oitocentos e vinte e seis e
+    cinquenta e cinco, ponto. A leitura dupla (que existe pro caso de a tool
+    escrever em BRL) transformava isso em 182.655 E 18.265.500 centavos, e um
+    `R$ 182.655,00` inventado — cem vezes o saldo — passava por sustentado.
+    Aqui o número vale pelo que é, e só a STRING passa pela leitura BRL."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _dinheiro_do_json(v, out, str(k))
+    elif isinstance(obj, list):
+        for v in obj:
+            _dinheiro_do_json(v, out, chave)
+    elif isinstance(obj, bool):
+        return
+    elif isinstance(obj, (int, float)):
+        if not _CHAVE_NAO_MONETARIA_RE.search(chave):
+            out.add(round(float(obj) * 100))
+    elif isinstance(obj, str):
+        if _CHAVE_NAO_MONETARIA_RE.search(chave):
+            return
+        limpo = _MASCARA_NAO_MONETARIA_RE.sub(" ", obj)
+        for m in _ANY_NUM_RE.finditer(limpo):
+            v = _brl_to_cents(m.group(0))
+            if v is not None:
+                out.add(v)
+
+
 def _evidence_cents(raw: str) -> set[int]:
     """Como a TOOL pode ter escrito: aceita as duas leituras de `1.234`
     (1234 reais e 1,234) porque não dá pra saber, e errar pra permissivo
@@ -255,6 +298,15 @@ def collect_evidence(tool_results: list[str],
         raw.update(m.group(0).upper() for m in _CLAIM_CODE_RE.finditer(chunk))
         # Dinheiro sai do texto SEM os IDs e códigos; ID e código saem do texto
         # original, logo abaixo.
+        # Resultado de tool que É JSON: lido por campo, sem leitura dupla.
+        if not e_do_usuario:
+            try:
+                _dinheiro_do_json(json.loads(chunk), cents)
+                _ids_from_json(json.loads(chunk), ids)
+                ids.update(int(m.group(1)) for m in _CLAIM_ID_RE.finditer(chunk))
+                continue
+            except (ValueError, TypeError):
+                pass  # não é JSON — cai no caminho permissivo abaixo
         limpo = _MASCARA_NAO_MONETARIA_RE.sub(" ", chunk)
         if e_do_usuario:
             limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", limpo)
@@ -344,11 +396,12 @@ if __name__ == "__main__":
     assert not id50.supported, "R$ 50,00 na evidência NÃO pode sustentar o #50"
     assert check("Apaguei o lançamento #1.", EV)[0].supported, "o #1 real tem que passar"
     assert check("Gastou R$ 50,00.", EV)[0].supported, "o valor real tem que passar"
-    # Teto conhecido do outro sentido, medido e aceito: um inteiro solto na
-    # evidência ainda sustenta o valor redondo correspondente. Não dá pra
-    # separar sem saber o nome do campo, e excluir inteiro do dinheiro
-    # reprovaria `"valor": 50` legítimo — cria lobo, que é pior.
-    assert check("Anotei R$ 1,00.", EV)[0].supported
+    # Este era um TETO DECLARADO: eu tinha escrito que `user_seq: 1` sustentar
+    # um `R$ 1,00` inventado não dava pra separar "sem saber o nome do campo".
+    # A leitura por campo, que entrou pra resolver outro achado, fechou o teto
+    # de graça — `user_seq` é campo de ID, então não entra no dinheiro.
+    # Lição: "não dá pra fazer" era "não dá pra fazer COM A ABORDAGEM QUE ESCOLHI".
+    assert not check("Anotei R$ 1,00.", EV)[0].supported
 
     # Data NÃO é ID: `2026-09-01` não pode sustentar `#9`, `#1` nem `#2026`.
     DATA = ['{"start_date": "2026-09-01", "end_date": "2026-09-30", "total": 263.35}']
@@ -426,6 +479,17 @@ if __name__ == "__main__":
     assert check("Anotei R$ 77,90.", [], user_text="gastei 77,90")[0].supported
     # a tool CONTINUA com a leitura dupla, que é onde a ambiguidade é real
     assert 779000 in collect_evidence(['{"valor": "7790"}'])[0]
+
+    # JSON de tool: número vale pelo que é, e campo não-monetário fica fora
+    assert collect_evidence(['{"saldo": 1826.55}'])[0] == {182655}
+    assert not check("Total: R$ 182.655,00", ['{"saldo": 1826.55}'])[0].supported
+    assert check("Total: R$ 1.826,55", ['{"saldo": 1826.55}'])[0].supported
+    CARD = ['{"name": "Nubank", "closing_day": 10, "due_day": 17, "credit_limit": 8000.0}']
+    assert collect_evidence(CARD)[0] == {800000}, collect_evidence(CARD)[0]
+    assert not check("Total: R$ 10,00", CARD)[0].supported, "dia de fechamento não é dinheiro"
+    assert check("Limite: R$ 8.000,00", CARD)[0].supported
+    # data ISO não injeta ano/mês/dia
+    assert collect_evidence(['{"start_date": "2026-09-01", "total": 263.35}'])[0] == {26335}
 
     # data, contagem de parcela e ano não são dinheiro
     for texto, inventado in [("quais contas vencem dia 20?", "R$ 20,00"),
