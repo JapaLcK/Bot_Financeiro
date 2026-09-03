@@ -2642,7 +2642,12 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
     # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
     try:
-        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
         if capi_configured():
             background_tasks.add_task(
                 send_event,
@@ -2650,6 +2655,10 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=body.email.strip().lower(),
+                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
+                # chega ao Meta sem o clique que o originou.
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
                 event_source_url=f"{DASHBOARD_URL}/cadastro",
             )
     except Exception as exc:
@@ -3836,7 +3845,12 @@ async def auth_google_complete_signup(
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
     # pixel do /completar-cadastro pro Meta deduplicar.
     try:
-        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
         if capi_configured():
             background_tasks.add_task(
                 send_event,
@@ -3844,6 +3858,8 @@ async def auth_google_complete_signup(
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=email,
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
                 event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
             )
     except Exception as exc:
@@ -3926,14 +3942,18 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
 
 
 async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
-                                     price_id: str, ga_client_id: str | None = None):
+                                     price_id: str, rastreio: dict[str, str] | None = None):
     """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
 
-    `ga_client_id` (já validado) entra no metadata da sessão e da assinatura pro
-    webhook conseguir mandar a compra pro GA4 na pessoa certa. Sessão REUTILIZADA
-    mantém o metadata de quando nasceu — o `_checkout_session_matches` não olha
-    este campo de propósito: recriar um checkout só porque o cookie do GA mudou
-    trocaria a URL que o usuário já tem aberta.
+    `rastreio` são os identificadores de anúncio já validados (`ga_client_id`,
+    `fbp`, `fbc`), lidos dos cookies no endpoint. Eles entram no metadata da
+    sessão e da assinatura porque é de lá que o webhook os lê pra mandar a compra
+    pro GA4 e pro Meta atribuída à pessoa — e à campanha — certa.
+
+    Sessão REUTILIZADA mantém o metadata de quando nasceu: o
+    `_checkout_session_matches` não olha estes campos de propósito, porque
+    recriar um checkout só porque um cookie mudou trocaria a URL que o usuário
+    já tem aberta.
     """
     from db import get_auth_user, set_stripe_customer
 
@@ -4084,8 +4104,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "plan": plan,
             "price_id": price_id,
         }
-        if ga_client_id:
-            metadata["ga_client_id"] = ga_client_id
+        metadata.update(rastreio or {})
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -4180,21 +4199,30 @@ async def billing_create_checkout(
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
-    # client_id do GA4 pro `purchase` do webhook cair na mesma pessoa que
-    # navegou. Sai do cookie `_ga`, que o navegador já manda neste POST — não do
-    # corpo: pedir pro JS ler e enviar era mais código na /precos e mais um campo
-    # de entrada pra validar, pelo mesmo dado. Ausente (visitante novo cujo
-    # gtag.js ainda não criou o cookie, ou bloqueado) → o webhook usa o
-    # `fallback_client_id` e a venda entra sem origem, nunca se perde.
+    # Identificadores de anúncio, todos lidos dos COOKIES que o navegador já
+    # manda neste POST — nenhum JS precisa lê-los e reenviá-los:
+    #   _ga  → client_id do GA4 (a compra cai na mesma pessoa que navegou);
+    #   _fbp → o navegador, pro Meta;
+    #   _fbc → o CLIQUE no anúncio, criado pelo pixel a partir do `fbclid` da URL
+    #          de entrada. É ele que amarra a compra à campanha.
+    # Cada um ausente (cookie bloqueado, pixel/gtag ainda carregando, visita
+    # orgânica sem fbclid) simplesmente não vai: o evento continua sendo enviado
+    # com o que houver, e o GA4 ainda tem o `fallback_client_id`.
     from core.services.ga4_mp import client_id_from_ga_cookie
-    ga_client_id = client_id_from_ga_cookie(request.cookies.get("_ga"))
+    from core.services.meta_capi import sanitize_fb_cookie
+    rastreio = {
+        "ga_client_id": client_id_from_ga_cookie(request.cookies.get("_ga")),
+        "fbp": sanitize_fb_cookie(request.cookies.get("_fbp")),
+        "fbc": sanitize_fb_cookie(request.cookies.get("_fbc")),
+    }
+    rastreio = {k: v for k, v in rastreio.items() if v}
 
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id, ga_client_id)
+                stripe, user_id, plan, interval, price_id, rastreio)
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
         # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
@@ -4605,6 +4633,21 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return valor
         return None
 
+    def _fb_ids(*objetos) -> tuple[str | None, str | None]:
+        """(`fbp`, `fbc`) do metadata do Stripe — os cookies do pixel gravados na
+        criação do checkout. São o que amarra a compra ao clique no anúncio; sem
+        eles o único identificador do evento é o e-mail com hash.
+
+        Assinatura criada antes desta versão não tem os campos: o evento vai com
+        o que houver, nunca deixa de ir.
+        """
+        for obj in objetos:
+            meta = _g(obj, "metadata", {})
+            fbp, fbc = _g(meta, "fbp"), _g(meta, "fbc")
+            if fbp or fbc:
+                return fbp, fbc
+        return None, None
+
     def _invoice_subscription_id(invoice) -> str | None:
         sub_id = _g(invoice, "subscription")
         if sub_id:
@@ -4693,6 +4736,20 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
+            # Uma linha dizendo o que este webhook DECIDIU sobre rastreio, antes
+            # de decidir. Sem ela, "não apareceu no Meta" não distinguia
+            # configuração ausente de envio recusado: os dois davam log nenhum, e
+            # foi onde uma investigação real empacou. Nunca pode quebrar o
+            # webhook, daí o try próprio.
+            try:
+                from core.services.ga4_mp import mp_configured as _mp_ok
+                from core.services.meta_capi import capi_configured as _capi_ok
+                print(f"[billing] rastreio checkout user={user_id} "
+                      f"status={sub_status} sid={_g(session, 'id')} "
+                      f"capi={_capi_ok()} ga4={_mp_ok()}")
+            except Exception as exc:
+                print(f"[billing] rastreio checkout: log falhou: {exc}")
+
             # Meta Conversions API — conversão server-side, deduplicada com o
             # pixel via event_id derivado da sessão. Trial → StartTrial; compra
             # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
@@ -4713,6 +4770,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
+                    _fbp, _fbc = _fb_ids(sub, session)
                     background_tasks.add_task(
                         send_event,
                         event_name=_ev_name,
@@ -4721,6 +4779,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         value=_value,
                         currency=_currency,
                         email=_capi_email,
+                        fbp=_fbp,
+                        fbc=_fbc,
                         event_source_url=f"{DASHBOARD_URL}/home",
                     )
             except Exception as exc:
@@ -4835,6 +4895,20 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 except Exception as exc:
                     print(f"[affiliates] comissao falhou user={user_id}: {exc}")
 
+                # O par do log do ramo de checkout: `billing_reason` é o que
+                # decide se esta fatura vira Purchase ou é pulada por já ter sido
+                # contada no checkout — sem ele no log, "pulou" e "falhou" são a
+                # mesma linha em branco.
+                try:
+                    from core.services.ga4_mp import mp_configured as _mp_ok
+                    from core.services.meta_capi import capi_configured as _capi_ok
+                    print(f"[billing] rastreio invoice user={user_id} "
+                          f"invoice={_g(invoice, 'id')} "
+                          f"reason={_g(invoice, 'billing_reason')} "
+                          f"capi={_capi_ok()} ga4={_mp_ok()}")
+                except Exception as exc:
+                    print(f"[billing] rastreio invoice: log falhou: {exc}")
+
                 # Meta Conversions API — Purchase da cobrança REAL (fim do trial
                 # e renovações), com o valor efetivamente pago. A primeira fatura
                 # da compra imediata (billing_reason=subscription_create) já virou
@@ -4848,6 +4922,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     if capi_configured() and _inv_id and _billing_reason != "subscription_create":
                         _capi_email = await _user_email(user_id)
                         _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
+                        _fbp, _fbc = _fb_ids(sub)
                         background_tasks.add_task(
                             send_event,
                             event_name="Purchase",
@@ -4856,6 +4931,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                             value=amount_brl,
                             currency=(_g(invoice, "currency") or "brl").upper(),
                             email=_capi_email,
+                            fbp=_fbp,
+                            fbc=_fbc,
                             event_source_url=f"{DASHBOARD_URL}/home",
                         )
                 except Exception as exc:

@@ -537,6 +537,93 @@ async def _get_db_pool() -> AsyncConnectionPool:
         return _db_pool
 
 
+def reset_db_pool() -> AsyncConnectionPool | None:
+    """Zera o pool async e RECRIA o lock. Devolve o pool anterior SEM fechá-lo.
+
+    Contrapartida do `close_pool()` de db/connection.py, com duas diferenças
+    que não são estilo:
+
+    - não fecha: o pool anterior costuma ter nascido num event loop já
+      encerrado, e `asyncio.run(pool.close())` sobre ele cai em CancelledError.
+      Abandonar pool de loop MORTO é seguro (é o que a suíte já fazia). O que
+      não é seguro é deixar aberto um pool do loop CORRENTE: ele tem task de
+      reconexão nesse loop e o `asyncio.run` pendura em `_cancel_all_tasks` —
+      MEDIDO em 02/09/2026, trava já no fim do 1º loop, sem chegar ao 2º. Logo:
+      quem ainda está no loop do pool fecha-o ANTES de o loop morrer.
+    - recria o `_db_pool_lock`: `asyncio.Lock` só resolve o loop no `acquire`
+      CONTENDIDO (`asyncio.mixins._LoopBoundMixin._get_loop`), e a partir daí
+      fica preso a ele PARA SEMPRE. Zerar só o pool deixa o lock velho, e a
+      próxima contenção vinda de outro loop levanta `RuntimeError: <asyncio.
+      locks.Lock ...> is bound to a different event loop` — MEDIDO. A pendura
+      é de SEGUNDA ordem, não da exceção: o `gather` propaga o RuntimeError, a
+      corrotina irmã fica órfã dentro de `pool.open()`, o pool aberto nunca
+      chega a `_db_pool` (logo ninguém o fecha) e o `asyncio.run` seguinte
+      trava em `asyncio.runners._cancel_all_tasks`.
+
+    ABANDONAR NÃO É DE GRAÇA — o pool abandonado segura o HIGH-WATER MARK de
+    conexões dele, não `min_size`. RE-MEDIDO em 03/09/2026 (a medição anterior
+    era o dobro de otimista e creditava o custo ao lugar errado), 40 ciclos,
+    delta de `pg_stat_activity`:
+
+        retorno descartado (`reset_db_pool()`)      10/20/30/40 -> +2  +2  +2  +2
+        padrão de `_no_pool_do_dashboard`           10/20/30/40 -> +0  +0  +0  +0
+        retornos ACUMULADOS numa lista, 1 query     10/20/30/40 -> +11 +21 +31 +41
+        retornos ACUMULADOS numa lista, gather de 2 10/20/30/40 -> +20 +40 +60 +80
+
+    Ligar o retorno a uma variável que morre no fim do ciclo NÃO vaza: o
+    `_no_pool_do_dashboard` mede ZERO porque o `finally` dele FECHA o pool
+    corrente — não porque "guarda uma por vez". A acumulação só aparece se
+    alguém segurar os pools num contêiner vivo, o que NENHUM call site faz.
+    E o custo por pool é o pico dele: com `gather` de duas queries são 2, não
+    1 — 80 conexões no ciclo 40, de `max_connections = 100`.
+
+    Na suíte cheia o pico é 11 (moda 8), amostrado 4704x. Confortável, mas o
+    número anterior (5, amostrado 80x) era grosso demais: os picos vivem ~2,5%
+    do tempo e passavam entre as amostras.
+
+    Precondição, agora IMPOSTA pelo assert abaixo: ninguém está segurando o
+    `_db_pool_lock` neste instante — chame entre event loops, nunca com um
+    `_get_db_pool` em voo. Sem a guarda, trocar o lock por baixo de um
+    `_get_db_pool` em voo é silencioso e MEDIDO em 03/09/2026: dois pools
+    construídos, os dois chamadores com pools DIFERENTES e um pool órfão aberto.
+
+    O QUE ISTO FECHA, E O QUE NÃO FECHA. Fecha os call sites que CHAMAM
+    `reset_db_pool`. NÃO fecha a categoria: a mina segue armada em 4 arquivos
+    que fazem `asyncio.run(get_financial_data(...))` sem passar por aqui.
+    Sonda (`assert _db_pool_lock._loop is None` como último arquivo da rodada),
+    MEDIDA em 03/09/2026 na árvore SEM este conserto:
+
+        test_virada_de_mes / test_fuso_do_app        lock: None        pool: None
+        test_categoria_vazia_donut_e_lista           lock: loop MORTO  pool: aberto
+        test_category_launches_query                 lock: loop MORTO  pool: aberto
+        test_budget_category_accent                  lock: loop MORTO  pool: aberto
+        test_tipo_legado_no_dashboard                lock: loop MORTO  pool: aberto
+
+    Ninguém explode hoje porque esses 4 deixam `_db_pool` NÃO-NULO: o
+    early-return de `_get_db_pool` devolve o pool e nem toca no lock. A mina só
+    arma com `_db_pool is None` E lock preso — e o único caminho que zera o
+    pool é este, que desarma junto. Ou seja: o invariante vale por COINCIDÊNCIA
+    de duas condições, não por construção. Um teste futuro que zere o pool na
+    mão depois de um desses 4 reabre o buraco.
+
+    ponytail: o teto é o invariante valer por coincidência das duas condições
+    acima, e não por construção. O conserto por construção é lock por loop (ou
+    nenhum lock) em `_get_db_pool` — mudança de produção, PR próprio.
+
+    Existe para a suíte. Em produção não há um único `asyncio.run` /
+    `new_event_loop` / `run_until_complete` fora de `tests/` (medido), então
+    isto nunca é chamado lá.
+    """
+    global _db_pool, _db_pool_lock
+    # `assert` e não `RuntimeError`: os 3 call sites estão em `tests/` (medido),
+    # ninguém neste repositório roda com `-O`, e sob `-O` a guarda some voltando
+    # ao comportamento de hoje — o downgrade é para o status quo, não para pior.
+    assert not _db_pool_lock.locked(), "reset_db_pool com _get_db_pool em voo"
+    anterior, _db_pool = _db_pool, None
+    _db_pool_lock = asyncio.Lock()
+    return anterior
+
+
 class _PooledConn:
     """Adapter pra preservar a interface `async with await db_connect() as conn`.
     `pool.connection()` retorna um async-context-manager direto, mas o caller

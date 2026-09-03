@@ -36,6 +36,14 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    # Sem isto o default é 360 min. O modo de falha que este número existe para
+    # cortar não é teste lento: é DEADLOCK — um `asyncio.Lock` de módulo preso a
+    # um event loop morto pendura o pytest para sempre (ver
+    # tests/test_pool_async_entre_loops.py). Foi o que travou a suíte no #211.
+    # RE-MEDIDO em 03/09/2026 sobre as 12 execuções verdes mais recentes do job
+    # `pytest` (started_at/completed_at da API): 3m53s a 4m39s, mediana 4m09s.
+    # 15 min = 3,2x o pior caso, e o mesmo número do job `frontend` abaixo.
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -429,6 +437,9 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     continue-on-error: true
+    # Idem: `continue-on-error` não encurta o default de 360 min — ele só muda a
+    # cor do check DEPOIS que o job termina. Era o último job sem teto.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

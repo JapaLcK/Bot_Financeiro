@@ -646,7 +646,18 @@ async def serve_font(name: str):
     )
 
 
-_BRAND_MEDIA = {".png": "image/png", ".webp": "image/webp"}
+# .mp4/.jpg entraram pela VSL da landing (frontend/index.html, seção #vsl).
+# Vídeo NÃO ganha rota própria de propósito: esta aqui já resolve o mesmo
+# problema com a mesma guarda de traversal e o mesmo cache imutável.
+# .jpg é a capa: não há caminho pra webp nesta máquina sem instalar codec
+# (o ffmpeg do brew veio sem libwebp e o `sips` não exporta webp), e 51 KB
+# de JPEG não justificam a dependência. Trocar depois é mudar duas linhas.
+_BRAND_MEDIA = {
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".mp4": "video/mp4",
+}
 
 
 @router.get("/brand/{path:path}")

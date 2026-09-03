@@ -145,6 +145,12 @@ def send_event(
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         if 200 <= resp.status_code < 300:
+            # Loga o sucesso pelo mesmo motivo do meta_capi: sem isto, "enviei e
+            # o Google descartou" e "nem tentei" são o mesmo silêncio no log.
+            # (O GA4 responde 204 pra quase tudo — 2xx aqui significa "chegou",
+            # não "está certo". Pra ver o que ele achou do evento, DebugView.)
+            logger.info("[ga4_mp] %s enviado (client_id=%s, status=%s)",
+                        name, client_id, resp.status_code)
             return True
         logger.warning("[ga4_mp] %s rejeitado (%s): %s", name, resp.status_code, resp.text[:300])
         return False

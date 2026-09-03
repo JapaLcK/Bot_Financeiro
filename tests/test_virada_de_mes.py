@@ -281,7 +281,12 @@ def _fuso_de_sao_paulo():
 
     def _refaz_os_dois_pools():
         close_pool()                          # pool SÍNCRONO (db/connection.py)
-        shared._db_pool = None                # pool ASYNC (frontend/routes/shared.py)
+        # O async não tem `close_pool`: `reset_db_pool` zera e devolve o pool
+        # velho SEM fechar, porque ele nasceu num loop já encerrado e
+        # `asyncio.run(pool.close())` cairia em CancelledError (parágrafo acima).
+        # Ele também recria o `_db_pool_lock`, que ficaria preso ao loop da
+        # primeira contenção — ver tests/test_pool_async_entre_loops.py.
+        shared.reset_db_pool()                # pool ASYNC (frontend/routes/shared.py)
         asyncio.run(shared._get_db_pool())
 
     os.environ["REPORT_TIMEZONE"] = "America/Sao_Paulo"
