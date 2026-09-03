@@ -4111,10 +4111,8 @@ async def billing_plans_config():
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
-        # Plus segue o mesmo `or` do _resolve_price_id("plus", "monthly"): sem o
-        # fallback legado, um deploy configurado só com STRIPE_PRICE_ID_PRO
-        # mostraria "Indisponível" num plano cujo checkout funciona.
-        "plus_available": bool(STRIPE_PRICE_ID_PRO_MENSAL or STRIPE_PRICE_ID_PRO),
+        "plus_available": bool(_resolve_price_id("plus", "monthly")
+                               or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
     }

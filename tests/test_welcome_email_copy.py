@@ -70,3 +70,30 @@ def test_controle_positivo_o_caminho_do_whatsapp_continua_no_email(monkeypatch):
     assert email_service._whatsapp_link() in enviado["html_body"]
     assert "WhatsApp" in enviado["text_body"]
     assert "gastei 50 mercado" in enviado["html_body"]
+
+
+def test_boas_vindas_nao_garante_quando_a_primeira_cobranca_vem(monkeypatch):
+    """A copy não pode prometer que a 1ª cobrança só vem depois dos 15 dias.
+
+    Quem recria a conta com um telefone que já está em plan_trials é inelegível
+    (db.plans.is_trial_eligible_for_user), o checkout sai com trial_days=0 e o
+    Stripe cobra na hora. O e-mail não tem como saber: não recebe user_id, e no
+    cadastro por senha a conta ainda nem tem telefone. Achado do Codex no PR
+    #239. A oferta continua (controle positivo nos testes acima: "15 dias
+    grátis" nos dois corpos), mas quem confirma a cobrança é o checkout.
+    """
+    enviado = _capturar(monkeypatch)
+
+    for campo in ("html_body", "text_body"):
+        corpo = " ".join(enviado[campo].split())  # a copy quebra linha no meio da frase
+        for garantia in (
+            "primeira cobrança só vem depois",       # HTML antigo
+            "Nada é cobrado agora",                  # os dois corpos antigos
+            "cancele antes do fim dos 15 dias",      # texto antigo
+        ):
+            assert garantia not in corpo, (
+                f"{campo} garante a data da cobrança, que o e-mail não conhece: {garantia!r}"
+            )
+        assert "checkout" in corpo.lower(), (
+            f"{campo} não diz que o checkout mostra a cobrança antes de confirmar"
+        )

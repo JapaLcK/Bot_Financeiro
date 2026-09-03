@@ -270,9 +270,13 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     depois mandar o oi no WhatsApp — prometer uso imediato era falso.
 
     O trial é 1 por telefone na vida (plan_trials, db/schema.py), e quem sabe a
-    resposta pra ESTE usuário é db.plans.is_trial_eligible_for_user; aqui
-    falamos com quem está chegando, então a oferta aparece com a ressalva de
-    que o checkout confirma antes de qualquer cobrança.
+    resposta pra ESTE usuário é db.plans.is_trial_eligible_for_user — que precisa
+    do user_id e de um telefone vinculado, e este e-mail não tem nenhum dos dois
+    (a assinatura recebe só o e-mail, e o cadastro por senha nem grava telefone).
+    Então a copy NÃO garante quando a primeira cobrança acontece: quem recria a
+    conta com um número já usado é cobrado na hora (_billing_checkout_for_user
+    manda trial_days=0). A oferta dos 15 dias aparece como o que o checkout vai
+    confirmar antes de cobrar, nunca como fato consumado.
 
     `link_code` e `dashboard_url` chegam dos chamadores e não são usados: os
     links saem do _public_base_url() e do _whatsapp_link(). A assinatura fica
@@ -283,12 +287,11 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
 
     content = f"""
       <p>Olá! 👋</p>
-      <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso — e você tem
-         <strong>15 dias grátis</strong> pra testar tudo.</p>
+      <p>Sua conta no <strong>PigBank</strong> foi criada com sucesso — falta só
+         escolher o plano que você quer testar por <strong>15 dias grátis</strong>.</p>
       <p><strong>1. Ative o seu teste</strong>: escolha o plano que quer
-         experimentar. Nada é cobrado agora — a primeira cobrança só vem depois
-         dos 15 dias, e dá pra cancelar antes sem pagar nada. O checkout mostra
-         o que vai acontecer antes de você confirmar.</p>
+         experimentar. O checkout mostra o que vai ser cobrado, e quando, antes
+         de você confirmar — nada é cobrado sem essa confirmação.</p>
       <p style="text-align:center"><a class="btn" href="{base}/precos">🐷 Ativar meus 15 dias grátis</a></p>
       <p><strong>2. Mande um oi pro Piggy no WhatsApp</strong> — com o teste
          ativo, ele reconhece o seu número automaticamente e já começa a anotar.</p>
@@ -305,9 +308,9 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     html = _base_html("Bem-vindo ao PigBank!", content)
     text = (
         "Bem-vindo ao PigBank!\n\n"
-        "Sua conta foi criada e você tem 15 dias grátis pra testar tudo.\n\n"
+        "Sua conta foi criada — falta escolher o plano que você quer testar por 15 dias grátis.\n\n"
         f"1) Ative o teste escolhendo um plano: {base}/precos\n"
-        "   Nada é cobrado agora; cancele antes do fim dos 15 dias e não paga nada.\n"
+        "   O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.\n"
         "2) Depois, mande um oi pro Piggy no WhatsApp — ele reconhece seu número automaticamente.\n\n"
         "Lá você vai poder mandar: gastei 50 mercado, recebi 1000 salário, saldo, ajuda.\n"
     )
