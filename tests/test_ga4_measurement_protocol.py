@@ -261,6 +261,31 @@ def test_renovacao_manda_purchase_com_o_valor_pago_e_o_id_da_fatura(user_id, mon
         _cleanup_trial(uid)
 
 
+def test_renovacao_depois_de_trocar_de_plano_usa_o_preco_atual(user_id, monkeypatch):
+    """A troca agendada (`/billing/change-plan`) reescreve só o PRICE das fases do
+    SubscriptionSchedule — o `metadata.plan` continua com o plano antigo pra
+    sempre. Sem olhar o preço, toda renovação depois da troca entraria no item
+    errado, e a receita do plano novo apareceria no antigo (Codex, #244)."""
+    import frontend.finance_bot_websocket_custom as dashboard
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PROMAX_MENSAL", "price_promax_m")
+
+    uid, client, fake = _setup(monkeypatch, f"ga4-troca-{user_id}")
+    captura = _ligar_ga4(monkeypatch)
+    try:
+        sub = _sub_pago("active", metadata={"plan": "plus"})   # metadata: o VELHO
+        sub["items"]["data"][0]["price"]["id"] = "price_promax_m"  # preço: o NOVO
+        _post(
+            client, fake,
+            _evento_fatura(uid, invoice_id="in_troca_1",
+                           billing_reason="subscription_cycle", amount_paid=4990),
+            subs={"sub_ga4": sub},
+        )
+        _, evento = captura.unico()
+        assert evento["params"]["items"][0]["item_id"] == "pro"
+    finally:
+        _cleanup_trial(uid)
+
+
 def test_primeira_fatura_da_compra_imediata_nao_conta_duas_vezes(user_id, monkeypatch):
     """Corte 2: `subscription_create` é a fatura da compra que o checkout já
     contou. Sem este corte, toda compra imediata viraria duas no relatório."""

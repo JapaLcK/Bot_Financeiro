@@ -4576,14 +4576,23 @@ async def billing_webhook(request: Request):
         return (value, str(cur).upper())
 
     def _ga_plano_publico(*objetos) -> str | None:
-        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro'), do metadata do Stripe.
+        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
 
         É o mesmo identificador que o `begin_checkout` manda do navegador.
         `_stored_plan_for_price` devolve o valor do BANCO, onde Plus é 'pro' por
-        legado e Pro é 'pro_max' — usar aquele no item do GA4 faria checkout e
-        compra virarem produtos diferentes, e ainda colidiria Plus com Pro
-        (Codex, #244). Assinatura antiga, sem o campo, cai no valor do banco.
+        legado e Pro é 'pro_max' — usar aquele aqui faria checkout e compra
+        virarem produtos diferentes, e ainda colidiria Plus com Pro (Codex, #244).
+
+        O PREÇO ATUAL manda, e o metadata é só o fallback: a troca de plano
+        agendada (`/billing/change-plan`) reescreve apenas o price das fases do
+        SubscriptionSchedule e nunca o `metadata.plan`. Depois que a troca entra
+        em vigor, o metadata aponta pro plano ANTIGO — e toda renovação seria
+        atribuída ao item errado (Codex, #244, 2ª rodada). O fallback continua
+        valendo pro price que não está nas envs (legado).
         """
+        publico, _ = _plan_interval_for_price(_subscription_price_id(objetos[0]))
+        if publico:
+            return publico
         for obj in objetos:
             valor = _g(_g(obj, "metadata", {}), "plan")
             if valor:
