@@ -6914,12 +6914,12 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
     # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
     # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
     # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
-    # primitivas e mesma isenção do app iOS (diretriz 3.1.1: o app não pode
-    # ser empurrado pra tela de compra; fica no acesso base).
+    # primitivas e, como ele, sem isenção de app: a que existia aqui era uma
+    # segunda cópia da checagem de UA (`"PigBankApp" in ws.headers`), e o header
+    # é escolhido pelo cliente — dava pra abrir o WS sem plano só pedindo.
     from core.services.plan_service import has_app_access, needs_plan_selection
-    in_app = "PigBankApp" in (ws.headers.get("user-agent") or "")
     sem_plano = await asyncio.to_thread(
-        lambda: (not in_app and needs_plan_selection(user_id)) or not has_app_access(user_id)
+        lambda: needs_plan_selection(user_id) or not has_app_access(user_id)
     )
     if sem_plano:
         await ws.close(code=4402, reason="subscription_required")

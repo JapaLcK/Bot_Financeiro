@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import db
 import frontend.finance_bot_websocket_custom as dashboard
 from token_utils import make_dashboard_token
 from tests.conftest import promote_to_pro
@@ -48,10 +49,15 @@ def test_paywall_desligado_segue_liberado(user_id, monkeypatch):
     assert msg["type"] == "snapshot"
 
 
-def test_isencao_ios_da_escolha_de_plano(user_id, monkeypatch):
-    """A perna needs_plan_selection do gate: cadastro sem plano escolhido é
-    negado na web, mas o app iOS (UA PigBankApp) passa — diretriz 3.1.1, a
-    mesma isenção do _enforce_subscription_gate das rotas de dados."""
+def test_ua_de_app_nao_abre_o_ws_sem_plano(user_id, monkeypatch):
+    """A perna needs_plan_selection do gate nega igual com e sem UA de app.
+
+    Havia isenção aqui pela diretriz 3.1.1, decidida por `"PigBankApp" in
+    ws.headers` — uma segunda cópia da checagem que o shared.py fazia. Como o
+    header é escolhido pelo cliente, bastava pedir para abrir o WS sem plano e
+    receber o snapshot com os dados. Controle negativo: repor o `not in_app and`
+    no lambda do gate faz a segunda perna deste teste voltar a receber snapshot.
+    """
     monkeypatch.setenv("PLANS_V2_ENABLED", "1")  # gate de escolha ativo (v2)
     from db.connection import get_conn
     with get_conn() as conn:
@@ -68,13 +74,25 @@ def test_isencao_ios_da_escolha_de_plano(user_id, monkeypatch):
         with pytest.raises(WebSocketDisconnect):
             with _connect(client, user_id) as ws:
                 ws.receive_json()
-        # iOS: mesma conta, UA do app ⇒ aceita e snapshot chega
+        # mesma conta, UA do app: negado igual — o header não concede nada
         client.cookies.set("dashboard_token", make_dashboard_token(user_id, hours=1))
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                f"/ws/{user_id}", headers={"user-agent": "Mozilla/5.0 PigBankApp"}
+            ) as ws:
+                ws.receive_json()
+        # Controle positivo: carimbado o plano, o MESMO UA de app conecta. Sem
+        # isto o caso acima passaria num gate que recusa todo mundo.
+        #
+        # Pelo db.mark_plan_selected, não por UPDATE cru: get_auth_user tem
+        # cache com TTL (db_support._auth_user_cache) e é a escrita oficial que
+        # o invalida. Um UPDATE em SQL deixa o cache quente e o gate segue
+        # negando — foi o que aconteceu na primeira versão deste teste.
+        db.mark_plan_selected(user_id)
         with client.websocket_connect(
             f"/ws/{user_id}", headers={"user-agent": "Mozilla/5.0 PigBankApp"}
         ) as ws:
-            msg = ws.receive_json()
-        assert msg["type"] == "snapshot"
+            assert ws.receive_json()["type"] == "snapshot"
     finally:
         with get_conn() as conn:
             with conn.cursor() as cur:

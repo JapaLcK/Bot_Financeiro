@@ -851,10 +851,11 @@ async function cancelChange(btn) {
     if (!r.ok) return;            // deslogado (401): a copy padrão está certa
     me = await r.json();
   } catch { return; }             // rede caiu: copy padrão, sem travar a página
-  // No app iOS o gate nem se aplica (_is_pigbank_app isenta, routes/shared.py),
-  // e a /precos é alcançável de lá pelo "Ver planos" .pb-keep-in-app do paywall:
-  // o mandato seria falso pra quem não está travado. Mesma guarda dos irmãos.
-  if (!me || !me.needs_plan_selection || window.PB_IN_APP) return;  // copy padrão
+  // Sem guarda de window.PB_IN_APP: o gate deixou de isentar o app iOS
+  // (routes/shared.py), então quem abre a /precos de dentro dele está travado
+  // como qualquer um. Esconder o mandato deixaria a tela sem explicar por que
+  // o dashboard não abre.
+  if (!me || !me.needs_plan_selection) return;  // copy padrão
   const sub = document.getElementById("precos-sub");
   if (sub) sub.textContent =
     "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "

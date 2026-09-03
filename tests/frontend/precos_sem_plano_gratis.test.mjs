@@ -14,9 +14,9 @@
  *     gate} × {com ?escolha=1, sem marcador}: quem decide é o
  *     needs_plan_selection do /auth/me, não a URL (o marcador se perde num
  *     clique no "Planos" do próprio nav);
- *   · app iOS — mais 2 células com a UA PigBankApp: lá o gate não existe
- *     (routes/shared.py isenta o app), então o mandato "Escolha um plano pra
- *     continuar" seria falso pra quem não está travado;
+ *   · app iOS — mais 2 células com a UA PigBankApp: o gate vale lá também, e
+ *     o mandato tem de aparecer. A isenção que routes/shared.py tinha era por
+ *     substring de User-Agent, escolhida pelo cliente, e saiu;
  *   · controle POSITIVO — "Assinar Plus" ainda dispara EXATAMENTE 1
  *     POST /billing/create-checkout. Sem ele o grupo passaria numa página com
  *     todos os botões quebrados, que é pior que o bug.
@@ -186,15 +186,16 @@ for (const [estado, me] of [
   }
 }
 
-// ── app iOS: o gate não se aplica, então a copy de mandato seria falsa ───────
-// routes/shared.py isenta o _is_pigbank_app do gate, e a /precos é alcançável de
-// dentro do app pelo "Ver planos" .pb-keep-in-app do paywall (`#upg-cta` em
-// frontend/dashboard.html)
-// — dizer "Escolha um plano pra continuar" a quem não está travado é errado.
+// ── app iOS: o gate passou a valer lá também, então a copy de mandato é certa ─
+// A isenção de routes/shared.py era decidida por substring de User-Agent, que o
+// cliente escolhe: qualquer conta web entrava sem plano mandando "PigBankApp".
+// Ela saiu, e com ela a guarda `|| window.PB_IN_APP` desta página. Quem abre a
+// /precos de dentro do app (pelo "Ver planos" .pb-keep-in-app do paywall,
+// `#upg-cta` em frontend/dashboard.html) está travado como qualquer um, e
+// esconder o mandato deixaria a tela sem explicar por que o dashboard não abre.
 // 2 células, não 6: as 4 de {deslogado, logado sem gate} × marcador saem da
-// função pelo mesmo `!me.needs_plan_selection`, com e sem app — a guarda não
-// alcança nenhuma delas. A coluna do marcador fica porque é o mesmo invariante
-// das células web: a URL não decide nada.
+// função pelo mesmo `!me.needs_plan_selection`, com e sem app. A coluna do
+// marcador fica porque é o mesmo invariante das células web: a URL não decide.
 for (const query of ["?escolha=1", ""]) {
   const rotulo = query ? "com marcador" : "sem marcador";
   test(`copy do subtítulo: app iOS, logado com gate, ${rotulo}`, async () => {
@@ -204,8 +205,8 @@ for (const query of ["?escolha=1", ""]) {
     assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true,
       "a UA do app não ligou window.PB_IN_APP — a célula não mediria o app");
     const sub = await page.textContent("#precos-sub");
-    assert.match(sub, COPY_PADRAO,
-      `app iOS ${rotulo} devia ler a copy padrão e leu: "${sub}"`);
+    assert.match(sub, COPY_GATE,
+      `app iOS ${rotulo} devia ler o mandato e leu: "${sub}"`);
     await page.close();
   });
 }
