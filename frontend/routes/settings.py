@@ -359,17 +359,23 @@ async def security_password_reset_route(request: Request, user_id: int):
     if not email:
         raise HTTPException(status_code=400, detail="Adicione um e-mail antes de resetar a senha.")
 
-    from db import create_password_reset_token
+    from db import auth_account_has_password, create_password_reset_token
     from core.services.email_service import send_password_reset_email
 
     token = await asyncio.to_thread(create_password_reset_token, email)
     if not token:
         raise HTTPException(status_code=404, detail="Conta de e-mail não encontrada.")
+    has_password = await asyncio.to_thread(auth_account_has_password, user_id)
     reset_url = f"{shared.DASHBOARD_URL}/reset-password#token={token}"
-    sent = await asyncio.to_thread(send_password_reset_email, email.strip().lower(), reset_url)
+    sent = await asyncio.to_thread(send_password_reset_email, email.strip().lower(), reset_url, has_password)
     if not sent:
         raise HTTPException(status_code=500, detail="Não foi possível enviar o e-mail de reset.")
-    return {"ok": True, "message": "Enviamos um link de redefinição de senha para o seu e-mail."}
+    message = (
+        "Enviamos um link de redefinição de senha para o seu e-mail."
+        if has_password
+        else "Enviamos um link para você definir sua senha. Confira seu e-mail."
+    )
+    return {"ok": True, "message": message}
 
 
 @router.get("/settings/{user_id}/activity")

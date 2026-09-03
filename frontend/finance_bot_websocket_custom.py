@@ -2899,7 +2899,7 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_password_reset_token
+    from db import create_password_reset_token, email_has_password
     from core.services.email_service import send_password_reset_email
 
     await _check_auth_rate_limits("forgot-password", request, body.email)
@@ -2907,7 +2907,11 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     token = create_password_reset_token(body.email)
     if token:
         reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-        send_password_reset_email(body.email.strip().lower(), reset_url)
+        # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
+        # instrução por instrução igual, e a resposta abaixo nunca muda
+        send_password_reset_email(
+            body.email.strip().lower(), reset_url, email_has_password(body.email)
+        )
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
     return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
