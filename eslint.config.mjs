@@ -12,6 +12,8 @@ import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";
 import globals from "globals";
 
+// A convenção do toolkit é COPIAR o plugin, não reescrevê-lo. Nada aqui percebe
+// se alguém editar a cópia: não há conferidor no repositório.
 import quality from "./eslint-rules/index.cjs";
 
 export default defineConfig([
@@ -59,7 +61,7 @@ export default defineConfig([
   },
 
   {
-    files: ["frontend/**/*.js", "scripts/**/*.mjs"],
+    files: ["{frontend,scripts}/**/*.{js,mjs,cjs}"],
     plugins: { quality },
     rules: {
       "no-empty": ["error", { allowEmptyCatch: true }],
@@ -78,14 +80,26 @@ export default defineConfig([
           caughtErrorsIgnorePattern: "^_",
           // MUDANÇA DE CONFIG, não limpeza de código: `local` deixa de
           // reportar declaração do escopo GLOBAL. Os arquivos de frontend/ são
-          // scripts clássicos, e o que consome os nomes do topo são os 139
+          // scripts clássicos, e o que consome os nomes do topo são os 107
           // `onclick=` do dashboard.html (mais os gerados dentro de template
-          // string) — HTML que o ESLint não lê. Com o default `all` isso dava
-          // 73 avisos, todos falso positivo, e enterrava os de dentro de
-          // função. Quem cobre ESTA classe é tests/frontend/handlers_inline.test.mjs,
-          // que compara os nomes do HTML com os do JS. O preço: global morta de
-          // verdade deixa de aparecer aqui (as 3 achadas na medição de
-          // 2026-09-03 estão no relatório do burndown).
+          // string) — HTML que o ESLint não lê. Para remedir:
+          //   grep -oiE "onclick\s*=" frontend/dashboard.html | wc -l
+          // Com o default `all` isso dava 73 avisos: 70 falso positivo e 3
+          // código morto de VERDADE.
+          //
+          // NADA cobre esta classe. tests/frontend/handlers_inline.test.mjs roda
+          // só na direção HTML→JS (pergunta se todo `onclick` do HTML acha um
+          // nome no JS); a direção inversa — global declarada e SEM consumidor —
+          // não é verificada por teste nenhum, nem por lint. O preço desta
+          // config é exatamente essa: as 3 abaixo só existem registradas aqui, e
+          // este comentário é o único registro. Linhas MEDIDAS EM 2026-09-03 —
+          // remeça antes de reusar (CLAUDE.md §2), elas andam a cada edição:
+          //   grep -n "^function openPocketModal\|^function confirmDeletePocket\|^function computeDailyFromLaunches" frontend/dashboard.js
+          //   openPocketModal          frontend/dashboard.js:8849
+          //   confirmDeletePocket      frontend/dashboard.js:9140
+          //   computeDailyFromLaunches frontend/dashboard.js:9973
+          // Remover função é decisão do dono, fora deste ciclo — as 3 seguem no
+          // arquivo de propósito.
           vars: "local",
         },
       ],
@@ -95,9 +109,9 @@ export default defineConfig([
       // 2026-09-03: as 3 eram `_fmtBRL`/`_fmtDateBR` declaradas 2× e 3× no
       // dashboard.js, com a última vencendo em todo o arquivo.
       "no-redeclare": ["error", { builtinGlobals: false }],
-      // 1 violação, e é bug de verdade: `errEl` em frontend/dashboard.js:9774
-      // está fora do escopo do `const errEl` da linha 9747.
-      "no-undef": "warn", // 1
+      // "error" torna verdade uma coisa nova: global de CDN nova usada sem
+      // entrar na lista `globals` deste arquivo REPROVA O CI, não avisa mais.
+      "no-undef": "error",
       // Orçamento de tamanho e complexidade: "warn" de propósito. São números
       // para conversa sobre fatoração, não portão. As contagens abaixo são a
       // LINHA DE BASE do burndown de 2026-09-03 (portão de decisão: corrigir o
@@ -113,37 +127,19 @@ export default defineConfig([
         { max: 150, skipBlankLines: true, skipComments: true },
       ],
       "max-nested-callbacks": ["warn", 3], // 1
-      // Fica em "error" mesmo com 6 infratores: eles entram como lista
-      // explícita em `ignore` (linha de base de 2026-09-03), então qualquer
-      // arquivo NOVO acima de 350 linhas quebra o lint hoje. Cada arquivo
-      // desta lista sai daqui quando for quebrado — não suba o teto.
-      "quality/max-lines": [
-        "error",
-        {
-          max: 350,
-          // Sem o tamanho de cada um anotado aqui: número que um comando
-          // responde envelhece em silêncio (CLAUDE.md §2 — e este já
-          // envelheceu uma vez, no burndown que tirou 25 linhas do
-          // dashboard.js). Para remedir:
-          //   wc -l frontend/dashboard.js frontend/app-mode.js frontend/comecar.js \
-          //         frontend/open-finance-connect.js frontend/pb-nav.js \
-          //         frontend/static/auth-refresh.js
-          ignore: [
-            "frontend/dashboard.js",
-            "frontend/app-mode.js",
-            "frontend/comecar.js",
-            "frontend/open-finance-connect.js",
-            "frontend/pb-nav.js",
-            "frontend/static/auth-refresh.js",
-          ],
-        },
-      ],
+      // A NATIVA, não a `quality/max-lines`: a copiada se isenta sozinha por
+      // basename (index/types/constants/dto/enum/vo, `*.config.*`) e por
+      // diretório (dist, build, generated, fixtures...) — ver
+      // `isCheckableSourceFile` em eslint-rules/utils.cjs. Um `constants.js`
+      // novo de 500 linhas passava silencioso nela. A nativa não isenta
+      // ninguém; os 6 legados saem pelo bloco logo abaixo. Não suba o teto.
+      "max-lines": ["error", { max: 350 }],
       // 21 violações na linha de base. Não há adaptador de log em JS neste
       // projeto — quando existir, aponte o nome dele aqui e desligue a regra
       // no arquivo do adaptador com um bloco DEPOIS deste.
       "quality/no-direct-console": [
         "warn", // 21
-        { logger: "um adaptador de log do frontend" },
+        { logger: "um adaptador de log do projeto" },
       ],
       // quality/no-direct-data-access foi removida: não existe módulo de dados
       // em JS aqui — o banco é acessado só pelo backend Python (db/).
@@ -151,14 +147,32 @@ export default defineConfig([
   },
 
   {
+    // A válvula dos 6 legados, e ela TEM que vir depois do bloco que liga a
+    // regra em "error" — no flat config o bloco posterior vence. Cada arquivo
+    // sai daqui quando for quebrado, não suba o teto. Os tamanhos não ficam
+    // anotados de propósito (CLAUDE.md §2 — este número já envelheceu uma vez,
+    // no burndown que tirou 25 linhas do dashboard.js). Para remedir:
+    //   wc -l frontend/dashboard.js frontend/app-mode.js frontend/comecar.js \
+    //         frontend/open-finance-connect.js frontend/pb-nav.js \
+    //         frontend/static/auth-refresh.js
+    files: [
+      "frontend/dashboard.js",
+      "frontend/app-mode.js",
+      "frontend/comecar.js",
+      "frontend/open-finance-connect.js",
+      "frontend/pb-nav.js",
+      "frontend/static/auth-refresh.js",
+    ],
+    rules: { "max-lines": "off" },
+  },
+
+  {
     // Mesmo orçamento de tamanho para os testes, em "warn" (8 acima de 350).
-    // Vem DEPOIS do bloco que liga a regra em "error": para um arquivo casado
-    // pelos dois, o flat config aplica o bloco posterior por último.
+    // Nenhum outro bloco que mexa em max-lines casa tests/frontend/ (os dois
+    // acima casam frontend/ e scripts/), então a posição deste é indiferente.
+    // A dependência de ordem real é a do bloco anterior, a válvula dos legados.
     files: ["tests/frontend/**/*.mjs"],
-    plugins: { quality },
-    rules: {
-      "quality/max-lines": ["warn", { includeTests: true, max: 350 }],
-    },
+    rules: { "max-lines": ["warn", { max: 350 }] },
   },
   {
     // O corpo de page.evaluate() roda no navegador e chama funções globais que
