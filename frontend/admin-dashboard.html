@@ -906,6 +906,19 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     </div>
   </section>
 
+  <!-- ── Guarda de afirmações da IA ─────────────────────────────────── -->
+  <!-- Painel próprio de propósito: estes eventos podem vir em rajada e não
+       podem despejar evento operacional de listas compartilhadas. -->
+  <section style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2><i class="ph ph-robot" aria-hidden="true"></i> Afirmações da IA sem dado</h2>
+        <span class="meta">Últimas 15 · número que a IA afirmou sem vir de nenhuma tool</span>
+      </div>
+      <div class="error-list" id="ai-claims-list"></div>
+    </div>
+  </section>
+
   <!-- ── E-mails enviados ───────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
@@ -1451,6 +1464,28 @@ function renderHealthGrid(summary, errors, ops) {
   `).join('');
 }
 
+/* ── Guarda de afirmações da IA ──────────────────────────────────── */
+function renderAiClaimsList(linhas) {
+  const el = $id('ai-claims-list');
+  if (!el) return;
+  if (!linhas || !linhas.length) {
+    el.innerHTML = '<div class="empty">Nenhuma afirmação sem dado nas últimas 15.</div>';
+    return;
+  }
+  el.innerHTML = linhas.map(r => {
+    const tokens = (r.details?.tokens || []).map(t => esc(String(t))).join(', ');
+    return `
+    <div class="error-item level-${esc(r.level || 'info')}">
+      <div class="error-item-header">
+        <span class="error-item-title">${tokens || esc(r.event_type)}</span>
+        <span class="error-item-time">${fRelTime(r.created_at)}</span>
+      </div>
+      <div class="error-item-msg">${esc(r.message || '')}</div>
+      ${r.user_id ? `<div class="error-item-source">user ${esc(String(r.user_id))}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
 /* ── Ops health (WhatsApp + backend) ─────────────────────────────── */
 function renderOpsHealthGrid(ops) {
   const items = [
@@ -1460,6 +1495,12 @@ function renderOpsHealthGrid(ops) {
       hint: "Erros ao enviar para a API do WhatsApp" },
     { label: "Token inválido WA 7d",val: fInt(ops.whatsapp_token_invalid_7d), color: ops.whatsapp_token_invalid_7d > 0 ? 'red' : 'green', cls: ops.whatsapp_token_invalid_7d > 0 ? 'danger' : '' },
     { label: "Erros backend 24h",   val: fInt(ops.backend_errors_24h),        color: ops.backend_errors_24h > 0 ? 'red' : 'green', cls: ops.backend_errors_24h > 0 ? 'danger' : '' },
+    // Azul fixo, nunca vermelho: um número > 0 aqui NÃO é incidente. A guarda
+    // reprova conta feita pelo modelo (tools deram 100 e 50, resposta diz
+    // R$ 150,00), e a taxa desse falso positivo é o que este contador existe
+    // pra medir. Pintar de vermelho seria afirmar um veredito que ninguém tem.
+    { label: "Afirm. IA sem dado 24h", val: fInt(ops.ai_claim_unsupported_24h), color: 'blue',
+      hint: "Números que a IA afirmou sem vir de nenhuma tool — inclui conta feita por ela" },
     { label: "Drops fila WA 24h",   val: fInt(ops.whatsapp_queue_drop_24h),   color: ops.whatsapp_queue_drop_24h > 0 ? 'red' : 'green', cls: ops.whatsapp_queue_drop_24h > 0 ? 'danger' : '' },
     { label: "WA conectados",       val: fInt(ops.whatsapp_connected_users),  color: 'blue' },
     { label: "WA pendentes",        val: fInt(ops.whatsapp_pending_users),    color: ops.whatsapp_pending_users > 0 ? 'yellow' : 'green', cls: ops.whatsapp_pending_users > 0 ? 'warning' : '' },
@@ -1796,6 +1837,7 @@ async function loadOverview(force=false) {
   renderOpsHealthGrid(data.ops_summary);
   renderOpenFinanceGrid(data.open_finance);
   renderOpsList(data.recent_ops);
+  renderAiClaimsList(data.recent_ai_claims);
   renderEmails(data.email_stats || {}, data.recent_emails || []);
   renderSignups(data.recent_signups);
   renderLogins(data.recent_logins);

@@ -574,6 +574,15 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                 SELECT id, level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  -- A guarda de afirmações da IA roda em TODA resposta do
+                  -- modelo e tem frequência ainda desconhecida. Nesta lista de
+                  -- 100 linhas ela podia expulsar erro de verdade — um
+                  -- diagnóstico estragando o painel onde mora. Ela tem lugar
+                  -- próprio em `recent_ops` e contador em `ops_summary`.
+                  -- Excluído por TIPO, não restringindo a lista a
+                  -- warning/error: isso mudaria o painel para todo evento
+                  -- `info`, que não é o problema aqui.
+                  AND event_type <> 'ai_claim_unsupported'
                 ORDER BY created_at DESC
                 LIMIT 100
                 """
@@ -598,11 +607,26 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_signature_invalid') AS billing_signature_invalid_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_payment_failed') AS billing_payment_failed_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'engagement_loop_error') AS engagement_errors_7d,
+                    -- SOMA as afirmações, não conta as linhas: uma resposta com
+                    -- três valores sem dado grava UM evento, e contar linhas
+                    -- subnotificaria por 3x justo na resposta mais grave. O
+                    -- `~ '^[0-9]+$'` é o fallback pra linha malformada — cast
+                    -- direto estouraria a query inteira do dashboard por causa
+                    -- de um `details` estranho.
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_24h,
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_7d,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_webhook_received') AS last_whatsapp_webhook_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_send_success') AS last_whatsapp_send_success_at,
                     MAX(created_at) FILTER (WHERE event_type LIKE 'category_ai_%') AS last_category_ai_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_token_invalid') AS last_whatsapp_token_invalid_at,
-                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at
+                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at,
+                    MAX(created_at) FILTER (WHERE event_type = 'ai_claim_unsupported') AS last_ai_claim_unsupported_at
                 FROM system_event_logs
                 """
             )
@@ -671,6 +695,23 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                 """
             )
             recent_ops = [dict(row) for row in await cur.fetchall()]
+
+            # Consulta PRÓPRIA, e não mais uma linha no filtro do `recent_ops`.
+            # A guarda roda em toda resposta de IA e tem frequência ainda
+            # desconhecida; nas duas listas compartilhadas ela podia expulsar
+            # evento operacional — primeiro nas 100 de `recent_errors`, depois
+            # nas 25 daqui. Trocar de balde não resolve quem é limitado: só
+            # balde próprio resolve.
+            await cur.execute(
+                """
+                SELECT level, event_type, message, source, user_id, details, created_at
+                FROM system_event_logs
+                WHERE event_type = 'ai_claim_unsupported'
+                ORDER BY created_at DESC
+                LIMIT 15
+                """
+            )
+            recent_ai_claims = [dict(row) for row in await cur.fetchall()]
 
             await cur.execute(
                 """
@@ -744,6 +785,7 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
         "recent_logins": recent_logins,
         "recent_errors": recent_errors,
         "recent_ops": recent_ops,
+        "recent_ai_claims": recent_ai_claims,
         "email_stats": email_stats,
         "recent_emails": recent_emails,
     }
