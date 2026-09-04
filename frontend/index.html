@@ -139,9 +139,9 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
           <a class="btn btn-outline btn-lg" href="#como-funciona">Ver como funciona</a>
         </div>
         <div class="trust">
-          <span><i class="dot"></i> Seguro e confiável</span>
-          <span><i class="dot"></i> Rápido e prático</span>
-          <span><i class="dot"></i> Privacidade garantida</span>
+          <span><i class="dot"></i> Texto, áudio ou foto do comprovante</span>
+          <span><i class="dot"></i> Sem instalar nada</span>
+          <span><i class="dot"></i> Dados criptografados</span>
         </div>
       </div>
 
@@ -205,7 +205,11 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
     <!-- ─── VSL ──────────────────────────────────────────────────── -->
     <section class="section" id="vsl">
-      <div class="section-head" data-reveal>
+      <!-- .center: o conteúdo desta seção é bloco estreito centrado (.vsl-frame,
+           860px de 1152) mais o CTA centrado. Sem a classe o cabeçalho caía em
+           404 contra 640 do vídeo — 236px fora do eixo. As outras seções desta
+           página apresentam grade de largura cheia e ficam alinhadas à esquerda. -->
+      <div class="section-head center" data-reveal>
         <div class="eyebrow">Assista antes de começar</div>
         <h2>Em 1 minuto você entende<br><span class="grad">tudo que a Piggy faz</span></h2>
       </div>
@@ -249,9 +253,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     <!-- ─── Funcionalidades ───────────────────────────────────────── -->
     <section class="section" id="funcionalidades">
       <div class="section-head" data-reveal>
-        <div class="eyebrow">Funcionalidades</div>
-        <h2>Recursos que fazem<br>a <span class="grad">diferença</span></h2>
-        <p>Tudo que você precisa pra organizar sua vida financeira, sem planilha, sem app pra baixar, direto no WhatsApp.</p>
+        <h2>O que a Piggy faz enquanto<br>você só conversa</h2>
+        <p>Você manda o gasto como mandaria pra um amigo. Ela categoriza, atualiza o saldo e guarda o histórico — sem planilha, sem app pra baixar.</p>
       </div>
 
       <div class="grid-3" data-reveal>
@@ -270,21 +273,11 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
           <h3>Caixinhas &amp; metas</h3>
           <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
         </div>
-        <div class="card feature-card">
-          <div class="icon-box neon"><i class="ph ph-credit-card" aria-hidden="true"></i></div>
-          <h3>Cartões &amp; faturas</h3>
-          <p>Limite, fatura aberta e parcelamentos de todos os seus cartões num lugar só.</p>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box"><i class="ph ph-bell" aria-hidden="true"></i></div>
-          <h3>Alertas inteligentes</h3>
-          <p>A Piggy te avisa quando um gasto foge do padrão ou o orçamento começa a apertar.</p>
-        </div>
-        <div class="card feature-card">
-          <div class="icon-box neon"><i class="ph ph-lock" aria-hidden="true"></i></div>
-          <h3>Segurança &amp; privacidade</h3>
-          <p>Seus dados sensíveis são cifrados. Você fica no controle das suas informações, sempre.</p>
-        </div>
+      </div>
+
+      <div class="sec-more" data-reveal>
+        <p>Cartões, alertas e o resto: cada um com a frase que aciona.</p>
+        <a class="btn btn-outline" href="/funcionalidades">Ver todas as funcionalidades <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
     </section>
 
@@ -293,14 +286,14 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     <!-- ─── Como funciona ─────────────────────────────────────────── -->
     <section class="section" id="como-funciona">
       <div class="section-head" data-reveal>
-        <div class="eyebrow">Como funciona</div>
-        <h2>Simples, rápido e<br>no seu <span class="grad">WhatsApp</span></h2>
+        <h2>De “gastei 32 no almoço”<br>até o saldo atualizado</h2>
+        <p>Três passos, um minuto, dentro de uma conversa que você já usa todo dia.</p>
       </div>
 
       <div class="hiw-rail">
 
         <article class="hiw-card is-open" tabindex="0" aria-current="step">
-          <div class="hiw-head"><span class="hiw-num">01</span><h3>Conexão</h3></div>
+          <div class="hiw-head"><span class="hiw-num">1</span><h3>Conexão</h3></div>
           <div class="hiw-stage">
             <div class="hiw-state hiw-demo">
               <div class="hiw-panel">
@@ -322,7 +315,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
             </div>
             <div class="hiw-state hiw-idle">
               <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
-              <span>passo 1 de 3</span>
+              <span>salve o número, mande um “oi”</span>
             </div>
           </div>
           <div class="hiw-foot">
@@ -331,7 +324,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         </article>
 
         <article class="hiw-card is-idle" tabindex="0">
-          <div class="hiw-head"><span class="hiw-num">02</span><h3>Resposta</h3></div>
+          <div class="hiw-head"><span class="hiw-num">2</span><h3>Resposta</h3></div>
           <div class="hiw-stage">
             <div class="hiw-state hiw-demo">
               <div class="hiw-panel">
@@ -356,7 +349,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
             </div>
             <div class="hiw-state hiw-idle">
               <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
-              <span>passo 2 de 3</span>
+              <span>conte o gasto, ela anota</span>
             </div>
           </div>
           <div class="hiw-foot">
@@ -365,7 +358,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         </article>
 
         <article class="hiw-card is-idle" tabindex="0">
-          <div class="hiw-head"><span class="hiw-num">03</span><h3>Painel</h3></div>
+          <div class="hiw-head"><span class="hiw-num">3</span><h3>Painel</h3></div>
           <div class="hiw-stage">
             <div class="hiw-state hiw-demo">
               <div class="hiw-charts">
@@ -408,7 +401,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
             </div>
             <div class="hiw-state hiw-idle">
               <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
-              <span>passo 3 de 3</span>
+              <span>gráficos e saldo em tempo real</span>
             </div>
           </div>
           <div class="hiw-foot">
@@ -428,132 +421,68 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     <!-- ─── IA / Tecnologia ───────────────────────────────────────── -->
     <section class="tech-split">
       <div class="tech-copy" data-reveal>
-        <div class="eyebrow">Tecnologia</div>
-        <h2>A inteligência que<br><span class="grad">facilita sua vida</span></h2>
+        <h2>Ela entende português<br>do jeito que você escreve</h2>
         <ul class="tech-list">
-          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> IA que entende português do dia a dia</li>
           <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização que aprende com você</li>
           <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard atualizado em tempo real</li>
           <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Tudo no WhatsApp, zero apps pra baixar</li>
         </ul>
         <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
+      <!-- Prova do título ao lado: o vocabulário real que a Piggy aceita.
+           Substituiu um cubo wireframe com as letras "AI" — decoração que não
+           explicava nada e é o visual mais genérico possível de IA. As oito
+           frases foram passadas pelo classify(..., allow_ai=False) e todas
+           resolvem SEM IA. Seis estão literais no catálogo
+           (core/commands_catalog.py, espelhado em /comandos); as outras duas —
+           "gastei 32 no almoço" e "quanto sobrou" — saem do
+           core/intent_classifier.py. Não acrescente frase aqui sem rodar o
+           classificador nela: "quanto sobrou esse mês?" já esteve aqui e dava
+           out_of_scope 0.0, porque o :70 é dicionário de match EXATO. -->
       <div class="tech-visual" data-reveal>
-        <div class="hologram" aria-label="Cubo AI holográfico em wireframe">
-          <div class="floating">
-            <svg viewBox="0 0 800 800" role="img" aria-labelledby="holoTitle holoDesc">
-              <title id="holoTitle">Cubo AI holográfico com texto em relevo</title>
-              <desc id="holoDesc">Cubo isométrico em wireframe rosa neon, com letras AI em perspectiva e extrusão tridimensional sobre a face superior.</desc>
-
-              <defs>
-                <linearGradient id="edgeGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#ff2d75" /><stop offset="52%" stop-color="#ec1758" /><stop offset="100%" stop-color="#b10c42" />
-                </linearGradient>
-                <linearGradient id="hotGradient" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stop-color="#ff86b1" /><stop offset="28%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#ec1758" />
-                </linearGradient>
-                <linearGradient id="aiGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#ff79aa" /><stop offset="38%" stop-color="#ff2d75" /><stop offset="100%" stop-color="#e31455" />
-                </linearGradient>
-                <filter id="neonGlow" x="-100%" y="-100%" width="300%" height="300%">
-                  <feGaussianBlur stdDeviation="3.5" result="a" /><feGaussianBlur stdDeviation="8.5" result="b" />
-                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <filter id="softGlow" x="-100%" y="-100%" width="300%" height="300%">
-                  <feGaussianBlur stdDeviation="2.5" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <filter id="nodeGlow" x="-200%" y="-200%" width="500%" height="500%">
-                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="8" result="b" />
-                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <filter id="textGlow" x="-100%" y="-100%" width="300%" height="300%">
-                  <feGaussianBlur stdDeviation="4" result="a" /><feGaussianBlur stdDeviation="12" result="b" />
-                  <feMerge><feMergeNode in="b" /><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <filter id="particleGlow" x="-250%" y="-250%" width="600%" height="600%">
-                  <feGaussianBlur stdDeviation="2.2" result="a" /><feMerge><feMergeNode in="a" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <clipPath id="topClip"><polygon points="400,148 648,292 400,436 152,292" /></clipPath>
-              </defs>
-
-              <g aria-hidden="true">
-                <path class="circuit" d="M66 332 H165 L212 379 H276" /><path class="circuit" d="M70 546 H170 L222 494 H282" />
-                <path class="circuit" d="M734 332 H635 L588 379 H524" /><path class="circuit" d="M730 546 H630 L578 494 H518" />
-                <path class="circuit" d="M400 58 V118 L366 152" /><path class="circuit" d="M400 744 V684 L435 649" />
-                <path class="circuit" d="M116 228 H186 L221 263" /><path class="circuit" d="M684 228 H614 L579 263" />
-                <path class="circuit" d="M95 642 H176 L226 592" /><path class="circuit" d="M705 642 H624 L574 592" />
-                <circle class="circuit-dot" cx="66" cy="332" r="2.2"/><circle class="circuit-dot" cx="70" cy="546" r="2.2"/>
-                <circle class="circuit-dot" cx="734" cy="332" r="2.2"/><circle class="circuit-dot" cx="730" cy="546" r="2.2"/>
-                <circle class="circuit-dot" cx="400" cy="58" r="2.2"/><circle class="circuit-dot" cx="400" cy="744" r="2.2"/>
-              </g>
-
-              <g aria-hidden="true">
-                <circle class="particle" cx="126" cy="275" r="2.2" style="--duration:5.4s;--delay:-1.1s"/>
-                <circle class="particle soft" cx="174" cy="421" r="1.7" style="--duration:6.2s;--delay:-3.5s"/>
-                <circle class="particle dim" cx="124" cy="554" r="2.8" style="--duration:7s;--delay:-2.4s"/>
-                <circle class="particle" cx="235" cy="655" r="1.9" style="--duration:5s;--delay:-.8s"/>
-                <circle class="particle soft" cx="340" cy="706" r="2.2" style="--duration:5.8s;--delay:-4.1s"/>
-                <circle class="particle dim" cx="478" cy="691" r="2.5" style="--duration:6.8s;--delay:-1.8s"/>
-                <circle class="particle soft" cx="588" cy="626" r="1.8" style="--duration:5.1s;--delay:-2.3s"/>
-                <circle class="particle" cx="684" cy="518" r="2.5" style="--duration:6.4s;--delay:-4.7s"/>
-                <circle class="particle dim" cx="692" cy="363" r="2.7" style="--duration:7.2s;--delay:-3s"/>
-                <circle class="particle" cx="637" cy="218" r="1.8" style="--duration:5.7s;--delay:-1.5s"/>
-                <circle class="particle soft" cx="530" cy="115" r="2.2" style="--duration:6.5s;--delay:-4.4s"/>
-                <circle class="particle dim" cx="365" cy="82" r="2.5" style="--duration:7.3s;--delay:-2.9s"/>
-                <circle class="particle soft" cx="247" cy="125" r="1.8" style="--duration:5.3s;--delay:-.5s"/>
-              </g>
-
-              <g class="cube">
-                <g class="face-grid top-grid">
-                  <path d="M214 256 L462 400"/><path d="M276 220 L524 364"/><path d="M338 184 L586 328"/>
-                  <path d="M586 256 L338 400"/><path d="M524 220 L276 364"/><path d="M462 184 L214 328"/>
-                </g>
-                <g class="face-grid">
-                  <path d="M214 328 L400 436 L400 690"/><path d="M276 364 L400 436"/><path d="M338 400 L400 436"/>
-                  <path d="M152 356 L400 500"/><path d="M152 420 L400 564"/><path d="M152 484 L400 628"/>
-                  <path d="M586 328 L400 436 L400 690"/><path d="M524 364 L400 436"/><path d="M462 400 L400 436"/>
-                  <path d="M648 356 L400 500"/><path d="M648 420 L400 564"/><path d="M648 484 L400 628"/>
-                </g>
-
-                <path class="inner" d="M400 148 L400 436 L400 690"/>
-                <path class="inner" d="M152 292 L400 436 L648 292"/>
-                <path class="inner" d="M152 548 L400 436 L648 548"/>
-                <path class="inner" d="M276 364 L276 620"/><path class="inner" d="M524 364 L524 620"/>
-
-                <path class="edge back" d="M400 148 L152 292"/><path class="edge back" d="M400 148 L648 292"/><path class="edge back" d="M400 148 L400 436"/>
-                <path class="edge strong" d="M400 148 L648 292 L400 436 L152 292 Z"/>
-                <path class="edge" d="M152 292 L400 436 L400 690 L152 548 Z"/>
-                <path class="edge strong" d="M648 292 L400 436 L400 690 L648 548 Z"/>
-                <path class="edge" d="M152 548 L400 690 L648 548"/>
-                <path class="edge" d="M152 292 L152 548"/><path class="edge strong" d="M400 436 L400 690"/><path class="edge strong" d="M648 292 L648 548"/>
-
-                <g clip-path="url(#topClip)" aria-label="AI">
-                  <g transform="translate(0 18)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-deep" x="-36" y="0">A</text><text class="ai-text ai-depth-deep" x="36" y="0">I</text></g></g>
-                  <g transform="translate(0 12)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
-                  <g transform="translate(0 6)"><g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-depth-mid" x="-36" y="0">A</text><text class="ai-text ai-depth-mid" x="36" y="0">I</text></g></g>
-                  <g transform="matrix(0.78 0.45 -0.78 0.45 400 276)"><text class="ai-text ai-letter-top" x="-36" y="0">A</text><text class="ai-text ai-letter-top" x="36" y="0">I</text></g>
-                </g>
-
-                <path class="scan" d="M232 363 L400 460 L568 363"/>
-
-                <circle class="node" cx="400" cy="148" r="4.2"/><circle class="node" cx="152" cy="292" r="4.2"/><circle class="node" cx="648" cy="292" r="4.2"/>
-                <circle class="node" cx="400" cy="436" r="4.8"/><circle class="node" cx="152" cy="548" r="4.1"/><circle class="node" cx="648" cy="548" r="4.1"/>
-                <circle class="node" cx="400" cy="690" r="4.8"/>
-                <circle class="node small" cx="276" cy="220" r="2.2"/><circle class="node small" cx="524" cy="220" r="2.2"/>
-                <circle class="node small" cx="276" cy="364" r="2.2"/><circle class="node small" cx="524" cy="364" r="2.2"/>
-                <circle class="node small" cx="152" cy="420" r="2.1"/><circle class="node small" cx="648" cy="420" r="2.1"/>
-                <circle class="node small" cx="400" cy="564" r="2.3"/><circle class="node small" cx="276" cy="620" r="2.1"/><circle class="node small" cx="524" cy="620" r="2.1"/>
-
-                <circle class="particle" cx="330" cy="340" r="1.8" style="--duration:4.7s;--delay:-1.1s"/>
-                <circle class="particle soft" cx="474" cy="350" r="2" style="--duration:5.7s;--delay:-3.4s"/>
-                <circle class="particle dim" cx="316" cy="468" r="2.3" style="--duration:6.5s;--delay:-2.1s"/>
-                <circle class="particle" cx="484" cy="494" r="1.7" style="--duration:5.1s;--delay:-4.1s"/>
-                <circle class="particle soft" cx="365" cy="575" r="2" style="--duration:6s;--delay:-.9s"/>
-                <circle class="particle" cx="442" cy="610" r="1.8" style="--duration:4.8s;--delay:-2.8s"/>
-              </g>
-            </svg>
-          </div>
+        <div class="phrasebook" role="list" aria-label="Exemplos de mensagens que a Piggy entende">
+          <span class="phrase" role="listitem">gastei 32 no almoço</span>
+          <span class="phrase" role="listitem">recebi 2000 de salário</span>
+          <span class="phrase" role="listitem">parcelei 1200 em 6x no Nubank</span>
+          <span class="phrase" role="listitem">quanto sobrou</span>
+          <span class="phrase" role="listitem">paguei a fatura do Nubank</span>
+          <span class="phrase" role="listitem">deposita 200 na caixinha viagem</span>
+          <span class="phrase" role="listitem">últimos lançamentos</span>
+          <span class="phrase" role="listitem">quanto tenho de limite no Nubank</span>
         </div>
+      </div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Agentes (faixa curta; a página inteira é /agents) ─────── -->
+    <section class="section" id="agentes">
+      <div class="section-head" data-reveal>
+        <h2>E tem gente trabalhando<br>quando você não está falando</h2>
+        <p>Agentes que rodam nos bastidores da sua conta e só te chamam quando têm algo pra dizer. Três dos oito:</p>
+      </div>
+
+      <div class="grid-3" data-reveal>
+        <article class="card agent-mini">
+          <img src="/brand/agents/xerife.png?v=1" alt="" width="265" height="433" loading="lazy" />
+          <h3>Xerife</h3>
+          <p>Fica de olho no seu padrão de gastos e dá o alerta quando algo foge da curva, ou quando uma categoria estoura o limite que você definiu.</p>
+        </article>
+        <article class="card agent-mini">
+          <img src="/brand/agents/carteiro.png?v=1" alt="" width="290" height="416" loading="lazy" />
+          <h3>Carteiro</h3>
+          <p>Não deixa boleto vencer. Avisa antes do vencimento, direto no seu feed, pra você nunca mais pagar juros por esquecimento.</p>
+        </article>
+        <article class="card agent-mini">
+          <img src="/brand/agents/detetive.png?v=1" alt="" width="305" height="439" loading="lazy" />
+          <h3>Detetive</h3>
+          <p>Fareja cobranças repetidas que parecem aquela assinatura esquecida, a que você paga todo mês e nem lembra mais que existe.</p>
+        </article>
+      </div>
+
+      <div class="sec-more" data-reveal>
+        <p>Os outros cinco: resumo do mês, metas, dinheiro parado, carteira de ações — e o Aviador, ainda em breve.</p>
+        <a class="btn btn-outline" href="/agents">Conhecer os agentes <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
     </section>
 
@@ -561,8 +490,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
     <!-- ─── Preços ────────────────────────────────────────────────── -->
     <section class="section" id="precos">
-      <div class="section-head" data-reveal>
-        <div class="eyebrow">Planos</div>
+      <div class="section-head center" data-reveal>
         <h2>Escolha seu <span class="grad">PigBank+</span></h2>
         <p>15 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
@@ -590,9 +518,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
     <!-- ─── FAQ ───────────────────────────────────────────────────── -->
     <section class="section" id="faq">
-      <div class="section-head" data-reveal>
-        <div class="eyebrow">Dúvidas</div>
-        <h2>Perguntas <span class="grad">frequentes</span></h2>
+      <div class="section-head center" data-reveal>
+        <h2>Perguntas frequentes</h2>
         <p>O que a galera mais quer saber antes de começar com a Piggy.</p>
       </div>
 
@@ -634,8 +561,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
     <!-- ─── CTA final ─────────────────────────────────────────────── -->
     <div class="cta-band" data-reveal>
-      <h2>Pronto para começar?</h2>
-      <p>Sua vida financeira resolvida no WhatsApp, a partir de agora.</p>
+      <h2>Manda o primeiro gasto pra Piggy</h2>
+      <p>Você conta o que gastou. Ela cuida do resto — e o painel já abre com isso dentro.</p>
       <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
     </div>
 

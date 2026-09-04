@@ -93,17 +93,8 @@
 }
 .rd .feature-card h3 { font-size: 1.12rem; letter-spacing: -.01em; }
 
-/* Ícones: caixa em gradiente, mais “produto” e menos flat */
-.rd .icon-box {
-  width: 50px; height: 50px; border-radius: 14px; font-size: 1.35rem;
-  background: linear-gradient(135deg, rgba(255,45,142,.22), rgba(255,45,142,.06));
-  border: 1px solid rgba(255,45,142,.32);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
-}
-.rd .icon-box.neon {
-  background: linear-gradient(135deg, rgba(198,241,26,.20), rgba(198,241,26,.05));
-  border-color: rgba(198,241,26,.34);
-}
+/* (não há bloco de ícone: o quadrado colorido em gradiente foi removido junto
+   com o do site.css. O ícone agora é só o glifo, herdado de .icon-box.) */
 
 /* ─── 6. Faixa de valor: chips com vidro e brilho no marcador ──────────── */
 .rd .value-strip { gap: 12px; margin: 8px 0 12px; }
@@ -194,7 +185,7 @@
 }
 .rd .hiw-card.is-open { background: var(--card-2); border-color: var(--line-2); box-shadow: var(--shadow); }
 .rd .hiw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; }
-.rd .hiw-num { font-size: 1.9rem; font-weight: 800; color: var(--ink-3); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.rd .hiw-num { font-size: .95rem; font-weight: 700; color: var(--ink-3); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .rd .hiw-card.is-open .hiw-num { color: var(--pink); }
 .rd .hiw-card.is-done .hiw-num { color: var(--neon); }
 .rd .hiw-head h3 { font-size: 1.55rem; font-weight: 700; letter-spacing: -.03em; }
@@ -310,8 +301,10 @@
 .rd .hiw-months { display: flex; justify-content: space-between; color: var(--ink-3); font-size: .68rem; margin-top: 6px; letter-spacing: .04em; }
 
 /* CTA logo abaixo do trilho */
-.rd .hiw-cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px; margin-top: 32px; }
-.rd .hiw-cta p { color: var(--ink-2); }
+.rd .hiw-cta,
+.rd .sec-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px; margin-top: 32px; }
+.rd .hiw-cta p,
+.rd .sec-more p { color: var(--ink-2); }
 
 /* Escopado no trilho de propósito: um `*` global mataria as transições da
    página inteira (nav, botões, FAQ, reveal). */
