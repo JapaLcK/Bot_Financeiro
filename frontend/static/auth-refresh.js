@@ -357,6 +357,22 @@
     // 401 no próprio refresh: não tenta de novo — caller redireciona pro login
     if (_isRefreshEndpoint(input)) return resp;
 
+    // Só o 401 de AUTENTICAÇÃO é renovável, e quem marca é o servidor: o
+    // `WWW_AUTHENTICATE_401` de `frontend/routes/shared.py` viaja nos 8 `raise`
+    // de falha de access/dashboard token. Sem esta linha o status sozinho decidia,
+    // e um 401 de aplicação ("Senha incorreta.") virava refresh + RETRY — a senha
+    // errada ia duas vezes e queimava dois slots do rate limit da rota (as de
+    // 3/hour davam 429 no segundo erro de digitação).
+    //
+    // Falha FECHADA de propósito: 401 sem marca não renova e o usuário cai no
+    // login. Quem prende as duas listas é o gate
+    // `test_401_de_autenticacao_declara_familia` (tests/test_static_pages_routes.py),
+    // que deixa vermelho todo 401 novo sem família declarada.
+    //
+    // ABAIXO do `_requestComLimpeza` acima, nunca acima dele: a limpeza central de
+    // fim de sessão roda lá e não pode ser pulada por um `return` antecipado.
+    if (!resp.headers.get("WWW-Authenticate")) return resp;
+
     // Tenta renovar e refazer a request original
     const ok = await _doRefresh();
     if (!ok) return resp;
