@@ -18,7 +18,7 @@
   --line-2:     rgba(255,255,255,.15);
   --ink:        #ffffff;
   --ink-2:      rgba(255,255,255,.62);
-  --ink-3:      rgba(255,255,255,.40);
+  --ink-3:      rgba(255,255,255,.48);  /* era .40 → 3,8:1 sobre --bg; .48 dá 5,0:1 */
   --radius:     20px;
   --radius-sm:  14px;
   --radius-lg:  26px;
@@ -106,6 +106,8 @@ img { max-width: 100%; display: block; }
   font-size: .74rem; font-weight: 800; letter-spacing: .04em;
 }
 .pill .tag-novo { background: var(--pink); color: #fff; border-radius: 999px; padding: 2px 8px; font-size: .64rem; font-weight: 800; letter-spacing: .06em; }
+/* Pílula da VSL (index.html). Único consumidor entre as 17 páginas que carregam
+   este arquivo — as outras tiveram o <div> removido do HTML pela ONDA 1. */
 .eyebrow {
   display: inline-flex; background: rgba(198,241,26,.12); border: 1px solid rgba(198,241,26,.28);
   color: var(--neon); border-radius: 999px; padding: 6px 14px;
@@ -114,9 +116,21 @@ img { max-width: 100%; display: block; }
 
 /* ─── Seções ────────────────────────────────────────────────────────── */
 .section { padding: 92px 0; }
-.section-head { text-align: center; max-width: 640px; margin: 0 auto 52px; }
-.section-head h2 { font-size: clamp(1.9rem,4vw,2.7rem); font-weight: 800; letter-spacing: -.02em; line-height: 1.08; margin-bottom: 16px; text-transform: uppercase; }
+
+/* Cabeçalho de seção. Era: centralizado + CAIXA ALTA + metade do título em
+   gradiente rosa, repetido oito vezes entre index, whatsapp, suporte, comandos
+   e changelog. Oito seções iguais lidas em sequência é o que faz o site parecer
+   gerado. Caixa alta agora é privilégio do hero (.hero-title); o resto usa
+   caixa baixa, como /precos e /termos já faziam — e são as páginas que a
+   auditoria apontou como as mais bem resolvidas. */
+.section-head { max-width: 640px; margin: 0 0 52px; }
+.section-head :is(h1,h2) { font-size: clamp(1.75rem,3.4vw,2.35rem); font-weight: 800; letter-spacing: -.022em; line-height: 1.1; margin-bottom: 14px; text-wrap: balance; }
 .section-head p { color: var(--ink-2); font-size: 1.02rem; line-height: 1.65; }
+
+/* Centralizar é opt-in, não padrão: usar só onde o conteúdo abaixo também é
+   centralizado (planos, FAQ). Alinhado à esquerda por padrão dá ritmo diferente
+   a cada seção sem precisar inventar composição nova pra cada uma. */
+.section-head.center { text-align: center; margin-left: auto; margin-right: auto; }
 .grad { background: linear-gradient(135deg,var(--pink),#FF7AB8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 
 /* ─── Cards genéricos ───────────────────────────────────────────────── */
@@ -125,11 +139,10 @@ img { max-width: 100%; display: block; }
   border-radius: var(--radius); padding: 26px;
 }
 .icon-box {
-  width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-  background: var(--pink-soft); border: 1px solid rgba(255,45,142,.3); color: var(--pink);
-  font-size: 1.25rem; margin-bottom: 18px;
+  display: flex; align-items: center; justify-content: flex-start;
+  color: var(--pink); font-size: 1.5rem; line-height: 1; margin-bottom: 14px;
 }
-.icon-box.neon { background: rgba(198,241,26,.1); border-color: rgba(198,241,26,.3); color: var(--neon); }
+.icon-box.neon { color: var(--neon-ink-on-dark, var(--neon)); }
 
 /* Feature card com seta circular (landing) */
 .feature-card { position: relative; }
@@ -213,12 +226,29 @@ img { max-width: 100%; display: block; }
 .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }
 .tech-split { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: center; padding: 30px 0 90px; }
-.tech-copy h2 { font-size: clamp(1.8rem,4vw,2.6rem); font-weight: 800; letter-spacing: -.02em; line-height: 1.08; margin-bottom: 24px; text-transform: uppercase; }
+.tech-copy h2 { font-size: clamp(1.7rem,3.4vw,2.3rem); font-weight: 800; letter-spacing: -.022em; line-height: 1.1; margin-bottom: 24px; text-wrap: balance; }
 .tech-list { list-style: none; display: grid; gap: 14px; margin-bottom: 28px; }
 .tech-list li { display: flex; align-items: center; gap: 12px; color: var(--ink-2); font-size: 1rem; }
 .tick { width: 24px; height: 24px; border-radius: 7px; background: rgba(198,241,26,.12); border: 1px solid rgba(198,241,26,.3); color: var(--neon); display: flex; align-items: center; justify-content: center; font-size: .78rem; font-weight: 800; flex-shrink: 0; }
 .tech-visual { display: flex; justify-content: center; }
-.tech-visual img { width: min(330px,82%); filter: drop-shadow(0 16px 34px rgba(0,0,0,.5)); }
+
+/* Vocabulário real da Piggy — substitui o cubo "AI". Mono porque é o texto que
+   a pessoa DIGITA, não prosa de marketing; é o mesmo tratamento que /comandos
+   já dá aos exemplos, e ali funciona. */
+.phrasebook { display: flex; flex-wrap: wrap; gap: 10px; align-content: center; max-width: 460px; }
+.phrase {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .86rem; color: var(--ink-2); line-height: 1.3;
+  /* Overlay relativo, não cor fixa: var(--card) era idêntico ao fundo do .card
+     e o chip sumia dentro dele em /funcionalidades. Branco translúcido clareia
+     sobre --bg (#0c0c0d) E sobre --card (#17171a); a borda a 33% é o que
+     desenha o chip: 3,0:1 sobre o card e 2,9:1 sobre --bg, contra 1,2:1 da
+     versão anterior (piso 3:1 de contraste não-textual, WCAG 1.4.11). */
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.33);
+  border-radius: var(--radius-sm); padding: 9px 13px;
+}
+.phrase::before { content: "“"; color: var(--pink); }
+.phrase::after  { content: "”"; color: var(--pink); }
 
 /* ─── Responsivo ────────────────────────────────────────────────────── */
 @media (max-width: 980px) {
@@ -252,6 +282,9 @@ img { max-width: 100%; display: block; }
 }
 @media (max-width: 560px) {
   .features-row { grid-template-columns: 1fr; }
+  /* .grid-3 parava em 2 colunas e ia até 0px: em 375 sobra ~146px por card e o
+     título quebra em 3 linhas. Uma coluna abaixo de 560. */
+  .grid-3 { grid-template-columns: 1fr; }
   .hero-mascot { width: 150px; }
 }
 
@@ -266,7 +299,7 @@ img { max-width: 100%; display: block; }
 .phone { justify-self: center; width: min(300px,90%); background: var(--card); border: 1px solid var(--line); border-radius: 30px; padding: 16px 14px; box-shadow: var(--shadow); position: relative; }
 .phone-notch { width: 54px; height: 5px; border-radius: 3px; background: var(--line-2); margin: 2px auto 14px; }
 .cta-band { text-align: center; background: linear-gradient(180deg, rgba(255,45,142,.10), rgba(255,255,255,.02)); border: 1px solid rgba(255,45,142,.28); border-radius: var(--radius-lg); padding: 56px 30px; margin: 46px 0 20px; }
-.cta-band h2 { font-size: clamp(1.6rem,3.5vw,2.3rem); font-weight: 800; text-transform: uppercase; letter-spacing: -.02em; margin-bottom: 12px; }
+.cta-band h2 { font-size: clamp(1.6rem,3.5vw,2.3rem); font-weight: 800; letter-spacing: -.02em; margin-bottom: 12px; }
 .cta-band p { color: var(--ink-2); margin-bottom: 24px; }
 
 /* ─── Preços: planos ────────────────────────────────────────────────── */
@@ -547,7 +580,12 @@ section[id] { scroll-margin-top: 96px; }
 
 /* FAQ — acordeão */
 .faq { max-width: 760px; margin: 0 auto; display: grid; gap: 12px; }
-.faq-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+/* Sem `overflow: hidden`: o botão .faq-q encosta na borda (folga 0), e o recorte
+   comia os 4px do anel de foco (2 de largura + 2 de offset) — 0 pixel de anel
+   visível, WCAG 2.4.7. O `overflow` aqui não segurava nada: quem recorta a
+   sanfona é o próprio .faq-a. Medido: 0 px de diferença aberto e fechado,
+   em / e /suporte, 1280x800 e 375x812. */
+.faq-item { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .faq-item.open { border-color: var(--line-2); }
 .faq-q {
   width: 100%; text-align: left; background: none; border: none; cursor: pointer;
@@ -564,53 +602,54 @@ section[id] { scroll-margin-top: 96px; }
 .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
 .reveal.in { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
-
 /* ══════════════════════════════════════════════════════════════════════
-   Cubo AI holográfico (fornecido pelo Lucas) — CSS escopado sob .hologram
-   pra não vazar (svg{}, :root, html/body do original foram dropados).
+   Acessibilidade — piso do site público. Fim do arquivo de propósito:
+   sem !important, ganha por ordem de cascata.
    ══════════════════════════════════════════════════════════════════════ */
-.hologram {
-  position: relative; width: min(460px,100%); aspect-ratio: 1;
-  display: grid; place-items: center; isolation: isolate; margin: 0 auto;
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 2px;
 }
-.hologram::before {
-  content: ""; position: absolute; inset: 13%; z-index: -2; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,45,117,.18) 0%, rgba(236,23,88,.095) 29%, rgba(177,12,66,.028) 57%, transparent 76%);
-  filter: blur(28px); animation: ambientPulse 4.8s ease-in-out infinite;
+
+/* O site já desligava .reveal. Isto fecha o resto: são 17 `transition:`,
+   2 `animation:` e 2 @keyframes só neste arquivo. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  html { scroll-behavior: auto; }
 }
-.hologram::after {
-  content: ""; position: absolute; width: 55%; height: 12%; bottom: 9%; z-index: -1; border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(236,23,88,.2), rgba(236,23,88,.045) 52%, transparent 74%);
-  filter: blur(18px); transform: perspective(520px) rotateX(68deg);
+
+/* Comando real fechando um bloco (card de funcionalidade, passo de /como-funciona)
+   — reusa .phrase, o mesmo tratamento mono do vocabulário da home. */
+.phrase.cmd { display: inline-block; margin-top: 12px; font-size: .8rem; }
+
+/* /como-funciona: a numeração descreve uma sequência real, então numerar não é o
+   problema — o círculo em gradiente rosa é, porque dá peso de decoração a um
+   ordinal. Aqui ele vira ordinal discreto e o peso vai pra frase que a pessoa
+   digita. /whatsapp não tem esta classe e mantém os círculos. */
+.steps-typed .step { gap: 14px; }
+.steps-typed .step-num,
+.steps-typed .step:nth-child(even) .step-num {
+  width: 22px; height: auto; border-radius: 0; background: none; box-shadow: none;
+  color: var(--ink-3); font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  align-items: flex-start; justify-content: flex-start; padding-top: 3px;
 }
-.hologram .floating { width: 100%; height: 100%; animation: floating 5.6s ease-in-out infinite; }
-.hologram svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.hologram .circuit { fill: none; stroke: #ec1758; stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 3 9; opacity: .12; animation: circuitFlow 14s linear infinite; }
-.hologram .circuit-dot { fill: #ff2d75; opacity: .28; filter: url(#softGlow); }
-.hologram .cube { transform-box: fill-box; transform-origin: center; animation: drift 13s ease-in-out infinite; }
-.hologram .face-grid { fill: none; stroke: #ec1758; stroke-width: .85; opacity: .12; vector-effect: non-scaling-stroke; }
-.hologram .top-grid { opacity: .18; }
-.hologram .edge { fill: none; stroke: url(#edgeGradient); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; filter: url(#neonGlow); animation: edgePulse 3.5s ease-in-out infinite; }
-.hologram .edge.strong { stroke: url(#hotGradient); stroke-width: 2.25; }
-.hologram .edge.back { opacity: .36; stroke-width: 1.5; filter: url(#softGlow); }
-.hologram .inner { fill: none; stroke: #ec1758; stroke-width: 1.15; stroke-dasharray: 3 7; opacity: .19; vector-effect: non-scaling-stroke; filter: url(#softGlow); }
-.hologram .node { fill: #ff5e98; stroke: rgba(255,255,255,.45); stroke-width: .5; filter: url(#nodeGlow); transform-box: fill-box; transform-origin: center; animation: nodePulse 2.8s ease-in-out infinite; }
-.hologram .node.small { opacity: .74; animation-delay: -1.2s; }
-.hologram .particle { fill: #ff2d75; filter: url(#particleGlow); transform-box: fill-box; transform-origin: center; animation: particleFloat var(--duration,6s) ease-in-out infinite; animation-delay: var(--delay,0s); }
-.hologram .particle.dim { fill: #b10c42; opacity: .3; }
-.hologram .particle.soft { opacity: .5; }
-.hologram .ai-text { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 132px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; letter-spacing: 0; }
-.hologram .ai-depth-deep { fill: #650626; stroke: #8f0a36; stroke-width: 1.1; stroke-linejoin: round; }
-.hologram .ai-depth-mid { fill: #a40b3e; stroke: #d21450; stroke-width: 1.05; stroke-linejoin: round; }
-.hologram .ai-letter-top { fill: url(#aiGradient); stroke: #ff91b7; stroke-width: 1.3; paint-order: stroke fill; filter: url(#textGlow); animation: textPulse 3.2s ease-in-out infinite; }
-.hologram .scan { fill: none; stroke: #ff5e98; stroke-width: 1; opacity: 0; filter: url(#softGlow); animation: scan 5.4s ease-in-out infinite; }
-@keyframes floating { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-@keyframes drift { 0%,100% { transform: rotate(0deg) translate(0,0); } 25% { transform: rotate(.25deg) translate(2px,-1px); } 50% { transform: rotate(0deg) translate(0,-2px); } 75% { transform: rotate(-.25deg) translate(-2px,-1px); } }
-@keyframes edgePulse { 0%,100% { opacity: .82; } 50% { opacity: 1; } }
-@keyframes textPulse { 0%,100% { opacity: .92; } 50% { opacity: 1; } }
-@keyframes nodePulse { 0%,100% { transform: scale(.88); opacity: .7; } 50% { transform: scale(1.25); opacity: 1; } }
-@keyframes ambientPulse { 0%,100% { transform: scale(.94); opacity: .65; } 50% { transform: scale(1.05); opacity: 1; } }
-@keyframes particleFloat { 0%,100% { transform: translate(0,0) scale(.8); opacity: .18; } 45% { transform: translate(3px,-9px) scale(1.2); opacity: .85; } 72% { transform: translate(-2px,-4px) scale(.95); opacity: .4; } }
-@keyframes circuitFlow { to { stroke-dashoffset: -110; } }
-@keyframes scan { 0%,15%,100% { opacity: 0; transform: translateY(-35px); } 38% { opacity: .4; } 72% { opacity: .06; transform: translateY(92px); } }
-@media (prefers-reduced-motion: reduce) { .hologram *, .hologram *::before, .hologram *::after { animation: none !important; } }
+
+/* Faixa curta de agentes na home — não duplica /agents: 3 dos 8, com a arte e a
+   copy da própria página, e link pra ela. */
+/* Sticker (xerife.png, 265×433, fundo transparente) e não a arte _hero de
+   1200×600: as três _hero pesavam 3.020 KB pra renderizar a 327 px. Mesmo
+   tratamento do .card-sticker dos guias. */
+.agent-mini img { width: auto; height: 150px; object-fit: contain; margin-bottom: 14px; filter: drop-shadow(0 8px 18px rgba(0,0,0,.45)); }
+.agent-mini h3 { font-size: 1.08rem; font-weight: 800; letter-spacing: -.01em; margin-bottom: 8px; }
+.agent-mini p { color: var(--ink-2); font-size: .93rem; line-height: 1.6; }
+
+/* /funcionalidades: segurança tinha virado oração subordinada no subtítulo do
+   CTA. Bloco próprio, largura cheia, reusando .card. */
+.sec-note { display: flex; gap: 16px; align-items: flex-start; margin-top: 18px; }
+.sec-note .icon-box { margin: 2px 0 0; font-size: 1.6rem; flex: none; }
+.sec-note h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
+.sec-note p { color: var(--ink-2); font-size: .95rem; line-height: 1.6; }
