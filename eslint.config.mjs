@@ -78,14 +78,26 @@ export default defineConfig([
           caughtErrorsIgnorePattern: "^_",
           // MUDANÇA DE CONFIG, não limpeza de código: `local` deixa de
           // reportar declaração do escopo GLOBAL. Os arquivos de frontend/ são
-          // scripts clássicos, e o que consome os nomes do topo são os 139
+          // scripts clássicos, e o que consome os nomes do topo são os 107
           // `onclick=` do dashboard.html (mais os gerados dentro de template
-          // string) — HTML que o ESLint não lê. Com o default `all` isso dava
-          // 73 avisos, todos falso positivo, e enterrava os de dentro de
-          // função. Quem cobre ESTA classe é tests/frontend/handlers_inline.test.mjs,
-          // que compara os nomes do HTML com os do JS. O preço: global morta de
-          // verdade deixa de aparecer aqui (as 3 achadas na medição de
-          // 2026-09-03 estão no relatório do burndown).
+          // string) — HTML que o ESLint não lê. Para remedir:
+          //   grep -oiE "onclick\s*=" frontend/dashboard.html | wc -l
+          // Com o default `all` isso dava 73 avisos: 70 falso positivo e 3
+          // código morto de VERDADE.
+          //
+          // NADA cobre esta classe. tests/frontend/handlers_inline.test.mjs roda
+          // só na direção HTML→JS (pergunta se todo `onclick` do HTML acha um
+          // nome no JS); a direção inversa — global declarada e SEM consumidor —
+          // não é verificada por teste nenhum, nem por lint. O preço desta
+          // config é exatamente essa: as 3 abaixo só existem registradas aqui, e
+          // este comentário é o único registro. Linhas MEDIDAS EM 2026-09-03 —
+          // remeça antes de reusar (CLAUDE.md §2), elas andam a cada edição:
+          //   grep -nE "^(async )?function (openPocketModal|confirmDeletePocket|computeDailyFromLaunches)\b" frontend/dashboard.js
+          //   openPocketModal          frontend/dashboard.js:8849
+          //   confirmDeletePocket      frontend/dashboard.js:9140
+          //   computeDailyFromLaunches frontend/dashboard.js:9973
+          // Remover função é decisão do dono, fora deste ciclo — as 3 seguem no
+          // arquivo de propósito.
           vars: "local",
         },
       ],
@@ -95,9 +107,9 @@ export default defineConfig([
       // 2026-09-03: as 3 eram `_fmtBRL`/`_fmtDateBR` declaradas 2× e 3× no
       // dashboard.js, com a última vencendo em todo o arquivo.
       "no-redeclare": ["error", { builtinGlobals: false }],
-      // 1 violação, e é bug de verdade: `errEl` em frontend/dashboard.js:9750
-      // está fora do escopo do `const errEl` da linha 9723.
-      "no-undef": "warn", // 1
+      // "error" torna verdade uma coisa nova: global de CDN nova usada sem
+      // entrar na lista `globals` deste arquivo REPROVA O CI, não avisa mais.
+      "no-undef": "error",
       // Orçamento de tamanho e complexidade: "warn" de propósito. São números
       // para conversa sobre fatoração, não portão. As contagens abaixo são a
       // LINHA DE BASE do burndown de 2026-09-03 (portão de decisão: corrigir o
@@ -151,7 +163,7 @@ export default defineConfig([
       // no arquivo do adaptador com um bloco DEPOIS deste.
       "quality/no-direct-console": [
         "warn", // 21
-        { logger: "um adaptador de log do frontend" },
+        { logger: "um adaptador de log do projeto" },
       ],
       // quality/no-direct-data-access foi removida: não existe módulo de dados
       // em JS aqui — o banco é acessado só pelo backend Python (db/).
