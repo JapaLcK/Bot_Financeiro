@@ -16,8 +16,8 @@ import re
 import db
 from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import (limpa_pontuacao_final, marcador_de_tudo, normalize_text,
-                        valor_perigoso)
+from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
+                        normalize_text, valor_perigoso)
 
 # handlers
 from core.handlers import (
@@ -842,13 +842,43 @@ def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     #
     # Só quando UM nome casa: com dois, escolher seria adivinhar, e o handler
     # dizendo "não encontrada" é melhor que mover dinheiro no alvo errado.
-    # Palavra inteira, senão a caixinha "ana" casaria em "banana".
+    # Palavra inteira, senão a caixinha "ana" casaria em "banana" — quem faz
+    # isso é o `contains_word` do `utils_text`, não uma regex repetida aqui (§0.7).
     alvo_norm = normalize_text(resposta)
-    dentro = [n for n in (existentes or [])
-              if re.search(rf"(?<!\w){re.escape(normalize_text(n))}(?!\w)", alvo_norm)]
+    dentro = [n for n in (existentes or []) if contains_word(alvo_norm, normalize_text(n))]
+    if len(dentro) > 1:
+        # "viagem" e "minha viagem" casam os dois: ANINHADOS, o mais específico
+        # ganha. Disjuntos ("ana" e "bruno" na mesma frase) continuam recusados —
+        # escolher seria adivinhar, e o handler dizendo "não encontrada" é melhor
+        # que mover dinheiro no alvo errado.
+        maior = max(dentro, key=lambda n: len(normalize_text(n)))
+        if all(contains_word(normalize_text(maior), normalize_text(n)) for n in dentro):
+            dentro = [maior]
+    # TETO deixado ABERTO de propósito: com catálogo ["viagem", "minha caixinha
+    # viagem"], "tira 100 da minha caixinha viagem" ainda devolve "viagem",
+    # porque o `_SUBST_ALVO_RE` recorta e o catálogo confirma ANTES de chegar
+    # aqui. Fechar isso mexeria na precedência documentada acima, e não há caso
+    # relatado.
     if len(dentro) == 1:
         return dentro[0]
     return recortado or resposta.strip()
+
+
+def _pede_tudo(resposta: str, existentes: list[str] | None = None) -> bool:
+    """O marcador de TUDO conta só se sobreviver à remoção do nome do catálogo.
+
+    Nome de caixinha é string arbitrária: "zerar dívida" é um nome legítimo, e
+    "tira 100 da zerar dívida" pedia 100 — não esvaziar.
+    """
+    if not marcador_de_tudo(resposta):
+        return False
+    alvo = _nome_do_alvo(resposta, existentes)
+    # ESSENCIAL: sem esta guarda, "esvaziar" sozinho se removeria de si mesmo
+    # (o `_nome_do_alvo` devolve a própria resposta) e o marcador sumiria.
+    if not _eh_nome_do_catalogo(alvo, existentes):
+        return True
+    resto = re.sub(rf"\b{re.escape(normalize_text(alvo))}\b", " ", normalize_text(resposta))
+    return marcador_de_tudo(resto)
 
 
 _INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
@@ -899,9 +929,11 @@ def _funde_a_resposta(
 
       target    o CATÁLOGO confirma. Sem ele, "retirei 100 do salário"
                 sobrescreveria a caixinha certa por uma que não existe.
-      quantity  o `valor_perigoso` libera E a resposta não é, INTEIRA, um nome
-                do catálogo — senão a caixinha "meta 2028" vira um saque de
-                R$ 2.028 sem perguntar (Codex P1, #184, rodada 3).
+      quantity  o CATÁLOGO guarda o slot INTEIRO, não só o ramo do
+                `_extract_valor`: a caixinha "meta 2028" não vira saque de
+                R$ 2.028 (Codex P1, #184, rodada 3) e a caixinha "zerar dívida"
+                não vira "esvaziar" (`_pede_tudo`). No ramo do número vale
+                ainda o `valor_perigoso`.
 
     Devolve `(ents, recusa)`. `recusa` é o motivo do `valor_perigoso`, e quem
     monta a mensagem e re-arma a pergunta é o chamador, que tem `db` e `payload`.
@@ -915,7 +947,9 @@ def _funde_a_resposta(
     # Ordem: TUDO primeiro, porque "esvaziar" não tem número e o `_extract_valor`
     # devolveria None — o que antes virava "Não entendi o valor" em laço.
     eh_nome = _eh_nome_do_catalogo(resposta, existentes)
-    if marcador_de_tudo(resposta):
+    # TETO conhecido: caixinha chamada `tudo`, respondida com `tudo`, é lida
+    # como NOME — a mesma precedência já aceita em `meta 2028`.
+    if _pede_tudo(resposta, existentes):
         ents["want_all"] = True
         ents.pop("amount", None)          # excludente: TUDO substitui a quantia
     elif not eh_nome:
@@ -1239,8 +1273,12 @@ def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
     # A quantidade "tudo" tem de sobreviver às QUATRO reconstruções de dict
     # abaixo — elas montam as entities do zero e descartavam o marcador, então
     # "esvaziar" por esta porta perguntava o valor para sempre. Irmão dos dois
-    # handlers de saque; fecha junto (§2).
-    want_all = bool(entities.get("want_all")) or marcador_de_tudo(text)
+    # handlers de saque; fecha junto (§2). A PRESENÇA da chave manda (idioma de
+    # core/handlers/pockets.py:215): com `or`, o `want_all=False` que o resolver
+    # grava DE PROPÓSITO era religado pelo texto original — "esvaziar caixinha"
+    # seguido de "tira 100 da viagem" esvaziava a caixinha.
+    want_all = (bool(entities["want_all"]) if "want_all" in (entities or {})
+                else marcador_de_tudo(text))
     quantia = {"amount": amount, "want_all": want_all}
 
     if target_kind == "pocket":
