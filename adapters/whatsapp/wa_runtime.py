@@ -40,6 +40,7 @@ from core.handle_incoming import handle_incoming
 from core.intent_router import abandona_pergunta_de_valor
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
+from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
 from db import (
     attempt_whatsapp_phone_link,
@@ -348,7 +349,7 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
         return "Lançamento não encontrado (talvez já tenha sido apagado)."
     ensure_user_category(user_id, canon)
     display = display_id_for(user_id, launch_id)
-    return f"✅ Categoria do lançamento #{display} atualizada para *{canon}*."
+    return f"✅ Categoria do lançamento #{display} atualizada para {wrap_wa_markup(canon)}."
 
 
 def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Attachment]:
@@ -801,7 +802,7 @@ def process_message(message: InboundMessage) -> None:
                         return
                     _send_reply(
                         reply_to,
-                        f"Quanto veio a conta de *{nome_conta}* este mês?{hint}\n"
+                        f"Quanto veio a conta de {wrap_wa_markup(nome_conta)} este mês?{hint}\n"
                         f"É só mandar o valor. Ex: *132,50*",
                     )
                     return
@@ -818,7 +819,7 @@ def process_message(message: InboundMessage) -> None:
                     val = paid.get("paid_amount") or paid.get("amount") or 0
                     _send_reply(
                         reply_to,
-                        f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+                        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
                         f"categorizado. Tá tudo em dia! 🐷",
                     )
                 return
@@ -956,7 +957,7 @@ def process_message(message: InboundMessage) -> None:
                         consume_pending_action(uid, pending_recat)
                     except Exception:
                         pass
-                    _send_reply(reply_to, f"Ok, deixei a conta de *{name}* pendente. Quando pagar é só avisar. 🐷")
+                    _send_reply(reply_to, f"Ok, deixei a conta de {wrap_wa_markup(name)} pendente. Quando pagar é só avisar. 🐷")
                     return
                 from utils_text import (fmt_brl, limpa_pontuacao_final,
                                         parse_money, valor_perigoso)
@@ -978,9 +979,9 @@ def process_message(message: InboundMessage) -> None:
                     # recusa → re-pergunta, mantém o pending de pé (descartá-lo
                     # jogaria o usuário no fallback genérico).
                     if perigo == "nao_positivo":
-                        _send_reply(reply_to, f"O valor da conta de *{name}* precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
+                        _send_reply(reply_to, f"O valor da conta de {wrap_wa_markup(name)} precisa ser maior que zero. Quanto veio? Ex: *132,50* (ou *cancelar*)")
                     else:
-                        _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de *{name}*. Ex: *132,50* (ou *cancelar*)")
+                        _send_reply(reply_to, f"Não peguei o valor. Manda só o número da conta de {wrap_wa_markup(name)}. Ex: *132,50* (ou *cancelar*)")
                     return
                 amount = round(amount, 2)
                 # REIVINDICA antes de pagar, e condicionado ao que foi lido:
@@ -1016,7 +1017,7 @@ def process_message(message: InboundMessage) -> None:
                         val = paid.get("paid_amount") or paid.get("amount") or amount
                         _send_reply(
                             reply_to,
-                            f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+                            f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
                             f"categorizado. Tá tudo em dia! 🐷",
                         )
                     return
