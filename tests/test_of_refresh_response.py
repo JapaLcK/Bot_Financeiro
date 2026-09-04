@@ -179,6 +179,24 @@ def test_detalhe_do_parcial_de_verdade_nao_e_sobrescrito(user_id, monkeypatch):
     assert out[0]["detail"] == "Cartão desatualizado desde 12/08", out[0]
 
 
+def test_detalhe_da_acao_necessaria_chega_inteiro_na_resposta_do_refresh(user_id, monkeypatch):
+    """Codex #166: `WAITING_USER_ACTION` pede AUTORIZAR o dispositivo / ler o QR,
+    não refazer a conexão. O detalhe específico tem que atravessar o
+    `_refresh_items_report` sem `_OVERRIDE_LABEL` pisar nele — é ele que o
+    `OF_VERDICT` do settings.html cola no toast."""
+    conexao = db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-espera-usuario", "status": "UPDATED",
+        "connector": {"id": 612, "name": "Nubank"}})
+    db.mark_sync_result(conexao["id"], ok=True, status="ERROR", status_reason="", health={
+        "observed_at": "2026-08-20T12:00:00-03:00", "item_status": "WAITING_USER_ACTION",
+        "execution_status": "WAITING_USER_ACTION", "products": {}, "stale_products": []})
+    monkeypatch.setattr(ps, "get_connections_by_item_id", db.get_connections_by_item_id)
+
+    out = ps._refresh_items_report(["item-espera-usuario"], {}, {}, {}, set())
+    assert out[0]["state"] == "needs_user_action", out[0]
+    assert out[0]["detail"] == "Autorize o acesso no app do banco", out[0]
+
+
 def test_manual_dentro_do_cooldown_ainda_sincroniza(user_id, monkeypatch):
     """O cooldown do manual protege a cota de COLETA (o PATCH). Reler o que a
     Pluggy já tem é GET — e era exatamente o que o usuário queria ao apertar o

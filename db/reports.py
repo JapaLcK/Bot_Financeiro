@@ -213,6 +213,7 @@ def set_onboarding_step(user_id: int, step: int) -> None:
                 (int(step), int(user_id), int(step)),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def mark_onboarding_completed(user_id: int) -> None:
@@ -226,6 +227,7 @@ def mark_onboarding_completed(user_id: int) -> None:
                 (int(user_id),),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def get_user_by_stripe_customer(stripe_customer_id: str) -> int | None:
@@ -365,6 +367,7 @@ def mark_reengagement_sent(user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def mark_tip_sent(user_id: int) -> None:
@@ -375,6 +378,7 @@ def mark_tip_sent(user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def mark_insight_sent(user_id: int) -> None:
@@ -385,6 +389,7 @@ def mark_insight_sent(user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
@@ -401,6 +406,7 @@ def set_engagement_opt_out(user_id: int, opt_out: bool) -> None:
                 (opt_out, opt_out, opt_out, user_id),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
@@ -411,6 +417,7 @@ def set_tip_email_opt_out(user_id: int, opt_out: bool) -> None:
                 (opt_out, user_id),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def set_insight_email_opt_out(user_id: int, opt_out: bool) -> None:
@@ -421,6 +428,7 @@ def set_insight_email_opt_out(user_id: int, opt_out: bool) -> None:
                 (opt_out, user_id),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def set_whatsapp_updates_opt_out(user_id: int, opt_out: bool) -> None:
@@ -431,6 +439,7 @@ def set_whatsapp_updates_opt_out(user_id: int, opt_out: bool) -> None:
                 (opt_out, user_id),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def sync_engagement_opt_out(user_id: int) -> None:
@@ -445,6 +454,7 @@ def sync_engagement_opt_out(user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    _db_support.invalidate_auth_user_cache(user_id)
 
 
 def get_user_by_email(email: str) -> dict | None:

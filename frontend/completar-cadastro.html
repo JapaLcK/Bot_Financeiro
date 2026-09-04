@@ -117,7 +117,12 @@ document.getElementById("signup-form").addEventListener("submit", async function
     // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
     // server-side (CAPI) pro Meta deduplicar.
     if (window.fbq && data.user_id) { fbq("track", "CompleteRegistration", {}, { eventID: "signup_" + data.user_id }); }
-    window.location.replace(data.dashboard_url || "/home");
+    // GA4: mesma conversão, nome recomendado. `method` separa e-mail de Google.
+    // `pbTrack` porque o replace abaixo destrói a página (ver o snippet em
+    // frontend/routes/shared.py): sem esperar, o evento morre no dataLayer.
+    const irPraDash = () => { window.location.replace(data.dashboard_url || "/home"); };
+    if (window.pbTrack && data.user_id) { pbTrack("sign_up", { method: "google" }, irPraDash); }
+    else { irPraDash(); }
   } catch (err) { showError("Erro de conexão. Tente novamente."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; }
 });
 

@@ -42,6 +42,83 @@ def test_html_pages_respondem_com_no_store():
         assert resp.headers["cache-control"] == "no-store", path
 
 
+def test_whatsapp_nao_garante_quando_a_primeira_cobranca_vem():
+    """A trilha de passos da /whatsapp é NOSSA (1ca0c44) e não pode prometer a data.
+
+    Mesmo defeito que o `tests/test_welcome_email_copy.py` já proíbe no e-mail:
+    quem recria a conta com um telefone que já está em `plan_trials` é
+    inelegível (`db.plans.is_trial_eligible_for_user`), o checkout sai com
+    `trial_days=0` e o Stripe cobra na hora. Achado do Codex no PR #239 — o
+    e-mail foi corrigido e esta página ficou.
+
+    Controle positivo junto: a oferta dos 15 dias continua na página (senão o
+    caso passaria numa /whatsapp que apagou o trial, que é pior que a garantia)
+    e a ressalva "um por número" da /precos aparece.
+
+    Só a /whatsapp: na /precos as mesmas frases existem em copy PREEXISTENTE
+    (linhas 220, 319 e 773, anteriores ao PR), então a asserção de página
+    inteira ficaria vermelha por código que não é deste PR. A copy do gate de
+    lá, que é nossa, é medida em tests/frontend/precos_sem_plano_gratis.test.mjs.
+    """
+    html = " ".join(client.get("/whatsapp").text.split())
+
+    for garantia in (
+        "Nada é cobrado agora",
+        "primeira cobrança só vem depois",
+        "cancelar antes sem pagar nada",
+    ):
+        assert garantia not in html, (
+            f"a /whatsapp garante a data da cobrança, que a página não conhece: {garantia!r}"
+        )
+
+    assert "15 dias grátis" in html, "a /whatsapp deixou de oferecer o teste"
+    assert "um por número de telefone" in html, (
+        "a /whatsapp perdeu a ressalva de que o teste é um por número"
+    )
+    assert "checkout" in html.lower(), (
+        "a /whatsapp não defere ao checkout quem confirma a cobrança"
+    )
+
+
+def test_index_nao_inverte_o_fluxo_do_trial():
+    """O CTA do "como funciona" da / é NOSSO (1ca0c44) e dizia o fluxo ao contrário.
+
+    O texto era "você testa 15 dias grátis antes de escolher um plano", mas o
+    gate deste PR faz o oposto: escolher o plano é o que ATIVA o trial
+    (`needs_plan_selection` bloqueia o app até a assinatura). O mesmo commit
+    escreveu a ordem certa na /whatsapp e na /como-funciona e a inversa aqui.
+
+    A asserção é presa ao bloco `.hiw-cta` de propósito: as garantias de data
+    ("primeira cobrança", "sem pagar nada") também existem nas linhas 504 e
+    536 desta página, mas são PREEXISTENTES (d5e299f, anterior à merge-base
+    c779837) e não são deste PR. Guarda de página inteira, como o da
+    /whatsapp, é impossível aqui — ficaria vermelho por código de terceiro.
+
+    Controle positivo dentro do próprio bloco: ele continua oferecendo o teste
+    e deferindo ao checkout, senão o caso passaria num CTA que apagou a oferta.
+    """
+    html = " ".join(client.get("/").text.split())
+    bloco = re.search(r'class="hiw-cta".*?</div>', html)
+    assert bloco, "o bloco .hiw-cta sumiu da / — a asserção abaixo ficou cega"
+    cta = bloco.group(0)
+
+    assert not re.search(
+        r"test\w*[^.]{0,60}antes de (?:escolher|assinar|pegar|pagar)[^.]{0,25}plano",
+        cta,
+        re.I,
+    ), f"o CTA da / diz que se testa antes de escolher o plano: {cta!r}"
+
+    for garantia in ("primeira cobrança", "sem pagar nada", "não paga nada"):
+        assert garantia not in cta, (
+            f"o CTA da / garante a data/ausência da cobrança: {garantia!r}"
+        )
+
+    assert "15 dias grátis" in cta, "o CTA da / deixou de oferecer o teste"
+    assert "checkout" in cta.lower(), (
+        "o CTA da / não defere ao checkout quem confirma a cobrança"
+    )
+
+
 def test_stamp_asset_versions_usa_hash_de_conteudo():
     # Número hardcoded no HTML é ignorado e trocado pelo hash do arquivo real.
     mtime = (FRONTEND_DIR / "app-mode.css").stat().st_mtime_ns
@@ -154,7 +231,7 @@ def test_auth_refresh_js_revalida_a_cada_load():
 
 
 def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
-    """As 4 páginas que o carregam pedem `?v=<hash>`, não a URL nua.
+    """As páginas que o carregam pedem `?v=<hash>`, não a URL nua.
 
     Três delas referenciavam sem `?v=` nenhum, e o `?v=1` da quarta era um
     cache-buster MORTO: o `_ASSET_VER_RE` não aceitava `/` no meio do caminho,
@@ -166,7 +243,7 @@ def test_auth_refresh_js_sai_versionado_nas_paginas_autenticadas():
         "static/auth-refresh.js",
         (FRONTEND_DIR / "static" / "auth-refresh.js").stat().st_mtime_ns,
     )
-    for page in ["/app", "/home", "/settings", "/onboarding"]:
+    for page in ["/app", "/home", "/settings", "/onboarding", "/precos"]:
         html = client.get(page).text
         assert "/static/auth-refresh.js" in html, page
         m = re.search(r"/static/auth-refresh\.js\?v=([0-9a-f]+)", html)

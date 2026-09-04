@@ -5,7 +5,7 @@ import calendar
 import logging
 import sys
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
 from psycopg.types.json import Jsonb
@@ -18,6 +18,85 @@ from .users import ensure_user
 
 logger = logging.getLogger(__name__)
 _warned_bcb_requests: set[tuple] = set()
+
+# Cache-primeiro nas taxas do BCB (CLAUDE.md §5 — caminho do dashboard):
+# série DIÁRIA é fresca enquanto não existe dia útil BR publicável depois do
+# ponto mais novo (sexta cobre o fim de semana e feriadão; a segunda publicada
+# invalida — regra de calendário, não de "N dias corridos", senão o accrual
+# ficava até 2 dias úteis atrás servindo cache "fresco"). IPCA_12M é mensal
+# com ~2 semanas de atraso: frescor por idade + memo de confirmação.
+# ponytail: dia já cacheado é FINAL — revisão retroativa do BCB é ignorada;
+# se um dia precisar ser recarregado, apague a linha de market_rates à mão.
+SGS_MONTHLY_FRESH_DAYS = 45
+# Timeout das chamadas SGS. Era 20 s; com cache-primeiro a rede só entra em
+# cache frio, e 20 s pendurados seguravam o /data do dashboard inteiro.
+SGS_TIMEOUT_SECONDS = 3
+
+# ── Máquina de estados do cache de séries SGS (mapas diários) ────────────────
+# cobertura = todo dia útil BR de [start, max(cache)] no cache (_sgs_cache_covers)
+# cauda     = nenhum dia útil publicável em (max(cache), end] (_sgs_tail_is_fresh)
+# memo      = a rede respondeu, e a resposta ainda vale, sobre um intervalo que
+#             CONTÉM o que eu preciso perguntar (_sgs_answered_covers)
+#
+#  célula                                          → ação (o que o código faz)
+#  1 cobertura FURADA (cabeça/meio)                → fetch da janela INTEIRA,
+#    sempre; memo NUNCA consultado — dinheiro não depende dele
+#  2 cobertura ok + cauda completa                 → 0 fetch (inclui end==newest
+#    e ref futura: cauda vazia é completa). Nada é adiado: não há dia publicável.
+#  3 cobertura ok + cauda incompleta + memo cobrindo (newest, end] → 0 fetch.
+#    RESSALVA: se o BCB publicar dentro da validade do memo, esse dia entra na
+#    próxima chamada após o vencimento — defere ≤2h (parcial/vazia) ou até a
+#    meia-noite UTC (resposta completa), NUNCA perde: o accrual só avança
+#    last_date até o último dia que ele viu.
+#  4 cobertura ok + cauda incompleta + memo não cobre → fetch [newest+1, end]:
+#    a dados que COMPLETAM a cauda → upsert; memo vale até a meia-noite UTC
+#    b dados PARCIAIS ou vazia (pré-publicação) → upsert o que veio; memo vale
+#      SGS_CONFIRM_SHORT — pega o ponto publicado à noite ainda no mesmo dia
+#    c falha/timeout (None) ou 200+lixo (None) → NÃO grava memo; re-tenta já
+#  5 cache VAZIO na janela → 0 fetch só se o memo cobre [start, end]; senão
+#    fetch da janela e grava como a célula 4. Mesma RESSALVA da célula 3.
+#    Instância real: manhã de segunda com lote acruado na sexta (janela
+#    [sáb, seg] vazia até o BCB publicar) — sem a célula era 1 fetch por
+#    abertura (~318 ms cada), o dia inteiro.
+#  get_latest_*: mesma máquina, perguntando por (ref_date, hoje]; o /ultimos/N
+#  responde sobre [ponto mais novo, hoje] e é isso que fica no memo. Na mensal
+#  (IPCA_12M) o frescor é por idade (≤45d).
+#
+# Todo memo é ESCOPADO ao intervalo que a rede respondeu — um memo global
+# ("não há ponto mais novo") parece equivalente e não é: ele cala uma janela
+# histórica que nunca foi consultada. Isso já mordeu duas vezes (Codex-6 na
+# janela vazia, e o mesmo padrão no memo de cauda), então existe UMA estrutura
+# só e ela sempre carrega o intervalo.
+#
+# Sem memo, série sem ponto novo (IPCA_12M passa 40-70 dias com o mesmo
+# ref_date; CDI parado num feriadão) pagaria um fetch idêntico A CADA chamada.
+# ponytail: memo por processo (reseta no restart, não cruza workers). Teto de
+# rede por série/dia/processo: 1 fetch em dia já publicado; ≤ 24h/2h = 12 em
+# dia pré-publicação com tráfego contínuo (típico ≤ 6). Banco, se incomodar.
+SGS_CONFIRM_SHORT = timedelta(hours=2)
+# code → (validade, start, end) do último intervalo que a rede respondeu.
+_sgs_answered: dict[str, tuple[datetime, date, date]] = {}
+
+
+def _sgs_remember(code: str, start: date, end: date, *, complete: bool) -> None:
+    """Guarda que a rede respondeu sobre [start, end]. `complete` = a resposta
+    fechou a cauda pedida (vale até a meia-noite UTC); parcial/vazia vale
+    SGS_CONFIRM_SHORT, para pegar a publicação do fim do dia."""
+    now = datetime.now(timezone.utc)
+    if complete:
+        until = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        until = now + SGS_CONFIRM_SHORT
+    _sgs_answered[code] = (until, start, end)
+
+
+def _sgs_answered_covers(code: str, start: date, end: date) -> bool:
+    """A rede já respondeu, e a resposta ainda vale, sobre um intervalo que
+    CONTÉM [start, end]? Só então dá para pular o fetch."""
+    a = _sgs_answered.get(code)
+    return bool(a) and datetime.now(timezone.utc) < a[0] and a[1] <= start and end <= a[2]
+
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -63,7 +142,10 @@ def _is_sgs_no_values_payload(payload) -> bool:
     return "Value(s) not found" in detail
 
 
-def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict]:
+def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tuple) -> list[dict] | None:
+    """None = payload não-decodificável/inesperado (trata-se como falha: não
+    alimenta o memo _sgs_answered, re-tenta na próxima chamada);
+    [] = resposta legítima "sem valores no período" (confirma o memo)."""
     try:
         payload = r.json()
     except Exception as e:
@@ -73,7 +155,7 @@ def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tup
             series_code,
             e,
         )
-        return []
+        return None
 
     if isinstance(payload, list):
         return payload
@@ -88,14 +170,18 @@ def _decode_sgs_response(r: requests.Response, series_code: int, *, context: tup
         series_code,
         payload,
     )
-    return []
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CDI — BCB SGS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict]:
+def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dict] | None:
+    """None = falha (rede/HTTP/timeout OU 200 com payload lixo — nada disso
+    confirma o memo, re-tenta na próxima chamada); lista = resposta do BCB
+    (vazia inclusive — "sem valores no período" é resposta, e alimenta o memo
+    _sgs_answered)."""
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados"
     params = {
         "formato": "json",
@@ -103,7 +189,7 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
         "dataFinal": _fmt_ddmmyyyy(end),
     }
     try:
-        r = requests.get(url, params=params, timeout=20)
+        r = requests.get(url, params=params, timeout=SGS_TIMEOUT_SECONDS)
         if r.status_code == 404:
             data = _decode_sgs_response(r, series_code, context=("fetch_sgs_series_json", series_code, start, end))
             if data or _is_sgs_no_values_payload(r.json()):
@@ -119,14 +205,14 @@ def _fetch_sgs_series_json(series_code: int, start: date, end: date) -> list[dic
             end.isoformat(),
             e,
         )
-        return []
+        return None
 
 
-def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict]:
+def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict] | None:
     url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{series_code}/dados/ultimos/{limit}"
     params = {"formato": "json"}
     try:
-        r = requests.get(url, params=params, timeout=20)
+        r = requests.get(url, params=params, timeout=SGS_TIMEOUT_SECONDS)
         if r.status_code == 404:
             data = _decode_sgs_response(r, series_code, context=("fetch_sgs_latest_json", series_code, limit))
             if data or _is_sgs_no_values_payload(r.json()):
@@ -140,7 +226,35 @@ def _fetch_sgs_latest_json(series_code: int, limit: int = 15) -> list[dict]:
             series_code,
             e,
         )
-        return []
+        return None  # mesmo contrato da _fetch_sgs_series_json: None = falha
+
+
+def _sgs_tail_is_fresh(newest: date, end: date) -> bool:
+    """Cauda completa: nenhum dia útil BR publicável em (newest, end].
+    Sexta→domingo é fresco (0 fetch); sexta→segunda já não é."""
+    d = newest + timedelta(days=1)
+    while d <= end:
+        if is_br_business_day(d):
+            return False
+        d += timedelta(days=1)
+    return True
+
+
+def _sgs_cache_covers(cached: dict[date, float], start: date, newest: date) -> bool:
+    """True se TODO dia útil BR de [start, newest] está no cache.
+
+    Buraco na CABEÇA ou no MEIO é juro não computado: o accrual avança
+    last_date por cima dos dias faltantes e o rendimento some sem retentativa
+    (dinheiro exibido). Cobertura furada ⇒ a janela inteira vai à rede
+    (comportamento antigo), que cura o buraco. Falso-negativo possível: dia
+    que o nosso calendário chama de útil mas o BCB não publica vira fetch da
+    janela toda — correto, só não otimizado."""
+    d = start
+    while d <= newest:
+        if is_br_business_day(d) and d not in cached:
+            return False
+        d += timedelta(days=1)
+    return True
 
 
 def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
@@ -158,8 +272,23 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
     )
     cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
 
-    data = _fetch_sgs_series_json(12, start, end)
+    fetch_start = start
+    if cached:
+        newest = max(cached)
+        if _sgs_cache_covers(cached, start, newest):
+            fetch_start = newest + timedelta(days=1)  # só a cauda falta
+            if _sgs_tail_is_fresh(newest, end) or \
+                    _sgs_answered_covers("CDI", fetch_start, end):
+                return cached  # cauda completa, ou a rede já respondeu por ela
+        # cobertura furada: fetch_start segue em `start` (janela inteira),
+        # e o memo NÃO é consultado — dinheiro não depende dele.
+    elif _sgs_answered_covers("CDI", start, end):
+        return cached  # célula 5: a rede já respondeu por ESTA janela
+
+    data = _fetch_sgs_series_json(12, fetch_start, end)
     if not isinstance(data, list) or not data:
+        if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
+            _sgs_remember("CDI", fetch_start, end, complete=False)
         return cached
 
     to_upsert = []
@@ -191,6 +320,9 @@ def _get_cdi_daily_map(cur, start: date, end: date) -> dict[date, float]:
             to_upsert,
         )
 
+    # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
+    _sgs_remember("CDI", fetch_start, end,
+                  complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
     return cached
 
 
@@ -206,8 +338,24 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
     )
     cached = {row["ref_date"]: float(row["value"]) for row in cur.fetchall()}
 
-    data = _fetch_sgs_series_json(series_code, start, end)
+    fetch_start = start
+    if cached:
+        newest = max(cached)
+        if _sgs_cache_covers(cached, start, newest):
+            fetch_start = newest + timedelta(days=1)  # só a cauda falta
+            if _sgs_tail_is_fresh(newest, end) or \
+                    _sgs_answered_covers(code, fetch_start, end):
+                return cached  # cauda completa, ou a rede já respondeu por ela
+        # cobertura furada: fetch_start segue em `start` (janela inteira), e o
+        # memo NÃO é consultado. (Séries mensais nunca "cobrem" dias úteis ⇒
+        # sempre janela inteira — comportamento antigo, correto.)
+    elif _sgs_answered_covers(code, start, end):
+        return cached  # célula 5: a rede já respondeu por ESTA janela
+
+    data = _fetch_sgs_series_json(series_code, fetch_start, end)
     if not isinstance(data, list) or not data:
+        if isinstance(data, list):  # []: "sem valores" pré-publicação → curto
+            _sgs_remember(code, fetch_start, end, complete=False)
         return cached
 
     to_upsert = []
@@ -234,6 +382,9 @@ def _get_sgs_daily_map(cur, code: str, series_code: int, start: date, end: date)
             to_upsert,
         )
 
+    # Célula 4a×4b: resposta completou a cauda ⇒ dia cheio; parcial ⇒ curto.
+    _sgs_remember(code, fetch_start, end,
+                  complete=bool(cached) and _sgs_tail_is_fresh(max(cached), end))
     return cached
 
 
@@ -278,49 +429,53 @@ def _parse_sgs_latest(data, *, series: str) -> tuple[date, float] | None:
 
 def get_latest_cdi(cur) -> tuple[date, float] | None:
     """Retorna (data, valor_percent_ao_dia) da CDI mais recente."""
-    latest = _parse_sgs_latest(_fetch_sgs_latest_json(12), series="CDI (12)")
-
-    if latest:
-        cur.execute(
-            "insert into market_rates(code, ref_date, value) values ('CDI', %s, %s) "
-            "on conflict (code, ref_date) do update set value = excluded.value",
-            latest,
-        )
-        return latest
-
-    cur.execute(
-        "select ref_date, value from market_rates where code = 'CDI' order by ref_date desc limit 1"
-    )
-    row = cur.fetchone()
-    return (row["ref_date"], float(row["value"])) if row else None
+    return get_latest_market_rate(cur, "CDI", 12)
 
 
 def get_latest_cdi_aa(cur) -> tuple[date, float] | None:
     """CDI a.a. (base 252) direto do SGS/BCB (série 4389)."""
-    latest = _parse_sgs_latest(_fetch_sgs_latest_json(4389), series="CDI_AA (4389)")
+    return get_latest_market_rate(cur, "CDI_AA", 4389)
 
-    if latest:
-        cur.execute(
-            "insert into market_rates(code, ref_date, value) values ('CDI_AA', %s, %s) "
-            "on conflict (code, ref_date) do update set value = excluded.value",
-            latest,
-        )
-        return latest
 
+def get_latest_market_rate(
+    cur, code: str, series_code: int, fresh_days: int | None = None
+) -> tuple[date, float] | None:
+    """Retorna a taxa mais recente de uma série SGS: cache local fresco primeiro,
+    rede em cache frio, e cache stale como fallback quando a rede falha.
+
+    fresh_days=None (séries DIÁRIAS): fresco enquanto não existe dia útil BR
+    publicável depois do ref_date. fresh_days=N (mensais, ex. IPCA_12M):
+    fresco por idade. Nos dois casos o memo de confirmação da rede vale por
+    cima (confirmou hoje que não há ponto novo ⇒ fresco até amanhã) — sem
+    ele, série sem ponto novo pagaria um fetch idêntico a cada chamada."""
     cur.execute(
-        "select ref_date, value from market_rates where code = 'CDI_AA' order by ref_date desc limit 1"
+        "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
+        (code,),
     )
     row = cur.fetchone()
-    return (row["ref_date"], float(row["value"])) if row else None
+    if row:
+        if fresh_days is None:
+            fresh = _sgs_tail_is_fresh(row["ref_date"], date.today())
+        else:
+            fresh = (date.today() - row["ref_date"]).days <= fresh_days
+        # Memo escopado: a pergunta aqui é sobre (ref_date, hoje].
+        if fresh or _sgs_answered_covers(code, row["ref_date"] + timedelta(days=1), date.today()):
+            return (row["ref_date"], float(row["value"]))
 
-
-def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, float] | None:
-    """Retorna a taxa mais recente de uma série SGS, usando cache local como fallback."""
     latest = _parse_sgs_latest(
         _fetch_sgs_latest_json(series_code), series=f"{code} ({series_code})"
     )
 
     if latest:
+        # O /ultimos/N responde sobre [ponto mais novo, hoje] — é esse o
+        # intervalo que vai para o memo, nunca "a série inteira".
+        if fresh_days is None:
+            # Diária: ponto do último dia útil ⇒ completa (dia cheio); ponto
+            # velho (pré-publicação de hoje) ⇒ curta, re-checa ainda hoje.
+            _sgs_remember(code, latest[0], date.today(),
+                          complete=_sgs_tail_is_fresh(latest[0], date.today()))
+        else:  # mensal: o mais novo É a resposta
+            _sgs_remember(code, latest[0], date.today(), complete=True)
         cur.execute(
             "insert into market_rates(code, ref_date, value) values (%s, %s, %s) "
             "on conflict (code, ref_date) do update set value = excluded.value",
@@ -328,11 +483,7 @@ def get_latest_market_rate(cur, code: str, series_code: int) -> tuple[date, floa
         )
         return latest
 
-    cur.execute(
-        "select ref_date, value from market_rates where code = %s order by ref_date desc limit 1",
-        (code,),
-    )
-    row = cur.fetchone()
+    # Rede falhou: cache stale (já lido acima) é melhor que nada.
     return (row["ref_date"], float(row["value"])) if row else None
 
 
@@ -343,7 +494,7 @@ def get_latest_selic_aa(cur) -> tuple[date, float] | None:
 
 def get_latest_ipca_12m(cur) -> tuple[date, float] | None:
     """IPCA acumulado em 12 meses no SGS/BCB (série 13522)."""
-    return get_latest_market_rate(cur, "IPCA_12M", 13522)
+    return get_latest_market_rate(cur, "IPCA_12M", 13522, fresh_days=SGS_MONTHLY_FRESH_DAYS)
 
 
 def get_dashboard_market_rates() -> dict:

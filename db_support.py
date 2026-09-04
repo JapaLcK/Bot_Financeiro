@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import secrets
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -457,6 +460,7 @@ def register_auth_user_impl(
                  encrypt_pii_optional(email)),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)
 
@@ -499,7 +503,64 @@ def login_auth_user_impl(get_conn, check_password, email: str, password: str) ->
     }
 
 
+# ─── Cache TTL do get_auth_user ──────────────────────────────────────────────
+# Uma abertura de dashboard lia auth_accounts ~17× (4×/auth/me, 4×/history,
+# 4×/dashboard-profile, 4×/data frio, 2×/expenses/daily). TTL curto por
+# user_id + invalidação nos writers de auth_accounts — mesmo desenho do
+# dashboard_current_cache (frontend/routes/shared.py).
+#
+# Exceções DELIBERADAS de invalidação (caminho quente, colunas que o SELECT
+# do get_auth_user não serve — invalidar ali zeraria o hit rate a cada
+# mensagem): db/reports.py::update_last_activity e
+# db/ai_chat.py::get_usage_this_month/increment_usage. Se alguma dessas
+# colunas entrar no SELECT abaixo, a exceção dela cai junto.
+# Cross-process (bot.py do Discord): sem invalidação remota; o TTL de 10 s é
+# o teto do atraso.
+AUTH_USER_CACHE_TTL_SECONDS = 10
+# Teto de entradas: o dict guarda PII decifrada (email/telefone/nome) e sem
+# teto uma entrada expirada só saía da memória quando o MESMO usuário fosse
+# consultado de novo. No insert acima do teto: poda expirados; se ainda
+# estourar, despeja o mais antigo. Dois limites aceitos de propósito: a poda
+# só roda NO INSERT (processo ocioso retém até 512 entradas expiradas até a
+# próxima leitura), e a ordem de despejo é por timestamp de INSERT, não de
+# uso — com TTL de 10 s, despejar um usuário ativo custa ≤10 s de cache.
+# ponytail: varredura O(n) no teto (512) — ordenar por timestamp se o teto
+# crescer 10x; poda por tempo (task periódica) se o ocioso incomodar.
+AUTH_USER_CACHE_MAX = 512
+_auth_user_cache: dict[int, tuple[float, dict | None]] = {}
+# get_auth_user roda em THREADS (dezenas de `asyncio.to_thread(get_auth_user,
+# ...)` no monólito), então poda+evict+insert — que ITERAM o dict — podem
+# correr com um insert/clear de outra thread e levantar "dictionary changed
+# size during iteration" numa request de auth legítima. O lock protege só as
+# seções COMPOSTAS; o lookup segue fora dele (dict.get é atômico sob o GIL e
+# o caminho quente não paga contenção).
+_auth_user_cache_lock = threading.Lock()
+
+
+def invalidate_auth_user_cache(user_id: int | None = None) -> None:
+    """Chame após QUALQUER escrita em auth_accounts (None = limpa tudo)."""
+    with _auth_user_cache_lock:
+        if user_id is None:
+            _auth_user_cache.clear()
+        else:
+            _auth_user_cache.pop(int(user_id), None)
+
+
 def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
+    hit = _auth_user_cache.get(int(user_id))
+    if hit and time.monotonic() - hit[0] < AUTH_USER_CACHE_TTL_SECONDS:
+        # deepcopy nos dois sentidos: caller que mutar o dict não pode
+        # envenenar o cache (plan/plan_expires_at decidem acesso pago).
+        return copy.deepcopy(hit[1])
+    # Timestamp do INÍCIO da leitura, não do fim: um leitor em cache-miss pode
+    # publicar uma linha que ficou velha durante a própria leitura (escritor
+    # commitou e invalidou no meio). Contando do início, esse stale continua
+    # limitado ao TTL — com o timestamp do fim, ele duraria TTL + a duração da
+    # leitura, ou seja MAIS que o teto que o design documenta.
+    # ponytail: não há generation counter — o efeito residual é exatamente o
+    # TTL de 10 s que o cache já assume; contador por usuário só se algum dia
+    # a promessa de invalidação precisar ser dura (aí o certo é não cachear).
+    lido_em = time.monotonic()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -538,6 +599,16 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
             ctx=PiiAccessContext(purpose="get_auth_user", actor=f"user:{user_id}",
                                  subject_user_id=user_id, field="name"),
         )
+    now = lido_em
+    with _auth_user_cache_lock:  # poda+evict ITERAM o dict: ver comentário do lock
+        if len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+            cutoff = now - AUTH_USER_CACHE_TTL_SECONDS
+            for uid in [u for u, (ts, _) in _auth_user_cache.items() if ts < cutoff]:
+                _auth_user_cache.pop(uid, None)
+            while len(_auth_user_cache) >= AUTH_USER_CACHE_MAX:
+                oldest = min(_auth_user_cache, key=lambda u: _auth_user_cache[u][0])
+                _auth_user_cache.pop(oldest, None)
+        _auth_user_cache[int(user_id)] = (now, copy.deepcopy(row))
     return row
 
 
@@ -589,12 +660,18 @@ def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) ->
                 (plan, expires_at, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def mark_plan_selected_impl(get_conn, user_id: int) -> None:
-    """Marca que o usuário já escolheu um plano no cadastro (Grátis ou pago),
-    liberando o acesso ao dashboard. Idempotente: só grava na primeira vez
-    (where plan_selected_at is null) pra preservar o timestamp original."""
+    """Marca que o usuário já escolheu um plano no cadastro, liberando o acesso
+    ao dashboard. Hoje quem chama são os DOIS ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`);
+    a escolha do Grátis morreu em 2026-09-02. Não são duas portas de entrada: o
+    `invoice.paid` pressupõe subscription, que pressupõe uma sessão de checkout
+    antes, então o funil de cadastro continua com uma saída só — pagar.
+    Idempotente: só grava na primeira vez (where plan_selected_at is null) pra
+    preservar o timestamp original."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -603,6 +680,7 @@ def mark_plan_selected_impl(get_conn, user_id: int) -> None:
                 (user_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
@@ -617,6 +695,7 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
                 (status, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 def get_user_by_stripe_customer_impl(get_conn, stripe_customer_id: str) -> int | None:
@@ -638,6 +717,7 @@ def set_stripe_customer_impl(get_conn, user_id: int, stripe_customer_id: str) ->
                 (stripe_customer_id, user_id),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 class AccountAlreadyExistsError(Exception):
@@ -803,6 +883,7 @@ def confirm_email_verification_impl(
                 (verification_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)
 
@@ -929,6 +1010,7 @@ def attempt_whatsapp_phone_link_impl(
                 (target_user_id,),
             )
         conn.commit()
+    invalidate_auth_user_cache(target_user_id)
 
     return {
         "status": "already_linked" if current_user_id == target_user_id and existing_current_wa else "linked",
@@ -1012,6 +1094,7 @@ def consume_password_reset_token_impl(get_conn, hash_password, token: str, new_p
                 (now, token),
             )
         conn.commit()
+    invalidate_auth_user_cache(user_id)
 
     return user_id
 

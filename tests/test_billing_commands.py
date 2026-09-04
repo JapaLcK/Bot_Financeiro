@@ -265,7 +265,7 @@ def test_assinar_v2_inelegivel_nao_promete_trial(patches):
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
 
-    assert "30 dias grátis" not in out
+    assert "15 dias grátis" not in out
     assert "cobrança imediata" in out
 
 
@@ -275,5 +275,5 @@ def test_assinar_v2_com_consulta_indisponivel_delega_confirmacao_ao_checkout(pat
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
 
-    assert "30 dias grátis" not in out
+    assert "15 dias grátis" not in out
     assert "checkout confirma" in out

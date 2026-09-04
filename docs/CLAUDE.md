@@ -55,8 +55,12 @@ frontend/
   routes/                 — routers já extraídos: static_pages, settings, pockets,
                             cards, analytics, open_finance, push, agents, affiliates,
                             shared (html_file, stamp_asset_versions, página de erro)
-  *.html (26 páginas)     — servidas por static_pages.py; ver o §5 do CLAUDE.md da raiz
-  *.css / *.js            — cada arquivo tem uma rota própria; não há StaticFiles mount
+  *.html                  — servidas por static_pages.py (quantas: `ls frontend/*.html
+                            | wc -l`; o número que estava aqui dizia 26 e eram 27);
+                            ver o §5 do CLAUDE.md da raiz
+  *.css / *.js            — cada arquivo tem uma rota própria; não há StaticFiles mount.
+                            Página ou asset sem rota é código morto que ninguém alcança:
+                            tests/test_frontend_assets_e_rotas.py reprova os dois casos
 
 adapters/
   whatsapp/               — webhook + cliente da API oficial (Cloud API)
@@ -66,6 +70,8 @@ mobile/                   — app iOS (Capacitor) que carrega https://pigbankai.
 scripts/                  — utilitários operacionais e de build de assets
 tests/                    — pytest (backend) e tests/frontend/*.mjs (node --test)
 docs/refactor_plan.md     — plano de quebra do monólito FastAPI
+docs/open_finance_validacao_manual.md — o que do Open Finance só se valida em
+                            aparelho ou com Pluggy real, e o roteiro para isso
 ```
 
 ---
@@ -129,7 +135,9 @@ de mensagem? Os dois lados mudam junto — o consumidor está no `dashboard.js`.
 ### Pagamentos
 
 Stripe: `/billing/create-checkout`, `webhook`, `portal`, `subscription`,
-`change-plan`, `cancel-change`, `select-free`, `plans-config`.
+`change-plan`, `cancel-change`, `plans-config` e `select-free` (esta só RECUSA
+com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
+sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
 A **escada de planos é `free < essencial < plus < pro`**, atrás do flag
 `PLANS_V2_ENABLED` (lido dinamicamente, sem redeploy; `0`/`false` é freio de
@@ -192,6 +200,12 @@ O drill-down de uma conta troca o plano à mão (`POST /admin/api/users/{id}/pla
 → `set_account_plan`, a mesma escrita do `/admin/grant-pro`): grava
 `plan`/`plan_expires_at` no banco e **não fala com a Stripe** — assinatura viva
 continua lá e o próximo webhook dela sobrescreve.
+
+A segunda escrita do drill-down libera novo trial
+(`POST /admin/api/users/{id}/trial-reset` → `db.plans.reset_trial_for_user`):
+apaga a linha de `plan_trials` do **telefone** da conta e zera
+`trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
+por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
 
 ### Tarefas de fundo
 
@@ -276,7 +290,9 @@ Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches
 | Pluggy | Open Finance | `core/services/pluggy*.py` |
 | Resend | e-mail transacional e de ciclo de vida | `core/services/email_service.py` |
 | APNs | push do app iOS | `core/services/push_service.py` |
-| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_meta_pixel`, `core/services/meta_capi.py` |
+| Meta Pixel / CAPI | marketing (só páginas públicas) | `inject_tracking`, `core/services/meta_capi.py` |
+| Google Analytics 4 | medição de funil (mesmas páginas do pixel) | `ga4_snippet`/`inject_tracking`; eventos ao lado de cada `fbq` |
+| GA4 Measurement Protocol | receita server-side (compra, fim do trial, renovação) | `core/services/ga4_mp.py`, no webhook do Stripe |
 
 O webhook do WhatsApp **verifica assinatura** (`X-Hub-Signature-256` com
 `WA_APP_SECRET`) e se recusa a subir em `APP_ENV=prod` sem o segredo.

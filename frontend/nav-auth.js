@@ -44,10 +44,16 @@
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
   var PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
-                  "pbDebug", "pbSpa", "finbot_logout_at"];
+                  "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
-  function apagaStorage(store) {
+  // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
+  // com dados do site bloqueados, e a avaliação do argumento ficava fora do
+  // `try`. Aqui o dano era maior que no auth-refresh — o `.finally` do
+  // `doLogout` rejeitava e o `location.reload()` nunca rodava, então nas
+  // páginas públicas o "Sair" não fazia nada visível.
+  function apagaStorage(nome) {
     try {
+      var store = window[nome];
       Object.keys(store).forEach(function (k) {
         if (PRESERVA.indexOf(k) === -1) store.removeItem(k);
       });
@@ -69,8 +75,8 @@
   }
 
   function limpaCacheNoLogout() {
-    apagaStorage(window.localStorage);
-    apagaStorage(window.sessionStorage);
+    apagaStorage("localStorage");
+    apagaStorage("sessionStorage");
     return desregistraWorkers()
       .then(function () {
         if (!window.caches) return;
