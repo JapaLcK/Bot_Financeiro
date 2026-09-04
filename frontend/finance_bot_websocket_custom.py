@@ -1774,20 +1774,23 @@ async def lifespan(app: FastAPI):
         únicas transições de acesso que acontecem sem evento externo nenhum —
         ninguém chama webhook para avisar que o downgrade agendado chegou.
 
-        Janela = desde a última passada, então nada é perdido entre ticks. A
-        primeira passada usa 25 h para cobrir o tempo em que o processo esteve
-        fora, e a cada 24 h uma passada larga repete essa varredura como rede de
-        segurança. Query indexada; devolve zero linhas quase sempre.
+        Duas passadas, e a segunda existe porque a primeira sozinha mente:
+
+        • a cada 60 s, por JANELA (desde o último tick) — barata e indexada;
+        • a cada 24 h, e também na PRIMEIRA volta, SEM janela: todo usuário com
+          grant ativo. Janela só conserta o que transicionou dentro dela, então
+          processo fora do ar por mais tempo que a janela deixava `plan` velho
+          para sempre. Sem janela não existe "mais tempo que a janela" — a
+          varredura é auto-curativa em vez de depender de uptime.
         """
         from core.services.billing_access import reprojetar_grants_recentes  # noqa: PLC0415
-        larga = timedelta(hours=25)
-        desde = datetime.now(timezone.utc) - larga
+        desde = None                       # 1ª volta é a varredura sem janela
         proxima_larga = datetime.now(timezone.utc) + timedelta(hours=24)
         while True:
             try:
                 agora = datetime.now(timezone.utc)
                 if agora >= proxima_larga:
-                    desde = agora - larga
+                    desde = None
                     proxima_larga = agora + timedelta(hours=24)
                 n = await asyncio.to_thread(reprojetar_grants_recentes, desde)
                 desde = agora
@@ -5115,14 +5118,16 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             set_payment_status(user_id, "canceled")
             # Revoga o direito registrado e reprojeta (§4.2, §5.1).
             #
-            # `external_ref=None` nos dois: revoga TODOS os grants ativos de
-            # cartão do usuário, sem depender do id da assinatura vir no objeto
-            # do evento (ele nem sempre vem — foi assim que a projeção chegou a
-            # ressuscitar o plano por cima do `free` escrito logo acima). A
-            # conta tem no máximo uma assinatura viva.
+            # Revoga a assinatura QUE O EVENTO NOMEIA — `external_ref=None` só
+            # quando o objeto não traz o `id`. A amplitude importa: se o usuário
+            # tem uma assinatura nova já paga e chega o `deleted` da ANTIGA,
+            # revogar "todas as de cartão" mataria a que acabou de ser paga e
+            # rebaixaria quem está em dia. O `None` continua existindo porque o
+            # objeto nem sempre traz o `id`, e aí não revogar nada faria a
+            # projeção ressuscitar o plano por cima do `free` escrito acima.
             #
-            # O `legacy` cai JUNTO e sem depender de existir grant `stripe`: ele
-            # é a RECONSTRUÇÃO do mesmo acesso de cartão feita pelo resync, e um
+            # O `legacy` cai JUNTO, e por `external_ref` exato: ele é a
+            # RECONSTRUÇÃO do mesmo acesso de cartão feita pelo resync, então um
             # assinante que cancele sem ter passado por um `invoice.paid` depois
             # do deploy não pode continuar pago pelo legado.
             try:
@@ -5130,9 +5135,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 from db.plan_grants import revoke_grant  # noqa: PLC0415
                 _versao = _event_version(event)
                 _evt_id = _g(event, "id")
-                for _src in ("stripe", "legacy"):
+                _sub_id = _g(obj, "id")
+                for _src, _ref in (("stripe", str(_sub_id) if _sub_id else None),
+                                   ("legacy", f"legacy:{int(user_id)}")):
                     await asyncio.to_thread(
-                        revoke_grant, int(user_id), _src, None,
+                        revoke_grant, int(user_id), _src, _ref,
                         "stripe_subscription_deleted", _versao, _evt_id)
                 await asyncio.to_thread(recompute_entitlement, int(user_id))
             except Exception as exc:

@@ -299,3 +299,75 @@ def test_24_positivo_assinante_stripe_puro_se_comporta_como_hoje(user_id, monkey
     row = _ler(uid)
     assert row["plan"] == "free" and row["plan_expires_at"] is None
     assert row["last_payment_status"] == "canceled"
+
+
+def test_D1_deleted_da_assinatura_ANTIGA_nao_mata_a_nova_ja_paga(user_id, monkeypatch):
+    """Duas assinaturas vivas: a nova acabou de ser paga e chega o `deleted` da
+    ANTIGA, com o `id` no objeto.
+
+    Revogar "todos os grants de cartão" derrubava a recém-paga junto e mandava
+    para `free` quem está em dia — dinheiro recebido, acesso tirado. A revogação
+    tem de mirar a assinatura QUE O EVENTO NOMEIA.
+    """
+    uid, client, fake = _setup(monkeypatch, f"gd1-{user_id}")
+    _post(client, fake, _evt_paid(uid, "sub_VELHA", 1_800_000_000),
+          subs={"sub_VELHA": _sub("active", "price_x", 5)})
+    _post(client, fake, _evt_paid(uid, "sub_NOVA", 1_800_000_100),
+          subs={"sub_NOVA": _sub("active", "price_x", 365)})
+
+    r = _post(client, fake, _evt_deleted(uid, "sub_VELHA", 1_800_000_200))
+    assert r.status_code == 200, r.text
+
+    por_ref = {g["external_ref"]: g["status"] for g in list_grants(uid)}
+    assert por_ref["sub_VELHA"] == "revoked"
+    assert por_ref["sub_NOVA"] == "active", "a assinatura recém-paga foi revogada junto"
+    assert _ler(uid)["plan"] == "pro", "quem está em dia não pode cair para free"
+
+
+def test_D2_resync_com_DUAS_auth_accounts_do_mesmo_user_nao_derruba_o_boot(user_id):
+    """`auth_accounts` não tem unique em `user_id`. Duas linhas pagas e vigentes
+    do mesmo usuário gerariam dois `legacy:<uid>` no MESMO `on conflict`, e o
+    Postgres recusa o comando inteiro (`CardinalityViolation`). Como o resync
+    roda dentro do `init_db`, isso não degradaria a migração: derrubaria a
+    SUBIDA da aplicação.
+    """
+    agora = datetime.now(timezone.utc)
+    _conta(user_id, "essencial", agora + timedelta(days=10))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into auth_accounts (user_id, email, password_hash, plan,"
+                "                           plan_expires_at, last_payment_status)"
+                " values (%s, %s, 'x', 'pro_max', %s, 'active')",
+                (user_id, f"bf-dup-{user_id}@t.local", agora + timedelta(days=300)))
+        conn.commit()
+
+    _rodar_resync()                      # sem o distinct on, estoura aqui
+
+    legados = [g for g in list_grants(user_id) if g["source"] == "legacy"]
+    assert len(legados) == 1
+    # desempate determinístico: a linha de MAIOR validade vence
+    assert legados[0]["plan_stored"] == "pro_max"
+
+
+def test_D4_resync_nao_ressuscita_legacy_revogado(user_id, monkeypatch):
+    """`auth_accounts` é PROJEÇÃO dos grants. Deixar o boot reanimar um `legacy`
+    revogado por `superseded_by_stripe` — só porque a coluna diz "pago e
+    vigente" — é transformar projeção de volta em direito: o grant vivo do
+    Stripe sustenta a coluna, e a coluna recria o grant morto.
+    """
+    uid, client, fake = _setup(monkeypatch, f"gd4-{user_id}")
+    # O legado nasce CURTO e a assinatura do Stripe é LONGA: é essa ordem que
+    # deixa `auth_accounts.plan_expires_at` (300 d, escrito pela projeção do
+    # grant `stripe`) maior que o `ends_at` do legado (30 d) e faz o `where` do
+    # resync querer "estender" — sem ele o teste passaria com e sem o conserto.
+    _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=30))
+    _rodar_resync()
+    _post(client, fake, _evt_paid(uid, "sub_gd4", 1_800_000_000),
+          subs={"sub_gd4": _sub("active", "price_x", 300)})
+    assert _legacy(uid)["status"] == "revoked"
+
+    _rodar_resync()                      # o boot seguinte
+    g = _legacy(uid)
+    assert g["status"] == "revoked", "o resync ressuscitou grant revogado"
+    assert g["revoked_reason"] == "superseded_by_stripe"

@@ -23,7 +23,17 @@ from .connection import get_conn
 # Fontes válidas da coluna `source`. 'pix' e as tabelas do Asaas chegam no PR 1b.
 GRANT_SOURCES = ("stripe", "pix", "legacy", "admin")
 
-# §6 — evento com versão MENOR OU IGUAL nunca reescreve uma concessão.
+# §6 — evento com versão MENOR OU IGUAL nunca reescreve uma concessão, e
+# NENHUM evento reescreve grant de outro dono.
+#
+# `plan_grants.user_id = excluded.user_id` é o isolamento do CLAUDE.md §0 dentro
+# do upsert. A unique é `(source, external_ref)`, que é GLOBAL: sem esta linha,
+# um upsert do usuário B com o `external_ref` do usuário A cai no `do update` e
+# reescreve plano e validade da linha de A. O `where` do `on conflict` é o único
+# lugar onde esse filtro cabe — o `insert` não tem cláusula `where`. Colisão
+# entre donos devolve None (não aplicou), que é o resultado conservador certo:
+# `external_ref` de `stripe` é id de assinatura, globalmente único, então
+# colisão entre contas já é corrupção, não caso de negócio.
 #
 # O `>` estrito é metade da regra do §6.1 ("no empate, a revogação ganha"): a
 # CONCESSÃO que empata é descartada aqui. A outra metade — a revogação que
@@ -34,7 +44,8 @@ GRANT_SOURCES = ("stripe", "pix", "legacy", "admin")
 # a definição de código morto — e código morto num caminho de acesso pago é o
 # que faz a próxima pessoa achar que a regra está coberta quando não está.
 _GUARDA_VERSAO = """
-     where excluded.event_version > plan_grants.event_version
+     where plan_grants.user_id = excluded.user_id
+       and excluded.event_version > plan_grants.event_version
 """
 
 _SUPERSEDE_LEGACY = """
@@ -117,15 +128,19 @@ def revoke_grant(
 ) -> bool:
     """Revoga grant(s) do usuário. Devolve True se revogou alguma linha.
 
-    **`external_ref=None` revoga TODOS os grants ativos daquela `source`** — é o
-    que o `customer.subscription.deleted` usa. O motivo é concreto: o objeto do
-    evento nem sempre traz o id da assinatura, e amarrar a revogação a ele
-    deixava o grant vivo; a projeção seguinte então RESSUSCITAVA o plano por
-    cima do `free` que o webhook acabara de escrever — regressão contra o
-    comportamento de hoje, pega por
-    `tests/test_billing_webhook_lifecycle.py::test_checkout_completed_fecha_o_gate_de_escolha`.
-    A conta tem no máximo uma assinatura viva (`_billing_checkout_for_user`
-    recusa a segunda), então "todas as ativas" é a mesma coisa que "a dela".
+    **`external_ref=None` revoga TODOS os grants ativos daquela `source`.** É
+    uma saída de emergência, não o caminho normal, e o chamador só deve usá-la
+    quando o evento NÃO identifica o que revogar — no
+    `customer.subscription.deleted` cujo objeto vem sem `id`. Amarrar a
+    revogação a um id que não veio deixava o grant vivo e a projeção seguinte
+    RESSUSCITAVA o plano por cima do `free` que o webhook acabara de escrever
+    (pego por
+    `tests/test_billing_webhook_lifecycle.py::test_checkout_completed_fecha_o_gate_de_escolha`).
+
+    O oposto também é defeito, e pior porque é dinheiro: usar `None` quando o id
+    VEIO revoga a assinatura nova já paga junto com a antiga que está sendo
+    cancelada, e rebaixa quem está em dia. Passe o `external_ref` sempre que
+    tiver um.
 
     **`event_version <= %s`, e não `<`: é aqui que mora o §6.1.**
     `event["created"]` do Stripe tem precisão de SEGUNDOS, então `invoice.paid` e
@@ -180,39 +195,17 @@ def revoke_grant(
     return aplicou
 
 
-def revoke_all_active_grants(user_id: int, reason: str, event_version: int) -> int:
-    """Revoga TODOS os grants ativos do usuário. Usado pelo reparo manual do
-    admin ao descer para `free` (§9 da auditoria / §15): sem isto, o grant que
-    sustentava o acesso reapareceria na projeção seguinte.
+def list_grants(user_id: int) -> list[dict]:
+    """TODOS os grants do usuário, revogados e vencidos inclusive, mais novos
+    por último (`starts_at`).
 
-    Sem guarda de versão de propósito: é ordem humana, não evento de gateway.
+    Devolver os revogados não é desleixo: a diferença entre "usuário sem NENHUM
+    grant" (desconhecimento → a projeção não escreve) e "usuário com grants,
+    todos vencidos ou revogados" (informação → rebaixa) é o que torna este PR
+    reversível (§4.1). Um filtro de `status` aqui apagaria essa diferença.
     """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update plan_grants"
-                "   set status = 'revoked', revoked_reason = %s, revoked_at = now(),"
-                "       event_version = %s, updated_at = now()"
-                " where user_id = %s and status = 'active'",
-                (reason, int(event_version), int(user_id)),
-            )
-            n = cur.rowcount
-        conn.commit()
-    return int(n)
-
-
-def list_grants(user_id: int, only_active: bool = False) -> list[dict]:
-    """Grants do usuário, mais novos por último (`starts_at`).
-
-    `only_active=False` de propósito no uso da projeção: a diferença entre
-    "usuário sem NENHUM grant" (desconhecimento → não escreve) e "usuário com
-    grants, todos vencidos/revogados" (informação → rebaixa) é o que torna o PR
-    reversível (§4.1). Contar só os ativos apagaria essa diferença.
-    """
-    sql = "select * from plan_grants where user_id = %s"
-    if only_active:
-        sql += " and status = 'active'"
-    sql += " order by starts_at asc, id asc"
+    sql = ("select * from plan_grants where user_id = %s"
+           " order by starts_at asc, id asc")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (int(user_id),))
@@ -220,19 +213,28 @@ def list_grants(user_id: int, only_active: bool = False) -> list[dict]:
 
 
 def users_com_grant_na_janela(desde) -> list[int]:
-    """user_ids cujo grant ativo COMEÇOU ou TERMINOU desde `desde` (§4.3).
+    """user_ids a reprojetar (§4.3).
 
-    É a lista que o loop de re-projeção precisa: grant futuro que virou vigente
-    e grant vigente que venceu são as duas únicas transições que acontecem sem
-    nenhum evento externo. Indexada por (user_id, status, starts_at); devolve
-    zero linhas quase sempre.
+    `desde` = instante: só quem teve grant ativo COMEÇANDO ou TERMINANDO desde
+    então. São as duas únicas transições de acesso que acontecem sem nenhum
+    evento externo. Indexada, devolve zero linhas quase sempre — é a passada de
+    60 s.
+
+    **`desde=None` = TODOS os usuários com grant ativo** — a varredura diária.
+    Ela é AUTO-CURATIVA de propósito: a passada por janela só conserta o que
+    transicionou DENTRO da janela, então um processo fora do ar por mais tempo
+    que a janela deixava o `status='active'` e o `plan` velhos para sempre. Sem
+    janela não existe "mais tempo que a janela". O custo é um `recompute` por
+    usuário com grant ativo por dia, e o pior caso mede o número de PAGANTES —
+    se um dia isso doer, o upgrade é comparar a projeção com os grants em SQL e
+    reprojetar só quem divergir.
     """
+    sql = "select distinct user_id from plan_grants where status = 'active'"
+    params: tuple = ()
+    if desde is not None:
+        sql += " and (starts_at between %s and now() or ends_at between %s and now())"
+        params = (desde, desde)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "select distinct user_id from plan_grants"
-                " where status = 'active'"
-                "   and (starts_at between %s and now() or ends_at between %s and now())",
-                (desde, desde),
-            )
+            cur.execute(sql, params)
             return [int(r["user_id"]) for r in cur.fetchall()]

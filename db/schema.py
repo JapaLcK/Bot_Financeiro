@@ -19,27 +19,43 @@ SCHEMA_INIT_LOCK = 728_531_004
 # event_version = 0 → qualquer evento real supera o legado.
 # `grandfathered` fica de fora: vitalício não tem `ends_at` para inventar.
 #
+# **`distinct on (a.user_id)` não é enfeite: é DISPONIBILIDADE.** `auth_accounts`
+# tem `id` como PK e unique em `email`/`phone_hash`, mas NENHUM unique em
+# `user_id` (confira: `\d auth_accounts`). Duas linhas pagas e vigentes do mesmo
+# usuário produziriam dois `legacy:<uid>` no MESMO comando, e o Postgres recusa
+# com `CardinalityViolation` ("ON CONFLICT DO UPDATE command cannot affect row a
+# second time"). Como isto roda dentro do `init_db`, que é passo obrigatório de
+# startup, o erro não degradaria a migração: derrubaria a subida da aplicação.
+# Desempate determinístico pela maior validade — a linha que dá mais acesso.
+#
+# **Nunca ressuscita linha revogada** (`plan_grants.status = 'active'` no
+# `where`): `auth_accounts` é PROJEÇÃO dos grants, então deixar o resync
+# reanimar um `legacy` já revogado por `superseded_by_stripe` seria transformar
+# projeção de volta em direito — o grant vivo do Stripe sustenta o valor da
+# coluna, e a coluna recriaria o grant morto. Por isso o SET também não mexe
+# mais em `status`/`revoked_reason`/`revoked_at`: quem chega aqui já está ativo.
+#
 # Constante no módulo (e não string solta na lista) para o teste do resync
 # executar EXATAMENTE o SQL que sobe em produção, sem uma segunda cópia.
 RESYNC_LEGACY_GRANTS_SQL = """
 insert into plan_grants (user_id, source, external_ref, plan_stored,
                          starts_at, ends_at, status, event_version)
-select a.user_id, 'legacy', 'legacy:' || a.user_id, a.plan,
+select distinct on (a.user_id)
+       a.user_id, 'legacy', 'legacy:' || a.user_id, a.plan,
        now(), a.plan_expires_at, 'active', 0
   from auth_accounts a
  where coalesce(a.plan, 'free') <> 'free'
    and a.plan_expires_at is not null
    and a.plan_expires_at > now()
    and coalesce(a.last_payment_status, '') <> 'grandfathered'
+ order by a.user_id, a.plan_expires_at desc, a.id desc
 on conflict (source, external_ref) do update
    set ends_at     = greatest(plan_grants.ends_at, excluded.ends_at),
        starts_at   = least(plan_grants.starts_at, excluded.starts_at),
        plan_stored = excluded.plan_stored,
-       status      = 'active',
-       revoked_reason = null,
-       revoked_at  = null,
        updated_at  = now()
- where plan_grants.ends_at < excluded.ends_at
+ where plan_grants.status = 'active'
+   and plan_grants.ends_at < excluded.ends_at
 """
 
 

@@ -171,12 +171,15 @@ def _alertar_sem_grants(user_id: int, plano: str, expira) -> None:
         print(f"[billing_access] alerta projecao_sem_grants falhou user={user_id}: {exc}")
 
 
-def reprojetar_grants_recentes(desde: datetime) -> int:
+def reprojetar_grants_recentes(desde: datetime | None) -> int:
     """Reprojeta quem teve grant COMEÇANDO ou TERMINANDO desde `desde` (§4.3).
 
     São as duas únicas transições de acesso que acontecem sem nenhum evento
     externo — grant futuro que vira vigente e grant vigente que vence. Sem isto,
     um downgrade agendado só apareceria no próximo webhook do usuário.
+
+    `desde=None` reprojeta TODOS os usuários com grant ativo: é a varredura
+    diária, e é auto-curativa (não depende de o processo ter estado no ar).
 
     Devolve quantos usuários foram reprojetados.
     """

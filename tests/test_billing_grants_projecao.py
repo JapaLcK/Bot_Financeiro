@@ -380,3 +380,77 @@ def test_50_set_account_plan_free_revoga_todos_os_grants_ativos(user_id):
     assert all(g["status"] == "revoked" for g in list_grants(user_id))
     assert all(g["revoked_reason"] == "admin_override" for g in list_grants(user_id))
     assert recompute_entitlement(user_id) == {"plan": "free", "plan_expires_at": None}
+
+
+def test_D3_rebaixamento_do_admin_sobrevive_a_projecao(user_id):
+    """A escrita do admin é AUTORITATIVA, e não só ao descer para `free`.
+
+    Revogar apenas no `free` deixava todo REBAIXAMENTO sem efeito: a projeção
+    pega o MAIOR tier vigente e a MAIOR cobertura, então um grant `stripe` de
+    `pro_max` com 300 dias ressuscitava o plano na primeira reprojeção e o
+    ajuste manual sumia — o defeito que este grant existe para consertar.
+    """
+    from core.admin_dashboard import set_account_plan
+
+    _conta(user_id, "pro_max", datetime.now(timezone.utc) + timedelta(days=300), "active")
+    agora = datetime.now(timezone.utc)
+    upsert_grant(user_id, "stripe", f"sub_d3_{user_id}", "pro_max",
+                 agora - timedelta(days=1), agora + timedelta(days=300), 6_000_000)
+
+    set_account_plan("essencial", months=1, user_id=user_id)
+    assert _grant_row(user_id, "stripe")["status"] == "revoked"
+
+    projetado = recompute_entitlement(user_id)
+    assert projetado["plan"] == "essencial", "a projeção desfez o rebaixamento manual"
+    assert projetado["plan_expires_at"] < agora + timedelta(days=40)
+
+
+def test_D5_upsert_de_outro_dono_nao_reescreve_o_grant_alheio(user_id, second_user_id):
+    """A unique é `(source, external_ref)` — GLOBAL. Sem o filtro por dono no
+    `on conflict … do update`, um upsert do usuário B reescreve plano e validade
+    da linha do usuário A (CLAUDE.md §0, bloco permanente)."""
+    agora = datetime.now(timezone.utc)
+    ref = f"sub_compartilhada_{user_id}"
+    upsert_grant(user_id, "stripe", ref, "essencial", agora,
+                 agora + timedelta(days=30), 100)
+
+    assert upsert_grant(second_user_id, "stripe", ref, "pro_max", agora,
+                        agora + timedelta(days=900), 999_999) is None
+
+    g = _grant_row(user_id)
+    assert g["plan_stored"] == "essencial", "grant de A foi reescrito por B"
+    assert g["ends_at"] < agora + timedelta(days=40)
+    assert list_grants(second_user_id) == []
+
+
+def test_D7_falha_ao_gravar_o_grant_nao_derruba_o_reparo_do_admin(user_id, monkeypatch):
+    """A ferramenta de REPARO manual não pode ser a mais frágil do sistema:
+    falha na escrita do grant não pode abortar o UPDATE de `auth_accounts`."""
+    import core.admin_dashboard as admin
+
+    _conta(user_id, "free", None, "inactive")
+
+    def _explode(cur, uid, plan, months):
+        cur.execute("select 1 from tabela_que_nao_existe")
+
+    monkeypatch.setattr(admin, "_gravar_grant_do_admin", _explode)
+    row = admin.set_account_plan("pro", months=2, user_id=user_id)
+
+    assert row is not None and row["plan"] == "pro"
+    assert _ler(user_id)["plan"] == "pro", "o reparo do admin foi abortado pelo grant"
+
+
+def test_D8_varredura_sem_janela_reprojeta_quem_a_janela_perdeu(user_id):
+    """Passada por JANELA só conserta o que transicionou dentro dela: processo
+    fora do ar por mais tempo que a janela deixava `plan` velho para sempre.
+    A varredura diária (`desde=None`) não depende de uptime."""
+    _conta(user_id, "free", None, "inactive")
+    agora = datetime.now(timezone.utc)
+    upsert_grant(user_id, "admin", f"admin:{user_id}", "pro",
+                 agora - timedelta(days=40), agora + timedelta(days=300), 1)
+
+    reprojetar_grants_recentes(agora - timedelta(minutes=5))   # janela: não alcança
+    assert _ler(user_id)["plan"] == "free"
+
+    reprojetar_grants_recentes(None)                            # varredura diária
+    assert _ler(user_id)["plan"] == "pro"

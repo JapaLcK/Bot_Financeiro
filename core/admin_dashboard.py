@@ -1373,7 +1373,17 @@ def set_account_plan(
             )
             row = cur.fetchone()
             if row:
-                _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
+                # SAVEPOINT, e não a transação inteira: falha ao gravar o grant
+                # não pode levar junto o UPDATE de `auth_accounts`. Esta é a
+                # ferramenta de REPARO manual — a última que pode virar a mais
+                # frágil do sistema. É a mesma política do webhook, que também
+                # grava o par legado primeiro e trata o grant como melhoria.
+                try:
+                    with conn.transaction():
+                        _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
+                except Exception as exc:
+                    print(f"[admin] grant do admin falhou user={row['user_id']}: {exc}",
+                          file=sys.stderr)
         conn.commit()
         if row:
             from db_support import invalidate_auth_user_cache
@@ -1398,18 +1408,25 @@ def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
     gateway já recebido; um webhook FUTURO ainda ganha, que é o comportamento
     já documentado ("não fala com a Stripe: o próximo webhook dela volta a
     mandar no par").
+
+    **A escrita do admin é AUTORITATIVA: revoga todos os grants ativos, não só
+    quando desce para `free`.** Revogar só no `free` deixava todo REBAIXAMENTO
+    sem efeito — pôr uma conta em `essencial` por 1 mês, tendo ela um grant
+    `stripe` de `pro_max` com 300 dias, voltava para `pro_max` na projeção
+    seguinte, porque a projeção pega o MAIOR tier vigente e a maior cobertura.
+    O ajuste sobrevivia na coluna e morria no primeiro `recompute`, que é
+    exatamente o defeito que este grant existe para consertar.
     """
+    # Autoritativo: derruba o que houver antes de dizer o que vale.
+    cur.execute(
+        "update plan_grants"
+        "   set status='revoked', revoked_reason='admin_override',"
+        "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
+        "       updated_at=now()"
+        " where user_id = %s and status = 'active'",
+        (user_id,),
+    )
     if plan == "free":
-        # Descer para free tem de revogar o direito, não só zerar a coluna:
-        # um grant ativo ressuscitaria o plano na projeção seguinte.
-        cur.execute(
-            "update plan_grants"
-            "   set status='revoked', revoked_reason='admin_override',"
-            "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
-            "       updated_at=now()"
-            " where user_id = %s and status = 'active'",
-            (user_id,),
-        )
         return
 
     cur.execute(
