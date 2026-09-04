@@ -9708,7 +9708,7 @@ function openAdjustWalletModal() {
   document.getElementById("adjust-wallet-banks").textContent = _fmtBRL(banks);
   const inp = document.getElementById("adjust-wallet-input");
   inp.value = carteira.toFixed(2);
-  document.getElementById("adjust-wallet-error").textContent = "";
+  _adjustWalletError("");  // texto E classe: só o textContent deixa a caixa vazia visível
   document.getElementById("adjust-wallet-overlay").classList.add("open");
   inp.oninput = _updateAdjustWalletTotal;
   _updateAdjustWalletTotal();
@@ -9747,7 +9747,7 @@ async function submitAdjustWallet() {
     showToast("✓ Carteira ajustada");
     sendRefresh();
   } catch (err) {
-    errEl.textContent = String(err.message || err);
+    _adjustWalletError(String(err.message || err));
   } finally {
     _adjustWalletState.submitting = false;
     btn.disabled = false;
