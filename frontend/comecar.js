@@ -20,12 +20,12 @@
 
   /* ─── Constantes ──────────────────────────────────────────────────────── */
 
-  var TOTAL_STEPS = 5;
-  var STEP_WELCOME = 1, STEP_MONEY = 2, STEP_WHATSAPP = 3, STEP_REPORT = 4, STEP_DONE = 5;
+  const TOTAL_STEPS = 5;
+  const STEP_WELCOME = 1, STEP_MONEY = 2, STEP_WHATSAPP = 3, STEP_REPORT = 4;
 
   /** Espelha cards.py:69-73 — a fonte de verdade é o servidor; isto é só a UI. */
-  var CARD_FLAGS = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outros"];
-  var CARD_COLORS = [
+  const CARD_FLAGS = ["Visa", "Mastercard", "Elo", "Amex", "Hipercard", "Outros"];
+  const CARD_COLORS = [
     ["purple", "Roxo"], ["coral", "Coral"], ["gold", "Dourado"],
     ["green", "Verde"], ["blue", "Azul"], ["gray", "Cinza"],
   ];
@@ -42,19 +42,19 @@
    *      estado default (true/true/true). Pré-marcar seria disfarçar uma
    *      mudança de preferência como confirmação.
    */
-  var REPORT_CHOICES = [
+  const REPORT_CHOICES = [
     { id: "diario",  label: "Todo dia",    hint: "Um resumo por dia",       daily: true,  weekly: false, monthly: false },
     { id: "semanal", label: "Toda semana", hint: "Toda segunda de manhã",   daily: false, weekly: true,  monthly: false },
     { id: "mensal",  label: "Todo mês",    hint: "No dia 1",                daily: false, weekly: false, monthly: true  },
     { id: "nenhum",  label: "Não quero",   hint: "Sem resumo automático",   daily: false, weekly: false, monthly: false },
   ];
 
-  var WA_POLL_MS = 3000;
-  var WA_POLL_LIMIT = 30; // 30 × 3s = 90s
+  const WA_POLL_MS = 3000;
+  const WA_POLL_LIMIT = 30; // 30 × 3s = 90s
 
   /* ─── Estado único do wizard ──────────────────────────────────────────── */
 
-  var state = {
+  const state = {
     userId: null,
     firstName: "",
     step: STEP_WELCOME,
@@ -77,8 +77,8 @@
 
   /** Opção da UI → o corpo do PATCH de notificações. */
   function reportPrefsFor(choiceId) {
-    var choice = null;
-    for (var i = 0; i < REPORT_CHOICES.length; i++) {
+    let choice = null;
+    for (let i = 0; i < REPORT_CHOICES.length; i++) {
       if (REPORT_CHOICES[i].id === choiceId) { choice = REPORT_CHOICES[i]; break; }
     }
     if (!choice) return null;
@@ -99,8 +99,8 @@
    * confirmação nunca apareceria pra ele. `identities` cobre os dois caminhos.
    */
   function isWhatsAppLinked(security) {
-    var list = (security && security.identities) || [];
-    for (var i = 0; i < list.length; i++) {
+    const list = (security && security.identities) || [];
+    for (let i = 0; i < list.length; i++) {
       if (list[i] && list[i].provider === "whatsapp") return true;
     }
     return false;
@@ -108,16 +108,16 @@
 
   /** Onde reabrir o wizard: o passo salvo, dentro dos limites. */
   function resumeStep(serverState) {
-    var step = parseInt((serverState && serverState.step) || 0, 10);
+    const step = parseInt((serverState && serverState.step) || 0, 10);
     if (!step || step < STEP_WELCOME) return STEP_WELCOME;
     return Math.min(step, TOTAL_STEPS);
   }
 
   /** Já existe cartão com esse nome? Evita 409 e clique duplo. */
   function hasCardNamed(cards, name) {
-    var wanted = String(name || "").trim().toLowerCase();
+    const wanted = String(name || "").trim().toLowerCase();
     if (!wanted) return false;
-    for (var i = 0; i < (cards || []).length; i++) {
+    for (let i = 0; i < (cards || []).length; i++) {
       if (String(cards[i].name || "").trim().toLowerCase() === wanted) return true;
     }
     return false;
@@ -132,13 +132,13 @@
   function text(node, value) { if (node) node.textContent = value; }
 
   function showError(message) {
-    var box = el("error");
+    const box = el("error");
     if (!box) return;
     box.textContent = message;
     box.classList.add("show");
   }
   function clearError() {
-    var box = el("error");
+    const box = el("error");
     if (!box) return;
     box.textContent = "";
     box.classList.remove("show");
@@ -151,13 +151,13 @@
   }
 
   async function apiGet(path) {
-    var res = await fetch(path, { credentials: "same-origin" });
+    const res = await fetch(path, { credentials: "same-origin" });
     if (!res.ok) throw await apiError(res);
     return res.json();
   }
 
   async function apiSend(method, path, body) {
-    var res = await fetch(path, {
+    const res = await fetch(path, {
       method: method,
       credentials: "same-origin",
       headers: csrf({ "Content-Type": "application/json" }),
@@ -168,10 +168,10 @@
   }
 
   async function apiError(res) {
-    var data = null;
+    let data = null;
     try { data = await res.json(); } catch (_) { /* corpo não-JSON */ }
-    var detail = data && data.detail;
-    var err = new Error(
+    const detail = data && data.detail;
+    const err = new Error(
       typeof detail === "string" ? detail : "Não foi possível concluir agora."
     );
     err.status = res.status;
@@ -202,7 +202,7 @@
   async function persist(payload) {
     try {
       return await apiSend("POST", "/onboarding/state", payload);
-    } catch (err) {
+    } catch (_err) {
       // Progresso é conveniência: se falhar, o usuário continua o fluxo e no
       // pior caso recomeça de um passo anterior na próxima visita.
       return null;
@@ -214,7 +214,7 @@
   function renderProgress() {
     text(el("step-current"), String(state.step));
     text(el("step-total"), String(TOTAL_STEPS));
-    var fill = el("progress");
+    const fill = el("progress");
     if (fill) fill.style.width = Math.round((state.step / TOTAL_STEPS) * 100) + "%";
   }
 
@@ -223,13 +223,13 @@
     clearError();
     stopWaPoll();
 
-    for (var n = 1; n <= TOTAL_STEPS; n++) show(stepEl(n), n === state.step);
+    for (let n = 1; n <= TOTAL_STEPS; n++) show(stepEl(n), n === state.step);
     renderProgress();
     window.scrollTo(0, 0);
 
     // Telemetria de view só na primeira vez em cada passo — voltar e avançar de
     // novo não pode inflar a contagem do funil.
-    var firstView = !state.viewed[state.step];
+    const firstView = !state.viewed[state.step];
     state.viewed[state.step] = true;
     persist({ step: state.step, event: firstView ? "view" : null });
     loadStep(state.step);
@@ -252,7 +252,7 @@
     // função: `pbTrack` espera o envio antes do replace (ver o snippet em
     // frontend/routes/shared.py). O `await` acima dá alguma folga, mas não é
     // garantia — gtag.js ainda carregando perde o evento do mesmo jeito.
-    var irPraHome = function () { window.location.replace("/home"); };
+    const irPraHome = function () { window.location.replace("/home"); };
     if (window.pbTrack && state.userId) {
       window.pbTrack("onboarding_complete", { step: state.step }, irPraHome);
     } else {
@@ -286,7 +286,7 @@
 
   async function loadMoney() {
     try {
-      var setup = await apiGet("/account/" + state.userId + "/setup-status");
+      const setup = await apiGet("/account/" + state.userId + "/setup-status");
       state.balance = Number(setup.balance || 0);
       // Conta que já tem saldo não pode receber saldo inicial (409 no servidor):
       // some com o campo em vez de deixar o usuário bater na parede.
@@ -299,7 +299,7 @@
 
   async function refreshCards() {
     try {
-      var data = await apiGet("/cards/" + state.userId + "/summary");
+      const data = await apiGet("/cards/" + state.userId + "/summary");
       state.cards = data.cards || [];
     } catch (_) {
       state.cards = [];
@@ -308,14 +308,14 @@
   }
 
   function renderCards() {
-    var list = el("cards-list");
+    const list = el("cards-list");
     if (!list) return;
     list.innerHTML = "";
     state.cards.forEach(function (card) {
-      var li = document.createElement("li");
-      var name = document.createElement("strong");
+      const li = document.createElement("li");
+      const name = document.createElement("strong");
       name.textContent = card.name || "Cartão";
-      var meta = document.createElement("span");
+      const meta = document.createElement("span");
       meta.textContent = "fecha " + (card.closing_day || "?") + " · vence " + (card.due_day || "?");
       li.appendChild(name);
       li.appendChild(meta);
@@ -329,7 +329,7 @@
     if (open) {
       fillSelect(el("card-flag"), CARD_FLAGS.map(function (f) { return [f, f]; }));
       fillSelect(el("card-color"), CARD_COLORS);
-      var nameInput = document.getElementById("onb-card-name");
+      const nameInput = document.getElementById("onb-card-name");
       if (nameInput) nameInput.focus();
     }
   }
@@ -337,7 +337,7 @@
   function fillSelect(select, pairs) {
     if (!select || select.options.length) return;
     pairs.forEach(function (pair) {
-      var opt = document.createElement("option");
+      const opt = document.createElement("option");
       opt.value = pair[0];
       opt.textContent = pair[1];
       select.appendChild(opt);
@@ -345,8 +345,8 @@
   }
 
   async function saveBalance(button) {
-    var input = document.getElementById("onb-balance");
-    var value = parseFloat(input && input.value);
+    const input = document.getElementById("onb-balance");
+    const value = parseFloat(input && input.value);
     if (isNaN(value) || value < 0) {
       showError("Digite um valor válido (zero ou positivo).");
       return;
@@ -371,11 +371,11 @@
   }
 
   async function saveCard(button) {
-    var name = (document.getElementById("onb-card-name") || {}).value || "";
-    var closing = parseInt((document.getElementById("onb-card-closing") || {}).value, 10);
-    var due = parseInt((document.getElementById("onb-card-due") || {}).value, 10);
-    var flag = (el("card-flag") || {}).value || null;
-    var color = (el("card-color") || {}).value || null;
+    let name = (document.getElementById("onb-card-name") || {}).value || "";
+    const closing = parseInt((document.getElementById("onb-card-closing") || {}).value, 10);
+    const due = parseInt((document.getElementById("onb-card-due") || {}).value, 10);
+    const flag = (el("card-flag") || {}).value || null;
+    const color = (el("card-color") || {}).value || null;
 
     name = name.trim();
     if (!name) { showError("Dê um nome ao cartão."); return; }
@@ -411,7 +411,7 @@
 
   function clearCardForm() {
     ["onb-card-name", "onb-card-closing", "onb-card-due"].forEach(function (id) {
-      var node = document.getElementById(id);
+      const node = document.getElementById(id);
       if (node) node.value = "";
     });
   }
@@ -423,11 +423,11 @@
    * location.href não seria pego pela regra e deixaria CTA de compra visível.
    */
   function renderCardLimit() {
-    var box = el("cards-limit");
+    const box = el("cards-limit");
     if (!box) return;
     box.innerHTML = "";
     box.appendChild(document.createTextNode("Seu plano permite um cartão. "));
-    var link = document.createElement("a");
+    const link = document.createElement("a");
     link.href = "/precos";
     link.textContent = "Ver planos";
     box.appendChild(link);
@@ -439,9 +439,9 @@
   /* ─── Passo 3: WhatsApp ───────────────────────────────────────────────── */
 
   async function loadWhatsApp() {
-    var linked = false;
+    let linked = false;
     try {
-      var security = await apiGet("/settings/" + state.userId + "/security");
+      const security = await apiGet("/settings/" + state.userId + "/security");
       linked = isWhatsAppLinked(security);
     } catch (_) { /* segue pro caminho de vincular */ }
 
@@ -454,7 +454,7 @@
     // e o poll bate no /settings/{id}/security, que não tem limite.
     if (!state.waCode) {
       try {
-        var data = await apiSend("POST", "/auth/link-code", {});
+        const data = await apiSend("POST", "/auth/link-code", {});
         state.waCode = data.link_code || "";
         state.waLink = data.whatsapp_link || "";
       } catch (err) {
@@ -471,7 +471,7 @@
     // hoje leva texto fixo "Olá" — por isso a mensagem inteira aparece aqui,
     // pronta pra copiar, em vez de só o número.
     text(el("wa-code"), state.waCode ? "link " + state.waCode : "—");
-    var link = el("wa-link");
+    const link = el("wa-link");
     if (link && state.waLink) {
       link.href = state.waLink;
       show(link, true);
@@ -489,7 +489,7 @@
         return;
       }
       try {
-        var security = await apiGet("/settings/" + state.userId + "/security");
+        const security = await apiGet("/settings/" + state.userId + "/security");
         if (isWhatsAppLinked(security)) {
           stopWaPoll();
           state.waLinked = true;
@@ -521,9 +521,9 @@
   }
 
   function renderReportCurrent() {
-    var box = el("report-current");
+    const box = el("report-current");
     if (!box || !state.reportCurrent) return;
-    var on = [];
+    const on = [];
     if (state.reportCurrent.daily_report_enabled) on.push("diário");
     if (state.reportCurrent.weekly_report_enabled) on.push("semanal");
     if (state.reportCurrent.monthly_report_enabled) on.push("mensal");
@@ -538,19 +538,19 @@
    * pré-marcar seria mudar a preferência do usuário fingindo confirmá-la.
    */
   function renderReportChoices() {
-    var wrap = el("report-choices");
+    const wrap = el("report-choices");
     if (!wrap || wrap.children.length) return;
     REPORT_CHOICES.forEach(function (choice) {
-      var button = document.createElement("button");
+      const button = document.createElement("button");
       button.type = "button";
       button.className = "onb-choice";
       button.setAttribute("role", "radio");
       button.setAttribute("aria-checked", "false");
       button.setAttribute("data-action", "pick-report");
       button.setAttribute("data-choice", choice.id);
-      var label = document.createElement("strong");
+      const label = document.createElement("strong");
       label.textContent = choice.label;
-      var hint = document.createElement("small");
+      const hint = document.createElement("small");
       hint.textContent = choice.hint;
       button.appendChild(label);
       button.appendChild(hint);
@@ -559,15 +559,15 @@
   }
 
   function fillHourSelect() {
-    var select = el("report-hour");
+    const select = el("report-hour");
     if (!select || select.options.length) return;
-    for (var h = 0; h < 24; h++) {
-      var opt = document.createElement("option");
+    for (let h = 0; h < 24; h++) {
+      const opt = document.createElement("option");
       opt.value = String(h);
       opt.textContent = (h < 10 ? "0" + h : h) + ":00";
       select.appendChild(opt);
     }
-    var current = state.reportCurrent && state.reportCurrent.daily_report_hour;
+    const current = state.reportCurrent && state.reportCurrent.daily_report_hour;
     select.value = String(current == null ? 9 : current);
   }
 
@@ -579,22 +579,22 @@
       });
     });
     show(el("report-hour-wrap"), choiceId === "diario");
-    var save = el("save-report");
+    const save = el("save-report");
     if (save) save.disabled = false;
   }
 
   async function saveReport(button) {
-    var prefs = reportPrefsFor(state.reportChoice);
+    const prefs = reportPrefsFor(state.reportChoice);
     if (!prefs) { showError("Escolha uma frequência."); return; }
     await withBusy(button, async function () {
       clearError();
-      var body = {
+      const body = {
         daily_report_enabled: prefs.daily_report_enabled,
         weekly_report_enabled: prefs.weekly_report_enabled,
         monthly_report_enabled: prefs.monthly_report_enabled,
       };
       if (prefs.daily_report_enabled) {
-        var hour = parseInt((el("report-hour") || {}).value, 10);
+        const hour = parseInt((el("report-hour") || {}).value, 10);
         if (!isNaN(hour)) { body.daily_report_hour = hour; body.daily_report_minute = 0; }
       }
       try {
@@ -617,7 +617,7 @@
 
   /* ─── Delegação de eventos (zero onclick inline) ──────────────────────── */
 
-  var ACTIONS = {
+  const ACTIONS = {
     next: function () { next(); },
     skip: function () { skip(); },
     "skip-all": function () { skipAll(); },
@@ -631,9 +631,9 @@
   };
 
   function onClick(event) {
-    var target = event.target.closest ? event.target.closest("[data-action]") : null;
+    const target = event.target.closest ? event.target.closest("[data-action]") : null;
     if (!target) return;
-    var handler = ACTIONS[target.getAttribute("data-action")];
+    const handler = ACTIONS[target.getAttribute("data-action")];
     if (!handler) return;
     event.preventDefault();
     handler(target);
@@ -657,16 +657,16 @@
 
     document.addEventListener("click", onClick);
 
-    var profile = null, server = null;
+    let profile = null, server = null;
     try {
       profile = await apiGet("/auth/dashboard-profile");
-    } catch (err) {
+    } catch (_err) {
       // Sem sessão válida a página não tem o que fazer.
       window.location.replace("/login?next=%2Fonboarding");
       return;
     }
     state.userId = profile.user_id;
-    var name = (profile.display_name || "").trim();
+    const name = (profile.display_name || "").trim();
     state.firstName = name ? name.split(/\s+/)[0] : "";
     if (state.firstName) {
       els("greet-name").forEach(function (n) { n.textContent = ", " + state.firstName; });
@@ -680,8 +680,8 @@
     // Retomada: volta no passo salvo em vez de recomeçar. `?step=` só é aceito
     // pra voltar do /settings (conectar banco) — e nunca além do que já foi
     // alcançado, pra o link não virar um pulo do fluxo.
-    var target = resumeStep(server);
-    var asked = parseInt(new URLSearchParams(window.location.search).get("step"), 10);
+    let target = resumeStep(server);
+    const asked = parseInt(new URLSearchParams(window.location.search).get("step"), 10);
     if (asked >= STEP_WELCOME && asked <= target) target = asked;
 
     goTo(target);

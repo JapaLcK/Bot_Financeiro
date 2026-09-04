@@ -256,7 +256,7 @@
    */
   function _desregistraWorkers() {
     try {
-      var sw = navigator.serviceWorker;
+      const sw = navigator.serviceWorker;
       if (!sw || !sw.getRegistrations) return Promise.resolve();
       return sw.getRegistrations()
         .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
@@ -350,7 +350,7 @@
     // (`location.replace`/`reload`/`href`), e navegação descarta o documento:
     // uma limpeza disparada e esquecida não tem garantia de terminar, e o cache
     // privado sobrevive no aparelho compartilhado (Codex, #170).
-    let resp = await _requestComLimpeza(caminho, input, init);
+    const resp = await _requestComLimpeza(caminho, input, init);
 
     if (resp.status !== 401) return resp;
 

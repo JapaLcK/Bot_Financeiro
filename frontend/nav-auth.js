@@ -12,17 +12,17 @@
   // Paywall (/precos?ativar=1): conta criada, ainda SEM assinatura. O menu da
   // conta APARECE (é exatamente onde o "quero sair" acontece); só os CTAs do
   // corpo ficam quietos — ali os botões são os planos.
-  var isPaywall =
+  const isPaywall =
     location.pathname.replace(/\/+$/, "") === "/precos" &&
     new URLSearchParams(location.search).get("ativar") === "1";
 
   function getCsrf() {
-    var m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+    const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
     return m ? decodeURIComponent(m[1]) : "";
   }
   function csrfHeaders(extra) {
-    var c = getCsrf();
-    var h = extra || {};
+    const c = getCsrf();
+    const h = extra || {};
     if (c) h["x-csrf-token"] = c;
     return h;
   }
@@ -43,7 +43,7 @@
   // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
-  var PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
+  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
                   "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
   // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
@@ -53,11 +53,11 @@
   // páginas públicas o "Sair" não fazia nada visível.
   function apagaStorage(nome) {
     try {
-      var store = window[nome];
+      const store = window[nome];
       Object.keys(store).forEach(function (k) {
         if (PRESERVA.indexOf(k) === -1) store.removeItem(k);
       });
-    } catch (e) { /* storage bloqueado (Safari privado): nada a apagar */ }
+    } catch (_e) { /* storage bloqueado (Safari privado): nada a apagar */ }
   }
 
   // Gêmeo do `_desregistraWorkers` de `auth-refresh.js`. Desregistra ANTES de
@@ -65,12 +65,12 @@
   // request em voo noutra aba podia recriar o cache depois do delete.
   function desregistraWorkers() {
     try {
-      var sw = navigator.serviceWorker;
+      const sw = navigator.serviceWorker;
       if (!sw || !sw.getRegistrations) return Promise.resolve();
       return sw.getRegistrations()
         .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
         .catch(function () {});
-    } catch (e) { /* sem service worker: nada a desregistrar */ }
+    } catch (_e) { /* sem service worker: nada a desregistrar */ }
     return Promise.resolve();
   }
 
@@ -100,7 +100,7 @@
       // compartilhado (Codex, #170).
       .finally(function () {
         return limpaCacheNoLogout().then(function () {
-          try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (e) {}
+          try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (_e) {}
           location.reload(); // CTAs voltam ao padrão deslogado
         });
       });
@@ -118,7 +118,7 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (data && data.whatsapp_link) {
-          var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+          const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
           if (isMobile) location.href = data.whatsapp_link;
           else window.open(data.whatsapp_link, "_blank", "noopener");
         } else {
@@ -132,20 +132,20 @@
   // 'pro' é alias legado do Plus (R$ 19,90) e 'pro_max' é o Pro novo — ver
   // _STORED_PLAN_TO_TIER em core/services/plan_service.py. Sem isso o badge
   // mostraria "PLANO PRO" pra um assinante Plus e "PLANO PRO_MAX" pro Pro.
-  var PLAN_ALIASES = { pro: "plus", pro_max: "pro" };
+  const PLAN_ALIASES = { pro: "plus", pro_max: "pro" };
   function planLabel(plan) {
-    var v = (plan || "free").trim().toLowerCase();
+    let v = (plan || "free").trim().toLowerCase();
     v = PLAN_ALIASES[v] || v;
     return v === "free" ? "PLANO FREE" : "PLANO " + v.toUpperCase();
   }
   function shortAccount(email) {
     if (!email) return "Minha conta";
-    var name = email.split("@")[0];
+    const name = email.split("@")[0];
     return name.length > 18 ? name.slice(0, 16) + "..." : name;
   }
 
   // Atalhos do usuário logado (mesma lista do app PWA).
-  var ACCOUNT_LINKS = [
+  const ACCOUNT_LINKS = [
     { icon: '<i class="ph ph-house" aria-hidden="true"></i>', label: "Início", href: "/home" },
     { icon: '<i class="ph ph-chart-bar" aria-hidden="true"></i>', label: "Dashboard", href: "/app" },
     { icon: '<i class="ph ph-whatsapp-logo" aria-hidden="true"></i>', label: "Conectar WhatsApp", action: connectWhatsApp },
@@ -156,7 +156,7 @@
 
   function injectStyles() {
     if (document.getElementById("pb-nav-css")) return;
-    var s = document.createElement("style");
+    const s = document.createElement("style");
     s.id = "pb-nav-css";
     s.textContent = [
       /* ── Menu da conta (desktop + mobile linha 1) ── */
@@ -190,10 +190,10 @@
 
   // ── Dropdown de conta (canto direito) ────────────────────────────────────
   function renderAccountMenu(nr) {
-    var linksHtml = ACCOUNT_LINKS.map(function (l, i) {
-      var cls = "pb-acct-link" + (l.danger ? " danger" : "");
-      var tag = l.href ? "a" : "button";
-      var attr = l.href ? 'href="' + l.href + '"' : 'type="button"';
+    const linksHtml = ACCOUNT_LINKS.map(function (l, i) {
+      const cls = "pb-acct-link" + (l.danger ? " danger" : "");
+      const tag = l.href ? "a" : "button";
+      const attr = l.href ? 'href="' + l.href + '"' : 'type="button"';
       return "<" + tag + ' class="' + cls + '" data-acct-i="' + i + '" ' + attr + ">" +
         '<span class="pb-acct-ico">' + l.icon + "</span>" + l.label + "</" + tag + ">";
     }).join("");
@@ -209,11 +209,11 @@
       '<span class="pb-acct-plan" id="pb-acct-plan" style="display:none"></span></div>' +
       linksHtml + "</div></div>";
 
-    var btn = document.getElementById("pb-acct-btn");
-    var dd = document.getElementById("pb-acct-dd");
+    const btn = document.getElementById("pb-acct-btn");
+    const dd = document.getElementById("pb-acct-dd");
     btn.addEventListener("click", function (e) {
       e.stopPropagation();
-      var open = dd.classList.toggle("open");
+      const open = dd.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     });
     document.addEventListener("click", function () {
@@ -222,7 +222,7 @@
     });
     ACCOUNT_LINKS.forEach(function (l, i) {
       if (!l.action) return;
-      var el = nr.querySelector('[data-acct-i="' + i + '"]');
+      const el = nr.querySelector('[data-acct-i="' + i + '"]');
       if (el) el.addEventListener("click", l.action);
     });
   }
@@ -233,15 +233,15 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
-        var email = data.email || "";
+        const email = data.email || "";
         setText("pb-acct-lbl", data.display_name || shortAccount(email));
         setText("pb-acct-email", email || "Minha conta");
         setPlan("pb-acct-plan", planLabel(data.plan || "free"));
       })
       .catch(function () {});
   }
-  function setText(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
-  function setPlan(id, v) { var el = document.getElementById(id); if (el) { el.textContent = v; el.style.display = "inline-block"; } }
+  function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+  function setPlan(id, v) { const el = document.getElementById(id); if (el) { el.textContent = v; el.style.display = "inline-block"; } }
 
   injectStyles();
 
@@ -249,7 +249,7 @@
     .then(function (r) {
       if (!r.ok) return; // deslogado: mantém "Entrar / Começar agora" padrão
       // 1) Nav direita: "Entrar / Começar agora" → menu da conta (com logout).
-      var nr = document.querySelector(".nav .nav-right");
+      const nr = document.querySelector(".nav .nav-right");
       if (nr) renderAccountMenu(nr);
       // 2) E-mail + plano no dropdown.
       loadProfile();

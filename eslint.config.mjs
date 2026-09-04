@@ -64,27 +64,46 @@ export default defineConfig([
     rules: {
       "no-empty": ["error", { allowEmptyCatch: true }],
       // Linhas de base medidas em 2026-09-03 (contagem entre parênteses).
-      "no-var": ["warn"], // 201
-      "prefer-const": ["warn"], // 6
+      // Zeradas no burndown de 2026-09-03 (`npx eslint . --fix`, 199 sítios;
+      // os 2 que o fixer recusou foram conferidos e convertidos à mão).
+      "no-var": "error",
+      "prefer-const": "error",
       "no-unused-vars": [
-        "warn", // 101
+        "error",
         {
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
           // `catch (_)` é o idioma do projeto, e argsIgnorePattern não vale
           // para parâmetro de catch.
           caughtErrorsIgnorePattern: "^_",
+          // MUDANÇA DE CONFIG, não limpeza de código: `local` deixa de
+          // reportar declaração do escopo GLOBAL. Os arquivos de frontend/ são
+          // scripts clássicos, e o que consome os nomes do topo são os 139
+          // `onclick=` do dashboard.html (mais os gerados dentro de template
+          // string) — HTML que o ESLint não lê. Com o default `all` isso dava
+          // 73 avisos, todos falso positivo, e enterrava os de dentro de
+          // função. Quem cobre ESTA classe é tests/frontend/handlers_inline.test.mjs,
+          // que compara os nomes do HTML com os do JS. O preço: global morta de
+          // verdade deixa de aparecer aqui (as 3 achadas na medição de
+          // 2026-09-03 estão no relatório do burndown).
+          vars: "local",
         },
       ],
       // builtinGlobals: false porque as funções globais do próprio projeto
       // estão declaradas em `globals` acima — sem isso, o arquivo que DEFINE
-      // cada uma é reportado como redeclaração dela.
-      "no-redeclare": ["warn", { builtinGlobals: false }], // 3
+      // cada uma é reportado como redeclaração dela. Zerada no burndown de
+      // 2026-09-03: as 3 eram `_fmtBRL`/`_fmtDateBR` declaradas 2× e 3× no
+      // dashboard.js, com a última vencendo em todo o arquivo.
+      "no-redeclare": ["error", { builtinGlobals: false }],
       // 1 violação, e é bug de verdade: `errEl` em frontend/dashboard.js:9774
       // está fora do escopo do `const errEl` da linha 9747.
       "no-undef": "warn", // 1
       // Orçamento de tamanho e complexidade: "warn" de propósito. São números
-      // para conversa sobre fatoração, não portão.
+      // para conversa sobre fatoração, não portão. As contagens abaixo são a
+      // LINHA DE BASE do burndown de 2026-09-03 (portão de decisão: corrigir o
+      // mecânico, rastrear esta cauda). 148 dos 179 estão em dashboard.js e só
+      // saem quando o arquivo for quebrado — reestruturar função e mover função
+      // de arquivo no mesmo commit é como se perde o rastro do que quebrou.
       complexity: ["warn", 12], // 86
       "max-depth": ["warn", 4], // 4
       "max-statements": ["warn", 20], // 77
