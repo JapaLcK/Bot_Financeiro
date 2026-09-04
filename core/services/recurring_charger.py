@@ -305,6 +305,11 @@ def _canonical_category(
     `cache` é por `user_id` porque as listas de vencimento são GLOBAIS (todos os
     usuários numa query só) — sem ele seria uma query de catálogo por linha cobrada.
     """
+    # ponytail: o cache é lido uma vez por usuário e vale o lote inteiro. Se o
+    # dono criar/renomear categoria DURANTE o cron, a 2ª linha dele usa o mapa
+    # velho — teto conhecido, custa um lançamento com a grafia anterior e o
+    # rename seguinte o corrige (o cascade de `update_user_category` alcança
+    # `launches`). Invalidar por escrita só se isso virar sintoma real.
     from db.categories import resolve_category_input, user_category_display_map
 
     if cache is None:

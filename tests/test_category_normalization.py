@@ -57,6 +57,7 @@ from db.categories import (
     create_user_category,
     delete_user_category,
     resolve_category_input,
+    update_user_category,
 )
 import frontend.finance_bot_websocket_custom as dashboard
 
@@ -1247,10 +1248,43 @@ def test_update_recurring_income_resolve_categoria(pro_user_id):
 
 def test_escrita_de_recorrente_nao_cria_categoria_orfa(pro_user_id):
     """A invariante do arquivo aplicada à porta 9: a linha em `user_categories`
-    nasce DEPOIS do write. Alvo inexistente = erro e catálogo intacto."""
+    nasce DEPOIS do write.
+
+    O alvo tem de EXISTIR e a falha tem de vir DEPOIS do bloco de categoria,
+    senão o teste não discrimina a ordem. `RECORRENTE_NAO_ENCONTRADO` sobe no
+    topo de `update_recurring_expense`, antes do resolver — com ele o
+    `ensure_user_category` é inalcançável em qualquer ordem e o teste passa até
+    na `main`. `DIA_INVALIDO` é validado DEPOIS do bloco `if category is not
+    None:` e antes de qualquer escrita: é o único ponto onde a ordem é
+    observável por caminho alcançável.
+
+    Controle negativo medido: mover o `ensure_user_category` pra dentro do bloco
+    de categoria (antes do UPDATE) faz o assert do catálogo ler
+    `['cafeteria da esquina']`."""
+    from db.recurring import (
+        create_recurring_expense,
+        get_recurring_expense,
+        update_recurring_expense,
+    )
+
+    rec = create_recurring_expense(
+        pro_user_id, "Assinatura", 21.90, "outros", 10, "account",
+    )
+    with pytest.raises(ValueError, match="DIA_INVALIDO"):
+        update_recurring_expense(
+            pro_user_id, rec["id"], category="Cafeteria da Esquina", due_day=99,
+        )
+    assert _nomes_custom(pro_user_id) == []
+    assert get_recurring_expense(pro_user_id, rec["id"])["category"] == "outros"
+
+
+def test_escrita_de_recorrente_nao_cria_orfa_com_alvo_inexistente(pro_user_id):
+    """POSITIVO do par: alvo que não existe continua sendo 404, catálogo intacto.
+    Este caso NÃO mede a ordem (o raise vem antes do resolver) — está aqui pra
+    provar que o caminho de erro anterior não regrediu."""
     from db.recurring import update_recurring_expense
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="RECORRENTE_NAO_ENCONTRADO"):
         update_recurring_expense(pro_user_id, 999_999_999, category="Cafeteria da Esquina")
     assert _nomes_custom(pro_user_id) == []
 
@@ -1273,3 +1307,204 @@ def test_escrita_de_recorrente_semeia_o_catalogo(pro_user_id, porta):
 
     # minúscula COM acento/pontuação é a forma de exibição da convenção do topo
     assert _nomes_custom(pro_user_id) == ["cafeteria da esquina"]
+
+
+# ─── o rename tem de alcançar o recorrente, senão a fatia gêmea volta ───────
+
+
+def _zera_idempotencia(user_id: int) -> None:
+    """Deixa o recorrente cobrável de novo, pra simular o mês seguinte."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update recurring_expenses set last_charged_ym=null where user_id=%s",
+                (user_id,),
+            )
+            cur.execute("delete from recurring_charges where user_id=%s", (user_id,))
+        conn.commit()
+
+
+def test_rename_cascateia_para_o_recorrente(pro_user_id):
+    """NEGATIVO (despesa): o #147 fez o recorrente nascer com a grafia do
+    catálogo — e com isso o RENAME virou a última fonte de divergência. O
+    cobrador é `create=False` + `or raw`: sem o cascade ele não acha mais o
+    nome velho no `display_map` e grava a grafia ANTIGA no mês seguinte,
+    enquanto o histórico já foi renomeado. Duas fatias no donut.
+
+    Controle negativo medido: removendo o `update recurring_expenses` do
+    cascade de `update_user_category`, este assert lê
+    `{'café': 1, 'cafeteria': 1}`."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from db.recurring import create_recurring_expense
+    from utils_date import today_tz
+
+    hoje = today_tz()
+    cat = create_user_category(pro_user_id, "cafeteria")
+    create_recurring_expense(
+        pro_user_id, "Assinatura", 21.90, "Cafeteria", hoje.day, "account",
+        start_date=hoje,
+    )
+    charge_due_recurring_expenses_once(hoje)          # mês 1
+    update_user_category(pro_user_id, cat["id"], new_name="café")
+    _zera_idempotencia(pro_user_id)
+    charge_due_recurring_expenses_once(hoje)          # mês 2
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select categoria, count(*) as n from launches "
+                " where user_id=%s group by categoria",
+                (pro_user_id,),
+            )
+            fatias = {r["categoria"]: int(r["n"]) for r in cur.fetchall()}
+    assert fatias == {"café": 2}, fatias
+
+
+def test_rename_cascateia_para_a_receita_recorrente(pro_user_id):
+    """NEGATIVO (receita): o mesmo buraco do outro lado — `recurring_incomes`
+    também guarda o texto. Controle negativo: sem o `update recurring_incomes`
+    no cascade, o crédito sai como "freela"."""
+    from core.services.recurring_charger import credit_due_recurring_incomes_once
+    from db.recurring_income import create_recurring_income
+    from utils_date import today_tz
+
+    hoje = today_tz()
+    cat = create_user_category(pro_user_id, "freela")
+    create_recurring_income(
+        pro_user_id, "Freela", 500.0, "Freela", hoje.day, start_date=hoje,
+    )
+    update_user_category(pro_user_id, cat["id"], new_name="renda extra")
+    credit_due_recurring_incomes_once(hoje)
+
+    assert _ultimo_launch(pro_user_id)["categoria"] == "renda extra"
+
+
+def test_rename_nao_toca_recorrente_de_outra_categoria(pro_user_id):
+    """POSITIVO do par: o cascade é `where lower(category)=lower(old_name)` —
+    recorrente de OUTRA categoria fica intocado. Sem este caso, um cascade que
+    reescrevesse a coluna inteira passaria nos dois testes acima."""
+    from db.recurring import create_recurring_expense, get_recurring_expense
+
+    cat = create_user_category(pro_user_id, "cafeteria")
+    create_user_category(pro_user_id, "padaria")
+    outro = create_recurring_expense(
+        pro_user_id, "Pão", 12.0, "Padaria", 10, "account",
+    )
+    update_user_category(pro_user_id, cat["id"], new_name="café")
+
+    assert get_recurring_expense(pro_user_id, outro["id"])["category"] == "padaria"
+
+
+# ─── teto do nome: a porta nova não pode furá-lo pra dentro do catálogo ─────
+
+
+def test_escrita_de_recorrente_nao_semeia_nome_acima_do_teto(pro_user_id):
+    """NEGATIVO: `resolve_category_input` recusa acima de CATEGORY_NAME_MAX_LEN
+    (é o que faz o PATCH /launches devolver 400), mas a porta nova faz `or cat`
+    e entrega o texto cru ao `ensure_user_category`. Sem o teto dentro do
+    `create_user_category`, a linha longa entra no catálogo.
+
+    Controle negativo medido: tirando o `len(norm) > CATEGORY_NAME_MAX_LEN` do
+    `create_user_category`, este assert lê um nome de 208 chars."""
+    from db.recurring import create_recurring_expense
+
+    longo = "Padaria " + "z" * 200
+    assert len(longo) > CATEGORY_NAME_MAX_LEN
+    rec = create_recurring_expense(
+        pro_user_id, "Assinatura", 10.0, longo, 10, "account",
+    )
+    # o recorrente guarda o texto (o `or cat` não perde o que o dono digitou)…
+    assert rec["category"] == longo
+    # …mas o catálogo não ganha linha acima do teto
+    assert _nomes_custom(pro_user_id) == []
+
+
+def test_nome_longo_no_catalogo_nao_fura_o_teto_das_outras_portas(pro_user_id):
+    """A escalada do caso acima: com a linha longa no catálogo, o `display_map`
+    a resolveria no passo 2 de `resolve_category_input` — ANTES do guard de
+    tamanho do passo 3 — e o PATCH /launches, que devolvia 400, passaria a
+    aceitar."""
+    from db.recurring import create_recurring_expense
+
+    longo = "Padaria " + "z" * 200
+    assert resolve_category_input(pro_user_id, longo, create=True) is None
+    create_recurring_expense(pro_user_id, "Assinatura", 10.0, longo, 10, "account")
+    assert resolve_category_input(pro_user_id, longo, create=True) is None
+
+
+def test_categoria_no_teto_continua_entrando_no_catalogo(pro_user_id):
+    """POSITIVO do par: o teto é `>`, não `>=`. Nome exatamente no limite
+    continua sendo aceito — sem este caso, um teto de `len(norm) > 0` passaria
+    nos dois negativos acima recusando tudo."""
+    no_teto = "c" * CATEGORY_NAME_MAX_LEN
+    create_user_category(pro_user_id, no_teto)
+    assert _nomes_custom(pro_user_id) == [no_teto]
+
+
+# ─── decisão registrada: falha do catálogo SOBE na escrita (strict=True) ────
+
+
+def test_escrita_falha_quando_o_catalogo_cai(pro_user_id, monkeypatch):
+    """PRENDE a decisão do comentário em `db/recurring.py`: `create=True` usa
+    `user_category_display_map(strict=True)`, então falha transitória de leitura
+    do catálogo aborta a criação do gasto fixo (500 na rota) em vez de degradar.
+
+    Degradar daria mapa vazio → o nome digitado passaria por NOVO →
+    `ensure_user_category` gravaria a gêmea, que é o defeito que a porta existe
+    pra matar. Aqui nada foi escrito ainda, então a retentativa é segura."""
+    import db.categories as C
+    from db.recurring import create_recurring_expense
+
+    real = C.get_conn
+    est = {"quebrar": True}
+
+    def conn_quebrada(*a, **k):
+        if est["quebrar"]:
+            est["quebrar"] = False
+            raise RuntimeError("conexao caiu (transitorio)")
+        return real(*a, **k)
+
+    monkeypatch.setattr(C, "get_conn", conn_quebrada)
+    with pytest.raises(RuntimeError):
+        create_recurring_expense(
+            pro_user_id, "Assinatura", 21.90, "Cafeteria da Esquina", 10, "account",
+        )
+    # nem recorrente, nem categoria: a falha é limpa
+    assert _nomes_custom(pro_user_id) == []
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from recurring_expenses where user_id=%s",
+                (pro_user_id,),
+            )
+            assert int(cur.fetchone()["n"]) == 0
+
+
+def test_cobranca_degrada_quando_o_catalogo_cai(pro_user_id, monkeypatch):
+    """POSITIVO do par: o COBRADOR usa `strict=False` de propósito — o oposto da
+    escrita. Falha do catálogo não pode abortar dinheiro; a cobrança acontece e
+    a categoria fica com o texto do recorrente (`or raw`).
+
+    Sem este caso, trocar o cobrador pra `strict=True` passaria no teste acima e
+    quebraria a cobrança em produção."""
+    import db.categories as C
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    create_user_category(pro_user_id, "mcdonald's")
+    _gasto_fixo_legado(pro_user_id, "McDonald's")
+
+    real = C.get_conn
+    est = {"quebrar": True}
+
+    def conn_quebrada(*a, **k):
+        if est["quebrar"]:
+            est["quebrar"] = False
+            raise RuntimeError("conexao caiu (transitorio)")
+        return real(*a, **k)
+
+    monkeypatch.setattr(C, "get_conn", conn_quebrada)
+    res = charge_due_recurring_expenses_once(today_tz())
+
+    assert len(res) == 1, res
+    assert _ultimo_launch(pro_user_id)["categoria"] == "McDonald's"

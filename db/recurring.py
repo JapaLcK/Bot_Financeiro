@@ -214,6 +214,15 @@ def create_recurring_expense(
     # categoria. Sem o resolver, "McDonald's" nascia cru aqui e o cobrador o
     # copiava pra `launches.categoria` todo mês, abrindo fatia gêmea no donut.
     # `or cat` mantém o texto quando o resolver recusa (nome longo demais).
+    #
+    # DECISÃO: `create=True` faz `user_category_display_map(strict=True)`, então
+    # falha de leitura do catálogo SOBE e o gasto fixo não é criado (500 na rota,
+    # mensagem de erro no WhatsApp). É de propósito, e é o mesmo contrato da porta
+    # de referência: degradar pra mapa vazio faria o nome digitado passar por
+    # "novo" e `ensure_user_category` gravaria a gêmea — o defeito que este
+    # conserto existe pra matar. Aqui não há estado parcial (nada foi escrito
+    # ainda), então a retentativa é segura. Preso por
+    # `test_escrita_falha_quando_o_catalogo_cai`.
     cat = (category or "").strip() or "outros"
     cat = resolve_category_input(user_id, cat, create=True) or cat
     note = (notes or "").strip() or None

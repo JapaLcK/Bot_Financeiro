@@ -128,7 +128,8 @@ def create_recurring_income(
     start = _parse_start_date(start_date, default=date.today())
 
     # #147: espelho de `create_recurring_expense` — o usuário DIGITA a categoria
-    # e o creditador a copia pra `launches.categoria` todo mês.
+    # e o creditador a copia pra `launches.categoria` todo mês. Vale aqui a mesma
+    # decisão registrada lá: `create=True` deixa falha do catálogo SUBIR.
     cat = (category or "").strip() or "salário"
     cat = resolve_category_input(user_id, cat, create=True) or cat
     note = (notes or "").strip() or None

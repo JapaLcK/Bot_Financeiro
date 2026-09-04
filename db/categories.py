@@ -511,7 +511,13 @@ def create_user_category(
     ensure_user(user_id)
     ensure_user_categories_seeded(user_id)
     norm = _normalize_category_name(name)
-    if not norm:
+    # O teto vale AQUI, não só nas portas: `resolve_category_input` já recusa
+    # nome maior que isto (é o que faz o PATCH /launches devolver 400), mas
+    # `create_user_category` é uma segunda entrada — o `POST /categories` e o
+    # `ensure_user_category` chegam por ela. Sem o teto, a linha longa entrava
+    # no catálogo e o `display_map` passava a resolvê-la no passo 2, ANTES do
+    # guard de tamanho do passo 3, fazendo as portas que recusavam aceitar.
+    if not norm or len(norm) > CATEGORY_NAME_MAX_LEN:
         raise ValueError("CATEGORIA_INVALIDA")
     emoji = (emoji or "🏷️").strip() or "🏷️"
     color = (color or "#7c3aed").strip() or "#7c3aed"
@@ -629,6 +635,22 @@ def update_user_category(
                 )
                 cur.execute(
                     "update user_category_rules set category=%s "
+                    "where user_id=%s and lower(category)=lower(%s)",
+                    (next_name, user_id, old_name),
+                )
+                # #147: os recorrentes guardam o TEXTO da categoria e o cobrador
+                # o copia pra `launches.categoria` todo mês. Ficar de fora do
+                # cascade reabria a fatia gêmea que o #147 fechou: o histórico
+                # renomeado acima e o recorrente ainda no nome velho, que o
+                # cobrador (`create=False` + `or raw`) grava de novo no mês
+                # seguinte. Medido em `test_rename_cascateia_para_o_recorrente`.
+                cur.execute(
+                    "update recurring_expenses set category=%s "
+                    "where user_id=%s and lower(category)=lower(%s)",
+                    (next_name, user_id, old_name),
+                )
+                cur.execute(
+                    "update recurring_incomes set category=%s "
                     "where user_id=%s and lower(category)=lower(%s)",
                     (next_name, user_id, old_name),
                 )
