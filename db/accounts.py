@@ -894,10 +894,16 @@ def list_launches_by_category(
                        posted_at, has_time, fonte,
                        user_seq, id, ord_id, is_internal_movement,
                        count(*) over () as n_total,
+                       -- A fonte única, não o literal: o `resumo` daqui é o
+                       -- número que o `_total_despesa` (core/handlers/launches.py)
+                       -- SUBTRAI do total do dashboard pra dizer o que ficou de
+                       -- fora. Com um terceiro alias só no filtro de linhas
+                       -- (`_TIPO_ALIASES`, logo abaixo) a linha entrava e não era
+                       -- somada — a explicação sumia calada.
                        coalesce(sum(valor) filter (
-                           where tipo in ('despesa', 'saida')) over (), 0) as tot_despesa,
+                           where {TIPO_DESPESA_SQL}) over (), 0) as tot_despesa,
                        coalesce(sum(valor) filter (
-                           where tipo in ('receita', 'entrada')) over (), 0) as tot_receita
+                           where {TIPO_RECEITA_SQL}) over (), 0) as tot_receita
                 from (
                     select tipo,
                            valor,
@@ -993,7 +999,7 @@ def get_top_expense_categories(
     """Top N categorias de gasto no período.
 
     Agrega:
-      - despesas reais em launches (tipo='despesa', is_internal_movement=false),
+      - despesas reais em launches (`TIPO_DESPESA_SQL`, is_internal_movement=false),
         pela data do lançamento (criado_em)
       - compras no cartão (credit_transactions, is_refund=false)
 
@@ -1034,7 +1040,7 @@ def get_top_expense_categories(
                     select categoria, valor
                     from launches
                     where user_id = %s
-                      and tipo = 'despesa'
+                      and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
                       and criado_em >= %s and criado_em < %s
                     union all

@@ -24,7 +24,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from db.connection import get_conn
+from db.connection import TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -192,12 +192,15 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
 # ── Repórter: a manchete do mês ──────────────────────────────────────────────
 
 def _month_stats(cur, user_id: int, first: date, nxt: date) -> dict[str, float]:
+    # f-string por causa de `TIPO_RECEITA_SQL`/`TIPO_DESPESA_SQL`: `entrou` lia
+    # só `tipo = 'receita'` enquanto `saiu` já lia as duas formas, então uma linha
+    # legada 'entrada' sumia da manchete e o "sobrou" saía MENOR do que é.
     cur.execute(
-        """
+        f"""
         select
-          coalesce(sum(valor) filter (where tipo = 'receita'
+          coalesce(sum(valor) filter (where {TIPO_RECEITA_SQL}
                                         and is_internal_movement = false), 0)      as entrou,
-          coalesce(sum(valor) filter (where tipo in ('despesa', 'saida')
+          coalesce(sum(valor) filter (where {TIPO_DESPESA_SQL}
                                         and is_internal_movement = false), 0)      as saiu,
           -- aportes vêm de deposito/saque_caixinha, que db/pockets.py grava SEMPRE
           -- como is_internal_movement=true. Por isso o guard de movimento interno
