@@ -967,20 +967,33 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 # O predicado inteiro mora em `_clarification_abandonada`; a tabela de unidade
 # input -> via está em `tests/test_bill_amount_pending.py` (§0.7 — não repetir).
 #
-# CONTROLES NEGATIVOS (cada um injetado num caso que estava VERDE):
-#   remover o ramo `if intent_da_resposta in ESCRITA and not _so_o_valor(text)`
-#     -> test_281_comando_explicito_vence_a_pergunta_de_valor
-#        test_281_comando_explicito_vence_a_pergunta_de_nome
-#        test_281_verbo_de_deposito_nao_vira_saque   (P1 e P4)
-#   trocar o portão por `if intent_da_resposta in ESCRITA` (todo ESCRITA
-#   abandona) -> test_281_resposta_compativel_nunca_vira_lancamento fica
-#        VERMELHO em `100 reais`, `2 mil` e `30 reais e 50 centavos` (as três
-#        que o classificador lê como `launches.add` 0.95).
-#   tirar o `_STARTS_WITH_VALUE_RE`: NÃO DISCRIMINA no PR A, e é declarado, não
-#        fingido — o AMBÍGUO e o COMPATÍVEL têm hoje o MESMO destino
-#        ("resolve"), então remover o teste do meio não muda saída nenhuma. O
-#        caso está preparado em `test_281_ambiguo_ainda_responde_a_pergunta`,
-#        que é a linha que fica vermelha quando o PR B chegar.
+# CONTROLES NEGATIVOS — quatro, MEDIDOS um a um (contagem sobre
+# `test_perguntas_guardam_contexto.py` + `test_bill_amount_pending.py` +
+# `test_full_handler_smoke.py`, os três arquivos da porta 2):
+#
+#   1. remover o ramo `if intent_da_resposta in ESCRITA and not _so_o_valor`
+#      -> 6 vermelhos, entre eles
+#         test_281_comando_explicito_vence_a_pergunta_de_valor
+#         test_281_comando_explicito_vence_a_pergunta_de_nome
+#         test_281_verbo_de_deposito_nao_vira_saque
+#   2. tirar o portão (`if intent_da_resposta in ESCRITA` sozinho)
+#      -> 12 vermelhos, TODOS da família `paguei …`
+#         (test_clarification_dano_nao_some_com_palavra_na_frente ×9,
+#          test_clarification_aceita_tudo_que_a_main_aceita ×2,
+#          test_porta_2_ponto_final_sem_virgula_registra ×1).
+#      MEDIDO, e não é o que se esperava: `100 reais` NÃO fica vermelho aqui —
+#      quem o segura é o `_STARTS_WITH_VALUE_RE`, não o `_so_o_valor`. O que o
+#      `_so_o_valor` segura sozinho é o VERBO sem alvo.
+#   3. trocar o `_SEM_CONTEUDO` pelo `_ENCHIMENTO_PALAVRAS` (tirar os 12 verbos
+#      do prefixo sem conteúdo) -> 19 vermelhos, incluindo o filtro de dano
+#      inteiro.
+#   4. tirar o `_STARTS_WITH_VALUE_RE`
+#      -> 1 vermelho: test_281_ambiguo_ainda_responde_a_pergunta.
+#      O plano previa que ele NÃO discriminasse no PR A; discrimina — sem ele
+#      `50 no mercado` (launches.add 0.95, não é só-o-valor) abandona.
+#
+# E a guarda de entrega tem o dela em `test_bill_amount_pending.py`: removê-la
+# deixa 2 vermelhos, os dois medindo R$ 13.250,00 no lugar de R$ 132,50.
 #
 # CLASSE CEGA (a mesma do #185): o LLM está fora dos testes, então o
 # `classify_with_context` nunca roda e os payloads de caixinha/investimento que
@@ -1086,8 +1099,14 @@ def test_281_resposta_compativel_nunca_vira_lancamento(uid, resposta, saque):
     """CONTROLE POSITIVO, e é o que separa este conserto de um que recusa tudo.
 
     `100 reais`, `2 mil` e `30 reais e 50 centavos` classificam `launches.add`
-    0.95 — os mesmos 0.95 de `gastei 50 no mercado`. Quem os separa é o
-    `_so_o_valor`, não o classificador."""
+    0.95 — os mesmos 0.95 de `gastei 50 no mercado`; `cem`, `132,50` e `tudo`
+    caem em `out_of_scope 0.0`. Nenhum deles pode virar lançamento.
+
+    MEDIDO, e corrige o que se supunha: destes seis, os que dependem de um
+    portão dependem do `_STARTS_WITH_VALUE_RE` (começam por dígito), não do
+    `_so_o_valor` — desligar o `_so_o_valor` não deixa nenhuma linha daqui
+    vermelha. Quem o `_so_o_valor` segura sozinho é o verbo sem alvo
+    (`paguei 132`), e isso se mede em `test_full_handler_smoke.py`."""
     _pergunta_de_valor(uid)
 
     respostas = _conversa(uid, resposta)
