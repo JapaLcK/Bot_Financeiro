@@ -95,7 +95,7 @@
       hideTyping();
       if (r.status === 403) {
         // Plano Pro expirou ou foi rebaixado. Fecha o widget e abre upgrade.
-        const data = await r.json().catch(() => ({}));
+        await r.json().catch(() => ({}));
         renderPiggyMsg("assistant", "Conversar com a IA é um recurso do PigBank+. " +
                                      "[Faça upgrade](/precos) pra liberar.", true);
         return;

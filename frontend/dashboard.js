@@ -271,7 +271,6 @@ const prevNums   = {};
 
 let launchesPage     = 1;
 const LAUNCHES_LIMIT = 25;
-let launchesLoading  = false;
 let alertsDismissed  = false;
 let monthRequestSeq  = 0;
 let monthAbortController = null;
@@ -346,9 +345,7 @@ const PALETTE_LIGHT = ["#C7186B","#3E8E23","#1E6FD0","#D42E2E","#0A8F7A","#A66E0
 function catColors() {
   return document.body.classList.contains("light") ? PALETTE_LIGHT : PALETTE_DARK;
 }
-const CAT_CLR = PALETTE_DARK;   // legado: refs diretas caem no dark; charts usam catColors()
 const PALETTE = PALETTE_DARK;
-const PKT_CLR   = ["var(--purple)","var(--blue)","var(--green)"];
 
 function getFilterText() {
   return (document.getElementById("filter-text")?.value || "").trim();
@@ -758,18 +755,6 @@ let _currentCards = [];
 let _cardsCache = null;       // último payload do GET /cards/summary
 const _cardsChannel = makeFetchChannel(); // dedup + abort + geração
 const CARDS_FREE_LIMIT = 1; // Free plan: 1 cartão. Pro: ilimitado.
-
-function _fmtBRL(n) {
-  return "R$ " + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function _fmtDateBR(iso) {
-  if (!iso) return "—";
-  try {
-    const [y, m, d] = iso.split("-").map(Number);
-    return String(d).padStart(2, "0") + "/" + String(m).padStart(2, "0");
-  } catch { return "—"; }
-}
 
 function _bestPurchaseDay(closing_day) {
   // Melhor dia = dia seguinte ao fechamento (maior prazo até vencer)
@@ -2664,7 +2649,6 @@ async function _fetchBudgetsStatus(month, { force = false } = {}) {
 async function loadBudgetsView(forceFresh = false, { background = false } = {}) {
   const list = document.getElementById("budgets-list");
   const stats = document.getElementById("budgets-stats");
-  const title = document.getElementById("budgets-title");
   if (!list || !stats) return;
   if (!USER_ID) {
     if (background) throw new Error("orçamentos: sessão ainda não pronta");
@@ -3236,7 +3220,7 @@ function _renderGoalCard(g, idx = 0) {
   const offset = circumference * (1 - pct / 100);
 
   let deadlineText = "Sem prazo definido";
-  let deadlineColor = "var(--text-3)";
+  const deadlineColor = "var(--text-3)";
   if (g.target_date) {
     const [y, m] = g.target_date.split("-").map(Number);
     const monthYear = new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
@@ -3809,13 +3793,6 @@ function _recFreqLabel(r) {
         : "anual";
     default:       return `dia ${dia}`;
   }
-}
-
-function _fmtDateBR(iso) {
-  try {
-    const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
-    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-  } catch (_) { return String(iso); }
 }
 
 function _renderRecurringRow(r) {
@@ -4466,7 +4443,7 @@ async function _fetchBills({ force = false } = {}) {
   }, { force });
 }
 
-async function loadBillsView(forceFresh = false, { background = false } = {}) {
+async function loadBillsView(_forceFresh = false, { background = false } = {}) {
   const agendaEl = document.getElementById("recurring-bills-agenda");
   if (!agendaEl) return;
   loadForecast();  // independente dos boletos; o próprio gate cuida do não-Pro
@@ -5853,12 +5830,12 @@ function _getDismissedInsights() {
       if (obj[k] && (now - obj[k]) < 24 * 60 * 60 * 1000) cleaned[k] = obj[k];
     }
     return cleaned;
-  } catch (e) { return {}; }
+  } catch (_e) { return {}; }
 }
 function _dismissInsight(key) {
   const obj = _getDismissedInsights();
   obj[key] = Date.now();
-  try { localStorage.setItem("_pigInsightsDismissed", JSON.stringify(obj)); } catch (e) {}
+  try { localStorage.setItem("_pigInsightsDismissed", JSON.stringify(obj)); } catch (_e) {}
   // Re-render
   if (_analyticsCache) renderAnalyticsInsights(_analyticsCache.insights);
 }
@@ -5969,7 +5946,7 @@ document.addEventListener("change", (e) => {
 
 // ── View Histórico (Sprint 6) ────────────────────────────────────────────
 // Estado dos filtros — guarda tudo num objeto pra facilitar diff e reload.
-let _historyFilters = {
+const _historyFilters = {
   months: 6,           // período principal (dropdown)
   tipo: "all",         // chip de tipo: all|despesa|receita|credito
   q: "",               // busca textual (debounce)
@@ -6368,7 +6345,7 @@ document.addEventListener("click", async (e) => {
     let more;
     try {
       more = await _fetchHistoryList({ ..._historyFilters, page: nextPage });
-    } catch (err) {
+    } catch (_err) {
       // Falha REAL (HTTP/rede): o throw do canal (guard de r.ok) chega aqui, fora
       // do try/catch do loadHistoryView. Botão volta acionável; contador intacto,
       // então o retry pega a MESMA próxima página (não pula).
@@ -6517,7 +6494,7 @@ function maybeShowTrialBanner() {
   try {
     const until = parseInt(localStorage.getItem(TRIAL_BANNER_SNOOZE_KEY) || "0", 10);
     if (until && Date.now() < until) return;  // ainda no período de silêncio
-  } catch (e) { /* localStorage indisponível → mostra assim mesmo */ }
+  } catch (_e) { /* localStorage indisponível → mostra assim mesmo */ }
   el.style.display = "block";
 }
 
@@ -6527,7 +6504,7 @@ function dismissTrialBanner() {
   try {
     const until = Date.now() + TRIAL_BANNER_SNOOZE_DAYS * 86400000;
     localStorage.setItem(TRIAL_BANNER_SNOOZE_KEY, String(until));
-  } catch (e) { /* sem localStorage → some só nesta sessão */ }
+  } catch (_e) { /* sem localStorage → some só nesta sessão */ }
 }
 
 function showUpgradeModal(feature) {
@@ -7797,7 +7774,6 @@ async function ackRecurringIncomeCredit(creditId, opts) {
    FILTER + LAUNCHES
 ═══════════════════════════════════════════════════════════════════════ */
 function setLaunchesLoading(on) {
-  launchesLoading = on;
   const card = document.getElementById("launches-card");
   if (!card) return;
 
@@ -8727,7 +8703,7 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     // installments_total). O refresh silencioso corrige se errou.
     const items = lastData?.recent_launches || [];
     const target = items.find(l => l.id === launchId);
-    let removeIds = new Set([launchId]);
+    const removeIds = new Set([launchId]);
     if (isCredit && installmentsTotal && installmentsTotal > 1 && target) {
       for (const l of items) {
         if (l.tipo === "credito"
@@ -9540,8 +9516,8 @@ function _installWalletDrag(wallet) {
       state.item.style.transform = `translateY(${dy}px) scale(1.015) rotate(-1deg)`;
       state.item.style.zIndex = 100;
       // Calcula slot alvo baseado em quantos passos de STEP percorreu.
-      let slotShift = Math.round(dy / STEP);
-      let toIndex = Math.max(0, Math.min(state.items.length - 1, state.fromIndex + slotShift));
+      const slotShift = Math.round(dy / STEP);
+      const toIndex = Math.max(0, Math.min(state.items.length - 1, state.fromIndex + slotShift));
       state.toIndex = toIndex;
       // Anima outros cards pra abrir espaço
       state.items.forEach((other, i) => {
@@ -9927,7 +9903,7 @@ async function handleOfxFileSelected(event) {
     document.getElementById("ofx-result-body").textContent = data.message || "Importação concluída.";
     document.getElementById("ofx-result-overlay").classList.add("open");
     sendRefresh && sendRefresh();
-  } catch (e) {
+  } catch (_e) {
     showLaunchSuccessToast("Erro ao importar OFX. Tente novamente.");
   }
 }
@@ -9962,7 +9938,7 @@ async function exportToEmail() {
     }
     const data = await resp.json().catch(() => ({}));
     showLaunchSuccessToast(` Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
-  } catch (e) {
+  } catch (_e) {
     showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
   }
 }
@@ -10278,7 +10254,6 @@ function render(d) {
   // do saldo, não é poupança sustentável). Mostra o motivo, em vermelho.
   const savDeltaCls = sav < 0 ? "down" : (rate>=20?"up":rate>=10?"":"down");
   const savDeltaTxt = sav < 0 ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
-  const rc   = rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--red)";
   const hist = d.is_current_month !== undefined
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
@@ -10759,7 +10734,7 @@ async function requestAffiliatePayout() {
     }
     showToast("✓ Saque solicitado");
     loadAffiliateView(true);
-  } catch (err) {
+  } catch (_err) {
     await alertModal("Erro ao solicitar o saque. Tente de novo.", { title: "Saque" });
   } finally {
     if (btn) btn.disabled = false;
@@ -10808,7 +10783,7 @@ function _showAccessError(title, msg) {
     if (!resp.ok) { _showAccessError(); return; }
     const data = await resp.json();
     USER_ID = data.user_id;
-  } catch(e) {
+  } catch (_e) {
     _showAccessError();
     return;
   }
@@ -10844,7 +10819,7 @@ function _showAccessError(title, msg) {
           maybeShowTrialBanner();
         }
       }
-    } catch (e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
+    } catch (_e) { /* se /auth/me falhar, segue; o 402 protege os dados */ }
     // Puxar pra atualizar: o contrato só nasce com o paywall vencido — nos
     // returns acima ele nunca é registrado e o puxão nessas telas cai no
     // reload, que é o que elas pedem (mesma regra de antes, agora async).
