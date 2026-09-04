@@ -588,6 +588,20 @@ def _assert_volta_para_a_origem(user_id: int, tipo_dep: str, tipo_saq: str, net:
     assert float(saq["delta_conta"]) == pytest.approx(esperado)
 
 
+def _dashboard_client(user_id: int, email: str):
+    """Cliente autenticado do dashboard — 4 testes daqui usam o mesmo preparo."""
+    from fastapi.testclient import TestClient
+
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, email))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(user_id, hours=1))
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
+    return client, {dashboard.CSRF_HEADER_NAME: "t", "Content-Type": "application/json"}
+
+
 def _seed_carteira_e_banco(user_id: int, carteira: float = 1000.0):
     """O cenário do relato: banco conectado E Carteira com dinheiro.
 
@@ -640,20 +654,10 @@ def test_282_caixinha_chat_da_ia_volta_para_a_carteira(user_id):
 
 
 def test_282_caixinha_dashboard_volta_para_a_carteira(user_id):
-    from fastapi.testclient import TestClient
-
-    import frontend.finance_bot_websocket_custom as dashboard
-
     _seed_carteira_e_banco(user_id)
     db.create_pocket(user_id, "viagem")
     antes = _patrimonio(user_id)
-
-    client = TestClient(dashboard.app)
-    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "p282@t.com"))
-    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
-                       dashboard.make_dashboard_token(user_id, hours=1))
-    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
-    headers = {dashboard.CSRF_HEADER_NAME: "t", "Content-Type": "application/json"}
+    client, headers = _dashboard_client(user_id, "p282@t.com")
 
     r = client.post(f"/pockets/{user_id}/viagem/deposit", json={"amount": 100}, headers=headers)
     assert r.status_code == 200, r.text
@@ -697,20 +701,10 @@ def test_282_investimento_chat_da_ia_volta_para_a_carteira(user_id):
 
 
 def test_282_investimento_dashboard_volta_para_a_carteira(user_id):
-    from fastapi.testclient import TestClient
-
-    import frontend.finance_bot_websocket_custom as dashboard
-
     _seed_carteira_e_banco(user_id)
     db.create_investment(user_id, "CDB XP", 0.12, "yearly")
     antes = _patrimonio(user_id)
-
-    client = TestClient(dashboard.app)
-    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "i282@t.com"))
-    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
-                       dashboard.make_dashboard_token(user_id, hours=1))
-    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
-    headers = {dashboard.CSRF_HEADER_NAME: "t", "Content-Type": "application/json"}
+    client, headers = _dashboard_client(user_id, "i282@t.com")
 
     r = client.post(f"/investments/{user_id}/deposit",
                     json={"name": "CDB XP", "amount": 100}, headers=headers)
@@ -761,18 +755,383 @@ def test_282_deposito_do_banco_continua_voltando_para_o_banco(user_id):
     assert float(db.get_balance(user_id)) == 0.0      # a Carteira NÃO foi creditada
 
 
-def test_282_origens_misturadas_mantem_o_banco(user_id):
-    """Comportamento ACEITO, não conserto: com depósitos de origens diferentes o
-    destino segue o de hoje (banco). Proporcional ou LIFO é decisão de produto
-    ainda não tomada — ver funding.resolve_destination."""
-    _seed_carteira_e_banco(user_id)
+# ─── a leitura é de ESTADO (lotes abertos), não de HISTÓRIA ───────────────────
+#
+# A primeira versão do conserto lia o histórico inteiro de `launches`, e aí
+# "origens misturadas" virava "misturou uma vez, para sempre". A sequência abaixo
+# (test_J1) reproduzia o P0 inteiro DEPOIS daquele conserto: no passo 6 a caixinha
+# é 100% dinheiro da Carteira, mas o lote do banco fechou no passo 3 e a história
+# continuava dizendo "misturado".
+
+def test_J1_lote_do_banco_ja_fechado_nao_contamina_o_deposito_seguinte(user_id):
+    """A sequência de 6 passos que sobrevivia ao conserto por histórico:
+
+      1. banco conectado, Carteira zerada (o produto pede pra zerar);
+      2. deposita 500 na caixinha  -> origem = banco (a Carteira não cobre);
+      3. saca os 500               -> volta pro banco; o lote do banco FECHA;
+      4. registra 200 em dinheiro  -> Carteira = 200;
+      5. deposita 100 na caixinha  -> origem = CARTEIRA (ela cobre);
+      6. saca os 100               -> tem de voltar pra CARTEIRA.
+
+    No passo 6 o único lote aberto veio da Carteira. Pelo histórico há duas
+    origens e o dinheiro ia pro banco: R$ 100 evaporavam da visão do usuário.
+    """
+    _connect_fake_bank(user_id)                       # Carteira = 0
+    db.create_pocket(user_id, "viagem")
+    client, headers = _dashboard_client(user_id, "j1@t.com")
+
+    assert client.post(f"/pockets/{user_id}/viagem/deposit",
+                       json={"amount": 500}, headers=headers).status_code == 200
+    assert client.post(f"/pockets/{user_id}/viagem/withdraw",
+                       json={"amount": 500}, headers=headers).status_code == 200
+
+    db.add_launch_and_update_balance(user_id, "receita", 200, None, "dinheiro em especie")
+    assert float(db.get_balance(user_id)) == 200.0
+    antes = _patrimonio(user_id)
+
+    assert client.post(f"/pockets/{user_id}/viagem/deposit",
+                       json={"amount": 100}, headers=headers).status_code == 200
+    assert float(db.get_balance(user_id)) == 100.0, "o depósito saiu da Carteira"
+    assert client.post(f"/pockets/{user_id}/viagem/withdraw",
+                       json={"amount": 100}, headers=headers).status_code == 200
+
+    depois = _patrimonio(user_id)
+    assert depois == pytest.approx(antes), (
+        f"EVAPOROU R$ {antes - depois:.2f} — Carteira={float(db.get_balance(user_id)):.2f}, "
+        f"origens={db.open_lot_origins(user_id, 'deposito_caixinha', 'viagem')}")
+
+
+def test_J1_investimento_o_mesmo_lote_ja_fechado(user_id):
+    """O irmão do J1 no investimento: o `_LOTES` tem duas variantes e só uma
+    estaria coberta se este caso não existisse."""
+    _connect_fake_bank(user_id)                       # Carteira = 0
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+
+    source = funding.resolve_deterministic(user_id, 500)["source"]
+    assert source["kind"] == funding.BANK
+    db.investment_deposit_from_account(user_id, "CDB XP", 500, "do banco",
+                                       funding_source=funding.to_db_arg(source))
+    h_investments.withdraw(user_id, "resgatei 500 do CDB XP",
+                           {"investment_name": "CDB XP", "amount": 500})
+
+    db.add_launch_and_update_balance(user_id, "receita", 200, None, "dinheiro em especie")
+    antes = _patrimonio(user_id)
+
+    source = funding.resolve_deterministic(user_id, 100)["source"]
+    assert source["kind"] == funding.CARTEIRA
+    db.investment_deposit_from_account(user_id, "CDB XP", 100, "da carteira",
+                                       funding_source=funding.to_db_arg(source))
+    h_investments.withdraw(user_id, "resgatei 100 do CDB XP",
+                           {"investment_name": "CDB XP", "amount": 100})
+
+    assert _patrimonio(user_id) == pytest.approx(antes), (
+        f"origens={db.open_lot_origins(user_id, 'aporte_investimento', 'CDB XP')}")
+
+
+def test_lotes_abertos_de_origens_diferentes_caem_na_regra_de_sempre(user_id):
+    """Comportamento ACEITO, não conserto: com DOIS lotes abertos de origens
+    diferentes o destino segue o de hoje (o primeiro banco). Dividir o resgate é
+    decisão de produto ainda não tomada — ver `funding.resolve_destination`.
+
+    Os dois bancos existem para tornar o teste insensível à ORDEM das linhas do
+    `select distinct` (que não tem `order by`). Depositando do banco B, nenhuma
+    das duas origens abertas é o destino esperado: um `origens[0]` ingênuo daria
+    a Carteira ou o banco B, e a regra de sempre dá o banco A (`list_bank_accounts`
+    ordena por `balance desc, id`). Sem isso o caso passava por sorte do hash.
+    """
+    _connect_fake_bank(user_id, "5000.00", nome="Banco A")
+    _connect_fake_bank(user_id, "100.00", nome="Banco B")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
     db.create_pocket(user_id, "viagem")
 
+    bancos = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK]
+    banco_a, banco_b = bancos[0], bancos[1]
+    assert banco_a["label"] != banco_b["label"]
+
     db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira", funding_source=None)
-    banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
-    db.pocket_deposit_from_account(user_id, "viagem", 100, "do banco",
-                                   funding_source=funding.to_db_arg(banco))
+    db.pocket_deposit_from_account(user_id, "viagem", 50, "do banco B",
+                                   funding_source=funding.to_db_arg(banco_b))
+
+    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
+    assert len(origens) == 2, origens                 # dois lotes abertos, duas origens
 
     destino = funding.resolve_destination(
         user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
     assert destino["kind"] == funding.BANK
+    assert destino["of_account_id"] == banco_a["of_account_id"], (
+        f"caiu em {destino['label']}, não na regra de sempre ({banco_a['label']})")
+
+
+# ── isolamento, tipo e lote órfão: as três guardas da query ──────────────────
+
+def test_isolamento_por_usuario(user_id):
+    """Dois usuários com uma caixinha de MESMO NOME. A origem de um não pode
+    aparecer na do outro (CLAUDE.md §0: `where user_id = %s` em toda tabela).
+
+    Os dois têm banco conectado de propósito: sem banco no B, a regra de sempre
+    já devolveria a Carteira e a mutação (tirar `pl.user_id`) passaria verde.
+    """
+    import uuid as _uuid
+
+    outro = int(_uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    _connect_fake_bank(outro)                          # A: Carteira zerada
+    db.create_pocket(outro, "viagem")
+    fonte_a = funding.resolve_deterministic(outro, 100)["source"]
+    assert fonte_a["kind"] == funding.BANK
+    db.pocket_deposit_from_account(outro, "viagem", 100, "do banco de A",
+                                   funding_source=funding.to_db_arg(fonte_a))
+
+    _seed_carteira_e_banco(user_id)                    # B: banco E Carteira
+    db.create_pocket(user_id, "viagem")
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira de B",
+                                   funding_source=None)
+
+    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
+    assert origens == [{"kind": funding.CARTEIRA, "of_account_id": None, "orfao": False}], origens
+
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.CARTEIRA, "o lote do OUTRO usuário vazou"
+
+
+def test_tipo_separa_caixinha_de_investimento(user_id):
+    """Mesmo usuário, mesmo nome nas duas entidades, origens diferentes. É o
+    `_LOTES[tipo]` que separa — trocar as duas entradas do dict deixa vermelho."""
+    _seed_carteira_e_banco(user_id)
+    banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+
+    db.create_pocket(user_id, "reserva")
+    db.pocket_deposit_from_account(user_id, "reserva", 100, "da carteira", funding_source=None)
+
+    db.create_investment(user_id, "reserva", 0.12, "yearly")
+    db.investment_deposit_from_account(user_id, "reserva", 100, "do banco",
+                                       funding_source=funding.to_db_arg(banco))
+
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "reserva") == [
+        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": False}]
+    assert db.open_lot_origins(user_id, "aporte_investimento", "reserva") == [
+        {"kind": funding.BANK, "of_account_id": str(banco["of_account_id"]), "orfao": False}]
+
+    assert funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "reserva"))["source"]["kind"] == funding.CARTEIRA
+    assert funding.resolve_destination(
+        user_id, origem_de=("aporte_investimento", "reserva"))["source"]["kind"] == funding.BANK
+
+
+def test_lote_orfao_cai_na_regra_de_sempre(user_id):
+    """Lote sem lançamento criador existe de verdade: o backfill de `db/schema.py`
+    e o `_ensure_pocket_lots` de `db/pockets.py` inserem direto em `pocket_lots`.
+
+    Sem a coluna `orfao`, o `coalesce(..., 'carteira')` faz o órfão passar por
+    Carteira e o saque credita dinheiro que nunca saiu dela — é a mutação que
+    deixa este teste vermelho.
+    """
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from pockets where user_id=%s and name='viagem'", (user_id,))
+        pocket_id = cur.fetchone()["id"]
+        cur.execute(
+            "insert into pocket_lots(user_id, pocket_id, principal_initial, "
+            "principal_remaining, balance, opened_at, last_date, status) "
+            "values (%s,%s,100,100,100,current_date,current_date,'open')",
+            (user_id, pocket_id),
+        )
+        cur.execute("update pockets set balance=100 where id=%s and user_id=%s",
+                    (pocket_id, user_id))
+        conn.commit()
+
+    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
+    assert origens == [{"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}], origens
+
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.BANK, "órfão virou Carteira e criaria dinheiro"
+
+
+# ── bordas do alvo e da origem ───────────────────────────────────────────────
+
+def test_alvo_sem_lote_aberto_cai_na_regra_de_sempre(user_id):
+    """Caixinha recém-criada: nenhum lote, nenhuma origem, regra de sempre."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == []
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.BANK
+
+
+def test_banco_de_origem_desconectado_nao_credita_a_carteira(user_id):
+    """Depósito veio do banco e o banco foi desconectado. A origem existe mas não
+    está mais em `list_sources` — cai na regra de sempre, sem inventar Carteira."""
+    conn_id = _connect_fake_bank(user_id)
+    db.create_pocket(user_id, "viagem")
+    banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "do banco",
+                                   funding_source=funding.to_db_arg(banco))
+    db.disconnect_open_finance_connection(user_id, conn_id)
+
+    antes = _patrimonio(user_id)
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+    assert _patrimonio(user_id) == pytest.approx(antes), "criou dinheiro na Carteira"
+
+
+def test_of_account_id_como_string_no_json_ainda_casa(user_id):
+    """`efeitos` é jsonb livre. Com `of_account_id` gravado como STRING o cast
+    `::bigint` da versão anterior estourava; a comparação em texto casa."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+    db.pocket_deposit_from_account(
+        user_id, "viagem", 100, "do banco",
+        funding_source={"kind": "bank", "of_account_id": str(banco["of_account_id"]),
+                        "label": banco["label"]})
+
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
+        {"kind": funding.BANK, "of_account_id": str(banco["of_account_id"]), "orfao": False}]
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.BANK
+    assert destino["of_account_id"] == banco["of_account_id"]
+
+
+def test_lot_id_nao_numerico_vira_orfao_em_vez_de_estourar(user_id):
+    """O outro lado do mesmo motivo: `lot_id` fora do formato (medido: `1.9`,
+    lista, string) não pode derrubar a query. Em texto ele só não casa."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira", funding_source=None)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update launches set efeitos = jsonb_set(efeitos, '{pocket_lot_create,lot_id}', "
+            "'\"abc\"') where user_id=%s and tipo='deposito_caixinha'", (user_id,))
+        conn.commit()
+
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
+        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}]
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.BANK
+
+
+@pytest.mark.parametrize("nome", ["Férias na Bahia", "reserva de emergência", "AÇÃO 2030"])
+def test_nome_acentuado_ida_e_volta_pelo_dashboard(user_id, nome):
+    """`lower()` do Postgres em nome com acento, espaço e caixa alta, pela URL."""
+    import urllib.parse
+
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, nome)
+    antes = _patrimonio(user_id)
+    client, headers = _dashboard_client(user_id, "acento@t.com")
+    enc = urllib.parse.quote(nome)
+
+    assert client.post(f"/pockets/{user_id}/{enc}/deposit",
+                       json={"amount": 100}, headers=headers).status_code == 200
+    assert float(db.get_balance(user_id)) == 900.0
+    assert client.post(f"/pockets/{user_id}/{enc}/withdraw",
+                       json={"amount": 100}, headers=headers).status_code == 200
+    assert _patrimonio(user_id) == pytest.approx(antes), (
+        f"{nome}: origens={db.open_lot_origins(user_id, 'deposito_caixinha', nome)}")
+
+
+def test_alvo_inexistente_gigante_ou_unicode_nao_estoura(user_id):
+    _seed_carteira_e_banco(user_id)
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "caixinha " + "ã" * 300) == []
+    assert db.open_lot_origins(user_id, "deposito_caixinha", "🐷💰") == []
+    assert db.open_lot_origins(user_id, "aporte_investimento", "🐷💰") == []
+
+
+# ── pela CONVERSA, com a pergunta de origem respondida ───────────────────────
+#
+# Armadilha medida: sem responder "De onde sai?" o depósito NÃO acontece, o saque
+# falha e o `assert patrimônio == antes` fecha porque nada rodou. Os três passos
+# obrigatórios em todo teste daqui: assertar a pergunta, responder, e conferir o
+# SALDO DO ALVO antes de sacar.
+
+def _manda(user_id: int, texto: str) -> str:
+    from core import intent_router
+    from core.intent_classifier import classify
+    from core.types import IncomingMessage
+
+    return intent_router.route(classify(texto, user_id=user_id),
+                               IncomingMessage(platform="whatsapp", user_id=user_id, text=texto))
+
+
+def _saldo_pocket(user_id: int, nome: str) -> float:
+    return next(float(p["balance"]) for p in db.list_pockets(user_id) if p["name"] == nome)
+
+
+def test_conversa_deposito_da_carteira_e_saque_total(user_id):
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+
+    p = _manda(user_id, "guardei 100 na caixinha viagem")
+    assert "De onde sai" in p, p
+    r = _manda(user_id, "1")                       # 1 = Carteira
+    assert _saldo_pocket(user_id, "viagem") == 100.0, r
+    assert float(db.get_balance(user_id)) == 900.0
+
+    s = _manda(user_id, "tirei 100 da caixinha viagem")
+    assert _saldo_pocket(user_id, "viagem") == 0.0, s
+    assert _patrimonio(user_id) == pytest.approx(antes), s
+
+
+def test_conversa_saque_com_pergunta_de_valor(user_id):
+    """O nome vem na primeira mensagem, o VALOR vira pergunta. Na volta o destino
+    ainda é o certo? (a resolução desceu para depois do nome em core/handlers)."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+    assert "De onde sai" in _manda(user_id, "guardei 100 na caixinha viagem")
+    _manda(user_id, "1")
+    assert _saldo_pocket(user_id, "viagem") == 100.0
+
+    p = h_pockets.withdraw(user_id, "sacar da caixinha viagem", {"pocket_name": "viagem"})
+    assert "valor" in p.lower(), p
+    r = _manda(user_id, "100")
+    assert _saldo_pocket(user_id, "viagem") == 0.0, r
+    assert _patrimonio(user_id) == pytest.approx(antes), r
+
+
+def test_conversa_com_outro_assunto_no_meio(user_id):
+    """Duas conversas de assuntos diferentes no mesmo usuário (CLAUDE.md §3)."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+    assert "De onde sai" in _manda(user_id, "guardei 100 na caixinha viagem")
+    _manda(user_id, "1")
+    assert _saldo_pocket(user_id, "viagem") == 100.0
+    _manda(user_id, "gastei 50 no mercado")
+
+    s = _manda(user_id, "esvaziar caixinha viagem")
+    assert _saldo_pocket(user_id, "viagem") == 0.0, s
+    assert _patrimonio(user_id) == pytest.approx(antes - 50), s
+
+
+def test_conversa_investimento(user_id):
+    _seed_carteira_e_banco(user_id)
+    db.create_investment_db(user_id, "Reserva", 1.0, "cdi", "seed")
+    antes = _patrimonio(user_id)
+    assert "De onde sai" in _manda(user_id, "investi 100 na reserva")
+    _manda(user_id, "1")
+    saldo = next(float(i["balance"]) for i in db.list_investments(user_id) if i["name"] == "Reserva")
+    assert saldo == 100.0
+
+    r = _manda(user_id, "resgatei 100 da reserva")
+    assert _patrimonio(user_id) == pytest.approx(antes), r
+
+
+def test_conversa_deposito_do_BANCO_e_saque(user_id):
+    """Controle positivo pela conversa: escolheu o banco, tem de voltar pro banco
+    — sem creditar a Carteira com dinheiro que o sync vai devolver de novo."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    assert "De onde sai" in _manda(user_id, "guardei 100 na caixinha viagem")
+    _manda(user_id, "2")                            # 2 = banco
+    assert _saldo_pocket(user_id, "viagem") == 100.0
+    assert float(db.get_balance(user_id)) == 1000.0
+
+    s = _manda(user_id, "tirei 100 da caixinha viagem")
+    assert float(db.get_balance(user_id)) == 1000.0, s   # a Carteira NÃO foi creditada

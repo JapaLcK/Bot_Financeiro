@@ -118,19 +118,26 @@ def resolve_destination(user_id: int, *, origem_de: tuple[str, str] | None = Non
     """Para onde volta o dinheiro de um resgate/saque. Sempre `{"source": {...}}`.
 
     `origem_de` é `(tipo_do_lancamento_de_deposito, alvo)` — ex.:
-    `("deposito_caixinha", "viagem")`. Quando vem, e o alvo tem **uma única** origem
-    de depósito, o dinheiro volta para ELA. É o conserto da #282: sem isso o destino
-    era decidido do zero e qualquer banco conectado vencia a Carteira, então quem
-    depositou da Carteira nunca recebia de volta — medido em produção, R$ 300 saíram
-    e R$ 0,00 voltaram.
+    `("deposito_caixinha", "viagem")`. Quando vem, a pergunta é de ESTADO: **todos os
+    lotes ABERTOS deste alvo vieram da mesma origem?** Se sim, o dinheiro volta para
+    ELA. É o conserto da #282: sem isso o destino era decidido do zero e qualquer
+    banco conectado vencia a Carteira, então quem depositou da Carteira nunca recebia
+    de volta — medido em produção, R$ 300 saíram e R$ 0,00 voltaram.
+
+    Lote aberto, e não histórico de depósito, porque a versão por histórico não
+    consertava o caso comum: depositou do banco e sacou tudo, depois depositou da
+    Carteira — o alvo é 100% dinheiro da Carteira, mas a HISTÓRIA tem duas origens e
+    o saque voltava pro banco. Por lote a resposta é exata, e a mistura se desfaz
+    sozinha quando o lote fecha (ver `db.open_lot_origins`).
 
     Em TODO o resto cai na regra de sempre (banco primeiro, senão Carteira): sem
-    `origem_de`, sem depósito nenhum, origens misturadas, ou banco de origem
+    `origem_de`, sem lote aberto, **lotes abertos de origens diferentes**, lote órfão
+    (sem lançamento criador, então sem origem conhecida), ou banco de origem
     desconectado desde então. A degradação é sempre para o comportamento de hoje.
 
-    **Origens misturadas mantêm o banco de propósito** (decisão do dono): devolver
-    proporcional ou LIFO é escolha de produto ainda não tomada, e adivinhar aqui
-    seria pior que o comportamento conhecido.
+    **Lotes abertos de origens diferentes mantêm o banco de propósito** (decisão do
+    dono): dividir o resgate proporcionalmente ou por LIFO é escolha de produto ainda
+    não tomada, e adivinhar aqui seria pior que o comportamento conhecido.
 
     Não pergunta, de propósito: no destino a escolha não muda o razão. Com qualquer
     banco conectado o `delta_conta` é 0 igual (o dinheiro volta pro banco e o sync
@@ -139,11 +146,14 @@ def resolve_destination(user_id: int, *, origem_de: tuple[str, str] | None = Non
     """
     fontes = list_sources(user_id)
     if origem_de:
-        origens = db.deposit_origins(user_id, *origem_de)
-        if len(origens) == 1:
+        origens = db.open_lot_origins(user_id, *origem_de)
+        if len(origens) == 1 and not origens[0]["orfao"]:
             o = origens[0]
+            # `of_account_id` vem em TEXTO do jsonb; a fonte tem int. Comparar sem
+            # converter faz TODO banco parecer diferente e o conserto nunca valer.
             igual = next((f for f in fontes if f["kind"] == o["kind"]
-                          and f["of_account_id"] == o["of_account_id"]), None)
+                          and (None if f["of_account_id"] is None
+                               else str(f["of_account_id"])) == o["of_account_id"]), None)
             if igual:
                 return {"source": igual}
     bancos = [f for f in fontes if f["kind"] == BANK]

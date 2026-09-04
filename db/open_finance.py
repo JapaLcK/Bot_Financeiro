@@ -2076,42 +2076,75 @@ def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
                     for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
 
 
-def deposit_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
-    """De onde saiu o dinheiro que entrou num alvo — origens DISTINTAS dos depósitos.
+# (tabela de lotes, tabela do alvo, FK do alvo, chave de `efeitos` do lançamento criador)
+_LOTES = {
+    "deposito_caixinha": ("pocket_lots", "pockets", "pocket_id", "pocket_lot_create"),
+    "aporte_investimento": ("investment_lots", "investments", "investment_id",
+                            "investment_lot_create"),
+}
 
-    O saque tem de devolver para onde o depósito tirou. O depósito já grava isso em
-    `efeitos.funding_source`; sem esta leitura o `funding.resolve_destination` decidia
-    do zero e qualquer banco conectado vencia a Carteira — medido em produção na conta
-    do dono (29/08): R$ 300 saíram da Carteira em depósitos e 4 saques devolveram
-    R$ 0,00 para ela. O dinheiro evaporava da visão do usuário.
 
-    `funding_source` ausente ou nulo É a Carteira — mesmo contrato que
-    `pocket_deposit_from_account` e `investment_deposit_from_account` já gravam
-    (`delta_conta` negativo com `funding_source` None).
+def open_lot_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
+    """De onde veio o dinheiro que AINDA ESTÁ num alvo — origens dos lotes ABERTOS.
+
+    A pergunta é de ESTADO, não de história. A primeira versão desta função lia o
+    histórico inteiro de `launches`, e aí "origens misturadas" virava "misturou uma
+    vez, para sempre": banco conectado + Carteira zerada, depósito de 500 do banco,
+    saque de 500 (correto), Carteira ganha 200 em espécie, depósito de 100 da
+    Carteira, saque de 100 — e os R$ 100 evaporavam, porque o lote do banco tinha
+    fechado três passos antes e a caixinha era 100% dinheiro da Carteira.
+
+    Lendo só os lotes abertos a resposta é EXATA: se todos vieram da mesma origem,
+    qualquer FIFO de qualquer valor só pode consumir lotes daquela origem. E se
+    limpa sozinha quando o lote fecha — sem backfill e sem migração.
+
+    O elo lote↔origem é o `efeitos` que o depósito já grava: `pocket_lot_create`
+    /`investment_lot_create` guardam o `lot_id`, e `funding_source` guarda a origem.
+    `funding_source` ausente ou nulo É a Carteira, mesmo contrato de
+    `pocket_deposit_from_account` e `investment_deposit_from_account`.
+
+    Três decisões de propósito na query:
+
+    * `user_id` nas TRÊS tabelas (lote, alvo e o join do lançamento) — CLAUDE.md §0;
+    * `lot_id` comparado em TEXTO, sem `::bigint`: `efeitos` é jsonb livre e um
+      `lot_id` não numérico (medido: `1.9`, lista, string) estoura o cast. Em texto
+      ele simplesmente não casa e o lote vira órfão, que é o lado seguro;
+    * `left join` + coluna `orfao`, porque lote sem lançamento criador existe: o
+      backfill de `db/schema.py` e o `_ensure_pocket_lots` de `db/pockets.py` criam
+      lotes direto. Sem essa coluna o `coalesce(..., 'carteira')` faria o órfão
+      passar por Carteira e o saque creditaria dinheiro que nunca saiu dela.
 
     A chave é o NOME (`alvo`), não o id: `db/` não tem rename de caixinha nem de
-    investimento. Se um dia tiver, o pior caso é esta lista vir vazia e o destino
-    cair na regra de sempre.
+    investimento. Se um dia tiver, o pior caso é a lista vir vazia e o destino cair
+    na regra de sempre.
 
-    Devolve [{"kind": "carteira"|"bank", "of_account_id": int|None}, ...].
+    `of_account_id` volta como TEXTO (ou None) — quem compara tem de converter.
+
+    Devolve [{"kind": "carteira"|"bank", "of_account_id": str|None, "orfao": bool}, ...].
     """
+    lotes, alvos, fk, efeito = _LOTES[tipo]  # tipo desconhecido é bug do chamador
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select distinct
-                       coalesce(efeitos->'funding_source'->>'kind', 'carteira') as kind,
-                       (efeitos->'funding_source'->>'of_account_id')::bigint as of_account_id
-                  from launches
-                 where user_id = %s
-                   and tipo = %s
-                   and lower(alvo) = lower(%s)
+                       coalesce(d.efeitos->'funding_source'->>'kind', 'carteira') as kind,
+                       d.efeitos->'funding_source'->>'of_account_id' as of_account_id,
+                       (d.id is null) as orfao
+                  from {lotes} pl
+                  join {alvos} p on p.id = pl.{fk} and p.user_id = pl.user_id
+                  left join launches d
+                         on d.user_id = pl.user_id
+                        and d.tipo = %s
+                        and (d.efeitos->'{efeito}'->>'lot_id') = pl.id::text
+                 where pl.user_id = %s and lower(p.name) = lower(%s)
+                   and pl.status = 'open' and pl.balance > 0
                 """,
-                (user_id, tipo, alvo),
+                (tipo, user_id, alvo),
             )
-            return [{"kind": r["kind"],
-                     "of_account_id": int(r["of_account_id"]) if r["of_account_id"] is not None else None}
+            return [{"kind": r["kind"], "of_account_id": r["of_account_id"],
+                     "orfao": bool(r["orfao"])}
                     for r in (cur.fetchall() or [])]
 
 
