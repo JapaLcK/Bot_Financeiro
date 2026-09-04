@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 import db
 from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
-                        normalize_text, valor_perigoso)
+from utils_text import (PT_VALUE, _ENCHIMENTO, _TRACOS, contains_word,
+                        limpa_pontuacao_final, marcador_de_tudo, normalize_text,
+                        valor_perigoso)
 
 # handlers
 from core.handlers import (
@@ -122,6 +124,11 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #            de `funds.add_ask` e as genéricas da IA passam pela mesma escotilha.
 #            O filtro não é o intent da pergunta, é o `_ja_tem_o_valor` — mais
 #            o veto de catálogo do #185, que só vale para as perguntas de NOME.
+#            É a única das quatro que tem uma SEGUNDA via de abandono, a do
+#            #281: intent de ESCRITA cuja mensagem inteira não é o valor
+#            pedido ("gastei 50 no mercado" respondendo "Qual o valor?"). Ela
+#            é só daqui — as portas 3 e 4 seguem lendo o `ABANDONA` pelo
+#            `abandona_pergunta_de_valor`, que não mudou.
 #   porta 3  fila do multi-lançamento  core/handlers/launches.py::resolve_multi_launch_value
 #   porta 4  botão "✅ Já paguei"      adapters/whatsapp/wa_runtime.py (roda ANTES
 #                                      do handle_incoming, por isso importa daqui)
@@ -146,36 +153,72 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #   pockets.list         "caixinhas"             1.0
 #   report.monthly       "resumo do mes"         1.0
 #
-# `credit.handle` ficou de FORA por medição, não por esquecimento: "fatura" é
-# 1.0 e "132 no cartao" é 0.95 — mesmo intent, e o segundo é uma resposta
-# legítima ("foram 132, no cartão"). O único corte por confiança que os separa
-# (== 1.0) também derrubaria "fatura do cartao" (0.95), então não é corte
-# limpo.
+# `credit.handle` ficou de FORA **deste conjunto** por medição, não por
+# esquecimento: "fatura" é 1.0 e "132 no cartao" é 0.95 — mesmo intent, e o
+# segundo é uma resposta legítima ("foram 132, no cartão"). O único corte por
+# confiança que os separa (== 1.0) também derrubaria "fatura do cartao"
+# (0.95), então não é corte limpo.
 #
-# O PREÇO de deixá-lo fora, MEDIDO nas quatro portas com "fatura",
+# ELE SEGUE FORA DO `ABANDONA` — e desde o #281 está no `ESCRITA` logo abaixo,
+# por decisão do dono. O que mudou não foi a medição, foi a peça disponível: o
+# `_STARTS_WITH_VALUE_RE` (parsers.py:176) separa limpo o que nenhum corte de
+# confiança separava. Medido com `allow_ai=False`:
+#   "fatura"        sv=0, e não é só-o-valor  -> EXPLÍCITO: abandona a porta 2
+#   "132 no cartao" sv=1                      -> AMBÍGUO: NÃO abandona (PR A)
+# A resposta legítima continua protegida, e o comando de cartão deixa de ficar
+# preso. A via nova é SÓ da porta 2: as portas 3 e 4 consultam o
+# `abandona_pergunta_de_valor`, que lê este conjunto e não mudou.
+#
+# O PREÇO de deixá-lo fora daqui, MEDIDO nas quatro portas com "fatura",
 # "fatura do cartao", "meus cartoes" e "cartao nubank" — não é "o usuário
 # repete o comando", e é diferente em cada porta:
 #
 #   porta 1  custo ZERO: o `_VALOR_RE` não casa, a pergunta é abandonada e o
 #            comando de cartão roda normalmente.
 #   porta 3  custo ZERO: o `_extract_valor` não acha valor, mesmo efeito.
-#   porta 2  LAÇO INDEFINIDO **medido com a IA desligada**: a pergunta volta
-#            ("Quanto foi no *luz*?") e a pendência é RE-ARMADA a cada turno
-#            (medido: `expires_at` cresce em cada resposta), então ela nunca
-#            expira e o comando de cartão nunca roda enquanto o usuário
-#            insistir nele. Em produção o `classify_with_context` roda ANTES do
-#            re-armar (no `_resolve_clarification`) e pode despachar o comando,
-#            encurtando ou eliminando o laço — saída de LLM, não mensurável
-#            aqui.
+#   porta 2  ERA um LAÇO INDEFINIDO **medido com a IA desligada**: a pergunta
+#            voltava ("Quanto foi no *luz*?") e a pendência era RE-ARMADA a
+#            cada turno (medido: `expires_at` cresce em cada resposta), então
+#            nunca expirava. FECHADO pelo #281: "fatura" entra pela via
+#            EXPLÍCITO do `ESCRITA` e abandona.
 #   porta 4  laço, mas com saída: a pergunta volta ("Não peguei o valor") e a
 #            pendência NÃO é reescrita (`expires_at` não muda), então o laço
 #            morre nos 10 min contados da pergunta original.
 #
-# Ainda assim o cartão fica fora: o laço da porta 2 custa turnos, e apagar a
-# fila de quem respondeu "132 no cartao" custa o lançamento do usuário.
+# Nas portas 3 e 4 o preço continua de pé, e é o que se quis proteger: quem
+# responde "132 no cartao" a uma pergunta de valor não perde o lançamento (a
+# fila não é apagada).
 ABANDONA = {
     "balance.check", "launches.list", "launches.delete",
     "launches.spend_query", "pockets.list", "report.monthly",
+}
+
+# Intents de ESCRITA. Mundo fechado como o `ABANDONA` acima, pela mesma razão
+# (blacklist sobre oráculo ilimitado faz todo intent novo nascer destrutivo),
+# e com o mesmo rigor: cada entrada abaixo veio de uma medição, e a string que
+# a produziu está do lado. `classify(..., allow_ai=False)`:
+#   launches.add         "gastei 50 no mercado", "paguei 120 de luz"    0.95
+#   pockets.deposit      "guardei 100 na caixinha viagem"               0.95
+#   pockets.withdraw     "retirei 100 da caixinha viagem"               0.95
+#   investments.deposit  "aportei 200 no CDB"                           0.95
+#   investments.withdraw "resgatei 200 do CDB"                          0.95
+#   funds.withdraw       "saquei 200", "tirei 200 do tesouro direto"    0.95
+#   pockets.create       "criar caixinha viagem"                        0.95
+#   pockets.delete       "apagar caixinha viagem"                       0.95
+#   credit.handle        "fatura" 1.0, "132 no cartao" 0.95  (ver acima)
+#
+# SÓ a porta 2 lê este conjunto (`_clarification_abandonada`). O
+# `abandona_pergunta_de_valor` — compartilhado com as portas 3 e 4 — continua
+# lendo apenas o `ABANDONA`, de propósito: mexer nele moveria três portas de
+# uma vez.
+#
+# E ele NUNCA decide sozinho. O portão de admissão é o `_so_o_valor` logo
+# abaixo: "100 reais" também classifica `launches.add` 0.95, e é a resposta
+# que o bot pediu. Sem esse portão, nenhuma pergunta do bot funcionaria mais.
+ESCRITA = {
+    "launches.add", "pockets.deposit", "pockets.withdraw",
+    "investments.deposit", "investments.withdraw", "funds.withdraw",
+    "pockets.create", "pockets.delete", "credit.handle",
 }
 
 
@@ -194,6 +237,53 @@ def abandona_pergunta_de_valor(text: str) -> bool:
       nunca abandonam nada, que é exatamente o comportamento da `main`.
     """
     return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
+
+
+# PORTÃO DE ADMISSÃO da via de escrita da porta 2 (#281). "A resposta tem de
+# consumir a mensagem INTEIRA" é uma pergunta sobre a mensagem, não sobre o
+# parser: o contrato do `_funde_a_resposta` ("leia número e alvo desta
+# resposta") está certo — ele só estava errado quando a mensagem não era uma
+# resposta. Por isso o portão mora aqui e o `_funde_a_resposta` não muda.
+#
+# Reusa o `PT_VALUE` e o `_ENCHIMENTO` do `utils_text` e o `_UNIDADE` da porta
+# 1 (`core/handlers/bills.py`) — as três já são fonte única compartilhada. A
+# unidade é obrigatória em cada iteração externa: sem isso o `PT_VALUE`
+# aninhado num segundo `*` dá backtracking catastrófico (medido: 40 grupos de
+# "2 mil e " não terminaram em 120s; com esta forma, 0,09 ms).
+#
+# "centavos" entra além do `_UNIDADE` da porta 1 porque aqui a mensagem é uma
+# frase falada inteira ("30 reais e 50 centavos"), e lá é só o número.
+_SO_O_VALOR_RE = re.compile(
+    rf"(?:{_ENCHIMENTO}\s+)*{PT_VALUE}"
+    rf"(?:\s+(?:e\s+)?(?:{h_bills._UNIDADE}|centavos?)(?:\s+(?:e\s+)?{PT_VALUE})?)*",
+    re.I)
+
+
+def _so_o_valor(text: str) -> bool:
+    """A mensagem INTEIRA é o valor que o bot pediu ("100 reais", "2 mil").
+
+    True aqui = a mensagem responde a pergunta, mesmo que o classificador a
+    tenha lido como comando de escrita ("100 reais" é `launches.add` 0.95).
+    É o controle positivo do #281 virado código: sem ele a via de escrita
+    abandonaria a pergunta para toda resposta falada com "reais"/"mil", e
+    nenhuma pergunta do bot funcionaria mais.
+
+    NÃO usa `normalize_text`: ele apaga `$` e `,`, e aí "R$ 100" e
+    "R$ 1.200,00" deixam de consumir a mensagem — medido. A dobra abaixo é a
+    da porta 1 (`lower` + NFKD sem combining + `_TRACOS` +
+    `limpa_pontuacao_final`), que preserva os dois.
+
+    TETO medido, e é a razão de "100 reais mesmo" cair em AMBÍGUO: o
+    `_ENCHIMENTO_PALAVRAS` só vale ANTES do número. Crescer aquela lista para
+    acomodar o enchimento depois do número move o `_sinal_negativo` e o
+    `_VALOR_RE` da porta 1 junto (utils_text.py:947), e o preço registrado lá
+    é "foi - 10" voltar a pagar R$ 10,00 positivo. Um turno a mais é barato;
+    aquilo não é.
+    """
+    dobrado = unicodedata.normalize(
+        "NFKD", (text or "").strip().lower().translate(_TRACOS))
+    dobrado = "".join(c for c in dobrado if not unicodedata.combining(c))
+    return bool(_SO_O_VALOR_RE.fullmatch(limpa_pontuacao_final(dobrado)))
 
 
 def route(result: IntentResult, msg: IncomingMessage, *,
@@ -239,7 +329,8 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # -----------------------------------------------------------------------
     clarif = None if ignora_pendencias else h_pending.get_pending_clarification(user_id)
     if clarif:
-        if _clarification_abandonada(clarif, text, user_id):
+        # `"resolve"` | `"abandona"` — ver `_clarification_abandonada`.
+        if _clarification_abandonada(clarif, text, user_id) == "abandona":
             # Porta 2. Mesma escotilha de escape do `investment_pick` e do
             # `funding_source_choice` logo abaixo: outro comando claro abandona
             # a pergunta em vez de ser engolido por ela ("Quanto foi no *luz*?"
@@ -704,11 +795,37 @@ def _ja_tem_o_valor(entities: dict | None) -> bool:
         return True
 
 
-def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
-    """True quando a resposta é OUTRO comando claro, não a resposta à pergunta.
+def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
+    """Decide o que a mensagem é: `"resolve"` a pergunta, ou a `"abandona"`.
 
     Porta 2 do passo 1 (`abandona_pergunta_de_valor`). Quem decide é o INTENT,
     não a forma do texto: "gastei 132" e "apagar 42" têm os dois um número.
+
+    Duas vias levam a `"abandona"`, e as duas leem a MESMA classificação:
+
+      ABANDONA   os 6 intents de LEITURA ("saldo", "extrato"), como sempre,
+                 mais o veto de catálogo do #185 lá embaixo.
+      ESCRITA    comando de escrita EXPLÍCITO — verbo próprio e a mensagem
+                 inteira não é o valor pedido ("gastei 50 no mercado"). #281.
+
+    A via `ESCRITA` tem dois portões, nesta ordem:
+
+      1. `_so_o_valor` — "100 reais" classifica `launches.add` 0.95 e É a
+         resposta que o bot pediu. Ele resolve, nunca abandona.
+      2. `_STARTS_WITH_VALUE_RE` (parsers.py:176) — sobra o ATALHO sem verbo
+         ("50 no mercado", "120 de luz", "100 na caixinha viagem"), que é
+         genuinamente ambíguo: pode ser o gasto ou pode ser o valor com o
+         nome junto. Hoje ele cai em `"resolve"`, que é o comportamento da
+         `main`. A pergunta de desempate é o PR B da #281 — quando ela vier,
+         é aqui que nasce o terceiro valor de retorno, sem tocar no resto.
+
+    Não é `bool` de propósito: o PR B acrescenta uma via, e um `bool` obrigaria
+    o chamador a adivinhar qual dos dois "False" ele recebeu.
+
+    UMA chamada de `classify` por turno. O `abandona_pergunta_de_valor` faria
+    a segunda com a mesma entrada e o mesmo `allow_ai=False` — a linha dele
+    está inlinada abaixo, e o docstring dele continua sendo a explicação de
+    por que a IA fica fora.
 
     Vale para TODA `clarification`, não só a de `launches.add`: roda no
     `route()`, antes de o `_resolve_clarification` olhar o `intent` do payload,
@@ -727,16 +844,30 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
     o valor, recusa o valor perigoso ou re-pergunta — a pergunta continua viva
     em todos os três casos.
     """
+    from parsers import _STARTS_WITH_VALUE_RE
+
     payload = clarif.get("payload")
     if not isinstance(payload, dict):
         # Nenhum produtor grava payload não-dict hoje; sem esta linha um dado
         # torto viraria AttributeError → "erro interno" em loop, com a
         # pendência nunca sendo limpa.
-        return False
+        return "resolve"
     if _ja_tem_o_valor(payload.get("entities")):
-        return False
-    if not abandona_pergunta_de_valor(text):
-        return False
+        return "resolve"
+
+    intent_da_resposta = classify((text or "").strip(), allow_ai=False).intent
+
+    # Via ESCRITA (#281), ANTES do `ABANDONA`: os dois conjuntos são disjuntos
+    # (o `test_281_escrita_e_abandona_sao_disjuntos` prende isso), então a
+    # ordem não muda resultado — ela está aqui porque o veto de catálogo
+    # abaixo é sobre o `ABANDONA`, e misturar os dois blocos confunde.
+    if intent_da_resposta in ESCRITA and not _so_o_valor(text):
+        if _STARTS_WITH_VALUE_RE.match((text or "").strip()):
+            return "resolve"   # AMBÍGUO — desempate é o PR B da #281
+        return "abandona"      # EXPLÍCITO — verbo próprio, comando novo
+
+    if intent_da_resposta not in ABANDONA:
+        return "resolve"
 
     # VETO DE CATÁLOGO (#185). Última palavra, e só no turno raro em que o
     # classificador já disse "abandona": a pergunta pendente pede um NOME
@@ -745,11 +876,18 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
     # saldo — é o nome que a pergunta pediu, e abandonar descartaria o valor
     # que ele já digitou ("saquei 200" → "de qual caixinha?" → "saldo").
     #
-    # DEPOIS do `abandona_pergunta_de_valor`, não antes: o classificador
-    # determinístico decide o caso comum sozinho, e o catálogo custa I/O
-    # (`_alvos_existentes` chama `accrue_all_investments`, que ESCREVE
-    # accruals). Nesta ordem ele só roda quando a resposta já é um dos 6
-    # intents do `ABANDONA` e a pergunta viva é de nome.
+    # DEPOIS do classificador, não antes: o determinístico decide o caso comum
+    # sozinho, e o catálogo custa I/O (`_alvos_existentes` chama
+    # `accrue_all_investments`, que ESCREVE accruals). Nesta ordem ele só roda
+    # quando a resposta já é um dos 6 intents do `ABANDONA` e a pergunta viva
+    # é de nome.
+    #
+    # A via `ESCRITA` do #281 foi posta ACIMA deste bloco pelo mesmo motivo, e
+    # é o que mantém a frase anterior verdadeira: se ela caísse aqui, o turno
+    # raro do veto viraria o turno comum ("gastei 50 no mercado" é
+    # `launches.add`), e cada mensagem sequestrada pagaria as 6 chamadas de
+    # catálogo — inclusive a que escreve. Medido no #280: 6 chamadas no turno
+    # do veto contra 2 no turno que abandona.
     #
     # `_ja_tem_o_valor` fica INTOCADO de propósito. A one-liner da issue
     # (ler `amount` além de `valor` ali) tem regressão medida: `saquei 200` +
@@ -801,9 +939,9 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
     # guard existe para evitar. Nenhum produtor grava não-str hoje.
     if falta and isinstance(intent, str) and falta == _CHAVE_DO_NOME.get(intent):
         resposta = limpa_pontuacao_final((text or "").strip())
-        return not _eh_nome_do_catalogo(
-            resposta, _alvos_existentes(user_id, intent))
-    return True
+        if _eh_nome_do_catalogo(resposta, _alvos_existentes(user_id, intent)):
+            return "resolve"
+    return "abandona"
 
 
 _SO_NUMERO_RE = re.compile(r"[\d.,\s]+")

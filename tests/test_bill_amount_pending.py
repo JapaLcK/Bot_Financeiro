@@ -1494,10 +1494,16 @@ def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia
     `clarification` antes, e o 132,50 vira o valor do lançamento VELHO — a
     conta fica sem pagar e o dinheiro entra na descrição errada.
 
-    A correção (o texto não sugere mais isso) continua valendo, e a enumeração
-    do #133 continua inteira: a escotilha de abandono desta rodada só larga a
-    pergunta quando a resposta não fala de valor nenhum, e "paguei luz 132,50"
-    TEM valor. As 8 pendências seguem engolindo a forma completa.
+    O #281 INVERTEU a segunda metade, e este teste passou a medir o contrário:
+    "paguei luz 132,50" é `launches.add` 0.95, não é só-o-valor e não começa
+    por valor — via EXPLÍCITO. A `clarification` é abandonada e a conta É paga.
+    Medido: `✅ Conta paga: *Luz* — R$ 132,50`, um único lançamento
+    (`conta:Luz`, 132,50) e a pendência limpa.
+
+    A primeira metade continua valendo como está: o texto degradado não voltou
+    a sugerir a forma completa. Reverter o texto é decisão de produto separada
+    (o sequestro que motivou a degradação acabou de morrer), e NÃO é o PR A —
+    ele não muda nenhuma mensagem.
     """
     import uuid
     import db
@@ -1519,16 +1525,14 @@ def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia
     assert "132,50" not in texto, texto
     assert "Qual foi o valor?" in texto, texto
 
-    # E o motivo do texto degradado continua verdadeiro: a `clarification`
-    # engole a forma completa, a conta NÃO é paga e o 132,50 vira o lançamento
-    # velho. É por isso que este texto não pode anunciar "paguei luz 132,50".
+    # O motivo do texto degradado MORREU no #281: a forma completa não é mais
+    # engolida pela `clarification` — ela abandona a pergunta e paga a conta.
     _diga(uid, "paguei luz 132,50")
 
-    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
-    mercado = [l for l in db.list_launches(uid, limit=10)
-               if "mercado" in (l.get("alvo") or l.get("nota") or "").lower()]
-    assert mercado, "o 132,50 tinha que ter virado o lançamento do mercado"
-    assert abs(float(mercado[0]["valor"])) == 132.5, mercado[0]
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "paid"
+    lancamentos = db.list_launches(uid, limit=10)
+    assert [(l.get("alvo"), abs(float(l["valor"]))) for l in lancamentos] == \
+        [("conta:Luz", 132.5)], lancamentos
 
 
 def test_valor_invalido_continua_sugerindo_a_forma_completa(ia_espia):
@@ -1770,12 +1774,12 @@ def test_clarification_com_payload_torto_nao_estoura():
     """
     from core.intent_router import _clarification_abandonada
 
-    assert _clarification_abandonada({"payload": "x"}, "saldo", 1) is False
-    assert _clarification_abandonada({}, "saldo", 1) is False
+    assert _clarification_abandonada({"payload": "x"}, "saldo", 1) == "resolve"
+    assert _clarification_abandonada({}, "saldo", 1) == "resolve"
     # `falta` casa com a chave de nome, e o `intent` é o dado torto: sem o
     # `isinstance(intent, str)` esta linha estoura antes de chegar ao return.
     torto = {"payload": {"falta": "pocket_name", "intent": ["pockets.withdraw"]}}
-    assert _clarification_abandonada(torto, "saldo", 1) is True
+    assert _clarification_abandonada(torto, "saldo", 1) == "abandona"
 
 
 # ---------------------------------------------------------------------------
@@ -1953,7 +1957,7 @@ def test_escotilha_da_clarification_nao_apaga_pergunta_de_outra_tarefa(monkeypat
 
     def com_corrida(clarif, texto, uid_):
         decidiu = real(clarif, texto, uid_)
-        if decidiu:
+        if decidiu == "abandona":
             # outra tarefa chegou primeiro e já perguntou outra coisa. É um
             # `bill_pay_amount` de propósito: o `route()` não o consome (quem
             # consome é o runtime do WhatsApp), então o que sobrar no fim é
@@ -2409,7 +2413,13 @@ def test_porta_4_ponto_final_sem_virgula_paga_como_na_main(monkeypatch, resposta
     assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)
 
 
-@pytest.mark.parametrize("resposta,esperado", PONTO_FINAL_SEM_VIRGULA)
+# "paguei 132." saiu daqui no #281, pelo MESMO motivo que já o tirava da porta
+# 1 (o comentário abaixo do próximo teste): ele tem verbo próprio, então a via
+# EXPLÍCITO abandona a pergunta antes da limpeza — a limpeza não participa.
+# O que ele faz agora está em `test_281_verbo_com_valor_e_nada_mais_custa_um_turno`.
+@pytest.mark.parametrize("resposta,esperado",
+                         [c for c in PONTO_FINAL_SEM_VIRGULA
+                          if not c[0].startswith("paguei")])
 def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
     """Porta 2, a única que já limpava antes — aqui só para as quatro
     concordarem no MESMO texto, que é o ponto do PR."""
@@ -2424,6 +2434,36 @@ def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
 
     lancs = db.list_launches(uid, limit=3)
     assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == esperado, lancs
+
+
+def test_281_verbo_com_valor_e_nada_mais_custa_um_turno():
+    """TETO do #281, medido e NÃO resolvido aqui: verbo + valor e MAIS NADA.
+
+    `paguei 132`, `gastei 50`, `recebi 1000`, `saquei 200` e `tirei 100` têm
+    verbo próprio e nenhum alvo — a via EXPLÍCITO os trata como comando novo,
+    então respondê-los a "Quanto foi no *luz*?" abandona a pergunta e o
+    roteamento normal pergunta de novo, agora pela DESCRIÇÃO.
+
+    NADA se perde e nada anda para o lado errado: o valor sobrevive na
+    `clarification` nova, e nenhum lançamento é gravado com alvo adivinhado.
+    O custo é UM turno e o `luz` da pergunta velha, que o usuário redigita.
+
+    Se o dono quiser esse caso de volta como resposta, a mudança é UMA linha
+    (`_VERBOS_LANCAMENTO` como prefixo aceito no `_SO_O_VALOR_RE`, ao lado do
+    `_ENCHIMENTO`) — mas ela decide que "verbo sem alvo não é comando", e essa
+    decisão não estava no plano do PR A.
+    """
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Quanto foi" in _diga(uid, "paguei a luz")
+
+    resp = _diga(uid, "paguei 132.  ")
+
+    assert "Em que você gastou R$ 132,00" in resp, resp
+    assert db.list_launches(uid, limit=3) == [], "nada podia ser gravado ainda"
 
 
 # "paguei 132." fica de fora: ele NÃO casa o `_VALOR_RE` (o verbo não está no
@@ -3119,3 +3159,116 @@ def test_cas_perdido_na_porta_3_ja_nao_tocava_a_pergunta_nova(monkeypatch):
 
     _fila_intacta(uid)
     assert "Conta Corrente" in resp, resp
+
+
+# ---------------------------------------------------------------------------
+# #281 — a tabela do predicado da porta 2, input -> via. Unidade, sem banco:
+# o que a conversa prova está em `tests/test_perguntas_guardam_contexto.py`,
+# que é onde moram os controles negativos e a classe cega.
+#
+#   i = classify(texto, allow_ai=False).intent
+#   i in ABANDONA                     -> ABANDONA-6 (+ veto de catálogo, #280)
+#   i in ESCRITA and not _so_o_valor:
+#           não começa por valor      -> EXPLÍCITO
+#           começa por valor          -> AMBÍGUO (no PR A cai em COMPATÍVEL)
+#   senão                             -> COMPATÍVEL
+# ---------------------------------------------------------------------------
+
+_VIAS_281 = [
+    # EXPLÍCITO — verbo próprio, e a mensagem inteira não é o valor pedido.
+    ("gastei 50 no mercado", "EXPLICITO"),
+    ("paguei 120 de luz", "EXPLICITO"),
+    ("gastei 25,90 na farmácia ontem", "EXPLICITO"),
+    ("guardei 100 na caixinha viagem", "EXPLICITO"),
+    ("transferi 80 pro joão", "EXPLICITO"),
+    ("aportei 200 no CDB", "EXPLICITO"),
+    ("resgatei 200 do CDB", "EXPLICITO"),
+    ("saquei 200", "EXPLICITO"),
+    ("criar caixinha viagem", "EXPLICITO"),
+    ("apagar caixinha viagem", "EXPLICITO"),
+    ("fatura", "EXPLICITO"),
+    # AMBÍGUO — atalho sem verbo. No PR A tem o MESMO destino do COMPATÍVEL.
+    ("50 no mercado", "AMBIGUO"),
+    ("120 de luz", "AMBIGUO"),
+    ("100 na caixinha viagem", "AMBIGUO"),
+    ("132 no cartao", "AMBIGUO"),
+    ("100 reais mesmo", "AMBIGUO"),
+    # COMPATÍVEL por FORMA — `launches.add` 0.95, mas consome a mensagem toda.
+    ("100 reais", "COMPATIVEL"),
+    ("2 mil", "COMPATIVEL"),
+    ("10 mil", "COMPATIVEL"),
+    ("2,5 mil", "COMPATIVEL"),
+    ("30 reais e 50 centavos", "COMPATIVEL"),
+    # COMPATÍVEL por INTENT — `out_of_scope`, nem chega ao portão de forma.
+    ("100", "COMPATIVEL"),
+    ("R$ 100", "COMPATIVEL"),
+    ("132,50", "COMPATIVEL"),
+    ("cem", "COMPATIVEL"),
+    ("cento e vinte", "COMPATIVEL"),
+    ("tudo", "COMPATIVEL"),
+    ("viagem", "COMPATIVEL"),
+    # O TETO declarado: verbo que os tiers 1-2 não conhecem. Todos
+    # `out_of_scope 0.0`, então seguem sendo lidos como resposta.
+    ("poupei 100", "COMPATIVEL"),
+    ("mercado 50", "COMPATIVEL"),
+    ("uber 25", "COMPATIVEL"),
+    ("gasteii 50 no mercado", "COMPATIVEL"),
+    ("gasto fixo aluguel 1200", "COMPATIVEL"),
+    # ABANDONA-6, intocado pelo #281.
+    ("saldo", "ABANDONA"),
+    ("extrato", "ABANDONA"),
+    ("caixinhas", "ABANDONA"),
+]
+
+
+def _via_281(texto: str) -> str:
+    """Reconstrói a via a partir das MESMAS peças que a porta 2 usa."""
+    from parsers import _STARTS_WITH_VALUE_RE
+    from core.intent_classifier import classify
+    from core.intent_router import ABANDONA, ESCRITA, _so_o_valor
+
+    i = classify(texto, allow_ai=False).intent
+    if i in ESCRITA and not _so_o_valor(texto):
+        return "AMBIGUO" if _STARTS_WITH_VALUE_RE.match(texto) else "EXPLICITO"
+    return "ABANDONA" if i in ABANDONA else "COMPATIVEL"
+
+
+@pytest.mark.parametrize("texto,via", _VIAS_281)
+def test_281_tabela_do_predicado(texto, via):
+    assert _via_281(texto) == via
+
+
+def test_281_escrita_e_abandona_sao_disjuntos():
+    """A ordem dos dois ramos em `_clarification_abandonada` não pode mudar
+    resultado. Se um intent novo entrar nos dois conjuntos, ela passa a mudar —
+    e o veto de catálogo (que roda só depois do `ABANDONA`) deixaria de ser
+    alcançável para ele."""
+    from core.intent_router import ABANDONA, ESCRITA
+
+    assert ABANDONA & ESCRITA == set()
+
+
+def test_281_so_o_valor_nao_usa_normalize_text():
+    """A armadilha medida: `normalize_text` apaga `$` e `,`, e aí `R$ 100` e
+    `R$ 1.200,00` deixariam de consumir a mensagem inteira — viravam AMBÍGUO
+    e o valor digitado se perderia num turno de desempate."""
+    from core.intent_router import _so_o_valor
+
+    assert _so_o_valor("R$ 100")
+    assert _so_o_valor("R$ 1.200,00")
+    assert _so_o_valor("132,50.")
+
+
+def test_281_so_o_valor_nao_estoura_com_texto_longo():
+    """A primeira forma do `_SO_O_VALOR_RE` (`{PT_VALUE}(?:\\s+e\\s+{MOEDA})*`)
+    tinha backtracking catastrófico: 40 grupos de `2 mil e ` não terminaram em
+    120s. A unidade obrigatória em cada iteração externa desfaz a ambiguidade.
+    O limite é generoso de propósito — o que se mede aqui é exponencial × não
+    exponencial, não milissegundos."""
+    import time
+
+    from core.intent_router import _so_o_valor
+
+    inicio = time.perf_counter()
+    _so_o_valor(" e ".join(["2 mil"] * 40) + " x")
+    assert time.perf_counter() - inicio < 1.0

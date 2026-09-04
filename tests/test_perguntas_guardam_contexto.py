@@ -583,14 +583,26 @@ def test_186_alvo_da_resposta_vence_o_guardado(uid, sem_teto_de_caixinha):
 
 
 def test_alvo_fora_do_catalogo_nao_sobrescreve(uid, sem_teto_de_caixinha):
-    """CONTROLE do portão: "explícito" não é o mesmo que "existente". Sem o
-    catálogo, `salario` sobrescreveria a caixinha certa e o usuário receberia
-    "não encontrada" no lugar de um saque perfeitamente executável."""
+    """CONTROLE do portão: "explícito" não é o mesmo que "existente".
+
+    O #281 mudou o CAMINHO e manteve o que este teste protege — o dinheiro do
+    `carro`. `retirei 100 do salario` tem verbo próprio (`pockets.withdraw`
+    0.95), então a via EXPLÍCITO abandona a pergunta e o comando roda sozinho;
+    como `salario` não existe, ele erra e nada se move. Medido:
+    "Não encontrei *salario* nem em caixinhas nem em investimentos".
+
+    Antes o resolver caía no alvo guardado e sacava R$ 100 do `carro`. É uma
+    troca deliberada e do lado seguro (não move dinheiro de caixinha que a
+    mensagem não nomeou, que é a direção da #186), mas custa um turno e é
+    TETO declarado do PR A."""
     _duas_caixinhas(uid)
 
-    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 do salario")
+    respostas = _conversa(uid, "tirar da caixinha carro", "carro",
+                          "retirei 100 do salario")
 
-    assert _saldos(uid)["carro"] == 200.00, "o alvo inexistente atropelou o guardado"
+    assert "Não encontrei" in respostas[-1], respostas[-1]
+    assert _saldos(uid) == {"carro": 300.00, "viagem": 300.00}, \
+        "o alvo inexistente atropelou o guardado"
 
 
 def test_nota_do_lancamento_nao_cita_o_alvo_velho(uid, sem_teto_de_caixinha):
@@ -935,3 +947,159 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
     assert "Conta Corrente" in respostas[-1], respostas[-1]
     assert _saldos(uid) == {"viagem": 300.00, "saldo": 300.00}, \
         "sacou sem que o valor fosse dito"
+
+
+# ── #281: o verbo da resposta entra na decisão (PR A de 2) ──────────────────
+#
+# P0 de dinheiro confirmado em produção (#189, fechada com os dados). Com uma
+# pergunta de handler viva, o resolver lia número e alvo da resposta e NUNCA o
+# verbo: `gastei 50 no mercado` virava saque de caixinha (dinheiro no sentido
+# errado, despesa não registrada) e `guardei 100 na caixinha viagem` virava
+# saque (o usuário disse GUARDEI).
+#
+# A REGRA DO DONO, e o que este PR A faz de cada linha dela:
+#   comando explícito vence     -> via EXPLÍCITO (`ESCRITA` + não-só-o-valor
+#                                  + não começa por valor). FEITO aqui.
+#   resposta compatível vence   -> portão `_so_o_valor`. FEITO aqui.
+#   atalho ambíguo não escreve  -> `50 no mercado` cai em COMPATÍVEL, que é o
+#                                  comportamento de HOJE. É o PR B, com a
+#                                  pergunta de desempate.
+# O predicado inteiro mora em `_clarification_abandonada`; a tabela de unidade
+# input -> via está em `tests/test_bill_amount_pending.py` (§0.7 — não repetir).
+#
+# CONTROLES NEGATIVOS (cada um injetado num caso que estava VERDE):
+#   remover o ramo `if intent_da_resposta in ESCRITA and not _so_o_valor(text)`
+#     -> test_281_comando_explicito_vence_a_pergunta_de_valor
+#        test_281_comando_explicito_vence_a_pergunta_de_nome
+#        test_281_verbo_de_deposito_nao_vira_saque   (P1 e P4)
+#   trocar o portão por `if intent_da_resposta in ESCRITA` (todo ESCRITA
+#   abandona) -> test_281_resposta_compativel_nunca_vira_lancamento fica
+#        VERMELHO em `100 reais`, `2 mil` e `30 reais e 50 centavos` (as três
+#        que o classificador lê como `launches.add` 0.95).
+#   tirar o `_STARTS_WITH_VALUE_RE`: NÃO DISCRIMINA no PR A, e é declarado, não
+#        fingido — o AMBÍGUO e o COMPATÍVEL têm hoje o MESMO destino
+#        ("resolve"), então remover o teste do meio não muda saída nenhuma. O
+#        caso está preparado em `test_281_ambiguo_ainda_responde_a_pergunta`,
+#        que é a linha que fica vermelha quando o PR B chegar.
+#
+# CLASSE CEGA (a mesma do #185): o LLM está fora dos testes, então o
+# `classify_with_context` nunca roda e os payloads de caixinha/investimento que
+# carregam `amount` só são alcançáveis por ele. A rota determinística provada
+# aqui é a `funds.withdraw`.
+#
+# TETO, medido e escrito também no código: continua sequestrado o verbo que os
+# tiers 1-2 não conhecem — `poupei 100`, `mercado 50`, `uber 25`,
+# `gasteii 50 no mercado` e `gasto fixo aluguel 1200` são todos `out_of_scope
+# 0.0`, então não entram no `ESCRITA` e seguem sendo lidos como resposta. A
+# porta 2 roda `allow_ai=False` de propósito (ver `abandona_pergunta_de_valor`).
+
+
+def _pergunta_de_valor(uid):
+    """Deixa viva a pergunta "Qual o valor?" de um saque, com R$ 300 na
+    caixinha `viagem` e R$ 100 na conta (`_caixinhas_com_saldo` credita 400 e
+    deposita 300). Duas mensagens, não uma: `tirar da
+    caixinha viagem` pergunta o NOME primeiro (medido)."""
+    _caixinhas_com_saldo(uid, "viagem")
+    respostas = _conversa(uid, "tirar da caixinha viagem", "viagem")
+    assert "Qual o valor" in respostas[-1], respostas[-1]
+
+
+def test_281_comando_explicito_vence_a_pergunta_de_valor(uid):
+    """O caso do título da issue, com os números medidos em produção.
+
+    Antes: `📤 Caixinha *viagem*: -R$ 50,00`, conta SOBE 50 e a despesa não
+    existe. Depois: despesa de 50, conta CAI 50, caixinha intacta."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado")
+
+    assert _saldos(uid)["viagem"] == 300.00, \
+        f"o gasto saiu da caixinha em vez da conta: {respostas[-1]!r}"
+    assert round(float(db.get_balance(uid)), 2) == 50.00, \
+        "a conta tinha de CAIR 50 (100 -> 50), não subir para 150"
+    assert [round(float(d["valor"]), 2) for d in _despesas(uid)] == [50.00], \
+        f"o gasto sumiu do extrato: {respostas[-1]!r}"
+
+
+def test_281_comando_explicito_vence_a_pergunta_de_nome(uid):
+    """A pergunta de NOME fecha de graça: o portão roda no `route()`, ANTES de
+    `payload["falta"]` ser lido, então não há ramo próprio para ela."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    respostas = _conversa(uid, "tirar da caixinha viagem", "gastei 50 no mercado")
+
+    assert "Qual caixinha" in respostas[0], respostas[0]
+    assert _saldos(uid)["viagem"] == 300.00, respostas[-1]
+    assert round(float(db.get_balance(uid)), 2) == 50.00, \
+        "conta = 100 do setup - 50 da despesa"
+    assert [round(float(d["valor"]), 2) for d in _despesas(uid)] == [50.00], \
+        f"a despesa não foi registrada: {respostas[-1]!r}"
+
+
+def test_281_verbo_de_deposito_nao_vira_saque(uid):
+    """O exemplo do comentário da issue: GUARDEI nas duas mensagens, e a
+    segunda virava SAQUE. É a mesma causa por um `falta` diferente."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    respostas = _conversa(uid, "guardei na caixinha viagem",
+                          "guardei 100 na caixinha viagem")
+
+    assert "Qual caixinha" in respostas[0], respostas[0]
+    assert _saldos(uid)["viagem"] == 400.00, \
+        f"o usuário disse GUARDEI e a caixinha não subiu: {respostas[-1]!r}"
+    assert round(float(db.get_balance(uid)), 2) == 0.00, \
+        "conta = 100 do setup - 100 depositados"
+
+
+@pytest.mark.parametrize("resposta,saque", [
+    ("100 reais", 100.00),
+    ("cem", 100.00),
+    ("132,50", 132.50),
+    ("R$ 100", 100.00),
+    ("30 reais e 50 centavos", 30.50),
+    ("tudo", 300.00),
+])
+def test_281_resposta_compativel_nunca_vira_lancamento(uid, resposta, saque):
+    """CONTROLE POSITIVO, e é o que separa este conserto de um que recusa tudo.
+
+    `100 reais`, `2 mil` e `30 reais e 50 centavos` classificam `launches.add`
+    0.95 — os mesmos 0.95 de `gastei 50 no mercado`. Quem os separa é o
+    `_so_o_valor`, não o classificador."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, resposta)
+
+    assert _saldos(uid)["viagem"] == round(300.00 - saque, 2), \
+        f"a resposta não fechou o saque: {respostas[-1]!r}"
+    assert round(float(db.get_balance(uid)), 2) == round(100.00 + saque, 2)
+    assert _despesas(uid) == [], \
+        f"a resposta à pergunta virou lançamento: {respostas[-1]!r}"
+
+
+def test_281_resposta_compativel_grande_demais_nao_vira_lancamento(uid):
+    """`2 mil` numa caixinha de 300: a resposta é COMPATÍVEL, então o saque é
+    recusado pelo saldo — e continua sem virar despesa avulsa."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "2 mil")
+
+    assert "insuficiente" in respostas[-1].lower(), respostas[-1]
+    assert _saldos(uid)["viagem"] == 300.00
+    assert _despesas(uid) == [], f"virou lançamento: {respostas[-1]!r}"
+
+
+def test_281_ambiguo_ainda_responde_a_pergunta(uid):
+    """O ATALHO sem verbo é o PR B, e este teste é o marcador dele.
+
+    `50 no mercado` classifica `launches.add` 0.95 igual a `gastei 50 no
+    mercado`, mas COMEÇA pelo valor (`_STARTS_WITH_VALUE_RE`) — pode ser o
+    gasto, pode ser "50, do mercado" respondendo a pergunta. No PR A ele cai
+    em COMPATÍVEL, que é o comportamento de HOJE: saque de 50, sem despesa.
+    Quando a pergunta de desempate do PR B chegar, é esta linha que fica
+    vermelha, de propósito."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "50 no mercado")
+
+    assert _saldos(uid)["viagem"] == 250.00, respostas[-1]
+    assert _despesas(uid) == [], respostas[-1]
