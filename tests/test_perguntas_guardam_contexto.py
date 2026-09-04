@@ -1051,18 +1051,27 @@ def test_281_comando_explicito_vence_a_pergunta_de_nome(uid):
 
 
 def test_281_verbo_de_deposito_nao_vira_saque(uid):
-    """O exemplo do comentário da issue: GUARDEI nas duas mensagens, e a
-    segunda virava SAQUE. É a mesma causa por um `falta` diferente."""
-    _caixinhas_com_saldo(uid, "viagem")
+    """GUARDEI virando SAQUE — o sentido do dinheiro invertido.
 
-    respostas = _conversa(uid, "guardei na caixinha viagem",
-                          "guardei 100 na caixinha viagem")
+    O caminho medido na `main` (1fff16f) É a pergunta de VALOR, não a de nome:
+    `guardei na caixinha viagem` + `guardei 100 na caixinha viagem` já
+    DEPOSITA na `main` (medido — a primeira redação deste teste era
+    tautológica e o controle negativo a pegou). O que ainda invertia é a
+    resposta à pergunta de VALOR de um saque:
 
-    assert "Qual caixinha" in respostas[0], respostas[0]
+        tirar da caixinha viagem / viagem  -> "Qual o valor?"
+        guardei 100 na caixinha viagem     -> 📤 -R$ 100,00   (main)
+                                           -> ✅ +R$ 100,00   (aqui)
+    """
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "guardei 100 na caixinha viagem")
+
     assert _saldos(uid)["viagem"] == 400.00, \
-        f"o usuário disse GUARDEI e a caixinha não subiu: {respostas[-1]!r}"
+        f"o usuário disse GUARDEI e a caixinha caiu: {respostas[-1]!r}"
     assert round(float(db.get_balance(uid)), 2) == 0.00, \
         "conta = 100 do setup - 100 depositados"
+    assert _despesas(uid) == [], respostas[-1]
 
 
 @pytest.mark.parametrize("resposta,saque", [
