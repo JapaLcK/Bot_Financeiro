@@ -253,3 +253,73 @@ def test_9h_deleted_da_assinatura_ANTIGA_nao_mata_a_NOVA_ja_paga(user_id, monkey
     assert por_ref["sub_VELHA"] == "revoked"
     assert por_ref["sub_NOVA"] == "active", "a assinatura recém-paga foi revogada junto"
     assert _ler(uid)["plan"] == "pro", "quem está em dia não pode cair para free"
+
+
+def test_B1_checkout_SEM_subscription_nao_estoura(user_id, monkeypatch):
+    """Sessão de checkout sem `subscription` (pagamento avulso).
+
+    `_invoice_subscription_id` caía no fallback do `parent` lendo a variável
+    LIVRE `invoice`, só ligada no ramo `invoice.paid` → UnboundLocalError → 500.
+    A Stripe reentregaria por 3 dias e desistiria, e o ramo que loga "Checkout
+    do Stripe concluido (sem subscription)" era inalcançável.
+    """
+    uid, client, fake = _setup(monkeypatch, f"gb1-{user_id}")
+    _conta(uid, "free", None, "inactive")
+
+    r = _post(client, fake, _evt_checkout(uid, None, 1_800_000_000, "cs_sem_sub"))
+
+    assert r.status_code == 200, r.text
+    assert list_grants(uid) == [], "sessão sem assinatura não pode virar grant"
+    assert _funil(uid) == 1, "o ramo 'sem subscription' precisa continuar alcançável"
+
+
+def test_B2_assinatura_VIVA_com_so_grant_legacy_nao_rebaixa(user_id, monkeypatch):
+    """O Stripe confirma assinatura VIVA e o único grant é `legacy` — que é
+    exatamente o que o backfill cria para toda a base pagante do deploy.
+
+    O código reduzia: `alvo is None` (nenhum grant `stripe` casando o `sub_id`)
+    virava veredito `reduz`, com o gateway dizendo o contrário. Assinatura viva
+    nunca pode resultar em redução.
+    """
+    agora = datetime.now(timezone.utc)
+    _conta(user_id, "pro", agora + timedelta(days=330), "active")
+    set_customer(user_id, f"cus_{user_id}")
+    upsert_grant(user_id, "legacy", f"legacy:{user_id}", "pro",
+                 agora - timedelta(days=395), agora - timedelta(days=30), 0)
+
+    fim = agora + timedelta(days=330)
+    viva = {"id": "sub_que_nao_tem_grant", "status": "active",
+            "current_period_end": int(fim.timestamp()),
+            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
+    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=viva))
+
+    resultado = recompute_entitlement(user_id, origem="varredura")
+
+    assert _ler(user_id)["plan"] == "pro", "pagante com assinatura VIVA foi rebaixado"
+    assert resultado is None or resultado["plan"] != "free"
+    g = _grant(user_id, "legacy")
+    assert g["ends_at"] > agora, "o legacy defasado não foi reparado a partir do Stripe"
+
+
+def test_B2_assinatura_viva_sem_grant_nenhum_nao_reduz(user_id, monkeypatch):
+    """Sem grant algum para esticar, a varredura não decide nada: alerta e não
+    escreve. Reduzir aqui tiraria acesso de quem o Stripe diz que está pagando."""
+    agora = datetime.now(timezone.utc)
+    _conta(user_id, "pro", agora + timedelta(days=330), "active")
+    set_customer(user_id, f"cus_{user_id}")
+    upsert_grant(user_id, "admin", f"admin:{user_id}", "pro",
+                 agora - timedelta(days=40), agora - timedelta(days=1), 1)
+
+    fim = agora + timedelta(days=330)
+    viva = {"id": "sub_orfa", "status": "active",
+            "current_period_end": int(fim.timestamp()),
+            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
+    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=viva))
+
+    alertas: list[str] = []
+    import core.services.admin_notify as admin_notify
+    monkeypatch.setattr(admin_notify, "_send", lambda m: alertas.append(m) or True)
+
+    assert recompute_entitlement(user_id, origem="varredura") is None
+    assert _ler(user_id)["plan"] == "pro"
+    assert len(alertas) == 1

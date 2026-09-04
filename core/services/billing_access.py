@@ -115,7 +115,7 @@ def _e_reducao(plano_atual: str, expira_atual, plano_novo: str, expira_novo) -> 
 def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) -> str:
     """Confirma no STRIPE uma redução que veio de VARREDURA (§4.1.1 B).
 
-    Devolve 'reduz' | 'reparou' | 'indisponivel'.
+    Devolve 'reduz' | 'reparou' | 'nao_reduz' | 'indisponivel'.
 
     O ponto todo: sem evento, a varredura não tem autoridade para rebaixar
     ninguém. "Grant defasado" e "assinatura acabou" produzem exatamente o mesmo
@@ -125,9 +125,20 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     varredura leu o buraco como fim de assinatura.
 
     Reparar significa ESTICAR o `ends_at` do grant até o período que o Stripe
-    diz; `plan_stored` não se mexe, porque é a MESMA assinatura — o que estava
-    velho era a data, não o tier. Assim o reparo não precisa mapear price→plano
-    e não pode inventar um tier que ninguém vendeu.
+    diz. `plan_stored` **não** se mexe — mas o motivo não é "é a mesma
+    assinatura, então é o mesmo tier": isso é FALSO neste repo, porque
+    `/billing/change-plan` troca o price por `SubscriptionSchedule` mantendo o
+    mesmo `sub_id`. O motivo real é mais estreito: aqui não há como resolver
+    price→plano sem duplicar o `_stored_plan_for_price` do monólito, e um
+    reparo que chuta tier pode CONCEDER tier que ninguém comprou. O tier de
+    registro continua sendo o que o último EVENTO escreveu, e o próximo
+    `invoice.paid` o corrige — a data é o que não pode esperar, porque é ela
+    que decide se a conta cai.
+
+    **Assinatura viva NUNCA resulta em redução.** Se o Stripe confirma que há
+    assinatura ativa e não dá para reparar (nenhum grant a esticar), o veredito
+    é `nao_reduz`: alerta e não escreve. O caminho que faltava era o assinante
+    cujo único grant é o `legacy` — justamente a população que o backfill cria.
     """
     customer = (conta.get("stripe_customer_id") or "").strip()
     if not customer:
@@ -159,14 +170,30 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
         return "indisponivel"   # assinatura viva sem data legível: não decide nada
     fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
 
+    # Alvo do reparo: o grant DAQUELA assinatura; na falta dele, o `legacy`, que
+    # é a reconstrução do mesmo acesso de cartão feita pelo backfill. Ler o
+    # STRIPE para esticar um grant não é a lavagem do D4 — lavagem era ler
+    # `auth_accounts`, que é projeção. Aqui a autoridade é o gateway.
     alvo = next((g for g in grants
                  if g["source"] == "stripe" and g["external_ref"] == str(sub_id)), None)
-    if alvo is None or alvo["ends_at"] >= fim:
-        return "reduz" if alvo is None else "indisponivel"
+    if alvo is None:
+        alvo = next((g for g in grants if g["source"] == "legacy"), None)
+    if alvo is None:
+        # Stripe diz VIVA e não há grant nenhum a esticar. Não reduz: quem tem
+        # assinatura ativa não perde acesso por falta de linha nossa.
+        return "nao_reduz"
+    if alvo["ends_at"] >= fim:
+        # O grant já cobre o que o Stripe promete, e mesmo assim a projeção quis
+        # reduzir. Não decide nada por conta própria.
+        # ponytail: teto conhecido — `past_due` entra aqui, porque
+        # `_find_active_subscription` a considera viva e o `current_period_end`
+        # dela é o período JÁ vencido. Resultado: alerta e nada escrito, todo
+        # dia. A regra do `past_due` é decisão do dono, pendente.
+        return "nao_reduz"
 
     from db.plan_grants import upsert_grant
 
-    upsert_grant(user_id, "stripe", str(sub_id), alvo["plan_stored"],
+    upsert_grant(user_id, alvo["source"], alvo["external_ref"], alvo["plan_stored"],
                  alvo["starts_at"], fim,
                  int(datetime.now(timezone.utc).timestamp()), "reparo:varredura")
     return "reparou"
@@ -220,15 +247,15 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
 
     if origem == "varredura" and _e_reducao(plano_atual, expira_atual, plano, expira):
         veredito = _reparar_grant_pelo_stripe(user_id, conta, grants)
-        if veredito == "indisponivel":
-            _alertar_reducao_nao_confirmada(user_id, plano_atual)
+        if veredito in ("indisponivel", "nao_reduz"):
+            _alertar_reducao_nao_confirmada(user_id, plano_atual, veredito)
             return None                      # falha na direção reparável
         if veredito == "reparou":
             grants = list_grants(user_id)
             plano, expira = projetar_grants(grants, agora)
             if _e_reducao(plano_atual, expira_atual, plano, expira):
                 # o reparo não resolveu: não reduz por conta própria
-                _alertar_reducao_nao_confirmada(user_id, plano_atual)
+                _alertar_reducao_nao_confirmada(user_id, plano_atual, "reparo_insuficiente")
                 return None
 
     from db import set_payment_status, update_user_plan
@@ -245,7 +272,7 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
     return {"plan": plano, "plan_expires_at": expira}
 
 
-def _alertar_reducao_nao_confirmada(user_id: int, plano: str) -> None:
+def _alertar_reducao_nao_confirmada(user_id: int, plano: str, motivo: str) -> None:
     """Varredura quis rebaixar e o Stripe não confirmou. Não escreve, avisa.
 
     Errar aqui na direção "não reduz" é reparável: o acesso segue e a próxima
@@ -253,8 +280,9 @@ def _alertar_reducao_nao_confirmada(user_id: int, plano: str) -> None:
     pagou por causa de um timeout de rede.
     """
     _observar(user_id, "projecao_reducao_nao_confirmada",
-              f"Reducao de acesso nao confirmada no Stripe (plano atual {plano}).",
-              f"Conta {user_id} ({plano}): varredura quis rebaixar e o Stripe nao confirmou.")
+              f"Reducao de acesso nao confirmada no Stripe (plano {plano}, motivo {motivo}).",
+              f"Conta {user_id} ({plano}): varredura quis rebaixar, Stripe nao confirmou "
+              f"({motivo}).")
 
 
 def _observar(user_id: int, evento: str, mensagem: str, alerta: str) -> None:

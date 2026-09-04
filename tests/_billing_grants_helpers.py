@@ -107,8 +107,15 @@ def evt_deleted(uid: int, sub_id: str, created: int) -> dict:
 
 
 def evt_checkout(uid: int, subscription, created: int, session_id: str) -> dict:
-    """`subscription` pode ser string OU objeto expandido (caso 9g)."""
+    """`subscription` pode ser string, objeto expandido (9g) ou None.
+
+    `None` OMITE a chave — checkout de pagamento avulso não traz `subscription`.
+    A versão anterior deste helper mandava a chave SEMPRE, e foi por isso que o
+    PR inteiro não viu o `UnboundLocalError` do `_invoice_subscription_id`:
+    nenhum teste exercitava o caminho em que ele cai no fallback do `parent`.
+    """
+    objeto = {"metadata": {"finbot_user_id": str(uid)}, "id": session_id}
+    if subscription is not None:
+        objeto["subscription"] = subscription
     return {"type": "checkout.session.completed", "id": f"evt_co_{created}",
-            "created": created,
-            "data": {"object": {"metadata": {"finbot_user_id": str(uid)},
-                                "subscription": subscription, "id": session_id}}}
+            "created": created, "data": {"object": objeto}}

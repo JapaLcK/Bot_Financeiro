@@ -734,7 +734,14 @@ Guarda do dreno (§8.2 B), não estado da tabela: transição com destino **`pai
 1. Assinante ativo preexistente **sem** grants: `recompute` **não escreve nada** e alerta; roda o resync; `recompute` → plano e data idênticos aos de `auth_accounts`. *Negativo: remova o resync → segunda metade vermelha.*
 2. Resync 2× → **um** grant `legacy` por usuário.
 3. `grandfathered` → nenhum grant, projeção não escreve.
-4. **[NOVO — nº 4a]** Simula revert+re-aplicação: `legacy` com `ends_at` no passado, `auth_accounts.plan_expires_at` no futuro, roda o resync → `ends_at` **atualizado**; assinante continua pago. *Negativo: volte para `do nothing` → assinante em dia vira `free`.*
+4. **[SUBSTITUÍDO na v6 — ver 9c e 9f]** ~~Simula revert+re-aplicação: o resync atualiza o `ends_at`.~~
+   **Este caso descrevia o contrato ANTIGO e foi anulado pela decisão do dono (§4.1.1, §5.1, §17).**
+   O boot deixou de reparar (`not exists` + `on conflict do nothing`), então o resync **não** atualiza
+   `ends_at` de linha existente — quem prova isso agora é o **9f** (revogado não é recriado em dois boots).
+   E o negativo dele virou factualmente falso: com a regra da redução (§4.1.1 B), grant defasado
+   **não rebaixa mais ninguém** — quem prova a reconciliação é o **9c** (varredura repara pelo Stripe).
+   Mantido riscado, e não apagado, pelo mesmo motivo da bullet do §5.1: apagar deixa a próxima pessoa
+   reintroduzir o `do update` achando que o caso 4 ainda o exigia.
 5. **[REVISTO — nº 2]** Primeiro `invoice.paid` depois do resync: grant `stripe` criado **e** `legacy` revogado (`superseded_by_stripe`); cobertura contínua.
 6. **[NOVO — nº 2]** `invoice.paid` com `period_end` **anterior** ao `ends_at` do `legacy` → `plan_expires_at` **encurta** para o do Stripe. *Negativo: remova a supersessão → o legado sustenta acesso além do que o Stripe diz.*
 7. **[NOVO — nº 2]** Assinatura que lapsa (`payment_failed` → `past_due`, sem `deleted`) depois de um `invoice.paid`: quando o grant `stripe` vence, o acesso **acaba**.

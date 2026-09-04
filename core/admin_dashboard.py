@@ -1384,9 +1384,13 @@ def set_account_plan(
                 except Exception as exc:
                     # Observabilidade de VERDADE, não print: o §15 nomeia esta
                     # rota como ferramenta de conciliação que não pode ser
-                    # desligada, e a varredura diária desfaz o ajuste em até
-                    # 24 h. Sem alerta, o admin acha que reparou e ninguém vê
-                    # o plano voltar sozinho.
+                    # desligada. O estado que sobra — coluna certa, grant
+                    # ausente — não é mais "some em 24 h": desde a v6 a
+                    # varredura não reduz sem o Stripe confirmar, então numa
+                    # conta com assinatura viva o ajuste PERSISTE e passa a
+                    # gerar alerta diário de redução não confirmada. Nos dois
+                    # desfechos (persistir errado ou ser desfeito) quem precisa
+                    # saber é uma pessoa, e é para isso que este alerta existe.
                     from core.observability import log_system_event_sync
                     log_system_event_sync(
                         "error", "admin_grant_nao_gravado",

@@ -4706,7 +4706,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         if sub_id:
             return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
         # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        parent = _g(invoice, "parent", {})
+        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
+        # `checkout.session.completed`, esta linha ficou lendo uma variável
+        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
+        # (checkout de pagamento avulso) chegava aqui e estourava
+        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
+        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
+        parent = _g(objeto, "parent", {})
         details = _g(parent, "subscription_details", {})
         ref = _g(details, "subscription")
         if ref is None:
@@ -4782,8 +4788,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         Dedup por (função, usuário, 1 dia) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
-        Ponto único de propósito — é por aqui que os transacionais do billing
-        passam. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
+        Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
+        (`send_pro_welcome_email`, `send_pro_charged_email`) e o aviso de fim de
+        trial. NÃO é o ponto único do arquivo — `send_payment_failed_email` e
+        `send_subscription_canceled_email` são chamados direto, cada um no seu
+        try/except. Sem consequência hoje (nenhum dos dois está depois de uma
+        escrita que possa falhar e forçar reentrega), mas quem mover um deles
+        para cá ganha a dedup de graça, e quem NÃO mover não deve achar que
+        tem. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
 
         Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
         enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
