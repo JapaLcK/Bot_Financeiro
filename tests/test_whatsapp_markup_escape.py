@@ -1,30 +1,42 @@
 """Nome do usuário é CONTEÚDO, não marcação do WhatsApp (#146, fatia 1 de 2).
 
 O WhatsApp NÃO tem caractere de escape: `\\*` não existe, entidade HTML aparece
-literal na tela. O mecanismo é `escape_wa_markup` (core/response_formatter.py):
-um WORD JOINER (U+2060, invisível) logo depois de cada `*`, `_`, `~` e crase que
-veio do usuário, quebrando o PAREAMENTO sem alterar o texto visível.
+literal na tela. E neutralizar o delimitador do usuário com um WORD JOINER
+(U+2060) também não resolve — MEDIDO pelo dono no cliente real do WhatsApp,
+`*a*<WJ>b*` renderiza `ab*`, idêntico ao que a `main` já mostra: o WJ cega a
+ABERTURA, mas o FECHAMENTO olha o caractere ANTERIOR. Ou seja, era inerte
+justamente quando o delimitador do usuário é igual ao do template — o `a*b`
+dentro de `*{...}*`, que é o caso do título da issue.
 
-CONTROLE NEGATIVO — faça `escape_wa_markup` devolver a entrada intacta
-(`return str(text)`) e rode este arquivo:
-os 5 testes de neutralização ficam VERMELHOS (medido: `5 failed, 3 passed`;
-com o conserto de pé, `8 passed`). Os 5 estavam VERDES com o conserto — nenhum
-foi injetado num caso já vermelho. Os 3 que continuam verdes são os controles
+O mecanismo é `wrap_wa_markup` (core/response_formatter.py): quando o texto do
+usuário contém `*`, `_`, `~` ou crase, a mensagem sai SEM o embrulho de
+marcação. Custo aceito: perde-se o negrito nesses nomes — e nesse mesmo caso a
+formatação já estava quebrada antes, então não se perde nada que funcione.
+
+CONTROLE NEGATIVO — faça `wrap_wa_markup` embrulhar sempre
+(`return f"{delim}{text}{delim}"`) e rode este arquivo: os 7 testes de
+não-embrulho ficam VERMELHOS (medido em 2026-09-04: `7 failed, 6 passed`; com o
+conserto de pé, `13 passed`). Os 7 estavam VERDES com o conserto — nenhum foi
+injetado num caso já vermelho. Os 6 que continuam verdes são os controles
 positivos, e é exatamente o que se espera deles.
 
-CONTROLE POSITIVO — `test_pontuacao_legitima_sobrevive_com_negrito_intacto`: o
-conserto RESTRINGE (passa a inserir caractere), então precisa provar que não
-mutila quem escreveu certo. `McDonald's`, `café & pão` e `Cartão Nubank` saem com
-o caractere original E com o par de asteriscos do negrito de pé.
+CONTROLE POSITIVO — o conserto RESTRINGE (passa a omitir o negrito), então
+precisa provar que não engole o negrito de quem escreveu certo: `McDonald's`,
+`café & pão` e `Cartão Nubank` (a mesma lista de tests/test_export_pdf_escape.py,
+#145) saem COM o par de asteriscos, e a pendência legada sai com as crases. O
+controle do controle, medido no mesmo dia: com `return text` (helper que nunca
+embrulha) são os 6 positivos que ficam vermelhos — `6 failed, 7 passed`.
 
 CLASSE CEGA: a RENDERIZAÇÃO do cliente WhatsApp (Android/iOS) não é exercitável
-aqui. Nada neste arquivo prova que o U+2060 realmente impede o negrito no
-aparelho — isso é verificação pós-deploy. O que se mede aqui é a estrutura da
-STRING que sai: quais delimitadores continuam pareáveis.
+aqui. O que se mede é a estrutura da STRING que sai da função real do handler —
+se o embrulho de marcação está presente ou ausente.
 
-ESCOPO: os 7 sítios de `adapters/whatsapp/wa_runtime.py` e o de
-`core/handlers/pending.py:89`. Os ~90 restantes (`credit.py`, `pockets.py`,
-`investments.py`…) são a fatia 2 e NÃO estão cobertos aqui.
+ESCOPO: os 7 sítios de `adapters/whatsapp/wa_runtime.py`, o
+`pergunta_de_valor_sem_contexto` (core/handlers/bills.py, chamado de
+wa_runtime.py:800) e o `core/handlers/pending.py:90`. Ficam FORA:
+`core/handlers/bills.py:174` e `:295`, que têm a string idêntica à de
+wa_runtime.py:822/1020 — a outra porta da MESMA pergunta —, e os 125 sítios
+restantes em ~20 arquivos. Tudo isso é a fatia 2.
 """
 from __future__ import annotations
 
@@ -32,22 +44,14 @@ import pytest
 
 import db
 from adapters.whatsapp import wa_runtime
+from core.handlers import bills as h_bills
 from core.handlers import pending as h_pending
 from core.response_formatter import format_for_platform
 
-WJ = "⁠"
-
-
-def _delimitadores_ativos(texto: str) -> str:
-    """Os marcadores que o WhatsApp ainda pode parear.
-
-    Um marcador seguido de WORD JOINER está neutralizado; o que sobra é o que
-    o cliente ainda enxerga como abertura/fechamento.
-    """
-    return "".join(
-        c for i, c in enumerate(texto)
-        if c in "*_~`" and texto[i + 1:i + 2] != WJ
-    )
+# A lista de nomes legítimos do #145 (tests/test_export_pdf_escape.py:105).
+NOMES_LEGITIMOS = [("McDonald's", "mcdonald's"),
+                   ("café & pão", "café & pão"),
+                   ("Cartão Nubank", "cartão nubank")]
 
 
 def _novo_launch(user_id: int) -> int:
@@ -58,49 +62,34 @@ def _novo_launch(user_id: int) -> int:
     return launch_id
 
 
-# ─── wa_runtime:351 — categoria (a linha citada na issue) ────────────────────
+# ─── wa_runtime:352 — categoria (a linha citada na issue) ────────────────────
 
 
-def test_categoria_com_asterisco_nao_abre_negrito(pro_user_id):
-    """`a*b` é nome legítimo desde o #143. Os asteriscos ativos têm que ser
-    só o par do template — 3 asteriscos ativos é negrito vazando."""
-    launch_id = _novo_launch(pro_user_id)
-
-    msg = wa_runtime._apply_recategorize(pro_user_id, launch_id, "a*b")
-
-    assert "a*" + WJ + "b" in msg          # o texto visível é o mesmo
-    assert _delimitadores_ativos(msg) == "**"
-
-
-def test_categoria_com_underscore_nao_italiza(pro_user_id):
-    """`meta_casa_nova`: dois underscores pareiam e o WhatsApp italiza "casa".
-    É o caractere realmente alcançável — asterisco em nome é raro, underscore não."""
-    launch_id = _novo_launch(pro_user_id)
-
-    msg = wa_runtime._apply_recategorize(pro_user_id, launch_id, "meta_casa_nova")
-
-    assert "meta_" + WJ + "casa_" + WJ + "nova" in msg
-    assert _delimitadores_ativos(msg) == "**"
-
-
-@pytest.mark.parametrize("nome,canon", [
-    ("McDonald's", "mcdonald's"),
-    ("café & pão", "café & pão"),
-    ("Cartão Nubank", "cartão nubank"),
+@pytest.mark.parametrize("nome", [
+    "a*b",            # delimitador IGUAL ao do template: o caso que o WJ não fechava
+    "meta_casa_nova",  # dois underscores pareiam e o WhatsApp italiza "casa"
+    "conta_",          # termina em delimitador: com WJ o negrito do bot vazava
 ])
-def test_pontuacao_legitima_sobrevive_com_negrito_intacto(pro_user_id, nome, canon):
-    """CONTROLE POSITIVO: o conserto restringe, então tem que provar que o
-    caminho legítimo continua — caractere original E negrito de pé."""
+def test_categoria_com_marcacao_sai_sem_negrito(pro_user_id, nome):
     launch_id = _novo_launch(pro_user_id)
 
     msg = wa_runtime._apply_recategorize(pro_user_id, launch_id, nome)
 
-    assert f"*{canon}*" in msg      # sem WJ nenhum no meio, e o par intacto
-    assert WJ not in msg
-    assert _delimitadores_ativos(msg) == "**"
+    assert msg.endswith(f"atualizada para {nome}.")   # o nome inteiro, na tela
+    assert f"*{nome}*" not in msg                     # e sem o embrulho
 
 
-# ─── wa_runtime:821/1019 — nome da conta no caminho do dinheiro ─────────────
+@pytest.mark.parametrize("nome,canon", NOMES_LEGITIMOS)
+def test_categoria_legitima_mantem_o_negrito(pro_user_id, nome, canon):
+    """CONTROLE POSITIVO: sem isto, um helper que nunca embrulha passaria."""
+    launch_id = _novo_launch(pro_user_id)
+
+    msg = wa_runtime._apply_recategorize(pro_user_id, launch_id, nome)
+
+    assert msg.endswith(f"atualizada para *{canon}*.")
+
+
+# ─── wa_runtime:822/1020 — nome da conta no caminho do dinheiro ─────────────
 
 
 def test_conta_paga_com_asterisco_no_nome(monkeypatch):
@@ -121,12 +110,33 @@ def test_conta_paga_com_asterisco_no_nome(monkeypatch):
 
     assert len(replies) == 1
     body = replies[0][1]
-    assert "luz *" + WJ + "casa*" + WJ in body
-    assert _delimitadores_ativos(body) == "**"
+    assert "Conta paga: luz *casa* —" in body
+    assert "*luz *casa**" not in body
+
+
+def test_conta_paga_legitima_mantem_o_negrito(monkeypatch):
+    """CONTROLE POSITIVO no caminho do dinheiro."""
+    replies: list[tuple[str, str]] = []
+    _mock_wa_boot(monkeypatch, replies, uid=4242)
+    monkeypatch.setattr(
+        "db.bills.get_bill",
+        lambda uid, bid: {"id": bid, "name": "Cartão Nubank", "status": "pending",
+                          "variable_amount": False, "amount": 132.5},
+    )
+    monkeypatch.setattr(
+        "db.bills.mark_bill_paid",
+        lambda uid, bid: {"name": "Cartão Nubank", "paid_amount": 132.5},
+    )
+
+    wa_runtime.process_message(_botao(wa_runtime.WA_BILL_PAID_PREFIX + "41"))
+
+    assert "Conta paga: *Cartão Nubank* —" in replies[0][1]
+
+
+# ─── wa_runtime:805 — pergunta de valor de conta variável ───────────────────
 
 
 def test_pergunta_de_valor_com_underscore_no_nome(monkeypatch):
-    """wa_runtime:804 — conta de valor variável chamada `conta_de_luz`."""
     replies: list[tuple[str, str]] = []
     _mock_wa_boot(monkeypatch, replies, uid=4242)
     monkeypatch.setattr(
@@ -141,33 +151,60 @@ def test_pergunta_de_valor_com_underscore_no_nome(monkeypatch):
 
     assert len(replies) == 1
     body = replies[0][1]
-    assert "conta_" + WJ + "de_" + WJ + "luz" in body
-    # o template tem 4 asteriscos ativos: *{nome}* e *132,50*
-    assert _delimitadores_ativos(body) == "****"
+    assert "Quanto veio a conta de conta_de_luz este mês?" in body
+    assert "*conta_de_luz*" not in body
 
 
-# ─── core/handlers/pending.py:89 — a mensagem CRUA do usuário ───────────────
+# ─── bills.py:63 — o irmão de wa_runtime.py:800, mesma variável ────────────
 
 
-def test_pendencia_legada_com_crase_na_mensagem_crua(monkeypatch):
-    """O pior caso: `text` é a mensagem que o usuário digitou, inteira, e o
-    template usa crase.
+def test_pergunta_sem_contexto_com_underscore_no_nome(monkeypatch):
+    """O `claim` perdeu a linha: o texto vem de core/handlers/bills.py e
+    interpola o nome DUAS vezes."""
+    monkeypatch.setattr(db, "get_pending_action", lambda uid: {})
 
-    Medido na `main`: com o texto ``paguei a `luz` ``, o
-    `format_for_platform` (que remove crase no WhatsApp) pareia errado e sobram
-    DUAS crases soltas na tela — `Tente: paguei a luz``.
-    """
-    pend = {"action_type": "confirm_media_launch",
-            "payload": {"text": "paguei a `luz`"}}
+    msg = h_bills.pergunta_de_valor_sem_contexto(9, "conta_de_luz")
+
+    assert msg.count("conta_de_luz") == 2
+    assert "*conta_de_luz*" not in msg
+
+
+def test_pergunta_sem_contexto_legitima_mantem_o_negrito(monkeypatch):
+    """CONTROLE POSITIVO."""
+    monkeypatch.setattr(db, "get_pending_action", lambda uid: {})
+
+    msg = h_bills.pergunta_de_valor_sem_contexto(9, "Cartão Nubank")
+
+    assert msg.count("*Cartão Nubank*") == 2
+
+
+# ─── core/handlers/pending.py:90 — a mensagem CRUA do usuário, em crase ────
+
+
+def _pendencia_legada(monkeypatch, texto: str) -> str:
+    pend = {"action_type": "confirm_media_launch", "payload": {"text": texto}}
     monkeypatch.setattr(db, "get_pending_action", lambda uid: pend)
     monkeypatch.setattr(db, "consume_pending_action", lambda uid, p: True)
     monkeypatch.setattr("core.services.quick_entry.handle_quick_entry",
                         lambda uid, text: None)
+    return h_pending.resolve_delete(9, confirmed=True)
 
-    bruto = h_pending.resolve_delete(9, confirmed=True)
-    saida = format_for_platform(bruto, "whatsapp")
 
-    assert _delimitadores_ativos(saida) == ""
+def test_pendencia_legada_com_crase_na_mensagem_crua(monkeypatch):
+    """Medido na `main`: com ``paguei a `luz` ``, o `format_for_platform`
+    (que remove crase no WhatsApp) pareia errado e sobram DUAS crases soltas
+    na tela — `Tente: paguei a luz``."""
+    bruto = _pendencia_legada(monkeypatch, "paguei a `luz`")
+
+    assert bruto.endswith("Tente: paguei a `luz`")
+    assert format_for_platform(bruto, "whatsapp").count("`") == 0
+
+
+def test_pendencia_legada_legitima_mantem_a_crase(monkeypatch):
+    """CONTROLE POSITIVO: texto sem marcação continua saindo em crase."""
+    bruto = _pendencia_legada(monkeypatch, "gastei 50 no mercado")
+
+    assert bruto.endswith("Tente: `gastei 50 no mercado`")
 
 
 # ─── plumbing do process_message (só monkeypatch de borda) ──────────────────

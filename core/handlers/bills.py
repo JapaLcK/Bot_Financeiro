@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from core.response_formatter import wrap_wa_markup
 from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso)
 
@@ -59,10 +60,11 @@ def pergunta_de_valor_sem_contexto(user_id: int, nome: str) -> str:
     except Exception:
         pergunta = None
     espera = f'esperando: "{pergunta}"' if pergunta else "esperando resposta."
+    rotulo = wrap_wa_markup(nome)
     return (
-        f"A conta de *{nome}* tem valor variável, mas antes tem outra pergunta "
+        f"A conta de {rotulo} tem valor variável, mas antes tem outra pergunta "
         f"minha {espera}\n"
-        f"Me responde ela primeiro; a *{nome}* fica pendente aqui e a gente "
+        f"Me responde ela primeiro; a {rotulo} fica pendente aqui e a gente "
         f"resolve o valor em seguida."
     )
 
