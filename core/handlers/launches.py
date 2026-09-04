@@ -554,6 +554,14 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
         total_receitas = sum(float(r["valor"]) for r in rows
                              if r.get("tipo") in _TIPO_ALIASES["receita"]
                              and not r.get("is_internal_movement"))
+        # E a soma parcial DIZ o que ficou fora — mesma forma de `_total_despesa`
+        # logo abaixo. Sem isto, o dia com pagamento de fatura (`db/cards.py`,
+        # despesa interna, mensal e todo usuário de cartão) mostra a linha e um
+        # "Gastos" menor, sem dizer por quê. As duas pernas: saldo inicial,
+        # ajuste e estorno de fatura entram como RECEITA interna.
+        internos = sum(float(r["valor"]) for r in rows
+                       if r.get("is_internal_movement")
+                       and r.get("tipo") in _TIPO_ALIASES["despesa"] + _TIPO_ALIASES["receita"])
 
         lines = []
         for r in rows:
@@ -570,6 +578,12 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             summary_parts.append(f"💸 Gastos: {fmt_brl(total_despesas)}")
         if total_receitas > 0:
             summary_parts.append(f"💰 Receitas: {fmt_brl(total_receitas)}")
+        if internos > 0:
+            # Sem o "Mais" do `_total_despesa`: aqui a linha pode ser a ÚNICA
+            # (dia só de pagamento de fatura), e são dois totais acima, não um.
+            summary_parts.append(
+                f"🔁 {fmt_brl(internos)} em movimentação interna (não entra nos totais)."
+            )
         summary = "\n".join(summary_parts)
 
         return f"{header}:\n" + "\n".join(lines) + (f"\n\n{summary}" if summary else "")
@@ -794,11 +808,15 @@ def _total_despesa(
     Nenhum número do dashboard muda: "você gastou" continua sendo o filtrado.
 
     ponytail: a diferença é atribuída a movimentação interna, e é a única causa
-    que sobra — as duas pernas leem `TIPO_DESPESA_SQL` (db/budgets.py:272 e
-    db/accounts.py:822 via `_TIPO_ALIASES`), então a linha legada com
-    tipo='saida' entra nas DUAS e não produz divergência. Se um dia as duas
-    deixarem de falar dos mesmos aliases, o rótulo volta a ficar impreciso — é o
-    que `test_o_sql_e_o_python_falam_dos_mesmos_aliases` guarda.
+    que sobra — as duas pernas somam por `TIPO_DESPESA_SQL`
+    (`sum_spent_in_category_period`, db/budgets.py; e o `tot_despesa` de
+    `list_launches_by_category`, db/accounts.py), então a linha legada com
+    tipo='saida' entra nas DUAS e não produz divergência. O `_TIPO_ALIASES` da
+    mesma função filtra as LINHAS, não soma: enquanto o somatório era literal,
+    um terceiro alias deixava a linha entrar sem ser somada e o `fora` sumia
+    calado. Quem guarda hoje: `test_o_sql_e_o_python_falam_dos_mesmos_aliases`
+    (as duas fontes entre si) e
+    `test_o_resumo_da_lista_de_categoria_acompanha_a_fonte_unica` (o somatório).
     """
     total = db.sum_spent_in_category_period(user_id, categoria, start, end)
     # limit=1: o resumo vem de window aggregates, calculados ANTES do LIMIT.

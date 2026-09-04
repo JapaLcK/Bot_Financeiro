@@ -20,9 +20,9 @@ Os dois primeiros vinham do SQL (`TIPO_DESPESA_SQL`/`TIPO_RECEITA_SQL`/
 
 Os dois meio-consertos que provam que a categoria estava aberta, não a folha:
 `_month_stats` já lia `('despesa','saida')` em `saiu` e só `'receita'` em
-`entrou` — sinal do "sobrou" INVERTIDO; e o rodapé do dia (launches.py:545) lia
-só a moderna dentro da MESMA função cujo rodapé sem data (launches.py:647) já
-lia as duas.
+`entrou` — sinal do "sobrou" INVERTIDO; e o rodapé do dia (`list_launches`,
+ramo COM data) lia só a moderna dentro da MESMA função cujo rodapé sem data
+(o ramo dos últimos N) já lia as duas.
 
 Incidência: a produção deu ZERO linhas legadas em 27/08/2026 (mesma medição do
 cabeçalho do irmão do dashboard). Isto fecha a classe; não muda número de
@@ -35,9 +35,10 @@ Controle NEGATIVO — um por conserto, todos injetados em caso que estava VERDE:
       → `test_resumo_do_periodo_nao_descarta_a_linha_legada` (despesa 150 × 50)
   • `get_top_expense_categories` de volta a `and tipo = 'despesa'`
       → `test_quanto_gastei_soma_a_linha_legada` (mercado 150 × 50)
-  • `launches.py:545-546` de volta a `== "despesa"` / `== "receita"`
+  • os dois somatórios do ramo COM data de `list_launches` de volta a
+    `== "despesa"` / `== "receita"`
       → `test_rodape_do_dia_soma_a_linha_legada` ("R$ 150,00" × "R$ 50,00")
-  • `balance.py:32` de volta a `== "despesa"`
+  • o filtro de `balance.py::check` de volta a `== "despesa"`
       → `test_hoje_do_saldo_mostra_a_linha_legada` (2 linhas × 1)
 Controle POSITIVO: `test_base_sem_linha_legada_nao_muda_nenhum_numero` — a MESMA
 base só com a forma moderna responde exatamente o mesmo nos cinco pontos. Sem
@@ -45,11 +46,12 @@ ele o grupo passaria num código que somasse a mesma linha DUAS vezes.
 
 Os cinco acima provam que os sites contam a linha legada de HOJE — não provam
 que eles LEEM a fonte única, e literal copiado passa igual. Quem mede isso é
-`test_ampliar_a_fonte_unica_alcanca_os_cinco_sites`: amplia a fonte com um
-terceiro alias e cobra que os cinco acompanhem (50 × 150).
+`test_ampliar_a_fonte_unica_alcanca_os_seis_sites`: amplia as DUAS pernas da
+fonte com um terceiro alias e cobra que os seis acompanhem (50 × 150). São seis
+e não cinco porque o rodapé sem data é a 6ª cópia, na mesma função da 4ª.
 
 E `test_rodape_do_dia_nao_conta_movimento_interno` guarda o guard de
-`is_internal_movement` do rodapé do dia, que igualou o irmão de :654/659 —
+`is_internal_movement` do rodapé do dia, que igualou o irmão dos últimos N —
 somar as duas formas de `tipo` tinha deixado a transferência LEGADA entrar no
 "Gastos" do dia, que o `== "despesa"` escondia por acidente.
 """
@@ -207,22 +209,28 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(uid_wa):
     lista = _diga(uid_wa, "lancamentos de hoje")
     assert "💸 Gastos: R$ 150,00" in lista, lista
     assert "💰 Receitas: R$ 300,00" in lista, lista
+    # POSITIVO do item 0: dia SEM movimento interno não ganha linha nenhuma a
+    # mais. Sem isto, a explicação podia aparecer sempre e ninguém veria.
+    assert "🔁" not in lista, lista
 
     saldo = _diga(uid_wa, "saldo")
     assert len(_linhas_do_hoje(saldo)) == 2, saldo
     assert "R$ 150,00" in saldo, saldo
 
 
-# ── a fonte única tem que ALCANÇAR os cinco sites ───────────────────────────
+# ── a fonte única tem que ALCANÇAR os seis sites ────────────────────────────
 #
-# Os 6 testes acima provam que os cinco sites contam a linha legada de HOJE.
+# Os 6 testes acima provam que os cinco sites da tabela contam a linha legada de
+# HOJE (o 6º, o rodapé sem data, já contava antes do PR).
 # Nenhum deles prova que os sites LEEM a fonte única — literal copiado passa
 # igual, e é assim que a deriva volta: ampliar a regra numa ponta e os literais
 # ficarem para trás, sem erro e sem log. `test_o_sql_e_o_python_falam_dos_mesmos
 # _aliases` (irmão do dashboard) compara as DUAS fontes entre si e também não
 # alcança cópia nenhuma.
 
-_ALIAS_NOVO = "egresso"  # um terceiro alias que não existe em lugar nenhum
+_ALIAS_NOVO = "egresso"    # um terceiro alias de DESPESA que não existe
+_ALIAS_NOVO_REC = "ingresso"  # e o de RECEITA: sem ele, a perna de receita de
+                              # cada site podia voltar ao literal em VERDE
 
 
 @pytest.fixture
@@ -232,7 +240,7 @@ def fonte_ampliada(monkeypatch):
     `setitem` e não `setattr`: `core/handlers/*` fazem `from db.accounts import
     _TIPO_ALIASES` na carga, então quem tem que mudar é o CONTEÚDO do dict, que
     é o mesmo objeto nos três módulos. O SQL é string interpolada em f-string,
-    e cada módulo guarda a sua cópia do nome — daí os três `setattr`.
+    e cada módulo guarda a sua cópia do nome — daí os cinco `setattr`.
     """
     import core.services.piggy_agents as PA
     import db.accounts as ACC
@@ -240,52 +248,88 @@ def fonte_ampliada(monkeypatch):
     from db.accounts import _TIPO_ALIASES
 
     despesa_sql = f"tipo IN ('despesa', 'saida', '{_ALIAS_NOVO}')"
+    receita_sql = f"tipo IN ('receita', 'entrada', '{_ALIAS_NOVO_REC}')"
     canon_sql = (
         f"CASE WHEN {despesa_sql} THEN 'despesa' "
-        f"WHEN {CONN.TIPO_RECEITA_SQL} THEN 'receita' ELSE tipo END"
+        f"WHEN {receita_sql} THEN 'receita' ELSE tipo END"
     )
     monkeypatch.setitem(_TIPO_ALIASES, "despesa", ("despesa", "saida", _ALIAS_NOVO))
+    monkeypatch.setitem(_TIPO_ALIASES, "receita", ("receita", "entrada", _ALIAS_NOVO_REC))
     monkeypatch.setattr(ACC, "TIPO_DESPESA_SQL", despesa_sql)
+    monkeypatch.setattr(ACC, "TIPO_RECEITA_SQL", receita_sql)
     monkeypatch.setattr(PA, "TIPO_DESPESA_SQL", despesa_sql)
+    monkeypatch.setattr(PA, "TIPO_RECEITA_SQL", receita_sql)
     monkeypatch.setattr(CONN, "TIPO_CANON_SQL", canon_sql)
 
 
-def test_ampliar_a_fonte_unica_alcanca_os_cinco_sites(uid_wa, fonte_ampliada):
-    """Controle da DERIVA: com um terceiro alias na fonte única, os cinco sites
-    têm que acompanhar. Qualquer um deles de volta ao literal
-    (`("despesa","saida")` em Python, `tipo = 'despesa'` no SQL) devolve 50 no
-    lugar de 150 e deixa este teste VERMELHO."""
+def test_ampliar_a_fonte_unica_alcanca_os_seis_sites(uid_wa, fonte_ampliada):
+    """Controle da DERIVA: com um terceiro alias em CADA perna da fonte única,
+    os seis sites têm que acompanhar. Qualquer um deles de volta ao literal
+    (`("despesa","saida")` / `("receita","entrada")` em Python, `tipo =
+    'despesa'` no SQL) devolve 50 no lugar de 150 (ou 0 no lugar de 300) e
+    deixa este teste VERMELHO.
+
+    A perna de RECEITA está aqui porque sem ela não estava: reverter os dois
+    `_TIPO_ALIASES["receita"]` de `list_launches` ao literal deixava o arquivo
+    inteiro VERDE (medido, 8 passed)."""
+    db.add_launch_and_update_balance(
+        uid_wa, "despesa", 50, "mercado", None,
+        categoria="mercado", criado_em=_hoje_as(10),
+    )
+    _grava_tipo_legado(uid_wa, _ALIAS_NOVO, 100, "mercado")
+    _grava_tipo_legado(uid_wa, _ALIAS_NOVO_REC, 300, "rendimentos")
+
+    assert _resumo(uid_wa)["despesa"] == 150.0, _resumo(uid_wa)      # db_support
+    assert _resumo(uid_wa)["receita"] == 300.0, _resumo(uid_wa)
+    assert _stats_do_mes(uid_wa)["saiu"] == 150.0, _stats_do_mes(uid_wa)  # piggy_agents
+    assert _stats_do_mes(uid_wa)["entrou"] == 300.0, _stats_do_mes(uid_wa)
+    assert _top_categorias(uid_wa) == {"mercado": 150.0}             # db/accounts
+
+    lista = _diga(uid_wa, "lancamentos de hoje")                     # launches.py
+    assert "💸 Gastos: R$ 150,00" in lista, lista
+    assert "💰 Receitas: R$ 300,00" in lista, lista
+    # o rodapé SEM data é o irmão na mesma função, e é a 6ª cópia em Python:
+    # sem ele aqui, revertê-lo ao literal não deixaria nada vermelho.
+    ultimos = _diga(uid_wa, "meus lancamentos")
+    assert "💸 Gastos: R$ 150,00" in ultimos, ultimos
+    assert "💰 Receitas: R$ 300,00" in ultimos, ultimos
+
+    saldo = _diga(uid_wa, "saldo")                                   # balance.py
+    assert len(_linhas_do_hoje(saldo)) == 2, saldo
+
+
+def test_o_resumo_da_lista_de_categoria_acompanha_a_fonte_unica(uid_wa, fonte_ampliada):
+    """O `tot_despesa` de `list_launches_by_category` (db/accounts.py) era
+    literal enquanto o FILTRO de linhas da MESMA query já lia `_TIPO_ALIASES`:
+    com um terceiro alias a linha entrava na lista e não era somada.
+
+    Não é cosmético — é o número que `_total_despesa`
+    (core/handlers/launches.py) subtrai do total do dashboard para escrever
+    "🔁 Mais R$ X em movimentação interna". Subcontado, a explicação some
+    calada. Negativo: literal de volta → 50,00 no lugar de 150,00."""
+    hoje = today_tz()
     db.add_launch_and_update_balance(
         uid_wa, "despesa", 50, "mercado", None,
         categoria="mercado", criado_em=_hoje_as(10),
     )
     _grava_tipo_legado(uid_wa, _ALIAS_NOVO, 100, "mercado")
 
-    assert _resumo(uid_wa)["despesa"] == 150.0, _resumo(uid_wa)      # db_support
-    assert _stats_do_mes(uid_wa)["saiu"] == 150.0, _stats_do_mes(uid_wa)  # piggy_agents
-    assert _top_categorias(uid_wa) == {"mercado": 150.0}             # db/accounts
-
-    lista = _diga(uid_wa, "lancamentos de hoje")                     # launches.py
-    assert "💸 Gastos: R$ 150,00" in lista, lista
-    # o rodapé SEM data é o irmão na mesma função, e é a 4ª cópia em Python:
-    # sem ele aqui, revertê-lo ao literal não deixaria nada vermelho.
-    ultimos = _diga(uid_wa, "meus lancamentos")
-    assert "💸 Gastos: R$ 150,00" in ultimos, ultimos
-
-    saldo = _diga(uid_wa, "saldo")                                   # balance.py
-    assert len(_linhas_do_hoje(saldo)) == 2, saldo
+    _, resumo = db.list_launches_by_category(
+        uid_wa, "mercado", hoje, hoje, tipo="despesa", limit=1,
+    )
+    assert resumo["despesa"] == 150.0, resumo
 
 
 # ── o guard de movimento interno no rodapé do DIA ───────────────────────────
 
 def test_rodape_do_dia_nao_conta_movimento_interno(uid_wa):
     """O rodapé do dia não descartava `is_internal_movement`, ao contrário do
-    irmão de :654/659 na MESMA função. Antes do conserto do tipo legado o
+    irmão dos últimos N na MESMA função. Antes do conserto do tipo legado o
     `== "despesa"` escondia isso por acidente; somar as duas formas passou a
     deixar a transferência LEGADA entrar no "Gastos" do dia.
 
-    Controle NEGATIVO: sem o `and not r.get("is_internal_movement")` de
-    launches.py:551-554 a resposta vira "R$ 138,00"."""
+    Controle NEGATIVO: sem o `and not r.get("is_internal_movement")` dos dois
+    somatórios do ramo COM data a resposta vira "R$ 138,00"."""
     db.add_launch_and_update_balance(
         uid_wa, "despesa", 50, "mercado", None,
         categoria="mercado", criado_em=_hoje_as(10),
@@ -297,3 +341,32 @@ def test_rodape_do_dia_nao_conta_movimento_interno(uid_wa):
     assert "R$ 138,00" not in lista, lista
     # a linha continua APARECENDO na lista; o que muda é o total do rodapé
     assert "legado-interno" in lista, lista
+
+
+def test_rodape_do_dia_explica_o_pagamento_de_fatura(uid_wa):
+    """A MESMA regra na forma que existe em produção: linha MODERNA
+    (`tipo='despesa'`) com `is_internal_movement`, categoria pagamento_fatura —
+    quem grava é `db/cards.py::mark_bill_paid`, uma vez por mês por cartão. O
+    irmão acima prova o guard com linha LEGADA, e a produção tem ZERO delas:
+    sem este teste, o único número que o PR muda hoje não tinha caso.
+
+    E o rodapé DIZ o que ficou de fora (a forma de `_total_despesa`). Sem a
+    linha "🔁", o dia com fatura paga mostra o lançamento de R$ 88,00 na lista e
+    "Gastos: R$ 50,00" embaixo, sem dizer por quê.
+
+    Controle NEGATIVO, dois: sem o guard vira "R$ 138,00"; sem o `internos` o
+    "🔁" some."""
+    db.add_launch_and_update_balance(
+        uid_wa, "despesa", 50, "mercado", None,
+        categoria="mercado", criado_em=_hoje_as(10),
+    )
+    db.add_launch_and_update_balance(
+        uid_wa, "despesa", 88, "fatura:nubank", "Pagamento de fatura (Nubank)",
+        categoria="pagamento_fatura", is_internal_movement=True,
+        criado_em=_hoje_as(9),
+    )
+
+    lista = _diga(uid_wa, "lancamentos de hoje")
+    assert "💸 Gastos: R$ 50,00" in lista, lista
+    assert "R$ 138,00" not in lista, lista
+    assert "🔁 R$ 88,00 em movimentação interna" in lista, lista
