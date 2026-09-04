@@ -46,13 +46,17 @@ def _hoje_as(hora: int):
 
 
 def _grava_tipo_legado(user_id, tipo, valor, categoria, *,
-                       nota=None, criado_em=None, interno=False):
+                       nota=None, alvo=None, criado_em=None, interno=False):
     """`add_launch_and_update_balance` não grava a forma legada (nem deve): a
     linha antiga entra por SQL, que é como ela existe numa base de verdade.
 
-    `nota`/`criado_em`/`interno` são os eixos que os OUTROS leitores da forma
-    legada precisam variar (descrição para casar merchant, mês anterior, saída
-    interna) — ver `tests/test_tipo_legado_sem_numero.py`.
+    `nota`/`alvo`/`criado_em`/`interno` são os eixos que os OUTROS leitores da
+    forma legada precisam variar (descrição para casar merchant, mês anterior,
+    saída interna) — ver `tests/test_tipo_legado_sem_numero.py`.
+
+    `alvo` importa no dedupe do Open Finance: `alvo` NULO cai em
+    `_is_generic_merchant` (db/open_finance.py:1322) e casa com QUALQUER
+    estabelecimento — ver `tests/test_tipo_legado_no_dedupe_do_of.py`.
 
     `interno=True` marca `is_internal_movement` — a transferência antiga, que é
     linha legada E movimento interno ao mesmo tempo — e, sem `nota` explícita,
@@ -60,10 +64,10 @@ def _grava_tipo_legado(user_id, tipo, valor, categoria, *,
     `tests/test_tipo_legado_na_cauda.py` a reconhece na lista do dia)."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "insert into launches (user_id, tipo, valor, categoria, nota, "
-            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,%s)",
+            "insert into launches (user_id, tipo, valor, categoria, nota, alvo, "
+            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,%s,%s)",
             (user_id, tipo, valor, categoria,
-             nota or ("legado-interno" if interno else "legado"),
+             nota or ("legado-interno" if interno else "legado"), alvo,
              criado_em or _hoje_as(9), interno),
         )
         conn.commit()

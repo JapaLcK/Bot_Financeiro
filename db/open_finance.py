@@ -16,7 +16,7 @@ from .cards import (
     get_or_create_open_finance_card,
     remove_single_credit_transaction,
 )
-from .connection import get_conn
+from .connection import TIPO_CANON_SQL, get_conn
 from .users import ensure_user, ensure_user_tx
 
 
@@ -1358,13 +1358,26 @@ def pick_reconciliation_match(valor, tx_date, description, candidates) -> dict:
 
 
 def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> list[dict]:
-    """Lançamentos manuais/OFX (não-OF) elegíveis a casar, ainda não vinculados a nenhuma OF tx."""
+    """Lançamentos manuais/OFX (não-OF) elegíveis a casar, ainda não vinculados a nenhuma OF tx.
+
+    `TIPO_CANON_SQL` e não `tipo = %s` cru, pela mesma razão de
+    `list_launches_by_tipo` (db/accounts.py:172): o tipo aqui é PARÂMETRO — vem
+    de `classify_open_finance_launch`, que só produz 'despesa'/'receita' (:1277)
+    — então colapsar a forma legada no lado da COLUNA faz a linha antiga
+    ('saida'/'entrada') ser candidata sem inventar regra por chamador, e deixa
+    qualquer outro valor casando exato como antes.
+
+    Sem isto o gêmeo legado do lançamento não era candidato, o dedupe falhava e
+    o gasto contava DUAS vezes. Medido (mesma transação OF de -50, mesmo dia,
+    mesmo estabelecimento): manual 'saida' → `inserted=1, auto_merged=0` e
+    `monthly_expense=100.0`; o mesmo manual na forma moderna 'despesa' →
+    `inserted=0, auto_merged=1` e `monthly_expense=50.0`."""
     cur.execute(
-        """
+        f"""
         select id, valor, coalesce(posted_at, criado_em::date) as ref_date, alvo, nota
         from launches
         where user_id = %s
-          and tipo = %s
+          and {TIPO_CANON_SQL} = %s
           and coalesce(source, 'manual') <> 'open_finance'
           and is_internal_movement = false
           and abs(valor - %s) <= %s
