@@ -372,35 +372,94 @@ _401_RENOVAVEL = {
     # Chave de API do lead engine e webhook server-to-server: sem sessão nenhuma.
     ("frontend/routes/prospects.py", "Chave inválida."): False,
     ("frontend/routes/open_finance.py", "Não autorizado."): False,
+    # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
+    # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
+    # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes
+    # deles, no `_isRefreshEndpoint`: renovar o refresh com o refresh é recursão.
+    ("frontend/finance_bot_websocket_custom.py", "missing_refresh_token"): False,
+    ("frontend/finance_bot_websocket_custom.py", "invalid_refresh_token"): False,
+    # Magic link expirado no `GET /d/{code}`: página HTML de NAVEGAÇÃO, não
+    # resposta de `fetch`. O `window.fetch` do auth-refresh.js não vê navegação.
+    ("frontend/finance_bot_websocket_custom.py", "<HTMLResponse>"): False,
 }
 
 
-def _varre_401(caminho, fonte):
-    """Devolve (chave, tem_header) de cada `raise HTTPException(status_code=401)`.
+def _e_401(no):
+    """`401`, `status.HTTP_401_UNAUTHORIZED` ou `HTTP_401_UNAUTHORIZED` importado.
 
-    `chave` é `(arquivo, detail)`; `detail` dinâmico vira o marcador `<str(exc)>`.
+    A forma com a constante do FastAPI é a IDIOMÁTICA — a que um contribuidor
+    novo escreve —, e o gate era cego para ela.
+    """
+    import ast
+
+    if isinstance(no, ast.Constant):
+        return no.value == 401
+    return getattr(no, "attr", None) == "HTTP_401_UNAUTHORIZED" or \
+        getattr(no, "id", None) == "HTTP_401_UNAUTHORIZED"
+
+
+def _forma_do_header(no):
+    """`"constante"`, `"literal"` ou `None` — as três formas do `headers=`.
+
+    O literal é separado do ausente de propósito: o código está CORRETO no
+    comportamento e errado na §0.7 (duplica o valor da constante), e a mensagem
+    que o autor recebe tem que ser essa, não "sem header nunca renova".
+    """
+    import ast
+
+    if getattr(no, "id", None) == "WWW_AUTHENTICATE_401":
+        return "constante"
+    if isinstance(no, ast.Dict) and any(
+        isinstance(k, ast.Constant) and str(k.value).lower() == "www-authenticate"
+        for k in no.keys
+    ):
+        return "literal"
+    return None
+
+
+def _varre_401(caminho, fonte):
+    """Devolve (chave, forma_do_header) de cada resposta 401 do arquivo.
+
+    Quatro formas, todas medidas (o gate anterior só via a primeira):
+
+        raise HTTPException(status_code=401, ...)
+        raise HTTPException(401, ...)                       # posicional
+        return JSONResponse(status_code=401, ...)           # e HTMLResponse etc
+        status_code=status.HTTP_401_UNAUTHORIZED            # constante do FastAPI
+
+    `chave` é `(arquivo, detail)`. O `detail` sai do kwarg (HTTPException) ou do
+    `content={"detail": ...}` (JSONResponse); quando não é string constante vira
+    `<str(exc)>` no HTTPException e `<NomeDaClasse>` na resposta montada à mão.
     """
     import ast
 
     achados = []
-    for no in ast.walk(ast.parse(fonte)):
-        if not (isinstance(no, ast.Raise) and isinstance(no.exc, ast.Call)):
+    for chamada in ast.walk(ast.parse(fonte)):
+        if not isinstance(chamada, ast.Call):
             continue
-        chamada = no.exc
-        nome = getattr(chamada.func, "id", None) or getattr(chamada.func, "attr", None)
-        if nome != "HTTPException":
+        nome = getattr(chamada.func, "id", None) or getattr(chamada.func, "attr", None) or ""
+        if nome != "HTTPException" and not nome.endswith("Response"):
             continue
         kw = {k.arg: k.value for k in chamada.keywords}
+        # posicional: `HTTPException(401, ...)` e `JSONResponse(content, 401)`
+        pos = 0 if nome == "HTTPException" else 1
         status = kw.get("status_code")
-        if not (isinstance(status, ast.Constant) and status.value == 401):
+        if status is None and len(chamada.args) > pos:
+            status = chamada.args[pos]
+        if not _e_401(status):
             continue
         detail = kw.get("detail")
+        if detail is None and isinstance(kw.get("content"), ast.Dict):
+            detail = next(
+                (v for k, v in zip(kw["content"].keys, kw["content"].values)
+                 if isinstance(k, ast.Constant) and k.value == "detail"),
+                None,
+            )
         chave = (
             detail.value if isinstance(detail, ast.Constant) and isinstance(detail.value, str)
-            else "<str(exc)>"
+            else "<str(exc)>" if nome == "HTTPException" else f"<{nome}>"
         )
-        header = kw.get("headers")
-        achados.append(((caminho, chave), getattr(header, "id", None) == "WWW_AUTHENTICATE_401"))
+        achados.append(((caminho, chave), _forma_do_header(kw.get("headers"))))
     return achados
 
 
@@ -412,10 +471,18 @@ def test_401_de_autenticacao_declara_familia():
     de autenticação que alguém esqueça de marcar deixa de ser renovado e joga o
     usuário para o login, regressão PIOR que o bug original (uma request extra).
 
-    Duas direções, as duas vermelhas:
+    Direções, todas vermelhas:
       - 401 novo sem entrada em `_401_RENOVAVEL` → o autor é obrigado a decidir a
         família, em vez de herdar um default errado em silêncio;
-      - família declarada que não bate com o `headers=` do código.
+      - família declarada que não bate com o `headers=` do código, nas duas
+        direções (renovável sem header × de aplicação com header);
+      - `WWW-Authenticate` escrito como dict literal em vez da constante (§0.7).
+
+    A varredura cobre as QUATRO formas de responder 401 aqui — `status_code=401`,
+    `HTTPException(401, ...)` posicional, `JSONResponse/HTMLResponse(status_code=401)`
+    e `status.HTTP_401_UNAUTHORIZED`. Cobria só a primeira, e as outras três já
+    existiam no monólito (os dois do `/auth/refresh` e o do `/d/{code}`): a
+    promessa do docstring era falsa em 3 das 4.
 
     Fora do alcance por caminho: `core/admin_dashboard.py`, que é outra árvore de
     auth (sessão de admin) e cujas páginas não carregam o `auth-refresh.js`.
@@ -441,19 +508,35 @@ def test_401_de_autenticacao_declara_familia():
         f"login. Classifique em `_401_RENOVAVEL`: {sem_classificacao}"
     )
 
-    divergentes = sorted(
-        f"{c} código={tem} classificação={_401_RENOVAVEL[c]}"
-        for c, tem in achados
-        if _401_RENOVAVEL[c] != tem
+    literais = sorted({c for c, forma in achados if forma == "literal"})
+    assert not literais, (
+        "o `WWW-Authenticate` foi escrito como dict literal. O comportamento está "
+        "certo e a §0.7 não: use `headers=WWW_AUTHENTICATE_401` (importe de "
+        f"`frontend/routes/shared.py`), que é a fonte única do valor: {literais}"
     )
-    assert not divergentes, (
-        "o `headers=` do código não bate com a família declarada — renovável sem "
-        f"header nunca renova; de aplicação com header renova à toa: {divergentes}"
+
+    faltando = sorted({c for c, forma in achados if _401_RENOVAVEL[c] and not forma})
+    assert not faltando, (
+        "401 classificado como RENOVÁVEL e sem `headers=`. Acrescente "
+        "`headers=WWW_AUTHENTICATE_401` no `raise`/`Response` — sem ele o "
+        "interceptor não renova e o usuário cai no login. Se este 401 é de "
+        f"aplicação (o token está ótimo), troque a classificação para False: {faltando}"
+    )
+
+    sobrando = sorted({c for c, forma in achados if forma and not _401_RENOVAVEL[c]})
+    assert not sobrando, (
+        "401 classificado como DE APLICAÇÃO e com `WWW-Authenticate`. Ele vai "
+        "renovar o token à toa e gastar dois slots do rate limit. Tire o "
+        f"`headers=`, ou mude a classificação para True se ele é de autenticação: {sobrando}"
     )
 
     # Controle positivo: a família A não pode ter esvaziado. Se um refactor tirar
-    # o `headers=` de todos os sítios, as duas asserções acima continuariam verdes
+    # o `headers=` de todos os sítios, as três asserções acima continuariam verdes
     # caso a classificação fosse trocada junto — este número não.
-    assert sum(1 for _, tem in achados if tem) == 8, sorted(
-        c for c, tem in achados if tem
+    com_header = sorted(c for c, forma in achados if forma)
+    assert len(com_header) == 8, (
+        f"são {len(com_header)} sítios com `WWW-Authenticate`, e este controle "
+        "espera 8. Se você ADICIONOU um 401 de autenticação legítimo (já "
+        "classificado como True acima), atualize o 8 para o número novo. Se você "
+        f"não mexeu em nenhum 401, alguém apagou um `headers=`: {com_header}"
     )

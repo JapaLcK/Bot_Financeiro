@@ -542,20 +542,29 @@ test("refresh interno que devolve 400 NAO limpa — a sessao esta' de pe", async
   assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao viva");
 });
 
-test("senha errada com refresh ausente: o estado fica E a chamada seguinte funciona", async () => {
+test("401 de autenticacao com refresh ausente: o estado fica E a chamada seguinte funciona", async () => {
   // O cenario inteiro, ponta a ponta: nao basta nao apagar, a sessao tem que
   // seguir utilizavel depois. Sem a segunda metade o caso passaria num
   // interceptor que engoliu a sessao de outro jeito.
+  //
+  // A marca de familia no `/auth/mfa/setup` NAO e' enfeite: sem ela o #176
+  // devolve o 401 antes de renovar, o `"/auth/refresh": 400` do mapa vira letra
+  // morta e o caso deixa de medir a metade que importa (o 400 nao apagando o
+  // aparelho). Medido: com a mutacao da #173 o caso ficava VERDE sem a marca.
+  // Aqui o 401 e' access token vencido ao abrir o setup do MFA, nao senha
+  // errada — essa e' 401 de aplicacao e vive no `auth_refresh_gatilho.test.mjs`.
   const apagados = [];
   const falso = fetchPorRota({
     "/auth/mfa/setup": 401, "/auth/refresh": 400, "/data/42": 200,
-  });
+  }, ["/auth/mfa/setup"]);
   const { ctx, local, sessao } = comStorageCheio("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 
   const erro = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+  assert.ok(falso.chamadas.some((c) => c.caminho === "/auth/refresh"),
+            "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
   assert.equal(erro.status, 401);
 
   for (const k of Object.keys(DERIVADO_DE_CONTA)) {
