@@ -114,8 +114,23 @@ def resolve_deterministic(user_id: int, amount) -> dict:
                                     "label": "Carteira", "balance": Decimal("0")})}
 
 
-def resolve_destination(user_id: int) -> dict:
+def resolve_destination(user_id: int, *, origem_de: tuple[str, str] | None = None) -> dict:
     """Para onde volta o dinheiro de um resgate/saque. Sempre `{"source": {...}}`.
+
+    `origem_de` é `(tipo_do_lancamento_de_deposito, alvo)` — ex.:
+    `("deposito_caixinha", "viagem")`. Quando vem, e o alvo tem **uma única** origem
+    de depósito, o dinheiro volta para ELA. É o conserto da #282: sem isso o destino
+    era decidido do zero e qualquer banco conectado vencia a Carteira, então quem
+    depositou da Carteira nunca recebia de volta — medido em produção, R$ 300 saíram
+    e R$ 0,00 voltaram.
+
+    Em TODO o resto cai na regra de sempre (banco primeiro, senão Carteira): sem
+    `origem_de`, sem depósito nenhum, origens misturadas, ou banco de origem
+    desconectado desde então. A degradação é sempre para o comportamento de hoje.
+
+    **Origens misturadas mantêm o banco de propósito** (decisão do dono): devolver
+    proporcional ou LIFO é escolha de produto ainda não tomada, e adivinhar aqui
+    seria pior que o comportamento conhecido.
 
     Não pergunta, de propósito: no destino a escolha não muda o razão. Com qualquer
     banco conectado o `delta_conta` é 0 igual (o dinheiro volta pro banco e o sync
@@ -123,6 +138,14 @@ def resolve_destination(user_id: int) -> dict:
     round-trip. Sem banco conectado, volta para a Carteira, como sempre foi.
     """
     fontes = list_sources(user_id)
+    if origem_de:
+        origens = db.deposit_origins(user_id, *origem_de)
+        if len(origens) == 1:
+            o = origens[0]
+            igual = next((f for f in fontes if f["kind"] == o["kind"]
+                          and f["of_account_id"] == o["of_account_id"]), None)
+            if igual:
+                return {"source": igual}
     bancos = [f for f in fontes if f["kind"] == BANK]
     return {"source": bancos[0] if bancos else fontes[0]}
 

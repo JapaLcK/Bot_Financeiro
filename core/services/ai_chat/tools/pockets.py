@@ -275,7 +275,8 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Faltou o valor (ou peça pra 'sacar tudo')."
     from core.services import funding
 
-    destino = funding.resolve_destination(user_id)["source"]
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", pocket_name))["source"]
     try:
         _lid, _acc, _pkt, canon, taxes = db.pocket_withdraw_to_account(
             user_id, pocket_name, None if withdraw_all else amount, withdraw_all=withdraw_all,

@@ -203,10 +203,6 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
 def withdraw(user_id: int, text: str, entities: dict) -> str:
     from core.services import funding
 
-    destino = funding.resolve_destination(user_id)["source"]
-    fs = funding.to_db_arg(destino)
-    nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
-
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
     # A entity ANTES do texto: o resolver de clarification grava a quantidade
@@ -230,6 +226,14 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return h_pending.pergunta_guardando_contexto(
             user_id, "pockets.withdraw", entities,
             "Qual caixinha? Tente: *retirei 100 da caixinha viagem*", text, falta="pocket_name")
+
+    # Depois do nome resolvido, de propósito: o destino agora depende da caixinha
+    # (resolve_destination consulta de onde os depósitos DELA saíram, #282), e acima
+    # daqui o nome ainda pode virar pergunta.
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", pocket_name))["source"]
+    fs = funding.to_db_arg(destino)
+    nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
 
     if want_all:
         try:

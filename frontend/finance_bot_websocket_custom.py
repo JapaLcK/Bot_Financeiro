@@ -7114,16 +7114,19 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _authorize_dashboard_access(request, user_id)
     if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
-    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
-    # Carteira (ver core/services/funding.py::resolve_destination).
+    # Destino do resgate: volta para onde o aporte tirou (#282). Sem aporte com
+    # origem única, cai na regra de sempre — ver funding.resolve_destination.
     from core.services import funding as _funding
 
-    _destino = (await asyncio.to_thread(_funding.resolve_destination, user_id))["source"]
+    _nome_inv = payload.name.strip()
+    _destino = (await asyncio.to_thread(
+        _funding.resolve_destination, user_id,
+        origem_de=("aporte_investimento", _nome_inv)))["source"]
     try:
         launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
-            payload.name.strip(),
+            _nome_inv,
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
             withdraw_all=bool(payload.withdraw_all),

@@ -490,10 +490,11 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     from core.services import funding
 
-    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
-    # Carteira — creditar a Carteira inflaria o consolidado com o mesmo dinheiro
-    # que o sync devolve. Não pergunta (ver funding.resolve_destination).
-    destino = funding.resolve_destination(user_id)["source"]
+    # Destino do resgate: volta para onde o aporte DESTE investimento tirou (#282).
+    # Quando a origem foi o banco, creditar a Carteira inflaria o consolidado com o
+    # mesmo dinheiro que o sync devolve. Não pergunta (ver funding.resolve_destination).
+    destino = funding.resolve_destination(
+        user_id, origem_de=("aporte_investimento", investment_name))["source"]
 
     try:
         launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(

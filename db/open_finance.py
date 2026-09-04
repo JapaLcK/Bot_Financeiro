@@ -2076,6 +2076,45 @@ def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
                     for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
 
 
+def deposit_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
+    """De onde saiu o dinheiro que entrou num alvo — origens DISTINTAS dos depósitos.
+
+    O saque tem de devolver para onde o depósito tirou. O depósito já grava isso em
+    `efeitos.funding_source`; sem esta leitura o `funding.resolve_destination` decidia
+    do zero e qualquer banco conectado vencia a Carteira — medido em produção na conta
+    do dono (29/08): R$ 300 saíram da Carteira em depósitos e 4 saques devolveram
+    R$ 0,00 para ela. O dinheiro evaporava da visão do usuário.
+
+    `funding_source` ausente ou nulo É a Carteira — mesmo contrato que
+    `pocket_deposit_from_account` e `investment_deposit_from_account` já gravam
+    (`delta_conta` negativo com `funding_source` None).
+
+    A chave é o NOME (`alvo`), não o id: `db/` não tem rename de caixinha nem de
+    investimento. Se um dia tiver, o pior caso é esta lista vir vazia e o destino
+    cair na regra de sempre.
+
+    Devolve [{"kind": "carteira"|"bank", "of_account_id": int|None}, ...].
+    """
+    ensure_user(user_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select distinct
+                       coalesce(efeitos->'funding_source'->>'kind', 'carteira') as kind,
+                       (efeitos->'funding_source'->>'of_account_id')::bigint as of_account_id
+                  from launches
+                 where user_id = %s
+                   and tipo = %s
+                   and lower(alvo) = lower(%s)
+                """,
+                (user_id, tipo, alvo),
+            )
+            return [{"kind": r["kind"],
+                     "of_account_id": int(r["of_account_id"]) if r["of_account_id"] is not None else None}
+                    for r in (cur.fetchall() or [])]
+
+
 def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
     """Autoriza uma saída contra uma conta do banco — DENTRO da transação que a grava.
 

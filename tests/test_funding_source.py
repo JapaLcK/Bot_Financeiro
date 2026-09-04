@@ -539,3 +539,240 @@ def test_guard_autoriza_a_propria_conta(user_id):
         db.assert_bank_covers(cur, user_id, minha, 400)          # cabe: não levanta
         with pytest.raises(ValueError, match="INSUFFICIENT_ACCOUNT"):
             db.assert_bank_covers(cur, user_id, minha, 600)      # não cabe
+
+
+# ─── #282: o saque volta para a origem do depósito ───────────────────────────
+#
+# O defeito, medido em produção na conta do dono (29/08 23:31–23:47): depósitos
+# com `funding_source=None` tiraram 200 + 100 = R$ 300 da Carteira, e os 4 saques
+# seguintes gravaram `delta_conta = 0` — R$ 300 saíram, R$ 0,00 voltaram. O
+# `resolve_destination` decidia o destino do zero e qualquer banco conectado
+# vencia a Carteira, sem consultar o `funding_source` que o próprio depósito
+# gravou.
+#
+# A métrica é o patrimônio NO PIG (Carteira + caixinhas + investimentos), SEM o
+# espelho do banco: ela pega a evaporação E pegaria um conserto que criasse
+# dinheiro creditando a Carteira por um depósito que saiu do banco.
+#
+# Os casos são todos no MESMO dia de propósito: caixinha rende CDI e o saque
+# cobra IOF/IR regressivo — em dias diferentes a comparação ganharia ruído de
+# rendimento em vez de medir a assimetria.
+
+def _patrimonio(user_id: int) -> float:
+    return (float(db.get_balance(user_id))
+            + sum(float(p["balance"]) for p in db.list_pockets(user_id))
+            + sum(float(i["balance"]) for i in db.list_investments(user_id)))
+
+
+def _efeitos(user_id: int, tipo: str) -> dict:
+    """`efeitos` do lançamento mais recente do tipo. As superfícies silenciosas
+    (chat da IA, dashboard) não devolvem o launch_id."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select efeitos from launches where user_id=%s and tipo=%s "
+                    "order by id desc limit 1", (user_id, tipo))
+        return cur.fetchone()["efeitos"]
+
+
+def _assert_volta_para_a_origem(user_id: int, tipo_dep: str, tipo_saq: str, net: float):
+    """A origem foi CONSULTADA, não adivinhada.
+
+    Sem comparar os dois `funding_source`, um conserto que acertasse o total por
+    acaso (ex.: creditar sempre a Carteira) passaria. `delta_conta` prende o outro
+    lado: +net quando o dinheiro voltou pra Carteira, 0 quando voltou pro banco.
+    """
+    dep = _efeitos(user_id, tipo_dep)
+    saq = _efeitos(user_id, tipo_saq)
+    assert saq["funding_source"] == dep["funding_source"], (
+        f"saque foi para {saq['funding_source']}, depósito saiu de {dep['funding_source']}")
+    esperado = 0 if dep["funding_source"] else net
+    assert float(saq["delta_conta"]) == pytest.approx(esperado)
+
+
+def _seed_carteira_e_banco(user_id: int, carteira: float = 1000.0):
+    """O cenário do relato: banco conectado E Carteira com dinheiro.
+
+    É aqui que o defeito vivia — a Carteira cobre, então o depósito sai dela, e o
+    saque devolvia pro banco assim mesmo.
+    """
+    _connect_fake_bank(user_id)
+    db.add_launch_and_update_balance(user_id, "receita", carteira, None, "seed")
+
+
+# ── caixinha, nas três superfícies ───────────────────────────────────────────
+
+def test_282_caixinha_whatsapp_volta_para_a_carteira(user_id):
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+
+    source = funding.resolve_deterministic(user_id, 100)["source"]
+    assert source["kind"] == funding.CARTEIRA        # a Carteira cobre, ela sai na frente
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "dep",
+                                   funding_source=funding.to_db_arg(source))
+
+    # saque parcial (core/handlers/pockets.py, caminho do valor)
+    h_pockets.withdraw(user_id, "retirei 40 da caixinha viagem",
+                       {"pocket_name": "viagem", "amount": 40})
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 40.0)
+
+    # e o caminho do "esvaziar", que usa o mesmo `fs` num segundo chamador
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 60.0)
+
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+def test_282_caixinha_chat_da_ia_volta_para_a_carteira(user_id):
+    """Superfície silenciosa: não há pergunta de origem nem aviso na tela — o
+    usuário não tinha como perceber o dinheiro sumindo."""
+    from core.services.ai_chat.tools.pockets import (
+        _pocket_deposit_execute, _pocket_withdraw_execute)
+
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+
+    _pocket_deposit_execute(user_id, {"pocket_name": "viagem", "amount": 100})
+    _pocket_withdraw_execute(user_id, {"pocket_name": "viagem", "amount": 100})
+
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+def test_282_caixinha_dashboard_volta_para_a_carteira(user_id):
+    from fastapi.testclient import TestClient
+
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "p282@t.com"))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(user_id, hours=1))
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
+    headers = {dashboard.CSRF_HEADER_NAME: "t", "Content-Type": "application/json"}
+
+    r = client.post(f"/pockets/{user_id}/viagem/deposit", json={"amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+    r = client.post(f"/pockets/{user_id}/viagem/withdraw", json={"amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+# ── investimento: a MESMA assimetria, e a issue #282 não a citava ────────────
+
+def test_282_investimento_whatsapp_volta_para_a_carteira(user_id):
+    _seed_carteira_e_banco(user_id)
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    antes = _patrimonio(user_id)
+
+    source = funding.resolve_deterministic(user_id, 100)["source"]
+    db.investment_deposit_from_account(user_id, "CDB XP", 100, "dep",
+                                       funding_source=funding.to_db_arg(source))
+    h_investments.withdraw(user_id, "resgatei 100 do CDB XP",
+                           {"investment_name": "CDB XP", "amount": 100})
+
+    _assert_volta_para_a_origem(user_id, "aporte_investimento", "resgate_investimento", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+def test_282_investimento_chat_da_ia_volta_para_a_carteira(user_id):
+    from core.services.ai_chat.tools.investments import (
+        _investment_deposit_execute, _investment_withdraw_execute)
+
+    _seed_carteira_e_banco(user_id)
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    antes = _patrimonio(user_id)
+
+    _investment_deposit_execute(user_id, {"name": "CDB XP", "amount": 100})
+    _investment_withdraw_execute(user_id, {"name": "CDB XP", "amount": 100})
+
+    _assert_volta_para_a_origem(user_id, "aporte_investimento", "resgate_investimento", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+def test_282_investimento_dashboard_volta_para_a_carteira(user_id):
+    from fastapi.testclient import TestClient
+
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    _seed_carteira_e_banco(user_id)
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    antes = _patrimonio(user_id)
+
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(user_id, "i282@t.com"))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(user_id, hours=1))
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
+    headers = {dashboard.CSRF_HEADER_NAME: "t", "Content-Type": "application/json"}
+
+    r = client.post(f"/investments/{user_id}/deposit",
+                    json={"name": "CDB XP", "amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+    r = client.post(f"/investments/{user_id}/withdraw",
+                    json={"name": "CDB XP", "amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+
+    _assert_volta_para_a_origem(user_id, "aporte_investimento", "resgate_investimento", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+# ── os três controles positivos ──────────────────────────────────────────────
+
+def test_282_sem_open_finance_a_ida_e_volta_fecha_em_zero(user_id):
+    """A diferença entre este caso e o de cima é a prova de que o teste mede a
+    ASSIMETRIA, não aritmética de ida-e-volta: aqui não há banco para vencer a
+    Carteira, e o total já fechava em zero antes do conserto."""
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    db.create_pocket(user_id, "viagem")
+    antes = _patrimonio(user_id)
+
+    source = funding.resolve_deterministic(user_id, 100)["source"]
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "dep",
+                                   funding_source=funding.to_db_arg(source))
+    h_pockets.withdraw(user_id, "retirei 100 da caixinha viagem",
+                       {"pocket_name": "viagem", "amount": 100})
+
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 100.0)
+    assert _patrimonio(user_id) == pytest.approx(antes)
+
+
+def test_282_deposito_do_banco_continua_voltando_para_o_banco(user_id):
+    """Sem este controle, um conserto "devolve SEMPRE para a Carteira" passaria no
+    caso de cima e inflaria o consolidado: creditaria a Carteira com dinheiro que
+    o sync do banco vai devolver de novo."""
+    _connect_fake_bank(user_id)                       # Carteira zerada: a origem é o banco
+    db.create_pocket(user_id, "viagem")
+
+    source = funding.resolve_deterministic(user_id, 100)["source"]
+    assert source["kind"] == funding.BANK
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "dep",
+                                   funding_source=funding.to_db_arg(source))
+    h_pockets.withdraw(user_id, "retirei 100 da caixinha viagem",
+                       {"pocket_name": "viagem", "amount": 100})
+
+    _assert_volta_para_a_origem(user_id, "deposito_caixinha", "saque_caixinha", 100.0)
+    assert float(db.get_balance(user_id)) == 0.0      # a Carteira NÃO foi creditada
+
+
+def test_282_origens_misturadas_mantem_o_banco(user_id):
+    """Comportamento ACEITO, não conserto: com depósitos de origens diferentes o
+    destino segue o de hoje (banco). Proporcional ou LIFO é decisão de produto
+    ainda não tomada — ver funding.resolve_destination."""
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira", funding_source=None)
+    banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "do banco",
+                                   funding_source=funding.to_db_arg(banco))
+
+    destino = funding.resolve_destination(
+        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
+    assert destino["kind"] == funding.BANK
