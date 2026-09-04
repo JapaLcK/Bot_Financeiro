@@ -774,3 +774,51 @@ def test_refresh_que_encerra_sessao_ainda_permite_logar_em_seguida():
     assert entrar.status_code != 403, (
         "403 aqui é o CSRF barrando o login, não credencial errada"
     )
+
+
+def test_401_de_autenticacao_manda_www_authenticate_e_o_de_aplicacao_nao(monkeypatch):
+    """A costura servidor→navegador da #176, num 401 REAL (não sintético).
+
+    O teste de navegador (`tests/frontend/auth_refresh_gatilho.test.mjs`) escreve
+    ele mesmo o header nas rotas mockadas, então ele prova só o lado do JS. Aqui
+    se prova o outro lado: que o `headers=WWW_AUTHENTICATE_401` do `raise`
+    sobrevive à pilha inteira (ExceptionMiddleware → `http_exception_page_handler`
+    → `http_exception_handler` → `vary_accept`) e chega na resposta.
+
+    Os dois casos juntos, porque o header só vale se DISCRIMINAR: se ele saísse em
+    todo 401 o interceptor voltaria a renovar em senha errada, que é o bug.
+    """
+    client = TestClient(dashboard.app)
+
+    # Família A — `_get_current_user` sem token: renovar é exatamente o conserto.
+    sem_token = client.post("/auth/dashboard-token", headers=_csrf_headers(client))
+    assert sem_token.status_code == 401
+    assert sem_token.json()["detail"] == "Token não fornecido."
+    assert sem_token.headers["www-authenticate"] == dashboard.WWW_AUTHENTICATE_401[
+        "WWW-Authenticate"
+    ]
+
+    # Família A — token inválido (o caso do access vencido no aparelho parado).
+    invalido = client.post(
+        "/auth/dashboard-token",
+        headers={"Authorization": "Bearer nao-e-um-jwt", **_csrf_headers(client)},
+    )
+    assert invalido.status_code == 401
+    assert invalido.json()["detail"] == "Token inválido ou expirado."
+    assert "www-authenticate" in invalido.headers
+
+    # Família B — chave de API errada no lead engine (rota de outro router, o que
+    # de quebra prova que `frontend/routes/*.py` sai pelo mesmo handler). Tem de
+    # vir SEM o header: renovar access token não conserta chave errada.
+    monkeypatch.setenv("PROSPECT_API_KEY", "chave-certa")
+    chave_errada = client.post(
+        "/api/prospect/status",
+        headers={"X-Prospect-Key": "chave-errada"},
+        json={"codes": ["abc"]},
+    )
+    assert chave_errada.status_code == 401
+    assert chave_errada.json()["detail"] == "Chave inválida."
+    assert "www-authenticate" not in chave_errada.headers, (
+        "401 de aplicação marcado como renovável — o interceptor volta a gastar "
+        "refresh + retry, que é o bug da #176"
+    )

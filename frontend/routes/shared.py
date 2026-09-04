@@ -54,6 +54,22 @@ JWT_SECRET = (os.getenv("JWT_SECRET") or "").strip()
 AUTH_COOKIE_NAME = "auth_token"
 DASHBOARD_COOKIE_NAME = "dashboard_token"
 
+# Marca a FAMÍLIA do 401 para o interceptor de `frontend/static/auth-refresh.js`:
+# só o 401 que leva este header é falha de access/dashboard token, o único caso em
+# que renovar resolve. 401 de aplicação (senha incorreta, magic link expirado, chave
+# de API) fica sem ele — o token está ótimo, e o retry automático reenviava a senha
+# errada, gastando DOIS slots do `@limiter.limit` da rota por digitação (as de
+# 3/hour trancavam o usuário por uma hora no segundo erro) e duplicando o
+# `data_export_password_failed` no log de segurança.
+#
+# Um literal só (§0.7) — os 8 sítios de autenticação importam daqui. Quem adicionar
+# um 401 novo é obrigado a classificá-lo pelo gate
+# `test_401_de_autenticacao_declara_familia` (tests/test_static_pages_routes.py).
+#
+# `Bearer` de propósito: navegador não abre diálogo nativo de credencial para este
+# esquema (só para `Basic`/`Digest`), então marcar a família não muda a UI.
+WWW_AUTHENTICATE_401 = {"WWW-Authenticate": 'Bearer realm="pigbank", error="invalid_token"'}
+
 # Meta (Facebook) Pixel — injetado no <head> das páginas públicas quando setado.
 # Vazio em dev/staging → nenhum pixel é injetado (site limpo, sem rastreio).
 META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
@@ -712,7 +728,8 @@ def resolve_dashboard_user_id(request: Request) -> int:
     )
     payload = decode_dashboard_token_full(token or "")
     if not payload:
-        raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.")
+        raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.",
+                            headers=WWW_AUTHENTICATE_401)
     user_id = payload["user_id"]
     jti = payload.get("jti")
     # Tokens com jti: validar contra auth_sessions (revogacao instantanea).
@@ -720,14 +737,16 @@ def resolve_dashboard_user_id(request: Request) -> int:
     if jti:
         session = get_active_session(jti)
         if not session or int(session.get("user_id") or 0) != user_id:
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
         request.state.session_jti = jti
     else:
         # Token de dashboard legado sem jti: se a conta trocou de senha (reset),
         # invalida — senão um token roubado sobrevive ao reset até expirar (12h).
         from db import get_password_changed_at
         if get_password_changed_at(user_id):
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
     return int(user_id)
 
 
