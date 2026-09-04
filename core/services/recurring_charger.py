@@ -196,10 +196,11 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
             )
             due = cur.fetchall() or []
 
+    cache: dict[int, dict[str, str]] = {}
     results: list[dict] = []
     for r in due:
         try:
-            result = _charge_one(dict(r), today, ym)
+            result = _charge_one(dict(r), today, ym, cache)
             results.append(result)
         except Exception as exc:
             print(
@@ -212,7 +213,7 @@ def charge_due_recurring_expenses_once(today: date | None = None) -> list[dict]:
     # once/weekly/daily. Fica fora do SQL mensal/anual (que é provado) pra não
     # arriscar o motor existente; idempotência própria por period_key.
     try:
-        results.extend(_charge_anchored_autopay_once(today))
+        results.extend(_charge_anchored_autopay_once(today, cache))
     except Exception as exc:
         print(f"[recurring_charger] falhou pass ancorado: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
@@ -242,7 +243,9 @@ def _anchored_charge_plan(rec: dict, today: date) -> tuple[date, str] | None:
     return None
 
 
-def _charge_anchored_autopay_once(today: date) -> list[dict]:
+def _charge_anchored_autopay_once(
+    today: date, cache: dict[int, dict[str, str]] | None = None
+) -> list[dict]:
     """Cobra gastos fixos autopay de frequência ancorada no start_date
     (daily/weekly/once). Idempotência por period_key: o pré-check em
     last_charged_ym evita re-debitar (loop é sequencial), e o UNIQUE
@@ -273,7 +276,7 @@ def _charge_anchored_autopay_once(today: date) -> list[dict]:
         if rec.get("last_charged_ym") == period_key:
             continue  # já cobrado neste período
         try:
-            results.append(_charge_one(rec, today, period_key))
+            results.append(_charge_one(rec, today, period_key, cache))
         except Exception as exc:
             print(
                 f"[recurring_charger] falhou cobrar (ancorado) rec={rec['id']} user={rec['user_id']}: {exc}",
@@ -283,13 +286,45 @@ def _charge_anchored_autopay_once(today: date) -> list[dict]:
     return results
 
 
-def _charge_one(rec: dict, today: date, ym: str) -> dict:
+def _canonical_category(
+    user_id: int, raw: str, cache: dict[int, dict[str, str]] | None = None
+) -> str:
+    """Grafia do catálogo do usuário para a categoria copiada do recorrente (#147).
+
+    `create=False` de propósito. Com `create=True` este job em lote ficaria pior
+    de três formas medidas: `user_category_display_map(strict=True)` faria erro de
+    banco SUBIR e abortar a cobrança em vez de degradar; `_custom_categories_allowed`
+    passaria a consultar o plano por linha cobrada; e, pra quem NÃO tem plano com
+    categoria custom, o retorno é `normalize_text(raw)` — "Padaria do Zé" viraria
+    "padaria do ze" a partir do próximo mês, com o histórico em "Padaria do Zé",
+    criando a fatia gêmea que este conserto existe pra matar.
+
+    O `or raw` fecha o contrato: nunca inventa nome, nunca grava no catálogo,
+    mantém o texto quando não acha correspondência.
+
+    `cache` é por `user_id` porque as listas de vencimento são GLOBAIS (todos os
+    usuários numa query só) — sem ele seria uma query de catálogo por linha cobrada.
+    """
+    from db.categories import resolve_category_input, user_category_display_map
+
+    if cache is None:
+        cache = {}
+    if user_id not in cache:
+        cache[user_id] = user_category_display_map(user_id)
+    return resolve_category_input(
+        user_id, raw, create=False, display_map=cache[user_id]
+    ) or raw
+
+
+def _charge_one(
+    rec: dict, today: date, ym: str, cache: dict[int, dict[str, str]] | None = None
+) -> dict:
     """Cobra UM gasto fixo. Retorna dict com info da cobrança."""
     user_id = int(rec["user_id"])
     rec_id = int(rec["id"])
     amount = float(rec["amount"])
     name = rec["name"]
-    category = rec["category"] or "outros"
+    category = _canonical_category(user_id, rec["category"] or "outros", cache)
     payment_type = rec["payment_type"]
 
     nota = f"Cobrança automática · {name}"
@@ -430,10 +465,11 @@ def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
             )
             due = cur.fetchall() or []
 
+    cache: dict[int, dict[str, str]] = {}
     results: list[dict] = []
     for r in due:
         try:
-            results.append(_credit_one(dict(r), today, ym))
+            results.append(_credit_one(dict(r), today, ym, cache))
         except Exception as exc:
             print(
                 f"[recurring_income] falhou creditar inc={r['id']} user={r['user_id']}: {exc}",
@@ -446,7 +482,9 @@ def credit_due_recurring_incomes_once(today: date | None = None) -> list[dict]:
     return results
 
 
-def _credit_one(inc: dict, today: date, ym: str) -> dict:
+def _credit_one(
+    inc: dict, today: date, ym: str, cache: dict[int, dict[str, str]] | None = None
+) -> dict:
     """Credita UMA receita recorrente. Retorna dict com info do crédito."""
     from db.accounts import add_launch_and_update_balance
 
@@ -454,7 +492,7 @@ def _credit_one(inc: dict, today: date, ym: str) -> dict:
     inc_id = int(inc["id"])
     amount = float(inc["amount"])
     name = inc["name"]
-    category = inc["category"] or "salário"
+    category = _canonical_category(user_id, inc["category"] or "salário", cache)
 
     nota = f"Receita recorrente · {name}"
 

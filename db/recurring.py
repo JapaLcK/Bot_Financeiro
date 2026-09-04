@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from .categories import ensure_user_category, resolve_category_input
 from .connection import get_conn
 from .users import ensure_user
 
@@ -209,7 +210,12 @@ def create_recurring_expense(
     if payment_type == "account":
         card_id = None  # ignora card_id quando não é cartão
 
+    # #147: mesma porta de correção do PATCH /launches — o usuário DIGITA esta
+    # categoria. Sem o resolver, "McDonald's" nascia cru aqui e o cobrador o
+    # copiava pra `launches.categoria` todo mês, abrindo fatia gêmea no donut.
+    # `or cat` mantém o texto quando o resolver recusa (nome longo demais).
     cat = (category or "").strip() or "outros"
+    cat = resolve_category_input(user_id, cat, create=True) or cat
     note = (notes or "").strip() or None
 
     with get_conn() as conn:
@@ -239,6 +245,7 @@ def create_recurring_expense(
             )
             new_id = cur.fetchone()["id"]
         conn.commit()
+    ensure_user_category(user_id, cat)  # só DEPOIS do insert (não deixa categoria órfã)
     return get_recurring_expense(user_id, new_id)
 
 
@@ -286,9 +293,12 @@ def update_recurring_expense(
             sets.append("last_amount_changed_at = now()")
         sets.append("amount = %s")
         params.append(Decimal(str(amount)))
+    cat: str | None = None
     if category is not None:
+        cat = (category or "").strip() or "outros"
+        cat = resolve_category_input(user_id, cat, create=True) or cat
         sets.append("category = %s")
-        params.append((category or "").strip() or "outros")
+        params.append(cat)
     if due_day is not None:
         if int(due_day) < 1 or int(due_day) > 31:
             raise ValueError("DIA_INVALIDO")
@@ -352,6 +362,8 @@ def update_recurring_expense(
                 params,
             )
         conn.commit()
+    if cat:
+        ensure_user_category(user_id, cat)  # só DEPOIS do update
     return get_recurring_expense(user_id, rec_id)
 
 

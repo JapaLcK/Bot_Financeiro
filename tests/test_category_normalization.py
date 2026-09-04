@@ -1,9 +1,21 @@
 """
 tests/test_category_normalization.py — texto livre de categoria colapsa numa
 forma só (`resolve_category_input`) nas portas que CHAMAM esse resolver — não
-em todas as que gravam categoria. Fora daqui, e não coberta: o cobrador de
-recorrentes (`core/services/recurring_charger.py:302,461`) grava
-`recurring_expenses.category` verbatim (`db/recurring.py:212` só faz `.strip()`).
+em todas as que gravam categoria.
+
+A porta 9 (gasto fixo / receita recorrente) era a dívida citada aqui e foi
+fechada pela issue #147: as 4 portas de escrita (`create_/update_recurring_expense`,
+`create_/update_recurring_income`) passaram a chamar o resolver como porta de
+CORREÇÃO (`create=True` + `ensure_user_category` depois do commit), e o cobrador
+(`core/services/recurring_charger._canonical_category`) resolve com `create=False`
+— em job de lote `create=True` abortaria a cobrança num erro de banco e tiraria o
+acento de quem não tem plano custom.
+
+Continua FORA deste invariante, de propósito: o Open Finance (issue #149) grava
+`launches.categoria` por caminho próprio. Enquanto ele existir, `launches.categoria`
+NÃO é sempre igual a algum `user_categories.name`, e não há teste aqui afirmando
+esse invariante global — o vermelho convidaria a renormalizar na LEITURA, que é
+exatamente o que o #143 desfez. Os testes são por PORTA.
 
 Caso real que originou o arquivo: o usuário corrige um lançamento pelo WhatsApp
 digitando "McDonald's" e o lançamento virava `mcdonald s` — apóstrofo virava
@@ -16,7 +28,8 @@ e precedência controlada, e nunca sobrescreve keyword canônica globalmente.
 
 Convenção travada aqui (não "conserte"):
   user_categories.name      → forma de exibição (minúscula, COM acento/pontuação)
-  launches.categoria        → sempre igual a algum user_categories.name
+  launches.categoria        → a grafia do catálogo, quando a porta resolve
+                              (exceção conhecida: Open Finance, #149)
   user_category_rules.category → índice interno, NORMALIZADO (sem acento)
 
 Duas invariantes que valem pra TODA porta e são testadas uma a uma:
@@ -1051,3 +1064,212 @@ def test_botao_outra_digitar_atropela_pendencia(wa_user_id, monkeypatch):
     assert _categoria_do_launch(wa_user_id, launch_id) == "mcdonald's", respostas
     # a pergunta da conta se perdeu (estado atual, documentado)
     assert db.get_pending_action(wa_user_id) is None
+
+
+# ─── porta 9: gasto fixo recorrente (issue #147) ────────────────────────────
+#
+# Dois lados. As 4 portas de ESCRITA resolvem na hora do cadastro/edição
+# (`create=True`, porta de correção — é o usuário digitando). O COBRADOR resolve
+# na hora de copiar pra `launches.categoria` (`create=False`), porque em produção
+# já existem 11 de 15 recorrentes ativos com categoria fora do catálogo do dono —
+# escrita consertada não reescreve o que já está gravado.
+
+
+def _forca_categoria_crua(tabela: str, user_id: int, rec_id: int, categoria: str) -> None:
+    """Deixa a linha do recorrente no estado LEGADO: categoria como o usuário
+    digitou, sem passar pelo resolver. É o estado dos 11 recorrentes de produção
+    e o único jeito de exercitar o cobrador depois que a escrita foi consertada."""
+    assert tabela in ("recurring_expenses", "recurring_incomes")
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"update {tabela} set category=%s where user_id=%s and id=%s",
+                (categoria, user_id, rec_id),
+            )
+        conn.commit()
+
+
+def _gasto_fixo_legado(user_id: int, categoria_crua: str, **kw) -> int:
+    from db.recurring import create_recurring_expense
+    from utils_date import today_tz
+
+    hoje = today_tz()
+    rec = create_recurring_expense(
+        user_id, "Assinatura", 21.90, "outros", hoje.day,
+        kw.pop("payment_type", "account"), start_date=hoje, **kw,
+    )
+    _forca_categoria_crua("recurring_expenses", user_id, rec["id"], categoria_crua)
+    return int(rec["id"])
+
+
+def test_cobranca_usa_grafia_do_catalogo(pro_user_id):
+    """NEGATIVO (despesa): o gasto fixo legado guarda "McDonald's"; o catálogo do
+    dono tem "mcdonald's". O launch da cobrança tem de sair com a grafia do
+    catálogo, senão o donut abre duas fatias todo mês.
+
+    Controle negativo medido: com `category = rec["category"] or "outros"` de
+    volta em `recurring_charger._charge_one`, o assert abaixo lê "McDonald's"."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    create_user_category(pro_user_id, "mcdonald's")
+    _gasto_fixo_legado(pro_user_id, "McDonald's")
+
+    charge_due_recurring_expenses_once(today_tz())
+
+    assert _ultimo_launch(pro_user_id)["categoria"] == "mcdonald's"
+
+
+def test_cobranca_no_cartao_usa_grafia_do_catalogo(pro_user_id):
+    """O outro ramo de `_charge_one` (`payment_type='credit_card'`), que grava em
+    `credit_transactions` em vez de `launches`. Sem ele o par fica meio coberto."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    create_user_category(pro_user_id, "mcdonald's")
+    card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    db.get_or_create_open_bill(pro_user_id, card_id, today_tz())  # o cron exige bill open
+    _gasto_fixo_legado(
+        pro_user_id, "McDonald's", payment_type="credit_card", card_id=card_id,
+    )
+
+    charge_due_recurring_expenses_once(today_tz())
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select categoria from credit_transactions where user_id=%s order by id desc limit 1",
+                (pro_user_id,),
+            )
+            row = cur.fetchone()
+    assert row and row["categoria"] == "mcdonald's"
+
+
+def test_credito_de_receita_usa_grafia_do_catalogo(pro_user_id):
+    """NEGATIVO (receita): o lado que a issue #147 nem citou. `_credit_one` tinha
+    a mesma linha crua. Controle negativo: `category = inc["category"] or
+    "salário"` de volta e o assert lê "Salário Extra"."""
+    from core.services.recurring_charger import credit_due_recurring_incomes_once
+    from db.recurring_income import create_recurring_income
+    from utils_date import today_tz
+
+    hoje = today_tz()
+    create_user_category(pro_user_id, "salário extra")
+    inc = create_recurring_income(
+        pro_user_id, "Freela", 500.0, "outros", hoje.day, start_date=hoje,
+    )
+    _forca_categoria_crua("recurring_incomes", pro_user_id, inc["id"], "Salário Extra")
+
+    credit_due_recurring_incomes_once(hoje)
+
+    assert _ultimo_launch(pro_user_id)["categoria"] == "salário extra"
+
+
+def test_cobranca_de_free_com_acento_nao_perde_o_acento(user_id):
+    """POSITIVO, e o mais importante do grupo: usuário SEM plano custom, gasto
+    fixo com acento e SEM entrada correspondente no catálogo. O cobrador NÃO pode
+    mexer no texto.
+
+    É este caso que mata a variante `create=True` no cobrador: com ela,
+    `resolve_category_input` devolve `normalize_text(raw)` pra quem não tem plano
+    custom e o mês seguinte gravaria "padaria do ze" enquanto o histórico está em
+    "Padaria do Zé" — o conserto CRIARIA a fatia gêmea que veio matar. Trocar o
+    `create=False` por `create=True` em `_canonical_category` derruba só este."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    _gasto_fixo_legado(user_id, "Padaria do Zé")
+
+    charge_due_recurring_expenses_once(today_tz())
+
+    assert _ultimo_launch(user_id)["categoria"] == "Padaria do Zé"
+    assert _nomes_custom(user_id) == []  # o cobrador nunca grava no catálogo
+
+
+def test_cobranca_nao_inventa_categoria_no_catalogo(pro_user_id):
+    """POSITIVO: mesmo com plano PRO, o cobrador é read-only sobre o catálogo.
+    Categoria sem correspondência passa intacta e nenhuma linha nova nasce —
+    `create=True` aqui semearia o catálogo a partir de um job em lote."""
+    from core.services.recurring_charger import charge_due_recurring_expenses_once
+    from utils_date import today_tz
+
+    _gasto_fixo_legado(pro_user_id, "Cafeteria da Esquina")
+
+    charge_due_recurring_expenses_once(today_tz())
+
+    assert _ultimo_launch(pro_user_id)["categoria"] == "Cafeteria da Esquina"
+    assert _nomes_custom(pro_user_id) == []
+
+
+# ─── porta 9, as 4 escritas: create/update × despesa/receita ────────────────
+
+
+def test_create_recurring_expense_resolve_categoria(pro_user_id):
+    """A porta que a issue citou (`db/recurring.py:212`, só `.strip()`)."""
+    from db.recurring import create_recurring_expense
+
+    create_user_category(pro_user_id, "mcdonald's")
+    rec = create_recurring_expense(
+        pro_user_id, "Assinatura", 21.90, "McDonald's", 10, "account",
+    )
+    assert rec["category"] == "mcdonald's"
+
+
+def test_update_recurring_expense_resolve_categoria(pro_user_id):
+    """A que a issue NÃO previu: deixar o `update_*` de fora reabre o buraco —
+    o usuário edita o gasto fixo pela tela e a grafia crua volta."""
+    from db.recurring import create_recurring_expense, update_recurring_expense
+
+    create_user_category(pro_user_id, "mcdonald's")
+    rec = create_recurring_expense(
+        pro_user_id, "Assinatura", 21.90, "outros", 10, "account",
+    )
+    editado = update_recurring_expense(pro_user_id, rec["id"], category="McDonald's")
+    assert editado["category"] == "mcdonald's"
+
+
+def test_create_recurring_income_resolve_categoria(pro_user_id):
+    from db.recurring_income import create_recurring_income
+
+    create_user_category(pro_user_id, "salário extra")
+    inc = create_recurring_income(pro_user_id, "Freela", 500.0, "Salário Extra", 10)
+    assert inc["category"] == "salário extra"
+
+
+def test_update_recurring_income_resolve_categoria(pro_user_id):
+    from db.recurring_income import create_recurring_income, update_recurring_income
+
+    create_user_category(pro_user_id, "salário extra")
+    inc = create_recurring_income(pro_user_id, "Freela", 500.0, "outros", 10)
+    editado = update_recurring_income(pro_user_id, inc["id"], category="Salário Extra")
+    assert editado["category"] == "salário extra"
+
+
+def test_escrita_de_recorrente_nao_cria_categoria_orfa(pro_user_id):
+    """A invariante do arquivo aplicada à porta 9: a linha em `user_categories`
+    nasce DEPOIS do write. Alvo inexistente = erro e catálogo intacto."""
+    from db.recurring import update_recurring_expense
+
+    with pytest.raises(ValueError):
+        update_recurring_expense(pro_user_id, 999_999_999, category="Cafeteria da Esquina")
+    assert _nomes_custom(pro_user_id) == []
+
+
+@pytest.mark.parametrize("porta", ["expense", "income"])
+def test_escrita_de_recorrente_semeia_o_catalogo(pro_user_id, porta):
+    """O outro lado da invariante: nome NOVO e legítimo ganha a linha em
+    `user_categories` depois do write, como nas outras portas de correção — é o
+    catálogo que de-duplica as grafias seguintes (inclusive a do cobrador, que é
+    read-only). Controle negativo: tirar o `ensure_user_category` da porta e o
+    catálogo sai vazio."""
+    if porta == "expense":
+        from db.recurring import create_recurring_expense
+        create_recurring_expense(
+            pro_user_id, "Assinatura", 21.90, "Cafeteria da Esquina", 10, "account",
+        )
+    else:
+        from db.recurring_income import create_recurring_income
+        create_recurring_income(pro_user_id, "Freela", 500.0, "Cafeteria da Esquina", 10)
+
+    # minúscula COM acento/pontuação é a forma de exibição da convenção do topo
+    assert _nomes_custom(pro_user_id) == ["cafeteria da esquina"]

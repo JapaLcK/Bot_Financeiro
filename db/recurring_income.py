@@ -18,6 +18,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from .categories import ensure_user_category, resolve_category_input
 from .connection import get_conn
 from .recurring import _parse_start_date, validate_frequency
 from .users import ensure_user
@@ -126,7 +127,10 @@ def create_recurring_income(
     freq, month = validate_frequency(frequency, pay_month)
     start = _parse_start_date(start_date, default=date.today())
 
+    # #147: espelho de `create_recurring_expense` — o usuário DIGITA a categoria
+    # e o creditador a copia pra `launches.categoria` todo mês.
     cat = (category or "").strip() or "salário"
+    cat = resolve_category_input(user_id, cat, create=True) or cat
     note = (notes or "").strip() or None
 
     with get_conn() as conn:
@@ -146,6 +150,7 @@ def create_recurring_income(
             )
             new_id = cur.fetchone()["id"]
         conn.commit()
+    ensure_user_category(user_id, cat)  # só DEPOIS do insert (não deixa categoria órfã)
     return get_recurring_income(user_id, new_id)
 
 
@@ -189,9 +194,12 @@ def update_recurring_income(
             sets.append("last_amount_changed_at = now()")
         sets.append("amount = %s")
         params.append(Decimal(str(amount)))
+    cat: str | None = None
     if category is not None:
+        cat = (category or "").strip() or "salário"
+        cat = resolve_category_input(user_id, cat, create=True) or cat
         sets.append("category = %s")
-        params.append((category or "").strip() or "salário")
+        params.append(cat)
     if pay_day is not None:
         if int(pay_day) < 1 or int(pay_day) > 31:
             raise ValueError("DIA_INVALIDO")
@@ -233,6 +241,8 @@ def update_recurring_income(
                 params,
             )
         conn.commit()
+    if cat:
+        ensure_user_category(user_id, cat)  # só DEPOIS do update
     return get_recurring_income(user_id, inc_id)
 
 
