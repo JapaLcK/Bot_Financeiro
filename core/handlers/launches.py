@@ -542,8 +542,16 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             return f"Nenhum lançamento encontrado em **{label}**."
 
         # calcula totais
-        total_despesas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "despesa")
-        total_receitas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "receita")
+        # As duas formas de `tipo`, igual ao rodapé da lista sem data logo abaixo
+        # (`("despesa", "saida")` / `("receita", "entrada")`): só a moderna
+        # SUBCONTA o rodapé de um dia que tenha linha legada.
+        # TODO: ao contrário do irmão, estes dois somatórios não descartam
+        # `is_internal_movement` — transferência entra no rodapé do dia. Outra
+        # classe de bug, fora do escopo deste PR.
+        total_despesas = sum(float(r["valor"]) for r in rows
+                             if r.get("tipo") in ("despesa", "saida"))
+        total_receitas = sum(float(r["valor"]) for r in rows
+                             if r.get("tipo") in ("receita", "entrada"))
 
         lines = []
         for r in rows:

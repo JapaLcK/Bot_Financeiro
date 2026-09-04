@@ -60,14 +60,24 @@ def get_summary_by_period_impl(
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_excl = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
 
-    sql = """
-        select tipo, coalesce(sum(valor), 0) as total
+    # Import local, não no topo: `db/__init__` importa `db.reports`, que lê
+    # atributos de `db_support` na carga — topo aqui fecha o ciclo (mesmo motivo
+    # do `from db_support import ...` local em db/users.py:167).
+    from db.connection import TIPO_CANON_SQL
+
+    # `TIPO_CANON_SQL` colapsa a forma legada na moderna AQUI, no SQL: com
+    # `group by tipo` cru a linha 'saida' vira chave própria e o `if tipo in out`
+    # abaixo a descarta sem erro e sem log — a despesa do mês sai menor do que é.
+    # `group by 1` e não `group by tipo`: com o alias e a coluna com o mesmo nome,
+    # o Postgres resolve o GROUP BY pela coluna de ENTRADA e o CASE não agruparia.
+    sql = f"""
+        select {TIPO_CANON_SQL} as tipo, coalesce(sum(valor), 0) as total
         from launches
         where user_id=%s
           and criado_em >= %s
           and criado_em < %s
           and is_internal_movement = false
-        group by tipo
+        group by 1
     """
 
     with get_conn() as conn:

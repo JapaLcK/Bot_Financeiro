@@ -29,7 +29,8 @@ def check(user_id: int) -> str:
     today_launches = db.get_launches_by_period(user_id, today, today)
     despesas_hoje = [
         l for l in today_launches
-        if l["tipo"] == "despesa" and not l.get("is_internal_movement")
+        # as duas formas de `tipo`: só a moderna some com a linha legada do dia
+        if l["tipo"] in ("despesa", "saida") and not l.get("is_internal_movement")
     ]
     if despesas_hoje:
         lines.append("")

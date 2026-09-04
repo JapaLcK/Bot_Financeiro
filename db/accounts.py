@@ -1034,7 +1034,7 @@ def get_top_expense_categories(
                     select categoria, valor
                     from launches
                     where user_id = %s
-                      and tipo = 'despesa'
+                      and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
                       and criado_em >= %s and criado_em < %s
                     union all
