@@ -1120,8 +1120,14 @@ def test_trial_reset_registra_a_data_da_trava_herdada_que_a_ancora_nao_tem(
         assert detalhes["deleted"] == 1
         assert detalhes["previous_started_at"] is None
         assert detalhes["previous_lock_started_at"] is not None
-        assert detalhes["previous_lock_started_at"].startswith(
-            queimado.date().isoformat()
+        # Compara o INSTANTE, não o prefixo do texto. O log devolve a data no
+        # fuso do app (-03:00) e `queimado` nasce de `datetime.now(timezone.utc)`,
+        # então entre 00:00 e 03:00 UTC as duas datas de calendário divergem e o
+        # startswith reprovava um valor certo — vermelho de relógio de parede,
+        # em qualquer branch. `fromisoformat` devolve datetime consciente de
+        # fuso, e a igualdade entre dois aware compara o momento, não o texto.
+        assert (
+            datetime.fromisoformat(detalhes["previous_lock_started_at"]) == queimado
         ), detalhes
         assert not _trial_lock_exists(h)
     finally:
