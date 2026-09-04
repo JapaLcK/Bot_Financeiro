@@ -120,7 +120,8 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #   porta 2  QUALQUER `clarification`  este arquivo, `_clarification_abandonada`
 #            no `route()` — não só a de `launches.add`: a de `recurring.add`, a
 #            de `funds.add_ask` e as genéricas da IA passam pela mesma escotilha.
-#            O filtro não é o intent da pergunta, é o `_ja_tem_o_valor`.
+#            O filtro não é o intent da pergunta, é o `_ja_tem_o_valor` — mais
+#            o veto de catálogo do #185, que só vale para as perguntas de NOME.
 #   porta 3  fila do multi-lançamento  core/handlers/launches.py::resolve_multi_launch_value
 #   porta 4  botão "✅ Já paguei"      adapters/whatsapp/wa_runtime.py (roda ANTES
 #                                      do handle_incoming, por isso importa daqui)
@@ -238,7 +239,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # -----------------------------------------------------------------------
     clarif = None if ignora_pendencias else h_pending.get_pending_clarification(user_id)
     if clarif:
-        if _clarification_abandonada(clarif, text):
+        if _clarification_abandonada(clarif, text, user_id):
             # Porta 2. Mesma escotilha de escape do `investment_pick` e do
             # `funding_source_choice` logo abaixo: outro comando claro abandona
             # a pergunta em vez de ser engolido por ela ("Quanto foi no *luz*?"
@@ -703,7 +704,7 @@ def _ja_tem_o_valor(entities: dict | None) -> bool:
         return True
 
 
-def _clarification_abandonada(clarif: dict, text: str) -> bool:
+def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
     """True quando a resposta é OUTRO comando claro, não a resposta à pergunta.
 
     Porta 2 do passo 1 (`abandona_pergunta_de_valor`). Quem decide é o INTENT,
@@ -712,7 +713,8 @@ def _clarification_abandonada(clarif: dict, text: str) -> bool:
     Vale para TODA `clarification`, não só a de `launches.add`: roda no
     `route()`, antes de o `_resolve_clarification` olhar o `intent` do payload,
     então a de `recurring.add`, a de `funds.add_ask` e as genéricas da IA
-    passam por aqui também. O único filtro por payload é o `_ja_tem_o_valor`.
+    passam por aqui também. Os filtros por payload são dois: o `_ja_tem_o_valor`
+    e o veto de catálogo lá embaixo (#185).
 
     Antes disso, uma condição que nada tem a ver com o classificador: **a
     pergunta ainda não pode ter o valor.** Toda `clarification` que pede a
@@ -733,7 +735,47 @@ def _clarification_abandonada(clarif: dict, text: str) -> bool:
         return False
     if _ja_tem_o_valor(payload.get("entities")):
         return False
-    return abandona_pergunta_de_valor(text)
+    if not abandona_pergunta_de_valor(text):
+        return False
+
+    # VETO DE CATÁLOGO (#185). Última palavra, e só no turno raro em que o
+    # classificador já disse "abandona": a pergunta pendente pede um NOME
+    # (`falta` é a chave de nome daquela intent) e a resposta é, literalmente,
+    # uma caixinha/investimento DESTE usuário. Aí "saldo" não é o comando de
+    # saldo — é o nome que a pergunta pediu, e abandonar descartaria o valor
+    # que ele já digitou ("saquei 200" → "de qual caixinha?" → "saldo").
+    #
+    # DEPOIS do `abandona_pergunta_de_valor`, não antes: o classificador
+    # determinístico decide o caso comum sozinho, e o catálogo custa I/O
+    # (`_alvos_existentes` chama `accrue_all_investments`, que ESCREVE
+    # accruals). Nesta ordem ele só roda quando a resposta já é um dos 6
+    # intents do `ABANDONA` e a pergunta viva é de nome.
+    #
+    # `_ja_tem_o_valor` fica INTOCADO de propósito. A one-liner da issue
+    # (ler `amount` além de `valor` ali) tem regressão medida: `saquei 200` +
+    # `saldo` SEM caixinha chamada "saldo" deixa de abandonar, cai no resolver,
+    # e `_funde_a_resposta` devolve `target_name="saldo"` — o bot responde
+    # "Não encontrei *saldo* nem em caixinhas nem em investimentos" e o comando
+    # nunca roda. Hoje o usuário ao menos vê o saldo. E mexer no
+    # `_ja_tem_o_valor` moveria o outro chamador (`pedia_o_valor`, :1040), que
+    # é o filtro de dano do #140.
+    #
+    # TETO ACEITO pelo dono, e é o exemplo do título da issue: `saquei 200` +
+    # `extrato` SEM caixinha chamada "extrato" continua abandonando, e os
+    # R$ 200 se perdem. Fechar isso exigiria rodar o outro comando E re-armar a
+    # pergunta no mesmo turno — padrão de UX novo, decisão adiada.
+    #
+    # TETO INVERTIDO, também aceito: quem tem caixinha chamada exatamente
+    # `saldo`/`extrato`/`caixinhas` e quer o COMANDO enquanto uma pergunta de
+    # nome está de pé passa a executar o saque na caixinha. Troca consciente —
+    # o lado do dinheiro ganha.
+    falta = payload.get("falta")
+    intent = payload.get("intent")
+    if falta and falta == _CHAVE_DO_NOME.get(intent):
+        resposta = limpa_pontuacao_final((text or "").strip())
+        return not _eh_nome_do_catalogo(
+            resposta, _alvos_existentes(user_id, intent))
+    return True
 
 
 _SO_NUMERO_RE = re.compile(r"[\d.,\s]+")

@@ -821,3 +821,88 @@ def test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado(uid):
     assert _saldos(uid)["viagem"] == 200.00
     assert "esvaziar" not in (saque.get("nota") or "").lower(), \
         f"a nota diz esvaziar num saque de 100: {saque.get('nota')!r}"
+
+
+# ── #185: o veto de catálogo na porta 2 ─────────────────────────────────────
+#
+# A pergunta de NOME já carrega o valor em `entities["amount"]`, que o
+# `_ja_tem_o_valor` (porta 2) não lê — ele só conhece `valor`. Então
+# `saquei 200` + `saldo` abandonava a pergunta e os R$ 200 sumiam, mesmo com
+# uma caixinha chamada `saldo` para receber o saque.
+#
+# O conserto NÃO é a one-liner da issue (fazer `_ja_tem_o_valor` ler `amount`).
+# Medido: com ela, `saquei 200` + `saldo` SEM caixinha chamada "saldo" deixa de
+# abandonar, cai no resolver, e o bot responde "Não encontrei *saldo* nem em
+# caixinhas nem em investimentos" — o comando `saldo` nunca roda e a pendência
+# morre do mesmo jeito. É estritamente pior que hoje. Quem prende isso é o
+# `test_185_abandono_comum_continua_vivo` abaixo.
+#
+# CONTROLES NEGATIVOS (medidos, cada um injetado num caso que estava VERDE):
+#   remover o bloco `if falta and falta == _CHAVE_DO_NOME.get(intent)` de
+#   `_clarification_abandonada` -> test_185_nome_do_catalogo_vence_o_comando
+#   trocar o `return not _eh_nome_do_catalogo(...)` daquele bloco por
+#   `return False`                -> test_185_abandono_comum_continua_vivo
+#
+# CLASSE CEGA: as portas de caixinha/investimento cujo payload guarda `amount`
+# só são alcançáveis via LLM, que não roda nos testes. O que esta seção prova é
+# a rota `funds.withdraw` (`classify("saquei 200")` -> `funds.withdraw
+# {'amount': 200.0}`, determinístico).
+#
+# TETO ACEITO, e é o exemplo do título da issue: `saquei 200` + `extrato`, sem
+# caixinha chamada "extrato", continua abandonando e perdendo os R$ 200 —
+# fechar isso exigiria rodar o comando E re-armar a pergunta no mesmo turno.
+# TETO INVERTIDO: quem TEM caixinha `saldo` e quer o COMANDO enquanto a
+# pergunta de nome está viva passa a sacar da caixinha. É o `test_185_nome_do_
+# catalogo_vence_o_comando`: troca consciente, o lado do dinheiro ganha.
+
+
+def test_185_nome_do_catalogo_vence_o_comando(uid):
+    """O caso da issue: a resposta É uma caixinha do usuário, não um comando."""
+    _caixinhas_com_saldo(uid, "saldo")
+
+    respostas = _conversa(uid, "saquei 200", "saldo")
+
+    assert "retirar de qual" in respostas[0], respostas[0]
+    assert _saldos(uid)["saldo"] == 100.00, \
+        f"o saque de R$ 200 na caixinha 'saldo' não fechou: {respostas[-1]!r}"
+
+
+def test_185_abandono_comum_continua_vivo(uid):
+    """CONTROLE POSITIVO, e é ele que separa este conserto do proposto na issue.
+
+    Sem caixinha chamada "saldo", `saldo` continua sendo o COMANDO de saldo. A
+    one-liner da issue derruba exatamente este caso (medido: o bot passa a
+    responder "Não encontrei *saldo*..."); o veto de catálogo o mantém.
+    """
+    respostas = _conversa(uid, "saquei 200", "saldo")
+
+    assert "Conta Corrente" in respostas[-1], respostas[-1]
+    assert _saldos(uid) == {}, "não havia caixinha nenhuma para mover"
+
+
+def test_185_saque_legitimo_pelo_nome_ainda_funciona(uid):
+    """CONTROLE POSITIVO 2: o caminho normal da pergunta de nome, com um nome
+    que não colide com comando nenhum."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem",
+              "saquei 100", "viagem")
+
+    assert _saldos(uid)["viagem"] == 200.00
+
+
+def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
+    """O veto vale SÓ quando a pergunta pede o NOME. Com `falta == "amount"` a
+    resposta `saldo` não responde nada que a pergunta pediu, e a escotilha do
+    comando continua valendo — mesmo com uma caixinha chamada `saldo` no
+    catálogo, que é o que faz este caso discriminar o veto."""
+    _caixinhas_com_saldo(uid, "viagem", "saldo")
+
+    respostas = _conversa(uid, "tirar da caixinha viagem", "viagem", "saldo")
+
+    assert "Qual o valor" in respostas[1], respostas[1]
+    assert "Conta Corrente" in respostas[-1], respostas[-1]
+    assert _saldos(uid) == {"viagem": 300.00, "saldo": 300.00}, \
+        "sacou sem que o valor fosse dito"
