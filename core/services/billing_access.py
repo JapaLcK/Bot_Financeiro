@@ -24,6 +24,23 @@ from db.plan_grants import list_grants, users_com_grant_na_janela
 # produtor de grants com data arredondada em dia.
 GAP_TOLERANCIA = timedelta(seconds=120)
 
+# Carência do `past_due` na varredura (§4.1.1 B). Decisão de PRODUTO do dono
+# (2026-09-04), não número técnico: durante o *dunning* a assinatura continua
+# viva no Stripe e o cliente ainda pode pagar, então tirar o acesso no primeiro
+# dia de atraso cobra do cliente um erro que costuma ser do cartão. O teto
+# existe para a cauda não ser infinita.
+#
+# **Fato a registrar para quem for mexer no número:** o dunning padrão do
+# Stripe retenta por volta de DUAS SEMANAS, então 15 dias fica na BORDA. Se as
+# tentativas configuradas na conta se estenderem além disso, o teto corta
+# alguém que o Stripe ainda recuperaria — a pessoa perde acesso e o pagamento
+# entra depois. O caminho de volta é automático (o `invoice.paid` da
+# recuperação regrava o grant e a projeção devolve o acesso), então o pior caso
+# é INTERMITÊNCIA, não perda permanente. Aumente o número se o dunning da conta
+# for mais longo que isto.
+# ponytail: constante nomeada, não env — não há segundo consumidor.
+PAST_DUE_CARENCIA_DIAS = 15
+
 
 def _tier_do_stored(plan_stored: str) -> int:
     """Posição do valor legado da coluna `plan` na escada de tiers.
@@ -115,7 +132,7 @@ def _e_reducao(plano_atual: str, expira_atual, plano_novo: str, expira_novo) -> 
 def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) -> str:
     """Confirma no STRIPE uma redução que veio de VARREDURA (§4.1.1 B).
 
-    Devolve 'reduz' | 'reparou' | 'nao_reduz' | 'indisponivel'.
+    Devolve 'reduz' | 'reparou' | 'nao_reduz' | 'carencia' | 'indisponivel'.
 
     O ponto todo: sem evento, a varredura não tem autoridade para rebaixar
     ninguém. "Grant defasado" e "assinatura acabou" produzem exatamente o mesmo
@@ -135,10 +152,17 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     `invoice.paid` o corrige — a data é o que não pode esperar, porque é ela
     que decide se a conta cai.
 
-    **Assinatura viva NUNCA resulta em redução.** Se o Stripe confirma que há
-    assinatura ativa e não dá para reparar (nenhum grant a esticar), o veredito
-    é `nao_reduz`: alerta e não escreve. O caminho que faltava era o assinante
-    cujo único grant é o `legacy` — justamente a população que o backfill cria.
+    **Assinatura viva quase nunca resulta em redução.** Se o Stripe confirma
+    que há assinatura ativa e não dá para reparar (nenhum grant a esticar), o
+    veredito é `nao_reduz`: alerta e não escreve. O caminho que faltava era o
+    assinante cujo único grant é o `legacy` — justamente a população que o
+    backfill cria.
+
+    A única exceção é o **`past_due` além da carência** (regra do dono): ali a
+    assinatura está viva no Stripe e mesmo assim reduzimos, porque senão a
+    cauda é infinita — `_find_active_subscription` considera `past_due` viva e
+    o `current_period_end` dela é o período JÁ VENCIDO, então nunca haveria o
+    que reparar e a conta ficaria pendurada para sempre.
     """
     customer = (conta.get("stripe_customer_id") or "").strip()
     if not customer:
@@ -151,7 +175,7 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     # para `core/services/stripe_lookup.py` — hoje seria refatoração sem pedido.
     import stripe as _stripe
     from frontend.finance_bot_websocket_custom import (  # noqa: PLC0415
-        StripeLookupError, _find_active_subscription, _sub_period_end_ts,
+        StripeLookupError, _find_active_subscription, _sg, _sub_period_end_ts,
     )
     try:
         sub = _find_active_subscription(_stripe, customer)
@@ -169,6 +193,7 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     if not (sub_id and ts):
         return "indisponivel"   # assinatura viva sem data legível: não decide nada
     fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    status = (_sg(sub, "status") or "").strip().lower()
 
     # Alvo do reparo: o grant DAQUELA assinatura; na falta dele, o `legacy`, que
     # é a reconstrução do mesmo acesso de cartão feita pelo backfill. Ler o
@@ -182,13 +207,26 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
         # Stripe diz VIVA e não há grant nenhum a esticar. Não reduz: quem tem
         # assinatura ativa não perde acesso por falta de linha nossa.
         return "nao_reduz"
+
+    if status == "past_due":
+        # Cobrança em atraso, assinatura ainda viva: o Stripe está retentando.
+        # NÃO se repara nada aqui — o `current_period_end` do `past_due` é o
+        # período que já venceu, então esticar por ele seria no-op ou mentira.
+        #
+        # Dentro da carência o acesso É SEGURADO, e o retorno é `carencia` em
+        # vez de `nao_reduz` por um motivo operacional: atraso durante o dunning
+        # é estado ESPERADO, não anomalia. Alertar a cada passada viraria ruído
+        # diário — e alerta que dispara todo dia é alerta que ninguém lê no dia
+        # em que importa.
+        if datetime.now(timezone.utc) <= alvo["ends_at"] + timedelta(days=PAST_DUE_CARENCIA_DIAS):
+            return "carencia"
+        # Passou o teto: reduz mesmo com a assinatura viva. É isto que impede a
+        # cauda infinita — sem o teto, `past_due` nunca reduziria.
+        return "reduz"
+
     if alvo["ends_at"] >= fim:
         # O grant já cobre o que o Stripe promete, e mesmo assim a projeção quis
         # reduzir. Não decide nada por conta própria.
-        # ponytail: teto conhecido — `past_due` entra aqui, porque
-        # `_find_active_subscription` a considera viva e o `current_period_end`
-        # dela é o período JÁ vencido. Resultado: alerta e nada escrito, todo
-        # dia. A regra do `past_due` é decisão do dono, pendente.
         return "nao_reduz"
 
     from db.plan_grants import upsert_grant
@@ -247,6 +285,14 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
 
     if origem == "varredura" and _e_reducao(plano_atual, expira_atual, plano, expira):
         veredito = _reparar_grant_pelo_stripe(user_id, conta, grants)
+        if veredito == "carencia":
+            # Atraso dentro da carência: segura o acesso e só LOGA. Sem alerta —
+            # dunning é estado esperado, e alerta diário vira ruído.
+            _observar(user_id, "projecao_past_due_em_carencia",
+                      f"Assinatura past_due dentro da carencia de "
+                      f"{PAST_DUE_CARENCIA_DIAS} dias; acesso mantido.",
+                      alerta=None)
+            return None
         if veredito in ("indisponivel", "nao_reduz"):
             _alertar_reducao_nao_confirmada(user_id, plano_atual, veredito)
             return None                      # falha na direção reparável
@@ -285,8 +331,11 @@ def _alertar_reducao_nao_confirmada(user_id: int, plano: str, motivo: str) -> No
               f"({motivo}).")
 
 
-def _observar(user_id: int, evento: str, mensagem: str, alerta: str) -> None:
+def _observar(user_id: int, evento: str, mensagem: str, alerta: str | None) -> None:
     """Loga sempre; alerta no máximo 1x/dia por usuário e evento.
+
+    `alerta=None` loga e NÃO alerta — para estado esperado (dunning), onde o
+    ping diário só ensinaria a ignorar o canal.
 
     Falha silenciosa: observabilidade nunca derruba cobrança.
     """
@@ -295,6 +344,8 @@ def _observar(user_id: int, evento: str, mensagem: str, alerta: str) -> None:
 
         log_system_event_sync("warning", evento, mensagem,
                               source="billing", user_id=int(user_id))
+        if alerta is None:
+            return
         if not recent_event_exists(f"{evento}_alertado", int(user_id), within_days=1.0):
             from core.services.admin_notify import _send
 

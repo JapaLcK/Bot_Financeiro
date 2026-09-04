@@ -1,14 +1,11 @@
 """
 tests/test_billing_grants_materializacao.py — §4.1.1 e §4.1.2 do
 docs/plano_pix_anual_asaas.md: materialização obrigatória do grant e regra da
-redução. Casos 9a–9e, 9g e 9h do §16.
+redução. Casos 9a, 9b, 9g e 9h do §16, mais o checkout sem `subscription` (B-1). A
+regra da redução (9c–9e, B-2, B-3) mora em `test_billing_grants_reducao.py`.
 
-Terceiro arquivo, e não um apêndice dos outros dois: o corte pedido punha 9a–9e
-+ 9g + 9h dentro de `..._projecao.py`, o que levava aquele arquivo a ~600
-linhas — o dobro do teto de 350 que motivou o corte. "Um arquivo por assunto"
-continua valendo: o assunto aqui é a decisão v6 (o grant não pode ficar para
-trás, e ninguém é rebaixado sem confirmação), que não é nem backfill nem
-projeção pura.
+O assunto aqui é o grant ENTRAR: materialização obrigatória e idempotência da
+reentrega. O grant SAIR é o arquivo da redução.
 """
 from __future__ import annotations
 
@@ -16,13 +13,11 @@ from datetime import datetime, timedelta, timezone
 
 from _billing_grants_helpers import (
     conta as _conta, evt_checkout as _evt_checkout, evt_deleted as _evt_deleted,
-    evt_paid as _evt_paid, garantir_system_event_logs, grant as _grant,
-    ler as _ler, set_customer, sub_stripe as _sub,
+    evt_paid as _evt_paid, garantir_system_event_logs, ler as _ler,
+    sub_stripe as _sub,
 )
-from core.services import billing_access
-from core.services.billing_access import recompute_entitlement
 from db.connection import get_conn
-from db.plan_grants import list_grants, upsert_grant
+from db.plan_grants import list_grants
 from test_billing_webhook_lifecycle import _post, _setup
 
 
@@ -115,102 +110,6 @@ def test_9b_funil_nao_duplica_na_reentrega(user_id, monkeypatch):
     assert _funil(uid) == 1, "reentrega inflou a conversão do funil"
 
 
-# ── 9c / 9d / 9e: a regra da redução (§4.1.1 B) ───────────────────────────────
-
-class _FakeStripeSubs:
-    """Só o `Subscription.list` que o `_find_active_subscription` usa."""
-
-    def __init__(self, ativa=None, erro=False):
-        self._ativa, self._erro = ativa, erro
-        outer = self
-
-        class _S:
-            @staticmethod
-            def list(customer=None, status=None, limit=None):
-                if outer._erro:
-                    raise RuntimeError("stripe fora do ar")
-                if status == "active" and outer._ativa:
-                    return {"data": [outer._ativa]}
-                return {"data": []}
-
-        self.Subscription = _S
-
-
-def _cenario_grant_defasado(uid: int, dias_restantes: int = 330):
-    """Grant congelado no período anterior + auth_accounts fresco.
-
-    É o estado que "materialização falhou" e "assinatura acabou" produzem
-    IGUAL — e é por isso que só o Stripe pode separar os dois.
-    """
-    agora = datetime.now(timezone.utc)
-    _conta(uid, "pro", agora + timedelta(days=dias_restantes), "active")
-    set_customer(uid, f"cus_{uid}")
-    upsert_grant(uid, "stripe", f"sub_def_{uid}", "pro",
-                 agora - timedelta(days=395), agora - timedelta(days=30), 1_000)
-    return agora
-
-
-def test_9c_varredura_repara_o_grant_defasado_e_NAO_rebaixa_o_pagante(user_id, monkeypatch):
-    """BLOQUEADOR 3 — a classe que derrubava pagante (`pro/2027-07-01 → free/None`).
-
-    Assinatura VIVA no Stripe: a varredura consulta, repara o grant a partir
-    dela, e em nenhum instante a conta fica `free`.
-    """
-    agora = _cenario_grant_defasado(user_id)
-    fim = agora + timedelta(days=330)
-    viva = {"id": f"sub_def_{user_id}", "status": "active",
-            "current_period_end": int(fim.timestamp()),
-            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=viva))
-
-    resultado = recompute_entitlement(user_id, origem="varredura")
-
-    assert _ler(user_id)["plan"] == "pro", "pagante foi rebaixado pela varredura"
-    assert resultado and resultado["plan"] == "pro"
-    g = _grant(user_id, "stripe")
-    assert g["ends_at"] > agora, "o grant defasado não foi reparado"
-    assert g["plan_stored"] == "pro", "o reparo não pode inventar tier"
-
-
-def test_9d_stripe_indisponivel_nao_escreve_nada_e_alerta(user_id, monkeypatch):
-    """BLOQUEADOR 3, variante: rebaixar por timeout de rede é perda de produto
-    de quem pagou. Não reduz, loga, alerta."""
-    _cenario_grant_defasado(user_id)
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(erro=True))
-
-    alertas: list[str] = []
-    import core.services.admin_notify as admin_notify
-    monkeypatch.setattr(admin_notify, "_send", lambda m: alertas.append(m) or True)
-
-    assert recompute_entitlement(user_id, origem="varredura") is None
-    assert _ler(user_id)["plan"] == "pro", "rebaixou sem o Stripe confirmar"
-    assert len(alertas) == 1
-
-
-def test_9e_POSITIVO_assinatura_encerrada_de_fato_REDUZ(user_id, monkeypatch):
-    """BLOQUEADOR 3, positivo. Sem ele o grupo passaria num código que NUNCA
-    rebaixa — pior que o bug, porque quem cancelou continuaria com o produto."""
-    _cenario_grant_defasado(user_id)
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=None))
-
-    assert recompute_entitlement(user_id, origem="varredura") == {
-        "plan": "free", "plan_expires_at": None}
-    assert _ler(user_id)["plan"] == "free"
-
-
-def test_9e_reducao_por_EVENTO_nao_consulta_o_stripe(user_id, monkeypatch):
-    """A outra metade da regra: evento É autoridade e reduz direto. Se o
-    caminho de evento consultasse o Stripe, um cancelamento durante uma queda
-    do Stripe ficaria sem efeito."""
-    _cenario_grant_defasado(user_id)
-
-    def _explode(*a, **k):
-        raise AssertionError("o caminho de EVENTO não pode consultar o Stripe")
-
-    monkeypatch.setattr(billing_access, "_reparar_grant_pelo_stripe", _explode)
-    assert recompute_entitlement(user_id) == {"plan": "free", "plan_expires_at": None}
-
-
 # ── 9g / 9h: identidade da assinatura ─────────────────────────────────────────
 
 def test_9g_subscription_string_e_expandida_dao_a_MESMA_chave(user_id, monkeypatch):
@@ -271,55 +170,3 @@ def test_B1_checkout_SEM_subscription_nao_estoura(user_id, monkeypatch):
     assert r.status_code == 200, r.text
     assert list_grants(uid) == [], "sessão sem assinatura não pode virar grant"
     assert _funil(uid) == 1, "o ramo 'sem subscription' precisa continuar alcançável"
-
-
-def test_B2_assinatura_VIVA_com_so_grant_legacy_nao_rebaixa(user_id, monkeypatch):
-    """O Stripe confirma assinatura VIVA e o único grant é `legacy` — que é
-    exatamente o que o backfill cria para toda a base pagante do deploy.
-
-    O código reduzia: `alvo is None` (nenhum grant `stripe` casando o `sub_id`)
-    virava veredito `reduz`, com o gateway dizendo o contrário. Assinatura viva
-    nunca pode resultar em redução.
-    """
-    agora = datetime.now(timezone.utc)
-    _conta(user_id, "pro", agora + timedelta(days=330), "active")
-    set_customer(user_id, f"cus_{user_id}")
-    upsert_grant(user_id, "legacy", f"legacy:{user_id}", "pro",
-                 agora - timedelta(days=395), agora - timedelta(days=30), 0)
-
-    fim = agora + timedelta(days=330)
-    viva = {"id": "sub_que_nao_tem_grant", "status": "active",
-            "current_period_end": int(fim.timestamp()),
-            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=viva))
-
-    resultado = recompute_entitlement(user_id, origem="varredura")
-
-    assert _ler(user_id)["plan"] == "pro", "pagante com assinatura VIVA foi rebaixado"
-    assert resultado is None or resultado["plan"] != "free"
-    g = _grant(user_id, "legacy")
-    assert g["ends_at"] > agora, "o legacy defasado não foi reparado a partir do Stripe"
-
-
-def test_B2_assinatura_viva_sem_grant_nenhum_nao_reduz(user_id, monkeypatch):
-    """Sem grant algum para esticar, a varredura não decide nada: alerta e não
-    escreve. Reduzir aqui tiraria acesso de quem o Stripe diz que está pagando."""
-    agora = datetime.now(timezone.utc)
-    _conta(user_id, "pro", agora + timedelta(days=330), "active")
-    set_customer(user_id, f"cus_{user_id}")
-    upsert_grant(user_id, "admin", f"admin:{user_id}", "pro",
-                 agora - timedelta(days=40), agora - timedelta(days=1), 1)
-
-    fim = agora + timedelta(days=330)
-    viva = {"id": "sub_orfa", "status": "active",
-            "current_period_end": int(fim.timestamp()),
-            "items": {"data": [{"current_period_end": int(fim.timestamp())}]}}
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _FakeStripeSubs(ativa=viva))
-
-    alertas: list[str] = []
-    import core.services.admin_notify as admin_notify
-    monkeypatch.setattr(admin_notify, "_send", lambda m: alertas.append(m) or True)
-
-    assert recompute_entitlement(user_id, origem="varredura") is None
-    assert _ler(user_id)["plan"] == "pro"
-    assert len(alertas) == 1
