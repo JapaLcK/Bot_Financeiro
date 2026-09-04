@@ -190,8 +190,13 @@ def test_subscription_deleted_volta_pra_free(user_id, monkeypatch):
             conn.commit()
         r = _post(
             client, fake,
+            # O `id` da assinatura no objeto é o que o Stripe REAL sempre manda
+            # (é o identificador primário do recurso). A fixture o omitia, e a
+            # revogação de grant é por `(source, external_ref)`: sem ele o teste
+            # exercitava um payload que a plataforma não produz.
             {"type": "customer.subscription.deleted",
-             "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}},
+             "data": {"object": {"id": "sub_life",
+                                 "metadata": {"finbot_user_id": str(uid)}}}},
         )
         assert r.status_code == 200, r.text
         row = db.get_auth_user(uid)
@@ -261,8 +266,13 @@ def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
         # tem de continuar FECHADO (quem barra agora é o paywall).
         r = _post(
             client, fake,
+            # O `id` da assinatura no objeto é o que o Stripe REAL sempre manda
+            # (é o identificador primário do recurso). A fixture o omitia, e a
+            # revogação de grant é por `(source, external_ref)`: sem ele o teste
+            # exercitava um payload que a plataforma não produz.
             {"type": "customer.subscription.deleted",
-             "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}},
+             "data": {"object": {"id": "sub_gate",
+                                 "metadata": {"finbot_user_id": str(uid)}}}},
         )
         assert r.status_code == 200, r.text
         assert db.get_auth_user(uid)["plan"] == "free", "pré-condição da 2ª metade"

@@ -121,26 +121,21 @@ def upsert_grant(
 def revoke_grant(
     user_id: int,
     source: str,
-    external_ref: str | None,
+    external_ref: str,
     reason: str,
     event_version: int,
     last_event_id: str | None = None,
 ) -> bool:
-    """Revoga grant(s) do usuário. Devolve True se revogou alguma linha.
+    """Revoga UM grant, identificado por `(user_id, source, external_ref)`.
 
-    **`external_ref=None` revoga TODOS os grants ativos daquela `source`.** É
-    uma saída de emergência, não o caminho normal, e o chamador só deve usá-la
-    quando o evento NÃO identifica o que revogar — no
-    `customer.subscription.deleted` cujo objeto vem sem `id`. Amarrar a
-    revogação a um id que não veio deixava o grant vivo e a projeção seguinte
-    RESSUSCITAVA o plano por cima do `free` que o webhook acabara de escrever
-    (pego por
-    `tests/test_billing_webhook_lifecycle.py::test_checkout_completed_fecha_o_gate_de_escolha`).
-
-    O oposto também é defeito, e pior porque é dinheiro: usar `None` quando o id
-    VEIO revoga a assinatura nova já paga junto com a antiga que está sendo
-    cancelada, e rebaixa quem está em dia. Passe o `external_ref` sempre que
-    tiver um.
+    **Revoga só o que o evento nomeia.** Existiu aqui um `external_ref=None` que
+    varria todos os grants ativos da `source`; foi apagado por não ter caso
+    alcançável que o justificasse — o objeto `Subscription` do Stripe sempre
+    traz `id`, e o único lugar onde ele faltava era uma fixture sintética de
+    teste. O caminho amplo custava dinheiro: com duas assinaturas vivas, o
+    `deleted` da ANTIGA revogava junto a NOVA já paga e rebaixava quem estava
+    em dia. Caminho sem prova, num fluxo de acesso pago, é o que faz a próxima
+    pessoa achar que a regra está coberta quando não está.
 
     **`event_version <= %s`, e não `<`: é aqui que mora o §6.1.**
     `event["created"]` do Stripe tem precisão de SEGUNDOS, então `invoice.paid` e
@@ -174,13 +169,12 @@ def revoke_grant(
                 "   set status = 'revoked', revoked_reason = %s, revoked_at = now(),"
                 "       event_version = %s, last_event_id = coalesce(%s, last_event_id),"
                 "       updated_at = now()"
-                " where user_id = %s and source = %s"
-                "   and (%s::text is null or external_ref = %s)"
+                " where user_id = %s and source = %s and external_ref = %s"
                 "   and status <> 'revoked'"
                 "   and event_version <= %s"
                 " returning id",
                 (reason, int(event_version), last_event_id,
-                 int(user_id), source, external_ref, external_ref, int(event_version)),
+                 int(user_id), source, external_ref, int(event_version)),
             )
             aplicou = cur.fetchone() is not None
             if aplicou and source == "stripe":
@@ -224,10 +218,13 @@ def users_com_grant_na_janela(desde) -> list[int]:
     Ela é AUTO-CURATIVA de propósito: a passada por janela só conserta o que
     transicionou DENTRO da janela, então um processo fora do ar por mais tempo
     que a janela deixava o `status='active'` e o `plan` velhos para sempre. Sem
-    janela não existe "mais tempo que a janela". O custo é um `recompute` por
-    usuário com grant ativo por dia, e o pior caso mede o número de PAGANTES —
-    se um dia isso doer, o upgrade é comparar a projeção com os grants em SQL e
-    reprojetar só quem divergir.
+    janela não existe "mais tempo que a janela".
+
+    ponytail: o custo é um `recompute` por usuário com grant ativo **por dia E
+    por boot** — a primeira volta do loop também roda sem janela, e no Railway
+    todo deploy é um boot, então dias de deploy pagam mais de uma vez. O pior
+    caso mede o número de PAGANTES. Se doer, o upgrade é comparar projeção ×
+    grants em SQL e reprojetar só quem divergir.
     """
     sql = "select distinct user_id from plan_grants where status = 'active'"
     params: tuple = ()

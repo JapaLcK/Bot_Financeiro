@@ -1,11 +1,13 @@
 """
-tests/test_billing_grants_projecao.py — projeção de `plan_grants` (§4 e §6 do
-docs/plano_pix_anual_asaas.md), ordem de eventos e reparo manual do admin.
+tests/test_billing_grants_projecao.py — projeção pura, ordem de eventos (§4 e §6
+do docs/plano_pix_anual_asaas.md) e o reparo manual do admin (§15).
 
-Casos 8, 9, 10, 12, 12b, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 49 e 50 do §16.
+Casos 12–24 e 49–50 do §16. Backfill e guardas de escrita ficam em
+`test_billing_grants_backfill.py`; materialização e regra da redução em
+`test_billing_grants_materializacao.py`.
 
-Os casos 20 e 20b (antecipação no cancelamento manual) NÃO estão aqui: eles
-dependem de `pix_charges.stripe_subscription_id`, e `pix_charges` é do PR 1b.
+Os casos 20 e 20b (antecipação no cancelamento manual) são do PR 1b: dependem
+de `pix_charges.stripe_subscription_id`.
 """
 from __future__ import annotations
 
@@ -13,13 +15,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _billing_grants_helpers import conta as _conta, ler as _ler
 from core.services import billing_access
 from core.services.billing_access import (
     projetar_grants,
     recompute_entitlement,
     reprojetar_grants_recentes,
 )
-from db.connection import get_conn
 from db.plan_grants import list_grants, revoke_grant, upsert_grant
 
 AGORA = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -115,84 +117,8 @@ def test_projecao_ignora_grant_revogado_e_vencido():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# recompute_entitlement contra o banco — casos 8, 9, 10, 23
+# Latência da entrada de grant futuro (§4.3) — caso 23
 # ──────────────────────────────────────────────────────────────────────────────
-
-def _conta(uid: int, plan: str, expires, status: str = "inactive") -> None:
-    """Cria/atualiza a auth_accounts do usuário da fixture.
-
-    UPDATE e só então INSERT: `auth_accounts` não tem unique em `user_id`
-    (só em email/phone), então `on conflict (user_id)` não existe.
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update auth_accounts set plan=%s, plan_expires_at=%s,"
-                "       last_payment_status=%s where user_id=%s",
-                (plan, expires, status, uid),
-            )
-            if cur.rowcount == 0:
-                cur.execute(
-                    "insert into auth_accounts (user_id, email, password_hash, plan,"
-                    "                           plan_expires_at, last_payment_status)"
-                    " values (%s, %s, 'x', %s, %s, %s)",
-                    (uid, f"grants-{uid}@t.local", plan, expires, status),
-                )
-        conn.commit()
-    from db_support import invalidate_auth_user_cache
-    invalidate_auth_user_cache(uid)
-
-
-def _ler(uid: int) -> dict:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select plan, plan_expires_at, last_payment_status"
-                "  from auth_accounts where user_id = %s", (uid,))
-            return dict(cur.fetchone())
-
-
-def test_08_conta_paga_sem_nenhum_grant_nao_escreve_e_alerta(user_id, monkeypatch):
-    """A guarda que torna o PR reversível: ausência de grant é DESCONHECIMENTO.
-    Se a projeção escrevesse 'free' aqui, o revert do PR encontraria a base
-    pagante já rebaixada."""
-    expira = datetime.now(timezone.utc) + timedelta(days=200)
-    _conta(user_id, "pro", expira, "active")
-
-    alertas: list[str] = []
-    import core.services.admin_notify as admin_notify
-    monkeypatch.setattr(admin_notify, "_send", lambda msg: alertas.append(msg) or True)
-
-    assert recompute_entitlement(user_id) is None
-    row = _ler(user_id)
-    assert row["plan"] == "pro"
-    assert row["plan_expires_at"] == expira
-    assert len(alertas) == 1, "conta paga sem grant tem de alertar"
-
-
-def test_09_grants_todos_vencidos_rebaixam_para_free(user_id):
-    """A guarda do 8 não pode virar 'nunca rebaixa': com grants, há informação."""
-    _conta(user_id, "pro", datetime.now(timezone.utc) + timedelta(days=200), "active")
-    agora = datetime.now(timezone.utc)
-    upsert_grant(user_id, "stripe", f"sub_venc_{user_id}", "pro",
-                 agora - timedelta(days=400), agora - timedelta(days=1), 1000)
-
-    assert recompute_entitlement(user_id) == {"plan": "free", "plan_expires_at": None}
-    row = _ler(user_id)
-    assert row["plan"] == "free" and row["plan_expires_at"] is None
-
-
-def test_10_vitalicio_sai_antes_de_qualquer_escrita(user_id):
-    """Duas saídas antecipadas: `grandfathered` e pago com validade NULL."""
-    _conta(user_id, "pro", None, "grandfathered")
-    assert recompute_entitlement(user_id) is None
-    assert _ler(user_id)["plan"] == "pro"
-
-    # vitalício DE FATO (sem o status): validade NULL não é "venceu"
-    _conta(user_id, "pro_max", None, "active")
-    assert recompute_entitlement(user_id) is None
-    assert _ler(user_id)["plan"] == "pro_max"
-
 
 def test_23_grant_que_comecou_ha_90s_entra_na_passada_de_60s(user_id):
     """§4.3 — grant futuro que vira vigente é transição sem evento externo

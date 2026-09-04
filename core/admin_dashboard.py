@@ -1382,8 +1382,25 @@ def set_account_plan(
                     with conn.transaction():
                         _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
                 except Exception as exc:
-                    print(f"[admin] grant do admin falhou user={row['user_id']}: {exc}",
-                          file=sys.stderr)
+                    # Observabilidade de VERDADE, não print: o §15 nomeia esta
+                    # rota como ferramenta de conciliação que não pode ser
+                    # desligada, e a varredura diária desfaz o ajuste em até
+                    # 24 h. Sem alerta, o admin acha que reparou e ninguém vê
+                    # o plano voltar sozinho.
+                    from core.observability import log_system_event_sync
+                    log_system_event_sync(
+                        "error", "admin_grant_nao_gravado",
+                        "set_account_plan gravou auth_accounts mas NAO o grant; "
+                        "a reprojecao vai desfazer o ajuste.",
+                        source="admin", user_id=int(row["user_id"]),
+                        details={"plan": plan, "months": int(months), "erro": str(exc)[:300]},
+                    )
+                    try:
+                        from core.services.admin_notify import _send
+                        _send(f"Reparo manual do admin na conta {row['user_id']} "
+                              f"({plan}) NAO virou grant: {str(exc)[:200]}")
+                    except Exception:
+                        pass
         conn.commit()
         if row:
             from db_support import invalidate_auth_user_cache
@@ -1401,8 +1418,12 @@ def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
     concedido a menos — ela não pode ser desligada pelo PR que cria os casos que
     ela repara.
 
-    Roda no MESMO cursor/transação do UPDATE de `auth_accounts`: ou os dois
-    entram, ou nenhum.
+    Roda no mesmo cursor, mas sob SAVEPOINT: o UPDATE de `auth_accounts` entra
+    mesmo que este grant falhe. Não é "ou os dois, ou nenhum" — é deliberado ao
+    contrário, porque esta é a ferramenta de REPARO manual e ela não pode ser a
+    peça mais frágil do sistema. O preço é ficar com a coluna certa e o grant
+    ausente, o que a reprojeção desfaz em até 24 h; por isso a falha alerta
+    (`admin_grant_nao_gravado`) em vez de sumir num stderr.
 
     `event_version = epoch(now)` põe a ordem humana acima de qualquer evento de
     gateway já recebido; um webhook FUTURO ainda ganha, que é o comportamento

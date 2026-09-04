@@ -47,6 +47,27 @@ Fechado e não reaberto: afiliado fora · GA4 e Meta CAPI dentro · sem trial ·
 
 ---
 
+## 1.2 v6 — o bloqueio do PR 1a e a decisão do dono
+
+O Tester provou (D4) que o resync ressuscitava grant `legacy` revogado. O conserto do Coder (`where status='active'`) fechou isso e **abriu dinheiro**: medido pelo Manager, `pro/2027-07-01 → free/None`, e o caminho provável nem é o revert — é a renovação cujo `upsert_grant` estourou dentro de um `except/print`.
+
+**Decisão do dono, e ela supera as duas leituras anteriores:** o defeito não é a projeção nem o resync — é a **gravação do grant ser opcional**.
+
+| # | o que muda | onde |
+|---|---|---|
+| 1 | **materializar o grant é obrigatório**: primeiro efeito do ramo, sem `except`, falha vira **5xx retryable**, reentrega idempotente e reparadora | **§4.1.1 A**, §14 item 4 |
+| 2 | **a projeção só reduz cobertura quando a redução é confirmada** — por evento, ou consultando o **Stripe** na varredura; sem confirmação, não escreve e alerta | **§4.1.1 B**, §4.1 |
+| 3 | o 5xx reentrega o evento **inteiro**: ordem + dedup por efeito, com **unique no funil** e **dedup de e-mail no `_fire_email`** | **§4.1.2** |
+| 4 | o resync do boot vira **backfill inicial único** (`not exists` + `do nothing`): não repara, não copia projeção para grant, **sem rede no boot** | **§5.1** |
+| 5 | reparo de grant só a partir de **estado autoritativo do Stripe**, fora do boot | §4.1.1 B |
+| 6 | `checkout.session.completed` e `invoice.paid` usam a **mesma normalização** da referência de assinatura | §14 item 4, teste 9g |
+| 7 | quatro blocos que o código já tinha e o plano não: `distinct on`/guarda do resync, `user_id` no upsert e a cláusula morta do desempate, varredura sem janela, revogação do admin em **toda** troca de plano | §5.1, §6, §4.3, §14 item 5 |
+| 8 | a propriedade (b) da reversibilidade **mudou de mecanismo** — não é mais o boot | §17 |
+
+**Descartada:** estender a guarda da projeção para "nenhum grant cobre agora, mas `auth_accounts` diz pago e vigente". Ela tratava o sintoma e mantinha a gravação do grant opcional.
+
+---
+
 ## 2. Objetivo
 
 Vender o plano anual por **uma cobrança Pix**, com acesso e dinheiro corretos em toda combinação com o Stripe — inclusive quando o processo morre no meio, quando os eventos chegam fora de ordem, quando a conta foi excluída e **no dia do deploy, com a base pagante já existente**.
@@ -166,10 +187,83 @@ recompute_entitlement(user_id):
     grava em auth_accounts
 ```
 
-**A guarda "sem nenhum grant não escreve"** é o que torna o PR 1a reversível: ausência de grant é *desconhecimento*, não *ausência de direito*. Quem tem grants e todos venceram **é** rebaixado — aí há informação.
+Depois de projetar, **antes de gravar**, a regra da redução (§4.1.1):
 
-`GAP_TOLERANCIA` é 120 s porque todo encadeamento que nós geramos é exato; buraco real é sempre de **dias**.
-> `ponytail:` constante fixa, não env. Vira parâmetro no dia em que existir produtor de grants com data arredondada em dia.
+```
+    reduz = (plano == 'free') or (expira < plan_expires_at atual)
+    se reduz e motivo == 'varredura':
+        autoridade = consulta ao Stripe (a assinatura do usuário)
+        se autoridade indisponível (erro/timeout):
+            log "projecao_reducao_nao_confirmada" + admin_notify (1x/dia); return
+        se autoridade mostra assinatura ativa mais longa que o grant:
+            repara o grant a partir DELA (upsert_grant) e reprojeta
+        senão:
+            grava a redução                      # confirmada: não há assinatura
+    grava em auth_accounts
+```
+
+### 4.1.1 Materialização obrigatória do grant + regra da redução (decisão do dono, v6)
+
+**O que estava errado não era a projeção: era a gravação do grant ser OPCIONAL.** `_registrar_grant_stripe` (`frontend/finance_bot_websocket_custom.py:4751`) engolia a exceção com um `print`, então uma renovação em que o `update_user_plan` entrava e o `upsert_grant` estourava deixava o grant parado no período anterior — e a varredura seguinte rebaixava um pagante. O resync do boot mascarava isso copiando `auth_accounts` de volta para o grant, o que transformava a **projeção** em fonte de verdade e ressuscitava grant revogado (D4).
+
+Duas decisões, nesta ordem:
+
+**(A) Materializar o grant é parte obrigatória do processamento do evento.**
+
+1. **`upsert_grant` roda ANTES** de qualquer escrita de projeção, e é o **primeiro** efeito do ramo;
+2. **o `except`/`print` sai**: a exceção **propaga**;
+3. a resposta ao Stripe vira **5xx**, que é **retryable** — mesmo tratamento que o `claim_trial_for_user` já tem no mesmo handler ("falha precisa propagar: resposta 5xx faz a Stripe repetir o webhook");
+4. `auth_accounts` passa a ser recalculado **a partir dos grants** (`recompute_entitlement`), nunca escrito à mão em paralelo;
+5. a reentrega é **idempotente e reparadora**: `upsert_grant` é `on conflict (source, external_ref)` com guarda de `event_version`, então o retry conclui a operação sem duplicar (§4.1.2 detalha efeito por efeito).
+
+Com isso a única defasagem possível é a **oposta** — grant novo, `auth_accounts` velho —, que a projeção seguinte cura sozinha. **O modelo de escrita pode estar à frente do de leitura; nunca atrás.**
+
+**(B) A projeção só REDUZ cobertura quando a redução é confirmada.**
+
+Uma regra no lugar de três guardas. Reduzir (virar `free` ou encurtar `plan_expires_at`) exige uma de duas autoridades:
+
+| origem da redução | o que a confirma |
+|---|---|
+| **evento** (webhook do Stripe/Asaas) | o próprio evento — ele *é* a autoridade, e chegou agora |
+| **varredura** (60 s ou diária), sem evento | **consulta ao Stripe**: sem assinatura ativa → reduz; assinatura ativa mais longa que o grant → **repara o grant a partir dela** e reprojeta; Stripe indisponível → **não escreve**, loga, alerta |
+
+O que cada caso vira, e por que nenhum legítimo é bloqueado:
+
+| situação | resultado |
+|---|---|
+| grant defasado (materialização falhou) | varredura consulta o Stripe, vê a assinatura viva, **repara o grant** — o pagante nem chega a ser rebaixado |
+| assinatura cancelada / lapsada | varredura consulta, não há assinatura ativa, **reduz** ✔ |
+| `subscription.deleted` | redução por **evento**, não passa pela consulta ✔ |
+| estorno/chargeback (1b) | redução por **evento** ✔ |
+| Stripe fora do ar | **não reduz** + alerta — falha na direção reparável |
+| downgrade agendado (1b) | não é redução: há grant vigente ✔ |
+
+Isso satisfaz "nunca rebaixar enquanto houver falha conhecida de materialização" sem inventar flag: **falha de materialização = grant que não bate com o Stripe**, e é exatamente o que a consulta descobre. E satisfaz "reparar só a partir de estado autoritativo": o único lugar que repara grant lê o **Stripe**, nunca `auth_accounts`.
+
+> `ponytail:` a consulta só acontece no caminho de **redução por varredura** — punhado de contas por dia (as que expiram de fato), não a base. O custo é uma chamada por conta reduzida. Se um dia doer, o upgrade é agrupar por `stripe_customer_id` e consultar em lote.
+
+### 4.1.2 O 5xx reentrega o evento INTEIRO — efeito por efeito
+
+Passar a devolver 5xx tem preço, e ele tem de estar escrito: a Stripe reentrega **o evento todo**, não o pedaço que falhou. O mecanismo tem duas partes.
+
+**Parte 1 — ordem.** O grant é o **primeiro** efeito do ramo. Se ele falha, **nada depois rodou**: sem e-mail, sem funil, sem GA4/CAPI, sem `mark_plan_selected`. A primeira reentrega, portanto, não repete nada — ela *executa* pela primeira vez. Duplicata só existe quando o grant passa e algo **depois** falha, que é o mesmo comportamento que o handler já tem hoje para qualquer exceção inesperada.
+
+**Parte 2 — dedup por efeito**, para a reentrega desse segundo caso:
+
+| efeito | na reentrega | mecanismo |
+|---|---|---|
+| `upsert_grant` | idempotente | `on conflict (source, external_ref)` + guarda de `event_version` |
+| `recompute_entitlement` | idempotente | é função do estado, não do evento |
+| `update_user_plan` / `set_payment_status` | idempotente | escrita do mesmo valor |
+| `mark_plan_selected` | idempotente | `where plan_selected_at is null` (já era) |
+| `claim_trial_for_user` | idempotente | 1 por telefone, na vida (já era) |
+| **`record_checkout_completed`** (funil) | **duplicava** | **unique parcial `(session_id, kind)` + `on conflict do nothing`** em `db/checkout_funnel.py` — 1 linha de DDL, 1 de SQL, e conserta também a duplicação que a reentrega de hoje já causa |
+| **e-mail** (`send_pro_welcome_email`, `send_pro_charged_email`) | **duplicava** | **dedup no `_fire_email`**, que é o ponto único por onde os dois passam: `recent_event_exists(<chave>, user_id, 1.0)` antes de enviar e `log_system_event` depois — o mesmo padrão do `trial_ending_email_sent` que já existe no repo |
+| GA4 `send_purchase` | dedup do outro lado | `transaction_id` (sessão/fatura) |
+| Meta CAPI | dedup do outro lado | `event_id` (`purchase_<id>`) |
+| `admin_notify` (`notify_new_pro`) | **pode duplicar, aceito** | é ping interno para o dono; dedup aqui custaria mais do que a linha repetida no Discord. Registrado, não silenciado |
+
+**Entrega "pelo menos uma vez" para e-mail no fluxo do Stripe fica RESTRITA à janela residual** (cair entre enviar e registrar o envio), igual ao que o §8.2 já decidiu para o Pix. O que não se aceita é e-mail novo **a cada retry** — isso o dedup fecha.
 
 ### 4.2 Precedência entre gateways (consequência da projeção)
 
@@ -189,12 +283,19 @@ recompute_entitlement(user_id):
 O loop de 60 s que drena a outbox roda também:
 
 ```sql
+-- passada de 60 s: só quem transicionou desde a última
 select distinct user_id from plan_grants
  where status='active' and (starts_at between :ultima_passada and now()
                          or ends_at   between :ultima_passada and now())
+
+-- varredura diária (`desde = None`): TODOS os usuários com grant ativo
+select distinct user_id from plan_grants where status='active'
 ```
 
-Indexada, zero linhas quase sempre. **Nenhum job novo.** A varredura diária segue como rede de segurança.
+A passada de 60 s é indexada e devolve zero linhas quase sempre. **Nenhum job novo.**
+
+A varredura diária **não tem janela** (conserto D8): a versão com janela de 25 h só consertava o que transicionou *dentro* dela, então processo fora do ar por mais tempo que a janela deixava `plan` e `status` velhos **para sempre**. Sem janela não existe "mais tempo que a janela" — é auto-curativa por construção.
+> `ponytail:` custo = um `recompute` por usuário com grant ativo por dia; o pior caso mede o número de **pagantes**. Se doer, o upgrade é comparar projeção × grants em SQL e reprojetar só quem divergir.
 
 ### 4.4 Antecipação no cancelamento manual do Stripe
 
@@ -239,32 +340,37 @@ Continua valendo a copy do PR 2: **"não cancele pela sua conta no Stripe"**.
 
 **Problema:** no deploy, a base pagante tem `plan`/`plan_expires_at` e nenhum grant.
 
-### 5.1 O resync (roda no boot, idempotente e auto-corretivo)
+### 5.1 O backfill inicial (roda no boot, sem rede, NÃO é reparador)
 
 No bloco DDL idempotente de `db/schema.py`, depois do `create table plan_grants`, no estilo dos backfills que já existem ali (`plan_selected_at`, `onboarding_completed_at`, `:1709-1730`):
 
 ```sql
 insert into plan_grants (user_id, source, external_ref, plan_stored,
                          starts_at, ends_at, status, event_version)
-select a.user_id, 'legacy', 'legacy:'||a.user_id, a.plan,
+select distinct on (a.user_id)
+       a.user_id, 'legacy', 'legacy:' || a.user_id, a.plan,
        now(), a.plan_expires_at, 'active', 0
   from auth_accounts a
- where coalesce(a.plan,'free') <> 'free'
+ where coalesce(a.plan, 'free') <> 'free'
    and a.plan_expires_at is not null
    and a.plan_expires_at > now()
-   and coalesce(a.last_payment_status,'') <> 'grandfathered'
-on conflict (source, external_ref) do update
-   set ends_at    = greatest(plan_grants.ends_at, excluded.ends_at),
-       starts_at  = least(plan_grants.starts_at, excluded.starts_at),
-       plan_stored= excluded.plan_stored,
-       status     = 'active', revoked_reason = null, revoked_at = null,
-       updated_at = now()
- where plan_grants.ends_at < excluded.ends_at
+   and coalesce(a.last_payment_status, '') <> 'grandfathered'
+   and not exists (select 1 from plan_grants g where g.user_id = a.user_id)
+ order by a.user_id, a.plan_expires_at desc, a.id desc
+on conflict (source, external_ref) do nothing
 ```
 
-- **`do update` em vez de `do nothing`** (nº 4a): reverter e re-aplicar o 1a **reconcilia** o `legacy` com o modelo de leitura em vez de congelá-lo numa data vencida.
-- O `where` só **estende**; em regime é **no-op** (a projeção mantém `auth_accounts` corrente). Ele só trabalha depois de uma janela em que os grants ficaram congelados — a janela do revert.
-- Ressuscitar `legacy` revogado é inofensivo: se a revogação foi legítima, `auth_accounts` não diz "pago e vigente" e o `where` externo exclui.
+**v6: o resync deixou de reparar e virou backfill inicial ÚNICO** (decisão do dono). O `not exists` + `do nothing` dizem a mesma coisa por dois caminhos: **linha de grant existente nunca é tocada pelo boot**. Consequências, todas desejadas:
+
+- **Grant revogado não ressuscita** — não porque uma cláusula o exclui, mas porque o comando **não atualiza nada**. Fecha o D4 pela raiz, e o artefato deixa de depender de um `where` sutil.
+- **`auth_accounts` deixa de ser fonte de verdade de grant.** Ela alimenta *apenas* a criação inicial de quem não tem grant nenhum — a população que existia antes desta tabela.
+- **O reparo saiu do boot.** Grant defasado é reparado pela **regra da redução** (§4.1.1 B), que lê o **Stripe**, fora do boot. `plan_grants` não é mais realimentado por cópia da projeção.
+- **`distinct on (a.user_id)` é DISPONIBILIDADE, não estilo.** `auth_accounts` não tem unique em `user_id` (`\d auth_accounts`): duas linhas pagas e vigentes do mesmo usuário gerariam dois `legacy:<uid>` no mesmo comando e o Postgres recusa com `CardinalityViolation`. Isto roda dentro do `init_db`: o erro não degradaria a migração, **derrubaria a subida da aplicação**. Desempate determinístico pela maior validade.
+- **Sem rede, e agora sem contradição.** O §5.1 sempre proibiu chamar o Stripe no boot ("rede em migração é modo de falha"), e o boot passou a não precisar: quem consulta o Stripe é a varredura (§4.1.1 B), fora do `init_db`, fora do advisory lock, e sem o container novo do Railway esperando por ela.
+
+- ~~**`do update` em vez de `do nothing`**: reverter e re-aplicar o 1a reconcilia o `legacy` com o modelo de leitura~~ — **removido na v6**. Era esse `do update` que fazia o boot copiar a projeção para dentro do grant.
+- ~~Ressuscitar `legacy` revogado é inofensivo: se a revogação foi legítima, `auth_accounts` não diz "pago e vigente"~~ — **afirmação PROVADA FALSA pelo Tester (D4)**, riscada aqui de propósito em vez de apagada: `legacy` revogado por `superseded_by_stripe` + grant `stripe` vigente ⇒ `auth_accounts` **diz** pago e vigente ⇒ o `where` externo **não** excluía e o boot reanimava o revogado. `auth_accounts` é projeção dos grants; deixá-la recriar grant morto é transformar projeção de volta em direito.
+- **Onde foi parar a proteção do pagante:** não no resync. Ela é o §4.1.1 — materialização obrigatória (o grant não pode mais ficar para trás) e regra da redução (ninguém é rebaixado por varredura sem o Stripe confirmar).
 - **Sem chamar o Stripe.** Rede em migração é modo de falha, não de leitura.
 - **`event_version = 0`**: qualquer evento real supera o legado.
 - **Supersessão (nº 2):** todo upsert **aplicado** de grant `source='stripe'` executa, na mesma transação:
@@ -297,18 +403,23 @@ insert into plan_grants (...) values (...)
 on conflict (source, external_ref) do update
    set plan_stored=excluded.plan_stored, starts_at=excluded.starts_at,
        ends_at=excluded.ends_at, status=excluded.status,
-       event_version=excluded.event_version, updated_at=now()
- where excluded.event_version > plan_grants.event_version
-    or (excluded.event_version = plan_grants.event_version
-        and excluded.status = 'revoked' and plan_grants.status <> 'revoked')
+       event_version=excluded.event_version, last_event_id=excluded.last_event_id,
+       revoked_reason=null, revoked_at=null, updated_at=now()
+ where plan_grants.user_id = excluded.user_id
+   and excluded.event_version > plan_grants.event_version
 returning id
 ```
+
+Duas diferenças em relação à v5, e as duas estão no código:
+
+- **`plan_grants.user_id = excluded.user_id`** é o isolamento do CLAUDE.md §0 dentro do upsert: a unique é `(source, external_ref)`, que é **global**, e sem esta linha um upsert com o `external_ref` de outra conta cairia no `do update` e reescreveria plano e validade **do dono errado**.
+- **A cláusula de desempate por `excluded.status='revoked'` SAIU** — ela era inalcançável: este `insert` nasce sempre `status='active'`, então `excluded.status` nunca é `'revoked'`. Removê-la não deixou um teste vermelho, que é a definição de código morto — e código morto num caminho de acesso pago faz a próxima pessoa achar que a regra está coberta quando não está. **A metade "a revogação que empata APLICA" mora no `revoke_grant`** (`event_version <= %s`), que é UPDATE, não upsert.
 
 ### 6.1 Empate de segundo — regra determinística (correção 1)
 
 `event["created"]` do Stripe tem precisão de **segundos**, então `invoice.paid` e `subscription.deleted` **podem** empatar. Com o `>` sozinho, o segundo a chegar era descartado **em silêncio** e o acesso passava a depender da ordem de entrega. A v5 dizia que isso não ocorria; ocorre, e a linha de `ponytail:` que afirmava o contrário saiu.
 
-**A regra: no empate, a REVOGAÇÃO ganha** (segunda cláusula do `where` acima). Nada mais aplica no empate.
+**A regra: no empate, a REVOGAÇÃO ganha.** Ela é implementada em **dois lugares complementares**, e não numa cláusula só: o `>` **estrito** do upsert descarta a concessão que empata, e o **`event_version <= %s`** do `revoke_grant` faz a revogação que empata aplicar. Nada mais aplica no empate.
 
 - **É determinística nos dois sentidos de chegada.** `paid` → `deleted`: o `deleted` empata, é revogação, aplica → `revoked`. `deleted` → `paid`: o `paid` empata, não é revogação, é descartado → continua `revoked`. **Mesmo estado final nas duas ordens** — e é essa comutatividade que o teste 12b mede, não o texto.
 - **É o erro conservador certo.** No empate não há como saber qual é o mais novo; conceder acesso indevido é irreversível na direção que dói (produto entregue, dinheiro não), enquanto negar acesso indevidamente é visível, reclamável e reparável pelo grant `admin` (§15).
@@ -595,7 +706,7 @@ Guarda do dreno (§8.2 B), não estado da tabela: transição com destino **`pai
 
 ## 14. Arquivos, na ordem
 
-**PR 1a** — 1) `db/schema.py`: `plan_grants` + resync (§5). 2) `db/plan_grants.py` (novo): upsert com guarda de versão, criação-única para `pix`, supersessão do `legacy`, revoke. **A antecipação (§4.4) NÃO entra no 1a** — vai para o 1b junto com `pix_charges`. 3) `core/services/billing_access.py` (novo): `recompute_entitlement` (§4). **`plano_da_cobranca` (§7) NÃO entra no 1a** — função pura sem chamador no 1a é código especulativo (CLAUDE.md §0.2); vai para o 1b. 4) `frontend/finance_bot_websocket_custom.py`: os quatro sites (`:4699`, `:4852`, `:5032`, `:5033`) passam a grant + recompute. 5) **`core/admin_dashboard.py::set_account_plan`**: escreve grant `source='admin'`, `external_ref='admin:<uid>'`, `event_version = epoch(now)`; plano `free` **revoga todos os grants ativos** (`admin_override`). Um lugar só — `/admin/api/users/{id}/plan` e `/admin/grant-pro` compartilham a escrita (nº 9). 6) loop de 60 s de re-projeção + varredura diária.
+**PR 1a** — 1) `db/schema.py`: `plan_grants` + resync (§5). 2) `db/plan_grants.py` (novo): upsert com guarda de versão, criação-única para `pix`, supersessão do `legacy`, revoke. **A antecipação (§4.4) NÃO entra no 1a** — vai para o 1b junto com `pix_charges`. 3) `core/services/billing_access.py` (novo): `recompute_entitlement` (§4). **`plano_da_cobranca` (§7) NÃO entra no 1a** — função pura sem chamador no 1a é código especulativo (CLAUDE.md §0.2); vai para o 1b. 4) `frontend/finance_bot_websocket_custom.py`: os quatro sites (`:4699`, `:4852`, `:5032`, `:5033`) passam a grant + recompute, com o **grant como PRIMEIRO efeito e sem `except`** (§4.1.1 A) — falha vira 5xx retryable; mais o helper único de **normalização da referência de assinatura** (`_sub_ref`: id simples **e** objeto expandido produzem a MESMA `external_ref`), usado por `checkout.session.completed` e por `invoice.paid`; e `revoke_grant` no `deleted` **com o `external_ref` da assinatura que o evento nomeia**. 4b) `db/checkout_funnel.py` + DDL: unique parcial `(session_id, kind)` e `on conflict do nothing`; e dedup de e-mail no `_fire_email` (§4.1.2). 5) **`core/admin_dashboard.py::set_account_plan`**: escreve grant `source='admin'`, `external_ref='admin:<uid>'`, `event_version = epoch(now)`. **A revogação dos grants ativos vale para TODA troca manual de plano** (conserto D3), não só para `free`: sem isso, baixar de Pro para Essencial na mão deixava o grant de Pro vivo e a projeção devolvia o Pro na passada seguinte. Para `free`, o resultado é o mesmo de antes — revoga e não cria grant novo. Um lugar só — `/admin/api/users/{id}/plan` e `/admin/grant-pro` compartilham a escrita (nº 9). 6) loop de 60 s de re-projeção + varredura diária.
 
 **PR 1b** — 7) `db/schema.py`: `pix_charges`, `pix_webhook_events`, `pix_payment_effects`, índices. 8) `db/schema_repairs.py`: `ensure_pix_charges_user_fk`. 9) `db/pix_charges.py`, `db/webhook_outbox.py` (novos). 10) `core/services/asaas.py` (novo, molde de `core/services/pluggy.py` com `httpx`; erros **sem corpo da resposta**, que traz PII). 11) `frontend/routes/billing_pix.py` (novo): `POST /billing/pix/checkout`, `GET /billing/pix/{id}` (404 para dono errado), `POST /billing/asaas/webhook` + `EFEITOS_POR_EVENTO`. 12) monólito: `CSRF_EXEMPT_PATHS` +1 (`:1892`), `include_router`, `/billing/subscription` (`:4318`) reconhece Pix **antes** do Stripe (`gateway:"pix"`), `_billing_checkout_for_user` (`:3963`) recusa com Pix vigente, `plans-config` (`:4163`) + `pix_annual_available`, dreno no loop de 60 s. 13) `core/services/engagement_scheduler.py`: reconciliação da saga, cancelamento remoto aos 60 d, retenção/purga/pseudonimização, e `_check_pix_annual_ending()` — **função irmã** do `_check_trial_ending` (`:206`), não reuso (aquela filtra `plan='pro' and last_payment_status='trialing'`); SQL próprio com `join plan_grants … source='pix'`, janelas 6,5–7,5 e 2,5–3,5 dias, dedup `recent_event_exists(…, 2.0)`. 14) `core/services/email_service.py`: `send_pix_annual_ending_email`. 15) `db/privacy.py` (export + comentário) e `frontend/privacy.html`.
 
@@ -617,7 +728,9 @@ Guarda do dreno (§8.2 B), não estado da tabela: transição com destino **`pai
 
 **Todo evento de pagamento nos testes é `PAYMENT_RECEIVED`** — é o que o Pix produz. Os dois casos com `CONFIRMED` estão marcados como **robustez**, não como fluxo.
 
-**Backfill / resync / deploy (§5)**
+> Os casos abaixo são o contrato do PR 1a. **Corte por arquivo** (o Manager pediu): `tests/test_billing_grants_backfill.py` fica com 1–11 e 9f; `tests/test_billing_grants_projecao.py` fica com 12–24 e 9a–9e, 9g, 9h. Um arquivo por assunto, nenhum arquivo com dois assuntos.
+
+**Backfill inicial / deploy (§5)**
 1. Assinante ativo preexistente **sem** grants: `recompute` **não escreve nada** e alerta; roda o resync; `recompute` → plano e data idênticos aos de `auth_accounts`. *Negativo: remova o resync → segunda metade vermelha.*
 2. Resync 2× → **um** grant `legacy` por usuário.
 3. `grandfathered` → nenhum grant, projeção não escreve.
@@ -626,7 +739,18 @@ Guarda do dreno (§8.2 B), não estado da tabela: transição com destino **`pai
 6. **[NOVO — nº 2]** `invoice.paid` com `period_end` **anterior** ao `ends_at` do `legacy` → `plan_expires_at` **encurta** para o do Stripe. *Negativo: remova a supersessão → o legado sustenta acesso além do que o Stripe diz.*
 7. **[NOVO — nº 2]** Assinatura que lapsa (`payment_failed` → `past_due`, sem `deleted`) depois de um `invoice.paid`: quando o grant `stripe` vence, o acesso **acaba**.
 8. **[NOVO — nº 4b]** Conta paga e vigente, zero grants: `recompute` **não escreve**, loga, alerta. *Negativo: deixe escrever `free` → rebaixamento destrutivo.*
-9. **[NOVO]** Conta com grants **todos vencidos** → `recompute` **escreve** `free` (a guarda do 8 não pode virar "nunca rebaixa").
+9. **[NOVO]** Conta com grants **todos vencidos** → `recompute` por **evento** **escreve** `free` (a guarda do 8 não pode virar "nunca rebaixa").
+
+**Materialização obrigatória e regra da redução (§4.1.1 — os 6 bloqueadores do dono)**
+
+9a. **[BLOQUEADOR 1]** `upsert_grant` levantando no ramo pago → a resposta do webhook é **5xx** (nunca 2xx), a exceção **não é engolida**, e **nada** depois do grant rodou: `auth_accounts` intacto, zero e-mail, zero linha de funil, `plan_selected_at` intacto. *Negativo: reponha o `except/print` → resposta 200 e o defeito volta inteiro (grant defasado com `auth_accounts` fresco).*
+9b. **[BLOQUEADOR 2]** Reentrega do **mesmo** evento depois do 5xx → conclui: **um** grant (`on conflict` + versão), **uma** linha de funil (unique `(session_id, kind)`), **um** e-mail (dedup do `_fire_email`), `plan_selected_at` preservado, e um `send_purchase`. *Negativo: tire a unique do funil **ou** o dedup do e-mail → duplicata por retry.*
+9c. **[BLOQUEADOR 3]** **A classe "grant defasado", que é o caso que derrubava pagante:** grant `stripe` congelado no período anterior (`ends_at` no passado, `status='active'`), `auth_accounts` `pro / hoje+330d`, assinatura **viva** no Stripe. Roda a **varredura** → o Stripe é consultado, o grant é **reparado a partir dele**, e `auth_accounts` continua `pro / hoje+330d`. **Em nenhum instante a conta fica `free`.** *Negativo: tire a regra da redução (§4.1.1 B) → a varredura escreve `free/None`, que é exatamente a medição do Manager (`pro/2027-07-01 → free/None`).*
+9d. **[BLOQUEADOR 3, variante]** Mesmo cenário com o **Stripe indisponível** → **não escreve nada**, loga `projecao_reducao_nao_confirmada`, alerta 1x/dia. *Negativo: deixe reduzir sem confirmação → pagante vira `free` num timeout de rede.*
+9e. **[BLOQUEADOR 3, positivo]** Assinatura **de fato encerrada** (o Stripe não devolve assinatura ativa) → a varredura **reduz** para `free`. Sem ele, o grupo passaria num código que **nunca** rebaixa, que é pior que o bug.
+9f. **[BLOQUEADOR 4]** Grant `legacy` **revogado** + `auth_accounts` pago e vigente (sustentado pelo grant `stripe`) → **dois boots seguidos** do `init_db` e o `legacy` **continua `revoked`**; nenhum grant é criado ou alterado. *Negativo: volte o `do update` do resync → o revogado ressuscita (D4).*
+9g. **[BLOQUEADOR 5]** `checkout.session.completed` com `subscription` **string** e com `subscription` **objeto expandido** → **a mesma `external_ref`** e **um** grant (o segundo evento cai no `on conflict`, não cria linha nova). *Negativo: leia `_g(session,"subscription")` cru → o objeto expandido vira `external_ref` diferente e o usuário fica com dois grants da mesma assinatura.*
+9h. **[BLOQUEADOR 6]** Usuário com **duas** assinaturas (a antiga e uma nova já paga); chega `subscription.deleted` **da antiga** → só o grant da antiga é revogado, o da nova continua `active`, e a projeção mantém o acesso. *Negativo: revogue por `source` sem `external_ref` → a assinatura nova morre junto e quem está em dia é rebaixado.*
 10. Vitalício sem data → fora do resync, projeção sai antes, acesso intacto, log de contagem. *Negativo: tire a segunda saída antecipada → vermelho.*
 11. `subscription.deleted` revoga `stripe` **e** `legacy` → `free`.
 
@@ -729,7 +853,7 @@ Controles do grupo: **negativo** — tire a condição de ciclo do render do bot
 
 | PR | entrega | prova | como reverter sozinho |
 |---|---|---|---|
-| **1a — grants, projeção, resync, grant do admin** (nenhuma linha de Asaas) | modelo de escrita novo com comportamento observável idêntico ao de hoje, base pagante migrada, reparo manual preservado | casos 1–19, 21–24, 49–50 (**20 e 20b são 1b**, §4.4) | `git revert`. `plan_grants` fica no banco, inerte. **Seguro por duas propriedades explícitas:** (a) a projeção **nunca rebaixa por ausência de grant** (§4.1), então o código novo não destrói os valores que o código antigo usa; (b) o resync (§5.1) é `do update` que **só estende**, então **re-aplicar o 1a depois do revert reconcilia sozinho no boot**, sem ação manual |
+| **1a — grants, projeção, resync, grant do admin** (nenhuma linha de Asaas) | modelo de escrita novo com comportamento observável idêntico ao de hoje, base pagante migrada, reparo manual preservado | casos 1–24 e **9a–9h** (os seis bloqueadores do dono), 49–50 (**20 e 20b são 1b**, §4.4) | `git revert`. `plan_grants` fica no banco, inerte. **Seguro por três propriedades, e a (b) MUDOU na v6:** (a) a projeção **nunca rebaixa por ausência de grant** (§4.1) — o código novo não destrói os valores de que o código antigo depende; (b) ~~o resync reconcilia sozinho no boot~~ **não vale mais**: o backfill virou inserção única e **não repara** (§5.1). A reconciliação depois de um revert passa a ter **dois caminhos, os dois automáticos**: o próximo evento do Stripe daquela assinatura regrava o grant (e agora **tem** de regravar, §4.1.1 A), e a **varredura confirma contra o Stripe antes de qualquer redução** (§4.1.1 B) — então, na janela em que os grants ficaram congelados, ninguém é rebaixado; (c) o modelo de **leitura** nunca muda de formato, então o código antigo volta a operar sobre `auth_accounts` como sempre. **O que se perdeu**: a reconciliação deixou de acontecer no instante do boot; ela acontece no primeiro evento ou na primeira varredura. **O que se ganhou**: o boot parou de poder escrever grant a partir da projeção, que era a origem do D4 |
 | **1b — Asaas, outbox, saga** (flag **off**) | fluxo Pix inteiro no backend, sem venda ligada | casos 25–48, 51–56 | nesta ordem: **(1)** `ASAAS_PIX_ANNUAL_ENABLED=0` — para venda nova **sem deploy**; **(2)** para reverter o código, **desativar antes o webhook no painel do Asaas** — a rota some, o Asaas toma 404 e **15 falhas seguidas pausam a fila**; **(3)** cancelar no painel as cobranças emitidas e não pagas |
 | **2 — frontend** | a venda visível na /precos | só depois do deploy e no aparelho | reverter o HTML; o backend continua aceitando webhook de cobrança já emitida |
 

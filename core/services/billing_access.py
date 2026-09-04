@@ -82,7 +82,7 @@ def _ler_conta(user_id: int) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select plan, plan_expires_at, last_payment_status"
+                "select plan, plan_expires_at, last_payment_status, stripe_customer_id"
                 "  from auth_accounts where user_id = %s",
                 (int(user_id),),
             )
@@ -90,7 +90,89 @@ def _ler_conta(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def recompute_entitlement(user_id: int) -> dict | None:
+def _e_reducao(plano_atual: str, expira_atual, plano_novo: str, expira_novo) -> bool:
+    """A projeção nova TIRA acesso do que a conta tem hoje?
+
+    Reduzir é virar `free` estando pago, ou encurtar a validade. Subir de tier,
+    esticar a data ou repetir o mesmo valor não é redução e nunca precisa de
+    confirmação — o caminho caro só existe para o que causa dano.
+    """
+    if plano_atual == "free":
+        return False
+    if plano_novo == "free":
+        return True
+    if not (expira_atual and expira_novo):
+        return False
+    # `- GAP_TOLERANCIA`: `current_period_end` do Stripe tem precisão de
+    # SEGUNDOS, então o reparo grava um `ends_at` truncado e a comparação com o
+    # `plan_expires_at` que estava em memória acusava uma "redução" de frações
+    # de segundo. Medido: o reparo do 9c era classificado como redução e a conta
+    # ficava sem escrita nenhuma. Diferença menor que a folga já usada para
+    # emendar grants não é mudança de cobertura.
+    return expira_novo < expira_atual - GAP_TOLERANCIA
+
+
+def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) -> str:
+    """Confirma no STRIPE uma redução que veio de VARREDURA (§4.1.1 B).
+
+    Devolve 'reduz' | 'reparou' | 'indisponivel'.
+
+    O ponto todo: sem evento, a varredura não tem autoridade para rebaixar
+    ninguém. "Grant defasado" e "assinatura acabou" produzem exatamente o mesmo
+    estado local — grant vencido com `auth_accounts` ainda pago — e só o Stripe
+    separa os dois. Foi essa confusão que rebaixou pagante (`pro/2027-07-01 →
+    free/None`): a materialização do grant tinha falhado em silêncio e a
+    varredura leu o buraco como fim de assinatura.
+
+    Reparar significa ESTICAR o `ends_at` do grant até o período que o Stripe
+    diz; `plan_stored` não se mexe, porque é a MESMA assinatura — o que estava
+    velho era a data, não o tier. Assim o reparo não precisa mapear price→plano
+    e não pode inventar um tier que ninguém vendeu.
+    """
+    customer = (conta.get("stripe_customer_id") or "").strip()
+    if not customer:
+        return "reduz"          # sem relação com o Stripe, não há o que confirmar
+
+    # Reuso dos helpers do monólito (`CLAUDE.md` §0.1/§0.7): a escada
+    # active > trialing > past_due e a leitura do `current_period_end` já vivem
+    # lá, testadas. Import tardio porque o monólito importa ESTE módulo.
+    # ponytail: se um segundo serviço precisar do mesmo, o upgrade é extrair
+    # para `core/services/stripe_lookup.py` — hoje seria refatoração sem pedido.
+    import stripe as _stripe
+    from frontend.finance_bot_websocket_custom import (  # noqa: PLC0415
+        StripeLookupError, _find_active_subscription, _sub_period_end_ts,
+    )
+    try:
+        sub = _find_active_subscription(_stripe, customer)
+    except StripeLookupError:
+        return "indisponivel"
+    except Exception:
+        # Qualquer falha de rede/SDK é indisponibilidade, nunca "não tem".
+        return "indisponivel"
+
+    if sub is None:
+        return "reduz"
+
+    sub_id = sub["id"] if not isinstance(sub, dict) else sub.get("id")
+    ts = _sub_period_end_ts(sub)
+    if not (sub_id and ts):
+        return "indisponivel"   # assinatura viva sem data legível: não decide nada
+    fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+
+    alvo = next((g for g in grants
+                 if g["source"] == "stripe" and g["external_ref"] == str(sub_id)), None)
+    if alvo is None or alvo["ends_at"] >= fim:
+        return "reduz" if alvo is None else "indisponivel"
+
+    from db.plan_grants import upsert_grant
+
+    upsert_grant(user_id, "stripe", str(sub_id), alvo["plan_stored"],
+                 alvo["starts_at"], fim,
+                 int(datetime.now(timezone.utc).timestamp()), "reparo:varredura")
+    return "reparou"
+
+
+def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | None:
     """Reprojeta `auth_accounts` a partir dos grants. Devolve o par escrito, ou
     None quando decidiu NÃO escrever.
 
@@ -105,6 +187,14 @@ def recompute_entitlement(user_id: int) -> dict | None:
        código novo nunca destrói os valores de que o código antigo depende.
        Quem TEM grants e todos venceram é rebaixado normalmente — aí há
        informação, e a guarda não pode virar "nunca rebaixa".
+
+    `origem` decide quem pode REDUZIR acesso (§4.1.1 B):
+
+    • `"evento"` — o webhook é a autoridade e chegou agora; reduz direto.
+    • `"varredura"` — não há autoridade nenhuma, só o relógio. Antes de tirar
+      acesso, CONSULTA O STRIPE: sem assinatura ativa reduz; assinatura viva
+      mais longa que o grant repara o grant e mantém o acesso; Stripe fora do ar
+      não escreve nada, loga e alerta.
     """
     conta = _ler_conta(user_id)
     if not conta:
@@ -128,6 +218,19 @@ def recompute_entitlement(user_id: int) -> dict | None:
 
     plano, expira = projetar_grants(grants, agora)
 
+    if origem == "varredura" and _e_reducao(plano_atual, expira_atual, plano, expira):
+        veredito = _reparar_grant_pelo_stripe(user_id, conta, grants)
+        if veredito == "indisponivel":
+            _alertar_reducao_nao_confirmada(user_id, plano_atual)
+            return None                      # falha na direção reparável
+        if veredito == "reparou":
+            grants = list_grants(user_id)
+            plano, expira = projetar_grants(grants, agora)
+            if _e_reducao(plano_atual, expira_atual, plano, expira):
+                # o reparo não resolveu: não reduz por conta própria
+                _alertar_reducao_nao_confirmada(user_id, plano_atual)
+                return None
+
     from db import set_payment_status, update_user_plan
 
     update_user_plan(user_id, plano, expira)
@@ -140,6 +243,38 @@ def recompute_entitlement(user_id: int) -> dict | None:
         set_payment_status(user_id, "active")
 
     return {"plan": plano, "plan_expires_at": expira}
+
+
+def _alertar_reducao_nao_confirmada(user_id: int, plano: str) -> None:
+    """Varredura quis rebaixar e o Stripe não confirmou. Não escreve, avisa.
+
+    Errar aqui na direção "não reduz" é reparável: o acesso segue e a próxima
+    passada tenta de novo. Errar na direção "reduz" tira o produto de quem
+    pagou por causa de um timeout de rede.
+    """
+    _observar(user_id, "projecao_reducao_nao_confirmada",
+              f"Reducao de acesso nao confirmada no Stripe (plano atual {plano}).",
+              f"Conta {user_id} ({plano}): varredura quis rebaixar e o Stripe nao confirmou.")
+
+
+def _observar(user_id: int, evento: str, mensagem: str, alerta: str) -> None:
+    """Loga sempre; alerta no máximo 1x/dia por usuário e evento.
+
+    Falha silenciosa: observabilidade nunca derruba cobrança.
+    """
+    try:
+        from core.observability import log_system_event_sync, recent_event_exists
+
+        log_system_event_sync("warning", evento, mensagem,
+                              source="billing", user_id=int(user_id))
+        if not recent_event_exists(f"{evento}_alertado", int(user_id), within_days=1.0):
+            from core.services.admin_notify import _send
+
+            _send(alerta)
+            log_system_event_sync("info", f"{evento}_alertado", "Alerta enviado.",
+                                  source="billing", user_id=int(user_id))
+    except Exception as exc:                                  # pragma: no cover
+        print(f"[billing_access] observabilidade falhou user={user_id}: {exc}")
 
 
 def _alertar_sem_grants(user_id: int, plano: str, expira) -> None:
@@ -186,7 +321,9 @@ def reprojetar_grants_recentes(desde: datetime | None) -> int:
     uids = users_com_grant_na_janela(desde)
     for uid in uids:
         try:
-            recompute_entitlement(uid)
+            # `origem="varredura"`: aqui não há evento nenhum, só o relógio —
+            # nenhuma redução de acesso sai daqui sem o Stripe confirmar.
+            recompute_entitlement(uid, origem="varredura")
         except Exception as exc:                              # pragma: no cover
             print(f"[billing_access] reprojecao falhou user={uid}: {exc}")
     return len(uids)

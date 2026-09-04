@@ -1,83 +1,34 @@
 """
-tests/test_billing_grants_backfill.py — resync do §5.1 e o webhook do Stripe
-escrevendo grants (§4.2, §5.1, §6 do docs/plano_pix_anual_asaas.md).
+tests/test_billing_grants_backfill.py — backfill inicial do §5 e as guardas de
+escrita da projeção (§4.1) do docs/plano_pix_anual_asaas.md.
 
-Casos 1 a 7, 11 e 24 do §16.
-
-A infra do webhook (`_FakeStripe`, `_setup`, `_post`) é reusada de
-`test_billing_webhook_lifecycle.py` em vez de reescrita — é a mesma máquina de
-cobrança, e uma segunda cópia divergiria na primeira mudança do webhook.
+Casos 1–11 e 9f do §16. Materialização e regra da redução ficam em
+`test_billing_grants_materializacao.py`; ordem de eventos e projeção pura em
+`test_billing_grants_projecao.py`.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from _billing_grants_helpers import (
+    conta as _conta, evt_deleted as _evt_deleted, evt_paid as _evt_paid,
+    grant as _grant, ler as _ler, rodar_resync as _rodar_resync,
+    sub_stripe as _sub,
+)
+from core.services.billing_access import recompute_entitlement
 from db.connection import get_conn
-from db.plan_grants import list_grants
-from db.schema import RESYNC_LEGACY_GRANTS_SQL
+from db.plan_grants import list_grants, upsert_grant
 from test_billing_webhook_lifecycle import _post, _setup
 
-from core.services.billing_access import recompute_entitlement
 
+# ── Backfill inicial (§5.1) ───────────────────────────────────────────────────
 
-def _rodar_resync() -> None:
-    """Executa EXATAMENTE o SQL que o init_db roda no boot — sem segunda cópia."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(RESYNC_LEGACY_GRANTS_SQL)
-        conn.commit()
-
-
-def _conta(uid: int, plan: str, expires, status: str = "active") -> None:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update auth_accounts set plan=%s, plan_expires_at=%s,"
-                "       last_payment_status=%s where user_id=%s",
-                (plan, expires, status, uid),
-            )
-            if cur.rowcount == 0:
-                cur.execute(
-                    "insert into auth_accounts (user_id, email, password_hash, plan,"
-                    "                           plan_expires_at, last_payment_status)"
-                    " values (%s, %s, 'x', %s, %s, %s)",
-                    (uid, f"bf-{uid}@t.local", plan, expires, status),
-                )
-        conn.commit()
-    from db_support import invalidate_auth_user_cache
-    invalidate_auth_user_cache(uid)
-
-
-def _ler(uid: int) -> dict:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select plan, plan_expires_at, last_payment_status"
-                "  from auth_accounts where user_id=%s", (uid,))
-            return dict(cur.fetchone())
-
-
-def _legacy(uid: int) -> dict | None:
-    linhas = [g for g in list_grants(uid) if g["source"] == "legacy"]
-    return linhas[0] if linhas else None
-
-
-def _stripe(uid: int) -> dict | None:
-    linhas = [g for g in list_grants(uid) if g["source"] == "stripe"]
-    return linhas[0] if linhas else None
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Resync (§5.1) — casos 1 a 4
-# ──────────────────────────────────────────────────────────────────────────────
-
-def test_01_assinante_preexistente_sem_grants_e_o_resync(user_id, monkeypatch):
+def test_01_assinante_preexistente_sem_grants_e_o_backfill(user_id, monkeypatch):
     """No dia do deploy a base pagante tem plano e validade, e zero grants.
 
     Primeira metade: a projeção NÃO escreve nada (é a guarda que torna o PR
-    reversível). Segunda metade: depois do resync ela reproduz exatamente o que
-    já estava em auth_accounts. É a segunda metade que discrimina — sem o
-    resync ela fica vermelha.
+    reversível). Segunda metade: depois do backfill ela reproduz exatamente o
+    que já estava em auth_accounts — e é ela que discrimina.
     """
     expira = datetime.now(timezone.utc) + timedelta(days=180)
     _conta(user_id, "pro", expira)
@@ -90,101 +41,170 @@ def test_01_assinante_preexistente_sem_grants_e_o_resync(user_id, monkeypatch):
     assert _ler(user_id)["plan"] == "pro"
 
     _rodar_resync()
-    g = _legacy(user_id)
+    g = _grant(user_id, "legacy")
     assert g is not None and g["status"] == "active"
     assert g["plan_stored"] == "pro" and g["event_version"] == 0
 
     assert recompute_entitlement(user_id) == {"plan": "pro", "plan_expires_at": expira}
-    assert _ler(user_id)["plan_expires_at"] == expira
 
 
-def test_02_resync_duas_vezes_da_um_grant_so(user_id):
+def test_02_backfill_duas_vezes_da_um_grant_so(user_id):
     _conta(user_id, "pro_max", datetime.now(timezone.utc) + timedelta(days=90))
     _rodar_resync()
     _rodar_resync()
     assert len([g for g in list_grants(user_id) if g["source"] == "legacy"]) == 1
 
 
-def test_03_grandfathered_fica_de_fora_do_resync(user_id):
+def test_03_grandfathered_fica_de_fora(user_id):
     """Vitalício não é grant: `plan_expires_at is null` não tem ends_at a inventar."""
     _conta(user_id, "pro", None, "grandfathered")
     _rodar_resync()
-    assert _legacy(user_id) is None
+    assert _grant(user_id, "legacy") is None
     assert recompute_entitlement(user_id) is None
     assert _ler(user_id)["plan"] == "pro"
 
 
-def test_04_resync_e_do_update_entao_o_revert_reconcilia_sozinho(user_id):
-    """Simula revert + re-aplicação do PR: durante a janela do revert os grants
-    ficam congelados enquanto auth_accounts anda. O `do update` do §5.1 põe os
-    dois de acordo no boot seguinte; com `do nothing` o assinante em dia viraria
-    `free` na primeira reprojeção.
+def test_04_o_boot_NAO_repara_grant_existente(user_id):
+    """**v6 (§5.1): o backfill deixou de reparar.** Linha de grant existente
+    nunca é tocada pelo boot, nem para "estender".
+
+    A versão anterior usava `do update` e copiava `auth_accounts` de volta para
+    dentro do grant — transformava a PROJEÇÃO em fonte de verdade. Quem repara
+    grant defasado é a regra da redução (§4.1.1 B), que lê o Stripe, fora do
+    boot; o pagante não é rebaixado na janela porque a varredura confirma antes
+    de reduzir (ver `test_billing_grants_materializacao.py`).
+
+    NOTA: o §16 do plano ainda descreve o caso 4 com o contrato ANTIGO
+    ("roda o resync → ends_at atualizado"). §5.1 e §17 v6 dizem o contrário e
+    riscam o `do update` explicitamente; este teste segue o §5.1/§17.
     """
     agora = datetime.now(timezone.utc)
     _conta(user_id, "pro", agora + timedelta(days=200))
     _rodar_resync()
 
-    # janela do revert: o legacy fica para trás, auth_accounts é renovado
+    congelado = agora - timedelta(days=5)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update plan_grants set ends_at=%s where user_id=%s and source='legacy'",
+                        (congelado, user_id))
+        conn.commit()
+
+    _rodar_resync()
+    g = _grant(user_id, "legacy")
+    assert abs((g["ends_at"] - congelado).total_seconds()) < 1, "o boot mexeu num grant existente"
+    assert len(list_grants(user_id)) == 1, "o boot criou grant para quem já tinha"
+
+
+def test_9f_boot_nao_ressuscita_grant_revogado(user_id, monkeypatch):
+    """`legacy` revogado por `superseded_by_stripe` + `auth_accounts` pago e
+    vigente (sustentado pelo grant `stripe`): DOIS boots e ele continua morto.
+
+    `auth_accounts` é PROJEÇÃO dos grants; deixá-la recriar grant revogado é
+    transformar projeção de volta em direito.
+    """
+    uid, client, fake = _setup(monkeypatch, f"g9f-{user_id}")
+    _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=30))
+    _rodar_resync()
+    _post(client, fake, _evt_paid(uid, "sub_9f", 1_800_000_000),
+          subs={"sub_9f": _sub("active", "price_x", 300)})
+    assert _grant(uid, "legacy")["status"] == "revoked"
+
+    antes = list_grants(uid)
+    _rodar_resync()
+    _rodar_resync()
+    depois = list_grants(uid)
+
+    assert _grant(uid, "legacy")["status"] == "revoked", "o boot ressuscitou grant revogado"
+    assert _grant(uid, "legacy")["revoked_reason"] == "superseded_by_stripe"
+    assert len(depois) == len(antes)
+    assert [g["ends_at"] for g in depois] == [g["ends_at"] for g in antes]
+
+
+def test_backfill_com_DUAS_auth_accounts_do_mesmo_user_nao_derruba_o_boot(user_id):
+    """`auth_accounts` não tem unique em `user_id`. Duas linhas pagas e vigentes
+    gerariam dois `legacy:<uid>` no MESMO `on conflict`, e o Postgres recusa o
+    comando (`CardinalityViolation`). Isto roda dentro do `init_db`: não
+    degradaria a migração, derrubaria a SUBIDA da aplicação.
+    """
+    agora = datetime.now(timezone.utc)
+    _conta(user_id, "essencial", agora + timedelta(days=10))
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update plan_grants set ends_at=%s where user_id=%s and source='legacy'",
-                (agora - timedelta(days=5), user_id))
+                "insert into auth_accounts (user_id, email, password_hash, plan,"
+                "                           plan_expires_at, last_payment_status)"
+                " values (%s, %s, 'x', 'pro_max', %s, 'active')",
+                (user_id, f"bf-dup-{user_id}@t.local", agora + timedelta(days=300)))
         conn.commit()
+
+    _rodar_resync()                      # sem o distinct on, estoura aqui
+
+    legados = [g for g in list_grants(user_id) if g["source"] == "legacy"]
+    assert len(legados) == 1
+    assert legados[0]["plan_stored"] == "pro_max", "desempate tem de ser a maior validade"
+
+
+# ── Guardas de escrita da projeção (§4.1) ─────────────────────────────────────
+
+def test_08_conta_paga_sem_nenhum_grant_nao_escreve_e_alerta(user_id, monkeypatch):
+    """Ausência de grant é DESCONHECIMENTO. Se a projeção escrevesse `free`
+    aqui, o revert do PR encontraria a base pagante já rebaixada."""
+    expira = datetime.now(timezone.utc) + timedelta(days=200)
+    _conta(user_id, "pro", expira)
+
+    alertas: list[str] = []
+    import core.services.admin_notify as admin_notify
+    monkeypatch.setattr(admin_notify, "_send", lambda msg: alertas.append(msg) or True)
+
+    assert recompute_entitlement(user_id) is None
+    row = _ler(user_id)
+    assert row["plan"] == "pro" and row["plan_expires_at"] == expira
+    assert len(alertas) == 1
+
+
+def test_09_grants_todos_vencidos_rebaixam_por_EVENTO(user_id):
+    """A guarda do 8 não pode virar "nunca rebaixa": com grants, há informação.
+    Por evento não há consulta ao Stripe — o evento é a autoridade."""
+    _conta(user_id, "pro", datetime.now(timezone.utc) + timedelta(days=200))
+    agora = datetime.now(timezone.utc)
+    upsert_grant(user_id, "stripe", f"sub_venc_{user_id}", "pro",
+                 agora - timedelta(days=400), agora - timedelta(days=1), 1000)
+
     assert recompute_entitlement(user_id) == {"plan": "free", "plan_expires_at": None}
-
-    _conta(user_id, "pro", agora + timedelta(days=200))     # re-aplicação: boot
-    _rodar_resync()
-    g = _legacy(user_id)
-    assert g["ends_at"] > agora, "o resync tem de ESTENDER o legacy congelado"
-    assert recompute_entitlement(user_id)["plan"] == "pro"
+    assert _ler(user_id)["plan"] == "free"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Webhook do Stripe escrevendo grants — casos 5, 6, 7, 11 e 24
-# ──────────────────────────────────────────────────────────────────────────────
+def test_10_vitalicio_sai_antes_de_qualquer_escrita(user_id):
+    """Duas saídas antecipadas: `grandfathered` e pago com validade NULL."""
+    _conta(user_id, "pro", None, "grandfathered")
+    assert recompute_entitlement(user_id) is None
+    assert _ler(user_id)["plan"] == "pro"
 
-def _sub(status: str, price_id: str, dias: int) -> dict:
-    ts = int((datetime.now(timezone.utc) + timedelta(days=dias)).timestamp())
-    return {"status": status,
-            "current_period_end": ts,
-            "items": {"data": [{"price": {"id": price_id}, "current_period_end": ts}]}}
-
-
-def _evt_paid(uid: int, sub_id: str, created: int) -> dict:
-    return {"type": "invoice.paid", "id": f"evt_paid_{created}", "created": created,
-            "data": {"object": {"metadata": {"finbot_user_id": str(uid)},
-                                "subscription": sub_id, "amount_paid": 0,
-                                "id": f"in_{created}"}}}
+    _conta(user_id, "pro_max", None, "active")
+    assert recompute_entitlement(user_id) is None
+    assert _ler(user_id)["plan"] == "pro_max"
 
 
-def _evt_deleted(uid: int, sub_id: str, created: int) -> dict:
-    return {"type": "customer.subscription.deleted", "id": f"evt_del_{created}",
-            "created": created,
-            "data": {"object": {"id": sub_id, "metadata": {"finbot_user_id": str(uid)}}}}
+# ── Supersessão e cancelamento (§5.1, §4.2) ───────────────────────────────────
 
-
-def test_05_primeiro_invoice_paid_cria_grant_stripe_e_revoga_o_legacy(user_id, monkeypatch):
+def test_05_primeiro_invoice_paid_cria_grant_e_revoga_o_legacy(user_id, monkeypatch):
     uid, client, fake = _setup(monkeypatch, f"g05-{user_id}")
     _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=100))
     _rodar_resync()
-    assert _legacy(uid)["status"] == "active"
+    assert _grant(uid, "legacy")["status"] == "active"
 
     r = _post(client, fake, _evt_paid(uid, "sub_g05", 1_800_000_000),
               subs={"sub_g05": _sub("active", "price_x", 30)})
     assert r.status_code == 200, r.text
 
-    assert _stripe(uid)["status"] == "active"
-    assert _legacy(uid)["status"] == "revoked"
-    assert _legacy(uid)["revoked_reason"] == "superseded_by_stripe"
-    # cobertura contínua: o grant do Stripe cobre a partir de agora
+    assert _grant(uid, "stripe")["status"] == "active"
+    assert _grant(uid, "legacy")["status"] == "revoked"
+    assert _grant(uid, "legacy")["revoked_reason"] == "superseded_by_stripe"
     assert _ler(uid)["plan"] == "pro"
 
 
 def test_06_grant_do_stripe_mais_curto_ENCURTA_o_acesso(user_id, monkeypatch):
-    """Sem a supersessão do §5.1, o legado sustentaria acesso além do que o
-    Stripe diz — o assinante que trocou para um período menor continuaria pago
-    por 100 dias."""
+    """Sem a supersessão, o legado sustentaria acesso além do que o Stripe diz."""
     uid, client, fake = _setup(monkeypatch, f"g06-{user_id}")
     _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=100))
     _rodar_resync()
@@ -192,15 +212,12 @@ def test_06_grant_do_stripe_mais_curto_ENCURTA_o_acesso(user_id, monkeypatch):
     r = _post(client, fake, _evt_paid(uid, "sub_g06", 1_800_000_000),
               subs={"sub_g06": _sub("active", "price_x", 7)})
     assert r.status_code == 200, r.text
-
-    novo = _ler(uid)["plan_expires_at"]
-    assert novo < datetime.now(timezone.utc) + timedelta(days=10), (
-        "o legacy de 100 dias não pode sobreviver ao grant do Stripe de 7")
+    assert _ler(uid)["plan_expires_at"] < datetime.now(timezone.utc) + timedelta(days=10)
 
 
-def test_07_assinatura_que_lapsa_sem_deleted_perde_o_acesso_no_vencimento(user_id, monkeypatch):
-    """`payment_failed` → `past_due` e nenhum `deleted`: quando o grant do
-    Stripe vence, o acesso ACABA — o legado já foi superseded e não segura."""
+def test_07_assinatura_que_lapsa_perde_o_acesso_no_vencimento(user_id, monkeypatch):
+    """`payment_failed` → `past_due` e nenhum `deleted`: quando o grant vence, o
+    acesso ACABA — o legado já foi superseded e não segura."""
     uid, client, fake = _setup(monkeypatch, f"g07-{user_id}")
     _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=100))
     _rodar_resync()
@@ -214,7 +231,6 @@ def test_07_assinatura_que_lapsa_sem_deleted_perde_o_acesso_no_vencimento(user_i
     assert r.status_code == 200
     assert _ler(uid)["last_payment_status"] == "past_due"
 
-    # o grant vence (relógio do teste = mexer na linha, não no relógio do banco)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("update plan_grants set ends_at=now() - interval '1 day'"
@@ -232,142 +248,21 @@ def test_11_subscription_deleted_revoga_stripe_e_legacy(user_id, monkeypatch):
 
     r = _post(client, fake, _evt_deleted(uid, "sub_g11", 1_800_000_500))
     assert r.status_code == 200, r.text
-    assert _stripe(uid)["status"] == "revoked"
-    assert _legacy(uid)["status"] == "revoked"
+    assert _grant(uid, "stripe")["status"] == "revoked"
+    assert _grant(uid, "legacy")["status"] == "revoked"
     assert _ler(uid)["plan"] == "free"
 
 
 def test_11b_deleted_sem_grant_stripe_ainda_derruba_o_legacy(user_id, monkeypatch):
     """Assinante que já existia no deploy e cancela SEM passar por um
-    `invoice.paid` no meio: só existe o grant `legacy`. Ele é a reconstrução do
-    mesmo acesso de cartão, então tem de cair junto — senão o cancelamento
-    deixaria de rebaixar, que é o comportamento de HOJE."""
+    `invoice.paid`: só existe o `legacy`, e ele é a reconstrução do mesmo acesso
+    de cartão — tem de cair junto, senão o cancelamento deixa de rebaixar."""
     uid, client, fake = _setup(monkeypatch, f"g11b-{user_id}")
     _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=100))
     _rodar_resync()
-    assert _legacy(uid)["status"] == "active"
+    assert _grant(uid, "legacy")["status"] == "active"
 
     r = _post(client, fake, _evt_deleted(uid, "sub_g11b", 1_800_000_500))
     assert r.status_code == 200, r.text
-    assert _legacy(uid)["status"] == "revoked"
+    assert _grant(uid, "legacy")["status"] == "revoked"
     assert _ler(uid)["plan"] == "free"
-
-
-def test_11c_deleted_SEM_id_da_assinatura_ainda_rebaixa(user_id, monkeypatch):
-    """O objeto do `customer.subscription.deleted` nem sempre traz o `id`.
-
-    Amarrar a revogação a ele deixava o grant `stripe` vivo, e a projeção que
-    roda em seguida RESSUSCITAVA o plano por cima do `free` que o webhook
-    acabara de escrever — regressão contra o comportamento de hoje, e não teoria:
-    foi o que quebrou
-    `test_billing_webhook_lifecycle.py::test_checkout_completed_fecha_o_gate_de_escolha`.
-    """
-    uid, client, fake = _setup(monkeypatch, f"g11c-{user_id}")
-    _post(client, fake, _evt_paid(uid, "sub_g11c", 1_800_000_000),
-          subs={"sub_g11c": _sub("active", "price_x", 30)})
-    assert _stripe(uid)["status"] == "active"
-
-    r = _post(client, fake,
-              {"type": "customer.subscription.deleted", "id": "evt_sem_sub",
-               "created": 1_800_000_500,
-               "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}})
-    assert r.status_code == 200, r.text
-    assert _stripe(uid)["status"] == "revoked"
-    assert _ler(uid)["plan"] == "free"
-
-
-def test_24_positivo_assinante_stripe_puro_se_comporta_como_hoje(user_id, monkeypatch):
-    """O positivo mais importante do PR: sem nenhum grant Pix, o assinante do
-    cartão termina em `plan_expires_at == current_period_end` a cada renovação,
-    e o `subscription.deleted` manda para `free` — igualzinho a antes."""
-    uid, client, fake = _setup(monkeypatch, f"g24-{user_id}")
-
-    for i, dias in enumerate((30, 60, 90)):
-        sub = _sub("active", "price_x", dias)
-        r = _post(client, fake, _evt_paid(uid, "sub_g24", 1_800_000_000 + i),
-                  subs={"sub_g24": sub})
-        assert r.status_code == 200, r.text
-        esperado = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
-        row = _ler(uid)
-        assert row["plan"] == "pro"
-        assert row["plan_expires_at"] == esperado, (
-            f"renovação {i}: projeção divergiu do current_period_end")
-        assert row["last_payment_status"] == "active"
-
-    r = _post(client, fake, _evt_deleted(uid, "sub_g24", 1_800_000_500))
-    assert r.status_code == 200, r.text
-    row = _ler(uid)
-    assert row["plan"] == "free" and row["plan_expires_at"] is None
-    assert row["last_payment_status"] == "canceled"
-
-
-def test_D1_deleted_da_assinatura_ANTIGA_nao_mata_a_nova_ja_paga(user_id, monkeypatch):
-    """Duas assinaturas vivas: a nova acabou de ser paga e chega o `deleted` da
-    ANTIGA, com o `id` no objeto.
-
-    Revogar "todos os grants de cartão" derrubava a recém-paga junto e mandava
-    para `free` quem está em dia — dinheiro recebido, acesso tirado. A revogação
-    tem de mirar a assinatura QUE O EVENTO NOMEIA.
-    """
-    uid, client, fake = _setup(monkeypatch, f"gd1-{user_id}")
-    _post(client, fake, _evt_paid(uid, "sub_VELHA", 1_800_000_000),
-          subs={"sub_VELHA": _sub("active", "price_x", 5)})
-    _post(client, fake, _evt_paid(uid, "sub_NOVA", 1_800_000_100),
-          subs={"sub_NOVA": _sub("active", "price_x", 365)})
-
-    r = _post(client, fake, _evt_deleted(uid, "sub_VELHA", 1_800_000_200))
-    assert r.status_code == 200, r.text
-
-    por_ref = {g["external_ref"]: g["status"] for g in list_grants(uid)}
-    assert por_ref["sub_VELHA"] == "revoked"
-    assert por_ref["sub_NOVA"] == "active", "a assinatura recém-paga foi revogada junto"
-    assert _ler(uid)["plan"] == "pro", "quem está em dia não pode cair para free"
-
-
-def test_D2_resync_com_DUAS_auth_accounts_do_mesmo_user_nao_derruba_o_boot(user_id):
-    """`auth_accounts` não tem unique em `user_id`. Duas linhas pagas e vigentes
-    do mesmo usuário gerariam dois `legacy:<uid>` no MESMO `on conflict`, e o
-    Postgres recusa o comando inteiro (`CardinalityViolation`). Como o resync
-    roda dentro do `init_db`, isso não degradaria a migração: derrubaria a
-    SUBIDA da aplicação.
-    """
-    agora = datetime.now(timezone.utc)
-    _conta(user_id, "essencial", agora + timedelta(days=10))
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into auth_accounts (user_id, email, password_hash, plan,"
-                "                           plan_expires_at, last_payment_status)"
-                " values (%s, %s, 'x', 'pro_max', %s, 'active')",
-                (user_id, f"bf-dup-{user_id}@t.local", agora + timedelta(days=300)))
-        conn.commit()
-
-    _rodar_resync()                      # sem o distinct on, estoura aqui
-
-    legados = [g for g in list_grants(user_id) if g["source"] == "legacy"]
-    assert len(legados) == 1
-    # desempate determinístico: a linha de MAIOR validade vence
-    assert legados[0]["plan_stored"] == "pro_max"
-
-
-def test_D4_resync_nao_ressuscita_legacy_revogado(user_id, monkeypatch):
-    """`auth_accounts` é PROJEÇÃO dos grants. Deixar o boot reanimar um `legacy`
-    revogado por `superseded_by_stripe` — só porque a coluna diz "pago e
-    vigente" — é transformar projeção de volta em direito: o grant vivo do
-    Stripe sustenta a coluna, e a coluna recria o grant morto.
-    """
-    uid, client, fake = _setup(monkeypatch, f"gd4-{user_id}")
-    # O legado nasce CURTO e a assinatura do Stripe é LONGA: é essa ordem que
-    # deixa `auth_accounts.plan_expires_at` (300 d, escrito pela projeção do
-    # grant `stripe`) maior que o `ends_at` do legado (30 d) e faz o `where` do
-    # resync querer "estender" — sem ele o teste passaria com e sem o conserto.
-    _conta(uid, "pro", datetime.now(timezone.utc) + timedelta(days=30))
-    _rodar_resync()
-    _post(client, fake, _evt_paid(uid, "sub_gd4", 1_800_000_000),
-          subs={"sub_gd4": _sub("active", "price_x", 300)})
-    assert _legacy(uid)["status"] == "revoked"
-
-    _rodar_resync()                      # o boot seguinte
-    g = _legacy(uid)
-    assert g["status"] == "revoked", "o resync ressuscitou grant revogado"
-    assert g["revoked_reason"] == "superseded_by_stripe"

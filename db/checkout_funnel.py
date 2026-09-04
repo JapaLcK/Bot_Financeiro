@@ -23,8 +23,14 @@ def _record(user_id: int, session_id: str | None, kind: str) -> None:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
+                    # `do nothing`: a reentrega do webhook (5xx da Stripe, e
+                    # agora também o 5xx deliberado de §4.1.2) repetia a linha
+                    # de CONCLUSÃO e inflava a conversão do painel. A unique
+                    # parcial vive em db/schema.py e cobre só `completed` — o
+                    # `started` repete de propósito no reaproveitamento de
+                    # sessão, e continua entrando normalmente.
                     "insert into checkout_funnel_events (user_id, session_id, kind) "
-                    "values (%s, %s, %s)",
+                    "values (%s, %s, %s) on conflict do nothing",
                     (int(user_id), session_id, kind),
                 )
             conn.commit()
