@@ -275,7 +275,17 @@ LOCAL_RULES = [
       "salgado", "salgados", "pastel", "esfiha", "coxinha",
       # "prime rib" é comida; "prime" sozinho é assinatura (regra mais abaixo).
       # Este bloco vem antes de assinaturas, então o prato ganha a disputa.
-      "prime rib", "prime ribs"], "alimentação"),
+      "prime rib", "prime ribs",
+      # Marcas (issue #138): sem elas, 14 das 16 marcas mais lançadas caíam em
+      # "outros" pra quem não tem IA. "burger king" e "pizza hut" não entram:
+      # já casam por "burger"/"pizza" acima.
+      # Formas com apóstrofo entram pelo radical: normalize_text("habib's") vira
+      # "habib s", que contém "habib". Idem "mcdonald's"/"applebee's".
+      "mcdonald", "mc donalds", "mequi", "bk", "subway", "habib", "bobs",
+      "kfc", "giraffas", "ragazzo", "china in box", "dominos", "divino fogao",
+      "starbucks", "the coffee", "kopenhagen", "cacau show",
+      "outback", "madero", "coco bambu", "spoleto", "applebee",
+      ], "alimentação"),
     # ─── Lazer ────────────────────────────────────────────────────────────────
     # Fica depois de alimentação pra bar/boteco/chopp seguirem sendo comida.
     # "clube" e "jogo" entram só como palavra inteira: "clube de assinatura" e
@@ -468,6 +478,10 @@ KEYWORD_BLOCKERS = {
     # "juros" é rendimento (receita); mas juros de dívida são DESPESA — esses
     # saem da regra de rendimentos e vão pra IA decidir a categoria certa.
     "juros": re.compile(r"\bjuros\s+d[eoa]\s+(cartao|cartão|cheque|rotativo|atraso|financiamento|emprestimo|empréstimo|mora|parcelamento)\b"),
+    # "fogao" é moradia (eletrodoméstico), mas "divino fogão" é rede de
+    # restaurante — sem este blocker a regra de moradia vence antes de
+    # alimentação chegar na marca (issue #138).
+    "fogao": re.compile(r"\bdivino\s+fogao\b"),
     # "aluguel de carro/bike" é transporte/lazer, não moradia.
     "aluguel": re.compile(r"\baluguel\s+de\s+(carro|carros|veiculo|veiculos|bicicleta|bike|moto)\b"),
     # "passagem" é lazer (viagem); "passagem de ônibus/metrô/trem" é transporte
