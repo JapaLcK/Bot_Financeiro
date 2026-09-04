@@ -1730,3 +1730,79 @@ def test_bill_id_de_outro_usuario_recusa_em_vez_de_creditar(user_id: int):
     assert _bill_status(bill_meu) == "paid", "a fatura do dono não é tocada na recusa"
     assert any(int(r["id"]) == pgto for r in db.list_launches(user_id, limit=10))
 
+
+# ── a forma LEGADA no "apagar tudo" ─────────────────────────────────────────
+#
+# `_CONTA_CORRENTE_LAUNCH_FILTER` era `tipo in ('despesa','receita')` e deixava
+# 'saida'/'entrada' de fora dos DOIS lados do par ("o que se conta é o que se
+# apaga"). O sintoma não era subcontagem: medido num banco descartável com uma
+# despesa moderna + uma 'saida' + uma 'entrada', `count_launches` dizia 1 e o
+# retorno vinha `remaining: 0` com as duas legadas ainda na tabela — o sistema
+# afirmando ter apagado tudo. Com a constante ampliada, isto é o que muda:
+#   • a confirmação ("vou apagar N") passa a incluir a linha legada;
+#   • uma linha legada com `efeitos` de caixinha/investimento passa a ser
+#     RECUSADA (`kept_unsafe`, motivo `fora_do_escopo`) em vez de nem ser olhada
+#     — recusa PERMANENTE, o teto conhecido do #214.
+
+def test_apagar_tudo_conta_e_apaga_a_linha_legada(user_id: int):
+    """Controle NEGATIVO deste par: voltando o filtro para
+    `tipo in ('despesa','receita')`, `count_launches` dá 1, `deleted` dá 1 e o
+    `remaining: 0` sai com DUAS linhas ainda na tabela — que é o defeito.
+
+    A legada entra por `_set_tipo` sobre um lançamento REAL: assim ela carrega o
+    `efeitos` que o escritor de verdade grava, e o saldo tem o que reverter."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid_saida, _s, _ = add_launch_and_update_balance(
+        user_id, "despesa", 100, "mercado", "gastei 100 mercado")
+    lid_entrada, _s2, _ = add_launch_and_update_balance(
+        user_id, "receita", 300, None, "freela")
+    _set_tipo(user_id, lid_saida, "saida")
+    _set_tipo(user_id, lid_entrada, "entrada")
+    assert _bal(user_id) == 1200.0
+
+    assert db.count_launches(user_id) == 3, "a confirmação tem de citar as 3"
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result == {"deleted": 3, "kept_no_effects": [], "kept_unsafe": [],
+                      "errors": [], "remaining": 0}, result
+    # o ponto: `remaining` é uma AFIRMAÇÃO sobre a tabela — confere contra ela,
+    # não contra `count_launches` (que usa o mesmo filtro e mentiria junto).
+    assert _linhas_cruas(user_id) == [], "sobrou linha com `remaining: 0` no retorno"
+    assert _bal(user_id) == 0.0, "o saldo da legada também tem de voltar"
+
+
+def test_linha_legada_de_caixinha_vai_para_kept_unsafe(user_id: int):
+    """Controle POSITIVO do teto: ampliar o filtro NÃO pode fazer o "apagar
+    tudo" destruir caixinha/investimento por uma linha legada.
+
+    Irmão de `test_apagar_tudo_nao_toca_caixinha_com_tipo_reescrito`, com
+    'saida' no lugar de 'despesa': é a porta que este PR ABRE. O pré-voo do #214
+    (`_EFEITOS_FORA_DO_APAGAR_TUDO`) recusa antes de qualquer escrita, a linha
+    cai em `kept_unsafe` (frase de produto), e `remaining` bate com a tabela.
+
+    Controle negativo medido: sem a guarda de escopo a caixinha some
+    (`_pocket_balance` volta None) — é o mesmo que o irmão mede."""
+    from db.pockets import create_pocket
+
+    lid, _pid, _nome = create_pocket(user_id, "viagem")
+    _set_tipo(user_id, lid, "saida")   # LEGADA: é o que a faz entrar no conjunto
+    assert db.count_launches(user_id) == 1, "sem o filtro ampliado ela nem seria contada"
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result["kept_unsafe"] == [_user_seq(user_id, lid)], result
+    assert result["deleted"] == 0, result
+    assert result["errors"] == [], "recusa de domínio não é erro técnico"
+    assert _pocket_balance(user_id, "viagem") is not None, "a caixinha foi apagada"
+    assert result["remaining"] == len(_linhas_cruas(user_id)) == 1, result
+
+
+def _linhas_cruas(user_id: int) -> list:
+    """As linhas do usuário SEM filtro de tipo — a realidade contra a qual
+    `remaining` é conferido."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, tipo from launches where user_id=%s order by id",
+                        (user_id,))
+            return [dict(r) for r in cur.fetchall()]

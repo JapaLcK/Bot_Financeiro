@@ -172,15 +172,27 @@ def get_last_inserted_launch(user_id: int):
 def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     """Lançamentos recentes de um tipo (despesa/receita) com só os campos que
     a detecção de valor recorrente precisa (valor + descrição). Ordenado do mais
-    recente pro mais antigo."""
+    recente pro mais antigo.
+
+    `TIPO_CANON_SQL` e não `TIPO_DESPESA_SQL`: aqui o tipo é PARÂMETRO, não
+    literal — colapsar a forma legada na moderna no lado da coluna faz um
+    `tipo='despesa'` casar também com 'saida' sem inventar regra por chamador, e
+    deixa qualquer outro valor (aporte_investimento…) casando exato como antes.
+    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:273), que
+    só devolve 'despesa'/'receita' — nenhum passa a forma legada.
+
+    Sem isto, `infer_recurring_value` (core/handlers/launches.py:1315) não via as
+    ocorrências legadas e o bot voltava a PERGUNTAR o valor de um "aluguel" que
+    ele já sabia. Medido: 4 linhas legadas 'aluguel' 1200 davam None; as mesmas
+    4 na forma moderna davam 1200.0."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select valor, alvo, nota
                 from launches
-                where user_id=%s and tipo=%s
+                where user_id=%s and {TIPO_CANON_SQL}=%s
                 order by criado_em desc, id desc
                 limit %s
                 """,
@@ -1951,9 +1963,26 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 # tipo evita essa armadilha. Validado no staging: 0 launches despesa/receita
 # carregam efeitos de caixinha/investimento.
 #
+# A forma LEGADA ('saida'/'entrada') é conta corrente do mesmo jeito, então
+# entra pelas duas constantes de `db/connection.py` (§0.7) em vez do literal.
+# Sem ela, medido num banco descartável com uma despesa moderna + uma 'saida' +
+# uma 'entrada': `count_launches` dizia 1 e o retorno vinha `remaining: 0` com as
+# DUAS linhas legadas ainda na tabela — o sistema afirmando que apagou tudo sem
+# ter apagado. Não é subcontagem, é relatório falso num caminho destrutivo.
+#
+# DUAS consequências visíveis que isto cria, de propósito:
+#   - a confirmação ("vou apagar N lançamentos", que sai de `count_launches`)
+#     passa a incluir a linha legada — o N muda ANTES do usuário confirmar;
+#   - uma linha legada que carregue `efeitos` de caixinha/investimento agora
+#     entra no conjunto e é RECUSADA pelo pré-voo do #214
+#     (`_EFEITOS_FORA_DO_APAGAR_TUDO` → `kept_unsafe`, motivo `fora_do_escopo`),
+#     de forma PERMANENTE. É o teto conhecido do #214: recusar para sempre não
+#     perde dinheiro, e o usuário lê a frase de `kept_unsafe` em vez de a linha
+#     sumir calada. Antes disto ela nem era olhada.
+#
 # Usado por count_launches e delete_all_launches_and_rollback pra ficarem
 # consistentes (o que se conta é o que se apaga).
-_CONTA_CORRENTE_LAUNCH_FILTER = "tipo in ('despesa', 'receita')"
+_CONTA_CORRENTE_LAUNCH_FILTER = f"({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"
 
 
 def count_launches(user_id: int) -> int:
