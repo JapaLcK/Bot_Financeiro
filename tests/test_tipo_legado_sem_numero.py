@@ -146,6 +146,13 @@ def test_migracao_marca_a_linha_legada_como_interna(user_id):
                        nota="aporte legado")
     assert _flag_interna(user_id, "aporte legado") is False, "pré-condição"
 
+    # ponytail: `init_db()` roda o `update launches set is_internal_movement=true
+    # where categoria in (...)` SEM `user_id` — escrita GLOBAL, sobre a base
+    # inteira. Benigna na suíte de hoje (sequencial, um banco por execução,
+    # `_cleanup_user` por teste); morde no dia em que duas suítes dividirem o
+    # mesmo banco, ligando a flag em linhas de outro usuário. A saída seria
+    # repetir o `update` aqui com `user_id` — a segunda cópia da regra que este
+    # teste existe para pegar (§0.7). A troca é deliberada.
     init_db()
 
     assert _flag_interna(user_id, "aporte legado") is True, (

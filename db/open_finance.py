@@ -1365,7 +1365,11 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date) -> lis
     de `classify_open_finance_launch`, que só produz 'despesa'/'receita' (:1277)
     — então colapsar a forma legada no lado da COLUNA faz a linha antiga
     ('saida'/'entrada') ser candidata sem inventar regra por chamador, e deixa
-    qualquer outro valor casando exato como antes.
+    qualquer outro valor casando exato como antes. Com a MESMA inversão de
+    `list_launches_by_tipo`: 'saida'/'entrada' passadas como ARGUMENTO passam a
+    não casar nada (antes casavam as linhas legadas). Inalcançável daqui — o
+    único produtor do argumento é `classify_open_finance_launch` — mas quem
+    ligar outro chamador precisa saber.
 
     Sem isto o gêmeo legado do lançamento não era candidato, o dedupe falhava e
     o gasto contava DUAS vezes. Medido (mesma transação OF de -50, mesmo dia,

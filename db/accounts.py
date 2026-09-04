@@ -181,6 +181,13 @@ def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:273), que
     só devolve 'despesa'/'receita' — nenhum passa a forma legada.
 
+    INVERSÃO, para quem for chamar isto de outro lugar: o colapso é da COLUNA,
+    então a forma legada COMO ARGUMENTO passa a devolver VAZIO — antes ela é que
+    trazia as linhas legadas. Medido, com uma linha 'saida' e uma 'despesa' na
+    base: `tipo='despesa'` → as DUAS; `tipo='saida'` → []; idem
+    'receita'/'entrada'. Inalcançável pelos chamadores de hoje (rastreados
+    acima), e é o preço de ter uma forma canônica só.
+
     Sem isto, `infer_recurring_value` (core/handlers/launches.py:1315) não via as
     ocorrências legadas e o bot voltava a PERGUNTAR o valor de um "aluguel" que
     ele já sabia. Medido: 4 linhas legadas 'aluguel' 1200 davam None; as mesmas
@@ -1971,17 +1978,30 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 # ter apagado. Não é subcontagem, é relatório falso num caminho destrutivo.
 #
 # DUAS consequências visíveis que isto cria, de propósito:
-#   - a confirmação ("vou apagar N lançamentos", que sai de `count_launches`)
-#     passa a incluir a linha legada — o N muda ANTES do usuário confirmar;
+#   - o PORTÃO de "não tem nada pra apagar" muda ANTES do usuário confirmar.
+#     `count_launches` tem um consumidor só (`_delete_all_launches_validate`,
+#     core/services/ai_chat/tools/launches.py:511) e ele é `n <= 0`, não um "N"
+#     na frase: `_delete_all_launches_summary` (:503) nem recebe `user_id`.
+#     Medido com um histórico 100% legado ('saida' 50 + 'entrada' 300):
+#       antes  count=0 → "🐷 Você não tem nenhum lançamento pra apagar — seu
+#                         histórico já está limpo." (afirmação FALSA, com as
+#                         duas linhas na tabela)
+#       agora  count=2 → `validate` devolve None e o fluxo segue para a
+#                        confirmação, que é o que existe linha para apagar;
 #   - uma linha legada que carregue `efeitos` de caixinha/investimento agora
-#     entra no conjunto e é RECUSADA pelo pré-voo do #214
-#     (`_EFEITOS_FORA_DO_APAGAR_TUDO` → `kept_unsafe`, motivo `fora_do_escopo`),
-#     de forma PERMANENTE. É o teto conhecido do #214: recusar para sempre não
-#     perde dinheiro, e o usuário lê a frase de `kept_unsafe` em vez de a linha
-#     sumir calada. Antes disto ela nem era olhada.
+#     entra no conjunto e é RECUSADA pelo pré-voo do #214, indo para
+#     `kept_unsafe` de forma PERMANENTE. É o teto conhecido do #214: recusar
+#     para sempre não perde dinheiro, e o usuário lê a frase de `kept_unsafe`
+#     em vez de a linha sumir calada. Antes disto ela nem era olhada.
+#     O `motivo` que vai para o LOG é `fora_do_escopo` em 6 das 8 chaves de
+#     `_EFEITOS_FORA_DO_APAGAR_TUDO`; `delta_pocket` e `delta_invest` sem chave
+#     de lote saem `lote_ausente`, porque `_DELTA_EXIGE_LOTE` dispara ANTES da
+#     guarda de escopo (medido, uma chave por vez). O balde é o mesmo nas 8.
 #
 # Usado por count_launches e delete_all_launches_and_rollback pra ficarem
-# consistentes (o que se conta é o que se apaga).
+# consistentes (o que se conta é o que se apaga). Esses dois são TODO o alcance
+# desta constante: o "Recomeçar do zero" (`reset_user_data`, db/privacy.py:519)
+# apaga `launches` do usuário SEM filtro de tipo e não passa por aqui.
 _CONTA_CORRENTE_LAUNCH_FILTER = f"({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"
 
 

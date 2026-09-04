@@ -29,25 +29,38 @@ legítimo — então o grupo tem as DUAS mutações medidas, uma para cada lado:
   `{TIPO_CANON_SQL} = %s` → `tipo = %s`            (NEGATIVO, desliga o conserto)
       FAILED test_gasto_legado_gemeo_nao_conta_duas_vezes      (100.0 != 50.0)
       FAILED test_gasto_legado_de_outro_estabelecimento_nao_e_engolido
-      3 passed
+      FAILED test_alvo_nulo_casa_igual_no_legado_e_no_moderno[saida]  ((0,0,1))
+      4 passed  — entre eles o [despesa] do mesmo caso, verde de propósito
 
   `{TIPO_CANON_SQL} = %s` → `coalesce(%s, tipo) is not null`   (alargou de MAIS)
       FAILED test_receita_legada_nao_casa_com_gasto_do_of
       FAILED test_aporte_legado_nao_casa_com_gasto_do_of
-      3 passed
+      5 passed
 
 `test_o_casamento_moderno_continua_igual` é o positivo do meio: verde nas duas
 mutações de propósito — ele prova que o caminho que já funcionava não mudou.
 
-`alvo` é obrigatório nos casos: `alvo` NULO cai em `_is_generic_merchant`
+`alvo` é obrigatório nos casos ACIMA: `alvo` NULO cai em `_is_generic_merchant`
 (db/open_finance.py:1322) e casa com QUALQUER estabelecimento, o que apagaria a
 diferença entre casar por nome e casar por genérico.
+
+O eixo do `alvo` NULO é a fatia MAIS LARGA do conserto, e tem caso próprio
+(`test_alvo_nulo_casa_igual_no_legado_e_no_moderno`): ali o "gêmeo" pode ser uma
+compra genuinamente diferente, e o R$ 50 dela some sem pendência e sem volta
+(`reject_reconciliation` só age em `status='pending'`). Isso está prendido como
+ESCOLHA, não como acidente: o espelho MODERNO ('despesa' com `alvo` NULO) dá o
+mesmo resultado, então é o desenho pré-existente de `_is_generic_merchant`
+passando a valer para a linha legada também — e dobrar dinheiro (o defeito que
+este PR conserta) é pior que fundir por genérico. Mudar isso é mexer no
+`_is_generic_merchant`, que é outro escopo.
 """
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, time
 from decimal import Decimal
+
+import pytest
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
@@ -169,3 +182,37 @@ def test_gasto_legado_de_outro_estabelecimento_nao_e_engolido(pro_user_id):
         cur.execute("select count(*) as n from launches where user_id=%s and tipo='saida'",
                     (pro_user_id,))
         assert cur.fetchone()["n"] == 1, "a linha manual do usuário sumiu"
+
+
+# ── a fatia mais larga: `alvo` NULO casa com qualquer estabelecimento ───────
+
+@pytest.mark.parametrize("tipo", ["saida", "despesa"])
+def test_alvo_nulo_casa_igual_no_legado_e_no_moderno(pro_user_id, tipo):
+    """Legado e moderno, o MESMO insert, só o `tipo` muda — e o resultado tem de
+    ser o mesmo. É o que faz do comportamento uma escolha e não um acidente.
+
+    `alvo` NULO → `_is_generic_merchant` → casa com QUALQUER nome, então a
+    compra do OF ("POSTO IPIRANGA") funde com um gasto manual que pode ser
+    genuinamente OUTRO. Medido nos dois tipos: `auto_merged=1, inserted=0,
+    pending=0`, `monthly_expense=50.0`, 1 linha na tabela. Com o conserto
+    desligado (`{TIPO_CANON_SQL} = %s` → `tipo = %s`) o LEGADO vira
+    `auto_merged=0, inserted=1`, `monthly_expense=100.0` e 2 linhas — o moderno
+    fica igual, que é o ponto: o conserto só ALINHA os dois.
+
+    Custo conhecido e aceito: R$ 50 de gasto real somem sem pendência (o
+    `reject_reconciliation` só age em `status='pending'`). É o desenho
+    pré-existente de `_is_generic_merchant`, não algo que este PR inventou —
+    contar o mesmo gasto DUAS vezes, que é o defeito consertado aqui, é pior."""
+    hoje = today_tz()
+    _grava_tipo_legado(pro_user_id, tipo, 50.00, "mercado", nota="gasto",
+                       criado_em=datetime.combine(hoje, time(9, 0)))
+
+    rep = _importa_of(pro_user_id, hoje, descricao="POSTO IPIRANGA",
+                      categoria="transporte")
+
+    assert (rep["auto_merged"], rep["pending"], rep["inserted"]) == (1, 0, 0), rep
+    assert _gasto_do_mes(pro_user_id) == 50.0, _gasto_do_mes(pro_user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from launches where user_id=%s",
+                    (pro_user_id,))
+        assert cur.fetchone()["n"] == 1, "a fusão tem de deixar UMA linha"
