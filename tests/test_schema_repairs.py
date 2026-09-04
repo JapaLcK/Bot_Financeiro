@@ -137,16 +137,6 @@ def _declared_user_fk_actions() -> dict[str, set[str]]:
     return declared
 
 
-# Divergência conhecida e AINDA SEM DECISÃO DO DONO. A #221 decidiu apenas
-# `system_event_logs`. `pii_access_log` declara SET NULL no DDL e roda CASCADE
-# (o repair converte a cada boot), e a escolha ali é genuinamente aberta: é um
-# audit de acesso a PII, e o irmão mais próximo (`auth_login_events`) é SET NULL
-# de propósito. Resolver exige decisão do dono, não o palpite de quem passou.
-# Ao decidir: ou o DDL vira CASCADE, ou a tabela entra em
-# _USER_FK_SET_NULL_TABLES — e esta linha sai junto.
-_PENDENTE_DECISAO_DO_DONO = frozenset({"pii_access_log"})
-
-
 def test_ddl_nao_contradiz_o_alvo_do_repair():
     """Nenhuma FK em users(id) pode declarar no DDL um `on delete` que o
     `repair_user_fk_cascades` vá sobrescrever no boot seguinte."""
@@ -163,10 +153,49 @@ def test_ddl_nao_contradiz_o_alvo_do_repair():
         if actions != {alvo}:
             divergentes[table] = {"ddl": sorted(actions), "repair": alvo}
 
-    inesperadas = set(divergentes) - _PENDENTE_DECISAO_DO_DONO
-    assert not inesperadas, (
+    assert not divergentes, (
         "DDL declara um `on delete` que o repair_user_fk_cascades sobrescreve: "
-        + repr({t: divergentes[t] for t in sorted(inesperadas)})
+        + repr({t: divergentes[t] for t in sorted(divergentes)})
         + ". Alinhe o DDL com _USER_FK_SET_NULL_TABLES (db/schema_repairs.py) — "
         "quem vale em runtime é o repair, não o `create table if not exists`."
     )
+
+
+def test_delete_user_preserva_linha_de_pii_access_log(user_id):
+    """Efeito da decisão do dono: `pii_access_log` é SET NULL, então apagar o
+    titular ANONIMIZA a linha de compliance em vez de destruí-la.
+
+    Controle negativo: tire "pii_access_log" de _USER_FK_SET_NULL_TABLES e o
+    repair converte a FK para CASCADE — o delete leva a linha junto e o
+    `select` abaixo não acha nada.
+    """
+    from conftest import _cleanup_user
+
+    with get_conn() as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            repair_user_fk_cascades(cur)  # aplica o alvo atual à FK real
+            assert _fk_action(cur, "pii_access_log") == "n"
+
+            cur.execute(
+                """
+                insert into pii_access_log (purpose, actor, subject_user_id, field)
+                values ('test_fk', 'system:test', %s, 'email')
+                returning id
+                """,
+                (user_id,),
+            )
+            row_id = cur.fetchone()["id"]
+            try:
+                _cleanup_user(user_id)  # o delete real da conta (users + filhos)
+
+                cur.execute(
+                    "select subject_user_id, purpose from pii_access_log where id = %s",
+                    (row_id,),
+                )
+                row = cur.fetchone()
+                assert row is not None, "CASCADE apagou a trilha de compliance"
+                assert row["subject_user_id"] is None
+                assert row["purpose"] == "test_fk"  # o resto do registro sobrevive
+            finally:
+                cur.execute("delete from pii_access_log where id = %s", (row_id,))
