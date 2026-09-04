@@ -7,6 +7,7 @@ import logging
 
 import db
 from core.observability import _log_falha
+from core.response_formatter import escape_wa_markup
 from utils_text import fmt_brl
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
         msg_out = handle_quick_entry(user_id, text)
         if msg_out:
             return f"✅ Lançamento registrado!\n{msg_out.text}"
-        return f"⚠️ Não consegui registrar automaticamente. Tente: `{text}`"
+        return f"⚠️ Não consegui registrar automaticamente. Tente: `{escape_wa_markup(text)}`"
 
     # ── Oferta "virar gasto fixo" (despesa que se repetiu) ───────────────────
     if action_type == "confirm_recurring_offer":
