@@ -423,10 +423,24 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Install dependencies
+        run: npm ci
+
+      # Antes do download do Chromium (~95 MB) de propósito, pelo mesmo motivo
+      # do gate do CACHE_NAME lá em cima: violação reprova em segundos em vez de
+      # esperar o job inteiro.
+      #
+      # BLOQUEANTE, e o que ele bloqueia é o FUTURO, não o passado: as regras
+      # que já valem `error` nasceram com contagem zero, e os 6 arquivos que já
+      # estouravam o teto de 350 linhas estão numa lista `ignore` nominal no
+      # eslint.config.mjs. Quem fica vermelho aqui é arquivo NOVO acima do teto,
+      # ou uma das regras zeradas voltando — não código que já existia. Aviso
+      # (`warn`) não reprova: `eslint` só sai != 0 com erro.
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Install Playwright + Chromium
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Run frontend tests
         run: npm run test:frontend
