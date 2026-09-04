@@ -17,7 +17,7 @@ import unicodedata
 import db
 from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import (PT_VALUE, _ENCHIMENTO, _TRACOS, contains_word,
+from utils_text import (PT_VALUE, _SEM_CONTEUDO, _TRACOS, contains_word,
                         limpa_pontuacao_final, marcador_de_tudo, normalize_text,
                         valor_perigoso)
 
@@ -245,17 +245,48 @@ def abandona_pergunta_de_valor(text: str) -> bool:
 # resposta") está certo — ele só estava errado quando a mensagem não era uma
 # resposta. Por isso o portão mora aqui e o `_funde_a_resposta` não muda.
 #
-# Reusa o `PT_VALUE` e o `_ENCHIMENTO` do `utils_text` e o `_UNIDADE` da porta
-# 1 (`core/handlers/bills.py`) — as três já são fonte única compartilhada. A
-# unidade é obrigatória em cada iteração externa: sem isso o `PT_VALUE`
+# Tudo aqui é peça já existente e compartilhada — nada foi inventado:
+#
+#   `_SEM_CONTEUDO`  (utils_text) o prefixo que NÃO carrega conteúdo. É o
+#                    `_ENCHIMENTO` ("foi", "uns", "acho que") MAIS os 12
+#                    verbos de lançamento MAIS "r$"/"rs". A lista já existe
+#                    com exatamente este significado: é ela que decide, no
+#                    `_sinal_negativo`, se o que vem antes de um traço é
+#                    conteúdo.
+#   `PT_VALUE`       (utils_text) dígitos ou número por extenso, encadeado.
+#   `_UNIDADE`       (porta 1) "reais", "pila", "conto"…
+#   `_NUMERO_AMBIGUO_RE` (porta 1) só dígitos/separadores/espaço, mas
+#                    malformado: "132 50", "1.23.456", ",50", "1"×400.
+#
+# O VERBO É PREFIXO SEM CONTEÚDO, e isto é o oposto de um detalhe. "paguei
+# 132" não nomeia alvo nenhum, então não compete com a pergunta pendente — ele
+# É a resposta, com um verbo na frente. Tratá-lo como comando novo tem preço
+# MEDIDO, porque o filtro de dano (`valor_perigoso`) mora no
+# `_resolve_clarification` e o abandono passa por fora dele:
+#   "paguei 132 50"           -> R$ 13.250,00 registrados (o bug que o filtro existe para matar)
+#   "paguei 132,50. foi isso" -> R$ 13.250,00
+#   "paguei -10"              -> R$ 10,00 POSITIVOS
+#   "paguei " + "1"*400       -> "erro interno" (Infinity no JSON da pendência)
+# Com o verbo como prefixo, os quatro voltam ao `valor_perigoso` — que é o
+# comportamento de HOJE e recusa os quatro. `gastei 50 no mercado` segue
+# EXPLÍCITO: sobra "no mercado", e sobra é alvo.
+#
+# O SINAL e o `_NUMERO_AMBIGUO_RE` estão aqui pela mesma razão, não por
+# completude: sem eles "paguei -10" e "paguei ,50" escapam do filtro.
+#
+# A unidade é obrigatória em cada iteração externa: sem isso o `PT_VALUE`
 # aninhado num segundo `*` dá backtracking catastrófico (medido: 40 grupos de
 # "2 mil e " não terminaram em 120s; com esta forma, 0,09 ms).
 #
 # "centavos" entra além do `_UNIDADE` da porta 1 porque aqui a mensagem é uma
 # frase falada inteira ("30 reais e 50 centavos"), e lá é só o número.
+_SEM_CONTEUDO_ALT = "|".join(
+    sorted((re.escape(w) for w in _SEM_CONTEUDO), key=len, reverse=True))
 _SO_O_VALOR_RE = re.compile(
-    rf"(?:{_ENCHIMENTO}\s+)*{PT_VALUE}"
-    rf"(?:\s+(?:e\s+)?(?:{h_bills._UNIDADE}|centavos?)(?:\s+(?:e\s+)?{PT_VALUE})?)*",
+    rf"(?:(?:{_SEM_CONTEUDO_ALT})\s+)*(?:-\s*)?"
+    rf"(?:{PT_VALUE}"
+    rf"(?:\s+(?:e\s+)?(?:{h_bills._UNIDADE}|centavos?)(?:\s+(?:e\s+)?{PT_VALUE})?)*"
+    rf"|{h_bills._NUMERO_AMBIGUO_RE.pattern})",
     re.I)
 
 
@@ -795,6 +826,33 @@ def _ja_tem_o_valor(entities: dict | None) -> bool:
         return True
 
 
+def _o_reroteamento_le_o_mesmo_valor(text: str) -> bool:
+    """Guarda de entrega da via EXPLÍCITO: só larga a pergunta se o roteamento
+    normal for ler o MESMO número que esta porta lê.
+
+    As quatro portas limpam a pontuação de prosa (`limpa_pontuacao_final`); o
+    roteamento normal NÃO — o furo é do `parse_money` e tem issue própria (ver
+    `_cola_separador_decimal`). Enquanto ele existir, entregar a mensagem ao
+    roteamento normal pode MUDAR o valor. Medido, e é a diferença entre
+    R$ 132,50 e R$ 13.250,00:
+
+        "paguei 132,50. foi isso"  porta: 132.5   roteamento normal: 13250.0
+        "1.234,56, foi isso"       porta: 1234.56 roteamento normal: None
+
+    Nas outras 14 formas EXPLÍCITO medidas (`gastei 50 no mercado`,
+    `paguei 120 de luz`, `guardei 100 na caixinha viagem`, `aportei 200 no
+    CDB`, `fatura`…) os dois leem o mesmo, então a guarda não custa nada.
+
+    Estritamente CONSERVADORA: ela só faz a porta abandonar MENOS. O caso que
+    ela segura continua exatamente no comportamento de hoje — o resolver, com
+    o filtro de dano.
+    """
+    from utils_text import parse_money
+
+    bruto = (text or "").strip()
+    return parse_money(bruto) == parse_money(limpa_pontuacao_final(bruto))
+
+
 def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     """Decide o que a mensagem é: `"resolve"` a pergunta, ou a `"abandona"`.
 
@@ -864,6 +922,8 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     if intent_da_resposta in ESCRITA and not _so_o_valor(text):
         if _STARTS_WITH_VALUE_RE.match((text or "").strip()):
             return "resolve"   # AMBÍGUO — desempate é o PR B da #281
+        if not _o_reroteamento_le_o_mesmo_valor(text):
+            return "resolve"
         return "abandona"      # EXPLÍCITO — verbo próprio, comando novo
 
     if intent_da_resposta not in ABANDONA:

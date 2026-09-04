@@ -2413,13 +2413,7 @@ def test_porta_4_ponto_final_sem_virgula_paga_como_na_main(monkeypatch, resposta
     assert (depois["status"], float(depois["paid_amount"] or 0)) == ("paid", esperado)
 
 
-# "paguei 132." saiu daqui no #281, pelo MESMO motivo que já o tirava da porta
-# 1 (o comentário abaixo do próximo teste): ele tem verbo próprio, então a via
-# EXPLÍCITO abandona a pergunta antes da limpeza — a limpeza não participa.
-# O que ele faz agora está em `test_281_verbo_com_valor_e_nada_mais_custa_um_turno`.
-@pytest.mark.parametrize("resposta,esperado",
-                         [c for c in PONTO_FINAL_SEM_VIRGULA
-                          if not c[0].startswith("paguei")])
+@pytest.mark.parametrize("resposta,esperado", PONTO_FINAL_SEM_VIRGULA)
 def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
     """Porta 2, a única que já limpava antes — aqui só para as quatro
     concordarem no MESMO texto, que é o ponto do PR."""
@@ -2434,36 +2428,6 @@ def test_porta_2_ponto_final_sem_virgula_registra(resposta, esperado):
 
     lancs = db.list_launches(uid, limit=3)
     assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == esperado, lancs
-
-
-def test_281_verbo_com_valor_e_nada_mais_custa_um_turno():
-    """TETO do #281, medido e NÃO resolvido aqui: verbo + valor e MAIS NADA.
-
-    `paguei 132`, `gastei 50`, `recebi 1000`, `saquei 200` e `tirei 100` têm
-    verbo próprio e nenhum alvo — a via EXPLÍCITO os trata como comando novo,
-    então respondê-los a "Quanto foi no *luz*?" abandona a pergunta e o
-    roteamento normal pergunta de novo, agora pela DESCRIÇÃO.
-
-    NADA se perde e nada anda para o lado errado: o valor sobrevive na
-    `clarification` nova, e nenhum lançamento é gravado com alvo adivinhado.
-    O custo é UM turno e o `luz` da pergunta velha, que o usuário redigita.
-
-    Se o dono quiser esse caso de volta como resposta, a mudança é UMA linha
-    (`_VERBOS_LANCAMENTO` como prefixo aceito no `_SO_O_VALOR_RE`, ao lado do
-    `_ENCHIMENTO`) — mas ela decide que "verbo sem alvo não é comando", e essa
-    decisão não estava no plano do PR A.
-    """
-    import uuid
-    import db
-
-    uid = int(uuid.uuid4().int % 1_000_000_000)
-    db.ensure_user(uid)
-    assert "Quanto foi" in _diga(uid, "paguei a luz")
-
-    resp = _diga(uid, "paguei 132.  ")
-
-    assert "Em que você gastou R$ 132,00" in resp, resp
-    assert db.list_launches(uid, limit=3) == [], "nada podia ser gravado ainda"
 
 
 # "paguei 132." fica de fora: ele NÃO casa o `_VALOR_RE` (o verbo não está no
@@ -3169,8 +3133,10 @@ def test_cas_perdido_na_porta_3_ja_nao_tocava_a_pergunta_nova(monkeypatch):
 #   i = classify(texto, allow_ai=False).intent
 #   i in ABANDONA                     -> ABANDONA-6 (+ veto de catálogo, #280)
 #   i in ESCRITA and not _so_o_valor:
-#           não começa por valor      -> EXPLÍCITO
 #           começa por valor          -> AMBÍGUO (no PR A cai em COMPATÍVEL)
+#           reroteamento leria OUTRO
+#             número                  -> COMPATÍVEL (guarda de entrega)
+#           senão                     -> EXPLÍCITO
 #   senão                             -> COMPATÍVEL
 # ---------------------------------------------------------------------------
 
@@ -3184,6 +3150,7 @@ _VIAS_281 = [
     ("aportei 200 no CDB", "EXPLICITO"),
     ("resgatei 200 do CDB", "EXPLICITO"),
     ("saquei 200", "EXPLICITO"),
+    ("investi 80", "EXPLICITO"),
     ("criar caixinha viagem", "EXPLICITO"),
     ("apagar caixinha viagem", "EXPLICITO"),
     ("fatura", "EXPLICITO"),
@@ -3199,6 +3166,20 @@ _VIAS_281 = [
     ("10 mil", "COMPATIVEL"),
     ("2,5 mil", "COMPATIVEL"),
     ("30 reais e 50 centavos", "COMPATIVEL"),
+    # COMPATÍVEL pelo VERBO: os 12 do `_VERBOS_LANCAMENTO` são prefixo SEM
+    # conteúdo (`_SEM_CONTEUDO`) — a mesma operação que a pergunta já fazia, e
+    # nenhum alvo nomeado. Sem isto eles pulam o `valor_perigoso`, e os quatro
+    # de baixo viravam R$ 13.250,00 / R$ 10,00 positivos / "erro interno".
+    ("paguei 132", "COMPATIVEL"),
+    ("gastei 132", "COMPATIVEL"),
+    ("recebi 1000", "COMPATIVEL"),
+    ("paguei 132 50", "COMPATIVEL"),
+    ("paguei -10", "COMPATIVEL"),
+    ("paguei ,50", "COMPATIVEL"),
+    ("paguei " + "1" * 400, "COMPATIVEL"),
+    # COMPATÍVEL pela GUARDA DE ENTREGA: o roteamento normal leria 13250.0
+    # onde a porta lê 132.5, porque só as portas limpam a pontuação de prosa.
+    ("paguei 132,50. foi isso", "COMPATIVEL"),
     # COMPATÍVEL por INTENT — `out_of_scope`, nem chega ao portão de forma.
     ("100", "COMPATIVEL"),
     ("R$ 100", "COMPATIVEL"),
@@ -3225,11 +3206,17 @@ def _via_281(texto: str) -> str:
     """Reconstrói a via a partir das MESMAS peças que a porta 2 usa."""
     from parsers import _STARTS_WITH_VALUE_RE
     from core.intent_classifier import classify
-    from core.intent_router import ABANDONA, ESCRITA, _so_o_valor
+    from core.intent_router import (ABANDONA, ESCRITA,
+                                    _o_reroteamento_le_o_mesmo_valor,
+                                    _so_o_valor)
 
     i = classify(texto, allow_ai=False).intent
     if i in ESCRITA and not _so_o_valor(texto):
-        return "AMBIGUO" if _STARTS_WITH_VALUE_RE.match(texto) else "EXPLICITO"
+        if _STARTS_WITH_VALUE_RE.match(texto):
+            return "AMBIGUO"
+        if not _o_reroteamento_le_o_mesmo_valor(texto):
+            return "COMPATIVEL"
+        return "EXPLICITO"
     return "ABANDONA" if i in ABANDONA else "COMPATIVEL"
 
 
@@ -3246,6 +3233,26 @@ def test_281_escrita_e_abandona_sao_disjuntos():
     from core.intent_router import ABANDONA, ESCRITA
 
     assert ABANDONA & ESCRITA == set()
+
+
+def test_281_guarda_de_entrega_prende_o_valor_que_o_reroteamento_mudaria():
+    """CONTROLE da guarda, pela CONVERSA: sem ela, `paguei 132,50. foi isso`
+    respondendo "Quanto foi no *luz*?" registra R$ 13.250,00.
+
+    O furo é do `parse_money` sobre a pontuação de prosa e tem issue própria
+    (ver `_cola_separador_decimal`); enquanto ele existir, a via EXPLÍCITO não
+    pode entregar a mensagem ao roteamento normal."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Quanto foi" in _diga(uid, "paguei a luz")
+
+    _diga(uid, "paguei 132,50. foi isso")
+
+    lancs = db.list_launches(uid, limit=3)
+    assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == 132.5, lancs
 
 
 def test_281_so_o_valor_nao_usa_normalize_text():

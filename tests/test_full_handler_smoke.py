@@ -543,20 +543,29 @@ def test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta(pro_uid, ia_de_esclareci
     Medido no WhatsApp: "gastei no mercado" → "Quanto foi no *mercado*?" →
     "fatura" → "Quanto foi no *mercado - fatura*?". O `orig_text` crescia a
     cada turno e a palavra do usuário ficava gravada como alvo do lançamento.
+
+    O #281 fecha isto MAIS CEDO e por outra via, por DECISÃO DO DONO:
+    `credit.handle` entrou no `ESCRITA`, então "fatura" (sv=0, não é
+    só-o-valor) é comando novo — a porta 2 abandona a pergunta e responde o
+    cartão. Medido: "📭 Você ainda não tem cartões cadastrados", pendência
+    limpa, nada registrado. A IA não é mais consultada neste turno, e é por
+    isso que o `assert chamadas` saiu: o abandono acontece no `route()`, antes
+    do `_resolve_clarification`.
+
+    O que o teste protege continua o mesmo e é o que importa: a palavra do
+    usuário não vira alvo de lançamento nenhum.
     """
     import db
 
     uid = pro_uid
     _pergunta_de_valor(uid, "gastei no mercado")
-    chamadas = ia_de_esclarecimento(valor=44.0)
+    ia_de_esclarecimento(valor=44.0)
 
     resp = _send(uid, "fatura")
 
-    assert chamadas, "a IA não foi consultada — o teste não mede nada"
     assert "mercado - fatura" not in resp, f"o alvo engordou: {resp}"
-    pend = _pendencia(uid)
-    assert pend is not None, resp
-    assert pend["payload"]["orig_text"] == "gastei no mercado", pend["payload"]
+    assert "cart" in resp.lower(), f"a pergunta engoliu o comando de cartão: {resp}"
+    assert _pendencia(uid) is None, _pendencia(uid)
     assert not db.list_launches(uid, limit=5), "gravou com a resposta como alvo"
 
 
@@ -978,6 +987,17 @@ def test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando(
         pro_uid, spy_ai):
     """Porta 2, com `investi 80` (`investments.deposit` 0.95).
 
+    INVERTIDO PELO #281, de propósito: `investi 80` é um comando de ESCRITA de
+    OUTRA operação (aportar), não uma forma de dizer "80". A regra do dono é
+    que o comando explícito vence, então a pergunta É largada e o aporte roda.
+    Medido: "Qual valor você quer aportar? Você ainda não tem investimentos
+    cadastrados", nada registrado, e uma pendência NOVA (a do aporte) no lugar.
+
+    Isto NÃO vale para `paguei 132` / `gastei 132`: aqueles são os 12 verbos do
+    `_VERBOS_LANCAMENTO`, que o `_SO_O_VALOR_RE` trata como prefixo sem
+    conteúdo — a mesma operação que a pergunta já estava fazendo. Quem prende
+    esse recorte é `test_clarification_aceita_tudo_que_a_main_aceita`.
+
     `132 no cartao` fica FORA desta metade por medição, não por esquecimento:
     nas duas árvores (`main` cf54ffb e este branch) o combinado
     "gastei 132 no cartao a luz" é lido como compra no cartão e responde
@@ -992,11 +1012,13 @@ def test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando(
     import db
     _pergunta_de_valor(uid)
 
-    _send(uid, "investi 80")
+    resp = _send(uid, "investi 80")
 
-    lancs = db.list_launches(uid, limit=5)
-    assert lancs, "'investi 80' perdeu a pergunta e não registrou nada"
-    assert abs(float(lancs[0]["valor"])) == 80.0, lancs[0]
+    assert "aportar" in resp.lower(), f"a pergunta engoliu o aporte: {resp}"
+    assert not db.list_launches(uid, limit=5), \
+        "não havia investimento para aportar; nada podia ser gravado"
+    pend = _pendencia(uid)
+    assert pend and pend["payload"].get("intent") != "launches.add", pend
 
 
 def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(free_uid, spy_ai, monkeypatch):

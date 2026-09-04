@@ -987,11 +987,25 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 # carregam `amount` só são alcançáveis por ele. A rota determinística provada
 # aqui é a `funds.withdraw`.
 #
-# TETO, medido e escrito também no código: continua sequestrado o verbo que os
-# tiers 1-2 não conhecem — `poupei 100`, `mercado 50`, `uber 25`,
-# `gasteii 50 no mercado` e `gasto fixo aluguel 1200` são todos `out_of_scope
-# 0.0`, então não entram no `ESCRITA` e seguem sendo lidos como resposta. A
-# porta 2 roda `allow_ai=False` de propósito (ver `abandona_pergunta_de_valor`).
+# TRÊS TETOS, medidos, e todos escritos também no código:
+#
+#   1. o verbo que os tiers 1-2 não conhecem continua sequestrado — `poupei
+#      100`, `mercado 50`, `uber 25`, `gasteii 50 no mercado` e `gasto fixo
+#      aluguel 1200` são todos `out_of_scope 0.0`, então não entram no
+#      `ESCRITA`. A porta 2 roda `allow_ai=False` de propósito (ver
+#      `abandona_pergunta_de_valor`).
+#   2. os 12 verbos de lançamento com valor e MAIS NADA (`paguei 132`,
+#      `gastei 132`) NÃO abandonam: eles são prefixo sem conteúdo. Não é
+#      esquecimento — medido, tratá-los como comando novo pula o
+#      `valor_perigoso` e faz `paguei 132 50` registrar R$ 13.250,00. A
+#      justificativa mora no `_SO_O_VALOR_RE`, com os quatro números.
+#   3. verbo de OUTRA operação com valor e nada mais (`investi 80`,
+#      `saquei 200`, `retirei 100 do salario`) ABANDONA, e quando o alvo não
+#      existe o usuário paga um turno — o comando erra e nada se move. É a
+#      regra do dono aplicada; prendem este teto
+#      `test_alvo_fora_do_catalogo_nao_sobrescreve` (aqui) e
+#      `test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando`
+#      (em `tests/test_full_handler_smoke.py`).
 
 
 def _pergunta_de_valor(uid):
