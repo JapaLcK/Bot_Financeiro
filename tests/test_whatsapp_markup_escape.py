@@ -18,18 +18,25 @@ caso a formatação já estava quebrada antes, então não se perde nada que
 funcione.
 
 CONTROLE NEGATIVO — quatro mutações, todas medidas em 2026-09-04 contra os
-`18 passed` deste arquivo com o conserto de pé. Nenhuma foi injetada num caso
-que já estava vermelho:
+`18 passed, 2 xfailed` deste arquivo com o conserto de pé. Nenhuma foi injetada
+num caso que já estava vermelho:
 
   1. `wrap_wa_markup` embrulha sempre (`return f"{delim}{text}{delim}"`)
      → `9 failed, 9 passed`: caem os 9 testes de não-embrulho;
   2. `wrap_wa_markup` nunca embrulha (`return text`)
      → `9 failed, 9 passed`: caem os 9 controles positivos (partição limpa);
-  3. `_MARCACAO_WA` volta ao `[*_~\`]` (o `_` sem fronteira)
+  3. `_MARCACAO_WA` volta ao filtro sem a fronteira do `_`
      → `1 failed, 17 passed`: só `test_categoria_legitima_mantem_o_negrito
      [meta_casa_nova]`, que é exatamente o que a precisão do `_` conserta;
   4. `core/handlers/bills.py:176/:297` voltam ao `*{paid.get('name')}*` literal
      → `2 failed, 16 passed`: os dois casos `luz *casa*` da porta digitada.
+
+Os 2 `xfailed` são da #276 e ficam de fora dessas quatro de propósito: eles
+afirmam o comportamento DESEJADO, não o atual. Que o `strict` está armado foi
+medido no mesmo dia — virando a asserção de um deles para o estado de hoje, o
+pytest devolve `[XPASS(strict)]` e `1 failed`. Ou seja: no dia em que a #276 for
+consertada, este arquivo fica VERMELHO pedindo a remoção do marcador, e não
+existe caminho em que o defeito seja lido como comportamento correto.
 
 CONTROLE POSITIVO — o conserto RESTRINGE (passa a omitir o negrito), então
 precisa provar que não engole o negrito de quem escreveu certo: `McDonald's`,
@@ -43,11 +50,14 @@ se o embrulho de marcação está presente ou ausente. Isso NÃO é a tela: em p
 menos um sítio (pending.py:90) ainda passa um `format_for_platform`
 (core/handle_incoming.py:150) que remove pares de crase no WhatsApp.
 
-SEGUNDA CLASSE CEGA: o helper decide POR ARGUMENTO, o WhatsApp pareia POR
-MENSAGEM. Onde o template tem marcação PRÓPRIA além do embrulho, o `*` ímpar do
-usuário casa com o do bot e o negrito vaza mesmo sem embrulho — medido pelo
-`process_message` real em wa_runtime.py:805 (3 asteriscos) e :982/:984 (5).
-Fechar isso é mudança de desenho e fica fora deste PR.
+ISSUE #276 — o helper decide POR ARGUMENTO, o WhatsApp pareia POR MENSAGEM.
+Onde o template tem marcação PRÓPRIA além do embrulho, o `*` ímpar do usuário
+casa com o do bot e o negrito vaza mesmo sem embrulho — medido pelo
+`process_message` real em wa_runtime.py:805 (3 asteriscos) e :982/:984 (5). E há
+um SEGUNDO mecanismo na mesma classe: bills.py:63 não tem marcação própria, mas
+interpola o nome DUAS vezes, então o `*` do usuário pareia consigo mesmo (2
+asteriscos). Fechar isso é mudança de desenho e fica fora deste PR — os dois
+casos estão aqui como `xfail(strict=True)` afirmando o estado DESEJADO.
 
 ESCOPO: os 7 sítios de `adapters/whatsapp/wa_runtime.py`, o
 `pergunta_de_valor_sem_contexto` (core/handlers/bills.py:63, chamado de
@@ -163,24 +173,13 @@ def test_conta_paga_legitima_mantem_o_negrito(monkeypatch):
 # ─── wa_runtime:805 — pergunta de valor de conta variável ───────────────────
 
 
-def test_pergunta_de_valor_com_asterisco_no_nome(monkeypatch):
-    """O que este sítio fecha, e o que NÃO fecha.
-
-    `conta_de_luz` estava aqui e era a única entrada da lista que ESCONDIA o
-    vazamento: sem asterisco nenhum, o total da mensagem ficava par de graça.
-    Com `a*b` o `process_message` real devolve (medido em 2026-09-04):
-
-        'Quanto veio a conta de a*b este mês?\nÉ só mandar o valor. Ex: *132,50*'
-
-    TRÊS asteriscos — o embrulho sai (é o que se afirma abaixo), mas o `*` do
-    usuário ainda pareia com o `*132,50*` do template e o negrito vaza na tela.
-    Fechar isso exige decidir por MENSAGEM, não por argumento; fica fora do PR.
-    """
+def _pergunta_de_valor(monkeypatch, nome: str) -> str:
+    """Roda o `process_message` real até a pergunta de valor (wa_runtime.py:805)."""
     replies: list[tuple[str, str]] = []
     _mock_wa_boot(monkeypatch, replies, uid=4242)
     monkeypatch.setattr(
         "db.bills.get_bill",
-        lambda uid, bid: {"id": bid, "name": "a*b", "status": "pending",
+        lambda uid, bid: {"id": bid, "name": nome, "status": "pending",
                           "variable_amount": True, "amount": None},
     )
     monkeypatch.setattr("adapters.whatsapp.wa_runtime.claim_pending_action",
@@ -189,10 +188,40 @@ def test_pergunta_de_valor_com_asterisco_no_nome(monkeypatch):
     wa_runtime.process_message(_botao(wa_runtime.WA_BILL_PAID_PREFIX + "41"))
 
     assert len(replies) == 1
-    body = replies[0][1]
+    return replies[0][1]
+
+
+def test_pergunta_de_valor_com_asterisco_no_nome(monkeypatch):
+    """O que ESTE PR fecha neste sítio: o embrulho sai.
+
+    `conta_de_luz` estava aqui e era a única entrada da lista que ESCONDIA o
+    vazamento da #276: sem asterisco nenhum, o total da mensagem ficava par de
+    graça. Com `a*b` o sítio é de fato exercitado.
+    """
+    body = _pergunta_de_valor(monkeypatch, "a*b")
+
     assert "Quanto veio a conta de a*b este mês?" in body
     assert "*a*b*" not in body
-    assert body.count("*") == 3   # o vazamento por mensagem, documentado
+
+
+@pytest.mark.xfail(strict=True, reason="issue #276: o WhatsApp pareia por MENSAGEM, "
+                                       "e wrap_wa_markup decide por argumento")
+def test_pergunta_de_valor_nao_deixa_asterisco_impar(monkeypatch):
+    """O que a #276 fecha: delimitador PAREADO na mensagem inteira.
+
+    Medido em 2026-09-04, o `process_message` real devolve:
+
+        'Quanto veio a conta de a*b este mês?\nÉ só mandar o valor. Ex: *132,50*'
+
+    TRÊS asteriscos: o embrulho saiu, mas o `*` do usuário pareia com o
+    `*132,50*` do TEMPLATE e o negrito vaza na tela mesmo assim. A asserção
+    abaixo é o estado DESEJADO, não o atual — `strict` de propósito: quando a
+    #276 for consertada isto vira XPASS e a mensagem pede a remoção do marcador,
+    em vez de parecer regressão.
+    """
+    body = _pergunta_de_valor(monkeypatch, "a*b")
+
+    assert body.count("*") % 2 == 0
 
 
 # ─── bills.py:63 — o irmão de wa_runtime.py:800, mesma variável ────────────
@@ -208,6 +237,21 @@ def test_pergunta_sem_contexto_com_underscore_no_nome(monkeypatch):
     assert msg.count("luz _extra_") == 2
     assert "*luz _extra_*" not in msg
     assert msg.count("*") == 0   # o template não tem marcação própria
+
+
+@pytest.mark.xfail(strict=True, reason="issue #276: o WhatsApp pareia por MENSAGEM, "
+                                       "e wrap_wa_markup decide por argumento")
+def test_pergunta_sem_contexto_nao_deixa_asterisco_impar(monkeypatch):
+    """A #276 por OUTRO mecanismo: aqui o template não tem marcação própria,
+    mas interpola o nome DUAS vezes — o `*` do usuário pareia consigo mesmo
+    através da mensagem. Medido em 2026-09-04: 2 asteriscos, e o que fica em
+    negrito é `b tem valor variável... Me responde ela primeiro; a a`.
+    """
+    monkeypatch.setattr(db, "get_pending_action", lambda uid: {})
+
+    msg = h_bills.pergunta_de_valor_sem_contexto(9, "a*b")
+
+    assert msg.count("*") == 0
 
 
 def test_pergunta_sem_contexto_legitima_mantem_o_negrito(monkeypatch):
