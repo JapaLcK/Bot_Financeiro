@@ -1761,15 +1761,21 @@ def test_negativo_pelo_botao_nao_paga(monkeypatch):
 
 
 def test_clarification_com_payload_torto_nao_estoura():
-    """`payload` não-dict virava AttributeError.
+    """`payload` não-dict virava AttributeError; `intent` não-hashável vira
+    `TypeError: unhashable type` no `_CHAVE_DO_NOME.get(intent)` do veto (#185).
 
-    Nenhum produtor grava isso hoje; o custo do guard é uma linha e o efeito
-    seria "erro interno" em loop, com a pendência nunca sendo limpa.
+    Nenhum produtor grava nenhum dos dois hoje; o custo dos guards é uma linha
+    cada e o efeito seria "erro interno" em loop, com a pendência nunca sendo
+    limpa — o `consume_pending_action` só acontece depois do `except`.
     """
     from core.intent_router import _clarification_abandonada
 
     assert _clarification_abandonada({"payload": "x"}, "saldo", 1) is False
     assert _clarification_abandonada({}, "saldo", 1) is False
+    # `falta` casa com a chave de nome, e o `intent` é o dado torto: sem o
+    # `isinstance(intent, str)` esta linha estoura antes de chegar ao return.
+    torto = {"payload": {"falta": "pocket_name", "intent": ["pockets.withdraw"]}}
+    assert _clarification_abandonada(torto, "saldo", 1) is True
 
 
 # ---------------------------------------------------------------------------

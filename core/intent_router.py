@@ -760,18 +760,46 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> bool:
     # `_ja_tem_o_valor` moveria o outro chamador (`pedia_o_valor`, :1040), que
     # é o filtro de dano do #140.
     #
-    # TETO ACEITO pelo dono, e é o exemplo do título da issue: `saquei 200` +
+    # ── OS TRÊS TETOS, medidos. Esta é a ÚNICA cópia do texto: o comentário de
+    # `tests/test_perguntas_guardam_contexto.py` e o corpo do PR #280 apontam
+    # para cá em vez de repetir (§0.7 — a primeira redação errada teve de ser
+    # corrigida em três lugares).
+    #
+    # TETO 1, aceito pelo dono, e é o exemplo do título da issue: `saquei 200` +
     # `extrato` SEM caixinha chamada "extrato" continua abandonando, e os
     # R$ 200 se perdem. Fechar isso exigiria rodar o outro comando E re-armar a
     # pergunta no mesmo turno — padrão de UX novo, decisão adiada.
     #
-    # TETO INVERTIDO, também aceito: quem tem caixinha chamada exatamente
-    # `saldo`/`extrato`/`caixinhas` e quer o COMANDO enquanto uma pergunta de
-    # nome está de pé passa a executar o saque na caixinha. Troca consciente —
-    # o lado do dinheiro ganha.
+    # TETO 2 (invertido), também aceito, e MAIOR que "executa o saque": quem tem
+    # caixinha chamada exatamente `saldo`/`extrato`/`caixinhas` e quer o COMANDO
+    # enquanto uma pergunta de nome está de pé executa o comando PENDENTE no
+    # tamanho que o `orig_text` mandar — inclusive ESVAZIAMENTO INTEGRAL, quantia
+    # ilimitada, porque o handler lê `marcador_de_tudo(orig_text)` quando as
+    # entities não trazem `want_all` (`core/handlers/pockets.py:215-216`).
+    # Medido, caixinha `saldo` com R$ 300:
+    #   "esvaziar caixinha" -> "Qual caixinha?"   (falta=pocket_name, entities={})
+    #   "saldo"             -> "Caixinha *saldo* esvaziada: -R$ 300,00"  (300 -> 0)
+    #                          sem o veto: mostra a Conta Corrente, caixinha em 300
+    # E a mensagem que dispara isso é `classify("saldo")` -> `balance.check` com
+    # confiança 1.0. Troca consciente — o lado do dinheiro ganha. Prende este
+    # teto o `test_185_teto2_comando_pendente_esvazia_a_caixinha`.
+    #
+    # TETO 3, declarado depois da revisão do #280: o veto também dispara quando
+    # NÃO HÁ VALOR A PERDER, e aí a justificativa acima não se aplica.
+    # `tirar da caixinha` grava `entities={}` — o `falta="pocket_name"` vem ANTES
+    # da checagem de valor (`core/handlers/pockets.py:230-232`). Medido:
+    #   "tirar da caixinha" -> "Qual caixinha?"
+    #   "saldo"             -> "Qual o valor?"  (em vez do saldo)
+    # Custa UM turno: na volta o `falta` é `amount`, o veto não pega e o comando
+    # roda. Prende este teto o `test_185_teto3_veto_dispara_sem_valor_a_perder`.
     falta = payload.get("falta")
     intent = payload.get("intent")
-    if falta and falta == _CHAVE_DO_NOME.get(intent):
+    # `isinstance(intent, str)` pelo mesmo motivo do guard de payload não-dict lá
+    # em cima: `_CHAVE_DO_NOME.get([])` é `TypeError: unhashable type`, que vira
+    # "erro interno" com a pendência NUNCA consumida (o `consume_pending_action`
+    # só acontece depois, `core/handle_incoming.py:785`) — o loop que este
+    # guard existe para evitar. Nenhum produtor grava não-str hoje.
+    if falta and isinstance(intent, str) and falta == _CHAVE_DO_NOME.get(intent):
         resposta = limpa_pontuacao_final((text or "").strip())
         return not _eh_nome_do_catalogo(
             resposta, _alvos_existentes(user_id, intent))
