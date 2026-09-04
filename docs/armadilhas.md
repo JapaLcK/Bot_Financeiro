@@ -15,13 +15,14 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   #56 era `"automatic"` e o WebView reservava a área segura sozinho. Saiba em qual
   dos dois mundos você está antes de somar `padding`: com `automatic`, inset em CSS
   **duplica** o espaçamento; com `never`, a falta dele deixa conteúdo sob o notch.
-- **Quem carrega o CSS ≠ quem é alcançável.** Das **27** páginas em `frontend/`:
+- **Quem carrega o CSS ≠ quem é alcançável.** Das páginas em `frontend/`
+  (`ls frontend/*.html | wc -l`; a soma das linhas abaixo tem de bater com ela):
 
   | quantas | o que carregam | quem |
   |---|---|---|
   | 6 | `app-mode.css`/`app-mode.js` | `login`, `cadastro`, `home`, `dashboard`, `comandos-app`, `settings` — mais a `changelog`, que carrega **os dois** (`changelog.html:15` shim, `:16-17` app-mode) e está contada na linha de baixo |
   | 16 | o shim `frontend/safe-area.js` | as estáticas: `index`, `precos`, `termos`, `privacy`, `completar-cadastro`, `comecar`, `suporte`, `agents`, `changelog`, `comandos`, `como-funciona`, `funcionalidades`, `blog-article`, `reset-password`, `whatsapp` — mais a `error`, que **não é rota**: é template servido pelo `error_page_response` (`frontend/routes/shared.py`) em quase toda URL que dá erro. Quase: as **4** exceções são `/webhook` e `/wa/webhook` (403 `text/plain` "forbidden", `adapters/whatsapp/wa_app.py:224,241,255`) e `/fonts/{name}` e `/brand/{path}` (404 de corpo vazio, `static_pages.py:536,559,564,567`) — endpoints de máquina e de subrecurso, que de propósito não gastam 1,4 KB de HTML |
-  | 5 | nada, de propósito | `admin-login`, `admin-dashboard`, `_dash_mockup`, `preview_agentes`, e o `ddf99f17-…` |
+  | 4 | nada, de propósito | `admin-login`, `admin-dashboard`, `preview_agentes`, e o `ddf99f17-…` — o `_dash_mockup` saiu no PR #209, e o `tests/test_frontend_assets_e_rotas.py` agora reprova página sem rota |
 
   As duas páginas geradas em Python (bullet seguinte) também carregam o shim.
   `env(safe-area-inset-*)` aparece em **seis** arquivos de `frontend/`
@@ -31,9 +32,14 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
   últimos são páginas que, de propósito, não carregam nem o app-mode nem o shim.
 
   Isso importa porque **qualquer rota do domínio abre no app**: o "Ver planos" do
-  dashboard leva ao `/precos`, que é uma das 14 — coberta pelo shim, não pelo
-  app-mode. Se alguma das **5** virar rota alcançável pelo app, precisa entrar no
-  shim; ela não herda nada.
+  dashboard leva ao `/precos`, que está na linha do shim — coberta por ele, não pelo
+  app-mode. Se alguma da linha "nada, de propósito" virar rota alcançável pelo app,
+  precisa entrar no shim; ela não herda nada.
+
+  As duas contagens que este parágrafo trazia **divergiam da tabela acima**: diziam
+  14 onde ela diz 16, e 5 depois de o `_dash_mockup` sair. Número repetido fora da
+  sua fonte envelhece sozinho (§0.7 e §2), então o texto passou a citar a LINHA —
+  quem quiser o número lê a tabela.
 - **Existe HTML gerado em Python**, fora de qualquer template:
   `frontend/finance_bot_websocket_custom.py` devolve duas páginas standalone
   (link expirado do `/d/{code}`, descadastro). O `AppDelegate.swift` carrega o
@@ -153,8 +159,22 @@ outro módulo não pode receber `immutable` enquanto não tiver hash no nome.
 HTML e auth nunca são cacheados, assets são network-first com fallback de cache,
 API e WebSocket passam direto. O `manifest.json` tem `start_url: "/login"` — e a
 `index.html` tem um guard no topo que manda a PWA instalada para `/login`, com saída
-por `?site=1`. Mexeu na estratégia de cache? Bumpe o `CACHE_NAME`, senão o aparelho
-que já instalou continua com o SW velho.
+por `?site=1`. Mexeu no `frontend/service-worker.js` sem apagá-lo — qualquer diff, typo em comentário
+incluso? Bumpe o `CACHE_NAME` **e o `VERSAO_ATUAL` de
+`tests/frontend/sw_cache_privado.test.mjs`**, para o mesmo N — um sem o outro fica
+vermelho em `node --test tests/frontend/sw_cache_privado.test.mjs`. O CI normalmente reprova quem
+esquecer, desde o #197.
+
+**Não é para entregar o código novo.** Isso já acontece sozinho: a rota serve o arquivo
+com `Cache-Control: no-cache` (`frontend/routes/static_pages.py`), o `install` encadeia
+`skipWaiting()` depois do `addAll` e o `activate` chama `clients.claim()`. Desde que o
+`install` complete, o worker novo assume com ou sem bump.
+
+O que o bump faz é apagar o **conteúdo**: o `activate` só apaga cache de nome DIFERENTE
+do atual. Sem bumpar, a regra nova só alcança gravação NOVA — e quem decide o que entra é
+a allowlist do `podeCachear`, não o `PRECACHE`: item tirado do precache que a allowlist
+ainda aceita volta a ser cacheado em runtime, e é o caso do Chart.js. O que a versão
+anterior já guardou — inclusive dado privado — continua no aparelho.
 
 ### `pending_actions`: uma linha por usuário, ~100 lugares mexendo nela
 

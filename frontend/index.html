@@ -20,6 +20,8 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   location.replace("/login");
 }
 </script>
+<!-- GA4 e Meta Pixel entram aqui no serve-time (frontend/routes/shared.py,
+     inject_tracking) — chumbar de novo no HTML duplicaria o page_view. -->
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=5" />
@@ -54,6 +56,52 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     .plan-solo { padding: 32px 22px 26px; }
     .plan-solo-amount { font-size: 2.6rem; }
   }
+
+  /* ── VSL: vídeo obrigatório antes do cadastro ─────────────────────────
+     O portão em si é JS (busque "vsl-gate" no fim do arquivo). Aqui só o
+     que ele precisa poder mostrar: o quadro do vídeo e o CTA travado. */
+  .vsl-frame {
+    max-width: 860px; margin: 0 auto; overflow: hidden;
+    border: 1px solid rgba(255,45,142,.35);
+    border-radius: var(--radius-lg);
+    background: var(--bg-inset);
+    box-shadow: 0 24px 60px rgba(255,45,142,.16);
+  }
+  .vsl-video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
+  .vsl-cta-wrap { margin: 26px auto 0; text-align: center; }
+  /* Reusa .btn/.btn-primary/.btn-lg do site.css — aqui só o que faz ele gritar. */
+  .vsl-cta {
+    font-size: 1.18rem; letter-spacing: .04em; padding: 19px 52px;
+    border: 2px solid rgba(255,255,255,.92);
+    border-radius: var(--radius-pill);
+    box-shadow: 0 16px 44px rgba(255,45,142,.45);
+  }
+  /* Travado NÃO é o .btn.is-locked cinza-desbotado: um botão apagado lê-se como
+     quebrado. Aqui ele vira superfície de espera, com a razão escrita nele. */
+  .vsl-cta.is-locked {
+    background: var(--bg-elev); color: var(--text-muted);
+    border: 2px dashed var(--border-strong);
+    box-shadow: none; opacity: 1; filter: none;
+    font-size: .96rem; letter-spacing: 0; padding: 16px 34px;
+  }
+  .vsl-cta.is-locked:hover { transform: none; box-shadow: none; }
+  /* O pulso só existe no estado liberado — é o que puxa o olho pro clique. */
+  @keyframes vslPulso {
+    0%, 100% { box-shadow: 0 16px 44px rgba(255,45,142,.42), 0 0 0 0 rgba(255,45,142,.45); }
+    50%      { box-shadow: 0 16px 44px rgba(255,45,142,.58), 0 0 0 16px rgba(255,45,142,0); }
+  }
+  .vsl-cta:not(.is-locked) { animation: vslPulso 2.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .vsl-cta:not(.is-locked) { animation: none; } }
+  .vsl-status { margin: 14px auto 0; text-align: center; color: var(--text-muted); font-size: .88rem; min-height: 1.2em; }
+  .vsl-status.is-ok { color: var(--pig-neon); }
+  .vsl-status.is-alerta { color: var(--pig-pink); font-weight: 600; }
+  @media (max-width: 560px) {
+    .vsl-cta { font-size: 1.05rem; padding: 17px 34px; }
+    .vsl-cta.is-locked { padding: 15px 22px; font-size: .9rem; }
+  }
+  /* Travado fica VISÍVEL e legível de propósito: CTA que some deixa a pessoa
+     procurando o botão em vez de assistir ao vídeo. */
+  .btn.is-locked { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
 </style>
 <script src="/safe-area.js?v=1"></script>
 </head>
@@ -103,7 +151,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
         <div class="chat-card">
           <div class="chat-head">
-            <img src="/brand/icon.png?v=1" alt="" /> <strong>PigBank</strong>
+            <img src="/brand/icon.png?v=2" alt="" /> <strong>PigBank</strong>
             <span class="online"><i></i> online</span>
           </div>
           <div class="bubble user">Gastei R$ 50 no mercado</div>
@@ -152,6 +200,40 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
             <div class="chart-months"><span>Jan</span><span>Fev</span><span>Mar</span><span>Abr</span><span>Mai</span><span>Jun</span><span>Jul</span></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ─── VSL ──────────────────────────────────────────────────── -->
+    <section class="section" id="vsl">
+      <div class="section-head" data-reveal>
+        <div class="eyebrow">Assista antes de começar</div>
+        <h2>Em 1 minuto você entende<br><span class="grad">tudo que a Piggy faz</span></h2>
+      </div>
+      <div class="vsl-frame" data-reveal>
+        <!-- `src` direto, sem <source>: com o `type` no <source> o navegador
+             filtra o candidato ANTES de buscar, e um navegador que reporta
+             mp4 como "maybe not" nem tenta. Aqui ele busca e decide pelo
+             conteúdo — e o que não tocar cai no `error`, que ABRE o portão.
+             O ?v= é manual: /brand/ serve com cache immutable de 1 ano, e o
+             stamper de conteúdo do serve-time só reescreve css/js. Trocou o
+             vídeo, sobe o número. -->
+        <!-- Sem <track>: o vídeo tem legenda QUEIMADA na imagem, e apontar
+             pra um .vtt que não existe só renderia um 404 por visita. Se um
+             dia houver o arquivo, o <track> volta e o `.vtt` volta pro
+             _BRAND_MEDIA de frontend/routes/static_pages.py. -->
+        <video id="vsl-video" class="vsl-video" controls playsinline
+               preload="metadata" poster="/brand/vsl-poster.jpg?v=1"
+               src="/brand/vsl.mp4?v=1"></video>
+      </div>
+      <!-- É um <a href="/cadastro"> de verdade, e não um <button>: assim ele entra
+           sozinho no `alvos` do vsl-gate e no handler de clique, sem caso especial.
+           Nasce TRAVADO no HTML — se o JS não rodar, o que aparece é o convite a
+           assistir, nunca um botão morto. O rótulo vira "COMECE JÁ" ao liberar. -->
+      <div class="vsl-cta-wrap" data-reveal>
+        <a class="btn btn-primary btn-lg vsl-cta is-locked" id="vsl-cta"
+           href="/cadastro" aria-disabled="true"
+           ><span id="vsl-cta-txt">Assista ao vídeo para liberar</span></a>
+        <p class="vsl-status" id="vsl-status" role="status"></p>
       </div>
     </section>
 
@@ -337,7 +419,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
       </div>
 
       <div class="hiw-cta" data-reveal>
-        <p>A conta leva alguns segundos e é grátis pra testar.</p>
+        <p>A conta leva alguns segundos. Depois você escolhe um plano pra ativar seus 15 dias grátis — um teste por número de telefone, e o checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.</p>
         <a class="btn btn-primary" href="/cadastro">Criar minha conta <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
       </div>
 
@@ -482,12 +564,12 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
       <div class="section-head" data-reveal>
         <div class="eyebrow">Planos</div>
         <h2>Escolha seu <span class="grad">PigBank+</span></h2>
-        <p>30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
+        <p>15 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
       </div>
 
       <div class="plan-solo-wrap" data-reveal>
         <article class="plan-solo">
-          <span class="plan-solo-trial">30 dias grátis</span>
+          <span class="plan-solo-trial">15 dias grátis</span>
           <div class="plan-solo-from">Acesse o PigBank por apenas</div>
           <div class="plan-solo-amount">R$ 9,90<span>/mês</span></div>
           <ul class="plan-solo-feats">
@@ -501,7 +583,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         </article>
       </div>
 
-      <p class="plans-note"><i class="ph ph-confetti" aria-hidden="true"></i> 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+      <p class="plans-note"><i class="ph ph-confetti" aria-hidden="true"></i> 15 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
     </section>
 
     <div class="sec-sep"></div>
@@ -533,7 +615,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Tem período grátis? <span class="chev">+</span></button>
-          <div class="faq-a"><p>Tem 30 dias grátis pra testar tudo. A primeira cobrança só acontece depois do trial, e você pode cancelar antes sem pagar nada.</p></div>
+          <div class="faq-a"><p>Tem 15 dias grátis pra testar tudo. A primeira cobrança só acontece depois do trial, e você pode cancelar antes sem pagar nada.</p></div>
         </div>
         <div class="faq-item">
           <button class="faq-q" type="button" aria-expanded="false">Como funciona o pagamento? <span class="chev">+</span></button>
@@ -563,7 +645,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   <footer class="footer">
     <div class="wrap footer-inner">
       <div class="footer-brand">
-        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
         <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
       </div>
       <div class="footer-cols">
@@ -713,6 +795,137 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     } else {
       comecar();
     }
+  })();
+  </script>
+  <script>
+  /* ── vsl-gate: o cadastro só destrava depois do vídeo ──────────────────
+     Pedido explícito do dono: assistir é obrigatório e não dá pra pular.
+
+     Isto é portão de PERSUASÃO, não de segurança. /cadastro continua
+     alcançável por URL direta, pelo botão da /precos e pelo nav das outras
+     páginas — quem quiser desviar, desvia. O que ele faz é não deixar o
+     caminho ÓBVIO da landing pular o vídeo.
+
+     Três decisões que não são detalhe:
+     · FALHA ABERTA. Vídeo que não carrega, formato que o navegador não toca,
+       rede caída — libera. Portão que trava por defeito zera o cadastro do
+       dia em silêncio, e quem está do lado de dentro não vê nada.
+     · Rebobinar pode, adiantar não: `seeking` devolve o cursor pro ponto mais
+       longe já assistido. Sem isso, arrastar a barra pro fim vale por assistir.
+     · Uma vez por navegador. Quem assistiu, foi pro /cadastro e voltou não
+       assiste de novo — senão o portão pune justo quem cumpriu.
+
+     O clique é UM handler no documento, não cinco nos botões: os CTAs de
+     /cadastro são 5 hoje (nav, hero, hiw, tech, fim) e o próximo nasce coberto. */
+  (function () {
+    var video  = document.getElementById("vsl-video");
+    var status = document.getElementById("vsl-status");
+    var rotulo = document.getElementById("vsl-cta-txt");
+    if (!video) return;
+
+    var CHAVE = "pb_vsl_visto";
+    var liberado = false, assistido = 0, marcos = {};
+    // Capturados UMA vez, e guardados como elementos. Reconsultar por
+    // `a[href="/cadastro"]` na hora de liberar era um bug: o nav-auth.js troca
+    // esse href por /app quando a sessão está viva, e aí a consulta não acha
+    // mais nada — os CTAs de quem já tem conta ficariam cinzas para sempre.
+    var alvos = [].slice.call(document.querySelectorAll('a[href="/cadastro"]'));
+
+    function travar() {
+      alvos.forEach(function (a) {
+        a.classList.add("is-locked");
+        a.setAttribute("aria-disabled", "true");
+      });
+    }
+
+    function liberar(motivo) {
+      if (liberado) return;
+      liberado = true;
+      alvos.forEach(function (a) {
+        a.classList.remove("is-locked");
+        a.removeAttribute("aria-disabled");
+      });
+      // Quem está logado NÃO recebe "COMECE JÁ": o nav-auth.js já escreveu
+      // "Ir para o dashboard" e o href aponta pro /app. Na prática ele também já
+      // destruiu este <span> (`a.textContent = ...` troca os filhos — medido:
+      // `parentNode` fica null), então a escrita cairia no vazio de qualquer
+      // jeito. A condição fica porque a regra tem de estar dita em algum lugar
+      // que não seja um efeito colateral de outro arquivo.
+      if (motivo !== "logado" && rotulo) rotulo.textContent = "COMECE JÁ";
+      if (status) {
+        status.textContent = "Cadastro liberado.";
+        status.className = "vsl-status is-ok";
+      }
+      // Só "assistiu" vira memória. "erro" não: um tropeço de rede não pode
+      // desligar o portão naquele navegador para sempre. "logado" também não:
+      // quem sair da conta depois volta a ser visitante.
+      if (motivo === "assistiu") { try { localStorage.setItem(CHAVE, "1"); } catch (e) {} }
+      // Sem `pbTrack` aqui: nada navega depois deste evento.
+      if (window.gtag) gtag("event", "vsl_unlock", { motivo: motivo });
+    }
+
+    document.addEventListener("click", function (ev) {
+      if (liberado) return;
+      var a = ev.target && ev.target.closest && ev.target.closest("a");
+      // Pelo href VIVO, não pelo seletor de origem: depois do nav-auth.js o
+      // botão aponta pro /app, e barrar quem já tem conta não faz sentido.
+      if (!a || a.getAttribute("href") !== "/cadastro") return;
+      ev.preventDefault();
+      video.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (status) {
+        status.textContent = "Assista ao vídeo até o fim para liberar o cadastro.";
+        status.className = "vsl-status is-alerta";
+      }
+    });
+
+    var visto = false;
+    try { visto = localStorage.getItem(CHAVE) === "1"; } catch (e) {}
+    if (visto) { liberar("memoria"); } else { travar(); }
+
+    // A porta de saída: `error` no <video> cobre os dois jeitos de o vídeo não
+    // existir pro usuário — 404 e codec que o navegador não toca.
+    video.addEventListener("error", function () { liberar("erro"); });
+
+    // A outra porta: o nav-auth.js reescreve o href dos CTAs quando o /auth/validate
+    // responde que a sessão está viva. Quem já tem conta não tem o que assistir
+    // pra se cadastrar. É observador de atributo porque o nav-auth é assíncrono
+    // e não anuncia nada — e sem ele o portão só se abriria pelo vídeo.
+    if (window.MutationObserver && alvos.length) {
+      var obs = new MutationObserver(function () {
+        if (alvos.some(function (a) { return a.getAttribute("href") !== "/cadastro"; })) {
+          obs.disconnect();
+          liberar("logado");
+        }
+      });
+      alvos.forEach(function (a) { obs.observe(a, { attributes: true, attributeFilter: ["href"] }); });
+    }
+
+    video.addEventListener("play", function () {
+      if (window.gtag) gtag("event", "vsl_play", {});
+    }, { once: true });
+
+    video.addEventListener("timeupdate", function () {
+      if (video.currentTime > assistido) assistido = video.currentTime;
+      var d = video.duration;
+      if (!d || !isFinite(d)) return;
+      var pct = Math.floor((assistido / d) * 100);
+      [25, 50, 75].forEach(function (m) {
+        if (pct >= m && !marcos[m]) {
+          marcos[m] = 1;
+          if (window.gtag) gtag("event", "vsl_progress", { percent: m });
+        }
+      });
+      // `ended` não vem em todo navegador quando o arquivo termina raspando;
+      // o teto de 0,5s fecha o buraco sem depender do evento.
+      if (assistido >= d - 0.5) liberar("assistiu");
+    });
+
+    video.addEventListener("seeking", function () {
+      if (liberado) return;
+      if (video.currentTime > assistido + 0.5) video.currentTime = assistido;
+    });
+
+    video.addEventListener("ended", function () { liberar("assistiu"); });
   })();
   </script>
   <script src="/nav-auth.js?v=7" defer></script>

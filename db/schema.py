@@ -1673,19 +1673,38 @@ def init_db():
           on affiliate_commissions (affiliate_id, status, available_at)
         """,
 
+        # ─── Prospecção (lead engine do Instagram) ───────────────────────────────
+        # O lead engine (repo próprio) gera o código e manda o link /i/{code};
+        # aqui só se grava o que veio no cookie prospect_code no cadastro (sem
+        # pré-registro — código lixo de crawler vira linha morta inofensiva) e
+        # se responde o status agregado via POST /api/prospect/status.
+        """
+        create table if not exists prospect_referrals (
+          id bigserial primary key,
+          code text not null,
+          referred_user_id bigint not null unique references users(id) on delete cascade,
+          created_at timestamptz not null default now()
+        )
+        """,
+        """
+        create index if not exists idx_prospect_referrals_code
+          on prospect_referrals (code)
+        """,
+
         # ── Planos v2 (escada Grátis/Essencial/Plus/Pro) ─────────────────────
-        # Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06):
+        # Trial de 15 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06):
         # plan_trials registra a queima do trial por telefone. É keyed por
         # phone_hash e NÃO tem FK pra users de propósito: sobrevive à deleção da
         # conta — recriar conta com o mesmo número herda o started_at original
-        # (trial já queimado). Regra: 30 dias únicos por telefone, na vida.
+        # (trial já queimado). Regra: 15 dias únicos por telefone, na vida.
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
-        # (mesmo o Grátis) antes de entrar no dashboard. plan_selected_at marca
-        # o momento dessa escolha — NULL = ainda não escolheu → cai na /precos.
+        # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o
+        # Grátis não é mais oferecido lá. plan_selected_at marca o momento dessa
+        # escolha — NULL = ainda não escolheu → cai na /precos.
         #
         # Backfill preciso pela fronteira REAL do rollout (sem cutoff por data
         # chutado): o ADD COLUMN com DEFAULT now() carimba TODAS as contas que já

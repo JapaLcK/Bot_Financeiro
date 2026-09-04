@@ -13,23 +13,33 @@ processo em UTC contra app em São Paulo é a MESMA divergência por outra porta
 `utils_date.align_process_tz` fecha as duas de uma vez, escrevendo `TZ` (processo)
 e `PGTZ` (toda conexão libpq) com o mesmo nome e chamando `tzset()`.
 
-Este arquivo é o único que PROVA o alinhamento; os outros o tomam como premissa
-(ver o cabeçalho de tests/test_category_launches_query.py). Controle negativo de
-cada caso está no comentário logo acima dele.
+Este arquivo PROVA o alinhamento dos três referenciais acima; os outros o tomam
+como premissa (ver o cabeçalho de tests/test_category_launches_query.py). Existe
+um QUARTO referencial fora do alcance de `align_process_tz` — o UTC cru chamado à
+mão como CALENDÁRIO (`datetime.now(timezone.utc).year/.month`) — e quem o prova é
+tests/test_virada_de_mes.py, com instante congelado na virada do mês. Controle
+negativo de cada caso está no comentário logo acima dele.
 
 O que os casos leem do ambiente são DUAS coisas, e elas não andam juntas:
 
-- o RELÓGIO (que dia é hoje): só os casos 3, 4, 5 e 7, que chamam `today_tz()` e
-  combinam o resultado com `_SP` fixo. Os outros — 1, 2, 6 e 8-13 — usam
-  instante aware LITERAL, o epoch, ou nenhuma data;
-- o FUSO configurado: os casos 3, 4, 5, 6 e 7. Medido em 29/08/2026,
-  `REPORT_TIMEZONE=Asia/Yangon` deixa esses CINCO vermelhos — no caso 6 isso é o
-  controle negativo declarado dele, não um defeito.
+- o RELÓGIO (que dia é hoje): os casos 3, 4, 5 e 7, que chamam `today_tz()` e
+  combinam o resultado com `_SP` fixo, mais o 18.5 (`date.today()`, para o
+  rótulo do mês) e o 18.7 (`datetime.now`, para o dia corrente em dois fusos).
+  Os outros — 1, 2, 6, 8-13 e 18.1-18.4/18.6 — usam instante aware LITERAL, o
+  epoch, ou nenhuma data;
+- o FUSO configurado: os casos 3, 4, 5, 6 e 7, mais a seção 18 inteira. Medido
+  em 29/08/2026, `REPORT_TIMEZONE=Asia/Yangon` deixa os CINCO primeiros
+  vermelhos — no caso 6 isso é o controle negativo declarado dele, não um
+  defeito. A seção 18 seta o fuso ela mesma, por caso, e não depende do
+  ambiente.
 
 Ler o dia corrente basta para o que 3, 4, 5 e 7 medem: a fronteira do dia contra
 a JANELA que o produto abre, e essa janela é sempre "hoje" no fuso do app — um
 dia fixo do passado trocaria o dia sem trocar a pergunta. Quem faz a mesma
 pergunta com data literal é o caso 6 (31/08/2025 23:00 em São Paulo).
+
+A seção 18 (issue #179) é de outra natureza: guarda de ACOPLAMENTO, não de
+fronteira do dia. Leia o cabeçalho dela antes de mexer nos casos.
 """
 from __future__ import annotations
 
@@ -130,23 +140,79 @@ def _tz_da_sessao_sincrona() -> str:
         return cur.fetchone()["tz"]
 
 
+def _no_pool_do_dashboard(chamada):
+    """Roda uma corrotina do monólito com pool próprio DESTE event loop.
+
+    `reset_db_pool()` nas DUAS pontas, e a de SAÍDA é a que não pode sumir. São
+    dois globais de `frontend/routes/shared.py` presos a um event loop, o
+    `_db_pool` e o `_db_pool_lock`. Zerar só o pool basta enquanto a corrotina
+    abre UMA conexão por vez (caso 1); quebra no `get_financial_data` (18.6),
+    que abre várias em `asyncio.gather` — aí duas `_q` chamam `_get_db_pool`
+    com o pool ainda em `None`, o `asyncio.Lock` fica CONTENDIDO e só então
+    resolve o loop (`asyncio.locks.Lock.acquire` só chama `_get_loop()` no ramo
+    com espera). O `_LoopBoundMixin` guarda esse loop PARA SEMPRE, e o
+    `asyncio.run` seguinte estoura `RuntimeError: is bound to a different event
+    loop` dentro do gather; a `_q` que ganhou o lock fica órfã em `pool.open()`,
+    o pool aberto nunca chega a `shared._db_pool`, e o `asyncio.run` DEPOIS
+    desse pendura em `asyncio.runners._cancel_all_tasks`.
+
+    Por isso o `reset_db_pool()` do `finally`, e por isso ele é LOAD-BEARING —
+    não é limpeza cosmética. O gather daqui prendeu o lock ao loop que está
+    prestes a morrer; sem recriá-lo na saída, o próximo `asyncio.run` do
+    processo herda um lock preso a loop morto. MEDIDO em 03/09/2026 com a sonda
+    `assert shared._db_pool_lock._loop is None` como último arquivo da rodada:
+    com a linha, `lock._loop = None`, 44 passed; sem ela, `lock._loop =
+    <_UnixSelectorEventLoop closed=True>` com `_db_pool = None` — que é
+    exatamente o par de condições que arma a mina (ver o docstring de
+    `shared.reset_db_pool`).
+
+    HISTÓRICO, para não voltar às variantes ruins:
+    - até 01/09/2026 isto DESVIAVA da mina com um `await shared._get_db_pool()`
+      antes da chamada: com o pool já aberto, o gather nem chegava no lock.
+      Funcionava, mas dependia de o lock nunca ser contendido — invariante
+      invisível que a próxima faxina apagaria. O reset na saída torna a
+      contenção inofensiva, então a linha saiu.
+    - trocar o lock por um novo e NÃO recriá-lo ao final não resolve: MEDIDO,
+      os 4 vizinhos passam quando rodam ANTES e travam quando rodam DEPOIS — o
+      veneno só troca de direção.
+
+    A restauração do pool no `finally` continua um poke no global do módulo, e
+    é de propósito: restaurar um pool não arma o lock (a mina era o lock), e um
+    context manager em `shared.py` só para embrulhar teardown de teste seria
+    scaffolding de teste dentro de módulo de produção.
+    """
+    import frontend.routes.shared as shared
+
+    async def _ler():
+        anterior = shared.reset_db_pool()
+        try:
+            return await chamada()
+        finally:
+            # LOAD-BEARING, e ANTES do `close()`: o gather acima prendeu o lock a
+            # ESTE loop, que morre em seguida; sem esta linha a sonda acusa
+            # `_loop = <loop morto>`. Com o `close()` na frente, uma exceção dele
+            # (fechar pool pode cair em CancelledError — ver o docstring de
+            # `reset_db_pool`) pularia o reset E a restauração, deixando plantada
+            # exatamente a mina que esta função existe para desarmar. Nesta ordem
+            # o pool corrente continua sendo fechado: `reset_db_pool()` DEVOLVE
+            # o que estava em `shared._db_pool`, que é o mesmo objeto de antes.
+            atual = shared.reset_db_pool()
+            shared._db_pool = anterior
+            if atual is not None:
+                await atual.close()
+
+    return asyncio.run(_ler())
+
+
 def _tz_da_sessao_async_do_dashboard() -> str:
     import frontend.routes.shared as shared
 
     async def _ler():
-        # Pool NOVO neste event loop e devolvido depois: o `_db_pool` global pode
-        # ter sido aberto por outro teste, num loop já encerrado.
-        anterior, shared._db_pool = shared._db_pool, None
-        try:
-            async with await shared.db_connect() as conn:
-                cur = await conn.execute("select current_setting('TimeZone') as tz")
-                return (await cur.fetchone())["tz"]
-        finally:
-            if shared._db_pool is not None:
-                await shared._db_pool.close()
-            shared._db_pool = anterior
+        async with await shared.db_connect() as conn:
+            cur = await conn.execute("select current_setting('TimeZone') as tz")
+            return (await cur.fetchone())["tz"]
 
-    return asyncio.run(_ler())
+    return _no_pool_do_dashboard(_ler)
 
 
 def _tz_da_sessao_do_admin() -> str:
@@ -588,8 +654,9 @@ def test_libc_que_diverge_so_no_verao_tambem_e_pega(tmp_path, monkeypatch):
 
 # ── 14. `load_app_env` roda em processo JÁ SERVINDO: `TZ` nunca some ─────────
 # `adapters/whatsapp/wa_app.py:39` chama `load_app_env()` no import, e esse import
-# é tardio de propósito (`frontend/finance_bot_websocket_custom.py:1952-1963`, 1ª
-# requisição; `:1632-1656`, 1 s depois do startup). Ou seja: ele roda com event
+# é tardio de propósito: no monólito ele mora dentro dos wrappers lazy do webhook
+# (`_wa_verify`/`_wa_webhook`, 1ª requisição) e dos wrappers de background do
+# `lifespan` (1 s depois do startup). Ou seja: ele roda com event
 # loop, threadpool e WebSockets ativos. A glibc relê `TZ` a cada `localtime()`,
 # então qualquer instante em que `TZ` não esteja no ambiente é uma janela em que
 # uma thread concorrente chamando `date.today()` cai no fuso do contêiner (UTC no
@@ -803,6 +870,340 @@ def test_sem_tzset_o_boot_continua_subindo(tmp_path, monkeypatch):
     _com_env(tmp_path, monkeypatch, "REPORT_TIMEZONE=America/Sao_Paulo\n")
 
     assert utils_date.tz_name() == "America/Sao_Paulo"
+
+
+# ── 18. FONTE ÚNICA: 5 dos 9 lugares que liam o fuso por fora do `utils_date` ─
+# Issue #179. São NOVE sites ao todo; CINCO estão fechados nesta árvore e
+# QUATRO ficam registrados como dívida no próprio local, com o motivo:
+# `billing_commands.py`
+# (offset BRT cravado, só exibição), `email_service.py` (idem, e o alias `_tz`
+# local colide com o nome da fonte única), `dashboard.js` (`APP_TZ` cravado no
+# cliente; fechar é mudar o CONTRATO da API) e `proactive_ai_scheduler.py`
+# (`PROACTIVE_AI_HOUR_UTC=3` "= 0h BRT" — o único que não é display: é a hora em
+# que o bot FALA com o usuário). Os cinco fechados: `get_spending_trend`
+# (db/accounts.py) e três pontos do monólito — `get_financial_data`,
+# `get_daily_expenses_window` e `daily_expenses_window` — vêm DESTE PR; o
+# quinto, `history_earliest_date` (core/services/plan_service.py), veio do #166
+# (8ea113a) pela `main` e subsome a metade que este PR tinha ali: lá a linha é
+# `day_tz(now or datetime.now(timezone.utc))`. Os casos 18.1–18.3 continuam
+# aqui porque a `main` não cobre essa função (o `test_virada_de_mes.py` só a
+# toca de raspão) — e continuam discriminando o `day_tz` do mesmo jeito.
+#
+# O que este PR consolidou no monólito foi o `today_tz` (o import local de
+# `create_launch_route` saiu). O monólito continua com DOIS imports de
+# `utils_date`, não um: o do topo (`now_tz, today_tz, tz_name`) e um
+# `from utils_date import _tz` local, dentro da rota de EDIÇÃO de lançamento
+# (`grep -n utils_date frontend/finance_bot_websocket_custom.py`). O segundo é
+# a mesma fonte única por outro nome, então não é dívida de fuso — mas quem
+# contar imports vai achar dois.
+#
+# Sem número de linha de propósito: cite símbolo greppável. Uma tabela de
+# referências de linha já apodreceu 3× no #166, e este merge sozinho deslocou
+# todas as do monólito em +1.
+#
+# LEIA ISTO ANTES DOS CASOS: quatro dos cinco pontos fechados NÃO mudam um
+# byte de saída em produção — SOB UMA CONDIÇÃO, que vale escrever porque é ela
+# que os testes quebram de propósito: o ambiente tem de ser ESTÁTICO depois do
+# boot. Antes, o fuso interpolado no SQL (`'{TZ}'`, constante de módulo) e o
+# `PGTZ` da sessão eram congelados no MESMO instante (o import) e não podiam
+# divergir. Agora a f-string chama `tz_name()` POR REQUISIÇÃO enquanto o `PGTZ`
+# só é relido em CONEXÃO NOVA — se alguém trocar o fuso com o pool aberto, as
+# duas metades da mesma query passam a discordar. Em produção o ambiente é
+# estático e a diferença é nula; nos testes é exatamente esse mecanismo que
+# obriga a fixture `_fuso_de_sao_paulo` (tests/test_virada_de_mes.py) a refazer
+# os DOIS pools depois de mexer no ambiente.
+# Fora essa condição, estes casos são GUARDA DE ACOPLAMENTO (§0.7) — "quem
+# precisa de fuso lê `utils_date`, e só ele" —, não prova de bug consertado. Só
+# o 18.5 cobre um defeito que o usuário via.
+#
+# Medido no boot real (31/08/2026): `load_app_env` (config/env.py) escreve
+# `os.environ["TZ"] = efetivo` ANTES de qualquer
+# leitura — a constante `TZ` do monólito saía de um `os.getenv` logo depois do
+# `load_app_env()`, e `plan_service` só é chamado bem depois.
+# Com `REPORT_TIMEZONE=Asia/Tokyo TZ=Etc/UTC`, a leitura ANTIGA
+# (`os.getenv("TZ")`) e a NOVA (`tz_name()`) devolvem as duas `Asia/Tokyo`.
+# É essa medição do boot — não a contraprova abaixo — que sustenta o "não é
+# verdade que `REPORT_TIMEZONE` sozinho passou a mover as três pontas": ele já
+# movia todas menos uma.
+#
+# Contraprova em duas colunas com `REPORT_TIMEZONE=Pacific/Kiritimati`, suíte
+# CHEIA, medida em 01/09/2026 na árvore já mergeada com a `main` e1b4633:
+# `main` e branch dão os MESMOS 15 vermelhos, com listas idênticas por NOME nos
+# dois sentidos (`comm` vazio dos dois lados). Zero vermelho novo, e zero
+# vermelho da `main` virando verde — os 7 casos novos desta seção somam-se aos
+# verdes (5.329 → 5.336) sem trocar a cor de nenhum caso antigo. Uma das quatro
+# execuções deu 16 na `main`:
+# `test_routes_categories.py::test_nota_alvo_e_criado_em_saem_na_resposta`
+# oscila entre execuções nas DUAS árvores (é a oscilação de baseline que o
+# CLAUDE.md §3 descreve), então o número estável é 15.
+#
+# ATENÇÃO à validade dessa contraprova: a `main` ANDOU desde ela. Em 02/09/2026
+# são 20 commits (14 sem merge, 5 PRs) entre a `e1b4633` medida e a `main` da
+# época — entre eles o "Recomeçar do zero", o trial de 15 dias e três consertos
+# do `/auth/refresh`. Os 15 vermelhos e o 5.329 → 5.336 valem para AQUELA
+# árvore; quem for reusar o número re-mede as duas colunas antes.
+#
+# O ponto com efeito observável é UM: o literal `'America/Sao_Paulo'` cravado
+# em `get_spending_trend` (db/accounts.py), que ignorava as duas variáveis
+# (caso 18.5). Os outros quatro — `history_earliest_date` (18.1/18.2),
+# `get_financial_data` (18.6), `get_daily_expenses_window` (18.4) e
+# `daily_expenses_window` (18.7) — valem pelo dia em que o
+# alinhamento do boot mudar de ordem ou alguém setar `TZ` depois dele.
+#
+# Como eles conseguem discriminar, então: o `TZ` é setado À MÃO depois do
+# import, o que desfaz a reescrita do `load_app_env` e recria uma divergência
+# entre as duas variáveis. O `.env.example` traz as duas PRESENTES E
+# IGUAIS, então essa divergência é montada aqui, não herdada — o que o Railway
+# tem de fato NÃO foi verificado por ninguém. Sem essa reescrita todo caso aqui
+# ficaria tautológico — e é por isso que cada um importa o módulo ANTES do
+# monkeypatch.
+#
+# Instante LITERAL em 18.1, 18.2, 18.3, 18.4 e 18.6. Leem o RELÓGIO o 18.5
+# (`date.today()`, para o rótulo do mês) e o 18.7 (`datetime.now`, para o dia
+# corrente em dois fusos) — os comentários de cada um dizem por quê.
+#
+# CONTROLE contra hardcode (rodada 3, medido em 31/08/2026; RE-MEDIDO em
+# 02/09/2026 na árvore mergeada): SEIS dos sete casos ficam VERMELHOS se o
+# ponto de produção correspondente cravar `ZoneInfo("America/Sao_Paulo")` — por
+# isso o fuso ESPERADO de todos eles é um fuso que NÃO é São Paulo. O sétimo
+# (18.7) fica vermelho em 17 das 24 horas do dia, pela razão que o comentário
+# dele mede; o controle dele que vale a qualquer hora é a coluna da direita. A
+# matriz, por implementação:
+#
+#   caso            árvore atual       hardcode SP   leitura antiga `TZ`
+#   18.1/18.2       verde              VERMELHO      VERMELHO
+#   18.3            verde              VERMELHO      verde (é o positivo)
+#   18.4            verde              VERMELHO      VERMELHO
+#   18.5            verde              VERMELHO      VERMELHO
+#   18.6            verde              VERMELHO      VERMELHO
+#   18.7            verde              VERMELHO (*)  VERMELHO
+#
+#   (*) só entre 07:00 e 24:00 de São Paulo — ver o comentário do 18.7.
+#
+# O 18.3 verde na coluna do meio é o CONTROLE POSITIVO do grupo: ele afirma que
+# sem `REPORT_TIMEZONE` o `TZ` continua valendo. Um conserto que passasse a
+# ignorar o `TZ` derrubaria só ele.
+
+def _limites_do_tier(monkeypatch, tier: str) -> None:
+    """Fixa os limites do plano sem tocar no banco. Mesmo alvo do
+    `tests/test_plan_tiers.py::TestLimits` (que chega lá pelo `_patch_user`,
+    patchando `get_auth_user`); aqui o atalho é patchar `get_user_limits`
+    direto, que é o que este arquivo precisa."""
+    from core.services import plan_service
+
+    monkeypatch.setattr(
+        plan_service, "get_user_limits", lambda uid: plan_service.limits_for_tier(tier)
+    )
+
+
+def _historico_desde(tier: str, monkeypatch) -> date:
+    from core.services import plan_service
+
+    _limites_do_tier(monkeypatch, tier)
+    # 01:00Z de 01/09 = 22:00 de 31/08 em São Paulo: o dia (e o mês) divergem.
+    return plan_service.history_earliest_date(1, datetime(2026, 9, 1, 1, 0, tzinfo=timezone.utc))
+
+
+# 18.1/18.2 — O par divergente é `REPORT_TIMEZONE=Pacific/Kiritimati` (UTC+14)
+# contra `TZ=Etc/GMT+12` (UTC−12), e NENHUM dos dois é São Paulo de propósito:
+# no instante do teste (01:00Z de 01/09) Kiritimati está em 01/09 enquanto São
+# Paulo (−3) e Etc/GMT+12 estão os DOIS em 31/08. Isso dá três respostas
+# distintas e permite discriminar as três implementações de uma vez.
+#
+# O ALVO destes dois casos é o `day_tz(...)` que o #166 pôs em
+# `history_earliest_date` (core/services/plan_service.py) — não o `_tz()` que
+# este branch tinha ali antes do merge. Controle NEGATIVO RE-MEDIDO na árvore
+# mergeada (01/09/2026), duas variantes, trocando essa linha por:
+#   - leitura ANTIGA, `.astimezone(ZoneInfo(os.getenv("TZ",
+#     "America/Sao_Paulo"))).date()` → grátis 2026-08-01, essencial
+#     2026-06-02. Os dois vermelhos (18.3 fica verde: é o positivo).
+#   - hardcode, `.astimezone(ZoneInfo("America/Sao_Paulo")).date()` → os mesmos
+#     2026-08-01 e 2026-06-02, e o 18.3 também vermelho. Três vermelhos.
+# Com a árvore como está: 3 passed.
+# O que 18.1/18.2 provam, então, é que a linha lê `REPORT_TIMEZONE` — não só
+# que ela deixou de ler `TZ`. Em produção as duas leituras dão o mesmo, porque
+# o boot alinha `TZ` (o cabeçalho acima); a divergência aqui é montada à mão.
+
+def test_o_historico_do_gratis_corta_pelo_report_timezone(monkeypatch):
+    monkeypatch.setenv("REPORT_TIMEZONE", "Pacific/Kiritimati")  # UTC+14, sem DST
+    monkeypatch.setenv("TZ", "Etc/GMT+12")                       # UTC-12, sem DST
+    assert _historico_desde("free", monkeypatch) == date(2026, 9, 1)
+
+
+def test_os_90_dias_do_essencial_contam_do_dia_local(monkeypatch):
+    monkeypatch.setenv("REPORT_TIMEZONE", "Pacific/Kiritimati")
+    monkeypatch.setenv("TZ", "Etc/GMT+12")
+    assert _historico_desde("essencial", monkeypatch) == date(2026, 6, 3)
+
+
+# 18.3 — Controle POSITIVO do par: com `REPORT_TIMEZONE` AUSENTE o `TZ` continua
+# valendo, isto é, o conserto não trocou uma variável pela outra nem cravou nada.
+# O `TZ` aqui também NÃO é São Paulo, e é isso que separa este caso do que ele
+# era na rodada 2: com `TZ=America/Sao_Paulo` ele passava sob um hardcode de São
+# Paulo e não excluía implementação nenhuma. Com Kiritimati:
+#   - hardcode `ZoneInfo("America/Sao_Paulo")` → 2026-08-01 / 2026-06-02, VERMELHO;
+#   - leitura ANTIGA `os.getenv("TZ")` → 2026-09-01 / 2026-06-03, VERDE — que é
+#     exatamente a afirmação positiva: sem `REPORT_TIMEZONE`, nada muda.
+
+def test_sem_report_timezone_o_historico_segue_o_tz(monkeypatch):
+    monkeypatch.delenv("REPORT_TIMEZONE", raising=False)
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    assert _historico_desde("free", monkeypatch) == date(2026, 9, 1)
+    assert _historico_desde("essencial", monkeypatch) == date(2026, 6, 3)
+
+
+# 18.4 — A janela diária do gráfico (`AT TIME ZONE` interpolado no SQL do
+# monólito). Ramo `start_date` de propósito: o outro é `NOW() - INTERVAL`, que
+# depende do relógio. Guarda de acoplamento, como o cabeçalho explica.
+#
+# O par divergente é o mesmo de 18.1/18.2 e pela mesma razão: no instante do
+# lançamento (02:00Z de 15/08) Kiritimati está em 15/08 enquanto São Paulo e
+# Etc/GMT+12 estão os dois em 14/08.
+#
+# Controle NEGATIVO, duas variantes, medidas em 31/08/2026 nos dois
+# `AT TIME ZONE '{tz_name()}'` de `get_daily_expenses_window`
+# (frontend/finance_bot_websocket_custom.py):
+#   - leitura ANTIGA, o `{tz_name()}` de volta para
+#     `{os.getenv("TZ", "America/Sao_Paulo")}` → o dia sai 2026-08-14, VERMELHO;
+#   - hardcode, `AT TIME ZONE 'America/Sao_Paulo'` → 2026-08-14, VERMELHO.
+# A constante `TZ` do módulo NÃO serve de controle: era avaliada no import e
+# congelava o valor (é justamente por isso que ela saiu).
+
+def _janela_diaria(uid: int, start_date: date) -> list[dict]:
+    import frontend.finance_bot_websocket_custom as dashboard
+
+    return _no_pool_do_dashboard(
+        lambda: dashboard.get_daily_expenses_window(uid, start_date=start_date)
+    )
+
+
+def test_a_janela_diaria_do_grafico_segue_o_report_timezone(pro_user_id, monkeypatch):
+    # Importar ANTES do monkeypatch: `load_app_env()` roda no import do monólito
+    # e reescreve `TZ` e `REPORT_TIMEZONE` (as duas escritas em
+    # `config/env.py::load_app_env`). Importado
+    # depois, ele apagaria a divergência e o caso passaria até revertido —
+    # medido em 31/08/2026, foi exatamente o que aconteceu na primeira versão.
+    import frontend.finance_bot_websocket_custom  # noqa: F401
+
+    # 02:00Z de 15/08 = 16:00 de 15/08 em Kiritimati, 23:00 de 14/08 em São
+    # Paulo e 14:00 de 14/08 em Etc/GMT+12.
+    _gasto(pro_user_id, datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc), "02:00Z de 15/08")
+    monkeypatch.setenv("REPORT_TIMEZONE", "Pacific/Kiritimati")  # UTC+14, sem DST
+    monkeypatch.setenv("TZ", "Etc/GMT+12")                       # UTC-12, sem DST
+
+    dados = _janela_diaria(pro_user_id, date(2026, 8, 1))
+    assert [d["date"] for d in dados] == ["2026-08-15"], dados
+
+
+# 18.5 — `get_spending_trend`, o ÚNICO ponto que ignorava as duas variáveis
+# (literal 'America/Sao_Paulo' × 2) e portanto o único cuja correção muda a
+# saída de produção quando `REPORT_TIMEZONE` está setado. Por isso o divergente
+# aqui é o `REPORT_TIMEZONE`, e não o `TZ`: contra um literal qualquer um dos
+# dois serve de controle, e o `REPORT_TIMEZONE` é o que tem precedência.
+#
+# O instante é literal (23:00 do último dia do mês passado, em São Paulo = dia 1
+# do mês corrente, 02:00Z); o mês CORRENTE entra só para a janela de `months=2`
+# do próprio `get_spending_trend` cobrir o lançamento em qualquer data de
+# execução — a afirmação é sobre o RÓTULO, não sobre o relógio.
+#
+# Controle NEGATIVO (medido em 31/08/2026): volte os dois `tz_name()` de
+# `get_spending_trend` (db/accounts.py) para `"America/Sao_Paulo"` → o rótulo
+# cai no mês PASSADO e
+# o caso fica vermelho.
+
+def test_a_tendencia_mensal_segue_o_report_timezone(pro_user_id, monkeypatch):
+    hoje = date.today()
+    ultimo_do_mes_passado = date(hoje.year, hoje.month, 1) - timedelta(days=1)
+    _gasto(
+        pro_user_id,
+        datetime.combine(ultimo_do_mes_passado, time(23, 0), tzinfo=_SP),
+        "23h do ultimo dia do mes passado",
+    )
+    monkeypatch.setenv("TZ", "America/Sao_Paulo")
+    monkeypatch.setenv("REPORT_TIMEZONE", "Etc/UTC")
+
+    linhas = db.get_spending_trend(pro_user_id, months=2)
+    assert len(linhas) == 1, linhas
+    assert (linhas[0]["year"], linhas[0]["month"]) == (hoje.year, hoje.month), linhas
+
+
+# 18.6 — O gráfico de barras "gastos por dia do mês" (`get_financial_data`, no
+# monólito). É o outro `AT TIME ZONE` interpolado, e o que a rodada 1 deixou
+# SEM teste: revertendo só este ponto, os 41 casos deste arquivo continuavam
+# verdes, e com sabotagem bruta (`AT TIME ZONE 'Etc/GMT+12'`) os 6 arquivos que
+# citam a função davam 103 passed / 0 failed.
+#
+# Mesmo par divergente e mesmo instante do 18.4. Controle NEGATIVO, duas
+# variantes, medidas em 31/08/2026 no `AT TIME ZONE` dessa função:
+#   - leitura ANTIGA, `{os.getenv("TZ", "America/Sao_Paulo")}` → o dia sai 14,
+#     VERMELHO;
+#   - hardcode, `America/Sao_Paulo` → o dia sai 14, VERMELHO.
+
+def test_o_grafico_de_gastos_por_dia_segue_o_report_timezone(pro_user_id, monkeypatch):
+    import frontend.finance_bot_websocket_custom as dashboard  # antes do monkeypatch (18.4)
+
+    # 02:00Z de 15/08 = 16:00 de 15/08 em Kiritimati (14/08 em SP e em GMT+12).
+    _gasto(pro_user_id, datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc), "02:00Z de 15/08")
+    monkeypatch.setenv("REPORT_TIMEZONE", "Pacific/Kiritimati")  # UTC+14, sem DST
+    monkeypatch.setenv("TZ", "Etc/GMT+12")                       # UTC-12, sem DST
+
+    dados = _no_pool_do_dashboard(
+        lambda: dashboard.get_financial_data(pro_user_id, year=2026, month=8)
+    )["daily_expenses"]
+    assert [d["day"] for d in dados] == [15], dados
+
+
+# 18.7 — O início da janela rolante da rota `/expenses/daily/{uid}`
+# (`daily_expenses_window`, no monólito), o outro ponto que a rodada 1 deixou
+# sem teste.
+#
+# Este caso lê o RELÓGIO (o 18.5 também, para outra pergunta), porque o que ele
+# pergunta é "que dia é hoje no fuso do app?" — e a resposta só diverge entre
+# dois fusos que
+# estejam em datas diferentes AGORA. Por isso o par não é São Paulo × UTC (que
+# só divergem em 3h de cada 24) e sim +14 × −12: 26 horas de distância, ou seja,
+# datas SEMPRE diferentes, a qualquer hora de execução. O esperado é calculado
+# aqui com `ZoneInfo` cru, não com `today_tz()`, senão o caso afirmaria a função
+# que está medindo.
+#
+# `get_daily_expenses_window` é substituída de propósito: o que se mede é o
+# ARGUMENTO que a rota calcula, não o SQL (esse é o 18.4).
+#
+# Controle NEGATIVO, duas variantes, medidas em 31/08/2026 no
+# `local_today = today_tz()` dessa rota:
+#   - leitura ANTIGA, `datetime.now(ZoneInfo(os.getenv("TZ",
+#     "America/Sao_Paulo"))).date()` → `start_date` sai um ou dois dias mais
+#     cedo, VERMELHO;
+#   - hardcode, `datetime.now(ZoneInfo("America/Sao_Paulo")).date()` →
+#     VERMELHO em 17 das 24 horas, VERDE nas outras 7. SP (−3) e Kiritimati
+#     (+14) estão a 17 horas de distância, não a 26: eles COMPARTILHAM a data
+#     enquanto o relógio de SP marca entre 00:00 e 07:00. MEDIDO em 02/09/2026
+#     às 00:06 de SP (mesma data nos dois): este foi o ÚNICO dos sete casos a
+#     passar sob o hardcode. Quem discrimina a QUALQUER hora é a leitura antiga
+#     acima — `TZ=Etc/GMT+12` está a 26h de Kiritimati, datas sempre diferentes
+#     —, e é ela o controle negativo declarado deste caso.
+
+def test_a_janela_rolante_comeca_no_dia_local(pro_user_id, monkeypatch):
+    import frontend.finance_bot_websocket_custom as dashboard  # antes do monkeypatch (18.4)
+
+    monkeypatch.setenv("REPORT_TIMEZONE", "Pacific/Kiritimati")  # UTC+14, sem DST
+    monkeypatch.setenv("TZ", "Etc/GMT+12")                       # UTC-12, sem DST
+
+    capturado = {}
+
+    async def _fake(user_id, days, start_date=None):
+        capturado.update(user_id=user_id, days=days, start_date=start_date)
+        return []
+
+    monkeypatch.setattr(dashboard, "get_daily_expenses_window", _fake)
+
+    resp = _cliente().get(
+        f"/expenses/daily/{pro_user_id}?days=7",
+        headers={"Authorization": f"Bearer {make_dashboard_token(pro_user_id, hours=1)}"},
+    )
+    assert resp.status_code == 200, resp.text
+    hoje_la = datetime.now(ZoneInfo("Pacific/Kiritimati")).date()
+    assert capturado["start_date"] == hoje_la - timedelta(days=7), (capturado, hoje_la)
 
 
 def _cliente():

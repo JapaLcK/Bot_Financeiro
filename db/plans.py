@@ -1,7 +1,7 @@
 """
 Camada de banco do sistema de planos v2 (escada Grátis/Essencial/Plus/Pro).
 
-Trial de 30 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
+Trial de 15 dias do plano escolhido, via Stripe COM CARTÃO (2026-08-06), com
 trava de 1 trial por TELEFONE na vida: `plan_trials` é keyed por phone_hash e
 sobrevive à deleção da conta — recriar conta com o mesmo número herda o
 started_at original (trial já queimado). A elegibilidade é checada na criação
@@ -30,7 +30,7 @@ class TrialClaimError(RuntimeError):
 def claim_trial_for_user(user_id: int) -> datetime | None:
     """Ancora o trial do usuário no telefone dele (idempotente).
 
-    Regra fechada: o contador é UM SÓ — 30 dias por telefone, na vida.
+    Regra fechada: o contador é UM SÓ — 15 dias por telefone, na vida.
     - Telefone nunca usou trial → registra now() em plan_trials e ancora a conta.
     - Telefone JÁ usou trial (nesta ou noutra conta, mesmo deletada) → a conta
       herda o started_at ORIGINAL; se o trial já venceu, days_left = 0.
@@ -80,6 +80,8 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
                     (started_at, int(user_id), started_at),
                 )
             conn.commit()
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(user_id)
         return started_at
     except TrialClaimError:
         raise
@@ -89,7 +91,7 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
 
 
 def is_trial_eligible_for_user(user_id: int) -> bool:
-    """O telefone deste usuário ainda tem direito ao trial de 30 dias?
+    """O telefone deste usuário ainda tem direito ao trial de 15 dias?
 
     Regra: 1 trial por telefone na vida. Elegível = o phone_hash NUNCA apareceu
     em plan_trials (nesta conta ou em outra, mesmo deletada). Usado na criação
@@ -117,6 +119,85 @@ def is_trial_eligible_for_user(user_id: int) -> bool:
     except Exception as exc:
         logger.warning("is_trial_eligible_for_user falhou pro user %s", user_id, exc_info=True)
         raise TrialEligibilityError("Falha ao consultar a elegibilidade do trial.") from exc
+
+
+def reset_trial_for_user(user_id: int) -> dict | None:
+    """Apaga a trava de trial do TELEFONE desta conta e reancora a conta.
+
+    Ação de admin (drill-down do painel): devolve a esta conta o direito ao
+    trial de 15 dias. Tudo numa transação só, e o SELECT é `for update`: sem o
+    lock de linha a transação seria READ COMMITTED pura, e uma troca de telefone
+    concorrente (frontend/routes/settings.py reescreve phone_hash) commitando
+    entre o SELECT e o DELETE faria isto apagar a trava do número ANTIGO e
+    reportar sucesso com o número atual ainda travado. O `for update` faz a
+    troca esperar ou o reset ler o hash já novo — nas duas ordens a trava
+    apagada é a do telefone que a conta tem no fim.
+
+    Apaga por UM phone_hash, o da própria conta, lido exatamente como
+    is_trial_eligible_for_user lê. NUNCA por phone_lookup_candidates: as
+    variantes de nono dígito produzem hash que pode ser de OUTRA conta, e
+    apagar a trava dela seria vazar a ação entre usuários. phone_hash é único
+    em auth_accounts e PK em plan_trials, então um hash é de no máximo uma conta.
+
+    Limpar `trial_started_at` é parte do conserto, não enfeite:
+    claim_trial_for_user só grava a âncora quando ela é nula ou mais nova que o
+    started_at novo, então uma âncora velha faria o trial seguinte nascer
+    vencido (get_trial_status calcula o fim pela data antiga e devolve
+    days_left=0 enquanto a Stripe dá os 15 dias). `trial_downsell_sent_at` vai
+    no mesmo UPDATE pro funil de downsell poder ser testado de novo.
+
+    Não fala com a Stripe: assinatura viva continua onde está (quem recusa esse
+    caso é o chamador). Retorna None se a conta não existe; `phone: False`
+    quando não há telefone vinculado — aí não há trava a remover e nada é escrito.
+
+    Devolve as DUAS datas, porque elas não são a mesma e a auditoria precisa da
+    que se perde: `previous_lock_started_at` é o started_at da linha de
+    plan_trials destruída (quando o trial foi queimado NAQUELE telefone) e
+    `previous_started_at` é a âncora da conta. Numa trava herdada — conta
+    anterior apagada, plan_trials.user_id nulo por ON DELETE SET NULL, número
+    recadastrado — a âncora é nula e só a primeira registra o que existia.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select phone_hash, trial_started_at from auth_accounts "
+                "where user_id = %s for update",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            phone_hash = row.get("phone_hash")
+            deleted = 0
+            lock_started_at = None
+            if phone_hash:
+                cur.execute(
+                    "delete from plan_trials where phone_hash = %s returning started_at",
+                    (phone_hash,),
+                )
+                # phone_hash é PK em plan_trials: no máximo uma linha.
+                apagada = cur.fetchone()
+                deleted = 1 if apagada else 0
+                lock_started_at = apagada.get("started_at") if apagada else None
+                cur.execute(
+                    """
+                    update auth_accounts
+                    set trial_started_at = null, trial_downsell_sent_at = null
+                    where user_id = %s
+                    """,
+                    (int(user_id),),
+                )
+        conn.commit()
+    # get_auth_user cacheia trial_started_at (db_support.py) — mesmo par que
+    # claim_trial_for_user usa depois de escrever.
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+    return {
+        "phone": bool(phone_hash),
+        "deleted": deleted,
+        "previous_started_at": row.get("trial_started_at"),
+        "previous_lock_started_at": lock_started_at,
+    }
 
 
 def get_trial_started_at(user_id: int) -> datetime | None:
@@ -166,6 +247,8 @@ def mark_trial_downsell_sent(user_id: int) -> None:
                 (int(user_id),),
             )
         conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
 
 
 def count_launches_this_month(user_id: int) -> int:
