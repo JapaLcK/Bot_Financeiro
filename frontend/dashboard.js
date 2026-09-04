@@ -4151,7 +4151,7 @@ async function saveRecurring() {
                      : (isBill ? "✓ Conta a pagar cadastrada" : "✓ Gasto fixo cadastrado"));
     _recurringCache = null;
     loadFixedView(true);           // re-render gastos fixos (sem await)
-    if (isBill) loadBillsView(true);
+    if (isBill) loadBillsView();
     sendRefresh();
   } catch (err) {
     // Reabre modal com dados preservados pro user corrigir
@@ -4443,7 +4443,7 @@ async function _fetchBills({ force = false } = {}) {
   }, { force });
 }
 
-async function loadBillsView(_forceFresh = false, { background = false } = {}) {
+async function loadBillsView({ background = false } = {}) {
   const agendaEl = document.getElementById("recurring-bills-agenda");
   if (!agendaEl) return;
   loadForecast();  // independente dos boletos; o próprio gate cuida do não-Pro
@@ -4613,7 +4613,7 @@ async function payBill(billId, estimate, name, variavel) {
       throw new Error(await _errDetail(resp));
     }
     showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
-    loadBillsView(true);
+    loadBillsView();
     sendRefresh();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao pagar" });
@@ -4655,7 +4655,7 @@ async function quickAddBoleto() {
     showToast("✓ Boleto adicionado");
     nameEl.value = ""; amtEl.value = "";  // mantém a data (costuma cadastrar vários próximos)
     nameEl.focus();
-    loadBillsView(true);
+    loadBillsView();
     sendRefresh();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao adicionar" });
@@ -4684,7 +4684,7 @@ async function editBoleto(id, name, amount, dueISO) {
       throw new Error(await _errDetail(resp));
     }
     showToast("✓ Boleto atualizado");
-    loadBillsView(true);
+    loadBillsView();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao editar" });
   }
@@ -4704,7 +4704,7 @@ async function deleteBoleto(id, name) {
       throw new Error(await _errDetail(resp));
     }
     showToast(" Boleto apagado");
-    loadBillsView(true);
+    loadBillsView();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao apagar" });
   }
@@ -11149,7 +11149,7 @@ function _pbDashboardRefresh() {
     case "fixed":
       if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
       if (_recurringTab === "incomes")  return loadRecurringIncomeView(true, { background: true });
-      if (_recurringTab === "bills")    return loadBillsView(true, { background: true });
+      if (_recurringTab === "bills")    return loadBillsView({ background: true });
       return loadFixedView(true, { background: true });
     case "goals":        return loadGoalsView(true, { background: true });
     // Afiliado: o fetch-antes-de-render + preservação da chave Pix agora vive

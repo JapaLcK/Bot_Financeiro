@@ -1,8 +1,11 @@
 """
 Testa db/schema_repairs — migrations que corrigem FKs em users(id).
 """
+import re
+from pathlib import Path
+
 from db import get_conn
-from db.schema_repairs import repair_user_fk_cascades
+from db.schema_repairs import _USER_FK_SET_NULL_TABLES, repair_user_fk_cascades
 
 
 def _fk_action(cur, table_name: str, constraint_name: str | None = None) -> str | None:
@@ -88,3 +91,82 @@ def test_repair_is_idempotent():
             repair_user_fk_cascades(cur)  # garante estado correto
             second = repair_user_fk_cascades(cur)
             assert second == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §0.7: DDL × configuração do repair — duas fontes para a MESMA regra.
+#
+# `create table if not exists` nunca converge tabela que já existe, então o que
+# vale em runtime é sempre o `repair_user_fk_cascades`, chamado em todo
+# `init_db` (db/schema.py). Um DDL que declare o oposto do alvo do repair é
+# documentação que mente: ele é sobrescrito no boot seguinte.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ROOT = Path(__file__).resolve().parents[1]
+_DDL_FILES = ("db/schema.py", "core/admin_dashboard.py")
+
+_TABLE_RE = re.compile(
+    r"(?:create\s+table\s+(?:if\s+not\s+exists\s+)?|alter\s+table\s+)([a-z_][a-z0-9_]*)",
+    re.I,
+)
+_USER_FK_RE = re.compile(
+    r"references\s+users\s*\(\s*id\s*\)\s*(?:on\s+delete\s+(cascade|set\s+null|no\s+action))?",
+    re.I,
+)
+
+
+def _declared_user_fk_actions() -> dict[str, set[str]]:
+    """Lê o DDL do código: tabela -> {`on delete` declarado} de cada FK em users(id).
+
+    Sem cláusula explícita = `no action` (o default do Postgres).
+    """
+    declared: dict[str, set[str]] = {}
+    for rel in _DDL_FILES:
+        text = (_ROOT / rel).read_text(encoding="utf-8")
+        marks = [(m.start(), m.group(1).lower()) for m in _TABLE_RE.finditer(text)]
+        for fk in _USER_FK_RE.finditer(text):
+            table = None
+            for pos, name in marks:
+                if pos >= fk.start():
+                    break
+                table = name
+            if table is None:
+                continue
+            action = " ".join((fk.group(1) or "no action").lower().split())
+            declared.setdefault(table, set()).add(action)
+    return declared
+
+
+# Divergência conhecida e AINDA SEM DECISÃO DO DONO. A #221 decidiu apenas
+# `system_event_logs`. `pii_access_log` declara SET NULL no DDL e roda CASCADE
+# (o repair converte a cada boot), e a escolha ali é genuinamente aberta: é um
+# audit de acesso a PII, e o irmão mais próximo (`auth_login_events`) é SET NULL
+# de propósito. Resolver exige decisão do dono, não o palpite de quem passou.
+# Ao decidir: ou o DDL vira CASCADE, ou a tabela entra em
+# _USER_FK_SET_NULL_TABLES — e esta linha sai junto.
+_PENDENTE_DECISAO_DO_DONO = frozenset({"pii_access_log"})
+
+
+def test_ddl_nao_contradiz_o_alvo_do_repair():
+    """Nenhuma FK em users(id) pode declarar no DDL um `on delete` que o
+    `repair_user_fk_cascades` vá sobrescrever no boot seguinte."""
+    declared = _declared_user_fk_actions()
+
+    # Piso anti-tautologia: se o parser não achar o DDL (regex quebrada, arquivo
+    # movido), o teste passaria vazio afirmando nada. Estas tabelas TÊM de estar.
+    faltando = (_USER_FK_SET_NULL_TABLES | {"system_event_logs"}) - set(declared)
+    assert not faltando, f"parser não achou o DDL de {sorted(faltando)} — regex quebrada?"
+
+    divergentes = {}
+    for table, actions in declared.items():
+        alvo = "set null" if table in _USER_FK_SET_NULL_TABLES else "cascade"
+        if actions != {alvo}:
+            divergentes[table] = {"ddl": sorted(actions), "repair": alvo}
+
+    inesperadas = set(divergentes) - _PENDENTE_DECISAO_DO_DONO
+    assert not inesperadas, (
+        "DDL declara um `on delete` que o repair_user_fk_cascades sobrescreve: "
+        + repr({t: divergentes[t] for t in sorted(inesperadas)})
+        + ". Alinhe o DDL com _USER_FK_SET_NULL_TABLES (db/schema_repairs.py) — "
+        "quem vale em runtime é o repair, não o `create table if not exists`."
+    )
