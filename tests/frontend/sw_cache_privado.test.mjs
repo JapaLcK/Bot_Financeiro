@@ -468,9 +468,19 @@ test("nav-auth preserva a mesma lista que o auth-refresh", () => {
 // a limpeza rodava so' no primeiro: as respostas internas saiam por baixo dela
 // (Codex, #170). Nenhum dos casos acima os alcanca.
 
-/** fetch falso que responde por caminho, e conta as chamadas. */
-function fetchPorRota(mapa) {
+/** fetch falso que responde por caminho, e conta as chamadas.
+ *
+ * `autenticacao` lista os caminhos cujo 401 sai com `WWW-Authenticate` — a marca
+ * de FAMÍLIA que o interceptor passou a exigir para renovar (#176). 401 sem ela é
+ * de aplicação (senha errada, chave inválida) e não dispara refresh nenhum.
+ *
+ * O `headers` não é enfeite de fidelidade: um duplo sem ele rebentava com
+ * `TypeError: Cannot read properties of undefined` na linha nova do interceptor,
+ * porque `Response.headers` sempre existe no navegador e aqui não existia.
+ */
+function fetchPorRota(mapa, autenticacao = []) {
   const chamadas = [];
+  const marcados = new Set(autenticacao);
   return {
     chamadas,
     fn: async (input, init) => {
@@ -479,14 +489,16 @@ function fetchPorRota(mapa) {
       chamadas.push({ caminho, method: (init && init.method) || "GET" });
       const r = mapa[caminho];
       const status = typeof r === "function" ? r(chamadas) : r;
-      return { ok: status >= 200 && status < 300, status };
+      const marca = status === 401 && marcados.has(caminho)
+        ? { "WWW-Authenticate": 'Bearer realm="pigbank", error="invalid_token"' } : {};
+      return { ok: status >= 200 && status < 300, status, headers: new Headers(marca) };
     },
   };
 }
 
 test("refresh interno que falha (401) limpa — deslogue involuntario", async () => {
   const apagados = [];
-  const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 401 });
+  const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 401 }, ["/data/42"]);
   const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
@@ -507,21 +519,26 @@ test("refresh interno que falha (401) limpa — deslogue involuntario", async ()
 // cobre o 401; os tres abaixo cobrem o 400 e o teto de renovacoes (#173).
 
 test("refresh interno que devolve 400 NAO limpa — a sessao esta' de pe", async () => {
-  // Senha errada no MFA leva 401 de APLICACAO. O interceptor renova por
-  // reflexo (#176), o backend responde 400 porque o access token ainda vale, e
-  // tratar isso como fim de sessao apagava o aparelho de quem so' errou a senha.
+  // O predicado do #173: 400 no /auth/refresh e' "refresh ausente com o access
+  // token de pe", nao fim de sessao — trata-lo como fim apagava o aparelho.
+  //
+  // O GATILHO mudou com o #176 e o caso trocou de rota por isso: antes quem
+  // chegava aqui era a senha errada do MFA, que hoje nao renova mais (401 de
+  // aplicacao, sem WWW-Authenticate — ver `auth_refresh_gatilho.test.mjs`).
+  // Quem ainda alcanca este ramo e' o 401 de AUTENTICACAO, que renova e pode
+  // receber 400. O invariante medido e' o mesmo; so' a porta de entrada mudou.
   const apagados = [];
-  const falso = fetchPorRota({ "/auth/mfa/setup": 401, "/auth/refresh": 400 });
+  const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 400 }, ["/data/42"]);
   const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
   });
 
-  const resp = await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+  const resp = await ctx.window.fetch("/data/42");
 
   assert.ok(falso.chamadas.some((c) => c.caminho === "/auth/refresh"),
             "o interceptor nem tentou renovar — o teste nao mede o caminho certo");
-  assert.equal(resp.status, 401, "o 401 da senha errada tem que chegar ao chamador");
+  assert.equal(resp.status, 401, "o 401 tem que chegar ao chamador");
   assert.deepEqual(apagados, [], "apagou o Cache Storage com a sessao viva");
 });
 
@@ -553,29 +570,31 @@ test("senha errada com refresh ausente: o estado fica E a chamada seguinte funci
 });
 
 test("uma renovacao por 401 interceptado, e nenhum retry quando ela falha", async () => {
-  // O teto. O interceptor renova em QUALQUER 401 (#176), entao o que segura o
-  // custo e' nao haver recursao: uma renovacao, e a request original refeita
-  // so' quando a renovacao da' certo.
-  const falso = fetchPorRota({ "/auth/mfa/setup": 401, "/auth/refresh": 400 });
+  // O teto do 401 que AINDA renova (o de autenticacao — desde o #176 o de
+  // aplicacao nao entra mais aqui): nao ha recursao, e' uma renovacao so', e a
+  // request original so' e' refeita quando a renovacao da' certo.
+  const falso = fetchPorRota({ "/data/42": 401, "/auth/refresh": 400 }, ["/data/42"]);
   const { ctx } = paginaComCache("static/auth-refresh.js", (c) => { c.fetch = falso.fn; });
 
-  await ctx.window.fetch("/auth/mfa/setup", { method: "POST" });
+  await ctx.window.fetch("/data/42");
 
   const refresh = falso.chamadas.filter((c) => c.caminho === "/auth/refresh");
-  const setup = falso.chamadas.filter((c) => c.caminho === "/auth/mfa/setup");
+  const original = falso.chamadas.filter((c) => c.caminho === "/data/42");
   assert.equal(refresh.length, 1, `esperado 1 refresh, vieram ${refresh.length}`);
-  assert.equal(setup.length, 1, "a request original foi refeita com o refresh falhando");
+  assert.equal(original.length, 1, "a request original foi refeita com o refresh falhando");
 });
 
 test("retry pos-refresh que encerra a sessao limpa", async () => {
-  // DELETE /auth/account leva 401, o refresh renova, o retry da' certo — e o
-  // retry e' que encerra a sessao. Ele saia por baixo da limpeza.
+  // DELETE /auth/account com o ACCESS TOKEN vencido (401 de autenticacao, o que
+  // leva WWW-Authenticate — a senha errada da mesma rota e' 401 de aplicacao e
+  // desde o #176 nao renova). O refresh renova, o retry da' certo — e o retry e'
+  // que encerra a sessao. Ele saia por baixo da limpeza.
   const apagados = [];
   let tentativas = 0;
   const falso = fetchPorRota({
     "/auth/account": () => (++tentativas === 1 ? 401 : 200),
     "/auth/refresh": 200,
-  });
+  }, ["/auth/account"]);
   const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };
@@ -596,7 +615,7 @@ test("request comum que renova e da' certo NAO limpa", async () => {
   const falso = fetchPorRota({
     "/data/42": () => (++tentativas === 1 ? 401 : 200),
     "/auth/refresh": 200,
-  });
+  }, ["/data/42"]);
   const { ctx } = paginaComCache("static/auth-refresh.js", (c) => {
     c.fetch = falso.fn;
     c.caches.delete = async (k) => { apagados.push(k); return true; };

@@ -338,3 +338,122 @@ def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
         "o cache privado sobrevive nesse fluxo. "
         f"só no Python: {sorted(do_python - do_js)}; só no JS: {sorted(do_js - do_python)}"
     )
+
+
+# Classificação EXPLÍCITA de cada `raise HTTPException(status_code=401, ...)` de
+# `frontend/finance_bot_websocket_custom.py` + `frontend/routes/*.py`, por
+# `(arquivo, detail)`. `True` = falha de access/dashboard token, leva o
+# `WWW_AUTHENTICATE_401` e o interceptor renova; `False` = 401 de aplicação, não
+# leva e não renova.
+#
+# `core/admin_dashboard.py` fica FORA por caminho: é outra árvore de auth (sessão
+# de admin, cookie próprio) e nenhuma página dela carrega o `auth-refresh.js`.
+_401_RENOVAVEL = {
+    # ── família A: o access/dashboard token falhou → renovar resolve ──────────
+    ("frontend/finance_bot_websocket_custom.py", "Token não fornecido."): True,
+    ("frontend/finance_bot_websocket_custom.py", "Token inválido ou expirado."): True,
+    ("frontend/finance_bot_websocket_custom.py", "Sessão encerrada. Faça login novamente."): True,
+    ("frontend/finance_bot_websocket_custom.py", "Sessão expirada. Faça login novamente."): True,
+    ("frontend/finance_bot_websocket_custom.py", "Token inválido"): True,
+    ("frontend/routes/shared.py", "Token de dashboard inválido ou expirado."): True,
+    ("frontend/routes/shared.py", "Sessão encerrada. Faça login novamente."): True,
+    # ── família B: 401 de aplicação, o token está ótimo ───────────────────────
+    # Senha incorreta em MFA setup/disable, regenerar backup codes e export.
+    ("frontend/finance_bot_websocket_custom.py", "Senha incorreta."): False,
+    # Login: nem chega ao interceptor — login.html não carrega o auth-refresh.js.
+    ("frontend/finance_bot_websocket_custom.py", "E-mail ou senha incorretos."): False,
+    # Magic link consumido/expirado. É a pegadinha da lista: parece autenticação
+    # e NÃO é renovável — access token novo não ressuscita um link expirado.
+    ("frontend/finance_bot_websocket_custom.py", "Link de dashboard inválido ou expirado."): False,
+    # `detail=str(exc)` de um PermissionError: senha errada no DELETE /auth/account
+    # (monólito) e no reset de dados (settings.py). Dinâmico, daí o marcador.
+    ("frontend/finance_bot_websocket_custom.py", "<str(exc)>"): False,
+    ("frontend/routes/settings.py", "<str(exc)>"): False,
+    # Chave de API do lead engine e webhook server-to-server: sem sessão nenhuma.
+    ("frontend/routes/prospects.py", "Chave inválida."): False,
+    ("frontend/routes/open_finance.py", "Não autorizado."): False,
+}
+
+
+def _varre_401(caminho, fonte):
+    """Devolve (chave, tem_header) de cada `raise HTTPException(status_code=401)`.
+
+    `chave` é `(arquivo, detail)`; `detail` dinâmico vira o marcador `<str(exc)>`.
+    """
+    import ast
+
+    achados = []
+    for no in ast.walk(ast.parse(fonte)):
+        if not (isinstance(no, ast.Raise) and isinstance(no.exc, ast.Call)):
+            continue
+        chamada = no.exc
+        nome = getattr(chamada.func, "id", None) or getattr(chamada.func, "attr", None)
+        if nome != "HTTPException":
+            continue
+        kw = {k.arg: k.value for k in chamada.keywords}
+        status = kw.get("status_code")
+        if not (isinstance(status, ast.Constant) and status.value == 401):
+            continue
+        detail = kw.get("detail")
+        chave = (
+            detail.value if isinstance(detail, ast.Constant) and isinstance(detail.value, str)
+            else "<str(exc)>"
+        )
+        header = kw.get("headers")
+        achados.append(((caminho, chave), getattr(header, "id", None) == "WWW_AUTHENTICATE_401"))
+    return achados
+
+
+def test_401_de_autenticacao_declara_familia():
+    """§0.7: o `auth-refresh.js` não importa Python, então um teste prende as listas.
+
+    Desde a #176 o interceptor só renova o 401 que traz `WWW-Authenticate` — ele
+    falha FECHADO, e é por isso que este gate é obrigatório e não opcional: um 401
+    de autenticação que alguém esqueça de marcar deixa de ser renovado e joga o
+    usuário para o login, regressão PIOR que o bug original (uma request extra).
+
+    Duas direções, as duas vermelhas:
+      - 401 novo sem entrada em `_401_RENOVAVEL` → o autor é obrigado a decidir a
+        família, em vez de herdar um default errado em silêncio;
+      - família declarada que não bate com o `headers=` do código.
+
+    Fora do alcance por caminho: `core/admin_dashboard.py`, que é outra árvore de
+    auth (sessão de admin) e cujas páginas não carregam o `auth-refresh.js`.
+    """
+    import pathlib
+
+    raiz = pathlib.Path(__file__).resolve().parents[1]
+    alvos = [pathlib.Path("frontend/finance_bot_websocket_custom.py")]
+    alvos += sorted(
+        p.relative_to(raiz) for p in (raiz / "frontend" / "routes").glob("*.py")
+    )
+
+    achados = []
+    for rel in alvos:
+        achados += _varre_401(rel.as_posix(), (raiz / rel).read_text(encoding="utf-8"))
+
+    assert achados, "a varredura não achou 401 nenhum — o walk quebrou"
+
+    sem_classificacao = sorted({c for c, _ in achados if c not in _401_RENOVAVEL})
+    assert not sem_classificacao, (
+        "401 novo sem família declarada. O interceptor do auth-refresh.js falha "
+        "FECHADO: sem `WWW_AUTHENTICATE_401` ele não renova e o usuário cai no "
+        f"login. Classifique em `_401_RENOVAVEL`: {sem_classificacao}"
+    )
+
+    divergentes = sorted(
+        f"{c} código={tem} classificação={_401_RENOVAVEL[c]}"
+        for c, tem in achados
+        if _401_RENOVAVEL[c] != tem
+    )
+    assert not divergentes, (
+        "o `headers=` do código não bate com a família declarada — renovável sem "
+        f"header nunca renova; de aplicação com header renova à toa: {divergentes}"
+    )
+
+    # Controle positivo: a família A não pode ter esvaziado. Se um refactor tirar
+    # o `headers=` de todos os sítios, as duas asserções acima continuariam verdes
+    # caso a classificação fosse trocada junto — este número não.
+    assert sum(1 for _, tem in achados if tem) == 8, sorted(
+        c for c, tem in achados if tem
+    )
