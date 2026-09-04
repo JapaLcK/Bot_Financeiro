@@ -16,7 +16,8 @@ import re
 import db
 from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import limpa_pontuacao_final, normalize_text, valor_perigoso
+from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
+                        normalize_text, valor_perigoso)
 
 # handlers
 from core.handlers import (
@@ -830,7 +831,68 @@ def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     achou = _SUBST_ALVO_RE.search(t)
     if achou:
         t = achou.group(1)
-    return _PREP_RE.sub("", t).strip() or resposta.strip()
+    recortado = _PREP_RE.sub("", t).strip()
+    if recortado and _eh_nome_do_catalogo(recortado, existentes):
+        return recortado
+
+    # Nem a resposta inteira nem o recorte batem. Última tentativa, e ainda pelo
+    # CATÁLOGO: um nome do usuário aparecendo DENTRO da resposta. É o que salva
+    # "tira 100 da viagem" — sem o substantivo "caixinha" o recorte acima não
+    # tem onde cortar, e o nome inteiro virava "tira 100 da viagem".
+    #
+    # Só quando UM nome casa: com dois, escolher seria adivinhar, e o handler
+    # dizendo "não encontrada" é melhor que mover dinheiro no alvo errado.
+    # Palavra inteira, senão a caixinha "ana" casaria em "banana" — quem faz
+    # isso é o `contains_word` do `utils_text`, não uma regex repetida aqui (§0.7).
+    alvo_norm = normalize_text(resposta)
+    dentro = [n for n in (existentes or []) if contains_word(alvo_norm, normalize_text(n))]
+    if len(dentro) > 1:
+        # "viagem" e "minha viagem" casam os dois numa MENÇÃO só ("tira 100 da
+        # minha viagem"): ANINHADOS, o mais específico ganha. O teste é UMA
+        # MENÇÃO, não "um nome cabe no outro": em "tira 100 da viagem e 50 da
+        # viagem japao" um cabe no outro do mesmo jeito, e são DUAS menções —
+        # escolher ali seria adivinhar, e o handler dizendo "não encontrada" é
+        # melhor que mover dinheiro no alvo errado.
+        #
+        # Quem separa os dois casos é a REMOÇÃO (mesmo idioma do `_pede_tudo`):
+        # tira a ocorrência do maior e vê se algum candidato ainda casa no resto.
+        # Se casa, sobrou outra menção. Disjuntos ("ana" e "bruno") caem aqui
+        # também, e continuam recusados.
+        maior = max(dentro, key=lambda n: len(normalize_text(n)))
+        resto = re.sub(rf"\b{re.escape(normalize_text(maior))}\b", " ", alvo_norm, count=1)
+        if not any(contains_word(resto, normalize_text(n)) for n in dentro):
+            dentro = [maior]
+    # TETO deixado ABERTO de propósito: com catálogo ["viagem", "minha caixinha
+    # viagem"], "tira 100 da minha caixinha viagem" ainda devolve "viagem",
+    # porque o `_SUBST_ALVO_RE` recorta e o catálogo confirma ANTES de chegar
+    # aqui. Fechar isso mexeria na precedência documentada acima. Está em #260,
+    # com repro e plano de teste.
+    #
+    # SEGUNDO teto, deste desempate: menções SOBREPOSTAS. Com ["casa nova",
+    # "nova moto"], "tira da casa nova moto" devolve "casa nova" — a remoção do
+    # maior deixa " moto", que não casa "nova moto", e o código aceita. Exige
+    # duas caixinhas compartilhando um token e uma frase que as emenda; é raro,
+    # mas é dinheiro num alvo adivinhado, que é a classe que este bloco fecha.
+    if len(dentro) == 1:
+        return dentro[0]
+    return recortado or resposta.strip()
+
+
+def _pede_tudo(resposta: str, existentes: list[str] | None = None) -> bool:
+    """O marcador de TUDO conta só se sobreviver à remoção do nome do catálogo.
+
+    Nome de caixinha é string arbitrária: "zerar dívida" é um nome legítimo, e
+    "tira 100 da zerar dívida" pedia 100 — não esvaziar.
+    """
+    if not marcador_de_tudo(resposta):
+        return False
+    alvo = _nome_do_alvo(resposta, existentes)
+    # ESSENCIAL: sem esta guarda, "esvaziar" sozinho se removeria de si mesmo
+    # (o `_nome_do_alvo` devolve a própria resposta) e o marcador sumiria.
+    if not _eh_nome_do_catalogo(alvo, existentes):
+        return True
+    resto = re.sub(rf"\b{re.escape(normalize_text(alvo))}\b", " ", normalize_text(resposta))
+    return marcador_de_tudo(resto)
 
 
 _INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
@@ -840,6 +902,114 @@ _INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
     "investments.withdraw",
     "funds.withdraw",
 })
+
+# Chave do NOME por intent. O valor é sempre `amount`; a quantidade "tudo" é
+# `want_all`. Fonte única — antes cada sítio repetia a sua.
+_CHAVE_DO_NOME: dict[str, str] = {
+    "pockets.deposit":      "pocket_name",
+    "pockets.withdraw":     "pocket_name",
+    "investments.deposit":  "investment_name",
+    "investments.withdraw": "investment_name",
+    "funds.withdraw":       "target_name",
+}
+
+
+def _funde_a_resposta(
+    intent: str, ents: dict, resposta: str, existentes: list[str],
+) -> tuple[dict, str | None]:
+    """Lê a resposta INTEIRA e funde nos slots. Pura: sem I/O, sem `db`.
+
+    Este é o ponto ÚNICO de leitura da resposta a uma pergunta de handler. Antes
+    eram dois sub-ramos escolhidos por `falta`, e foi isso que produziu QUATRO
+    rodadas de revisão no #184: como seletor de LEITURA, cada ramo aprendia um
+    pedaço diferente do mundo, e a rodada seguinte achava o pedaço que faltava no
+    outro. `falta` agora só decide o que RE-PERGUNTAR (quem faz isso é o
+    chamador); o que se LÊ da resposta não depende dele.
+
+    Dois slots, não três:
+
+        target    — o nome do alvo
+        quantity  — QUANTIA(x) | TUDO | ausente
+
+    `amount` e `want_all` são duas formas de preencher o MESMO conceito (quanto
+    movimentar), então são EXCLUDENTES. Modelá-los como campos independentes com
+    união permite `amount=100 AND want_all=True`, e aí quem decide é a
+    precedência do handler — que ninguém escolheu. O caso que prova:
+
+        esvaziar caixinha   -> "Qual caixinha?"   (quantity = TUDO)
+        tira 100 da viagem  -> a caixinha seria ESVAZIADA, não debitada em 100
+
+    Portões (cada slot vence o guardado só se passar no seu):
+
+      target    o CATÁLOGO confirma. Sem ele, "retirei 100 do salário"
+                sobrescreveria a caixinha certa por uma que não existe.
+      quantity  o CATÁLOGO guarda o slot INTEIRO, não só o ramo do
+                `_extract_valor`: a caixinha "meta 2028" não vira saque de
+                R$ 2.028 (Codex P1, #184, rodada 3) e a caixinha "zerar dívida"
+                não vira "esvaziar" (`_pede_tudo`). No ramo do número vale
+                ainda o `valor_perigoso`.
+
+    Devolve `(ents, recusa)`. `recusa` é o motivo do `valor_perigoso`, e quem
+    monta a mensagem e re-arma a pergunta é o chamador, que tem `db` e `payload`.
+    """
+    from parsers import _extract_valor
+
+    ents = dict(ents)
+    resposta = (resposta or "").strip()
+
+    # ── quantity ────────────────────────────────────────────────────────────
+    # Ordem: TUDO primeiro, porque "esvaziar" não tem número e o `_extract_valor`
+    # devolveria None — o que antes virava "Não entendi o valor" em laço.
+    eh_nome = _eh_nome_do_catalogo(resposta, existentes)
+    # TETO conhecido: caixinha chamada `tudo`, respondida com `tudo`, é lida
+    # como NOME — a mesma precedência já aceita em `meta 2028`.
+    if _pede_tudo(resposta, existentes):
+        ents["want_all"] = True
+        ents.pop("amount", None)          # excludente: TUDO substitui a quantia
+    elif not eh_nome:
+        valor = _extract_valor(resposta)
+        perigo = valor_perigoso(resposta, valor)
+        if perigo:
+            # NÃO é `return` seco: o nome desta mesma resposta ainda vale. Antes
+            # a recusa re-armava o payload ORIGINAL e o alvo novo se perdia.
+            ents = _funde_o_nome(intent, ents, resposta, existentes, eh_nome)
+            return ents, perigo
+        if valor is not None:
+            ents["amount"] = valor
+            # `False` EXPLÍCITO, não `pop`: a PRESENÇA da chave é o sinal de que
+            # o resolver decidiu a quantidade. Removendo-a, o handler caía no
+            # fallback de texto e re-derivava "tudo" do `orig_text` — medido:
+            # "esvaziar caixinha" + "tira 100 da viagem" ESVAZIAVA a caixinha,
+            # que é precisamente o dano que a exclusividade existe para impedir.
+            ents["want_all"] = False
+    # `eh_nome` sem marcador: a resposta é só o nome. A quantidade guardada fica.
+
+    # ── target ──────────────────────────────────────────────────────────────
+    return _funde_o_nome(intent, ents, resposta, existentes, eh_nome), None
+
+
+def _funde_o_nome(
+    intent: str, ents: dict, resposta: str, existentes: list[str], eh_nome: bool,
+) -> dict:
+    """O alvo mais recente vence o guardado — se o catálogo o confirmar.
+
+    Sem o portão do catálogo, "explícito" viraria sinônimo de "existente" e
+    `retirei 100 do salário` sobrescreveria a caixinha certa. Quando não há alvo
+    guardado, entra o best-effort do `_nome_do_alvo` mesmo sem confirmação —
+    é o que permite ao handler responder "*X* não encontrada" em vez de
+    perguntar de novo em laço.
+    """
+    chave = _CHAVE_DO_NOME.get(intent)
+    if not chave:
+        return ents
+    ents = dict(ents)
+    if eh_nome:
+        ents[chave] = resposta
+    else:
+        candidato = _nome_do_alvo(resposta, existentes)
+        if _eh_nome_do_catalogo(candidato, existentes) or not ents.get(chave):
+            ents[chave] = candidato
+    return ents
 
 
 def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platform: str, external_id: str) -> str:
@@ -912,68 +1082,67 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
     # antes de chegarmos aqui.
     falta = payload.get("falta")
     if falta and original_intent in _INTENTS_PERGUNTA_DE_HANDLER:
-        ents = dict(original_entities)
         resposta_h = limpa_pontuacao_final(user_response.strip())
-        if falta == "amount":
-            from parsers import _extract_valor
-            valor = _extract_valor(resposta_h)
-            perigo = valor_perigoso(resposta_h, valor)
-            if perigo or valor is None:
-                # Recusa MANTÉM a pergunta viva — mesmo contrato das 4 portas do
-                # #140. Descartar jogaria o usuário no fallback genérico e a
-                # caixinha/investimento que ele já escolheu sumiria.
-                #
-                # `create_pending_action_if_absent` e não `set_pending_action`:
-                # o `consume_pending_action` no topo desta função já apagou a
-                # linha, e entre lá e aqui outra tarefa pode ter posto uma
-                # pergunta NOVA — que o usuário já viu. O upsert a atropelaria.
-                db.create_pending_action_if_absent(user_id, "clarification", payload)
-                recusa = ("O valor precisa ser maior que zero."
-                          if perigo == "nao_positivo"
-                          else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
-                return f"{recusa}\n\n{payload.get('question') or 'Qual o valor?'}"
-            ents["amount"] = valor
-            # `orig_text` e não o combinado: medido, "tirar da caixinha viagem"
-            # + "100 reais" concatenado faz o parser de saque ler o nome como
-            # "viagem 100 reais" e a caixinha não é encontrada. O valor entra
-            # pela entity, que é o que o handler consulta quando o parse falha.
-            return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
+        # Catálogo só quando a resposta pode conter um nome. Resposta feita só de
+        # dígitos e pontuação não esconde nome nenhum, e pular a consulta evita
+        # o `accrue_all_investments` (que ESCREVE accruals) no caso mais comum.
+        # Teto aceito: caixinha chamada "2028" respondida a "Qual o valor?" é
+        # lida como valor.
+        existentes = ([] if _SO_NUMERO_RE.fullmatch(resposta_h)
+                      else _alvos_existentes(user_id, original_intent))
+        ents, recusa = _funde_a_resposta(
+            original_intent, original_entities, resposta_h, existentes)
 
-        # NOME de caixinha/investimento/alvo. A RESPOSTA vira o `text`, não o
-        # `orig_text`: a própria pergunta sugere o comando completo ("Tente:
-        # *coloquei 200 na caixinha viagem*"), e tomar a resposta verbatim como
-        # nome fazia o bot RECUSAR o texto que ele acabou de recomendar —
-        # "Caixinha *coloquei 200 na caixinha viagem* não encontrada". Regressão
-        # apontada pelo Codex no #184 e confirmada medindo; na `main` o comando
-        # completo era reclassificado e funcionava.
+        # A quantidade ainda falta? Pode ser recusa do filtro de dano, ou uma
+        # resposta que só trouxe o nome. Nos dois casos a pergunta VOLTA viva —
+        # mesmo contrato das 4 portas do #140 — mas agora com as entities
+        # ATUALIZADAS: o alvo que o usuário acabou de dizer não se perde.
+        sem_quantidade = not ents.get("want_all") and not ents.get("amount")
+        if recusa or (falta == "amount" and sem_quantidade):
+            # `create_pending_action_if_absent` e não `set_pending_action`: o
+            # `consume_pending_action` no topo desta função já apagou a linha, e
+            # entre lá e aqui outra tarefa pode ter posto uma pergunta NOVA —
+            # que o usuário já viu. O upsert a atropelaria.
+            db.create_pending_action_if_absent(
+                user_id, "clarification", {**payload, "entities": ents})
+            texto = ("O valor precisa ser maior que zero." if recusa == "nao_positivo"
+                     else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
+            return f"{texto}\n\n{payload.get('question') or 'Qual o valor?'}"
+
+        # Que texto vira a NOTA do lançamento (`db/pockets.py:497`, `:659` — o
+        # `text` é passado como `nota`; o `alvo` já é o nome canônico resolvido).
         #
-        # Passando a resposta como `text`, o parser natural do próprio handler
-        # (`parse_pocket_deposit_natural`, `_parse_pocket_withdraw_natural`)
-        # extrai nome E valor do comando completo, e a entity abaixo só vale
-        # quando esse parse não acha nada — o caso da resposta curta.
-        existentes = _alvos_existentes(user_id, original_intent)
-        ents[falta] = _nome_do_alvo(resposta_h, existentes)
-        # O comando completo ("retirei 100 da caixinha viagem") traz o valor
-        # junto: aproveita e poupa um turno. Passa pelo MESMO filtro de dano do
-        # ramo de cima — um valor perigoso aqui e a pergunta do valor volta.
+        # Regra: o `orig_text`, EXCETO quando o usuário redirecionou o alvo na
+        # resposta. Aí ele mentiria — "tirar da caixinha carro" gravado num
+        # lançamento que debitou `viagem` —, e extrato, auditoria, suporte e a
+        # IA lendo o histórico depois herdam a mentira.
         #
-        # MAS não quando a resposta é, ela inteira, um nome do catálogo: uma
-        # caixinha "meta 2028" fazia `_extract_valor` devolver 2028 e o saque
-        # levava R$ 2.028 SEM PERGUNTAR quanto. Medido (com R$ 500 na caixinha:
-        # "Saldo insuficiente na caixinha *meta 2028*" — com saldo maior teria
-        # sacado). Nome é nome; dígito dentro dele não é valor. Codex P1, #184.
-        if not _eh_nome_do_catalogo(resposta_h, existentes) and not ents.get("amount"):
-            from parsers import _extract_valor
-            v = _extract_valor(resposta_h)
-            if v is not None and not valor_perigoso(resposta_h, v):
-                ents["amount"] = v
-        # `orig_text` e NAO a resposta: `want_all` ("esvaziar", "zerar", "tudo")
-        # e derivado do `text` pelos dois handlers de saque, entao trocar o texto
-        # pela resposta curta perdia o marcador e o bot pedia um valor em vez de
-        # esvaziar a caixinha. Medido; apontado pelo Codex no #184. O nome e o
-        # valor chegam pelas entities, que e o que o handler consulta quando o
-        # parse do texto nao acha nada.
-        return _execute(original_intent, user_id, orig_text, ents, platform, external_id)
+        # A divergência é medida comparando as entities ANTES e DEPOIS, não
+        # re-parseando texto: exato e sem custo. E é seguro passar a resposta
+        # nesse caso porque o alvo novo veio DELA e já passou pelo portão do
+        # catálogo — o parse do handler, se rodar, chega ao mesmo nome. Quando o
+        # portão RECUSOU o alvo da resposta não há divergência, então o
+        # `orig_text` fica, e o parse não tem como reintroduzir o alvo recusado.
+        # `antes` VAZIO conta igual: "esvaziar caixinha" (sem alvo guardado) +
+        # "tira 100 da viagem" gravava a nota "esvaziar caixinha" num saque de
+        # R$ 100 — mesma mentira, sem alvo velho para citar. Com uma condição a
+        # mais: o texto também é a fonte de PARSE do handler, e a quantidade
+        # "tudo" mora só no `orig_text` (as entities não a carregam quando a
+        # pergunta foi "Qual caixinha?"). Trocar o texto por uma resposta que só
+        # traz o NOME — "esvaziar caixinha" + "viagem" — perdia o esvaziar
+        # (medido: virava "Qual o valor?"). Com `antes` preenchido a quantidade
+        # já veio nas entities guardadas, então a condição só vale para o ramo
+        # novo.
+        chave = _CHAVE_DO_NOME.get(original_intent)
+        antes = (original_entities or {}).get(chave) if chave else None
+        depois = ents.get(chave) if chave else None
+        qtd_nova = (ents.get("amount") != original_entities.get("amount")
+                    or ents.get("want_all") != original_entities.get("want_all"))
+        redirecionou = bool(depois
+                            and normalize_text(antes or "") != normalize_text(depois)
+                            and (antes or qtd_nova))
+        texto = resposta_h if redirecionou else orig_text
+        return _execute(original_intent, user_id, texto, ents, platform, external_id)
 
     # Reclassifica COM contexto (mensagem original + pergunta que o bot fez +
     # resposta). Se a IA montar a intenção completa, despacha por ela — resolve
@@ -1128,20 +1297,30 @@ def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
     amount = entities.get("amount")
     target_name = (entities.get("target_name") or "").strip()
     target_kind = entities.get("target_kind")
+    # A quantidade "tudo" tem de sobreviver às QUATRO reconstruções de dict
+    # abaixo — elas montam as entities do zero e descartavam o marcador, então
+    # "esvaziar" por esta porta perguntava o valor para sempre. Irmão dos dois
+    # handlers de saque; fecha junto (§2). A PRESENÇA da chave manda (idioma de
+    # core/handlers/pockets.py:215): com `or`, o `want_all=False` que o resolver
+    # grava DE PROPÓSITO era religado pelo texto original — "esvaziar caixinha"
+    # seguido de "tira 100 da viagem" esvaziava a caixinha.
+    want_all = (bool(entities["want_all"]) if "want_all" in (entities or {})
+                else marcador_de_tudo(text))
+    quantia = {"amount": amount, "want_all": want_all}
 
     if target_kind == "pocket":
-        return h_pockets.withdraw(user_id, text, {"pocket_name": target_name, "amount": amount})
+        return h_pockets.withdraw(user_id, text, {"pocket_name": target_name, **quantia})
     if target_kind == "investment":
-        return h_investments.withdraw(user_id, text, {"investment_name": target_name, "amount": amount})
+        return h_investments.withdraw(user_id, text, {"investment_name": target_name, **quantia})
 
-    if not amount or float(amount) <= 0:
+    if not want_all and (not amount or float(amount) <= 0):
         return h_pending.pergunta_guardando_contexto(
             user_id, "funds.withdraw", entities,
             "Qual o valor? Tente: *saquei 200 da reserva de emergência*", text, falta="amount")
 
     if not target_name:
         return h_pending.pergunta_guardando_contexto(
-            user_id, "funds.withdraw", {**(entities or {}), "amount": amount},
+            user_id, "funds.withdraw", {**(entities or {}), **quantia},
             "Você quer retirar de qual caixinha ou investimento?", text, falta="target_name")
 
     norm_target = normalize_text(target_name)
@@ -1153,10 +1332,10 @@ def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
     investment_matches = [i for i in investments if normalize_text(i.get("name") or "") == norm_target]
 
     if len(pocket_matches) == 1 and not investment_matches:
-        return h_pockets.withdraw(user_id, text, {"pocket_name": pocket_matches[0]["name"], "amount": amount})
+        return h_pockets.withdraw(user_id, text, {"pocket_name": pocket_matches[0]["name"], **quantia})
 
     if len(investment_matches) == 1 and not pocket_matches:
-        return h_investments.withdraw(user_id, text, {"investment_name": investment_matches[0]["name"], "amount": amount})
+        return h_investments.withdraw(user_id, text, {"investment_name": investment_matches[0]["name"], **quantia})
 
     if pocket_matches and investment_matches:
         return (

@@ -4,7 +4,7 @@ import logging
 import re
 import db
 from core.handlers import pending as h_pending
-from utils_text import fmt_brl, parse_pocket_deposit_natural
+from utils_text import fmt_brl, marcador_de_tudo, parse_pocket_deposit_natural
 
 logger = logging.getLogger(__name__)
 
@@ -156,10 +156,6 @@ _WITHDRAW_VERBS = [
     "saca", "saque", "tira", "tire", "retira", "retire", "resgata", "resgate",
 ]
 
-# "sacar tudo" / "esvaziar" / "zerar a caixinha" → saca o saldo cheio e zera
-_WITHDRAW_ALL_RX = re.compile(r"\b(tudo|esvaziar|esvazia|zerar|zera)\b", re.I)
-
-
 def _parse_pocket_withdraw_natural(text: str):
     """Extrai (amount, pocket_name) de frases de saque como 'retirei 50 da caixinha viagem'."""
     from utils_text import parse_money, normalize_spaces
@@ -213,7 +209,11 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
-    want_all    = bool(_WITHDRAW_ALL_RX.search(text or ""))
+    # A entity ANTES do texto: o resolver de clarification grava a quantidade
+    # "tudo" nas entities, para ela não depender de qual string chegou aqui.
+    # O `or` preserva o caminho direto ("esvaziar caixinha viagem") intocado.
+    want_all    = (bool(entities["want_all"]) if "want_all" in (entities or {})
+                else marcador_de_tudo(text))
 
     # tenta extrair do texto se as entidades não trouxerem
     if not pocket_name or (not amount and not want_all):

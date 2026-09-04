@@ -455,3 +455,369 @@ def test_conjunto_nao_tem_intent_orfa():
 
     usadas = {intent for _, _, intent, _ in _chamadas_de_pergunta()}
     assert _INTENTS_PERGUNTA_DE_HANDLER - usadas == set()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A TABELA estados × eventos do resolver (#186)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Por que uma tabela e não mais um caso por bug: o resolver levou QUATRO rodadas
+# de revisão, cada uma consertando a transição que a anterior deixou aberta. A
+# causa era `falta` acumular dois papéis — decidir o que LER da resposta e o que
+# RE-PERGUNTAR. Como seletor de leitura, cada sub-ramo aprendia um pedaço
+# diferente do mundo. Rebaixado a decisor de re-pergunta, sobra UMA leitura, e o
+# produto estados × eventos vira soma: esta tabela.
+#
+# `_funde_a_resposta` é PURA (o catálogo entra por parâmetro), então o eixo dos
+# eventos se testa aqui sem conversa nenhuma — e adicionar célula = adicionar
+# LINHA, que é o antídoto contra a rodada 6. As conversas logo abaixo cobrem a
+# integração de verdade, que a tabela sozinha não prova.
+
+_CATALOGO = ["viagem", "carro", "meta 2028", "minha caixinha viagem",
+             "reserva de emergencia", "zerar divida"]
+
+
+@pytest.mark.parametrize("resposta,nome,valor,tudo,recusa", [
+    ("100",                            None,           100.0, None, None),
+    ("200 reais",                      None,           200.0, None, None),
+    ("viagem",                         "viagem",       None,  None, None),
+    ("caixinha viagem",                "viagem",       None,  None, None),
+    ("da caixinha viagem",             "viagem",       None,  None, None),
+    # nome literal com o substantivo dentro: o catálogo desempata
+    ("minha caixinha viagem",          "minha caixinha viagem", None, None, None),
+    # nome do catálogo COM DÍGITOS: é nome, não valor (Codex P1, rodada 3)
+    ("meta 2028",                      "meta 2028",    None,  None, None),
+    # nome legítimo que parece preposição + substantivo
+    ("reserva de emergencia",          "reserva de emergencia", None, None, None),
+    # comando completo: nome E valor da mesma resposta
+    ("retirei 100 da caixinha viagem", "viagem",       100.0, None, None),
+    # comando completo SEM o substantivo — o catálogo acha o nome dentro
+    ("tira 100 da viagem",             "viagem",       100.0, None, None),
+    # alvo FORA do catálogo: o portão barra, o nome guardado permanece
+    ("retirei 100 do salario",         "carro",        100.0, None, None),
+    # marcador de tudo: quantidade sem número
+    ("esvaziar",                       None,           None,  True, None),
+    ("zerar",                          None,           None,  True, None),
+    # nome do catálogo que CONTÉM o marcador: é NOME, não "esvaziar" (P1-B)
+    ("zerar divida",                   "zerar divida", None,  None, None),
+    ("tira 100 da zerar divida",       "zerar divida", 100.0, None, None),
+    # e o marcador que SOBREVIVE à remoção do nome continua valendo
+    ("esvaziar a zerar divida",        "zerar divida", None,  True, None),
+    # CONTROLE POSITIVO da remoção: nome sem marcador dentro segue esvaziando
+    ("esvaziar a viagem",              "viagem",       None,  True, None),
+    # valores perigosos: recusa
+    ("-10",                            None,           None,  None, "nao_positivo"),
+    ("0",                              None,           None,  None, "nao_positivo"),
+    ("132 50",                         None,           None,  None, "nao_entendi"),
+])
+def test_tabela_de_eventos(resposta, nome, valor, tudo, recusa):
+    """Um evento por linha. O estado é sempre o mesmo — alvo `carro` guardado,
+    sem quantidade — porque a LEITURA da resposta não depende do estado; é o
+    ponto inteiro do conserto."""
+    from core.intent_router import _funde_a_resposta
+
+    ents, motivo = _funde_a_resposta(
+        "pockets.withdraw", {"pocket_name": "carro"}, resposta, _CATALOGO)
+
+    assert motivo == recusa
+    assert ents.get("pocket_name") == (nome or "carro")
+    assert ents.get("amount") == valor
+    assert bool(ents.get("want_all")) is bool(tudo)
+
+
+@pytest.mark.parametrize("guardado,resposta,amount,tudo", [
+    # A EXCLUSIVIDADE, nas duas direções. `quantity` é um valor de soma
+    # (QUANTIA | TUDO | ausente), não dois campos independentes: união
+    # permitiria `amount=100 AND want_all=True`, e aí quem decide é a
+    # precedência do handler — que ninguém escolheu.
+    ({"want_all": True}, "tira 100 da viagem", 100.0, False),   # TUDO -> quantia
+    ({"want_all": True}, "tira 100 da zerar divida", 100.0, False),  # idem, nome com marcador
+    ({"amount": 100.0},  "esvaziar",           None,  True),    # quantia -> TUDO
+    # sem quantidade na resposta, a guardada permanece
+    ({"amount": 100.0},  "viagem",             100.0, False),
+    ({"want_all": True}, "viagem",             None,  True),
+])
+def test_quantidade_e_excludente(guardado, resposta, amount, tudo):
+    from core.intent_router import _funde_a_resposta
+
+    ents, _ = _funde_a_resposta(
+        "pockets.withdraw", {"pocket_name": "carro", **guardado}, resposta, _CATALOGO)
+
+    assert ents.get("amount") == amount
+    assert bool(ents.get("want_all")) is tudo
+    assert not (ents.get("amount") and ents.get("want_all")), "as duas ao mesmo tempo"
+
+
+# ── As células, pela conversa real ──────────────────────────────────────────
+
+@pytest.fixture
+def sem_teto_de_caixinha(monkeypatch):
+    """O plano Grátis limita a 1 caixinha e estas células precisam de duas."""
+    monkeypatch.setattr(
+        "core.services.plan_service.check_can_create_pocket", lambda uid: None)
+
+
+def _duas_caixinhas(uid, saldo=2000.0):
+    db.add_launch_and_update_balance(
+        uid, "receita", saldo, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    db.create_pocket(uid, "carro")
+    db.create_pocket(uid, "viagem")
+    _conversa(uid, "coloquei 300 na caixinha carro", "coloquei 300 na caixinha viagem")
+
+
+def _saldos(uid):
+    return {x["name"]: float(x["balance"]) for x in (db.list_pockets(uid) or [])}
+
+
+def test_186_alvo_da_resposta_vence_o_guardado(uid, sem_teto_de_caixinha):
+    """O bug da #186, confirmado em produção com dinheiro real: a resposta nomeia
+    OUTRA caixinha e o bot debitava a guardada."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+
+    p = _saldos(uid)
+    assert p["viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
+    assert p["carro"] == 300.00, "saiu da caixinha ERRADA"
+
+
+def test_alvo_fora_do_catalogo_nao_sobrescreve(uid, sem_teto_de_caixinha):
+    """CONTROLE do portão: "explícito" não é o mesmo que "existente". Sem o
+    catálogo, `salario` sobrescreveria a caixinha certa e o usuário receberia
+    "não encontrada" no lugar de um saque perfeitamente executável."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 do salario")
+
+    assert _saldos(uid)["carro"] == 200.00, "o alvo inexistente atropelou o guardado"
+
+
+def test_nota_do_lancamento_nao_cita_o_alvo_velho(uid, sem_teto_de_caixinha):
+    """A descrição é auditoria: extrato, suporte e a IA lendo o histórico depois.
+    Gravar "tirar da caixinha carro" num lançamento que debitou `viagem`
+    envenena os três."""
+    _duas_caixinhas(uid)
+
+    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+
+    saque = next(l for l in db.list_launches(uid, limit=20)
+                 if l.get("tipo") == "saque_caixinha")
+    assert saque["alvo"] == "viagem"
+    assert "carro" not in (saque.get("nota") or ""), "a nota cita a caixinha errada"
+
+
+def test_esvaziar_respondido_a_pergunta_de_valor(uid):
+    """`esvaziar` não tem número: o `_extract_valor` devolvia None e a pergunta
+    voltava em laço, sem nunca esvaziar."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+
+    respostas = _conversa(uid, "tirar da caixinha viagem", "viagem", "esvaziar")
+
+    assert "esvaziada" in respostas[-1], respostas[-1]
+    assert _saldos(uid)["viagem"] == 0.00
+
+
+def test_tudo_guardado_mais_quantia_nova_nao_esvazia(uid):
+    """A célula que o dono levantou revisando o plano. Com `want_all` e `amount`
+    como campos independentes (união), a caixinha era ESVAZIADA quando o usuário
+    acabou de dizer R$ 100 — medido: dava 0,00."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
+
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+
+    assert _saldos(uid)["viagem"] == 200.00, "esvaziou apesar de o usuário ter dito 100"
+
+
+# ── #186, rodada da tabela estados × eventos: três células que sobraram ──────
+#
+# CONTROLES NEGATIVOS (cada um injetado num caso que estava VERDE depois do fix):
+#   P1-A  `core/intent_router.py:1281` de volta para
+#         `bool(entities.get("want_all")) or marcador_de_tudo(text)`
+#         -> test_p1a_quantia_da_resposta_nao_e_religada_pelo_orig_text
+#   P1-B  `core/intent_router.py:951` de volta para `marcador_de_tudo(resposta)`
+#         -> test_tabela_de_eventos[tira 100 da zerar divida...] e
+#            test_p1b_nome_com_marcador_nao_esvazia_pela_conversa
+#   P1-C  remover o bloco `if len(dentro) > 1` de `_nome_do_alvo`
+#         -> test_p1c_nome_aninhado_escolhe_o_mais_especifico e
+#            test_p1c_caixinha_aninhada_pela_conversa
+# Os controles POSITIVOS estão nomeados abaixo: os três consertos RESTRINGEM
+# (uma flag deixa de ser religada, um marcador deixa de contar, um empate deixa
+# de ser recusado), então cada um precisa provar que o caminho bom continua vivo.
+
+
+def _caixinhas_com_saldo(uid: int, *nomes: str, saldo: float = 300.0) -> None:
+    """Caixinhas com saldo, pelo `db`. NÃO escapa do teto do plano Grátis: o
+    `db.create_pocket` chama `check_can_create_pocket` (`db/pockets.py:531`), e
+    com dois nomes o teste precisa da fixture `sem_teto_de_caixinha`."""
+    db.add_launch_and_update_balance(
+        uid, "receita", saldo * len(nomes) + 100, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+    for nome in nomes:
+        db.create_pocket(uid, nome)
+        db.pocket_deposit_from_account(uid, nome, saldo)
+
+
+# P1-A ── a porta do saque genérico religava o `want_all=False` pelo orig_text ─
+
+def test_p1a_quantia_da_resposta_nao_e_religada_pelo_orig_text(uid):
+    """A nota do lançamento é o `orig_text` ("esvaziar"), e o
+    `_execute_generic_withdraw` relia esse texto com `or`: a caixinha era
+    ESVAZIADA apesar de o usuário ter acabado de dizer R$ 100."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    _pergunta_injetada(uid, "funds.withdraw", {}, "esvaziar")
+    _conversa(uid, "tira 100 da viagem")
+
+    assert _saldos(uid)["viagem"] == 200.00, "esvaziou apesar do R$ 100 da resposta"
+
+
+def test_p1a_esvaziar_direto_ainda_esvazia(uid):
+    """CONTROLE POSITIVO do P1-A: sem a chave `want_all` nas entities, o
+    `else marcador_de_tudo(text)` continua vivo e o comando direto esvazia."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    _pergunta_injetada(uid, "funds.withdraw", {"target_name": "viagem"},
+                       "esvaziar caixinha viagem")
+
+    assert _saldos(uid)["viagem"] == 0.00, "o comando direto de esvaziar parou de funcionar"
+
+
+# P1-B ── nome de caixinha que CONTÉM o marcador de tudo ─────────────────────
+
+def test_p1b_nome_com_marcador_nao_esvazia_pela_conversa(uid):
+    """"zerar dívida" é nome legítimo. "tira 100 da zerar divida" pedia 100 —
+    o marcador estava dentro do NOME, não na quantidade."""
+    _caixinhas_com_saldo(uid, "zerar divida")
+
+    _conversa(uid, "tirar da caixinha", "tira 100 da zerar divida")
+
+    assert _saldos(uid)["zerar divida"] == 200.00, "o nome da caixinha virou 'esvaziar'"
+
+
+# P1-C ── dois nomes do catálogo dentro da resposta, um contido no outro ─────
+
+def test_p1c_nome_aninhado_escolhe_o_mais_especifico():
+    from core.intent_router import _nome_do_alvo
+
+    assert _nome_do_alvo("tira 100 da minha viagem",
+                         ["viagem", "minha viagem"]) == "minha viagem"
+
+
+def test_p1c_nomes_disjuntos_continuam_recusados():
+    """CONTROLE POSITIVO do P1-C: com nomes DISJUNTOS escolher seria adivinhar,
+    e o empate continua recusado — quem responde é o handler, com
+    "não encontrada"."""
+    from core.intent_router import _nome_do_alvo
+
+    assert _nome_do_alvo("tira 100 da ana e do bruno",
+                         ["ana", "bruno"]) == "tira 100 da ana e do bruno"
+
+
+def test_p1c_caixinha_aninhada_pela_conversa(uid, sem_teto_de_caixinha):
+    """O dinheiro: o empate recusado deixava o alvo GUARDADO vencer, e o saque
+    saía da caixinha errada."""
+    _caixinhas_com_saldo(uid, "viagem", "minha viagem")
+
+    _conversa(uid, "tirar da caixinha viagem", "tira 100 da minha viagem")
+
+    p = _saldos(uid)
+    assert p["minha viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
+    assert p["viagem"] == 300.00, "saiu da caixinha ERRADA"
+
+
+# ── Regressões do 45db911, achadas pelo Tester ───────────────────────────────
+#
+# CONTROLES NEGATIVOS (cada um injetado num caso que estava VERDE depois do fix):
+#   P0  `utils_text.py:28`, remover o `if not word: return False`
+#       -> test_p0_caixinha_so_emoji_nao_sequestra_o_saque e
+#          test_p0_caixinha_so_emoji_nao_sequestra_o_deposito
+#   P1  `core/intent_router.py:863`, o `if not any(...)` de volta para
+#       `if all(contains_word(normalize_text(maior), normalize_text(n)) ...)`
+#       -> test_p1_duas_mencoes_aninhadas_continuam_recusadas e
+#          test_p1_duas_caixinhas_aninhadas_na_frase_nao_movem_dinheiro
+#   P3  `core/intent_router.py:1136`, `redirecionou` de volta para
+#       `bool(antes and depois and normalize_text(antes) != normalize_text(depois))`
+#       -> test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado
+# Os POSITIVOS do P1 continuam sendo `test_p1c_nome_aninhado_escolhe_o_mais_
+# especifico` e `test_p1c_nomes_disjuntos_continuam_recusados`.
+
+_EMOJI = "\U0001f4b0"  # 💰 — nome de caixinha legítimo que normaliza para ""
+
+
+def test_p0_caixinha_so_emoji_nao_sequestra_o_saque(uid, sem_teto_de_caixinha):
+    """Nome que normaliza para "" virava `contains_word(texto, "")` -> `\\b\\b`,
+    que casa qualquer texto: o saque saía da caixinha do emoji."""
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    _conversa(uid, "tirar da caixinha", "tira 100 da poupanca")
+
+    assert _saldos(uid) == {_EMOJI: 300.00, "viagem": 300.00}, \
+        "o saque saiu da caixinha do emoji"
+
+
+def test_p0_caixinha_so_emoji_nao_sequestra_o_deposito(uid, sem_teto_de_caixinha):
+    """Mesma raiz na outra ponta: o depósito caía na caixinha do emoji."""
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    r = _conversa(uid, "guardei na caixinha", "coloca 100 na poupanca")
+
+    assert _saldos(uid) == {_EMOJI: 300.00, "viagem": 300.00}, \
+        f"o depósito caiu na do emoji: {r[-1]!r}"
+
+
+def test_p0_caixinha_so_emoji_continua_utilizavel(uid, sem_teto_de_caixinha):
+    """Controle POSITIVO do par acima: a guarda RESTRINGE o casamento, então
+    precisa provar que o caminho legítimo sobreviveu (CLAUDE.md §3). Sem este
+    caso, um conserto que tornasse a caixinha inerte passaria — e inerte é pior
+    que o bug, porque o usuário perde o acesso ao dinheiro que já guardou.
+
+    O nome normaliza para "" e por isso nunca casa por TEXTO; quem resolve é o
+    `_eh_nome_do_catalogo`, que compara igualdade, não contenção.
+    """
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    r = _conversa(uid, "guardei na caixinha", _EMOJI, "100")
+
+    assert _saldos(uid) == {_EMOJI: 400.00, "viagem": 300.00}, \
+        f"a caixinha ficou inalcançável: {r[-1]!r}"
+
+
+def test_p1_duas_mencoes_aninhadas_continuam_recusadas():
+    """"um nome cabe no outro" não é "uma menção só": com DUAS menções o
+    desempate do aninhamento adivinhava e escolhia a maior."""
+    from core.intent_router import _nome_do_alvo
+
+    resposta = "tira 100 da viagem e 50 da viagem japao"
+    assert _nome_do_alvo(resposta, ["viagem", "viagem japao"]) == resposta
+
+
+def test_p1_duas_caixinhas_aninhadas_na_frase_nao_movem_dinheiro(uid, sem_teto_de_caixinha):
+    """O dinheiro: o alvo adivinhado era debitado em silêncio."""
+    _caixinhas_com_saldo(uid, "viagem", "viagem japao")
+
+    _conversa(uid, "tirar da caixinha", "tira 100 da viagem e 50 da viagem japao")
+
+    assert _saldos(uid) == {"viagem": 300.00, "viagem japao": 300.00}, \
+        "moveu dinheiro num alvo adivinhado"
+
+
+def test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado(uid):
+    """Irmã do `test_nota_do_lancamento_nao_cita_o_alvo_velho`: sem alvo
+    guardado, o `redirecionou` dava False e a nota do saque de R$ 100 ficava
+    "esvaziar caixinha"."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+
+    saque = next(l for l in db.list_launches(uid, limit=20)
+                 if l.get("tipo") == "saque_caixinha")
+    assert _saldos(uid)["viagem"] == 200.00
+    assert "esvaziar" not in (saque.get("nota") or "").lower(), \
+        f"a nota diz esvaziar num saque de 100: {saque.get('nota')!r}"
