@@ -455,11 +455,11 @@ def get_internal_movement_total(user_id: int, start_date: date, end_date: date) 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select coalesce(sum(valor), 0) as total
                 from launches
                 where user_id = %s
-                  and tipo = 'despesa'
+                  and {TIPO_DESPESA_SQL}
                   and is_internal_movement = true
                   and criado_em >= %s and criado_em < %s
                 """,

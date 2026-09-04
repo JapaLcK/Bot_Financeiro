@@ -45,14 +45,20 @@ def _hoje_as(hora: int):
     return datetime.combine(today_tz(), time(hora, 0))
 
 
-def _grava_tipo_legado(user_id, tipo, valor, categoria):
+def _grava_tipo_legado(user_id, tipo, valor, categoria, *,
+                       nota="legado", criado_em=None, interno=False):
     """`add_launch_and_update_balance` não grava a forma legada (nem deve): a
-    linha antiga entra por SQL, que é como ela existe numa base de verdade."""
+    linha antiga entra por SQL, que é como ela existe numa base de verdade.
+
+    `nota`/`criado_em`/`interno` são os eixos que os OUTROS leitores da forma
+    legada precisam variar (descrição para casar merchant, mês anterior, saída
+    interna) — ver `tests/test_tipo_legado_sem_numero.py`."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "insert into launches (user_id, tipo, valor, categoria, nota, "
-            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,false)",
-            (user_id, tipo, valor, categoria, "legado", _hoje_as(9)),
+            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,%s)",
+            (user_id, tipo, valor, categoria, nota,
+             criado_em or _hoje_as(9), interno),
         )
         conn.commit()
 
