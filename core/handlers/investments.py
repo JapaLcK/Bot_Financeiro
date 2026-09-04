@@ -490,9 +490,9 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     from core.services import funding
 
-    # Destino do resgate: volta para onde o aporte DESTE investimento tirou (#282).
-    # Quando a origem foi o banco, creditar a Carteira inflaria o consolidado com o
-    # mesmo dinheiro que o sync devolve. Não pergunta (ver funding.resolve_destination).
+    # DICA para a mensagem, não a decisão: quem decide o destino é
+    # `db.destination_of_lots`, dentro da transação do resgate (#282). Esta leitura é
+    # anterior ao accrual e ao lock, então pode divergir do destino gravado (#286).
     destino = funding.resolve_destination(
         user_id, origem_de=("aporte_investimento", investment_name),
         amount=None if want_all else amount, withdraw_all=want_all)["source"]
@@ -504,7 +504,6 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             None if want_all else float(amount),
             text,
             withdraw_all=want_all,
-            funding_source=funding.to_db_arg(destino),
         )
     except LookupError:
         return _investment_not_found(user_id, investment_name, action="resgatar de")

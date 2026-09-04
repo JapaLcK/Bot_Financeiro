@@ -10,6 +10,7 @@ aporte de R$ 800.
 Aqui a origem vira explícita: `carteira` debita e exige cobertura; `bank` não toca em
 `accounts.balance` e grava `delta_conta: 0`.
 """
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -963,19 +964,38 @@ def test_alvo_sem_lote_aberto_cai_na_regra_de_sempre(user_id):
     assert destino["kind"] == funding.BANK
 
 
-def test_banco_de_origem_desconectado_nao_credita_a_carteira(user_id):
-    """Depósito veio do banco e o banco foi desconectado. A origem existe mas não
-    está mais em `list_sources` — cai na regra de sempre, sem inventar Carteira."""
+@pytest.mark.parametrize("como", ["desconectar", "pausar"])
+def test_banco_de_origem_desconectado_nao_credita_a_carteira(user_id, como):
+    """Depósito veio do banco e o banco sumiu. A origem existe mas não está mais em
+    `list_sources` — cai na regra de sempre, sem inventar Carteira.
+
+    As DUAS formas de sumir, porque elas somem por caminhos diferentes:
+    `disconnect_open_finance_connection` APAGA a linha, e a conta pausada continua
+    lá — só o `connection_status not in ('PAUSED','DELETED')` de `BANK_ACCOUNTS_SQL`
+    a tira. Com só a primeira, esse filtro não era medido em `_bank_account`.
+    """
     conn_id = _connect_fake_bank(user_id)
     db.create_pocket(user_id, "viagem")
     banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
     db.pocket_deposit_from_account(user_id, "viagem", 100, "do banco",
                                    funding_source=funding.to_db_arg(banco))
-    db.disconnect_open_finance_connection(user_id, conn_id)
+    if como == "desconectar":
+        db.disconnect_open_finance_connection(user_id, conn_id)
+    else:
+        db.pause_open_finance_connection(conn_id)
 
     antes = _patrimonio(user_id)
     h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
     assert _patrimonio(user_id) == pytest.approx(antes), "criou dinheiro na Carteira"
+    # O `_patrimonio` sozinho não separa os dois lados aqui (o dinheiro só muda de
+    # bolso DENTRO do Pig, e a soma fica igual nas duas hipóteses). Quem separa é o
+    # destino gravado: mandar para um banco que não existe mais grava delta_conta 0 e
+    # o dinheiro some de vez — é o recorte de `BANK_ACCOUNTS_SQL` em `_bank_account`
+    # que evita isso, e sem esta linha ele não era medido.
+    saq = _efeitos(user_id, "saque_caixinha")
+    assert saq["funding_source"] is None, (
+        f"destino num banco desconectado ({saq['funding_source']}): o dinheiro some")
+    assert float(db.get_balance(user_id)) == 100.0
 
 
 def test_of_account_id_como_string_no_json_ainda_casa(user_id):
@@ -1258,6 +1278,15 @@ def test_deposito_do_banco_no_meio_do_saque_nao_credita_a_carteira(user_id):
     efeitos = _efeitos(user_id, "saque_caixinha")
     assert efeitos["delta_conta"] == 0, efeitos["delta_conta"]
     assert efeitos["funding_source"]["kind"] == funding.BANK, efeitos["funding_source"]
+    # O PREÇO desta guarda, registrado em vez de escondido (decisão do dono, #286).
+    # O saque atravessou as duas origens, e origens diferentes vão para o banco: os
+    # R$ 100 que tinham saído da Carteira vão junto. Patrimônio no Pig 1000 -> 900, e
+    # o usuário não vê o dinheiro voltar. Continua sendo a troca certa — CRIAR R$ 50
+    # infla o consolidado de todos e o sync depois não bate —, mas é uma troca, não
+    # um conserto. A decisão dentro da transação NÃO muda este número: os dois lotes
+    # são consumidos de fato, e a divisão do resgate é que segue sem decisão.
+    # Os 8 testes irmãos da #282 afirmam o patrimônio; este afirmava só a Carteira.
+    assert _patrimonio(user_id) == pytest.approx(900.0)
 
 
 def test_aporte_do_banco_no_meio_do_resgate_nao_credita_a_carteira(user_id):
@@ -1324,3 +1353,215 @@ def test_isolamento_pelo_lot_id_de_outro_usuario(user_id):
     assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
         {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}], (
         "o lote de B devia virar órfão, não herdar origem")
+
+
+# ── o recorte por valor nas QUATRO superfícies silenciosas ───────────────────
+#
+# `test_saque_parcial_consome_so_o_lote_da_carteira` cobria o WhatsApp e só ele.
+# Medido antes desta bateria: revertendo as quatro chamadas não-WhatsApp para a
+# assinatura sem `amount`, os 73 testes ficavam VERDES enquanto a sonda mostrava
+# `Carteira 1000 -> 900` em cada uma — o dinheiro sumia sem uma linha vermelha.
+#
+# Com a decisão dentro da transação (`db.destination_of_lots`) estes testes medem
+# mais: eles passam pelo caminho que DECIDE, não pela dica.
+
+def _lotes_carteira_e_banco(user_id: int, tipo: str, alvo: str,
+                            carteira: float = 100.0, banco: float = 50.0):
+    """`[carteira 100; banco 50]` no alvo, com Carteira de 1000 e banco conectado.
+
+    O depósito vai pelo `db` de propósito: o que está sendo medido é o SAQUE de cada
+    superfície. Pela superfície, o depósito escolheria a origem sozinho
+    (`resolve_deterministic` prefere a Carteira sempre que ela cobre) e não daria
+    lote nenhum do banco.
+    """
+    _seed_carteira_e_banco(user_id)
+    conta = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+    dep = (db.pocket_deposit_from_account if tipo == "deposito_caixinha"
+           else db.investment_deposit_from_account)
+    dep(user_id, alvo, carteira, "da carteira", funding_source=None)
+    dep(user_id, alvo, banco, "do banco", funding_source=funding.to_db_arg(conta))
+    assert float(db.get_balance(user_id)) == 900.0
+
+
+def _assert_voltou_pra_carteira(user_id: int, tipo_saq: str, antes: float):
+    saq = _efeitos(user_id, tipo_saq)
+    assert saq["funding_source"] is None, (
+        f"o saque consumiu só o lote da Carteira e foi para {saq['funding_source']}")
+    assert float(db.get_balance(user_id)) == 1000.0, "a Carteira não recebeu de volta"
+    assert _patrimonio(user_id) == pytest.approx(antes), (
+        f"EVAPOROU R$ {antes - _patrimonio(user_id):.2f}")
+
+
+def test_saque_parcial_com_duas_origens_pelo_dashboard(user_id):
+    db.create_pocket(user_id, "viagem")
+    _lotes_carteira_e_banco(user_id, "deposito_caixinha", "viagem")
+    antes = _patrimonio(user_id)
+    client, headers = _dashboard_client(user_id, "b1p@t.com")
+
+    r = client.post(f"/pockets/{user_id}/viagem/withdraw", json={"amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+    _assert_voltou_pra_carteira(user_id, "saque_caixinha", antes)
+
+
+def test_saque_parcial_com_duas_origens_pelo_chat_da_ia(user_id):
+    from core.services.ai_chat.tools.pockets import _pocket_withdraw_execute
+
+    db.create_pocket(user_id, "viagem")
+    _lotes_carteira_e_banco(user_id, "deposito_caixinha", "viagem")
+    antes = _patrimonio(user_id)
+
+    _pocket_withdraw_execute(user_id, {"pocket_name": "viagem", "amount": 100})
+    _assert_voltou_pra_carteira(user_id, "saque_caixinha", antes)
+
+
+def test_resgate_parcial_com_duas_origens_pelo_dashboard(user_id):
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    _lotes_carteira_e_banco(user_id, "aporte_investimento", "CDB XP")
+    antes = _patrimonio(user_id)
+    client, headers = _dashboard_client(user_id, "b1i@t.com")
+
+    r = client.post(f"/investments/{user_id}/withdraw",
+                    json={"name": "CDB XP", "amount": 100}, headers=headers)
+    assert r.status_code == 200, r.text
+    _assert_voltou_pra_carteira(user_id, "resgate_investimento", antes)
+
+
+def test_resgate_parcial_com_duas_origens_pelo_chat_da_ia(user_id):
+    from core.services.ai_chat.tools.investments import _investment_withdraw_execute
+
+    db.create_investment(user_id, "CDB XP", 0.12, "yearly")
+    _lotes_carteira_e_banco(user_id, "aporte_investimento", "CDB XP")
+    antes = _patrimonio(user_id)
+
+    _investment_withdraw_execute(user_id, {"name": "CDB XP", "amount": 100})
+    _assert_voltou_pra_carteira(user_id, "resgate_investimento", antes)
+
+
+# ── C1: o accrual muda QUAIS lotes o saque consome ───────────────────────────
+
+def _semeia_cdi(inicio, fim, pct_ao_dia: str = "0.05") -> list:
+    """CDI em `market_rates` para todo dia útil de [inicio, fim]. Devolve o que inseriu.
+
+    A tabela está VAZIA no banco de teste, então TODO o resto deste arquivo roda com
+    rendimento ZERO — e rendimento zero é justamente o que esconde o C1: sem accrual,
+    a previsão de fora e o consumo de dentro nunca divergem.
+
+    Cache completo + cauda fresca fazem `_get_cdi_daily_map` devolver sem ir ao BCB
+    (ver `_sgs_cache_covers`/`_sgs_tail_is_fresh`) — a saída HTTP é bloqueada na suíte.
+
+    A tabela é GLOBAL, sem `user_id`: quem semeia limpa, senão os outros testes passam
+    a render juros. E limpa só o que inseriu (`returning`), nunca a janela inteira —
+    com `PYTEST_DB_ISOLATION=0` a janela pegaria linhas de CDI que já estavam lá.
+    """
+    from utils_date import is_br_business_day
+
+    dias, d = [], inicio
+    while d <= fim:
+        if is_br_business_day(d):
+            dias.append(d)
+        d += timedelta(days=1)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into market_rates(code, ref_date, value) "
+            "select 'CDI', d, %s from unnest(%s::date[]) d "
+            "on conflict (code, ref_date) do nothing returning ref_date",
+            (pct_ao_dia, dias))
+        inseridos = [r["ref_date"] for r in cur.fetchall()]
+        conn.commit()
+    return inseridos
+
+
+def _apaga_cdi(dias) -> None:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("delete from market_rates where code='CDI' and ref_date = any(%s)",
+                    (dias,))
+        conn.commit()
+
+
+def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
+    """A #282 literal que sobrava depois do recorte por valor.
+
+    `[carteira 1000; banco 500]` parada há 60 dias, saque de 1005:
+
+    * a leitura de FORA vê os saldos ANTES do accrual (1000 e 500), então prevê que o
+      saque atravessa os dois lotes → duas origens → regra de sempre → BANCO;
+    * o saque real accrua primeiro: o lote da Carteira virou ~1021 e 1005 cabe nele,
+      então consome UM lote só, da Carteira.
+
+    Com a decisão fora, R$ 1.005 saíam da Carteira e R$ 0,00 voltavam. Com ela dentro
+    (`db.destination_of_lots`), o destino é o consumo de FATO.
+
+    `tax_summary["lots"]` é quem prende o mecanismo: 1 lote = o accrual rodou e mudou
+    o prefixo; 2 lotes = o rendimento não aconteceu e o teste não mediria nada.
+    """
+    hoje = date.today()
+    inicio = hoje - timedelta(days=60)
+    semeados = _semeia_cdi(inicio, hoje)
+    try:
+        _seed_carteira_e_banco(user_id, 2000.0)
+        db.create_pocket(user_id, "viagem")
+        conta = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
+        db.pocket_deposit_from_account(user_id, "viagem", 1000, "da carteira", funding_source=None)
+        db.pocket_deposit_from_account(user_id, "viagem", 500, "do banco",
+                                       funding_source=funding.to_db_arg(conta))
+        assert float(db.get_balance(user_id)) == 1000.0
+        with db.get_conn() as conn, conn.cursor() as cur:   # 60 dias sem accrual
+            cur.execute("update pocket_lots set opened_at=%s, last_date=%s where user_id=%s",
+                        (inicio, inicio, user_id))
+            cur.execute("update pockets set last_interest_date=%s where user_id=%s",
+                        (inicio, user_id))
+            conn.commit()
+
+        # a previsão de FORA erra aqui, e é a errada que a versão anterior gravava
+        assert funding.resolve_destination(
+            user_id, origem_de=("deposito_caixinha", "viagem"),
+            amount=1005)["source"]["kind"] == funding.BANK
+
+        h_pockets.withdraw(user_id, "retirei 1005 da caixinha viagem",
+                           {"pocket_name": "viagem", "amount": 1005})
+
+        saq = _efeitos(user_id, "saque_caixinha")
+        assert len(saq["tax_summary"]["lots"]) == 1, (
+            "o accrual não rodou: sem rendimento o saque atravessa os dois lotes e o "
+            "teste fica cego ao C1")
+        assert saq["funding_source"] is None, (
+            f"R$ 1.005 saíram da Carteira e o saque foi para {saq['funding_source']}")
+        assert float(saq["delta_conta"]) > 1000
+        assert float(db.get_balance(user_id)) == pytest.approx(
+            1000.0 + float(saq["delta_conta"])), "a Carteira não recebeu de volta"
+    finally:
+        _apaga_cdi(semeados)
+
+
+def test_lote_orfao_consumido_nao_credita_a_carteira(user_id):
+    """O órfão pelo caminho que DECIDE, e não só pelo `open_lot_origins`.
+
+    `test_lote_orfao_cai_na_regra_de_sempre` mede a leitura de fora; o saque em si
+    passava sem cobertura nenhuma para o órfão — medido: tirar o `not orfao` de
+    `db.destination_of_lots` deixava os 78 verdes.
+
+    Lote sem lançamento criador existe de verdade (backfill de `db/schema.py`,
+    `_ensure_pocket_lots` de `db/pockets.py`). O `coalesce(..., 'carteira')` o faz
+    parecer Carteira, e aí o saque creditaria R$ 100 que nunca saíram dela.
+    """
+    _seed_carteira_e_banco(user_id)
+    db.create_pocket(user_id, "viagem")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from pockets where user_id=%s and name='viagem'", (user_id,))
+        pocket_id = cur.fetchone()["id"]
+        cur.execute(
+            "insert into pocket_lots(user_id, pocket_id, principal_initial, "
+            "principal_remaining, balance, opened_at, last_date, status) "
+            "values (%s,%s,100,100,100,current_date,current_date,'open')",
+            (user_id, pocket_id),
+        )
+        cur.execute("update pockets set balance=100 where id=%s and user_id=%s",
+                    (pocket_id, user_id))
+        conn.commit()
+
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+
+    saq = _efeitos(user_id, "saque_caixinha")
+    assert saq["funding_source"] is not None, "órfão virou Carteira e criou dinheiro"
+    assert saq["delta_conta"] == 0
+    assert float(db.get_balance(user_id)) == 1000.0, "a Carteira foi creditada por um órfão"

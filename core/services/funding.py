@@ -119,58 +119,32 @@ def resolve_deterministic(user_id: int, amount) -> dict:
 
 def resolve_destination(user_id: int, *, origem_de: tuple[str, str] | None = None,
                         amount=None, withdraw_all: bool = False) -> dict:
-    """Para onde volta o dinheiro de um resgate/saque. Sempre `{"source": {...}}`.
+    """DICA de para onde volta o dinheiro de um resgate/saque — não é a decisão.
 
-    `origem_de` é `(tipo_do_lancamento_de_deposito, alvo)` — ex.:
-    `("deposito_caixinha", "viagem")`. Com `amount` (ou `withdraw_all`), a pergunta é
-    de ESTADO e sobre ESTE saque: **os lotes que o FIFO vai consumir vieram todos da
-    mesma origem?** Se sim, o dinheiro volta para ELA. É o conserto da #282: sem isso
-    o destino era decidido do zero e qualquer banco conectado vencia a Carteira, então
-    quem depositou da Carteira nunca recebia de volta — medido em produção, R$ 300
-    saíram e R$ 0,00 voltaram.
+    Quem DECIDE o destino é `db.destination_of_lots`, dentro da transação do saque,
+    sobre os lotes que o FIFO consumiu de fato. Isto aqui existe para a MENSAGEM: o
+    "para o Nubank · Conta" e o aviso de sync (`nota_sync`) precisam de uma resposta
+    antes de o saque rodar, e as duas funções de saque nem aceitam mais um destino.
 
-    Lote aberto, e não histórico de depósito, porque a versão por histórico não
-    consertava o caso comum: depositou do banco e sacou tudo, depois depositou da
-    Carteira — o alvo é 100% dinheiro da Carteira, mas a HISTÓRIA tem duas origens e
-    o saque voltava pro banco. Por lote a resposta é exata, e a mistura se desfaz
-    sozinha quando o lote fecha (ver `db.open_lot_origins`).
+    A leitura de fora foi a decisão em três versões seguidas, e errou nas três porque
+    a pergunta é sobre lotes lidos ANTES do accrual e FORA do lock — previsão, não
+    fato. **Ela continua sendo previsão aqui**, e por isso pode divergir do destino
+    gravado; quando diverge, a mensagem mente (custo conhecido, #286). Ver
+    `db.destination_of_lots` para as duas medições que derrubaram a versão de fora.
 
-    E o recorte pelo `amount` é o que tira do caso comum a mistura que sobrava: com
-    `[carteira 100; banco 50]`, sacar 100 consome só o lote da Carteira — sem o
-    recorte a resposta era "duas origens", o dinheiro ia pro banco e evaporava.
-    **Passe `amount`/`withdraw_all` sempre que tiver**; sem eles a pergunta volta a
-    ser sobre todos os lotes abertos, que é a versão grosseira.
+    Mesma regra, para a dica sair o mais perto possível do fato: `origem_de` é
+    `(tipo_do_lancamento_de_deposito, alvo)` — ex.: `("deposito_caixinha", "viagem")` —
+    e com `amount` (ou `withdraw_all`) a pergunta é **os lotes que ESTE saque
+    consumiria vieram todos da mesma origem?**. Passe `amount`/`withdraw_all` sempre
+    que tiver; sem eles a pergunta volta a ser sobre todos os lotes abertos.
 
-    Em TODO o resto cai na regra de sempre (banco primeiro, senão Carteira): sem
-    `origem_de`, sem lote aberto, **lotes consumidos de origens diferentes**, lote
-    órfão (sem lançamento criador, então sem origem conhecida), ou banco de origem
-    desconectado desde então. A degradação é sempre para o comportamento de hoje.
-
-    **Lotes consumidos de origens diferentes mantêm o banco de propósito** (decisão do
-    dono, issue #286): dividir o resgate proporcionalmente ou por LIFO é escolha de
-    produto ainda não tomada, e adivinhar aqui seria pior que o comportamento
-    conhecido. Com o recorte pelo `amount`, esse caso passou de comum a raro — é
-    preciso que UM saque atravesse mesmo duas origens.
-
-    **O destino pode mudar sozinho entre dois saques iguais, e isso é esperado.**
-    Ele é função do ESTADO dos lotes, e o estado muda a cada saque: alvo com um lote
-    órfão + um lote da Carteira manda o 1º saque para o banco (duas origens); o órfão
-    fecha; o 2º saque, mesmo comando e mesma caixinha, vai para a Carteira. Não é
-    não-determinismo — é a regra de sempre aplicada a um estado que o saque anterior
-    mudou.
-
-    **Esta leitura é FORA da transação do saque**, e a janela cria dinheiro: um
-    depósito com origem no banco que commite entre a decisão e a gravação entra no
-    FIFO do saque, e o crédito da Carteira soma dinheiro que continua no banco
-    (medido: Carteira 1050,00 contra 900,00 sem a janela). Quem fecha isso é
-    `db.bank_destination_of_lots`, chamado pelas duas funções de saque com os lotes
-    já sob `for update` — ali a resposta é definitiva. Aqui não dá para fechar: sem
-    a transação aberta, qualquer releitura teria a mesma janela.
+    Em TODO o resto cai na regra de sempre (banco primeiro, senão Carteira), a mesma
+    de `db._regra_de_sempre`: sem `origem_de`, sem lote aberto, lotes de origens
+    diferentes (decisão do dono, #286), lote órfão, ou banco de origem desconectado.
 
     Não pergunta, de propósito: no destino a escolha não muda o razão. Com qualquer
-    banco conectado o `delta_conta` é 0 igual (o dinheiro volta pro banco e o sync
-    reflete), então entre dois bancos só mudaria o rótulo da mensagem — não vale um
-    round-trip. Sem banco conectado, volta para a Carteira, como sempre foi.
+    banco conectado o `delta_conta` é 0 igual, então entre dois bancos só mudaria o
+    rótulo da mensagem — não vale um round-trip.
     """
     fontes = list_sources(user_id)
     if origem_de:

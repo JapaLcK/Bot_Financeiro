@@ -309,11 +309,11 @@ def pocket_withdraw_to_account(
     nota: str | None = None,
     *,
     withdraw_all: bool = False,
-    funding_source: dict | None = None,
 ):
     """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary).
 
-    `funding_source` é o DESTINO — ver investment_withdraw_to_account.
+    O DESTINO sai de `db.destination_of_lots`, aqui dentro — ver
+    investment_withdraw_to_account.
 
     Se ``withdraw_all=True``, saca o saldo cheio pós-rendimento (zera a caixinha de
     forma atômica) e ignora ``amount``. Caso contrário saca ``amount``; mas se o valor
@@ -456,15 +456,12 @@ def pocket_withdraw_to_account(
             if remaining > LOT_EPSILON:
                 raise ValueError("INSUFFICIENT_POCKET")
 
-            # O destino foi decidido FORA desta transação (funding.resolve_destination).
-            # Um depósito com origem no banco que commitou nesse intervalo entra no FIFO
-            # acima, e o crédito abaixo somaria à Carteira dinheiro que continua no banco.
-            # Sob o `for update` dos lotes a resposta é definitiva.
-            if funding_source is None:
-                from .open_finance import bank_destination_of_lots
+            # O destino sai daqui, com os lotes consumidos já sob `for update`: é o
+            # consumo de FATO, depois do accrual. Ver `destination_of_lots`.
+            from .open_finance import destination_of_lots
 
-                funding_source = bank_destination_of_lots(
-                    cur, user_id, "deposito_caixinha", [e["lot_id"] for e in lot_effects])
+            funding_source = destination_of_lots(
+                cur, user_id, "deposito_caixinha", [e["lot_id"] for e in lot_effects])
 
             new_pocket = _sync_pocket_from_lots(cur, user_id, pocket_id)
 

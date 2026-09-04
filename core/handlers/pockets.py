@@ -227,20 +227,20 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             user_id, "pockets.withdraw", entities,
             "Qual caixinha? Tente: *retirei 100 da caixinha viagem*", text, falta="pocket_name")
 
-    # Depois do nome resolvido, de propósito: o destino agora depende da caixinha
-    # (resolve_destination consulta de onde os depósitos DELA saíram, #282), e acima
-    # daqui o nome ainda pode virar pergunta.
+    # DICA para a mensagem, não a decisão: quem decide o destino é
+    # `db.destination_of_lots`, dentro da transação do saque (#282). Esta leitura é
+    # anterior ao accrual e ao lock, então pode divergir — o aviso de sync é o custo
+    # conhecido dessa divergência (#286).
+    # Depois do nome resolvido, de propósito: acima daqui o nome ainda vira pergunta.
     destino = funding.resolve_destination(
         user_id, origem_de=("deposito_caixinha", pocket_name),
         amount=None if want_all else amount, withdraw_all=want_all)["source"]
-    fs = funding.to_db_arg(destino)
     nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
 
     if want_all:
         try:
             launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
                 user_id, pocket_name, None, text, withdraw_all=True,
-                funding_source=fs,
             )
         except LookupError:
             return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -262,7 +262,7 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     try:
         launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-            user_id, pocket_name, float(amount), text, funding_source=fs,
+            user_id, pocket_name, float(amount), text,
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
