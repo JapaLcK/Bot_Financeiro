@@ -8,6 +8,40 @@ from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
 SCHEMA_INIT_LOCK = 728_531_004
 
+# Resync dos assinantes que já existiam quando plan_grants nasceu (§5.1 do
+# docs/plano_pix_anual_asaas.md). Roda em TODO boot, dentro do init_db, e é de
+# propósito: `do update` em vez de `do nothing` faz o revert do PR reconciliar
+# sozinho na re-aplicação, em vez de congelar o `legacy` numa data já vencida.
+# O `where` só ESTENDE, então em regime é no-op (a projeção mantém
+# auth_accounts corrente) — ele só trabalha depois da janela do revert.
+#
+# Sem chamar o Stripe: rede em migração é modo de falha, não de leitura.
+# event_version = 0 → qualquer evento real supera o legado.
+# `grandfathered` fica de fora: vitalício não tem `ends_at` para inventar.
+#
+# Constante no módulo (e não string solta na lista) para o teste do resync
+# executar EXATAMENTE o SQL que sobe em produção, sem uma segunda cópia.
+RESYNC_LEGACY_GRANTS_SQL = """
+insert into plan_grants (user_id, source, external_ref, plan_stored,
+                         starts_at, ends_at, status, event_version)
+select a.user_id, 'legacy', 'legacy:' || a.user_id, a.plan,
+       now(), a.plan_expires_at, 'active', 0
+  from auth_accounts a
+ where coalesce(a.plan, 'free') <> 'free'
+   and a.plan_expires_at is not null
+   and a.plan_expires_at > now()
+   and coalesce(a.last_payment_status, '') <> 'grandfathered'
+on conflict (source, external_ref) do update
+   set ends_at     = greatest(plan_grants.ends_at, excluded.ends_at),
+       starts_at   = least(plan_grants.starts_at, excluded.starts_at),
+       plan_stored = excluded.plan_stored,
+       status      = 'active',
+       revoked_reason = null,
+       revoked_at  = null,
+       updated_at  = now()
+ where plan_grants.ends_at < excluded.ends_at
+"""
+
 
 def init_db():
     ddl_statements = [
@@ -2000,6 +2034,43 @@ def init_db():
           before insert or update of space_id on open_finance_accounts
           for each row execute function of_account_space_same_owner()
         """,
+
+        # ── plan_grants: o DIREITO de acesso, como registro ──────────────────
+        # `auth_accounts.plan`/`plan_expires_at` continuam sendo o modelo de
+        # LEITURA de todo o app (nenhum leitor muda) — viram projeção, escrita
+        # por uma função só: core/services/billing_access.recompute_entitlement.
+        # Plano em docs/plano_pix_anual_asaas.md §3.1.
+        #
+        # `user_id not null`: grant é direito de ALGUÉM. Pagamento de conta
+        # excluída nunca vira grant (§8.2 B do plano, PR 1b).
+        # `plan_stored` guarda o valor LEGADO da coluna auth_accounts.plan
+        # ('pro' = Plus, 'pro_max' = Pro) — ver _stored_plan_for_price.
+        """
+        create table if not exists plan_grants (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          source text not null,                     -- stripe | pix | legacy | admin
+          external_ref text not null,               -- sub id | pix_charges.id | legacy:<uid> | admin:<uid>
+          plan_stored text not null,
+          starts_at timestamptz not null,
+          ends_at timestamptz not null,
+          status text not null default 'active',    -- active | revoked
+          event_version bigint not null default 0,
+          last_event_id text,
+          revoked_reason text,
+          revoked_at timestamptz,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique (source, external_ref)
+        )
+        """,
+        """
+        create index if not exists idx_plan_grants_user
+          on plan_grants (user_id, status, starts_at)
+        """,
+        # Resync do §5.1 — a SQL mora em RESYNC_LEGACY_GRANTS_SQL (topo do
+        # arquivo), com o porquê do `do update`.
+        RESYNC_LEGACY_GRANTS_SQL,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

@@ -1372,11 +1372,60 @@ def set_account_plan(
                 {"plan": plan, "months": int(months), "target": target},
             )
             row = cur.fetchone()
+            if row:
+                _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
         conn.commit()
         if row:
             from db_support import invalidate_auth_user_cache
             invalidate_auth_user_cache(row["user_id"])
         return dict(row) if row else None
+
+
+def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
+    """O reparo manual do admin também vira GRANT (§9 da auditoria / §15 do
+    docs/plano_pix_anual_asaas.md).
+
+    Sem isto, o ajuste some na primeira reprojeção: a projeção de `plan_grants`
+    reescreve `auth_accounts` e o admin nunca teria escrito um grant. E é
+    justamente esta a ferramenta de conciliação de pagamento órfão e de acesso
+    concedido a menos — ela não pode ser desligada pelo PR que cria os casos que
+    ela repara.
+
+    Roda no MESMO cursor/transação do UPDATE de `auth_accounts`: ou os dois
+    entram, ou nenhum.
+
+    `event_version = epoch(now)` põe a ordem humana acima de qualquer evento de
+    gateway já recebido; um webhook FUTURO ainda ganha, que é o comportamento
+    já documentado ("não fala com a Stripe: o próximo webhook dela volta a
+    mandar no par").
+    """
+    if plan == "free":
+        # Descer para free tem de revogar o direito, não só zerar a coluna:
+        # um grant ativo ressuscitaria o plano na projeção seguinte.
+        cur.execute(
+            "update plan_grants"
+            "   set status='revoked', revoked_reason='admin_override',"
+            "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
+            "       updated_at=now()"
+            " where user_id = %s and status = 'active'",
+            (user_id,),
+        )
+        return
+
+    cur.execute(
+        "insert into plan_grants (user_id, source, external_ref, plan_stored,"
+        "                         starts_at, ends_at, status, event_version)"
+        " values (%s, 'admin', %s, %s, now(), now() + (%s || ' months')::interval,"
+        "         'active', extract(epoch from now())::bigint)"
+        " on conflict (source, external_ref) do update"
+        "    set plan_stored = excluded.plan_stored,"
+        "        starts_at = excluded.starts_at,"
+        "        ends_at = excluded.ends_at,"
+        "        status = 'active', revoked_reason = null, revoked_at = null,"
+        "        event_version = excluded.event_version,"
+        "        updated_at = now()",
+        (user_id, f"admin:{user_id}", plan, months),
+    )
 
 
 async def log_admin_startup_warnings() -> None:

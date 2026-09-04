@@ -1767,6 +1767,38 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _plan_grants_reprojection():
+        """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
+
+        Grant futuro que vira vigente e grant vigente que vence são as duas
+        únicas transições de acesso que acontecem sem evento externo nenhum —
+        ninguém chama webhook para avisar que o downgrade agendado chegou.
+
+        Janela = desde a última passada, então nada é perdido entre ticks. A
+        primeira passada usa 25 h para cobrir o tempo em que o processo esteve
+        fora, e a cada 24 h uma passada larga repete essa varredura como rede de
+        segurança. Query indexada; devolve zero linhas quase sempre.
+        """
+        from core.services.billing_access import reprojetar_grants_recentes  # noqa: PLC0415
+        larga = timedelta(hours=25)
+        desde = datetime.now(timezone.utc) - larga
+        proxima_larga = datetime.now(timezone.utc) + timedelta(hours=24)
+        while True:
+            try:
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_larga:
+                    desde = agora - larga
+                    proxima_larga = agora + timedelta(hours=24)
+                n = await asyncio.to_thread(reprojetar_grants_recentes, desde)
+                desde = agora
+                if n:
+                    print(f"[plan_grants] {n} usuario(s) reprojetado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1859,6 +1891,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
             ]
         )
     else:
@@ -4674,6 +4707,47 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         except Exception:
             return ""
 
+    def _event_version(evt) -> int:
+        """Ordem dos eventos (§6 do docs/plano_pix_anual_asaas.md).
+
+        `event["created"]` do Stripe é epoch em SEGUNDOS — é por isso que o
+        empate do §6.1 (invoice.paid × subscription.deleted no mesmo segundo) é
+        caso real e não teórico. Ausente só em evento sintético: cai em now(),
+        nunca em 0, porque versão 0 BLOQUEARIA toda escrita posterior sobre um
+        grant existente e o acesso ficaria congelado no primeiro evento.
+        """
+        try:
+            return int(_g(evt, "created"))
+        except (TypeError, ValueError):
+            return int(datetime.now(timezone.utc).timestamp())
+
+    async def _registrar_grant_stripe(uid: int, sub_id, plan_value, expires_dt) -> None:
+        """Registra o direito como grant e reprojeta auth_accounts (§4, §6).
+
+        Roda DEPOIS da escrita legada de `update_user_plan`, nunca no lugar
+        dela, e nunca derruba o webhook: se o grant falhar, o comportamento
+        observável é exatamente o de antes deste PR. É a mesma propriedade que
+        torna o PR reversível — o modelo novo só pode melhorar o resultado, não
+        destruir o do modelo antigo.
+
+        Sem `expires_dt` não há grant: `ends_at` é `not null`, e assinatura sem
+        `current_period_end` é o "vitalício de fato" que a projeção protege com
+        saída antecipada (§5.3).
+        """
+        if not (uid and sub_id and expires_dt):
+            return
+        try:
+            from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+            from db.plan_grants import upsert_grant  # noqa: PLC0415
+            await asyncio.to_thread(
+                upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
+                datetime.now(timezone.utc), expires_dt,
+                _event_version(event), _g(event, "id"),
+            )
+            await asyncio.to_thread(recompute_entitlement, int(uid))
+        except Exception as exc:
+            print(f"[billing] grant stripe falhou user={uid} sub={sub_id}: {exc}", file=sys.stderr)
+
     async def _fire_email(uid: int, fn, *args):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook."""
         try:
@@ -4704,6 +4778,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            await _registrar_grant_stripe(user_id, sub_id, plan_value, expires_dt)
             # Checkout concluído = plano escolhido: libera o gate da /precos
             # (idempotente; só grava na primeira vez).
             await asyncio.to_thread(mark_plan_selected, user_id)
@@ -4857,6 +4932,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             update_user_plan(user_id, plan_value, expires_dt)
             set_payment_status(user_id, sub_status)
+            await _registrar_grant_stripe(user_id, sub_id, plan_value, expires_dt)
             await asyncio.to_thread(mark_plan_selected, user_id)
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
@@ -5037,6 +5113,30 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # Revoga o direito registrado e reprojeta (§4.2, §5.1).
+            #
+            # `external_ref=None` nos dois: revoga TODOS os grants ativos de
+            # cartão do usuário, sem depender do id da assinatura vir no objeto
+            # do evento (ele nem sempre vem — foi assim que a projeção chegou a
+            # ressuscitar o plano por cima do `free` escrito logo acima). A
+            # conta tem no máximo uma assinatura viva.
+            #
+            # O `legacy` cai JUNTO e sem depender de existir grant `stripe`: ele
+            # é a RECONSTRUÇÃO do mesmo acesso de cartão feita pelo resync, e um
+            # assinante que cancele sem ter passado por um `invoice.paid` depois
+            # do deploy não pode continuar pago pelo legado.
+            try:
+                from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+                from db.plan_grants import revoke_grant  # noqa: PLC0415
+                _versao = _event_version(event)
+                _evt_id = _g(event, "id")
+                for _src in ("stripe", "legacy"):
+                    await asyncio.to_thread(
+                        revoke_grant, int(user_id), _src, None,
+                        "stripe_subscription_deleted", _versao, _evt_id)
+                await asyncio.to_thread(recompute_entitlement, int(user_id))
+            except Exception as exc:
+                print(f"[billing] revoke de grant falhou user={user_id}: {exc}", file=sys.stderr)
             print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",
