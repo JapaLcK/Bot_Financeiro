@@ -18,7 +18,6 @@ from datetime import datetime, date
 from decimal import Decimal
 
 from ofxparse import OfxParser
-from utils_date import _tz
 from utils_text import normalize_text, contains_word, LOCAL_RULES, keyword_blocked
 from db import import_credit_ofx_bulk, list_user_category_rules
 from db import resolve_category_input, user_category_display_map

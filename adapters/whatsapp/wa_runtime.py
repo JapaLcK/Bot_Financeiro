@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import os
 import re
 import threading
 import time
@@ -20,13 +19,11 @@ from adapters.whatsapp.wa_client import (
 )
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
-    TUTORIAL_BUTTON_IDS,
     get_tutorial_button_id,
     handle_tutorial_button,
     send_welcome,
 )
 from adapters.whatsapp.wa_help_menu import (
-    HELP_MENU_IDS,
     get_help_menu_id,
     send_help_menu,
     send_help_section,

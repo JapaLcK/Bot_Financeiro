@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
-from utils_date import _tz, today_tz, billing_period_for_close_day
+from utils_date import today_tz, billing_period_for_close_day
 
 from .connection import get_conn
 from .users import ensure_user

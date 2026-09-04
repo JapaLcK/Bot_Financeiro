@@ -1,6 +1,5 @@
 # core/handlers/balance.py
 from __future__ import annotations
-from datetime import date
 import db
 from db.accounts import _TIPO_ALIASES
 from utils_text import fmt_brl

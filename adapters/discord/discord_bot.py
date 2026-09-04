@@ -20,7 +20,6 @@ Responsabilidades:
   handler legado de crédito (handlers/credit.py) foi removido por isso —
   crédito é 100% core/handlers/credit.py.
 """
-import asyncio
 import os
 import sys
 import time as pytime

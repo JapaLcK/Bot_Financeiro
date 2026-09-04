@@ -14,7 +14,6 @@ from .users import (
     get_or_create_canonical_user,
     create_link_code,
     merge_users,
-    get_or_create_canonical_user,
     _hash_password,
     _check_password,
 )
