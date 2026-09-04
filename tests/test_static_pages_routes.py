@@ -338,3 +338,315 @@ def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
         "o cache privado sobrevive nesse fluxo. "
         f"só no Python: {sorted(do_python - do_js)}; só no JS: {sorted(do_js - do_python)}"
     )
+
+
+# Classificação EXPLÍCITA de cada resposta 401 de
+# `frontend/finance_bot_websocket_custom.py` + `frontend/routes/*.py`, por
+# `(arquivo, função, detail)`. `True` = falha de access/dashboard token, leva o
+# `WWW_AUTHENTICATE_401` e o interceptor renova; `False` = 401 de aplicação, não
+# leva e não renova.
+#
+# A FUNÇÃO faz parte da chave porque `<str(exc)>` e `<NomeDaClasse>` são curingas:
+# com a chave só em `(arquivo, detail)`, um 401 novo de detail dinâmico herdava em
+# silêncio a classificação de outro sítio do mesmo arquivo e o gate ficava verde.
+#
+# `core/admin_dashboard.py` fica FORA por caminho: é outra árvore de auth (sessão
+# de admin, cookie próprio) e nenhuma página dela carrega o `auth-refresh.js`.
+_MONO = "frontend/finance_bot_websocket_custom.py"
+_401_RENOVAVEL = {
+    # ── família A: o access/dashboard token falhou → renovar resolve ──────────
+    (_MONO, "_get_current_user", "Token não fornecido."): True,
+    (_MONO, "_get_current_user", "Token inválido ou expirado."): True,
+    (_MONO, "_get_current_user", "Sessão encerrada. Faça login novamente."): True,
+    (_MONO, "_get_current_user", "Sessão expirada. Faça login novamente."): True,
+    (_MONO, "auth_validate", "Token inválido"): True,
+    ("frontend/routes/shared.py", "resolve_dashboard_user_id",
+     "Token de dashboard inválido ou expirado."): True,
+    ("frontend/routes/shared.py", "resolve_dashboard_user_id",
+     "Sessão encerrada. Faça login novamente."): True,
+    # ── família B: 401 de aplicação, o token está ótimo ───────────────────────
+    # Senha incorreta em MFA setup/disable, regenerar backup codes e export.
+    (_MONO, "auth_mfa_setup", "Senha incorreta."): False,
+    (_MONO, "auth_mfa_disable", "Senha incorreta."): False,
+    (_MONO, "auth_mfa_regenerate", "Senha incorreta."): False,
+    (_MONO, "auth_account_export_request", "Senha incorreta."): False,
+    # Login: nem chega ao interceptor — login.html não carrega o auth-refresh.js.
+    (_MONO, "auth_login", "E-mail ou senha incorretos."): False,
+    # Magic link consumido/expirado. É a pegadinha da lista: parece autenticação
+    # e NÃO é renovável — access token novo não ressuscita um link expirado.
+    (_MONO, "auth_dashboard_link", "Link de dashboard inválido ou expirado."): False,
+    # `detail=str(exc)` de um PermissionError: senha errada no DELETE /auth/account
+    # (monólito) e no reset de dados (settings.py). Dinâmico, daí o marcador.
+    (_MONO, "auth_delete_account", "<str(exc)>"): False,
+    ("frontend/routes/settings.py", "account_reset_route", "<str(exc)>"): False,
+    # Chave de API do lead engine e webhook server-to-server: sem sessão nenhuma.
+    ("frontend/routes/prospects.py", "prospect_status", "Chave inválida."): False,
+    ("frontend/routes/open_finance.py", "open_finance_pluggy_webhook",
+     "Não autorizado."): False,
+    # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
+    # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
+    # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes
+    # deles, no `_isRefreshEndpoint`: renovar o refresh com o refresh é recursão.
+    (_MONO, "auth_refresh", "missing_refresh_token"): False,
+    (_MONO, "auth_refresh", "invalid_refresh_token"): False,
+    # Magic link expirado no `GET /d/{code}`: página HTML de NAVEGAÇÃO, não
+    # resposta de `fetch`. O `window.fetch` do auth-refresh.js não vê navegação.
+    (_MONO, "dashboard_short_link", "<HTMLResponse>"): False,
+}
+
+
+def _e_401(no):
+    """`401`, `status.HTTP_401_UNAUTHORIZED` ou `HTTP_401_UNAUTHORIZED` importado.
+
+    A forma com a constante do FastAPI é a IDIOMÁTICA — a que um contribuidor
+    novo escreve —, e o gate era cego para ela.
+    """
+    import ast
+
+    if isinstance(no, ast.Constant):
+        return no.value == 401
+    return getattr(no, "attr", None) == "HTTP_401_UNAUTHORIZED" or \
+        getattr(no, "id", None) == "HTTP_401_UNAUTHORIZED"
+
+
+def _forma_do_header(no):
+    """`"constante"`, `"literal"` ou `None` — as três formas do `headers=`.
+
+    O literal é separado do ausente de propósito: o código está CORRETO no
+    comportamento e errado na §0.7 (duplica o valor da constante), e a mensagem
+    que o autor recebe tem que ser essa, não "sem header nunca renova".
+
+    A constante casa pelo nome final, então três escritas contam igual: o nome nu,
+    o apelido com `_` (o bloco de import do monólito apelida quase tudo assim —
+    `stamp_asset_versions as _stamp_asset_versions`) e o acesso por atributo
+    (`shared.WWW_AUTHENTICATE_401`). É guarda PROSPECTIVA, não conserto de um
+    vermelho observado: hoje os 8 sítios usam o nome nu (`git grep -n
+    WWW_AUTHENTICATE_401`), e as outras duas formas não existem no repositório.
+    """
+    import ast
+
+    # ponytail: casa pelo nome final, não resolve o import. Três tetos, medidos:
+    # (1) fail-closed — um apelido sem relação (`as WWW`) passa por ausente;
+    # (2) fail-open — `qualquer_coisa.WWW_AUTHENTICATE_401` devolve "constante":
+    #     serve QUALQUER atributo com esse nome final, em qualquer objeto;
+    # (3) assimetria — `_varre_401` lê status e detail posicionalmente, o header
+    #     só por kwarg: `HTTPException(401, "m", WWW_AUTHENTICATE_401)` dá forma
+    #     None. Fail-closed, e ninguém escreve assim aqui.
+    # Resolver alias e objeto exige ler o bloco de import — faça se aparecer um.
+    nome = getattr(no, "id", None) or getattr(no, "attr", None) or ""
+    if nome.lstrip("_") == "WWW_AUTHENTICATE_401":
+        return "constante"
+    if isinstance(no, ast.Dict) and any(
+        isinstance(k, ast.Constant) and str(k.value).lower() == "www-authenticate"
+        for k in no.keys
+    ):
+        return "literal"
+    return None
+
+
+def _varre_401(caminho, fonte):
+    """Devolve (chave, forma_do_header) de cada resposta 401 do arquivo.
+
+    Quatro formas, todas medidas (o gate anterior só via a primeira):
+
+        raise HTTPException(status_code=401, ...)
+        raise HTTPException(401, ...)                       # posicional
+        return JSONResponse(status_code=401, ...)           # e HTMLResponse etc
+        status_code=status.HTTP_401_UNAUTHORIZED            # constante do FastAPI
+
+    `chave` é `(arquivo, função, detail)`. O `detail` sai do kwarg ou do 2º
+    posicional (HTTPException) ou do `content={"detail": ...}` (JSONResponse);
+    quando não é string constante vira `<str(exc)>` no HTTPException e
+    `<NomeDaClasse>` na resposta montada à mão.
+
+    A função que ENVOLVE o sítio entra na chave porque esses dois marcadores são
+    curingas: sem ela, um 401 novo cujo detail não é constante herda em silêncio
+    a classificação de um 401 velho do mesmo arquivo, e o gate — que é a única
+    rede de um interceptor que falha FECHADO — passa verde. Medido: três sítios
+    novos (dois `HTTPException` e um `HTMLResponse`) eram absorvidos pelas três
+    entradas curinga da tabela. Nome de função é estável; número de linha desliza
+    a cada edição acima.
+
+    E dois curingas IGUAIS na MESMA função ainda colidiriam, então o segundo
+    ganha `#2` no marcador e cai fora da tabela também. Detail constante não
+    recebe sufixo de propósito: ali a chave repetida é mesmo o mesmo caso.
+    """
+    import ast
+
+    arvore = ast.parse(fonte)
+    # `ast.walk` é BFS, então a função mais interna escreve por último e ganha.
+    # Sem isso um sítio dentro de closure levaria o nome da função de fora.
+    dono = {}
+    for no in ast.walk(arvore):
+        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for filho in ast.walk(no):
+                if isinstance(filho, ast.Call):
+                    dono[filho] = no.name
+
+    achados = []
+    vistos: dict[tuple, int] = {}
+    for chamada in ast.walk(arvore):
+        if not isinstance(chamada, ast.Call):
+            continue
+        nome = getattr(chamada.func, "id", None) or getattr(chamada.func, "attr", None) or ""
+        if nome != "HTTPException" and not nome.endswith("Response"):
+            continue
+        kw = {k.arg: k.value for k in chamada.keywords}
+        # posicional: `HTTPException(401, ...)` e `JSONResponse(content, 401)`
+        pos = 0 if nome == "HTTPException" else 1
+        status = kw.get("status_code")
+        if status is None and len(chamada.args) > pos:
+            status = chamada.args[pos]
+        if not _e_401(status):
+            continue
+        detail = kw.get("detail")
+        # `HTTPException(401, "mensagem")` — detail é o 2º posicional. Medido: sem
+        # esta leitura o gate CONTINUA vermelho no sítio novo (quem fecha o buraco
+        # é o sufixo `#2` abaixo). O que ela entrega é a chave legível — a
+        # mensagem — em vez de mais um `<str(exc)>` na tabela.
+        if detail is None and nome == "HTTPException" and len(chamada.args) > 1:
+            detail = chamada.args[1]
+        if detail is None and isinstance(kw.get("content"), ast.Dict):
+            detail = next(
+                (v for k, v in zip(kw["content"].keys, kw["content"].values)
+                 if isinstance(k, ast.Constant) and k.value == "detail"),
+                None,
+            )
+        funcao = dono.get(chamada, "<módulo>")
+        if isinstance(detail, ast.Constant) and isinstance(detail.value, str):
+            # Detail constante é auto-descritivo: chave repetida = mesma mensagem,
+            # mesma família. Compartilhar a entrada aqui é certo (o `auth_login`
+            # levanta a mesma duas vezes).
+            marca = detail.value
+        else:
+            # Curinga (`<str(exc)>`, `<HTMLResponse>`): chave repetida NÃO quer
+            # dizer mesma coisa, então o segundo sítio da mesma função vira
+            # `...#2` e cai fora da tabela — o autor é obrigado a declará-lo.
+            marca = "<str(exc)>" if nome == "HTTPException" else f"<{nome}>"
+            n = vistos.get((funcao, marca), 0) + 1
+            vistos[(funcao, marca)] = n
+            if n > 1:
+                marca = f"{marca}#{n}"
+        achados.append(((caminho, funcao, marca), _forma_do_header(kw.get("headers"))))
+    return achados
+
+
+def test_varredura_401_reconhece_as_formas():
+    """Controle do GATE, não do código de produção.
+
+    Sem ele as três partes da varredura podem ser apagadas com a suíte verde
+    (medido em `0dc1f5c`: 18 passed com cada uma removida) — e uma varredura que
+    falha ABERTO deixa o 401 novo passar sem família, que é a regressão que este
+    arquivo inteiro existe para impedir.
+    """
+    fonte = '''
+def f():
+    raise HTTPException(401, "posicional")
+    raise HTTPException(status_code=401, detail=str(exc))
+    raise HTTPException(status_code=401, detail=str(erro))
+
+def g():
+    raise HTTPException(401, "a", headers=_WWW_AUTHENTICATE_401)
+    raise HTTPException(401, "b", headers=shared.WWW_AUTHENTICATE_401)
+    raise HTTPException(401, "c", headers={"WWW-Authenticate": "Bearer"})
+    raise HTTPException(401, "d")
+'''
+
+    assert dict(_varre_401("x.py", fonte)) == {
+        # detail no 2º posicional vira a mensagem, não o curinga
+        ("x.py", "f", "posicional"): None,
+        # dois curingas iguais na MESMA função: o segundo cai fora da tabela
+        ("x.py", "f", "<str(exc)>"): None,
+        ("x.py", "f", "<str(exc)>#2"): None,
+        # as três escritas da constante e o dict literal
+        ("x.py", "g", "a"): "constante",
+        ("x.py", "g", "b"): "constante",
+        ("x.py", "g", "c"): "literal",
+        ("x.py", "g", "d"): None,
+    }, dict(_varre_401("x.py", fonte))
+
+
+def test_401_de_autenticacao_declara_familia():
+    """§0.7: o `auth-refresh.js` não importa Python, então um teste prende as listas.
+
+    Desde a #176 o interceptor só renova o 401 que traz `WWW-Authenticate` — ele
+    falha FECHADO, e é por isso que este gate é obrigatório e não opcional: um 401
+    de autenticação que alguém esqueça de marcar deixa de ser renovado e joga o
+    usuário para o login, regressão PIOR que o bug original (uma request extra).
+
+    Direções, todas vermelhas:
+      - 401 novo sem entrada em `_401_RENOVAVEL` → o autor é obrigado a decidir a
+        família, em vez de herdar um default errado em silêncio;
+      - família declarada que não bate com o `headers=` do código, nas duas
+        direções (renovável sem header × de aplicação com header);
+      - `WWW-Authenticate` escrito como dict literal em vez da constante (§0.7).
+
+    A varredura cobre as QUATRO formas de responder 401 aqui — `status_code=401`,
+    `HTTPException(401, ...)` posicional, `JSONResponse/HTMLResponse(status_code=401)`
+    e `status.HTTP_401_UNAUTHORIZED`. Cobria só a primeira, e as outras três já
+    existiam no monólito (os dois do `/auth/refresh` e o do `/d/{code}`): a
+    promessa do docstring era falsa em 3 das 4.
+
+    Fora do alcance por caminho: `core/admin_dashboard.py`, que é outra árvore de
+    auth (sessão de admin) e cujas páginas não carregam o `auth-refresh.js`.
+    """
+    import pathlib
+
+    raiz = pathlib.Path(__file__).resolve().parents[1]
+    alvos = [pathlib.Path("frontend/finance_bot_websocket_custom.py")]
+    alvos += sorted(
+        p.relative_to(raiz) for p in (raiz / "frontend" / "routes").glob("*.py")
+    )
+
+    achados = []
+    for rel in alvos:
+        achados += _varre_401(rel.as_posix(), (raiz / rel).read_text(encoding="utf-8"))
+
+    assert achados, "a varredura não achou 401 nenhum — o walk quebrou"
+
+    mortas = sorted(set(_401_RENOVAVEL) - {c for c, _ in achados})
+    assert not mortas, (
+        "entrada de `_401_RENOVAVEL` sem sítio no código. Curinga órfão volta a "
+        "absorver o 401 novo da mesma função em silêncio, com a família velha — "
+        f"apague a entrada junto com o `raise`: {mortas}"
+    )
+
+    sem_classificacao = sorted({c for c, _ in achados if c not in _401_RENOVAVEL})
+    assert not sem_classificacao, (
+        "401 novo sem família declarada. O interceptor do auth-refresh.js falha "
+        "FECHADO: sem `WWW_AUTHENTICATE_401` ele não renova e o usuário cai no "
+        f"login. Classifique em `_401_RENOVAVEL`: {sem_classificacao}"
+    )
+
+    literais = sorted({c for c, forma in achados if forma == "literal"})
+    assert not literais, (
+        "o `WWW-Authenticate` foi escrito como dict literal. O comportamento está "
+        "certo e a §0.7 não: use `headers=WWW_AUTHENTICATE_401` (importe de "
+        f"`frontend/routes/shared.py`), que é a fonte única do valor: {literais}"
+    )
+
+    faltando = sorted({c for c, forma in achados if _401_RENOVAVEL[c] and not forma})
+    assert not faltando, (
+        "401 classificado como RENOVÁVEL e sem `headers=`. Acrescente "
+        "`headers=WWW_AUTHENTICATE_401` no `raise`/`Response` — sem ele o "
+        "interceptor não renova e o usuário cai no login. Se este 401 é de "
+        f"aplicação (o token está ótimo), troque a classificação para False: {faltando}"
+    )
+
+    sobrando = sorted({c for c, forma in achados if forma and not _401_RENOVAVEL[c]})
+    assert not sobrando, (
+        "401 classificado como DE APLICAÇÃO e com `WWW-Authenticate`. Ele vai "
+        "renovar o token à toa e gastar dois slots do rate limit. Tire o "
+        f"`headers=`, ou mude a classificação para True se ele é de autenticação: {sobrando}"
+    )
+
+    # Controle positivo: a família A não pode ter esvaziado. Se um refactor tirar
+    # o `headers=` de todos os sítios, as três asserções acima continuariam verdes
+    # caso a classificação fosse trocada junto — este número não.
+    com_header = sorted(c for c, forma in achados if forma)
+    assert len(com_header) == 8, (
+        f"são {len(com_header)} sítios com `WWW-Authenticate`, e este controle "
+        "espera 8. Se você ADICIONOU um 401 de autenticação legítimo (já "
+        "classificado como True acima), atualize o 8 para o número novo. Se você "
+        f"não mexeu em nenhum 401, alguém apagou um `headers=`: {com_header}"
+    )

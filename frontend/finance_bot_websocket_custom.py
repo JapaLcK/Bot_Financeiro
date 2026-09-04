@@ -124,6 +124,7 @@ from frontend.routes.shared import (
     DASHBOARD_CURRENT_CACHE_TTL_SECONDS as _DASHBOARD_CURRENT_CACHE_TTL_SECONDS,
     DASHBOARD_URL,
     JWT_SECRET,
+    WWW_AUTHENTICATE_401,
     authorize_dashboard_access as _authorize_dashboard_access,
     dashboard_current_cache as _dashboard_current_cache,
     dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
@@ -2330,10 +2331,12 @@ async def _get_current_user(
 ) -> int:
     token = _get_auth_token_from_request(request, creds)
     if not token:
-        raise HTTPException(status_code=401, detail="Token não fornecido.")
+        raise HTTPException(status_code=401, detail="Token não fornecido.",
+                            headers=WWW_AUTHENTICATE_401)
     payload = _decode_jwt(token)
     if not payload or payload.get("type") != "auth":
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado.",
+                            headers=WWW_AUTHENTICATE_401)
     request.state.auth_payload = payload
     user_id = int(payload["sub"])
 
@@ -2343,7 +2346,8 @@ async def _get_current_user(
     if jti:
         session = await asyncio.to_thread(get_active_session, jti)
         if not session or int(session.get("user_id") or 0) != user_id:
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
         request.state.session_jti = jti
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
@@ -2354,7 +2358,8 @@ async def _get_current_user(
         # de sessão feita no reset.
         from db import get_password_changed_at
         if await asyncio.to_thread(get_password_changed_at, user_id):
-            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
@@ -2447,7 +2452,8 @@ async def auth_validate(request: Request, response: Response):
     """
     user_id = _resolve_dashboard_user_id(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Token inválido")
+        raise HTTPException(status_code=401, detail="Token inválido",
+                            headers=WWW_AUTHENTICATE_401)
     _raise_if_account_scheduled_for_deletion(int(user_id))
     _no_store(response)
 
