@@ -6,8 +6,9 @@ Duas tabelas distintas:
   abaixo de `list_category_rules`, `add_category_rule` etc.
 - `user_categories`: nome + emoji + cor por usuário (metadata visual da
   Sprint 3). Não tem FK em launches — `launches.categoria` continua string
-  livre. Rename emite UPDATE em cascata nas 5 tabelas que referenciam o
-  texto da categoria.
+  livre. Rename emite UPDATE em cascata nas tabelas que referenciam o
+  texto da categoria — a lista vive no bloco `if rename:` de
+  `update_user_category`, e é lá que se conta (contar aqui envelhece).
 """
 import logging
 import unicodedata
@@ -882,6 +883,9 @@ def resolve_category_input(
     #    "Padaria do Zé" e "Padaria do Ze" virarem duas fatias no dashboard,
     #    onde a `main` colapsava as duas. Aí a de-duplicação é o próprio
     #    `normalize_text`, que é o que a `main` grava.
+    #    ATENÇÃO: isto só vale para porta cuja `main` JÁ gravava normalizado (o
+    #    PATCH /launches). Porta que gravava o texto cru não pode cair aqui — vira
+    #    fatia gêmea nova. É por isso que existe `resolve_category_for_write`.
     # Mede o que VAI SER GRAVADO, não o normalizado: `normalize_text` tira
     # acento/emoji/pontuação e ENCOLHE a entrada, então medir por ele deixava
     # passar nome de 5000 caracteres (emoji + uma letra normaliza pra 1 char).
@@ -889,6 +893,44 @@ def resolve_category_input(
     if not stored or len(stored) > CATEGORY_NAME_MAX_LEN:
         return None
     return stored
+
+
+def resolve_category_for_write(user_id: int, raw: str) -> str:
+    """Grafia a GRAVAR numa porta de escrita de recorrente (#147).
+
+    A REGRA, num lugar só, valendo para as 4 portas (`create_/update_recurring_expense`
+    e `create_/update_recurring_income`):
+
+        o valor gravado é (a) uma grafia que JÁ existe no catálogo do usuário,
+        ou (b) o texto CRU do usuário. Nunca `normalize_text(raw)`.
+
+    Por isso o `create` segue o plano em vez de ser fixo em `True`. Com `create=True`,
+    o passo 3 de `resolve_category_input` devolve `normalize_text(raw)` para quem NÃO
+    pode ter categoria custom: "Padaria do Zé" seria gravado "padaria do ze" com o
+    histórico em "Padaria do Zé", e o donut — que agrupa pela string crua, sensível a
+    caixa e acento (`db/accounts.py`) — abriria a fatia GÊMEA que o #147 existe pra
+    matar. É a mesma razão pela qual o cobrador usa `create=False`
+    (`recurring_charger._canonical_category`); a porta de escrita não pode fazer o que
+    o cobrador foi proibido de fazer.
+
+    Quem não pode ter custom hoje é o PLANO INATIVO (assinatura vencida, cancelada ou
+    com pagamento falhando): `get_plan_tier` colapsa em "free" quando `_paid_plan_active`
+    é falso (`core/services/plan_service.py:117-122`) — não é mais um produto grátis.
+    E `list_due_recurring_expenses` não filtra por plano, então essa pessoa continua
+    gerando lançamento todo mês.
+
+    Para quem PODE ter custom nada muda: `create=True`, grafia preservada, catálogo
+    semeado depois pelo `ensure_user_category`, e a falha de leitura do catálogo
+    continua SUBINDO (`strict=create`) — decisão presa por
+    `test_escrita_falha_quando_o_catalogo_cai`. Para quem não pode, a leitura degrada
+    e o `or raw` devolve o texto cru, que é o que a `main` gravava.
+    """
+    # ponytail: 1 leitura de plano por escrita de recorrente (antes o
+    # `resolve_category_input` só a fazia quando os passos 1-2 não achavam nada).
+    # Passar o veredito como argumento só se aparecer no perfil.
+    return resolve_category_input(
+        user_id, raw, create=_custom_categories_allowed(user_id)
+    ) or raw
 
 
 def _custom_categories_allowed(user_id: int) -> bool:

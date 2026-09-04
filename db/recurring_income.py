@@ -18,7 +18,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from .categories import ensure_user_category, resolve_category_input
+from .categories import ensure_user_category, resolve_category_for_write
 from .connection import get_conn
 from .recurring import _parse_start_date, validate_frequency
 from .users import ensure_user
@@ -127,11 +127,11 @@ def create_recurring_income(
     freq, month = validate_frequency(frequency, pay_month)
     start = _parse_start_date(start_date, default=date.today())
 
-    # #147: espelho de `create_recurring_expense` — o usuário DIGITA a categoria
-    # e o creditador a copia pra `launches.categoria` todo mês. Vale aqui a mesma
-    # decisão registrada lá: `create=True` deixa falha do catálogo SUBIR.
+    # #147: espelho de `create_recurring_expense` — o usuário DIGITA a categoria e o
+    # creditador a copia pra `launches.categoria` todo mês. Regra das 4 portas num
+    # lugar só: `db/categories.resolve_category_for_write`.
     cat = (category or "").strip() or "salário"
-    cat = resolve_category_input(user_id, cat, create=True) or cat
+    cat = resolve_category_for_write(user_id, cat)
     note = (notes or "").strip() or None
 
     with get_conn() as conn:
@@ -197,8 +197,9 @@ def update_recurring_income(
         params.append(Decimal(str(amount)))
     cat: str | None = None
     if category is not None:
+        # regra em `db/categories.resolve_category_for_write`
         cat = (category or "").strip() or "salário"
-        cat = resolve_category_input(user_id, cat, create=True) or cat
+        cat = resolve_category_for_write(user_id, cat)
         sets.append("category = %s")
         params.append(cat)
     if pay_day is not None:

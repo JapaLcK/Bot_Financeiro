@@ -6,10 +6,10 @@ em todas as que gravam categoria.
 A porta 9 (gasto fixo / receita recorrente) era a dívida citada aqui e foi
 fechada pela issue #147: as 4 portas de escrita (`create_/update_recurring_expense`,
 `create_/update_recurring_income`) passaram a chamar o resolver como porta de
-CORREÇÃO (`create=True` + `ensure_user_category` depois do commit), e o cobrador
-(`core/services/recurring_charger._canonical_category`) resolve com `create=False`
-— em job de lote `create=True` abortaria a cobrança num erro de banco e tiraria o
-acento de quem não tem plano custom.
+CORREÇÃO (`db/categories.resolve_category_for_write` + `ensure_user_category` depois
+do commit), e o cobrador (`core/services/recurring_charger._canonical_category`)
+resolve com `create=False` — em job de lote `create=True` abortaria a cobrança num
+erro de banco e tiraria o acento de quem não pode ter categoria custom.
 
 Continua FORA deste invariante, de propósito: o Open Finance (issue #149) grava
 `launches.categoria` por caminho próprio. Enquanto ele existir, `launches.categoria`
@@ -35,9 +35,12 @@ Convenção travada aqui (não "conserte"):
 Duas invariantes que valem pra TODA porta e são testadas uma a uma:
   • a linha em `user_categories` só nasce DEPOIS de o UPDATE dar certo
     (alvo inexistente = 404 e catálogo intacto);
-  • quem NÃO tem plano com categoria custom grava sem acento, como a `main` —
-    sem catálogo não há de-duplicação, e preservar a grafia criaria as gêmeas
-    que este PR existe pra matar.
+  • o valor gravado é uma grafia que JÁ existe no catálogo do usuário, ou o
+    texto CRU — nunca `normalize_text(raw)`. Quem não pode ter categoria custom
+    (hoje: plano INATIVO, ver `resolve_category_for_write`) não tem catálogo pra
+    de-duplicar, então tirar o acento dele só CRIA a gêmea, em vez de fundi-la.
+    O `resolve_category_input` cru ainda devolve `normalize_text(raw)` no passo 3
+    — quem garante a invariante é a porta, que escolhe o `create`.
 """
 from __future__ import annotations
 
@@ -125,6 +128,20 @@ def _todos_os_nomes(user_id: int) -> list[str]:
                 (user_id,),
             )
             return [r["name"] for r in (cur.fetchall() or [])]
+
+
+def _fatias_do_donut(user_id: int) -> dict[str, int]:
+    """O donut agrupa pela string CRUA de `launches.categoria` (`db/accounts.py`,
+    `group by coalesce(nullif(categoria,''),'outros')`) — caixa e acento separam
+    fatias. É a medição que prova (ou nega) a gêmea."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select categoria, count(*) as n from launches "
+                " where user_id=%s group by categoria",
+                (user_id,),
+            )
+            return {r["categoria"]: int(r["n"]) for r in cur.fetchall()}
 
 
 def _regra(user_id: int, keyword: str) -> str | None:
@@ -1309,6 +1326,83 @@ def test_escrita_de_recorrente_semeia_o_catalogo(pro_user_id, porta):
     assert _nomes_custom(pro_user_id) == ["cafeteria da esquina"]
 
 
+# ─── plano INATIVO: a porta não pode fazer o que o cobrador foi proibido de fazer ─
+
+
+@pytest.mark.parametrize(
+    "porta", ["create_expense", "update_expense", "create_income", "update_income"]
+)
+def test_escrita_de_recorrente_sem_custom_nao_abre_fatia_gemea(user_id, porta):
+    """O gêmeo das 4 portas para quem NÃO pode ter categoria custom.
+
+    Hoje esse estado é o PLANO INATIVO — assinatura vencida, cancelada ou com
+    pagamento falhando —, não "plano grátis" (esse produto não existe mais):
+    `get_plan_tier` colapsa em "free" quando `_paid_plan_active` é falso
+    (`core/services/plan_service.py:117-122`), e é esse veredito que
+    `_custom_categories_allowed` lê. A fixture `user_id` (sem linha em
+    `auth_accounts`) produz o MESMO veredito, por isso serve de modelo.
+
+    Alcançável sem plano ativo: `core/handlers/pending.py:111` (a oferta "virar
+    gasto fixo?" do WhatsApp) chama `create_recurring_expense` sem gate nenhum,
+    com o `categoria_final` do próprio lançamento — literalmente a grafia que já
+    está no histórico. E `list_due_recurring_expenses` não filtra por plano, então
+    quem está com o cartão recusado segue sendo cobrado todo mês.
+
+    Controle negativo medido: `create=True` fixo de volta em
+    `resolve_category_for_write` e os 4 casos leem
+    `{'Padaria do Zé': 1, 'padaria do ze': 1}` — duas fatias."""
+    from core.services.recurring_charger import (
+        charge_due_recurring_expenses_once,
+        credit_due_recurring_incomes_once,
+    )
+    from db.recurring import create_recurring_expense, update_recurring_expense
+    from db.recurring_income import create_recurring_income, update_recurring_income
+    from utils_date import today_tz
+
+    hoje = today_tz()
+    grafia = "Padaria do Zé"
+    _novo_launch(user_id, categoria=grafia)  # o histórico que já existe
+
+    if porta == "create_expense":
+        create_recurring_expense(
+            user_id, "Assinatura", 21.90, grafia, hoje.day, "account", start_date=hoje,
+        )
+    elif porta == "update_expense":
+        rec = create_recurring_expense(
+            user_id, "Assinatura", 21.90, "outros", hoje.day, "account", start_date=hoje,
+        )
+        update_recurring_expense(user_id, rec["id"], category=grafia)
+    elif porta == "create_income":
+        create_recurring_income(
+            user_id, "Freela", 500.0, grafia, hoje.day, start_date=hoje,
+        )
+    else:
+        inc = create_recurring_income(
+            user_id, "Freela", 500.0, "outros", hoje.day, start_date=hoje,
+        )
+        update_recurring_income(user_id, inc["id"], category=grafia)
+
+    charge_due_recurring_expenses_once(hoje)
+    credit_due_recurring_incomes_once(hoje)
+
+    assert _fatias_do_donut(user_id) == {grafia: 2}
+    assert _nomes_custom(user_id) == []  # sem plano ativo, catálogo intocado
+
+
+def test_escrita_de_recorrente_com_custom_ainda_semeia_a_grafia(pro_user_id):
+    """POSITIVO do par: quem PODE ter custom continua no `create=True` — grafia
+    preservada E linha nova no catálogo. Sem este caso, um
+    `resolve_category_for_write` que devolvesse sempre o texto cru (create=False
+    fixo) passaria no teste acima e desligaria a de-duplicação que o #147 monta."""
+    from db.recurring import create_recurring_expense
+
+    rec = create_recurring_expense(
+        pro_user_id, "Assinatura", 21.90, "Padaria do Zé", 10, "account",
+    )
+    assert rec["category"] == "padaria do zé"
+    assert _nomes_custom(pro_user_id) == ["padaria do zé"]
+
+
 # ─── o rename tem de alcançar o recorrente, senão a fatia gêmea volta ───────
 
 
@@ -1325,11 +1419,19 @@ def _zera_idempotencia(user_id: int) -> None:
 
 
 def test_rename_cascateia_para_o_recorrente(pro_user_id):
-    """NEGATIVO (despesa): o #147 fez o recorrente nascer com a grafia do
-    catálogo — e com isso o RENAME virou a última fonte de divergência. O
-    cobrador é `create=False` + `or raw`: sem o cascade ele não acha mais o
-    nome velho no `display_map` e grava a grafia ANTIGA no mês seguinte,
-    enquanto o histórico já foi renomeado. Duas fatias no donut.
+    """NEGATIVO (despesa): o #147 fez o recorrente nascer com a grafia do catálogo,
+    e o rename precisava alcançá-lo. O cobrador é `create=False` + `or raw`: sem o
+    cascade ele não acha mais o nome velho no `display_map` e grava a grafia ANTIGA
+    no mês seguinte, enquanto o histórico já foi renomeado. Duas fatias no donut.
+
+    O QUE ESTE TESTE NÃO FECHA (o recorrente aqui nasce PELA porta, então a grafia
+    dele é idêntica à do catálogo): o cascade casa por `lower(category)=lower(old_name)`
+    e `lower()` NÃO colapsa acento, enquanto a resolução do cobrador usa
+    `normalize_text()`, que colapsa. Recorrente LEGADO com grafia crua — os que a
+    issue #147 mira — pode divergir do catálogo só pelo acento e escapar do cascade.
+    Medido: catálogo "cafe", recorrente legado "Café", rename para "cafeteria" →
+    o recorrente fica em `'Café'` e o donut lê `{'Café': 1, 'cafeteria': 1}`.
+    As duas igualdades sobre o mesmo dado ficam registradas como issue própria.
 
     Controle negativo medido: removendo o `update recurring_expenses` do
     cascade de `update_user_category`, este assert lê
@@ -1349,14 +1451,7 @@ def test_rename_cascateia_para_o_recorrente(pro_user_id):
     _zera_idempotencia(pro_user_id)
     charge_due_recurring_expenses_once(hoje)          # mês 2
 
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select categoria, count(*) as n from launches "
-                " where user_id=%s group by categoria",
-                (pro_user_id,),
-            )
-            fatias = {r["categoria"]: int(r["n"]) for r in cur.fetchall()}
+    fatias = _fatias_do_donut(pro_user_id)
     assert fatias == {"café": 2}, fatias
 
 
@@ -1420,10 +1515,18 @@ def test_escrita_de_recorrente_nao_semeia_nome_acima_do_teto(pro_user_id):
 
 
 def test_nome_longo_no_catalogo_nao_fura_o_teto_das_outras_portas(pro_user_id):
-    """A escalada do caso acima: com a linha longa no catálogo, o `display_map`
-    a resolveria no passo 2 de `resolve_category_input` — ANTES do guard de
-    tamanho do passo 3 — e o PATCH /launches, que devolvia 400, passaria a
-    aceitar."""
+    """A escalada do caso acima: com a linha longa no catálogo, o `display_map` a
+    resolveria no passo 2 de `resolve_category_input` — ANTES do guard de tamanho do
+    passo 3 — e o PATCH /launches, que devolvia 400, passaria a aceitar.
+
+    FECHA 2 DAS 3 ENTRADAS do catálogo: `resolve_category_input` (passo 3) e
+    `create_user_category`. A terceira, `ensure_user_categories_seeded`
+    (`db/categories.py`), continua SEM teto — insere `lower(trim(categoria))` em SQL
+    cru a partir do histórico do usuário, uma vez por conta. Medido: lançamento com
+    categoria de 208 chars (teto 80) vira linha no catálogo, e
+    `resolve_category_input(..., create=True)` passa a devolver os 208 em vez de
+    `None`. Fica aberto de propósito (é importação de histórico já existente, não
+    entrada nova) e registrado como issue própria."""
     from db.recurring import create_recurring_expense
 
     longo = "Padaria " + "z" * 200

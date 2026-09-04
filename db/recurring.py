@@ -14,7 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from .categories import ensure_user_category, resolve_category_input
+from .categories import ensure_user_category, resolve_category_for_write
 from .connection import get_conn
 from .users import ensure_user
 
@@ -210,21 +210,13 @@ def create_recurring_expense(
     if payment_type == "account":
         card_id = None  # ignora card_id quando não é cartão
 
-    # #147: mesma porta de correção do PATCH /launches — o usuário DIGITA esta
-    # categoria. Sem o resolver, "McDonald's" nascia cru aqui e o cobrador o
-    # copiava pra `launches.categoria` todo mês, abrindo fatia gêmea no donut.
-    # `or cat` mantém o texto quando o resolver recusa (nome longo demais).
-    #
-    # DECISÃO: `create=True` faz `user_category_display_map(strict=True)`, então
-    # falha de leitura do catálogo SOBE e o gasto fixo não é criado (500 na rota,
-    # mensagem de erro no WhatsApp). É de propósito, e é o mesmo contrato da porta
-    # de referência: degradar pra mapa vazio faria o nome digitado passar por
-    # "novo" e `ensure_user_category` gravaria a gêmea — o defeito que este
-    # conserto existe pra matar. Aqui não há estado parcial (nada foi escrito
-    # ainda), então a retentativa é segura. Preso por
-    # `test_escrita_falha_quando_o_catalogo_cai`.
+    # #147: o usuário DIGITA esta categoria e o cobrador a copia pra
+    # `launches.categoria` todo mês. Sem resolver, "McDonald's" nascia cru aqui e
+    # abria fatia gêmea no donut. A REGRA das 4 portas (o que pode ser gravado, e
+    # por que o `create` segue o plano em vez de ser fixo em True) está escrita num
+    # lugar só: `db/categories.resolve_category_for_write`.
     cat = (category or "").strip() or "outros"
-    cat = resolve_category_input(user_id, cat, create=True) or cat
+    cat = resolve_category_for_write(user_id, cat)
     note = (notes or "").strip() or None
 
     with get_conn() as conn:
@@ -304,8 +296,9 @@ def update_recurring_expense(
         params.append(Decimal(str(amount)))
     cat: str | None = None
     if category is not None:
+        # regra em `db/categories.resolve_category_for_write`
         cat = (category or "").strip() or "outros"
-        cat = resolve_category_input(user_id, cat, create=True) or cat
+        cat = resolve_category_for_write(user_id, cat)
         sets.append("category = %s")
         params.append(cat)
     if due_day is not None:
