@@ -119,7 +119,13 @@ async def ensure_admin_tables():
                     event_type TEXT NOT NULL,
                     message TEXT NOT NULL,
                     source TEXT,
-                    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                    -- CASCADE (nao SET NULL): log de sistema e dado do titular
+                    -- e vai junto com a conta -- coerente com db/privacy.py, que
+                    -- ja faz `delete` puro nesta tabela. Quem VALE em runtime e o
+                    -- repair_user_fk_cascades (db/schema_repairs.py), que converge
+                    -- toda FK em users(id) a cada init_db; este DDL so precisava
+                    -- parar de declarar o oposto. Ver #221.
+                    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
                     details JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
