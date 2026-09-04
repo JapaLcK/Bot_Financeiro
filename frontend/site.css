@@ -603,10 +603,24 @@ section[id] { scroll-margin-top: 96px; }
 .reveal.in { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
 /* ══════════════════════════════════════════════════════════════════════
-   Acessibilidade — piso do site público. Fim do arquivo de propósito:
-   sem !important, ganha por ordem de cascata.
+   Acessibilidade — piso do site público.
+
+   `:is()`, não `:where()`. O `:where()` zera a especificidade dos argumentos,
+   então a regra ficava em (0,1,0) — vinda só do `:focus-visible` — e PERDIA
+   para `.field input, .field textarea, .field select { outline: none }` da
+   linha 488, que é (0,1,1). Resultado medido: os 13 campos de /login,
+   /cadastro, /reset-password e /suporte ficavam com `outline-style: none`,
+   justamente onde o usuário de teclado digita. O `:is()` herda a
+   especificidade do argumento mais forte — `[tabindex]`, (0,1,0) — e a regra
+   sobe para (0,2,0), que vence o (0,1,1) pelo `b`.
+
+   Não é "ordem de cascata": ordem só desempata especificidade IGUAL.
+
+   Alcance medido dos dois lados: 281 focáveis em 13 rotas, 13 mudam — os 13
+   campos. Nenhum outro seletor é atropelado. Guardado por
+   tests/frontend/faq_focus_ring.test.mjs.
    ══════════════════════════════════════════════════════════════════════ */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+:is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--pink);
   outline-offset: 2px;
 }
