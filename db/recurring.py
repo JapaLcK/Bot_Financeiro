@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from .categories import ensure_user_category, resolve_category_for_write
 from .connection import get_conn
 from .users import ensure_user
 
@@ -209,7 +210,13 @@ def create_recurring_expense(
     if payment_type == "account":
         card_id = None  # ignora card_id quando não é cartão
 
+    # #147: o usuário DIGITA esta categoria e o cobrador a copia pra
+    # `launches.categoria` todo mês. Sem resolver, "McDonald's" nascia cru aqui e
+    # abria fatia gêmea no donut. A REGRA das 4 portas (o que pode ser gravado, e
+    # por que o `create` segue o plano em vez de ser fixo em True) está escrita num
+    # lugar só: `db/categories.resolve_category_for_write`.
     cat = (category or "").strip() or "outros"
+    cat = resolve_category_for_write(user_id, cat)
     note = (notes or "").strip() or None
 
     with get_conn() as conn:
@@ -239,6 +246,7 @@ def create_recurring_expense(
             )
             new_id = cur.fetchone()["id"]
         conn.commit()
+    ensure_user_category(user_id, cat)  # só DEPOIS do insert (não deixa categoria órfã)
     return get_recurring_expense(user_id, new_id)
 
 
@@ -286,9 +294,13 @@ def update_recurring_expense(
             sets.append("last_amount_changed_at = now()")
         sets.append("amount = %s")
         params.append(Decimal(str(amount)))
+    cat: str | None = None
     if category is not None:
+        # regra em `db/categories.resolve_category_for_write`
+        cat = (category or "").strip() or "outros"
+        cat = resolve_category_for_write(user_id, cat)
         sets.append("category = %s")
-        params.append((category or "").strip() or "outros")
+        params.append(cat)
     if due_day is not None:
         if int(due_day) < 1 or int(due_day) > 31:
             raise ValueError("DIA_INVALIDO")
@@ -352,6 +364,8 @@ def update_recurring_expense(
                 params,
             )
         conn.commit()
+    if cat:
+        ensure_user_category(user_id, cat)  # só DEPOIS do update
     return get_recurring_expense(user_id, rec_id)
 
 
