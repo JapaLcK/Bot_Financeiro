@@ -42,3 +42,4 @@ skills-lock.json
 
 # Harness de testes de frontend (tests/frontend/): dependência local, não viaja.
 node_modules/
+.qa_ai_cost.jsonl
