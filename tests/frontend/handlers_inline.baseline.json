@@ -13,6 +13,7 @@
       "openUserDetail",
       "openUsersModal",
       "payoutAction",
+      "resetTrial",
       "setUsersStatus",
       "showPayoutPix",
       "showUsersList",
