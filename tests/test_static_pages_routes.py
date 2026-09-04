@@ -416,17 +416,23 @@ def _forma_do_header(no):
     comportamento e errado na §0.7 (duplica o valor da constante), e a mensagem
     que o autor recebe tem que ser essa, não "sem header nunca renova".
 
-    A constante conta nas três escritas que o repositório usa: o nome nu, o
-    apelido com `_` (o bloco de import do monólito apelida quase tudo assim —
+    A constante casa pelo nome final, então três escritas contam igual: o nome nu,
+    o apelido com `_` (o bloco de import do monólito apelida quase tudo assim —
     `stamp_asset_versions as _stamp_asset_versions`) e o acesso por atributo
-    (`shared.WWW_AUTHENTICATE_401`). Sem isso o gate ficava VERMELHO em código
-    correto, mandando o autor procurar um header que está na linha.
+    (`shared.WWW_AUTHENTICATE_401`). É guarda PROSPECTIVA, não conserto de um
+    vermelho observado: hoje os 8 sítios usam o nome nu (`git grep -n
+    WWW_AUTHENTICATE_401`), e as outras duas formas não existem no repositório.
     """
     import ast
 
-    # ponytail: casa pelo nome final, não resolve o import. Um apelido sem
-    # relação (`as WWW`) passaria por ausente; resolver aliases exige ler o
-    # bloco de import — faça se alguém escrever um.
+    # ponytail: casa pelo nome final, não resolve o import. Três tetos, medidos:
+    # (1) fail-closed — um apelido sem relação (`as WWW`) passa por ausente;
+    # (2) fail-open — `qualquer_coisa.WWW_AUTHENTICATE_401` devolve "constante":
+    #     serve QUALQUER atributo com esse nome final, em qualquer objeto;
+    # (3) assimetria — `_varre_401` lê status e detail posicionalmente, o header
+    #     só por kwarg: `HTTPException(401, "m", WWW_AUTHENTICATE_401)` dá forma
+    #     None. Fail-closed, e ninguém escreve assim aqui.
+    # Resolver alias e objeto exige ler o bloco de import — faça se aparecer um.
     nome = getattr(no, "id", None) or getattr(no, "attr", None) or ""
     if nome.lstrip("_") == "WWW_AUTHENTICATE_401":
         return "constante"
@@ -494,8 +500,10 @@ def _varre_401(caminho, fonte):
         if not _e_401(status):
             continue
         detail = kw.get("detail")
-        # `HTTPException(401, "mensagem")` — detail é o 2º posicional, e lê-lo
-        # evita que uma mensagem constante nova caia no curinga `<str(exc)>`.
+        # `HTTPException(401, "mensagem")` — detail é o 2º posicional. Medido: sem
+        # esta leitura o gate CONTINUA vermelho no sítio novo (quem fecha o buraco
+        # é o sufixo `#2` abaixo). O que ela entrega é a chave legível — a
+        # mensagem — em vez de mais um `<str(exc)>` na tabela.
         if detail is None and nome == "HTTPException" and len(chamada.args) > 1:
             detail = chamada.args[1]
         if detail is None and isinstance(kw.get("content"), ast.Dict):
@@ -521,6 +529,41 @@ def _varre_401(caminho, fonte):
                 marca = f"{marca}#{n}"
         achados.append(((caminho, funcao, marca), _forma_do_header(kw.get("headers"))))
     return achados
+
+
+def test_varredura_401_reconhece_as_formas():
+    """Controle do GATE, não do código de produção.
+
+    Sem ele as três partes da varredura podem ser apagadas com a suíte verde
+    (medido em `0dc1f5c`: 18 passed com cada uma removida) — e uma varredura que
+    falha ABERTO deixa o 401 novo passar sem família, que é a regressão que este
+    arquivo inteiro existe para impedir.
+    """
+    fonte = '''
+def f():
+    raise HTTPException(401, "posicional")
+    raise HTTPException(status_code=401, detail=str(exc))
+    raise HTTPException(status_code=401, detail=str(erro))
+
+def g():
+    raise HTTPException(401, "a", headers=_WWW_AUTHENTICATE_401)
+    raise HTTPException(401, "b", headers=shared.WWW_AUTHENTICATE_401)
+    raise HTTPException(401, "c", headers={"WWW-Authenticate": "Bearer"})
+    raise HTTPException(401, "d")
+'''
+
+    assert dict(_varre_401("x.py", fonte)) == {
+        # detail no 2º posicional vira a mensagem, não o curinga
+        ("x.py", "f", "posicional"): None,
+        # dois curingas iguais na MESMA função: o segundo cai fora da tabela
+        ("x.py", "f", "<str(exc)>"): None,
+        ("x.py", "f", "<str(exc)>#2"): None,
+        # as três escritas da constante e o dict literal
+        ("x.py", "g", "a"): "constante",
+        ("x.py", "g", "b"): "constante",
+        ("x.py", "g", "c"): "literal",
+        ("x.py", "g", "d"): None,
+    }, dict(_varre_401("x.py", fonte))
 
 
 def test_401_de_autenticacao_declara_familia():
@@ -560,6 +603,13 @@ def test_401_de_autenticacao_declara_familia():
         achados += _varre_401(rel.as_posix(), (raiz / rel).read_text(encoding="utf-8"))
 
     assert achados, "a varredura não achou 401 nenhum — o walk quebrou"
+
+    mortas = sorted(set(_401_RENOVAVEL) - {c for c, _ in achados})
+    assert not mortas, (
+        "entrada de `_401_RENOVAVEL` sem sítio no código. Curinga órfão volta a "
+        "absorver o 401 novo da mesma função em silêncio, com a família velha — "
+        f"apague a entrada junto com o `raise`: {mortas}"
+    )
 
     sem_classificacao = sorted({c for c, _ in achados if c not in _401_RENOVAVEL})
     assert not sem_classificacao, (
