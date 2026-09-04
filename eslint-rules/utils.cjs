@@ -24,35 +24,6 @@ const BANNED_CONSOLE_METHODS = new Set([
   "profileEnd",
 ]);
 
-// A file whose basename says it is not production source. Config and story
-// files are here for the same reason as tests: their length says nothing
-// about how well the code behind them is factored.
-const NON_SOURCE_BASENAME = /\.(test|spec|stories|config|conf)\.[^.]+$/;
-
-// A barrel or a pure declaration module. An index.ts that only re-exports
-// has no meaningful size, and neither does a file that is nothing but type
-// or constant declarations.
-const TYPE_BARREL_BASENAME =
-  /^(index|types?|interfaces?|constants?|dtos?|enums?|vo)\.[^.]+$/;
-
-// Directories whose contents are either not authored by hand or not part of
-// the application being linted.
-const IGNORED_PATH_SEGMENTS = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  "generated",
-  "__generated__",
-  "migrations",
-  "migration",
-  "locales",
-  "__tests__",
-  "__mocks__",
-  "fixtures",
-  "mocks",
-]);
-
 function normalizeFilePath(filename) {
   return filename.replace(/\\/g, "/");
 }
@@ -63,20 +34,20 @@ function fileName(context) {
   return normalizeFilePath(context.filename ?? context.getFilename());
 }
 
+// ADAPTADO do vibe-coding-toolkit (que é TypeScript): lá havia mais duas
+// isenções por nome — barrel/declaração (`index|types|interfaces|constants|
+// dtos|enums|vo`) e um `.config`/`.stories` — e uma lista de diretórios
+// (`generated/`, `locales/`, `dist/`, `build/`, `migrations/`, `fixtures/`,
+// `mocks/`, `.next/`, `__tests__/`). Nenhum desses diretórios existe neste
+// repositório (medido em 2026-09-04; para remedir:
+//   git ls-files | awk -F/ '{for(i=1;i<NF;i++) print $i}' | sort -u
+// ) e nenhum arquivo tem esses basenames. Elas só abriam buraco no gate:
+// `frontend/index.js` é nome plausível aqui (já existe frontend/index.html) e
+// passava com 404 linhas sem uma linha vermelha. Sobra a única que este repo
+// tem de verdade: os testes em tests/frontend/*.test.mjs, cujo tamanho não
+// diz nada sobre a fatoração do código de produção.
 function isTestFile(filename) {
-  return /(^|\/)(__tests__|__mocks__|fixtures|mocks)(\/|$)|\.(test|spec)\.[cm]?[jt]sx?$/.test(
-    filename
-  );
-}
-
-function isCheckableSourceFile(filename) {
-  if (filename.endsWith(".d.ts")) return false;
-  const segments = filename.split("/");
-  for (const segment of segments.slice(0, -1)) {
-    if (IGNORED_PATH_SEGMENTS.has(segment)) return false;
-  }
-  const base = segments[segments.length - 1];
-  return !NON_SOURCE_BASENAME.test(base) && !TYPE_BARREL_BASENAME.test(base);
+  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(filename);
 }
 
 // Baseline entries are matched as a whole path or as a path suffix, so an
@@ -93,6 +64,5 @@ module.exports = {
   DEFAULT_MAX_LINES,
   fileName,
   isBaselineIgnored,
-  isCheckableSourceFile,
   isTestFile,
 };

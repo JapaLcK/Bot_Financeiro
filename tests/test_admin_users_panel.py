@@ -1126,6 +1126,20 @@ def test_trial_reset_registra_a_data_da_trava_herdada_que_a_ancora_nao_tem(
         # startswith reprovava um valor certo — vermelho de relógio de parede,
         # em qualquer branch. `fromisoformat` devolve datetime consciente de
         # fuso, e a igualdade entre dois aware compara o momento, não o texto.
+        #
+        # CONTROLE NEGATIVO, medido em 2026-09-04 (a asserção antiga passa fora
+        # da janela, então "a suíte passou" não provava nada). Duas formas de
+        # entrar na janela sem esperar o relógio de parede:
+        #   1. congelando o NOW deste módulo em 01:30 UTC (plugin de 8 linhas
+        #      que faz `mod.NOW = ...` em pytest_collection_modifyitems, no
+        #      molde de tests/test_virada_de_mes.py — não há freezegun aqui),
+        #      com REPORT_TIMEZONE=America/Sao_Paulo: o log devolveu
+        #      '2026-05-06T22:30:00-03:00' e `queimado.date()` era 2026-05-07 —
+        #      startswith VERMELHO, fromisoformat VERDE (60 passed no arquivo);
+        #   2. sem congelar nada, `REPORT_TIMEZONE=Asia/Tokyo pytest` a partir
+        #      das 15:00 UTC (o offset +09:00 empurra o mesmo instante para o
+        #      dia seguinte): startswith VERMELHO
+        #      ('2026-05-08T00:42:30+09:00' × 2026-05-07), fromisoformat VERDE.
         assert (
             datetime.fromisoformat(detalhes["previous_lock_started_at"]) == queimado
         ), detalhes

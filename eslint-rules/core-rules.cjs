@@ -5,7 +5,6 @@ const {
   DEFAULT_MAX_LINES,
   fileName,
   isBaselineIgnored,
-  isCheckableSourceFile,
   isTestFile,
 } = require("./utils.cjs");
 
@@ -60,21 +59,26 @@ const maxLines = {
     const options = context.options[0] ?? {};
     const max = options.max ?? DEFAULT_MAX_LINES;
     const ignore = options.ignore ?? [];
-    // Opt-in, default false. Test files are outside isCheckableSourceFile by
-    // design; turning this on is how the same budget gets applied to them in
-    // a separate "warn" block without loosening the "error" on production
-    // code. See the test-file block in eslint.config.mjs.example.
+    // Opt-in, default false. Arquivo de teste fica de fora por padrão; ligar
+    // isto é como o mesmo orçamento se aplica a eles num bloco "warn"
+    // separado, sem afrouxar o "error" do código de produção. Ver o bloco de
+    // tests/frontend no eslint.config.mjs.
     const includeTests = options.includeTests ?? false;
     const filename = fileName(context);
-    const checkable =
-      isCheckableSourceFile(filename) ||
-      (includeTests && isTestFile(filename) && !filename.endsWith(".d.ts"));
-    if (!checkable || isBaselineIgnored(filename, ignore)) {
+    if (
+      (isTestFile(filename) && !includeTests) ||
+      isBaselineIgnored(filename, ignore)
+    ) {
       return {};
     }
     return {
       Program() {
-        const lines = context.sourceCode.lines.length;
+        // `sourceCode.lines` traz um elemento vazio depois do \n final. Sem
+        // descontar, a mensagem sai 1 acima do que o `wc -l` do eslint.config
+        // manda usar para remedir, e o teto efetivo vira 349 (CLAUDE.md §0.7).
+        const src = context.sourceCode.lines;
+        const lines =
+          src.length - (src.length > 0 && src[src.length - 1] === "" ? 1 : 0);
         if (lines > max) {
           context.report({
             loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 0 } },

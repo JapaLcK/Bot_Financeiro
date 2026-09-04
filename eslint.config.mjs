@@ -95,8 +95,8 @@ export default defineConfig([
       // 2026-09-03: as 3 eram `_fmtBRL`/`_fmtDateBR` declaradas 2× e 3× no
       // dashboard.js, com a última vencendo em todo o arquivo.
       "no-redeclare": ["error", { builtinGlobals: false }],
-      // 1 violação, e é bug de verdade: `errEl` em frontend/dashboard.js:9774
-      // está fora do escopo do `const errEl` da linha 9747.
+      // 1 violação, e é bug de verdade: `errEl` em frontend/dashboard.js:9750
+      // está fora do escopo do `const errEl` da linha 9723.
       "no-undef": "warn", // 1
       // Orçamento de tamanho e complexidade: "warn" de propósito. São números
       // para conversa sobre fatoração, não portão. As contagens abaixo são a
@@ -117,9 +117,17 @@ export default defineConfig([
       // explícita em `ignore` (linha de base de 2026-09-03), então qualquer
       // arquivo NOVO acima de 350 linhas quebra o lint hoje. Cada arquivo
       // desta lista sai daqui quando for quebrado — não suba o teto.
+      // "Qualquer arquivo NOVO" é literal desde 2026-09-04: as isenções por
+      // nome e por diretório que vinham do toolkit TypeScript foram
+      // removidas (eslint-rules/utils.cjs) porque isentavam nomes plausíveis
+      // aqui — `frontend/index.js` com 404 linhas passava sem uma linha
+      // vermelha. Sonda de 403 linhas em 10 nomes: os 10 reprovam.
       "quality/max-lines": [
         "error",
         {
+          // A contagem da regra bate com o `wc -l` (a linha vazia depois do
+          // \n final é descontada em eslint-rules/core-rules.cjs): 350 passa,
+          // 351 reprova, e a mensagem informa o mesmo número do comando.
           max: 350,
           // Sem o tamanho de cada um anotado aqui: número que um comando
           // responde envelhece em silêncio (CLAUDE.md §2 — e este já
