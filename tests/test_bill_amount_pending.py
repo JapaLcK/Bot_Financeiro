@@ -3202,34 +3202,50 @@ _VIAS_281 = [
 ]
 
 
-def _via_281(texto: str) -> str:
-    """Reconstrói a via a partir das MESMAS peças que a porta 2 usa."""
-    from parsers import _STARTS_WITH_VALUE_RE
-    from core.intent_classifier import classify
-    from core.intent_router import (ABANDONA, ESCRITA,
-                                    _o_reroteamento_le_o_mesmo_valor,
-                                    _so_o_valor)
+# As quatro vias colapsam nos DOIS veredictos que a porta 2 realmente devolve.
+# `EXPLICITO` e `ABANDONA` chegam ao mesmo `"abandona"` por caminhos
+# diferentes; `AMBIGUO` e `COMPATIVEL`, ao mesmo `"resolve"`.
+_VEREDICTO_DA_VIA = {
+    "EXPLICITO": "abandona", "ABANDONA": "abandona",
+    "AMBIGUO": "resolve", "COMPATIVEL": "resolve",
+}
 
-    i = classify(texto, allow_ai=False).intent
-    if i in ESCRITA and not _so_o_valor(texto):
-        if _STARTS_WITH_VALUE_RE.match(texto):
-            return "AMBIGUO"
-        if not _o_reroteamento_le_o_mesmo_valor(texto):
-            return "COMPATIVEL"
-        return "EXPLICITO"
-    return "ABANDONA" if i in ABANDONA else "COMPATIVEL"
+
+def _via_281(texto: str) -> str:
+    """Chama a PORTA 2 DE VERDADE com uma `clarification` sintética.
+
+    Antes esta função REIMPLEMENTAVA o predicado (mesma classificação, mesmos
+    portões, mesma ordem) — duas fontes de verdade para a mesma regra (§0.7),
+    e a tabela ficava verde com o `_clarification_abandonada` arbitrariamente
+    torto. Medido: invertendo o `return "abandona"` final do router, a tabela
+    de ~47 casos não produzia UM vermelho.
+
+    O payload sintético é o de uma pergunta de VALOR (`falta="amount"`,
+    `entities={}`): não dispara o `_ja_tem_o_valor` e não dispara o veto de
+    catálogo (`_CHAVE_DO_NOME["pockets.withdraw"]` é `pocket_name`, não
+    `amount`), então nenhum acesso a banco acontece e o `user_id` é inerte.
+    """
+    from core.intent_router import _clarification_abandonada
+
+    clarif = {"payload": {"intent": "pockets.withdraw", "falta": "amount",
+                          "entities": {}}}
+    return _clarification_abandonada(clarif, texto, 0)
 
 
 @pytest.mark.parametrize("texto,via", _VIAS_281)
 def test_281_tabela_do_predicado(texto, via):
-    assert _via_281(texto) == via
+    assert _via_281(texto) == _VEREDICTO_DA_VIA[via], via
 
 
 def test_281_escrita_e_abandona_sao_disjuntos():
-    """A ordem dos dois ramos em `_clarification_abandonada` não pode mudar
-    resultado. Se um intent novo entrar nos dois conjuntos, ela passa a mudar —
-    e o veto de catálogo (que roda só depois do `ABANDONA`) deixaria de ser
-    alcançável para ele."""
+    """Ser disjunto NÃO é o que torna o veto de catálogo alcançável — essa era
+    a afirmação errada do primeiro texto deste teste, e ela custou o achado A
+    do Tester (caixinha chamada `fatura` perdendo R$ 200).
+
+    O que a disjunção prende é só isto: nenhum intent está nos dois conjuntos,
+    então cada mensagem entra por UMA via. Quem garante o veto é o `elif` do
+    `_clarification_abandonada`, e quem prende isso é o
+    `test_281_veto_de_catalogo_alcanca_a_via_de_escrita`."""
     from core.intent_router import ABANDONA, ESCRITA
 
     assert ABANDONA & ESCRITA == set()
@@ -3279,3 +3295,157 @@ def test_281_so_o_valor_nao_estoura_com_texto_longo():
     inicio = time.perf_counter()
     _so_o_valor(" e ".join(["2 mil"] * 40) + " x")
     assert time.perf_counter() - inicio < 1.0
+
+
+# ── Os três achados do Tester no #281, pela CONVERSA ────────────────────────
+# Os três nasceram do mesmo desenho: a via `ESCRITA` decidindo sozinha, com
+# `return` próprio, antes das duas proteções que já existiam (o veto de
+# catálogo do #185 e o `valor_perigoso`). Cada um cobra um `assert` sobre o
+# DINHEIRO, não sobre o texto da resposta.
+
+def _pergunta_de_valor_do_saque(uid, pocket="viagem", saldo=300, conta=400):
+    """Deixa viva a pergunta "Qual o valor?" de um saque de caixinha."""
+    import db
+
+    db.ensure_user(uid)
+    db.add_launch_and_update_balance(uid, "receita", conta, alvo="salario",
+                                     nota="setup", categoria="salario",
+                                     is_internal_movement=False)
+    db.create_pocket(uid, pocket)
+    db.pocket_deposit_from_account(uid, pocket, saldo)
+
+
+def _saldo(uid, pocket):
+    import db
+
+    return {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}[pocket]
+
+
+@pytest.mark.parametrize("nome", ["fatura", "cartão", "limite"])
+def test_281_veto_de_catalogo_alcanca_a_via_de_escrita(nome):
+    """ACHADO A. O veto do #185 ficara INALCANÇÁVEL para os 9 intents de
+    escrita: a via `ESCRITA` dava `return "abandona"` antes dele.
+
+    Vítimas são nomes triviais de caixinha — `fatura` classifica
+    `credit.handle` 1.0, que entrou no `ESCRITA` por decisão do dono. Medido
+    sem o `elif`, caixinha `fatura` com R$ 300 e "saquei 200" pendente:
+    "📭 Você ainda não tem cartões cadastrados", caixinha INTACTA, pendência
+    CONSUMIDA, R$ 200 perdidos — e repetir `fatura` re-abandonava para sempre.
+
+    Os quatro testes do #185 não viam porque `saldo` está no `ABANDONA`, que
+    sempre passou pelo veto."""
+    import uuid
+
+    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    _pergunta_de_valor_do_saque(uid, pocket=nome, saldo=300, conta=700)
+
+    assert "caixinha" in _diga(uid, "saquei 200").lower()
+    _diga(uid, nome)
+
+    assert _saldo(uid, nome) == 100.00
+
+
+@pytest.mark.parametrize("resposta", [
+    # A pontuação de prosa impede o `_so_o_valor` de casar, e sem o filtro a
+    # via EXPLÍCITO entregava a mensagem ao roteamento normal, por fora dele.
+    "paguei, 132 50", "paguei: 132 50", "paguei 132 50 ok", "paguei 132 50?",
+    "paguei os 132 50", "paguei 132 50​",
+    # ALVO NOMEADO: aqui não há pontuação nenhuma — o `_SO_O_VALOR_RE` nunca
+    # protegeu o que nomeia alvo, então a lista de formas não fecharia isto.
+    "gastei 132 50 no mercado", "paguei 132 50 de luz",
+    "gastei -10 no mercado", "paguei 1.23.456 de luz",
+    "gastei " + "1" * 400 + " no mercado",
+    # CONTROLE POSITIVO: já era verde antes da guarda (cai em AMBÍGUO pelo
+    # `_STARTS_WITH_VALUE_RE`, que vem antes) e continua verde depois — a
+    # guarda não mudou o caminho de quem começa com o valor.
+    "-50 no mercado",
+])
+def test_281_valor_perigoso_vem_antes_do_abandono(resposta):
+    """ACHADOS B e C. `valor_perigoso` mora no `_resolve_clarification`, e
+    abandonar passa por FORA dele. Medido sem a guarda, respondendo à pergunta
+    de valor de um saque: R$ 13.250,00 registrados, R$ 10,00 POSITIVOS para
+    `-10`, R$ 123.456,00 para `1.23.456` e "erro interno" para os 400 dígitos.
+
+    O consertado é a CLASSE, não as strings: o filtro roda antes da decisão,
+    então qualquer forma nova de resíduo cai nele igual."""
+    import uuid
+
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    _pergunta_de_valor_do_saque(uid)
+    _diga(uid, "tirar da caixinha viagem")
+    assert "Qual o valor" in _diga(uid, "viagem")
+
+    saida = _diga(uid, resposta)
+
+    assert "erro interno" not in saida.lower(), saida
+    assert [l for l in (db.list_launches(uid, limit=20) or [])
+            if (l.get("tipo") or "") == "despesa"] == [], saida
+    assert _saldo(uid, "viagem") == 300.00, saida
+
+
+@pytest.mark.parametrize("resposta,fecha_o_saque", [
+    # Verbo de lançamento + UMA palavra: nem valor nem alvo, então não é
+    # comando novo. `tudo` preenche o mesmo slot que um valor preencheria.
+    ("gastei tudo", True), ("paguei tudo", True),
+    # A palavra que não é resposta nenhuma: o veredito é "re-pergunta", nunca
+    # "vira alvo de uma pendência nova".
+    ("gastei metade", False),
+])
+def test_281_verbo_com_uma_palavra_nao_abandona(resposta, fecha_o_saque):
+    """ACHADO D. Sem a guarda, `gastei tudo` respondia "🐷 Quanto foi no
+    *tudo*?": o saque se perdia E a palavra do usuário virava ALVO de uma
+    pendência nova — a classe do
+    `test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta`.
+
+    Abandonar só faz sentido quando o outro comando PODE RODAR; sem valor e
+    sem alvo, o `launches.add` só refaz a pergunta em cima do lixo."""
+    import uuid
+
+    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    _pergunta_de_valor_do_saque(uid)
+    _diga(uid, "tirar da caixinha viagem")
+    assert "Qual o valor" in _diga(uid, "viagem")
+
+    saida = _diga(uid, resposta)
+
+    assert "*tudo*" not in saida and "*metade*" not in saida, saida
+    assert _saldo(uid, "viagem") == (0.00 if fecha_o_saque else 300.00), saida
+
+
+def test_281_verbo_com_uma_palavra_nao_come_o_comando_explicito():
+    """CONTROLE POSITIVO da guarda do ACHADO D: ela restringe UMA palavra, e o
+    que nomeia alvo continua abandonando. Sem este caso, a guarda passaria
+    recusando tudo — pior que o bug."""
+    from core.intent_router import _verbo_e_uma_palavra
+
+    assert _verbo_e_uma_palavra("gastei tudo")
+    assert not _verbo_e_uma_palavra("gastei 50 no mercado")
+    assert not _verbo_e_uma_palavra("paguei 120 de luz")
+    # Só os 12 `_VERBOS_LANCAMENTO` são prefixo sem conteúdo.
+    assert not _verbo_e_uma_palavra("retirei tudo")
+    assert not _verbo_e_uma_palavra("esvaziar caixinha viagem")
+    assert not _verbo_e_uma_palavra("fatura")
+
+
+def test_281_sem_conteudo_alt_e_deterministico():
+    """`_SEM_CONTEUDO` é `frozenset`: `key=len` sozinho desempatava pela ordem
+    de iteração, que muda com o `PYTHONHASHSEED`. O RESULTADO era estável (md5
+    idêntico em 7 seeds), mas o TEMPO não — `_so_o_valor("um "*1365 + "x")`
+    mediu de 463 ms a 6,1 s conforme a seed, e é alcançável por mensagem de
+    usuário. A segunda chave (alfabética) torna o custo reprodutível."""
+    from core.intent_router import _SEM_CONTEUDO_ALT
+
+    alt = _SEM_CONTEUDO_ALT.split("|")
+    # A alternância mais longa primeiro — é o que evita "um" casar dentro de
+    # "umas". Esta parte já valia com `key=len`.
+    assert all(len(a) >= len(b) for a, b in zip(alt, alt[1:])), alt
+    # E, dentro de cada comprimento, ordem ESTRITA. É o que tira o `frozenset`
+    # da jogada: sem a segunda chave, o desempate é a iteração do set.
+    #
+    # TETO desta forma: ela afirma a propriedade, não a expressão (senão seria
+    # tautológica), e com `key=len` sozinho a ordem dentro de um grupo PODERIA
+    # sair alfabética por sorte de uma seed. Com 39 palavras isso é remoto, mas
+    # não é zero — o teto é do teste, não do conserto.
+    assert all(a < b for a, b in zip(alt, alt[1:]) if len(a) == len(b)), alt

@@ -276,12 +276,33 @@ def abandona_pergunta_de_valor(text: str) -> bool:
 #
 # A unidade é obrigatória em cada iteração externa: sem isso o `PT_VALUE`
 # aninhado num segundo `*` dá backtracking catastrófico (medido: 40 grupos de
-# "2 mil e " não terminaram em 120s; com esta forma, 0,09 ms).
+# "2 mil e " não terminaram em 120s; com esta forma, termina). O "0,09 ms" que
+# estava escrito aqui era de UMA seed de `PYTHONHASHSEED` — o tempo varia com
+# a ordenação da alternância, e é o que a nota de ordenação abaixo trata. O
+# `test_281_so_o_valor_nao_estoura_com_texto_longo` mede exponencial × não
+# exponencial, não milissegundos.
 #
 # "centavos" entra além do `_UNIDADE` da porta 1 porque aqui a mensagem é uma
 # frase falada inteira ("30 reais e 50 centavos"), e lá é só o número.
+#
+# A ordenação tem DUAS chaves de propósito. `_SEM_CONTEUDO` é um `frozenset`,
+# então `key=len` sozinho desempata pela ordem de iteração — que muda com o
+# `PYTHONHASHSEED`. O resultado do `fullmatch` é o mesmo (medido: md5 idêntico
+# sobre 7 seeds), mas o TEMPO não é: `_so_o_valor("um "*1365 + "x")` mediu de
+# 463 ms a 6,1 s conforme a seed, e é alcançável por mensagem de usuário
+# ("gastei " + "um "*1362 + "x" → 1,3–1,5 s). O `-len` mantém a alternância mais
+# longa primeiro (é o que evita o casamento parcial de "um" dentro de "umas") e
+# o alfabético torna o custo reprodutível. REMEDIDO em 2026-09-04 com a segunda
+# chave, nas mesmas 7 seeds (0 1 2 3 7 42 12345):
+#     PYTHONHASHSEED=$S .venv/bin/python -c "…md5(_SEM_CONTEUDO_ALT); _so_o_valor('um '*1365+'x')"
+# md5 idêntico nas 7 e 392–443 ms — remedir antes de reusar o número.
+#
+# ponytail: o teto que SOBRA é o custo linear-com-constante-alta do próprio
+# `_SO_O_VALOR_RE` (≈400 ms para 1365 palavras de enchimento). É o mesmo da
+# `main`, agora só previsível. Se virar problema, o conserto é cortar a
+# mensagem por tamanho antes do `fullmatch`, não mexer na alternância.
 _SEM_CONTEUDO_ALT = "|".join(
-    sorted((re.escape(w) for w in _SEM_CONTEUDO), key=len, reverse=True))
+    sorted((re.escape(w) for w in _SEM_CONTEUDO), key=lambda w: (-len(w), w)))
 _SO_O_VALOR_RE = re.compile(
     rf"(?:(?:{_SEM_CONTEUDO_ALT})\s+)*(?:-\s*)?"
     rf"(?:{PT_VALUE}"
@@ -311,10 +332,45 @@ def _so_o_valor(text: str) -> bool:
     é "foi - 10" voltar a pagar R$ 10,00 positivo. Um turno a mais é barato;
     aquilo não é.
     """
-    dobrado = unicodedata.normalize(
+    return bool(_SO_O_VALOR_RE.fullmatch(_dobrado(text)))
+
+
+# Verbo de lançamento (prefixo SEM conteúdo) e MAIS NADA além de UMA palavra.
+# O `_so_o_valor` acima cobre o caso em que essa palavra é o valor; este cobre
+# o caso em que ela não é — e o veredito é o mesmo, porque a razão é a mesma:
+# a mensagem não nomeia alvo nenhum, então não compete com a pergunta viva.
+#
+# É a via EXPLÍCITO abandonando para um comando que NÃO PODE RODAR: sem valor e
+# sem alvo, o `launches.add` só faz a sua própria pergunta, com a palavra do
+# usuário no lugar do alvo — a classe que o
+# `test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta` existe para impedir.
+# Medido contra a `main`, respondendo "Qual o valor?" de um saque da caixinha
+# `viagem` (R$ 300):
+#   "gastei tudo"    main: esvaziada -R$ 300,00   sem esta guarda: "Quanto foi no *tudo*?"
+#   "paguei tudo"    main: esvaziada -R$ 300,00   sem esta guarda: "Quanto foi no *tudo*?"
+#   "gastei metade"  main: "Não entendi o valor" (pergunta VIVA)
+#                                                 sem esta guarda: "Quanto foi no *metade*?"
+#
+# UMA palavra, não N: "gastei 50 no mercado" nomeia alvo e segue EXPLÍCITO.
+# E só os 12 `_VERBOS_LANCAMENTO` (mais o enchimento) são prefixo sem conteúdo,
+# então `retirei tudo`, `saquei tudo`, `tirei tudo` e `esvaziar caixinha viagem`
+# não passam por aqui — os quatro seguem abandonando, como na `main`.
+_VERBO_E_UMA_PALAVRA_RE = re.compile(
+    rf"(?:(?:{_SEM_CONTEUDO_ALT})\s+)+\S+", re.I)
+
+
+def _verbo_e_uma_palavra(text: str) -> bool:
+    """A mensagem é prefixo sem conteúdo + UMA palavra ("gastei tudo")."""
+    return bool(_VERBO_E_UMA_PALAVRA_RE.fullmatch(_dobrado(text)))
+
+
+def _dobrado(text: str) -> str:
+    """A dobra da porta 1: `lower` + NFKD sem combining + `_TRACOS` +
+    `limpa_pontuacao_final`. Compartilhada pelos dois portões acima."""
+    d = unicodedata.normalize(
         "NFKD", (text or "").strip().lower().translate(_TRACOS))
-    dobrado = "".join(c for c in dobrado if not unicodedata.combining(c))
-    return bool(_SO_O_VALOR_RE.fullmatch(limpa_pontuacao_final(dobrado)))
+    return limpa_pontuacao_final(
+        "".join(c for c in d if not unicodedata.combining(c)))
 
 
 def route(result: IntentResult, msg: IncomingMessage, *,
@@ -880,6 +936,14 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     Não é `bool` de propósito: o PR B acrescenta uma via, e um `bool` obrigaria
     o chamador a adivinhar qual dos dois "False" ele recebeu.
 
+    TETO DECLARADO, não verificável neste ambiente: quando a via `ESCRITA`
+    abandona, o turno sai daqui pelo roteamento normal e o
+    `classify_with_context` — que só roda dentro do `_resolve_clarification` —
+    NÃO roda. Para a conta Pro, isso significa que a IA não vê aquele turno. A
+    suíte não cobre: os testes de WhatsApp mockam o LLM (`CLAUDE.md §3`), e um
+    `classify` determinístico com `allow_ai=False` é o que decide aqui. Só se
+    observa em produção, com conta Pro.
+
     UMA chamada de `classify` por turno. O `abandona_pergunta_de_valor` faria
     a segunda com a mesma entrada e o mesmo `allow_ai=False` — a linha dele
     está inlinada abaixo, e o docstring dele continua sendo a explicação de
@@ -902,7 +966,7 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     o valor, recusa o valor perigoso ou re-pergunta — a pergunta continua viva
     em todos os três casos.
     """
-    from parsers import _STARTS_WITH_VALUE_RE
+    from parsers import _STARTS_WITH_VALUE_RE, _extract_valor
 
     payload = clarif.get("payload")
     if not isinstance(payload, dict):
@@ -915,18 +979,39 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
 
     intent_da_resposta = classify((text or "").strip(), allow_ai=False).intent
 
-    # Via ESCRITA (#281), ANTES do `ABANDONA`: os dois conjuntos são disjuntos
-    # (o `test_281_escrita_e_abandona_sao_disjuntos` prende isso), então a
-    # ordem não muda resultado — ela está aqui porque o veto de catálogo
-    # abaixo é sobre o `ABANDONA`, e misturar os dois blocos confunde.
-    if intent_da_resposta in ESCRITA and not _so_o_valor(text):
+    # As DUAS vias caem no veto de catálogo abaixo — `elif`, não dois `return`.
+    # Ser disjunto do `ABANDONA` (o `test_281_escrita_e_abandona_sao_disjuntos`)
+    # NÃO bastava: o que tornava o veto inalcançável não era um intent nos dois
+    # conjuntos, era o `return "abandona"` que esta via tinha antes dele.
+    # Medido, caixinha chamada `fatura` com R$ 300 e "saquei 200" pendente:
+    #   "fatura" -> classify `credit.handle` 1.0, que está no ESCRITA
+    #            -> abandonava: "Você ainda não tem cartões cadastrados",
+    #               caixinha INTACTA, pendência consumida, R$ 200 perdidos, e
+    #               repetir "fatura" re-abandonava para sempre.
+    # É o mesmo bug que o #185 fechou, por outra porta — e os testes do #185
+    # não viam porque `saldo` (do `ABANDONA`) continuava passando pelo veto.
+    if (intent_da_resposta in ESCRITA
+            and not _so_o_valor(text) and not _verbo_e_uma_palavra(text)):
         if _STARTS_WITH_VALUE_RE.match((text or "").strip()):
             return "resolve"   # AMBÍGUO — desempate é o PR B da #281
         if not _o_reroteamento_le_o_mesmo_valor(text):
             return "resolve"
-        return "abandona"      # EXPLÍCITO — verbo próprio, comando novo
-
-    if intent_da_resposta not in ABANDONA:
+        # FILTRO DE DANO antes de largar a pergunta. Abandonar passa por FORA
+        # do `valor_perigoso` (ele mora no `_resolve_clarification`), então
+        # todo texto cuja pontuação de prosa impede o `_so_o_valor` de casar
+        # entrava no roteamento normal SEM filtro. Não é lista de formas de
+        # mensagem — é a mesma pergunta que o resolver faz, feita antes:
+        #   "paguei, 132 50" / "paguei 132 50 ok" -> R$ 13.250,00
+        #   "gastei 132 50 no mercado"            -> R$ 13.250,00
+        #   "gastei -10 no mercado"               -> R$ 10,00 POSITIVOS
+        #   "gastei " + "1"*400 + " no mercado"   -> "erro interno" (inf)
+        # Com ele, os quatro voltam a `"resolve"` e o resolver re-pergunta com
+        # a pendência viva — que é o comportamento da `main`. Estritamente
+        # conservador: só faz esta via abandonar MENOS.
+        if valor_perigoso(text, _extract_valor((text or "").strip())):
+            return "resolve"
+        # EXPLÍCITO — verbo próprio, comando novo. Segue para o veto.
+    elif intent_da_resposta not in ABANDONA:
         return "resolve"
 
     # VETO DE CATÁLOGO (#185). Última palavra, e só no turno raro em que o
@@ -936,18 +1021,18 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     # saldo — é o nome que a pergunta pediu, e abandonar descartaria o valor
     # que ele já digitou ("saquei 200" → "de qual caixinha?" → "saldo").
     #
-    # DEPOIS do classificador, não antes: o determinístico decide o caso comum
-    # sozinho, e o catálogo custa I/O (`_alvos_existentes` chama
-    # `accrue_all_investments`, que ESCREVE accruals). Nesta ordem ele só roda
-    # quando a resposta já é um dos 6 intents do `ABANDONA` e a pergunta viva
-    # é de nome.
+    # DEPOIS do classificador e dos dois portões da via `ESCRITA`, não antes: o
+    # determinístico decide o caso comum sozinho, e o catálogo custa I/O
+    # (`_alvos_existentes` chama `accrue_all_investments`, que ESCREVE
+    # accruals). Nesta ordem ele só roda quando UMA DAS DUAS vias já disse
+    # "abandona" e a pergunta viva é de nome — os `return "resolve"` de cima
+    # (AMBÍGUO, guarda de entrega, valor perigoso) saem sem pagar o catálogo.
     #
-    # A via `ESCRITA` do #281 foi posta ACIMA deste bloco pelo mesmo motivo, e
-    # é o que mantém a frase anterior verdadeira: se ela caísse aqui, o turno
-    # raro do veto viraria o turno comum ("gastei 50 no mercado" é
-    # `launches.add`), e cada mensagem sequestrada pagaria as 6 chamadas de
-    # catálogo — inclusive a que escreve. Medido no #280: 6 chamadas no turno
-    # do veto contra 2 no turno que abandona.
+    # O #281 tinha posto a via `ESCRITA` acima deste bloco COM `return` próprio,
+    # justamente para não pagar essa I/O. O preço era o veto ficar inalcançável
+    # para os 9 intents de escrita — ver o comentário da via, e o custo em
+    # dinheiro na caixinha chamada `fatura`. A I/O passa a ser paga também no
+    # turno que abandona por escrita; é o lado barato da troca.
     #
     # `_ja_tem_o_valor` fica INTOCADO de propósito. A one-liner da issue
     # (ler `amount` além de `valor` ali) tem regressão medida: `saquei 200` +
