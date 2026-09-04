@@ -865,8 +865,14 @@ def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     # TETO deixado ABERTO de propósito: com catálogo ["viagem", "minha caixinha
     # viagem"], "tira 100 da minha caixinha viagem" ainda devolve "viagem",
     # porque o `_SUBST_ALVO_RE` recorta e o catálogo confirma ANTES de chegar
-    # aqui. Fechar isso mexeria na precedência documentada acima, e não há caso
-    # relatado.
+    # aqui. Fechar isso mexeria na precedência documentada acima. Está em #260,
+    # com repro e plano de teste.
+    #
+    # SEGUNDO teto, deste desempate: menções SOBREPOSTAS. Com ["casa nova",
+    # "nova moto"], "tira da casa nova moto" devolve "casa nova" — a remoção do
+    # maior deixa " moto", que não casa "nova moto", e o código aceita. Exige
+    # duas caixinhas compartilhando um token e uma frase que as emenda; é raro,
+    # mas é dinheiro num alvo adivinhado, que é a classe que este bloco fecha.
     if len(dentro) == 1:
         return dentro[0]
     return recortado or resposta.strip()
@@ -1126,8 +1132,7 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         # traz o NOME — "esvaziar caixinha" + "viagem" — perdia o esvaziar
         # (medido: virava "Qual o valor?"). Com `antes` preenchido a quantidade
         # já veio nas entities guardadas, então a condição só vale para o ramo
-        # novo. O portão do catálogo, que antes era implícito (o `_funde_o_nome`
-        # só sobrescreve alvo guardado pelo catálogo), fica explícito aqui.
+        # novo.
         chave = _CHAVE_DO_NOME.get(original_intent)
         antes = (original_entities or {}).get(chave) if chave else None
         depois = ents.get(chave) if chave else None
@@ -1135,7 +1140,6 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
                     or ents.get("want_all") != original_entities.get("want_all"))
         redirecionou = bool(depois
                             and normalize_text(antes or "") != normalize_text(depois)
-                            and _eh_nome_do_catalogo(depois, existentes)
                             and (antes or qtd_nova))
         texto = resposta_h if redirecionou else orig_text
         return _execute(original_intent, user_id, texto, ents, platform, external_id)

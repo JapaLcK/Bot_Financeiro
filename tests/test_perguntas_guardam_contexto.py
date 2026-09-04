@@ -758,7 +758,8 @@ def test_p0_caixinha_so_emoji_nao_sequestra_o_saque(uid, sem_teto_de_caixinha):
 
     _conversa(uid, "tirar da caixinha", "tira 100 da poupanca")
 
-    assert _saldos(uid)[_EMOJI] == 300.00, "o saque saiu da caixinha do emoji"
+    assert _saldos(uid) == {_EMOJI: 300.00, "viagem": 300.00}, \
+        "o saque saiu da caixinha do emoji"
 
 
 def test_p0_caixinha_so_emoji_nao_sequestra_o_deposito(uid, sem_teto_de_caixinha):
@@ -767,7 +768,25 @@ def test_p0_caixinha_so_emoji_nao_sequestra_o_deposito(uid, sem_teto_de_caixinha
 
     r = _conversa(uid, "guardei na caixinha", "coloca 100 na poupanca")
 
-    assert _saldos(uid)[_EMOJI] == 300.00, f"o depósito caiu na do emoji: {r[-1]!r}"
+    assert _saldos(uid) == {_EMOJI: 300.00, "viagem": 300.00}, \
+        f"o depósito caiu na do emoji: {r[-1]!r}"
+
+
+def test_p0_caixinha_so_emoji_continua_utilizavel(uid, sem_teto_de_caixinha):
+    """Controle POSITIVO do par acima: a guarda RESTRINGE o casamento, então
+    precisa provar que o caminho legítimo sobreviveu (CLAUDE.md §3). Sem este
+    caso, um conserto que tornasse a caixinha inerte passaria — e inerte é pior
+    que o bug, porque o usuário perde o acesso ao dinheiro que já guardou.
+
+    O nome normaliza para "" e por isso nunca casa por TEXTO; quem resolve é o
+    `_eh_nome_do_catalogo`, que compara igualdade, não contenção.
+    """
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    r = _conversa(uid, "guardei na caixinha", _EMOJI, "100")
+
+    assert _saldos(uid) == {_EMOJI: 400.00, "viagem": 300.00}, \
+        f"a caixinha ficou inalcançável: {r[-1]!r}"
 
 
 def test_p1_duas_mencoes_aninhadas_continuam_recusadas():
