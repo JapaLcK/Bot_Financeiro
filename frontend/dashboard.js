@@ -533,6 +533,16 @@ function appTzWallClockToISO(localStr) {
   return new Date(asUTC - offsetMin * 60000).toISOString();
 }
 
+// "Hoje" em APP_TZ, como YYYY-MM-DD. Caminho OPOSTO ao de `appTzWallClockToISO`
+// (que vai de parede pra instante): aqui um instante vira o DIA de calendário em
+// São Paulo. `new Date().toISOString().slice(0,10)` dá o dia em UTC — das 21:00 às
+// 23:59 de SP isso já é amanhã, para TODO usuário; e `_isoDate(new Date())` dá o
+// dia do APARELHO, que erra para quem viaja. Issue #257.
+function appTodayIso(now = new Date()) {
+  const p = _wallPartsInTZ(now, APP_TZ);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 const fmtDate = iso => {
   const d = _isoToDate(iso);
   if (!d) return "—";
@@ -4151,7 +4161,7 @@ async function saveRecurring() {
                      : (isBill ? "✓ Conta a pagar cadastrada" : "✓ Gasto fixo cadastrado"));
     _recurringCache = null;
     loadFixedView(true);           // re-render gastos fixos (sem await)
-    if (isBill) loadBillsView(true);
+    if (isBill) loadBillsView();
     sendRefresh();
   } catch (err) {
     // Reabre modal com dados preservados pro user corrigir
@@ -4443,7 +4453,7 @@ async function _fetchBills({ force = false } = {}) {
   }, { force });
 }
 
-async function loadBillsView(_forceFresh = false, { background = false } = {}) {
+async function loadBillsView({ background = false } = {}) {
   const agendaEl = document.getElementById("recurring-bills-agenda");
   if (!agendaEl) return;
   loadForecast();  // independente dos boletos; o próprio gate cuida do não-Pro
@@ -4470,7 +4480,7 @@ async function loadBillsView(_forceFresh = false, { background = false } = {}) {
   }
 }
 
-const _billToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const _billToday = () => new Date(appTodayIso() + "T00:00:00");
 const _billDate = (b) => { const d = new Date(b.due_date + "T00:00:00"); d.setHours(0, 0, 0, 0); return d; };
 const _billDaysUntil = (b) => Math.round((_billDate(b) - _billToday()) / 86400000);
 function _billOverdue(b) { return _billDaysUntil(b) < 0; }
@@ -4613,7 +4623,7 @@ async function payBill(billId, estimate, name, variavel) {
       throw new Error(await _errDetail(resp));
     }
     showToast(`✓ Boleto pago: ${_fmtBRL(amount)}`);
-    loadBillsView(true);
+    loadBillsView();
     sendRefresh();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao pagar" });
@@ -4655,7 +4665,7 @@ async function quickAddBoleto() {
     showToast("✓ Boleto adicionado");
     nameEl.value = ""; amtEl.value = "";  // mantém a data (costuma cadastrar vários próximos)
     nameEl.focus();
-    loadBillsView(true);
+    loadBillsView();
     sendRefresh();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao adicionar" });
@@ -4684,7 +4694,7 @@ async function editBoleto(id, name, amount, dueISO) {
       throw new Error(await _errDetail(resp));
     }
     showToast("✓ Boleto atualizado");
-    loadBillsView(true);
+    loadBillsView();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao editar" });
   }
@@ -4704,7 +4714,7 @@ async function deleteBoleto(id, name) {
       throw new Error(await _errDetail(resp));
     }
     showToast(" Boleto apagado");
-    loadBillsView(true);
+    loadBillsView();
   } catch (err) {
     await alertModal(String(err.message || err), { title: "Erro ao apagar" });
   }
@@ -9779,7 +9789,7 @@ async function submitPayBill() {
 
   // Confirmação extra ao antecipar fatura futura — comum em parcelamento
   // (paga 3/3 antes de 1/3 e 2/3). Não bloqueia, só avisa pra evitar erro.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = appTodayIso();
   if (b.period_end && b.period_end > todayIso) {
     const ok = await confirmModal(
       `${b.card_name} · ${b.label || ""} ainda não fechou (vence depois de hoje). ` +
@@ -11149,7 +11159,7 @@ function _pbDashboardRefresh() {
     case "fixed":
       if (_recurringTab === "overview") return loadRecurringOverview({ background: true });
       if (_recurringTab === "incomes")  return loadRecurringIncomeView(true, { background: true });
-      if (_recurringTab === "bills")    return loadBillsView(true, { background: true });
+      if (_recurringTab === "bills")    return loadBillsView({ background: true });
       return loadFixedView(true, { background: true });
     case "goals":        return loadGoalsView(true, { background: true });
     // Afiliado: o fetch-antes-de-render + preservação da chave Pix agora vive

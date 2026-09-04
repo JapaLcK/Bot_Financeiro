@@ -6,6 +6,7 @@ import re
 from datetime import date, timedelta
 
 import db
+from db.accounts import _TIPO_ALIASES
 from utils_text import (
     fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
     merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS,
@@ -542,8 +543,25 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             return f"Nenhum lançamento encontrado em **{label}**."
 
         # calcula totais
-        total_despesas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "despesa")
-        total_receitas = sum(float(r["valor"]) for r in rows if r.get("tipo") == "receita")
+        # Mesma regra do rodapé da lista sem data logo abaixo, e a mesma fonte:
+        # `_TIPO_ALIASES` (db/accounts.py). Só a forma moderna SUBCONTA o rodapé
+        # de um dia que tenha linha legada; literal aqui deriva da tabela.
+        # O `is_internal_movement` também iguala o irmão: sem o guard, uma
+        # transferência entrava no "Gastos" do dia e não no dos últimos N.
+        total_despesas = sum(float(r["valor"]) for r in rows
+                             if r.get("tipo") in _TIPO_ALIASES["despesa"]
+                             and not r.get("is_internal_movement"))
+        total_receitas = sum(float(r["valor"]) for r in rows
+                             if r.get("tipo") in _TIPO_ALIASES["receita"]
+                             and not r.get("is_internal_movement"))
+        # E a soma parcial DIZ o que ficou fora — mesma forma de `_total_despesa`
+        # logo abaixo. Sem isto, o dia com pagamento de fatura (`db/cards.py`,
+        # despesa interna, mensal e todo usuário de cartão) mostra a linha e um
+        # "Gastos" menor, sem dizer por quê. As duas pernas: saldo inicial,
+        # ajuste e estorno de fatura entram como RECEITA interna.
+        internos = sum(float(r["valor"]) for r in rows
+                       if r.get("is_internal_movement")
+                       and r.get("tipo") in _TIPO_ALIASES["despesa"] + _TIPO_ALIASES["receita"])
 
         lines = []
         for r in rows:
@@ -560,6 +578,12 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             summary_parts.append(f"💸 Gastos: {fmt_brl(total_despesas)}")
         if total_receitas > 0:
             summary_parts.append(f"💰 Receitas: {fmt_brl(total_receitas)}")
+        if internos > 0:
+            # Sem o "Mais" do `_total_despesa`: aqui a linha pode ser a ÚNICA
+            # (dia só de pagamento de fatura), e são dois totais acima, não um.
+            summary_parts.append(
+                f"🔁 {fmt_brl(internos)} em movimentação interna (não entra nos totais)."
+            )
         summary = "\n".join(summary_parts)
 
         return f"{header}:\n" + "\n".join(lines) + (f"\n\n{summary}" if summary else "")
@@ -644,12 +668,12 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     total_despesas = sum(
         float(r["valor"])
         for r in rows
-        if r.get("tipo") in ("despesa", "saida") and not r.get("is_internal_movement")
+        if r.get("tipo") in _TIPO_ALIASES["despesa"] and not r.get("is_internal_movement")
     )
     total_receitas = sum(
         float(r["valor"])
         for r in rows
-        if r.get("tipo") in ("receita", "entrada") and not r.get("is_internal_movement")
+        if r.get("tipo") in _TIPO_ALIASES["receita"] and not r.get("is_internal_movement")
     )
 
     summary_parts = []
@@ -754,7 +778,7 @@ def _total_despesa(
 
     Duas fontes, de propósito diferentes:
       - `sum_spent_in_category_period` (db/budgets.py) filtra
-        `is_internal_movement = false` e `tipo = 'despesa'` → é o número do
+        `is_internal_movement = false` e `TIPO_DESPESA_SQL` → é o número do
         DASHBOARD, e continua sendo o que sai como "você gastou".
       - o `resumo` de `list_launches_by_category` NÃO filtra nada disso → é o
         número que a LISTA da mesma categoria mostra.
@@ -783,11 +807,16 @@ def _total_despesa(
 
     Nenhum número do dashboard muda: "você gastou" continua sendo o filtrado.
 
-    ponytail: a diferença é atribuída a movimentação interna, que é a causa em
-    todo escritor acima. Uma linha LEGADA com tipo='saida' (que a lista conta e
-    o `sum_spent_...` não, porque ele fixa `tipo = 'despesa'`) cairia no mesmo
-    rótulo. Separar as duas causas pede uma 3ª query; enquanto não houver
-    escritor de 'saida' (não há), a soma é a mesma e só o rótulo seria impreciso.
+    ponytail: a diferença é atribuída a movimentação interna, e é a única causa
+    que sobra — as duas pernas somam por `TIPO_DESPESA_SQL`
+    (`sum_spent_in_category_period`, db/budgets.py; e o `tot_despesa` de
+    `list_launches_by_category`, db/accounts.py), então a linha legada com
+    tipo='saida' entra nas DUAS e não produz divergência. O `_TIPO_ALIASES` da
+    mesma função filtra as LINHAS, não soma: enquanto o somatório era literal,
+    um terceiro alias deixava a linha entrar sem ser somada e o `fora` sumia
+    calado. Quem guarda hoje: `test_o_sql_e_o_python_falam_dos_mesmos_aliases`
+    (as duas fontes entre si) e
+    `test_o_resumo_da_lista_de_categoria_acompanha_a_fonte_unica` (o somatório).
     """
     total = db.sum_spent_in_category_period(user_id, categoria, start, end)
     # limit=1: o resumo vem de window aggregates, calculados ANTES do LIMIT.
