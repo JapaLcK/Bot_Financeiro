@@ -821,3 +821,117 @@ def test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado(uid):
     assert _saldos(uid)["viagem"] == 200.00
     assert "esvaziar" not in (saque.get("nota") or "").lower(), \
         f"a nota diz esvaziar num saque de 100: {saque.get('nota')!r}"
+
+
+# ── #185: o veto de catálogo na porta 2 ─────────────────────────────────────
+#
+# A pergunta de NOME já carrega o valor em `entities["amount"]`, que o
+# `_ja_tem_o_valor` (porta 2) não lê — ele só conhece `valor`. Então
+# `saquei 200` + `saldo` abandonava a pergunta e os R$ 200 sumiam, mesmo com
+# uma caixinha chamada `saldo` para receber o saque.
+#
+# POR QUE NÃO A ONE-LINER DA ISSUE, e OS TRÊS TETOS do conserto: o texto mora
+# UMA VEZ SÓ, no comentário do veto em `core/intent_router.py`
+# (`_clarification_abandonada`, bloco `VETO DE CATÁLOGO (#185)`). Não repita
+# aqui — a primeira redação errada custou correção em três lugares (§0.7).
+# Quem prende cada teto:
+#   teto 1 (`extrato` sem caixinha)  -> test_185_abandono_comum_continua_vivo
+#   teto 2 (comando vira comando pendente, esvaziamento integral)
+#                                    -> test_185_nome_do_catalogo_vence_o_comando
+#                                       test_185_teto2_comando_pendente_esvazia_a_caixinha
+#   teto 3 (dispara sem valor a perder)
+#                                    -> test_185_teto3_veto_dispara_sem_valor_a_perder
+#
+# CONTROLES NEGATIVOS (medidos, cada um injetado num caso que estava VERDE):
+#   remover o bloco `if falta and isinstance(intent, str) and falta ==
+#   _CHAVE_DO_NOME.get(intent)` de `_clarification_abandonada`
+#     -> test_185_nome_do_catalogo_vence_o_comando,
+#        test_185_teto2_comando_pendente_esvazia_a_caixinha,
+#        test_185_teto3_veto_dispara_sem_valor_a_perder
+#   trocar o `return not _eh_nome_do_catalogo(...)` daquele bloco por
+#   `return False`                -> test_185_abandono_comum_continua_vivo
+#
+# CLASSE CEGA: as portas de caixinha/investimento cujo payload guarda `amount`
+# só são alcançáveis via LLM, que não roda nos testes. O que esta seção prova é
+# a rota `funds.withdraw` (`classify("saquei 200")` -> `funds.withdraw
+# {'amount': 200.0}`, determinístico).
+
+def test_185_nome_do_catalogo_vence_o_comando(uid):
+    """O caso da issue: a resposta É uma caixinha do usuário, não um comando."""
+    _caixinhas_com_saldo(uid, "saldo")
+
+    respostas = _conversa(uid, "saquei 200", "saldo")
+
+    assert "retirar de qual" in respostas[0], respostas[0]
+    assert _saldos(uid)["saldo"] == 100.00, \
+        f"o saque de R$ 200 na caixinha 'saldo' não fechou: {respostas[-1]!r}"
+
+
+def test_185_abandono_comum_continua_vivo(uid):
+    """CONTROLE POSITIVO, e é ele que separa este conserto do proposto na issue.
+
+    Sem caixinha chamada "saldo", `saldo` continua sendo o COMANDO de saldo. A
+    one-liner da issue derruba exatamente este caso (medido: o bot passa a
+    responder "Não encontrei *saldo*..."); o veto de catálogo o mantém.
+    """
+    respostas = _conversa(uid, "saquei 200", "saldo")
+
+    assert "Conta Corrente" in respostas[-1], respostas[-1]
+    assert _saldos(uid) == {}, "não havia caixinha nenhuma para mover"
+
+
+def test_185_saque_legitimo_pelo_nome_ainda_funciona(uid):
+    """CONTROLE POSITIVO 2: o caminho normal da pergunta de nome, com um nome
+    que não colide com comando nenhum."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False)
+
+    _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem",
+              "saquei 100", "viagem")
+
+    assert _saldos(uid)["viagem"] == 200.00
+
+
+def test_185_teto2_comando_pendente_esvazia_a_caixinha(uid):
+    """TETO 2 no tamanho medido: não é "executa o saque", é esvaziamento
+    integral. `esvaziar caixinha` deixa `entities={}` e o handler lê o `tudo` do
+    `orig_text`, então a resposta `saldo` — que o classificador lê como
+    `balance.check` com confiança 1.0 — zera a caixinha inteira."""
+    _caixinhas_com_saldo(uid, "saldo")
+
+    respostas = _conversa(uid, "esvaziar caixinha", "saldo")
+
+    assert "Qual caixinha" in respostas[0], respostas[0]
+    assert "esvaziada" in respostas[-1], respostas[-1]
+    assert _saldos(uid)["saldo"] == 0.00, \
+        f"o teto 2 é maior que um saque: a caixinha inteira foi: {respostas[-1]!r}"
+
+
+def test_185_teto3_veto_dispara_sem_valor_a_perder(uid):
+    """TETO 3: `tirar da caixinha` grava `entities={}` (o `falta` vem antes da
+    checagem de valor), então o veto segura a pergunta sem ter valor nenhum a
+    proteger. Custa UM turno — a pergunta vira a de valor e nada se move."""
+    _caixinhas_com_saldo(uid, "saldo")
+
+    respostas = _conversa(uid, "tirar da caixinha", "saldo")
+
+    assert "Qual o valor" in respostas[-1], \
+        f"sem o veto aqui viria o saldo; com ele, a pergunta de valor: {respostas[-1]!r}"
+    assert "Conta Corrente" not in respostas[-1], respostas[-1]
+    assert _saldos(uid)["saldo"] == 300.00, "nada podia se mover neste turno"
+
+
+def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
+    """O veto vale SÓ quando a pergunta pede o NOME. Com `falta == "amount"` a
+    resposta `saldo` não responde nada que a pergunta pediu, e a escotilha do
+    comando continua valendo — mesmo com uma caixinha chamada `saldo` no
+    catálogo, que é o que faz este caso discriminar o veto."""
+    _caixinhas_com_saldo(uid, "viagem", "saldo")
+
+    respostas = _conversa(uid, "tirar da caixinha viagem", "viagem", "saldo")
+
+    assert "Qual o valor" in respostas[1], respostas[1]
+    assert "Conta Corrente" in respostas[-1], respostas[-1]
+    assert _saldos(uid) == {"viagem": 300.00, "saldo": 300.00}, \
+        "sacou sem que o valor fosse dito"
