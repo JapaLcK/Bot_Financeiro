@@ -9,34 +9,54 @@ justamente quando o delimitador do usuário é igual ao do template — o `a*b`
 dentro de `*{...}*`, que é o caso do título da issue.
 
 O mecanismo é `wrap_wa_markup` (core/response_formatter.py): quando o texto do
-usuário contém `*`, `_`, `~` ou crase, a mensagem sai SEM o embrulho de
-marcação. Custo aceito: perde-se o negrito nesses nomes — e nesse mesmo caso a
-formatação já estava quebrada antes, então não se perde nada que funcione.
+usuário contém `*`, `~`, crase — ou um `_` que PODE parear (com não-palavra ou
+borda de um dos lados) —, a mensagem sai SEM o embrulho de marcação. O `_` no
+MEIO de palavra não entra: MEDIDO pelo dono no cliente real em 2026-09-04,
+`meta_casa_nova` sai literal, sem itálico, enquanto `~x~` sai riscado mesmo
+colado. Custo aceito: perde-se o negrito nos nomes que casam — e nesse mesmo
+caso a formatação já estava quebrada antes, então não se perde nada que
+funcione.
 
-CONTROLE NEGATIVO — faça `wrap_wa_markup` embrulhar sempre
-(`return f"{delim}{text}{delim}"`) e rode este arquivo: os 7 testes de
-não-embrulho ficam VERMELHOS (medido em 2026-09-04: `7 failed, 6 passed`; com o
-conserto de pé, `13 passed`). Os 7 estavam VERDES com o conserto — nenhum foi
-injetado num caso já vermelho. Os 6 que continuam verdes são os controles
-positivos, e é exatamente o que se espera deles.
+CONTROLE NEGATIVO — quatro mutações, todas medidas em 2026-09-04 contra os
+`18 passed` deste arquivo com o conserto de pé. Nenhuma foi injetada num caso
+que já estava vermelho:
+
+  1. `wrap_wa_markup` embrulha sempre (`return f"{delim}{text}{delim}"`)
+     → `9 failed, 9 passed`: caem os 9 testes de não-embrulho;
+  2. `wrap_wa_markup` nunca embrulha (`return text`)
+     → `9 failed, 9 passed`: caem os 9 controles positivos (partição limpa);
+  3. `_MARCACAO_WA` volta ao `[*_~\`]` (o `_` sem fronteira)
+     → `1 failed, 17 passed`: só `test_categoria_legitima_mantem_o_negrito
+     [meta_casa_nova]`, que é exatamente o que a precisão do `_` conserta;
+  4. `core/handlers/bills.py:176/:297` voltam ao `*{paid.get('name')}*` literal
+     → `2 failed, 16 passed`: os dois casos `luz *casa*` da porta digitada.
 
 CONTROLE POSITIVO — o conserto RESTRINGE (passa a omitir o negrito), então
 precisa provar que não engole o negrito de quem escreveu certo: `McDonald's`,
-`café & pão` e `Cartão Nubank` (a mesma lista de tests/test_export_pdf_escape.py,
-#145) saem COM o par de asteriscos, e a pendência legada sai com as crases. O
-controle do controle, medido no mesmo dia: com `return text` (helper que nunca
-embrulha) são os 6 positivos que ficam vermelhos — `6 failed, 7 passed`.
+`café & pão`, `Cartão Nubank` (a mesma lista de tests/test_export_pdf_escape.py,
+#145) e `meta_casa_nova` saem COM o par de asteriscos, e a pendência legada sai
+com as crases. É a mutação 2 acima que prova que esse grupo mede alguma coisa.
 
 CLASSE CEGA: a RENDERIZAÇÃO do cliente WhatsApp (Android/iOS) não é exercitável
 aqui. O que se mede é a estrutura da STRING que sai da função real do handler —
-se o embrulho de marcação está presente ou ausente.
+se o embrulho de marcação está presente ou ausente. Isso NÃO é a tela: em pelo
+menos um sítio (pending.py:90) ainda passa um `format_for_platform`
+(core/handle_incoming.py:150) que remove pares de crase no WhatsApp.
+
+SEGUNDA CLASSE CEGA: o helper decide POR ARGUMENTO, o WhatsApp pareia POR
+MENSAGEM. Onde o template tem marcação PRÓPRIA além do embrulho, o `*` ímpar do
+usuário casa com o do bot e o negrito vaza mesmo sem embrulho — medido pelo
+`process_message` real em wa_runtime.py:805 (3 asteriscos) e :982/:984 (5).
+Fechar isso é mudança de desenho e fica fora deste PR.
 
 ESCOPO: os 7 sítios de `adapters/whatsapp/wa_runtime.py`, o
-`pergunta_de_valor_sem_contexto` (core/handlers/bills.py, chamado de
-wa_runtime.py:800) e o `core/handlers/pending.py:90`. Ficam FORA:
-`core/handlers/bills.py:174` e `:295`, que têm a string idêntica à de
-wa_runtime.py:822/1020 — a outra porta da MESMA pergunta —, e os 125 sítios
-restantes em ~20 arquivos. Tudo isso é a fatia 2.
+`pergunta_de_valor_sem_contexto` (core/handlers/bills.py:63, chamado de
+wa_runtime.py:800), o `core/handlers/pending.py:90` e — porque é a MESMA
+pergunta pela outra porta, com a string byte-idêntica — `core/handlers/
+bills.py:176` e `:297`, que atendem quem DIGITA "paguei luz" em vez de tocar o
+botão. Ficam FORA: `core/handlers/bills.py:169-170`, onde o nome cai DENTRO da
+marcação do bot (`*paguei {nome} 132,50*`, forma que o helper não alcança por
+construção), e os sítios restantes em ~20 arquivos.
 """
 from __future__ import annotations
 
@@ -67,7 +87,7 @@ def _novo_launch(user_id: int) -> int:
 
 @pytest.mark.parametrize("nome", [
     "a*b",            # delimitador IGUAL ao do template: o caso que o WJ não fechava
-    "meta_casa_nova",  # dois underscores pareiam e o WhatsApp italiza "casa"
+    "luz _extra_",     # underscore COM fronteira: pareia e italiza "extra"
     "conta_",          # termina em delimitador: com WJ o negrito do bot vazava
 ])
 def test_categoria_com_marcacao_sai_sem_negrito(pro_user_id, nome):
@@ -79,7 +99,14 @@ def test_categoria_com_marcacao_sai_sem_negrito(pro_user_id, nome):
     assert f"*{nome}*" not in msg                     # e sem o embrulho
 
 
-@pytest.mark.parametrize("nome,canon", NOMES_LEGITIMOS)
+@pytest.mark.parametrize("nome,canon", NOMES_LEGITIMOS + [
+    # MEDIDO pelo dono no cliente real em 2026-09-04: `meta_casa_nova` sai
+    # LITERAL, sem itálico — underscore no MEIO de palavra não pareia. Não há
+    # nada a neutralizar aqui, então o negrito do bot fica. Este caso já esteve
+    # do lado errado da tabela, com o comentário afirmando que o WhatsApp
+    # italizava "casa".
+    ("meta_casa_nova", "meta_casa_nova"),
+])
 def test_categoria_legitima_mantem_o_negrito(pro_user_id, nome, canon):
     """CONTROLE POSITIVO: sem isto, um helper que nunca embrulha passaria."""
     launch_id = _novo_launch(pro_user_id)
@@ -136,12 +163,24 @@ def test_conta_paga_legitima_mantem_o_negrito(monkeypatch):
 # ─── wa_runtime:805 — pergunta de valor de conta variável ───────────────────
 
 
-def test_pergunta_de_valor_com_underscore_no_nome(monkeypatch):
+def test_pergunta_de_valor_com_asterisco_no_nome(monkeypatch):
+    """O que este sítio fecha, e o que NÃO fecha.
+
+    `conta_de_luz` estava aqui e era a única entrada da lista que ESCONDIA o
+    vazamento: sem asterisco nenhum, o total da mensagem ficava par de graça.
+    Com `a*b` o `process_message` real devolve (medido em 2026-09-04):
+
+        'Quanto veio a conta de a*b este mês?\nÉ só mandar o valor. Ex: *132,50*'
+
+    TRÊS asteriscos — o embrulho sai (é o que se afirma abaixo), mas o `*` do
+    usuário ainda pareia com o `*132,50*` do template e o negrito vaza na tela.
+    Fechar isso exige decidir por MENSAGEM, não por argumento; fica fora do PR.
+    """
     replies: list[tuple[str, str]] = []
     _mock_wa_boot(monkeypatch, replies, uid=4242)
     monkeypatch.setattr(
         "db.bills.get_bill",
-        lambda uid, bid: {"id": bid, "name": "conta_de_luz", "status": "pending",
+        lambda uid, bid: {"id": bid, "name": "a*b", "status": "pending",
                           "variable_amount": True, "amount": None},
     )
     monkeypatch.setattr("adapters.whatsapp.wa_runtime.claim_pending_action",
@@ -151,8 +190,9 @@ def test_pergunta_de_valor_com_underscore_no_nome(monkeypatch):
 
     assert len(replies) == 1
     body = replies[0][1]
-    assert "Quanto veio a conta de conta_de_luz este mês?" in body
-    assert "*conta_de_luz*" not in body
+    assert "Quanto veio a conta de a*b este mês?" in body
+    assert "*a*b*" not in body
+    assert body.count("*") == 3   # o vazamento por mensagem, documentado
 
 
 # ─── bills.py:63 — o irmão de wa_runtime.py:800, mesma variável ────────────
@@ -163,10 +203,11 @@ def test_pergunta_sem_contexto_com_underscore_no_nome(monkeypatch):
     interpola o nome DUAS vezes."""
     monkeypatch.setattr(db, "get_pending_action", lambda uid: {})
 
-    msg = h_bills.pergunta_de_valor_sem_contexto(9, "conta_de_luz")
+    msg = h_bills.pergunta_de_valor_sem_contexto(9, "luz _extra_")
 
-    assert msg.count("conta_de_luz") == 2
-    assert "*conta_de_luz*" not in msg
+    assert msg.count("luz _extra_") == 2
+    assert "*luz _extra_*" not in msg
+    assert msg.count("*") == 0   # o template não tem marcação própria
 
 
 def test_pergunta_sem_contexto_legitima_mantem_o_negrito(monkeypatch):
@@ -176,6 +217,50 @@ def test_pergunta_sem_contexto_legitima_mantem_o_negrito(monkeypatch):
     msg = h_bills.pergunta_de_valor_sem_contexto(9, "Cartão Nubank")
 
     assert msg.count("*Cartão Nubank*") == 2
+
+
+# ─── bills.py:176/:297 — a porta GÊMEA de wa_runtime.py:822/1020 ───────────
+#
+# String byte-idêntica, mesma ação do mesmo usuário: quem toca o BOTÃO cai no
+# wa_runtime, quem DIGITA "paguei luz" cai aqui. Sem estas duas linhas, metade
+# dos usuários recebia a versão quebrada.
+
+
+def _conta(nome: str, **extra) -> dict:
+    return {"id": 41, "name": nome, "status": "pending",
+            "variable_amount": False, "amount": 132.5, **extra}
+
+
+@pytest.mark.parametrize("nome,esperado", [
+    ("luz *casa*", "Conta paga: luz *casa* —"),      # marcação do usuário: sem embrulho
+    ("Cartão Nubank", "Conta paga: *Cartão Nubank* —"),  # CONTROLE POSITIVO
+])
+def test_conta_paga_digitando_bills_176(monkeypatch, nome, esperado):
+    """`paguei ...` no texto — bills.py:176, o irmão de wa_runtime.py:822."""
+    monkeypatch.setattr("db.bills.list_bills", lambda uid, include_paid=False: [_conta(nome)])
+    monkeypatch.setattr("db.bills.mark_bill_paid",
+                        lambda uid, bid, amount=None: {"name": nome, "paid_amount": 132.5})
+
+    msg = h_bills.try_pay_from_text(9, "paguei")
+
+    assert esperado in msg
+
+
+@pytest.mark.parametrize("nome,esperado", [
+    ("luz *casa*", "Conta paga: luz *casa* —"),
+    ("Cartão Nubank", "Conta paga: *Cartão Nubank* —"),  # CONTROLE POSITIVO
+])
+def test_conta_paga_respondendo_o_valor_bills_297(monkeypatch, nome, esperado):
+    """Resposta só com o valor — bills.py:297, o irmão de wa_runtime.py:1020."""
+    monkeypatch.setattr(db, "consume_pending_action", lambda uid, p: True)
+    monkeypatch.setattr("db.bills.mark_bill_paid",
+                        lambda uid, bid, amount: {"name": nome, "paid_amount": amount})
+    pend = {"action_type": "bill_amount_expected",
+            "payload": {"bill_id": 41, "bill_name": nome}}
+
+    msg = h_bills.resolve_bill_amount(9, "132,50", pend)
+
+    assert esperado in msg
 
 
 # ─── core/handlers/pending.py:90 — a mensagem CRUA do usuário, em crase ────
@@ -201,7 +286,13 @@ def test_pendencia_legada_com_crase_na_mensagem_crua(monkeypatch):
 
 
 def test_pendencia_legada_legitima_mantem_a_crase(monkeypatch):
-    """CONTROLE POSITIVO: texto sem marcação continua saindo em crase."""
+    """CONTROLE POSITIVO: a string CRUA do handler continua saindo em crase.
+
+    Não é a tela: depois daqui ainda roda o `format_for_platform`
+    (core/handle_incoming.py:150), que remove os pares de crase no WhatsApp.
+    O que se prova é que o embrulho do helper não sumiu — o teste acima é que
+    mede a tela, passando pelo `format_for_platform`.
+    """
     bruto = _pendencia_legada(monkeypatch, "gastei 50 no mercado")
 
     assert bruto.endswith("Tente: `gastei 50 no mercado`")

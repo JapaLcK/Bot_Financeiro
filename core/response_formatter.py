@@ -30,7 +30,12 @@ def format_for_platform(text: str, platform: str) -> str:
 
 
 # `*`, `_`, `~` e crase são os quatro delimitadores de marcação do WhatsApp.
-_MARCACAO_WA = re.compile(r"[*_~`]")
+# O `_` entra com fronteira, os outros três não — MEDIDO pelo dono no cliente
+# real do WhatsApp em 2026-09-04: `meta_casa_nova` sai LITERAL (underscore no
+# meio de palavra não pareia), enquanto `~x~` sai RISCADO (o til pareia mesmo
+# colado à palavra). Sem a fronteira, todo nome com `_` no miolo perdia o
+# negrito do bot sem que houvesse nada a consertar.
+_MARCACAO_WA = re.compile(r"[*~`]|(?<!\w)_|_(?!\w)")
 
 
 def wrap_wa_markup(text: object, delim: str = "*") -> str:

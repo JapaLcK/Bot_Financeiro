@@ -173,7 +173,7 @@ def try_pay_from_text(user_id: int, text: str) -> str | None:
         return None
     val = paid.get("paid_amount") or paid.get("amount") or 0
     return (
-        f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
         f"categorizado. Tá tudo em dia! 🐷"
     )
 
@@ -294,7 +294,7 @@ def resolve_bill_amount(user_id: int, text: str, pending: dict) -> str | None:
         return "Essa conta não está mais pendente."
     val = paid.get("paid_amount") or paid.get("amount") or 0
     return (
-        f"✅ Conta paga: *{paid.get('name')}* — {fmt_brl(val)} lançado e "
+        f"✅ Conta paga: {wrap_wa_markup(paid.get('name'))} — {fmt_brl(val)} lançado e "
         f"categorizado. Tá tudo em dia! 🐷"
     )
 
