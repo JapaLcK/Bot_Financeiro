@@ -279,9 +279,25 @@ LOCAL_RULES = [
       # Marcas (issue #138): sem elas, 14 das 16 marcas mais lançadas caíam em
       # "outros" pra quem não tem IA. "burger king" e "pizza hut" não entram:
       # já casam por "burger"/"pizza" acima.
-      # Formas com apóstrofo entram pelo radical: normalize_text("habib's") vira
-      # "habib s", que contém "habib". Idem "mcdonald's"/"applebee's".
-      "mcdonald", "mc donalds", "mequi", "bk", "subway", "habib", "bobs",
+      # Apóstrofo vira ESPAÇO em normalize_text ("habib's" → "habib s"), então a
+      # grafia com apóstrofo entra pelo RADICAL, sem o "s": "habib", "mcdonald",
+      # "applebee" e "mc donald" — este último cobre de uma vez "mc donald's",
+      # "mc donald" e "mc donalds" (a versão anterior, "mc donalds", não casava
+      # "mc donald s" e deixava a grafia mais provável cair em "outros").
+      # "bobs" é a exceção: o radical "bob" tem 3 letras, casaria como palavra
+      # inteira e roubaria "ração do bob"/"consulta do bob" de pets/saúde
+      # (medido: 6 falsos positivos em 8 frases; cachorro chamado Bob é comum).
+      # Por isso as duas grafias entram explícitas, e nenhuma delas é "bob".
+      # "bk" e "kfc" ficam apesar de <=3 letras: aqui em local_rule_category elas
+      # só casam como PALAVRA INTEIRA. Nos importadores (ofx_import.resolve_category
+      # e ofx_credit_import._categorize) o laço casa por substring e elas geram
+      # falso positivo ("PAG BKB CONSULTORIA" → alimentação) — mas isso é a issue
+      # #272, e a classe inteira já existe na main: são 39 keywords <=3 letras
+      # (bar, sol, gas, luz, pet, cao, ada…), que num corpus de 32 memos realistas
+      # dão 27 falsos positivos na main contra 32 aqui. Tirar bk/kfc corrigiria 5
+      # instâncias e deixaria a classe intacta; a correção certa é o corte de
+      # palavra inteira nos dois importadores (#272).
+      "mcdonald", "mc donald", "mequi", "bk", "subway", "habib", "bobs", "bob s",
       "kfc", "giraffas", "ragazzo", "china in box", "dominos", "divino fogao",
       "starbucks", "the coffee", "kopenhagen", "cacau show",
       "outback", "madero", "coco bambu", "spoleto", "applebee",
@@ -1292,7 +1308,15 @@ CATEGORY_KEYWORDS = {
     "alimentação": ["ifood", "uber eats", "rappi", "restaurante", "lanche", "pizza", "hamburguer", "cafe", "café", "cafeteria", "padaria",
                     "comida", "alimento", "almoço", "almoco", "janta", "jantar", "marmita", "refeição", "refeicao", "delivery", "açaí", "acai", "sushi", "churrasco",
                     "food truck", "self service", "buffet", "boteco", "botequim", "cerveja", "japonês", "japones", "feira livre", "prime rib",
-                    "bar", "pub", "happy hour", "drinks", "chopp", "chope"],
+                    "bar", "pub", "happy hour", "drinks", "chopp", "chope",
+                    # KEYWORD_BLOCKERS["fogao"] (issue #138) é lido pelos DOIS
+                    # motores: local_rule_category e guess_category. As marcas
+                    # entraram só em LOCAL_RULES, então sem esta linha "divino
+                    # fogão" saía de moradia (errado) para outros (nada) no
+                    # motor de gasto recorrente. Alimentação é avaliada ANTES de
+                    # moradia aqui, então a marca vence o eletrodoméstico. A keyword é
+                    # normalizada no laço, então a forma sem acento casa junto.
+                    "divino fogão"],
     "transporte": ["uber", "lyft", "99", "metro", "trem", "ônibus", "gasolina", "combustível", "posto", "estacionamento", "parking",
                    "indriver", "cabify", "mototáxi", "blablacar", "etanol", "diesel", "abastecimento",
                    "posto de gasolina", "passagem de ônibus", "bilhete único", "vale-transporte",
