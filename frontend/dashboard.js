@@ -533,6 +533,16 @@ function appTzWallClockToISO(localStr) {
   return new Date(asUTC - offsetMin * 60000).toISOString();
 }
 
+// "Hoje" em APP_TZ, como YYYY-MM-DD. Caminho OPOSTO ao de `appTzWallClockToISO`
+// (que vai de parede pra instante): aqui um instante vira o DIA de calendário em
+// São Paulo. `new Date().toISOString().slice(0,10)` dá o dia em UTC — das 21:00 às
+// 23:59 de SP isso já é amanhã, para TODO usuário; e `_isoDate(new Date())` dá o
+// dia do APARELHO, que erra para quem viaja. Issue #257.
+function appTodayIso(now = new Date()) {
+  const p = _wallPartsInTZ(now, APP_TZ);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 const fmtDate = iso => {
   const d = _isoToDate(iso);
   if (!d) return "—";
@@ -4470,7 +4480,7 @@ async function loadBillsView({ background = false } = {}) {
   }
 }
 
-const _billToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const _billToday = () => new Date(appTodayIso() + "T00:00:00");
 const _billDate = (b) => { const d = new Date(b.due_date + "T00:00:00"); d.setHours(0, 0, 0, 0); return d; };
 const _billDaysUntil = (b) => Math.round((_billDate(b) - _billToday()) / 86400000);
 function _billOverdue(b) { return _billDaysUntil(b) < 0; }
@@ -9779,7 +9789,7 @@ async function submitPayBill() {
 
   // Confirmação extra ao antecipar fatura futura — comum em parcelamento
   // (paga 3/3 antes de 1/3 e 2/3). Não bloqueia, só avisa pra evitar erro.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = appTodayIso();
   if (b.period_end && b.period_end > todayIso) {
     const ok = await confirmModal(
       `${b.card_name} · ${b.label || ""} ainda não fechou (vence depois de hoje). ` +
