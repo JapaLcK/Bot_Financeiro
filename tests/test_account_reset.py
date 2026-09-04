@@ -1089,8 +1089,10 @@ def test_deadlock_no_reset_vira_503_e_nao_apaga_nada(user_id, monkeypatch):
     A exceção é levantada no 1º `_table_exists`, que roda DEPOIS do
     `update accounts`: o caminho real da rota e da transação é exercitado.
 
-    NEGATIVO: sem o `except psycopg.errors.DeadlockDetected` da rota
+    NEGATIVO: sem o `except psycopg.OperationalError` da rota
     (frontend/routes/settings.py) a exceção sobe e o teste fica vermelho.
+    Este caso sozinho NÃO mede a categoria — ele passaria também com o `except`
+    capturando só a folha `DeadlockDetected`. Quem mede é o irmão abaixo.
     """
     _semeia(user_id)
     antes = _contagens(user_id)
@@ -1131,6 +1133,50 @@ def test_deadlock_no_reset_vira_503_e_nao_apaga_nada(user_id, monkeypatch):
     assert _contagens(vizinho) == antes_vizinho, "o reset abortado de A tocou dados de B"
     assert _saldo(vizinho) == 100, "o reset abortado de A mexeu no saldo de B"
 
+
+
+
+def test_pool_timeout_no_reset_tambem_vira_503(user_id, monkeypatch):
+    """A CATEGORIA, não a folha — é este caso que mede a ampliação do `except`.
+
+    O irmão acima injeta `DeadlockDetected` e passaria mesmo com a rota
+    capturando só aquela folha. Aqui a exceção é `psycopg_pool.PoolTimeout`,
+    que NÃO é deadlock e é a que o próprio conserto deste PR tornou mais
+    provável: durante a transação, todo `ensure_user` daquele usuário bloqueia
+    SEGURANDO um dos 8 slots do pool sync (db/connection.py, DB_POOL_MAX_SYNC).
+
+    As quatro folhas relevantes descendem de `psycopg.OperationalError`
+    (medido): DeadlockDetected, PoolTimeout, QueryCanceled, LockNotAvailable.
+    Todas abortam a transação inteira e todas são temporárias, então o desfecho
+    certo é o mesmo 503 recuperável — e cair em 500 aqui deixaria os items da
+    Pluggy já deletados remotamente com o banco local intacto.
+
+    NEGATIVO: voltando a rota para `except psycopg.errors.DeadlockDetected`,
+    este teste fica vermelho com 500, e o irmão acima continua VERDE — que é
+    exatamente a demonstração de que a folha não bastava.
+    """
+    import psycopg_pool
+
+    _semeia(user_id)
+    antes = _contagens(user_id)
+
+    monkeypatch.setattr(of_routes, "create_pluggy_api_key", lambda: "api-key")
+    monkeypatch.setattr(
+        of_routes, "delete_pluggy_item", lambda item_id, api_key=None: None,
+    )
+
+    def _pool_timeout(cur, table):
+        raise psycopg_pool.PoolTimeout("couldn't get a connection after 30 sec")
+
+    monkeypatch.setattr(privacy, "_table_exists", _pool_timeout)
+
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+    resp = client.post("/settings/reset", json={"password": SENHA}, headers=headers)
+
+    assert resp.status_code == 503, resp.text
+    assert "Tente de novo" in resp.json()["detail"], resp.text
+    assert _contagens(user_id) == antes, "a transação abortada apagou dado"
 
 # ── 9. sem sessão ────────────────────────────────────────────────────────────
 

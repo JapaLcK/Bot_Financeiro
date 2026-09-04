@@ -524,9 +524,15 @@ def reset_user_data(
     a Pluggy não foi tocada. O hook é responsável pelo próprio best-effort
     (exceção dele aborta o reset com nada apagado localmente).
 
-    A linha de `accounts` é PRESERVADA com `balance = 0` (não é apagada) — ver
-    o comentário no início da transação: é ela que serializa o reset contra um
-    lançamento concorrente (issue #246).
+    A linha de `accounts` é PRESERVADA (não é apagada) e o saldo é zerado na
+    PRIMEIRA escrita da transação — ver o comentário no início dela: é esse
+    `update` que serializa o reset contra um lançamento concorrente (#246).
+
+    O saldo final NÃO é necessariamente 0: um lançamento que chegue durante a
+    transação escreve depois, sobre o zero, e o saldo pode ficar NEGATIVO. É a
+    aritmética da decisão do dono registrada abaixo — o lançamento sobrevive
+    com o dinheiro dele —, e é o desfecho correto: a alternativa (saldo 0 com o
+    lançamento vivo) é exatamente o bug do #246.
 
     Ficam intactos: users (a linha), auth_accounts (login, plano, Stripe,
     opt-outs, contadores de IA, deletion_*), auth_identities, user_identities
@@ -619,8 +625,16 @@ def reset_user_data(
                 # `ensure_user` do writer, que pede accounts em transação
                 # PRÓPRIA antes de qualquer caixinha. Invariante frágil: vale
                 # enquanto todo escritor de accounts chamar `ensure_user` — hoje
-                # os 9 chamam (`grep -rn 'update accounts set' --include='*.py'
-                # db/`, menos o `merge_users`, que é a exceção conhecida). E a
+                # os 10 chamam, menos o `merge_users`, que é a exceção conhecida.
+                # A receita, e ela precisa ser case-INSENSITIVE: uma versão
+                # anterior deste comentário usava `grep -rn 'update accounts
+                # set'` e por isso dizia 9 — o `set_balance` (db/accounts.py:41)
+                # escreve em MAIÚSCULAS e ficava invisível.
+                #     grep -rniE 'update[[:space:]]+accounts[[:space:]]+set' \
+                #          --include='*.py' db/
+                # (medido 2026-09-04: 12 linhas = 10 escritores + este
+                # comentário + o `update` do próprio reset. REMEÇA antes de
+                # reusar.) E a
                 # espera não é só do dono da linha — a fila do WhatsApp tem
                 # consumidor único (`_worker_loop`, adapters/whatsapp/wa_app.py:324),
                 # então um writer preso trava as mensagens de TODOS na janela.
