@@ -304,7 +304,12 @@ def test_inferencia_nao_escreve_no_banco(pro_user_id):
     # os 2 INSERT que sobram são o `ensure_user` que já existia na main
     # (users/accounts, on conflict do nothing) — nenhum toca user_categories.
     assert [q for q in escritas if "user_categories" in q] == [], escritas
-    assert len(statements) <= 4, len(statements)   # main: 3 · com o seed: 22
+    # 5, não 4: o guard de regra obsoleta (`_regra_ficou_obsoleta`) faz UMA
+    # leitura a mais — `list_custom_category_names`, para saber se alguma
+    # categoria custom passou a ser dona do keyword. É leitura, e o assert de
+    # cima continua provando que nada escreve. O teto segue valendo como
+    # tripwire: o seed que este teste nasceu para pegar levaria a 22.
+    assert len(statements) <= 5, len(statements)   # main: 3 · com o seed: 22
     assert _todos_os_nomes(pro_user_id) == []
 
 
