@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import date
 import db
+from db.accounts import _TIPO_ALIASES
 from utils_text import fmt_brl
 from utils_date import today_tz
 
@@ -29,8 +30,9 @@ def check(user_id: int) -> str:
     today_launches = db.get_launches_by_period(user_id, today, today)
     despesas_hoje = [
         l for l in today_launches
-        # as duas formas de `tipo`: só a moderna some com a linha legada do dia
-        if l["tipo"] in ("despesa", "saida") and not l.get("is_internal_movement")
+        # As duas formas de `tipo` vêm de `_TIPO_ALIASES` (db/accounts.py), o dono
+        # da regra em Python: literal aqui deriva no dia em que a tabela mudar.
+        if l["tipo"] in _TIPO_ALIASES["despesa"] and not l.get("is_internal_movement")
     ]
     if despesas_hoje:
         lines.append("")

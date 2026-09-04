@@ -6,6 +6,7 @@ import re
 from datetime import date, timedelta
 
 import db
+from db.accounts import _TIPO_ALIASES
 from utils_text import (
     fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
     merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS,
@@ -542,16 +543,17 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
             return f"Nenhum lançamento encontrado em **{label}**."
 
         # calcula totais
-        # As duas formas de `tipo`, igual ao rodapé da lista sem data logo abaixo
-        # (`("despesa", "saida")` / `("receita", "entrada")`): só a moderna
-        # SUBCONTA o rodapé de um dia que tenha linha legada.
-        # TODO: ao contrário do irmão, estes dois somatórios não descartam
-        # `is_internal_movement` — transferência entra no rodapé do dia. Outra
-        # classe de bug, fora do escopo deste PR.
+        # Mesma regra do rodapé da lista sem data logo abaixo, e a mesma fonte:
+        # `_TIPO_ALIASES` (db/accounts.py). Só a forma moderna SUBCONTA o rodapé
+        # de um dia que tenha linha legada; literal aqui deriva da tabela.
+        # O `is_internal_movement` também iguala o irmão: sem o guard, uma
+        # transferência entrava no "Gastos" do dia e não no dos últimos N.
         total_despesas = sum(float(r["valor"]) for r in rows
-                             if r.get("tipo") in ("despesa", "saida"))
+                             if r.get("tipo") in _TIPO_ALIASES["despesa"]
+                             and not r.get("is_internal_movement"))
         total_receitas = sum(float(r["valor"]) for r in rows
-                             if r.get("tipo") in ("receita", "entrada"))
+                             if r.get("tipo") in _TIPO_ALIASES["receita"]
+                             and not r.get("is_internal_movement"))
 
         lines = []
         for r in rows:
@@ -652,12 +654,12 @@ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, o
     total_despesas = sum(
         float(r["valor"])
         for r in rows
-        if r.get("tipo") in ("despesa", "saida") and not r.get("is_internal_movement")
+        if r.get("tipo") in _TIPO_ALIASES["despesa"] and not r.get("is_internal_movement")
     )
     total_receitas = sum(
         float(r["valor"])
         for r in rows
-        if r.get("tipo") in ("receita", "entrada") and not r.get("is_internal_movement")
+        if r.get("tipo") in _TIPO_ALIASES["receita"] and not r.get("is_internal_movement")
     )
 
     summary_parts = []
@@ -762,7 +764,7 @@ def _total_despesa(
 
     Duas fontes, de propósito diferentes:
       - `sum_spent_in_category_period` (db/budgets.py) filtra
-        `is_internal_movement = false` e `tipo = 'despesa'` → é o número do
+        `is_internal_movement = false` e `TIPO_DESPESA_SQL` → é o número do
         DASHBOARD, e continua sendo o que sai como "você gastou".
       - o `resumo` de `list_launches_by_category` NÃO filtra nada disso → é o
         número que a LISTA da mesma categoria mostra.
@@ -791,11 +793,12 @@ def _total_despesa(
 
     Nenhum número do dashboard muda: "você gastou" continua sendo o filtrado.
 
-    ponytail: a diferença é atribuída a movimentação interna, que é a causa em
-    todo escritor acima. Uma linha LEGADA com tipo='saida' (que a lista conta e
-    o `sum_spent_...` não, porque ele fixa `tipo = 'despesa'`) cairia no mesmo
-    rótulo. Separar as duas causas pede uma 3ª query; enquanto não houver
-    escritor de 'saida' (não há), a soma é a mesma e só o rótulo seria impreciso.
+    ponytail: a diferença é atribuída a movimentação interna, e é a única causa
+    que sobra — as duas pernas leem `TIPO_DESPESA_SQL` (db/budgets.py:272 e
+    db/accounts.py:822 via `_TIPO_ALIASES`), então a linha legada com
+    tipo='saida' entra nas DUAS e não produz divergência. Se um dia as duas
+    deixarem de falar dos mesmos aliases, o rótulo volta a ficar impreciso — é o
+    que `test_o_sql_e_o_python_falam_dos_mesmos_aliases` guarda.
     """
     total = db.sum_spent_in_category_period(user_id, categoria, start, end)
     # limit=1: o resumo vem de window aggregates, calculados ANTES do LIMIT.

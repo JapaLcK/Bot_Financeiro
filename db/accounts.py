@@ -993,7 +993,7 @@ def get_top_expense_categories(
     """Top N categorias de gasto no período.
 
     Agrega:
-      - despesas reais em launches (tipo='despesa', is_internal_movement=false),
+      - despesas reais em launches (`TIPO_DESPESA_SQL`, is_internal_movement=false),
         pela data do lançamento (criado_em)
       - compras no cartão (credit_transactions, is_refund=false)
 

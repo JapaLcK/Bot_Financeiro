@@ -42,6 +42,16 @@ Controle NEGATIVO — um por conserto, todos injetados em caso que estava VERDE:
 Controle POSITIVO: `test_base_sem_linha_legada_nao_muda_nenhum_numero` — a MESMA
 base só com a forma moderna responde exatamente o mesmo nos cinco pontos. Sem
 ele o grupo passaria num código que somasse a mesma linha DUAS vezes.
+
+Os cinco acima provam que os sites contam a linha legada de HOJE — não provam
+que eles LEEM a fonte única, e literal copiado passa igual. Quem mede isso é
+`test_ampliar_a_fonte_unica_alcanca_os_cinco_sites`: amplia a fonte com um
+terceiro alias e cobra que os cinco acompanhem (50 × 150).
+
+E `test_rodape_do_dia_nao_conta_movimento_interno` guarda o guard de
+`is_internal_movement` do rodapé do dia, que igualou o irmão de :654/659 —
+somar as duas formas de `tipo` tinha deixado a transferência LEGADA entrar no
+"Gastos" do dia, que o `== "despesa"` escondia por acidente.
 """
 from __future__ import annotations
 
@@ -201,3 +211,89 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(uid_wa):
     saldo = _diga(uid_wa, "saldo")
     assert len(_linhas_do_hoje(saldo)) == 2, saldo
     assert "R$ 150,00" in saldo, saldo
+
+
+# ── a fonte única tem que ALCANÇAR os cinco sites ───────────────────────────
+#
+# Os 6 testes acima provam que os cinco sites contam a linha legada de HOJE.
+# Nenhum deles prova que os sites LEEM a fonte única — literal copiado passa
+# igual, e é assim que a deriva volta: ampliar a regra numa ponta e os literais
+# ficarem para trás, sem erro e sem log. `test_o_sql_e_o_python_falam_dos_mesmos
+# _aliases` (irmão do dashboard) compara as DUAS fontes entre si e também não
+# alcança cópia nenhuma.
+
+_ALIAS_NOVO = "egresso"  # um terceiro alias que não existe em lugar nenhum
+
+
+@pytest.fixture
+def fonte_ampliada(monkeypatch):
+    """Amplia a fonte ÚNICA (as duas pernas dela) com um terceiro alias.
+
+    `setitem` e não `setattr`: `core/handlers/*` fazem `from db.accounts import
+    _TIPO_ALIASES` na carga, então quem tem que mudar é o CONTEÚDO do dict, que
+    é o mesmo objeto nos três módulos. O SQL é string interpolada em f-string,
+    e cada módulo guarda a sua cópia do nome — daí os três `setattr`.
+    """
+    import core.services.piggy_agents as PA
+    import db.accounts as ACC
+    import db.connection as CONN
+    from db.accounts import _TIPO_ALIASES
+
+    despesa_sql = f"tipo IN ('despesa', 'saida', '{_ALIAS_NOVO}')"
+    canon_sql = (
+        f"CASE WHEN {despesa_sql} THEN 'despesa' "
+        f"WHEN {CONN.TIPO_RECEITA_SQL} THEN 'receita' ELSE tipo END"
+    )
+    monkeypatch.setitem(_TIPO_ALIASES, "despesa", ("despesa", "saida", _ALIAS_NOVO))
+    monkeypatch.setattr(ACC, "TIPO_DESPESA_SQL", despesa_sql)
+    monkeypatch.setattr(PA, "TIPO_DESPESA_SQL", despesa_sql)
+    monkeypatch.setattr(CONN, "TIPO_CANON_SQL", canon_sql)
+
+
+def test_ampliar_a_fonte_unica_alcanca_os_cinco_sites(uid_wa, fonte_ampliada):
+    """Controle da DERIVA: com um terceiro alias na fonte única, os cinco sites
+    têm que acompanhar. Qualquer um deles de volta ao literal
+    (`("despesa","saida")` em Python, `tipo = 'despesa'` no SQL) devolve 50 no
+    lugar de 150 e deixa este teste VERMELHO."""
+    db.add_launch_and_update_balance(
+        uid_wa, "despesa", 50, "mercado", None,
+        categoria="mercado", criado_em=_hoje_as(10),
+    )
+    _grava_tipo_legado(uid_wa, _ALIAS_NOVO, 100, "mercado")
+
+    assert _resumo(uid_wa)["despesa"] == 150.0, _resumo(uid_wa)      # db_support
+    assert _stats_do_mes(uid_wa)["saiu"] == 150.0, _stats_do_mes(uid_wa)  # piggy_agents
+    assert _top_categorias(uid_wa) == {"mercado": 150.0}             # db/accounts
+
+    lista = _diga(uid_wa, "lancamentos de hoje")                     # launches.py
+    assert "💸 Gastos: R$ 150,00" in lista, lista
+    # o rodapé SEM data é o irmão na mesma função, e é a 4ª cópia em Python:
+    # sem ele aqui, revertê-lo ao literal não deixaria nada vermelho.
+    ultimos = _diga(uid_wa, "meus lancamentos")
+    assert "💸 Gastos: R$ 150,00" in ultimos, ultimos
+
+    saldo = _diga(uid_wa, "saldo")                                   # balance.py
+    assert len(_linhas_do_hoje(saldo)) == 2, saldo
+
+
+# ── o guard de movimento interno no rodapé do DIA ───────────────────────────
+
+def test_rodape_do_dia_nao_conta_movimento_interno(uid_wa):
+    """O rodapé do dia não descartava `is_internal_movement`, ao contrário do
+    irmão de :654/659 na MESMA função. Antes do conserto do tipo legado o
+    `== "despesa"` escondia isso por acidente; somar as duas formas passou a
+    deixar a transferência LEGADA entrar no "Gastos" do dia.
+
+    Controle NEGATIVO: sem o `and not r.get("is_internal_movement")` de
+    launches.py:551-554 a resposta vira "R$ 138,00"."""
+    db.add_launch_and_update_balance(
+        uid_wa, "despesa", 50, "mercado", None,
+        categoria="mercado", criado_em=_hoje_as(10),
+    )
+    _grava_tipo_legado(uid_wa, "saida", 88, "transferencia", interno=True)
+
+    lista = _diga(uid_wa, "lancamentos de hoje")
+    assert "💸 Gastos: R$ 50,00" in lista, lista
+    assert "R$ 138,00" not in lista, lista
+    # a linha continua APARECENDO na lista; o que muda é o total do rodapé
+    assert "legado-interno" in lista, lista

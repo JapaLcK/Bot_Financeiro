@@ -45,14 +45,18 @@ def _hoje_as(hora: int):
     return datetime.combine(today_tz(), time(hora, 0))
 
 
-def _grava_tipo_legado(user_id, tipo, valor, categoria):
+def _grava_tipo_legado(user_id, tipo, valor, categoria, interno: bool = False):
     """`add_launch_and_update_balance` não grava a forma legada (nem deve): a
-    linha antiga entra por SQL, que é como ela existe numa base de verdade."""
+    linha antiga entra por SQL, que é como ela existe numa base de verdade.
+
+    `interno=True` marca `is_internal_movement` — a transferência antiga, que é
+    linha legada E movimento interno ao mesmo tempo."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "insert into launches (user_id, tipo, valor, categoria, nota, "
-            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,false)",
-            (user_id, tipo, valor, categoria, "legado", _hoje_as(9)),
+            "criado_em, is_internal_movement) values (%s,%s,%s,%s,%s,%s,%s)",
+            (user_id, tipo, valor, categoria,
+             "legado-interno" if interno else "legado", _hoje_as(9), interno),
         )
         conn.commit()
 
