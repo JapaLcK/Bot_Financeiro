@@ -16,7 +16,7 @@ from uuid import UUID
 from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
 
 from .connection import get_conn
-from .users import _check_password
+from .users import _check_password, ensure_user_tx
 
 
 # Conta criada só via Google não tem password_hash: NENHUMA senha funciona, e
@@ -505,7 +505,9 @@ _RESET_TABLES = (
     "daily_report_prefs",
     "launches",
     "financial_spaces",
-    "accounts",
+    # `accounts` NÃO entra aqui: a linha é preservada e o saldo é zerado no
+    # INÍCIO da transação (ver reset_user_data) — apagar no fim recriava o
+    # bug do #246.
 )
 
 
@@ -521,6 +523,16 @@ def reset_user_data(
     invariante: se o reset local não vai acontecer (lock ocupado → aborto),
     a Pluggy não foi tocada. O hook é responsável pelo próprio best-effort
     (exceção dele aborta o reset com nada apagado localmente).
+
+    A linha de `accounts` é PRESERVADA (não é apagada) e o saldo é zerado na
+    PRIMEIRA escrita da transação — ver o comentário no início dela: é esse
+    `update` que serializa o reset contra um lançamento concorrente (#246).
+
+    O saldo final NÃO é necessariamente 0: um lançamento que chegue durante a
+    transação escreve depois, sobre o zero, e o saldo pode ficar NEGATIVO. É a
+    aritmética da decisão do dono registrada abaixo — o lançamento sobrevive
+    com o dinheiro dele —, e é o desfecho correto: a alternativa (saldo 0 com o
+    lançamento vivo) é exatamente o bug do #246.
 
     Ficam intactos: users (a linha), auth_accounts (login, plano, Stripe,
     opt-outs, contadores de IA, deletion_*), auth_identities, user_identities
@@ -588,6 +600,71 @@ def reset_user_data(
 
         with get_conn() as conn:
             with conn.cursor() as cur:
+                # PRIMEIRAS escritas da transação, e são elas que fazem o reset
+                # ser correto sob concorrência (#246): o `update` segura o lock
+                # de accounts até o commit, então um lançamento concorrente só
+                # escreve depois, sobre saldo 0. Saldo NEGATIVO após o reset é o
+                # certo — o lançamento sobreviveu (decisão do dono) com o
+                # dinheiro dele. `ensure_user_tx` ANTES porque sem a linha o
+                # update casa 0 e não trava nada, e o estado é alcançável
+                # (`merge_users` apaga accounts da origem, db/users.py:88); o
+                # `on conflict do nothing` (:19) é inócuo no caso normal.
+                #
+                # ponytail: o lock inverte a ordem accounts×pockets/investments
+                # de 4 fluxos (db/pockets.py:336→466, db/investments.py:1041→1096
+                # e :1554→1680, db/accounts.py:1647/1696→1718). Deadlock é REAL e
+                # é novo, e o reset NÃO é imune: ele fecha o ciclo (pede pockets
+                # no `_delete` do laço segurando accounts desde o update), e
+                # morre quem o Postgres detecta primeiro — ordem de chegada, não
+                # estrutura. Teto: nas 3 portas do OF o DeadlockDetected cai em
+                # `except Exception: pass` e some (db/accounts.py:1500-1512). No
+                # reset ele vira 503 (frontend/routes/settings.py:188) com o
+                # `remote_cleanup` já feito — gatilho novo para a janela residual.
+                #
+                # Quem chega DEPOIS do lock não deadlocka, só ESPERA — no
+                # `ensure_user` do writer, que pede accounts em transação
+                # PRÓPRIA antes de qualquer caixinha. Invariante frágil: vale
+                # enquanto todo escritor de accounts chamar `ensure_user` — hoje
+                # os 10 chamam, menos o `merge_users`, que é a exceção conhecida.
+                # A receita, e ela precisa ser case-INSENSITIVE: uma versão
+                # anterior deste comentário usava `grep -rn 'update accounts
+                # set'` e por isso dizia 9 — o `set_balance` (db/accounts.py:41)
+                # escreve em MAIÚSCULAS e ficava invisível.
+                #     grep -rniE 'update[[:space:]]+accounts[[:space:]]+set' \
+                #          --include='*.py' db/
+                # (medido 2026-09-04: 12 linhas = 10 escritores + este
+                # comentário + o `update` do próprio reset. REMEÇA antes de
+                # reusar.) E a
+                # espera não é só do dono da linha — a fila do WhatsApp tem
+                # consumidor único (`_worker_loop`, adapters/whatsapp/wa_app.py:324),
+                # então um writer preso trava as mensagens de TODOS na janela.
+                #
+                # Sem `lock_timeout` de propósito: o do repo vive nas conexões
+                # DEDICADAS do `pluggy_item_lock` (db/open_finance_state.py:595,
+                # :611, :676), feitas para ter teto próprio. No pool ele valeria
+                # para TODO write do produto, e espera correta viraria erro. Se
+                # incomodar, a saída é ordem única de lock nos writers.
+                #
+                # Janela MEDIDA 2026-09-03 (Postgres 15.15 local, 3 execuções,
+                # writer disparado no 1º `_table_exists` — gatilho de
+                # tests/test_account_reset.py::_reset_com_lancamento_concorrente).
+                # REMEÇA antes de reusar: conta vazia 0,05 s; MAIOR CONTA REAL de
+                # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma acima de
+                # 10 mil). Sintético: 50 mil launches sozinhos 0,58 s; os mesmos com
+                # 20 mil open_finance_transactions, 16,9 s. Custo ≈ linhas apagadas ×
+                # tamanho GLOBAL de cada filha que as referencia (open_finance_
+                # transactions conta DUAS vezes p/ launches) — nenhuma das FKs
+                # `on delete set null` p/ launches/credit_transactions é indexada,
+                # então conta pequena também dói se a filha for grande; o conserto é
+                # o índice. Os 0,08 s são só o 1º fator (linhas-pai) e em banco
+                # LOCAL: o 2º — tamanho das filhas EM PRODUÇÃO — nunca foi medido,
+                # então eles NÃO sustentam "janela pequena em produção". Ele, as
+                # FKs e as queries: #253.
+                ensure_user_tx(cur, user_id)
+                cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
+                # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a
+                # linha NÃO é apagada — contar aqui seria mentira no contrato.
+
                 # Open Finance, child-first (accounts/transactions/investments
                 # não têm user_id — o isolamento entra pelo join na connection).
                 _delete(cur, "open_finance_transactions", """

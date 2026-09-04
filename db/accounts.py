@@ -1497,7 +1497,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     em TODA tentativa, sem caminho de saída pro usuário. É a troca deliberada:
     recusar para sempre não perde dinheiro; seguir perde (R$300 em 5 toques de
     produto, medido). Nas 3 portas do Open Finance a recusa é SILÊNCIO — em
-    `db/open_finance.py:1329` e `:1418` o código segue e marca `auto_merged`
+    `db/open_finance.py:1545` e `:1634` o código segue e marca `auto_merged`
     mesmo com o delete recusado. Consertar isso é o PR dos `except`, não este.
 
     `escopo_conta_corrente=True` — usado SÓ pelo "apagar tudo" — recusa também
@@ -1507,9 +1507,9 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     usuário como frase de produto em cinco deles e como SILÊNCIO em três:
       - `core/handlers/pending.py:170` (WhatsApp, singular) e `:230` (bulk);
       - `core/services/ai_chat/tools/launches.py:433` (/ai/chat);
-      - `frontend/finance_bot_websocket_custom.py:5490` (DELETE /launches);
+      - `frontend/finance_bot_websocket_custom.py:5749` (DELETE /launches);
       - `delete_all_launches_and_rollback` (abaixo), que classifica em baldes;
-      - `db/open_finance.py:43`, `:1329` e `:1418` — os três dentro de
+      - `db/open_finance.py:44`, `:1545` e `:1634` — os três dentro de
         `except Exception: pass`. Ali uma recusa não vira mensagem nem log: o
         lançamento duplicado do Open Finance sobrevive à reconciliação e o saldo
         conta duas vezes, calado. HOJE inalcançável (as chaves que o importador
@@ -1698,7 +1698,21 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         (user_id, nome, bal0),
                     )
 
-            # reverte conta
+            # reverte conta. NÃO checar `cur.rowcount` aqui (proposta original
+            # da issue #246) — mas não porque seja impossível casar 0: o
+            # `ensure_user` do topo (:1521) commita em transação PRÓPRIA e solta
+            # a linha, então `merge_users` (db/users.py:88) apagando accounts
+            # entre ele e este update deixa rowcount 0, e o lançamento é apagado
+            # sem reverter o saldo — o sintoma do #246 por outra porta. A
+            # decisão de não guardar é de custo, não de impossibilidade: a
+            # janela é o intervalo entre duas linhas desta função, `merge_users`
+            # é raro, e a guarda transformaria o caso em `kept_unsafe`
+            # PERMANENTE (mesmo teto do `rowcount` de lote, na docstring). O
+            # #246 em si era ordem de escrita no reset, consertado em
+            # db/privacy.py (reset_user_data): lá o lock de accounts é tomado
+            # na PRIMEIRA escrita e segurado até o commit, que é o que fecha a
+            # janela equivalente. Fechar esta aqui é lock em `merge_users`,
+            # outro PR.
             if delta_conta != 0:
                 cur.execute(
                     "update accounts set balance = balance - %s where user_id=%s",

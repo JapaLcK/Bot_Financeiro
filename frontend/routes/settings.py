@@ -186,6 +186,33 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
             detail="Não foi possível recomeçar agora: uma sincronização bancária "
                    "está em andamento. Tente de novo em alguns segundos.",
         ) from exc
+    except psycopg.OperationalError as exc:
+        # A CATEGORIA inteira, não só o `DeadlockDetected`. O reset toma accounts
+        # primeiro e pockets/investments no laço; um saque de caixinha faz o
+        # contrário, e o Postgres mata quem detectar primeiro (db/privacy.py,
+        # comentário do `update accounts`). Mas o deadlock é UMA das folhas:
+        # `PoolTimeout`, `QueryCanceled` e `LockNotAvailable` também descendem de
+        # `OperationalError`, e o conserto deste PR tornou a primeira mais
+        # provável — durante a transação todo `ensure_user` daquele usuário
+        # bloqueia SEGURANDO um dos 8 slots do pool sync (db/connection.py:77).
+        #
+        # Capturar a folha era copiar a forma do precedente e perder a lição
+        # dele: `frontend/routes/open_finance.py:393` captura `OperationalError`
+        # justamente porque o Codex apontou OITO vezes o mesmo fenômeno por
+        # portas diferentes, e nomeia o `DeadlockDetected` como uma delas.
+        #
+        # Todas abortam a transação INTEIRA — nada local mudou — e todas são
+        # temporárias, então o desfecho certo é o mesmo 503 recuperável, em vez
+        # do 500 "erro interno" numa condição que a retentativa resolve. E o
+        # `remote_cleanup` já rodou (db/privacy.py:593, antes do `get_conn`),
+        # então cair em 500 aqui deixaria os items da Pluggy deletados com o
+        # banco local intacto — a janela residual que a docstring do
+        # `reset_user_data` descreve, com gatilho novo.
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível recomeçar agora: outra operação na sua conta "
+                   "estava em andamento. Tente de novo em alguns segundos.",
+        ) from exc
 
     # 2º passe remoto (Codex PR #217, 11º): item Pluggy salvo ENTRE a
     # enumeração da limpeza remota e o DELETE local foi varrido do banco sem
