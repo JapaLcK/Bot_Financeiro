@@ -653,7 +653,9 @@ def test_tudo_guardado_mais_quantia_nova_nao_esvazia(uid):
 
 
 def _caixinhas_com_saldo(uid: int, *nomes: str, saldo: float = 300.0) -> None:
-    """Caixinhas com saldo, pelo `db` — sem passar pelo teto do plano Grátis."""
+    """Caixinhas com saldo, pelo `db`. NÃO escapa do teto do plano Grátis: o
+    `db.create_pocket` chama `check_can_create_pocket` (`db/pockets.py:531`), e
+    com dois nomes o teste precisa da fixture `sem_teto_de_caixinha`."""
     db.add_launch_and_update_balance(
         uid, "receita", saldo * len(nomes) + 100, alvo="salário", nota="setup",
         categoria="salário", is_internal_movement=False)
@@ -728,3 +730,75 @@ def test_p1c_caixinha_aninhada_pela_conversa(uid, sem_teto_de_caixinha):
     p = _saldos(uid)
     assert p["minha viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
     assert p["viagem"] == 300.00, "saiu da caixinha ERRADA"
+
+
+# ── Regressões do 45db911, achadas pelo Tester ───────────────────────────────
+#
+# CONTROLES NEGATIVOS (cada um injetado num caso que estava VERDE depois do fix):
+#   P0  `utils_text.py:28`, remover o `if not word: return False`
+#       -> test_p0_caixinha_so_emoji_nao_sequestra_o_saque e
+#          test_p0_caixinha_so_emoji_nao_sequestra_o_deposito
+#   P1  `core/intent_router.py:863`, o `if not any(...)` de volta para
+#       `if all(contains_word(normalize_text(maior), normalize_text(n)) ...)`
+#       -> test_p1_duas_mencoes_aninhadas_continuam_recusadas e
+#          test_p1_duas_caixinhas_aninhadas_na_frase_nao_movem_dinheiro
+#   P3  `core/intent_router.py:1136`, `redirecionou` de volta para
+#       `bool(antes and depois and normalize_text(antes) != normalize_text(depois))`
+#       -> test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado
+# Os POSITIVOS do P1 continuam sendo `test_p1c_nome_aninhado_escolhe_o_mais_
+# especifico` e `test_p1c_nomes_disjuntos_continuam_recusados`.
+
+_EMOJI = "\U0001f4b0"  # 💰 — nome de caixinha legítimo que normaliza para ""
+
+
+def test_p0_caixinha_so_emoji_nao_sequestra_o_saque(uid, sem_teto_de_caixinha):
+    """Nome que normaliza para "" virava `contains_word(texto, "")` -> `\\b\\b`,
+    que casa qualquer texto: o saque saía da caixinha do emoji."""
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    _conversa(uid, "tirar da caixinha", "tira 100 da poupanca")
+
+    assert _saldos(uid)[_EMOJI] == 300.00, "o saque saiu da caixinha do emoji"
+
+
+def test_p0_caixinha_so_emoji_nao_sequestra_o_deposito(uid, sem_teto_de_caixinha):
+    """Mesma raiz na outra ponta: o depósito caía na caixinha do emoji."""
+    _caixinhas_com_saldo(uid, _EMOJI, "viagem")
+
+    r = _conversa(uid, "guardei na caixinha", "coloca 100 na poupanca")
+
+    assert _saldos(uid)[_EMOJI] == 300.00, f"o depósito caiu na do emoji: {r[-1]!r}"
+
+
+def test_p1_duas_mencoes_aninhadas_continuam_recusadas():
+    """"um nome cabe no outro" não é "uma menção só": com DUAS menções o
+    desempate do aninhamento adivinhava e escolhia a maior."""
+    from core.intent_router import _nome_do_alvo
+
+    resposta = "tira 100 da viagem e 50 da viagem japao"
+    assert _nome_do_alvo(resposta, ["viagem", "viagem japao"]) == resposta
+
+
+def test_p1_duas_caixinhas_aninhadas_na_frase_nao_movem_dinheiro(uid, sem_teto_de_caixinha):
+    """O dinheiro: o alvo adivinhado era debitado em silêncio."""
+    _caixinhas_com_saldo(uid, "viagem", "viagem japao")
+
+    _conversa(uid, "tirar da caixinha", "tira 100 da viagem e 50 da viagem japao")
+
+    assert _saldos(uid) == {"viagem": 300.00, "viagem japao": 300.00}, \
+        "moveu dinheiro num alvo adivinhado"
+
+
+def test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado(uid):
+    """Irmã do `test_nota_do_lancamento_nao_cita_o_alvo_velho`: sem alvo
+    guardado, o `redirecionou` dava False e a nota do saque de R$ 100 ficava
+    "esvaziar caixinha"."""
+    _caixinhas_com_saldo(uid, "viagem")
+
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+
+    saque = next(l for l in db.list_launches(uid, limit=20)
+                 if l.get("tipo") == "saque_caixinha")
+    assert _saldos(uid)["viagem"] == 200.00
+    assert "esvaziar" not in (saque.get("nota") or "").lower(), \
+        f"a nota diz esvaziar num saque de 100: {saque.get('nota')!r}"

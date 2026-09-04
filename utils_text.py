@@ -21,6 +21,12 @@ def normalize_text(text: str) -> str:
     return text
 
 def contains_word(text: str, word: str) -> bool:
+    # Palavra vazia não casa NADA: `\b\b` casa qualquer texto com uma palavra.
+    # Guarda AQUI e não em cada chamador — nome de caixinha só-emoji, keyword de
+    # regra do usuário e categoria vazia chegam por caminhos diferentes e todos
+    # normalizam para "" (§0.1: uma guarda na função compartilhada).
+    if not word:
+        return False
     # bate palavra inteira quando possível (evita falsos positivos)
     return re.search(rf"\b{re.escape(word)}\b", text) is not None
 

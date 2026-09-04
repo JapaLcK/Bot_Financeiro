@@ -847,12 +847,20 @@ def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
     alvo_norm = normalize_text(resposta)
     dentro = [n for n in (existentes or []) if contains_word(alvo_norm, normalize_text(n))]
     if len(dentro) > 1:
-        # "viagem" e "minha viagem" casam os dois: ANINHADOS, o mais específico
-        # ganha. Disjuntos ("ana" e "bruno" na mesma frase) continuam recusados —
-        # escolher seria adivinhar, e o handler dizendo "não encontrada" é melhor
-        # que mover dinheiro no alvo errado.
+        # "viagem" e "minha viagem" casam os dois numa MENÇÃO só ("tira 100 da
+        # minha viagem"): ANINHADOS, o mais específico ganha. O teste é UMA
+        # MENÇÃO, não "um nome cabe no outro": em "tira 100 da viagem e 50 da
+        # viagem japao" um cabe no outro do mesmo jeito, e são DUAS menções —
+        # escolher ali seria adivinhar, e o handler dizendo "não encontrada" é
+        # melhor que mover dinheiro no alvo errado.
+        #
+        # Quem separa os dois casos é a REMOÇÃO (mesmo idioma do `_pede_tudo`):
+        # tira a ocorrência do maior e vê se algum candidato ainda casa no resto.
+        # Se casa, sobrou outra menção. Disjuntos ("ana" e "bruno") caem aqui
+        # também, e continuam recusados.
         maior = max(dentro, key=lambda n: len(normalize_text(n)))
-        if all(contains_word(normalize_text(maior), normalize_text(n)) for n in dentro):
+        resto = re.sub(rf"\b{re.escape(normalize_text(maior))}\b", " ", alvo_norm, count=1)
+        if not any(contains_word(resto, normalize_text(n)) for n in dentro):
             dentro = [maior]
     # TETO deixado ABERTO de propósito: com catálogo ["viagem", "minha caixinha
     # viagem"], "tira 100 da minha caixinha viagem" ainda devolve "viagem",
@@ -1109,11 +1117,26 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
         # catálogo — o parse do handler, se rodar, chega ao mesmo nome. Quando o
         # portão RECUSOU o alvo da resposta não há divergência, então o
         # `orig_text` fica, e o parse não tem como reintroduzir o alvo recusado.
+        # `antes` VAZIO conta igual: "esvaziar caixinha" (sem alvo guardado) +
+        # "tira 100 da viagem" gravava a nota "esvaziar caixinha" num saque de
+        # R$ 100 — mesma mentira, sem alvo velho para citar. Com uma condição a
+        # mais: o texto também é a fonte de PARSE do handler, e a quantidade
+        # "tudo" mora só no `orig_text` (as entities não a carregam quando a
+        # pergunta foi "Qual caixinha?"). Trocar o texto por uma resposta que só
+        # traz o NOME — "esvaziar caixinha" + "viagem" — perdia o esvaziar
+        # (medido: virava "Qual o valor?"). Com `antes` preenchido a quantidade
+        # já veio nas entities guardadas, então a condição só vale para o ramo
+        # novo. O portão do catálogo, que antes era implícito (o `_funde_o_nome`
+        # só sobrescreve alvo guardado pelo catálogo), fica explícito aqui.
         chave = _CHAVE_DO_NOME.get(original_intent)
         antes = (original_entities or {}).get(chave) if chave else None
         depois = ents.get(chave) if chave else None
-        redirecionou = bool(antes and depois
-                            and normalize_text(antes) != normalize_text(depois))
+        qtd_nova = (ents.get("amount") != original_entities.get("amount")
+                    or ents.get("want_all") != original_entities.get("want_all"))
+        redirecionou = bool(depois
+                            and normalize_text(antes or "") != normalize_text(depois)
+                            and _eh_nome_do_catalogo(depois, existentes)
+                            and (antes or qtd_nova))
         texto = resposta_h if redirecionou else orig_text
         return _execute(original_intent, user_id, texto, ents, platform, external_id)
 
