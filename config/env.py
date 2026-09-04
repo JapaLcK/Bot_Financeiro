@@ -13,6 +13,9 @@ import utils_date
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+# Aviso de fuso divergente: uma vez por processo (ver o fim de `load_app_env`).
+_AVISO_FUSO_EMITIDO = False
+
 
 def load_app_env() -> str:
     """
@@ -122,5 +125,63 @@ def load_app_env() -> str:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # O `APP_TZ` de `frontend/dashboard.js` é LITERAL e vale `utils_date.TZ_PADRAO`.
+    # A guarda 19.1 de `tests/test_fuso_do_app.py` prova MENOS desse par do que o
+    # nome sugere: que existe UMA const chamada `APP_TZ` com o valor certo e que
+    # três substrings de uso continuam no arquivo. Ela lê TEXTO — não executa o JS.
+    # Sombrear o nome (`function appTzWallClockToISO(localStr, APP_TZ)` mais
+    # `appTzWallClockToISO(dataVal, Intl.DateTimeFormat().resolvedOptions().timeZone)`
+    # no chamador) a deixa VERDE com o dashboard já seguindo o APARELHO — medido.
+    # Quem prova o USO é `tests/frontend/edit_launch_patch_body.test.mjs`, caso
+    # "navegador em Asia/Tokyo": ele roda o `dashboard.js` de verdade num Chromium
+    # noutro fuso e confere o `criado_em` do PATCH.
+    #
+    # As duas juntas protegem a CONSTANTE e UM caminho de escrita, não a classe:
+    # um segundo formulário chamando `new Date(v).toISOString()` passaria verde nas
+    # duas. Então um fuso efetivo diferente do padrão quebra o par JS↔servidor: o
+    # `appTzWallClockToISO` do dashboard continua lendo o datetime-local como hora
+    # de parede em São Paulo e grava o lançamento em DIA errado para quem estiver
+    # perto da meia-noite.
+    #
+    # AVISO, não `exit(1)`, por duas razões medidas:
+    #   1. `load_app_env` não roda só no boot — `adapters/whatsapp/wa_app.py:39` o
+    #      chama NO IMPORT, e esse import é tardio de propósito (primeira
+    #      requisição). Sair aqui derrubaria um processo JÁ SERVINDO.
+    #   2. fuso divergente é configuração SUPORTADA e testada: 21 casos de
+    #      `tests/test_fuso_do_app.py` chamam `load_app_env` com fuso efetivo ≠
+    #      padrão, e a técnica `REPORT_TIMEZONE=<zona> pytest` (documentada no
+    #      cabeçalho daquele arquivo e no de `tests/test_virada_de_mes.py`)
+    #      morreria junto.
+    # UMA VEZ POR PROCESSO. `load_app_env` é chamado no IMPORT de vários módulos do
+    # mesmo processo: medido, `import core.observability, frontend.routes.shared,
+    # adapters.whatsapp.wa_app` imprimia 3 linhas idênticas e agora imprime 1. Um
+    # boot web importa mais que isso.
+    #
+    # A SUÍTE não muda: continua em 22 avisos, todos de `tests/test_fuso_do_app.py`
+    # (medido: sem esse arquivo, 0). É de propósito — a fixture `_restaura_fuso`
+    # zera a flag ANTES de cada caso, senão `test_fuso_divergente_...avisa` ficaria
+    # verde-por-engano ao rodar depois de outro caso que já avisou (medido: sem o
+    # reset, ele passa sozinho e falha em `test_report_timezone_...` + ele).
+    #
+    # ponytail: comparação por NOME, não por offset. Um ALIAS do mesmo fuso —
+    # `Brazil/East`, mesmo TZif de `America/Sao_Paulo`, offset medido idêntico
+    # (−03:00) — dispara aviso falso. Aceito: alias é raro, o aviso não bloqueia
+    # nada, e resolver por identidade de zona custa mais código do que o alarme
+    # cosmético vale. Se incomodar, compare `ZoneInfo(a).utcoffset(now)`.
+    global _AVISO_FUSO_EMITIDO
+    if not _AVISO_FUSO_EMITIDO and utils_date.tz_name() != utils_date.TZ_PADRAO:
+        _AVISO_FUSO_EMITIDO = True
+        print(
+            f"WARNING: fuso do servidor ({utils_date.tz_name()}) diverge do APP_TZ do "
+            f"dashboard ({utils_date.TZ_PADRAO}), que é literal no JS. Lançamento "
+            f"criado pelo dashboard perto da meia-noite vai para o DIA errado. "
+            f"Operar noutro fuso exige mudar os três de PRODUÇÃO juntos — o `APP_TZ` "
+            f"de frontend/dashboard.js, o `TZ_PADRAO` de utils_date.py e o ambiente "
+            f"(REPORT_TIMEZONE/TZ) — mais os controles que cravam São Paulo em "
+            f"tests/test_fuso_do_app.py (`_SP` e `_SP_DEFAULT`). Mexer só no ambiente "
+            f"é o que este aviso está vendo agora.",
+            file=sys.stderr,
+        )
 
     return app_env
