@@ -13,7 +13,7 @@ Duas tabelas distintas:
 import logging
 import unicodedata
 
-from .connection import get_conn
+from .connection import get_conn, TIPO_DESPESA_SQL
 from .users import ensure_user
 from utils_text import normalize_text
 
@@ -237,11 +237,11 @@ def get_uncategorized_launches(user_id: int, limit: int = 20) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select id, tipo, valor, alvo, nota, categoria, criado_em
                 from launches
                 where user_id = %s
-                  and tipo = 'despesa'
+                  and {TIPO_DESPESA_SQL}
                   and is_internal_movement = false
                   and (categoria is null or lower(categoria) = 'outros')
                 order by criado_em desc

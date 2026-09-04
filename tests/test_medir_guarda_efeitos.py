@@ -149,3 +149,49 @@ def test_escape_alem_do_tratador_nao_imprime_nada(tmp_path):
     assert "12345678900" not in fim.stdout + fim.stderr
     assert fim.stdout == "" and fim.stderr == ""
     assert fim.returncode == 5, "o codigo de saida e o unico aviso que sobra"
+
+
+# ── o recorte do "apagar tudo": duas fontes, um teste (§0.7) ────────────────
+#
+# O script decide o bloco ('tudo' × 'singular') e o `escopo_conta_corrente` da
+# guarda a partir de `_tipos_apagar_tudo()`; quem apaga de verdade é
+# `_CONTA_CORRENTE_LAUNCH_FILTER`, em SQL. Enquanto forem duas expressões, uma
+# tem de ser conferida contra a outra — senão o script volta a divergir calado,
+# que foi o que aconteceu: com o literal `("despesa","receita")` congelado, a
+# linha legada saía no bloco 'singular' com veredito "apaga" onde o código real
+# devolve `kept_unsafe`/`fora_do_escopo`.
+#
+# TETO: isto mede o eixo `tipo`. Um termo que não seja de `tipo` no filtro (um
+# `and is_internal_movement = false`) passaria por aqui — todas as linhas
+# semeadas nascem com o default da coluna.
+_TIPOS_SEMEADOS = (
+    "despesa", "receita", "saida", "entrada",
+    "aporte_investimento", "deposito_caixinha", "saque_caixinha",
+    "resgate_investimento", "criar_caixinha",
+)
+
+
+def test_recorte_do_apagar_tudo_bate_com_o_sql(user_id):
+    """Controle negativo: recongele `_tipos_apagar_tudo` em
+    `("despesa","receita")` e o SQL devolve 'saida'/'entrada' a mais — vermelho.
+    Controle positivo embutido: os tipos de caixinha/investimento continuam
+    FORA dos dois lados, então o teste não passa num filtro que pega tudo."""
+    import db
+    from db.accounts import _CONTA_CORRENTE_LAUNCH_FILTER
+
+    with db.get_conn() as conn, conn.cursor() as cur:
+        for tipo in _TIPOS_SEMEADOS:
+            cur.execute(
+                "insert into launches (user_id, tipo, valor, categoria, nota) "
+                "values (%s, %s, 1, 'outros', 'recorte')",
+                (user_id, tipo),
+            )
+        cur.execute(
+            f"select tipo from launches where user_id=%s "
+            f"and {_CONTA_CORRENTE_LAUNCH_FILTER}",
+            (user_id,),
+        )
+        do_sql = {r["tipo"] for r in cur.fetchall()}
+
+    assert do_sql == set(_carregar()._tipos_apagar_tudo()), do_sql
+    assert do_sql < set(_TIPOS_SEMEADOS), "o filtro passou a pegar TODO tipo"

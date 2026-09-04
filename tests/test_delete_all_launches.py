@@ -1730,3 +1730,110 @@ def test_bill_id_de_outro_usuario_recusa_em_vez_de_creditar(user_id: int):
     assert _bill_status(bill_meu) == "paid", "a fatura do dono não é tocada na recusa"
     assert any(int(r["id"]) == pgto for r in db.list_launches(user_id, limit=10))
 
+
+# ── a forma LEGADA no "apagar tudo" ─────────────────────────────────────────
+#
+# `_CONTA_CORRENTE_LAUNCH_FILTER` era `tipo in ('despesa','receita')` e deixava
+# 'saida'/'entrada' de fora dos DOIS lados do par ("o que se conta é o que se
+# apaga"). O sintoma não era subcontagem: medido num banco descartável com uma
+# despesa moderna + uma 'saida' + uma 'entrada', `count_launches` dizia 1 e o
+# retorno vinha `remaining: 0` com as duas legadas ainda na tabela — o sistema
+# afirmando ter apagado tudo. Com a constante ampliada, isto é o que muda:
+#   • o PORTÃO do `/ai/chat` (`delete_all_launches.validate`, o único consumidor
+#     de `count_launches`) deixa de afirmar "seu histórico já está limpo" com
+#     linha na tabela. Não é um "N" na frase: `_delete_all_launches_summary` nem
+#     recebe `user_id` — o que muda é `n <= 0`;
+#   • uma linha legada com `efeitos` de caixinha/investimento passa a ser
+#     RECUSADA (`kept_unsafe`) em vez de nem ser olhada — recusa PERMANENTE, o
+#     teto conhecido do #214. O `motivo` do log é `fora_do_escopo` em 6 das 8
+#     chaves; `delta_pocket`/`delta_invest` sem lote saem `lote_ausente`
+#     (`_DELTA_EXIGE_LOTE` dispara antes da guarda de escopo).
+
+def test_apagar_tudo_conta_e_apaga_a_linha_legada(user_id: int):
+    """Controle NEGATIVO deste par: voltando o filtro para
+    `tipo in ('despesa','receita')`, `count_launches` dá 1, `deleted` dá 1 e o
+    `remaining: 0` sai com DUAS linhas ainda na tabela — que é o defeito.
+
+    A legada entra por `_set_tipo` sobre um lançamento REAL: assim ela carrega o
+    `efeitos` que o escritor de verdade grava, e o saldo tem o que reverter."""
+    add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+    lid_saida, _s, _ = add_launch_and_update_balance(
+        user_id, "despesa", 100, "mercado", "gastei 100 mercado")
+    lid_entrada, _s2, _ = add_launch_and_update_balance(
+        user_id, "receita", 300, None, "freela")
+    _set_tipo(user_id, lid_saida, "saida")
+    _set_tipo(user_id, lid_entrada, "entrada")
+    assert _bal(user_id) == 1200.0
+
+    assert db.count_launches(user_id) == 3, "as 3 têm de entrar no conjunto"
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result == {"deleted": 3, "kept_no_effects": [], "kept_unsafe": [],
+                      "errors": [], "remaining": 0}, result
+    # o ponto: `remaining` é uma AFIRMAÇÃO sobre a tabela — confere contra ela,
+    # não contra `count_launches` (que usa o mesmo filtro e mentiria junto).
+    assert _linhas_cruas(user_id) == [], "sobrou linha com `remaining: 0` no retorno"
+    assert _bal(user_id) == 0.0, "o saldo da legada também tem de voltar"
+
+
+def test_portao_do_chat_nao_diz_historico_limpo_com_linha_legada(user_id: int):
+    """O consumo REAL de `count_launches` é o portão `n <= 0` do `validate` da
+    tool `delete_all_launches` — não um "N" na frase de confirmação
+    (`_delete_all_launches_summary` nem recebe `user_id`).
+
+    Base 100% LEGADA de propósito: com uma linha moderna junto, `count` já era
+    >= 1 dos dois lados e o assert não mediria nada. Medido, com o filtro antigo:
+    `count=0` e o bot respondia "🐷 ... seu histórico já está limpo" com as duas
+    linhas na tabela — afirmação falsa num caminho destrutivo, ANTES de qualquer
+    confirmação. Com o filtro ampliado: `count=2` e `validate` devolve None.
+
+    Controle NEGATIVO: volte `_CONTA_CORRENTE_LAUNCH_FILTER` para
+    `tipo in ('despesa','receita')` e este caso fica vermelho na 1ª asserção."""
+    lid_s, _a, _ = add_launch_and_update_balance(
+        user_id, "despesa", 50, "mercado", "gastei 50 mercado")
+    lid_e, _b, _ = add_launch_and_update_balance(
+        user_id, "receita", 300, None, "freela")
+    _set_tipo(user_id, lid_s, "saida")
+    _set_tipo(user_id, lid_e, "entrada")
+
+    assert db.count_launches(user_id) == 2, "o portão do chat lê este número"
+    assert get_tool("delete_all_launches").validate(user_id, {}) is None, (
+        "o bot afirmou 'histórico já está limpo' com 2 linhas na tabela"
+    )
+
+
+def test_linha_legada_de_caixinha_vai_para_kept_unsafe(user_id: int):
+    """Controle POSITIVO do teto: ampliar o filtro NÃO pode fazer o "apagar
+    tudo" destruir caixinha/investimento por uma linha legada.
+
+    Irmão de `test_apagar_tudo_nao_toca_caixinha_com_tipo_reescrito`, com
+    'saida' no lugar de 'despesa': é a porta que este PR ABRE. O pré-voo do #214
+    (`_EFEITOS_FORA_DO_APAGAR_TUDO`) recusa antes de qualquer escrita, a linha
+    cai em `kept_unsafe` (frase de produto), e `remaining` bate com a tabela.
+
+    Controle negativo medido: sem a guarda de escopo a caixinha some
+    (`_pocket_balance` volta None) — é o mesmo que o irmão mede."""
+    from db.pockets import create_pocket
+
+    lid, _pid, _nome = create_pocket(user_id, "viagem")
+    _set_tipo(user_id, lid, "saida")   # LEGADA: é o que a faz entrar no conjunto
+    assert db.count_launches(user_id) == 1, "sem o filtro ampliado ela nem seria contada"
+
+    result = db.delete_all_launches_and_rollback(user_id)
+
+    assert result["kept_unsafe"] == [_user_seq(user_id, lid)], result
+    assert result["deleted"] == 0, result
+    assert result["errors"] == [], "recusa de domínio não é erro técnico"
+    assert _pocket_balance(user_id, "viagem") is not None, "a caixinha foi apagada"
+    assert result["remaining"] == len(_linhas_cruas(user_id)) == 1, result
+
+
+def _linhas_cruas(user_id: int) -> list:
+    """As linhas do usuário SEM filtro de tipo — a realidade contra a qual
+    `remaining` é conferido."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, tipo from launches where user_id=%s order by id",
+                        (user_id,))
+            return [dict(r) for r in cur.fetchall()]

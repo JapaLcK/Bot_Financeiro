@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any
 
 from .categories import ensure_user_category, resolve_category_for_write
-from .connection import get_conn
+from .connection import get_conn, TIPO_DESPESA_SQL
 from .users import ensure_user
 
 
@@ -487,11 +487,11 @@ def find_recurring_candidate(
                     return 0
             # 3) despesas passadas com o MESMO valor exato (casa descrição depois)
             cur.execute(
-                """
+                f"""
                 select criado_em,
                        coalesce(nullif(alvo,''), nullif(nota,'')) as descr
                 from launches
-                where user_id=%s and tipo='despesa'
+                where user_id=%s and {TIPO_DESPESA_SQL}
                   and is_internal_movement=false
                   and valor=%s
                   and (%s::bigint is null or id <> %s)

@@ -2277,32 +2277,3 @@ def get_installment_group_summaries(user_id: int, group_ids: list) -> dict:
         }
         for r in rows
     }
-
-
-def monthly_summary_credit_debit(user_id: int, start: date, end: date):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select coalesce(sum(valor),0) as total_debito from launches "
-                "where user_id=%s and tipo='despesa' and criado_em::date between %s and %s",
-                (user_id, start, end),
-            )
-            deb = cur.fetchone()["total_debito"]
-
-            cur.execute(
-                "select coalesce(sum(valor),0) as total_credito from credit_transactions "
-                "where user_id=%s and purchased_at between %s and %s",
-                (user_id, start, end),
-            )
-            cred = cur.fetchone()["total_credito"]
-
-            cur.execute(
-                "select c.name, coalesce(sum(t.valor),0) as total "
-                "from credit_transactions t join credit_cards c on c.id=t.card_id "
-                "where t.user_id=%s and t.purchased_at between %s and %s "
-                "group by c.name order by total desc",
-                (user_id, start, end),
-            )
-            by_card = cur.fetchall()
-
-    return {"debito": deb, "credito": cred, "por_cartao": by_card}

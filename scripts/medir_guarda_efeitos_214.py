@@ -181,10 +181,31 @@ def _guarda_b4d0085(efeitos, *, escopo_conta_corrente):
 # Classificação
 # ---------------------------------------------------------------------------
 # `escopo_conta_corrente=True` é usado SÓ por `delete_all_launches_and_rollback`,
-# que lê `where tipo in ('despesa','receita')` (`_CONTA_CORRENTE_LAUNCH_FILTER`).
+# e o conjunto que ela apaga é `_CONTA_CORRENTE_LAUNCH_FILTER` (db/accounts.py).
 # Fora desse filtro o `fora_do_escopo` seria ruído — por isso a tabela do
 # "apagar tudo" só conta essas linhas.
-_TIPOS_APAGAR_TUDO = ("despesa", "receita")
+#
+# DERIVADO, não congelado (§0.7). O literal `("despesa", "receita")` que morava
+# aqui ficou falso no dia em que o filtro passou a incluir a forma legada: com
+# ele, `tipo='saida'` caía no bloco 'singular' e o script imprimia "apaga"
+# exatamente onde o código real devolve `kept_unsafe`/`fora_do_escopo` — a
+# medição sairia errada na direção "a guarda não pega nada", que é o oposto do
+# que ela faz. É outra coisa que a guarda `b4d0085` acima: lá o congelamento é
+# de propósito (a versão VELHA, para comparar duas colunas); aqui é o recorte de
+# HOJE, e ele tem de acompanhar o código.
+#
+# ponytail: extração por regex do literal SQL — vale enquanto o filtro for
+# disjunção de `tipo IN (...)`. Termo que não seja de `tipo` (um
+# `and is_internal_movement = false`, por exemplo) não aparece no conjunto;
+# quem pega o eixo `tipo` é
+# `tests/test_medir_guarda_efeitos.py::test_recorte_do_apagar_tudo_bate_com_o_sql`,
+# que roda o filtro DE VERDADE contra o banco e compara com este conjunto.
+@lru_cache(maxsize=1)
+def _tipos_apagar_tudo():
+    from db.accounts import _CONTA_CORRENTE_LAUNCH_FILTER
+
+    return frozenset(re.findall(r"'([^']*)'", _CONTA_CORRENTE_LAUNCH_FILTER))
+
 
 # Só a FORMA do caminho ('bill_id', 'delete_pocket.nome'), e só de um conjunto
 # FECHADO deles. Regex de identificador não servia: a mensagem de
@@ -245,7 +266,7 @@ def classificar(efeitos, tipo):
     ef = _normalizar(efeitos)
     if ef is None:
         return ("sem_efeitos", "", ""), ("sem_efeitos", "", "")
-    escopo = tipo in _TIPOS_APAGAR_TUDO
+    escopo = tipo in _tipos_apagar_tudo()
 
     def rodar(fn):
         try:
@@ -266,10 +287,11 @@ def medir(cur):
     O registro individual é DESCARTADO logo depois de contado: nada acumula em
     lista, nem para amostra."""
     cruz, detalhe, total = Counter(), Counter(), 0
+    tipos = _tipos_apagar_tudo()
     for tipo, efeitos in cur:
         total += 1
         velho, novo = classificar(efeitos, tipo)
-        alvo = "tudo" if tipo in _TIPOS_APAGAR_TUDO else "singular"
+        alvo = "tudo" if tipo in tipos else "singular"
         cruz[(alvo, velho[0], novo[0])] += 1
         if novo[0] == "recusa":   # `sem_efeitos` ja tem linha propria
             detalhe[(alvo, velho[0], novo[0], novo[1], novo[2])] += 1
@@ -329,8 +351,9 @@ def relatar(cruz, detalhe, total, info_servidor):
           "(HEAD do checkout, #214) ==")
     print(f"servidor: {info_servidor}")
     print(f"linhas de 'launches' examinadas: {total}")
-    _bloco("apagar tudo (escopo_conta_corrente=True) — tipo in "
-           "('despesa','receita')", "tudo", cruz, detalhe)
+    recorte = ",".join(f"'{t}'" for t in sorted(_tipos_apagar_tudo()))
+    _bloco(f"apagar tudo (escopo_conta_corrente=True) — tipo in ({recorte})",
+           "tudo", cruz, detalhe)
     _bloco("demais portas (escopo_conta_corrente=False) — os outros tipos",
            "singular", cruz, detalhe)
 
@@ -384,6 +407,14 @@ def _autoteste():
          "despesa", "recusa", "recusa"),
         ({"delta_conta": 0, "create_pocket": {"nome": "x"}},
          "despesa", "recusa", "recusa"),   # fora_do_escopo, nas duas
+        # a forma LEGADA é conta corrente do mesmo jeito. Com o literal
+        # `("despesa","receita")` de volta em `_tipos_apagar_tudo`, estes dois
+        # viram ("apaga","apaga") e o bloco impresso vira 'singular' — o script
+        # mediria "a guarda não pega nada" onde ela recusa.
+        ({"delta_conta": 0, "create_pocket": {"nome": "x"}},
+         "saida", "recusa", "recusa"),
+        ({"delta_conta": 0, "create_pocket": {"nome": "x"}},
+         "entrada", "recusa", "recusa"),
         # 'efeitos' que nao e dict
         (None, "despesa", "sem_efeitos", "sem_efeitos"),
         ([1, 2], "despesa", "sem_efeitos", "sem_efeitos"),
@@ -463,6 +494,7 @@ def main():
     # falha dele nascia com um `efeitos` no `__context__`.
     from db.accounts import LaunchUnsafeRollback, _validar_efeitos  # noqa: F401
     _caminhos_do_esquema()
+    _tipos_apagar_tudo()
 
     conn = psycopg.connect(dsn, options=_OPTIONS, connect_timeout=10,
                            autocommit=False)

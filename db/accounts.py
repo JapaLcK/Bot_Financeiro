@@ -172,15 +172,34 @@ def get_last_inserted_launch(user_id: int):
 def list_launches_by_tipo(user_id: int, tipo: str, limit: int = 200):
     """Lançamentos recentes de um tipo (despesa/receita) com só os campos que
     a detecção de valor recorrente precisa (valor + descrição). Ordenado do mais
-    recente pro mais antigo."""
+    recente pro mais antigo.
+
+    `TIPO_CANON_SQL` e não `TIPO_DESPESA_SQL`: aqui o tipo é PARÂMETRO, não
+    literal — colapsar a forma legada na moderna no lado da coluna faz um
+    `tipo='despesa'` casar também com 'saida' sem inventar regra por chamador, e
+    deixa qualquer outro valor (aporte_investimento…) casando exato como antes.
+    Os DOIS chamadores vêm de `describe_valueless_launch` (parsers.py:273), que
+    só devolve 'despesa'/'receita' — nenhum passa a forma legada.
+
+    INVERSÃO, para quem for chamar isto de outro lugar: o colapso é da COLUNA,
+    então a forma legada COMO ARGUMENTO passa a devolver VAZIO — antes ela é que
+    trazia as linhas legadas. Medido, com uma linha 'saida' e uma 'despesa' na
+    base: `tipo='despesa'` → as DUAS; `tipo='saida'` → []; idem
+    'receita'/'entrada'. Inalcançável pelos chamadores de hoje (rastreados
+    acima), e é o preço de ter uma forma canônica só.
+
+    Sem isto, `infer_recurring_value` (core/handlers/launches.py:1315) não via as
+    ocorrências legadas e o bot voltava a PERGUNTAR o valor de um "aluguel" que
+    ele já sabia. Medido: 4 linhas legadas 'aluguel' 1200 davam None; as mesmas
+    4 na forma moderna davam 1200.0."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select valor, alvo, nota
                 from launches
-                where user_id=%s and tipo=%s
+                where user_id=%s and {TIPO_CANON_SQL}=%s
                 order by criado_em desc, id desc
                 limit %s
                 """,
@@ -455,11 +474,11 @@ def get_internal_movement_total(user_id: int, start_date: date, end_date: date) 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select coalesce(sum(valor), 0) as total
                 from launches
                 where user_id = %s
-                  and tipo = 'despesa'
+                  and {TIPO_DESPESA_SQL}
                   and is_internal_movement = true
                   and criado_em >= %s and criado_em < %s
                 """,
@@ -1951,9 +1970,39 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 # tipo evita essa armadilha. Validado no staging: 0 launches despesa/receita
 # carregam efeitos de caixinha/investimento.
 #
+# A forma LEGADA ('saida'/'entrada') é conta corrente do mesmo jeito, então
+# entra pelas duas constantes de `db/connection.py` (§0.7) em vez do literal.
+# Sem ela, medido num banco descartável com uma despesa moderna + uma 'saida' +
+# uma 'entrada': `count_launches` dizia 1 e o retorno vinha `remaining: 0` com as
+# DUAS linhas legadas ainda na tabela — o sistema afirmando que apagou tudo sem
+# ter apagado. Não é subcontagem, é relatório falso num caminho destrutivo.
+#
+# DUAS consequências visíveis que isto cria, de propósito:
+#   - o PORTÃO de "não tem nada pra apagar" muda ANTES do usuário confirmar.
+#     `count_launches` tem um consumidor só (`_delete_all_launches_validate`,
+#     core/services/ai_chat/tools/launches.py:511) e ele é `n <= 0`, não um "N"
+#     na frase: `_delete_all_launches_summary` (:503) nem recebe `user_id`.
+#     Medido com um histórico 100% legado ('saida' 50 + 'entrada' 300):
+#       antes  count=0 → "🐷 Você não tem nenhum lançamento pra apagar — seu
+#                         histórico já está limpo." (afirmação FALSA, com as
+#                         duas linhas na tabela)
+#       agora  count=2 → `validate` devolve None e o fluxo segue para a
+#                        confirmação, que é o que existe linha para apagar;
+#   - uma linha legada que carregue `efeitos` de caixinha/investimento agora
+#     entra no conjunto e é RECUSADA pelo pré-voo do #214, indo para
+#     `kept_unsafe` de forma PERMANENTE. É o teto conhecido do #214: recusar
+#     para sempre não perde dinheiro, e o usuário lê a frase de `kept_unsafe`
+#     em vez de a linha sumir calada. Antes disto ela nem era olhada.
+#     O `motivo` que vai para o LOG é `fora_do_escopo` em 6 das 8 chaves de
+#     `_EFEITOS_FORA_DO_APAGAR_TUDO`; `delta_pocket` e `delta_invest` sem chave
+#     de lote saem `lote_ausente`, porque `_DELTA_EXIGE_LOTE` dispara ANTES da
+#     guarda de escopo (medido, uma chave por vez). O balde é o mesmo nas 8.
+#
 # Usado por count_launches e delete_all_launches_and_rollback pra ficarem
-# consistentes (o que se conta é o que se apaga).
-_CONTA_CORRENTE_LAUNCH_FILTER = "tipo in ('despesa', 'receita')"
+# consistentes (o que se conta é o que se apaga). Esses dois são TODO o alcance
+# desta constante: o "Recomeçar do zero" (`reset_user_data`, db/privacy.py:519)
+# apaga `launches` do usuário SEM filtro de tipo e não passa por aqui.
+_CONTA_CORRENTE_LAUNCH_FILTER = f"({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"
 
 
 def count_launches(user_id: int) -> int:
