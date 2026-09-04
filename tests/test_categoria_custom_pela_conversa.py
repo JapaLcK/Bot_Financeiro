@@ -439,11 +439,38 @@ def test_falha_ao_checar_obsolescencia_nao_derruba_o_lancamento(monkeypatch):
     def _explode(*a, **k):
         raise RuntimeError("falha transitória de banco")
 
-    monkeypatch.setattr(cs, "list_custom_category_names", _explode)
+    # Mocka a função que ESTÁ no caminho: desde d24b1f7 o passo B carrega
+    # `list_custom_categories_com_data` e passa `nomes=` adiante, então
+    # `list_custom_category_names` nunca é chamada — o mock antigo não disparava
+    # e o teste passava com o `except` interno trocado por `raise`.
+    monkeypatch.setattr(cs, "list_custom_categories_com_data", _explode)
     resultado = cs.infer_category(uid, "gastei 15 com cafe", allow_ai=False)
     assert normalize_text(resultado.category) == "alimentacao", (
         f"a falha de metadado mudou o resultado: {resultado.category!r}"
     )
+
+
+def test_falha_ao_ler_as_regras_nao_vira_usuario_sem_regra(monkeypatch):
+    """Não conseguir LER as regras não pode virar "o usuário não tem regra".
+
+    Se a leitura degradasse para `[]`, a inferência cairia para local/IA e o
+    `learn_from_inference` (chamado depois do commit em
+    core/handlers/launches.py:1114) gravaria esse palpite POR CIMA da regra
+    explícita do usuário — com o `ON CONFLICT` renovando o `created_at`, a
+    regra do usuário ficaria corrompida para sempre. O contrato da `main` é
+    deixar a exceção subir; é ele que este teste fixa.
+    """
+    import core.services.category_service as cs
+
+    uid = _uid()
+    upsert_category_rule(uid, "cafe", "alimentacao")
+
+    def _explode(*a, **k):
+        raise RuntimeError("falha transitória de banco")
+
+    monkeypatch.setattr(cs, "get_memorized_rules", _explode)
+    with pytest.raises(RuntimeError):
+        cs.infer_category(uid, "gastei 15 com cafe", allow_ai=False)
 
 
 def test_rename_faz_a_categoria_adquirir_os_termos_novos():

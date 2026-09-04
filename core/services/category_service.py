@@ -297,15 +297,20 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     # A lista de categorias é carregada UMA vez e passada adiante: sem isso a
     # verificação consultaria o banco por candidata.
     #
-    # E o bloco inteiro degrada: se a consulta de metadado falhar, a regra vale.
+    # E a CHECAGEM de obsolescência degrada: se a consulta de metadado falhar,
+    # a regra vale.
     # É o mesmo contrato do B2 abaixo, que já trata exceção devolvendo None — e
     # a alternativa é deixar a exceção subir pelo handler e o lançamento do
     # usuário não ser gravado por causa de um hiccup de banco.
+    #
+    # A LEITURA das regras não é capturada de propósito (a `main` também deixa
+    # subir): falha de leitura não é ausência de regra. Se virasse `[]`, a
+    # inferência cairia para local/IA e o `learn_from_inference`
+    # (core/handlers/launches.py:1114, pós-commit) gravaria esse palpite POR
+    # CIMA da regra explícita do usuário — com o `ON CONFLICT` renovando o
+    # `created_at`, a corrupção ficaria permanente e silenciosa.
     regra = None
-    try:
-        candidatas = get_memorized_rules(user_id, t)
-    except Exception:
-        candidatas = []
+    candidatas = get_memorized_rules(user_id, t)
 
     if candidatas:
         # Degradação: se a checagem de obsolescência falhar, vale a regra de
