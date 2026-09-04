@@ -7121,7 +7121,9 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _nome_inv = payload.name.strip()
     _destino = (await asyncio.to_thread(
         _funding.resolve_destination, user_id,
-        origem_de=("aporte_investimento", _nome_inv)))["source"]
+        origem_de=("aporte_investimento", _nome_inv),
+        amount=None if payload.withdraw_all else payload.amount,
+        withdraw_all=bool(payload.withdraw_all)))["source"]
     try:
         launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
             investment_withdraw_to_account,

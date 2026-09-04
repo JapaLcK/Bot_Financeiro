@@ -17,6 +17,7 @@ from .investments import (
     _iof_rate_for_days,
     _ir_rate_for_days,
     _taxes_for_gain,
+    fifo_takes,
 )
 from .users import ensure_user
 
@@ -376,15 +377,9 @@ def pocket_withdraw_to_account(
             breakdown = []
             tax_profile = p.get("interest_tax_profile") or "regressive_ir_iof"
 
-            for lot in lots:
-                if remaining <= 0:
-                    break
-
+            for lot, take in fifo_takes(lots, remaining):
                 lot_balance = Decimal(str(lot["balance"] or 0))
-                if lot_balance <= 0:
-                    continue
                 lot_principal = Decimal(str(lot["principal_remaining"] or 0))
-                take = min(lot_balance, remaining)
 
                 if lot_balance <= lot_principal or lot_balance <= 0:
                     principal_part = min(take, lot_principal)
@@ -460,6 +455,16 @@ def pocket_withdraw_to_account(
 
             if remaining > LOT_EPSILON:
                 raise ValueError("INSUFFICIENT_POCKET")
+
+            # O destino foi decidido FORA desta transação (funding.resolve_destination).
+            # Um depósito com origem no banco que commitou nesse intervalo entra no FIFO
+            # acima, e o crédito abaixo somaria à Carteira dinheiro que continua no banco.
+            # Sob o `for update` dos lotes a resposta é definitiva.
+            if funding_source is None:
+                from .open_finance import bank_destination_of_lots
+
+                funding_source = bank_destination_of_lots(
+                    cur, user_id, "deposito_caixinha", [e["lot_id"] for e in lot_effects])
 
             new_pocket = _sync_pocket_from_lots(cur, user_id, pocket_id)
 

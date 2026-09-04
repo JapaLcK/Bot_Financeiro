@@ -235,7 +235,8 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         from core.services import funding
 
         destino = funding.resolve_destination(
-            user_id, origem_de=("aporte_investimento", name))["source"]
+            user_id, origem_de=("aporte_investimento", name),
+            amount=None if withdraw_all else amount, withdraw_all=withdraw_all)["source"]
         _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
             funding_source=funding.to_db_arg(destino),

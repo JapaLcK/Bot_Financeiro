@@ -366,7 +366,9 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
             funding_source=funding.to_db_arg(
                 (await asyncio.to_thread(
                     funding.resolve_destination, int(user_id),
-                    origem_de=("deposito_caixinha", name)))["source"]),
+                    origem_de=("deposito_caixinha", name),
+                    amount=None if payload.withdraw_all else payload.amount,
+                    withdraw_all=bool(payload.withdraw_all)))["source"]),
             withdraw_all=bool(payload.withdraw_all),
         )
     except LookupError as exc:

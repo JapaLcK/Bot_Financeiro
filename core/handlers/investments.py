@@ -494,7 +494,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     # Quando a origem foi o banco, creditar a Carteira inflaria o consolidado com o
     # mesmo dinheiro que o sync devolve. Não pergunta (ver funding.resolve_destination).
     destino = funding.resolve_destination(
-        user_id, origem_de=("aporte_investimento", investment_name))["source"]
+        user_id, origem_de=("aporte_investimento", investment_name),
+        amount=None if want_all else amount, withdraw_all=want_all)["source"]
 
     try:
         launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(

@@ -231,7 +231,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     # (resolve_destination consulta de onde os depósitos DELA saíram, #282), e acima
     # daqui o nome ainda pode virar pergunta.
     destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", pocket_name))["source"]
+        user_id, origem_de=("deposito_caixinha", pocket_name),
+        amount=None if want_all else amount, withdraw_all=want_all)["source"]
     fs = funding.to_db_arg(destino)
     nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
 

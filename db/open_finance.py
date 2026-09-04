@@ -17,6 +17,7 @@ from .cards import (
     remove_single_credit_transaction,
 )
 from .connection import get_conn
+from .investments import WITHDRAW_ALL_TOLERANCE, fifo_takes
 from .users import ensure_user, ensure_user_tx
 
 
@@ -2084,8 +2085,9 @@ _LOTES = {
 }
 
 
-def open_lot_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
-    """De onde veio o dinheiro que AINDA ESTÁ num alvo — origens dos lotes ABERTOS.
+def open_lot_origins(user_id: int, tipo: str, alvo: str, *, amount=None,
+                     withdraw_all: bool = False) -> list[dict]:
+    """De onde veio o dinheiro que ESTE saque leva — origens dos lotes que o FIFO consome.
 
     A pergunta é de ESTADO, não de história. A primeira versão desta função lia o
     histórico inteiro de `launches`, e aí "origens misturadas" virava "misturou uma
@@ -2094,9 +2096,15 @@ def open_lot_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
     Carteira, saque de 100 — e os R$ 100 evaporavam, porque o lote do banco tinha
     fechado três passos antes e a caixinha era 100% dinheiro da Carteira.
 
-    Lendo só os lotes abertos a resposta é EXATA: se todos vieram da mesma origem,
-    qualquer FIFO de qualquer valor só pode consumir lotes daquela origem. E se
-    limpa sozinha quando o lote fecha — sem backfill e sem migração.
+    Lendo só os lotes abertos a resposta já é sobre o estado, e se limpa sozinha
+    quando o lote fecha — sem backfill e sem migração. Mas "todos os lotes abertos"
+    ainda era pergunta demais: com `[carteira 100; banco 50]` e saque de 100 o FIFO
+    consome SÓ o lote da Carteira, e responder "duas origens" mandava os R$ 100 para
+    o banco — evaporavam. Com `amount`/`withdraw_all` a pergunta vira **quais lotes
+    ESTE saque consome**, e aí a resposta é exata e única (`_rows_do_saque`).
+
+    Sem `amount` (e sem `withdraw_all`), devolve todos os lotes abertos — é o que
+    `withdraw_all` também faz, já que ele leva tudo.
 
     O elo lote↔origem é o `efeitos` que o depósito já grava: `pocket_lot_create`
     /`investment_lot_create` guardam o `lot_id`, e `funding_source` guarda a origem.
@@ -2128,7 +2136,7 @@ def open_lot_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select distinct
+                select pl.id as lot_id, pl.balance,
                        coalesce(d.efeitos->'funding_source'->>'kind', 'carteira') as kind,
                        d.efeitos->'funding_source'->>'of_account_id' as of_account_id,
                        (d.id is null) as orfao
@@ -2140,12 +2148,99 @@ def open_lot_origins(user_id: int, tipo: str, alvo: str) -> list[dict]:
                         and (d.efeitos->'{efeito}'->>'lot_id') = pl.id::text
                  where pl.user_id = %s and lower(p.name) = lower(%s)
                    and pl.status = 'open' and pl.balance > 0
+                 order by pl.opened_at, pl.id
                 """,
                 (tipo, user_id, alvo),
             )
-            return [{"kind": r["kind"], "of_account_id": r["of_account_id"],
-                     "orfao": bool(r["orfao"])}
-                    for r in (cur.fetchall() or [])]
+            rows = cur.fetchall() or []
+
+    if not withdraw_all and amount is not None:
+        rows = _rows_do_saque(rows, amount)
+    vistas, origens = set(), []
+    for r in rows:
+        chave = (r["kind"], r["of_account_id"], bool(r["orfao"]))
+        if chave not in vistas:
+            vistas.add(chave)
+            origens.append({"kind": r["kind"], "of_account_id": r["of_account_id"],
+                            "orfao": bool(r["orfao"])})
+    return origens
+
+
+def _rows_do_saque(rows: list[dict], amount) -> list[dict]:
+    """Recorta as linhas para os lotes que um saque de `amount` consumiria.
+
+    Os saldos aqui são lidos FORA da transação do saque e ANTES do rendimento do dia,
+    então erram sempre para MENOS — o prefixo sai igual ou MAIOR que o real. Prefixo
+    maior só pode acrescentar origem, e mais de uma origem cai na regra de sempre: o
+    erro é para o lado seguro (nunca credita a Carteira com dinheiro do banco).
+
+    O `left join` de `open_lot_origins` pode repetir o mesmo lote (dois lançamentos
+    apontando o mesmo `lot_id`); o FIFO tem de andar sobre lotes ÚNICOS, senão o saldo
+    conta duas vezes e o prefixo encurta.
+    """
+    unicos = {}
+    for r in rows:
+        unicos.setdefault(r["lot_id"], r)
+    v = Decimal(str(amount))
+    total = sum(Decimal(str(r["balance"] or 0)) for r in unicos.values())
+    # Mesma tolerância do saque real (db/pockets.py, db/investments.py): pedir ~tudo
+    # saca tudo. Sem isto, `[carteira 100,00; banco 0,005]` + pedido de 100 diria
+    # "só o lote da Carteira" enquanto o saque leva os dois — e evaporaria R$ 100.
+    if v >= total - WITHDRAW_ALL_TOLERANCE:
+        return rows
+    consumidos = {lot["lot_id"] for lot, _take in fifo_takes(unicos.values(), v)}
+    return [r for r in rows if r["lot_id"] in consumidos]
+
+
+def bank_destination_of_lots(cur, user_id: int, tipo: str, lot_ids) -> dict | None:
+    """Se ALGUM dos lotes consumidos veio do banco, devolve o `funding_source` dele.
+
+    Fecha a janela do `funding.resolve_destination`, que lê FORA da transação do saque.
+    Medido com o depósito intercalado: Carteira 900 + saque de tudo com um lote de
+    R$ 50 do banco commitado no meio creditava R$ 150 na Carteira — R$ 50 CRIADOS, e
+    eles continuam no banco. A `main` nunca creditava a Carteira num resgate com banco
+    conectado, então inflar o consolidado é risco que só o destino por lote abriu.
+
+    Aqui os lotes já estão sob `for update`, então a resposta é definitiva: o
+    `lot_effects` do saque é a lista exata do que saiu.
+
+    Só a direção que CRIA dinheiro é corrigida (destino Carteira com lote do banco).
+    A oposta — destino banco com lote da Carteira — é a regra de sempre da #286 e
+    fica como está: mudar isso aqui seria decidir o produto dentro do `db/`.
+
+    O join com `BANK_ACCOUNTS_SQL` é o MESMO recorte de `funding.list_sources` (§0.7):
+    banco desconectado desde o depósito não conta, e aí o destino continua sendo a
+    Carteira — a regra que `resolve_destination` já documenta e que
+    `test_banco_de_origem_desconectado_nao_credita_a_carteira` fixa. Ele também é o
+    filtro de dono: conta de outro usuário não casa. O cast é `a.id::text`, nunca
+    `->>'of_account_id'::bigint` — a jsonb é livre e o cast estoura.
+
+    `label` vem do lançamento (o que a origem gravou); é cosmético.
+    """
+    if not lot_ids:
+        return None
+    efeito = _LOTES[tipo][3]
+    cur.execute(
+        f"""
+        select d.efeitos->'funding_source'->>'of_account_id' as of_account_id,
+               d.efeitos->'funding_source'->>'label' as label
+          from launches d
+          join ({BANK_ACCOUNTS_SQL}) conta
+            on conta.id::text = d.efeitos->'funding_source'->>'of_account_id'
+         where d.user_id = %s and d.tipo = %s
+           and d.efeitos->'funding_source'->>'kind' = 'bank'
+           and (d.efeitos->'{efeito}'->>'lot_id') = any(%s)
+         limit 1
+        """,
+        (user_id, user_id, tipo, [str(i) for i in lot_ids]),
+    )
+    r = cur.fetchone()
+    if not r:
+        return None
+    conta = r["of_account_id"]
+    return {"kind": "bank",
+            "of_account_id": int(conta) if (conta or "").isdigit() else conta,
+            "label": r["label"]}
 
 
 def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
