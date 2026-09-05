@@ -2090,11 +2090,10 @@ def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
                     for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
 
 
-# (tabela de lotes, tabela do alvo, FK do alvo, chave de `efeitos` do lançamento criador)
-_LOTES = {
-    "deposito_caixinha": ("pocket_lots", "pockets", "pocket_id", "pocket_lot_create"),
-    "aporte_investimento": ("investment_lots", "investments", "investment_id",
-                            "investment_lot_create"),
+# tipo do depósito -> chave de `efeitos` do lançamento que CRIOU o lote
+_EFEITO_CRIADOR = {
+    "deposito_caixinha": "pocket_lot_create",
+    "aporte_investimento": "investment_lot_create",
 }
 
 
@@ -2144,7 +2143,7 @@ def destination_of_lots(cur, user_id: int, tipo: str, lot_ids) -> dict | None:
     * `d.user_id = %s` é o isolamento (§0): ids de lote são globais, então o jsonb de
       OUTRO usuário pode apontar para um lote deste. Só o filtro de dono segura.
     """
-    efeito = _LOTES[tipo][3]  # tipo desconhecido é bug do chamador
+    efeito = _EFEITO_CRIADOR[tipo]  # tipo desconhecido é bug do chamador
     origens = []
     if lot_ids:
         cur.execute(

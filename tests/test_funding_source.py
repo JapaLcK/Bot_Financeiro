@@ -578,7 +578,8 @@ def _assert_volta_para_a_origem(user_id: int, tipo_dep: str, tipo_saq: str, net:
 
 
 def _dashboard_client(user_id: int, email: str):
-    """Cliente autenticado do dashboard — 4 testes daqui usam o mesmo preparo."""
+    """Cliente autenticado do dashboard — o preparo é compartilhado
+    (`grep -c _dashboard_client tests/test_funding_source.py`)."""
     from fastapi.testclient import TestClient
 
     import frontend.finance_bot_websocket_custom as dashboard
@@ -795,8 +796,8 @@ def test_J1_lote_do_banco_ja_fechado_nao_contamina_o_deposito_seguinte(user_id):
 
 
 def test_J1_investimento_o_mesmo_lote_ja_fechado(user_id):
-    """O irmão do J1 no investimento: o `_LOTES` tem duas variantes e só uma
-    estaria coberta se este caso não existisse."""
+    """O irmão do J1 no investimento: o `_EFEITO_CRIADOR` tem duas variantes e só
+    uma estaria coberta se este caso não existisse."""
     _connect_fake_bank(user_id)                       # Carteira = 0
     db.create_investment(user_id, "CDB XP", 0.12, "yearly")
 
@@ -888,7 +889,8 @@ def test_isolamento_por_usuario(user_id):
 
 def test_tipo_separa_caixinha_de_investimento(user_id):
     """Mesmo usuário, mesmo nome nas duas entidades, origens diferentes. É o
-    `_LOTES[tipo]` que separa — trocar as duas entradas do dict deixa vermelho."""
+    `_EFEITO_CRIADOR[tipo]` que separa — trocar as duas entradas do dict deixa
+    vermelho."""
     _seed_carteira_e_banco(user_id)
     banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
 
@@ -989,7 +991,8 @@ def test_lot_id_nao_numerico_vira_orfao_em_vez_de_estourar(user_id):
 
 @pytest.mark.parametrize("nome", ["Férias na Bahia", "reserva de emergência", "AÇÃO 2030"])
 def test_nome_acentuado_ida_e_volta_pelo_dashboard(user_id, nome):
-    """`lower()` do Postgres em nome com acento, espaço e caixa alta, pela URL."""
+    """Nome com acento, espaço e caixa alta sobrevive à URL do dashboard: depósito
+    e saque pelos endpoints, com o patrimônio fechando no fim."""
     import urllib.parse
 
     _seed_carteira_e_banco(user_id)
@@ -1239,14 +1242,16 @@ def test_deposito_do_banco_no_meio_do_saque_nao_credita_a_carteira(user_id):
     # infla o consolidado de todos e o sync depois não bate —, mas é uma troca, não
     # um conserto. A decisão dentro da transação NÃO muda este número: os dois lotes
     # são consumidos de fato, e a divisão do resgate é que segue sem decisão.
-    # Os 8 testes irmãos da #282 afirmam o patrimônio; este afirmava só a Carteira.
+    # Os testes irmãos da #282 afirmam o patrimônio (`grep -n _patrimonio` neste
+    # arquivo); este afirmava só a Carteira.
     assert _patrimonio(user_id) == pytest.approx(900.0)
 
 
 def test_aporte_do_banco_no_meio_do_resgate_nao_credita_a_carteira(user_id):
     """O gêmeo do de cima no investimento — a guarda é uma chamada em cada
     função de saque, e sem este teste a de `db/investments.py` podia sumir sem
-    uma linha vermelha (medido: mutar só ela deixava 72 verdes)."""
+    uma linha vermelha — tirar a chamada de `db/investments.py` e rodar
+    `pytest tests/test_funding_source.py` deixava o arquivo inteiro verde."""
     _seed_carteira_e_banco(user_id)
     db.create_investment(user_id, "CDB XP", 0.12, "yearly")
     banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
@@ -1321,8 +1326,9 @@ def test_isolamento_pelo_lot_id_de_outro_usuario(user_id):
 #
 # `test_saque_parcial_consome_so_o_lote_da_carteira` cobria o WhatsApp e só ele.
 # Medido antes desta bateria: revertendo as quatro chamadas não-WhatsApp para a
-# assinatura sem `amount`, os 73 testes ficavam VERDES enquanto a sonda mostrava
-# `Carteira 1000 -> 900` em cada uma — o dinheiro sumia sem uma linha vermelha.
+# assinatura sem `amount`, `pytest tests/test_funding_source.py` ficava todo VERDE
+# enquanto a sonda mostrava `Carteira 1000 -> 900` em cada uma — o dinheiro sumia
+# sem uma linha vermelha.
 #
 # Com a decisão dentro da transação (`db.destination_of_lots`) estes testes medem
 # mais: eles passam pelo caminho que DECIDE, não pela dica.
@@ -1503,8 +1509,8 @@ def test_lote_orfao_consumido_nao_credita_a_carteira(user_id):
     """O órfão pelo caminho que DECIDE — hoje o único que existe.
 
     Medido quando ainda havia leitura de fora: tirar o `not orfao` de
-    `db.destination_of_lots` deixava os 78 verdes, porque a cobertura do órfão
-    estava toda na previsão.
+    `db.destination_of_lots` deixava `pytest tests/test_funding_source.py` todo
+    verde, porque a cobertura do órfão estava toda na previsão.
 
     Lote sem lançamento criador existe de verdade (backfill de `db/schema.py`,
     `_ensure_pocket_lots` de `db/pockets.py`). O `coalesce(..., 'carteira')` o faz
@@ -1531,3 +1537,39 @@ def test_lote_orfao_consumido_nao_credita_a_carteira(user_id):
     assert saq["funding_source"] is not None, "órfão virou Carteira e criou dinheiro"
     assert saq["delta_conta"] == 0
     assert float(db.get_balance(user_id)) == 1000.0, "a Carteira foi creditada por um órfão"
+
+
+def test_regra_de_sempre_escolhe_a_MESMA_conta_do_painel(user_id):
+    """Dois bancos: o painel (`list_bank_accounts`, fora da transação) e
+    `_regra_de_sempre` (dentro) têm de eleger a MESMA conta — é o que
+    `BANK_ACCOUNTS_ORDER` promete em comentário (§0.7) e nada afirmava.
+
+    Um saque com origens diferentes cai na regra de sempre, e a origem do depósito é
+    a conta MENOR de propósito: se as duas leituras divergissem, o destino gravado
+    seria a Pequena e o painel mostraria a Grande no topo.
+
+    Controles negativos, medidos: inverter o `desc` de `BANK_ACCOUNTS_ORDER` (as duas
+    leituras juntas) derruba o `assert` do painel; trocar só a ordem de
+    `_regra_de_sempre` derruba o `assert` do destino.
+    """
+    _connect_fake_bank(user_id, "100.00", "Pequena")
+    _connect_fake_bank(user_id, "900.00", "Grande")
+    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
+
+    painel = db.list_bank_accounts(user_id)
+    assert [c["label"] for c in painel] == ["Nubank · Grande", "Nubank · Pequena"], painel
+
+    pequena = [f for f in funding.list_sources(user_id)
+               if f["label"] == "Nubank · Pequena"][0]
+    db.create_pocket(user_id, "viagem")
+    db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira", funding_source=None)
+    db.pocket_deposit_from_account(user_id, "viagem", 50, "do banco pequeno",
+                                   funding_source=funding.to_db_arg(pequena))
+
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+
+    destino = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino and destino["of_account_id"] == painel[0]["id"], (
+        f"a regra de sempre foi para {destino}, e o painel elege {painel[0]['label']} "
+        f"(id={painel[0]['id']})")
+    assert destino["label"] == "Nubank · Grande", destino
