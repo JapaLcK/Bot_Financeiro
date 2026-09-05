@@ -403,6 +403,17 @@ def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> 
         clauses.append("is_internal_movement = true")
 
     if query:
+        # `tipo` CRU na busca livre, e a divergência com a TELA foi CRIADA aqui,
+        # não herdada: antes deste PR a query 4 devolvia o tipo cru, então a tela
+        # dizia "saida" e buscar "saida" achava. Agora a projeção de FORA da
+        # query 4 canoniza (`TIPO_CANON_SQL`) e a busca não: a linha legada sai como
+        # "despesa" e digitar "despesa" NÃO a acha — digitar "saida" acha.
+        # Fica cru de propósito. Canonizar aqui é o oposto do que o filtro por
+        # tipo faz três linhas acima (ele lê as DUAS formas, de propósito, pra
+        # não esconder dinheiro), e trocaria um casamento a menos por um a menos
+        # do outro lado. Incidência ZERO: nenhuma linha legada em produção
+        # (04/09/2026, ver a issue 287) — nenhum usuário passa por isto hoje.
+        # Se um dia passar, o conserto é `TIPO_CANON_SQL LIKE %s` OR o cru.
         clauses.append(
             """
             (
@@ -543,7 +554,30 @@ async def get_financial_data(
         # 4) Launches paginado
         _q(
             f"""
-            SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+            -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
+            -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
+            -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
+            -- alvo é quem CONSOME `recent_launches`, e só ele: home.html:944
+            -- imprime o tipo cru como rótulo ("Última atividade: saida"), :1094
+            -- não conta a linha legada no onboarding e :1147 desenha a receita
+            -- legada como despesa; dashboard.js:7954 (linha do Histórico), :8035
+            -- (`_renderLaunchDetail`, "Tipo: saida") e :8479 (resumo do editor,
+            -- "saida - R$ 100,00") usam o cru como label. São 6 sites, não 5.
+            -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
+            -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
+            --
+            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
+            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
+            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
+            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
+            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
+            -- dashboard -> barra de categoria -> linha ainda escreve
+            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
+            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
+            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
+            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
+            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
