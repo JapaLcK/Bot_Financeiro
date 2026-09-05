@@ -275,7 +275,8 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Faltou o valor (ou peça pra 'sacar tudo')."
     try:
         # O destino do saque sai de `db.destination_of_lots`, dentro da transação (#282).
-        _lid, _acc, _pkt, canon, taxes = db.pocket_withdraw_to_account(
+        # Este canal não o exibe: a resposta do chat não nomeia banco nem avisa do sync.
+        _lid, _acc, _pkt, canon, taxes, _dest = db.pocket_withdraw_to_account(
             user_id, pocket_name, None if withdraw_all else amount, withdraw_all=withdraw_all,
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0

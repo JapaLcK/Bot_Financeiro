@@ -471,7 +471,7 @@ def test_resgate_usa_peps_e_calcula_ir_por_lote(user_id):
             )
         conn.commit()
 
-    _, bal_acc, bal_inv, _, taxes = db.investment_withdraw_to_account(user_id, "CDB PEPS", 700, "resgate")
+    _, bal_acc, bal_inv, _, taxes, _ = db.investment_withdraw_to_account(user_id, "CDB PEPS", 700, "resgate")
 
     assert bal_acc.quantize(Decimal("0.01")) == Decimal("694.75")
     # Tolerância: o saldo residual pode acumular ~1 dia útil de juro intradiário
@@ -534,7 +534,7 @@ def test_resgate_de_ativo_isento_nao_desconta_ir_iof(user_id):
             )
         conn.commit()
 
-    _, bal_acc, bal_inv, _, taxes = db.investment_withdraw_to_account(user_id, "LCI Isenta", 100, "resgate")
+    _, bal_acc, bal_inv, _, taxes, _ = db.investment_withdraw_to_account(user_id, "LCI Isenta", 100, "resgate")
 
     assert bal_acc == Decimal("100")
     # Tolerância p/ acúmulo intradiário do saldo residual (ver nota no teste PEPS).

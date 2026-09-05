@@ -548,9 +548,9 @@ def fifo_takes(lots, amount):
     """Quais lotes um saque de `amount` consome, e quanto de cada um — FIFO.
 
     Fonte única do critério (CLAUDE.md §0.7): o resgate e o saque de caixinha
-    consomem por aqui, e `db.open_lot_origins` pergunta daqui de onde veio o
-    dinheiro que ESTE saque leva. Duas cópias divergiriam no dia em que só uma
-    fosse corrigida.
+    consomem por aqui, e `db.destination_of_lots` decide o destino sobre exatamente
+    os lotes que saíram daqui. Duas cópias divergiriam no dia em que só uma fosse
+    corrigida — e uma segunda cópia, fora da transação, chegou a existir (#286).
 
     `lots` já chega ordenado por (opened_at, id) — a ordem é do `select ... for
     update` de quem chama; esta função não reordena nada.
@@ -1548,7 +1548,9 @@ def investment_withdraw_to_account(
     *,
     withdraw_all: bool = False,
 ):
-    """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary).
+    """Investimento → Conta via PEPS/FIFO.
+
+    Retorna (launch_id, new_acc, new_inv, canon, tax_summary, funding_source).
 
     O DESTINO do resgate — espelho do aporte — é decidido AQUI DENTRO, por
     `db.destination_of_lots`, sobre os lotes que o PEPS consumiu de fato. Com origem
@@ -1556,7 +1558,9 @@ def investment_withdraw_to_account(
     inflaria o saldo consolidado com o mesmo dinheiro que o sync vai trazer de volta.
 
     Não há parâmetro `funding_source`, de propósito (#282): quem decidia de fora lia os
-    lotes antes do accrual e fora do lock, e errava — ver `destination_of_lots`.
+    lotes antes do accrual e fora do lock, e errava — ver `destination_of_lots`. Ele
+    volta no RETORNO porque a mensagem precisa do destino gravado; a previsão de fora
+    que sobrou só para o texto fazia a mensagem contradizer o razão (#286).
 
     Se ``withdraw_all=True``, resgata o saldo cheio pós-rendimento (zera o investimento
     de forma atômica) e ignora ``amount``. Caso contrário resgata ``amount``; mas se o
@@ -1740,4 +1744,4 @@ def investment_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon, tax_summary
+    return launch_id, new_acc, new_inv, canon, tax_summary, funding_source

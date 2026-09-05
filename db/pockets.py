@@ -310,10 +310,16 @@ def pocket_withdraw_to_account(
     *,
     withdraw_all: bool = False,
 ):
-    """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary).
+    """Caixinha → Conta via FIFO.
+
+    Retorna (launch_id, new_acc, new_pocket, canon, tax_summary, funding_source).
 
     O DESTINO sai de `db.destination_of_lots`, aqui dentro — ver
-    investment_withdraw_to_account.
+    investment_withdraw_to_account. Ele volta no retorno porque a MENSAGEM precisa
+    dele: quem monta o texto ("para o Nubank · Conta", o aviso de sync) tem de ler o
+    destino GRAVADO, não uma previsão. A previsão de fora existiu em quatro versões e
+    errou nas quatro — quando ela sobreviveu só para a mensagem, a mensagem passou a
+    contradizer o razão nos dois sentidos (#286).
 
     Se ``withdraw_all=True``, saca o saldo cheio pós-rendimento (zera a caixinha de
     forma atômica) e ignora ``amount``. Caso contrário saca ``amount``; mas se o valor
@@ -502,7 +508,7 @@ def pocket_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_pocket, canon, tax_summary
+    return launch_id, new_acc, new_pocket, canon, tax_summary, funding_source
 
 
 def create_pocket(

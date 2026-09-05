@@ -233,7 +233,8 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Faltou o valor (ou peça pra 'resgatar tudo')."
     try:
         # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282).
-        _lid, _acc, _inv, canon, taxes = db.investment_withdraw_to_account(
+        # Este canal não o exibe: a resposta do chat não nomeia banco nem avisa do sync.
+        _lid, _acc, _inv, canon, taxes, _dest = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0

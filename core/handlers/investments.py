@@ -490,15 +490,11 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     from core.services import funding
 
-    # DICA para a mensagem, não a decisão: quem decide o destino é
-    # `db.destination_of_lots`, dentro da transação do resgate (#282). Esta leitura é
-    # anterior ao accrual e ao lock, então pode divergir do destino gravado (#286).
-    destino = funding.resolve_destination(
-        user_id, origem_de=("aporte_investimento", investment_name),
-        amount=None if want_all else amount, withdraw_all=want_all)["source"]
-
     try:
-        launch_id, _new_acc, _new_inv, canon, taxes = db.investment_withdraw_to_account(
+        # `destino` é o `funding_source` GRAVADO pelo resgate (`db.destination_of_lots`,
+        # dentro da transação). A mensagem lê o fato: a previsão de fora divergia do
+        # razão e o texto mentia nos dois sentidos (#286). `None` é a Carteira.
+        launch_id, _new_acc, _new_inv, canon, taxes, destino = db.investment_withdraw_to_account(
             user_id,
             investment_name,
             None if want_all else float(amount),
@@ -526,8 +522,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
     if taxes and float(taxes.get("iof", 0) or 0) + float(taxes.get("ir", 0) or 0) > 0:
         tax_note = f" Líquido: **{fmt_brl(float(taxes.get('net', 0)))}**."
     verb = "Resgate total" if want_all else "Resgate"
-    destino_txt = (f", para o {destino['label']}" if destino["kind"] == funding.BANK else "")
-    nota = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
+    destino_txt = f", para o {destino['label']}" if destino else ""
+    nota = ("\n\n" + funding.nota_sync(saida=False)) if destino else ""
     return (
         f"✅ {verb} de **{fmt_brl(gross)}** de **{canon}**{destino_txt}.{tax_note} "
         f"ID #{db.display_id_for(user_id, launch_id)}.{nota}\n\n"

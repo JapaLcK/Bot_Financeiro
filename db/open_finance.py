@@ -17,7 +17,6 @@ from .cards import (
     remove_single_credit_transaction,
 )
 from .connection import get_conn
-from .investments import WITHDRAW_ALL_TOLERANCE, fifo_takes
 from .users import ensure_user, ensure_user_tx
 
 
@@ -2099,133 +2098,19 @@ _LOTES = {
 }
 
 
-def open_lot_origins(user_id: int, tipo: str, alvo: str, *, amount=None,
-                     withdraw_all: bool = False) -> list[dict]:
-    """De onde veio o dinheiro que ESTE saque levaria — PREVISÃO, para a mensagem.
-
-    Quem decide o destino é `destination_of_lots`, dentro da transação e sobre o
-    consumo de fato. Aqui a leitura é fora do lock e antes do accrual, então erra —
-    ver `_rows_do_saque`. `funding.resolve_destination` é o único chamador.
-
-    A pergunta é de ESTADO, não de história. A primeira versão desta função lia o
-    histórico inteiro de `launches`, e aí "origens misturadas" virava "misturou uma
-    vez, para sempre": banco conectado + Carteira zerada, depósito de 500 do banco,
-    saque de 500 (correto), Carteira ganha 200 em espécie, depósito de 100 da
-    Carteira, saque de 100 — e os R$ 100 evaporavam, porque o lote do banco tinha
-    fechado três passos antes e a caixinha era 100% dinheiro da Carteira.
-
-    Lendo só os lotes abertos a resposta já é sobre o estado, e se limpa sozinha
-    quando o lote fecha — sem backfill e sem migração. Mas "todos os lotes abertos"
-    ainda era pergunta demais: com `[carteira 100; banco 50]` e saque de 100 o FIFO
-    consome SÓ o lote da Carteira, e responder "duas origens" mandava os R$ 100 para
-    o banco — evaporavam. Com `amount`/`withdraw_all` a pergunta vira **quais lotes
-    ESTE saque consome**, e aí a resposta é exata e única (`_rows_do_saque`).
-
-    Sem `amount` (e sem `withdraw_all`), devolve todos os lotes abertos — é o que
-    `withdraw_all` também faz, já que ele leva tudo.
-
-    O elo lote↔origem é o `efeitos` que o depósito já grava: `pocket_lot_create`
-    /`investment_lot_create` guardam o `lot_id`, e `funding_source` guarda a origem.
-    `funding_source` ausente ou nulo É a Carteira, mesmo contrato de
-    `pocket_deposit_from_account` e `investment_deposit_from_account`.
-
-    Três decisões de propósito na query:
-
-    * `user_id` nas TRÊS tabelas (lote, alvo e o join do lançamento) — CLAUDE.md §0;
-    * `lot_id` comparado em TEXTO, sem `::bigint`: `efeitos` é jsonb livre e um
-      `lot_id` não numérico (medido: `1.9`, lista, string) estoura o cast. Em texto
-      ele simplesmente não casa e o lote vira órfão, que é o lado seguro;
-    * `left join` + coluna `orfao`, porque lote sem lançamento criador existe: o
-      backfill de `db/schema.py` e o `_ensure_pocket_lots` de `db/pockets.py` criam
-      lotes direto. Sem essa coluna o `coalesce(..., 'carteira')` faria o órfão
-      passar por Carteira e o saque creditaria dinheiro que nunca saiu dela.
-
-    A chave é o NOME (`alvo`), não o id: `db/` não tem rename de caixinha nem de
-    investimento. Se um dia tiver, o pior caso é a lista vir vazia e o destino cair
-    na regra de sempre.
-
-    `of_account_id` volta como TEXTO (ou None) — quem compara tem de converter.
-
-    Devolve [{"kind": "carteira"|"bank", "of_account_id": str|None, "orfao": bool}, ...].
-    """
-    lotes, alvos, fk, efeito = _LOTES[tipo]  # tipo desconhecido é bug do chamador
-    ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                select pl.id as lot_id, pl.balance,
-                       coalesce(d.efeitos->'funding_source'->>'kind', 'carteira') as kind,
-                       d.efeitos->'funding_source'->>'of_account_id' as of_account_id,
-                       (d.id is null) as orfao
-                  from {lotes} pl
-                  join {alvos} p on p.id = pl.{fk} and p.user_id = pl.user_id
-                  left join launches d
-                         on d.user_id = pl.user_id
-                        and d.tipo = %s
-                        and (d.efeitos->'{efeito}'->>'lot_id') = pl.id::text
-                 where pl.user_id = %s and lower(p.name) = lower(%s)
-                   and pl.status = 'open' and pl.balance > 0
-                 order by pl.opened_at, pl.id
-                """,
-                (tipo, user_id, alvo),
-            )
-            rows = cur.fetchall() or []
-
-    if not withdraw_all and amount is not None:
-        rows = _rows_do_saque(rows, amount)
-    vistas, origens = set(), []
-    for r in rows:
-        chave = (r["kind"], r["of_account_id"], bool(r["orfao"]))
-        if chave not in vistas:
-            vistas.add(chave)
-            origens.append({"kind": r["kind"], "of_account_id": r["of_account_id"],
-                            "orfao": bool(r["orfao"])})
-    return origens
-
-
-def _rows_do_saque(rows: list[dict], amount) -> list[dict]:
-    """Recorta as linhas para os lotes que um saque de `amount` consumiria.
-
-    Os saldos aqui são lidos FORA da transação do saque e ANTES do rendimento do dia,
-    então erram sempre para MENOS e o prefixo sai igual ou MAIOR que o real. Isso NÃO
-    é "erro para o lado seguro", como esta docstring já afirmou: prefixo maior
-    acrescenta origem, duas origens caem na regra de sempre, e a regra de sempre manda
-    para o BANCO — que é exatamente a #282 (medido: `[carteira 1000; banco 500]` com
-    60 dias sem accrual e saque de 1005 prevê as duas origens, mas o saque consome só
-    o lote da Carteira, que rendeu para 1022). É seguro só contra CRIAR dinheiro; é a
-    própria evaporação do outro lado.
-
-    Por isso o resultado daqui é DICA, não decisão: quem decide é `destination_of_lots`,
-    com o consumo de fato e depois do accrual.
-
-    O `left join` de `open_lot_origins` pode repetir o mesmo lote (dois lançamentos
-    apontando o mesmo `lot_id`); o FIFO tem de andar sobre lotes ÚNICOS, senão o saldo
-    conta duas vezes e o prefixo encurta.
-    """
-    unicos = {}
-    for r in rows:
-        unicos.setdefault(r["lot_id"], r)
-    v = Decimal(str(amount))
-    total = sum(Decimal(str(r["balance"] or 0)) for r in unicos.values())
-    # Mesma tolerância do saque real (db/pockets.py, db/investments.py): pedir ~tudo
-    # saca tudo. Sem isto, `[carteira 100,00; banco 0,005]` + pedido de 100 diria
-    # "só o lote da Carteira" enquanto o saque leva os dois — e evaporaria R$ 100.
-    if v >= total - WITHDRAW_ALL_TOLERANCE:
-        return rows
-    consumidos = {lot["lot_id"] for lot, _take in fifo_takes(unicos.values(), v)}
-    return [r for r in rows if r["lot_id"] in consumidos]
-
-
 def destination_of_lots(cur, user_id: int, tipo: str, lot_ids) -> dict | None:
     """Para onde volta o dinheiro deste saque — decidido DENTRO da transação.
 
     Devolve o `funding_source` do destino (banco) ou `None`, que é a Carteira: só ela
     credita `accounts.balance`.
 
-    A decisão morava FORA (`funding.resolve_destination`) e errou por construção três
-    versões seguidas, porque lá os lotes são lidos ANTES do accrual e FORA do lock: o
-    destino era uma PREVISÃO de quais lotes o FIFO ia consumir. Duas medições:
+    A decisão morava FORA (`funding.resolve_destination`, apagada) e errou por
+    construção quatro versões seguidas, porque lá os lotes são lidos ANTES do accrual
+    e FORA do lock: o destino era uma PREVISÃO de quais lotes o FIFO ia consumir. A
+    previsão sobreviveu uma versão a mais só para montar a mensagem, e aí a MENSAGEM
+    é que passou a contradizer o razão — por isso ela não existe mais em lugar nenhum:
+    quem escreve o texto lê o `funding_source` que as funções de saque devolvem (#286).
+    Duas medições que derrubaram a decisão de fora:
 
     * caixinha com 60 dias sem accrual, `[carteira 1000; banco 500]`, saque de 1005 —
       a previsão vê os dois lotes (1005 > 1000) e manda pro banco, mas o lote da
@@ -2278,10 +2163,20 @@ def destination_of_lots(cur, user_id: int, tipo: str, lot_ids) -> dict | None:
         )
         origens = cur.fetchall() or []
 
-    # Ordem fixa, Carteira primeiro: com mais de uma origem a lista é descartada, mas
-    # a decisão não pode depender da ordem que o Postgres devolve num `select distinct`.
-    # Sem ela o `len == 1` era decorativo — a mutação `len >= 1` passava nos 78 testes
-    # porque a linha do banco vinha primeiro por sorte, e devolvia a mesma resposta.
+    # Esta linha NÃO decide nada: quem decide é o `len == 1` abaixo, e com uma origem só
+    # a lista tem um elemento — ordenar um elemento não muda resposta nenhuma. Remover o
+    # `sort` do código correto deixa este arquivo inteiro verde.
+    #
+    # Ela existe para o `len == 1` ser TESTÁVEL. Sem ela, `origens[0]` é a ordem que o
+    # Postgres devolveu num `select distinct` sem `order by`: com origens misturadas a
+    # linha do banco pode vir primeiro por acaso e a mutação `len >= 1` responder o
+    # mesmo que o código correto — passando verde por sorte, e voltando a falhar noutro
+    # plano de execução. Fixando a Carteira em primeiro, a mutação erra sempre, no mesmo
+    # sentido (destino Carteira para dinheiro que saiu do banco), e o teste a pega.
+    #
+    # Comandos, se for reconferir (não confie no que estiver escrito aqui sem remedir):
+    #   tirar este `sort`                          -> verde
+    #   `len >= 1` com este `sort`                 -> vermelho
     origens.sort(key=lambda r: r["kind"] != "carteira")
 
     if len(origens) == 1 and not origens[0]["orfao"]:

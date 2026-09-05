@@ -7118,7 +7118,7 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.
     _nome_inv = payload.name.strip()
     try:
-        launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
+        launch_id, new_acc, new_inv, canon, tax_summary, _dest = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
             _nome_inv,

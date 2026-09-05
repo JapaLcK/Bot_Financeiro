@@ -95,19 +95,6 @@ def test_deterministico_prefere_a_carteira_quando_ela_cobre(user_id):
     assert funding.resolve_deterministic(user_id, 800)["source"]["kind"] == funding.CARTEIRA
 
 
-def test_destino_do_resgate_nao_pergunta(user_id):
-    """No destino a escolha não muda o razão (delta_conta é 0 com qualquer banco),
-    então entre dois bancos só mudaria o rótulo — não vale um round-trip."""
-    _connect_fake_bank(user_id, "500.00", nome="Conta A")
-    _connect_fake_bank(user_id, "900.00", nome="Conta B")
-    r = funding.resolve_destination(user_id)
-    assert r["source"]["kind"] == funding.BANK
-
-
-def test_sem_banco_o_resgate_volta_pra_carteira(user_id):
-    assert funding.resolve_destination(user_id)["source"]["kind"] == funding.CARTEIRA
-
-
 # ─── o efeito no razão ───────────────────────────────────────────────────────
 
 def test_aporte_com_origem_banco_nao_debita_a_carteira(user_id):
@@ -548,9 +535,9 @@ def test_guard_autoriza_a_propria_conta(user_id):
 # O defeito, medido em produção na conta do dono (29/08 23:31–23:47): depósitos
 # com `funding_source=None` tiraram 200 + 100 = R$ 300 da Carteira, e os 4 saques
 # seguintes gravaram `delta_conta = 0` — R$ 300 saíram, R$ 0,00 voltaram. O
-# `resolve_destination` decidia o destino do zero e qualquer banco conectado
+# O destino era decidido do zero, FORA da transação, e qualquer banco conectado
 # vencia a Carteira, sem consultar o `funding_source` que o próprio depósito
-# gravou.
+# gravou. Hoje quem decide é `db.destination_of_lots`, dentro da transação.
 #
 # A métrica é o patrimônio NO PIG (Carteira + caixinhas + investimentos), SEM o
 # espelho do banco: ela pega a evaporação E pegaria um conserto que criasse
@@ -680,11 +667,15 @@ def test_282_investimento_whatsapp_volta_para_a_carteira(user_id):
     source = funding.resolve_deterministic(user_id, 100)["source"]
     db.investment_deposit_from_account(user_id, "CDB XP", 100, "dep",
                                        funding_source=funding.to_db_arg(source))
-    h_investments.withdraw(user_id, "resgatei 100 do CDB XP",
-                           {"investment_name": "CDB XP", "amount": 100})
+    msg = h_investments.withdraw(user_id, "resgatei 100 do CDB XP",
+                                 {"investment_name": "CDB XP", "amount": 100})
 
     _assert_volta_para_a_origem(user_id, "aporte_investimento", "resgate_investimento", 100.0)
     assert _patrimonio(user_id) == pytest.approx(antes)
+    # SENTIDO A: o dinheiro voltou para a Carteira (há banco conectado, mas ele não é
+    # o destino). O texto não pode nomear banco nem prometer o sync.
+    assert "Open Finance sincronizar" not in msg, msg
+    assert ", para o " not in msg, msg
 
 
 def test_282_investimento_chat_da_ia_volta_para_a_carteira(user_id):
@@ -800,7 +791,7 @@ def test_J1_lote_do_banco_ja_fechado_nao_contamina_o_deposito_seguinte(user_id):
     depois = _patrimonio(user_id)
     assert depois == pytest.approx(antes), (
         f"EVAPOROU R$ {antes - depois:.2f} — Carteira={float(db.get_balance(user_id)):.2f}, "
-        f"origens={db.open_lot_origins(user_id, 'deposito_caixinha', 'viagem')}")
+        f"saque={_efeitos(user_id, 'saque_caixinha')['funding_source']}")
 
 
 def test_J1_investimento_o_mesmo_lote_ja_fechado(user_id):
@@ -827,18 +818,18 @@ def test_J1_investimento_o_mesmo_lote_ja_fechado(user_id):
                            {"investment_name": "CDB XP", "amount": 100})
 
     assert _patrimonio(user_id) == pytest.approx(antes), (
-        f"origens={db.open_lot_origins(user_id, 'aporte_investimento', 'CDB XP')}")
+        f"resgate={_efeitos(user_id, 'resgate_investimento')['funding_source']}")
 
 
 def test_lotes_abertos_de_origens_diferentes_caem_na_regra_de_sempre(user_id):
-    """Comportamento ACEITO, não conserto: com DOIS lotes abertos de origens
+    """Comportamento ACEITO, não conserto: com DOIS lotes consumidos de origens
     diferentes o destino segue o de hoje (o primeiro banco). Dividir o resgate é
-    decisão de produto ainda não tomada — ver `funding.resolve_destination`.
+    decisão de produto ainda não tomada — ver `db.destination_of_lots`.
 
     Os dois bancos existem para tornar o teste insensível à ORDEM das linhas do
     `select distinct` (que não tem `order by`). Depositando do banco B, nenhuma
-    das duas origens abertas é o destino esperado: um `origens[0]` ingênuo daria
-    a Carteira ou o banco B, e a regra de sempre dá o banco A (`list_bank_accounts`
+    das duas origens consumidas é o destino esperado: um `origens[0]` ingênuo daria
+    a Carteira ou o banco B, e a regra de sempre dá o banco A (`BANK_ACCOUNTS_ORDER`
     ordena por `balance desc, id`). Sem isso o caso passava por sorte do hash.
     """
     _connect_fake_bank(user_id, "5000.00", nome="Banco A")
@@ -854,12 +845,10 @@ def test_lotes_abertos_de_origens_diferentes_caem_na_regra_de_sempre(user_id):
     db.pocket_deposit_from_account(user_id, "viagem", 50, "do banco B",
                                    funding_source=funding.to_db_arg(banco_b))
 
-    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
-    assert len(origens) == 2, origens                 # dois lotes abertos, duas origens
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
 
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.BANK
+    destino = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino and destino["kind"] == funding.BANK, destino
     assert destino["of_account_id"] == banco_a["of_account_id"], (
         f"caiu em {destino['label']}, não na regra de sempre ({banco_a['label']})")
 
@@ -889,12 +878,12 @@ def test_isolamento_por_usuario(user_id):
     db.pocket_deposit_from_account(user_id, "viagem", 100, "da carteira de B",
                                    funding_source=None)
 
-    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
-    assert origens == [{"kind": funding.CARTEIRA, "of_account_id": None, "orfao": False}], origens
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
 
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.CARTEIRA, "o lote do OUTRO usuário vazou"
+    saq = _efeitos(user_id, "saque_caixinha")
+    assert saq["funding_source"] is None, (
+        f"o lote do OUTRO usuário vazou: destino {saq['funding_source']}")
+    assert float(db.get_balance(user_id)) == 1000.0
 
 
 def test_tipo_separa_caixinha_de_investimento(user_id):
@@ -910,59 +899,18 @@ def test_tipo_separa_caixinha_de_investimento(user_id):
     db.investment_deposit_from_account(user_id, "reserva", 100, "do banco",
                                        funding_source=funding.to_db_arg(banco))
 
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "reserva") == [
-        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": False}]
-    assert db.open_lot_origins(user_id, "aporte_investimento", "reserva") == [
-        {"kind": funding.BANK, "of_account_id": str(banco["of_account_id"]), "orfao": False}]
+    h_pockets.withdraw(user_id, "esvaziar caixinha reserva", {"pocket_name": "reserva"})
+    h_investments.withdraw(user_id, "resgatar tudo da reserva",
+                           {"investment_name": "reserva", "want_all": True})
 
-    assert funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "reserva"))["source"]["kind"] == funding.CARTEIRA
-    assert funding.resolve_destination(
-        user_id, origem_de=("aporte_investimento", "reserva"))["source"]["kind"] == funding.BANK
-
-
-def test_lote_orfao_cai_na_regra_de_sempre(user_id):
-    """Lote sem lançamento criador existe de verdade: o backfill de `db/schema.py`
-    e o `_ensure_pocket_lots` de `db/pockets.py` inserem direto em `pocket_lots`.
-
-    Sem a coluna `orfao`, o `coalesce(..., 'carteira')` faz o órfão passar por
-    Carteira e o saque credita dinheiro que nunca saiu dela — é a mutação que
-    deixa este teste vermelho.
-    """
-    _seed_carteira_e_banco(user_id)
-    db.create_pocket(user_id, "viagem")
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select id from pockets where user_id=%s and name='viagem'", (user_id,))
-        pocket_id = cur.fetchone()["id"]
-        cur.execute(
-            "insert into pocket_lots(user_id, pocket_id, principal_initial, "
-            "principal_remaining, balance, opened_at, last_date, status) "
-            "values (%s,%s,100,100,100,current_date,current_date,'open')",
-            (user_id, pocket_id),
-        )
-        cur.execute("update pockets set balance=100 where id=%s and user_id=%s",
-                    (pocket_id, user_id))
-        conn.commit()
-
-    origens = db.open_lot_origins(user_id, "deposito_caixinha", "viagem")
-    assert origens == [{"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}], origens
-
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.BANK, "órfão virou Carteira e criaria dinheiro"
+    assert _efeitos(user_id, "saque_caixinha")["funding_source"] is None, (
+        "o saque da caixinha pegou a origem do INVESTIMENTO de mesmo nome")
+    resg = _efeitos(user_id, "resgate_investimento")["funding_source"]
+    assert resg and int(resg["of_account_id"]) == banco["of_account_id"], (
+        f"o resgate pegou a origem da CAIXINHA de mesmo nome: {resg}")
 
 
 # ── bordas do alvo e da origem ───────────────────────────────────────────────
-
-def test_alvo_sem_lote_aberto_cai_na_regra_de_sempre(user_id):
-    """Caixinha recém-criada: nenhum lote, nenhuma origem, regra de sempre."""
-    _seed_carteira_e_banco(user_id)
-    db.create_pocket(user_id, "viagem")
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == []
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.BANK
-
 
 @pytest.mark.parametrize("como", ["desconectar", "pausar"])
 def test_banco_de_origem_desconectado_nao_credita_a_carteira(user_id, como):
@@ -1009,12 +957,15 @@ def test_of_account_id_como_string_no_json_ainda_casa(user_id):
         funding_source={"kind": "bank", "of_account_id": str(banco["of_account_id"]),
                         "label": banco["label"]})
 
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
-        {"kind": funding.BANK, "of_account_id": str(banco["of_account_id"]), "orfao": False}]
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.BANK
-    assert destino["of_account_id"] == banco["of_account_id"]
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+
+    saq = _efeitos(user_id, "saque_caixinha")
+    destino = saq["funding_source"]
+    assert destino and destino["kind"] == funding.BANK, destino
+    assert int(destino["of_account_id"]) == banco["of_account_id"]
+    # o depósito saiu do banco, então a Carteira não foi tocada nem na ida nem na volta
+    assert saq["delta_conta"] == 0, saq["delta_conta"]
+    assert float(db.get_balance(user_id)) == 1000.0
 
 
 def test_lot_id_nao_numerico_vira_orfao_em_vez_de_estourar(user_id):
@@ -1029,11 +980,11 @@ def test_lot_id_nao_numerico_vira_orfao_em_vez_de_estourar(user_id):
             "'\"abc\"') where user_id=%s and tipo='deposito_caixinha'", (user_id,))
         conn.commit()
 
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
-        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}]
-    destino = funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"))["source"]
-    assert destino["kind"] == funding.BANK
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+
+    destino = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino and destino["kind"] == funding.BANK, (
+        f"o lote virou Carteira em vez de órfão e criaria dinheiro: {destino}")
 
 
 @pytest.mark.parametrize("nome", ["Férias na Bahia", "reserva de emergência", "AÇÃO 2030"])
@@ -1053,14 +1004,7 @@ def test_nome_acentuado_ida_e_volta_pelo_dashboard(user_id, nome):
     assert client.post(f"/pockets/{user_id}/{enc}/withdraw",
                        json={"amount": 100}, headers=headers).status_code == 200
     assert _patrimonio(user_id) == pytest.approx(antes), (
-        f"{nome}: origens={db.open_lot_origins(user_id, 'deposito_caixinha', nome)}")
-
-
-def test_alvo_inexistente_gigante_ou_unicode_nao_estoura(user_id):
-    _seed_carteira_e_banco(user_id)
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "caixinha " + "ã" * 300) == []
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "🐷💰") == []
-    assert db.open_lot_origins(user_id, "aporte_investimento", "🐷💰") == []
+        f"{nome}: saque={_efeitos(user_id, 'saque_caixinha')['funding_source']}")
 
 
 # ── pela CONVERSA, com a pergunta de origem respondida ───────────────────────
@@ -1165,9 +1109,8 @@ def test_saque_parcial_consome_so_o_lote_da_carteira(user_id):
 
     `[carteira 100; banco 50]` e saque de 100: o FIFO consome SÓ o lote da Carteira,
     mas "todos os lotes abertos" via duas origens, mandava pro banco e os R$ 100
-    evaporavam. Com `amount`, `open_lot_origins` responde sobre o prefixo do FIFO.
-
-    Tirar o `amount=` da chamada (ou o recorte de `_rows_do_saque`) deixa vermelho.
+    evaporavam. Hoje `db.destination_of_lots` recebe os lotes que o FIFO consumiu de
+    fato, então a pergunta já é sobre o prefixo — sem previsão nenhuma.
     """
     _seed_carteira_e_banco(user_id)
     db.create_pocket(user_id, "viagem")
@@ -1218,20 +1161,22 @@ def test_saque_que_atravessa_as_duas_origens_mantem_a_regra_de_sempre(user_id):
     db.pocket_deposit_from_account(user_id, "viagem", 50, "do banco",
                                    funding_source=funding.to_db_arg(banco))
 
-    assert funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"),
-        amount=120)["source"]["kind"] == funding.BANK
-    # esvaziar leva tudo: as duas origens, mesma regra
-    assert funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"),
-        withdraw_all=True)["source"]["kind"] == funding.BANK
+    h_pockets.withdraw(user_id, "retirei 120 da caixinha viagem",
+                       {"pocket_name": "viagem", "amount": 120})
+    destino = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino and destino["kind"] == funding.BANK, destino
+
+    # esvaziar leva o resto: mesma regra, e é o outro ramo do handler
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+    destino = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino and destino["kind"] == funding.BANK, destino
 
 
 def test_tolerancia_de_esvaziar_arrasta_o_lote_seguinte(user_id):
     """`[carteira 100,00; banco 0,005]` e pedido de 100: o saque real varre os DOIS
     (`WITHDRAW_ALL_TOLERANCE`), então o destino tem de ver os dois. Sem a mesma
-    tolerância em `_rows_do_saque` o destino vira Carteira e credita R$ 0,005 que
-    continuam no banco — o recorte erraria justamente no `esvaziar`."""
+    tolerância dentro da transação o destino veria um lote só, viraria Carteira e
+    creditaria R$ 0,005 que continuam no banco — erraria justamente no `esvaziar`."""
     _seed_carteira_e_banco(user_id)
     db.create_pocket(user_id, "viagem")
     banco = [f for f in funding.list_sources(user_id) if f["kind"] == funding.BANK][0]
@@ -1239,18 +1184,22 @@ def test_tolerancia_de_esvaziar_arrasta_o_lote_seguinte(user_id):
     db.pocket_deposit_from_account(user_id, "viagem", Decimal("0.005"), "do banco",
                                    funding_source=funding.to_db_arg(banco))
 
-    assert funding.resolve_destination(
-        user_id, origem_de=("deposito_caixinha", "viagem"),
-        amount=100)["source"]["kind"] == funding.BANK
+    h_pockets.withdraw(user_id, "retirei 100 da caixinha viagem",
+                       {"pocket_name": "viagem", "amount": 100})
+
+    saq = _efeitos(user_id, "saque_caixinha")
+    assert len(saq["tax_summary"]["lots"]) == 2, (
+        "a tolerância não arrastou o segundo lote: sem os dois o teste não mede nada")
+    assert saq["funding_source"]["kind"] == funding.BANK, saq["funding_source"]
 
 
 def test_deposito_do_banco_no_meio_do_saque_nao_credita_a_carteira(user_id):
     """A janela entre decidir o destino e gravar o saque (TOCTOU).
 
-    `resolve_destination` lê FORA da transação. Um depósito com origem no BANCO que
-    commita nesse intervalo entra no FIFO do saque, e o crédito da Carteira somaria
+    Enquanto a decisão morava FORA da transação, um depósito com origem no BANCO que
+    commitasse nesse intervalo entrava no FIFO do saque, e o crédito da Carteira somava
     dinheiro que continua no banco: medido 1050,00 na Carteira (R$ 50 CRIADOS) contra
-    900,00 sem a janela. `db.bank_destination_of_lots` fecha isso sob o `for update`.
+    900,00 sem a janela. `db.destination_of_lots` fecha isso sob o `for update`.
 
     Tirar a chamada de `db/pockets.py` deixa vermelho.
     """
@@ -1269,7 +1218,12 @@ def test_deposito_do_banco_no_meio_do_saque_nao_credita_a_carteira(user_id):
         return real(*a, **kw)
 
     with patch.object(db, "pocket_withdraw_to_account", intercalado):
-        h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+        msg = h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+
+    # SENTIDO B da mensagem (#286): antes do saque o único lote era da Carteira, e o
+    # texto lia esse estado — o usuário via a caixinha esvaziar, a Conta parada e
+    # NENHUMA explicação. É a forma exata do relato da #282, do lado da mensagem.
+    assert "Open Finance sincronizar" in msg, msg
 
     carteira = float(db.get_balance(user_id))
     assert carteira == 900.0, (
@@ -1308,8 +1262,14 @@ def test_aporte_do_banco_no_meio_do_resgate_nao_credita_a_carteira(user_id):
         return real(*a, **kw)
 
     with patch.object(db, "investment_withdraw_to_account", intercalado):
-        h_investments.withdraw(user_id, "resgatar tudo do CDB XP",
-                               {"investment_name": "CDB XP", "want_all": True})
+        msg = h_investments.withdraw(user_id, "resgatar tudo do CDB XP",
+                                     {"investment_name": "CDB XP", "want_all": True})
+
+    # SENTIDO B no investimento, onde o texto é pior: o `, para o <banco>` fica DENTRO
+    # da linha de sucesso, então a previsão errada não só omitia o aviso — ela afirmava
+    # o destino errado no meio da confirmação.
+    assert "Open Finance sincronizar" in msg, msg
+    assert f", para o {banco['label']}" in msg, msg
 
     carteira = float(db.get_balance(user_id))
     assert carteira == 900.0, (
@@ -1320,9 +1280,9 @@ def test_aporte_do_banco_no_meio_do_resgate_nao_credita_a_carteira(user_id):
 def test_isolamento_pelo_lot_id_de_outro_usuario(user_id):
     """A outra metade do §0 nesta query: os ids de lote são globais, então um
     `lot_id` de jsonb livre pode apontar para o lote de OUTRO usuário. Só o
-    `d.user_id = pl.user_id` do `left join` segura — mutar essa condição deixa
-    vermelho ("A foi contaminado por B"); o teste de isolamento acima passa com
-    a mutação, porque lá o vazamento seria pelo alvo, não pelo alvo do `lot_id`.
+    `d.user_id = %s` do `left join` de `destination_of_lots` segura — mutar essa
+    condição deixa vermelho; o teste de isolamento acima passa com a mutação,
+    porque lá o vazamento seria pelo alvo, não pelo `lot_id`.
     """
     import uuid as _uuid
 
@@ -1347,12 +1307,14 @@ def test_isolamento_pelo_lot_id_de_outro_usuario(user_id):
                     "tipo='deposito_caixinha'", (Jsonb(int(lote_de_a)), user_id))
         conn.commit()
 
-    assert db.open_lot_origins(outro, "deposito_caixinha", "viagem") == [
-        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": False}], (
+    h_pockets.withdraw(outro, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+    assert _efeitos(outro, "saque_caixinha")["funding_source"] is None, (
         "A foi contaminado pelo lançamento de B")
-    assert db.open_lot_origins(user_id, "deposito_caixinha", "viagem") == [
-        {"kind": funding.CARTEIRA, "of_account_id": None, "orfao": True}], (
-        "o lote de B devia virar órfão, não herdar origem")
+
+    h_pockets.withdraw(user_id, "esvaziar caixinha viagem", {"pocket_name": "viagem"})
+    destino_b = _efeitos(user_id, "saque_caixinha")["funding_source"]
+    assert destino_b and destino_b["kind"] == funding.BANK, (
+        f"o lote de B devia virar órfão e cair na regra de sempre, não virar {destino_b}")
 
 
 # ── o recorte por valor nas QUATRO superfícies silenciosas ───────────────────
@@ -1493,6 +1455,9 @@ def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
 
     `tax_summary["lots"]` é quem prende o mecanismo: 1 lote = o accrual rodou e mudou
     o prefixo; 2 lotes = o rendimento não aconteceu e o teste não mediria nada.
+
+    É também o SENTIDO A da mensagem (#286): a Conta sobe R$ 1.000+ e o texto não
+    pode dizer que o dinheiro "aparece quando o Open Finance sincronizar".
     """
     hoje = date.today()
     inicio = hoje - timedelta(days=60)
@@ -1512,13 +1477,8 @@ def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
                         (inicio, user_id))
             conn.commit()
 
-        # a previsão de FORA erra aqui, e é a errada que a versão anterior gravava
-        assert funding.resolve_destination(
-            user_id, origem_de=("deposito_caixinha", "viagem"),
-            amount=1005)["source"]["kind"] == funding.BANK
-
-        h_pockets.withdraw(user_id, "retirei 1005 da caixinha viagem",
-                           {"pocket_name": "viagem", "amount": 1005})
+        msg = h_pockets.withdraw(user_id, "retirei 1005 da caixinha viagem",
+                                 {"pocket_name": "viagem", "amount": 1005})
 
         saq = _efeitos(user_id, "saque_caixinha")
         assert len(saq["tax_summary"]["lots"]) == 1, (
@@ -1529,16 +1489,22 @@ def test_C1_o_accrual_muda_quais_lotes_o_saque_consome(user_id):
         assert float(saq["delta_conta"]) > 1000
         assert float(db.get_balance(user_id)) == pytest.approx(
             1000.0 + float(saq["delta_conta"])), "a Carteira não recebeu de volta"
+
+        # SENTIDO A: o razão creditou a Carteira, então a mensagem não pode avisar
+        # que a entrada só aparece no sync. Enquanto o texto lia a previsão, esta
+        # resposta trazia o aviso com o `delta_conta` positivo logo acima dele.
+        assert "Open Finance sincronizar" not in msg, msg
+        assert "🏦 Conta:" in msg, msg
     finally:
         _apaga_cdi(semeados)
 
 
 def test_lote_orfao_consumido_nao_credita_a_carteira(user_id):
-    """O órfão pelo caminho que DECIDE, e não só pelo `open_lot_origins`.
+    """O órfão pelo caminho que DECIDE — hoje o único que existe.
 
-    `test_lote_orfao_cai_na_regra_de_sempre` mede a leitura de fora; o saque em si
-    passava sem cobertura nenhuma para o órfão — medido: tirar o `not orfao` de
-    `db.destination_of_lots` deixava os 78 verdes.
+    Medido quando ainda havia leitura de fora: tirar o `not orfao` de
+    `db.destination_of_lots` deixava os 78 verdes, porque a cobertura do órfão
+    estava toda na previsão.
 
     Lote sem lançamento criador existe de verdade (backfill de `db/schema.py`,
     `_ensure_pocket_lots` de `db/pockets.py`). O `coalesce(..., 'carteira')` o faz

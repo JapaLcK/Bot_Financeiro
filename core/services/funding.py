@@ -17,9 +17,11 @@ Aqui a origem vira explícita:
 A regra de escolha vive só neste módulo. As superfícies que movimentam dinheiro (bot,
 chat da IA, Discord e as duas rotas do dashboard) chamam daqui — se cada uma
 reimplementasse, elas divergiriam e o bot recusaria um lançamento que a tela aceita.
-O Discord é a exceção conhecida: o cog resgata sem passar `origem_de`/`amount`
-(`adapters/discord/cogs/investments_cog.py`), então o destino dele é a regra de sempre.
-O adaptador está morto e não vale trabalho — mas o "todas chamam igual" não é verdade.
+A regra do DESTINO (para onde volta um saque/resgate) não mora aqui: ela é
+`db.destination_of_lots`, dentro da transação do saque, sobre os lotes que o FIFO
+consumiu de fato. Uma previsão de fora existiu em quatro versões e errou nas quatro —
+ela lê os lotes antes do accrual e fora do lock. A quinta apagou a previsão: as duas
+funções de saque devolvem o destino gravado, e a mensagem lê o fato.
 """
 from __future__ import annotations
 
@@ -115,52 +117,6 @@ def resolve_deterministic(user_id: int, amount) -> dict:
     return {"source": carteira or (candidatas[0] if candidatas else
                                    {"kind": CARTEIRA, "of_account_id": None,
                                     "label": "Carteira", "balance": Decimal("0")})}
-
-
-def resolve_destination(user_id: int, *, origem_de: tuple[str, str] | None = None,
-                        amount=None, withdraw_all: bool = False) -> dict:
-    """DICA de para onde volta o dinheiro de um resgate/saque — não é a decisão.
-
-    Quem DECIDE o destino é `db.destination_of_lots`, dentro da transação do saque,
-    sobre os lotes que o FIFO consumiu de fato. Isto aqui existe para a MENSAGEM: o
-    "para o Nubank · Conta" e o aviso de sync (`nota_sync`) precisam de uma resposta
-    antes de o saque rodar, e as duas funções de saque nem aceitam mais um destino.
-
-    A leitura de fora foi a decisão em três versões seguidas, e errou nas três porque
-    a pergunta é sobre lotes lidos ANTES do accrual e FORA do lock — previsão, não
-    fato. **Ela continua sendo previsão aqui**, e por isso pode divergir do destino
-    gravado; quando diverge, a mensagem mente (custo conhecido, #286). Ver
-    `db.destination_of_lots` para as duas medições que derrubaram a versão de fora.
-
-    Mesma regra, para a dica sair o mais perto possível do fato: `origem_de` é
-    `(tipo_do_lancamento_de_deposito, alvo)` — ex.: `("deposito_caixinha", "viagem")` —
-    e com `amount` (ou `withdraw_all`) a pergunta é **os lotes que ESTE saque
-    consumiria vieram todos da mesma origem?**. Passe `amount`/`withdraw_all` sempre
-    que tiver; sem eles a pergunta volta a ser sobre todos os lotes abertos.
-
-    Em TODO o resto cai na regra de sempre (banco primeiro, senão Carteira), a mesma
-    de `db._regra_de_sempre`: sem `origem_de`, sem lote aberto, lotes de origens
-    diferentes (decisão do dono, #286), lote órfão, ou banco de origem desconectado.
-
-    Não pergunta, de propósito: no destino a escolha não muda o razão. Com qualquer
-    banco conectado o `delta_conta` é 0 igual, então entre dois bancos só mudaria o
-    rótulo da mensagem — não vale um round-trip.
-    """
-    fontes = list_sources(user_id)
-    if origem_de:
-        origens = db.open_lot_origins(user_id, *origem_de,
-                                      amount=amount, withdraw_all=withdraw_all)
-        if len(origens) == 1 and not origens[0]["orfao"]:
-            o = origens[0]
-            # `of_account_id` vem em TEXTO do jsonb; a fonte tem int. Comparar sem
-            # converter faz TODO banco parecer diferente e o conserto nunca valer.
-            igual = next((f for f in fontes if f["kind"] == o["kind"]
-                          and (None if f["of_account_id"] is None
-                               else str(f["of_account_id"])) == o["of_account_id"]), None)
-            if igual:
-                return {"source": igual}
-    bancos = [f for f in fontes if f["kind"] == BANK]
-    return {"source": bancos[0] if bancos else fontes[0]}
 
 
 def to_db_arg(source: dict | None) -> dict | None:

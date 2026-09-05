@@ -213,7 +213,7 @@ class InvestmentsCog(commands.Cog):
             return True
 
         try:
-            launch_id, new_acc, new_inv, canon, taxes = investment_withdraw_to_account(
+            launch_id, new_acc, new_inv, canon, taxes, _dest = investment_withdraw_to_account(
                 uid, investment_name=name, amount=float(amount), nota=message.content,
             )
         except LookupError:
