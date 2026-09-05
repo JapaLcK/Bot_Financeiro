@@ -149,7 +149,6 @@ def test_deposito_legitimo_ainda_funciona(uid):
     "viagem",                            # nome pelado
     "caixinha viagem",                   # repete o substantivo da pergunta
     "da caixinha viagem",                # com preposição
-    "coloquei 200 na caixinha viagem",   # o comando COMPLETO que a pergunta sugere
 ])
 def test_resposta_natural_ao_nome_da_caixinha(uid, resposta):
     """A pergunta sugere "Tente: *coloquei 200 na caixinha viagem*" — recusar esse
@@ -181,10 +180,39 @@ def test_saque_com_comando_completo_como_resposta(uid):
         categoria="salário", is_internal_movement=False,
     )
     _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
-    _conversa(uid, "tirar da caixinha viagem", "retirei 100 da caixinha viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tirar da caixinha viagem", "retirei 100 da caixinha viagem", "1")
 
     pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
     assert pockets.get("viagem") == 200.00, "o saque de 100 sobre 300 não fechou"
+
+
+def test_comando_completo_sugerido_passa_pelo_desempate(uid):
+    """O comando COMPLETO que a própria pergunta sugere ("Tente: *coloquei 200
+    na caixinha viagem*") é valor + alvo — célula D8 do #281 —, então ele PASSA
+    pelo desempate antes de fechar.
+
+    CUSTO DECLARADO: o bot pede um turno a mais para o texto que ele mesmo
+    recomendou. Vale a pena porque a alternativa é a classe do #189 (o mesmo
+    texto respondendo a uma pergunta de SAQUE movia dinheiro no sentido
+    errado), e porque perguntar nunca escreve. Com o "1", o depósito fecha
+    exatamente como antes."""
+    db.add_launch_and_update_balance(
+        uid, "receita", 500.0, alvo="salário", nota="setup",
+        categoria="salário", is_internal_movement=False,
+    )
+    respostas = _conversa(uid, "criar caixinha viagem",
+                          "guardei na caixinha viagem",
+                          "coloquei 200 na caixinha viagem")
+
+    assert "1️⃣" in respostas[-1], respostas[-1]
+    respostas += _conversa(uid, "1")
+
+    pockets = {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}
+    assert pockets.get("viagem") == 200.00, respostas[-2:]
+    assert _despesas(uid) == []
 
 
 def test_nome_do_alvo_preserva_nome_legitimo():
@@ -575,7 +603,11 @@ def test_186_alvo_da_resposta_vence_o_guardado(uid, sem_teto_de_caixinha):
     OUTRA caixinha e o bot debitava a guardada."""
     _duas_caixinhas(uid)
 
-    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tirar da caixinha carro", "carro",
+              "retirei 100 da caixinha viagem", "1")
 
     p = _saldos(uid)
     assert p["viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
@@ -586,19 +618,18 @@ def test_alvo_fora_do_catalogo_nao_sobrescreve(uid, sem_teto_de_caixinha):
     """CONTROLE do portão: "explícito" não é o mesmo que "existente".
 
     O #281 mudou o CAMINHO e manteve o que este teste protege — o dinheiro do
-    `carro`. `retirei 100 do salario` tem verbo próprio (`pockets.withdraw`
-    0.95), então a via EXPLÍCITO abandona a pergunta e o comando roda sozinho;
-    como `salario` não existe, ele erra e nada se move. Medido:
-    "Não encontrei *salario* nem em caixinhas nem em investimentos".
+    `carro`. `retirei 100 do salario` é valor + alvo (célula D8), então a porta
+    PERGUNTA; com o "2" o comando roda sozinho e, como `salario` não existe,
+    ele erra e nada se move. Medido: "Não encontrei *salario* nem em caixinhas
+    nem em investimentos".
 
-    Antes o resolver caía no alvo guardado e sacava R$ 100 do `carro`. É uma
-    troca deliberada e do lado seguro (não move dinheiro de caixinha que a
-    mensagem não nomeou, que é a direção da #186), mas custa um turno e é
-    TETO declarado do PR A."""
+    Antes o resolver caía no alvo guardado e sacava R$ 100 do `carro` sem que
+    ninguém tivesse escolhido isso. Agora quem escolhe é o usuário: o turno a
+    mais deixou de ser teto e virou a pergunta de desempate."""
     _duas_caixinhas(uid)
 
     respostas = _conversa(uid, "tirar da caixinha carro", "carro",
-                          "retirei 100 do salario")
+                          "retirei 100 do salario", "2")
 
     assert "Não encontrei" in respostas[-1], respostas[-1]
     assert _saldos(uid) == {"carro": 300.00, "viagem": 300.00}, \
@@ -611,7 +642,11 @@ def test_nota_do_lancamento_nao_cita_o_alvo_velho(uid, sem_teto_de_caixinha):
     envenena os três."""
     _duas_caixinhas(uid)
 
-    _conversa(uid, "tirar da caixinha carro", "carro", "retirei 100 da caixinha viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tirar da caixinha carro", "carro",
+              "retirei 100 da caixinha viagem", "1")
 
     saque = next(l for l in db.list_launches(uid, limit=20)
                  if l.get("tipo") == "saque_caixinha")
@@ -642,7 +677,10 @@ def test_tudo_guardado_mais_quantia_nova_nao_esvazia(uid):
         categoria="salário", is_internal_movement=False)
     _conversa(uid, "criar caixinha viagem", "coloquei 300 na caixinha viagem")
 
-    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem", "1")
 
     assert _saldos(uid)["viagem"] == 200.00, "esvaziou apesar de o usuário ter dito 100"
 
@@ -685,7 +723,10 @@ def test_p1a_quantia_da_resposta_nao_e_religada_pelo_orig_text(uid):
     _caixinhas_com_saldo(uid, "viagem")
 
     _pergunta_injetada(uid, "funds.withdraw", {}, "esvaziar")
-    _conversa(uid, "tira 100 da viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tira 100 da viagem", "1")
 
     assert _saldos(uid)["viagem"] == 200.00, "esvaziou apesar do R$ 100 da resposta"
 
@@ -708,7 +749,10 @@ def test_p1b_nome_com_marcador_nao_esvazia_pela_conversa(uid):
     o marcador estava dentro do NOME, não na quantidade."""
     _caixinhas_com_saldo(uid, "zerar divida")
 
-    _conversa(uid, "tirar da caixinha", "tira 100 da zerar divida")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tirar da caixinha", "tira 100 da zerar divida", "1")
 
     assert _saldos(uid)["zerar divida"] == 200.00, "o nome da caixinha virou 'esvaziar'"
 
@@ -737,7 +781,10 @@ def test_p1c_caixinha_aninhada_pela_conversa(uid, sem_teto_de_caixinha):
     saía da caixinha errada."""
     _caixinhas_com_saldo(uid, "viagem", "minha viagem")
 
-    _conversa(uid, "tirar da caixinha viagem", "tira 100 da minha viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "tirar da caixinha viagem", "tira 100 da minha viagem", "1")
 
     p = _saldos(uid)
     assert p["minha viagem"] == 200.00, "não saiu da caixinha que o usuário nomeou"
@@ -826,7 +873,10 @@ def test_p3_nota_nao_mente_quando_nao_havia_alvo_guardado(uid):
     "esvaziar caixinha"."""
     _caixinhas_com_saldo(uid, "viagem")
 
-    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem")
+    # O "1" é o desempate do #281: valor + alvo na mesma mensagem é AMBÍGUO
+    # (célula D8), e "era a resposta" devolve o turno ao resolver — que é o que
+    # este teste mede.
+    _conversa(uid, "esvaziar caixinha", "tira 100 da viagem", "1")
 
     saque = next(l for l in db.list_launches(uid, limit=20)
                  if l.get("tipo") == "saque_caixinha")
@@ -949,7 +999,7 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
         "sacou sem que o valor fosse dito"
 
 
-# ── #281: o verbo da resposta entra na decisão (PR A de 2) ──────────────────
+# ── #281: a TABELA das 16 células, pela conversa ────────────────────────────
 #
 # P0 de dinheiro confirmado em produção (#189, fechada com os dados). Com uma
 # pergunta de handler viva, o resolver lia número e alvo da resposta e NUNCA o
@@ -957,68 +1007,74 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 # errado, despesa não registrada) e `guardei 100 na caixinha viagem` virava
 # saque (o usuário disse GUARDEI).
 #
-# A REGRA DO DONO, e o que este PR A faz de cada linha dela:
-#   comando explícito vence     -> via EXPLÍCITO (`ESCRITA` + não-só-o-valor
-#                                  + não começa por valor). FEITO aqui.
-#   resposta compatível vence   -> portão `_so_o_valor`. FEITO aqui.
-#   atalho ambíguo não escreve  -> `50 no mercado` cai em COMPATÍVEL, que é o
-#                                  comportamento de HOJE. É o PR B, com a
-#                                  pergunta de desempate.
-# O predicado inteiro mora em `_clarification_abandonada`; a tabela de unidade
-# input -> via está em `tests/test_bill_amount_pending.py` (§0.7 — não repetir).
+# A REGRA DO DONO, e o QUINTO SINAL que a fecha (`core/intent_router.py`,
+# `_quantidade_fecha`): **a quantidade é a última coisa da mensagem?**
+#   fecha  -> a mensagem é RESPOSTA         -> resolve a pergunta
+#   sobrou -> a mensagem é AMBÍGUA          -> PERGUNTA, e ninguém escreve
+# O que o classificador ainda decide são duas células: o intent de LEITURA
+# (`ABANDONA`) e o comando SEM quantidade (`COMANDO_SEM_QUANTIDADE`).
 #
-# CONTROLES NEGATIVOS — quatro, MEDIDOS um a um (contagem sobre
-# `test_perguntas_guardam_contexto.py` + `test_bill_amount_pending.py` +
-# `test_full_handler_smoke.py`, os três arquivos da porta 2):
+# A TABELA — R resolve · A abandona · ? pergunta (não escreve). Uma célula, um
+# teste, e esta é a única cópia dela no repositório (§0.7):
 #
-#   1. remover o ramo `if intent_da_resposta in ESCRITA and not _so_o_valor`
-#      -> 6 vermelhos, entre eles
-#         test_281_comando_explicito_vence_a_pergunta_de_valor
-#         test_281_comando_explicito_vence_a_pergunta_de_nome
-#         test_281_verbo_de_deposito_nao_vira_saque
-#   2. tirar o portão (`if intent_da_resposta in ESCRITA` sozinho)
-#      -> 12 vermelhos, TODOS da família `paguei …`
-#         (test_clarification_dano_nao_some_com_palavra_na_frente ×9,
-#          test_clarification_aceita_tudo_que_a_main_aceita ×2,
-#          test_porta_2_ponto_final_sem_virgula_registra ×1).
-#      MEDIDO, e não é o que se esperava: `100 reais` NÃO fica vermelho aqui —
-#      quem o segura é o `_STARTS_WITH_VALUE_RE`, não o `_so_o_valor`. O que o
-#      `_so_o_valor` segura sozinho é o VERBO sem alvo.
-#   3. trocar o `_SEM_CONTEUDO` pelo `_ENCHIMENTO_PALAVRAS` (tirar os 12 verbos
-#      do prefixo sem conteúdo) -> 19 vermelhos, incluindo o filtro de dano
-#      inteiro.
-#   4. tirar o `_STARTS_WITH_VALUE_RE`
-#      -> 1 vermelho: test_281_ambiguo_ainda_responde_a_pergunta.
-#      O plano previa que ele NÃO discriminasse no PR A; discrimina — sem ele
-#      `50 no mercado` (launches.add 0.95, não é só-o-valor) abandona.
+#   A0  LEITURA               saldo, extrato                       A
+#   B0  NEUTRO                132, cem, tudo, ok, retirei tudo     R
+#   C1  comando sem quantia   fatura, meus cartoes, criar caixinha A
+#   C2/C3 idem COM quantia    fatura 132, fatura tudo              R
+#   D1  verbo puro            gastei, paguei, recebi               R
+#   D2  cauda sem número      gastei o resto, gastei metade        R
+#   D3  cauda alvo sem número gastei no mercado                    R
+#   D4a TUDO no fim           gastei tudo, gastei quase tudo       R
+#   D4b TUDO com cauda        gastei tudo mesmo                    ?
+#   D5  TUDO + alvo           esvaziar caixinha                    ?
+#   D6  número no fim         paguei 132, saquei 100, investi 100  R
+#   D7  número + cauda        paguei 132 ok / hoje / no debito     ?
+#   D8  número + alvo         gastei 50 no mercado                 ?
+#   D9  valor perigoso        paguei, 132 50 / gastei -10          R
+#   D10 pontuação de prosa    paguei 132,50. foi isso              R
+#   D11 começa pelo valor     50 no mercado, 132 ok, 100 reais     R
 #
-# E a guarda de entrega tem o dela em `test_bill_amount_pending.py`: removê-la
-# deixa 2 vermelhos, os dois medindo R$ 13.250,00 no lugar de R$ 132,50.
+# D9 e D10 são medidos em `tests/test_bill_amount_pending.py`, onde moram as
+# duas guardas que os produzem (o filtro de dano e a guarda de entrega).
+#
+# CADA TESTE AFIRMA TRÊS COISAS, e a terceira é a que faltava por três rodadas:
+# o saldo da caixinha e da conta; que não nasceu despesa avulsa; e o que
+# aconteceu com a PENDÊNCIA. Um teste que só olha saldo passa igual quando a
+# pergunta MORRE levando o dinheiro junto — foi assim que `gastei` escapou.
+#
+# CONTROLES NEGATIVOS do grupo, MEDIDOS um a um nesta árvore (os números estão
+# no relato do PR #288; remedir antes de reusar):
+#   1. esvaziar o `COMANDO_SEM_QUANTIDADE`
+#      -> test_281_c1_comando_sem_quantidade_abandona vermelho (3 casos).
+#   2. trocar o `return "pergunta"` por `"resolve"` (desligar o desempate)
+#      -> test_281_quantidade_com_cauda_nao_escreve vermelho em D5/D7/D8, e os
+#         três testes do desempate junto.
+#   3. desligar o quinto sinal (toda quantidade vira `"pergunta"`)
+#      -> test_281_quantidade_que_fecha_e_resposta vermelho em D4a e D6.
+# CONTROLE POSITIVO: test_281_resposta_compativel_nunca_vira_lancamento —
+# `100 reais`, `cem`, `132,50`, `R$ 100`, `30 reais e 50 centavos` e `tudo`
+# continuam fechando o saque. Sem ele o grupo passaria num código que recusa
+# tudo, que é pior que o bug.
 #
 # CLASSE CEGA (a mesma do #185): o LLM está fora dos testes, então o
 # `classify_with_context` nunca roda e os payloads de caixinha/investimento que
 # carregam `amount` só são alcançáveis por ele. A rota determinística provada
 # aqui é a `funds.withdraw`.
 #
-# TRÊS TETOS, medidos, e todos escritos também no código:
+# TETOS, medidos, e todos escritos também no código:
 #
 #   1. o verbo que os tiers 1-2 não conhecem continua sequestrado — `poupei
 #      100`, `mercado 50`, `uber 25`, `gasteii 50 no mercado` e `gasto fixo
-#      aluguel 1200` são todos `out_of_scope 0.0`, então não entram no
-#      `ESCRITA`. A porta 2 roda `allow_ai=False` de propósito (ver
+#      aluguel 1200` são todos `out_of_scope 0.0`. Como B0, eles resolvem a
+#      pergunta. A porta 2 roda `allow_ai=False` de propósito (ver
 #      `abandona_pergunta_de_valor`).
-#   2. os 12 verbos de lançamento com valor e MAIS NADA (`paguei 132`,
-#      `gastei 132`) NÃO abandonam: eles são prefixo sem conteúdo. Não é
-#      esquecimento — medido, tratá-los como comando novo pula o
-#      `valor_perigoso` e faz `paguei 132 50` registrar R$ 13.250,00. A
-#      justificativa mora no `_SO_O_VALOR_RE`, com os quatro números.
-#   3. verbo de OUTRA operação com valor e nada mais (`investi 80`,
-#      `saquei 200`, `retirei 100 do salario`) ABANDONA, e quando o alvo não
-#      existe o usuário paga um turno — o comando erra e nada se move. É a
-#      regra do dono aplicada; prendem este teto
-#      `test_alvo_fora_do_catalogo_nao_sobrescreve` (aqui) e
-#      `test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando`
-#      (em `tests/test_full_handler_smoke.py`).
+#   2. a UNIDADE conta como cauda: `paguei 100 reais` PERGUNTA (custa um turno,
+#      nunca dinheiro), enquanto `paguei 2 mil` resolve — "mil" é valor para o
+#      `_extract_valor` e "reais" não. É o preço de não ter lista de cauda.
+#   3. `gastei tudo mesmo` PERGUNTA em vez de esvaziar. Decisão do dono, e é a
+#      única linha que saiu da tabela anterior: esvaziar zera a caixinha
+#      inteira, e o lado seguro de uma operação irreversível é o que não
+#      escreve.
 
 
 def _pergunta_de_valor(uid):
@@ -1031,14 +1087,158 @@ def _pergunta_de_valor(uid):
     assert "Qual o valor" in respostas[-1], respostas[-1]
 
 
-def test_281_comando_explicito_vence_a_pergunta_de_valor(uid):
-    """O caso do título da issue, com os números medidos em produção.
+def _nada_se_moveu(uid, resposta):
+    """As duas primeiras afirmações: caixinha, conta e nenhuma despesa avulsa."""
+    assert _saldos(uid)["viagem"] == 300.00, resposta
+    assert round(float(db.get_balance(uid)), 2) == 100.00, resposta
+    assert _despesas(uid) == [], f"virou lançamento: {resposta!r}"
+
+
+@pytest.mark.parametrize("celula,resposta,saque", [
+    ("B0", "132", 132.00),
+    ("B0", "cem", 100.00),
+    ("B0", "tudo", 300.00),
+    ("B0", "retirei tudo", 300.00),
+    ("C2", "fatura 132", 132.00),
+    ("C3", "fatura tudo", 300.00),
+    ("D4a", "gastei tudo", 300.00),
+    ("D4a", "gastei quase tudo", 300.00),
+    ("D6", "paguei 132", 132.00),
+    ("D6", "saquei 100", 100.00),
+    ("D6", "investi 100", 100.00),
+])
+def test_281_quantidade_que_fecha_e_resposta(uid, celula, resposta, saque):
+    """B0, C2/C3, D4a e D6: a quantidade fecha a mensagem, então ela É a
+    resposta — mesmo com verbo na frente (`paguei 132`), com comando na frente
+    (`fatura 132`) ou com o marcador de tudo no lugar do número.
+
+    `investi 100` e `saquei 100` uniformizam a assimetria que sobrava: eram
+    comando (abandonavam, e o saque de R$ 100 se perdia quando o alvo não
+    existia); agora são resposta, como `paguei 132` sempre foi."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, resposta)
+
+    assert _saldos(uid)["viagem"] == round(300.00 - saque, 2), \
+        f"{celula}: a resposta não fechou o saque: {respostas[-1]!r}"
+    assert round(float(db.get_balance(uid)), 2) == round(100.00 + saque, 2)
+    assert _despesas(uid) == [], f"{celula}: virou lançamento: {respostas[-1]!r}"
+    assert db.get_pending_action(uid) is None, "a pergunta tinha de ser consumida"
+
+
+@pytest.mark.parametrize("celula,resposta", [
+    ("D1", "gastei"), ("D1", "paguei"), ("D1", "recebi"),
+    ("D2", "gastei o resto"), ("D2", "gastei metade"),
+    ("D3", "gastei no mercado"), ("D3", "guardei na caixinha viagem"),
+])
+def test_281_sem_quantidade_a_pergunta_continua_viva(uid, celula, resposta):
+    """D1, D2 e D3: sem quantidade nenhuma o comando não teria como rodar — só
+    faria a própria pergunta, com a palavra do usuário no lugar do alvo
+    ("🐷 Quanto foi no *metade*?"), que é a classe do
+    `test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta`.
+
+    A TERCEIRA afirmação é a que discrimina: sem ela este teste passa igual
+    quando a pergunta morre e o saque de R$ 300 evapora."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, resposta)
+
+    _nada_se_moveu(uid, respostas[-1])
+    assert db.get_pending_action(uid) is not None, \
+        f"{celula}: a pergunta morreu levando o saque: {respostas[-1]!r}"
+    assert "Qual o valor" in respostas[-1], respostas[-1]
+    assert "*metade*" not in respostas[-1] and "*resto*" not in respostas[-1], \
+        f"{celula}: a palavra do usuário virou alvo: {respostas[-1]!r}"
+
+
+@pytest.mark.parametrize("resposta,marca", [
+    ("fatura", "cart"),
+    ("meus cartoes", "cart"),
+    # `carro`, não `viagem`: a caixinha da pergunta já existe, e "já existe"
+    # não distingue "o comando rodou" de "o comando foi engolido". A fixture é
+    # o teto do plano Grátis (uma caixinha), não parte do que se mede aqui.
+    ("criar caixinha carro", "carro"),
+])
+def test_281_c1_comando_sem_quantidade_abandona(uid, sem_teto_de_caixinha,
+                                                resposta, marca):
+    """C1, o ÚNICO abandono novo. `fatura` sem quantidade nenhuma não pode ser
+    resposta de "Qual o valor?" — e, ao contrário do verbo de lançamento, o
+    comando RODA sozinho (mostra a fatura, cria a caixinha).
+
+    Era um laço indefinido medido: a pergunta voltava ("Quanto foi no *luz*?")
+    e a pendência era RE-ARMADA a cada turno, então nunca expirava."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, resposta)
+
+    _nada_se_moveu(uid, respostas[-1])
+    assert db.get_pending_action(uid) is None, \
+        f"a pergunta sobreviveu ao comando: {respostas[-1]!r}"
+    assert marca in respostas[-1].lower(), \
+        f"o comando não rodou: {respostas[-1]!r}"
+
+
+@pytest.mark.parametrize("celula,resposta", [
+    ("D4b", "gastei tudo mesmo"),
+    ("D5", "esvaziar caixinha"),
+    ("D5", "guardei tudo na caixinha viagem"),
+    ("D7", "paguei 132 ok"),
+    ("D7", "paguei 132 hoje"),
+    ("D7", "paguei 132 no debito"),
+    ("D8", "gastei 50 no mercado"),
+    ("D8", "guardei 100 na caixinha viagem"),
+])
+def test_281_quantidade_com_cauda_nao_escreve(uid, celula, resposta):
+    """D4b, D5, D7 e D8: sobrou cauda depois da quantidade, então a mensagem
+    pode ser as duas coisas — e AMBÍGUO NÃO ESCREVE, nem o valor na pergunta
+    viva nem o comando novo. O turno acaba com as duas opções na tela.
+
+    É aqui que mora a decisão do dono sobre `gastei tudo mesmo`: perguntar
+    custa um turno, esvaziar por engano custa a caixinha inteira."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, resposta)
+
+    _nada_se_moveu(uid, respostas[-1])
+    pend = db.get_pending_action(uid)
+    assert pend and pend["action_type"] == "value_or_command_choice", \
+        f"{celula}: o desempate não foi armado: {pend}"
+    # A pergunta original não se perdeu: ela viaja DENTRO do payload e aparece
+    # na opção 1 (`pending_actions` é uma linha por usuário).
+    assert pend["payload"]["clarif"].get("question"), pend
+    assert "Qual o valor" in respostas[-1], respostas[-1]
+    assert resposta in respostas[-1], respostas[-1]
+
+
+# ── O desempate: três saídas, e a quarta que desembrulha ─────────────────────
+# Zero transições novas — `1` volta ao payload original e resolve com o texto
+# guardado, `2` roteia o texto como comando novo, e qualquer outra coisa
+# devolve a pergunta para a linha e reentra na tabela com a mensagem NOVA.
+
+@pytest.mark.parametrize("escolha", ["1", "responder"])
+def test_281_desempate_1_era_o_valor(uid, escolha):
+    """`gastei 50 no mercado` + "era o valor" = o saque de R$ 50 que a pergunta
+    pedia. O texto guardado volta a ser lido como resposta."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado", escolha)
+
+    assert _saldos(uid)["viagem"] == 250.00, respostas[-1]
+    assert round(float(db.get_balance(uid)), 2) == 150.00, respostas[-1]
+    assert _despesas(uid) == [], respostas[-1]
+    assert db.get_pending_action(uid) is None, "a linha ficou presa"
+
+
+@pytest.mark.parametrize("escolha", ["2", "registrar"])
+def test_281_desempate_2_o_comando_explicito_vence(uid, escolha):
+    """O caso do TÍTULO da issue, com os números medidos em produção — um turno
+    depois, e só quando o usuário confirma.
 
     Antes: `📤 Caixinha *viagem*: -R$ 50,00`, conta SOBE 50 e a despesa não
     existe. Depois: despesa de 50, conta CAI 50, caixinha intacta."""
     _pergunta_de_valor(uid)
 
-    respostas = _conversa(uid, "gastei 50 no mercado")
+    respostas = _conversa(uid, "gastei 50 no mercado", escolha)
 
     assert _saldos(uid)["viagem"] == 300.00, \
         f"o gasto saiu da caixinha em vez da conta: {respostas[-1]!r}"
@@ -1046,45 +1246,85 @@ def test_281_comando_explicito_vence_a_pergunta_de_valor(uid):
         "a conta tinha de CAIR 50 (100 -> 50), não subir para 150"
     assert [round(float(d["valor"]), 2) for d in _despesas(uid)] == [50.00], \
         f"o gasto sumiu do extrato: {respostas[-1]!r}"
+    # O desempate saiu da linha. O que fica lá é a oferta de recategorização do
+    # lançamento novo, que é do fluxo normal de `launches.add`.
+    pend = db.get_pending_action(uid)
+    assert (pend or {}).get("action_type") != "value_or_command_choice", pend
 
 
-def test_281_comando_explicito_vence_a_pergunta_de_nome(uid):
-    """A pergunta de NOME fecha de graça: o portão roda no `route()`, ANTES de
-    `payload["falta"]` ser lido, então não há ramo próprio para ela."""
-    _caixinhas_com_saldo(uid, "viagem")
-
-    respostas = _conversa(uid, "tirar da caixinha viagem", "gastei 50 no mercado")
-
-    assert "Qual caixinha" in respostas[0], respostas[0]
-    assert _saldos(uid)["viagem"] == 300.00, respostas[-1]
-    assert round(float(db.get_balance(uid)), 2) == 50.00, \
-        "conta = 100 do setup - 50 da despesa"
-    assert [round(float(d["valor"]), 2) for d in _despesas(uid)] == [50.00], \
-        f"a despesa não foi registrada: {respostas[-1]!r}"
-
-
-def test_281_verbo_de_deposito_nao_vira_saque(uid):
-    """GUARDEI virando SAQUE — o sentido do dinheiro invertido.
-
-    O caminho medido na `main` (1fff16f) É a pergunta de VALOR, não a de nome:
-    `guardei na caixinha viagem` + `guardei 100 na caixinha viagem` já
-    DEPOSITA na `main` (medido — a primeira redação deste teste era
-    tautológica e o controle negativo a pegou). O que ainda invertia é a
-    resposta à pergunta de VALOR de um saque:
-
-        tirar da caixinha viagem / viagem  -> "Qual o valor?"
-        guardei 100 na caixinha viagem     -> 📤 -R$ 100,00   (main)
-                                           -> ✅ +R$ 100,00   (aqui)
-    """
+def test_281_desempate_2_verbo_de_deposito_nao_vira_saque(uid):
+    """GUARDEI virando SAQUE — o sentido do dinheiro invertido, que é o outro
+    lado do P0. Na `main` (1fff16f) `guardei 100 na caixinha viagem`
+    respondendo "Qual o valor?" DEBITAVA a caixinha; aqui ele deposita, depois
+    de o usuário dizer que era comando."""
     _pergunta_de_valor(uid)
 
-    respostas = _conversa(uid, "guardei 100 na caixinha viagem")
+    respostas = _conversa(uid, "guardei 100 na caixinha viagem", "2")
 
     assert _saldos(uid)["viagem"] == 400.00, \
         f"o usuário disse GUARDEI e a caixinha caiu: {respostas[-1]!r}"
     assert round(float(db.get_balance(uid)), 2) == 0.00, \
         "conta = 100 do setup - 100 depositados"
     assert _despesas(uid) == [], respostas[-1]
+
+
+def test_281_desempate_cancela_mata_as_duas(uid):
+    """O cancelamento mata o texto pendurado E a pergunta que ele desalojou.
+
+    A palavra oferecida é *cancela*, não *cancelar*, e é medição: com QUALQUER
+    pendência determinística de pé, "cancelar" nunca chega ao `route()` — o
+    `handle_billing_command` (core/services/billing_commands.py:296) responde
+    "🐷 Você tá no plano Free, não tem o que cancelar" porque a guarda dele olha
+    o `ai_pending_actions` e não o `pending_actions`. Hole PRÉ-EXISTENTE (vale
+    igual para a confirmação de delete que o comentário de lá diz proteger) e
+    não consertado neste PR."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado", "cancela")
+
+    _nada_se_moveu(uid, respostas[-1])
+    assert "ancelado" in respostas[-1], respostas[-1]
+    assert db.get_pending_action(uid) is None, \
+        f"o cancelamento deixou uma linha viva: {db.get_pending_action(uid)}"
+
+
+def test_281_desempate_a_palavra_cancelar_nao_perde_nada(uid):
+    """O outro lado do hole: quem digitar *cancelar* recebe a resposta do
+    billing, e o desempate continua de pé — nada se move e nenhuma opção se
+    perde. É o que torna o hole barato o bastante para ficar para outro PR."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado", "cancelar")
+
+    _nada_se_moveu(uid, respostas[-1])
+    pend = db.get_pending_action(uid)
+    assert pend and pend["action_type"] == "value_or_command_choice", pend
+
+
+def test_281_desempate_terceira_coisa_reentra_na_tabela(uid):
+    """Uma TERCEIRA mensagem desembrulha o desempate e reentra na tabela com a
+    mensagem nova: `132` fecha a quantidade, então é a resposta da pergunta
+    original, que voltou para a linha. O texto guardado é descartado."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado", "132")
+
+    assert _saldos(uid)["viagem"] == 168.00, respostas[-1]
+    assert round(float(db.get_balance(uid)), 2) == 232.00, respostas[-1]
+    assert _despesas(uid) == [], respostas[-1]
+
+
+def test_281_desempate_terceira_coisa_pode_abandonar(uid):
+    """A mesma porta, do outro lado: `saldo` é LEITURA (A0), então a pergunta
+    que acabou de voltar para a linha é abandonada como sempre foi — o
+    desempate não criou estado do qual não se sai."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "gastei 50 no mercado", "saldo")
+
+    _nada_se_moveu(uid, respostas[-1])
+    assert "Conta Corrente" in respostas[-1], respostas[-1]
+    assert db.get_pending_action(uid) is None, db.get_pending_action(uid)
 
 
 @pytest.mark.parametrize("resposta,saque", [
@@ -1102,11 +1342,10 @@ def test_281_resposta_compativel_nunca_vira_lancamento(uid, resposta, saque):
     0.95 — os mesmos 0.95 de `gastei 50 no mercado`; `cem`, `132,50` e `tudo`
     caem em `out_of_scope 0.0`. Nenhum deles pode virar lançamento.
 
-    MEDIDO, e corrige o que se supunha: destes seis, os que dependem de um
-    portão dependem do `_STARTS_WITH_VALUE_RE` (começam por dígito), não do
-    `_so_o_valor` — desligar o `_so_o_valor` não deixa nenhuma linha daqui
-    vermelha. Quem o `_so_o_valor` segura sozinho é o verbo sem alvo
-    (`paguei 132`), e isso se mede em `test_full_handler_smoke.py`."""
+    MEDIDO: `100 reais`, `132,50`, `R$ 100` e `30 reais e 50 centavos` são
+    seguros pelo `_STARTS_WITH_VALUE_RE` (célula D11 — começam por dígito);
+    `cem` e `tudo` pelo quinto sinal, que os lê como quantidade que fecha a
+    mensagem."""
     _pergunta_de_valor(uid)
 
     respostas = _conversa(uid, resposta)
@@ -1131,17 +1370,33 @@ def test_281_resposta_compativel_grande_demais_nao_vira_lancamento(uid):
 
 
 def test_281_ambiguo_ainda_responde_a_pergunta(uid):
-    """O ATALHO sem verbo é o PR B, e este teste é o marcador dele.
+    """D11 — e a decisão medida de NÃO mandar esta célula ao desempate.
 
     `50 no mercado` classifica `launches.add` 0.95 igual a `gastei 50 no
-    mercado`, mas COMEÇA pelo valor (`_STARTS_WITH_VALUE_RE`) — pode ser o
-    gasto, pode ser "50, do mercado" respondendo a pergunta. No PR A ele cai
-    em COMPATÍVEL, que é o comportamento de HOJE: saque de 50, sem despesa.
-    Quando a pergunta de desempate do PR B chegar, é esta linha que fica
-    vermelha, de propósito."""
+    mercado` e tem cauda depois do número, então pelo quinto sinal sozinho ele
+    perguntaria. Começar pelo VALOR vem antes de propósito: é a forma de
+    `100 reais` e de `30 reais e 50 centavos`, que são resposta legítima —
+    mandá-las ao desempate cobraria um turno da resposta mais comum de todas.
+    Saque de 50, sem despesa, como hoje."""
     _pergunta_de_valor(uid)
 
     respostas = _conversa(uid, "50 no mercado")
 
     assert _saldos(uid)["viagem"] == 250.00, respostas[-1]
+    assert _despesas(uid) == [], respostas[-1]
+
+
+def test_281_c2_quantidade_grande_no_comando_nao_cria_a_caixinha(uid):
+    """C2 pelo outro lado: `criar caixinha 2028` respondendo "Qual o valor?" é
+    lido como VALOR (2028 fecha a mensagem), e 2028 > 300 — então o saque é
+    recusado pelo saldo e a caixinha `2028` NÃO nasce. É o teto declarado do
+    `_resolve_clarification`: caixinha chamada "2028" respondida a uma pergunta
+    de valor é lida como valor."""
+    _pergunta_de_valor(uid)
+
+    respostas = _conversa(uid, "criar caixinha 2028")
+
+    assert "insuficiente" in respostas[-1].lower(), respostas[-1]
+    assert sorted(_saldos(uid)) == ["viagem"], \
+        f"o comando rodou em vez de responder: {_saldos(uid)}"
     assert _despesas(uid) == [], respostas[-1]

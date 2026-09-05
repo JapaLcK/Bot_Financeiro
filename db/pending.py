@@ -266,6 +266,14 @@ _REGISTRO: dict[str, _Pendencia] = {
     # ficava sem valor). Já estava na lista do áudio, o que mostra que a
     # ausência era esquecimento, não decisão.
     "multi_launch_values":       _Pendencia(   False,   True,      True),
+    # Desempate do #281 ("era o valor" x "é um lançamento novo"). As TRÊS
+    # colunas copiadas da `clarification`, porque ele É uma `clarification`
+    # embrulhada: não é oferta (não pode ser desalojado por outra pergunta,
+    # senão a pergunta original — que mora no payload dele — some junto);
+    # suprime a IA (a resposta é "1"/"2", que o classificador lê como
+    # `out_of_scope` e a IA do Pro sequestraria); e sobrevive a áudio (perder a
+    # linha perde a pergunta original E o texto pendurado).
+    "value_or_command_choice":   _Pendencia(   False,   True,      True),
 
     # ── perguntas respondidas com "sim"/"não" (classificador reconhece) ───
     "confirm_recurring_offer":   _Pendencia(   False,   False,     True),

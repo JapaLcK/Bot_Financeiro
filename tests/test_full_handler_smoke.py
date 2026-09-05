@@ -545,9 +545,9 @@ def test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta(pro_uid, ia_de_esclareci
     cada turno e a palavra do usuário ficava gravada como alvo do lançamento.
 
     O #281 fecha isto MAIS CEDO e por outra via, por DECISÃO DO DONO:
-    `credit.handle` entrou no `ESCRITA`, então "fatura" (sv=0, não é
-    só-o-valor) é comando novo — a porta 2 abandona a pergunta e responde o
-    cartão. Medido: "📭 Você ainda não tem cartões cadastrados", pendência
+    `credit.handle` entrou no `COMANDO_SEM_QUANTIDADE`, então "fatura" (sem
+    quantidade nenhuma) é comando novo — a porta 2 abandona a pergunta e
+    responde o cartão. Medido: "📭 Você ainda não tem cartões cadastrados", pendência
     limpa, nada registrado. A IA não é mais consultada neste turno, e é por
     isso que o `assert chamadas` saiu: o abandono acontece no `route()`, antes
     do `_resolve_clarification`.
@@ -723,6 +723,16 @@ def test_multi_launch_texto_sem_valor_ainda_abandona(free_uid, spy_ai):
 # filtro de dano roda DEPOIS, sobre o texto.
 # ---------------------------------------------------------------------------
 
+# As formas em que a CAUDA vem depois do número (células D7/D8 do #281): a
+# mensagem pode ser a resposta ou um lançamento novo, então a porta pergunta
+# antes de escrever. Não é uma lista de exceções do código — é a lista das
+# linhas DESTE teste que pagam o turno a mais, e ela está aqui para o custo
+# aparecer no arquivo em vez de sumir num `if`.
+_COM_CAUDA = {"deu 132 no total", "foi uns 132 no total",
+              "paguei 132 - da luz", "gastei 50 - mercado",
+              "paguei 132. foi isso"}
+
+
 @pytest.mark.parametrize("resposta,esperado", [
     ("132 mil", 132000.0),
     ("2,5 mil", 2500.0),
@@ -750,6 +760,11 @@ def test_clarification_aceita_tudo_que_a_main_aceita(pro_uid, spy_ai, resposta, 
     Assere DESCRIÇÃO e CATEGORIA junto com o valor: os dois modos de dano da
     rodada 2 se distinguem por aí. No laço, nada é registrado; na perda da
     pergunta, o valor até entra, mas com descrição errada e categoria "outros".
+
+    Duas das 17 passam pelo DESEMPATE do #281 antes de fechar (`_COM_CAUDA`):
+    o número não é a última coisa da mensagem, e nenhum outro sinal as
+    distingue de "gastei 50 no mercado". O valor aceito é o mesmo — muda o
+    turno a mais, e o teste o paga explicitamente para não esconder o custo.
     """
     from parsers import _extract_valor
     uid = pro_uid
@@ -758,6 +773,9 @@ def test_clarification_aceita_tudo_que_a_main_aceita(pro_uid, spy_ai, resposta, 
     _pergunta_de_valor(uid)
 
     resp = _send(uid, resposta)
+    if resposta in _COM_CAUDA:
+        assert "1️⃣" in resp, f"{resposta!r} devia ir ao desempate: {resp}"
+        resp = _send(uid, "1")
 
     lancs = db.list_launches(uid, limit=5)
     assert lancs, f"{resposta!r} não registrou nada (laço): {resp}"
@@ -987,16 +1005,15 @@ def test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando(
         pro_uid, spy_ai):
     """Porta 2, com `investi 80` (`investments.deposit` 0.95).
 
-    INVERTIDO PELO #281, de propósito: `investi 80` é um comando de ESCRITA de
-    OUTRA operação (aportar), não uma forma de dizer "80". A regra do dono é
-    que o comando explícito vence, então a pergunta É largada e o aporte roda.
-    Medido: "Qual valor você quer aportar? Você ainda não tem investimentos
-    cadastrados", nada registrado, e uma pendência NOVA (a do aporte) no lugar.
+    A rodada da TABELA do #281 UNIFORMIZOU a assimetria que este teste media:
+    `investi 80` e `paguei 132` têm a mesma forma — a quantidade fecha a
+    mensagem (célula D6) —, então os dois são RESPOSTA. Antes um abandonava e o
+    outro não, e o critério era o verbo estar ou não numa lista de 12.
 
-    Isto NÃO vale para `paguei 132` / `gastei 132`: aqueles são os 12 verbos do
-    `_VERBOS_LANCAMENTO`, que o `_SO_O_VALOR_RE` trata como prefixo sem
-    conteúdo — a mesma operação que a pergunta já estava fazendo. Quem prende
-    esse recorte é `test_clarification_aceita_tudo_que_a_main_aceita`.
+    O que se ganha: o saque/aporte de R$ 80 não se perde quando o alvo não
+    existe (era o teto 3 declarado na rodada anterior). O que se perde: quem
+    QUERIA aportar com uma pergunta de valor viva paga um turno — responde a
+    pergunta e repete o comando.
 
     `132 no cartao` fica FORA desta metade por medição, não por esquecimento:
     nas duas árvores (`main` cf54ffb e este branch) o combinado
@@ -1014,11 +1031,14 @@ def test_clarification_nao_perde_a_pergunta_com_resposta_que_parece_comando(
 
     resp = _send(uid, "investi 80")
 
-    assert "aportar" in resp.lower(), f"a pergunta engoliu o aporte: {resp}"
-    assert not db.list_launches(uid, limit=5), \
-        "não havia investimento para aportar; nada podia ser gravado"
-    pend = _pendencia(uid)
-    assert pend and pend["payload"].get("intent") != "launches.add", pend
+    lancs = db.list_launches(uid, limit=5)
+    assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == 80.0, \
+        f"os R$ 80 tinham de fechar a pergunta viva: {resp} / {lancs}"
+    texto = f"{lancs[0].get('alvo') or ''} {lancs[0].get('nota') or ''}".lower()
+    assert "luz" in texto, f"o valor entrou sem a descrição da pergunta: {lancs[0]}"
+    # A `clarification` foi consumida; o que fica na linha é a oferta de
+    # recategorização do lançamento novo, do fluxo normal.
+    assert (_pendencia(uid) or {}).get("action_type") != "clarification", _pendencia(uid)
 
 
 def test_controle_negativo_credit_handle_no_conjunto_apaga_a_fila(free_uid, spy_ai, monkeypatch):
@@ -1196,12 +1216,19 @@ _PROSA = [("paguei 132 - da luz", 132.0), ("132 — luz", 132.0),
 
 @pytest.mark.parametrize("resposta,esperado", _PROSA)
 def test_clarification_prosa_registra_o_valor_certo(pro_uid, spy_ai, resposta, esperado):
-    """Porta 2. `gastei 50 - mercado` é o " - " que ESTE PR pôs no combinado."""
+    """Porta 2. `gastei 50 - mercado` é o " - " que ESTE PR pôs no combinado.
+
+    Três das oito passam pelo desempate do #281 antes de fechar (`_COM_CAUDA`)
+    — a pontuação de prosa deixa cauda depois do número. O valor registrado é o
+    mesmo."""
     uid = pro_uid
     import db
     _pergunta_de_valor(uid)
 
-    _send(uid, resposta)
+    resp = _send(uid, resposta)
+    if resposta in _COM_CAUDA:
+        assert "1️⃣" in resp, f"{resposta!r} devia ir ao desempate: {resp}"
+        _send(uid, "1")
 
     lancs = db.list_launches(uid, limit=1)
     assert lancs, f"{resposta!r} não registrou nada"

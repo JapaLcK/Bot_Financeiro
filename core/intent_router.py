@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
+from dataclasses import replace
 
 import db
 from core.intent_classifier import IntentResult, classify
 from core.types import IncomingMessage
-from utils_text import (PT_VALUE, _SEM_CONTEUDO, _TRACOS, contains_word,
-                        limpa_pontuacao_final, marcador_de_tudo, normalize_text,
-                        valor_perigoso)
+from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
+                        normalize_text, valor_perigoso)
 
 # handlers
 from core.handlers import (
@@ -124,10 +123,12 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #            de `funds.add_ask` e as genéricas da IA passam pela mesma escotilha.
 #            O filtro não é o intent da pergunta, é o `_ja_tem_o_valor` — mais
 #            o veto de catálogo do #185, que só vale para as perguntas de NOME.
-#            É a única das quatro que tem uma SEGUNDA via de abandono, a do
-#            #281: intent de ESCRITA cuja mensagem inteira não é o valor
-#            pedido ("gastei 50 no mercado" respondendo "Qual o valor?"). Ela
-#            é só daqui — as portas 3 e 4 seguem lendo o `ABANDONA` pelo
+#            É a única das quatro com uma SEGUNDA via (#281): o comando sem
+#            quantidade (`COMANDO_SEM_QUANTIDADE`) também abandona, e a
+#            mensagem com quantidade que NÃO fecha ("gastei 50 no mercado"
+#            respondendo "Qual o valor?") não abandona nem resolve — ela
+#            PERGUNTA (`_quantidade_fecha`, e o desempate no `route()`). As
+#            duas são só daqui: as portas 3 e 4 seguem lendo o `ABANDONA` pelo
 #            `abandona_pergunta_de_valor`, que não mudou.
 #   porta 3  fila do multi-lançamento  core/handlers/launches.py::resolve_multi_launch_value
 #   porta 4  botão "✅ Já paguei"      adapters/whatsapp/wa_runtime.py (roda ANTES
@@ -159,12 +160,13 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 # confiança que os separa (== 1.0) também derrubaria "fatura do cartao"
 # (0.95), então não é corte limpo.
 #
-# ELE SEGUE FORA DO `ABANDONA` — e desde o #281 está no `ESCRITA` logo abaixo,
-# por decisão do dono. O que mudou não foi a medição, foi a peça disponível: o
-# `_STARTS_WITH_VALUE_RE` (parsers.py:176) separa limpo o que nenhum corte de
-# confiança separava. Medido com `allow_ai=False`:
-#   "fatura"        sv=0, e não é só-o-valor  -> EXPLÍCITO: abandona a porta 2
-#   "132 no cartao" sv=1                      -> AMBÍGUO: NÃO abandona (PR A)
+# ELE SEGUE FORA DO `ABANDONA` — e desde o #281 está no
+# `COMANDO_SEM_QUANTIDADE` logo abaixo, por decisão do dono. O que mudou não foi
+# a medição, foi a peça disponível: a QUANTIDADE separa limpo o que nenhum corte
+# de confiança separava. Medido com `allow_ai=False`:
+#   "fatura"        sem quantidade  -> COMANDO: abandona a porta 2
+#   "fatura 132"    quantidade que fecha a mensagem -> RESPOSTA: não abandona
+#   "132 no cartao" começa pelo valor               -> RESPOSTA: não abandona
 # A resposta legítima continua protegida, e o comando de cartão deixa de ficar
 # preso. A via nova é SÓ da porta 2: as portas 3 e 4 consultam o
 # `abandona_pergunta_de_valor`, que lê este conjunto e não mudou.
@@ -179,8 +181,8 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #   porta 2  ERA um LAÇO INDEFINIDO **medido com a IA desligada**: a pergunta
 #            voltava ("Quanto foi no *luz*?") e a pendência era RE-ARMADA a
 #            cada turno (medido: `expires_at` cresce em cada resposta), então
-#            nunca expirava. FECHADO pelo #281: "fatura" entra pela via
-#            EXPLÍCITO do `ESCRITA` e abandona.
+#            nunca expirava. FECHADO pelo #281: "fatura" é comando SEM
+#            quantidade e abandona.
 #   porta 4  laço, mas com saída: a pergunta volta ("Não peguei o valor") e a
 #            pendência NÃO é reescrita (`expires_at` não muda), então o laço
 #            morre nos 10 min contados da pergunta original.
@@ -193,32 +195,26 @@ ABANDONA = {
     "launches.spend_query", "pockets.list", "report.monthly",
 }
 
-# Intents de ESCRITA. Mundo fechado como o `ABANDONA` acima, pela mesma razão
-# (blacklist sobre oráculo ilimitado faz todo intent novo nascer destrutivo),
-# e com o mesmo rigor: cada entrada abaixo veio de uma medição, e a string que
-# a produziu está do lado. `classify(..., allow_ai=False)`:
-#   launches.add         "gastei 50 no mercado", "paguei 120 de luz"    0.95
-#   pockets.deposit      "guardei 100 na caixinha viagem"               0.95
-#   pockets.withdraw     "retirei 100 da caixinha viagem"               0.95
-#   investments.deposit  "aportei 200 no CDB"                           0.95
-#   investments.withdraw "resgatei 200 do CDB"                          0.95
-#   funds.withdraw       "saquei 200", "tirei 200 do tesouro direto"    0.95
-#   pockets.create       "criar caixinha viagem"                        0.95
-#   pockets.delete       "apagar caixinha viagem"                       0.95
-#   credit.handle        "fatura" 1.0, "132 no cartao" 0.95  (ver acima)
+# Comandos que NÃO carregam quantidade. Único abandono NOVO do #281, e o único
+# lugar onde o classificador ainda decide alguma coisa além do `ABANDONA` acima
+# — o resto da tabela é posicional (ver `_quantidade_fecha`).
 #
-# SÓ a porta 2 lê este conjunto (`_clarification_abandonada`). O
-# `abandona_pergunta_de_valor` — compartilhado com as portas 3 e 4 — continua
-# lendo apenas o `ABANDONA`, de propósito: mexer nele moveria três portas de
-# uma vez.
+# Medidos um a um com `classify(..., allow_ai=False)`:
+#   credit.handle    "fatura" 1.0, "meus cartoes" 1.0
+#   pockets.create   "criar caixinha viagem" 0.95
+#   pockets.delete   "apagar caixinha viagem" 0.95
 #
-# E ele NUNCA decide sozinho. O portão de admissão é o `_so_o_valor` logo
-# abaixo: "100 reais" também classifica `launches.add` 0.95, e é a resposta
-# que o bot pediu. Sem esse portão, nenhuma pergunta do bot funcionaria mais.
-ESCRITA = {
-    "launches.add", "pockets.deposit", "pockets.withdraw",
-    "investments.deposit", "investments.withdraw", "funds.withdraw",
-    "pockets.create", "pockets.delete", "credit.handle",
+# Os SEIS verbos de lançamento (`launches.add`, `pockets.deposit`,
+# `pockets.withdraw`, `investments.deposit`, `investments.withdraw`,
+# `funds.withdraw`) ficam de FORA: sem quantidade nenhuma eles não conseguem
+# rodar — `gastei`, `gastei no mercado` e `guardei na caixinha viagem` só fariam
+# a própria pergunta, com a palavra do usuário no lugar do alvo. Estes três
+# rodam: "fatura" mostra a fatura, "criar caixinha viagem" cria a caixinha.
+#
+# COM quantidade eles voltam a ser resposta ("fatura 132", "fatura tudo",
+# "criar caixinha 2028") — quem decide é o portão posicional, não este conjunto.
+COMANDO_SEM_QUANTIDADE = {
+    "credit.handle", "pockets.create", "pockets.delete",
 }
 
 
@@ -239,138 +235,142 @@ def abandona_pergunta_de_valor(text: str) -> bool:
     return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
 
 
-# PORTÃO DE ADMISSÃO da via de escrita da porta 2 (#281). "A resposta tem de
-# consumir a mensagem INTEIRA" é uma pergunta sobre a mensagem, não sobre o
-# parser: o contrato do `_funde_a_resposta` ("leia número e alvo desta
-# resposta") está certo — ele só estava errado quando a mensagem não era uma
-# resposta. Por isso o portão mora aqui e o `_funde_a_resposta` não muda.
+# O QUINTO SINAL do #281, e o portão inteiro da via de comando da porta 2:
+# **a quantidade é a ÚLTIMA coisa da mensagem?**
 #
-# Tudo aqui é peça já existente e compartilhada — nada foi inventado:
+#   fecha  -> é RESPOSTA. A pessoa está respondendo "Qual o valor?".
+#             "paguei 132", "gastei tudo", "fatura 132", "cem".
+#   sobrou -> é AMBÍGUO, e aí ninguém escreve: a porta PERGUNTA.
+#             "paguei 132 ok", "gastei 50 no mercado", "gastei tudo mesmo".
 #
-#   `_SEM_CONTEUDO`  (utils_text) o prefixo que NÃO carrega conteúdo. É o
-#                    `_ENCHIMENTO` ("foi", "uns", "acho que") MAIS os 12
-#                    verbos de lançamento MAIS "r$"/"rs". A lista já existe
-#                    com exatamente este significado: é ela que decide, no
-#                    `_sinal_negativo`, se o que vem antes de um traço é
-#                    conteúdo.
-#   `PT_VALUE`       (utils_text) dígitos ou número por extenso, encadeado.
-#   `_UNIDADE`       (porta 1) "reais", "pila", "conto"…
-#   `_NUMERO_AMBIGUO_RE` (porta 1) só dígitos/separadores/espaço, mas
-#                    malformado: "132 50", "1.23.456", ",50", "1"×400.
+# POSICIONAL, não lexical, e isso é a decisão — não um detalhe de implementação.
+# As três rodadas anteriores morreram tentando listar o que pode vir depois do
+# número ("ok", "sim", "hoje", "no debito", "mesmo"…): a lista nunca fecha, e
+# cada palavra esquecida vira dinheiro no lugar errado. Aqui não há lista: o que
+# vier depois da quantidade é cauda, seja qual for a palavra.
 #
-# O VERBO É PREFIXO SEM CONTEÚDO, e isto é o oposto de um detalhe. "paguei
-# 132" não nomeia alvo nenhum, então não compete com a pergunta pendente — ele
-# É a resposta, com um verbo na frente. Tratá-lo como comando novo tem preço
-# MEDIDO, porque o filtro de dano (`valor_perigoso`) mora no
-# `_resolve_clarification` e o abandono passa por fora dele:
-#   "paguei 132 50"           -> R$ 13.250,00 registrados (o bug que o filtro existe para matar)
-#   "paguei 132,50. foi isso" -> R$ 13.250,00
-#   "paguei -10"              -> R$ 10,00 POSITIVOS
-#   "paguei " + "1"*400       -> "erro interno" (Infinity no JSON da pendência)
-# Com o verbo como prefixo, os quatro voltam ao `valor_perigoso` — que é o
-# comportamento de HOJE e recusa os quatro. `gastei 50 no mercado` segue
-# EXPLÍCITO: sobra "no mercado", e sobra é alvo.
+# `quantidade` são as DUAS formas de dizer quanto, pelas peças que já existem —
+# nada foi inventado: `_extract_valor` (parsers.py) para o número em qualquer
+# grafia ("132", "cem", "2 mil", "1.234,56") e `marcador_de_tudo` (utils_text)
+# para o "tudo"/"esvaziar"/"zerar", que é a outra forma de preencher o MESMO
+# campo (ver o docstring de lá).
 #
-# O SINAL e o `_NUMERO_AMBIGUO_RE` estão aqui pela mesma razão, não por
-# completude: sem eles "paguei -10" e "paguei ,50" escapam do filtro.
+# TETO MEDIDO, e é o preço de não ter lista: a UNIDADE conta como cauda.
+#   "paguei 100 reais"  -> pergunta   (era resolve; "reais" é a última palavra)
+#   "paguei 2 mil"      -> resolve    ("mil" É valor para o `_extract_valor`)
+#   "100 reais"         -> resolve    (começa pelo valor, sai antes daqui)
+# Custa UM turno numa forma comum, e nunca custa dinheiro — perguntar não
+# escreve. Fechar isso exigiria a lista de unidades, que é a lista que este
+# desenho existe para não ter. ponytail: se o turno a mais incomodar, o conserto
+# é reusar o `h_bills._UNIDADE` AQUI, num predicado só, não espalhar palavras.
 #
-# A unidade é obrigatória em cada iteração externa: sem isso o `PT_VALUE`
-# aninhado num segundo `*` dá backtracking catastrófico (medido: 40 grupos de
-# "2 mil e " não terminaram em 120s; com esta forma, termina). O "0,09 ms" que
-# estava escrito aqui era de UMA seed de `PYTHONHASHSEED` — o tempo varia com
-# a ordenação da alternância, e é o que a nota de ordenação abaixo trata. O
-# `test_281_so_o_valor_nao_estoura_com_texto_longo` mede exponencial × não
-# exponencial, não milissegundos.
+# CONSEQUÊNCIA ACEITA PELO DONO, e é a única linha que sai da tabela anterior:
+# `gastei tudo mesmo` passa a PERGUNTAR em vez de esvaziar. Esvaziar é a
+# operação que zera a caixinha inteira; quando a mensagem é ambígua, o lado
+# seguro de uma operação irreversível é o que não escreve. Decisão, não acidente.
 #
-# "centavos" entra além do `_UNIDADE` da porta 1 porque aqui a mensagem é uma
-# frase falada inteira ("30 reais e 50 centavos"), e lá é só o número.
-#
-# A ordenação tem DUAS chaves de propósito. `_SEM_CONTEUDO` é um `frozenset`,
-# então `key=len` sozinho desempata pela ordem de iteração — que muda com o
-# `PYTHONHASHSEED`. O resultado do `fullmatch` é o mesmo (medido: md5 idêntico
-# sobre 7 seeds), mas o TEMPO não é: `_so_o_valor("um "*1365 + "x")` mediu de
-# 463 ms a 6,1 s conforme a seed, e é alcançável por mensagem de usuário
-# ("gastei " + "um "*1362 + "x" → 1,3–1,5 s). O `-len` mantém a alternância mais
-# longa primeiro (é o que evita o casamento parcial de "um" dentro de "umas") e
-# o alfabético torna o custo reprodutível. REMEDIDO em 2026-09-04 com a segunda
-# chave, nas mesmas 7 seeds (0 1 2 3 7 42 12345):
-#     PYTHONHASHSEED=$S .venv/bin/python -c "…md5(_SEM_CONTEUDO_ALT); _so_o_valor('um '*1365+'x')"
-# md5 idêntico nas 7 e 392–443 ms — remedir antes de reusar o número.
-#
-# ponytail: o teto que SOBRA é o custo linear-com-constante-alta do próprio
-# `_SO_O_VALOR_RE` (≈400 ms para 1365 palavras de enchimento). É o mesmo da
-# `main`, agora só previsível. Se virar problema, o conserto é cortar a
-# mensagem por tamanho antes do `fullmatch`, não mexer na alternância.
-_SEM_CONTEUDO_ALT = "|".join(
-    sorted((re.escape(w) for w in _SEM_CONTEUDO), key=lambda w: (-len(w), w)))
-_SO_O_VALOR_RE = re.compile(
-    rf"(?:(?:{_SEM_CONTEUDO_ALT})\s+)*(?:-\s*)?"
-    rf"(?:{PT_VALUE}"
-    rf"(?:\s+(?:e\s+)?(?:{h_bills._UNIDADE}|centavos?)(?:\s+(?:e\s+)?{PT_VALUE})?)*"
-    rf"|{h_bills._NUMERO_AMBIGUO_RE.pattern})",
-    re.I)
+# RESÍDUO INVISÍVEL (ZWSP, BOM — o que o teclado do celular e o copiar-e-colar
+# deixam) conta como NADA, não como cauda: "paguei 132\u200b" e
+# "paguei 132 \u200b" são os dois RESPOSTA. Sem isto o mesmo caractere decidia
+# coisas diferentes conforme viesse colado no número ou separado por espaço.
+_INVISIVEL = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
 
 
-def _so_o_valor(text: str) -> bool:
-    """A mensagem INTEIRA é o valor que o bot pediu ("100 reais", "2 mil").
+def _tem_quantidade(text: str) -> bool:
+    """O texto diz QUANTO — por número ou pelo marcador de tudo."""
+    from parsers import _extract_valor
 
-    True aqui = a mensagem responde a pergunta, mesmo que o classificador a
-    tenha lido como comando de escrita ("100 reais" é `launches.add` 0.95).
-    É o controle positivo do #281 virado código: sem ele a via de escrita
-    abandonaria a pergunta para toda resposta falada com "reais"/"mil", e
-    nenhuma pergunta do bot funcionaria mais.
+    return _extract_valor(text) is not None or marcador_de_tudo(text)
 
-    NÃO usa `normalize_text`: ele apaga `$` e `,`, e aí "R$ 100" e
-    "R$ 1.200,00" deixam de consumir a mensagem — medido. A dobra abaixo é a
-    da porta 1 (`lower` + NFKD sem combining + `_TRACOS` +
-    `limpa_pontuacao_final`), que preserva os dois.
 
-    TETO medido, e é a razão de "100 reais mesmo" cair em AMBÍGUO: o
-    `_ENCHIMENTO_PALAVRAS` só vale ANTES do número. Crescer aquela lista para
-    acomodar o enchimento depois do número move o `_sinal_negativo` e o
-    `_VALOR_RE` da porta 1 junto (utils_text.py:947), e o preço registrado lá
-    é "foi - 10" voltar a pagar R$ 10,00 positivo. Um turno a mais é barato;
-    aquilo não é.
+def _quantidade_fecha(text: str) -> bool:
+    """A quantidade é a última coisa da mensagem? — o quinto sinal, acima.
+
+    `limpa_pontuacao_final` porque "paguei 132." é resposta, não cauda. Ele NÃO
+    tira `?`, `,` nem `:` (utils_text.py) — e não é esquecimento aqui: o que ele
+    deixar preso na última palavra faz a mensagem cair no lado que PERGUNTA, que
+    é o lado que não escreve.
     """
-    return bool(_SO_O_VALOR_RE.fullmatch(_dobrado(text)))
+    palavras = limpa_pontuacao_final(
+        (text or "").translate(_INVISIVEL).strip()).split()
+    return bool(palavras) and _tem_quantidade(palavras[-1])
 
 
-# Verbo de lançamento (prefixo SEM conteúdo) e MAIS NADA além de UMA palavra.
-# O `_so_o_valor` acima cobre o caso em que essa palavra é o valor; este cobre
-# o caso em que ela não é — e o veredito é o mesmo, porque a razão é a mesma:
-# a mensagem não nomeia alvo nenhum, então não compete com a pergunta viva.
+# O DESEMPATE do #281. A mensagem tem quantidade e cauda: pode ser a resposta
+# da pergunta viva ("era o valor") ou um comando novo. Ninguém escreve até o
+# usuário dizer qual — perguntar é a única saída que não move dinheiro.
 #
-# É a via EXPLÍCITO abandonando para um comando que NÃO PODE RODAR: sem valor e
-# sem alvo, o `launches.add` só faz a sua própria pergunta, com a palavra do
-# usuário no lugar do alvo — a classe que o
-# `test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta` existe para impedir.
-# Medido contra a `main`, respondendo "Qual o valor?" de um saque da caixinha
-# `viagem` (R$ 300):
-#   "gastei tudo"    main: esvaziada -R$ 300,00   sem esta guarda: "Quanto foi no *tudo*?"
-#   "paguei tudo"    main: esvaziada -R$ 300,00   sem esta guarda: "Quanto foi no *tudo*?"
-#   "gastei metade"  main: "Não entendi o valor" (pergunta VIVA)
-#                                                 sem esta guarda: "Quanto foi no *metade*?"
-#
-# UMA palavra, não N: "gastei 50 no mercado" nomeia alvo e segue EXPLÍCITO.
-# E só os 12 `_VERBOS_LANCAMENTO` (mais o enchimento) são prefixo sem conteúdo,
-# então `retirei tudo`, `saquei tudo`, `tirei tudo` e `esvaziar caixinha viagem`
-# não passam por aqui — os quatro seguem abandonando, como na `main`.
-_VERBO_E_UMA_PALAVRA_RE = re.compile(
-    rf"(?:(?:{_SEM_CONTEUDO_ALT})\s+)+\S+", re.I)
+# `pending_actions` é UMA LINHA POR USUÁRIO, então armar o desempate DESALOJA a
+# pergunta original. Por isso o payload dela viaja DENTRO do payload daqui
+# (`clarif`), junto com o texto que ficou pendurado (`texto`): sem os dois, "era
+# o valor" não teria para onde voltar. Mesmo desenho do `funding_source_choice`
+# e do `investment_pick`, que também guardam o contexto no payload.
+_PERGUNTA_DE_DESEMPATE = (
+    "Não sei se *{texto}* responde a pergunta ou é um lançamento novo.\n\n"
+    "1️⃣ *responder* — {pergunta}\n"
+    "2️⃣ *registrar* — trata *{texto}* como comando novo\n\n"
+    "Ou *cancela*."
+)
 
 
-def _verbo_e_uma_palavra(text: str) -> bool:
-    """A mensagem é prefixo sem conteúdo + UMA palavra ("gastei tudo")."""
-    return bool(_VERBO_E_UMA_PALAVRA_RE.fullmatch(_dobrado(text)))
+def _resolve_desempate(pending: dict, msg: IncomingMessage, user_id: int) -> str | None:
+    """As três saídas do desempate. `None` = desembrulhou, o turno segue.
 
+    INVÓLUCRO FINO de propósito: não há transição nova aqui. `2` roteia o texto
+    guardado como comando novo (o mesmo `route`, com a linha já livre); `1`
+    devolve a pergunta original para a linha e resolve com o texto guardado (o
+    mesmo `_resolve_clarification`); QUALQUER outra coisa devolve a pergunta
+    para a linha e sai por `None` — o `route()` reentra na tabela com a mensagem
+    NOVA, como se o desempate nunca tivesse existido.
 
-def _dobrado(text: str) -> str:
-    """A dobra da porta 1: `lower` + NFKD sem combining + `_TRACOS` +
-    `limpa_pontuacao_final`. Compartilhada pelos dois portões acima."""
-    d = unicodedata.normalize(
-        "NFKD", (text or "").strip().lower().translate(_TRACOS))
-    return limpa_pontuacao_final(
-        "".join(c for c in d if not unicodedata.combining(c)))
+    O cancelamento tem ramo próprio, e isso NÃO é duplicação do
+    `_resolve_clarification` (que já trata "nao"/"cancelar"): com o desempate
+    armado, "cancelar" nunca chega ao `route()`. O
+    `handle_billing_command` (core/services/billing_commands.py:296) responde
+    antes — "🐷 Você tá no plano Free, não tem o que cancelar" — porque a
+    guarda dele consulta o `ai_pending_actions` (a mesa da IA) e não o
+    `pending_actions`, que é onde moram a `clarification`, este desempate e as
+    confirmações de delete que o comentário de lá diz proteger.
+    HOLE PRÉ-EXISTENTE, medido, e NÃO consertado aqui: mexer naquela guarda
+    move o `cancelar` de toda pendência determinística do produto, o que é
+    outro PR. O texto da pergunta oferece *cancela*, que chega até aqui; o ramo
+    aceita as quatro formas assim mesmo, para quem digitar de outro jeito.
+
+    O CAS é o de sempre: se a linha já não é este desempate, outra tarefa a
+    substituiu e o texto do usuário responde a OUTRA pergunta.
+    """
+    payload  = pending.get("payload") or {}
+    guardado = payload.get("texto") or ""
+    escolha  = limpa_pontuacao_final((msg.text or "").strip().lower())
+
+    if escolha in ("cancelar", "cancela", "nao", "não"):
+        # Mata as DUAS: o texto pendurado e a pergunta que ele desalojou. Ramo
+        # próprio porque o `_resolve_clarification` (que já trata "cancelar")
+        # nunca é alcançado — a inferência de ajuda responde antes, ver o
+        # comentário no `route()`.
+        db.consume_pending_action(user_id, pending)
+        return "❌ Cancelado."
+
+    if escolha in ("2", "2️⃣", "registrar"):
+        if not db.consume_pending_action(user_id, pending):
+            return NOT_UNDERSTOOD_MSG
+        return route(classify(guardado, user_id=user_id),
+                     replace(msg, text=guardado), ignora_pendencias=True)
+
+    if not db.advance_pending_action(
+            user_id, "value_or_command_choice", payload,
+            payload.get("clarif") or {}, new_action_type="clarification",
+            old_created_at=pending.get("created_at")):
+        return NOT_UNDERSTOOD_MSG
+
+    if escolha in ("1", "1️⃣", "responder"):
+        clarif = h_pending.get_pending_clarification(user_id)
+        if clarif is None:
+            return NOT_UNDERSTOOD_MSG
+        return _resolve_clarification(
+            clarif, guardado, user_id, msg.platform,
+            getattr(msg, "external_id", None) or "")
+    return None
 
 
 def route(result: IntentResult, msg: IncomingMessage, *,
@@ -396,6 +396,22 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     confidence = result.confidence
     entities   = result.entities or {}
 
+    # Desempate do #281 armado no turno anterior. ANTES DE TUDO, inclusive do
+    # `infer_help_from_text` logo abaixo: as respostas dele são `1`, `2` e o
+    # cancelamento, e nenhuma delas pode ser lida como pedido de ajuda.
+    #
+    # Enquanto ele está armado, a pergunta original mora DENTRO do payload dele
+    # (`pending_actions` é UMA linha por usuário) e só volta para a linha por
+    # aqui. `None` = o usuário mandou uma TERCEIRA coisa, a pergunta original já
+    # voltou para a linha e o turno segue abaixo como sempre — inclusive pela
+    # inferência de ajuda.
+    if not ignora_pendencias:
+        desempate = db.get_pending_action(user_id)
+        if desempate and desempate.get("action_type") == "value_or_command_choice":
+            resp = _resolve_desempate(desempate, msg, user_id)
+            if resp is not None:
+                return resp
+
     inferred_help = h_help.infer_help_from_text(text, platform)
     if inferred_help is not None:
         norm = normalize_text(text)
@@ -416,8 +432,28 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # -----------------------------------------------------------------------
     clarif = None if ignora_pendencias else h_pending.get_pending_clarification(user_id)
     if clarif:
-        # `"resolve"` | `"abandona"` — ver `_clarification_abandonada`.
-        if _clarification_abandonada(clarif, text, user_id) == "abandona":
+        # `"resolve"` | `"abandona"` | `"pergunta"` — ver
+        # `_clarification_abandonada`.
+        veredito = _clarification_abandonada(clarif, text, user_id)
+        if veredito == "pergunta":
+            # AMBÍGUO: a quantidade não fecha a mensagem. Ninguém escreve neste
+            # turno — nem o valor na pergunta viva, nem o comando novo. O CAS é
+            # o mesmo do abandono logo abaixo, e pela mesma razão: se a linha já
+            # é de outra tarefa, o desempate não pode atropelá-la.
+            if db.advance_pending_action(
+                    user_id, "clarification", clarif.get("payload") or {},
+                    {"clarif": clarif.get("payload") or {}, "texto": text},
+                    # Literal, e não uma constante: o varredor do
+                    # `tests/test_pending_registry.py` lê o `ast` e só confere
+                    # tipo que aparece como string aqui.
+                    new_action_type="value_or_command_choice",
+                    old_created_at=clarif.get("created_at")):
+                return _PERGUNTA_DE_DESEMPATE.format(
+                    texto=text,
+                    pergunta=(clarif.get("payload") or {}).get("question")
+                             or "a pergunta anterior")
+            ignora_pendencias = True
+        elif veredito == "abandona":
             # Porta 2. Mesma escotilha de escape do `investment_pick` e do
             # `funding_source_choice` logo abaixo: outro comando claro abandona
             # a pergunta em vez de ser engolido por ela ("Quanto foi no *luz*?"
@@ -910,33 +946,29 @@ def _o_reroteamento_le_o_mesmo_valor(text: str) -> bool:
 
 
 def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
-    """Decide o que a mensagem é: `"resolve"` a pergunta, ou a `"abandona"`.
+    """O que a mensagem é: `"resolve"` a pergunta, `"abandona"`, ou `"pergunta"`.
 
-    Porta 2 do passo 1 (`abandona_pergunta_de_valor`). Quem decide é o INTENT,
-    não a forma do texto: "gastei 132" e "apagar 42" têm os dois um número.
+    Porta 2 do passo 1 (`abandona_pergunta_de_valor`). A TABELA das 16 células
+    está no corpo do PR #288 e nos testes; aqui fica o predicado, nesta ordem:
 
-    Duas vias levam a `"abandona"`, e as duas leem a MESMA classificação:
+      A0  intent de LEITURA ("saldo", "extrato")            -> abandona
+      D11 começa pelo valor ("50 no mercado", "100 reais")  -> resolve
+      D10 o reroteamento leria OUTRO valor                  -> resolve
+      D9  valor perigoso ("paguei, 132 50", "-10")          -> resolve
+      D4/D6/C2 a quantidade FECHA a mensagem                -> resolve
+      D4b/D5/D7/D8 a quantidade tem cauda                   -> PERGUNTA
+      C1  comando SEM quantidade ("fatura")                 -> abandona
+      D1/D2/D3/B0 o resto (sem quantidade nenhuma)          -> resolve
 
-      ABANDONA   os 6 intents de LEITURA ("saldo", "extrato"), como sempre,
-                 mais o veto de catálogo do #185 lá embaixo.
-      ESCRITA    comando de escrita EXPLÍCITO — verbo próprio e a mensagem
-                 inteira não é o valor pedido ("gastei 50 no mercado"). #281.
+    O classificador decide DUAS células (A0 e C1); as outras são posicionais —
+    ver o quinto sinal, em `_quantidade_fecha`. Foi a tentativa de decidir tudo
+    pelo intent que produziu as rodadas anteriores: `launches.add` 0.95 é o
+    mesmo veredito para `gastei 50 no mercado` e para `100 reais`.
 
-    A via `ESCRITA` tem dois portões, nesta ordem:
+    `"pergunta"` NUNCA escreve — quem a recebe é o desempate do `route()`, que
+    guarda a pergunta original e o texto e devolve as duas opções ao usuário.
 
-      1. `_so_o_valor` — "100 reais" classifica `launches.add` 0.95 e É a
-         resposta que o bot pediu. Ele resolve, nunca abandona.
-      2. `_STARTS_WITH_VALUE_RE` (parsers.py:176) — sobra o ATALHO sem verbo
-         ("50 no mercado", "120 de luz", "100 na caixinha viagem"), que é
-         genuinamente ambíguo: pode ser o gasto ou pode ser o valor com o
-         nome junto. Hoje ele cai em `"resolve"`, que é o comportamento da
-         `main`. A pergunta de desempate é o PR B da #281 — quando ela vier,
-         é aqui que nasce o terceiro valor de retorno, sem tocar no resto.
-
-    Não é `bool` de propósito: o PR B acrescenta uma via, e um `bool` obrigaria
-    o chamador a adivinhar qual dos dois "False" ele recebeu.
-
-    TETO DECLARADO, não verificável neste ambiente: quando a via `ESCRITA`
+    TETO DECLARADO, não verificável neste ambiente: quando a via de comando
     abandona, o turno sai daqui pelo roteamento normal e o
     `classify_with_context` — que só roda dentro do `_resolve_clarification` —
     NÃO roda. Para a conta Pro, isso significa que a IA não vê aquele turno. A
@@ -979,40 +1011,50 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
 
     intent_da_resposta = classify((text or "").strip(), allow_ai=False).intent
 
-    # As DUAS vias caem no veto de catálogo abaixo — `elif`, não dois `return`.
-    # Ser disjunto do `ABANDONA` (o `test_281_escrita_e_abandona_sao_disjuntos`)
-    # NÃO bastava: o que tornava o veto inalcançável não era um intent nos dois
-    # conjuntos, era o `return "abandona"` que esta via tinha antes dele.
+    # As DUAS vias de abandono caem no veto de catálogo abaixo — o bloco não tem
+    # `return "abandona"` próprio, ele CAI para lá. Ser disjunto do `ABANDONA`
+    # não bastava: o que tornava o veto inalcançável era o `return` que a via de
+    # comando tinha antes dele.
     # Medido, caixinha chamada `fatura` com R$ 300 e "saquei 200" pendente:
-    #   "fatura" -> classify `credit.handle` 1.0, que está no ESCRITA
+    #   "fatura" -> classify `credit.handle` 1.0, comando sem quantidade
     #            -> abandonava: "Você ainda não tem cartões cadastrados",
     #               caixinha INTACTA, pendência consumida, R$ 200 perdidos, e
     #               repetir "fatura" re-abandonava para sempre.
     # É o mesmo bug que o #185 fechou, por outra porta — e os testes do #185
     # não viam porque `saldo` (do `ABANDONA`) continuava passando pelo veto.
-    if (intent_da_resposta in ESCRITA
-            and not _so_o_valor(text) and not _verbo_e_uma_palavra(text)):
-        if _STARTS_WITH_VALUE_RE.match((text or "").strip()):
-            return "resolve"   # AMBÍGUO — desempate é o PR B da #281
-        if not _o_reroteamento_le_o_mesmo_valor(text):
-            return "resolve"
-        # FILTRO DE DANO antes de largar a pergunta. Abandonar passa por FORA
-        # do `valor_perigoso` (ele mora no `_resolve_clarification`), então
-        # todo texto cuja pontuação de prosa impede o `_so_o_valor` de casar
-        # entrava no roteamento normal SEM filtro. Não é lista de formas de
-        # mensagem — é a mesma pergunta que o resolver faz, feita antes:
+    if intent_da_resposta not in ABANDONA:
+        # D11: começa pelo valor. "50 no mercado" e "100 reais" classificam
+        # `launches.add` 0.95 igual a `gastei 50 no mercado`, e são a resposta
+        # que o bot pediu com o nome junto. Sem esta linha, `100 reais` e
+        # `30 reais e 50 centavos` viram pergunta de desempate.
+        #
+        # D10 e D9, o FILTRO DE DANO antes de largar a pergunta. Abandonar e
+        # perguntar passam por FORA do `valor_perigoso` (ele mora no
+        # `_resolve_clarification`), então o texto com pontuação de prosa ou com
+        # valor torto entrava no roteamento normal SEM filtro:
+        #   "paguei 132,50. foi isso"             -> R$ 13.250,00
         #   "paguei, 132 50" / "paguei 132 50 ok" -> R$ 13.250,00
-        #   "gastei 132 50 no mercado"            -> R$ 13.250,00
         #   "gastei -10 no mercado"               -> R$ 10,00 POSITIVOS
         #   "gastei " + "1"*400 + " no mercado"   -> "erro interno" (inf)
-        # Com ele, os quatro voltam a `"resolve"` e o resolver re-pergunta com
-        # a pendência viva — que é o comportamento da `main`. Estritamente
-        # conservador: só faz esta via abandonar MENOS.
-        if valor_perigoso(text, _extract_valor((text or "").strip())):
+        # Com eles, os quatro voltam a `"resolve"` e o resolver re-pergunta com
+        # a pendência viva — o comportamento da `main`. Estritamente
+        # conservadores: só fazem esta via abandonar (e perguntar) MENOS.
+        bruto = (text or "").strip()
+        if (_STARTS_WITH_VALUE_RE.match(bruto)
+                or not _o_reroteamento_le_o_mesmo_valor(bruto)
+                or valor_perigoso(bruto, _extract_valor(bruto))):
             return "resolve"
-        # EXPLÍCITO — verbo próprio, comando novo. Segue para o veto.
-    elif intent_da_resposta not in ABANDONA:
-        return "resolve"
+        if _tem_quantidade(bruto):
+            # O QUINTO SINAL. Fechou a mensagem: é resposta. Sobrou cauda: é
+            # ambíguo, e ambíguo não escreve — nem o valor da pergunta, nem o
+            # comando novo.
+            return "resolve" if _quantidade_fecha(bruto) else "pergunta"
+        if intent_da_resposta not in COMANDO_SEM_QUANTIDADE:
+            # Verbo sem quantidade nenhuma (`gastei`, `gastei no mercado`): o
+            # comando não teria como rodar — só faria a própria pergunta, com a
+            # palavra do usuário no lugar do alvo. A pergunta viva continua.
+            return "resolve"
+        # C1 — comando SEM quantidade. Segue para o veto.
 
     # VETO DE CATÁLOGO (#185). Última palavra, e só no turno raro em que o
     # classificador já disse "abandona": a pergunta pendente pede um NOME
@@ -1021,18 +1063,22 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     # saldo — é o nome que a pergunta pediu, e abandonar descartaria o valor
     # que ele já digitou ("saquei 200" → "de qual caixinha?" → "saldo").
     #
-    # DEPOIS do classificador e dos dois portões da via `ESCRITA`, não antes: o
+    # DEPOIS do classificador e dos portões da via de comando, não antes: o
     # determinístico decide o caso comum sozinho, e o catálogo custa I/O
     # (`_alvos_existentes` chama `accrue_all_investments`, que ESCREVE
     # accruals). Nesta ordem ele só roda quando UMA DAS DUAS vias já disse
-    # "abandona" e a pergunta viva é de nome — os `return "resolve"` de cima
-    # (AMBÍGUO, guarda de entrega, valor perigoso) saem sem pagar o catálogo.
+    # "abandona" e a pergunta viva é de nome — os `return` de cima (resolve em
+    # todas as suas formas, e `pergunta`) saem sem pagar o catálogo.
     #
-    # O #281 tinha posto a via `ESCRITA` acima deste bloco COM `return` próprio,
-    # justamente para não pagar essa I/O. O preço era o veto ficar inalcançável
-    # para os 9 intents de escrita — ver o comentário da via, e o custo em
-    # dinheiro na caixinha chamada `fatura`. A I/O passa a ser paga também no
-    # turno que abandona por escrita; é o lado barato da troca.
+    # O #281 tinha posto a via de comando acima deste bloco COM `return`
+    # próprio, justamente para não pagar essa I/O. O preço era o veto ficar
+    # inalcançável para os intents de escrita — ver o comentário da via, e o
+    # custo em dinheiro na caixinha chamada `fatura`. A I/O passa a ser paga
+    # também no turno que abandona por comando; é o lado barato da troca.
+    #
+    # E ela ficou MAIS rara com o quinto sinal: só o comando SEM quantidade
+    # chega aqui pela via nova. `fatura 132` e `gastei 50 no mercado` saem
+    # antes, sem catálogo — era exatamente a I/O que a rodada anterior evitava.
     #
     # `_ja_tem_o_valor` fica INTOCADO de propósito. A one-liner da issue
     # (ler `amount` além de `valor` ali) tem regressão medida: `saquei 200` +
