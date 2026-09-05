@@ -1617,7 +1617,7 @@ def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
 
             # `l.tipo=%s` cru: canonizar a COLUNA aqui seria no-op, e essa é a
             # armadilha do trecho. `l.tipo` é a coluna do lançamento OF, moderna por
-            # construção (prova em `detect_open_finance_salary`, :1963); quem pode
+            # construção (prova em `detect_open_finance_salary`, :1948-1958); quem pode
             # vir legado é o PARÂMETRO, `m["tipo"]`, do lançamento MANUAL, que não
             # passa por filtro de `source` nenhum. Um manual 'saida' procuraria um OF
             # 'saida', que não existe: o dedupe reverso falha calado e o gasto conta
@@ -1627,7 +1627,7 @@ def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
             # escritor atual grava a forma legada (o chamador reconcilia lançamento
             # recém-criado), NÃO pelo filtro de `source`. Mesma inversão que
             # `_find_manual_candidates` (:1363-1372) documenta, com os lados trocados:
-            # lá a coluna é suja e o parâmetro limpo.
+            # lá a coluna é suja e o parâmetro limpo. Registrado na issue 294.
             cur.execute(
                 """
                 select l.id, l.valor, coalesce(l.posted_at, l.criado_em::date) as ref_date,
@@ -2019,7 +2019,8 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
     with get_conn() as conn:
         with conn.cursor() as cur:
             # `tipo='despesa'` cru pela mesma prova — e com a mesma condição que a
-            # derruba — do gêmeo em `detect_open_finance_salary`, :1963.
+            # derruba — do gêmeo em `detect_open_finance_salary`. A prova está no
+            # comentário, :1948-1958; a :1963 é só o SQL que ela justifica.
             cur.execute(
                 """
                 select alvo, nota, valor, coalesce(posted_at, criado_em::date) as date

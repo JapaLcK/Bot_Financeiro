@@ -11,7 +11,7 @@
  * ║ `test_projecao_colapsa_saida_em_despesa_sem_tocar_no_valor`), que ficam ║
  * ║ vermelhos ao reverter a projeção da query 4.                            ║
  * ║                                                                          ║
- * ║ SEM ESTA FRASE ALGUÉM LÊ SETE CASOS VERDES COMO PROVA DO FIX. Não são.  ║
+ * ║ SEM ESTA FRASE ALGUÉM LÊ OS CASOS VERDES COMO PROVA DO FIX. Não são.    ║
  * ║ O que eles provam é o OUTRO lado do contrato: dado o payload canônico,  ║
  * ║ a Início desenha certo — e volta a ficar vermelho no dia em que alguém  ║
  * ║ mexer no home.html sem saber que o servidor já canoniza.                ║
@@ -31,8 +31,9 @@
  *   - os 4 tipos internos do filtro (home.html:1134) ficam FORA da lista, e
  *     `deposito_caixinha` — que não está nesse filtro — fica DENTRO
  *   - `#greeting-sub` (home.html:944) diz "Despesa"/"Receita" e nunca valor cru
- *   - onboarding (home.html:1094) marca com 1 lançamento não-interno e não
- *     marca com 1 interno
+ *     — o tipo INTERNO cru ainda escapa por ali, e é a issue 293, não este PR
+ *   - onboarding (home.html:1094): marca com despesa E com receita (as DUAS
+ *     pernas do `||`, que é o requisito do dono), e não marca com 1 interno
  *   - o repaint por `sessionStorage.pb_home_1` desenha o mesmo contrato
  *
  * Rodar:  npm run test:frontend
@@ -205,7 +206,7 @@ test("#greeting-sub diz Despesa/Receita e nunca o valor cru do tipo", async () =
   }
 });
 
-test("onboarding: 1 lançamento não-interno marca o item; 1 interno não marca", async () => {
+test("onboarding: despesa E receita marcam o item; interno não marca", async () => {
   const marcado = async (launches) => {
     const page = await abrirHome(launches);
     try {
@@ -218,8 +219,15 @@ test("onboarding: 1 lançamento não-interno marca o item; 1 interno não marca"
     } finally { await fechar(page); }
   };
 
-  assert.equal(await marcado([lancamento({ tipo: "despesa", valor: 50 })]), true,
-               "despesa não-interna tem de marcar 'Fazer seu primeiro lançamento'");
+  // As DUAS pernas do `||` em home.html:1094, não só a primeira: com só
+  // 'despesa' aqui, apagar `|| r.tipo === "receita"` daquela linha deixava o
+  // grupo inteiro verde — quem só tem receita nunca via o item marcado, e
+  // nenhum caso reclamava. Mutação medida: sem a perna, ESTE `for` fica
+  // vermelho no caso 'receita'.
+  for (const tipo of ["despesa", "receita"]) {
+    assert.equal(await marcado([lancamento({ tipo, valor: 50 })]), true,
+                 `'${tipo}' não-interna tem de marcar 'Fazer seu primeiro lançamento'`);
+  }
   assert.equal(await marcado([lancamento({ tipo: "deposito_caixinha", valor: 20,
                                            is_internal_movement: true })]), false,
                "movimento interno não conta como primeiro lançamento");

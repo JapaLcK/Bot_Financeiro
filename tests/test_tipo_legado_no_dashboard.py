@@ -167,19 +167,54 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
 # `recent_launches` decide rótulo, cor, sinal e ícone com igualdade estrita:
 # home.html:944 imprime o cru ("Última atividade: saida"), :1094 não conta a
 # linha legada no onboarding, :1147 desenha a receita legada como DESPESA
-# (vermelho, sinal de menos, ícone de queda), e dashboard.js:7954/:8035 usam o
-# cru como label do Histórico. O conserto é `TIPO_CANON_SQL AS tipo` na
-# projeção de FORA — mesma decisão de db/analytics.py:784-790.
+# (vermelho, sinal de menos, ícone de queda), e dashboard.js:7954/:8035/:8479
+# usam o cru como label. O conserto é `TIPO_CANON_SQL AS tipo` na projeção de
+# FORA — mesma decisão de db/analytics.py:784-791.
 #
-# Incidência: ZERO linhas legadas em 4.964 launches na produção (medição do
-# dono, 04/09/2026). É fechamento PREVENTIVO de classe, não conserto de
-# incêndio — nenhum número de usuário muda hoje.
+# NÃO fecha o modal de detalhe inteiro: ele tem um SEGUNDO alimentador
+# (`_catLaunchesRows`, de `list_launches_by_category`), que segue cru — issue
+# 296, e o comentário da query 4 diz por que ficou fora.
 #
-# Controle NEGATIVO do grupo: reverta a projeção da query 4 para `tipo` cru
-# (frontend/finance_bot_websocket_custom.py:556) — os dois `test_projecao_*`
-# ficam VERMELHOS e os quatro `test_canonizacao_nao_*` seguem verdes. Se algum
-# dos verdes cair junto, a canonização foi injetada no lugar errado (na perna
-# de DENTRO, onde ela contaminaria o filtro e os tipos internos).
+# Incidência: ZERO linhas legadas em 4.964 `launches` na produção, medido pelo
+# dono em 04/09/2026 com
+#
+#     select count(*) filter (where tipo = 'saida')   as saida,
+#            count(*) filter (where tipo = 'entrada') as entrada,
+#            count(*)                                 as total_launches
+#       from launches;
+#
+# REMEDIR antes de reusar este número: ele envelhece a cada import. É
+# fechamento PREVENTIVO de classe, não conserto de incêndio — nenhum número de
+# usuário muda hoje.
+#
+# Controles do grupo. As três mutações abaixo foram RODADAS, e cada uma diz
+# quais casos ficam vermelhos — se o resultado for outro, o conserto mudou de
+# lugar e o grupo parou de medir o que diz medir:
+#
+#   1. NEGATIVO. Troque a projeção de FORA da query 4 por `tipo` cru
+#      (`SELECT id, tipo, valor, ...`, frontend/finance_bot_websocket_custom.py,
+#      a linha do `TIPO_CANON_SQL AS tipo` na query 4) → os dois
+#      `test_projecao_*` ficam VERMELHOS e os outros três, verdes.
+#   2. POSITIVO do filtro. Tire a forma legada das DUAS pernas de
+#      `_dashboard_launch_filter_sql` (mesmo arquivo), deixando
+#      `tipo IN ('despesa')` e `tipo IN ('receita')` → só
+#      `test_filtro_continua_achando_as_duas_formas` cai.
+#      NÃO é `TIPO_DESPESA_SQL` (db/connection.py): mexer lá derruba 5 casos,
+#      inclusive os dois de projeção, e deixa este verde — medido. O filtro do
+#      dashboard tem literal próprio, e é ele que este caso positivo guarda.
+#   3. POSITIVO do `ELSE`. Troque o `ELSE tipo` de `TIPO_CANON_SQL` por
+#      `ELSE 'despesa'` → só `test_canonizacao_nao_toca_nos_outros_tipos` cai.
+#
+# O que NÃO discrimina, e já enganou uma leitura deste arquivo: injetar
+# `TIPO_CANON_SQL` na perna de DENTRO. O WHERE avalia a tabela base, não a
+# projeção da subquery — os 10 casos do arquivo passam. É no-op funcional, não
+# controle.
+#
+# Os casos positivos são TRÊS (`test_canonizacao_nao_toca_nos_outros_tipos`,
+# `test_lista_e_contagem_nao_mudam_de_tamanho`,
+# `test_filtro_continua_achando_as_duas_formas`) e só UM casa `-k
+# canonizacao_nao`. Para rodar o grupo inteiro:
+# `pytest tests/test_tipo_legado_no_dashboard.py -k "projecao or canonizacao or contagem or filtro_continua"`.
 
 
 def test_projecao_nao_devolve_forma_legada_nenhuma(pro_user_id):
