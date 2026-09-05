@@ -134,12 +134,38 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
 
     Devolve 'reduz' | 'reparou' | 'nao_reduz' | 'carencia' | 'indisponivel'.
 
-    O ponto todo: sem evento, a varredura não tem autoridade para rebaixar
-    ninguém. "Grant defasado" e "assinatura acabou" produzem exatamente o mesmo
-    estado local — grant vencido com `auth_accounts` ainda pago — e só o Stripe
-    separa os dois. Foi essa confusão que rebaixou pagante (`pro/2027-07-01 →
-    free/None`): a materialização do grant tinha falhado em silêncio e a
-    varredura leu o buraco como fim de assinatura.
+    **A MATRIZ DO PLANO (§4.1.1 D), célula por célula.** Terceira rodada seguida
+    em que o conserto abriu defeito neste trecho, e o `CLAUDE.md` §4 manda
+    enumerar em vez de remendar. Esta tabela é o CONTRATO — o código implementa
+    exatamente estas células, e teste que não casar com uma delas está errado ou
+    é célula nova. Ordem de avaliação segue a tabela, com a busca de alvo
+    ANTES do ramo `past_due` (ela só fornece a `base` do prazo).
+
+    | #  | assinatura no Stripe            | grant                                   | veredito     |
+    |----|---------------------------------|-----------------------------------------|--------------|
+    | 1  | conta sem `stripe_customer_id`  | qualquer                                | reduz        |
+    | 2  | consulta falhou                 | qualquer                                | indisponivel |
+    | 3  | nenhuma ativa                   | qualquer                                | reduz        |
+    | 4  | viva, sem `current_period_end`  | qualquer                                | indisponivel |
+    | 5  | `past_due`, dentro dos 15 d     | usa `ends_at` do alvo, senão `plan_expires_at` | carencia |
+    | 6  | `past_due`, além dos 15 d       | qualquer, **inclusive sem grant ativo** | reduz        |
+    | 7  | `active`/`trialing`             | ativo da `sub_id`, `ends_at < fim`      | reparou      |
+    | 8  | `active`/`trialing`             | ativo da `sub_id`, `ends_at >= fim`     | nao_reduz    |
+    | 9  | `active`/`trialing`             | sem o da `sub_id`; `legacy` ATIVO menor | reparou      |
+    | 10 | `active`/`trialing`             | **nenhum grant ATIVO**                  | nao_reduz    |
+
+    Duas invariantes que a matriz protege, e que valem para qualquer célula nova:
+
+    **1. O reparo nunca ressuscita.** Só grant `status='active'` pode ser alvo.
+    `revoked` é decisão registrada, não defasagem — e só um EVENTO a desfaz.
+    `list_grants` devolve os revogados de propósito (a projeção precisa deles
+    para separar "sem informação" de "venceu"), e o `upsert_grant` grava
+    `status='active'` zerando `revoked_reason`: sem o filtro, o reparo reanimava
+    o `legacy` que a supersessão matou, com o tier ANTERIOR à supersessão. Era
+    o D4 voltando pela porta do reparo, e a guarda de versão não segurava
+    (o reparo carimba `now()`, sempre maior).
+
+    **2. O reparo nunca escolhe tier.** Só a DATA se move.
 
     Reparar significa ESTICAR o `ends_at` do grant até o período que o Stripe
     diz. `plan_stored` **não** se mexe — mas o motivo não é "é a mesma
@@ -149,24 +175,11 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     price→plano sem duplicar o `_stored_plan_for_price` do monólito, e um
     reparo que chuta tier pode CONCEDER tier que ninguém comprou. O tier de
     registro continua sendo o que o último EVENTO escreveu, e o próximo
-    `invoice.paid` o corrige — a data é o que não pode esperar, porque é ela
-    que decide se a conta cai.
-
-    **Assinatura viva quase nunca resulta em redução.** Se o Stripe confirma
-    que há assinatura ativa e não dá para reparar (nenhum grant a esticar), o
-    veredito é `nao_reduz`: alerta e não escreve. O caminho que faltava era o
-    assinante cujo único grant é o `legacy` — justamente a população que o
-    backfill cria.
-
-    A única exceção é o **`past_due` além da carência** (regra do dono): ali a
-    assinatura está viva no Stripe e mesmo assim reduzimos, porque senão a
-    cauda é infinita — `_find_active_subscription` considera `past_due` viva e
-    o `current_period_end` dela é o período JÁ VENCIDO, então nunca haveria o
-    que reparar e a conta ficaria pendurada para sempre.
+    `invoice.paid` o corrige — a data é o que não pode esperar.
     """
     customer = (conta.get("stripe_customer_id") or "").strip()
     if not customer:
-        return "reduz"          # sem relação com o Stripe, não há o que confirmar
+        return "reduz"          # CÉLULA 1: sem relação com o gateway a confirmar
 
     # Reuso dos helpers do monólito (`CLAUDE.md` §0.1/§0.7): a escada
     # active > trialing > past_due e a leitura do `current_period_end` já vivem
@@ -180,57 +193,89 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     try:
         sub = _find_active_subscription(_stripe, customer)
     except StripeLookupError:
-        return "indisponivel"
+        return "indisponivel"                                          # CÉLULA 2
     except Exception:
         # Qualquer falha de rede/SDK é indisponibilidade, nunca "não tem".
-        return "indisponivel"
+        return "indisponivel"                                          # CÉLULA 2
 
     if sub is None:
-        return "reduz"
+        return "reduz"                                                 # CÉLULA 3
 
     sub_id = sub["id"] if not isinstance(sub, dict) else sub.get("id")
     ts = _sub_period_end_ts(sub)
     if not (sub_id and ts):
-        return "indisponivel"   # assinatura viva sem data legível: não decide nada
+        return "indisponivel"   # CÉLULA 4: viva sem data legível nunca vira "não tem"
     fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
     status = (_sg(sub, "status") or "").strip().lower()
 
-    # Alvo do reparo: o grant DAQUELA assinatura; na falta dele, o `legacy`, que
-    # é a reconstrução do mesmo acesso de cartão feita pelo backfill. Ler o
-    # STRIPE para esticar um grant não é a lavagem do D4 — lavagem era ler
-    # `auth_accounts`, que é projeção. Aqui a autoridade é o gateway.
+    # Alvo do reparo: grant ATIVO daquela assinatura; na falta dele, o `legacy`
+    # ATIVO (a reconstrução do mesmo acesso de cartão feita pelo backfill).
+    # `status == "active"` é a invariante 1 — ver docstring.
+    #
+    # Calculado ANTES do ramo `past_due` porque aquele ramo usa o `ends_at` do
+    # alvo como base do prazo; ele NÃO exige que o alvo exista.
+    def _ativo(g) -> bool:
+        return g["status"] == "active"
+
     alvo = next((g for g in grants
-                 if g["source"] == "stripe" and g["external_ref"] == str(sub_id)), None)
+                 if _ativo(g) and g["source"] == "stripe"
+                 and g["external_ref"] == str(sub_id)), None)
     if alvo is None:
-        alvo = next((g for g in grants if g["source"] == "legacy"), None)
-    if alvo is None:
-        # Stripe diz VIVA e não há grant nenhum a esticar. Não reduz: quem tem
-        # assinatura ativa não perde acesso por falta de linha nossa.
-        return "nao_reduz"
+        alvo = next((g for g in grants if _ativo(g) and g["source"] == "legacy"), None)
 
     if status == "past_due":
-        # Cobrança em atraso, assinatura ainda viva: o Stripe está retentando.
-        # NÃO se repara nada aqui — o `current_period_end` do `past_due` é o
-        # período que já venceu, então esticar por ele seria no-op ou mentira.
+        # CÉLULAS 5 e 6 — decidem SÓ entre `carencia` e `reduz`, e não dependem
+        # de haver alvo. Enquanto dependiam, `past_due` sem grant ativo saía por
+        # `nao_reduz` e o teto ficava INALCANÇÁVEL justamente para a base
+        # migrada, que perde o `legacy` para a supersessão no primeiro
+        # `invoice.paid`.
         #
-        # Dentro da carência o acesso É SEGURADO, e o retorno é `carencia` em
-        # vez de `nao_reduz` por um motivo operacional: atraso durante o dunning
-        # é estado ESPERADO, não anomalia. Alertar a cada passada viraria ruído
-        # diário — e alerta que dispara todo dia é alerta que ninguém lê no dia
-        # em que importa.
-        if datetime.now(timezone.utc) <= alvo["ends_at"] + timedelta(days=PAST_DUE_CARENCIA_DIAS):
+        # **`fim` NÃO é lido aqui, e é a proteção mais importante do ramo.**
+        # Assinatura `past_due` tem `current_period_end` NO FUTURO: a Stripe fixa
+        # o período ao CRIAR a fatura, não quando o pagamento entra, então o
+        # `fim` é o do período que ainda NÃO foi pago. (O comentário anterior
+        # dizia o oposto — "o período já venceu" — e o código só estava certo por
+        # acidente.) Esticar o grant por ele concederia período não pago E
+        # renovaria a carência a cada passada, tornando o teto inalcançável.
+        # Quem estica grant é o ramo `active`/`trialing`, onde o período foi
+        # faturado e pago.
+        #
+        # A `base` do prazo vem do alvo; sem alvo, do `plan_expires_at` da conta.
+        # Ler a PROJEÇÃO para decidir um PRAZO não é o D4 — o proibido é
+        # ESCREVER grant a partir dela, e isso continua não acontecendo aqui. No
+        # caso normal os dois valores coincidem, porque a projeção foi calculada
+        # a partir do próprio grant defasado.
+        base = alvo["ends_at"] if alvo else conta.get("plan_expires_at")
+        if base is None:
+            # Sem base não há prazo a conceder: carência sem âncora seria
+            # infinita, e `None + timedelta` seria TypeError.
+            return "reduz"
+        if datetime.now(timezone.utc) <= base + timedelta(days=PAST_DUE_CARENCIA_DIAS):
+            # Dentro da carência o acesso é SEGURADO. `carencia` em vez de
+            # `nao_reduz` por motivo operacional: atraso em dunning é estado
+            # ESPERADO, e alerta diário é alerta que ninguém lê no dia em que
+            # importa. Loga, para ser contável.
             return "carencia"
-        # Passou o teto: reduz mesmo com a assinatura viva. É isto que impede a
-        # cauda infinita — sem o teto, `past_due` nunca reduziria.
+        # Além do teto: reduz mesmo com a assinatura viva no Stripe. Única
+        # redução nessa condição, e é ela que corta a cauda infinita.
         return "reduz"
 
+    if alvo is None:
+        # CÉLULA 10 — nenhum grant ATIVO a esticar (inclusive `legacy` revogado).
+        # Não reduz: quem tem assinatura viva não perde acesso por falta de linha
+        # nossa. Alerta, porque é anomalia de materialização e precisa de gente.
+        return "nao_reduz"
+
     if alvo["ends_at"] >= fim:
-        # O grant já cobre o que o Stripe promete, e mesmo assim a projeção quis
-        # reduzir. Não decide nada por conta própria.
+        # CÉLULA 8 — o grant já cobre o que o Stripe promete.
         return "nao_reduz"
 
     from db.plan_grants import upsert_grant
 
+    # CÉLULAS 7 e 9 — estica SÓ o `ends_at`. `plan_stored` vai igual ao que já
+    # estava (invariante 2): `/billing/change-plan` troca o price mantendo o
+    # mesmo `sub_id`, então inferir plano do price aqui concederia tier que
+    # ninguém comprou. O tier continua sendo o que o último EVENTO escreveu.
     upsert_grant(user_id, alvo["source"], alvo["external_ref"], alvo["plan_stored"],
                  alvo["starts_at"], fim,
                  int(datetime.now(timezone.utc).timestamp()), "reparo:varredura")

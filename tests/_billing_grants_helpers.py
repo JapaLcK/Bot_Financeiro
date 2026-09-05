@@ -119,3 +119,27 @@ def evt_checkout(uid: int, subscription, created: int, session_id: str) -> dict:
         objeto["subscription"] = subscription
     return {"type": "checkout.session.completed", "id": f"evt_co_{created}",
             "created": created, "data": {"object": objeto}}
+
+
+class FakeStripeSubs:
+    """Só o `Subscription.list` que o `_find_active_subscription` usa.
+
+    `status_viva` importa: aquele helper percorre a escada
+    active > trialing > past_due e devolve a PRIMEIRA que casar, então uma
+    assinatura `past_due` só aparece se a busca por `past_due` a devolver.
+    """
+
+    def __init__(self, ativa=None, erro=False, status_viva="active"):
+        self._ativa, self._erro, self._status = ativa, erro, status_viva
+        outer = self
+
+        class _S:
+            @staticmethod
+            def list(customer=None, status=None, limit=None):
+                if outer._erro:
+                    raise RuntimeError("stripe fora do ar")
+                if status == outer._status and outer._ativa:
+                    return {"data": [outer._ativa]}
+                return {"data": []}
+
+        self.Subscription = _S

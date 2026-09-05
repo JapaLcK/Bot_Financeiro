@@ -17,7 +17,7 @@ from _billing_grants_helpers import (
     sub_stripe as _sub,
 )
 from db.connection import get_conn
-from db.plan_grants import list_grants
+from db.plan_grants import list_grants, upsert_grant
 from test_billing_webhook_lifecycle import _post, _setup
 
 
@@ -170,3 +170,32 @@ def test_B1_checkout_SEM_subscription_nao_estoura(user_id, monkeypatch):
     assert r.status_code == 200, r.text
     assert list_grants(uid) == [], "sessão sem assinatura não pode virar grant"
     assert _funil(uid) == 1, "o ramo 'sem subscription' precisa continuar alcançável"
+
+
+def test_B3_acesso_VOLTA_pelo_evento_depois_do_corte_do_past_due(user_id, monkeypatch):
+    """O caminho de dinheiro que o teto do `past_due` criou.
+
+    Sequência real: a cobrança atrasa, a varredura corta no dia 16, e no dia 20
+    o Stripe recupera o pagamento. O `invoice.paid` da recuperação tem de
+    devolver o acesso — é isso que faz o pior caso do teto ser INTERMITÊNCIA em
+    vez de perda permanente, e era a afirmação que sustentava o número 15 sem
+    nenhum teste por baixo.
+    """
+    uid, client, fake = _setup(monkeypatch, f"gvolta-{user_id}")
+    agora = datetime.now(timezone.utc)
+
+    # Estado pós-corte: grant vencido e conta já rebaixada pela varredura.
+    _conta(uid, "free", None, "past_due")
+    upsert_grant(uid, "stripe", "sub_volta", "pro",
+                 agora - timedelta(days=395), agora - timedelta(days=16), 1_000)
+    assert _ler(uid)["plan"] == "free"
+
+    # Dia 20: o Stripe recupera a cobrança.
+    r = _post(client, fake, _evt_paid(uid, "sub_volta", 1_900_000_000),
+              subs={"sub_volta": _sub("active", "price_x", 30)})
+    assert r.status_code == 200, r.text
+
+    row = _ler(uid)
+    assert row["plan"] == "pro", "o acesso não voltou com o pagamento recuperado"
+    assert row["plan_expires_at"] > agora
+    assert row["last_payment_status"] == "active"
