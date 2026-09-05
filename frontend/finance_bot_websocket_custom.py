@@ -4742,7 +4742,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             return int(datetime.now(timezone.utc).timestamp())
 
     async def _materializar_assinatura(uid: int, sub_id, plan_value,
-                                       expires_dt, sub_status: str) -> None:
+                                       expires_dt, sub_status: str) -> bool:
         """Grava o GRANT e reprojeta `auth_accounts` a partir dele (§4.1.1 A).
 
         **A exceção PROPAGA de propósito.** Antes havia um `except`/`print`
@@ -4765,22 +4765,49 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
 
         Sem `expires_dt` não há grant (`ends_at` é `not null`): cai na escrita
         legada, que é o "vitalício de fato" do §5.3.
+
+        Devolve False quando o evento era VELHO e nada de acesso foi escrito.
+        Os chamadores **não** abortam o ramo com isso (decisão do dono): evento
+        obsoleto quer dizer que outro evento mais novo já decidiu o ACESSO, não
+        que a fatura não foi paga — comissão, GA4/CAPI, e-mail e, sobretudo, o
+        `claim_trial_for_user` (trava de um trial por telefone na vida) seguem
+        rodando.
         """
         if not (uid and sub_id and expires_dt):
             update_user_plan(uid, plan_value, expires_dt)
             set_payment_status(uid, sub_status)
-            return
+            return True
         from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
         from db.plan_grants import upsert_grant  # noqa: PLC0415
-        await asyncio.to_thread(
+        aplicou = await asyncio.to_thread(
             upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
             datetime.now(timezone.utc), expires_dt,
             _event_version(event), _g(event, "id"),
         )
+        if aplicou is None:
+            # Evento VELHO: a guarda de versão recusou o grant, e quem decidiu o
+            # acesso foi um evento MAIS NOVO. Escrever `last_payment_status`
+            # aqui devolveria `active` a uma conta que o `deleted` acabou de
+            # cancelar — a guarda protegia o grant e o status passava por fora
+            # dela. NÃO caem aqui, e é o que `upsert_grant` classifica pela
+            # COMPARAÇÃO DE VERSÃO (§4.1.2): a reentrega do 5xx, o evento IRMÃO
+            # do mesmo segundo (`checkout` + `paid` de compra imediata, o empate
+            # do §6.1) e o `paid` em voo quando quem bloqueou foi o REPARO da
+            # varredura — que carimba `now()` mas não é evento.
+            await log_system_event(
+                "warning", "billing_evento_obsoleto",
+                f"Evento de cobranca obsoleto ignorado (assinatura {sub_id}).",
+                source="billing", user_id=int(uid),
+                details={"plan": plan_value, "status": sub_status,
+                         "event_version": _event_version(event),
+                         "event_id": _g(event, "id")},
+            )
+            return False
         await asyncio.to_thread(set_payment_status, uid, sub_status)
         # `auth_accounts` sai dos grants, não de uma escrita paralela à mão:
         # duas fontes escrevendo o mesmo par é como elas divergem.
         await asyncio.to_thread(recompute_entitlement, int(uid))
+        return True
 
     async def _fire_email(uid: int, fn, *args):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.

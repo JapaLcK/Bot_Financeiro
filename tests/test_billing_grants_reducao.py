@@ -154,10 +154,23 @@ def test_9l_celula5_legacy_revogado_nao_ressuscita_e_nao_reduz(user_id, monkeypa
     A pré-condição é a NORMAL, não a exótica: `_SUPERSEDE_LEGACY` revoga o
     `legacy` a todo upsert aplicado de grant `stripe`, então toda a base migrada
     fica assim assim que o primeiro `invoice.paid` entra. `list_grants` devolve
-    revogados de propósito, e `upsert_grant` escreve `status='active'` zerando
-    `revoked_reason` — sem filtrar por `status`, a varredura reanimava o grant
-    morto, com o tier ANTERIOR à supersessão (quem baixou de tier recuperava o
-    alto). A guarda de versão não segura: o reparo carimba `now()`.
+    revogados de propósito — sem filtrar por `status`, a varredura reanimava o
+    grant morto, com o tier ANTERIOR à supersessão (quem baixou de tier
+    recuperava o alto).
+
+    **O mecanismo do dano mudou, a regra não.** Enquanto o reparo era um
+    `upsert_grant`, ele escrevia `status='active'` zerando `revoked_reason` e a
+    guarda de versão não segurava (carimbava `now()`). Hoje o reparo é o
+    `esticar_grant`, que não escreve nenhuma das duas colunas — a ressurreição
+    passou a ser impossível pelo `and status = 'active'` do próprio `UPDATE`
+    (invariante 1, §4.1.1 D).
+
+    **O que ESTE teste discrimina, medido:** só o veredito (célula 5,
+    `sem_grant`, sem escrita) e o `ends_at` do revogado não ter sido movido. Ele
+    NÃO cobre a cláusula SQL sozinha — há um filtro `_ativo()` em Python fazendo
+    o mesmo trabalho, e desligar qualquer uma das duas deixa a suíte verde;
+    só caem juntas. Quem mede a cláusula do `UPDATE` é o
+    `test_esticar_grant_so_estica_grant_ATIVO_do_DONO_e_nunca_encurta`.
     """
     from db.plan_grants import revoke_grant
 

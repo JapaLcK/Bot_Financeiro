@@ -112,6 +112,34 @@ def _e_reducao(plano_atual: str, expira_atual, plano_novo: str, expira_novo) -> 
     return expira_novo < expira_atual - GAP_TOLERANCIA
 
 
+def _queda_de_tier(plano_atual: str, plano_novo: str) -> bool:
+    """A projeção baixou o TIER? (O eixo que `_e_reducao` não enxerga.)
+
+    `_e_reducao` só vê `free` e data: uma conta `pro_max` que passa a projetar
+    `essencial` mantendo a MESMA data não é redução para ela, e a varredura
+    escrevia o tier menor sem ninguém confirmar — grant de tier alto TRUNCADO
+    por falha de materialização passava direto. Por isso queda de tier também
+    manda consultar o Stripe (§4.1.1 D).
+
+    **Consultar não é congelar.** O que sai daqui só decide se a consulta
+    acontece; quem decide a escrita é o `recompute_entitlement`, e lá queda só
+    de tier ESCREVE mesmo sem confirmação (menos `indisponivel`). A consulta
+    existe para dar ao reparo a chance de esticar o grant truncado: se a
+    assinatura do tier alto está viva, a célula 7 a restaura e o tier volta
+    sozinho, sem escrita nenhuma.
+
+    A versão anterior desta função tentava distinguir "downgrade agendado" de
+    "defeito" caminhando a cadeia de grants com tolerância de emenda, para não
+    congelar o agendado. **Isso saiu inteiro** — cadeia, tolerância e distinção.
+    Sem congelamento ela não tem o que decidir, e o Tester mostrou que ela
+    engolia o caso COMUM e não a exceção: quem assina o plano barato 5 dias
+    antes de o caro vencer produz grants SOBREPOSTOS, que a caminhada lia como
+    defeito e travava no tier alto indefinidamente. Cada conceito a menos aqui é
+    um lugar a menos para o próximo conserto abrir defeito.
+    """
+    return _tier_do_stored(plano_novo) < _tier_do_stored(plano_atual)
+
+
 def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) -> str:
     """Confirma no STRIPE uma redução que veio de VARREDURA (§4.1.1 B).
 
@@ -129,25 +157,46 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
     | 2 | consulta falhou (rede/SDK/`StripeLookupError`) | qualquer                        | indisponivel |
     | 3 | nenhuma ativa, **ou `past_due`**           | qualquer                           | reduz        |
     | 4 | viva, sem `id` **ou** sem `current_period_end` | qualquer                        | indisponivel |
-    | 5 | `active`/`trialing`                        | nenhum (inclusive `legacy` revogado) | nao_reduz  |
+    | 5 | `active`/`trialing`                        | nenhum (inclusive `legacy` revogado) | sem_grant  |
     | 6 | `active`/`trialing`                        | da `sub_id` **ou** `legacy`, `ends_at >= fim` | nao_reduz |
     | 7 | `active`/`trialing`                        | da `sub_id` **ou** `legacy`, `ends_at < fim`  | reparou   |
 
     As células 6 e 7 valem igual para o grant da `sub_id` e para o `legacy` —
     o que muda entre eles é só a ordem de escolha do alvo, não a regra.
 
-    Duas invariantes que a matriz protege, e que valem para qualquer célula nova:
+    TRÊS invariantes que a matriz protege, e que valem para qualquer célula
+    nova. As três são condições do `esticar_grant`, e não precondições soltas em
+    Python — ver a docstring dele:
 
     **1. O reparo nunca ressuscita.** Só grant `status='active'` pode ser alvo.
     `revoked` é decisão registrada, não defasagem — e só um EVENTO a desfaz.
     `list_grants` devolve os revogados de propósito (a projeção precisa deles
-    para separar "sem informação" de "venceu"), e o `upsert_grant` grava
-    `status='active'` zerando `revoked_reason`: sem o filtro, o reparo reanimava
-    o `legacy` que a supersessão matou, com o tier ANTERIOR à supersessão. Era
-    o D4 voltando pela porta do reparo, e a guarda de versão não segurava
-    (o reparo carimba `now()`, sempre maior).
+    para separar "sem informação" de "venceu"). Enquanto o reparo era feito por
+    `upsert_grant` — que grava `status='active'` zerando `revoked_reason` —
+    isto dependia do filtro em Python: sem ele o reparo reanimava o `legacy` que
+    a supersessão matou, com o tier ANTERIOR à supersessão (o D4 pela porta do
+    reparo). Hoje o `and status = 'active'` do `UPDATE` fecha isso no BANCO.
 
-    **2. O reparo nunca escolhe tier.** Só a DATA se move.
+    **2. O reparo nunca escolhe tier.** Só a DATA se move — e agora
+    estruturalmente: `plan_stored` não está no `set` do `esticar_grant`.
+
+    **3. O reparo NÃO escreve `event_version`.** Aquela coluna é marca d'água de
+    EVENTO, e o reparo não é evento. O carimbo `epoch(now())` que o `upsert_grant`
+    exigia (era a única forma de passar pela guarda `excluded.event_version >
+    plan_grants.event_version`) produziu dois defeitos medidos: `deleted`
+    atrasado deixava de revogar (`revoke_grant` exige `event_version <= %s`), e o
+    remendo que compensava isso na reclassificação aceitava evento de QUALQUER
+    idade (R2-1). Consequência declarada: o reparo deixa de disparar a
+    supersessão do `legacy` (efeito colateral do upsert de `source='stripe'`).
+    É o certo pelo §5.1 — quem mata o `legacy` é o primeiro EVENTO real —, e o
+    que torna isso seguro é que o `legacy` só existe para quem NÃO
+    tem grant nenhum: o `RESYNC_LEGACY_GRANTS_SQL` (`db/schema.py`) filtra por
+    `and not exists (select 1 from plan_grants g where g.user_id = a.user_id)`.
+    Então `legacy` ativo nunca coexiste com `stripe` ativo, e não há o que
+    supersedir na hora do reparo. **Se alguém relaxar aquele `not exists`, isto
+    acorda**: um `legacy` do backfill carrega o `plan_expires_at` antigo, que
+    pode ir MUITO além do que o Stripe cobra — o Tester mediu 270 dias de acesso
+    a mais. A direção do erro NÃO é conservadora; quem segura é o `not exists`.
 
     Reparar significa ESTICAR o `ends_at` do grant até o período que o Stripe
     diz. `plan_stored` **não** se mexe — mas o motivo não é "é a mesma
@@ -220,25 +269,39 @@ def _reparar_grant_pelo_stripe(user_id: int, conta: dict, grants: list[dict]) ->
         alvo = next((g for g in grants if _ativo(g) and g["source"] == "legacy"), None)
 
     if alvo is None:
-        # CÉLULA 5 — nenhum grant ATIVO a esticar (inclusive `legacy` revogado).
-        # Não reduz: quem tem assinatura viva não perde acesso por falta de linha
-        # nossa. Alerta, porque é anomalia de materialização e precisa de gente.
-        return "nao_reduz"
+        # CÉLULA 5 — a assinatura VIVA não tem grant ATIVO nosso (nem o da
+        # `sub_id`, nem `legacy`). Não reduz: quem tem assinatura viva não perde
+        # acesso por falta de linha nossa. Alerta, porque é anomalia de
+        # materialização e precisa de gente.
+        #
+        # Veredito PRÓPRIO, e não `nao_reduz`, porque 5 e 6 querem respostas
+        # OPOSTAS no eixo do tier e a string era a única coisa que as
+        # distinguia: aqui falta informação sobre a assinatura viva (não
+        # sabemos o tier dela), na 6 a informação está completa. Enquanto as
+        # duas dividiram a mesma palavra, a 5 rebaixava conta com assinatura
+        # viva — e nenhum teste conseguia separá-las (R3-1).
+        return "sem_grant"
 
     if alvo["ends_at"] >= fim:
         # CÉLULA 6 — o grant ativo (da `sub_id` OU o `legacy`) já cobre o que o
         # Stripe promete. Não escreve; a redução não sai daqui.
         return "nao_reduz"
 
-    from db.plan_grants import upsert_grant
+    from db.plan_grants import esticar_grant
 
-    # CÉLULA 7 — estica SÓ o `ends_at`. `plan_stored` vai igual ao que já
-    # estava (invariante 2): `/billing/change-plan` troca o price mantendo o
-    # mesmo `sub_id`, então inferir plano do price aqui concederia tier que
-    # ninguém comprou. O tier continua sendo o que o último EVENTO escreveu.
-    upsert_grant(user_id, alvo["source"], alvo["external_ref"], alvo["plan_stored"],
-                 alvo["starts_at"], fim,
-                 int(datetime.now(timezone.utc).timestamp()), "reparo:varredura")
+    # CÉLULA 7 — estica SÓ o `ends_at`, por `UPDATE` e nunca por `upsert_grant`.
+    # As invariantes 1, 2 e 3 são condições do próprio `UPDATE`; ver a docstring
+    # do `esticar_grant`. Em especial ele NÃO escreve `event_version`: aquela
+    # coluna é marca d'água de evento, e o carimbo `now()` que o upsert exigia
+    # bloqueava `subscription.deleted` atrasado e abria o R2-1.
+    # O bool importa: `esticar_grant` não casa linha quando o grant sumiu, foi
+    # revogado ou já foi esticado entre o `list_grants` e o `UPDATE`. Devolver
+    # "reparou" sem ter reparado põe uma MENTIRA no único campo que distingue as
+    # células, e o `veredito` é o que autoriza escrita lá em cima. Nada esticado
+    # = mesmo estado de conhecimento da célula 5: não temos linha utilizável
+    # para a assinatura viva.
+    if not esticar_grant(user_id, alvo["source"], alvo["external_ref"], fim):
+        return "sem_grant"
     return "reparou"
 
 
@@ -288,18 +351,80 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
 
     plano, expira = projetar_grants(grants, agora)
 
-    if origem == "varredura" and _e_reducao(plano_atual, expira_atual, plano, expira):
+    # Os DOIS eixos mandam consultar o Stripe; só um deles pode CONGELAR.
+    if origem == "varredura" and (_e_reducao(plano_atual, expira_atual, plano, expira)
+                                  or _queda_de_tier(plano_atual, plano)):
         veredito = _reparar_grant_pelo_stripe(user_id, conta, grants)
-        if veredito in ("indisponivel", "nao_reduz"):
-            _alertar_reducao_nao_confirmada(user_id, plano_atual, veredito)
-            return None                      # falha na direção reparável
         if veredito == "reparou":
+            # O reparo esticou um grant: reprojeta e julga o resultado dele.
             grants = list_grants(user_id)
             plano, expira = projetar_grants(grants, agora)
-            if _e_reducao(plano_atual, expira_atual, plano, expira):
-                # o reparo não resolveu: não reduz por conta própria
-                _alertar_reducao_nao_confirmada(user_id, plano_atual, "reparo_insuficiente")
-                return None
+
+        # Sem INFORMAÇÃO nunca se escreve. Vale para os dois eixos, e a lista
+        # é de quem ESCREVE, nunca de quem segura: o default de uma célula nova
+        # tem de ser SEGURAR. A versão anterior listava quem segura
+        # (`== "indisponivel"`) e foi assim que a célula 5 passou a rebaixar
+        # conta com assinatura VIVA no Stripe — ela não estava na lista (R3-1).
+        #
+        # Quem autoriza escrita, e por quê:
+        #   • `reduz`    — o Stripe disse que não há assinatura (células 1 e 3);
+        #   • `reparou`  — esticamos o grant e reprojetamos (célula 7);
+        #   • `nao_reduz`— célula 6: a assinatura viva TEM grant nosso e ele já
+        #     cobre o período. A informação está completa, e a queda de tier que
+        #     sobra é real (é o caso comum do downgrade, R2-5).
+        # Quem segura: `indisponivel` (não lemos o Stripe, células 2 e 4) e
+        # `sem_grant` (lemos, e a assinatura VIVA não tem grant ativo nosso —
+        # célula 5, ou um `esticar_grant` que não casou linha).
+        if veredito not in ("reduz", "reparou", "nao_reduz"):
+            _alertar_reducao_nao_confirmada(user_id, plano_atual, veredito)
+            return None                      # falha na direção reparável
+
+        # Eixo da DATA: o erro é `free`, o usuário perde o produto inteiro.
+        # Aqui congelar continua sendo a regra — só `reduz` (o Stripe disse que
+        # não há assinatura) autoriza encurtar.
+        if veredito != "reduz" and _e_reducao(plano_atual, expira_atual, plano, expira):
+            _alertar_reducao_nao_confirmada(
+                user_id, plano_atual,
+                "reparo_insuficiente" if veredito == "reparou" else veredito)
+            return None
+
+        # Eixo do TIER: **escreve mesmo sem confirmação** (§4.1.1 D). A matriz é
+        # incapaz de confirmar tier — todo reparo move só a data —, então "não
+        # confirmou" é o caso NORMAL desta entrada, não a exceção, e tratá-lo
+        # como "não escreve" congelava a conta no tier ALTO por tempo
+        # indefinido. Os dois erros são simétricos e se curam no MESMO prazo: o
+        # próximo evento daquela assinatura reprojeta com `origem="evento"`, que
+        # não passa por nada disto. Escrever cedo tira tier de quem paga;
+        # congelar dá tier de graça a quem não paga. Fica o registro.
+        #
+        # `and plano != "free"`: o registro não sai quando o DESTINO é `free`.
+        # Como `_tier_do_stored("free") == 0`, toda redução para `free` também é
+        # queda de tier, e a mensagem saía se contradizendo — "tier caiu de pro
+        # para free (veredito reduz); a matriz nao confirma tier" — em todo
+        # cancelamento de rotina: célula 3 (dunning esgotado, assinatura
+        # encerrada sem `deleted`) e célula 1 (conta sem `stripe_customer_id`,
+        # ou seja TODA conta Pix do PR 1b). O dado saía certo; quem quebrava era
+        # o CANAL: `_observar` alerta 1x/dia por conta, e é o mesmo canal que
+        # precisa fazer um humano olhar `indisponivel` e `sem_grant` — a metade
+        # "congela e avisa" desta feature. Afogá-lo em cancelamento de rotina a
+        # desliga.
+        #
+        # **O predicado é o DESTINO, não a opinião do outro eixo.** A primeira
+        # versão disto era `and not _e_reducao(...)`, e ela fechava um lado
+        # abrindo o outro: quando os DOIS eixos se movem juntos (tier cai E data
+        # encurta), `_e_reducao` dá True e o registro SUMIA — escrevia queda de
+        # tier não confirmada em silêncio, que é exatamente o que este registro
+        # existe para não deixar acontecer. Medido: `pro_max/+60d` com grants
+        # `pro_max` vencido + `essencial` até +10d escrevia `essencial` com ZERO
+        # eventos. Quem tornava a mensagem contraditória era o destino `free`,
+        # nunca "o outro eixo também viu" — não reintroduza o `_e_reducao` aqui
+        # achando que é mais preciso.
+        if _queda_de_tier(plano_atual, plano) and plano != "free":
+            _observar(user_id, "projecao_queda_de_tier",
+                      f"Queda de tier escrita sem confirmacao de tier "
+                      f"({plano_atual} -> {plano}, veredito {veredito}).",
+                      f"Conta {user_id}: tier caiu de {plano_atual} para {plano} "
+                      f"(veredito {veredito}); a matriz nao confirma tier.")
 
     from db import set_payment_status, update_user_plan
 
