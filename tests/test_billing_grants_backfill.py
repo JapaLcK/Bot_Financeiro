@@ -11,23 +11,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from _billing_grants_helpers import (
-    conta as _conta, evt_deleted as _evt_deleted, evt_paid as _evt_paid,
-    grant as _grant, ler as _ler, rodar_resync as _rodar_resync,
-    set_customer, sub_stripe as _sub,
+    FakeStripeSubs, conta as _conta, evt_deleted as _evt_deleted,
+    evt_paid as _evt_paid, grant as _grant, ler as _ler,
+    rodar_resync as _rodar_resync, set_customer, sub_stripe as _sub,
 )
 from core.services.billing_access import recompute_entitlement
 from db.connection import get_conn
 from db.plan_grants import list_grants, upsert_grant
 from test_billing_webhook_lifecycle import _post, _setup
-
-
-class _StripeSemAssinatura:
-    """Stripe que responde "nenhuma assinatura ativa" — a lapsada do caso 7."""
-
-    class Subscription:
-        @staticmethod
-        def list(customer=None, status=None, limit=None):
-            return {"data": []}
 
 
 # ── Backfill inicial (§5.1) ───────────────────────────────────────────────────
@@ -251,7 +242,7 @@ def test_07_assinatura_que_lapsa_perde_o_acesso_no_vencimento(user_id, monkeypat
     # varredura — e é ela que tem de consultar o Stripe antes de reduzir. Com o
     # default, o teste passava por um caminho que a produção não percorre.
     set_customer(uid, f"cus_{uid}")
-    monkeypatch.setitem(__import__("sys").modules, "stripe", _StripeSemAssinatura())
+    monkeypatch.setitem(__import__("sys").modules, "stripe", FakeStripeSubs(ativa=None))
 
     assert recompute_entitlement(uid, origem="varredura") == {
         "plan": "free", "plan_expires_at": None}

@@ -2,8 +2,7 @@
 tests/test_billing_grants_reducao.py — a REGRA DA REDUÇÃO do §4.1.1 B do
 docs/plano_pix_anual_asaas.md: quem pode tirar acesso, e sob qual confirmação.
 
-Casos 9c, 9d, 9e do §16, mais o assinante só-`legacy` (B-2) e os dois lados do
-teto de carência do `past_due` (B-3).
+Casos 9c, 9d, 9e e 9i–9o do §16 — as 7 células da matriz do §4.1.1 D.
 
 Arquivo próprio porque é assunto próprio: `..._materializacao.py` cobre o grant
 ENTRAR (§4.1.1 A e §4.1.2); aqui é o grant SAIR.
@@ -149,7 +148,7 @@ def test_B2_assinatura_viva_sem_grant_nenhum_nao_reduz(user_id, monkeypatch):
     assert len(alertas) == 1
 
 
-def test_9l_celula10_legacy_revogado_nao_ressuscita_e_nao_reduz(user_id, monkeypatch):
+def test_9l_celula5_legacy_revogado_nao_ressuscita_e_nao_reduz(user_id, monkeypatch):
     """O D4 por outra porta: o fallback do `legacy` não pode pegar um revogado.
 
     A pré-condição é a NORMAL, não a exótica: `_SUPERSEDE_LEGACY` revoga o
@@ -216,7 +215,7 @@ def test_9m_POSITIVO_reparo_move_so_a_data_e_nao_o_tier(user_id, monkeypatch):
     assert _ler(user_id)["plan"] == "essencial"
 
 
-def test_9n_celula8_grant_ja_cobre_o_que_o_stripe_promete(user_id, monkeypatch):
+def test_9n_celula6_grant_ja_cobre_o_que_o_stripe_promete(user_id, monkeypatch):
     """Grant ativo com `ends_at >= fim` e ainda assim a projeção quis reduzir:
     estado incoerente, então não decide nada — não escreve e alerta."""
     agora = datetime.now(timezone.utc)
@@ -248,12 +247,12 @@ def test_9n_celula8_grant_ja_cobre_o_que_o_stripe_promete(user_id, monkeypatch):
     assert recompute_entitlement(user_id, origem="varredura") is None
     assert _ler(user_id)["plan"] == "pro", "escreveu numa célula que não decide"
     assert len(alertas) == 1
-    # O que DISCRIMINA a célula 8: ela não escreve. Sem esta asserção o teste é
+    # O que DISCRIMINA a célula 6: ela não escreve. Sem esta asserção o teste é
     # tautológico — deixar a célula cair no reparo ENCURTA o grant para o `fim`
     # que o Stripe promete, e o resultado observável (None, plano intacto,
     # 1 alerta) fica idêntico, porque o grant continua sem cobrir AGORA.
     assert _grant(user_id, "stripe")["ends_at"] == antes, (
-        "a célula 8 escreveu: o grant foi encurtado para o período do Stripe")
+        "a célula 6 escreveu: o grant foi encurtado para o período do Stripe")
 
 
 def test_9o_celula4_assinatura_viva_sem_data_legivel_e_indisponivel(user_id, monkeypatch):
@@ -275,3 +274,67 @@ def test_9o_celula4_assinatura_viva_sem_data_legivel_e_indisponivel(user_id, mon
     assert recompute_entitlement(user_id, origem="varredura") is None
     assert _ler(user_id)["plan"] == "pro"
     assert len(alertas) == 1
+
+
+def test_past_due_vencida_rebaixa_como_qualquer_outra(user_id, monkeypatch):
+    """Célula 3: `past_due` é tratada como "sem assinatura ativa".
+
+    **Isto preserva o comportamento que o app já tinha**, e não cria regra nova:
+    o `invoice.payment_failed` só grava `last_payment_status='past_due'` e manda
+    e-mail — nunca tocou em `plan`/`plan_expires_at`. Então o acesso sempre foi
+    "até o fim do período efetivamente pago, e depois acaba". A pergunta sobre
+    `past_due` nasceu da varredura que este PR introduziu; a resposta é não
+    mudar nada.
+
+    Existiu aqui uma carência de 15 dias. Ela saiu por decisão do dono: além de
+    ser feature nova, não entregava acesso nenhum no caso comum — `_paid_plan_active`
+    (`core/services/plan_service.py`) decide por `plan_expires_at`, que já está
+    vencido exatamente no cenário que a carência dizia proteger.
+
+    As duas asserções são o par que discrimina: sem o desvio da célula 3, a
+    `past_due` cai no reparo e o grant é ESTICADO até o `current_period_end`
+    dela — que é FUTURO, do período que ninguém pagou.
+    """
+    agora = datetime.now(timezone.utc)
+    fim_pago = agora - timedelta(days=3)
+    _conta(user_id, "pro", fim_pago, "past_due")
+    set_customer(user_id, f"cus_{user_id}")
+    upsert_grant(user_id, "stripe", f"sub_pd_{user_id}", "pro",
+                 agora - timedelta(days=395), fim_pago, 1_000)
+
+    # Período FUTURO: a fatura do ciclo novo foi criada e NÃO foi paga.
+    nao_pago = int((agora + timedelta(days=27)).timestamp())
+    atrasada = {"id": f"sub_pd_{user_id}", "status": "past_due",
+                "current_period_end": nao_pago,
+                "items": {"data": [{"current_period_end": nao_pago}]}}
+    monkeypatch.setitem(__import__("sys").modules, "stripe",
+                        FakeStripeSubs(ativa=atrasada, status_viva="past_due"))
+
+    assert recompute_entitlement(user_id, origem="varredura") == {
+        "plan": "free", "plan_expires_at": None}
+    assert _ler(user_id)["plan"] == "free"
+    assert _grant(user_id, "stripe")["ends_at"] == fim_pago, (
+        "o grant foi esticado para um período que ninguém pagou")
+
+
+def test_celula1_conta_sem_stripe_customer_id_reduz(user_id, monkeypatch):
+    """Célula 1: sem relação com o gateway não há o que confirmar, então reduz.
+
+    Sem este caso a célula não tinha teste nenhum — a mutação que a inverte
+    deixava a suíte inteira verde.
+    """
+    agora = datetime.now(timezone.utc)
+    _conta(user_id, "pro", agora - timedelta(days=1), "active")
+    upsert_grant(user_id, "stripe", f"sub_c1_{user_id}", "pro",
+                 agora - timedelta(days=395), agora - timedelta(days=1), 1_000)
+
+    def _nunca(*a, **k):
+        raise AssertionError("célula 1 não pode consultar o Stripe")
+
+    monkeypatch.setattr(billing_access, "_reparar_grant_pelo_stripe",
+                        billing_access._reparar_grant_pelo_stripe)
+    monkeypatch.setitem(__import__("sys").modules, "stripe",
+                        type("S", (), {"Subscription": type("X", (), {"list": _nunca})})())
+
+    assert recompute_entitlement(user_id, origem="varredura") == {
+        "plan": "free", "plan_expires_at": None}
