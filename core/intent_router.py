@@ -16,6 +16,7 @@ from dataclasses import replace
 
 import db
 from core.intent_classifier import IntentResult, classify
+from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
 from utils_text import (contains_word, limpa_pontuacao_final, marcador_de_tudo,
                         normalize_text, valor_perigoso)
@@ -323,7 +324,7 @@ def _quantidade_fecha(text: str) -> bool:
 # plataforma e NÃO foi exercitado aqui. O texto inteiro continua no payload, que
 # é quem o registra quando o usuário escolhe 2.
 _PERGUNTA_DE_DESEMPATE = (
-    "Não sei se *{texto}* responde a pergunta ou é um lançamento novo.\n\n"
+    "Não sei se {texto} responde a pergunta ou é um lançamento novo.\n\n"
     "1️⃣ *responder* — {pergunta}\n"
     "2️⃣ *registrar* — trata como comando novo\n\n"
     "Ou *cancela*."
@@ -469,7 +470,14 @@ def route(result: IntentResult, msg: IncomingMessage, *,
                     new_action_type="value_or_command_choice",
                     old_created_at=clarif.get("created_at")):
                 return _PERGUNTA_DE_DESEMPATE.format(
-                    texto=text[:300] + ("…" if len(text) > 300 else ""),
+                    # `wrap_wa_markup` e não `*{texto}*` no molde: texto CRU
+                    # do usuário dentro de `*...*` faz o bot ABRIR um par que o
+                    # `*` do usuário fecha no meio (`gastei 50 no *mercado`
+                    # virava `*gastei 50 no *mercado*` na tela). Mesma fonte
+                    # única do `core/handlers/pending.py` (#270). O total ímpar
+                    # que SOBRA é a #276, e é outro desenho.
+                    texto=wrap_wa_markup(
+                        text[:300] + ("…" if len(text) > 300 else "")),
                     pergunta=(clarif.get("payload") or {}).get("question")
                              or "a pergunta anterior")
             return NOT_UNDERSTOOD_MSG

@@ -1041,8 +1041,20 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 # era "começa pelo valor" e resolvia por um curto-circuito
 # (`_STARTS_WITH_VALUE_RE`) posto ANTES do quinto sinal — que também levava
 # `50 no mercado`, `120 de luz` e `100 na caixinha viagem` junto, e essas TRÊS
-# são a regra 3 do dono. Medido em duas colunas nas 6 células (NOME × VALOR ×
-# 3 textos): `main` e o HEAD anterior escreviam 1 linha em `launches` nas seis.
+# são a regra 3 do dono. O dano NÃO era o mesmo nas 6 células (NOME × VALOR ×
+# 3 textos): 4 escreviam 1 linha em `launches`, e as outras DUAS — NOME ×
+# `50 no mercado` e NOME × `120 de luz` — escreviam ZERO e matavam a pendência,
+# com o texto engolido como nome de caixinha ("Caixinha *50 no mercado* não
+# encontrada"). Remedido em 2026-09-04 nas duas árvores — `main` em `ee0524a`
+# e o HEAD anterior a este conserto, `56ed7f1` —, copiando ESTE arquivo para
+# dentro delas:
+#   git worktree add /tmp/m288 ee0524a   # ou 56ed7f1
+#   cp tests/test_perguntas_guardam_contexto.py /tmp/m288/tests/
+#   cd /tmp/m288 && pytest tests/test_perguntas_guardam_contexto.py \
+#       -k test_288_regra3 -q --tb=line
+# Saída idêntica nas duas: `6 failed` — 4 em "escreveu em `launches`"
+# (`assert 4 == 3`) e 2 em "o desempate não foi armado: None". Remeça antes de
+# reusar qualquer um desses números.
 # O que separa as duas regras é a UNIDADE, não a posição: depois de `100` vem
 # `reais`, que é o próprio valor; depois de `50` vem um ALVO
 # (`core/intent_router.py::_UNIDADE_DE_VALOR_RE`).
@@ -1426,10 +1438,13 @@ def test_288_regra3_quantidade_com_alvo_nunca_escreve(uid, pergunta, texto):
     """A REGRA 3 DO DONO, verbatim, nas DUAS perguntas — e o defeito do #288.
 
     As três strings são as que ele escreveu; as duas perguntas são as duas que
-    a porta 2 protege (NOME e VALOR). Medido em duas colunas antes do conserto:
-    `main` e HEAD `371a49c` escreviam 1 linha em `launches` nas SEIS células,
-    porque o `_STARTS_WITH_VALUE_RE` (D11) devolvia "resolve" antes de o quinto
-    sinal ser consultado — a regra não existia no código.
+    a porta 2 protege (NOME e VALOR). Antes do conserto o
+    `_STARTS_WITH_VALUE_RE` (D11) devolvia "resolve" antes de o quinto sinal ser
+    consultado — a regra não existia no código —, mas o dano era de DOIS tipos:
+    4 células escreviam 1 linha em `launches` e 2 (NOME × `50 no mercado` e
+    NOME × `120 de luz`) escreviam ZERO e MATAVAM a pendência, engolindo o texto
+    como nome de caixinha. Este teste falha nos dois tipos; o comando que remede
+    as duas árvores está no comentário da tabela, acima.
 
     A afirmação de dinheiro é a CONTAGEM de `launches` antes/depois: zero linha
     nova. As outras duas são a pendência (a pergunta original tem de sobreviver,
@@ -1455,6 +1470,30 @@ def test_288_regra3_quantidade_com_alvo_nunca_escreve(uid, pergunta, texto):
         f"a pergunta original se perdeu: {pend}"
     assert "1️⃣" in resposta, \
         f"nenhum desempate na tela: {resposta!r}"
+
+
+def test_288_desempate_nao_embrulha_texto_com_marcacao(uid):
+    """A classe que o #270 fechou, reaberta pelo `_PERGUNTA_DE_DESEMPATE`.
+
+    O molde interpolava o texto CRU do usuário dentro de `*...*`. Medido em
+    2026-09-04 com o molde antigo (mutação `"Não sei se *{texto}*"`), pela
+    conversa real: `*gastei 50 no *mercado*` na tela e 11 asteriscos na
+    mensagem; com `wrap_wa_markup` são 9, e o texto sai inteiro, sem embrulho —
+    que é o que este teste afirma.
+
+    TETO DECLARADO, e é a issue #276: 9 é ÍMPAR. `wrap_wa_markup` decide POR
+    ARGUMENTO e o WhatsApp pareia POR MENSAGEM, então o `*` solto do usuário
+    ainda casa com a marcação PRÓPRIA do molde (`*responder*`, `*registrar*`,
+    `*cancela*` e os do `{pergunta}`). Fechar isso é o desenho da #276 e não
+    cabe aqui; o que cabe é não ser o bot a ABRIR o par."""
+    _caixinhas_com_saldo(uid, "viagem")
+    _conversa(uid, "tirar da caixinha viagem", "viagem")
+
+    resposta = _conversa(uid, "gastei 50 no *mercado")[-1]
+
+    assert "gastei 50 no *mercado" in resposta, resposta
+    assert "*gastei 50 no *mercado*" not in resposta, \
+        f"o bot embrulhou texto que já tem marcação: {resposta!r}"
 
 
 def test_281_c2_quantidade_grande_no_comando_nao_cria_a_caixinha(uid):
