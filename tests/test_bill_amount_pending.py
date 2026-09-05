@@ -498,8 +498,13 @@ def test_ordem_de_prioridade_da_linha_de_pendencias():
     # 3. ocupada por PERGUNTA → cede, e a pergunta antiga fica intacta
     # `confirm_recurring_offer` está aqui, e não entre as ofertas: ela pergunta
     # "sim ou não" em texto e o runtime NÃO a consome no turno em que nasce.
+    # `value_or_command_choice` (o desempate do #281) está aqui porque é o caso
+    # mais caro da coluna: a pergunta original mora DENTRO do payload dele, então
+    # marcá-lo como oferta perderia DUAS perguntas de uma vez. Sem esta linha,
+    # `oferta=True` no registro não deixava um teste vermelho (medido).
     for pergunta in ("clarification", "multi_launch_values", "credit_card_setup",
-                     "delete_launch", "confirm_recurring_offer"):
+                     "delete_launch", "confirm_recurring_offer",
+                     "value_or_command_choice"):
         uid = int(uuid.uuid4().int % 1_000_000_000)
         db.ensure_user(uid)
         db.set_pending_action(uid, pergunta, {"valor": 77.9})
@@ -3243,10 +3248,10 @@ def test_281_veto_de_catalogo_alcanca_a_via_de_escrita(nome):
     "gastei 132 50 no mercado", "paguei 132 50 de luz",
     "gastei -10 no mercado", "paguei 1.23.456 de luz",
     "gastei " + "1" * 400 + " no mercado",
-    # O sinal separado do dígito: "-50" NÃO casa o `_STARTS_WITH_VALUE_RE`
-    # (`^\s*(?:r\$\s*)?\d`, parsers.py:176), então quem o segura é o filtro —
-    # medido, desligando o filtro esta linha fica vermelha junto com as outras.
-    # A redação anterior dizia o contrário e estava errada.
+    # Sinal separado do dígito. Quem o segura é o filtro — medido, desligando
+    # o filtro esta linha fica vermelha junto com as outras. (A redação
+    # anterior atribuía isso ao `_STARTS_WITH_VALUE_RE`, que saiu da via no
+    # #288 por levar a regra 3 do dono no atropelo.)
     "-50 no mercado",
 ])
 def test_281_valor_perigoso_vem_antes_do_abandono(resposta):

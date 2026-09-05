@@ -1032,10 +1032,20 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 #   D8  número + alvo         gastei 50 no mercado                 ?
 #   D9  valor perigoso        paguei, 132 50 / gastei -10          R
 #   D10 pontuação de prosa    paguei 132,50. foi isso              R
-#   D11 começa pelo valor     50 no mercado, 132 ok, 100 reais     R
+#   D11 quantidade + UNIDADE  100 reais, 30 reais e 50 centavos    R
 #
 # D9 e D10 são medidos em `tests/test_bill_amount_pending.py`, onde moram as
 # duas guardas que os produzem (o filtro de dano e a guarda de entrega).
+#
+# D11 mudou no #288, e é a diferença entre a tabela e a REGRA DO DONO. A célula
+# era "começa pelo valor" e resolvia por um curto-circuito
+# (`_STARTS_WITH_VALUE_RE`) posto ANTES do quinto sinal — que também levava
+# `50 no mercado`, `120 de luz` e `100 na caixinha viagem` junto, e essas TRÊS
+# são a regra 3 do dono. Medido em duas colunas nas 6 células (NOME × VALOR ×
+# 3 textos): `main` e o HEAD anterior escreviam 1 linha em `launches` nas seis.
+# O que separa as duas regras é a UNIDADE, não a posição: depois de `100` vem
+# `reais`, que é o próprio valor; depois de `50` vem um ALVO
+# (`core/intent_router.py::_UNIDADE_DE_VALOR_RE`).
 #
 # CADA TESTE AFIRMA TRÊS COISAS, e a terceira é a que faltava por três rodadas:
 # o saldo da caixinha e da conta; que não nasceu despesa avulsa; e o que
@@ -1051,6 +1061,8 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 #         três testes do desempate junto.
 #   3. desligar o quinto sinal (toda quantidade vira `"pergunta"`)
 #      -> test_281_quantidade_que_fecha_e_resposta vermelho em D4a e D6.
+#   4. repor o `_STARTS_WITH_VALUE_RE` no topo da via (o defeito do #288)
+#      -> test_288_regra3_quantidade_com_alvo_nunca_escreve vermelho nas 6.
 # CONTROLE POSITIVO: test_281_resposta_compativel_nunca_vira_lancamento —
 # `100 reais`, `cem`, `132,50`, `R$ 100`, `30 reais e 50 centavos` e `tudo`
 # continuam fechando o saque. Sem ele o grupo passaria num código que recusa
@@ -1068,9 +1080,11 @@ def test_185_pergunta_de_valor_continua_abandonando(uid, sem_teto_de_caixinha):
 #      aluguel 1200` são todos `out_of_scope 0.0`. Como B0, eles resolvem a
 #      pergunta. A porta 2 roda `allow_ai=False` de propósito (ver
 #      `abandona_pergunta_de_valor`).
-#   2. a UNIDADE conta como cauda: `paguei 100 reais` PERGUNTA (custa um turno,
-#      nunca dinheiro), enquanto `paguei 2 mil` resolve — "mil" é valor para o
-#      `_extract_valor` e "reais" não. É o preço de não ter lista de cauda.
+#   2. FECHADO no #288: a unidade deixou de contar como cauda (`paguei 100
+#      reais` resolve, como `paguei 2 mil` já resolvia). O vocabulário é o
+#      `h_bills._UNIDADE`, mais `centavos` e `k`, que na porta 1 mudariam o
+#      valor pago. Sobra o TETO NOVO: unidade que a lista não tem ("paguei 100
+#      pratas") continua perguntando — custa um turno, nunca dinheiro.
 #   3. `gastei tudo mesmo` PERGUNTA em vez de esvaziar. Decisão do dono, e é a
 #      única linha que saiu da tabela anterior: esvaziar zera a caixinha
 #      inteira, e o lado seguro de uma operação irreversível é o que não
@@ -1166,7 +1180,12 @@ def test_281_c1_comando_sem_quantidade_abandona(uid, sem_teto_de_caixinha,
     comando RODA sozinho (mostra a fatura, cria a caixinha).
 
     Era um laço indefinido medido: a pergunta voltava ("Quanto foi no *luz*?")
-    e a pendência era RE-ARMADA a cada turno, então nunca expirava."""
+    e a pendência era RE-ARMADA a cada turno, então nunca expirava.
+
+    E ela morre AVISANDO (#288): na `main` a pergunta sobrevivia ao `fatura`,
+    então descartá-la em silêncio deixaria o usuário esperando a resposta de uma
+    pergunta que já não existe. O A0 (`saldo`) segue calado — lá o abandono é o
+    comportamento de sempre."""
     _pergunta_de_valor(uid)
 
     respostas = _conversa(uid, resposta)
@@ -1176,6 +1195,8 @@ def test_281_c1_comando_sem_quantidade_abandona(uid, sem_teto_de_caixinha,
         f"a pergunta sobreviveu ao comando: {respostas[-1]!r}"
     assert marca in respostas[-1].lower(), \
         f"o comando não rodou: {respostas[-1]!r}"
+    assert "Cancelei a pergunta anterior" in respostas[-1], \
+        f"a pergunta morreu em silêncio: {respostas[-1]!r}"
 
 
 @pytest.mark.parametrize("celula,resposta", [
@@ -1342,10 +1363,11 @@ def test_281_resposta_compativel_nunca_vira_lancamento(uid, resposta, saque):
     0.95 — os mesmos 0.95 de `gastei 50 no mercado`; `cem`, `132,50` e `tudo`
     caem em `out_of_scope 0.0`. Nenhum deles pode virar lançamento.
 
-    MEDIDO: `100 reais`, `132,50`, `R$ 100` e `30 reais e 50 centavos` são
-    seguros pelo `_STARTS_WITH_VALUE_RE` (célula D11 — começam por dígito);
-    `cem` e `tudo` pelo quinto sinal, que os lê como quantidade que fecha a
-    mensagem."""
+    MEDIDO, e desde o #288 é o MESMO sinal para os seis: a quantidade é a
+    última coisa da mensagem. `132,50`, `R$ 100`, `cem` e `tudo` fecham no
+    próprio número/marcador; `100 reais` e `30 reais e 50 centavos` fecham
+    porque a UNIDADE não é cauda (`_UNIDADE_DE_VALOR_RE`). É este teste que
+    impede o conserto da regra 3 de virar um código que recusa tudo."""
     _pergunta_de_valor(uid)
 
     respostas = _conversa(uid, resposta)
@@ -1355,6 +1377,34 @@ def test_281_resposta_compativel_nunca_vira_lancamento(uid, resposta, saque):
     assert round(float(db.get_balance(uid)), 2) == round(100.00 + saque, 2)
     assert _despesas(uid) == [], \
         f"a resposta à pergunta virou lançamento: {respostas[-1]!r}"
+
+
+def test_288_cas_do_desempate_falha_e_ninguem_escreve(uid, monkeypatch):
+    """O fallback do CAS não pode escrever o que o desenho chamou de ambíguo.
+
+    Quando a linha já é de OUTRA tarefa, o desempate não pode ser armado. A
+    saída anterior caía no roteamento normal — medido com o CAS forçado a
+    False: `💸 *Despesa registrada*: R$ 50,00 ... ID: #3`, conta em 4950 e a
+    pergunta original perdida. O abandono pode cair no roteamento normal (lá o
+    texto é um comando que o usuário deu de propósito); isto aqui, não."""
+    import core.intent_router as IR
+
+    _pergunta_de_valor(uid)
+    real = IR.db.advance_pending_action
+
+    def perde_a_corrida(*args, **kwargs):
+        if kwargs.get("new_action_type") == "value_or_command_choice":
+            return False
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(IR.db, "advance_pending_action", perde_a_corrida)
+    antes = len(db.list_launches(uid, limit=50) or [])
+
+    resposta = _conversa(uid, "gastei 50 no mercado")[-1]
+
+    assert len(db.list_launches(uid, limit=50) or []) == antes, \
+        f"o ambíguo virou lançamento no caminho de exceção: {resposta!r}"
+    _nada_se_moveu(uid, resposta)
 
 
 def test_281_resposta_compativel_grande_demais_nao_vira_lancamento(uid):
@@ -1369,21 +1419,42 @@ def test_281_resposta_compativel_grande_demais_nao_vira_lancamento(uid):
     assert _despesas(uid) == [], f"virou lançamento: {respostas[-1]!r}"
 
 
-def test_281_ambiguo_ainda_responde_a_pergunta(uid):
-    """D11 — e a decisão medida de NÃO mandar esta célula ao desempate.
+@pytest.mark.parametrize("texto", ["50 no mercado", "120 de luz",
+                                   "100 na caixinha viagem"])
+@pytest.mark.parametrize("pergunta", ["nome", "valor"])
+def test_288_regra3_quantidade_com_alvo_nunca_escreve(uid, pergunta, texto):
+    """A REGRA 3 DO DONO, verbatim, nas DUAS perguntas — e o defeito do #288.
 
-    `50 no mercado` classifica `launches.add` 0.95 igual a `gastei 50 no
-    mercado` e tem cauda depois do número, então pelo quinto sinal sozinho ele
-    perguntaria. Começar pelo VALOR vem antes de propósito: é a forma de
-    `100 reais` e de `30 reais e 50 centavos`, que são resposta legítima —
-    mandá-las ao desempate cobraria um turno da resposta mais comum de todas.
-    Saque de 50, sem despesa, como hoje."""
-    _pergunta_de_valor(uid)
+    As três strings são as que ele escreveu; as duas perguntas são as duas que
+    a porta 2 protege (NOME e VALOR). Medido em duas colunas antes do conserto:
+    `main` e HEAD `371a49c` escreviam 1 linha em `launches` nas SEIS células,
+    porque o `_STARTS_WITH_VALUE_RE` (D11) devolvia "resolve" antes de o quinto
+    sinal ser consultado — a regra não existia no código.
 
-    respostas = _conversa(uid, "50 no mercado")
+    A afirmação de dinheiro é a CONTAGEM de `launches` antes/depois: zero linha
+    nova. As outras duas são a pendência (a pergunta original tem de sobreviver,
+    dentro do payload do desempate) e o desempate oferecido na tela."""
+    _caixinhas_com_saldo(uid, "viagem")
+    original = _conversa(uid, "tirar da caixinha viagem")[-1]
+    if pergunta == "valor":
+        original = _conversa(uid, "viagem")[-1]
+        assert "Qual o valor" in original, original
+    else:
+        assert "Qual caixinha" in original, original
+    antes = len(db.list_launches(uid, limit=50) or [])
 
-    assert _saldos(uid)["viagem"] == 250.00, respostas[-1]
-    assert _despesas(uid) == [], respostas[-1]
+    resposta = _conversa(uid, texto)[-1]
+
+    assert len(db.list_launches(uid, limit=50) or []) == antes, \
+        f"escreveu em `launches`: {resposta!r}"
+    _nada_se_moveu(uid, resposta)
+    pend = db.get_pending_action(uid)
+    assert pend and pend["action_type"] == "value_or_command_choice", \
+        f"o desempate não foi armado: {pend}"
+    assert pend["payload"]["clarif"].get("question"), \
+        f"a pergunta original se perdeu: {pend}"
+    assert "1️⃣" in resposta, \
+        f"nenhum desempate na tela: {resposta!r}"
 
 
 def test_281_c2_quantidade_grande_no_comando_nao_cria_a_caixinha(uid):

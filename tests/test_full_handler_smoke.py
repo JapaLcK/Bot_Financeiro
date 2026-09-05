@@ -548,9 +548,14 @@ def test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta(pro_uid, ia_de_esclareci
     `credit.handle` entrou no `COMANDO_SEM_QUANTIDADE`, então "fatura" (sem
     quantidade nenhuma) é comando novo — a porta 2 abandona a pergunta e
     responde o cartão. Medido: "📭 Você ainda não tem cartões cadastrados", pendência
-    limpa, nada registrado. A IA não é mais consultada neste turno, e é por
-    isso que o `assert chamadas` saiu: o abandono acontece no `route()`, antes
-    do `_resolve_clarification`.
+    limpa, nada registrado. A IA não é mais consultada neste turno — o abandono
+    acontece no `route()`, antes do `_resolve_clarification`.
+
+    A GUARDA ANTITAUTOLÓGICA virou do avesso, e continua sendo uma: o
+    `ia_de_esclarecimento(valor=44.0)` está armado e o teste afirma que ele
+    NÃO foi chamado. Se o turno voltar a passar pelo `_resolve_clarification`
+    (a regressão que este teste existe para pegar), `chamadas` enche e o teste
+    fica vermelho — o setup não é morto.
 
     O que o teste protege continua o mesmo e é o que importa: a palavra do
     usuário não vira alvo de lançamento nenhum.
@@ -559,10 +564,14 @@ def test_ia_com_valor_nao_engorda_o_alvo_com_a_resposta(pro_uid, ia_de_esclareci
 
     uid = pro_uid
     _pergunta_de_valor(uid, "gastei no mercado")
-    ia_de_esclarecimento(valor=44.0)
+    chamadas = ia_de_esclarecimento(valor=44.0)
 
     resp = _send(uid, "fatura")
 
+    assert not chamadas, \
+        f"o turno passou pelo `_resolve_clarification`: {chamadas!r}"
+    assert "Cancelei a pergunta anterior" in resp, \
+        f"a pergunta morreu em silêncio: {resp}"
     assert "mercado - fatura" not in resp, f"o alvo engordou: {resp}"
     assert "cart" in resp.lower(), f"a pergunta engoliu o comando de cartão: {resp}"
     assert _pendencia(uid) is None, _pendencia(uid)
@@ -728,9 +737,14 @@ def test_multi_launch_texto_sem_valor_ainda_abandona(free_uid, spy_ai):
 # antes de escrever. Não é uma lista de exceções do código — é a lista das
 # linhas DESTE teste que pagam o turno a mais, e ela está aqui para o custo
 # aparecer no arquivo em vez de sumir num `if`.
+#
+# As TRÊS últimas entraram com a queda do `_STARTS_WITH_VALUE_RE` (#288): elas
+# começam pelo número e têm alvo depois, que é a forma exata de `50 no mercado`
+# na regra do dono. Antes um curto-circuito as resolvia; agora pagam o turno.
 _COM_CAUDA = {"deu 132 no total", "foi uns 132 no total",
               "paguei 132 - da luz", "gastei 50 - mercado",
-              "paguei 132. foi isso"}
+              "paguei 132. foi isso",
+              "132 no boleto", "132 — luz", "132. da luz"}
 
 
 @pytest.mark.parametrize("resposta,esperado", [
@@ -761,7 +775,7 @@ def test_clarification_aceita_tudo_que_a_main_aceita(pro_uid, spy_ai, resposta, 
     rodada 2 se distinguem por aí. No laço, nada é registrado; na perda da
     pergunta, o valor até entra, mas com descrição errada e categoria "outros".
 
-    Duas das 17 passam pelo DESEMPATE do #281 antes de fechar (`_COM_CAUDA`):
+    Três das 17 passam pelo DESEMPATE do #281 antes de fechar (`_COM_CAUDA`):
     o número não é a última coisa da mensagem, e nenhum outro sinal as
     distingue de "gastei 50 no mercado". O valor aceito é o mesmo — muda o
     turno a mais, e o teste o paga explicitamente para não esconder o custo.
@@ -1218,7 +1232,7 @@ _PROSA = [("paguei 132 - da luz", 132.0), ("132 — luz", 132.0),
 def test_clarification_prosa_registra_o_valor_certo(pro_uid, spy_ai, resposta, esperado):
     """Porta 2. `gastei 50 - mercado` é o " - " que ESTE PR pôs no combinado.
 
-    Três das oito passam pelo desempate do #281 antes de fechar (`_COM_CAUDA`)
+    Cinco das oito passam pelo desempate do #281 antes de fechar (`_COM_CAUDA`)
     — a pontuação de prosa deixa cauda depois do número. O valor registrado é o
     mesmo."""
     uid = pro_uid
