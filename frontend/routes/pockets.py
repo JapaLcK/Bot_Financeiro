@@ -358,13 +358,11 @@ async def pocket_withdraw_route(request: Request, user_id: int, pocket_name: str
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
-    from core.services import funding
 
     try:
-        launch_id, new_acc, new_pocket, canon, taxes = await asyncio.to_thread(
+        # O destino do saque sai de `db.destination_of_lots`, dentro da transação (#282).
+        launch_id, new_acc, new_pocket, canon, taxes, _dest = await asyncio.to_thread(
             pocket_withdraw_to_account, int(user_id), name, payload.amount, nota,
-            funding_source=funding.to_db_arg(
-                (await asyncio.to_thread(funding.resolve_destination, int(user_id)))["source"]),
             withdraw_all=bool(payload.withdraw_all),
         )
     except LookupError as exc:

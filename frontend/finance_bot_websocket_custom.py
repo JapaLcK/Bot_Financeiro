@@ -7114,20 +7114,17 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _authorize_dashboard_access(request, user_id)
     if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
-    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
-    # Carteira (ver core/services/funding.py::resolve_destination).
-    from core.services import funding as _funding
-
-    _destino = (await asyncio.to_thread(_funding.resolve_destination, user_id))["source"]
+    # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282):
+    # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.
+    _nome_inv = payload.name.strip()
     try:
-        launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
+        launch_id, new_acc, new_inv, canon, tax_summary, _dest = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
-            payload.name.strip(),
+            _nome_inv,
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
             withdraw_all=bool(payload.withdraw_all),
-            funding_source=_funding.to_db_arg(_destino),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc

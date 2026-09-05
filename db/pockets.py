@@ -17,6 +17,7 @@ from .investments import (
     _iof_rate_for_days,
     _ir_rate_for_days,
     _taxes_for_gain,
+    fifo_takes,
 )
 from .users import ensure_user
 
@@ -308,11 +309,17 @@ def pocket_withdraw_to_account(
     nota: str | None = None,
     *,
     withdraw_all: bool = False,
-    funding_source: dict | None = None,
 ):
-    """Caixinha → Conta via FIFO. Retorna (launch_id, new_acc, new_pocket, canon, tax_summary).
+    """Caixinha → Conta via FIFO.
 
-    `funding_source` é o DESTINO — ver investment_withdraw_to_account.
+    Retorna (launch_id, new_acc, new_pocket, canon, tax_summary, funding_source).
+
+    O DESTINO sai de `db.destination_of_lots`, aqui dentro — ver
+    investment_withdraw_to_account. Ele volta no retorno porque a MENSAGEM precisa
+    dele: quem monta o texto ("para o Nubank · Conta", o aviso de sync) tem de ler o
+    destino GRAVADO, não uma previsão. A previsão de fora existiu em quatro versões e
+    errou nas quatro — quando ela sobreviveu só para a mensagem, a mensagem passou a
+    contradizer o razão nos dois sentidos (#286).
 
     Se ``withdraw_all=True``, saca o saldo cheio pós-rendimento (zera a caixinha de
     forma atômica) e ignora ``amount``. Caso contrário saca ``amount``; mas se o valor
@@ -376,15 +383,9 @@ def pocket_withdraw_to_account(
             breakdown = []
             tax_profile = p.get("interest_tax_profile") or "regressive_ir_iof"
 
-            for lot in lots:
-                if remaining <= 0:
-                    break
-
+            for lot, take in fifo_takes(lots, remaining):
                 lot_balance = Decimal(str(lot["balance"] or 0))
-                if lot_balance <= 0:
-                    continue
                 lot_principal = Decimal(str(lot["principal_remaining"] or 0))
-                take = min(lot_balance, remaining)
 
                 if lot_balance <= lot_principal or lot_balance <= 0:
                     principal_part = min(take, lot_principal)
@@ -461,6 +462,13 @@ def pocket_withdraw_to_account(
             if remaining > LOT_EPSILON:
                 raise ValueError("INSUFFICIENT_POCKET")
 
+            # O destino sai daqui, com os lotes consumidos já sob `for update`: é o
+            # consumo de FATO, depois do accrual. Ver `destination_of_lots`.
+            from .open_finance import destination_of_lots
+
+            funding_source = destination_of_lots(
+                cur, user_id, "deposito_caixinha", [e["lot_id"] for e in lot_effects])
+
             new_pocket = _sync_pocket_from_lots(cur, user_id, pocket_id)
 
             cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
@@ -500,7 +508,7 @@ def pocket_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_pocket, canon, tax_summary
+    return launch_id, new_acc, new_pocket, canon, tax_summary, funding_source
 
 
 def create_pocket(

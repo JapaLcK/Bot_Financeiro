@@ -273,13 +273,11 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Faltou o nome da caixinha."
     if not withdraw_all and amount <= 0:
         return "🐷 Faltou o valor (ou peça pra 'sacar tudo')."
-    from core.services import funding
-
-    destino = funding.resolve_destination(user_id)["source"]
     try:
-        _lid, _acc, _pkt, canon, taxes = db.pocket_withdraw_to_account(
+        # O destino do saque sai de `db.destination_of_lots`, dentro da transação (#282).
+        # Este canal não o exibe: a resposta do chat não nomeia banco nem avisa do sync.
+        _lid, _acc, _pkt, canon, taxes, _dest = db.pocket_withdraw_to_account(
             user_id, pocket_name, None if withdraw_all else amount, withdraw_all=withdraw_all,
-            funding_source=funding.to_db_arg(destino),
         )
         gross = float(taxes.get("gross", 0)) if taxes else 0.0
         tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0

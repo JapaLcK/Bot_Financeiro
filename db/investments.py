@@ -543,6 +543,30 @@ LOT_EPSILON = Decimal("0.000001")
 # usuário nunca consegue digitar o valor exato pra zerar a caixinha/investimento.
 WITHDRAW_ALL_TOLERANCE = Decimal("0.01")
 
+
+def fifo_takes(lots, amount):
+    """Quais lotes um saque de `amount` consome, e quanto de cada um — FIFO.
+
+    Fonte única do critério (CLAUDE.md §0.7): o resgate e o saque de caixinha
+    consomem por aqui, e `db.destination_of_lots` decide o destino sobre exatamente
+    os lotes que saíram daqui. Duas cópias divergiriam no dia em que só uma fosse
+    corrigida — e uma segunda cópia, fora da transação, chegou a existir (#286).
+
+    `lots` já chega ordenado por (opened_at, id) — a ordem é do `select ... for
+    update` de quem chama; esta função não reordena nada.
+    """
+    remaining = Decimal(str(amount))
+    for lot in lots:
+        if remaining <= 0:
+            return
+        balance = Decimal(str(lot["balance"] or 0))
+        if balance <= 0:
+            continue
+        take = min(balance, remaining)
+        yield lot, take
+        remaining -= take
+
+
 IOF_REGRESSIVE_RATES = {
     1: Decimal("0.96"),
     2: Decimal("0.93"),
@@ -1523,13 +1547,20 @@ def investment_withdraw_to_account(
     nota: str | None = None,
     *,
     withdraw_all: bool = False,
-    funding_source: dict | None = None,
 ):
-    """Investimento → Conta via PEPS/FIFO. Retorna (launch_id, new_acc, new_inv, canon, tax_summary).
+    """Investimento → Conta via PEPS/FIFO.
 
-    `funding_source` aqui é o DESTINO do resgate — espelho do aporte. Com origem `bank`
-    o dinheiro volta para o banco, não para a Carteira: creditar a Carteira inflaria o
-    saldo consolidado com o mesmo dinheiro que o sync vai trazer de volta.
+    Retorna (launch_id, new_acc, new_inv, canon, tax_summary, funding_source).
+
+    O DESTINO do resgate — espelho do aporte — é decidido AQUI DENTRO, por
+    `db.destination_of_lots`, sobre os lotes que o PEPS consumiu de fato. Com origem
+    `bank` o dinheiro volta para o banco, não para a Carteira: creditar a Carteira
+    inflaria o saldo consolidado com o mesmo dinheiro que o sync vai trazer de volta.
+
+    Não há parâmetro `funding_source`, de propósito (#282): quem decidia de fora lia os
+    lotes antes do accrual e fora do lock, e errava — ver `destination_of_lots`. Ele
+    volta no RETORNO porque a mensagem precisa do destino gravado; a previsão de fora
+    que sobrou só para o texto fazia a mensagem contradizer o razão (#286).
 
     Se ``withdraw_all=True``, resgata o saldo cheio pós-rendimento (zera o investimento
     de forma atômica) e ignora ``amount``. Caso contrário resgata ``amount``; mas se o
@@ -1589,15 +1620,9 @@ def investment_withdraw_to_account(
             breakdown = []
             tax_profile = inv.get("tax_profile") or "regressive_ir_iof"
 
-            for lot in lots:
-                if remaining <= 0:
-                    break
-
+            for lot, take in fifo_takes(lots, remaining):
                 lot_balance = Decimal(str(lot["balance"] or 0))
-                if lot_balance <= 0:
-                    continue
                 lot_principal = Decimal(str(lot["principal_remaining"] or 0))
-                take = min(lot_balance, remaining)
 
                 if lot_balance <= lot_principal or lot_balance <= 0:
                     principal_part = min(take, lot_principal)
@@ -1673,6 +1698,13 @@ def investment_withdraw_to_account(
             if remaining > LOT_EPSILON:
                 raise ValueError("INSUFFICIENT_INVEST")
 
+            # O destino sai daqui, com os lotes consumidos já sob `for update`: é o
+            # consumo de FATO, depois do accrual. Ver `destination_of_lots`.
+            from .open_finance import destination_of_lots
+
+            funding_source = destination_of_lots(
+                cur, user_id, "aporte_investimento", [e["lot_id"] for e in lot_effects])
+
             new_inv = _sync_investment_from_lots(cur, user_id, inv_id)
 
             if funding_source is None:
@@ -1712,4 +1744,4 @@ def investment_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon, tax_summary
+    return launch_id, new_acc, new_inv, canon, tax_summary, funding_source
