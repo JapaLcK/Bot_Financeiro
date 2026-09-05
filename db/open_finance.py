@@ -1615,6 +1615,19 @@ def reconcile_manual_launch(user_id: int, launch_id: int) -> dict:
             if not m or m["source"] == "open_finance" or m["is_internal_movement"]:
                 return {"ok": False, "reason": "not_manual"}
 
+            # `l.tipo=%s` cru: canonizar a COLUNA aqui seria no-op, e essa é a
+            # armadilha do trecho. `l.tipo` é a coluna do lançamento OF, moderna por
+            # construção (prova em `detect_open_finance_salary`, :1963); quem pode
+            # vir legado é o PARÂMETRO, `m["tipo"]`, do lançamento MANUAL, que não
+            # passa por filtro de `source` nenhum. Um manual 'saida' procuraria um OF
+            # 'saida', que não existe: o dedupe reverso falha calado e o gasto conta
+            # DUAS vezes. O conserto, se um dia precisar, é canonizar o PARÂMETRO em
+            # Python antes do bind — `{TIPO_CANON_SQL} = %s` na coluna é no-op aqui,
+            # porque a coluna já é moderna. Hoje é inalcançável só porque nenhum
+            # escritor atual grava a forma legada (o chamador reconcilia lançamento
+            # recém-criado), NÃO pelo filtro de `source`. Mesma inversão que
+            # `_find_manual_candidates` (:1363-1372) documenta, com os lados trocados:
+            # lá a coluna é suja e o parâmetro limpo.
             cur.execute(
                 """
                 select l.id, l.valor, coalesce(l.posted_at, l.criado_em::date) as ref_date,
@@ -1932,6 +1945,17 @@ def detect_open_finance_salary(user_id: int, months: int = 4) -> dict | None:
     since = datetime.now(_tz()).date() - timedelta(days=months * 31)
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # `tipo='receita'` cru, sem `TIPO_CANON_SQL`: aqui `tipo` é COLUNA e o
+            # filtro de `source` vem antes. O único INSERT de launch com
+            # source='open_finance' é o :1487, com `cls["tipo"]` de
+            # `classify_open_finance_launch` (:1277 — "despesa" if v < 0 else
+            # "receita", incondicional), e o único `update launches set … tipo=` do
+            # repositório inteiro é o :1837, que grava o mesmo `cls["tipo"]`. Nenhuma
+            # linha desse source tem 'entrada'/'saida', então canonizar só somaria
+            # custo sem mudar resultado. A premissa cai no dia em que qualquer outro
+            # escritor ganhar source='open_finance' — migração, backfill, import OFX,
+            # SQL manual em produção: aí este filtro e o gêmeo de 'despesa' em
+            # `detect_open_finance_bill_increase` precisam de `TIPO_CANON_SQL`.
             cur.execute(
                 """
                 select id, valor, coalesce(posted_at, criado_em::date) as date
@@ -1994,6 +2018,8 @@ def detect_open_finance_bill_increase(user_id: int, months: int = 4) -> list:
     since = datetime.now(_tz()).date() - timedelta(days=months * 31)
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # `tipo='despesa'` cru pela mesma prova — e com a mesma condição que a
+            # derruba — do gêmeo em `detect_open_finance_salary`, :1963.
             cur.execute(
                 """
                 select alvo, nota, valor, coalesce(posted_at, criado_em::date) as date
