@@ -543,7 +543,17 @@ async def get_financial_data(
         # 4) Launches paginado
         _q(
             f"""
-            SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+            -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
+            -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
+            -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
+            -- alvo é quem CONSOME `recent_launches`: home.html:944 imprime o
+            -- tipo cru como rótulo ("Última atividade: saida"), :1094 não
+            -- conta a linha legada no onboarding e :1147 desenha a receita
+            -- legada como despesa; dashboard.js:7954 e :8035 usam o cru como
+            -- label do Histórico. Mesma decisão, mesmo sintoma, já tomada em
+            -- db/analytics.py:784-790. O `ELSE tipo` preserva 'credito' e os
+            -- tipos internos intactos.
+            SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,

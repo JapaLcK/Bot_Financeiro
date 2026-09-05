@@ -159,3 +159,110 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
     assert d["monthly_income"] == 80.0, d["monthly_income"]
     assert sum(c["total"] for c in d["expense_categories"]) == 50.0, d["expense_categories"]
     assert sum(x["total"] for x in d["daily_expenses"]) == 50.0, d["daily_expenses"]
+
+
+# ── PR 3 (#287): a PROJEÇÃO de `recent_launches` devolve a forma canônica ───
+#
+# Query 4 de `get_financial_data` devolvia o `tipo` CRU para fora. Quem consome
+# `recent_launches` decide rótulo, cor, sinal e ícone com igualdade estrita:
+# home.html:944 imprime o cru ("Última atividade: saida"), :1094 não conta a
+# linha legada no onboarding, :1147 desenha a receita legada como DESPESA
+# (vermelho, sinal de menos, ícone de queda), e dashboard.js:7954/:8035 usam o
+# cru como label do Histórico. O conserto é `TIPO_CANON_SQL AS tipo` na
+# projeção de FORA — mesma decisão de db/analytics.py:784-790.
+#
+# Incidência: ZERO linhas legadas em 4.964 launches na produção (medição do
+# dono, 04/09/2026). É fechamento PREVENTIVO de classe, não conserto de
+# incêndio — nenhum número de usuário muda hoje.
+#
+# Controle NEGATIVO do grupo: reverta a projeção da query 4 para `tipo` cru
+# (frontend/finance_bot_websocket_custom.py:556) — os dois `test_projecao_*`
+# ficam VERMELHOS e os quatro `test_canonizacao_nao_*` seguem verdes. Se algum
+# dos verdes cair junto, a canonização foi injetada no lugar errado (na perna
+# de DENTRO, onde ela contaminaria o filtro e os tipos internos).
+
+
+def test_projecao_nao_devolve_forma_legada_nenhuma(pro_user_id):
+    """N1 — com as duas formas legadas na base, nenhuma sai pela projeção."""
+    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
+    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
+
+    tipos = [r["tipo"] for r in _dados(pro_user_id)["recent_launches"]]
+    assert tipos, "as duas linhas legadas têm de aparecer na lista"
+    assert not ({"saida", "entrada"} & set(tipos)), tipos
+
+
+def test_projecao_colapsa_saida_em_despesa_sem_tocar_no_valor(pro_user_id):
+    """N2 — a linha 'saida' 100 chega como 'despesa', com o valor intacto."""
+    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
+
+    linhas = _dados(pro_user_id)["recent_launches"]
+    assert len(linhas) == 1, linhas
+    assert linhas[0]["tipo"] == "despesa", linhas[0]
+    assert float(linhas[0]["valor"]) == 100.0, linhas[0]
+
+
+def test_canonizacao_nao_toca_nos_outros_tipos(pro_user_id):
+    """P1 — controle POSITIVO, o que reprova canonizar DEMAIS.
+
+    `TIPO_CANON_SQL` tem `ELSE tipo`: só os dois pares colapsam. Todo o resto
+    (moderno, interno, investimento) sai IDÊNTICO ao gravado. `criar_caixinha`
+    é o par oposto: a perna de DENTRO o exclui pela coluna crua, e ele tem de
+    continuar fora — é o que prova que a canonização não vazou para o WHERE.
+    """
+    db.add_launch_and_update_balance(
+        pro_user_id, "despesa", 50, "compra", None,
+        categoria="mercado", criado_em=_hoje_as(10),
+    )
+    db.add_launch_and_update_balance(
+        pro_user_id, "receita", 80, "freela", None,
+        categoria="rendimentos", criado_em=_hoje_as(11),
+    )
+    # `_grava_tipo_legado` é o inserter SQL genérico do arquivo (§0.1): os tipos
+    # internos entram por ele porque o que se mede aqui é a PROJEÇÃO, não o
+    # caminho de escrita de caixinha/investimento.
+    for tipo in ("deposito_caixinha", "aporte_investimento", "criar_caixinha"):
+        _grava_tipo_legado(pro_user_id, tipo, 20, None, interno=True)
+
+    card_id = db.create_card(pro_user_id, "Nubank", closing_day=31, due_day=10)
+    db.add_credit_purchase(pro_user_id, card_id, 70, "mercado", "pão", today_tz())
+
+    tipos = sorted(r["tipo"] for r in _dados(pro_user_id)["recent_launches"])
+    assert tipos == ["aporte_investimento", "credito", "deposito_caixinha",
+                     "despesa", "receita"], tipos
+
+
+def test_lista_e_contagem_nao_mudam_de_tamanho(pro_user_id):
+    """P2 — canonizar o RÓTULO não pode criar, sumir nem duplicar linha."""
+    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
+    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
+
+    d = _dados(pro_user_id)
+    assert d["launches_pagination"]["total"] == 2, d["launches_pagination"]
+    assert len(d["recent_launches"]) == 2, d["recent_launches"]
+
+
+def test_filtro_continua_achando_as_duas_formas(pro_user_id):
+    """P3 — controle POSITIVO do caminho que RESTRINGE.
+
+    O filtro (`_dashboard_launch_filter_sql`) roda no WHERE da perna de DENTRO,
+    contra a coluna CRUA, e lê os dois pares. A canonização entrou no SELECT de
+    FORA, então "Despesas" tem de continuar trazendo a linha 'saida' e
+    "Receitas" a 'entrada' — se o filtro tivesse sido levado junto, um dos dois
+    voltaria vazio.
+    """
+    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
+    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
+    hoje = today_tz()
+
+    def _filtrado(ft):
+        return asyncio.run(dashboard.get_financial_data(
+            pro_user_id, year=hoje.year, month=hoje.month, filter_type=ft,
+        ))["recent_launches"]
+
+    # Só o VALOR, de propósito: o tipo devolvido é o que os dois testes de
+    # projeção acima medem. Aqui o observável é QUAIS linhas o WHERE trouxe —
+    # é o que mantém este caso verde com e sem o conserto, que é o que um
+    # controle positivo tem de fazer.
+    assert [float(r["valor"]) for r in _filtrado("despesa")] == [100.0]
+    assert [float(r["valor"]) for r in _filtrado("receita")] == [300.0]
