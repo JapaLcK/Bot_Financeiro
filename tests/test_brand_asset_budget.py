@@ -14,7 +14,8 @@ São três perguntas, e as três precisam da varredura:
    produção e verde no CI — ninguém pegava isso);
 2. algum arquivo isolado passa do teto?
 3. a soma de uma página passa do teto? Oito arquivos de 120 KB passam no teto
-   individual e ainda assim entregam ~1 MB numa tela só.
+   individual e ainda assim entregam ~1 MB numa tela só. A soma é da PÁGINA: o que o
+   HTML cita mais o que os stylesheets que ele carrega citam.
 
 Fora do teto de propósito:
 
@@ -143,9 +144,38 @@ def test_nenhuma_imagem_de_brand_passa_do_teto():
     assert not pesados, f"acima do teto de {TETO_ARQUIVO} B por arquivo:\n" + "\n".join(pesados)
 
 
+# `href` vem sempre depois do `rel` e sempre absoluto (`/site.css?v=5`); o `?v=` para
+# a captura sozinho, como na REF.
+CSS_LINK = re.compile(r"""<link[^>]+stylesheet[^>]+href=["']/([A-Za-z0-9_./-]+\.css)""")
+
+
+def _referencias_por_pagina() -> dict[str, set[str]]:
+    """O que a PÁGINA baixa: o que o HTML cita mais o que os stylesheets dele citam.
+
+    `_referencias()` indexa cada `.css` como uma entrada própria, e isso não é uma
+    página: imagem citada no `site.css` é baixada em TODA página que carrega o
+    `site.css`, então HTML e CSS podiam ficar cada um abaixo do teto enquanto a
+    página real passava dele. Hoje nenhum `.css` referencia `/brand/` — o buraco é
+    latente, e é por isso que ele fecha barato.
+
+    O `for` é sobre TODO `.html`, não sobre as chaves de `_referencias()`: página sem
+    referência direta nenhuma, servindo 1 MB pelo stylesheet, não estaria naquelas
+    chaves e nunca seria pesada.
+    """
+    por_arquivo = _referencias()
+    paginas = {}
+    for f in sorted(FRONTEND.rglob("*.html")):
+        refs = set(por_arquivo.get(str(f.relative_to(RAIZ)), ()))
+        for css in CSS_LINK.findall(f.read_text(encoding="utf-8", errors="ignore")):
+            refs |= por_arquivo.get(f"frontend/{css}", set())
+        if refs:
+            paginas[str(f.relative_to(RAIZ))] = refs
+    return paginas
+
+
 def test_nenhuma_pagina_passa_do_teto_de_imagens():
     estouradas = []
-    for pagina, refs in sorted(_referencias().items()):
+    for pagina, refs in sorted(_referencias_por_pagina().items()):
         existentes = [BRAND / r for r in sorted(refs) if (BRAND / r).is_file()]
         total = sum(p.stat().st_size for p in existentes)
         if total > TETO_PAGINA:
@@ -232,9 +262,15 @@ def test_png_nomeado_por_consumidor_continua_no_disco():
     )
     assert not faltando, "PNG nomeado por consumidor apagado:\n" + "\n".join(faltando)
     # A exceção nomeada não pode virar dispensa permanente: no dia em que a arte do
-    # Aviador chegar, ela sai da lista e passa a ser protegida como as outras.
-    assert not (BRAND / "agents/aviador.png").is_file(), (
-        "brand/agents/aviador.png existe agora: tire 'aviador' de PNG_AUSENTE_CONHECIDO"
+    # Aviador chegar, ela sai da lista e passa a ser protegida como as outras. A
+    # varredura é sobre o CONJUNTO, não sobre o nome: cobrar o arquivo direto deixava
+    # a instrução sem saída — quem tirasse "aviador" da lista continuaria vermelho.
+    obsoletas = sorted(
+        nome for nome in PNG_AUSENTE_CONHECIDO if (BRAND / f"agents/{nome}.png").is_file()
+    )
+    assert not obsoletas, (
+        "PNG existe agora, a exceção ficou obsoleta — tire de PNG_AUSENTE_CONHECIDO: "
+        + ", ".join(obsoletas)
     )
 
 
