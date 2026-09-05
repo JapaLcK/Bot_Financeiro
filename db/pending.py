@@ -266,6 +266,23 @@ _REGISTRO: dict[str, _Pendencia] = {
     # ficava sem valor). Já estava na lista do áudio, o que mostra que a
     # ausência era esquecimento, não decisão.
     "multi_launch_values":       _Pendencia(   False,   True,      True),
+    # Desempate do #281 ("era o valor" x "é um lançamento novo"). As TRÊS
+    # colunas copiadas da `clarification`, porque ele É uma `clarification`
+    # embrulhada: não é oferta (não pode ser desalojado por outra pergunta,
+    # senão a pergunta original — que mora no payload dele — some junto);
+    # suprime a IA (a resposta é "1"/"2", que o classificador lê como
+    # `out_of_scope` e a IA do Pro sequestraria); e sobrevive a áudio (perder a
+    # linha perde a pergunta original E o texto pendurado).
+    #
+    # A 3ª coluna é a única DEFENSIVA das três, e isso é medido: mutá-la não
+    # deixa nenhum teste vermelho porque o estado não é alcançável. Com o
+    # desempate de pé, todo áudio passa antes pelo `_resolve_desempate` do
+    # `route()` — nos quatro turnos medidos ("1", "2", um terceiro assunto e um
+    # comando), o `core/handle_incoming.py:332` consultou a coluna com
+    # `recategorize_launch_offer` e com `None`, nunca com este tipo: quando o
+    # desempate sobrevive, o turno não insere lançamento e o check nem roda.
+    # Fica `True` por coerência com a `clarification` que ele embrulha.
+    "value_or_command_choice":   _Pendencia(   False,   True,      True),
 
     # ── perguntas respondidas com "sim"/"não" (classificador reconhece) ───
     "confirm_recurring_offer":   _Pendencia(   False,   False,     True),

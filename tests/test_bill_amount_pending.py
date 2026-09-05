@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 from unittest.mock import Mock
 
@@ -496,8 +498,13 @@ def test_ordem_de_prioridade_da_linha_de_pendencias():
     # 3. ocupada por PERGUNTA → cede, e a pergunta antiga fica intacta
     # `confirm_recurring_offer` está aqui, e não entre as ofertas: ela pergunta
     # "sim ou não" em texto e o runtime NÃO a consome no turno em que nasce.
+    # `value_or_command_choice` (o desempate do #281) está aqui porque é o caso
+    # mais caro da coluna: a pergunta original mora DENTRO do payload dele, então
+    # marcá-lo como oferta perderia DUAS perguntas de uma vez. Sem esta linha,
+    # `oferta=True` no registro não deixava um teste vermelho (medido).
     for pergunta in ("clarification", "multi_launch_values", "credit_card_setup",
-                     "delete_launch", "confirm_recurring_offer"):
+                     "delete_launch", "confirm_recurring_offer",
+                     "value_or_command_choice"):
         uid = int(uuid.uuid4().int % 1_000_000_000)
         db.ensure_user(uid)
         db.set_pending_action(uid, pergunta, {"valor": 77.9})
@@ -1494,10 +1501,21 @@ def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia
     `clarification` antes, e o 132,50 vira o valor do lançamento VELHO — a
     conta fica sem pagar e o dinheiro entra na descrição errada.
 
-    A correção (o texto não sugere mais isso) continua valendo, e a enumeração
-    do #133 continua inteira: a escotilha de abandono desta rodada só larga a
-    pergunta quando a resposta não fala de valor nenhum, e "paguei luz 132,50"
-    TEM valor. As 8 pendências seguem engolindo a forma completa.
+    A rodada da TABELA do #281 devolveu este caso ao comportamento da `main`, e
+    é uma medição, não uma escolha nova: em "paguei luz 132,50" a QUANTIDADE
+    FECHA A MENSAGEM (célula D6), então ela é lida como resposta — o valor vai
+    para o lançamento velho e a conta segue pendente. O quinto sinal olha o que
+    vem DEPOIS do número; o alvo aqui vem ANTES, e nenhum sinal da tabela o vê.
+
+    Medido nas três árvores, com a `clarification` de "gastei no mercado" viva:
+      main     -> resolve a pergunta, conta PENDENTE
+      b543228  -> abandona pela via EXPLÍCITO, conta PAGA
+      aqui     -> resolve a pergunta, conta PENDENTE  (= main)
+
+    Nada se perde no turno (o valor vira o lançamento que a pergunta pediu) e a
+    conta continua pagável no turno seguinte, mas o texto degradado que a
+    primeira metade prende segue sendo necessário — e é por isso que ele NÃO
+    voltou a sugerir a forma completa.
     """
     import uuid
     import db
@@ -1519,16 +1537,18 @@ def test_claim_perdido_nao_anuncia_comando_que_paga_o_lancamento_errado(ia_espia
     assert "132,50" not in texto, texto
     assert "Qual foi o valor?" in texto, texto
 
-    # E o motivo do texto degradado continua verdadeiro: a `clarification`
-    # engole a forma completa, a conta NÃO é paga e o 132,50 vira o lançamento
-    # velho. É por isso que este texto não pode anunciar "paguei luz 132,50".
+    # A forma completa continua sendo engolida pela `clarification`, como na
+    # `main`: o 132,50 fecha a mensagem, então é a resposta da pergunta viva.
     _diga(uid, "paguei luz 132,50")
 
-    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
-    mercado = [l for l in db.list_launches(uid, limit=10)
-               if "mercado" in (l.get("alvo") or l.get("nota") or "").lower()]
-    assert mercado, "o 132,50 tinha que ter virado o lançamento do mercado"
-    assert abs(float(mercado[0]["valor"])) == 132.5, mercado[0]
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending", \
+        "a conta não podia ser paga por um texto que respondeu outra pergunta"
+    # UM lançamento, o da pergunta velha, com o texto inteiro na descrição —
+    # exatamente o dano que a primeira metade deste teste existe para não
+    # anunciar. R$ 132,50 é o valor certo; o alvo é que é o do outro assunto.
+    lancamentos = db.list_launches(uid, limit=10)
+    assert [abs(float(l["valor"])) for l in lancamentos] == [132.5], lancamentos
+    assert "mercado" in (lancamentos[0].get("alvo") or ""), lancamentos
 
 
 def test_valor_invalido_continua_sugerindo_a_forma_completa(ia_espia):
@@ -1770,12 +1790,12 @@ def test_clarification_com_payload_torto_nao_estoura():
     """
     from core.intent_router import _clarification_abandonada
 
-    assert _clarification_abandonada({"payload": "x"}, "saldo", 1) is False
-    assert _clarification_abandonada({}, "saldo", 1) is False
+    assert _clarification_abandonada({"payload": "x"}, "saldo", 1) == "resolve"
+    assert _clarification_abandonada({}, "saldo", 1) == "resolve"
     # `falta` casa com a chave de nome, e o `intent` é o dado torto: sem o
     # `isinstance(intent, str)` esta linha estoura antes de chegar ao return.
     torto = {"payload": {"falta": "pocket_name", "intent": ["pockets.withdraw"]}}
-    assert _clarification_abandonada(torto, "saldo", 1) is True
+    assert _clarification_abandonada(torto, "saldo", 1) == "abandona"
 
 
 # ---------------------------------------------------------------------------
@@ -1953,7 +1973,7 @@ def test_escotilha_da_clarification_nao_apaga_pergunta_de_outra_tarefa(monkeypat
 
     def com_corrida(clarif, texto, uid_):
         decidiu = real(clarif, texto, uid_)
-        if decidiu:
+        if decidiu == "abandona":
             # outra tarefa chegou primeiro e já perguntou outra coisa. É um
             # `bill_pay_amount` de propósito: o `route()` não o consome (quem
             # consome é o runtime do WhatsApp), então o que sobrar no fim é
@@ -2628,7 +2648,13 @@ def test_recusa_da_porta_2_nao_apaga_pergunta_de_outra_tarefa(monkeypatch, respo
 
     def com_corrida(texto, valor):
         perigo = real(texto, valor)
-        if perigo:
+        # A corrida tem de nascer na chamada do RESOLVER — é ele que re-arma a
+        # pergunta, e é o primitivo do re-armamento que este par mede. Desde o
+        # #281 o PORTÃO da porta 2 (`_clarification_abandonada`) também chama o
+        # `valor_perigoso`, antes de decidir; injetar ali faria o
+        # `consume_pending_action` do resolver falhar no CAS e o par passaria a
+        # medir outra coisa (medido: o controle negativo ficava verde sozinho).
+        if perigo and sys._getframe(1).f_code.co_name != "_clarification_abandonada":
             db.set_pending_action(uid, "bill_pay_amount", nova)
         return perigo
 
@@ -2685,7 +2711,13 @@ def test_controle_negativo_upsert_incondicional_atropela_a_pergunta_nova(monkeyp
 
     def com_corrida(texto, valor):
         perigo = real(texto, valor)
-        if perigo:
+        # A corrida tem de nascer na chamada do RESOLVER — é ele que re-arma a
+        # pergunta, e é o primitivo do re-armamento que este par mede. Desde o
+        # #281 o PORTÃO da porta 2 (`_clarification_abandonada`) também chama o
+        # `valor_perigoso`, antes de decidir; injetar ali faria o
+        # `consume_pending_action` do resolver falhar no CAS e o par passaria a
+        # medir outra coisa (medido: o controle negativo ficava verde sozinho).
+        if perigo and sys._getframe(1).f_code.co_name != "_clarification_abandonada":
             db.set_pending_action(uid, "bill_pay_amount", nova)
         return perigo
 
@@ -3119,3 +3151,143 @@ def test_cas_perdido_na_porta_3_ja_nao_tocava_a_pergunta_nova(monkeypatch):
 
     _fila_intacta(uid)
     assert "Conta Corrente" in resp, resp
+
+
+# ---------------------------------------------------------------------------
+# #281 — a porta 2 pela CONVERSA. A tabela das 16 células mora em
+# `tests/test_perguntas_guardam_contexto.py` (§0.7 — uma cópia só), com os
+# controles negativos e a classe cega. Aqui ficam as duas guardas que a via de
+# comando atravessa ANTES de decidir: a de entrega e o filtro de dano.
+#
+# A tabela de UNIDADE que existia aqui foi apagada junto com o vocabulário que
+# ela media (EXPLÍCITO/AMBÍGUO/COMPATÍVEL, `_so_o_valor`,
+# `_verbo_e_uma_palavra`): o predicado deixou de ser decidido pelo intent — só
+# `ABANDONA` e `COMANDO_SEM_QUANTIDADE` ainda o consultam, o resto é posicional.
+# ---------------------------------------------------------------------------
+
+def test_281_guarda_de_entrega_prende_o_valor_que_o_reroteamento_mudaria():
+    """CONTROLE da guarda, pela CONVERSA: sem ela, `paguei 132,50. foi isso`
+    respondendo "Quanto foi no *luz*?" registra R$ 13.250,00.
+
+    O furo é do `parse_money` sobre a pontuação de prosa e tem issue própria
+    (ver `_cola_separador_decimal`); enquanto ele existir, a via EXPLÍCITO não
+    pode entregar a mensagem ao roteamento normal."""
+    import uuid
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
+    assert "Quanto foi" in _diga(uid, "paguei a luz")
+
+    _diga(uid, "paguei 132,50. foi isso")
+
+    lancs = db.list_launches(uid, limit=3)
+    assert len(lancs) == 1 and abs(float(lancs[0]["valor"])) == 132.5, lancs
+
+
+# ── Os achados do Tester no #281, pela CONVERSA ─────────────────────────────
+# Nasceram do mesmo desenho: a via de comando decidindo sozinha, com `return`
+# próprio, antes das duas proteções que já existiam (o veto de catálogo do #185
+# e o `valor_perigoso`). Cada um cobra um `assert` sobre o DINHEIRO, não sobre o
+# texto da resposta.
+#
+# O quarto (`gastei tudo` virando "Quanto foi no *tudo*?") mudou de dono: quem o
+# prende agora é a célula D1/D2/D3 da tabela, em
+# `tests/test_perguntas_guardam_contexto.py` — o verbo sem quantidade nenhuma
+# não abandona nada.
+
+def _pergunta_de_valor_do_saque(uid, pocket="viagem", saldo=300, conta=400):
+    """Deixa viva a pergunta "Qual o valor?" de um saque de caixinha."""
+    import db
+
+    db.ensure_user(uid)
+    db.add_launch_and_update_balance(uid, "receita", conta, alvo="salario",
+                                     nota="setup", categoria="salario",
+                                     is_internal_movement=False)
+    db.create_pocket(uid, pocket)
+    db.pocket_deposit_from_account(uid, pocket, saldo)
+
+
+def _saldo(uid, pocket):
+    import db
+
+    return {p["name"]: float(p["balance"]) for p in (db.list_pockets(uid) or [])}[pocket]
+
+
+@pytest.mark.parametrize("nome", ["fatura", "cartão", "limite"])
+def test_281_veto_de_catalogo_alcanca_a_via_de_escrita(nome):
+    """ACHADO A. O veto do #185 ficara INALCANÇÁVEL para os intents de escrita:
+    a via de comando dava `return "abandona"` antes dele.
+
+    Vítimas são nomes triviais de caixinha — `fatura` classifica
+    `credit.handle` 1.0, que é comando SEM quantidade. Medido
+    sem o `elif`, caixinha `fatura` com R$ 300 e "saquei 200" pendente:
+    "📭 Você ainda não tem cartões cadastrados", caixinha INTACTA, pendência
+    CONSUMIDA, R$ 200 perdidos — e repetir `fatura` re-abandonava para sempre.
+
+    Os quatro testes do #185 não viam porque `saldo` está no `ABANDONA`, que
+    sempre passou pelo veto."""
+    import uuid
+
+    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    _pergunta_de_valor_do_saque(uid, pocket=nome, saldo=300, conta=700)
+
+    assert "caixinha" in _diga(uid, "saquei 200").lower()
+    _diga(uid, nome)
+
+    assert _saldo(uid, nome) == 100.00
+
+
+@pytest.mark.parametrize("resposta", [
+    # A cauda depois do valor manda a mensagem para o desempate, e sem o filtro
+    # o "2" de lá entregaria a mensagem ao roteamento normal, por fora dele.
+    "paguei, 132 50", "paguei: 132 50", "paguei 132 50 ok", "paguei 132 50?",
+    "paguei os 132 50", "paguei 132 50​",
+    # ALVO NOMEADO: aqui não há pontuação nenhuma, e nenhuma lista de formas de
+    # mensagem fecharia isto — o filtro é sobre o VALOR, não sobre a forma.
+    "gastei 132 50 no mercado", "paguei 132 50 de luz",
+    "gastei -10 no mercado", "paguei 1.23.456 de luz",
+    "gastei " + "1" * 400 + " no mercado",
+    # Sinal separado do dígito. Quem o segura é o filtro — medido, desligando
+    # o filtro esta linha fica vermelha junto com as outras. (A redação
+    # anterior atribuía isso ao `_STARTS_WITH_VALUE_RE`, que saiu da via no
+    # #288 por levar a regra 3 do dono no atropelo.)
+    "-50 no mercado",
+])
+def test_281_valor_perigoso_vem_antes_do_abandono(resposta):
+    """ACHADOS B e C. `valor_perigoso` mora no `_resolve_clarification`, e
+    abandonar passa por FORA dele. Medido sem a guarda, respondendo à pergunta
+    de valor de um saque: R$ 13.250,00 registrados, R$ 10,00 POSITIVOS para
+    `-10`, R$ 123.456,00 para `1.23.456` e "erro interno" para os 400 dígitos.
+
+    O consertado é a CLASSE, não as strings: o filtro roda antes da decisão,
+    então qualquer forma nova de resíduo cai nele igual."""
+    import uuid
+
+    import db
+
+    uid = int(uuid.uuid4().int % 1_000_000_000) + 1
+    _pergunta_de_valor_do_saque(uid)
+    _diga(uid, "tirar da caixinha viagem")
+    assert "Qual o valor" in _diga(uid, "viagem")
+
+    saida = _diga(uid, resposta)
+
+    assert "erro interno" not in saida.lower(), saida
+    assert [l for l in (db.list_launches(uid, limit=20) or [])
+            if (l.get("tipo") or "") == "despesa"] == [], saida
+    assert _saldo(uid, "viagem") == 300.00, saida
+    # A TERCEIRA afirmação, e é a que faltava no grupo inteiro: "nada se moveu"
+    # também é verdade quando a pergunta MORRE e o dinheiro simplesmente se
+    # perde. Foi a ausência dela que deixou `gastei` escapar por três rodadas.
+    #
+    # E ela cobra o TIPO, não só a existência: sem o filtro, estas mensagens
+    # caem no DESEMPATE (a cauda depois do valor torto), que também deixa uma
+    # linha viva e também repete "Qual o valor" na opção 1 — medido, o teste
+    # ficava verde com o filtro desligado. O que o filtro garante é que o
+    # usuário nem chegue a ver a opção "registrar", porque um "2" ali entrega
+    # `132 50` ao roteamento normal e vira R$ 13.250,00.
+    pend = db.get_pending_action(uid)
+    assert pend and pend["action_type"] == "clarification", \
+        f"a pergunta morreu ou virou desempate com o valor recusado: {pend}"
+    assert "Qual o valor" in saida, saida
