@@ -7,8 +7,11 @@ foram removidas em 2026-09-04 (`eslint-rules/utils.cjs`). `tests/test_max_lines_
 prende as duas do lado Python com sondas.
 
 A lista é um RATCHET, não uma anistia: arquivo daqui que cair para 350 ou menos
-deixa o CI vermelho até ser REMOVIDO desta lista. Ninguém acrescenta nome novo
-sem quebrar o arquivo primeiro.
+deixa o CI vermelho até ser REMOVIDO desta lista. O que o CI garante
+MECANICAMENTE é só isso: o ratchet dos nomes JÁ registrados. Nome novo não
+entra aqui por POLÍTICA, não por impedimento técnico — acrescentar um arquivo
+novo e grande a esta lista passa em tudo. Alteração de baseline depende de
+revisão de diff, e é lá que a política é aplicada.
 
 Sem o tamanho de cada um anotado: número que um comando responde envelhece em
 silêncio (CLAUDE.md §2 — o `eslint.config.mjs` recusou a mesma anotação pelo

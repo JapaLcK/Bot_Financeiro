@@ -147,8 +147,21 @@ seção nesse arquivo — e ele precisa de rota própria em `static_pages.py` (v
 Teto de **350 linhas** para arquivo novo, nos dois lados: JavaScript pela regra
 `quality/max-lines` (`eslint.config.mjs`, em `error`, step bloqueante do CI) e
 Python por `tests/test_max_lines_python.py`, que roda no `pytest` e cuja lista de
-legado mora em `tests/_max_lines_baseline.py`. Nos dois, **a isenção é por caminho
-exato e mais nada** — as isenções por *basename* (`index`, `constants`, `types`,
+legado mora em `tests/_max_lines_baseline.py`.
+
+**Os dois NÃO isentam do mesmo jeito, e a diferença importa.** No **Python** a
+isenção é **só por caminho exato**: `LEGADOS` é um `frozenset` de strings e a
+varredura compara por igualdade, então glob e sufixo não são sequer
+representáveis, e **arquivo de teste não tem tratamento especial** — os ~45 de
+`tests/` estão na lista nominalmente, e teste novo acima de 350 **reprova**. No
+**JavaScript** sobram duas frouxidões: o baseline casa **caminho inteiro ou
+sufixo** (`eslint-rules/utils.cjs:53-55`), e arquivo de teste continua sendo
+reconhecido **por regex** (`isTestFile`, `/\.(test|spec)\.[cm]?[jt]sx?$/`,
+`utils.cjs:49-51`), com `tests/frontend/**/*.mjs` em **`warn`** — que não reprova,
+porque o `eslint` só sai != 0 com erro. **O portão de Python é o mais estrito dos
+dois, de propósito.**
+
+O que os dois têm em comum é o que foi REMOVIDO: as isenções por *basename* (`index`, `constants`, `types`,
 `*.config.*`) e por *diretório* (`generated/`, `fixtures/`, `mocks/`) vieram de um
 template TypeScript e foram removidas em 2026-09-04, porque `frontend/index.js`
 chegou a 404 linhas passando limpo por causa delas.
