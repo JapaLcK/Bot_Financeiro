@@ -1767,6 +1767,41 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _plan_grants_reprojection():
+        """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
+
+        Grant futuro que vira vigente e grant vigente que vence são as duas
+        únicas transições de acesso que acontecem sem evento externo nenhum —
+        ninguém chama webhook para avisar que o downgrade agendado chegou.
+
+        Duas passadas, e a segunda existe porque a primeira sozinha mente:
+
+        • a cada 60 s, por JANELA (desde o último tick) — barata e indexada;
+        • a cada 24 h, e também na PRIMEIRA volta, SEM janela: todo usuário com
+          grant ativo. Janela só conserta o que transicionou dentro dela, então
+          processo fora do ar por mais tempo que a janela deixava `plan` velho
+          para sempre. Sem janela não existe "mais tempo que a janela" — a
+          varredura é auto-curativa em vez de depender de uptime.
+        """
+        from core.services.billing_access import reprojetar_grants_recentes  # noqa: PLC0415
+        desde = None                       # 1ª volta é a varredura sem janela
+        proxima_larga = datetime.now(timezone.utc) + timedelta(hours=24)
+        while True:
+            try:
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_larga:
+                    desde = None
+                    proxima_larga = agora + timedelta(hours=24)
+                n = await asyncio.to_thread(reprojetar_grants_recentes, desde)
+                desde = agora
+                if n:
+                    print(f"[plan_grants] {n} usuario(s) reprojetado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1859,6 +1894,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
             ]
         )
     else:
@@ -4654,12 +4690,29 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return fbp, fbc
         return None, None
 
-    def _invoice_subscription_id(invoice) -> str | None:
-        sub_id = _g(invoice, "subscription")
+    def _invoice_subscription_id(objeto) -> str | None:
+        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
+
+        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
+        lia `_g(session, "subscription")` cru, então um payload com o objeto
+        expandido virava uma `external_ref` diferente da que o `invoice.paid`
+        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
+        Depois que a revogação passou a mirar `external_ref` exato, os dois
+        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
+        O fallback de `parent.subscription_details` simplesmente não casa num
+        objeto de sessão, então serve os dois sem ramificar por tipo.
+        """
+        sub_id = _g(objeto, "subscription")
         if sub_id:
             return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
         # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        parent = _g(invoice, "parent", {})
+        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
+        # `checkout.session.completed`, esta linha ficou lendo uma variável
+        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
+        # (checkout de pagamento avulso) chegava aqui e estourava
+        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
+        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
+        parent = _g(objeto, "parent", {})
         details = _g(parent, "subscription_details", {})
         ref = _g(details, "subscription")
         if ref is None:
@@ -4674,20 +4727,143 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         except Exception:
             return ""
 
+    def _event_version(evt) -> int:
+        """Ordem dos eventos (§6 do docs/plano_pix_anual_asaas.md).
+
+        `event["created"]` do Stripe é epoch em SEGUNDOS — é por isso que o
+        empate do §6.1 (invoice.paid × subscription.deleted no mesmo segundo) é
+        caso real e não teórico. Ausente só em evento sintético: cai em now(),
+        nunca em 0, porque versão 0 BLOQUEARIA toda escrita posterior sobre um
+        grant existente e o acesso ficaria congelado no primeiro evento.
+        """
+        try:
+            return int(_g(evt, "created"))
+        except (TypeError, ValueError):
+            return int(datetime.now(timezone.utc).timestamp())
+
+    async def _materializar_assinatura(uid: int, sub_id, plan_value,
+                                       expires_dt, sub_status: str) -> bool:
+        """Grava o GRANT e reprojeta `auth_accounts` a partir dele (§4.1.1 A).
+
+        **A exceção PROPAGA de propósito.** Antes havia um `except`/`print`
+        aqui, e o efeito medido foi caro: uma renovação em que o
+        `update_user_plan` entrava e o `upsert_grant` estourava deixava o grant
+        parado no período anterior, com `auth_accounts` fresco — e a varredura
+        seguinte lia o buraco como fim de assinatura e rebaixava um PAGANTE
+        (`pro/2027-07-01 → free/None`). Gravação crítica que engole exceção não
+        é resiliência: é perda silenciosa.
+
+        Falhar aqui vira **5xx**, e 5xx na Stripe é **retryable** — o mesmo
+        tratamento que o `claim_trial_for_user` vinte linhas abaixo já tem
+        ("falha precisa propagar: resposta 5xx faz a Stripe repetir o webhook
+        até a trava ficar persistida"). Esta era a única escrita crítica do
+        handler que destoava do padrão.
+
+        É também o PRIMEIRO efeito do ramo: se o grant não entra, nada depois
+        rodou — sem e-mail, sem funil, sem GA4/CAPI, sem `mark_plan_selected` —
+        então a primeira reentrega não repete nada, ela executa (§4.1.2).
+
+        Sem `expires_dt` não há grant (`ends_at` é `not null`): cai na escrita
+        legada, que é o "vitalício de fato" do §5.3.
+
+        Devolve False quando o evento era VELHO e nada de acesso foi escrito.
+        Os chamadores **não** abortam o ramo com isso (decisão do dono): evento
+        obsoleto quer dizer que outro evento mais novo já decidiu o ACESSO, não
+        que a fatura não foi paga — comissão, GA4/CAPI, e-mail e, sobretudo, o
+        `claim_trial_for_user` (trava de um trial por telefone na vida) seguem
+        rodando.
+        """
+        if not (uid and sub_id and expires_dt):
+            update_user_plan(uid, plan_value, expires_dt)
+            set_payment_status(uid, sub_status)
+            return True
+        from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+        from db.plan_grants import upsert_grant  # noqa: PLC0415
+        aplicou = await asyncio.to_thread(
+            upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
+            datetime.now(timezone.utc), expires_dt,
+            _event_version(event), _g(event, "id"),
+        )
+        if aplicou is None:
+            # Evento VELHO: a guarda de versão recusou o grant, e quem decidiu o
+            # acesso foi um evento MAIS NOVO. Escrever `last_payment_status`
+            # aqui devolveria `active` a uma conta que o `deleted` acabou de
+            # cancelar — a guarda protegia o grant e o status passava por fora
+            # dela. NÃO caem aqui, e é o que `upsert_grant` classifica pela
+            # COMPARAÇÃO DE VERSÃO (§4.1.2): a reentrega do 5xx, o evento IRMÃO
+            # do mesmo segundo (`checkout` + `paid` de compra imediata, o empate
+            # do §6.1) e o `paid` em voo quando quem bloqueou foi o REPARO da
+            # varredura — que carimba `now()` mas não é evento.
+            await log_system_event(
+                "warning", "billing_evento_obsoleto",
+                f"Evento de cobranca obsoleto ignorado (assinatura {sub_id}).",
+                source="billing", user_id=int(uid),
+                details={"plan": plan_value, "status": sub_status,
+                         "event_version": _event_version(event),
+                         "event_id": _g(event, "id")},
+            )
+            return False
+        await asyncio.to_thread(set_payment_status, uid, sub_status)
+        # `auth_accounts` sai dos grants, não de uma escrita paralela à mão:
+        # duas fontes escrevendo o mesmo par é como elas divergem.
+        await asyncio.to_thread(recompute_entitlement, int(uid))
+        return True
+
     async def _fire_email(uid: int, fn, *args):
-        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook."""
+        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
+
+        Dedup por (função, usuário, 1 dia) porque o handler agora devolve 5xx
+        de propósito quando a materialização falha, e a Stripe reentrega o
+        evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
+        Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
+        (`send_pro_welcome_email`, `send_pro_charged_email`) e o aviso de fim de
+        trial. NÃO é o ponto único do arquivo — `send_payment_failed_email` e
+        `send_subscription_canceled_email` são chamados direto, cada um no seu
+        try/except. Sem consequência hoje (nenhum dos dois está depois de uma
+        escrita que possa falhar e forçar reentrega), mas quem mover um deles
+        para cá ganha a dedup de graça, e quem NÃO mover não deve achar que
+        tem. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
+
+        Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
+        enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
+        cada retry não é.
+        """
+        chave = f"{fn.__name__}_sent"
+        try:
+            from core.observability import recent_event_exists  # noqa: PLC0415
+            if await asyncio.to_thread(recent_event_exists, chave, int(uid), 1.0):
+                return
+        except Exception as exc:
+            print(f"[billing] dedup de email falhou user={uid}: {exc}")
         try:
             email = await _user_email(uid)
             if not email:
                 return
             await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            await log_system_event("info", chave, f"Email {fn.__name__} enviado.",
+                                   source="billing", user_id=int(uid))
         except Exception as exc:
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
-        sub_id  = _g(session, "subscription")
+        # Normaliza igual ao invoice.paid: string ou objeto expandido têm de
+        # produzir a MESMA external_ref, senão o assinante ganha dois grants.
+        sub_id  = _invoice_subscription_id(session)
+        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
+        # Promover ja agora pra user nao ficar Free durante o trial.
+        #
+        # O GRANT VEM PRIMEIRO (§4.1.2): se ele falhar, a resposta é 5xx e nada
+        # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
+        # tudo uma vez só, em vez de repetir a metade que já tinha passado.
+        if user_id and sub_id:
+            sub = stripe.Subscription.retrieve(sub_id)
+            expires_dt = _subscription_period_end(sub)
+            sub_status = _g(sub, "status") or "trialing"
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            await _materializar_assinatura(user_id, sub_id, plan_value,
+                                           expires_dt, sub_status)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -4695,15 +4871,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from db import record_checkout_completed
             await asyncio.to_thread(
                 record_checkout_completed, user_id, _g(session, "id"))
-        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
-        # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
-            expires_dt = _subscription_period_end(sub)
-            sub_status = _g(sub, "status") or "trialing"
-            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
             # Checkout concluído = plano escolhido: libera o gate da /precos
             # (idempotente; só grava na primeira vez).
             await asyncio.to_thread(mark_plan_selected, user_id)
@@ -4855,8 +5023,10 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
+            # Grant primeiro, sempre (§4.1.2): falha aqui vira 5xx retryable e
+            # nada abaixo — e-mail de cobrança, comissão, GA4 — chega a rodar.
+            await _materializar_assinatura(user_id, sub_id, plan_value,
+                                           expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
@@ -5037,6 +5207,32 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
+            #
+            # A amplitude é dinheiro: quem tem uma assinatura nova já paga e
+            # recebe o `deleted` da ANTIGA não pode perder as duas. Por isso
+            # nada de "revoga todos os grants de cartão" — `external_ref` exato.
+            #
+            # O `legacy` cai JUNTO, também por ref exata: ele é a RECONSTRUÇÃO
+            # do mesmo acesso de cartão feita pelo backfill, então um assinante
+            # que cancele sem ter passado por um `invoice.paid` depois do deploy
+            # não pode continuar pago pelo legado.
+            #
+            # A redução aqui vem de EVENTO, que é autoridade: `recompute` roda
+            # com `origem="evento"` (o default) e reduz sem consultar o Stripe.
+            _sub_id = _g(obj, "id")
+            from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+            from db.plan_grants import revoke_grant  # noqa: PLC0415
+            _versao = _event_version(event)
+            _evt_id = _g(event, "id")
+            _refs = [("legacy", f"legacy:{int(user_id)}")]
+            if _sub_id:
+                _refs.insert(0, ("stripe", str(_sub_id)))
+            for _src, _ref in _refs:
+                await asyncio.to_thread(
+                    revoke_grant, int(user_id), _src, _ref,
+                    "stripe_subscription_deleted", _versao, _evt_id)
+            await asyncio.to_thread(recompute_entitlement, int(user_id))
             print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",

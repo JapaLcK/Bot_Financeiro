@@ -32,6 +32,11 @@ from db.connection import get_conn
 import frontend.finance_bot_websocket_custom as dashboard
 
 
+# `event["created"]` do empate do §6.1: `checkout.session.completed` e
+# `invoice.paid` de uma compra imediata saem no MESMO segundo.
+_T_LIFE = 1_800_000_000
+
+
 def _future_ts(days: int) -> int:
     return int((datetime.now(timezone.utc) + timedelta(days=days)).timestamp())
 
@@ -127,7 +132,16 @@ def test_trial_lifecycle_completo(user_id, monkeypatch):
         # 1) checkout concluído com trial → status trialing + plano + claim
         r = _post(
             client, fake,
+            # `id` e `created` são o que a Stripe REAL sempre manda, e a
+            # fixture os omitia: sem eles os dois eventos deste teste ficavam
+            # com `event_version = now()` e `last_event_id` NULO, virando "o
+            # mesmo evento" para a classificação de `upsert_grant`. Com os ids
+            # reais e o MESMO `created` (o empate de segundos do §6.1), o teste
+            # passa a exercitar a compra imediata de verdade: dois eventos
+            # DIFERENTES no mesmo segundo. Mesmo defeito de fixture já corrigido
+            # no `test_subscription_deleted_volta_pra_free`, abaixo.
             {"type": "checkout.session.completed",
+             "id": "evt_life_checkout", "created": _T_LIFE,
              "data": {"object": {"metadata": {"finbot_user_id": str(uid)},
                                   "subscription": "sub_life"}}},
             subs={"sub_life": _fake_sub("trialing")},
@@ -153,6 +167,7 @@ def test_trial_lifecycle_completo(user_id, monkeypatch):
         r = _post(
             client, fake,
             {"type": "invoice.payment_succeeded",
+             "id": "evt_life_paid", "created": _T_LIFE,   # MESMO segundo, evento OUTRO
              "data": {"object": {"metadata": {"finbot_user_id": str(uid)},
                                   "subscription": "sub_life", "amount_paid": 1990,
                                   "id": "in_life_1"}}},
@@ -190,8 +205,13 @@ def test_subscription_deleted_volta_pra_free(user_id, monkeypatch):
             conn.commit()
         r = _post(
             client, fake,
+            # O `id` da assinatura no objeto é o que o Stripe REAL sempre manda
+            # (é o identificador primário do recurso). A fixture o omitia, e a
+            # revogação de grant é por `(source, external_ref)`: sem ele o teste
+            # exercitava um payload que a plataforma não produz.
             {"type": "customer.subscription.deleted",
-             "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}},
+             "data": {"object": {"id": "sub_life",
+                                 "metadata": {"finbot_user_id": str(uid)}}}},
         )
         assert r.status_code == 200, r.text
         row = db.get_auth_user(uid)
@@ -261,8 +281,13 @@ def test_checkout_completed_fecha_o_gate_de_escolha(user_id, monkeypatch):
         # tem de continuar FECHADO (quem barra agora é o paywall).
         r = _post(
             client, fake,
+            # O `id` da assinatura no objeto é o que o Stripe REAL sempre manda
+            # (é o identificador primário do recurso). A fixture o omitia, e a
+            # revogação de grant é por `(source, external_ref)`: sem ele o teste
+            # exercitava um payload que a plataforma não produz.
             {"type": "customer.subscription.deleted",
-             "data": {"object": {"metadata": {"finbot_user_id": str(uid)}}}},
+             "data": {"object": {"id": "sub_gate",
+                                 "metadata": {"finbot_user_id": str(uid)}}}},
         )
         assert r.status_code == 200, r.text
         assert db.get_auth_user(uid)["plan"] == "free", "pré-condição da 2ª metade"

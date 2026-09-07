@@ -8,6 +8,60 @@ from .schema_repairs import ensure_plan_trials_user_fk, repair_user_fk_cascades
 # Valor arbitrário e estável; só precisa não colidir com outro lock do processo.
 SCHEMA_INIT_LOCK = 728_531_004
 
+# BACKFILL INICIAL dos assinantes que já existiam quando plan_grants nasceu
+# (§5.1 do docs/plano_pix_anual_asaas.md). Roda no boot, dentro do init_db.
+#
+# **v6: ele NÃO REPARA. Só cria, e só para quem não tem grant nenhum.**
+# O `not exists` e o `do nothing` dizem a mesma coisa por dois caminhos: linha
+# de grant existente nunca é tocada pelo boot. A versão anterior usava
+# `do update`, e era ela que copiava `auth_accounts` de volta para dentro do
+# grant — ou seja, transformava a PROJEÇÃO em fonte de verdade. Dois estragos
+# medidos vieram daí: grant revogado por `superseded_by_stripe` ressuscitava no
+# boot seguinte, e o boot mascarava grant defasado em vez de deixá-lo aparecer.
+#
+# `auth_accounts` alimenta APENAS a criação inicial de quem existia antes desta
+# tabela. Reparo de grant defasado é outra coisa e mora em outro lugar: a regra
+# da redução (§4.1.1 B), que lê o STRIPE, fora do boot.
+#
+# Sem chamar o Stripe: rede em migração é modo de falha, não de leitura — e
+# agora sem contradição, porque o boot deixou de precisar reparar. O `init_db`
+# roda sob advisory lock, com o Railway subindo container novo antes de o velho
+# sair; consulta de rede aqui seria a pior hora possível.
+# event_version = 0 → qualquer evento real supera o legado.
+# `grandfathered` fica de fora: vitalício não tem `ends_at` para inventar.
+#
+# **`distinct on (a.user_id)` não é enfeite: é DISPONIBILIDADE.** `auth_accounts`
+# tem `id` como PK e unique em `email`/`phone_hash`, mas NENHUM unique em
+# `user_id` (confira: `\d auth_accounts`). Duas linhas pagas e vigentes do mesmo
+# usuário produziriam dois `legacy:<uid>` no MESMO comando, e o Postgres recusa
+# com `CardinalityViolation` ("ON CONFLICT DO UPDATE command cannot affect row a
+# second time"). Como isto roda dentro do `init_db`, que é passo obrigatório de
+# startup, o erro não degradaria a migração: derrubaria a subida da aplicação.
+# Desempate determinístico pela maior validade — a linha que dá mais acesso.
+#
+# **Nunca ressuscita linha revogada** — não por uma cláusula sutil, mas porque
+# o comando não atualiza NADA. É a diferença entre "o `where` exclui o caso" e
+# "o caso não existe": o primeiro depende de alguém manter a cláusula certa, o
+# segundo não tem o que manter.
+#
+# Constante no módulo (e não string solta na lista) para o teste do resync
+# executar EXATAMENTE o SQL que sobe em produção, sem uma segunda cópia.
+RESYNC_LEGACY_GRANTS_SQL = """
+insert into plan_grants (user_id, source, external_ref, plan_stored,
+                         starts_at, ends_at, status, event_version)
+select distinct on (a.user_id)
+       a.user_id, 'legacy', 'legacy:' || a.user_id, a.plan,
+       now(), a.plan_expires_at, 'active', 0
+  from auth_accounts a
+ where coalesce(a.plan, 'free') <> 'free'
+   and a.plan_expires_at is not null
+   and a.plan_expires_at > now()
+   and coalesce(a.last_payment_status, '') <> 'grandfathered'
+   and not exists (select 1 from plan_grants g where g.user_id = a.user_id)
+ order by a.user_id, a.plan_expires_at desc, a.id desc
+on conflict (source, external_ref) do nothing
+"""
+
 
 def init_db():
     ddl_statements = [
@@ -1794,6 +1848,39 @@ def init_db():
         create index if not exists idx_checkout_funnel_session
           on checkout_funnel_events (session_id)
         """,
+        # Reentrega de webhook duplicava a linha de conclusão do funil — e isso
+        # já acontece HOJE, sem relação com plan_grants: qualquer 5xx do handler
+        # faz a Stripe repetir, e o `insert` era incondicional. Ao passar a
+        # devolver 5xx de propósito quando a materialização do grant falha
+        # (§4.1.2), a duplicata deixaria de ser rara.
+        #
+        # **Só `completed`, e não `(session_id, kind)` como o plano dizia.**
+        # `started` REPETE de propósito na mesma sessão: quando o checkout
+        # reaproveita uma sessão aberta, grava um segundo `started` com o mesmo
+        # `session_id` — comportamento documentado e coberto por
+        # `tests/test_billing_checkout.py::test_checkout_reaproveitado_propaga_session_id_no_funil`.
+        # A unique ampla o proibia, e o DELETE de dedup teria APAGADO essas
+        # linhas legítimas no primeiro boot: perda de telemetria real para
+        # consertar uma duplicata que só existe do lado do `completed`.
+        #
+        # O DELETE vem ANTES do índice e não é zelo: `create unique index` em
+        # tabela que já tem duplicata ESTOURA, e isto roda dentro do `init_db` —
+        # derrubaria a subida da aplicação, exatamente a classe de erro que o
+        # `distinct on` do backfill acima evita. Mantém a linha de menor id.
+        """
+        delete from checkout_funnel_events a
+              using checkout_funnel_events b
+         where a.kind = 'completed'
+           and b.kind = 'completed'
+           and a.session_id is not null
+           and a.session_id = b.session_id
+           and a.id > b.id
+        """,
+        """
+        create unique index if not exists uniq_checkout_funnel_sessao_completed
+          on checkout_funnel_events (session_id)
+          where session_id is not null and kind = 'completed'
+        """,
 
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
         # Um agente por kind por usuário (custom multiplica no futuro via
@@ -2000,6 +2087,43 @@ def init_db():
           before insert or update of space_id on open_finance_accounts
           for each row execute function of_account_space_same_owner()
         """,
+
+        # ── plan_grants: o DIREITO de acesso, como registro ──────────────────
+        # `auth_accounts.plan`/`plan_expires_at` continuam sendo o modelo de
+        # LEITURA de todo o app (nenhum leitor muda) — viram projeção, escrita
+        # por uma função só: core/services/billing_access.recompute_entitlement.
+        # Plano em docs/plano_pix_anual_asaas.md §3.1.
+        #
+        # `user_id not null`: grant é direito de ALGUÉM. Pagamento de conta
+        # excluída nunca vira grant (§8.2 B do plano, PR 1b).
+        # `plan_stored` guarda o valor LEGADO da coluna auth_accounts.plan
+        # ('pro' = Plus, 'pro_max' = Pro) — ver _stored_plan_for_price.
+        """
+        create table if not exists plan_grants (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          source text not null,                     -- stripe | pix | legacy | admin
+          external_ref text not null,               -- sub id | pix_charges.id | legacy:<uid> | admin:<uid>
+          plan_stored text not null,
+          starts_at timestamptz not null,
+          ends_at timestamptz not null,
+          status text not null default 'active',    -- active | revoked
+          event_version bigint not null default 0,
+          last_event_id text,
+          revoked_reason text,
+          revoked_at timestamptz,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now(),
+          unique (source, external_ref)
+        )
+        """,
+        """
+        create index if not exists idx_plan_grants_user
+          on plan_grants (user_id, status, starts_at)
+        """,
+        # Resync do §5.1 — a SQL mora em RESYNC_LEGACY_GRANTS_SQL (topo do
+        # arquivo), com o porquê do `do update`.
+        RESYNC_LEGACY_GRANTS_SQL,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
