@@ -114,7 +114,7 @@ def test_invariante_admin_nao_deixa_relogio_orfao(user_id):
 
     Órfão não é dado morto: o `invoice.payment_failed` do ciclo seguinte devolve
     o status para a lista, o `claim_past_due_since` vê `rowcount 0` e o relógio
-    fica preso na data velha — a conta nasce fora da janela `[6d, 7d)` e o
+    fica preso na data velha — a conta nasce fora da janela do lembrete e o
     lembrete de pagamento daquele ciclo não sai.
     """
     from core.admin_dashboard import set_account_plan
@@ -174,6 +174,34 @@ def test_janela_e_de_sete_dias():
     número muda o dia do lembrete de pagamento E a janela de dedupe do e-mail
     de falha no webhook."""
     assert DUNNING_GRACE_DAYS == 7
+
+
+def test_invariante_janela_menor_que_dedupe():
+    """A largura da janela de candidatos do lembrete tem de ser ESTRITAMENTE
+    MENOR que a janela de dedupe do envio.
+
+    É o teto da largura. A janela existe larga para sobreviver a um tick
+    perdido (restart, deploy, falha operacional atrasam muito mais que os 24 h
+    nominais do `run_engagement_loop`), mas largura ≥ dedupe devolve o outro
+    modo de falha: a conta continua elegível depois de o e-mail ter saído e o
+    tick seguinte manda o SEGUNDO lembrete do mesmo ciclo.
+
+    Este teste é o único lugar onde os dois números se veem — quem mexer num
+    deles é obrigado a olhar o outro (§0.7). A conferência de que o consumidor
+    usa mesmo estas constantes está em tests/test_payment_reminder.py
+    (`test_janela`, `test_tick_inteiro_perdido_ainda_entrega` e
+    `test_dois_ticks_na_janela_larga_mandam_um_so`).
+    """
+    from core.services.billing_dunning import (
+        PAYMENT_REMINDER_DEDUPE_DAYS,
+        PAYMENT_REMINDER_WINDOW_DAYS,
+    )
+
+    assert PAYMENT_REMINDER_WINDOW_DAYS < PAYMENT_REMINDER_DEDUPE_DAYS, (
+        PAYMENT_REMINDER_WINDOW_DAYS, PAYMENT_REMINDER_DEDUPE_DAYS)
+    # E a janela do lembrete começa DENTRO da carência, não depois dela.
+    assert 1 <= PAYMENT_REMINDER_WINDOW_DAYS
+    assert DUNNING_GRACE_DAYS - 1 >= 1
 
 
 # ──────────────────────────────────────────────────────────────────────────────

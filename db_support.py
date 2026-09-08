@@ -701,19 +701,25 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
     **E mantém a invariante do relógio de inadimplência no MESMO UPDATE**:
     `past_due_since` não nulo com status FORA de `PAST_DUE_PAYMENT_STATUSES` é
     órfão, e órfão não é dado morto — o `invoice.payment_failed` seguinte
-    devolve o status para a lista, o `claim_past_due_since` vê `rowcount 0` e o
-    relógio do ciclo NOVO fica preso na data velha: a conta já nasce fora da
-    janela `[6d, 7d)` e o lembrete de pagamento daquele ciclo não sai. Quem
+    devolve o status para a lista, o `claim_past_due_since` (`db/dunning.py`) vê
+    `rowcount 0` e o relógio do ciclo NOVO fica preso na data velha: a conta já
+    nasce fora da janela do lembrete e o lembrete daquele ciclo não sai. Quem
     produzia o órfão era `billing_access.recompute_entitlement`, que escreve
     `active` quando há grant Pix vigente e não limpava o relógio.
 
     Aqui e não em cada chamador de ESTA função (§2: fechar a categoria, não a
-    instância): `frontend/finance_bot_websocket_custom.py` :4895 e :4923
-    (`_materializar_assinatura`), :5373 (`payment_failed`), :5444
-    (`subscription.deleted`) e `core/services/billing_access.py` :459. A ORDEM
-    do :5373 importa e está certa: ele grava `past_due`, que está NA lista,
-    então o relógio é PRESERVADO e o `claim_past_due_since` logo abaixo carimba
-    se estiver nulo.
+    instância). Os chamadores, sem número de linha de propósito (§2 — eles
+    envelhecem, e já envelheceram uma vez):
+
+        grep -rn "set_payment_status(" --include="*.py" --exclude-dir=.venv .
+
+    São os dois de `_materializar_assinatura`, o do `payment_failed`, o do
+    `subscription.deleted` (todos em `frontend/finance_bot_websocket_custom.py`)
+    e o de `core/services/billing_access.py`. A ORDEM do `payment_failed`
+    importa e está certa: ele grava `past_due`, que está NA lista, então o
+    relógio é PRESERVADO e o `claim_past_due_since` logo abaixo carimba se
+    estiver nulo — e o `claim` só carimba se o status AINDA estiver na lista,
+    que é o que fecha a corrida com o `invoice.paid` de outra requisição.
 
     **A categoria maior é "quem escreve a coluna `last_payment_status`", e ela
     tem MAIS um membro, em SQL cru**: `core/admin_dashboard.set_account_plan`

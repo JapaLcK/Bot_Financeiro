@@ -147,9 +147,12 @@ em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.
 
 **Inadimplência de cartão** (`core/services/billing_dunning.py`): a coluna
 `auth_accounts.past_due_since` guarda a **primeira falha de cobrança do ciclo**,
-carimbada pelo webhook `invoice.payment_failed` (`db.plans.claim_past_due_since`,
-idempotente no SQL) e zerada por pagamento/cancelamento
-(`clear_past_due_since`). `DUNNING_GRACE_DAYS = 7` é a janela.
+carimbada pelo webhook `invoice.payment_failed` (`db.dunning.claim_past_due_since`,
+idempotente no SQL **e condicionada ao status atual**) e zerada por
+pagamento/cancelamento (`clear_past_due_since`, que os ramos `checkout` e
+`invoice.paid` só chamam quando `_materializar_assinatura` disse que o evento
+decidiu o acesso). Os três helpers moram em `db/dunning.py`, não em `db/plans.py`.
+`DUNNING_GRACE_DAYS = 7` é a carência.
 
 **Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna só
 alimenta duas coisas: o **lembrete de pagamento do 6º dia**

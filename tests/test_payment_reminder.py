@@ -11,17 +11,17 @@ sem nada pausar depois, e foi o que reprovou o PR.
 CONTROLES do grupo (o "conserto" aqui é o funil inteiro; a injeção vai num caso
 que estava VERDE):
 
-  • NEGATIVO 1 — troque a janela do SQL (`db.plans.list_payment_reminder_
+  • NEGATIVO 1 — troque a janela do SQL (`db.dunning.list_payment_reminder_
     candidates`) por `past_due_since is not null` sem as duas fronteiras:
-      VERMELHO: test_janela_de_um_dia[5.0] e [8.0].
-      VERDE:    [6.5] e todo o resto — é o que prova que a janela é o que
-                discrimina, e não "manda para todo mundo".
+      VERMELHO: test_janela[5.9] e [9.1].
+      VERDE:    [6.1], [8.9] e todo o resto — é o que prova que a janela é o
+                que discrimina, e não "manda para todo mundo".
   • NEGATIVO 2 — apague o `if not payment_reminder_enabled(): return` da
     primeira linha de `check_payment_reminder`:
       VERMELHO: test_flag_desligada_nao_manda_nem_consulta, e só ele.
       VERDE:    todos os outros, porque a fixture liga a flag — é o que prova
                 que a injeção mede o FREIO e não o funil.
-  • POSITIVO — test_janela_de_um_dia[6.5] e a segunda metade do teste da flag
+  • POSITIVO — test_janela[6.1]/[8.9] e a segunda metade do teste da flag
     (religa e o e-mail sai, na mesma conta e no mesmo tick). Sem eles o arquivo
     passaria num funil que nunca manda e-mail, que é pior que o bug.
 
@@ -110,11 +110,18 @@ def _limpar_eventos(uid: int) -> None:
 
 # ──────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("dias,avisa", [(5.0, False), (6.5, True), (8.0, False)])
-def test_janela_de_um_dia(user_id, monkeypatch, dias, avisa):
-    """O lembrete tem UMA janela de 1 dia: [6d, 7d). Antes é cedo demais (a
-    Stripe ainda está no smart retry inicial), depois já passou. Com o tick de
-    24 h, cada conta cai nela uma vez por ciclo."""
+@pytest.mark.parametrize("dias,avisa", [
+    (5.9, False),   # fronteira de baixo, fora: cedo demais (smart retry inicial)
+    (6.1, True),    # fronteira de baixo, dentro: o 6º dia
+    (8.9, True),    # fronteira de cima, dentro: a largura é de 3 dias
+    (9.1, False),   # fronteira de cima, fora
+])
+def test_janela(user_id, monkeypatch, dias, avisa):
+    """A janela abre no 6º dia e tem `PAYMENT_REMINDER_WINDOW_DAYS` de largura:
+    `[6d, 9d)`. As quatro fronteiras, nos DOIS lados. Ela não é de 1 dia porque
+    o tick não é de 24 h exatos (o `sleep` de `run_engagement_loop` vem depois
+    de todo o trabalho) e restart/deploy atrasam muito mais — ver a invariante
+    em `core/services/billing_dunning`."""
     _inadimplente(user_id, dias=dias)
     enviados = _espia(monkeypatch, user_id)
     _limpar_eventos(user_id)
@@ -122,9 +129,16 @@ def test_janela_de_um_dia(user_id, monkeypatch, dias, avisa):
     assert bool(enviados) is avisa, (dias, enviados)
 
 
+# O tick INTEIRO perdido e o "dois ticks na mesma janela larga" moram em
+# tests/test_payment_reminder_janela.py: são o par da LARGURA da janela (e
+# precisam envelhecer o evento de dedupe), e este arquivo está perto do teto de
+# 350 linhas de tests/test_max_lines_python.py.
+
+
 def test_dedupe_nao_reenvia_no_mesmo_ciclo(user_id, monkeypatch):
-    """Um lembrete por ciclo. Dois ticks dentro da mesma janela mandam UM
-    e-mail — dedupe por system_event_logs, não por coluna."""
+    """Um lembrete por ciclo. Dois ticks dentro da mesma janela e na MESMA
+    idade mandam UM e-mail — dedupe por system_event_logs, não por coluna. Quem
+    mede a largura (ticks em dias diferentes) é o arquivo apontado acima."""
     _inadimplente(user_id, dias=6.5)
     enviados = _espia(monkeypatch, user_id)
     _limpar_eventos(user_id)
@@ -184,7 +198,7 @@ def test_status_fora_da_lista_de_tres_nao_recebe_lembrete(user_id, monkeypatch):
     commit, a docstring de `billing_dunning`. Ele é dado dormente: o
     `invoice.payment_failed` seguinte devolve o status para a lista, o
     `claim_past_due_since` vê `rowcount 0` e o relógio do ciclo novo fica preso
-    na data velha, fora da janela `[6d, 7d)`. Quem impede o órfão de existir são
+    na data velha, fora da janela do lembrete. Quem impede o órfão de existir são
     os dois writers de `last_payment_status` (tests/test_billing_dunning.py);
     este filtro é defesa em profundidade."""
     _inadimplente(user_id, dias=6.5, status="active")
@@ -253,24 +267,24 @@ def test_flag_desligada_nao_manda_nem_consulta(user_id, monkeypatch):
     LOGA e retorna, então um fake que levanta deixaria este teste verde com e
     sem o freio.
 
-    A conta é a MESMA que `test_janela_de_um_dia[6.5]` avisa, e a segunda metade
+    A conta é a MESMA que `test_janela[6.1]` avisa, e a segunda metade
     religa a flag no mesmo tick: é o par que separa "o freio funciona" de "esta
     conta nunca receberia".
     """
-    import db.plans
+    import db.dunning
 
     _inadimplente(user_id, dias=6.5)
     enviados = _espia(monkeypatch, user_id)
     _limpar_eventos(user_id)
 
     consultas = []
-    real = db.plans.list_payment_reminder_candidates
+    real = db.dunning.list_payment_reminder_candidates
 
     def _spy(*a, **k):
         consultas.append(a)
         return real(*a, **k)
 
-    monkeypatch.setattr(db.plans, "list_payment_reminder_candidates", _spy)
+    monkeypatch.setattr(db.dunning, "list_payment_reminder_candidates", _spy)
 
     monkeypatch.setenv("PAYMENT_REMINDER_ENABLED", "0")
     _tick()

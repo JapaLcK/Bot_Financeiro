@@ -90,7 +90,7 @@ def test_T2_reentrega_nao_reinicia_o_relogio_nem_duplica_email(user_id, monkeypa
     evento em cima de 5xx. Antes deste PR o e-mail saía em TODOS.
 
     Controle negativo declarado: tire o `and past_due_since is null` do
-    `claim_past_due_since` (db/plans.py) → VERMELHO na metade do RELÓGIO (ele
+    `claim_past_due_since` (db/dunning.py) → VERMELHO na metade do RELÓGIO (ele
     avança); T1 e T3 continuam verdes. A metade do E-MAIL não depende desse
     `where`: quem a protege é a dedupe do `_fire_email`, cujos controles estão
     em tests/test_billing_payment_failed_email.py.
@@ -234,7 +234,7 @@ def test_T4_grant_pix_nao_deixa_relogio_orfao(user_id, monkeypatch):
     `recompute_entitlement`, que escreve `active` (billing_access.py:459) e não
     chama `clear_past_due_since`. Antes, o relógio sobrevivia ali; o
     `payment_failed` do ciclo seguinte via `rowcount 0` e o relógio do ciclo
-    novo nascia com a data velha — fora da janela `[6d, 7d)` do lembrete de
+    novo nascia com a data velha — fora da janela do lembrete de
     pagamento, que então nunca saía.
     """
     from core.services.billing_access import recompute_entitlement
@@ -260,12 +260,12 @@ def test_T4_grant_pix_nao_deixa_relogio_orfao(user_id, monkeypatch):
 
         # E o ciclo seguinte nasce com os 7 dias inteiros, não com a data
         # velha. A consequência MEDÍVEL disso é o lembrete: recém-carimbada, a
-        # conta não está na janela [6d, 7d) — vai estar daqui a seis dias.
+        # conta não está na janela do lembrete — vai estar no 6º dia.
         assert _post(client, fake, _failed(uid, "evt_pds_4b", _T_LIFE + 60),
                      subs={_INVOICE_SUB: _fake_sub("past_due")}).status_code == 200
         novo = _relogio(uid)
         assert novo is not None and novo > primeiro, (primeiro, novo)
-        from db.plans import list_payment_reminder_candidates
+        from db.dunning import list_payment_reminder_candidates
         assert uid not in [r["user_id"] for r in list_payment_reminder_candidates(7)]
     finally:
         _cleanup_trial(uid)

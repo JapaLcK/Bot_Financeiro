@@ -1756,7 +1756,7 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
         # Relógio da inadimplência de cartão — o instante da PRIMEIRA falha de
         # cobrança do ciclo, carimbado pelo webhook `invoice.payment_failed`
-        # (db.plans.claim_past_due_since). NULLABLE e SEM DEFAULT: NULL
+        # (db.dunning.claim_past_due_since). NULLABLE e SEM DEFAULT: NULL
         # significa "não há ciclo de inadimplência aberto".
         #
         # Coluna e não derivação: `system_event_logs` é purgável por decisão de

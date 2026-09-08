@@ -63,11 +63,16 @@ async def check_payment_reminder() -> None:
     INERTE sem `PAYMENT_REMINDER_ENABLED`, e a guarda é a PRIMEIRA linha: nem a
     query do funil roda com a flag desligada.
 
-    Janela de 1 dia no SQL (`db.plans.list_payment_reminder_candidates`), no
-    desenho do `_check_trial_ending`: o tick roda a cada 24 h, então cada conta
-    entra na janela uma vez por ciclo de inadimplência.
+    Janela no SQL (`db.dunning.list_payment_reminder_candidates`), abrindo no
+    6º dia e com `PAYMENT_REMINDER_WINDOW_DAYS` de largura. Ela NÃO é de 1 dia,
+    e a razão está na constante: o tick não é de 24 h exatos (o `sleep` de
+    `run_engagement_loop` vem depois do trabalho) e restart/deploy atrasam
+    muito mais — com 24 h, um tick perdido sumia com o único lembrete do ciclo.
+    Quem impede o segundo lembrete é a dedupe abaixo, e a invariante que amarra
+    a largura ao tamanho dela está em `core/services/billing_dunning`.
 
-    Dedupe por `system_event_logs` (`recent_event_exists`), e não por coluna
+    Dedupe por `system_event_logs` (`recent_event_exists`,
+    `PAYMENT_REMINDER_DEDUPE_DAYS`), e não por coluna
     como o `trial_downsell_sent_at`: inadimplência RECORRE, e uma coluna
     precisaria ser zerada quando o pagamento entra — virando uma quarta coisa
     para esquecer. Custo declarado: `system_event_logs` é purgável, então um
@@ -85,11 +90,14 @@ async def check_payment_reminder() -> None:
 
     from core.observability import recent_event_exists
     from core.services import plan_service
-    from core.services.billing_dunning import DUNNING_GRACE_DAYS
+    from core.services.billing_dunning import (
+        DUNNING_GRACE_DAYS,
+        PAYMENT_REMINDER_DEDUPE_DAYS,
+    )
     from core.services.email_service import send_payment_reminder_email
     # Reuso, não cópia (§0.1): a minimização de PII em log já existe lá.
     from core.services.engagement_scheduler import _mask_email
-    from db.plans import list_payment_reminder_candidates
+    from db.dunning import list_payment_reminder_candidates
 
     loop = asyncio.get_event_loop()
     dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
@@ -120,7 +128,8 @@ async def check_payment_reminder() -> None:
         if not email:
             continue
         if await loop.run_in_executor(
-            None, recent_event_exists, "payment_reminder_sent", user_id, 6.0
+            None, recent_event_exists, "payment_reminder_sent", user_id,
+            PAYMENT_REMINDER_DEDUPE_DAYS,
         ):
             continue
         # Grant pix/admin vigente: o acesso desta conta não depende do cartão,
