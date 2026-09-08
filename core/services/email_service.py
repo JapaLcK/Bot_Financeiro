@@ -1133,6 +1133,37 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
     )
 
 
+def send_dunning_warning_email(to: str, dashboard_url: str = "") -> bool:
+    """Véspera do corte do bot por inadimplência (core/services/billing_dunning).
+
+    Molde do send_payment_failed_email: aquele avisa que a cobrança falhou;
+    este avisa que AMANHÃ o bot para de atender.
+    """
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷 Oi! Última chamada antes de eu ter que pausar.</p>
+      <p>A cobrança do seu plano <strong>não passou</strong> e já faz quase uma semana.
+      <strong>Amanhã</strong> eu pauso o registro das suas movimentações no WhatsApp e no Discord
+      até o pagamento se resolver.</p>
+      <p>Seus dados continuam guardados — nada é apagado. É só atualizar o cartão que tudo
+      volta na hora:</p>
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{dash}/conta">Atualizar cartão</a>
+      </p>
+    """
+    html = _base_html("Amanhã eu pauso — atualize seu cartão", content)
+    text = (
+        "PigBank — amanha eu pauso o registro das suas movimentacoes.\n\n"
+        "A cobranca do seu plano nao passou e ja faz quase uma semana. Seus dados "
+        "continuam guardados; e so atualizar o cartao que tudo volta na hora:\n"
+        f"{dash}/conta\n"
+    )
+    return send_email(
+        to=to, subject="⚠️ PigBank — amanhã eu pauso, atualize seu cartão",
+        html_body=html, text_body=text,
+    )
+
+
 def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
     """E-mail de confirmação de cancelamento (item 41)."""
     has_grace = expires_at is not None

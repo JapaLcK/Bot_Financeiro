@@ -1362,3 +1362,149 @@ def test_prosa_perigosa_recusada_com_a_fila_viva(free_uid, spy_ai, resposta, rec
     assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
     pend = _pendencia(uid)
     assert pend and pend["action_type"] == "multi_launch_values", pend
+
+
+# ---------------------------------------------------------------------------
+# T5/T6 — o corte por inadimplência de cartão (core/services/billing_dunning)
+#
+# "Rode a conversa, não a função" (CLAUDE.md §3): estes testes entram pelo
+# `handle_incoming` com estado real no banco, mandam MAIS DE UMA mensagem de
+# assuntos diferentes na mesma conta, e checam o BANCO — não só o texto da
+# resposta. Um teste que só olha a resposta não vê o lançamento entrando.
+#
+# CONTROLE NEGATIVO DECLARADO: ponha `return None` na primeira linha de
+# `core.handle_incoming._dunning_gate`. Esperado:
+#   • test_T5_1_bloqueado_nao_registra_lancamento  → VERMELHO
+#   • test_T5_3_assinante_e_free_registram_normalmente → VERDE
+# Se o T5.3 também ficar vermelho, a injeção foi no lugar errado.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def dunning_ligado(monkeypatch):
+    monkeypatch.setenv("DUNNING_BLOCK_ENABLED", "1")
+
+
+def _inadimplente(uid: int, *, dias: float = 8.0, status: str = "past_due") -> None:
+    """Deixa a conta com o cartão em atraso há `dias` (relógio já carimbado)."""
+    from db.connection import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts"
+                "   set last_payment_status = %s,"
+                "       past_due_since = now() - make_interval(secs => %s)"
+                " where user_id = %s",
+                (status, dias * 86400, uid),
+            )
+            assert cur.rowcount == 1, "conta sem linha em auth_accounts"
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(uid)
+
+
+def test_T5_1_bloqueado_nao_registra_lancamento(pro_uid, spy_ai, dunning_ligado):
+    """Conta cortada: a mensagem devolve o aviso E o lançamento NÃO entra.
+
+    Não basta olhar o texto — o defeito que importa é o gate responder bloqueio
+    e o handler gravar do mesmo jeito. A asserção que discrimina é o banco.
+
+    Entrada real (§3 regra 3): duas mensagens de assuntos diferentes, na
+    sequência, na mesma conta — "gastei 50 no mercado" e depois "paguei a luz",
+    que é exatamente o par que reproduzia o bug do PR #133.
+    """
+    import db
+    uid = pro_uid
+    _inadimplente(uid)
+
+    resp = _send(uid, "gastei 50 no mercado")
+    assert "não passou" in resp, resp
+    assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
+
+    # Segunda mensagem, outro assunto, mesma conta: nada de pendência aberta
+    # nem de lançamento — o gate retorna antes de tocar em pending_actions.
+    resp2 = _send(uid, "paguei a luz")
+    assert "não passou" in resp2, resp2
+    assert not db.list_launches(uid, limit=5), db.list_launches(uid, limit=5)
+    assert not db.ai_get_pending_action(uid), db.ai_get_pending_action(uid)
+
+
+def test_T5_2_escape_hatch_de_billing_funciona_bloqueado(pro_uid, spy_ai, dunning_ligado):
+    """O bloqueio não pode ser beco sem saída: os comandos de assinatura
+    respondem billing (com link), não o aviso de bloqueio.
+
+    Cobre o `_normalize` de billing_commands.py (espaço duplo + maiúscula) —
+    entrada real, não a que eu projetei.
+    """
+    uid = pro_uid
+    _inadimplente(uid)
+
+    # (texto, marcador da resposta de billing). O marcador é por comando: só
+    # `assinar`/`cancelar` devolvem link — `plano` devolve o extrato do plano.
+    # DASHBOARD_URL é localhost no ambiente de teste, por isso "http" e não o
+    # domínio de produção.
+    casos = [
+        ("assinar plano", "http"),
+        ("plano", "Plano:"),
+        ("cancelar plano", "http"),
+        ("assinar  Plano", "http"),   # espaço duplo + maiúscula → _normalize
+    ]
+    for texto, marcador in casos:
+        resp = _send(uid, texto)
+        assert "não passou" not in resp, (texto, resp)
+        assert marcador in resp, (texto, resp)
+
+
+def test_T5_3_assinante_e_free_registram_normalmente(pro_uid, free_uid, spy_ai,
+                                                     dunning_ligado):
+    """CONTROLE POSITIVO obrigatório: com a flag LIGADA, conta `active` e conta
+    `free` (sem linha em auth_accounts) continuam registrando.
+
+    Sem este caso o grupo passaria num gate que recusa todo mundo — que é pior
+    que o bug. É também o que prova que a decisão 1 (o `free` intacto) vale.
+    """
+    import db
+    from db.connection import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update auth_accounts set last_payment_status='active',"
+                        "       past_due_since=null where user_id=%s", (pro_uid,))
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(pro_uid)
+
+    for uid in (pro_uid, free_uid):
+        resp = _send(uid, "gastei 50 no mercado")
+        assert "não passou" not in resp, (uid, resp)
+        assert db.list_launches(uid, limit=5), (uid, resp)
+
+
+def test_T5_4_dentro_da_carencia_passa(pro_uid, spy_ai, dunning_ligado):
+    """A carência é de 7 dias: 1 dia de atraso registra normalmente."""
+    import db
+    uid = pro_uid
+    _inadimplente(uid, dias=1.0)
+    resp = _send(uid, "gastei 50 no mercado")
+    assert "não passou" not in resp, resp
+    assert db.list_launches(uid, limit=5), resp
+
+
+def test_T5_5_flag_desligada_nao_bloqueia(pro_uid, spy_ai, monkeypatch):
+    """Sem DUNNING_BLOCK_ENABLED o gate é inerte — a MESMA conta do T5.1."""
+    import db
+    monkeypatch.setenv("DUNNING_BLOCK_ENABLED", "0")
+    uid = pro_uid
+    _inadimplente(uid)
+    resp = _send(uid, "gastei 50 no mercado")
+    assert "não passou" not in resp, resp
+    assert db.list_launches(uid, limit=5), resp
+
+
+def test_T6_mensagem_sem_texto_nao_gera_resposta_de_bloqueio(pro_uid, spy_ai,
+                                                             dunning_ligado):
+    """Sticker/contato/localização chegam com `text` vazio e sem anexo. Hoje
+    isso devolve `[]` no passo 5, e o gate tem de preservar esse silêncio —
+    senão o bot responde bloqueio a cada figurinha."""
+    uid = pro_uid
+    _inadimplente(uid)
+    assert hi.handle_incoming(_msg(uid, "")) == []
+    assert hi.handle_incoming(_msg(uid, "   ")) == []

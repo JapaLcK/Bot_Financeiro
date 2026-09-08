@@ -92,6 +92,20 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
+        # Aviso da véspera do corte por inadimplência. Inerte sem
+        # DUNNING_BLOCK_ENABLED. Isolado como os demais checks.
+        try:
+            from core.services.dunning_warning import check_dunning_warning
+            await check_dunning_warning()
+        except Exception as exc:
+            logger.error("[engagement] Erro no aviso de inadimplência: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "dunning_warning_error",
+                f"Erro no aviso de inadimplencia: {exc}",
+                source="engagement_scheduler",
+            )
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except asyncio.CancelledError:

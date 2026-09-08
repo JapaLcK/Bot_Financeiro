@@ -145,6 +145,16 @@ emergência e colapsa no binário legado). **A fonte de verdade é
 `core/services/plan_service.py`** — não duplique a tabela de tiers, limites ou nomes
 em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.py`.
 
+**Corte por inadimplência de cartão** (`core/services/billing_dunning.py`):
+cartão falhado há **7 dias** (`DUNNING_GRACE_DAYS`, contados de
+`auth_accounts.past_due_since`, carimbada pelo webhook `invoice.payment_failed`)
+tira o bot do usuário — gate `_dunning_gate` em `core/handle_incoming.py`, atrás
+de `DUNNING_BLOCK_ENABLED` (**default off**). O plano `free` **não é tocado**, e
+grant `pix` ou `admin` vigente resgata (`legacy` não). Aviso da véspera pelo tick
+de `engagement_scheduler`: e-mail sempre, **WhatsApp só se
+`WA_TEMPLATE_DUNNING_WARNING` apontar para um template aprovado na Meta** (vazio
+por padrão → caminho dormente).
+
 ### Open Finance
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`

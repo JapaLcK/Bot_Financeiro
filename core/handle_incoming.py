@@ -511,6 +511,93 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     ))]
 
 
+def _dunning_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
+    """Cartão falhado há 7+ dias → o bot para de atender. Irmão do
+    `_paywall_gate`, e roda logo depois dele.
+
+    Aqui e não em `has_app_access`: aquela função devolve True incondicional com
+    o v2 ligado, e mexer nela quebraria o contrato de que o plano `free`
+    continua INTACTO. Este gate só olha a lista de três status de cartão em
+    atraso — free, canceled, trialing e grant de admin expirado nem chegam à
+    checagem do relógio.
+
+    Ponto de convergência dos dois adapters (`wa_runtime.py` e
+    `discord_bot.py`), DEPOIS da vinculação de número e do caminho "sem conta"
+    (que retornam antes, no wa_runtime) e ANTES de áudio/imagem/OFX/CSV/PDF —
+    o inadimplente não queima Whisper nem Vision.
+
+    Fail-open igual aos três gates de plano existentes: exceção na checagem →
+    passa. Trancar quem paga por um timeout de banco é pior que escapar uma
+    mensagem.
+
+    VAZAMENTO CONSCIENTE: os botões interativos do WhatsApp
+    (`wa_runtime.py:593-930`) são tratados e retornam ANTES do handler, então
+    continuam funcionando para conta bloqueada — inclusive o "Paguei"
+    (`bill_paid`), que MEXE EM DINHEIRO. Fechar isso é PR próprio; o gate está
+    no ponto de convergência dos adapters, não no runtime de cada um.
+    """
+    try:
+        from core.services.billing_dunning import (
+            bloqueado_por_inadimplencia,
+            dunning_block_enabled,
+        )
+        if not dunning_block_enabled():
+            return None
+        # Sticker, contato, localização: `msg.text` vazio e sem anexo já devolve
+        # [] no passo 5. Sem esta guarda o bot responderia bloqueio a cada
+        # figurinha.
+        if not (msg.text or "").strip() and not msg.attachments:
+            return None
+        uid = _normalize_user_id(msg)
+        if not bloqueado_por_inadimplencia(uid):
+            return None
+
+        # ESCAPE HATCH — sem ele o bloqueio é beco sem saída: o usuário não tem
+        # como voltar a pagar pelo canal em que foi cortado. Reusa a MESMA
+        # função que o passo 5 daqui e o `billing_cog` do Discord já usam, então
+        # os gatilhos (assinar/upgrade/renovar, cancelar, plano/minha
+        # assinatura) vêm de graça, sem uma segunda lista para divergir.
+        #
+        # No Discord isto é obrigatório e não conveniência: `discord_bot.py:181`
+        # curto-circuita os cogs quando `handle_incoming` devolve mensagem, então
+        # sem o hatch aqui "assinar plano" pararia de funcionar lá.
+        #
+        # FORA do hatch, por decisão do dono: o código de vínculo de 6 dígitos
+        # vindo de conta já inadimplente. Ele não resolve o bloqueio (a conta é a
+        # mesma), e incluí-lo exigiria extrair para um TERCEIRO lugar um regex
+        # que hoje vive em dois (`wa_runtime.py:390` e
+        # `core/intent_classifier.py:487-490`).
+        #
+        # `handle_billing_command` faz UMA leitura de `pending_actions`
+        # (`ai_get_pending_action`, para ceder o turno a uma confirmação em
+        # curso) e nenhuma escrita. É a única visita do gate à tabela, e é a
+        # mesma que o caminho normal faria — reusar a função é o que evita a
+        # segunda lista de gatilhos.
+        from core.services.billing_commands import handle_billing_command
+        billing_reply = handle_billing_command(uid, msg.text or "", platform=platform)
+        if billing_reply is not None:
+            return [OutgoingMessage(text=billing_reply)]
+    except Exception:
+        logger.warning("gate de inadimplência falhou — seguindo fail-open", exc_info=True)
+        return None
+
+    link = "https://pigbankai.com/conta"
+    try:
+        from core.dashboard_links import build_dashboard_link
+        link = build_dashboard_link(uid, hours=1.0, next_path="/conta") or link
+    except Exception:
+        logger.warning("não consegui gerar link autenticado do /conta", exc_info=True)
+
+    return [OutgoingMessage(text=(
+        "🐷 Oi! Preciso te avisar de uma coisa antes de continuar.\n\n"
+        f"A cobrança do seu plano {_bold('não passou', platform)} e já faz mais de "
+        "uma semana. Enquanto isso não se resolve, eu pausei o registro das suas "
+        "movimentações — seus dados continuam guardadinhos aqui.\n\n"
+        f"👉 {link}\n\n"
+        "É só atualizar o cartão que eu volto a anotar tudo na hora 💚"
+    ))]
+
+
 def handle_incoming(msg: IncomingMessage, *,
                     ignora_pendencias: bool = False) -> list[OutgoingMessage]:
     # `ignora_pendencias`: repassado cru ao `route()`. Um chamador só — a
@@ -524,6 +611,14 @@ def handle_incoming(msg: IncomingMessage, *,
         # 0. Paywall — sem assinatura ativa, o bot não processa nada
         # ------------------------------------------------------------------
         gated = _paywall_gate(msg, platform)
+        if gated is not None:
+            return gated
+
+        # ------------------------------------------------------------------
+        # 0b. Inadimplência de cartão (7+ dias) — corta o bot, com escape
+        # hatch de billing dentro do gate. `free` não é afetado.
+        # ------------------------------------------------------------------
+        gated = _dunning_gate(msg, platform)
         if gated is not None:
             return gated
 

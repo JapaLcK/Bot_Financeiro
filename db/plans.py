@@ -251,6 +251,83 @@ def mark_trial_downsell_sent(user_id: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
+# ── Inadimplência de cartão: o relógio da carência de 7 dias ─────────────────
+# Ver core/services/billing_dunning para a regra que LÊ estas colunas.
+
+
+def claim_past_due_since(user_id: int) -> bool:
+    """Carimba o início da inadimplência. True se foi ESTA chamada que carimbou.
+
+    A idempotência é SQL, não Python (decisão do dono): UMA instrução com
+    `past_due_since is null` no `where`, sem read-modify-write. A Stripe manda
+    um `invoice.payment_failed` por smart retry, e reentrega o mesmo evento em
+    cima de 5xx — o relógio NÃO pode reiniciar em nenhum dos dois casos.
+
+    O `rowcount` sai de graça e é a chave de dedupe do e-mail "seu pagamento
+    falhou" (só a PRIMEIRA falha do ciclo manda e-mail ao usuário). Um
+    `coalesce` no `set` também seria idempotente, mas o `RETURNING` veria o
+    valor novo e não diria se foi esta chamada que carimbou.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set past_due_since = now()"
+                " where user_id = %s and past_due_since is null",
+                (int(user_id),),
+            )
+            carimbou = cur.rowcount == 1
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+    return carimbou
+
+
+def clear_past_due_since(user_id: int) -> None:
+    """Zera o relógio: pagou, cancelou ou a assinatura morreu. Desbloqueio
+    automático — o gate volta a passar na próxima mensagem."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set past_due_since = null where user_id = %s",
+                (int(user_id),),
+            )
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+
+
+def list_dunning_warning_candidates(grace_days: int = 7) -> list[dict]:
+    """Contas na VÉSPERA do corte por inadimplência (aviso de 1 dia antes).
+
+    Janela de 1 dia — `past_due_since` entre `grace_days` e `grace_days - 1`
+    dias atrás — no mesmo desenho do `_check_trial_ending`: o tick roda a cada
+    24 h, então cada conta entra na janela exatamente uma vez por ciclo de
+    inadimplência.
+
+    O funil grosso é SQL (lista de três, relógio presente, e-mail presente,
+    opt-out); o filtro fino que precisa de Python (allowlist, grant pix/admin
+    vigente) é do chamador, como em `list_trial_downsell_candidates`.
+    """
+    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select user_id, email, email_enc
+                from auth_accounts
+                where past_due_since is not null
+                  and lower(coalesce(last_payment_status, '')) = any(%s)
+                  and coalesce(engagement_opt_out, false) = false
+                  and email is not null and email <> ''
+                  and past_due_since <= now() - make_interval(days => %s)
+                  and past_due_since >  now() - make_interval(days => %s)
+                """,
+                (list(PAST_DUE_PAYMENT_STATUSES),
+                 int(grace_days) - 1, int(grace_days)),
+            )
+            return [dict(r) for r in cur.fetchall() or []]
+
+
 def count_launches_this_month(user_id: int) -> int:
     """Lançamentos do mês-calendário corrente (limite do tier Grátis)."""
     with get_conn() as conn:

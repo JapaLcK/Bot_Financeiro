@@ -4981,6 +4981,10 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             await _materializar_assinatura(user_id, sub_id, plan_value,
                                            expires_dt, sub_status)
+            # Assinatura nova por cima de um ciclo de inadimplência: zera o
+            # relógio do corte do bot (core/services/billing_dunning).
+            from db.plans import clear_past_due_since
+            await asyncio.to_thread(clear_past_due_since, int(user_id))
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -5145,6 +5149,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             await _materializar_assinatura(user_id, sub_id, plan_value,
                                            expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
+            # Desbloqueio automático do bot: pagou, o relógio da inadimplência
+            # zera. NÃO fica dentro de set_payment_status — ela é chamada de
+            # _materializar_assinatura e de recompute_entitlement, e mudar a
+            # semântica dela mexeria em call sites que este PR não auditou.
+            from db.plans import clear_past_due_since
+            await asyncio.to_thread(clear_past_due_since, int(user_id))
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
@@ -5287,6 +5297,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id = _resolve_user(invoice)
         if user_id:
             set_payment_status(user_id, "past_due")
+            # Relógio da carência de 7 dias do corte do bot
+            # (core/services/billing_dunning). Idempotente no SQL: a Stripe
+            # manda um payment_failed por smart retry e reentrega o mesmo
+            # evento em cima de 5xx — nenhum dos dois reinicia a contagem.
+            from db.plans import claim_past_due_since
+            primeira_falha = await asyncio.to_thread(
+                claim_past_due_since, int(user_id))
             await log_system_event(
                 "warning",
                 "billing_payment_failed",
@@ -5295,10 +5312,16 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email com link pra atualizar cartao (item 40)
+            #
+            # Condicionado ao carimbo: sem isso a Stripe manda este e-mail uma
+            # vez por tentativa de smart retry (3-4 por ciclo) e por reentrega
+            # de webhook. `primeira_falha` é o rowcount do UPDATE — só a falha
+            # que ABRIU o ciclo avisa o usuário.
             from core.services.email_service import send_payment_failed_email
+            email = None
             try:
                 email = await _user_email(user_id)
-                if email:
+                if email and primeira_falha:
                     await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
@@ -5324,6 +5347,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # A assinatura morreu: o relógio da inadimplência não tem mais o
+            # que medir. Deixá-lo carimbado seria dado órfão numa conta
+            # 'canceled' — a guarda de status de billing_dunning já o ignora
+            # (a invariante), mas ele nunca deve sobreviver ao fim do ciclo.
+            from db.plans import clear_past_due_since
+            await asyncio.to_thread(clear_past_due_since, int(user_id))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
             #
             # A amplitude é dinheiro: quem tem uma assinatura nova já paga e

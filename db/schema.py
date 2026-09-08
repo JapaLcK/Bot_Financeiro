@@ -1754,6 +1754,34 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Relógio do corte do bot por inadimplência de cartão (7 dias de
+        # carência) — core/services/billing_dunning. NULLABLE e SEM DEFAULT: o
+        # carimbo é do webhook `invoice.payment_failed`
+        # (db.plans.claim_past_due_since), e NULL significa "não há relógio".
+        #
+        # Coluna e não derivação: `system_event_logs` é purgável por decisão de
+        # projeto (o "Limpar" do painel; ver o comentário do
+        # checkout_funnel_events mais abaixo), então o relógio que decide corte
+        # de acesso não pode morar em log.
+        """alter table auth_accounts add column if not exists past_due_since timestamptz""",
+        # BACKFILL, e ele é AUTO-CURATIVO de propósito (roda em TODO boot, não
+        # uma vez): a guarda `past_due_since is null` o torna no-op para quem já
+        # está carimbado, e é justamente ela que faz o UPDATE alcançar também a
+        # conta que ficou inadimplente sem o webhook conseguir carimbar (evento
+        # perdido, processo fora do ar, deploy no meio da entrega). Sem ele,
+        # essa conta ficaria com relógio NULL para sempre e nunca seria
+        # bloqueada — falha silenciosa no lado de quem não paga.
+        #
+        # Errar por excesso aqui é o lado seguro: recarimbar dá 7 dias NOVOS de
+        # carência a quem já devia estar cortado; deixar de carimbar dá acesso
+        # infinito. O `lower(coalesce(...))` espelha o `strip().lower()` do
+        # Python em `bloqueado_por_inadimplencia`.
+        """
+        update auth_accounts set past_due_since = now()
+         where past_due_since is null
+           and lower(coalesce(last_payment_status, ''))
+               in ('past_due', 'unpaid', 'incomplete')
+        """,
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
         # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o

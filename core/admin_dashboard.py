@@ -806,8 +806,17 @@ _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 # db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
 # 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
 # terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
-# regra decide o rótulo do painel e o gate de /trial-reset (§0.7).
-_PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
+# regra decide o rótulo do painel, o gate de /trial-reset e o corte do bot por
+# inadimplência (§0.7).
+#
+# A lista MUDOU DE CASA para core/services/billing_dunning: este módulo importa
+# fastapi/bcrypt/jwt/slowapi e custa ~357 ms de import, caro demais para o
+# caminho de mensagem do bot (sobretudo no processo do Discord). O espelho SQL
+# em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como sempre — o
+# teste de paridade de tests/test_admin_users_panel.py compara os dois.
+from core.services.billing_dunning import (  # noqa: E402
+    PAST_DUE_PAYMENT_STATUSES as _PAST_DUE_PAYMENT_STATUSES,
+)
 _LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
 
 
