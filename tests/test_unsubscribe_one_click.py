@@ -104,6 +104,27 @@ def test_get_unsubscribe_continua_funcionando(user_id):
     assert _engagement_opt_out(user_id) is True
 
 
+def test_unsubscribe_token_nao_ascii_da_400(user_id):
+    """O `token` vem da query do link do e-mail — quem clica escolhe o valor.
+    `compare_digest` sobre str não-ASCII levanta TypeError → 500 nas DUAS
+    rotas (o GET do humano e o POST one-click do Gmail). Segue 400.
+
+    Pela pilha HTTP, não chamando o handler direto: os bytes `caf%C3%A9` na
+    query são o que o cliente de e-mail manda de verdade, e é o Starlette que
+    decide qual `str` chega na função. Chamada direta seria cega à classe "a
+    rota deixou de entregar `str` não-ASCII ao handler".
+    """
+    _make_auth_account(user_id)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app_mod.app)
+    url = f"/unsubscribe?uid={user_id}&token=caf%C3%A9"  # "café" em UTF-8 percent-encoded
+
+    assert client.post(url).status_code == 400
+    assert client.get(url).status_code == 400
+    assert _engagement_opt_out(user_id) is False
+
+
 def test_post_unsubscribe_atravessa_o_middleware_csrf(user_id):
     """O POST do Gmail/Yahoo chega sem cookie/header CSRF — o path precisa
     estar em CSRF_EXEMPT_PATHS, senão o middleware devolve 403 antes do
