@@ -1,0 +1,7 @@
+# Poda de auth_refresh_tokens, mfa_login_challenges e pending_google_signups.
+# 04:00 UTC (01:00 BRT): duas horas antes do job de exclusão de conta
+# (railway.account-deletion.toml, 06:00 UTC) e no vale de tráfego do WhatsApp.
+[deploy]
+startCommand = "python scripts/cleanup_job.py"
+cronSchedule = "0 4 * * *"
+restartPolicyType = "NEVER"

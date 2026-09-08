@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import sys
 import uuid
-from typing import Any
 
 from db.connection import get_conn
 

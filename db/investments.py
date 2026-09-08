@@ -1,7 +1,6 @@
 """
 db/investments.py — Investimentos: criar, aportar, resgatar, juros e CDI.
 """
-import calendar
 import logging
 import sys
 import requests
