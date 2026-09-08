@@ -368,6 +368,22 @@ def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
     return row
 
 
+async def _json_object_body(request: Request) -> dict:
+    """Corpo JSON de topo objeto. Parse falho, lista, escalar ou null → 400.
+
+    `await request.json()` aceita qualquer JSON válido (`[1,2,3]`, `"abc"`,
+    `42`, `null`, `true`), e o `payload.get(...)` seguinte levantava
+    AttributeError → 500 com stack trace (issue #310).
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    return payload
+
+
 async def fetch_admin_overview(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
     """Wrapper que envolve a coleta de dados num pii_audit_batch — os ~30
     decrypts (top_users + recent_signups + recent_logins) acumulam e geram
@@ -1580,10 +1596,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if not admin_enabled():
             raise HTTPException(status_code=503, detail="Painel admin não configurado.")
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         username = str(payload.get("username") or "").strip()
         password = str(payload.get("password") or "")
@@ -1757,16 +1770,14 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         hora; o que já existe acima do teto do plano novo (bancos de Open
         Finance, agentes) cai na varredura de downgrade, que roda a cada 6h.
         """
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         months = payload.get("months")
         try:
             months = 12 if months is None else int(months)
-        except (TypeError, ValueError):
+        # OverflowError: json.loads aceita `Infinity`/`-Infinity`/`1e400` e devolve
+        # float('inf'), e int(inf) NÃO levanta TypeError nem ValueError — era 500.
+        # (`NaN` levanta ValueError, e por isso já caía aqui.)
+        except (TypeError, ValueError, OverflowError):
             raise HTTPException(status_code=422, detail="months inválido.")
         try:
             row = await asyncio.to_thread(
@@ -1989,10 +2000,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         from db import find_user_id_by_email
         from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         email = str(payload.get("email") or "").strip()
         if not email:
@@ -2002,7 +2010,18 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=404, detail="Nenhuma conta com esse email.")
 
         code = (payload.get("code") or None)
-        bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        # `code` não-string chegava em _normalize_code (db/affiliates.py), que faz
+        # .strip() → AttributeError → 500. O `except ValueError` abaixo não pega.
+        if code is not None and not isinstance(code, str):
+            raise HTTPException(status_code=422, detail="code inválido.")
+        # int() FORA do try dava 500: 'abc'/NaN → ValueError, [10]/{'a':1}/null →
+        # TypeError, Infinity/1e400 → OverflowError. São as TRÊS que int() levanta
+        # sobre valor vindo de json.loads, e o try abaixo só embrulha o
+        # create_affiliate e só pega ValueError. Mesmo tratamento do `months`.
+        try:
+            bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="commission_bps inválido.")
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
@@ -2029,10 +2048,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         comissão nova; o saldo já acumulado continua sacável."""
         from db.affiliates import set_affiliate_status
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         status = str(payload.get("status") or "")
         try:
             ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
@@ -2096,7 +2112,12 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        note = str(payload.get("note") or "").strip() or None
         ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
@@ -2120,7 +2141,12 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        note = str(payload.get("note") or "").strip() or None
         ok = await asyncio.to_thread(reject_payout, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
