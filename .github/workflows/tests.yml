@@ -64,6 +64,37 @@ jobs:
         run: |
           PYTHONPATH=. pytest -q
 
+  # Testes de frontend (tests/frontend/): Playwright + Chromium contra as páginas
+  # reais de frontend/. Job SEPARADO de propósito — não depende de Postgres nem
+  # das deps de Python, e roda em paralelo sem somar um segundo ao `pytest`.
+  #
+  # BLOQUEANTE, de propósito: o download do Chromium (~95 MB) é rede externa e
+  # não foi exercitado neste CI ainda. Se ele quebrar, o CI fica vermelho e a
+  # gente descobre na hora — falha ruidosa vale mais que um job que sinaliza
+  # sozinho e ninguém lê.
+  frontend:
+    runs-on: ubuntu-latest
+    # Sem isto o default é 360 min: um download de Chromium travado queimaria
+    # 6 horas de runner antes de desistir.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run frontend tests
+        run: npm run test:frontend
+
   # Varredura de CVE nas dependências. Não-bloqueante: sinaliza sem travar
   # o merge/deploy (uma CVE sem fix disponível não deve segurar a main).
   # O Dependabot (.github/dependabot.yml) abre os PRs de correção.

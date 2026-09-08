@@ -1,0 +1,11 @@
+{
+  "name": "pigbank-frontend-tests",
+  "private": true,
+  "description": "Só o harness de testes de frontend (tests/frontend/). O site é HTML estático servido pelo backend; não há build de JS.",
+  "scripts": {
+    "test:frontend": "node --test tests/frontend/*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

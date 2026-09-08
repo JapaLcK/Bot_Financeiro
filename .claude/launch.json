@@ -4,13 +4,45 @@
     {
       "name": "landing-preview",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8899", "--directory", "frontend"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8899",
+        "--directory",
+        "frontend"
+      ],
       "port": 8899
+    },
+    {
+      "name": "faria-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8902",
+        "--directory",
+        "/private/tmp/claude-501/-Users-lucaskuramoti-Desktop-Bot-Discord-Bot-Financeiro/f355ca7d-a082-4d59-bea4-7bec168936e0/scratchpad/art-wt/frontend"
+      ],
+      "port": 8902
+    },
+    {
+      "name": "welcome-redesign",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8903",
+        "--directory",
+        ".claude/worktrees/welcome-redesign/frontend"
+      ],
+      "port": 8903
     },
     {
       "name": "dashboard",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["dashboard_dev.py"],
+      "runtimeArgs": [
+        "dashboard_dev.py"
+      ],
       "port": 8000
     }
   ]
