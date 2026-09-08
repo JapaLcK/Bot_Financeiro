@@ -2,7 +2,7 @@
 
 Público:  GET /i/{code}              → seta cookie prospect_code (30d) e manda pra landing.
 Serviço:  POST /api/prospect/status  → status dos códigos (sem PII), autenticado
-          por X-Prospect-Key = env PROSPECT_API_KEY (secrets.compare_digest).
+          por X-Prospect-Key = env PROSPECT_API_KEY (constant_time_eq).
 
 Espelho de frontend/routes/affiliates.py, sem lookup no banco no /i/{code}:
 o código não é pré-registrado (o lead engine o gera), então não há o que
@@ -10,12 +10,12 @@ consultar — e não consultar também não vaza a existência de código.
 """
 import asyncio
 import os
-import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
+from core.secure_compare import constant_time_eq
 from db.prospects import (
     PROSPECT_COOKIE_MAX_AGE_DAYS,
     is_valid_prospect_code,
@@ -68,11 +68,13 @@ async def prospect_status(request: Request, body: ProspectStatusBody):
     if not expected:
         raise HTTPException(status_code=503, detail="Serviço não configurado.")
     provided = request.headers.get("X-Prospect-Key") or ""
-    # compare em bytes: compare_digest com str levanta TypeError se o header
-    # vier não-ASCII (viraria 500 sem autenticação; tem de ser 401).
-    if not secrets.compare_digest(
-        provided.encode("utf-8", "replace"), expected.encode("utf-8")
-    ):
+    # Migrou pro helper por causa do lado DIREITO, não do esquerdo: o
+    # `expected.encode("utf-8")` que estava aqui era estrito, e `expected` vem
+    # de `os.getenv` — um PROSPECT_API_KEY com byte não-UTF-8 chega como
+    # `'...\udcff...'` e levantava UnicodeEncodeError → 500 latente. O lado
+    # esquerdo já estava certo. O `errors=` de cada lado mora no helper — ver
+    # core/secure_compare.py.
+    if not constant_time_eq(provided, expected):
         raise HTTPException(status_code=401, detail="Chave inválida.")
 
     codes = (body.codes or [])[:_STATUS_CODES_CAP]

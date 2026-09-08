@@ -22,6 +22,7 @@ from core.reports.reports_daily import (
     build_weekly_report_summary,
     build_monthly_report_summary,
 )
+from core.secure_compare import constant_time_eq
 from db import (
     claim_daily_report_send,
     claim_weekly_report_send,
@@ -223,7 +224,8 @@ async def wa_verify(request: Request):
         )
         return PlainTextResponse("forbidden", status_code=403)
 
-    if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
+    # `token` vem da query (pode ser None): a guarda antes do compare fica.
+    if mode == "subscribe" and token and constant_time_eq(token, VERIFY_TOKEN) and challenge:
         log_system_event_sync(
             "info",
             "whatsapp_webhook_verified",

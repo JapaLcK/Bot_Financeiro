@@ -105,3 +105,36 @@ def test_pluggy_webhook_rejects_wrong_url_token(monkeypatch):
     )
 
     assert response.status_code == 401
+
+
+def test_pluggy_webhook_rejects_non_ascii_credentials(monkeypatch):
+    """Os três caminhos de autenticação leem valor escolhido por quem chama.
+
+    `compare_digest` sobre str não-ASCII levanta TypeError → 500 com stack
+    trace, sem autenticação nenhuma. Tem de continuar 401 nos três.
+    """
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    client = TestClient(dashboard.app)
+
+    # 1. token na query string
+    por_query = client.post(
+        "/open-finance/pluggy/webhook?token=café",
+        json={"event": "item/updated"},
+    )
+    assert por_query.status_code == 401
+
+    # 2. header de secret compartilhado (em bytes: o httpx recusa str não-ASCII)
+    por_header = client.post(
+        "/open-finance/pluggy/webhook",
+        json={"event": "item/updated"},
+        headers={"X-Webhook-Token": "café".encode("latin-1")},
+    )
+    assert por_header.status_code == 401
+
+    # 3. assinatura HMAC
+    por_assinatura = client.post(
+        "/open-finance/pluggy/webhook",
+        json={"event": "item/updated"},
+        headers={"X-Pluggy-Signature": "sha256=café".encode("latin-1")},
+    )
+    assert por_assinatura.status_code == 401

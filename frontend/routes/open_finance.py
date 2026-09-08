@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, record_audit_event
+from core.secure_compare import constant_time_eq
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
@@ -1064,7 +1065,7 @@ def _verify_pluggy_webhook_signature(raw_body: bytes, signature_header: str, sec
         return False
 
     expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    return constant_time_eq(signature, expected)
 
 
 # Headers de secret compartilhado aceitos (caso configurados no painel da Pluggy).
@@ -1091,12 +1092,12 @@ def _authorize_pluggy_webhook(request: Request, raw_body: bytes, secret: str) ->
     """
     # 1. token na query string
     token = request.query_params.get("token") or ""
-    if token and hmac.compare_digest(token, secret):
+    if token and constant_time_eq(token, secret):
         return True
     # 2. header com o secret
     for header_name in _PLUGGY_WEBHOOK_SECRET_HEADERS:
         value = (request.headers.get(header_name) or "").strip()
-        if value and hmac.compare_digest(value, secret):
+        if value and constant_time_eq(value, secret):
             return True
     # 3. assinatura HMAC do corpo (compat)
     signature = request.headers.get("X-Pluggy-Signature") or ""
