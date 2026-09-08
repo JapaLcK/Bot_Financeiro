@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -29,6 +28,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
+from core.secure_compare import constant_time_eq
 
 
 load_app_env()
@@ -248,8 +248,8 @@ def _check_admin_password(password: str) -> bool:
             return False
     if not ADMIN_DASHBOARD_PASSWORD:
         return False
-    # compare_digest pra evitar timing leak no fallback plaintext.
-    return secrets.compare_digest(password, ADMIN_DASHBOARD_PASSWORD)
+    # Tempo constante pra evitar timing leak no fallback plaintext.
+    return constant_time_eq(password, ADMIN_DASHBOARD_PASSWORD)
 
 
 def _make_admin_jwt(username: str, jwt_secret: str) -> str:
