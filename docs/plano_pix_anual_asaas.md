@@ -115,7 +115,7 @@ public_token text not null unique           -- NOVO (correção 4): id OPACO, o 
 status text not null default 'draft'
 qr_payload_enc text, due_date date, qr_expires_at timestamptz  -- QR CIFRADO, apagado no fim (§13.6)
 access_starts_at, access_expires_at timestamptz              -- decididos NO PAGAMENTO
-ga_client_id, fbp, fbc text                                  -- zerados na exclusão (§13)
+ga_client_id, fbp, fbc text     -- SÓ no 1b-B, junto de escritor+purga (§14); zerados na exclusão (§13)
 created_at, paid_at, canceled_at, refunded_at, purged_at timestamptz
 
 unique index uniq_pix_charge_ativa on pix_charges (user_id)
@@ -519,6 +519,25 @@ Função pura `plano_da_cobranca(grants_ativos, plano_novo, preco_novo_cents, mi
 
 **Crédito monetário existe só no caminho Pix → Pix** — repetido aqui e no §9 de propósito.
 
+**RECOMPRA QUE NÃO ACRESCENTA NADA É RECUSADA (409), não agendada.** Se já existe grant ativo de tier **igual ou maior** que o comprado com `ends_at` no futuro — tipicamente um grant Pix já pago começando no fim do período do Stripe —, os dois ramos de **upgrade** levantam `CoberturaJaPaga` em vez de precificar. Medido antes da guarda, com Stripe Plus vigente + Pix Pro futuro pago: **365 dias sobrepostos, 0 dias novos, R$ 499,00 cobrados**; e o mesmo no ramo Pix→Pix (R$ 305,45). A causa era os ramos de upgrade decidirem `access_starts_at` pelo grant VIGENTE, enquanto renovação e downgrade já usavam `max(agora, fim_cobertura)`.
+**A guarda vale para QUALQUER grant `pix` futuro ainda vigente, de qualquer tier** (P1-4, Codex #304). A primeira versão só bloqueava tier igual ou maior, e o resto ficou declarado como teto — errado: com um grant Pix de tier MENOR já pago e futuro, o cliente compra um ano inteiro do tier maior sobrepondo os 365 dias daquele e recebe **crédito zero**. Ganho de tier não paga um ano duplicado.
+
+**DECIDIDO PELO DONO (2026-09-07): a recusa é a resposta, não um interino.** O checkout devolve
+**409** com `error = "pix_future_purchase_conflict"`, `plan` e `covered_until`, deixando claro que já
+existe uma compra Pix futura incompatível. **Não cobra e não altera grant algum.** A exceção
+`CoberturaJaPaga` (`core/services/pix_pricing.py`) já carrega `ERRO`, `plano` e `cobertura_ate` — o
+1b-B traduz em uma linha e **não deve reconsultar o banco** para montar a mensagem.
+
+> **Evolução separada — substituição do grant futuro com crédito.** Creditar o grant futuro e
+> substituí-lo seria melhor para o cliente, e foi recusado como escopo deste PR: exige **modelar a
+> linhagem do crédito** (qual cobrança pagou o quê, e quando uma substitui a outra) e **definir
+> estorno e chargeback das duas cobranças** — a original e a substituta. **Não é apenas "um pouco
+> mais de código"**: é trabalho próprio, fora do 1b-A e do 1b-B, e o §11 mostra o que custa tratar
+> estorno sobre grant encadeado (uma coluna de estado por evento, e o `revoke` decidindo sozinho o
+> que fica de pé).
+
+Recusar, e não agendar: agendar é o certo para RENOVAÇÃO e já é o que aqueles ramos fazem; num **upgrade** o cliente pediu o tier maior AGORA, e vender caladamente um ano que só começa depois é o que o campo `agendada` existe para evitar. Antecipar acesso já comprado é o §4.4, não uma venda. A guarda é estreita: cobertura futura de tier **menor** não bloqueia (ali o upgrade entrega tier real). Achado pelo Codex no #304 (ramo Stripe) e a varredura da categoria achou o irmão (ramo Pix→Pix).
+
 `access_expires_at = access_starts_at + 365 dias`; crédito nunca vira tempo. **`ASAAS_MIN_CHARGE_CENTS` não tem default**: sem a env, venda 503. **Valor MEDIDO: 500 (R$ 5,00).** Método: `POST /v3/payments` com `billingType: PIX` contra o Sandbox do Asaas, em **2026-09-05** — R$ 0,50, R$ 1,00 e R$ 4,99 recusadas; R$ 5,00 aceita. Gravado no `.env` da raiz (não em código, e não no `.env.example`, que é do PR 1b).
 
 **O mínimo incide sobre o LÍQUIDO, e isso é o que importa mais que o número.** A recusa vem com *"O valor da cobrança (R$ 4,99) menos o valor do desconto (R$ 0,00) não pode ser menor que R$ 5,00"* — o Asaas compara depois de subtrair. Isso **confirma que a regra abaixo mira o campo certo**: se o mínimo fosse sobre o BRUTO, comparar `preço − crédito` com ele estaria comparando grandezas diferentes, e nada na suíte teria acusado.
@@ -560,7 +579,7 @@ drenar_evento(event_id):
         se NÃO casa ^pix:[0-9]+$ no externalReference:
             log "asaas_evento_fora_do_escopo" (contagem)   # SEM alerta, SEM linha
             marca processed_at; sai
-        insere linha 'orphan_unknown' + admin_notify
+        insere linha em pix_unmatched_payments + admin_notify   # NÃO em pix_charges
         marca processed_at; sai
 
     # B) GUARDA DE ÓRFÃO — antes do laço (nº 1)
@@ -569,12 +588,12 @@ drenar_evento(event_id):
         insert em pix_payment_effects (payment_id, 'orphan_notified')
         admin_notify; marca processed_at; sai       # NENHUM efeito de compra
 
-    # C) transição PRIMEIRO, efeitos DEPOIS e SÓ os que o evento autoriza
-    aplicou = transição condicional do §11 (UPDATE … WHERE status = <esperado> RETURNING)
-    efeitos = EFEITOS_POR_EVENTO[evt.event_type]
-    se não aplicou: efeitos = []                    # reentrega/no-op não dispara nada
+    # C) transição e efeitos são INDEPENDENTES, cada um idempotente por si
+    transição condicional do §11 (UPDATE … WHERE status = <esperado> RETURNING)
+                                                    # avança o estado SE ainda não avançou
+    efeitos = EFEITOS_POR_EVENTO[evt.event_type]    # SEMPRE — nunca zerada pela transição
     para cada efeito em efeitos (na ordem da lista):
-        se (asaas_payment_id, efeito) já existe: pula
+        se (asaas_payment_id, efeito) já existe: pula     # <- o ÚNICO gate
         executa; insert em pix_payment_effects (na mesma transação quando houver)
     marca processed_at
 ```
@@ -588,12 +607,40 @@ drenar_evento(event_id):
 | `PAYMENT_CREATED` | nenhuma | **nenhum** |
 | `PAYMENT_OVERDUE` | → `expired` | **nenhum** |
 | `PAYMENT_DELETED` | → `canceled` | **nenhum** |
-| `PAYMENT_REFUNDED` total | → `refunded` | `[revoke]` |
-| `PAYMENT_REFUNDED` parcial | → `refunded_partial` | **nenhum** (só alerta) |
+| `PAYMENT_REFUNDED` | → `refunded` | `[revoke]` |
+| `PAYMENT_PARTIALLY_REFUNDED` | → `refunded_partial` | **nenhum** (só alerta) |
+| `PAYMENT_REFUND_IN_PROGRESS` | **nenhuma** | **nenhum** (log) |
+| `PAYMENT_REFUND_DENIED` | **nenhuma** | **nenhum** (log) |
 | `PAYMENT_CHARGEBACK_*` | → `chargeback` | `[revoke]` |
 | desconhecido | nenhuma | **nenhum** (log) |
 
-Sem essa tabela, um estorno mandava `purchase` ao GA4 e `Purchase` à CAPI — receita inventada em cima de dinheiro devolvido. **`aplicou == False` zera a lista**: reentrega do mesmo `RECEIVED` não reexecuta nada nem mesmo se a tabela de efeitos tiver sido purgada.
+Sem essa tabela, um estorno mandava `purchase` ao GA4 e `Purchase` à CAPI — receita inventada em cima de dinheiro devolvido.
+
+**A regra `aplicou == False → efeitos = []` FOI REMOVIDA (P1-A, Codex no #304), e ela contradizia o §3.4 deste mesmo plano.** O §3.4 já dizia: *"o que autoriza parar é o registro do efeito **por pagamento**, nunca a transição de status"*. O §8.2 C dizia o contrário, e o contrário é um ponto de perda de dinheiro:
+
+> a transição commita sozinha, ANTES dos efeitos. Se o processo morre — ou um efeito levanta — depois desse commit, o evento continua pendente na outbox; a retentativa chama a transição de novo, recebe `None` porque a cobrança já é `paid`/`refunded`, e **roda zero efeitos**. Cliente pago sem grant, ou cliente estornado com acesso para sempre.
+
+É o defeito do #298 renascendo um nível abaixo: lá o `UPDATE … WHERE status` perdia efeitos e o conserto foi escrever o `processed_at` **depois** deles. A ironia é que `pix_payment_effects` existe exatamente para isto — mas o dreno nunca chegava a consultá-la, porque a lista já tinha sido esvaziada.
+
+**Agora as duas operações são independentes e cada uma é idempotente por si:** a transição avança o estado se ainda não avançou; os efeitos saem sempre de `EFEITOS_POR_EVENTO` e cada um é pulado individualmente pelo par `(asaas_payment_id, effect)`. **Nenhuma das duas é porteira da outra.**
+
+> **`returning` vazio NÃO quer dizer "já estava lá", e a versão anterior desta frase dizia isso.** O contrato de `transicionar` (`db/pix_charges.py`) é o que vale: o `None` **reúne duas situações OPOSTAS** — "já está no destino" (reentrega, cujos efeitos podem não ter rodado e têm de rodar) e "passou para um terminal que CONTRADIZ o evento" (a cobrança já é `refunded` e chega um `RECEIVED` atrasado, onde rodar `grant` é o erro). É por isso que ele não decide efeito nenhum, em nenhuma direção. Quando o plano e o docstring divergirem, o docstring é o contrato.
+
+Isto é seguro porque `pix_payment_effects` **nunca é purgada** — não aparece em nenhuma categoria do §13.1. O registro é permanente, então é autoridade suficiente. Se um dia alguém puser retenção nela, esta regra volta a ter um furo, e é aqui que se lê isso.
+
+**Duas consequências, e nenhuma é acidente:**
+- **reentrega do mesmo `RECEIVED`** continua não reexecutando nada — todos os pares já estão registrados. O que mudou é o MOTIVO: antes era a transição que barrava, agora é o registro, que é o que sobrevive a uma morte no meio.
+- **`RECEIVED` sobre cobrança já `refunded`** não reexecuta **quando os efeitos daquele pagamento já foram registrados** — que é o caminho em ordem (`RECEIVED` → `REFUNDED`): `grant` e os demais já estão em `pix_payment_effects` sob o mesmo `asaas_payment_id`, e o registro é o que barra. **A frase anterior ("a proteção não se perdeu") era incondicional e está errada:** o registro é a única proteção, então onde ele não existe não há proteção nenhuma. É exatamente o cenário da pendência 1 do §17.1 — o estorno chega ANTES do `RECEIVED`, nenhum efeito foi registrado, e os efeitos de compra rodam sobre dinheiro já devolvido. O docstring de `transicionar` (`db/pix_charges.py`) diz o mesmo pelo outro lado: o `None` do terminal que contradiz o evento **não** autoriza pular, e por isso não protege.
+- **`RECEIVED` sobre `draft`/`creating`** (transição que o §11 não prevê) passa a **rodar os efeitos** enquanto o estado fica para a reconciliação arrumar. É o certo: o dinheiro entrou, e negar acesso a quem pagou não é recuperável — mesmo raciocínio do fallback do `stripe_cancel`.
+
+**Correção P1-5 (Codex #304, conferida na doc oficial do Asaas): `PAYMENT_PARTIALLY_REFUNDED` é evento PRÓPRIO.** O plano tratava `PAYMENT_REFUNDED` como "total ou parcial" e ramificava pelo valor — isso não existe na plataforma. Um estorno parcial chegava como `PAYMENT_REFUNDED`, casava a linha "total" e disparava **`revoke`**: o acesso de quem teve R$ 1,00 devolvido morria inteiro.
+
+**E dois eventos que o plano ignorava, os dois de estorno:**
+
+- **`PAYMENT_REFUND_IN_PROGRESS`** — estorno agendado, **ainda não efetivado**. Transição nenhuma e efeito nenhum, de propósito: revogar aqui cortaria o acesso por um estorno que ainda pode ser **negado**, e desfazer revogação é mais caro que esperar. Quem revoga é o `PAYMENT_REFUNDED` que vier depois.
+- **`PAYMENT_REFUND_DENIED`** — estorno recusado (só boleto, mas a fila é a mesma). Transição nenhuma: como o `IN_PROGRESS` não mexeu em nada, não há o que reverter. É exatamente por isso que ele não mexe.
+
+Os dois entram na tabela como **conhecidos-e-no-op**, e não caem no ramo `desconhecido`: o log de evento desconhecido existe para revelar formato novo do provedor, e enchê-lo de eventos esperados é como ele para de ser lido. **A reentrega do mesmo `RECEIVED` não reexecuta nada porque os pares `(payment_id, effect)` já estão registrados** — não porque a transição a barre. A frase anterior aqui dizia que a lista era zerada por `aplicou == False`, "nem mesmo se a tabela de efeitos tiver sido purgada": era essa hipótese que sustentava a regra, e ela não se aplica — `pix_payment_effects` **não tem categoria de retenção no §13.1**, logo nunca é purgada. Trocar uma garantia permanente (o registro) por uma frágil (o estado ter avançado) custava exatamente o caso em que o processo morre no meio.
 
 **Ordem dos efeitos de pagamento (correção nº 3):** começa por **`stripe_cancel`**, que lê o `current_period_end` **agora**, reconfirma `pix_charges.stripe_period_end_at` e chama `Subscription.modify(cancel_at_period_end=True)`. Só depois o `grant` roda, usando **aquele** valor — nada de `starts_at` congelado em leitura anterior.
 
@@ -674,15 +721,20 @@ O que **nunca** é decidido no escuro:
 - **`creating` não expurga nunca.** É o estado ambíguo por definição: reconcilia; achou → `attach` + `pending`; não achou → volta a `draft`, que na passada seguinte cai na regra (b).
 - **`canceling` não vira `canceled` por tempo** — só com a prova (a).
 - **Consulta ao Asaas falhou?** A linha fica **como está**; a passada seguinte tenta de novo. Indisponibilidade do provedor não é evidência de inexistência.
+- **Resposta 2xx com forma INESPERADA também não é.** `GET /payments` sem `data`, com `data` de outro tipo, ou com o corpo noutro formato levanta `AsaasApiError` — **nunca vira `[]`**. A lista vazia é a metade que, com `asaas_payment_id is null`, autoriza APAGAR a linha, e o cenário de falha satisfaz as duas: POST efetiva no Asaas, resposta se perde, linha local sem `asaas_payment_id`, GET malformado — e a limpeza apagaria a linha com uma cobrança pagável viva. "Não sei" e "não existe" não podem ser o mesmo valor. P1-2 do Codex no #304; o Tester tinha apontado na rodada 1 e a justificativa que o defendia estava errada.
 - Mesma linha irreconciliável por mais de **24 h** → `admin_notify`: aí o problema é de integração, não de cobrança.
 
 ---
 
 ## 11. Máquina de estados da cobrança
 
-Estados: `draft` · `creating` · `pending` · `canceling` · `canceled` · `paid` · `paid_orphan` · `orphan_unknown` · `expired` · `refunded` · `refunded_partial` · `chargeback`.
+Estados de `pix_charges`: `draft` · `creating` · `pending` · `canceling` · `canceled` · `paid` · `paid_orphan` · `expired` · `refunded` · `refunded_partial` · `chargeback`.
+
+**São 11, e a lista é a mesma do `check pix_charges_status_valido`** (`db/schema.py`) — quem diverge das duas é recusado pelo banco, não por revisão. `orphan_unknown` **saiu**: ele não é estado desta tabela e sim linha de `pix_unmatched_payments` (§8.2 A), porque um pagamento sem cobrança nossa não tem plano, preço nem dono. A matriz abaixo não tem linha para ele pelo mesmo motivo.
 
 > **Coluna "RECEIVED / CONFIRMED":** no Pix **só o `PAYMENT_RECEIVED` ocorre** — a liquidação é instantânea e a plataforma pula o `CONFIRMED`, que é de cartão. As duas ficam na mesma coluna **por robustez** (se um dia vendermos cartão pelo Asaas, ou se a plataforma mudar), **não porque façam parte do fluxo**. Teste que exercitar `CONFIRMED` está exercitando robustez, e o §16 diz isso onde importa.
+
+> **Legenda do `—`, que faltava:** a célula com `—` quer dizer **"combinação não prevista"** — o dreno não tem regra de transição para ela. Não quer dizer "no-op" (que a tabela escreve com todas as letras) nem "impossível": o Asaas **não garante ordem de entrega**, então `pending × REFUND parcial` é `—` e mesmo assim **chega**. O que o dreno faz numa célula `—` é a pendência 1 do §17.1, e a divergência com o §8.2 está registrada lá.
 
 | estado \ evento | RECEIVED / *CONFIRMED* | OVERDUE | DELETED | REFUND total | REFUND parcial | CHARGEBACK | varredura |
 |---|---|---|---|---|---|---|---|
@@ -692,14 +744,19 @@ Estados: `draft` · `creating` · `pending` · `canceling` · `canceled` · `pai
 | `canceling` | → **`paid`** + efeitos + `admin_notify` | → `expired` | → `canceled` | — | — | — | repete o `DELETE` |
 | `canceled` | → **`paid`** + efeitos + `admin_notify` | no-op | no-op | — | — | — | — |
 | `expired` | → **`paid`** + efeitos (**tardio válido até 60 d**) | no-op | no-op | — | — | — | cancela no Asaas após 60 d |
-| `paid` | **no-op** (nenhum efeito, §8.2) | no-op | no-op | → `refunded` + `[revoke]` | → `refunded_partial`, não revoga, alerta | → `chargeback` + `[revoke]` | confere pago × esperado |
+| `paid` | **no-op** (nenhum efeito, §8.2) | no-op | no-op | `PAYMENT_REFUNDED` → `refunded` + `[revoke]` | `PAYMENT_PARTIALLY_REFUNDED` → `refunded_partial`, não revoga, alerta | → `chargeback` + `[revoke]` | confere pago × esperado |
 | `paid_orphan` | no-op | no-op | no-op | → `refunded` | → alerta | → `chargeback` | lista de conciliação |
-| `orphan_unknown` | no-op | no-op | no-op | → `refunded` | → alerta | → `chargeback` | lista de conciliação |
+| `refunded_partial` | no-op | no-op | no-op | → **`refunded`** + `[revoke]` | no-op (já parcial) | → **`chargeback`** + `[revoke]` | confere devolvido × esperado |
 | `refunded`/`chargeback` | só por reconciliação manual | no-op | no-op | no-op | no-op | no-op | log |
+
+**`refunded_partial` tem linha própria, e a ausência dela era buraco NOSSO.** Nós criamos o estado ao separar `PAYMENT_PARTIALLY_REFUNDED` (P1-5) e não enumeramos as SAÍDAS — a matriz definia as transições terminais só a partir de `paid`. Um estorno parcial seguido de estorno total, ou de chargeback, encontrava a cobrança em `refunded_partial`, não casava linha nenhuma, e **o `revoke` não rodava**: acesso ativo depois de o dinheiro inteiro ter voltado. É a forma do §4 do `CLAUDE.md` — estado novo sem enumerar o que sai dele —, e por isso a varredura desta rodada olhou os 11, não só o apontado.
 
 **A linha `user_id is null` saiu da tabela** (nº 1): não é estado, é **condição do titular**, e virou guarda do dreno (§8.2 B). Assim uma cobrança `pending` de conta excluída casa com **uma** linha só.
 
 `orphan_unknown` é a célula para **evento sem cobrança correspondente cujo `externalReference` é NOSSO** (§8.2 A): dinheiro do PigBank entrou e não havia linha — isso nunca se descarta em silêncio.
+
+**Correção P1-2 (Codex #304): ele NÃO é um estado de `pix_charges`, e não podia ser.** `plan`, `plan_stored`, `price_cents`, `credit_cents`, `amount_cents` e `public_token` são `not null`, e **nenhum desses dados existe num webhook órfão** — a linha era literalmente ininserível. Das duas saídas, a escolhida é **tabela própria, `pix_unmatched_payments`**, e não colunas anuláveis: o registro não é uma cobrança nossa (não tem plano, preço nem dono), e afrouxar seis `not null` tiraria a garantia do caminho de 100% das vendas para acomodar um caso que não é venda — todo leitor futuro de `amount_cents` passaria a precisar de um ramo de NULL.
+Ela guarda o que o webhook de fato traz: `asaas_payment_id`, `external_reference`, `value`, `netValue`, `status`, `dateCreated`, `customer`, `received_at`, `notified_at`. **Nasce no 1b-B, junto do dreno que a escreve** — regra do dono (§14). No 1b-A o `check pix_charges_status_valido` já **proíbe** o estado em `pix_charges`, para ninguém tentar enfiá-lo lá enquanto isso.
 
 **Mas "desconhecido" não é sinônimo de "nosso" (correção 5).** A conta Asaas é a **conta do negócio** e recebe outros Pix: cobrança criada à mão no painel, transferência avulsa, pagamento de um cliente por fora. Classificar tudo isso como `orphan_unknown` geraria alerta e fila de conciliação sobre **dinheiro de terceiros** — e alerta que dispara por dinheiro que não é problema é alerta que ninguém lê no dia em que for.
 
@@ -753,7 +810,10 @@ Efeito `revoke`: `revoke_grant('pix', charge_id, reason, event_version)` + `reco
 
 ### 13.2 Pseudonimização (molde exato da `plan_trials`)
 
-- `pix_charges.user_id` → **FK `on delete set null`**, criada por `ensure_pix_charges_user_fk(cur)` em `db/schema_repairs.py`, espelhando `ensure_plan_trials_user_fk` (`:95-120`), inclusive o índice do lado que referencia.
+- `pix_charges.user_id` → **FK `on delete set null` DECLARADA INLINE no `create table`** (`db/schema.py`), mais **`"pix_charges"` em `_USER_FK_SET_NULL_TABLES`** (`db/schema_repairs.py`) e o índice do lado que referencia (`idx_pix_charges_user`).
+  **Não existe `ensure_pix_charges_user_fk`, e criá-la seria um defeito.** A `ensure_plan_trials_user_fk` existe porque a `plan_trials` nasceu SEM FK nenhuma, e o `repair_user_fk_cascades` só AJUSTA constraint existente — tabela sem FK passa despercebida. A `pix_charges` nasce COM a FK declarada, então uma função espelhada seria código morto no dia 1.
+  **O que a protege é a linha no conjunto**, e ela não é opcional: o `repair_user_fk_cascades` roda em TODO `init_db` e reescreve o `on delete` de toda FK em `users(id)`. Sem `"pix_charges"` lá, ele converte a declaração `set null` em `cascade` na primeira subida, **em silêncio**, e a pseudonimização morre junto com a prova do pagamento. Medido: o log diz `schema_repairs ajustou 1 FK(s): [{'table': 'pix_charges', 'from': 'SET NULL', 'to': 'CASCADE'}]`, e a linha financeira some.
+  Duas fontes decidindo o `on delete` da MESMA FK, uma rodando depois da outra a cada boot, é exatamente o que o `CLAUDE.md` §0.7 proíbe.
 - `pix_charges` fica **fora** de `user_owned_tables` (`db/privacy.py:766`), com comentário citando `:889`: o vínculo some **pelo banco, não por UPDATE**, porque UPDATE perde a corrida com um commit concorrente e a varredura pós-commit nunca revisita a tabela.
 - Colunas zeradas na exclusão: `ga_client_id`, `fbp`, `fbc`, `qr_payload_enc`, `asaas_customer_id`; `purged_at` marcado. O UPDATE **não é a garantia**: a varredura diária re-zera qualquer linha com `user_id is null and purged_at is null`.
 - **Sobra para reconciliar:** `external_reference`, `asaas_payment_id`, valores, plano, status e datas.
@@ -799,7 +859,7 @@ Guarda do dreno (§8.2 B), não estado da tabela: transição com destino **`pai
 
 **PR 1a** — 1) `db/schema.py`: `plan_grants` + resync (§5). 2) `db/plan_grants.py` (novo): upsert com guarda de versão, criação-única para `pix`, supersessão do `legacy`, revoke. **A antecipação (§4.4) NÃO entra no 1a** — vai para o 1b junto com `pix_charges`. 3) `core/services/billing_access.py` (novo): `recompute_entitlement` (§4). **`plano_da_cobranca` (§7) NÃO entra no 1a** — função pura sem chamador no 1a é código especulativo (CLAUDE.md §0.2); vai para o 1b. 4) `frontend/finance_bot_websocket_custom.py`: os quatro sites (`:4699`, `:4852`, `:5032`, `:5033`) passam a grant + recompute, com o **grant como PRIMEIRO efeito e sem `except`** (§4.1.1 A) — falha vira 5xx retryable; mais o helper único de **normalização da referência de assinatura** (`_sub_ref`: id simples **e** objeto expandido produzem a MESMA `external_ref`), usado por `checkout.session.completed` e por `invoice.paid`; e `revoke_grant` no `deleted` **com o `external_ref` da assinatura que o evento nomeia**. 4b) `db/checkout_funnel.py` + DDL: **unique parcial só em `kind='completed'`** (`db/schema.py:1880`), **sem `on conflict`** — quem absorve a reentrega é o `except` que a função já tinha, e ele loga (§4.1.2); e dedup de e-mail no `_fire_email`. 5) **`core/admin_dashboard.py::set_account_plan`**: escreve grant `source='admin'`, `external_ref='admin:<uid>'`, `event_version = epoch(now)`. **A revogação dos grants ativos vale para TODA troca manual de plano** (conserto D3), não só para `free`: sem isso, baixar de Pro para Essencial na mão deixava o grant de Pro vivo e a projeção devolvia o Pro na passada seguinte. Para `free`, o resultado é o mesmo de antes — revoga e não cria grant novo. Um lugar só — `/admin/api/users/{id}/plan` e `/admin/grant-pro` compartilham a escrita (nº 9). 6) loop de 60 s de re-projeção + varredura diária.
 
-**PR 1b** — 7) `db/schema.py`: `pix_charges`, `pix_webhook_events`, `pix_payment_effects`, índices. 8) `db/schema_repairs.py`: `ensure_pix_charges_user_fk`. 9) `db/pix_charges.py`, `db/webhook_outbox.py` (novos). 10) `core/services/asaas.py` (novo, molde de `core/services/pluggy.py` com `httpx`; erros **sem corpo da resposta**, que traz PII). 11) `frontend/routes/billing_pix.py` (novo): `POST /billing/pix/checkout`, `GET /billing/pix/{id}` (404 para dono errado), `POST /billing/asaas/webhook` + `EFEITOS_POR_EVENTO`. 12) monólito: `CSRF_EXEMPT_PATHS` +1 (`:1892`), `include_router`, `/billing/subscription` (`:4318`) reconhece Pix **antes** do Stripe (`gateway:"pix"`), `_billing_checkout_for_user` (`:3963`) recusa com Pix vigente, `plans-config` (`:4163`) + `pix_annual_available`, dreno no loop de 60 s. 13) `core/services/engagement_scheduler.py`: reconciliação da saga, cancelamento remoto aos 60 d, retenção/purga/pseudonimização, e `_check_pix_annual_ending()` — **função irmã** do `_check_trial_ending` (`:206`), não reuso (aquela filtra `plan='pro' and last_payment_status='trialing'`); SQL próprio com `join plan_grants … source='pix'`, janelas 6,5–7,5 e 2,5–3,5 dias, dedup `recent_event_exists(…, 2.0)`. 14) `core/services/email_service.py`: `send_pix_annual_ending_email`. 15) `db/privacy.py` (export + comentário) e `frontend/privacy.html`.
+**PR 1b** — 7) `db/schema.py`: `pix_charges`, `pix_webhook_events`, `pix_payment_effects`, índices. **`ga_client_id`, `fbp` e `fbc` nascem no MESMO PR que trouxer seus escritores e a purga do §13.2 — nunca soltas "para já deixar pronto"** (decisão do dono, 2026-09-07; o PR 1b-A criou as outras colunas e deixou estas três de fora justamente por isso). Coluna de rastreio publicitário sem purga é dado que sobrevive à exclusão da conta, e o gap fica descrito por um teste invertido em vez de não existir. `alter table … add column if not exists` é barato num repositório que roda DDL idempotente a cada boot; o gap não é. 8) `db/schema_repairs.py`: **uma linha** — `"pix_charges"` em `_USER_FK_SET_NULL_TABLES`. **NÃO escreva `ensure_pix_charges_user_fk`**: a FK é declarada inline no `create table` (item 7), então a função espelhada da `plan_trials` seria código morto, e teria o efeito colateral de pôr duas fontes decidindo o mesmo `on delete` (§13.2, §0.7). **Feito no PR 1b-A.** 9) `db/pix_charges.py`, `db/webhook_outbox.py` (novos). 10) `core/services/asaas.py` (novo, molde de `core/services/pluggy.py` com `httpx`; erros **sem corpo da resposta**, que traz PII). 11) `frontend/routes/billing_pix.py` (novo). **Ao registrar este router, o portão `tests/test_pix_rota_inerte.py` tem de MUDAR DE FORMA no MESMO PR: ele hoje PROÍBE rota de Pix, e passa a ter de EXIGI-la.** Não é opcional — aquele portão mede o app importado, então um registro atrás de `if os.getenv("PIX_ANUAL_ENABLED")` (a forma que o monólito já usa em `ENABLE_DEV_ENDPOINTS`, `:2062`) passaria verde por ele sem uma linha vermelha, e um portão que segue dizendo "não existe rota de Pix" depois do Pix ligado é mentira verde. Rotas: `POST /billing/pix/checkout`, `GET /billing/pix/{id}` (404 para dono errado), `POST /billing/asaas/webhook` + `EFEITOS_POR_EVENTO`. 12) monólito: `CSRF_EXEMPT_PATHS` +1 (`:1892`), `include_router`, `/billing/subscription` (`:4318`) reconhece Pix **antes** do Stripe (`gateway:"pix"`), `_billing_checkout_for_user` (`:3963`) recusa com Pix vigente, `plans-config` (`:4163`) + `pix_annual_available`, dreno no loop de 60 s. 13) `core/services/engagement_scheduler.py`: reconciliação da saga, cancelamento remoto aos 60 d, retenção/purga/pseudonimização, e `_check_pix_annual_ending()` — **função irmã** do `_check_trial_ending` (`:206`), não reuso (aquela filtra `plan='pro' and last_payment_status='trialing'`); SQL próprio com `join plan_grants … source='pix'`, janelas 6,5–7,5 e 2,5–3,5 dias, dedup `recent_event_exists(…, 2.0)`. 14) `core/services/email_service.py`: `send_pix_annual_ending_email`. 15) `db/privacy.py` (export + comentário) e `frontend/privacy.html`.
 
 **PR 2** — 16) `frontend/precos.html`: botão "Pagar no Pix (à vista)" só no Anual; modal com **"Copiar código Pix" como ação primária**; linha de crédito/vigência; modal do §9 com o aviso do §4.4; poll com teto; sucesso reaproveita `/home?upgrade=success&sid=<public_token>&ev=purchase&td=0&pl=…&ia=…` (`home.html:2120`), que dedupe o pixel com a CAPI pelo `eventID`. **O `sid` é o `public_token`, nunca o `asaas_payment_id`** (§13.6) — ele vai para a Meta no `fbq(… eventID: "purchase_" + sid)` de `home.html:2151`. 17) **`tests/frontend/precos_pix_anual.test.mjs`** (novo, §16.1).
 
@@ -994,11 +1054,55 @@ Controles do grupo: **negativo** — tire a condição de ciclo do render do bot
 
 **Fronteira de rollback segura é o 1a**, e é onde mora o risco do §5 — por isso ele sobe sozinho.
 
+### 17.1 Pendências OBRIGATÓRIAS do 1b-B (abertas — decisão do dono)
+
+**Isto não é solução, é a lista do que está aberto.** As cinco nasceram do ataque ao PR 1b-A (#304) e **nenhuma se resolve nele**: o 1b-A entrega tabelas, índices, FK e o contrato de `transicionar`; as cinco decidem o comportamento do **dreno**, que é código do 1b-B. Quatro rodadas de redesenho escolheram quatro respostas diferentes para a mesma pergunta e as quatro foram reprovadas — por isso aqui elas ficam registradas como pergunta, não como matriz nova. **A matriz do §11 e o §8.2 continuam como estão.**
+
+**1. Estorno parcial fora de ordem roda o efeito de COMPRA.**
+*Cenário:* `PAYMENT_PARTIALLY_REFUNDED` é entregue ANTES do `PAYMENT_RECEIVED` numa cobrança ainda `pending` (o Asaas não garante ordem; quem ordena é o `event_version` do §6, que ordena o PROCESSAMENTO, não a chegada). A cobrança vai a `refunded_partial`; o `RECEIVED` chega depois, não casa nenhuma origem da célula do §11 — `pending`/`canceling`/`canceled`/`expired` —, a transição devolve `None`, **e os efeitos de compra rodam assim mesmo**, porque quem decide efeito é o registro do efeito (§3.4, e é a regra certa). `grant`, `ga4`, `capi` e `email` num pagamento já parcialmente devolvido.
+*Evidência:* medido contra o Postgres (dono, 2026-09-08).
+*Por que não se resolve aqui:* a tentativa óbvia de conserto foi **medida e é pior**. Acrescentar `refunded_partial` às origens do `RECEIVED` torna a transição `refunded_partial → paid` **RE-APLICÁVEL numa reentrega**: o `paid_at` é recarimbado e a janela é reescrita. (A frase "a janela é decidida uma vez, no pagamento" está no §6.1, mas lá ela é sobre o **grant** — `plan_grants`, criação única —, não sobre `pix_charges.access_*`; o que a recarimbagem quebra aqui é a mesma ideia aplicada à cobrança, e ela não tem parágrafo próprio no plano.) Os dois estão medidos; os dois seguem abertos. A escolha entre "recusar o RECEIVED tardio" e "aceitá-lo sem recarimbar" é do dono.
+
+*A pergunta tem uma DIVERGÊNCIA embutida, e ela faz parte da pergunta — não escolha por conta própria.* O cenário acima só existe sob a leitura do §8.2. O plano diz duas coisas incompatíveis sobre `pending × REFUND parcial`:
+
+- **a linha `pending` da matriz do §11** (`plano:743`, medido em 2026-09-08 — remeça antes de reusar) põe `—` nessa célula, ou seja, combinação **não prevista**: sob esta leitura a cobrança **continua `pending`** e nada acontece;
+- **a linha `PAYMENT_PARTIALLY_REFUNDED` da tabela do §8.2** (`plano:611`) roteia `→ refunded_partial` **sem estado de origem**, ou seja, de qualquer estado: sob esta leitura ela vai a `refunded_partial`;
+- **o *Cenário* desta própria pendência** (`plano:1062`) afirma que "a cobrança vai a `refunded_partial`", isto é, já adotou a leitura do §8.2 sem dizer que estava escolhendo.
+
+Enquanto o dono não decidir qual das duas vale, "a matriz do §11 e o §8.2 continuam como estão" (frase de abertura deste §17.1) **não é suficiente para implementar**: as duas discordam nesta célula. A decisão de qual vence é parte da pendência 1.
+
+**2. O curinga `PAYMENT_CHARGEBACK_*` inverte o sinal do evento.**
+*Cenário:* a linha `| PAYMENT_CHARGEBACK_* | → chargeback | [revoke] |` do §8.2 (`plano:614`) casa **três** eventos com significados diferentes. Pela doc oficial do Asaas: `PAYMENT_CHARGEBACK_REQUESTED` é o chargeback **aberto**; `PAYMENT_AWAITING_CHARGEBACK_REVERSAL` significa que **NÓS GANHAMOS** a disputa (depois dele o status do pagamento volta a `RECEIVED`); e, **perdendo**, o que chega é `PAYMENT_REFUNDED`. Sob o curinga, o evento que anuncia a **vitória** é o que **revoga o acesso do cliente**.
+*Evidência:* leitura da doc oficial do Asaas (dono, 2026-09-08). **NÃO verificado contra o Sandbox** — ver §18.
+*Por que não se resolve aqui:* nada disto é schema. Trocar o curinga por três linhas nomeadas muda a tabela de roteamento do dreno, que é 1b-B, e a decisão de o que fazer no `AWAITING_CHARGEBACK_REVERSAL` (nada? reconceder? só alertar?) é do dono.
+
+**3. `paid_at` sem janela — FECHADO NO BANCO por este PR. Pendência de CONHECIMENTO, não de conserto.**
+*Cenário:* o dreno grava `paid_at` e esquece `access_starts_at`/`access_expires_at`. Antes, a linha entrava calada e o cliente ficava pago sem acesso.
+*Evidência:* a constraint `pix_charges_pago_tem_janela` existe desde o 1b-A (`db/schema.py`), com as três formulações medidas em `tests/test_pix_invariantes_do_banco.py`. A exceção é `user_id is null` (titular ausente, §13.4) e **não** `status = 'paid_orphan'`: a exceção por status recusaria o **estorno posterior do órfão**, porque `paid_orphan → refunded` deixa o status para trás.
+*O que o 1b-B precisa saber:* a garantia agora é **do banco**, e ela é CONDICIONAL. Uma transição para `paid` sem os dois carimbos levanta **`CheckViolation`** — **desde que a cobrança tenha titular**. Medido: titular vivo → `CheckViolation`; titular já excluído (`user_id is null`, o órfão do §13.4) → **aplica em silêncio**, porque não há a quem conceder e essa é a exceção do `CHECK`. Onde ele levanta, o dreno tem de tratar como falha retryable do evento (a outbox reentrega), nunca como 500 mudo. Os testes do 1b-A que só transicionavam para `paid` passaram a ter de passar a janela; foi assim que o efeito ficou visível.
+
+*O que o `CHECK` NÃO cobre* (medido por SQL cru; a lista mora também no docstring de `tests/test_pix_invariantes_do_banco.py`): `status = 'paid'` **sem** `paid_at` — o gatilho é o carimbo, não o status —, janela **invertida**, janela de **duração zero**, janela **inteira no passado**, e o órfão indo a `paid` liso sem janela. **Não ampliar é decisão do dono:** nenhum desses é alcançável pela API do módulo (`transicionar` sempre carimba `paid_at`, e `plano_da_cobranca` devolve `access_expires_at > access_starts_at` por construção), e cada ampliação tentada custou uma rodada. Quem reparar linha à mão por `psql` é quem precisa saber que estes cinco passam.
+
+*E há um segundo motivo para o `CHECK` não ser rede de segurança total:* ele entra com **`not valid`** (`db/schema.py`), porque `add constraint` simples derruba a subida do app se existir UMA linha legada violando — medido: `CheckViolation` no `_run_ddl` → `raise` → `_startup_required` mata o boot, e como a conexão é autocommit o `drop constraint if exists` já commitou, deixando o banco **sem** o constraint e sem nenhum statement posterior. `not valid` barra toda linha nova ou atualizada e não olha a população existente — se um dia houver linha legada ruim, ela continua lá.
+
+**4. Dois estornos parciais somando 100% deixam o acesso vivo.**
+*Cenário:* a matriz do §11 define `refunded_partial × parcial = no-op`. Dois `PAYMENT_PARTIALLY_REFUNDED` de 50% cada devolvem o dinheiro **inteiro** e o status **nunca chega a `refunded`** — fica em `refunded_partial`. Qualquer regra que teste "foi devolvido?" pelo STATUS nunca revoga: dinheiro todo de volta, acesso mantido pelos 365 dias.
+*Evidência:* consequência direta da célula `refunded_partial × parcial` do §11 (`plano:748` descreve a lacuna irmã, que foi fechada; esta não).
+*Por que não se resolve aqui:* somar valor estornado exige guardar `refunded_cents` (coluna que não existe) **ou** perguntar o total ao Asaas — e a escolha entre revogar automaticamente, alertar, ou não fazer nada é decisão de negócio do dono, não de schema.
+
+**5. Entre `efeito_registrado` e `registrar_efeito` cabe o TRABALHO EXTERNO, não só a linha.**
+*Cenário:* dois eventos **distintos** do mesmo `payment.id` (um `PAYMENT_CONFIRMED` e um `PAYMENT_RECEIVED`, ou uma reentrega com `event_id` novo) são drenados **em paralelo**. Cada um trava uma linha **de outbox diferente**, então o `select … for update skip locked` do dreno **não os serializa** — ele serializa por `event_id`, e a chave do efeito é `(asaas_payment_id, effect)`. Os dois leem `efeito_registrado(...) is False`, os dois executam: **dois e-mails ao cliente, dois `purchase` no GA4, dois `Purchase` na CAPI** em cima do mesmo dinheiro. O `on conflict do nothing` de `registrar_efeito` só desempata **depois**, devolvendo `False` a uma das passadas para trabalho que já aconteceu. Ele garante **uma linha por par**, e nada sobre quantas vezes o mundo lá fora foi tocado.
+*Evidência:* apontamento do Codex no #304 (2026-09-08), no `registrar_efeito`. Achado de forma independente pelo nosso Tester na mesma rodada, que o classificou como **P3** — a divergência de severidade também é do dono: P3 vira P1 se o efeito `email` ou o `capi` for o que roda duas vezes.
+*Por que não se resolve aqui:* **não há dreno.** `grep 'registrar_efeito(' --include=*.py` fora de `tests/` devolve zero (medido em 2026-09-08 — remeça antes de reusar), e serialização sem consumidor não se mede: um lock escrito hoje passaria verde sem provar nada, que é o mesmo motivo pelo qual o `skip locked` ficou fora do 1b-A. O que o 1b-A entrega é o **contrato**, escrito nos docstrings de `registrar_efeito` e `efeito_registrado` (`db/webhook_outbox.py`): o par consulta+insert protege a LINHA, e **serializar por `(asaas_payment_id, effect)` é obrigação do dreno**.
+*Direção sugerida pelo Codex, como **opção a avaliar** e não como decisão tomada:* **advisory lock** por `(payment_id, effect)` segurando consulta + execução + registro no mesmo escopo, mais **chave de idempotência do provedor** (GA4/CAPI/e-mail) para o caso do crash entre a execução e o registro — que nenhum lock cobre, porque o processo morre com o lock. Alternativas não descartadas: registrar o efeito **antes** de executar e tratar a falha como retryable (troca "executa duas vezes" por "pode não executar"), ou aceitar a duplicata onde ela for barata e proteger só `email` e `capi`. Qual vale é decisão do dono, no 1b-B.
+
 ---
 
 ## 18. Não verificável aqui, e o que falta decidir
 
 **Não se prova neste ambiente:** chamada real ao Asaas (customer com `cpfCnpj`, cobrança, `pixQrCode`, `DELETE`, busca por `externalReference`), o header real do webhook, a pausa da fila após 15 falhas, pagamento Pix e pagamento tardio reais, cancelamento manual no painel do Stripe, o GA4 ter aceitado o `purchase` (o endpoint responde 204 para quase tudo, `ga4_mp.py:147`), a **leitura física do QR** no aparelho (o headless não lê câmera, e dentro do app o aparelho não se escaneia). A lógica da `precos.html` **passa a ser testada** no `precos_pix_anual.test.mjs` (§16.1); o que sobra de manual ali é só o que precisa de câmera e de deploy.
+
+**Os três nomes de evento de chargeback vieram da DOC OFICIAL e NÃO foram verificados contra o Sandbox** (§17.1, pendência 2): `PAYMENT_CHARGEBACK_REQUESTED` (disputa aberta), `PAYMENT_AWAITING_CHARGEBACK_REVERSAL` (**nós ganhamos**; o status volta a `RECEIVED`) e `PAYMENT_REFUNDED` (nós perdemos). O desenho atual — o curinga `PAYMENT_CHARGEBACK_*` do §8.2 — **revoga no evento da vitória**, e a correção depende de confirmar estes três nomes e o status resultante numa cobrança de Sandbox. Silêncio sobre isto se leria como verificado (`CLAUDE.md` §7).
 
 **Fato que eu NÃO verifiquei e que veio do coordenador** (doc oficial): ids de evento próprios, `payment.id` estável, e o fluxo Pix `CREATED → RECEIVED` sem `CONFIRMED`. O desenho não depende de o `CONFIRMED` existir; se a plataforma passar a emiti-lo, a coluna fundida do §11 e o caso 29 de robustez já cobrem.
 
