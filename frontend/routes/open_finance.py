@@ -1153,6 +1153,12 @@ async def open_finance_pluggy_webhook(request: Request):
         # o comentário do `item` seis linhas abaixo existe para evitar. Recusar no
         # parse põe o caso na classe que este handler JÁ tratava com 400 desde
         # antes ("corpo que não é JSON"), sem política nova nem saneamento depois.
+        # NÃO fecha a metade de STRING da mesma via: NUL (`\u0000`) e surrogate
+        # solitário, no valor OU na chave, seguem chegando ao `Jsonb(raw)` de
+        # update_pluggy_open_finance_item_status, ao param `text` do item_id e à
+        # lista de transactionIds do `any(%s)` em delete_open_finance_transactions
+        # (psycopg a adapta como text[]) → 500.
+        # Pré-existente (a `main` também dá 500) e só alcançável com o secret.
         event = json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
