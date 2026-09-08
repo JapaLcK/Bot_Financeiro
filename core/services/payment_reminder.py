@@ -88,6 +88,16 @@ async def check_payment_reminder() -> None:
     `LIMIT`, e quem pagou no meio dele não pode receber "a cobrança continua
     pendente". A máquina completa está em `docs/dunning_estados_eventos.md`.
 
+    **UMA LINHA RUIM NÃO DERRUBA O LOTE.** O chamador embrulha esta função
+    inteira num `except`, então toda exceção que escapa daqui abandona os
+    candidatos SEGUINTES — e eles podem sair da janela antes do próximo tick.
+    Por isso toda operação por linha que pode levantar tem `except` PRÓPRIO,
+    com log específico e `continue`: decriptação de PII, checagem de grant,
+    revalidação e envio. Enumeração da classe (com quem levanta, quem não
+    levanta e por quê) em `tests/test_payment_reminder_lote.py`. Não troque isso
+    por um `try` em volta do corpo do laço: a granularidade é o que faz o log
+    dizer QUAL etapa falhou.
+
     E-MAIL é o caminho garantido; o WhatsApp é melhoria. Ver `_wa_lembrete`.
     """
     if not payment_reminder_enabled():
@@ -119,19 +129,57 @@ async def check_payment_reminder() -> None:
         if user_id in plan_service._ACCESS_ALLOWLIST:
             continue
         if row.get("email_enc"):
-            email = decrypt_pii_optional(
-                row["email_enc"],
-                ctx=PiiAccessContext(
-                    purpose="send_payment_reminder_email",
-                    actor="system:engagement",
-                    subject_user_id=user_id,
-                    field="email",
-                ),
-            )
+            # Decriptação é operação POR LINHA e LEVANTA: chave errada ou
+            # ciphertext corrompido saem de `core.crypto.decrypt_pii` como
+            # `RuntimeError` (`InvalidToken`, :237-240), e versão desconhecida
+            # ou `PII_ENCRYPTION_KEY_*` ausente também (`_load_fernet`, :115).
+            # Sem este `try` a exceção escapava `check_payment_reminder`
+            # INTEIRA, e o `except` do chamador
+            # (`engagement_scheduler.run_engagement_loop`) abandonava o RESTO do
+            # lote: UMA linha ruim custava o lembrete de todos os candidatos
+            # seguintes, que podem sair da janela de
+            # `PAYMENT_REMINDER_WINDOW_DAYS` antes do próximo tick.
+            #
+            # `continue`, e NUNCA `email = row["email"]` como fallback:
+            # `email_enc` que existe e não decifra é sinal de problema de
+            # CHAVE, não permissão para usar a coluna em claro.
+            #
+            # O log leva `user_id` e a exceção, e nenhum e-mail — não há o que
+            # mascarar com `_mask_email` (o que falhou foi justamente obter o
+            # endereço), e as mensagens de `core/crypto.py` carregam versão e
+            # nome de env, nunca o valor.
+            try:
+                email = decrypt_pii_optional(
+                    row["email_enc"],
+                    ctx=PiiAccessContext(
+                        purpose="send_payment_reminder_email",
+                        actor="system:engagement",
+                        subject_user_id=user_id,
+                        field="email",
+                    ),
+                )
+            except Exception as exc:
+                logger.error("[cobranca] decriptacao do e-mail falhou"
+                             " user_id=%s: %s", user_id, exc)
+                continue
         else:
             email = row["email"]
         if not email:
             continue
+        # SEM `try`, e isso é medido, não descuido: `recent_event_exists`
+        # (`core/observability.py:288-313`) tem `except Exception` próprio e
+        # devolve `False` em QUALQUER falha — política declarada na docstring
+        # dela ("melhor mandar duplicado que perder"). Medido nos três modos:
+        # banco inalcançável, URL inválida e `DATABASE_URL` vazia → `False`,
+        # nenhum levantou. Um `try` aqui embrulharia código que provadamente
+        # não levanta (§0.2). Se algum dia aquele `except` sair, este ponto
+        # volta a poder derrubar o lote — `tests/test_payment_reminder_lote.py`
+        # amarra essa dependência.
+        #
+        # A assimetria com `ciclo_de_atraso_aberto` abaixo é de PROPÓSITO: a
+        # dedupe falha ABERTA (manda, no pior caso duplicado) e a revalidação
+        # falha FECHADA (não manda). São perguntas diferentes e as direções
+        # seguras são opostas.
         if await loop.run_in_executor(
             None, recent_event_exists, "payment_reminder_sent", user_id,
             PAYMENT_REMINDER_DEDUPE_DAYS,
