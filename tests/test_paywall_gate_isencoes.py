@@ -3,7 +3,10 @@
 Quem está barrado tem de conseguir DUAS coisas: assinar e pedir ajuda. É o mesmo
 papel do `_GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")` da web
 (frontend/routes/shared.py). O veredito do gate em si mora no
-`test_paywall_gate_bot.py`; aqui só se mede o que ele deixa passar.
+`test_paywall_gate_bot.py`; aqui se mede o que ele deixa passar, e se a RESPOSTA
+que o isento recebe é verdadeira pra quem está barrado (o bloco P2 no fim). Que
+ele responde ele mesmo, em vez de deixar a mensagem seguir, é o
+`test_paywall_gate_responde.py`.
 
 A CLASSE de bug que este arquivo fecha (§4 do CLAUDE.md — enumerar, não
 remendar): a isenção fazia string matching com `.strip().lower()` enquanto o
@@ -28,6 +31,7 @@ from core.types import Attachment
 from _paywall_gate_helpers import (  # noqa: F401  (v2_ligado é fixture autouse)
     barrado as _barrado,
     cadastro_novo as _cadastro_novo,
+    com_plano as _com_plano,
     diga as _diga,
     v2_ligado,
 )
@@ -165,3 +169,52 @@ def test_anexo_com_legenda_isenta_continua_barrado(nome, tipo, legenda):
 
     assert _barrado(resposta), f"anexo passou com legenda {legenda!r}: {resposta!r}"
     assert db.list_launches(uid) == []
+
+
+# ---------------------------------------------------------------------------
+# P2: a resposta de billing conhece o estado "não escolheu plano".
+#
+# CONTROLE NEGATIVO: apague o `if _sem_plano_escolhido(...)` de `_handle_plano`
+# e de `_handle_cancelar` (core/services/billing_commands.py) — os dois primeiros
+# testes abaixo ficam vermelhos; o de `assinar` continua verde (ele é o controle
+# positivo: a saída de emergência do barrado não pode ter mudado).
+# ---------------------------------------------------------------------------
+
+def test_barrado_pergunta_plano_e_nao_recebe_franquia_do_gratis():
+    uid = _cadastro_novo()
+
+    resposta = _diga(uid, "plano").lower()
+
+    assert "30 lançamentos" not in resposta, resposta
+    assert "plano: *grátis*" not in resposta, resposta
+    assert "assinar plano" in resposta, resposta
+
+
+def test_barrado_manda_cancelar_e_nao_ouve_que_esta_tudo_de_graca():
+    uid = _cadastro_novo()
+
+    resposta = _diga(uid, "cancelar").lower()
+
+    assert "tudo de graça" not in resposta, resposta
+    assert "assinar plano" in resposta, resposta
+
+
+def test_barrado_manda_assinar_e_continua_recebendo_o_link():
+    """A saída de emergência do barrado. Nada aqui pode ter mudado."""
+    uid = _cadastro_novo()
+
+    resposta = _diga(uid, "assinar")
+
+    assert not _barrado(resposta), resposta
+    assert "pigbank" in resposta.lower(), resposta
+    assert "http" in resposta, resposta
+
+
+def test_quem_escolheu_o_gratis_continua_vendo_a_franquia_do_gratis():
+    """A copy do Grátis não pode ter sumido para quem NÃO está barrado — ela é
+    verdadeira para quem já escolheu um plano e caiu no Grátis."""
+    uid = _com_plano()
+
+    resposta = _diga(uid, "plano")
+
+    assert "30 lançamentos" in resposta, resposta

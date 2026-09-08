@@ -152,10 +152,34 @@ def _handle_assinar(user_id: int, platform: str) -> str:
     )
 
 
+# Cadastro sem plano escolhido é BARRADO pelo bot (`_paywall_gate`), e `plano` /
+# `cancelar` são justamente os comandos que ele é levado a mandar: a copy do
+# Grátis ("30 lançamentos/mês", "tá tudo de graça mesmo") prometeria a ele
+# direitos que a próxima mensagem leva um "sua conta precisa estar ativa".
+_SEM_PLANO_MSG = (
+    "🐷 Sua conta ainda não escolheu um plano — por isso eu ainda não consigo "
+    "anotar nada por aqui, e não há assinatura a cancelar.\n\n"
+    "Escolhe um e eu já começo: manda {assinar} 🐷✨"
+)
+
+
+def _sem_plano_escolhido(user_id: int, user: dict | None = None) -> bool:
+    """Fonte única do estado: o mesmo `needs_plan_selection` que o gate do bot
+    usa pra barrar. Import defensivo pelo mesmo motivo do `_handle_plano` —
+    testes (e deploys sem a escada v2) mockam plan_service só com `is_pro`."""
+    try:
+        from core.services.plan_service import needs_plan_selection
+    except ImportError:
+        return False
+    return needs_plan_selection(user_id, user)
+
+
 def _handle_cancelar(user_id: int, platform: str) -> str:
     from core.services.plan_service import is_pro
 
     if not is_pro(user_id):
+        if _sem_plano_escolhido(user_id):
+            return _SEM_PLANO_MSG.format(assinar=_bold("assinar plano", platform))
         return "🐷 Você tá no plano Free — não tem o que cancelar. Tá tudo de graça mesmo."
 
     link = build_dashboard_link(user_id, hours=1.0, next_path="/conta")
@@ -195,6 +219,9 @@ def _handle_plano(user_id: int, platform: str) -> str:
         tier = get_plan_tier(user_id)
 
         if tier == "free":
+            # `user` já veio do get_auth_user acima — sem SELECT novo.
+            if _sem_plano_escolhido(user_id, user):
+                return _SEM_PLANO_MSG.format(assinar=b("assinar plano"))
             return (
                 f"🐷 Plano: {b('Grátis')}\n\n"
                 f"O que vem aqui:\n"

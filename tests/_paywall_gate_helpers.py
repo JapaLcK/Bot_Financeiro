@@ -36,6 +36,15 @@ def cadastro_novo() -> int:
     return int(user["user_id"])
 
 
+def com_plano() -> int:
+    """Cadastro que já passou pela /precos — o gate deixa passar. É o controle
+    positivo dos dois arquivos: sem ele, um gate que recusa TODO MUNDO passaria
+    verde."""
+    uid = cadastro_novo()
+    db.mark_plan_selected(uid)
+    return uid
+
+
 def diga(uid: int, texto: str, plataforma: str = "whatsapp", anexos=None) -> str:
     """Uma mensagem pelo `handle_incoming` — nunca pelo `_paywall_gate` isolado
     (§3 do CLAUDE.md: rode a conversa, não a função)."""

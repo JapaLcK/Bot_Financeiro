@@ -474,6 +474,10 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     liberado no fluxo legado do paywall. Retorna a mensagem de convite quando o
     usuário não tem acesso, ou None pra seguir o fluxo normal.
 
+    Só quem NÃO é barrado recebe None. Quem é barrado sai daqui com uma resposta
+    sempre — a do convite, ou a da isenção (ajuda/billing), que este gate monta
+    ele mesmo. Ver o comentário da isenção lá embaixo.
+
     Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
     attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
     é a conta real do usuário — não corre o risco de barrar quem ia vincular.
@@ -481,6 +485,12 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     Fail-open igual aos outros gates Pro: se a checagem quebrar, deixa passar.
     Trancar quem está pagando é pior do que escapar uma mensagem.
     """
+    # Este usuário JÁ foi julgado barrado? Só o veredito é fail-open: se quem
+    # estourar for a RESPOSTA da isenção (renderizar a ajuda, gerar o link de
+    # billing), cair no fluxo normal devolveria a porta que este gate fecha —
+    # o `route()` resolve pendências antes do ramo de ajuda, e uma delas
+    # registra parcelamento. Nesse caso devolve a mensagem do gate.
+    barrado = False
     try:
         # Mesma expressão do gate do WS e do _post_login_url. A perna do
         # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
@@ -514,6 +524,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             sem_plano = estado is not None and needs_plan_selection(uid, estado)
         if not (sem_plano or not has_app_access(uid)):
             return None
+        barrado = True
 
         # Este usuário SERIA barrado. Isenções, mesmo papel do
         # _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta") da web
@@ -541,16 +552,28 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # sem DB e sem rede. As duas rotas de ajuda do intent_router
             # (help, help.tutorial) só renderizam texto, não tocam em dinheiro.
             ajuda = classify(texto, user_id=uid, allow_ai=False).intent
-            # ponytail: isenta a MENSAGEM, não garante a RESPOSTA de billing —
-            # daqui ela segue o fluxo normal, e com uma pendência aberta o
-            # handle_billing_command cede a vez (aí "cancelar" cancela a
-            # pendência, não mexe em dinheiro). Se um dia isso incomodar, o
-            # certo é o gate devolver a resposta de billing ele mesmo.
-            if ajuda in ("help", "help.tutorial") or is_billing_command(texto):
-                return None
+            # O gate DEVOLVE a resposta, em vez de isentar a mensagem e deixá-la
+            # seguir. "Seguir o fluxo" entregava a mensagem ao `route()`, que
+            # resolve pendências ANTES do ramo de ajuda: com um
+            # `installment_pending` vivo, `ajuda?` virava a descrição da compra e
+            # registrava N parcelas. Não dava pra enumerar essas portas para
+            # sempre — a resposta ela mesma fecha a classe.
+            if ajuda in ("help", "help.tutorial"):
+                from core.handlers import help_handler as h_help
+                return [OutgoingMessage(text=format_for_platform(
+                    h_help.answer_help(ajuda, texto, platform), platform))]
+            if is_billing_command(texto):
+                from core.services.billing_commands import handle_billing_command
+                resposta = handle_billing_command(uid, texto, platform=platform)
+                if resposta is not None:
+                    return [OutgoingMessage(text=resposta)]
+                # None = o billing cedeu a vez (há ai_pending). Cair no fluxo
+                # normal aqui reabriria o buraco pela porta do billing: segue
+                # para a mensagem do gate.
     except Exception:
         logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
-        return None
+        if not barrado:
+            return None
 
     # Link público, sem token: cada link autenticado insere uma linha em
     # dashboard_sessions que só sai quando é consumida, e mensagem barrada não
