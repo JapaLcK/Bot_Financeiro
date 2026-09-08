@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pytest  # noqa: F401  (usado pelas fixtures importadas)
 
+from db.connection import get_conn
 from test_payment_reminder import (
     _espia,
     _inadimplente,
@@ -152,3 +153,148 @@ def test_opt_out_de_whatsapp_nao_tira_o_email(user_id, monkeypatch):
     assert len(enviados) == 1, \
         "quem desligou só o WhatsApp perdeu o e-mail de cobrança"
     assert _detalhes_do_evento(user_id)["whatsapp"] is False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PREFERÊNCIA MUDADA DURANTE O LOTE — a irmã do achado da rodada 3.
+#
+# A rodada 3 revalidou, no ponto do envio, o estado que torna a mensagem
+# ERRADA (pagou no meio do lote). A rodada 7 pôs o gate de consentimento, mas
+# alimentado pelo SNAPSHOT do funil. Resultado: `lembrete_ainda_vale` lia fresco
+# e, TRÊS LINHAS depois, `wa_opt_out.get(...)` entregava valor velho — a
+# assimetria dentro das mesmas vinte linhas. Revalidamos o que torna a mensagem
+# errada e não o que a torna NÃO AUTORIZADA (§2 outra vez).
+#
+# **A lição sobre o conserto da rodada 7**: o parâmetro obrigatório e
+# keyword-only protegia contra OMISSÃO, não contra OBSOLESCÊNCIA. "Ninguém pode
+# esquecer de passar" não é "o valor passado é verdadeiro no momento do uso", e
+# a invariante forte é a segunda. Por isso a leitura foi para DENTRO de
+# `_wa_lembrete` e o parâmetro deixou de existir: no ponto de uso, nenhum
+# chamador consegue nem esquecer nem envelhecer o valor.
+#
+# A mudança é injetada no envelope REAL do funil, o mesmo padrão de
+# `test_payment_reminder_revalida.py` (§0.1 — reusar, não inventar outro).
+#
+# CONTROLES NEGATIVOS DECLARADOS:
+#  • WhatsApp — em `payment_reminder_wa._wa_lembrete`, troque a leitura fresca
+#    por um valor fixo `False` (ou reponha o parâmetro alimentado pelo funil):
+#      VERMELHO: test_opt_out_ligado_durante_o_lote_nao_manda_whatsapp
+#      VERDE:    test_sem_mudanca_durante_o_lote_whatsapp_sai (o positivo) e os
+#                três casos da rodada 7.
+#  • E-mail — em `db.dunning.lembrete_ainda_vale`, apague o
+#    `and coalesce(engagement_opt_out, false) = false`:
+#      VERMELHO: test_engagement_opt_out_ligado_durante_o_lote_nao_manda_email
+#      VERDE:    todo o resto, porque nenhuma outra fixture liga aquele opt-out.
+#
+# CONTROLE POSITIVO: test_sem_mudanca_durante_o_lote_whatsapp_sai. Sem ele, uma
+# leitura que devolvesse sempre "bloqueado" passaria nos negativos.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _mudar_durante_o_lote(monkeypatch, sql: str, uid: int) -> list:
+    """Reusa o padrão da rodada 3: envelopa o funil REAL, deixa o snapshot sair
+    igual ao de produção e só então mexe no banco por baixo dele. Devolve os
+    tamanhos de lote vistos, para o teste provar que a injeção pegou."""
+    from db import dunning as db_dunning
+    real = db_dunning.list_payment_reminder_candidates
+    lotes: list = []
+
+    def _envelope(grace_days):
+        rows = real(grace_days)
+        lotes.append(len(rows))
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uid,))
+            conn.commit()
+        from db_support import invalidate_auth_user_cache
+        invalidate_auth_user_cache(uid)
+        return rows
+
+    monkeypatch.setattr(db_dunning, "list_payment_reminder_candidates", _envelope)
+    return lotes
+
+
+def test_opt_out_ligado_durante_o_lote_nao_manda_whatsapp(user_id, monkeypatch):
+    """NEGATIVO: opt-out DESLIGADO no snapshot e LIGADO durante o lote.
+
+    O snapshot do funil diz que pode; a pessoa desliga enquanto as linhas
+    anteriores são decifradas/enviadas; o envio não pode acontecer. O e-mail,
+    que já foi autorizado por outro opt-out, continua saindo — e é o que separa
+    este conserto de tirar a conta do lote.
+    """
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    enviados = _espia(monkeypatch, user_id)
+    _um_destino_whatsapp(monkeypatch, user_id)
+    chamadas = _send_template_roteiro(monkeypatch, {0: _OK})
+    lotes = _mudar_durante_o_lote(
+        monkeypatch,
+        "update auth_accounts set whatsapp_updates_opt_out = true"
+        " where user_id = %s",
+        user_id)
+
+    _tick()
+
+    assert lotes and lotes[0] >= 1, \
+        "o funil não devolveu a conta — o teste mediria nada"
+    assert chamadas == [], \
+        "mandou WhatsApp para quem desligou o canal DURANTE o lote"
+    assert len(enviados) == 1, "o e-mail deveria continuar saindo"
+    assert _detalhes_do_evento(user_id)["whatsapp"] is False
+
+
+def test_sem_mudanca_durante_o_lote_whatsapp_sai(user_id, monkeypatch):
+    """POSITIVO: mesmo envelope, mesma quantidade de chamadas, sem mudança de
+    preferência — o WhatsApp continua saindo.
+
+    É o que separa "a leitura fresca discrimina" de "a leitura fresca bloqueia".
+    Sem este caso, uma implementação que devolvesse sempre "bloqueado" (ou que
+    falhasse na leitura e caísse no fail-closed) passaria no negativo.
+    """
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    enviados = _espia(monkeypatch, user_id)
+    _um_destino_whatsapp(monkeypatch, user_id)
+    chamadas = _send_template_roteiro(monkeypatch, {0: _OK})
+    lotes = _mudar_durante_o_lote(monkeypatch, "select %s", user_id)
+
+    _tick()
+
+    assert lotes and lotes[0] >= 1
+    assert len(chamadas) == 1, "a leitura fresca bloqueou envio legítimo"
+    assert len(enviados) == 1
+    assert _detalhes_do_evento(user_id)["whatsapp"] is True
+
+
+def test_engagement_opt_out_ligado_durante_o_lote_nao_manda_email(
+        user_id, monkeypatch):
+    """O IRMÃO que a varredura desta rodada achou: `engagement_opt_out` também
+    vinha do snapshot, e é o consentimento do canal que de fato envia hoje.
+
+    O funil o aplica no `where`, ou seja no momento da query. Quem desligasse os
+    e-mails de engajamento durante o lote recebia um de todo jeito. O conserto
+    é o segundo termo de `db.dunning.lembrete_ainda_vale` — mesma query, uma
+    linha de predicado, zero leitura a mais.
+    """
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    enviados = _espia(monkeypatch, user_id)
+    lotes = _mudar_durante_o_lote(
+        monkeypatch,
+        "update auth_accounts set engagement_opt_out = true where user_id = %s",
+        user_id)
+
+    _tick()
+
+    assert lotes and lotes[0] >= 1, \
+        "o funil não devolveu a conta — o teste mediria nada"
+    assert enviados == [], \
+        "mandou e-mail para quem desligou o engajamento DURANTE o lote"
+    # E nada de dedupe gravada: o tick seguinte não pode ficar mudo por causa
+    # de um envio que não aconteceu (é o bug que a rodada 1 consertou).
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from system_event_logs"
+                " where event_type = 'payment_reminder_sent' and user_id = %s",
+                (user_id,))
+            assert cur.fetchone()["n"] == 0

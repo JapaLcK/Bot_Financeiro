@@ -9,7 +9,7 @@ pendente" e a dedupe registrava o envio como sucesso. E-mail errado para cliente
 PAGANTE, que é a categoria que este caminho existe para consertar (célula nº 28
 de `docs/dunning_estados_eventos.md`).
 
-O conserto é `db.dunning.ciclo_de_atraso_aberto`, chamado como ÚLTIMA coisa
+O conserto é `db.dunning.lembrete_ainda_vale`, chamado como ÚLTIMA coisa
 antes do envio. Duas coisas que ele deliberadamente NÃO é, e cada uma tem teste
 aqui:
 
@@ -24,7 +24,7 @@ de 350 de `tests/test_max_lines_python.py`; os helpers vêm por IMPORT dele —
 uma fonte só (§0.7). Mesmo arranjo do `test_payment_reminder_janela.py`.
 
 CONTROLE NEGATIVO DECLARADO — em `core/services/payment_reminder.py`, apague o
-bloco `if not await loop.run_in_executor(None, ciclo_de_atraso_aberto, ...)`:
+bloco `if not await loop.run_in_executor(None, lembrete_ainda_vale, ...)`:
     VERMELHO: test_pagou_durante_o_lote_nao_recebe_lembrete
               test_status_saiu_da_lista_durante_o_lote_nao_recebe_lembrete
     VERDE:    test_lembrete_legitimo_continua_saindo e todo o
@@ -33,7 +33,7 @@ bloco `if not await loop.run_in_executor(None, ciclo_de_atraso_aberto, ...)`:
               mede a REVALIDAÇÃO e não o funil.
 
 CONTROLE POSITIVO: `test_lembrete_legitimo_continua_saindo`. Sem ele o arquivo
-passaria num `ciclo_de_atraso_aberto` que devolvesse sempre False — ou seja num
+passaria num `lembrete_ainda_vale` que devolvesse sempre False — ou seja num
 lembrete que nunca sai, que é pior que o bug.
 """
 from __future__ import annotations

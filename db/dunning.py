@@ -133,24 +133,43 @@ def clear_past_due_since(user_id: int, *, nao_mais_novo_que: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
-def ciclo_de_atraso_aberto(user_id: int) -> bool:
-    """A conta AINDA está com um ciclo de inadimplência aberto? Leitura DIRETA.
+def lembrete_ainda_vale(user_id: int) -> bool:
+    """O lembrete de cobrança por E-MAIL ainda se sustenta? Leitura DIRETA, no
+    ponto do envio.
 
-    É a revalidação do `core/services/payment_reminder`: o funil é UM snapshot,
-    o lote não tem `LIMIT`, e quem pagasse no meio dele recebia "a cobrança
-    continua pendente" — e-mail errado para cliente pagante (célula nº 28 de
-    `docs/dunning_estados_eventos.md`).
+    Revalidação do `core/services/payment_reminder`: o funil é UM snapshot, o
+    lote não tem `LIMIT`, e todo valor que vem dele pode ter envelhecido antes
+    do dispatch. **DOIS termos, e eles respondem perguntas diferentes:**
 
-    O predicado é o MESMO núcleo de `list_payment_reminder_candidates` (relógio
-    + status, da mesma constante, com a mesma normalização) e **só ele**: janela
-    e opt-out não são o que torna a mensagem FALSA, e revalidar a janela faria um
-    lote lento descartar lembrete legítimo — o erro oposto.
+    • **estado da inadimplência** (relógio + status, da mesma constante e com a
+      mesma normalização do funil) — quem pagou no meio do lote receberia "a
+      cobrança continua pendente", e-mail errado para cliente PAGANTE (célula
+      nº 28 de `docs/dunning_estados_eventos.md`);
+    • **consentimento do canal de e-mail** (`engagement_opt_out`) — quem
+      desligou os e-mails de engajamento no meio do lote receberia um de todo
+      jeito. É o MESMO predicado que o `where` do funil aplica no snapshot;
+      aqui ele é reavaliado fresco.
+
+    Uma query só para os dois: são colunas da MESMA linha de `auth_accounts`.
+
+    **Antes chamava-se `ciclo_de_atraso_aberto` e tinha só o primeiro termo, e
+    a docstring dizia "janela e opt-out não são o que torna a mensagem FALSA".**
+    Isso valia para a JANELA e não para o opt-out, e os dois foram excluídos
+    pelo mesmo argumento — o erro de tirar conclusão do caso examinado em vez
+    da categoria (§2), na sua terceira aparição nestas mesmas vinte linhas. A
+    janela continua FORA, e agora com a razão certa: revalidá-la faria um lote
+    lento descartar lembrete legítimo, que é o erro oposto e pior. Opt-out não
+    tem esse problema — se a pessoa desligou, não mandar é exatamente o certo.
 
     NÃO é `get_auth_user`: aquele tem cache de 10 s
     (`db_support._auth_user_cache`) e uma leitura cacheada pode mentir
     exatamente na corrida que esta função existe para pegar. E NÃO é um claim
     atômico: gravar a chave de dedupe antes do envio é o bug que a rodada 1
     consertou (`_fire_email` grava DEPOIS de o envio confirmar, de propósito).
+
+    O consentimento do canal de WHATSAPP não está aqui de propósito: ele é lido
+    no ponto de envio DELE, que é outro
+    (`core.services.payment_reminder_wa._wa_lembrete`).
     """
     from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
     with get_conn() as conn:
@@ -158,7 +177,8 @@ def ciclo_de_atraso_aberto(user_id: int) -> bool:
             cur.execute(
                 "select 1 from auth_accounts"
                 " where user_id = %s and past_due_since is not null"
-                "   and lower(coalesce(last_payment_status, '')) = any(%s)",
+                "   and lower(coalesce(last_payment_status, '')) = any(%s)"
+                "   and coalesce(engagement_opt_out, false) = false",
                 (int(user_id), list(PAST_DUE_PAYMENT_STATUSES)),
             )
             return cur.fetchone() is not None
@@ -182,16 +202,25 @@ def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:
     precisa de Python (allowlist, grant pix/admin) é do chamador, como em
     `list_trial_downsell_candidates`.
 
-    **`whatsapp_updates_opt_out` é SELECIONADA e NÃO filtrada, e isso é decisão.**
-    O `where` só tem o `engagement_opt_out`, que é o opt-out do canal de
-    E-MAIL — o e-mail é o caminho garantido deste funil. Quem desligou só o
-    WhatsApp em Configurações continua com direito ao aviso de cobrança por
-    e-mail, então pôr a coluna no `where` trocaria uma violação de
-    consentimento por um erro PIOR: perder aviso legítimo de cobrança de quem
-    nunca pediu para perdê-lo. Ela vem de graça (é a MESMA linha de
-    `auth_accounts` já lida, sem query nem join a mais) e quem decide é o
-    CANAL, em `core/services/payment_reminder_wa._wa_lembrete`. Amarrado por
-    `tests/test_payment_reminder_whatsapp.py::test_opt_out_de_whatsapp_nao_tira_o_email`.
+    **`whatsapp_updates_opt_out` NÃO aparece aqui — nem no `where`, nem no
+    `select` — e as duas ausências são decisão separada.**
+
+    Fora do `where`: este funil serve os DOIS canais e o `engagement_opt_out`
+    dele é o opt-out do canal de E-MAIL, que é o caminho garantido. Quem
+    desligou só o WhatsApp continua com direito ao aviso de cobrança por
+    e-mail; filtrar o opt-out de WhatsApp aqui trocaria uma violação de
+    consentimento por um erro PIOR — perder aviso legítimo de cobrança de quem
+    nunca pediu para perdê-lo. Amarrado por
+    `tests/test_payment_reminder_consentimento.py::test_opt_out_de_whatsapp_nao_tira_o_email`.
+
+    Fora do `select`: uma versão anterior a trazia daqui "de graça" e o canal
+    recebia o valor por parâmetro. Só que valor de SNAPSHOT envelhece — quem
+    desligasse o canal durante o lote recebia mensagem de todo jeito —, então a
+    leitura foi para o ponto de uso
+    (`core.services.payment_reminder_wa._wa_lembrete`) e a coluna aqui virou
+    morta. **Não a traga de volta para "economizar uma query"**: a economia é de
+    uma leitura por lembrete ENVIADO e o preço é o gate de consentimento voltar
+    a decidir com dado velho.
     """
     from core.services.billing_dunning import (
         PAST_DUE_PAYMENT_STATUSES,
@@ -202,9 +231,7 @@ def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select user_id, email, email_enc,
-                       coalesce(whatsapp_updates_opt_out, false)
-                           as whatsapp_updates_opt_out
+                select user_id, email, email_enc
                 from auth_accounts
                 where past_due_since is not null
                   and lower(coalesce(last_payment_status, '')) = any(%s)

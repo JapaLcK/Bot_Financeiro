@@ -20,7 +20,7 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 | `email = row["email"]`              | `KeyError` só se a coluna sair do `select` | — |
 | `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (`core/observability.py:311`) | o callee, medido em `test_dedupe_indisponivel_*` |
 | `_pago_por_outro_caminho`           | sim | `except` próprio (já existia) |
-| `ciclo_de_atraso_aberto`            | sim | `except` próprio (já existia) |
+| `lembrete_ainda_vale`            | sim | `except` próprio (já existia) |
 | envio + `_wa_lembrete` + log        | sim | `except` próprio (já existia) |
 
 Ou seja: **um buraco só**, e o segundo candidato óbvio já estava fechado do

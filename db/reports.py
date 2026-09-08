@@ -442,6 +442,31 @@ def set_whatsapp_updates_opt_out(user_id: int, opt_out: bool) -> None:
     _db_support.invalidate_auth_user_cache(user_id)
 
 
+def get_whatsapp_updates_opt_out(user_id: int) -> bool:
+    """A pessoa desligou as "atualizações do Piggy" no WhatsApp?
+
+    Mora ao lado do `set_` que é o par dela (§0.1) e é leitura DIRETA de
+    propósito: NÃO usa `get_auth_user`, que tem cache de 10 s
+    (`db_support._auth_user_cache`) — quem consulta isto está decidindo se
+    manda mensagem proativa, e consentimento é a última coisa que se lê de um
+    cache. Quem grava é a tela de Configurações
+    (`frontend/routes/settings.py:507`) e o botão do próprio WhatsApp
+    (`adapters/whatsapp/wa_runtime.py:878`).
+
+    Conta inexistente devolve True (bloqueado), não False: num gate de
+    consentimento a ausência de informação não autoriza envio.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select coalesce(whatsapp_updates_opt_out, false) as bloqueado"
+                "  from auth_accounts where user_id = %s",
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+    return True if row is None else bool(row["bloqueado"])
+
+
 def sync_engagement_opt_out(user_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:

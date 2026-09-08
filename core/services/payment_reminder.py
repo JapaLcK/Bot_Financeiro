@@ -28,7 +28,6 @@ tinha (mesma convenção de `PAYWALL_ENABLED` e `PLANS_V2_ENABLED`).
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import os
 from datetime import datetime, timezone
@@ -85,7 +84,7 @@ async def check_payment_reminder() -> None:
     está pago por outro caminho é ruído.
 
     E **revalida o estado imediatamente antes de enviar**
-    (`db.dunning.ciclo_de_atraso_aberto`): o funil é um snapshot, o lote não tem
+    (`db.dunning.lembrete_ainda_vale`): o funil é um snapshot, o lote não tem
     `LIMIT`, e quem pagou no meio dele não pode receber "a cobrança continua
     pendente". A máquina completa está em `docs/dunning_estados_eventos.md`.
 
@@ -122,7 +121,7 @@ async def check_payment_reminder() -> None:
     from core.services.engagement_scheduler import _mask_email
     # O canal WhatsApp mora em módulo irmão (assunto próprio + teto de linhas).
     from core.services.payment_reminder_wa import _wa_lembrete
-    from db.dunning import ciclo_de_atraso_aberto, list_payment_reminder_candidates
+    from db.dunning import lembrete_ainda_vale, list_payment_reminder_candidates
 
     loop = asyncio.get_event_loop()
     dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
@@ -140,12 +139,6 @@ async def check_payment_reminder() -> None:
     # de acesso a PII.
     elegiveis = [r for r in rows
                  if int(r["user_id"]) not in plan_service._ACCESS_ALLOWLIST]
-    # Preferência do canal WhatsApp, da MESMA linha que o funil já leu (nenhuma
-    # query a mais). Vive num mapa em vez de virar um terceiro item da tupla de
-    # `_decifrar_lote`: aquela função é sobre resolver e-mail, e enfiar uma
-    # preferência de WhatsApp nela acoplaria dois assuntos sem ganho.
-    wa_opt_out = {int(r["user_id"]): bool(r.get("whatsapp_updates_opt_out"))
-                  for r in elegiveis}
     candidatos = await loop.run_in_executor(None, _decifrar_lote, elegiveis)
 
     for user_id, email in candidatos:
@@ -158,7 +151,7 @@ async def check_payment_reminder() -> None:
         # `tests/test_payment_reminder_lote.py` amarra essa dependência para o
         # dia em que aquele `except` sair.
         #
-        # A assimetria com `ciclo_de_atraso_aberto` abaixo é de PROPÓSITO: a
+        # A assimetria com `lembrete_ainda_vale` abaixo é de PROPÓSITO: a
         # dedupe falha ABERTA (manda, no pior caso duplicado) e a revalidação
         # falha FECHADA (não manda). Perguntas diferentes, direções seguras
         # opostas.
@@ -183,14 +176,14 @@ async def check_payment_reminder() -> None:
         # cliente PAGANTE, que é a categoria que este caminho existe para
         # consertar (célula nº 28 de `docs/dunning_estados_eventos.md`).
         #
-        # Leitura DIRETA (`ciclo_de_atraso_aberto`), não `get_auth_user`:
+        # Leitura DIRETA (`lembrete_ainda_vale`), não `get_auth_user`:
         # aquele tem cache de 10 s e pode mentir exatamente nesta corrida. E
         # não é claim atômico — gravar a dedupe antes do envio é o bug que a
         # rodada 1 consertou. Falha de leitura NÃO manda: neste ponto o silêncio
         # é o erro recuperável (o tick seguinte tenta de novo, e a janela tem
         # `PAYMENT_REMINDER_WINDOW_DAYS` de largura justamente para isso).
         try:
-            if not await loop.run_in_executor(None, ciclo_de_atraso_aberto, user_id):
+            if not await loop.run_in_executor(None, lembrete_ainda_vale, user_id):
                 logger.info("[cobranca] lembrete abortado: ciclo fechou durante"
                             " o lote → user_id=%s", user_id)
                 continue
@@ -204,16 +197,12 @@ async def check_payment_reminder() -> None:
                 continue
             logger.info("[cobranca] lembrete enviado → user_id=%s (%s)",
                         user_id, _mask_email(email))
-            # `wa_opt_out.get(..., True)` — default BLOQUEADO, não liberado. A
-            # chave sempre existe (o mapa vem de `elegiveis`, de onde
-            # `candidatos` deriva), mas num gate de consentimento a direção
-            # segura do erro é não enviar: o e-mail, que é o caminho garantido,
-            # já saiu, então o custo de errar para o lado fechado é perder uma
-            # MELHORIA, e o de errar para o aberto é mandar mensagem em canal
-            # que a pessoa desligou.
-            wa = await loop.run_in_executor(
-                None, functools.partial(_wa_lembrete, user_id,
-                                        wa_opt_out=wa_opt_out.get(user_id, True)))
+            # O opt-out do canal NÃO vem daqui: `_wa_lembrete` o lê fresco, no
+            # ponto do envio dele. A versão anterior passava o valor do
+            # snapshot do funil num parâmetro obrigatório, e obrigatório
+            # protege contra OMISSÃO, não contra OBSOLESCÊNCIA — quem
+            # desligasse o canal durante o lote recebia mensagem de todo jeito.
+            wa = await loop.run_in_executor(None, _wa_lembrete, user_id)
             log_system_event_sync(
                 "info",
                 "payment_reminder_sent",

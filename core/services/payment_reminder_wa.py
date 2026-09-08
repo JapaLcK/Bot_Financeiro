@@ -20,17 +20,35 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _wa_lembrete(user_id: int, *, wa_opt_out: bool) -> bool:
+def _wa_lembrete(user_id: int) -> bool:
     """Manda o lembrete por WhatsApp. **True se ALGUM destino aceitou.**
 
-    **`wa_opt_out` é OBRIGATÓRIO e é a primeira coisa checada.** Quem desligou
+    **O consentimento é LIDO AQUI, fresco, no ponto do envio.** Quem desligou
     "atualizações do Piggy" em Configurações > Notificações (ou pelo botão do
     próprio WhatsApp, `wa_runtime.py:878`) grava
     `auth_accounts.whatsapp_updates_opt_out`, e mandar mesmo assim não é bug de
-    mecânica, é violação de CONSENTIMENTO — a pessoa pediu para não receber
-    neste canal. O valor vem da linha que o funil já lê
-    (`db.dunning.list_payment_reminder_candidates`), sem query a mais.
-    Parâmetro obrigatório de propósito: chamador novo não consegue esquecer.
+    mecânica, é violação de CONSENTIMENTO.
+
+    **Por que a leitura mora aqui e o parâmetro obrigatório SAIU.** A versão
+    anterior recebia `wa_opt_out` do chamador, tirado do snapshot do funil, e o
+    parâmetro era obrigatório e keyword-only "para ninguém esquecer". Ele
+    protegia contra OMISSÃO e não contra OBSOLESCÊNCIA: quem desligasse o canal
+    durante o lote — enquanto as linhas anteriores eram decifradas ou enviadas —
+    tinha `False` no mapa e recebia mensagem de todo jeito. "Ninguém pode
+    esquecer de passar" não é "o valor passado é verdadeiro no momento do uso",
+    e a invariante forte é a segunda. Lendo aqui, nenhum chamador consegue nem
+    esquecer nem envelhecer o valor — e não há mais default para o chamador
+    escolher errado.
+
+    A leitura acontece uma vez por lembrete **ENVIADO** (não por candidato) e
+    logo depois de um envio de e-mail de 100-300 ms de HTTP: é uma linha de
+    `auth_accounts` no meio disso. Sem cache de propósito
+    (`db.reports.get_whatsapp_updates_opt_out` não passa por `get_auth_user`,
+    que tem TTL de 10 s) — consentimento não se lê de cache.
+
+    FAIL-CLOSED: falha de leitura devolve False (não manda). O e-mail, que é o
+    caminho garantido, já saiu, então errar para o lado fechado custa uma
+    MELHORIA e errar para o aberto custa mensagem em canal desligado.
 
     Não checa `whatsapp_updates_available` da tela de Configurações
     (`frontend/routes/settings.py:74`), e isso é decisão: aquilo é
@@ -59,9 +77,15 @@ def _wa_lembrete(user_id: int, *, wa_opt_out: bool) -> bool:
     """
     # CONSENTIMENTO PRIMEIRO, antes até do template: é a razão mais forte para
     # não enviar, e a ordem faz o código dizer isso.
-    if wa_opt_out:
-        logger.info("[cobranca] WhatsApp pulado por opt-out do canal"
-                    " user_id=%s", user_id)
+    try:
+        from db.reports import get_whatsapp_updates_opt_out
+        if get_whatsapp_updates_opt_out(user_id):
+            logger.info("[cobranca] WhatsApp pulado por opt-out do canal"
+                        " user_id=%s", user_id)
+            return False
+    except Exception as exc:
+        logger.warning("[cobranca] leitura do opt-out de WhatsApp falhou"
+                       " user_id=%s: %s — nao envia", user_id, exc)
         return False
     nome = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER") or "").strip()
     if not nome:
