@@ -1601,6 +1601,8 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
   padding:8px 20px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;transition:opacity .2s; }
 .btn-save:hover { opacity:.85; }
 .btn-save:disabled { opacity:.5;cursor:not-allowed; }
+.export-period-error { min-height:18px;margin:-8px 0 12px;color:var(--red);
+  font-size:.76rem;line-height:1.4; }
 
 /* ─── Pro feature gate (visível mas desabilitado pra Free) ─────────────── */
 /* Estratégia: não usar opacity no parent (cascata via compositing destrói o

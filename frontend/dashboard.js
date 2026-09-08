@@ -9778,29 +9778,75 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+function _exportIsoDate(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function openExportModal() {
+  if (!featureAllowed("export")) {
+    showUpgradeModal("export");
+    return;
+  }
+  const start = document.getElementById("export-start-date");
+  const end = document.getElementById("export-end-date");
+  start.value = _exportIsoDate(viewYear, viewMonth, 1);
+  end.value = _exportIsoDate(viewYear, viewMonth, new Date(viewYear, viewMonth, 0).getDate());
+  document.getElementById("export-period-error").textContent = "";
+  document.getElementById("export-overlay").classList.add("open");
+  window.setTimeout(() => start.focus(), 0);
+}
+
+function closeExportModal() {
+  document.getElementById("export-overlay").classList.remove("open");
+}
+
 async function exportToEmail() {
-  const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  showLaunchSuccessToast(" Gerando e enviando o extrato…");
+  const start = document.getElementById("export-start-date").value;
+  const end = document.getElementById("export-end-date").value;
+  const error = document.getElementById("export-period-error");
+  if (!start || !end) {
+    error.textContent = "Informe a data inicial e a data final.";
+    return;
+  }
+  if (end < start) {
+    error.textContent = "A data final não pode ser anterior à data inicial.";
+    return;
+  }
+  error.textContent = "";
+  const query = new URLSearchParams({ start_date: start, end_date: end });
+  const url = `${API}/export/${USER_ID}?${query.toString()}`;
+  const submit = document.getElementById("export-submit-btn");
+  submit.disabled = true;
+  submit.textContent = "Enviando…";
+  showLaunchSuccessToast("Gerando e enviando o extrato…");
   try {
     const resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
     if (resp.status === 404) {
-      showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.", true);
+      error.textContent = "Nenhum lançamento neste período para exportar.";
       return;
     }
     if (resp.status === 429) {
-      showLaunchSuccessToast("Você exportou agora há pouco. Aguarde um instante e tente de novo.", true);
+      error.textContent = "Você exportou agora há pouco. Aguarde um instante e tente de novo.";
       return;
     }
     if (!resp.ok) {
-      showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
+      const data = await resp.json().catch(() => ({}));
+      error.textContent = typeof data.detail === "string"
+        ? data.detail
+        : "Não consegui enviar agora. Tente novamente.";
       return;
     }
     const data = await resp.json().catch(() => ({}));
-    showLaunchSuccessToast(` Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
+    closeExportModal();
+    showLaunchSuccessToast(`Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
   } catch (e) {
-    showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
+    error.textContent = "Não consegui enviar agora. Tente novamente.";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Enviar por e-mail";
   }
 }
+window.pigModalKeys && pigModalKeys("export-overlay", closeExportModal);
 
 /* ═══════════════════════════════════════════════════════════════════════
    CHARTS
