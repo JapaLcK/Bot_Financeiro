@@ -98,6 +98,12 @@ async def check_payment_reminder() -> None:
     por um `try` em volta do corpo do laço: a granularidade é o que faz o log
     dizer QUAL etapa falhou.
 
+    **NADA DE ESCRITA SÍNCRONA NO EVENT LOOP.** Este tick roda no event loop
+    único do Uvicorn e o funil não tem `LIMIT`: I/O feito aqui, e não num
+    executor, atrasa request e webhook da Stripe. Todo o laço abaixo já vai por
+    executor — mantenha assim. A decriptação de PII era a exceção e foi para
+    `_decifrar_lote` (medição e o motivo da forma, na docstring dela).
+
     E-MAIL é o caminho garantido; o WhatsApp é melhoria. Ver `_wa_lembrete`.
     """
     if not payment_reminder_enabled():
@@ -124,62 +130,28 @@ async def check_payment_reminder() -> None:
         logger.error("[cobranca] Falha ao buscar candidatos: %s", exc, exc_info=True)
         return
 
-    for row in rows:
-        user_id = int(row["user_id"])
-        if user_id in plan_service._ACCESS_ALLOWLIST:
-            continue
-        if row.get("email_enc"):
-            # Decriptação é operação POR LINHA e LEVANTA: chave errada ou
-            # ciphertext corrompido saem de `core.crypto.decrypt_pii` como
-            # `RuntimeError` (`InvalidToken`, :237-240), e versão desconhecida
-            # ou `PII_ENCRYPTION_KEY_*` ausente também (`_load_fernet`, :115).
-            # Sem este `try` a exceção escapava `check_payment_reminder`
-            # INTEIRA, e o `except` do chamador
-            # (`engagement_scheduler.run_engagement_loop`) abandonava o RESTO do
-            # lote: UMA linha ruim custava o lembrete de todos os candidatos
-            # seguintes, que podem sair da janela de
-            # `PAYMENT_REMINDER_WINDOW_DAYS` antes do próximo tick.
-            #
-            # `continue`, e NUNCA `email = row["email"]` como fallback:
-            # `email_enc` que existe e não decifra é sinal de problema de
-            # CHAVE, não permissão para usar a coluna em claro.
-            #
-            # O log leva `user_id` e a exceção, e nenhum e-mail — não há o que
-            # mascarar com `_mask_email` (o que falhou foi justamente obter o
-            # endereço), e as mensagens de `core/crypto.py` carregam versão e
-            # nome de env, nunca o valor.
-            try:
-                email = decrypt_pii_optional(
-                    row["email_enc"],
-                    ctx=PiiAccessContext(
-                        purpose="send_payment_reminder_email",
-                        actor="system:engagement",
-                        subject_user_id=user_id,
-                        field="email",
-                    ),
-                )
-            except Exception as exc:
-                logger.error("[cobranca] decriptacao do e-mail falhou"
-                             " user_id=%s: %s", user_id, exc)
-                continue
-        else:
-            email = row["email"]
-        if not email:
-            continue
+    # Allowlist ANTES da decriptação: é filtro PURO (`set` de dois ids, sem
+    # I/O), e assim não se decifra nem se AUDITA PII de quem já foi descartado.
+    # O conjunto decifrado fica idêntico ao de antes desta mudança — zero delta
+    # de acesso a PII.
+    elegiveis = [r for r in rows
+                 if int(r["user_id"]) not in plan_service._ACCESS_ALLOWLIST]
+    candidatos = await loop.run_in_executor(None, _decifrar_lote, elegiveis)
+
+    for user_id, email in candidatos:
         # SEM `try`, e isso é medido, não descuido: `recent_event_exists`
         # (`core/observability.py:288-313`) tem `except Exception` próprio e
-        # devolve `False` em QUALQUER falha — política declarada na docstring
-        # dela ("melhor mandar duplicado que perder"). Medido nos três modos:
-        # banco inalcançável, URL inválida e `DATABASE_URL` vazia → `False`,
-        # nenhum levantou. Um `try` aqui embrulharia código que provadamente
-        # não levanta (§0.2). Se algum dia aquele `except` sair, este ponto
-        # volta a poder derrubar o lote — `tests/test_payment_reminder_lote.py`
-        # amarra essa dependência.
+        # devolve `False` em QUALQUER falha ("melhor mandar duplicado que
+        # perder", docstring dela). Medido nos três modos — banco inalcançável,
+        # URL inválida, `DATABASE_URL` vazia — nenhum levantou. Um `try` aqui
+        # embrulharia código que provadamente não levanta (§0.2);
+        # `tests/test_payment_reminder_lote.py` amarra essa dependência para o
+        # dia em que aquele `except` sair.
         #
         # A assimetria com `ciclo_de_atraso_aberto` abaixo é de PROPÓSITO: a
         # dedupe falha ABERTA (manda, no pior caso duplicado) e a revalidação
-        # falha FECHADA (não manda). São perguntas diferentes e as direções
-        # seguras são opostas.
+        # falha FECHADA (não manda). Perguntas diferentes, direções seguras
+        # opostas.
         if await loop.run_in_executor(
             None, recent_event_exists, "payment_reminder_sent", user_id,
             PAYMENT_REMINDER_DEDUPE_DAYS,
@@ -235,6 +207,77 @@ async def check_payment_reminder() -> None:
             logger.error("[cobranca] falha enviando user_id=%s: %s", user_id, exc)
 
 
+def _decifrar_lote(rows: list[dict]) -> list[tuple[int, str]]:
+    """Resolve o e-mail de cada candidato e devolve os pares `(user_id, email)`
+    que dão para usar. **UMA ida ao banco para o audit de PII, e nenhuma no
+    event loop.**
+
+    Cada `decrypt_pii` chama `core.crypto._record_access`, que sem batch faz
+    `get_conn` + `execute` + `commit` IMEDIATOS (`core/crypto.py:266-280`).
+    Como o funil não tem `LIMIT` e este tick roda dentro do event loop único do
+    Uvicorn, era uma ida ao banco BLOQUEANTE por linha, competindo com request
+    e webhook da Stripe. Medido aqui (200 linhas, `pii_access_log` conferida
+    com `count(*)` nos dois modos): 142,5 ms solto (0,712 ms/linha) × 9,3 ms em
+    lote (0,046 ms/linha) — 15,4× menos tempo, e agora esse tempo está numa
+    thread do executor, então o loop bloqueia ZERO.
+
+    Reuso, não invenção (§0.1): `pii_audit_batch` já existe exatamente para
+    isso ("endpoints que decifram muitos campos", `core/crypto.py:70-73`) e faz
+    um `executemany` no `__exit__`.
+
+    **Por que uma função separada, e não um `with` em volta do laço `async`.**
+    O buffer de `pii_audit_batch` é `threading.local()`
+    (`core/crypto.py:74`), NÃO task-local. Um `with` em volta de um laço com
+    `await` dentro fica aberto na thread do event loop enquanto o loop atende
+    OUTRAS corrotinas — e todo handler de request que decifrasse PII nesse
+    intervalo teria a entrada de audit dele capturada no NOSSO buffer
+    (`_record_access:261-264`), publicada só no nosso `__exit__` e perdida em
+    silêncio se o nosso flush falhasse. Aqui `__enter__`, os `append` e o
+    `__exit__` acontecem todos dentro da MESMA chamada de
+    `run_in_executor`, numa thread só nossa. Não troque isto por um `with` em
+    volta do laço achando que simplifica.
+
+    A ISOLAÇÃO POR LINHA da rodada 4 continua, e continua por desenho: o `try`
+    é de cada `decrypt_pii_optional`, então linha ruim vira `continue` e não
+    derruba as seguintes — nem o flush, que roda no `__exit__` de todo jeito.
+    Linha que falha não gera entrada de audit (o `_record_access` de
+    `decrypt_pii` só roda DEPOIS de decifrar, `core/crypto.py:242`), o que está
+    certo: acesso que não aconteceu não se registra.
+
+    `continue`, e NUNCA `row["email"]` como fallback: `email_enc` que existe e
+    não decifra é sinal de problema de CHAVE, não permissão para usar a coluna
+    em claro. O log leva `user_id` e a exceção e nenhum e-mail — não há o que
+    mascarar com `_mask_email` (o que falhou foi justamente obter o endereço),
+    e as mensagens de `core/crypto.py` carregam versão e nome de env, nunca o
+    valor.
+    """
+    from core.crypto import pii_audit_batch
+    prontos: list[tuple[int, str]] = []
+    with pii_audit_batch():
+        for row in rows:
+            user_id = int(row["user_id"])
+            if row.get("email_enc"):
+                try:
+                    email = decrypt_pii_optional(
+                        row["email_enc"],
+                        ctx=PiiAccessContext(
+                            purpose="send_payment_reminder_email",
+                            actor="system:engagement",
+                            subject_user_id=user_id,
+                            field="email",
+                        ),
+                    )
+                except Exception as exc:
+                    logger.error("[cobranca] decriptacao do e-mail falhou"
+                                 " user_id=%s: %s", user_id, exc)
+                    continue
+            else:
+                email = row["email"]
+            if email:
+                prontos.append((user_id, email))
+    return prontos
+
+
 def _pago_por_outro_caminho(user_id: int) -> bool:
     """True se um grant `pix` ou `admin` vigente sustenta o acesso desta conta
     independentemente do cartão. `legacy` NÃO conta — ele é a reconstrução do
@@ -268,8 +311,25 @@ def _wa_lembrete(user_id: int) -> bool:
         idioma = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER_LANGUAGE") or "pt_BR").strip()
         enviado = False
         for to in _dedupe_whatsapp_targets(list_identities_by_user(user_id)):
-            send_template(to, nome, language_code=idioma)
-            enviado = True
+            # O RETORNO CARREGA VEREDITO, e descartá-lo gravava
+            # `whatsapp: true` com a Meta tendo RECUSADO a mensagem.
+            # `send_template` devolve `None` no 401 — token inválido/expirado,
+            # `adapters/whatsapp/wa_client.py:220` — e LEVANTA em todo outro
+            # `>= 400` (`:237`). O 401 é o ÚNICO caminho silencioso e o pior:
+            # token expirado faz TODO envio falhar sem ninguém saber.
+            #
+            # `is not None`, não truthiness: o contrato é "None no 401, JSON da
+            # resposta nos outros casos".
+            #
+            # Semântica: "ALGUM destino aceitou". É o que interessa ao lembrete
+            # (a pessoa foi alcançada em pelo menos um número), e o único
+            # desfecho silencioso é o 401, que é problema de TOKEN e portanto
+            # GLOBAL — com ele nenhum destino passa e `any`/`all` coincidem.
+            #
+            # O `RuntimeError` dos outros `>= 400` não ganha tratamento novo: o
+            # `except` deste `try` já o captura (comportamento pré-existente).
+            if send_template(to, nome, language_code=idioma) is not None:
+                enviado = True
         return enviado
     except Exception as exc:
         logger.warning("[cobranca] WhatsApp não enviado user_id=%s: %s", user_id, exc)

@@ -217,3 +217,109 @@ def test_dedupe_com_erro_inesperado_devolve_false(monkeypatch):
 
     monkeypatch.setattr(obs.psycopg, "connect", _explode)
     assert obs.recent_event_exists("payment_reminder_sent", 1, 6.0) is False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# O LOTE E O EVENT LOOP: a decriptação de PII não pode escrever no banco de
+# forma síncrona uma vez POR LINHA.
+#
+# Cada `decrypt_pii` chama `core.crypto._record_access`, que sem batch faz
+# `get_conn` + `execute` + `commit` imediatos (`core/crypto.py:266-280`). Como o
+# funil não tem `LIMIT` e o tick roda no event loop único do Uvicorn, era uma
+# ida ao banco BLOQUEANTE por candidato, competindo com request e webhook.
+#
+# Medido antes de escrever o conserto (200 linhas, `pii_access_log` conferida
+# com `count(*)` nos dois modos, 2026-09-08 — remeça antes de reusar):
+#   solto: 142,5 ms  (0,712 ms/linha, 200 idas ao banco)
+#   lote :   9,3 ms  (0,046 ms/linha, 1 `executemany`)  → 15,4x
+# e, com a passada indo para o executor, o loop bloqueia ZERO.
+#
+# O OBSERVÁVEL destes testes é o par (thread, batch ativo) NO MOMENTO do
+# decrypt, mais a contagem de linhas em `pii_access_log`. Contar só as linhas
+# não mediria nada: `executemany` grava N linhas igual ao modo solto — o que é
+# UM é a ida ao banco. E contar só a ida não bastaria: um "conserto" que
+# desligasse o audit também daria uma ida só, e perderia a trilha.
+#
+# CONTROLE NEGATIVO — em `core/services/payment_reminder.py`, volte a decifrar
+# dentro do laço `async` (apague a chamada de `_decifrar_lote` e reponha o
+# `decrypt_pii_optional` inline no `for`):
+#     VERMELHO: test_audit_de_pii_vai_em_lote_e_fora_do_event_loop
+#     VERDE:    todo o resto deste arquivo e dos três irmãos.
+# CONTROLE POSITIVO: a asserção de que `pii_access_log` recebeu UMA LINHA POR
+# CANDIDATO. Sem ela, `PII_AUDIT_DISABLED=1` passaria no teste.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _cifrar_email(uid: int) -> None:
+    """Põe o e-mail da conta em `email_enc` de verdade, para o laço tomar o
+    caminho da decriptação (o `_inadimplente` deixa `email_enc = null`)."""
+    from core.crypto import encrypt_pii
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set email_enc = %s where user_id = %s",
+                (encrypt_pii(f"dun-{uid}@t.local"), uid),
+            )
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(uid)
+
+
+def _linhas_de_audit(uids: list[int]) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select count(*) as n from pii_access_log"
+                " where purpose = 'send_payment_reminder_email'"
+                "   and subject_user_id = any(%s)",
+                (uids,))
+            return cur.fetchone()["n"]
+
+
+def test_audit_de_pii_vai_em_lote_e_fora_do_event_loop(user_id, monkeypatch):
+    """Duas contas com `email_enc`: os dois decrypts rodam FORA da thread do
+    event loop e com o buffer de `pii_audit_batch` ATIVO — que é o que faz a
+    trilha inteira sair numa ida só. E a trilha sai: uma linha por candidato.
+
+    A suíte roda com `PII_AUDIT_DISABLED=1` (hook do ambiente), então o teste
+    liga o audit de propósito: com ele desligado `_record_access` retorna na
+    primeira linha e não haveria nada para medir.
+    """
+    import threading
+
+    import core.crypto as crypto
+    from core.services import payment_reminder as pr
+
+    monkeypatch.setenv("PII_AUDIT_DISABLED", "")
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    outro = _segunda_conta(user_id)
+    _cifrar_email(user_id)
+    _cifrar_email(outro)
+    destinos = _espiar_todos(monkeypatch)
+
+    real = pr.decrypt_pii_optional
+    observado: list[tuple[bool, bool]] = []
+
+    def _espiao(ct, *, ctx):
+        observado.append((
+            threading.current_thread() is threading.main_thread(),
+            getattr(crypto._audit_buffer, "entries", None) is not None,
+        ))
+        return real(ct, ctx=ctx)
+
+    monkeypatch.setattr(pr, "decrypt_pii_optional", _espiao)
+
+    _tick()
+
+    assert len(observado) == 2, \
+        f"o caminho da decriptação não foi exercitado nas duas contas: {observado}"
+    assert not any(na_loop for na_loop, _ in observado), \
+        "decriptação rodou na thread do event loop — volta a bloquear request"
+    assert all(em_lote for _, em_lote in observado), \
+        "buffer de pii_audit_batch inativo — é uma ida ao banco POR LINHA"
+    assert _linhas_de_audit([user_id, outro]) == 2, \
+        "a trilha de audit não foi gravada — o flush do lote não aconteceu"
+    # E o lembrete continua saindo para as duas: o conserto é de I/O, não de
+    # comportamento.
+    assert f"dun-{user_id}@t.local" in destinos
+    assert f"dun-{outro}@t.local" in destinos
