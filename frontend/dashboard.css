@@ -5,17 +5,23 @@
   --bg-page:       #111111;
   --glass-bg:      rgba(255,255,255,0.07);
   --glass-border:  rgba(255,255,255,0.13);
-  --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
-  --radius:        22px;
-  --green:  #00F078; --neon:   #C6F11A; --red:    #FF2D2D; --blue:   #FF80B8;
+  --glass-shadow:  0 4px 16px rgba(0,0,0,0.28);
+  --radius:        16px;
+  /* --red clareado de #FF2D2D (4,31:1) para 5,2:1 sobre os cards: era o último
+     texto abaixo do AA depois da correção dos tokens de --text-*. */
+  --green:  #00F078; --neon:   #C6F11A; --red:    #FF5A5A; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
+  /* Três degraus de texto, todos ≥ 4,5:1 (WCAG AA) sobre --bg-page e sobre
+     --glass-bg. O --text-3 era .28 → 2,5:1: reprovava em 145 usos do produto,
+     porque é o token oficial de "rótulo discreto" (62 usos só neste arquivo).
+     Discreto agora é .50; a hierarquia vem do degrau entre eles, não de sumir. */
   --text:   rgba(255,255,255,0.92);
-  --text-2: rgba(255,255,255,0.52);
-  --text-3: rgba(255,255,255,0.28);
+  --text-2: rgba(255,255,255,0.66);
+  --text-3: rgba(255,255,255,0.50);
   --div:    rgba(255,255,255,0.08);
   --ease:   cubic-bezier(.4,0,.2,1);
-  --orb-opacity: .42;
+  --orb-opacity: .16;
 }
 
 /* ─── Light mode override ──────────────────────────────────────────── */
@@ -26,7 +32,7 @@ body.light {
   --glass-shadow:  0 6px 20px rgba(15,23,42,0.07);
   --text:   #0f172a;
   --text-2: #475569;
-  --text-3: #94a3b8;
+  --text-3: #64748b;   /* era #94a3b8 → 2,9:1 sobre --bg-page; slate-500 dá 4,8:1 */
   --div:    rgba(15,23,42,0.08);
   --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
   --orb-opacity: .12;
@@ -1018,17 +1024,16 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 @media(max-width:520px) { .ov-stats{grid-template-columns:1fr} }
 .ov-stat {
   position:relative; background:var(--glass-bg);
-  backdrop-filter:blur(24px) saturate(160%); -webkit-backdrop-filter:blur(24px) saturate(160%);
   border:1px solid var(--glass-border); border-radius:var(--radius); padding:18px 18px 16px;
-  box-shadow:var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.1);
   animation:fadeIn .4s var(--ease) both; overflow:hidden;
 }
 .ov-stat .ov-ico {
-  position:absolute; top:16px; right:16px; width:34px; height:34px; border-radius:10px;
-  display:grid; place-items:center;
-  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple);
+  position:absolute; top:16px; right:16px; width:20px; height:20px;
+  display:grid; place-items:center; color:var(--text-3);
 }
-.ov-stat .ov-ico.neon { background:rgba(198,241,26,.12); border-color:rgba(198,241,26,.28); color:var(--neon); }
+/* .neon existe no HTML de alguns KPIs; sem a caixa, ele deixa de pintar um
+   quadrado e passa a ser só uma dica de tom no próprio glifo. */
+.ov-stat .ov-ico.neon { color:var(--text-3); }
 .ov-stat .ov-ico svg { width:18px; height:18px; }
 .ov-lbl { font-size:.68rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3); padding-right:40px; }
 .ov-val { font-size:1.55rem; font-weight:800; letter-spacing:-.02em; margin:12px 0 5px; font-variant-numeric:tabular-nums; }
@@ -2222,8 +2227,8 @@ html.pb-app #piggy-fab { touch-action: none; }
   font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
   border: 1px solid transparent; font-family: inherit;
 }
-.ag-btn-on { background: var(--purple); color: #fff; }
-.ag-btn-on:hover { filter: brightness(1.08); }
+.ag-btn-on { background: transparent; border-color: var(--purple); color: var(--purple); }
+.ag-btn-on:hover { background: rgba(255,45,142,.12); }
 .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
 .ag-btn-noenergy { background: var(--glass-bg); color: var(--text-3); border-color: var(--glass-border); cursor: not-allowed; }
@@ -2269,3 +2274,69 @@ body.balance-hidden #bill-detail-summary .v {
   user-select: none;
   transition: filter .15s ease;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Acessibilidade — base do arquivo inteiro. Fica no fim de propósito:
+   sem !important, ganha por ordem de cascata de qualquer regra acima.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Foco visível padrão. Havia 21 regras de :focus-visible espalhadas, uma por
+   componente — quem não estava na lista ficava sem indicador nenhum. Isto é o
+   piso; as regras específicas continuam ganhando por especificidade. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* prefers-reduced-motion. Antes deste bloco o arquivo tinha UMA regra
+   (.loading-sticker) para 21 `animation:` e 75 `transition:` declarados. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html { scroll-behavior: auto; }
+  .orb, .loading-sticker { animation: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Header no mobile — medido em 375×812: as três linhas do topo somavam
+   ~320px, 39% da tela, antes de um único número aparecer. Importar OFX e
+   Exportar são tarefas de desktop ocupando o espaço mais caro do celular:
+   viram ícone (o aria-label/title carrega o nome), e o status vira só o
+   ponto. A ação primária "+ Lançar" continua sendo a única em rosa.
+   ══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 720px) {
+  .header-right .hbtn-label { display: none; }
+  .header-right #status span { display: none; }
+  .header-right #status { padding: 0; }
+  /* alvo de toque 44×44 mesmo sem rótulo */
+  .header-right .hbtn:not(.user-menu-btn) {
+    min-width: 44px; min-height: 44px;
+    justify-content: center; padding: 0 10px;
+  }
+}
+
+/* Superfície de dado é opaca. Os cards de KPI usavam --glass-bg (branco a 7%),
+   então os orbs magenta do fundo atravessavam e tingiam o número — no mobile a
+   coluna inteira lia rosa. Rosa é ação e marca, não superfície de leitura. */
+.ov-stat { background: #17171b; }
+body.light .ov-stat { background: #fff; }
+
+/* O FAB é fixo e não reservava espaço abaixo de si: cobria conteúdo em três
+   telas (toast do dashboard vazio, última linha de "Top estabelecimentos",
+   canto do card de Receitas no mobile). O padding devolve a faixa. */
+body.has-sidenav .dash-main,
+#dashboard-content { padding-bottom: 96px; }
+
+/* Estado vazio dentro do quadro de um gráfico — mesmo par (sticker + frase) dos
+   vazios de Orçamentos/Cartões, só que ocupando a altura que o canvas ocuparia. */
+.chart-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; min-height: 180px; text-align: center; padding: 20px;
+}
+.chart-empty .empty-sticker { width: 84px; height: auto; opacity: .9; }
+.chart-empty-txt { color: var(--text-2); font-size: .88rem; max-width: 34ch; line-height: 1.5; }

@@ -693,6 +693,15 @@ function _fmtBRL(n) {
   return "R$ " + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/* Cor de um valor monetário pelo que ele significa, não pelo campo em que está.
+   Verde = entrada/positivo, vermelho = saída/negativo, neutro quando NÃO HÁ
+   direção — que é o caso do zero. Pintar zero de vermelho ou verde afirma um
+   movimento que não aconteceu: a tela de Cartões abria com quatro zeros em
+   quatro cores, e o olho lia alerta onde não havia nada. */
+function _toneMoney(v, dir) {
+  return Number(v) ? (dir === "in" ? "var(--green)" : "var(--red)") : "var(--text)";
+}
+
 function _fmtDateBR(iso) {
   if (!iso) return "—";
   try {
@@ -822,13 +831,13 @@ function renderCardsView(cards) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Usado este mês</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(usedSum)}</div>
-      <div class="stat-delta down">${pct.toFixed(1).replace(".", ",")}% do limite</div>
+      <div class="stat-value" style="color:${_toneMoney(usedSum, "out")}">${_fmtBRL(usedSum)}</div>
+      <div class="stat-delta${usedSum ? " down" : ""}">${pct.toFixed(1).replace(".", ",")}% do limite</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
       <div class="stat-label">Disponível agora</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(availSum)}</div>
-      <div class="stat-delta up">${availPct.toFixed(1).replace(".", ",")}% livre</div>
+      <div class="stat-value" style="color:${_toneMoney(availSum, "in")}">${_fmtBRL(availSum)}</div>
+      <div class="stat-delta${availSum ? " up" : ""}">${availPct.toFixed(1).replace(".", ",")}% livre</div>
     </div>
     <div class="stat-tile" style="animation-delay:180ms">
       <div class="stat-label">Fatura aberta total</div>
@@ -1320,7 +1329,7 @@ function renderInstallmentsView(groups) {
       </div>
       <div class="stat-tile" style="animation-delay:60ms">
         <div class="stat-label">Total quitado</div>
-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
+        <div class="stat-value" style="color:${_toneMoney(totalPago, "in")}">${_fmtBRL(totalPago)}</div>
         <div class="stat-delta" style="color:var(--text-3)">soma de tudo que já foi pago</div>
       </div>
       <div class="stat-tile" style="animation-delay:120ms">
@@ -1343,7 +1352,7 @@ function renderInstallmentsView(groups) {
       </div>
       <div class="stat-tile" style="animation-delay:60ms">
         <div class="stat-label">Total devido</div>
-        <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalDevido)}</div>
+        <div class="stat-value" style="color:${_toneMoney(totalDevido, "out")}">${_fmtBRL(totalDevido)}</div>
         <div class="stat-delta" style="color:var(--text-3)">${nParcelasFuturas} parcela${nParcelasFuturas === 1 ? "" : "s"} futura${nParcelasFuturas === 1 ? "" : "s"}</div>
       </div>
       <div class="stat-tile" style="animation-delay:120ms">
@@ -1353,7 +1362,7 @@ function renderInstallmentsView(groups) {
       </div>
       <div class="stat-tile" style="animation-delay:180ms">
         <div class="stat-label">Já pago</div>
-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
+        <div class="stat-value" style="color:${_toneMoney(totalPago, "in")}">${_fmtBRL(totalPago)}</div>
         <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
       </div>
     `;
@@ -2554,7 +2563,7 @@ function _renderGoalsView(goals) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Total guardado</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalSaved)}</div>
+      <div class="stat-value" style="color:${_toneMoney(totalSaved, "in")}">${_fmtBRL(totalSaved)}</div>
       <div class="stat-delta" style="color:var(--text-3)">em ${list.length} caixinha${list.length === 1 ? "" : "s"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
@@ -3348,7 +3357,7 @@ function _renderFixedView(items) {
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
       <div class="stat-label">Total mensal</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(total)}</div>
+      <div class="stat-value" style="color:${_toneMoney(total, "out")}">${_fmtBRL(total)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${renderPct != null ? renderPct + "% da renda do mês" : active.length + " ativos"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
@@ -4152,7 +4161,7 @@ function _renderBillsView(bills) {
 
   if (statsEl) statsEl.innerHTML = `
     <div class="stat-tile"><div class="stat-label">Em aberto</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalPend)}</div>
+      <div class="stat-value" style="color:${_toneMoney(totalPend, "out")}">${_fmtBRL(totalPend)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${pending.length} boleto(s)</div></div>
     <div class="stat-tile"><div class="stat-label">Próx. 7 dias</div>
       <div class="stat-value">${_fmtBRL(sum(wk))}</div>
@@ -4622,7 +4631,7 @@ function _renderRecurringIncomeView(items) {
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
       <div class="stat-label">Total mensal</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(total)}</div>
+      <div class="stat-value" style="color:${_toneMoney(total, "in")}">${_fmtBRL(total)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${active.length} recorrente${active.length === 1 ? "" : "s"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
@@ -5123,7 +5132,7 @@ function renderAnalyticsKPIs(k, months) {
     </div>
     <div class="stat-tile">
       <div class="stat-label">Receita média</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(avgIncome)}</div>
+      <div class="stat-value" style="color:${_toneMoney(avgIncome, "in")}">${_fmtBRL(avgIncome)}</div>
       <div class="stat-delta ${dIncome.cls}">${dIncome.text}</div>
     </div>
     <div class="stat-tile">
@@ -9400,6 +9409,10 @@ function buildCatChart(cats) {
   const data   = cats.map(c => c.total);
   const _pal = catColors();
   const colors = cats.map((_, i) => _pal[i % _pal.length]);
+  if (_chartEmptyState(el, data, "Sem despesas categorizadas neste mês.")) {
+    if (chartCat) { chartCat.destroy(); chartCat = null; }
+    return;
+  }
   if (chartCat) chartCat.destroy();
   chartCat = new Chart(el, {
     type:"doughnut",
@@ -9431,6 +9444,38 @@ function computeDailyFromLaunches(launches, year, month) {
   return Object.entries(result).map(([day, total]) => ({ day: parseInt(day), total }));
 }
 
+/* Gráfico sem dado nenhum vira estado vazio, não gráfico zerado.
+   Uma linha reta no eixo zero com o mês inteiro rotulado no eixo X PARECE um
+   gráfico com dados — o usuário lê "meus gastos foram planos", não "não há o
+   que mostrar". Mesma coisa nas barras de receita×despesa com seis meses em R$0.
+   Reaproveita o par .empty + sticker do Piggy que Orçamentos, Cartões e
+   Caixinhas já usam; nada de vocabulário novo de estado vazio.
+   Devolve true quando assumiu a tela (o chamador retorna sem desenhar). */
+function _chartEmptyState(el, values, msg) {
+  const box = el && el.parentElement;
+  if (!box) return false;
+  const prev = box.querySelector(".chart-empty");
+  const vazio = !values.length || values.every(v => !Number(v));
+  if (!vazio) {                       // dado chegou depois: desfaz o estado
+    if (prev) prev.remove();
+    el.style.display = "";
+    return false;
+  }
+  el.style.display = "none";
+  if (!prev) {
+    const d = document.createElement("div");
+    d.className = "empty chart-empty";
+    d.innerHTML =
+      '<img class="empty-sticker" src="/brand/stickers/report.webp" alt="" />' +
+      '<div class="chart-empty-txt"></div>';
+    box.appendChild(d);
+    d.querySelector(".chart-empty-txt").textContent = msg;
+  } else {
+    prev.querySelector(".chart-empty-txt").textContent = msg;
+  }
+  return true;
+}
+
 // Gráfico de evolução dos gastos com janela rolante (7D / 30D / 3M).
 // Série vem de /expenses/daily?days=N como [{date:"YYYY-MM-DD", total}].
 let _expensePeriod = 30;
@@ -9448,6 +9493,10 @@ function buildExpenseChart(series, days) {
     const key = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
     totals.push(byDate[key] || 0);
     labels.push(`${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}`);
+  }
+  if (_chartEmptyState(el, totals, "Nenhum gasto nesse período. Manda o primeiro pra Piggy no WhatsApp.")) {
+    if (chartDay) { chartDay.destroy(); chartDay = null; }
+    return;
   }
   const step = days <= 7 ? 1 : days <= 30 ? 5 : 15;
   const light = _isLightMode();
@@ -9509,6 +9558,10 @@ function buildHistoryChart(history) {
   const incomes  = history.map(h => h.income  || 0);
   const expenses = history.map(h => h.expense || 0);
 
+  if (_chartEmptyState(el, incomes.concat(expenses), "Ainda não há meses fechados pra comparar.")) {
+    if (chartHistory) { chartHistory.destroy(); chartHistory = null; }
+    return;
+  }
   if (chartHistory) chartHistory.destroy();
   chartHistory = new Chart(el, {
     type: "bar",
@@ -9677,9 +9730,14 @@ function render(d) {
   // Déficit (sav<0): despesas+aportes passaram da renda. Nesse caso NÃO exibir
   // "X% da renda poupada" — soa positivo num mês negativo (você aportou puxando
   // do saldo, não é poupança sustentável). Mostra o motivo, em vermelho.
-  const savDeltaCls = sav < 0 ? "down" : (rate>=20?"up":rate>=10?"":"down");
+  // Vermelho só quando há déficit de verdade (sav < 0). Uma taxa BAIXA de
+  // aporte num mês que fechou positivo não é perda — é só dinheiro que ficou
+  // parado, e pintar de vermelho fazia o card se contradizer: "Sobrou R$
+  // 331,50" em verde com "0% da renda poupada" em vermelho logo abaixo.
+  // Verde ≥20%, neutro abaixo disso, vermelho reservado ao déficit.
+  const savDeltaCls = sav < 0 ? "down" : (rate >= 20 ? "up" : "");
   const savDeltaTxt = sav < 0 ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
-  const rc   = rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--red)";
+  const rc   = sav < 0 ? "var(--red)" : rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--text-2)";
   const hist = d.is_current_month !== undefined
     ? !d.is_current_month
     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
@@ -10016,7 +10074,7 @@ function _renderAffiliateView(data) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Disponível pra saque</div>
-      <div class="stat-value" style="color:var(--green)">${fmt(s.available || 0)}</div>
+      <div class="stat-value" style="color:${_toneMoney(s.available || 0, "in")}">${fmt(s.available || 0)}</div>
       <div class="stat-delta" style="color:var(--text-3)">mínimo ${fmt(data.min_payout || 50)}</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">

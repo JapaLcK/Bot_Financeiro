@@ -4792,30 +4792,39 @@ async def dashboard_short_link(
         expired_html = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Link expirado</title>
+<title>Link expirado · PigBank</title>
 <script src="/safe-area.js?v=1"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-html{background:#050506}
-body{background:#050506;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
-display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
-.box{text-align:center;max-width:400px;padding:48px 32px}
-.icon{font-size:3.5rem;margin-bottom:20px}
-h2{font-size:1.4rem;font-weight:600;margin-bottom:10px}
-p{color:rgba(255,255,255,.5);line-height:1.7;margin-bottom:28px}
-a{display:inline-block;padding:11px 28px;background:#FF2D8E;
-border:1px solid #FF2D8E;border-radius:14px;color:#111111;font-weight:600;
-box-shadow:0 8px 30px rgba(255,45,142,.30);
-text-decoration:none;font-size:.9rem;transition:background .2s}
-a:hover{background:#FF5CA5;border-color:#FF5CA5}
+html{background:#0c0c0d}
+body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
+padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;
+background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
+.brand{position:relative;display:block;margin-bottom:34px}
+.brand img{height:28px;width:auto;display:block}
+.box{position:relative;text-align:center;max-width:440px}
+.sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
+.tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
+letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
+h2{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin-bottom:10px}
+p{color:rgba(255,255,255,.62);margin-bottom:28px}
+p b{color:rgba(255,255,255,.92)}
+.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 22px;border-radius:12px;
+font-weight:700;font-size:.9rem;text-decoration:none;background:#FF2D8E;color:#fff;border:1px solid transparent}
+.btn:hover{background:#FF5CA5}
+.btn:focus-visible,.brand:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
 </style></head>
-<body><div class="box">
-<div class="icon">🔒</div>
-<h2>Link expirado ou inválido</h2>
-<p>Este link de acesso ao dashboard expirou ou já foi usado.<br>
-Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.<br>
-Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</p>
-<a href="/">← Página inicial</a>
+<body>
+<a class="brand" href="/"><img src="/brand/logo.png?v=1" alt="PigBank"></a>
+<div class="box">
+<img class="sticker" src="/brand/stickers/hello.webp" alt="">
+<div class="tag">LINK EXPIRADO</div>
+<h2>Esse link já foi usado</h2>
+<p>Links do dashboard valem __MAGIC_LINK_MINUTES__ minutos e funcionam uma vez só.
+Manda <b>dashboard</b> pra Piggy no WhatsApp que ela gera outro na hora.</p>
+<a class="btn" href="/">Página inicial</a>
 </div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
         return HTMLResponse(content=_stamp_asset_versions(expired_html), status_code=401)
 
@@ -4940,23 +4949,35 @@ async def unsubscribe(uid: int, token: str):
   <script src="/safe-area.js?v=1"></script>
   <title>Descadastro · PigBank</title>
   <style>
-    body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-         color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
-    .card{background:#0f1320;border:1px solid rgba(255,255,255,.1);border-radius:20px;
-          padding:48px 40px;text-align:center;max-width:440px}
-    .icon{font-size:56px;margin-bottom:16px}
-    h1{margin:0 0 12px;font-size:22px;color:#fff}
-    p{color:rgba(255,255,255,.6);line-height:1.7;margin:0 0 24px}
-    a{color:#7c3aed;text-decoration:none}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{background:#0c0c0d}
+    body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
+         padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;
+         background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
+    .brand{position:relative;display:block;margin-bottom:34px}
+    .brand img{height:28px;width:auto;display:block}
+    .box{position:relative;text-align:center;max-width:440px}
+    .sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
+    .tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
+         letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
+    h1{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin:0 0 10px}
+    p{color:rgba(255,255,255,.62);margin:0 0 16px}
+    p b{color:rgba(255,255,255,.92)}
+    .fine{font-size:.82rem;color:rgba(255,255,255,.48);margin:0}
+    a:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="icon">🐷</div>
-    <h1>Descadastro confirmado</h1>
-    <p>Você não vai mais receber os emails de dicas e insights do Piggy.<br/>
-       Seus emails de segurança (código de verificação, redefinição de senha) continuam normais.</p>
-    <p style="font-size:13px">Arrependeu? Mande "reativar emails" pro bot!
+  <a class="brand" href="/"><img src="/brand/logo.png?v=1" alt="PigBank"></a>
+  <div class="box">
+    <img class="sticker" src="/brand/stickers/ok.webp" alt="">
+    <div class="tag">TUDO CERTO</div>
+    <h1>Pronto, parei de te mandar e-mail</h1>
+    <p>As dicas e os resumos da Piggy não chegam mais. Os e-mails de segurança
+       — código de verificação e redefinição de senha — continuam vindo.</p>
+    <p class="fine">Mudou de ideia? Manda <b>reativar emails</b> pra Piggy no WhatsApp.</p>
   </div>
 </body>
 </html>

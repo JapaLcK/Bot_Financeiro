@@ -130,10 +130,10 @@
         <span id="status-text">Conectando…</span>
       </div>
       <button class="hbtn" id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"><i class="ph ph-eye" aria-hidden="true"></i></button>
-      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
-      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
+      <button class="hbtn" id="refresh-btn" title="Atualizar" aria-label="Atualizar" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> <span class="hbtn-label">Atualizar</span></button>
+      <button class="hbtn" data-pro-feature="ofx_import" title="Importar OFX" aria-label="Importar OFX" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> <span class="hbtn-label">Importar OFX</span></button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
+      <button class="hbtn" data-pro-feature="export" title="Exportar" aria-label="Exportar" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> <span class="hbtn-label">Exportar</span></button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">

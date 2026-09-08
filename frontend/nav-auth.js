@@ -110,13 +110,30 @@
       ".pb-acct-link.danger{color:#fecaca}",
       ".pb-acct-link.danger:hover{background:rgba(248,113,113,.15);color:#fff1f2}",
       ".pb-acct-ico{width:18px;text-align:center;flex-shrink:0}",
-      /* ── Nav mobile: os 4 links vão pra uma 2ª linha, sempre visíveis ── */
+      /* ── Nav mobile: menu recolhido ─────────────────────────────────────
+         Antes os 5 links ficavam SEMPRE abertos numa 2ª linha: 133px de nav
+         medidos em 375×812, fixos, acompanhando a rolagem — 16% da tela gastos
+         em navegação antes de qualquer conteúdo. Agora recolhem atrás de um
+         botão; a linha 1 (logo + conta/CTA) cai para ~62px. */
+      ".pb-burger{display:none}",
       "@media (max-width:900px){",
       ".nav{flex-wrap:wrap;row-gap:0}",
       ".nav .nav-logo{order:1}",
       ".nav .nav-right{order:2;margin-left:auto}",
-      ".nav .nav-links{order:3;display:flex;flex-wrap:wrap;width:100%;justify-content:center;align-items:center;gap:8px 20px;margin:10px 0 0;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}",
-      ".nav .nav-links a{font-size:.9rem;white-space:nowrap}",
+      /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
+      ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;",
+      "width:44px;height:44px;margin-left:8px;padding:0;flex-shrink:0;",
+      "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);",
+      "border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
+      ".pb-burger:hover{background:rgba(255,255,255,.12)}",
+      ".nav .nav-links{order:4;display:none;flex-wrap:wrap;width:100%;",
+      "flex-direction:column;align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;",
+      "border-top:1px solid rgba(255,255,255,.08)}",
+      ".nav.pb-nav-open .nav-links{display:flex}",
+      /* linha de 44px: item de menu, não link solto no meio da barra */
+      ".nav .nav-links a{font-size:.95rem;white-space:nowrap;padding:11px 12px;",
+      "border-radius:10px;min-height:44px;display:flex;align-items:center}",
+      ".nav .nav-links a:hover{background:rgba(255,255,255,.06)}",
       "}",
     ].join("");
     document.head.appendChild(s);
@@ -177,7 +194,53 @@
   function setText(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
   function setPlan(id, v) { var el = document.getElementById(id); if (el) { el.textContent = v; el.style.display = "inline-block"; } }
 
+  /* ── Botão do menu mobile ────────────────────────────────────────────────
+     O CSS acima recolhe .nav-links abaixo de 900px; sem este botão não haveria
+     como reabrir. Fica ao lado da .nav-right e só aparece no breakpoint mobile
+     (a própria regra .pb-burger{display:none} cuida do desktop), então não há
+     estado inconsistente ao girar o aparelho — é CSS decidindo, não JS. */
+  function mountBurger() {
+    var nav = document.querySelector(".nav");
+    var links = nav && nav.querySelector(".nav-links");
+    if (!nav || !links || nav.querySelector(".pb-burger")) return;
+
+    if (!links.id) links.id = "pb-nav-links";
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "pb-burger";
+    b.setAttribute("aria-label", "Abrir menu");
+    b.setAttribute("aria-expanded", "false");
+    b.setAttribute("aria-controls", links.id);
+    b.innerHTML = "&#9776;";
+
+    function setOpen(open) {
+      nav.classList.toggle("pb-nav-open", open);
+      b.setAttribute("aria-expanded", open ? "true" : "false");
+      b.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
+    }
+    b.addEventListener("click", function () {
+      setOpen(!nav.classList.contains("pb-nav-open"));
+    });
+    // Escape fecha e devolve o foco ao botão — senão o foco fica órfão no menu.
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && nav.classList.contains("pb-nav-open")) {
+        setOpen(false);
+        b.focus();
+      }
+    });
+    // Toque fora fecha. Navegar por um link também: a página troca, mas em
+    // âncora (#funcionalidades) não trocaria e o menu ficaria aberto por cima.
+    document.addEventListener("click", function (e) {
+      if (!nav.contains(e.target)) setOpen(false);
+    });
+    links.addEventListener("click", function (e) {
+      if (e.target.closest("a")) setOpen(false);
+    });
+
+    nav.insertBefore(b, links);
+  }
   injectStyles();
+  mountBurger();
 
   fetch("/auth/validate", { credentials: "same-origin" })
     .then(function (r) {
