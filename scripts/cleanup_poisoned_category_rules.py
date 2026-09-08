@@ -24,10 +24,10 @@ colisão, mas apagá-la seria perder config do usuário. Por isso `--apply` exig
 `--user`: rode global em dry-run, revise a lista, e só então aplique cliente a
 cliente conferindo que nenhuma daquelas regras é intencional.
 
-O dry-run é READ-ONLY de verdade: nenhuma das duas leituras (`_all_user_ids`,
-`_rules_somente_leitura`) escreve, e `--user` inexistente aborta em vez de ser
-criado. Sem isso o próprio conselho de segurança deste script ("rode o dry-run
-primeiro") criava dado em produção.
+O dry-run é READ-ONLY de verdade: nenhuma das três leituras (`_all_user_ids`,
+`_rules_somente_leitura`, `db.user_exists`) escreve, e `--user` inexistente aborta
+em vez de ser criado. Sem isso o próprio conselho de segurança deste script ("rode
+o dry-run primeiro") criava dado em produção.
 
 Uso:
     .venv/bin/python -m scripts.cleanup_poisoned_category_rules              # dry-run global (só reporta)
@@ -48,12 +48,6 @@ def _all_user_ids() -> list[int]:
         cur.execute("select id from users order by id")
         rows = cur.fetchall() or []
     return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
-
-
-def _user_existe(user_id: int) -> bool:
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select 1 from users where id=%s", (user_id,))
-        return cur.fetchone() is not None
 
 
 def _rules_somente_leitura(user_id: int) -> list[tuple[str, str]]:
@@ -121,7 +115,7 @@ def main() -> None:
     # `--user` digitado errado não pode virar "0 regras, nada a fazer": aborta.
     # (O write que ele causava morreu em `_rules_somente_leitura`; isto é o
     # aviso, pra não confundir "cliente limpo" com "cliente que não existe".)
-    if args.user is not None and not _user_existe(args.user):
+    if args.user is not None and not db.user_exists(args.user):
         ap.error(f"user {args.user} não existe — confira o id.")
 
     user_ids = [args.user] if args.user else _all_user_ids()

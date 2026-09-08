@@ -38,6 +38,7 @@ from core.services.pluggy import (
 )
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
+    ITEM_UPDATING,
     _env_int,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
@@ -51,12 +52,14 @@ from db import (
     get_connections_by_item_id,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    item_registry_origins,
     list_pluggy_item_ids,
     pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
     token_hash,
     update_pluggy_open_finance_item_status,
+    user_exists,
 )
 from frontend.routes import shared
 
@@ -630,6 +633,200 @@ def _schedule_pluggy_sync(item_id: str) -> None:
     task.add_done_callback(lambda _t: _on_sync_done(item_id))
 
 
+async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int | None:
+    """Adota um item da Pluggy que existe lá e não tem conexão local. Devolve o dono.
+
+    Por que existe: a linha em `open_finance_connections` só nascia no
+    `POST /pluggy-item`, que é chamado pelo NAVEGADOR. Quem fechava a aba no meio
+    do widget ficava com o item vivo na Pluggy e nenhuma linha aqui — a tela mostra
+    0 bancos, o `DELETE /open-finance/{uid}` enumera a partir das conexões e não
+    apaga nada lá, e o `avoidDuplicates` do connect token recusa item novo. O
+    usuário fica travado sem saída pelo produto.
+
+    SÓ o chamador decide QUANDO adotar, e ele adota só em `item/created` — o
+    porquê está no webhook.
+
+    O dono vem SEMPRE da resposta REMOTA (`clientUserId`, que nós mesmos setamos ao
+    emitir o connect token) — NUNCA do corpo do webhook, que vem de fora e não
+    decide posse. E ele é aceito com a MESMA régua do `POST /pluggy-item`, que
+    compara STRING (`str(dono_remoto or "") != str(session_uid)`): só passa o que
+    for a forma canônica de um inteiro. `int()` sozinho aceitava mais do que a
+    rota — `' 5 '`, `'+5'`, `'1_2'` (PEP 515) e `'١٢'` (dígitos árabe-índicos) —
+    e as duas portas divergiam no mesmo valor.
+
+    Três guardas de escrita, nesta ordem:
+      • o item não pode ter tido dono NUNCA. "Item/created dispara uma vez" é
+        premissa errada: webhook é entrega AT-LEAST-ONCE e este endpoint devolve
+        401/400/503 (e pode dar 500 antes daqui), o que faz a Pluggy retentar o
+        MESMO evento. Uma 2ª entrega depois de o usuário remover o banco
+        ressuscitava a conexão, com sync agendado, re-importando na carteira que
+        ele limpou — o delete remoto é best-effort e o item sobrevive lá. POR QUE
+        o rastro com dono é o sinal certo (e por que banco removido fica "sem
+        conexão local" para sempre): docstring de `db.item_registry_origins`,
+        fonte única dos três leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
+        com dono ANTES da conexão, então ela mesma fecha a duplicata;
+      • o usuário TEM de existir. Não dá para delegar à FK: todo caminho de
+        escrita passa por `ensure_user_tx`, que CRIA a linha de `users`. Conta
+        apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
+        best-effort ressuscitava por causa de um evento da Pluggy;
+      • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
+        ela deixava conexão commitada com registry VAZIO — item adotado sem
+        nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
+        da Pluggy devolve 401).
+
+    O PREÇO dessa ordem, medido: se a escrita da conexão falhar no meio, sobra
+    rastro COM dono e nenhuma conexão — estado indistinguível de banco removido
+    pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
+    listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
+    regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
+    `item/created` não readota (a 1ª guarda acima). A saída é OPERACIONAL:
+    `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
+    item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
+    widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
+    (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
+    escrita em outro fluxo, outro PR.
+
+    Nada escapa daqui: o chamador (webhook) tem de responder 200 mesmo em falha,
+    senão a Pluggy retenta em laço. Sem dono resolvível, sem usuário, com o teto
+    de bancos do plano estourado (`_enforce_bank_limit`, 402) ou com qualquer
+    falha de escrita, devolve None e o chamador mantém o rastro sem dono que já
+    existia.
+
+    LIMITE CONHECIDO (medido, decidido não consertar): duas entregas CONCORRENTES
+    do mesmo `item/created` podem ler o rastro vazio antes de qualquer uma
+    escrever, e gravam DUAS auditorias para UMA conexão (o `pluggy_item_lock`
+    protege a conexão, a auditoria fica fora dele). A janela é a distância entre
+    a leitura do rastro e o `register_item` — hoje duas idas ao banco; fechá-la
+    de vez é serializar a adoção pelo `pluggy_item_lock`, que muda o desenho do
+    lock. Também fica aberto: `item/updated` chegando ANTES do `item/created`
+    (entrega fora de ordem) é adotado sem contas e sem sync agendado até o evento
+    seguinte ou o pull-to-refresh. Nenhum dos dois é regressão contra a `main`.
+
+    ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
+    desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
+    preço da ordem escolhida acima. Se virar latência, jogar num
+    `asyncio.create_task` como o `_schedule_pluggy_sync` já faz.
+    """
+    try:
+        remote = await asyncio.to_thread(get_pluggy_item, item_id)
+        bruto = str(remote.get("clientUserId") or "")
+        dono = int(bruto)
+        if str(dono) != bruto:   # ' 5 ', '+5', '007', '1_2', '١٢' → não é o que a rota aceita
+            raise ValueError(f"clientUserId fora da forma canônica: {bruto!r}")
+    except Exception as exc:
+        # Sem dono resolvível: o chamador registra o rastro como antes. O MOTIVO
+        # importa — `PluggyConfigError`, 404, timeout e item sem `clientUserId`
+        # viravam todos o mesmo `of_webhook_item_unknown` genérico.
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item órfão sem dono resolvível",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+
+    # A leitura do rastro vem DEPOIS do HTTP de propósito, e custa um POST /auth
+    # + GET /items desperdiçado na duplicata. Antes dele, ela ficava separada da
+    # escrita (`register_item`) por um round-trip inteiro da Pluggy — e MEDIDO
+    # (duas entregas concorrentes de `item/created`, a 2ª começando com a 1ª
+    # ainda dentro do GET): 2 auditorias e 2 rastros para 1 conexão, contra 1 e 1
+    # com a leitura aqui. A posição NÃO é neutra: a troca é uma chamada HTTP num
+    # caminho raro (retentativa) por uma janela de corrida N vezes menor. O que
+    # SOBRA de janela é o "LIMITE CONHECIDO" da docstring acima, que é onde ele
+    # está descrito por extenso (CLAUDE.md §0.7).
+    # Falha de leitura NÃO adota (não dá para verificar).
+    try:
+        origens = await asyncio.to_thread(item_registry_origins, item_id)
+    except Exception as exc:  # noqa: BLE001 — nada escapa daqui (o webhook responde 200)
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Rastro do item ilegível: adoção não verificável",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+    if origens:
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item já teve dono: adoção só vale para item nunca atribuído",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": "rastro_com_dono",
+                     "origens": sorted(origens)},
+        )
+        return None
+
+    try:
+        if not await asyncio.to_thread(user_exists, dono):
+            await log_system_event(
+                "warning", "of_webhook_adopt_skipped",
+                "Item órfão de usuário que não existe mais",
+                source="open_finance",
+                details={"item_id": item_id, "user_id": dono, "motivo": "usuario_inexistente"},
+            )
+            return None
+        await _enforce_bank_limit(dono, item_id)
+        # O rastro DUPLICA de propósito quando o navegador volta depois (o POST
+        # grava outra linha, `origin='pluggy_item'`): o registry é um log de
+        # append, "este item existiu, visto por esta porta", e as duas portas
+        # viram o item de verdade. Deduplicar apagaria justamente o que responde
+        # "por onde ele entrou". O que NÃO pode duplicar é a conexão (uma só, o
+        # upsert garante) e a auditoria (ver o `POST /pluggy-item`).
+        await asyncio.to_thread(
+            register_item, dono, provider_item_id=item_id, origin="webhook_adopt",
+            status=str(remote.get("status") or "") or None, last_event=last_event,
+        )
+        await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False)
+    except Exception as exc:
+        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de três
+        # desfechos com ações de operador diferentes — 402 (teto de bancos do
+        # plano), 409 (o estado sumiu durante o lock) e 503 (lock ocupado). O
+        # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
+        # (starlette), então não precisa de formatação nossa.
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item órfão não adotado",
+            source="open_finance",
+            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+
+    # Daqui pra baixo a adoção JÁ aconteceu: nada pode desfazê-la nem virar 5xx
+    # para a Pluggy. Auditoria é o mesmo evento que o `POST /pluggy-item` grava —
+    # sem `request`, que aqui é o POST da Pluggy e não o do usuário.
+    try:
+        await asyncio.to_thread(
+            record_audit_event, dono, AuditEvent.OPEN_FINANCE_CONNECTED,
+            details={"provider": "pluggy", "item_id": item_id, "origin": "webhook_adopt"},
+        )
+        # Sync em tudo MENOS `UPDATING`/`CREATED` (`ITEM_UPDATING` é só esses
+        # dois): o que está barrado é o item que a Pluggy ainda está montando —
+        # em `item/created` esse é o status normal, e sincronizar ali é uma task
+        # esperando o item sair de UPDATING (`pluggy_sync`, que já faz essa
+        # espera) para achar zero conta. O `item/updated` seguinte sincroniza
+        # sozinho, e a essa altura a conexão JÁ existe, então ele entra pelo
+        # caminho comum (`len(conexoes) == 1`). É menos código rodando, não mais.
+        # Os outros status AGENDAM: `WAITING_USER_INPUT`, `WAITING_USER_ACTION`,
+        # `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um sync que provavelmente
+        # não traz nada — e isso NÃO vira estado errado na tela, porque
+        # `connection_ui_state` testa `_NEEDS_USER` antes de `no_accounts`.
+        # `_UPDATING` vem de `pluggy_health` — a fonte que o `pluggy_sync` também
+        # usa; não é uma segunda lista de status (CLAUDE.md §0.7).
+        if str(remote.get("status") or "").upper() not in ITEM_UPDATING:
+            _schedule_pluggy_sync(item_id)
+    except Exception as exc:
+        await log_system_event(
+            "warning", "of_webhook_adopt_incompleto",
+            "Item adotado, mas auditoria/sync falharam",
+            source="open_finance",
+            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+    return dono
+
+
 def _bank_limit_enabled() -> bool:
     # Gate dormante: só bloqueia quando ligado no ambiente (como os outros gates do projeto).
     return (os.getenv("OF_BANK_LIMIT_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -962,6 +1159,17 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         )
         raise HTTPException(status_code=409, detail="Este item já está vinculado a outra conta.")
 
+    # A conexão que JÁ existia nasceu do webhook (que auditou por ela) ou é um
+    # banco que o usuário está RECONECTANDO? `tinha_conexao_propria` sozinho não
+    # separa os dois: o widget reconecta banco existente e o `avoidDuplicates`
+    # devolve o MESMO itemId, então re-consentimento e conserto de LOGIN_ERROR
+    # também chegam aqui com a conexão de pé — e sumiam de "Atividade da conta".
+    # O fato que separa: `pluggy_item` no rastro = o NAVEGADOR já registrou este
+    # item alguma vez, logo a conexão não é a que o webhook acabou de adotar.
+    # Lido ANTES do `register_item` abaixo, que grava justamente essa origem.
+    conexao_recem_adotada = tinha_conexao_propria and "pluggy_item" not in (
+        await asyncio.to_thread(item_registry_origins, new_item_id))
+
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
         connection = await _grava_reconexao(
@@ -975,13 +1183,24 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         status=str(remote.get("status") or "") or None,
     )
 
-    await asyncio.to_thread(
-        record_audit_event,
-        user_id,
-        AuditEvent.OPEN_FINANCE_CONNECTED,
-        request=request,
-        details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
-    )
+    # Pula SÓ a duplicata do webhook. `item/created` chega antes do `onSuccess`
+    # do widget (que só dispara em status final), então em produção a ordem comum
+    # é webhook primeiro: a adoção grava a conexão E a auditoria, e este POST
+    # chegava depois gravando o SEGUNDO `OPEN_FINANCE_CONNECTED` da MESMA conexão.
+    # O que se suprime é "o webhook JÁ auditou ESTA conexão", não "o usuário já
+    # tinha este banco" — reconexão legítima (re-consentimento, conserto de
+    # LOGIN_ERROR) é evento de segurança e continua aparecendo, uma vez cada.
+    # ponytail: a 1ª reconexão de um item adotado pelo webhook cujo navegador
+    # NUNCA postou (aba fechada) ainda cai como duplicata e não audita — a partir
+    # da 2ª, audita. Fechar isso exige marcar a adoção na própria conexão.
+    if not conexao_recem_adotada:
+        await asyncio.to_thread(
+            record_audit_event,
+            user_id,
+            AuditEvent.OPEN_FINANCE_CONNECTED,
+            request=request,
+            details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
+        )
 
     # Sync inicial: puxa contas + transações do banco recém-conectado.
     _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
@@ -1220,17 +1439,50 @@ async def open_finance_pluggy_webhook(request: Request):
         if len(conexoes) == 1:
             _schedule_pluggy_sync(item_id)
         elif not conexoes:
-            # Item que não conhecemos: registra (o GET /items lista devolve 401,
-            # então este é o único jeito de saber que ele existe) e NÃO sincroniza.
-            await log_system_event(
-                "warning", "of_webhook_item_unknown",
-                "Webhook de item sem conexão local",
-                source="open_finance", details={"item_id": item_id, "event": event_name},
-            )
-            await asyncio.to_thread(
-                register_item, None, provider_item_id=item_id,
-                origin="webhook", last_event=event_name,
-            )
+            # Item que não conhecemos. Em `item/created` — e SÓ nele — pergunta à
+            # Pluggy de quem ele é e adota. QUEM ele destrava está na docstring de
+            # `_adota_item_orfao` ("Por que existe"), fonte única (CLAUDE.md §0.7);
+            # aqui fica só o QUANDO, que é decisão deste chamador:
+            #
+            # Por que só nesse evento: `item/created` dispara UMA vez, na criação,
+            # e é exatamente "item novo que o navegador não registrou". Evento
+            # POSTERIOR (`item/updated`, `transactions/created`) num item sem
+            # conexão significa item que JÁ TEVE conexão e foi removida — adotar
+            # ali ressuscita o banco que o usuário acabou de tirar, com sync
+            # agendado, que é o buraco que o `_disconnect_sob_lock` fechou pelo
+            # outro lado. O delete do item na Pluggy é best-effort
+            # (`delete_pluggy_items_best_effort`): o item sobrevive à falha e
+            # continua mandando evento.
+            adotado = (await _adota_item_orfao(item_id, event_name)
+                       if event_name == "item/created" else None)
+            if adotado is None:
+                # Sem adoção: registra (o GET /items lista devolve 401, então este
+                # é o único jeito de saber que ele existe) e NÃO sincroniza.
+                # ponytail: INSERT puro, sem teto — sob entrega at-least-once,
+                # cada retentativa de um item que já tem dono soma mais uma linha
+                # `origin='webhook'`/`user_id NULL` aqui. Igual à `main` (não é
+                # regressão) e inofensivo para os dois leitores, que perguntam
+                # por rastro COM dono; se o volume incomodar, é um upsert por
+                # (provider, item, origin) com contador.
+                await log_system_event(
+                    "warning", "of_webhook_item_unknown",
+                    "Webhook de item sem conexão local",
+                    source="open_finance", details={"item_id": item_id, "event": event_name},
+                )
+                try:
+                    await asyncio.to_thread(
+                        register_item, None, provider_item_id=item_id,
+                        origin="webhook", last_event=event_name,
+                    )
+                except Exception as exc:  # noqa: BLE001 — rastro nunca derruba o 200
+                    # Mesmo contrato do `of_item_registry_failed` na emissão do
+                    # connect token: 5xx aqui vira retentativa em laço da Pluggy.
+                    await log_system_event(
+                        "warning", "of_item_registry_failed",
+                        "Falha ao registrar item sem conexão",
+                        source="open_finance",
+                        details={"item_id": item_id, "error": str(exc)[:200]},
+                    )
         else:
             # Dois donos possíveis: sincronizar um deles é sincronizar a carteira
             # do usuário errado. Recusa.

@@ -302,6 +302,52 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+# Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
+# que não tem NENHUMA conexão local. Uma fonte só, porque dois leitores precisam
+# enxergar exatamente o mesmo universo: o contador do painel de saúde abaixo e o
+# `scripts/adotar_items_of_orfaos.py`, que adota justamente esses items.
+ITEMS_SEM_CONEXAO = """
+  from open_finance_item_registry r
+ where r.provider_item_id is not null
+   and not exists (
+       select 1 from open_finance_connections c
+        where c.provider = r.provider
+          and c.provider_item_id = r.provider_item_id
+   )
+"""
+
+
+def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy") -> set[str]:
+    """Por quais portas este item já foi visto COM DONO.
+
+    Uma pergunta, uma fonte (CLAUDE.md §0.7). Vazio = o item nunca foi atribuído
+    a ninguém, e é isso que separa ADOTAR de RESSUSCITAR: nem o disconnect nem o
+    reset apagam o registry (`db/privacy.py` o preserva), então banco REMOVIDO
+    fica para sempre "sem conexão local" e só o rastro com dono
+    (`pluggy_item`/`webhook_adopt`) conta que ele existiu. Os três leitores:
+
+      • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
+        de `item/created`, entrega at-least-once, ressuscitava o removido);
+      • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
+        este item, logo a conexão que existe não é a que o webhook acabou de
+        adotar (auditoria de reconexão);
+      • `scripts/adotar_items_of_orfaos.py` — o alvo do one-shot.
+
+    Devolve ORIGENS, nunca `user_id`: o chamador decide sobre o item, e nenhum
+    dado de outro usuário sai daqui.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select distinct origin from open_finance_item_registry
+                 where provider = %s and provider_item_id = %s and user_id is not null
+                """,
+                (provider, str(provider_item_id or "")),
+            )
+            return {r["origin"] for r in (cur.fetchall() or []) if r["origin"]}
+
+
 def register_item(
     user_id: int | None,
     *,
@@ -378,18 +424,7 @@ def of_health_counters() -> dict[str, Any]:
             row["stale_por_produto"] = {r["produto"]: int(r["n"]) for r in (cur.fetchall() or [])}
 
             # Items vistos (registry) que não têm conexão local nenhuma.
-            cur.execute(
-                """
-                select count(distinct r.provider_item_id) as n
-                  from open_finance_item_registry r
-                 where r.provider_item_id is not null
-                   and not exists (
-                       select 1 from open_finance_connections c
-                        where c.provider = r.provider
-                          and c.provider_item_id = r.provider_item_id
-                   )
-                """
-            )
+            cur.execute(f"select count(distinct r.provider_item_id) as n {ITEMS_SEM_CONEXAO}")
             row["items_sem_conexao"] = int((cur.fetchone() or {}).get("n") or 0)
 
             # Deadlocks/retries recentes (24h) — o log de sistema é a fonte.
