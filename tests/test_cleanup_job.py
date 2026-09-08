@@ -31,3 +31,30 @@ def test_falha_em_uma_tabela_nao_impede_as_outras(monkeypatch, capsys):
     assert "pending_google_signups: 0 linha(s) removida(s)" in saida.out
     assert "mfa_login_challenges: FALHOU" in saida.err
     assert rc == 1  # o cron precisa marcar a execução como falha
+
+
+def test_falha_no_delete_de_refresh_tokens_chega_ao_resultado(monkeypatch, capsys):
+    """Sem try/except engolindo a exceção, a falha do DELETE tem de sair no rc e em errors."""
+    from scripts import cleanup_job
+
+    def _get_conn_quebrado(*a, **k):
+        raise RuntimeError("connection refused")
+
+    # get_conn real quebrado: exercita cleanup_expired_refresh_tokens de verdade,
+    # via o _cleanups() real. As outras duas viram no-op pra não tocar no banco.
+    monkeypatch.setattr("core.refresh_tokens.get_conn", _get_conn_quebrado)
+    monkeypatch.setattr("db.mfa.cleanup_expired_challenges", lambda: 0)
+    monkeypatch.setattr("db.google_auth.cleanup_expired_pending_signups", lambda: 0)
+
+    eventos: list[tuple[str, dict]] = []
+    monkeypatch.setattr(cleanup_job, "_log_event", lambda level, msg, det: eventos.append((level, det)))
+
+    rc = cleanup_job.run()
+    saida = capsys.readouterr()
+
+    assert rc == 1, "cron ficaria verde sobre tabela que não foi podada"
+    assert [(lvl, [e["table"] for e in det["errors"]]) for lvl, det in eventos] == [
+        ("error", ["auth_refresh_tokens"])
+    ]
+    assert "auth_refresh_tokens" not in eventos[0][1]["removed"]
+    assert "auth_refresh_tokens: FALHOU" in saida.err
