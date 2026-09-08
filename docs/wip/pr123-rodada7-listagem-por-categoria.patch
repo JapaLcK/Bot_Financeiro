@@ -1,0 +1,931 @@
+diff --git a/core/handlers/launches.py b/core/handlers/launches.py
+index 36b042b..5b515e2 100644
+--- a/core/handlers/launches.py
++++ b/core/handlers/launches.py
+@@ -17,6 +17,7 @@ from parsers import (
+     split_financial_transactions,
+     describe_valueless_launch,
+     _extract_valor,
++    RECEITA_START_VERBS,
+ )
+ 
+ logger = logging.getLogger(__name__)
+@@ -85,33 +86,155 @@ _INTERNAL_TIPOS = {
+ }
+ 
+ 
+-# Pergunta explicitamente por dinheiro que ENTROU. Só é consultado pra decidir se
+-# delega pro spend_query (que é expense-only); normalize_text já tirou o acento.
++# Palavra de GASTO — o ÚNICO gate que desvia pro caminho estreito (spend_query,
++# que é expense-only). Mesmo conjunto de verbos que parsers.py/intent_classifier.py
++# já reconhecem. Casa contra o trecho FORA da categoria, já normalizado por
++# _split_query_category (sem acento, minúsculo) — nunca contra o texto inteiro.
++_PEDE_GASTO_RE = re.compile(
++    r"\b(gastei|gasto|gastos|gastou|gastando|despesas?|paguei|pagamento|comprei|compras|torrei|queimei)\b"
++)
++
++# Pergunta explicitamente por dinheiro que ENTROU. Reusa os verbos de receita do
++# parser (RECEITA_START_VERBS) em vez de manter uma lista paralela — foi a lista
++# paralela que fez "caiu"/"pingou"/"embolsei" caírem no caminho expense-only.
++# NÃO é load-bearing: sem palavra nenhuma o tipo fica None e a listagem mostra
++# os DOIS tipos da categoria (conteúdo correto, só menos estreito).
+ _PEDE_RECEITA_RE = re.compile(
+-    r"\b(receitas?|ganhos?|entradas?|recebimentos?|recebi|ganhei|faturamento)\b"
++    r"\b(receitas?|ganhos?|entradas?|recebimentos?|faturamento|"
++    + "|".join(v.strip() for v in RECEITA_START_VERBS)
++    + r")\b"
+ )
+ 
+ 
++def _tipo_pedido(text: str) -> str | None:
++    """'despesa' | 'receita' | None (os dois) — o que a pergunta pede.
++
++    SÓ o texto decide. `entities["tipo"]` era consultado como fallback e foi
++    removido: o prompt do classificador não documenta `tipo` pra `launches.list`
++    (core/intent_classifier.py:794-795), então o valor é chute do LLM sem
++    contrato — e ele só consegue ESTREITAR. Medido antes da remoção:
++    `entities={"tipo":"despesa"}` + "me mostra os lançamentos em rendimentos"
++    respondia "você não teve gastos em rendimentos" com a receita no banco.
++
++    Lê SÓ o trecho fora da categoria (`_split_query_category`), pelo mesmo motivo
++    que o match de categoria da rodada 3 passou a valer só dentro do trecho: o
++    nome da categoria não é vocabulário da pergunta. Sobre o texto inteiro,
++    "liste as receitas em compras online" tinha "compras" (categoria de SISTEMA,
++    utils_text.py:495) casando como palavra de gasto e respondia "você não teve
++    gastos em compras online". Idem "gastos com minha namorada".
++
++    AS DUAS classes presentes → None (mostra os dois tipos): "liste os gastos e
++    receitas em X" pede os dois, e escolher um esconde metade. Isso também deixa
++    a NEGAÇÃO ("não quero gastos, quero as receitas") cair em "ambos" — conteúdo
++    correto sem interpretar negação, que é análise de linguagem e não é o que
++    este gate faz. Nenhuma das duas → None também.
++    """
++    fora_da_categoria, _ = _split_query_category(text)
++    tem_gasto = bool(_PEDE_GASTO_RE.search(fora_da_categoria))
++    tem_receita = bool(_PEDE_RECEITA_RE.search(fora_da_categoria))
++    if tem_gasto and tem_receita:
++        return None
++    if tem_gasto:
++        return "despesa"
++    if tem_receita:
++        return "receita"
++    return None
++
++
++def _resolve_period(text: str, entities: dict | None = None) -> tuple[date | None, date | None, str]:
++    """Período pedido, ou (None, None, "") quando o texto/entities não trazem um.
++
++    Precedência TEXTO PRIMEIRO: `date_filter` já resolvido (clarificação "gastos
++    com saúde dia 4" + "abril" → ISO em entities) é só FALLBACK, senão "julho"
++    (mês inteiro) colapsaria no único dia que estiver em entities. Texto vazio no
++    2º arg do _parse_date_entity: sem fallback textual, o texto já foi consultado.
++    """
++    period = parse_period_from_text(text)
++    if period:
++        return period
++    dia = _parse_date_entity(entities or {}, "")
++    if dia:
++        lbl = _fmt_date_label(dia)
++        return dia, dia, (lbl if lbl in ("hoje", "ontem") else f"em {lbl}")
++    return None, None, ""
++
++
++def _listar_categoria(
++    user_id: int, categoria: str, text: str,
++    entities: dict | None = None, tipo: str | None = None,
++) -> str:
++    """Listagem cronológica dos lançamentos de uma categoria (launches + cartão).
++
++    Sem período no texto → sem janela: mostra os últimos N da categoria. Uma lista
++    que descarta linhas de uma janela não anunciada é o bug que este caminho existe
++    pra matar.
++
++    Mesmo princípio no corte por `limit`: o sumário sai do `resumo` (TODAS as
++    linhas que casam, calculado em SQL antes do LIMIT), e o cabeçalho anuncia
++    "mostrando os N mais recentes de M". Somar só as linhas exibidas dava um
++    total menor que o real com rótulo de total — medido: 25 despesas de R$ 112,00
++    (R$ 2.800,00) viravam "💸 Gastos: R$ 2.240,00" (as 20 exibidas), enquanto
++    "quanto gastei em lazer" respondia R$ 2.800,00 pra mesma pergunta.
++
++    O total daqui NÃO bate com `sum_spent_in_category_period` em categoria de
++    movimento interno: aquele filtra `is_internal_movement = false`
++    (db/budgets.py:250) e este não (ver docstring de list_launches_by_category).
++    Em pagamento_fatura/aporte a lista mostra e soma o que o outro ignora — é a
++    diferença entre "o que aconteceu nesta categoria" e "quanto você gastou".
++    """
++    start, end, period_label = _resolve_period(text, entities)
++    rows, resumo = db.list_launches_by_category(user_id, categoria, start, end, tipo=tipo)
++
++    label = canonicalize_category_label(categoria) or categoria
++    suffix = f" {period_label}" if period_label else ""
++    if not rows:
++        return f"🐷 Nenhum lançamento em **{label}**{suffix}."
++
++    lines = []
++    for r in rows:
++        valor = fmt_brl(float(r["valor"])) if r.get("valor") is not None else "-"
++        desc = (r.get("descricao") or "").strip() or "—"
++        data = r.get("data")
++        data_txt = _fmt_date_label(data) if data else "-"
++        # Linha de cartão não tem user_seq, e "#N" é o que o usuário digita em
++        # "apagar #N" — mostrar um número que não existe seria pior que não mostrar.
++        prefixo = f"#{r['user_seq']}" if r.get("user_seq") else "💳"
++        lines.append(f"{prefixo} • {r.get('tipo', '')} • {valor} • {desc} • {data_txt}")
++
++    # sumário do PERÍODO INTEIRO, não das linhas exibidas (ver docstring)
++    summary_parts = []
++    if resumo["despesa"] > 0:
++        summary_parts.append(f"💸 Gastos: {fmt_brl(resumo['despesa'])}")
++    if resumo["receita"] > 0:
++        summary_parts.append(f"💰 Receitas: {fmt_brl(resumo['receita'])}")
++    summary = "\n".join(summary_parts)
++
++    header = f"🧾 **Lançamentos em {label}**{suffix}"
++    if resumo["n_total"] > len(rows):
++        header += f" (mostrando os {len(rows)} mais recentes de {resumo['n_total']})"
++    return f"{header}:\n" + "\n".join(lines) + (f"\n\n{summary}" if summary else "")
++
++
+ def list_launches(user_id: int, limit: int = 10, entities: dict | None = None, original_text: str = "") -> str:
+     entities = entities or {}
+ 
+     # "liste os gastos com <categoria>" chega aqui como launches.list, mas a
+-    # listagem geral ignora categoria e mostra os últimos N de tudo. Só delega pro
+-    # caminho categoria-aware (spend_query) quando o texto menciona uma categoria
+-    # que EXISTE de fato (sistema ou custom). "liste os gastos no cartão" não é
+-    # categoria — cai na listagem geral em vez de responder "R$ 0 em cartao".
+-    # ponytail: spend_query responde total+top5, não a lista cronológica da
+-    # categoria; upgrade pra listagem cronológica filtrada se pedirem.
++    # listagem geral ignora categoria e mostra os últimos N de tudo. Só entra no
++    # caminho categoria-aware quando o texto menciona uma categoria que EXISTE de
++    # fato (sistema ou custom). "liste os gastos no cartão" não é categoria — cai
++    # na listagem geral em vez de responder "R$ 0 em cartao".
+     #
+-    # E NÃO delega pergunta por RECEITA: spend_query soma só tipo='despesa'
+-    # (sum_spent_in_category_period), então "liste as receitas em rendimentos"
+-    # — rendimentos é categoria de receita (dividendos, juros) — respondia
+-    # "você não teve gastos em rendimentos" e escondia o lançamento. Nesse caso
+-    # cai na listagem geral, que preserva os dois tipos.
+-    if _resolve_query_category(user_id, original_text) and not _PEDE_RECEITA_RE.search(
+-        normalize_text(original_text)
+-    ):
+-        return spend_query(user_id, original_text, entities=entities)
++    # Dentro dele, o DEFAULT é a listagem (os dois tipos): só a palavra de GASTO
++    # desvia pro spend_query (total + top5), que é expense-only. Antes era o
++    # contrário — a palavra de receita é que precisava ser reconhecida, e cada
++    # verbo esquecido ("caiu", "pingou") escondia o lançamento atrás de "você não
++    # teve gastos em rendimentos".
++    categoria_pedida = _resolve_query_category(user_id, original_text)
++    if categoria_pedida:
++        tipo = _tipo_pedido(original_text)
++        if tipo == "despesa":
++            return spend_query(user_id, original_text, entities=entities)
++        return _listar_categoria(user_id, categoria_pedida, original_text, entities, tipo)
+ 
+     target_date = _parse_date_entity(entities, original_text)
+ 
+@@ -257,25 +380,41 @@ _CAT_STOP_WORDS = {
+ }
+ 
+ 
+-def _extract_query_category(text: str) -> str | None:
+-    """Extrai o nome da categoria de uma pergunta de gasto.
++def _split_query_category(text: str) -> tuple[str, str]:
++    """Parte a pergunta em (o que vem ANTES da categoria, trecho da categoria).
+ 
+-    Reconhece "na categoria X", "categoria X" e, como fallback, "com/no/na X".
+-    Remove palavras de período ("esta semana", "julho", ...) do rabo capturado.
+-    Retorna o rótulo canônico da categoria ou None se não houver categoria.
++    Ponto único que sabe onde a categoria começa. Dois consumidores, cada um de
++    um lado do corte: `_extract_query_category` fica com o trecho da categoria,
++    `_tipo_pedido` fica com o resto — senão o nome da categoria ("compras
++    online", "gastos com minha namorada") entra na detecção de tipo e força
++    'despesa'. Ambos os pedaços saem normalizados (sem acento, minúsculo).
++
++    Sem categoria no texto → (texto inteiro, ""): não há trecho pra tirar.
+     """
+     norm = normalize_text(text)  # sem acento, minúsculo
+-
+     m = re.search(r"\bcategoria\s+(?:de\s+)?(.+)$", norm)
+     if not m:
+         # "gastei com/em/no/na X". Palavras de período ("em julho", "no mes")
+-        # caem no filtro _CAT_STOP_WORDS abaixo, então não viram categoria.
++        # caem no filtro _CAT_STOP_WORDS do _extract_query_category.
+         m = re.search(r"\b(?:com|em|no|na)\s+(.+)$", norm)
+     if not m:
++        return norm, ""
++    return norm[:m.start()], m.group(1)
++
++
++def _extract_query_category(text: str) -> str | None:
++    """Extrai o nome da categoria de uma pergunta de gasto.
++
++    Reconhece "na categoria X", "categoria X" e, como fallback, "com/no/na X".
++    Remove palavras de período ("esta semana", "julho", ...) do rabo capturado.
++    Retorna o rótulo canônico da categoria ou None se não houver categoria.
++    """
++    _, tail = _split_query_category(text)
++    if not tail:
+         return None
+ 
+     toks = [
+-        tk for tk in m.group(1).split()
++        tk for tk in tail.split()
+         if tk not in _CAT_STOP_WORDS and not tk.isdigit()
+     ]
+     cat = " ".join(toks).strip()
+@@ -326,20 +465,17 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
+     - Com categoria → total daquela categoria (launches + cartão).
+     - Sem categoria → total de despesas no período + top categorias.
+     """
+-    period = parse_period_from_text(text)
+-    if period:
+-        start, end, period_label = period
+-    elif (dia := _parse_date_entity(entities or {}, "")):
+-        # date_filter JÁ RESOLVIDO (clarificação "gastos com saúde dia 4" + "abril"
+-        # → ISO em entities) vence o mês corrente: o re-execute do router reusa o
+-        # original_text inalterado, onde "dia 4" não é período reconhecível.
+-        # Só quando o texto não trouxe período — senão "julho" (mês inteiro)
+-        # colapsaria num único dia. Texto vazio no 2º arg: sem fallback textual,
+-        # o texto já foi consultado acima.
+-        start = end = dia
+-        lbl = _fmt_date_label(dia)
+-        period_label = lbl if lbl in ("hoje", "ontem") else f"em {lbl}"
+-    else:
++    # spend_query é intent próprio e alcançável direto pelo roteador, então a
++    # guarda tem que estar AQUI também: "quanto entrou em rendimentos" chega sem
++    # passar pelo list_launches e respondia "você não teve gastos em rendimentos".
++    categoria_pedida = _resolve_query_category(user_id, text)
++    if categoria_pedida:
++        tipo = _tipo_pedido(text)
++        if tipo != "despesa":
++            return _listar_categoria(user_id, categoria_pedida, text, entities, tipo)
++
++    start, end, period_label = _resolve_period(text, entities)
++    if start is None:
+         # sem período reconhecido → mês corrente cheio (igual ao dashboard)
+         start, end = month_range_today()
+         period_label = "neste mês"
+@@ -347,7 +483,7 @@ def spend_query(user_id: int, text: str, entities: dict | None = None) -> str:
+     # Categoria real (sistema/custom) vence; se nada real casar, cai no extrator
+     # textual — preserva o "você não teve gastos em <X>" quando o usuário pergunta
+     # por uma categoria que ele não usa, e o branch geral quando não há categoria.
+-    categoria = _resolve_query_category(user_id, text) or _extract_query_category(text)
++    categoria = categoria_pedida or _extract_query_category(text)
+ 
+     if categoria:
+         total = db.sum_spent_in_category_period(user_id, categoria, start, end)
+diff --git a/db/__init__.py b/db/__init__.py
+index ca51724..f12f2b9 100644
+--- a/db/__init__.py
++++ b/db/__init__.py
+@@ -48,6 +48,7 @@ from .accounts import (
+     add_launch_and_update_balance,
+     list_launches,
+     list_launches_by_tipo,
++    list_launches_by_category,
+     latest_launch_id,
+     get_last_inserted_launch,
+     resolve_user_seq_to_id,
+@@ -422,7 +423,8 @@ __all__ = [
+     "link_platform_identity",
+     # accounts
+     "get_balance", "set_balance", "add_launch_and_update_balance", "list_launches",
+-    "list_launches_by_tipo", "latest_launch_id", "get_last_inserted_launch",
++    "list_launches_by_tipo", "list_launches_by_category",
++    "latest_launch_id", "get_last_inserted_launch",
+     "resolve_user_seq_to_id", "get_launch_user_seq", "display_id_for",
+     "update_launch_category", "update_launch_fields", "update_launch_categories_bulk", "export_launches",
+     "get_launches_by_period", "get_summary_by_period", "get_top_expense_categories",
+diff --git a/db/accounts.py b/db/accounts.py
+index 7bffee4..e2810bc 100644
+--- a/db/accounts.py
++++ b/db/accounts.py
+@@ -537,6 +537,164 @@ def get_largest_expenses(
+     ]
+ 
+ 
++# Nenhum writer atual escreve 'entrada'/'saida', mas 8 read paths de produção
++# ainda tratam esses valores (core/admin_dashboard.py:397, budget_alerts.py:129,
++# piggy_agents.py:74, core/handlers/launches.py:313). Filtrar só o valor moderno
++# deixaria a linha legada invisível na lista E fora do total.
++_TIPO_ALIASES = {
++    "despesa": ("despesa", "saida"),
++    "saida": ("despesa", "saida"),
++    "receita": ("receita", "entrada"),
++    "entrada": ("receita", "entrada"),
++}
++
++
++def list_launches_by_category(
++    user_id: int,
++    categoria: str,
++    start_date: date | None = None,
++    end_date: date | None = None,
++    tipo: str | None = None,
++    limit: int = 20,
++    by_bill_month: bool = True,
++) -> tuple[list[dict], dict]:
++    """Lançamentos de UMA categoria, mais recente primeiro (launches + cartão).
++
++    Difere de `get_largest_expenses` (que ordena por valor e é expense-only):
++    aqui a lista é cronológica e inclui RECEITA — é o que responde "liste as
++    receitas em rendimentos".
++
++    - `tipo`: 'despesa' | 'receita' | None (ambos). Aceita os valores LEGADOS
++      'saida'/'entrada' junto (mesmo `tipo in (...)` de `core/budget_alerts.py:129`
++      e `piggy_agents.py:74`): uma linha antiga com tipo='entrada' ficaria
++      invisível E fora do total, que é a pior classe de erro num caminho de
++      dinheiro. A perna do cartão só entra quando tipo pede despesa ou nada —
++      compra no crédito nunca é receita.
++    - `start_date`/`end_date`: opcionais. None → sem janela (últimos N da
++      categoria, sem filtrar por mês).
++    - `by_bill_month=True`: a compra de cartão entra pelo MÊS DA FATURA
++      (credit_bills.period_end), mesma regra do dashboard e do
++      `sum_spent_in_category_period`.
++    - Match de categoria case- e acento-insensível (mesmo `cat_norm_sql`).
++    - Tipos internos de gerenciamento (criar_caixinha & cia) ficam de fora;
++      `is_internal_movement` NÃO é filtrado de propósito: senão "liste os
++      lançamentos em investimento_aporte" voltaria vazio. Consequência: numa
++      categoria de movimento interno (pagamento_fatura, aporte) o total daqui é
++      MAIOR que o de `sum_spent_in_category_period`, que filtra
++      `is_internal_movement = false` (`db/budgets.py:250`).
++
++    Retorna `(rows, resumo)`:
++    - rows: [{tipo, valor, categoria, descricao, data, fonte, user_seq}], no
++      máximo `limit`. `fonte` = 'launches' | 'credito'; `user_seq` é None no
++      crédito (não existe "#N" pra apagar). `data` é um `date`.
++    - resumo: {"n_total", "despesa", "receita"} sobre TODAS as linhas que casam,
++      não só as `limit` devolvidas — os totais vêm de window aggregates, que o
++      Postgres calcula ANTES do LIMIT. Sem isso o chamador somaria só as linhas
++      exibidas e imprimiria um total errado com cara de total certo.
++    """
++    ensure_user(user_id)
++
++    _cat = cat_norm_sql("categoria")
++    _cat_ct = cat_norm_sql("ct.categoria")
++    _arg = cat_norm_sql("%s")
++
++    params: list = [user_id, categoria]
++    launch_filters = ""
++    if tipo:
++        launch_filters += " and tipo = any(%s)"
++        params.append(list(_TIPO_ALIASES.get(tipo, (tipo,))))
++    if start_date:
++        launch_filters += " and criado_em >= %s"
++        params.append(datetime.combine(start_date, datetime.min.time()))
++    if end_date:
++        launch_filters += " and criado_em < %s"
++        params.append(datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
++
++    credit_sql = ""
++    if tipo in (None, "despesa", "saida"):
++        if by_bill_month:
++            credit_from = "from credit_transactions ct join credit_bills b on b.id = ct.bill_id"
++            credit_date_col = "b.period_end"
++        else:
++            credit_from = "from credit_transactions ct"
++            credit_date_col = "ct.purchased_at"
++        credit_filters = ""
++        params_credit: list = [user_id, categoria]
++        if start_date:
++            credit_filters += f" and {credit_date_col} >= %s"
++            params_credit.append(start_date)
++        if end_date:
++            credit_filters += f" and {credit_date_col} < %s"
++            params_credit.append(end_date + timedelta(days=1))
++        credit_sql = f"""
++                    union all
++                    select 'despesa' as tipo,
++                           ct.valor,
++                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
++                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
++                           ct.purchased_at::timestamp as dt,
++                           'credito' as fonte,
++                           null::int as user_seq
++                    {credit_from}
++                    where ct.user_id = %s
++                      and {_cat_ct} = {_arg}
++                      and ct.is_refund = false
++                      {credit_filters}
++        """
++        params += params_credit
++
++    with get_conn() as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                f"""
++                select tipo, valor, categoria, descricao, dt, fonte, user_seq,
++                       count(*) over () as n_total,
++                       coalesce(sum(valor) filter (
++                           where tipo in ('despesa', 'saida')) over (), 0) as tot_despesa,
++                       coalesce(sum(valor) filter (
++                           where tipo in ('receita', 'entrada')) over (), 0) as tot_receita
++                from (
++                    select tipo,
++                           valor,
++                           coalesce(nullif(categoria, ''), 'outros') as categoria,
++                           coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
++                           criado_em as dt,
++                           'launches' as fonte,
++                           user_seq
++                    from launches
++                    where user_id = %s
++                      and {_cat} = {_arg}
++                      and tipo not in ('criar_caixinha', 'delete_pocket',
++                                       'create_investment', 'delete_investment')
++                      {launch_filters}
++                    {credit_sql}
++                ) agg
++                order by dt desc, user_seq desc nulls last
++                limit %s
++                """,
++                (*params, int(limit)),
++            )
++            rows = cur.fetchall()
++
++    resumo = {
++        "n_total": int(rows[0]["n_total"]) if rows else 0,
++        "despesa": float(rows[0]["tot_despesa"] or 0) if rows else 0.0,
++        "receita": float(rows[0]["tot_receita"] or 0) if rows else 0.0,
++    }
++    return [
++        {
++            "tipo": r["tipo"],
++            "valor": float(r["valor"] or 0),
++            "categoria": r["categoria"],
++            "descricao": r["descricao"],
++            "data": r["dt"].date() if hasattr(r["dt"], "date") else r["dt"],
++            "fonte": r["fonte"],
++            "user_seq": r["user_seq"],
++        }
++        for r in rows
++    ], resumo
++
++
+ def get_top_expense_categories(
+     user_id: int,
+     start_date: date,
+diff --git a/parsers.py b/parsers.py
+index f13ac04..e4b0e04 100644
+--- a/parsers.py
++++ b/parsers.py
+@@ -279,6 +279,15 @@ def describe_valueless_launch(text: str) -> tuple[str, str] | None:
+     return tipo, desc
+ 
+ 
++# Verbos que marcam dinheiro que ENTROU, no formato de prefixo usado pelo
++# startswith abaixo (com o espaço). Módulo-level porque os handlers de consulta
++# ("o que caiu em rendimentos") precisam do MESMO conjunto — lista duplicada lá
++# foi o que fez "caiu"/"pingou"/"embolsei" caírem no caminho expense-only.
++RECEITA_START_VERBS = (
++    "recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ",
++)
++
++
+ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
+     text_clean = (raw_text or "").strip()
+     if not text_clean:
+@@ -303,7 +312,7 @@ def parse_receita_despesa_natural(user_id: int, raw_text: str) -> dict | None:
+     tipo = None
+     if raw_norm.startswith(("gastei ", "gasto ", "paguei ", "pagar ", "comprei ", "debitei ", "mandei ", "enviei ", "pixei ")):
+         tipo = "despesa"
+-    elif raw_norm.startswith(("recebi ", "receita ", "ganhei ", "entrou ", "caiu ", "pingou ", "pinguei ", "embolsei ")):
++    elif raw_norm.startswith(RECEITA_START_VERBS):
+         tipo = "receita"
+     elif "saldo" in raw_norm and raw_norm.startswith((
+         "adicionar ", "adicione ", "adiciona ", "adicionei ", "adicionou ",
+diff --git a/tests/test_custom_category_infer.py b/tests/test_custom_category_infer.py
+index 307a0a1..69e4184 100644
+--- a/tests/test_custom_category_infer.py
++++ b/tests/test_custom_category_infer.py
+@@ -9,6 +9,8 @@ categorias custom que o usuário cadastrou visualmente.
+ """
+ from __future__ import annotations
+ 
++from datetime import datetime, time, timedelta
++
+ import pytest
+ 
+ import db
+@@ -26,6 +28,7 @@ from core.services.category_service import (
+     learn_from_inference,
+     _distinctive_tokens,
+ )
++from utils_date import today_tz
+ from utils_text import normalize_text
+ 
+ 
+@@ -321,16 +324,407 @@ def test_spend_query_periodo_do_texto_vence_date_filter(pro_user_id):
+     assert "160,00" in resp
+ 
+ 
+-def test_list_launches_receita_em_categoria_nao_delega(pro_user_id):
+-    # Codex P2: spend_query soma só tipo='despesa' (sum_spent_in_category_period).
+-    # "rendimentos" é categoria de RECEITA (dividendos, juros), então delegar
+-    # respondia "você não teve gastos em rendimentos" e sumia com o lançamento.
++def _ruido_mais_recente(user_id, quando):
++    """10 despesas de OUTRA categoria, MAIS RECENTES que a linha esperada.
++
++    Obrigatório em todo teste desta seção: sem isso a listagem geral (o fallback
++    COM o bug, que mostra os 10 últimos de tudo) exibiria a linha esperada por
++    acaso e o teste ficaria verde com e sem a correção.
++    """
++    for i in range(10):
++        db.add_launch_and_update_balance(
++            user_id, "despesa", 10 + i, "mercado", None, categoria="mercado",
++            criado_em=quando + timedelta(minutes=i + 1),
++        )
++
++
++def _hoje_as(hora: int):
++    return datetime.combine(today_tz(), time(hora, 0))
++
++
++def test_lista_receita_da_categoria(pro_user_id):
++    # Codex P2 (:114): a palavra de receita só desligava a delegação e caía na
++    # listagem GERAL, que não filtra por tipo nem por categoria — com 10 despesas
++    # mais recentes, a receita pedida continuava sumindo.
++    base = _hoje_as(9)
+     db.add_launch_and_update_balance(
+-        pro_user_id, "receita", 300, "dividendos itau", None, categoria="rendimentos",
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
+     )
++    _ruido_mais_recente(pro_user_id, base)
++
+     resp = list_launches(pro_user_id, original_text="liste as receitas em rendimentos")
+     assert "300" in resp
++    assert "Últimos" not in resp             # não é a listagem geral
++    assert "mercado" not in resp.lower()     # outra categoria não vaza
++    assert "não teve gastos" not in resp.lower()
++
++
++def test_lista_receita_verbo_fora_do_regex(pro_user_id):
++    # Codex P2 (:92): "caiu" é verbo de receita que o parser já reconhece
++    # (RECEITA_START_VERBS) mas o regex de consulta não tinha → ia pro spend_query
++    # expense-only e respondia "não teve gastos em rendimentos".
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="o que caiu em rendimentos")
++    assert "300" in resp
++    assert "não teve gastos" not in resp.lower()
++    assert "mercado" not in resp.lower()
++
++
++def test_lista_receita_com_periodo(pro_user_id):
++    # O branch de data tinha o mesmo buraco: get_launches_by_period não filtra
++    # categoria, então "hoje" trazia TODAS as categorias do dia.
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste as receitas em rendimentos hoje")
++    assert "300" in resp
++    assert "hoje" in resp.lower()
++    assert "mercado" not in resp.lower()
++
++
++def test_lista_neutro_mostra_os_dois_tipos(pro_user_id):
++    # Sem palavra de tipo nenhuma o default é a LISTAGEM (os dois tipos), não o
++    # spend_query expense-only. É a propriedade que faz a lista de palavras
++    # deixar de ser load-bearing.
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 40, "taxa custodia", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em rendimentos")
++    assert "300" in resp
++    assert "40,00" in resp
++    assert "não teve gastos" not in resp.lower()
++    assert "mercado" not in resp.lower()
++
++
++def test_lista_neutro_categoria_vazia(pro_user_id):
++    # Categoria existe mas não tem lançamento: a resposta é "nenhum lançamento",
++    # não "você não teve gastos" (que mente sobre o que foi perguntado).
++    base = _hoje_as(9)
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em lazer")
++    assert "Nenhum lançamento" in resp
++    assert "lazer" in resp.lower()
++    assert "não teve gastos" not in resp.lower()
++
++
++def test_lista_receita_custom(pro_user_id):
++    # Mesma regra vale pra categoria CUSTOM — user_categories não tem coluna de
++    # tipo, quem tem tipo é o lançamento.
++    create_user_category(pro_user_id, "freela")
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 900, "site do cliente", None,
++        categoria="freela", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste as receitas com freela")
++    assert "900" in resp
++    assert "Últimos" not in resp
++    assert "mercado" not in resp.lower()
++
++
++def test_spend_query_receita_nao_responde_gasto(pro_user_id):
++    # spend_query é intent próprio, alcançável direto pelo roteador (o LLM manda
++    # "quanto entrou em rendimentos" pra cá). Corrigir só o list_launches deixava
++    # este irmão quebrado.
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = spend_query(pro_user_id, "quanto entrou em rendimentos")
++    assert "300" in resp
++    assert "não teve gastos" not in resp.lower()
++
++
++def test_lista_inclui_cartao(pro_user_id):
++    # Excluir o cartão reproduziria o mesmo bug: categoria cujo gasto todo está no
++    # crédito listaria vazio. Linha de cartão não tem user_seq → renderiza com 💳
++    # e sem "#N" (o "#N" é o que o usuário digita em "apagar #N").
++    card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
++    db.add_credit_purchase(pro_user_id, card_id, 250, "saúde", "dentista", today_tz())
++    _ruido_mais_recente(pro_user_id, _hoje_as(9))
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em saúde")
++    assert "250" in resp
++    assert "💳" in resp
++    assert "dentista" in resp.lower()
++
++
++# --- rodada 7: o gate de tipo não pode ler o nome da categoria -----------
++
++@pytest.mark.parametrize("frase,esperado", [
++    # o nome da categoria fica FORA da detecção de tipo. "compras online" é
++    # categoria de SISTEMA (utils_text.py:495) e "compras" casava _PEDE_GASTO_RE
++    # sobre o texto inteiro → toda pergunta por receita virava expense-only.
++    ("liste as receitas em compras online",                     "receita"),
++    ("o que caiu em compras online",                            "receita"),
++    ("quanto entrou em compras online",                         "receita"),
++    ("liste as receitas em gastos com minha namorada",          "receita"),
++    ("o que recebi em despesas da empresa",                     "receita"),
++    ("quanto entrou em compras do mes",                         "receita"),
++    # as duas classes no MESMO trecho fora da categoria → os dois tipos
++    ("quero ver as receitas, nao os gastos, em compras online",  None),
++    ("liste os gastos e as receitas em compras online",          None),
++    ("liste os gastos e receitas em rendimentos",                None),
++    # e o que já funcionava continua
++    ("quanto gastei em lazer",                                  "despesa"),
++    ("liste os lancamentos em lazer",                            None),
++])
++def test_tipo_pedido_ignora_o_nome_da_categoria(frase, esperado):
++    from core.handlers.launches import _tipo_pedido
++    assert _tipo_pedido(frase) == esperado
++
++
++@pytest.mark.parametrize("categoria,frase,custom", [
++    # "compras online" é de SISTEMA (utils_text.py:495) — não precisa de custom
++    # nenhuma pra reproduzir. "gastos com minha namorada" é a categoria da queixa
++    # original (docstring deste arquivo).
++    ("compras online", "liste os lançamentos em compras online", False),
++    ("gastos com minha namorada",
++     "me mostra os lançamentos em gastos com minha namorada", True),
++])
++def test_nome_da_categoria_nao_esconde_receita(pro_user_id, categoria, frase, custom):
++    # e2e do parametrize acima: unit verde com o handler chamando outra coisa não
++    # provaria nada. Pergunta NEUTRA numa categoria cujo NOME tem palavra de
++    # gasto: sem o corte do trecho, "compras"/"gastos" força expense-only e a
++    # receita da categoria some.
++    if custom:
++        create_user_category(pro_user_id, categoria)
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "estorno da loja", None,
++        categoria=categoria, criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 40, "compra da loja", None,
++        categoria=categoria, criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text=frase)
++    assert "300,00" in resp
++    assert "40,00" in resp
+     assert "não teve gastos" not in resp.lower()
++    assert "mercado" not in resp.lower()
++
++
++def test_lista_nao_vaza_entre_usuarios(pro_user_id):
++    # CLAUDE.md §5: isolamento por usuário é regra dura. A listagem nova monta SQL
++    # com union all — duas pernas, dois `where user_id`.
++    # O fixture `user_id` NÃO serve de segundo usuário: `pro_user_id` depende dele
++    # e os dois são o MESMO id (conftest.py:387).
++    import uuid as _uuid
++    vizinho = int(_uuid.uuid4().int % 10_000_000_000)
++    db.ensure_user(vizinho)
++
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 11, "meu cinema", None,
++        categoria="lazer", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        vizinho, "despesa", 8888, "cinema do vizinho", None,
++        categoria="lazer", criado_em=base,
++    )
++    card_vizinho = db.create_card(vizinho, "Nubank", closing_day=28, due_day=5)
++    db.add_credit_purchase(vizinho, card_vizinho, 7777, "lazer", "show do vizinho", today_tz())
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em lazer")
++    assert "11,00" in resp
++    assert "8.888,00" not in resp
++    assert "7.777,00" not in resp           # a perna do cartão tem seu próprio where
++    assert "vizinho" not in resp
++    assert "💸 Gastos: R$ 11,00" in resp     # nem no sumário
++
++
++def test_pede_os_dois_tipos_mostra_os_dois(pro_user_id):
++    # BLOQUEIA #2: "gasto vence" respondia só R$ 40,00 e sumia com os R$ 300,00.
++    # Os dois asserts juntos ficam VERMELHOS nas duas precedências erradas
++    # (gasto-primeiro perde os 300; receita-primeiro perde os 40).
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 40, "taxa custodia", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste os gastos e receitas em rendimentos")
++    assert "300,00" in resp
++    assert "40,00" in resp
++    assert "💰 Receitas: R$ 300,00" in resp
++    assert "💸 Gastos: R$ 40,00" in resp
++
++
++def test_um_tipo_pedido_exclui_o_outro(pro_user_id):
++    # O filtro `tipo` tem que chegar na SQL: com receita E despesa na mesma
++    # categoria, pedir receita não pode trazer a despesa nem somá-la no rodapé.
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 40, "taxa custodia", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste as receitas em rendimentos")
++    assert "300,00" in resp
++    assert "40,00" not in resp            # a despesa não vaza na lista
++    assert "taxa custodia" not in resp
++    assert "Gastos:" not in resp          # nem no sumário
++
++
++def test_periodo_exclui_linha_de_fora(pro_user_id):
++    # A janela tem que chegar na SQL: a linha do mês passado não pode aparecer
++    # numa pergunta com "hoje".
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 77, "cinema", None,
++        categoria="lazer", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 4000, "viagem antiga", None,
++        categoria="lazer", criado_em=base - timedelta(days=40),
++    )
++    _ruido_mais_recente(pro_user_id, base)
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em lazer hoje")
++    assert "77,00" in resp
++    assert "4.000,00" not in resp
++    assert "viagem antiga" not in resp
++    assert "💸 Gastos: R$ 77,00" in resp   # o sumário respeita a mesma janela
++
++
++def test_corte_de_20_anuncia_e_nao_mente_no_total(pro_user_id):
++    # BLOQUEIA #3: 25 despesas de R$ 112,00 = R$ 2.800,00. Somar só as 20 linhas
++    # exibidas dava "💸 Gastos: R$ 2.240,00" com rótulo de total, discordando do
++    # "quanto gastei em lazer" (spend_query) pra mesma pergunta.
++    base = _hoje_as(9)
++    for i in range(25):
++        db.add_launch_and_update_balance(
++            pro_user_id, "despesa", 112, f"lazer-{i:02d}", None,
++            categoria="lazer", criado_em=base + timedelta(minutes=i),
++        )
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em lazer")
++    assert "💸 Gastos: R$ 2.800,00" in resp          # total REAL, não o das 20
++    assert "mostrando os 20 mais recentes de 25" in resp
++    assert "lazer-24" in resp                        # ordem desc: o mais novo entra
++    assert "lazer-00" not in resp                    # o mais velho é o cortado
++
++    # e a pergunta "de total" pra mesma categoria dá o MESMO número
++    assert "2.800,00" in spend_query(pro_user_id, "quanto gastei em lazer")
++
++
++def test_spend_query_neutro_nao_esconde_receita(pro_user_id):
++    # spend_query também é alcançável direto ("quanto foi em rendimentos" cai
++    # aqui). A guarda tem que ser `tipo != 'despesa'`: trocada por
++    # `tipo == 'receita'`, o neutro volta pro caminho expense-only.
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "receita", 300, "dividendos itau", None,
++        categoria="rendimentos", criado_em=base,
++    )
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 40, "taxa custodia", None,
++        categoria="rendimentos", criado_em=base,
++    )
++
++    resp = spend_query(pro_user_id, "quanto foi em rendimentos")
++    assert "300,00" in resp
++    assert "💰 Receitas: R$ 300,00" in resp
++
++
++def _insere_launch_cru(user_id, tipo, valor, categoria, nota, criado_em):
++    """Insert direto: add_launch_and_update_balance rejeita tipo != despesa/receita
++    (db/accounts.py:73), e estes testes precisam justamente dos outros tipos."""
++    with db.get_conn() as conn:
++        with conn.cursor() as cur:
++            cur.execute(
++                "insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em) "
++                "values (%s,%s,%s,%s,%s,%s,%s)",
++                (user_id, tipo, valor, nota, None, categoria, criado_em),
++            )
++        conn.commit()
++
++
++def test_lista_nao_mostra_tipo_interno(pro_user_id):
++    # criar_caixinha & cia existem em launches pra rollback/auditoria e não são
++    # movimentação — o filtro tem que estar na SQL (mesmo _INTERNAL_TIPOS da
++    # listagem geral).
++    base = _hoje_as(9)
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 77, "cinema", None,
++        categoria="lazer", criado_em=base,
++    )
++    _insere_launch_cru(pro_user_id, "criar_caixinha", 9999, "lazer", "caixinha viagem", base)
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em lazer")
++    assert "77,00" in resp
++    assert "9.999,00" not in resp
++    assert "caixinha viagem" not in resp
++
++
++def test_lista_inclui_tipo_legado_entrada(pro_user_id):
++    # Nenhum writer atual escreve 'entrada', mas 8 read paths de produção tratam
++    # o valor. Filtrar só `tipo = 'receita'` deixava a linha legada invisível na
++    # lista E fora do sumário — dinheiro sumido sem aviso.
++    base = _hoje_as(9)
++    _insere_launch_cru(pro_user_id, "entrada", 500, "rendimentos", "juros antigos", base)
++
++    resp = list_launches(pro_user_id, original_text="liste as receitas em rendimentos")
++    assert "500,00" in resp
++    assert "💰 Receitas: R$ 500,00" in resp
++
++
++def test_cartao_entra_pelo_mes_da_fatura(pro_user_id):
++    # Mesma regra do dashboard e do sum_spent_in_category_period: a compra conta
++    # no mês da FATURA, não no dia da compra. closing_day escolhido pra que o
++    # period_end nunca caia em hoje (se caísse, ref == fechamento e a fatura
++    # fecharia hoje mesmo).
++    hoje = today_tz()
++    closing = 1 if hoje.day != 1 else 2
++    card_id = db.create_card(pro_user_id, "Nubank", closing_day=closing, due_day=17)
++    db.add_credit_purchase(pro_user_id, card_id, 250, "saúde", "dentista", hoje)
++    db.add_launch_and_update_balance(
++        pro_user_id, "despesa", 33, "farmacia", None,
++        categoria="saúde", criado_em=_hoje_as(9),
++    )
++
++    resp = list_launches(pro_user_id, original_text="liste os lançamentos em saúde hoje")
++    assert "33,00" in resp                 # o lançamento de hoje entra
++    assert "250,00" not in resp            # a compra no crédito é da fatura seguinte
++    assert "💸 Gastos: R$ 33,00" in resp
+ 
+ 
+ def test_list_launches_gasto_em_categoria_ainda_delega(pro_user_id):

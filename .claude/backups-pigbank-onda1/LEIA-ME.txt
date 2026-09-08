@@ -1,0 +1,2 @@
+base do patch: df55f71
+restaurar: cd <worktree> && git checkout . && git apply /Users/lucaskuramoti/Desktop/bot/bot_wa/.claude/backups-pigbank-onda1/estado-atual-completo.patch

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Contato & Suporte · PigBank</title>
+<meta name="description" content="Fale com o time do PigBank. Tire dúvidas, peça ajuda com acesso, WhatsApp ou dashboard." />
+<link rel="canonical" href="https://pigbankai.com/suporte" />
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/site.css?v=4" />
+<style>
+  /* Respostas do FAQ = corpo dos guias (.guide-prose) dentro do acordeão */
+  .faq-a .guide-prose { padding: 4px 20px 22px; font-size: .96rem; }
+  .faq-a .guide-prose p { padding: 0; }              /* neutraliza o padding do .faq-a p */
+  .faq-a .guide-prose > *:first-child { margin-top: 0; }
+  .faq-a .guide-prose > p:first-of-type { font-size: 1rem; color: var(--ink); }
+</style>
+<script src="/safe-area.js?v=1"></script>
+</head>
+<body>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+    <div class="nav-links">
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Planos</a>
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/agents">Agentes</a>
+      
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+
+    <!-- FAQ: guias e dicas evergreen (renderizados de core/blog_guides.py via {{FAQ}}) -->
+    <section class="section" id="faq">
+      <div class="section-head center">
+        <h1>Guias &amp; <span class="grad">dicas</span></h1>
+        <p>As dúvidas mais comuns sobre usar o PigBank. Toque numa pergunta pra abrir.</p>
+      </div>
+      <div class="faq">
+        {{FAQ}}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head center">
+        <h2>Fale com o <span class="grad">nosso time</span></h2>
+        <p>Estamos aqui pra te ajudar a tirar o máximo do PigBank. Escolha o canal ou mande uma mensagem.</p>
+      </div>
+
+      <div class="contact-grid">
+        <div class="contact-info">
+          <div class="contact-item">
+            <div class="icon-box"><i class="ph ph-envelope" aria-hidden="true"></i></div>
+            <div><h4>E-mail</h4><a href="mailto:contato@pigbankai.com">contato@pigbankai.com</a></div>
+          </div>
+          <div class="contact-item">
+            <div class="icon-box neon"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
+            <div><h4>WhatsApp</h4><a href="/wa">Abrir conversa com a Piggy →</a></div>
+          </div>
+          <div class="contact-item">
+            <div class="icon-box"><i class="ph ph-lifebuoy" aria-hidden="true"></i></div>
+            <div><h4>Suporte</h4><a href="mailto:suporte@pigbankai.com">suporte@pigbankai.com</a></div>
+          </div>
+          <div class="contact-item">
+            <div class="icon-box neon">⏱️</div>
+            <div><h4>Horário</h4><p>Respondemos em até 1 dia útil.</p></div>
+          </div>
+        </div>
+
+        <form class="form-card" id="contact-form" novalidate>
+          <div id="contact-msg" class="contact-msg"></div>
+          <div class="field">
+            <label for="nome">Nome</label>
+            <input type="text" id="nome" placeholder="Seu nome" required />
+          </div>
+          <div class="field">
+            <label for="email">E-mail</label>
+            <input type="email" id="email" placeholder="seu@email.com" required />
+          </div>
+          <div class="field">
+            <label for="assunto">Assunto</label>
+            <input type="text" id="assunto" placeholder="Sobre o que é?" required />
+          </div>
+          <div class="field">
+            <label for="msg">Mensagem</label>
+            <textarea id="msg" placeholder="Como podemos ajudar?" required></textarea>
+          </div>
+          <input type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+          <button type="submit" id="contact-btn" class="btn btn-primary btn-block btn-lg">Enviar mensagem</button>
+        </form>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a>
+          <a href="/como-funciona">Como funciona</a>
+          <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
+          
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
+  </footer>
+
+<script>
+  // Envia via endpoint real /contact (Resend no backend). Sem depender de
+  // cliente de e-mail no dispositivo (o mailto: antigo falhava sem handler).
+  document.getElementById('contact-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    var box = document.getElementById('contact-msg');
+    var btn = document.getElementById('contact-btn');
+    function show(t, ok){ box.textContent = t; box.className = 'contact-msg show ' + (ok ? 'ok' : 'err'); }
+    var body = {
+      name:    document.getElementById('nome').value.trim(),
+      email:   document.getElementById('email').value.trim(),
+      subject: document.getElementById('assunto').value.trim(),
+      message: document.getElementById('msg').value.trim(),
+      website: document.getElementById('website').value
+    };
+    if (!body.name || !body.email || !body.subject || !body.message) { show('Preencha nome, e-mail, assunto e mensagem.', false); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) { show('Digite um e-mail válido (ex.: seu@email.com).', false); return; }
+    var csrf = decodeURIComponent((document.cookie.split('; ').find(function(r){ return r.indexOf('csrf_token=') === 0; }) || '').split('=')[1] || '');
+    var headers = { 'Content-Type': 'application/json' };
+    if (csrf) headers['x-csrf-token'] = csrf;
+    btn.disabled = true; var orig = btn.textContent; btn.textContent = 'Enviando…';
+    try {
+      var res = await fetch('/contact', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify(body) });
+      var data = await res.json().catch(function(){ return {}; });
+      if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve.', true); e.target.reset(); }
+      else if (res.status === 429) { show('Muitas mensagens em pouco tempo. Tente mais tarde ou escreva pra contato@pigbankai.com.', false); }
+      else { show(data.detail || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
+    } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  });
+
+  // FAQ acordeão — perguntas = guias/dicas. Ao abrir o card, os blocos visuais
+  // (gráficos, barras, metas) se animam — mesma mecânica do /blog (.g-anim + .in-view).
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var ANIM_SEL = ".g-chart, .g-bars, .g-goal, .g-cardshot";
+
+    // No load: prepara as linhas de gráfico e colapsa os blocos (só com JS —
+    // sem JS ou com reduced-motion eles já ficam cheios, via CSS).
+    if (!reduce) {
+      [].slice.call(document.querySelectorAll(".g-chart-line")).forEach(function (line) {
+        try {
+          var len = line.getTotalLength();
+          line.style.strokeDasharray = len;
+          line.style.strokeDashoffset = len;
+          line.style.transition = "stroke-dashoffset 1.2s ease";
+        } catch (e) { /* getTotalLength indisponível — linha fica estática */ }
+      });
+      [].slice.call(document.querySelectorAll(ANIM_SEL)).forEach(function (el) { el.classList.add("g-anim"); });
+    }
+
+    function revealBlocks(root) {
+      [].slice.call(root.querySelectorAll(ANIM_SEL)).forEach(function (el) {
+        el.classList.add("in-view");
+        [].slice.call(el.querySelectorAll(".g-chart-line")).forEach(function (line) { line.style.strokeDashoffset = "0"; });
+      });
+    }
+    function resetBlocks(root) {  // volta ao estado colapsado pra reanimar na próxima abertura
+      [].slice.call(root.querySelectorAll(ANIM_SEL)).forEach(function (el) {
+        el.classList.remove("in-view");
+        [].slice.call(el.querySelectorAll(".g-chart-line")).forEach(function (line) {
+          try { line.style.strokeDashoffset = line.getTotalLength(); } catch (e) {}
+        });
+      });
+    }
+
+    document.querySelectorAll('.faq-q').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var item = btn.closest('.faq-item');
+        var a = item.querySelector('.faq-a');
+        var open = item.classList.toggle('open');
+        a.style.maxHeight = open ? a.scrollHeight + 'px' : '0';
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (reduce) return;
+        if (open) {
+          // deixa o card começar a expandir, então dispara a animação dos gráficos
+          setTimeout(function () { revealBlocks(a); }, 160);
+        } else {
+          resetBlocks(a);
+        }
+      });
+    });
+  })();
+</script>
+  <script src="/nav-auth.js?v=7" defer></script>
+</body>
+</html>

@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>PigBank</title>
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#111111" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<!-- Aquece a conexão com os CDNs de terceiros antes de baixar os scripts. -->
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<!-- Chart.js: usado pela view padrão (overview). defer tira do caminho
+     bloqueante do parse, mas ainda pré-carrega durante a ociosidade, ficando
+     pronto quando os dados chegam. Sortable NÃO entra aqui: é carregado sob
+     demanda (ensureSortable) só quando o usuário reordena cartões. -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw==" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/brand.css" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/dashboard.css?v=7" />
+<link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
+<!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
+     dashboard.js. Nenhum script inline depende deles durante o parse. -->
+<script defer src="/static/auth-refresh.js"></script>
+<script defer src="/modals.js"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=34" />
+  <script defer src="/app-mode.js?v=34"></script>
+</head>
+<body class="has-sidenav">
+
+<div class="bg">
+  <div class="orb orb-1"></div><div class="orb orb-2"></div>
+  <div class="orb orb-3"></div><div class="orb orb-4"></div>
+</div>
+
+<div class="sidenav-backdrop" id="sidenav-backdrop" onclick="toggleSidenav(false)"></div>
+<aside class="sidenav" id="sidenav" aria-label="Navegação principal">
+  <div class="sidenav-brand">
+    <img class="logo" src="/brand/icon.png?v=1" alt="" />
+    <div class="brand-text">
+      <span class="brand-name">PigBank</span>
+      <span class="brand-sub">Assistente financeiro</span>
+    </div>
+  </div>
+
+  <div class="sidenav-section">Geral</div>
+  <button class="sidenav-item active" type="button" data-nav="overview" onclick="navigateTo('overview')">
+    <span class="sn-icon" style="color:#3B82F6"><i class="ph ph-chart-bar" aria-hidden="true"></i></span><span class="sn-label">Visão Geral</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="analytics" onclick="navigateTo('analytics')">
+    <span class="sn-icon" style="color:#06B6D4"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Análises</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="history" onclick="navigateTo('history')">
+    <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span class="sn-label">Histórico</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="agentes" onclick="navigateTo('agentes')">
+    <span class="sn-icon" style="color:#FF2D8E"><i class="ph ph-piggy-bank" aria-hidden="true"></i></span><span class="sn-label">Agentes</span><span class="sn-tag new">novo</span>
+  </button>
+
+  <div class="sidenav-section">Planejamento</div>
+  <button class="sidenav-item" type="button" data-nav="fixed" onclick="navigateTo('fixed')">
+    <span class="sn-icon" style="color:#14B8A6"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span><span class="sn-label">Recorrentes</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="budgets" onclick="navigateTo('budgets')">
+    <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-note-pencil" aria-hidden="true"></i></span><span class="sn-label">Orçamentos</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="goals" onclick="navigateTo('goals')">
+    <span class="sn-icon" style="color:#10B981"><i class="ph ph-target" aria-hidden="true"></i></span><span class="sn-label">Caixinhas e metas</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="categories" onclick="navigateTo('categories')">
+    <span class="sn-icon" style="color:#A855F7"><i class="ph ph-tag" aria-hidden="true"></i></span><span class="sn-label">Categorias</span>
+  </button>
+
+  <div class="sidenav-section">Crédito</div>
+  <button class="sidenav-item" type="button" data-nav="installments" onclick="navigateTo('installments')">
+    <span class="sn-icon" style="color:#FB923C"><i class="ph ph-credit-card" aria-hidden="true"></i></span><span class="sn-label">Parcelamentos</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="cards" onclick="navigateTo('cards')">
+    <span class="sn-icon" style="color:#6366F1"><i class="ph ph-cards" aria-hidden="true"></i></span><span class="sn-label">Cartões</span><span class="sn-tag new">novo</span>
+  </button>
+  <button class="sidenav-item" type="button" data-nav="investments" data-pro-feature="investments" onclick="navigateTo('investments')">
+    <span class="sn-icon" style="color:#22C55E"><i class="ph ph-chart-line-up" aria-hidden="true"></i></span><span class="sn-label">Investimentos</span><span class="sn-tag">Pro</span>
+  </button>
+  <!-- Só aparece pra quem é afiliado (initAffiliateNav mostra se /api/affiliate/me responder 200) -->
+  <button class="sidenav-item" type="button" data-nav="affiliate" id="sidenav-affiliate" style="display:none" onclick="navigateTo('affiliate')">
+    <span class="sn-icon" style="color:#F43F5E"><i class="ph ph-handshake" aria-hidden="true"></i></span><span class="sn-label">Afiliados</span>
+  </button>
+
+  <div class="sidenav-footer">
+    <div class="sidenav-section" style="padding-top:0">Conta</div>
+    <a class="sidenav-item" href="/settings?view=security">
+      <span class="sn-icon" style="color:#94A3B8"><i class="ph ph-user" aria-hidden="true"></i></span><span class="sn-label">Conta</span>
+    </a>
+    <a class="sidenav-item" href="/suporte" target="_blank" rel="noopener">
+      <span class="sn-icon" style="color:#60A5FA"><i class="ph ph-question" aria-hidden="true"></i></span><span class="sn-label">Suporte</span>
+    </a>
+    <a class="sidenav-item" href="/changelog" data-pro-feature="changelog">
+      <span class="sn-icon" style="color:#F59E0B"><i class="ph ph-newspaper" aria-hidden="true"></i></span><span class="sn-label">Notícias</span><span class="sn-tag">Pro</span>
+    </a>
+    <button class="sidenav-item" type="button" onclick="connectWhatsAppFromDashboard(event)">
+      <span class="sn-icon" style="color:#22c55e"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span><span class="sn-label">WhatsApp</span>
+    </button>
+    <button class="sidenav-item" type="button" id="theme-toggle-btn" onclick="toggleTheme()">
+      <span class="sn-icon" id="theme-toggle-icon" style="color:#94A3B8"><i class="ph ph-moon" aria-hidden="true"></i></span><span class="sn-label" id="theme-toggle-label">Modo escuro</span>
+    </button>
+  </div>
+</aside>
+
+<div class="page">
+
+  <header>
+    <div class="header-left">
+      <button class="sidenav-toggle" type="button" aria-label="Abrir menu" onclick="toggleSidenav()"><i class="ph ph-list" aria-hidden="true"></i></button>
+      <img class="logo-img" src="/brand/icon.png?v=1" alt="Piggy" />
+      <h1>PigBank</h1>
+    </div>
+
+    <div class="month-nav">
+      <button class="mbtn" id="btn-prev" onclick="changeMonth(-1)">‹</button>
+      <span id="month-label">—</span>
+      <button class="mbtn" id="btn-next" onclick="changeMonth(1)">›</button>
+    </div>
+
+    <div class="header-right">
+      <div id="status">
+        <div id="dot" class="connecting"></div>
+        <span id="status-text">Conectando…</span>
+      </div>
+      <button class="hbtn" id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"><i class="ph ph-eye" aria-hidden="true"></i></button>
+      <button class="hbtn" id="refresh-btn" title="Atualizar" aria-label="Atualizar" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> <span class="hbtn-label">Atualizar</span></button>
+      <button class="hbtn" data-pro-feature="ofx_import" title="Importar OFX" aria-label="Importar OFX" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> <span class="hbtn-label">Importar OFX</span></button>
+      <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
+      <button class="hbtn" data-pro-feature="export" title="Exportar" aria-label="Exportar" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> <span class="hbtn-label">Exportar</span></button>
+      <div class="user-menu" id="user-menu">
+        <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
+          <span class="user-menu-main">
+            <span class="user-dot"></span>
+            <span id="user-label">Minha conta</span>
+          </span>
+          <span class="hamburger-icon" aria-hidden="true"><i class="ph ph-list" aria-hidden="true"></i></span>
+        </button>
+        <div class="user-dropdown" id="user-dropdown" role="menu" aria-label="Menu da conta">
+          <div class="user-dropdown-head">
+            <div class="user-email" id="user-email">carregando...</div>
+            <div class="user-plan" id="user-plan">Plano Free</div>
+          </div>
+          <a class="user-menu-link" href="/home" role="menuitem"><span class="user-menu-icon"><i class="ph ph-house" aria-hidden="true"></i></span>Início</a>
+          <a class="user-menu-link" href="/app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-chart-bar" aria-hidden="true"></i></span>Dashboard</a>
+          <a class="user-menu-link" href="/comandos-app" role="menuitem"><span class="user-menu-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>O que pedir</a>
+          <button class="user-menu-link" type="button" role="menuitem" onclick="connectWhatsAppFromDashboard(event)"><span class="user-menu-icon"><i class="ph ph-whatsapp-logo" aria-hidden="true"></i></span>Conectar WhatsApp</button>
+          <a class="user-menu-link" href="/settings?view=security" role="menuitem"><span class="user-menu-icon"><i class="ph ph-gear" aria-hidden="true"></i></span>Configurações</a>
+          <a class="user-menu-link" href="/conta" role="menuitem"><span class="user-menu-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>Gerenciar assinatura</a>
+          <a class="user-menu-link" href="/?site=1" data-landing role="menuitem"><span class="user-menu-icon"><i class="ph ph-globe" aria-hidden="true"></i></span>Ir para o site</a>
+          <button class="user-menu-link danger" type="button" role="menuitem" onclick="logoutDashboard()"><span class="user-menu-icon"><i class="ph ph-sign-out" aria-hidden="true"></i></span>Sair</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="dashboard-tabs">
+    <button class="main-tab active" data-view="overview" onclick="setMainView('overview')">Visão geral</button>
+    <button class="main-tab" data-view="investments" data-pro-feature="investments" onclick="setMainView('investments')">Investimentos</button>
+    <button class="main-tab tab-launch" id="open-launch-btn" type="button" onclick="openLaunchModal()">+ Lançar</button>
+    <button class="main-tab tab-launch" id="open-invest-btn" type="button" onclick="openInvestmentModal()" style="display:none">+ Investir</button>
+  </div>
+
+  <div id="overview-view" class="dash-view active">
+  <div id="alert-banner"></div>
+
+  <!-- Banner de trial (B1) — só pro Grátis sem trial ativo; escondido no app iOS.
+       Revelado por maybeShowTrialBanner() em dashboard.js. -->
+  <div id="trial-banner" style="display:none;position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:22px;padding:20px 22px;overflow:hidden;margin-bottom:18px">
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+      <span style="flex-shrink:0;width:46px;height:46px;border-radius:14px;background:rgba(255,45,142,.16);color:#FF2D8E;display:inline-flex;align-items:center;justify-content:center;font-size:24px"><i class="ph ph-sparkle" aria-hidden="true"></i></span>
+      <div style="flex:1;min-width:220px">
+        <div style="color:var(--text);font-weight:600;font-size:1rem;line-height:1.3">Experimente o Plus por 30 dias grátis</div>
+        <div style="color:var(--text-2);font-size:.82rem;line-height:1.45;margin-top:3px">Conecte seu banco, ative os agentes e veja seu dinheiro trabalhar. Cancele quando quiser.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-bank" style="color:var(--neon-ink)" aria-hidden="true"></i> Open Finance</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-robot" style="color:var(--neon-ink)" aria-hidden="true"></i> Agentes do Piggy</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:.75rem;color:var(--text);background:rgba(255,255,255,.05);border:1px solid var(--div);padding:4px 9px;border-radius:999px"><i class="ph ph-clock-counter-clockwise" style="color:var(--neon-ink)" aria-hidden="true"></i> Histórico ilimitado</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px;flex-shrink:0">
+        <a href="/precos" style="background:#FF2D8E;color:#fff;border:none;border-radius:12px;padding:11px 18px;font-size:.88rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;text-decoration:none">Ativar teste grátis <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+        <button type="button" onclick="dismissTrialBanner()" style="background:transparent;color:var(--text-3);border:none;font-size:.78rem;cursor:pointer;font-family:inherit">Agora não</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="section-title" id="overview-heading" style="margin:0 0 14px">Visão geral</p>
+
+  <!-- Insight do Piggy — populado via /insights/{user_id}/current (LLM) -->
+  <!-- Visível só quando há insight; vazio = some -->
+  <div id="piggy-insight-card" class="mock-card" style="display:none;margin-bottom:18px;background:linear-gradient(135deg, rgba(255,45,142,.12), rgba(199,24,107,.08));border-color:rgba(255,45,142,.3)">
+    <div style="display:flex;gap:14px;align-items:center">
+      <img class="pig-sticker" src="/brand/stickers/thinking.webp" alt="Piggy" style="width:56px;height:56px;flex-shrink:0" />
+      <div style="flex:1">
+        <div style="font-size:.7rem;color:#F7D7E3;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px">Piggy notou</div>
+        <div id="piggy-insight-title" style="font-size:.92rem;color:var(--text);line-height:1.45;font-weight:600"></div>
+        <div id="piggy-insight-message" style="font-size:.86rem;color:var(--text-2);line-height:1.4;margin-top:4px;display:none"></div>
+      </div>
+      <button id="piggy-insight-cta" class="mock-cta" style="display:none">Ajustar <i class="ph ph-arrow-right" aria-hidden="true"></i></button>
+    </div>
+  </div>
+
+  <div class="grid" id="grid">
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-h1"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div><div class="sk sk-line w70"></div></div>
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div><div class="sk sk-line w80"></div></div>
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w60"></div><div class="sk sk-line w70"></div><div class="sk sk-line w80"></div></div>
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div></div>
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div><div class="sk sk-line w70"></div></div>
+    <div class="card"><div class="sk sk-h2"></div><div class="sk sk-line w80"></div><div class="sk sk-line w60"></div></div>
+  </div>
+
+  <p class="section-title" id="charts-title" style="display:none">Análise do Mês</p>
+  <div class="grid charts-grid" id="charts-grid" style="display:none">
+    <div class="card">
+      <div class="ov-chart-head">
+        <h2>Evolução dos gastos</h2>
+        <div class="ov-period-tabs" id="expense-period-tabs" role="tablist">
+          <button type="button" data-days="7" onclick="setExpensePeriod(7,this)">7D</button>
+          <button type="button" data-days="30" class="on" onclick="setExpensePeriod(30,this)">30D</button>
+          <button type="button" data-days="90" onclick="setExpensePeriod(90,this)">3M</button>
+        </div>
+      </div>
+      <div class="chart-wrap line"><canvas id="chart-day"></canvas></div>
+    </div>
+    <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div></div>
+  </div>
+
+  <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
+  <div id="history-wrap" style="display:none">
+    <div class="card">
+      <h2 id="history-card-title">Receita vs Despesa (Últimos 6 Meses)</h2>
+      <div class="chart-wrap" style="height:230px"><canvas id="chart-history"></canvas></div>
+    </div>
+  </div>
+
+  <p class="section-title" id="launches-title" style="display:none">Lançamentos</p>
+  <div id="launches-wrap" style="display:none">
+    <div class="filter-bar">
+      <input class="filter-input" id="filter-text" placeholder="Buscar por descrição ou categoria…" oninput="applyFilter()" />
+      <div class="filter-tabs">
+        <button class="ftab active" data-type="all"          onclick="setTab(this)">Todos</button>
+        <button class="ftab"        data-type="receita"      onclick="setTab(this)">Receitas</button>
+        <button class="ftab"        data-type="despesa"      onclick="setTab(this)">Despesas</button>
+        <button class="ftab"        data-type="investimento" onclick="setTab(this)">Invest.</button>
+        <button class="ftab"        data-type="interno"      onclick="setTab(this)">Internos</button>
+      </div>
+    </div>
+    <div class="card" id="launches-card"></div>
+  </div>
+
+  <div id="last-update"></div>
+  </div>
+
+  <div id="analytics-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Análises</p>
+      <div style="display:flex;gap:8px">
+        <select id="analytics-period-select" class="period-pill" aria-label="Período de análise">
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="analytics-stats" class="stats-row">
+      <div class="stat-tile"><div class="stat-label">Gasto médio mensal</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Receita média</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Taxa de poupança</div><div class="sk sk-h2"></div></div>
+      <div class="stat-tile"><div class="stat-label">Maior dia do período</div><div class="sk sk-h2"></div></div>
+    </div>
+
+    <div class="mock-grid cols-2" style="margin-bottom:14px">
+      <div class="mock-card">
+        <h3>Evolução de gastos</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-evolution-chart"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Receita vs Despesa</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-income-expense-chart"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Distribuição por categoria</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-category-donut"></canvas></div>
+      </div>
+      <div class="mock-card">
+        <h3>Gasto por dia da semana</h3>
+        <div style="height:240px;position:relative"><canvas id="mock-weekday-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card">
+        <h3>Insights do Piggy</h3>
+        <div id="analytics-insights-list" class="tx-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3 id="analytics-comparative-title">Comparativo mês a mês</h3>
+        <div id="analytics-comparative-list" class="tx-list">
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:40%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:50%"></div></div></div></div>
+          <div class="bar-row"><div class="bar-icon"><i class="ph ph-calendar-dots" aria-hidden="true"></i></div><div class="bar-body"><div class="bar-head"><span class="name sk sk-text" style="width:120px"></span></div><div class="bar-track"><div class="bar-fill blue" style="width:60%"></div></div></div></div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3 id="analytics-merchants-title">Top estabelecimentos do período</h3>
+        <div id="analytics-merchants-list" class="tx-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Carregando…</div>
+        </div>
+      </div>
+
+      <div class="mock-card">
+        <h3>Padrões detectados pela IA</h3>
+        <div id="analytics-patterns-list">
+          <div class="empty" style="padding:16px;text-align:center;color:var(--text-3);font-size:.85rem">Carregando…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="history-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Histórico</p>
+      <div style="display:flex;gap:8px">
+        <select id="history-period-select" class="period-pill" aria-label="Período">
+          <option value="1">Últimos 30 dias</option>
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="history-stats" class="stats-row history-stats">
+      <div class="stat-tile">
+        <div class="stat-label">Média / mês</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">lançamentos</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Receitas</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">no período</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Despesas</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">débito + cartão</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-label">Total no período</div>
+        <div class="sk sk-h2"></div>
+        <div class="stat-delta" style="color:var(--text-3)">todos os lançamentos</div>
+      </div>
+    </div>
+
+    <div id="history-filter-chips" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-right:4px">Tipo:</span>
+      <button class="filter-chip active" data-tipo="all">Todos</button>
+      <button class="filter-chip" data-tipo="despesa">Despesas</button>
+      <button class="filter-chip" data-tipo="receita">Receitas</button>
+      <button class="filter-chip" data-tipo="credito">Cartão</button>
+      <span id="history-active-filter" class="active-filter-badge" style="display:none"></span>
+    </div>
+
+    <div class="search-bar" style="margin-bottom:14px">
+      <input id="history-search-input" type="search"
+             placeholder="Buscar por nome, categoria ou nota… (ex: compra shopping)"
+             autocomplete="off" />
+    </div>
+
+    <div class="mock-card">
+      <div id="history-timeline">
+        <div class="empty" style="padding:30px;text-align:center;color:var(--text-3)">Carregando lançamentos…</div>
+      </div>
+
+      <div id="history-load-more-wrap" style="text-align:center;padding:18px 0 6px;display:none">
+        <button id="history-load-more-btn" class="mock-cta outline">Carregar mais</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fixed-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0" id="recurring-section-title">Recorrentes</p>
+      <button class="mock-cta" id="recurring-new-btn" data-pro-feature="recurring_expenses" onclick="openRecurringNewFromTab()">+ Novo gasto fixo</button>
+    </div>
+
+    <div class="filter-tabs" id="recurring-tabs" role="tablist" style="margin:-6px 0 16px">
+      <button class="ftab active" type="button" role="tab" data-rectab="overview" onclick="setRecurringTab('overview')"><i class="ph ph-chart-bar" aria-hidden="true"></i> Visão geral</button>
+      <button class="ftab" type="button" role="tab" data-rectab="expenses" onclick="setRecurringTab('expenses')"><i class="ph ph-trend-down" aria-hidden="true"></i> Gastos fixos</button>
+      <button class="ftab" type="button" role="tab" data-rectab="incomes" onclick="setRecurringTab('incomes')"><i class="ph ph-trend-up" aria-hidden="true"></i> Receitas fixas</button>
+      <button class="ftab" type="button" role="tab" data-rectab="bills" onclick="setRecurringTab('bills')"><i class="ph ph-receipt" aria-hidden="true"></i> Contas a pagar</button>
+    </div>
+
+    <div id="recurring-overview-pane">
+      <div id="recurring-overview-cards"></div>
+    </div>
+
+    <div id="recurring-expenses-pane" style="display:none">
+      <div id="recurring-stats" class="stats-row"></div>
+
+      <div class="mock-grid cols-2">
+        <div class="mock-card">
+          <h3>Essenciais</h3>
+          <div id="recurring-essentials-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Assinaturas / lazer</h3>
+          <div id="recurring-leisure-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Próximos 7 dias</h3>
+          <div id="recurring-upcoming-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Reajustes recentes</h3>
+          <div id="recurring-adjustments-list" class="tx-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="recurring-incomes-pane" style="display:none">
+      <div id="recurring-income-stats" class="stats-row"></div>
+
+      <div class="mock-grid cols-2">
+        <div class="mock-card">
+          <h3>Renda principal</h3>
+          <div id="recurring-income-primary-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Rendas extras</h3>
+          <div id="recurring-income-extra-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Próximos 7 dias</h3>
+          <div id="recurring-income-upcoming-list" class="tx-list"></div>
+        </div>
+
+        <div class="mock-card">
+          <h3>Reajustes recentes</h3>
+          <div id="recurring-income-adjustments-list" class="tx-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="recurring-bills-pane" style="display:none">
+      <!-- Entrada rápida: o representante entrega o boleto → 3 campos e pronto -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3 style="margin-bottom:10px"><i class="ph ph-plus" aria-hidden="true"></i> Novo boleto</h3>
+        <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
+          <div class="field" style="flex:2;min-width:160px">
+            <label for="boleto-quick-name">Descrição</label>
+            <input type="text" id="boleto-quick-name" maxlength="80" placeholder="Ex: Distribuidora XYZ, IPTU, dentista..." onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <div class="field" style="flex:1;min-width:110px">
+            <label for="boleto-quick-amount">Valor (R$)</label>
+            <input type="number" id="boleto-quick-amount" min="0.01" step="0.01" placeholder="0,00" onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <div class="field" style="flex:1;min-width:130px">
+            <label for="boleto-quick-due">Vencimento</label>
+            <input type="date" id="boleto-quick-due" onkeydown="if(event.key==='Enter')quickAddBoleto()" />
+          </div>
+          <button class="mock-cta" id="boleto-quick-btn" onclick="quickAddBoleto()">Adicionar</button>
+        </div>
+      </div>
+
+      <div id="recurring-bills-stats" class="stats-row"></div>
+
+      <!-- "Tô tranquilo nesse prazo?" — o representante oferece um prazo e ele decide -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3 style="margin-bottom:6px"><i class="ph ph-clock" aria-hidden="true"></i> Tô tranquilo nesse prazo?</h3>
+        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Ofereceram um prazo? Veja como fica seu caixa até lá.</p>
+        <div class="form-row" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:130px">
+            <label for="boleto-sim-date">Pagar até</label>
+            <input type="date" id="boleto-sim-date" onkeydown="if(event.key==='Enter')simularPrazo()" />
+          </div>
+          <div class="field" style="flex:1;min-width:130px">
+            <label for="boleto-sim-amount">Boleto novo (opcional)</label>
+            <input type="number" id="boleto-sim-amount" min="0" step="0.01" placeholder="R$ do novo" onkeydown="if(event.key==='Enter')simularPrazo()" />
+          </div>
+          <button class="mock-cta" id="boleto-sim-btn" onclick="simularPrazo()">Simular</button>
+        </div>
+        <div id="boleto-sim-result" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Previsão de saldo 30/60/90 (Pro): pra onde o caixa caminha nos próximos meses -->
+      <div class="mock-card" id="forecast-card" data-pro-feature="forecast" style="margin-bottom:14px">
+        <h3 style="margin-bottom:6px"><i class="ph ph-chart-line-up" aria-hidden="true"></i> Previsão de saldo</h3>
+        <p style="font-size:.78rem;color:var(--text-3);margin:0 0 10px">Pra onde seu caixa caminha em 30, 60 e 90 dias, no ritmo atual de receitas fixas e boletos.</p>
+        <div id="forecast-result"></div>
+      </div>
+
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3><i class="ph ph-calendar-dots" aria-hidden="true"></i> Agenda de vencimentos</h3>
+        <div id="recurring-bills-agenda"></div>
+      </div>
+
+      <div class="mock-card">
+        <h3><i class="ph ph-check" aria-hidden="true"></i> Pagos recentemente</h3>
+        <div id="recurring-bills-paid-list" class="tx-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="budgets-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0" id="budgets-title">Orçamentos</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta" onclick="openBudgetEditModal()">+ Novo orçamento</button>
+      </div>
+    </div>
+
+    <div id="budgets-stats" class="stats-row"></div>
+
+    <div id="budgets-list-card" class="mock-card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">Por categoria</h3>
+        <div style="font-size:.72rem;color:var(--text-3)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px"></span>&lt; 80% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;vertical-align:middle;margin-right:5px"></span>80–99% &nbsp;•&nbsp; <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px"></span>≥ 100%</div>
+      </div>
+      <div id="budgets-list" class="tx-list"></div>
+    </div>
+  </div>
+
+  <div id="goals-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Caixinhas e metas</p>
+      <button class="mock-cta" onclick="openGoalEditModal()">+ Nova</button>
+    </div>
+
+    <div id="goals-stats" class="stats-row"></div>
+
+    <div id="goals-grid" class="mock-grid cols-2"></div>
+  </div>
+
+  <div id="affiliate-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Programa de afiliados</p>
+    </div>
+
+    <div id="affiliate-stats" class="stats-row"></div>
+
+    <div id="affiliate-body" class="mock-grid cols-2"></div>
+  </div>
+
+  <div id="agentes-view" class="dash-view">
+    <!-- Porquinhos: symbols SVG reutilizados nos cards e no feed -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <g id="pig-base">
+          <path d="M30 46 Q22 20 48 31 Q37 38 35 52 Z" fill="#E87FAC"/>
+          <path d="M90 46 Q98 20 72 31 Q83 38 85 52 Z" fill="#E87FAC"/>
+          <path d="M33 43 Q29 28 45 34 Q38 39 37 48 Z" fill="#C95A8B"/>
+          <path d="M87 43 Q91 28 75 34 Q82 39 83 48 Z" fill="#C95A8B"/>
+          <circle cx="60" cy="70" r="36" fill="#F48FB8"/>
+          <circle cx="39" cy="79" r="5.5" fill="#F7B1CC" opacity=".8"/>
+          <circle cx="81" cy="79" r="5.5" fill="#F7B1CC" opacity=".8"/>
+          <ellipse cx="60" cy="82" rx="17" ry="12" fill="#E86FA4"/>
+          <ellipse cx="54" cy="82" rx="2.6" ry="4.2" fill="#8A2F5C"/>
+          <ellipse cx="66" cy="82" rx="2.6" ry="4.2" fill="#8A2F5C"/>
+          <circle cx="46" cy="63" r="4" fill="#2A1118"/>
+          <circle cx="74" cy="63" r="4" fill="#2A1118"/>
+          <circle cx="47.4" cy="61.6" r="1.3" fill="#fff"/>
+          <circle cx="75.4" cy="61.6" r="1.3" fill="#fff"/>
+        </g>
+        <symbol id="ag-pig-xerife" viewBox="0 14 120 106">
+          <use href="#pig-base"/>
+          <path d="M40 55 Q46 51 52 54" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M80 55 Q74 51 68 54" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <ellipse cx="60" cy="38" rx="32" ry="8" fill="#7A4A22"/>
+          <path d="M44 37 Q43 16 60 16 Q77 16 76 37 Z" fill="#8F5A2B"/>
+          <rect x="44" y="31" width="32" height="6" fill="#5A3418"/>
+          <path d="M60 20 L61.8 24 L66 24.3 L62.8 27 L63.9 31 L60 28.7 L56.1 31 L57.2 27 L54 24.3 L58.2 24 Z" fill="#F2C230"/>
+        </symbol>
+        <symbol id="ag-pig-reporter" viewBox="0 10 120 110">
+          <use href="#pig-base"/>
+          <path d="M34 40 Q34 18 60 18 Q86 18 86 40 Z" fill="#3E5068"/>
+          <ellipse cx="60" cy="40" rx="26" ry="5" fill="#2C3A4B"/>
+          <circle cx="60" cy="17.5" r="2.6" fill="#2C3A4B"/>
+          <g transform="rotate(8 76 26)">
+            <rect x="67" y="18" width="18" height="12.5" rx="1.5" fill="#F5EEF1" stroke="#C9B3BD"/>
+            <text x="76" y="27" text-anchor="middle" font-size="5.4" font-weight="800" fill="#2A1118">PRESS</text>
+          </g>
+          <rect x="86" y="94" width="8" height="20" rx="4" fill="#3A2C34" transform="rotate(-24 90 104)"/>
+          <circle cx="92" cy="89" r="8.5" fill="#55677E" stroke="#2C3A4B" stroke-width="2"/>
+          <path d="M86.5 86 L97.5 86 M85.5 89 L98.5 89 M86.5 92 L97.5 92" stroke="#2C3A4B" stroke-width="1.2"/>
+        </symbol>
+        <symbol id="ag-pig-carteiro" viewBox="0 18 120 102">
+          <use href="#pig-base"/>
+          <path d="M38 40 Q38 21 60 21 Q82 21 82 40 Z" fill="#2E4C9E"/>
+          <ellipse cx="60" cy="40" rx="27" ry="5.5" fill="#233C80"/>
+          <circle cx="60" cy="30" r="4" fill="#F2C230"/>
+          <rect x="76" y="88" width="30" height="21" rx="2.5" fill="#F5EEF1" stroke="#C9B3BD"/>
+          <path d="M76 90 L91 101 L106 90" stroke="#FF2D8E" stroke-width="2" fill="none"/>
+        </symbol>
+        <symbol id="ag-pig-detetive" viewBox="0 16 120 104">
+          <use href="#pig-base"/>
+          <path d="M40 54 Q46 50 52 53" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M68 50 Q74 47 80 50" stroke="#6B2346" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <path d="M36 40 Q36 19 60 19 Q84 19 84 40 Z" fill="#7A5A34"/>
+          <ellipse cx="60" cy="40" rx="25" ry="5" fill="#5F4426"/>
+          <circle cx="90" cy="88" r="12" fill="rgba(198,241,26,.14)" stroke="#C9A227" stroke-width="3.2"/>
+          <path d="M98.5 96.5 L109 107" stroke="#8A6E2B" stroke-width="5" stroke-linecap="round"/>
+        </symbol>
+        <symbol id="ag-pig-cofre" viewBox="0 6 120 114">
+          <use href="#pig-base"/>
+          <rect x="51" y="30" width="18" height="5.5" rx="2.75" fill="#2A1118"/>
+          <circle cx="60" cy="16" r="8" fill="#F2C230" stroke="#C99A1E" stroke-width="2"/>
+          <rect x="57.5" y="12.5" width="5" height="7" rx="1" fill="#C99A1E"/>
+        </symbol>
+        <symbol id="ag-pig-barao" viewBox="0 2 120 118">
+          <use href="#pig-base"/>
+          <rect x="43" y="6" width="34" height="28" rx="3" fill="#1B0F16"/>
+          <rect x="43" y="26" width="34" height="7" fill="#FF2D8E"/>
+          <ellipse cx="60" cy="34" rx="27" ry="6" fill="#14090F"/>
+          <circle cx="74" cy="63" r="9" fill="rgba(255,255,255,.06)" stroke="#C9A227" stroke-width="2.2"/>
+          <path d="M80 70 Q90 82 85 96" stroke="#C9A227" stroke-width="1.8" fill="none"/>
+          <path d="M44 92 Q52 86 60 91 M60 91 Q68 86 76 92" stroke="#3A2230" stroke-width="3.2" fill="none" stroke-linecap="round"/>
+        </symbol>
+        <symbol id="ag-pig-aviador" viewBox="0 12 120 108">
+          <use href="#pig-base"/>
+          <path d="M32 46 Q32 17 60 17 Q88 17 88 46 Q74 38 60 38 Q46 38 32 46 Z" fill="#6B4A2B"/>
+          <circle cx="47" cy="42" r="7.5" fill="#9FD8E8" stroke="#3A2A1B" stroke-width="2.6"/>
+          <circle cx="73" cy="42" r="7.5" fill="#9FD8E8" stroke="#3A2A1B" stroke-width="2.6"/>
+          <path d="M54.5 42 L65.5 42 M39.5 42 L32 44 M80.5 42 L88 44" stroke="#3A2A1B" stroke-width="2.6"/>
+          <path d="M38 101 Q60 111 82 101 L82 110 Q60 118 38 110 Z" fill="#D6453A"/>
+        </symbol>
+        <symbol id="ag-pig-faria_limer" viewBox="0 8 120 112">
+          <use href="#pig-base"/>
+          <!-- tela de trading: linha de alta subindo -->
+          <rect x="34" y="14" width="52" height="34" rx="4" fill="#0E1B14" stroke="#1E4A33" stroke-width="2"/>
+          <path d="M39 40 L50 33 L58 37 L70 24 L81 19" fill="none" stroke="#00F078" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M76 19 L81 19 L81 24" fill="none" stroke="#00F078" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- gravata do investidor -->
+          <path d="M56 62 L60 58 L64 62 L61 74 L59 74 Z" fill="#FF2D8E"/>
+        </symbol>
+      </defs>
+    </svg>
+
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Agentes</p>
+      <div id="agentes-counters" class="ag-counters"></div>
+    </div>
+    <p class="ag-sub">Sua equipe de porquinhos trabalhando 24h nos seus dados: cada um vigia uma coisa e só fala quando vale a pena.</p>
+
+    <div id="agentes-shelf" class="ag-shelf"></div>
+
+    <p class="section-title ag-feed-title">Últimos disparos</p>
+    <div id="agentes-feed" class="ag-feed"></div>
+  </div>
+
+  <div id="categories-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Categorias</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta" onclick="openCategoryEditModal()">+ Nova categoria</button>
+      </div>
+    </div>
+
+    <div id="categories-stats" class="stats-row"></div>
+
+    <div class="mock-grid cols-2">
+      <div class="mock-card" id="categories-distribution-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="margin:0">Distribuição do mês</h3>
+          <span style="font-size:.72rem;color:var(--text-3)">% sobre o total gasto</span>
+        </div>
+        <div id="categories-distribution" class="tx-list"></div>
+      </div>
+
+      <div class="mock-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="margin:0">Todas as categorias</h3>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--text-3);cursor:pointer">
+            <input type="checkbox" id="cat-show-archived" onchange="loadCategoriesView(true)"> mostrar arquivadas
+          </label>
+        </div>
+        <div id="categories-grid" class="cat-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="installments-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Parcelamentos</p>
+      <span style="font-size:.72rem;color:var(--text-3)">Novos parcelamentos: lance pelo bot ou WhatsApp</span>
+    </div>
+
+    <div id="installments-stats" class="stats-row"></div>
+
+    <div id="installments-tabs" class="inst-tabs" role="tablist">
+      <button class="inst-tab active" data-tab="active" type="button" role="tab" onclick="setInstallmentsTab('active')"><i class="ph ph-folder-open" aria-hidden="true"></i> Atuais</button>
+      <button class="inst-tab" data-tab="history" type="button" role="tab" onclick="setInstallmentsTab('history')"><i class="ph ph-folder" aria-hidden="true"></i> Histórico</button>
+    </div>
+
+    <div id="installments-folder" class="inst-folder">
+      <p id="installments-sort-hint" style="font-size:.72rem;color:var(--text-3);margin:0 0 12px;display:none;align-items:center;gap:8px">
+        <span>Ordenado por urgência</span> · <span>próxima parcela primeiro</span>
+      </p>
+
+      <div id="installments-list" class="inst-list"></div>
+    </div>
+  </div>
+
+  <div id="cards-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Cartões</p>
+      <button class="mock-cta" onclick="openCardEditModal()">+ Novo cartão</button>
+    </div>
+
+    <div id="cards-stats" class="stats-row"></div>
+    <div id="cards-grid" class="mock-grid cols-2"></div>
+  </div>
+
+  <div id="investments-view" class="dash-view">
+    <div class="mock-header">
+      <p class="section-title" style="margin:0">Investimentos</p>
+      <div style="display:flex;gap:8px">
+        <button class="mock-cta outline" type="button" onclick="openInvestmentHelp()"><i class="ph ph-question" aria-hidden="true"></i> Como usar</button>
+        <button class="mock-cta" type="button" onclick="openInvestmentModal()">+ Novo investimento</button>
+      </div>
+    </div>
+    <p style="font-size:.72rem;color:var(--text-3);margin:0 0 14px;line-height:1.5">
+      Taxas oficiais do Banco Central (BCB) · CDI do dia atual é estimado e corrigido quando o oficial sai na manhã seguinte.
+    </p>
+
+    <div class="invest-layout-v2">
+      <!-- 1. Taxas BCB -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <h3>Taxas oficiais do mercado</h3>
+        <div class="rate-grid" id="invest-rate-grid">
+          <div class="rate-tile"><div class="rate-name">CDI a.a.</div><div class="rate-val">—</div></div>
+          <div class="rate-tile"><div class="rate-name">SELIC a.a.</div><div class="rate-val">—</div></div>
+          <div class="rate-tile"><div class="rate-name">IPCA 12m</div><div class="rate-val">—</div></div>
+        </div>
+      </div>
+
+      <!-- 2. Resumo da carteira (KPIs) — populado por JS dentro de #invest-summary -->
+      <div id="invest-summary"></div>
+
+      <!-- 3. Lista de investimentos -->
+      <div class="mock-card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Carteira</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">clique em um investimento pra ver detalhes</span>
+        </div>
+        <div id="invest-list"></div>
+      </div>
+
+      <!-- 3b. Renda variável (ações/FIIs via Open Finance) — read-only -->
+      <div class="mock-card" id="rv-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda variável</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">ações e FIIs · atualizado pela sua corretora</span>
+        </div>
+        <div id="rv-summary" class="rv-summary"></div>
+        <div id="rv-list"></div>
+      </div>
+
+      <!-- 3c. Renda fixa via banco (CDB/Tesouro do Open Finance) — read-only, agregada -->
+      <div class="mock-card" id="of-rf-card" style="margin-bottom:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <h3 style="margin:0">Renda fixa · via banco</h3>
+          <span style="font-size:.7rem;color:var(--text-3)">CDB e Tesouro · atualizado pelo seu banco</span>
+        </div>
+        <div id="of-rf-summary" class="rv-summary"></div>
+        <div id="of-rf-list"></div>
+      </div>
+
+      <!-- 4. Simulador líquido -->
+      <div class="mock-card">
+        <h3>Simulador líquido</h3>
+          <div class="invest-form">
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-indexer">Indexador</label>
+                <select id="sim-indexer" onchange="runInvestmentSimulator()">
+                  <option value="cdi">CDI</option>
+                  <option value="selic">SELIC</option>
+                  <option value="ipca">IPCA+</option>
+                  <option value="fixed">Prefixado</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="sim-rate">Taxa</label>
+                <input id="sim-rate" type="number" min="0" step="0.01" value="110" oninput="runInvestmentSimulator()" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="sim-amount">Valor investido</label>
+                <input id="sim-amount" type="number" min="1" step="0.01" value="10000" oninput="runInvestmentSimulator()" />
+              </div>
+              <div class="field">
+                <label for="sim-years">Prazo em anos</label>
+                <input id="sim-years" type="number" min="0.05" step="0.05" value="2" oninput="runInvestmentSimulator()" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="sim-tax">Tributação</label>
+              <select id="sim-tax" onchange="runInvestmentSimulator()">
+                <option value="taxed">IR regressivo + IOF</option>
+                <option value="exempt">Isento</option>
+              </select>
+            </div>
+          </div>
+          <div id="sim-output"></div>
+          <p class="tax-note" style="margin-top:12px">
+            IR regressivo: até 180 dias 22,5%; 181–360 dias 20%; 361–720 dias 17,5%; acima de 720 dias 15%.
+            IOF estimado apenas para resgates nos primeiros 30 dias.
+          </p>
+      </div>
+    </div>
+  </div>
+
+<div id="toast"><i class="ph ph-check" aria-hidden="true"></i> Atualizado</div>
+
+<div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
+  <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
+    <h3 id="ofx-result-title">Importação OFX</h3>
+    <pre id="ofx-result-body" style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text);background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;padding:14px;max-height:60vh;overflow:auto;margin-bottom:18px"></pre>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closeOfxResult()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="upgrade-overlay" onclick="if(event.target===this) closeUpgradeModal()">
+  <div class="modal upgrade-modal" role="dialog" aria-labelledby="upg-title">
+    <h3 id="upg-title">Disponível nos planos PigBank</h3>
+    <p class="upg-feat" id="upg-feat-msg">Essa feature faz parte dos planos pagos do PigBank. Escolha o que faz mais sentido pra você.</p>
+    <div class="upg-perks">
+      <div class="upg-perk">Piggy IA: converse sobre suas finanças</div>
+      <div class="upg-perk">Caixinhas e cartões ilimitados</div>
+      <div class="upg-perk">Investimentos com acompanhamento automático</div>
+      <div class="upg-perk">Histórico completo + exportar CSV</div>
+      <div class="upg-perk">Importar extrato e fatura por OFX</div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeUpgradeModal()">Agora não</button>
+      <a class="btn-upgrade pb-keep-in-app" href="/precos" id="upg-cta">Ver planos <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="bgt-overlay">
+  <div class="modal">
+    <h3>Definir Orçamento</h3>
+    <p class="msub" id="bgt-cat-label">—</p>
+    <input class="modal-inp" id="bgt-input" type="number" placeholder="Ex: 800.00" min="0.01" step="0.01" />
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeBudget()">Cancelar</button>
+      <button class="btn-save"   onclick="saveBudget()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="launch-overlay">
+  <div class="modal">
+    <h3>Novo lançamento</h3>
+    <p class="msub">Registre uma receita ou despesa. Vai aparecer aqui e no histórico do bot.</p>
+
+    <div class="tipo-toggle" role="radiogroup" aria-label="Tipo de lançamento">
+      <button type="button" class="tipo-opt despesa active" data-tipo="despesa" onclick="setLaunchTipo('despesa')" role="radio" aria-checked="true">
+        <span class="tipo-icon"><i class="ph ph-trend-down" aria-hidden="true"></i></span>
+        <span>Despesa</span>
+      </button>
+      <button type="button" class="tipo-opt receita" data-tipo="receita" onclick="setLaunchTipo('receita')" role="radio" aria-checked="false">
+        <span class="tipo-icon"><i class="ph ph-trend-up" aria-hidden="true"></i></span>
+        <span>Receita</span>
+      </button>
+      <button type="button" class="tipo-opt credito" data-tipo="credito" onclick="setLaunchTipo('credito')" role="radio" aria-checked="false">
+        <span class="tipo-icon"><i class="ph ph-credit-card" aria-hidden="true"></i></span>
+        <span>Crédito</span>
+      </button>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-valor">Valor (R$)</label>
+      <input class="modal-inp" id="launch-valor" type="number" placeholder="0,00" min="0.01" step="0.01" inputmode="decimal" />
+    </div>
+
+    <div class="modal-row" id="launch-card-row" style="display:none">
+      <label class="modal-label" for="launch-card">Cartão</label>
+      <select class="modal-inp cat-select" id="launch-card">
+        <option value="">— Selecione um cartão —</option>
+      </select>
+    </div>
+
+    <div class="modal-row" id="launch-parcelas-row" style="display:none">
+      <label class="modal-label" for="launch-parcelas">Parcelas</label>
+      <select class="modal-inp cat-select" id="launch-parcelas" onchange="syncParcUI()">
+        <option value="1">1x (à vista)</option>
+        <option value="2">2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+        <option value="5">5x</option>
+        <option value="6">6x</option>
+        <option value="7">7x</option>
+        <option value="8">8x</option>
+        <option value="9">9x</option>
+        <option value="10">10x</option>
+        <option value="12">12x</option>
+        <option value="15">15x</option>
+        <option value="18">18x</option>
+        <option value="24">24x</option>
+      </select>
+    </div>
+
+    <div class="modal-row" id="launch-valor-mode-row" style="display:none">
+      <div class="valor-mode-toggle" role="radiogroup" aria-label="O valor digitado é o da parcela ou o total?">
+        <button type="button" class="vmode-opt active" data-vmode="parcela" onclick="setValorMode('parcela')" role="radio" aria-checked="true">Valor da parcela</button>
+        <button type="button" class="vmode-opt" data-vmode="total" onclick="setValorMode('total')" role="radio" aria-checked="false">Valor total</button>
+      </div>
+      <p class="parc-preview empty" id="launch-parc-preview"></p>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-categoria">Categoria</label>
+      <select class="modal-inp cat-select" id="launch-categoria">
+        <option value="">— Detectar automaticamente —</option>
+      </select>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="launch-alvo">Descrição</label>
+      <input class="modal-inp" id="launch-alvo" type="text" placeholder="Ex: Mercado, Salário, Uber..." maxlength="80" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="launch-nota">Observação (opcional)</label>
+      <textarea class="modal-inp" id="launch-nota" placeholder="Detalhe adicional, se quiser" maxlength="200"></textarea>
+    </div>
+
+    <div class="modal-error" id="launch-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeLaunchModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="launch-submit-btn" onclick="submitLaunch()">Registrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="invest-overlay">
+  <div class="modal wide">
+    <h3 id="invest-modal-title">Movimentar investimento</h3>
+    <p class="msub" id="invest-modal-sub">Aporte, resgate ou cadastre um novo ativo na sua carteira.</p>
+
+    <div class="tipo-toggle" role="radiogroup" aria-label="Operação de investimento">
+      <button type="button" class="tipo-opt aporte active" data-invtab="deposit" onclick="setInvestModalTab('deposit')" role="radio" aria-checked="true">
+        <span class="tipo-icon"><i class="ph ph-arrow-up" aria-hidden="true"></i></span><span>Aporte</span>
+      </button>
+      <button type="button" class="tipo-opt resgate" data-invtab="withdraw" onclick="setInvestModalTab('withdraw')" role="radio" aria-checked="false">
+        <span class="tipo-icon"><i class="ph ph-arrow-down" aria-hidden="true"></i></span><span>Resgate</span>
+      </button>
+      <button type="button" class="tipo-opt novo-inv" data-invtab="create" onclick="setInvestModalTab('create')" role="radio" aria-checked="false">
+        <span class="tipo-icon">＋</span><span>Novo ativo</span>
+      </button>
+    </div>
+
+    <!-- Aba Aporte/Resgate -->
+    <div id="invest-pane-move" class="invest-pane">
+      <form class="invest-form" onsubmit="moveInvestment(event)" novalidate>
+        <div class="modal-row">
+          <label class="modal-label" for="move-name">Investimento</label>
+          <select class="modal-inp cat-select" id="move-name" onchange="updateMoveFormVisibility()"></select>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="move-kind">Operação</label>
+            <select class="modal-inp cat-select" id="move-kind" onchange="updateMoveFormVisibility()">
+              <option value="deposit">Aporte</option>
+              <option value="withdraw">Resgate</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="modal-label" for="move-amount">Valor</label>
+            <input class="modal-inp" id="move-amount" type="number" min="0.01" step="0.01" placeholder="500.00" />
+          </div>
+        </div>
+        <div class="form-row" id="move-rate-row" style="display:none">
+          <div class="field">
+            <label class="modal-label" for="move-rate">Taxa desta compra (% a.a.)</label>
+            <input class="modal-inp" id="move-rate" type="number" min="0" step="0.0001" placeholder="6.85" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="move-purchase-date">Data da compra</label>
+            <input class="modal-inp" id="move-purchase-date" type="date" />
+          </div>
+        </div>
+        <p id="move-rate-hint" class="tax-note" style="display:none;margin:4px 0 8px">
+          Tesouro IPCA+/Prefixado e títulos com taxa de mercado mudam por compra.
+          Deixe a taxa em branco para herdar a do investimento.
+        </p>
+        <div class="modal-acts">
+          <button class="btn-cancel" type="button" onclick="closeInvestmentModal()">Cancelar</button>
+          <button class="btn-cancel" type="button" id="move-withdraw-all" onclick="investmentWithdrawAll()" style="display:none">Resgatar tudo</button>
+          <button class="btn-save" type="submit">Salvar movimentação</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Aba Novo ativo -->
+    <div id="invest-pane-create" class="invest-pane" style="display:none">
+      <form class="invest-form" onsubmit="createInvestment(event)" novalidate>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-issuer">Emissor</label>
+            <input class="modal-inp" id="inv-issuer" autocomplete="off" placeholder="Tesouro Direto, Nubank" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-name">Nome do ativo</label>
+            <input class="modal-inp" id="inv-name" autocomplete="off" placeholder="Tesouro Selic 2027, CDB 110% CDI" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-asset-type">Tipo</label>
+            <select class="modal-inp cat-select" id="inv-asset-type" onchange="updateInvestmentTaxHint()" required>
+              <option value="" disabled selected hidden>Selecione o tipo</option>
+              <option value="CDB">CDB</option>
+              <option value="LCI">LCI</option>
+              <option value="LCA">LCA</option>
+              <option value="Debênture">Debênture</option>
+              <option value="CRI">CRI</option>
+              <option value="CRA">CRA</option>
+              <option value="ETF Renda Fixa">ETF Renda Fixa</option>
+              <option value="Tesouro Selic">Tesouro Selic</option>
+              <option value="Tesouro IPCA+">Tesouro IPCA+</option>
+              <option value="Tesouro Prefixado">Tesouro Prefixado</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-period">Indexador</label>
+            <select class="modal-inp cat-select" id="inv-period" onchange="updateInvestmentRateHint()" required>
+              <option value="" disabled selected hidden>Selecione o indexador</option>
+              <option value="pct_cdi">% do CDI</option>
+              <option value="cdi_spread">CDI + spread a.a.</option>
+              <option value="ipca_spread">IPCA + spread a.a.</option>
+              <option value="fixed">Prefixado a.a.</option>
+              <option value="selic_spread">SELIC + spread a.a.</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-rate" id="inv-rate-label">Taxa (% do CDI)</label>
+            <input class="modal-inp" id="inv-rate" type="number" min="0.01" step="0.01" placeholder="Ex: 110 = 110% do CDI" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-frequency">Pagamento de juros</label>
+            <select class="modal-inp cat-select" id="inv-frequency" required>
+              <option value="" disabled selected hidden>Selecione a frequência</option>
+              <option value="maturity">Só no vencimento</option>
+              <option value="monthly">Mensal</option>
+              <option value="quarterly">Trimestral</option>
+              <option value="semiannual">Semestral</option>
+              <option value="annual">Anual</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-initial-amount">Valor investido (R$)</label>
+            <input class="modal-inp" id="inv-initial-amount" type="number" min="0" step="0.01" placeholder="10000" />
+          </div>
+          <div class="field">
+            <label class="modal-label" for="inv-purchase-date">Data de compra</label>
+            <input class="modal-inp" id="inv-purchase-date" type="date" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="modal-label" for="inv-maturity-date">Data de vencimento</label>
+            <input class="modal-inp" id="inv-maturity-date" type="date" />
+          </div>
+        </div>
+        <p class="tax-note" id="inv-tax-hint">IR regressivo e IOF conforme regra do tipo selecionado.</p>
+        <div class="modal-row">
+          <label class="modal-label" for="inv-note">Observações</label>
+          <input class="modal-inp" id="inv-note" autocomplete="off" placeholder="Reserva de emergência, objetivo, liquidez" />
+        </div>
+        <div class="modal-acts">
+          <button class="btn-cancel" type="button" onclick="closeInvestmentModal()">Cancelar</button>
+          <button class="btn-save" type="submit">Criar investimento</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="edit-launch-overlay">
+  <div class="modal">
+    <h3>Editar lançamento</h3>
+    <p class="msub" id="edit-launch-summary">—</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="edit-launch-categoria">Categoria</label>
+      <select class="modal-inp cat-select" id="edit-launch-categoria" onchange="_onEditCategoriaChange()"></select>
+    </div>
+
+    <div class="modal-row" id="edit-launch-categoria-custom-row" style="display:none">
+      <label class="modal-label" for="edit-launch-categoria-custom">Nova categoria</label>
+      <input class="modal-inp" id="edit-launch-categoria-custom" type="text" maxlength="40" placeholder="Digite a categoria personalizada" />
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="edit-launch-nota">Descrição</label>
+      <input class="modal-inp" id="edit-launch-nota" type="text" maxlength="200" placeholder="Ex: gastei 50 mercado..." />
+    </div>
+
+    <div class="modal-row" id="edit-launch-data-row">
+      <label class="modal-label" for="edit-launch-data">Data e hora</label>
+      <input class="modal-inp" id="edit-launch-data" type="datetime-local" />
+    </div>
+
+    <div class="modal-error" id="edit-launch-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeEditLaunchModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="edit-launch-submit-btn" onclick="submitEditLaunch()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-success-toast" id="launch-success-toast"></div>
+
+<div class="overlay" id="pocket-history-overlay">
+  <div class="modal wide">
+    <h3 id="pkt-hist-title">Histórico da caixinha</h3>
+    <p class="msub" id="pkt-hist-sub">Depósitos e saques desta caixinha.</p>
+
+    <div class="pkt-hist-summary" id="pkt-hist-summary" style="display:none">
+      <div class="it"><span class="k">Saldo</span><span class="v" id="pkt-hist-balance">—</span></div>
+      <div class="it dep"><span class="k">Depósitos</span><span class="v" id="pkt-hist-deposits">—</span></div>
+      <div class="it wd"><span class="k">Saques</span><span class="v" id="pkt-hist-withdrawals">—</span></div>
+    </div>
+
+    <div class="pkt-move-actions" id="pkt-move-actions" style="display:none">
+      <button class="pkt-move-btn dep" type="button" onclick="openPocketMove('deposit')">+ Depositar</button>
+      <button class="pkt-move-btn wd"  type="button" onclick="openPocketMove('withdraw')">− Sacar</button>
+      <button class="pkt-move-btn wd"  type="button" onclick="pocketWithdrawAll()">⤓ Sacar tudo</button>
+    </div>
+
+    <form class="pkt-move-form" id="pkt-move-form" onsubmit="submitPocketMove(event)" novalidate>
+      <span class="pkt-move-form-title" id="pkt-move-form-title">Depositar</span>
+      <input type="number" id="pkt-move-amount" inputmode="decimal" step="0.01" min="0.01" placeholder="Valor (R$)" required />
+      <input type="text" id="pkt-move-nota" maxlength="120" placeholder="Nota (opcional)" />
+      <div class="pkt-move-form-acts">
+        <button type="button" onclick="closePocketMove()">Cancelar</button>
+        <button type="submit" class="pkt-move-submit" id="pkt-move-submit">Confirmar</button>
+      </div>
+    </form>
+
+    <div id="pkt-hist-body">
+      <div class="pkt-hist-loading">Carregando…</div>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" id="pkt-hist-edit-btn" onclick="editCurrentPocketFromHistory()" style="margin-right:auto">Editar</button>
+      <button class="btn-cancel" type="button" onclick="closePocketHistory()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="pocket-overlay">
+  <div class="modal">
+    <h3>Nova caixinha</h3>
+    <p class="msub">Crie uma caixinha para reservar dinheiro para um objetivo (viagem, emergência, etc).</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="pocket-name">Nome</label>
+      <input class="modal-inp" id="pocket-name" type="text" placeholder="Ex: Viagem, Emergência, Carro..." maxlength="80" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="pocket-description">Descrição (opcional)</label>
+      <textarea class="modal-inp" id="pocket-description" placeholder="Para que serve esta caixinha?" maxlength="200"></textarea>
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="pocket-interest-enabled">Rendimento?</label>
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:.86rem">
+        <input type="checkbox" id="pocket-interest-enabled" checked onchange="syncPocketInterestConfig()" />
+        <span>Rendimento atrelado ao CDI</span>
+      </label>
+      <div id="pocket-interest-config" style="margin-top:10px">
+        <label class="modal-label" for="pocket-interest-rate">Percentual do CDI</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input class="modal-inp" id="pocket-interest-rate" type="number" min="1" max="300" step="0.01" value="100" inputmode="decimal" style="width:112px;flex:0 0 112px" />
+          <span style="color:var(--text-2);font-size:.86rem;white-space:nowrap">% do CDI</span>
+        </div>
+        <div style="color:var(--text-3);font-size:.78rem;margin-top:8px;line-height:1.35"><i class="ph ph-lightbulb" aria-hidden="true"></i> Valor simulado: o PigBank não custodia seu dinheiro. Use a taxa do banco onde o saldo realmente está aplicado.</div>
+      </div>
+    </div>
+
+    <div class="modal-error" id="pocket-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closePocketModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="pocket-submit-btn" onclick="submitPocket()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="card-overlay">
+  <div class="modal">
+    <h3>Novo cartão</h3>
+    <p class="msub">Cadastre um cartão de crédito para registrar compras e acompanhar a fatura.</p>
+
+    <div class="modal-row">
+      <label class="modal-label" for="card-name">Nome</label>
+      <input class="modal-inp" id="card-name" type="text" placeholder="Ex: Nubank, Inter Black, Itaú..." maxlength="80" />
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="card-closing-day">Dia de fechamento</label>
+      <input class="modal-inp" id="card-closing-day" type="number" placeholder="Ex: 28" min="1" max="31" step="1" inputmode="numeric" />
+    </div>
+
+    <div class="modal-row" style="margin-bottom:18px">
+      <label class="modal-label" for="card-due-day">Dia de vencimento</label>
+      <input class="modal-inp" id="card-due-day" type="number" placeholder="Ex: 5" min="1" max="31" step="1" inputmode="numeric" />
+    </div>
+
+    <div class="modal-error" id="card-error"></div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeCardModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="card-submit-btn" onclick="submitCard()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Detalhe da fatura ──────────────────────────────────────────────── -->
+<div class="overlay" id="bill-detail-overlay">
+  <div class="modal wide">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px">
+      <h3 id="bill-detail-title" style="margin:0">Fatura</h3>
+      <div id="bill-detail-nav" style="display:none;gap:6px;align-items:center">
+        <button type="button" id="bill-detail-prev" class="hbtn" style="padding:4px 10px;min-height:28px;font-size:.85rem" onclick="navBill(-1)" title="Fatura anterior">◀</button>
+        <span id="bill-detail-nav-label" style="font-size:.7rem;color:var(--text-3);min-width:60px;text-align:center"></span>
+        <button type="button" id="bill-detail-next" class="hbtn" style="padding:4px 10px;min-height:28px;font-size:.85rem" onclick="navBill(1)" title="Próxima fatura">▶</button>
+      </div>
+    </div>
+    <p class="msub" id="bill-detail-sub">—</p>
+    <div class="bill-summary" id="bill-detail-summary">
+      <div class="it"><span class="k">Total</span><span class="v" id="bill-detail-total">—</span></div>
+      <div class="it"><span class="k">Pago</span><span class="v" id="bill-detail-paid">—</span></div>
+      <div class="it due"><span class="k">Em aberto</span><span class="v" id="bill-detail-due">—</span></div>
+    </div>
+    <div style="font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:8px">
+      Compras desta fatura
+    </div>
+    <div class="bill-tx-list" id="bill-detail-tx"></div>
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeBillDetailModal()">Fechar</button>
+      <button class="btn-save" type="button" id="bill-detail-pay-btn" onclick="payFromDetail()">Pagar fatura</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Pagar fatura ───────────────────────────────────────────────────── -->
+<div class="overlay" id="pay-bill-overlay">
+  <div class="modal">
+    <h3>Pagar fatura</h3>
+    <p class="msub">O valor sai do saldo da sua conta.</p>
+
+    <div class="bill-balance-line">
+      <span class="lbl-k">Saldo disponível</span>
+      <span class="lbl-v" id="pay-bill-balance">R$ 0,00</span>
+    </div>
+
+    <div id="pay-bill-empty" class="empty" style="display:none;padding:18px 4px;text-align:center;font-size:.85rem;color:var(--text-2)">
+      <i class="ph ph-tray" aria-hidden="true"></i> Nenhuma fatura em aberto.
+    </div>
+
+    <div class="bill-list" id="pay-bill-list"></div>
+
+    <div id="pay-bill-form" style="display:none">
+      <div class="modal-row">
+        <label class="modal-label" for="pay-bill-amount">Valor a pagar (R$)</label>
+        <input class="modal-inp" id="pay-bill-amount" type="number" step="0.01" min="0.01" inputmode="decimal" />
+        <div style="font-size:.7rem;color:var(--text-3);margin-top:6px" id="pay-bill-hint">—</div>
+      </div>
+      <div class="modal-error" id="pay-bill-error"></div>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closePayBillModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="pay-bill-submit-btn" onclick="submitPayBill()" disabled>Pagar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Comprovante ────────────────────────────────────────────────────── -->
+<div class="overlay" id="pay-bill-receipt-overlay">
+  <div class="modal">
+    <div class="receipt-card">
+      <div class="receipt-icon"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
+      <div class="receipt-title">Pagamento realizado</div>
+      <div class="receipt-amount" id="receipt-amount">R$ 0,00</div>
+      <div style="font-size:.78rem;color:var(--text-2)" id="receipt-card-line">—</div>
+    </div>
+    <div class="receipt-grid">
+      <div class="receipt-cell"><div class="k">Saldo agora</div><div class="v" id="receipt-balance">—</div></div>
+      <div class="receipt-cell"><div class="k">Em aberto</div><div class="v" id="receipt-open">—</div></div>
+      <div class="receipt-cell"><div class="k">Status</div><div class="v" id="receipt-status">—</div></div>
+      <div class="receipt-cell"><div class="k">ID lançamento</div><div class="v" id="receipt-launch-id">—</div></div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closePayReceiptModal()">Concluir</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Ajustar Carteira (dinheiro fora de banco conectado — Open Finance) ── -->
+<div class="overlay" id="adjust-wallet-overlay" onclick="if(event.target===this) closeAdjustWalletModal()">
+  <div class="modal">
+    <h3>Ajustar carteira</h3>
+    <p class="msub">A <b>Carteira</b> é o dinheiro <b>fora</b> dos bancos conectados: espécie e contas que você não ligou no Open Finance. O saldo dos bancos conectados entra sozinho; não digite ele aqui.</p>
+
+    <div class="bill-balance-line">
+      <span class="lbl-k"><i class="ph ph-bank" aria-hidden="true"></i> Nos bancos conectados</span>
+      <span class="lbl-v" id="adjust-wallet-banks">R$ 0,00</span>
+    </div>
+
+    <div class="modal-row">
+      <label class="modal-label" for="adjust-wallet-input"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira (dinheiro fora do banco)</label>
+      <input class="modal-inp" id="adjust-wallet-input" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0,00" />
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:6px">Se você controlava esse banco manualmente aqui, zere: agora o saldo real vem do próprio banco.</div>
+    </div>
+    <div class="modal-error" id="adjust-wallet-error"></div>
+
+    <div class="bill-balance-line" style="margin-top:4px">
+      <span class="lbl-k">= Saldo total</span>
+      <span class="lbl-v" id="adjust-wallet-total">R$ 0,00</span>
+    </div>
+
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeAdjustWalletModal()">Cancelar</button>
+      <button class="btn-save" type="button" id="adjust-wallet-submit" onclick="submitAdjustWallet()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="investment-detail-overlay">
+  <div class="modal wide">
+    <h3 id="investment-detail-title">Investimento</h3>
+    <p class="msub" id="investment-detail-sub">—</p>
+    <div id="investment-detail-body"></div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeInvestmentDetail()">Fechar</button>
+      <button class="btn-cancel" id="investment-detail-withdraw-all" type="button" style="display:none">Resgatar tudo</button>
+      <button class="inst-delete-btn" id="investment-detail-delete" type="button">Remover investimento</button>
+      <button class="btn-save" id="investment-detail-move" type="button">Movimentar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cadastrar / editar cartão -->
+<div class="overlay" id="card-edit-overlay">
+  <div class="modal wide">
+    <h3 id="card-edit-title">Novo cartão</h3>
+    <p class="msub">Apelido obrigatório. Demais campos são opcionais. Só preencha o que ajudar você a identificar este cartão.</p>
+    <form id="card-edit-form" onsubmit="event.preventDefault(); saveCard();" novalidate>
+      <input type="hidden" id="card-edit-id" />
+
+      <div class="invest-form">
+        <div class="field">
+          <label for="card-edit-name">Apelido <span style="color:var(--red)">*</span></label>
+          <input type="text" id="card-edit-name" maxlength="80" required
+            placeholder="Ex: Nubank Roxinho, Itaú Click..."
+            oninvalid="this.setCustomValidity('Digite um apelido pro cartão.')"
+            oninput="this.setCustomValidity('')" />
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="card-edit-flag">Bandeira</label>
+            <select id="card-edit-flag">
+              <option value="">— sem bandeira —</option>
+              <option value="Visa">Visa</option>
+              <option value="Mastercard">Mastercard</option>
+              <option value="Elo">Elo</option>
+              <option value="Amex">Amex</option>
+              <option value="Hipercard">Hipercard</option>
+              <option value="Outros">Outros</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="card-edit-last4">Últimos 4 dígitos (opcional)</label>
+            <input type="text" id="card-edit-last4" maxlength="4" inputmode="numeric" pattern="[0-9]{4}"
+              placeholder="ex: 4821"
+              oninvalid="this.setCustomValidity('Use exatamente 4 números (ou deixe vazio).')"
+              oninput="this.setCustomValidity('')" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Cor</label>
+          <div id="card-edit-colors" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="card-edit-limit">Limite (R$, opcional)</label>
+            <input type="number" id="card-edit-limit" min="0" step="0.01" placeholder="ex: 5000"
+              oninvalid="this.setCustomValidity('Use um valor maior ou igual a zero.')"
+              oninput="this.setCustomValidity('')" />
+          </div>
+          <div class="field">
+            <label for="card-edit-closing">Fecha dia</label>
+            <input type="number" id="card-edit-closing" min="1" max="31" required placeholder="1-31"
+              oninvalid="this.setCustomValidity('Use um dia entre 1 e 31.')"
+              oninput="this.setCustomValidity('')" />
+          </div>
+          <div class="field">
+            <label for="card-edit-due">Vence dia</label>
+            <input type="number" id="card-edit-due" min="1" max="31" required placeholder="1-31"
+              oninvalid="this.setCustomValidity('Use um dia entre 1 e 31.')"
+              oninput="this.setCustomValidity('')" />
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-acts" style="margin-top:18px">
+        <button type="button" class="btn-cancel" onclick="closeCardEditModal()">Cancelar</button>
+        <button type="submit" class="btn-save" id="card-edit-save-btn">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Confirmar exclusão de cartão (mostra impacto) -->
+<div class="overlay" id="card-delete-overlay">
+  <div class="modal">
+    <h3>Excluir cartão</h3>
+    <p class="msub" id="card-delete-body">Tem certeza?</p>
+    <div class="modal-acts" style="margin-top:18px">
+      <button type="button" class="btn-cancel" onclick="closeCardDeleteModal()">Cancelar</button>
+      <button type="button" class="inst-delete-btn" id="card-delete-confirm-btn">Sim, excluir tudo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Antecipar parcela -->
+<div class="overlay" id="inst-anticipate-overlay">
+  <div class="modal">
+    <h3>Antecipar próxima parcela</h3>
+    <p class="msub" id="inst-anticipate-body">Tem certeza?</p>
+    <div class="modal-acts" style="margin-top:18px">
+      <button type="button" class="btn-cancel" onclick="closeInstAnticipateModal()">Cancelar</button>
+      <button type="button" class="btn-save" id="inst-anticipate-confirm-btn">Sim, antecipar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excluir parcelamento (mostra impacto) -->
+<div class="overlay" id="inst-delete-overlay">
+  <div class="modal">
+    <h3>Excluir parcelamento</h3>
+    <p class="msub" id="inst-delete-body">Carregando…</p>
+    <div class="modal-acts" style="margin-top:18px">
+      <button type="button" class="btn-cancel" onclick="closeInstDeleteModal()">Cancelar</button>
+      <button type="button" class="inst-delete-btn" id="inst-delete-confirm-btn">Sim, excluir</button>
+    </div>
+  </div>
+</div>
+
+<!-- Editar parcelamento (nome + categoria) -->
+<div class="overlay" id="inst-edit-overlay">
+  <div class="modal">
+    <h3>Editar parcelamento</h3>
+    <p class="msub">Edita nome e categoria de todas as parcelas deste grupo.</p>
+    <form id="inst-edit-form" onsubmit="event.preventDefault(); saveInstallmentEdit();" novalidate>
+      <div class="field">
+        <label for="inst-edit-nome">Nome / descrição</label>
+        <input type="text" id="inst-edit-nome" maxlength="200" placeholder="Ex: iPhone capa MagSafe" />
+      </div>
+      <div class="field">
+        <label for="inst-edit-categoria">Categoria</label>
+        <input type="text" id="inst-edit-categoria" maxlength="80" placeholder="Ex: eletronicos" />
+      </div>
+      <div class="modal-acts" style="margin-top:18px">
+        <button type="button" class="btn-cancel" onclick="closeInstEditModal()">Cancelar</button>
+        <button type="submit" class="btn-save" id="inst-edit-save-btn">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="investment-help-overlay">
+  <div class="modal wide">
+    <h3>Como usar a aba de investimentos</h3>
+    <p class="msub">Use esta área para registrar aplicações, acompanhar rendimentos e simular o valor líquido antes de investir.</p>
+    <div class="help-steps">
+      <div class="help-step">
+        <div>
+          <h4>Veja as taxas de referência</h4>
+          <p>No topo da aba ficam CDI, Selic e IPCA. Elas ajudam o Piggy a calcular investimentos pós-fixados e indexados.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Cadastre o investimento</h4>
+          <p>Preencha emissor, nome do ativo, tipo, indexador, taxa, data de compra e valor investido. Exemplo: CDB 110% CDI ou Tesouro IPCA+.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Confira a tributação</h4>
+          <p>O Piggy aplica a regra do tipo escolhido, como IR regressivo, IOF nos primeiros 30 dias ou isenção para LCI/LCA quando aplicável.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Registre aportes e resgates</h4>
+          <p>Quando colocar mais dinheiro ou retirar parte do investimento, use “Aporte e resgate”. Assim a carteira continua batendo com a realidade.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Abra um investimento para ver detalhes</h4>
+          <p>Clique em qualquer investimento da carteira para ver saldo, rendimento estimado, datas, taxa e histórico de movimentações.</p>
+        </div>
+      </div>
+      <div class="help-step">
+        <div>
+          <h4>Use o simulador líquido</h4>
+          <p>Antes de cadastrar algo novo, simule indexador, taxa, valor e prazo para comparar cenários já considerando impostos.</p>
+        </div>
+      </div>
+    </div>
+    <div class="help-note">Dica: se não souber algum campo, preencha o essencial primeiro. Você pode usar observações para guardar detalhes como objetivo, liquidez ou banco emissor.</div>
+    <div class="modal-acts">
+      <button class="btn-save" type="button" onclick="closeInvestmentHelp()">Entendi</button>
+    </div>
+  </div>
+</div>
+
+<script defer src="/dashboard.js?v=15"></script>
+
+<!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
+
+<button id="piggy-fab" type="button" aria-label="Abrir Piggy IA">
+  <span aria-hidden="true"><img src="/brand/stickers/hello.webp" alt=""></span>
+  <span class="fab-badge" id="piggy-fab-badge"></span>
+</button>
+
+<div id="piggy-panel" role="dialog" aria-labelledby="piggy-title" aria-modal="false">
+  <div class="piggy-head">
+    <div class="avatar"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
+    <div class="title">
+      <b id="piggy-title">Piggy</b>
+      <small id="piggy-sub">IA das suas finanças</small>
+    </div>
+    <button class="close-btn" type="button" aria-label="Fechar" onclick="closePiggy()">×</button>
+  </div>
+  <div class="piggy-body" id="piggy-body">
+    <div class="piggy-empty" id="piggy-empty">
+      <div class="big"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
+      <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
+      <div class="piggy-suggestions">
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')"><i class="ph ph-trend-down" aria-hidden="true"></i> Quanto eu gastei esse mês?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')"><i class="ph ph-chart-pie" aria-hidden="true"></i> Quais minhas maiores categorias?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')"><i class="ph ph-wallet" aria-hidden="true"></i> Quanto tenho de saldo?</button>
+        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')"><i class="ph ph-receipt" aria-hidden="true"></i> Mostra meus últimos lançamentos</button>
+      </div>
+    </div>
+  </div>
+  <div class="piggy-foot">
+    <div class="piggy-input-row">
+      <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
+      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
+    </div>
+    <div class="piggy-usage" id="piggy-usage"></div>
+  </div>
+</div>
+
+<script defer src="/dashboard-chat.js"></script>
+
+</body>
+</html>

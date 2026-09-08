@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{CODE}} — {{TITLE}} | PigBank</title>
+<meta name="robots" content="noindex">
+<script src="/safe-area.js?v=1"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:#0c0c0d}
+body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
+padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;
+background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
+.brand{position:relative;display:flex;align-items:center;gap:10px;margin-bottom:34px}
+.brand img{height:28px;width:auto;display:block}
+.box{position:relative;text-align:center;max-width:440px}
+.sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
+letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
+h2{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin-bottom:10px}
+p{color:rgba(255,255,255,.62);margin-bottom:28px}
+.acts{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 22px;border-radius:12px;
+font-weight:700;font-size:.9rem;text-decoration:none;border:1px solid transparent}
+.btn-primary{background:#FF2D8E;color:#fff}
+.btn-primary:hover{background:#FF5CA5}
+.btn-ghost{color:rgba(255,255,255,.92);border-color:rgba(255,255,255,.15)}
+.btn-ghost:hover{background:rgba(255,255,255,.06)}
+a:focus-visible,.btn:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style></head>
+<body>
+<a class="brand" href="/"><img src="/brand/logo.png" alt="PigBank"></a>
+<div class="box">
+  <img class="sticker" src="/brand/stickers/report.webp" alt="">
+  <div class="code">{{CODE}}</div>
+  <h2>{{TITLE}}</h2>
+  <p>{{MESSAGE}}</p>
+  <div class="acts">
+    <a class="btn btn-primary" href="/">← Página inicial</a>
+  </div>
+</div>
+</body></html>

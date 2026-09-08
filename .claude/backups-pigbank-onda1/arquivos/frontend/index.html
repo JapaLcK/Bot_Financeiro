@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PigBank · Seu assistente financeiro no WhatsApp</title>
+<meta name="description" content="Controle seu dinheiro direto no WhatsApp. Registre gastos, consulte saldo e acompanhe cartões em segundos com a IA da PigBank." />
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<meta name="theme-color" content="#0c0c0d" />
+<meta name="facebook-domain-verification" content="bkhplpcvt5kouph3e1b9y8jk8aiqsu" />
+<meta property="og:type" content="website" />
+<script>
+/* PWA instalada (start_url antiga "/"): entra pelo app, não pela landing —
+   /login pula direto pro /home quando a sessão está viva.
+   Exceção: ?site=1 é o usuário PEDINDO o site pelo menu da conta ("Ir para o
+   site"). Sem essa saída, o atalho virava um pulo de volta pro /home. */
+if (!/[?&]site=1(&|$)/.test(location.search) &&
+    ((window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true)) {
+  location.replace("/login");
+}
+</script>
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<style>
+  /* Planos: card único de entrada (R$ 9,90) — leva pra /precos escolher ciclo */
+  .plan-solo-wrap { display: flex; justify-content: center; padding: 10px 0 30px; }
+  .plan-solo {
+    position: relative; width: 100%; max-width: 480px;
+    background: linear-gradient(180deg, rgba(255,45,142,.12), var(--card));
+    border: 1px solid rgba(255,45,142,.4);
+    border-radius: var(--radius);
+    box-shadow: 0 24px 60px rgba(255,45,142,.16);
+    padding: 40px 34px 34px; text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .plan-solo-trial {
+    background: var(--neon); color: var(--neon-ink);
+    font-size: .62rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .plan-solo-from { color: var(--ink-2); font-size: 1rem; font-weight: 600; }
+  .plan-solo-amount { font-size: 3.2rem; font-weight: 850; letter-spacing: -.03em; line-height: 1.05; margin: 4px 0 2px; }
+  .plan-solo-amount span { font-size: 1.05rem; color: var(--ink-2); font-weight: 600; }
+  .plan-solo-feats { list-style: none; display: grid; gap: 11px; margin: 22px 0 24px; text-align: left; width: 100%; max-width: 330px; }
+  .plan-solo-feats li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-2); font-size: .9rem; line-height: 1.4; }
+  .plan-solo-feats li .tick { width: 20px; height: 20px; font-size: .7rem; margin-top: 1px; }
+  .plan-solo .btn-block { width: 100%; max-width: 330px; }
+  .plan-solo-choose { color: var(--ink-3); font-size: .82rem; margin-top: 14px; }
+  .plan-solo-choose b { color: var(--ink-2); font-weight: 700; }
+  @media (max-width: 560px) {
+    .plan-solo { padding: 32px 22px 26px; }
+    .plan-solo-amount { font-size: 2.6rem; }
+  }
+</style>
+<script src="/safe-area.js?v=1"></script>
+</head>
+<body class="rd">
+<div class="glow"></div>
+<div class="rd-grain" aria-hidden="true"></div>
+
+  <!-- ─── Nav ─────────────────────────────────────────────────────── -->
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+    <div class="nav-links">
+      <a href="#funcionalidades">Funcionalidades</a>
+      <a href="#como-funciona">Como funciona</a>
+      <a href="/precos">Planos</a>
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/agents">Agentes</a>
+      
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+
+    <!-- ─── Hero ──────────────────────────────────────────────────── -->
+    <section class="hero-grid">
+      <div class="hero-copy">
+        <div class="pill"><span class="tag-novo">NOVO</span> Seu assistente financeiro com IA no WhatsApp</div>
+        <h1 class="hero-title">A sua vida financeira,<br><span class="grad">resolvida no WhatsApp.</span></h1>
+        <p class="hero-sub">Registre gastos, acompanhe seu saldo e entenda sua vida financeira conversando com a IA da PigBank. Sem planilha, sem app pra baixar.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+          <a class="btn btn-outline btn-lg" href="#como-funciona">Ver como funciona</a>
+        </div>
+        <div class="trust">
+          <span><i class="dot"></i> Texto, áudio ou foto do comprovante</span>
+          <span><i class="dot"></i> Sem instalar nada</span>
+          <span><i class="dot"></i> Dados criptografados</span>
+        </div>
+      </div>
+
+      <!-- Visual: chat + resumo + mascote -->
+      <div class="hero-visual">
+        <img class="hero-mascot" src="/brand/mascot.webp" alt="Piggy" />
+
+        <div class="chat-card">
+          <div class="chat-head">
+            <img src="/brand/icon.png?v=1" alt="" /> <strong>PigBank</strong>
+            <span class="online"><i></i> online</span>
+          </div>
+          <div class="bubble user">Gastei R$ 50 no mercado</div>
+          <div class="bubble bot">
+            Entendi!<br>
+            Categoria: <b>Alimentação</b><br>
+            Total hoje: <b>R$ 50,00</b><br>
+            Saldo atual: <b>R$ 1.250,00</b><br>
+            Ótimo controle!
+          </div>
+        </div>
+
+        <div class="summary-card">
+          <div class="sum-head">
+            <span>Resumo do mês</span>
+            <span class="delta-up">+12% <small>vs mês passado</small></span>
+          </div>
+          <div class="sum-balance">Saldo atual<b>R$ 3.420,50</b></div>
+          <div class="sum-body">
+            <div class="donut-wrap">
+              <svg viewBox="0 0 100 100" width="112" height="112" aria-hidden="true">
+                <g transform="rotate(-90 50 50)" fill="none" stroke-width="15">
+                  <circle cx="50" cy="50" r="42" stroke="#FF2D8E" stroke-dasharray="109 155" stroke-dashoffset="0"></circle>
+                  <circle cx="50" cy="50" r="42" stroke="#2E7FE0" stroke-dasharray="64 200" stroke-dashoffset="-111"></circle>
+                  <circle cx="50" cy="50" r="42" stroke="#C6F11A" stroke-dasharray="40 224" stroke-dashoffset="-177"></circle>
+                  <circle cx="50" cy="50" r="42" stroke="#5a5a62" stroke-dasharray="43 221" stroke-dashoffset="-219"></circle>
+                </g>
+              </svg>
+            </div>
+            <ul class="donut-legend">
+              <li><i style="background:#FF2D8E"></i>Alimentação <b>42%</b></li>
+              <li><i style="background:#2E7FE0"></i>Transporte <b>25%</b></li>
+              <li><i style="background:#C6F11A"></i>Lazer <b>16%</b></li>
+              <li><i style="background:#5a5a62"></i>Outros <b>17%</b></li>
+            </ul>
+          </div>
+          <div class="sum-chart">
+            <svg viewBox="0 0 260 70" preserveAspectRatio="none" width="100%" height="64" aria-hidden="true">
+              <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="rgba(255,45,142,.35)"/><stop offset="1" stop-color="rgba(255,45,142,0)"/>
+              </linearGradient></defs>
+              <path d="M0,54 L40,48 L80,50 L120,38 L160,40 L200,24 L260,14 L260,70 L0,70 Z" fill="url(#lg)"/>
+              <path d="M0,54 L40,48 L80,50 L120,38 L160,40 L200,24 L260,14" fill="none" stroke="#FF2D8E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="chart-badge">+18%</span>
+            <div class="chart-months"><span>Jan</span><span>Fev</span><span>Mar</span><span>Abr</span><span>Mai</span><span>Jun</span><span>Jul</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Faixa de valor ────────────────────────────────────────── -->
+    <div class="value-strip" data-reveal>
+      <span class="value-chip"><i></i> Sem planilha</span>
+      <span class="value-chip"><i></i> Sem app pra baixar</span>
+      <span class="value-chip"><i></i> Registra em segundos</span>
+      <span class="value-chip"><i></i> Dados cifrados</span>
+      <span class="value-chip"><i></i> Cancela quando quiser</span>
+    </div>
+
+    <!-- ─── Funcionalidades ───────────────────────────────────────── -->
+    <section class="section" id="funcionalidades">
+      <div class="section-head" data-reveal>
+        <h2>O que a Piggy faz enquanto<br>você só conversa</h2>
+        <p>Você manda o gasto como mandaria pra um amigo. Ela categoriza, atualiza o saldo e guarda o histórico — sem planilha, sem app pra baixar.</p>
+      </div>
+
+      <div class="grid-3" data-reveal>
+        <div class="card feature-card">
+          <div class="icon-box"><i class="ph ph-chat-circle" aria-hidden="true"></i></div>
+          <h3>Registro por conversa</h3>
+          <p>Fale como você fala. A IA entende, categoriza e registra o gasto na hora, em segundos.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box neon"><i class="ph ph-tag" aria-hidden="true"></i></div>
+          <h3>Categorização automática</h3>
+          <p>Cada gasto cai na categoria certa sozinho. Você não precisa marcar nada manualmente.</p>
+        </div>
+        <div class="card feature-card">
+          <div class="icon-box"><i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
+          <h3>Caixinhas &amp; metas</h3>
+          <p>Separe dinheiro por objetivo e acompanhe o progresso de cada meta que você criar.</p>
+        </div>
+      </div>
+
+      <div class="hiw-cta" data-reveal>
+        <p>Cartões, alertas e o resto: cada um com a frase que aciona.</p>
+        <a class="btn btn-outline" href="/funcionalidades">Ver todas as funcionalidades <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+      </div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Como funciona ─────────────────────────────────────────── -->
+    <section class="section" id="como-funciona">
+      <div class="section-head" data-reveal>
+        <h2>De “gastei 32 no almoço”<br>até o saldo atualizado</h2>
+        <p>Três passos, um minuto, dentro de uma conversa que você já usa todo dia.</p>
+      </div>
+
+      <div class="hiw-rail">
+
+        <article class="hiw-card is-open" tabindex="0" aria-current="step">
+          <div class="hiw-head"><span class="hiw-num">1</span><h3>Conexão</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-panel">
+                <div class="hiw-panel-top"><span><span class="hiw-dot"></span>WhatsApp</span><span>Piggy</span></div>
+                <div class="hiw-qr">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.23 8.25-8.23 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 0 1 2.41 5.82c0 4.54-3.7 8.23-8.24 8.23Z"/></svg>
+                  <div><b>+55 11 91234-5678</b><span>salve o número e mande um “oi”</span></div>
+                </div>
+                <div class="hiw-chat">
+                  <div class="hiw-msg out hiw-d1">oi<time>09:12</time></div>
+                  <div class="hiw-msg in hiw-d2">Oi! Sou o Piggy 🐷 Me conta seus gastos como você contaria pra um amigo — texto, áudio ou foto do comprovante.<time>09:12</time></div>
+                  <div class="hiw-msg out hiw-d3">gastei 32 no almoço<time>09:12</time></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>WhatsApp conectado</b><span>abrindo o próximo passo…</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>salve o número, mande um “oi”</span>
+            </div>
+          </div>
+          <div class="hiw-foot">
+            <h4>Sem app, sem cadastro chato</h4>
+          </div>
+        </article>
+
+        <article class="hiw-card is-idle" tabindex="0">
+          <div class="hiw-head"><span class="hiw-num">2</span><h3>Resposta</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-panel">
+                <div class="hiw-panel-top"><span><span class="hiw-dot"></span>Piggy responde</span><span>0,8 s</span></div>
+                <div class="hiw-chat">
+                  <div class="hiw-msg out hiw-d1">gastei 32 no almoço<time>09:12</time></div>
+                  <div class="hiw-msg in hiw-d2">Anotado! 🐷<time>09:12</time></div>
+                </div>
+                <div class="hiw-receipt">
+                  <div class="hiw-row"><span class="hiw-k">Almoço</span><span class="hiw-v">R$ 32,00</span></div>
+                  <div class="hiw-row"><span class="hiw-k">Categoria</span><span class="hiw-tag">Alimentação</span></div>
+                  <div class="hiw-row"><span class="hiw-k">Restam hoje</span><span class="hiw-v" style="color:var(--neon)">R$ 18,00</span></div>
+                </div>
+                <div class="hiw-chat" style="margin-top:12px">
+                  <div class="hiw-msg in hiw-d4">Esse é o 4º almoço fora essa semana — R$ 121 no total. Quer que eu te avise quando passar de R$ 150?<time>09:12</time></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>Gasto registrado</b><span>abrindo o próximo passo…</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>conte o gasto, ela anota</span>
+            </div>
+          </div>
+          <div class="hiw-foot">
+            <h4>Categorizado antes de você guardar o celular</h4>
+          </div>
+        </article>
+
+        <article class="hiw-card is-idle" tabindex="0">
+          <div class="hiw-head"><span class="hiw-num">3</span><h3>Painel</h3></div>
+          <div class="hiw-stage">
+            <div class="hiw-state hiw-demo">
+              <div class="hiw-charts">
+                <div class="hiw-kpis">
+                  <div class="hiw-kpi"><span>Gasto do mês</span><b class="neg">R$ 2.148</b></div>
+                  <div class="hiw-kpi"><span>Sobra prevista</span><b class="pos">R$ 612</b></div>
+                </div>
+                <div class="hiw-panel">
+                  <div class="hiw-panel-top"><span>Para onde foi</span><span>Agosto</span></div>
+                  <div class="hiw-donut">
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                      <circle cx="50" cy="50" r="42" stroke="#FF2D8E" stroke-dasharray="109 155"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#2E7FE0" stroke-dasharray="64 200" stroke-dashoffset="-111"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#C6F11A" stroke-dasharray="40 224" stroke-dashoffset="-177"></circle>
+                      <circle cx="50" cy="50" r="42" stroke="#5a5a62" stroke-dasharray="43 221" stroke-dashoffset="-219"></circle>
+                    </svg>
+                    <ul class="hiw-legend">
+                      <li><i style="background:#FF2D8E"></i>Alimentação <b>42%</b></li>
+                      <li><i style="background:#2E7FE0"></i>Transporte <b>25%</b></li>
+                      <li><i style="background:#C6F11A"></i>Lazer <b>16%</b></li>
+                      <li><i style="background:#5a5a62"></i>Outros <b>17%</b></li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="hiw-panel hiw-spark">
+                  <div class="hiw-panel-top"><span>Gasto por mês</span><span>−18% vs. março</span></div>
+                  <svg viewBox="0 0 280 70" preserveAspectRatio="none" aria-hidden="true">
+                    <line class="hiw-grid" x1="0" y1="18" x2="280" y2="18"></line>
+                    <line class="hiw-grid" x1="0" y1="44" x2="280" y2="44"></line>
+                    <path class="hiw-line" d="M4,58 L50,52 L96,54 L142,40 L188,42 L234,24 L276,14"></path>
+                    <circle class="hiw-cap" cx="276" cy="14" r="4"></circle>
+                  </svg>
+                  <div class="hiw-months"><span>MAR</span><span>ABR</span><span>MAI</span><span>JUN</span><span>JUL</span><span>AGO</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="hiw-state hiw-done">
+              <div class="hiw-tick"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9.5 18 20 6.5"/></svg></div>
+              <b>Painel atualizado</b><span>em tempo real</span>
+            </div>
+            <div class="hiw-state hiw-idle">
+              <div class="hiw-ring"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/></svg></div>
+              <span>gráficos e saldo em tempo real</span>
+            </div>
+          </div>
+          <div class="hiw-foot">
+            <h4>O mês inteiro, sem você abrir nada</h4>
+          </div>
+        </article>
+
+      </div>
+
+    </section>
+
+    <!-- ─── IA / Tecnologia ───────────────────────────────────────── -->
+    <section class="tech-split">
+      <div class="tech-copy" data-reveal>
+        <h2>Ela entende português<br>do jeito que você escreve</h2>
+        <ul class="tech-list">
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização que aprende com você</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard atualizado em tempo real</li>
+          <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Tudo no WhatsApp, zero apps pra baixar</li>
+        </ul>
+      </div>
+      <!-- Prova do título ao lado: o vocabulário real que a Piggy aceita.
+           Substituiu um cubo wireframe com as letras "AI" — decoração que não
+           explicava nada e é o visual mais genérico possível de IA. As oito
+           frases foram passadas pelo classify(..., allow_ai=False) e todas
+           resolvem SEM IA. Seis estão literais no catálogo
+           (core/commands_catalog.py, espelhado em /comandos); as outras duas —
+           "gastei 32 no almoço" e "quanto sobrou" — saem do
+           core/intent_classifier.py. Não acrescente frase aqui sem rodar o
+           classificador nela: "quanto sobrou esse mês?" já esteve aqui e dava
+           out_of_scope 0.0, porque o :70 é dicionário de match EXATO. -->
+      <div class="tech-visual" data-reveal>
+        <div class="phrasebook" role="list" aria-label="Exemplos de mensagens que a Piggy entende">
+          <span class="phrase" role="listitem">gastei 32 no almoço</span>
+          <span class="phrase" role="listitem">recebi 2000 de salário</span>
+          <span class="phrase" role="listitem">parcelei 1200 em 6x no Nubank</span>
+          <span class="phrase" role="listitem">quanto sobrou</span>
+          <span class="phrase" role="listitem">paguei a fatura do Nubank</span>
+          <span class="phrase" role="listitem">deposita 200 na caixinha viagem</span>
+          <span class="phrase" role="listitem">últimos lançamentos</span>
+          <span class="phrase" role="listitem">quanto tenho de limite no Nubank</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Agentes (faixa curta; a página inteira é /agents) ─────── -->
+    <section class="section" id="agentes">
+      <div class="section-head" data-reveal>
+        <h2>E tem gente trabalhando<br>quando você não está falando</h2>
+        <p>Agentes que rodam nos bastidores da sua conta e só te chamam quando têm algo pra dizer. Três dos oito:</p>
+      </div>
+
+      <div class="grid-3" data-reveal>
+        <article class="card agent-mini">
+          <img src="/brand/agents/xerife.png?v=1" alt="" width="265" height="433" loading="lazy" />
+          <h3>Xerife</h3>
+          <p>Fica de olho no seu padrão de gastos e dá o alerta quando algo foge da curva, ou quando uma categoria estoura o limite que você definiu.</p>
+        </article>
+        <article class="card agent-mini">
+          <img src="/brand/agents/carteiro.png?v=1" alt="" width="290" height="416" loading="lazy" />
+          <h3>Carteiro</h3>
+          <p>Não deixa boleto vencer. Avisa antes do vencimento, direto no seu feed, pra você nunca mais pagar juros por esquecimento.</p>
+        </article>
+        <article class="card agent-mini">
+          <img src="/brand/agents/detetive.png?v=1" alt="" width="305" height="439" loading="lazy" />
+          <h3>Detetive</h3>
+          <p>Fareja cobranças repetidas que parecem aquela assinatura esquecida, a que você paga todo mês e nem lembra mais que existe.</p>
+        </article>
+      </div>
+
+      <div class="hiw-cta" data-reveal>
+        <p>Os outros cinco: resumo do mês, metas, dinheiro parado, carteira de ações — e o Aviador, ainda em breve.</p>
+        <a class="btn btn-outline" href="/agents">Conhecer os agentes <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+      </div>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── Preços ────────────────────────────────────────────────── -->
+    <section class="section" id="precos">
+      <div class="section-head center" data-reveal>
+        <h2>Escolha seu <span class="grad">PigBank+</span></h2>
+        <p>30 dias grátis pra testar. Cancele quando quiser, sem letras miúdas.</p>
+      </div>
+
+      <div class="plan-solo-wrap" data-reveal>
+        <article class="plan-solo">
+          <span class="plan-solo-trial">30 dias grátis</span>
+          <div class="plan-solo-from">Acesse o PigBank por apenas</div>
+          <div class="plan-solo-amount">R$ 9,90<span>/mês</span></div>
+          <ul class="plan-solo-feats">
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Caixinhas, metas e cartões ilimitados</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Categorização automática por IA</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Dashboard em tempo real</li>
+            <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA: converse sobre suas finanças</li>
+          </ul>
+          <a class="btn btn-primary btn-lg btn-block" href="/precos">Ver planos <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+          <p class="plan-solo-choose">Escolha <b>mensal</b> ou <b>anual</b> na próxima tela.</p>
+        </article>
+      </div>
+
+      <p class="plans-note"><i class="ph ph-confetti" aria-hidden="true"></i> 30 dias grátis com cartão; a primeira cobrança só acontece depois do trial. Cancele quando quiser pelo dashboard antes do fim do trial, sem ser cobrado. Pagamentos processados pela Stripe. A PigBank nunca vê os dados do seu cartão.</p>
+    </section>
+
+    <div class="sec-sep"></div>
+
+    <!-- ─── FAQ ───────────────────────────────────────────────────── -->
+    <section class="section" id="faq">
+      <div class="section-head center" data-reveal>
+        <h2>Perguntas frequentes</h2>
+        <p>O que a galera mais quer saber antes de começar com a Piggy.</p>
+      </div>
+
+      <div class="faq" data-reveal>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Preciso baixar algum aplicativo? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Não. Tudo acontece no seu WhatsApp: é só conversar com a Piggy. O dashboard abre no navegador, sem instalar nada.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Como eu registro um gasto? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Você só fala como falaria com um amigo: "gastei 50 no mercado". A IA entende, categoriza e salva na hora, em segundos.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Meus dados estão seguros? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Sim. Seus dados sensíveis são cifrados e você fica no controle das suas informações, sempre. Nada é vendido nem compartilhado.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">A PigBank mexe no meu dinheiro ou tem a senha do meu banco? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Não. A PigBank não é banco nem corretora: <strong>nunca movimenta, transfere ou guarda</strong> o seu dinheiro. Se você conectar um banco, é via Open Finance oficial, <strong>só de leitura</strong> e autorizado por você: a gente nunca pede sua senha, e você revoga o acesso quando quiser.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Tem período grátis? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Tem 30 dias grátis pra testar tudo. A primeira cobrança só acontece depois do trial, e você pode cancelar antes sem pagar nada.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Como funciona o pagamento? <span class="chev">+</span></button>
+          <div class="faq-a"><p>O pagamento é processado <strong>100% pela Stripe</strong>, a mesma usada por gigantes do mundo todo. A PigBank <strong>nunca vê nem armazena os dados do seu cartão</strong>.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">Posso cancelar quando quiser? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Pode, pelo próprio dashboard, sem letra miúda e sem falar com ninguém. Cancelou, não é mais cobrado.</p></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" type="button" aria-expanded="false">A Piggy entende português do dia a dia? <span class="chev">+</span></button>
+          <div class="faq-a"><p>Entende. Você não precisa decorar comando nenhum: fala do seu jeito e a IA faz o resto.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── CTA final ─────────────────────────────────────────────── -->
+    <div class="cta-band" data-reveal>
+      <h2>Manda o primeiro gasto pra Piggy</h2>
+      <p>Você conta o que gastou. Ela cuida do resto — e o painel já abre com isso dentro.</p>
+      <a class="btn btn-primary btn-lg" href="/cadastro">Começar agora <i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+    </div>
+
+  </div>
+
+  <!-- ─── Footer ──────────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=1" alt="" /> <span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="#funcionalidades">Funcionalidades</a>
+          <a href="#como-funciona">Como funciona</a>
+          <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
+          
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
+  </footer>
+
+  <!-- Reveal on scroll + FAQ acordeão (progressive enhancement) -->
+  <script>
+  (function () {
+    // FAQ acordeão
+    document.querySelectorAll(".faq-q").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var item = btn.closest(".faq-item");
+        var a = item.querySelector(".faq-a");
+        var open = item.classList.toggle("open");
+        a.style.maxHeight = open ? a.scrollHeight + "px" : "0";
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+    });
+
+    // Reveal on scroll — só ativa se houver suporte e sem reduced-motion.
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var els = document.querySelectorAll("[data-reveal]");
+    if (!("IntersectionObserver" in window) || reduce) return;  // sem JS/observer: conteúdo já visível
+    els.forEach(function (el) { el.classList.add("reveal"); });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+  </script>
+  <!-- Redesign: borda-holofote que segue o cursor nos cards -->
+  <script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var cards = document.querySelectorAll(".rd .card, .rd .plan-solo");
+    cards.forEach(function (c) {
+      c.addEventListener("pointermove", function (e) {
+        var r = c.getBoundingClientRect();
+        c.style.setProperty("--mx", (e.clientX - r.left) + "px");
+        c.style.setProperty("--my", (e.clientY - r.top) + "px");
+      });
+    });
+  })();
+  </script>
+  <!-- Como funciona: um card aberto por vez; hover/foco/clique assume o controle -->
+  <script>
+  (function () {
+    var rail = document.querySelector(".hiw-rail");
+    var cards = rail ? rail.querySelectorAll(".hiw-card") : [];
+    if (!cards.length) return;
+
+    var active = 0, timer = null, comecou = false, tocado = false, dentro = false;
+
+    function paint() {
+      for (var i = 0; i < cards.length; i++) {
+        var aberto = i === active;
+        cards[i].classList.toggle("is-open", aberto);
+        cards[i].classList.toggle("is-done", i < active);
+        cards[i].classList.toggle("is-idle", i > active);
+        if (aberto) cards[i].setAttribute("aria-current", "step");
+        else cards[i].removeAttribute("aria-current");
+      }
+    }
+
+    // Autoplay só onde dá para parar antes: em touch não há hover, o conteúdo
+    // trocaria sozinho sob o dedo. Reduced-motion também fica parado no card 1.
+    var mm = window.matchMedia;
+    var autoplay = !!mm && !mm("(prefers-reduced-motion: reduce)").matches
+                        && mm("(hover: hover) and (pointer: fine)").matches;
+
+    /** O ciclo roda só depois de o trilho aparecer, com ninguém tendo decidido
+        por clique/foco e sem o mouse em cima. Todo evento reavalia isto. */
+    function sincronizar() {
+      var rodar = comecou && autoplay && !tocado && !dentro;
+      if (rodar && !timer) timer = setInterval(function () { active = (active + 1) % cards.length; paint(); }, 6000);
+      if (!rodar && timer) { clearInterval(timer); timer = null; }
+    }
+
+    /** mousemove só PAUSA o ciclo; clique e foco são deliberados e param de vez. */
+    function open(i) {
+      return function (e) {
+        rail.classList.remove("is-esperando");   // quem interagiu já viu o trilho
+        if (e.type === "mousemove") dentro = true; else tocado = true;
+        if (i !== active) { active = i; paint(); }   // mousemove chega dezenas de vezes por segundo
+        sincronizar();
+      };
+    }
+
+    for (var i = 0; i < cards.length; i++) {
+      var go = open(i);
+      // mousemove, não mouseenter: rolar a página com o cursor PARADO trazia um
+      // card para debaixo dele e matava o autoplay sem ninguém ter interagido.
+      // O preço: com o cursor imóvel e o trilho subindo por baixo dele o Chrome
+      // só emite mouseenter, então o ciclo segue trocando os cards até o
+      // primeiro pixel de movimento — "mouse em cima pausa" só vale depois disso.
+      cards[i].addEventListener("mousemove", go);
+      cards[i].addEventListener("focus", go);
+      cards[i].addEventListener("click", go);
+    }
+    // um handler no trilho, não três nos cards: sair de um card para o vizinho
+    // não é sair do trilho. Atravessar a caminho do CTA vira pausa, não morte.
+    // Não há blur/focusout equivalente DE PROPÓSITO: tabular até um card é ato
+    // deliberado (marca tocado) e não se desfaz ao sair; mover o mouse não é.
+    rail.addEventListener("mouseleave", function () { dentro = false; sincronizar(); });
+
+    /** Solta as animações da demo e libera o ciclo — uma vez só, ao aparecer. */
+    function comecar() {
+      rail.classList.remove("is-esperando");
+      comecou = true;
+      sincronizar();
+    }
+
+    paint();
+    // O trilho começa quando entra na tela, não no load: senão o chat do card 1
+    // termina de animar bem antes da dobra. Sem observer, começa na hora.
+    if ("IntersectionObserver" in window) {
+      rail.classList.add("is-esperando");
+      var io = new IntersectionObserver(function (entries, obs) {
+        if (!entries[0].isIntersecting) return;
+        obs.unobserve(rail);
+        comecar();
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+      io.observe(rail);
+    } else {
+      comecar();
+    }
+  })();
+  </script>
+  <script src="/nav-auth.js?v=7" defer></script>
+</body>
+</html>

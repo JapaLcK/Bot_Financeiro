@@ -1,0 +1,708 @@
+diff --git a/frontend/cadastro.html b/frontend/cadastro.html
+index 2f1c4c4..461faed 100644
+--- a/frontend/cadastro.html
++++ b/frontend/cadastro.html
+@@ -24,12 +24,6 @@
+ 
+   <nav class="nav">
+     <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+-    <div class="nav-links">
+-      <a href="/funcionalidades">Funcionalidades</a>
+-      <a href="/como-funciona">Como funciona</a>
+-      <a href="/precos">Planos</a>
+-      
+-    </div>
+     <div class="nav-right">
+       <a class="link-entrar" href="/login">Entrar</a>
+     </div>
+@@ -42,7 +36,7 @@
+       <!-- Passo 1: cadastro -->
+       <form id="form-register" onsubmit="doRegister(event)" novalidate>
+         <h1>Crie sua conta</h1>
+-        <p class="auth-sub">Comece sua jornada financeira agora.</p>
++        <p class="auth-sub">Leva menos de um minuto. Depois é só mandar o primeiro gasto pra Piggy no WhatsApp.</p>
+         <div id="reg-error" class="auth-error"></div>
+         <div class="field">
+           <label for="reg-name">Nome completo</label>
+diff --git a/frontend/dashboard.css b/frontend/dashboard.css
+index 8488439..a2b89bd 100644
+--- a/frontend/dashboard.css
++++ b/frontend/dashboard.css
+@@ -5,17 +5,23 @@
+   --bg-page:       #111111;
+   --glass-bg:      rgba(255,255,255,0.07);
+   --glass-border:  rgba(255,255,255,0.13);
+-  --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
+-  --radius:        22px;
+-  --green:  #00F078; --neon:   #C6F11A; --red:    #FF2D2D; --blue:   #FF80B8;
++  --glass-shadow:  0 4px 16px rgba(0,0,0,0.28);
++  --radius:        16px;
++  /* --red clareado de #FF2D2D (4,31:1) para 5,2:1 sobre os cards: era o último
++     texto abaixo do AA depois da correção dos tokens de --text-*. */
++  --green:  #00F078; --neon:   #C6F11A; --red:    #FF5A5A; --blue:   #FF80B8;
+   --purple: #FF2D8E; --yellow: #fbbf24;
+   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
++  /* Três degraus de texto, todos ≥ 4,5:1 (WCAG AA) sobre --bg-page e sobre
++     --glass-bg. O --text-3 era .28 → 2,5:1: reprovava em 145 usos do produto,
++     porque é o token oficial de "rótulo discreto" (62 usos só neste arquivo).
++     Discreto agora é .50; a hierarquia vem do degrau entre eles, não de sumir. */
+   --text:   rgba(255,255,255,0.92);
+-  --text-2: rgba(255,255,255,0.52);
+-  --text-3: rgba(255,255,255,0.28);
++  --text-2: rgba(255,255,255,0.66);
++  --text-3: rgba(255,255,255,0.50);
+   --div:    rgba(255,255,255,0.08);
+   --ease:   cubic-bezier(.4,0,.2,1);
+-  --orb-opacity: .42;
++  --orb-opacity: .16;
+ }
+ 
+ /* ─── Light mode override ──────────────────────────────────────────── */
+@@ -26,7 +32,7 @@ body.light {
+   --glass-shadow:  0 6px 20px rgba(15,23,42,0.07);
+   --text:   #0f172a;
+   --text-2: #475569;
+-  --text-3: #94a3b8;
++  --text-3: #64748b;   /* era #94a3b8 → 2,9:1 sobre --bg-page; slate-500 dá 4,8:1 */
+   --div:    rgba(15,23,42,0.08);
+   --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
+   --orb-opacity: .12;
+@@ -1018,17 +1024,16 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
+ @media(max-width:520px) { .ov-stats{grid-template-columns:1fr} }
+ .ov-stat {
+   position:relative; background:var(--glass-bg);
+-  backdrop-filter:blur(24px) saturate(160%); -webkit-backdrop-filter:blur(24px) saturate(160%);
+   border:1px solid var(--glass-border); border-radius:var(--radius); padding:18px 18px 16px;
+-  box-shadow:var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,.1);
+   animation:fadeIn .4s var(--ease) both; overflow:hidden;
+ }
+ .ov-stat .ov-ico {
+-  position:absolute; top:16px; right:16px; width:34px; height:34px; border-radius:10px;
+-  display:grid; place-items:center;
+-  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple);
++  position:absolute; top:16px; right:16px; width:20px; height:20px;
++  display:grid; place-items:center; color:var(--text-3);
+ }
+-.ov-stat .ov-ico.neon { background:rgba(198,241,26,.12); border-color:rgba(198,241,26,.28); color:var(--neon); }
++/* .neon existe no HTML de alguns KPIs; sem a caixa, ele deixa de pintar um
++   quadrado e passa a ser só uma dica de tom no próprio glifo. */
++.ov-stat .ov-ico.neon { color:var(--text-3); }
+ .ov-stat .ov-ico svg { width:18px; height:18px; }
+ .ov-lbl { font-size:.68rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3); padding-right:40px; }
+ .ov-val { font-size:1.55rem; font-weight:800; letter-spacing:-.02em; margin:12px 0 5px; font-variant-numeric:tabular-nums; }
+@@ -2222,8 +2227,8 @@ html.pb-app #piggy-fab { touch-action: none; }
+   font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
+   border: 1px solid transparent; font-family: inherit;
+ }
+-.ag-btn-on { background: var(--purple); color: #fff; }
+-.ag-btn-on:hover { filter: brightness(1.08); }
++.ag-btn-on { background: transparent; border-color: var(--purple); color: var(--purple); }
++.ag-btn-on:hover { background: rgba(255,45,142,.12); }
+ .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
+ .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
+ .ag-btn-noenergy { background: var(--glass-bg); color: var(--text-3); border-color: var(--glass-border); cursor: not-allowed; }
+@@ -2269,3 +2274,69 @@ body.balance-hidden #bill-detail-summary .v {
+   user-select: none;
+   transition: filter .15s ease;
+ }
++
++/* ══════════════════════════════════════════════════════════════════════
++   Acessibilidade — base do arquivo inteiro. Fica no fim de propósito:
++   sem !important, ganha por ordem de cascata de qualquer regra acima.
++   ══════════════════════════════════════════════════════════════════════ */
++
++/* Foco visível padrão. Havia 21 regras de :focus-visible espalhadas, uma por
++   componente — quem não estava na lista ficava sem indicador nenhum. Isto é o
++   piso; as regras específicas continuam ganhando por especificidade. */
++:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
++  outline: 2px solid var(--purple);
++  outline-offset: 2px;
++  border-radius: 4px;
++}
++
++/* prefers-reduced-motion. Antes deste bloco o arquivo tinha UMA regra
++   (.loading-sticker) para 21 `animation:` e 75 `transition:` declarados. */
++@media (prefers-reduced-motion: reduce) {
++  *, *::before, *::after {
++    animation-duration: .01ms !important;
++    animation-iteration-count: 1 !important;
++    transition-duration: .01ms !important;
++    scroll-behavior: auto !important;
++  }
++  html { scroll-behavior: auto; }
++  .orb, .loading-sticker { animation: none !important; }
++}
++
++/* ══════════════════════════════════════════════════════════════════════
++   Header no mobile — medido em 375×812: as três linhas do topo somavam
++   ~320px, 39% da tela, antes de um único número aparecer. Importar OFX e
++   Exportar são tarefas de desktop ocupando o espaço mais caro do celular:
++   viram ícone (o aria-label/title carrega o nome), e o status vira só o
++   ponto. A ação primária "+ Lançar" continua sendo a única em rosa.
++   ══════════════════════════════════════════════════════════════════════ */
++@media (max-width: 720px) {
++  .header-right .hbtn-label { display: none; }
++  .header-right #status span { display: none; }
++  .header-right #status { padding: 0; }
++  /* alvo de toque 44×44 mesmo sem rótulo */
++  .header-right .hbtn:not(.user-menu-btn) {
++    min-width: 44px; min-height: 44px;
++    justify-content: center; padding: 0 10px;
++  }
++}
++
++/* Superfície de dado é opaca. Os cards de KPI usavam --glass-bg (branco a 7%),
++   então os orbs magenta do fundo atravessavam e tingiam o número — no mobile a
++   coluna inteira lia rosa. Rosa é ação e marca, não superfície de leitura. */
++.ov-stat { background: #17171b; }
++body.light .ov-stat { background: #fff; }
++
++/* O FAB é fixo e não reservava espaço abaixo de si: cobria conteúdo em três
++   telas (toast do dashboard vazio, última linha de "Top estabelecimentos",
++   canto do card de Receitas no mobile). O padding devolve a faixa. */
++body.has-sidenav .dash-main,
++#dashboard-content { padding-bottom: 96px; }
++
++/* Estado vazio dentro do quadro de um gráfico — mesmo par (sticker + frase) dos
++   vazios de Orçamentos/Cartões, só que ocupando a altura que o canvas ocuparia. */
++.chart-empty {
++  display: flex; flex-direction: column; align-items: center; justify-content: center;
++  gap: 10px; min-height: 180px; text-align: center; padding: 20px;
++}
++.chart-empty .empty-sticker { width: 84px; height: auto; opacity: .9; }
++.chart-empty-txt { color: var(--text-2); font-size: .88rem; max-width: 34ch; line-height: 1.5; }
+diff --git a/frontend/dashboard.html b/frontend/dashboard.html
+index faaa437..99f4506 100644
+--- a/frontend/dashboard.html
++++ b/frontend/dashboard.html
+@@ -130,10 +130,10 @@
+         <span id="status-text">Conectando…</span>
+       </div>
+       <button class="hbtn" id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"><i class="ph ph-eye" aria-hidden="true"></i></button>
+-      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
+-      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
++      <button class="hbtn" id="refresh-btn" title="Atualizar" aria-label="Atualizar" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> <span class="hbtn-label">Atualizar</span></button>
++      <button class="hbtn" data-pro-feature="ofx_import" title="Importar OFX" aria-label="Importar OFX" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> <span class="hbtn-label">Importar OFX</span></button>
+       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
+-      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
++      <button class="hbtn" data-pro-feature="export" title="Exportar" aria-label="Exportar" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> <span class="hbtn-label">Exportar</span></button>
+       <div class="user-menu" id="user-menu">
+         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
+           <span class="user-menu-main">
+diff --git a/frontend/dashboard.js b/frontend/dashboard.js
+index 7fb61be..4e2b5c4 100644
+--- a/frontend/dashboard.js
++++ b/frontend/dashboard.js
+@@ -693,6 +693,15 @@ function _fmtBRL(n) {
+   return "R$ " + Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+ }
+ 
++/* Cor de um valor monetário pelo que ele significa, não pelo campo em que está.
++   Verde = entrada/positivo, vermelho = saída/negativo, neutro quando NÃO HÁ
++   direção — que é o caso do zero. Pintar zero de vermelho ou verde afirma um
++   movimento que não aconteceu: a tela de Cartões abria com quatro zeros em
++   quatro cores, e o olho lia alerta onde não havia nada. */
++function _toneMoney(v, dir) {
++  return Number(v) ? (dir === "in" ? "var(--green)" : "var(--red)") : "var(--text)";
++}
++
+ function _fmtDateBR(iso) {
+   if (!iso) return "—";
+   try {
+@@ -822,13 +831,13 @@ function renderCardsView(cards) {
+     </div>
+     <div class="stat-tile" style="animation-delay:60ms">
+       <div class="stat-label">Usado este mês</div>
+-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(usedSum)}</div>
+-      <div class="stat-delta down">${pct.toFixed(1).replace(".", ",")}% do limite</div>
++      <div class="stat-value" style="color:${_toneMoney(usedSum, "out")}">${_fmtBRL(usedSum)}</div>
++      <div class="stat-delta${usedSum ? " down" : ""}">${pct.toFixed(1).replace(".", ",")}% do limite</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:120ms">
+       <div class="stat-label">Disponível agora</div>
+-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(availSum)}</div>
+-      <div class="stat-delta up">${availPct.toFixed(1).replace(".", ",")}% livre</div>
++      <div class="stat-value" style="color:${_toneMoney(availSum, "in")}">${_fmtBRL(availSum)}</div>
++      <div class="stat-delta${availSum ? " up" : ""}">${availPct.toFixed(1).replace(".", ",")}% livre</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:180ms">
+       <div class="stat-label">Fatura aberta total</div>
+@@ -1320,7 +1329,7 @@ function renderInstallmentsView(groups) {
+       </div>
+       <div class="stat-tile" style="animation-delay:60ms">
+         <div class="stat-label">Total quitado</div>
+-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
++        <div class="stat-value" style="color:${_toneMoney(totalPago, "in")}">${_fmtBRL(totalPago)}</div>
+         <div class="stat-delta" style="color:var(--text-3)">soma de tudo que já foi pago</div>
+       </div>
+       <div class="stat-tile" style="animation-delay:120ms">
+@@ -1343,7 +1352,7 @@ function renderInstallmentsView(groups) {
+       </div>
+       <div class="stat-tile" style="animation-delay:60ms">
+         <div class="stat-label">Total devido</div>
+-        <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalDevido)}</div>
++        <div class="stat-value" style="color:${_toneMoney(totalDevido, "out")}">${_fmtBRL(totalDevido)}</div>
+         <div class="stat-delta" style="color:var(--text-3)">${nParcelasFuturas} parcela${nParcelasFuturas === 1 ? "" : "s"} futura${nParcelasFuturas === 1 ? "" : "s"}</div>
+       </div>
+       <div class="stat-tile" style="animation-delay:120ms">
+@@ -1353,7 +1362,7 @@ function renderInstallmentsView(groups) {
+       </div>
+       <div class="stat-tile" style="animation-delay:180ms">
+         <div class="stat-label">Já pago</div>
+-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
++        <div class="stat-value" style="color:${_toneMoney(totalPago, "in")}">${_fmtBRL(totalPago)}</div>
+         <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
+       </div>
+     `;
+@@ -2554,7 +2563,7 @@ function _renderGoalsView(goals) {
+     </div>
+     <div class="stat-tile" style="animation-delay:60ms">
+       <div class="stat-label">Total guardado</div>
+-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalSaved)}</div>
++      <div class="stat-value" style="color:${_toneMoney(totalSaved, "in")}">${_fmtBRL(totalSaved)}</div>
+       <div class="stat-delta" style="color:var(--text-3)">em ${list.length} caixinha${list.length === 1 ? "" : "s"}</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:120ms">
+@@ -3348,7 +3357,7 @@ function _renderFixedView(items) {
+   stats.innerHTML = `
+     <div class="stat-tile" style="animation-delay:0ms">
+       <div class="stat-label">Total mensal</div>
+-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(total)}</div>
++      <div class="stat-value" style="color:${_toneMoney(total, "out")}">${_fmtBRL(total)}</div>
+       <div class="stat-delta" style="color:var(--text-3)">${renderPct != null ? renderPct + "% da renda do mês" : active.length + " ativos"}</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:60ms">
+@@ -4152,7 +4161,7 @@ function _renderBillsView(bills) {
+ 
+   if (statsEl) statsEl.innerHTML = `
+     <div class="stat-tile"><div class="stat-label">Em aberto</div>
+-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalPend)}</div>
++      <div class="stat-value" style="color:${_toneMoney(totalPend, "out")}">${_fmtBRL(totalPend)}</div>
+       <div class="stat-delta" style="color:var(--text-3)">${pending.length} boleto(s)</div></div>
+     <div class="stat-tile"><div class="stat-label">Próx. 7 dias</div>
+       <div class="stat-value">${_fmtBRL(sum(wk))}</div>
+@@ -4622,7 +4631,7 @@ function _renderRecurringIncomeView(items) {
+   stats.innerHTML = `
+     <div class="stat-tile" style="animation-delay:0ms">
+       <div class="stat-label">Total mensal</div>
+-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(total)}</div>
++      <div class="stat-value" style="color:${_toneMoney(total, "in")}">${_fmtBRL(total)}</div>
+       <div class="stat-delta" style="color:var(--text-3)">${active.length} recorrente${active.length === 1 ? "" : "s"}</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:60ms">
+@@ -5123,7 +5132,7 @@ function renderAnalyticsKPIs(k, months) {
+     </div>
+     <div class="stat-tile">
+       <div class="stat-label">Receita média</div>
+-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(avgIncome)}</div>
++      <div class="stat-value" style="color:${_toneMoney(avgIncome, "in")}">${_fmtBRL(avgIncome)}</div>
+       <div class="stat-delta ${dIncome.cls}">${dIncome.text}</div>
+     </div>
+     <div class="stat-tile">
+@@ -9400,6 +9409,10 @@ function buildCatChart(cats) {
+   const data   = cats.map(c => c.total);
+   const _pal = catColors();
+   const colors = cats.map((_, i) => _pal[i % _pal.length]);
++  if (_chartEmptyState(el, data, "Sem despesas categorizadas neste mês.")) {
++    if (chartCat) { chartCat.destroy(); chartCat = null; }
++    return;
++  }
+   if (chartCat) chartCat.destroy();
+   chartCat = new Chart(el, {
+     type:"doughnut",
+@@ -9431,6 +9444,38 @@ function computeDailyFromLaunches(launches, year, month) {
+   return Object.entries(result).map(([day, total]) => ({ day: parseInt(day), total }));
+ }
+ 
++/* Gráfico sem dado nenhum vira estado vazio, não gráfico zerado.
++   Uma linha reta no eixo zero com o mês inteiro rotulado no eixo X PARECE um
++   gráfico com dados — o usuário lê "meus gastos foram planos", não "não há o
++   que mostrar". Mesma coisa nas barras de receita×despesa com seis meses em R$0.
++   Reaproveita o par .empty + sticker do Piggy que Orçamentos, Cartões e
++   Caixinhas já usam; nada de vocabulário novo de estado vazio.
++   Devolve true quando assumiu a tela (o chamador retorna sem desenhar). */
++function _chartEmptyState(el, values, msg) {
++  const box = el && el.parentElement;
++  if (!box) return false;
++  const prev = box.querySelector(".chart-empty");
++  const vazio = !values.length || values.every(v => !Number(v));
++  if (!vazio) {                       // dado chegou depois: desfaz o estado
++    if (prev) prev.remove();
++    el.style.display = "";
++    return false;
++  }
++  el.style.display = "none";
++  if (!prev) {
++    const d = document.createElement("div");
++    d.className = "empty chart-empty";
++    d.innerHTML =
++      '<img class="empty-sticker" src="/brand/stickers/report.webp" alt="" />' +
++      '<div class="chart-empty-txt"></div>';
++    box.appendChild(d);
++    d.querySelector(".chart-empty-txt").textContent = msg;
++  } else {
++    prev.querySelector(".chart-empty-txt").textContent = msg;
++  }
++  return true;
++}
++
+ // Gráfico de evolução dos gastos com janela rolante (7D / 30D / 3M).
+ // Série vem de /expenses/daily?days=N como [{date:"YYYY-MM-DD", total}].
+ let _expensePeriod = 30;
+@@ -9449,6 +9494,10 @@ function buildExpenseChart(series, days) {
+     totals.push(byDate[key] || 0);
+     labels.push(`${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}`);
+   }
++  if (_chartEmptyState(el, totals, "Nenhum gasto nesse período. Manda o primeiro pra Piggy no WhatsApp.")) {
++    if (chartDay) { chartDay.destroy(); chartDay = null; }
++    return;
++  }
+   const step = days <= 7 ? 1 : days <= 30 ? 5 : 15;
+   const light = _isLightMode();
+   if (chartDay) chartDay.destroy();
+@@ -9509,6 +9558,10 @@ function buildHistoryChart(history) {
+   const incomes  = history.map(h => h.income  || 0);
+   const expenses = history.map(h => h.expense || 0);
+ 
++  if (_chartEmptyState(el, incomes.concat(expenses), "Ainda não há meses fechados pra comparar.")) {
++    if (chartHistory) { chartHistory.destroy(); chartHistory = null; }
++    return;
++  }
+   if (chartHistory) chartHistory.destroy();
+   chartHistory = new Chart(el, {
+     type: "bar",
+@@ -9677,9 +9730,14 @@ function render(d) {
+   // Déficit (sav<0): despesas+aportes passaram da renda. Nesse caso NÃO exibir
+   // "X% da renda poupada" — soa positivo num mês negativo (você aportou puxando
+   // do saldo, não é poupança sustentável). Mostra o motivo, em vermelho.
+-  const savDeltaCls = sav < 0 ? "down" : (rate>=20?"up":rate>=10?"":"down");
++  // Vermelho só quando há déficit de verdade (sav < 0). Uma taxa BAIXA de
++  // aporte num mês que fechou positivo não é perda — é só dinheiro que ficou
++  // parado, e pintar de vermelho fazia o card se contradizer: "Sobrou R$
++  // 331,50" em verde com "0% da renda poupada" em vermelho logo abaixo.
++  // Verde ≥20%, neutro abaixo disso, vermelho reservado ao déficit.
++  const savDeltaCls = sav < 0 ? "down" : (rate >= 20 ? "up" : "");
+   const savDeltaTxt = sav < 0 ? "Aportes e gastos passaram da renda" : `${rate}% da renda poupada`;
+-  const rc   = rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--red)";
++  const rc   = sav < 0 ? "var(--red)" : rate>=20?"var(--green)":rate>=10?"var(--yellow)":"var(--text-2)";
+   const hist = d.is_current_month !== undefined
+     ? !d.is_current_month
+     : (ry !== NOW.getFullYear() || rm !== NOW.getMonth() + 1);
+@@ -10016,7 +10074,7 @@ function _renderAffiliateView(data) {
+     </div>
+     <div class="stat-tile" style="animation-delay:60ms">
+       <div class="stat-label">Disponível pra saque</div>
+-      <div class="stat-value" style="color:var(--green)">${fmt(s.available || 0)}</div>
++      <div class="stat-value" style="color:${_toneMoney(s.available || 0, "in")}">${fmt(s.available || 0)}</div>
+       <div class="stat-delta" style="color:var(--text-3)">mínimo ${fmt(data.min_payout || 50)}</div>
+     </div>
+     <div class="stat-tile" style="animation-delay:120ms">
+diff --git a/frontend/error.html b/frontend/error.html
+index bbc9b6c..8bbe737 100644
+--- a/frontend/error.html
++++ b/frontend/error.html
+@@ -6,22 +6,39 @@
+ <script src="/safe-area.js?v=1"></script>
+ <style>
+ *{box-sizing:border-box;margin:0;padding:0}
+-html{background:#050506}
+-body{background:#050506;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
+-display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
+-.box{text-align:center;max-width:400px;padding:48px 32px}
+-.code{font-size:3.5rem;font-weight:700;color:rgba(255,255,255,.22);letter-spacing:.04em;margin-bottom:12px}
+-h2{font-size:1.4rem;font-weight:600;margin-bottom:10px}
+-p{color:rgba(255,255,255,.5);line-height:1.7;margin-bottom:28px}
+-a{display:inline-block;padding:11px 28px;background:#FF2D8E;
+-border:1px solid #FF2D8E;border-radius:14px;color:#111111;font-weight:600;
+-box-shadow:0 8px 30px rgba(255,45,142,.30);
+-text-decoration:none;font-size:.9rem;transition:background .2s}
+-a:hover{background:#FF5CA5;border-color:#FF5CA5}
++html{background:#0c0c0d}
++body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
++display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
++padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
++body::before{content:"";position:fixed;inset:0;pointer-events:none;
++background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
++.brand{position:relative;display:flex;align-items:center;gap:10px;margin-bottom:34px}
++.brand img{height:28px;width:auto;display:block}
++.box{position:relative;text-align:center;max-width:440px}
++.sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
++.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
++letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
++h2{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin-bottom:10px}
++p{color:rgba(255,255,255,.62);margin-bottom:28px}
++.acts{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
++.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 22px;border-radius:12px;
++font-weight:700;font-size:.9rem;text-decoration:none;border:1px solid transparent}
++.btn-primary{background:#FF2D8E;color:#fff}
++.btn-primary:hover{background:#FF5CA5}
++.btn-ghost{color:rgba(255,255,255,.92);border-color:rgba(255,255,255,.15)}
++.btn-ghost:hover{background:rgba(255,255,255,.06)}
++a:focus-visible,.btn:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
++@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+ </style></head>
+-<body><div class="box">
+-<div class="code">{{CODE}}</div>
+-<h2>{{TITLE}}</h2>
+-<p>{{MESSAGE}}</p>
+-<a href="/">← Página inicial</a>
+-</div></body></html>
++<body>
++<a class="brand" href="/"><img src="/brand/logo.png" alt="PigBank"></a>
++<div class="box">
++  <img class="sticker" src="/brand/stickers/report.webp" alt="">
++  <div class="code">{{CODE}}</div>
++  <h2>{{TITLE}}</h2>
++  <p>{{MESSAGE}}</p>
++  <div class="acts">
++    <a class="btn btn-primary" href="/">← Página inicial</a>
++  </div>
++</div>
++</body></html>
+diff --git a/frontend/finance_bot_websocket_custom.py b/frontend/finance_bot_websocket_custom.py
+index 0c2d0e0..b1fab1a 100644
+--- a/frontend/finance_bot_websocket_custom.py
++++ b/frontend/finance_bot_websocket_custom.py
+@@ -4792,30 +4792,39 @@ async def dashboard_short_link(
+         expired_html = """<!DOCTYPE html>
+ <html lang="pt-BR">
+ <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+-<title>Link expirado</title>
++<title>Link expirado · PigBank</title>
+ <script src="/safe-area.js?v=1"></script>
+ <style>
+ *{box-sizing:border-box;margin:0;padding:0}
+-html{background:#050506}
+-body{background:#050506;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
+-display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
+-.box{text-align:center;max-width:400px;padding:48px 32px}
+-.icon{font-size:3.5rem;margin-bottom:20px}
+-h2{font-size:1.4rem;font-weight:600;margin-bottom:10px}
+-p{color:rgba(255,255,255,.5);line-height:1.7;margin-bottom:28px}
+-a{display:inline-block;padding:11px 28px;background:#FF2D8E;
+-border:1px solid #FF2D8E;border-radius:14px;color:#111111;font-weight:600;
+-box-shadow:0 8px 30px rgba(255,45,142,.30);
+-text-decoration:none;font-size:.9rem;transition:background .2s}
+-a:hover{background:#FF5CA5;border-color:#FF5CA5}
++html{background:#0c0c0d}
++body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
++display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
++padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
++body::before{content:"";position:fixed;inset:0;pointer-events:none;
++background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
++.brand{position:relative;display:block;margin-bottom:34px}
++.brand img{height:28px;width:auto;display:block}
++.box{position:relative;text-align:center;max-width:440px}
++.sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
++.tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
++letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
++h2{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin-bottom:10px}
++p{color:rgba(255,255,255,.62);margin-bottom:28px}
++p b{color:rgba(255,255,255,.92)}
++.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 22px;border-radius:12px;
++font-weight:700;font-size:.9rem;text-decoration:none;background:#FF2D8E;color:#fff;border:1px solid transparent}
++.btn:hover{background:#FF5CA5}
++.btn:focus-visible,.brand:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
+ </style></head>
+-<body><div class="box">
+-<div class="icon">🔒</div>
+-<h2>Link expirado ou inválido</h2>
+-<p>Este link de acesso ao dashboard expirou ou já foi usado.<br>
+-Solicite um novo link digitando <strong style="color:rgba(255,255,255,.8)">dashboard</strong> no bot.<br>
+-Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</p>
+-<a href="/">← Página inicial</a>
++<body>
++<a class="brand" href="/"><img src="/brand/logo.png?v=1" alt="PigBank"></a>
++<div class="box">
++<img class="sticker" src="/brand/stickers/hello.webp" alt="">
++<div class="tag">LINK EXPIRADO</div>
++<h2>Esse link já foi usado</h2>
++<p>Links do dashboard valem __MAGIC_LINK_MINUTES__ minutos e funcionam uma vez só.
++Manda <b>dashboard</b> pra Piggy no WhatsApp que ela gera outro na hora.</p>
++<a class="btn" href="/">Página inicial</a>
+ </div></body></html>""".replace("__MAGIC_LINK_MINUTES__", str(DASHBOARD_MAGIC_LINK_MINUTES))
+         return HTMLResponse(content=_stamp_asset_versions(expired_html), status_code=401)
+ 
+@@ -4940,23 +4949,35 @@ async def unsubscribe(uid: int, token: str):
+   <script src="/safe-area.js?v=1"></script>
+   <title>Descadastro · PigBank</title>
+   <style>
+-    body{margin:0;padding:0;background:#0a0d18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+-         color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+-    .card{background:#0f1320;border:1px solid rgba(255,255,255,.1);border-radius:20px;
+-          padding:48px 40px;text-align:center;max-width:440px}
+-    .icon{font-size:56px;margin-bottom:16px}
+-    h1{margin:0 0 12px;font-size:22px;color:#fff}
+-    p{color:rgba(255,255,255,.6);line-height:1.7;margin:0 0 24px}
+-    a{color:#7c3aed;text-decoration:none}
++    *{box-sizing:border-box;margin:0;padding:0}
++    html{background:#0c0c0d}
++    body{background:#0c0c0d;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
++         display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;
++         padding:32px 20px;color:rgba(255,255,255,.92);line-height:1.5}
++    body::before{content:"";position:fixed;inset:0;pointer-events:none;
++         background:radial-gradient(620px 620px at 12% -10%, rgba(255,45,142,.16), transparent 70%)}
++    .brand{position:relative;display:block;margin-bottom:34px}
++    .brand img{height:28px;width:auto;display:block}
++    .box{position:relative;text-align:center;max-width:440px}
++    .sticker{width:104px;height:auto;margin:0 auto 20px;display:block}
++    .tag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;font-weight:600;
++         letter-spacing:.14em;color:#FF2D8E;margin-bottom:12px}
++    h1{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;margin:0 0 10px}
++    p{color:rgba(255,255,255,.62);margin:0 0 16px}
++    p b{color:rgba(255,255,255,.92)}
++    .fine{font-size:.82rem;color:rgba(255,255,255,.48);margin:0}
++    a:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
+   </style>
+ </head>
+ <body>
+-  <div class="card">
+-    <div class="icon">🐷</div>
+-    <h1>Descadastro confirmado</h1>
+-    <p>Você não vai mais receber os emails de dicas e insights do Piggy.<br/>
+-       Seus emails de segurança (código de verificação, redefinição de senha) continuam normais.</p>
+-    <p style="font-size:13px">Arrependeu? Mande "reativar emails" pro bot!
++  <a class="brand" href="/"><img src="/brand/logo.png?v=1" alt="PigBank"></a>
++  <div class="box">
++    <img class="sticker" src="/brand/stickers/ok.webp" alt="">
++    <div class="tag">TUDO CERTO</div>
++    <h1>Pronto, parei de te mandar e-mail</h1>
++    <p>As dicas e os resumos da Piggy não chegam mais. Os e-mails de segurança
++       — código de verificação e redefinição de senha — continuam vindo.</p>
++    <p class="fine">Mudou de ideia? Manda <b>reativar emails</b> pra Piggy no WhatsApp.</p>
+   </div>
+ </body>
+ </html>
+diff --git a/frontend/login.html b/frontend/login.html
+index b36ed60..c2b1e73 100644
+--- a/frontend/login.html
++++ b/frontend/login.html
+@@ -23,12 +23,6 @@
+ 
+   <nav class="nav">
+     <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+-    <div class="nav-links">
+-      <a href="/funcionalidades">Funcionalidades</a>
+-      <a href="/como-funciona">Como funciona</a>
+-      <a href="/precos">Planos</a>
+-      
+-    </div>
+     <div class="nav-right">
+       <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+     </div>
+@@ -40,8 +34,8 @@
+ 
+       <!-- Login -->
+       <form id="form-login" onsubmit="doLogin(event)" novalidate>
+-        <h1>Bem-vindo de volta!</h1>
+-        <p class="auth-sub">Entre na sua conta para continuar.</p>
++        <h1>Oi de novo</h1>
++        <p class="auth-sub">Entra e o painel abre com o que a Piggy anotou desde a última vez.</p>
+         <div id="login-error" class="auth-error"></div>
+         <div class="field">
+           <label for="email">E-mail</label>
+diff --git a/frontend/nav-auth.js b/frontend/nav-auth.js
+index ac9f28f..a5c75f0 100644
+--- a/frontend/nav-auth.js
++++ b/frontend/nav-auth.js
+@@ -110,13 +110,30 @@
+       ".pb-acct-link.danger{color:#fecaca}",
+       ".pb-acct-link.danger:hover{background:rgba(248,113,113,.15);color:#fff1f2}",
+       ".pb-acct-ico{width:18px;text-align:center;flex-shrink:0}",
+-      /* ── Nav mobile: os 4 links vão pra uma 2ª linha, sempre visíveis ── */
++      /* ── Nav mobile: menu recolhido ─────────────────────────────────────
++         Antes os 5 links ficavam SEMPRE abertos numa 2ª linha: 133px de nav
++         medidos em 375×812, fixos, acompanhando a rolagem — 16% da tela gastos
++         em navegação antes de qualquer conteúdo. Agora recolhem atrás de um
++         botão; a linha 1 (logo + conta/CTA) cai para ~62px. */
++      ".pb-burger{display:none}",
+       "@media (max-width:900px){",
+       ".nav{flex-wrap:wrap;row-gap:0}",
+       ".nav .nav-logo{order:1}",
+       ".nav .nav-right{order:2;margin-left:auto}",
+-      ".nav .nav-links{order:3;display:flex;flex-wrap:wrap;width:100%;justify-content:center;align-items:center;gap:8px 20px;margin:10px 0 0;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}",
+-      ".nav .nav-links a{font-size:.9rem;white-space:nowrap}",
++      /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
++      ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;",
++      "width:44px;height:44px;margin-left:8px;padding:0;flex-shrink:0;",
++      "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);",
++      "border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
++      ".pb-burger:hover{background:rgba(255,255,255,.12)}",
++      ".nav .nav-links{order:4;display:none;flex-wrap:wrap;width:100%;",
++      "flex-direction:column;align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;",
++      "border-top:1px solid rgba(255,255,255,.08)}",
++      ".nav.pb-nav-open .nav-links{display:flex}",
++      /* linha de 44px: item de menu, não link solto no meio da barra */
++      ".nav .nav-links a{font-size:.95rem;white-space:nowrap;padding:11px 12px;",
++      "border-radius:10px;min-height:44px;display:flex;align-items:center}",
++      ".nav .nav-links a:hover{background:rgba(255,255,255,.06)}",
+       "}",
+     ].join("");
+     document.head.appendChild(s);
+@@ -177,7 +194,53 @@
+   function setText(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+   function setPlan(id, v) { var el = document.getElementById(id); if (el) { el.textContent = v; el.style.display = "inline-block"; } }
+ 
++  /* ── Botão do menu mobile ────────────────────────────────────────────────
++     O CSS acima recolhe .nav-links abaixo de 900px; sem este botão não haveria
++     como reabrir. Fica ao lado da .nav-right e só aparece no breakpoint mobile
++     (a própria regra .pb-burger{display:none} cuida do desktop), então não há
++     estado inconsistente ao girar o aparelho — é CSS decidindo, não JS. */
++  function mountBurger() {
++    var nav = document.querySelector(".nav");
++    var links = nav && nav.querySelector(".nav-links");
++    if (!nav || !links || nav.querySelector(".pb-burger")) return;
++
++    if (!links.id) links.id = "pb-nav-links";
++    var b = document.createElement("button");
++    b.type = "button";
++    b.className = "pb-burger";
++    b.setAttribute("aria-label", "Abrir menu");
++    b.setAttribute("aria-expanded", "false");
++    b.setAttribute("aria-controls", links.id);
++    b.innerHTML = "&#9776;";
++
++    function setOpen(open) {
++      nav.classList.toggle("pb-nav-open", open);
++      b.setAttribute("aria-expanded", open ? "true" : "false");
++      b.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
++    }
++    b.addEventListener("click", function () {
++      setOpen(!nav.classList.contains("pb-nav-open"));
++    });
++    // Escape fecha e devolve o foco ao botão — senão o foco fica órfão no menu.
++    document.addEventListener("keydown", function (e) {
++      if (e.key === "Escape" && nav.classList.contains("pb-nav-open")) {
++        setOpen(false);
++        b.focus();
++      }
++    });
++    // Toque fora fecha. Navegar por um link também: a página troca, mas em
++    // âncora (#funcionalidades) não trocaria e o menu ficaria aberto por cima.
++    document.addEventListener("click", function (e) {
++      if (!nav.contains(e.target)) setOpen(false);
++    });
++    links.addEventListener("click", function (e) {
++      if (e.target.closest("a")) setOpen(false);
++    });
++
++    nav.insertBefore(b, links);
++  }
+   injectStyles();
++  mountBurger();
+ 
+   fetch("/auth/validate", { credentials: "same-origin" })
+     .then(function (r) {
+diff --git a/frontend/reset-password.html b/frontend/reset-password.html
+index d201a6b..9c640db 100644
+--- a/frontend/reset-password.html
++++ b/frontend/reset-password.html
+@@ -40,7 +40,7 @@
+       <!-- Formulário -->
+       <div id="form-state">
+         <h1>Nova senha</h1>
+-        <p class="auth-sub">Digite sua nova senha. O link expira em 30 minutos.</p>
++        <p class="auth-sub">Escolha uma senha nova. Este link vale por 30 minutos e só funciona uma vez.</p>
+         <div class="auth-error" id="msg-error"></div>
+         <form id="reset-form" novalidate>
+           <div class="field">

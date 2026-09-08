@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Notícias · PigBank</title>
+<meta name="description" content="Notícias e resumos do mercado financeiro pela Piggy, exclusivo pra assinantes do PigBank+." />
+<link rel="canonical" href="https://pigbankai.com/changelog" />
+<link rel="icon" type="image/png" href="/favicon.png?v=3" />
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
+<meta name="theme-color" content="#0c0c0d" />
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/site.css?v=4" />
+<script src="/safe-area.js?v=1"></script>
+  <link rel="stylesheet" href="/app-mode.css?v=34" />
+  <script src="/app-mode.js?v=34"></script>
+</head>
+<body>
+<div class="glow"></div>
+
+  <nav class="nav">
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+    <div class="nav-links">
+      <a href="/funcionalidades">Funcionalidades</a>
+      <a href="/como-funciona">Como funciona</a>
+      <a href="/precos">Planos</a>
+      <a href="/whatsapp">WhatsApp</a>
+      <a href="/agents">Agentes</a>
+      
+    </div>
+    <div class="nav-right">
+      <a class="link-entrar" href="/login">Entrar</a>
+      <a class="btn btn-primary" href="/cadastro">Começar agora</a>
+    </div>
+  </nav>
+
+  <!-- .page: wrapper que o pull-to-refresh do modo app desliza (app-mode.js).
+       Inerte na web (sem CSS próprio); só serve de alvo pro transform. -->
+  <div class="page">
+  <div class="wrap">
+
+    <section class="section">
+      <div class="section-head center">
+        <h1>Notícias do <span class="grad">mercado</span></h1>
+        <p>Resumos do mercado financeiro feitos pela Piggy, atualizados ao longo do dia. Exclusivo pra assinantes.</p>
+      </div>
+
+      <!-- Notícias do mercado: preenchida via /api/blog/news pelo blog-news.js.
+           Começa oculta e é revelada quando há notícias (news_bot as coleta). -->
+      <div id="news-section" class="news-section" style="display:none">
+        <div id="news-grid" class="blog-grid"></div>
+      </div>
+
+      <!-- Estado vazio: some assim que o blog-news.js revela #news-section -->
+      <p id="news-empty" class="plans-note" style="margin-top:20px">
+        Nenhuma notícia por aqui ainda. A Piggy publica os resumos ao longo do dia.<br>
+        Procurando os guias e dicas? Agora eles ficam no <a href="/suporte" style="color:var(--pink);font-weight:700">Suporte</a>.
+      </p>
+    </section>
+
+  </div>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="nav-logo" href="/"><img class="logo-icon" src="/brand/icon.png?v=2" alt="" /> <span>PigBank</span></a>
+        <p>Seu dinheiro, suas regras, direto no WhatsApp, com a IA da Piggy.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col"><span class="footer-title">Navegue</span>
+          <a href="/funcionalidades">Funcionalidades</a>
+          <a href="/como-funciona">Como funciona</a>
+          <a href="/precos">Planos</a>
+          <a href="/agents">Agentes</a>
+          
+        </div>
+        <div class="footer-col"><span class="footer-title">Produto</span>
+          <a href="/whatsapp">WhatsApp</a>
+          <a href="/comandos">O que pedir</a>
+          <a href="/suporte">Suporte</a>
+        </div>
+        <div class="footer-col"><span class="footer-title">Institucional</span>
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacy">Privacidade</a>
+          <a href="mailto:contato@pigbankai.com">Contato</a>
+        </div>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 PigBank · Feito com <i class="ph ph-piggy-bank" aria-hidden="true"></i></p>
+  </footer>
+
+  <script src="/nav-auth.js?v=7" defer></script>
+  <script src="/blog-news.js?v=5" defer></script>
+</body>
+</html>
