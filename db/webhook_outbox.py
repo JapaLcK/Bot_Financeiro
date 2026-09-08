@@ -219,16 +219,39 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
 def _erro_seguro(tipo: str, codigo: str | None) -> str:
     """`Tipo(codigo)`, com os dois filtrados por FORMA — nunca por confiança.
 
-    Mesma regra do `_codigo_seguro` de `core/services/asaas.py`: alfanumérico,
-    `_`, `-` e `.`, curto. O que não casa vira `?`, e é isso que impede uma
-    mensagem inteira de entrar por um parâmetro que se chama `tipo`.
-    """
-    def limpo(valor: str | None, teto: int) -> str:
-        texto = str(valor or "")[:teto]
-        return texto if texto and all(c.isalnum() or c in "_-." for c in texto) else "?"
+    Réplica **passo a passo** do `_codigo_seguro` de `core/services/asaas.py`:
+    até 60 chars, alfanumérico mais `_`, `-` e `.`, e **só-dígitos recusado**.
+    O que não casa vira `?` (lá vira `""`, e é a única diferença), e é isso que
+    impede uma mensagem inteira de entrar por um parâmetro que se chama `tipo`.
 
-    base = limpo(tipo, 60)
-    return f"{base}({limpo(codigo, 60)})" if codigo else base
+    **A recusa de só-dígitos é a linha que faltava, e o defeito era ela.** A
+    versão anterior dizia no docstring ser "a mesma regra" e aceitava
+    `"12345678901"`, porque todo dígito é `isalnum()` — a forma de um CPF é
+    exatamente a de um código curto. Isso mandava CPF para o `last_error`, que
+    sobrevive à purga do payload (§13.3) e à exclusão da conta (P2 do Codex no
+    #304).
+
+    **Por que uma CÓPIA e não um import, que é o que o §0.7 pede:** importar
+    `core.services.asaas` daqui viola o portão de inércia do 1b-A — medido,
+    `tests/test_pix_inerte.py::test_nenhum_modulo_de_producao_importa_os_modulos_inertes`
+    vermelho, porque a varredura é por `ast` sobre os `.py` de produção e não
+    distingue inerte importando inerte. O `safe_code` de `pluggy_health` (não
+    inerte) tampouco serve: o teto dele é 20 chars e corta nome de exceção
+    legítimo (`TransactionRollbackError`) para `?`. Enquanto a cópia existir, é
+    `test_erro_seguro_nao_divergiu_do_codigo_seguro` que impede a divergência de
+    voltar — foi ela que criou este bug. Quando o 1b-B puser o dreno na
+    allowlist do portão, isto aqui vira um import e o teste morre junto.
+    """
+    def limpo(valor: str | None) -> str:
+        texto = str(valor or "")
+        if not texto or len(texto) > 60:
+            return "?"
+        if not all(c.isalnum() or c in "_-." for c in texto):
+            return "?"
+        return "?" if texto.replace("-", "").replace(".", "").isdigit() else texto
+
+    base = limpo(tipo)
+    return f"{base}({limpo(codigo)})" if codigo else base
 
 
 def efeito_registrado(asaas_payment_id: str, effect: str) -> bool:
@@ -238,6 +261,12 @@ def efeito_registrado(asaas_payment_id: str, effect: str) -> bool:
     `event_id` NOVO — que a plataforma pode emitir — reexecutaria `ga4`, `capi`
     e `email` se a chave fosse o evento. Receita duplicada no GA4 e segundo
     Purchase na CAPI em cima do mesmo dinheiro.
+
+    **`False` aqui não é permissão para executar: é a leitura de um instante.**
+    Entre este `select` e o `registrar_efeito` que o segue, outra passada do
+    dreno pode ter respondido `False` à mesma pergunta. Quem fecha essa janela é
+    o DRENO, serializando por `(asaas_payment_id, effect)` — ver
+    `registrar_efeito`.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -255,8 +284,27 @@ def registrar_efeito(asaas_payment_id: str, effect: str, event_id: str) -> bool:
 
     O `on conflict do nothing` fecha a janela que o `efeito_registrado` sozinho
     deixa: entre a consulta e o registro cabe outra passada do dreno. A consulta
-    evita o TRABALHO (chamar o Stripe, o GA4); este insert evita a LINHA
-    duplicada — as duas são necessárias e nenhuma substitui a outra.
+    evita o TRABALHO no caso comum; este insert evita a LINHA duplicada — as duas
+    são necessárias e nenhuma substitui a outra.
+
+    **O par consulta+insert protege a LINHA, e NÃO o trabalho externo.** Ele é
+    idempotência de BOOKKEEPING: quando duas passadas concorrentes leem `False` e
+    ambas executam, o e-mail já saiu duas vezes, o `purchase` do GA4 e o
+    `Purchase` da CAPI já foram enviados duas vezes, e este insert só desempata
+    depois — devolvendo `False` a uma delas para uma execução que já aconteceu.
+
+    E o `for update skip locked` do dreno (1b-B) **não** serializa esse caso:
+    dois eventos DISTINTOS do mesmo `payment.id` (um `PAYMENT_CONFIRMED` e um
+    `PAYMENT_RECEIVED`, ou uma reentrega com `event_id` novo) travam linhas de
+    OUTBOX diferentes, e nada em `pix_webhook_events` os põe em fila. A chave que
+    precisa ser serializada é `(asaas_payment_id, effect)`, que não é a chave da
+    linha travada.
+
+    **Serializar por `(asaas_payment_id, effect)` é obrigação do DRENO**, e ela
+    tem de segurar a consulta, a execução externa e o registro dentro do mesmo
+    escopo — não só o insert. Sem isso, este módulo garante uma linha por par, e
+    nada sobre quantas vezes o mundo lá fora foi tocado. Apontamento do Codex no
+    #304; direções em avaliação no §17.1 do plano.
 
     `event_id` é forense: diz QUAL entrega executou o efeito. Nada é decidido
     por ele.

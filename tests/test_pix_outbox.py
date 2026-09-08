@@ -41,6 +41,7 @@ from db.connection import get_conn
 from db.webhook_outbox import (
     CAMPOS_MINIMOS,
     EFEITOS,
+    _erro_seguro,
     efeito_registrado,
     marcar_processado,
     minimizar,
@@ -147,6 +148,12 @@ def test_registrar_falha_devolve_o_attempts_novo():
     ("Falha ao criar: CPF 12345678901 de Fulano (a@b.com)", None, "?"),
     ("AsaasApiError", "CPF 12345678901 invalido", "AsaasApiError(?)"),
     ("", None, "?"),
+    # P2 do Codex no #304: o CPF SOZINHO, sem mensagem em volta. Todo dígito é
+    # `isalnum()`, então a cópia divergente de `_codigo_seguro` que morava aqui
+    # ACEITAVA estas três — a forma de um CPF é exatamente a de um código curto.
+    ("12345678901", None, "?"),
+    ("123.456.789-01", None, "?"),
+    ("AsaasApiError", "12345678901", "AsaasApiError(?)"),
 ])
 def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
     """P2-6 do Codex. `last_error` SOBREVIVE à purga do payload (§13.3) e à
@@ -155,10 +162,16 @@ def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
     A versão anterior recebia `erro: str` e guardava os primeiros 500 chars.
     Truncar não removia nada: CPF, e-mail e nome aparecem no COMEÇO da mensagem.
     Agora a assinatura só aceita `tipo` + `codigo`, e os dois passam pelo filtro
-    de FORMA — a mesma regra do `_codigo_seguro` do cliente Asaas.
+    de FORMA — a mesma regra do `_codigo_seguro` do cliente Asaas, **incluindo a
+    recusa de só-dígitos**, que é a linha que faltava: a cópia aceitava
+    `"12345678901"` porque todo dígito passa no `isalnum()` (P2 do Codex no
+    #304). Que as duas continuem sendo a mesma regra é o que
+    `test_erro_seguro_nao_divergiu_do_codigo_seguro` mede.
 
-    *Negativo: faça `_erro_seguro` devolver `tipo` sem filtrar → as duas linhas
-    com PII ficam vermelhas.*
+    *Negativo: faça `_erro_seguro` devolver `tipo` sem filtrar → as linhas com
+    PII ficam vermelhas. Negativo da recusa de só-dígitos: apague o `return "?"
+    if texto.replace(...).isdigit()` de `db/webhook_outbox.py` → os três casos de
+    CPF puro ficam vermelhos.*
     """
     eid = _evt()
     registrar_evento(eid, "PAYMENT_RECEIVED", _corpo(), 1)
@@ -272,3 +285,34 @@ def test_efeito_desconhecido_e_recusado():
         "stripe_cancel", "grant", "ga4", "capi", "email", "revoke",
         "orphan_notified",
     }, "a lista de efeitos do §3.4 mudou — o dreno do 1b-B depende dela"
+
+
+def test_erro_seguro_nao_divergiu_do_codigo_seguro():
+    """§0.7: `_erro_seguro` é uma CÓPIA da regra de `_codigo_seguro`, e a cópia
+    já divergiu uma vez — aceitando `"12345678901"` porque todo dígito é
+    `isalnum()` (P2 do Codex no #304). Este teste é o que o §0.7 manda pôr
+    quando a duplicação é inevitável: as duas rodam sobre a MESMA tabela e têm
+    de decidir igual.
+
+    Um import resolveria melhor, e não pode: `db.webhook_outbox` importando
+    `core.services.asaas` deixa
+    `test_pix_inerte.py::test_nenhum_modulo_de_producao_importa_os_modulos_inertes`
+    vermelho (medido). No 1b-B, com o dreno na allowlist, este teste some junto
+    com a cópia.
+
+    *Negativo: apague a linha do só-dígitos de UM dos dois lados → vermelho, com
+    o valor divergente no assert. Positivo: `AsaasApiError` e `invalid_cpfCnpj`
+    estão na tabela e passam nos dois — sem eles, dois filtros que recusam TUDO
+    concordariam.*
+    """
+    from core.services.asaas import _codigo_seguro
+
+    for valor in ("AsaasApiError", "invalid_cpfCnpj", "ReadTimeout", "v1.2.3",
+                  "12345678901", "123.456.789-01", "0001-12345-6", "42",
+                  "Fulano de Tal", "a@b.com", "CPF 123 invalido",
+                  "", None, "x" * 61, "x" * 60):
+        assert _erro_seguro(valor, None) == (_codigo_seguro(valor) or "?"), (
+            f"a cópia de `_codigo_seguro` em db/webhook_outbox.py divergiu "
+            f"em {valor!r}: {_erro_seguro(valor, None)!r} vs "
+            f"{_codigo_seguro(valor) or '?'!r}"
+        )
