@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .connection import get_conn
+from .connection import cat_norm_sql, get_conn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -727,7 +727,9 @@ def list_history(
             clauses.append("criado_em < %s")
             launches_params.append(to_date)
         if categoria:
-            clauses.append("LOWER(COALESCE(categoria, '')) = LOWER(%s)")
+            clauses.append(
+                cat_norm_sql("COALESCE(categoria, '')") + " = " + cat_norm_sql("%s")
+            )
             launches_params.append(categoria)
         if uncategorized:
             clauses.append("(categoria IS NULL OR categoria = '')")
@@ -775,7 +777,9 @@ def list_history(
             clauses.append("b.period_end < %s")
             credit_params.append(to_date)
         if categoria:
-            clauses.append("LOWER(COALESCE(ct.categoria, '')) = LOWER(%s)")
+            clauses.append(
+                cat_norm_sql("COALESCE(ct.categoria, '')") + " = " + cat_norm_sql("%s")
+            )
             credit_params.append(categoria)
         if uncategorized:
             clauses.append("(ct.categoria IS NULL OR ct.categoria = '')")

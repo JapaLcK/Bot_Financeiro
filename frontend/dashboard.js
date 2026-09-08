@@ -1824,8 +1824,11 @@ function _renderCategoriesDistribution(categories) {
     const color = meta.color || "#FF2D8E";
     const pct = total > 0 ? (m.total / total * 100) : 0;
     const fillClass = pct > 30 ? "red" : pct > 15 ? "yellow" : "green";
+    const catJs = escapeJsString(m.categoria || "sem categoria");
     return `
-      <div class="bar-row" style="animation-delay:${i * 70}ms">
+      <div class="bar-row cat-open-row" style="animation-delay:${i * 70}ms" role="button" tabindex="0"
+           onclick="openCategoryDetail('${catJs}', { monthOnly: true, total: ${Number(m.total || 0)}, count: ${Number(m.count || 0)} })"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCategoryDetail('${catJs}', { monthOnly: true, total: ${Number(m.total || 0)}, count: ${Number(m.count || 0)} });}">
         <div class="bar-icon" style="color:${escapeHtmlSafe(color)}">${phIcon(emoji)}</div>
         <div class="bar-body">
           <div class="bar-head"><span class="name">${escapeHtmlSafe(m.categoria)}</span><span class="val">${_fmtBRL(m.total)}</span></div>
@@ -1837,21 +1840,233 @@ function _renderCategoriesDistribution(categories) {
   }).join("");
 }
 
+function _findCategoryInCacheById(id) {
+  const n = Number(id);
+  return (_categoriesCache || []).find(c => Number(c.id) === n) || null;
+}
+
+function openCategoryEditModalById(id) {
+  const cat = _findCategoryInCacheById(id);
+  if (cat) openCategoryEditModal(cat);
+}
+
 function _renderCategoryPill(cat, idx = 0) {
   const dim = cat.is_archived ? "opacity:.45;" : "";
   const tag = cat.is_archived
     ? '<span style="font-size:.65rem;color:var(--text-3);margin-left:6px">(arquivada)</span>'
     : (cat.is_system ? '<span style="font-size:.62rem;color:var(--text-3);margin-left:6px">padrão</span>' : '');
   const delay = 200 + idx * 30;
+  const catJs = escapeJsString(cat.name || "sem categoria");
+  const id = Number(cat.id || 0);
   return `
-    <div class="cat-pill" style="cursor:pointer;${dim}animation-delay:${delay}ms" onclick='openCategoryEditModal(${JSON.stringify(cat)})'>
+    <div class="cat-pill" style="${dim}animation-delay:${delay}ms" role="button" tabindex="0"
+         onclick="openCategoryDetail('${catJs}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCategoryDetail('${catJs}');}">
       <span class="cat-dot" style="background:${escapeHtmlSafe(cat.color)}"></span>
       <div class="cat-body">
         <div class="cat-name">${phIcon(cat.emoji)} ${escapeHtmlSafe(cat.name)}${tag}</div>
         <div class="cat-val" style="color:var(--text-3)">${cat.usage_count || 0} lanç.</div>
       </div>
+      ${id ? `<button class="cat-edit-mini" type="button" title="Editar categoria" aria-label="Editar categoria" onclick="event.stopPropagation();openCategoryEditModalById(${id})" onkeydown="event.stopPropagation()"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>` : ""}
     </div>
   `;
+}
+
+const CATEGORY_DETAIL_LIMIT = 50;
+let _categoryDetailState = null;
+let _categoryDetailItems = [];
+let _categoryDetailGen = 0;
+
+function _categoryIsUncategorized(category) {
+  return String(category || "").trim().toLowerCase() === "sem categoria";
+}
+
+function _categoryDisplayName(category) {
+  return _categoryIsUncategorized(category) ? "Sem categoria" : String(category || "Categoria");
+}
+
+function _categoryDetailMonthRange() {
+  const start = new Date(viewYear, viewMonth - 1, 1);
+  const end = new Date(viewYear, viewMonth, 1);
+  return { from: _isoDate(start), to: _isoDate(end) };
+}
+
+function _ensureCategoryDetailModal() {
+  if (document.getElementById("cat-detail-overlay")) return;
+  const html = `
+    <div class="overlay" id="cat-detail-overlay">
+      <div class="modal wide category-detail-modal">
+        <div class="cat-detail-head">
+          <div>
+            <h3 id="cat-detail-title">Lançamentos</h3>
+            <p class="msub" id="cat-detail-sub"></p>
+          </div>
+          <button type="button" class="cat-detail-close" aria-label="Fechar" onclick="closeCategoryDetailModal()"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
+        <div class="pkt-hist-summary" id="cat-detail-summary"></div>
+        <div class="cat-detail-list" id="cat-detail-list"></div>
+        <div class="modal-acts cat-detail-actions">
+          <button type="button" class="btn-cancel" id="cat-detail-more" style="display:none" onclick="_loadCategoryDetailNextPage()">Carregar mais</button>
+          <button type="button" class="btn-save" onclick="closeCategoryDetailModal()">Fechar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", html);
+  const ov = document.getElementById("cat-detail-overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeCategoryDetailModal(); });
+  document.addEventListener("keydown", e => {
+    const launchOpen = document.getElementById("launch-detail-overlay")?.classList.contains("open");
+    if (e.key === "Escape" && ov.classList.contains("open") && !launchOpen) closeCategoryDetailModal();
+  });
+}
+
+function closeCategoryDetailModal() {
+  const ov = document.getElementById("cat-detail-overlay");
+  if (ov) ov.classList.remove("open");
+}
+
+function openCategoryDetail(category, opts = {}) {
+  const cat = String(category || "").trim() || "sem categoria";
+  _ensureCategoryDetailModal();
+  _categoryDetailGen += 1;
+  _categoryDetailState = {
+    category: cat,
+    monthOnly: !!opts.monthOnly,
+    total: opts.total == null ? null : Number(opts.total || 0),
+    count: opts.count == null ? null : Number(opts.count || 0),
+    page: 1,
+  };
+  _categoryDetailItems = [];
+
+  document.getElementById("cat-detail-title").textContent = _categoryDisplayName(cat);
+  document.getElementById("cat-detail-sub").textContent = _categoryDetailState.monthOnly
+    ? `${PT_MONTHS[viewMonth - 1]} ${viewYear}`
+    : "Histórico disponível";
+  document.getElementById("cat-detail-summary").innerHTML = _categoryDetailSummaryHTML(null);
+  document.getElementById("cat-detail-list").innerHTML = `<div class="pkt-hist-loading">Carregando lançamentos…</div>`;
+  document.getElementById("cat-detail-more").style.display = "none";
+  document.getElementById("cat-detail-overlay").classList.add("open");
+  _loadCategoryDetailPage(1, false);
+}
+
+function _categoryDetailQuery(page) {
+  const st = _categoryDetailState;
+  const p = new URLSearchParams();
+  if (st.monthOnly) {
+    const range = _categoryDetailMonthRange();
+    p.set("from", range.from);
+    p.set("to", range.to);
+  }
+  if (_categoryIsUncategorized(st.category)) p.set("uncategorized", "true");
+  else p.set("categoria", st.category);
+  p.set("page", String(page || 1));
+  p.set("limit", String(CATEGORY_DETAIL_LIMIT));
+  return p.toString();
+}
+
+function _categoryDetailSummaryHTML(payload) {
+  const st = _categoryDetailState || {};
+  const totalCount = payload ? Number(payload.total || 0) : (st.count == null ? "—" : st.count);
+  const shown = payload ? _categoryDetailItems.length : 0;
+  const amount = st.total == null ? (st.monthOnly ? "Mês" : "Histórico") : _fmtBRL(st.total);
+  const amountLabel = st.total == null ? "Período" : (st.monthOnly ? "Gasto no mês" : "Total");
+  return `
+    <div class="it"><span class="k">Lançamentos</span><span class="v">${escapeHtmlSafe(String(totalCount))}</span></div>
+    <div class="it"><span class="k">Exibidos</span><span class="v">${shown}</span></div>
+    <div class="it dep"><span class="k">${amountLabel}</span><span class="v">${escapeHtmlSafe(amount)}</span></div>
+  `;
+}
+
+function _categoryDetailRowsHTML(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = (item.criado_em || "").slice(0, 10);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return Array.from(groups.entries()).map(([dayKey, list]) => `
+    <div class="cat-detail-day">${escapeHtmlSafe(_historyDayHeader(dayKey))}</div>
+    <div class="tx-list">${list.map(i => _historyRowHTML(i, "openCategoryHistoryDetail")).join("")}</div>
+  `).join("");
+}
+
+function _renderCategoryDetailPage(payload, append) {
+  const listEl = document.getElementById("cat-detail-list");
+  const moreBtn = document.getElementById("cat-detail-more");
+  if (!listEl || !moreBtn) return;
+
+  const base = append ? _categoryDetailItems.length : 0;
+  const items = (payload.items || []).map((it, idx) => ({ ...it, _ldx: base + idx }));
+  if (append) _categoryDetailItems.push(...items);
+  else _categoryDetailItems = items;
+
+  document.getElementById("cat-detail-summary").innerHTML = _categoryDetailSummaryHTML(payload);
+
+  if (!_categoryDetailItems.length) {
+    listEl.innerHTML = `<div class="pkt-hist-empty">Nenhum lançamento nesta categoria.</div>`;
+  } else if (append) {
+    listEl.insertAdjacentHTML("beforeend", _categoryDetailRowsHTML(items));
+  } else {
+    listEl.innerHTML = _categoryDetailRowsHTML(items);
+  }
+
+  const page = Number(payload.page || 1);
+  const totalPages = Number(payload.total_pages || 0);
+  _categoryDetailState.page = page;
+  if (totalPages > page) {
+    moreBtn.style.display = "";
+    moreBtn.disabled = false;
+    moreBtn.textContent = `Carregar mais (${Math.max(0, Number(payload.total || 0) - page * CATEGORY_DETAIL_LIMIT)} restantes)`;
+  } else {
+    moreBtn.style.display = "none";
+  }
+}
+
+async function _loadCategoryDetailPage(page = 1, append = false) {
+  if (!_categoryDetailState || !USER_ID) return;
+  const gen = _categoryDetailGen;
+  const moreBtn = document.getElementById("cat-detail-more");
+  if (append && moreBtn) {
+    moreBtn.disabled = true;
+    moreBtn.textContent = "Carregando…";
+  }
+  try {
+    const r = await fetch(`/history/${USER_ID}/list?${_categoryDetailQuery(page)}`, { credentials: "same-origin" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    if (gen !== _categoryDetailGen) return;
+    _renderCategoryDetailPage(payload, append);
+  } catch (err) {
+    if (gen !== _categoryDetailGen) return;
+    const listEl = document.getElementById("cat-detail-list");
+    if (append && moreBtn) {
+      moreBtn.disabled = false;
+      moreBtn.textContent = "Tentar de novo";
+    } else if (listEl) {
+      listEl.innerHTML = `<div class="pkt-hist-error">Erro ao carregar lançamentos.</div>`;
+    }
+  }
+}
+
+function _loadCategoryDetailNextPage() {
+  if (!_categoryDetailState) return;
+  _loadCategoryDetailPage((_categoryDetailState.page || 1) + 1, true);
+}
+
+function openCategoryHistoryDetail(idx) {
+  const l = (_categoryDetailItems || [])[idx];
+  if (!l) return;
+  _launchDetailCurrent = l;
+  _launchDetailSource = "category";
+  _renderLaunchDetail(l);
+}
+
+function _reloadCategoryDetailAfterMutation() {
+  const ov = document.getElementById("cat-detail-overlay");
+  if (ov && ov.classList.contains("open")) {
+    _categoryDetailGen += 1;
+    _loadCategoryDetailPage(1, false);
+  }
 }
 
 // ── Modal cadastrar/editar categoria ──────────────────────────────────
@@ -5918,7 +6133,7 @@ function _fmtDayLabel(dayKey, includeWeekday = false) {
   return `${base} · ${weekdays[dt.getDay()]}`;
 }
 
-function _historyRowHTML(i) {
+function _historyRowHTML(i, detailFn = "openHistoryDetail") {
   const isReceita = i.tipo === "receita";
   const isCredito = i.tipo === "credito";
   const isDespesa = i.tipo === "despesa" || i.tipo === "saida";
@@ -5933,7 +6148,7 @@ function _historyRowHTML(i) {
   if (isCredito && i.alvo)  meta.push(`Cartão ${i.alvo}`);
   if (!isCredito && i.nota && i.alvo && i.nota !== i.alvo) meta.push(i.nota);
   if (time) meta.push(time);
-  const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
+  const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="${detailFn}(${i._ldx})"` : "";
   return `
     <div class="tx-row"${clickable}>
       <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
@@ -7495,8 +7710,8 @@ function renderLaunches() {
 // altura mínima e respiro. Edit/delete roteiam por tipo (crédito vs launch),
 // então funcionam nas duas origens sem colisão de id.
 let _launchDetailCurrent = null;
-let _launchDetailSource = "overview";   // 'overview' | 'history'
-let _editDeleteReturnTo = null;         // 'history' → recarrega o histórico após a ação
+let _launchDetailSource = "overview";   // 'overview' | 'history' | 'category'
+let _editDeleteReturnTo = null;         // 'history'/'category' recarrega a origem após a ação
 
 function _ensureLaunchDetailModal() {
   if (document.getElementById("launch-detail-overlay")) return;
@@ -7676,7 +7891,7 @@ function openHistoryDetail(idx) {
 function _launchDetailEdit() {
   const l = _launchDetailCurrent;
   if (!l || l.id == null) return;
-  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  _editDeleteReturnTo = (_launchDetailSource === "history" || _launchDetailSource === "category") ? _launchDetailSource : null;
   closeLaunchDetail();
   openEditLaunchModal(l.id, l);
 }
@@ -7684,7 +7899,7 @@ function _launchDetailEdit() {
 function _launchDetailDelete() {
   const l = _launchDetailCurrent;
   if (!l || l.id == null) return;
-  _editDeleteReturnTo = (_launchDetailSource === "history") ? "history" : null;
+  _editDeleteReturnTo = (_launchDetailSource === "history" || _launchDetailSource === "category") ? _launchDetailSource : null;
   closeLaunchDetail();
   const descTxt = describeLaunch(l).replace(/<[^>]+>/g, "").trim();
   confirmDeleteLaunch(l.id, descTxt, l.valor, l.tipo === "credito", l.installments_total || null);
@@ -8000,7 +8215,7 @@ function showEditLaunchError(msg) {
 async function submitEditLaunch() {
   if (editLaunchSubmitting || !editingLaunchId) return;
   hideEditLaunchError();
-  const _returnToHistory = (_editDeleteReturnTo === "history");
+  const _returnAfterEdit = _editDeleteReturnTo;
 
   let categoria = document.getElementById("edit-launch-categoria").value;
   if (categoria === EDIT_LAUNCH_CUSTOM_VALUE) {
@@ -8078,7 +8293,8 @@ async function submitEditLaunch() {
     sendRefreshSilent();
     // Veio do Histórico → recarrega a timeline resetando a paginação (senão,
     // se o usuário tinha dado "Carregar mais", recarregaria só a página N).
-    if (_returnToHistory) _historyResetAndReload();
+    if (_returnAfterEdit === "history") _historyResetAndReload();
+    if (_returnAfterEdit === "category") _reloadCategoryDetailAfterMutation();
   } catch (err) {
     showEditLaunchError("Erro: " + err.message);
   } finally {
@@ -8095,7 +8311,7 @@ let deleteLaunchInFlight = false;
 async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false, installmentsTotal = null) {
   if (deleteLaunchInFlight) return;
   if (!launchId) return;
-  const _returnToHistory = (_editDeleteReturnTo === "history");
+  const _returnAfterDelete = _editDeleteReturnTo;
   _editDeleteReturnTo = null;  // consome o flag (independe do usuário confirmar)
   const valFmt = (typeof valor === "number") ? fmt(valor) : "";
   const desc   = (descricao || "").trim() || "este lançamento";
@@ -8156,7 +8372,8 @@ async function confirmDeleteLaunch(launchId, descricao, valor, isCredit = false,
     showLaunchSuccessToast(msg);
     sendRefreshSilent();
     // Veio do Histórico → recarrega resetando a paginação (ver edição acima).
-    if (_returnToHistory) _historyResetAndReload();
+    if (_returnAfterDelete === "history") _historyResetAndReload();
+    if (_returnAfterDelete === "category") _reloadCategoryDetailAfterMutation();
   } catch (err) {
     await alertModal(err.message, { title: "Erro ao apagar" });
   } finally {

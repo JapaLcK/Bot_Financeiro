@@ -378,6 +378,45 @@ details.cc-details[open] summary .cc-card {
   font-size:.7rem; color:var(--text-3); font-variant-numeric:tabular-nums;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
+.cat-edit-mini {
+  width:30px;height:30px;border-radius:8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.06);border:1px solid var(--glass-border);
+  color:var(--text-2);cursor:pointer;transition:all .18s var(--ease);
+}
+.cat-edit-mini:hover { color:var(--text);background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.2); }
+.bar-row.cat-open-row { cursor:pointer;border-radius:10px;padding-left:8px;padding-right:8px;transition:background .18s var(--ease),border-color .18s var(--ease); }
+.bar-row.cat-open-row:hover { background:rgba(255,255,255,.05); }
+.bar-row.cat-open-row:focus-visible,
+.cat-pill:focus-visible,
+.cat-edit-mini:focus-visible { outline:2px solid rgba(255,45,142,.65);outline-offset:2px; }
+#cat-detail-overlay { z-index:805; }
+#launch-detail-overlay { z-index:820; }
+.category-detail-modal {
+  width:min(780px,92vw);max-height:86vh;overflow:hidden;
+  display:flex;flex-direction:column;
+}
+.cat-detail-head { display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px; }
+.cat-detail-head h3 { margin:0 0 4px; }
+.cat-detail-head .msub { margin:0; }
+.cat-detail-close {
+  width:34px;height:34px;border-radius:9px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.06);border:1px solid var(--glass-border);
+  color:var(--text-2);cursor:pointer;
+}
+.cat-detail-close:hover { color:var(--text);background:rgba(255,255,255,.11); }
+.cat-detail-list {
+  display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow-y:auto;
+  padding-right:4px;margin-bottom:14px;
+}
+.cat-detail-day {
+  font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;
+  margin:14px 0 4px;
+}
+.cat-detail-list .tx-list { border-top:1px solid var(--div); }
+.cat-detail-actions { align-items:center; }
+#cat-detail-more { margin-right:auto; }
 
 /* Metas — card com ring de progresso (svg) */
 .goal-card {
