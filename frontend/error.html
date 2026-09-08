@@ -6,20 +6,28 @@
 <script src="/safe-area.js?v=1"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-html{background:#050506}
-body{background:#050506;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
-display:flex;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
-.box{text-align:center;max-width:400px;padding:48px 32px}
+html{background:#0c0c0d}
+body{background:#0c0c0d;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;
+display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;color:rgba(255,255,255,.85)}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+background:radial-gradient(620px 620px at 15% -10%,rgba(255,45,142,.20),transparent 70%)}
+.brand,.box{position:relative;z-index:1}
+.brand{color:#fff;text-decoration:none}
+.brand img{height:30px;width:auto;display:block}
+.box{text-align:center;max-width:400px;padding:28px 32px 48px}
 .code{font-size:3.5rem;font-weight:700;color:rgba(255,255,255,.22);letter-spacing:.04em;margin-bottom:12px}
 h2{font-size:1.4rem;font-weight:600;margin-bottom:10px}
-p{color:rgba(255,255,255,.5);line-height:1.7;margin-bottom:28px}
-a{display:inline-block;padding:11px 28px;background:#FF2D8E;
+p{color:rgba(255,255,255,.62);line-height:1.7;margin-bottom:28px}
+.box a{display:inline-block;padding:11px 28px;background:#FF2D8E;
 border:1px solid #FF2D8E;border-radius:14px;color:#111111;font-weight:600;
 box-shadow:0 8px 30px rgba(255,45,142,.30);
 text-decoration:none;font-size:.9rem;transition:background .2s}
-a:hover{background:#FF5CA5;border-color:#FF5CA5}
+.box a:hover{background:#FF5CA5;border-color:#FF5CA5}
+a:focus-visible{outline:2px solid #FF2D8E;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head>
-<body><div class="box">
+<body><a class="brand" href="/"><img src="/brand/logo.webp?v=1" alt="PigBank" width="607" height="180"></a>
+<div class="box">
 <div class="code">{{CODE}}</div>
 <h2>{{TITLE}}</h2>
 <p>{{MESSAGE}}</p>

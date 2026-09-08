@@ -563,7 +563,12 @@ def test_pagina_de_erro_passa_pelo_stamp_asset_versions(monkeypatch):
     mtime_ns = (shared.FRONTEND_DIR / "safe-area.js").stat().st_mtime_ns
     esperado = shared._asset_hash("safe-area.js", mtime_ns)
     assert f"/safe-area.js?v={esperado}" in body
-    assert "?v=1" not in body
+    # E vale pra CLASSE: todo `.css`/`.js` sai com hash de 12 hex, nunca com o `?v=N`
+    # literal — stamp que não resolve devolve a URL intocada, que nunca invalida.
+    # `.webp` fica fora porque `_ASSET_VER_RE` casa só `.css|.js`; `.mjs` também não
+    # é carimbado lá, então esta invariante não o alcança.
+    versoes = re.findall(r"\.(?:css|js)\?v=([^\"']*)", body, re.I)
+    assert versoes and all(re.fullmatch(r"[0-9a-f]{12}", v) for v in versoes), versoes
 
 
 def test_pagina_de_erro_nao_leva_o_meta_pixel(monkeypatch):
