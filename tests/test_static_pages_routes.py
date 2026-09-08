@@ -189,6 +189,44 @@ def test_health_sem_token_configurado_nao_aceita_header_vazio(monkeypatch):
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_health_com_token_nao_ascii_nao_derruba_a_rota(monkeypatch):
+    """`compare_digest` sobre str não-ASCII levanta TypeError: seria 500 com
+    stack trace num endpoint público, escolhido byte a byte por quem chama.
+
+    NÃO vira 401: o x-smoke-token aqui é portão de DIVULGAÇÃO, não
+    autenticação — o healthcheck do Railway não manda header nenhum e depende
+    do 200. O que o token errado tira é só o campo `commit`.
+    """
+    monkeypatch.setenv("SMOKE_HEALTH_TOKEN", "token-de-teste-32-bytes-ou-mais!!")
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc123def456")
+
+    # Em bytes: o httpx recusa str não-ASCII em header (UnicodeEncodeError)
+    # antes da requisição sair, e o teste nunca chegaria no servidor.
+    resp = client.get("/health", headers={"X-Smoke-Token": "café".encode("latin-1")})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_health_com_segredo_surrogate_no_env_nao_da_500(monkeypatch):
+    """O surrogate mora no SEGREDO, não no header: `os.getenv` decodifica o
+    ambiente com `surrogateescape`, então um SMOKE_HEALTH_TOKEN com byte
+    não-UTF-8 chega como `'...\\udcff...'` e o `.encode("utf-8")` estrito
+    levantava UnicodeEncodeError → 500 nesta rota pública.
+
+    Ver o `errors="surrogateescape"` do lado `esperado` em
+    core/secure_compare.py. Falha FECHADO: nenhum header casa com esse
+    segredo (o HTTP não devolve o byte cru), mas o /health segue 200.
+    """
+    monkeypatch.setenv("SMOKE_HEALTH_TOKEN", b"token-\xff-cru".decode("utf-8", "surrogateescape"))
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc123def456")
+
+    resp = client.get("/health", headers={"X-Smoke-Token": "token-cru"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
 def test_robots_txt():
     resp = client.get("/robots.txt")
     assert resp.status_code == 200

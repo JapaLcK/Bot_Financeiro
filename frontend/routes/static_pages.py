@@ -5,7 +5,6 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 import asyncio
-import hmac
 import html as _html
 import os
 from urllib.parse import quote
@@ -14,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
+from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
     gate_onboarding,
@@ -773,6 +773,6 @@ async def health(request: Request):
     # deploy ANTERIOR, e o gate abriria cedo: o verde falso que ele impede.
     corpo = {"status": "ok"}
     esperado = os.getenv("SMOKE_HEALTH_TOKEN", "")
-    if esperado and hmac.compare_digest(request.headers.get("x-smoke-token", ""), esperado):
+    if esperado and constant_time_eq(request.headers.get("x-smoke-token", ""), esperado):
         corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
     return JSONResponse(corpo, headers={"Cache-Control": "no-store"})
