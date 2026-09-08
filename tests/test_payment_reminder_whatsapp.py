@@ -2,7 +2,7 @@
 tests/test_payment_reminder_whatsapp.py — o VEREDITO do envio por WhatsApp, e o
 que fica gravado por causa dele.
 
-`core.services.payment_reminder._wa_lembrete` descartava o retorno de
+`core.services.payment_reminder_wa._wa_lembrete` descartava o retorno de
 `adapters.whatsapp.wa_client.send_template` e punha `enviado = True`
 incondicional. O retorno carrega veredito:
 
@@ -28,7 +28,14 @@ O OBSERVÁVEL é o que foi **gravado**, não o retorno da função: o dano descr
 é o registro errado, e um teste que só olhasse o `bool` de `_wa_lembrete`
 passaria mesmo que o `details` fosse montado de outro jeito.
 
-CONTROLE NEGATIVO DECLARADO — em `core/services/payment_reminder.py::_wa_lembrete`,
+O canal WhatsApp foi extraído para `core/services/payment_reminder_wa.py` na
+rodada 6: o assunto é outro (sistema externo, template na Meta, envio por
+destino) e o `payment_reminder.py` estourou o teto de 350 linhas com o conserto
+de falha por destino. §0.5 — dividir por assunto em vez de cortar a razão das
+decisões dos comentários.
+
+CONTROLE NEGATIVO DECLARADO — em
+`core/services/payment_reminder_wa.py::_wa_lembrete`,
 volte o corpo do laço a descartar o retorno (`send_template(...)` numa linha e
 `enviado = True` na seguinte):
     VERMELHO: test_token_invalido_grava_whatsapp_false
@@ -78,15 +85,27 @@ def _detalhes_do_evento(uid: int) -> dict:
     return json.loads(det) if isinstance(det, str) else det
 
 
-def _um_destino_whatsapp(monkeypatch, uid: int) -> None:
-    """Uma identidade de WhatsApp para a conta. `_wa_lembrete` importa
+_NUMEROS = ["5511999990000", "5521988880000", "5531977770000"]
+
+
+def _destinos_whatsapp(monkeypatch, uid: int, quantos: int = 1) -> None:
+    """`quantos` identidades de WhatsApp para a conta. `_wa_lembrete` importa
     `list_identities_by_user` de `db` DENTRO da função, então o ponto de
-    injeção é o módulo `db`."""
+    injeção é o módulo `db`.
+
+    Números de DDDs diferentes de propósito: `_dedupe_whatsapp_targets`
+    normaliza e deduplica por candidatos de telefone, e variações do mesmo
+    número colapsariam em um destino só — o teste de falha parcial precisa de
+    destinos realmente distintos."""
     import db
-    monkeypatch.setattr(
-        db, "list_identities_by_user",
-        lambda u: [{"provider": "whatsapp", "external_id": "5511999990000"}]
-        if int(u) == uid else [])
+    ids = [{"provider": "whatsapp", "external_id": n}
+           for n in _NUMEROS[:quantos]]
+    monkeypatch.setattr(db, "list_identities_by_user",
+                        lambda u: ids if int(u) == uid else [])
+
+
+def _um_destino_whatsapp(monkeypatch, uid: int) -> None:
+    _destinos_whatsapp(monkeypatch, uid, 1)
 
 
 def _send_template(monkeypatch, retorno):
@@ -182,5 +201,131 @@ def test_sem_template_nao_tenta_whatsapp(user_id, monkeypatch):
     _tick()
 
     assert chamadas == [], "tentou WhatsApp sem template aprovado na Meta"
+    assert len(enviados) == 1
+    assert _detalhes_do_evento(user_id)["whatsapp"] is False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FALHA POR DESTINO — a categoria que a rodada anterior pulou.
+#
+# `send_template` tem TRÊS desfechos, e o conserto anterior tratou UM:
+#   • `None` no 401 — token inválido/expirado, GLOBAL (não levanta);
+#   • `raise` em erro de TRANSPORTE (`wa_client.py:189-195`) e em todo outro
+#     `>= 400` (`:237`) — os dois POR DESTINO;
+#   • JSON da resposta no 2xx.
+#
+# O raciocínio da rodada anterior foi "o único desfecho silencioso é o 401, que
+# é global, então `any` e `all` coincidem". Isso era verdade PARA O 401 e nos
+# fez concluir sobre a categoria a partir do caso examinado (§2 — "achei um
+# caso" não é "resolvi a categoria"). Com o `return enviado` DENTRO do `try` de
+# fora, um destino levantando abortava o laço antes dos seguintes E fazia o
+# `except` devolver False mesmo que um destino anterior tivesse aceitado — o
+# comentário que a rodada anterior escreveu ("ALGUM destino aceitou") ficou na
+# frente do código, que é o pior tipo de defeito.
+#
+# CONTROLE NEGATIVO — em `core/services/payment_reminder_wa.py::_wa_lembrete`,
+# tire o `try`/`except` de dentro do laço e volte o `return` para dentro do
+# `try` de fora:
+#     VERMELHO: test_destino_que_estoura_nao_perde_o_sucesso_anterior
+#               test_destino_que_estoura_nao_aborta_os_seguintes
+#     VERDE:    test_todos_os_destinos_aceitos_conta_todos,
+#               test_token_invalido_grava_whatsapp_false (o conserto da rodada
+#               anterior, que a injeção NÃO pode reprovar), e os demais.
+# CONTROLE POSITIVO: test_todos_os_destinos_aceitos_conta_todos — sem ele o
+# grupo passaria num `_wa_lembrete` que devolvesse True sempre.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _send_template_roteiro(monkeypatch, roteiro: dict):
+    """`send_template` que responde por ORDEM de chamada: `roteiro[i]` é o que a
+    i-ésima chamada faz — um valor devolve, um `Exception` levanta. Devolve a
+    lista de destinos tentados."""
+    from adapters.whatsapp import wa_client
+    tentados: list = []
+
+    def _fake(to, nome, language_code=None, **kw):
+        tentados.append(to)
+        acao = roteiro[len(tentados) - 1]
+        if isinstance(acao, Exception):
+            raise acao
+        return acao
+
+    monkeypatch.setattr(wa_client, "send_template", _fake)
+    return tentados
+
+
+_OK = {"messages": [{"id": "wamid.ok"}]}
+
+
+def test_destino_que_estoura_nao_perde_o_sucesso_anterior(user_id, monkeypatch):
+    """NEGATIVO 1: destino 1 aceita, destino 2 levanta → `whatsapp: true`.
+
+    A metade mais insidiosa do defeito: a mensagem CHEGOU num número e o
+    registro dizia que não saiu nada. É exatamente o que o comentário da rodada
+    anterior prometia e o código não fazia.
+    """
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    enviados = _espia(monkeypatch, user_id)
+    _destinos_whatsapp(monkeypatch, user_id, 2)
+    tentados = _send_template_roteiro(
+        monkeypatch, {0: _OK, 1: RuntimeError("WA send_template failed 500")})
+
+    _tick()
+
+    assert len(tentados) == 2, f"os dois destinos não foram tentados: {tentados}"
+    assert len(enviados) == 1, "o e-mail (caminho garantido) deixou de sair"
+    assert _detalhes_do_evento(user_id)["whatsapp"] is True, \
+        "sucesso do 1º destino foi perdido pela falha do 2º"
+
+
+def test_destino_que_estoura_nao_aborta_os_seguintes(user_id, monkeypatch):
+    """NEGATIVO 2: três destinos, o do meio levanta, e o TERCEIRO tem de ser
+    tentado. É a outra metade do apontamento — o laço abortava."""
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    _espia(monkeypatch, user_id)
+    _destinos_whatsapp(monkeypatch, user_id, 3)
+    tentados = _send_template_roteiro(monkeypatch, {
+        0: RuntimeError("transporte caiu"),   # 1º já falha: nada a "preservar"
+        1: _OK,
+        2: _OK,
+    })
+
+    _tick()
+
+    assert len(tentados) == 3, \
+        f"o laço abortou no destino que levantou — tentou só {len(tentados)}"
+    assert _detalhes_do_evento(user_id)["whatsapp"] is True
+
+
+def test_todos_os_destinos_aceitos_conta_todos(user_id, monkeypatch):
+    """POSITIVO: três destinos, três aceitos, `whatsapp: true`. Sem este caso o
+    grupo passaria num `_wa_lembrete` que devolvesse True sempre — inclusive
+    quando nada saiu."""
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    _espia(monkeypatch, user_id)
+    _destinos_whatsapp(monkeypatch, user_id, 3)
+    tentados = _send_template_roteiro(monkeypatch, {0: _OK, 1: _OK, 2: _OK})
+
+    _tick()
+
+    assert len(tentados) == 3
+    assert _detalhes_do_evento(user_id)["whatsapp"] is True
+
+
+def test_todos_os_destinos_falhando_grava_false(user_id, monkeypatch):
+    """O piso do `any`: nenhum destino aceito → `false`. É o que separa "algum
+    aceitou" de "tentou alguém"."""
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    enviados = _espia(monkeypatch, user_id)
+    _destinos_whatsapp(monkeypatch, user_id, 2)
+    tentados = _send_template_roteiro(
+        monkeypatch, {0: RuntimeError("500"), 1: None})   # 500 e depois 401
+
+    _tick()
+
+    assert len(tentados) == 2
     assert len(enviados) == 1
     assert _detalhes_do_evento(user_id)["whatsapp"] is False

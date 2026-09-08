@@ -104,7 +104,8 @@ async def check_payment_reminder() -> None:
     executor — mantenha assim. A decriptação de PII era a exceção e foi para
     `_decifrar_lote` (medição e o motivo da forma, na docstring dela).
 
-    E-MAIL é o caminho garantido; o WhatsApp é melhoria. Ver `_wa_lembrete`.
+    E-MAIL é o caminho garantido; o WhatsApp é melhoria e mora em
+    `core/services/payment_reminder_wa.py`.
     """
     if not payment_reminder_enabled():
         return
@@ -118,6 +119,8 @@ async def check_payment_reminder() -> None:
     from core.services.email_service import send_payment_reminder_email
     # Reuso, não cópia (§0.1): a minimização de PII em log já existe lá.
     from core.services.engagement_scheduler import _mask_email
+    # O canal WhatsApp mora em módulo irmão (assunto próprio + teto de linhas).
+    from core.services.payment_reminder_wa import _wa_lembrete
     from db.dunning import ciclo_de_atraso_aberto, list_payment_reminder_candidates
 
     loop = asyncio.get_event_loop()
@@ -286,51 +289,3 @@ def _pago_por_outro_caminho(user_id: int) -> bool:
     from db.plan_grants import list_grants
     return grant_vigente(list_grants(user_id), datetime.now(timezone.utc),
                          sources=("pix", "admin"))
-
-
-def _wa_lembrete(user_id: int) -> bool:
-    """Manda o lembrete por WhatsApp. True se saiu, False se não.
-
-    Mensagem proativa fora da janela de 24 h exige TEMPLATE APROVADO NA META,
-    e o nome do template vive em `WA_TEMPLATE_PAYMENT_REMINDER`, VAZIO por
-    padrão — sem a env este caminho é dormente e nem importa o `wa_client`
-    (mesmo desenho do `open_finance_proactive._template_cfg`). O texto do
-    template é escrito na Meta, fora deste repositório: quem o aprovar tem de
-    manter a mesma regra da copy do e-mail e NÃO prometer perda de acesso.
-
-    Nunca levanta: o e-mail já saiu quando isto roda, e derrubar o tick por
-    causa de um template não aprovado transformaria a melhoria em regressão.
-    """
-    nome = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER") or "").strip()
-    if not nome:
-        return False
-    try:
-        from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
-        from adapters.whatsapp.wa_client import send_template
-        from db import list_identities_by_user
-        idioma = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER_LANGUAGE") or "pt_BR").strip()
-        enviado = False
-        for to in _dedupe_whatsapp_targets(list_identities_by_user(user_id)):
-            # O RETORNO CARREGA VEREDITO, e descartá-lo gravava
-            # `whatsapp: true` com a Meta tendo RECUSADO a mensagem.
-            # `send_template` devolve `None` no 401 — token inválido/expirado,
-            # `adapters/whatsapp/wa_client.py:220` — e LEVANTA em todo outro
-            # `>= 400` (`:237`). O 401 é o ÚNICO caminho silencioso e o pior:
-            # token expirado faz TODO envio falhar sem ninguém saber.
-            #
-            # `is not None`, não truthiness: o contrato é "None no 401, JSON da
-            # resposta nos outros casos".
-            #
-            # Semântica: "ALGUM destino aceitou". É o que interessa ao lembrete
-            # (a pessoa foi alcançada em pelo menos um número), e o único
-            # desfecho silencioso é o 401, que é problema de TOKEN e portanto
-            # GLOBAL — com ele nenhum destino passa e `any`/`all` coincidem.
-            #
-            # O `RuntimeError` dos outros `>= 400` não ganha tratamento novo: o
-            # `except` deste `try` já o captura (comportamento pré-existente).
-            if send_template(to, nome, language_code=idioma) is not None:
-                enviado = True
-        return enviado
-    except Exception as exc:
-        logger.warning("[cobranca] WhatsApp não enviado user_id=%s: %s", user_id, exc)
-        return False

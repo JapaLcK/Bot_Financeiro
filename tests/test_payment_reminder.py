@@ -159,11 +159,16 @@ def test_dedupe_nao_reenvia_no_mesmo_ciclo(user_id, monkeypatch):
 def test_email_sai_sem_template_de_whatsapp(user_id, monkeypatch):
     """O e-mail é o caminho GARANTIDO; o WhatsApp é melhoria que liga quando o
     template existir na Meta. Sem a env, `_wa_lembrete` devolve False sem
-    sequer importar o wa_client — e o e-mail sai igual."""
+    sequer importar o wa_client — e o e-mail sai igual.
+
+    O canal WhatsApp mora em `core/services/payment_reminder_wa.py` (assunto
+    próprio, e o `payment_reminder.py` bateu no teto de 350 linhas); o resto
+    dele tem arquivo de teste próprio, `test_payment_reminder_whatsapp.py`."""
+    from core.services.payment_reminder_wa import _wa_lembrete
     _inadimplente(user_id, dias=6.5)
     enviados = _espia(monkeypatch, user_id)
     _limpar_eventos(user_id)
-    assert payment_reminder._wa_lembrete(user_id) is False
+    assert _wa_lembrete(user_id) is False
     _tick()
     assert len(enviados) == 1
 

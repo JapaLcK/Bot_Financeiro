@@ -4992,7 +4992,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
         # tudo uma vez só, em vez de repetir a metade que já tinha passado.
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            # As TRÊS chamadas de `Subscription.retrieve` deste handler são a
+            # mesma classe (I/O síncrono no event loop único) e foram
+            # embrulhadas juntas — fechar duas e deixar a terceira é o erro de
+            # instância que este PR já pagou cinco vezes (§2). Estas duas
+            # (`checkout` e `invoice.paid`) são as mais FREQUENTES das três.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "trialing"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
@@ -5180,7 +5186,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id  = _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
@@ -5400,9 +5407,23 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         _sub_id = _invoice_subscription_id(invoice)
         _status_agora = ""
         if user_id and _sub_id:
-            _status_agora = (
-                _g(stripe.Subscription.retrieve(_sub_id), "status") or ""
-            ).strip().lower()
+            # `to_thread` porque este handler é `async` e roda no event loop
+            # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
+            # inteiro enquanto espera o Stripe — e não por milissegundos, mas
+            # pelo timeout do cliente HTTP, com request e OUTROS webhooks de
+            # pagamento parados atrás. `to_thread` é o padrão JÁ estabelecido
+            # neste arquivo para chamada Stripe em handler async (as cinco de
+            # `SubscriptionSchedule`, :4503-:4660), então embrulhar aqui é
+            # CONVERGIR com o arquivo, não divergir.
+            #
+            # A propagação de exceção fica IDÊNTICA — `to_thread` relança na
+            # corrotina que espera —, e o guard depende disso: falha do
+            # `retrieve` tem de virar 5xx e não "status vazio", senão um evento
+            # obsoleto passaria pela guarda. Amarrado por
+            # `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`.
+            _sub_agora = await asyncio.to_thread(
+                stripe.Subscription.retrieve, _sub_id)
+            _status_agora = (_g(_sub_agora, "status") or "").strip().lower()
         if user_id and _status_agora and _status_agora not in PAST_DUE_PAYMENT_STATUSES:
             await log_system_event(
                 "warning",
