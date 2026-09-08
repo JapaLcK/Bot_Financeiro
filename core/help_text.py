@@ -5,6 +5,13 @@ from typing import Literal, Tuple
 
 Platform = Literal["discord", "whatsapp"]
 
+# Texto exato que pede o menu de ajuda. Fonte única (§0.7): o desvio do
+# WhatsApp (wa_runtime) e a isenção do gate de plano (handle_incoming) leem
+# daqui — duas cópias divergiriam no dia em que uma ganhasse "/menu".
+HELP_TRIGGERS: frozenset[str] = frozenset({
+    "ajuda", "help", "menu", "/ajuda", "/help", "/menu",
+})
+
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
     "Digite `ajuda` para ver os comandos.\n"

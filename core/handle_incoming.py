@@ -470,9 +470,9 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
 def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
     """
-    Com o paywall ligado, o bot só atende quem tem assinatura ativa (ou trial).
-    Retorna a mensagem de convite quando o usuário não tem acesso, ou None pra
-    seguir o fluxo normal.
+    O bot só atende quem já escolheu um plano na /precos (v2) ou tem acesso
+    liberado no fluxo legado do paywall. Retorna a mensagem de convite quando o
+    usuário não tem acesso, ou None pra seguir o fluxo normal.
 
     Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
     attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
@@ -482,29 +482,73 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     Trancar quem está pagando é pior do que escapar uma mensagem.
     """
     try:
-        from core.services.plan_service import has_app_access, paywall_enabled
-        if not paywall_enabled():
+        # Isenções, mesmo papel do _GATE_EXEMPT_PREFIXES = ("/billing", "/auth",
+        # "/conta") da web (frontend/routes/shared.py): quem está barrado tem de
+        # conseguir assinar e pedir ajuda. No Discord isto é obrigatório — lá o
+        # handle_incoming responde assinar/plano/cancelar e ajuda ele mesmo, e o
+        # adapter só chega aos cogs quando a lista volta vazia.
+        from core.services.billing_commands import is_billing_command
+        from core.help_text import HELP_TRIGGERS
+        texto = (msg.text or "").strip().lower()
+        # `not msg.attachments`: no WhatsApp a LEGENDA do anexo vira msg.text
+        # (adapters/whatsapp/wa_parse.py), então um .ofx legendado "ajuda"
+        # atravessaria o gate inteiro. Anexo com legenda de ajuda não é pedido
+        # de ajuda — a isenção é do campo texto, o anexo segue barrado.
+        if not msg.attachments and (texto in HELP_TRIGGERS or is_billing_command(texto)):
+            # ponytail: isenta a MENSAGEM, não garante a RESPOSTA de billing —
+            # daqui ela segue o fluxo normal, e com uma pendência aberta o
+            # handle_billing_command cede a vez (aí "cancelar" cancela a
+            # pendência, não mexe em dinheiro). Se um dia isso incomodar, o
+            # certo é o gate devolver a resposta de billing ele mesmo.
             return None
+
+        # Mesma expressão do gate do WS e do _post_login_url. A perna do
+        # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
+        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py) e é a
+        # única que morde hoje — `has_app_access` devolve True com o v2 ligado.
+        # A política (onde vale, e por que sem isenção de app) mora na docstring
+        # de plan_service.needs_plan_selection.
+        from core.services.plan_service import (
+            has_app_access, needs_plan_selection, plans_v2_enabled,
+        )
         uid = _normalize_user_id(msg)
-        if has_app_access(uid):
+        # Linha enxuta em vez do get_auth_user: aquele SELECT decifra PII e
+        # registra em pii_access_log, e este gate roda em TODA mensagem. Mesmo
+        # motivo (e mesmo padrão) do bloco de onboarding em db/reports.py.
+        # O custo: get_plan_gate_state NÃO tem cache, então é 1 SELECT por
+        # mensagem, sempre — o get_auth_user absorvia as seguintes num cache de
+        # 10 s. Troca aceita: escrever em pii_access_log por mensagem é pior que
+        # um SELECT por chave primária.
+        # O `plans_v2_enabled()` fica AQUI, e não dentro do needs_plan_selection,
+        # pra que o freio de emergência devolva também a QUERY: com o v2 off o
+        # veredito seria False de qualquer jeito, mas o SELECT teria sido feito
+        # e jogado fora. Puxar o freio tem de zerar o custo, não só o efeito.
+        sem_plano = False
+        if plans_v2_enabled():
+            estado = db.get_plan_gate_state(uid)
+            # Sem linha em auth_accounts não há cadastro web e não há plano a
+            # exigir — mesmo veredito do needs_plan_selection, sem deixar ele
+            # repetir a consulta pelo get_auth_user (era a 2ª query do usuário
+            # só-WhatsApp, que é a maioria aqui).
+            sem_plano = estado is not None and needs_plan_selection(uid, estado)
+        if not (sem_plano or not has_app_access(uid)):
             return None
     except Exception:
         logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
         return None
 
-    # Link autenticado que já cai no /precos logado; usa o público se falhar.
+    # Link público, sem token: cada link autenticado insere uma linha em
+    # dashboard_sessions que só sai quando é consumida, e mensagem barrada não
+    # costuma ser consumida — quem insiste geraria lixo permanente. A web faz
+    # igual: redireciona pra /precos e quem vai pagar loga de qualquer jeito.
     link = "https://pigbankai.com/precos"
-    try:
-        from core.dashboard_links import build_dashboard_link
-        link = build_dashboard_link(uid, hours=1.0, next_path="/precos") or link
-    except Exception:
-        logger.warning("não consegui gerar link autenticado do /precos", exc_info=True)
 
     return [OutgoingMessage(text=(
         "🐷 Oi! Que bom te ver por aqui.\n\n"
         "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra começar com {_bold('15 dias grátis', platform)}, sem cobrança "
-        "agora e cancelando quando quiser.\n\n"
+        f"dá pra testar {_bold('15 dias grátis', platform)} (um teste por número) "
+        "— o checkout mostra o que vai ser cobrado, e quando, antes de você "
+        "confirmar.\n\n"
         f"👉 {link}\n\n"
         "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "
         "tudo pra você 💚"

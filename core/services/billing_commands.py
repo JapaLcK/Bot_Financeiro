@@ -42,6 +42,27 @@ _PLANO_TRIGGERS = {
 }
 
 
+def _norm_cmd(text: str) -> str:
+    """Normaliza e tira o "/" do Discord (ex: "/assinar" → "assinar")."""
+    norm = _normalize(text)
+    return norm[1:].strip() if norm.startswith("/") else norm
+
+
+def is_billing_command(text: str) -> bool:
+    """True se o texto é assinar/cancelar/plano. Sem DB, sem efeito colateral.
+
+    Existe pro gate de plano (core.handle_incoming._paywall_gate) poder isentar
+    estes comandos SEM reimplementar os triggers: é o mesmo papel do
+    `_GATE_EXEMPT_PREFIXES = ("/billing", ...)` da web (frontend/routes/shared.py)
+    — quem está barrado precisa conseguir assinar."""
+    norm = _norm_cmd(text)
+    return bool(norm) and (
+        norm in _ASSINAR_TRIGGERS
+        or norm in _CANCELAR_TRIGGERS
+        or norm in _PLANO_TRIGGERS
+    )
+
+
 def _normalize(text: str) -> str:
     """Lowercase + remove acentos + colapsa espacos."""
     if not text:
@@ -273,21 +294,11 @@ def handle_billing_command(user_id: int, text: str, platform: str = "whatsapp") 
     a confirmação. Senão "cancelar" puro durante uma confirmação de delete
     viraria comando de billing.
     """
-    norm = _normalize(text)
-    if not norm:
+    # Match rápido: se nem encosta nos triggers, retorna sem mexer no DB (e sem
+    # normalizar duas vezes — a maioria das mensagens sai por aqui).
+    if not is_billing_command(text):
         return None
-
-    # Aceita prefixo "/" do Discord (ex: "/assinar")
-    if norm.startswith("/"):
-        norm = norm[1:].strip()
-
-    # Match rápido: se nem encosta nos triggers, retorna sem mexer no DB.
-    if (
-        norm not in _ASSINAR_TRIGGERS
-        and norm not in _CANCELAR_TRIGGERS
-        and norm not in _PLANO_TRIGGERS
-    ):
-        return None
+    norm = _norm_cmd(text)
 
     # Pending action → cede o turno pro ai_chat_command. Cobre "cancelar"
     # puro durante confirmação de delete, etc.
