@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.admin_dashboard import log_system_event
-from core.audit import AuditEvent, record_audit_event
+from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.secure_compare import constant_time_eq
 from core.pg_text import limpa_para_pg
 from core.services.pluggy import (
@@ -267,7 +267,8 @@ def _retryable(exc: BaseException) -> bool:
 
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
-                         tinha_conexao_propria: bool = False) -> tuple[dict, bool]:
+                         tinha_conexao_propria: bool = False,
+                         criar_usuario: bool = True) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -344,11 +345,13 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # propósito: o número muda com a versão do psycopg e envelhece errado.
         resto = None if budget_ms is None else max(
             1, budget_ms - int((time.monotonic() - t0) * 1000))
-        return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
+        return save_pluggy_open_finance_item(
+            user_id, remote, budget_ms=resto, criar_usuario=criar_usuario), True
 
 
 async def _grava_reconexao(
     user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
+    criar_usuario: bool = True,
 ) -> dict:
     """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
 
@@ -394,7 +397,7 @@ async def _grava_reconexao(
         try:
             connection, sob_lock = await asyncio.to_thread(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
-                tinha_conexao_propria)
+                tinha_conexao_propria, criar_usuario)
             causa = None
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
@@ -665,10 +668,16 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         conexão local" para sempre): docstring de `db.item_registry_origins`,
         fonte única dos três leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
         com dono ANTES da conexão, então ela mesma fecha a duplicata;
-      • o usuário TEM de existir. Não dá para delegar à FK: todo caminho de
-        escrita passa por `ensure_user_tx`, que CRIA a linha de `users`. Conta
-        apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
-        best-effort ressuscitava por causa de um evento da Pluggy;
+      • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
+        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
+        é ele que responde quando a conta já não existia — mas é leitura em
+        transação própria, então sozinho ele só cobre a foto do instante em que
+        leu. Quem cobre a JANELA (exclusão da conta commitando entre a leitura e
+        a escrita) é a FK, e só porque as duas escritas desta função passaram a
+        ser incapazes de criar usuário: `register_item` nunca criou, e a conexão
+        vai com `criar_usuario=False`. Antes, `ensure_user_tx` RESSUSCITAVA a
+        conta apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
+        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313);
       • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
         ela deixava conexão commitada com registry VAZIO — item adotado sem
         nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
@@ -777,7 +786,22 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             register_item, dono, provider_item_id=item_id, origin="webhook_adopt",
             status=str(remote.get("status") or "") or None, last_event=last_event,
         )
-        await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False)
+        # `criar_usuario=False`: a FK da conexão é a ÚNICA coisa atômica com o
+        # insert. O `user_exists` acima é leitura em transação PRÓPRIA, e uma
+        # exclusão de conta (db/privacy.py) que commite entre ele e esta escrita
+        # deixava o `ensure_user_tx` recriar a linha de `users` que a LGPD acabou
+        # de apagar — o `register_item` acima já cai na FK dele quando a exclusão
+        # chega antes, e esta fecha o resto da janela (Codex #313, P1). Sem a
+        # linha de `users`, o insert estoura `ForeignKeyViolation`, o `except`
+        # abaixo registra e o webhook responde 200 sem adotar.
+        # Registrado, não consertado: sem o `ensure_user_tx` a adoção também
+        # deixa de REPOR a linha de `accounts`, e existe estado de produção com
+        # `users` sem `accounts` (`merge_users` apaga a do `from_user_id` e nunca
+        # apaga o `users` dele, db/users.py:107). Medido: a adoção grava, o
+        # snapshot responde e `get_consolidated_balance` devolve zeros sem
+        # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
+        await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False,
+                               criar_usuario=False)
     except Exception as exc:
         # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de três
         # desfechos com ações de operador diferentes — 402 (teto de bancos do
@@ -1169,6 +1193,34 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     # Lido ANTES do `register_item` abaixo, que grava justamente essa origem.
     conexao_recem_adotada = tinha_conexao_propria and "pluggy_item" not in (
         await asyncio.to_thread(item_registry_origins, new_item_id))
+    if conexao_recem_adotada:
+        # ...e o webhook TEM de ter auditado de verdade. `record_audit_event`
+        # ENGOLE falha de banco (core/audit.py:156) — o rastro prova a adoção, não
+        # a auditoria —, então o insert dele podia falhar lá e esta guarda suprimir
+        # aqui: NENHUM `OPEN_FINANCE_CONNECTED` para uma conexão que nasceu. Num
+        # log de segurança duplicata é ruído e buraco é perda (Codex #313, P2).
+        # Fecha junto o 2º caso do mesmo achado: conexão ANTERIOR ao registry não
+        # tem rastro nenhum, e a 1ª reconexão dela caía como duplicata de um
+        # webhook que nunca existiu.
+        # `list_audit_events` (já existente, e já filtrada por `user_id`) em vez de
+        # query nova: são os 50 últimos eventos do usuário, e a adoção que este POST
+        # duplica aconteceu segundos atrás. Fora dessa janela o desfecho é auditar DE
+        # NOVO, que é o lado barato do erro — e falha de banco cai do mesmo lado
+        # porque quem captura `Exception` e devolve `[]` é a PRÓPRIA
+        # `list_audit_events` (core/audit.py:95-97). Aqui não há `try`: o que
+        # escapar dela vira 500 para o usuário, não degradação.
+        # `isinstance(..., dict)` e não `or {}`: uma linha com `details` escalar
+        # (`'"texto"'::jsonb`) estoura `AttributeError` no `.get`, e sem guarda o
+        # POST fica 500 PERMANENTE para aquele usuário. Nenhum escritor de hoje
+        # grava assim (os dois passam dict, e `Jsonb(details or {})` normaliza o
+        # `None`) — é fronteira de dado vindo do banco, custa uma linha.
+        conexao_recem_adotada = any(
+            e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
+            and isinstance(e.get("details"), dict)
+            and e["details"].get("item_id") == new_item_id
+            and e["details"].get("origin") == "webhook_adopt"
+            for e in await asyncio.to_thread(list_audit_events, session_uid, 50)
+        )
 
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
@@ -1190,9 +1242,21 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     # O que se suprime é "o webhook JÁ auditou ESTA conexão", não "o usuário já
     # tinha este banco" — reconexão legítima (re-consentimento, conserto de
     # LOGIN_ERROR) é evento de segurança e continua aparecendo, uma vez cada.
-    # ponytail: a 1ª reconexão de um item adotado pelo webhook cujo navegador
-    # NUNCA postou (aba fechada) ainda cai como duplicata e não audita — a partir
-    # da 2ª, audita. Fechar isso exige marcar a adoção na própria conexão.
+    # ponytail: dois tetos conhecidos, ambos de UM evento de auditoria e ambos
+    # fechados pela mesma coisa — marcar a adoção na PRÓPRIA conexão (coluna
+    # nova + migração), que é o custo que nenhum dos dois paga hoje:
+    #   1. item adotado pelo webhook cujo navegador NUNCA postou (aba fechada):
+    #      a 1ª reconexão cai como duplicata e não audita — mas só ENQUANTO a
+    #      auditoria do webhook estiver nos 50 últimos eventos do usuário
+    #      (`min(limit, 50)` do `list_audit_events`). Com mais de 50 eventos no
+    #      meio, a evidência sai da janela e a 1ª reconexão audita. Da 2ª em
+    #      diante audita sempre: aí o registry já tem `pluggy_item`.
+    #   2. a janela invertida, que é DUPLICATA e não buraco: `_adota_item_orfao`
+    #      commita a conexão e só depois grava o `record_audit_event` do webhook.
+    #      Um `POST /pluggy-item` que caia nesse vão vê a conexão de pé e a
+    #      evidência ainda não → audita, e o webhook audita em seguida: 2
+    #      `OPEN_FINANCE_CONNECTED` para 1 conexão. Escolha deliberada, mesma
+    #      régua do bloco acima — duplicata é ruído, buraco é perda.
     if not conexao_recem_adotada:
         await asyncio.to_thread(
             record_audit_event,

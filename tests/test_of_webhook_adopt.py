@@ -9,7 +9,9 @@ docstring de `frontend/routes/open_finance._adota_item_orfao`, "Por que existe".
 
 CONTROLE NEGATIVO do grupo:
   • `test_adocao_desligada_volta_a_deixar_o_dono_sem_linha` desliga
-    `_adota_item_orfao` e o caso do teste positivo volta a `connections == []`.
+    `_adota_item_orfao` e o caso do teste positivo volta a `connections == []`;
+  • `test_conta_apagada_no_meio_da_adocao_nao_ressuscita` tem o seu: tirar o
+    `criar_usuario=False` da adoção e ele volta a achar a conta recriada.
 CONTROLE POSITIVO (a adoção RESTRINGE nada, mas ADICIONA escrita num caminho de
 posse): `test_item_sem_client_user_id_mantem_o_comportamento_de_hoje` prova que
 o ramo antigo continua de pé quando não há dono a resolver.
@@ -27,7 +29,8 @@ from test_of_item_ownership import _auth, _webhook, eventos  # noqa: F401
 # Helpers de _guards, como o `_dupe.py` já fazia: eram cópias byte a byte aqui
 # (CLAUDE.md §0.1). `_limpa_item` apaga registry E conexão — antes havia um
 # `_limpa_registry` local que só apagava metade, com outro nome.
-from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
+from test_of_webhook_adopt_guards import (  # noqa: F401
+    _existe_user, _limpa_item, _mock_item, _registry, webhook_pluggy)
 
 
 def test_webhook_adota_item_orfao_e_a_tela_passa_a_mostrar_o_banco(
@@ -213,3 +216,50 @@ def test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando(
     finally:
         db.disconnect_open_finance_connection(user_id)
         _limpa_item("item-updating")
+
+
+def test_conta_apagada_no_meio_da_adocao_nao_ressuscita(monkeypatch, eventos, webhook_pluggy):
+    """A JANELA entre o `user_exists` e a escrita da conexão (Codex #313, P1).
+
+    `user_exists` lê em transação própria, e `register_item`/`save_pluggy_open_
+    finance_item` escrevem em outras duas. O interleaving que o Codex nomeou:
+    rastro gravado → `delete_user_data` roda INTEIRO (a cascata leva o rastro
+    junto) → a escrita da conexão. Aqui a exclusão é disparada de dentro do
+    `register_item` justamente para cair nessa ordem, sem sleep.
+
+    Com `ensure_user_tx` no caminho, essa última escrita RECRIAVA a linha de
+    `users` que a LGPD acabou de apagar e pendurava a conexão nela — a guarda de
+    identidade não alcança, porque no instante em que ela leu a conta existia.
+    Quem alcança é a FK, e só com `criar_usuario=False`.
+    """
+    fantasma = 987654321988
+    db.ensure_user(fantasma)
+    _mock_item(monkeypatch, fantasma)
+
+    real_register = of_routes.register_item
+
+    def _apaga_a_conta_no_meio(*a, **k):
+        rid = real_register(*a, **k)
+        with get_conn() as c:      # a exclusão commita DEPOIS do user_exists
+            c.execute("delete from users where id=%s", (fantasma,))
+            c.commit()
+        return rid
+
+    monkeypatch.setattr(of_routes, "register_item", _apaga_a_conta_no_meio)
+    try:
+        r = _webhook(TestClient(dashboard.app), "item/created", "item-lgpd-corrida")
+
+        assert r.status_code == 200, f"{r.status_code}: a Pluggy retenta em laço"
+        assert not _existe_user(fantasma), (
+            "a escrita da conexão RECRIOU a conta que a exclusão apagou no meio")
+        assert db.get_connections_by_item_id("item-lgpd-corrida") == [], \
+            "conexão pendurada numa conta que não existe mais"
+        motivos = [e["details"].get("motivo") for e in eventos
+                   if e["event"] == "of_webhook_adopt_skipped"]
+        assert motivos == ["ForeignKeyViolation"], (
+            f"a FK tinha de ser quem recusa nesta janela: {motivos}")
+    finally:
+        _limpa_item("item-lgpd-corrida")
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (fantasma,))
+            c.commit()

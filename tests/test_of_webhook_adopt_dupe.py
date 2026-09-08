@@ -36,6 +36,15 @@ CONTROLES do grupo:
     _vez` vermelho, e o `test_webhook_antes_do_navegador_audita_uma_vez_por_
     conexao` (guards) continua verde — é ele que cobre os outros dois casos:
     conexão nova COM webhook antes, e conexão nova SEM webhook antes;
+  • negativo (evidência durável): tirar o `if conexao_recem_adotada:` que exige a
+    auditoria do webhook PERSISTIDA →
+    `test_auditoria_engolida_no_webhook_nao_apaga_a_da_rota` e
+    `test_reconexao_de_conexao_anterior_ao_registry_audita` vermelhos (0 eventos),
+    nos dois casos que estão VERDES hoje;
+  • negativo (`details` escalar): voltar o `isinstance(e.get("details"), dict)`
+    para `(e.get("details") or {})` →
+    `test_details_escalar_no_rastro_nao_derruba_o_post` vermelho
+    (`AttributeError`), com os outros casos do arquivo verdes;
   • positivo: `test_rastro_sem_dono_nao_bloqueia_a_adocao_legitima` prova que a
     guarda nova recusa por DONO, não por "tem rastro" — senão ela mataria
     justamente o usuário que o PR veio destravar.
@@ -48,6 +57,7 @@ import asyncio
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
+from db.connection import get_conn
 from fastapi.testclient import TestClient
 from test_of_item_ownership import SEGREDO, _auth, _item_remoto, _webhook, eventos  # noqa: F401
 from test_of_webhook_adopt_guards import _limpa_item, _mock_item, _registry, webhook_pluggy  # noqa: F401
@@ -188,3 +198,106 @@ def test_segunda_entrega_inteira_dentro_do_get_da_primeira_audita_uma_vez(
     finally:
         db.disconnect_open_finance_connection(user_id)
         _limpa_item("z-corrida")
+
+
+def test_auditoria_engolida_no_webhook_nao_apaga_a_da_rota(
+        user_id, monkeypatch, eventos, webhook_pluggy):
+    """`record_audit_event` ENGOLE falha de banco (core/audit.py:152).
+
+    Se o insert dele falhar DENTRO da adoção, o rastro `webhook_adopt` fica lá
+    dizendo "o webhook auditou" — e a guarda do `POST /pluggy-item` suprimia a
+    auditoria da rota por causa dele. Desfecho: conexão viva e NENHUM
+    `OPEN_FINANCE_CONNECTED` em "Atividade da conta" (Codex #313, P2).
+    """
+    from core.audit import AuditEvent, list_audit_events
+
+    real_audit = of_routes.record_audit_event
+
+    def _engole_a_do_webhook(uid, evento, **kw):
+        if (kw.get("details") or {}).get("origin") == "webhook_adopt":
+            return                      # o insert falhou e ninguém ficou sabendo
+        return real_audit(uid, evento, **kw)
+
+    monkeypatch.setattr(of_routes, "record_audit_event", _engole_a_do_webhook)
+    _mock_item(monkeypatch, user_id)
+    client = TestClient(dashboard.app)
+    try:
+        assert _webhook(client, "item/created", "z-sem-audit").status_code == 200
+        assert len(db.get_connections_by_item_id("z-sem-audit")) == 1, "pré-condição: adotou"
+
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "z-sem-audit"}}, headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+
+        gravados = [e for e in list_audit_events(user_id, limit=50)
+                    if e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
+                    and (e.get("details") or {}).get("item_id") == "z-sem-audit"]
+        assert len(gravados) == 1, (
+            f"{len(gravados)} eventos: a conexão nasceu e não aparece em "
+            "'Atividade da conta' — duplicata é ruído, buraco é perda")
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("z-sem-audit")
+
+
+def test_reconexao_de_conexao_anterior_ao_registry_audita(
+        user_id, monkeypatch, eventos, webhook_pluggy):
+    """Conexão que existe SEM rastro nenhum (nasceu antes do registry): a guarda
+    lia "sem `pluggy_item`" como "o webhook auditou", e o webhook nunca existiu.
+
+    É a 2ª metade do mesmo achado do Codex, e não estava no `ponytail:` que a
+    rodada anterior declarou: ali o teto era só o item ADOTADO cujo navegador
+    nunca postou.
+    """
+    from core.audit import AuditEvent, list_audit_events
+
+    _mock_item(monkeypatch, user_id)
+    client = TestClient(dashboard.app)
+    try:
+        db.save_pluggy_open_finance_item(
+            user_id, {"id": "z-legado", "status": "UPDATED",
+                      "connector": {"id": 612, "name": "Nubank"}})
+        assert _registry("z-legado") == [], "pré-condição: conexão sem rastro"
+
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "z-legado"}}, headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+
+        gravados = [e for e in list_audit_events(user_id, limit=50)
+                    if e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
+                    and (e.get("details") or {}).get("item_id") == "z-legado"]
+        assert len(gravados) == 1, f"a reconexão sumiu de 'Atividade da conta': {gravados}"
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("z-legado")
+
+
+def test_details_escalar_no_rastro_nao_derruba_o_post(
+        user_id, monkeypatch, eventos, webhook_pluggy):
+    """Uma linha de `audit_events` com `details` ESCALAR (`'"texto"'::jsonb`)
+    fazia o `.get` da guarda estourar `AttributeError` dentro do laço — 500
+    PERMANENTE no `POST /pluggy-item` daquele usuário, para sempre, por causa de
+    um dado. Nenhum escritor de hoje grava assim; é fronteira de leitura do banco.
+    """
+    from core.audit import AuditEvent
+
+    _mock_item(monkeypatch, user_id)
+    client = TestClient(dashboard.app)
+    try:
+        assert _webhook(client, "item/created", "z-escalar").status_code == 200
+        with get_conn() as c:                       # mais NOVA que a do webhook: o
+            c.execute(                              # laço bate nela primeiro
+                "insert into audit_events (user_id, event, details) values (%s,%s,%s::jsonb)",
+                (user_id, AuditEvent.OPEN_FINANCE_CONNECTED, '"texto"'))
+            c.commit()
+
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "z-escalar"}}, headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+    finally:
+        with get_conn() as c:
+            c.execute("delete from audit_events where user_id=%s and details=%s::jsonb",
+                      (user_id, '"texto"'))
+            c.commit()
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("z-escalar")

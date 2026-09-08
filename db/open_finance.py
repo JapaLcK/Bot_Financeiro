@@ -619,11 +619,23 @@ class _CursorComTeto:
 
 
 def save_pluggy_open_finance_item(user_id: int, item: dict, *,
-                                  budget_ms: int | None = None) -> dict:
+                                  budget_ms: int | None = None,
+                                  criar_usuario: bool = True) -> dict:
     """Grava (ou reconecta) o item da Pluggy.
 
     `budget_ms` é o teto de espera desta escrita, para quem tem cliente HTTP
     esperando — a rota de reconexão. Sem ele, comportamento de sempre.
+
+    `criar_usuario=False` desliga o `ensure_user_tx` e deixa a FK
+    `open_finance_connections.user_id -> users(id)` decidir: sem a linha de
+    `users`, o insert estoura `ForeignKeyViolation` na MESMA transação, em vez de
+    criar o usuário que falta. É o que a adoção pelo webhook usa
+    (`frontend/routes/open_finance._adota_item_orfao`): lá o `user_id` vem do
+    `clientUserId` REMOTO e é lido fora da transação da escrita, então uma
+    exclusão de conta (LGPD) que commite no meio deixava o `ensure_user_tx`
+    RESSUSCITAR a conta apagada e pendurar a conexão nela (Codex #313, P1).
+    Quem tem sessão autenticada continua com o default: a linha de `users` é
+    pré-requisito da sessão, e o `ensure_user_tx` ainda repõe a de `accounts`.
 
     O `ensure_user` saiu daqui e virou `ensure_user_tx` DENTRO da mesma
     transação do upsert: eram duas aquisições de conexão do pool (até 30s cada,
@@ -664,7 +676,8 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         with conn.cursor() as cur:
             if budget_ms is not None:
                 cur = _CursorComTeto(cur, budget_ms, t0)
-            ensure_user_tx(cur, user_id)
+            if criar_usuario:
+                ensure_user_tx(cur, user_id)
             cur.execute(
                 """
                 insert into open_finance_connections (

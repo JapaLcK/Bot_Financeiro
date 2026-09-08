@@ -121,7 +121,8 @@ def test_usuario_inexistente_nao_e_criado_pelo_webhook(monkeypatch, eventos, web
         # certo por acidente — a FK de `open_finance_item_registry.user_id` recusa
         # o rastro e a adoção morre ali. Duas defesas para o mesmo estrago é bom;
         # depender só da segunda é o que já falhou uma vez (a FK da conexão nunca
-        # dispara, porque `ensure_user_tx` cria a linha antes). Este assert é o
+        # dispara — hoje ela dispara: a adoção grava com `criar_usuario=False`,
+        # e esse é o conserto do P1 do Codex #313, não desta guarda). Este assert é o
         # que separa "recusamos por identidade" de "o banco recusou por acaso".
         motivos = [e["details"].get("motivo") for e in eventos
                    if e["event"] == "of_webhook_adopt_skipped"]
@@ -306,13 +307,23 @@ def test_webhook_antes_do_navegador_audita_uma_vez_por_conexao(
     produção é webhook primeiro. Então a adoção roda no fluxo comum, e as duas
     portas gravavam `OPEN_FINANCE_CONNECTED` para a MESMA conexão: o histórico
     de segurança do usuário mentia sobre quantas vezes ele conectou o banco.
+
+    O espião GRAVA de verdade (ele chama o `record_audit_event` real) porque a
+    guarda passou a exigir evidência DURÁVEL da auditoria do webhook — um stub que
+    só anota numa lista deixava `audit_events` vazio, e a rota (com razão) auditava
+    de novo. Com o stub mudo este caso ficaria verde num código sem dedup nenhuma.
     """
     from core.audit import AuditEvent
 
     auditados: list[int] = []
-    monkeypatch.setattr(of_routes, "record_audit_event",
-                        lambda uid, evento, **kw: auditados.append(uid)
-                        if evento == AuditEvent.OPEN_FINANCE_CONNECTED else None)
+    real_audit = of_routes.record_audit_event
+
+    def _espia(uid, evento, **kw):
+        if evento == AuditEvent.OPEN_FINANCE_CONNECTED:
+            auditados.append(uid)
+        return real_audit(uid, evento, **kw)
+
+    monkeypatch.setattr(of_routes, "record_audit_event", _espia)
     _mock_item(monkeypatch, user_id)
     client = TestClient(dashboard.app)
     try:
