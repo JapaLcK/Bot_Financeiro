@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 from utils_text import (
     normalize_text,
@@ -19,8 +18,6 @@ from utils_text import (
     MEMORY_STOP_TOKENS,
 )
 from db import (
-    get_memorized_category,
-    get_memorized_rule,
     get_memorized_rules,
     upsert_category_rule,
     list_custom_categories_com_data,

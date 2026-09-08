@@ -16,7 +16,6 @@ Fluxo:
 from __future__ import annotations
 
 import logging
-import re
 import traceback
 
 import db

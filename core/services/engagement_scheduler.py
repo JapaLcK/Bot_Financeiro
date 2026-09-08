@@ -206,7 +206,6 @@ TRIAL_ENDING_WINDOW_MAX_DAYS = 3.5
 async def _check_trial_ending() -> None:
     """Envia email pra users em trial cujo PigBank+ termina em ~3 dias (item 38)."""
     import os
-    import db
     from core.services.email_service import send_trial_ending_email
     from db.connection import get_conn
 

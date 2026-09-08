@@ -7,7 +7,7 @@ from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 from math import isfinite
 
-from psycopg.types.json import Json, Jsonb
+from psycopg.types.json import Json
 
 import db_support as _db_support
 from utils_date import _tz, day_tz, launch_day, tz_name
@@ -16,7 +16,7 @@ from .connection import (
     get_conn, cat_key_sql, LAUNCH_HAS_TIME_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
-from .users import ensure_user, ensure_user_tx
+from .users import ensure_user
 
 logger = logging.getLogger(__name__)
 

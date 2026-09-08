@@ -1,6 +1,5 @@
 # core/handlers/investments.py
 from __future__ import annotations
-import re
 import db
 from utils_text import fmt_brl, fmt_rate, marcador_de_tudo
 from core.dashboard_links import build_dashboard_link
@@ -142,7 +141,6 @@ def resolve_funding_choice(user_id: int, text: str, pending: dict) -> str | None
     Devolve None quando a mensagem não é resposta a esta pergunta — aí o roteador
     segue o caminho normal em vez de prender o usuário no fluxo.
     """
-    from core.services import funding
     from utils_text import normalize_text
 
     if pending.get("action_type") != "funding_source_choice":

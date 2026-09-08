@@ -1,7 +1,7 @@
 # core/help_text.py
 from __future__ import annotations
 import re
-from typing import Literal, Tuple
+from typing import Literal
 
 Platform = Literal["discord", "whatsapp"]
 
