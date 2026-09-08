@@ -213,17 +213,42 @@ def criar_pagamento_pix(*, customer_id: str, valor_cents: int, due_date: str,
 def buscar_por_external_reference(external_reference: str) -> list[dict]:
     """`GET /v3/payments?externalReference=…` — a consulta que RECONCILIA (§10.1).
 
-    Devolve a lista `data`, e a lista **vazia é uma resposta**: é a única prova
-    aceita de que a cobrança nunca ganhou id remoto, e portanto a única que
-    autoriza apagar a linha. Falha de rede levanta `AsaasApiError` justamente
-    para não ser confundida com ela — indisponibilidade do provedor não é
-    evidência de inexistência, e tratar as duas igual apaga dinheiro sem linha.
+    Devolve a lista `data`. A lista **vazia é uma RESPOSTA**, e é a única prova
+    aceita de que a cobrança nunca ganhou id remoto — a metade que, junto com
+    `asaas_payment_id is null`, autoriza APAGAR a linha (§10.1, regra (b)).
+
+    Por isso **nada além de uma lista bem formada vira `[]`**. Resposta 2xx sem
+    `data`, com `data` de outro tipo, ou com o corpo inteiro noutro formato
+    levanta `AsaasApiError` — "não sei" e "não existe" não podem ser o mesmo
+    valor num caminho que apaga cobrança paga.
+
+    **A versão anterior fazia `return lista if isinstance(lista, list) else []`,
+    e a justificativa que a defendia estava errada.** Ela dizia que o perigo era
+    contido por "a segunda condição da regra (b), `asaas_payment_id is null`".
+    Mas as duas metades são um `and`, e o cenário de falha satisfaz as DUAS: o
+    POST efetiva no Asaas, a resposta se perde, a linha local fica sem
+    `asaas_payment_id`, e um GET malformado virava a prova de inexistência. A
+    guarda invocada era a outra metade da condição que AUTORIZA apagar, não uma
+    proteção contra ela. Apontado pelo Tester na rodada 1 e pelo Codex no #304.
+
+    Falha de transporte levanta pelo mesmo motivo (ver `_request`):
+    indisponibilidade do provedor não é evidência de inexistência.
     """
     dados = _request("GET", "/v3/payments",
                      contexto="Falha ao consultar cobranca no Asaas",
                      params={"externalReference": external_reference})
-    lista = dados.get("data")
-    return lista if isinstance(lista, list) else []
+    lista = dados.get("data") if isinstance(dados, dict) else None
+    if not isinstance(lista, list):
+        # `status_code=None` é o mesmo de uma falha de transporte, e é o certo:
+        # os dois querem dizer "NÃO SEI", e é isso que quem apaga precisa saber.
+        # Distinguir "não entendi a resposta" de "não consegui falar" seria
+        # informação sem consumidor — as duas proíbem exatamente a mesma ação.
+        raise AsaasApiError(
+            "Consulta ao Asaas devolveu resposta sem lista `data` — forma "
+            "inesperada NÃO é ausência de cobrança",
+            status_code=None,
+        )
+    return lista
 
 
 def deletar_pagamento(asaas_payment_id: str) -> dict:

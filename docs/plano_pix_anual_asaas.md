@@ -519,6 +519,9 @@ Função pura `plano_da_cobranca(grants_ativos, plano_novo, preco_novo_cents, mi
 
 **Crédito monetário existe só no caminho Pix → Pix** — repetido aqui e no §9 de propósito.
 
+**RECOMPRA QUE NÃO ACRESCENTA NADA É RECUSADA (409), não agendada.** Se já existe grant ativo de tier **igual ou maior** que o comprado com `ends_at` no futuro — tipicamente um grant Pix já pago começando no fim do período do Stripe —, os dois ramos de **upgrade** levantam `CoberturaJaPaga` em vez de precificar. Medido antes da guarda, com Stripe Plus vigente + Pix Pro futuro pago: **365 dias sobrepostos, 0 dias novos, R$ 499,00 cobrados**; e o mesmo no ramo Pix→Pix (R$ 305,45). A causa era os ramos de upgrade decidirem `access_starts_at` pelo grant VIGENTE, enquanto renovação e downgrade já usavam `max(agora, fim_cobertura)`.
+Recusar, e não agendar: agendar é o certo para RENOVAÇÃO e já é o que aqueles ramos fazem; num **upgrade** o cliente pediu o tier maior AGORA, e vender caladamente um ano que só começa depois é o que o campo `agendada` existe para evitar. Antecipar acesso já comprado é o §4.4, não uma venda. A guarda é estreita: cobertura futura de tier **menor** não bloqueia (ali o upgrade entrega tier real). Achado pelo Codex no #304 (ramo Stripe) e a varredura da categoria achou o irmão (ramo Pix→Pix).
+
 `access_expires_at = access_starts_at + 365 dias`; crédito nunca vira tempo. **`ASAAS_MIN_CHARGE_CENTS` não tem default**: sem a env, venda 503. **Valor MEDIDO: 500 (R$ 5,00).** Método: `POST /v3/payments` com `billingType: PIX` contra o Sandbox do Asaas, em **2026-09-05** — R$ 0,50, R$ 1,00 e R$ 4,99 recusadas; R$ 5,00 aceita. Gravado no `.env` da raiz (não em código, e não no `.env.example`, que é do PR 1b).
 
 **O mínimo incide sobre o LÍQUIDO, e isso é o que importa mais que o número.** A recusa vem com *"O valor da cobrança (R$ 4,99) menos o valor do desconto (R$ 0,00) não pode ser menor que R$ 5,00"* — o Asaas compara depois de subtrair. Isso **confirma que a regra abaixo mira o campo certo**: se o mínimo fosse sobre o BRUTO, comparar `preço − crédito` com ele estaria comparando grandezas diferentes, e nada na suíte teria acusado.
@@ -674,6 +677,7 @@ O que **nunca** é decidido no escuro:
 - **`creating` não expurga nunca.** É o estado ambíguo por definição: reconcilia; achou → `attach` + `pending`; não achou → volta a `draft`, que na passada seguinte cai na regra (b).
 - **`canceling` não vira `canceled` por tempo** — só com a prova (a).
 - **Consulta ao Asaas falhou?** A linha fica **como está**; a passada seguinte tenta de novo. Indisponibilidade do provedor não é evidência de inexistência.
+- **Resposta 2xx com forma INESPERADA também não é.** `GET /payments` sem `data`, com `data` de outro tipo, ou com o corpo noutro formato levanta `AsaasApiError` — **nunca vira `[]`**. A lista vazia é a metade que, com `asaas_payment_id is null`, autoriza APAGAR a linha, e o cenário de falha satisfaz as duas: POST efetiva no Asaas, resposta se perde, linha local sem `asaas_payment_id`, GET malformado — e a limpeza apagaria a linha com uma cobrança pagável viva. "Não sei" e "não existe" não podem ser o mesmo valor. P1-2 do Codex no #304; o Tester tinha apontado na rodada 1 e a justificativa que o defendia estava errada.
 - Mesma linha irreconciliável por mais de **24 h** → `admin_notify`: aí o problema é de integração, não de cobrança.
 
 ---

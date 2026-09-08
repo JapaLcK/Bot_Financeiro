@@ -40,7 +40,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from core.services.pix_pricing import DURACAO_DIAS, plano_da_cobranca
+from core.services.pix_pricing import (
+    DURACAO_DIAS,
+    CoberturaJaPaga,
+    plano_da_cobranca,
+)
 
 AGORA = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
 # Valor ARBITRÁRIO de teste: fixa a aritmética, não o preço de produção.
@@ -251,3 +255,88 @@ def test_vigencia_e_sempre_de_365_dias():
     for grants, plano in casos:
         r = plano_da_cobranca(grants, plano, PRECO, MIN, agora=AGORA)
         assert r["access_expires_at"] - r["access_starts_at"] == timedelta(days=DURACAO_DIAS)
+
+
+# ── recompra que não acrescentaria acesso (P1-1 do Codex + o irmão) ──────────
+
+# Grant Pix Pro **futuro e JÁ PAGO**: começa quando o Stripe acaba, vale um ano.
+# É o que torna a recompra vazia — e é o que os dois ramos de upgrade ignoravam,
+# porque olham `atual` (o grant VIGENTE) em vez de `fim_cobertura`.
+FUTURO_PAGO = _grant("pix", "pro_max", 60, 60 + DURACAO_DIAS, amount_cents=49900)
+
+
+@pytest.mark.parametrize("rotulo,vigente", [
+    # O cenário EXATO do Codex: assinante Stripe Plus, upgrade para Pro.
+    ("upgrade a partir do STRIPE", _grant("stripe", "pro", -300, 60)),
+    # O IRMÃO, que a varredura do §2 achou e o apontamento não citava: mesmo
+    # defeito no ramo de cima, upgrade Pix→Pix.
+    ("upgrade PIX para PIX", _grant("pix", "pro", -10, 355, amount_cents=19900)),
+])
+def test_recompra_do_tier_ja_coberto_e_RECUSADA(rotulo, vigente):
+    """Bug de dinheiro, medido antes do conserto:
+
+        upgrade a partir do STRIPE   365d sobrepostos, 0 novos, R$ 499,00
+        upgrade PIX -> PIX           365d sobrepostos, 0 novos, R$ 305,45
+
+    A pessoa paga preço cheio e ganha **zero** dias. `fim_cobertura` é
+    `max(ends_at)` sobre TODOS os grants ativos justamente para incluir os
+    futuros, e os ramos de renovação/downgrade já o usam — só os dois de
+    upgrade não usavam.
+
+    Recusa em vez de agendar: agendar é o certo para RENOVAÇÃO (e já é o que
+    aqueles ramos fazem), mas aqui o cliente pediu o tier maior AGORA, e ele já
+    comprou esse tier. Vender caladamente um ano que só começa em 60 dias com a
+    tela dizendo "upgrade" é a mesma desonestidade que o campo `agendada`
+    existe para evitar. Antecipar acesso já comprado é o §4.4, não uma venda.
+
+    *Negativo: tire a guarda `if tier_novo > tier_atual: cobre_o_tier…` → as
+    duas linhas voltam a VENDER 365 dias sobrepostos.*
+    """
+    with pytest.raises(CoberturaJaPaga) as capturado:
+        plano_da_cobranca([vigente, FUTURO_PAGO], "pro_max", 49900, MIN, agora=AGORA)
+    assert capturado.value.cobertura_ate == FUTURO_PAGO["ends_at"]
+    assert capturado.value.plano == "pro_max"
+
+
+def test_upgrade_com_cobertura_futura_de_tier_MENOR_continua_vendendo():
+    """POSITIVO, e ele mantém a guarda ESTREITA: cobertura futura de tier menor
+    não bloqueia nada, porque ali o upgrade entrega valor real — tier maior a
+    partir de hoje, e a projeção resolve a sobreposição pela união.
+
+    Sem esta linha, a guarda poderia virar "toda recompra é recusada", que
+    quebraria upgrade legítimo de quem tem um downgrade agendado.
+
+    TETO DECLARADO: este caminho ainda sobrepõe os 365 dias em número de DIAS —
+    o cliente paga o ano cheio de Pro por cima de um ano de Plus já pago. Não é
+    o mesmo defeito (há ganho de tier, e o §7 não define crédito contra grant
+    futuro), mas também não é ideal. Fica nomeado aqui em vez de silencioso.
+    """
+    futuro_menor = _grant("pix", "pro", 60, 60 + DURACAO_DIAS, amount_cents=19900)
+    r = plano_da_cobranca([_grant("stripe", "pro", -300, 60), futuro_menor],
+                          "pro_max", 49900, MIN, agora=AGORA)
+    assert r["amount_cents"] == 49900
+
+
+def test_upgrade_SEM_cobertura_futura_nao_e_afetado():
+    """POSITIVO do par: a guarda não pode tocar o upgrade comum. Sem ele, o
+    grupo passaria num código que recusa toda venda — pior que o bug."""
+    stripe = plano_da_cobranca([_grant("stripe", "pro", -300, 60)], "pro_max",
+                               49900, MIN, agora=AGORA)
+    assert stripe["access_starts_at"] == AGORA + timedelta(days=60)
+    assert stripe["credit_cents"] == 0
+
+    pix = plano_da_cobranca([_grant("pix", "pro", -182, 183, amount_cents=19900)],
+                            "pro_max", 49900, MIN, agora=AGORA)
+    assert pix["access_starts_at"] == AGORA
+    assert pix["credit_cents"] > 0
+
+
+@pytest.mark.parametrize("plano,preco", [("pro_max", 49900), ("pro", 19900)])
+def test_renovacao_e_downgrade_com_futuro_pago_continuam_agendando(plano, preco):
+    """POSITIVO: os ramos que JÁ estavam certos não podem ser recusados. Eles
+    emendam em `fim_cobertura` e entregam 365 dias novos — a guarda é só para
+    upgrade, que é onde `atual` decidia sozinho."""
+    r = plano_da_cobranca([_grant("pix", "pro_max", -10, 60, amount_cents=49900),
+                           FUTURO_PAGO], plano, preco, MIN, agora=AGORA)
+    assert r["access_starts_at"] == FUTURO_PAGO["ends_at"]
+    assert r["agendada"] is True

@@ -25,6 +25,28 @@ from core.services.billing_access import _tier_do_stored
 DURACAO_DIAS = 365
 
 
+class CoberturaJaPaga(RuntimeError):
+    """A compra não acrescentaria acesso nenhum — o cliente JÁ pagou por ela.
+
+    Levanta em vez de devolver um dict com um campo `recusada`, e a escolha é
+    deliberada: um campo pode ser ignorado em silêncio, uma exceção não. Isto é
+    caminho de dinheiro, e o modo de falha que ela impede foi MEDIDO — assinante
+    Stripe Plus vigente + grant Pix Pro **futuro e já pago**, comprando Pro de
+    novo: **365 dias sobrepostos, 0 dias novos, R$ 499,00 cobrados**.
+
+    Quem chama (1b-B) traduz em **409**, no mesmo lugar onde o §10 já devolve
+    409 para `stripe_active`. `cobertura_ate` vai junto para a tela poder dizer
+    *"você já tem Pro até 06/11/2027"* em vez de um erro genérico.
+    """
+
+    def __init__(self, plano: str, cobertura_ate):
+        super().__init__(
+            f"cobertura de {plano} já paga até {cobertura_ate.isoformat()}"
+        )
+        self.plano = plano
+        self.cobertura_ate = cobertura_ate
+
+
 def _agora(agora: datetime | None) -> datetime:
     return agora or datetime.now(timezone.utc)
 
@@ -121,6 +143,38 @@ def plano_da_cobranca(
 
     atual = _acesso_atual(vigentes)
     tier_atual = _tier_do_stored(atual["plan_stored"])
+
+    # RECOMPRA QUE NÃO ACRESCENTA NADA (P1-1 do Codex, e o irmão que a varredura
+    # do §2 achou). Os dois ramos de UPGRADE abaixo decidem `access_starts_at`
+    # olhando só o grant VIGENTE (`atual`) e ignoram `fim_cobertura` — que é
+    # `max(ends_at)` sobre TODOS os grants ativos, justamente para incluir os
+    # FUTUROS. Medido, com um grant Pix Pro futuro e já pago no conjunto:
+    #
+    #   upgrade a partir do STRIPE   365d sobrepostos, 0 novos, R$ 499,00
+    #   upgrade PIX -> PIX           365d sobrepostos, 0 novos, R$ 305,45
+    #
+    # (O Codex apontou o primeiro; o segundo é a mesma classe, no ramo de cima.
+    # Consertar só o apontado teria deixado o irmão vivo — CLAUDE.md §2.)
+    #
+    # Por que RECUSAR e não agendar depois da cobertura: agendar é o certo para
+    # RENOVAÇÃO, e os ramos de renovação/downgrade já fazem isso com
+    # `max(agora, fim_cobertura)`. Mas aqui o cliente pediu UPGRADE — acesso ao
+    # tier maior AGORA —, e o que ele já comprou cobre esse tier até uma data
+    # futura. Agendar entregaria caladamente um ano que só começa depois, com a
+    # tela dizendo "upgrade"; e antecipar acesso que já existe é o §4.4, não uma
+    # venda. Recusar é a única resposta que não cobra por nada.
+    #
+    # A guarda é ESTREITA de propósito: só bloqueia quando a cobertura futura é
+    # de tier IGUAL OU MAIOR que o comprado. Cobertura futura de tier MENOR não
+    # bloqueia nada — ali o upgrade entrega valor real (tier maior a partir de
+    # hoje), e a projeção resolve a sobreposição pela união.
+    if tier_novo > tier_atual:
+        cobre_o_tier = [g for g in grants_ativos
+                        if _tier_do_stored(g["plan_stored"]) >= tier_novo
+                        and g["ends_at"] > agora]
+        if cobre_o_tier:
+            raise CoberturaJaPaga(plano_novo,
+                                  max(g["ends_at"] for g in cobre_o_tier))
 
     if tier_novo > tier_atual and atual["source"] == "pix":
         credito = _credito_proporcional(atual, agora)

@@ -8,10 +8,9 @@ abrem socket, e o `_TestClientTransport` do Starlette não. `httpx.MockTransport
 também não é `HTTPTransport` — então ele **passa pelo bloqueio e roda
 in-process**, que é exatamente o que se quer.
 
-O jeito de injetá-lo é trocar `httpx.Client` **no namespace do módulo** por uma
-fábrica que devolve um `Client(transport=MockTransport(...))`. Não se toca no
-`conftest`: mexer no kill switch para testar um cliente novo é como o furo do
-PR #133 nasceu (nada falha, a chamada só sai).
+Injeta-se trocando `httpx.Client` **no namespace do módulo** por uma fábrica que
+devolve `Client(transport=MockTransport(...))`. Não se toca no `conftest`: mexer
+no kill switch para testar cliente novo é como o furo do #133 nasceu.
 
 A asserção não é "chamou": é **método, path, body e headers**. Um teste que só
 verificasse "não estourou" passaria com o verbo errado, com o valor em centavos
@@ -19,15 +18,11 @@ onde o Asaas espera reais, e com a `access_token` na query string.
 
 ## O erro SEM corpo se testa sem transporte nenhum
 
-`_raise_for_asaas_response` recebe uma `httpx.Response` FABRICADA. A ausência do
-corpo é propriedade da FUNÇÃO — testá-la através de uma chamada mockada mediria
-o mock, e um refactor que passasse a montar a mensagem noutro lugar sairia
-verde.
-
-Isso importa porque `str(exc)` desta exceção vai para `log_system_event`
-(persistido em `system_event_logs`, lido pelo painel admin) e para
-`pix_webhook_events.last_error`, que SOBREVIVE à purga do payload (§13.3) e à
-exclusão da conta.
+`_raise_for_asaas_response` recebe uma `httpx.Response` FABRICADA: a ausência do
+corpo é propriedade da FUNÇÃO, e testá-la por uma chamada mockada mediria o
+mock. Importa porque `str(exc)` vai para `log_system_event` (persistido, lido
+pelo painel admin) e para `pix_webhook_events.last_error`, que SOBREVIVE à purga
+do payload (§13.3) e à exclusão da conta.
 
 CONTROLES NEGATIVOS MEDIDOS:
 
@@ -36,17 +31,16 @@ CONTROLES NEGATIVOS MEDIDOS:
   * tire o `status_code=` do `AsaasApiError` →
     `test_erro_preserva_o_status_code` vermelho (e a reconciliação do §10.1
     perde como separar 404 de 5xx);
-  * mande a `access_token` em `params` em vez de `headers` →
-    `test_token_vai_no_header_nunca_na_url` vermelho;
-  * troque `value` por centavos (`valor_cents` cru) →
-    `test_criar_pagamento_manda_reais_e_nao_centavos` vermelho.
+  * `access_token` em `params` → `test_token_vai_no_header_nunca_na_url`;
+  * `value` em centavos crus → `test_criar_pagamento_manda_reais_e_nao_centavos`;
+  * `else []` na busca → as 5 linhas de `test_forma_inesperada_NAO_vira_lista_vazia`.
 
-POSITIVO do grupo: `test_busca_por_external_reference_devolve_a_lista` — sem
-ele, um código que levantasse em toda resposta passaria nos negativos.
+POSITIVOS: `test_busca_por_external_reference_devolve_a_lista` e
+`test_lista_vazia_BEM_FORMADA_continua_sendo_resposta` — sem eles, um código que
+levantasse em toda resposta passaria nos negativos.
 
 CEGUEIRA DECLARADA: nada aqui prova o contrato REAL do Asaas (nome dos campos,
-formato do `dueDate`, o header que o provedor de fato aceita). Isso é §18 do
-plano — só contra o Sandbox, e não neste ambiente.
+formato do `dueDate`, o header aceito). É o §18 — só contra o Sandbox.
 """
 
 from types import SimpleNamespace
@@ -139,22 +133,41 @@ def test_busca_por_external_reference_devolve_a_lista(chamadas):
     assert buscar_por_external_reference("pix:99") == []
 
 
-def test_resposta_sem_data_nao_vira_lista_falsa(chamadas):
-    """Resposta com `data` ausente ou de outro tipo devolve `[]` — e **lista
-    vazia autoriza APAGAR a cobrança** (§10.1, regra (b)). Ou seja: aqui o lado
-    "defensivo" cai no lado perigoso.
+@pytest.mark.parametrize("corpo", [
+    {"erro": "forma inesperada"},          # 2xx sem `data`
+    {"data": {"id": "pay_7"}},             # `data` que não é lista
+    {"data": None},
+    ["pay_7"],                             # o corpo inteiro noutro formato
+    "ok",
+])
+def test_forma_inesperada_NAO_vira_lista_vazia(chamadas, corpo):
+    """P1-2 do Codex, e a correção de uma justificativa minha que estava errada.
 
-    O teste fixa o comportamento e nomeia o teto em vez de escondê-lo. O que
-    impede o apagamento errado NÃO é esta função: é a segunda condição da regra
-    (b), `asaas_payment_id is null`, que mora no 1b-B. Uma cobrança que já ganhou
-    id remoto nunca é apagada, mesmo com a lista vazia.
+    Lista vazia é a metade que, com `asaas_payment_id is null`, AUTORIZA apagar
+    a linha (§10.1, regra (b)); converter resposta malformada em `[]` fabricava
+    essa prova. Cenário: o POST efetiva no Asaas, a resposta se perde, a linha
+    fica sem `asaas_payment_id`, o GET de reconciliação volta 2xx com forma
+    inesperada — e a limpeza apaga a linha **com uma cobrança pagável viva no
+    Asaas**.
 
-    ponytail: se o Asaas mudar a forma da resposta, o conserto é distinguir
-    "consultei e não achou" de "não entendi a resposta" — um sentinela, não um
-    `[]`. Fazer isso agora seria escrever a regra (b) sem o chamador dela.
+    Eu marquei isso como teto dizendo que "quem segura é a segunda condição da
+    regra (b)". Errado: as metades são um `and` e o cenário satisfaz as DUAS —
+    a guarda que invoquei era a outra metade da condição que autoriza apagar.
+
+    *Negativo: volte o `else []` → todas estas linhas ficam vermelhas.*
     """
-    chamadas.json = {"erro": "forma inesperada"}
-    assert buscar_por_external_reference("pix:1") == []
+    chamadas.json = corpo
+    with pytest.raises(AsaasApiError) as capturado:
+        buscar_por_external_reference("pix:1")
+    assert capturado.value.status_code is None, "'não sei' não pode virar 404"
+
+
+def test_lista_vazia_BEM_FORMADA_continua_sendo_resposta(chamadas):
+    """POSITIVO do par, e ele não é cerimônia: sem esta linha o grupo passaria
+    num código que levanta em TODA consulta — e aí a reconciliação do §10.1
+    nunca conseguiria apagar `draft` órfão nenhum, que é o outro lado do erro."""
+    chamadas.json = {"data": []}
+    assert buscar_por_external_reference("pix:99") == []
 
 
 def test_deletar_usa_o_verbo_delete_e_o_id_no_path(chamadas):
@@ -189,12 +202,10 @@ def _resp(status: int, json_corpo) -> httpx.Response:
 
 def test_erro_nao_carrega_o_corpo_da_resposta():
     """A propriedade que mais custa se quebrar: `str(exc)` vira `details` de
-    `log_system_event` (PERSISTIDO, lido pelo painel admin) e
-    `pix_webhook_events.last_error` (sobrevive à purga do payload E à exclusão
-    da conta, §13.3).
-
-    Fabricada, sem transporte: a ausência do corpo é propriedade da FUNÇÃO.
-    """
+    `log_system_event` (persistido, lido pelo painel admin) e
+    `pix_webhook_events.last_error`, que sobrevive à purga do payload E à
+    exclusão da conta (§13.3). Fabricada, sem transporte: a ausência do corpo é
+    propriedade da FUNÇÃO."""
     with pytest.raises(AsaasApiError) as exc:
         _raise_for_asaas_response(_resp(400, CORPO_COM_PII), "Falha ao criar")
     msg = str(exc.value)
@@ -205,10 +216,10 @@ def test_erro_nao_carrega_o_corpo_da_resposta():
 
 
 def test_erro_preserva_o_status_code():
-    """404 é resposta de NEGÓCIO na reconciliação (§10.1: a cobrança não existe
-    lá); 5xx é indisponibilidade, e indisponibilidade NÃO é evidência de
-    inexistência. Sem o `status_code`, o único jeito de separar as duas seria
-    regex na mensagem — e a decisão que depende disso APAGA cobrança."""
+    """404 é resposta de NEGÓCIO na reconciliação (§10.1); 5xx é
+    indisponibilidade, que NÃO é evidência de inexistência. Sem `status_code`, o
+    único jeito de separar seria regex na mensagem — e a decisão que depende
+    disso APAGA cobrança."""
     for status in (404, 429, 500, 503):
         with pytest.raises(AsaasApiError) as exc:
             _raise_for_asaas_response(_resp(status, {"errors": []}), "ctx")
