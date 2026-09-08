@@ -26,6 +26,9 @@ import secrets
 import uuid
 
 from db.pix_charges import attach_pagamento, criar_cobranca, transicionar
+# `_JANELA` vem do arquivo irmão em vez de ser recopiada (§0.7): é a mesma
+# fixture da janela que o CHECK `pix_charges_pago_tem_janela` exige.
+from test_pix_charges import _JANELA
 from db.webhook_outbox import efeito_registrado, registrar_efeito
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -117,7 +120,7 @@ def test_efeito_roda_na_RETENTATIVA_mesmo_com_a_transicao_ja_commitada(user_id):
     assert attach_pagamento(linha["id"], pagamento)
 
     # 1+2: transição commita, e o processo morre antes do efeito.
-    assert transicionar(linha["id"], de="pending", para="paid") is not None
+    assert transicionar(linha["id"], de="pending", para="paid", **_JANELA) is not None
     assert efeito_registrado(pagamento, "grant") is False
 
     # 3+4: reentrega. A transição não aplica — e isso NÃO pode decidir nada.
@@ -146,7 +149,7 @@ def test_reentrega_completa_nao_reexecuta_nada(user_id):
     linha = _nova(user_id)
     pagamento = f"pay_{uuid.uuid4().hex[:10]}"
     attach_pagamento(linha["id"], pagamento)
-    transicionar(linha["id"], de="pending", para="paid")
+    transicionar(linha["id"], de="pending", para="paid", **_JANELA)
 
     for efeito in ("stripe_cancel", "grant", "ga4", "capi", "email"):
         assert registrar_efeito(pagamento, efeito, "evt_1") is True

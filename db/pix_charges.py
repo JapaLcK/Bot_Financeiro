@@ -17,9 +17,9 @@ Três regras que valem para TODA escrita daqui:
     de um `select`+`insert` em Python. Duas requisições concorrentes seriam
     precificadas contra o mesmo crédito (§10).
   • **Transição é condicional** (`update … where status = <esperado> returning`).
-    O `returning` vazio diz **só** "o estado já estava lá" — e **não** autoriza
-    pular efeito nenhum (§8.2 C). Ler o status e depois escrever seria a mesma
-    corrida com mais linhas.
+    O `returning` vazio reúne "já estava lá" e "foi para outro terminal" — e
+    **não** autoriza pular efeito nenhum (§8.2 C; ver `transicionar`). Ler o
+    status e depois escrever seria a mesma corrida com mais linhas.
   • **Toda query do dado do usuário filtra por `user_id`** (CLAUDE.md §0), com
     **QUATRO exceções, e duas delas são ESCRITA**. Todas do dreno, todas
     nomeadas nas próprias funções:
@@ -164,15 +164,32 @@ def transicionar(
     """Transição CONDICIONAL da máquina de estados (§11). Devolve a linha nova
     quando a transição aplicou; **`None`** quando o status atual não é `de`.
 
-    ## `None` significa "o estado já avançou" — e NADA MAIS
+    ## `None` NÃO DECIDE EFEITO NENHUM — nem para pular, nem para rodar
 
-    **Não** significa "pule os efeitos", e quem escrever o dreno do 1b-B contra
-    esta função precisa ler isto antes:
+    **`None` reúne duas situações OPOSTAS**, e é por isso que ele não serve de
+    porteiro de coisa alguma:
 
-        transicionar(...)                       # avança o estado se ainda não avançou
-        for efeito in EFEITOS_POR_EVENTO[tipo]: # SEMPRE — não depende do retorno acima
-            if efeito_registrado(payment_id, efeito): continue
-            ...
+      * **já está no destino** — a reentrega do mesmo evento. Os efeitos daquele
+        evento podem não ter rodado, e têm de rodar;
+      * **passou para um terminal que CONTRADIZ o evento** — a cobrança já é
+        `refunded` e chega um `RECEIVED` atrasado. Aqui rodar `grant` é o erro.
+
+    Os dois chegam aqui como o MESMO `None`, e quem escrever o dreno do 1b-B
+    precisa ler isto antes de usar o retorno como condição.
+
+    **O que autoriza pular um efeito por JÁ TER RODADO é o registro daquele
+    efeito** (`pix_payment_effects`, par `(asaas_payment_id, effect)`), nunca o
+    resultado desta transição — o §3.4 do plano já dizia isso enquanto o §8.2 C
+    dizia o contrário. Vale porque aquela tabela **nunca é purgada** (não tem
+    categoria no §13.1); se um dia ganhar retenção, esta garantia volta a ter furo.
+
+    **O que autoriza pular um efeito por NÃO FAZER MAIS SENTIDO é PERGUNTA
+    ABERTA, e ela é do 1b-B.** Não há resposta aqui de propósito: os cenários
+    concretos (o `RECEIVED` atrasado numa cobrança já estornada, o parcial
+    entregue fora de ordem, dois parciais somando 100%) estão medidos e
+    registrados como **pendências obrigatórias do 1b-B** no §17.1 de
+    `docs/plano_pix_anual_asaas.md`. Escolher aqui fixaria em contrato uma
+    decisão que o dono não tomou.
 
     A regra `aplicou == False → efeitos = []` **existiu e foi removida** (P1-A,
     Codex no #304), porque era um ponto de perda de dinheiro: esta função
@@ -184,12 +201,6 @@ def transicionar(
 
     É o defeito do #298 um nível abaixo: lá o `UPDATE … WHERE status` perdia
     efeitos, e o conserto foi escrever o `processed_at` DEPOIS deles.
-
-    **O que autoriza pular um efeito é o registro DAQUELE efeito**
-    (`pix_payment_effects`, par `(asaas_payment_id, effect)`), nunca o resultado
-    desta transição — e o §3.4 do plano já dizia isso enquanto o §8.2 C dizia o
-    contrário. Vale porque aquela tabela **nunca é purgada** (não tem categoria
-    no §13.1); se um dia ganhar retenção, esta garantia volta a ter furo.
 
     Sem a condição no `where`, ler e depois escrever deixaria a janela entre as
     duas para o retry do Asaas — por isso ela fica.

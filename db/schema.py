@@ -2187,43 +2187,109 @@ def init_db():
           paid_at timestamptz,
           canceled_at timestamptz,
           refunded_at timestamptz,
-          purged_at timestamptz,
-
-          -- ── as quatro invariantes, no BANCO e não em Python ──────────────
-          -- `status` é texto livre, e um typo (`pendng`) tira a linha do índice
-          -- parcial `uniq_pix_charge_ativa` — que só cobre 4 estados nomeados —
-          -- e LIBERA uma segunda cobrança ativa do mesmo usuário. Dois QRs
-          -- pagáveis é o furo financeiro que o §10 existe para fechar, e ele
-          -- voltaria por um erro de digitação.
-          --
-          -- `orphan_unknown` **não está na lista, de propósito**: ver o
-          -- comentário logo abaixo do `create table`.
-          constraint pix_charges_status_valido check (status in (
-            'draft', 'creating', 'pending', 'canceling', 'canceled',
-            'paid', 'paid_orphan', 'expired',
-            'refunded', 'refunded_partial', 'chargeback'
-          )),
-          -- `^pix:[0-9]+$` é o formato que separa NOSSO dinheiro do de terceiros
-          -- (§11): o dreno só classifica como `orphan_unknown` — dinheiro nosso
-          -- que perdeu a linha — o que casa esta regex. Uma referência fora do
-          -- formato faz o pagamento ser descartado em SILÊNCIO, que é o oposto
-          -- do que a célula existe para impedir. A regex mora aqui porque é o
-          -- único lugar que nenhum chamador pode contornar.
-          constraint pix_charges_ref_formato
-            check (external_reference ~ '^pix:[0-9]+$'),
-          -- Centavos são inteiros e não-negativos. Sem isto, um crédito maior
-          -- que o preço produz `amount_cents` negativo e a cobrança sai com
-          -- valor negativo para o provedor.
-          constraint pix_charges_centavos_nao_negativos check (
-            price_cents >= 0 and credit_cents >= 0 and amount_cents >= 0
-          ),
-          -- O que se COBRA é sempre preço menos crédito (§7). É a única relação
-          -- entre as três colunas, e deixá-la implícita permitiria uma cobrança
-          -- cujo valor não bate com o snapshot que a justifica.
-          constraint pix_charges_amount_fecha
-            check (amount_cents = price_cents - credit_cents)
+          purged_at timestamptz
+          -- As CINCO invariantes NÃO estão aqui, e é decisão medida: ver o
+          -- bloco `alter table` logo abaixo.
         )
         """,
+        # ── as CINCO invariantes de `pix_charges`, no BANCO e não em Python ──
+        #
+        # **Fora do `create table`, e as cinco juntas.** `create table if not
+        # exists` NÃO acrescenta constraint a tabela que já existe, e o
+        # `pigbank_ci_test` (como o Railway) persiste entre subidas. Enquanto
+        # quatro delas ficaram inline, o buraco foi MEDIDO no `pigbank_ci_test`,
+        # onde `pix_charges` já existia: `pg_constraint` com `contype='c'`
+        # listava SÓ `pix_charges_pago_tem_janela`, e o banco ACEITAVA
+        # `status='pendng'` (typo que tira a linha de `uniq_pix_charge_ativa` e
+        # LIBERA uma segunda cobrança ativa), `external_reference` de terceiro,
+        # `price_cents` negativo e `amount_cents` que não fecha. `drop
+        # constraint if exists` + `add constraint` é o par idempotente que este
+        # arquivo já usa (`recurring_expenses_amount_check`, :1372) e o único
+        # que alcança as duas populações. Elas ficam AQUI e não também inline,
+        # porque duas cópias da mesma expressão é a §0.7.
+        #
+        # **`not valid`, e não `add` simples** — medido contra o Postgres com UMA
+        # linha legada violando. `add` simples levanta `CheckViolation`; o
+        # `_run_ddl` faz `raise` no primeiro erro e o `_startup_required`
+        # (`frontend/finance_bot_websocket_custom.py`) MATA a subida do app. E
+        # como a conexão é autocommit, o `drop` do par JÁ commitou: o banco fica
+        # SEM o constraint e nenhum statement seguinte roda —
+        # `uniq_pix_charge_ativa`, `pix_webhook_events`, `pix_payment_effects` e
+        # o `repair_user_fk_cascades` somem junto, e o reboot repete. Com `not
+        # valid` a subida segue, o constraint FICA, e toda linha NOVA ou
+        # ATUALIZADA continua barrada; só a população já existente escapa da
+        # checagem — que é exatamente o que se quer de dado legado.
+        #
+        # **Sem `validate constraint` depois, e não é por custo:** medido em
+        # 2026-09-08 num banco descartável, `alter table … validate constraint`
+        # levou 3 ms com 50 mil linhas e 22 ms com 200 mil — barato. O motivo é
+        # outro: ele só falha no único caso em que faria diferença (existe linha
+        # legada ruim), e ali um `try` que só loga não decide nada. Quando esse
+        # dia chegar, o `validate` se roda à mão, depois de olhar a linha.
+        #
+        # `orphan_unknown` NÃO está na lista de status, de propósito: ver o
+        # comentário logo abaixo.
+        """alter table pix_charges
+             drop constraint if exists pix_charges_status_valido""",
+        # `status` é texto livre, e um typo (`pendng`) tira a linha do índice
+        # parcial `uniq_pix_charge_ativa` — que só cobre 4 estados nomeados — e
+        # LIBERA uma segunda cobrança ativa do mesmo usuário. Dois QRs pagáveis é
+        # o furo financeiro que o §10 existe para fechar, e ele voltaria por um
+        # erro de digitação.
+        """alter table pix_charges
+             add constraint pix_charges_status_valido check (status in (
+               'draft', 'creating', 'pending', 'canceling', 'canceled',
+               'paid', 'paid_orphan', 'expired',
+               'refunded', 'refunded_partial', 'chargeback'
+             )) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_ref_formato""",
+        # `^pix:[0-9]+$` é o formato que separa NOSSO dinheiro do de terceiros
+        # (§11): o dreno só classifica como `orphan_unknown` — dinheiro nosso que
+        # perdeu a linha — o que casa esta regex. Uma referência fora do formato
+        # faz o pagamento ser descartado em SILÊNCIO, que é o oposto do que a
+        # célula existe para impedir. A regex mora no banco porque é o único
+        # lugar que nenhum chamador pode contornar.
+        """alter table pix_charges
+             add constraint pix_charges_ref_formato
+             check (external_reference ~ '^pix:[0-9]+$') not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_centavos_nao_negativos""",
+        # Centavos são inteiros e não-negativos. Sem isto, um crédito maior que o
+        # preço produz `amount_cents` negativo e a cobrança sai com valor
+        # negativo para o provedor.
+        """alter table pix_charges
+             add constraint pix_charges_centavos_nao_negativos check (
+               price_cents >= 0 and credit_cents >= 0 and amount_cents >= 0
+             ) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_amount_fecha""",
+        # O que se COBRA é sempre preço menos crédito (§7). É a única relação
+        # entre as três colunas, e deixá-la implícita permitiria uma cobrança
+        # cujo valor não bate com o snapshot que a justifica.
+        """alter table pix_charges
+             add constraint pix_charges_amount_fecha
+             check (amount_cents = price_cents - credit_cents) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_pago_tem_janela""",
+        # **Pagamento com titular tem janela de acesso.** Sem ela, o dreno do
+        # 1b-B pode gravar `paid_at` e esquecer `access_*`, e a linha fica pagando
+        # sem conceder — em SILÊNCIO, que é o modo caro. O que ela NÃO cobre está
+        # escrito em `tests/test_pix_invariantes_do_banco.py`.
+        #
+        # **A exceção é `user_id is null`, NÃO `status = 'paid_orphan'`**, e a
+        # diferença foi medida contra o Postgres: a exceção por status aceita o
+        # órfão pago mas RECUSA o estorno posterior dele (`paid_orphan` →
+        # `refunded` deixa o status para trás e a linha continua sem janela). A
+        # condição do titular ausente PERSISTE pela transição — a FK é `on delete
+        # set null` e `pix_charges` está em `_USER_FK_SET_NULL_TABLES` —, então
+        # ela cobre também a conta excluída DEPOIS de pagar (§13.4). A medição
+        # das três formulações está no mesmo arquivo de teste.
+        """alter table pix_charges
+             add constraint pix_charges_pago_tem_janela check (
+               paid_at is null or user_id is null
+               or (access_starts_at is not null and access_expires_at is not null)
+             ) not valid""",
         # **`orphan_unknown` NÃO é um estado desta tabela**, e a decisão está no
         # `check` acima em vez de numa frase. O §8.2 A manda registrar o
         # pagamento que chega com `externalReference` NOSSO e sem linha local —

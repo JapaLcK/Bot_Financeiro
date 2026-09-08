@@ -31,6 +31,7 @@ próprio dono.
 import re
 import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -61,6 +62,16 @@ def _nova(user_id: int, **kw) -> dict | None:
     )
     campos.update(kw)
     return criar_cobranca(user_id, **campos)
+
+
+# A janela de acesso, que o CHECK `pix_charges_pago_tem_janela` passou a EXIGIR
+# de toda cobrança COM TITULAR que ganha `paid_at`. As três formulações medidas
+# estão em `tests/test_pix_invariantes_do_banco.py`. Aqui é fixture: quem calcula
+# a vigência é `plano_da_cobranca` (`core/services/pix_pricing.py`), que é 1b-A e
+# está neste mesmo PR; quem CARIMBA `access_starts_at`/`access_expires_at` na
+# linha é o dreno do webhook, que é 1b-B e ainda não existe.
+_JANELA = dict(access_starts_at=datetime.now(timezone.utc),
+               access_expires_at=datetime.now(timezone.utc) + timedelta(days=365))
 
 
 # ── 1. uma cobrança ativa por usuário ────────────────────────────────────────
@@ -99,7 +110,8 @@ def test_cobranca_encerrada_nao_bloqueia_venda_nova(user_id, terminal):
     O índice é PARCIAL de propósito: só `ESTADOS_ATIVOS` ocupam a vaga.
     """
     primeira = _nova(user_id)
-    assert transicionar(primeira["id"], de="draft", para=terminal) is not None
+    assert transicionar(primeira["id"], de="draft", para=terminal,
+                        **(_JANELA if terminal == "paid" else {})) is not None
     assert _nova(user_id) is not None
 
 
@@ -129,7 +141,7 @@ def test_transicao_do_status_esperado_aplica(user_id):
     linha = _nova(user_id)
     assert attach_pagamento(linha["id"], "pay_123") is True
     nova = transicionar(linha["id"], de="pending", para="paid",
-                        asaas_payment_id="pay_123")
+                        asaas_payment_id="pay_123", **_JANELA)
     assert nova is not None
     assert nova["status"] == "paid"
     assert nova["paid_at"] is not None
@@ -144,8 +156,8 @@ def test_transicao_de_status_errado_nao_aplica(user_id):
     `test_efeito_roda_na_RETENTATIVA_mesmo_com_a_transicao_ja_commitada`.
     """
     linha = _nova(user_id)
-    assert transicionar(linha["id"], de="draft", para="paid") is not None
-    assert transicionar(linha["id"], de="draft", para="paid") is None
+    assert transicionar(linha["id"], de="draft", para="paid", **_JANELA) is not None
+    assert transicionar(linha["id"], de="draft", para="paid", **_JANELA) is None
     # E o estado NÃO foi corrompido pela tentativa recusada.
     assert buscar_por_external_reference(linha["external_reference"])["status"] == "paid"
 
@@ -158,7 +170,7 @@ def test_transicao_aceita_varias_origens_da_mesma_celula(user_id):
     assert transicionar(linha["id"], de="draft", para="expired") is not None
     nova = transicionar(linha["id"],
                         de=("pending", "canceling", "canceled", "expired"),
-                        para="paid")
+                        para="paid", **_JANELA)
     assert nova is not None and nova["status"] == "paid"
 
 
@@ -174,7 +186,7 @@ def test_transicao_terminal_apaga_o_qr(user_id):
         cur.execute("select qr_payload_enc from pix_charges where id = %s", (linha["id"],))
         assert cur.fetchone()["qr_payload_enc"] == "gAAAA-cifrado"
 
-    transicionar(linha["id"], de="pending", para="paid", apagar_qr=True)
+    transicionar(linha["id"], de="pending", para="paid", apagar_qr=True, **_JANELA)
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select qr_payload_enc from pix_charges where id = %s", (linha["id"],))
         assert cur.fetchone()["qr_payload_enc"] is None
@@ -276,69 +288,6 @@ def test_fk_de_pix_charges_e_set_null_depois_do_repair():
             row = cur.fetchone()
     assert row is not None, "pix_charges perdeu a FK para users(id)"
     assert row["confdeltype"] == "n", "FK virou CASCADE — a pseudonimização morreu"
-
-
-# ── as invariantes que vivem no BANCO (P2-7 e P1-3 do Codex) ────────────────
-
-def _insere_cru(cur, user_id, **campos):
-    """INSERT direto, contornando `criar_cobranca`. É o ponto: as invariantes
-    têm de valer contra QUALQUER escritor, inclusive um `psql` na madrugada."""
-    base = dict(user_id=user_id, external_reference="pix:999999999",
-                public_token=secrets.token_urlsafe(16), plan="pro_max",
-                plan_stored="pro_max", price_cents=29900, credit_cents=0,
-                amount_cents=29900, status="draft")
-    base.update(campos)
-    cols = ", ".join(base)
-    cur.execute(f"insert into pix_charges ({cols}) values "
-                f"({', '.join(['%s'] * len(base))})", tuple(base.values()))
-
-
-@pytest.mark.parametrize("rotulo,campos", [
-    # P2-7: `pendng` sai do índice parcial (que só cobre 4 estados NOMEADOS) e
-    # libera uma SEGUNDA cobrança ativa do mesmo usuário — dois QRs pagáveis,
-    # que é o furo financeiro que o §10 fecha. Por um typo.
-    ("status com typo", {"status": "pendng"}),
-    # `orphan_unknown` NÃO é estado desta tabela: o registro não tem plano,
-    # preço nem dono. A decisão do P1-2 é do CHECK, não de um comentário.
-    ("orphan_unknown", {"status": "orphan_unknown"}),
-    # P1-3: fora de `^pix:[0-9]+$` o dreno classifica o pagamento como de
-    # TERCEIRO e o descarta em silêncio — dinheiro nosso perdido.
-    ("referência hexadecimal", {"external_reference": "pix:a1b2c3"}),
-    ("referência sem prefixo", {"external_reference": "boleto-loja-42"}),
-    ("referência vazia", {"external_reference": ""}),
-    # Centavos negativos produzem cobrança de valor negativo no provedor.
-    ("preço negativo", {"price_cents": -1, "amount_cents": -1}),
-    ("crédito negativo", {"credit_cents": -1, "amount_cents": 29901}),
-    # A única relação entre as três colunas (§7). Sem ela, a cobrança sai com um
-    # valor que não bate com o snapshot que a justifica.
-    ("amount que não fecha", {"price_cents": 29900, "credit_cents": 100,
-                              "amount_cents": 29900}),
-])
-def test_o_banco_recusa_linha_invalida(user_id, rotulo, campos):
-    """As quatro invariantes são `CHECK`, não validação em Python.
-
-    O diff tinha **zero** `check` antes disto (medido). Python valida quem passa
-    por `criar_cobranca`; o banco valida todo mundo — a varredura, um reparo
-    manual, o dreno do 1b-B, um `psql`.
-
-    *Negativo: tire a constraint correspondente do `create table` → a linha
-    entra, e no caso do `status` a segunda cobrança ativa passa a ser possível.*
-    """
-    from psycopg.errors import CheckViolation
-
-    with get_conn() as conn, conn.cursor() as cur:
-        with pytest.raises(CheckViolation):
-            _insere_cru(cur, user_id, **campos)
-        conn.rollback()
-
-
-def test_o_banco_ACEITA_a_linha_legitima(user_id):
-    """POSITIVO das quatro: sem ele, uma constraint escrita errado demais
-    recusaria toda venda e o grupo acima passaria igual."""
-    with get_conn() as conn, conn.cursor() as cur:
-        _insere_cru(cur, user_id, price_cents=29900, credit_cents=900,
-                    amount_cents=29000)
-        conn.commit()
 
 
 def test_criar_cobranca_gera_a_referencia_no_formato_do_dreno(user_id):
