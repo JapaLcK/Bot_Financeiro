@@ -12,7 +12,7 @@ Endpoints:
   GET  /budgets/{user_id}       → list budgets
   POST /budgets/{user_id}       → set budget {categoria, budget}
   DEL  /budgets/{user_id}/{cat} → delete budget
-  POST /export/{user_id}        → envia extrato (PDF+XLSX+CSV) p/ email (query: year, month)
+  POST /export/{user_id}        → envia extrato (PDF+XLSX+CSV) p/ email (query: start_date, end_date)
   WS   /ws/{user_id}            → real-time updates
 """
 
@@ -1097,12 +1097,39 @@ def _item_sort_key(it: dict):
     return (d.year, d.month, d.day, getattr(d, "hour", 0), getattr(d, "minute", 0))
 
 
-async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]:
-    """Itens monetários do mês p/ relatório (CSV/XLSX/PDF compartilham):
+def _normalize_export_period(start_date: date | int, end_date: date | int) -> tuple[date, date]:
+    """Normaliza o período inclusivo do relatório.
+
+    Aceita ``year, month`` para manter compatibilidade com chamadas internas
+    anteriores à exportação por período.
+    """
+    if isinstance(start_date, int) and isinstance(end_date, int):
+        start, exclusive_end = _month_range(start_date, end_date)
+        return start, exclusive_end - timedelta(days=1)
+    if not isinstance(start_date, date) or not isinstance(end_date, date):
+        raise ValueError("Período de exportação inválido.")
+    if end_date < start_date:
+        raise ValueError("A data final não pode ser anterior à data inicial.")
+    if end_date == date.max:
+        raise ValueError("A data final deve ser anterior a 31/12/9999.")
+    return start_date, end_date
+
+
+def _export_period_label(start_date: date, end_date: date) -> str:
+    if start_date == end_date:
+        return start_date.strftime("%d/%m/%Y")
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return f"{start_date:%d} a {end_date:%d/%m/%Y}"
+    return f"{start_date:%d/%m/%Y} a {end_date:%d/%m/%Y}"
+
+
+async def _fetch_export_items(user_id: int, start_date: date | int, end_date: date | int) -> list[dict]:
+    """Itens monetários do período p/ relatório (CSV/XLSX/PDF compartilham):
     despesas/receitas reais da conta, aportes/movimentações de investimento e
     caixinha, e compras no cartão (alocadas por bill.period_end, igual ao
     dashboard). Ações não-monetárias ficam de fora."""
-    month_start, month_end = _month_range(year, month)
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    exclusive_end = period_end + timedelta(days=1)
     items: list[dict] = []
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -1113,7 +1140,7 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                 """,
-                (user_id, month_start, month_end),
+                (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
                 cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"))
@@ -1147,7 +1174,7 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
                 """,
-                (user_id, month_start, month_end),
+                (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
                 desc = (r.get("nota") or "").strip()
@@ -1183,8 +1210,8 @@ def _spreadsheet_safe(v) -> str:
     return s
 
 
-async def build_csv(user_id: int, year: int, month: int) -> str | None:
-    items = await _fetch_export_items(user_id, year, month)
+async def build_csv(user_id: int, start_date: date | int, end_date: date | int) -> str | None:
+    items = await _fetch_export_items(user_id, start_date, end_date)
     if not items:
         return None
     buf = io.StringIO()
@@ -1215,23 +1242,38 @@ def _export_summary(items: list[dict]) -> dict:
         if it["natureza"] == "despesa":
             by_cat[it["categoria"] or "sem categoria"] += it["valor"]
     cats = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    entradas = sum(it["valor"] for it in items if it["sign"] == "+")
+    saidas = sum(it["valor"] for it in items if it["sign"] == "-")
     return {
         "receitas": receitas,
         "despesas": despesas,
         "aportes": aportes,
+        "entradas": entradas,
+        "saidas": saidas,
+        "saldo_periodo": entradas - saidas,
+        "balanco": receitas - despesas,
         "by_category": cats,
         "count": len(items),
     }
 
 
-async def build_xlsx(user_id: int, year: int, month: int) -> bytes | None:
-    items = await _fetch_export_items(user_id, year, month)
+async def build_xlsx(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    items = await _fetch_export_items(user_id, period_start, period_end)
     if not items:
         return None
-    return await asyncio.to_thread(_render_xlsx, items)
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
+    return await asyncio.to_thread(_render_xlsx, items, period_start, period_end, balance)
 
 
-def _render_xlsx(items: list[dict]) -> bytes:
+def _render_xlsx(
+    items: list[dict], start_date: date | None = None, end_date: date | None = None,
+    balance: float = 0.0,
+) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
@@ -1274,25 +1316,72 @@ def _render_xlsx(items: list[dict]) -> bytes:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:E{len(items) + 1}"
 
+    # Espelha o Dashboard da exportação por Excel do bot: o resumo fica em
+    # uma aba própria e a aba tabular continua pronta para filtros/importação.
+    summary = _export_summary(items)
+    resumo = wb.create_sheet("Resumo", 0)
+    resumo.append(["Resumo financeiro", ""])
+    resumo.merge_cells("A1:B1")
+    resumo["A1"].font = Font(bold=True, size=18, color="FFFFFF")
+    resumo["A1"].fill = PatternFill("solid", fgColor=BRAND)
+    resumo["A1"].alignment = Alignment(horizontal="center")
+    resumo.row_dimensions[1].height = 28
+    period_label = (
+        _export_period_label(start_date, end_date)
+        if start_date is not None and end_date is not None
+        else "Período selecionado"
+    )
+    summary_rows = [
+        ("Período", period_label, False),
+        ("Total de entradas", summary["entradas"], True),
+        ("Total de saídas", summary["saidas"], True),
+        ("Saldo do período", summary["saldo_periodo"], True),
+        ("Balanço (receitas - despesas)", summary["balanco"], True),
+        ("Receitas", summary["receitas"], True),
+        ("Despesas", summary["despesas"], True),
+        ("Aportes", summary["aportes"], True),
+        ("Saldo atual", balance, True),
+        ("Lançamentos", summary["count"], False),
+    ]
+    for label, value, currency in summary_rows:
+        resumo.append([label, value])
+        row = resumo.max_row
+        resumo.cell(row=row, column=1).font = Font(bold=True, color="1E293B")
+        if currency:
+            resumo.cell(row=row, column=2).number_format = '"R$" #,##0.00'
+    resumo.column_dimensions["A"].width = 24
+    resumo.column_dimensions["B"].width = 26
+
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
-async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
-    items = await _fetch_export_items(user_id, year, month)
-    if not items:
-        return None
-    # Saldo atual da conta (não escopado ao mês) — mesmo número do card do dashboard.
+async def _fetch_export_balance(user_id: int) -> float:
+    """Saldo atual da conta, compartilhado pelos anexos de resumo."""
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
             row = await cur.fetchone()
-    balance = float(row["balance"]) if row else 0.0
-    return await asyncio.to_thread(_render_pdf, items, year, month, balance)
+    return float(row["balance"]) if row else 0.0
 
 
-def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) -> bytes:
+async def build_pdf(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    items = await _fetch_export_items(user_id, period_start, period_end)
+    if not items:
+        return None
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
+    return await asyncio.to_thread(_render_pdf, items, period_start, period_end, balance)
+
+
+def _render_pdf(
+    items: list[dict], start_date: date | int, end_date: date | int, balance: float = 0.0
+) -> bytes:
     from datetime import datetime as _dt
     from html import escape
     from reportlab.lib import colors
@@ -1337,12 +1426,14 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
             fontSize=size, textColor=color, alignment=align, leading=size + 3,
         ))
 
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    period_label = _export_period_label(period_start, period_end)
     summary = _export_summary(items)
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
         bio, pagesize=A4,
         topMargin=14 * mm, bottomMargin=15 * mm, leftMargin=15 * mm, rightMargin=15 * mm,
-        title=f"Extrato {_MESES_PT[month]}/{year}", author="PigBank",
+        title=f"Extrato {period_label}", author="PigBank",
     )
     W = doc.width
     el = []
@@ -1350,7 +1441,7 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     # ── Banner ───────────────────────────────────────────────────────────
     banner = Table(
         [[par("PigBank", 22, colors.white, bold=True)],
-         [par(f"Extrato de {_MESES_PT[month]} de {year}", 11, HEAD_SUB)]],
+         [par(f"Extrato de {period_label}", 11, HEAD_SUB)]],
         colWidths=[W],
     )
     banner.setStyle(TableStyle([
@@ -1365,19 +1456,18 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     el.append(Spacer(1, 16))
 
     # ── Cards de resumo (Receitas | Despesas | Saldo) ────────────────────
-    # Despesas = despesas + aportes (aporte é saída de caixa).
-    # Saldo = saldo atual da conta (≠ "sobrou do mês"); mesmo número do dashboard.
+    # Entradas e saídas incluem as movimentações de investimento; o bloco
+    # seguinte abre o balanço entre receitas, despesas e aportes.
     gap = 8
     card_w = (W - 2 * gap) / 3.0
     SALDO_BG = colors.HexColor("#F1F5F9")
-    saldo_color = POS if balance >= 0 else NEG
-    despesas_total = summary["despesas"] + summary["aportes"]
+    saldo_periodo_color = POS if summary["saldo_periodo"] >= 0 else NEG
     kpi = Table(
-        [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "",
-          par("SALDO", 8, MUTED, bold=True)],
-         [par(fmt_brl(summary["receitas"]), 13, POS, bold=True), "",
-          par(fmt_brl(despesas_total), 13, NEG, bold=True), "",
-          par(fmt_brl(balance), 13, saldo_color, bold=True)]],
+        [[par("ENTRADAS", 8, MUTED, bold=True), "", par("SAÍDAS", 8, MUTED, bold=True), "",
+          par("SALDO DO PERÍODO", 8, MUTED, bold=True)],
+         [par(fmt_brl(summary["entradas"]), 13, POS, bold=True), "",
+          par(fmt_brl(summary["saidas"]), 13, NEG, bold=True), "",
+          par(fmt_brl(summary["saldo_periodo"]), 13, saldo_periodo_color, bold=True)]],
         colWidths=[card_w, gap, card_w, gap, card_w],
     )
     kpi.setStyle(TableStyle([
@@ -1394,6 +1484,33 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
         ("LEFTPADDING", (3, 0), (3, -1), 0), ("RIGHTPADDING", (3, 0), (3, -1), 0),
     ]))
     el.append(kpi)
+
+    el.append(Spacer(1, 8))
+    detail_w = W / 5.0
+    saldo_atual_color = POS if balance >= 0 else NEG
+    details = Table(
+        [[par("RECEITAS", 7, MUTED, bold=True), par("DESPESAS", 7, MUTED, bold=True),
+          par("APORTES", 7, MUTED, bold=True), par("BALANÇO", 7, MUTED, bold=True),
+          par("SALDO ATUAL", 7, MUTED, bold=True)],
+         [par(fmt_brl(summary["receitas"]), 10, POS, bold=True),
+          par(fmt_brl(summary["despesas"]), 10, NEG, bold=True),
+          par(fmt_brl(summary["aportes"]), 10, BRAND, bold=True),
+          par(fmt_brl(summary["balanco"]), 10, POS if summary["balanco"] >= 0 else NEG, bold=True),
+          par(fmt_brl(balance), 10, saldo_atual_color, bold=True)]],
+        colWidths=[detail_w] * 5,
+    )
+    details.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), SALDO_BG),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 1),
+        ("TOPPADDING", (0, 1), (-1, 1), 0),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 7),
+    ]))
+    el.append(details)
 
     # ── Despesas por categoria (com barra de proporção) ──────────────────
     if summary["by_category"]:
@@ -6350,22 +6467,61 @@ def _mask_email(email: str) -> str:
 
 @app.post("/export/{user_id}")
 @limiter.limit("3/minute")
-async def export_email(request: Request, user_id: int, year: int = None, month: int = None):
-    """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
+async def export_email(
+    request: Request,
+    user_id: int,
+    year: int = None,
+    month: int = None,
+    start_date: date = None,
+    end_date: date = None,
+):
+    """Gera o extrato de um período (PDF + XLSX + CSV) e envia por e-mail.
+
+    ``year/month`` continua aceito para clientes antigos; a interface nova usa
+    ``start_date/end_date`` inclusivos.
+    """
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
     now = now_tz()
-    y = year  or now.year
-    m = month or now.month
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Informe a data inicial e a data final do período.",
+        )
+    if start_date is not None and end_date is not None:
+        try:
+            period_start, period_end = _normalize_export_period(start_date, end_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        y = year or now.year
+        m = month or now.month
+        try:
+            period_start, period_end = _normalize_export_period(y, m)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Mês de exportação inválido.") from exc
 
-    csv_content = await build_csv(user_id, y, m)
+    # O export respeita a mesma janela de histórico do dashboard e das rotas
+    # de histórico. O corte é silencioso quando parte do intervalo é acessível.
+    from core.services.plan_service import history_earliest_date
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, now)
+    if earliest and period_start < earliest:
+        period_start = earliest
+    if period_end < period_start:
+        raise HTTPException(
+            status_code=400,
+            detail="O período selecionado está fora do histórico disponível no seu plano.",
+        )
+
+    csv_content = await build_csv(user_id, period_start, period_end)
     if csv_content is None:
         raise HTTPException(
             status_code=404,
-            detail="Nenhum lançamento encontrado neste mês para exportar.",
+            detail="Nenhum lançamento encontrado neste período para exportar.",
         )
-    xlsx_bytes = await build_xlsx(user_id, y, m)
-    pdf_bytes  = await build_pdf(user_id, y, m)
+    balance = await _fetch_export_balance(user_id)
+    xlsx_bytes = await build_xlsx(user_id, period_start, period_end, balance)
+    pdf_bytes = await build_pdf(user_id, period_start, period_end, balance)
 
     from db.privacy import get_user_email
     to_email = await asyncio.to_thread(get_user_email, user_id)
@@ -6376,7 +6532,7 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
         )
 
     import base64
-    tag = f"{y:04d}_{m:02d}"
+    tag = f"{period_start:%Y%m%d}_a_{period_end:%Y%m%d}"
     attachments = [
         {"filename": f"extrato_{tag}.pdf",   "content": base64.b64encode(pdf_bytes).decode(),
          "content_type": "application/pdf"},
@@ -6386,15 +6542,16 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
          "content_type": "text/csv"},
     ]
 
-    mes_label = f"{_MESES_PT[m]} de {y}"
-    subject = f"Seu extrato PigBank — {mes_label}"
+    period_label = _export_period_label(period_start, period_end)
+    subject = f"Seu extrato PigBank — {period_label}"
     from core.services.email_service import send_email, _base_html
     inner = (
         "<p>Oi! 🐷</p>"
-        f"<p>Segue em anexo o seu extrato de <strong>{mes_label}</strong>:</p>"
+        f"<p>Segue em anexo o seu extrato do período de <strong>{period_label}</strong>:</p>"
         "<ul>"
-        "<li><strong>PDF</strong> — resumo pra ler ou imprimir</li>"
-        "<li><strong>XLSX / CSV</strong> — pra abrir em planilha</li>"
+        "<li><strong>PDF</strong> — balanço com entradas, saídas, saldo do período e lançamentos</li>"
+        "<li><strong>XLSX</strong> — resumo financeiro e dados completos em planilha</li>"
+        "<li><strong>CSV</strong> — lançamentos do período em formato aberto</li>"
         "</ul>"
         "<p>Qualquer dúvida, fala com a gente em "
         "<a href=\"mailto:suporte@pigbankai.com\">suporte@pigbankai.com</a>.</p>"
