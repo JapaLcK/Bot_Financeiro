@@ -33,6 +33,16 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     # pessoas vivas — a conversão histórica não pode encolher quando uma conta
     # é excluída. O evento sobrevive anonimizado (user_id nulo).
     "checkout_funnel_events",
+    # Snapshot financeiro do Pix (docs/plano_pix_anual_asaas.md §13.2). A linha
+    # PRECISA sobreviver à deleção da conta: valores, datas, status e
+    # `asaas_payment_id` são o que reconcilia dinheiro que já entrou, e o
+    # vínculo com o titular some pelo BANCO — não por um UPDATE no job de
+    # exclusão, que perde a corrida com um webhook concorrente. Estar nesta
+    # lista não é detalhe: a tabela nasce em `db/schema.py` com a FK `set null`
+    # DECLARADA, e mesmo assim o `repair_user_fk_cascades` abaixo a converteria
+    # para CASCADE na primeira subida sem esta linha — apagando a
+    # pseudonimização em silêncio, junto com a prova do pagamento.
+    "pix_charges",
     # Registro de compliance de acesso a PII: "alguém leu tal campo de tal
     # titular, em tal data, com tal propósito" (purpose/actor/field). A coluna
     # da FK é `subject_user_id` — o TITULAR cujo dado foi lido, não o autor do

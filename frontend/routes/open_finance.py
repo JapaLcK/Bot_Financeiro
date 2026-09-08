@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import random
 import time
@@ -1106,6 +1107,15 @@ def _authorize_pluggy_webhook(request: Request, raw_body: bytes, secret: str) ->
     return False
 
 
+def _float_finito(texto: str) -> float:
+    """Hook de `json.loads`: aceita float normal, recusa nan/inf. Serve para
+    `parse_float` (`1e400`) e `parse_constant` (`NaN`/`Infinity`/`-Infinity`)."""
+    valor = float(texto)
+    if not math.isfinite(valor):
+        raise ValueError(f"número JSON não finito: {texto}")
+    return valor
+
+
 @router.post("/open-finance/pluggy/webhook")
 async def open_finance_pluggy_webhook(request: Request):
     """
@@ -1134,12 +1144,39 @@ async def open_finance_pluggy_webhook(request: Request):
         raise HTTPException(status_code=401, detail="Não autorizado.")
 
     try:
-        event = json.loads(raw_body)
+        # parse_float/parse_constant: `NaN`, `Infinity`, `-Infinity` e `1e400` NÃO
+        # são JSON (RFC 8259 não tem esses tokens) — o `json` do Python é que é
+        # leniente e devolve float('nan')/float('inf'). Em QUALQUER chave do corpo
+        # esse valor sobrevivia até o `Jsonb(event)` de update_pluggy_..._status
+        # (db/open_finance.py), onde o json.dumps do psycopg emite o token cru e o
+        # Postgres recusa: InvalidTextRepresentation → 500 — o laço de reenvio que
+        # o comentário do `item` seis linhas abaixo existe para evitar. Recusar no
+        # parse põe o caso na classe que este handler JÁ tratava com 400 desde
+        # antes ("corpo que não é JSON"), sem política nova nem saneamento depois.
+        # NÃO fecha a metade de STRING da mesma via: NUL (`\u0000`) e surrogate
+        # solitário, no valor OU na chave, seguem chegando ao `Jsonb(raw)` de
+        # update_pluggy_open_finance_item_status, ao param `text` do item_id e à
+        # lista de transactionIds do `any(%s)` em delete_open_finance_transactions
+        # (psycopg a adapta como text[]) → 500.
+        # Pré-existente (a `main` também dá 500) e só alcançável com o secret.
+        event = json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
+    if not isinstance(event, dict):
+        # Topo válido em JSON mas não-objeto (`[1,2,3]`, `"abc"`, `42`, `null`,
+        # `true`) passava pelo parse e quebrava no `.get()` abaixo → 500 (#310).
+        raise HTTPException(status_code=400, detail="Webhook inválido.")
 
     event_name = str(event.get("event") or event.get("type") or "")
-    item_id = str(event.get("itemId") or event.get("item_id") or event.get("item", {}).get("id") or "")
+    # `item` não-objeto vale como AUSENTE, não como 400: `{"item": null}` é corpo
+    # que a própria Pluggy manda em evento sem item, e responder erro faz ela
+    # REENVIAR — 500 em loop. O `.get("item", {})` só usava o default `{}` quando
+    # a CHAVE faltava; com a chave presente e valor `null`/escalar/lista, o
+    # `.get("id")` seguinte levantava AttributeError → 500 (#310). O `itemId` do
+    # topo continua identificando o evento quando existir.
+    item = event.get("item")
+    item_id = str(event.get("itemId") or event.get("item_id")
+                  or (item.get("id") if isinstance(item, dict) else None) or "")
     # `item/updated` NÃO escreve mais ACTIVE: quem afirma que sincronizou é o sync,
     # depois de consultar o item e puxar as contas. O webhook só diz o que a Pluggy
     # disse.
