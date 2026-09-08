@@ -2124,6 +2124,134 @@ def init_db():
         # Resync do §5.1 — a SQL mora em RESYNC_LEGACY_GRANTS_SQL (topo do
         # arquivo), com o porquê do `do update`.
         RESYNC_LEGACY_GRANTS_SQL,
+
+        # ── Pix anual via Asaas: as três tabelas (PR 1b-A) ───────────────────
+        # docs/plano_pix_anual_asaas.md §3.2, §3.3 e §3.4. Esta fatia é INERTE:
+        # as tabelas nascem e ficam vazias, nenhum módulo de produção importa
+        # `db/pix_charges.py`, `db/webhook_outbox.py` ou `core/services/asaas.py`,
+        # e não há rota. Quem prova é `tests/test_pix_inerte.py`.
+        #
+        # ZERO `insert` aqui, e isso é decisão, não descuido: o
+        # `CardinalityViolation` do PR 1a nasceu de um `insert … on conflict`
+        # rodando dentro do `init_db`. Estas tabelas nascem vazias — não existe
+        # backfill do que nunca foi vendido.
+
+        # `user_id` é `on delete set null` e NÃO `cascade`: o registro financeiro
+        # sobrevive à exclusão da conta com o VÍNCULO ao titular desfeito pelo
+        # banco (§13.2, molde da `plan_trials`).
+        #
+        # **`ga_client_id`, `fbp` e `fbc` NÃO existem aqui, e é decisão do dono.**
+        # O §3.2 do plano as lista, mas elas não têm escritor nem leitor nesta
+        # fatia: nascem só para o 1b-B. Criá-las agora produziria colunas que
+        # sobrevivem à exclusão da conta sem a purga que o §13.2 manda — os
+        # identificadores com que Meta e GA reidentificam a pessoa, sem nenhum
+        # uso na reconciliação do dinheiro —, e um gap que só um teste invertido
+        # descreveria. Elas entram no 1b-B, no MESMO PR que trouxer seus
+        # escritores e a purga (§14, regra registrada no plano).
+        #
+        # Quem garante o `set null` em RUNTIME é `_USER_FK_SET_NULL_TABLES`
+        # em db/schema_repairs.py — sem "pix_charges" lá, o
+        # `repair_user_fk_cascades` converte esta declaração em CASCADE na
+        # primeira subida. Declarar aqui só alinha o DDL com o reparo
+        # (tests/test_schema_repairs.py::test_ddl_nao_contradiz_o_alvo_do_repair).
+        #
+        # Centavos são `bigint`, nunca float. `plan_stored` é o valor LEGADO já
+        # resolvido na CRIAÇÃO (§3.2), o que mata o fallback silencioso de
+        # `_stored_plan_for_price`. `qr_payload_enc` guarda o "copia e cola"
+        # CIFRADO (§13.6): em texto puro é instrumento ao portador.
+        """
+        create table if not exists pix_charges (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          external_reference text not null unique,        -- "pix:<id>"
+          asaas_payment_id text unique,
+          asaas_customer_id text,
+          plan text not null,
+          plan_stored text not null,
+          price_cents bigint not null,
+          credit_cents bigint not null,
+          amount_cents bigint not null,
+          currency text not null default 'BRL',
+          duration_days int not null default 365,
+          stripe_subscription_id text,
+          stripe_cancel_scheduled_at timestamptz,
+          stripe_period_end_at timestamptz,
+          public_token text not null unique,              -- id OPACO, o único que sai daqui
+          status text not null default 'draft',
+          qr_payload_enc text,
+          due_date date,
+          qr_expires_at timestamptz,
+          access_starts_at timestamptz,
+          access_expires_at timestamptz,
+          created_at timestamptz not null default now(),
+          paid_at timestamptz,
+          canceled_at timestamptz,
+          refunded_at timestamptz,
+          purged_at timestamptz
+        )
+        """,
+        # UMA cobrança ativa por usuário, garantida pelo BANCO e não por
+        # `select`+`insert` em Python (§3.2 + §10): duas requisições
+        # concorrentes não podem produzir dois QRs pagáveis, senão as duas são
+        # precificadas contra o MESMO crédito. `canceling` está na lista porque
+        # a substituição cancela no Asaas ANTES de criar a nova (correção nº 6),
+        # então `canceling` e `draft` do mesmo dono não coexistem mais.
+        """
+        create unique index if not exists uniq_pix_charge_ativa
+          on pix_charges (user_id)
+          where status in ('draft', 'creating', 'pending', 'canceling')
+        """,
+        # O índice do lado que REFERENCIA, igual ao que a `plan_trials` ganhou:
+        # sem ele, todo `delete from users` varre `pix_charges` inteira para
+        # aplicar o `set null`.
+        """
+        create index if not exists idx_pix_charges_user
+          on pix_charges (user_id)
+        """,
+
+        # Outbox do webhook (§3.3). O handler só grava aqui e responde 200; quem
+        # concede acesso é o dreno, que é PR 1b-B. `payload_enc` é minimizado
+        # (só os 9 campos do §13.3) e cifrado; vira NULL na purga, e a linha
+        # FICA para forense.
+        """
+        create table if not exists pix_webhook_events (
+          event_id text primary key,
+          event_type text not null,
+          payload_enc text,
+          event_version bigint not null,
+          received_at timestamptz not null default now(),
+          processed_at timestamptz,
+          purged_at timestamptz,
+          attempts int not null default 0,
+          last_error text
+        )
+        """,
+        # A fila do dreno: parcial porque o interesse é só o que falta processar.
+        """
+        create index if not exists idx_pix_webhook_pendentes
+          on pix_webhook_events (processed_at) where processed_at is null
+        """,
+        # A purga do §13.3 conta de `received_at`, processado ou não — evento
+        # travado é justamente o de quem pediu exclusão da conta.
+        """
+        create index if not exists idx_pix_webhook_received
+          on pix_webhook_events (received_at)
+        """,
+
+        # Um registro por efeito, chaveado pelo PAGAMENTO e não pelo evento
+        # (§3.4, correção nº 8b): `PAYMENT_RECEIVED` reentregue com `event_id`
+        # NOVO não pode reexecutar `ga4`/`capi`/`email`. `event_id` fica só como
+        # forense de quem executou. Tabela de servidor — nunca sai daqui, então
+        # o id do provedor pode viver nela (§13.6).
+        """
+        create table if not exists pix_payment_effects (
+          asaas_payment_id text not null,
+          effect text not null,
+          event_id text not null,
+          done_at timestamptz not null default now(),
+          primary key (asaas_payment_id, effect)
+        )
+        """,
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
