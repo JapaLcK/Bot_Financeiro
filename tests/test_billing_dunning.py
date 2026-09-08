@@ -1,10 +1,11 @@
 """
 tests/test_billing_dunning.py — a regra "está bloqueado por inadimplência?".
 
-A tabela de 17 casos de `core.services.billing_dunning.bloqueado_por_inadimplencia`,
-contra Postgres real. Cada linha é uma população que o contrato do dono nomeia,
-e a razão de serem 17 e não 3 é que 11 delas existem para provar que o plano
-`free` (e os vizinhos dele) NÃO são tocados.
+A tabela de `core.services.billing_dunning.bloqueado_por_inadimplencia`, contra
+Postgres real (quantas linhas: `len(CASOS)` — o número que estava escrito aqui
+dizia 17 e eram 18; §2). Cada linha é uma população que o contrato do dono
+nomeia, e a razão de a tabela não ter três linhas é que a maioria delas existe
+para provar que o plano `free` (e os vizinhos dele) NÃO são tocados.
 
 Os controles negativos declarados do grupo, com o resultado MEDIDO de cada um
 (não o previsto — os dois divergiram, e o que vale é o medido):
@@ -19,8 +20,10 @@ Os controles negativos declarados do grupo, com o resultado MEDIDO de cada um
     em vez de uma só: com `active` sozinha, o controle mediria uma instância
     e não a categoria.
 
-O controle POSITIVO do grupo são as 13 linhas que esperam "passa": sem elas o
-grupo ficaria verde num código que bloqueia todo mundo, que é pior que o bug.
+O controle POSITIVO do grupo são as linhas que esperam "passa"
+(`sum(1 for c in CASOS if not c[-1])` — o número que estava escrito aqui dizia
+13 e eram 14; §2): sem elas o grupo ficaria verde num código que bloqueia todo
+mundo, que é pior que o bug.
 """
 from __future__ import annotations
 
@@ -61,7 +64,7 @@ def _grant(uid: int, source: str, *, dias_ini: int, dias_fim: int) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# A tabela de 17 casos
+# A tabela de casos (contagem: `len(CASOS)`, nunca escrita aqui — §2)
 # ──────────────────────────────────────────────────────────────────────────────
 # (nome, plan, last_payment_status, delta do relógio, grants, esperado)
 _GRANT_VIGENTE = ("pix", -10, 355)
@@ -182,3 +185,53 @@ def test_grant_vigente_janela_semiaberta_e_filtro_de_source():
     assert grant_vigente([g("pix", timedelta(days=-1), timedelta(days=1),
                             status="revoked")], AGORA) is False
     assert grant_vigente([], AGORA) is False
+
+
+def test_backfill_do_relogio_nao_recarimba_a_cada_boot(user_id):
+    """O backfill de `db/schema.py` roda UMA VEZ, na criação da coluna.
+
+    O par simétrico do `where past_due_since is null` que ele tinha: conta com
+    relógio LIMPO e `last_payment_status` ainda na lista dos três era
+    recarimbada a cada boot de cada processo — e esse estado é NORMAL, é o que o
+    `clear_past_due_since` do `invoice.paid` produz quando o
+    `Subscription.retrieve` ainda devolve `past_due`. Ou seja: quem acabou de
+    pagar ganhava relógio novo no boot seguinte.
+
+    Controle negativo declarado: devolva o `add column if not exists` + o UPDATE
+    solto (sem o `do $$ ... information_schema ...`) e este teste fica VERMELHO;
+    a tabela de casos acima continua verde, porque ela carimba o relógio à mão.
+    """
+    from db import get_auth_user, init_db
+
+    _conta(user_id, "pro", AGORA + timedelta(days=20), "past_due")
+    _relogio(user_id, None)
+    assert get_auth_user(user_id)["past_due_since"] is None
+
+    init_db()                       # o boot seguinte, com a coluna já existindo
+
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+    assert get_auth_user(user_id)["past_due_since"] is None, "recarimbou no boot"
+
+
+def test_backfill_do_relogio_carimba_inadimplente_ao_criar_a_coluna(user_id):
+    """CONTROLE POSITIVO do backfill: uma vez só não é nenhuma vez.
+
+    A decisão do dono é que TODO inadimplente existente ganhe sete dias a
+    partir do deploy — então o statement tem de carimbar quando a coluna nasce.
+    Aqui a coluna é DERRUBADA para reproduzir o estado pré-deploy; o `init_db`
+    a recria e o teste devolve o schema ao normal por construção.
+    """
+    from db import get_auth_user, init_db
+    from db_support import invalidate_auth_user_cache
+
+    _conta(user_id, "pro", AGORA + timedelta(days=20), "unpaid")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("alter table auth_accounts drop column past_due_since")
+        conn.commit()
+
+    init_db()
+
+    invalidate_auth_user_cache(user_id)
+    assert get_auth_user(user_id)["past_due_since"] is not None, "backfill não carimbou"

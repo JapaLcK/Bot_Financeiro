@@ -1372,11 +1372,24 @@ def test_prosa_perigosa_recusada_com_a_fila_viva(free_uid, spy_ai, resposta, rec
 # assuntos diferentes na mesma conta, e checam o BANCO — não só o texto da
 # resposta. Um teste que só olha a resposta não vê o lançamento entrando.
 #
-# CONTROLE NEGATIVO DECLARADO: ponha `return None` na primeira linha de
-# `core.handle_incoming._dunning_gate`. Esperado:
-#   • test_T5_1_bloqueado_nao_registra_lancamento  → VERMELHO
-#   • test_T5_3_assinante_e_free_registram_normalmente → VERDE
-# Se o T5.3 também ficar vermelho, a injeção foi no lugar errado.
+# CONTROLES NEGATIVOS DECLARADOS — são TRÊS, porque o grupo prova três coisas e
+# nenhuma injeção sozinha discrimina as outras duas. Resultado MEDIDO de cada
+# uma (`pytest tests/test_full_handler_smoke.py -k "T5 or T6"`), não o previsto:
+#
+#   1. `return None` na primeira linha de `_dunning_gate`:
+#        VERMELHO: T5.1 e T6_figurinha (a metade POSITIVA dele — a imagem de
+#                  verdade deixa de ser bloqueada).
+#        VERDE:    T5.2, T5.3, T5.4, T5.5, T6_mensagem_sem_texto.
+#      O T5.2 ficar VERDE aqui NÃO é falha do controle: com o gate inerte o
+#      passo 5 do handler responde billing do mesmo jeito, então esta injeção
+#      simplesmente não mede o escape hatch. Quem o mede é a 2.
+#   2. apague o bloco do escape hatch (o `handle_billing_command` dentro do
+#      gate), deixando-o cair direto na mensagem de bloqueio:
+#        VERMELHO: T5.2, e só ele.
+#   3. troque a lista `_uteis` do gate de volta por `not msg.attachments`:
+#        VERMELHO: T6_figurinha, e só ele.
+#
+# Se o T5.3 ficar vermelho em qualquer uma delas, a injeção foi no lugar errado.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -1501,10 +1514,55 @@ def test_T5_5_flag_desligada_nao_bloqueia(pro_uid, spy_ai, monkeypatch):
 
 def test_T6_mensagem_sem_texto_nao_gera_resposta_de_bloqueio(pro_uid, spy_ai,
                                                              dunning_ligado):
-    """Sticker/contato/localização chegam com `text` vazio e sem anexo. Hoje
-    isso devolve `[]` no passo 5, e o gate tem de preservar esse silêncio —
-    senão o bot responde bloqueio a cada figurinha."""
+    """Reação/contato/localização chegam com `text` vazio e SEM anexo. Hoje isso
+    devolve `[]` no passo 5, e o gate tem de preservar esse silêncio.
+
+    A premissa da versão anterior desta docstring ("sticker … chega com text
+    vazio e sem anexo") era FALSA — figurinha vira anexo. Ela tem teste próprio,
+    o de baixo."""
     uid = pro_uid
     _inadimplente(uid)
     assert hi.handle_incoming(_msg(uid, "")) == []
     assert hi.handle_incoming(_msg(uid, "   ")) == []
+
+
+def test_T6_figurinha_nao_gera_resposta_de_bloqueio(pro_uid, spy_ai,
+                                                    dunning_ligado, monkeypatch):
+    """Figurinha é ANEXO, não texto vazio: `wa_parse.py:90` põe `sticker` na
+    mesma lista de `image`/`document` e monta `filename = f"sticker_{id}"`.
+
+    Sem a guarda, a conta bloqueada recebia "a cobrança não passou" a cada
+    figurinha. A entrada aqui é a que o parser do WhatsApp REALMENTE produz
+    (§3 regra 3), não uma que eu projetei: mesmo `content_type` de um webp
+    qualquer, o que discrimina é o prefixo do `filename`.
+    """
+    from core.types import Attachment
+    uid = pro_uid
+    _inadimplente(uid)
+
+    def _figurinha():
+        m = _msg(uid, "")
+        m.attachments = [Attachment(filename="sticker_wamid.ABC123",
+                                    content_type="image/webp", data=b"")]
+        return m
+
+    # O gate tem de ser INERTE aqui: a resposta com a flag LIGADA é a MESMA que
+    # com ela desligada. Comparar as duas é o que separa "não bloqueou" de
+    # "bloqueou de outro jeito" — asserção `== []` não serviria, porque
+    # figurinha sem bytes baixados cai no aviso de download do passo de imagem.
+    ligado = hi.handle_incoming(_figurinha())
+    monkeypatch.setenv("DUNNING_BLOCK_ENABLED", "0")
+    desligado = hi.handle_incoming(_figurinha())
+    monkeypatch.setenv("DUNNING_BLOCK_ENABLED", "1")
+    assert [o.text for o in ligado] == [o.text for o in desligado], ligado
+    assert all("não passou" not in o.text for o in ligado), ligado
+
+    # CONTROLE POSITIVO do par: uma IMAGEM de verdade (mesmo content_type,
+    # filename sem o prefixo) continua sendo bloqueada — senão a guarda vira
+    # um buraco por onde o inadimplente manda foto de nota fiscal e queima
+    # Vision.
+    imagem = _msg(uid, "")
+    imagem.attachments = [Attachment(filename="image_wamid.XYZ789",
+                                     content_type="image/webp", data=b"")]
+    out = hi.handle_incoming(imagem)
+    assert out and "não passou" in out[0].text, out

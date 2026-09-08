@@ -4926,29 +4926,34 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         await asyncio.to_thread(recompute_entitlement, int(uid))
         return True
 
-    async def _fire_email(uid: int, fn, *args):
+    async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
-        Dedup por (função, usuário, 1 dia) porque o handler agora devolve 5xx
+        Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
         Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
-        (`send_pro_welcome_email`, `send_pro_charged_email`) e o aviso de fim de
-        trial. NÃO é o ponto único do arquivo — `send_payment_failed_email` e
-        `send_subscription_canceled_email` são chamados direto, cada um no seu
-        try/except. Sem consequência hoje (nenhum dos dois está depois de uma
-        escrita que possa falhar e forçar reentrega), mas quem mover um deles
-        para cá ganha a dedup de graça, e quem NÃO mover não deve achar que
-        tem. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
+        (`send_pro_welcome_email`, `send_pro_charged_email`), o aviso de fim de
+        trial e o `send_payment_failed_email` — este com
+        `dedup_days=DUNNING_GRACE_DAYS`, porque a janela dele é o CICLO de
+        inadimplência, não um dia. Fora daqui sobrou o
+        `send_subscription_canceled_email`, chamado direto no seu try/except;
+        quem mover também ele para cá ganha a dedup de graça, e quem NÃO mover
+        não deve achar que tem. Mesmo padrão do `trial_ending_email_sent` já
+        usado no repo.
 
-        Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
-        enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
-        cada retry não é.
+        **O registro vem DEPOIS do envio, e é isso que torna a entrega
+        retentável**: envio que estoura não grava a chave, então a entrega
+        seguinte do mesmo evento tenta de novo. Entrega continua "pelo menos uma
+        vez" na janela residual (cair ENTRE enviar e registrar). E-mail repetido
+        é o pior caso aceitável; e-mail a cada retry não é; e ZERO e-mail no
+        ciclo inteiro — o que uma dedupe commitada ANTES do envio produz — é o
+        pior dos três.
         """
         chave = f"{fn.__name__}_sent"
         try:
             from core.observability import recent_event_exists  # noqa: PLC0415
-            if await asyncio.to_thread(recent_event_exists, chave, int(uid), 1.0):
+            if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
                 return
         except Exception as exc:
             print(f"[billing] dedup de email falhou user={uid}: {exc}")
@@ -5150,9 +5155,18 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                                            expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
             # Desbloqueio automático do bot: pagou, o relógio da inadimplência
-            # zera. NÃO fica dentro de set_payment_status — ela é chamada de
-            # _materializar_assinatura e de recompute_entitlement, e mudar a
-            # semântica dela mexeria em call sites que este PR não auditou.
+            # zera.
+            #
+            # NÃO é redundante com a limpeza condicional de
+            # `set_payment_status_impl`, e a razão do comentário que estava aqui
+            # ("mexeria em call sites que este PR não auditou") era falsa — o
+            # call site não auditado, `recompute_entitlement`, era justamente o
+            # que produzia relógio órfão. Os call sites foram auditados e a
+            # limpeza virou estrutural. O que sobra para ESTA linha é o caso em
+            # que as duas regras divergem: se o `Subscription.retrieve` acima
+            # ainda devolver `past_due` (consistência eventual, ou outra fatura
+            # aberta), `sub_status` está NA lista e o UPDATE preserva o relógio
+            # — é este clear que destrava quem acabou de pagar.
             from db.plans import clear_past_due_since
             await asyncio.to_thread(clear_past_due_since, int(user_id))
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
@@ -5295,15 +5309,53 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # customer.subscription.deleted quando a sub for de fato cancelada.
         invoice = event["data"]["object"]
         user_id = _resolve_user(invoice)
-        if user_id:
+        # EVENTO FORA DE ORDEM não pode carimbar o relógio de quem já PAGOU.
+        # Medido: falha → `invoice.paid` (relógio zerado, status `active`) → um
+        # `payment_failed` atrasado, com `created` ANTERIOR ao do paid, punha
+        # `past_due` e carimbava de novo. Nada limpa até o `invoice.paid` do mês
+        # seguinte: ~3 semanas sem bot para quem está pagando.
+        #
+        # A fonte de verdade é o status ATUAL da assinatura, não a ordem dos
+        # eventos. `_event_version` serve o `subscription.deleted` porque lá ele
+        # é comparado com `plan_grants.event_version` — coluna que `esticar_grant`
+        # de propósito NÃO escreve (invariante 3) e que nem existe quando a
+        # assinatura não tem `expires_dt`, então aqui ele daria proteção com
+        # buraco. O `Subscription.retrieve` custa uma chamada de API no caminho
+        # do webhook e é o MESMO padrão dos ramos `invoice.paid` e
+        # `checkout.session.completed`, dez linhas acima. Exceção PROPAGA (5xx →
+        # a Stripe reentrega): nada foi escrito ainda, então a reentrega decide
+        # com informação melhor, e errar para "reentrega" atrasa o relógio em
+        # favor do usuário.
+        from core.services.billing_dunning import (  # noqa: PLC0415
+            DUNNING_GRACE_DAYS,
+            PAST_DUE_PAYMENT_STATUSES,
+        )
+        _sub_id = _invoice_subscription_id(invoice)
+        _status_agora = ""
+        if user_id and _sub_id:
+            _status_agora = (
+                _g(stripe.Subscription.retrieve(_sub_id), "status") or ""
+            ).strip().lower()
+        if user_id and _status_agora and _status_agora not in PAST_DUE_PAYMENT_STATUSES:
+            await log_system_event(
+                "warning",
+                "billing_payment_failed_obsoleto",
+                f"invoice.payment_failed ignorado: assinatura esta '{_status_agora}'.",
+                source="billing",
+                user_id=user_id,
+                details={"subscription": str(_sub_id),
+                         "status_atual": _status_agora,
+                         "event_id": _g(event, "id"),
+                         "event_version": _event_version(event)},
+            )
+        elif user_id:
             set_payment_status(user_id, "past_due")
             # Relógio da carência de 7 dias do corte do bot
             # (core/services/billing_dunning). Idempotente no SQL: a Stripe
             # manda um payment_failed por smart retry e reentrega o mesmo
             # evento em cima de 5xx — nenhum dos dois reinicia a contagem.
             from db.plans import claim_past_due_since
-            primeira_falha = await asyncio.to_thread(
-                claim_past_due_since, int(user_id))
+            await asyncio.to_thread(claim_past_due_since, int(user_id))
             await log_system_event(
                 "warning",
                 "billing_payment_failed",
@@ -5313,25 +5365,26 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             )
             # Email com link pra atualizar cartao (item 40)
             #
-            # Condicionado ao carimbo: sem isso a Stripe manda este e-mail uma
-            # vez por tentativa de smart retry (3-4 por ciclo) e por reentrega
-            # de webhook. `primeira_falha` é o rowcount do UPDATE — só a falha
-            # que ABRIU o ciclo avisa o usuário.
+            # A dedupe é `_fire_email` (system_event_logs), NÃO o rowcount de
+            # `claim_past_due_since`: aquele carimbo COMMITA antes do envio e o
+            # envio não tinha retentativa, então SMTP fora do ar na 1ª entrega
+            # deixava o ciclo INTEIRO mudo — medido: 1ª entrega + 3 reentregas
+            # da Stripe = 0 e-mails, e no fim do ciclo a pessoa perde o bot.
+            # `_fire_email` registra o evento DEPOIS de o envio voltar sem
+            # exceção: entrega 2 tenta de novo, sucesso na 1 continua barrando
+            # a 2. `dedup_days=DUNNING_GRACE_DAYS` no lugar do 1,0 default
+            # porque a janela a cobrir é o CICLO — com um dia, cada smart retry
+            # mandaria um e-mail, que é o ruído que o gate por rowcount matava.
             from core.services.email_service import send_payment_failed_email
-            email = None
-            try:
-                email = await _user_email(user_id)
-                if email and primeira_falha:
-                    await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
-            except Exception as exc:
-                print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
+            await _fire_email(user_id, send_payment_failed_email,
+                              dedup_days=float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
                 from core.services.admin_notify import notify_payment_failed
-                _attempt = _g(invoice, "attempt_count")
                 await asyncio.to_thread(
                     notify_payment_failed,
-                    user_id=user_id, email=email, attempt_count=_attempt,
+                    user_id=user_id, email=await _user_email(user_id),
+                    attempt_count=_g(invoice, "attempt_count"),
                 )
             except Exception as exc:
                 print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
@@ -5348,9 +5401,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
             # A assinatura morreu: o relógio da inadimplência não tem mais o
-            # que medir. Deixá-lo carimbado seria dado órfão numa conta
-            # 'canceled' — a guarda de status de billing_dunning já o ignora
-            # (a invariante), mas ele nunca deve sobreviver ao fim do ciclo.
+            # que medir. REDUNDANTE hoje — `canceled` está fora de
+            # `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status` da linha
+            # acima já zerou o relógio no mesmo UPDATE. Fica como declaração de
+            # intenção do ramo (e cobertura se o status deste ramo mudar), e não
+            # como a proteção: órfão em conta `canceled` NÃO é dado morto, é
+            # dado dormente que o `payment_failed` seguinte arma.
             from db.plans import clear_past_due_since
             await asyncio.to_thread(clear_past_due_since, int(user_id))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).

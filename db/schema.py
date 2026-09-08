@@ -1763,24 +1763,40 @@ def init_db():
         # projeto (o "Limpar" do painel; ver o comentário do
         # checkout_funnel_events mais abaixo), então o relógio que decide corte
         # de acesso não pode morar em log.
-        """alter table auth_accounts add column if not exists past_due_since timestamptz""",
-        # BACKFILL, e ele é AUTO-CURATIVO de propósito (roda em TODO boot, não
-        # uma vez): a guarda `past_due_since is null` o torna no-op para quem já
-        # está carimbado, e é justamente ela que faz o UPDATE alcançar também a
-        # conta que ficou inadimplente sem o webhook conseguir carimbar (evento
-        # perdido, processo fora do ar, deploy no meio da entrega). Sem ele,
-        # essa conta ficaria com relógio NULL para sempre e nunca seria
-        # bloqueada — falha silenciosa no lado de quem não paga.
+        # ADD COLUMN + BACKFILL num só statement, e o backfill roda UMA VEZ na
+        # vida do banco — a guarda é a INEXISTÊNCIA da coluna, avaliada antes do
+        # `alter`. Preserva a decisão do dono (todo inadimplente atual ganha
+        # sete dias a partir do deploy) e nada mais.
         #
-        # Errar por excesso aqui é o lado seguro: recarimbar dá 7 dias NOVOS de
-        # carência a quem já devia estar cortado; deixar de carimbar dá acesso
-        # infinito. O `lower(coalesce(...))` espelha o `strip().lower()` do
-        # Python em `bloqueado_por_inadimplencia`.
+        # A versão anterior era `add column if not exists` + um UPDATE solto com
+        # `where past_due_since is null`, rodando a cada boot de cada processo.
+        # Aquele `where` protege quem está carimbado, mas o par SIMÉTRICO passa:
+        # conta com relógio LIMPO e `last_payment_status` ainda na lista dos
+        # três é RECARIMBADA a cada boot (medido: 1 linha). E esse estado é
+        # normal — é exatamente o que o `clear_past_due_since` do `invoice.paid`
+        # produz quando o `Subscription.retrieve` ainda devolve `past_due`
+        # (consistência eventual). Ou seja: quem acabou de pagar ganhava um
+        # relógio novo no boot seguinte. Depois do backfill inicial quem carimba
+        # é o `claim_past_due_since` do webhook, e ele cobre todo o resto.
+        #
+        # De brinde sai o Seq Scan de todo boot (o `lower(coalesce())` não é
+        # indexável).
+        #
+        # O `lower(coalesce(...))` espelha o `strip().lower()` do Python em
+        # `bloqueado_por_inadimplencia`.
         """
-        update auth_accounts set past_due_since = now()
-         where past_due_since is null
-           and lower(coalesce(last_payment_status, ''))
-               in ('past_due', 'unpaid', 'incomplete')
+        do $$
+        begin
+          if not exists (select 1 from information_schema.columns
+                          where table_schema = 'public'
+                            and table_name = 'auth_accounts'
+                            and column_name = 'past_due_since') then
+            alter table auth_accounts add column past_due_since timestamptz;
+            update auth_accounts set past_due_since = now()
+             where lower(coalesce(last_payment_status, ''))
+                   in ('past_due', 'unpaid', 'incomplete');
+          end if;
+        end $$
         """,
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano

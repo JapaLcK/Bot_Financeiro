@@ -263,10 +263,13 @@ def claim_past_due_since(user_id: int) -> bool:
     um `invoice.payment_failed` por smart retry, e reentrega o mesmo evento em
     cima de 5xx — o relógio NÃO pode reiniciar em nenhum dos dois casos.
 
-    O `rowcount` sai de graça e é a chave de dedupe do e-mail "seu pagamento
-    falhou" (só a PRIMEIRA falha do ciclo manda e-mail ao usuário). Um
-    `coalesce` no `set` também seria idempotente, mas o `RETURNING` veria o
-    valor novo e não diria se foi esta chamada que carimbou.
+    O `rowcount` sai de graça e diz se foi esta chamada que abriu o ciclo (um
+    `coalesce` no `set` seria idempotente também, mas o `RETURNING` veria o
+    valor novo e não diria isso). **NÃO o use como dedupe de e-mail**: ele já
+    foi a chave do "seu pagamento falhou" e o carimbo COMMITA antes do envio,
+    então SMTP fora do ar na 1ª entrega calava o ciclo inteiro (medido: 1ª
+    entrega + 3 reentregas da Stripe = 0 e-mails). A dedupe de e-mail mora no
+    `_fire_email` do webhook, que grava a chave DEPOIS do envio.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:

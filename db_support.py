@@ -697,12 +697,41 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
     """
     Atualiza last_payment_status. Valores esperados (alinhados com o ciclo do
     Stripe Subscription): inactive, trialing, active, past_due, canceled, unpaid.
+
+    **E mantém a invariante do relógio de inadimplência no MESMO UPDATE**:
+    `past_due_since` não nulo com status FORA de `PAST_DUE_PAYMENT_STATUSES` é
+    órfão, e órfão não é dado morto — é dado dormente que o
+    `invoice.payment_failed` seguinte transforma em corte instantâneo (o
+    `claim_past_due_since` vê `rowcount 0`, então a carência vira zero E o
+    e-mail de aviso não sai). Quem produzia o órfão era
+    `billing_access.recompute_entitlement`, que escreve `active` quando há
+    grant Pix vigente e não limpava o relógio.
+
+    Aqui e não em cada chamador (§2: fechar a categoria, não a instância). Os
+    call sites são estes e é o conjunto todo — `frontend/finance_bot_websocket_
+    custom.py` :4895 e :4923 (`_materializar_assinatura`), :5299
+    (`payment_failed`), :5349 (`subscription.deleted`) e
+    `core/services/billing_access.py` :459. A ORDEM do :5299 importa e está
+    certa: ele grava `past_due`, que está NA lista, então o relógio é
+    PRESERVADO e o `claim_past_due_since` logo abaixo carimba se estiver nulo.
+
+    Não substitui os `clear_past_due_since` explícitos do webhook: "o status
+    saiu da lista" e "este evento significa pago/encerrado" são regras
+    diferentes. `invoice.paid` cujo `Subscription.retrieve` ainda devolva
+    `past_due` (consistência eventual, ou outra fatura aberta) grava um status
+    DA lista — o relógio sobrevive a este UPDATE e é o clear explícito que
+    destrava quem acabou de pagar.
     """
+    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
+    preserva_relogio = (status or "").strip().lower() in PAST_DUE_PAYMENT_STATUSES
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update auth_accounts set last_payment_status = %s where user_id = %s",
-                (status, user_id),
+                "update auth_accounts"
+                "   set last_payment_status = %s,"
+                "       past_due_since = case when %s then past_due_since end"
+                " where user_id = %s",
+                (status, preserva_relogio, user_id),
             )
         conn.commit()
     invalidate_auth_user_cache(user_id)

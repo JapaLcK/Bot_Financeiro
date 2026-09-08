@@ -7,12 +7,25 @@ plano, quem cancelou por vontade, quem escolheu o Grátis e quem teve grant de
 admin expirado continuam usando — cada um deles é preservado por uma guarda
 explícita de `bloqueado_por_inadimplencia`, na ordem em que elas aparecem.
 
-**A INVARIANTE**: o relógio (`auth_accounts.past_due_since`) NUNCA é lido
-sozinho. A guarda de status vem ANTES dele — um `past_due_since` órfão numa
-conta `active`/`free`/`canceled` é dado morto, não bloqueio. Sem essa ordem,
-uma conta que voltou a pagar mas cujo `clear_past_due_since` não rodou (webhook
-perdido, ramo novo que ninguém lembrou de limpar) seria cortada por um carimbo
-antigo. Coberta por teste: linha 16 da tabela de `tests/test_billing_dunning.py`.
+**A INVARIANTE**: relógio (`auth_accounts.past_due_since`) não nulo só existe
+em conta cujo `last_payment_status` está em `PAST_DUE_PAYMENT_STATUSES`. Quem a
+mantém é ESTRUTURAL e mora na escrita, não aqui: `db_support.
+set_payment_status_impl` zera o relógio no MESMO UPDATE quando o status vai
+para fora da lista. Ler a docstring dela antes de mexer em qualquer um dos dois
+lados.
+
+A guarda de status deste módulo (passo 2 abaixo) é **defesa em profundidade**,
+não o que torna o órfão seguro. Ela cobre a linha PRÉ-EXISTENTE (carimbada
+antes de a invariante existir, ou pelo backfill de `db/schema.py`) e o caso de
+alguém escrever a coluna por fora. Órfão NÃO é dado morto: enquanto ele
+existir, o próximo `invoice.payment_failed` devolve o status para a lista, o
+`claim_past_due_since` vê `rowcount 0` e a conta é cortada na PRIMEIRA falha do
+ciclo novo, com carência zero e sem o e-mail de aviso. A versão anterior desta
+docstring dizia o contrário e foi o raciocínio que deixou o produtor de órfão
+(`billing_access.recompute_entitlement`) sem conserto.
+Coberta por teste: linhas 16a/16b/16c da tabela de
+`tests/test_billing_dunning.py` (a guarda) e `test_T4_*` de
+`tests/test_billing_dunning_webhook.py` (a invariante na escrita).
 
 Import leve de propósito (só `os`/`datetime` no topo): este módulo entra no
 caminho de TODA mensagem do bot, inclusive no processo do Discord. `db`,
@@ -63,7 +76,8 @@ def bloqueado_por_inadimplencia(user_id: int, agora: datetime | None = None) -> 
       1. allowlist de admin/teste;
       2. status fora de `PAST_DUE_PAYMENT_STATUSES` — inclui `free`,
          `canceled`, `active`, `trialing`, `grandfathered` e conta sem status.
-         É a guarda da INVARIANTE do topo do arquivo;
+         é a DEFESA EM PROFUNDIDADE da invariante do topo do arquivo (quem a
+         mantém é `set_payment_status_impl`);
       3. sem `past_due_since` — nunca foi carimbada, não há relógio;
       4. dentro da carência;
       5. direito EFETIVO por outro caminho: grant `pix` ou `admin` vigente.
