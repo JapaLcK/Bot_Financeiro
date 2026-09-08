@@ -170,6 +170,15 @@ pode prometer pausa ou perda de acesso.
 e os dois writers da coluna de status são `db_support.set_payment_status_impl` e
 o SQL cru de `core/admin_dashboard.set_account_plan` — mexeu num, leia o outro.
 
+**A máquina inteira está enumerada em `docs/dunning_estados_eventos.md`**:
+estados (o par relógio × status) × eventos (os quatro webhooks de cobrança, o
+`recompute_entitlement`, o `set_account_plan` e o tick do lembrete) × validade
+do evento (novo / reentrega / velho), com o que cada célula faz hoje, o que
+deveria fazer, e as três células deixadas abertas de propósito. **Leia antes de
+tocar em qualquer writer do relógio** — o subsistema levou três rodadas de
+revisão porque cada conserto foi feito como transição isolada, e a tabela existe
+para a quarta não repetir o método (raiz §4, registro do PR #60).
+
 ### Open Finance
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`

@@ -83,6 +83,11 @@ async def check_payment_reminder() -> None:
     do cartão não é o que sustenta o acesso, e lembrar de pagar algo que já
     está pago por outro caminho é ruído.
 
+    E **revalida o estado imediatamente antes de enviar**
+    (`db.dunning.ciclo_de_atraso_aberto`): o funil é um snapshot, o lote não tem
+    `LIMIT`, e quem pagou no meio dele não pode receber "a cobrança continua
+    pendente". A máquina completa está em `docs/dunning_estados_eventos.md`.
+
     E-MAIL é o caminho garantido; o WhatsApp é melhoria. Ver `_wa_lembrete`.
     """
     if not payment_reminder_enabled():
@@ -97,7 +102,7 @@ async def check_payment_reminder() -> None:
     from core.services.email_service import send_payment_reminder_email
     # Reuso, não cópia (§0.1): a minimização de PII em log já existe lá.
     from core.services.engagement_scheduler import _mask_email
-    from db.dunning import list_payment_reminder_candidates
+    from db.dunning import ciclo_de_atraso_aberto, list_payment_reminder_candidates
 
     loop = asyncio.get_event_loop()
     dashboard_url = os.getenv("DASHBOARD_URL", "https://pigbankai.com")
@@ -140,6 +145,27 @@ async def check_payment_reminder() -> None:
                 continue
         except Exception as exc:
             logger.error("[cobranca] checagem de grant falhou user_id=%s: %s", user_id, exc)
+            continue
+        # REVALIDAÇÃO, a última coisa antes do envio. `rows` é UM snapshot e o
+        # lote não tem `LIMIT`: quem pagasse depois da query — em especial
+        # enquanto as linhas anteriores são processadas — recebia "a cobrança
+        # continua pendente" e a dedupe registrava o sucesso. E-mail errado para
+        # cliente PAGANTE, que é a categoria que este caminho existe para
+        # consertar (célula nº 28 de `docs/dunning_estados_eventos.md`).
+        #
+        # Leitura DIRETA (`ciclo_de_atraso_aberto`), não `get_auth_user`:
+        # aquele tem cache de 10 s e pode mentir exatamente nesta corrida. E
+        # não é claim atômico — gravar a dedupe antes do envio é o bug que a
+        # rodada 1 consertou. Falha de leitura NÃO manda: neste ponto o silêncio
+        # é o erro recuperável (o tick seguinte tenta de novo, e a janela tem
+        # `PAYMENT_REMINDER_WINDOW_DAYS` de largura justamente para isso).
+        try:
+            if not await loop.run_in_executor(None, ciclo_de_atraso_aberto, user_id):
+                logger.info("[cobranca] lembrete abortado: ciclo fechou durante"
+                            " o lote → user_id=%s", user_id)
+                continue
+        except Exception as exc:
+            logger.error("[cobranca] revalidacao falhou user_id=%s: %s", user_id, exc)
             continue
         try:
             ok = await loop.run_in_executor(

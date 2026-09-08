@@ -24,6 +24,12 @@ veredito para ler — o `update_user_plan`/`set_payment_status` daquele ramo já
 escrevem sem checar versão de evento na `main`, então gatear só o clear não
 fecharia nada. Ressalva registrada no comentário do ramo.
 
+**Fica fora também a REENTREGA, e ela tem arquivo próprio**
+(`tests/test_billing_dunning_reentrega.py`): o discriminador de R1–R3 é o
+VEREDITO do evento, e o dela é a IDADE do relógio. O gate `_decidiu_acesso` que
+R2/R3 provam é NECESSÁRIO e não SUFICIENTE — a tabela de estados × eventos
+(`docs/dunning_estados_eventos.md`) mostra as duas células lado a lado.
+
 Helpers por IMPORT de `test_billing_webhook_lifecycle` (§0.7), como os dois
 arquivos irmãos. Arquivo NOVO porque `test_billing_dunning_webhook.py` está em
 350/350, o teto de `tests/test_max_lines_python.py`.
@@ -54,6 +60,8 @@ num código que nunca carimba e nunca limpa):
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 import db
@@ -68,6 +76,11 @@ from test_billing_webhook_lifecycle import (
 )
 
 _SUB = "sub_dev"
+
+# `created` de um evento que a Stripe emitiu ANTES do carimbo do relógio (que é
+# `now()` do banco). Relativo a `now()`, e não literal, pela mesma razão do
+# `_T_LIFE`: literal no passado ou no futuro faz o teste medir o calendário.
+_T_PASSADO = int(datetime.now(timezone.utc).timestamp()) - 30 * 86_400
 
 
 @pytest.fixture(autouse=True)
@@ -140,9 +153,12 @@ def test_R1_corrida_com_invoice_paid_nao_deixa_relogio_orfao(user_id, monkeypatc
         real_sps(u, status)
         if status == "past_due" and int(u) == uid and not ja_correu:
             ja_correu.append(status)
-            # A outra requisição, no intervalo: pagou.
+            # A outra requisição, no intervalo: pagou. O `paid` competidor é
+            # MAIS NOVO que o relógio que este ramo acabou de tentar carimbar,
+            # então ele passa pelo predicado da escrita (é o que o
+            # `nao_mais_novo_que` mede — ver R4/R5 abaixo).
             real_sps(u, "active")
-            clear_past_due_since(int(u))
+            clear_past_due_since(int(u), nao_mais_novo_que=_T_LIFE + 1)
 
     # O webhook resolve o nome em `db` (o `from db import ...` do :4687 roda
     # DENTRO do endpoint), então o ponto de injeção é o módulo `db`.
@@ -234,3 +250,4 @@ def test_R3_checkout_velho_nao_zera_o_relogio(user_id, monkeypatch):
         assert _relogio(uid) is None, "assinatura nova não fechou o ciclo"
     finally:
         _cleanup_trial(uid)
+

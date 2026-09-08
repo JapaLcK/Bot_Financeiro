@@ -7,10 +7,16 @@ vocabulário (lista de status, janela, largura) mora em
 `core/services/payment_reminder`; quem escreve são os ramos de cobrança do
 webhook do Stripe. **NADA de acesso depende desta coluna.**
 
+**A máquina inteira — estados × eventos, com o que cada célula faz hoje e o que
+deveria fazer — está em `docs/dunning_estados_eventos.md`.** Leia antes de
+mexer em qualquer writer deste arquivo ou dos ramos que o chamam: três rodadas
+de revisão consertaram transições isoladas desta mesma máquina, e a tabela
+existe para a quarta não repetir o método.
+
 Saiu de `db/plans.py` (que estava em 350/350, o teto de
 `tests/test_max_lines_python.py`) quando o predicado de status entrou no
 `claim`. É separação por assunto, não por tamanho: `plans.py` é trial e escada
-de planos, e estas três funções são cobrança. Importe daqui — não há
+de planos, e estas funções são cobrança. Importe daqui — não há
 re-export em `db/plans.py`, de propósito (§0.7).
 """
 
@@ -79,25 +85,83 @@ def claim_past_due_since(user_id: int) -> bool:
     return carimbou
 
 
-def clear_past_due_since(user_id: int) -> None:
+def clear_past_due_since(user_id: int, *, nao_mais_novo_que: int) -> None:
     """Zera o relógio: pagou, cancelou ou a assinatura morreu — ciclo fechado.
 
-    INCONDICIONAL de propósito: quem decide se o evento tem autoridade para
-    fechar o ciclo é o CHAMADOR, e nos ramos `checkout.session.completed` e
-    `invoice.paid` isso é o retorno de `_materializar_assinatura` (False =
-    evento velho, recusado pela guarda de versão de `upsert_grant`). Chamar isto
-    sem olhar aquele retorno era zerar o relógio por ordem de um evento que já
-    tinha sido descartado para o ACESSO.
+    **O limite mora AQUI, na escrita, e o parâmetro é obrigatório** — mesma
+    forma do predicado de status do `claim` acima, e pela mesma razão. Uma
+    versão anterior era incondicional e delegava ao chamador a pergunta "este
+    evento tem autoridade?", respondida pelo retorno de
+    `_materializar_assinatura` (False = evento VELHO). Aquele gate era
+    insuficiente por construção, e a tabela de estados × eventos
+    (`docs/dunning_estados_eventos.md`, célula E1/E2 nº 5) mostra por quê:
+    `upsert_grant` devolve o `id` DE PROPÓSITO para versão IGUAL (reentrega do
+    mesmo evento, e o irmão do mesmo segundo do §6.1), e o
+    `invoice.payment_failed` que abre o ciclo NOVO não escreve grant, logo não
+    avança a marca d'água de versão. Resultado: a reentrega de um `paid`
+    ANTERIOR ao ciclo atual passava pelo gate e apagava o relógio que a falha
+    nova tinha acabado de carimbar.
+
+    A pergunta certa não é "este evento é válido?", é **"este evento é mais novo
+    que o ciclo que estou apagando?"** — e ela se responde no `where`:
+    `past_due_since <= to_timestamp(<created do evento>)`. Isso separa a
+    reentrega VELHA (recusa) da reentrega DO MESMO CICLO (aceita — o 5xx que cai
+    entre o grant e o clear, célula nº 6), que é o caso que um gate por "o
+    upsert APLICOU?" quebraria. `nao_mais_novo_que` é epoch em SEGUNDOS, o mesmo
+    vocabulário de `_event_version` do webhook. Relógio NULL faz o predicado
+    valer NULL: zero linhas, que é o no-op correto.
+
+    ponytail: o relógio é `now()` do NOSSO banco e o `created` é do Stripe. Se o
+    `payment_failed` for processado com atraso MAIOR que o intervalo entre a
+    falha e o pagamento, o clear legítimo vira no-op e o relógio sobrevive — ele
+    some sozinho no próximo status fora da lista
+    (`db_support.set_payment_status_impl`). Carimbar o relógio com o `created`
+    do evento falho troca esse erro por um pior (falho reentregue com `created`
+    de dias atrás nasce fora da janela do lembrete): a coluna ancora a JANELA
+    além da ORDEM, e para a janela `now()` é a resposta certa. Ver a ressalva na
+    tabela.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update auth_accounts set past_due_since = null where user_id = %s",
-                (int(user_id),),
+                "update auth_accounts set past_due_since = null"
+                " where user_id = %s and past_due_since <= to_timestamp(%s)",
+                (int(user_id), int(nao_mais_novo_que)),
             )
         conn.commit()
     from db_support import invalidate_auth_user_cache
     invalidate_auth_user_cache(user_id)
+
+
+def ciclo_de_atraso_aberto(user_id: int) -> bool:
+    """A conta AINDA está com um ciclo de inadimplência aberto? Leitura DIRETA.
+
+    É a revalidação do `core/services/payment_reminder`: o funil é UM snapshot,
+    o lote não tem `LIMIT`, e quem pagasse no meio dele recebia "a cobrança
+    continua pendente" — e-mail errado para cliente pagante (célula nº 28 de
+    `docs/dunning_estados_eventos.md`).
+
+    O predicado é o MESMO núcleo de `list_payment_reminder_candidates` (relógio
+    + status, da mesma constante, com a mesma normalização) e **só ele**: janela
+    e opt-out não são o que torna a mensagem FALSA, e revalidar a janela faria um
+    lote lento descartar lembrete legítimo — o erro oposto.
+
+    NÃO é `get_auth_user`: aquele tem cache de 10 s
+    (`db_support._auth_user_cache`) e uma leitura cacheada pode mentir
+    exatamente na corrida que esta função existe para pegar. E NÃO é um claim
+    atômico: gravar a chave de dedupe antes do envio é o bug que a rodada 1
+    consertou (`_fire_email` grava DEPOIS de o envio confirmar, de propósito).
+    """
+    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from auth_accounts"
+                " where user_id = %s and past_due_since is not null"
+                "   and lower(coalesce(last_payment_status, '')) = any(%s)",
+                (int(user_id), list(PAST_DUE_PAYMENT_STATUSES)),
+            )
+            return cur.fetchone() is not None
 
 
 def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:

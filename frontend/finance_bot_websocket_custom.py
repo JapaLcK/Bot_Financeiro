@@ -5001,16 +5001,30 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # Assinatura nova por cima de um ciclo de inadimplência: fecha o
             # ciclo e zera o relógio (core/services/billing_dunning).
             #
-            # SÓ se ESTE evento decidiu o acesso. `_materializar_assinatura`
-            # devolve False quando a guarda de versão de `upsert_grant` recusou
-            # o evento por ser VELHO — nesse caso quem decidiu foi um evento
-            # mais novo, e um `checkout` atrasado zerando o relógio apagava o
-            # ciclo de inadimplência que o evento novo tinha estabelecido. É o
-            # MESMO par do `invoice.paid` abaixo: os dois descartavam o retorno
-            # e chamavam o clear incondicional (§2, a classe, não a instância).
+            # DUAS condições, e elas respondem perguntas diferentes — ver a
+            # tabela de estados × eventos em `docs/dunning_estados_eventos.md`:
+            #
+            #  • `_decidiu_acesso` — "este evento decidiu o acesso?". False
+            #    quando a guarda de versão de `upsert_grant` o recusou por
+            #    VELHO; aí quem decidiu foi um evento mais novo e um `checkout`
+            #    atrasado não pode apagar o ciclo que o novo estabeleceu
+            #    (célula nº 7).
+            #  • `nao_mais_novo_que` — "este evento é mais novo que o ciclo que
+            #    estou apagando?". O gate acima NÃO responde isso: `upsert_grant`
+            #    devolve o `id` para versão IGUAL de propósito, e o
+            #    `payment_failed` que abre o ciclo novo não avança a versão do
+            #    grant — a REENTREGA de um `checkout`/`paid` anterior ao ciclo
+            #    atual passava pelo gate e zerava o relógio (célula nº 5). O
+            #    predicado mora na ESCRITA, como o do `claim`.
+            #
+            # É o MESMO par do `invoice.paid` abaixo, nas duas correções: os
+            # dois ramos tiveram os dois defeitos (§2, a classe, não a
+            # instância — o apontamento citava só o `invoice.paid`).
             if _decidiu_acesso:
                 from db.dunning import clear_past_due_since
-                await asyncio.to_thread(clear_past_due_since, int(user_id))
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -5190,16 +5204,29 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # aberta), `sub_status` está NA lista e o UPDATE preserva o relógio
             # — é este clear que fecha o ciclo de quem acabou de pagar.
             #
-            # E ele é CONDICIONAL ao veredito do evento. Quando `upsert_grant`
-            # recusa um `invoice.paid` VELHO, `_materializar_assinatura`
-            # devolve False sem escrever status nenhum — o retorno era
-            # descartado aqui e o clear rodava do mesmo jeito, deixando um
-            # evento já classificado como obsoleto zerar o relógio de um ciclo
-            # de inadimplência estabelecido por evento mais novo. Mesmo gate no
-            # `checkout.session.completed`, que tinha o defeito idêntico.
+            # E ele tem DUAS condições. `_decidiu_acesso` é o veredito do
+            # evento: quando `upsert_grant` recusa um `invoice.paid` VELHO,
+            # `_materializar_assinatura` devolve False sem escrever status
+            # nenhum, e o retorno era descartado aqui (célula nº 7 de
+            # `docs/dunning_estados_eventos.md`).
+            #
+            # `nao_mais_novo_que` é o que faltava, e é a célula nº 5: o gate
+            # acima ACEITA a reentrega do mesmo evento, porque `upsert_grant`
+            # devolve o `id` para versão IGUAL de propósito (é o que faz o 5xx
+            # da Stripe ser retryable). Como o `invoice.payment_failed` não
+            # escreve grant, ele não avança a marca d'água de versão — então a
+            # reentrega de um `paid` ANTERIOR ao ciclo atual passava pelo gate e
+            # apagava o relógio que a falha nova acabara de carimbar, deixando a
+            # conta `past_due` com o relógio zerado. O predicado mora na
+            # ESCRITA (`db.dunning.clear_past_due_since`), como o do `claim`, e
+            # é ele que distingue essa reentrega VELHA da reentrega DO MESMO
+            # CICLO (5xx entre o grant e este clear, célula nº 6), que precisa
+            # continuar limpando. Mesmo par no `checkout.session.completed`.
             if _decidiu_acesso:
                 from db.dunning import clear_past_due_since
-                await asyncio.to_thread(clear_past_due_since, int(user_id))
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
@@ -5488,11 +5515,21 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # comportamento PRÉ-EXISTENTE da main e já rodam sem checar versão
             # de evento, então gatear só o clear não fecharia nada — a
             # staleness deste ramo é do ramo inteiro, é anterior a este PR
-            # (§0.3) e continua aberta. A categoria "clear que ignora o
-            # veredito do evento" está fechada nos dois ramos onde o veredito
+            # (§0.3) e continua aberta (célula nº 18 de
+            # `docs/dunning_estados_eventos.md`). A categoria "clear que ignora
+            # o veredito do evento" está fechada nos dois ramos onde o veredito
             # EXISTE; este fica pendente de propósito.
+            #
+            # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro: o
+            # parâmetro é OBRIGATÓRIO para que nenhum call site futuro herde a
+            # versão incondicional, a regra passa a ser UMA só, e nas três
+            # células alcançáveis deste ramo (16, 17, 18) ele não muda nada —
+            # o `set_payment_status('canceled')` acima já zerou o relógio no
+            # mesmo UPDATE, então este clear é no-op. `_versao` é o mesmo
+            # `_event_version(event)` que o `revoke_grant` abaixo usa.
             from db.dunning import clear_past_due_since
-            await asyncio.to_thread(clear_past_due_since, int(user_id))
+            await asyncio.to_thread(clear_past_due_since, int(user_id),
+                                    nao_mais_novo_que=_event_version(event))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
             #
             # A amplitude é dinheiro: quem tem uma assinatura nova já paga e

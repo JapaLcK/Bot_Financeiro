@@ -34,7 +34,15 @@ import frontend.finance_bot_websocket_custom as dashboard
 
 # `event["created"]` do empate do §6.1: `checkout.session.completed` e
 # `invoice.paid` de uma compra imediata saem no MESMO segundo.
-_T_LIFE = 1_800_000_000
+#
+# **Tem de ficar no FUTURO de `now()`, e é por isso que não é uma constante
+# crua.** Desde que `db.dunning.clear_past_due_since` compara o relógio de
+# inadimplência (carimbado com o `now()` do banco) contra o `created` do evento,
+# um base fixo no passado faria os testes do relógio virarem bomba-relógio: eles
+# passariam até a data do literal e reprovariam depois dela, sem ninguém tocar
+# em código. O `max` preserva o valor histórico enquanto ele ainda for futuro.
+_T_LIFE = max(1_800_000_000,
+              int(datetime.now(timezone.utc).timestamp()) + 7 * 86_400)
 
 
 def _future_ts(days: int) -> int:
