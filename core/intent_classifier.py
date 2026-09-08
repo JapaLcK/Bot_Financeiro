@@ -18,7 +18,6 @@ import unicodedata
 from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
-from core.help_text import HELP_SECTION_RE
 from utils_text import parse_money
 
 logger = logging.getLogger(__name__)
@@ -490,9 +489,8 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^vincular\s+\d{6}$",
      "account.vincular"),
 
-    # ajuda com seção — padrão em core/help_text (fonte única: o gate de plano
-    # em handle_incoming isenta exatamente o que esta regra roteia pra "help").
-    (HELP_SECTION_RE.pattern,
+    # ajuda com seção
+    (r"^(ajuda|help)\s+\w+",
      "help"),
 
     # valor primeiro, sem palavra-chave: "77,90 mercado", "50 uber" → despesa.

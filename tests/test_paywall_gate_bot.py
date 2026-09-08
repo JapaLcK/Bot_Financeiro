@@ -6,6 +6,9 @@ que devolve True INCONDICIONALMENTE com o v2 ligado (plan_service.has_app_access
 usava o WhatsApp de graça. Agora ele espelha o veredito do gate do WS e do
 _post_login_url: `needs_plan_selection(uid) or not has_app_access(uid)`.
 
+Este arquivo mede o VEREDITO (quem é barrado, e o que barrar escreve ou não).
+O que o gate deixa passar mora no `test_paywall_gate_isencoes.py`.
+
 CONTROLE NEGATIVO DO GRUPO (§3 do CLAUDE.md): no `_paywall_gate`, troque
 `sem_plano = estado is not None and needs_plan_selection(uid, estado)` por
 `sem_plano = False` — ou reponha o `if not paywall_enabled(): return None` no
@@ -26,40 +29,13 @@ import pathlib
 import re
 import uuid
 
-import pytest
-
 import db
-import core.handle_incoming as hi
-from core.types import Attachment, IncomingMessage
-
-
-@pytest.fixture(autouse=True)
-def _v2_ligado(monkeypatch):
-    """O conftest roda a suíte com PLANS_V2_ENABLED=0. Sem este setenv,
-    needs_plan_selection devolve False sempre e o arquivo inteiro é teatro."""
-    monkeypatch.setenv("PLANS_V2_ENABLED", "1")
-    monkeypatch.setenv("PAYWALL_ENABLED", "0")  # a perna legada fica fora do teste
-
-
-def _cadastro_novo() -> int:
-    """Conta recém-criada pela web: plan_selected_at NULL → gate fechado.
-
-    O user_id canônico é <= 2e9 (db/users.get_or_create_canonical_user), então
-    `_normalize_user_id` não comprime e o uid do teste é o uid do handler."""
-    user = db.register_auth_user(f"gatebot-{uuid.uuid4().hex[:12]}@t.com", "senha-forte-123")
-    return int(user["user_id"])
-
-
-def _diga(uid: int, texto: str, plataforma: str = "whatsapp", anexos=None) -> str:
-    out = hi.handle_incoming(IncomingMessage(
-        platform=plataforma, user_id=uid, text=texto,
-        message_id=uuid.uuid4().hex, attachments=anexos or [], external_id="", raw={},
-    ))
-    return "\n".join(m.text for m in out)
-
-
-def _barrado(resposta: str) -> bool:
-    return "sua conta precisa estar ativa" in resposta.lower()
+from _paywall_gate_helpers import (  # noqa: F401  (v2_ligado é fixture autouse)
+    barrado as _barrado,
+    cadastro_novo as _cadastro_novo,
+    diga as _diga,
+    v2_ligado,
+)
 
 
 def _ressalva_do_trial_na_precos() -> str:
@@ -130,110 +106,6 @@ def test_uid_sem_cadastro_web_nao_ve_o_gate_e_uid_com_cadastro_ve():
         "barrou quem ainda não tem cadastro web"
     assert _barrado(_diga(com_conta_sem_plano, "link 123456")), \
         "o mesmo texto passou para uma conta sem plano — o teste não mede estado"
-
-
-@pytest.mark.parametrize("comando,esperado", [
-    ("assinar", "assinar"),      # link de checkout
-    ("/assinar", "assinar"),     # prefixo do Discord
-    ("plano", "plano"),
-    ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
-    ("ajuda", "comece aqui"),
-    # Ajuda COM seção (HELP_SECTION_RE). O texto esperado é o da seção "start"
-    # e não o da seção pedida DE PROPÓSITO: intent_router passa só o argumento
-    # ("ofx") pro resolve_section, que espera o texto inteiro ("ajuda ofx") e
-    # cai no fallback "start". Defeito PRÉ-EXISTENTE, fora deste PR — o que se
-    # mede aqui é o gate deixar passar, não a seção resolvida.
-    ("ajuda ofx", "comece aqui"),
-    ("help investimentos", "comece aqui"),
-])
-def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
-    """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o
-    adapter (adapters/discord/discord_bot.py) só cai nos cogs quando a lista
-    volta vazia. Sem as isenções, o gate sequestra esses comandos e o usuário
-    barrado fica sem como assinar: é o `_GATE_EXEMPT_PREFIXES` da web
-    (frontend/routes/shared.py) faltando aqui.
-
-    Controle negativo: apague o bloco de isenção do `_paywall_gate` e os quatro
-    casos ficam VERMELHOS.
-    """
-    uid = _cadastro_novo()
-
-    resposta = _diga(uid, comando, plataforma="discord")
-
-    assert not _barrado(resposta), f"o gate sequestrou {comando!r}: {resposta!r}"
-    assert esperado in resposta.lower(), f"{comando!r} respondeu: {resposta!r}"
-
-
-@pytest.mark.parametrize("nome,tipo", [
-    ("extrato.ofx", "application/x-ofx"),
-    ("extrato.csv", "text/csv"),
-])
-@pytest.mark.parametrize("legenda", ["ajuda", "assinar", "ajuda ofx"])
-def test_anexo_com_legenda_isenta_continua_barrado(nome, tipo, legenda):
-    """A legenda do anexo vira msg.text (adapters/whatsapp/wa_parse.py), então
-    sem o `not msg.attachments` um .ofx legendado "ajuda" entra pelo gate e cai
-    direto na importação — o passo do anexo roda ANTES de qualquer outro.
-
-    Hoje nada é gravado porque cada ramo de anexo tem gate de feature próprio
-    (extrato Pro, image_ocr_enabled, audio_enabled); isso é defesa em
-    profundidade, não este gate. Imagem e áudio percorrem o MESMO caminho
-    (passos 2 e 3, depois do gate) e ficam de fora só porque exigem chave de API
-    para rodar aqui.
-
-    Controle negativo: tire o `not msg.attachments` e os quatro casos ficam
-    vermelhos.
-    """
-    uid = _cadastro_novo()
-
-    resposta = _diga(uid, legenda, anexos=[
-        Attachment(filename=nome, content_type=tipo, data=b"OFXHEADER:100\n"),
-    ])
-
-    assert _barrado(resposta), f"anexo passou com legenda {legenda!r}: {resposta!r}"
-    assert db.list_launches(uid) == []
-
-
-def test_ajuda_com_secao_passa_e_o_payload_nao_registra_nada():
-    """`ajuda ofx` / `help investimentos` são ajuda documentada (help_text
-    resolve a seção por alias). A isenção por texto EXATO barrava as duas —
-    achado do Codex no PR #308.
-
-    As duas outras metades são o freio: o payload de `ajuda <qualquer coisa>`
-    não pode virar porta de entrada (medido: o classificador manda tudo isso pra
-    `help`, nunca pra despesa), e `menu <algo>` NÃO é isento, porque o
-    classificador manda `menu ofx` pra out_of_scope — isentá-lo abriria bypass
-    sem levar ninguém à ajuda.
-
-    Controle negativo: tire o `HELP_SECTION_RE.match(texto)` do `pede_ajuda` e
-    a primeira asserção fica vermelha.
-    """
-    uid = _cadastro_novo()
-
-    secao = _diga(uid, "ajuda ofx")
-    assert not _barrado(secao), f"o gate barrou 'ajuda ofx': {secao!r}"
-    # "comece aqui" e não "ofx": o `ofx` da resposta viria do texto da seção
-    # "start" (ela cita `.ofx`), então casar por "ofx" passaria sem provar nada.
-    # Que "ajuda ofx" caia em "start" é defeito pré-existente do resolve_section
-    # (recebe só o argumento do intent_router) — aqui só se mede o gate.
-    assert "comece aqui" in secao.lower(), f"não veio ajuda nenhuma: {secao!r}"
-
-    payload = _diga(uid, "ajuda gastei 50 no mercado")
-    assert not _barrado(payload)
-    assert db.list_launches(uid) == [], "a isenção deixou registrar um gasto"
-    assert db.get_balance(uid) == 0, "a isenção deixou debitar o saldo"
-
-    assert _barrado(_diga(uid, "menu ofx")), \
-        "`menu <algo>` ficou isento e não vai pra ajuda — bypass de graça"
-
-
-def test_discord_mensagem_comum_continua_barrada():
-    """Par do teste acima: a isenção é só dos comandos, não da plataforma."""
-    uid = _cadastro_novo()
-
-    resposta = _diga(uid, "gastei 50 no mercado", plataforma="discord")
-
-    assert _barrado(resposta), f"o Discord passou por cima do gate: {resposta!r}"
-    assert db.list_launches(uid) == []
 
 
 def test_freio_de_emergencia_desliga_o_gate(monkeypatch):

@@ -482,36 +482,13 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     Trancar quem está pagando é pior do que escapar uma mensagem.
     """
     try:
-        # Isenções, mesmo papel do _GATE_EXEMPT_PREFIXES = ("/billing", "/auth",
-        # "/conta") da web (frontend/routes/shared.py): quem está barrado tem de
-        # conseguir assinar e pedir ajuda. No Discord isto é obrigatório — lá o
-        # handle_incoming responde assinar/plano/cancelar e ajuda ele mesmo, e o
-        # adapter só chega aos cogs quando a lista volta vazia.
-        from core.services.billing_commands import is_billing_command
-        from core.help_text import HELP_SECTION_RE, HELP_TRIGGERS
-        texto = (msg.text or "").strip().lower()
-        # HELP_SECTION_RE cobre a ajuda COM seção ("ajuda ofx"): é o mesmo
-        # padrão que o intent_classifier usa pra rotear isso pra "help", lido do
-        # mesmo lugar — a isenção não pode ser mais larga que o que vira ajuda.
-        pede_ajuda = texto in HELP_TRIGGERS or HELP_SECTION_RE.match(texto) is not None
-        # `not msg.attachments`: no WhatsApp a LEGENDA do anexo vira msg.text
-        # (adapters/whatsapp/wa_parse.py), então um .ofx legendado "ajuda"
-        # atravessaria o gate inteiro. Anexo com legenda de ajuda não é pedido
-        # de ajuda — a isenção é do campo texto, o anexo segue barrado.
-        if not msg.attachments and (pede_ajuda or is_billing_command(texto)):
-            # ponytail: isenta a MENSAGEM, não garante a RESPOSTA de billing —
-            # daqui ela segue o fluxo normal, e com uma pendência aberta o
-            # handle_billing_command cede a vez (aí "cancelar" cancela a
-            # pendência, não mexe em dinheiro). Se um dia isso incomodar, o
-            # certo é o gate devolver a resposta de billing ele mesmo.
-            return None
-
         # Mesma expressão do gate do WS e do _post_login_url. A perna do
         # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
         # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py) e é a
         # única que morde hoje — `has_app_access` devolve True com o v2 ligado.
         # A política (onde vale, e por que sem isenção de app) mora na docstring
         # de plan_service.needs_plan_selection.
+        from core.services.billing_commands import is_billing_command
         from core.services.plan_service import (
             has_app_access, needs_plan_selection, plans_v2_enabled,
         )
@@ -537,6 +514,40 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             sem_plano = estado is not None and needs_plan_selection(uid, estado)
         if not (sem_plano or not has_app_access(uid)):
             return None
+
+        # Este usuário SERIA barrado. Isenções, mesmo papel do
+        # _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta") da web
+        # (frontend/routes/shared.py): quem está barrado tem de conseguir
+        # assinar e pedir ajuda. No Discord isto é obrigatório — lá o
+        # handle_incoming responde assinar/plano/cancelar e ajuda ele mesmo, e o
+        # adapter só chega aos cogs quando a lista volta vazia.
+        #
+        # Rodam DEPOIS do veredito de propósito: assim o `classify` abaixo só
+        # custa para quem está sendo barrado, e não em toda mensagem de todo
+        # assinante.
+        #
+        # `not msg.attachments`: no WhatsApp a LEGENDA do anexo vira msg.text
+        # (adapters/whatsapp/wa_parse.py), então um .ofx legendado "ajuda"
+        # atravessaria o gate inteiro. A isenção é do campo texto.
+        if not msg.attachments:
+            texto = (msg.text or "").strip()
+            # A ajuda pergunta ao MESMO oráculo que roteia a mensagem, em vez de
+            # imitar a normalização dele: o classificador tira pontuação, acento
+            # e "/" antes de casar, e toda tentativa de reproduzir isso aqui com
+            # string matching perdia uma variante ("ajuda?", "/ajuda ofx",
+            # "help: ofx", "ajúda"). Como é o mesmo julgamento, a isenção não
+            # pode ficar nem mais larga nem mais estreita que o roteamento.
+            # `allow_ai=False`: só as regras determinísticas — medido em 19 µs,
+            # sem DB e sem rede. As duas rotas de ajuda do intent_router
+            # (help, help.tutorial) só renderizam texto, não tocam em dinheiro.
+            ajuda = classify(texto, user_id=uid, allow_ai=False).intent
+            # ponytail: isenta a MENSAGEM, não garante a RESPOSTA de billing —
+            # daqui ela segue o fluxo normal, e com uma pendência aberta o
+            # handle_billing_command cede a vez (aí "cancelar" cancela a
+            # pendência, não mexe em dinheiro). Se um dia isso incomodar, o
+            # certo é o gate devolver a resposta de billing ele mesmo.
+            if ajuda in ("help", "help.tutorial") or is_billing_command(texto):
+                return None
     except Exception:
         logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
         return None

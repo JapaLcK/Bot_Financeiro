@@ -41,6 +41,7 @@ _OFXPARSE_DEPENDENTES = [
     "test_full_handler_smoke.py",
     "test_handle_incoming_routing.py",
     "test_paywall_gate_bot.py",
+    "test_paywall_gate_isencoes.py",
     "test_recurring_value.py",
     "test_split_audio_transactions.py",
     "test_whatsapp_confirmations.py",

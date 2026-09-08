@@ -5,20 +5,14 @@ from typing import Literal, Tuple
 
 Platform = Literal["discord", "whatsapp"]
 
-# Texto exato que pede o menu de ajuda. Fonte única (§0.7): o desvio do
-# WhatsApp (wa_runtime) e a isenção do gate de plano (handle_incoming) leem
-# daqui — duas cópias divergiriam no dia em que uma ganhasse "/menu".
+# Texto exato que faz o WhatsApp desviar pro menu interativo (wa_runtime), antes
+# do handle_incoming. Mora aqui porque é vocabulário de ajuda, não do adapter.
+# Não confundir com a isenção do gate de plano (handle_incoming): aquela pergunta
+# ao intent_classifier, então `menu` — que o classificador manda pra
+# out_of_scope — NÃO é isento lá.
 HELP_TRIGGERS: frozenset[str] = frozenset({
     "ajuda", "help", "menu", "/ajuda", "/help", "/menu",
 })
-
-# "ajuda ofx", "help investimentos" — ajuda COM seção, resolvida logo abaixo por
-# resolve_section. Mora aqui e não no intent_classifier porque tem dois leitores:
-# a regra "help" do classificador (que importa daqui) e a isenção do gate de
-# plano (handle_incoming). Note que `menu <algo>` NÃO entra: o classificador
-# manda isso pra out_of_scope, então isentá-lo abriria bypass sem levar ninguém
-# à ajuda.
-HELP_SECTION_RE = re.compile(r"^(ajuda|help)\s+\w+", re.IGNORECASE)
 
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
