@@ -168,7 +168,11 @@ def test_email_sai_sem_template_de_whatsapp(user_id, monkeypatch):
     _inadimplente(user_id, dias=6.5)
     enviados = _espia(monkeypatch, user_id)
     _limpar_eventos(user_id)
-    assert _wa_lembrete(user_id) is False
+    # `wa_opt_out=False`: esta conta NÃO desligou o canal, então o que faz o
+    # retorno ser False aqui é a ausência do template, que é o que o teste mede.
+    # O parâmetro é obrigatório de propósito (gate de consentimento) — quem
+    # mede o opt-out é `test_payment_reminder_whatsapp.py`.
+    assert _wa_lembrete(user_id, wa_opt_out=False) is False
     _tick()
     assert len(enviados) == 1
 

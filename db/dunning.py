@@ -181,6 +181,17 @@ def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:
     O funil grosso é SQL (status, relógio, e-mail, opt-out); o filtro fino que
     precisa de Python (allowlist, grant pix/admin) é do chamador, como em
     `list_trial_downsell_candidates`.
+
+    **`whatsapp_updates_opt_out` é SELECIONADA e NÃO filtrada, e isso é decisão.**
+    O `where` só tem o `engagement_opt_out`, que é o opt-out do canal de
+    E-MAIL — o e-mail é o caminho garantido deste funil. Quem desligou só o
+    WhatsApp em Configurações continua com direito ao aviso de cobrança por
+    e-mail, então pôr a coluna no `where` trocaria uma violação de
+    consentimento por um erro PIOR: perder aviso legítimo de cobrança de quem
+    nunca pediu para perdê-lo. Ela vem de graça (é a MESMA linha de
+    `auth_accounts` já lida, sem query nem join a mais) e quem decide é o
+    CANAL, em `core/services/payment_reminder_wa._wa_lembrete`. Amarrado por
+    `tests/test_payment_reminder_whatsapp.py::test_opt_out_de_whatsapp_nao_tira_o_email`.
     """
     from core.services.billing_dunning import (
         PAST_DUE_PAYMENT_STATUSES,
@@ -191,7 +202,9 @@ def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select user_id, email, email_enc
+                select user_id, email, email_enc,
+                       coalesce(whatsapp_updates_opt_out, false)
+                           as whatsapp_updates_opt_out
                 from auth_accounts
                 where past_due_since is not null
                   and lower(coalesce(last_payment_status, '')) = any(%s)

@@ -20,8 +20,26 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _wa_lembrete(user_id: int) -> bool:
+def _wa_lembrete(user_id: int, *, wa_opt_out: bool) -> bool:
     """Manda o lembrete por WhatsApp. **True se ALGUM destino aceitou.**
+
+    **`wa_opt_out` é OBRIGATÓRIO e é a primeira coisa checada.** Quem desligou
+    "atualizações do Piggy" em Configurações > Notificações (ou pelo botão do
+    próprio WhatsApp, `wa_runtime.py:878`) grava
+    `auth_accounts.whatsapp_updates_opt_out`, e mandar mesmo assim não é bug de
+    mecânica, é violação de CONSENTIMENTO — a pessoa pediu para não receber
+    neste canal. O valor vem da linha que o funil já lê
+    (`db.dunning.list_payment_reminder_candidates`), sem query a mais.
+    Parâmetro obrigatório de propósito: chamador novo não consegue esquecer.
+
+    Não checa `whatsapp_updates_available` da tela de Configurações
+    (`frontend/routes/settings.py:74`), e isso é decisão: aquilo é
+    `bool(phone_e164)`, uma CAPACIDADE de exibição, não uma preferência. Os
+    destinos daqui saem de `user_identities` (`list_identities_by_user`), que é
+    fonte independente de `auth_accounts.phone_e164` — gatear por
+    "disponível" sumiria com o lembrete de quem tem WhatsApp funcionando e
+    `phone_e164` vazio, trocando um erro por outro. Quem não tem identidade
+    nenhuma já cai fora: a lista de destinos vem vazia e o retorno é False.
 
     A conta pode ter mais de um número (`_dedupe_whatsapp_targets`), e falha de
     um não é falha do lembrete: o valor que sai daqui vira `whatsapp` nos
@@ -39,6 +57,12 @@ def _wa_lembrete(user_id: int) -> bool:
     Nunca levanta: o e-mail já saiu quando isto roda, e derrubar o tick por
     causa de um template não aprovado transformaria a melhoria em regressão.
     """
+    # CONSENTIMENTO PRIMEIRO, antes até do template: é a razão mais forte para
+    # não enviar, e a ordem faz o código dizer isso.
+    if wa_opt_out:
+        logger.info("[cobranca] WhatsApp pulado por opt-out do canal"
+                    " user_id=%s", user_id)
+        return False
     nome = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER") or "").strip()
     if not nome:
         return False

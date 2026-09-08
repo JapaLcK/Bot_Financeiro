@@ -28,6 +28,7 @@ tinha (mesma convenção de `PAYWALL_ENABLED` e `PLANS_V2_ENABLED`).
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 from datetime import datetime, timezone
@@ -139,6 +140,12 @@ async def check_payment_reminder() -> None:
     # de acesso a PII.
     elegiveis = [r for r in rows
                  if int(r["user_id"]) not in plan_service._ACCESS_ALLOWLIST]
+    # Preferência do canal WhatsApp, da MESMA linha que o funil já leu (nenhuma
+    # query a mais). Vive num mapa em vez de virar um terceiro item da tupla de
+    # `_decifrar_lote`: aquela função é sobre resolver e-mail, e enfiar uma
+    # preferência de WhatsApp nela acoplaria dois assuntos sem ganho.
+    wa_opt_out = {int(r["user_id"]): bool(r.get("whatsapp_updates_opt_out"))
+                  for r in elegiveis}
     candidatos = await loop.run_in_executor(None, _decifrar_lote, elegiveis)
 
     for user_id, email in candidatos:
@@ -197,7 +204,16 @@ async def check_payment_reminder() -> None:
                 continue
             logger.info("[cobranca] lembrete enviado → user_id=%s (%s)",
                         user_id, _mask_email(email))
-            wa = await loop.run_in_executor(None, _wa_lembrete, user_id)
+            # `wa_opt_out.get(..., True)` — default BLOQUEADO, não liberado. A
+            # chave sempre existe (o mapa vem de `elegiveis`, de onde
+            # `candidatos` deriva), mas num gate de consentimento a direção
+            # segura do erro é não enviar: o e-mail, que é o caminho garantido,
+            # já saiu, então o custo de errar para o lado fechado é perder uma
+            # MELHORIA, e o de errar para o aberto é mandar mensagem em canal
+            # que a pessoa desligou.
+            wa = await loop.run_in_executor(
+                None, functools.partial(_wa_lembrete, user_id,
+                                        wa_opt_out=wa_opt_out.get(user_id, True)))
             log_system_event_sync(
                 "info",
                 "payment_reminder_sent",
