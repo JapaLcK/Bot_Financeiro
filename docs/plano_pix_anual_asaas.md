@@ -588,12 +588,12 @@ drenar_evento(event_id):
         insert em pix_payment_effects (payment_id, 'orphan_notified')
         admin_notify; marca processed_at; sai       # NENHUM efeito de compra
 
-    # C) transição PRIMEIRO, efeitos DEPOIS e SÓ os que o evento autoriza
-    aplicou = transição condicional do §11 (UPDATE … WHERE status = <esperado> RETURNING)
-    efeitos = EFEITOS_POR_EVENTO[evt.event_type]
-    se não aplicou: efeitos = []                    # reentrega/no-op não dispara nada
+    # C) transição e efeitos são INDEPENDENTES, cada um idempotente por si
+    transição condicional do §11 (UPDATE … WHERE status = <esperado> RETURNING)
+                                                    # avança o estado SE ainda não avançou
+    efeitos = EFEITOS_POR_EVENTO[evt.event_type]    # SEMPRE — nunca zerada pela transição
     para cada efeito em efeitos (na ordem da lista):
-        se (asaas_payment_id, efeito) já existe: pula
+        se (asaas_payment_id, efeito) já existe: pula     # <- o ÚNICO gate
         executa; insert em pix_payment_effects (na mesma transação quando houver)
     marca processed_at
 ```
@@ -616,6 +616,21 @@ drenar_evento(event_id):
 
 Sem essa tabela, um estorno mandava `purchase` ao GA4 e `Purchase` à CAPI — receita inventada em cima de dinheiro devolvido.
 
+**A regra `aplicou == False → efeitos = []` FOI REMOVIDA (P1-A, Codex no #304), e ela contradizia o §3.4 deste mesmo plano.** O §3.4 já dizia: *"o que autoriza parar é o registro do efeito **por pagamento**, nunca a transição de status"*. O §8.2 C dizia o contrário, e o contrário é um ponto de perda de dinheiro:
+
+> a transição commita sozinha, ANTES dos efeitos. Se o processo morre — ou um efeito levanta — depois desse commit, o evento continua pendente na outbox; a retentativa chama a transição de novo, recebe `None` porque a cobrança já é `paid`/`refunded`, e **roda zero efeitos**. Cliente pago sem grant, ou cliente estornado com acesso para sempre.
+
+É o defeito do #298 renascendo um nível abaixo: lá o `UPDATE … WHERE status` perdia efeitos e o conserto foi escrever o `processed_at` **depois** deles. A ironia é que `pix_payment_effects` existe exatamente para isto — mas o dreno nunca chegava a consultá-la, porque a lista já tinha sido esvaziada.
+
+**Agora as duas operações são independentes e cada uma é idempotente por si:** a transição avança o estado se ainda não avançou (`returning` vazio = "já estava lá", e nada mais); os efeitos saem sempre de `EFEITOS_POR_EVENTO` e cada um é pulado individualmente pelo par `(asaas_payment_id, effect)`. **Nenhuma das duas é porteira da outra.**
+
+Isto é seguro porque `pix_payment_effects` **nunca é purgada** — não aparece em nenhuma categoria do §13.1. O registro é permanente, então é autoridade suficiente. Se um dia alguém puser retenção nela, esta regra volta a ter um furo, e é aqui que se lê isso.
+
+**Duas consequências, e nenhuma é acidente:**
+- **reentrega do mesmo `RECEIVED`** continua não reexecutando nada — todos os pares já estão registrados. O que mudou é o MOTIVO: antes era a transição que barrava, agora é o registro, que é o que sobrevive a uma morte no meio.
+- **`RECEIVED` sobre cobrança já `refunded`** também não reexecuta: `grant` e os demais já estão registrados daquele mesmo `asaas_payment_id`. A proteção não se perdeu ao tirar a transição do caminho.
+- **`RECEIVED` sobre `draft`/`creating`** (transição que o §11 não prevê) passa a **rodar os efeitos** enquanto o estado fica para a reconciliação arrumar. É o certo: o dinheiro entrou, e negar acesso a quem pagou não é recuperável — mesmo raciocínio do fallback do `stripe_cancel`.
+
 **Correção P1-5 (Codex #304, conferida na doc oficial do Asaas): `PAYMENT_PARTIALLY_REFUNDED` é evento PRÓPRIO.** O plano tratava `PAYMENT_REFUNDED` como "total ou parcial" e ramificava pelo valor — isso não existe na plataforma. Um estorno parcial chegava como `PAYMENT_REFUNDED`, casava a linha "total" e disparava **`revoke`**: o acesso de quem teve R$ 1,00 devolvido morria inteiro.
 
 **E dois eventos que o plano ignorava, os dois de estorno:**
@@ -623,7 +638,7 @@ Sem essa tabela, um estorno mandava `purchase` ao GA4 e `Purchase` à CAPI — r
 - **`PAYMENT_REFUND_IN_PROGRESS`** — estorno agendado, **ainda não efetivado**. Transição nenhuma e efeito nenhum, de propósito: revogar aqui cortaria o acesso por um estorno que ainda pode ser **negado**, e desfazer revogação é mais caro que esperar. Quem revoga é o `PAYMENT_REFUNDED` que vier depois.
 - **`PAYMENT_REFUND_DENIED`** — estorno recusado (só boleto, mas a fila é a mesma). Transição nenhuma: como o `IN_PROGRESS` não mexeu em nada, não há o que reverter. É exatamente por isso que ele não mexe.
 
-Os dois entram na tabela como **conhecidos-e-no-op**, e não caem no ramo `desconhecido`: o log de evento desconhecido existe para revelar formato novo do provedor, e enchê-lo de eventos esperados é como ele para de ser lido. **`aplicou == False` zera a lista**: reentrega do mesmo `RECEIVED` não reexecuta nada nem mesmo se a tabela de efeitos tiver sido purgada.
+Os dois entram na tabela como **conhecidos-e-no-op**, e não caem no ramo `desconhecido`: o log de evento desconhecido existe para revelar formato novo do provedor, e enchê-lo de eventos esperados é como ele para de ser lido. **A reentrega do mesmo `RECEIVED` não reexecuta nada porque os pares `(payment_id, effect)` já estão registrados** — não porque a transição a barre. A frase anterior aqui dizia que a lista era zerada por `aplicou == False`, "nem mesmo se a tabela de efeitos tiver sido purgada": era essa hipótese que sustentava a regra, e ela não se aplica — `pix_payment_effects` **não tem categoria de retenção no §13.1**, logo nunca é purgada. Trocar uma garantia permanente (o registro) por uma frágil (o estado ter avançado) custava exatamente o caso em que o processo morre no meio.
 
 **Ordem dos efeitos de pagamento (correção nº 3):** começa por **`stripe_cancel`**, que lê o `current_period_end` **agora**, reconfirma `pix_charges.stripe_period_end_at` e chama `Subscription.modify(cancel_at_period_end=True)`. Só depois o `grant` roda, usando **aquele** valor — nada de `starts_at` congelado em leitura anterior.
 
@@ -711,7 +726,9 @@ O que **nunca** é decidido no escuro:
 
 ## 11. Máquina de estados da cobrança
 
-Estados: `draft` · `creating` · `pending` · `canceling` · `canceled` · `paid` · `paid_orphan` · `orphan_unknown` · `expired` · `refunded` · `refunded_partial` · `chargeback`.
+Estados de `pix_charges`: `draft` · `creating` · `pending` · `canceling` · `canceled` · `paid` · `paid_orphan` · `expired` · `refunded` · `refunded_partial` · `chargeback`.
+
+**São 11, e a lista é a mesma do `check pix_charges_status_valido`** (`db/schema.py`) — quem diverge das duas é recusado pelo banco, não por revisão. `orphan_unknown` **saiu**: ele não é estado desta tabela e sim linha de `pix_unmatched_payments` (§8.2 A), porque um pagamento sem cobrança nossa não tem plano, preço nem dono. A matriz abaixo não tem linha para ele pelo mesmo motivo.
 
 > **Coluna "RECEIVED / CONFIRMED":** no Pix **só o `PAYMENT_RECEIVED` ocorre** — a liquidação é instantânea e a plataforma pula o `CONFIRMED`, que é de cartão. As duas ficam na mesma coluna **por robustez** (se um dia vendermos cartão pelo Asaas, ou se a plataforma mudar), **não porque façam parte do fluxo**. Teste que exercitar `CONFIRMED` está exercitando robustez, e o §16 diz isso onde importa.
 
@@ -725,8 +742,10 @@ Estados: `draft` · `creating` · `pending` · `canceling` · `canceled` · `pai
 | `expired` | → **`paid`** + efeitos (**tardio válido até 60 d**) | no-op | no-op | — | — | — | cancela no Asaas após 60 d |
 | `paid` | **no-op** (nenhum efeito, §8.2) | no-op | no-op | `PAYMENT_REFUNDED` → `refunded` + `[revoke]` | `PAYMENT_PARTIALLY_REFUNDED` → `refunded_partial`, não revoga, alerta | → `chargeback` + `[revoke]` | confere pago × esperado |
 | `paid_orphan` | no-op | no-op | no-op | → `refunded` | → alerta | → `chargeback` | lista de conciliação |
-| `orphan_unknown` | no-op | no-op | no-op | → `refunded` | → alerta | → `chargeback` | lista de conciliação |
+| `refunded_partial` | no-op | no-op | no-op | → **`refunded`** + `[revoke]` | no-op (já parcial) | → **`chargeback`** + `[revoke]` | confere devolvido × esperado |
 | `refunded`/`chargeback` | só por reconciliação manual | no-op | no-op | no-op | no-op | no-op | log |
+
+**`refunded_partial` tem linha própria, e a ausência dela era buraco NOSSO.** Nós criamos o estado ao separar `PAYMENT_PARTIALLY_REFUNDED` (P1-5) e não enumeramos as SAÍDAS — a matriz definia as transições terminais só a partir de `paid`. Um estorno parcial seguido de estorno total, ou de chargeback, encontrava a cobrança em `refunded_partial`, não casava linha nenhuma, e **o `revoke` não rodava**: acesso ativo depois de o dinheiro inteiro ter voltado. É a forma do §4 do `CLAUDE.md` — estado novo sem enumerar o que sai dele —, e por isso a varredura desta rodada olhou os 11, não só o apontado.
 
 **A linha `user_id is null` saiu da tabela** (nº 1): não é estado, é **condição do titular**, e virou guarda do dreno (§8.2 B). Assim uma cobrança `pending` de conta excluída casa com **uma** linha só.
 

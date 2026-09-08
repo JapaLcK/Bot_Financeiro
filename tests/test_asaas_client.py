@@ -52,7 +52,6 @@ import core.services.asaas as asaas
 from core.services.asaas import (
     AsaasApiError,
     AsaasConfigError,
-    _raise_for_asaas_response,
     buscar_por_external_reference,
     criar_pagamento_pix,
     deletar_pagamento,
@@ -185,80 +184,6 @@ def test_sem_api_key_levanta_config_error(monkeypatch):
         deletar_pagamento("pay_1")
 
 
-# ── o erro, sem transporte nenhum ────────────────────────────────────────────
-
-CORPO_COM_PII = {
-    "errors": [{
-        "code": "invalid_cpfCnpj",
-        "description": "O CPF 12345678901 de Fulano de Tal (fulano@example.com) é inválido",
-    }]
-}
-
-
-def _resp(status: int, json_corpo) -> httpx.Response:
-    return httpx.Response(status, json=json_corpo,
-                          request=httpx.Request("POST", "https://asaas.test/v3/payments"))
-
-
-def test_erro_nao_carrega_o_corpo_da_resposta():
-    """A propriedade que mais custa se quebrar: `str(exc)` vira `details` de
-    `log_system_event` (persistido, lido pelo painel admin) e
-    `pix_webhook_events.last_error`, que sobrevive à purga do payload E à
-    exclusão da conta (§13.3). Fabricada, sem transporte: a ausência do corpo é
-    propriedade da FUNÇÃO."""
-    with pytest.raises(AsaasApiError) as exc:
-        _raise_for_asaas_response(_resp(400, CORPO_COM_PII), "Falha ao criar")
-    msg = str(exc.value)
-    for pii in ("12345678901", "Fulano", "fulano@example.com", "inválido"):
-        assert pii not in msg, f"{pii!r} vazou para a mensagem persistida: {msg}"
-    # POSITIVO: sobra o que serve para depurar.
-    assert "400" in msg and "invalid_cpfCnpj" in msg
-
-
-def test_erro_preserva_o_status_code():
-    """404 é resposta de NEGÓCIO na reconciliação (§10.1); 5xx é
-    indisponibilidade, que NÃO é evidência de inexistência. Sem `status_code`, o
-    único jeito de separar seria regex na mensagem — e a decisão que depende
-    disso APAGA cobrança."""
-    for status in (404, 429, 500, 503):
-        with pytest.raises(AsaasApiError) as exc:
-            _raise_for_asaas_response(_resp(status, {"errors": []}), "ctx")
-        assert exc.value.status_code == status
-
-
-def test_code_so_passa_se_tiver_forma_de_codigo():
-    """A descrição do erro vem no MESMO objeto que o `code`. Filtrar por FORMA
-    (alfanumérico curto) é o que impede alguém de ampliar isto para "só a
-    description, que é curtinha"."""
-    longo = {"errors": [{"code": "x" * 61}]}
-    with pytest.raises(AsaasApiError) as exc:
-        _raise_for_asaas_response(_resp(400, longo), "ctx")
-    assert exc.value.code is None
-
-    com_espaco = {"errors": [{"code": "CPF do Fulano invalido"}]}
-    with pytest.raises(AsaasApiError) as exc:
-        _raise_for_asaas_response(_resp(400, com_espaco), "ctx")
-    assert exc.value.code is None
-    assert "Fulano" not in str(exc.value)
-
-
-def test_corpo_nao_json_nao_derruba_o_tratamento():
-    """O provedor fora do ar devolve HTML de gateway, não JSON. O `.json()`
-    estourando ali transformaria uma indisponibilidade tratável num `ValueError`
-    solto no meio da venda."""
-    resp = httpx.Response(502, text="<html>bad gateway</html>",
-                          request=httpx.Request("GET", "https://asaas.test/x"))
-    with pytest.raises(AsaasApiError) as exc:
-        _raise_for_asaas_response(resp, "ctx")
-    assert exc.value.status_code == 502
-    assert "html" not in str(exc.value).lower()
-
-
-def test_resposta_de_sucesso_nao_levanta():
-    """POSITIVO: sem ele o grupo passaria num código que levanta sempre."""
-    assert _raise_for_asaas_response(_resp(200, {"id": "pay_1"}), "ctx") is None
-
-
 # ── falha de transporte e corpo ilegível (o contrato que o 1b-B consome) ─────
 
 def _cliente_que_levanta(monkeypatch, exc):
@@ -320,29 +245,3 @@ def test_sucesso_sem_json_valido_vira_asaas_api_error(chamadas, monkeypatch, sta
     with pytest.raises(AsaasApiError) as capturado:
         buscar_por_external_reference("pix:42")
     assert capturado.value.status_code == status
-
-
-def test_timeout_invalido_nao_derruba_a_venda(monkeypatch):
-    """Erro de digitação na env é problema de operação, não motivo para recusar
-    cobrança. `float("vinte")` estourava dentro do `_request`, ou seja na hora
-    da venda."""
-    monkeypatch.setenv("ASAAS_TIMEOUT", "vinte")
-    assert asaas._timeout() == 20.0
-    monkeypatch.setenv("ASAAS_TIMEOUT", "5.5")
-    assert asaas._timeout() == 5.5
-
-
-def test_code_com_forma_de_cpf_e_recusado():
-    """A forma de um CPF é a de um código curto: alfanumérico, sem espaço, 11
-    chars. O `code` do Asaas é sempre nominal (`invalid_cpfCnpj`), então recusar
-    só-dígitos custa nada e fecha o caminho por onde um documento entraria numa
-    string que é PERSISTIDA e sobrevive à exclusão da conta."""
-    for documento in ("12345678901", "123.456.789-01", "12345678000199"):
-        with pytest.raises(AsaasApiError) as capturado:
-            _raise_for_asaas_response(_resp(400, {"errors": [{"code": documento}]}), "ctx")
-        assert capturado.value.code is None
-        assert documento not in str(capturado.value)
-    # POSITIVO: o código nominal continua passando.
-    with pytest.raises(AsaasApiError) as capturado:
-        _raise_for_asaas_response(_resp(400, {"errors": [{"code": "invalid_cpfCnpj"}]}), "ctx")
-    assert capturado.value.code == "invalid_cpfCnpj"

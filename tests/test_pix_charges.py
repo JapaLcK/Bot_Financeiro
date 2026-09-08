@@ -5,9 +5,9 @@ rodado (desligar o conserto, ver vermelho, repor):
 
   1. **uma cobrança ativa por usuário**, garantida pelo índice parcial. Duas
      seriam duas cobranças precificadas contra o MESMO crédito (§10, nº 6).
-  2. **transição condicional**: o `returning` vazio é o que zera a lista de
-     efeitos no dreno (§8.2 C). Sem a condição no `where`, reentrega do mesmo
-     `PAYMENT_RECEIVED` reexecutaria GA4, CAPI e e-mail.
+  2. **transição condicional**: o `returning` vazio diz que o estado já
+     avançou — e **nada mais**. Quem decide efeito é o registro do efeito, e
+     isso mora em `tests/test_pix_transicao_efeitos.py` (P1-A).
   3. **a FK `set null`**: a linha sobrevive à exclusão da conta,
      pseudonimizada (§13.2). Com `cascade`, a prova do pagamento some junto com
      o titular.
@@ -136,12 +136,12 @@ def test_transicao_do_status_esperado_aplica(user_id):
 
 
 def test_transicao_de_status_errado_nao_aplica(user_id):
-    """O `returning` vazio é a resposta a "reentrega ou corrida?", e é ele que
-    zera a lista de efeitos no dreno (§8.2 C).
+    """O `returning` vazio diz **só** que o estado já avançou.
 
-    Reentrega do mesmo `PAYMENT_RECEIVED` numa cobrança já `paid`: a segunda
-    transição devolve `None`, e é isso que impede um segundo `purchase` no GA4 e
-    um segundo `Purchase` na CAPI em cima do mesmo dinheiro.
+    **Não** diz "pule os efeitos" — essa regra foi removida (P1-A). Quem impede
+    o segundo `purchase` no GA4 é o registro do par `(asaas_payment_id, 'ga4')`
+    em `pix_payment_effects`, não esta função. O teste que prova isso é
+    `test_efeito_roda_na_RETENTATIVA_mesmo_com_a_transicao_ja_commitada`.
     """
     linha = _nova(user_id)
     assert transicionar(linha["id"], de="draft", para="paid") is not None

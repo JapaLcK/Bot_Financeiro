@@ -17,6 +17,7 @@ quem a chama.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
@@ -64,11 +65,21 @@ def _timeout() -> float:
 
     `float("vinte")` estourava `ValueError` dentro do `_request`, ou seja na
     hora da cobrança, por um erro de digitação no painel de env. Timeout é
-    parâmetro operacional — o lado seguro é o padrão, não a recusa."""
+    parâmetro operacional — o lado seguro é o padrão, não a recusa.
+
+    **Parsear não é servir**, e é aí que a primeira versão furava: `-1`, `nan` e
+    `inf` passam pelo `float()` e eram devolvidos. Medido contra o httpx real:
+    `-1` e `nan` levantam `ValueError`, `inf` levanta `OverflowError` — e
+    **nenhum dos dois é `httpx.HTTPError`**, então escapavam do `except` do
+    `_request` e a venda falhava FORA do contrato `AsaasApiError` que este
+    módulo promete. O valor tem de ser finito e positivo, não só numérico."""
     try:
-        return float(os.getenv("ASAAS_TIMEOUT") or 20)
+        valor = float(os.getenv("ASAAS_TIMEOUT") or 20)
     except ValueError:
         return 20.0
+    # `math.isfinite` recusa `nan` e `inf` de uma vez; `> 0` recusa `-1` e `0`
+    # (timeout zero é "desista imediatamente", que na prática é não cobrar).
+    return valor if math.isfinite(valor) and valor > 0 else 20.0
 
 
 def _api_key() -> str:
