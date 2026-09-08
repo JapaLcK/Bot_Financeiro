@@ -488,13 +488,17 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # handle_incoming responde assinar/plano/cancelar e ajuda ele mesmo, e o
         # adapter só chega aos cogs quando a lista volta vazia.
         from core.services.billing_commands import is_billing_command
-        from core.help_text import HELP_TRIGGERS
+        from core.help_text import HELP_SECTION_RE, HELP_TRIGGERS
         texto = (msg.text or "").strip().lower()
+        # HELP_SECTION_RE cobre a ajuda COM seção ("ajuda ofx"): é o mesmo
+        # padrão que o intent_classifier usa pra rotear isso pra "help", lido do
+        # mesmo lugar — a isenção não pode ser mais larga que o que vira ajuda.
+        pede_ajuda = texto in HELP_TRIGGERS or HELP_SECTION_RE.match(texto) is not None
         # `not msg.attachments`: no WhatsApp a LEGENDA do anexo vira msg.text
         # (adapters/whatsapp/wa_parse.py), então um .ofx legendado "ajuda"
         # atravessaria o gate inteiro. Anexo com legenda de ajuda não é pedido
         # de ajuda — a isenção é do campo texto, o anexo segue barrado.
-        if not msg.attachments and (texto in HELP_TRIGGERS or is_billing_command(texto)):
+        if not msg.attachments and (pede_ajuda or is_billing_command(texto)):
             # ponytail: isenta a MENSAGEM, não garante a RESPOSTA de billing —
             # daqui ela segue o fluxo normal, e com uma pendência aberta o
             # handle_billing_command cede a vez (aí "cancelar" cancela a

@@ -12,6 +12,14 @@ HELP_TRIGGERS: frozenset[str] = frozenset({
     "ajuda", "help", "menu", "/ajuda", "/help", "/menu",
 })
 
+# "ajuda ofx", "help investimentos" — ajuda COM seção, resolvida logo abaixo por
+# resolve_section. Mora aqui e não no intent_classifier porque tem dois leitores:
+# a regra "help" do classificador (que importa daqui) e a isenção do gate de
+# plano (handle_incoming). Note que `menu <algo>` NÃO entra: o classificador
+# manda isso pra out_of_scope, então isentá-lo abriria bypass sem levar ninguém
+# à ajuda.
+HELP_SECTION_RE = re.compile(r"^(ajuda|help)\s+\w+", re.IGNORECASE)
+
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
     "Digite `ajuda` para ver os comandos.\n"

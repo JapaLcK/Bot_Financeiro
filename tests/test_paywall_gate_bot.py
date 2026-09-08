@@ -138,6 +138,13 @@ def test_uid_sem_cadastro_web_nao_ve_o_gate_e_uid_com_cadastro_ve():
     ("plano", "plano"),
     ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
     ("ajuda", "comece aqui"),
+    # Ajuda COM seção (HELP_SECTION_RE). O texto esperado é o da seção "start"
+    # e não o da seção pedida DE PROPÓSITO: intent_router passa só o argumento
+    # ("ofx") pro resolve_section, que espera o texto inteiro ("ajuda ofx") e
+    # cai no fallback "start". Defeito PRÉ-EXISTENTE, fora deste PR — o que se
+    # mede aqui é o gate deixar passar, não a seção resolvida.
+    ("ajuda ofx", "comece aqui"),
+    ("help investimentos", "comece aqui"),
 ])
 def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
     """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o
@@ -161,7 +168,7 @@ def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
     ("extrato.ofx", "application/x-ofx"),
     ("extrato.csv", "text/csv"),
 ])
-@pytest.mark.parametrize("legenda", ["ajuda", "assinar"])
+@pytest.mark.parametrize("legenda", ["ajuda", "assinar", "ajuda ofx"])
 def test_anexo_com_legenda_isenta_continua_barrado(nome, tipo, legenda):
     """A legenda do anexo vira msg.text (adapters/whatsapp/wa_parse.py), então
     sem o `not msg.attachments` um .ofx legendado "ajuda" entra pelo gate e cai
@@ -184,6 +191,39 @@ def test_anexo_com_legenda_isenta_continua_barrado(nome, tipo, legenda):
 
     assert _barrado(resposta), f"anexo passou com legenda {legenda!r}: {resposta!r}"
     assert db.list_launches(uid) == []
+
+
+def test_ajuda_com_secao_passa_e_o_payload_nao_registra_nada():
+    """`ajuda ofx` / `help investimentos` são ajuda documentada (help_text
+    resolve a seção por alias). A isenção por texto EXATO barrava as duas —
+    achado do Codex no PR #308.
+
+    As duas outras metades são o freio: o payload de `ajuda <qualquer coisa>`
+    não pode virar porta de entrada (medido: o classificador manda tudo isso pra
+    `help`, nunca pra despesa), e `menu <algo>` NÃO é isento, porque o
+    classificador manda `menu ofx` pra out_of_scope — isentá-lo abriria bypass
+    sem levar ninguém à ajuda.
+
+    Controle negativo: tire o `HELP_SECTION_RE.match(texto)` do `pede_ajuda` e
+    a primeira asserção fica vermelha.
+    """
+    uid = _cadastro_novo()
+
+    secao = _diga(uid, "ajuda ofx")
+    assert not _barrado(secao), f"o gate barrou 'ajuda ofx': {secao!r}"
+    # "comece aqui" e não "ofx": o `ofx` da resposta viria do texto da seção
+    # "start" (ela cita `.ofx`), então casar por "ofx" passaria sem provar nada.
+    # Que "ajuda ofx" caia em "start" é defeito pré-existente do resolve_section
+    # (recebe só o argumento do intent_router) — aqui só se mede o gate.
+    assert "comece aqui" in secao.lower(), f"não veio ajuda nenhuma: {secao!r}"
+
+    payload = _diga(uid, "ajuda gastei 50 no mercado")
+    assert not _barrado(payload)
+    assert db.list_launches(uid) == [], "a isenção deixou registrar um gasto"
+    assert db.get_balance(uid) == 0, "a isenção deixou debitar o saldo"
+
+    assert _barrado(_diga(uid, "menu ofx")), \
+        "`menu <algo>` ficou isento e não vai pra ajuda — bypass de graça"
 
 
 def test_discord_mensagem_comum_continua_barrada():
