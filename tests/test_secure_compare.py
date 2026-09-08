@@ -50,27 +50,69 @@ def test_segredos_distintos_nao_colidem():
     assert eq("senha-?-cru", b) is False
 
 
-def test_nao_e_injetiva():
-    """Docstring, linhas 52-53: consequência do `replace` do lado `fornecido`,
-    sem ganho pro atacante (ele pode mandar `?` literal de qualquer jeito).
+def test_fornecido_preserva_surrogate_sem_colidir():
+    """O apontamento do Codex no PR #309, virado em portão.
 
-    Vermelho se `fornecido` virar `.encode("utf-8")` estrito
-    (`UnicodeEncodeError`) ou `surrogateescape` (`\\ud800` fora da faixa)."""
-    assert eq("\udcff", "?") is True
-    assert eq("\ud800", "?") is True
-    assert eq("a\udcffb", "a?b") is True
+    Com `replace` no lado `fornecido` todo surrogate virava `b"?"`, então uma
+    senha com `?` literal casava também com o surrogate na mesma posição.
+    `surrogatepass` preserva os 3 bytes do surrogate: a colisão morre e a
+    função passa a ser injetiva deste lado.
+
+    Injetividade é o argumento inteiro da troca, então cada handler que APAGA
+    ou ESCAPA o surrogate precisa aqui da pré-imagem ASCII que ele criaria. Só
+    com o `?` o grupo passava verde sob `ignore`, `backslashreplace` e
+    `xmlcharrefreplace` — e `ignore` é PIOR que o `replace` apontado, porque dá
+    pré-imagem infinita para qualquer segredo (`eq("abc\\ud800", "abc")`,
+    `eq("\\ud800abc", "abc")`, …).
+
+    Vermelho sob QUALQUER mutação do `errors=` do lado `fornecido`. As seis
+    medidas: `replace`, `ignore`, `backslashreplace` e `xmlcharrefreplace`
+    viram algum assert em True; `.encode("utf-8")` estrito e `surrogateescape`
+    levantam `UnicodeEncodeError` em `\\ud800` (fora da faixa dele).
+    """
+    assert eq("\udcff", "?") is False  # mata `replace`
+    assert eq("\ud800", "?") is False
+    assert eq("a\udcffb", "a?b") is False
+    assert eq("abc\ud800", "abc") is False  # mata `ignore`
+    assert eq("abc\ud800", "abc\\ud800") is False  # mata `backslashreplace`
+    assert eq("abc\ud800", "abc&#55296;") is False  # mata `xmlcharrefreplace`
+
+    # o `?` literal continua casando com a senha que tem `?` — o que morreu foi
+    # a segunda pré-imagem, não o caminho legítimo.
+    assert eq("a?b", "a?b") is True
+
+
+def test_segredo_cesu8_e_alcancavel_classe_conhecida_e_aceita():
+    """Docstring, parágrafo da assimetria — a ÚNICA classe que a troca abre.
+
+    Segredo cujos bytes crus formam a codificação CESU-8 de um surrogate
+    (`\\xed\\xa0\\x80`..`\\xed\\xbf\\xbf`) passa a ser alcançável: o
+    `surrogatepass` do lado `fornecido` produz exatamente esses 3 bytes quando
+    recebe o surrogate correspondente. São 2048 segredos, e o diferencial
+    exaustivo sobre 1–3 bytes não achou outro ganho de alcance.
+
+    É DECIDIDO, não bug — não "conserte": quem manda tem de conhecer o segredo
+    inteiro (não é bypass), e nenhum env real tem esses bytes. O assert existe
+    pra que a afirmação não more só na prosa do docstring (CLAUDE.md §0.7).
+    """
+    segredo = b"\xed\xa0\x80".decode("utf-8", "surrogateescape")
+
+    assert eq("\ud800", segredo) is True
 
 
 def test_nao_e_reflexiva_na_faixa_do_surrogateescape():
-    """Docstring, linhas 54-61: `eq(x, x)` é False quando o surrogate de `x`
-    está em `\\udc80-\\udcff` — o lado `fornecido` faz `?`, o `esperado`
-    devolve o byte cru. É a mesma falha-fechado vista do outro lado."""
+    """Docstring, bloco da não-reflexividade: `eq(x, x)` é False quando o
+    surrogate de `x` está em `\\udc80-\\udcff` — o `fornecido` codifica os 3
+    bytes do surrogate, o `esperado` devolve o byte cru. É a mesma
+    falha-fechado vista do outro lado, e ela sobreviveu à troca de `replace`
+    por `surrogatepass`."""
     assert eq("\udcff", "\udcff") is False
     assert eq("\udc80", "\udc80") is False
 
 
 def test_esperado_fora_da_faixa_levanta():
-    """Docstring, linhas 58-61: `surrogateescape` só codifica `\\udc80-\\udcff`.
+    """Docstring, bloco da não-reflexividade: `surrogateescape` só codifica
+    `\\udc80-\\udcff`.
     Fora dela o lado `esperado` LEVANTA — armadilha pro próximo call site, não
     bug aberto (hoje `esperado` vem de `os.getenv`, cookie latin-1 ou
     hexdigest/base64 ASCII). Se algum dia isto parar de levantar, foi porque
@@ -80,7 +122,7 @@ def test_esperado_fora_da_faixa_levanta():
 
 
 def test_vazio_com_vazio_e_true():
-    """Docstring, linha 63: o helper NÃO valida vazio, igual ao
+    """Docstring, último parágrafo: o helper NÃO valida vazio, igual ao
     `compare_digest`. É o invariante de que os `if <valor> and ...` dos call
     sites dependem — sem eles, segredo não configurado casaria com header
     ausente."""

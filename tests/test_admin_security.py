@@ -113,7 +113,7 @@ def test_admin_login_com_surrogate_no_corpo_json_nao_da_500():
     produz, e `_check_admin_password` lê a senha justamente dali.
 
     Controle negativo do lado `fornecido` do `constant_time_eq`: troque o
-    `fornecido.encode("utf-8", "replace")` por `.encode("utf-8")` estrito em
+    `fornecido.encode("utf-8", "surrogatepass")` por `.encode("utf-8")` estrito em
     `core/secure_compare.py` e este teste fica vermelho com
     `UnicodeEncodeError` — 500 sem autenticação nenhuma, que é a classe que o
     helper existe pra fechar. O controle positivo do grupo é o
