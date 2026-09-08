@@ -4,42 +4,42 @@
 (function () {
   "use strict";
 
-  var grid = document.getElementById("news-grid");
-  var section = document.getElementById("news-section");
-  var empty = document.getElementById("news-empty");
+  const grid = document.getElementById("news-grid");
+  const section = document.getElementById("news-section");
+  const empty = document.getElementById("news-empty");
   if (!grid || !section) return;
 
   function timeAgo(iso) {
     if (!iso) return "";
-    var then = new Date(iso).getTime();
+    const then = new Date(iso).getTime();
     if (isNaN(then)) return "";
-    var mins = Math.floor((Date.now() - then) / 60000);
+    const mins = Math.floor((Date.now() - then) / 60000);
     if (mins < 60) return "há " + Math.max(1, mins) + " min";
-    var hrs = Math.floor(mins / 60);
+    const hrs = Math.floor(mins / 60);
     if (hrs < 24) return "há " + hrs + "h";
-    var days = Math.floor(hrs / 24);
+    const days = Math.floor(hrs / 24);
     if (days < 7) return "há " + days + (days === 1 ? " dia" : " dias");
     return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
   }
 
   function el(tag, cls, text) {
-    var e = document.createElement(tag);
+    const e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text != null) e.textContent = text; // textContent = anti-XSS
     return e;
   }
 
   function card(n) {
-    var a = document.createElement("a");
+    const a = document.createElement("a");
     a.className = "article";
     a.href = n.url;
     a.target = "_blank";
     a.rel = "noopener noreferrer";
 
-    var thumb = el("div", "article-thumb");
+    const thumb = el("div", "article-thumb");
     if (n.image) {
       // Foto real da matéria. Se falhar ao carregar, cai no emoji.
-      var img = document.createElement("img");
+      const img = document.createElement("img");
       img.className = "article-photo";
       img.src = n.image;
       img.alt = "";
@@ -55,14 +55,14 @@
       thumb.classList.add("article-thumb-emoji");
       thumb.innerHTML = '<i class="ph ph-newspaper" aria-hidden="true"></i>';
     }
-    var body = el("div", "article-body");
+    const body = el("div", "article-body");
     if (n.category) body.appendChild(el("span", "tag-cat", n.category));
     body.appendChild(el("h3", null, n.title));
     body.appendChild(el("p", "article-summary", n.summary));
 
-    var metaBits = [];
+    const metaBits = [];
     if (n.source) metaBits.push(n.source);
-    var t = timeAgo(n.published_at);
+    const t = timeAgo(n.published_at);
     if (t) metaBits.push(t);
     body.appendChild(el("div", "meta", metaBits.join(" · ")));
 
@@ -80,9 +80,9 @@
   // dispara um 2º request; se o inicial chegar por último, repintaria cards
   // velhos (ou limparia com snapshot vazio). Cada load carimba uma geração; só
   // a mais recente pinta — resposta superada (inicial ou refresh velho) é no-op.
-  var _gen = 0;
+  let _gen = 0;
   function load() {
-    var myGen = ++_gen;
+    const myGen = ++_gen;
     // non-OK vira reject: cai no catch (tratado como falha transitória), não é
     // confundido com "genuinamente sem notícias" — senão um 502 no meio de um
     // pull-to-refresh apagaria os cards que já estavam na tela.
@@ -90,7 +90,7 @@
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
       .then(function (data) {
         if (myGen !== _gen) return;   // superado por um load mais novo: não pinta
-        var news = (data && data.news) || [];
+        const news = (data && data.news) || [];
         if (!news.length) {
           // 200 com lista vazia = genuinamente sem notícias: limpa e mostra o
           // estado vazio (vale pro 1º load e pra um refresh que esvaziou).

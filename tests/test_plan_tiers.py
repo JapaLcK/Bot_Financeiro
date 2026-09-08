@@ -177,17 +177,17 @@ class TestTrialStatus:
         _patch_user(monkeypatch, _user("free", trial_started=NOW - timedelta(hours=1)))
         st = plan_service.get_trial_status(1, _user("free", trial_started=NOW - timedelta(hours=1)))
         assert st["active"] is True
-        assert st["days_left"] == 30
+        assert st["days_left"] == 15
 
     def test_days_left_ultimo_dia(self, v2):
         st = plan_service.get_trial_status(
-            1, _user("free", trial_started=NOW - timedelta(days=29, hours=12)))
+            1, _user("free", trial_started=NOW - timedelta(days=14, hours=12)))
         assert st["active"] is True
         assert st["days_left"] == 1
 
     def test_expirado(self, v2):
         st = plan_service.get_trial_status(
-            1, _user("free", trial_started=NOW - timedelta(days=30, minutes=1)))
+            1, _user("free", trial_started=NOW - timedelta(days=15, minutes=1)))
         assert st["active"] is False
         assert st["days_left"] == 0
 

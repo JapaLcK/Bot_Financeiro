@@ -22,7 +22,7 @@
 <div class="glow"></div>
 
   <nav class="nav">
-    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.png?v=1" alt="PigBank" /></a>
+    <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
     <div class="nav-links">
       <a href="/funcionalidades">Funcionalidades</a>
       <a href="/como-funciona">Como funciona</a>
@@ -36,7 +36,7 @@
 
   <div class="wrap auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img src="/brand/icon.png?v=1" alt="" /><span>PigBank</span></div>
+      <div class="auth-logo"><img src="/brand/icon.png?v=2" alt="" /><span>PigBank</span></div>
 
       <!-- Login -->
       <form id="form-login" onsubmit="doLogin(event)" novalidate>
@@ -144,7 +144,7 @@
     var email=document.getElementById('email').value.trim();
     if(!email){document.getElementById('email').focus();return err('login-error','Digite seu e-mail acima primeiro.')}
     try{await fetch('/auth/forgot-password',{method:'POST',credentials:'same-origin',headers:csrfHeaders({'Content-Type':'application/json'}),body:JSON.stringify({email:email})})}catch(e){}
-    err('login-error','Se o e-mail existir, enviamos um link pra redefinir a senha.',true);
+    err('login-error','Se o e-mail existir, enviamos um link por e-mail.',true);
   }
 </script>
 </body>

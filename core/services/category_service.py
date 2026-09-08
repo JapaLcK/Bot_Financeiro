@@ -20,7 +20,10 @@ from utils_text import (
 )
 from db import (
     get_memorized_category,
+    get_memorized_rule,
+    get_memorized_rules,
     upsert_category_rule,
+    list_custom_categories_com_data,
     list_custom_category_names,
     resolve_category_input,
 )
@@ -71,7 +74,7 @@ def _distinctive_tokens(category_name: str) -> list[str]:
     return out
 
 
-def custom_category_match(user_id: int, text_norm: str) -> str | None:
+def custom_category_match(user_id: int, text_norm: str, *, nomes: list[str] | None = None) -> str | None:
     """Casa um texto JÁ normalizado com uma categoria CUSTOM do usuário.
 
     O usuário pode criar uma categoria na tela (ex.: "gastos com minha
@@ -89,7 +92,11 @@ def custom_category_match(user_id: int, text_norm: str) -> str | None:
     best_name: str | None = None
     best_score = 0
     best_len = 0
-    for name in list_custom_category_names(user_id) or []:
+    # `nomes` pré-carregado existe para quem chama em laço: sem ele a
+    # reconciliação fazia uma consulta (e uma conexão) POR REGRA do usuário, e
+    # quem acumulou centenas de keywords veria o POST de criar categoria
+    # estourar o tempo. Sem o parâmetro, o comportamento é o de sempre.
+    for name in (nomes if nomes is not None else list_custom_category_names(user_id) or []):
         tokens = _distinctive_tokens(name)
         if not tokens:
             continue
@@ -104,6 +111,80 @@ def custom_category_match(user_id: int, text_norm: str) -> str | None:
             best_len = matched_len
 
     return best_name
+
+
+def _regra_ficou_obsoleta(user_id: int, keyword: str, destino: str, criada_em,
+                          *, catalogo: list[tuple[str, object]]) -> bool:
+    """A regra aprendida envelheceu porque o usuário criou a categoria DEPOIS?
+
+    Duas condições, e as duas importam:
+
+    1. **colide** — `custom_category_match` sobre o KEYWORD devolve uma categoria
+       diferente do destino da regra. É exatamente a função que o passo B2 usa
+       para reconhecer categoria custom num texto: mesmo critério, sem segunda
+       heurística.
+    2. **é posterior** — essa categoria nasceu depois da regra. Sem isto o guard
+       derrubaria também a regra DELIBERADA: quem tem a categoria "gastos com
+       minha namorada" e linkou `namorada -> lazer` de propósito fez uma escolha,
+       e o `test_regra_de_keyword_vence_categoria_custom` afirma que ela vence.
+       Regra obsoleta é a que já existia quando a categoria apareceu.
+
+    A 2ª consulta só roda quando há colisão — no caminho quente, sem categoria
+    custom conflitante, o custo é o de sempre.
+    """
+    nomes = [nome for nome, _ in catalogo]
+    dona = custom_category_match(user_id, normalize_text(keyword or ""), nomes=nomes)
+    if not dona or normalize_text(dona) == normalize_text(destino or ""):
+        return False
+
+    # A data vem do catálogo já carregado: sem isso era uma consulta por
+    # candidata que colide, no caminho quente da inferência.
+    dona_norm = normalize_text(dona)
+    nascimento = next((quando for nome, quando in catalogo
+                       if normalize_text(nome) == dona_norm), None)
+    if nascimento is None or criada_em is None:
+        # Sem uma das datas não dá para afirmar que a regra envelheceu; o caso
+        # conhecido é a regra velha, então erra para o lado de respeitar a
+        # categoria que o usuário criou na tela.
+        return True
+    return nascimento > criada_em
+
+
+def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
+    """Reaponta para `nome_categoria` as regras que ela passou a possuir.
+
+    Chamado quando a categoria é criada, e só alcança regra ANTERIOR a ela.
+    Reaponta em vez de apagar porque aqui não há adivinhação: `custom_category_match` sobre o keyword devolveu ESTA
+    categoria, então o destino novo é o mesmo match que o sistema faria pelo B2
+    de qualquer forma. Quando a resposta for outra categoria, ou nenhuma, a
+    regra não é tocada — ambiguidade não vira palpite.
+
+    Devolve quantas regras foram reapontadas.
+    """
+    from db.categories import (
+        list_custom_category_names,
+        list_user_category_rules,
+        reaponta_regra_se_anterior,
+    )
+
+    alvo_norm = normalize_text(nome_categoria or "")
+    if not alvo_norm:
+        return 0
+
+    nomes = list_custom_category_names(user_id) or []   # uma vez, não por regra
+    n = 0
+    for keyword, destino in list_user_category_rules(user_id) or []:
+        dona = custom_category_match(user_id, normalize_text(keyword or ""), nomes=nomes)
+        if not dona or normalize_text(dona) != alvo_norm:
+            continue                                   # não é desta categoria
+        if normalize_text(destino or "") == alvo_norm:
+            continue                                   # já aponta pra cá
+        # O UPDATE é condicional: regra posterior à categoria é escolha
+        # deliberada feita no intervalo entre o commit da criação e esta linha,
+        # e não pode ser sobrescrita.
+        if reaponta_regra_se_anterior(user_id, keyword, nome_categoria):
+            n += 1
+    return n
 
 
 # Tickers brasileiros (B3): 4 letras + 1 ou 2 dígitos.
@@ -199,7 +280,58 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
         return InferResult(category="outros", reason="default")
 
     # B) regras do usuário (mesma fonte do comando "criar categoria ... linkar ...")
-    cat = get_memorized_category(user_id, t)
+    #
+    # A regra mantém a precedência que sempre teve — ela só perde quando ficou
+    # OBSOLETA: o usuário criou depois uma categoria custom que, pelo mesmo
+    # critério que o B2 usa para reconhecer categoria (custom_category_match
+    # sobre o keyword), passou a ser a dona daquele termo. Aí a regra aponta
+    # para o lugar errado e cede para o B2 abaixo — sem inverter a precedência
+    # global entre os dois passos.
+    #
+    # Isto conserta conta ANTIGA sem script: a regra envenenada há meses deixa
+    # de vencer na primeira classificação depois deste código subir.
+    # Percorre TODAS as regras que casam, na ordem de precedência, e fica com a
+    # primeira que não estiver obsoleta. Descartar só a primeira e desistir do
+    # passo faria uma regra deliberada mais curta perder a vez para o B2.
+    #
+    # A lista de categorias é carregada UMA vez e passada adiante: sem isso a
+    # verificação consultaria o banco por candidata.
+    #
+    # E a CHECAGEM de obsolescência degrada: se a consulta de metadado falhar,
+    # a regra vale.
+    # É o mesmo contrato do B2 abaixo, que já trata exceção devolvendo None — e
+    # a alternativa é deixar a exceção subir pelo handler e o lançamento do
+    # usuário não ser gravado por causa de um hiccup de banco.
+    #
+    # A LEITURA das regras não é capturada de propósito (a `main` também deixa
+    # subir): falha de leitura não é ausência de regra. Se virasse `[]`, a
+    # inferência cairia para local/IA e o `learn_from_inference`
+    # (core/handlers/launches.py:1114, pós-commit) gravaria esse palpite POR
+    # CIMA da regra explícita do usuário — com o `ON CONFLICT` renovando o
+    # `created_at`, a corrupção ficaria permanente e silenciosa.
+    regra = None
+    candidatas = get_memorized_rules(user_id, t)
+
+    if candidatas:
+        # Degradação: se a checagem de obsolescência falhar, vale a regra de
+        # maior precedência — o comportamento de antes deste guard. É o mesmo
+        # contrato do B2 abaixo, que já devolve None em exceção; a alternativa
+        # seria a exceção subir pelo handler e o lançamento do usuário não ser
+        # gravado por causa de um hiccup de banco.
+        regra = candidatas[0]
+        try:
+            catalogo = list_custom_categories_com_data(user_id) or []
+            for cand in candidatas:
+                if not _regra_ficou_obsoleta(user_id, cand[0], cand[1], cand[2],
+                                             catalogo=catalogo):
+                    regra = cand
+                    break
+            else:
+                regra = None          # todas obsoletas: cede ao B2
+        except Exception:
+            pass
+
+    cat = regra[1] if regra else None
     if cat:
         # A regra guarda a categoria NORMALIZADA (sem acento) — é índice interno.
         # A forma de exibição vem de user_categories; o canonicalize é o

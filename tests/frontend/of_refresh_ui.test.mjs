@@ -23,7 +23,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -31,28 +31,13 @@ import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
-// porta própria: 8899 é do fanout, 8901 do hiw_rail, 8903 dos modais — o
-// `node --test` roda os arquivos em PARALELO e duas suítes na mesma porta se matam.
-const PORT = Number(process.env.PB_OF_TEST_PORT || 8905);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1";
 const APP_UA = SAFARI + " PigBankApp/1.0";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1",
-                                 "--directory", FRONTEND], { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/settings.html`)).ok) return proc; } catch { /* subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
 
 async function waitFor(cond, what, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
@@ -64,7 +49,8 @@ async function waitFor(cond, what, timeoutMs = 15000) {
 }
 
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Página com as rotas de API neutralizadas (asset vai pro http.server). */
@@ -182,11 +168,165 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       assert.equal(v.tone, "ok", `${bons.join("+")} tinha que ficar verde`);
       assert.match(v.msg, /tudo em dia/i, v.msg);
     }
+    // Codex #166, 3ª rodada: a INSTRUÇÃO vem do backend, não desta tabela.
+    // `WAITING_USER_ACTION` pede autorizar o dispositivo / ler o QR antes do
+    // `userAction.expiresAt`; mandar "reautorize" faz perder essa janela.
+    //
+    // UM CASO POR ESTADO DE DETALHE VARIÁVEL, e é isto que a paridade de
+    // `tests/test_of_health.py` NÃO alcança: lá basta o JS MENCIONAR
+    // `i.detail`, aqui a mensagem tem de CONTER o detalhe do item. Uma entrada
+    // que devolve a mesma frase fixa nos dois ramos do ternário passa lá e
+    // falha aqui — os três detalhes abaixo são valores REAIS do backend
+    // (`_DETALHE_POR_STATUS`, `_FIXED_DETAIL` e `_stale_detail`).
+    for (const [state, detail, proibido] of [
+      ["needs_user_action", "Autorize o acesso no app do banco", /reautoriz/i],
+      // CONTROLE POSITIVO: não trocamos uma frase fixa errada por outra — o
+      // detalhe do caso comum é este, e é ele que sai.
+      ["needs_user_action", "Reautorize o banco", null],
+      ["updating",          "Ainda não sincronizou", null],
+      ["partial",           "Cartão desatualizado desde 12/08", null],
+    ]) {
+      const v = await page.evaluate(([s, d]) => window.refreshVerdict({ ok: false, items: [{
+        item_id: "a", institution: "Nubank", state: s, label: "x", detail: d }] }), [state, detail]);
+      assert.notEqual(v.tone, "ok", v.msg);
+      // O JS só minúscula a 1ª letra, para o detalhe entrar no meio da frase.
+      const esperado = detail.charAt(0).toLowerCase() + detail.slice(1);
+      assert.ok(v.msg.includes(esperado),
+                `${state}: o detalhe "${detail}" sumiu da mensagem → ${v.msg}`);
+      // ...e o detalhe SOZINHO não basta: com dois bancos conectados, "Ação
+      // necessária: autorize o acesso no app do banco" não diz em QUAL. Sem
+      // esta linha o grupo inteiro passa numa tabela que apagou o `ofNome(i)`
+      // de todas as entradas (medido: 5 pass / 0 fail).
+      assert.ok(v.msg.includes("Nubank"),
+                `${state}: a mensagem não diz de qual banco → ${v.msg}`);
+      if (proibido) assert.doesNotMatch(v.msg, proibido, v.msg);
+    }
+
+    // `detail` não-string: o `ofInstrucao` chamava `d.charAt` direto e um
+    // número/objeto/array estourava `TypeError` subindo pelo `refreshVerdict`,
+    // que não tem `try` em nenhum ponto do caminho — o toast sumia inteiro.
+    // Não é alcançável pelo backend de hoje; a exposição TRIPLICOU nesta onda.
+    for (const lixo of [42, { a: 1 }, ["x"], true]) {
+      const v = await page.evaluate((d) => {
+        try {
+          return { msg: window.refreshVerdict({ ok: false, items: [{
+            item_id: "a", institution: "Nubank", state: "partial", detail: d }] }).msg };
+        } catch (e) { return { erro: String(e) }; }
+      }, lixo);
+      assert.ok(!v.erro, `detail=${JSON.stringify(lixo)} derrubou o veredito: ${v.erro}`);
+      assert.ok(v.msg.includes("Nubank"), v.msg);
+    }
+
+    // Sem detalhe, a frase genérica continua — e é UMA só: o ramo
+    // `still_updating > 0` e o fallback do `updating` compartilham a constante
+    // (eram duas cópias literais; editar uma deixava a outra para trás).
+    const semDetalhe = await page.evaluate(() => window.refreshVerdict({
+      ok: false, still_updating: 0,
+      items: [{ item_id: "a", state: "updating", detail: null }] }));
+    assert.match(semDetalhe.msg, /ainda está atualizando/i, semDetalhe.msg);
+    const soContador = await page.evaluate(() => window.refreshVerdict({
+      ok: false, still_updating: 2, items: [] }));
+    assert.equal(soContador.msg, semDetalhe.msg, "as duas frases de 'atualizando' divergiram");
+
     // Só cooldown: verde, mas dizendo que não pediu coleta nova.
     const cooldown = await page.evaluate(() => window.refreshVerdict({
       ok: true, items: [{ item_id: "a", state: "rate_limited" }] }));
     assert.equal(cooldown.tone, "ok");
     assert.match(cooldown.msg, /acabou de atualizar/i, cooldown.msg);
+  } finally { await page.__ctx.close(); }
+});
+
+/**
+ * O toast é a ÚNICA superfície dessas mensagens (mobile/desktop web; no app e
+ * na PWA o gesto descarta a string) — e ele CORTAVA: `white-space:nowrap` com
+ * `position:fixed; left:50%` e sem teto de largura punha o fim da frase fora da
+ * viewport, com `scrollWidth` igual ao da tela (não havia scroll que revelasse).
+ * Medido antes: 11 das 12 mensagens cortavam a 390.
+ *
+ * `isMobile: true` NÃO é decoração. Esta página tem overflow horizontal
+ * pré-existente (`.top-actions`), e com a meta viewport respeitada o
+ * bloco-contêiner do `fixed` vira 379px numa tela de 320 — é o único jeito de o
+ * teste ver o defeito que `margin-inline:auto` entre left/right deixava (medido:
+ * 45..333, 13px fora). Sem `isMobile` o Chromium dá innerWidth = clientWidth e o
+ * caso de 320 não discrimina nada.
+ *
+ * O invariante é "o texto não está cortado NEM espremido", e não "a caixa tem
+ * ≥300px": uma copy curta e correta ("Tudo em dia!", 138.8px) reprovaria numa
+ * asserção de largura mínima sem ter defeito nenhum. Por isso são duas medidas
+ * observáveis: a caixa cabe na tela, e o texto cabe na caixa.
+ *
+ * ESTE TESTE MEDE UM EIXO SÓ, e o nome dele diz isso de propósito. No eixo
+ * VERTICAL o mesmo overflow horizontal da página estica o bloco-contêiner do
+ * `fixed` para 1000px de altura contra um `clientHeight` de 844, e o
+ * `bottom: 28px` passa a medir de 1000: medido, a 320 o toast fica em
+ * y=914..972 (fora da tela inteiro) e a 360 em y=803..861 (17px cortados
+ * embaixo). A partir de 375 ele aparece. **Isso NÃO é regressão desta onda** —
+ * a baseline `9cec25c` dá o mesmo y a 320 — e a causa é o overflow da página
+ * (`.top-actions` / `.btn-topbar.logout`), que é pré-existente e está fora do
+ * escopo desta onda de validação.
+ *
+ * Não escrevi asserção de Y porque ela reprovaria hoje, e um teste que reprova
+ * por um defeito que a onda decidiu não consertar vira um vermelho que se
+ * aprende a ignorar. O número está aqui para quem for consertar o overflow da
+ * página: acrescente a asserção de Y no mesmo laço, ela é uma linha.
+ *
+ * E o de sempre: tudo isto é Chromium emulado. O Safari real pode encolher a
+ * página em vez de esticar o layout viewport, e aí o toast estaria visível a
+ * 320. Ninguém mediu — não leia daqui um veredito sobre o aparelho.
+ */
+test("toast do refresh: cabe na LARGURA da tela e o texto cabe na caixa, de 320 a 1440", async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.refreshVerdict === "function"),
+                  "refreshVerdict existir na página");
+
+    const CASOS = [
+      // A instrução mais longa do Open Finance, a que mais cortava.
+      ["needs_user_action", "Autorize o acesso no app do banco", null],
+      ["paused", null, null],
+      // CONTROLE POSITIVO da asserção: copy curta é legítima e não pode reprovar.
+      [null, null, "Tudo em dia!"],
+      // `err.message` do servidor cai no toast em 21 chamadas desta página, e
+      // traz o `detail` cru. Token SEM oportunidade de quebra, de propósito:
+      // uma URL longa NÃO serve aqui — o UA quebra depois de "/" sozinho e o
+      // caso passa com e sem `overflow-wrap` (medido: 6 pass / 0 fail com a
+      // regra removida). Com o JWT abaixo, sem a regra: scrollWidth 508 numa
+      // caixa de 356 a 390 — e a CAIXA continua em 16..374, ou seja a asserção
+      // de "cabe na tela" não vê nada; quem vê é a de "texto cabe na caixa".
+      [null, null, "Erro: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9eyJzdWIiOiIxMjM0NTY3ODkwIn0"],
+    ];
+
+    // 320 é o piso real (iPhone SE 1ª geração / Android pequeno); 1440, o desktop.
+    for (const larg of [320, 360, 375, 390, 768, 1440]) {
+      await page.setViewportSize({ width: larg, height: 844 });
+      for (const [estado, detail, literal] of CASOS) {
+        const r = await page.evaluate(([s, d, lit]) => {
+          const msg = lit ?? window.refreshVerdict({ ok: false, items: [{
+            item_id: "a", institution: "Nubank", state: s, label: "x", detail: d }] }).msg;
+          window.showToast(msg, "error");
+          const el = document.getElementById("toast");
+          const b = el.getBoundingClientRect();
+          return { msg, left: b.left, right: b.right,
+                   scrollW: el.scrollWidth, clientW: el.clientWidth,
+                   vw: document.documentElement.clientWidth, icb: window.innerWidth };
+        }, [estado, detail, literal]);
+
+        const rot = `${larg}px / ${estado || "literal"}`;
+        // 1) a CAIXA cabe na tela visível. `clientWidth` do <html>, não
+        //    `innerWidth`: com o overflow da página os dois divergem (320 × 379),
+        //    e é o de 320 que o usuário enxerga.
+        assert.ok(r.left >= 0 && r.right <= r.vw,
+                  `${rot}: toast fora da tela — left=${r.left} right=${r.right} `
+                  + `vw=${r.vw} (icb=${r.icb}) | ${r.msg}`);
+        // 2) o TEXTO cabe na caixa: sem isto, "cabe na tela" é satisfeito por
+        //    uma caixa pequena com a frase transbordando por dentro.
+        assert.ok(r.scrollW <= r.clientW,
+                  `${rot}: texto transbordando a caixa — scrollWidth=${r.scrollW} `
+                  + `clientWidth=${r.clientW} | ${r.msg}`);
+      }
+    }
+
   } finally { await page.__ctx.close(); }
 });
 

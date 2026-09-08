@@ -70,8 +70,10 @@ let browser;
 before(async () => { browser = await chromium.launch(); });
 after(async () => { await browser?.close(); });
 
-async function loadDashboardJs() {
-  const page = await browser.newPage();
+/** `opts` vai direto pro contexto do Playwright — `{ timezoneId }` é o que o
+    último caso usa pra pôr o navegador noutro fuso. */
+async function loadDashboardJs(opts) {
+  const page = await browser.newPage(opts);
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   // Origem de verdade (e não `setContent`, que carrega about:blank): o
@@ -190,5 +192,53 @@ test("lançamento manual com segundos != 0: minuto igual não é mudança", asyn
 
   assert.equal(r.antes.data, "2026-03-10T12:34");
   assert.deepEqual(r.req.body, { nota: "so a nota" });
+  await page.close();
+});
+
+/**
+ * O QUE A GUARDA DE TEXTO NÃO ALCANÇA (issue #251).
+ *
+ * `tests/test_fuso_do_app.py` (guarda 19.1) lê o `dashboard.js` como TEXTO:
+ * confere que existe uma const `APP_TZ` com o valor de `utils_date.TZ_PADRAO` e
+ * que três substrings de uso continuam no arquivo. Nada disso executa o JS, e
+ * por isso ela fica VERDE com o dashboard já seguindo o fuso do APARELHO — basta
+ * SOMBREAR o nome:
+ *
+ *     function appTzWallClockToISO(localStr, APP_TZ) { … }   // era (localStr)
+ *     criadoEmISO = appTzWallClockToISO(dataVal, Intl.DateTimeFormat().resolvedOptions().timeZone);
+ *
+ * Const global intacta, literal intacto, os três usos intactos — e a ESCRITA
+ * passa a seguir o aparelho, que é a #179 de volta. Irmãos da mesma classe:
+ * `let APP_TZ` + `APP_TZ &&= …` (o regex da guarda não casa `&&=`) e
+ * `const { APP_TZ } = cfg`. Nenhuma guarda de TEXTO fecha a categoria.
+ *
+ * Este caso fecha, porque EXECUTA: o Chromium abre num fuso bem distante e o
+ * corpo do PATCH tem de continuar sendo a parede de São Paulo.
+ *
+ * Controle NEGATIVO (medido): aplique o sombreamento acima em `dashboard.js` —
+ * este caso fica vermelho (09:00 em Tóquio = 00:00Z, 12h fora). Idem trocando o
+ * `appTzWallClockToISO(dataVal)` por `new Date(dataVal).toISOString()`.
+ * Controle POSITIVO: sem mutação nenhuma, ele passa nos dois fusos (o caso 2
+ * acima roda no fuso da máquina, este em Tóquio).
+ */
+test("navegador em Asia/Tokyo: criado_em é a parede de São Paulo, não a do aparelho", async () => {
+  const page = await loadDashboardJs({ timezoneId: "Asia/Tokyo" });
+
+  // Sanidade: se o contexto ignorasse o timezoneId, o caso não mediria nada —
+  // seria o 2º teste de novo, com outro nome.
+  assert.equal(
+    await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
+    "Asia/Tokyo",
+    "o Chromium não entrou no fuso pedido",
+  );
+
+  const r = await salvar(page, OF_LEGADO, { data: "2026-04-15T09:00" });
+
+  assert.deepEqual(Object.keys(r.req.body), ["criado_em"]);
+  assert.equal(
+    new Date(r.req.body.criado_em).getTime(),
+    Date.parse("2026-04-15T09:00:00-03:00"),   // 12:00Z; lendo Tóquio daria 00:00Z
+    `criado_em=${r.req.body.criado_em}: o dashboard leu o datetime-local no fuso do aparelho`,
+  );
   await page.close();
 });

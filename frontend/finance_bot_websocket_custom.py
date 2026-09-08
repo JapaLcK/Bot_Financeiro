@@ -30,7 +30,6 @@ import time as _startup_time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
-from zoneinfo import ZoneInfo
 from typing import Dict
 
 from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, Request, Response
@@ -47,6 +46,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from token_utils import decode_dashboard_token_full, make_dashboard_token
+from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
     ensure_admin_tables,
@@ -87,6 +87,7 @@ from db import (
     get_auth_user,
     build_user_export_zip,
     verify_user_password,
+    PasswordNotSetError,
     get_user_email,
     create_data_export_token,
     consume_data_export_token,
@@ -101,7 +102,11 @@ from db import (
     update_credit_transaction_fields,
     undo_credit_transaction,
     delete_launch_and_rollback,
+    LaunchNoEffects,
+    InvestmentLotHasWithdrawal,
+    LaunchUnsafeRollback,
 )
+from core.observability import _log_falha, get_logger
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
@@ -109,6 +114,7 @@ from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.pockets import router as pockets_router
+from frontend.routes.prospects import router as prospects_router
 from frontend.routes.push import router as push_router
 from frontend.routes.onboarding import router as onboarding_router
 from frontend.routes.settings import router as settings_router
@@ -118,8 +124,10 @@ from frontend.routes.shared import (
     DASHBOARD_CURRENT_CACHE_TTL_SECONDS as _DASHBOARD_CURRENT_CACHE_TTL_SECONDS,
     DASHBOARD_URL,
     JWT_SECRET,
+    WWW_AUTHENTICATE_401,
     authorize_dashboard_access as _authorize_dashboard_access,
     dashboard_current_cache as _dashboard_current_cache,
+    dashboard_current_cache_epoch as _dashboard_current_cache_epoch,
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
@@ -141,9 +149,28 @@ from frontend.routes.static_pages import router as static_pages_router
 
 load_app_env()
 
+# Instala o `_DashboardHandler` no logger RAIZ deste processo — é o que leva
+# WARNING/ERROR (inclusive os `_log_falha` das rotas destrutivas) ao
+# `system_event_logs` e ao `backend_errors_24h` do admin. Aqui e não em
+# `core/observability.py` porque aquele é módulo de BIBLIOTECA: 23 módulos de
+# `adapters/`, `core/` e `frontend/` o importam, mais o
+# `scripts/account_deletion_job.py`. Configurar o root logger no import dele
+# daria INFO no stderr e um handler que escreve no banco a qualquer script.
+# Este módulo é choke point único: os três entrypoints ASGI (`launch.py:28`,
+# `dashboard_dev.py:87` e o `__main__` abaixo) sobem `…custom:app`, e o import
+# roda antes do lifespan e de qualquer requisição. Antes disso, o PRIMEIRO a
+# instalar era o import tardio da cadeia do WhatsApp no `_wa_worker` — que só
+# acontece com RUN_BACKGROUND_TASKS=1, então com RUN_BACKGROUND_TASKS=0 ninguém
+# instalava e a falha de operação destrutiva só saía no stderr.
+# Efeito colateral aceito: o `dashboard_dev.py` (que força RUN_BACKGROUND_TASKS=0)
+# passa a imprimir INFO no stderr e a gravar `system_event_logs` no banco de dev
+# — inclusive WARNING/ERROR de TERCEIROS, que passam a contar em
+# `backend_errors_24h` (medido: `source=asyncio | logger.error`, do event loop do
+# uvicorn). Com RUN_BACKGROUND_TASKS=1 (produção) já era assim; muda só o dev.
+get_logger(__name__)
+
 DATABASE_URL      = os.getenv("DATABASE_URL")
 DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
-TZ                = os.getenv("TZ", "America/Sao_Paulo")
 # JWT_SECRET e DASHBOARD_URL (leitura + sanitização do env) vêm de frontend/routes/shared.py
 # Em dev local (http://localhost) o navegador rejeita cookies Secure. Em prod
 # DASHBOARD_URL é https → Secure=True. Blindagem: se APP_ENV=prod, força Secure
@@ -324,6 +351,12 @@ async def _get_dashboard_current_state(user_id: int):
     if cached and now_mono - cached[0] < _DASHBOARD_CURRENT_CACHE_TTL_SECONDS:
         return cached[1], cached[2], cached[3], cached[4], cached[5]
 
+    # Época ANTES dos gathers: se uma invalidação (reset, escrita de pocket/
+    # cartão/launch) rodar enquanto este fill espera o banco, publicar o
+    # resultado seria regravar dado pré-mutação por cima do pop (até 45s de
+    # TTL). Fill concorrente legítimo publica normal (mesma época).
+    fill_epoch = _dashboard_current_cache_epoch.get(int(user_id), 0)
+
     # rv_positions e of_fixed_income só LÊEM open_finance_investments (não batem na
     # rede) → cabem no gather sem estourar latência; a corretora é a fonte, o sync já
     # atualizou. of_fixed_income = renda fixa do banco (CDB/Tesouro) agregada.
@@ -341,14 +374,15 @@ async def _get_dashboard_current_state(user_id: int):
     if not require_min_tier(user_id, "essencial"):
         rv_positions = []
         of_fixed_income = []
-    _dashboard_current_cache[int(user_id)] = (
-        _startup_time.monotonic(),
-        current_pockets,
-        current_investments,
-        market_rates,
-        rv_positions,
-        of_fixed_income,
-    )
+    if _dashboard_current_cache_epoch.get(int(user_id), 0) == fill_epoch:
+        _dashboard_current_cache[int(user_id)] = (
+            _startup_time.monotonic(),
+            current_pockets,
+            current_investments,
+            market_rates,
+            rv_positions,
+            of_fixed_income,
+        )
     return current_pockets, current_investments, market_rates, rv_positions, of_fixed_income
 
 
@@ -400,12 +434,12 @@ async def get_financial_data(
     are scoped to that month. Balance, pockets and investments
     always reflect the current state.
     """
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     y   = year  or now.year
     m   = month or now.month
     month_start, month_end = _month_range(y, m)
     from core.services.plan_service import history_earliest_date
-    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest_history_date = await asyncio.to_thread(history_earliest_date, user_id, now)
     query_start = max(month_start, earliest_history_date) if earliest_history_date else month_start
     is_current = (y == now.year and m == now.month)
     page = max(int(page or 1), 1)
@@ -670,9 +704,17 @@ async def get_financial_data(
             (query_start, month_end, user_id),
         ),
         # 9) Daily expenses (bar chart)
+        # `tz_name()` interpolado em f-string aqui e nos dois `AT TIME ZONE` de
+        # `get_daily_expenses_window` — forma HERDADA (era a constante `TZ`).
+        # Não é injeção: `tz_name()` é `_tz().key`, nome IANA que o `ZoneInfo`
+        # já validou (o boot recusa inválido em `config/env.py::load_app_env`).
+        # Para SQL NOVO, prefira o bind param: `get_spending_trend`
+        # (db/accounts.py) passa `at time zone %s` com `tz_name()` no
+        # parâmetro. Trocar estes três é mudança de SQL de produção — PR
+        # próprio, não o que unificou a leitura do fuso (#179).
         _q(
             f"""
-            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{TZ}')::int AS dia,
+            SELECT EXTRACT(DAY FROM criado_em AT TIME ZONE '{tz_name()}')::int AS dia,
                    SUM(valor) AS total
             FROM launches
             WHERE user_id = %s
@@ -976,7 +1018,7 @@ async def get_daily_expenses_window(
     primeiro. Cada item: ``{"date": "YYYY-MM-DD", "total": float}``. Mesmo filtro
     do gráfico de gastos por dia do mês (tipo despesa/saida, não interno)."""
     if start_date:
-        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{TZ}') >= %s"
+        limit_clause = f"AND DATE(criado_em AT TIME ZONE '{tz_name()}') >= %s"
         params = (user_id, start_date)
     else:
         limit_clause = f"AND criado_em >= NOW() - INTERVAL '{int(days)} days'"
@@ -985,7 +1027,7 @@ async def get_daily_expenses_window(
         async with conn.cursor() as cur:
             await cur.execute(
                 f"""
-                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{TZ}'), 'YYYY-MM-DD') AS dia,
+                SELECT TO_CHAR(DATE(criado_em AT TIME ZONE '{tz_name()}'), 'YYYY-MM-DD') AS dia,
                        SUM(valor) AS total
                 FROM launches
                 WHERE user_id = %s
@@ -1068,6 +1110,8 @@ def _normalize_export_period(start_date: date | int, end_date: date | int) -> tu
         raise ValueError("Período de exportação inválido.")
     if end_date < start_date:
         raise ValueError("A data final não pode ser anterior à data inicial.")
+    if end_date == date.max:
+        raise ValueError("A data final deve ser anterior a 31/12/9999.")
     return start_date, end_date
 
 
@@ -1213,16 +1257,22 @@ def _export_summary(items: list[dict]) -> dict:
     }
 
 
-async def build_xlsx(user_id: int, start_date: date | int, end_date: date | int) -> bytes | None:
+async def build_xlsx(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
     period_start, period_end = _normalize_export_period(start_date, end_date)
     items = await _fetch_export_items(user_id, period_start, period_end)
     if not items:
         return None
-    return await asyncio.to_thread(_render_xlsx, items, period_start, period_end)
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
+    return await asyncio.to_thread(_render_xlsx, items, period_start, period_end, balance)
 
 
 def _render_xlsx(
-    items: list[dict], start_date: date | None = None, end_date: date | None = None
+    items: list[dict], start_date: date | None = None, end_date: date | None = None,
+    balance: float = 0.0,
 ) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -1290,6 +1340,7 @@ def _render_xlsx(
         ("Receitas", summary["receitas"], True),
         ("Despesas", summary["despesas"], True),
         ("Aportes", summary["aportes"], True),
+        ("Saldo atual", balance, True),
         ("Lançamentos", summary["count"], False),
     ]
     for label, value, currency in summary_rows:
@@ -1306,17 +1357,25 @@ def _render_xlsx(
     return bio.getvalue()
 
 
-async def build_pdf(user_id: int, start_date: date | int, end_date: date | int) -> bytes | None:
-    period_start, period_end = _normalize_export_period(start_date, end_date)
-    items = await _fetch_export_items(user_id, period_start, period_end)
-    if not items:
-        return None
-    # Saldo atual da conta (não escopado ao mês) — mesmo número do card do dashboard.
+async def _fetch_export_balance(user_id: int) -> float:
+    """Saldo atual da conta, compartilhado pelos anexos de resumo."""
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
             row = await cur.fetchone()
-    balance = float(row["balance"]) if row else 0.0
+    return float(row["balance"]) if row else 0.0
+
+
+async def build_pdf(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    items = await _fetch_export_items(user_id, period_start, period_end)
+    if not items:
+        return None
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
     return await asyncio.to_thread(_render_pdf, items, period_start, period_end, balance)
 
 
@@ -1564,7 +1623,7 @@ class ConnectionManager:
         if info:
             return info["year"], info["month"]
 
-        now = datetime.now(timezone.utc)
+        now = now_tz()
         return now.year, now.month
 
     async def send_to(self, ws: WebSocket, payload: str):
@@ -1825,6 +1884,41 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _plan_grants_reprojection():
+        """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
+
+        Grant futuro que vira vigente e grant vigente que vence são as duas
+        únicas transições de acesso que acontecem sem evento externo nenhum —
+        ninguém chama webhook para avisar que o downgrade agendado chegou.
+
+        Duas passadas, e a segunda existe porque a primeira sozinha mente:
+
+        • a cada 60 s, por JANELA (desde o último tick) — barata e indexada;
+        • a cada 24 h, e também na PRIMEIRA volta, SEM janela: todo usuário com
+          grant ativo. Janela só conserta o que transicionou dentro dela, então
+          processo fora do ar por mais tempo que a janela deixava `plan` velho
+          para sempre. Sem janela não existe "mais tempo que a janela" — a
+          varredura é auto-curativa em vez de depender de uptime.
+        """
+        from core.services.billing_access import reprojetar_grants_recentes  # noqa: PLC0415
+        desde = None                       # 1ª volta é a varredura sem janela
+        proxima_larga = datetime.now(timezone.utc) + timedelta(hours=24)
+        while True:
+            try:
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_larga:
+                    desde = None
+                    proxima_larga = agora + timedelta(hours=24)
+                n = await asyncio.to_thread(reprojetar_grants_recentes, desde)
+                desde = agora
+                if n:
+                    print(f"[plan_grants] {n} usuario(s) reprojetado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1917,6 +2011,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
             ]
         )
     else:
@@ -1956,6 +2051,9 @@ CSRF_EXEMPT_PATHS = {
     # One-click unsubscribe (RFC 8058): POST server-to-server do Gmail/Yahoo,
     # sem cookie de sessão — autenticado pelo token HMAC da própria URL.
     "/unsubscribe",
+    # Consulta do lead engine: server-to-server, sem cookie de sessão —
+    # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
+    "/api/prospect/status",
 }
 
 _SECURITY_HEADERS = {
@@ -1968,7 +2066,8 @@ _SECURITY_HEADERS = {
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
-        "https://static.cloudflareinsights.com https://connect.facebook.net; "
+        "https://static.cloudflareinsights.com https://connect.facebook.net "
+        "https://www.googletagmanager.com; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -2357,8 +2456,9 @@ def _post_login_url(user_id: int | None = None) -> str:
     O campo `dashboard_url` nas respostas de auth aponta para cá.
 
     Cadastro novo (ou quem ainda não escolheu plano) vai DIRETO pra /precos —
-    só entra no dashboard depois de escolher um plano (mesmo o Grátis) e, nos
-    pagos, concluir o pagamento. Sem assinatura ativa (paywall ligado), idem."""
+    só entra no dashboard depois de escolher um plano — que hoje é sempre pago,
+    o Grátis saiu da /precos — e concluir o pagamento. Sem assinatura ativa
+    (paywall ligado), idem."""
     if user_id is not None:
         from core.services.plan_service import has_app_access, needs_plan_selection
         if needs_plan_selection(int(user_id)):
@@ -2384,10 +2484,12 @@ async def _get_current_user(
 ) -> int:
     token = _get_auth_token_from_request(request, creds)
     if not token:
-        raise HTTPException(status_code=401, detail="Token não fornecido.")
+        raise HTTPException(status_code=401, detail="Token não fornecido.",
+                            headers=WWW_AUTHENTICATE_401)
     payload = _decode_jwt(token)
     if not payload or payload.get("type") != "auth":
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado.",
+                            headers=WWW_AUTHENTICATE_401)
     request.state.auth_payload = payload
     user_id = int(payload["sub"])
 
@@ -2397,7 +2499,8 @@ async def _get_current_user(
     if jti:
         session = await asyncio.to_thread(get_active_session, jti)
         if not session or int(session.get("user_id") or 0) != user_id:
-            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão encerrada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
         request.state.session_jti = jti
         # Atualiza last_seen com debounce; falha silenciosa.
         asyncio.create_task(asyncio.to_thread(touch_session, jti))
@@ -2408,7 +2511,8 @@ async def _get_current_user(
         # de sessão feita no reset.
         from db import get_password_changed_at
         if await asyncio.to_thread(get_password_changed_at, user_id):
-            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.")
+            raise HTTPException(status_code=401, detail="Sessão expirada. Faça login novamente.",
+                                headers=WWW_AUTHENTICATE_401)
 
     _raise_if_account_scheduled_for_deletion(user_id)
     return user_id
@@ -2501,7 +2605,8 @@ async def auth_validate(request: Request, response: Response):
     """
     user_id = _resolve_dashboard_user_id(request)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Token inválido")
+        raise HTTPException(status_code=401, detail="Token inválido",
+                            headers=WWW_AUTHENTICATE_401)
     _raise_if_account_scheduled_for_deletion(int(user_id))
     _no_store(response)
 
@@ -2577,6 +2682,29 @@ async def _apply_referral_attribution(request: Request, response: Response, user
         print(f"[affiliates] atribuicao de referral falhou user={user_id}: {exc}")
     finally:
         response.delete_cookie("ref_code")
+
+
+async def _apply_prospect_attribution(request: Request, response: Response, user_id: int) -> None:
+    """Se o cadastro veio de um link de prospecção (cookie prospect_code do
+    /i/{code}), grava a atribuição e consome o cookie. Nunca pode quebrar o signup."""
+    code = (request.cookies.get("prospect_code") or "").strip()
+    if not code:
+        return
+    try:
+        from db.prospects import record_prospect_referral
+        attributed = await asyncio.to_thread(record_prospect_referral, code, int(user_id))
+        if attributed:
+            await log_system_event(
+                "info",
+                "prospect_referral_recorded",
+                f"Cadastro atribuido ao funil de prospeccao (code={code}).",
+                source="prospects",
+                user_id=int(user_id),
+            )
+    except Exception as exc:
+        print(f"[prospects] atribuicao de prospect falhou user={user_id}: {exc}")
+    finally:
+        response.delete_cookie("prospect_code")
 
 
 @app.post("/auth/register")
@@ -2667,12 +2795,18 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     _set_dashboard_cookie(response, int(user_id), jti=jti)
 
     await _apply_referral_attribution(request, response, int(user_id))
+    await _apply_prospect_attribution(request, response, int(user_id))
 
     # Meta Conversions API — CompleteRegistration (conta criada). Agendado como
     # background task (roda DEPOIS da resposta) pra um Meta lento/fora nunca
     # atrasar o cadastro. event_id signup_<uid> casa com o pixel do /cadastro.
     try:
-        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
         if capi_configured():
             background_tasks.add_task(
                 send_event,
@@ -2680,6 +2814,10 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=body.email.strip().lower(),
+                # Mesma classe do Purchase: sem os cookies do pixel, o cadastro
+                # chega ao Meta sem o clique que o originou.
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
                 event_source_url=f"{DASHBOARD_URL}/cadastro",
             )
     except Exception as exc:
@@ -2823,7 +2961,16 @@ async def auth_logout(request: Request, response: Response):
             )
 
     _clear_session_cookies(response)
-    response.headers["Clear-Site-Data"] = '"cookies", "storage"'
+    # SEM `"storage"`, e a ausência é a regra — não esquecimento. O diretivo é
+    # tudo-ou-nada (não tem granularidade por chave) e apagava localStorage,
+    # sessionStorage, Cache Storage e service workers INTEIROS, atropelando o
+    # `_PRESERVA` de `frontend/static/auth-refresh.js` (e o gêmeo do
+    # `nav-auth.js`), que é a fonte de verdade do que sobrevive ao fim de
+    # sessão. Medido em Chromium 151: `finbot_reset_at` sumia e reabria o flash
+    # de snapshot pré-reset na cadeia reset → logout → relogin; tema, esconder-
+    # saldo e posição do FAB sumiam junto. Quem apaga o estado do aparelho é o
+    # JS — todo chamador de POST /auth/logout carrega um dos dois arquivos.
+    response.headers["Clear-Site-Data"] = '"cookies"'
     _no_store(response)
     return {"ok": True}
 
@@ -2867,17 +3014,34 @@ async def auth_refresh(request: Request, response: Response):
     por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
     clientes desta rota, `login.html` e o interceptor, são de cookie).
 
-    O `_clear_session_cookies` do ramo `invalid` NÃO chega ao cliente — o
-    `HTTPException` descarta os headers do sub-response (medido, #175). Está
-    fora do escopo deste conserto, mas não é para ser lido como funcionando.
+    Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
+    `HTTPException` descarta os headers do sub-response injetado (medido,
+    #175), então o `_clear_session_cookies` não chegava ao cliente e o
+    dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
+    ver o comentário no primeiro ramo.
     """
     refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
     if not refresh_in_cookie:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
-        raise HTTPException(
-            status_code=400 if sessao_viva else 401, detail="missing_refresh_token",
-        )
+        if sessao_viva:
+            raise HTTPException(status_code=400, detail="missing_refresh_token")
+        # O Set-Cookie da limpeza precisa CHEGAR ao cliente: `raise
+        # HTTPException` descarta os headers do sub-response injetado (#175).
+        # Sem isto o dashboard_token (12h) sobrevivia ao refresh morto e o
+        # usuário ficava preso — o nav mostrava a conta logada, todo /billing
+        # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
+        # olha o dashboard_token, não o access. Nem assinava, nem relogava.
+        resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
@@ -2886,9 +3050,18 @@ async def auth_refresh(request: Request, response: Response):
         consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
     )
     if not result:
-        # Limpa cookies — qualquer motivo de falha vira deslogue.
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+        # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
+        # do ramo acima para montar a resposta em vez de dar raise (#175).
+        resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
+        _clear_session_cookies(resp)
+        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
+        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
+        # reemite em método seguro sem cookie — a /login já carregou, então o
+        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
+        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
+        # não pode levar junto a credencial de que o formulário precisa.
+        _set_csrf_cookie(resp, _make_csrf_token())
+        return _no_store(resp)
 
     user_id = int(result["user_id"])
     session_jti = result["session_jti"]
@@ -2920,7 +3093,7 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     """
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_password_reset_token
+    from db import create_password_reset_token, email_has_password
     from core.services.email_service import send_password_reset_email
 
     await _check_auth_rate_limits("forgot-password", request, body.email)
@@ -2928,7 +3101,11 @@ async def auth_forgot_password(request: Request, body: EmailBody):
     token = create_password_reset_token(body.email)
     if token:
         reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-        send_password_reset_email(body.email.strip().lower(), reset_url)
+        # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
+        # instrução por instrução igual, e a resposta abaixo nunca muda
+        send_password_reset_email(
+            body.email.strip().lower(), reset_url, email_has_password(body.email)
+        )
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
     return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
@@ -3004,7 +3181,10 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
     """Retorna dados do usuário autenticado."""
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import get_auth_user, should_show_mfa_onboarding, get_mfa_status
+    from db import (
+        auth_account_has_password, get_auth_user, should_show_mfa_onboarding,
+        get_mfa_status,
+    )
 
     user = get_auth_user(user_id)
     if not user:
@@ -3043,6 +3223,10 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "user_id": user_id,
         **safe_user,
         "show_mfa_onboarding": show_onboarding,
+        # False = conta criada só via Google (password_hash NULL): a UI manda
+        # DEFINIR senha em vez de mostrar campo de senha que nunca aceita nada.
+        # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
+        "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
         "app_access": has_app_access(user_id),
         "needs_plan_selection": needs_plan_selection(user_id, user_dict),
@@ -3055,6 +3239,20 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         "of_ui_enabled": of_ui_enabled,
         "agents_ui_enabled": agents_ui,
     }
+
+
+async def _reauth_password_ok(user_id: int, password: str) -> bool:
+    """Re-autenticação por senha nos endpoints já autenticados.
+
+    Devolve False para senha ERRADA (cada chamador mantém o próprio 401 e o
+    próprio log). Conta SEM senha (criada só via Google) vira 409 aqui: a
+    PasswordNotSetError atravessando o asyncio.to_thread viraria 500 no handler
+    global de Exception (:2138), não 401.
+    """
+    try:
+        return await asyncio.to_thread(verify_user_password, user_id, password)
+    except PasswordNotSetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ── MFA (TOTP) ───────────────────────────────────────────────────────────────
@@ -3115,7 +3313,7 @@ async def auth_mfa_setup(request: Request, body: MFASetupBody, user_id: int = De
     """Inicia setup do MFA: pede senha, gera secret, retorna QR + URI."""
     _block_setup_if_unsupported_user(user_id)
 
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3169,7 +3367,7 @@ async def auth_mfa_enable(request: Request, body: MFAEnableBody, user_id: int = 
 @limiter.limit("5/hour")
 async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
     """Desativa MFA (pede senha + codigo TOTP atual ou backup code)."""
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3206,7 +3404,7 @@ async def auth_mfa_disable(request: Request, body: MFADisableBody, user_id: int 
 @limiter.limit("3/hour")
 async def auth_mfa_regenerate(request: Request, body: MFADisableBody, user_id: int = Depends(_get_current_user)):
     """Gera novos backup codes (invalida os antigos). Pede senha + TOTP."""
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         raise HTTPException(status_code=401, detail="Senha incorreta.")
 
@@ -3327,7 +3525,7 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     # 1) Re-auth por senha
-    password_ok = await asyncio.to_thread(verify_user_password, user_id, body.password)
+    password_ok = await _reauth_password_ok(user_id, body.password)
     if not password_ok:
         await log_system_event(
             "warning",
@@ -3490,6 +3688,10 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     email = (auth_user or {}).get("email")
     try:
         result = await asyncio.to_thread(schedule_account_deletion, user_id, body.password, 7)
+    except PasswordNotSetError as exc:
+        # ANTES do except PermissionError (é subclasse dele): invertido, o
+        # genérico engole e o 409 nunca acontece.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LookupError as exc:
@@ -3796,12 +3998,18 @@ async def auth_google_complete_signup(
     _set_dashboard_cookie(response, user_id, jti=jti)
 
     await _apply_referral_attribution(request, response, user_id)
+    await _apply_prospect_attribution(request, response, user_id)
 
     # Meta Conversions API — CompleteRegistration (conta criada via Google).
     # Background task (roda após a resposta); event_id signup_<uid> casa com o
     # pixel do /completar-cadastro pro Meta deduplicar.
     try:
-        from core.services.meta_capi import capi_configured, registration_event_id, send_event
+        from core.services.meta_capi import (
+            capi_configured,
+            registration_event_id,
+            sanitize_fb_cookie,
+            send_event,
+        )
         if capi_configured():
             background_tasks.add_task(
                 send_event,
@@ -3809,6 +4017,8 @@ async def auth_google_complete_signup(
                 event_id=registration_event_id(user_id),
                 event_time=int(datetime.now(timezone.utc).timestamp()),
                 email=email,
+                fbp=sanitize_fb_cookie(request.cookies.get("_fbp")),
+                fbc=sanitize_fb_cookie(request.cookies.get("_fbc")),
                 event_source_url=f"{DASHBOARD_URL}/completar-cadastro",
             )
     except Exception as exc:
@@ -3890,8 +4100,20 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
     )
 
 
-async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str, price_id: str):
-    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``."""
+async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
+                                     price_id: str, rastreio: dict[str, str] | None = None):
+    """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
+
+    `rastreio` são os identificadores de anúncio já validados (`ga_client_id`,
+    `fbp`, `fbc`), lidos dos cookies no endpoint. Eles entram no metadata da
+    sessão e da assinatura porque é de lá que o webhook os lê pra mandar a compra
+    pro GA4 e pro Meta atribuída à pessoa — e à campanha — certa.
+
+    Sessão REUTILIZADA mantém o metadata de quando nasceu: o
+    `_checkout_session_matches` não olha estes campos de propósito, porque
+    recriar um checkout só porque um cookie mudou trocaria a URL que o usuário
+    já tem aberta.
+    """
     from db import get_auth_user, set_stripe_customer
 
     user = await asyncio.to_thread(get_auth_user, user_id)
@@ -4024,7 +4246,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             )
         trial_days = trial_days_total() if eligible else 0
     else:
-        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "30"))
+        trial_days = int(os.getenv("PRO_TRIAL_DAYS", "15"))
 
     # Cota mensal da IA do plano comprado. Plus e Pro têm `ai_monthly_messages:
     # None` em plan_limits.py, o que NÃO é ilimitado: cai no teto global
@@ -4041,6 +4263,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "plan": plan,
             "price_id": price_id,
         }
+        metadata.update(rastreio or {})
         subscription_data = {"metadata": metadata.copy()}
         if trial_days > 0:
             subscription_data["trial_period_days"] = trial_days
@@ -4065,11 +4288,13 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                 f"&ev={'trial' if trial_days > 0 else 'purchase'}"
                 f"&td={trial_days}&pl={plan}&ia={ia_quota}"
             ),
-            # Abandonou o checkout → volta pra /precos escolher um plano (pago
-            # ou Grátis). O escolha=1 já faz o applyOnboardingChoice mostrar
-            # "Escolha um plano pra começar" (needs_plan_selection segue true,
-            # pois o gate não fechou) — não anexo upgrade=cancelled porque
-            # /precos não consome esse marcador (o toast vive só na /home).
+            # Abandonou o checkout → volta pra /precos escolher um plano PAGO
+            # (o Grátis não é mais escolha). O escolha=1 fica como rastro de
+            # origem: a copy "Escolha um plano pra continuar" da precos.html é
+            # decidida pelo needs_plan_selection do /auth/me (que segue true,
+            # pois o gate não fechou), não por este marcador — ele se perde num
+            # clique no "Planos" do próprio nav. Não anexo upgrade=cancelled
+            # porque /precos não consome esse marcador (o toast vive só na /home).
             cancel_url=f"{DASHBOARD_URL}/precos?escolha=1",
             metadata=metadata,
             subscription_data=subscription_data,
@@ -4103,6 +4328,8 @@ async def billing_plans_config():
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
+        "plus_available": bool(_resolve_price_id("plus", "monthly")
+                               or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
     }
@@ -4131,12 +4358,30 @@ async def billing_create_checkout(
     if not STRIPE_SECRET_KEY or not price_id:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
+    # Identificadores de anúncio, todos lidos dos COOKIES que o navegador já
+    # manda neste POST — nenhum JS precisa lê-los e reenviá-los:
+    #   _ga  → client_id do GA4 (a compra cai na mesma pessoa que navegou);
+    #   _fbp → o navegador, pro Meta;
+    #   _fbc → o CLIQUE no anúncio, criado pelo pixel a partir do `fbclid` da URL
+    #          de entrada. É ele que amarra a compra à campanha.
+    # Cada um ausente (cookie bloqueado, pixel/gtag ainda carregando, visita
+    # orgânica sem fbclid) simplesmente não vai: o evento continua sendo enviado
+    # com o que houver, e o GA4 ainda tem o `fallback_client_id`.
+    from core.services.ga4_mp import client_id_from_ga_cookie
+    from core.services.meta_capi import sanitize_fb_cookie
+    rastreio = {
+        "ga_client_id": client_id_from_ga_cookie(request.cookies.get("_ga")),
+        "fbp": sanitize_fb_cookie(request.cookies.get("_fbp")),
+        "fbc": sanitize_fb_cookie(request.cookies.get("_fbc")),
+    }
+    rastreio = {k: v for k, v in rastreio.items() if v}
+
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id)
+                stripe, user_id, plan, interval, price_id, rastreio)
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
         # session_id do Stripe (par do record_checkout_completed no webhook —
         # correlaciona a mesma tentativa). Só depois da sessão nascer de fato.
@@ -4145,8 +4390,8 @@ async def billing_create_checkout(
         _session_id = result.pop("session_id", None)
         await asyncio.to_thread(record_checkout_started, user_id, _session_id)
         # NÃO fechamos o gate da /precos aqui. Abrir o checkout não é escolher um
-        # plano — quem abandona o Stripe tem de voltar pra /precos e escolher
-        # (pago ou Grátis). O gate só fecha quando o pagamento COMPLETA de fato,
+        # plano — quem abandona o Stripe tem de voltar pra /precos e assinar
+        # (só há plano pago lá). O gate só fecha quando o pagamento COMPLETA de fato,
         # no webhook checkout.session.completed (mark_plan_selected lá). O
         # retorno de sucesso (?upgrade=success) é tratado como "webhook em
         # trânsito" pelo gate e pela tela de confirmação, sem cair no 402.
@@ -4168,24 +4413,41 @@ async def billing_select_free(
     request: Request,
     user_id: int = Depends(_get_current_user),
 ):
-    """Escolha do plano Grátis no fim do cadastro.
+    """Escolha do plano Grátis no fim do cadastro — DESATIVADA.
 
-    Fecha o gate da /precos (plan_selected_at) e libera o dashboard sem passar
-    pelo Stripe. Recusa se o usuário já tem assinatura paga/trial vigente —
-    aí a troca é pela /precos normal, não por aqui."""
-    from db import mark_plan_selected
-    from core.services.plan_service import get_plan_tier
+    O Grátis morreu como porta de entrada: quem se cadastra pela web tem de
+    assinar pra entrar. A rota continua existindo só pra RECUSAR — apagá-la
+    devolveria 404/405 (HTML da página de erro, sem `detail`) a um cliente
+    antigo em cache, e o front trata 4xx lendo `detail.message`.
 
-    tier = await asyncio.to_thread(get_plan_tier, user_id)
-    if tier != "free":
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "already_subscribed",
-                    "message": "Você já tem um plano pago ativo."},
-        )
+    O front NOVO não chama mais: o `[data-free-cta]` e o `selectFree` saíram da
+    precos.html no mesmo commit (`git grep -n select-free -- frontend/`), e quem
+    fecha o gate hoje são os dois ramos pagos do webhook da Stripe
+    (`checkout.session.completed` e `invoice.paid`/`invoice.payment_succeeded`,
+    os dois chamando `mark_plan_selected`).
 
-    await asyncio.to_thread(mark_plan_selected, user_id)
-    return {"ok": True, "dashboard_url": _dashboard_url("/home")}
+    Sobra UM chamador real, e é ele que sustenta o parágrafo acima: a aba com a
+    /precos ANTIGA já carregada no instante do deploy, de usuário em
+    `needs_plan_selection`. O JS velho dessa aba já converteu o CTA em
+    "Continuar com o plano Grátis"; o clique faz o POST, leva 410, e o
+    `selectFree` antigo cai no `showToast(msg, "err")` — ou seja, a recusa VIRA
+    um toast vermelho com a mensagem daqui, que por isso é escrita pra ser lida
+    por humano. Não é beco sem saída: os CTAs pagos da mesma aba continuam
+    funcionando, e um reload traz a página nova.
+
+    Os outros vetores estão fechados: link salvo, e-mail, deep link e sitemap
+    não alcançam a rota (é `@app.post` só, atrás de `_get_current_user` e do
+    CSRF — um GET dá 405), e HTML velho servido por PWA ou por cache HTTP não
+    existe (o service worker não intercepta navegação e o HTML sai `no-store`).
+
+    O tier `free` continua existindo como ESTADO (fallback após falha de
+    cobrança); o que sumiu é a ESCOLHA."""
+    raise HTTPException(
+        status_code=410,
+        detail={"error": "free_plan_discontinued",
+                "message": "O plano Grátis não está mais disponível. "
+                           "Escolha um plano pago pra continuar."},
+    )
 
 
 # ─── Troca de plano (upgrade/downgrade sem assinatura dupla) ─────────────────
@@ -4406,10 +4668,15 @@ async def billing_cancel_change(request: Request, user_id: int = Depends(_get_cu
 
 
 @app.post("/billing/webhook")
-async def billing_webhook(request: Request):
+async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     """
     Recebe eventos do Stripe (checkout.session.completed, customer.subscription.*).
     Atualiza o plano do usuário no banco.
+
+    Rastreio (GA4 / Meta CAPI) sai por `background_tasks`, nunca inline: são dois
+    POSTs pra fora, e a Stripe desiste do webhook por timeout — o que faz ela
+    REENVIAR o evento, e aí o e-mail de boas-vindas sai de novo. O padrão já era
+    esse no /auth/verify-email; aqui o await tinha entrado por descuido.
     """
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe não configurado.")
@@ -4501,12 +4768,68 @@ async def billing_webhook(request: Request):
         value = (float(unit) / 100.0) if unit is not None else 0.0
         return (value, str(cur).upper())
 
-    def _invoice_subscription_id(invoice) -> str | None:
-        sub_id = _g(invoice, "subscription")
+    def _ga_plano_publico(*objetos) -> str | None:
+        """Nome PÚBLICO do plano ('essencial'/'plus'/'pro') pro item do GA4.
+
+        É o mesmo identificador que o `begin_checkout` manda do navegador.
+        `_stored_plan_for_price` devolve o valor do BANCO, onde Plus é 'pro' por
+        legado e Pro é 'pro_max' — usar aquele aqui faria checkout e compra
+        virarem produtos diferentes, e ainda colidiria Plus com Pro (Codex, #244).
+
+        O PREÇO ATUAL manda, e o metadata é só o fallback: a troca de plano
+        agendada (`/billing/change-plan`) reescreve apenas o price das fases do
+        SubscriptionSchedule e nunca o `metadata.plan`. Depois que a troca entra
+        em vigor, o metadata aponta pro plano ANTIGO — e toda renovação seria
+        atribuída ao item errado (Codex, #244, 2ª rodada). O fallback continua
+        valendo pro price que não está nas envs (legado).
+        """
+        publico, _ = _plan_interval_for_price(_subscription_price_id(objetos[0]))
+        if publico:
+            return publico
+        for obj in objetos:
+            valor = _g(_g(obj, "metadata", {}), "plan")
+            if valor:
+                return valor
+        return None
+
+    def _fb_ids(*objetos) -> tuple[str | None, str | None]:
+        """(`fbp`, `fbc`) do metadata do Stripe — os cookies do pixel gravados na
+        criação do checkout. São o que amarra a compra ao clique no anúncio; sem
+        eles o único identificador do evento é o e-mail com hash.
+
+        Assinatura criada antes desta versão não tem os campos: o evento vai com
+        o que houver, nunca deixa de ir.
+        """
+        for obj in objetos:
+            meta = _g(obj, "metadata", {})
+            fbp, fbc = _g(meta, "fbp"), _g(meta, "fbc")
+            if fbp or fbc:
+                return fbp, fbc
+        return None, None
+
+    def _invoice_subscription_id(objeto) -> str | None:
+        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
+
+        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
+        lia `_g(session, "subscription")` cru, então um payload com o objeto
+        expandido virava uma `external_ref` diferente da que o `invoice.paid`
+        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
+        Depois que a revogação passou a mirar `external_ref` exato, os dois
+        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
+        O fallback de `parent.subscription_details` simplesmente não casa num
+        objeto de sessão, então serve os dois sem ramificar por tipo.
+        """
+        sub_id = _g(objeto, "subscription")
         if sub_id:
             return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
         # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        parent = _g(invoice, "parent", {})
+        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
+        # `checkout.session.completed`, esta linha ficou lendo uma variável
+        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
+        # (checkout de pagamento avulso) chegava aqui e estourava
+        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
+        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
+        parent = _g(objeto, "parent", {})
         details = _g(parent, "subscription_details", {})
         ref = _g(details, "subscription")
         if ref is None:
@@ -4521,20 +4844,143 @@ async def billing_webhook(request: Request):
         except Exception:
             return ""
 
+    def _event_version(evt) -> int:
+        """Ordem dos eventos (§6 do docs/plano_pix_anual_asaas.md).
+
+        `event["created"]` do Stripe é epoch em SEGUNDOS — é por isso que o
+        empate do §6.1 (invoice.paid × subscription.deleted no mesmo segundo) é
+        caso real e não teórico. Ausente só em evento sintético: cai em now(),
+        nunca em 0, porque versão 0 BLOQUEARIA toda escrita posterior sobre um
+        grant existente e o acesso ficaria congelado no primeiro evento.
+        """
+        try:
+            return int(_g(evt, "created"))
+        except (TypeError, ValueError):
+            return int(datetime.now(timezone.utc).timestamp())
+
+    async def _materializar_assinatura(uid: int, sub_id, plan_value,
+                                       expires_dt, sub_status: str) -> bool:
+        """Grava o GRANT e reprojeta `auth_accounts` a partir dele (§4.1.1 A).
+
+        **A exceção PROPAGA de propósito.** Antes havia um `except`/`print`
+        aqui, e o efeito medido foi caro: uma renovação em que o
+        `update_user_plan` entrava e o `upsert_grant` estourava deixava o grant
+        parado no período anterior, com `auth_accounts` fresco — e a varredura
+        seguinte lia o buraco como fim de assinatura e rebaixava um PAGANTE
+        (`pro/2027-07-01 → free/None`). Gravação crítica que engole exceção não
+        é resiliência: é perda silenciosa.
+
+        Falhar aqui vira **5xx**, e 5xx na Stripe é **retryable** — o mesmo
+        tratamento que o `claim_trial_for_user` vinte linhas abaixo já tem
+        ("falha precisa propagar: resposta 5xx faz a Stripe repetir o webhook
+        até a trava ficar persistida"). Esta era a única escrita crítica do
+        handler que destoava do padrão.
+
+        É também o PRIMEIRO efeito do ramo: se o grant não entra, nada depois
+        rodou — sem e-mail, sem funil, sem GA4/CAPI, sem `mark_plan_selected` —
+        então a primeira reentrega não repete nada, ela executa (§4.1.2).
+
+        Sem `expires_dt` não há grant (`ends_at` é `not null`): cai na escrita
+        legada, que é o "vitalício de fato" do §5.3.
+
+        Devolve False quando o evento era VELHO e nada de acesso foi escrito.
+        Os chamadores **não** abortam o ramo com isso (decisão do dono): evento
+        obsoleto quer dizer que outro evento mais novo já decidiu o ACESSO, não
+        que a fatura não foi paga — comissão, GA4/CAPI, e-mail e, sobretudo, o
+        `claim_trial_for_user` (trava de um trial por telefone na vida) seguem
+        rodando.
+        """
+        if not (uid and sub_id and expires_dt):
+            update_user_plan(uid, plan_value, expires_dt)
+            set_payment_status(uid, sub_status)
+            return True
+        from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+        from db.plan_grants import upsert_grant  # noqa: PLC0415
+        aplicou = await asyncio.to_thread(
+            upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
+            datetime.now(timezone.utc), expires_dt,
+            _event_version(event), _g(event, "id"),
+        )
+        if aplicou is None:
+            # Evento VELHO: a guarda de versão recusou o grant, e quem decidiu o
+            # acesso foi um evento MAIS NOVO. Escrever `last_payment_status`
+            # aqui devolveria `active` a uma conta que o `deleted` acabou de
+            # cancelar — a guarda protegia o grant e o status passava por fora
+            # dela. NÃO caem aqui, e é o que `upsert_grant` classifica pela
+            # COMPARAÇÃO DE VERSÃO (§4.1.2): a reentrega do 5xx, o evento IRMÃO
+            # do mesmo segundo (`checkout` + `paid` de compra imediata, o empate
+            # do §6.1) e o `paid` em voo quando quem bloqueou foi o REPARO da
+            # varredura — que carimba `now()` mas não é evento.
+            await log_system_event(
+                "warning", "billing_evento_obsoleto",
+                f"Evento de cobranca obsoleto ignorado (assinatura {sub_id}).",
+                source="billing", user_id=int(uid),
+                details={"plan": plan_value, "status": sub_status,
+                         "event_version": _event_version(event),
+                         "event_id": _g(event, "id")},
+            )
+            return False
+        await asyncio.to_thread(set_payment_status, uid, sub_status)
+        # `auth_accounts` sai dos grants, não de uma escrita paralela à mão:
+        # duas fontes escrevendo o mesmo par é como elas divergem.
+        await asyncio.to_thread(recompute_entitlement, int(uid))
+        return True
+
     async def _fire_email(uid: int, fn, *args):
-        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook."""
+        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
+
+        Dedup por (função, usuário, 1 dia) porque o handler agora devolve 5xx
+        de propósito quando a materialização falha, e a Stripe reentrega o
+        evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
+        Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
+        (`send_pro_welcome_email`, `send_pro_charged_email`) e o aviso de fim de
+        trial. NÃO é o ponto único do arquivo — `send_payment_failed_email` e
+        `send_subscription_canceled_email` são chamados direto, cada um no seu
+        try/except. Sem consequência hoje (nenhum dos dois está depois de uma
+        escrita que possa falhar e forçar reentrega), mas quem mover um deles
+        para cá ganha a dedup de graça, e quem NÃO mover não deve achar que
+        tem. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
+
+        Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
+        enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
+        cada retry não é.
+        """
+        chave = f"{fn.__name__}_sent"
+        try:
+            from core.observability import recent_event_exists  # noqa: PLC0415
+            if await asyncio.to_thread(recent_event_exists, chave, int(uid), 1.0):
+                return
+        except Exception as exc:
+            print(f"[billing] dedup de email falhou user={uid}: {exc}")
         try:
             email = await _user_email(uid)
             if not email:
                 return
             await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            await log_system_event("info", chave, f"Email {fn.__name__} enviado.",
+                                   source="billing", user_id=int(uid))
         except Exception as exc:
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
-        sub_id  = _g(session, "subscription")
+        # Normaliza igual ao invoice.paid: string ou objeto expandido têm de
+        # produzir a MESMA external_ref, senão o assinante ganha dois grants.
+        sub_id  = _invoice_subscription_id(session)
+        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
+        # Promover ja agora pra user nao ficar Free durante o trial.
+        #
+        # O GRANT VEM PRIMEIRO (§4.1.2): se ele falhar, a resposta é 5xx e nada
+        # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
+        # tudo uma vez só, em vez de repetir a metade que já tinha passado.
+        if user_id and sub_id:
+            sub = stripe.Subscription.retrieve(sub_id)
+            expires_dt = _subscription_period_end(sub)
+            sub_status = _g(sub, "status") or "trialing"
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            await _materializar_assinatura(user_id, sub_id, plan_value,
+                                           expires_dt, sub_status)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -4542,15 +4988,7 @@ async def billing_webhook(request: Request):
             from db import record_checkout_completed
             await asyncio.to_thread(
                 record_checkout_completed, user_id, _g(session, "id"))
-        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
-        # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
-            expires_dt = _subscription_period_end(sub)
-            sub_status = _g(sub, "status") or "trialing"
-            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
             # Checkout concluído = plano escolhido: libera o gate da /precos
             # (idempotente; só grava na primeira vez).
             await asyncio.to_thread(mark_plan_selected, user_id)
@@ -4589,6 +5027,20 @@ async def billing_webhook(request: Request):
                 )
             except Exception as exc:
                 print(f"[billing] admin notify falhou user={user_id}: {exc}")
+            # Uma linha dizendo o que este webhook DECIDIU sobre rastreio, antes
+            # de decidir. Sem ela, "não apareceu no Meta" não distinguia
+            # configuração ausente de envio recusado: os dois davam log nenhum, e
+            # foi onde uma investigação real empacou. Nunca pode quebrar o
+            # webhook, daí o try próprio.
+            try:
+                from core.services.ga4_mp import mp_configured as _mp_ok
+                from core.services.meta_capi import capi_configured as _capi_ok
+                print(f"[billing] rastreio checkout user={user_id} "
+                      f"status={sub_status} sid={_g(session, 'id')} "
+                      f"capi={_capi_ok()} ga4={_mp_ok()}")
+            except Exception as exc:
+                print(f"[billing] rastreio checkout: log falhou: {exc}")
+
             # Meta Conversions API — conversão server-side, deduplicada com o
             # pixel via event_id derivado da sessão. Trial → StartTrial; compra
             # imediata (sem trial) → Purchase. A cobrança REAL pós-trial e as
@@ -4609,7 +5061,8 @@ async def billing_webhook(request: Request):
                         _ev_name, _ev_id = "StartTrial", trial_event_id(_sid)
                     else:
                         _ev_name, _ev_id = "Purchase", purchase_event_id(_sid)
-                    await asyncio.to_thread(
+                    _fbp, _fbc = _fb_ids(sub, session)
+                    background_tasks.add_task(
                         send_event,
                         event_name=_ev_name,
                         event_id=_ev_id,
@@ -4617,10 +5070,58 @@ async def billing_webhook(request: Request):
                         value=_value,
                         currency=_currency,
                         email=_capi_email,
+                        fbp=_fbp,
+                        fbc=_fbc,
                         event_source_url=f"{DASHBOARD_URL}/home",
                     )
             except Exception as exc:
                 print(f"[billing] meta capi checkout ({sub_status}) falhou user={user_id}: {exc}")
+            # GA4 (Measurement Protocol) — a compra com o VALOR real cobrado.
+            # Só a compra IMEDIATA: quando a assinatura nasce em trial o dinheiro
+            # entra semanas depois, e o purchase daquele caso sai no invoice.paid.
+            # É server-only de propósito: o navegador manda `start_trial` (que não
+            # tem valor), e deixar os dois mandarem `purchase` criaria duas versões
+            # do mesmo evento, uma delas sem receita.
+            try:
+                from core.services.ga4_mp import (
+                    fallback_client_id,
+                    mp_configured,
+                    send_purchase,
+                )
+                _ga_sid = _g(session, "id")
+                if mp_configured() and _ga_sid and sub_status != "trialing":
+                    # Valor REALMENTE cobrado: `amount_total` da sessão já vem
+                    # com cupom aplicado, e o `unit_amount` do plano não — este
+                    # checkout aceita cupom (`allow_promotion_codes=True`), então
+                    # o preço de tabela superestimaria a receita (Codex, #244).
+                    # Zero é resposta legítima (cupom de 100%): o teste é
+                    # `is None`, não falsy. Sem o campo, cai no valor do plano.
+                    _ga_total = _g(session, "amount_total")
+                    if _ga_total is None:
+                        _ga_value, _ga_currency = _subscription_amount(sub)
+                    else:
+                        _ga_value = float(_ga_total) / 100.0
+                        _ga_currency = (_g(session, "currency") or "brl").upper()
+                    # O client_id foi gravado no metadata na criação do checkout
+                    # (/billing/create-checkout). Sem ele a venda ainda entra, como
+                    # usuário novo sem origem — ver fallback_client_id.
+                    # Os dois metadata são consultados, não um OU outro: a
+                    # assinatura pode existir sem o campo (nasceu antes desta
+                    # versão) e a sessão desta compra ter o valor novo.
+                    _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                               or _g(_g(session, "metadata", {}), "ga_client_id")
+                               or fallback_client_id(user_id))
+                    background_tasks.add_task(
+                        send_purchase,
+                        transaction_id=_ga_sid,
+                        value=_ga_value,
+                        currency=_ga_currency,
+                        plan=_ga_plano_publico(sub, session) or plan_value,
+                        client_id=_ga_cid,
+                        user_id=user_id,
+                    )
+            except Exception as exc:
+                print(f"[billing] ga4 purchase (checkout) falhou user={user_id}: {exc}")
         elif user_id:
             await log_system_event(
                 "info",
@@ -4639,8 +5140,10 @@ async def billing_webhook(request: Request):
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
+            # Grant primeiro, sempre (§4.1.2): falha aqui vira 5xx retryable e
+            # nada abaixo — e-mail de cobrança, comissão, GA4 — chega a rodar.
+            await _materializar_assinatura(user_id, sub_id, plan_value,
+                                           expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
@@ -4685,6 +5188,20 @@ async def billing_webhook(request: Request):
                 except Exception as exc:
                     print(f"[affiliates] comissao falhou user={user_id}: {exc}")
 
+                # O par do log do ramo de checkout: `billing_reason` é o que
+                # decide se esta fatura vira Purchase ou é pulada por já ter sido
+                # contada no checkout — sem ele no log, "pulou" e "falhou" são a
+                # mesma linha em branco.
+                try:
+                    from core.services.ga4_mp import mp_configured as _mp_ok
+                    from core.services.meta_capi import capi_configured as _capi_ok
+                    print(f"[billing] rastreio invoice user={user_id} "
+                          f"invoice={_g(invoice, 'id')} "
+                          f"reason={_g(invoice, 'billing_reason')} "
+                          f"capi={_capi_ok()} ga4={_mp_ok()}")
+                except Exception as exc:
+                    print(f"[billing] rastreio invoice: log falhou: {exc}")
+
                 # Meta Conversions API — Purchase da cobrança REAL (fim do trial
                 # e renovações), com o valor efetivamente pago. A primeira fatura
                 # da compra imediata (billing_reason=subscription_create) já virou
@@ -4698,7 +5215,8 @@ async def billing_webhook(request: Request):
                     if capi_configured() and _inv_id and _billing_reason != "subscription_create":
                         _capi_email = await _user_email(user_id)
                         _evt_time = int(_g(event, "created") or _g(invoice, "created") or 0)
-                        await asyncio.to_thread(
+                        _fbp, _fbc = _fb_ids(sub)
+                        background_tasks.add_task(
                             send_event,
                             event_name="Purchase",
                             event_id=purchase_event_id(_inv_id),
@@ -4706,10 +5224,40 @@ async def billing_webhook(request: Request):
                             value=amount_brl,
                             currency=(_g(invoice, "currency") or "brl").upper(),
                             email=_capi_email,
+                            fbp=_fbp,
+                            fbc=_fbc,
                             event_source_url=f"{DASHBOARD_URL}/home",
                         )
                 except Exception as exc:
                     print(f"[billing] meta capi invoice purchase falhou user={user_id}: {exc}")
+
+                # GA4 (Measurement Protocol) — o mesmo purchase, pelo mesmo motivo
+                # e com o mesmo corte: a primeira fatura da compra imediata
+                # (subscription_create) já virou purchase no
+                # checkout.session.completed. Aqui ficam a cobrança do fim do
+                # trial e as renovações — dinheiro que nenhum navegador vê.
+                try:
+                    from core.services.ga4_mp import (
+                        fallback_client_id,
+                        mp_configured,
+                        send_purchase,
+                    )
+                    _ga_inv = _g(invoice, "id")
+                    if (mp_configured() and _ga_inv
+                            and _g(invoice, "billing_reason") != "subscription_create"):
+                        _ga_cid = (_g(_g(sub, "metadata", {}), "ga_client_id")
+                                   or fallback_client_id(user_id))
+                        background_tasks.add_task(
+                            send_purchase,
+                            transaction_id=_ga_inv,
+                            value=amount_brl,
+                            currency=(_g(invoice, "currency") or "brl").upper(),
+                            plan=_ga_plano_publico(sub) or plan_value,
+                            client_id=_ga_cid,
+                            user_id=user_id,
+                        )
+                except Exception as exc:
+                    print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
@@ -4776,6 +5324,32 @@ async def billing_webhook(request: Request):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
+            #
+            # A amplitude é dinheiro: quem tem uma assinatura nova já paga e
+            # recebe o `deleted` da ANTIGA não pode perder as duas. Por isso
+            # nada de "revoga todos os grants de cartão" — `external_ref` exato.
+            #
+            # O `legacy` cai JUNTO, também por ref exata: ele é a RECONSTRUÇÃO
+            # do mesmo acesso de cartão feita pelo backfill, então um assinante
+            # que cancele sem ter passado por um `invoice.paid` depois do deploy
+            # não pode continuar pago pelo legado.
+            #
+            # A redução aqui vem de EVENTO, que é autoridade: `recompute` roda
+            # com `origem="evento"` (o default) e reduz sem consultar o Stripe.
+            _sub_id = _g(obj, "id")
+            from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+            from db.plan_grants import revoke_grant  # noqa: PLC0415
+            _versao = _event_version(event)
+            _evt_id = _g(event, "id")
+            _refs = [("legacy", f"legacy:{int(user_id)}")]
+            if _sub_id:
+                _refs.insert(0, ("stripe", str(_sub_id)))
+            for _src, _ref in _refs:
+                await asyncio.to_thread(
+                    revoke_grant, int(user_id), _src, _ref,
+                    "stripe_subscription_deleted", _versao, _evt_id)
+            await asyncio.to_thread(recompute_entitlement, int(user_id))
             print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",
@@ -5098,6 +5672,8 @@ async def _apply_unsubscribe(uid: int, token: str) -> bool:
                 (uid,),
             )
         await conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(uid)
     return True
 
 
@@ -5209,9 +5785,13 @@ async def daily_expenses_window(request: Request, user_id: int, days: int = 30):
     if days not in (7, 30, 90):
         raise HTTPException(status_code=400, detail="days must be 7, 30 or 90")
     from core.services.plan_service import history_earliest_date
-    local_today = datetime.now(ZoneInfo(TZ)).date()
+    # UM instante para os dois relógios desta rota (#166): `today_tz()` aqui e
+    # `datetime.now(utc)` lá dentro abriam dois, e na virada do dia a janela
+    # começava num dia e era cortada por outro. Mesmo par de `get_financial_data`.
+    agora = now_tz()
+    local_today = agora.date()
     requested_start = local_today - timedelta(days=days)
-    earliest = await asyncio.to_thread(history_earliest_date, user_id)
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, agora)
     start_date = max(requested_start, earliest) if earliest else requested_start
     effective = max(1, (local_today - start_date).days + 1)
     data = await get_daily_expenses_window(user_id, effective, start_date=start_date)
@@ -5274,7 +5854,6 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
     # ── Crédito → add_credit_purchase (à vista) ou installments (parcelado) ─
     if tipo == "credito":
         from db import add_credit_purchase, add_credit_purchase_installments, get_card_by_id
-        from utils_date import today_tz
 
         card_id = payload.card_id
         if not card_id:
@@ -5527,6 +6106,28 @@ async def update_launch_route(
     }
 
 
+# Frase por condição de domínio de `delete_launch_and_rollback`. O `detail` da
+# HTTPException vira texto na tela (`frontend/dashboard.js` faz
+# `throw new Error(detail.detail)`), então nada de `str(exc)`: jargão de banco
+# ("efeitos") e texto de driver não são mensagem de produto.
+_MSG_DELETE_LAUNCH = {
+    LaunchNoEffects: (
+        "Esse lançamento é antigo e não guarda o que precisaria ser revertido, "
+        "então mantive ele intacto pra não bagunçar seu saldo."
+    ),
+    InvestmentLotHasWithdrawal: (
+        "Não dá pra desfazer esse aporte: o lote já teve resgate. Apague o "
+        "resgate primeiro."
+    ),
+    LaunchUnsafeRollback: (
+        "Não consigo reverter esse lançamento com segurança, então mantive ele "
+        "intacto pra não bagunçar seu saldo."
+    ),
+}
+
+_ERRO_APAGAR_HTTP = "Não consegui apagar agora — deu erro do meu lado. Tenta de novo em alguns minutos."
+
+
 @app.delete("/launches/{user_id}/{launch_id}")
 async def delete_launch_route(
     request: Request,
@@ -5544,10 +6145,35 @@ async def delete_launch_route(
         await asyncio.to_thread(delete_launch_and_rollback, user_id, int(launch_id))
     except LookupError:
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except tuple(_MSG_DELETE_LAUNCH) as exc:
+        # `tuple(...)` do próprio dict: o `except` e as frases não podem
+        # divergir. Condição de DOMÍNIO: frase própria, sem `str(exc)`. O `detail` é
+        # renderizado pro usuário (`frontend/dashboard.js`), e o `str(exc)`
+        # daqui mostrava "lançamento sem 'efeitos'" cru no modal do app.
+        # `to_thread` igual ao ramo técnico abaixo: WARNING também é espelhado
+        # em `system_event_logs` pelo `_DashboardHandler`, com o mesmo
+        # `psycopg.connect()` bloqueante — o nível não muda quem paga a conta.
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                nivel=logging.WARNING, launch_id=int(launch_id))
+        # `[type(exc)]` casaria por tipo EXATO dentro de um `except` que casa por
+        # `isinstance`: uma subclasse futura entraria aqui e levantaria KeyError
+        # (medido: 500 com `detail=None`). O `next(...)` usa a mesma regra do `except`.
+        frase = next(m for c, m in _MSG_DELETE_LAUNCH.items() if isinstance(exc, c))
+        raise HTTPException(status_code=400, detail=frase) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar lançamento: {exc}") from exc
+        # `f"...{exc}"` num caminho DESTRUTIVO vazava o texto do psycopg
+        # (`DETAIL: Key (…)=(…)`) pro modal, e não deixava log nenhum. SEM
+        # traceback de propósito (medido em duas colunas): na `main` esta rota
+        # já levantava `HTTPException(500, f"Erro ao apagar…")`, e o
+        # `admin_error_logging_middleware` faz `except HTTPException: raise` —
+        # nunca viu esta falha, nunca gravou pilha nenhuma. Ligar
+        # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
+        # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
+        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
+        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
+                                launch_id=int(launch_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "launch_id": int(launch_id)}
@@ -5633,7 +6259,12 @@ async def delete_credit_transaction_route(
     try:
         result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao apagar compra: {exc}") from exc
+        # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
+        # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
+        # middleware deixa passar — nunca houve pilha gravada aqui para manter.
+        await asyncio.to_thread(_log_falha, "undo_credit_transaction", user_id, exc,
+                                credit_tx_id=int(tx_id))
+        raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc
 
     if result is None:
         raise HTTPException(status_code=404, detail="Compra no crédito não encontrada.")
@@ -5663,6 +6294,10 @@ app.include_router(analytics_router)
 
 # ─── Programa de afiliados → frontend/routes/affiliates.py ───────────────────
 app.include_router(affiliates_router)
+
+
+# ─── Funil de prospecção → frontend/routes/prospects.py ──────────────────────
+app.include_router(prospects_router)
 
 
 # ─── Agentes do Piggy → frontend/routes/agents.py ────────────────────────────
@@ -5847,7 +6482,7 @@ async def export_email(
     """
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     if (start_date is None) != (end_date is None):
         raise HTTPException(
             status_code=400,
@@ -5866,14 +6501,27 @@ async def export_email(
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="Mês de exportação inválido.") from exc
 
+    # O export respeita a mesma janela de histórico do dashboard e das rotas
+    # de histórico. O corte é silencioso quando parte do intervalo é acessível.
+    from core.services.plan_service import history_earliest_date
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, now)
+    if earliest and period_start < earliest:
+        period_start = earliest
+    if period_end < period_start:
+        raise HTTPException(
+            status_code=400,
+            detail="O período selecionado está fora do histórico disponível no seu plano.",
+        )
+
     csv_content = await build_csv(user_id, period_start, period_end)
     if csv_content is None:
         raise HTTPException(
             status_code=404,
             detail="Nenhum lançamento encontrado neste período para exportar.",
         )
-    xlsx_bytes = await build_xlsx(user_id, period_start, period_end)
-    pdf_bytes = await build_pdf(user_id, period_start, period_end)
+    balance = await _fetch_export_balance(user_id)
+    xlsx_bytes = await build_xlsx(user_id, period_start, period_end, balance)
+    pdf_bytes = await build_pdf(user_id, period_start, period_end, balance)
 
     from db.privacy import get_user_email
     to_email = await asyncio.to_thread(get_user_email, user_id)
@@ -6819,20 +7467,17 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _authorize_dashboard_access(request, user_id)
     if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
-    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
-    # Carteira (ver core/services/funding.py::resolve_destination).
-    from core.services import funding as _funding
-
-    _destino = (await asyncio.to_thread(_funding.resolve_destination, user_id))["source"]
+    # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282):
+    # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.
+    _nome_inv = payload.name.strip()
     try:
-        launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
+        launch_id, new_acc, new_inv, canon, tax_summary, _dest = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
-            payload.name.strip(),
+            _nome_inv,
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
             withdraw_all=bool(payload.withdraw_all),
-            funding_source=_funding.to_db_arg(_destino),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc
@@ -6902,7 +7547,23 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
             await ws.close(code=1008)
             return
 
-    now = datetime.now(timezone.utc)
+    # Espelho do _enforce_subscription_gate (frontend/routes/shared.py): o
+    # backstop 402 das rotas de dados NÃO cobre o WS — sem este gate, o
+    # snapshot pintava dados no boot antes do veredito do paywall. Mesmas
+    # primitivas e, como ele, sem isenção de app: a que existia aqui era uma
+    # segunda cópia da checagem de UA (`"PigBankApp" in ws.headers`), e o header
+    # é escolhido pelo cliente — dava pra abrir o WS sem plano só pedindo.
+    from core.services.plan_service import has_app_access, needs_plan_selection
+    sem_plano = await asyncio.to_thread(
+        lambda: needs_plan_selection(user_id) or not has_app_access(user_id)
+    )
+    if sem_plano:
+        await ws.close(code=4402, reason="subscription_required")
+        return
+
+    # now_tz() (main, 8ea113a): o mês do snapshot é o do USUÁRIO, não o do UTC
+    # — senão o dashboard descarta o snapshot nas 3 h após a virada em UTC.
+    now = now_tz()
     if not await manager.connect(ws, user_id, now.year, now.month):
         return
     print(f"Connected: user={user_id} total={len(manager.active.get(user_id, {}))}")
@@ -6928,7 +7589,7 @@ async def websocket_endpoint(ws: WebSocket, user_id: int):
 
                 elif t == "get_month":
                     # Data for a specific month (month selector navigation)
-                    now = datetime.now(timezone.utc)
+                    now = now_tz()
                     y   = int(payload.get("year", now.year))
                     m   = int(payload.get("month", now.month))
                     page  = int(payload.get("page", 1))

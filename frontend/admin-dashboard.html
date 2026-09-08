@@ -906,6 +906,19 @@ button, select, .user-chip, .error-item, .card-clickable, .health-item.clickable
     </div>
   </section>
 
+  <!-- ── Guarda de afirmações da IA ─────────────────────────────────── -->
+  <!-- Painel próprio de propósito: estes eventos podem vir em rajada e não
+       podem despejar evento operacional de listas compartilhadas. -->
+  <section style="margin-bottom:16px">
+    <div class="card">
+      <div class="section-title">
+        <h2><i class="ph ph-robot" aria-hidden="true"></i> Afirmações da IA sem dado</h2>
+        <span class="meta">Últimas 15 · número que a IA afirmou sem vir de nenhuma tool</span>
+      </div>
+      <div class="error-list" id="ai-claims-list"></div>
+    </div>
+  </section>
+
   <!-- ── E-mails enviados ───────────────────────────────────────────── -->
   <section class="grid-2" style="margin-bottom:16px">
     <div class="card">
@@ -1451,6 +1464,28 @@ function renderHealthGrid(summary, errors, ops) {
   `).join('');
 }
 
+/* ── Guarda de afirmações da IA ──────────────────────────────────── */
+function renderAiClaimsList(linhas) {
+  const el = $id('ai-claims-list');
+  if (!el) return;
+  if (!linhas || !linhas.length) {
+    el.innerHTML = '<div class="empty">Nenhuma afirmação sem dado nas últimas 15.</div>';
+    return;
+  }
+  el.innerHTML = linhas.map(r => {
+    const tokens = (r.details?.tokens || []).map(t => esc(String(t))).join(', ');
+    return `
+    <div class="error-item level-${esc(r.level || 'info')}">
+      <div class="error-item-header">
+        <span class="error-item-title">${tokens || esc(r.event_type)}</span>
+        <span class="error-item-time">${fRelTime(r.created_at)}</span>
+      </div>
+      <div class="error-item-msg">${esc(r.message || '')}</div>
+      ${r.user_id ? `<div class="error-item-source">user ${esc(String(r.user_id))}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
 /* ── Ops health (WhatsApp + backend) ─────────────────────────────── */
 function renderOpsHealthGrid(ops) {
   const items = [
@@ -1460,6 +1495,12 @@ function renderOpsHealthGrid(ops) {
       hint: "Erros ao enviar para a API do WhatsApp" },
     { label: "Token inválido WA 7d",val: fInt(ops.whatsapp_token_invalid_7d), color: ops.whatsapp_token_invalid_7d > 0 ? 'red' : 'green', cls: ops.whatsapp_token_invalid_7d > 0 ? 'danger' : '' },
     { label: "Erros backend 24h",   val: fInt(ops.backend_errors_24h),        color: ops.backend_errors_24h > 0 ? 'red' : 'green', cls: ops.backend_errors_24h > 0 ? 'danger' : '' },
+    // Azul fixo, nunca vermelho: um número > 0 aqui NÃO é incidente. A guarda
+    // reprova conta feita pelo modelo (tools deram 100 e 50, resposta diz
+    // R$ 150,00), e a taxa desse falso positivo é o que este contador existe
+    // pra medir. Pintar de vermelho seria afirmar um veredito que ninguém tem.
+    { label: "Afirm. IA sem dado 24h", val: fInt(ops.ai_claim_unsupported_24h), color: 'blue',
+      hint: "Números que a IA afirmou sem vir de nenhuma tool — inclui conta feita por ela" },
     { label: "Drops fila WA 24h",   val: fInt(ops.whatsapp_queue_drop_24h),   color: ops.whatsapp_queue_drop_24h > 0 ? 'red' : 'green', cls: ops.whatsapp_queue_drop_24h > 0 ? 'danger' : '' },
     { label: "WA conectados",       val: fInt(ops.whatsapp_connected_users),  color: 'blue' },
     { label: "WA pendentes",        val: fInt(ops.whatsapp_pending_users),    color: ops.whatsapp_pending_users > 0 ? 'yellow' : 'green', cls: ops.whatsapp_pending_users > 0 ? 'warning' : '' },
@@ -1796,6 +1837,7 @@ async function loadOverview(force=false) {
   renderOpsHealthGrid(data.ops_summary);
   renderOpenFinanceGrid(data.open_finance);
   renderOpsList(data.recent_ops);
+  renderAiClaimsList(data.recent_ai_claims);
   renderEmails(data.email_stats || {}, data.recent_emails || []);
   renderSignups(data.recent_signups);
   renderLogins(data.recent_logins);
@@ -2153,6 +2195,37 @@ function renderUserDetail(data) {
   const planNow = stored === 'plus' ? 'pro'
     : (PLAN_WRITE_VALUES.includes(stored) ? stored : 'free');
 
+  // A trava de trial é por TELEFONE (plan_trials, keyed por phone_hash) e
+  // sobrevive à conta: pode existir com trial_started_at NULL aqui, herdada de
+  // outra conta que usou o mesmo número. É essa linha que explica a conta
+  // inelegível cujo "Trial (conta)" está vazio.
+  //
+  // E são TRÊS casos, não dois: plan_trials.user_id é ON DELETE SET NULL
+  // (db/schema.py), então a trava herdada de uma conta já APAGADA chega com
+  // user_id NULO. Esse é o caso mais comum, e era o que renderizava uma data
+  // pelada sem explicação nenhuma — a confusão que esta linha existe para
+  // resolver.
+  const lockOwner = !p.trial_lock_started_at ? ''
+    : p.trial_lock_user_id == null
+      ? ' · trava herdada: a conta que queimou o trial neste número foi apagada'
+      : Number(p.trial_lock_user_id) !== Number(p.user_id)
+        ? ` · trava de OUTRA conta com o mesmo número (user ${Number(p.trial_lock_user_id)})`
+        : '';
+  const trialLock = p.trial_lock_started_at
+    ? `${fDate(p.trial_lock_started_at)}${lockOwner}`
+    : 'sem trava — telefone ainda elegível';
+  // Só bloqueia quando não há NADA a limpar. Âncora sem trava é estado real
+  // (a troca de telefone reescreve phone_hash e deixa trial_started_at para
+  // trás) e é justamente o que faz o próximo trial nascer vencido — recusar o
+  // botão aí seria recusar o único remédio.
+  const resetBlocked = !p.phone_e164
+    ? 'Conta sem telefone vinculado: a trava é por telefone, não há o que liberar.'
+    : (!p.trial_lock_started_at && !p.trial_started_at
+        ? 'Sem trava no telefone e sem âncora de trial na conta — nada a liberar.' : '');
+  const resetHint = resetBlocked || (p.trial_lock_started_at
+    ? 'Apaga a trava do TELEFONE desta conta (o direito ao trial é 1 por número, na vida) e zera a âncora do trial e o downsell. Não fala com a Stripe: assinatura viva lá continua de pé e é recusada aqui.'
+    : 'Sem trava no telefone, mas a conta guarda uma âncora de trial antiga — ela faria o próximo trial nascer vencido. Zera a âncora e o downsell; não há trava a apagar.');
+
   $id('user-detail').innerHTML = `
     <div class="detail-head" style="display:flex;align-items:center;gap:10px;margin:4px 0 14px">
       <button onclick="showUsersList()"><i class="ph ph-arrow-left" aria-hidden="true"></i> Voltar</button>
@@ -2170,7 +2243,8 @@ function renderUserDetail(data) {
       ${item('Plano', `${esc(planLabel(p.plan))}${p.plan_expires_at ? ` · expira ${fDate(p.plan_expires_at)}` : ''}`)}
       ${item('Origem do cadastro', esc(sourceLabel(p.signup_source)))}
       ${item('Status pagamento', esc(p.last_payment_status || '—'))}
-      ${item('Trial iniciado', p.trial_started_at ? fDate(p.trial_started_at) : '—')}
+      ${item('Trial (conta)', p.trial_started_at ? fDate(p.trial_started_at) : '—')}
+      ${item('Trial (trava do telefone)', trialLock)}
       ${item('Plano escolhido em', p.plan_selected_at ? fDate(p.plan_selected_at) : '—')}
       ${item('Cadastro', fDate(p.created_at))}
       ${item('Última atividade', p.last_activity_at ? `${fRelTime(p.last_activity_at)}` : '—')}
@@ -2194,6 +2268,15 @@ function renderUserDetail(data) {
       <span class="plan-hint ${p.stripe_customer_id ? 'warn' : ''}">${p.stripe_customer_id
         ? 'Conta com cliente na Stripe: isto muda só o banco — a assinatura continua lá e o próximo webhook dela sobrescreve o plano. Cancele/troque no Stripe também.'
         : 'Vale na hora para os limites do plano. Bancos de Open Finance e agentes acima do teto novo caem na varredura de downgrade (a cada 6h).'}</span>
+    </div>
+
+    <div class="detail-section-title">Liberar novo trial</div>
+    <div class="plan-editor">
+      <button class="btn-primary" id="trial-reset" ${resetBlocked ? 'disabled' : ''}
+              data-email="${esc(p.email || '')}" data-phone="${esc(p.phone_e164 || '')}"
+              data-lock="${p.trial_lock_started_at ? esc(fDate(p.trial_lock_started_at)) : ''}"
+              onclick="resetTrial(${Number(p.user_id)})">Liberar novo trial</button>
+      <span class="plan-hint ${resetBlocked ? 'warn' : ''}">${resetHint}</span>
     </div>
 
     <div class="detail-section-title">Uso (contagens — sem conteúdo financeiro)</div>
@@ -2254,6 +2337,37 @@ async function applyPlanChange(userId) {
   } catch (e) {
     console.error('plan-change:', e);
     alert('Falha de rede ao alterar o plano.');
+    btn.disabled = false;
+  }
+}
+
+/* Apaga a trava de trial do TELEFONE desta conta (1 trial por número, na vida)
+   para o número poder testar o funil de assinatura de novo. Só o banco: a
+   Stripe não é consultada nem alterada, e o backend recusa (409) conta com
+   assinatura viva lá. Não redesenha a lista: ela não mostra trial. */
+async function resetTrial(userId) {
+  const btn = $id('trial-reset');
+  const phone = btn.dataset.phone || 'sem telefone';
+  const lock = btn.dataset.lock;
+  if (!confirm(`Liberar novo trial para ${btn.dataset.email || `user ${userId}`} (${phone})?\n\n`
+    + (lock
+        ? `A trava atual do telefone (${lock}) será APAGADA, junto com a data de trial da conta `
+        : 'Este telefone não tem trava registrada. Será apagada a data de trial da conta ')
+    + 'e o registro de downsell.\n\nA Stripe NÃO é alterada por aqui.')) return;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/admin/api/users/${userId}/trial-reset`, {
+      method: 'POST',
+      headers: authH(),
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(data.detail || 'Erro ao liberar o trial.'); btn.disabled = false; return; }
+    await openUserDetail(userId);
+  } catch (e) {
+    console.error('trial-reset:', e);
+    alert('Falha de rede ao liberar o trial.');
     btn.disabled = false;
   }
 }

@@ -30,12 +30,12 @@
 
   /* ─── Configuração e estado ───────────────────────────────────────────── */
 
-  var cfg = null;          // o que o host passou no init
-  var root = null;         // nó do overlay, injetado sob demanda
-  var onKeyRef = null;     // listener de teclado ativo (só enquanto aberto)
-  var lastFocus = null;    // quem tinha o foco antes de abrir
-  var connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
-  var selected = null;     // {id, name}
+  let cfg = null;          // o que o host passou no init
+  let root = null;         // nó do overlay, injetado sob demanda
+  let onKeyRef = null;     // listener de teclado ativo (só enquanto aberto)
+  let lastFocus = null;    // quem tinha o foco antes de abrir
+  let connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
+  let selected = null;     // {id, name}
   // Limites do plano e conexões, rebuscados a cada open() — confiar no que a
   // página leu no load faz quem acabou de fazer upgrade em outra aba continuar
   // batendo no teto antigo.
@@ -51,7 +51,7 @@
   // mutável no módulo, duas buscas concorrentes (abre, fecha, abre) podiam
   // terminar fora de ordem e a mais VELHA sobrescrever a mais nova pouco antes
   // de o confirmar ler — decidindo teto e reconexão com dado vencido.
-  var limitsPromise = null;   // busca em voo, iniciada no open()
+  let limitsPromise = null;   // busca em voo, iniciada no open()
 
   function noop() {}
 
@@ -62,7 +62,7 @@
    * configurado quando a Pluggy terminar. Sem `host`, usa a atual.
    */
   function conf(name, host) {
-    var c = host || cfg;
+    const c = host || cfg;
     return (c && typeof c[name] === "function") ? c[name] : noop;
   }
 
@@ -73,15 +73,15 @@
   }
 
   function bankInitials(name) {
-    var small = { de: 1, do: 1, da: 1, dos: 1, das: 1, e: 1, "-": 1 };
-    var parts = (name || "").replace(/[^\wÀ-ÿ\s-]/g, "").split(/\s+/)
+    const small = { de: 1, do: 1, da: 1, dos: 1, das: 1, e: 1, "-": 1 };
+    const parts = (name || "").replace(/[^\wÀ-ÿ\s-]/g, "").split(/\s+/)
       .filter(function (w) { return w && !small[w.toLowerCase()]; });
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return (name || "?").replace(/[^A-Za-zÀ-ÿ]/g, "").slice(0, 2).toUpperCase();
   }
 
   function bankColor(hex) {
-    var c = String(hex || "").replace("#", "");
+    const c = String(hex || "").replace("#", "");
     return /^[0-9a-f]{6}$/i.test(c) ? "#" + c : "#5f6470";
   }
 
@@ -104,13 +104,13 @@
    * settings.html antes desta extração.
    */
   async function apiError(resp) {
-    var raw = "";
-    try { raw = await resp.text(); } catch (e) { /* corpo ilegível */ }
+    let raw = "";
+    try { raw = await resp.text(); } catch (_e) { /* corpo ilegível */ }
     try {
-      var detail = JSON.parse(raw).detail;
+      const detail = JSON.parse(raw).detail;
       if (detail && typeof detail === "object") return new Error(detail.message || detail.code || raw);
       return new Error(detail || raw);
-    } catch (e) {
+    } catch (_e) {
       return new Error(raw || "Erro inesperado");
     }
   }
@@ -124,7 +124,7 @@
    * próprio fetch é cancelado e a continuação nunca roda. Mecanismo da
    * plataforma no lugar de disciplina de quem escreve.
    */
-  var inflight = null;
+  let inflight = null;
 
   function signal() {
     if (!inflight) inflight = new AbortController();
@@ -141,7 +141,7 @@
   }
 
   async function get(path) {
-    var resp = await fetch(url(path), {
+    const resp = await fetch(url(path), {
       credentials: "same-origin", headers: headers(), signal: signal(),
     });
     if (!resp.ok) throw await apiError(resp);
@@ -149,7 +149,7 @@
   }
 
   async function post(path, body) {
-    var resp = await fetch(url(path), {
+    const resp = await fetch(url(path), {
       method: "POST",
       credentials: "same-origin",
       headers: headers({ "Content-Type": "application/json" }),
@@ -176,19 +176,19 @@
    * antes de o /pluggy-item recusar com 402, deixando o consentimento órfão.
    */
   async function refreshLimits() {
-    var me, of;
+    let me, of;
     try {
-      var both = await Promise.all([
+      const both = await Promise.all([
         get("/auth/me"),
         get("/open-finance/" + cfg.userId),
       ]);
       me = both[0];
       of = both[1];
-    } catch (e) {
+    } catch (_e) {
       return null;
     }
 
-    var counted = ((of && of.connections) || []).filter(countsTowardLimit);
+    const counted = ((of && of.connections) || []).filter(countsTowardLimit);
     return {
       banksMax: (me && me.of_banks_max !== undefined) ? me.of_banks_max : null,
       count: counted.length,
@@ -199,27 +199,27 @@
   /* ─── Markup ──────────────────────────────────────────────────────────── */
 
   function el(tag, cls, text) {
-    var node = document.createElement(tag);
+    const node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
     return node;
   }
 
   function buildRoot() {
-    var overlay = el("div", "bankpick-overlay");
+    const overlay = el("div", "bankpick-overlay");
     overlay.id = "bankpick-overlay";
 
-    var modal = el("div", "bankpick-modal");
+    const modal = el("div", "bankpick-modal");
     modal.setAttribute("role", "dialog");
     modal.setAttribute("aria-modal", "true");
     modal.setAttribute("aria-label", "Conectar banco");
 
-    var head = el("div", "bankpick-head");
-    var headRow = el("div", "bankpick-head-row");
-    var titles = el("div");
+    const head = el("div", "bankpick-head");
+    const headRow = el("div", "bankpick-head-row");
+    const titles = el("div");
     titles.appendChild(el("div", "bankpick-title", "Conectar banco"));
     titles.appendChild(el("div", "bankpick-sub", "Busque entre as instituições disponíveis"));
-    var x = el("button", "bankpick-x");
+    const x = el("button", "bankpick-x");
     x.type = "button";
     x.setAttribute("aria-label", "Fechar");
     x.setAttribute("data-act", "close");
@@ -227,11 +227,11 @@
     headRow.appendChild(titles);
     headRow.appendChild(x);
 
-    var searchWrap = el("div", "bankpick-search-wrap");
-    var icon = el("span");
+    const searchWrap = el("div", "bankpick-search-wrap");
+    const icon = el("span");
     icon.setAttribute("aria-hidden", "true");
     icon.innerHTML = '<i class="ph ph-magnifying-glass" aria-hidden="true"></i>';
-    var search = el("input");
+    const search = el("input");
     search.id = "bankpick-search";
     search.type = "text";
     search.autocomplete = "off";
@@ -242,13 +242,13 @@
     head.appendChild(headRow);
     head.appendChild(searchWrap);
 
-    var list = el("div", "bankpick-list");
+    const list = el("div", "bankpick-list");
     list.id = "bankpick-list";
 
-    var foot = el("div", "bankpick-foot");
-    var count = el("div", "bankpick-count", "Nenhum banco selecionado");
+    const foot = el("div", "bankpick-foot");
+    const count = el("div", "bankpick-count", "Nenhum banco selecionado");
     count.id = "bankpick-count";
-    var go = el("button", "btn-connect bankpick-go", "Conectar Open Finance");
+    const go = el("button", "btn-connect bankpick-go", "Conectar Open Finance");
     go.id = "bankpick-go";
     go.type = "button";
     go.disabled = true;
@@ -279,10 +279,10 @@
   /* ─── Render da lista ─────────────────────────────────────────────────── */
 
   function renderList(filter) {
-    var listEl = q("#bankpick-list");
+    const listEl = q("#bankpick-list");
     if (!listEl) return;
-    var f = stripAccent(filter || "").trim();
-    var items = (connectors || []).filter(function (b) {
+    const f = stripAccent(filter || "").trim();
+    const items = (connectors || []).filter(function (b) {
       return stripAccent(b.name).indexOf(f) !== -1;
     });
 
@@ -293,23 +293,23 @@
       return;
     }
 
-    var letter = "";
+    let letter = "";
     items.forEach(function (b) {
-      var L = (b.name[0] || "#").toUpperCase();
+      const L = (b.name[0] || "#").toUpperCase();
       if (L !== letter) {
         letter = L;
         listEl.appendChild(el("div", "bankpick-alpha", L));
       }
-      var on = selected && selected.id === b.id;
-      var row = el("button", "bank-row bankpick-row" + (on ? " active" : ""));
+      const on = selected && selected.id === b.id;
+      const row = el("button", "bank-row bankpick-row" + (on ? " active" : ""));
       row.type = "button";
       row.setAttribute("data-name", b.name);
       row.setAttribute("data-id", String(b.id));
 
-      var logo = el("span", "bank-logo bankpick-logo", bankInitials(b.name));
+      const logo = el("span", "bank-logo bankpick-logo", bankInitials(b.name));
       logo.style.color = bankColor(b.color);
       if (b.logo) {
-        var img = document.createElement("img");
+        const img = document.createElement("img");
         img.src = b.logo;
         img.alt = "";
         img.loading = "lazy";
@@ -317,12 +317,12 @@
         logo.appendChild(img);
       }
 
-      var info = el("span", "bank-info");
+      const info = el("span", "bank-info");
       info.appendChild(el("span", "bank-name", b.name));
       info.appendChild(el("span", "bank-meta",
         b.inv ? "Conta, cartão · caixinha/investimentos" : "Conta corrente e cartão"));
 
-      var check = el("span", "bank-check");
+      const check = el("span", "bank-check");
       if (on) check.innerHTML = '<i class="ph ph-check" aria-hidden="true"></i>';
 
       row.appendChild(logo);
@@ -334,19 +334,19 @@
 
   function pick(id, node) {
     selected = { id: id, name: node ? node.getAttribute("data-name") : "" };
-    var rows = root ? root.querySelectorAll("#bankpick-list .bank-row") : [];
+    const rows = root ? root.querySelectorAll("#bankpick-list .bank-row") : [];
     Array.prototype.forEach.call(rows, function (r) {
-      var on = r === node;
+      const on = r === node;
       r.classList.toggle("active", on);
-      var chk = r.querySelector(".bank-check");
+      const chk = r.querySelector(".bank-check");
       if (chk) chk.innerHTML = on ? '<i class="ph ph-check" aria-hidden="true"></i>' : "";
     });
     syncFoot();
   }
 
   function syncFoot() {
-    var count = q("#bankpick-count");
-    var go = q("#bankpick-go");
+    const count = q("#bankpick-count");
+    const go = q("#bankpick-go");
     if (!count || !go) return;
     if (selected) {
       count.textContent = "";
@@ -362,9 +362,9 @@
   /* ─── Teclado: o trap que o aria-modal promete ────────────────────────── */
 
   function focusables() {
-    var modal = q(".bankpick-modal");
+    const modal = q(".bankpick-modal");
     if (!modal) return [];
-    var sel = 'a[href], button:not([disabled]), input:not([disabled]),'
+    const sel = 'a[href], button:not([disabled]), input:not([disabled]),'
             + ' select:not([disabled]), textarea:not([disabled]),'
             + ' [tabindex]:not([tabindex="-1"])';
     return Array.prototype.filter.call(modal.querySelectorAll(sel), function (e) {
@@ -376,14 +376,14 @@
     if (e.key === "Escape") { close(); return; }
     if (e.key !== "Tab") return;
 
-    var modal = q(".bankpick-modal");
-    var alvos = focusables();
+    const modal = q(".bankpick-modal");
+    const alvos = focusables();
     if (!modal || !alvos.length) return;
 
-    var primeiro = alvos[0];
-    var ultimo = alvos[alvos.length - 1];
-    var proximo = e.shiftKey ? ultimo : primeiro;
-    var borda = e.shiftKey ? primeiro : ultimo;
+    const primeiro = alvos[0];
+    const ultimo = alvos[alvos.length - 1];
+    const proximo = e.shiftKey ? ultimo : primeiro;
+    const borda = e.shiftKey ? primeiro : ultimo;
 
     // `foco fora` cobre o caso de já ter escapado (clique no fundo, foco no body)
     if (!modal.contains(document.activeElement) || document.activeElement === borda) {
@@ -396,12 +396,12 @@
 
   function onClick(e) {
     if (e.target === root) { close(); return; }          // clique no fundo
-    var act = e.target.closest ? e.target.closest("[data-act]") : null;
+    const act = e.target.closest ? e.target.closest("[data-act]") : null;
     if (act) {
       if (act.getAttribute("data-act") === "close") return close();
       if (act.getAttribute("data-act") === "confirm") return confirmPick();
     }
-    var row = e.target.closest ? e.target.closest(".bank-row") : null;
+    const row = e.target.closest ? e.target.closest(".bank-row") : null;
     if (row) pick(Number(row.getAttribute("data-id")), row);
   }
 
@@ -432,7 +432,7 @@
     onKeyRef = onKey;
     document.addEventListener("keydown", onKeyRef);
 
-    var search = q("#bankpick-search");
+    const search = q("#bankpick-search");
     if (search) { search.value = ""; search.focus(); }
     selected = null;
     syncFoot();
@@ -450,20 +450,20 @@
    * que dispensa qualquer controle de ciclo de vida.
    */
   async function carregarBancos() {
-    var listEl = q("#bankpick-list");
+    const listEl = q("#bankpick-list");
     if (listEl) {
       listEl.innerHTML = "";
       listEl.appendChild(el("div", "bankpick-empty", "Carregando bancos…"));
     }
     try {
-      var data = await get("/open-finance/" + cfg.userId + "/connectors");
+      const data = await get("/open-finance/" + cfg.userId + "/connectors");
       connectors = (data.connectors || []).filter(function (b) { return b && b.name; });
       renderList("");
       // sem focar de novo: o foco já entrou no modal antes do await, e refocar
       // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
     } catch (err) {
       if (foiAbortado(err)) return;   // destruído no meio: nada a mostrar
-      var alvo = q("#bankpick-list");
+      const alvo = q("#bankpick-list");
       if (alvo) {
         alvo.innerHTML = "";
         alvo.appendChild(el("div", "bankpick-empty",
@@ -488,8 +488,8 @@
    */
   async function confirmPick() {
     if (!selected) return;
-    var escolhido = selected;          // pra detectar troca/cancelamento no await
-    var go = q("#bankpick-go");
+    const escolhido = selected;          // pra detectar troca/cancelamento no await
+    const go = q("#bankpick-go");
     // Desabilita durante a espera: sem isso um segundo clique passaria antes de
     // os limites chegarem. Na prática a busca começou lá no open() e já
     // resolveu, mas "na prática" não é garantia.
@@ -497,7 +497,7 @@
     try {
       // O retrato que ESTE confirmar esperou — não um objeto de módulo que uma
       // busca mais velha pudesse ter sobrescrito no caminho.
-      var plano = await (limitsPromise || refreshLimits());
+      const plano = await (limitsPromise || refreshLimits());
 
       // Mover a espera pra cá criou uma janela de cancelamento que o confirmar
       // original (síncrono) não tinha: Esc, clique no fundo ou o X fecham o
@@ -515,9 +515,9 @@
       // nome). Banco novo abriria o widget da Pluggy só pra tomar 402 no
       // /pluggy-item — deixando item e consentimento órfãos. Bloqueia antes.
       if (plano.banksMax !== null && plano.banksMax > 0 && plano.count >= plano.banksMax) {
-        var isReconnect = plano.names.indexOf(stripAccent(selected.name || "")) !== -1;
+        const isReconnect = plano.names.indexOf(stripAccent(selected.name || "")) !== -1;
         if (!isReconnect) {
-          var n = plano.banksMax;
+          const n = plano.banksMax;
           conf("notify")("Seu plano conecta até " + n + " banco" + (n > 1 ? "s" : "") +
                          ". Faça upgrade pra conectar mais: /precos", "error");
           return;
@@ -543,29 +543,29 @@
    * por usuário é regra dura deste repositório.
    */
   async function savePluggyItem(itemData, uid, host) {
-    var item = (itemData && itemData.item) || itemData || {};
+    const item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
-    var data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
+    const data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
     conf("onConnected", host)(data);
     return data;
   }
 
   async function openWidget(uid, host) {
-    var data = await post("/open-finance/" + uid + "/connect-token", {});
-    var accessToken = data.accessToken;
+    const data = await post("/open-finance/" + uid + "/connect-token", {});
+    const accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
 
-    var PluggyConnect = pluggyFactory();
+    const PluggyConnect = pluggyFactory();
     if (!PluggyConnect) {
       throw new Error("Widget da Pluggy não carregou. Recarregue a página e tente novamente.");
     }
 
-    var connectorTypes = ["PERSONAL_BANK", "BUSINESS_BANK"];
+    const connectorTypes = ["PERSONAL_BANK", "BUSINESS_BANK"];
     if (data.includeSandbox) connectorTypes.push("SANDBOX");
 
-    var widget = new PluggyConnect({
+    const widget = new PluggyConnect({
       connectToken: accessToken,
       includeSandbox: Boolean(data.includeSandbox),
       connectorTypes: connectorTypes,
@@ -606,8 +606,8 @@
     // depois gravaria o item de quem iniciou na conta de quem estiver
     // configurado no fim, e pintaria as contas e transações de um na tela do
     // outro. Fixar só a URL resolvia metade.
-    var host = cfg;
-    var uid = host && host.userId;
+    const host = cfg;
+    const uid = host && host.userId;
     if (!uid) { conf("onError", host)("Sessão inválida. Faça login novamente"); return; }
     conf("onConnectStart", host)();
     try {
@@ -642,6 +642,6 @@
     // propósito pra reabrir sem novo fetch da lista.
   }
 
-  var api = { init: init, open: open, close: close, destroy: destroy };
+  const api = { init: init, open: open, close: close, destroy: destroy };
   window.PBOpenFinance = api;
 })();

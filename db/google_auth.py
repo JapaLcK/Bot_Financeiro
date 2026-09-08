@@ -238,6 +238,8 @@ def consume_pending_google_signup(
             )
             cur.execute("delete from pending_google_signups where token = %s", (token,))
         conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
 
     link_code = create_link_code(user_id, minutes_valid=15)
 

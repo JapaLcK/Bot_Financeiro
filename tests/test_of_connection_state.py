@@ -26,6 +26,8 @@ import pytest
 import db
 import core.services.pluggy_sync as ps
 from core.services.pluggy import PluggyApiError
+from psycopg.types.json import Jsonb
+
 from db.connection import get_conn
 from utils_date import _tz
 
@@ -86,6 +88,10 @@ def _linha(item_id: str = "item-g1") -> dict:
     rows = db.get_connections_by_item_id(item_id)
     assert len(rows) == 1
     return rows[0]
+
+
+def _avisadas(uid: int) -> set[str]:
+    return {c["provider_item_id"] for c in db.list_connections_needing_reconnect(uid)}
 
 
 def _espelho(connection_id: int) -> tuple[int, int]:
@@ -955,3 +961,194 @@ def test_reconexao_dentro_do_lock_ainda_recusa_o_carimbo(user_id, monkeypatch, r
         "reconectaram entre a relectura e o carimbo — o carimbo não vale"
     ui = db.get_open_finance_snapshot(user_id)["connections"][0]["ui"]
     assert ui["state"] != "updated"
+
+
+# ── Codex #166: quem espera QR não recebe "reconecte seu banco" ──────────────
+# `WAITING_USER_ACTION` grava `status='ERROR'` como os outros de `_NEEDS_USER`,
+# então caía em `list_connections_needing_reconnect` e receberia o template
+# proativo de reconexão — quando a ação certa é autorizar o dispositivo / ler o
+# QR no app do banco, antes do `userAction.expiresAt`. Mandar reconectar é
+# empurrar a pessoa para o único caminho que faz PERDER a janela.
+#
+# Esta superfície estava ENUMERADA e eu tinha decidido não consertá-la ("fluxo
+# dormente, template na Meta"). Dormente não é inexistente: quando ligarem o
+# `OF_RECONNECT_TEMPLATE_NAME`, o aviso sai errado.
+#
+# São DOIS campos: `WAITING_USER_ACTION` chega como status de Item (Safra,
+# Inter PF), e a Caixa chega como `"status": "OUTDATED"` +
+# `"executionStatus": "USER_AUTHORIZATION_PENDING"` — o 2º achado do Codex do
+# @hiago. Filtrar só o `item_status` deixava a Caixa recebendo "reconecte".
+#
+# CONTROLE NEGATIVO: tirar QUALQUER uma das duas condições da query deixa o caso
+# correspondente (1º ou 2º) vermelho.
+# CONTROLE POSITIVO: os casos 3 e 4 — `OUTDATED` sozinho e `LOGIN_ERROR`
+# CONTINUAM sendo avisados. Sem o 3º, filtrar `OUTDATED` inteiro passaria, e o
+# aviso sumiria para todo mundo que só precisa reautorizar.
+
+@pytest.mark.parametrize("item_status, execution_status, deve_avisar", [
+    ("WAITING_USER_ACTION", None, False),
+    ("OUTDATED", "USER_AUTHORIZATION_PENDING", False),
+    ("OUTDATED", "SUCCESS", True),
+    ("LOGIN_ERROR", None, True),
+])
+def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
+        user_id, relogio_fixo, item_status, execution_status, deve_avisar):
+    item = f"item-aviso-{item_status}-{execution_status}"
+    conexao = _conexao(user_id, item)
+    _set_estado(conexao["id"], status="ERROR",
+                health=Jsonb({"item_status": item_status,
+                              "execution_status": execution_status,
+                              "products": {}, "stale_products": []}))
+
+    avisadas = {c["provider_item_id"]
+                for c in db.list_connections_needing_reconnect(user_id)}
+
+    assert (item in avisadas) is deve_avisar, (
+        f"{item_status}/{execution_status}: aviso proativo de reconexão "
+        f"{'devia' if deve_avisar else 'NÃO devia'} sair")
+
+
+# A exclusão de device/QR vale para o `where` INTEIRO, inclusive para a perna do
+# consentimento vencendo — e isso é DELIBERADO, não descuido. Eu tinha
+# restringido à perna de erro, argumentando que são janelas diferentes (~30 min
+# contra 7 dias); o Manager derrubou com dois fatos medidos:
+#
+#   • `run_reconnect_notifications` manda UM template só, com o nome do banco,
+#     para toda linha devolvida — não existe "aviso de renovação" separado. Uma
+#     conexão que passasse pela perna do consentimento receberia exatamente o
+#     "reconecte seu banco" que este filtro existe para evitar;
+#   • a perna do consentimento é morta para `provider='pluggy'`: o upsert grava
+#     `consent_expires_at = None` e o ramo de conflito não toca a coluna.
+#
+# Este teste prende a decisão. Se alguém restringir o filtro à perna de erro
+# "consertando" o que parece um efeito colateral, ele fica vermelho.
+#
+# LIMITE HONESTO: o estado abaixo é montado com UPDATE cru e HOJE é inalcançável
+# em produção (nenhum escritor põe `consent_expires_at` numa linha 'pluggy').
+# Ele guarda a decisão, não um caminho vivo.
+
+def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentimento(
+        user_id, relogio_fixo):
+    item = "item-consent-device"
+    conexao = _conexao(user_id, item)
+    _set_estado(conexao["id"], status="ACTIVE",
+                consent_expires_at=datetime.now(_tz()) + timedelta(days=2),
+                health=Jsonb({"item_status": "OUTDATED",
+                              "execution_status": "USER_AUTHORIZATION_PENDING",
+                              "products": {}, "stale_products": []}))
+
+    avisadas = {c["provider_item_id"]
+                for c in db.list_connections_needing_reconnect(user_id)}
+
+    assert item not in avisadas, (
+        "o template é UM só e diz 'reconecte seu banco': deixar passar pela "
+        "perna do consentimento entrega a instrução que faz perder a janela")
+
+
+# ── Codex #166 (rodada 4): a janela em que o `health` ainda é NULL ────────────
+# O filtro acima olhava só o `health`, e a reconexão o ZERA (`health = null` no
+# ramo de conflito do upsert; numa conexão NOVA ele já nasce NULL). Quem escreve
+# de volta é o sync de fundo. No meio dos dois, a Caixa — `status: OUTDATED` +
+# `executionStatus: USER_AUTHORIZATION_PENDING` — casava com a cláusula de erro
+# pelo `OUTDATED`, os dois predicados avaliavam contra `''`, e um tique do aviso
+# proativo mandava "reconecte seu banco": a instrução que faz PERDER a janela do
+# QR. O `raw` JÁ estava persistido (`Jsonb(item)`), então dava para fechar sem
+# tocar na máquina de estados.
+#
+# Este teste NÃO monta o estado com UPDATE cru de propósito: ele passa pelo
+# `save_pluggy_open_finance_item`, que é o caminho de produção que abre a janela.
+#
+# ALCANCE, que é onde este conserto PARA: ele cobre o AVISO PROATIVO e só. A TELA
+# na mesma janela continua errada, porque `get_open_finance_snapshot` não
+# seleciona `raw` — o `connection_ui_state` recebe a linha pronta e não tem como
+# ver o `executionStatus`. Metade PENDENTE, de PR próprio; o motivo está no
+# comentário do snapshot (`db/open_finance.py`). Se alguém escrever um teste de
+# tela para esta janela esperando verde, é por não ter lido isto.
+#
+# CONTROLE NEGATIVO: tirar o `raw->>'executionStatus'` da query → o caso da Caixa
+# fica vermelho (volta a ser avisado).
+# CONTROLE POSITIVO: o `LOGIN_ERROR` com `health` NULL CONTINUA sendo avisado —
+# sem ele, um fallback que casasse demais teria calado o aviso inteiro e o teste
+# passaria mesmo assim.
+# CONTROLE do `case when health is null`: o 3º caso. Com `coalesce` puro
+# (`health->>…, raw->>…`), o `health` observado DEPOIS (usuário autorizou, virou
+# LOGIN_ERROR, sem `execution_status`) cairia no `raw` VELHO — `mark_sync_result`
+# não toca em `raw` — e calaria o aviso PARA SEMPRE. Fica vermelho sem o `case`.
+
+def test_aviso_pula_o_QR_na_janela_em_que_o_health_ainda_e_null(user_id, relogio_fixo):
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-null-caixa", "status": "OUTDATED",
+        "executionStatus": "USER_AUTHORIZATION_PENDING",
+        "connector": {"id": 219, "name": "Caixa"}})
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-null-login", "status": "LOGIN_ERROR",
+        "connector": {"id": 612, "name": "Nubank"}})
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-null-mfa", "status": "WAITING_USER_INPUT",
+        "connector": {"id": 612, "name": "Nubank"}})
+    # Mesmo `raw` da Caixa, mas o sync JÁ observou: o usuário autorizou o
+    # dispositivo e o que sobrou foi credencial. Aqui o `raw` é passado.
+    autorizou = db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-autorizou", "status": "OUTDATED",
+        "executionStatus": "USER_AUTHORIZATION_PENDING",
+        "connector": {"id": 219, "name": "Caixa"}})
+    _set_estado(autorizou["id"], status="ERROR",
+                health=Jsonb({"item_status": "LOGIN_ERROR", "execution_status": None,
+                              "products": {}, "stale_products": []}))
+
+    avisadas = {c["provider_item_id"]
+                for c in db.list_connections_needing_reconnect(user_id)}
+
+    assert "item-null-caixa" not in avisadas, \
+        "health NULL + raw da Caixa: 'reconecte seu banco' faz perder a janela do QR"
+    assert "item-null-login" in avisadas, \
+        "CONTROLE POSITIVO: erro comum com health NULL continua sendo avisado"
+    assert "item-null-mfa" in avisadas, \
+        "CONTROLE POSITIVO: MFA pendente com health NULL continua sendo avisado"
+    assert "item-autorizou" in avisadas, \
+        "o `raw` só vale enquanto o `health` é NULL — senão o aviso morre para sempre"
+
+
+# O teste acima entra pelo INSERT do upsert (item que nunca existiu). A reconexão
+# de PRODUÇÃO entra pelo CONFLITO — é o único ramo que executa `health = null` +
+# `raw = excluded.raw` + `reconnected_at`, e é ele que ABRE a janela. Cobrir só o
+# INSERT deixava sem teste o caminho que importa (Codex #166, rodada 5).
+#
+# CONTROLE NEGATIVO (medido, ver o relato): tirar o `raw->>'executionStatus'` da
+# query → o passo 2 fica vermelho. Tirar o `health = null` do ramo de conflito →
+# o passo 2 também (o `health` bom sobrevive e não há por que consultar o `raw`).
+# CONTROLE do `case when health is null`: o passo 3 — com `coalesce` puro o `raw`
+# VELHO calaria o aviso para sempre, porque `mark_sync_result` não toca em `raw`.
+
+def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
+    user_id, relogio_fixo
+):
+    # 1) conexão que JÁ existia, saudável e com `health` medido
+    conexao = db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-conflito", "status": "ACTIVE", "executionStatus": "SUCCESS",
+        "connector": {"id": 219, "name": "Caixa"}})
+    db.mark_sync_result(
+        conexao["id"], ok=True, status="ACTIVE", status_reason="",
+        health={"item_status": "UPDATED", "execution_status": "SUCCESS",
+                "products": {}, "stale_products": []})
+    assert _linha("item-conflito")["health"] is not None
+
+    # 2) o usuário reconecta: MESMO provider_item_id → ramo do CONFLITO
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-conflito", "status": "OUTDATED",
+        "executionStatus": "USER_AUTHORIZATION_PENDING",
+        "connector": {"id": 219, "name": "Caixa"}})
+    linha = _linha("item-conflito")
+    assert linha["health"] is None, "o ramo do conflito tem de ZERAR o health"
+    assert "item-conflito" not in _avisadas(user_id), (
+        "health NULL + raw da Caixa: 'reconecte seu banco' faz perder a janela do "
+        "QR — e este raw só está aqui se o conflito trocou `raw = excluded.raw`")
+
+    # 3) o job de saúde observa DEPOIS: autorizou o QR, sobrou credencial
+    db.mark_sync_result(
+        linha["id"], ok=None, status="ERROR", status_reason="login_error",
+        health={"item_status": "LOGIN_ERROR", "execution_status": None,
+                "products": {}, "stale_products": []})
+    assert "item-conflito" in _avisadas(user_id), (
+        "o `raw` da reconexão continua VELHO (mark_sync_result não o toca): sem o "
+        "`case when health is null` o aviso morria para sempre")

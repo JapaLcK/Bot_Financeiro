@@ -14,9 +14,14 @@ Aqui a origem vira explícita:
     carteira  → debita `accounts.balance`, exige cobertura nela
     bank      → não toca em `accounts.balance`; quem reflete a saída é o sync do banco
 
-A regra de escolha vive só neste módulo. As cinco superfícies que movimentam dinheiro
-(bot, chat da IA, Discord e as duas rotas do dashboard) chamam daqui — se cada uma
+A regra de escolha vive só neste módulo. As superfícies que movimentam dinheiro (bot,
+chat da IA, Discord e as duas rotas do dashboard) chamam daqui — se cada uma
 reimplementasse, elas divergiriam e o bot recusaria um lançamento que a tela aceita.
+A regra do DESTINO (para onde volta um saque/resgate) não mora aqui: ela é
+`db.destination_of_lots`, dentro da transação do saque, sobre os lotes que o FIFO
+consumiu de fato. Uma previsão de fora existiu em quatro versões e errou nas quatro —
+ela lê os lotes antes do accrual e fora do lock. A quinta apagou a previsão: as duas
+funções de saque devolvem o destino gravado, e a mensagem lê o fato.
 """
 from __future__ import annotations
 
@@ -112,19 +117,6 @@ def resolve_deterministic(user_id: int, amount) -> dict:
     return {"source": carteira or (candidatas[0] if candidatas else
                                    {"kind": CARTEIRA, "of_account_id": None,
                                     "label": "Carteira", "balance": Decimal("0")})}
-
-
-def resolve_destination(user_id: int) -> dict:
-    """Para onde volta o dinheiro de um resgate/saque. Sempre `{"source": {...}}`.
-
-    Não pergunta, de propósito: no destino a escolha não muda o razão. Com qualquer
-    banco conectado o `delta_conta` é 0 igual (o dinheiro volta pro banco e o sync
-    reflete), então entre dois bancos só mudaria o rótulo da mensagem — não vale um
-    round-trip. Sem banco conectado, volta para a Carteira, como sempre foi.
-    """
-    fontes = list_sources(user_id)
-    bancos = [f for f in fontes if f["kind"] == BANK]
-    return {"source": bancos[0] if bancos else fontes[0]}
 
 
 def to_db_arg(source: dict | None) -> dict | None:

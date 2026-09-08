@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Iterable
 
 from db.connection import get_conn, cat_key_sql, CAT_CANON_ORDER
+from utils_date import day_tz
 from utils_text import fmt_brl
 
 # Casamento de categoria pela `cat_key_sql` (fonte unica: db/connection.py) — a
@@ -46,8 +47,8 @@ class BudgetAlert:
     budget: float      # limite mensal
 
 
-def _ym(when: datetime) -> str:
-    return when.strftime("%Y-%m")
+def _ym(dia: date) -> str:
+    return dia.strftime("%Y-%m")
 
 
 def _crossed_thresholds(spent_before: float, spent_after: float, budget: float) -> list[int]:
@@ -108,8 +109,17 @@ def evaluate_after_expense(
     if valor is None or float(valor) <= 0:
         return None
 
-    ym = _ym(criado_em)
-    year, month = criado_em.year, criado_em.month
+    # `day_tz`: o dia de PAREDE do gasto, no fuso do app. `criado_em.year/.month`
+    # cru lê o calendário do fuso de QUEM CHAMOU, enquanto o SQL abaixo soma pelo
+    # fuso da SESSÃO (`date_part`, alinhada ao app pelo #180): um instante UTC em
+    # 01/09 00:13Z procurava setembro e a soma vinha de agosto — zero gasto,
+    # alerta nenhum. Isto é robustez de FRONTEIRA, não conserto de dado de
+    # produção: hoje nenhum caller de produção manda instante em outro fuso (o
+    # único é `add_from_entities`, core/handlers/launches.py, que manda naive do
+    # processo ou aware do fuso do app). Quem manda UTC-aware é a suíte.
+    dia = day_tz(criado_em)
+    ym = _ym(dia)
+    year, month = dia.year, dia.month
 
     try:
         with get_conn() as conn:

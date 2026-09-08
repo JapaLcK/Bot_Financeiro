@@ -3,9 +3,14 @@
   "private": true,
   "description": "Só o harness de testes de frontend (tests/frontend/). O site é HTML estático servido pelo backend; não há build de JS.",
   "scripts": {
-    "test:frontend": "node --test tests/frontend/*.test.mjs"
+    "test:frontend": "node --test tests/frontend/*.test.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0",
     "playwright": "^1.56.0"
   }
 }

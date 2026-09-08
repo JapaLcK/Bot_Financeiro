@@ -10,8 +10,18 @@ from dateutil.relativedelta import relativedelta
 
 # ---------------- timezone helpers ----------------
 
+# Fuso do app quando NADA está configurado. Constante, e não literal solto, porque
+# o `APP_TZ` de `frontend/dashboard.js` tem de valer o mesmo nome: a guarda 19.1 de
+# `tests/test_fuso_do_app.py` compara os dois VALORES lendo o JS como TEXTO — ela
+# não prova que o JS USA esse valor (sombrear o nome `APP_TZ` a deixa verde). Quem
+# prova o uso é `tests/frontend/edit_launch_patch_body.test.mjs`, caso "navegador em
+# Asia/Tokyo", que executa o dashboard.js num fuso distante. E
+# `config/env.py::load_app_env` avisa quando o fuso EFETIVO diverge daqui.
+TZ_PADRAO = "America/Sao_Paulo"
+
+
 def _tz():
-    tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or "America/Sao_Paulo"
+    tz_name = os.getenv("REPORT_TIMEZONE") or os.getenv("TZ") or TZ_PADRAO
     return ZoneInfo(tz_name)
 
 
@@ -275,9 +285,14 @@ def br_national_holidays(year: int) -> set[date]:
         date(year, 10, 12),                     # Nossa Senhora Aparecida
         date(year, 11, 2),                      # Finados
         date(year, 11, 15),                     # Proclamação da República
-        date(year, 11, 20),                     # Consciência Negra
         date(year, 12, 25),                     # Natal
     }
+    if year >= 2024:
+        # Consciência Negra virou feriado nacional pela Lei 14.759/2023, a
+        # partir de 2024 — antes disso o BCB publicava CDI em 20/11, e marcar
+        # o dia como feriado em ano antigo faria a checagem de cobertura do
+        # accrual (db/investments.py) engolir um dia útil de juro.
+        holidays.add(date(year, 11, 20))
     _BR_HOLIDAYS_CACHE[year] = holidays
     return holidays
 

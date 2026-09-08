@@ -572,13 +572,19 @@ def test_pagina_de_erro_nao_leva_o_meta_pixel(monkeypatch):
     injeta o pixel quando META_PIXEL_ID está setado — este assert é o que impede
     isso de entrar calado junto com a próxima refatoração."""
     monkeypatch.setattr(shared, "META_PIXEL_ID", "000000000000000")
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", "G-000000000")
     monkeypatch.setattr(shared, "_error_template", None)
     assert shared.meta_pixel_snippet()  # o pixel ESTÁ ligado nesta requisição
+    assert shared.ga4_snippet()         # e o GA4 também
 
     body = shared.error_page_response(404).body.decode()
     assert "fbq" not in body
     assert "connect.facebook.net" not in body
     assert "facebook.com/tr" not in body
+    # O GA4 entrou pelo MESMO funil (inject_tracking), então herda a mesma
+    # decisão: a página de erro fica fora do rastreio.
+    assert "gtag" not in body
+    assert "googletagmanager" not in body
 
 
 # ─── N. 422 de validação — o handler que estava no diff sem um teste sequer ───
@@ -661,9 +667,14 @@ def test_401_de_rota_protegida_nos_dois_ramos(accept_html):
 def test_401_www_authenticate_sobrevive_ao_ramo_html():
     """A allowlist já tem teste unitário (`test_headers_da_allowlist_passam`), mas
     ninguém provava que o header sai vivo do outro lado da pilha — do `exc.headers`
-    do `raise` até a resposta. Rota sintética porque HOJE nenhum 401 do produto
-    manda WWW-Authenticate (`git grep -i www-authenticate` só acha o comentário do
-    handler, a allowlist e o teste): quem adicionar um vai depender deste caminho."""
+    do `raise` até a resposta.
+
+    Rota sintética porque este caso é o ramo HTML: desde a #176 os 8 `raise` de
+    falha de access/dashboard token mandam o `WWW_AUTHENTICATE_401` de verdade
+    (`git grep -n WWW_AUTHENTICATE_401`), mas eles são consumidos por fetch, que
+    cai no ramo JSON — coberto por
+    `tests/test_auth_cookie.py::test_401_de_autenticacao_manda_www_authenticate_e_o_de_aplicacao_nao`.
+    Aqui se prova o outro ramo, o do `error_page_response`."""
     path = f"/__401-{uuid.uuid4().hex}"
 
     @dashboard.app.get(path)

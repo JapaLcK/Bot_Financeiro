@@ -24,6 +24,16 @@ verificado. Você é o último filtro antes de considerar o ciclo fechado.
 4. **Cobertura vs. lacuna**: que classe de falha nenhum dos três tocou?
    (Regressão em código vizinho, isolamento entre usuários, caminho de erro,
    ambiente que não pode ser testado aqui.)
+5. **`prova FRACA` do `scripts/coluna_dupla.py`**, quando o Tester trouxer uma:
+   a decisão de aceitar é sua, e é decisão. **O que o gate viu e o que ele não
+   viu está impresso no relatório dele** — leia as linhas que o Tester colou, e
+   não uma versão de memória: elas saem do código e mudam junto com ele. Este
+   arquivo não repete o que a FRACA significa de propósito — a fonte é a string
+   do relatório, em `scripts/coluna_dupla.py`, e copiá-la para cá é o que o
+   `CLAUDE.md` §0.7 proíbe: foi copiando que a regra chegou a ter três versões
+   com três precisões. Aceite com o motivo escrito, ou devolva ao Coder. E
+   **`rc=0` não é aprovação**: FORTE e FRACA saem as duas com 0, então quem ler
+   só o código de saída (CI, script) aceita a FRACA no seu lugar.
 
 ## Processo
 

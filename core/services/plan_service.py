@@ -10,8 +10,8 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
     o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
     (has_app_access sempre True) e os gates viram por-feature/por-tier.
-    Trial (2026-08-06): 30 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
-    (subscription trialing → cobra no dia 31). Escolheu Pro? 30 dias de Pro.
+    Trial (2026-08-06): 15 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
+    (subscription trialing → cobra no dia 16). Escolheu Pro? 15 dias de Pro.
     Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
     Durante o trial o tier vem da coluna `plan` (assinatura vigente), com os
     limites cheios do plano assinado — cadastro novo sem assinatura = Grátis.
@@ -23,7 +23,8 @@ _get_current_user — ela usa os helpers daqui.
 
 import os
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from utils_date import day_tz
 
 from db import get_auth_user
 
@@ -44,7 +45,7 @@ _STORED_PLAN_TO_TIER = {
     "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
 }
 
-TRIAL_DAYS_DEFAULT = 30
+TRIAL_DAYS_DEFAULT = 15
 
 
 def plans_v2_enabled() -> bool:
@@ -81,7 +82,7 @@ def get_trial_status(user_id: int, user: dict | None = None) -> dict:
     """{"active": bool, "days_left": int, "started_at": datetime|None}.
 
     Fonte: auth_accounts.trial_started_at (ancorado por telefone via
-    db.plans.claim_trial_for_user — 30 dias únicos por phone_hash, na vida;
+    db.plans.claim_trial_for_user — 15 dias únicos por phone_hash, na vida;
     cartão não zera nem estica)."""
     started = None
     if user is not None and "trial_started_at" in user:
@@ -271,8 +272,10 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     """True se o cadastro ainda NÃO escolheu um plano na /precos.
 
     Regra de produto (2026-08-11): depois de criar a conta, o usuário é obrigado
-    a passar pela /precos e escolher um plano — mesmo o Grátis — antes de entrar
-    no dashboard. `plan_selected_at` (auth_accounts) marca essa escolha.
+    a passar pela /precos e ASSINAR um plano pago antes de entrar no dashboard
+    (o Grátis saiu da /precos como escolha em 2026-09-02 — segue existindo como
+    ESTADO, no fallback após falha de cobrança). `plan_selected_at`
+    (auth_accounts) marca essa escolha.
 
     Nunca trava quem já tem assinatura paga/trial vigente (escolha implícita no
     checkout) nem contas antigas (backfill em schema.py). Com o v2 desligado
@@ -324,16 +327,20 @@ def history_current_month_only(user_id: int) -> bool:
 def history_earliest_date(user_id: int, now: datetime | None = None) -> date | None:
     """Primeiro dia que o tier pode consultar; None significa sem limite."""
     limits = get_user_limits(user_id)
-    current = now or datetime.now(timezone.utc)
-    try:
-        local_now = current.astimezone(ZoneInfo(os.getenv("TZ", "America/Sao_Paulo")))
-    except ZoneInfoNotFoundError:
-        local_now = current.astimezone(timezone.utc)
+    # `day_tz`: fonte única do fuso do app (utils_date) — um segundo leitor de
+    # ambiente a menos, não conserto de comportamento. O `os.getenv("TZ")` de
+    # antes JÁ valia `REPORT_TIMEZONE`: `align_process_tz` escreve `TZ` =
+    # `_tz().key` no import de utils_date, e `_tz()` lê `REPORT_TIMEZONE`
+    # primeiro. O conserto de comportamento é o `now` que `get_financial_data`
+    # passou a repassar — sem ele esta função abria um segundo relógio, em UTC.
+    # O fallback para UTC saiu junto: com nome de zona inválido `_tz()` levanta,
+    # e o boot já recusa isso antes (`config/env.py::load_app_env`, `exit(1)`).
+    hoje = day_tz(now or datetime.now(timezone.utc))
 
     if limits.get("history_current_month_only", False):
-        return local_now.date().replace(day=1)
+        return hoje.replace(day=1)
     days = limits.get("history_days")
-    return None if days is None else local_now.date() - timedelta(days=int(days))
+    return None if days is None else hoje - timedelta(days=int(days))
 
 
 def history_months_cap(user_id: int) -> int | None:

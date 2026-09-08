@@ -76,9 +76,27 @@ def test_retorno_cancelado_ainda_forca_precos(monkeypatch):
     assert out.headers["location"] == "/precos?escolha=1"
 
 
-def test_app_ios_e_isento(monkeypatch):
-    # UA do WebView do app: nunca redireciona pra tela de compra (3.1.1).
+def test_ua_de_app_nao_isenta_o_gate(monkeypatch):
+    """Mandar "PigBankApp" no User-Agent NÃO pula o gate de escolha de plano.
+
+    A isenção existia pela diretriz 3.1.1 da App Store e era decidida por
+    substring de header — escolhido pelo cliente. Qualquer conta web entrava no
+    dashboard sem plano só forjando o UA, e depois que o Grátis saiu da /precos
+    isso passou a valer dinheiro. Controle negativo: repor
+    `if _is_pigbank_app(request): return None` no topo de gate_plan_selection
+    faz este caso voltar a receber None.
+    """
     _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True)
+    out = shared.gate_plan_selection(_Req(ua="Mozilla/5.0 PigBankApp/1.2"))
+    assert isinstance(out, RedirectResponse)
+    assert out.headers["location"] == "/precos?escolha=1"
+
+
+def test_ua_de_app_nao_impede_quem_ja_escolheu(monkeypatch):
+    # Controle positivo do par acima: sem o gate pendente, o UA de app segue
+    # entrando normalmente. Sem isto, o teste anterior passaria num gate que
+    # recusa todo mundo.
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False)
     assert shared.gate_plan_selection(_Req(ua="Mozilla/5.0 PigBankApp/1.2")) is None
 
 
@@ -166,3 +184,50 @@ class TestJanelaEntreEscritasDoWebhook:
         """Assinatura vencida não é escolha implícita: volta a barrar."""
         u = self._user("plus", plan_selected_at=None, expires="2020-01-01T00:00:00+00:00")
         assert plan_service.needs_plan_selection(1, u) is True
+
+
+class _DataReq:
+    """Request falso pro _enforce_subscription_gate: ele lê url.path e o UA."""
+    def __init__(self, ua="", path="/data/7"):
+        self.headers = {"user-agent": ua}
+
+        class _U:
+            pass
+        self.url = _U()
+        self.url.path = path
+
+
+@pytest.mark.parametrize("ua", ["Mozilla/5.0", "Mozilla/5.0 PigBankApp/1.2"])
+def test_backstop_402_nao_isenta_ua_de_app(monkeypatch, ua):
+    """O 402 das rotas de dados nega com e sem UA de app.
+
+    Era o terceiro ponto que isentava o app por header (`not
+    _is_pigbank_app(request) and needs_plan_selection(...)`): sem o gate de
+    página, uma conta sem plano batia direto em /data/{id} forjando o UA e lia
+    os dados. Controle negativo: repor o `not _is_pigbank_app(request) and`
+    faz o caso do UA de app parar de levantar.
+    """
+    monkeypatch.setattr(plan_service, "needs_plan_selection", lambda uid: True)
+    monkeypatch.setattr(plan_service, "has_app_access", lambda uid: True)
+    with pytest.raises(HTTPException) as exc:
+        shared._enforce_subscription_gate(_DataReq(ua=ua), 7)
+    assert exc.value.status_code == 402
+    assert exc.value.detail["error"] == "plan_selection_required"
+
+
+@pytest.mark.parametrize("ua", ["Mozilla/5.0", "Mozilla/5.0 PigBankApp/1.2"])
+def test_backstop_402_libera_quem_ja_escolheu(monkeypatch, ua):
+    # Controle positivo do par acima, nos dois UAs: sem gate pendente e com
+    # acesso, a rota passa. Sem isto o par passaria num backstop que nega tudo.
+    monkeypatch.setattr(plan_service, "needs_plan_selection", lambda uid: False)
+    monkeypatch.setattr(plan_service, "has_app_access", lambda uid: True)
+    assert shared._enforce_subscription_gate(_DataReq(ua=ua), 7) is None
+
+
+def test_backstop_402_ainda_isenta_as_rotas_que_resolvem_o_gate(monkeypatch):
+    # /billing e /auth continuam isentos por PREFIXO (não por UA): são eles que
+    # fecham o gate. Gatear isto trancaria a saída.
+    monkeypatch.setattr(plan_service, "needs_plan_selection", lambda uid: True)
+    monkeypatch.setattr(plan_service, "has_app_access", lambda uid: True)
+    assert shared._enforce_subscription_gate(
+        _DataReq(path="/billing/create-checkout"), 7) is None

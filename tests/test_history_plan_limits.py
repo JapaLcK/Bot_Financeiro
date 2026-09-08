@@ -41,7 +41,15 @@ def test_daily_free_usa_inicio_exato_do_mes(monkeypatch):
     captured = {}
     monkeypatch.setattr(dashboard, "_authorize_dashboard_access", lambda *_: None)
     first_day = date.today().replace(day=1)
-    monkeypatch.setattr(plan_service, "history_earliest_date", lambda _uid: first_day)
+    # A rota tem de repassar o SEU instante (#166/#179): dois relógios abertos
+    # na mesma rota divergem na virada do dia. Sem o repasse, `agora` fica None.
+    recebido = {}
+
+    def fake_earliest(_uid, agora=None):
+        recebido["agora"] = agora
+        return first_day
+
+    monkeypatch.setattr(plan_service, "history_earliest_date", fake_earliest)
 
     async def fake_daily(user_id, days, start_date=None):
         captured["start"] = start_date
@@ -55,3 +63,7 @@ def test_daily_free_usa_inicio_exato_do_mes(monkeypatch):
 
     assert captured["start"] == first_day
     assert result["data"] == []
+    # Controle do repasse (fica VERMELHO se a rota voltar a chamar
+    # `history_earliest_date(user_id)` sem o instante): chegou, e aware.
+    assert recebido["agora"] is not None
+    assert recebido["agora"].tzinfo is not None

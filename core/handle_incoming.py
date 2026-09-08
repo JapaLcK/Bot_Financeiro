@@ -503,7 +503,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     return [OutgoingMessage(text=(
         "🐷 Oi! Que bom te ver por aqui.\n\n"
         "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra começar com {_bold('30 dias grátis', platform)}, sem cobrança "
+        f"dá pra começar com {_bold('15 dias grátis', platform)}, sem cobrança "
         "agora e cancelando quando quiser.\n\n"
         f"👉 {link}\n\n"
         "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "

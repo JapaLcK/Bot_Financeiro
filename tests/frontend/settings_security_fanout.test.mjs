@@ -22,7 +22,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { startServer } from "./_server.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -30,26 +30,11 @@ import { chromium } from "playwright";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FRONTEND = join(REPO, "frontend");
-const PORT = Number(process.env.PB_TEST_PORT || 8899);
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN;   // a porta é efêmera, o `before` preenche
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 const err500 = (detail) => ({ status: 500, contentType: "application/json", body: JSON.stringify({ detail }) });
-
-async function startServer() {
-  const proc = spawn("python3", ["-m", "http.server", String(PORT), "--bind", "127.0.0.1", "--directory", FRONTEND],
-    { stdio: "ignore" });
-  for (let i = 0; i < 100; i++) {
-    await sleep(100);
-    // Porta ocupada por outro processo: o python morre na hora ("Address already
-    // in use"). Sem esta checagem a sonda adotava o servidor alheio em silêncio.
-    if (proc.exitCode !== null) throw new Error(`http.server morreu (porta ${PORT} ocupada?)`);
-    try { if ((await fetch(`${ORIGIN}/settings.html`)).ok) return proc; } catch { /* ainda subindo */ }
-  }
-  proc.kill();
-  throw new Error(`http.server não subiu em ${ORIGIN}`);
-}
 
 /** Espera cond() virar true; estoura em vez de pendurar o teste pra sempre. */
 async function waitFor(cond, what, timeoutMs = 15000) {
@@ -62,7 +47,8 @@ async function waitFor(cond, what, timeoutMs = 15000) {
 }
 
 let server, browser;
-before(async () => { server = await startServer(); browser = await chromium.launch(); });
+before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
+                     browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
 /**

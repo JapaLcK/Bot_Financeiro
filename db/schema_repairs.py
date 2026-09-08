@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     "auth_login_events",
     # Trava de 1 trial por telefone, na vida. A linha é keyed por phone_hash e
-    # PRECISA sobreviver à deleção da conta — cascatear devolveria 30 dias novos
+    # PRECISA sobreviver à deleção da conta — cascatear devolveria 15 dias novos
     # a cada conta recriada com o mesmo número. Estar nesta lista não é detalhe:
     # sem ela, o `repair_user_fk_cascades` abaixo converteria a FK nova para
     # CASCADE na primeira subida e apagaria a trava em silêncio.
@@ -33,6 +33,15 @@ _USER_FK_SET_NULL_TABLES: frozenset[str] = frozenset({
     # pessoas vivas — a conversão histórica não pode encolher quando uma conta
     # é excluída. O evento sobrevive anonimizado (user_id nulo).
     "checkout_funnel_events",
+    # Registro de compliance de acesso a PII: "alguém leu tal campo de tal
+    # titular, em tal data, com tal propósito" (purpose/actor/field). A coluna
+    # da FK é `subject_user_id` — o TITULAR cujo dado foi lido, não o autor do
+    # acesso —, então CASCADE apagaria a trilha justamente de quem pediu
+    # exclusão, destruindo a prova de que o acesso foi legítimo. O
+    # `db/privacy.py` não apaga esta tabela (nem no reset, nem no
+    # delete_user_data): a linha sobrevive anonimizada, com subject_user_id
+    # nulo.
+    "pii_access_log",
 })
 
 

@@ -1,7 +1,7 @@
 """Exclusão de conta: o que some, e o resíduo que sobrava sem função.
 
 `plan_trials` sobrevive de propósito — é keyed por `phone_hash` e segura a
-regra de 30 dias de teste por telefone, na vida. Apagar devolveria um trial
+regra de 15 dias de teste por telefone, na vida. Apagar devolveria um trial
 novo a cada conta recriada com o mesmo número.
 
 O `user_id` da linha, porém, era resíduo: só é escrito no insert
@@ -79,7 +79,7 @@ def test_exclusao_desvincula_o_trial_da_conta_apagada(user_id):
 
 def test_exclusao_preserva_a_trava_de_um_trial_por_telefone(user_id):
     """Positivo: sem ele, apagar a linha inteira passaria neste grupo — e daria
-    um teste de 30 dias novo a cada conta recriada com o mesmo número."""
+    um teste de 15 dias novo a cada conta recriada com o mesmo número."""
     phone_hash = _trial_para(user_id)
     try:
         antes = _linha(phone_hash)["started_at"]
@@ -96,7 +96,7 @@ def test_exclusao_preserva_a_trava_de_um_trial_por_telefone(user_id):
 def test_fk_da_trava_e_set_null_e_nao_cascade():
     """A FK existe e é SET NULL.
 
-    CASCADE aqui apagaria a linha na exclusão da conta e devolveria 30 dias de
+    CASCADE aqui apagaria a linha na exclusão da conta e devolveria 15 dias de
     teste a cada conta recriada com o mesmo telefone. É o erro que o
     `repair_user_fk_cascades` cometeria sozinho se `plan_trials` não estivesse
     em `_USER_FK_SET_NULL_TABLES` — este teste é o que segura as duas pontas

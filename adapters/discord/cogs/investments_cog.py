@@ -212,13 +212,9 @@ class InvestmentsCog(commands.Cog):
             await message.reply(self._investments_text(uid, "De qual investimento você quer resgatar?"))
             return True
 
-        from core.services import funding
-
-        destino = funding.resolve_destination(uid)["source"]
         try:
-            launch_id, new_acc, new_inv, canon, taxes = investment_withdraw_to_account(
+            launch_id, new_acc, new_inv, canon, taxes, _dest = investment_withdraw_to_account(
                 uid, investment_name=name, amount=float(amount), nota=message.content,
-                funding_source=funding.to_db_arg(destino),
             )
         except LookupError:
             await message.reply(self._investments_text(uid, f"Não achei esse investimento: **{name}**."))

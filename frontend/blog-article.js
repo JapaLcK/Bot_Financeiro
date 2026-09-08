@@ -8,12 +8,12 @@
   "use strict";
 
   // ── 1. Barra de progresso de leitura ──────────────────────────────────────
-  var bar = document.getElementById("readProgress");
+  const bar = document.getElementById("readProgress");
   if (bar) {
-    var update = function () {
-      var doc = document.documentElement;
-      var scrollable = doc.scrollHeight - doc.clientHeight;
-      var pct = scrollable > 0 ? (doc.scrollTop || document.body.scrollTop) / scrollable : 0;
+    const update = function () {
+      const doc = document.documentElement;
+      const scrollable = doc.scrollHeight - doc.clientHeight;
+      const pct = scrollable > 0 ? (doc.scrollTop || document.body.scrollTop) / scrollable : 0;
       bar.style.width = Math.min(100, Math.max(0, pct * 100)) + "%";
     };
     update();
@@ -22,24 +22,24 @@
   }
 
   // ── 2. Animações ao entrar na tela ────────────────────────────────────────
-  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var blocks = [].slice.call(document.querySelectorAll(".g-chart, .g-bars, .g-goal, .g-cardshot"));
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const blocks = [].slice.call(document.querySelectorAll(".g-chart, .g-bars, .g-goal, .g-cardshot"));
   if (!blocks.length || reduce) return;
 
   // Prepara as linhas dos gráficos pra "desenhar" via stroke-dashoffset.
   [].slice.call(document.querySelectorAll(".g-chart-line")).forEach(function (line) {
     try {
-      var len = line.getTotalLength();
+      const len = line.getTotalLength();
       line.style.strokeDasharray = len;
       line.style.strokeDashoffset = len;
       line.style.transition = "stroke-dashoffset 1.2s ease";
-    } catch (e) { /* getTotalLength indisponível — deixa a linha estática */ }
+    } catch (_e) { /* getTotalLength indisponível — deixa a linha estática */ }
   });
 
   // Só entra no estado "colapsado" agora (com JS garantido) — sem JS fica cheio.
   blocks.forEach(function (el) { el.classList.add("g-anim"); });
 
-  var reveal = function (el) {
+  const reveal = function (el) {
     el.classList.add("in-view");
     [].slice.call(el.querySelectorAll(".g-chart-line")).forEach(function (line) {
       line.style.strokeDashoffset = "0";
@@ -47,7 +47,7 @@
   };
 
   if ("IntersectionObserver" in window) {
-    var io = new IntersectionObserver(function (entries) {
+    const io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (e.isIntersecting) { reveal(e.target); io.unobserve(e.target); }
       });

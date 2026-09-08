@@ -68,6 +68,9 @@ def _format_plan_expires(expires_at) -> str:
     # Converte pra horario de Brasilia (UTC-3) sem precisar de pytz
     local = expires_at.astimezone(timezone.utc)
     # Usa offset fixo BRT (UTC-3); suficiente pra exibir no chat.
+    # DÍVIDA (#179): offset cravado, fora da fonte única `utils_date._tz()`. Só
+    # exibição (data de validade da assinatura), sem efeito em dinheiro nem em
+    # janela de consulta — por isso ficou fora do PR que unificou as leituras.
     from datetime import timedelta
     brt = local.astimezone(timezone(timedelta(hours=-3)))
     return brt.strftime("%d/%m/%Y às %H:%M")
@@ -96,7 +99,7 @@ def _handle_assinar(user_id: int, platform: str) -> str:
         )
     b = lambda s: _bold(s, platform)
     offer_text = (
-        f"Aqui ó, link pra assinar com {b('30 dias grátis')} "
+        f"Aqui ó, link pra assinar com {b('15 dias grátis')} "
         "(cancela quando quiser, sem cobrança no trial):"
     )
     try:
@@ -181,7 +184,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
                 f"Manda {b('assinar plano')} 🐷✨"
             )
 
-        # Nota: o trial de 30 dias hoje é uma assinatura Stripe do plano escolhido
+        # Nota: o trial de 15 dias hoje é uma assinatura Stripe do plano escolhido
         # (status trialing) — cai no ramo pago abaixo com status_label "Período
         # grátis em andamento" e "Primeira cobrança" na data. Não há mais o
         # estado "Plus sem assinatura" (trial sem cartão).
@@ -242,7 +245,7 @@ def _handle_plano(user_id: int, platform: str) -> str:
         next_label = "Renovação"
     else:
         status_label = {
-            "trialing": "Trial em andamento (30 dias grátis)",
+            "trialing": "Trial em andamento (15 dias grátis)",
             "active": "Ativo",
             "past_due": "Pagamento em atraso",
             "canceled": "Cancelado",

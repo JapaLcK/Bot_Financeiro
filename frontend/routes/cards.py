@@ -10,6 +10,7 @@ import pathlib
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from core.observability import _log_falha
 from db import create_card
 from frontend.routes import shared
 
@@ -321,7 +322,41 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
     if not card:
         raise HTTPException(status_code=404, detail="Cartão não encontrado.")
 
-    deleted = await asyncio.to_thread(delete_card, user_id, card_id)
+    try:
+        deleted = await asyncio.to_thread(delete_card, user_id, card_id)
+    except Exception as exc:
+        # Mesmo buraco de `/installments`, na mesma porta de cartão: sem este
+        # `except`, apagar um cartão (e, por CASCADE, faturas e compras)
+        # falhava com a frase de sistema do middleware — 500 "Erro interno do
+        # servidor.", ou 503 "Serviço temporariamente indisponível…" quando o
+        # erro casava timeout/connection (`core/admin_dashboard.py`) — frase de
+        # sistema, não de produto. Log HAVIA: o `admin_error_logging_middleware`
+        # já gravava `http_unhandled_exception` com traceback. Como ele deixa passar
+        # `HTTPException`, o 500 daqui apagaria essa linha — por isso o
+        # `com_traceback=True` (`core/observability.py`): entre as portas que
+        # este PR toca, estas DUAS rotas de cartão são as únicas onde a pilha
+        # já era gravada — o critério não é "ser rota HTTP". (Fora do PR o
+        # middleware gravava pilha em qualquer rota que deixasse subir exceção
+        # não-`HTTPException`, que é a maioria do repositório; a regra que vale
+        # é a do docstring de `core/observability.py`: só liga quem a `main`
+        # deixava subir CRUA e o `except` novo passou a engolir.) As duas
+        # rotas destrutivas de `finance_bot_websocket_custom.py` já levantavam
+        # `HTTPException` na `main`, o middleware nunca as viu, e ligar o
+        # traceback LÁ criaria persistência nova de `DETAIL: Key (…)`. Aqui
+        # mantê-la não persiste nada novo.
+        # `to_thread`: a rota é async e o `_DashboardHandler` grava com
+        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        # `rota=`: na `main` o middleware gravava a rota no `source` do evento
+        # (`f"{method} {path}"`, `core/admin_dashboard.py`). O `_log_falha` grava
+        # o nome do LOGGER dele (`core.observability`) nesse campo, igual para
+        # toda porta — sem isto o operador vê a falha e não sabe qual rota é.
+        await asyncio.to_thread(_log_falha, "delete_card", user_id, exc,
+                                com_traceback=True, card_id=card_id,
+                                rota=f"{request.method} {request.url.path}")
+        raise HTTPException(
+            status_code=500,
+            detail="Não consegui excluir o cartão agora — deu erro do meu lado. Tenta de novo em alguns minutos.",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Cartão não encontrado.")
 
@@ -394,7 +429,29 @@ async def installment_delete_route(request: Request, user_id: int, group_id: str
     shared.authorize_dashboard_access(request, user_id)
     from db.cards import undo_installment_group
 
-    result = await asyncio.to_thread(undo_installment_group, user_id, group_id)
+    try:
+        result = await asyncio.to_thread(undo_installment_group, user_id, group_id)
+    except Exception as exc:
+        # Caminho destrutivo: sem este `except` a exclusão de parcelamento
+        # falhava com a frase de sistema do `admin_error_logging_middleware`
+        # (500, ou 503 em timeout/queda de banco) — que JÁ logava
+        # `http_unhandled_exception` com traceback. O ganho aqui é a frase de
+        # produto; do rastro se mantém o TRACEBACK, pelo `com_traceback=True` do
+        # `_log_falha` (o middleware não olha `HTTPException`, ver
+        # `core/observability.py`). O que NÃO se mantém sozinho: o `event_type`
+        # vira `logger.error` (por isso a linha nova na allowlist do `recent_ops`,
+        # `core/admin_dashboard.py`), o `source` vira `core.observability` (por
+        # isso o `rota=` abaixo), `details` perde `query`/`status_code`/`exc_type`
+        # e a queda de banco nestas duas rotas passa a dar 500 sempre, nunca mais
+        # 503 (`core/admin_dashboard.py`) — nenhum consumidor lê 503
+        # (`grep 503 frontend/dashboard.js` → zero), é sinal de ops, não produto.
+        await asyncio.to_thread(_log_falha, "undo_installment_group", user_id, exc,
+                                com_traceback=True, group_id=group_id,
+                                rota=f"{request.method} {request.url.path}")
+        raise HTTPException(
+            status_code=500,
+            detail="Não consegui excluir o parcelamento agora — deu erro do meu lado. Tenta de novo em alguns minutos.",
+        ) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Parcelamento não encontrado.")
     shared.invalidate_dashboard_current_cache(user_id)

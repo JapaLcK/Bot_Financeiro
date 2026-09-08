@@ -6,13 +6,14 @@ Duas tabelas distintas:
   abaixo de `list_category_rules`, `add_category_rule` etc.
 - `user_categories`: nome + emoji + cor por usuário (metadata visual da
   Sprint 3). Não tem FK em launches — `launches.categoria` continua string
-  livre. Rename emite UPDATE em cascata nas 5 tabelas que referenciam o
-  texto da categoria.
+  livre. Rename emite UPDATE em cascata nas tabelas que referenciam o
+  texto da categoria — a lista vive no bloco `if rename:` de
+  `update_user_category`, e é lá que se conta (contar aqui envelhece).
 """
 import logging
 import unicodedata
 
-from .connection import get_conn
+from .connection import get_conn, TIPO_DESPESA_SQL
 from .users import ensure_user
 from utils_text import normalize_text
 
@@ -62,15 +63,7 @@ def add_category_rule(user_id: int, keyword: str, category: str) -> None:
         raise ValueError("keyword vazio")
     if not category:
         raise ValueError("category vazia")
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO user_category_rules (user_id, keyword, category) VALUES (%s, %s, %s) "
-                "ON CONFLICT (user_id, keyword) DO UPDATE SET category = EXCLUDED.category",
-                (user_id, keyword, category),
-            )
-        conn.commit()
+    _grava_regra(user_id, keyword, category)
 
 
 def delete_category_rule(user_id: int, keyword: str) -> int:
@@ -122,17 +115,44 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
     """
     Retorna categoria memorizada se alguma keyword bater com o texto.
     """
+    achado = get_memorized_rule(user_id, memo)
+    return None if achado is None else achado[1]
+
+
+def get_memorized_rule(user_id: int, memo: str):
+    """A PRIMEIRA regra memorizada que bate com o texto, na ordem de precedência."""
+    todas = get_memorized_rules(user_id, memo)
+    return todas[0] if todas else None
+
+
+def get_memorized_rules(user_id: int, memo: str) -> list[tuple[str, str, object]]:
+    """TODAS as regras que batem com o texto: `(keyword, categoria, criada_em)`.
+
+    Ordenadas por comprimento do keyword, que é a precedência de sempre. A lista
+    inteira — e não só a primeira — porque quem consome precisa poder DESCARTAR
+    a primeira sem perder as seguintes: uma regra obsoleta (a categoria que hoje
+    é dona daquele termo nasceu depois dela) não pode fazer o passo B inteiro
+    ser pulado, senão uma regra deliberada mais curta que também casa perde a
+    vez para o passo B2.
+
+    O `keyword` vem junto porque é ele que responde a pergunta da obsolescência,
+    e o `created_at` porque é ele que separa regra velha de escolha deliberada.
+    `get_memorized_category` e `get_memorized_rule` delegam para cá — a busca é
+    uma só (§0.7).
+    """
     from utils_text import normalize_text, contains_word  # import local pra evitar loop circular
 
     ensure_user(user_id)
     memo_norm = normalize_text(memo or "")
     if not memo_norm:
-        return None
+        return []
+
+    achadas: list[tuple[str, str, object]] = []
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT keyword, category FROM user_category_rules "
+                "SELECT keyword, category, created_at FROM user_category_rules "
                 "WHERE user_id = %s ORDER BY LENGTH(keyword) DESC",
                 (user_id,),
             )
@@ -145,21 +165,47 @@ def get_memorized_category(user_id: int, memo: str) -> str | None:
         if not kw_norm:
             continue
         if contains_word(memo_norm, kw_norm) or (kw_norm in memo_norm):
-            return (category or "").strip() or None
+            destino = (category or "").strip()
+            criada_em = r.get("created_at") if isinstance(r, dict) else r[2]
+            if destino:
+                achadas.append((keyword, destino, criada_em))
 
-    return None
+    return achadas
 
 
-def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
-    keyword = (keyword or "").strip().lower()
+def _grava_regra(user_id: int, keyword: str, category: str) -> None:
+    """O único INSERT em `user_category_rules`.
+
+    Existia escrito duas vezes — em `add_category_rule` e em
+    `upsert_category_rule`, que diferem só no tratamento do keyword (uma valida
+    e chama `ensure_user`, a outra faz `lower()`). As duas cópias custaram caro:
+    a renovação do `created_at` foi aplicada numa e a outra continuou como
+    estava, e o defeito só apareceu porque um teste mediu o timestamp.
+
+    `created_at` renovado no conflito é necessário, não cosmético: ele é o
+    critério que separa regra OBSOLETA de regra DELIBERADA
+    (`_regra_ficou_obsoleta`). Sem renovar, quem manda "aprender cafe como
+    lazer" DEPOIS de criar a categoria Café recebe a confirmação e continua
+    sendo classificado como Café — a regra nova herdaria a data velha e seria
+    descartada por antiga.
+
+    O caminho automático não chega aqui quando há conflito: o guard do #123
+    (`learn_from_signals`, `guard_local_conflict`) recusa aprender token que já
+    pertence a categoria custom. Então renovar só afeta ação deliberada.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO user_category_rules (user_id, keyword, category) VALUES (%s, %s, %s) "
-                "ON CONFLICT (user_id, keyword) DO UPDATE SET category = EXCLUDED.category",
+                "ON CONFLICT (user_id, keyword) DO UPDATE "
+                "   SET category = EXCLUDED.category, created_at = now()",
                 (user_id, keyword, category),
             )
         conn.commit()
+
+
+def upsert_category_rule(user_id: int, keyword: str, category: str) -> None:
+    _grava_regra(user_id, (keyword or "").strip().lower(), category)
 
 
 def list_user_category_rules(user_id: int) -> list[tuple[str, str]]:
@@ -191,11 +237,11 @@ def get_uncategorized_launches(user_id: int, limit: int = 20) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select id, tipo, valor, alvo, nota, categoria, criado_em
                 from launches
                 where user_id = %s
-                  and tipo = 'despesa'
+                  and {TIPO_DESPESA_SQL}
                   and is_internal_movement = false
                   and (categoria is null or lower(categoria) = 'outros')
                 order by criado_em desc
@@ -281,8 +327,15 @@ def ensure_user_categories_seeded(user_id: int) -> None:
             # Importa categorias customizadas já presentes em launches.
             cur.execute(
                 """
-                insert into user_categories (user_id, name, emoji, color, is_system)
-                select %s, lower(trim(categoria)), '🏷️', '#7c3aed', false
+                -- `created_at` epoch de propósito, não `now()`: estas linhas não são
+                -- uma categoria que o usuário CRIOU agora, são o espelho do
+                -- histórico dele. Com a data de hoje, toda regra de uma conta
+                -- legada passaria a parecer anterior à categoria e o guard de
+                -- `_regra_ficou_obsoleta` a descartaria — inclusive uma regra
+                -- deliberada, revertida em silêncio no primeiro acesso à tela.
+                -- O campo não é exibido nem ordenado em lugar nenhum (medido).
+                insert into user_categories (user_id, name, emoji, color, is_system, created_at)
+                select %s, lower(trim(categoria)), '🏷️', '#7c3aed', false, to_timestamp(0)
                 from (
                     select distinct categoria from launches
                     where user_id=%s and categoria is not null
@@ -350,6 +403,67 @@ def list_user_categories_full(
     return out
 
 
+def reaponta_regra_se_anterior(user_id: int, keyword: str, nova_categoria: str) -> bool:
+    """Reaponta a regra para `nova_categoria` — SÓ se ela for anterior à categoria.
+
+    A condição vai no próprio UPDATE, não em leitura seguida de escrita: a
+    criação da categoria já foi commitada quando a reconciliação roda, e nesse
+    intervalo um comando explícito pode ter gravado a mesma keyword de
+    propósito. Sem a condição, a reconciliação sobrescreveria uma escolha que o
+    usuário acabou de fazer e que já foi confirmada para ele.
+
+    É o mesmo critério do guard de leitura (`_regra_ficou_obsoleta`): regra
+    ANTERIOR à categoria envelheceu; regra posterior é escolha deliberada.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update user_category_rules r
+                   set category = %s, created_at = now()
+                 where r.user_id = %s and r.keyword = %s
+                   and r.created_at < (
+                         select c.created_at from user_categories c
+                          where c.user_id = r.user_id
+                            and lower(c.name) = lower(%s)
+                          limit 1
+                       )
+                """,
+                (nova_categoria, user_id, keyword, nova_categoria),
+            )
+            mudou = cur.rowcount > 0
+        conn.commit()
+    return mudou
+
+
+def list_custom_categories_com_data(user_id: int) -> list[tuple[str, object]]:
+    """As categorias custom ativas com a data em que passaram a ter esse nome.
+
+    Uma consulta só, para quem precisa avaliar várias regras de uma vez: sem
+    ela, o passo B do `infer_category` abria uma conexão POR CANDIDATA que
+    colide (medido: 1 leitura de `user_categories` no caminho comum, 6 com
+    cinco regras colidindo). Substituiu uma função que consultava a data de uma
+    categoria por vez — o catálogo já vinha pré-carregado, faltava trazer a data
+    junto.
+
+    SEM `ensure_user`, igual à `list_custom_category_names` logo abaixo: é
+    leitura no caminho quente da inferência, e o `ensure_user` são dois INSERT
+    que o `test_inferencia_nao_escreve_no_banco` conta — e que já foram feitos
+    pelo `get_memorized_rules` antes desta chamada.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select name, created_at from user_categories "
+                " where user_id=%s and is_system=false and is_archived=false "
+                " order by name",
+                (user_id,),
+            )
+            rows = cur.fetchall() or []
+    return [((r["name"] if isinstance(r, dict) else r[0]),
+             (r["created_at"] if isinstance(r, dict) else r[1])) for r in rows]
+
+
 def list_custom_category_names(user_id: int) -> list[str]:
     """Nomes das categorias CUSTOMIZADAS (is_system=false) e não arquivadas.
 
@@ -398,7 +512,13 @@ def create_user_category(
     ensure_user(user_id)
     ensure_user_categories_seeded(user_id)
     norm = _normalize_category_name(name)
-    if not norm:
+    # O teto vale AQUI, não só nas portas: `resolve_category_input` já recusa
+    # nome maior que isto (é o que faz o PATCH /launches devolver 400), mas
+    # `create_user_category` é uma segunda entrada — o `POST /categories` e o
+    # `ensure_user_category` chegam por ela. Sem o teto, a linha longa entrava
+    # no catálogo e o `display_map` passava a resolvê-la no passo 2, ANTES do
+    # guard de tamanho do passo 3, fazendo as portas que recusavam aceitar.
+    if not norm or len(norm) > CATEGORY_NAME_MAX_LEN:
         raise ValueError("CATEGORIA_INVALIDA")
     emoji = (emoji or "🏷️").strip() or "🏷️"
     color = (color or "#7c3aed").strip() or "#7c3aed"
@@ -420,6 +540,24 @@ def create_user_category(
             )
             new_id = cur.fetchone()["id"]
         conn.commit()
+
+    # A categoria nova pode ser a dona legítima de keywords que o bot aprendeu
+    # ANTES de ela existir — o caso "gastei com cafe" por meses e só depois
+    # criar a categoria Café. Sem isto, a regra velha vence no passo B de
+    # `infer_category` e a categoria recém-criada nunca é usada. Import local
+    # porque `category_service` importa deste módulo.
+    # BEST-EFFORT de propósito: a categoria já foi commitada acima, e falhar
+    # aqui devolveria 500 num POST que deu certo — o usuário veria erro e a
+    # retentativa daria CATEGORIA_DUPLICADA. A correção do comportamento não
+    # depende disto: quem garante que a regra obsoleta perde é o guard de
+    # LEITURA em `infer_category`. Isto é só higiene do dado.
+    try:
+        from core.services.category_service import reconciliar_regras_com_categoria
+
+        reconciliar_regras_com_categoria(user_id, norm)
+    except Exception:
+        log.warning("reconciliacao de regras falhou para user=%s categoria=%r",
+                    user_id, norm, exc_info=True)
     return get_user_category(user_id, new_id)
 
 
@@ -501,16 +639,53 @@ def update_user_category(
                     "where user_id=%s and lower(category)=lower(%s)",
                     (next_name, user_id, old_name),
                 )
+                # #147: os recorrentes guardam o TEXTO da categoria e o cobrador
+                # o copia pra `launches.categoria` todo mês. Ficar de fora do
+                # cascade reabria a fatia gêmea que o #147 fechou: o histórico
+                # renomeado acima e o recorrente ainda no nome velho, que o
+                # cobrador (`create=False` + `or raw`) grava de novo no mês
+                # seguinte. Medido em `test_rename_cascateia_para_o_recorrente`.
+                cur.execute(
+                    "update recurring_expenses set category=%s "
+                    "where user_id=%s and lower(category)=lower(%s)",
+                    (next_name, user_id, old_name),
+                )
+                cur.execute(
+                    "update recurring_incomes set category=%s "
+                    "where user_id=%s and lower(category)=lower(%s)",
+                    (next_name, user_id, old_name),
+                )
 
+            # `created_at` renovado QUANDO O NOME MUDA, e só aí. O campo responde
+            # "desde quando esta categoria é dona deste termo", e num rename a
+            # resposta é agora: a categoria acabou de adquirir tokens novos.
+            # Sem isso, renomear "viagens" para "cafe" deixaria uma regra
+            # `cafe -> alimentação` mais nova que a data ORIGINAL da categoria,
+            # o guard a trataria como escolha deliberada, e os gastos com café
+            # continuariam indo para alimentação depois de o usuário ter
+            # renomeado a categoria justamente para recebê-los.
             cur.execute(
                 """
                 update user_categories
-                   set name=%s, emoji=%s, color=%s
+                   set name=%s, emoji=%s, color=%s,
+                       created_at = case when %s then now() else created_at end
                  where user_id=%s and id=%s
                 """,
-                (next_name, next_emoji, next_color, user_id, int(cat_id)),
+                (next_name, next_emoji, next_color, rename, user_id, int(cat_id)),
             )
         conn.commit()
+
+    if rename:
+        # Best-effort pelo mesmo motivo da criação: o rename já foi commitado, e
+        # higiene de regra não pode derrubar um PATCH que deu certo. Quem garante
+        # o comportamento é o guard de leitura.
+        try:
+            from core.services.category_service import reconciliar_regras_com_categoria
+
+            reconciliar_regras_com_categoria(user_id, next_name)
+        except Exception:
+            log.warning("reconciliacao pos-rename falhou para user=%s categoria=%r",
+                        user_id, next_name, exc_info=True)
     return get_user_category(user_id, cat_id)
 
 
@@ -560,6 +735,17 @@ def delete_user_category(user_id: int, cat_id: int) -> None:
             cur.execute(
                 "delete from user_categories where user_id=%s and id=%s",
                 (user_id, int(cat_id)),
+            )
+            # Na MESMA transação, antes do commit: se a limpeza falhasse depois,
+            # a categoria já estaria apagada, o endpoint devolveria erro e a
+            # retentativa daria CATEGORIA_NAO_ENCONTRADA — não sobraria caminho
+            # de API para limpar as regras órfãs. Sem isto elas apontam para um
+            # nome que não existe mais e o passo B de `infer_category` devolve
+            # categoria fantasma. O rename já era tratado; faltava o delete.
+            cur.execute(
+                "delete from user_category_rules "
+                " where user_id=%s and lower(category)=lower(%s)",
+                (user_id, current["name"]),
             )
         conn.commit()
 
@@ -697,6 +883,9 @@ def resolve_category_input(
     #    "Padaria do Zé" e "Padaria do Ze" virarem duas fatias no dashboard,
     #    onde a `main` colapsava as duas. Aí a de-duplicação é o próprio
     #    `normalize_text`, que é o que a `main` grava.
+    #    ATENÇÃO: isto só vale para porta cuja `main` JÁ gravava normalizado (o
+    #    PATCH /launches). Porta que gravava o texto cru não pode cair aqui — vira
+    #    fatia gêmea nova. É por isso que existe `resolve_category_for_write`.
     # Mede o que VAI SER GRAVADO, não o normalizado: `normalize_text` tira
     # acento/emoji/pontuação e ENCOLHE a entrada, então medir por ele deixava
     # passar nome de 5000 caracteres (emoji + uma letra normaliza pra 1 char).
@@ -704,6 +893,44 @@ def resolve_category_input(
     if not stored or len(stored) > CATEGORY_NAME_MAX_LEN:
         return None
     return stored
+
+
+def resolve_category_for_write(user_id: int, raw: str) -> str:
+    """Grafia a GRAVAR numa porta de escrita de recorrente (#147).
+
+    A REGRA, num lugar só, valendo para as 4 portas (`create_/update_recurring_expense`
+    e `create_/update_recurring_income`):
+
+        o valor gravado é (a) uma grafia que JÁ existe no catálogo do usuário,
+        ou (b) o texto CRU do usuário. Nunca `normalize_text(raw)`.
+
+    Por isso o `create` segue o plano em vez de ser fixo em `True`. Com `create=True`,
+    o passo 3 de `resolve_category_input` devolve `normalize_text(raw)` para quem NÃO
+    pode ter categoria custom: "Padaria do Zé" seria gravado "padaria do ze" com o
+    histórico em "Padaria do Zé", e o donut — que agrupa pela string crua, sensível a
+    caixa e acento (`db/accounts.py`) — abriria a fatia GÊMEA que o #147 existe pra
+    matar. É a mesma razão pela qual o cobrador usa `create=False`
+    (`recurring_charger._canonical_category`); a porta de escrita não pode fazer o que
+    o cobrador foi proibido de fazer.
+
+    Quem não pode ter custom hoje é o PLANO INATIVO (assinatura vencida, cancelada ou
+    com pagamento falhando): `get_plan_tier` colapsa em "free" quando `_paid_plan_active`
+    é falso (`core/services/plan_service.py:117-122`) — não é mais um produto grátis.
+    E `list_due_recurring_expenses` não filtra por plano, então essa pessoa continua
+    gerando lançamento todo mês.
+
+    Para quem PODE ter custom nada muda: `create=True`, grafia preservada, catálogo
+    semeado depois pelo `ensure_user_category`, e a falha de leitura do catálogo
+    continua SUBINDO (`strict=create`) — decisão presa por
+    `test_escrita_falha_quando_o_catalogo_cai`. Para quem não pode, a leitura degrada
+    e o `or raw` devolve o texto cru, que é o que a `main` gravava.
+    """
+    # ponytail: 1 leitura de plano por escrita de recorrente (antes o
+    # `resolve_category_input` só a fazia quando os passos 1-2 não achavam nada).
+    # Passar o veredito como argumento só se aparecer no perfil.
+    return resolve_category_input(
+        user_id, raw, create=_custom_categories_allowed(user_id)
+    ) or raw
 
 
 def _custom_categories_allowed(user_id: int) -> bool:

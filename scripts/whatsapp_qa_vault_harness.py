@@ -50,17 +50,12 @@ if WORKTREE_ROOT not in sys.path:
     sys.path.insert(0, WORKTREE_ROOT)
 
 # ─────────────────────────────────────────────────────────────────────────
-# 1) DB isolado e descartável
+# 1) Nome do database (a criação vem depois do preflight de modelos)
 # ─────────────────────────────────────────────────────────────────────────
 import psycopg  # noqa: E402
 
 DB_NAME = f"qa_wa_pilot_{_uuid.uuid4().hex[:12]}"
 _ADMIN_DSN = "postgresql://localhost:5432/postgres"
-
-print(f"[harness] criando database isolado {DB_NAME} ...")
-with psycopg.connect(_ADMIN_DSN, autocommit=True) as _conn:
-    _conn.execute(f'create database "{DB_NAME}"')
-os.environ["DATABASE_URL"] = f"postgresql://localhost:5432/{DB_NAME}"
 
 # ─────────────────────────────────────────────────────────────────────────
 # 2) Envs obrigatórias (mesmos valores/padrão de tests/conftest.py)
@@ -89,6 +84,52 @@ if not os.environ.get("OPENAI_API_KEY"):
     print("[harness] AVISO: OPENAI_API_KEY não encontrada — chamadas de IA vão falhar.")
 
 # ─────────────────────────────────────────────────────────────────────────
+# 3b) Medidor de chamadas OpenAI (custo + coluna comando × IA)
+# ─────────────────────────────────────────────────────────────────────────
+import scripts._ai_meter as meter  # noqa: E402
+
+meter.install()
+
+# Modelos que ESTE código usa de fato: o do .env (6 módulos leem a mesma env)
+# e os dois fixos do media_service. Conferir antes vira erro de apelido aqui,
+# em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
+# ABORTA só no que este harness realmente alcança. O `msg()` monta TODA
+# mensagem com `attachments=[]` (linha única no arquivo), então nenhuma cena
+# chega no whisper nem no gpt-4o de visão. Barrar a rodada porque a chave não
+# tem acesso a um modelo de mídia que ninguém vai chamar é impedir trabalho
+# válido — defeito que EU introduzi ao fazer o preflight abortar.
+_MODELO_DE_CHAT = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+_MODELOS_DE_MIDIA = [
+    "whisper-1",  # core/services/media_service.py:102
+    "gpt-4o",     # core/services/media_service.py:187
+]
+MODEL_PROBLEMS = meter.check_models([_MODELO_DE_CHAT])
+# Os de mídia continuam conferidos, mas só AVISAM: o dia em que entrar cena
+# com anexo, o aviso vira o lembrete de promovê-los pro bloco que aborta.
+for _p in meter.check_models(_MODELOS_DE_MIDIA):
+    print(f"[harness] AVISO (modelo de mídia, nenhuma cena o alcança hoje): {_p}")
+if MODEL_PROBLEMS:
+    # ABORTA, e antes de criar qualquer coisa. O comentário acima prometia
+    # "erro de apelido em 1 segundo, não no meio de uma cena com o banco já
+    # semeado" — e o código só imprimia e seguia, gastando minutos e dólares
+    # pra produzir um relatório inválido. Promessa que o código não cumpre é
+    # pior que promessa nenhuma: dá confiança falsa em quem lê.
+    for _p in MODEL_PROBLEMS:
+        print(f"[harness] MODELO: {_p}")
+    print("[harness] ABORTANDO antes de criar o database — conserte a chave/modelo "
+          "e rode de novo. Nada foi criado, nada foi gasto.")
+    sys.exit(1)
+print(f"[harness] modelo de chat conferido em /v1/models: {_MODELO_DE_CHAT}")
+
+# ─────────────────────────────────────────────────────────────────────────
+# 3c) DB isolado e descartável — SÓ depois do preflight passar.
+# ─────────────────────────────────────────────────────────────────────────
+print(f"[harness] criando database isolado {DB_NAME} ...")
+with psycopg.connect(_ADMIN_DSN, autocommit=True) as _conn:
+    _conn.execute(f'create database "{DB_NAME}"')
+os.environ["DATABASE_URL"] = f"postgresql://localhost:5432/{DB_NAME}"
+
+# ─────────────────────────────────────────────────────────────────────────
 # 4) init_db()
 # ─────────────────────────────────────────────────────────────────────────
 from db import init_db  # noqa: E402
@@ -102,6 +143,36 @@ print("[harness] schema inicializado.")
 from core.types import IncomingMessage  # noqa: E402
 import core.handle_incoming as hi  # noqa: E402
 import db  # noqa: E402
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Guarda de afirmações: coleta o que as tools devolveram (a evidência que o
+# modelo teve na mão) pra conferir número inventado na resposta.
+# `_dispatch_tool` é o ÚNICO ponto por onde todo resultado de tool passa.
+# ─────────────────────────────────────────────────────────────────────────
+from core.services import ai_guard  # noqa: E402
+import core.services.ai_chat.runner as _runner  # noqa: E402
+
+# Espiona a PRÓPRIA função de produção em vez de redefinir aqui o que é
+# "resposta escrita pelo modelo". A versão anterior contava entrada no
+# `_run_tool_loop`, e o loop também retorna pelo `terminal_msg` — template
+# determinístico de write auto-executado, que o modelo não escreveu. Aquilo
+# inflava a contagem de afirmações de IA com confirmação gerada por código.
+#
+# `_log_unsupported_claims` é chamada exatamente no ramo em que o modelo
+# escreveu o texto, e recebe as mensagens JÁ fatiadas por turno. Espionando
+# ela, harness e produção não têm como divergir — que é o defeito que o Codex
+# pegou na rodada anterior, quando eu tinha duas definições.
+GUARD_CALLS: list[tuple[str, list[dict]]] = []
+_orig_guard = _runner._log_unsupported_claims
+
+
+def _guard_spy(user_id, reply, messages):
+    GUARD_CALLS.append((reply, list(messages)))
+    return _orig_guard(user_id, reply, messages)
+
+
+_runner._log_unsupported_claims = _guard_spy
 
 
 def msg(uid, text, platform="whatsapp"):
@@ -150,13 +221,15 @@ class Scenario:
         self.name = name
         self.domain = domain
         self.scenario_desc = scenario_desc
-        self.turns: list[tuple[str, str]] = []  # (você, pigbank)
+        self.turns: list[tuple[str, str, list[dict], list]] = []  # (você, pigbank, chamadas, claims)
         self.checklist: list[tuple[bool | None, str]] = []
         self.veredict = "🔍"
         self.notes: list[str] = []
         self.exception = None
 
     def turn(self, uid, text, platform="whatsapp"):
+        mark = meter.snapshot()
+        gmark = len(GUARD_CALLS)
         try:
             resp = send(uid, text, platform=platform)
         except Exception as e:
@@ -164,7 +237,19 @@ class Scenario:
             resp = f"(EXCEÇÃO: {e.__class__.__name__}: {e})"
             self.exception = tb
             self.veredict = "⚠️"
-        self.turns.append((text, resp))
+        # A marca é lida MESMO no caminho da exceção: chamada que já saiu foi
+        # cobrada, e o turno que quebrou depois dela não é "comando".
+        chamadas = meter.since(mark)
+        # A guarda só faz sentido em resposta de MODELO. No caminho
+        # determinístico não há tool nenhuma pra servir de evidência, e todo
+        # ID viraria falso positivo — o código que imprime `#1` é o mesmo que
+        # gravou a linha. Quem diz se o modelo escreveu é a produção, não eu.
+        claims = []
+        for resposta_do_modelo, msgs_do_turno in GUARD_CALLS[gmark:]:
+            claims += ai_guard.check(resposta_do_modelo,
+                                      ai_guard.tool_results(msgs_do_turno),
+                                      user_text=text)
+        self.turns.append((text, resp, chamadas, claims))
         return resp
 
     def check(self, ok, label):
@@ -179,6 +264,12 @@ class Scenario:
 
 SCENARIOS: list[Scenario] = []
 DISCREPANCIAS: list[str] = []
+
+# O `append_ledger` devolve False quando não consegue gravar (eu o fiz parar de
+# levantar pra não derrubar rodada paga). Ignorar esse retorno fazia o relatório
+# imprimir um "acumulado do mês" que sabidamente não inclui a própria rodada —
+# número errado com cara de medido, que é o que este arquivo inteiro combate.
+LEDGER_OK = True
 
 
 def extract_hash_id(text: str) -> str | None:
@@ -698,7 +789,9 @@ def cena_15_parcelamento():
     sc.note(f"PC capturado (celular): {pc2}")
     C14_STATE["pc_celular"] = pc2
 
-    limit_blocked = any("excede o limite" in r.lower() for _, r in sc.turns)
+    # Indexa em vez de desempacotar: `turns` ganhou campos (chamadas, claims) e
+    # o `for _, r in` daqui quebrava a cena inteira a cada campo novo.
+    limit_blocked = any("excede o limite" in t[1].lower() for t in sc.turns)
     if limit_blocked and not all(x[0] for x in sc.checklist):
         sc.set_veredict("🔍")
         sc.note("Veredito 🔍 em vez de ❌: bloqueio por limite (ver aviso acima), não erro de "
@@ -936,6 +1029,166 @@ def cena_23_pendencia_abandonada():
 # Execução sequencial e determinística
 # ═══════════════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# PARES COMANDO × IA
+#
+# As 23 cenas acima quase não exercitam o modelo: medido, 84 dos 90 turnos
+# não fazem chamada nenhuma, e só 2 respostas foram ESCRITAS pela IA. Elas
+# cobrem o mesmo caminho determinístico que o pytest já cobre de graça.
+#
+# Aqui a pergunta é outra: a mesma intenção, dita CURTA e dita SOLTA, chega no
+# mesmo lugar? Não escrevo resultado esperado à mão — é o que tornaria isto
+# caro e frágil. A asserção é que os dois lados afirmam os mesmos valores.
+#
+# A forma curta TENDE a ser determinística e servir de gabarito, mas não é
+# garantido e o harness não assume: qual caminho cada lado tomou sai MEDIDO no
+# rótulo do turno. Medido em 2026-09-02, o par "Gasto por categoria" inverteu —
+# "gastos com saúde" foi pra IA e "quanto eu gastei com remedio e farmacia"
+# ficou no determinístico.
+#
+# Dois usuários Pro com seed IDÊNTICO, um pra cada lado: mesma base de dados,
+# duas formas de perguntar. Se divergirem, ou a IA alucinou ou achou um bug —
+# foi assim que a cena 18 apareceu.
+# ═══════════════════════════════════════════════════════════════════════
+
+SEED_PAR = (
+    "gastei 50 no mercado",
+    "gastei 123,45 na farmacia",
+    "recebi 2000 de salario",
+    "gastei 89,90 com uber",
+)
+
+# (rótulo, forma CURTA, forma SOLTA como o usuário falaria)
+PARES = [
+    ("Saldo",            "saldo",             "qto sobrou pra mim"),
+    ("Saldo (2)",        "saldo",             "quanto eu tenho de dinheiro agora"),
+    ("Extrato",          "extrato",           "me mostra meus ultimos lancamentos"),
+    ("Gasto do mês",     "quanto gastei",     "quanto eu torrei esse mes"),
+    ("Gasto do mês (2)", "quanto gastei",     "somando tudo, quanto saiu da minha conta"),
+    ("Registrar gasto",  "gastei 30 no ifood", "torrei trinta reais no ifood hoje"),
+    ("Registrar receita", "recebi 500 freela", "caiu quinhentos de freela na conta"),
+    ("Gasto por categoria", "gastos com saúde", "quanto eu gastei com remedio e farmacia"),
+    ("Limite do cartão", "limite nubank",     "quanto ainda posso gastar no nubank"),
+    ("Fatura",           "fatura nubank",     "quanto ta a fatura do nubank"),
+    ("Listar cartões",   "cartoes",           "quais cartoes eu tenho cadastrados"),
+]
+
+
+def _seed_par(com_cartao: bool) -> int:
+    """Usuário Pro com base idêntica dos dois lados. Semeia pelo caminho de
+    comando de propósito: é determinístico e (quase) não gasta chamada."""
+    uid = new_pro_uid()
+    for t in SEED_PAR:
+        resp = send(uid, t)
+        # Conferir os QUATRO, não só o do cartão. No commit anterior eu escrevi
+        # que estava "corrigindo a classe, não a instância" e validei UM seed —
+        # a classe era "toda resposta de seed". Um lançamento que não entra
+        # deixa os dois usuários com a mesma base incompleta, e o par volta a
+        # ganhar ✅ comparando totais iguais e errados, inclusive R$ 0,00.
+        if extract_hash_id(resp) is None:
+            raise RuntimeError(f"seed {t!r} não gerou lançamento (sem ID #N): {resp[:120]!r}")
+    if com_cartao:
+        seed_card(uid)
+        # "comprei 200 no nubank" registrava DESPESA COMUM, não compra no
+        # crédito — medido: a resposta é "💸 Despesa registrada". A fatura
+        # ficava zerada e o par Fatura passava comparando R$ 0,00 com R$ 0,00.
+        resp = send(uid, "comprei 200 no cartao nubank")
+        # E conferir não é redundante com acertar a frase: sem isto, QUALQUER
+        # regressão futura no roteamento volta a produzir par verde comparando
+        # dois zeros. Erro no seed tem que derrubar a cena, não passar calado —
+        # `roda_pares` captura e marca ⚠️.
+        if extract_cc_code(resp) is None:
+            raise RuntimeError(
+                f"seed de compra no crédito não pegou (sem código CC): {resp[:120]!r}")
+    return uid
+
+
+def roda_pares():
+    precisa_cartao = ("nubank", "cartoes", "fatura", "cartao")
+    for rotulo, cmd, ia in PARES:
+        com_cartao = any(k in (cmd + " " + ia).lower() for k in precisa_cartao)
+        sc = Scenario(f"PAR — {rotulo}", "comando × IA",
+                      "dois users Pro com seed idêntico; caminho de cada lado é medido")
+        try:
+            uid_c = _seed_par(com_cartao)
+            uid_i = _seed_par(com_cartao)
+        except Exception:
+            sc.exception = traceback.format_exc()
+            sc.set_veredict("⚠️")
+            SCENARIOS.append(sc)
+            continue
+
+        r_cmd = sc.turn(uid_c, cmd)
+        r_ia = sc.turn(uid_i, ia)
+
+        v_cmd = ai_guard.money_cents(r_cmd)
+        v_ia = ai_guard.money_cents(r_ia)
+        inventados = v_ia - v_cmd
+
+        sem_invencao = not inventados
+        trouxe_dado = bool(v_ia) or not v_cmd
+        faltando = v_cmd - v_ia
+        sc.check(sem_invencao, "todo valor da forma solta aparece na resposta da forma curta")
+        sc.check(trouxe_dado, "a forma solta trouxe o dado numérico que a curta traz")
+        # Terceiro item, e NÃO entra no veredito: exigir todos os valores
+        # reprovaria resposta legítima. "limite nubank" devolve total, usado e
+        # disponível; "quanto posso gastar" responder só o disponível é uma
+        # resposta boa, não um defeito. Mas `trouxe_dado` sozinho passa com UM
+        # valor de três, então a omissão precisa aparecer em algum lugar —
+        # aqui, como `[?]` no checklist, pra quem lê o relatório julgar.
+        sc.check(None if faltando else True,
+                 "a forma solta trouxe TODOS os valores da curta (informativo)")
+
+        # Os DOIS turnos, não só o segundo. A forma curta também pode cair na
+        # IA — o harness permite isso de propósito e mede o caminho de cada
+        # lado —, e olhando só o último turno uma alucinação na curta passava:
+        # `inventados` fica vazio se a solta não repete o valor inventado, a
+        # omissão é só informativa, e o par saía ✅.
+        claims_do_par = sc.turns[-2][3] + sc.turns[-1][3]
+        guarda_ok = all(c.supported for c in claims_do_par)
+        sc.check(guarda_ok, "guarda: nenhum número da IA veio de fora das tools (os dois lados)")
+
+        if inventados:
+            sc.note("valores que só a forma solta afirma: "
+                     + ", ".join(f"R$ {v/100:.2f}" for v in sorted(inventados)))
+        # Máquina de estados do veredito, enumerada de uma vez (CLAUDE.md §4:
+        # dois achados no mesmo subsistema = parar de remendar). Dois estados
+        # davam ✅ sem terem comparado nada:
+        #   - chamada de IA FALHOU nos dois lados → tudo vazio → passava;
+        #   - nenhum dos lados afirmou valor → nada foi medido → passava.
+        chamadas_do_par = sc.turns[-2][2] + sc.turns[-1][2]
+        falhas_openai = sorted({c["erro"] for c in chamadas_do_par if c.get("erro")})
+        sc.check(not falhas_openai, "nenhuma chamada à OpenAI falhou neste par")
+
+        if faltando:
+            sc.note("valores que a forma curta traz e a solta não: "
+                     + ", ".join(f"R$ {v/100:.2f}" for v in sorted(faltando)))
+        if v_cmd and not v_ia:
+            sc.note(f"a forma curta trouxe {len(v_cmd)} valor(es) e a solta não trouxe nenhum")
+        if sc.exception:
+            # Um turno que levantou já marcou ⚠️ e guardou o traceback. Sem
+            # este ramo, o veredito por valores sobrescrevia isso com ❌ ou 🔍 e
+            # o resumo classificava uma comparação INVÁLIDA como resultado de
+            # produto. Enumerei os estados por valores e esqueci o estado que
+            # vem de fora deles.
+            sc.set_veredict("⚠️")
+            sc.note("um turno levantou exceção — o par não comparou nada, "
+                     "o resultado não vale (traceback no fim da cena)")
+        elif falhas_openai:
+            # Não é ❌: ❌ acusa o produto, e aqui quem quebrou foi a chamada.
+            sc.set_veredict("⚠️")
+            sc.note("chamada à OpenAI falhou (" + ", ".join(falhas_openai)
+                     + ") — o par não comparou nada, o resultado não vale")
+        elif not v_cmd and not v_ia:
+            sc.set_veredict("🔍")
+            sc.note("nenhum dos dois lados afirmou valor em R$ — o par não mediu nada; "
+                     "ou o caso não é numérico, ou os dois falharam em responder")
+        else:
+            sc.set_veredict("✅" if (sem_invencao and trouxe_dado and guarda_ok) else "❌")
+        SCENARIOS.append(sc)
+
+
 def main():
     t0 = time.time()
 
@@ -967,6 +1220,10 @@ def main():
         cena_23_pendencia_abandonada,
     ]
 
+    so_pares = "--pares" in sys.argv
+    if so_pares:
+        ordered = []
+
     for fn in ordered:
         print(f"[harness] rodando {fn.__name__} ...")
         try:
@@ -979,9 +1236,20 @@ def main():
             sc.set_veredict("⚠️")
             SCENARIOS.append(sc)
 
+    print(f"[harness] rodando {len(PARES)} pares comando × IA ...")
+    roda_pares()
+
     elapsed = time.time() - t0
-    print(f"[harness] execução das 23 funções de cena concluída em {elapsed:.1f}s "
+    print(f"[harness] execução concluída em {elapsed:.1f}s "
           f"({len(SCENARIOS)} cenários registrados).")
+
+    # Ledger ANTES do relatório: o `write_report()` imprime o acumulado do mês,
+    # e gravando depois o artefato sempre omitia a própria rodada — na primeira
+    # do mês ele mostrava custo > 0 e acumulado 0,0000, contradizendo a si
+    # mesmo. O total do console estava certo só porque roda depois.
+    global LEDGER_OK
+    usd_rodada, _ = meter.cost_usd(meter.CALLS)
+    LEDGER_OK = meter.append_ledger(usd_rodada, "whatsapp_qa_vault_harness")
 
     write_report()
 
@@ -991,9 +1259,49 @@ def main():
     print(f"[harness] resumo: ✅{counts['✅']} ❌{counts['❌']} ⚠️{counts['⚠️']} 🔍{counts['🔍']} "
           f"de {len(SCENARIOS)}")
 
+    usd, unknown = meter.cost_usd(meter.CALLS)
+    ia, cmd = _split_paths()
+    print(f"[harness] caminho: {ia} turno(s) por IA, {cmd} por comando "
+          f"({len(meter.CALLS)} chamadas OpenAI)")
+    print(f"[harness] custo desta rodada: US$ {usd:.4f}")
+    if unknown:
+        print(f"[harness] AVISO: modelo(s) sem preço na tabela, FORA do custo: {', '.join(unknown)}")
+    todas = [c for sc in SCENARIOS for _, _, _, cl in sc.turns for c in cl]
+    nao_sust = [c for c in todas if not c.supported]
+    print(f"[harness] guarda: {len(todas)} afirmação(ões) numérica(s) em resposta de IA, "
+          f"{len(nao_sust)} NÃO sustentada(s)")
+    for c in nao_sust:
+        print(f"[harness]   🚨 {c.token} ({c.kind}) — {c.detail}")
+    if LEDGER_OK:
+        print(f"[harness] acumulado dos harnesses no mês: US$ {meter.month_total_usd():.4f}")
+    else:
+        print("[harness] acumulado do mês INDISPONÍVEL — o ledger não pôde ser gravado")
+
+
+def _split_paths() -> tuple[int, int]:
+    """(turnos que chamaram IA, turnos resolvidos por comando)."""
+    ia = cmd = 0
+    for sc in SCENARIOS:
+        for _, _, chamadas, _ in sc.turns:
+            if chamadas:
+                ia += 1
+            else:
+                cmd += 1
+    return ia, cmd
+
 
 def write_report():
-    path = os.path.join(WORKTREE_ROOT, "docs", "qa_whatsapp_pilot_2026-08-20.md")
+    # Data do dia, não fixa: com o nome cravado em 2026-08-20 toda rodada nova
+    # sobrescrevia em silêncio o relatório da rodada anterior — que é o único
+    # registro do que a IA respondeu naquele dia, e não se reproduz sem pagar
+    # a suíte de novo.
+    # Com data, hora, minuto E SEGUNDO. Só data sobrescrevia entre rodadas do
+    # mesmo dia (custou a comparação que provava que o defeito da cena 18 é
+    # intermitente); e só até o minuto ainda sobrescreve, porque a rodada
+    # completa leva 11,6s medidos — duas dentro do mesmo minuto é rotina, não
+    # exceção.
+    hoje = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    path = os.path.join(WORKTREE_ROOT, "docs", f"qa_whatsapp_pilot_{hoje}.md")
     counts = {"✅": 0, "❌": 0, "⚠️": 0, "🔍": 0}
     for sc in SCENARIOS:
         counts[sc.veredict] = counts.get(sc.veredict, 0) + 1
@@ -1001,13 +1309,46 @@ def write_report():
     lines = []
     lines.append("# QA piloto — vault WhatsApp (23 interações, 3 domínios)")
     lines.append("")
-    lines.append(f"Gerado em 2026-08-20 por `scripts/whatsapp_qa_vault_harness.py`, chamando "
+    lines.append(f"Gerado em {hoje} por `scripts/whatsapp_qa_vault_harness.py`, chamando "
                   f"`core.handle_incoming.handle_incoming()` direto contra um Postgres isolado "
                   f"e descartável, sem mockar a IA (chamadas OpenAI reais).")
     lines.append("")
     lines.append(f"**Sumário:** {len(SCENARIOS)} interações — "
                   f"✅ {counts['✅']} · ❌ {counts['❌']} · ⚠️ {counts['⚠️']} · 🔍 {counts['🔍']}")
     lines.append("")
+    usd, unknown = meter.cost_usd(meter.CALLS)
+    ia, cmd = _split_paths()
+    lines.append(f"**Caminho:** {ia} turno(s) resolvido(s) pela IA · {cmd} por comando/regex "
+                  f"(sem chamada nenhuma) — {len(meter.CALLS)} chamadas OpenAI no total.")
+    lines.append("")
+    tin = sum(c["in"] for c in meter.CALLS)
+    tcached = sum(c["cached"] for c in meter.CALLS)
+    pct = (100 * tcached / tin) if tin else 0
+    mes = (f"US$ {meter.month_total_usd():.4f} acumulado no mês pelos harnesses"
+           if LEDGER_OK else
+           "**acumulado do mês INDISPONÍVEL** — o ledger não pôde ser gravado, "
+           "então esta rodada não entrou nele e o total seria menor que o real")
+    lines.append(f"**Custo:** US$ {usd:.4f} nesta rodada · {mes}. {tin} tokens de entrada, "
+                  f"{tcached} cacheados ({pct:.0f}%), cobrados à metade. "
+                  f"Preços da tabela de 2026-09-01, sem o whisper (cobrado por minuto) "
+                  f"— reconfira antes de citar fora daqui.")
+    if unknown:
+        lines.append("")
+        lines.append(f"⚠️ **Fora do custo:** modelo(s) sem preço na tabela: {', '.join(unknown)}.")
+    if MODEL_PROBLEMS:
+        lines.append("")
+        lines.append("⚠️ **Modelos:** " + " · ".join(MODEL_PROBLEMS))
+    lines.append("")
+    todas = [c for sc in SCENARIOS for _, _, _, cl in sc.turns for c in cl]
+    nao_sust = [c for c in todas if not c.supported]
+    if todas:
+        lines.append(f"**Guarda de afirmações:** {len(todas)} afirmação(ões) numérica(s) "
+                      f"em resposta de IA · **{len(nao_sust)} não sustentada(s)** "
+                      f"(número que não veio de nenhuma tool nem da mensagem do usuário).")
+        for c in nao_sust:
+            lines.append(f"- 🚨 `{c.token}` ({c.kind}) — {c.detail}")
+        lines.append("")
+
     lines.append("## Discrepâncias entre vault e código")
     lines.append("")
     if DISCREPANCIAS:
@@ -1023,9 +1364,12 @@ def write_report():
         lines.append(f"## {sc.name}")
         lines.append(f"**Domínio:** {sc.domain} · **Cenário/usuário:** {sc.scenario_desc}")
         lines.append("")
-        for texto, resposta in sc.turns:
+        for texto, resposta, chamadas, claims in sc.turns:
             lines.append(f"> Você: {texto}")
             lines.append(f"> PigBank: {resposta}")
+            lines.append(f"> _caminho: {meter.path_label(chamadas)}_")
+            if claims:
+                lines.append(f"> _guarda: {ai_guard.verdict(claims)}_")
             lines.append(">")
         lines.append("")
         lines.append(f"**Veredito:** {sc.veredict}")

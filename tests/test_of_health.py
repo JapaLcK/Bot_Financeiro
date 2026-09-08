@@ -462,10 +462,20 @@ _HTML = (pathlib.Path(__file__).resolve().parent.parent
          / "frontend" / "settings.html").read_text(encoding="utf-8")
 
 
+# Comentário JS é ruído para TODAS as leituras abaixo, e ele derrota as quatro
+# nos DOIS sentidos (medido): um `// paused nao usa i.detail` acima de uma
+# entrada deixa a paridade VERMELHA sem defeito, e — pior — um comentário logo
+# ABAIXO de uma entrada que parou de ler `i.detail` a deixa VERDE, que é o bug
+# que a guarda existe para pegar. Some para a entrada anterior no `re.split` e
+# casa dentro do próprio texto no `re.search`. Some aqui, uma vez, em vez de em
+# cada leitor: `(?<!:)` para não comer o `//` de uma URL (`https://`).
+_SEM_COMENTARIO = re.compile(r"/\*.*?\*/|(?<!:)//[^\n]*", re.S)
+
+
 def _bloco(nome: str, abre: str, fecha: str) -> str:
     m = re.search(rf"const {nome} = \{abre}(.*?)\{fecha};", _HTML, re.S)
     assert m, f"{nome} sumiu/foi renomeado no settings.html — a paridade ficou cega"
-    return m.group(1)
+    return _SEM_COMENTARIO.sub("", m.group(1))
 
 
 def _js_pill_states() -> set[str]:
@@ -508,3 +518,374 @@ def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
     assert esperado == js, (
         f"estado sem mensagem em OF_VERDICT: {sorted(esperado - js)}; "
         f"mensagem para estado que não existe no backend: {sorted(js - esperado)}")
+
+
+# ── ONDA 3, item 3: a taxonomia da Pluggy deixou de ser um chute ─────────────
+# A Onda 1 registrou "um `item_status` que não esteja em `_NEEDS_USER` nem seja
+# ERROR cai adiante como saudável" como LIMITAÇÃO CONHECIDA, porque a taxonomia
+# do provedor não era observável daqui e adivinhá-la seria pior que a lacuna.
+#
+# A evidência apareceu, e é documentação oficial — não log nosso, não payload
+# observado: https://docs.pluggy.ai/docs/item-lifecycle enumera o campo `status`
+# do Item em CINCO valores, e só esses cinco:
+#
+#   UPDATED             sucesso
+#   UPDATING            transitório
+#   WAITING_USER_INPUT  transitório, mas depende do usuário (MFA)
+#   LOGIN_ERROR         erro, exige credencial nova
+#   OUTDATED            erro, retentável
+#
+# O que a mesma página mostra e é a armadilha aqui: `ERROR`, `MERGE_ERROR`,
+# `INVALID_CREDENTIALS`, `SITE_NOT_AVAILABLE` e companhia são valores de
+# `executionStatus`, um campo DIFERENTE — não são status de Item. Por isso a
+# Onda 3 não acrescenta MERGE_ERROR a lista nenhuma: ele nunca chega em
+# `health["item_status"]`, que sai de `item.get("status")`
+# (`pluggy_health.py:196`). Colocá-lo lá seria exatamente o "inventar status
+# externo" que esta onda proíbe.
+#
+# Este teste não muda comportamento: ele PRENDE o que já é verdade, agora que dá
+# para dizer que a lista está fechada. Se a Pluggy publicar um sexto status, ele
+# não falha sozinho — quem falha é a revisão. O que ele pega é a regressão:
+# alguém tirar um dos cinco de `_NEEDS_USER`/`_UPDATING` por engano.
+#
+# CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa 1 vermelho
+# (o caso OUTDATED); tirar "UPDATING" de `_UPDATING` deixa 2 (o caso UPDATING e o
+# `test_updating_e_updating`, que já existia).
+# CONTROLE POSITIVO: o caso UPDATED prova que a guarda não recusa tudo.
+
+_STATUS_DOCUMENTADOS = [
+    # (item_status, (status, reason) esperados do resolve, estado da tela)
+    ("UPDATED",            ("ACTIVE", ""), "updated"),
+    ("UPDATING",           ("ACTIVE", ""), "updating"),
+    ("WAITING_USER_INPUT", ("ERROR",  ""), "needs_user_action"),
+    ("LOGIN_ERROR",        ("ERROR",  ""), "needs_user_action"),
+    ("OUTDATED",           ("ERROR",  ""), "needs_user_action"),
+    # O SEXTO, que a tabela do `item-lifecycle` não lista mas os payloads de
+    # `docs/connect-an-account` (Safra, Banco Inter PF) e `docs/sandbox` (QR
+    # Login) trazem: `"status": "WAITING_USER_ACTION"`. Autorizar dispositivo /
+    # ler QR no app do banco. Estava em `_UPDATING` e a tela dizia
+    # "Atualizando…" numa conexão que só anda se a pessoa AGIR.
+    # CONTROLE NEGATIVO: devolvê-lo a `_UPDATING` deixa este caso vermelho.
+    ("WAITING_USER_ACTION", ("ERROR", ""), "needs_user_action"),
+]
+
+
+@pytest.mark.parametrize("item_status, resolve_esperado, estado_esperado",
+                         _STATUS_DOCUMENTADOS)
+def test_os_status_de_item_da_pluggy_estao_cobertos(
+        item_status, resolve_esperado, estado_esperado):
+    """Os valores conhecidos do campo `status` do Item, ponta a ponta: o que o
+    backend grava (`resolve_connection_state`) e o que a tela mostra
+    (`connection_ui_state`).
+
+    O par `(status, status_reason)` inteiro, não só o `status`: o módulo declara
+    que os dois são UM estado só, e afirmar metade deixaria passar um caminho
+    que devolvesse `ERROR, "item_missing"` para um `LOGIN_ERROR`."""
+    health = {"item_status": item_status, "products": {}, "stale_products": []}
+
+    assert resolve_connection_state(
+        health=health, has_data=True,
+        leitura_completa=True) == resolve_esperado, f"{item_status} → estado local"
+    status = resolve_esperado[0]
+
+    ui = connection_ui_state({
+        "status": status, "status_reason": "", "health": health,
+        # sync real posterior à autorização atual: sem isto o `sem_sync` da
+        # Onda 2 devolve "updating" para todo mundo e o teste não mede nada.
+        "last_sync_at": AGORA, "reconnected_at": None,
+    })
+    assert ui["state"] == estado_esperado, f"{item_status} → tela"
+
+
+@pytest.mark.parametrize("item, esperado, rotulo", [
+    ({"status": "UPDATED", "executionStatus": "MERGE_ERROR"}, "UPDATED",
+     "com os dois campos, vence o `status`"),
+    # O caso que discrimina de verdade: SEM `status`, um `or` para o
+    # `executionStatus` (o padrão que `db/open_finance.py` usa no upsert)
+    # deixaria `MERGE_ERROR` entrar como se fosse status de Item. A versão
+    # anterior deste teste mandava `status: "UPDATED"` e por isso passava
+    # mesmo COM a mutação aplicada — medido, 4957 verdes com o `or` no lugar.
+    # Com estes dois casos, a mesma mutação dá 2 vermelhos.
+    ({"executionStatus": "MERGE_ERROR"}, None, "sem `status`, NÃO cai no outro campo"),
+    ({"status": "", "executionStatus": "SITE_NOT_AVAILABLE"}, None,
+     "`status` vazio também não cai"),
+])
+def test_execution_status_de_erro_nao_e_status_de_item(item, esperado, rotulo):
+    """`MERGE_ERROR` e irmãos são `executionStatus`, não `status` do Item.
+
+    Prende a decisão de NÃO os mapear: eles não chegam a `health["item_status"]`
+    porque `derive_item_health` lê `item["status"]` e SÓ ele."""
+    saude = derive_item_health({"id": "item-x", **item}, now=AGORA)
+    assert saude["item_status"] == esperado, rotulo
+    assert saude["execution_status"] == ((item.get("executionStatus") or "").upper() or None)
+
+
+# ── ONDA 3: os membros de `executionStatus` nos conjuntos são LOAD-BEARING ───
+# `_NEEDS_USER` tem `INVALID_CREDENTIALS` e `_UPDATING` tem `CREATED` — os dois
+# são `executionStatus`, não status de Item, e por isso NUNCA chegam pelo
+# `health["item_status"]`. Parecem resíduo. Não são: `connection_ui_state`
+# compara os mesmos conjuntos com o `status` LOCAL da conexão, e o upsert de
+# `db/open_finance.py` grava `item.get("status") or item.get("executionStatus")`
+# ali. Sem eles, uma conexão em `INVALID_CREDENTIALS` deixa de dizer "Ação
+# necessária" e uma em `CREATED` deixa de dizer "Atualizando…".
+#
+# Medido antes deste teste existir: tirar os dois dos conjuntos deixava a suíte
+# INTEIRA verde (4957 passed). Era instrução de deleção sem rede.
+#
+# CONTROLE NEGATIVO: tirar `INVALID_CREDENTIALS` de `_NEEDS_USER` ou `CREATED`
+# de `_UPDATING` deixa um caso vermelho cada.
+
+# ── Codex #166: "Ação necessária" não diz QUAL ação ─────────────────────────
+# `_NEEDS_USER` é um balde só, e o detalhe fixo do estado é "Reautorize o banco".
+# Para `WAITING_USER_ACTION` isso manda a pessoa REFAZER a conexão quando o que
+# ela precisa é autorizar o dispositivo / ler o QR antes do `expiresAt` — ou
+# seja, a instrução errada faz perder exatamente a janela que importa.
+#
+# CONTROLE NEGATIVO: tirar a entrada de `_DETALHE_POR_STATUS` deixa os dois
+# casos abaixo vermelhos (o detalhe volta a ser "Reautorize o banco").
+# CONTROLE POSITIVO: `LOGIN_ERROR` prova que os OUTROS membros do balde seguem
+# com o detalhe compartilhado — senão a exceção teria virado regra.
+
+@pytest.mark.parametrize("origem", ["health", "status_local"])
+@pytest.mark.parametrize("item_status, detalhe_esperado", [
+    ("WAITING_USER_ACTION", "Autorize o acesso no app do banco"),
+    ("LOGIN_ERROR", "Reautorize o banco"),
+])
+def test_detalhe_da_acao_necessaria_e_especifico_quando_precisa(
+        origem, item_status, detalhe_esperado):
+    """Os dois ramos: com `health` medido e caindo no `status` LOCAL — o upsert
+    grava `item.get("status") or item.get("executionStatus")`, então o valor
+    chega pelos dois caminhos."""
+    linha = {"status_reason": "", "last_sync_at": AGORA, "reconnected_at": None}
+    if origem == "health":
+        linha |= {"status": "ERROR",
+                  "health": {"item_status": item_status, "products": {},
+                             "stale_products": []}}
+    else:
+        linha |= {"status": item_status, "health": None}
+
+    ui = connection_ui_state(linha)
+    assert ui["state"] == "needs_user_action"
+    assert ui["label"] == "Ação necessária"
+    assert ui["detail"] == detalhe_esperado
+
+
+# ── Codex do @hiago no #166: o MESMO defeito pela via do `executionStatus` ──
+# A autorização de dispositivo da Caixa (PF & PJ) NÃO chega como status de Item:
+# a doc mostra `"status": "OUTDATED"` com `"executionStatus":
+# "USER_AUTHORIZATION_PENDING"` (`docs/connect-an-account`, mais cinco páginas).
+# `OUTDATED` já estava em `_NEEDS_USER`, então o BALDE sempre acertou — quem
+# errava era o DETALHE, que mandava "Reautorize o banco" para quem só precisa
+# liberar o dispositivo no internet banking e esperar.
+#
+# CONTROLE NEGATIVO: tirar a consulta ao `execution_status` de `_detalhe_de_acao`
+# (ou a chave do dicionário) deixa o 1º caso vermelho.
+# CONTROLE POSITIVO: o 2º caso — `OUTDATED` SOZINHO continua com o detalhe
+# compartilhado. Sem ele, bastaria mapear `OUTDATED` inteiro para passar, e aí
+# quem só precisa reautorizar receberia a instrução de dispositivo.
+
+@pytest.mark.parametrize("execution_status, detalhe_esperado", [
+    ("USER_AUTHORIZATION_PENDING", "Autorize o acesso no app do banco"),
+    ("SUCCESS", "Reautorize o banco"),
+])
+def test_detalhe_olha_o_execution_status_quando_o_item_e_outdated(
+        execution_status, detalhe_esperado):
+    ui = connection_ui_state({
+        "status": "ERROR", "status_reason": "", "last_sync_at": AGORA,
+        "reconnected_at": None,
+        "health": {"item_status": "OUTDATED", "execution_status": execution_status,
+                   "products": {}, "stale_products": []}})
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == detalhe_esperado, ui
+
+
+# O payload REAL da Caixa, copiado de `docs.pluggy.ai/docs/connect-an-account`.
+# Os sete casos acima montam o `health` À MÃO, e por isso são todos cegos à
+# cadeia que o produz: o Tester sabotou `derive_item_health` para parar de gravar
+# `execution_status` e os sete continuaram VERDES, com a tela quebrada. Este
+# parte do item cru e vai até o detalhe — é o único que enxerga essa metade.
+#
+# CONTROLE NEGATIVO: tirar `execution_status` do dict de `derive_item_health`
+# (ou renomear a chave) deixa SÓ este vermelho.
+
+ITEM_CAIXA_DEVICE = {
+    "id": "item-caixa",
+    "status": "OUTDATED",
+    "executionStatus": "USER_AUTHORIZATION_PENDING",
+    "error": {
+        "code": "USER_AUTHORIZATION_PENDING",
+        "message": "The user needs to grant necessary permissions for their account.",
+        "attributes": {"deviceNickname": "nick-name", "qrCodes": "cHJ1ZWJh"},
+    },
+}
+
+
+def test_item_cru_da_caixa_chega_na_tela_com_a_instrucao_certa():
+    health = derive_item_health(ITEM_CAIXA_DEVICE, now=AGORA)
+    assert health["item_status"] == "OUTDATED"
+    assert health["execution_status"] == "USER_AUTHORIZATION_PENDING"
+
+    ui = connection_ui_state({"status": "ERROR", "status_reason": "",
+                              "health": health, "last_sync_at": AGORA,
+                              "reconnected_at": None})
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == "Autorize o acesso no app do banco", (
+        "quem espera liberar o dispositivo no banco não pode ser mandado a "
+        f"refazer a conexão; veio {ui}")
+
+
+def test_execution_status_de_device_nao_vira_status_de_item():
+    """`USER_AUTHORIZATION_PENDING` NÃO entra em `_NEEDS_USER`/`_UPDATING`.
+
+    Ele é `executionStatus` e nunca `status` — acrescentá-lo aos conjuntos seria
+    o `executionStatus` "por precaução" que o bloco do módulo proíbe. O que ele
+    ganhou foi UM detalhe, e nada mais."""
+    from core.services import pluggy_health as ph
+
+    assert "USER_AUTHORIZATION_PENDING" not in ph._NEEDS_USER
+    assert "USER_AUTHORIZATION_PENDING" not in ph._UPDATING
+    assert ph._DETALHE_POR_STATUS["USER_AUTHORIZATION_PENDING"] == \
+        ph._DETALHE_POR_STATUS["WAITING_USER_ACTION"], \
+        "os dois estados de device/QR pedem a MESMA ação — uma frase só"
+
+
+@pytest.mark.parametrize("status_local, estado_esperado", [
+    ("INVALID_CREDENTIALS", "needs_user_action"),
+    ("CREATED", "updating"),
+])
+def test_execution_status_no_status_local_ainda_e_lido(status_local, estado_esperado):
+    ui = connection_ui_state({
+        "status": status_local, "status_reason": "", "health": None,
+        "last_sync_at": AGORA, "reconnected_at": None,
+    })
+    assert ui["state"] == estado_esperado
+
+
+# ── Codex #166, 3ª rodada: a instrução do toast também vem do backend ────────
+# O mesmo defeito bateu três vezes na mesma classe (status em `_UPDATING`;
+# detalhe da LINHA da conexão; e o TOAST do refresh). O que fecha a classe não é
+# consertar o terceiro caso: é prender a REGRA — estado cujo `detail` pode
+# VARIAR entre itens tem de ler `i.detail` no `OF_VERDICT`, senão o JS
+# sobrescreve a instrução que o backend calculou por uma frase fixa.
+#
+# Este teste DERIVA os dois lados em vez de declará-los: roda o
+# `connection_ui_state` sobre a matriz de entradas e vê quem tem detalhe
+# variável; lê o `OF_VERDICT` e vê quem consome `i.detail`.
+#
+# CONTROLES NEGATIVOS, os dois medidos AQUI (e não "ver relato"):
+#   • `["updating", () => OF_UPDATING_LOTE]` — o JS para de ler o detalhe de um
+#     estado que tem detalhe variável → 1 vermelho, este teste;
+#   • dar detalhe variável a `error_recoverable` no backend sem tocar no JS
+#     (a simulação da 4ª rodada) → 3 vermelhos: este teste, o de cobertura
+#     comportamental, e o `test_erro_sem_motivo_e_recuperavel` (que já existia e
+#     afirma o detalhe daquele estado).
+#
+# O QUE **NÃO** SERVE, e chegou a estar escrito aqui como se tivesse sido
+# medido: acrescentar chave a `_DETALHE_POR_STATUS` para um status fora de
+# `_NEEDS_USER`. Aquele dict só é lido dentro do ramo `needs_user_action`
+# (`pluggy_health.py`), então a chave vira código morto e o teste fica VERDE —
+# controle que não executa a linha mutada não é controle. Foi assim que a
+# afirmação "a classe fechou" quase entrou sem prova.
+
+def _detalhe_por_estado() -> dict[str, set]:
+    """estado → conjunto dos `detail` que ele consegue produzir."""
+    from core.services.pluggy_health import (
+        _LABELS, _NEEDS_USER, _UPDATING, READ_FAILED)
+
+    mapa: dict[str, set] = {}
+
+    def anota(linha: dict) -> None:
+        ui = connection_ui_state(linha)
+        mapa.setdefault(ui["state"], set()).add(ui["detail"])
+
+    for item_status in sorted(_NEEDS_USER | _UPDATING | {"ERROR", "UPDATED"}):
+        for reason in sorted(set(_LABELS) | {"", READ_FAILED}):
+            for sync in (AGORA, None):
+                for status_local in ("ACTIVE", "ERROR", "DELETED", "PAUSED", item_status):
+                    base = {"status": status_local, "status_reason": reason,
+                            "last_sync_at": sync, "reconnected_at": None}
+                    anota(base | {"health": {"item_status": item_status, "products": {},
+                                             "stale_products": []}})
+                    anota(base | {"health": None})
+
+    # `partial` só nasce de um health com produto atrasado — o detalhe dele é
+    # calculado ("Cartão desatualizado desde 12/08"), nunca fixo.
+    anota({"status": "ACTIVE", "status_reason": "", "last_sync_at": AGORA,
+           "reconnected_at": None, "health": derive_item_health(ITEM_PARCIAL, now=AGORA)})
+    return mapa
+
+
+# `i.detail`, `i?.detail` e `i["detail"]` são a MESMA leitura. Casar só a
+# primeira forma deixava a paridade VERMELHA num refactor inócuo (medido: trocar
+# `i.detail` por `i?.detail` nas três entradas reprovava as três).
+_LE_DETALHE = re.compile(r"""i\??(?:\.detail\b|\[['"]detail['"]\])""")
+
+
+def _js_verdict_le_detail() -> set[str]:
+    bloco = _bloco("OF_VERDICT", "[", "]")
+    partes = re.split(r'^\s*\["(\w+)",', bloco, flags=re.M)[1:]
+    entradas = dict(zip(partes[::2], partes[1::2]))
+    assert entradas, "OF_VERDICT ficou ilegível — a paridade do detalhe está cega"
+    return {estado for estado, corpo in entradas.items() if _LE_DETALHE.search(corpo)}
+
+
+def _mjs_estados_com_caso_comportamental() -> set[str]:
+    """Os estados que `of_refresh_ui.test.mjs` exercita com detalhe de verdade."""
+    caminho = pathlib.Path(__file__).parent / "frontend" / "of_refresh_ui.test.mjs"
+    texto = caminho.read_text(encoding="utf-8")
+    ini = texto.index("for (const [state, detail, proibido] of [")
+    fim = texto.index("]) {", ini)
+    return set(re.findall(r'^\s*\["(\w+)",', texto[ini:fim], re.M))
+
+
+def test_todo_estado_de_detalhe_variavel_tem_caso_comportamental():
+    """A guarda ESTRUTURAL abaixo é cega para "menciona `i.detail` e ignora" —
+    ela mesma diz isso. Quem pega é o caso comportamental do Playwright, e a
+    lista de lá é escrita à mão: um estado de detalhe variável NOVO nasceria com
+    guarda estrutural só, que é exatamente a rodada 4 esperando acontecer.
+
+    Este teste tira a lista da mão de quem escreve: o conjunto derivado do
+    backend tem de ser o mesmo que o `.mjs` exercita.
+
+    CONTROLE NEGATIVO: apagar uma das linhas do laço no `.mjs` deixa isto
+    vermelho nomeando o estado que ficou sem cobertura comportamental."""
+    from core.services.pluggy_health import _FIXED_DETAIL
+
+    variavel = {estado for estado, detalhes in _detalhe_por_estado().items()
+                if detalhes != {_FIXED_DETAIL.get(estado)}}
+    mjs = _mjs_estados_com_caso_comportamental()
+    assert variavel == mjs, (
+        f"estado de detalhe variável SEM caso comportamental (só a guarda "
+        f"estrutural, que é cega para menciona-e-ignora): {sorted(variavel - mjs)}; "
+        f"caso comportamental para estado de detalhe constante: {sorted(mjs - variavel)}")
+
+
+def test_estado_de_detalhe_variavel_le_i_detail_no_of_verdict():
+    """Guarda ESTRUTURAL: o conjunto dos estados de detalhe VARIÁVEL tem de ser
+    o mesmo que o `OF_VERDICT` lê.
+
+    O QUE ELA NÃO PEGA: mede MENÇÃO a `i.detail`, não USO. Uma entrada escrita
+    como `(i) => i.detail ? "frase fixa" : "frase fixa"` — o jeito plausível de
+    a classe reabrir, alguém encurtando a frase e mantendo a condição — passa
+    aqui (medido: mutar `updating` e `partial` assim deixa este arquivo verde).
+    Quem pega isso é a guarda COMPORTAMENTAL: um caso por estado de detalhe
+    variável no teste "veredito do refresh" de
+    `tests/frontend/of_refresh_ui.test.mjs`, que afirma que a mensagem CONTÉM o
+    detalhe do item E o nome da instituição. Esta aqui é a rede contra o estado NOVO que o JS nem
+    menciona; aquela é a rede contra o estado conhecido que menciona e ignora.
+    Um não substitui o outro.
+    """
+    from core.services.pluggy_health import _FIXED_DETAIL
+
+    mapa = _detalhe_por_estado()
+    assert set(mapa) >= {"needs_user_action", "updating", "partial"}, sorted(mapa)
+    variaveis = {e for e, d in mapa.items() if d != {_FIXED_DETAIL.get(e)}}
+    lidos = _js_verdict_le_detail()
+
+    assert variaveis == lidos, (
+        "estado com detalhe VARIÁVEL que o OF_VERDICT ignora (o toast troca a "
+        f"instrução do backend por frase fixa): {sorted(variaveis - lidos)}; "
+        "estado que o JS lê `i.detail` mas cujo detalhe é sempre o fixo (a "
+        f"leitura não serve para nada): {sorted(lidos - variaveis)}")

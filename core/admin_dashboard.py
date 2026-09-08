@@ -119,7 +119,13 @@ async def ensure_admin_tables():
                     event_type TEXT NOT NULL,
                     message TEXT NOT NULL,
                     source TEXT,
-                    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                    -- CASCADE (nao SET NULL): log de sistema e dado do titular
+                    -- e vai junto com a conta -- coerente com db/privacy.py, que
+                    -- ja faz `delete` puro nesta tabela. Quem VALE em runtime e o
+                    -- repair_user_fk_cascades (db/schema_repairs.py), que converge
+                    -- toda FK em users(id) a cada init_db; este DDL so precisava
+                    -- parar de declarar o oposto. Ver #221.
+                    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
                     details JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -574,6 +580,15 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                 SELECT id, level, event_type, message, source, user_id, details, created_at
                 FROM system_event_logs
                 WHERE created_at >= NOW() - INTERVAL '24 hours'
+                  -- A guarda de afirmações da IA roda em TODA resposta do
+                  -- modelo e tem frequência ainda desconhecida. Nesta lista de
+                  -- 100 linhas ela podia expulsar erro de verdade — um
+                  -- diagnóstico estragando o painel onde mora. Ela tem lugar
+                  -- próprio em `recent_ops` e contador em `ops_summary`.
+                  -- Excluído por TIPO, não restringindo a lista a
+                  -- warning/error: isso mudaria o painel para todo evento
+                  -- `info`, que não é o problema aqui.
+                  AND event_type <> 'ai_claim_unsupported'
                 ORDER BY created_at DESC
                 LIMIT 100
                 """
@@ -598,11 +613,26 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_signature_invalid') AS billing_signature_invalid_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'billing_payment_failed') AS billing_payment_failed_7d,
                     COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'engagement_loop_error') AS engagement_errors_7d,
+                    -- SOMA as afirmações, não conta as linhas: uma resposta com
+                    -- três valores sem dado grava UM evento, e contar linhas
+                    -- subnotificaria por 3x justo na resposta mais grave. O
+                    -- `~ '^[0-9]+$'` é o fallback pra linha malformada — cast
+                    -- direto estouraria a query inteira do dashboard por causa
+                    -- de um `details` estranho.
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_24h,
+                    COALESCE(SUM(
+                        CASE WHEN details->>'n_afirmacoes' ~ '^[0-9]+$'
+                             THEN (details->>'n_afirmacoes')::int ELSE 1 END
+                    ) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND event_type = 'ai_claim_unsupported'), 0) AS ai_claim_unsupported_7d,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_webhook_received') AS last_whatsapp_webhook_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_send_success') AS last_whatsapp_send_success_at,
                     MAX(created_at) FILTER (WHERE event_type LIKE 'category_ai_%') AS last_category_ai_at,
                     MAX(created_at) FILTER (WHERE event_type = 'whatsapp_token_invalid') AS last_whatsapp_token_invalid_at,
-                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at
+                    MAX(created_at) FILTER (WHERE event_type = 'billing_webhook_received') AS last_billing_webhook_at,
+                    MAX(created_at) FILTER (WHERE event_type = 'ai_claim_unsupported') AS last_ai_claim_unsupported_at
                 FROM system_event_logs
                 """
             )
@@ -661,11 +691,33 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
                    OR event_type LIKE 'billing_%'
                    OR event_type LIKE 'engagement_%'
                    OR event_type = 'http_unhandled_exception'
+                   -- toda falha do `_log_falha` (`core/observability.py`), que
+                   -- loga `logger.error` com `source` = o logger dele: as 2 rotas
+                   -- de `cards.py` e os 12 ERROR das portas de conversa
+                   -- (`core/handlers/`). O `source` separa isso de terceiros.
+                   OR (event_type = 'logger.error' AND source = 'core.observability')
                 ORDER BY created_at DESC
                 LIMIT 25
                 """
             )
             recent_ops = [dict(row) for row in await cur.fetchall()]
+
+            # Consulta PRÓPRIA, e não mais uma linha no filtro do `recent_ops`.
+            # A guarda roda em toda resposta de IA e tem frequência ainda
+            # desconhecida; nas duas listas compartilhadas ela podia expulsar
+            # evento operacional — primeiro nas 100 de `recent_errors`, depois
+            # nas 25 daqui. Trocar de balde não resolve quem é limitado: só
+            # balde próprio resolve.
+            await cur.execute(
+                """
+                SELECT level, event_type, message, source, user_id, details, created_at
+                FROM system_event_logs
+                WHERE event_type = 'ai_claim_unsupported'
+                ORDER BY created_at DESC
+                LIMIT 15
+                """
+            )
+            recent_ai_claims = [dict(row) for row in await cur.fetchall()]
 
             await cur.execute(
                 """
@@ -739,6 +791,7 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
         "recent_logins": recent_logins,
         "recent_errors": recent_errors,
         "recent_ops": recent_ops,
+        "recent_ai_claims": recent_ai_claims,
         "email_stats": email_stats,
         "recent_emails": recent_emails,
     }
@@ -747,6 +800,15 @@ async def _fetch_admin_overview_inner(days: int = 30, admin_user: str = "admin")
 # ── Painel de usuários (/admin/api/users) ────────────────────────────────────
 
 _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
+
+
+# Status crus de last_payment_status (o webhook grava o do Stripe sem traduzir,
+# db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
+# 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
+# terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
+# regra decide o rótulo do painel e o gate de /trial-reset (§0.7).
+_PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
+_LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
 
 
 def _derive_account_status(row: dict, now: datetime) -> str:
@@ -777,7 +839,7 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         return "trial"
     if pay == "active":
         return "paying"
-    if pay in ("past_due", "unpaid", "incomplete"):
+    if pay in _PAST_DUE_PAYMENT_STATUSES:
         return "past_due"
     if pay in ("canceled", "incomplete_expired"):
         return "canceled"
@@ -1151,11 +1213,20 @@ async def fetch_admin_user_detail(user_id: int, admin_user: str = "admin") -> di
                     a.engagement_opt_out, a.tip_email_opt_out, a.insight_email_opt_out,
                     a.deletion_status, a.deletion_requested_at, a.signup_source,
                     a.ai_messages_this_month,
+                    -- Trava de trial: plan_trials é keyed por TELEFONE e
+                    -- sobrevive à conta, então ela pode existir com
+                    -- a.trial_started_at NULL (trava herdada de outra conta com
+                    -- o mesmo número). Sem estas duas colunas a tela dizia
+                    -- "Trial iniciado —" numa conta inelegível. phone_hash NÃO
+                    -- é selecionado: é HMAC de PII e o front não precisa.
+                    pt.started_at AS trial_lock_started_at,
+                    pt.user_id    AS trial_lock_user_id,
                     EXISTS (
                         SELECT 1 FROM user_identities ui
                         WHERE ui.user_id = a.user_id AND ui.provider = 'whatsapp'
                     ) AS has_whatsapp_identity
                 FROM auth_accounts a
+                LEFT JOIN plan_trials pt ON pt.phone_hash = a.phone_hash
                 WHERE a.user_id = %s
                 """,
                 (int(user_id),),
@@ -1301,8 +1372,102 @@ def set_account_plan(
                 {"plan": plan, "months": int(months), "target": target},
             )
             row = cur.fetchone()
+            if row:
+                # SAVEPOINT, e não a transação inteira: falha ao gravar o grant
+                # não pode levar junto o UPDATE de `auth_accounts`. Esta é a
+                # ferramenta de REPARO manual — a última que pode virar a mais
+                # frágil do sistema. É a mesma política do webhook, que também
+                # grava o par legado primeiro e trata o grant como melhoria.
+                try:
+                    with conn.transaction():
+                        _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
+                except Exception as exc:
+                    # Observabilidade de VERDADE, não print: o §15 nomeia esta
+                    # rota como ferramenta de conciliação que não pode ser
+                    # desligada. O estado que sobra — coluna certa, grant
+                    # ausente — não é mais "some em 24 h": desde a v6 a
+                    # varredura não reduz sem o Stripe confirmar, então numa
+                    # conta com assinatura viva o ajuste PERSISTE e passa a
+                    # gerar alerta diário de redução não confirmada. Nos dois
+                    # desfechos (persistir errado ou ser desfeito) quem precisa
+                    # saber é uma pessoa, e é para isso que este alerta existe.
+                    from core.observability import log_system_event_sync
+                    log_system_event_sync(
+                        "error", "admin_grant_nao_gravado",
+                        "set_account_plan gravou auth_accounts mas NAO o grant; "
+                        "a reprojecao vai desfazer o ajuste.",
+                        source="admin", user_id=int(row["user_id"]),
+                        details={"plan": plan, "months": int(months), "erro": str(exc)[:300]},
+                    )
+                    try:
+                        from core.services.admin_notify import _send
+                        _send(f"Reparo manual do admin na conta {row['user_id']} "
+                              f"({plan}) NAO virou grant: {str(exc)[:200]}")
+                    except Exception:
+                        pass
         conn.commit()
+        if row:
+            from db_support import invalidate_auth_user_cache
+            invalidate_auth_user_cache(row["user_id"])
         return dict(row) if row else None
+
+
+def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
+    """O reparo manual do admin também vira GRANT (§9 da auditoria / §15 do
+    docs/plano_pix_anual_asaas.md).
+
+    Sem isto, o ajuste some na primeira reprojeção: a projeção de `plan_grants`
+    reescreve `auth_accounts` e o admin nunca teria escrito um grant. E é
+    justamente esta a ferramenta de conciliação de pagamento órfão e de acesso
+    concedido a menos — ela não pode ser desligada pelo PR que cria os casos que
+    ela repara.
+
+    Roda no mesmo cursor, mas sob SAVEPOINT: o UPDATE de `auth_accounts` entra
+    mesmo que este grant falhe. Não é "ou os dois, ou nenhum" — é deliberado ao
+    contrário, porque esta é a ferramenta de REPARO manual e ela não pode ser a
+    peça mais frágil do sistema. O preço é ficar com a coluna certa e o grant
+    ausente, o que a reprojeção desfaz em até 24 h; por isso a falha alerta
+    (`admin_grant_nao_gravado`) em vez de sumir num stderr.
+
+    `event_version = epoch(now)` põe a ordem humana acima de qualquer evento de
+    gateway já recebido; um webhook FUTURO ainda ganha, que é o comportamento
+    já documentado ("não fala com a Stripe: o próximo webhook dela volta a
+    mandar no par").
+
+    **A escrita do admin é AUTORITATIVA: revoga todos os grants ativos, não só
+    quando desce para `free`.** Revogar só no `free` deixava todo REBAIXAMENTO
+    sem efeito — pôr uma conta em `essencial` por 1 mês, tendo ela um grant
+    `stripe` de `pro_max` com 300 dias, voltava para `pro_max` na projeção
+    seguinte, porque a projeção pega o MAIOR tier vigente e a maior cobertura.
+    O ajuste sobrevivia na coluna e morria no primeiro `recompute`, que é
+    exatamente o defeito que este grant existe para consertar.
+    """
+    # Autoritativo: derruba o que houver antes de dizer o que vale.
+    cur.execute(
+        "update plan_grants"
+        "   set status='revoked', revoked_reason='admin_override',"
+        "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
+        "       updated_at=now()"
+        " where user_id = %s and status = 'active'",
+        (user_id,),
+    )
+    if plan == "free":
+        return
+
+    cur.execute(
+        "insert into plan_grants (user_id, source, external_ref, plan_stored,"
+        "                         starts_at, ends_at, status, event_version)"
+        " values (%s, 'admin', %s, %s, now(), now() + (%s || ' months')::interval,"
+        "         'active', extract(epoch from now())::bigint)"
+        " on conflict (source, external_ref) do update"
+        "    set plan_stored = excluded.plan_stored,"
+        "        starts_at = excluded.starts_at,"
+        "        ends_at = excluded.ends_at,"
+        "        status = 'active', revoked_reason = null, revoked_at = null,"
+        "        event_version = excluded.event_version,"
+        "        updated_at = now()",
+        (user_id, f"admin:{user_id}", plan, months),
+    )
 
 
 async def log_admin_startup_warnings() -> None:
@@ -1630,6 +1795,76 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             "plan": row["plan"],
             "plan_expires_at": row["plan_expires_at"],
             "last_payment_status": row["last_payment_status"],
+        }))
+
+    @app.post("/admin/api/users/{user_id}/trial-reset")
+    async def admin_api_user_trial_reset(
+        user_id: int, username: str = Depends(_get_current_admin)
+    ):
+        """Sem body: apaga a trava de trial do TELEFONE desta conta.
+
+        Serve a retestar o funil de assinatura com o próprio número. Como o
+        /plan, mexe só no banco — não fala com a Stripe. Por isso recusa com
+        409 quando há assinatura viva lá: apagar a trava não cancelaria nada, e
+        o checkout novo esbarraria na assinatura existente de qualquer forma.
+        """
+        # Uma coluna, sem passar pelo fetch_admin_user_detail: aquele decifra
+        # e-mail/telefone/nome e grava pii_access_log — acesso a PII que esta
+        # ação não precisa.
+        async with await db_connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT last_payment_status FROM auth_accounts WHERE user_id = %s",
+                    (int(user_id),),
+                )
+                acc = await cur.fetchone()
+        if acc is None:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        pay = (acc.get("last_payment_status") or "").strip().lower()
+        if pay in _LIVE_PAYMENT_STATUSES:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A conta tem assinatura viva na Stripe (status {pay}). "
+                    "Quem manda no trial é a Stripe: liberar a trava aqui não "
+                    "cancela nada e o checkout novo esbarraria na assinatura "
+                    "existente. Cancele no Stripe primeiro e tente de novo."
+                ),
+            )
+        from db.plans import reset_trial_for_user
+        row = await asyncio.to_thread(reset_trial_for_user, user_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        if row["phone"] is False:
+            raise HTTPException(
+                status_code=422,
+                detail=("Conta sem telefone vinculado: a trava é por telefone, "
+                        "não há o que liberar."),
+            )
+        # warning de propósito: é remoção de trava anti-abuso, tem que saltar na
+        # lista de eventos. Nada de telefone nem de phone_hash no details.
+        await log_system_event(
+            "warning",
+            "admin_trial_reset",
+            f"Trava de trial da conta {user_id} removida (admin {username}).",
+            source="admin",
+            user_id=int(user_id),
+            details={
+                "admin": username,
+                "deleted": row["deleted"],
+                # As duas datas, porque divergem no caso que mais importa: na
+                # trava herdada (conta anterior apagada, plan_trials.user_id
+                # nulo) a âncora da conta é nula e a data do trial queimado só
+                # existe na linha destruída — sem registrá-la aqui ela some.
+                "previous_started_at": _json_safe(row["previous_started_at"]),
+                "previous_lock_started_at": _json_safe(row["previous_lock_started_at"]),
+            },
+        )
+        return JSONResponse(content=_json_safe({
+            "ok": True,
+            "user_id": int(user_id),
+            "deleted": row["deleted"],
+            "previous_started_at": row["previous_started_at"],
         }))
 
     @app.delete("/admin/api/events/{event_id}")
