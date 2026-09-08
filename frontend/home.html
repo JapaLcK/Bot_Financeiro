@@ -1531,7 +1531,7 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // Gate de escolha de plano: cadastro novo tem que passar pela /precos e
   // assinar um plano pago antes de entrar no dashboard (o Grátis não é mais
   // uma escolha oferecida na /precos).
-  if (me && me.needs_plan_selection && !_justUpgraded && !window.PB_IN_APP) {
+  if (me && me.needs_plan_selection && !_justUpgraded) {
     window.location.replace("/precos?escolha=1");
     return;
   }

@@ -3499,8 +3499,9 @@ async function initSettings() {
       me = await meResp.json();
       setHasPassword(me, meGen);
       // Gate de escolha de plano: cadastro novo passa pela /precos antes de
-      // acessar qualquer tela do app (só na web; app iOS fica de fora — 3.1.1).
-      if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+      // acessar qualquer tela do app. Sem isenção de app — política na docstring
+      // de plan_service.needs_plan_selection.
+      if (me && me.needs_plan_selection) {
         window.location.replace("/precos?escolha=1"); return;
       }
       if (me && me.app_access === false) {

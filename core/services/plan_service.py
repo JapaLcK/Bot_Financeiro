@@ -141,7 +141,9 @@ def is_pro(user_id: int) -> bool:
     return _paid_plan_active(user)
 
 
-# user_ids sempre liberados (admin/teste), mesmo sem assinatura.
+# user_ids liberados (admin/teste) na perna LEGADA do paywall — is_pro/paywall.
+# Com o v2 ligado ela não vale para o gate de escolha de plano:
+# needs_plan_selection não consulta esta lista (nem no bot, nem na web).
 _ACCESS_ALLOWLIST = {88648360, 832398038}
 
 
@@ -280,6 +282,19 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     Nunca trava quem já tem assinatura paga/trial vigente (escolha implícita no
     checkout) nem contas antigas (backfill em schema.py). Com o v2 desligado
     (freio de emergência) o gate fica dormente — o fluxo legado do paywall vale.
+
+    Onde vale (âncora da política — os pontos de enforcement apontam pra cá em
+    vez de repetir o texto): HTML do dashboard (`gate_plan_selection`), rotas de
+    dados (`_enforce_subscription_gate`), WebSocket
+    (`frontend/finance_bot_websocket_custom.py`, gate do `/ws`), `_post_login_url`
+    e o BOT (`core.handle_incoming._paywall_gate`).
+
+    SEM isenção por `signup_source` (`app`/`google_app` não ganham passe) nem por
+    User-Agent/header — o UA é escolhido pelo cliente, então "isentar o app" por
+    ele é o mesmo que isentar quem pedir. A diretriz 3.1.1 da App Store está
+    ADIADA: falta credencial que o servidor consiga verificar, e não existe
+    mecanismo de isenção neste repositório. O que o app suprime é só o CTA de
+    compra (`app_access === false`), nunca o gate.
     """
     if not plans_v2_enabled():
         return False
