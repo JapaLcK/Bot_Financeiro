@@ -107,6 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
@@ -2125,7 +2126,7 @@ async def csrf_middleware(request: Request, call_next):
 
     if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
-        if not token or not header_token or not secrets.compare_digest(token, header_token):
+        if not token or not header_token or not constant_time_eq(header_token, token):
             # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
             # olha método não-seguro, e o produto não tem submit de formulário —
             # os 13 `<form>` de frontend/*.html não têm um `method=`/`action=`
@@ -3849,7 +3850,7 @@ async def auth_google_callback(
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
 
-    if not code or not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+    if not code or not state or not cookie_state or not constant_time_eq(state, cookie_state):
         return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
 
     try:
@@ -5650,7 +5651,7 @@ def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     payload  = f"{user_id}:{email}".encode()
     sig      = _hmac.new(secret, payload, _hashlib.sha256).digest()
     expected = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
-    return _hmac.compare_digest(expected, token)
+    return constant_time_eq(token, expected)
 
 
 async def _apply_unsubscribe(uid: int, token: str) -> bool:

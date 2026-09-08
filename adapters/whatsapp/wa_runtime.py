@@ -39,6 +39,7 @@ from adapters.whatsapp.wa_commands_menu import (
 from core.handle_incoming import handle_incoming
 from core.help_text import HELP_TRIGGERS
 from core.intent_router import abandona_pergunta_de_valor
+from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
@@ -100,7 +101,7 @@ def verify_webhook_signature(raw_body: bytes, signature_header: str, app_secret:
         return False
     expected_hash = hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
     expected = f"sha256={expected_hash}"
-    return hmac.compare_digest(signature_header, expected)
+    return constant_time_eq(signature_header, expected)
 
 
 def _seen_recent(msg_id: str) -> bool:
