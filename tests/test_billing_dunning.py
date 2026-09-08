@@ -1,29 +1,42 @@
 """
-tests/test_billing_dunning.py — a regra "está bloqueado por inadimplência?".
+tests/test_billing_dunning.py — a INVARIANTE do relógio de inadimplência e o
+vocabulário compartilhado de `core.services.billing_dunning`.
 
-A tabela de `core.services.billing_dunning.bloqueado_por_inadimplencia`, contra
-Postgres real (quantas linhas: `len(CASOS)` — o número que estava escrito aqui
-dizia 17 e eram 18; §2). Cada linha é uma população que o contrato do dono
-nomeia, e a razão de a tabela não ter três linhas é que a maioria delas existe
-para provar que o plano `free` (e os vizinhos dele) NÃO são tocados.
+Este PR não bloqueia nada, então não há tabela de "está bloqueado?" para
+testar. O que sobra e precisa de teste é a mecânica:
 
-Os controles negativos declarados do grupo, com o resultado MEDIDO de cada um
-(não o previsto — os dois divergiram, e o que vale é o medido):
+  • a invariante — `auth_accounts.past_due_since` não nulo SÓ existe em conta
+    cujo `last_payment_status` está em `PAST_DUE_PAYMENT_STATUSES`. Ela é
+    mantida na ESCRITA, e são DOIS os writers da coluna de status:
+    `db_support.set_payment_status_impl` e o SQL cru de
+    `core.admin_dashboard.set_account_plan`. Fechar só o primeiro foi o defeito
+    que reprovou a v1 (§2: "achei um caso" ≠ "resolvi a categoria");
+  • a lista de três status ter uma fonte só (§0.7);
+  • `grant_vigente`, o predicado extraído de `billing_access`.
 
-  • `sources=("pix","admin")` → `sources=()` em `grant_vigente`:
-    ficam vermelhas as linhas 12 (Pix vigente) e 13 (admin vigente); as
-    linhas 1-11, 14, 16 e 17 continuam verdes.
-  • remover a guarda de status (passo 2 de `bloqueado_por_inadimplencia`):
-    ficam vermelhas SÓ as linhas 16a/16b/16c — a INVARIANTE. As linhas 3, 4 e
-    5 continuam VERDES porque o relógio delas é NULL e a guarda 3 já as
-    protege; foi por isso que a invariante virou três linhas (um status cada)
-    em vez de uma só: com `active` sozinha, o controle mediria uma instância
-    e não a categoria.
+CONTROLES do grupo da invariante, com o resultado MEDIDO de cada um:
 
-O controle POSITIVO do grupo são as linhas que esperam "passa"
-(`sum(1 for c in CASOS if not c[-1])` — o número que estava escrito aqui dizia
-13 e eram 14; §2): sem elas o grupo ficaria verde num código que bloqueia todo
-mundo, que é pior que o bug.
+  • NEGATIVO 1 — devolva o `cur.execute` de `db_support.set_payment_status_impl`
+    ao UPDATE de UMA coluna (`set last_payment_status = %s where user_id = %s`,
+    sem o `case`):
+      VERMELHO: test_invariante_set_payment_status[active] e [canceled].
+      VERDE:    o caso [past_due], os dois testes do admin e o resto do arquivo
+                (medido: 2 failed, 6 passed).
+  • NEGATIVO 2 — no `past_due_since = case` de
+    `core.admin_dashboard.set_account_plan`, troque `then null` por
+    `then past_due_since`:
+      VERMELHO: test_invariante_admin_nao_deixa_relogio_orfao, e só ele
+                (medido: 1 failed, 7 passed).
+      VERDE:    todos os de `set_payment_status`, inclusive os de status fora
+                da lista. É o que prova que os dois writers são categorias
+                separadas e que o NEGATIVO 1 não mediria este.
+    APAGAR o bloco inteiro NÃO serve de controle: deixa o `end,` da coluna
+    anterior sem sucessor e o UPDATE vira erro de sintaxe, que reprova os dois
+    testes do admin por motivo errado (medido antes de trocar a injeção).
+  • POSITIVO — `test_admin_preserva_relogio_de_quem_segue_em_atraso` e o caso
+    [past_due] do parametrize: os dois consertos RESTRINGEM, então sem um caso
+    provando que o relógio LEGÍTIMO sobrevive o grupo passaria num código que
+    zera o relógio sempre — pior que o bug, porque aí ninguém recebe lembrete.
 """
 from __future__ import annotations
 
@@ -32,14 +45,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from _billing_grants_helpers import conta as _conta
-from core.services import plan_service
 from core.services.billing_dunning import (
     DUNNING_GRACE_DAYS,
-    bloqueado_por_inadimplencia,
-    dunning_block_enabled,
+    PAST_DUE_PAYMENT_STATUSES,
 )
 from db.connection import get_conn
-from db.plan_grants import upsert_grant
 
 AGORA = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -57,106 +67,113 @@ def _relogio(uid: int, delta: timedelta | None) -> None:
     invalidate_auth_user_cache(uid)
 
 
-def _grant(uid: int, source: str, *, dias_ini: int, dias_fim: int) -> None:
-    upsert_grant(uid, source, f"{source}:{uid}", "pro",
-                 AGORA + timedelta(days=dias_ini),
-                 AGORA + timedelta(days=dias_fim), 1, f"evt_{source}_{uid}")
+def _ler_relogio(uid: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select past_due_since, last_payment_status"
+                        "  from auth_accounts where user_id = %s", (uid,))
+            return cur.fetchone()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# A tabela de casos (contagem: `len(CASOS)`, nunca escrita aqui — §2)
+# A invariante, nos DOIS writers de `last_payment_status`.
+#
+# A categoria não é "quem chama set_payment_status" — é "quem escreve a coluna",
+# em qualquer forma, inclusive SQL cru. A varredura que a fecha:
+#   grep -rn "last_payment_status" --include="*.py" --include="*.sql" \
+#        --exclude-dir=.venv .
 # ──────────────────────────────────────────────────────────────────────────────
-# (nome, plan, last_payment_status, delta do relógio, grants, esperado)
-_GRANT_VIGENTE = ("pix", -10, 355)
-_GRANT_EXPIRADO = ("admin", -400, -10)
 
-CASOS = [
-    # 1-6: status que NÃO é dunning — o `free` e os vizinhos dele, intactos.
-    ("01_active",              "pro",  "active",         None, [("stripe", -10, 20)], False),
-    ("02_trialing",            "pro",  "trialing",       None, [("stripe", -1, 14)],  False),
-    ("03_sem_status",          "free", "",               None, [],                    False),
-    ("04_canceled",            "free", "canceled",       None, [],                    False),
-    ("05_grandfathered",       "pro",  "grandfathered",  None, [],                    False),
-    ("06_free_admin_expirado", "free", "canceled",       None, [_GRANT_EXPIRADO],     False),
-    # 7-9: a carência de 7 dias e as duas fronteiras dela.
-    ("07_past_due_1d",         "pro",  "past_due",       timedelta(days=-1),                    [("stripe", -30, 1)], False),
-    ("08_past_due_6d23h",      "pro",  "past_due",       -timedelta(days=6, hours=23),          [("stripe", -30, 1)], False),
-    ("09_past_due_7d1min",     "pro",  "past_due",       -timedelta(days=7, minutes=1),         [("stripe", -30, 1)], True),
-    ("10_unpaid_8d",           "pro",  "unpaid",         timedelta(days=-8),                    [("stripe", -30, 1)], True),
-    # 11: dunning sem relógio — nunca foi carimbada.
-    ("11_past_due_sem_relogio", "pro", "past_due",       None, [("stripe", -30, 1)], False),
-    # 12-14: direito EFETIVO por outro caminho (decisão 3). `legacy` não resgata.
-    ("12_pix_vigente",         "pro",  "past_due",       timedelta(days=-30), [_GRANT_VIGENTE],                    False),
-    ("13_admin_vigente",       "pro",  "past_due",       timedelta(days=-30), [("admin", -10, 355)],               False),
-    ("14_legacy_vigente",      "pro",  "past_due",       timedelta(days=-30), [("legacy", -10, 355)],              True),
-    # 16: a INVARIANTE, nas três populações em que o relógio pode ficar órfão
-    # (`clear_past_due_since` que não rodou). Uma linha por status porque a
-    # guarda que as protege é a MESMA — e é essa guarda que o controle negativo
-    # 4 desliga. `active` sozinha não fecharia a categoria.
-    ("16a_relogio_orfao_em_active",   "pro",  "active",   timedelta(days=-30), [("stripe", -10, 20)], False),
-    ("16b_relogio_orfao_em_canceled", "free", "canceled", timedelta(days=-30), [],                    False),
-    ("16c_relogio_orfao_em_free",     "free", "",         timedelta(days=-30), [],                    False),
-    # 17: o `incomplete` (decisão 9).
-    ("17_incomplete_8d",       "pro",  "incomplete",     timedelta(days=-8),  [("stripe", -30, 1)],  True),
-]
+@pytest.mark.parametrize("novo_status,relogio_sobrevive", [
+    ("active", False),          # saiu da lista → zera
+    ("canceled", False),        # saiu da lista → zera
+    ("past_due", True),         # continua na lista → PRESERVA (positivo)
+])
+def test_invariante_set_payment_status(user_id, novo_status, relogio_sobrevive):
+    """`set_payment_status` zera o relógio no MESMO UPDATE quando o status sai
+    de `PAST_DUE_PAYMENT_STATUSES` — e só nesse caso."""
+    from db import set_payment_status
+
+    _conta(user_id, "pro", AGORA + timedelta(days=20), "unpaid")
+    _relogio(user_id, timedelta(days=-3))
+    assert _ler_relogio(user_id)["past_due_since"] is not None
+
+    set_payment_status(user_id, novo_status)
+
+    row = _ler_relogio(user_id)
+    assert row["last_payment_status"] == novo_status
+    assert (row["past_due_since"] is not None) is relogio_sobrevive, row
 
 
-@pytest.mark.parametrize("nome,plan,status,relogio,grants,esperado",
-                         CASOS, ids=[c[0] for c in CASOS])
-def test_tabela_de_bloqueio(user_id, nome, plan, status, relogio, grants, esperado):
-    _conta(user_id, plan, AGORA + timedelta(days=20), status)
-    _relogio(user_id, relogio)
-    for source, ini, fim in grants:
-        _grant(user_id, source, dias_ini=ini, dias_fim=fim)
+def test_invariante_admin_nao_deixa_relogio_orfao(user_id):
+    """O SEGUNDO writer: `set_account_plan` (drill-down do painel e
+    /admin/grant-pro) move 'unpaid' para 'inactive' em SQL cru, sem passar por
+    `set_payment_status`. Sem a linha `past_due_since = case ...` dele, o
+    relógio ficava órfão — medido pelo Manager: `{'past_due_since':
+    datetime(...), 'last_payment_status': 'inactive'}`.
 
-    assert bloqueado_por_inadimplencia(user_id, AGORA) is esperado, nome
+    Órfão não é dado morto: o `invoice.payment_failed` do ciclo seguinte devolve
+    o status para a lista, o `claim_past_due_since` vê `rowcount 0` e o relógio
+    fica preso na data velha — a conta nasce fora da janela `[6d, 7d)` e o
+    lembrete de pagamento daquele ciclo não sai.
+    """
+    from core.admin_dashboard import set_account_plan
+
+    _conta(user_id, "pro", AGORA + timedelta(days=20), "unpaid")
+    _relogio(user_id, timedelta(days=-3))
+
+    assert set_account_plan("pro", 12, user_id=user_id) is not None
+
+    row = _ler_relogio(user_id)
+    assert row["last_payment_status"] == "inactive", row
+    assert row["past_due_since"] is None, f"orfao: {row}"
 
 
-def test_15_allowlist_nunca_bloqueia(user_id, monkeypatch):
-    """Linha 15: uid na allowlist de admin/teste passa mesmo com 30 dias de
-    atraso e grant só de cartão. Reuso de `plan_service._ACCESS_ALLOWLIST`, a
-    mesma que `trial_downsell.py` e `open_finance_trial_expiry.py` consultam."""
+def test_admin_preserva_relogio_de_quem_segue_em_atraso(user_id):
+    """CONTROLE POSITIVO do writer do admin: 'past_due' NÃO é status terminal,
+    o CASE do SQL não o toca, e o relógio tem de SOBREVIVER. Sem este caso o
+    conserto acima passaria num `past_due_since = null` incondicional — que
+    apagaria o relógio de todo mundo a cada ajuste de plano pelo painel."""
+    from core.admin_dashboard import set_account_plan
+
     _conta(user_id, "pro", AGORA + timedelta(days=20), "past_due")
-    _relogio(user_id, timedelta(days=-30))
-    _grant(user_id, "stripe", dias_ini=-30, dias_fim=1)
+    _relogio(user_id, timedelta(days=-3))
 
-    # Sem a allowlist, esta MESMA conta bloqueia — é o que torna a asserção
-    # seguinte não-tautológica.
-    assert bloqueado_por_inadimplencia(user_id, AGORA) is True
+    assert set_account_plan("pro", 12, user_id=user_id) is not None
 
-    monkeypatch.setattr(plan_service, "_ACCESS_ALLOWLIST", {int(user_id)})
-    assert bloqueado_por_inadimplencia(user_id, AGORA) is False
+    row = _ler_relogio(user_id)
+    assert row["last_payment_status"] == "past_due", row
+    assert row["past_due_since"] == AGORA + timedelta(days=-3), row
 
 
-def test_flag_default_desligada(monkeypatch):
-    """A flag nasce DESLIGADA (deploy seguro) e é lida do ambiente a cada
-    chamada — sem redeploy, igual `paywall_enabled`."""
-    monkeypatch.delenv("DUNNING_BLOCK_ENABLED", raising=False)
-    assert dunning_block_enabled() is False
-    for ligado in ("1", "true", "yes", "ON"):
-        monkeypatch.setenv("DUNNING_BLOCK_ENABLED", ligado)
-        assert dunning_block_enabled() is True
-    monkeypatch.setenv("DUNNING_BLOCK_ENABLED", "0")
-    assert dunning_block_enabled() is False
-
-
-def test_carencia_e_sete_dias():
-    """A carência é constante de módulo, não env: quem mudar o número muda a
-    regra de produto, e as linhas 8/9 da tabela medem exatamente esta fronteira."""
-    assert DUNNING_GRACE_DAYS == 7
-
+# ──────────────────────────────────────────────────────────────────────────────
 
 def test_lista_de_tres_tem_uma_fonte_so():
-    """O admin importa a lista daqui — não existe uma quarta cópia (§0.7)."""
+    """O admin importa a lista daqui, e o Python não tem uma segunda cópia
+    (§0.7).
+
+    Cópias LITERAIS em SQL, que este teste NÃO consegue amarrar por identidade,
+    e por isso são nomeadas aqui: o espelho `_ACCOUNT_STATUS_SQL` do painel (o
+    teste de paridade completo vive em tests/test_admin_users_panel.py) e o
+    `in ('canceled', 'incomplete_expired', 'unpaid')` de
+    `admin_dashboard.set_account_plan`, que é uma lista DIFERENTE (terminais +
+    'unpaid') e não uma cópia desta. `db/schema.py` não tem cópia nenhuma — a
+    versão do PR que tinha um backfill com os três status literais saiu junto
+    com o backfill.
+    """
     from core import admin_dashboard
-    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
 
     assert admin_dashboard._PAST_DUE_PAYMENT_STATUSES is PAST_DUE_PAYMENT_STATUSES
     assert PAST_DUE_PAYMENT_STATUSES == ("past_due", "unpaid", "incomplete")
-    # E o espelho SQL do painel continua decidindo igual (o teste de paridade
-    # completo vive em tests/test_admin_users_panel.py).
     for s in PAST_DUE_PAYMENT_STATUSES:
         assert f"'{s}'" in admin_dashboard._ACCOUNT_STATUS_SQL
+
+
+def test_janela_e_de_sete_dias():
+    """7 dias é regra de produto (constante de módulo, não env). Quem mudar o
+    número muda o dia do lembrete de pagamento E a janela de dedupe do e-mail
+    de falha no webhook."""
+    assert DUNNING_GRACE_DAYS == 7
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,53 +202,3 @@ def test_grant_vigente_janela_semiaberta_e_filtro_de_source():
     assert grant_vigente([g("pix", timedelta(days=-1), timedelta(days=1),
                             status="revoked")], AGORA) is False
     assert grant_vigente([], AGORA) is False
-
-
-def test_backfill_do_relogio_nao_recarimba_a_cada_boot(user_id):
-    """O backfill de `db/schema.py` roda UMA VEZ, na criação da coluna.
-
-    O par simétrico do `where past_due_since is null` que ele tinha: conta com
-    relógio LIMPO e `last_payment_status` ainda na lista dos três era
-    recarimbada a cada boot de cada processo — e esse estado é NORMAL, é o que o
-    `clear_past_due_since` do `invoice.paid` produz quando o
-    `Subscription.retrieve` ainda devolve `past_due`. Ou seja: quem acabou de
-    pagar ganhava relógio novo no boot seguinte.
-
-    Controle negativo declarado: devolva o `add column if not exists` + o UPDATE
-    solto (sem o `do $$ ... information_schema ...`) e este teste fica VERMELHO;
-    a tabela de casos acima continua verde, porque ela carimba o relógio à mão.
-    """
-    from db import get_auth_user, init_db
-
-    _conta(user_id, "pro", AGORA + timedelta(days=20), "past_due")
-    _relogio(user_id, None)
-    assert get_auth_user(user_id)["past_due_since"] is None
-
-    init_db()                       # o boot seguinte, com a coluna já existindo
-
-    from db_support import invalidate_auth_user_cache
-    invalidate_auth_user_cache(user_id)
-    assert get_auth_user(user_id)["past_due_since"] is None, "recarimbou no boot"
-
-
-def test_backfill_do_relogio_carimba_inadimplente_ao_criar_a_coluna(user_id):
-    """CONTROLE POSITIVO do backfill: uma vez só não é nenhuma vez.
-
-    A decisão do dono é que TODO inadimplente existente ganhe sete dias a
-    partir do deploy — então o statement tem de carimbar quando a coluna nasce.
-    Aqui a coluna é DERRUBADA para reproduzir o estado pré-deploy; o `init_db`
-    a recria e o teste devolve o schema ao normal por construção.
-    """
-    from db import get_auth_user, init_db
-    from db_support import invalidate_auth_user_cache
-
-    _conta(user_id, "pro", AGORA + timedelta(days=20), "unpaid")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("alter table auth_accounts drop column past_due_since")
-        conn.commit()
-
-    init_db()
-
-    invalidate_auth_user_cache(user_id)
-    assert get_auth_user(user_id)["past_due_since"] is not None, "backfill não carimbou"

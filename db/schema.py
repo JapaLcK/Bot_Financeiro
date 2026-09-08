@@ -1754,50 +1754,25 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
-        # Relógio do corte do bot por inadimplência de cartão (7 dias de
-        # carência) — core/services/billing_dunning. NULLABLE e SEM DEFAULT: o
-        # carimbo é do webhook `invoice.payment_failed`
-        # (db.plans.claim_past_due_since), e NULL significa "não há relógio".
+        # Relógio da inadimplência de cartão — o instante da PRIMEIRA falha de
+        # cobrança do ciclo, carimbado pelo webhook `invoice.payment_failed`
+        # (db.plans.claim_past_due_since). NULLABLE e SEM DEFAULT: NULL
+        # significa "não há ciclo de inadimplência aberto".
         #
         # Coluna e não derivação: `system_event_logs` é purgável por decisão de
         # projeto (o "Limpar" do painel; ver o comentário do
-        # checkout_funnel_events mais abaixo), então o relógio que decide corte
-        # de acesso não pode morar em log.
-        # ADD COLUMN + BACKFILL num só statement, e o backfill roda UMA VEZ na
-        # vida do banco — a guarda é a INEXISTÊNCIA da coluna, avaliada antes do
-        # `alter`. Preserva a decisão do dono (todo inadimplente atual ganha
-        # sete dias a partir do deploy) e nada mais.
+        # checkout_funnel_events mais abaixo), e o relógio da cobrança não pode
+        # morar em log que alguém apaga pelo painel.
         #
-        # A versão anterior era `add column if not exists` + um UPDATE solto com
-        # `where past_due_since is null`, rodando a cada boot de cada processo.
-        # Aquele `where` protege quem está carimbado, mas o par SIMÉTRICO passa:
-        # conta com relógio LIMPO e `last_payment_status` ainda na lista dos
-        # três é RECARIMBADA a cada boot (medido: 1 linha). E esse estado é
-        # normal — é exatamente o que o `clear_past_due_since` do `invoice.paid`
-        # produz quando o `Subscription.retrieve` ainda devolve `past_due`
-        # (consistência eventual). Ou seja: quem acabou de pagar ganhava um
-        # relógio novo no boot seguinte. Depois do backfill inicial quem carimba
-        # é o `claim_past_due_since` do webhook, e ele cobre todo o resto.
+        # SEM BACKFILL, por decisão do dono. Quem já está inadimplente no
+        # deploy fica com NULL até o `invoice.payment_failed` seguinte (a Stripe
+        # continua tentando por ~3 semanas de smart retries) — e o único efeito
+        # de NULL é ficar de fora do lembrete de pagamento do dia 6 daquele
+        # ciclo. Nenhum acesso depende desta coluna.
         #
-        # De brinde sai o Seq Scan de todo boot (o `lower(coalesce())` não é
-        # indexável).
-        #
-        # O `lower(coalesce(...))` espelha o `strip().lower()` do Python em
-        # `bloqueado_por_inadimplencia`.
-        """
-        do $$
-        begin
-          if not exists (select 1 from information_schema.columns
-                          where table_schema = 'public'
-                            and table_name = 'auth_accounts'
-                            and column_name = 'past_due_since') then
-            alter table auth_accounts add column past_due_since timestamptz;
-            update auth_accounts set past_due_since = now()
-             where lower(coalesce(last_payment_status, ''))
-                   in ('past_due', 'unpaid', 'incomplete');
-          end if;
-        end $$
-        """,
+        # A versão que tinha backfill era um `do $$` com `information_schema`
+        # para rodar uma vez só; sem backfill sobra o idioma normal do arquivo.
+        """alter table auth_accounts add column if not exists past_due_since timestamptz""",
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
         # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o

@@ -145,15 +145,27 @@ emergência e colapsa no binário legado). **A fonte de verdade é
 `core/services/plan_service.py`** — não duplique a tabela de tiers, limites ou nomes
 em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.py`.
 
-**Corte por inadimplência de cartão** (`core/services/billing_dunning.py`):
-cartão falhado há **7 dias** (`DUNNING_GRACE_DAYS`, contados de
-`auth_accounts.past_due_since`, carimbada pelo webhook `invoice.payment_failed`)
-tira o bot do usuário — gate `_dunning_gate` em `core/handle_incoming.py`, atrás
-de `DUNNING_BLOCK_ENABLED` (**default off**). O plano `free` **não é tocado**, e
-grant `pix` ou `admin` vigente resgata (`legacy` não). Aviso da véspera pelo tick
-de `engagement_scheduler`: e-mail sempre, **WhatsApp só se
-`WA_TEMPLATE_DUNNING_WARNING` apontar para um template aprovado na Meta** (vazio
-por padrão → caminho dormente).
+**Inadimplência de cartão** (`core/services/billing_dunning.py`): a coluna
+`auth_accounts.past_due_since` guarda a **primeira falha de cobrança do ciclo**,
+carimbada pelo webhook `invoice.payment_failed` (`db.plans.claim_past_due_since`,
+idempotente no SQL) e zerada por pagamento/cancelamento
+(`clear_past_due_since`). `DUNNING_GRACE_DAYS = 7` é a janela.
+
+**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna só
+alimenta duas coisas: o **lembrete de pagamento do 6º dia**
+(`core/services/payment_reminder.py`, no tick de `engagement_scheduler`; e-mail
+sempre, WhatsApp só se `WA_TEMPLATE_PAYMENT_REMINDER` apontar para um template
+aprovado na Meta — vazio por padrão → caminho dormente) e a janela de dedupe do
+e-mail de falha no webhook. O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
+(**default off**, lida a cada tick, sem redeploy; a guarda é a 1ª linha de
+`check_payment_reminder`, então desligada nem consulta o funil). Grant
+`pix`/`admin` vigente pula o lembrete (`legacy` não). Nenhuma copy deste caminho
+pode prometer pausa ou perda de acesso.
+
+**A INVARIANTE**: `past_due_since` não nulo só existe em conta com
+`last_payment_status` em `PAST_DUE_PAYMENT_STATUSES`. Ela é mantida na ESCRITA,
+e os dois writers da coluna de status são `db_support.set_payment_status_impl` e
+o SQL cru de `core/admin_dashboard.set_account_plan` — mexeu num, leia o outro.
 
 ### Open Finance
 

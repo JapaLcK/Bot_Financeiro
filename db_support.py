@@ -700,20 +700,35 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
 
     **E mantém a invariante do relógio de inadimplência no MESMO UPDATE**:
     `past_due_since` não nulo com status FORA de `PAST_DUE_PAYMENT_STATUSES` é
-    órfão, e órfão não é dado morto — é dado dormente que o
-    `invoice.payment_failed` seguinte transforma em corte instantâneo (o
-    `claim_past_due_since` vê `rowcount 0`, então a carência vira zero E o
-    e-mail de aviso não sai). Quem produzia o órfão era
-    `billing_access.recompute_entitlement`, que escreve `active` quando há
-    grant Pix vigente e não limpava o relógio.
+    órfão, e órfão não é dado morto — o `invoice.payment_failed` seguinte
+    devolve o status para a lista, o `claim_past_due_since` vê `rowcount 0` e o
+    relógio do ciclo NOVO fica preso na data velha: a conta já nasce fora da
+    janela `[6d, 7d)` e o lembrete de pagamento daquele ciclo não sai. Quem
+    produzia o órfão era `billing_access.recompute_entitlement`, que escreve
+    `active` quando há grant Pix vigente e não limpava o relógio.
 
-    Aqui e não em cada chamador (§2: fechar a categoria, não a instância). Os
-    call sites são estes e é o conjunto todo — `frontend/finance_bot_websocket_
-    custom.py` :4895 e :4923 (`_materializar_assinatura`), :5299
-    (`payment_failed`), :5349 (`subscription.deleted`) e
-    `core/services/billing_access.py` :459. A ORDEM do :5299 importa e está
-    certa: ele grava `past_due`, que está NA lista, então o relógio é
-    PRESERVADO e o `claim_past_due_since` logo abaixo carimba se estiver nulo.
+    Aqui e não em cada chamador de ESTA função (§2: fechar a categoria, não a
+    instância): `frontend/finance_bot_websocket_custom.py` :4895 e :4923
+    (`_materializar_assinatura`), :5373 (`payment_failed`), :5444
+    (`subscription.deleted`) e `core/services/billing_access.py` :459. A ORDEM
+    do :5373 importa e está certa: ele grava `past_due`, que está NA lista,
+    então o relógio é PRESERVADO e o `claim_past_due_since` logo abaixo carimba
+    se estiver nulo.
+
+    **A categoria maior é "quem escreve a coluna `last_payment_status`", e ela
+    tem MAIS um membro, em SQL cru**: `core/admin_dashboard.set_account_plan`
+    (:1371) move 'unpaid' para 'inactive' num UPDATE próprio, sem passar por
+    aqui. Ele mantém a invariante no CASE dele — leia os dois juntos antes de
+    mexer. Varredura que fecha a categoria (a de `set_payment_status` NÃO
+    fecha, e foi assim que este órfão passou):
+
+        grep -rn "last_payment_status" --include="*.py" --include="*.sql" \\
+             --exclude-dir=.venv .
+
+    Ela também acusa `scripts/backfill_pro_grandfather.sql:36`, que grava
+    'grandfathered' à mão. É script de reparo manual, roda uma vez, e um órfão
+    que ele criasse custa um lembrete de pagamento perdido — não vale um
+    `past_due_since = null` a mais num arquivo que ninguém executa hoje.
 
     Não substitui os `clear_past_due_since` explícitos do webhook: "o status
     saiu da lista" e "este evento significa pago/encerrado" são regras

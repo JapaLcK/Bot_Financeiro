@@ -92,17 +92,18 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
-        # Aviso da véspera do corte por inadimplência. Inerte sem
-        # DUNNING_BLOCK_ENABLED. Isolado como os demais checks.
+        # Lembrete de pagamento do 6º dia de cartão em atraso. Isolado como os
+        # demais checks, e INERTE sem PAYMENT_REMINDER_ENABLED (default off).
+        # Não bloqueia acesso de ninguém — ver payment_reminder.py.
         try:
-            from core.services.dunning_warning import check_dunning_warning
-            await check_dunning_warning()
+            from core.services.payment_reminder import check_payment_reminder
+            await check_payment_reminder()
         except Exception as exc:
-            logger.error("[engagement] Erro no aviso de inadimplência: %s", exc, exc_info=True)
+            logger.error("[engagement] Erro no lembrete de pagamento: %s", exc, exc_info=True)
             log_system_event_sync(
                 "error",
-                "dunning_warning_error",
-                f"Erro no aviso de inadimplencia: {exc}",
+                "payment_reminder_error",
+                f"Erro no lembrete de pagamento: {exc}",
                 source="engagement_scheduler",
             )
 

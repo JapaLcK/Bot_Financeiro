@@ -1133,33 +1133,38 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
     )
 
 
-def send_dunning_warning_email(to: str, dashboard_url: str = "") -> bool:
-    """Véspera do corte do bot por inadimplência (core/services/billing_dunning).
+def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
+    """Lembrete de pagamento do 6º dia de cartão em atraso
+    (`core/services/payment_reminder.py`).
 
-    Molde do send_payment_failed_email: aquele avisa que a cobrança falhou;
-    este avisa que AMANHÃ o bot para de atender.
+    Molde do `send_payment_failed_email`: aquele sai na HORA da falha, este
+    volta uma semana depois se a cobrança continuar aberta.
+
+    A copy NÃO promete perda de acesso, e isso é requisito e não estilo: neste
+    PR nada é cortado por inadimplência, e prometer corte que não vem é
+    exatamente o defeito que este trabalho existe para não cometer. Quem trouxer
+    a regra de acesso reescreve esta copy junto — não antes.
     """
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
-      <p>🐷 Oi! Última chamada antes de eu ter que pausar.</p>
+      <p>🐷 Oi! Passando pra lembrar de uma coisinha.</p>
       <p>A cobrança do seu plano <strong>não passou</strong> e já faz quase uma semana.
-      <strong>Amanhã</strong> eu pauso o registro das suas movimentações no WhatsApp e no Discord
-      até o pagamento se resolver.</p>
-      <p>Seus dados continuam guardados — nada é apagado. É só atualizar o cartão que tudo
-      volta na hora:</p>
+      Seu PigBank continua funcionando normalmente — só a cobrança está pendente.</p>
+      <p>Atualizar o cartão leva menos de um minuto:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
       </p>
     """
-    html = _base_html("Amanhã eu pauso — atualize seu cartão", content)
+    html = _base_html("Lembrete: sua cobrança está pendente", content)
     text = (
-        "PigBank — amanha eu pauso o registro das suas movimentacoes.\n\n"
-        "A cobranca do seu plano nao passou e ja faz quase uma semana. Seus dados "
-        "continuam guardados; e so atualizar o cartao que tudo volta na hora:\n"
+        "PigBank — sua cobranca continua pendente.\n\n"
+        "A cobranca do seu plano nao passou e ja faz quase uma semana. Seu PigBank "
+        "continua funcionando normalmente; atualizar o cartao leva menos de um "
+        "minuto:\n"
         f"{dash}/conta\n"
     )
     return send_email(
-        to=to, subject="⚠️ PigBank — amanhã eu pauso, atualize seu cartão",
+        to=to, subject="🐷 PigBank — sua cobrança continua pendente",
         html_body=html, text_body=text,
     )
 

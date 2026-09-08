@@ -806,14 +806,15 @@ _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 # db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
 # 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
 # terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
-# regra decide o rótulo do painel, o gate de /trial-reset e o corte do bot por
-# inadimplência (§0.7).
+# regra decide o rótulo do painel, o gate de /trial-reset e a mecânica de
+# cobrança por inadimplência (§0.7).
 #
 # A lista MUDOU DE CASA para core/services/billing_dunning: este módulo importa
-# fastapi/bcrypt/jwt/slowapi e custa ~357 ms de import, caro demais para o
-# caminho de mensagem do bot (sobretudo no processo do Discord). O espelho SQL
-# em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como sempre — o
-# teste de paridade de tests/test_admin_users_panel.py compara os dois.
+# fastapi/bcrypt/jwt/slowapi e é caro de importar, caro demais para módulo que
+# entra no caminho de cobrança e do bot. Meça antes de reusar o argumento:
+# `python3 -X importtime -c "import core.admin_dashboard" 2>&1 | tail -1`.
+# O espelho SQL em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como
+# sempre — o teste de paridade de tests/test_admin_users_panel.py compara os dois.
 from core.services.billing_dunning import (  # noqa: E402
     PAST_DUE_PAYMENT_STATUSES as _PAST_DUE_PAYMENT_STATUSES,
 )
@@ -1374,6 +1375,25 @@ def set_account_plan(
                                     in ('canceled', 'incomplete_expired', 'unpaid')
                            then 'inactive'
                            else last_payment_status
+                       end,
+                       -- A INVARIANTE do relógio de inadimplência, no MESMO
+                       -- UPDATE (leia db_support.set_payment_status_impl): este
+                       -- statement é o único writer de last_payment_status em
+                       -- Python fora dela, e o CASE acima tira 'unpaid' — que
+                       -- está em PAST_DUE_PAYMENT_STATUSES — da lista. Sem esta
+                       -- linha sobrava relógio órfão (medido: past_due_since
+                       -- preenchido com status 'inactive'), e órfão prende o
+                       -- relógio do ciclo seguinte na data velha, tirando a
+                       -- conta da janela do lembrete de pagamento.
+                       -- O predicado é o MESMO do CASE acima de propósito: as
+                       -- duas colunas descrevem a mesma transição, e todo
+                       -- `set` de um UPDATE lê os valores ANTIGOS da linha.
+                       past_due_since = case
+                           when %(plan)s::text <> 'free'
+                                and lower(coalesce(last_payment_status, ''))
+                                    in ('canceled', 'incomplete_expired', 'unpaid')
+                           then null
+                           else past_due_since
                        end
                  where {where}
                 returning user_id, email, plan, plan_expires_at, last_payment_status

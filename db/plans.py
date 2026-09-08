@@ -251,8 +251,9 @@ def mark_trial_downsell_sent(user_id: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
-# ── Inadimplência de cartão: o relógio da carência de 7 dias ─────────────────
-# Ver core/services/billing_dunning para a regra que LÊ estas colunas.
+# ── `past_due_since`: a PRIMEIRA falha de cobrança do ciclo ──────────────────
+# Status e janela em core/services/billing_dunning; quem lê é
+# core/services/payment_reminder. NADA de acesso depende desta coluna.
 
 
 def claim_past_due_since(user_id: int) -> bool:
@@ -265,11 +266,13 @@ def claim_past_due_since(user_id: int) -> bool:
 
     O `rowcount` sai de graça e diz se foi esta chamada que abriu o ciclo (um
     `coalesce` no `set` seria idempotente também, mas o `RETURNING` veria o
-    valor novo e não diria isso). **NÃO o use como dedupe de e-mail**: ele já
+    valor novo e não diria isso). **NÃO o use como SUPRESSOR de e-mail**: ele já
     foi a chave do "seu pagamento falhou" e o carimbo COMMITA antes do envio,
     então SMTP fora do ar na 1ª entrega calava o ciclo inteiro (medido: 1ª
-    entrega + 3 reentregas da Stripe = 0 e-mails). A dedupe de e-mail mora no
-    `_fire_email` do webhook, que grava a chave DEPOIS do envio.
+    entrega + 3 reentregas da Stripe = 0 e-mails). Quem suprime é o `_fire_email`
+    do webhook, que grava a chave DEPOIS de o envio confirmar; ele usa este
+    `rowcount` só para AMPLIAR (ciclo novo → manda mesmo dentro da janela de
+    dedupe), nunca para calar.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -286,8 +289,7 @@ def claim_past_due_since(user_id: int) -> bool:
 
 
 def clear_past_due_since(user_id: int) -> None:
-    """Zera o relógio: pagou, cancelou ou a assinatura morreu. Desbloqueio
-    automático — o gate volta a passar na próxima mensagem."""
+    """Zera o relógio: pagou, cancelou ou a assinatura morreu — ciclo fechado."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -299,17 +301,16 @@ def clear_past_due_since(user_id: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
-def list_dunning_warning_candidates(grace_days: int = 7) -> list[dict]:
-    """Contas na VÉSPERA do corte por inadimplência (aviso de 1 dia antes).
+def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:
+    """Contas do LEMBRETE DE PAGAMENTO: cartão em atraso há `grace_days - 1`.
 
     Janela de 1 dia — `past_due_since` entre `grace_days` e `grace_days - 1`
-    dias atrás — no mesmo desenho do `_check_trial_ending`: o tick roda a cada
-    24 h, então cada conta entra na janela exatamente uma vez por ciclo de
-    inadimplência.
+    dias atrás — no desenho do `_check_trial_ending`: com o tick de 24 h, cada
+    conta entra nela exatamente uma vez por ciclo de inadimplência.
 
-    O funil grosso é SQL (lista de três, relógio presente, e-mail presente,
-    opt-out); o filtro fino que precisa de Python (allowlist, grant pix/admin
-    vigente) é do chamador, como em `list_trial_downsell_candidates`.
+    O funil grosso é SQL (status, relógio, e-mail, opt-out); o filtro fino que
+    precisa de Python (allowlist, grant pix/admin) é do chamador, como em
+    `list_trial_downsell_candidates`.
     """
     from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
     with get_conn() as conn:

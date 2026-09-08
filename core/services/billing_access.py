@@ -31,8 +31,8 @@ def grant_vigente(grants: list[dict], agora: datetime, *,
     (`None` = qualquer uma).
 
     Extraído do predicado que era inline no `projetar_grants` (o "grant Pix
-    vigente manda no status"), porque a mesma pergunta é a guarda 5 de
-    `core/services/billing_dunning.bloqueado_por_inadimplencia` — lá com
+    vigente manda no status"), porque a mesma pergunta é feita por
+    `core/services/payment_reminder._pago_por_outro_caminho` — lá com
     `sources=("pix", "admin")`. Comportamento idêntico ao inline: `status`,
     janela semiaberta `[starts_at, ends_at)` e nada mais.
 
