@@ -154,9 +154,30 @@ def test_registrar_falha_devolve_o_attempts_novo():
     ("12345678901", None, "?"),
     ("123.456.789-01", None, "?"),
     ("AsaasApiError", "12345678901", "AsaasApiError(?)"),
+    # P2 do Codex no #305: o documento com PREFIXO. Nenhum destes é
+    # `isdigit()`, então a recusa de só-dígitos deixava o CPF/CNPJ inteiro
+    # entrar no `last_error`.
+    ("CPF12345678901", None, "?"),
+    ("cpf_12345678901", None, "?"),
+    ("invalid_123.456.789-01", None, "?"),
+    ("CNPJ12345678000199", None, "?"),
+    ("AsaasApiError", "cnpj-12.345.678-0001-99", "AsaasApiError(?)"),
+    # 3ª rodada: `_` era separador ACEITO e não normalizado (§2).
+    ("cpf_123_456_789_01", None, "?"),
+    ("123_456_789_01", None, "?"),
+    ("AsaasApiError", "cpf-123.456_789-01", "AsaasApiError(?)"),
+    # POSITIVO: código legítimo COM dígito continua passando. Sem estas
+    # linhas, um filtro que recusasse todo dígito passaria acima — e
+    # `last_error` sem diagnóstico é pior que a coluna não existir.
+    ("AsaasApiError", "error_400", "AsaasApiError(error_400)"),
+    ("AsaasApiError", "HTTP_502", "AsaasApiError(HTTP_502)"),
+    ("AsaasApiError", "code-42", "AsaasApiError(code-42)"),
+    ("AsaasApiError", "asaas_invalid_object", "AsaasApiError(asaas_invalid_object)"),
+    ("payment_not_found", None, "payment_not_found"),
+    ("TransactionRollbackError", "v1.2.3", "TransactionRollbackError(v1.2.3)"),
 ])
 def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
-    """P2-6 do Codex. `last_error` SOBREVIVE à purga do payload (§13.3) e à
+    r"""P2-6 do Codex. `last_error` SOBREVIVE à purga do payload (§13.3) e à
     exclusão da conta — é o pior lugar do schema para PII.
 
     A versão anterior recebia `erro: str` e guardava os primeiros 500 chars.
@@ -169,16 +190,18 @@ def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
     `test_erro_seguro_nao_divergiu_do_codigo_seguro` mede.
 
     *Negativo: faça `_erro_seguro` devolver `tipo` sem filtrar → as linhas com
-    PII ficam vermelhas. Negativo da recusa de só-dígitos: apague o `return "?"
-    if texto.replace(...).isdigit()` de `db/webhook_outbox.py` → os três casos de
-    CPF puro ficam vermelhos.*
+    PII ficam vermelhas. Negativo da corrida de 11+ dígitos: apague o
+    `re.search(r"\d{11,}", nu)` → só os casos com PREFIXO ficam vermelhos (CPF
+    puro segue verde pelo `isdigit()`). Negativo da normalização: tire o `_` de
+    `_SEPARADORES` → só as três grafias com `_` ficam vermelhas — cada mutação
+    discrimina numa grafia, porque a categoria É a grafia.*
     """
     eid = _evt()
     registrar_evento(eid, "PAYMENT_RECEIVED", _corpo(), 1)
     registrar_falha(eid, tipo, codigo)
     guardado = _linha(eid)["last_error"]
     assert guardado == esperado
-    for pii in ("12345678901", "Fulano", "a@b.com"):
+    for pii in ("12345678901", "12345678000199", "Fulano", "a@b.com"):
         assert pii not in guardado
 
 
@@ -300,8 +323,9 @@ def test_erro_seguro_nao_divergiu_do_codigo_seguro():
     vermelho (medido). No 1b-B, com o dreno na allowlist, este teste some junto
     com a cópia.
 
-    *Negativo: apague a linha do só-dígitos de UM dos dois lados → vermelho, com
-    o valor divergente no assert. Positivo: `AsaasApiError` e `invalid_cpfCnpj`
+    *Negativo: apague a linha do só-dígitos OU a da corrida de 11+ dígitos de UM
+    dos dois lados → vermelho, com o valor divergente no assert. Positivo:
+    `AsaasApiError`, `invalid_cpfCnpj`, `error_400`, `HTTP_502` e `code-42`
     estão na tabela e passam nos dois — sem eles, dois filtros que recusam TUDO
     concordariam.*
     """
@@ -309,6 +333,11 @@ def test_erro_seguro_nao_divergiu_do_codigo_seguro():
 
     for valor in ("AsaasApiError", "invalid_cpfCnpj", "ReadTimeout", "v1.2.3",
                   "12345678901", "123.456.789-01", "0001-12345-6", "42",
+                  "CPF12345678901", "cpf_12345678901", "CNPJ12345678000199",
+                  "invalid_123.456.789-01", "cnpj-12.345.678-0001-99",
+                  "cpf_123_456_789_01", "123_456_789_01", "cpf-123.456_789-01",
+                  "error_400", "HTTP_502", "code-42", "payment_not_found",
+                  "asaas_invalid_object", "subscription_not_found",
                   "Fulano de Tal", "a@b.com", "CPF 123 invalido",
                   "", None, "x" * 61, "x" * 60):
         assert _erro_seguro(valor, None) == (_codigo_seguro(valor) or "?"), (

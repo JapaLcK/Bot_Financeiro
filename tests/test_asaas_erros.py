@@ -108,19 +108,43 @@ def test_resposta_de_sucesso_nao_levanta():
 
 
 def test_code_com_forma_de_cpf_e_recusado():
-    """A forma de um CPF é a de um código curto: alfanumérico, sem espaço, 11
+    r"""A forma de um CPF é a de um código curto: alfanumérico, sem espaço, 11
     chars. O `code` do Asaas é sempre nominal (`invalid_cpfCnpj`), então recusar
     só-dígitos custa nada e fecha o caminho por onde um documento entraria numa
-    string que é PERSISTIDA e sobrevive à exclusão da conta."""
-    for documento in ("12345678901", "123.456.789-01", "12345678000199"):
+    string que é PERSISTIDA e sobrevive à exclusão da conta.
+
+    Só-dígitos NÃO fechava a categoria (P2 do Codex no #305). A categoria é
+    "corrida com forma de documento em QUALQUER grafia que o filtro permita" —
+    prefixo (`CPF12345678901`), separador (`123.456.789-01`, `cpf_123_456_789_01`)
+    ou os dois. Consertar uma grafia por vez foi o que trouxe o mesmo defeito
+    três vezes; quem fecha é a corrida de 11+ dígitos sobre o texto com TODO
+    separador de `_SEPARADORES` removido.
+
+    *Negativo: apague o `re.search(r"\d{11,}", nu)` → as entradas com prefixo
+    ficam vermelhas. Tire o `_` de `_SEPARADORES` → as três com `_` ficam
+    vermelhas. Positivo: o loop de legítimos abaixo, todos com dígito e três
+    deles com `_`.*
+    """
+    for documento in ("12345678901", "123.456.789-01", "12345678000199",
+                      "CPF12345678901", "cpf_12345678901",
+                      "invalid_123.456.789-01", "CNPJ12345678000199",
+                      "cnpj-12.345.678-0001-99", "cpf_123_456_789_01",
+                      "123_456_789_01", "cpf-123.456_789-01"):
         with pytest.raises(AsaasApiError) as capturado:
             _raise_for_asaas_response(_resp(400, {"errors": [{"code": documento}]}), "ctx")
         assert capturado.value.code is None
         assert documento not in str(capturado.value)
-    # POSITIVO: o código nominal continua passando.
-    with pytest.raises(AsaasApiError) as capturado:
-        _raise_for_asaas_response(_resp(400, {"errors": [{"code": "invalid_cpfCnpj"}]}), "ctx")
-    assert capturado.value.code == "invalid_cpfCnpj"
+        for pii in ("12345678901", "12345678000199"):
+            assert pii not in str(capturado.value)
+    # POSITIVO: código nominal e código legítimo COM dígito continuam passando —
+    # sem isto, um filtro que recusasse toda entrada com número passaria acima e
+    # o `code` deixaria de diagnosticar qualquer coisa.
+    for legitimo in ("invalid_cpfCnpj", "error_400", "HTTP_502", "code-42",
+                     "v1.2.3", "payment_not_found", "asaas_invalid_object",
+                     "subscription_not_found", "TransactionRollbackError"):
+        with pytest.raises(AsaasApiError) as capturado:
+            _raise_for_asaas_response(_resp(400, {"errors": [{"code": legitimo}]}), "ctx")
+        assert capturado.value.code == legitimo
 
 
 @pytest.mark.parametrize("bruto", ["-1", "0", "nan", "inf", "-inf", "vinte", ""])

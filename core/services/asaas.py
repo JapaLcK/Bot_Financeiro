@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from typing import Any
 
 import httpx
@@ -89,6 +90,12 @@ def _api_key() -> str:
     return chave
 
 
+# Os separadores que o filtro de forma ACEITA — e que a normalização remove
+# antes de procurar corrida de dígito. Os dois usos leem daqui de propósito:
+# separador aceito e não normalizado é o defeito que voltou três vezes (§2).
+_SEPARADORES = "_-."
+
+
 def _codigo_seguro(valor: Any) -> str:
     """Só o que PARECE código curto passa (mesma regra do `safe_code` do
     Pluggy): letras, dígitos, `_`, `-` e `.`, até 60 chars.
@@ -101,14 +108,28 @@ def _codigo_seguro(valor: Any) -> str:
     texto = str(valor or "")
     if not texto or len(texto) > 60:
         return ""
-    if not all(c.isalnum() or c in "_-." for c in texto):
+    if not all(c.isalnum() or c in _SEPARADORES for c in texto):
         return ""
+    nu = texto.translate(str.maketrans("", "", _SEPARADORES))
     # Só-dígitos é recusado: a forma de um CPF ("12345678901") é exatamente a de
     # um código curto, e o código do Asaas é sempre nominal
     # ("invalid_cpfCnpj"). Recusar identificador puramente numérico custa nada —
     # não existe `code` só-dígitos na API — e fecha o caminho por onde um
     # documento entraria numa string persistida.
-    return "" if texto.replace("-", "").replace(".", "").isdigit() else texto
+    if nu.isdigit():
+        return ""
+    # …e só-dígitos NÃO basta. A CATEGORIA é "corrida com forma de documento,
+    # em QUALQUER grafia que o filtro permita": prefixo (`CPF12345678901`),
+    # separador (`123.456.789-01`) ou os dois. Por isso a normalização acima
+    # remove TODO separador de `_SEPARADORES` — normalizar só parte deles fecha
+    # uma grafia e deixa as outras, que foi como este mesmo defeito voltou em
+    # três rodadas: só-dígitos, depois prefixo alfabético, depois `_`. Cada
+    # rodada tratou o caso achado como se fosse a categoria (§2).
+    # 11+ dígitos porque CPF tem 11 e CNPJ 14; código legítimo com número é
+    # curto (`error_400`, `HTTP_502`, `v1.2.3`), então não colide.
+    if re.search(r"\d{11,}", nu):
+        return ""
+    return texto
 
 
 def _raise_for_asaas_response(resp: httpx.Response, contexto: str) -> None:

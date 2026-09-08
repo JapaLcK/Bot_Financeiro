@@ -32,6 +32,7 @@ O que este arquivo NÃO tem, e o corte é deliberado:
 from __future__ import annotations
 
 import json
+import re
 
 from core.crypto import encrypt_pii_optional
 
@@ -216,11 +217,24 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
     return int(row["attempts"]) if row else 0
 
 
+# Separadores ACEITOS pelo filtro de forma — e removidos antes de procurar
+# corrida de dígito. Aceitar um separador sem normalizá-lo é o defeito (§2).
+_SEPARADORES = "_-."
+
+
 def _erro_seguro(tipo: str, codigo: str | None) -> str:
     """`Tipo(codigo)`, com os dois filtrados por FORMA — nunca por confiança.
 
     Réplica **passo a passo** do `_codigo_seguro` de `core/services/asaas.py`:
-    até 60 chars, alfanumérico mais `_`, `-` e `.`, e **só-dígitos recusado**.
+    até 60 chars, alfanumérico mais `_`, `-` e `.`, só-dígitos recusado, e
+    **corrida de 11+ dígitos recusada** (CPF tem 11, CNPJ 14).
+
+    A categoria é "corrida com forma de documento em QUALQUER grafia que o
+    filtro permita", e por isso a normalização remove TODO separador de
+    `_SEPARADORES`: normalizar só parte deles fecha uma grafia e deixa as
+    outras. Foi assim que o MESMO defeito voltou três vezes — só-dígitos,
+    prefixo alfabético (`CPF12345678901`), separador `_` (`cpf_123_456_789_01`)
+    —, cada rodada consertando o caso achado em vez da categoria (§2).
     O que não casa vira `?` (lá vira `""`, e é a única diferença), e é isso que
     impede uma mensagem inteira de entrar por um parâmetro que se chama `tipo`.
 
@@ -246,9 +260,12 @@ def _erro_seguro(tipo: str, codigo: str | None) -> str:
         texto = str(valor or "")
         if not texto or len(texto) > 60:
             return "?"
-        if not all(c.isalnum() or c in "_-." for c in texto):
+        if not all(c.isalnum() or c in _SEPARADORES for c in texto):
             return "?"
-        return "?" if texto.replace("-", "").replace(".", "").isdigit() else texto
+        nu = texto.translate(str.maketrans("", "", _SEPARADORES))
+        if nu.isdigit():
+            return "?"
+        return "?" if re.search(r"\d{11,}", nu) else texto
 
     base = limpo(tipo)
     return f"{base}({limpo(codigo)})" if codigo else base
