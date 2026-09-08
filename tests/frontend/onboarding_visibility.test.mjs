@@ -7,7 +7,7 @@
  * por especificidade (ambas 0,1,0), mas porque folha de autor vence folha de
  * user-agent. Como `.onb-done` declara `display:flex` e `.btn` declara
  * `display:inline-flex`, quatro elementos ficavam SEMPRE visíveis:
- * "Você já tem saldo lançado", "WhatsApp já conectado", o botão do WhatsApp e
+ * "Saldo lançado com sucesso", "WhatsApp conectado com sucesso", o botão do WhatsApp e
  * o "+ Adicionar cartão". O usuário viu o primeiro no passo 2, antes de lançar
  * qualquer saldo.
  *
@@ -80,6 +80,33 @@ async function abrirWizard({ balance = 0, waLinked = false } = {}) {
 const display = (page, role) =>
   page.$eval(`[data-role="${role}"]`, (e) => getComputedStyle(e).display);
 
+/**
+ * Contraste WCAG do texto do elemento contra o fundo REAL (composto).
+ * `.onb-done` pinta o próprio fundo com alpha (.08 de neon), então comparar a
+ * cor do texto com `background-color` cru daria o valor errado: as camadas são
+ * compostas até a primeira opaca, que aqui é o `--bg` (#0c0c0d) do site.
+ */
+const contraste = (page, role) => page.$eval(`[data-role="${role}"]`, (el) => {
+  const canal = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+  const sobre = ([r, g, b, a = 1], bg) => [r, g, b].map((v, i) => v * a + bg[i] * (1 - a));
+  const lum = (c) => {
+    const [r, g, b] = c.map((v) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const camadas = [];
+  for (let n = el; n; n = n.parentElement) {
+    const c = canal(getComputedStyle(n).backgroundColor);
+    const a = c.length === 4 ? c[3] : 1;
+    if (a > 0) camadas.push(c);
+    if (a === 1) break;
+  }
+  let bg = camadas.pop() || [255, 255, 255];
+  while (camadas.length) bg = sobre(camadas.pop(), bg);
+  const [claro, escuro] = [lum(sobre(canal(getComputedStyle(el).color), bg)), lum(bg)]
+    .sort((x, y) => y - x);
+  return Math.round(((claro + 0.05) / (escuro + 0.05)) * 100) / 100;
+});
+
 async function irPara(page, passo) {
   await page.click(`.onb-step[data-step="${passo - 1}"] [data-action="next"]`);
   await page.waitForSelector(`.onb-step[data-step="${passo}"]:not([hidden])`);
@@ -87,7 +114,7 @@ async function irPara(page, passo) {
 
 // ── Passo 2 ─────────────────────────────────────────────────────────────────
 
-test("conta sem saldo NÃO mostra o aviso de saldo já lançado", async () => {
+test("conta sem saldo NÃO mostra o aviso de saldo lançado", async () => {
   const page = await abrirWizard({ balance: 0 });
   await irPara(page, 2);
   await page.waitForFunction(() =>
@@ -134,7 +161,7 @@ test("sem WhatsApp vinculado, mostra o código e esconde a confirmação", async
     !document.querySelector('[data-role="wa-pending"]').hasAttribute("hidden"));
 
   assert.equal(await display(page, "wa-linked"), "none",
-    '"WhatsApp já conectado" aparecia junto com o pedido de vínculo');
+    '"WhatsApp conectado com sucesso" aparecia junto com o pedido de vínculo');
   assert.notEqual(await display(page, "wa-pending"), "none");
   assert.equal(await page.$eval('[data-role="wa-code"]', (e) => e.textContent), "link 482913");
   await page.close();
@@ -149,6 +176,25 @@ test("com WhatsApp vinculado, mostra a confirmação e esconde o código", async
 
   assert.equal(await display(page, "wa-linked"), "flex");
   assert.equal(await display(page, "wa-pending"), "none");
+  await page.close();
+});
+
+// ── A cor do aviso ──────────────────────────────────────────────────────────
+
+test("o aviso de sucesso é legível sobre o fundo escuro", async () => {
+  // A única mudança funcional deste PR era `color: var(--neon-ink, var(--neon))`
+  // → `var(--neon)`, e nenhum teste a via. Em `site.css` (a folha que o
+  // comecar.html carrega) `--neon-ink` é #10140a, quase o próprio `--bg`
+  // (#0c0c0d): medido, o texto "Saldo lançado com sucesso." saía a 1,25:1 —
+  // presente no DOM, invisível na tela. Com `--neon` (#C6F11A) dá 11,4:1.
+  // Medido em 2026-09-08 pelo próprio teste; remeça antes de reusar o número.
+  const page = await abrirWizard({ balance: 1250.4 });
+  await irPara(page, 2);
+  await page.waitForFunction(() =>
+    document.querySelector('[data-role="balance-form"]').hasAttribute("hidden"));
+
+  const c = await contraste(page, "balance-done");
+  assert.ok(c >= 4.5, `contraste do aviso: ${c}:1 (WCAG AA para texto normal exige 4,5:1)`);
   await page.close();
 });
 
