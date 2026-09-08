@@ -29,7 +29,6 @@ from frontend.routes import shared
 router = APIRouter()
 
 REF_COOKIE_NAME = "ref_code"
-_COOKIE_SECURE = shared.DASHBOARD_URL.startswith("https://")
 
 
 @router.get("/r/{code}")
@@ -39,12 +38,17 @@ async def affiliate_link(code: str):
     response = RedirectResponse(url="/", status_code=302)
     affiliate = await asyncio.to_thread(get_affiliate_by_code, code)
     if affiliate and affiliate["status"] == "active":
+        # COOKIE_SECURE do app inclui a blindagem APP_ENV=prod (Secure mesmo
+        # com DASHBOARD_URL http por engano). Import tardio porque o monólito
+        # importa este router antes de definir a constante (precedente:
+        # open_finance.py importa `manager` do mesmo jeito).
+        from frontend.finance_bot_websocket_custom import COOKIE_SECURE
         response.set_cookie(
             REF_COOKIE_NAME,
             affiliate["code"],
             max_age=REF_COOKIE_MAX_AGE_DAYS * 24 * 3600,
             httponly=True,
-            secure=_COOKIE_SECURE,
+            secure=COOKIE_SECURE,
             samesite="lax",
         )
     return response
