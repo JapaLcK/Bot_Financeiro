@@ -31,12 +31,23 @@ from core.services.pix_pricing import DURACAO_DIAS, plano_da_cobranca
 # Valores ARBITRÁRIOS de teste — não são os preços de produção. Estes fixam a
 # aritmética; os de produção são LIDOS da fonte em `_precos_anuais_de_producao`
 # mais abaixo, e é lá que mora a asserção sobre o mundo real.
+_OMITIDO = object()
 AGORA = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
 PRECO = 29900
 MIN = 500           # ASAAS_MIN_CHARGE_CENTS medido no Sandbox: R$ 5,00 (§7)
 
 
-def _grant(source, plan_stored, inicio_dias, fim_dias, amount_cents=None):
+def _grant(source, plan_stored, inicio_dias, fim_dias, amount_cents=_OMITIDO):
+    """`amount_cents` é OBRIGATÓRIO para `source='pix'`, e o default deixou de
+    ser `None` de propósito: era ele que ensinava o modo de falha do P1-1 como
+    normal. Para as outras fontes o default continua `None` — elas não geram
+    crédito (§7)."""
+    if amount_cents is _OMITIDO:
+        assert source != "pix", (
+            "fixture de grant pix sem `amount_cents`: era esse default que "
+            "codificava o bug do P1-1 como comportamento esperado"
+        )
+        amount_cents = None
     return {
         "source": source,
         "plan_stored": plan_stored,

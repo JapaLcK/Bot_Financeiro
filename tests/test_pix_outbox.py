@@ -135,19 +135,38 @@ def test_registrar_falha_devolve_o_attempts_novo():
     dois — o alerta sairia duplicado ou nenhuma vez."""
     eid = _evt()
     registrar_evento(eid, "PAYMENT_RECEIVED", _corpo(), 1)
-    assert [registrar_falha(eid, "boom") for _ in range(3)] == [1, 2, 3]
-    assert _linha(eid)["last_error"] == "boom"
+    assert [registrar_falha(eid, "ReadTimeout") for _ in range(3)] == [1, 2, 3]
+    assert _linha(eid)["last_error"] == "ReadTimeout"
 
 
-def test_registrar_falha_trunca_a_mensagem():
-    """`last_error` SOBREVIVE à purga do payload (§13.3) e à exclusão da conta.
-    Uma exceção com o corpo da resposta do Asaas colado dentro viraria PII
-    retida indefinidamente — é a razão de `core/services/asaas.py` não incluir o
-    corpo, e este truncamento é o cinto."""
+@pytest.mark.parametrize("tipo,codigo,esperado", [
+    ("ReadTimeout", None, "ReadTimeout"),
+    ("AsaasApiError", "invalid_cpfCnpj", "AsaasApiError(invalid_cpfCnpj)"),
+    # A mensagem inteira entrando pelo parâmetro `tipo` — o caminho que a
+    # assinatura antiga (`erro: str`) tornava natural.
+    ("Falha ao criar: CPF 12345678901 de Fulano (a@b.com)", None, "?"),
+    ("AsaasApiError", "CPF 12345678901 invalido", "AsaasApiError(?)"),
+    ("", None, "?"),
+])
+def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
+    """P2-6 do Codex. `last_error` SOBREVIVE à purga do payload (§13.3) e à
+    exclusão da conta — é o pior lugar do schema para PII.
+
+    A versão anterior recebia `erro: str` e guardava os primeiros 500 chars.
+    Truncar não removia nada: CPF, e-mail e nome aparecem no COMEÇO da mensagem.
+    Agora a assinatura só aceita `tipo` + `codigo`, e os dois passam pelo filtro
+    de FORMA — a mesma regra do `_codigo_seguro` do cliente Asaas.
+
+    *Negativo: faça `_erro_seguro` devolver `tipo` sem filtrar → as duas linhas
+    com PII ficam vermelhas.*
+    """
     eid = _evt()
     registrar_evento(eid, "PAYMENT_RECEIVED", _corpo(), 1)
-    registrar_falha(eid, "x" * 5000)
-    assert len(_linha(eid)["last_error"]) == 500
+    registrar_falha(eid, tipo, codigo)
+    guardado = _linha(eid)["last_error"]
+    assert guardado == esperado
+    for pii in ("12345678901", "Fulano", "a@b.com"):
+        assert pii not in guardado
 
 
 # ── 2. minimização e cifra do payload (§13.3) ────────────────────────────────

@@ -28,6 +28,7 @@ POSITIVOS do grupo (o que impede um código que RECUSA TUDO de passar):
 próprio dono.
 """
 
+import re
 import secrets
 import uuid
 
@@ -46,14 +47,13 @@ from db.pix_charges import (
 
 
 def _nova(user_id: int, **kw) -> dict | None:
-    """Uma cobrança plausível. `external_reference` e `public_token` são únicos
-    por chamada — a unique deles é global, e reusar valor entre testes faria a
-    falha aparecer no teste errado."""
-    marca = uuid.uuid4().hex[:12]
+    """Uma cobrança plausível. `public_token` é único por chamada — a unique é
+    global, e reusar valor entre testes faria a falha aparecer no teste errado."""
     # 29900 aqui é VALOR DE FIXTURE, não o preço de nenhum plano — o anual do
     # `pro_max` é R$ 499 (`tests/test_pix_pricing_contrato.py` lê da fonte).
+    # `external_reference` NÃO é passado: quem o gera é a própria função, no
+    # formato `pix:<id>` que o dreno exige (P1-3).
     campos = dict(
-        external_reference=f"pix:{marca}",
         public_token=secrets.token_urlsafe(16),
         plan="pro_max", plan_stored="pro_max",
         price_cents=29900, credit_cents=0, amount_cents=29900,
@@ -276,3 +276,75 @@ def test_fk_de_pix_charges_e_set_null_depois_do_repair():
             row = cur.fetchone()
     assert row is not None, "pix_charges perdeu a FK para users(id)"
     assert row["confdeltype"] == "n", "FK virou CASCADE — a pseudonimização morreu"
+
+
+# ── as invariantes que vivem no BANCO (P2-7 e P1-3 do Codex) ────────────────
+
+def _insere_cru(cur, user_id, **campos):
+    """INSERT direto, contornando `criar_cobranca`. É o ponto: as invariantes
+    têm de valer contra QUALQUER escritor, inclusive um `psql` na madrugada."""
+    base = dict(user_id=user_id, external_reference="pix:999999999",
+                public_token=secrets.token_urlsafe(16), plan="pro_max",
+                plan_stored="pro_max", price_cents=29900, credit_cents=0,
+                amount_cents=29900, status="draft")
+    base.update(campos)
+    cols = ", ".join(base)
+    cur.execute(f"insert into pix_charges ({cols}) values "
+                f"({', '.join(['%s'] * len(base))})", tuple(base.values()))
+
+
+@pytest.mark.parametrize("rotulo,campos", [
+    # P2-7: `pendng` sai do índice parcial (que só cobre 4 estados NOMEADOS) e
+    # libera uma SEGUNDA cobrança ativa do mesmo usuário — dois QRs pagáveis,
+    # que é o furo financeiro que o §10 fecha. Por um typo.
+    ("status com typo", {"status": "pendng"}),
+    # `orphan_unknown` NÃO é estado desta tabela: o registro não tem plano,
+    # preço nem dono. A decisão do P1-2 é do CHECK, não de um comentário.
+    ("orphan_unknown", {"status": "orphan_unknown"}),
+    # P1-3: fora de `^pix:[0-9]+$` o dreno classifica o pagamento como de
+    # TERCEIRO e o descarta em silêncio — dinheiro nosso perdido.
+    ("referência hexadecimal", {"external_reference": "pix:a1b2c3"}),
+    ("referência sem prefixo", {"external_reference": "boleto-loja-42"}),
+    ("referência vazia", {"external_reference": ""}),
+    # Centavos negativos produzem cobrança de valor negativo no provedor.
+    ("preço negativo", {"price_cents": -1, "amount_cents": -1}),
+    ("crédito negativo", {"credit_cents": -1, "amount_cents": 29901}),
+    # A única relação entre as três colunas (§7). Sem ela, a cobrança sai com um
+    # valor que não bate com o snapshot que a justifica.
+    ("amount que não fecha", {"price_cents": 29900, "credit_cents": 100,
+                              "amount_cents": 29900}),
+])
+def test_o_banco_recusa_linha_invalida(user_id, rotulo, campos):
+    """As quatro invariantes são `CHECK`, não validação em Python.
+
+    O diff tinha **zero** `check` antes disto (medido). Python valida quem passa
+    por `criar_cobranca`; o banco valida todo mundo — a varredura, um reparo
+    manual, o dreno do 1b-B, um `psql`.
+
+    *Negativo: tire a constraint correspondente do `create table` → a linha
+    entra, e no caso do `status` a segunda cobrança ativa passa a ser possível.*
+    """
+    from psycopg.errors import CheckViolation
+
+    with get_conn() as conn, conn.cursor() as cur:
+        with pytest.raises(CheckViolation):
+            _insere_cru(cur, user_id, **campos)
+        conn.rollback()
+
+
+def test_o_banco_ACEITA_a_linha_legitima(user_id):
+    """POSITIVO das quatro: sem ele, uma constraint escrita errado demais
+    recusaria toda venda e o grupo acima passaria igual."""
+    with get_conn() as conn, conn.cursor() as cur:
+        _insere_cru(cur, user_id, price_cents=29900, credit_cents=900,
+                    amount_cents=29000)
+        conn.commit()
+
+
+def test_criar_cobranca_gera_a_referencia_no_formato_do_dreno(user_id):
+    """P1-3: a referência deixou de ser parâmetro. `pix:<id>` com o `id` da
+    própria linha, que é o que `^pix:[0-9]+$` exige e o que o dreno usa para
+    saber que o dinheiro é NOSSO."""
+    linha = _nova(user_id)
+    assert linha["external_reference"] == f"pix:{linha['id']}"
+    assert re.fullmatch(r"pix:[0-9]+", linha["external_reference"])

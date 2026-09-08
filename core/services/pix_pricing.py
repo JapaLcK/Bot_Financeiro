@@ -28,16 +28,32 @@ DURACAO_DIAS = 365
 class CoberturaJaPaga(RuntimeError):
     """A compra não acrescentaria acesso nenhum — o cliente JÁ pagou por ela.
 
-    Levanta em vez de devolver um dict com um campo `recusada`, e a escolha é
-    deliberada: um campo pode ser ignorado em silêncio, uma exceção não. Isto é
-    caminho de dinheiro, e o modo de falha que ela impede foi MEDIDO — assinante
-    Stripe Plus vigente + grant Pix Pro **futuro e já pago**, comprando Pro de
-    novo: **365 dias sobrepostos, 0 dias novos, R$ 499,00 cobrados**.
+    **Não cobra e não altera grant algum** (decisão do dono, 2026-09-07):
+    levantada ANTES de qualquer escrita, e esta função é pura. Quem prova isso
+    não é esta frase — é `test_recusa_nao_toca_no_banco_nem_muda_os_grants`, que
+    roda a recusa com o pool do banco trocado por um espião.
 
-    Quem chama (1b-B) traduz em **409**, no mesmo lugar onde o §10 já devolve
-    409 para `stripe_active`. `cobertura_ate` vai junto para a tela poder dizer
-    *"você já tem Pro até 06/11/2027"* em vez de um erro genérico.
+    **O 409 é do 1b-B**, não daqui: o checkout mora lá e este PR não tem rota.
+    Os três atributos existem para a tradução ser UMA linha, e para ninguém no
+    1b-B reconsultar o banco pelo dado que já veio junto (o resultado poderia
+    divergir do que motivou a recusa):
+
+        except CoberturaJaPaga as exc:
+            raise HTTPException(409, detail={"error": exc.ERRO,
+                                             "plan": exc.plano,
+                                             "covered_until": exc.cobertura_ate})
+
+    Exceção e não campo `recusada` num dict: campo pode ser ignorado em
+    silêncio, exceção não — e o modo de falha que ela impede foi MEDIDO
+    (365 dias sobrepostos, 0 novos, R$ 499,00 cobrados).
+
+    O porquê de recusar em vez de creditar, e a evolução separada que a
+    substituição exigiria, estão no **§7 do plano** — aqui não, para não haver
+    duas versões da mesma decisão (CLAUDE.md §0.7).
     """
+
+    #: Código estável para o 409 do 1b-B. Não mude sem mudar o front junto.
+    ERRO = "pix_future_purchase_conflict"
 
     def __init__(self, plano: str, cobertura_ate):
         super().__init__(
@@ -45,6 +61,41 @@ class CoberturaJaPaga(RuntimeError):
         )
         self.plano = plano
         self.cobertura_ate = cobertura_ate
+
+
+def _exigir_amount_cents(grants: list[dict]) -> None:
+    """Grant `source='pix'` SEM `amount_cents` utilizável é erro, não zero.
+
+    `amount_cents` não existe em `plan_grants` — vem de `pix_charges` por um
+    `join` do chamador (ver a docstring pública). Esquecer o `join` fazia a
+    coluna chegar `None`, e o `_credito_proporcional` devolvia **0**: crédito
+    legítimo virava zero e o cliente pagava o valor CHEIO, calado. A própria
+    docstring do helper dizia "ou o chamador esqueceu o `join`" — ou seja, o
+    modo de falha estava documentado e tratado como normal (P1-1 do Codex).
+
+    É a mesma lição do P1-2 da rodada anterior: **"não sei" não pode virar um
+    valor que decide dinheiro.** Lá era `[]` autorizando apagar cobrança; aqui é
+    `0` autorizando cobrar cheio.
+
+    A guarda vale para TODO grant `pix` da lista, não só para o que acaba
+    gerando crédito: o `join` esquecido é um bug do chamador em qualquer caso, e
+    qual grant vira `atual` depende de dados. Verificar só o escolhido deixaria
+    a falha aparecer para um cliente e não para outro.
+
+    `stripe`, `legacy` e `admin` seguem aceitando `None`: aquele dinheiro está
+    noutro gateway (ou não existe), e o §7 é explícito que crédito monetário só
+    existe no caminho Pix → Pix.
+    """
+    for g in grants:
+        if g.get("source") != "pix":
+            continue
+        valor = g.get("amount_cents")
+        if not isinstance(valor, int) or isinstance(valor, bool) or valor < 0:
+            raise ValueError(
+                "grant pix sem `amount_cents` inteiro e não-negativo "
+                f"({valor!r}) — o chamador provavelmente esqueceu o join com "
+                "pix_charges, e sem ele o crédito vira 0 e a cobrança sai cheia"
+            )
 
 
 def _agora(agora: datetime | None) -> datetime:
@@ -114,6 +165,7 @@ def plano_da_cobranca(
     continua valendo — por isso a vigência começa no fim dele, e não hoje.
     """
     agora = _agora(agora)
+    _exigir_amount_cents(grants_ativos)
     preco_novo_cents = int(preco_novo_cents)
     # Convertido AQUI e não no ramo que usa: `int(min_cents)` só era avaliado no
     # caminho de upgrade Pix→Pix, então `min_cents=None` passava silencioso em
@@ -144,37 +196,34 @@ def plano_da_cobranca(
     atual = _acesso_atual(vigentes)
     tier_atual = _tier_do_stored(atual["plan_stored"])
 
-    # RECOMPRA QUE NÃO ACRESCENTA NADA (P1-1 do Codex, e o irmão que a varredura
-    # do §2 achou). Os dois ramos de UPGRADE abaixo decidem `access_starts_at`
-    # olhando só o grant VIGENTE (`atual`) e ignoram `fim_cobertura` — que é
-    # `max(ends_at)` sobre TODOS os grants ativos, justamente para incluir os
-    # FUTUROS. Medido, com um grant Pix Pro futuro e já pago no conjunto:
+    # RECOMPRA QUE NÃO ACRESCENTARIA ACESSO — a invariante: uma compra tem de
+    # acrescentar acesso. Os dois ramos de UPGRADE abaixo decidem
+    # `access_starts_at` olhando só o grant VIGENTE (`atual`) e ignoram
+    # `fim_cobertura`, que é `max(ends_at)` sobre TODOS os grants ativos,
+    # justamente para incluir os FUTUROS. Medido com um grant Pix futuro já pago:
     #
     #   upgrade a partir do STRIPE   365d sobrepostos, 0 novos, R$ 499,00
     #   upgrade PIX -> PIX           365d sobrepostos, 0 novos, R$ 305,45
     #
-    # (O Codex apontou o primeiro; o segundo é a mesma classe, no ramo de cima.
-    # Consertar só o apontado teria deixado o irmão vivo — CLAUDE.md §2.)
+    # Cobre QUALQUER grant `pix` futuro ainda vigente, de qualquer tier: limitar
+    # a tier igual/maior deixava passar a mesma cobrança dupla um tier abaixo.
+    # `source == "pix"` porque só esse dinheiro está na NOSSA conta — grant
+    # `stripe`/`legacy` futuro não é crédito nosso a devolver (§9).
     #
-    # Por que RECUSAR e não agendar depois da cobertura: agendar é o certo para
-    # RENOVAÇÃO, e os ramos de renovação/downgrade já fazem isso com
-    # `max(agora, fim_cobertura)`. Mas aqui o cliente pediu UPGRADE — acesso ao
-    # tier maior AGORA —, e o que ele já comprou cobre esse tier até uma data
-    # futura. Agendar entregaria caladamente um ano que só começa depois, com a
-    # tela dizendo "upgrade"; e antecipar acesso que já existe é o §4.4, não uma
-    # venda. Recusar é a única resposta que não cobra por nada.
-    #
-    # A guarda é ESTREITA de propósito: só bloqueia quando a cobertura futura é
-    # de tier IGUAL OU MAIOR que o comprado. Cobertura futura de tier MENOR não
-    # bloqueia nada — ali o upgrade entrega valor real (tier maior a partir de
-    # hoje), e a projeção resolve a sobreposição pela união.
+    # Recusar (e não agendar, e não creditar) é decisão do dono, com o porquê e
+    # a evolução separada no §7 do plano. Os casos, com os dois achados que os
+    # produziram, em `tests/test_pix_recompra.py`.
     if tier_novo > tier_atual:
+        pix_futuro_pago = [g for g in grants_ativos
+                           if g.get("source") == "pix" and g["ends_at"] > agora
+                           and g["starts_at"] > agora]
         cobre_o_tier = [g for g in grants_ativos
                         if _tier_do_stored(g["plan_stored"]) >= tier_novo
                         and g["ends_at"] > agora]
-        if cobre_o_tier:
+        bloqueiam = pix_futuro_pago or cobre_o_tier
+        if bloqueiam:
             raise CoberturaJaPaga(plano_novo,
-                                  max(g["ends_at"] for g in cobre_o_tier))
+                                  max(g["ends_at"] for g in bloqueiam))
 
     if tier_novo > tier_atual and atual["source"] == "pix":
         credito = _credito_proporcional(atual, agora)
@@ -254,12 +303,16 @@ def _acesso_atual(vigentes: list[dict]) -> dict:
 def _credito_proporcional(grant: dict, agora: datetime) -> int:
     """`round(amount_cents × dias_restantes / DURACAO_DIAS)`, em centavos.
 
-    Zero quando o grant não tem `amount_cents` (não veio de uma cobrança Pix, ou
-    o chamador esqueceu o `join` — ver a docstring pública). O teto é o próprio
-    `amount_cents`: um grant com janela maior que 365 dias — reparo manual,
-    concessão do admin — não pode gerar crédito maior que o dinheiro que entrou.
+    Só é chamado para grant `pix`, e `_exigir_amount_cents` já garantiu que a
+    coluna é inteiro não-negativo — o ramo "esqueceu o join → 0" saiu daqui de
+    propósito (P1-1). `0` legítimo (cortesia, cobrança de valor zero) segue
+    dando crédito zero, que é aritmética e não ausência de dado.
+
+    O teto é o próprio `amount_cents`: um grant com janela maior que 365 dias —
+    reparo manual, concessão do admin — não pode gerar crédito maior que o
+    dinheiro que de fato entrou.
     """
-    valor = grant.get("amount_cents")
+    valor = grant["amount_cents"]
     if not valor:
         return 0
     restantes = (grant["ends_at"] - agora) / timedelta(days=1)

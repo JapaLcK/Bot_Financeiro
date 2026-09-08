@@ -182,7 +182,7 @@ def marcar_processado(event_id: str) -> bool:
     return aplicou
 
 
-def registrar_falha(event_id: str, erro: str) -> int:
+def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
     """Incrementa `attempts` e grava `last_error`. Devolve o `attempts` NOVO.
 
     Devolve o número, e não `None`, porque quem decide o `admin_notify` de
@@ -190,9 +190,17 @@ def registrar_falha(event_id: str, erro: str) -> int:
     entre o UPDATE e o SELECT cabe outra passada, e o alerta sairia duplicado ou
     nenhuma vez. `returning attempts` é a leitura da própria escrita.
 
-    `erro` é TRUNCADO: mensagem de exceção do Asaas pode carregar corpo de
-    resposta com PII do titular (é a razão de `core/services/asaas.py` não
-    incluir o corpo), e `last_error` sobrevive à purga do payload para forense.
+    **Não aceita texto livre, e a assinatura é o conserto.** A versão anterior
+    recebia `erro: str` e guardava os primeiros 500 caracteres — e CPF, e-mail e
+    nome aparecem justamente NO COMEÇO de uma mensagem de erro, então truncar
+    não removia nada (P2-6 do Codex). Esta coluna **sobrevive à purga do
+    payload** (§13.3) e à exclusão da conta: é o pior lugar do schema para PII.
+
+    `tipo` é o NOME DA CLASSE da exceção (`type(exc).__name__`) e `codigo` é o
+    `AsaasApiError.code`, que já nasce filtrado por `_codigo_seguro`. Os dois
+    passam pelo mesmo filtro de FORMA aqui, porque "o chamador promete que é
+    seguro" é como a PII entra — e o chamador é o dreno do 1b-B, que ainda não
+    existe para prometer nada.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -201,11 +209,26 @@ def registrar_falha(event_id: str, erro: str) -> int:
                 "   set attempts = attempts + 1, last_error = %s"
                 " where event_id = %s"
                 " returning attempts",
-                ((erro or "")[:500], event_id),
+                (_erro_seguro(tipo, codigo), event_id),
             )
             row = cur.fetchone()
         conn.commit()
     return int(row["attempts"]) if row else 0
+
+
+def _erro_seguro(tipo: str, codigo: str | None) -> str:
+    """`Tipo(codigo)`, com os dois filtrados por FORMA — nunca por confiança.
+
+    Mesma regra do `_codigo_seguro` de `core/services/asaas.py`: alfanumérico,
+    `_`, `-` e `.`, curto. O que não casa vira `?`, e é isso que impede uma
+    mensagem inteira de entrar por um parâmetro que se chama `tipo`.
+    """
+    def limpo(valor: str | None, teto: int) -> str:
+        texto = str(valor or "")[:teto]
+        return texto if texto and all(c.isalnum() or c in "_-." for c in texto) else "?"
+
+    base = limpo(tipo, 60)
+    return f"{base}({limpo(codigo, 60)})" if codigo else base
 
 
 def efeito_registrado(asaas_payment_id: str, effect: str) -> bool:

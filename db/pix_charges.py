@@ -76,7 +76,6 @@ _COLUNAS = (
 def criar_cobranca(
     user_id: int,
     *,
-    external_reference: str,
     public_token: str,
     plan: str,
     plan_stored: str,
@@ -96,13 +95,26 @@ def criar_cobranca(
     `uniq_pix_charge_ativa`, então uma cobrança `paid`/`canceled`/`expired` do
     mesmo dono não bloqueia venda nova.
 
-    O `on conflict` cobre **só** o índice parcial. Repetir `external_reference`
-    ou `public_token` levanta `UniqueViolation`, e isso é o certo: os dois são
-    gerados por nós (`pix:<id>` e `secrets.token_urlsafe(16)`), então repetição
-    é corrupção, não caso de negócio — falhar alto é a única hora em que alguém
-    vê. O chamador do 1b-B não deve envolver isto num `except` que devolva
-    `None`: `None` significa "já existe cobrança ativa", e confundir as duas
-    faria uma colisão de token virar "tente de novo mais tarde".
+    **`external_reference` NÃO é parâmetro: é gerado aqui, como `pix:<id>`.**
+    Ele era `str` livre, e o formato importa — o dreno só reconhece como NOSSO
+    dinheiro o que casa `^pix:[0-9]+$` (§8.2 A, §11). Uma referência fora do
+    formato faz o pagamento ser classificado como de terceiro e **descartado em
+    silêncio**, que é o oposto do que a célula `orphan_unknown` existe para
+    impedir. Os próprios testes deste repositório usavam `pix:<hex>` — ou seja,
+    o parâmetro livre já tinha ensinado o formato errado (P1-3 do Codex).
+
+    O `id` vem de um `nextval` ANTES do insert, e não de um `insert` seguido de
+    `update`: a referência precisa existir na mesma linha que a cria, e um
+    segundo comando deixaria uma janela em que a cobrança existe sem referência.
+    A constraint `pix_charges_ref_formato` fecha o resto — nem esta função pode
+    contorná-la.
+
+    O `on conflict` cobre **só** o índice parcial. Repetir `public_token`
+    levanta `UniqueViolation`, e isso é o certo: ele é `secrets.token_urlsafe(16)`,
+    então repetição é corrupção, não caso de negócio — falhar alto é a única
+    hora em que alguém vê. O chamador do 1b-B não deve envolver isto num
+    `except` que devolva `None`: `None` significa "já existe cobrança ativa", e
+    confundir as duas faria uma colisão de token virar "tente de novo".
 
     `stripe_period_end_at` é a ESTIMATIVA da migração (§8.2), gravada aqui com
     um valor que o checkout já leu — sem chamada extra ao Stripe. Ela é
@@ -111,12 +123,17 @@ def criar_cobranca(
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # O id primeiro, para a referência nascer com ele na MESMA linha.
+            cur.execute(
+                "select nextval(pg_get_serial_sequence('pix_charges', 'id')) as id"
+            )
+            novo_id = int(cur.fetchone()["id"])
             cur.execute(
                 "insert into pix_charges "
-                " (user_id, external_reference, public_token, plan, plan_stored,"
+                " (id, user_id, external_reference, public_token, plan, plan_stored,"
                 "  price_cents, credit_cents, amount_cents, duration_days,"
                 "  stripe_subscription_id, stripe_period_end_at, status)"
-                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')"
+                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')"
                 # Inferência pelo índice PARCIAL: `uniq_pix_charge_ativa` é
                 # `create unique index … where`, não uma constraint, então
                 # `on conflict on constraint` não o alcança — o Postgres só casa
@@ -124,7 +141,7 @@ def criar_cobranca(
                 # `ESTADOS_ATIVOS` em vez de reescrito (CLAUDE.md §0.7).
                 + _CONFLITO_INDICE_PARCIAL +
                 f" returning {_COLUNAS}",
-                (int(user_id), external_reference, public_token, plan, plan_stored,
+                (novo_id, int(user_id), f"pix:{novo_id}", public_token, plan, plan_stored,
                  int(price_cents), int(credit_cents), int(amount_cents),
                  int(duration_days), stripe_subscription_id,
                  stripe_period_end_at),

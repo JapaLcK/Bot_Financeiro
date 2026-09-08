@@ -2187,9 +2187,62 @@ def init_db():
           paid_at timestamptz,
           canceled_at timestamptz,
           refunded_at timestamptz,
-          purged_at timestamptz
+          purged_at timestamptz,
+
+          -- ── as quatro invariantes, no BANCO e não em Python ──────────────
+          -- `status` é texto livre, e um typo (`pendng`) tira a linha do índice
+          -- parcial `uniq_pix_charge_ativa` — que só cobre 4 estados nomeados —
+          -- e LIBERA uma segunda cobrança ativa do mesmo usuário. Dois QRs
+          -- pagáveis é o furo financeiro que o §10 existe para fechar, e ele
+          -- voltaria por um erro de digitação.
+          --
+          -- `orphan_unknown` **não está na lista, de propósito**: ver o
+          -- comentário logo abaixo do `create table`.
+          constraint pix_charges_status_valido check (status in (
+            'draft', 'creating', 'pending', 'canceling', 'canceled',
+            'paid', 'paid_orphan', 'expired',
+            'refunded', 'refunded_partial', 'chargeback'
+          )),
+          -- `^pix:[0-9]+$` é o formato que separa NOSSO dinheiro do de terceiros
+          -- (§11): o dreno só classifica como `orphan_unknown` — dinheiro nosso
+          -- que perdeu a linha — o que casa esta regex. Uma referência fora do
+          -- formato faz o pagamento ser descartado em SILÊNCIO, que é o oposto
+          -- do que a célula existe para impedir. A regex mora aqui porque é o
+          -- único lugar que nenhum chamador pode contornar.
+          constraint pix_charges_ref_formato
+            check (external_reference ~ '^pix:[0-9]+$'),
+          -- Centavos são inteiros e não-negativos. Sem isto, um crédito maior
+          -- que o preço produz `amount_cents` negativo e a cobrança sai com
+          -- valor negativo para o provedor.
+          constraint pix_charges_centavos_nao_negativos check (
+            price_cents >= 0 and credit_cents >= 0 and amount_cents >= 0
+          ),
+          -- O que se COBRA é sempre preço menos crédito (§7). É a única relação
+          -- entre as três colunas, e deixá-la implícita permitiria uma cobrança
+          -- cujo valor não bate com o snapshot que a justifica.
+          constraint pix_charges_amount_fecha
+            check (amount_cents = price_cents - credit_cents)
         )
         """,
+        # **`orphan_unknown` NÃO é um estado desta tabela**, e a decisão está no
+        # `check` acima em vez de numa frase. O §8.2 A manda registrar o
+        # pagamento que chega com `externalReference` NOSSO e sem linha local —
+        # mas esse registro não tem `plan`, `plan_stored`, `price_cents`,
+        # `credit_cents`, `public_token` nem `user_id`, que são todos `not null`
+        # aqui. A linha era literalmente ininserível (P1-2 do Codex no #304).
+        #
+        # Das duas saídas, a escolhida é **tabela própria** (`pix_unmatched_payments`),
+        # não colunas anuláveis: o registro NÃO é uma cobrança nossa — não tem
+        # plano, preço nem dono —, e afrouxar seis `not null` tiraria a garantia
+        # do caminho de 100% das vendas para acomodar um caso que não é venda.
+        # Todo leitor futuro de `amount_cents` passaria a precisar de um ramo de
+        # NULL.
+        #
+        # **Ela nasce no 1b-B, junto do dreno que a escreve** — é a mesma regra
+        # que o dono fixou para `ga_client_id`/`fbp`/`fbc` (§14): tabela sem
+        # escritor é tabela que alguém preenche errado. O `check` acima garante
+        # que ninguém tente enfiar o estado aqui enquanto isso.
+
         # UMA cobrança ativa por usuário, garantida pelo BANCO e não por
         # `select`+`insert` em Python (§3.2 + §10): duas requisições
         # concorrentes não podem produzir dois QRs pagáveis, senão as duas são
