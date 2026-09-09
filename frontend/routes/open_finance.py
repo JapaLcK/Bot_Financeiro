@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, record_audit_event
 from core.secure_compare import constant_time_eq
+from core.pg_text import limpa_para_pg
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
@@ -1153,13 +1154,29 @@ async def open_finance_pluggy_webhook(request: Request):
         # o comentário do `item` seis linhas abaixo existe para evitar. Recusar no
         # parse põe o caso na classe que este handler JÁ tratava com 400 desde
         # antes ("corpo que não é JSON"), sem política nova nem saneamento depois.
-        # NÃO fecha a metade de STRING da mesma via: NUL (`\u0000`) e surrogate
-        # solitário, no valor OU na chave, seguem chegando ao `Jsonb(raw)` de
-        # update_pluggy_open_finance_item_status, ao param `text` do item_id e à
-        # lista de transactionIds do `any(%s)` em delete_open_finance_transactions
-        # (psycopg a adapta como text[]) → 500.
-        # Pré-existente (a `main` também dá 500) e só alcançável com o secret.
-        event = json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
+        # A metade de STRING da mesma via — NUL (`\u0000`) e surrogate solitário,
+        # no valor OU na chave — é o que o `limpa_para_pg` fecha (#317). Nenhum
+        # dos dois existe em `text`/`jsonb`, então eles davam 500 no `Jsonb(raw)`
+        # de update_pluggy_open_finance_item_status, no param `text` do item_id,
+        # no get_connections_by_item_id e na lista de transactionIds do `any(%s)`
+        # de delete_open_finance_transactions (psycopg a adapta como text[]) — e
+        # ainda faziam o `Jsonb(details)` do log_system_event perder a linha de
+        # auditoria em silêncio (o `except Exception: print(...)` engole).
+        # UM ponto cobre todos eles porque `item_id`, `event_name` e
+        # `transactionIds` são DERIVADOS deste `event` já saneado, logo abaixo —
+        # por isso o `db/` não muda. Inclui o `register_item` de item
+        # desconhecido (~70 linhas abaixo), que grava `provider_item_id` e
+        # `last_event`: MEDIDO com `{"event":"item/updated","itemId":"ZZ\ud800"}`
+        # — na `main` é 500 e NÃO grava; aqui é 200 e grava
+        # `provider_item_id='ZZ\ufffd\ufffd\ufffd'` com `user_id=None`. Dois
+        # surrogates diferentes colapsam nessa mesma identidade e viram DUAS
+        # linhas. É lixo novo no registry, não privilégio novo: exige o secret, e
+        # a mesma capacidade já existia com qualquer id limpo desconhecido.
+        # DENTRO do try de propósito: fora dele, um corpo fundo o bastante
+        # viraria 500 em vez do 400 que já era o desfecho de "não é JSON".
+        event = limpa_para_pg(
+            json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
     if not isinstance(event, dict):
