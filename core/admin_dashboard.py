@@ -28,6 +28,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
+from core.pg_text import limpa_para_pg
 from core.secure_compare import constant_time_eq
 
 
@@ -2117,7 +2118,11 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
         # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
         # hoje seguem idênticos: ausente/null/""/"   " → None.
-        note = str(payload.get("note") or "").strip() or None
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
@@ -2146,7 +2151,11 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
         # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
         # hoje seguem idênticos: ausente/null/""/"   " → None.
-        note = str(payload.get("note") or "").strip() or None
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(reject_payout, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
