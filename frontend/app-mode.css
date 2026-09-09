@@ -609,11 +609,8 @@ html.pb-app #piggy-fab {
   /* Abaixo do vidro dos modais (800): FAB não compete com botões de modal */
   z-index: 700 !important;
 }
-/* Mesma sobreposição que o toast tem na web, com outra aritmética: aqui o FAB
-   começa em 84px e tem 58px de altura, então seu topo fica em 142px. Os 88px
-   antigos só limpavam a tab bar e deixavam o toast atrás da bolinha. */
 html.pb-app #toast {
-  bottom: calc(150px + env(safe-area-inset-bottom)) !important;
+  bottom: calc(88px + env(safe-area-inset-bottom)) !important;
 }
 /* Só o toast do dashboard é ancorado à direita. O do settings é centralizado
    por `left: 50vw` + `transform: translateX(-50%)` — dar um "right" a ele

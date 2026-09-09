@@ -44,6 +44,24 @@ body.light {
   --orb-opacity: .12;
 }
 
+/* Estas duas superfícies seguem ESCURAS no tema claro — a `.modal`
+   (`rgba(14,16,30,.94)`) e o `#piggy-panel` (gradiente #1a1d2a→#14161e) não
+   têm par `body.light`, ao contrário da `.user-dropdown` (:103) e da
+   `.period-pill option` (:497), que viram brancas. Tinta clara ali dentro
+   seria cinza-ardósia sobre quase-preto, então elas mantêm a rampa escura.
+   Isto também fecha o buraco que o comentário da `.cl-row` já registrava
+   (`--text` virava #0f172a dentro de modal escuro), e que atingia `.modal h3`
+   e `.ld-desc` desde antes desta mudança. */
+body.light .modal,
+body.light #piggy-panel {
+  --text:   rgba(255,255,255,0.92);
+  --text-2: rgba(255,255,255,0.66);
+  --text-3: rgba(255,255,255,0.50);
+  --green:  #00F078;
+  --red:    #FF5A5A;
+  --neon-ink: var(--neon);
+}
+
 html { scroll-behavior: smooth; }
 body {
   font-family: var(--font-brand, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
@@ -1544,9 +1562,12 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
-/* Sobe acima do FAB (topo dele a 80px): os dois são `fixed` e ancorados no
-   mesmo canto, então o toast nascia atrás da bolinha do Piggy. */
-#toast { position:fixed;bottom:92px;right:26px;z-index:999;
+/* Sai da frente do #piggy-fab pelo LADO, não por cima: os dois são `fixed` no
+   mesmo canto e o toast nascia atrás da bolinha. O FAB ocupa de 22px a 80px da
+   borda direita, então 92px o limpa. Subir o toast em vez disso o jogaria em
+   cima do #piggy-panel, que começa em bottom:90px e tem o campo de digitar no
+   rodapé. */
+#toast { position:fixed;bottom:26px;right:92px;z-index:999;
   background:rgba(0,240,120,.14);backdrop-filter:blur(20px);
   border:1px solid rgba(0,240,120,.3);color:var(--green);
   padding:9px 18px;border-radius:12px;font-size:.8rem;font-weight:600;

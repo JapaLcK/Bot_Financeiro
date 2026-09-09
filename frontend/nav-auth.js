@@ -188,7 +188,7 @@
       ".nav .nav-right{order:2;margin-left:auto}",
       /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
       ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;",
-      "width:44px;height:44px;margin-left:8px;padding:0;flex-shrink:0;",
+      "width:44px;height:44px;margin-left:auto;padding:0;flex-shrink:0;",
       "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);",
       "border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
       ".pb-burger:hover{background:rgba(255,255,255,.12)}",
@@ -262,9 +262,23 @@
 
   // ── Botão do menu mobile ──────────────────────────────────────────────────
   // O CSS acima recolhe .nav-links abaixo de 900px; sem este botão não haveria
-  // como reabrir. Fica antes da lista e só aparece no breakpoint mobile — é a
-  // regra .pb-burger{display:none} que cuida do desktop, então girar o aparelho
-  // não deixa estado inconsistente: quem decide é o CSS, não o JS.
+  // como reabrir. Quem mostra ou esconde o botão é o CSS
+  // (.pb-burger{display:none}); o JS só precisa zerar o estado ao SAIR do
+  // breakpoint, senão a classe pb-nav-open e o aria-expanded="true" ficariam de
+  // pé num botão invisível — e quem gira o aparelho e volta reencontraria o
+  // menu aberto sem ter pedido.
+  //
+  // O botão entra ANTES do .nav-links, e isso é deliberado: um DOM só serve a
+  // DUAS ordens visuais diferentes (desktop é logo→links→entrar, mobile é
+  // logo→entrar→botão→links), então alguma das duas vai divergir do Tab.
+  // Aqui a conta foi feita:
+  //   - antes dos links (atual): com o menu ABERTO o Tab entra nos links logo
+  //     depois do botão, e o desktop segue igual ao visual. O desvio fica no
+  //     mobile FECHADO, onde o botão é tabulado antes do "Entrar".
+  //   - depois do .nav-right: consertaria o mobile fechado e deixaria os links
+  //     INALCANÇÁVEIS por Tab com o menu aberto — nada vem depois deles.
+  // Quem só pode abrir o menu pelo teclado precisa conseguir entrar nele, então
+  // fica como está. Não mova sem medir os dois estados.
   function mountBurger() {
     const nav = document.querySelector(".nav");
     const links = nav && nav.querySelector(".nav-links");
@@ -302,6 +316,11 @@
     links.addEventListener("click", function (e) {
       if (e.target.closest("a")) setOpen(false);
     });
+    // Passou de 900px: o botão some e o menu volta a ser a barra do desktop.
+    var mq = window.matchMedia("(max-width:900px)");
+    var onBreakpoint = function (e) { if (!e.matches) setOpen(false); };
+    if (mq.addEventListener) mq.addEventListener("change", onBreakpoint);
+    else if (mq.addListener) mq.addListener(onBreakpoint); // Safari < 14
 
     nav.insertBefore(b, links);
   }
