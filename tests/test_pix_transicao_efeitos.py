@@ -25,11 +25,12 @@ import pathlib
 import secrets
 import uuid
 
-from db.pix_charges import attach_pagamento, criar_cobranca, transicionar
+from db.pix_charges import criar_cobranca, transicionar
+from db.pix_charges_saga import attach_pagamento
 # `_JANELA` vem do arquivo irmão em vez de ser recopiada (§0.7): é a mesma
 # fixture da janela que o CHECK `pix_charges_pago_tem_janela` exige.
 from test_pix_charges import _JANELA
-from db.webhook_outbox import efeito_registrado, registrar_efeito
+from db.pix_effects import efeito_registrado, registrar_efeito
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 

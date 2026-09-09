@@ -57,9 +57,11 @@ import httpx
 import pytest
 
 import core.services.asaas as asaas
+import core.services.asaas_customers as asaas_customers
 from core.services.asaas import (
     AsaasApiError,
     AsaasConfigError,
+    _codigo_seguro,
     buscar_por_external_reference,
     criar_pagamento_pix,
     deletar_pagamento,
@@ -254,3 +256,87 @@ def test_sucesso_sem_json_valido_vira_asaas_api_error(chamadas, monkeypatch, sta
     with pytest.raises(AsaasApiError) as capturado:
         buscar_por_external_reference("pix:42")
     assert capturado.value.status_code == status
+
+
+# ── C4: cliente e leitura do pagamento (1b-B) ────────────────────────────────
+#
+# `criar_cliente` mudou de módulo no C7 (`core/services/asaas_customers.py`):
+# `core/services/asaas.py` bateu no teto de 350 quando o `obter_qr_pix` entrou.
+# O `_request` continua sendo o mesmo, então a fixture `chamadas` alcança os
+# dois — é o transporte que ela troca, não o módulo.
+
+def test_criar_cliente_manda_o_cpf_e_devolve_so_o_id(chamadas):
+    """O `cpfCnpj` VAI no corpo (o Asaas exige) e o retorno é só o `id`.
+
+    *Negativo: devolva o dict inteiro em `criar_cliente` → a última asserção
+    fica vermelha, e é ela que impede nome/CPF/e-mail ecoados pelo Asaas de
+    seguirem para um `details` de `log_system_event`.*
+    """
+    import json
+
+    chamadas.json = {"id": "cus_9", "name": "Fulano", "cpfCnpj": "12345678901",
+                     "email": "f@x.com"}
+    devolvido = asaas_customers.criar_cliente(nome="Fulano",
+                                              cpf_cnpj="12345678901",
+                                              email="f@x.com")
+    req = chamadas.vistas[0]
+    assert req.method == "POST"
+    assert req.url.path == "/v3/customers"
+    corpo = json.loads(req.content)
+    assert corpo == {"name": "Fulano", "cpfCnpj": "12345678901", "email": "f@x.com"}
+    assert devolvido == "cus_9"
+
+
+def test_criar_cliente_sem_id_na_resposta_levanta(chamadas):
+    """Customer vazio criaria a cobrança seguinte sem dono no Asaas — e `""` é
+    o valor que passaria despercebido até o POST do pagamento."""
+    chamadas.json = {"errors": []}
+    with pytest.raises(AsaasApiError):
+        asaas_customers.criar_cliente(nome="Fulano", cpf_cnpj="12345678901")
+
+
+def test_buscar_pagamento_le_o_pagamento_pelo_id(chamadas):
+    """POSITIVO do par: o caminho legítimo devolve o objeto com `refunds[]`,
+    que é o único lugar onde o acumulado do estorno existe (§17.1, pendência 4)."""
+    chamadas.json = {"id": "pay_7", "value": 299.0,
+                     "refunds": [{"value": 100.0}, {"value": 50.0}]}
+    pagamento = asaas.buscar_pagamento("pay_7")
+    req = chamadas.vistas[0]
+    assert req.method == "GET"
+    assert req.url.path == "/v3/payments/pay_7"
+    assert sum(r["value"] for r in pagamento["refunds"]) == 150.0
+
+
+def test_buscar_pagamento_com_forma_inesperada_levanta(chamadas):
+    """Lista onde devia haver objeto: "não sei" não pode virar "sem estorno",
+    senão o alerta sai com um número inventado em vez de `indisponível`."""
+    chamadas.json = [{"id": "pay_7"}]
+    with pytest.raises(AsaasApiError) as capturado:
+        asaas.buscar_pagamento("pay_7")
+    assert capturado.value.status_code is None
+
+
+# ── C6: o QR do Pix ──────────────────────────────────────────────────────────
+
+def test_obter_qr_pix_le_o_payload(chamadas):
+    """POSITIVO: o caminho legítimo devolve o "copia e cola"."""
+    chamadas.json = {"payload": "00020126...5204", "encodedImage": "iVBORw0=",
+                     "expirationDate": "2026-09-12 23:59:59"}
+    qr = asaas.obter_qr_pix("pay_7")
+    assert chamadas.vistas[0].url.path == "/v3/payments/pay_7/pixQrCode"
+    assert qr["payload"] == "00020126...5204"
+
+
+@pytest.mark.parametrize("corpo", [{}, {"payload": ""}, {"payload": 42},
+                                   {"encodedImage": "iVBORw0="}])
+def test_obter_qr_pix_sem_payload_levanta(chamadas, corpo):
+    """DISCRIMINA. Cobrança emitida cujo QR não veio é venda que o cliente não
+    consegue pagar; devolver `""` viraria um modal em branco.
+
+    *Negativo: troque o `raise` por `return dados` → a venda sobe com
+    `qr_payload` vazio, o `qr_svg_data_url` gera um QR de string vazia, e o
+    cliente vê um quadradinho que não paga nada.*
+    """
+    chamadas.json = corpo
+    with pytest.raises(AsaasApiError):
+        asaas.obter_qr_pix("pay_7")

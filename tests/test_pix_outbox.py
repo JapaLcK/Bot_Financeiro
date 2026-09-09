@@ -1,5 +1,5 @@
-"""`db/webhook_outbox.py` — outbox do webhook do Asaas e registro de efeitos
-(§3.3, §3.4, §8.1 e §13.3).
+"""`db/webhook_outbox.py` + `db/pix_effects.py` — a outbox do webhook do Asaas
+e o registro de efeitos (§3.3, §3.4, §8.1 e §13.3).
 
 Duas propriedades decidem dinheiro aqui:
 
@@ -38,14 +38,12 @@ import pytest
 
 from core.crypto import PiiAccessContext, decrypt_pii
 from db.connection import get_conn
+from db.pix_effects import EFEITOS, efeito_registrado, registrar_efeito
 from db.webhook_outbox import (
     CAMPOS_MINIMOS,
-    EFEITOS,
     _erro_seguro,
-    efeito_registrado,
     marcar_processado,
     minimizar,
-    registrar_efeito,
     registrar_evento,
     registrar_falha,
 )
@@ -183,11 +181,15 @@ def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
     A versão anterior recebia `erro: str` e guardava os primeiros 500 chars.
     Truncar não removia nada: CPF, e-mail e nome aparecem no COMEÇO da mensagem.
     Agora a assinatura só aceita `tipo` + `codigo`, e os dois passam pelo filtro
-    de FORMA — a mesma regra do `_codigo_seguro` do cliente Asaas, **incluindo a
-    recusa de só-dígitos**, que é a linha que faltava: a cópia aceitava
-    `"12345678901"` porque todo dígito passa no `isalnum()` (P2 do Codex no
-    #304). Que as duas continuem sendo a mesma regra é o que
-    `test_erro_seguro_nao_divergiu_do_codigo_seguro` mede.
+    de FORMA — **e desde o 1b-B ela é literalmente a MESMA função**: `_erro_seguro`
+    virou uma chamada a `core.services.asaas._codigo_seguro(valor, "?")`, e a
+    cópia (que já divergiu uma vez, aceitando `"12345678901"` porque todo dígito
+    passa no `isalnum()`, P2 do Codex no #304) morreu junto com
+    `test_erro_seguro_nao_divergiu_do_codigo_seguro`. Os **29** valores que aquela
+    media migraram para `tests/test_asaas_codigo_seguro.py` — não para
+    `tests/test_asaas_client.py`, que é o transporte HTTP, e não eram "três".
+    (O ponteiro errado e a contagem errada estavam aqui, e foi por eles que
+    `"x"*60`, `"0001-12345-6"` e `"42"` sumiram sem ninguém notar.)
 
     *Negativo: faça `_erro_seguro` devolver `tipo` sem filtrar → as linhas com
     PII ficam vermelhas. Negativo da corrida de 11+ dígitos: apague o
@@ -308,40 +310,3 @@ def test_efeito_desconhecido_e_recusado():
         "stripe_cancel", "grant", "ga4", "capi", "email", "revoke",
         "orphan_notified",
     }, "a lista de efeitos do §3.4 mudou — o dreno do 1b-B depende dela"
-
-
-def test_erro_seguro_nao_divergiu_do_codigo_seguro():
-    """§0.7: `_erro_seguro` é uma CÓPIA da regra de `_codigo_seguro`, e a cópia
-    já divergiu uma vez — aceitando `"12345678901"` porque todo dígito é
-    `isalnum()` (P2 do Codex no #304). Este teste é o que o §0.7 manda pôr
-    quando a duplicação é inevitável: as duas rodam sobre a MESMA tabela e têm
-    de decidir igual.
-
-    Um import resolveria melhor, e não pode: `db.webhook_outbox` importando
-    `core.services.asaas` deixa
-    `test_pix_inerte.py::test_nenhum_modulo_de_producao_importa_os_modulos_inertes`
-    vermelho (medido). No 1b-B, com o dreno na allowlist, este teste some junto
-    com a cópia.
-
-    *Negativo: apague a linha do só-dígitos OU a da corrida de 11+ dígitos de UM
-    dos dois lados → vermelho, com o valor divergente no assert. Positivo:
-    `AsaasApiError`, `invalid_cpfCnpj`, `error_400`, `HTTP_502` e `code-42`
-    estão na tabela e passam nos dois — sem eles, dois filtros que recusam TUDO
-    concordariam.*
-    """
-    from core.services.asaas import _codigo_seguro
-
-    for valor in ("AsaasApiError", "invalid_cpfCnpj", "ReadTimeout", "v1.2.3",
-                  "12345678901", "123.456.789-01", "0001-12345-6", "42",
-                  "CPF12345678901", "cpf_12345678901", "CNPJ12345678000199",
-                  "invalid_123.456.789-01", "cnpj-12.345.678-0001-99",
-                  "cpf_123_456_789_01", "123_456_789_01", "cpf-123.456_789-01",
-                  "error_400", "HTTP_502", "code-42", "payment_not_found",
-                  "asaas_invalid_object", "subscription_not_found",
-                  "Fulano de Tal", "a@b.com", "CPF 123 invalido",
-                  "", None, "x" * 61, "x" * 60):
-        assert _erro_seguro(valor, None) == (_codigo_seguro(valor) or "?"), (
-            f"a cópia de `_codigo_seguro` em db/webhook_outbox.py divergiu "
-            f"em {valor!r}: {_erro_seguro(valor, None)!r} vs "
-            f"{_codigo_seguro(valor) or '?'!r}"
-        )
