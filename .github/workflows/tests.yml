@@ -470,12 +470,19 @@ jobs:
           python -m pip install --upgrade pip pip-audit
           pip-audit -r requirements.txt || echo "::warning title=pip-audit::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
 
-      # Sem `setup-node`: o ubuntu-latest ja traz npm, e `--package-lock-only`
-      # le so o lock — nao instala nada. Inclui devDependencies (padrao do
-      # comando): no mobile/ a cadeia de build e quem assina o binario.
+      # Sem `setup-node`: o ubuntu-latest ja traz npm e node, e o
+      # `--package-lock-only` do script le so o lock — nao instala nada. Inclui
+      # devDependencies (padrao do comando): no mobile/ a cadeia de build e quem
+      # assina o binario.
+      #
+      # E por que um script, e nao `npm audit ... || echo "::warning ..."`: o npm
+      # sai 1 tanto quando ACHA vulnerabilidade quanto quando o audit nao roda
+      # (registry fora, 403, JSON truncado). O `|| echo` tratava os dois igual —
+      # queda de registry saia verde anunciando "vulnerabilidades encontradas",
+      # com o lock nunca escaneado. O script decide pelo payload e avisa "NAO
+      # RODOU" com titulo proprio. Nao bloqueia: sai 0 sempre.
       - name: npm audit raiz (informativo, nao bloqueia)
-        run: npm audit --package-lock-only || echo "::warning title=npm-audit (raiz)::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
+        run: node scripts/npm_audit_report.mjs .
 
       - name: npm audit mobile (informativo, nao bloqueia)
-        working-directory: mobile
-        run: npm audit --package-lock-only || echo "::warning title=npm-audit (mobile)::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
+        run: node scripts/npm_audit_report.mjs mobile
