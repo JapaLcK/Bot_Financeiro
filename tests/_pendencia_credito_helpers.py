@@ -189,6 +189,28 @@ de seleção do `MEMORY_STOP_TOKENS`: 5 vermelhos —
 `test_so_numero_aceita_o_vocabulario_canonico_de_fala` (`5000 pilas`,
 `5000 mangos`, `acho que 5000`, `5 mil reais e 50 centavos`).
 
+A TERCEIRA PORTA da mesma classe (portão mais estrito que a peça que ele
+substituiu), achada pelo Codex no #323 e medida contra a `main`: SUFIXO e
+PREFIXO VERBAL. Duas regressões, três controles:
+
+CONTROLE NEGATIVO N — tire `_VERBO_CONVERSACIONAL` da união do
+`_UNIDADE_DE_RESPOSTA`: 9 vermelhos, todos os casos conversacionais do
+`test_forma_legitima_passa_pelo_portao` (`pode ser dia 10`, `pode colocar 5000`,
+`quero 3 dias antes`, `deixa 5000`, `bota 3000`, `queria 5 mil`, `coloca 3
+dias`, `poe dia 10`, `pode por dia 10`).
+
+CONTROLE NEGATIVO O — apague o `while ... in _CORTESIA_FINAL` do
+`_leituras_da_resposta`: 12 vermelhos no
+`test_pay_bill_choice_aceita_nome_com_acento_pontuacao_e_filler` (`nubank por
+favor`, `nubank obrigado`, `itau obrigado`, `btg por favor`, …).
+
+CONTROLE NEGATIVO P — o mais importante dos três, e é o do SENTIDO OPOSTO:
+troque `_CORTESIA_FINAL` pelo `_FILLER` na poda de sufixo, que é a simplificação
+tentadora ("é a mesma coisa das duas pontas"). 5 vermelhos em
+`test_pay_bill_choice_nao_paga_com_comando_depois_do_nome`, e o que eles medem é
+`nubank excluir` PAGANDO R$ 300 — um comando de EXCLUIR virando pagamento. As
+duas pontas não correm o mesmo risco, e é isso que o conjunto pequeno protege.
+
 RESÍDUO CONHECIDO, medido e não consertado: um cartão chamado exatamente como
 um comando (`Conta`) ainda perde a resposta `conta` sozinha — mas pela OUTRA
 porta, a allowlist (`classify("conta")` = `balance.check`/1.0), não pelo portão.

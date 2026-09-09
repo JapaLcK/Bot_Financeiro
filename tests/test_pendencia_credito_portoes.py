@@ -227,3 +227,23 @@ def test_set_primary_choose_re_pergunta_em_vez_de_abandonar():
     pend = db.get_pending_action(uid)
     assert pend and pend["action_type"] == "credit_card_set_primary", \
         f"a pendência não sobreviveu: {pend!r}"
+
+
+# P2-2 (Codex no #323), o lado do ATAQUE. Aparar o sufixo do nome do cartão
+# abriu uma ponta nova, e as duas pontas NÃO correm o mesmo risco: no começo o
+# perigo é o comando vir antes do nome (`excluir cartao nubank`), no fim é ele
+# vir depois. Por isso `_CORTESIA_FINAL` é um conjunto pequeno de cortesia e
+# não a lista de filler — com o filler, `nubank excluir` casaria `nubank` e a
+# pergunta "qual fatura?" pagaria R$ 300 com um comando de EXCLUIR.
+@pytest.mark.parametrize("frase", ["nubank excluir", "nubank apagar",
+                                   "nubank deletar", "nubank remover",
+                                   "nubank saldo", "nubank fatura"])
+def test_pay_bill_choice_nao_paga_com_comando_depois_do_nome(frase):
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+
+    resposta = _diga(uid, frase)
+
+    assert db.list_open_bills(uid), f"{frase!r} PAGOU a fatura: {resposta!r}"
+    assert float(db.get_balance(uid)) > -300, \
+        f"{frase!r} debitou a fatura: {resposta!r}"

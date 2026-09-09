@@ -346,24 +346,45 @@ _FILLER = {"a", "o", "as", "os", "um", "uma", "do", "da", "de", "dos", "das",
            "esse", "essa", "este", "esta"}
 
 
-def _leituras_da_resposta(alvo: str) -> set[str]:
-    """A resposta inteira, e ela sem os enfeites do COMEÇO.
+# Cortesia de FIM de mensagem. Conjunto pequeno e fechado DE PROPÓSITO, e
+# deliberadamente diferente do `_FILLER`: as duas pontas não correm o mesmo
+# risco. No começo, o perigo é o comando vir ANTES do nome
+# (`excluir cartao nubank`); no fim, é o comando vir DEPOIS (`nubank excluir`).
+# Aparar o sufixo com a mesma lista do prefixo reabriria a segunda forma — por
+# isso aqui só entram palavras que não são comando de nada.
+_CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
+                   "valeu", "vlw", "pls", "please", "plz"}
 
-    Só o PREFIXO, nunca o miolo: `a do banco do brasil` tem de virar
+
+def _leituras_da_resposta(alvo: str) -> set[str]:
+    """A resposta inteira, ela sem os enfeites do COMEÇO, e sem a cortesia do FIM.
+
+    Prefixo, nunca o miolo: `a do banco do brasil` tem de virar
     `banco do brasil`, e um filtro global de filler comeria também o `do` do
     MEIO do nome. Pelo mesmo motivo `a conta` vira `conta` mesmo com "conta"
     sendo filler — o nome do cartão pode SER uma palavra de enfeite.
 
-    E é o que mantém o ataque fora: em `excluir cartao nubank` a primeira
-    palavra não é enfeite, a varredura para na hora, e a única leitura é a frase
-    inteira — que não é nome de cartão nenhum.
+    Sufixo só de `_CORTESIA_FINAL`: `nubank por favor` é resposta comum e a
+    `main` aceitava (por substring). O que NÃO se faz é voltar ao `re.search` —
+    é ele que fazia `excluir cartao nubank` casar `nubank` e PAGAR R$ 300.
+
+    E é o que mantém os dois ataques fora: em `excluir cartao nubank` a primeira
+    palavra não é enfeite e a varredura de prefixo para na hora; em
+    `nubank excluir` o último token não é cortesia e a de sufixo também. Nos
+    dois a única leitura é a frase inteira, que não é nome de cartão nenhum.
     """
     tokens = alvo.split()
-    leituras = {alvo}
-    for i in range(1, len(tokens)):
-        if tokens[i - 1] not in _FILLER:
+    fim = len(tokens)
+    # `fim > 1`: uma resposta que é SÓ cortesia ("obrigado") não pode virar
+    # string vazia e casar um cartão de nome vazio.
+    while fim > 1 and tokens[fim - 1] in _CORTESIA_FINAL:
+        fim -= 1
+    nucleo = tokens[:fim]
+    leituras = {alvo, " ".join(nucleo)}
+    for i in range(1, len(nucleo)):
+        if nucleo[i - 1] not in _FILLER:
             break
-        leituras.add(" ".join(tokens[i:]))
+        leituras.add(" ".join(nucleo[i:]))
     return leituras
 
 
@@ -429,7 +450,24 @@ _UNIDADE_DE_CARTAO = {
     "cerca", "aproximadamente", "ate",
 }
 
-_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO
+# 3. `_VERBO_CONVERSACIONAL` — o jeito como se responde uma pergunta falando,
+#    não o assunto da resposta: "pode ser dia 10", "quero 3 dias antes",
+#    "pode colocar 5000". A `main` aceitava as três (os parsers fazem `search`).
+#
+#    PROCUREI ANTES DE CRIAR (§0.1) e a lista NÃO existe no repositório:
+#    medido, nenhum de `pode`/`ser`/`quero`/`colocar`/`deixa`/`bota`/`poe` está
+#    em `STOPWORDS_PT` nem em `MEMORY_STOP_TOKENS`. E reusar `STOPWORDS_PT`
+#    seria ERRADO, não só inútil: ela contém `gastei`, `comprei` e `paguei` —
+#    exatamente as palavras que este portão existe para recusar. Por isso é
+#    conjunto próprio, e por isso ele é curto: entra verbo de preenchimento,
+#    nunca substantivo ou verbo que nomeie o assunto.
+_VERBO_CONVERSACIONAL = {
+    "pode", "podem", "poderia", "poder", "ser", "seria",
+    "quero", "queria", "gostaria",
+    "coloca", "colocar", "bota", "botar", "poe", "por", "deixa", "deixar",
+}
+
+_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO | _VERBO_CONVERSACIONAL
 
 
 # `PT_NUM_ALT` (público desde sempre, `utils_text.py`) em vez de uma cópia do

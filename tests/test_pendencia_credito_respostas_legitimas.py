@@ -173,6 +173,18 @@ _NOMES_E_RESPOSTAS = [
     # o nome É uma palavra de filler.
     ("Conta", "a conta"), ("Conta", "minha conta"),
     ("Mercado Pago", "a do mercado pago"),
+    # P2-2 (Codex no #323): CORTESIA no fim. A `main` aceitava (casava por
+    # substring), e o `_leituras_da_resposta` só aparava o PREFIXO. O conjunto
+    # aparável é pequeno e fechado de propósito — ver `_CORTESIA_FINAL` e o
+    # teste do ataque em `test_pendencia_credito_portoes.py`.
+    ("Nubank", "nubank por favor"), ("Nubank", "nubank obrigado"),
+    ("Nubank", "nubank obrigada"), ("Nubank", "nubank valeu"),
+    ("Nubank", "nubank pf"), ("Nubank", "nubank pls"),
+    ("Nubank", "a do nubank por favor"),
+    ("Nubank", "a fatura do nubank por favor"),
+    ("Mercado Pago", "mercado pago por favor"),
+    ("Itaú", "itau obrigado"), ("C6-Carbon", "c6 carbon obrigado"),
+    ("BTG+", "btg por favor"),
 ]
 
 

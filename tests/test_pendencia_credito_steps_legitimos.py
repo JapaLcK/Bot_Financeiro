@@ -192,6 +192,20 @@ _FORMA_LEGITIMA = [
     ("reminder_days", "3 dias", "registrado com sucesso"),
     ("reminder_days", "uns 3", "registrado com sucesso"),
     ("reminder_days", "3 dias antes", "registrado com sucesso"),
+    # P2-1 (Codex no #323): resposta NUMÉRICA dita conversando. A `main`
+    # aceitava as cinco — `_parse_day`/`parse_money` fazem `search` —, e o
+    # portão de forma passou a recusar porque `pode`/`quero`/`colocar`/`ser`
+    # não estavam em conjunto nenhum. Mesma classe de regressão do R3-2, por
+    # uma terceira porta: o PREFIXO VERBAL.
+    ("closing_day", "pode ser dia 10", "quando vence"),
+    ("closing_day", "poe dia 10", "quando vence"),
+    ("closing_day", "pode por dia 10", "quando vence"),
+    ("credit_limit_ask", "pode colocar 5000", "registrado com sucesso"),
+    ("credit_limit_ask", "deixa 5000", "registrado com sucesso"),
+    ("credit_limit_ask", "bota 3000", "registrado com sucesso"),
+    ("credit_limit_ask", "queria 5 mil", "registrado com sucesso"),
+    ("reminder_days", "quero 3 dias antes", "registrado com sucesso"),
+    ("reminder_days", "coloca 3 dias", "registrado com sucesso"),
 ]
 
 
