@@ -821,7 +821,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         ele limpou — o delete remoto é best-effort e o item sobrevive lá. POR QUE
         o rastro com dono é o sinal certo (e por que banco removido fica "sem
         conexão local" para sempre): docstring de `db.item_registry_origins`,
-        fonte única dos três leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
+        fonte única dos leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
         com dono ANTES da conexão, então ela mesma fecha a duplicata — e a
         guarda é REFEITA dentro do `pluggy_item_lock`, imediatamente antes da
         escrita da conexão (`_salva_item_sob_lock`, `adocao_registro_id`),
@@ -867,12 +867,17 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     escrita: consertar só o primeiro TROCAVA o perdedor (quem aborta limpa, quem
     perde o lock fica), e era regressão contra a `main`, onde a mesma
     intercalação dava 1 conexão. O que continua pagando o preço é a falha de
-    INFRA DENTRO da escrita (FK da conta apagada, erro no meio do upsert, commit
-    ambíguo), em que o desfecho é DESCONHECIDO e apagar a reivindicação poderia
-    soltar uma segunda adoção por cima de uma conexão que existe. Pool esgotado
-    NÃO está nesta lista: ele estoura no `get_conn`, ANTES de qualquer statement,
-    e `PoolTimeout`/`PoolClosed` saindo do `save_...` desfazem a reivindicação
-    como qualquer outra falha pré-escrita. Aí a saída é OPERACIONAL:
+    INFRA DENTRO da escrita (erro no meio do upsert, commit ambíguo), em que o
+    desfecho é DESCONHECIDO e apagar a reivindicação poderia soltar uma segunda
+    adoção por cima de uma conexão que existe. Pool esgotado NÃO está nesta
+    lista: ele estoura no `get_conn`, ANTES de qualquer statement, e
+    `PoolTimeout`/`PoolClosed` saindo do `save_...` desfazem a reivindicação como
+    qualquer outra falha pré-escrita. A FK da conta apagada também não está, e
+    não é escolha: `open_finance_item_registry.user_id` é `on delete cascade`
+    (`db/schema.py`), então o mesmo `delete from users` que faz a FK estourar já
+    levou o rastro `webhook_adopt` junto — não sobra reivindicação nenhuma
+    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Aí a saída é
+    OPERACIONAL:
     `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
     item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
     widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
@@ -888,10 +893,11 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     LIMITE CONHECIDO (medido). Duas entregas CONCORRENTES do mesmo `item/created`
     ainda leem o rastro vazio antes de qualquer uma escrever, e as duas gravam
     rastro (`register_item` fica FORA do lock, de propósito: é ele que a
-    retentativa do `_grava_reconexao` não pode repetir). O que a revalidação sob
-    o lock mais o desfazimento garantem é que NUNCA sobre reivindicação sem
-    conexão: no caso comum uma entrega grava e fica com o rastro, e as outras
-    abortam apagando o que gravaram; na intercalação em que a entrega que pega o
+    retentativa do `_grava_reconexao` não pode repetir). A revalidação sob o lock
+    mais o desfazimento fecham isso NAS CORRIDAS de entrega concorrente, e só
+    nelas: nenhuma intercalação delas deixa reivindicação sem conexão — no caso
+    comum uma entrega grava e fica com o rastro, e as outras abortam apagando o
+    que gravaram; na intercalação em que a entrega que pega o
     lock é justamente a que aborta, ninguém grava e ninguém reivindica — o item
     volta a ser órfão e a PRÓXIMA entrega (ou o script one-shot) adota. Sobra uma
     janela de LEITURA, não de estado: enquanto a perdedora não chega ao lock, o
@@ -904,9 +910,12 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     RECUSAVA toda retentativa e sumia do script, deixando o usuário com 0 bancos
     e sem saída (o P0 do Tester, 30/30 rodadas), a 3ª consertou só o aborto sob o
     lock e criou esse MESMO estado terminal pela porta do 503. Também fica aberto:
-    `item/updated` chegando ANTES do `item/created` (entrega fora de ordem) é
-    adotado sem contas e sem sync agendado até o evento seguinte ou o
-    pull-to-refresh. Nenhum dos dois é regressão contra a `main`.
+    SÓ `item/created` adota (o gate é `event_name == "item/created"` no webhook, e
+    `test_so_item_created_adota` prende), então item cujo `item/created` se perdeu
+    ou nunca foi entregue não é adotado por evento NENHUM depois — nem pelo
+    `item/updated` —, e a única recuperação é o one-shot
+    (`scripts/adotar_items_of_orfaos.py`). Nenhum dos dois é regressão contra a
+    `main`.
 
     ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
     desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
@@ -994,7 +1003,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # Registrado, não consertado: sem o `ensure_user_tx` a adoção também
         # deixa de REPOR a linha de `accounts`, e existe estado de produção com
         # `users` sem `accounts` (`merge_users` apaga a do `from_user_id` e nunca
-        # apaga o `users` dele, db/users.py:107). Medido: a adoção grava, o
+        # apaga o `users` dele, db/users.py:109). Medido: a adoção grava, o
         # snapshot responde e `get_consolidated_balance` devolve zeros sem
         # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
         # `adocao_registro_id`: a 1ª guarda (rastro sem dono) é REFEITA dentro do
@@ -1748,7 +1757,7 @@ async def open_finance_pluggy_webhook(request: Request):
                 # ponytail: INSERT puro, sem teto — sob entrega at-least-once,
                 # cada retentativa de um item que já tem dono soma mais uma linha
                 # `origin='webhook'`/`user_id NULL` aqui. Igual à `main` (não é
-                # regressão) e inofensivo para os dois leitores, que perguntam
+                # regressão) e inofensivo para os leitores, que perguntam
                 # por rastro COM dono; se o volume incomodar, é um upsert por
                 # (provider, item, origin) com contador.
                 await log_system_event(

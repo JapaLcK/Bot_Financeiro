@@ -326,10 +326,12 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
     a ninguém, e é isso que separa ADOTAR de RESSUSCITAR: nem o disconnect nem o
     reset apagam o registry (`db/privacy.py` o preserva), então banco REMOVIDO
     fica para sempre "sem conexão local" e só o rastro com dono
-    (`pluggy_item`/`webhook_adopt`) conta que ele existiu. Os três leitores:
+    (`pluggy_item`/`webhook_adopt`) conta que ele existiu. Os leitores:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
-        de `item/created`, entrega at-least-once, ressuscitava o removido);
+        de `item/created`, entrega at-least-once, ressuscitava o removido), e a
+        MESMA pergunta de novo dentro do lock, em `_salva_item_sob_lock`
+        (`exceto_registro_id`, abaixo);
       • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
         este item, logo a conexão que existe não é a que o webhook acabou de
         adotar (auditoria de reconexão);
