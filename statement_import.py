@@ -167,7 +167,6 @@ def _is_type_header(c: str) -> bool:
 
 
 _DEBIT_TYPE_VALUES = {"d", "debito", "debit", "saida", "pagamento", "despesa", "compra"}
-_CREDIT_TYPE_VALUES = {"c", "credito", "credit", "entrada", "deposito", "receita"}
 
 
 def _find_csv_header(text: str) -> tuple[str, int, list[str]] | None:
@@ -266,8 +265,8 @@ def parse_csv_statement(data: bytes) -> list[dict]:
         if amount is None or amount == 0:
             continue
 
-        # Coluna "Tipo" (D/C, Débito/Crédito) define o sinal quando o valor
-        # vem sem sinal no CSV.
+        # O sinal do valor manda. A coluna "Tipo" só é consultada para
+        # negativar valor positivo marcado como débito.
         tipo_raw = normalize_text(cell(type_col))
         if tipo_raw and amount > 0 and tipo_raw in _DEBIT_TYPE_VALUES:
             amount = -amount
