@@ -58,6 +58,7 @@ from db import (
     register_item,
     save_pluggy_open_finance_item,
     token_hash,
+    unregister_item,
     update_pluggy_open_finance_item_status,
     user_exists,
 )
@@ -268,7 +269,8 @@ def _retryable(exc: BaseException) -> bool:
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
                          tinha_conexao_propria: bool = False,
-                         criar_usuario: bool = True) -> tuple[dict, bool]:
+                         criar_usuario: bool = True,
+                         adocao_registro_id: int | None = None) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -325,6 +327,52 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                     detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
                            "a conexão era concluída. Conecte o banco de novo.",
                 )
+        # A MESMA revalidação, pelo lado da ADOÇÃO (Codex #313, P1). O fato que a
+        # adoção leu fora do lock não é "a conexão existe" — é "NENHUMA linha do
+        # rastro deste item tem dono" (1ª guarda de `_adota_item_orfao`), e ele
+        # muda na espera: duas entregas concorrentes do MESMO `item/created` leem
+        # o rastro vazio, a 1ª adota, o usuário DESCONECTA, e a 2ª chegava aqui
+        # com `tinha_conexao_propria=False` — item órfão nunca teve conexão, o
+        # valor era honesto — pulando a revalidação acima e recriando a conexão
+        # COM sync agendado, na carteira que o usuário acabou de limpar.
+        # Uma releitura fecha os DOIS casos porque o disconnect preserva o
+        # registry (`db/privacy.py`): duplicata pura (a 1ª já gravou o rastro) e
+        # ressurreição pós-disconnect (o rastro sobreviveu à conexão). `exceto` é
+        # a linha que ESTA entrega gravou segundos atrás — sem ela a adoção
+        # legítima se recusaria a si mesma.
+        #
+        # E o aborto DESFAZ a própria reivindicação, dentro do lock, antes de
+        # subir. Sem isso a revalidação sozinha trocava um estrago por outro
+        # PIOR (medido pelo Tester, 30/30): duas entregas concorrentes gravam o
+        # rastro antes de qualquer uma pegar o lock, cada uma enxerga o rastro
+        # da OUTRA, as duas abortam, e sobra rastro com dono e ZERO conexão —
+        # estado terminal, do qual nem a retentativa (1ª guarda) nem o script
+        # one-shot (o filtro dele exclui rastro com dono) tiram o usuário.
+        # Apagando a linha AQUI, com o lock na mão, quem entrar depois não vê
+        # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
+        # último a pegar o lock ganha e os outros saem sem deixar rastro. São
+        # DOIS os pontos que apagam (o outro é a desistência do lock, no 503 de
+        # `_grava_reconexao`), e nos dois a linha é a que a própria adoção acabou
+        # de escrever (`db.unregister_item`, que filtra por `user_id`).
+        #
+        # REGISTRADO, não consertado: quando quem "ganhou" foi o `POST
+        # /pluggy-item` do MESMO usuário (o navegador voltou enquanto o webhook
+        # esperava o lock), este delete tira a linha `webhook_adopt` e o log de
+        # append perde o registro de que o item também entrou por ali. O desfecho
+        # funcional está certo (1 conexão, 1 auditoria, a linha `pluggy_item`
+        # fica) e NENHUMA decisão lê `origin` para isso — só o diagnóstico "por
+        # onde ele entrou" fica mais pobre. Fechar exigiria distinguir origem
+        # rival no aborto, e a distinção não muda decisão nenhuma hoje.
+        if adocao_registro_id is not None:
+            outras = item_registry_origins(item_id, exceto_registro_id=adocao_registro_id,
+                                           exceto_user_id=user_id)
+            if outras:
+                unregister_item(adocao_registro_id, user_id)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Item {item_id} já foi atribuído por outra porta "
+                           f"({sorted(outras)}): adoção abortada sob o lock.",
+                )
         # O que sobrou DEPOIS de pegar o lock vai para a escrita. Sem isto o
         # orçamento parava aqui: `save_pluggy_open_finance_item` esperava o pool
         # (até `DB_CONNECT_TIMEOUT`) fora do prazo, e podia COMMITAR depois de o
@@ -351,7 +399,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
 
 async def _grava_reconexao(
     user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
-    criar_usuario: bool = True,
+    criar_usuario: bool = True, adocao_registro_id: int | None = None,
 ) -> dict:
     """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
 
@@ -375,6 +423,14 @@ async def _grava_reconexao(
     """
     fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
+    # LATCHED (nunca volta a False), e é por isso que não é `causa is None`:
+    # `causa` é só a da ÚLTIMA tentativa, de propósito
+    # (`test_causa_e_a_da_ultima_tentativa`), então infra na 1ª + lock ocupado na
+    # 2ª chega ao fim com `causa is None` tendo passado por uma escrita de
+    # desfecho DESCONHECIDO. Quem decide o desfazimento lá embaixo precisa da
+    # pergunta do prazo INTEIRO ("alguma tentativa pode ter escrito?"), não da
+    # última.
+    escrita_incerta = False
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         folga_ms = int((fim - time.monotonic()) * 1000)
         if folga_ms < 1:
@@ -397,7 +453,7 @@ async def _grava_reconexao(
         try:
             connection, sob_lock = await asyncio.to_thread(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
-                tinha_conexao_propria, criar_usuario)
+                tinha_conexao_propria, criar_usuario, adocao_registro_id)
             causa = None
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
@@ -457,6 +513,7 @@ async def _grava_reconexao(
             # (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
             causa = f"{type(exc).__name__}: {exc}"
+            escrita_incerta = True
         if sob_lock:
             return connection
         # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
@@ -514,6 +571,32 @@ async def _grava_reconexao(
         details={"item_id": item_id, "deadline_ms": _RECONNECT_DEADLINE_MS,
                  "erro": causa},
     )
+    # DESISTIR DO LOCK também desfaz a reivindicação da adoção — é o SEGUNDO
+    # desfecho em que a escrita provadamente não aconteceu, e sem ele o conserto
+    # do aborto sob o lock era REGRESSÃO contra a `main` (medido, duas colunas):
+    # duas entregas concorrentes, a que pega o lock aborta e apaga a linha dela,
+    # a que PERDE o lock deixava a dela para trás — 1 conexão saudável na `main`
+    # virava 0 conexões + reivindicação abandonada, que é o estado terminal (a 1ª
+    # guarda de `_adota_item_orfao` recusa a retentativa e o script one-shot não
+    # lista rastro com dono). Com o desfazimento, ninguém escreveu e ninguém
+    # reivindicou: a próxima entrega do `item/created` adota.
+    #
+    # "Provadamente": o ÚNICO `return None, False` de `_salva_item_sob_lock` é o
+    # `if not locked`, antes do `save_pluggy_open_finance_item` — e
+    # `escrita_incerta` cobre o resto do prazo, porque infra é desfecho
+    # desconhecido e aí a reivindicação FICA (apagá-la poderia soltar uma segunda
+    # adoção por cima de uma conexão que existe).
+    #
+    # AQUI e não no `if not locked`: apagar entre as tentativas deixaria a
+    # tentativa que enfim pega o lock gravar a conexão sem rastro com dono — item
+    # com banco conectado que o one-shot lista como órfão e a entrega seguinte
+    # readota. O desfazimento é do desfecho, não da tentativa.
+    #
+    # DEPOIS dos logs: o diagnóstico do 503 já está gravado se este delete
+    # estourar (ele sobe para o `except Exception` de `_adota_item_orfao`, que
+    # loga e responde 200 ao webhook).
+    if adocao_registro_id is not None and not escrita_incerta:
+        await asyncio.to_thread(unregister_item, adocao_registro_id, user_id)
     raise HTTPException(
         status_code=503,
         detail="Não foi possível concluir a conexão agora. Tente de novo em alguns segundos.",
@@ -667,7 +750,15 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         o rastro com dono é o sinal certo (e por que banco removido fica "sem
         conexão local" para sempre): docstring de `db.item_registry_origins`,
         fonte única dos três leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
-        com dono ANTES da conexão, então ela mesma fecha a duplicata;
+        com dono ANTES da conexão, então ela mesma fecha a duplicata — e a
+        guarda é REFEITA dentro do `pluggy_item_lock`, imediatamente antes da
+        escrita da conexão (`_salva_item_sob_lock`, `adocao_registro_id`),
+        porque entre as duas leituras cabe uma entrega concorrente inteira.
+        Quem perde essa segunda leitura APAGA o próprio rastro antes de
+        abortar, ainda com o lock na mão — e quem DESISTE do lock (503 sem
+        infra) apaga também, no `_grava_reconexao`: reivindicação abandonada
+        que fica para trás é o que torna o aborto terminal (ver o LIMITE
+        CONHECIDO);
       • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
         `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
         é ele que responde quando a conta já não existia — mas é leitura em
@@ -688,7 +779,19 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
     listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
     regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
-    `item/created` não readota (a 1ª guarda acima). A saída é OPERACIONAL:
+    `item/created` não readota (a 1ª guarda acima). É por isso que os DOIS
+    desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
+    adoção acabou de gravar, em vez de deixá-lo: o aborto sob o lock
+    (`_salva_item_sob_lock`) e a desistência do lock — o 503 com `causa` vazia,
+    em que nenhuma tentativa passou do `if not locked`. Sem os dois, duas
+    entregas concorrentes caíam neste estado sozinhas, sem falha nenhuma de
+    escrita: consertar só o primeiro TROCAVA o perdedor (quem aborta limpa, quem
+    perde o lock fica), e era regressão contra a `main`, onde a mesma
+    intercalação dava 1 conexão. O que continua pagando o preço é a falha de
+    INFRA (`psycopg.OperationalError` em qualquer tentativa: FK da conta apagada,
+    commit ambíguo, pool esgotado), em que o desfecho da escrita é DESCONHECIDO e
+    apagar a reivindicação poderia soltar uma segunda adoção por cima de uma
+    conexão que existe. Aí a saída é OPERACIONAL:
     `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
     item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
     widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
@@ -701,15 +804,28 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     falha de escrita, devolve None e o chamador mantém o rastro sem dono que já
     existia.
 
-    LIMITE CONHECIDO (medido, decidido não consertar): duas entregas CONCORRENTES
-    do mesmo `item/created` podem ler o rastro vazio antes de qualquer uma
-    escrever, e gravam DUAS auditorias para UMA conexão (o `pluggy_item_lock`
-    protege a conexão, a auditoria fica fora dele). A janela é a distância entre
-    a leitura do rastro e o `register_item` — hoje duas idas ao banco; fechá-la
-    de vez é serializar a adoção pelo `pluggy_item_lock`, que muda o desenho do
-    lock. Também fica aberto: `item/updated` chegando ANTES do `item/created`
-    (entrega fora de ordem) é adotado sem contas e sem sync agendado até o evento
-    seguinte ou o pull-to-refresh. Nenhum dos dois é regressão contra a `main`.
+    LIMITE CONHECIDO (medido). Duas entregas CONCORRENTES do mesmo `item/created`
+    ainda leem o rastro vazio antes de qualquer uma escrever, e as duas gravam
+    rastro (`register_item` fica FORA do lock, de propósito: é ele que a
+    retentativa do `_grava_reconexao` não pode repetir). O que a revalidação sob
+    o lock mais o desfazimento garantem é que NUNCA sobre reivindicação sem
+    conexão: no caso comum uma entrega grava e fica com o rastro, e as outras
+    abortam apagando o que gravaram; na intercalação em que a entrega que pega o
+    lock é justamente a que aborta, ninguém grava e ninguém reivindica — o item
+    volta a ser órfão e a PRÓXIMA entrega (ou o script one-shot) adota. Sobra uma
+    janela de LEITURA, não de estado: enquanto a perdedora não chega ao lock, o
+    rastro dela existe e um leitor concorrente (o painel de saúde, o script
+    one-shot) vê uma linha a mais desse item. E sobra o desfecho DESCONHECIDO —
+    infra no meio da escrita mantém a reivindicação de propósito, e aí vale o
+    parágrafo de cima. Três rodadas erraram este parágrafo — a 1ª chamou a janela
+    de "só auditoria duplicada" (era ressurreição de banco desconectado, o P1 do
+    Codex #313), a 2ª deu o rastro extra como permanente e não viu que ele
+    RECUSAVA toda retentativa e sumia do script, deixando o usuário com 0 bancos
+    e sem saída (o P0 do Tester, 30/30 rodadas), a 3ª consertou só o aborto sob o
+    lock e criou esse MESMO estado terminal pela porta do 503. Também fica aberto:
+    `item/updated` chegando ANTES do `item/created` (entrega fora de ordem) é
+    adotado sem contas e sem sync agendado até o evento seguinte ou o
+    pull-to-refresh. Nenhum dos dois é regressão contra a `main`.
 
     ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
     desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
@@ -782,7 +898,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # viram o item de verdade. Deduplicar apagaria justamente o que responde
         # "por onde ele entrou". O que NÃO pode duplicar é a conexão (uma só, o
         # upsert garante) e a auditoria (ver o `POST /pluggy-item`).
-        await asyncio.to_thread(
+        registro_id = await asyncio.to_thread(
             register_item, dono, provider_item_id=item_id, origin="webhook_adopt",
             status=str(remote.get("status") or "") or None, last_event=last_event,
         )
@@ -800,12 +916,20 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # apaga o `users` dele, db/users.py:107). Medido: a adoção grava, o
         # snapshot responde e `get_consolidated_balance` devolve zeros sem
         # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
+        # `adocao_registro_id`: a 1ª guarda (rastro sem dono) é REFEITA dentro do
+        # `pluggy_item_lock`, ignorando a linha recém-gravada acima — e o aborto
+        # APAGA essa linha. Sem a releitura, a decisão de adotar valia por uma
+        # leitura de segundos atrás e a corrida com outra entrega ressuscitava
+        # banco removido (Codex #313, P1); sem o desfazimento, a mesma corrida
+        # deixava o item reivindicado e sem conexão para sempre (P0 do Tester).
         await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False,
-                               criar_usuario=False)
+                               criar_usuario=False, adocao_registro_id=registro_id)
     except Exception as exc:
-        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de três
+        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de quatro
         # desfechos com ações de operador diferentes — 402 (teto de bancos do
-        # plano), 409 (o estado sumiu durante o lock) e 503 (lock ocupado). O
+        # plano), 409 do estado que sumiu na espera do lock, 409 do item que
+        # OUTRA entrega já atribuiu (a revalidação da adoção) e 503 (lock
+        # ocupado); os dois 409 se separam pelo texto do `detail`. O
         # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
         # (starlette), então não precisa de formatação nossa.
         await log_system_event(

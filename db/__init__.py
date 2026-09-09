@@ -272,6 +272,7 @@ from .open_finance_state import (
     pluggy_item_lock,
     register_item,
     token_hash,
+    unregister_item,
 )
 
 # ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
@@ -550,6 +551,7 @@ __all__ = [
     "list_connections_for_health_check", "mark_sync_attempt", "mark_sync_result",
     "item_registry_origins",
     "of_health_counters", "pluggy_item_lock", "register_item", "token_hash",
+    "unregister_item",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",

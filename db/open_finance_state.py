@@ -317,7 +317,9 @@ ITEMS_SEM_CONEXAO = """
 """
 
 
-def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy") -> set[str]:
+def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
+                          exceto_registro_id: int | None = None,
+                          exceto_user_id: int | None = None) -> set[str]:
     """Por quais portas este item já foi visto COM DONO.
 
     Uma pergunta, uma fonte (CLAUDE.md §0.7). Vazio = o item nunca foi atribuído
@@ -333,19 +335,65 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy") ->
         adotar (auditoria de reconexão);
       • `scripts/adotar_items_of_orfaos.py` — o alvo do one-shot.
 
+    `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
+    chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer
+    a pergunta do 1º leitor DENTRO do `pluggy_item_lock` ("alguém MAIS já tem
+    este item?") sem que a adoção em curso responda a si mesma (Codex #313, P1).
+    Um parâmetro na fonte única em vez de uma 2ª query com o mesmo `user_id is
+    not null`: a regra "teve dono" continua escrita uma vez (CLAUDE.md §0.7).
+    Ele ANDA COM `exceto_user_id`, e o `ValueError` abaixo OBRIGA: a query filtra
+    por `provider + provider_item_id`, então um `id` de OUTRO item nunca mascara
+    nada, mas o mesmo item pode ter linha de outro USUÁRIO — e esconder a origem
+    dela seria vazar decisão entre usuários (CLAUDE.md §0, isolamento). O par só
+    ignora a linha que é do próprio dono em curso. Sem a guarda, meio par era
+    SILENCIOSAMENTE pior que nenhum: só `exceto_registro_id` faz o `user_id = %s`
+    virar `= null`, o `not (...)` inteiro vira NULL, e o `where` descarta TODA
+    linha — `set()` no lugar de `{'webhook_adopt'}`, ou seja "item nunca teve
+    dono" para um item que tem. O chamador de produção passa os dois; isto é
+    fronteira para o PRÓXIMO (CLAUDE.md §0.2, validação não se simplifica).
+
     Devolve ORIGENS, nunca `user_id`: o chamador decide sobre o item, e nenhum
     dado de outro usuário sai daqui.
     """
+    if (exceto_registro_id is None) != (exceto_user_id is None):
+        raise ValueError("exceto_registro_id e exceto_user_id andam juntos ou nenhum")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select distinct origin from open_finance_item_registry
                  where provider = %s and provider_item_id = %s and user_id is not null
+                   and (%s::bigint is null or not (id = %s and user_id = %s))
                 """,
-                (provider, str(provider_item_id or "")),
+                (provider, str(provider_item_id or ""),
+                 exceto_registro_id, exceto_registro_id, exceto_user_id),
             )
             return {r["origin"] for r in (cur.fetchall() or []) if r["origin"]}
+
+
+def unregister_item(registro_id: int, user_id: int) -> int:
+    """Apaga UMA linha do rastro: a reivindicação que a própria adoção ABANDONOU.
+
+    O registry é log de append ("este item existiu, visto por esta porta") e
+    continua sendo — o único caso que apaga é a linha que ESTA adoção gravou
+    segundos atrás e não vai honrar, porque outra entrega ficou com o item. Sem
+    isso o aborto era TERMINAL: rastro com dono e zero conexão recusa toda
+    retentativa (1ª guarda de `_adota_item_orfao`) e some do
+    `scripts/adotar_items_of_orfaos.py` (o filtro dele exclui rastro com dono),
+    e o usuário fica com 0 bancos sem saída pelo produto.
+
+    `user_id` no `where` não é decoração: é o isolamento por usuário do
+    CLAUDE.md §0 aplicado a um DELETE que recebe um `id` cru.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from open_finance_item_registry where id = %s and user_id = %s",
+                (registro_id, user_id),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
 
 
 def register_item(
