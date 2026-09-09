@@ -469,3 +469,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip pip-audit
           pip-audit -r requirements.txt || echo "::warning title=pip-audit::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
+
+      # Sem `setup-node`: o ubuntu-latest ja traz npm, e `--package-lock-only`
+      # le so o lock — nao instala nada. Inclui devDependencies (padrao do
+      # comando): no mobile/ a cadeia de build e quem assina o binario.
+      - name: npm audit raiz (informativo, nao bloqueia)
+        run: npm audit --package-lock-only || echo "::warning title=npm-audit (raiz)::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
+
+      - name: npm audit mobile (informativo, nao bloqueia)
+        working-directory: mobile
+        run: npm audit --package-lock-only || echo "::warning title=npm-audit (mobile)::Vulnerabilidades conhecidas encontradas (informativo, nao bloqueia; o Dependabot abre os PRs de correcao)."
