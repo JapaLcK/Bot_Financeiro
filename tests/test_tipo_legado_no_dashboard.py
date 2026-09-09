@@ -187,33 +187,38 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
 # fechamento PREVENTIVO de classe, não conserto de incêndio — nenhum número de
 # usuário muda hoje.
 #
-# Controles do grupo. As três mutações abaixo foram RODADAS, e cada uma diz
-# quais casos ficam vermelhos — se o resultado for outro, o conserto mudou de
-# lugar e o grupo parou de medir o que diz medir:
+# Controles do grupo. As mutações abaixo foram RODADAS, e cada uma diz quais
+# casos ficam vermelhos — se o resultado for outro, o conserto mudou de lugar e
+# o grupo parou de medir o que diz medir:
 #
 #   1. NEGATIVO. Troque a projeção de FORA da query 4 por `tipo` cru
 #      (`SELECT id, tipo, valor, ...`, frontend/finance_bot_websocket_custom.py,
 #      a linha do `TIPO_CANON_SQL AS tipo` na query 4) → os dois
-#      `test_projecao_*` ficam VERMELHOS e os outros três, verdes.
+#      `test_projecao_*` ficam VERMELHOS e os outros quatro, verdes.
 #   2. POSITIVO do filtro. Tire a forma legada das DUAS pernas de
 #      `_dashboard_launch_filter_sql` (mesmo arquivo), deixando
-#      `tipo IN ('despesa')` e `tipo IN ('receita')` → só
-#      `test_filtro_continua_achando_as_duas_formas` cai.
+#      `tipo IN ('despesa')` e `tipo IN ('receita')` → caem DOIS:
+#      `test_filtro_continua_achando_as_duas_formas` (listas vazias) e
+#      `test_contagem_sob_filtro_*` (`total` 0 contra 27).
 #      NÃO é `TIPO_DESPESA_SQL` (db/connection.py): mexer lá derruba 5 casos,
 #      inclusive os dois de projeção, e deixa este verde — medido. O filtro do
 #      dashboard tem literal próprio, e é ele que este caso positivo guarda.
 #   3. POSITIVO do `ELSE`. Troque o `ELSE tipo` de `TIPO_CANON_SQL` por
 #      `ELSE 'despesa'` → só `test_canonizacao_nao_toca_nos_outros_tipos` cai.
+#   4. POSITIVO da paginação — as DUAS na query 3 (o COUNT), query 4 intacta,
+#      e só `test_contagem_sob_filtro_*` cai nas duas. Apagar o
+#      `{launch_filter_sql}`: `total` 53 contra 27 (conta o mês inteiro, lista
+#      filtrada). Trocar `WHERE user_id = %s` por `WHERE (user_id = %s OR 1=1)`:
+#      28 contra 27 — é a medição que justifica o vizinho que o caso semeia.
 #
 # O que NÃO discrimina, e já enganou uma leitura deste arquivo: injetar
 # `TIPO_CANON_SQL` na perna de DENTRO. O WHERE avalia a tabela base, não a
-# projeção da subquery — os 10 casos do arquivo passam. É no-op funcional, não
+# projeção da subquery — o arquivo inteiro passa. É no-op funcional, não
 # controle.
 #
-# Os casos positivos são TRÊS (`test_canonizacao_nao_toca_nos_outros_tipos`,
-# `test_lista_e_contagem_nao_mudam_de_tamanho`,
-# `test_filtro_continua_achando_as_duas_formas`) e só UM casa `-k
-# canonizacao_nao`. Para rodar o grupo inteiro:
+# Os positivos são QUATRO (`canonizacao_nao_toca`, `lista_e_contagem`,
+# `filtro_continua`, `contagem_sob_filtro`) e só UM casa `-k canonizacao_nao`.
+# Para rodar o grupo inteiro:
 # `pytest tests/test_tipo_legado_no_dashboard.py -k "projecao or canonizacao or contagem or filtro_continua"`.
 
 
@@ -293,24 +298,50 @@ def test_filtro_continua_achando_as_duas_formas(pro_user_id):
     def _filtrado(ft):
         return asyncio.run(dashboard.get_financial_data(
             pro_user_id, year=hoje.year, month=hoje.month, filter_type=ft,
-        ))
-
-    despesas = _filtrado("despesa")
-    receitas = _filtrado("receita")
+        ))["recent_launches"]
 
     # Só o VALOR, de propósito: o tipo devolvido é o que os dois testes de
     # projeção acima medem. Aqui o observável é QUAIS linhas o WHERE trouxe —
     # é o que mantém este caso verde com e sem o conserto, que é o que um
     # controle positivo tem de fazer.
-    assert [float(r["valor"]) for r in despesas["recent_launches"]] == [100.0]
-    assert [float(r["valor"]) for r in receitas["recent_launches"]] == [300.0]
+    assert [float(r["valor"]) for r in _filtrado("despesa")] == [100.0]
+    assert [float(r["valor"]) for r in _filtrado("receita")] == [300.0]
 
-    # O "N de M" do card "Lançamentos" (`renderLaunchesPagination`,
-    # dashboard.js:7841) vem do `total`, e o `total` é a query 3 — outra query,
-    # o MESMO `_dashboard_launch_filter_sql`. Contar por um WHERE e listar por
-    # outro é como a paginação passa a mentir sobre a própria lista: "1 de 1"
-    # com zero linhas, ou o contrário. Isto trava as duas metades juntas, e é
-    # o item 5 do smoke do #299 virado em asserção. Não discrimina o #299: a
-    # projeção que ele mudou é a de FORA, e o `total` nunca passa por ela.
-    assert despesas["launches_pagination"]["total"] == 1, despesas["launches_pagination"]
-    assert receitas["launches_pagination"]["total"] == 1, receitas["launches_pagination"]
+
+def test_contagem_sob_filtro_bate_com_a_lista_pagina_a_pagina(pro_user_id):
+    """P4 — o "N de M" do card "Lançamentos" e as linhas que ele numera.
+
+    O `total` sai da query 3 (o COUNT) e as linhas da query 4: só concordam
+    porque interpolam o MESMO `launch_filter_sql` (:549 e :594 de
+    frontend/finance_bot_websocket_custom.py). `renderLaunchesPagination`
+    (frontend/dashboard.js:7840) imprime "Mostrando 1 – 25 de N" a partir do
+    `total`, sem olhar a lista. Seed acima do `limit` porque com uma página só
+    `total_pages` é 1 e ela devolve "" (dashboard.js:7841) — sem isso não há "N
+    de M" para conferir; e a asserção é a RELAÇÃO, não um literal.
+    """
+    # `limite` = `LAUNCHES_LIMIT` (frontend/dashboard.js:273) e o default de
+    # `get_financial_data`; os seeds passam dele e diferem entre si, então a
+    # última página sai parcial nos dois filtros (2 e 1 linha).
+    limite, despesas, receitas = 25, 27, 26
+    for tipo, n in (("saida", despesas), ("entrada", receitas)):
+        for _ in range(n):
+            _grava_tipo_legado(pro_user_id, tipo, 10, "mercado")
+
+    # §0: sem vizinho na base, um `total` que perdesse o `user_id = %s` daria o
+    # número certo assim mesmo. `_auto_cleanup_orphan_users` (conftest) o apaga.
+    vizinho = pro_user_id + 1
+    db.ensure_user(vizinho)
+    for tipo in ("saida", "entrada"):
+        _grava_tipo_legado(vizinho, tipo, 99, "mercado")
+
+    hoje = today_tz()
+    for ft, esperado in (("despesa", despesas), ("receita", receitas)):
+        for page in (1, 2):  # 2 é a ÚLTIMA, e é parcial nos dois filtros
+            d = asyncio.run(dashboard.get_financial_data(
+                pro_user_id, year=hoje.year, month=hoje.month,
+                page=page, limit=limite, filter_type=ft,
+            ))
+            meta, linhas = d["launches_pagination"], len(d["recent_launches"])
+            assert (meta["total"], meta["total_pages"]) == (esperado, 2), (ft, page, meta)
+            assert linhas == min(limite, max(0, meta["total"] - (page - 1) * limite)), \
+                (ft, page, meta, linhas)
