@@ -177,8 +177,8 @@ def test_registrar_falha_devolve_o_attempts_novo():
     ("TransactionRollbackError", "v1.2.3", "TransactionRollbackError(v1.2.3)"),
 ])
 def test_last_error_nao_aceita_texto_livre(tipo, codigo, esperado):
-    r"""P2-6 do Codex. `last_error` SOBREVIVE à purga do payload (§13.3) e à
-    exclusão da conta — é o pior lugar do schema para PII.
+    r"""P2-6 do Codex. A purga do §13.3 zera `last_error` junto com o payload,
+    mas dentro dos 7 dias o valor está lá — e vai para `system_event_logs`.
 
     A versão anterior recebia `erro: str` e guardava os primeiros 500 chars.
     Truncar não removia nada: CPF, e-mail e nome aparecem no COMEÇO da mensagem.

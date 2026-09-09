@@ -8,9 +8,9 @@ de FUNÇÃO, e testá-las através de uma chamada mockada mediria o mock.
 
 `str(exc)` desta exceção vai para `log_system_event` (persistido em
 `system_event_logs`, lido pelo painel admin) e para
-`pix_webhook_events.last_error`, que **sobrevive à purga do payload** (§13.3) e
-à exclusão da conta. É o pior lugar do schema para PII, e o corpo de erro do
-Asaas carrega nome, CPF e e-mail do titular.
+`pix_webhook_events.last_error`. A purga do §13.3 zera aquela coluna aos 7 dias
+— `system_event_logs` ela **não** alcança —, e dentro da janela o valor está lá.
+O corpo de erro do Asaas carrega nome, CPF e e-mail do titular.
 
 E o `status_code` decide o que a reconciliação faz: **404** é resposta de
 negócio (§10.1, a cobrança não existe lá) e **5xx** é indisponibilidade, que
@@ -51,8 +51,8 @@ def _resp(status: int, json_corpo) -> httpx.Response:
 def test_erro_nao_carrega_o_corpo_da_resposta():
     """A propriedade que mais custa se quebrar: `str(exc)` vira `details` de
     `log_system_event` (persistido, lido pelo painel admin) e
-    `pix_webhook_events.last_error`, que sobrevive à purga do payload E à
-    exclusão da conta (§13.3). Fabricada, sem transporte: a ausência do corpo é
+    `pix_webhook_events.last_error` — zerado pela purga do §13.3 aos 7 dias,
+    presente dentro dela. Fabricada, sem transporte: a ausência do corpo é
     propriedade da FUNÇÃO."""
     with pytest.raises(AsaasApiError) as exc:
         _raise_for_asaas_response(_resp(400, CORPO_COM_PII), "Falha ao criar")
@@ -111,7 +111,15 @@ def test_code_com_forma_de_cpf_e_recusado():
     r"""A forma de um CPF é a de um código curto: alfanumérico, sem espaço, 11
     chars. O `code` do Asaas é sempre nominal (`invalid_cpfCnpj`), então recusar
     só-dígitos custa nada e fecha o caminho por onde um documento entraria numa
-    string que é PERSISTIDA e sobrevive à exclusão da conta.
+    string PERSISTIDA em `system_event_logs`.
+
+    A purga alcança essa tabela só em PARTE: a exclusão de conta apaga por
+    `user_id` (`db/privacy.py:837`), mas o erro do Asaas nasce sem dono
+    (`log_system_event_sync` tem `user_id: int | None = None`), e linha
+    `user_id is null` nenhuma exclusão alcança. Retenção automática por idade
+    não existe — as duas purgas da tabela são manuais (`admin.py purge` e o
+    `Limpar` do painel), sem agendador. **Por isso `_codigo_seguro` continua
+    obrigatório apesar da purga**: o que ele deixa passar fica indefinidamente.
 
     Só-dígitos NÃO fechava a categoria (P2 do Codex no #305). A categoria é
     "corrida com forma de documento em QUALQUER grafia que o filtro permita" —
