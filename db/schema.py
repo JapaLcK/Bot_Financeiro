@@ -2351,8 +2351,8 @@ def init_db():
 
         # Outbox do webhook (§3.3). O handler só grava aqui e responde 200; quem
         # concede acesso é o dreno, que é PR 1b-B. `payload_enc` é minimizado
-        # (só os 9 campos do §13.3) e cifrado; vira NULL na purga, e a linha
-        # FICA para forense.
+        # (só os 9 campos do §13.3) e cifrado; ele e o `last_error` viram NULL
+        # na MESMA purga por idade, e a linha fica só com os metadados.
         """
         create table if not exists pix_webhook_events (
           event_id text primary key,
