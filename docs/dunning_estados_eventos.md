@@ -296,6 +296,20 @@ e não é um claim que grave a chave de dedupe antes do envio — foi exatamente
 bug que a rodada 1 consertou (`_fire_email` grava DEPOIS do sucesso de
 propósito).
 
+**O ENDEREÇO também é lido no ponto do envio** (rodada 10). Ele vinha decifrado
+do lote do funil, e a rodada 8 registrou isso como decisão de NÃO consertar, com
+a razão "não é consentimento, o endereço era da mesma pessoa". **Essa razão
+estava errada**: a remoção do e-mail é exatamente o que desfaz a premissa — um
+endereço que a pessoa tirou da conta pode não ser mais dela (e-mail de trabalho
+de um emprego que ela deixou), e aí mandar "sua cobrança está pendente" é
+divulgar situação de pagamento a TERCEIRO. E a segunda razão de então ("consertar
+poluiria a trilha de auditoria") estava INVERTIDA: `lembrete_ainda_vale` já lia a
+linha, então o endereço fresco saiu de graça e a decriptação passou de uma por
+CANDIDATO para uma por ENVIADO. Medido (2026-09-09): lote = 200 linhas de
+auditoria para 200 candidatos; ponto de envio = 10 linhas para 10 enviados —
+menos PII lida e trilha mais verdadeira, porque o lote registrava acesso ao
+e-mail de gente que nunca recebeu nada.
+
 **O `LIMIT` fica de fora**, e não por esquecimento: o dano do lote grande era a
 janela de staleness, e ela passa a ser fechada no ponto de uso. Truncar o lote
 só reordena quem é servido em qual tick, e a invariante
@@ -316,6 +330,7 @@ quem sobrar volta no tick seguinte ainda dentro da janela.
 | 14 (2º e-mail de falha) | esta enumeração | **aberta de propósito**, ressalva acima |
 | 18 (`deleted` fora de ordem) | rodada 2 | **aberta**, anterior a este PR |
 | 23 (admin sobre `past_due`) | esta enumeração | sem defeito — a proteção é o grant `admin` |
+| 28-b (endereço do snapshot) | Codex, rodada 10 | fechada — o endereço sai da revalidação fresca; a recusa da rodada 8 usava duas razões, uma errada e uma invertida |
 | **29 (corrida check/write da guarda)** | **Codex, rodada 9** | **ABERTA, com recusa fundamentada** — janela medida em 0,174 ms (mediana), sem perda de acesso, e todo predicado sobre dado existente ou deixa irmã aberta ou recusa falha legítima. Fechar exige marca d'água por usuário. Leia a seção da célula antes de tentar de novo. |
 
 **Se você veio aqui para "finalmente consertar a 29"**, leia a seção dela

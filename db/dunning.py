@@ -133,9 +133,10 @@ def clear_past_due_since(user_id: int, *, nao_mais_novo_que: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
-def lembrete_ainda_vale(user_id: int) -> bool:
+def lembrete_ainda_vale(user_id: int) -> dict | None:
     """O lembrete de cobrança por E-MAIL ainda se sustenta? Leitura DIRETA, no
-    ponto do envio.
+    ponto do envio. Devolve **o material de e-mail ATUAL** (`email`,
+    `email_enc`) quando sim, e `None` quando não.
 
     Revalidação do `core/services/payment_reminder`: o funil é UM snapshot, o
     lote não tem `LIMIT`, e todo valor que vem dele pode ter envelhecido antes
@@ -167,6 +168,19 @@ def lembrete_ainda_vale(user_id: int) -> bool:
     atômico: gravar a chave de dedupe antes do envio é o bug que a rodada 1
     consertou (`_fire_email` grava DEPOIS de o envio confirmar, de propósito).
 
+    **Devolve o e-mail em vez de um `bool`, e isso fecha um terceiro valor de
+    snapshot.** O endereço vinha decifrado do lote do funil, então trocar de
+    e-mail durante o lote fazia o lembrete ir para o ANTIGO — e endereço que a
+    pessoa REMOVEU da conta pode não ser mais dela (e-mail de trabalho de um
+    emprego que ela deixou é o caso óbvio), o que transforma "entrega velha" em
+    divulgação de situação de pagamento a TERCEIRO. Como esta função já lê a
+    linha, o endereço fresco sai de graça na mesma query, e a decriptação passa
+    a ser uma por lembrete enviado em vez de uma por candidato.
+
+    Devolve o CIFRADO, não o claro: cripto de PII é assunto de `core/crypto` e
+    da camada de serviço (`core.services.payment_reminder._resolver_email`),
+    não da camada de banco.
+
     O consentimento do canal de WHATSAPP não está aqui de propósito: ele é lido
     no ponto de envio DELE, que é outro
     (`core.services.payment_reminder_wa._wa_lembrete`).
@@ -175,13 +189,14 @@ def lembrete_ainda_vale(user_id: int) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select 1 from auth_accounts"
+                "select email, email_enc from auth_accounts"
                 " where user_id = %s and past_due_since is not null"
                 "   and lower(coalesce(last_payment_status, '')) = any(%s)"
                 "   and coalesce(engagement_opt_out, false) = false",
                 (int(user_id), list(PAST_DUE_PAYMENT_STATUSES)),
             )
-            return cur.fetchone() is not None
+            row = cur.fetchone()
+            return dict(row) if row is not None else None
 
 
 def list_payment_reminder_candidates(grace_days: int = 7) -> list[dict]:

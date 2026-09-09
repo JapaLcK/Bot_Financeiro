@@ -158,3 +158,67 @@ def test_lembrete_legitimo_continua_saindo(user_id, monkeypatch):
     assert chamadas and chamadas[0] >= 1
     assert enviados != [], "o lembrete legítimo deixou de sair"
     assert _eventos_de_dedupe(user_id) == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# O ENDEREÇO também vinha do snapshot — o terceiro e último valor da classe.
+#
+# Até a rodada 10, `_decifrar_lote` decifrava o e-mail de todos os candidatos no
+# começo do tick e o envio usava aquele valor. Quem trocasse de e-mail durante o
+# lote recebia no ANTIGO. A rodada 8 registrou isso e NÃO consertou, com a razão
+# "não é consentimento, o endereço era da mesma pessoa" — razão que o
+# apontamento seguinte derrubou: endereço que a pessoa REMOVEU da conta pode não
+# ser mais dela (e-mail de trabalho de um emprego que ela deixou), e aí mandar
+# "sua cobrança está pendente" é divulgar situação de pagamento a TERCEIRO, não
+# entregar tarde.
+#
+# O conserto veio de graça: `lembrete_ainda_vale` já lia a linha, então passou a
+# devolver `email`/`email_enc` frescos e a decriptação foi para o ponto do envio.
+#
+# CONTROLE NEGATIVO — em `core/services/payment_reminder.py`, decifre a partir
+# de `_linha_do_funil` (o snapshot) em vez de `atual` (a leitura fresca):
+#     VERMELHO: test_email_trocado_durante_o_lote_vai_para_o_novo
+#     VERDE:    test_lembrete_legitimo_continua_saindo e o resto dos irmãos —
+#               a fixture deles não troca o e-mail, que é o que prova que a
+#               injeção mede o ENDEREÇO e não o funil.
+# CONTROLE POSITIVO: test_lembrete_legitimo_continua_saindo (acima) e a segunda
+# asserção deste teste — o endereço novo REALMENTE recebe. Sem ela, uma
+# implementação que não mandasse para ninguém passaria.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_email_trocado_durante_o_lote_vai_para_o_novo(user_id, monkeypatch):
+    """O e-mail da conta muda depois do snapshot: o lembrete tem de ir para o
+    endereço NOVO, e nada pode ir para o removido.
+
+    As duas asserções são necessárias e não são a mesma: "não foi para o antigo"
+    é a divulgação evitada; "foi para o novo" é a entrega preservada.
+    """
+    from core.services import email_service
+
+    _inadimplente(user_id, dias=6.5)
+    _limpar_eventos(user_id)
+    antigo = f"dun-{user_id}@t.local"
+    novo = f"novo-{user_id}@t.local"
+
+    destinos: list = []
+    monkeypatch.setattr(email_service, "send_payment_reminder_email",
+                        lambda to, dash="": destinos.append(to) or True)
+
+    # `email_enc = null` de propósito: o caminho legado (coluna em claro) e o
+    # cifrado convergem no mesmo `_resolver_email`, e este teste é sobre a
+    # FRESCURA do endereço, não sobre cripto — o caminho cifrado tem teste
+    # próprio em `test_payment_reminder_lote.py`.
+    chamadas = _mexer_depois_da_query(
+        monkeypatch,
+        "update auth_accounts"
+        "   set email = 'novo-' || user_id || '@t.local', email_enc = null"
+        " where user_id = %s",
+        user_id)
+
+    _tick()
+
+    assert chamadas and chamadas[0] >= 1, \
+        "o funil não devolveu a conta — o teste mediria nada"
+    assert antigo not in destinos, \
+        "lembrete foi para o endereço que a pessoa removeu da conta"
+    assert novo in destinos, "o endereço novo não recebeu o lembrete"

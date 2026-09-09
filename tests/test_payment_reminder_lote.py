@@ -16,7 +16,7 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 | `int(row["user_id"])`               | não alcançável — o `select` do funil traz `user_id`, coluna `not null` int | — |
 | `user_id in _ACCESS_ALLOWLIST`      | `set.__contains__(int)` não levanta | — |
 | `row.get("email_enc")`              | `dict.get` não levanta | — |
-| **`decrypt_pii_optional`**          | **SIM** — `RuntimeError` de `core/crypto.py:238` (`InvalidToken`) e de `:115` (env de chave ausente) | `except` próprio ← **o conserto desta rodada** |
+| **`decrypt_pii_optional`** (em `_resolver_email`, no ponto do envio) | **SIM** — `RuntimeError` de `core/crypto.py:238` (`InvalidToken`) e de `:115` (env de chave ausente) | `except` próprio |
 | `email = row["email"]`              | `KeyError` só se a coluna sair do `select` | — |
 | `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (`core/observability.py:311`) | o callee, medido em `test_dedupe_indisponivel_*` |
 | `_pago_por_outro_caminho`           | sim | `except` próprio (já existia) |
@@ -234,19 +234,27 @@ def test_dedupe_com_erro_inesperado_devolve_false(monkeypatch):
 #   lote :   9,3 ms  (0,046 ms/linha, 1 `executemany`)  → 15,4x
 # e, com a passada indo para o executor, o loop bloqueia ZERO.
 #
-# O OBSERVÁVEL destes testes é o par (thread, batch ativo) NO MOMENTO do
-# decrypt, mais a contagem de linhas em `pii_access_log`. Contar só as linhas
-# não mediria nada: `executemany` grava N linhas igual ao modo solto — o que é
-# UM é a ida ao banco. E contar só a ida não bastaria: um "conserto" que
-# desligasse o audit também daria uma ida só, e perderia a trilha.
+# O OBSERVÁVEL é (a) a thread em que a decriptação roda e (b) **para QUEM** a
+# trilha de auditoria registra acesso. Contar só linhas não mediria nada, e
+# contar só a thread deixaria passar um "conserto" que desligasse a auditoria.
+#
+# **Este teste mudou de forma na rodada 10, e a nota fica porque a razão
+# importa.** Até ela, a decriptação era em LOTE (`_decifrar_lote`, N candidatos
+# dentro de um `pii_audit_batch`, uma escrita só) e o teste media "buffer de
+# batch ativo". O endereço passou a ser lido no ponto do envio — para deixar de
+# vir do snapshot do funil —, então não há mais lote e a asserção de buffer
+# perdeu objeto. Ela foi SUBSTITUÍDA, não apagada, pela invariante mais forte
+# que o desenho novo dá: a trilha registra acesso **só de quem foi contatado**.
+# Medido na troca (2026-09-09): lote = 200 linhas de auditoria para 200
+# candidatos; ponto de envio = 10 linhas para 10 enviados.
 #
 # CONTROLE NEGATIVO — em `core/services/payment_reminder.py`, volte a decifrar
-# dentro do laço `async` (apague a chamada de `_decifrar_lote` e reponha o
-# `decrypt_pii_optional` inline no `for`):
-#     VERMELHO: test_audit_de_pii_vai_em_lote_e_fora_do_event_loop
-#     VERDE:    todo o resto deste arquivo e dos três irmãos.
-# CONTROLE POSITIVO: a asserção de que `pii_access_log` recebeu UMA LINHA POR
-# CANDIDATO. Sem ela, `PII_AUDIT_DISABLED=1` passaria no teste.
+# a partir do snapshot (decifre `_linha_do_funil` antes da dedupe, em vez de
+# `atual` depois da revalidação):
+#     VERMELHO: test_audit_de_pii_so_registra_quem_foi_contatado
+#     VERDE:    todo o resto deste arquivo e dos irmãos.
+# CONTROLE POSITIVO: a asserção de que a conta CONTATADA tem exatamente uma
+# linha de auditoria. Sem ela, `PII_AUDIT_DISABLED=1` passaria no teste.
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _cifrar_email(uid: int) -> None:
@@ -275,51 +283,59 @@ def _linhas_de_audit(uids: list[int]) -> int:
             return cur.fetchone()["n"]
 
 
-def test_audit_de_pii_vai_em_lote_e_fora_do_event_loop(user_id, monkeypatch):
-    """Duas contas com `email_enc`: os dois decrypts rodam FORA da thread do
-    event loop e com o buffer de `pii_audit_batch` ATIVO — que é o que faz a
-    trilha inteira sair numa ida só. E a trilha sai: uma linha por candidato.
+def test_audit_de_pii_so_registra_quem_foi_contatado(user_id, monkeypatch):
+    """A decriptação roda FORA da thread do event loop e a trilha de auditoria
+    registra acesso ao e-mail **só de quem recebeu o lembrete**.
+
+    Duas contas com `email_enc`: uma elegível e outra já DEDUPADA (recebeu no
+    tick anterior). No desenho antigo as duas eram decifradas e as duas viravam
+    linha em `pii_access_log`, porque o lote decifrava todo candidato antes dos
+    filtros. Agora só a contatada é.
 
     A suíte roda com `PII_AUDIT_DISABLED=1` (hook do ambiente), então o teste
-    liga o audit de propósito: com ele desligado `_record_access` retorna na
+    liga a auditoria de propósito: com ela desligada `_record_access` retorna na
     primeira linha e não haveria nada para medir.
     """
     import threading
 
-    import core.crypto as crypto
+    from core.observability import log_system_event_sync
     from core.services import payment_reminder as pr
 
     monkeypatch.setenv("PII_AUDIT_DISABLED", "")
     _inadimplente(user_id, dias=6.5)
     _limpar_eventos(user_id)
-    outro = _segunda_conta(user_id)
+    dedupado = _segunda_conta(user_id)
     _cifrar_email(user_id)
-    _cifrar_email(outro)
+    _cifrar_email(dedupado)
+    # A segunda conta já foi lembrada: a dedupe a descarta ANTES do envio, e é
+    # justamente ela que o lote decifrava à toa.
+    log_system_event_sync("info", "payment_reminder_sent", "tick anterior",
+                          source="engagement_scheduler", user_id=dedupado)
     destinos = _espiar_todos(monkeypatch)
 
     real = pr.decrypt_pii_optional
-    observado: list[tuple[bool, bool]] = []
+    na_thread_do_loop: list[bool] = []
 
     def _espiao(ct, *, ctx):
-        observado.append((
-            threading.current_thread() is threading.main_thread(),
-            getattr(crypto._audit_buffer, "entries", None) is not None,
-        ))
+        na_thread_do_loop.append(
+            threading.current_thread() is threading.main_thread())
         return real(ct, ctx=ctx)
 
     monkeypatch.setattr(pr, "decrypt_pii_optional", _espiao)
 
     _tick()
 
-    assert len(observado) == 2, \
-        f"o caminho da decriptação não foi exercitado nas duas contas: {observado}"
-    assert not any(na_loop for na_loop, _ in observado), \
+    assert na_thread_do_loop, "o caminho da decriptação não foi exercitado"
+    assert not any(na_thread_do_loop), \
         "decriptação rodou na thread do event loop — volta a bloquear request"
-    assert all(em_lote for _, em_lote in observado), \
-        "buffer de pii_audit_batch inativo — é uma ida ao banco POR LINHA"
-    assert _linhas_de_audit([user_id, outro]) == 2, \
-        "a trilha de audit não foi gravada — o flush do lote não aconteceu"
-    # E o lembrete continua saindo para as duas: o conserto é de I/O, não de
-    # comportamento.
+    assert len(na_thread_do_loop) == 1, \
+        ("decifrou mais de uma conta: a dedupada não devia ser decifrada "
+         f"({len(na_thread_do_loop)} decriptações)")
+    assert _linhas_de_audit([user_id]) == 1, \
+        "a trilha de auditoria da conta contatada não foi gravada"
+    assert _linhas_de_audit([dedupado]) == 0, \
+        "auditou acesso ao e-mail de quem não recebeu nada"
+    # E o lembrete continua saindo para a elegível: a troca é de I/O e de
+    # minimização, não de comportamento.
     assert f"dun-{user_id}@t.local" in destinos
-    assert f"dun-{outro}@t.local" in destinos
+    assert f"dun-{dedupado}@t.local" not in destinos

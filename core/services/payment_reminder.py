@@ -101,8 +101,15 @@ async def check_payment_reminder() -> None:
     **NADA DE ESCRITA SÍNCRONA NO EVENT LOOP.** Este tick roda no event loop
     único do Uvicorn e o funil não tem `LIMIT`: I/O feito aqui, e não num
     executor, atrasa request e webhook da Stripe. Todo o laço abaixo já vai por
-    executor — mantenha assim. A decriptação de PII era a exceção e foi para
-    `_decifrar_lote` (medição e o motivo da forma, na docstring dela).
+    executor — mantenha assim, inclusive a decriptação (`_resolver_email`).
+
+    **NENHUM VALOR DO SNAPSHOT CHEGA AO ENVIO.** O funil diz QUEM considerar e
+    nada mais: estado da inadimplência, consentimento de e-mail e o próprio
+    ENDEREÇO saem de `lembrete_ainda_vale`, uma leitura fresca por lembrete; o
+    consentimento de WhatsApp sai de `_wa_lembrete`, no ponto de envio dele. A
+    janela de elegibilidade é a única coisa deliberadamente NÃO revalidada —
+    revalidá-la faria um lote lento descartar lembrete legítimo, que é o erro
+    oposto e pior.
 
     E-MAIL é o caminho garantido; o WhatsApp é melhoria e mora em
     `core/services/payment_reminder_wa.py`.
@@ -133,15 +140,14 @@ async def check_payment_reminder() -> None:
         logger.error("[cobranca] Falha ao buscar candidatos: %s", exc, exc_info=True)
         return
 
-    # Allowlist ANTES da decriptação: é filtro PURO (`set` de dois ids, sem
-    # I/O), e assim não se decifra nem se AUDITA PII de quem já foi descartado.
-    # O conjunto decifrado fica idêntico ao de antes desta mudança — zero delta
-    # de acesso a PII.
+    # Allowlist é filtro PURO (`set` de dois ids, sem I/O) e fica aqui para nem
+    # entrar no laço. O snapshot passa a servir APENAS para dizer QUEM
+    # considerar: nenhum valor dele chega ao envio (ver `lembrete_ainda_vale`).
     elegiveis = [r for r in rows
                  if int(r["user_id"]) not in plan_service._ACCESS_ALLOWLIST]
-    candidatos = await loop.run_in_executor(None, _decifrar_lote, elegiveis)
 
-    for user_id, email in candidatos:
+    for _linha_do_funil in elegiveis:
+        user_id = int(_linha_do_funil["user_id"])
         # SEM `try`, e isso é medido, não descuido: `recent_event_exists`
         # (`core/observability.py:288-313`) tem `except Exception` próprio e
         # devolve `False` em QUALQUER falha ("melhor mandar duplicado que
@@ -183,12 +189,28 @@ async def check_payment_reminder() -> None:
         # é o erro recuperável (o tick seguinte tenta de novo, e a janela tem
         # `PAYMENT_REMINDER_WINDOW_DAYS` de largura justamente para isso).
         try:
-            if not await loop.run_in_executor(None, lembrete_ainda_vale, user_id):
-                logger.info("[cobranca] lembrete abortado: ciclo fechou durante"
-                            " o lote → user_id=%s", user_id)
-                continue
+            atual = await loop.run_in_executor(None, lembrete_ainda_vale, user_id)
         except Exception as exc:
             logger.error("[cobranca] revalidacao falhou user_id=%s: %s", user_id, exc)
+            continue
+        if atual is None:
+            logger.info("[cobranca] lembrete abortado: ciclo fechou ou opt-out de"
+                        " engajamento durante o lote → user_id=%s", user_id)
+            continue
+        # DECRIPTAÇÃO NO PONTO DO ENVIO, com o endereço que a revalidação acabou
+        # de ler. `try` próprio para manter a granularidade do log e a garantia
+        # de que uma linha ruim não derruba o lote (a exceção do
+        # `core.crypto.decrypt_pii` viraria abandono dos candidatos seguintes,
+        # porque o chamador embrulha esta função inteira). O log leva `user_id` e
+        # a exceção e nenhum e-mail — o que falhou foi obter o endereço.
+        try:
+            email = await loop.run_in_executor(
+                None, _resolver_email, user_id, atual)
+        except Exception as exc:
+            logger.error("[cobranca] decriptacao do e-mail falhou"
+                         " user_id=%s: %s", user_id, exc)
+            continue
+        if not email:
             continue
         try:
             ok = await loop.run_in_executor(
@@ -215,75 +237,52 @@ async def check_payment_reminder() -> None:
             logger.error("[cobranca] falha enviando user_id=%s: %s", user_id, exc)
 
 
-def _decifrar_lote(rows: list[dict]) -> list[tuple[int, str]]:
-    """Resolve o e-mail de cada candidato e devolve os pares `(user_id, email)`
-    que dão para usar. **UMA ida ao banco para o audit de PII, e nenhuma no
-    event loop.**
+def _resolver_email(user_id: int, linha: dict) -> str | None:
+    """Endereço para onde o lembrete vai, a partir da linha que
+    `db.dunning.lembrete_ainda_vale` acabou de ler. **Uma decriptação por
+    lembrete, não por candidato.**
 
-    Cada `decrypt_pii` chama `core.crypto._record_access`, que sem batch faz
-    `get_conn` + `execute` + `commit` IMEDIATOS (`core/crypto.py:266-280`).
-    Como o funil não tem `LIMIT` e este tick roda dentro do event loop único do
-    Uvicorn, era uma ida ao banco BLOQUEANTE por linha, competindo com request
-    e webhook da Stripe. Medido aqui (200 linhas, `pii_access_log` conferida
-    com `count(*)` nos dois modos): 142,5 ms solto (0,712 ms/linha) × 9,3 ms em
-    lote (0,046 ms/linha) — 15,4× menos tempo, e agora esse tempo está numa
-    thread do executor, então o loop bloqueia ZERO.
+    Substituiu um `_decifrar_lote` que decifrava TODOS os candidatos de uma vez
+    dentro de `core.crypto.pii_audit_batch` (uma escrita de auditoria em lote).
+    A troca foi feita para o endereço deixar de vir do snapshot do funil — e
+    ela melhora os três eixos, medido (200 candidatos, `pii_access_log`
+    conferida com `count(*)`, 2026-09-09; remedir antes de reusar):
 
-    Reuso, não invenção (§0.1): `pii_audit_batch` já existe exatamente para
-    isso ("endpoints que decifram muitos campos", `core/crypto.py:70-73`) e faz
-    um `executemany` no `__exit__`.
+        lote,  N=200 candidatos : 14,1 ms, 200 linhas de auditoria
+        aqui,  M=10  enviados   : 13,1 ms,  10 linhas
+        aqui,  M=20  enviados   : 20,9 ms,  20 linhas
+        aqui,  M=60  enviados   : 56,9 ms,  60 linhas
 
-    **Por que uma função separada, e não um `with` em volta do laço `async`.**
-    O buffer de `pii_audit_batch` é `threading.local()`
-    (`core/crypto.py:74`), NÃO task-local. Um `with` em volta de um laço com
-    `await` dentro fica aberto na thread do event loop enquanto o loop atende
-    OUTRAS corrotinas — e todo handler de request que decifrasse PII nesse
-    intervalo teria a entrada de audit dele capturada no NOSSO buffer
-    (`_record_access:261-264`), publicada só no nosso `__exit__` e perdida em
-    silêncio se o nosso flush falhasse. Aqui `__enter__`, os `append` e o
-    `__exit__` acontecem todos dentro da MESMA chamada de
-    `run_in_executor`, numa thread só nossa. Não troque isto por um `with` em
-    volta do laço achando que simplifica.
+    Decifra-se MENOS PII (só de quem foi de fato contatado) e a trilha fica
+    VERDADEIRA — o lote registrava acesso ao e-mail de todo candidato, incluindo
+    os que a dedupe descartava, que em regime são a maioria (a janela de dedupe
+    é de 6 dias e a de elegibilidade de 3, então quem já recebeu continua no
+    funil). O tempo é comparável em M pequeno e maior em M grande, sempre em
+    dezenas de ms, dentro do executor e uma vez por tick de 24 h.
 
-    A ISOLAÇÃO POR LINHA da rodada 4 continua, e continua por desenho: o `try`
-    é de cada `decrypt_pii_optional`, então linha ruim vira `continue` e não
-    derruba as seguintes — nem o flush, que roda no `__exit__` de todo jeito.
-    Linha que falha não gera entrada de audit (o `_record_access` de
-    `decrypt_pii` só roda DEPOIS de decifrar, `core/crypto.py:242`), o que está
-    certo: acesso que não aconteceu não se registra.
+    **Não reintroduza `pii_audit_batch` aqui.** O buffer dele é
+    `threading.local()` (`core/crypto.py:74`), não task-local: um `with` aberto
+    em volta de um laço com `await` fica ativo na thread do event loop enquanto
+    ela atende OUTRAS corrotinas, e todo handler que decifrasse PII no intervalo
+    teria a entrada de auditoria dele capturada no nosso buffer, publicada só no
+    nosso `__exit__` e perdida em silêncio se o nosso flush falhasse.
 
-    `continue`, e NUNCA `row["email"]` como fallback: `email_enc` que existe e
-    não decifra é sinal de problema de CHAVE, não permissão para usar a coluna
-    em claro. O log leva `user_id` e a exceção e nenhum e-mail — não há o que
-    mascarar com `_mask_email` (o que falhou foi justamente obter o endereço),
-    e as mensagens de `core/crypto.py` carregam versão e nome de env, nunca o
-    valor.
+    `email_enc` manda quando existe; o `email` em claro é o caso legado. Nunca
+    cai de um para o outro: `email_enc` que existe e não decifra é problema de
+    CHAVE, e a exceção sobe para o `except` do chamador (§ o `try` de lá é o que
+    isola a linha ruim do resto do lote).
     """
-    from core.crypto import pii_audit_batch
-    prontos: list[tuple[int, str]] = []
-    with pii_audit_batch():
-        for row in rows:
-            user_id = int(row["user_id"])
-            if row.get("email_enc"):
-                try:
-                    email = decrypt_pii_optional(
-                        row["email_enc"],
-                        ctx=PiiAccessContext(
-                            purpose="send_payment_reminder_email",
-                            actor="system:engagement",
-                            subject_user_id=user_id,
-                            field="email",
-                        ),
-                    )
-                except Exception as exc:
-                    logger.error("[cobranca] decriptacao do e-mail falhou"
-                                 " user_id=%s: %s", user_id, exc)
-                    continue
-            else:
-                email = row["email"]
-            if email:
-                prontos.append((user_id, email))
-    return prontos
+    if linha.get("email_enc"):
+        return decrypt_pii_optional(
+            linha["email_enc"],
+            ctx=PiiAccessContext(
+                purpose="send_payment_reminder_email",
+                actor="system:engagement",
+                subject_user_id=user_id,
+                field="email",
+            ),
+        )
+    return linha.get("email")
 
 
 def _pago_por_outro_caminho(user_id: int) -> bool:
