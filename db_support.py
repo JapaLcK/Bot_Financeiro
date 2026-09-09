@@ -580,7 +580,7 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
                        phone_status, phone_confirmed_at, whatsapp_verified_at,
                        engagement_opt_out, tip_email_opt_out, insight_email_opt_out,
                        whatsapp_updates_opt_out, stripe_customer_id, last_payment_status,
-                       trial_started_at, plan_selected_at
+                       trial_started_at, plan_selected_at, past_due_since
                 from auth_accounts
                 where user_id=%s
                 """,
@@ -697,12 +697,62 @@ def set_payment_status_impl(get_conn, user_id: int, status: str) -> None:
     """
     Atualiza last_payment_status. Valores esperados (alinhados com o ciclo do
     Stripe Subscription): inactive, trialing, active, past_due, canceled, unpaid.
+
+    **E mantém a invariante do relógio de inadimplência no MESMO UPDATE**:
+    `past_due_since` não nulo com status FORA de `PAST_DUE_PAYMENT_STATUSES` é
+    órfão, e órfão não é dado morto — o `invoice.payment_failed` seguinte
+    devolve o status para a lista, o `claim_past_due_since` (`db/dunning.py`) vê
+    `rowcount 0` e o relógio do ciclo NOVO fica preso na data velha: a conta já
+    nasce fora da janela do lembrete e o lembrete daquele ciclo não sai. Quem
+    produzia o órfão era `billing_access.recompute_entitlement`, que escreve
+    `active` quando há grant Pix vigente e não limpava o relógio.
+
+    Aqui e não em cada chamador de ESTA função (§2: fechar a categoria, não a
+    instância). Os chamadores, sem número de linha de propósito (§2 — eles
+    envelhecem, e já envelheceram uma vez):
+
+        grep -rn "set_payment_status(" --include="*.py" --exclude-dir=.venv .
+
+    São os dois de `_materializar_assinatura`, o do `payment_failed`, o do
+    `subscription.deleted` (todos em `frontend/finance_bot_websocket_custom.py`)
+    e o de `core/services/billing_access.py`. A ORDEM do `payment_failed`
+    importa e está certa: ele grava `past_due`, que está NA lista, então o
+    relógio é PRESERVADO e o `claim_past_due_since` logo abaixo carimba se
+    estiver nulo — e o `claim` só carimba se o status AINDA estiver na lista,
+    que é o que fecha a corrida com o `invoice.paid` de outra requisição.
+
+    **A categoria maior é "quem escreve a coluna `last_payment_status`", e ela
+    tem MAIS um membro, em SQL cru**: `core/admin_dashboard.set_account_plan`
+    (:1371) move 'unpaid' para 'inactive' num UPDATE próprio, sem passar por
+    aqui. Ele mantém a invariante no CASE dele — leia os dois juntos antes de
+    mexer. Varredura que fecha a categoria (a de `set_payment_status` NÃO
+    fecha, e foi assim que este órfão passou):
+
+        grep -rn "last_payment_status" --include="*.py" --include="*.sql" \\
+             --exclude-dir=.venv .
+
+    Ela também acusa `scripts/backfill_pro_grandfather.sql:36`, que grava
+    'grandfathered' à mão. É script de reparo manual, roda uma vez, e um órfão
+    que ele criasse custa um lembrete de pagamento perdido — não vale um
+    `past_due_since = null` a mais num arquivo que ninguém executa hoje.
+
+    Não substitui os `clear_past_due_since` explícitos do webhook: "o status
+    saiu da lista" e "este evento significa pago/encerrado" são regras
+    diferentes. `invoice.paid` cujo `Subscription.retrieve` ainda devolva
+    `past_due` (consistência eventual, ou outra fatura aberta) grava um status
+    DA lista — o relógio sobrevive a este UPDATE e é o clear explícito que
+    destrava quem acabou de pagar.
     """
+    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
+    preserva_relogio = (status or "").strip().lower() in PAST_DUE_PAYMENT_STATUSES
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "update auth_accounts set last_payment_status = %s where user_id = %s",
-                (status, user_id),
+                "update auth_accounts"
+                "   set last_payment_status = %s,"
+                "       past_due_since = case when %s then past_due_since end"
+                " where user_id = %s",
+                (status, preserva_relogio, user_id),
             )
         conn.commit()
     invalidate_auth_user_cache(user_id)

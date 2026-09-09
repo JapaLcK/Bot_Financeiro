@@ -619,11 +619,23 @@ class _CursorComTeto:
 
 
 def save_pluggy_open_finance_item(user_id: int, item: dict, *,
-                                  budget_ms: int | None = None) -> dict:
+                                  budget_ms: int | None = None,
+                                  criar_usuario: bool = True) -> dict:
     """Grava (ou reconecta) o item da Pluggy.
 
     `budget_ms` é o teto de espera desta escrita, para quem tem cliente HTTP
     esperando — a rota de reconexão. Sem ele, comportamento de sempre.
+
+    `criar_usuario=False` desliga o `ensure_user_tx` e deixa a FK
+    `open_finance_connections.user_id -> users(id)` decidir: sem a linha de
+    `users`, o insert estoura `ForeignKeyViolation` na MESMA transação, em vez de
+    criar o usuário que falta. É o que a adoção pelo webhook usa
+    (`frontend/routes/open_finance._adota_item_orfao`): lá o `user_id` vem do
+    `clientUserId` REMOTO e é lido fora da transação da escrita, então uma
+    exclusão de conta (LGPD) que commite no meio deixava o `ensure_user_tx`
+    RESSUSCITAR a conta apagada e pendurar a conexão nela (Codex #313, P1).
+    Quem tem sessão autenticada continua com o default: a linha de `users` é
+    pré-requisito da sessão, e o `ensure_user_tx` ainda repõe a de `accounts`.
 
     O `ensure_user` saiu daqui e virou `ensure_user_tx` DENTRO da mesma
     transação do upsert: eram duas aquisições de conexão do pool (até 30s cada,
@@ -664,7 +676,8 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
         with conn.cursor() as cur:
             if budget_ms is not None:
                 cur = _CursorComTeto(cur, budget_ms, t0)
-            ensure_user_tx(cur, user_id)
+            if criar_usuario:
+                ensure_user_tx(cur, user_id)
             cur.execute(
                 """
                 insert into open_finance_connections (
@@ -2061,6 +2074,11 @@ BANK_ACCOUNTS_SQL = """
     where connection_status not in ('PAUSED', 'DELETED')
 """
 
+# Ordem canônica das contas do banco: é ela que define qual banco é "o banco" na
+# regra de sempre. `list_bank_accounts` (fora da transação) e `_regra_de_sempre`
+# (dentro) leem a MESMA — sem isso as duas escolheriam contas diferentes (§0.7).
+BANK_ACCOUNTS_ORDER = " order by balance desc nulls last, id"
+
 
 def list_bank_accounts(user_id: int) -> list[dict]:
     """Contas BANK conectadas e ativas, com saldo e rótulo para exibição.
@@ -2070,16 +2088,25 @@ def list_bank_accounts(user_id: int) -> list[dict]:
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(BANK_ACCOUNTS_SQL + " order by balance desc nulls last, id", (user_id,))
+            cur.execute(BANK_ACCOUNTS_SQL + BANK_ACCOUNTS_ORDER, (user_id,))
             rows = [dict(r) for r in (cur.fetchall() or [])]
 
     for r in rows:
-        # "Nubank · Conta" quando os dois existem; o que houver, senão.
-        partes = [p for p in ((r.get("institution_name") or "").strip(),
-                              (r.get("name") or "").strip()) if p]
-        r["label"] = " · ".join(partes) or "Banco conectado"
+        r["label"] = bank_label(r)
         r["balance"] = r.get("balance") or Decimal("0")
     return rows
+
+
+def bank_label(conta) -> str:
+    """"Nubank · Conta" quando os dois existem; o que houver, senão.
+
+    Único (§0.7): o rótulo grava no `funding_source` do lançamento, e
+    `_assert_volta_para_a_origem` compara o do depósito com o do saque — duas versões
+    dele fariam o mesmo banco parecer dois.
+    """
+    partes = [p for p in ((conta.get("institution_name") or "").strip(),
+                          (conta.get("name") or "").strip()) if p]
+    return " · ".join(partes) or "Banco conectado"
 
 
 def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
@@ -2118,6 +2145,134 @@ def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
             )
             return {int(r["of_account_id"]): Decimal(str(r["total"] or 0))
                     for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
+
+
+# tipo do depósito -> chave de `efeitos` do lançamento que CRIOU o lote
+_EFEITO_CRIADOR = {
+    "deposito_caixinha": "pocket_lot_create",
+    "aporte_investimento": "investment_lot_create",
+}
+
+
+def destination_of_lots(cur, user_id: int, tipo: str, lot_ids) -> dict | None:
+    """Para onde volta o dinheiro deste saque — decidido DENTRO da transação.
+
+    Devolve o `funding_source` do destino (banco) ou `None`, que é a Carteira: só ela
+    credita `accounts.balance`.
+
+    A decisão morava FORA (`funding.resolve_destination`, apagada) e errou por
+    construção quatro versões seguidas, porque lá os lotes são lidos ANTES do accrual
+    e FORA do lock: o destino era uma PREVISÃO de quais lotes o FIFO ia consumir. A
+    previsão sobreviveu uma versão a mais só para montar a mensagem, e aí a MENSAGEM
+    é que passou a contradizer o razão — por isso ela não existe mais em lugar nenhum:
+    quem escreve o texto lê o `funding_source` que as funções de saque devolvem (#286).
+    Duas medições que derrubaram a decisão de fora:
+
+    * caixinha com 60 dias sem accrual, `[carteira 1000; banco 500]`, saque de 1005 —
+      a previsão vê os dois lotes (1005 > 1000) e manda pro banco, mas o lote da
+      Carteira rendeu para 1022 e o saque consome SÓ ele. R$ 1.005 saíram da Carteira
+      e R$ 0,00 voltaram: é a #282 literal, com o conserto anterior já aplicado;
+    * um depósito com origem no banco que commite entre a previsão e o saque entra no
+      FIFO, e o crédito da Carteira soma dinheiro que continua no banco (medido:
+      1050,00 contra 900,00 sem a janela).
+
+    Aqui `lot_ids` é o que o saque consumiu de FATO, com os lotes já sob `for update`:
+    é fato e não previsão, então vale para as DUAS direções — a que cria dinheiro
+    (destino Carteira com lote do banco) e a que destrói (destino banco com lote da
+    Carteira). A guarda anterior corrigia só a primeira.
+
+    A regra é a de sempre, agora sobre o consumo real: origem única e conhecida devolve
+    o dinheiro para ela; qualquer outra coisa — origens diferentes, lote órfão (sem
+    lançamento criador, então sem origem conhecida), banco desconectado desde o
+    depósito, nenhum lote — cai em `_regra_de_sempre`.
+
+    **Origens diferentes mantêm o banco de propósito** (decisão do dono, #286):
+    dividir o resgate proporcionalmente ou por LIFO é escolha de produto ainda não
+    tomada. O custo conhecido é destruir dinheiro do lado da Carteira em vez de criar
+    do lado do banco — criar é pior, porque infla o consolidado de todos e o sync
+    depois não bate.
+
+    Duas decisões da query:
+
+    * `lot_id` comparado em TEXTO, sem `::bigint`: `efeitos` é jsonb livre e um lot_id
+      não numérico estoura o cast. Em texto ele não casa, o lote vira órfão e o destino
+      cai na regra de sempre, que é o lado seguro;
+    * `d.user_id = %s` é o isolamento (§0): ids de lote são globais, então o jsonb de
+      OUTRO usuário pode apontar para um lote deste. Só o filtro de dono segura.
+    """
+    efeito = _EFEITO_CRIADOR[tipo]  # tipo desconhecido é bug do chamador
+    origens = []
+    if lot_ids:
+        cur.execute(
+            f"""
+            select distinct
+                   coalesce(d.efeitos->'funding_source'->>'kind', 'carteira') as kind,
+                   d.efeitos->'funding_source'->>'of_account_id' as of_account_id,
+                   (d.id is null) as orfao
+              from unnest(%s::text[]) as lote(id)
+              left join launches d
+                     on d.user_id = %s
+                    and d.tipo = %s
+                    and (d.efeitos->'{efeito}'->>'lot_id') = lote.id
+            """,
+            ([str(i) for i in lot_ids], user_id, tipo),
+        )
+        origens = cur.fetchall() or []
+
+    # Esta linha NÃO decide nada: quem decide é o `len == 1` abaixo, e com uma origem só
+    # a lista tem um elemento — ordenar um elemento não muda resposta nenhuma. Remover o
+    # `sort` do código correto deixa este arquivo inteiro verde.
+    #
+    # Ela existe para o `len == 1` ser TESTÁVEL. Sem ela, `origens[0]` é a ordem que o
+    # Postgres devolveu num `select distinct` sem `order by`: com origens misturadas a
+    # linha do banco pode vir primeiro por acaso e a mutação `len >= 1` responder o
+    # mesmo que o código correto — passando verde por sorte, e voltando a falhar noutro
+    # plano de execução. Fixando a Carteira em primeiro, a mutação erra sempre, no mesmo
+    # sentido (destino Carteira para dinheiro que saiu do banco), e o teste a pega.
+    #
+    # Comandos, se for reconferir (não confie no que estiver escrito aqui sem remedir):
+    #   tirar este `sort`                          -> verde
+    #   `len >= 1` com este `sort`                 -> vermelho
+    origens.sort(key=lambda r: r["kind"] != "carteira")
+
+    if len(origens) == 1 and not origens[0]["orfao"]:
+        if origens[0]["kind"] != "bank":
+            return None                       # Carteira: o saque credita accounts
+        conta = _bank_account(cur, user_id, origens[0]["of_account_id"])
+        if conta:
+            return {"kind": "bank", "of_account_id": int(conta["id"]),
+                    "label": bank_label(conta)}
+        # banco desconectado desde o depósito: cai na regra de sempre, como antes
+    return _regra_de_sempre(cur, user_id)
+
+
+def _bank_account(cur, user_id: int, of_account_id) -> dict | None:
+    """A conta BANK conectada com este id, no MESMO recorte de `list_bank_accounts`.
+
+    O join com `BANK_ACCOUNTS_SQL` (§0.7) é o que faz banco pausado/apagado desde o
+    depósito não contar — e é também o filtro de dono: conta de outro usuário não casa.
+    Compara `conta.id::text`, nunca `->>'of_account_id'::bigint`: a jsonb é livre e o
+    cast estoura.
+    """
+    if of_account_id is None:
+        return None
+    cur.execute(f"select * from ({BANK_ACCOUNTS_SQL}) conta where conta.id::text = %s",
+                (user_id, str(of_account_id)))
+    return cur.fetchone()
+
+
+def _regra_de_sempre(cur, user_id: int) -> dict | None:
+    """O destino de quando os lotes não respondem: banco conectado se houver, senão
+    Carteira (`None`). Mesma ordem de `list_bank_accounts` — `BANK_ACCOUNTS_ORDER`.
+
+    Não pergunta, de propósito: com qualquer banco conectado o `delta_conta` é 0
+    igual, então entre dois bancos só mudaria o rótulo da mensagem.
+    """
+    cur.execute(BANK_ACCOUNTS_SQL + BANK_ACCOUNTS_ORDER + " limit 1", (user_id,))
+    conta = cur.fetchone()
+    if not conta:
+        return None
+    return {"kind": "bank", "of_account_id": int(conta["id"]), "label": bank_label(conta)}
 
 
 def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:

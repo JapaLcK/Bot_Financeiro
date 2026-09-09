@@ -184,6 +184,19 @@ def _pocket_name_from_text(text: str):
     return pocket or None
 
 
+def _nota_destino(funding_source: dict | None) -> str:
+    """Aviso de sync a partir do destino GRAVADO pelo saque, nunca de uma previsão.
+
+    `None` é a Carteira: o `delta_conta` do saque é positivo e o dinheiro já está lá,
+    então avisar "aparece quando o Open Finance sincronizar" seria mentira. Qualquer
+    outra coisa é banco, e aí o aviso é obrigatório — sem ele o usuário vê a caixinha
+    esvaziar e nenhuma explicação para o dinheiro não ter voltado (#286).
+    """
+    from core.services import funding
+
+    return ("\n\n" + funding.nota_sync(saida=False)) if funding_source else ""
+
+
 def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, *, emptied=False, nota=""):
     tax_note = ""
     if taxes and (taxes.get("iof", 0) or taxes.get("ir", 0)):
@@ -201,12 +214,6 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
-    from core.services import funding
-
-    destino = funding.resolve_destination(user_id)["source"]
-    fs = funding.to_db_arg(destino)
-    nota_destino = ("\n\n" + funding.nota_sync(saida=False)) if destino["kind"] == funding.BANK else ""
-
     pocket_name = entities.get("pocket_name")
     amount      = entities.get("amount")
     # A entity ANTES do texto: o resolver de clarification grava a quantidade
@@ -233,9 +240,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
 
     if want_all:
         try:
-            launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
+            launch_id, new_acc, new_pocket, canon, taxes, destino = db.pocket_withdraw_to_account(
                 user_id, pocket_name, None, text, withdraw_all=True,
-                funding_source=fs,
             )
         except LookupError:
             return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -248,7 +254,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         except Exception as e:
             return f"Erro ao retirar: {e}"
         sacado = float(taxes.get("gross", 0)) if taxes else 0.0
-        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, emptied=True, nota=nota_destino)
+        return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes,
+                                      launch_id, emptied=True, nota=_nota_destino(destino))
 
     if not amount or float(amount) <= 0:
         return h_pending.pergunta_guardando_contexto(
@@ -256,8 +263,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             "Qual o valor? Tente: *retirei 100 da caixinha viagem*", text, falta="amount")
 
     try:
-        launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
-            user_id, pocket_name, float(amount), text, funding_source=fs,
+        launch_id, new_acc, new_pocket, canon, taxes, destino = db.pocket_withdraw_to_account(
+            user_id, pocket_name, float(amount), text,
         )
     except LookupError:
         return f"Caixinha **{pocket_name}** não encontrada. Use *listar caixinhas* para ver as disponíveis."
@@ -271,4 +278,5 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return f"Erro ao retirar: {e}"
     # o backend pode sacar um pouco mais que o pedido (tolerância de zeragem)
     sacado = float(taxes.get("gross", amount)) if taxes else float(amount)
-    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, launch_id, nota=nota_destino)
+    return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes,
+                                  launch_id, nota=_nota_destino(destino))

@@ -38,6 +38,22 @@ logger = logging.getLogger(__name__)
 _STATE: dict[str, dict] = {}
 _TTL = 3600  # 1 hora — tutorial expira após isso
 
+
+def _set_step(wa_id: str, step: str) -> None:
+    """Grava o passo atual e descarta quem parou no meio há mais de _TTL.
+
+    O `at` é reescrito a cada passo, então o TTL é de INATIVIDADE: quem está
+    navegando nunca expira, por mais longo que seja o tour.
+
+    ponytail: varredura O(n) do dicionário a cada clique; n = tutoriais
+    simultâneos no processo. Trocar por fila ordenada se n crescer.
+    """
+    now = time.time()
+    for stale in [k for k, v in _STATE.items() if now - (v.get("at") or 0) > _TTL]:
+        _STATE.pop(stale, None)
+    _STATE[wa_id] = {"step": step, "at": now}
+
+
 # ── IDs de botões que pertencem ao tutorial ─────────────────────────────────
 TUTORIAL_BUTTON_IDS: set[str] = {
     "tut_start", "tut_skip", "tut_try",
@@ -66,7 +82,7 @@ def get_tutorial_button_id(raw: dict) -> str | None:
 # ── Passos do tutorial ───────────────────────────────────────────────────────
 
 def _step_1(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_1", "at": time.time()}
+    _set_step(wa_id, "step_1")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 1 de 7 — Lançamentos 📝",
@@ -88,7 +104,7 @@ def _step_1(wa_id: str) -> None:
 
 
 def _step_2(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_2", "at": time.time()}
+    _set_step(wa_id, "step_2")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 2 de 7 — Saldo e histórico 💰",
@@ -109,7 +125,7 @@ def _step_2(wa_id: str) -> None:
 
 
 def _step_cc(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_cc", "at": time.time()}
+    _set_step(wa_id, "step_cc")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 3 de 7 — Cartões e Crédito 💳",
@@ -142,7 +158,7 @@ def _step_cc(wa_id: str) -> None:
 
 
 def _step_3(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_3", "at": time.time()}
+    _set_step(wa_id, "step_3")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 4 de 7 — Caixinhas 📦",
@@ -165,7 +181,7 @@ def _step_3(wa_id: str) -> None:
 
 
 def _step_4(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_4", "at": time.time()}
+    _set_step(wa_id, "step_4")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 5 de 7 — Investimentos 📈",
@@ -189,7 +205,7 @@ def _step_4(wa_id: str) -> None:
 
 
 def _step_5(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_5", "at": time.time()}
+    _set_step(wa_id, "step_5")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 6 de 7 — Extrato OFX 🧾",
@@ -211,7 +227,7 @@ def _step_5(wa_id: str) -> None:
 
 
 def _step_6(wa_id: str) -> None:
-    _STATE[wa_id] = {"step": "step_6", "at": time.time()}
+    _set_step(wa_id, "step_6")
     send_interactive_buttons(
         to=wa_id,
         header="Passo 7 de 7 — Dashboard 🖥️",

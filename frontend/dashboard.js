@@ -953,7 +953,6 @@ function _renderCardItem(c, idx = 0) {
           <div class="row"><span class="label">Melhor dia</span><span class="val">${_bestPurchaseDay(c.closing_day)}</span></div>
           <div class="row"><span class="label">Fecha em</span><span class="val">${c.closing_day ? "dia " + c.closing_day : "—"}</span></div>
           <div class="row"><span class="label">Vence em</span><span class="val">${c.due_day ? "dia " + c.due_day : "—"}</span></div>
-          <div class="row"><span class="label">Próxima fatura</span><span class="val cc-money">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
         </div>
         ${lim != null ? `
           <div class="bar-body" style="margin-top:12px">
@@ -7540,7 +7539,7 @@ function setStatus(s) {
 // o que essa saída exige já foi executado aqui. Uma fonte só, usada pelo boot
 // e pela revalidação disparada por reconexões rejeitadas.
 function applyAccessVerdict(me) {
-  if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+  if (me && me.needs_plan_selection) {
     clearSessionSnapshots();  // veredito negativo: reload não repinta saldo
     stopWsRetries();
     window.location.replace("/precos?escolha=1");
@@ -9929,29 +9928,81 @@ function getCsrfToken() {
   return m ? decodeURIComponent(m[1]) : "";
 }
 
+function _exportIsoDate(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function openExportModal() {
+  if (!featureAllowed("export")) {
+    showUpgradeModal("export");
+    return;
+  }
+  const start = document.getElementById("export-start-date");
+  const end = document.getElementById("export-end-date");
+  const firstDay = _exportIsoDate(viewYear, viewMonth, 1);
+  const lastDay = _exportIsoDate(viewYear, viewMonth, new Date(viewYear, viewMonth, 0).getDate());
+  start.min = historyEarliestDate || "";
+  end.min = historyEarliestDate || "";
+  start.value = historyEarliestDate && firstDay < historyEarliestDate
+    ? historyEarliestDate
+    : firstDay;
+  end.value = lastDay < start.value ? start.value : lastDay;
+  document.getElementById("export-period-error").textContent = "";
+  document.getElementById("export-overlay").classList.add("open");
+  window.setTimeout(() => start.focus(), 0);
+}
+
+function closeExportModal() {
+  document.getElementById("export-overlay").classList.remove("open");
+}
+
 async function exportToEmail() {
-  const url = `${API}/export/${USER_ID}?year=${viewYear}&month=${viewMonth}`;
-  showLaunchSuccessToast(" Gerando e enviando o extrato…");
+  const start = document.getElementById("export-start-date").value;
+  const end = document.getElementById("export-end-date").value;
+  const error = document.getElementById("export-period-error");
+  if (!start || !end) {
+    error.textContent = "Informe a data inicial e a data final.";
+    return;
+  }
+  if (end < start) {
+    error.textContent = "A data final não pode ser anterior à data inicial.";
+    return;
+  }
+  error.textContent = "";
+  const query = new URLSearchParams({ start_date: start, end_date: end });
+  const url = `${API}/export/${USER_ID}?${query.toString()}`;
+  const submit = document.getElementById("export-submit-btn");
+  submit.disabled = true;
+  submit.textContent = "Enviando…";
+  showLaunchSuccessToast("Gerando e enviando o extrato…");
   try {
     const resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: csrfHeaders() });
     if (resp.status === 404) {
-      showLaunchSuccessToast("Nenhum lançamento neste mês para exportar.", true);
+      error.textContent = "Nenhum lançamento neste período para exportar.";
       return;
     }
     if (resp.status === 429) {
-      showLaunchSuccessToast("Você exportou agora há pouco. Aguarde um instante e tente de novo.", true);
+      error.textContent = "Você exportou agora há pouco. Aguarde um instante e tente de novo.";
       return;
     }
     if (!resp.ok) {
-      showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
+      const data = await resp.json().catch(() => ({}));
+      error.textContent = typeof data.detail === "string"
+        ? data.detail
+        : "Não consegui enviar agora. Tente novamente.";
       return;
     }
     const data = await resp.json().catch(() => ({}));
-    showLaunchSuccessToast(` Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
+    closeExportModal();
+    showLaunchSuccessToast(`Extrato enviado pro seu email ${data.email || "cadastrado"}.`);
   } catch (_e) {
-    showLaunchSuccessToast("Não consegui enviar agora. Tente novamente.", true);
+    error.textContent = "Não consegui enviar agora. Tente novamente.";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Enviar por e-mail";
   }
 }
+window.pigModalKeys && pigModalKeys("export-overlay", closeExportModal);
 
 /* ═══════════════════════════════════════════════════════════════════════
    CHARTS
@@ -10818,8 +10869,9 @@ function _showAccessError(title, msg) {
         }
         // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
         // plano pago antes de acessar o app (o Grátis não é mais uma escolha
-        // oferecida na /precos). Só na web — no app iOS o gate fica de fora pra
-        // não forçar a tela de planos/compra (diretriz 3.1.1).
+        // oferecida na /precos). Vale também no app iOS — a política (e por que
+        // não há isenção por app) mora na docstring de
+        // plan_service.needs_plan_selection.
         // Paywall/escolha de plano: mesmo veredito da revalidação por WS
         // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
         if (!applyAccessVerdict(me)) return false;

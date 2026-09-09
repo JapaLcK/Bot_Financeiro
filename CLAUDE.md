@@ -35,6 +35,31 @@ implementação, correção, refatoração, arquivo novo. Não são um checklist
 `CLAUDE.md` mais específico dentro da área que você vai mexer, ele também vale — e o
 mais específico ganha quando os dois falarem do mesmo assunto.
 
+**Toda alteração de código passa pela skill `time-dev`** (Arquiteto → Coder → Tester
+→ Manager). Não é "para trabalho não-trivial" nem "quando pedirem por nome": vale
+para correção de uma linha também. Invoque `Skill(skill="time-dev")` **antes** de
+abrir o arquivo, não depois de já ter editado. É o §4 ("ataque antes de empurrar")
+virado em rotina: o Arquiteto levanta as perguntas de escopo enquanto ainda dá para
+mudar de plano, e o Tester acha o defeito antes do revisor — quando isso não é feito,
+a descoberta é terceirizada para o Codex e cada rodada dele revela um irmão que a
+varredura anterior descartou com justificativa errada.
+
+**O Coder invoca a skill `pigbank-frontend` antes de escrever código de frontend.**
+Ela carrega a identidade visual (rosa `#FF2D8E` como principal e não em toda
+superfície, base branco/preto/neutros, verde só para sucesso e valor positivo, Piggy
+e os agentes, público de 18–24 anos) e a seção "Verificação" que exige abrir no
+navegador em desktop **e** mobile e relatar como conferiu. Subagente começa sem
+contexto e não herda esta regra: o prompt do Coder tem de mandar isso explicitamente.
+A skill mora em `.claude/skills/pigbank-frontend/SKILL.md`, versionada na `main`.
+Ela própria diz "não use para tarefas exclusivamente de backend" — nessas, registre
+no relato que ela não se aplicava, em vez de omitir (§7).
+
+**Quando faltar skill para a tarefa, use a `find-skills` antes de improvisar.** Ela
+busca e instala do ecossistema aberto (`npx skills find <termo>` / `npx skills add`).
+É para quando for útil, não em toda tarefa: se o assunto é frontend, teste ou o ciclo
+do time, as skills acima já cobrem. Ela mora em `~/.claude/skills/` e **não** viaja
+com o repositório — quem clonar precisa instalá-la.
+
 ### 0.1 Procure antes de criar
 
 Antes de escrever **qualquer** função, classe, helper, utilitário, componente,

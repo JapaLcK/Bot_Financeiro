@@ -222,13 +222,13 @@ test("dashboard: Esc fecha o diálogo que ESTÁ aberto", async () => {
 
 // ── os outros três dos sete ─────────────────────────────────────────────────
 
-test("dashboard: upgrade e resultado do OFX prendem o Tab e fecham no Esc", async () => {
+test("dashboard: upgrade, OFX e exportação prendem o Tab e fecham no Esc", async () => {
   const page = await newPage();
   try {
     await page.goto(`${ORIGIN}/dashboard.html`);
     await page.waitForFunction(() => typeof window.closeUpgradeModal === "function");
 
-    for (const id of ["upgrade-overlay", "ofx-result-overlay"]) {
+    for (const id of ["upgrade-overlay", "ofx-result-overlay", "export-overlay"]) {
       await page.evaluate((i) => document.getElementById(i).classList.add("open"), id);
       assert.equal(await tabAndoCount(page, id), 0, `${id}: o foco vazou do diálogo`);
       await page.keyboard.press("Escape");

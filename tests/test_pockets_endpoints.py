@@ -277,7 +277,7 @@ def test_pocket_withdraw_applies_ir_iof_on_gain(user_id):
             )
         conn.commit()
 
-    launch_id, new_acc, new_pocket, canon, taxes = db.pocket_withdraw_to_account(
+    launch_id, new_acc, new_pocket, canon, taxes, _dest = db.pocket_withdraw_to_account(
         user_id, "viagem", 1100, "resgate"
     )
 

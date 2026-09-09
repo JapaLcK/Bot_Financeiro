@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -29,6 +28,8 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
+from core.pg_text import limpa_para_pg
+from core.secure_compare import constant_time_eq
 
 
 load_app_env()
@@ -248,8 +249,8 @@ def _check_admin_password(password: str) -> bool:
             return False
     if not ADMIN_DASHBOARD_PASSWORD:
         return False
-    # compare_digest pra evitar timing leak no fallback plaintext.
-    return secrets.compare_digest(password, ADMIN_DASHBOARD_PASSWORD)
+    # Tempo constante pra evitar timing leak no fallback plaintext.
+    return constant_time_eq(password, ADMIN_DASHBOARD_PASSWORD)
 
 
 def _make_admin_jwt(username: str, jwt_secret: str) -> str:
@@ -366,6 +367,22 @@ def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
     row.pop("phone_enc", None)
     row.pop("display_name_enc", None)
     return row
+
+
+async def _json_object_body(request: Request) -> dict:
+    """Corpo JSON de topo objeto. Parse falho, lista, escalar ou null → 400.
+
+    `await request.json()` aceita qualquer JSON válido (`[1,2,3]`, `"abc"`,
+    `42`, `null`, `true`), e o `payload.get(...)` seguinte levantava
+    AttributeError → 500 com stack trace (issue #310).
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    return payload
 
 
 async def fetch_admin_overview(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
@@ -806,8 +823,18 @@ _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 # db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
 # 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
 # terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
-# regra decide o rótulo do painel e o gate de /trial-reset (§0.7).
-_PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
+# regra decide o rótulo do painel, o gate de /trial-reset e a mecânica de
+# cobrança por inadimplência (§0.7).
+#
+# A lista MUDOU DE CASA para core/services/billing_dunning: este módulo importa
+# fastapi/bcrypt/jwt/slowapi e é caro de importar, caro demais para módulo que
+# entra no caminho de cobrança e do bot. Meça antes de reusar o argumento:
+# `python3 -X importtime -c "import core.admin_dashboard" 2>&1 | tail -1`.
+# O espelho SQL em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como
+# sempre — o teste de paridade de tests/test_admin_users_panel.py compara os dois.
+from core.services.billing_dunning import (  # noqa: E402
+    PAST_DUE_PAYMENT_STATUSES as _PAST_DUE_PAYMENT_STATUSES,
+)
 _LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
 
 
@@ -1365,6 +1392,25 @@ def set_account_plan(
                                     in ('canceled', 'incomplete_expired', 'unpaid')
                            then 'inactive'
                            else last_payment_status
+                       end,
+                       -- A INVARIANTE do relógio de inadimplência, no MESMO
+                       -- UPDATE (leia db_support.set_payment_status_impl): este
+                       -- statement é o único writer de last_payment_status em
+                       -- Python fora dela, e o CASE acima tira 'unpaid' — que
+                       -- está em PAST_DUE_PAYMENT_STATUSES — da lista. Sem esta
+                       -- linha sobrava relógio órfão (medido: past_due_since
+                       -- preenchido com status 'inactive'), e órfão prende o
+                       -- relógio do ciclo seguinte na data velha, tirando a
+                       -- conta da janela do lembrete de pagamento.
+                       -- O predicado é o MESMO do CASE acima de propósito: as
+                       -- duas colunas descrevem a mesma transição, e todo
+                       -- `set` de um UPDATE lê os valores ANTIGOS da linha.
+                       past_due_since = case
+                           when %(plan)s::text <> 'free'
+                                and lower(coalesce(last_payment_status, ''))
+                                    in ('canceled', 'incomplete_expired', 'unpaid')
+                           then null
+                           else past_due_since
                        end
                  where {where}
                 returning user_id, email, plan, plan_expires_at, last_payment_status
@@ -1372,11 +1418,102 @@ def set_account_plan(
                 {"plan": plan, "months": int(months), "target": target},
             )
             row = cur.fetchone()
+            if row:
+                # SAVEPOINT, e não a transação inteira: falha ao gravar o grant
+                # não pode levar junto o UPDATE de `auth_accounts`. Esta é a
+                # ferramenta de REPARO manual — a última que pode virar a mais
+                # frágil do sistema. É a mesma política do webhook, que também
+                # grava o par legado primeiro e trata o grant como melhoria.
+                try:
+                    with conn.transaction():
+                        _gravar_grant_do_admin(cur, int(row["user_id"]), plan, int(months))
+                except Exception as exc:
+                    # Observabilidade de VERDADE, não print: o §15 nomeia esta
+                    # rota como ferramenta de conciliação que não pode ser
+                    # desligada. O estado que sobra — coluna certa, grant
+                    # ausente — não é mais "some em 24 h": desde a v6 a
+                    # varredura não reduz sem o Stripe confirmar, então numa
+                    # conta com assinatura viva o ajuste PERSISTE e passa a
+                    # gerar alerta diário de redução não confirmada. Nos dois
+                    # desfechos (persistir errado ou ser desfeito) quem precisa
+                    # saber é uma pessoa, e é para isso que este alerta existe.
+                    from core.observability import log_system_event_sync
+                    log_system_event_sync(
+                        "error", "admin_grant_nao_gravado",
+                        "set_account_plan gravou auth_accounts mas NAO o grant; "
+                        "a reprojecao vai desfazer o ajuste.",
+                        source="admin", user_id=int(row["user_id"]),
+                        details={"plan": plan, "months": int(months), "erro": str(exc)[:300]},
+                    )
+                    try:
+                        from core.services.admin_notify import _send
+                        _send(f"Reparo manual do admin na conta {row['user_id']} "
+                              f"({plan}) NAO virou grant: {str(exc)[:200]}")
+                    except Exception:
+                        pass
         conn.commit()
         if row:
             from db_support import invalidate_auth_user_cache
             invalidate_auth_user_cache(row["user_id"])
         return dict(row) if row else None
+
+
+def _gravar_grant_do_admin(cur, user_id: int, plan: str, months: int) -> None:
+    """O reparo manual do admin também vira GRANT (§9 da auditoria / §15 do
+    docs/plano_pix_anual_asaas.md).
+
+    Sem isto, o ajuste some na primeira reprojeção: a projeção de `plan_grants`
+    reescreve `auth_accounts` e o admin nunca teria escrito um grant. E é
+    justamente esta a ferramenta de conciliação de pagamento órfão e de acesso
+    concedido a menos — ela não pode ser desligada pelo PR que cria os casos que
+    ela repara.
+
+    Roda no mesmo cursor, mas sob SAVEPOINT: o UPDATE de `auth_accounts` entra
+    mesmo que este grant falhe. Não é "ou os dois, ou nenhum" — é deliberado ao
+    contrário, porque esta é a ferramenta de REPARO manual e ela não pode ser a
+    peça mais frágil do sistema. O preço é ficar com a coluna certa e o grant
+    ausente, o que a reprojeção desfaz em até 24 h; por isso a falha alerta
+    (`admin_grant_nao_gravado`) em vez de sumir num stderr.
+
+    `event_version = epoch(now)` põe a ordem humana acima de qualquer evento de
+    gateway já recebido; um webhook FUTURO ainda ganha, que é o comportamento
+    já documentado ("não fala com a Stripe: o próximo webhook dela volta a
+    mandar no par").
+
+    **A escrita do admin é AUTORITATIVA: revoga todos os grants ativos, não só
+    quando desce para `free`.** Revogar só no `free` deixava todo REBAIXAMENTO
+    sem efeito — pôr uma conta em `essencial` por 1 mês, tendo ela um grant
+    `stripe` de `pro_max` com 300 dias, voltava para `pro_max` na projeção
+    seguinte, porque a projeção pega o MAIOR tier vigente e a maior cobertura.
+    O ajuste sobrevivia na coluna e morria no primeiro `recompute`, que é
+    exatamente o defeito que este grant existe para consertar.
+    """
+    # Autoritativo: derruba o que houver antes de dizer o que vale.
+    cur.execute(
+        "update plan_grants"
+        "   set status='revoked', revoked_reason='admin_override',"
+        "       revoked_at=now(), event_version=extract(epoch from now())::bigint,"
+        "       updated_at=now()"
+        " where user_id = %s and status = 'active'",
+        (user_id,),
+    )
+    if plan == "free":
+        return
+
+    cur.execute(
+        "insert into plan_grants (user_id, source, external_ref, plan_stored,"
+        "                         starts_at, ends_at, status, event_version)"
+        " values (%s, 'admin', %s, %s, now(), now() + (%s || ' months')::interval,"
+        "         'active', extract(epoch from now())::bigint)"
+        " on conflict (source, external_ref) do update"
+        "    set plan_stored = excluded.plan_stored,"
+        "        starts_at = excluded.starts_at,"
+        "        ends_at = excluded.ends_at,"
+        "        status = 'active', revoked_reason = null, revoked_at = null,"
+        "        event_version = excluded.event_version,"
+        "        updated_at = now()",
+        (user_id, f"admin:{user_id}", plan, months),
+    )
 
 
 async def log_admin_startup_warnings() -> None:
@@ -1489,10 +1626,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if not admin_enabled():
             raise HTTPException(status_code=503, detail="Painel admin não configurado.")
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         username = str(payload.get("username") or "").strip()
         password = str(payload.get("password") or "")
@@ -1666,16 +1800,14 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         hora; o que já existe acima do teto do plano novo (bancos de Open
         Finance, agentes) cai na varredura de downgrade, que roda a cada 6h.
         """
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         months = payload.get("months")
         try:
             months = 12 if months is None else int(months)
-        except (TypeError, ValueError):
+        # OverflowError: json.loads aceita `Infinity`/`-Infinity`/`1e400` e devolve
+        # float('inf'), e int(inf) NÃO levanta TypeError nem ValueError — era 500.
+        # (`NaN` levanta ValueError, e por isso já caía aqui.)
+        except (TypeError, ValueError, OverflowError):
             raise HTTPException(status_code=422, detail="months inválido.")
         try:
             row = await asyncio.to_thread(
@@ -1898,10 +2030,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         from db import find_user_id_by_email
         from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         email = str(payload.get("email") or "").strip()
         if not email:
@@ -1911,7 +2040,18 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=404, detail="Nenhuma conta com esse email.")
 
         code = (payload.get("code") or None)
-        bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        # `code` não-string chegava em _normalize_code (db/affiliates.py), que faz
+        # .strip() → AttributeError → 500. O `except ValueError` abaixo não pega.
+        if code is not None and not isinstance(code, str):
+            raise HTTPException(status_code=422, detail="code inválido.")
+        # int() FORA do try dava 500: 'abc'/NaN → ValueError, [10]/{'a':1}/null →
+        # TypeError, Infinity/1e400 → OverflowError. São as TRÊS que int() levanta
+        # sobre valor vindo de json.loads, e o try abaixo só embrulha o
+        # create_affiliate e só pega ValueError. Mesmo tratamento do `months`.
+        try:
+            bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="commission_bps inválido.")
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
@@ -1938,10 +2078,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         comissão nova; o saldo já acumulado continua sacável."""
         from db.affiliates import set_affiliate_status
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         status = str(payload.get("status") or "")
         try:
             ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
@@ -2005,7 +2142,16 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
@@ -2029,7 +2175,16 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(reject_payout, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")

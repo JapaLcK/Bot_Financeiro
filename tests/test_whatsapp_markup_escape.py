@@ -59,6 +59,12 @@ interpola o nome DUAS vezes, então o `*` do usuário pareia consigo mesmo (2
 asteriscos). Fechar isso é mudança de desenho e fica fora deste PR — os dois
 casos estão aqui como `xfail(strict=True)` afirmando o estado DESEJADO.
 
+SÍTIO FORA DESTE ARQUIVO, e de propósito: o `_PERGUNTA_DE_DESEMPATE`
+(core/intent_router.py) só existe DEPOIS de uma pendência viva, então o teste
+dele mora onde a conversa real já está montada —
+`tests/test_perguntas_guardam_contexto.py::test_288_desempate_nao_embrulha_texto_com_marcacao`.
+Ele é da mesma classe: o embrulho sai, e o total ímpar que sobra é a #276.
+
 ESCOPO: os 7 sítios de `adapters/whatsapp/wa_runtime.py`, o
 `pergunta_de_valor_sem_contexto` (core/handlers/bills.py:63, chamado de
 wa_runtime.py:800), o `core/handlers/pending.py:90` e — porque é a MESMA

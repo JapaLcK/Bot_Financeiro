@@ -18,13 +18,38 @@
 //
 // Rodar:  npm run test:frontend
 //         (ou só este: node --test tests/frontend/eslint_max_lines_gate.test.mjs)
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { ESLint } from "eslint";
+
+// Import dinâmico, e não estático, por causa do que a ausência do pacote fazia:
+// o `import { ESLint } from "eslint"` derruba o ARQUIVO inteiro com
+// `ERR_MODULE_NOT_FOUND` antes de qualquer teste existir, e três PRs seguidos
+// (#221, #257, #268) pararam para concluir "é ambiente" antes de comparar a
+// baseline — a quarta vez é alguém olhando só o número (issue #279).
+//
+// O alívio é do DEV, nunca do CI. Lá o `npm ci` roda (.github/workflows/tests.yml,
+// step "Install dependencies"), então eslint ausente é o gate quebrado de verdade,
+// e pular seria exatamente o silêncio que se quer evitar — é o mesmo motivo pelo
+// qual o `PYTEST_ALLOW_MISSING_OPTIONAL_DEPS` do conftest.py é opt-in: alívio
+// automático faz a dependência sumir do projeto sem uma linha vermelha.
+let ESLint;
+try {
+  ({ ESLint } = await import("eslint"));
+} catch (erro) {
+  if (process.env.CI) throw erro;
+}
+
+const skip = ESLint
+  ? false
+  : "eslint não está no node_modules: rode `npm ci` na raiz do repo para rodar este portão localmente (no CI a ausência REPROVA, não pula)";
+
+// Sem o pacote, `skip` desliga os testes antes de o corpo rodar — o wrapper
+// existe para que teste novo neste arquivo herde isso sem ninguém lembrar.
+const test = (nome, fn) => nodeTest(nome, { skip }, fn);
 
 const cwd = fileURLToPath(new URL("../..", import.meta.url));
-const eslint = new ESLint({ cwd });
+const eslint = ESLint ? new ESLint({ cwd }) : null;
 
 const LONGO = "x\n".repeat(500);
 // 351 linhas de conteúdo: uma acima do teto. É o que prende o 350.

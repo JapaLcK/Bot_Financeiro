@@ -12,7 +12,7 @@ Endpoints:
   GET  /budgets/{user_id}       → list budgets
   POST /budgets/{user_id}       → set budget {categoria, budget}
   DEL  /budgets/{user_id}/{cat} → delete budget
-  POST /export/{user_id}        → envia extrato (PDF+XLSX+CSV) p/ email (query: year, month)
+  POST /export/{user_id}        → envia extrato (PDF+XLSX+CSV) p/ email (query: start_date, end_date)
   WS   /ws/{user_id}            → real-time updates
 """
 
@@ -107,6 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
@@ -1131,12 +1132,39 @@ def _item_sort_key(it: dict):
     return (d.year, d.month, d.day, getattr(d, "hour", 0), getattr(d, "minute", 0))
 
 
-async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]:
-    """Itens monetários do mês p/ relatório (CSV/XLSX/PDF compartilham):
+def _normalize_export_period(start_date: date | int, end_date: date | int) -> tuple[date, date]:
+    """Normaliza o período inclusivo do relatório.
+
+    Aceita ``year, month`` para manter compatibilidade com chamadas internas
+    anteriores à exportação por período.
+    """
+    if isinstance(start_date, int) and isinstance(end_date, int):
+        start, exclusive_end = _month_range(start_date, end_date)
+        return start, exclusive_end - timedelta(days=1)
+    if not isinstance(start_date, date) or not isinstance(end_date, date):
+        raise ValueError("Período de exportação inválido.")
+    if end_date < start_date:
+        raise ValueError("A data final não pode ser anterior à data inicial.")
+    if end_date == date.max:
+        raise ValueError("A data final deve ser anterior a 31/12/9999.")
+    return start_date, end_date
+
+
+def _export_period_label(start_date: date, end_date: date) -> str:
+    if start_date == end_date:
+        return start_date.strftime("%d/%m/%Y")
+    if start_date.year == end_date.year and start_date.month == end_date.month:
+        return f"{start_date:%d} a {end_date:%d/%m/%Y}"
+    return f"{start_date:%d/%m/%Y} a {end_date:%d/%m/%Y}"
+
+
+async def _fetch_export_items(user_id: int, start_date: date | int, end_date: date | int) -> list[dict]:
+    """Itens monetários do período p/ relatório (CSV/XLSX/PDF compartilham):
     despesas/receitas reais da conta, aportes/movimentações de investimento e
     caixinha, e compras no cartão (alocadas por bill.period_end, igual ao
     dashboard). Ações não-monetárias ficam de fora."""
-    month_start, month_end = _month_range(year, month)
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    exclusive_end = period_end + timedelta(days=1)
     items: list[dict] = []
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
@@ -1147,7 +1175,7 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                 WHERE user_id = %s
                   AND criado_em >= %s AND criado_em < %s
                 """,
-                (user_id, month_start, month_end),
+                (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
                 cls = _classify_launch(r["tipo"], r.get("is_internal_movement"), r.get("categoria"))
@@ -1181,7 +1209,7 @@ async def _fetch_export_items(user_id: int, year: int, month: int) -> list[dict]
                   AND ct.is_refund = false
                   AND b.period_end >= %s AND b.period_end < %s
                 """,
-                (user_id, month_start, month_end),
+                (user_id, period_start, exclusive_end),
             )
             for r in await cur.fetchall():
                 desc = (r.get("nota") or "").strip()
@@ -1217,8 +1245,8 @@ def _spreadsheet_safe(v) -> str:
     return s
 
 
-async def build_csv(user_id: int, year: int, month: int) -> str | None:
-    items = await _fetch_export_items(user_id, year, month)
+async def build_csv(user_id: int, start_date: date | int, end_date: date | int) -> str | None:
+    items = await _fetch_export_items(user_id, start_date, end_date)
     if not items:
         return None
     buf = io.StringIO()
@@ -1249,23 +1277,38 @@ def _export_summary(items: list[dict]) -> dict:
         if it["natureza"] == "despesa":
             by_cat[it["categoria"] or "sem categoria"] += it["valor"]
     cats = sorted(by_cat.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    entradas = sum(it["valor"] for it in items if it["sign"] == "+")
+    saidas = sum(it["valor"] for it in items if it["sign"] == "-")
     return {
         "receitas": receitas,
         "despesas": despesas,
         "aportes": aportes,
+        "entradas": entradas,
+        "saidas": saidas,
+        "saldo_periodo": entradas - saidas,
+        "balanco": receitas - despesas,
         "by_category": cats,
         "count": len(items),
     }
 
 
-async def build_xlsx(user_id: int, year: int, month: int) -> bytes | None:
-    items = await _fetch_export_items(user_id, year, month)
+async def build_xlsx(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    items = await _fetch_export_items(user_id, period_start, period_end)
     if not items:
         return None
-    return await asyncio.to_thread(_render_xlsx, items)
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
+    return await asyncio.to_thread(_render_xlsx, items, period_start, period_end, balance)
 
 
-def _render_xlsx(items: list[dict]) -> bytes:
+def _render_xlsx(
+    items: list[dict], start_date: date | None = None, end_date: date | None = None,
+    balance: float = 0.0,
+) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
@@ -1308,25 +1351,72 @@ def _render_xlsx(items: list[dict]) -> bytes:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:E{len(items) + 1}"
 
+    # Espelha o Dashboard da exportação por Excel do bot: o resumo fica em
+    # uma aba própria e a aba tabular continua pronta para filtros/importação.
+    summary = _export_summary(items)
+    resumo = wb.create_sheet("Resumo", 0)
+    resumo.append(["Resumo financeiro", ""])
+    resumo.merge_cells("A1:B1")
+    resumo["A1"].font = Font(bold=True, size=18, color="FFFFFF")
+    resumo["A1"].fill = PatternFill("solid", fgColor=BRAND)
+    resumo["A1"].alignment = Alignment(horizontal="center")
+    resumo.row_dimensions[1].height = 28
+    period_label = (
+        _export_period_label(start_date, end_date)
+        if start_date is not None and end_date is not None
+        else "Período selecionado"
+    )
+    summary_rows = [
+        ("Período", period_label, False),
+        ("Total de entradas", summary["entradas"], True),
+        ("Total de saídas", summary["saidas"], True),
+        ("Saldo do período", summary["saldo_periodo"], True),
+        ("Balanço (receitas - despesas)", summary["balanco"], True),
+        ("Receitas", summary["receitas"], True),
+        ("Despesas", summary["despesas"], True),
+        ("Aportes", summary["aportes"], True),
+        ("Saldo atual", balance, True),
+        ("Lançamentos", summary["count"], False),
+    ]
+    for label, value, currency in summary_rows:
+        resumo.append([label, value])
+        row = resumo.max_row
+        resumo.cell(row=row, column=1).font = Font(bold=True, color="1E293B")
+        if currency:
+            resumo.cell(row=row, column=2).number_format = '"R$" #,##0.00'
+    resumo.column_dimensions["A"].width = 24
+    resumo.column_dimensions["B"].width = 26
+
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
-async def build_pdf(user_id: int, year: int, month: int) -> bytes | None:
-    items = await _fetch_export_items(user_id, year, month)
-    if not items:
-        return None
-    # Saldo atual da conta (não escopado ao mês) — mesmo número do card do dashboard.
+async def _fetch_export_balance(user_id: int) -> float:
+    """Saldo atual da conta, compartilhado pelos anexos de resumo."""
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
             row = await cur.fetchone()
-    balance = float(row["balance"]) if row else 0.0
-    return await asyncio.to_thread(_render_pdf, items, year, month, balance)
+    return float(row["balance"]) if row else 0.0
 
 
-def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) -> bytes:
+async def build_pdf(
+    user_id: int, start_date: date | int, end_date: date | int,
+    balance: float | None = None,
+) -> bytes | None:
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    items = await _fetch_export_items(user_id, period_start, period_end)
+    if not items:
+        return None
+    if balance is None:
+        balance = await _fetch_export_balance(user_id)
+    return await asyncio.to_thread(_render_pdf, items, period_start, period_end, balance)
+
+
+def _render_pdf(
+    items: list[dict], start_date: date | int, end_date: date | int, balance: float = 0.0
+) -> bytes:
     from datetime import datetime as _dt
     from html import escape
     from reportlab.lib import colors
@@ -1371,12 +1461,14 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
             fontSize=size, textColor=color, alignment=align, leading=size + 3,
         ))
 
+    period_start, period_end = _normalize_export_period(start_date, end_date)
+    period_label = _export_period_label(period_start, period_end)
     summary = _export_summary(items)
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
         bio, pagesize=A4,
         topMargin=14 * mm, bottomMargin=15 * mm, leftMargin=15 * mm, rightMargin=15 * mm,
-        title=f"Extrato {_MESES_PT[month]}/{year}", author="PigBank",
+        title=f"Extrato {period_label}", author="PigBank",
     )
     W = doc.width
     el = []
@@ -1384,7 +1476,7 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     # ── Banner ───────────────────────────────────────────────────────────
     banner = Table(
         [[par("PigBank", 22, colors.white, bold=True)],
-         [par(f"Extrato de {_MESES_PT[month]} de {year}", 11, HEAD_SUB)]],
+         [par(f"Extrato de {period_label}", 11, HEAD_SUB)]],
         colWidths=[W],
     )
     banner.setStyle(TableStyle([
@@ -1399,19 +1491,18 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
     el.append(Spacer(1, 16))
 
     # ── Cards de resumo (Receitas | Despesas | Saldo) ────────────────────
-    # Despesas = despesas + aportes (aporte é saída de caixa).
-    # Saldo = saldo atual da conta (≠ "sobrou do mês"); mesmo número do dashboard.
+    # Entradas e saídas incluem as movimentações de investimento; o bloco
+    # seguinte abre o balanço entre receitas, despesas e aportes.
     gap = 8
     card_w = (W - 2 * gap) / 3.0
     SALDO_BG = colors.HexColor("#F1F5F9")
-    saldo_color = POS if balance >= 0 else NEG
-    despesas_total = summary["despesas"] + summary["aportes"]
+    saldo_periodo_color = POS if summary["saldo_periodo"] >= 0 else NEG
     kpi = Table(
-        [[par("RECEITAS", 8, MUTED, bold=True), "", par("DESPESAS", 8, MUTED, bold=True), "",
-          par("SALDO", 8, MUTED, bold=True)],
-         [par(fmt_brl(summary["receitas"]), 13, POS, bold=True), "",
-          par(fmt_brl(despesas_total), 13, NEG, bold=True), "",
-          par(fmt_brl(balance), 13, saldo_color, bold=True)]],
+        [[par("ENTRADAS", 8, MUTED, bold=True), "", par("SAÍDAS", 8, MUTED, bold=True), "",
+          par("SALDO DO PERÍODO", 8, MUTED, bold=True)],
+         [par(fmt_brl(summary["entradas"]), 13, POS, bold=True), "",
+          par(fmt_brl(summary["saidas"]), 13, NEG, bold=True), "",
+          par(fmt_brl(summary["saldo_periodo"]), 13, saldo_periodo_color, bold=True)]],
         colWidths=[card_w, gap, card_w, gap, card_w],
     )
     kpi.setStyle(TableStyle([
@@ -1428,6 +1519,33 @@ def _render_pdf(items: list[dict], year: int, month: int, balance: float = 0.0) 
         ("LEFTPADDING", (3, 0), (3, -1), 0), ("RIGHTPADDING", (3, 0), (3, -1), 0),
     ]))
     el.append(kpi)
+
+    el.append(Spacer(1, 8))
+    detail_w = W / 5.0
+    saldo_atual_color = POS if balance >= 0 else NEG
+    details = Table(
+        [[par("RECEITAS", 7, MUTED, bold=True), par("DESPESAS", 7, MUTED, bold=True),
+          par("APORTES", 7, MUTED, bold=True), par("BALANÇO", 7, MUTED, bold=True),
+          par("SALDO ATUAL", 7, MUTED, bold=True)],
+         [par(fmt_brl(summary["receitas"]), 10, POS, bold=True),
+          par(fmt_brl(summary["despesas"]), 10, NEG, bold=True),
+          par(fmt_brl(summary["aportes"]), 10, BRAND, bold=True),
+          par(fmt_brl(summary["balanco"]), 10, POS if summary["balanco"] >= 0 else NEG, bold=True),
+          par(fmt_brl(balance), 10, saldo_atual_color, bold=True)]],
+        colWidths=[detail_w] * 5,
+    )
+    details.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), SALDO_BG),
+        ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, LINE),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, 0), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 1),
+        ("TOPPADDING", (0, 1), (-1, 1), 0),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 7),
+    ]))
+    el.append(details)
 
     # ── Despesas por categoria (com barra de proporção) ──────────────────
     if summary["by_category"]:
@@ -1801,6 +1919,52 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _table_cleanup():
+        # Poda de auth_refresh_tokens/mfa_login_challenges/pending_google_signups.
+        # As três funções são síncronas (get_conn bloqueante); o loop as chama por
+        # asyncio.to_thread — ver core/services/table_cleanup.py.
+        try:
+            await asyncio.sleep(2)
+            from core.services.table_cleanup import run_table_cleanup_loop  # noqa: PLC0415
+            await run_table_cleanup_loop()
+        except Exception as exc:
+            print(f"[table_cleanup] erro: {exc}", file=sys.stderr)
+
+    async def _plan_grants_reprojection():
+        """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
+
+        Grant futuro que vira vigente e grant vigente que vence são as duas
+        únicas transições de acesso que acontecem sem evento externo nenhum —
+        ninguém chama webhook para avisar que o downgrade agendado chegou.
+
+        Duas passadas, e a segunda existe porque a primeira sozinha mente:
+
+        • a cada 60 s, por JANELA (desde o último tick) — barata e indexada;
+        • a cada 24 h, e também na PRIMEIRA volta, SEM janela: todo usuário com
+          grant ativo. Janela só conserta o que transicionou dentro dela, então
+          processo fora do ar por mais tempo que a janela deixava `plan` velho
+          para sempre. Sem janela não existe "mais tempo que a janela" — a
+          varredura é auto-curativa em vez de depender de uptime.
+        """
+        from core.services.billing_access import reprojetar_grants_recentes  # noqa: PLC0415
+        desde = None                       # 1ª volta é a varredura sem janela
+        proxima_larga = datetime.now(timezone.utc) + timedelta(hours=24)
+        while True:
+            try:
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_larga:
+                    desde = None
+                    proxima_larga = agora + timedelta(hours=24)
+                n = await asyncio.to_thread(reprojetar_grants_recentes, desde)
+                desde = agora
+                if n:
+                    print(f"[plan_grants] {n} usuario(s) reprojetado(s).", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -1893,6 +2057,8 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_table_cleanup(), name="table_cleanup"),
+                asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
             ]
         )
     else:
@@ -2006,7 +2172,7 @@ async def csrf_middleware(request: Request, call_next):
 
     if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
-        if not token or not header_token or not secrets.compare_digest(token, header_token):
+        if not token or not header_token or not constant_time_eq(header_token, token):
             # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
             # olha método não-seguro, e o produto não tem submit de formulário —
             # os 13 `<form>` de frontend/*.html não têm um `method=`/`action=`
@@ -3730,7 +3896,7 @@ async def auth_google_callback(
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
 
-    if not code or not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+    if not code or not state or not cookie_state or not constant_time_eq(state, cookie_state):
         return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
 
     try:
@@ -4688,12 +4854,29 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 return fbp, fbc
         return None, None
 
-    def _invoice_subscription_id(invoice) -> str | None:
-        sub_id = _g(invoice, "subscription")
+    def _invoice_subscription_id(objeto) -> str | None:
+        """Id da assinatura, seja `subscription` string ou objeto EXPANDIDO.
+
+        Serve `invoice.paid` E `checkout.session.completed`: o ramo do checkout
+        lia `_g(session, "subscription")` cru, então um payload com o objeto
+        expandido virava uma `external_ref` diferente da que o `invoice.paid`
+        grava, e o mesmo assinante ficava com DOIS grants da mesma assinatura.
+        Depois que a revogação passou a mirar `external_ref` exato, os dois
+        lados precisam produzir a mesma chave (§0.1: reusar, não repetir).
+        O fallback de `parent.subscription_details` simplesmente não casa num
+        objeto de sessão, então serve os dois sem ramificar por tipo.
+        """
+        sub_id = _g(objeto, "subscription")
         if sub_id:
             return sub_id if isinstance(sub_id, str) else _g(sub_id, "id")
         # API >= 2025-09 movido pra invoice.parent.subscription_details.subscription.
-        parent = _g(invoice, "parent", {})
+        # `objeto`, NÃO `invoice`: quando esta função passou a servir também o
+        # `checkout.session.completed`, esta linha ficou lendo uma variável
+        # LIVRE, só ligada no ramo `invoice.paid`. Sessão sem `subscription`
+        # (checkout de pagamento avulso) chegava aqui e estourava
+        # UnboundLocalError → 500 → a Stripe reentregando por 3 dias, e o ramo
+        # "Checkout do Stripe concluido (sem subscription)" inalcançável.
+        parent = _g(objeto, "parent", {})
         details = _g(parent, "subscription_details", {})
         ref = _g(details, "subscription")
         if ref is None:
@@ -4708,20 +4891,192 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         except Exception:
             return ""
 
-    async def _fire_email(uid: int, fn, *args):
-        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook."""
+    def _event_version(evt) -> int:
+        """Ordem dos eventos (§6 do docs/plano_pix_anual_asaas.md).
+
+        `event["created"]` do Stripe é epoch em SEGUNDOS — é por isso que o
+        empate do §6.1 (invoice.paid × subscription.deleted no mesmo segundo) é
+        caso real e não teórico. Ausente só em evento sintético: cai em now(),
+        nunca em 0, porque versão 0 BLOQUEARIA toda escrita posterior sobre um
+        grant existente e o acesso ficaria congelado no primeiro evento.
+        """
+        try:
+            return int(_g(evt, "created"))
+        except (TypeError, ValueError):
+            return int(datetime.now(timezone.utc).timestamp())
+
+    async def _materializar_assinatura(uid: int, sub_id, plan_value,
+                                       expires_dt, sub_status: str) -> bool:
+        """Grava o GRANT e reprojeta `auth_accounts` a partir dele (§4.1.1 A).
+
+        **A exceção PROPAGA de propósito.** Antes havia um `except`/`print`
+        aqui, e o efeito medido foi caro: uma renovação em que o
+        `update_user_plan` entrava e o `upsert_grant` estourava deixava o grant
+        parado no período anterior, com `auth_accounts` fresco — e a varredura
+        seguinte lia o buraco como fim de assinatura e rebaixava um PAGANTE
+        (`pro/2027-07-01 → free/None`). Gravação crítica que engole exceção não
+        é resiliência: é perda silenciosa.
+
+        Falhar aqui vira **5xx**, e 5xx na Stripe é **retryable** — o mesmo
+        tratamento que o `claim_trial_for_user` vinte linhas abaixo já tem
+        ("falha precisa propagar: resposta 5xx faz a Stripe repetir o webhook
+        até a trava ficar persistida"). Esta era a única escrita crítica do
+        handler que destoava do padrão.
+
+        É também o PRIMEIRO efeito do ramo: se o grant não entra, nada depois
+        rodou — sem e-mail, sem funil, sem GA4/CAPI, sem `mark_plan_selected` —
+        então a primeira reentrega não repete nada, ela executa (§4.1.2).
+
+        Sem `expires_dt` não há grant (`ends_at` é `not null`): cai na escrita
+        legada, que é o "vitalício de fato" do §5.3.
+
+        Devolve False quando o evento era VELHO e nada de acesso foi escrito.
+        Os chamadores **não** abortam o ramo com isso (decisão do dono): evento
+        obsoleto quer dizer que outro evento mais novo já decidiu o ACESSO, não
+        que a fatura não foi paga — comissão, GA4/CAPI, e-mail e, sobretudo, o
+        `claim_trial_for_user` (trava de um trial por telefone na vida) seguem
+        rodando.
+        """
+        if not (uid and sub_id and expires_dt):
+            update_user_plan(uid, plan_value, expires_dt)
+            set_payment_status(uid, sub_status)
+            return True
+        from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+        from db.plan_grants import upsert_grant  # noqa: PLC0415
+        aplicou = await asyncio.to_thread(
+            upsert_grant, int(uid), "stripe", str(sub_id), plan_value,
+            datetime.now(timezone.utc), expires_dt,
+            _event_version(event), _g(event, "id"),
+        )
+        if aplicou is None:
+            # Evento VELHO: a guarda de versão recusou o grant, e quem decidiu o
+            # acesso foi um evento MAIS NOVO. Escrever `last_payment_status`
+            # aqui devolveria `active` a uma conta que o `deleted` acabou de
+            # cancelar — a guarda protegia o grant e o status passava por fora
+            # dela. NÃO caem aqui, e é o que `upsert_grant` classifica pela
+            # COMPARAÇÃO DE VERSÃO (§4.1.2): a reentrega do 5xx, o evento IRMÃO
+            # do mesmo segundo (`checkout` + `paid` de compra imediata, o empate
+            # do §6.1) e o `paid` em voo quando quem bloqueou foi o REPARO da
+            # varredura — que carimba `now()` mas não é evento.
+            await log_system_event(
+                "warning", "billing_evento_obsoleto",
+                f"Evento de cobranca obsoleto ignorado (assinatura {sub_id}).",
+                source="billing", user_id=int(uid),
+                details={"plan": plan_value, "status": sub_status,
+                         "event_version": _event_version(event),
+                         "event_id": _g(event, "id")},
+            )
+            return False
+        await asyncio.to_thread(set_payment_status, uid, sub_status)
+        # `auth_accounts` sai dos grants, não de uma escrita paralela à mão:
+        # duas fontes escrevendo o mesmo par é como elas divergem.
+        await asyncio.to_thread(recompute_entitlement, int(uid))
+        return True
+
+    async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
+        """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
+
+        Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
+        de propósito quando a materialização falha, e a Stripe reentrega o
+        evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
+        Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
+        (`send_pro_welcome_email`, `send_pro_charged_email`), o aviso de fim de
+        trial e o `send_payment_failed_email` — este com `dedup_days` maior,
+        ver o call site. Fora daqui sobrou o
+        `send_subscription_canceled_email`, chamado direto no seu try/except;
+        quem mover também ele para cá ganha a dedup de graça, e quem NÃO mover
+        não deve achar que tem. Mesmo padrão do `trial_ending_email_sent` já
+        usado no repo.
+
+        **O registro vem DEPOIS do envio E SÓ SE O ENVIO CONFIRMOU, e é isso
+        que torna a entrega retentável.** O `if not ok` não é código defensivo:
+        os quatro remetentes daqui terminam em `return send_email(...)`, e
+        `send_email` (`core/services/email_service.py:64`) documenta "nunca
+        lança exceção" — todo caminho de falha dela sai por `return False`
+        (`:72` sem RESEND_API_KEY, `:100` no except). Uma versão anterior disto
+        só protegia o `raise`, que é justamente o caminho que a produção NÃO
+        toma: Resend fora do ar gravava a chave de dedupe com zero e-mail
+        enviado, e a janela inteira ficava muda (medido pelo Manager: 3 entregas
+        do mesmo evento = 1 tentativa, 0 e-mails, chave gravada 1x).
+
+        Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
+        enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
+        cada retry não é; e ZERO e-mail na janela inteira — o que uma dedupe
+        gravada sem olhar o retorno produz — é o pior dos três.
+        """
+        chave = f"{fn.__name__}_sent"
+        try:
+            from core.observability import recent_event_exists  # noqa: PLC0415
+            if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
+                return
+        except Exception as exc:
+            print(f"[billing] dedup de email falhou user={uid}: {exc}")
         try:
             email = await _user_email(uid)
             if not email:
                 return
-            await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            ok = await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            if not ok:
+                print(f"[billing] email {fn.__name__} nao enviado user={uid}"
+                      " — chave de dedupe NAO gravada, a reentrega tenta de novo")
+                return
+            await log_system_event("info", chave, f"Email {fn.__name__} enviado.",
+                                   source="billing", user_id=int(uid))
         except Exception as exc:
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = _resolve_user(session)
-        sub_id  = _g(session, "subscription")
+        # Normaliza igual ao invoice.paid: string ou objeto expandido têm de
+        # produzir a MESMA external_ref, senão o assinante ganha dois grants.
+        sub_id  = _invoice_subscription_id(session)
+        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
+        # Promover ja agora pra user nao ficar Free durante o trial.
+        #
+        # O GRANT VEM PRIMEIRO (§4.1.2): se ele falhar, a resposta é 5xx e nada
+        # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
+        # tudo uma vez só, em vez de repetir a metade que já tinha passado.
+        if user_id and sub_id:
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            # As TRÊS chamadas de `Subscription.retrieve` deste handler são a
+            # mesma classe (I/O síncrono no event loop único) e foram
+            # embrulhadas juntas — fechar duas e deixar a terceira é o erro de
+            # instância que este PR já pagou cinco vezes (§2). Estas duas
+            # (`checkout` e `invoice.paid`) são as mais FREQUENTES das três.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
+            expires_dt = _subscription_period_end(sub)
+            sub_status = _g(sub, "status") or "trialing"
+            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
+            _decidiu_acesso = await _materializar_assinatura(
+                user_id, sub_id, plan_value, expires_dt, sub_status)
+            # Assinatura nova por cima de um ciclo de inadimplência: fecha o
+            # ciclo e zera o relógio (core/services/billing_dunning).
+            #
+            # DUAS condições, e elas respondem perguntas diferentes — ver a
+            # tabela de estados × eventos em `docs/dunning_estados_eventos.md`:
+            #
+            #  • `_decidiu_acesso` — "este evento decidiu o acesso?". False
+            #    quando a guarda de versão de `upsert_grant` o recusou por
+            #    VELHO; aí quem decidiu foi um evento mais novo e um `checkout`
+            #    atrasado não pode apagar o ciclo que o novo estabeleceu
+            #    (célula nº 7).
+            #  • `nao_mais_novo_que` — "este evento é mais novo que o ciclo que
+            #    estou apagando?". O gate acima NÃO responde isso: `upsert_grant`
+            #    devolve o `id` para versão IGUAL de propósito, e o
+            #    `payment_failed` que abre o ciclo novo não avança a versão do
+            #    grant — a REENTREGA de um `checkout`/`paid` anterior ao ciclo
+            #    atual passava pelo gate e zerava o relógio (célula nº 5). O
+            #    predicado mora na ESCRITA, como o do `claim`.
+            #
+            # É o MESMO par do `invoice.paid` abaixo, nas duas correções: os
+            # dois ramos tiveram os dois defeitos (§2, a classe, não a
+            # instância — o apontamento citava só o `invoice.paid`).
+            if _decidiu_acesso:
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -4729,15 +5084,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from db import record_checkout_completed
             await asyncio.to_thread(
                 record_checkout_completed, user_id, _g(session, "id"))
-        # Trial 30d: subscription nasce status=trialing, sem invoice paga.
-        # Promover ja agora pra user nao ficar Free durante o trial.
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
-            expires_dt = _subscription_period_end(sub)
-            sub_status = _g(sub, "status") or "trialing"
-            plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
             # Checkout concluído = plano escolhido: libera o gate da /precos
             # (idempotente; só grava na primeira vez).
             await asyncio.to_thread(mark_plan_selected, user_id)
@@ -4885,13 +5232,54 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id  = _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            update_user_plan(user_id, plan_value, expires_dt)
-            set_payment_status(user_id, sub_status)
+            # Grant primeiro, sempre (§4.1.2): falha aqui vira 5xx retryable e
+            # nada abaixo — e-mail de cobrança, comissão, GA4 — chega a rodar.
+            _decidiu_acesso = await _materializar_assinatura(
+                user_id, sub_id, plan_value, expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
+            # Pagou: o ciclo de inadimplência fechou e o relógio zera.
+            #
+            # NÃO é redundante com a limpeza condicional de
+            # `set_payment_status_impl`, e a razão do comentário que estava aqui
+            # ("mexeria em call sites que este PR não auditou") era falsa — o
+            # call site não auditado, `recompute_entitlement`, era justamente o
+            # que produzia relógio órfão. Os writers da coluna de status foram
+            # auditados (`db_support.set_payment_status_impl` e o SQL cru de
+            # `admin_dashboard.set_account_plan`) e a limpeza virou ESTRUTURAL
+            # nos dois. O que sobra para ESTA linha é o caso em
+            # que as duas regras divergem: se o `Subscription.retrieve` acima
+            # ainda devolver `past_due` (consistência eventual, ou outra fatura
+            # aberta), `sub_status` está NA lista e o UPDATE preserva o relógio
+            # — é este clear que fecha o ciclo de quem acabou de pagar.
+            #
+            # E ele tem DUAS condições. `_decidiu_acesso` é o veredito do
+            # evento: quando `upsert_grant` recusa um `invoice.paid` VELHO,
+            # `_materializar_assinatura` devolve False sem escrever status
+            # nenhum, e o retorno era descartado aqui (célula nº 7 de
+            # `docs/dunning_estados_eventos.md`).
+            #
+            # `nao_mais_novo_que` é o que faltava, e é a célula nº 5: o gate
+            # acima ACEITA a reentrega do mesmo evento, porque `upsert_grant`
+            # devolve o `id` para versão IGUAL de propósito (é o que faz o 5xx
+            # da Stripe ser retryable). Como o `invoice.payment_failed` não
+            # escreve grant, ele não avança a marca d'água de versão — então a
+            # reentrega de um `paid` ANTERIOR ao ciclo atual passava pelo gate e
+            # apagava o relógio que a falha nova acabara de carimbar, deixando a
+            # conta `past_due` com o relógio zerado. O predicado mora na
+            # ESCRITA (`db.dunning.clear_past_due_since`), como o do `claim`, e
+            # é ele que distingue essa reentrega VELHA da reentrega DO MESMO
+            # CICLO (5xx entre o grant e este clear, célula nº 6), que precisa
+            # continuar limpando. Mesmo par no `checkout.session.completed`.
+            if _decidiu_acesso:
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
@@ -5032,8 +5420,102 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # customer.subscription.deleted quando a sub for de fato cancelada.
         invoice = event["data"]["object"]
         user_id = _resolve_user(invoice)
-        if user_id:
+        # EVENTO FORA DE ORDEM não pode carimbar o relógio de quem já PAGOU.
+        # Medido: falha → `invoice.paid` (relógio zerado, status `active`) → um
+        # `payment_failed` atrasado, com `created` ANTERIOR ao do paid, punha
+        # `past_due` e carimbava de novo. Nada limpa até o `invoice.paid` do mês
+        # seguinte: ~3 semanas com a conta rotulada "em atraso" no painel e
+        # recebendo lembrete de pagamento, para quem está pagando em dia.
+        #
+        # A fonte de verdade é o status ATUAL da assinatura, não a ordem dos
+        # eventos. `_event_version` serve o `subscription.deleted` porque lá ele
+        # é comparado com `plan_grants.event_version` — coluna que `esticar_grant`
+        # de propósito NÃO escreve (invariante 3) e que nem existe quando a
+        # assinatura não tem `expires_dt`, então aqui ele daria proteção com
+        # buraco. O `Subscription.retrieve` custa uma chamada de API no caminho
+        # do webhook e é o MESMO padrão dos ramos `invoice.paid` e
+        # `checkout.session.completed`, dez linhas acima.
+        #
+        # DECISÃO, o `retrieve` sem try: a exceção PROPAGA e vira 5xx, então a
+        # Stripe reentrega (por até 3 dias) e a reentrega decide com informação
+        # melhor. Nada foi escrito antes dela — o `set_payment_status` está no
+        # ramo de baixo. O custo declarado é o oposto: `retrieve` que falha de
+        # forma PERMANENTE (assinatura apagada na Stripe, chave revogada) esgota
+        # as reentregas e o ciclo fica sem `past_due` e sem e-mail de falha.
+        # Escolhido assim porque as duas pontas do erro só mandam e-mail errado
+        # (nenhum acesso depende disto neste PR) e a ponta "reentrega" erra em
+        # favor de quem paga. Coberto por
+        # `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`.
+        from core.services.billing_dunning import (  # noqa: PLC0415
+            DUNNING_GRACE_DAYS,
+            PAST_DUE_PAYMENT_STATUSES,
+        )
+        _sub_id = _invoice_subscription_id(invoice)
+        _status_agora = ""
+        if user_id and _sub_id:
+            # `to_thread` porque este handler é `async` e roda no event loop
+            # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
+            # inteiro enquanto espera o Stripe — e não por milissegundos, mas
+            # pelo timeout do cliente HTTP, com request e OUTROS webhooks de
+            # pagamento parados atrás. `to_thread` é o padrão JÁ estabelecido
+            # neste arquivo para chamada Stripe em handler async (as cinco de
+            # `SubscriptionSchedule`, :4503-:4660), então embrulhar aqui é
+            # CONVERGIR com o arquivo, não divergir.
+            #
+            # A propagação de exceção fica IDÊNTICA — `to_thread` relança na
+            # corrotina que espera —, e o guard depende disso: falha do
+            # `retrieve` tem de virar 5xx e não "status vazio", senão um evento
+            # obsoleto passaria pela guarda. Amarrado por
+            # `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`.
+            _sub_agora = await asyncio.to_thread(
+                stripe.Subscription.retrieve, _sub_id)
+            _status_agora = (_g(_sub_agora, "status") or "").strip().lower()
+        if user_id and _status_agora and _status_agora not in PAST_DUE_PAYMENT_STATUSES:
+            await log_system_event(
+                "warning",
+                "billing_payment_failed_obsoleto",
+                f"invoice.payment_failed ignorado: assinatura esta '{_status_agora}'.",
+                source="billing",
+                user_id=user_id,
+                details={"subscription": str(_sub_id),
+                         "status_atual": _status_agora,
+                         "event_id": _g(event, "id"),
+                         "event_version": _event_version(event)},
+            )
+        elif user_id:
             set_payment_status(user_id, "past_due")
+            # Relógio da inadimplência (core/services/billing_dunning).
+            # Idempotente no SQL: a Stripe manda um payment_failed por smart
+            # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
+            # reinicia a contagem, e o `rowcount` diz se ESTA entrega abriu um
+            # ciclo novo.
+            #
+            # SÓ com `_sub_id`: `past_due_since` é o relógio do ciclo de
+            # inadimplência DA ASSINATURA, e `_invoice_subscription_id`
+            # (:4810) já cobre as duas formas da API (`subscription` e
+            # `parent.subscription_details`) — devolver None aqui significa
+            # fatura AVULSA, que não tem ciclo de assinatura para medir. Sem
+            # esta guarda o ramo era fail-CLOSED ao contrário do resto: uma
+            # fatura avulsa de um `stripe_customer_id` conhecido carimbava o
+            # relógio de quem tem assinatura viva, e a pessoa recebia o
+            # lembrete do dia 6 sem nada em atraso. O `set_payment_status` da
+            # linha acima é comportamento PRÉ-EXISTENTE da `main` e fica como
+            # está (§0.3) — a invariante continua válida nos dois casos, porque
+            # a guarda só deixa de CRIAR relógio, nunca cria órfão.
+            #
+            # O predicado de STATUS do `where` (o relógio só nasce em conta
+            # cujo `last_payment_status` ainda está em
+            # `PAST_DUE_PAYMENT_STATUSES`) fecha a corrida entre ESTE ramo e o
+            # `invoice.paid` de outra requisição: entre o `set_payment_status`
+            # da linha acima e este `to_thread` cabe o ramo pago escrevendo
+            # `active` e zerando o relógio, e o UPDATE incondicional o repunha
+            # com o status fora da lista — o órfão que a invariante declara
+            # impossível. `rowcount 0` passa a significar "já carimbado" OU
+            # "status não elegível", e o `_abriu_ciclo` abaixo continua correto
+            # porque só AMPLIA (ver a docstring de `claim_past_due_since`).
+            from db.dunning import claim_past_due_since
+            _abriu_ciclo = bool(_sub_id) and await asyncio.to_thread(
+                claim_past_due_since, int(user_id))
             await log_system_event(
                 "warning",
                 "billing_payment_failed",
@@ -5042,20 +5524,33 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email com link pra atualizar cartao (item 40)
+            #
+            # A SUPRESSÃO é sempre `_fire_email` (evento em system_event_logs
+            # gravado DEPOIS de o envio confirmar), nunca o rowcount de
+            # `claim_past_due_since`: aquele carimbo COMMITA antes do envio, e
+            # usá-lo como gate fazia SMTP fora do ar na 1ª entrega calar a
+            # janela inteira — medido: 1ª entrega + 3 reentregas da Stripe = 0
+            # e-mails.
+            #
+            # `_abriu_ciclo` só AMPLIA: ciclo novo (rowcount 1) manda com
+            # `dedup_days=0`, que é "não suprima". É o que amarra a dedupe ao
+            # CICLO em vez de a 7 dias de calendário — sem isso, dois ciclos
+            # distintos dentro da mesma semana (troca de plano gerando fatura
+            # nova, segunda assinatura, falha logo depois de um pagamento)
+            # deixavam o segundo mudo. Fora do ciclo novo vale
+            # `DUNNING_GRACE_DAYS`: cada smart retry do MESMO ciclo cai na
+            # janela e não vira um e-mail a mais.
             from core.services.email_service import send_payment_failed_email
-            try:
-                email = await _user_email(user_id)
-                if email:
-                    await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
-            except Exception as exc:
-                print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
+            await _fire_email(
+                user_id, send_payment_failed_email,
+                dedup_days=0.0 if _abriu_ciclo else float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
                 from core.services.admin_notify import notify_payment_failed
-                _attempt = _g(invoice, "attempt_count")
                 await asyncio.to_thread(
                     notify_payment_failed,
-                    user_id=user_id, email=email, attempt_count=_attempt,
+                    user_id=user_id, email=await _user_email(user_id),
+                    attempt_count=_g(invoice, "attempt_count"),
                 )
             except Exception as exc:
                 print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
@@ -5071,6 +5566,63 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # A assinatura morreu: o relógio da inadimplência não tem mais o
+            # que medir. REDUNDANTE hoje — `canceled` está fora de
+            # `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status` da linha
+            # acima já zerou o relógio no mesmo UPDATE. Fica como declaração de
+            # intenção do ramo (e cobertura se o status deste ramo mudar), e não
+            # como a proteção: órfão em conta `canceled` NÃO é dado morto — é
+            # dado dormente que prende o relógio do ciclo seguinte na data
+            # velha e tira a conta da janela do lembrete de pagamento.
+            #
+            # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o gate
+            # de "o evento decidiu o acesso" que o `checkout` e o
+            # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
+            # escritas acima (`update_user_plan` e `set_payment_status`) são
+            # comportamento PRÉ-EXISTENTE da main e já rodam sem checar versão
+            # de evento, então gatear só o clear não fecharia nada — a
+            # staleness deste ramo é do ramo inteiro, é anterior a este PR
+            # (§0.3) e continua aberta (célula nº 18 de
+            # `docs/dunning_estados_eventos.md`). A categoria "clear que ignora
+            # o veredito do evento" está fechada nos dois ramos onde o veredito
+            # EXISTE; este fica pendente de propósito.
+            #
+            # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro: o
+            # parâmetro é OBRIGATÓRIO para que nenhum call site futuro herde a
+            # versão incondicional, a regra passa a ser UMA só, e nas três
+            # células alcançáveis deste ramo (16, 17, 18) ele não muda nada —
+            # o `set_payment_status('canceled')` acima já zerou o relógio no
+            # mesmo UPDATE, então este clear é no-op. `_versao` é o mesmo
+            # `_event_version(event)` que o `revoke_grant` abaixo usa.
+            from db.dunning import clear_past_due_since
+            await asyncio.to_thread(clear_past_due_since, int(user_id),
+                                    nao_mais_novo_que=_event_version(event))
+            # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
+            #
+            # A amplitude é dinheiro: quem tem uma assinatura nova já paga e
+            # recebe o `deleted` da ANTIGA não pode perder as duas. Por isso
+            # nada de "revoga todos os grants de cartão" — `external_ref` exato.
+            #
+            # O `legacy` cai JUNTO, também por ref exata: ele é a RECONSTRUÇÃO
+            # do mesmo acesso de cartão feita pelo backfill, então um assinante
+            # que cancele sem ter passado por um `invoice.paid` depois do deploy
+            # não pode continuar pago pelo legado.
+            #
+            # A redução aqui vem de EVENTO, que é autoridade: `recompute` roda
+            # com `origem="evento"` (o default) e reduz sem consultar o Stripe.
+            _sub_id = _g(obj, "id")
+            from core.services.billing_access import recompute_entitlement  # noqa: PLC0415
+            from db.plan_grants import revoke_grant  # noqa: PLC0415
+            _versao = _event_version(event)
+            _evt_id = _g(event, "id")
+            _refs = [("legacy", f"legacy:{int(user_id)}")]
+            if _sub_id:
+                _refs.insert(0, ("stripe", str(_sub_id)))
+            for _src, _ref in _refs:
+                await asyncio.to_thread(
+                    revoke_grant, int(user_id), _src, _ref,
+                    "stripe_subscription_deleted", _versao, _evt_id)
+            await asyncio.to_thread(recompute_entitlement, int(user_id))
             print(f"[billing] user {user_id} → free (cancelado)")
             await log_system_event(
                 "warning",
@@ -5371,7 +5923,7 @@ def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     payload  = f"{user_id}:{email}".encode()
     sig      = _hmac.new(secret, payload, _hashlib.sha256).digest()
     expected = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
-    return _hmac.compare_digest(expected, token)
+    return constant_time_eq(token, expected)
 
 
 async def _apply_unsubscribe(uid: int, token: str) -> bool:
@@ -6188,22 +6740,61 @@ def _mask_email(email: str) -> str:
 
 @app.post("/export/{user_id}")
 @limiter.limit("3/minute")
-async def export_email(request: Request, user_id: int, year: int = None, month: int = None):
-    """Gera o extrato do mês (PDF + XLSX + CSV) e envia pro email cadastrado."""
+async def export_email(
+    request: Request,
+    user_id: int,
+    year: int = None,
+    month: int = None,
+    start_date: date = None,
+    end_date: date = None,
+):
+    """Gera o extrato de um período (PDF + XLSX + CSV) e envia por e-mail.
+
+    ``year/month`` continua aceito para clientes antigos; a interface nova usa
+    ``start_date/end_date`` inclusivos.
+    """
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "export")
     now = now_tz()
-    y = year  or now.year
-    m = month or now.month
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Informe a data inicial e a data final do período.",
+        )
+    if start_date is not None and end_date is not None:
+        try:
+            period_start, period_end = _normalize_export_period(start_date, end_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        y = year or now.year
+        m = month or now.month
+        try:
+            period_start, period_end = _normalize_export_period(y, m)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Mês de exportação inválido.") from exc
 
-    csv_content = await build_csv(user_id, y, m)
+    # O export respeita a mesma janela de histórico do dashboard e das rotas
+    # de histórico. O corte é silencioso quando parte do intervalo é acessível.
+    from core.services.plan_service import history_earliest_date
+    earliest = await asyncio.to_thread(history_earliest_date, user_id, now)
+    if earliest and period_start < earliest:
+        period_start = earliest
+    if period_end < period_start:
+        raise HTTPException(
+            status_code=400,
+            detail="O período selecionado está fora do histórico disponível no seu plano.",
+        )
+
+    csv_content = await build_csv(user_id, period_start, period_end)
     if csv_content is None:
         raise HTTPException(
             status_code=404,
-            detail="Nenhum lançamento encontrado neste mês para exportar.",
+            detail="Nenhum lançamento encontrado neste período para exportar.",
         )
-    xlsx_bytes = await build_xlsx(user_id, y, m)
-    pdf_bytes  = await build_pdf(user_id, y, m)
+    balance = await _fetch_export_balance(user_id)
+    xlsx_bytes = await build_xlsx(user_id, period_start, period_end, balance)
+    pdf_bytes = await build_pdf(user_id, period_start, period_end, balance)
 
     from db.privacy import get_user_email
     to_email = await asyncio.to_thread(get_user_email, user_id)
@@ -6214,7 +6805,7 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
         )
 
     import base64
-    tag = f"{y:04d}_{m:02d}"
+    tag = f"{period_start:%Y%m%d}_a_{period_end:%Y%m%d}"
     attachments = [
         {"filename": f"extrato_{tag}.pdf",   "content": base64.b64encode(pdf_bytes).decode(),
          "content_type": "application/pdf"},
@@ -6224,15 +6815,16 @@ async def export_email(request: Request, user_id: int, year: int = None, month: 
          "content_type": "text/csv"},
     ]
 
-    mes_label = f"{_MESES_PT[m]} de {y}"
-    subject = f"Seu extrato PigBank — {mes_label}"
+    period_label = _export_period_label(period_start, period_end)
+    subject = f"Seu extrato PigBank — {period_label}"
     from core.services.email_service import send_email, _base_html
     inner = (
         "<p>Oi! 🐷</p>"
-        f"<p>Segue em anexo o seu extrato de <strong>{mes_label}</strong>:</p>"
+        f"<p>Segue em anexo o seu extrato do período de <strong>{period_label}</strong>:</p>"
         "<ul>"
-        "<li><strong>PDF</strong> — resumo pra ler ou imprimir</li>"
-        "<li><strong>XLSX / CSV</strong> — pra abrir em planilha</li>"
+        "<li><strong>PDF</strong> — balanço com entradas, saídas, saldo do período e lançamentos</li>"
+        "<li><strong>XLSX</strong> — resumo financeiro e dados completos em planilha</li>"
+        "<li><strong>CSV</strong> — lançamentos do período em formato aberto</li>"
         "</ul>"
         "<p>Qualquer dúvida, fala com a gente em "
         "<a href=\"mailto:suporte@pigbankai.com\">suporte@pigbankai.com</a>.</p>"
@@ -7148,20 +7740,17 @@ async def withdraw_investment_route(request: Request, user_id: int, payload: Inv
     _authorize_dashboard_access(request, user_id)
     if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
-    # Destino do resgate: com banco conectado o dinheiro volta pro banco, não pra
-    # Carteira (ver core/services/funding.py::resolve_destination).
-    from core.services import funding as _funding
-
-    _destino = (await asyncio.to_thread(_funding.resolve_destination, user_id))["source"]
+    # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282):
+    # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.
+    _nome_inv = payload.name.strip()
     try:
-        launch_id, new_acc, new_inv, canon, tax_summary = await asyncio.to_thread(
+        launch_id, new_acc, new_inv, canon, tax_summary, _dest = await asyncio.to_thread(
             investment_withdraw_to_account,
             user_id,
-            payload.name.strip(),
+            _nome_inv,
             payload.amount,
             payload.note or _investment_action_note("Resgate de", payload.name),
             withdraw_all=bool(payload.withdraw_all),
-            funding_source=_funding.to_db_arg(_destino),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Investimento não encontrado.") from exc

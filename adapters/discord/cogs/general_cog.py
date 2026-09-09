@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from db import (
-    get_pending_action, consume_pending_action, set_pending_action,
+    get_pending_action, consume_pending_action,
     delete_launch_and_rollback, delete_pocket, delete_investment,
     get_conn, get_latest_cdi_aa,
 )

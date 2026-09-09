@@ -142,6 +142,72 @@ Três fatos que decidem qualquer mexida ali:
 Ao adicionar funcionalidade nova de dashboard, **prefira arquivo novo** a mais uma
 seção nesse arquivo — e ele precisa de rota própria em `static_pages.py` (ver abaixo).
 
+### Portões de tamanho: o que eles prendem, e o que NÃO prendem
+
+Teto de **350 linhas** para arquivo novo, nos dois lados: JavaScript pela regra
+`quality/max-lines` (`eslint.config.mjs`, em `error`, step bloqueante do CI) e
+Python por `tests/test_max_lines_python.py`, que roda no `pytest` e cuja lista de
+legado mora em `tests/_max_lines_baseline.py`.
+
+**Os dois NÃO isentam do mesmo jeito, e a diferença importa.** No **Python** a
+isenção é **só por caminho exato**: `LEGADOS` é um `frozenset` de strings e a
+varredura compara por igualdade, então glob e sufixo não são sequer
+representáveis, e **arquivo de teste não tem tratamento especial** — os ~45 de
+`tests/` estão na lista nominalmente, e teste novo acima de 350 **reprova**. No
+**JavaScript** sobram duas frouxidões: o baseline casa **caminho inteiro ou
+sufixo** (`eslint-rules/utils.cjs:53-55`), e arquivo de teste continua sendo
+reconhecido **por regex** (`isTestFile`, `/\.(test|spec)\.[cm]?[jt]sx?$/`,
+`utils.cjs:49-51`), com `tests/frontend/**/*.mjs` em **`warn`** — que não reprova,
+porque o `eslint` só sai != 0 com erro. **O portão de Python é o mais estrito dos
+dois, de propósito.**
+
+O que os dois têm em comum é o que foi REMOVIDO: as isenções por *basename* (`index`, `constants`, `types`,
+`*.config.*`) e por *diretório* (`generated/`, `fixtures/`, `mocks/`) vieram de um
+template TypeScript e foram removidas em 2026-09-04, porque `frontend/index.js`
+chegou a 404 linhas passando limpo por causa delas.
+
+**O que as sondas prendem: os predicados historicamente perigosos, nomeados um a
+um.** Basename e diretório, que são exatamente os do template. Devolver qualquer
+um deles deixa vermelho na hora.
+
+**O que elas NÃO prendem: predicado arbitrário.** Isto é medição, não hipótese —
+três pontos de inserção, com as 8 sondas do arquivo VERDES:
+
+| onde | predicado | resultado |
+|---|---|---|
+| `_lidos` | `rel.startswith("handlers/")` | 8 passed |
+| `_lidos` | `rel.startswith("adapters/discord/")` | 8 passed |
+| `_estoura` | `caminho.startswith("scripts/")` | 8 passed |
+
+Com a segunda, `adapters/discord/enorme_novo.py` com 400 linhas entra sem uma
+linha vermelha.
+
+**O padrão que decide, e é acionável:** isenção que atinge um diretório **que já
+tem legado dentro** morre pelo ratchet — `rel.startswith("adapters/whatsapp/")`
+dá vermelho, porque os legados daquele diretório somem do universo e caem no
+`sobrando`. A que atinge diretório **sem legado** sobrevive. Ou seja, a proteção
+que existe ali é **efeito colateral do ratchet, não controle desenhado** — e o
+mapa de quem está protegido é a lista de legado, que encolhe com o tempo.
+
+**Não gaste rodada tentando fechar isso: enumeração não cobre arbitrário.** O
+portão de JS que o de Python espelha tem o mesmo piso — a isenção dele é o `if`
+booleano de `eslint-rules/core-rules.cjs:67-72`, e um termo novo somado ali
+também não é pego pelas 7 sondas de `tests/frontend/eslint_max_lines_gate.test.mjs`.
+A defesa contra termo novo na condição é revisão de diff, não teste.
+
+**Post-mortem das duas rodadas que custaram isso**, porque o erro se repetiu com
+cara diferente: na primeira versão do portão de Python, as sondas exercitavam um
+`_estoura()` que o enforcement **não chamava** — uma isenção por basename no laço
+real passava com as sondas verdes. Consertado, o buraco **desceu uma função**: as
+sondas passaram a chamar `_varrer()`, mas quem monta o universo a partir do disco
+(`_lidos()`) continuou sem sonda, e a mesma isenção escondida lá repetia o
+sintoma. O conserto que valeu foi estrutural, não mais um caso enumerado: uma
+sonda ponta a ponta (`test_ponta_a_ponta_pelo_disco_e_pelo_git`) que monta um
+repositório de brinquedo com `git init` + `git add` num `tmp_path` e roda
+**git → `_rastreados` → `_lidos` → `_varrer`**. É a §2 do `CLAUDE.md` ao vivo:
+"achei um caso" não é "resolvi a categoria", e consertar a instância move a
+fronteira do não-coberto em vez de fechá-la.
+
 ### Assets: não há `StaticFiles` mount
 
 Cada CSS/JS servido tem **uma rota `@router.get` escrita à mão** em
@@ -281,6 +347,11 @@ fixo de toda mudança de layout.
 - **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
   `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
-  (agendadores de investimento, Open Finance, engajamento, cobrança recorrente…).
-  Em teste e no `dashboard_dev.py` isso é desligado — se você ligar sem querer num
-  ambiente com banco real, elas escrevem.
+  (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
+  das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`
+  (o ambiente ganha deles): `dashboard_dev.py:69` e
+  `scripts/whatsapp_qa_vault_harness.py:69`. **Em teste NÃO é desligado** — o
+  `tests/conftest.py` não põe nada, então teste que sobe o `app` herda o default
+  (`1`) e as tarefas escrevem no banco daquela execução, a menos que ele mesmo
+  passe `0` na env do subprocesso (`tests/test_log_falha_nivel.py:183`). A versão
+  longa está no `docs/CLAUDE.md`, seção "Tarefas de fundo".

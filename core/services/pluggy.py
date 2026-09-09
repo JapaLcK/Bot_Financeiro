@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -106,18 +107,41 @@ def _pluggy_get(path: str, api_key: str, params: dict[str, Any] | None = None) -
     return resp.json()
 
 
+# O que a Pluggy emite como id de item é um UUID; o que CHEGA aqui pode não ser.
+# Desde a adoção de item órfão (`_adota_item_orfao`), o `itemId` do CORPO do
+# webhook — que vem de fora, e cujo único portão é um secret que trafega em query
+# param — vira URL na API da Pluggy com a NOSSA chave. Sem esta régua,
+# `itemId='../../accounts'` virava `GET https://api.pluggy.ai/accounts`, e
+# `x?include=all` / `abc#frag` passavam intactos: requisição forjada por corpo
+# alheio. Validado na FRONTEIRA de saída, uma vez, para os três montadores de
+# `/items/{id}` (get/update/delete) — guarda no chamador deixaria os irmãos
+# abertos (CLAUDE.md §0.1).
+#
+# Charset, não UUID estrito: o que precisa ser barrado é o que muda a ESTRUTURA
+# da URL (`/`, `?`, `#`, `.`, espaço, `%`). Exigir UUID recusaria id de sandbox e
+# de ambiente de teste sem fechar nada a mais.
+_ITEM_ID_OK = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _item_path(item_id: str) -> str:
+    if not _ITEM_ID_OK.match(str(item_id or "")):
+        raise PluggyApiError("Id de item Pluggy inválido.", status_code=400)
+    return f"/items/{item_id}"
+
+
 def get_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
-    key = api_key or create_pluggy_api_key()
-    return _pluggy_get(f"/items/{item_id}", key)
+    path = _item_path(item_id)   # antes da chave: id inválido não gasta um POST /auth
+    return _pluggy_get(path, api_key or create_pluggy_api_key())
 
 
 def update_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
     """PATCH /items/{id}: força a Pluggy a re-buscar do banco. Ao concluir, ela manda
     webhook (item/updated, transactions/*), que dispara o sync. Usado no refresh periódico."""
+    path = _item_path(item_id)   # antes da chave: id inválido não gasta um POST /auth
     key = api_key or create_pluggy_api_key()
     with httpx.Client(timeout=_pluggy_timeout()) as client:
         resp = client.patch(
-            f"{_pluggy_base_url()}/items/{item_id}",
+            f"{_pluggy_base_url()}{path}",
             headers={"X-API-KEY": key},
             json={},
         )
@@ -134,10 +158,11 @@ def delete_pluggy_item(item_id: str, api_key: str | None = None) -> bool:
     """
     if not item_id:
         return False
+    path = _item_path(item_id)   # antes da chave: id inválido não gasta um POST /auth
     key = api_key or create_pluggy_api_key()
     with httpx.Client(timeout=_pluggy_timeout()) as client:
         resp = client.delete(
-            f"{_pluggy_base_url()}/items/{item_id}",
+            f"{_pluggy_base_url()}{path}",
             headers={"X-API-KEY": key},
         )
     if resp.status_code in (200, 202, 204, 404):

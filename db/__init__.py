@@ -29,6 +29,7 @@ from .schema import init_db
 from .users import (
     ensure_user_tx,
     ensure_user,
+    user_exists,
     merge_users,
     choose_primary_user,
     user_score,
@@ -249,6 +250,7 @@ from .open_finance import (
     get_consolidated_balance,
     list_bank_accounts,
     pending_bank_outflows,
+    destination_of_lots,
     assert_bank_covers,
     disconnect_open_finance_connection,
     save_pluggy_open_finance_item,
@@ -262,6 +264,7 @@ from .open_finance_state import (
     claim_items_for_refresh,
     claim_manual_refresh,
     get_connections_by_item_id,
+    item_registry_origins,
     list_connections_for_health_check,
     mark_sync_attempt,
     mark_sync_result,
@@ -269,6 +272,7 @@ from .open_finance_state import (
     pluggy_item_lock,
     register_item,
     token_hash,
+    unregister_item,
 )
 
 # ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
@@ -344,6 +348,7 @@ from .reports import (
     consume_dashboard_session,
     update_user_plan,
     mark_plan_selected,
+    get_plan_gate_state,
     get_onboarding_state,
     needs_onboarding,
     set_onboarding_step,
@@ -367,6 +372,7 @@ from .reports import (
     set_tip_email_opt_out,
     set_insight_email_opt_out,
     set_whatsapp_updates_opt_out,
+    get_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
     get_user_by_email,
 )
@@ -456,7 +462,7 @@ __all__ = [
     # schema
     "init_db",
     # users
-    "ensure_user_tx", "ensure_user", "merge_users", "choose_primary_user", "user_score",
+    "ensure_user_tx", "ensure_user", "user_exists", "merge_users", "choose_primary_user", "user_score",
     "get_or_create_canonical_user", "create_link_code", "create_platform_onboarding_token",
     "consume_platform_onboarding_token", "consume_link_code", "bind_identity",
     "link_platform_identity",
@@ -538,13 +544,15 @@ __all__ = [
     "detect_recurring_income_matches", "detect_open_finance_salary",
     "detect_bill_increase", "detect_open_finance_bill_increase",
     "import_open_finance_launches", "import_open_finance_credit",
-    "sync_imported_open_finance_updates", "get_consolidated_balance", "list_bank_accounts", "pending_bank_outflows", "assert_bank_covers",
+    "sync_imported_open_finance_updates", "get_consolidated_balance", "list_bank_accounts", "pending_bank_outflows", "destination_of_lots", "assert_bank_covers",
     "disconnect_open_finance_connection", "save_pluggy_open_finance_item", "user_synced_within",
     "update_pluggy_open_finance_item_status",
     "AmbiguousItemError", "claim_items_for_refresh", "claim_manual_refresh",
     "get_connections_by_item_id",
     "list_connections_for_health_check", "mark_sync_attempt", "mark_sync_result",
+    "item_registry_origins",
     "of_health_counters", "pluggy_item_lock", "register_item", "token_hash",
+    "unregister_item",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",
@@ -556,7 +564,8 @@ __all__ = [
     "get_last_ofx_import_end_date",
     "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at", "auto_link_auth_user",
     "create_dashboard_session", "get_dashboard_session", "consume_dashboard_session",
-    "update_user_plan", "mark_plan_selected", "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
+    "update_user_plan", "mark_plan_selected", "get_plan_gate_state",
+    "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
     "get_onboarding_state", "needs_onboarding", "set_onboarding_step", "mark_onboarding_completed",
     "record_checkout_started", "record_checkout_completed",
     "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
@@ -565,6 +574,7 @@ __all__ = [
     "mark_reengagement_sent",
     "mark_tip_sent", "mark_insight_sent", "set_engagement_opt_out",
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
+    "get_whatsapp_updates_opt_out",
     "sync_engagement_opt_out",
     "get_user_by_email",
     # news (news_bot)

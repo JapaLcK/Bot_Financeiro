@@ -20,7 +20,7 @@
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw==" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/brand.css" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
-<link rel="stylesheet" href="/dashboard.css?v=7" />
+<link rel="stylesheet" href="/dashboard.css?v=8" />
 <link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width: 900px)" />
 <!-- defer preserva a ordem: auth-refresh (patch do fetch) → modals → app-mode →
      dashboard.js. Nenhum script inline depende deles durante o parse. -->
@@ -133,7 +133,7 @@
       <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
       <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="exportToEmail()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="openExportModal()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
       <div class="user-menu" id="user-menu">
         <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
@@ -831,6 +831,28 @@
   </div>
 
 <div id="toast"><i class="ph ph-check" aria-hidden="true"></i> Atualizado</div>
+
+<div class="overlay" id="export-overlay" onclick="if(event.target===this) closeExportModal()">
+  <div class="modal" role="dialog" aria-labelledby="export-title" aria-modal="true">
+    <h3 id="export-title">Exportar dados</h3>
+    <p class="msub">Escolha o período. Você receberá por e-mail o balanço completo em PDF, XLSX e CSV.</p>
+    <div class="form-row" style="margin-bottom:18px">
+      <div class="field">
+        <label for="export-start-date">Data inicial</label>
+        <input class="modal-inp" id="export-start-date" type="date" max="9999-12-30" required />
+      </div>
+      <div class="field">
+        <label for="export-end-date">Data final</label>
+        <input class="modal-inp" id="export-end-date" type="date" max="9999-12-30" required />
+      </div>
+    </div>
+    <p class="export-period-error" id="export-period-error" role="alert" aria-live="polite"></p>
+    <div class="modal-acts">
+      <button class="btn-cancel" type="button" onclick="closeExportModal()">Cancelar</button>
+      <button class="btn-save" id="export-submit-btn" type="button" onclick="exportToEmail()">Enviar por e-mail</button>
+    </div>
+  </div>
+</div>
 
 <div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
   <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
@@ -1556,7 +1578,7 @@
   </div>
 </div>
 
-<script defer src="/dashboard.js?v=15"></script>
+<script defer src="/dashboard.js?v=16"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
 
