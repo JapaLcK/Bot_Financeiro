@@ -198,7 +198,6 @@ async def cards_summary_route(request: Request, user_id: int):
                     "due_amount": float(r["open_due"] or 0),
                     "period_end": r["open_period_end"].isoformat() if r.get("open_period_end") else None,
                 },
-                "next_bill": {"total": 0.0, "period_end": None},  # TODO Sprint 2: calcular se necessário
                 "credit_used": usage,
                 "credit_available": available,
             })
