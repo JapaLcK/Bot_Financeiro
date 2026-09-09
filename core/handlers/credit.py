@@ -41,7 +41,8 @@ from db import (
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number,
-    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE,
+    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    MEMORY_STOP_TOKENS,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,9 +292,10 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
     if chosen is None:
         cid = get_card_id_by_name(user_id, answer)
         if cid is None:
-            resolved_name = _find_card_name_in_text(user_id, answer)
-            if resolved_name:
-                cid = get_card_id_by_name(user_id, resolved_name)
+            # `_card_name_da_resposta`, NÃO `_find_card_name_in_text`: aqui a
+            # mensagem é RESPOSTA, e casar o nome do cartão dentro de uma frase
+            # fazia `excluir cartao nubank` PAGAR a fatura.
+            cid = _card_name_da_resposta(user_id, answer)
         if cid is not None:
             card_matches = [r for r in candidates if int(r["card_id"]) == int(cid)]
             if len(card_matches) == 1:
@@ -302,6 +304,9 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
                 return _ask_which_bill(user_id, card_matches, amount)
 
     if chosen is None:
+        # RE-PERGUNTA (regra acima): nada aqui é gatilho — `sim` não é
+        # referência de fatura, então manter a pergunta viva não arma nada. E o
+        # portão já garantiu que texto não reconhecido NÃO paga.
         lines = ["❓ Não entendi qual fatura. Responda com o número:", ""]
         for i, r in enumerate(candidates, start=1):
             lines.append(f"{i}. {_format_bill_label(r)} — em aberto {fmt_brl(_bill_due(r))}")
@@ -332,6 +337,179 @@ def _find_card_name_in_text(user_id: int, text: str) -> str | None:
         if name_norm and re.search(rf"\b{re.escape(name_norm)}\b", norm):
             return card["name"]
     return None
+
+
+# Palavras que só enfeitam a RESPOSTA e não fazem parte do nome do cartão.
+_FILLER = {"a", "o", "as", "os", "um", "uma", "do", "da", "de", "dos", "das",
+           "no", "na", "nos", "nas", "em", "meu", "minha", "meus", "minhas",
+           "fatura", "faturas", "cartao", "conta",
+           "esse", "essa", "este", "esta"}
+
+
+def _leituras_da_resposta(alvo: str) -> set[str]:
+    """A resposta inteira, e ela sem os enfeites do COMEÇO.
+
+    Só o PREFIXO, nunca o miolo: `a do banco do brasil` tem de virar
+    `banco do brasil`, e um filtro global de filler comeria também o `do` do
+    MEIO do nome. Pelo mesmo motivo `a conta` vira `conta` mesmo com "conta"
+    sendo filler — o nome do cartão pode SER uma palavra de enfeite.
+
+    E é o que mantém o ataque fora: em `excluir cartao nubank` a primeira
+    palavra não é enfeite, a varredura para na hora, e a única leitura é a frase
+    inteira — que não é nome de cartão nenhum.
+    """
+    tokens = alvo.split()
+    leituras = {alvo}
+    for i in range(1, len(tokens)):
+        if tokens[i - 1] not in _FILLER:
+            break
+        leituras.add(" ".join(tokens[i:]))
+    return leituras
+
+
+def _card_name_da_resposta(user_id: int, answer: str):
+    """Id do cartão quando a MENSAGEM INTEIRA é a resposta — não substring.
+
+    `_find_card_name_in_text` é para COMANDO, e nos oito chamadores dela casar
+    dentro da frase é CERTO ("parcelei 500 no nubank"). Numa RESPOSTA é errado,
+    e caro: `excluir cartao nubank` respondendo "qual fatura?" casava "nubank"
+    e PAGAVA R$ 300.
+
+    Normaliza OS DOIS LADOS, como o `_find_card_name_in_text` já fazia — é o que
+    dobra acento e pontuação, e é por isso que ele achava `Itaú`/`C6-Carbon` e a
+    versão anterior daqui não (ela normalizava só a resposta e consultava o
+    `get_card_id_by_name`, que só faz `lower()`). O que NÃO se reusa dele é o
+    `re.search` de substring, que é justamente o defeito.
+
+    Compara por IGUALDADE contra as leituras da resposta, nunca por substring.
+    # ponytail: filler fixo; se aparecer variante regional, some nela.
+    """
+    alvo = normalize_text(answer)
+    if not alvo:
+        return None
+    leituras = _leituras_da_resposta(alvo)
+    for card in list_cards(user_id):
+        nome = normalize_text(card["name"])
+        if nome and nome in leituras:
+            return card["id"]
+    return None
+
+
+# Palavras que acompanham um número numa RESPOSTA sem mudar o assunto dela.
+#
+# Divide-se em DUAS fatias de propósito, porque só uma delas é nossa:
+#
+# 1. `_FALA_E_MOEDA` — unidade de dinheiro e enchimento de fala. Isto NÃO é
+#    nosso: é a mesma coisa que o `MEMORY_STOP_TOKENS` (`utils_text.py`) já
+#    enumera, e escrever a segunda lista foi como nasceram quatro divergências
+#    medidas — `5000 pila` passava e `5000 pilas` não, `acho que 5000` era
+#    recusado com "acho" na lista canônica desde sempre.
+#    SELEÇÃO e não reuso literal: a lista canônica tem `dashboard`, `eu` e
+#    `meu`, e reusá-la inteira faria `dashboard 5000` virar limite. O
+#    `test_fala_e_moeda_nao_divergiu_do_memory_stop_tokens` prova que a seleção
+#    continua existindo na origem — renomeie um token lá e ele morre (§0.7).
+_FALA_E_MOEDA = MEMORY_STOP_TOKENS & {
+    "reais", "real", "centavos", "centavo", "conto", "contos",
+    "pila", "pilas", "mango", "mangos",
+    "acho", "tipo", "ai", "valor", "mais", "menos", "acredita",
+}
+
+# 2. `_UNIDADE_DE_CARTAO` — vocabulário DESTA pergunta (dia de fechamento,
+#    vencimento, limite). Não existe em lugar nenhum do repositório, e por isso
+#    é escrito aqui. "mil"/"milhão" entram aqui e não no vocabulário de números
+#    por extenso porque lá eles são MULTIPLICADOR, tratado à parte no
+#    `parse_money`. "r"/"rs" são a borda de "R$ 5.000,00" depois do
+#    `normalize_text` (que vira "r 5 000 00").
+_UNIDADE_DE_CARTAO = {
+    "r", "rs", "limite",
+    "mil", "milhao", "milhoes", "bilhao", "bilhoes",
+    "dia", "dias", "todo", "toda", "todos", "todas", "cada",
+    "mes", "meses", "antes", "depois", "fecha", "fechamento", "fechar",
+    "vence", "vencimento", "vencer", "e", "que", "uns", "umas", "por", "volta",
+    "cerca", "aproximadamente", "ate",
+}
+
+_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO
+
+
+# `PT_NUM_ALT` (público desde sempre, `utils_text.py`) em vez de uma cópia do
+# dicionário: é a MESMA fonte que o `parse_money` usa, e as regexes derivadas
+# dele são congeladas no import — o conjunto cru não é exposto de propósito.
+_NUM_POR_EXTENSO_RE = re.compile(rf"(?:{PT_NUM_ALT})", re.IGNORECASE)
+
+
+def _so_numero(text: str) -> bool:
+    """A resposta é SÓ um número — sem conteúdo semântico sobrando?
+
+    NÃO é "tem formato de número". É "depois de tirar o número, o filler e a
+    unidade, sobra alguma palavra que mude o assunto?". A forma estrita anterior
+    (uma regex ancorada) era mais restrita que os parsers que ela guarda e
+    derrubava 14 respostas legítimas que eles entendem — `todo dia 10` e
+    `5 de cada mes` (o `_parse_day` lê), `cinco mil` e `limite 5000` (o
+    `parse_money` lê), `3 dias antes` (idem).
+
+    O propósito é o mesmo: `gastei 50 no mercado` respondendo "qual o limite?"
+    deixa sobrar `gastei` e `mercado` → recusa, e o limite não vira R$ 50,00.
+    Os parsers fazem `search`, não `fullmatch`, e por isso achavam o 50.
+
+    Sobre o texto normalizado, e agora isso é CORRETO: o `normalize_text` de
+    fato destrói `R$ 5.000,00` como NÚMERO (vira "r 5 000 00"), mas aqui não se
+    lê valor nenhum — só se pergunta se sobrou palavra. Quem lê o valor é o
+    `parse_money`, que recebe o texto CRU logo depois e não foi tocado.
+    """
+    tokens = normalize_text(text).split()
+    if not tokens:
+        return False
+    e_numero = lambda t: t.isdigit() or _NUM_POR_EXTENSO_RE.fullmatch(t)
+    if not any(e_numero(t) for t in tokens):
+        return False  # "nao", "sim", "amanha": não há número nenhum a ler
+    return all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
+               for t in tokens)
+
+
+# ---------------------------------------------------------------------------
+# RESPOSTA NÃO RECONHECIDA: RE-PERGUNTAR ou ABANDONAR?
+#
+# A regra é UMA, e está escrita aqui porque ela se aplica a nove portões
+# espalhados por este arquivo — deixá-la implícita é como a próxima rodada
+# uniformiza os nove e reabre o footgun.
+#
+#   Manter a pergunta viva ARMA UM GATILHO DESTRUTIVO?
+#     SIM  -> `return None`: o `route()` abandona a pendência com aviso.
+#     NÃO  -> devolve a re-pergunta: a pendência segue viva.
+#
+# Por que re-perguntar é seguro no caso NÃO: o `route()` já testou a allowlist
+# de comandos (`abandona_pergunta_de_credito`) ANTES de chamar este arquivo.
+# Se a mensagem chegou aqui, ela não é comando conhecido — é muito mais provável
+# ser uma resposta malformada ("setembro/2026", "a primeira", "09/2026") do que
+# um comando, e para essas a re-pergunta é exatamente o que ajuda. Abandonar
+# daria "🔕 Cancelei a pergunta anterior" + "não entendi", que é pior.
+#
+# Por que abandonar é obrigatório no caso SIM: manter viva uma CONFIRMAÇÃO
+# destrutiva é precisamente o que o `sim` do turno seguinte vira delete em
+# cascata ("excluir cartao nubank" -> "tchau" -> "sim"). Perder a pergunta é
+# fail-safe, e é a mesma escolha que o `docs/armadilhas.md` registra.
+#
+# ABANDONAM (o `sim` seguinte destruiria):
+#   `_resolve_delete_card`, `_resolve_set_primary` confirm,
+#   step `confirm_delete_existing_card`  -> o `sim` seguinte APAGA cartão;
+#   step `set_primary`                   -> o `sim` seguinte TROCA o principal;
+#   step `reminder_opt_in`               -> o `sim` seguinte LIGA o lembrete;
+# NEM UM NEM OUTRO: o step `duplicate_card_name` é TEXTO LIVRE (o usuário
+#   inventa um nome novo de cartão), então "não reconheci" não distingue
+#   resposta de comando e o portão não existe. Resposta vazia ali é CANCELAR,
+#   igual aos dois irmãos deste arquivo.
+# RE-PERGUNTAM (nada a armar; `sim` não é resposta válida em nenhum deles):
+#   `_resolve_pay_bill_choice`     -> `sim` não é referência de fatura;
+#   `_resolve_set_primary` step `choose` -> `sim` não é nome de cartão;
+#   steps `closing_day`, `due_day`, `reminder_days`, `credit_limit_ask`
+#                                  -> `sim` não é número.
+#
+# O que separa os dois grupos é UMA pergunta, e ela é sempre a mesma: o texto
+# do PRÓXIMO turno pode ser lido como um "sim" que dispara algo? Nos de cima o
+# handler lê sim/não; nos de baixo ele lê número, nome ou referência de fatura,
+# e um "sim" solto não é nenhum dos três.
+# ---------------------------------------------------------------------------
 
 
 def _extract_unknown_card_candidate(text: str) -> str | None:
@@ -1173,9 +1351,13 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
         if _is_no(answer):
             consume_pending_action(user_id, pending)
             return "Perfeito. Mantive o cartão principal atual."
-        card_name = _find_card_name_in_text(user_id, answer) or answer.strip()
-        card_id = get_card_id_by_name(user_id, card_name)
+        card_id = (get_card_id_by_name(user_id, answer.strip())
+                   or _card_name_da_resposta(user_id, answer))
         if not card_id:
+            # RE-PERGUNTA (regra acima): o turno seguinte deste step só é lido
+            # como NOME de cartão — um `sim` velho vira
+            # `get_card_id_by_name("sim")` → None e cai aqui de novo. Nada a
+            # armar, então abandonar só custaria o fluxo do usuário.
             return "Não encontrei esse cartão. Me diga o nome exatamente como aparece na lista."
         set_pending_action(user_id, "credit_card_set_primary", {"card_id": card_id}, minutes=20)
         card = get_card_by_id(user_id, card_id)
@@ -1204,7 +1386,12 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return "Perfeito. Mantive o cartão principal atual."
 
-    return f"Responda **sim** para tornar **{card['name']}** o principal ou **não** para cancelar."
+    # `None`: sim/não é mundo fechado — os dois conjuntos são literais em
+    # `_is_yes`/`_is_no` logo acima; conte com
+    #   grep -A1 'def _is_yes\|def _is_no' core/handlers/credit.py
+    # Qualquer coisa fora deles não é resposta, e esta pendência sequestrava a
+    # conversa.
+    return None
 
 
 def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
@@ -1234,7 +1421,10 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return f"Perfeito. Mantive o cartão **{card_name}**."
 
-    return f"Responda **sim** para excluir **{card_name}** ou **não** para cancelar."
+    # `None`: idem. É o footgun de 3 turnos — "excluir cartao nubank" → "oi" →
+    # "sim" apagava o cartão, e `oi` é out_of_scope/0.00 (nenhuma allowlist de
+    # intent o pegaria).
+    return None
 
 
 def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str | None:
@@ -1308,7 +1498,15 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         # Usuário digitou um novo nome
         new_name = answer.strip()
         if not new_name:
-            return "Digite o novo nome do cartão ou **excluir** para remover o existente."
+            # Vazio = desistiu, igual aos dois irmãos deste arquivo (o
+            # `_is_no` deste mesmo step, logo acima, e o do
+            # `_resolve_pay_bill_choice`). Antes eram TRÊS comportamentos para o
+            # mesmo caso no mesmo arquivo: cancelar, cancelar e abandonar.
+            # Inalcançável hoje — `core/handle_incoming.py` devolve [] com texto
+            # vazio antes de chegar aqui —, e é por isso que alinhar sai mais
+            # barato que manter a terceira leitura.
+            consume_pending_action(user_id, pending)
+            return "❌ Cadastro de cartão cancelado."
 
         # Verifica se o novo nome também é duplicado
         if card_name_exists(user_id, new_name):
@@ -1393,7 +1591,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
                 "Digite um **novo nome** para o cartão ou **cancelar** para desistir."
             )
 
-        return f"Responda **sim** para excluir **{existing_name}** ou **não** para cancelar."
+        # `None`: sim/não é mundo fechado. Mesmo footgun destrutivo do
+        # `_resolve_delete_card` — este step também apaga cartão em cascata.
+        return None
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -1416,6 +1616,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         return f"Quando fecha a fatura do cartão **{name}**?"
 
     if step == "closing_day":
+        # Portão de FORMA antes do parser: `_parse_day` faz `search` e acharia o
+        # 10 de "gastei 10 no mercado". RE-PERGUNTA (regra acima): perder o
+        # cadastro do cartão no meio é chato e não há gatilho a armar.
+        if not _so_numero(answer):
+            return "Me diga o dia de fechamento com um número entre **1** e **31**. Ex: **dia 1**."
         closing_day = _parse_day(answer)
         if closing_day is None:
             return "Me diga o dia de fechamento com um número entre **1** e **31**. Ex: **dia 1**."
@@ -1425,6 +1630,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         return f"Quando vence a fatura do cartão **{payload['card_name']}**?"
 
     if step == "due_day":
+        if not _so_numero(answer):
+            return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
         due_day = _parse_day(answer)
         if due_day is None:
             return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
@@ -1466,6 +1673,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "reminder_opt_in":
         card_id = int(payload["card_id"])
+        # ABANDONA (regra acima): é pergunta de sim/não, e um `sim` velho aqui
+        # liga lembrete sozinho. Sem este portão, QUALQUER texto caía no
+        # `enabled=False` lá embaixo — "saldo" desligava o lembrete.
+        if not _is_yes(answer) and not _is_no(answer):
+            return None
         if _is_yes(answer):
             payload["step"] = "reminder_days"
             set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
@@ -1476,6 +1688,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "reminder_days":
         card_id = int(payload["card_id"])
+        if not _so_numero(answer):
+            return "Me diga em quantos dias antes devo avisar. Ex: **3**."
         days_before = _parse_day(answer)
         if days_before is None:
             return "Me diga em quantos dias antes devo avisar. Ex: **3**."
@@ -1484,6 +1698,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "credit_limit_ask":
         card_id = int(payload["card_id"])
+        # Portão de FORMA antes do `parse_money` (que NÃO é tocado): ele faz
+        # `search` e "gastei 50 no mercado" gravava limite de R$ 50,00.
+        # RE-PERGUNTA (regra acima).
+        if not _is_no(answer) and not _so_numero(answer):
+            return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
         if _is_no(answer):
             return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
         limit_val = parse_money(answer)
@@ -1495,6 +1714,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "set_primary":
         card_id = int(payload["card_id"])
+        # ABANDONA (regra acima): sim/não, e um `sim` velho troca o cartão
+        # principal sozinho. Sem o portão, qualquer texto caía no "Mantive o
+        # principal atual" lá embaixo e consumia a pergunta.
+        if not _is_yes(answer) and not _is_no(answer):
+            return None
         card = get_card_by_id(user_id, card_id)
         if not card:
             consume_pending_action(user_id, pending)
