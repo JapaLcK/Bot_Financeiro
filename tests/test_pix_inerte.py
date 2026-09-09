@@ -9,11 +9,13 @@ aceitação do dono:
 Checkout e webhook não se separam — os dois são o 1b-B. Enquanto isso, os quatro
 módulos novos existem e ninguém os chama.
 
-**"Ninguém os chama" vale para os 216 `.py` de PRODUÇÃO — não para o repositório
-inteiro.** A versão anterior dizia "repositório INTEIRO" e era falso: o git
-rastreia 631 arquivos, 395 `.py`, 216 fora de `tests/`. Foi por essa frase que o
-Manager entrou (ver a cegueira do `startCommand`). Alcance se mede com varredura
-e com número medido, nunca de memória (§2).
+**"Ninguém os chama" vale para os `.py` de PRODUÇÃO — não para o repositório
+inteiro.** A versão anterior dizia "repositório INTEIRO" e era falso: o universo
+deste portão é `git ls-files '*.py' | grep -vc '^tests/'`, e o repositório
+rastreia bem mais que isso (`git ls-files | wc -l`). Foi por essa frase que o
+Manager entrou (ver a cegueira do `startCommand`). Alcance se mede rodando a
+varredura na hora, nunca de memória — nem de número escrito aqui, que envelhece
+em silêncio (§2).
 
 ## Quatro caminhos de alcance, um arquivo cada
 
@@ -23,11 +25,13 @@ e com número medido, nunca de memória (§2).
      como o próprio app chegaria, inclusive por `background_tasks` e pelo loop
      de 60 s — os dois precisam do import para chamar;
   3. **destino** — `tests/test_pix_destino_inerte.py`, que vê o HOST e não o
-     nome do módulo, e cujo universo são os 433 rastreados, não só `.py`;
+     nome do módulo, e cujo universo é todo rastreado fora de `tests/`
+     (`git ls-files | grep -vc '^tests/'`), não só `.py`;
   4. **boot** — `tests/test_pix_ddl_sem_escrita.py`.
 
 Arquivos separados porque os universos e os mecanismos são diferentes: este lê
-395 `.py` com `ast`; o de destino lê 433 arquivos como texto.
+os `.py` com `ast`; o de destino lê como texto todo rastreado, de qualquer
+formato.
 
 **A varredura de import se AUTOVALIDA por dois caminhos**, os dois necessários:
 `_quem_importa` sobre `tests/` (tem de vir NÃO-VAZIA) e `_importa_algum` sobre
@@ -44,16 +48,20 @@ estes chamam", que continua sendo uma propriedade.
 
   * **import dinâmico** (`importlib.import_module("db." + nome)`): `ast` vê a
     árvore, não o valor. Nenhum existe hoje.
-  * **NÃO-`.py` rastreado**: este portão precisa de `ast`, então os **236**
-    arquivos rastreados que não são Python ficam fora dele. Não é teórico — o
-    Manager plantou `railway.pix-manager-probe.toml` nomeando `api.asaas.com` e
-    as três tabelas, com 49 verdes, e `railway.account-deletion.toml` já usa
-    `startCommand = "python scripts/account_deletion_job.py"` com `cronSchedule`
-    (o repositório JÁ roda Python em produção fora do app). Quem fecha esse caso
-    é o portão de DESTINO, que varre os 433; aqui ele fica declarado porque é
-    ESTE portão que a frase "ninguém importa" pode fazer parecer completo.
+  * **NÃO-`.py` rastreado**: este portão precisa de `ast`, então todo arquivo
+    rastreado que não é Python (`git ls-files | grep -vc '[.]py$'`) fica fora
+    dele. Não é teórico — o Manager plantou `railway.pix-manager-probe.toml`
+    nomeando `api.asaas.com` e as três tabelas, com 49 verdes, e o `Procfile`
+    (`web: python launch.py`) já dá o start command de produção num arquivo que
+    o `ast` não lê (o repositório JÁ roda Python por um caminho não-`.py`). Quem
+    fecha esse caso é o portão de DESTINO, que varre todo formato; aqui fica
+    declarado porque é ESTE portão que a frase "ninguém importa" pode fazer
+    parecer completo.
   * **arquivo NÃO rastreado**: o universo é `git ls-files`, então um script
-    Python fora do git chamado por um `startCommand` escapa dos dois.
+    Python fora do git chamado por um `startCommand` escapa dos dois. Esta
+    cegueira CRESCEU: o `account-deletion-job` migrou para configuração nativa
+    do painel do Railway (Config as Code descontinuado), então o start command
+    dele não está mais em arquivo nenhum — só no painel.
 
 Para todas, o método é revisão de diff, não mais varredura.
 """
