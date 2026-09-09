@@ -29,6 +29,7 @@ from .schema import init_db
 from .users import (
     ensure_user_tx,
     ensure_user,
+    user_exists,
     merge_users,
     choose_primary_user,
     user_score,
@@ -263,6 +264,7 @@ from .open_finance_state import (
     claim_items_for_refresh,
     claim_manual_refresh,
     get_connections_by_item_id,
+    item_registry_origins,
     list_connections_for_health_check,
     mark_sync_attempt,
     mark_sync_result,
@@ -270,6 +272,7 @@ from .open_finance_state import (
     pluggy_item_lock,
     register_item,
     token_hash,
+    unregister_item,
 )
 
 # ── Renda variável (ações/FIIs via Open Finance) ──────────────────────────────
@@ -458,7 +461,7 @@ __all__ = [
     # schema
     "init_db",
     # users
-    "ensure_user_tx", "ensure_user", "merge_users", "choose_primary_user", "user_score",
+    "ensure_user_tx", "ensure_user", "user_exists", "merge_users", "choose_primary_user", "user_score",
     "get_or_create_canonical_user", "create_link_code", "create_platform_onboarding_token",
     "consume_platform_onboarding_token", "consume_link_code", "bind_identity",
     "link_platform_identity",
@@ -546,7 +549,9 @@ __all__ = [
     "AmbiguousItemError", "claim_items_for_refresh", "claim_manual_refresh",
     "get_connections_by_item_id",
     "list_connections_for_health_check", "mark_sync_attempt", "mark_sync_result",
+    "item_registry_origins",
     "of_health_counters", "pluggy_item_lock", "register_item", "token_hash",
+    "unregister_item",
     "list_pluggy_connections_for_trial_sweep", "pause_open_finance_connection",
     # reports
     "set_daily_report_enabled", "set_daily_report_hour", "get_daily_report_prefs",

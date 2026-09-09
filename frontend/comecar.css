@@ -13,7 +13,7 @@
    por especificidade (as duas são 0,1,0), mas porque folha de autor vence folha
    de user-agent. Como `.onb-done` declara `display:flex` e `.btn` declara
    `display:inline-flex`, os quatro elementos que o JS controla por `hidden`
-   ficavam SEMPRE visíveis: "já tem saldo lançado", "WhatsApp já conectado", o
+   ficavam SEMPRE visíveis: "Saldo lançado com sucesso", "WhatsApp conectado com sucesso", o
    botão do WhatsApp e o "+ Adicionar cartão".
 
    O `!important` é necessário: sem ele, `.btn{display:inline-flex}` (mesma
@@ -123,7 +123,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--neon-ink, var(--neon));
+  color: var(--neon);
   font-size: .88rem;
   font-weight: 600;
   padding: 12px 14px;

@@ -17,15 +17,18 @@ import math
 import os
 import random
 import time
+from datetime import datetime, timedelta, timezone
 
 import psycopg
+from psycopg_pool import PoolClosed, PoolTimeout
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.admin_dashboard import log_system_event
-from core.audit import AuditEvent, record_audit_event
+from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.secure_compare import constant_time_eq
+from core.pg_text import limpa_para_pg
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
@@ -37,6 +40,7 @@ from core.services.pluggy import (
 )
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
+    ITEM_UPDATING,
     _env_int,
     refresh_and_sync_pluggy_user,
     sync_pluggy_item,
@@ -50,12 +54,15 @@ from db import (
     get_connections_by_item_id,
     get_open_finance_connection_by_item_id,
     get_open_finance_snapshot,
+    item_registry_origins,
     list_pluggy_item_ids,
     pluggy_item_lock,
     register_item,
     save_pluggy_open_finance_item,
     token_hash,
+    unregister_item,
     update_pluggy_open_finance_item_status,
+    user_exists,
 )
 from frontend.routes import shared
 
@@ -263,7 +270,10 @@ def _retryable(exc: BaseException) -> bool:
 
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
-                         tinha_conexao_propria: bool = False) -> tuple[dict, bool]:
+                         tinha_conexao_propria: bool = False,
+                         criar_usuario: bool = True,
+                         adocao_registro_id: int | None = None,
+                         *, escrita_tentada: list | None = None) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -278,6 +288,16 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     Pegar o mesmo lock aqui fecha a fresta na origem: enquanto um sync escreve, a
     reconexão espera; enquanto a reconexão grava, nenhum sync entra na fase de
     escrita — e o próximo a entrar relê a geração nova e aborta.
+
+    `escrita_tentada` é o canal de SAÍDA para "a execução chegou à escrita?" — uma
+    lista do chamador, marcada na linha anterior ao
+    `save_pluggy_open_finance_item` e DESMARCADA no `PoolTimeout`/`PoolClosed`
+    que prova que nem o pool foi adquirido. Existe porque `return` não sobrevive
+    a exceção e o TIPO dela não distingue: `psycopg.OperationalError` sai igual
+    do commit ambíguo e de tudo que roda antes (o `psycopg.connect` do
+    `pluggy_item_lock`, o `set_config`, o `pg_advisory_lock`, as leituras das
+    revalidações). Quem lê é o desfazimento da reivindicação de adoção no 503 de
+    `_grava_reconexao`.
 
     Sem o lock NÃO grava. A primeira versão disto gravava assim mesmo e só logava
     o aviso — e essa é exatamente a escrita que o lock existe para serializar
@@ -320,6 +340,52 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                     detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
                            "a conexão era concluída. Conecte o banco de novo.",
                 )
+        # A MESMA revalidação, pelo lado da ADOÇÃO (Codex #313, P1). O fato que a
+        # adoção leu fora do lock não é "a conexão existe" — é "NENHUMA linha do
+        # rastro deste item tem dono" (1ª guarda de `_adota_item_orfao`), e ele
+        # muda na espera: duas entregas concorrentes do MESMO `item/created` leem
+        # o rastro vazio, a 1ª adota, o usuário DESCONECTA, e a 2ª chegava aqui
+        # com `tinha_conexao_propria=False` — item órfão nunca teve conexão, o
+        # valor era honesto — pulando a revalidação acima e recriando a conexão
+        # COM sync agendado, na carteira que o usuário acabou de limpar.
+        # Uma releitura fecha os DOIS casos porque o disconnect preserva o
+        # registry (`db/privacy.py`): duplicata pura (a 1ª já gravou o rastro) e
+        # ressurreição pós-disconnect (o rastro sobreviveu à conexão). `exceto` é
+        # a linha que ESTA entrega gravou segundos atrás — sem ela a adoção
+        # legítima se recusaria a si mesma.
+        #
+        # E o aborto DESFAZ a própria reivindicação, dentro do lock, antes de
+        # subir. Sem isso a revalidação sozinha trocava um estrago por outro
+        # PIOR (medido pelo Tester, 30/30): duas entregas concorrentes gravam o
+        # rastro antes de qualquer uma pegar o lock, cada uma enxerga o rastro
+        # da OUTRA, as duas abortam, e sobra rastro com dono e ZERO conexão —
+        # estado terminal, do qual nem a retentativa (1ª guarda) nem o script
+        # one-shot (o filtro dele exclui rastro com dono) tiram o usuário.
+        # Apagando a linha AQUI, com o lock na mão, quem entrar depois não vê
+        # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
+        # último a pegar o lock ganha e os outros saem sem deixar rastro. São
+        # DOIS os pontos que apagam (o outro é a desistência do lock, no 503 de
+        # `_grava_reconexao`), e nos dois a linha é a que a própria adoção acabou
+        # de escrever (`db.unregister_item`, que filtra por `user_id`).
+        #
+        # REGISTRADO, não consertado: quando quem "ganhou" foi o `POST
+        # /pluggy-item` do MESMO usuário (o navegador voltou enquanto o webhook
+        # esperava o lock), este delete tira a linha `webhook_adopt` e o log de
+        # append perde o registro de que o item também entrou por ali. O desfecho
+        # funcional está certo (1 conexão, 1 auditoria, a linha `pluggy_item`
+        # fica) e NENHUMA decisão lê `origin` para isso — só o diagnóstico "por
+        # onde ele entrou" fica mais pobre. Fechar exigiria distinguir origem
+        # rival no aborto, e a distinção não muda decisão nenhuma hoje.
+        if adocao_registro_id is not None:
+            outras = item_registry_origins(item_id, exceto_registro_id=adocao_registro_id,
+                                           exceto_user_id=user_id)
+            if outras:
+                unregister_item(adocao_registro_id, user_id)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Item {item_id} já foi atribuído por outra porta "
+                           f"({sorted(outras)}): adoção abortada sob o lock.",
+                )
         # O que sobrou DEPOIS de pegar o lock vai para a escrita. Sem isto o
         # orçamento parava aqui: `save_pluggy_open_finance_item` esperava o pool
         # (até `DB_CONNECT_TIMEOUT`) fora do prazo, e podia COMMITAR depois de o
@@ -340,11 +406,53 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # propósito: o número muda com a versão do psycopg e envelhece errado.
         resto = None if budget_ms is None else max(
             1, budget_ms - int((time.monotonic() - t0) * 1000))
-        return save_pluggy_open_finance_item(user_id, remote, budget_ms=resto), True
+        # A ÚNICA linha que responde "a escrita chegou a ser tentada?" (Codex
+        # #313, P1). Ela atravessa o `except` do chamador porque é a lista DELE
+        # que está sendo mutada — `return` não sobrevive a exceção, e o tipo do
+        # erro não sabe responder isso: `psycopg.OperationalError` sai tanto
+        # daqui de dentro (commit ambíguo) quanto de tudo que veio ANTES (o
+        # `psycopg.connect` dedicado do `pluggy_item_lock`, o `set_config`, o
+        # `pg_advisory_lock`, as leituras das duas revalidações). Marcado ANTES
+        # da chamada, e não no `except`, porque a pergunta é do CHAMADOR ("pode
+        # ter escrito?"): se o erro vier da saída do `with` depois de um commit
+        # que deu certo, ele ainda tem de contar como escrita tentada.
+        if escrita_tentada is not None:
+            escrita_tentada.append(True)
+        try:
+            return save_pluggy_open_finance_item(
+                user_id, remote, budget_ms=resto, criar_usuario=criar_usuario), True
+        except (PoolTimeout, PoolClosed):
+            # ... e DESMARCA no único erro que prova o contrário. Os dois só
+            # saem do `getconn`, e o `get_conn()` do `save_...` é a ÚNICA
+            # aquisição de pool da função e a primeira linha com I/O dela: aqui
+            # nenhum statement rodou. (Medido no psycopg_pool 3.3.1: `PoolTimeout`
+            # só nasce da espera do `getconn`; `PoolClosed`, do
+            # `_check_open_getconn`; a devolução no fim do `with` levanta
+            # `ValueError`, não estes. A invariante do "única aquisição" tem
+            # guarda em `tests/test_of_webhook_adopt_503.py`.)
+            #
+            # É o membro MAIS PROVÁVEL da classe, e não precisa de infra doente:
+            # o `resto` acima tem piso de 1 ms, então uma espera longa pelo lock
+            # — o cenário para o qual esta feature existe — manda
+            # `get_conn(timeout=0.001)`. Medido em 2026-09-08 no Postgres local
+            # SAUDÁVEL (`ConnectionPool(open=True)` + `connection(timeout=0.001)`
+            # imediato): pool frio → `PoolTimeout`; quente → ok. O tempo varia com
+            # a carga (1,4 ms e 4,2 ms em duas medições), remeça antes de reusar —
+            # o que não varia é o desfecho. Sem isto, o caminho
+            # mais provável de todos preservava a reivindicação sem uma única
+            # escrita e reconstruía o estado terminal que o P0 fechou.
+            #
+            # `pop()` e não `clear()`: a lista é do PRAZO INTEIRO e cada chamada
+            # marca no máximo uma vez, então cada uma só desfaz a SUA marca — uma
+            # tentativa anterior que chegou a escrever continua contando.
+            if escrita_tentada:
+                escrita_tentada.pop()
+            raise
 
 
 async def _grava_reconexao(
     user_id: int, remote: dict, item_id: str, tinha_conexao_propria: bool = False,
+    criar_usuario: bool = True, adocao_registro_id: int | None = None,
 ) -> dict:
     """Grava a reconexão sob o lock, RETENTANDO antes de desistir.
 
@@ -368,6 +476,27 @@ async def _grava_reconexao(
     """
     fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
+    # A pergunta do desfazimento lá embaixo é "alguma tentativa pode ter
+    # ESCRITO?", e ela tem duas metades.
+    #
+    # PRAZO INTEIRO: a lista é LATCHED (só cresce), e é por isso que não é
+    # `causa is None` — `causa` é só a da ÚLTIMA tentativa, de propósito
+    # (`test_causa_e_a_da_ultima_tentativa`), então infra na 1ª + lock ocupado na
+    # 2ª chega ao fim com `causa is None` tendo passado por escrita de desfecho
+    # DESCONHECIDO.
+    #
+    # PRECISÃO: quem marca é o `_salva_item_sob_lock`, na linha ANTES da escrita
+    # — não o tipo da exceção (Codex #313, P1). `OperationalError` também sai de
+    # tudo que roda antes dela (o `psycopg.connect` dedicado do
+    # `pluggy_item_lock`, o `set_config` inicial, o `pg_advisory_lock` — que só
+    # trata `LockNotAvailable`/`QueryCanceled` e deixa passar um `AdminShutdown`
+    # —, as leituras das revalidações) e do próprio `get_conn` da escrita,
+    # e nessas a escrita PROVADAMENTE não aconteceu. Preservar a reivindicação
+    # ali reconstruía o estado terminal que o P0 fechou: zero conexões + rastro
+    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa e
+    # o `scripts/adotar_items_of_orfaos.py` sem enxergar a linha — o usuário sem
+    # banco e sem saída pelo produto.
+    escrita_tentada: list = []
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         folga_ms = int((fim - time.monotonic()) * 1000)
         if folga_ms < 1:
@@ -390,7 +519,8 @@ async def _grava_reconexao(
         try:
             connection, sob_lock = await asyncio.to_thread(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
-                tinha_conexao_propria)
+                tinha_conexao_propria, criar_usuario, adocao_registro_id,
+                escrita_tentada=escrita_tentada)
             causa = None
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
@@ -507,6 +637,38 @@ async def _grava_reconexao(
         details={"item_id": item_id, "deadline_ms": _RECONNECT_DEADLINE_MS,
                  "erro": causa},
     )
+    # DESISTIR DO LOCK também desfaz a reivindicação da adoção — é o SEGUNDO
+    # desfecho em que a escrita provadamente não aconteceu, e sem ele o conserto
+    # do aborto sob o lock era REGRESSÃO contra a `main` (medido, duas colunas):
+    # duas entregas concorrentes, a que pega o lock aborta e apaga a linha dela,
+    # a que PERDE o lock deixava a dela para trás — 1 conexão saudável na `main`
+    # virava 0 conexões + reivindicação abandonada, que é o estado terminal (a 1ª
+    # guarda de `_adota_item_orfao` recusa a retentativa e o script one-shot não
+    # lista rastro com dono). Com o desfazimento, ninguém escreveu e ninguém
+    # reivindicou: a próxima entrega do `item/created` adota.
+    #
+    # "Provadamente" é medido, não deduzido do tipo do erro: `escrita_tentada` só
+    # tem item se a execução CHEGOU ao `save_pluggy_open_finance_item`, e a marca
+    # é feita lá, na linha anterior à chamada. Cobre o prazo inteiro e as duas
+    # portas de saída sem escrita — o `if not locked` (lock ocupado) e a infra
+    # PRÉ-escrita, que é `psycopg.OperationalError` igualzinho à do commit
+    # (`psycopg.connect` do lock, `set_config`, `pg_advisory_lock`, as leituras
+    # das revalidações, e o `get_conn` do próprio `save_...`) e
+    # antes desta linha ficava preservada à toa (Codex #313, P1). Vazia: ninguém
+    # escreveu, a reivindicação vai embora. Com item: desfecho DESCONHECIDO e a
+    # reivindicação FICA — apagá-la poderia soltar uma segunda adoção por cima de
+    # uma conexão que existe.
+    #
+    # AQUI e não no `if not locked`: apagar entre as tentativas deixaria a
+    # tentativa que enfim pega o lock gravar a conexão sem rastro com dono — item
+    # com banco conectado que o one-shot lista como órfão e a entrega seguinte
+    # readota. O desfazimento é do desfecho, não da tentativa.
+    #
+    # DEPOIS dos logs: o diagnóstico do 503 já está gravado se este delete
+    # estourar (ele sobe para o `except Exception` de `_adota_item_orfao`, que
+    # loga e responde 200 ao webhook).
+    if adocao_registro_id is not None and not escrita_tentada:
+        await asyncio.to_thread(unregister_item, adocao_registro_id, user_id)
     raise HTTPException(
         status_code=503,
         detail="Não foi possível concluir a conexão agora. Tente de novo em alguns segundos.",
@@ -627,6 +789,280 @@ def _schedule_pluggy_sync(item_id: str) -> None:
     task = asyncio.create_task(_run_pluggy_sync_bg(item_id), name=f"pluggy_sync_{item_id}")
     _INFLIGHT[item_id] = task
     task.add_done_callback(lambda _t: _on_sync_done(item_id))
+
+
+async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int | None:
+    """Adota um item da Pluggy que existe lá e não tem conexão local. Devolve o dono.
+
+    Por que existe: a linha em `open_finance_connections` só nascia no
+    `POST /pluggy-item`, que é chamado pelo NAVEGADOR. Quem fechava a aba no meio
+    do widget ficava com o item vivo na Pluggy e nenhuma linha aqui — a tela mostra
+    0 bancos, o `DELETE /open-finance/{uid}` enumera a partir das conexões e não
+    apaga nada lá, e o `avoidDuplicates` do connect token recusa item novo. O
+    usuário fica travado sem saída pelo produto.
+
+    SÓ o chamador decide QUANDO adotar, e ele adota só em `item/created` — o
+    porquê está no webhook.
+
+    O dono vem SEMPRE da resposta REMOTA (`clientUserId`, que nós mesmos setamos ao
+    emitir o connect token) — NUNCA do corpo do webhook, que vem de fora e não
+    decide posse. E ele é aceito com a MESMA régua do `POST /pluggy-item`, que
+    compara STRING (`str(dono_remoto or "") != str(session_uid)`): só passa o que
+    for a forma canônica de um inteiro. `int()` sozinho aceitava mais do que a
+    rota — `' 5 '`, `'+5'`, `'1_2'` (PEP 515) e `'١٢'` (dígitos árabe-índicos) —
+    e as duas portas divergiam no mesmo valor.
+
+    Três guardas de escrita, nesta ordem:
+      • o item não pode ter tido dono NUNCA. "Item/created dispara uma vez" é
+        premissa errada: webhook é entrega AT-LEAST-ONCE e este endpoint devolve
+        401/400/503 (e pode dar 500 antes daqui), o que faz a Pluggy retentar o
+        MESMO evento. Uma 2ª entrega depois de o usuário remover o banco
+        ressuscitava a conexão, com sync agendado, re-importando na carteira que
+        ele limpou — o delete remoto é best-effort e o item sobrevive lá. POR QUE
+        o rastro com dono é o sinal certo (e por que banco removido fica "sem
+        conexão local" para sempre): docstring de `db.item_registry_origins`,
+        fonte única dos leitores (CLAUDE.md §0.7). A 1ª adoção grava rastro
+        com dono ANTES da conexão, então ela mesma fecha a duplicata — e a
+        guarda é REFEITA dentro do `pluggy_item_lock`, imediatamente antes da
+        escrita da conexão (`_salva_item_sob_lock`, `adocao_registro_id`),
+        porque entre as duas leituras cabe uma entrega concorrente inteira.
+        Quem perde essa segunda leitura APAGA o próprio rastro antes de
+        abortar, ainda com o lock na mão — e quem sai no 503 sem NUNCA ter
+        chegado à escrita apaga também, no `_grava_reconexao`: reivindicação
+        abandonada que fica para trás é o que torna o aborto terminal (ver o
+        LIMITE CONHECIDO);
+      • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
+        `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
+        é ele que responde quando a conta já não existia — mas é leitura em
+        transação própria, então sozinho ele só cobre a foto do instante em que
+        leu. Quem cobre a JANELA (exclusão da conta commitando entre a leitura e
+        a escrita) é a FK, e só porque as duas escritas desta função passaram a
+        ser incapazes de criar usuário: `register_item` nunca criou, e a conexão
+        vai com `criar_usuario=False`. Antes, `ensure_user_tx` RESSUSCITAVA a
+        conta apagada por LGPD (`db/privacy.py`) cujo item sobreviveu ao delete
+        best-effort — pelo evento da Pluggy, e depois pela corrida (Codex #313);
+      • o rastro (`register_item`) vai ANTES da conexão, e a ordem inversa é pior:
+        ela deixava conexão commitada com registry VAZIO — item adotado sem
+        nenhum rastro, e o rastro é a única enumeração que existe (`GET /items`
+        da Pluggy devolve 401).
+
+    O PREÇO dessa ordem, medido: se a escrita da conexão falhar no meio, sobra
+    rastro COM dono e nenhuma conexão — estado indistinguível de banco removido
+    pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
+    listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
+    regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
+    `item/created` não readota (a 1ª guarda acima). É por isso que os DOIS
+    desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
+    adoção acabou de gravar, em vez de deixá-lo: o aborto sob o lock
+    (`_salva_item_sob_lock`) e o 503 em que NENHUMA tentativa do prazo chegou ao
+    `save_pluggy_open_finance_item` — lock ocupado (`if not locked`) ou infra
+    PRÉ-escrita, que é `psycopg.OperationalError` idêntica à do commit e vem do
+    `psycopg.connect` dedicado do lock, do `set_config`, do `pg_advisory_lock`,
+    das leituras das revalidações ou do `get_conn` do próprio
+    `save_pluggy_open_finance_item` (Codex #313, P1). Quem responde isso é a
+    marca feita na linha anterior à escrita — desfeita quando o erro é
+    `PoolTimeout`/`PoolClosed`, que só sai do `getconn` —, não o tipo do erro.
+    Sem os dois desfazimentos, duas
+    entregas concorrentes caíam neste estado sozinhas, sem falha nenhuma de
+    escrita: consertar só o primeiro TROCAVA o perdedor (quem aborta limpa, quem
+    perde o lock fica), e era regressão contra a `main`, onde a mesma
+    intercalação dava 1 conexão. O que continua pagando o preço é a falha de
+    INFRA DENTRO da escrita (erro no meio do upsert, commit ambíguo), em que o
+    desfecho é DESCONHECIDO e apagar a reivindicação poderia soltar uma segunda
+    adoção por cima de uma conexão que existe. Pool esgotado NÃO está nesta
+    lista: ele estoura no `get_conn`, ANTES de qualquer statement, e
+    `PoolTimeout`/`PoolClosed` saindo do `save_...` desfazem a reivindicação como
+    qualquer outra falha pré-escrita. A FK da conta apagada também não está, e
+    não é escolha: `open_finance_item_registry.user_id` é `on delete cascade`
+    (`db/schema.py`), então o mesmo `delete from users` que faz a FK estourar já
+    levou o rastro `webhook_adopt` junto — não sobra reivindicação nenhuma
+    (`test_conta_apagada_no_meio_da_adocao_nao_ressuscita`). Aí a saída é
+    OPERACIONAL:
+    `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
+    item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
+    widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio
+    (`origin='disconnect'`) para separar "removido" de "adoção que falhou" —
+    escrita em outro fluxo, outro PR.
+
+    Nada escapa daqui: o chamador (webhook) tem de responder 200 mesmo em falha,
+    senão a Pluggy retenta em laço. Sem dono resolvível, sem usuário, com o teto
+    de bancos do plano estourado (`_enforce_bank_limit`, 402) ou com qualquer
+    falha de escrita, devolve None e o chamador mantém o rastro sem dono que já
+    existia.
+
+    LIMITE CONHECIDO (medido). Duas entregas CONCORRENTES do mesmo `item/created`
+    ainda leem o rastro vazio antes de qualquer uma escrever, e as duas gravam
+    rastro (`register_item` fica FORA do lock, de propósito: é ele que a
+    retentativa do `_grava_reconexao` não pode repetir). A revalidação sob o lock
+    mais o desfazimento fecham isso NAS CORRIDAS de entrega concorrente, e só
+    nelas: nenhuma intercalação delas deixa reivindicação sem conexão — no caso
+    comum uma entrega grava e fica com o rastro, e as outras abortam apagando o
+    que gravaram; na intercalação em que a entrega que pega o
+    lock é justamente a que aborta, ninguém grava e ninguém reivindica — o item
+    volta a ser órfão e a PRÓXIMA entrega (ou o script one-shot) adota. Sobra uma
+    janela de LEITURA, não de estado: enquanto a perdedora não chega ao lock, o
+    rastro dela existe e um leitor concorrente (o painel de saúde, o script
+    one-shot) vê uma linha a mais desse item. E sobra o desfecho DESCONHECIDO —
+    infra no meio da escrita mantém a reivindicação de propósito, e aí vale o
+    parágrafo de cima. Três rodadas erraram este parágrafo — a 1ª chamou a janela
+    de "só auditoria duplicada" (era ressurreição de banco desconectado, o P1 do
+    Codex #313), a 2ª deu o rastro extra como permanente e não viu que ele
+    RECUSAVA toda retentativa e sumia do script, deixando o usuário com 0 bancos
+    e sem saída (o P0 do Tester, 30/30 rodadas), a 3ª consertou só o aborto sob o
+    lock e criou esse MESMO estado terminal pela porta do 503. Também fica aberto:
+    SÓ `item/created` adota (o gate é `event_name == "item/created"` no webhook, e
+    `test_so_item_created_adota` prende), então item cujo `item/created` se perdeu
+    ou nunca foi entregue não é adotado por evento NENHUM depois — nem pelo
+    `item/updated` —, e a única recuperação é o one-shot
+    (`scripts/adotar_items_of_orfaos.py`). Nenhum dos dois é regressão contra a
+    `main`.
+
+    ponytail: custa uma chamada HTTP a mais dentro do webhook no ramo de item
+    desconhecido — inclusive quando ele acaba recusado por já ter dono, que é o
+    preço da ordem escolhida acima. Se virar latência, jogar num
+    `asyncio.create_task` como o `_schedule_pluggy_sync` já faz.
+    """
+    try:
+        remote = await asyncio.to_thread(get_pluggy_item, item_id)
+        bruto = str(remote.get("clientUserId") or "")
+        dono = int(bruto)
+        if str(dono) != bruto:   # ' 5 ', '+5', '007', '1_2', '١٢' → não é o que a rota aceita
+            raise ValueError(f"clientUserId fora da forma canônica: {bruto!r}")
+    except Exception as exc:
+        # Sem dono resolvível: o chamador registra o rastro como antes. O MOTIVO
+        # importa — `PluggyConfigError`, 404, timeout e item sem `clientUserId`
+        # viravam todos o mesmo `of_webhook_item_unknown` genérico.
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item órfão sem dono resolvível",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+
+    # A leitura do rastro vem DEPOIS do HTTP de propósito, e custa um POST /auth
+    # + GET /items desperdiçado na duplicata. Antes dele, ela ficava separada da
+    # escrita (`register_item`) por um round-trip inteiro da Pluggy — e MEDIDO
+    # (duas entregas concorrentes de `item/created`, a 2ª começando com a 1ª
+    # ainda dentro do GET): 2 auditorias e 2 rastros para 1 conexão, contra 1 e 1
+    # com a leitura aqui. A posição NÃO é neutra: a troca é uma chamada HTTP num
+    # caminho raro (retentativa) por uma janela de corrida N vezes menor. O que
+    # SOBRA de janela é o "LIMITE CONHECIDO" da docstring acima, que é onde ele
+    # está descrito por extenso (CLAUDE.md §0.7).
+    # Falha de leitura NÃO adota (não dá para verificar).
+    try:
+        origens = await asyncio.to_thread(item_registry_origins, item_id)
+    except Exception as exc:  # noqa: BLE001 — nada escapa daqui (o webhook responde 200)
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Rastro do item ilegível: adoção não verificável",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+    if origens:
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item já teve dono: adoção só vale para item nunca atribuído",
+            source="open_finance",
+            details={"item_id": item_id, "motivo": "rastro_com_dono",
+                     "origens": sorted(origens)},
+        )
+        return None
+
+    try:
+        if not await asyncio.to_thread(user_exists, dono):
+            await log_system_event(
+                "warning", "of_webhook_adopt_skipped",
+                "Item órfão de usuário que não existe mais",
+                source="open_finance",
+                details={"item_id": item_id, "user_id": dono, "motivo": "usuario_inexistente"},
+            )
+            return None
+        await _enforce_bank_limit(dono, item_id)
+        # O rastro DUPLICA de propósito quando o navegador volta depois (o POST
+        # grava outra linha, `origin='pluggy_item'`): o registry é um log de
+        # append, "este item existiu, visto por esta porta", e as duas portas
+        # viram o item de verdade. Deduplicar apagaria justamente o que responde
+        # "por onde ele entrou". O que NÃO pode duplicar é a conexão (uma só, o
+        # upsert garante) e a auditoria (ver o `POST /pluggy-item`).
+        registro_id = await asyncio.to_thread(
+            register_item, dono, provider_item_id=item_id, origin="webhook_adopt",
+            status=str(remote.get("status") or "") or None, last_event=last_event,
+        )
+        # `criar_usuario=False`: a FK da conexão é a ÚNICA coisa atômica com o
+        # insert. O `user_exists` acima é leitura em transação PRÓPRIA, e uma
+        # exclusão de conta (db/privacy.py) que commite entre ele e esta escrita
+        # deixava o `ensure_user_tx` recriar a linha de `users` que a LGPD acabou
+        # de apagar — o `register_item` acima já cai na FK dele quando a exclusão
+        # chega antes, e esta fecha o resto da janela (Codex #313, P1). Sem a
+        # linha de `users`, o insert estoura `ForeignKeyViolation`, o `except`
+        # abaixo registra e o webhook responde 200 sem adotar.
+        # Registrado, não consertado: sem o `ensure_user_tx` a adoção também
+        # deixa de REPOR a linha de `accounts`, e existe estado de produção com
+        # `users` sem `accounts` (`merge_users` apaga a do `from_user_id` e nunca
+        # apaga o `users` dele, db/users.py:109). Medido: a adoção grava, o
+        # snapshot responde e `get_consolidated_balance` devolve zeros sem
+        # estourar; qualquer `ensure_user` posterior (o próximo login) repara.
+        # `adocao_registro_id`: a 1ª guarda (rastro sem dono) é REFEITA dentro do
+        # `pluggy_item_lock`, ignorando a linha recém-gravada acima — e o aborto
+        # APAGA essa linha. Sem a releitura, a decisão de adotar valia por uma
+        # leitura de segundos atrás e a corrida com outra entrega ressuscitava
+        # banco removido (Codex #313, P1); sem o desfazimento, a mesma corrida
+        # deixava o item reivindicado e sem conexão para sempre (P0 do Tester).
+        await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False,
+                               criar_usuario=False, adocao_registro_id=registro_id)
+    except Exception as exc:
+        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de quatro
+        # desfechos com ações de operador diferentes — 402 (teto de bancos do
+        # plano), 409 do estado que sumiu na espera do lock, 409 do item que
+        # OUTRA entrega já atribuiu (a revalidação da adoção) e 503 (lock
+        # ocupado); os dois 409 se separam pelo texto do `detail`. O
+        # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
+        # (starlette), então não precisa de formatação nossa.
+        await log_system_event(
+            "warning", "of_webhook_adopt_skipped",
+            "Item órfão não adotado",
+            source="open_finance",
+            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+        return None
+
+    # Daqui pra baixo a adoção JÁ aconteceu: nada pode desfazê-la nem virar 5xx
+    # para a Pluggy. Auditoria é o mesmo evento que o `POST /pluggy-item` grava —
+    # sem `request`, que aqui é o POST da Pluggy e não o do usuário.
+    try:
+        await asyncio.to_thread(
+            record_audit_event, dono, AuditEvent.OPEN_FINANCE_CONNECTED,
+            details={"provider": "pluggy", "item_id": item_id, "origin": "webhook_adopt"},
+        )
+        # Sync em tudo MENOS `UPDATING`/`CREATED` (`ITEM_UPDATING` é só esses
+        # dois): o que está barrado é o item que a Pluggy ainda está montando —
+        # em `item/created` esse é o status normal, e sincronizar ali é uma task
+        # esperando o item sair de UPDATING (`pluggy_sync`, que já faz essa
+        # espera) para achar zero conta. O `item/updated` seguinte sincroniza
+        # sozinho, e a essa altura a conexão JÁ existe, então ele entra pelo
+        # caminho comum (`len(conexoes) == 1`). É menos código rodando, não mais.
+        # Os outros status AGENDAM: `WAITING_USER_INPUT`, `WAITING_USER_ACTION`,
+        # `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um sync que provavelmente
+        # não traz nada — e isso NÃO vira estado errado na tela, porque
+        # `connection_ui_state` testa `_NEEDS_USER` antes de `no_accounts`.
+        # `_UPDATING` vem de `pluggy_health` — a fonte que o `pluggy_sync` também
+        # usa; não é uma segunda lista de status (CLAUDE.md §0.7).
+        if str(remote.get("status") or "").upper() not in ITEM_UPDATING:
+            _schedule_pluggy_sync(item_id)
+    except Exception as exc:
+        await log_system_event(
+            "warning", "of_webhook_adopt_incompleto",
+            "Item adotado, mas auditoria/sync falharam",
+            source="open_finance",
+            details={"item_id": item_id, "user_id": dono, "motivo": type(exc).__name__,
+                     "error": str(exc)[:200]},
+        )
+    return dono
 
 
 def _bank_limit_enabled() -> bool:
@@ -902,6 +1338,13 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     }
 
 
+# Por quanto tempo, depois da adoção pelo webhook, o `POST /pluggy-item` ainda é
+# o HANDOFF dela — e não uma reconexão nova. `item/created` chega com o widget
+# aberto e o `onSuccess` vem em seguida: o vão real é de segundos. Uma hora é
+# folga, não alvo, e fora dela o desfecho é AUDITAR — o lado barato do erro.
+JANELA_HANDOFF_WEBHOOK = timedelta(hours=1)
+
+
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     """Registra o item que o widget da Pluggy acabou de criar.
@@ -961,6 +1404,54 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         )
         raise HTTPException(status_code=409, detail="Este item já está vinculado a outra conta.")
 
+    # A conexão que JÁ existia nasceu do webhook (que auditou por ela) ou é um
+    # banco que o usuário está RECONECTANDO? `tinha_conexao_propria` sozinho não
+    # separa os dois: o widget reconecta banco existente e o `avoidDuplicates`
+    # devolve o MESMO itemId, então re-consentimento e conserto de LOGIN_ERROR
+    # também chegam aqui com a conexão de pé — e sumiam de "Atividade da conta".
+    # O fato que separa: `pluggy_item` no rastro = o NAVEGADOR já registrou este
+    # item alguma vez, logo a conexão não é a que o webhook acabou de adotar.
+    # Lido ANTES do `register_item` abaixo, que grava justamente essa origem.
+    conexao_recem_adotada = tinha_conexao_propria and "pluggy_item" not in (
+        await asyncio.to_thread(item_registry_origins, new_item_id))
+    if conexao_recem_adotada:
+        # ...e o webhook TEM de ter auditado de verdade. `record_audit_event`
+        # ENGOLE falha de banco (core/audit.py:156) — o rastro prova a adoção, não
+        # a auditoria —, então o insert dele podia falhar lá e esta guarda suprimir
+        # aqui: NENHUM `OPEN_FINANCE_CONNECTED` para uma conexão que nasceu. Num
+        # log de segurança duplicata é ruído e buraco é perda (Codex #313, P2).
+        # Fecha junto o 2º caso do mesmo achado: conexão ANTERIOR ao registry não
+        # tem rastro nenhum, e a 1ª reconexão dela caía como duplicata de um
+        # webhook que nunca existiu.
+        # `list_audit_events` (já existente, e já filtrada por `user_id`) em vez de
+        # query nova: são os 50 últimos eventos do usuário, e a adoção que este POST
+        # duplica aconteceu segundos atrás. Fora dessa janela o desfecho é auditar DE
+        # NOVO, que é o lado barato do erro — e falha de banco cai do mesmo lado
+        # porque quem captura `Exception` e devolve `[]` é a PRÓPRIA
+        # `list_audit_events` (core/audit.py:95-97). Aqui não há `try`: o que
+        # escapar dela vira 500 para o usuário, não degradação.
+        # `isinstance(..., dict)` e não `or {}`: uma linha com `details` escalar
+        # (`'"texto"'::jsonb`) estoura `AttributeError` no `.get`, e sem guarda o
+        # POST fica 500 PERMANENTE para aquele usuário. Nenhum escritor de hoje
+        # grava assim (os dois passam dict, e `Jsonb(details or {})` normaliza o
+        # `None`) — é fronteira de dado vindo do banco, custa uma linha.
+        # `created_at` (já vem no SELECT de `list_audit_events`) porque item+origem
+        # NÃO correlaciona a evidência com ESTE POST: item adotado cujo navegador
+        # nunca postou fica sem `pluggy_item` no registry PARA SEMPRE, e a
+        # reconexão de dias depois consumia a auditoria histórica como se fosse a
+        # duplicata da adoção de agora — a 1ª reconexão real sumia do log de
+        # segurança (Codex #313, P2, 2ª rodada). A janela é a duração do próprio
+        # handoff: sem coluna nova, sem marcador consumível, sem estado novo.
+        handoff_desde = datetime.now(timezone.utc) - JANELA_HANDOFF_WEBHOOK
+        conexao_recem_adotada = any(
+            e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
+            and isinstance(e.get("details"), dict)
+            and e["details"].get("item_id") == new_item_id
+            and e["details"].get("origin") == "webhook_adopt"
+            and e["created_at"] >= handoff_desde
+            for e in await asyncio.to_thread(list_audit_events, session_uid, 50)
+        )
+
     await _enforce_bank_limit(session_uid, new_item_id)
     try:
         connection = await _grava_reconexao(
@@ -974,13 +1465,38 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         status=str(remote.get("status") or "") or None,
     )
 
-    await asyncio.to_thread(
-        record_audit_event,
-        user_id,
-        AuditEvent.OPEN_FINANCE_CONNECTED,
-        request=request,
-        details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
-    )
+    # Pula SÓ a duplicata do webhook. `item/created` chega antes do `onSuccess`
+    # do widget (que só dispara em status final), então em produção a ordem comum
+    # é webhook primeiro: a adoção grava a conexão E a auditoria, e este POST
+    # chegava depois gravando o SEGUNDO `OPEN_FINANCE_CONNECTED` da MESMA conexão.
+    # O que se suprime é "o webhook JÁ auditou ESTA conexão", não "o usuário já
+    # tinha este banco" — reconexão legítima (re-consentimento, conserto de
+    # LOGIN_ERROR) é evento de segurança e continua aparecendo, uma vez cada.
+    # ponytail: dois tetos conhecidos, ambos de UM evento de auditoria e ambos
+    # fechados pela mesma coisa — marcar a adoção na PRÓPRIA conexão (coluna
+    # nova + migração), que é o custo que nenhum dos dois paga hoje:
+    #   1. item adotado pelo webhook cujo navegador NUNCA postou (aba fechada):
+    #      uma reconexão que caia DENTRO da `JANELA_HANDOFF_WEBHOOK` contada da
+    #      adoção não audita. Fora da janela audita, e da 2ª em diante audita
+    #      sempre: aí o registry já tem `pluggy_item`. O teto é UM evento, e só
+    #      para quem reconecta o mesmo item na mesma hora em que ele foi adotado.
+    #      O limite de 50 eventos do `list_audit_events` só ENCOLHE a supressão
+    #      (evidência fora dos 50 = audita), então quem define este teto é o
+    #      tempo, não o histórico do usuário.
+    #   2. a janela invertida, que é DUPLICATA e não buraco: `_adota_item_orfao`
+    #      commita a conexão e só depois grava o `record_audit_event` do webhook.
+    #      Um `POST /pluggy-item` que caia nesse vão vê a conexão de pé e a
+    #      evidência ainda não → audita, e o webhook audita em seguida: 2
+    #      `OPEN_FINANCE_CONNECTED` para 1 conexão. Escolha deliberada, mesma
+    #      régua do bloco acima — duplicata é ruído, buraco é perda.
+    if not conexao_recem_adotada:
+        await asyncio.to_thread(
+            record_audit_event,
+            user_id,
+            AuditEvent.OPEN_FINANCE_CONNECTED,
+            request=request,
+            details={"provider": "pluggy", "item_id": (connection or {}).get("provider_item_id")},
+        )
 
     # Sync inicial: puxa contas + transações do banco recém-conectado.
     _schedule_pluggy_sync(str((connection or {}).get("provider_item_id") or ""))
@@ -1153,13 +1669,29 @@ async def open_finance_pluggy_webhook(request: Request):
         # o comentário do `item` seis linhas abaixo existe para evitar. Recusar no
         # parse põe o caso na classe que este handler JÁ tratava com 400 desde
         # antes ("corpo que não é JSON"), sem política nova nem saneamento depois.
-        # NÃO fecha a metade de STRING da mesma via: NUL (`\u0000`) e surrogate
-        # solitário, no valor OU na chave, seguem chegando ao `Jsonb(raw)` de
-        # update_pluggy_open_finance_item_status, ao param `text` do item_id e à
-        # lista de transactionIds do `any(%s)` em delete_open_finance_transactions
-        # (psycopg a adapta como text[]) → 500.
-        # Pré-existente (a `main` também dá 500) e só alcançável com o secret.
-        event = json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
+        # A metade de STRING da mesma via — NUL (`\u0000`) e surrogate solitário,
+        # no valor OU na chave — é o que o `limpa_para_pg` fecha (#317). Nenhum
+        # dos dois existe em `text`/`jsonb`, então eles davam 500 no `Jsonb(raw)`
+        # de update_pluggy_open_finance_item_status, no param `text` do item_id,
+        # no get_connections_by_item_id e na lista de transactionIds do `any(%s)`
+        # de delete_open_finance_transactions (psycopg a adapta como text[]) — e
+        # ainda faziam o `Jsonb(details)` do log_system_event perder a linha de
+        # auditoria em silêncio (o `except Exception: print(...)` engole).
+        # UM ponto cobre todos eles porque `item_id`, `event_name` e
+        # `transactionIds` são DERIVADOS deste `event` já saneado, logo abaixo —
+        # por isso o `db/` não muda. Inclui o `register_item` de item
+        # desconhecido (~70 linhas abaixo), que grava `provider_item_id` e
+        # `last_event`: MEDIDO com `{"event":"item/updated","itemId":"ZZ\ud800"}`
+        # — na `main` é 500 e NÃO grava; aqui é 200 e grava
+        # `provider_item_id='ZZ\ufffd\ufffd\ufffd'` com `user_id=None`. Dois
+        # surrogates diferentes colapsam nessa mesma identidade e viram DUAS
+        # linhas. É lixo novo no registry, não privilégio novo: exige o secret, e
+        # a mesma capacidade já existia com qualquer id limpo desconhecido.
+        # DENTRO do try de propósito: fora dele, um corpo fundo o bastante
+        # viraria 500 em vez do 400 que já era o desfecho de "não é JSON".
+        event = limpa_para_pg(
+            json.loads(raw_body, parse_float=_float_finito, parse_constant=_float_finito)
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Webhook inválido.") from exc
     if not isinstance(event, dict):
@@ -1203,17 +1735,50 @@ async def open_finance_pluggy_webhook(request: Request):
         if len(conexoes) == 1:
             _schedule_pluggy_sync(item_id)
         elif not conexoes:
-            # Item que não conhecemos: registra (o GET /items lista devolve 401,
-            # então este é o único jeito de saber que ele existe) e NÃO sincroniza.
-            await log_system_event(
-                "warning", "of_webhook_item_unknown",
-                "Webhook de item sem conexão local",
-                source="open_finance", details={"item_id": item_id, "event": event_name},
-            )
-            await asyncio.to_thread(
-                register_item, None, provider_item_id=item_id,
-                origin="webhook", last_event=event_name,
-            )
+            # Item que não conhecemos. Em `item/created` — e SÓ nele — pergunta à
+            # Pluggy de quem ele é e adota. QUEM ele destrava está na docstring de
+            # `_adota_item_orfao` ("Por que existe"), fonte única (CLAUDE.md §0.7);
+            # aqui fica só o QUANDO, que é decisão deste chamador:
+            #
+            # Por que só nesse evento: `item/created` dispara UMA vez, na criação,
+            # e é exatamente "item novo que o navegador não registrou". Evento
+            # POSTERIOR (`item/updated`, `transactions/created`) num item sem
+            # conexão significa item que JÁ TEVE conexão e foi removida — adotar
+            # ali ressuscita o banco que o usuário acabou de tirar, com sync
+            # agendado, que é o buraco que o `_disconnect_sob_lock` fechou pelo
+            # outro lado. O delete do item na Pluggy é best-effort
+            # (`delete_pluggy_items_best_effort`): o item sobrevive à falha e
+            # continua mandando evento.
+            adotado = (await _adota_item_orfao(item_id, event_name)
+                       if event_name == "item/created" else None)
+            if adotado is None:
+                # Sem adoção: registra (o GET /items lista devolve 401, então este
+                # é o único jeito de saber que ele existe) e NÃO sincroniza.
+                # ponytail: INSERT puro, sem teto — sob entrega at-least-once,
+                # cada retentativa de um item que já tem dono soma mais uma linha
+                # `origin='webhook'`/`user_id NULL` aqui. Igual à `main` (não é
+                # regressão) e inofensivo para os leitores, que perguntam
+                # por rastro COM dono; se o volume incomodar, é um upsert por
+                # (provider, item, origin) com contador.
+                await log_system_event(
+                    "warning", "of_webhook_item_unknown",
+                    "Webhook de item sem conexão local",
+                    source="open_finance", details={"item_id": item_id, "event": event_name},
+                )
+                try:
+                    await asyncio.to_thread(
+                        register_item, None, provider_item_id=item_id,
+                        origin="webhook", last_event=event_name,
+                    )
+                except Exception as exc:  # noqa: BLE001 — rastro nunca derruba o 200
+                    # Mesmo contrato do `of_item_registry_failed` na emissão do
+                    # connect token: 5xx aqui vira retentativa em laço da Pluggy.
+                    await log_system_event(
+                        "warning", "of_item_registry_failed",
+                        "Falha ao registrar item sem conexão",
+                        source="open_finance",
+                        details={"item_id": item_id, "error": str(exc)[:200]},
+                    )
         else:
             # Dois donos possíveis: sincronizar um deles é sincronizar a carteira
             # do usuário errado. Recusa.
