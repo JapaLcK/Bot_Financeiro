@@ -372,6 +372,7 @@ from .reports import (
     set_tip_email_opt_out,
     set_insight_email_opt_out,
     set_whatsapp_updates_opt_out,
+    get_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
     get_user_by_email,
 )
@@ -573,6 +574,7 @@ __all__ = [
     "mark_reengagement_sent",
     "mark_tip_sent", "mark_insight_sent", "set_engagement_opt_out",
     "set_tip_email_opt_out", "set_insight_email_opt_out", "set_whatsapp_updates_opt_out",
+    "get_whatsapp_updates_opt_out",
     "sync_engagement_opt_out",
     "get_user_by_email",
     # news (news_bot)

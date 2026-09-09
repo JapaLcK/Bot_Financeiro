@@ -92,6 +92,21 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
+        # Lembrete de pagamento do 6º dia de cartão em atraso. Isolado como os
+        # demais checks, e INERTE sem PAYMENT_REMINDER_ENABLED (default off).
+        # Não bloqueia acesso de ninguém — ver payment_reminder.py.
+        try:
+            from core.services.payment_reminder import check_payment_reminder
+            await check_payment_reminder()
+        except Exception as exc:
+            logger.error("[engagement] Erro no lembrete de pagamento: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "payment_reminder_error",
+                f"Erro no lembrete de pagamento: {exc}",
+                source="engagement_scheduler",
+            )
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except asyncio.CancelledError:

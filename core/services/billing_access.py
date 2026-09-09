@@ -25,6 +25,28 @@ from db.plan_grants import list_grants, users_com_grant_na_janela
 GAP_TOLERANCIA = timedelta(seconds=120)
 
 
+def grant_vigente(grants: list[dict], agora: datetime, *,
+                  sources: tuple[str, ...] | None = None) -> bool:
+    """True se existe grant ATIVO cobrindo `agora`. `sources` filtra a origem
+    (`None` = qualquer uma).
+
+    Extraído do predicado que era inline no `projetar_grants` (o "grant Pix
+    vigente manda no status"), porque a mesma pergunta é feita por
+    `core/services/payment_reminder._pago_por_outro_caminho` — lá com
+    `sources=("pix", "admin")`. Comportamento idêntico ao inline: `status`,
+    janela semiaberta `[starts_at, ends_at)` e nada mais.
+
+    Roda em todo webhook de cobrança e na passada de 60 s do loop de grants:
+    é `any()` sobre a lista já carregada, sem query nova.
+    """
+    return any(
+        g["status"] == "active"
+        and (sources is None or g["source"] in sources)
+        and g["starts_at"] <= agora < g["ends_at"]
+        for g in grants
+    )
+
+
 def _tier_do_stored(plan_stored: str) -> int:
     """Posição do valor legado da coluna `plan` na escada de tiers.
 
@@ -433,8 +455,7 @@ def recompute_entitlement(user_id: int, *, origem: str = "evento") -> dict | Non
     # Grant Pix vigente agora manda no status: a assinatura do cartão pode estar
     # 'canceled' e o acesso continuar pago pelo Pix. Sem grant Pix o status do
     # Stripe é preservado — quem manda nele continua sendo o webhook do cartão.
-    if any(g["source"] == "pix" and g["status"] == "active"
-           and g["starts_at"] <= agora < g["ends_at"] for g in grants):
+    if grant_vigente(grants, agora, sources=("pix",)):
         set_payment_status(user_id, "active")
 
     return {"plan": plano, "plan_expires_at": expira}
