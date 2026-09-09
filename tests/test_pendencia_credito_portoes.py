@@ -247,3 +247,69 @@ def test_pay_bill_choice_nao_paga_com_comando_depois_do_nome(frase):
     assert db.list_open_bills(uid), f"{frase!r} PAGOU a fatura: {resposta!r}"
     assert float(db.get_balance(uid)) > -300, \
         f"{frase!r} debitou a fatura: {resposta!r}"
+
+
+# P2-5, o lado do ATAQUE. A inversão poda QUALQUER prefixo, então o que segura
+# o ataque muda de mecanismo — e são DOIS, independentes:
+#
+#   1. VETO de `_VERBO_DE_COMANDO` sobre a mensagem inteira. É o único que pega
+#      `nubank excluir`: medido, ele é `out_of_scope/0.00`, então o oráculo do
+#      `_so_numero` o deixaria passar e ele pagaria os R$ 300. Por isso aqui
+#      NÃO se usa o classificador.
+#   2. A poda ser só de PREFIXO (a leitura sempre termina no fim da mensagem).
+#      É o que pega `nubank fatura` e `nubank saldo`, onde o nome do cartão não
+#      é sufixo — e é por isso que `fatura` não precisa estar no veto, o que
+#      manteria `a fatura do nubank` funcionando.
+@pytest.mark.parametrize("frase", [
+    "excluir cartao nubank", "nubank excluir", "nubank apagar", "nubank deletar",
+    "nubank remover", "quanto gastei no nubank", "quando vence o nubank",
+    "gastei 50 no nubank", "qual o limite do nubank", "nubank saldo",
+    "nubank fatura", "limite do nubank", "ver fatura nubank", "excluir o nubank",
+    "apagar cartao nubank",
+])
+def test_pay_bill_choice_nao_paga_com_comando_apesar_da_poda_livre(frase):
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+
+    resposta = _diga(uid, frase)
+
+    assert db.list_open_bills(uid), f"{frase!r} PAGOU a fatura: {resposta!r}"
+    assert float(db.get_balance(uid)) > -300, \
+        f"{frase!r} debitou a fatura: {resposta!r}"
+
+
+# P2-6 (Codex no #323) — NEGATIVA NATURAL. `_is_no` só aceitava literais, então
+# `nao quero` devolvia `None`, o `route()` abandonava, e a resposta que o
+# usuário via era "Nada a cancelar." (o ramo `confirm.no` do router, que não
+# trata pendência de cartão) — assunto trocado, e o resto do cadastro pulado.
+@pytest.mark.parametrize("negativa", ["nao quero", "não quero", "não obrigado",
+                                      "nao obrigado", "nao precisa", "nao agora",
+                                      "nao por enquanto"])
+def test_reminder_opt_in_aceita_negativa_natural(negativa):
+    uid = _uid()
+    card_id = _cartao(uid)
+    db.set_pending_action(uid, "credit_card_setup", {
+        "step": "reminder_opt_in", "card_name": "Nubank", "card_id": card_id,
+        "closing_day": 10, "ask_primary": False,
+    })
+
+    resposta = _diga(uid, negativa)
+
+    assert _AVISO not in resposta, f"{negativa!r} foi abandonada: {resposta!r}"
+    assert "nada a cancelar" not in resposta.lower(), \
+        f"{negativa!r} saiu pelo ramo confirm.no: {resposta!r}"
+    assert "limite de crédito" in resposta.lower(), \
+        f"{negativa!r} não seguiu o cadastro: {resposta!r}"
+
+
+@pytest.mark.parametrize("negativa", ["nao quero", "não obrigado", "nao precisa"])
+def test_delete_card_negativa_natural_mantem_o_cartao(negativa):
+    """A ponta destrutiva: a negativa natural tem de CANCELAR a exclusão, e o
+    cartão continuar de pé."""
+    uid = _uid()
+    _arma_delete_card(uid)
+
+    resposta = _diga(uid, negativa)
+
+    assert len(db.list_cards(uid)) == 1, f"{negativa!r} apagou o cartão: {resposta!r}"
+    assert "mantive" in resposta.lower(), f"{negativa!r}: {resposta!r}"

@@ -316,3 +316,4 @@ def test_custo_do_oraculo_frase_sem_comando_vira_limite(frase):
 
     assert float(db.list_cards(uid)[0]["credit_limit"]) == 5000.0, \
         f"{frase!r}: o custo do oráculo mudou — remeça antes de mexer"
+

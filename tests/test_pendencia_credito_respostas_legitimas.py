@@ -281,3 +281,49 @@ def test_pay_bill_choice_o_generico_continua_pagando_o_generico(
     assert _fatura_aberta_do_cartao(uid, ids["Nubank PF"]), \
         f"{resposta_do_user!r} pagou o *Nubank PF* por engano: {resposta!r}"
     assert "300" in resposta, resposta
+
+
+# ===========================================================================
+# P2-5 (Codex no #323) — PREFIXO CONVERSACIONAL no nome do cartão.
+#
+# `quero o Nubank`, `pode ser o Nubank`, `escolho o Nubank`: a poda parava no
+# primeiro token fora do `_FILLER`, e a `main` casava por substring.
+#
+# A correção é a INVERSÃO: poda QUALQUER prefixo, a não ser que a mensagem
+# contenha verbo de comando (`_VERBO_DE_COMANDO`, conjunto fechado do domínio).
+# Enumerar prefixo inofensivo é conjunto aberto — foi o que custou quatro
+# rodadas no `_so_numero`. O ataque continua fora por dois mecanismos
+# independentes, e os dois têm teste em `test_pendencia_credito_portoes.py`:
+# o veto de verbo (pega `nubank excluir`, que o classificador vê como
+# out_of_scope) e a poda ser só de PREFIXO (pega `nubank fatura`, cujo nome não
+# é sufixo da mensagem).
+# ===========================================================================
+
+@pytest.mark.parametrize("resposta_do_user", [
+    "quero o nubank", "pode ser o nubank", "escolho o nubank",
+    "prefiro o nubank", "vai ser o nubank", "manda o nubank",
+    "acho que o nubank", "quero nubank", "pode ser nubank",
+    "esse ai o nubank",
+])
+def test_pay_bill_choice_aceita_prefixo_conversacional(resposta_do_user):
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
+    assert db.list_open_bills(uid) == [], \
+        f"{resposta_do_user!r} não pagou: {resposta!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["quero o nubank", "pode ser o nubank",
+                                              "escolho o nubank"])
+def test_set_primary_choose_aceita_prefixo_conversacional(resposta_do_user):
+    """A outra pergunta que lê nome de cartão."""
+    uid = _uid()
+    _cartao(uid)
+    db.set_pending_action(uid, "credit_card_set_primary", {"step": "choose"})
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert "principal" in resposta.lower(), f"{resposta_do_user!r}: {resposta!r}"

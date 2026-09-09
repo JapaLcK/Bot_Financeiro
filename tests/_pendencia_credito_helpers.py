@@ -22,23 +22,19 @@ cinco (`credit_card_setup`, `credit_card_set_primary`, `credit_delete_card`,
 `installment_pending`, `pay_bill_choice`) não, e nessas etapas QUALQUER texto
 vira resposta. Medido nesta árvore, antes da correção:
 
-  - `installment_pending` + `saldo` → "✅ Parcelamento Registrado! Descrição:
-    saldo", 5 `credit_transactions`, R$ 500;
-  - `pay_bill_choice` + `quanto gastei no nubank` → PAGA a fatura (R$ 300),
-    porque `_find_card_name_in_text` casa o nome do cartão dentro de qualquer
-    frase;
-  - `excluir cartao nubank` → `saldo` → `sim` → cartão apagado em cascata. É o
-    footgun de 3 turnos que o guard anti-órfão existe para impedir, mas
-    `credit_delete_card` não está em `DESTRUCTIVE_PENDING_TYPES` E este bloco
-    retorna antes dele — estava SOMBREADO, não ausente.
+  - `installment_pending` + `saldo` → 5 `credit_transactions`, R$ 500, com
+    descrição "saldo";
+  - `pay_bill_choice` + `quanto gastei no nubank` → PAGA a fatura (R$ 300), por
+    `_find_card_name_in_text` casar o nome dentro de qualquer frase;
+  - `excluir cartao nubank` → `saldo` → `sim` → cartão apagado em cascata: o
+    footgun de 3 turnos, SOMBREADO (o bloco retorna antes do guard anti-órfão,
+    e `credit_delete_card` não está em `DESTRUCTIVE_PENDING_TYPES`).
 
-O predicado é o `abandona_pergunta_de_credito` (WHITELIST derivada do
-`ABANDONA`), e o defeito tem DUAS direções — por isso são DOIS controles
-negativos, um em cada sentido. Os dois foram executados nesta árvore:
+O predicado é o `abandona_pergunta_de_credito` (whitelist derivada do
+`ABANDONA`). O defeito tem DUAS direções, logo dois controles:
 
-CONTROLE NEGATIVO A — abandonar de MENOS. Em `core/intent_router.py`, troque
-`if abandona_pergunta_de_credito(text):` por `if False:` (o `if` incondicional
-de antes). Ficam VERMELHOS:
+CONTROLE NEGATIVO A — abandonar de MENOS: `if abandona_pergunta_de_credito(
+text):` vira `if False:` (o `if` incondicional de antes). VERMELHOS:
 
     test_saldo_abandona_sem_escrever[credit_card_setup]
     test_saldo_abandona_sem_escrever[credit_card_set_primary]
@@ -49,13 +45,9 @@ de antes). Ficam VERMELHOS:
     test_pay_bill_choice_nao_paga_com_pergunta_de_gasto
     test_aviso_aparece_quando_abandona
 
-CONTROLE NEGATIVO B — abandonar DEMAIS. Troque pelo predicado de blacklist que
-a rodada anterior usava:
-
-    if (confidence >= 0.55 and intent != "out_of_scope"
-            and intent not in ("confirm.yes", "confirm.no")):
-
-Ficam VERMELHOS (medido nesta árvore):
+CONTROLE NEGATIVO B — abandonar DEMAIS: troque pela blacklist de antes
+(`confidence >= 0.55 and intent != "out_of_scope" and intent not in
+("confirm.yes", "confirm.no")`). VERMELHOS:
 
     test_installment_todas_as_descricoes_registram[comprei uma tv]
     test_installment_todas_as_descricoes_registram[comprei um sofa]
@@ -68,10 +60,8 @@ Ficam VERMELHOS (medido nesta árvore):
     test_duplicate_card_name_aceita_as_sete_do_is_delete[excluir cartao]
     test_duplicate_card_name_aceita_as_sete_do_is_delete[excluir cartão]
 
-Sem este segundo controle o grupo é cego à classe inteira que a blacklist
-quebrava: `comprei uma tv` virava despesa de R$ 1,00 e o parcelamento ia fora.
-Os dois controles medem defeitos OPOSTOS, e nenhum dos dois sozinho basta — o A
-não vê a blacklist, o B não vê o `if` incondicional.
+A e B medem defeitos OPOSTOS e nenhum basta sozinho: sem o B o grupo é cego à
+classe que a blacklist quebrava (`comprei uma tv` virava despesa de R$ 1,00).
 
 O abandono tem DUAS portas; os controles acima cobrem só a primeira (allowlist
 de intent). A segunda é a RESPOSTA NÃO RECONHECIDA num espaço enumerável — ela
@@ -89,14 +79,10 @@ CONTROLE NEGATIVO C — o casamento por SUBSTRING volta. Em
     test_pay_bill_choice_nao_paga_com_frase_que_contem_o_cartao[qual o limite do nubank]
     test_pay_bill_choice_nao_paga_com_frase_que_contem_o_cartao[gastei 50 no nubank]
 
-CONTROLE NEGATIVO D — o portão do destrutivo desliga. No `_resolve_delete_card`,
-troque o `return None` final de volta pela re-pergunta "Responda **sim**…":
-
-    test_footgun_tres_turnos_com_qualquer_meio[tchau]
-    test_footgun_tres_turnos_com_qualquer_meio[obrigado]
-
-(só estes dois: `oi`/`bom dia` são pegos pela OUTRA porta, a allowlist. Cada
-metade do teste prova uma porta, e é por isso que as duas estão juntas nele.)
+CONTROLE NEGATIVO D — no `_resolve_delete_card`, o `return None` final vira a
+re-pergunta "Responda **sim**…": `test_footgun_tres_turnos_com_qualquer_meio`
+[tchau] e [obrigado]. Só estes dois — `oi`/`bom dia` são pegos pela OUTRA porta
+(a allowlist), e é por isso que as duas metades vivem no mesmo teste.
 
 CONTROLE NEGATIVO E — tire `"greeting"` do `_ABANDONA_CREDITO`:
 
@@ -110,7 +96,7 @@ RE-PERGUNTAR × ABANDONAR é escolha por portão; a regra está em
 `core/handlers/credit.py`, acima do `_so_numero`. Os dois sentidos, medidos:
 
 CONTROLE NEGATIVO F — o `pay_bill_choice` passa a ABANDONAR (`return None` no
-lugar da lista numerada). Ficam VERMELHOS:
+lugar da lista numerada). VERMELHOS:
 
     test_pay_bill_choice_nao_reconhecida_nunca_paga[setembro/2026]
     test_pay_bill_choice_nao_reconhecida_nunca_paga[09/2026]
@@ -119,18 +105,12 @@ lugar da lista numerada). Ficam VERMELHOS:
     test_pay_bill_choice_nao_reconhecida_nunca_paga[a segunda]
 
 e a assertiva que cai é a de UX (`AVISO not in resposta`) — as de DINHEIRO
-(`list_open_bills`, `get_balance`) seguem verdes nas duas leituras, que é
-justamente por que esta perna é escolha de UX e não de segurança.
+seguem verdes nas duas leituras, que é por que esta perna é UX, não segurança.
 
-CONTROLE NEGATIVO G — os três destrutivos passam a RE-PERGUNTAR (o `return None`
-vira a mensagem "Responda **sim**…"). Ficam VERMELHOS:
-
-    test_footgun_tres_turnos_com_qualquer_meio[tchau]
-    test_footgun_tres_turnos_com_qualquer_meio[obrigado]
-
-Aqui a assertiva que cai é a do CARTÃO APAGADO. É a prova de que a assimetria
-entre as duas pernas não é gosto: uniformizar os nove portões para
-"re-perguntar" reabre o footgun de 3 turnos.
+CONTROLE NEGATIVO G — os três destrutivos passam a RE-PERGUNTAR: os MESMOS dois
+casos do D, mas agora a assertiva que cai é a do CARTÃO APAGADO. Prova de que a
+assimetria não é gosto — uniformizar os nove portões para "re-perguntar" reabre
+o footgun de 3 turnos.
 
 POSITIVOS da segunda porta ("qual resposta legítima o portão RECUSA?"): 20 do
 `pay_bill_choice`, 8 do `_is_yes`, 7 do `_is_no`, o nome no `choose` e os steps
@@ -142,18 +122,12 @@ o intercepta antes do `route()`; igual nas duas colunas, anterior a este PR.
 O ESPELHO: os portões acima recusavam RESPOSTA LEGÍTIMA, defeito do mesmo
 jeito. Quatro mutantes:
 
-CONTROLE NEGATIVO H — apague o `if not _is_yes(answer) and not _is_no(answer):
-return None` do step `reminder_opt_in`:
-
-    test_reminder_opt_in_recusa_o_que_nao_e_sim_nem_nao[talvez|depois|tchau]
-
-CONTROLE NEGATIVO I — o mesmo, no step `set_primary`:
-
-    test_set_primary_step_recusa_o_que_nao_e_sim_nem_nao[talvez|depois|tchau]
-
-(H e I existiam sem NENHUM teste: o Tester apagou as duas linhas e a suíte
-inteira ficou verde. Conserto sem teste que morre é conserto que alguém apaga
-sem perceber.)
+CONTROLES NEGATIVOS H e I — apague o `if not _is_yes(answer) and not
+_is_no(answer): return None` do step `reminder_opt_in` (H) e do `set_primary`
+(I): morrem `test_reminder_opt_in_recusa_o_que_nao_e_sim_nem_nao` e
+`test_set_primary_step_recusa_o_que_nao_e_sim_nem_nao`, [talvez|depois|tchau].
+Os dois portões existiam sem NENHUM teste — o Tester apagou as duas linhas e a
+suíte inteira ficou verde.
 
 CONTROLE NEGATIVO J — o `_card_name_da_resposta` volta a normalizar SÓ a
 resposta (núcleo + `get_card_id_by_name`, que só faz `lower()`): 17 vermelhos,
@@ -165,10 +139,9 @@ CONTROLE NEGATIVO K — o `_so_numero` volta à regex ancorada: 13 vermelhos, to
 o `test_forma_legitima_passa_pelo_portao` de `todo dia 10`, `cinco mil`,
 `3 dias antes` etc.
 
-E o outro lado de J e K, que tem de continuar VERDE nos dois:
+O outro lado de J e K tem de continuar VERDE nos dois:
 `test_pay_bill_choice_nao_paga_com_frase_que_contem_o_cartao` e
-`test_forma_com_residuo_semantico_continua_recusada` — afrouxar o critério não
-pode reabrir o buraco que o portão existe para fechar.
+`test_forma_com_residuo_semantico_continua_recusada`.
 
 CONTROLE NEGATIVO L — o `_ABANDONA_CREDITO` volta ao conjunto de antes (os 12
 intents que herdaram a ausência do `ABANDONA` de fora): 13 vermelhos, todo o
@@ -224,6 +197,30 @@ do palpite: sozinho, o oráculo QUEBRA 10 respostas legítimas que hoje funciona
 `5000 pilas`, `5000 contos`, `5000 mangos`, `5 mil reais e 50 centavos`), todas
 `launches.add/0.95`. Trocar tokens POR oráculo reabriria o R3-2 inteiro.
 
+A QUINTA porta: PREFIXO CONVERSACIONAL no nome e NEGATIVA NATURAL (#323).
+
+CONTROLE NEGATIVO T — volte a podar só o prefixo de `_FILLER` (o `for i in
+range(fim)` vira a varredura que parava no primeiro não-filler): 13 vermelhos
+em `test_pay_bill_choice_aceita_prefixo_conversacional` e
+`test_set_primary_choose_aceita_prefixo_conversacional`.
+
+CONTROLE NEGATIVO U — tire o veto de `_VERBO_DE_COMANDO`: 8 vermelhos em
+`test_pay_bill_choice_nao_paga_com_comando_apesar_da_poda_livre`. Note QUAIS:
+só os casos em que o nome do cartão é SUFIXO da mensagem (`excluir cartao
+nubank`, `limite do nubank`, `ver fatura nubank`...). `nubank excluir` e
+`nubank fatura` seguem verdes sem o veto, porque ali quem segura é a poda ser
+só de prefixo. São DOIS mecanismos independentes, e o teste mede os dois.
+
+CONTROLE NEGATIVO V — `_is_no` volta a só aceitar literais: 10 vermelhos em
+`test_reminder_opt_in_aceita_negativa_natural` e
+`test_delete_card_negativa_natural_mantem_o_cartao`.
+
+POR QUE NÃO O ORÁCULO no nome do cartão, ao contrário do `_so_numero`: medido,
+`nubank excluir` é `out_of_scope/0.00` — o classificador não vê comando —,
+então o oráculo o deixaria passar, ele casaria `nubank` e pagaria os R$ 300.
+Para nome de cartão a veto-list é obrigatória; para número, o oráculo é o que
+evita enumerar conjugação. Ferramentas diferentes para portas diferentes.
+
 DOIS RESÍDUOS CONHECIDOS, medidos e não consertados, os dois pela porta da
 ALLOWLIST (não pelos portões): (1) cartão chamado como um comando — `Conta`
 perde a resposta `conta` sozinha (`balance.check`/1.0); `a conta` e
@@ -231,7 +228,10 @@ perde a resposta `conta` sozinha (`balance.check`/1.0); `a conta` e
 `re.search` ancorados só no começo), então `opa 5000` e `oi, a do nubank`
 abandonam sendo legítimas. O (2) está fixado em
 `test_saudacao_seguida_de_resposta_legitima_abandona_sem_escrever`: a direção é
-fail-safe — avisa e não escreve.
+fail-safe — avisa e não escreve. (3) `o nubank mesmo` não casa: a leitura
+sempre termina no fim da mensagem, e é ESSA regra que mantém `nubank fatura` e
+`nubank saldo` fora. Custo aceito — trocar por busca em qualquer posição
+reabriria o mutante P.
 
 HISTÓRICO: `test_credit_limit_ask_nao_vira_limite_de_50` saiu daqui por só
 passar com `launches.add` no predicado — o que comia `comprei uma tv`, o teste

@@ -353,6 +353,31 @@ _FILLER = {"a", "o", "as", "os", "um", "uma", "do", "da", "de", "dos", "das",
 # (`excluir cartao nubank`); no fim, é o comando vir DEPOIS (`nubank excluir`).
 # Aparar o sufixo com a mesma lista do prefixo reabriria a segunda forma — por
 # isso aqui só entram palavras que não são comando de nada.
+# Verbo/pronome que faz da mensagem um COMANDO, não uma escolha de cartão.
+# Conjunto FECHADO e do domínio — é a inversão que este repositório já escolheu
+# duas vezes (a nota do `ABANDONA`, :165-171): enumerar o que é INOFENSIVO é
+# conjunto aberto ("quero", "pode ser", "escolho", "prefiro", "vai ser"...) e
+# rende uma rodada de revisão por palavra esquecida; enumerar o que é PERIGOSO
+# é fechado, porque os comandos deste domínio são contáveis.
+#
+# NÃO se usa o oráculo (`classify`) aqui, ao contrário do `_so_numero`, e a
+# medição é a razão: `nubank excluir` é `out_of_scope/0.00` — o classificador
+# não vê comando nenhum —, então o oráculo o deixaria passar, ele casaria
+# `nubank` e PAGARIA os R$ 300. A veto-list pega porque olha a mensagem
+# INTEIRA, não só o começo.
+#
+# `fatura` fica de FORA de propósito: é filler ("a fatura do nubank" é resposta
+# legítima). Quem barra `nubank fatura` é a poda ser por SUFIXO — ver abaixo.
+_VERBO_DE_COMANDO = {
+    "excluir", "apagar", "deletar", "remover", "delete", "cancelar",
+    "pagar", "paguei", "gastei", "gasto", "gastos", "comprei", "parcelei",
+    "quanto", "quando", "qual", "quais",
+    "ver", "mostrar", "mostra", "listar", "lista",
+    "vence", "vencimento", "fecha", "fechamento", "limite",
+    "saldo", "extrato", "criar", "cadastrar", "definir", "mudar", "trocar",
+    "desfazer", "ajuda",
+}
+
 _CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
                    "valeu", "vlw", "pls", "please", "plz"}
 
@@ -385,6 +410,12 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
     cortesia e a de sufixo também.
     """
     tokens = alvo.split()
+    # VETO: a mensagem inteira tem verbo de comando → só a leitura literal, que
+    # na prática é "não casa cartão nenhum". É o que segura `nubank excluir`,
+    # onde o comando vem DEPOIS do nome e nenhuma poda de prefixo alcançaria.
+    if any(t in _VERBO_DE_COMANDO for t in tokens):
+        return [alvo]
+
     # `> 1`: resposta que é SÓ cortesia ("obrigado") não pode virar string
     # vazia e casar um cartão de nome vazio.
     sem_cortesia = len(tokens)
@@ -392,18 +423,20 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
         sem_cortesia -= 1
 
     leituras: set[str] = set()
-    # TODO corte de sufixo entre "nenhuma cortesia aparada" e "toda aparada",
+    # Todo corte de sufixo entre "nenhuma cortesia aparada" e "toda aparada",
     # não só os dois extremos: a poda é gulosa e em `nubank pf por favor` ela
-    # come o `pf` junto, então parar nos extremos daria `nubank pf por favor` e
-    # `nubank` — sem o `nubank pf`, que é o nome do cartão. Aparar MENOS nunca
-    # expõe comando, porque só se apara token de `_CORTESIA_FINAL`.
+    # comeria o `pf` junto, deixando sem o `nubank pf`, que é o nome do cartão.
+    #
+    # E QUALQUER prefixo, não só o de filler: sem isso `quero o nubank` e
+    # `pode ser o nubank` não casavam nada. O que impede isso de virar busca por
+    # substring é a leitura terminar SEMPRE no fim (só se poda prefixo, nunca
+    # miolo nem cauda) — é isso que mantém `nubank fatura` e `nubank saldo`
+    # fora, porque ali o nome não é sufixo da mensagem.
+    # ponytail: O(n²) em tokens de UMA resposta de WhatsApp; se algum dia
+    # importar, corte pelo maior nome de cartão do usuário.
     for fim in range(len(tokens), sem_cortesia - 1, -1):
-        nucleo = tokens[:fim]
-        leituras.add(" ".join(nucleo))
-        for i in range(1, len(nucleo)):
-            if nucleo[i - 1] not in _FILLER:
-                break
-            leituras.add(" ".join(nucleo[i:]))
+        for i in range(fim):
+            leituras.add(" ".join(tokens[i:fim]))
     return sorted(leituras, key=len, reverse=True)
 
 
@@ -923,8 +956,33 @@ def _is_yes(text: str) -> bool:
     return normalize_text(text) in {"sim", "s", "yes", "y", "quero", "claro", "ok", "pode"}
 
 
+_NEGATIVAS_EXATAS = {"nao", "não", "n", "no", "cancelar", "cancela",
+                     "agora nao", "agora não"}
+
+
 def _is_no(text: str) -> bool:
-    return normalize_text(text) in {"nao", "não", "n", "no", "cancelar", "cancela", "agora nao", "agora não"}
+    """Negativa, em pergunta de sim/não.
+
+    UNIÃO, não substituição: os literais de sempre MAIS "começa com não". Só os
+    literais deixavam de fora a negativa natural — `nao quero`, `não obrigado`,
+    `nao precisa`, `nao agora` —, e o efeito não era só "não entendi": o portão
+    devolvia `None`, o `route()` abandonava, e `não quero` (que é
+    `confirm.no/1.00`) saía como **"Nada a cancelar."**, resposta de outro
+    assunto, pulando o resto do cadastro.
+
+    Medido: das 19 positivas do corpus (`sim`, `quero sim`, `pode sim`,
+    `claro que sim`, `beleza`...), NENHUMA começa com "não" — a união não
+    ambigua nada.
+
+    O lado positivo NÃO ganhou regra equivalente, e é decisão, não esquecimento:
+    `_is_yes` também perde `quero sim`/`pode sim`, mas alargar o SIM é alargar o
+    gatilho de uma confirmação DESTRUTIVA (`_resolve_delete_card`,
+    `confirm_delete_existing_card`). Não reconhecer um "sim" é fail-safe — o
+    cartão fica de pé; não reconhecer um "não" é só confuso. As duas pontas não
+    correm o mesmo risco, igual ao `_CORTESIA_FINAL`.
+    """
+    norm = normalize_text(text)
+    return norm in _NEGATIVAS_EXATAS or norm.startswith(("nao ", "não "))
 
 
 def _is_delete(text: str) -> bool:
