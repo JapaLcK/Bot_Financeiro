@@ -1885,6 +1885,17 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _table_cleanup():
+        # Poda de auth_refresh_tokens/mfa_login_challenges/pending_google_signups.
+        # As três funções são síncronas (get_conn bloqueante); o loop as chama por
+        # asyncio.to_thread — ver core/services/table_cleanup.py.
+        try:
+            await asyncio.sleep(2)
+            from core.services.table_cleanup import run_table_cleanup_loop  # noqa: PLC0415
+            await run_table_cleanup_loop()
+        except Exception as exc:
+            print(f"[table_cleanup] erro: {exc}", file=sys.stderr)
+
     async def _plan_grants_reprojection():
         """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
 
@@ -2012,6 +2023,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
             ]
         )

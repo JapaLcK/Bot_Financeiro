@@ -16,8 +16,8 @@ def test_falha_em_uma_tabela_nao_impede_as_outras(monkeypatch, capsys):
         chamadas.append("mfa_login_challenges")
         raise RuntimeError("conexão caiu no meio")
 
-    monkeypatch.setattr(cleanup_job, "_log_event", lambda *a, **k: None)
-    monkeypatch.setattr(cleanup_job, "_cleanups", lambda: [
+    monkeypatch.setattr(cleanup_job, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr("core.services.table_cleanup._cleanups", lambda: [
         ("auth_refresh_tokens", _ok("auth_refresh_tokens", 3)),
         ("mfa_login_challenges", _explode),
         ("pending_google_signups", _ok("pending_google_signups", 0)),
@@ -30,7 +30,7 @@ def test_falha_em_uma_tabela_nao_impede_as_outras(monkeypatch, capsys):
     assert "auth_refresh_tokens: 3 linha(s) removida(s)" in saida.out
     assert "pending_google_signups: 0 linha(s) removida(s)" in saida.out
     assert "mfa_login_challenges: FALHOU" in saida.err
-    assert rc == 1  # o cron precisa marcar a execução como falha
+    assert rc == 1  # a execução manual precisa sair vermelha
 
 
 def test_falha_no_delete_de_refresh_tokens_chega_ao_resultado(monkeypatch, capsys):
@@ -47,12 +47,12 @@ def test_falha_no_delete_de_refresh_tokens_chega_ao_resultado(monkeypatch, capsy
     monkeypatch.setattr("db.google_auth.cleanup_expired_pending_signups", lambda: 0)
 
     eventos: list[tuple[str, dict]] = []
-    monkeypatch.setattr(cleanup_job, "_log_event", lambda level, msg, det: eventos.append((level, det)))
+    monkeypatch.setattr(cleanup_job, "log_event", lambda level, msg, det: eventos.append((level, det)))
 
     rc = cleanup_job.run()
     saida = capsys.readouterr()
 
-    assert rc == 1, "cron ficaria verde sobre tabela que não foi podada"
+    assert rc == 1, "o job ficaria verde sobre tabela que não foi podada"
     assert [(lvl, [e["table"] for e in det["errors"]]) for lvl, det in eventos] == [
         ("error", ["auth_refresh_tokens"])
     ]
