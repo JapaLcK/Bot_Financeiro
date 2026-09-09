@@ -158,12 +158,18 @@ function pixVisivel() {
 }
 
 async function pixBater() {
-  if (!pixPoll) return;
+  // A cobrança que ESTA pergunta é sobre. Fechar o modal com a requisição no ar
+  // e abrir outro checkout deixava `pixPoll` NÃO-NULO de novo — e a resposta da
+  // cobrança VELHA passava pela guarda: um `paid` antigo redirecionava com o
+  // `sid` da outra, e um terminal antigo apagava o QR novo. Identidade do
+  // objeto, não `token`: duas cobranças podem trazer o mesmo.
+  const meu = pixPoll;
+  if (!meu) return;
   // O deadline NÃO expira sozinho. Na cauda o poll é de 10 s: a cobrança liquida
   // dentro dessa janela, depois do último poll, e a tela dizia "expirou e nada
   // foi cobrado" sobre cobrança PAGA — com um "Gerar novo código" ao lado, que
   // CANCELA a cobrança remota (§10). Vencido, pergunta-se uma última vez.
-  const venceu = Date.now() >= pixPoll.deadline;
+  const venceu = Date.now() >= meu.deadline;
   // Aba escondida não gasta requisição: quem retoma é o visibilitychange. A
   // última pergunta é a exceção — é ela que decide a mensagem.
   if (document.hidden && !venceu) { pixAgendar(pixIntervalo()); return; }
@@ -171,19 +177,19 @@ async function pixBater() {
   let corpo = null;
   let desistir = false;
   try {
-    const r = await fetch("/billing/pix/" + encodeURIComponent(pixPoll.token),
+    const r = await fetch("/billing/pix/" + encodeURIComponent(meu.token),
       { credentials: "same-origin" });
-    if (!pixPoll) return;                       // fechou durante a requisição
+    if (pixPoll !== meu) return;                // fechou ou trocou de cobrança
     if (r.status === 401) desistir = true;      // sobrou do auth-refresh: não insiste
     else if (!r.ok) throw new Error("http " + r.status);
     else corpo = await r.json();
   } catch {
-    if (!pixPoll) return;
-    if (++pixPoll.falhas >= 3) desistir = true;
+    if (pixPoll !== meu) return;
+    if (++meu.falhas >= 3) desistir = true;
   }
-  if (!pixPoll) return;
+  if (pixPoll !== meu) return;
   if (corpo) {
-    pixPoll.falhas = 0;
+    meu.falhas = 0;
     if (corpo.status === "paid") { pixPago(); return; }
     if (PIX_TERMINAIS.has(corpo.status)) { pixExpirou("Esta cobrança não vale mais.", true); return; }
   }

@@ -86,7 +86,12 @@ function pbPixInit(cfg, sub) {
 function pbPixRefresh() {
   // `!== true` e não `!`: portão de venda não abre com valor truthy qualquer.
   if (!pixCfg || pixCfg.pix_annual_available !== true) return;
-  const anual = currentCycle === "annual";
+  // Vitalício NÃO compra: o `refreshPlanButtons` da precos.html já marca os
+  // cards como acesso permanente, e o backend recusa o checkout com 409
+  // `lifetime` — um CTA aqui é um clique rumo ao erro, com CPF digitado antes.
+  // Mesmo caminho do mensal: sai do DOM (escondido ainda recebe Tab), o que
+  // também apaga o CTA já criado quando a assinatura chega depois do cfg.
+  const anual = currentCycle === "annual" && !(pixSub && pixSub.lifetime === true);
   for (const plano of PIX_PLANOS) {
     const existente = document.querySelector('[data-pix-cta="' + plano + '"]');
     // Sai do DOM no mensal em vez de ficar escondido: escondido ainda recebe Tab.
@@ -270,9 +275,12 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
       headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
       body: JSON.stringify(corpo),
     });
-    // Fechou no meio: nada de QR desenhado numa caixa já destacada — seria um
-    // instrumento ao portador fora da tela, com o poll rodando por trás dele.
-    // A cobrança criada lá expira sozinha; o que não pode é sobrar aqui.
+    const d = await r.json().catch(() => ({}));
+    // Fechou no meio — e a conferência vem DEPOIS do corpo, não antes: dá para
+    // fechar entre a chegada dos cabeçalhos e o fim do download do JSON, e aí o
+    // QR ia para uma caixa já destacada, com o poll rodando por trás dela e o
+    // `pixPoll` invisível bloqueando o próximo checkout até vencer. A cobrança
+    // criada lá expira sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
       showToast("Faça login pra continuar a assinatura.", "err");
@@ -281,7 +289,6 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
       }, 900);
       return;
     }
-    const d = await r.json().catch(() => ({}));
     const det = (d && d.detail) || {};
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
@@ -321,3 +328,10 @@ function pixModalMigracao(plano, det, documento, ctx) {
   box.append(ok, nao);
   ok.focus();
 }
+
+// A precos.html chama o `pbPixInit` depois de duas requisições, guardada por
+// `typeof pbPixInit === "function"` — e estes dois scripts ainda podem estar
+// sendo BAIXADOS quando elas terminam: ali a guarda daria falso e ninguém
+// tentaria de novo, deixando a página sem CTA nenhum com a flag ligada. Então
+// quem chegar por ÚLTIMO lê o estado que o outro deixou, seja qual for a ordem.
+if (window.pbPixState) pbPixInit(window.pbPixState.cfg, window.pbPixState.sub);

@@ -73,8 +73,11 @@ async function abrirPrecos({
   status = () => ({ status: "pending" }),
   viewport = { width: 1280, height: 900 },
   relogio = false,
+  atrasos = {},
+  initScript = null,
 } = {}) {
   const page = await browser.newPage({ viewport });
+  if (initScript) await page.addInitScript(initScript);
   // Relógio falso: o teto do CLIENTE é de 15 minutos, e a única forma de medir
   // que ele existe sem esperar 15 minutos é adiantar o relógio da página. Com
   // ele instalado o setTimeout do poll só anda por `fastForward` — nenhuma
@@ -124,10 +127,10 @@ async function abrirPrecos({
   // Depois do `checkout` na ordem de registro: o Playwright usa a ÚLTIMA rota
   // que casa, então o padrão mais amplo tem de vir por último para não engolir
   // o `/billing/pix/checkout`. Este `if` é o que devolve o checkout para ele.
-  await page.route("**/billing/pix/*", (r) => {
+  await page.route("**/billing/pix/*", async (r) => {
     if (r.request().url().endsWith("/checkout")) return r.fallback();
     chamadas.poll += 1;
-    const corpo = status(chamadas.poll);
+    const corpo = await status(chamadas.poll);
     if (!corpo) return r.abort();          // rede fora: o fetch REJEITA
     return r.fulfill({ contentType: "application/json", body: JSON.stringify(corpo) });
   });
@@ -136,6 +139,18 @@ async function abrirPrecos({
   await page.route("**/home*", (r) => r.fulfill({
     contentType: "text/html", body: "<html><body>home</body></html>",
   }));
+
+  // Atraso artificial por pedaço de URL, e por ÚLTIMO de propósito: o Playwright
+  // usa a rota registrada mais tarde, e o `fallback()` devolve o pedido para a
+  // registrada antes (ou para a rede). É o que permite medir corrida de carga —
+  // script que chega depois das requisições, /billing/subscription lento.
+  if (Object.keys(atrasos).length) {
+    await page.route("**/*", async (r) => {
+      const k = Object.keys(atrasos).find((x) => r.request().url().includes(x));
+      if (k) await new Promise((ok) => setTimeout(ok, atrasos[k]));
+      return r.fallback();
+    });
+  }
 
   await page.goto(`${ORIGIN}/precos.html`);
   await page.waitForSelector("#plans-v2 .plan");
@@ -916,5 +931,166 @@ test("PT12e: no estado do FORMULÁRIO o Tab não sai do modal", async () => {
   assert.equal(await page.$$eval(".pix-ov", (e) => e.length), 1,
     "nasceu um SEGUNDO modal com o formulário do documento aberto");
   assert.equal(chamadas.pixCheckout, 0, "o segundo caminho cobrou sem pedir documento");
+  await page.close();
+});
+
+/**
+ * PT13 — A RESPOSTA É DA COBRANÇA QUE A PEDIU, e é a de dinheiro.
+ *
+ * Fechar o modal com o poll no ar e abrir OUTRO checkout deixava `pixPoll`
+ * não-nulo de novo, e a guarda `if (!pixPoll) return` aceitava a resposta da
+ * cobrança VELHA: um `paid` antigo redirecionava para a /home com o `sid` da
+ * cobrança NOVA (atribuição errada no GA4 e no pixel, sobre uma compra que não
+ * aconteceu), e um terminal antigo apagava o QR novo da tela.
+ *
+ * A 1ª pergunta fica PENDURADA no servidor e só responde `paid` quando o teste
+ * solta — que é a cobrança velha liquidando depois de a tela já ser de outra.
+ *
+ * *Negativo: troque os `if (pixPoll !== meu) return;` do `pixBater` de volta por
+ * `if (!pixPoll) return;` → o `waitForTimeout` seguinte encontra a /home.*
+ */
+test("PT13: resposta do poll da cobrança velha não decide sobre o modal novo", async () => {
+  let soltar;
+  const velha = new Promise((ok) => { soltar = ok; });
+  const { page, chamadas } = await abrirQr({
+    status: async (n) => {
+      if (n !== 1) return { status: "pending" };
+      await velha;
+      return { status: "paid" };
+    },
+  });
+  assert.equal(chamadas.poll, 1, "a primeira pergunta não chegou a sair");
+  await page.click(".pix-box .pix-ghost");          // fecha com a requisição no ar
+  await page.waitForTimeout(150);
+  await page.click('[data-pix-cta="pro"]');
+  await page.waitForSelector(".pix-doc");
+  await enviarDoc(page);
+  await page.waitForSelector(".pix-code");
+  const url = page.url();
+
+  soltar();                                          // a cobrança VELHA diz "paid"
+  await page.waitForTimeout(900);
+  assert.equal(page.url(), url,
+    `a resposta da cobrança velha navegou a página: ${page.url()}`);
+  assert.equal(await page.$$eval(".pix-code", (e) => e.length), 1,
+    "a resposta da cobrança velha apagou o QR da cobrança nova");
+  assert.equal(await page.inputValue(".pix-code"), PAYLOAD);
+  await page.close();
+});
+
+/**
+ * PT14 — VITALÍCIO NÃO COMPRA, e o CTA some quando a assinatura chega depois.
+ *
+ * O `refreshPlanButtons` já marca os cards como acesso permanente; o laço do Pix
+ * só olhava `gateway` e `plan`, então o vitalício via os três CTAs, digitava o
+ * CPF e tomava o 409 `lifetime` do backend. Como o CTA agora nasce ANTES do
+ * /billing/subscription (PT15), o caso que importa é o da assinatura ATRASADA:
+ * ele aparece e tem de SAIR.
+ *
+ * Positivo (já no arquivo): o PT4 prova que assinante de Pix não-vitalício
+ * continua vendo os três CTAs, com "Renovar" no plano dele.
+ *
+ * *Negativo: tire o `&& !(pixSub && pixSub.lifetime === true)` do
+ * `pbPixRefresh` → sobram os 3 CTAs depois da assinatura chegar.*
+ */
+test("PT14: vitalício não fica com CTA de Pix nenhum", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, lifetime: true },
+    atrasos: { "/billing/subscription": 1200 },
+  });
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "âncora do caso: antes da assinatura chegar os CTAs existem");
+  await page.waitForTimeout(1500);
+  assert.equal(await contarCtas(page), 0,
+    "o vitalício ficou com CTA de compra de Pix depois da assinatura chegar");
+  assert.equal(await page.textContent('[data-plan-btn="plus"]'), "Você tem acesso vitalício");
+  await page.close();
+});
+
+/**
+ * PT15 — O CTA DE PIX NÃO ESPERA O STRIPE.
+ *
+ * Para quem já é cliente do Stripe, o /billing/subscription consulta o Stripe e
+ * pode demorar ou travar. Enquanto ele não voltava, NENHUM CTA de Pix existia —
+ * escondendo a migração cartão → Pix exatamente quando o Stripe está ruim.
+ *
+ * *Negativo: volte o `publicarPix(null)` da precos.html para depois do
+ * `await loadSubscription()` → zero CTA aqui.*
+ */
+test("PT15: com /billing/subscription lento, os CTAs de Pix já estão na tela", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, gateway: "stripe", plan: "plus", interval: "monthly" },
+    atrasos: { "/billing/subscription": 2500 },
+  });
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "os CTAs de Pix esperaram o /billing/subscription para nascer");
+  await page.close();
+});
+
+/**
+ * PT16 — O SCRIPT PODE CHEGAR DEPOIS DAS REQUISIÇÕES.
+ *
+ * O `loadPlansState` é inline e começa antes de o parser alcançar os dois
+ * `<script>` do Pix; a única inicialização era guardada por `typeof pbPixInit`.
+ * Com as duas requisições terminando enquanto o script ainda baixa, a guarda
+ * dava falso e ninguém tentava de novo: página sem CTA de Pix, com a flag ligada
+ * no servidor. Agora quem chega por último lê o `window.pbPixState`.
+ *
+ * *Negativo: tire o `if (window.pbPixState) pbPixInit(...)` do fim do
+ * pix-checkout.js → zero CTA aqui, e o `pixCfg` fica nulo (o setCycle também não
+ * salva, porque o `pbPixRefresh` sai na primeira linha sem cfg).*
+ */
+test("PT16: pix-checkout.js chegando depois das requisições ainda cria os CTAs", async () => {
+  const { page } = await abrirPrecos({ atrasos: { "pix-checkout.js": 1500 } });
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "o script chegou depois das requisições e a página ficou sem CTA de Pix");
+  await page.close();
+});
+
+/**
+ * PT17 — FECHAR ENTRE OS CABEÇALHOS E O CORPO.
+ *
+ * O `ctx.box.isConnected` era conferido antes do `await r.json()`: dá para
+ * fechar o modal enquanto o corpo ainda baixa, e aí o QR era montado numa caixa
+ * já destacada, com o poll rodando por trás dela — e o `pixPoll` invisível
+ * impedia o próximo checkout até a cobrança vencer.
+ *
+ * O Esc sai de DENTRO do `Response.prototype.json`, que é o único ponto em que a
+ * janela existe: `route.fulfill` não separa cabeçalho de corpo. O evento é o
+ * mesmo que o teclado do usuário dispara.
+ *
+ * *Negativo: mova o `if (!ctx.box.isConnected) return;` do `pixEnviar` para
+ * antes do `const d = await r.json()` → o poll começa e o segundo checkout não
+ * abre.*
+ */
+test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos", async () => {
+  const { page, chamadas } = await abrirForm({
+    initScript: () => {
+      const orig = Response.prototype.json;
+      Response.prototype.json = function () {
+        return orig.call(this).then((d) => {
+          if (String(this.url).includes("/billing/pix/checkout")) {
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+          }
+          return d;
+        });
+      };
+    },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(600);
+  assert.equal(chamadas.pixCheckout, 1, "âncora: o POST do checkout saiu");
+  assert.equal(await page.$$eval(".pix-ov", (e) => e.length), 0,
+    "sobrou modal na tela depois de fechar durante o corpo da resposta");
+  assert.equal(await page.$$eval(".pix-code", (e) => e.length), 0,
+    "o copia-e-cola foi montado numa caixa já destacada");
+  assert.equal(chamadas.poll, 0,
+    "o poll começou contra um modal que o usuário já tinha fechado");
+  // A consequência visível para o usuário: o próximo checkout tem de abrir.
+  await page.click('[data-pix-cta="plus"]');
+  await page.waitForSelector(".pix-doc", { timeout: 3000 });
   await page.close();
 });
