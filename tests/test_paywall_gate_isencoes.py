@@ -111,13 +111,14 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
     ("plano", "plano"),
     ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
     ("ajuda", "comece aqui"),
-    # Ajuda COM seção. O texto esperado é o da seção "start" e não o da seção
-    # pedida DE PROPÓSITO: intent_router passa só o argumento ("ofx") pro
-    # resolve_section, que espera o texto inteiro ("ajuda ofx") e cai no
-    # fallback "start". Defeito PRÉ-EXISTENTE, fora deste PR — o que se mede
-    # aqui é o gate deixar passar, não a seção resolvida.
-    ("ajuda ofx", "comece aqui"),
-    ("help investimentos", "comece aqui"),
+    # Ajuda COM seção. O esperado é a seção PEDIDA: o `answer_help` passava só o
+    # argumento ("ofx") pro resolve_section, que espera o texto inteiro ("ajuda
+    # ofx"), e toda seção caía no fallback "start". Consertado neste branch
+    # (core/handlers/help_handler.py) — antes, os dois casos esperavam "comece
+    # aqui". O que se mede aqui continua sendo o gate deixar passar; a seção
+    # resolvida é de tests/test_help_section_aliases.py.
+    ("ajuda ofx", "importar extrato ou fatura"),
+    ("help investimentos", "investimentos"),
 ])
 def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
     """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o

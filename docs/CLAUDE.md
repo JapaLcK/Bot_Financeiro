@@ -247,8 +247,13 @@ por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_du
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
 investimento, Open Finance (abaixo), cobrança de recorrentes, agendadores de
-engajamento e de IA proativa, retenção de eventos de login. Em teste e no
-`dashboard_dev.py` ficam desligadas.
+engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
+refresh token / challenge de MFA / cadastro Google pendente
+(`core/services/table_cleanup.py`). Ficam desligadas só onde
+`RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
+`scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
+teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
+`"1"` de propósito, para ver a tarefa subir.
 
 O Open Finance tem **três** trabalhos, não dois: expiração de trial
 (`_open_finance_trial_expiry`), refresh proativo e **job de saúde** — os dois últimos no
@@ -352,7 +357,9 @@ Grupos: `DATABASE_URL`/`DB_POOL_*` · `JWT_SECRET`/`DASHBOARD_*` ·
 `PII_ENCRYPTION_KEY`/`PII_HASH_PEPPER`/`PII_AUDIT_DISABLED` · `MFA_ENCRYPTION_KEY` ·
 `WA_*` · `DISCORD_BOT_TOKEN` · `OPENAI_*`/`AI_*`/`AGENTS_*` · `STRIPE_*`/`PLANS_V2_ENABLED` ·
 `PLUGGY_*`/`OF_*` · `RESEND_API_KEY`/`EMAIL_FROM*` · `APNS_*` · `ADMIN_DASHBOARD_*` ·
-`META_PIXEL_ID` · `RUN_BACKGROUND_TASKS`/`SKIP_INIT_DB`/`ENABLE_DEV_ENDPOINTS`.
+`META_PIXEL_ID` · `RUN_BACKGROUND_TASKS`/`SKIP_INIT_DB`/`ENABLE_DEV_ENDPOINTS` ·
+`ACCOUNT_DELETION_JOB_LIMIT`/`TABLE_CLEANUP_INTERVAL_HOURS` (os dois kill switches
+de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
 
 ---
 

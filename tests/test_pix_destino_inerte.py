@@ -1,8 +1,9 @@
 """Portão de DESTINO: nada de produção fala com o Asaas (PR 1b-A).
 
 Assunto próprio, e não uma seção de `tests/test_pix_inerte.py`, porque o
-UNIVERSO e o MECANISMO são outros: lá são os 395 `.py` lidos com `ast`; aqui são
-os **433 arquivos rastreados** fora de `tests/`, lidos como TEXTO.
+UNIVERSO e o MECANISMO são outros: lá são os `.py` lidos com `ast`; aqui é
+**todo arquivo rastreado** fora de `tests/`, de qualquer formato, lido como
+TEXTO — `git ls-files | grep -vc '^tests/'` conta quantos são hoje.
 
 ## Por que existe: os portões de import veem NOME DE MÓDULO
 
@@ -17,20 +18,25 @@ de rota e de import ficaram verdes.
 
 Porque este portão é textual e não precisa de `ast`, então limitá-lo a Python
 era restrição sem contrapartida — e a contrapartida existia do outro lado:
-**236 arquivos rastreados não são `.py`**, e um deles basta. O Manager plantou
-`railway.pix-manager-probe.toml` nomeando `api.asaas.com`, `ASAAS_API_KEY` e as
-três tabelas: 49 verdes.
+**há arquivo rastreado que não é `.py`** (`git ls-files | grep -vc '[.]py$'`), e
+um deles basta. O Manager plantou `railway.pix-manager-probe.toml` nomeando
+`api.asaas.com`, `ASAAS_API_KEY` e as três tabelas: 49 verdes.
 
-**Não é hipótese exótica.** `railway.account-deletion.toml` já tem
-`startCommand = "python scripts/account_deletion_job.py"` com `cronSchedule` —
-o repositório JÁ roda Python em produção por esse caminho, fora do app. Um
-`railway.pix-drain.toml` chamando `db.pix_charges` emitiria cobrança sem uma
-linha vermelha.
+**Não é hipótese exótica.** O `Procfile` (`web: python launch.py`) é rastreado,
+não é `.py`, e é ele quem dá o start command de produção: o repositório JÁ roda
+Python por um caminho que o `ast` não lê. Um arquivo desse tipo chamando
+`db.pix_charges` emitiria cobrança sem uma linha vermelha.
+
+O exemplo anterior aqui era `railway.account-deletion.toml`, apagado quando o
+`account-deletion-job` migrou para configuração nativa do painel do Railway
+(Config as Code descontinuado, arquivos existentes param em 2026-12-01). A troca
+de exemplo NÃO reduz a cegueira, muda ela de lado: o start command daquele job
+não está mais em arquivo nenhum, o que cai na terceira cegueira abaixo.
 
 CEGUEIRAS DECLARADAS: host montado em partes (`"api." + "asaas" + ".com"`) ou
 env de outro nome; tabela com outro nome; arquivo NÃO rastreado — inclusive um
-script Python fora do git chamado por um `startCommand`. Para essas o método é
-revisão de diff.
+script Python fora do git chamado por um `startCommand`, ou um start command que
+só existe no painel do Railway. Para essas o método é revisão de diff.
 """
 
 import pathlib
@@ -84,9 +90,11 @@ def _producao_todos_os_formatos() -> list[str]:
     """TODO arquivo rastreado fora de `tests/` — o universo do portão de DESTINO.
 
     Ele é TEXTUAL e não precisa de `ast`, então limitá-lo a `.py` era restrição
-    sem contrapartida: sobravam **236** rastreados não-Python, e um basta para
-    emitir cobrança (ver `startCommand`, no cabeçalho). Entram 433; binário é
-    pulado por `UnicodeDecodeError`, sem lista de exceções por nome.
+    sem contrapartida: sobrava todo rastreado não-Python, contado por
+    `git ls-files | grep -vc '[.]py$'`, e um basta para emitir cobrança (ver
+    `startCommand`, no cabeçalho). Entra o que `git ls-files | grep -vc
+    '^tests/'` conta; binário é pulado por `UnicodeDecodeError`, sem lista de
+    exceções por nome.
     """
     return [rel for rel in _rastreados() if not rel.startswith("tests/")]
 

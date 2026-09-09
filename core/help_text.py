@@ -272,7 +272,6 @@ HELP_ALIASES: dict[str, str] = {
     "lancamentos": "launches",
     "gastos": "launches",
     "despesas": "launches",
-    "extrato": "launches",
     "historico": "launches",
     "histórico": "launches",
     "limite": "credit",
@@ -307,7 +306,9 @@ _SECTION_ALIASES = {
     "invest": {"invest", "investimentos", "investimento"},
     "cdi": {"cdi"},
     "dashboard": {"dashboard", "painel", "sheets", "planilha", "exportar"},
-    "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas", "extrato"},
+    # "extrato" é do `ofx` (importação), não daqui — o usuário que pede "ajuda
+    # extrato" quer importar o arquivo do banco.
+    "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
     "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas", "limite", "limites"},
     "categories": {"categoria", "categorias", "regras", "regra", "linkar", "aprender", "palavras", "palavra-chave", "palavras-chave"},

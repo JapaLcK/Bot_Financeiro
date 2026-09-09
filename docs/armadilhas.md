@@ -347,6 +347,11 @@ fixo de toda mudança de layout.
 - **`launch.py` sobe dois processos**: o uvicorn (que atende o `$PORT` do Railway) e o
   `bot.py` do Discord. Um `web` no Procfile, dois processos filhos.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
-  (agendadores de investimento, Open Finance, engajamento, cobrança recorrente…).
-  Em teste e no `dashboard_dev.py` isso é desligado — se você ligar sem querer num
-  ambiente com banco real, elas escrevem.
+  (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
+  das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`
+  (o ambiente ganha deles): `dashboard_dev.py:69` e
+  `scripts/whatsapp_qa_vault_harness.py:69`. **Em teste NÃO é desligado** — o
+  `tests/conftest.py` não põe nada, então teste que sobe o `app` herda o default
+  (`1`) e as tarefas escrevem no banco daquela execução, a menos que ele mesmo
+  passe `0` na env do subprocesso (`tests/test_log_falha_nivel.py:183`). A versão
+  longa está no `docs/CLAUDE.md`, seção "Tarefas de fundo".

@@ -251,11 +251,16 @@ def revoke_user_refresh_tokens(user_id: int) -> int:
 
 
 def cleanup_expired_refresh_tokens() -> int:
-    """Limpeza periódica de refresh tokens expirados/revogados há mais de 30d.
+    """Limpeza periódica: revogado há mais de 30d OU expirado há mais de 7d.
 
-    Chamada pelo cron de manutenção (scripts/cleanup_job.py, railway.cleanup.toml).
-    A falha PROPAGA de propósito: engolir a exceção e devolver 0 deixaria o cron
-    verde enquanto a tabela cresce sem poda. Quem chama já loga e sai rc=1.
+    Os dois prazos são diferentes de propósito e o SQL abaixo é a fonte: token
+    REVOGADO ainda serve de trilha de auditoria de logout/roubo por 30 dias;
+    token que só EXPIROU não prova nada depois de 7.
+
+    Chamada pela tarefa de fundo do app (core/services/table_cleanup.py) e, à
+    mão, por scripts/cleanup_job.py. A falha PROPAGA de propósito: engolir a
+    exceção e devolver 0 deixaria o job verde enquanto a tabela cresce sem
+    poda. Quem chama já loga (e o script sai rc=1).
     """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(

@@ -252,9 +252,12 @@ def answer_help(intent: str, text: str, platform: str) -> str:
     """
     if intent == "help.tutorial":
         return tutorial(platform)
-    parts = text.split(maxsplit=1)
-    if len(parts) > 1:
-        return help_section(parts[1], platform)
+    # O split só DECIDE entre menu completo e seção; quem resolve a seção é o
+    # `resolve_section`, e ele casa `^(ajuda|help)\s+(.+)$` — então recebe o
+    # texto inteiro, igual aos outros dois chamadores dele. Passar o fragmento
+    # ("ofx") caía no fallback "start" e quebrava TODA seção pedida por texto.
+    if len(text.split(maxsplit=1)) > 1:
+        return help_section(text, platform)
     return help_general(platform)
 
 
