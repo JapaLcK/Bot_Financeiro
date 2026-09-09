@@ -187,12 +187,30 @@ docstring existe para enumerar e conter essa categoria. Em código de cobrança
 ATIVO, na nona rodada, o remendo aumenta a superfície mais do que o achado
 custa (`CLAUDE.md` §4).
 
-**Divulgação honesta: a rodada 6 ALARGOU esta corrida.** Antes dela o
-`retrieve` era síncrono e não havia `await` entre a checagem e a escrita, então
-num deploy de worker único nenhuma outra corrotina se intercalava — a corrida
-era só entre processos. O `to_thread` (que consertou um bloqueio de event loop
-de **segundos**) criou o ponto de intercalação em processo. A troca é
-favorável — congelar o loop inteiro é pior —, mas fica no registro.
+**Divulgação honesta: a rodada 6 CRIOU esta corrida — não a alargou.** Antes
+dela o `retrieve` era síncrono e não havia `await` entre a checagem e a escrita.
+O `to_thread` (que consertou um bloqueio de event loop de **segundos**) criou o
+ponto de intercalação em processo.
+
+Isto foi escrito primeiro como "alargou", com a ressalva de que dependia de
+quantos workers a produção roda, e a resposta foi conferida depois:
+**`launch.py:26-33` sobe o uvicorn SEM `--workers`, ou seja um worker** (o
+default). Logo não havia corrida entre processos para alargar — com um worker e
+sem `await` entre checagem e escrita, o handler ia até o fim sem ceder, e
+nenhuma outra requisição se intercalava. **Fomos de zero pontos de intercalação
+para um.** A corrida é nossa, não é condição pré-existente.
+
+A troca continua favorável, e é por isso que ela fica: o bloqueio custava o loop
+inteiro congelado por uma chamada de API a CADA `payment_failed` (frequente, um
+por smart retry de cada inadimplente), atingindo toda requisição e todo webhook
+do processo; a corrida custa uma conta errada, sem perda de acesso, e exige
+entrega simultânea de `paid` e `failed` do MESMO usuário. Mas quem lê isto
+depois precisa saber que o defeito foi introduzido, e não herdado.
+
+Se algum dia a produção passar a rodar `--workers > 1`, esta célula muda de
+natureza: a corrida passa a existir também entre processos, onde nem a
+serialização do event loop ajudaria, e o conserto por marca d'água **por
+usuário** (abaixo) deixa de ser opcional.
 
 **A categoria maior é "lê estado externo, escreve no nosso banco", e ela tem
 três membros neste handler**, os três `Subscription.retrieve`:
