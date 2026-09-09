@@ -240,6 +240,24 @@ def tutorial(platform: str) -> str:
     return render_help("tutorial", platform)
 
 
+def answer_help(intent: str, text: str, platform: str) -> str:
+    """A rota de ajuda inteira (`help` + `help.tutorial`), num lugar só.
+
+    Mora aqui, e não no intent_router, porque quem tem DOIS chamadores é a
+    resposta, não o roteamento: o ramo de ajuda do `route()` e o
+    `_paywall_gate`, que responde à ajuda ele mesmo em vez de deixar a mensagem
+    seguir o fluxo (o `route()` resolve pendências ANTES do ramo de ajuda, e uma
+    delas registra parcelamento). Duas cópias do `split(maxsplit=1)` seriam duas
+    ajudas que divergem — §0.7 do CLAUDE.md.
+    """
+    if intent == "help.tutorial":
+        return tutorial(platform)
+    parts = text.split(maxsplit=1)
+    if len(parts) > 1:
+        return help_section(parts[1], platform)
+    return help_general(platform)
+
+
 def _infer_precise_help(norm: str) -> str | None:
     if "cartao" in norm or "cartão" in norm or "cartoes" in norm or "cartões" in norm:
         if any(expr in norm for expr in ("apagar", "apago", "excluir", "remover", "deletar")) and "compra" not in norm:

@@ -24,8 +24,8 @@ from db import init_db, ensure_user, get_conn
 
 
 # ── Coleta: arquivos que dependem de `ofxparse` ──────────────────────────────
-# Sem o pacote, estes 10 arquivos estouram no IMPORT e o pytest aborta a suíte
-# inteira antes de rodar um teste — o resultado não é "alguns testes falham",
+# Sem o pacote, os arquivos da lista abaixo estouram no IMPORT e o pytest aborta
+# a suíte inteira antes de rodar um teste — o resultado não é "alguns falham",
 # é sinal nenhum, nem verde nem vermelho.
 #
 # A lista é FIXA de propósito. Gerá-la a partir dos erros de coleta ("ignore
@@ -33,13 +33,15 @@ from db import init_db, ensure_user, get_conn
 # sintaxe recém-introduzido, e o arquivo quebrado nunca mais rodaria.
 #
 # A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
-# requirements.txt, então nada aqui é ignorado e os 10 rodam normalmente.
+# requirements.txt, então nada aqui é ignorado e todos rodam normalmente.
 _OFXPARSE_DEPENDENTES = [
     "test_audio_clarification.py",
     "test_audio_multi_launch_ask_value.py",
     "test_category_normalization.py",
     "test_full_handler_smoke.py",
     "test_handle_incoming_routing.py",
+    "test_paywall_gate_bot.py",
+    "test_paywall_gate_isencoes.py",
     "test_recurring_value.py",
     "test_split_audio_transactions.py",
     "test_whatsapp_confirmations.py",

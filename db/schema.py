@@ -1786,10 +1786,12 @@ def init_db():
         # quem já está carimbado em onboarding_completed_at nunca lê esta coluna.
         """alter table auth_accounts add column if not exists onboarding_step smallint not null default 0""",
         # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
-        # no painel de admin quem se cadastrou pela web (passa pelo gate da
-        # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1
-        # da Apple). Valores: 'web' | 'app' | 'google' | 'google_app' |
-        # 'whatsapp'. NULL = conta anterior a esta coluna (origem desconhecida);
+        # no painel de admin quem se cadastrou pela web de quem veio pelo app
+        # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
+        # app (política em plan_service.needs_plan_selection).
+        # Valores (os únicos que signup_source_from_request produz):
+        # 'web' | 'app' | 'google' | 'google_app'.
+        # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
         """

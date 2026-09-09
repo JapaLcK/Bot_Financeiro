@@ -3,7 +3,8 @@
 O backstop 402 das rotas de dados (_enforce_subscription_gate, shared.py) não
 cobre o WS: sem plano, o snapshot pintava o dashboard inteiro antes do veredito
 do paywall. O websocket_endpoint agora espelha o mesmo gate, com as mesmas
-primitivas (needs_plan_selection/has_app_access) e a mesma isenção do app iOS.
+primitivas (needs_plan_selection/has_app_access) e SEM isenção de app — como
+prova o test_ua_de_app_nao_abre_o_ws_sem_plano abaixo.
 """
 import pytest
 from fastapi.testclient import TestClient

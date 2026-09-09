@@ -469,9 +469,13 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 
 def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
     """
-    Com o paywall ligado, o bot só atende quem tem assinatura ativa (ou trial).
-    Retorna a mensagem de convite quando o usuário não tem acesso, ou None pra
-    seguir o fluxo normal.
+    O bot só atende quem já escolheu um plano na /precos (v2) ou tem acesso
+    liberado no fluxo legado do paywall. Retorna a mensagem de convite quando o
+    usuário não tem acesso, ou None pra seguir o fluxo normal.
+
+    Só quem NÃO é barrado recebe None. Quem é barrado sai daqui com uma resposta
+    sempre — a do convite, ou a da isenção (ajuda/billing), que este gate monta
+    ele mesmo. Ver o comentário da isenção lá embaixo.
 
     Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
     attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
@@ -480,30 +484,108 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     Fail-open igual aos outros gates Pro: se a checagem quebrar, deixa passar.
     Trancar quem está pagando é pior do que escapar uma mensagem.
     """
+    # Este usuário JÁ foi julgado barrado? Só o veredito é fail-open: se quem
+    # estourar for a RESPOSTA da isenção (renderizar a ajuda, gerar o link de
+    # billing), cair no fluxo normal devolveria a porta que este gate fecha —
+    # o `route()` resolve pendências antes do ramo de ajuda, e uma delas
+    # registra parcelamento. Nesse caso devolve a mensagem do gate.
+    barrado = False
     try:
-        from core.services.plan_service import has_app_access, paywall_enabled
-        if not paywall_enabled():
-            return None
+        # Mesma expressão do gate do WS e do _post_login_url. A perna do
+        # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
+        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py) e é a
+        # única que morde hoje — `has_app_access` devolve True com o v2 ligado.
+        # A política (onde vale, e por que sem isenção de app) mora na docstring
+        # de plan_service.needs_plan_selection.
+        from core.services.billing_commands import is_billing_command
+        from core.services.plan_service import (
+            has_app_access, needs_plan_selection, plans_v2_enabled,
+        )
         uid = _normalize_user_id(msg)
-        if has_app_access(uid):
+        # Linha enxuta em vez do get_auth_user: aquele SELECT decifra PII e
+        # registra em pii_access_log, e este gate roda em TODA mensagem. Mesmo
+        # motivo (e mesmo padrão) do bloco de onboarding em db/reports.py.
+        # O custo: get_plan_gate_state NÃO tem cache, então é 1 SELECT por
+        # mensagem, sempre — o get_auth_user absorvia as seguintes num cache de
+        # 10 s. Troca aceita: escrever em pii_access_log por mensagem é pior que
+        # um SELECT por chave primária.
+        # O `plans_v2_enabled()` fica AQUI, e não dentro do needs_plan_selection,
+        # pra que o freio de emergência devolva também a QUERY: com o v2 off o
+        # veredito seria False de qualquer jeito, mas o SELECT teria sido feito
+        # e jogado fora. Puxar o freio tem de zerar o custo, não só o efeito.
+        sem_plano = False
+        if plans_v2_enabled():
+            estado = db.get_plan_gate_state(uid)
+            # Sem linha em auth_accounts não há cadastro web e não há plano a
+            # exigir — mesmo veredito do needs_plan_selection, sem deixar ele
+            # repetir a consulta pelo get_auth_user (era a 2ª query do usuário
+            # só-WhatsApp, que é a maioria aqui).
+            sem_plano = estado is not None and needs_plan_selection(uid, estado)
+        if not (sem_plano or not has_app_access(uid)):
             return None
+        barrado = True
+
+        # Este usuário SERIA barrado. Isenções, mesmo papel do
+        # _GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta") da web
+        # (frontend/routes/shared.py): quem está barrado tem de conseguir
+        # assinar e pedir ajuda. No Discord isto é obrigatório — lá o
+        # handle_incoming responde assinar/plano/cancelar e ajuda ele mesmo, e o
+        # adapter só chega aos cogs quando a lista volta vazia.
+        #
+        # Rodam DEPOIS do veredito de propósito: assim o `classify` abaixo só
+        # custa para quem está sendo barrado, e não em toda mensagem de todo
+        # assinante.
+        #
+        # `not msg.attachments`: no WhatsApp a LEGENDA do anexo vira msg.text
+        # (adapters/whatsapp/wa_parse.py), então um .ofx legendado "ajuda"
+        # atravessaria o gate inteiro. A isenção é do campo texto.
+        if not msg.attachments:
+            texto = (msg.text or "").strip()
+            # A ajuda pergunta ao MESMO oráculo que roteia a mensagem, em vez de
+            # imitar a normalização dele: o classificador tira pontuação, acento
+            # e "/" antes de casar, e toda tentativa de reproduzir isso aqui com
+            # string matching perdia uma variante ("ajuda?", "/ajuda ofx",
+            # "help: ofx", "ajúda"). Como é o mesmo julgamento, a isenção não
+            # pode ficar nem mais larga nem mais estreita que o roteamento.
+            # `allow_ai=False`: só as regras determinísticas — medido em 19 µs,
+            # sem DB e sem rede. As duas rotas de ajuda do intent_router
+            # (help, help.tutorial) só renderizam texto, não tocam em dinheiro.
+            ajuda = classify(texto, user_id=uid, allow_ai=False).intent
+            # O gate DEVOLVE a resposta, em vez de isentar a mensagem e deixá-la
+            # seguir. "Seguir o fluxo" entregava a mensagem ao `route()`, que
+            # resolve pendências ANTES do ramo de ajuda: com um
+            # `installment_pending` vivo, `ajuda?` virava a descrição da compra e
+            # registrava N parcelas. Não dava pra enumerar essas portas para
+            # sempre — a resposta ela mesma fecha a classe.
+            if ajuda in ("help", "help.tutorial"):
+                from core.handlers import help_handler as h_help
+                return [OutgoingMessage(text=format_for_platform(
+                    h_help.answer_help(ajuda, texto, platform), platform))]
+            if is_billing_command(texto):
+                from core.services.billing_commands import handle_billing_command
+                resposta = handle_billing_command(uid, texto, platform=platform)
+                if resposta is not None:
+                    return [OutgoingMessage(text=resposta)]
+                # None = o billing cedeu a vez (há ai_pending). Cair no fluxo
+                # normal aqui reabriria o buraco pela porta do billing: segue
+                # para a mensagem do gate.
     except Exception:
         logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
-        return None
+        if not barrado:
+            return None
 
-    # Link autenticado que já cai no /precos logado; usa o público se falhar.
+    # Link público, sem token: cada link autenticado insere uma linha em
+    # dashboard_sessions que só sai quando é consumida, e mensagem barrada não
+    # costuma ser consumida — quem insiste geraria lixo permanente. A web faz
+    # igual: redireciona pra /precos e quem vai pagar loga de qualquer jeito.
     link = "https://pigbankai.com/precos"
-    try:
-        from core.dashboard_links import build_dashboard_link
-        link = build_dashboard_link(uid, hours=1.0, next_path="/precos") or link
-    except Exception:
-        logger.warning("não consegui gerar link autenticado do /precos", exc_info=True)
 
     return [OutgoingMessage(text=(
         "🐷 Oi! Que bom te ver por aqui.\n\n"
         "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra começar com {_bold('15 dias grátis', platform)}, sem cobrança "
-        "agora e cancelando quando quiser.\n\n"
+        f"dá pra testar {_bold('15 dias grátis', platform)} (um teste por número) "
+        "— o checkout mostra o que vai ser cobrado, e quando, antes de você "
+        "confirmar.\n\n"
         f"👉 {link}\n\n"
         "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "
         "tudo pra você 💚"

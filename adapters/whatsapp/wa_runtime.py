@@ -34,6 +34,7 @@ from adapters.whatsapp.wa_commands_menu import (
     send_commands_section,
 )
 from core.handle_incoming import handle_incoming
+from core.help_text import HELP_TRIGGERS
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
 from core.handlers import report as h_report
@@ -1027,7 +1028,7 @@ def process_message(message: InboundMessage) -> None:
 
         # "ajuda" → tutor pra quem ta aprendendo (send_help_menu, com link
         # pro tutorial).
-        if text_cmd in {"ajuda", "help", "menu", "/ajuda", "/help", "/menu"}:
+        if text_cmd in HELP_TRIGGERS:
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)
