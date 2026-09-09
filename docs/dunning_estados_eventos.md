@@ -121,7 +121,88 @@ IN`.
 
 O `payment_failed` **não tem guarda de versão** — o `_event_version` do ramo só
 vai para o log. Quem faz o papel dela é a guarda (a), que consulta o estado
-REAL em vez da ordem dos eventos. As células 13/15 mostram por que isso basta.
+REAL em vez da ordem dos eventos. As células 13/15 mostram por que isso basta
+para ordem de eventos — e a célula 29 mostra onde não basta.
+
+### Célula 29 — a corrida check/write da guarda (a). **ABERTA, com recusa fundamentada**
+
+| # | validade | intercalamento | HOJE | DEVERIA |
+|---|---|---|---|---|
+| 29 | qualquer | o `invoice.paid` de OUTRA requisição escreve `active` e zera o relógio **depois** de o `retrieve` deste ramo responder `past_due` e **antes** de a corrotina retomar e escrever | grava `past_due` por cima do `active`, o `claim` acha status na lista + relógio nulo e **carimba ciclo novo**, e sai e-mail de "sua cobrança falhou" com `dedup_days=0` | não escrever nada: o evento pago é mais novo |
+
+A guarda (a) é **snapshot**, não é atômica com a escrita. O predicado de status
+do `claim` (rodada 2) protege a ordenação **oposta** — quando o pago escreve
+DEPOIS do nosso `set_payment_status`, o `claim` vê status fora da lista e não
+carimba (é o `test_R1_*` de `tests/test_billing_dunning_eventos.py`). Nesta
+ordenação o pago escreve ANTES, e o nosso próprio `set_payment_status` repõe o
+status na lista — então o predicado não tem como distinguir "está `past_due`
+porque eu acabei de escrever por cima de um `active` mais fresco".
+
+**Janela, medida** (2026-09-08, `perf_counter` nos dois extremos, 30 entregas,
+Stripe de latência zero — remedir antes de reusar): do `retrieve` retornar até o
+`set_payment_status` executar, **mediana 0,174 ms, máx 0,273 ms**. Essa é só a
+parcela em processo; a janela real soma a meia-volta de rede do `retrieve`,
+porque o valor fica velho no instante em que o Stripe o avalia.
+
+**Gatilho.** Exige duas entregas do MESMO usuário em voo ao mesmo tempo, com a
+escrita do ramo pago caindo dentro da suspensão do ramo falho. Smart retry do
+Stripe são separados por horas ou dias, então sobram dois caminhos: reentrega de
+`payment_failed` por 5xx coincidindo com um `paid`, e **usuário com DUAS
+assinaturas** (uma pagando, outra falhando) — caso que este repositório
+contempla explicitamente, ver o comentário do ramo `subscription.deleted`
+("quem tem uma assinatura nova já paga e recebe o `deleted` da ANTIGA não pode
+perder as duas").
+
+**Dano.** `last_payment_status='past_due'` + relógio novo numa conta paga, mais
+um e-mail errado. **Acesso NÃO é afetado** — este PR não tem gate, e
+`plan`/`plan_expires_at` não são tocados por este ramo. O que doi é a duração:
+**não existe ramo `customer.subscription.updated`** neste handler (são cinco:
+`checkout.session.completed`, `invoice.paid`/`payment_succeeded`,
+`trial_will_end`, `payment_failed`, `subscription.deleted`), e
+`recompute_entitlement` só reescreve o status quando há grant **pix** vigente —
+logo conta só-de-cartão **não se auto-cura até o próximo `invoice.paid`**, ou
+seja até a renovação seguinte. E, com `PAYMENT_REMINDER_ENABLED` ligada, o
+estado errado é consistente (S3 dentro da janela), então a revalidação de
+`lembrete_ainda_vale` passa e sai **um segundo** e-mail errado no 6º dia.
+
+**Por que fica aberta, e não é "custou complexidade demais".** É um
+descasamento de tipo que torna errado todo predicado disponível:
+`last_payment_status` é **por USUÁRIO** e a única marca d'água de ordenação do
+schema é `plan_grants.event_version`, que é **por ASSINATURA** (`unique (source,
+external_ref)`). Consequência:
+
+* predicado com a ref DESTA assinatura ("não escreva se existe grant desta ref
+  com `event_version` maior") fecha a corrida de uma assinatura e **deixa aberta
+  a de duas** — seria um predicado com cara de atômico que não é, o erro de
+  instância que este PR já pagou cinco vezes;
+* predicado com QUALQUER ref ("não escreva se existe grant mais novo") fecha as
+  duas e passa a **recusar falha legítima**: usuário com assinatura X renovando
+  e assinatura Y falhando de verdade teria a falha de Y recusada porque o pago
+  de X é mais novo.
+
+Fechar de verdade exige marca d'água **por usuário** para
+`last_payment_status` — coluna nova, invariante nova, e um **terceiro** writer
+daquela coluna fora de `db_support.set_payment_status_impl`, cuja própria
+docstring existe para enumerar e conter essa categoria. Em código de cobrança
+ATIVO, na nona rodada, o remendo aumenta a superfície mais do que o achado
+custa (`CLAUDE.md` §4).
+
+**Divulgação honesta: a rodada 6 ALARGOU esta corrida.** Antes dela o
+`retrieve` era síncrono e não havia `await` entre a checagem e a escrita, então
+num deploy de worker único nenhuma outra corrotina se intercalava — a corrida
+era só entre processos. O `to_thread` (que consertou um bloqueio de event loop
+de **segundos**) criou o ponto de intercalação em processo. A troca é
+favorável — congelar o loop inteiro é pior —, mas fica no registro.
+
+**A categoria maior é "lê estado externo, escreve no nosso banco", e ela tem
+três membros neste handler**, os três `Subscription.retrieve`:
+`checkout.session.completed` (:5001) e `invoice.paid` (:5190) escrevem via
+`_materializar_assinatura`, onde o `upsert_grant` recusa evento estritamente
+mais velho e o `set_payment_status` **só roda se ele não recusou** — ordenação
+imperfeita (versão igual passa, e o `expires_dt` continua vindo do snapshot),
+mas não nula. O `payment_failed` é o **único cuja escrita de status não tem
+ordenação nenhuma**, e é por isso que a corrida aparece aqui. Os dois primeiros
+são anteriores a este PR e ficam como estão (§0.3).
 
 ---
 
@@ -217,3 +298,11 @@ quem sobrar volta no tick seguinte ainda dentro da janela.
 | 14 (2º e-mail de falha) | esta enumeração | **aberta de propósito**, ressalva acima |
 | 18 (`deleted` fora de ordem) | rodada 2 | **aberta**, anterior a este PR |
 | 23 (admin sobre `past_due`) | esta enumeração | sem defeito — a proteção é o grant `admin` |
+| **29 (corrida check/write da guarda)** | **Codex, rodada 9** | **ABERTA, com recusa fundamentada** — janela medida em 0,174 ms (mediana), sem perda de acesso, e todo predicado sobre dado existente ou deixa irmã aberta ou recusa falha legítima. Fechar exige marca d'água por usuário. Leia a seção da célula antes de tentar de novo. |
+
+**Se você veio aqui para "finalmente consertar a 29"**, leia a seção dela
+primeiro e responda a três coisas por escrito: (1) qual marca d'água por
+**usuário** você vai usar; (2) como o seu predicado aceita a falha legítima do
+usuário com duas assinaturas; (3) quantos writers de `last_payment_status`
+passam a existir. Sem as três respostas, o conserto é o remendo que a rodada 9
+recusou de propósito.
