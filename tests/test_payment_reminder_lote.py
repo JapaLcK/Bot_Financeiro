@@ -37,13 +37,12 @@ chamada nova do lembrete) e **não** foi consertado aqui — §0.3, não widenin
 Mesma bala na agulha ao lado, oferecida como trabalho separado.
 
 CONTROLE NEGATIVO DECLARADO — em `core/services/payment_reminder.py`, apague o
-`try`/`except` em volta do `decrypt_pii_optional` (voltando ao `email =
-decrypt_pii_optional(...)` cru):
+`try`/`except` que envolve a chamada de `_resolver_email` (deixando
+`email = await loop.run_in_executor(None, _resolver_email, user_id, atual)`
+sozinha, sem guarda):
     VERMELHO: test_linha_com_email_enc_corrompido_nao_derruba_o_resto_do_lote
-    VERDE:    test_lote_sem_defeito_entrega_a_todos, os dois de dedupe, e todo
-              o `test_payment_reminder.py` / `_janela.py` / `_revalida.py` — a
-              fixture deles não tem `email_enc`, que é o que prova que a
-              injeção mede a DECRIPTAÇÃO e não o funil.
+
+Regra e por que este texto já apodreceu uma vez: `docs/controles_declarados.md`.
 
 CONTROLE POSITIVO: `test_lote_sem_defeito_entrega_a_todos`. Sem ele o arquivo
 passaria num código que engolisse tudo e não mandasse nada — o `continue` de um
@@ -252,7 +251,11 @@ def test_dedupe_com_erro_inesperado_devolve_false(monkeypatch):
 # a partir do snapshot (decifre `_linha_do_funil` antes da dedupe, em vez de
 # `atual` depois da revalidação):
 #     VERMELHO: test_audit_de_pii_so_registra_quem_foi_contatado
-#     VERDE:    todo o resto deste arquivo e dos irmãos.
+#               test_email_trocado_durante_o_lote_vai_para_o_novo
+#               (`_revalida.py`) — a injeção reintroduz o endereço do snapshot
+#               e reprova os DOIS.
+# Regra: `docs/controles_declarados.md`.
+
 # CONTROLE POSITIVO: a asserção de que a conta CONTATADA tem exatamente uma
 # linha de auditoria. Sem ela, `PII_AUDIT_DISABLED=1` passaria no teste.
 # ──────────────────────────────────────────────────────────────────────────────

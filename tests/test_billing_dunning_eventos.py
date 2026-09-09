@@ -36,21 +36,27 @@ arquivos irmãos. Arquivo NOVO porque `test_billing_dunning_webhook.py` está em
 
 CONTROLES NEGATIVOS DECLARADOS, cada um injetado num caso que estava VERDE:
 
+**Estes controles seguem a regra que a rodada 12 pagou** (ver
+`docs/controles_declarados.md`): citam o PREDICADO ou a constante a injetar,
+nomeiam só os testes VERMELHOS, e não trazem contagem de `passed`. Nome de
+vermelho não envelhece; lista verde e contagem envelhecem sempre.
+
   • R1 — tire o `and lower(coalesce(last_payment_status, '')) = any(%s)` do
     `where` de `db/dunning.py::claim_past_due_since` (e o `%s` correspondente):
       VERMELHO: test_R1_corrida_com_invoice_paid_nao_deixa_relogio_orfao.
-      VERDE:    R2, R3 e os dois arquivos irmãos do webhook.
   • R2 — no ramo `invoice.paid` do webhook, volte o clear a incondicional
     (apague o `if _decidiu_acesso:` e desidente as três linhas da chamada, sem
     tocar no `nao_mais_novo_que`). Conferido: ele AINDA discrimina — o gate e o
     predicado da escrita respondem perguntas diferentes, e neste cenário quem
     recusa é o gate:
       VERMELHO: test_R2_invoice_paid_velho_nao_zera_o_relogio.
-      VERDE:    R1, R3 e o T3a do arquivo irmão (o `paid` NORMAL, que é o caso
-                que a injeção NÃO pode reprovar).
   • R3 — o mesmo no ramo `checkout.session.completed`:
       VERMELHO: test_R3_checkout_velho_nao_zera_o_relogio.
-      VERDE:    R1, R2 e o T3b do arquivo irmão.
+
+Nenhuma das três injeções reprova o `paid`/`checkout` NORMAL (T3a/T3b do
+arquivo irmão) — é isso que separa "o gate discrimina" de "o gate recusa
+tudo", e é a única afirmação de VERDE que vale a pena fazer aqui, porque ela é
+sobre o caminho injetado e não sobre o conjunto de arquivos.
 
 CONTROLES POSITIVOS (os três consertos RESTRINGEM — sem eles o arquivo passaria
 num código que nunca carimba e nunca limpa):

@@ -19,20 +19,22 @@ Arquivo próprio porque o `test_payment_reminder.py` está perto do teto de 350
 linhas de `tests/test_max_lines_python.py`; os helpers vêm por IMPORT dele —
 uma fonte só (§0.7).
 
-CONTROLES NEGATIVOS DECLARADOS, com o resultado MEDIDO:
+CONTROLES NEGATIVOS DECLARADOS:
+
+Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem `N
+passed` — ver `docs/controles_declarados.md`.
 
   • largura — troque `inicio + PAYMENT_REMINDER_WINDOW_DAYS` por `inicio + 1`
     em `db/dunning.py::list_payment_reminder_candidates`:
       VERMELHO: test_tick_inteiro_perdido_ainda_entrega (e o caso [8.9] do
                 `test_janela` do arquivo irmão).
-      VERDE:    test_dois_ticks_na_janela_larga_mandam_um_so e o resto dos dois
-                arquivos (medido nos três: 2 failed, 21 passed).
   • dedupe — `PAYMENT_REMINDER_DEDUPE_DAYS = 2.0` (menor que os 2,8 dias de
     travessia da janela deste teste):
       VERMELHO: test_dois_ticks_na_janela_larga_mandam_um_so e
                 test_invariante_janela_menor_que_dedupe.
-      VERDE:    test_tick_inteiro_perdido_ainda_entrega e o `test_janela`
-                inteiro (medido nos três: 2 failed, 21 passed).
+
+As duas injeções são DISJUNTAS — a da largura não reprova o teste da dedupe e
+vice-versa —, e é isso que prova que os dois números são independentes.
 
 CONTROLE POSITIVO: `test_tick_inteiro_perdido_ainda_entrega` é ele mesmo o
 positivo do par — a largura maior tem de fazer o e-mail SAIR, não só deixar de

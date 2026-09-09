@@ -14,22 +14,24 @@ testar. O que sobra e precisa de teste é a mecânica:
   • a lista de três status ter uma fonte só (§0.7);
   • `grant_vigente`, o predicado extraído de `billing_access`.
 
-CONTROLES do grupo da invariante, com o resultado MEDIDO de cada um:
+CONTROLES do grupo da invariante:
+
+**Estes controles seguem a regra que a rodada 12 pagou** (ver
+`docs/controles_declarados.md`): citam o PREDICADO ou a constante a injetar,
+nomeiam só os testes VERMELHOS, e não trazem contagem de `passed`. Nome de
+vermelho não envelhece; lista verde e contagem envelhecem sempre.
 
   • NEGATIVO 1 — devolva o `cur.execute` de `db_support.set_payment_status_impl`
     ao UPDATE de UMA coluna (`set last_payment_status = %s where user_id = %s`,
     sem o `case`):
       VERMELHO: test_invariante_set_payment_status[active] e [canceled].
-      VERDE:    o caso [past_due], os dois testes do admin e o resto do arquivo
-                (medido: 2 failed, 6 passed).
   • NEGATIVO 2 — no `past_due_since = case` de
     `core.admin_dashboard.set_account_plan`, troque `then null` por
     `then past_due_since`:
-      VERMELHO: test_invariante_admin_nao_deixa_relogio_orfao, e só ele
-                (medido: 1 failed, 7 passed).
-      VERDE:    todos os de `set_payment_status`, inclusive os de status fora
-                da lista. É o que prova que os dois writers são categorias
-                separadas e que o NEGATIVO 1 não mediria este.
+      VERMELHO: test_invariante_admin_nao_deixa_relogio_orfao.
+    Os dois writers são categorias SEPARADAS: o NEGATIVO 1 não reprova este
+    teste e o NEGATIVO 2 não reprova os de `set_payment_status`. É essa
+    independência que os controles medem, não a contagem.
     APAGAR o bloco inteiro NÃO serve de controle: deixa o `end,` da coluna
     anterior sem sucessor e o UPDATE vira erro de sintaxe, que reprova os dois
     testes do admin por motivo errado (medido antes de trocar a injeção).

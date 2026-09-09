@@ -27,6 +27,18 @@ a janela de dedupe do e-mail de falha, e só.
 | **S3** | T | IN | *ciclo aberto* | o estado da inadimplência; é o único que o lembrete lê |
 | **S4** | T | OUT | **órfão** | a INVARIANTE declara impossível. Mantida na escrita por `db_support.set_payment_status_impl` e pelo SQL cru de `core/admin_dashboard.set_account_plan` — os **dois únicos** writers de `last_payment_status` em Python (varredura: `grep -rn "last_payment_status" --include="*.py" --include="*.sql" --exclude-dir=.venv .`; sobram dois `scripts/*.sql` de reparo manual, aceitos) |
 
+**A coluna `COMPORTAMENTO` não é "hoje" em toda linha, e o marcador diz qual
+é qual.** Ela se chamava `HOJE` e passou a mentir nas células que foram
+consertadas depois de escritas — o registro discordava de si mesmo dentro do
+mesmo arquivo (apontado pelo Codex na rodada 12). Três marcadores, e eles valem
+para as SETE tabelas abaixo:
+
+| marcador | leitura |
+|---|---|
+| (sem marcador) | comportamento ATUAL, e a coluna `DEVERIA` confirma com ✔ |
+| **`FECHADA (rodada N) — era:`** | comportamento ANTERIOR ao conserto. O que roda hoje é o da coluna `DEVERIA`; a descrição antiga fica porque o defeito é a parte que ensina |
+| **`✗ ABERTA —`** | comportamento ATUAL e ERRADO, de propósito. A razão de continuar aberta está na seção da célula |
+
 **Validade do evento**, o terceiro eixo. Ela sai do contrato de retorno de
 `db.plan_grants.upsert_grant`, que é o **único** produtor de `event_version` de
 grant `stripe` em produção (`_materializar_assinatura` é o único chamador):
@@ -50,13 +62,13 @@ grant, depois `set_payment_status(status LIVE do Stripe)`, depois
 `recompute_entitlement`) e só então o clear. **O estado que o clear vê já passou
 pelo `set_payment_status`** — é por isso que a coluna "estado no clear" existe.
 
-| # | validade | estado antes | status LIVE | estado no clear | HOJE | DEVERIA |
+| # | validade | estado antes | status LIVE | estado no clear | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|---|---|
 | 1 | NOVO | S2 | qualquer | NULL | clear (no-op) | no-op ✔ |
 | 2 | NOVO | S3 | OUT (`active`) | NULL — `set_payment_status` já zerou | clear (no-op) | no-op ✔ |
 | 3 | NOVO | S3 | IN (consistência eventual, ou outra fatura aberta) | S3 | **clear** | clear ✔ — é a única razão de esta linha existir |
 | 4 | NOVO | S4 | OUT | NULL | no-op | no-op ✔ |
-| 5 | REENTREGA | S3, relógio carimbado **depois** deste evento | IN | S3 | **clear** ✗ | **NÃO limpar** |
+| 5 | REENTREGA | S3, relógio carimbado **depois** deste evento | IN | S3 | **FECHADA (rodada 3) — era: clear** | **NÃO limpar** — e é o que roda hoje, pelo predicado `nao_mais_novo_que` |
 | 6 | REENTREGA | S3, relógio carimbado **antes** deste evento (5xx entre o grant e o clear) | IN | S3 | clear | clear ✔ |
 | 7 | VELHO | qualquer | — (nem consulta) | inalterado | no-op (gate `_decidiu_acesso`) | no-op ✔ |
 
@@ -99,7 +111,7 @@ fora da lista ⇒ o ramo inteiro é ignorado e logado; (b) `_sub_id` ausente
 (fatura avulsa) ⇒ não carimba. O `claim` é `past_due_since is null AND status
 IN`.
 
-| # | validade | estado antes | status LIVE | HOJE | DEVERIA |
+| # | validade | estado antes | status LIVE | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|---|
 | 8 | qualquer | qualquer | OUT | ignorado + `billing_payment_failed_obsoleto` | ✔ |
 | 9 | qualquer | qualquer, sem `_sub_id` | IN | grava `past_due`, **não** carimba | ✔ (fatura avulsa não tem ciclo de assinatura) |
@@ -107,7 +119,7 @@ IN`.
 | 11 | NOVO | S3 | IN | `rowcount 0`; e-mail dedupado por `DUNNING_GRACE_DAYS` | ✔ (smart retry do mesmo ciclo) |
 | 12 | NOVO | S4 | IN | preserva o relógio VELHO ⇒ ciclo novo nasce fora da janela | seria bug — **S4 é inalcançável**, ver o eixo de estados |
 | 13 | REENTREGA | S3 | IN | `rowcount 0`, não reinicia | ✔ |
-| 14 | REENTREGA | S1 | IN | carimba `now()`, `_abriu_ciclo=True` ⇒ **2º e-mail de falha** | ver a ressalva abaixo |
+| 14 | REENTREGA | S1 | IN | **✗ ABERTA —** carimba `now()`, `_abriu_ciclo=True` ⇒ **2º e-mail de falha** | ver a ressalva abaixo |
 | 15 | VELHO | S1/S2 | IN | carimba `now()` | ✔ — o Stripe diz que há atraso AGORA; a data é de hoje e o lembrete sai no prazo |
 
 > **Ressalva da célula 14, aberta de propósito.** Para chegar nela a conta tem
@@ -126,9 +138,9 @@ para ordem de eventos — e a célula 29 mostra onde não basta.
 
 ### Célula 29 — a corrida check/write da guarda (a). **ABERTA, com recusa fundamentada**
 
-| # | validade | intercalamento | HOJE | DEVERIA |
+| # | validade | intercalamento | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|
-| 29 | qualquer | o `invoice.paid` de OUTRA requisição escreve `active` e zera o relógio **depois** de o `retrieve` deste ramo responder `past_due` e **antes** de a corrotina retomar e escrever | grava `past_due` por cima do `active`, o `claim` acha status na lista + relógio nulo e **carimba ciclo novo**, e sai e-mail de "sua cobrança falhou" com `dedup_days=0` | não escrever nada: o evento pago é mais novo |
+| 29 | qualquer | o `invoice.paid` de OUTRA requisição escreve `active` e zera o relógio **depois** de o `retrieve` deste ramo responder `past_due` e **antes** de a corrotina retomar e escrever | **✗ ABERTA —** grava `past_due` por cima do `active`, o `claim` acha status na lista + relógio nulo e **carimba ciclo novo**, e sai e-mail de "sua cobrança falhou" com `dedup_days=0` | não escrever nada: o evento pago é mais novo |
 
 A guarda (a) é **snapshot**, não é atômica com a escrita. O predicado de status
 do `claim` (rodada 2) protege a ordenação **oposta** — quando o pago escreve
@@ -226,11 +238,11 @@ são anteriores a este PR e ficam como estão (§0.3).
 
 ## E4 — `customer.subscription.deleted`
 
-| # | validade | estado antes | HOJE | DEVERIA |
+| # | validade | estado antes | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|
 | 16 | NOVO | S3 | `canceled` ⇒ o próprio `set_payment_status` zera o relógio; o clear é no-op | ✔ |
 | 17 | NOVO | S4 | idem | ✔ |
-| 18 | REENTREGA/VELHO | S3 de OUTRA assinatura viva | `plan=free` + `canceled` + relógio zerado; `revoke_grant` é recusado por versão e `recompute_entitlement` devolve o plano, mas o status fica `canceled` | não deveria — **anterior a este PR** |
+| 18 | REENTREGA/VELHO | S3 de OUTRA assinatura viva | **✗ ABERTA —** `plan=free` + `canceled` + relógio zerado; `revoke_grant` é recusado por versão e `recompute_entitlement` devolve o plano, mas o status fica `canceled` | não deveria — **anterior a este PR** |
 
 **O `subscription.deleted` sobrevive ao predicado**: nas três células o
 `set_payment_status('canceled')` roda ANTES e já zerou o relógio no mesmo
@@ -248,7 +260,7 @@ Nunca escreve o relógio. Escreve `last_payment_status` num caso só: grant `pix
 vigente ⇒ `active` ⇒ status fora da lista ⇒ `set_payment_status_impl` zera o
 relógio no mesmo UPDATE.
 
-| # | origem | estado antes | HOJE | DEVERIA |
+| # | origem | estado antes | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|
 | 19 | evento | S3 + grant `pix` vigente | S2 | ✔ (era o órfão da rodada 1) |
 | 20 | varredura | S3 + grant `pix` vigente | S2 | ✔ |
@@ -258,7 +270,7 @@ relógio no mesmo UPDATE.
 
 ## E6 — `set_account_plan` (admin)
 
-| # | plano destino | status antes | HOJE | DEVERIA |
+| # | plano destino | status antes | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|
 | 22 | pago | `canceled` / `incomplete_expired` / `unpaid` | ⇒ `inactive` + relógio zerado no mesmo UPDATE | ✔ |
 | 23 | pago | `past_due` ou `incomplete` | status e relógio **intactos** | ✔ — o ajuste grava um grant `source='admin'`, e `_pago_por_outro_caminho` pula o lembrete dessa conta |
@@ -276,18 +288,20 @@ lembrete de cartão para quem o admin acabou de liberar.
 `list_payment_reminder_candidates` devolve **só S3**, dentro da janela
 `[GRACE-1, GRACE-1+WINDOW)`, com e-mail e sem opt-out.
 
-| # | estado | HOJE | DEVERIA |
+| # | estado | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|
 | 25 | S1 / S2 | não entra (relógio NULL) | ✔ |
 | 26 | S4 | não entra (predicado de status no SQL) | ✔ |
 | 27 | S3, na janela, sem grant `pix`/`admin`, sem dedupe | envia | ✔ |
-| 28 | S3 no snapshot, **pagou durante o lote** (virou S1/S2) | **envia**, e grava a dedupe | **não enviar** |
+| 28 | S3 no snapshot, **pagou durante o lote** (virou S1/S2) | **FECHADA (rodada 3) — era: envia, e grava a dedupe** | **não enviar** — e é o que roda hoje: `lembrete_ainda_vale` devolve `None` e o laço pula |
 
-**A célula 28 é o apontamento do Codex 5** (`core/services/payment_reminder.py:146`).
-O funil é um snapshot único, o lote não tem `LIMIT`, e entre a query e o envio a
-única checagem é a dedupe. Quem pagou no meio recebe "a cobrança continua
-pendente" — e-mail errado para cliente pagante, que é a categoria que este PR
-existe para consertar.
+**A célula 28 foi o apontamento do Codex 5** (`core/services/payment_reminder.py:146`),
+e está FECHADA. O defeito era: o funil é um snapshot único, o lote não tem
+`LIMIT`, e entre a query e o envio a única checagem era a dedupe — quem pagava
+no meio recebia "a cobrança continua pendente", e-mail errado para cliente
+pagante, que é a categoria que este PR existe para consertar. **Hoje**
+`lembrete_ainda_vale` faz leitura fresca imediatamente antes do envio e o laço
+pula quando ela devolve `None`.
 
 **O conserto**: revalidar o MESMO predicado do funil (relógio + status), por
 conta, imediatamente antes do envio, com leitura direta ao banco. Não é

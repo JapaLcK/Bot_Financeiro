@@ -89,11 +89,11 @@ def test_T2_reentrega_nao_reinicia_o_relogio_nem_duplica_email(user_id, monkeypa
     A Stripe manda um `payment_failed` por smart retry E reentrega o mesmo
     evento em cima de 5xx. Antes deste PR o e-mail saía em TODOS.
 
-    Controle negativo declarado: tire o `and past_due_since is null` do
-    `claim_past_due_since` (db/dunning.py) → VERMELHO na metade do RELÓGIO (ele
-    avança); T1 e T3 continuam verdes. A metade do E-MAIL não depende desse
-    `where`: quem a protege é a dedupe do `_fire_email`, cujos controles estão
-    em tests/test_billing_payment_failed_email.py.
+    Controle negativo: tire o `and past_due_since is null` do
+    `claim_past_due_since` (db/dunning.py) → VERMELHO aqui e nos T6 e T8 de
+    `tests/test_billing_payment_failed.py`. A metade do E-MAIL DEPENDE desse
+    `where`: sem ele o `claim` carimba, `rowcount` vira 1, `_abriu_ciclo` vira
+    True e o e-mail sai com `dedup_days=0.0` — dois onde se espera um.
     """
     uid, client, fake = _setup(monkeypatch, f"pds2-{user_id}")
     emails = _conta_emails(monkeypatch)
@@ -199,17 +199,17 @@ def test_T3_subscription_deleted_limpa_o_relogio(user_id, monkeypatch):
 #  moram em tests/test_billing_payment_failed.py: assunto diferente, e este
 #  arquivo bateria no teto de 350 linhas de tests/test_max_lines_python.py.)
 #
-# CONTROLES NEGATIVOS DECLARADOS (um por conserto, num caso que estava VERDE):
+# CONTROLES NEGATIVOS DECLARADOS (um por conserto, num caso que estava VERDE).
+# Regra: `docs/controles_declarados.md`.
 #   • T4: devolva o `cur.execute` de `set_payment_status_impl` (db_support.py)
 #     ao UPDATE de uma coluna só (sem o `case when ... then past_due_since end`)
-#     → T4 VERMELHO, T1/T2/T3/T5/T9 e o arquivo do e-mail VERDES (medido: 1
-#     failed, 10 passed).
+#     → VERMELHO: T4.
 #   • T5: não atribua o resultado do `retrieve` a `_status_agora` no ramo
-#     `invoice.payment_failed` (frontend/finance_bot_websocket_custom.py) → T5
-#     VERMELHO, o resto VERDE (medido: 1 failed, 10 passed).
-#   • T9: tire o `bool(_sub_id) and` do `claim_past_due_since` do mesmo ramo →
-#     T9 VERMELHO, o resto VERDE (medido: 1 failed, 10 passed). T1..T5 nomeiam
-#     a subscription no payload, como a Stripe faz.
+#     `invoice.payment_failed` (frontend/finance_bot_websocket_custom.py)
+#     → VERMELHO: T5.
+#   • T9: tire o `bool(_sub_id) and` do `claim_past_due_since` do mesmo ramo
+#     → VERMELHO: T9. T1..T5 nomeiam a subscription no payload, como a Stripe
+#     faz, e é por isso que a injeção do T9 não os alcança.
 #
 # CONTROLE POSITIVO: T1 e T2 — conta LIMPA, `payment_failed` continua carimbando
 # o relógio. Sem eles os consertos "passariam" num relógio que nunca carimba.

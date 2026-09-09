@@ -29,9 +29,11 @@ predicado do `where` (volte para `where user_id = %s`, sem o
 `and past_due_since <= to_timestamp(%s)` e sem o `%s` correspondente):
     VERMELHO: test_R4_reentrega_de_invoice_paid_nao_apaga_o_ciclo_novo
               test_R5_reentrega_de_checkout_nao_apaga_o_ciclo_novo
-    VERDE:    R1, R2, R3 do irmão, e T3a/T3b/T5 de
-              `test_billing_dunning_webhook.py` — os `paid`/`checkout` NORMAIS,
-              que a injeção NÃO pode reprovar.
+
+A injeção NÃO reprova o `paid`/`checkout` normal (T3a/T3b do
+`test_billing_dunning_webhook.py`) — afirmação que vale porque é sobre o
+caminho injetado. Nomes de verde e contagem de `passed` ficam fora de
+propósito: ver `docs/controles_declarados.md`.
 
 **A injeção é a REENTREGA, e não o evento velho, de propósito** (§3, "injete
 onde discrimina"): com evento velho estes dois casos ficam VERDES no head

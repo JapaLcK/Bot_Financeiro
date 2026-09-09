@@ -11,16 +11,20 @@ sem nada pausar depois, e foi o que reprovou o PR.
 CONTROLES do grupo (o "conserto" aqui é o funil inteiro; a injeção vai num caso
 que estava VERDE):
 
+
+Regra dos controles deste arquivo: citar o PREDICADO a injetar, nomear só os
+VERMELHOS, nunca escrever `N passed` — ver `docs/controles_declarados.md`.
+
   • NEGATIVO 1 — troque a janela do SQL (`db.dunning.list_payment_reminder_
     candidates`) por `past_due_since is not null` sem as duas fronteiras:
-      VERMELHO: test_janela[5.9] e [9.1].
-      VERDE:    [6.1], [8.9] e todo o resto — é o que prova que a janela é o
-                que discrimina, e não "manda para todo mundo".
+      VERMELHO: test_janela[5.9] e [9.1]. Os casos [6.1] e [8.9] continuam
+                passando, e é isso que prova que a janela DISCRIMINA em vez de
+                "mandar para todo mundo".
   • NEGATIVO 2 — apague o `if not payment_reminder_enabled(): return` da
     primeira linha de `check_payment_reminder`:
-      VERMELHO: test_flag_desligada_nao_manda_nem_consulta, e só ele.
-      VERDE:    todos os outros, porque a fixture liga a flag — é o que prova
-                que a injeção mede o FREIO e não o funil.
+      VERMELHO: test_flag_desligada_nao_manda_nem_consulta, e só ele — a
+                fixture liga a flag nos outros, o que é o que prova que a
+                injeção mede o FREIO e não o funil.
   • POSITIVO — test_janela[6.1]/[8.9] e a segunda metade do teste da flag
     (religa e o e-mail sai, na mesma conta e no mesmo tick). Sem eles o arquivo
     passaria num funil que nunca manda e-mail, que é pior que o bug.

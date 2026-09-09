@@ -35,9 +35,14 @@ registra por que comparar com `threading.main_thread()` aqui não media nada.
 CONTROLE NEGATIVO DECLARADO — em `frontend/finance_bot_websocket_custom.py`,
 tire o `await asyncio.to_thread(...)` de QUALQUER um dos três ramos (voltando
 para `stripe.Subscription.retrieve(sub_id)`):
-    VERMELHO: test_retrieve_nao_roda_na_thread_do_event_loop[<o ramo tocado>]
-    VERDE:    os outros dois ramos, e o resto da suíte de billing — é o que
-              prova que a medição é POR RAMO e discrimina qual deles regrediu.
+    VERMELHO: test_retrieve_nao_roda_na_thread_do_event_loop[<o ramo tocado>],
+              e SÓ o ramo tocado — a parametrização é o que faz a medição
+              discriminar QUAL dos três regrediu, e essa é uma afirmação sobre o
+              caminho injetado, não sobre o conjunto de arquivos.
+
+Regra dos controles deste arquivo: citar o PREDICADO a injetar, nomear só os
+VERMELHOS, nunca escrever `N passed` — ver `docs/controles_declarados.md`.
+
 
 CONTROLE POSITIVO: `test_retrieve_que_estoura_continua_virando_5xx`. O guard de
 evento fora de ordem DEPENDE de a exceção propagar (falha do `retrieve` tem de

@@ -98,10 +98,27 @@ async def check_payment_reminder() -> None:
     por um `try` em volta do corpo do laço: a granularidade é o que faz o log
     dizer QUAL etapa falhou.
 
-    **NADA DE ESCRITA SÍNCRONA NO EVENT LOOP.** Este tick roda no event loop
-    único do Uvicorn e o funil não tem `LIMIT`: I/O feito aqui, e não num
-    executor, atrasa request e webhook da Stripe. Todo o laço abaixo já vai por
-    executor — mantenha assim, inclusive a decriptação (`_resolver_email`).
+    **QUASE NADA DE I/O SÍNCRONO NO EVENT LOOP — e a exceção é decidida, não
+    esquecida.** Este tick roda no event loop único do Uvicorn e o funil não tem
+    `LIMIT`: I/O feito aqui, e não num executor, atrasa request e webhook da
+    Stripe. Funil, dedupe, checagem de grant, revalidação, decriptação
+    (`_resolver_email`), envio e WhatsApp vão todos por executor — mantenha
+    assim.
+
+    **A EXCEÇÃO É O `log_system_event_sync` DO CAMINHO DE SUCESSO**, e ela é
+    proposital. Medido: **6,16 ms por chamada**, porque aquele helper usa
+    `psycopg.connect` DIRETO, sem o pool (contra 0,712 ms de um insert pooled).
+    Fica síncrono por três razões: acontece uma vez por lembrete ENVIADO (M), e
+    M é limitado pela dedupe a um por ciclo por usuário — bem menor que os N
+    candidatos; o laço já cede a cada linha, inclusive no envio de e-mail, que é
+    HTTP de 100-300 ms; e há **oito** irmãos pré-existentes exatamente iguais em
+    `core/services/engagement_scheduler.py` (confirmado com
+    `git grep -n "log_system_event_sync(" 50017dd -- core/services/engagement_scheduler.py`),
+    todos crus e em contexto assíncrono — embrulhar só este divergiria de todos
+    eles (§0.6).
+    **Não "conserte" esta linha embrulhando-a**: o conserto certo é o helper
+    passar a usar o pool, o que fecha os nove call sites de uma vez em vez de
+    esconder o sintoma no único lugar onde ele é menor.
 
     **NENHUM VALOR DO SNAPSHOT CHEGA AO ENVIO.** O funil diz QUEM considerar e
     nada mais: estado da inadimplência, consentimento de e-mail e o próprio

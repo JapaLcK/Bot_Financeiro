@@ -36,14 +36,20 @@ decisões dos comentários.
 
 CONTROLE NEGATIVO DECLARADO — em
 `core/services/payment_reminder_wa.py::_wa_lembrete`,
-volte o corpo do laço a descartar o retorno (`send_template(...)` numa linha e
-`enviado = True` na seguinte):
+descarte o retorno de `send_template`: chame-o numa linha e ponha
+`aceitos += 1` na seguinte, sem o `is not None`:
     VERMELHO: test_token_invalido_grava_whatsapp_false
-    VERDE:    test_envio_aceito_grava_whatsapp_true (é o caso que a injeção NÃO
-              pode reprovar), test_sem_template_nao_tenta_whatsapp, e todo
-              `test_payment_reminder.py` / `_janela.py` / `_revalida.py` /
-              `_lote.py`, cuja fixture não define
-              `WA_TEMPLATE_PAYMENT_REMINDER`.
+              test_todos_os_destinos_falhando_grava_false — o 401 é um dos dois
+              destinos dele, então descartar o retorno também o reprova.
+              Medido ao reescrever esta instrução: DOIS vermelhos, não um.
+
+Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem `N
+passed` — ver `docs/controles_declarados.md`.
+
+A instrução anterior dizia `enviado = True`, nome que deixou de existir quando o
+laço passou a contar `aceitos`. O caso que a injeção NÃO pode reprovar —
+`test_envio_aceito_grava_whatsapp_true` — continua sendo a afirmação útil, porque
+é sobre o caminho injetado.
 
 CONTROLE POSITIVO: `test_envio_aceito_grava_whatsapp_true`. Sem ele o arquivo
 passaria num `_wa_lembrete` que devolvesse sempre False — WhatsApp desligado na
@@ -224,13 +230,19 @@ def test_sem_template_nao_tenta_whatsapp(user_id, monkeypatch):
 # frente do código, que é o pior tipo de defeito.
 #
 # CONTROLE NEGATIVO — em `core/services/payment_reminder_wa.py::_wa_lembrete`,
-# tire o `try`/`except` de dentro do laço e volte o `return` para dentro do
-# `try` de fora:
+# tire o `try`/`except` de DENTRO do laço (só isso):
 #     VERMELHO: test_destino_que_estoura_nao_perde_o_sucesso_anterior
 #               test_destino_que_estoura_nao_aborta_os_seguintes
-#     VERDE:    test_todos_os_destinos_aceitos_conta_todos,
-#               test_token_invalido_grava_whatsapp_false (o conserto da rodada
-#               anterior, que a injeção NÃO pode reprovar), e os demais.
+#               test_todos_os_destinos_falhando_grava_false
+#
+# **A instrução tinha uma segunda cláusula impossível e ela foi APAGADA**, não
+# reformulada: mandava "volte o `return` para dentro do `try` de fora", e o
+# `return aceitos > 0` **já está** lá — ele nunca saiu. Quem consertou o defeito
+# foi só o `try` por destino. O comentário de produção que dizia que o `return`
+# "vivia" dentro do `try` de fora também estava errado e foi corrigido.
+# Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem
+# `N passed` — ver `docs/controles_declarados.md`.
+
 # CONTROLE POSITIVO: test_todos_os_destinos_aceitos_conta_todos — sem ele o
 # grupo passaria num `_wa_lembrete` que devolvesse True sempre.
 # ──────────────────────────────────────────────────────────────────────────────

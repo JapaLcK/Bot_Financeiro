@@ -23,14 +23,23 @@ Arquivo próprio porque `test_payment_reminder.py` está a poucas linhas do teto
 de 350 de `tests/test_max_lines_python.py`; os helpers vêm por IMPORT dele —
 uma fonte só (§0.7). Mesmo arranjo do `test_payment_reminder_janela.py`.
 
-CONTROLE NEGATIVO DECLARADO — em `core/services/payment_reminder.py`, apague o
-bloco `if not await loop.run_in_executor(None, lembrete_ainda_vale, ...)`:
+CONTROLE NEGATIVO DECLARADO — em `core/services/payment_reminder.py`, troque o
+`continue` do `if atual is None:` por `atual = _linha_do_funil` (ou seja: em vez
+de pular, siga com o valor do snapshot):
     VERMELHO: test_pagou_durante_o_lote_nao_recebe_lembrete
               test_status_saiu_da_lista_durante_o_lote_nao_recebe_lembrete
-    VERDE:    test_lembrete_legitimo_continua_saindo e todo o
-              `test_payment_reminder.py` / `_janela.py` — a fixture deles não
-              mexe no estado depois da query, que é o que prova que a injeção
-              mede a REVALIDAÇÃO e não o funil.
+              test_engagement_opt_out_ligado_durante_o_lote_nao_manda_email
+              (`_consentimento.py`) — seguir com o snapshot também pula o
+              segundo termo de `lembrete_ainda_vale`, o do consentimento de
+              e-mail. Medido ao reescrever esta instrução: TRÊS vermelhos, não
+              dois.
+
+Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem `N
+passed` — ver `docs/controles_declarados.md`.
+
+A instrução anterior mandava apagar um `if not await ... lembrete_ainda_vale`
+que deixou de existir quando a função passou a devolver `dict | None` em vez de
+`bool` — instrução que nomeia a forma do bloco morre com a refatoração.
 
 CONTROLE POSITIVO: `test_lembrete_legitimo_continua_saindo`. Sem ele o arquivo
 passaria num `lembrete_ainda_vale` que devolvesse sempre False — ou seja num
@@ -178,9 +187,12 @@ def test_lembrete_legitimo_continua_saindo(user_id, monkeypatch):
 # CONTROLE NEGATIVO — em `core/services/payment_reminder.py`, decifre a partir
 # de `_linha_do_funil` (o snapshot) em vez de `atual` (a leitura fresca):
 #     VERMELHO: test_email_trocado_durante_o_lote_vai_para_o_novo
-#     VERDE:    test_lembrete_legitimo_continua_saindo e o resto dos irmãos —
-#               a fixture deles não troca o e-mail, que é o que prova que a
-#               injeção mede o ENDEREÇO e não o funil.
+#               test_audit_de_pii_so_registra_quem_foi_contatado (`_lote.py`) —
+#               a mesma injeção reprova os dois, porque decifrar do snapshot
+#               também volta a decifrar candidato que não recebe.
+# Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem
+# `N passed` — ver `docs/controles_declarados.md`.
+
 # CONTROLE POSITIVO: test_lembrete_legitimo_continua_saindo (acima) e a segunda
 # asserção deste teste — o endereço novo REALMENTE recebe. Sem ela, uma
 # implementação que não mandasse para ninguém passaria.

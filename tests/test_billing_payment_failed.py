@@ -9,18 +9,20 @@ por IMPORT de `test_billing_webhook_lifecycle` (§0.7), como no arquivo irmão.
 
 CONTROLES NEGATIVOS DECLARADOS, cada um injetado num caso que estava VERDE:
 
+Regra dos controles deste arquivo: citar o PREDICADO a injetar, nomear só os
+VERMELHOS, nunca escrever `N passed` — ver `docs/controles_declarados.md`.
+
+
   • T6 — em `_fire_email` (frontend/finance_bot_websocket_custom.py), volte a
     gravar a chave de dedupe sem olhar o retorno (`await asyncio.to_thread(fn,
     ...)` sozinho, sem o `if not ok: return`):
       VERMELHO: T6, na entrega 2 ("entregas 2 e 3 nao retentaram o e-mail").
-      VERDE:    T7 e T8.
     O modo de falha do T6 é `return False`, e isso É o teste: `send_email`
     (`core/services/email_service.py:64`) documenta "nunca lança exceção", e um
     controle que injetasse `raise` mediria um caminho que a produção não toma —
     foi exatamente assim que a v1 passou verde com o defeito intacto.
   • T7 — envolva o `stripe.Subscription.retrieve` do ramo num `try/except: pass`:
       VERMELHO: T7 (a 1ª entrega passa a devolver 200 e a escrever).
-      VERDE:    T6 e T8.
   • T8 — troque o `dedup_days=0.0 if _abriu_ciclo else ...` por
     `dedup_days=float(DUNNING_GRACE_DAYS)` fixo:
       VERMELHO: T8, e só ele.

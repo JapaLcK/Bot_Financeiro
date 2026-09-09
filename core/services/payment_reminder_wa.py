@@ -133,10 +133,13 @@ def _wa_lembrete(user_id: int) -> bool:
             logger.warning("[cobranca] WhatsApp parcial user_id=%s:"
                            " %d de %d destinos aceitaram", user_id,
                            aceitos, len(destinos))
-        # "ALGUM destino aceitou" — a semântica que a rodada anterior
-        # DOCUMENTOU e o código não implementava, porque o `return` vivia
-        # dentro do `try` de fora. É o que interessa ao lembrete: a pessoa foi
-        # alcançada em pelo menos um número.
+        # "ALGUM destino aceitou" — a semântica que uma rodada anterior
+        # DOCUMENTOU e o código não implementava. **Este `return` está DENTRO do
+        # `try` de fora e sempre esteve**: não foi ele que mudou. O que
+        # implementou a semântica foi o `try` POR DESTINO acima, que impede uma
+        # falha de destino de escapar até o `except` de fora e virar `False`
+        # depois de outro destino ter aceitado. É o que interessa ao lembrete:
+        # a pessoa foi alcançada em pelo menos um número.
         return aceitos > 0
     except Exception as exc:
         # Só chega aqui a falha de SETUP (import/identidades/dedupe), e aí

@@ -60,20 +60,21 @@ from test_payment_reminder_whatsapp import (  # noqa: F401
 # CONTROLE NEGATIVO — em `core/services/payment_reminder_wa.py::_wa_lembrete`,
 # apague o `if get_whatsapp_updates_opt_out(user_id): return False`:
 #     VERMELHO: test_opt_out_de_whatsapp_nao_recebe_template
-#     VERDE:    test_sem_opt_out_continua_recebendo (o positivo),
-#               test_opt_out_de_whatsapp_nao_tira_o_email, e todo o resto dos
-#               arquivos de lembrete — a fixture deles não liga o opt-out, que é
-#               o que prova que a injeção mede a PREFERÊNCIA e não o canal.
-#     MEDIDO:   1 failed, 34 passed.
+#               test_opt_out_ligado_durante_o_lote_nao_manda_whatsapp — os DOIS,
+#               porque sem o gate nenhum dos dois cenários é barrado. O texto
+#               anterior dizia "todo o resto dos arquivos de lembrete" VERDE, e
+#               isso era falso: o caso da rodada seguinte cai também.
+# Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem
+# `N passed` — ver `docs/controles_declarados.md`.
 # CONTROLE POSITIVO: test_sem_opt_out_continua_recebendo. Sem ele o grupo
 # passaria num canal que nunca manda.
 # E O TERCEIRO, que separa este conserto do erro pior:
 # test_opt_out_de_whatsapp_nao_tira_o_email — uma implementação que filtrasse no
-# FUNIL passaria no positivo e reprovaria neste. MEDIDO, pondo
+# FUNIL passaria no positivo e reprovaria neste. Injeção que o prova: pôr
 # `and coalesce(whatsapp_updates_opt_out, false) = false` no `where` de
-# `db.dunning.list_payment_reminder_candidates`: 2 failed, 33 passed — vermelho
-# neste e no test_opt_out_de_whatsapp_nao_recebe_template (a conta desaparece do
-# lote inteiro, então o e-mail cai junto), verde no positivo.
+# `db.dunning.list_payment_reminder_candidates` → VERMELHO neste e no
+# test_opt_out_de_whatsapp_nao_recebe_template (a conta desaparece do lote
+# inteiro, então o e-mail cai junto).
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _desligar_whatsapp(uid: int) -> None:
@@ -181,15 +182,35 @@ def test_opt_out_de_whatsapp_nao_tira_o_email(user_id, monkeypatch):
 # `test_payment_reminder_revalida.py` (§0.1 — reusar, não inventar outro).
 #
 # CONTROLES NEGATIVOS DECLARADOS:
-#  • WhatsApp — em `payment_reminder_wa._wa_lembrete`, troque a leitura fresca
-#    por um valor fixo `False` (ou reponha o parâmetro alimentado pelo funil):
-#      VERMELHO: test_opt_out_ligado_durante_o_lote_nao_manda_whatsapp
-#      VERDE:    test_sem_mudanca_durante_o_lote_whatsapp_sai (o positivo) e os
-#                três casos da rodada 7.
+#  • WhatsApp — **reponha o valor de SNAPSHOT**, em três passos (medidos ao
+#    reescrever este controle):
+#      1. em `db.dunning.list_payment_reminder_candidates`, acrescente
+#         `coalesce(whatsapp_updates_opt_out, false) as wa_off` ao `select`
+#         (é o FUNIL, não o `lembrete_ainda_vale` — patch na query errada
+#         apenas DESLIGA o gate e volta a ser degenerado);
+#      2. em `_wa_lembrete`, troque a leitura por um parâmetro
+#         `wa_opt_out: bool = False` (com default, para o chamador direto de
+#         `test_payment_reminder.py` não cair por assinatura e sujar o sinal);
+#      3. no laço, passe `wa_opt_out=bool(_linha_do_funil.get("wa_off"))`.
+#      VERMELHO: test_opt_out_ligado_durante_o_lote_nao_manda_whatsapp, e SÓ
+#                ele — `test_opt_out_de_whatsapp_nao_recebe_template` continua
+#                passando, porque naquele cenário o opt-out já está no
+#                snapshot. **É essa diferença que faz o controle discriminar a
+#                FRESCURA em vez do gate**, e é o que a variante apagada não
+#                fazia.
+#
+#    **A variante "troque a leitura fresca por um valor fixo `False`" foi
+#    APAGADA por ser degenerada**: ela produz exatamente o mesmo conjunto de
+#    falhas que o controle de cima (o do gate), ou seja é a MESMA injeção com
+#    outro nome, e nenhuma das duas separa "o gate existe" de "o gate lê
+#    fresco". Só repondo o snapshot a injeção discrimina a FRESCURA, que é o
+#    conserto desta seção.
 #  • E-mail — em `db.dunning.lembrete_ainda_vale`, apague o
 #    `and coalesce(engagement_opt_out, false) = false`:
 #      VERMELHO: test_engagement_opt_out_ligado_durante_o_lote_nao_manda_email
-#      VERDE:    todo o resto, porque nenhuma outra fixture liga aquele opt-out.
+# Regra dos controles: predicado citado, só os VERMELHOS nomeados, sem
+# `N passed` — ver `docs/controles_declarados.md`.
+
 #
 # CONTROLE POSITIVO: test_sem_mudanca_durante_o_lote_whatsapp_sai. Sem ele, uma
 # leitura que devolvesse sempre "bloqueado" passaria nos negativos.
