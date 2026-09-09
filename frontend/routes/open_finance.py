@@ -19,6 +19,7 @@ import random
 import time
 
 import psycopg
+from psycopg_pool import PoolClosed, PoolTimeout
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -270,7 +271,8 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
                          tinha_conexao_propria: bool = False,
                          criar_usuario: bool = True,
-                         adocao_registro_id: int | None = None) -> tuple[dict, bool]:
+                         adocao_registro_id: int | None = None,
+                         *, escrita_tentada: list | None = None) -> tuple[dict, bool]:
     """Grava a reconexão DENTRO do `pluggy_item_lock` do item.
 
     A relectura da geração em `_sync_pluggy_item_confirmado` não é atômica com as
@@ -285,6 +287,16 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     Pegar o mesmo lock aqui fecha a fresta na origem: enquanto um sync escreve, a
     reconexão espera; enquanto a reconexão grava, nenhum sync entra na fase de
     escrita — e o próximo a entrar relê a geração nova e aborta.
+
+    `escrita_tentada` é o canal de SAÍDA para "a execução chegou à escrita?" — uma
+    lista do chamador, marcada na linha anterior ao
+    `save_pluggy_open_finance_item` e DESMARCADA no `PoolTimeout`/`PoolClosed`
+    que prova que nem o pool foi adquirido. Existe porque `return` não sobrevive
+    a exceção e o TIPO dela não distingue: `psycopg.OperationalError` sai igual
+    do commit ambíguo e de tudo que roda antes (o `psycopg.connect` do
+    `pluggy_item_lock`, o `set_config`, o `pg_advisory_lock`, as leituras das
+    revalidações). Quem lê é o desfazimento da reivindicação de adoção no 503 de
+    `_grava_reconexao`.
 
     Sem o lock NÃO grava. A primeira versão disto gravava assim mesmo e só logava
     o aviso — e essa é exatamente a escrita que o lock existe para serializar
@@ -393,8 +405,48 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # propósito: o número muda com a versão do psycopg e envelhece errado.
         resto = None if budget_ms is None else max(
             1, budget_ms - int((time.monotonic() - t0) * 1000))
-        return save_pluggy_open_finance_item(
-            user_id, remote, budget_ms=resto, criar_usuario=criar_usuario), True
+        # A ÚNICA linha que responde "a escrita chegou a ser tentada?" (Codex
+        # #313, P1). Ela atravessa o `except` do chamador porque é a lista DELE
+        # que está sendo mutada — `return` não sobrevive a exceção, e o tipo do
+        # erro não sabe responder isso: `psycopg.OperationalError` sai tanto
+        # daqui de dentro (commit ambíguo) quanto de tudo que veio ANTES (o
+        # `psycopg.connect` dedicado do `pluggy_item_lock`, o `set_config`, o
+        # `pg_advisory_lock`, as leituras das duas revalidações). Marcado ANTES
+        # da chamada, e não no `except`, porque a pergunta é do CHAMADOR ("pode
+        # ter escrito?"): se o erro vier da saída do `with` depois de um commit
+        # que deu certo, ele ainda tem de contar como escrita tentada.
+        if escrita_tentada is not None:
+            escrita_tentada.append(True)
+        try:
+            return save_pluggy_open_finance_item(
+                user_id, remote, budget_ms=resto, criar_usuario=criar_usuario), True
+        except (PoolTimeout, PoolClosed):
+            # ... e DESMARCA no único erro que prova o contrário. Os dois só
+            # saem do `getconn`, e o `get_conn()` do `save_...` é a ÚNICA
+            # aquisição de pool da função e a primeira linha com I/O dela: aqui
+            # nenhum statement rodou. (Medido no psycopg_pool 3.3.1: `PoolTimeout`
+            # só nasce da espera do `getconn`; `PoolClosed`, do
+            # `_check_open_getconn`; a devolução no fim do `with` levanta
+            # `ValueError`, não estes. A invariante do "única aquisição" tem
+            # guarda em `tests/test_of_webhook_adopt_503.py`.)
+            #
+            # É o membro MAIS PROVÁVEL da classe, e não precisa de infra doente:
+            # o `resto` acima tem piso de 1 ms, então uma espera longa pelo lock
+            # — o cenário para o qual esta feature existe — manda
+            # `get_conn(timeout=0.001)`. Medido em 2026-09-08 no Postgres local
+            # SAUDÁVEL (`ConnectionPool(open=True)` + `connection(timeout=0.001)`
+            # imediato): pool frio → `PoolTimeout`; quente → ok. O tempo varia com
+            # a carga (1,4 ms e 4,2 ms em duas medições), remeça antes de reusar —
+            # o que não varia é o desfecho. Sem isto, o caminho
+            # mais provável de todos preservava a reivindicação sem uma única
+            # escrita e reconstruía o estado terminal que o P0 fechou.
+            #
+            # `pop()` e não `clear()`: a lista é do PRAZO INTEIRO e cada chamada
+            # marca no máximo uma vez, então cada uma só desfaz a SUA marca — uma
+            # tentativa anterior que chegou a escrever continua contando.
+            if escrita_tentada:
+                escrita_tentada.pop()
+            raise
 
 
 async def _grava_reconexao(
@@ -423,14 +475,27 @@ async def _grava_reconexao(
     """
     fim = time.monotonic() + _RECONNECT_DEADLINE_MS / 1000.0
     causa = None   # None = lock ocupado; senão, o erro de infra da última tentativa
-    # LATCHED (nunca volta a False), e é por isso que não é `causa is None`:
-    # `causa` é só a da ÚLTIMA tentativa, de propósito
+    # A pergunta do desfazimento lá embaixo é "alguma tentativa pode ter
+    # ESCRITO?", e ela tem duas metades.
+    #
+    # PRAZO INTEIRO: a lista é LATCHED (só cresce), e é por isso que não é
+    # `causa is None` — `causa` é só a da ÚLTIMA tentativa, de propósito
     # (`test_causa_e_a_da_ultima_tentativa`), então infra na 1ª + lock ocupado na
-    # 2ª chega ao fim com `causa is None` tendo passado por uma escrita de
-    # desfecho DESCONHECIDO. Quem decide o desfazimento lá embaixo precisa da
-    # pergunta do prazo INTEIRO ("alguma tentativa pode ter escrito?"), não da
-    # última.
-    escrita_incerta = False
+    # 2ª chega ao fim com `causa is None` tendo passado por escrita de desfecho
+    # DESCONHECIDO.
+    #
+    # PRECISÃO: quem marca é o `_salva_item_sob_lock`, na linha ANTES da escrita
+    # — não o tipo da exceção (Codex #313, P1). `OperationalError` também sai de
+    # tudo que roda antes dela (o `psycopg.connect` dedicado do
+    # `pluggy_item_lock`, o `set_config` inicial, o `pg_advisory_lock` — que só
+    # trata `LockNotAvailable`/`QueryCanceled` e deixa passar um `AdminShutdown`
+    # —, as leituras das revalidações) e do próprio `get_conn` da escrita,
+    # e nessas a escrita PROVADAMENTE não aconteceu. Preservar a reivindicação
+    # ali reconstruía o estado terminal que o P0 fechou: zero conexões + rastro
+    # com dono, a 1ª guarda de `_adota_item_orfao` recusando toda retentativa e
+    # o `scripts/adotar_items_of_orfaos.py` sem enxergar a linha — o usuário sem
+    # banco e sem saída pelo produto.
+    escrita_tentada: list = []
     for tentativa in range(1, _RECONNECT_LOCK_ATTEMPTS + 1):
         folga_ms = int((fim - time.monotonic()) * 1000)
         if folga_ms < 1:
@@ -453,7 +518,8 @@ async def _grava_reconexao(
         try:
             connection, sob_lock = await asyncio.to_thread(
                 _salva_item_sob_lock, user_id, remote, item_id, restante_ms,
-                tinha_conexao_propria, criar_usuario, adocao_registro_id)
+                tinha_conexao_propria, criar_usuario, adocao_registro_id,
+                escrita_tentada=escrita_tentada)
             causa = None
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
@@ -513,7 +579,6 @@ async def _grava_reconexao(
             # (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
             causa = f"{type(exc).__name__}: {exc}"
-            escrita_incerta = True
         if sob_lock:
             return connection
         # O backoff também cabe no prazo: dormir "só mais um pouco" depois de
@@ -581,11 +646,17 @@ async def _grava_reconexao(
     # lista rastro com dono). Com o desfazimento, ninguém escreveu e ninguém
     # reivindicou: a próxima entrega do `item/created` adota.
     #
-    # "Provadamente": o ÚNICO `return None, False` de `_salva_item_sob_lock` é o
-    # `if not locked`, antes do `save_pluggy_open_finance_item` — e
-    # `escrita_incerta` cobre o resto do prazo, porque infra é desfecho
-    # desconhecido e aí a reivindicação FICA (apagá-la poderia soltar uma segunda
-    # adoção por cima de uma conexão que existe).
+    # "Provadamente" é medido, não deduzido do tipo do erro: `escrita_tentada` só
+    # tem item se a execução CHEGOU ao `save_pluggy_open_finance_item`, e a marca
+    # é feita lá, na linha anterior à chamada. Cobre o prazo inteiro e as duas
+    # portas de saída sem escrita — o `if not locked` (lock ocupado) e a infra
+    # PRÉ-escrita, que é `psycopg.OperationalError` igualzinho à do commit
+    # (`psycopg.connect` do lock, `set_config`, `pg_advisory_lock`, as leituras
+    # das revalidações, e o `get_conn` do próprio `save_...`) e
+    # antes desta linha ficava preservada à toa (Codex #313, P1). Vazia: ninguém
+    # escreveu, a reivindicação vai embora. Com item: desfecho DESCONHECIDO e a
+    # reivindicação FICA — apagá-la poderia soltar uma segunda adoção por cima de
+    # uma conexão que existe.
     #
     # AQUI e não no `if not locked`: apagar entre as tentativas deixaria a
     # tentativa que enfim pega o lock gravar a conexão sem rastro com dono — item
@@ -595,7 +666,7 @@ async def _grava_reconexao(
     # DEPOIS dos logs: o diagnóstico do 503 já está gravado se este delete
     # estourar (ele sobe para o `except Exception` de `_adota_item_orfao`, que
     # loga e responde 200 ao webhook).
-    if adocao_registro_id is not None and not escrita_incerta:
+    if adocao_registro_id is not None and not escrita_tentada:
         await asyncio.to_thread(unregister_item, adocao_registro_id, user_id)
     raise HTTPException(
         status_code=503,
@@ -755,10 +826,10 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         escrita da conexão (`_salva_item_sob_lock`, `adocao_registro_id`),
         porque entre as duas leituras cabe uma entrega concorrente inteira.
         Quem perde essa segunda leitura APAGA o próprio rastro antes de
-        abortar, ainda com o lock na mão — e quem DESISTE do lock (503 sem
-        infra) apaga também, no `_grava_reconexao`: reivindicação abandonada
-        que fica para trás é o que torna o aborto terminal (ver o LIMITE
-        CONHECIDO);
+        abortar, ainda com o lock na mão — e quem sai no 503 sem NUNCA ter
+        chegado à escrita apaga também, no `_grava_reconexao`: reivindicação
+        abandonada que fica para trás é o que torna o aborto terminal (ver o
+        LIMITE CONHECIDO);
       • o usuário TEM de existir, e são DUAS defesas para o mesmo estrago.
         `user_exists` recusa por IDENTIDADE (o log diz `usuario_inexistente`), e
         é ele que responde quando a conta já não existia — mas é leitura em
@@ -782,16 +853,25 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     `item/created` não readota (a 1ª guarda acima). É por isso que os DOIS
     desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
     adoção acabou de gravar, em vez de deixá-lo: o aborto sob o lock
-    (`_salva_item_sob_lock`) e a desistência do lock — o 503 com `causa` vazia,
-    em que nenhuma tentativa passou do `if not locked`. Sem os dois, duas
+    (`_salva_item_sob_lock`) e o 503 em que NENHUMA tentativa do prazo chegou ao
+    `save_pluggy_open_finance_item` — lock ocupado (`if not locked`) ou infra
+    PRÉ-escrita, que é `psycopg.OperationalError` idêntica à do commit e vem do
+    `psycopg.connect` dedicado do lock, do `set_config`, do `pg_advisory_lock`,
+    das leituras das revalidações ou do `get_conn` do próprio
+    `save_pluggy_open_finance_item` (Codex #313, P1). Quem responde isso é a
+    marca feita na linha anterior à escrita — desfeita quando o erro é
+    `PoolTimeout`/`PoolClosed`, que só sai do `getconn` —, não o tipo do erro.
+    Sem os dois desfazimentos, duas
     entregas concorrentes caíam neste estado sozinhas, sem falha nenhuma de
     escrita: consertar só o primeiro TROCAVA o perdedor (quem aborta limpa, quem
     perde o lock fica), e era regressão contra a `main`, onde a mesma
     intercalação dava 1 conexão. O que continua pagando o preço é a falha de
-    INFRA (`psycopg.OperationalError` em qualquer tentativa: FK da conta apagada,
-    commit ambíguo, pool esgotado), em que o desfecho da escrita é DESCONHECIDO e
-    apagar a reivindicação poderia soltar uma segunda adoção por cima de uma
-    conexão que existe. Aí a saída é OPERACIONAL:
+    INFRA DENTRO da escrita (FK da conta apagada, erro no meio do upsert, commit
+    ambíguo), em que o desfecho é DESCONHECIDO e apagar a reivindicação poderia
+    soltar uma segunda adoção por cima de uma conexão que existe. Pool esgotado
+    NÃO está nesta lista: ele estoura no `get_conn`, ANTES de qualquer statement,
+    e `PoolTimeout`/`PoolClosed` saindo do `save_...` desfazem a reivindicação
+    como qualquer outra falha pré-escrita. Aí a saída é OPERACIONAL:
     `python -m scripts.adotar_items_of_orfaos --item ID --apply --delete` apaga o
     item na Pluggy, o `avoidDuplicates` libera, e o usuário reconecta pelo
     widget. Fechar isso sozinho exigiria o disconnect deixar rastro próprio

@@ -35,7 +35,7 @@ CONTROLES do grupo (medidos, não deduzidos):
     reproduzido; os outros vermelhos caem no rastro que sobra. Sem CONTAR os
     vermelhos: o número envelhece a cada teste novo aqui (CLAUDE.md §2);
   • negativo (desfazimento no 503): `if False and ...` no `if adocao_registro_id
-    is not None and not escrita_incerta` do fim de `_grava_reconexao` →
+    is not None and not escrita_tentada` do fim de `_grava_reconexao` →
     discrimina `test_quem_perde_o_lock_...`, no assert de rastro
     (`[{'origin': 'webhook_adopt', 'user_id': ...}] == []`). Desligando TAMBÉM
     esse assert, o vermelho seguinte é a retentativa devolvendo `None` — o P0 em
@@ -43,10 +43,9 @@ CONTROLES do grupo (medidos, não deduzidos):
   • negativo (revalidação): `if False and adocao_registro_id is not None:` →
     discrimina `test_entrega_atrasada_...`, que falha em "a entrega atrasada
     adotou", o bug do Codex de volta;
-  • negativo (o LATCH): trocar `not escrita_incerta` por `causa is None` no
-    mesmo `if` → discrimina `test_desfazimento_do_503_olha_o_prazo_INTEIRO
-    [infra-ocupado]`. Antes dele a troca deixava o grupo OF inteiro VERDE: o
-    latch era comportamento correto sem controle negativo nenhum;
+  • o MECANISMO do desfazimento no 503 — o latch do prazo inteiro e a marca que
+    separa infra ANTES da escrita de infra DENTRO dela — mudou de arquivo:
+    `test_of_webhook_adopt_503.py`, com os controles negativos dele;
   • positivo: o teste do aborto mútuo exige UMA conexão criada. Num código que
     recusasse toda adoção — o risco de uma guarda nova — ele fica vermelho pelo
     mesmo assert. `test_item_created_continua_adotando_o_dono_legitimo`
@@ -58,9 +57,7 @@ from __future__ import annotations
 import asyncio
 import threading
 
-import psycopg
 import pytest
-from fastapi import HTTPException
 
 import db
 import frontend.routes.open_finance as of_routes
@@ -267,7 +264,7 @@ def test_quem_perde_o_lock_tambem_some_do_rastro(user_id, monkeypatch, eventos, 
             b_leitura.wait()            # as duas passaram a 1ª guarda; agora reivindicam
         return real_user(uid)
 
-    def _intercala(*a):                 # `real_lock(*a)` repassa TUDO: nada some no meio
+    def _intercala(*a, **kw):           # repassa TUDO (args E kwargs): nada some no meio
         registro = a[6]                 # `adocao_registro_id`: identifica a ENTREGA
         with trava:
             nova = registro not in vistos
@@ -276,7 +273,7 @@ def test_quem_perde_o_lock_tambem_some_do_rastro(user_id, monkeypatch, eventos, 
             ordem = vistos[registro]
         if nova and ordem < 2:
             b_lock.wait()
-        return (None, False) if ordem == 1 else real_lock(*a)
+        return (None, False) if ordem == 1 else real_lock(*a, **kw)
 
     monkeypatch.setattr(of_routes, "user_exists", _pareia)
     monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _intercala)
@@ -304,43 +301,3 @@ def test_quem_perde_o_lock_tambem_some_do_rastro(user_id, monkeypatch, eventos, 
     finally:
         db.disconnect_open_finance_connection(user_id)
         _limpa_item("z-perde-lock")
-
-
-@pytest.mark.parametrize("sequencia, sobra", [
-    (["ocupado", "ocupado"], False),   # nenhuma passou do `if not locked`: desfaz
-    (["infra", "ocupado"], True),      # a 1ª pode ter COMMITADO — a que discrimina
-    (["ocupado", "infra"], True),      # idem, e aqui `causa is None` seguraria também
-], ids=["so-lock", "infra-ocupado", "ocupado-infra"])
-def test_desfazimento_do_503_olha_o_prazo_INTEIRO(user_id, monkeypatch, eventos,
-                                                  sequencia, sobra):
-    """A tabela que separa `escrita_incerta` (latch) de `causa is None`.
-
-    `causa` é só a da ÚLTIMA tentativa, de propósito
-    (`test_causa_e_a_da_ultima_tentativa`): infra na 1ª + lock ocupado na 2ª
-    chega ao 503 com `causa is None` TENDO passado por escrita de desfecho
-    desconhecido, e apagar a reivindicação ali soltaria uma segunda adoção por
-    cima de conexão que existe. `infra-ocupado` é a ÚNICA linha que separa os
-    dois gates — sem ela a troca passa com o grupo OF inteiro no verde.
-    """
-    monkeypatch.setattr(of_routes, "_RECONNECT_DEADLINE_MS", 3000)
-    item, chamadas = "z-prazo-" + "-".join(sequencia), []
-
-    def _script(*a):
-        acao = sequencia[min(len(chamadas), len(sequencia) - 1)]
-        chamadas.append(acao)
-        if acao == "infra":
-            raise psycopg.errors.TooManyConnections("sorry, too many clients already")
-        return None, False              # lock ocupado: a escrita nem foi TENTADA
-
-    monkeypatch.setattr(of_routes, "_salva_item_sob_lock", _script)
-    registro = db.register_item(user_id, provider_item_id=item, origin="webhook_adopt")
-    try:
-        with pytest.raises(HTTPException) as exc:
-            asyncio.run(of_routes._grava_reconexao(
-                user_id, {"id": item}, item, criar_usuario=False,
-                adocao_registro_id=registro))
-        assert exc.value.status_code == 503
-        assert chamadas == sequencia, chamadas
-        assert bool(_registry(item)) is sobra, f"{sequencia}: {_registry(item)}"
-    finally:
-        _limpa_item(item)
