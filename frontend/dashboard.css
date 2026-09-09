@@ -7,12 +7,18 @@
   --glass-border:  rgba(255,255,255,0.13);
   --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
   --radius:        22px;
-  --green:  #00F078; --neon:   #C6F11A; --red:    #FF2D2D; --blue:   #FF80B8;
+  /* --red era #FF2D2D: 4,31:1 sobre o card, abaixo do AA justamente onde pinta
+     valor negativo. #FF5A5A dá 5,22:1 sem sair do vermelho da marca. */
+  --green:  #00F078; --neon:   #C6F11A; --red:    #FF5A5A; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
   --text:   rgba(255,255,255,0.92);
-  --text-2: rgba(255,255,255,0.52);
-  --text-3: rgba(255,255,255,0.28);
+  /* Piso AA (4,5:1) sobre as duas superfícies reais, página #111 e card #222.
+     --text-3 estava em .28 → 2,48:1, e é o token oficial de rótulo discreto:
+     um valor conserta os 112 usos do arquivo. --text-2 sobe junto porque .52
+     ao lado de .50 deixaria de existir como segundo nível de hierarquia. */
+  --text-2: rgba(255,255,255,0.66);
+  --text-3: rgba(255,255,255,0.50);
   --div:    rgba(255,255,255,0.08);
   --ease:   cubic-bezier(.4,0,.2,1);
   --orb-opacity: .42;
@@ -25,8 +31,14 @@ body.light {
   --glass-border:  rgba(15,23,42,0.09);
   --glass-shadow:  0 6px 20px rgba(15,23,42,0.07);
   --text:   #0f172a;
-  --text-2: #475569;
-  --text-3: #94a3b8;
+  --text-2: #334155;   /* era #475569; desce um passo porque --text-3 assume esse valor */
+  --text-3: #475569;   /* era #94a3b8 → 2,34:1 sobre --bg-page; slate-600 dá 6,90:1 */
+  /* Verde e vermelho não eram redefinidos aqui, e são cor de DINHEIRO
+     (.tx-amt, .ov-val, .stat-delta). Sobre o fundo claro o neon dava 1,39:1 —
+     valor positivo praticamente invisível — e o vermelho, 3,38:1. Escurecem
+     como o --neon-ink logo abaixo já faz: mesma função, mesma identidade. */
+  --green:  #067647;
+  --red:    #C81E1E;
   --div:    rgba(15,23,42,0.08);
   --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
   --orb-opacity: .12;
@@ -82,7 +94,10 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.6; }
 
 /* ─── Layout ────────────────────────────────────────────────────────── */
-.page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 64px; }
+/* O padding de baixo reserva a coluna do #piggy-fab, que é `fixed` e por isso
+   não empurra nada: ele ocupa de 22px a 80px da borda inferior da viewport e
+   estava cobrindo a última linha de tabela e o último card. 96px = 80 + folga. */
+.page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 96px; }
 
 /* ─── Side navigation (estilo YouTube — overlay full-height) ────────── */
 /* Sidebar oculta por padrão. Click no hamburger abre overlay sobre o
@@ -176,6 +191,10 @@ body.light .sidenav-toggle:hover { background:rgba(15,23,42,.05); color:var(--te
 }
 .sidenav-item .sn-tag.beta { background:rgba(255,128,184,.18); color:#FF80B8; }
 .sidenav-item .sn-tag.new  { background:rgba(198,241,26,.18); color:#C6F11A; }
+/* No claro os três selos ficam entre 1,2:1 e 1,5:1: são cores pensadas para
+   brilhar sobre fundo escuro, e o fundo do selo é só um véu de 18%. A tinta
+   identifica o selo, a tinta do texto passa a ser a do resto da interface. */
+body.light .sidenav-item .sn-tag { color:var(--text); }
 
 .sidenav-footer {
   margin-top:auto; padding-top:12px; border-top:1px solid var(--div);
@@ -1068,7 +1087,9 @@ body.light .hbtn.hbtn-pink:hover {
 .ov-cc-status.s-due   { background:rgba(255,45,45,.16);  color:var(--red); }
 .ov-cc-status.s-empty { background:rgba(255,255,255,.06); color:var(--text-3); }
 .ov-cc-sub { font-size:.68rem; color:var(--text-3); margin:-5px 0 8px; }
-@media(max-width:600px) { .page{padding:12px 10px 48px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
+/* 96px de baixo = folga do FAB, mesmo valor da .page base e do
+   dashboard-mobile.css, que é quem de fato vence abaixo de 640px. */
+@media(max-width:600px) { .page{padding:12px 10px 96px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
 
 /* ─── Skeleton ──────────────────────────────────────────────────────── */
 .sk { border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.06) 75%);
@@ -1517,11 +1538,15 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 .ov-period-tabs { display:flex; gap:3px; background:rgba(255,255,255,.05); border:1px solid var(--glass-border); border-radius:9px; padding:3px; }
 .ov-period-tabs button { font-size:.72rem; font-weight:600; color:var(--text-3); padding:4px 11px; border-radius:6px; border:none; background:transparent; cursor:pointer; transition:background .15s var(--ease),color .15s var(--ease); }
 .ov-period-tabs button:hover { color:var(--text-2); }
-.ov-period-tabs button.on { background:var(--purple); color:#fff; }
+/* Branco sobre --purple dá 3,49:1 e o rótulo tem 11,5px. O #C7186B é o mesmo
+   rosa escuro da ponta do gradiente do FAB, e leva a 5,57:1. */
+.ov-period-tabs button.on { background:#C7186B; color:#fff; }
 body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
-#toast { position:fixed;bottom:26px;right:26px;z-index:999;
+/* Sobe acima do FAB (topo dele a 80px): os dois são `fixed` e ancorados no
+   mesmo canto, então o toast nascia atrás da bolinha do Piggy. */
+#toast { position:fixed;bottom:92px;right:26px;z-index:999;
   background:rgba(0,240,120,.14);backdrop-filter:blur(20px);
   border:1px solid rgba(0,240,120,.3);color:var(--green);
   padding:9px 18px;border-radius:12px;font-size:.8rem;font-weight:600;
@@ -2198,7 +2223,10 @@ html.pb-app #piggy-fab { touch-action: none; }
   font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
   border: 1px solid transparent; font-family: inherit;
 }
-.ag-btn-on { background: var(--purple); color: #fff; }
+/* Mesmo caso da .ov-period-tabs button.on: rosa chapado com texto branco dá
+   3,49:1. Estas duas eram as únicas regras com --purple sólido sob texto —
+   as demais usam o gradiente, que fecha em #C7186B. */
+.ag-btn-on { background: #C7186B; color: #fff; }
 .ag-btn-on:hover { filter: brightness(1.08); }
 .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
