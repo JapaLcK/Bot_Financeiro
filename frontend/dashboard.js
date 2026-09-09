@@ -7540,7 +7540,7 @@ function setStatus(s) {
 // o que essa saída exige já foi executado aqui. Uma fonte só, usada pelo boot
 // e pela revalidação disparada por reconexões rejeitadas.
 function applyAccessVerdict(me) {
-  if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+  if (me && me.needs_plan_selection) {
     clearSessionSnapshots();  // veredito negativo: reload não repinta saldo
     stopWsRetries();
     window.location.replace("/precos?escolha=1");
@@ -10870,8 +10870,9 @@ function _showAccessError(title, msg) {
         }
         // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
         // plano pago antes de acessar o app (o Grátis não é mais uma escolha
-        // oferecida na /precos). Só na web — no app iOS o gate fica de fora pra
-        // não forçar a tela de planos/compra (diretriz 3.1.1).
+        // oferecida na /precos). Vale também no app iOS — a política (e por que
+        // não há isenção por app) mora na docstring de
+        // plan_service.needs_plan_selection.
         // Paywall/escolha de plano: mesmo veredito da revalidação por WS
         // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
         if (!applyAccessVerdict(me)) return false;

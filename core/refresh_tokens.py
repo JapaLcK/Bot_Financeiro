@@ -252,19 +252,19 @@ def revoke_user_refresh_tokens(user_id: int) -> int:
 
 def cleanup_expired_refresh_tokens() -> int:
     """Limpeza periódica de refresh tokens expirados/revogados há mais de 30d.
-    Não usar pra produção sem chamar de um cron — só housekeeping."""
-    try:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from auth_refresh_tokens
-                where (revoked_at is not null and revoked_at < now() - interval '30 days')
-                   or (expires_at < now() - interval '7 days')
-                """
-            )
-            n = cur.rowcount
-            conn.commit()
-        return n or 0
-    except Exception as exc:
-        print(f"[refresh] cleanup falhou: {exc}", file=sys.stderr)
-        return 0
+
+    Chamada pelo cron de manutenção (scripts/cleanup_job.py, railway.cleanup.toml).
+    A falha PROPAGA de propósito: engolir a exceção e devolver 0 deixaria o cron
+    verde enquanto a tabela cresce sem poda. Quem chama já loga e sai rc=1.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            delete from auth_refresh_tokens
+            where (revoked_at is not null and revoked_at < now() - interval '30 days')
+               or (expires_at < now() - interval '7 days')
+            """
+        )
+        n = cur.rowcount
+        conn.commit()
+    return n or 0

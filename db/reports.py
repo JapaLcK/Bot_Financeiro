@@ -14,7 +14,6 @@ from .users import (
     get_or_create_canonical_user,
     create_link_code,
     merge_users,
-    get_or_create_canonical_user,
     _hash_password,
     _check_password,
 )
@@ -156,6 +155,24 @@ def update_user_plan(user_id: int, plan: str, expires_at=None) -> None:
 
 def mark_plan_selected(user_id: int) -> None:
     return _db_support.mark_plan_selected_impl(get_conn, user_id)
+
+
+def get_plan_gate_state(user_id: int) -> dict | None:
+    """As três colunas que `plan_service.needs_plan_selection` lê — nada mais.
+
+    Mesmo motivo do SELECT enxuto do onboarding logo abaixo: `get_auth_user`
+    traz PII cifrada e cada decrypt grava em `pii_access_log`, e o gate do bot
+    (`core.handle_incoming._paywall_gate`) roda em TODA mensagem recebida.
+    None quando não há cadastro web — igual ao que `get_auth_user` devolve, que
+    é o que o `needs_plan_selection` espera."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select plan, plan_expires_at, plan_selected_at "
+                "from auth_accounts where user_id=%s",
+                (int(user_id),),
+            )
+            return cur.fetchone()
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -883,15 +883,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_dashboard.open_dashboard(user_id)
 
     # --- ajuda ---
-    if intent == "help":
-        parts = text.split(maxsplit=1)
-        section_arg = parts[1] if len(parts) > 1 else None
-        if section_arg:
-            return h_help.help_section(section_arg, platform)
-        return h_help.help_general(platform)
-
-    if intent == "help.tutorial":
-        return h_help.tutorial(platform)
+    # A montagem mora no `h_help.answer_help` porque o `_paywall_gate` responde
+    # à ajuda ele mesmo (o barrado não pode chegar aqui — as pendências são
+    # resolvidas ANTES deste ramo).
+    if intent in ("help", "help.tutorial"):
+        return h_help.answer_help(intent, text, platform)
 
     # --- CDI ---
     if intent == "cdi.check":

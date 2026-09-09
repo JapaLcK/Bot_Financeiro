@@ -34,7 +34,7 @@ from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
 from .system_prompt import SYSTEM_PROMPT
-from .tools import SCHEMAS, WRITE_TOOL_NAMES, get_tool
+from .tools import SCHEMAS, get_tool
 
 
 logger = logging.getLogger(__name__)

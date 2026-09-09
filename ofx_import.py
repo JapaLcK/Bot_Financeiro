@@ -4,7 +4,6 @@ import hashlib
 from datetime import datetime, date, time
 from decimal import Decimal
 import re
-from unittest import result
 from ofxparse import OfxParser
 from utils_date import _tz
 from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date

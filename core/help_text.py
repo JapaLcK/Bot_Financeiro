@@ -1,9 +1,18 @@
 # core/help_text.py
 from __future__ import annotations
 import re
-from typing import Literal, Tuple
+from typing import Literal
 
 Platform = Literal["discord", "whatsapp"]
+
+# Texto exato que faz o WhatsApp desviar pro menu interativo (wa_runtime), antes
+# do handle_incoming. Mora aqui porque é vocabulário de ajuda, não do adapter.
+# Não confundir com a isenção do gate de plano (handle_incoming): aquela pergunta
+# ao intent_classifier, então `menu` — que o classificador manda pra
+# out_of_scope — NÃO é isento lá.
+HELP_TRIGGERS: frozenset[str] = frozenset({
+    "ajuda", "help", "menu", "/ajuda", "/help", "/menu",
+})
 
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"

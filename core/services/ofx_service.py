@@ -2,7 +2,6 @@
 from __future__ import annotations
 from typing import Any
 from ofx_import import import_ofx_bytes
-import asyncio
 try:
     from utils_text import fmt_brl
 except Exception:
