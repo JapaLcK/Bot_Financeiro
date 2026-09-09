@@ -43,8 +43,8 @@ class AsaasApiError(RuntimeError):
     corpo de erro traz PII do titular (nome, e-mail, CPF do cliente da cobrança),
     e `str(exc)` desta exceção vira `details` de `log_system_event` — PERSISTIDO
     em `system_event_logs` e lido pelo painel admin. Aqui é pior que no Pluggy:
-    a mesma string vai para `pix_webhook_events.last_error`, que SOBREVIVE à
-    purga do payload (§13.3) e à exclusão da conta.
+    a mesma string vai para `pix_webhook_events.last_error`. A purga do §13.3
+    zera aquela coluna aos 7 dias; `system_event_logs` ela não alcança.
     """
 
     def __init__(self, message: str, *, status_code: int | None = None,
