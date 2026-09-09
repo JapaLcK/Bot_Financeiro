@@ -121,25 +121,32 @@ def valores_por_cobranca(user_id: int) -> dict[str, int]:
             return {str(r["id"]): int(r["amount_cents"]) for r in cur.fetchall()}
 
 
-def gravar_stripe_period_end(charge_id: int, quando) -> bool:
+def gravar_stripe_period_end(charge_id: int, quando, *, access_starts_at=None,
+                             access_expires_at=None) -> bool:
     """Grava o `stripe_period_end_at` RECONFIRMADO no Stripe. True se aplicou.
 
     A criação grava a ESTIMATIVA que o checkout leu (§8.2); o efeito
     `stripe_cancel` lê o `current_period_end` de verdade no pagamento e chama
-    isto. **Não recalcula a janela de acesso** — ela já foi decidida na transição
-    para `paid`, e reescrevê-la aqui seria evento de pagamento mexendo em grant,
-    que o §6 proíbe. `where stripe_subscription_id is not null` porque só a
-    migração tem período a reconfirmar.
+    isto. `where stripe_subscription_id is not null` porque só a migração tem
+    período a reconfirmar.
+
+    **A janela vem junto, e no MESMO update.** Quem decide se ela muda é
+    `_janela_adiada` (só adia, nunca antecipa); passá-la aqui em vez de num
+    segundo comando evita a linha ficar um instante com período novo e janela
+    velha — que é exatamente o instante em que o efeito `grant` roda. `None` nos
+    dois mantém o que está gravado (`coalesce`), que é o caminho comum.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "update pix_charges"
                 "   set stripe_period_end_at = %s,"
-                "       stripe_cancel_scheduled_at = now()"
+                "       stripe_cancel_scheduled_at = now(),"
+                "       access_starts_at = coalesce(%s, access_starts_at),"
+                "       access_expires_at = coalesce(%s, access_expires_at)"
                 " where id = %s and stripe_subscription_id is not null"
                 " returning id",
-                (quando, int(charge_id)),
+                (quando, access_starts_at, access_expires_at, int(charge_id)),
             )
             aplicou = cur.fetchone() is not None
         conn.commit()

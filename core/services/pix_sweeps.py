@@ -147,16 +147,46 @@ def _viva(remotas: list[dict]) -> dict | None:
 
 
 def _anexar(linha: dict, remota: dict) -> bool:
-    """Fecha a saga com o id que o Asaas confirmou ter.
+    """Fecha a saga com o id que o Asaas confirmou ter — **e com o QR**.
 
-    **Sem QR.** O `payload` viria de uma segunda chamada, e a cobrança que a
-    varredura acha é justamente aquela cujo QR o cliente nunca recebeu — quem
-    reabrir a tela cai no caminho "mesmo QR" do checkout, que lê a linha. Deixar
-    `qr_payload_enc` nulo aqui é o certo: nada em `pix_charges` fica mentindo.
+    A segunda chamada (`obter_qr_pix`) não é luxo: a cobrança que a varredura
+    acha é justamente aquela cujo QR o cliente nunca recebeu, e quem reabrir a
+    tela cai no caminho "mesmo QR" do checkout, que LÊ a linha. Anexar só o id
+    levava a `pending` sem instrumento de pagamento — e daí `_reaproveitar`
+    devolve 503 em todo checkout do mesmo plano, enquanto `pending` já não volta
+    para a reconciliação. Cobrança impagável e insubstituível, para sempre.
+
+    Falha ali levanta (o Asaas recusa cobrança sem `payload`), e o `except` de
+    `reconciliar_saga` a lê como "indefinidas": a linha fica em `creating`/`draft`
+    e a passada seguinte tenta de novo — que é o desfecho certo, porque anexar
+    sem QR é a própria armadilha acima.
+
+    `ponytail:` `qr_expires_at` fica nulo (o parser do `expirationDate` mora no
+    checkout). O que se perde é a precisão do teto do poll, não o pagamento.
     """
+    from core.crypto import encrypt_pii_optional
     from db.pix_charges_saga import attach_pagamento
 
-    return attach_pagamento(linha["id"], str(remota["id"]))
+    qr = asaas.obter_qr_pix(str(remota["id"]))
+    return attach_pagamento(linha["id"], str(remota["id"]),
+                            qr_payload_enc=encrypt_pii_optional(qr["payload"]))
+
+
+def id_remoto_vivo(external_reference: str) -> str | None:
+    """O id da cobrança remota ainda PAGÁVEL desta referência, se houver.
+
+    Mora aqui, e não no checkout, porque é a mesma pergunta da reconciliação
+    (§10.1) — "o POST efetivou e a resposta se perdeu?" —, com a mesma consulta e
+    a mesma lista de status vivos (§0.7). Quem chama é a substituição: uma linha
+    `creating` **sem `asaas_payment_id`** pode ter cobrança pagável lá, e pular o
+    `DELETE` por causa da coluna nula deixava as duas pagáveis ao mesmo tempo.
+
+    **Levanta quando a consulta falha**, e é o contrato de
+    `buscar_por_external_reference`: "não sei" não pode virar "não existe" num
+    caminho que emite a segunda cobrança.
+    """
+    viva = _viva(asaas.buscar_por_external_reference(external_reference))
+    return str(viva["id"]) if viva else None
 
 
 def _voltar(linha: dict) -> bool:

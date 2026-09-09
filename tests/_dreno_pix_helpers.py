@@ -47,11 +47,17 @@ def nova_cobranca(user_id: int, **kw) -> dict:
 
 
 def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
-             referencia: str | None = None, valor: float | None = None) -> str:
+             referencia: str | None = None, valor: float | None = None,
+             tentativas: int = 0) -> str:
     """Grava o evento na outbox e DRENA — o caminho inteiro, não o handler solto.
 
     Devolve o `event_id`, que é o que os testes consultam para conferir
     `processed_at`, `attempts` e `last_error`.
+
+    `tentativas` carimba `attempts` ANTES da drenagem: é como se testa o que só
+    acontece depois de N falhas (o fallback do `stripe_cancel`, §8.2) sem drenar
+    o mesmo evento seis vezes — cada `entregar` cria um `event_id` novo, então
+    repetir a chamada mediria seis eventos com `attempts` zero.
     """
     from core.services.pix_drain import drenar_evento
     from db.webhook_outbox import registrar_evento
@@ -69,6 +75,11 @@ def entregar(tipo: str, cobranca: dict, *, payment_id: str | None = None,
         },
     }
     registrar_evento(event_id, tipo, corpo, next(_versao))
+    if tentativas:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("update pix_webhook_events set attempts = %s"
+                        " where event_id = %s", (int(tentativas), event_id))
+            conn.commit()
     drenar_evento(event_id)
     return event_id
 
@@ -100,12 +111,21 @@ def mundo_externo(monkeypatch) -> dict:
     pelo ramo "não configurado" e o teste que afirma "um `send_purchase`" mede
     zero em qualquer versão do código — a tautologia clássica.
     """
-    contas = {"ga4": 0, "capi": 0, "email": 0, "alerta": [], "grant": 0}
+    contas = {"ga4": 0, "capi": 0, "email": 0, "alerta": [], "grant": 0,
+              # `send_email` NUNCA levanta: Resend fora do ar e Resend sem chave
+              # saem os dois por `return False`. O falso devolve o mesmo `bool`
+              # que a produção, senão o efeito `email` seria medido contra uma
+              # função que não existe. `email_ok=False` liga o caminho da falha.
+              "email_ok": True}
 
     import core.services.admin_notify as an
     import core.services.email_service as es
     import core.services.ga4_mp as ga4
     import core.services.meta_capi as capi
+
+    def _email(*a, **kw):
+        contas["email"] += 1
+        return contas["email_ok"]
 
     monkeypatch.setattr(ga4, "mp_configured", lambda: True)
     monkeypatch.setattr(ga4, "send_purchase",
@@ -113,8 +133,7 @@ def mundo_externo(monkeypatch) -> dict:
     monkeypatch.setattr(capi, "capi_configured", lambda: True)
     monkeypatch.setattr(capi, "send_event",
                         lambda **kw: contas.__setitem__("capi", contas["capi"] + 1))
-    monkeypatch.setattr(es, "send_pix_paid_email",
-                        lambda *a, **kw: contas.__setitem__("email", contas["email"] + 1))
+    monkeypatch.setattr(es, "send_pix_paid_email", _email)
     monkeypatch.setattr(an, "notify_pix_alerta",
                         lambda msg: contas["alerta"].append(msg) or True)
     return contas

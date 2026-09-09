@@ -22,10 +22,10 @@ dois QRs pagáveis do mesmo usuário seriam duas cobranças contra o mesmo créd
 ## O caso "fechei a aba e voltei" — 200 com o MESMO QR
 
 Decisão do dono, 2026-09-09: cobrança ativa **do mesmo plano** devolve o mesmo
-QR, com 200, e não 409. Só plano DIFERENTE substitui. É por isso que
-`buscar_ativa` traz o `qr_payload_enc` junto e este módulo o decifra com
-`PiiAccessContext(purpose="pix_qr_read")` (§13.6) — é o único lugar do
-repositório que tira o instrumento de pagamento do banco.
+QR, com 200, e não 409. Só plano DIFERENTE — ou QR já VENCIDO — substitui. É por
+isso que `buscar_ativa` traz o `qr_payload_enc` junto, decifrado por
+`pix_checkout_resposta.qr_da_linha` com `purpose="pix_qr_read"` (§13.6): é o
+único caminho do repositório que tira o instrumento de pagamento do banco.
 
 ## Os dois números de dinheiro vêm de lugares OPOSTOS
 
@@ -40,16 +40,13 @@ import os
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
-from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
+from core.crypto import encrypt_pii_optional
 from core.observability import log_system_event_sync
 from core.services import asaas
+from core.services.pix_checkout_resposta import (
+    VENCIMENTO_DIAS, expira, qr_da_linha, resposta)
 from core.services.pix_pricing import (  # noqa: I001
     DURACAO_DIAS, PRECOS_ANUAIS_CENTS, CoberturaJaPaga, plano_da_cobranca)
-
-# Dias em que o QR fica pagável. O Asaas cobra `dueDate`, não hora; o poll do
-# PR 2 tem teto próprio e muito menor. Três dias é folga para quem fecha a aba
-# e volta — o caso que devolve o MESMO QR.
-VENCIMENTO_DIAS = 3
 
 # Estados de onde a substituição consegue partir. `paid` e os terminais não
 # estão aqui: cobrança paga não se substitui, se renova (§11).
@@ -167,44 +164,31 @@ def _stripe_vivo(user_id: int) -> tuple[str, datetime] | None:
     return (str(_sg(sub, "id") or ""), fim)
 
 
-def _qr_da_linha(linha: dict) -> str | None:
-    """Decifra o `qr_payload_enc` da cobrança — o ÚNICO caminho de releitura."""
-    return decrypt_pii_optional(linha.get("qr_payload_enc"), ctx=PiiAccessContext(
-        purpose="pix_qr_read", actor="system:billing_pix",
-        subject_user_id=linha["user_id"], field="qr_payload"))
-
-
-def _resposta(linha: dict, qr_payload: str) -> dict:
-    """O contrato que a tela do PR 2 consome. Uma função para os dois caminhos
-    (cobrança nova e cobrança reaproveitada) — duas montagens divergiriam."""
-    from core.services.pix_brcode import qr_svg_data_url
-
-    return {
-        "public_token": linha["public_token"],
-        "qr_payload": qr_payload,
-        "qr_image": qr_svg_data_url(qr_payload),
-        "expires_at": linha["qr_expires_at"],
-        "amount_cents": int(linha["amount_cents"]),
-        "credit_cents": int(linha["credit_cents"]),
-        "starts_at": linha["access_starts_at"],
-        "plan": linha["plan"],
-    }
-
-
 def _cancelar_remota(linha: dict) -> None:
     """`canceling` → `DELETE` no Asaas → `canceled`. Falhou, ninguém cria nada.
 
     Marcar `canceling` ANTES do `DELETE` (§10) deixa rastro para a varredura
     repetir o cancelamento se o processo morrer no meio.
+
+    **Coluna nula não é prova de que não há cobrança lá.** Em `creating` o POST
+    pode ter efetivado com a resposta (ou o QR) perdida: `id_remoto_vivo`
+    pergunta ao Asaas pela `external_reference` antes de dar a linha por
+    fantasma. Sem isso a substituição pulava o `DELETE` e deixava duas cobranças
+    pagáveis contra o mesmo crédito — o furo que o §10 existe para fechar, e o
+    `PAYMENT_RECEIVED` aceita `canceled` como origem (§11).
     """
+    from core.services.pix_sweeps import id_remoto_vivo
     from db.pix_charges import transicionar
 
     transicionar(linha["id"], de=_SUBSTITUIVEIS, para="canceling")
-    if linha["asaas_payment_id"]:
-        try:
-            asaas.deletar_pagamento(linha["asaas_payment_id"])
-        except Exception as exc:  # noqa: BLE001
-            raise CheckoutIndisponivel("asaas_cancelamento_falhou") from exc
+    try:
+        pagamento = linha["asaas_payment_id"] or (
+            id_remoto_vivo(linha["external_reference"])
+            if linha["status"] == "creating" else None)
+        if pagamento:
+            asaas.deletar_pagamento(pagamento)
+    except Exception as exc:  # noqa: BLE001 — consulta que falha é 503 também
+        raise CheckoutIndisponivel("asaas_cancelamento_falhou") from exc
     transicionar(linha["id"], de=("canceling",), para="canceled", apagar_qr=True)
 
 
@@ -246,9 +230,13 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                                 preco, min_cents)
 
     linha = _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio)
+    # `access_starts_at` da LINHA só é escrito no pagamento (§7), então ela o traz
+    # nulo aqui — quem já o calculou é `plano_da_cobranca`, e é esse valor que a
+    # tela mostra. Sem passá-lo, `starts_at` saía nulo em todo checkout.
     if linha is None:  # reaproveitou a cobrança que já existia
-        return _reaproveitar(user_id, plan_stored)
-    return _emitir(linha, cpf_cnpj, nome, email)
+        return _reaproveitar(user_id, plan_stored, venda["access_starts_at"])
+    return _emitir(dict(linha, access_starts_at=venda["access_starts_at"]),
+                   cpf_cnpj, nome, email)
 
 
 def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
@@ -278,7 +266,12 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
         # (varredura apagou um `draft`). Uma retentativa resolve; inventar um
         # segundo caminho aqui seria estado a mais para o mesmo desfecho.
         raise CheckoutIndisponivel("cobranca_ativa_sumiu")
-    if ativa["plan"] == plan_stored and ativa["status"] == "pending":
+    # QR VENCIDO não se reaproveita: o `OVERDUE` do Asaas pode atrasar ou se
+    # perder, e `pending` não volta para a reconciliação — devolver o mesmo
+    # código expirado prendia o cliente sem cobrança pagável para sempre.
+    vencido = (ativa["qr_expires_at"] is not None
+               and ativa["qr_expires_at"] <= datetime.now(timezone.utc))
+    if ativa["plan"] == plan_stored and ativa["status"] == "pending" and not vencido:
         return None
     _cancelar_remota(ativa)
     nova = _inserir()
@@ -287,12 +280,12 @@ def _criar_ou_substituir(user_id, plan_stored, venda, stripe_sub, rastreio):
     return nova
 
 
-def _reaproveitar(user_id: int, plan_stored: str) -> dict:
+def _reaproveitar(user_id: int, plan_stored: str, starts_at) -> dict:
     """O mesmo QR, com 200. Relê a linha porque `_cancelar_remota` não rodou."""
     from db.pix_charges_saga import buscar_ativa
 
     ativa = buscar_ativa(user_id) or {}
-    qr = _qr_da_linha(ativa) if ativa else None
+    qr = qr_da_linha(ativa) if ativa else None
     if not qr:
         # QR apagado (terminal) ou linha que sumiu: não há o que devolver, e
         # inventar um QR novo aqui pularia o `criar_cobranca`. 503 e o cliente
@@ -302,7 +295,7 @@ def _reaproveitar(user_id: int, plan_stored: str) -> dict:
                           "Checkout Pix devolveu a cobranca ativa do mesmo plano.",
                           source="pix", user_id=user_id,
                           details={"plan": plan_stored})
-    return _resposta(ativa, qr)
+    return resposta(dict(ativa, access_starts_at=starts_at), qr)
 
 
 def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
@@ -331,20 +324,7 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
 
     attach_pagamento(linha["id"], str(pagamento["id"]),
                      qr_payload_enc=encrypt_pii_optional(qr["payload"]),
-                     due_date=vence, qr_expires_at=_expira(qr))
+                     due_date=vence, qr_expires_at=expira(qr))
     linha = dict(linha, asaas_payment_id=str(pagamento["id"]), status="pending",
-                 qr_expires_at=_expira(qr))
-    return _resposta(linha, qr["payload"])
-
-
-def _expira(qr: dict):
-    """`expirationDate` do Asaas → datetime, ou o vencimento local. Forma
-    inesperada NÃO derruba a venda: o QR está emitido e pagável, e o que se
-    perde é só a precisão do teto do poll."""
-    bruto = qr.get("expirationDate")
-    if isinstance(bruto, str) and bruto:
-        try:
-            return datetime.fromisoformat(bruto.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-    return datetime.now(timezone.utc) + timedelta(days=VENCIMENTO_DIAS)
+                 qr_expires_at=expira(qr))
+    return resposta(linha, qr["payload"])

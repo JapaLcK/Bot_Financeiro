@@ -60,6 +60,8 @@ from core.services import admin_notify
 from core.services.pix_drain_effects import (
     EXECUTORES,
     alertar,
+    alertar_stripe_desistido,
+    alertar_valor,
     janela_de_acesso,
 )
 from db.pix_charges import (
@@ -124,7 +126,15 @@ def drenar_evento(event_id: str) -> None:
     with reservar_evento(event_id) as evt:
         if evt is None:
             return
-        falha = _decidir(event_id, evt)
+        try:
+            falha = _decidir(event_id, evt)
+        except Exception as exc:  # noqa: BLE001 — a promessa do docstring é ESTA
+            # Só o laço de efeitos convertia exceção em `(tipo, code)`. Sem
+            # isto, decifrar o payload, buscar a cobrança, gravar
+            # `pix_unmatched_payments` ou transicionar subiam POR CIMA de
+            # `drenar_pendentes`: o evento mais velho abortava a passada inteira,
+            # com `attempts` parado em zero e sem alerta de travado.
+            falha = (type(exc).__name__, getattr(exc, "code", None))
     # Fora do `with` de propósito — ver o cabeçalho do módulo.
     if falha is None:
         marcar_processado(event_id)
@@ -173,19 +183,23 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
 
     # D3 — dinheiro devolvido não é reconcedido. Vale só para efeito de COMPRA:
     # o `revoke` de um estorno que chegue depois continua rodando.
-    if set(efeitos) & set(EFEITOS_DE_COMPRA) and efeito_registrado(payment_id, "revoke"):
-        log_system_event_sync(
-            "warning", "pix_received_apos_estorno",
-            "Pagamento confirmado depois de estorno ja registrado — nenhum "
-            "efeito de compra executado.",
-            source="pix", user_id=cobranca["user_id"],
-            details={"charge_id": cobranca["id"]},
-        )
-        admin_notify.notify_pix_alerta(
-            f"⚠️ **Pix: pagamento depois do estorno** cobrança `{cobranca['id']}` — "
-            "acesso NÃO concedido, confira no painel do Asaas."
-        )
-        return None
+    if set(efeitos) & set(EFEITOS_DE_COMPRA):
+        if efeito_registrado(payment_id, "revoke"):
+            log_system_event_sync(
+                "warning", "pix_received_apos_estorno",
+                "Pagamento confirmado depois de estorno ja registrado — nenhum "
+                "efeito de compra executado.",
+                source="pix", user_id=cobranca["user_id"],
+                details={"charge_id": cobranca["id"]},
+            )
+            admin_notify.notify_pix_alerta(
+                f"⚠️ **Pix: pagamento depois do estorno** cobrança `{cobranca['id']}` — "
+                "acesso NÃO concedido, confira no painel do Asaas."
+            )
+            return None
+        # O `value` que a minimização guarda existe para ser CONFERIDO, e até
+        # aqui nada o lia. Alerta, e segue — o porquê está em `alertar_valor`.
+        alertar_valor(cobranca, pagamento.get("value"))
 
     if destino and origens:
         # A linha NOVA substitui a lida no começo: os efeitos leem
@@ -212,6 +226,13 @@ def _decidir(event_id: str, evt: dict) -> tuple[str, str | None] | None:
             try:
                 EXECUTORES[efeito](cobranca, evt)
             except Exception as exc:  # noqa: BLE001 — vira attempts, não 500 mudo
+                # FALLBACK do §8.2, e ele existe porque `stripe_cancel` é o
+                # PRIMEIRO efeito: Stripe fora do ar barrava o `grant` em TODA
+                # retentativa. `continue` sem `registrar_efeito` — o efeito não
+                # rodou, e é o alerta que vira trabalho manual.
+                if efeito == "stripe_cancel" and int(evt["attempts"] or 0) >= 5:
+                    alertar_stripe_desistido(cobranca)
+                    continue
                 return (type(exc).__name__, getattr(exc, "code", None))
             registrar_efeito(payment_id, efeito, event_id)
     return None

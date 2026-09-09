@@ -79,6 +79,48 @@ def alertar(tipo: str, cobranca, payment_id: str) -> None:
     )
 
 
+def alertar_stripe_desistido(cobranca) -> None:
+    """O fallback do §8.2: na 6ª falha do `stripe_cancel`, o grant sai assim mesmo.
+
+    Stripe fora do ar barrava o `grant` em toda retentativa — dinheiro dentro e
+    acesso nenhum, para sempre. O começo do acesso já é
+    `max(now, stripe_period_end_at)` desde a transição (`janela_de_acesso`),
+    inclusive com a coluna nula, que é o caso da própria indisponibilidade.
+
+    Sobreposição de período é ESTORNÁVEL; acesso negado a quem pagou não é. O
+    cartão fica com o cancelamento pendente e o caminho é manual (§9).
+    """
+    admin_notify.notify_pix_alerta(
+        f"🚨 **Pix: cancelamento no Stripe não entrou** cobrança `{cobranca['id']}`"
+        " — 6ª falha, o acesso Pix FOI concedido assim mesmo. Cancele a "
+        "assinatura à mão e estorne a fatura que renovar."
+    )
+
+
+def alertar_valor(cobranca, valor) -> None:
+    """Valor liquidado ≠ `amount_cents` do snapshot — **alerta, e NÃO barra**.
+
+    Barrar era a outra saída possível, e ela é pior aqui: o QR dinâmico carrega
+    o valor, então o pagador não escolhe quanto paga. Divergência só nasce de
+    edição no painel do Asaas — um desconto que NÓS demos —, e recusar acesso a
+    quem pagou o que combinamos é o erro irreversível (§7 do plano).
+
+    `value` ausente ou não numérico sai calado: o corpo minimizado o traz
+    sempre, e inventar alerta sobre campo que não veio é ruído.
+    """
+    try:
+        recebido = int(round(float(valor) * 100))
+    except (TypeError, ValueError):
+        return
+    combinado = int(cobranca["amount_cents"])
+    if recebido != combinado:
+        admin_notify.notify_pix_alerta(
+            f"⚠️ **Pix: valor diferente do combinado** cobrança `{cobranca['id']}`"
+            f" — recebido R$ {recebido / 100:.2f} contra R$ {combinado / 100:.2f}."
+            " O acesso FOI concedido; confira a cobrança no painel do Asaas."
+        )
+
+
 def _acumulado_estornado(payment_id: str) -> str:
     from core.services.asaas import buscar_pagamento
 
@@ -107,11 +149,13 @@ def _stripe_cancel(cobranca, evt) -> None:
       2. `cancel_at_period_end=True` — nunca `Subscription.delete`, que cortaria
          hoje o acesso que o cliente já pagou até o fim do mês.
 
-    **A janela de acesso NÃO é recalculada aqui**, e é o certo: ela foi decidida
-    na transição para `paid`, a partir da estimativa que o checkout gravou.
-    Reescrevê-la seria evento de pagamento mexendo em grant (§6 proíbe), e o
-    grant nasce no efeito SEGUINTE — ele leria uma linha que este efeito acabou
-    de mover debaixo dele.
+    **A janela de acesso só é ADIADA, e só quando o período reconfirmado passar
+    do começo já gravado** (`_janela_adiada`). A transição para `paid` a decidiu
+    a partir da ESTIMATIVA do checkout; se a assinatura renovou durante a vida
+    do QR, aquela estimativa ficou no passado e o ano Pix comeria dias de um mês
+    que o cartão já cobrou. Não é "evento mexendo em grant": o grant nasce no
+    efeito SEGUINTE, e é por isso que a correção cabe aqui e em nenhum outro
+    lugar — o dicionário atualizado é o que ele lê.
 
     **Levanta se o Stripe recusar**, e é por isso que este é o PRIMEIRO efeito da
     lista: sem `attempts` + retentativa, ficaria dinheiro dentro com o cartão
@@ -131,14 +175,31 @@ def _stripe_cancel(cobranca, evt) -> None:
     sub = _stripe.Subscription.retrieve(sub_id)
     ts = _sub_period_end_ts(sub)
     if ts:
-        gravar_stripe_period_end(cobranca["id"],
-                                 datetime.fromtimestamp(int(ts), tz=timezone.utc))
+        fim = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        janela = _janela_adiada(cobranca, fim)
+        gravar_stripe_period_end(cobranca["id"], fim, **janela)
+        cobranca.update(janela)
     _stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
     log_system_event_sync(
         "info", "pix_stripe_cancel_agendado",
         "Assinatura do Stripe agendada para cancelar no fim do periodo pago.",
         source="pix", user_id=cobranca["user_id"],
         details={"charge_id": cobranca["id"]})
+
+
+def _janela_adiada(cobranca, fim) -> dict:
+    """A janela recalculada quando o período do cartão renovou DEPOIS do checkout.
+
+    Só ADIA: `fim` igual ou anterior ao `access_starts_at` já gravado devolve
+    `{}` e nada é reescrito — antecipar o começo é que sobreporia grant com
+    período de cartão pago. Linha sem janela (não deveria existir em `paid`, o
+    `CHECK` a proíbe) também sai por `{}`, porque quem a escreve é a transição.
+    """
+    inicio = cobranca["access_starts_at"]
+    if not inicio or fim <= inicio:
+        return {}
+    return {"access_starts_at": fim,
+            "access_expires_at": fim + timedelta(days=int(cobranca["duration_days"]))}
 
 
 def _grant(cobranca, evt) -> None:
@@ -194,15 +255,28 @@ def _capi(cobranca, evt) -> None:
 def _email(cobranca, evt) -> None:
     """Confirmação da compra. O registro fecha a janela normal; a residual (cair
     ENTRE enviar e registrar) é coberta pelo `recent_event_exists`, o mesmo
-    padrão do `_fire_email` — e-mail duplicado é o pior caso aceitável."""
+    padrão do `_fire_email` — e-mail duplicado é o pior caso aceitável.
+
+    **`False` é FALHA, e levanta.** `send_email` nunca lança: Resend fora do ar
+    e Resend não configurado saem os dois por `return False`
+    (`core/services/email_service.py:72` e `:100`). Ignorar o retorno registrava
+    o efeito `email` como feito com zero e-mail enviado, e o par
+    `(payment_id, 'email')` **nunca é purgado** — o cliente pagante ficaria sem
+    confirmação para sempre. É o mesmo `if not ok` do `_fire_email`
+    (`frontend/finance_bot_websocket_custom.py:5069`), que existe pelo mesmo
+    motivo. `ponytail:` teto — sem `RESEND_API_KEY` o evento retenta para
+    sempre; quem quiser o no-op registrado (padrão de `ga4`/`capi`) precisa de
+    uma leitura de env que hoje mora só no `email_service` (§0.7).
+    """
     from core.services.email_service import send_pix_paid_email
 
     destino = _email_do_titular(cobranca["user_id"])
     if not destino or recent_event_exists("pix_paid_email_sent",
                                           cobranca["user_id"], 1.0):
         return
-    send_pix_paid_email(destino, int(cobranca["amount_cents"]) / 100,
-                        cobranca["access_expires_at"])
+    if not send_pix_paid_email(destino, int(cobranca["amount_cents"]) / 100,
+                               cobranca["access_expires_at"]):
+        raise RuntimeError("send_pix_paid_email devolveu False")
     log_system_event_sync("info", "pix_paid_email_sent",
                           "E-mail de confirmacao da compra Pix enviado.",
                           source="pix", user_id=cobranca["user_id"])

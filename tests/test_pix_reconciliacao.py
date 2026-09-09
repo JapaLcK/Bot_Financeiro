@@ -76,13 +76,25 @@ def _ler(charge_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def _asaas(monkeypatch, resposta):
-    """Troca a consulta remota. `resposta` é lista, ou uma exceção a levantar."""
+def _asaas(monkeypatch, resposta, qr="000201-reconciliado"):
+    """Troca a consulta remota. `resposta` é lista, ou uma exceção a levantar.
+
+    O `obter_qr_pix` vem junto porque o attach da varredura busca o QR: sem ele o
+    teste sairia para a rede. `qr=None` faz a busca levantar, que é o cenário
+    "achei a cobrança e não consegui o instrumento de pagamento".
+    """
     def _consulta(ref):
         if isinstance(resposta, Exception):
             raise resposta
         return resposta
+
+    def _qr(pid):
+        if qr is None:
+            raise AsaasApiError("sem payload", status_code=None)
+        return {"payload": f"{qr}-{pid}"}
+
     monkeypatch.setattr(pix_sweeps.asaas, "buscar_por_external_reference", _consulta)
+    monkeypatch.setattr(pix_sweeps.asaas, "obter_qr_pix", _qr)
 
 
 VELHA = RECONCILIAR_APOS_MIN + 5
@@ -104,6 +116,27 @@ def test_cobranca_viva_no_asaas_e_anexada(user_id, monkeypatch):
     depois = _ler(linha["id"])
     assert depois["status"] == "pending"
     assert depois["asaas_payment_id"] == "pay_remoto_1"
+    # O QR vem JUNTO: `pending` sem payload é cobrança impagável e
+    # insubstituível — o checkout do mesmo plano cai no reuso e devolve 503,
+    # e `pending` já não volta para esta varredura.
+    assert depois["qr_payload_enc"] is not None
+
+
+def test_attach_sem_qr_nao_move_a_linha_para_pending(user_id, monkeypatch):
+    """DISCRIMINA o par do caso acima: QR que não vem **não** fecha a saga.
+
+    Anexar só o id deixaria a cobrança em `pending` sem instrumento de pagamento
+    — o beco sem saída. Levantando ali, a linha fica `creating` e a passada
+    seguinte tenta de novo.
+    """
+    conta(user_id, "free", None)
+    linha = _cobranca(user_id, "creating", VELHA)
+    _asaas(monkeypatch, [{"id": "pay_remoto_2", "status": "PENDING"}], qr=None)
+
+    assert reconciliar_saga()["indefinidas"] == 1
+    depois = _ler(linha["id"])
+    assert depois["status"] == "creating"
+    assert depois["asaas_payment_id"] is None
 
 
 def test_cobranca_morta_no_asaas_nao_vira_pending(user_id, monkeypatch):

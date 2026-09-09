@@ -42,7 +42,13 @@ def asaas_falso(monkeypatch):
     # Prefixo único por teste: `asaas_payment_id` é `unique` na tabela e as
     # linhas sobrevivem entre os testes do arquivo — um contador só colidiria.
     marca = uuid.uuid4().hex[:8]
-    estado = {"ordem": [], "delete_falha": False, "n": 0, "marca": marca}
+    # `remotas` é o que o `GET /payments?externalReference=` devolve. Ele entrou
+    # no falso quando a substituição passou a PERGUNTAR pela cobrança ambígua
+    # (linha `creating` sem `asaas_payment_id`): sem o stub o teste sairia para a
+    # rede, e com `[]` o comportamento é o de antes — nada remoto para deletar.
+    # Uma exceção aqui simula o provedor fora do ar.
+    estado = {"ordem": [], "delete_falha": False, "n": 0, "marca": marca,
+              "remotas": [], "qr_falha": False}
 
     def _cliente(**kw):
         estado["ordem"].append("customer")
@@ -56,7 +62,15 @@ def asaas_falso(monkeypatch):
 
     def _qr(pid):
         estado["ordem"].append("qr")
+        if estado["qr_falha"]:
+            raise a.AsaasApiError("QR nao veio", status_code=502)
         return {"payload": f"000201-{pid}", "expirationDate": "2026-12-31 23:59:59"}
+
+    def _por_referencia(ref):
+        estado["ordem"].append("consulta")
+        if isinstance(estado["remotas"], Exception):
+            raise estado["remotas"]
+        return estado["remotas"]
 
     def _delete(pid):
         estado["ordem"].append(f"delete:{pid}")
@@ -68,6 +82,7 @@ def asaas_falso(monkeypatch):
     monkeypatch.setattr(a, "criar_pagamento_pix", _pagamento)
     monkeypatch.setattr(a, "obter_qr_pix", _qr)
     monkeypatch.setattr(a, "deletar_pagamento", _delete)
+    monkeypatch.setattr(a, "buscar_por_external_reference", _por_referencia)
     # Sem assinatura no cartão: o ramo do §9 tem teste próprio.
     monkeypatch.setattr(pix_checkout, "_stripe_vivo", lambda uid: None)
     return estado
