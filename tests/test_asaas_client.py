@@ -20,9 +20,17 @@ onde o Asaas espera reais, e com a `access_token` na query string.
 
 `_raise_for_asaas_response` recebe uma `httpx.Response` FABRICADA: a ausência do
 corpo é propriedade da FUNÇÃO, e testá-la por uma chamada mockada mediria o
-mock. Importa porque `str(exc)` vai para `log_system_event` (persistido, lido
-pelo painel admin) e para `pix_webhook_events.last_error`, que SOBREVIVE à purga
-do payload (§13.3) e à exclusão da conta.
+mock. Importa porque `str(exc)` vai para `log_system_event` (persistido em
+`system_event_logs`, lido pelo painel admin) e para
+`pix_webhook_events.last_error`, que a purga do §13.3 zera aos 7 dias.
+
+O alcance da purga em `system_event_logs` é PARCIAL, e o resíduo é o que pesa:
+a exclusão de conta apaga a linha por `user_id` (`db/privacy.py:837`), mas
+`log_system_event_sync` tem `user_id: int | None = None`
+(`core/observability.py:216`) e o erro do Asaas nasce sem dono — linha
+`user_id is null` nenhuma exclusão alcança. E não existe retenção automática
+por idade: as duas purgas da tabela são MANUAIS (`admin.py purge`, que pergunta
+`[y/N]`, e o `Limpar` do painel), nenhum agendador chama qualquer uma.
 
 CONTROLES NEGATIVOS MEDIDOS:
 
@@ -224,7 +232,8 @@ def test_falha_de_transporte_vira_asaas_api_error(monkeypatch, exc):
 
 def test_falha_de_transporte_nao_vaza_a_url(monkeypatch):
     """A mensagem do httpx carrega a URL, e a URL carrega o `externalReference`.
-    Esta string é persistida em `pix_webhook_events.last_error`."""
+    Esta string é persistida em `system_event_logs` e, por 7 dias, em
+    `pix_webhook_events.last_error` (§13.3)."""
     _cliente_que_levanta(monkeypatch, httpx.ConnectError("erro em https://x/y?ref=pix:42"))
     with pytest.raises(AsaasApiError) as capturado:
         buscar_por_external_reference("pix:42")

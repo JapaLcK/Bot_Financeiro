@@ -16,17 +16,17 @@ O handler e o dreno são o PR 1b-B.
 
 O que este arquivo NÃO tem, e o corte é deliberado:
 
-  • **o `select … for update skip locked` do dreno**. Ele é a semântica de
-    concorrência da leitura, e semântica de concorrência sem consumidor não se
-    mede: um `skip locked` escrito hoje passaria verde sem provar que duas
-    instâncias não executam o mesmo efeito. Vai junto com o dreno, no 1b-B.
+  • **o `select … for update skip locked` do dreno**. Ele é a semântica de concorrência
+    da leitura, e semântica de concorrência sem consumidor não se mede: um `skip locked`
+    escrito hoje passaria verde sem provar que duas instâncias não executam o mesmo
+    efeito. Vai junto com o dreno, no 1b-B.
   • **a leitura do `payload_enc`**. Decifrar exige um `PiiAccessContext`, e o
-    `subject_user_id` dele só existe DEPOIS de casar o evento com a cobrança —
-    que é trabalho do dreno. Inventar um sujeito aqui (0, -1) gravaria linha
-    falsa em `pii_access_log`, que é registro de compliance.
-  • **as três constantes de retenção** (`RETENCAO_*`). O próprio plano congelou
-    `RETENCAO_PAGAMENTO_DIAS` "sem valor em código até validação jurídica"
-    (§13.1), e as outras duas só têm sentido com a varredura que as consome.
+    `subject_user_id` dele só existe DEPOIS de casar o evento com a cobrança — que é
+    trabalho do dreno. Inventar um sujeito aqui (0, -1) gravaria linha falsa em
+    `pii_access_log`, que é registro de compliance.
+  • **as três constantes de retenção** (`RETENCAO_*`). O plano congelou
+    `RETENCAO_PAGAMENTO_DIAS` "sem valor em código até validação jurídica" (§13.1), e as
+    outras duas só têm sentido com a varredura que as consome.
 """
 
 from __future__ import annotations
@@ -64,20 +64,18 @@ EFEITOS = (
 )
 
 
-# Tipos que podem ser guardados como VALOR de um campo permitido. A allowlist
-# de CHAVES não basta: `customer` é um campo permitido, e o Asaas pode mandá-lo
-# **expandido** — `{"id": …, "name": …, "cpfCnpj": …, "email": …}`. Filtrar só o
-# primeiro nível copiaria o objeto inteiro, com o CPF dentro de um campo cujo
-# nome está na lista. Medido pelo Tester, em três formas: `customer` expandido,
-# dict aninhado em `status` e lista sob `value`.
+# Tipos que podem ser guardados como VALOR de um campo permitido. A allowlist de CHAVES
+# não basta: `customer` é permitido e o Asaas pode mandá-lo **expandido** —
+# `{"id": …, "name": …, "cpfCnpj": …, "email": …}` —, e filtrar só o primeiro nível
+# copiaria o objeto inteiro, com o CPF dentro de um campo cujo nome está na lista.
+# Medido em três formas: `customer` expandido, dict em `status`, lista sob `value`.
 _ESCALARES = (str, int, float, bool, type(None))
 
 # Teto por campo. Nenhum dos nove campos do §13.3 é texto livre: o maior é o
-# `externalReference` (`pix:<id>`), com menos de 30 chars. 200 é folga de quase
-# 7×, e o que ele impede é o campo permitido virar CARGA — a filtragem por forma
-# barrava a ESTRUTURA e deixava passar escalar de qualquer tamanho: 1 MB numa
-# string, cifrado, na tabela, medido. Truncar é melhor que descartar: o começo
-# de um valor esquisito é o que serve para depurar por que ele era esquisito.
+# `externalReference` (`pix:<id>`), com menos de 30 chars, então 200 é folga de quase 7×.
+# Ele impede o campo permitido virar CARGA — a filtragem por forma barrava a ESTRUTURA e
+# deixava passar escalar de qualquer tamanho: 1 MB numa string, cifrado, na tabela,
+# medido. Truncar bate descartar: o começo de um valor esquisito serve para depurar.
 LIMITE_POR_CAMPO = 200
 
 
@@ -89,13 +87,11 @@ def _valor_seguro(valor):
     o dreno usa para casar); qualquer outra estrutura vira `None`, e o campo
     fica registrado como presente-mas-descartado.
     """
-    # O teto é sobre o TAMANHO SERIALIZADO, não sobre o tipo `str`. A versão
-    # anterior só truncava `str`, e um `int` gigante passava inteiro: medido,
-    # 4.351 bytes gravados na coluna (o teto real era o `json.loads` do CPython
-    # estourando antes, o que não é uma política de retenção).
-    #
-    # `bool` e `None` saem antes de propósito: `bool` é subclasse de `int`, e
-    # `str(True)` viraria a string "True", trocando o tipo de um campo curto.
+    # O teto é sobre o TAMANHO SERIALIZADO, não sobre o tipo `str`: a versão anterior só
+    # truncava `str` e um `int` gigante passava inteiro — medido, 4.351 bytes na coluna
+    # (o teto real era o `json.loads` do CPython estourando antes, o que não é política
+    # de retenção). `bool` e `None` saem antes de propósito: `bool` é subclasse de `int`,
+    # e `str(True)` viraria a string "True", trocando o tipo de um campo curto.
     if valor is None or isinstance(valor, bool):
         return valor
     if isinstance(valor, (str, int, float)):
@@ -112,13 +108,13 @@ def _valor_seguro(valor):
 def minimizar(corpo: dict) -> dict:
     """FUNÇÃO PURA: corpo cru do webhook → o subconjunto que pode ser guardado.
 
-    Mantém `event`/`id` do envelope e, de `payment`, só `CAMPOS_MINIMOS` — e de
-    cada um só o VALOR ESCALAR (ver `_valor_seguro`). Chave permitida com objeto
-    dentro é o furo que uma allowlist rasa não vê.
+    Mantém `event`/`id` do envelope e, de `payment`, só `CAMPOS_MINIMOS` — e de cada um
+    só o VALOR ESCALAR (ver `_valor_seguro`). Chave permitida com objeto dentro é o furo
+    que uma allowlist rasa não vê.
 
-    Um `payment` ausente ou de outro tipo vira dict vazio em vez de estourar: o
-    handler já respondeu 400 para corpo sem id de evento (§8.1), e o resto do
-    formato é do provedor, não nosso.
+    Um `payment` ausente ou de outro tipo vira dict vazio em vez de estourar: o handler
+    já respondeu 400 para corpo sem id de evento (§8.1), e o resto do formato é do
+    provedor, não nosso.
     """
     pagamento = corpo.get("payment")
     if not isinstance(pagamento, dict):
@@ -133,17 +129,16 @@ def minimizar(corpo: dict) -> dict:
 
 def registrar_evento(event_id: str, event_type: str, corpo: dict,
                      event_version: int) -> bool:
-    """Grava o evento na outbox. Devolve **True** se a linha é nova, **False**
-    na duplicata.
+    """Grava o evento na outbox. Devolve **True** se a linha é nova, **False** na duplicata.
 
-    É o `insert … on conflict (event_id) do nothing returning` do §8.1: o Asaas
-    reentrega, e o 200 da duplicata não pode custar trabalho nenhum. O `returning`
-    vazio é a resposta — não há `select` antes, que teria a corrida entre duas
-    entregas simultâneas do mesmo evento.
+    É o `insert … on conflict (event_id) do nothing returning` do §8.1: o Asaas reentrega,
+    e o 200 da duplicata não pode custar trabalho nenhum. O `returning` vazio é a
+    resposta — não há `select` antes, que teria a corrida entre duas entregas simultâneas
+    do mesmo evento.
 
-    O payload é **minimizado e depois cifrado** (§13.3). A ordem importa: cifrar
-    primeiro e minimizar depois guardaria o dado pessoal cifrado no banco, que é
-    exatamente o que a purga de 7 dias tenta desfazer.
+    O payload é **minimizado e depois cifrado** (§13.3). A ordem importa: cifrar primeiro
+    e minimizar depois guardaria o dado pessoal cifrado no banco, que é exatamente o que
+    a purga de 7 dias tenta desfazer.
     """
     payload_enc = encrypt_pii_optional(
         json.dumps(minimizar(corpo), ensure_ascii=False, sort_keys=True, default=str)
@@ -191,11 +186,24 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
     entre o UPDATE e o SELECT cabe outra passada, e o alerta sairia duplicado ou
     nenhuma vez. `returning attempts` é a leitura da própria escrita.
 
-    **Não aceita texto livre, e a assinatura é o conserto.** A versão anterior
-    recebia `erro: str` e guardava os primeiros 500 caracteres — e CPF, e-mail e
-    nome aparecem justamente NO COMEÇO de uma mensagem de erro, então truncar
-    não removia nada (P2-6 do Codex). Esta coluna **sobrevive à purga do
-    payload** (§13.3) e à exclusão da conta: é o pior lugar do schema para PII.
+    **Não aceita texto livre, e a assinatura é o conserto.** A versão anterior recebia
+    `erro: str` e guardava os primeiros 500 caracteres — e CPF, e-mail e nome aparecem
+    justamente NO COMEÇO de uma mensagem de erro, então truncar não removia nada (P2-6
+    do Codex). A purga do §13.3 zera esta coluna aos 7 dias, junto com o `payload_enc` —
+    mas dentro da janela o valor ESTÁ lá, e a mesma string vai para `system_event_logs`,
+    onde a purga só alcança PARTE: a exclusão de conta apaga por `user_id`
+    (`db/privacy.py:837`), e este erro nasce sem dono (`log_system_event_sync` tem
+    `user_id: int | None = None`), então linha `user_id is null` nada alcança — e
+    retenção automática por idade não existe (as duas purgas da tabela são manuais).
+    **`_erro_seguro` continua obrigatório apesar da purga**: o que passa fica para sempre.
+
+    TETO CONHECIDO, a corrigir no 1b-B (#316): este UPDATE não tem `and purged_at is null`,
+    guarda que `marcar_processado` tem. **O caminho alcançável é a CORRIDA, e só ela:** a
+    passada que já leu o payload executa os efeitos quando a varredura do §13.3 carimba
+    `purged_at` e zera as duas colunas; um efeito falha, e esta função REPÕE `last_error`
+    numa linha purgada, que a varredura (filtro `purged_at is null`) nunca revisita: PII
+    permanente. Passada NOVA não chega aqui: sem payload o dreno carimba `processed_at` e sai
+    (§13.3), sem falhar. Sem chamador de produção, a guarda e o teste são critério do #316.
 
     `tipo` é o NOME DA CLASSE da exceção (`type(exc).__name__`) e `codigo` é o
     `AsaasApiError.code`, que já nasce filtrado por `_codigo_seguro`. Os dois
@@ -241,9 +249,8 @@ def _erro_seguro(tipo: str, codigo: str | None) -> str:
     **A recusa de só-dígitos é a linha que faltava, e o defeito era ela.** A
     versão anterior dizia no docstring ser "a mesma regra" e aceitava
     `"12345678901"`, porque todo dígito é `isalnum()` — a forma de um CPF é
-    exatamente a de um código curto. Isso mandava CPF para o `last_error`, que
-    sobrevive à purga do payload (§13.3) e à exclusão da conta (P2 do Codex no
-    #304).
+    exatamente a de um código curto. Isso mandava CPF para o `last_error` e
+    para `system_event_logs` (P2 do Codex no #304).
 
     **Por que uma CÓPIA e não um import, que é o que o §0.7 pede:** importar
     `core.services.asaas` daqui viola o portão de inércia do 1b-A — medido,
