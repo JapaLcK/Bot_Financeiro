@@ -76,6 +76,13 @@ def test_9b_reentrega_do_mesmo_evento_conclui_sem_duplicar(user_id, monkeypatch)
 
     def send_pro_charged_email(*a, **k):      # __name__ é a CHAVE da dedup
         enviados.append("charged")
+        # `return True` NÃO é decoração: o `_fire_email` do webhook só grava a
+        # chave de dedup se o remetente CONFIRMAR o envio, e todos os
+        # remetentes reais terminam em `return send_email(...)` (bool, nunca
+        # exceção — core/services/email_service.py:64). Um fake que devolve
+        # None finge um envio FALHO, e aí a reentrega retenta de propósito:
+        # este teste media 3 e-mails e a causa era o fake, não o webhook.
+        return True
 
     import core.services.email_service as email_service
     monkeypatch.setattr(email_service, "send_pro_charged_email",

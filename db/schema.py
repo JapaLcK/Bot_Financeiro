@@ -1754,6 +1754,25 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Relógio da inadimplência de cartão — o instante da PRIMEIRA falha de
+        # cobrança do ciclo, carimbado pelo webhook `invoice.payment_failed`
+        # (db.dunning.claim_past_due_since). NULLABLE e SEM DEFAULT: NULL
+        # significa "não há ciclo de inadimplência aberto".
+        #
+        # Coluna e não derivação: `system_event_logs` é purgável por decisão de
+        # projeto (o "Limpar" do painel; ver o comentário do
+        # checkout_funnel_events mais abaixo), e o relógio da cobrança não pode
+        # morar em log que alguém apaga pelo painel.
+        #
+        # SEM BACKFILL, por decisão do dono. Quem já está inadimplente no
+        # deploy fica com NULL até o `invoice.payment_failed` seguinte (a Stripe
+        # continua tentando por ~3 semanas de smart retries) — e o único efeito
+        # de NULL é ficar de fora do lembrete de pagamento do dia 6 daquele
+        # ciclo. Nenhum acesso depende desta coluna.
+        #
+        # A versão que tinha backfill era um `do $$` com `information_schema`
+        # para rodar uma vez só; sem backfill sobra o idioma normal do arquivo.
+        """alter table auth_accounts add column if not exists past_due_since timestamptz""",
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
         # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o
