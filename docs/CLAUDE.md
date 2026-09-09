@@ -174,10 +174,12 @@ o SQL cru de `core/admin_dashboard.set_account_plan` — mexeu num, leia o outro
 estados (o par relógio × status) × eventos (os quatro webhooks de cobrança, o
 `recompute_entitlement`, o `set_account_plan` e o tick do lembrete) × validade
 do evento (novo / reentrega / velho), com o que cada célula faz hoje, o que
-deveria fazer, e as três células deixadas abertas de propósito. **Leia antes de
-tocar em qualquer writer do relógio** — o subsistema levou três rodadas de
+deveria fazer, e as células deixadas abertas de propósito. **Leia antes de
+tocar em qualquer writer do relógio** — o subsistema levou VÁRIAS rodadas de
 revisão porque cada conserto foi feito como transição isolada, e a tabela existe
-para a quarta não repetir o método (raiz §4, registro do PR #60).
+para a próxima não repetir o método (raiz §4, registro do PR #60). Quais rodadas
+apontaram o quê está na coluna "quem achou" da tabela do fim daquele arquivo; a
+contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
 
 ### Open Finance
 

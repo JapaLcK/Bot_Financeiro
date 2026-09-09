@@ -1,12 +1,17 @@
 # Inadimplência de cartão — a máquina de estados, enumerada
 
 Esta é a tabela de **estados × eventos** do relógio de inadimplência
-(`auth_accounts.past_due_since`). Ela existe porque o subsistema levou **três
-rodadas seguidas** de apontamentos e cada conserto foi feito como transição
+(`auth_accounts.past_due_since`). Ela existe porque o subsistema levou
+**rodadas seguidas** de apontamentos e cada conserto foi feito como transição
 isolada — o mecanismo 2 do registro do PR #60 no `CLAUDE.md` §4 ("remendar
 transição em vez de enumerar a máquina"). A regra de lá é a razão deste arquivo:
 *"se duas rodadas seguidas batem no mesmo subsistema, pare de remendar: enumere
 estados × eventos por escrito e feche tudo num commit."*
+
+Quais rodadas apontaram o quê está na coluna "quem achou" da tabela "O que a
+enumeração fechou", no fim deste arquivo. **A contagem de rodadas não vem
+escrita aqui de propósito**: ela sobe a cada rodada e envelhece em silêncio
+(§2) — este parágrafo já dizia "três" quando eram mais.
 
 Vocabulário e constantes: `core/services/billing_dunning.py`.
 Escrita: `db/dunning.py`. Leitura: `core/services/payment_reminder.py`.
@@ -25,7 +30,7 @@ a janela de dedupe do e-mail de falha, e só.
 | **S1** | NULL | IN | *atraso sem ciclo* | o Stripe ainda diz atraso, mas nenhum ciclo nosso está aberto (pagou e o status não alcançou) |
 | **S2** | NULL | OUT | *normal* | `active`, `trialing`, `canceled` |
 | **S3** | T | IN | *ciclo aberto* | o estado da inadimplência; é o único que o lembrete lê |
-| **S4** | T | OUT | **órfão** | a INVARIANTE declara impossível. Mantida na escrita por `db_support.set_payment_status_impl` e pelo SQL cru de `core/admin_dashboard.set_account_plan` — os **dois únicos** writers de `last_payment_status` em Python (varredura: `grep -rn "last_payment_status" --include="*.py" --include="*.sql" --exclude-dir=.venv .`; sobram dois `scripts/*.sql` de reparo manual, aceitos) |
+| **S4** | T | OUT | **órfão** | a INVARIANTE declara impossível. Mantida na escrita por `db_support.set_payment_status_impl` e pelo SQL cru de `core/admin_dashboard.set_account_plan` — os **dois únicos** writers de `last_payment_status` em Python (varredura: `grep -rn "last_payment_status" --include="*.py" --include="*.sql" --exclude-dir=.venv .`; dos dois `scripts/*.sql` que a varredura acusa, só `backfill_pro_grandfather.sql` ESCREVE a coluna — `reset_plan_trials_for_stripe_trial_model.sql` apenas FILTRA por ela num `where`; ambos de reparo manual, aceitos) |
 
 **A coluna `COMPORTAMENTO` não é "hoje" em toda linha, e o marcador diz qual
 é qual.** Ela se chamava `HOJE` e passou a mentir nas células que foram
@@ -71,6 +76,17 @@ pelo `set_payment_status`** — é por isso que a coluna "estado no clear" exist
 | 5 | REENTREGA | S3, relógio carimbado **depois** deste evento | IN | S3 | **FECHADA (rodada 3) — era: clear** | **NÃO limpar** — e é o que roda hoje, pelo predicado `nao_mais_novo_que` |
 | 6 | REENTREGA | S3, relógio carimbado **antes** deste evento (5xx entre o grant e o clear) | IN | S3 | clear | clear ✔ |
 | 7 | VELHO | qualquer | — (nem consulta) | inalterado | no-op (gate `_decidiu_acesso`) | no-op ✔ |
+| 30 | NOVO | S3, relógio da assinatura **A** — e o evento é de **B** | OUT (`active`, de B) | NULL — o `CASE` de `set_payment_status_impl` já zerou | **✗ ABERTA —** o relógio de A morre no `paid` de B | ver a seção da célula |
+
+**As linhas 2 e 30 têm as três colunas do meio IGUAIS e vereditos opostos**, e
+isso não é erro de tabela: o que as separa é **de qual assinatura o evento é**,
+e esse eixo não é nenhum dos três declarados (estado, evento, validade). Não é
+por descuido — é o próprio defeito. O estado é o par de colunas de
+`auth_accounts`, que são **por USUÁRIO**, então o registro não tem onde guardar
+"o relógio é da assinatura A". É a mesma raiz das células 29 e 30, escrita na
+gramática da tabela: **o eixo que falta na tabela é o eixo que falta no
+schema.** Enquanto ele faltar, a distinção mora na coluna "estado antes", em
+texto, como na linha 30.
 
 **A célula 5 é o apontamento do Codex 4** (`frontend/finance_bot_websocket_custom.py:5201`).
 O gate `_decidiu_acesso` fecha a 7 e **não** fecha a 5: `upsert_grant` devolve o
@@ -101,6 +117,105 @@ evento), e de quebra continua fechando a 7.
 > carimbaria um relógio já fora da janela do lembrete, e o lembrete daquele
 > ciclo nunca sairia. A coluna serve dois papéis (âncora da JANELA e âncora da
 > ORDEM) e `now()` é a resposta certa para o primeiro.
+
+### Célula 30 — o relógio é por CONTA e a assinatura em atraso é OUTRA. **ABERTA, com recusa fundamentada**
+
+**Estado e evento.** A conta tem DUAS assinaturas na Stripe: **A** em atraso —
+`last_payment_status` ∈ {`unpaid`, `incomplete`} — com o relógio carimbado pelo
+`payment_failed` dela, e **B** saudável. Chega o `invoice.paid` de **B**:
+`_materializar_assinatura` grava o grant de B e escreve
+`set_payment_status(user_id, 'active')`. O relógio de A morre, e o lembrete
+daquele ciclo nunca sai.
+
+**Alcançabilidade, por LEITURA DE CÓDIGO** — não por medição, e a distinção
+importa porque o bloco ao lado traz medição de verdade: o lado Stripe não é
+exercitável neste ambiente, então o que sustenta este parágrafo é o código
+citado, não uma saída. `POST /billing/create-checkout` TEM guarda contra
+segunda assinatura (`_billing_checkout_for_user` → `_find_active_subscription`
+→ 409 `already_subscribed`), mas ela consulta a Stripe só em `active`,
+`trialing` e `past_due`. `PAST_DUE_PAYMENT_STATUSES` é (`past_due`,
+`unpaid`, `incomplete`). **A interseção é `past_due` e nada mais** — logo uma
+assinatura em `unpaid` ou `incomplete` não aparece para a guarda e **não
+bloqueia checkout novo**. A sobreposição é alcançável pelo próprio produto, sem
+corrida e sem painel da Stripe: a pessoa deixa a cobrança vencer até `unpaid` e
+assina de novo pela /precos.
+
+**Quem apaga o relógio neste caminho é o `CASE`, não o clear** — e a ordem é o
+oposto do que uma primeira leitura sugere. O apontamento é o `CASE` de
+`db_support.set_payment_status_impl` (o que preserva o relógio só quando o
+status novo está na lista). Em `_materializar_assinatura` o
+`set_payment_status(uid, 'active')` roda **antes** do
+`clear_past_due_since(user_id, nao_mais_novo_que=_event_version(event))` do
+ramo, então o `CASE` zera primeiro e o clear opera sobre NULL. Medido
+(2026-09-09, conta em S3, os dois writers chamados na ordem do ramo; remedir
+antes de reusar):
+
+    apos set_payment_status('active') : past_due_since=None, status='active'
+    apos clear_past_due_since         : past_due_since=None, status='active'
+
+É a coluna "estado no clear" da linha 30 dizendo o que já dizia, e é o
+vocabulário da célula 2: **clear (no-op)**. Mesmo par no
+`checkout.session.completed`.
+
+> **Uma versão anterior desta seção afirmava o contrário** — "gatear o `CASE` é
+> no-op, porque o clear explícito apaga igual" — e a medição derrubou a
+> afirmação em três frentes. Fica registrada porque o erro é a parte que ensina,
+> e porque ele é o de sempre: concluir da instância para a linha. **(i)** A
+> ordem inverte quem é o no-op, como acima. **(ii)** O clear **não** apaga em
+> todo caminho: o predicado é `past_due_since <= to_timestamp(%s)`, então
+> relógio mais NOVO que o `created` do evento sobrevive a ele (medido com
+> `created` 120 s antes do relógio: o relógio fica) — é o "Teto conhecido,
+> declarado" acima, cuja última cláusula ("some sozinho no próximo status fora
+> da lista") já era a admissão de que quem apaga ali é o `CASE`. **(iii)** A
+> linha apontada serve MAIS call sites do que este ramo, e um deles não tem
+> clear nenhum: `core.services.billing_access.recompute_entitlement` escreve
+> `'active'` com grant Pix vigente (na passada de 60 s do loop, a mesma do
+> cabeçalho do E5 — não numa varredura diária, como esta frente já disse
+> errado), e `clear_past_due_since` só aparece nas ramificações do webhook
+> (`grep -rn "clear_past_due_since" --include="*.py" .`). Ali o `CASE` decide
+> sozinho, sempre, sem corrida — são as **células 19 e 20**. E isto vem com o
+> vermelho que o prova: forçar `preserva_relogio = True` em
+> `set_payment_status_impl` (o `CASE` gateado na sua forma mais crua) derruba
+> `test_billing_dunning_webhook.py::test_T4_grant_pix_nao_deixa_relogio_orfao`
+> mais `test_billing_dunning.py::test_invariante_set_payment_status[active-False]`
+> e `[canceled-False]`.
+
+**O que sustenta a recusa é uma coisa só: gatear os dois produz S4.** O estado
+resultante
+(`past_due_since` = T de A, `last_payment_status` = `active`) é **S4**, o órfão
+que o próprio `CASE` existe para impedir. E ele não produz o
+lembrete que se queria salvar: o funil e `lembrete_ainda_vale` exigem status na
+lista (**célula 26**), então o relógio preservado fica invisível. Pior, ele
+envenena o ciclo seguinte — é a **célula 12**: o próximo `payment_failed` acha
+`rowcount 0` e o ciclo novo herda a data velha. **Aqui o "e o lembrete daquele
+ciclo também nunca sai" vale para ESTA célula e não como universal**, e a
+diferença foi medida (2026-09-09; remedir antes de reusar): forjando S4 e
+repondo o status na lista, uma data velha de −6,5 d cai DENTRO da janela
+`[6,9)` e `list_payment_reminder_candidates(7)` devolve a conta. O que mata o
+lembrete é a data herdada estar FORA da janela — que é o caso da célula 30, onde
+o relógio de A tem semanas quando B renova. Trocaríamos um lembrete perdido por
+um órfão mais um ciclo cuja janela passa a depender da idade do relógio velho.
+
+**Dano.** Um lembrete de pagamento perdido. **Nenhuma perda de acesso** — este
+PR não tem gate, e o `plan`/`plan_expires_at` de B é legítimo. E a copy de hoje
+(`core.services.email_service.send_payment_reminder_email`: "a cobrança do
+**seu plano** não passou… atualizar o cartão leva menos de um minuto") seria
+**FALSA** nesse estado: a conta tem plano pago e cartão bom, via B. Consertar o
+relógio sem trocar a copy trocaria lembrete perdido por lembrete mentiroso.
+
+**Relação com a célula 29** — mesma raiz, gatilho diferente, e é por isso que
+esta é célula própria e não um rodapé daquela:
+
+| | célula 29 | célula 30 |
+|---|---|---|
+| raiz | `last_payment_status` por USUÁRIO × `plan_grants.event_version` por ASSINATURA | a mesma |
+| gatilho | precisa de duas requisições INTERCALADAS (o `paid` escrevendo dentro da suspensão do ramo falho) | **nenhum intercalamento** — é estritamente sequencial |
+| escrita culpada | o `set_payment_status('past_due')` do ramo falho | o `set_payment_status('active')` do ramo pago (o clear que vem depois já acha NULL) |
+| dano | e-mail de falha errado numa conta paga | lembrete de cobrança que nunca sai |
+
+Fechar de verdade é o mesmo trabalho que a 29 pede: marca d'água **por
+usuário**, ou relógio por assinatura. Ver as perguntas-portão no fim deste
+arquivo.
 
 ---
 
@@ -294,6 +409,7 @@ lembrete de cartão para quem o admin acabou de liberar.
 | 26 | S4 | não entra (predicado de status no SQL) | ✔ |
 | 27 | S3, na janela, sem grant `pix`/`admin`, sem dedupe | envia | ✔ |
 | 28 | S3 no snapshot, **pagou durante o lote** (virou S1/S2) | **FECHADA (rodada 3) — era: envia, e grava a dedupe** | **não enviar** — e é o que roda hoje: `lembrete_ainda_vale` devolve `None` e o laço pula |
+| 31 | S3 na revalidação, **pagou durante o `send_payment_reminder_email`** (o HTTP entre a revalidação e o dispatch do WhatsApp) | **FECHADA (rodada 13) — era: o e-mail sai (correto) e o WhatsApp sai depois dizendo que a cobrança está pendente, com `whatsapp: true` no registro** | e-mail sai, WhatsApp não, `whatsapp: false`, dedupe gravada — e é o que roda hoje, com a sobra da linha abaixo |
 
 **A célula 28 foi o apontamento do Codex 5** (`core/services/payment_reminder.py:146`),
 e está FECHADA. O defeito era: o funil é um snapshot único, o lote não tem
@@ -302,6 +418,72 @@ no meio recebia "a cobrança continua pendente", e-mail errado para cliente
 pagante, que é a categoria que este PR existe para consertar. **Hoje**
 `lembrete_ainda_vale` faz leitura fresca imediatamente antes do envio e o laço
 pula quando ela devolve `None`.
+
+**A célula 31 é a 28 no canal IRMÃO** — a instância que a rodada anterior não
+fechou (§2: "achei um caso" ≠ "resolvi a categoria"). A revalidação do lote roda
+antes do e-mail, mas o e-mail é uma requisição HTTP a serviço externo e o
+WhatsApp sai DEPOIS dela
+com o veredito daquela leitura; quem paga nesse intervalo recebia um e-mail
+correto e, em seguida, um template dizendo que a cobrança está pendente. O
+conserto é `db.dunning.ciclo_de_atraso_aberto`, lido DENTRO de
+`core.services.payment_reminder_wa._wa_lembrete` — mesmo lugar onde o
+consentimento do canal já é lido fresco, e o call site não muda uma linha. Ele
+é o PRIMEIRO TERMO de `lembrete_ainda_vale` e não a função inteira: o segundo
+termo dela é o `engagement_opt_out`, o consentimento do canal de E-MAIL, e um
+canal não decide pela preferência do outro.
+
+**A dedupe continua gravada, de propósito.** O lembrete FOI entregue, por
+e-mail — não gravar reenviaria o e-mail no tick seguinte, regressão pior que o
+WhatsApp errado. É a metade do apontamento que NÃO foi implementada: ele tratava
+"registrar o lembrete como entregue" como parte do defeito, e não é.
+
+> **Sobra de janela dentro do próprio `_wa_lembrete`**: a leitura do gate é
+> UMA, antes do laço de destinos, e cada `send_template` é uma requisição HTTP.
+> Numa conta com vários números, o ÚLTIMO destino sai mais de uma volta de rede
+> depois da leitura. Ler por destino fecharia a sobra e não vale: o dano dela é
+> uma mensagem a mais no MESMO lembrete, não um lembrete a mais. O código diz
+> isso no comentário do gate; o registro passou a dizer também.
+>
+> **Ressalva da 31: o gate fecha "pagou PELO CARTÃO", e a célula diz "pagou".**
+> O predicado é (relógio, `last_payment_status`), e **um grant `pix`/`admin` que
+> passa a vigorar durante o envio não toca nenhuma das duas colunas** — ele
+> chega por `plan_grants`, e quem reprojeta o status a partir dele é o
+> `recompute_entitlement` na passada de 60 s, tarde demais para este tick.
+>
+> **Das duas metades, só a do `admin` é alcançável nesta árvore, e ela roda
+> hoje.** A do Pix é mecanismo, não caminho: **não existe escritor de grant
+> `source='pix'` fora dos testes** (`db/plan_grants.py` diz que "'pix' e as
+> tabelas do Asaas chegam no **PR 1b**"), e a medição que a demonstrou criou o
+> grant à mão. A do `admin` usa ferramenta de PRODUÇÃO — o painel e o
+> `/admin/grant-pro` passam por `core.admin_dashboard.set_account_plan`, que
+> grava `source='admin'` em `_gravar_grant_do_admin`. Medido (2026-09-09,
+> `set_account_plan("pro", 12, user_id=uid)` chamado durante o
+> `send_payment_reminder_email`; remedir antes de reusar):
+>
+>     par no momento do gate  : past_due_since=<T>, last_payment_status='past_due'
+>     _pago_por_outro_caminho : True
+>     destinos tentados       : 1
+>     details                 : {'email': True, 'whatsapp': True}
+>
+> **É a célula 23 sendo furada por POSIÇÃO.** Aquela célula declara que o
+> lembrete de quem o admin acabou de liberar é pulado pelo filtro fino — e é,
+> quando o grant já existe no início da iteração. Se ele nasce durante o envio
+> do e-mail, ninguém mais olha.
+>
+> **Por que não foi consertado aqui, e não é preguiça:** o canal de E-MAIL tem a
+> MESMA lacuna — `db.dunning.lembrete_ainda_vale` também não olha grant —, então
+> gatear só o WhatsApp seria de novo a instância em vez da categoria (§2), o
+> erro que este arquivo inteiro existe para não repetir. É categoria de DOIS
+> canais e pede PR próprio, com a pergunta de copy junto (quem pagou por Pix não
+> tem "cartão para atualizar").
+>
+> **O que já existe e NÃO fecha isto:** `core.services.payment_reminder._pago_por_outro_caminho`
+> pula quem tem grant `pix`/`admin` vigente, e ele **não** lê do snapshot do
+> funil — é leitura viva do banco (medido: devolve `False` antes do grant e
+> `True` logo depois). O que o deixa cego é a POSIÇÃO, não a frescura: ele roda
+> no início da iteração, antes da revalidação e antes do e-mail, então um grant
+> que passa a vigorar durante o envio não é visto por ninguém. É a mesma classe
+> da 28 e da 31 num terceiro valor, e some quando a categoria for fechada.
 
 **O conserto**: revalidar o MESMO predicado do funil (relógio + status), por
 conta, imediatamente antes do envio, com leitura direta ao banco. Não é
@@ -355,6 +537,8 @@ quem sobrar volta no tick seguinte ainda dentro da janela.
 | 18 (`deleted` fora de ordem) | rodada 2 | **aberta**, anterior a este PR |
 | 23 (admin sobre `past_due`) | esta enumeração | sem defeito — a proteção é o grant `admin` |
 | 28-b (endereço do snapshot) | Codex, rodada 10 | fechada — o endereço sai da revalidação fresca; a recusa da rodada 8 usava duas razões, uma errada e uma invertida |
+| 31 (WhatsApp depois do e-mail) | Codex, rodada 13 | fechada **para pagamento por cartão** — `ciclo_de_atraso_aberto` dentro do `_wa_lembrete`; a dedupe continua gravada de propósito, e essa metade do apontamento foi recusada. **Resíduo declarado**: grant `pix`/`admin` que passa a vigorar DURANTE o envio não move o par (relógio, status) e continua passando pelo gate — a metade `admin` roda hoje (fura a célula 23 por posição), a metade `pix` depende do PR 1b. É lacuna dos DOIS canais e fica para PR próprio — ver a ressalva na seção do E7 |
+| **30 (`paid` de OUTRA assinatura)** | **Codex, rodada 13** | **ABERTA, com recusa fundamentada** — quem apaga o relógio ali é o `CASE` de `set_payment_status_impl` (ele roda ANTES do clear, que fica no-op), e gateá-lo cria o órfão S4: não produz lembrete (célula 26), envenena o ciclo seguinte (célula 12) e quebra as células 19/20, onde o `CASE` é o único que apaga. É essa consequência que sustenta a recusa, e ela é a ÚNICA — a razão "gatear ali é no-op" foi publicada nesta mesma rodada e a medição a derrubou. Custo do defeito: um lembrete perdido, sem perda de acesso. Leia a seção da célula antes de tentar de novo. |
 | **29 (corrida check/write da guarda)** | **Codex, rodada 9** | **ABERTA, com recusa fundamentada** — janela medida em 0,174 ms (mediana), sem perda de acesso, e todo predicado sobre dado existente ou deixa irmã aberta ou recusa falha legítima. Fechar exige marca d'água por usuário. Leia a seção da célula antes de tentar de novo. |
 
 **Se você veio aqui para "finalmente consertar a 29"**, leia a seção dela
@@ -363,3 +547,27 @@ primeiro e responda a três coisas por escrito: (1) qual marca d'água por
 usuário com duas assinaturas; (3) quantos writers de `last_payment_status`
 passam a existir. Sem as três respostas, o conserto é o remendo que a rodada 9
 recusou de propósito.
+
+**Se você veio aqui para "finalmente consertar a 30"**, o par do bloco acima, e
+são QUATRO perguntas — porque ali o relógio muda de dono:
+
+1. **Onde o relógio passa a morar** para ser por ASSINATURA: coluna nova em
+   `plan_grants`? Tabela nova? E **quem passa a ser o dono da invariante** que
+   hoje `db_support.set_payment_status_impl` mantém no MESMO UPDATE do status
+   ("relógio não nulo só existe com status na lista")? Ela deixa de ser uma
+   linha de SQL no mesmo `set` e passa a ser coisa entre duas tabelas.
+2. **Qual vira o predicado do funil.** `last_payment_status` é por USUÁRIO e não
+   distingue A de B, então como se pergunta "esta conta tem ALGUMA assinatura em
+   atraso há 6 dias" sem o par (relógio, status) que o funil e
+   `db.dunning.lembrete_ainda_vale` usam hoje?
+3. **O que a copy passa a dizer** para quem tem B ativa e A em atraso. A de hoje
+   afirma que a cobrança do "seu plano" não passou, e nesse estado o plano está
+   pago — sem copy nova, o conserto entrega lembrete mentiroso.
+4. **Quantos writers de `last_payment_status` passam a existir** (hoje dois **em
+   Python**: `db_support.set_payment_status_impl` e o SQL cru de
+   `core/admin_dashboard.set_account_plan`; fora deles sobram `scripts/*.sql` de
+   reparo manual, aceitos — o eixo de estados traz a varredura e o qualificador
+   completo, que esta pergunta já publicou sem).
+
+Sem as quatro, o conserto é a regressão que a rodada 13 recusou: o órfão S4, que
+não produz lembrete nenhum e estraga o ciclo seguinte.

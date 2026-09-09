@@ -9,9 +9,11 @@ webhook do Stripe. **NADA de acesso depende desta coluna.**
 
 **A máquina inteira — estados × eventos, com o que cada célula faz hoje e o que
 deveria fazer — está em `docs/dunning_estados_eventos.md`.** Leia antes de
-mexer em qualquer writer deste arquivo ou dos ramos que o chamam: três rodadas
-de revisão consertaram transições isoladas desta mesma máquina, e a tabela
-existe para a quarta não repetir o método.
+mexer em qualquer writer deste arquivo ou dos ramos que o chamam: rodadas
+seguidas de revisão consertaram transições isoladas desta mesma máquina, e a
+tabela existe para a próxima não repetir o método. A contagem de rodadas não
+vem escrita aqui de propósito — ela sobe, e envelhece em silêncio (§2); quem
+apontou o quê está na tabela do fim daquele arquivo.
 
 Saiu de `db/plans.py` (que estava em 350/350, o teto de
 `tests/test_max_lines_python.py`) quando o predicado de status entrou no
@@ -131,6 +133,46 @@ def clear_past_due_since(user_id: int, *, nao_mais_novo_que: int) -> None:
         conn.commit()
     from db_support import invalidate_auth_user_cache
     invalidate_auth_user_cache(user_id)
+
+
+def ciclo_de_atraso_aberto(user_id: int) -> bool:
+    """O ciclo de inadimplência ainda está aberto? Leitura DIRETA, no ponto do
+    envio pelo canal de WHATSAPP (`core.services.payment_reminder_wa._wa_lembrete`).
+
+    **É o PRIMEIRO TERMO de `lembrete_ainda_vale`, e a duplicação é
+    DELIBERADA** — as duas perguntas não são a mesma. Aquele responde "o
+    lembrete por E-MAIL ainda se sustenta?" e por isso soma o consentimento do
+    canal de e-mail (`engagement_opt_out`) e devolve o endereço; numa query só
+    porque são colunas da MESMA linha. Este responde só "o ciclo ainda está
+    aberto?", que é a VERDADE DA MENSAGEM, comum aos dois canais.
+
+    Gatear o WhatsApp pelo `engagement_opt_out` seria a imagem espelhada do erro
+    que `tests/test_payment_reminder_consentimento.py::test_opt_out_de_whatsapp_nao_tira_o_email`
+    existe para impedir: um canal decidindo pela preferência do OUTRO. E
+    devolver `email`/`email_enc` puxaria PII em claro para um caminho que não
+    tem uso para ela. O consentimento do canal de WhatsApp continua onde já
+    estava, `db.reports.get_whatsapp_updates_opt_out`.
+
+    **O nome é recuperado de propósito**: era assim que `lembrete_ainda_vale` se
+    chamava antes de absorver o segundo termo.
+
+    NÃO é `get_auth_user`, pela mesma razão de `lembrete_ainda_vale`: aquele tem
+    cache de 10 s (`db_support._auth_user_cache`) e uma leitura cacheada pode
+    mentir exatamente na corrida que esta função existe para pegar — aqui a
+    corrida é a requisição HTTP do envio do e-mail, que roda entre a
+    revalidação do lote e este ponto (célula nº 31 de
+    `docs/dunning_estados_eventos.md`).
+    """
+    from core.services.billing_dunning import PAST_DUE_PAYMENT_STATUSES
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select 1 from auth_accounts"
+                " where user_id = %s and past_due_since is not null"
+                "   and lower(coalesce(last_payment_status, '')) = any(%s)",
+                (int(user_id), list(PAST_DUE_PAYMENT_STATUSES)),
+            )
+            return cur.fetchone() is not None
 
 
 def lembrete_ainda_vale(user_id: int) -> dict | None:

@@ -123,10 +123,19 @@ async def check_payment_reminder() -> None:
     **NENHUM VALOR DO SNAPSHOT CHEGA AO ENVIO.** O funil diz QUEM considerar e
     nada mais: estado da inadimplência, consentimento de e-mail e o próprio
     ENDEREÇO saem de `lembrete_ainda_vale`, uma leitura fresca por lembrete; o
-    consentimento de WhatsApp sai de `_wa_lembrete`, no ponto de envio dele. A
-    janela de elegibilidade é a única coisa deliberadamente NÃO revalidada —
-    revalidá-la faria um lote lento descartar lembrete legítimo, que é o erro
-    oposto e pior.
+    consentimento de WhatsApp **e, de novo, o estado da inadimplência** saem de
+    `_wa_lembrete`, no ponto de envio DELE — o e-mail acima é uma requisição
+    HTTP a serviço externo, e o ciclo pode fechar nesse intervalo.
+
+    **DUAS coisas não são revalidadas, e cada uma por sua razão** (uma versão
+    anterior desta docstring dizia "a única", e a ressalva da célula 31 do
+    `docs/dunning_estados_eventos.md`, escrita no MESMO commit, já a
+    contradizia): a **janela de elegibilidade**, porque revalidá-la faria um
+    lote lento descartar lembrete legítimo — erro oposto e pior; e o **grant
+    `pix`/`admin`**, porque `_pago_por_outro_caminho` roda no início da
+    iteração, antes do e-mail, então um grant que passa a vigorar durante o
+    envio não é visto por ninguém. A segunda é lacuna dos DOIS canais e está
+    registrada como resíduo na ressalva da célula 31, não consertada aqui.
 
     E-MAIL é o caminho garantido; o WhatsApp é melhoria e mora em
     `core/services/payment_reminder_wa.py`.

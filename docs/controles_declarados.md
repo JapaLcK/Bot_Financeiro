@@ -51,6 +51,16 @@ coisa que o conserto **é**, e o nome da variável é só onde ele mora hoje.
 > **Cite o predicado ou a constante. Nomeie só os testes VERMELHOS. Nunca
 > escreva `N passed`.**
 
+E um corolário, quando a mesma injeção tem mais de uma grafia: **se duas
+variantes produzem o MESMO vermelho, fique com uma** (é a patologia
+"degenerado", abaixo); **se produzem vermelhos DIFERENTES, elas são injeções
+diferentes — nomeie qual delas a instrução manda aplicar.** O segundo caso não
+é teórico: um controle desta família oferecia "descarte o retorno do gate" e
+"apague o bloco do gate" como equivalentes, e um teste novo de fail-closed
+passou a distinguir as duas (2 vermelhos × 3), porque apagar o bloco leva o
+`except` junto. Instrução que não diz QUAL variante deixa o leitor conferir
+outra coisa.
+
 E uma exceção útil: **afirmação de verde vale quando é sobre o caminho
 injetado**, não sobre o conjunto de arquivos. "Esta injeção NÃO reprova o caso
 legítimo X" é o controle positivo, é o que separa "o guard discrimina" de "o
@@ -73,6 +83,27 @@ lá e nunca havia saído. Pior, o comentário de produção correspondente dizia
 ele "vivia" lá no passado, sugerindo uma mudança que não houve. Instrução
 impossível é sinal de que a narrativa do conserto está errada, não só o texto do
 controle — conserte os dois.
+
+**Injeção que APAGA TEXTO, num gate fail-closed** — a pior das três, porque
+inverte a leitura em vez de só envelhecer. Apagar um fragmento de expressão
+(um pedaço de string SQL, uma linha de concatenação) pode deixar a expressão
+inválida em vez de deixá-la mais fraca. Se o trecho injetado mora dentro de um
+`try` cujo `except` é **fail-closed**, a exceção é engolida, o guard passa a
+RECUSAR TUDO, **o teste que a instrução declara VERMELHO fica verde** e os
+positivos ficam vermelhos — quem seguiu a instrução conclui o oposto do que ela
+afirma. Esta família pagou o erro DUAS vezes com a mesma instrução: apagar só o
+texto do predicado deixou `1 placeholders but 2 parameters were passed`; apagar
+a linha inteira encostou a string na tupla seguinte e deu `'str' object is not
+callable`. Nas duas, até 11 vermelhos e o declarado passando.
+
+O remédio não é redigir com mais cuidado, é **trocar o eixo da injeção: ALARGUE
+em vez de apagar.** Onde a instrução mandava apagar o termo de status do `where`,
+ela passou a mandar trocar `list(PAST_DUE_PAYMENT_STATUSES)` por
+`list(PAST_DUE_PAYMENT_STATUSES) + ["active"]` — o termo continua lá e deixa de
+discriminar, nada é removido, **não há expressão para quebrar sob nenhuma
+leitura**, e as duas grafias plausíveis foram medidas dando o mesmo vermelho.
+Regra prática: se o guard é fail-closed, prefira injeção que muda um VALOR à
+que apaga um PEDAÇO DE CÓDIGO.
 
 ## Como conferir
 

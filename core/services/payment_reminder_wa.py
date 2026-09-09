@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 def _wa_lembrete(user_id: int) -> bool:
     """Manda o lembrete por WhatsApp. **True se ALGUM destino aceitou.**
 
+    **DUAS coisas são LIDAS AQUI, frescas, no ponto do envio**, e elas respondem
+    perguntas diferentes:
+
+      • **o consentimento do canal** (`whatsapp_updates_opt_out`) — a pessoa
+        AUTORIZA receber neste canal? Parágrafo abaixo;
+      • **o estado da inadimplência** (`db.dunning.ciclo_de_atraso_aberto`) — a
+        mensagem ainda é VERDADE? O chamador revalidou isso antes do e-mail,
+        mas o envio do e-mail é uma requisição HTTP a serviço externo e o
+        `invoice.paid` pode cair no meio: aí o e-mail estava certo quando saiu e
+        o WhatsApp diria "sua
+        cobrança está pendente" para quem acabou de pagar (célula nº 31 de
+        `docs/dunning_estados_eventos.md`).
+
+    A segunda **não** é `lembrete_ainda_vale`, que é o que o canal de e-mail
+    usa: aquele carrega um segundo termo, o `engagement_opt_out`, que é o
+    consentimento do canal de E-MAIL. Um canal decidindo pela preferência do
+    outro é o erro que
+    `tests/test_payment_reminder_consentimento.py::test_opt_out_de_whatsapp_nao_tira_o_email`
+    existe para impedir — só que espelhado. Ele também devolve `email`/
+    `email_enc`, PII sem uso nenhum aqui.
+
     **O consentimento é LIDO AQUI, fresco, no ponto do envio.** Quem desligou
     "atualizações do Piggy" em Configurações > Notificações (ou pelo botão do
     próprio WhatsApp, `wa_runtime.py:878`) grava
@@ -89,6 +110,36 @@ def _wa_lembrete(user_id: int) -> bool:
         return False
     nome = (os.getenv("WA_TEMPLATE_PAYMENT_REMINDER") or "").strip()
     if not nome:
+        return False
+    # INADIMPLÊNCIA DEPOIS DO TEMPLATE, e a ordem das leituras é o argumento:
+    # consentimento é AUTORIZAÇÃO (a razão mais forte para não enviar, fica
+    # primeiro); template é CAPACIDADE; isto aqui é a VERDADE DA MENSAGEM, e
+    # quanto mais tarde for lida, mais fresca ela é.
+    #
+    # DUAS ressalvas, para a frase acima não afirmar mais do que o código faz.
+    # (1) "mais tarde" é APROXIMADO: a leitura é UMA, aqui, antes do laço de
+    # destinos; cada `send_template` é HTTP, então numa conta com vários números
+    # o último sai mais de uma volta de rede depois desta leitura. Ler por
+    # destino fecharia a sobra e não vale: o dano dela é uma mensagem a mais no
+    # MESMO lembrete, não um lembrete a mais. (2) A minimização de leitura é
+    # propriedade DESTE gate, não do arquivo — ele não custa nada no caminho
+    # dormente de produção (sem template, não chega aqui), mas o
+    # `get_whatsapp_updates_opt_out` acima roda antes do `if not nome`, em TODO
+    # lembrete, inclusive hoje com a env vazia. É o preço de o consentimento vir
+    # primeiro, e ele vem primeiro de propósito.
+    #
+    # NÃO é `lembrete_ainda_vale`: aquele soma o `engagement_opt_out`, que é o
+    # consentimento do canal de E-MAIL — gateá-lo aqui é a imagem espelhada do
+    # erro que `test_opt_out_de_whatsapp_nao_tira_o_email` existe para impedir.
+    try:
+        from db.dunning import ciclo_de_atraso_aberto
+        if not ciclo_de_atraso_aberto(user_id):
+            logger.info("[cobranca] WhatsApp pulado: o ciclo fechou durante o"
+                        " envio do e-mail user_id=%s", user_id)
+            return False
+    except Exception as exc:
+        logger.warning("[cobranca] revalidacao da inadimplencia falhou"
+                       " user_id=%s: %s — nao envia", user_id, exc)
         return False
     try:
         from adapters.whatsapp.wa_app import _dedupe_whatsapp_targets
