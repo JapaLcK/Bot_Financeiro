@@ -2763,7 +2763,7 @@ function _renderBudgetRow(b, idx = 0) {
   const pct = b.pct || 0;
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
-  const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
+  const subColor = b.status === "vermelho" ? "color:var(--red)" : "";
   const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
   let subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
@@ -3241,7 +3241,7 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--red)"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado, pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
@@ -3746,7 +3746,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -4302,7 +4302,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const saidas = totalGastos + totalPend;
   const resultado = entradas - saidas;
   const positivo = resultado >= 0;
-  const resColor = positivo ? "#22c55e" : "#FF2D2D";
+  const resColor = positivo ? "#22c55e" : "var(--red)";
   const plural = (n) => n === 1 ? "" : "s";
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4518,7 +4518,7 @@ function _renderBillsView(bills) {
       <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
   const buckets = [
-    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
+    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "var(--red)", items: pending.filter(b => _billDaysUntil(b) < 0) },
     { label: "Hoje", color: "#fbbf24", items: pending.filter(b => _billDaysUntil(b) === 0) },
     { label: "Próximos 7 dias", color: "#fbbf24", items: pending.filter(b => { const n = _billDaysUntil(b); return n >= 1 && n <= 7; }) },
     { label: "Ainda este mês", color: "var(--text-2)", items: pending.filter(b => _billDaysUntil(b) > 7 && _billDate(b) <= endMonth) },
@@ -4543,7 +4543,7 @@ function _renderBillRow(b) {
   const due = _billDate(b);
   const overdue = _billOverdue(b);
   const quando = overdue ? "vencido" : _formatDueIn(due);
-  const color = overdue ? "#FF2D2D" : "#fbbf24";
+  const color = overdue ? "var(--red)" : "#fbbf24";
   const variavel = !!b.variable_amount;
   const temEstimativa = (b.amount || 0) > 0;
   const amtLabel = variavel
@@ -4745,7 +4745,7 @@ function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
   const ok = p.tranquilo;
-  const accent = ok ? "#22c55e" : "#FF2D2D";
+  const accent = ok ? "#22c55e" : "var(--red)";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
     ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
@@ -4798,7 +4798,7 @@ function _renderForecast(fc) {
   const tile = (dias, p) => {
     if (!p) return "";
     const ok = p.tranquilo;
-    const accent = ok ? "#22c55e" : "#FF2D2D";
+    const accent = ok ? "#22c55e" : "var(--red)";
     return `
       <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
         <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
@@ -5541,6 +5541,7 @@ function renderAnalyticsIncomeExpense(evolution) {
       labels,
       datasets: [
         { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#00F078", borderRadius: 6 },
+        // Canvas: o Chart.js pinta em bitmap e nao resolve var(--red).
         { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF2D2D", borderRadius: 6 },
       ]
     },
@@ -5603,6 +5604,7 @@ function renderAnalyticsWeekday(weekday) {
   const data    = weekday.map(w => w.avg);
   const max     = Math.max(...data, 1);
   const colors  = weekday.map(w => {
+    // Idem: estas cores vao para o backgroundColor do Chart.js, em canvas.
     if ([0, 6].includes(w.dow)) return "#FF2D2D"; // dom/sáb
     if (w.avg / max > 0.8)       return "#fbbf24";
     return "#FF2D8E";
@@ -6137,7 +6139,7 @@ function renderHistoryStats(s) {
     {
       value: s.despesas_count != null ? s.despesas_count : "—",
       sub: "débito + cartão",
-      color: "#FF2D2D",
+      color: "var(--red)",
     },
     {
       value: s.total_count != null ? s.total_count : "—",

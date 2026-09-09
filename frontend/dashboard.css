@@ -49,11 +49,15 @@ body.light {
    têm par `body.light`, ao contrário da `.user-dropdown` (:103) e da
    `.period-pill option` (:497), que viram brancas. Tinta clara ali dentro
    seria cinza-ardósia sobre quase-preto, então elas mantêm a rampa escura.
-   Isto também fecha o buraco que o comentário da `.cl-row` já registrava
-   (`--text` virava #0f172a dentro de modal escuro), e que atingia `.modal h3`
-   e `.ld-desc` desde antes desta mudança. */
+   O `color` explícito não é decoração: redefinir a custom property só alcança
+   quem DECLARA `color:var(--text*)`. Quem não declara — `.modal h3` (:1638),
+   `.receipt-cell .v` (:1847) — herda o valor JÁ COMPUTADO do `body`, e custom
+   property não reescreve herança. Sem esta linha os 18 títulos de modal ficam
+   em #0f172a sobre #141623, ou seja 1,01:1: invisíveis. É o buraco que o
+   comentário da `.cl-row` registrava, e é ele que fecha aqui. */
 body.light .modal,
 body.light #piggy-panel {
+  color: var(--text);
   --text:   rgba(255,255,255,0.92);
   --text-2: rgba(255,255,255,0.66);
   --text-3: rgba(255,255,255,0.50);
@@ -757,7 +761,8 @@ details.inst-card[open] .inst-chevron {
   text-transform:uppercase; letter-spacing:.1em;
 }
 .inst-pay-summary { display:flex; gap:14px; font-size:.78rem; }
-.inst-pay-summary .paid-amt { color:#00F078; font-weight:600; }
+/* Dinheiro pago: usa o token, senão o neon puro fica ~1,5:1 no tema claro. */
+.inst-pay-summary .paid-amt { color:var(--green); font-weight:600; }
 .inst-pay-summary .left-amt { color:#fb923c; font-weight:600; }
 .inst-pay-summary .paid-amt::before, .inst-pay-summary .left-amt::before {
   content:""; display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle;
@@ -820,7 +825,7 @@ body.light .parcel-status-icon.next { color:#FF2D8E; }
   font-size:.62rem; padding:2px 7px; border-radius:5px;
   text-transform:uppercase; letter-spacing:.06em; font-weight:700;
 }
-.parcel-tag.paid { background:rgba(0,240,120,.16); color:#00F078; }
+.parcel-tag.paid { background:rgba(0,240,120,.16); color:var(--green); }
 .parcel-tag.next { background:linear-gradient(135deg, rgba(255,45,142,.25), rgba(199,24,107,.18)); color:#F7D7E3; border:1px solid rgba(255,45,142,.3); }
 body.light .parcel-tag.next { color:#5b21b6; }
 .parcel-val { font-size:.95rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
@@ -2323,16 +2328,16 @@ body.balance-hidden #bill-detail-summary .v {
    clipa os DOIS eixos), então uma linha mais larga que o conteúdo perdia as
    bordas laterais do anel de foco — sobrava um traço em cima e outro embaixo. */
 .cl-row { border-radius:10px; cursor:pointer; transition:background .16s var(--ease); }
-/* Branco a 5,5% nos DOIS temas, e é medido: `.modal` é
-   `rgba(14,16,30,.94)` com e sem `body.light` — não existe regra
-   `body.light .modal`/`.overlay` na dashboard.css inteira. A linha desta lista
-   está SEMPRE sobre superfície escura, então o par `body.light` que a barra da
+/* Branco a 5,5% nos DOIS temas, e é medido: o FUNDO da `.modal` é
+   `rgba(14,16,30,.94)` com e sem `body.light` — a regra `body.light .modal` do
+   topo do arquivo troca só a TINTA, não a superfície. A linha desta lista está
+   SEMPRE sobre superfície escura, então o par `body.light` que a barra da
    Distribuição tem (fim do arquivo) seria errado aqui: aquela barra fica na
    PÁGINA, que no tema claro é `--bg-page:#F6F4F1`. Aplicar
    `rgba(15,23,42,.05)` aqui apaga o hover em vez de consertá-lo.
-   (O tema claro dos MODAIS é um buraco pré-existente e geral — `--text` vira
-   `#0f172a` dentro de um modal que continua escuro, o que atinge `.modal h3`,
-   `.ld-desc` e todo o resto. Não é desta feature.) */
+   (O buraco de tinta que este comentário registrava — `--text` virando
+   `#0f172a` dentro de modal escuro, atingindo `.modal h3` e `.ld-desc` — está
+   fechado pela rampa do topo, que declara `color` e não só as variáveis.) */
 .cl-row:hover { background:rgba(255,255,255,.055); }
 .cl-row:focus-visible { outline:2px solid rgba(255,45,142,.55); outline-offset:-2px; }
 .cl-row .bar-head { align-items:baseline; }

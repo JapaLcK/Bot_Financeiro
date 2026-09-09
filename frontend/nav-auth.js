@@ -183,12 +183,20 @@
          qualquer conteúdo. Agora recolhem atrás de um botão. */
       ".pb-burger{display:none}",
       "@media (max-width:900px){",
-      ".nav{flex-wrap:wrap;row-gap:0}",
-      ".nav .nav-logo{order:1}",
-      ".nav .nav-right{order:2;margin-left:auto}",
+      /* UM auto por linha, e o resto por justify-content. Dois `margin-left:auto`
+         na mesma linha flex REPARTEM a sobra em vez de empurrar tudo para a
+         direita: com um no .nav-right e outro no botão, o "Entrar / Começar
+         agora" descolava da borda e flutuava no meio (medido: 313px de folga a
+         899px). Aqui a sobra da 1ª linha vai toda para o logo, e a 2ª linha —
+         quando o botão quebra — é alinhada pelo justify-content do container.
+         O column-gap cai de 10px para 6px porque a linha pedia 356px onde há
+         349: são os 7px que faltavam para o botão caber a 375px. */
+      ".nav{flex-wrap:wrap;row-gap:0;column-gap:6px;justify-content:flex-end}",
+      ".nav .nav-logo{order:1;margin-right:auto}",
+      ".nav .nav-right{order:2;margin-left:0}",
       /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
       ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;",
-      "width:44px;height:44px;margin-left:auto;padding:0;flex-shrink:0;",
+      "width:44px;height:44px;margin-left:0;padding:0;flex-shrink:0;",
       "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);",
       "border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
       ".pb-burger:hover{background:rgba(255,255,255,.12)}",
