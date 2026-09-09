@@ -293,11 +293,24 @@ def test_filtro_continua_achando_as_duas_formas(pro_user_id):
     def _filtrado(ft):
         return asyncio.run(dashboard.get_financial_data(
             pro_user_id, year=hoje.year, month=hoje.month, filter_type=ft,
-        ))["recent_launches"]
+        ))
+
+    despesas = _filtrado("despesa")
+    receitas = _filtrado("receita")
 
     # Só o VALOR, de propósito: o tipo devolvido é o que os dois testes de
     # projeção acima medem. Aqui o observável é QUAIS linhas o WHERE trouxe —
     # é o que mantém este caso verde com e sem o conserto, que é o que um
     # controle positivo tem de fazer.
-    assert [float(r["valor"]) for r in _filtrado("despesa")] == [100.0]
-    assert [float(r["valor"]) for r in _filtrado("receita")] == [300.0]
+    assert [float(r["valor"]) for r in despesas["recent_launches"]] == [100.0]
+    assert [float(r["valor"]) for r in receitas["recent_launches"]] == [300.0]
+
+    # O "N de M" do card "Lançamentos" (`renderLaunchesPagination`,
+    # dashboard.js:7841) vem do `total`, e o `total` é a query 3 — outra query,
+    # o MESMO `_dashboard_launch_filter_sql`. Contar por um WHERE e listar por
+    # outro é como a paginação passa a mentir sobre a própria lista: "1 de 1"
+    # com zero linhas, ou o contrário. Isto trava as duas metades juntas, e é
+    # o item 5 do smoke do #299 virado em asserção. Não discrimina o #299: a
+    # projeção que ele mudou é a de FORA, e o `total` nunca passa por ela.
+    assert despesas["launches_pagination"]["total"] == 1, despesas["launches_pagination"]
+    assert receitas["launches_pagination"]["total"] == 1, receitas["launches_pagination"]
