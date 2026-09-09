@@ -6,6 +6,7 @@ from collections import defaultdict
 
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
+from core.intent_classifier import classify
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
@@ -356,36 +357,54 @@ _CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
                    "valeu", "vlw", "pls", "please", "plz"}
 
 
-def _leituras_da_resposta(alvo: str) -> set[str]:
-    """A resposta inteira, ela sem os enfeites do COMEÇO, e sem a cortesia do FIM.
+def _leituras_da_resposta(alvo: str) -> list[str]:
+    """Como esta resposta pode ser lida, da leitura MAIS LONGA para a mais curta.
 
-    Prefixo, nunca o miolo: `a do banco do brasil` tem de virar
-    `banco do brasil`, e um filtro global de filler comeria também o `do` do
-    MEIO do nome. Pelo mesmo motivo `a conta` vira `conta` mesmo com "conta"
-    sendo filler — o nome do cartão pode SER uma palavra de enfeite.
+    Três aparos, e o terceiro é o que custou um bug de dinheiro:
 
-    Sufixo só de `_CORTESIA_FINAL`: `nubank por favor` é resposta comum e a
-    `main` aceitava (por substring). O que NÃO se faz é voltar ao `re.search` —
-    é ele que fazia `excluir cartao nubank` casar `nubank` e PAGAR R$ 300.
+    - PREFIXO de filler: `a do banco do brasil` tem de virar `banco do brasil`.
+      Só o prefixo, nunca o miolo — um filtro global comeria o `do` do MEIO do
+      nome, e `a conta` tem de virar `conta` mesmo com "conta" sendo filler,
+      porque o nome do cartão pode SER uma palavra de enfeite.
+    - SUFIXO de cortesia: `nubank por favor` é resposta comum e a `main`
+      aceitava (por substring).
+    - As DUAS leituras, com e sem a cortesia. `pf` é cortesia E é nome de cartão
+      real ("PF" de pessoa física: `Nubank PF`, `Itaú PF` existem). Aparando o
+      sufixo ANTES de gerar os prefixos, `a do nubank pf` produzia `nubank` e
+      NUNCA `nubank pf` — com os dois cartões cadastrados e fatura aberta nos
+      dois, isso PAGAVA A FATURA DO CARTÃO ERRADO. Achado pelo Codex no #323.
 
-    E é o que mantém os dois ataques fora: em `excluir cartao nubank` a primeira
-    palavra não é enfeite e a varredura de prefixo para na hora; em
-    `nubank excluir` o último token não é cortesia e a de sufixo também. Nos
-    dois a única leitura é a frase inteira, que não é nome de cartão nenhum.
+    A ordem do retorno é o desempate, e por isso é lista e não conjunto: a
+    leitura mais LONGA vem primeiro, então o nome mais específico (`nubank pf`)
+    ganha do genérico (`nubank`) quando os dois existem.
+
+    O que NÃO se faz é voltar ao `re.search` — é ele que fazia
+    `excluir cartao nubank` casar `nubank` e pagar R$ 300. Os dois ataques
+    seguem fora: em `excluir cartao nubank` a primeira palavra não é filler e a
+    varredura de prefixo para na hora; em `nubank excluir` o último token não é
+    cortesia e a de sufixo também.
     """
     tokens = alvo.split()
-    fim = len(tokens)
-    # `fim > 1`: uma resposta que é SÓ cortesia ("obrigado") não pode virar
-    # string vazia e casar um cartão de nome vazio.
-    while fim > 1 and tokens[fim - 1] in _CORTESIA_FINAL:
-        fim -= 1
-    nucleo = tokens[:fim]
-    leituras = {alvo, " ".join(nucleo)}
-    for i in range(1, len(nucleo)):
-        if nucleo[i - 1] not in _FILLER:
-            break
-        leituras.add(" ".join(nucleo[i:]))
-    return leituras
+    # `> 1`: resposta que é SÓ cortesia ("obrigado") não pode virar string
+    # vazia e casar um cartão de nome vazio.
+    sem_cortesia = len(tokens)
+    while sem_cortesia > 1 and tokens[sem_cortesia - 1] in _CORTESIA_FINAL:
+        sem_cortesia -= 1
+
+    leituras: set[str] = set()
+    # TODO corte de sufixo entre "nenhuma cortesia aparada" e "toda aparada",
+    # não só os dois extremos: a poda é gulosa e em `nubank pf por favor` ela
+    # come o `pf` junto, então parar nos extremos daria `nubank pf por favor` e
+    # `nubank` — sem o `nubank pf`, que é o nome do cartão. Aparar MENOS nunca
+    # expõe comando, porque só se apara token de `_CORTESIA_FINAL`.
+    for fim in range(len(tokens), sem_cortesia - 1, -1):
+        nucleo = tokens[:fim]
+        leituras.add(" ".join(nucleo))
+        for i in range(1, len(nucleo)):
+            if nucleo[i - 1] not in _FILLER:
+                break
+            leituras.add(" ".join(nucleo[i:]))
+    return sorted(leituras, key=len, reverse=True)
 
 
 def _card_name_da_resposta(user_id: int, answer: str):
@@ -408,11 +427,16 @@ def _card_name_da_resposta(user_id: int, answer: str):
     alvo = normalize_text(answer)
     if not alvo:
         return None
-    leituras = _leituras_da_resposta(alvo)
+    # Percorre as LEITURAS (mais longa primeiro), não os cartões: a ordem é o
+    # desempate entre `Nubank` e `Nubank PF`, e iterar os cartões a perderia.
+    por_nome: dict[str, int] = {}
     for card in list_cards(user_id):
         nome = normalize_text(card["name"])
-        if nome and nome in leituras:
-            return card["id"]
+        if nome:
+            por_nome.setdefault(nome, card["id"])
+    for leitura in _leituras_da_resposta(alvo):
+        if leitura in por_nome:
+            return por_nome[leitura]
     return None
 
 
@@ -450,24 +474,15 @@ _UNIDADE_DE_CARTAO = {
     "cerca", "aproximadamente", "ate",
 }
 
-# 3. `_VERBO_CONVERSACIONAL` — o jeito como se responde uma pergunta falando,
-#    não o assunto da resposta: "pode ser dia 10", "quero 3 dias antes",
-#    "pode colocar 5000". A `main` aceitava as três (os parsers fazem `search`).
-#
-#    PROCUREI ANTES DE CRIAR (§0.1) e a lista NÃO existe no repositório:
-#    medido, nenhum de `pode`/`ser`/`quero`/`colocar`/`deixa`/`bota`/`poe` está
-#    em `STOPWORDS_PT` nem em `MEMORY_STOP_TOKENS`. E reusar `STOPWORDS_PT`
-#    seria ERRADO, não só inútil: ela contém `gastei`, `comprei` e `paguei` —
-#    exatamente as palavras que este portão existe para recusar. Por isso é
-#    conjunto próprio, e por isso ele é curto: entra verbo de preenchimento,
-#    nunca substantivo ou verbo que nomeie o assunto.
-_VERBO_CONVERSACIONAL = {
-    "pode", "podem", "poderia", "poder", "ser", "seria",
-    "quero", "queria", "gostaria",
-    "coloca", "colocar", "bota", "botar", "poe", "por", "deixa", "deixar",
-}
-
-_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO | _VERBO_CONVERSACIONAL
+# A rodada 8 tinha aqui uma terceira fatia, `_VERBO_CONVERSACIONAL`
+# ("pode", "quero", "colocar"...), para aceitar resposta numérica dita
+# conversando. Ela MORREU na rodada 9 e não foi substituída: verbo do português
+# é conjunto ABERTO — faltavam `coloque`, `bote`, `ponha`, `deixe` — e a
+# segunda via do `_so_numero` (o oráculo `out_of_scope`) cobre a categoria
+# inteira sem enumerar nada. Medido: com e sem a lista, resultado IDÊNTICO nas
+# 64 strings do corpus (45 legítimas + 19 ataques). Enumerar conjugação era
+# garantir uma rodada de revisão por verbo esquecido.
+_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO
 
 
 # `PT_NUM_ALT` (público desde sempre, `utils_text.py`) em vez de uma cópia do
@@ -477,23 +492,44 @@ _NUM_POR_EXTENSO_RE = re.compile(rf"(?:{PT_NUM_ALT})", re.IGNORECASE)
 
 
 def _so_numero(text: str) -> bool:
-    """A resposta é SÓ um número — sem conteúdo semântico sobrando?
+    """A resposta traz um número e NENHUM comando reconhecível?
 
-    NÃO é "tem formato de número". É "depois de tirar o número, o filler e a
-    unidade, sobra alguma palavra que mude o assunto?". A forma estrita anterior
-    (uma regex ancorada) era mais restrita que os parsers que ela guarda e
-    derrubava 14 respostas legítimas que eles entendem — `todo dia 10` e
-    `5 de cada mes` (o `_parse_day` lê), `cinco mil` e `limite 5000` (o
-    `parse_money` lê), `3 dias antes` (idem).
+    NÃO é "tem formato de número". Os parsers deste arquivo (`_parse_day`,
+    `parse_money`) fazem `search`, não `fullmatch`: acham o número DENTRO da
+    frase, e é assim que "gastei 50 no mercado" respondendo "qual o limite?"
+    gravava limite de R$ 50,00. O portão existe para recusar ESSE caso.
 
-    O propósito é o mesmo: `gastei 50 no mercado` respondendo "qual o limite?"
-    deixa sobrar `gastei` e `mercado` → recusa, e o limite não vira R$ 50,00.
-    Os parsers fazem `search`, não `fullmatch`, e por isso achavam o 50.
+    DUAS VIAS, em união, porque cada uma cobre o furo da outra — medido:
 
-    Sobre o texto normalizado, e agora isso é CORRETO: o `normalize_text` de
-    fato destrói `R$ 5.000,00` como NÚMERO (vira "r 5 000 00"), mas aqui não se
-    lê valor nenhum — só se pergunta se sobrou palavra. Quem lê o valor é o
-    `parse_money`, que recebe o texto CRU logo depois e não foi tocado.
+    1. TOKENS: sobra alguma palavra que mude o assunto depois de tirar número,
+       filler, unidade e verbo de preenchimento? Cobre o vocabulário de moeda e
+       de fala ("5 mil", "3 dias antes", "5000 pilas", "5 de cada mes"), que o
+       classificador lê como `launches.add` e recusaria.
+    2. ORÁCULO: `classify(..., allow_ai=False).intent == "out_of_scope"`, ou
+       seja, o classificador NÃO reconheceu comando nenhum. Cobre a conjugação
+       que a lista de verbos nunca vai fechar — "coloque 5000", "bote 3000",
+       "ponha 5000", "quero que seja dia 10" são todos `out_of_scope/0.00`.
+       Verbo do português é conjunto ABERTO, e enumerar era garantir uma
+       rodada de revisão por conjugação esquecida.
+
+    POR QUE UNIÃO E NÃO SÓ O ORÁCULO (medido nesta árvore): sozinho, ele
+    QUEBRA 10 respostas legítimas que hoje funcionam — `5 mil`, `10 mil`,
+    `3 dias`, `3 dias antes`, `5 de cada mes`, `5000 pila`, `5000 pilas`,
+    `5000 contos`, `5000 mangos` e `5 mil reais e 50 centavos` classificam
+    `launches.add/0.95`, não `out_of_scope`. Trocar tokens POR oráculo seria
+    reabrir exatamente o R3-2.
+
+    O CUSTO da união, enumerado (só estes dois no corpus adversarial): as
+    frases sem comando reconhecível mas com assunto próprio — "dashboard 5000",
+    "quero comprar uma tv de 5000" — passam a ser aceitas e gravam 5000. É
+    METADADO (limite, dia de fechamento, dias de aviso), nunca dinheiro: o
+    `_so_numero` só guarda `closing_day`, `due_day`, `reminder_days` e
+    `credit_limit_ask`. O erro é visível na confirmação e o usuário corrige;
+    o erro oposto — recusar resposta legítima — já custou quatro rodadas.
+
+    `allow_ai=False` é requisito, não otimização: mesma razão do
+    `abandona_pergunta_de_credito` — com o tier 3 no meio o oráculo volta a ser
+    ilimitado e uma alucinação do LLM passa a decidir o portão.
     """
     tokens = normalize_text(text).split()
     if not tokens:
@@ -501,8 +537,10 @@ def _so_numero(text: str) -> bool:
     e_numero = lambda t: t.isdigit() or _NUM_POR_EXTENSO_RE.fullmatch(t)
     if not any(e_numero(t) for t in tokens):
         return False  # "nao", "sim", "amanha": não há número nenhum a ler
-    return all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
-               for t in tokens)
+    if all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
+           for t in tokens):
+        return True
+    return classify(text, allow_ai=False).intent == "out_of_scope"
 
 
 # ---------------------------------------------------------------------------

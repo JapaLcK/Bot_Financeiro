@@ -209,3 +209,75 @@ def test_pay_bill_choice_aceita_nome_com_acento_pontuacao_e_filler(
 
 # Respostas de FORMA que os parsers deste arquivo entendem e que a regex
 # ancorada anterior derrubava (14 destas). `(step, resposta, o que aparece)`.
+
+
+# ===========================================================================
+# P2-3 (Codex no #323) — BUG DE DINHEIRO que a correção da rodada 8 criou.
+#
+# `pf` ("pessoa física") é cortesia E é nome de cartão real: `Nubank PF` e
+# `Itaú PF` existem. Aparando o sufixo ANTES de gerar os prefixos,
+# `a do nubank pf` produzia `nubank` e NUNCA `nubank pf` — com os dois cartões
+# cadastrados e fatura aberta nos dois, PAGAVA A FATURA DO CARTÃO ERRADO.
+#
+# Não basta gerar as duas leituras: a ORDEM é o desempate, e é por isso que
+# `_leituras_da_resposta` devolve lista (mais longa primeiro) e não conjunto.
+# ===========================================================================
+
+def _dois_cartoes_com_fatura(uid, monkeypatch):
+    """`Nubank` e `Nubank PF`, os dois com fatura em aberto de valor DIFERENTE.
+
+    Valores diferentes de propósito: é o que prova QUAL foi paga sem depender
+    de qual linha o banco devolveu primeiro."""
+    monkeypatch.setattr("core.services.plan_service.check_can_create_card",
+                        lambda _uid: None)
+    ids = {}
+    for nome, valor in (("Nubank", 300.0), ("Nubank PF", 700.0)):
+        card_id = db.create_card(uid, nome, 10, 17)
+        db.add_credit_purchase_installments(
+            user_id=uid, card_id=card_id, valor_total=valor, categoria="outros",
+            nota="mercado", purchased_at=date.today(), installments=1)
+        ids[nome] = card_id
+    abertas = db.list_open_bills(uid)
+    assert len(abertas) == 2, f"setup não gerou as duas faturas: {abertas!r}"
+    db.set_pending_action(uid, "pay_bill_choice", {
+        "bill_ids": [int(b["id"]) for b in abertas], "amount": None})
+    return ids
+
+
+def _fatura_aberta_do_cartao(uid, card_id):
+    return [b for b in db.list_open_bills(uid) if int(b["card_id"]) == int(card_id)]
+
+
+@pytest.mark.parametrize("resposta_do_user", ["nubank pf", "a do nubank pf",
+                                              "a fatura do nubank pf",
+                                              "nubank pf por favor"])
+def test_pay_bill_choice_paga_o_cartao_especifico_nao_o_generico(
+        resposta_do_user, monkeypatch):
+    uid = _uid()
+    ids = _dois_cartoes_com_fatura(uid, monkeypatch)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert not _fatura_aberta_do_cartao(uid, ids["Nubank PF"]), \
+        f"{resposta_do_user!r} não pagou o *Nubank PF*: {resposta!r}"
+    assert _fatura_aberta_do_cartao(uid, ids["Nubank"]), \
+        f"{resposta_do_user!r} PAGOU O CARTÃO ERRADO (*Nubank*): {resposta!r}"
+    assert "700" in resposta, f"pagou o valor do cartão errado: {resposta!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["nubank", "a do nubank",
+                                              "nubank por favor"])
+def test_pay_bill_choice_o_generico_continua_pagando_o_generico(
+        resposta_do_user, monkeypatch):
+    """O outro lado: desempatar pela leitura mais longa não pode fazer o nome
+    genérico passar a casar o específico."""
+    uid = _uid()
+    ids = _dois_cartoes_com_fatura(uid, monkeypatch)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert not _fatura_aberta_do_cartao(uid, ids["Nubank"]), \
+        f"{resposta_do_user!r} não pagou o *Nubank*: {resposta!r}"
+    assert _fatura_aberta_do_cartao(uid, ids["Nubank PF"]), \
+        f"{resposta_do_user!r} pagou o *Nubank PF* por engano: {resposta!r}"
+    assert "300" in resposta, resposta

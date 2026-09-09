@@ -73,12 +73,10 @@ quebrava: `comprei uma tv` virava despesa de R$ 1,00 e o parcelamento ia fora.
 Os dois controles medem defeitos OPOSTOS, e nenhum dos dois sozinho basta — o A
 não vê a blacklist, o B não vê o `if` incondicional.
 
-O abandono tem DUAS portas, e os controles acima só cobrem a primeira (a
-allowlist de intent). A segunda é a RESPOSTA NÃO RECONHECIDA num espaço de
-resposta ENUMERÁVEL: o handler devolve `None` e o `route()` abandona. Ela existe
-porque allowlist de intent nenhuma alcança `quanto tenho na fatura do nubank`,
-`excluir cartao nubank` ou `tchau` — todos out_of_scope/0.00. Três controles,
-todos executados nesta árvore:
+O abandono tem DUAS portas; os controles acima cobrem só a primeira (allowlist
+de intent). A segunda é a RESPOSTA NÃO RECONHECIDA num espaço enumerável — ela
+alcança o que allowlist nenhuma alcançaria (`excluir cartao nubank`, `tchau`:
+out_of_scope/0.00). Três controles:
 
 CONTROLE NEGATIVO C — o casamento por SUBSTRING volta. Em
 `core/handlers/credit.py::_resolve_pay_bill_choice`, troque
@@ -108,9 +106,8 @@ CONTROLE NEGATIVO E — tire `"greeting"` do `_ABANDONA_CREDITO`:
     test_saudacao_nao_vira_descricao_de_parcelamento[boa tarde]
     test_saudacao_nao_vira_descricao_de_parcelamento[boa noite]
 
-RE-PERGUNTAR × ABANDONAR é uma escolha por portão, e a regra está escrita em
-`core/handlers/credit.py`, logo acima do `_so_numero`: *manter a pergunta viva
-arma um gatilho destrutivo?* Os dois sentidos foram medidos:
+RE-PERGUNTAR × ABANDONAR é escolha por portão; a regra está em
+`core/handlers/credit.py`, acima do `_so_numero`. Os dois sentidos, medidos:
 
 CONTROLE NEGATIVO F — o `pay_bill_choice` passa a ABANDONAR (`return None` no
 lugar da lista numerada). Ficam VERMELHOS:
@@ -135,19 +132,15 @@ Aqui a assertiva que cai é a do CARTÃO APAGADO. É a prova de que a assimetria
 entre as duas pernas não é gosto: uniformizar os nove portões para
 "re-perguntar" reabre o footgun de 3 turnos.
 
-POSITIVOS da segunda porta (a pergunta certa é "qual resposta legítima o portão
-RECUSA?"): 20 respostas do `pay_bill_choice`, as 8 do `_is_yes` e 7 do `_is_no`
-no `credit_delete_card`, o nome no step `choose`, e os 8 steps restritos do
-`credit_card_setup`. Medidos em DUAS COLUNAS (main × branch): 49 linhas, 48
-idênticas. A única diferença é a intencional — nome de cartão inexistente no
-step `choose` deixa de re-perguntar e passa a abandonar.
+POSITIVOS da segunda porta ("qual resposta legítima o portão RECUSA?"): 20 do
+`pay_bill_choice`, 8 do `_is_yes`, 7 do `_is_no`, o nome no `choose` e os steps
+restritos. Medidos em DUAS COLUNAS (main × branch): 49 linhas, 48 idênticas — a
+única diferença é a intencional (nome inexistente no `choose` passa a
+abandonar). `cancelar` fica fora dos positivos porque o `handle_billing_command`
+o intercepta antes do `route()`; igual nas duas colunas, anterior a este PR.
 
-`cancelar` fica fora dos positivos do `_is_no` de propósito: o
-`handle_billing_command` o intercepta antes do `route()` e ele nunca chega no
-handler do cartão. Medido igual nas duas colunas — anterior a este PR.
-
-O ESPELHO (rodada 6): os portões acima recusavam RESPOSTA LEGÍTIMA, e isso é
-defeito do mesmo jeito. Quatro mutantes, todos executados nesta árvore:
+O ESPELHO: os portões acima recusavam RESPOSTA LEGÍTIMA, defeito do mesmo
+jeito. Quatro mutantes:
 
 CONTROLE NEGATIVO H — apague o `if not _is_yes(answer) and not _is_no(answer):
 return None` do step `reminder_opt_in`:
@@ -189,15 +182,9 @@ de seleção do `MEMORY_STOP_TOKENS`: 5 vermelhos —
 `test_so_numero_aceita_o_vocabulario_canonico_de_fala` (`5000 pilas`,
 `5000 mangos`, `acho que 5000`, `5 mil reais e 50 centavos`).
 
-A TERCEIRA PORTA da mesma classe (portão mais estrito que a peça que ele
-substituiu), achada pelo Codex no #323 e medida contra a `main`: SUFIXO e
-PREFIXO VERBAL. Duas regressões, três controles:
-
-CONTROLE NEGATIVO N — tire `_VERBO_CONVERSACIONAL` da união do
-`_UNIDADE_DE_RESPOSTA`: 9 vermelhos, todos os casos conversacionais do
-`test_forma_legitima_passa_pelo_portao` (`pode ser dia 10`, `pode colocar 5000`,
-`quero 3 dias antes`, `deixa 5000`, `bota 3000`, `queria 5 mil`, `coloca 3
-dias`, `poe dia 10`, `pode por dia 10`).
+A TERCEIRA PORTA da mesma classe: SUFIXO e PREFIXO VERBAL (#323). O controle N
+desta série media o `_VERBO_CONVERSACIONAL`, REMOVIDO na rodada 9 por ser código
+morto — quem cobre a categoria hoje é o controle S.
 
 CONTROLE NEGATIVO O — apague o `while ... in _CORTESIA_FINAL` do
 `_leituras_da_resposta`: 12 vermelhos no
@@ -211,26 +198,46 @@ tentadora ("é a mesma coisa das duas pontas"). 5 vermelhos em
 `nubank excluir` PAGANDO R$ 300 — um comando de EXCLUIR virando pagamento. As
 duas pontas não correm o mesmo risco, e é isso que o conjunto pequeno protege.
 
-RESÍDUO CONHECIDO, medido e não consertado: um cartão chamado exatamente como
-um comando (`Conta`) ainda perde a resposta `conta` sozinha — mas pela OUTRA
-porta, a allowlist (`classify("conta")` = `balance.check`/1.0), não pelo portão.
-`a conta` e `minha conta` funcionam. Fechar isso exigiria a allowlist consultar
-os nomes de cartão do usuário antes de decidir, que é outro assunto.
+A QUARTA porta da mesma classe, e a primeira que virou BUG DE DINHEIRO NOSSO
+(Codex no #323, `5be9a6a`). Três controles:
 
-E o segundo, do `greeting`: ele NÃO é mundo fechado (4 regexes com `re.search`
-ancorados só no começo), então `opa 5000` e `oi, a do nubank` abandonam mesmo
-sendo respostas legítimas. Fixado em
-`test_saudacao_seguida_de_resposta_legitima_abandona_sem_escrever`, que assere o
-que importa: a direção é fail-safe — avisa e não escreve.
+CONTROLE NEGATIVO Q — apare o sufixo de cortesia ANTES de gerar os prefixos
+(`for fim in {sem_cortesia}` no lugar do `range`): 3 vermelhos em
+`test_pay_bill_choice_paga_o_cartao_especifico_nao_o_generico`. O que eles
+medem é `a do nubank pf` PAGANDO A FATURA DO `Nubank` com o `Nubank PF`
+cadastrado — cartão errado, R$ 300 no lugar de R$ 700. `pf` é cortesia E é nome
+de cartão real ("pessoa física").
 
-SAIU DAQUI de propósito: `test_credit_limit_ask_nao_vira_limite_de_50`
-(step=`credit_limit_ask` + `gastei 50 no mercado` grava limite R$ 50,00). Ele
-só passa se `launches.add` estiver no predicado — que é exatamente o que come
-`comprei uma tv`. Era o teste puxando o design para o lado inseguro. O conserto
-certo — o `credit_limit_ask` validar a FORMA antes do `parse_money`, sem tocar
-no `parse_money` — foi feito nesta rodada (`_so_numero`), e o caso voltou como
-`test_portao_de_forma_nao_deixa_numero_de_frase_virar_valor`, agora medindo o
-portão em vez do predicado.
+CONTROLE NEGATIVO R — inverta a ordem do retorno (`key=len` sem `reverse`): os
+MESMOS 3 vermelhos. Gerar as duas leituras não basta; quem resolve o empate
+entre `nubank` e `nubank pf` é a ORDEM, e é por isso que
+`_leituras_da_resposta` devolve lista e não conjunto.
+
+CONTROLE NEGATIVO S — tire a segunda via do `_so_numero` (`return False` no
+lugar do oráculo): 8 vermelhos, as conjugações (`coloque 5000`, `ponha 5000`,
+`deixe 3000`, `bote 3 dias`, `quero que seja dia 10`, `me parece 5000`) e os
+dois casos de `test_custo_do_oraculo_frase_sem_comando_vira_limite`.
+
+POR QUE UNIÃO (tokens OU oráculo) e não só o oráculo — medido, e é o contrário
+do palpite: sozinho, o oráculo QUEBRA 10 respostas legítimas que hoje funcionam
+(`5 mil`, `10 mil`, `3 dias`, `3 dias antes`, `5 de cada mes`, `5000 pila`,
+`5000 pilas`, `5000 contos`, `5000 mangos`, `5 mil reais e 50 centavos`), todas
+`launches.add/0.95`. Trocar tokens POR oráculo reabriria o R3-2 inteiro.
+
+DOIS RESÍDUOS CONHECIDOS, medidos e não consertados, os dois pela porta da
+ALLOWLIST (não pelos portões): (1) cartão chamado como um comando — `Conta`
+perde a resposta `conta` sozinha (`balance.check`/1.0); `a conta` e
+`minha conta` funcionam. (2) `greeting` não é mundo fechado (4 regexes com
+`re.search` ancorados só no começo), então `opa 5000` e `oi, a do nubank`
+abandonam sendo legítimas. O (2) está fixado em
+`test_saudacao_seguida_de_resposta_legitima_abandona_sem_escrever`: a direção é
+fail-safe — avisa e não escreve.
+
+HISTÓRICO: `test_credit_limit_ask_nao_vira_limite_de_50` saiu daqui por só
+passar com `launches.add` no predicado — o que comia `comprei uma tv`, o teste
+puxando o design para o lado inseguro. Voltou como
+`test_portao_de_forma_nao_deixa_numero_de_frase_virar_valor`, medindo o portão
+de FORMA (`_so_numero`) em vez do predicado, sem tocar no `parse_money`.
 """
 from __future__ import annotations
 

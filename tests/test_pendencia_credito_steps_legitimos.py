@@ -206,6 +206,19 @@ _FORMA_LEGITIMA = [
     ("credit_limit_ask", "queria 5 mil", "registrado com sucesso"),
     ("reminder_days", "quero 3 dias antes", "registrado com sucesso"),
     ("reminder_days", "coloca 3 dias", "registrado com sucesso"),
+    # P2-4 (Codex no #323): as CONJUGAÇÕES que a lista de verbos não fechava.
+    # Verbo do português é conjunto ABERTO — enumerar era garantir uma rodada
+    # de revisão por conjugação esquecida. Quem cobre estas é o ORÁCULO
+    # (`classify(..., allow_ai=False) == out_of_scope`), a segunda via do
+    # `_so_numero`; a via de tokens continua cobrindo "5 mil"/"3 dias", que o
+    # classificador lê como `launches.add` e recusaria.
+    ("closing_day", "quero que seja dia 10", "quando vence"),
+    ("credit_limit_ask", "coloque 5000", "registrado com sucesso"),
+    ("credit_limit_ask", "ponha 5000", "registrado com sucesso"),
+    ("credit_limit_ask", "deixe 3000", "registrado com sucesso"),
+    ("credit_limit_ask", "põe 5000", "registrado com sucesso"),
+    ("credit_limit_ask", "me parece 5000", "registrado com sucesso"),
+    ("reminder_days", "bote 3 dias", "registrado com sucesso"),
 ]
 
 
@@ -278,3 +291,28 @@ def test_so_numero_aceita_o_vocabulario_canonico_de_fala(resposta_do_user):
 
 
 # M2: as duas assimetrias que critério nenhum sustentava, e os irmãos delas.
+
+
+# O CUSTO da segunda via do `_so_numero` (o oráculo), fixado em teste para ser
+# VISÍVEL em vez de virar surpresa: frase SEM comando reconhecível mas COM
+# assunto próprio passa a ser aceita e grava o número.
+#
+# É metadado, nunca dinheiro — o `_so_numero` só guarda `closing_day`,
+# `due_day`, `reminder_days` e `credit_limit_ask`. O erro aparece na
+# confirmação e o usuário corrige; o erro oposto (recusar resposta legítima)
+# custou quatro rodadas. Se um dia incomodar, este teste morre e a decisão
+# volta para a mesa em vez de mudar sozinha.
+@pytest.mark.parametrize("frase", ["quero comprar uma tv de 5000",
+                                   "dashboard 5000"])
+def test_custo_do_oraculo_frase_sem_comando_vira_limite(frase):
+    uid = _uid()
+    card_id = _cartao(uid)
+    db.set_pending_action(uid, "credit_card_setup", {
+        "step": "credit_limit_ask", "card_name": "Nubank", "card_id": card_id,
+        "closing_day": 10, "ask_primary": False, "credit_limit_asked": True,
+    })
+
+    _diga(uid, frase)
+
+    assert float(db.list_cards(uid)[0]["credit_limit"]) == 5000.0, \
+        f"{frase!r}: o custo do oráculo mudou — remeça antes de mexer"
