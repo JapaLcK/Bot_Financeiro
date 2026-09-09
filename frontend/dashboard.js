@@ -2764,7 +2764,7 @@ function _renderBudgetRow(b, idx = 0) {
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
   const subColor = b.status === "vermelho" ? "color:var(--red)" : "";
-  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
+  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "var(--green)")}"></span>`;
   let subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
     subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}%, estourou ${_fmtBRL(-b.remaining)}`;
@@ -3245,11 +3245,11 @@ function _renderGoalCard(g, idx = 0) {
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado, pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)">No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
   }
 
   return `
@@ -3814,7 +3814,7 @@ function _renderRecurringRow(r) {
     const delta = r.amount - r.last_amount;
     if (Math.abs(delta) > 0.005) {
       const arrow = delta > 0 ? "↑" : "↓";
-      const color = delta > 0 ? "#fbbf24" : "#22c55e";
+      const color = delta > 0 ? "#fbbf24" : "var(--green)";
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
@@ -4302,7 +4302,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const saidas = totalGastos + totalPend;
   const resultado = entradas - saidas;
   const positivo = resultado >= 0;
-  const resColor = positivo ? "#22c55e" : "var(--red)";
+  const resColor = positivo ? "var(--green)" : "var(--red)";
   const plural = (n) => n === 1 ? "" : "s";
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4339,7 +4339,7 @@ async function loadRecurringOverview({ background = false } = {}) {
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
-          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:var(--green)">${_fmtBRL(resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
@@ -4365,7 +4365,7 @@ async function loadRecurringOverview({ background = false } = {}) {
       </div>
     </div>`;
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard("#22c55e", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "#22c55e",
+    ${statCard("var(--green)", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "var(--green)",
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
     ${statCard("#fb7185", "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), "#fb7185",
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
@@ -4380,7 +4380,7 @@ async function loadRecurringOverview({ background = false } = {}) {
       <div style="width:30px;text-align:center;font-size:1rem">${x.tag}</div>
       <div style="flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtmlSafe(x.name)}</div>
       <div style="font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:20px;background:${b.bg};color:${b.fg}">${b.txt}</div>
-      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? '#22c55e' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
+      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? 'var(--green)' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
     </div>`;
   }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
   const vencCard = `
@@ -4397,7 +4397,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const resumoCard = `
     <div class="mock-card">
       <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
-      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "#22c55e")}
+      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "var(--green)")}
       ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
       ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
       <div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
@@ -4573,7 +4573,7 @@ function _renderBillPaidRow(b) {
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:#22c55e"><i class="ph ph-check" aria-hidden="true"></i></div>
+      <div class="tx-icon" style="color:var(--green)"><i class="ph ph-check" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
@@ -4745,7 +4745,7 @@ function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
   const ok = p.tranquilo;
-  const accent = ok ? "#22c55e" : "var(--red)";
+  const accent = ok ? "var(--green)" : "var(--red)";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
     ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
@@ -4798,7 +4798,7 @@ function _renderForecast(fc) {
   const tile = (dias, p) => {
     if (!p) return "";
     const ok = p.tranquilo;
-    const accent = ok ? "#22c55e" : "var(--red)";
+    const accent = ok ? "var(--green)" : "var(--red)";
     return `
       <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
         <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
@@ -5029,7 +5029,7 @@ function _renderRecurringIncomeView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
+            <div class="tx-icon" style="color:${delta > 0 ? "var(--green)" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -5061,7 +5061,7 @@ function _renderRecurringIncomeRow(r) {
     const delta = r.amount - r.last_amount;
     if (Math.abs(delta) > 0.005) {
       const arrow = delta > 0 ? "↑" : "↓";
-      const color = delta > 0 ? "#22c55e" : "#fbbf24";
+      const color = delta > 0 ? "var(--green)" : "#fbbf24";
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
@@ -5540,6 +5540,7 @@ function renderAnalyticsIncomeExpense(evolution) {
     data: {
       labels,
       datasets: [
+        // Canvas: o Chart.js pinta em bitmap e nao resolve var(--green).
         { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#00F078", borderRadius: 6 },
         // Canvas: o Chart.js pinta em bitmap e nao resolve var(--red).
         { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF2D2D", borderRadius: 6 },
@@ -6301,7 +6302,7 @@ function _historyRowHTML(i) {
   const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
   return `
     <div class="tx-row"${clickable}>
-      <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
+      <div class="tx-icon" style="color:${isReceita ? "var(--green)" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
         <div class="tx-meta">${escapeHtmlSafe(meta.join(" • "))}</div>
@@ -11049,7 +11050,7 @@ function _renderAgentes(data) {
       ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
            title="Receber os avisos deste agente por e-mail"
            style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
-           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
+           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "var(--green)" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
          </button>`
       : "";
     return `

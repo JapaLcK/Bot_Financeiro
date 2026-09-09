@@ -12,6 +12,7 @@
   --green:  #00F078; --neon:   #C6F11A; --red:    #FF5A5A; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
+  --purple-ink: var(--purple);  /* mesmo padrão do --neon-ink: o rosa da marca como TINTA, não como superfície */
   --text:   rgba(255,255,255,0.92);
   /* Piso AA (4,5:1) sobre as duas superfícies reais, página #111 e card #222.
      --text-3 estava em .28 → 2,48:1, e é o token oficial de rótulo discreto:
@@ -39,32 +40,27 @@ body.light {
      como o --neon-ink logo abaixo já faz: mesma função, mesma identidade. */
   --green:  #067647;
   --red:    #C81E1E;
+  --blue:   #A32D6B;   /* #FF80B8 dava 2,18:1 no claro, e é cor de texto em 9 regras (aporte, investimento) */
+  --purple-ink: #C7186B;  /* o #FF2D8E como texto dá 3,49:1 sobre branco; SUPERFÍCIE segue --purple */
   --div:    rgba(15,23,42,0.08);
   --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
   --orb-opacity: .12;
 }
 
-/* Estas duas superfícies seguem ESCURAS no tema claro — a `.modal`
-   (`rgba(14,16,30,.94)`) e o `#piggy-panel` (gradiente #1a1d2a→#14161e) não
-   têm par `body.light`, ao contrário da `.user-dropdown` (:103) e da
-   `.period-pill option` (:497), que viram brancas. Tinta clara ali dentro
-   seria cinza-ardósia sobre quase-preto, então elas mantêm a rampa escura.
-   O `color` explícito não é decoração: redefinir a custom property só alcança
-   quem DECLARA `color:var(--text*)`. Quem não declara — `.modal h3` (:1638),
-   `.receipt-cell .v` (:1847) — herda o valor JÁ COMPUTADO do `body`, e custom
-   property não reescreve herança. Sem esta linha os 18 títulos de modal ficam
-   em #0f172a sobre #141623, ou seja 1,01:1: invisíveis. É o buraco que o
-   comentário da `.cl-row` registrava, e é ele que fecha aqui. */
-body.light .modal,
-body.light #piggy-panel {
-  color: var(--text);
-  --text:   rgba(255,255,255,0.92);
-  --text-2: rgba(255,255,255,0.66);
-  --text-3: rgba(255,255,255,0.50);
-  --green:  #00F078;
-  --red:    #FF5A5A;
-  --neon-ink: var(--neon);
-}
+/* O modal era a única superfície grande que continuava ESCURA no tema claro —
+   `rgba(14,16,30,.94)` com e sem `body.light` — e o `CLAUDE.md` da `.cl-row` já
+   registrava isso como "um buraco pré-existente e geral": `--text` virava
+   #0f172a dentro dele, deixando os 18 títulos de modal a 1,01:1.
+   A saída NÃO é pintar a tinta de branco. Tentei, e a cada rodada aparecia
+   outro filho com fundo próprio CLARO — `.user-dropdown`, `.period-pill
+   option`, depois `.hbtn` e `.mock-cta.outline`, este último a 1,00:1 no hover.
+   São uma FAMÍLIA inteira de regras `body.light X { background: claro }`
+   (:85-105, :141, :499, :645, :1423…), e qualquer uma delas pode aparecer
+   dentro de um modal hoje ou amanhã: consertar por instância é enxugar gelo.
+   O modal passa a ser claro no tema claro. Aí não há tinta branca em lugar
+   nenhum, os filhos de fundo claro funcionam sozinhos e os tokens normais
+   valem. Nenhuma regra escopada em modal escreve branco na mão (conferido). */
+body.light .modal { background:#fff; }
 
 html { scroll-behavior: smooth; }
 body {
@@ -973,6 +969,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   background:rgba(255,45,45,.12);
   color:#fecaca;
 }
+/* #fecaca é tinta de fundo escuro: 1,22:1 sobre o menu branco do tema claro. */
+body.light .user-menu-link.danger { color:var(--red); }
 .user-menu-link.danger:hover {
   background:rgba(255,45,45,.2);
   color:#fff1f2;
@@ -1042,7 +1040,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-stat .ov-ico {
   position:absolute; top:16px; right:16px; width:34px; height:34px; border-radius:10px;
   display:grid; place-items:center;
-  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple);
+  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple-ink);
 }
 .ov-stat .ov-ico.neon { background:rgba(198,241,26,.12); border-color:rgba(198,241,26,.28); color:var(--neon); }
 .ov-stat .ov-ico svg { width:18px; height:18px; }
@@ -1052,7 +1050,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-delta { font-size:.74rem; font-weight:600; color:var(--text-3); font-variant-numeric:tabular-nums; }
 .ov-delta.up { color:var(--green); } .ov-delta.down { color:var(--red); }
 .ov-adjust-lnk { background:none; border:none; padding:0; cursor:pointer; font:inherit;
-  font-weight:700; color:var(--purple); text-decoration:underline; text-underline-offset:2px; }
+  font-weight:700; color:var(--purple-ink); text-decoration:underline; text-underline-offset:2px; }
 .ov-adjust-lnk:hover { color:var(--pink, var(--purple)); }
 
 .ov-section-lbl { font-size:.67rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
@@ -1105,7 +1103,7 @@ body.light .hbtn.hbtn-pink:hover {
 .ov-cc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ov-cc-status { flex-shrink:0; font-size:.6rem; font-weight:700; text-transform:uppercase;
   letter-spacing:.04em; padding:3px 8px; border-radius:999px; }
-.ov-cc-status.s-open  { background:rgba(255,45,142,.16); color:var(--purple); }
+.ov-cc-status.s-open  { background:rgba(255,45,142,.16); color:var(--purple-ink); }
 .ov-cc-status.s-paid  { background:rgba(0,240,120,.16);  color:var(--green); }
 .ov-cc-status.s-due   { background:rgba(255,45,45,.16);  color:var(--red); }
 .ov-cc-status.s-empty { background:rgba(255,255,255,.06); color:var(--text-3); }
@@ -1140,7 +1138,7 @@ body.light .hbtn.hbtn-pink:hover {
 .row:last-child { border-bottom:none; }
 .row .lbl { color:var(--text-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:10px; }
 .row .val { font-weight:600;color:var(--text);white-space:nowrap; }
-.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple)}
+.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple-ink)}
 
 .mrow { display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--div); }
 .mrow:last-child { border-bottom:none; }
@@ -1175,7 +1173,7 @@ body.light .hbtn.hbtn-pink:hover {
 .tag.saida,.tag.despesa   { background:rgba(255,45,45,.14);color:var(--red);  border:1px solid rgba(255,45,45,.22); }
 .tag.entrada,.tag.receita { background:rgba(0,240,120,.12); color:var(--green);border:1px solid rgba(0,240,120,.2); }
 .tag.investimento         { background:rgba(255,128,184,.12); color:var(--blue); border:1px solid rgba(255,128,184,.2); }
-.tag.credito              { background:rgba(255,45,142,.14); color:var(--purple);border:1px solid rgba(255,45,142,.28); }
+.tag.credito              { background:rgba(255,45,142,.14); color:var(--purple-ink);border:1px solid rgba(255,45,142,.28); }
 .tag.deposito_caixinha,
 .tag.saque_caixinha,
 .tag.aporte_investimento,
@@ -1317,7 +1315,7 @@ body.light .hbtn.hbtn-pink:hover {
 .filter-tabs { display:flex;gap:6px;flex-wrap:wrap; }
 .ftab { background:rgba(255,255,255,.06);border:1px solid var(--glass-border);color:var(--text-2);
   padding:5px 12px;border-radius:8px;font-size:.74rem;cursor:pointer;transition:all .2s;white-space:nowrap; }
-.ftab.active { background:rgba(255,45,142,.18);border-color:rgba(255,45,142,.4);color:var(--purple); }
+.ftab.active { background:rgba(255,45,142,.18);border-color:rgba(255,45,142,.4);color:var(--purple-ink); }
 .ftab:hover:not(.active) { background:rgba(255,255,255,.1);color:var(--text); }
 
 /* ─── Dashboard tabs ────────────────────────────────────────────────── */
@@ -1760,6 +1758,12 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .tipo-opt.active.credito { background:rgba(255,45,142,.16);border-color:rgba(255,45,142,.45);color:#ddd6fe; }
 .tipo-opt.active.aporte    { background:rgba(0,240,120,.14);border-color:rgba(0,240,120,.45);color:#a7f3d0; }
 .tipo-opt.active.resgate   { background:rgba(255,45,45,.14);border-color:rgba(255,45,45,.45);color:#fecaca; }
+/* #fecaca e #a7f3d0 são tintas para fundo ESCURO: davam 1,18:1 depois que o
+   modal passou a ser claro. Sobre fundo claro quem serve é o token. */
+body.light .tipo-opt.active.despesa,
+body.light .tipo-opt.active.resgate { color:var(--red); }
+body.light .tipo-opt.active.receita,
+body.light .tipo-opt.active.aporte  { color:var(--green); }
 .tipo-opt.active.novo-inv  { background:rgba(255,128,184,.16);border-color:rgba(255,128,184,.45);color:#bfdbfe; }
 /* Toggle "valor da parcela" vs "valor total" + preview do parcelamento */
 .valor-mode-toggle { display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px; }
@@ -1811,7 +1815,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .bill-opt.selected { background:rgba(255,45,142,.14);border-color:rgba(255,45,142,.45); }
 .bill-opt .b-name { font-size:.85rem;font-weight:650;color:var(--text-1); }
 .bill-opt .b-period { font-size:.7rem;color:var(--text-3); }
-.bill-opt .b-due { font-size:.92rem;font-weight:740;color:var(--purple);font-variant-numeric:tabular-nums; }
+.bill-opt .b-due { font-size:.92rem;font-weight:740;color:var(--purple-ink);font-variant-numeric:tabular-nums; }
 .bill-opt .b-due-sub { font-size:.65rem;color:var(--text-3);font-weight:500; }
 
 .bill-summary {
@@ -1822,7 +1826,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .bill-summary .it { display:flex;flex-direction:column;gap:2px; }
 .bill-summary .it .k { color:var(--text-3);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:650; }
 .bill-summary .it .v { font-weight:700;font-variant-numeric:tabular-nums; }
-.bill-summary .it.due .v { color:var(--purple); }
+.bill-summary .it.due .v { color:var(--purple-ink); }
 
 .bill-tx-list { max-height:38vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:14px; }
 .bill-tx { display:flex;align-items:center;justify-content:space-between;gap:8px;

@@ -46,7 +46,9 @@ html, body { overflow-x: hidden; }
     font-size: .72rem;
   }
   .user-menu { flex: 1 1 100%; } /* “Minha conta” continua em linha própria */
-  .user-menu-btn { min-height: 40px; }
+  /* "Minha conta" é .hbtn como os outros quatro: ficava 4px abaixo do alvo de
+     polegar por estar numa regra separada, oito linhas abaixo. */
+  .user-menu-btn { min-height: 44px; }
 
   /* ── Botão “+ Lançar” vira alvo de polegar: largura total ────────────── */
   .dashboard-tabs { margin: -4px 0 16px; }
