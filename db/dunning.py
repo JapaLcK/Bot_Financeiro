@@ -174,8 +174,11 @@ def lembrete_ainda_vale(user_id: int) -> dict | None:
     pessoa REMOVEU da conta pode não ser mais dela (e-mail de trabalho de um
     emprego que ela deixou é o caso óbvio), o que transforma "entrega velha" em
     divulgação de situação de pagamento a TERCEIRO. Como esta função já lê a
-    linha, o endereço fresco sai de graça na mesma query, e a decriptação passa
-    a ser uma por lembrete enviado em vez de uma por candidato.
+    linha, as duas colunas a mais no `select` não custam query nova — mas o
+    RESTO da mudança não é grátis: a decriptação passou de uma por candidato
+    (em lote, uma escrita de auditoria) para uma por lembrete enviado (uma
+    escrita cada), e acima de M ≈ 6,5 % de N isso custa mais tempo. A troca
+    está medida em `core.services.payment_reminder._resolver_email`.
 
     Devolve o CIFRADO, não o claro: cripto de PII é assunto de `core/crypto` e
     da camada de serviço (`core.services.payment_reminder._resolver_email`),

@@ -304,10 +304,20 @@ endereço que a pessoa tirou da conta pode não ser mais dela (e-mail de trabalh
 de um emprego que ela deixou), e aí mandar "sua cobrança está pendente" é
 divulgar situação de pagamento a TERCEIRO. E a segunda razão de então ("consertar
 poluiria a trilha de auditoria") estava INVERTIDA: `lembrete_ainda_vale` já lia a
-linha, então o endereço fresco saiu de graça e a decriptação passou de uma por
-CANDIDATO para uma por ENVIADO. Medido (2026-09-09): lote = 200 linhas de
-auditoria para 200 candidatos; ponto de envio = 10 linhas para 10 enviados —
-menos PII lida e trilha mais verdadeira, porque o lote registrava acesso ao
+linha, então as colunas de e-mail não custaram query nova e a decriptação
+passou de uma por CANDIDATO para uma por ENVIADO. **É uma TROCA, e o registro
+tem de mostrar os dois lados** (medido em 2026-09-09; remedir antes de reusar):
+
+| desenho | linhas de auditoria | tempo |
+|---|---|---|
+| lote, N=200 candidatos | 200 | 14,1 ms |
+| ponto de envio, M=10 | 10 | 13,1 ms |
+| ponto de envio, M=20 | 20 | 20,9 ms |
+| ponto de envio, M=60 | 60 | 56,9 ms |
+
+Ganha minimização de PII e veracidade da trilha; **paga tempo acima do ponto de
+equilíbrio, que é M ≈ 6,5 % de N**. Vale porque são dezenas de ms dentro do
+executor, uma vez por tick de 24 h — e porque o lote registrava acesso ao
 e-mail de gente que nunca recebeu nada.
 
 **O `LIMIT` fica de fora**, e não por esquecimento: o dano do lote grande era a

@@ -49,11 +49,16 @@ from test_payment_reminder_whatsapp import (  # noqa: F401
 # **A checagem NÃO foi para a query do funil, e isso é o ponto do desenho.** O
 # funil serve os DOIS canais, e quem desligou só o WhatsApp continua com direito
 # ao e-mail de cobrança. Filtrar lá trocaria a violação de consentimento por um
-# erro PIOR (perder aviso legítimo de cobrança). A coluna é SELECIONADA — mesma
-# linha já lida, zero query a mais — e quem decide é o canal.
+# erro PIOR (perder aviso legítimo de cobrança). Quem decide é o CANAL.
+#
+# **Este bloco descrevia a coluna sendo SELECIONADA no funil e passada ao canal
+# "sem query a mais". Aquele desenho não existe mais**: valor de snapshot
+# envelhece, então a rodada seguinte tirou a coluna do funil e pôs a leitura
+# dentro de `_wa_lembrete`, no ponto do envio. Agora HÁ uma query a mais, uma
+# por lembrete enviado, e ela é o preço da frescura — não "de graça".
 #
 # CONTROLE NEGATIVO — em `core/services/payment_reminder_wa.py::_wa_lembrete`,
-# apague o `if wa_opt_out: return False`:
+# apague o `if get_whatsapp_updates_opt_out(user_id): return False`:
 #     VERMELHO: test_opt_out_de_whatsapp_nao_recebe_template
 #     VERDE:    test_sem_opt_out_continua_recebendo (o positivo),
 #               test_opt_out_de_whatsapp_nao_tira_o_email, e todo o resto dos

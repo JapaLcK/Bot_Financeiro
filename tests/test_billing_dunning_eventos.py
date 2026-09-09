@@ -41,7 +41,10 @@ CONTROLES NEGATIVOS DECLARADOS, cada um injetado num caso que estava VERDE:
       VERMELHO: test_R1_corrida_com_invoice_paid_nao_deixa_relogio_orfao.
       VERDE:    R2, R3 e os dois arquivos irmãos do webhook.
   • R2 — no ramo `invoice.paid` do webhook, volte o clear a incondicional
-    (apague o `if _decidiu_acesso:` e desidente as duas linhas):
+    (apague o `if _decidiu_acesso:` e desidente as três linhas da chamada, sem
+    tocar no `nao_mais_novo_que`). Conferido: ele AINDA discrimina — o gate e o
+    predicado da escrita respondem perguntas diferentes, e neste cenário quem
+    recusa é o gate:
       VERMELHO: test_R2_invoice_paid_velho_nao_zera_o_relogio.
       VERDE:    R1, R3 e o T3a do arquivo irmão (o `paid` NORMAL, que é o caso
                 que a injeção NÃO pode reprovar).

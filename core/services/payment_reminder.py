@@ -244,9 +244,11 @@ def _resolver_email(user_id: int, linha: dict) -> str | None:
 
     Substituiu um `_decifrar_lote` que decifrava TODOS os candidatos de uma vez
     dentro de `core.crypto.pii_audit_batch` (uma escrita de auditoria em lote).
-    A troca foi feita para o endereço deixar de vir do snapshot do funil — e
-    ela melhora os três eixos, medido (200 candidatos, `pii_access_log`
-    conferida com `count(*)`, 2026-09-09; remedir antes de reusar):
+    A troca foi feita para o endereço deixar de vir do snapshot do funil, e é
+    uma TROCA e não uma melhoria em tudo: ganha minimização de PII e veracidade
+    da trilha, **paga tempo de execução acima do ponto de equilíbrio**. Medido
+    (200 candidatos, `pii_access_log` conferida com `count(*)`, 2026-09-09;
+    remedir antes de reusar):
 
         lote,  N=200 candidatos : 14,1 ms, 200 linhas de auditoria
         aqui,  M=10  enviados   : 13,1 ms,  10 linhas
@@ -257,8 +259,19 @@ def _resolver_email(user_id: int, linha: dict) -> str | None:
     VERDADEIRA — o lote registrava acesso ao e-mail de todo candidato, incluindo
     os que a dedupe descartava, que em regime são a maioria (a janela de dedupe
     é de 6 dias e a de elegibilidade de 3, então quem já recebeu continua no
-    funil). O tempo é comparável em M pequeno e maior em M grande, sempre em
-    dezenas de ms, dentro do executor e uma vez por tick de 24 h.
+    funil).
+
+    **O ponto de equilíbrio é M ≈ 6,5 % de N** (0,046 ms por linha em lote
+    contra 0,712 ms solta, medidas na mesma bancada): abaixo dele esta função é
+    mais rápida, acima é mais lenta, e em M = 60 sobre N = 200 custa 4× o tempo
+    do lote. O número está aqui porque é ele que torna "mais lento em M grande"
+    acionável: se algum dia M passar de uns 7 % dos candidatos por tick E os
+    milissegundos passarem a importar, a saída NÃO é voltar a decifrar do
+    snapshot (isso reabre a divulgação a endereço removido) — é decifrar no
+    ponto do envio com as escritas de auditoria agrupadas por outra via, por
+    exemplo um flush explícito ao fim do laço, fora de `pii_audit_batch` pelo
+    motivo do parágrafo seguinte. Enquanto forem dezenas de ms dentro do
+    executor, uma vez por tick de 24 h, não vale complexidade nenhuma.
 
     **Não reintroduza `pii_audit_batch` aqui.** O buffer dele é
     `threading.local()` (`core/crypto.py:74`), não task-local: um `with` aberto
