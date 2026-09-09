@@ -48,6 +48,10 @@ CONTROLES do grupo:
   • positivo: `test_rastro_sem_dono_nao_bloqueia_a_adocao_legitima` prova que a
     guarda nova recusa por DONO, não por "tem rastro" — senão ela mataria
     justamente o usuário que o PR veio destravar.
+  • negativo (janela do handoff): tirar o `and e["created_at"] >= handoff_desde`
+    → `test_reconexao_muito_depois_da_adocao_audita` vermelho (0 eventos da
+    rota), num caso VERDE hoje; o positivo do par é o handoff LEGÍTIMO
+    (`test_webhook_antes_do_navegador_audita_uma_vez_por_conexao`, guards);
 """
 
 from __future__ import annotations
@@ -301,3 +305,46 @@ def test_details_escalar_no_rastro_nao_derruba_o_post(
             c.commit()
         db.disconnect_open_finance_connection(user_id)
         _limpa_item("z-escalar")
+
+
+def test_reconexao_muito_depois_da_adocao_audita(
+        user_id, monkeypatch, eventos, webhook_pluggy):
+    """Adotado pelo webhook, navegador NUNCA postou: o registry fica sem
+    `pluggy_item` PARA SEMPRE, e toda reconexão futura cai no predicado. Sem
+    correlação de TEMPO, a de dias depois consumia a auditoria histórica como
+    duplicata da adoção de agora: a 1ª reconexão real sumia do log (Codex #313).
+
+    O relógio não é tocado: quem anda é o `created_at` do evento, 2 dias para
+    trás contra uma janela de 1h — sem borda, sem flake. O evento velho continua
+    DENTRO dos 50 últimos: o que discrimina é a janela, não o limite da consulta.
+    """
+    from core.audit import AuditEvent, list_audit_events
+
+    _mock_item(monkeypatch, user_id)
+    client = TestClient(dashboard.app)
+    try:
+        assert _webhook(client, "item/created", "z-tarde").status_code == 200
+        assert [r["origin"] for r in _registry("z-tarde")] == ["webhook_adopt"], \
+            "pré-condição: adotou e o navegador nunca postou (sem `pluggy_item`)"
+        with get_conn() as c:
+            c.execute("update audit_events set created_at = now() - interval '2 days' "
+                      "where user_id = %s and event = %s",
+                      (user_id, AuditEvent.OPEN_FINANCE_CONNECTED))
+            c.commit()
+
+        r = client.post(f"/open-finance/{user_id}/pluggy-item",
+                        json={"item": {"id": "z-tarde"}}, headers=_auth(client, user_id))
+        assert r.status_code == 200, r.text
+
+        da_rota = [e for e in list_audit_events(user_id, limit=50)
+                   if e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
+                   and isinstance(e.get("details"), dict)
+                   and e["details"].get("item_id") == "z-tarde"
+                   and e["details"].get("origin") != "webhook_adopt"]
+        assert len(da_rota) == 1, (
+            f"{len(da_rota)} eventos da rota: a 1ª reconexão real sumiu de "
+            "'Atividade da conta' — a auditoria de 2 dias atrás foi lida como "
+            "duplicata DESTE POST")
+    finally:
+        db.disconnect_open_finance_connection(user_id)
+        _limpa_item("z-tarde")

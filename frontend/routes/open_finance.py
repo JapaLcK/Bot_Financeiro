@@ -17,6 +17,7 @@ import math
 import os
 import random
 import time
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
@@ -1328,6 +1329,13 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
     }
 
 
+# Por quanto tempo, depois da adoção pelo webhook, o `POST /pluggy-item` ainda é
+# o HANDOFF dela — e não uma reconexão nova. `item/created` chega com o widget
+# aberto e o `onSuccess` vem em seguida: o vão real é de segundos. Uma hora é
+# folga, não alvo, e fora dela o desfecho é AUDITAR — o lado barato do erro.
+JANELA_HANDOFF_WEBHOOK = timedelta(hours=1)
+
+
 @router.post("/open-finance/{user_id}/pluggy-item")
 async def open_finance_pluggy_item_route(request: Request, user_id: int, payload: OpenFinancePluggyItemPayload):
     """Registra o item que o widget da Pluggy acabou de criar.
@@ -1418,11 +1426,20 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         # POST fica 500 PERMANENTE para aquele usuário. Nenhum escritor de hoje
         # grava assim (os dois passam dict, e `Jsonb(details or {})` normaliza o
         # `None`) — é fronteira de dado vindo do banco, custa uma linha.
+        # `created_at` (já vem no SELECT de `list_audit_events`) porque item+origem
+        # NÃO correlaciona a evidência com ESTE POST: item adotado cujo navegador
+        # nunca postou fica sem `pluggy_item` no registry PARA SEMPRE, e a
+        # reconexão de dias depois consumia a auditoria histórica como se fosse a
+        # duplicata da adoção de agora — a 1ª reconexão real sumia do log de
+        # segurança (Codex #313, P2, 2ª rodada). A janela é a duração do próprio
+        # handoff: sem coluna nova, sem marcador consumível, sem estado novo.
+        handoff_desde = datetime.now(timezone.utc) - JANELA_HANDOFF_WEBHOOK
         conexao_recem_adotada = any(
             e["event"] == AuditEvent.OPEN_FINANCE_CONNECTED
             and isinstance(e.get("details"), dict)
             and e["details"].get("item_id") == new_item_id
             and e["details"].get("origin") == "webhook_adopt"
+            and e["created_at"] >= handoff_desde
             for e in await asyncio.to_thread(list_audit_events, session_uid, 50)
         )
 
@@ -1450,11 +1467,13 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     # fechados pela mesma coisa — marcar a adoção na PRÓPRIA conexão (coluna
     # nova + migração), que é o custo que nenhum dos dois paga hoje:
     #   1. item adotado pelo webhook cujo navegador NUNCA postou (aba fechada):
-    #      a 1ª reconexão cai como duplicata e não audita — mas só ENQUANTO a
-    #      auditoria do webhook estiver nos 50 últimos eventos do usuário
-    #      (`min(limit, 50)` do `list_audit_events`). Com mais de 50 eventos no
-    #      meio, a evidência sai da janela e a 1ª reconexão audita. Da 2ª em
-    #      diante audita sempre: aí o registry já tem `pluggy_item`.
+    #      uma reconexão que caia DENTRO da `JANELA_HANDOFF_WEBHOOK` contada da
+    #      adoção não audita. Fora da janela audita, e da 2ª em diante audita
+    #      sempre: aí o registry já tem `pluggy_item`. O teto é UM evento, e só
+    #      para quem reconecta o mesmo item na mesma hora em que ele foi adotado.
+    #      O limite de 50 eventos do `list_audit_events` só ENCOLHE a supressão
+    #      (evidência fora dos 50 = audita), então quem define este teto é o
+    #      tempo, não o histórico do usuário.
     #   2. a janela invertida, que é DUPLICATA e não buraco: `_adota_item_orfao`
     #      commita a conexão e só depois grava o `record_audit_event` do webhook.
     #      Um `POST /pluggy-item` que caia nesse vão vê a conexão de pé e a
