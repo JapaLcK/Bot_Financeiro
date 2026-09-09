@@ -61,9 +61,12 @@ def _conta(tabela: str) -> int:
 
 
 def _existe(user_id: int) -> bool:
-    # SELECT local de propósito: importar o `_user_existe` do script faria o
-    # teste morrer de ImportError antes de chegar na asserção que interessa —
-    # e ImportError não prova nada sobre escrita no banco.
+    # SELECT local de propósito, e o motivo é ORÁCULO INDEPENDENTE, não import: a
+    # checagem do script é hoje `db.user_exists` (CLAUDE.md §0.7 — era uma cópia
+    # byte a byte dela), e é justamente o que este teste exercita. Perguntar
+    # "existe?" com a mesma função sob teste tornaria a asserção circular: se
+    # `user_exists` passasse a responder False sempre, o `assert not _existe(...)`
+    # continuaria verde enquanto a linha em `users` ESTIVESSE lá.
     import db
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("select 1 from users where id=%s", (user_id,))

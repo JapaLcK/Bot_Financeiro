@@ -31,6 +31,27 @@ def ensure_user(user_id: int):
         conn.commit()
 
 
+def user_exists(user_id: int) -> bool:
+    """A conta existe? Pergunta para quem NÃO pode criá-la ao consultar.
+
+    Nasceu do webhook da Pluggy (`_adota_item_orfao`): lá o dono vem do
+    `clientUserId` remoto, e todo caminho de escrita passa por `ensure_user_tx`,
+    que INSERE a linha em vez de recusar. Conta apagada por LGPD
+    (`db/privacy.py`) cujo item sobreviveu ao delete best-effort voltava a
+    existir no banco por causa de um evento da Pluggy.
+
+    LIMITE CONHECIDO: responde True durante a janela da exclusão AGENDADA
+    (`auth_accounts.deletion_status in ('scheduled','processing')`) — a linha de
+    `users` só some no fim. Fechar isso é join com `auth_accounts`, outra tabela,
+    dentro do que hoje é um `select 1 from users`; não vale o custo aqui: nessa
+    janela a conta ainda EXISTE, e a exclusão, quando roda, leva a conexão junto.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select 1 from users where id = %s", (user_id,))
+            return cur.fetchone() is not None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Merge de usuários (vinculação Discord ↔ WhatsApp)
 # ──────────────────────────────────────────────────────────────────────────────
