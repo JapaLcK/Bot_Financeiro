@@ -969,24 +969,55 @@ function _renderCardItem(c, idx = 0) {
   `;
 }
 
+// ── Pickers de swatch (cartão, categoria, meta) ───────────────────────
+/**
+ * Re-renderiza um picker e devolve o foco ao botão que ficou selecionado.
+ *
+ * Os cinco `_set*`/`_pick*` refazem o `innerHTML` inteiro do contêiner, e um
+ * `<button>` que sai do DOM leva o foco junto para o `<body>`. Medido antes deste
+ * helper: clicar num swatch levava `document.activeElement` de
+ * `BUTTON.sw-opt.sw-color` para `BODY.has-sidenav`. O efeito é duplo e é por isso
+ * que ele existe — sem foco no nó novo, o leitor de tela não anuncia a mudança de
+ * `aria-pressed` (o atributo vira num elemento que ninguém está observando), e o
+ * usuário de teclado é jogado para o começo do documento no meio de 30 botões.
+ * A guarda `tinhaFoco` NÃO separa mouse de teclado — o clique foca o botão antes
+ * do `onclick`, então ela é verdadeira nos dois e a restauração acontece nos dois.
+ * Medido nesta árvore, com `page.click()` e com `Enter` reais:
+ *   mouse ...... foco volta ao selecionado, `:focus-visible` false, `outline none`
+ *   teclado .... foco volta ao selecionado, `:focus-visible` true,  `outline auto 1px`
+ *   foco fora .. com o cursor em `#card-edit-name`, o foco FICA lá (guarda pega)
+ * Ou seja: quem decide se o anel de foco aparece é o `:focus-visible`, não esta
+ * função; ela só garante que o foco não caia no `<body>`. A guarda existe para o
+ * terceiro caso — um `_set*` chamado com o foco em outro lugar não rouba o cursor
+ * de quem está digitando o nome.
+ */
+function _rerenderPicker(idContainer, render) {
+  const tinhaFoco = document.getElementById(idContainer)?.contains(document.activeElement);
+  render();
+  if (tinhaFoco) document.getElementById(idContainer)?.querySelector(".selected")?.focus();
+}
+
 // ── Modal cadastrar/editar cartão ─────────────────────────────────────
 function _renderCardColorPicker(selected) {
   const wrap = document.getElementById("card-edit-colors");
   if (!wrap) return;
+  // `sample` é um GRADIENTE, então o dado vai em `background-image` (não em
+  // `background-color`, que o rejeitaria, nem no shorthand `background`, que
+  // resseta o `background-clip:padding-box` de que o anel de seleção depende).
+  // Geometria, borda e anel moram em `.sw-opt`/`.sw-card` no dashboard.css.
   wrap.innerHTML = CARD_COLOR_OPTIONS.map(opt => `
-    <button type="button" data-color="${opt.key}"
-      title="${opt.label}"
+    <button type="button" class="sw-opt sw-card${opt.key === selected ? " selected" : ""}"
+      data-color="${opt.key}"
+      title="${opt.label}" aria-label="${opt.label}" aria-pressed="${opt.key === selected}"
       onclick="_pickCardColor('${opt.key}')"
-      style="width:44px;height:30px;border-radius:8px;border:2px solid ${opt.key === selected ? "#fff" : "transparent"};
-             background:${opt.sample};cursor:pointer;
-             box-shadow:${opt.key === selected ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"
+      style="background-image:${opt.sample}"
     ></button>
   `).join("");
 }
 
 function _pickCardColor(key) {
   _cardEditState.color = key;
-  _renderCardColorPicker(key);
+  _rerenderPicker("card-edit-colors", () => _renderCardColorPicker(key));
 }
 
 function openCardEditModal(card) {
@@ -2484,25 +2515,46 @@ function _ensureCategoryModal() {
 function _renderCategoryPickers() {
   const ePick = document.getElementById("cat-emoji-picker");
   const cPick = document.getElementById("cat-color-picker");
+  // `aria-label` com o PRÓPRIO emoji: o `phIcon` devolve um `<i>` `aria-hidden`,
+  // então sem isto o botão não tem nome acessível nenhum e o `aria-pressed`
+  // decora um controle anônimo. O caractere é lido pelo nome nativo do leitor de
+  // tela, no idioma do usuário — não inventa uma segunda fonte de verdade.
   ePick.innerHTML = CATEGORY_EMOJI_OPTIONS.map(e => {
     const sel = e === _catEditState.emoji;
-    return `<button type="button" onclick="_setCatEmoji('${e}')"
-      style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
+    return `<button type="button" class="sw-opt sw-emoji${sel ? " selected" : ""}"
+      aria-label="${e}" aria-pressed="${sel}" onclick="_setCatEmoji('${e}')">${phIcon(e)}</button>`;
   }).join("");
-  cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map(c => {
+  // Swatch de cor não tem nome natural: ler "#FF2D8E" em voz alta não ajuda, e
+  // batizar 15 hexadecimais criaria uma 2ª fonte de verdade (§0.7). A posição é o
+  // que o usuário consegue usar para navegar e conferir o que está pressionado.
+  //
+  // INCONSISTÊNCIA ASSUMIDA, e ela é do dado, não do critério: os 6 swatches do
+  // cartão ganham nome REAL (`aria-label="Rosa"`) porque `CARD_COLOR_OPTIONS` já
+  // carrega um `label`; estes 25 ficam posicionais porque `CATEGORY_COLOR_OPTIONS`
+  // e `GOAL_COLOR_OPTIONS` são listas de hexadecimais crus. O critério é o mesmo
+  // nos três — usar o nome que a fonte de verdade já tem, e não inventar um. O
+  // teto conhecido: com `Cor 7` o usuário de leitor de tela CONFIRMA o que está
+  // pressionado, mas não ESCOLHE por cor. Fechar isso é dar `label` às duas
+  // paletas, e aí o lugar certo é a própria constante.
+  // PENDÊNCIA NOMINAL na mesma vizinhança, pré-existente e fora do escopo deste PR:
+  // `CATEGORY_COLOR_OPTIONS[0..9]` é IGUAL a `GOAL_COLOR_OPTIONS` — duas cópias da
+  // mesma lista de 10 cores (§0.7). É justamente a fonte de verdade única que
+  // faltaria para nomear as cores em um lugar só.
+  cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map((c, i) => {
     const sel = c === _catEditState.color;
-    return `<button type="button" onclick="_setCatColor('${c}')"
-      style="width:32px;height:32px;border-radius:8px;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
+    return `<button type="button" class="sw-opt sw-color${sel ? " selected" : ""}"
+      aria-label="Cor ${i + 1}" aria-pressed="${sel}" onclick="_setCatColor('${c}')"
+      style="background-color:${c}"></button>`;
   }).join("");
 }
-function _setCatEmoji(e) { _catEditState.emoji = e; _renderCategoryPickers(); }
-function _setCatColor(c) { _catEditState.color = c; _renderCategoryPickers(); }
+function _setCatEmoji(e) {
+  _catEditState.emoji = e;
+  _rerenderPicker("cat-emoji-picker", _renderCategoryPickers);
+}
+function _setCatColor(c) {
+  _catEditState.color = c;
+  _rerenderPicker("cat-color-picker", _renderCategoryPickers);
+}
 
 function openCategoryEditModal(category) {
   _ensureCategoryModal();
@@ -3360,25 +3412,27 @@ function _ensureGoalModal() {
 function _renderGoalPickers() {
   const ePick = document.getElementById("goal-emoji-picker");
   const cPick = document.getElementById("goal-color-picker");
+  // Nomes acessíveis pelo mesmo critério do picker de categoria, acima.
   ePick.innerHTML = GOAL_EMOJI_OPTIONS.map(e => {
     const sel = e === _goalEditState.emoji;
-    return `<button type="button" onclick="_setGoalEmoji('${e}')"
-      style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
+    return `<button type="button" class="sw-opt sw-emoji${sel ? " selected" : ""}"
+      aria-label="${e}" aria-pressed="${sel}" onclick="_setGoalEmoji('${e}')">${phIcon(e)}</button>`;
   }).join("");
-  cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
+  cPick.innerHTML = GOAL_COLOR_OPTIONS.map((c, i) => {
     const sel = c === _goalEditState.color;
-    return `<button type="button" onclick="_setGoalColor('${c}')"
-      style="width:32px;height:32px;border-radius:8px;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
+    return `<button type="button" class="sw-opt sw-color${sel ? " selected" : ""}"
+      aria-label="Cor ${i + 1}" aria-pressed="${sel}" onclick="_setGoalColor('${c}')"
+      style="background-color:${c}"></button>`;
   }).join("");
 }
-function _setGoalEmoji(e) { _goalEditState.emoji = e; _renderGoalPickers(); }
-function _setGoalColor(c) { _goalEditState.color = c; _renderGoalPickers(); }
+function _setGoalEmoji(e) {
+  _goalEditState.emoji = e;
+  _rerenderPicker("goal-emoji-picker", _renderGoalPickers);
+}
+function _setGoalColor(c) {
+  _goalEditState.color = c;
+  _rerenderPicker("goal-color-picker", _renderGoalPickers);
+}
 
 function syncGoalInterestConfig() {
   const enabled = document.getElementById("goal-interest-enabled")?.checked ?? true;

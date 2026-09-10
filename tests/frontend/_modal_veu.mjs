@@ -44,7 +44,24 @@ export const MARGEM = 1.6;
 
 /* ── Fonte C: markup que só existe dentro do dashboard.js ────────────────────
    `class="modal` casa 18 vezes no arquivo, e NOVE delas são `class="modal-acts`
-   — a contagem crua mente; o teste trava o 9 abaixo. */
+   — a contagem crua mente; o teste trava o 18 (9 × 2 ramos) abaixo. */
+
+/* Resolve `${ cond ? "literal" : "literal" }` escolhendo UM ramo, antes do
+   `achatar()`. Sem isto o ramo perdia duas coisas de uma vez:
+     - o VALOR: `border:2px solid ${sel ? "#fff" : "transparent"}` chegava ao DOM
+       como `border:2px solid  ` (declaração inválida, descartada) e os 6 botões
+       dos três pickers eram medidos SEM véu nenhum;
+     - a CLASSE: `class="bill-opt${cond ? ' selected' : ''}"` perdia o token
+       `selected` no `limparClasses` (o token vinha com aspa), então
+       `.bill-opt.selected` NUNCA foi medido.
+   DOIS passes, não 2ⁿ: cada elemento é medido isoladamente contra a superfície
+   do modal ancestral, então combinação mista de ramos não muda nenhuma leitura.
+   `[^?{}]*?` na condição limita a UM nível — ternário aninhado não resolve e
+   cai no `achatar()` como antes, que é o comportamento anterior, não uma piora. */
+const TERN = /\$\{\s*[^?{}]*?\?\s*(["'])((?:(?!\1)[^\\])*)\1\s*:\s*(["'])((?:(?!\3)[^\\])*)\3\s*\}/g;
+export const ramificar = (src, verdadeiro) =>
+  src.replace(TERN, (_, q1, a, q2, b) => (verdadeiro ? a : b));
+
 function achatar(s) {
   // Achata template literal: tira as CRASES e os delimitadores `${` `}`,
   // guardando o conteúdo dos DOIS lados. A 1ª versão removia o `${…}` inteiro
@@ -91,7 +108,7 @@ function blocos(src, pos, limite) {
 }
 
 /**
- * Devolve `{ raizes, alvos }`:
+ * Devolve `{ raizes, alvos }` para UM ramo de ternário (ver `ramificar`):
  *  - `raizes`: os 9 `<div class="modal …">` inteiros do dashboard.js;
  *  - `alvos`: id do contêiner -> markup que ele recebe.
  * Três resoluções, cada uma paga por uma cobertura que faltou:
@@ -113,25 +130,37 @@ function blocos(src, pos, limite) {
  * neste corte: `.bill-opt`, `.cl-row`, `.bar-icon`, `.bill-tx`, `.detail-cell`
  * e `.pkt-hist-row`, todas presentes.
  */
-function fonteJs() {
-  const plano = achatar(readFileSync(join(FRONTEND, "dashboard.js"), "utf8"));
+function fonteJs(ramo) {
+  const plano = achatar(ramificar(readFileSync(join(FRONTEND, "dashboard.js"), "utf8"), ramo));
   const raizes = [];
   for (const m of plano.matchAll(/<div class="modal[ "]/g)) {
     const b = blocos(plano, m.index, 40000);
     if (b.length) raizes.push(limparClasses(b[0]));
   }
-  const varId = new Map();
-  for (const m of plano.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*document\.getElementById\(["']([\w-]+)["']\)/g))
-    varId.set(m[1], m[2]);
+  // `wrap`, `ePick` e `cPick` são declarados VÁRIAS vezes no arquivo, cada uma
+  // apontando para um id diferente. Um `Map` nome -> id guardava só a ÚLTIMA, e o
+  // efeito não era perder um pouco de cobertura: era atribuir markup ao contêiner
+  // ERRADO. `wrap` resolvia para `#launches-wrap` (:7797), então o picker de cor
+  // do cartão (`#card-edit-colors`, :974) caía fora de modal e era descartado; e
+  // `ePick`/`cPick` resolviam para os pickers da META (:3361-3362), então os da
+  // CATEGORIA (:2485-2486) nunca entravam no DOM medido. Dos três pickers, um só
+  // era medido. Resolve pela declaração mais próxima ANTES do uso.
+  const decls = [...plano.matchAll(
+    /(?:const|let|var)\s+(\w+)\s*=\s*document\.getElementById\(["']([\w-]+)["']\)/g)]
+    .map((m) => ({ nome: m[1], id: m[2], pos: m.index }));
+  const varId = (nome, pos) => decls.filter((d) => d.nome === nome && d.pos < pos).at(-1)?.id;
   const fnHtml = new Map();
   for (const m of plano.matchAll(/function\s+(\w+)\s*\([^)]*\)\s*\{/g)) {
-    const h = blocos(plano, m.index, 4000).filter((x) => /class="/.test(x)).join("");
+    // `style="` entra ao lado de `class="`: markup SÓ com estilo inline era
+    // descartado em silêncio aqui, e os botões dos três pickers de emoji/cor não
+    // têm classe nenhuma — foi por isso que o véu branco deles nunca foi medido.
+    const h = blocos(plano, m.index, 4000).filter((x) => /class="|style="/.test(x)).join("");
     if (h) fnHtml.set(m[1], h);
   }
   const alvos = new Map();
   const ALVO = /(?:document\.getElementById\(["']([\w-]+)["']\)|\b(\w+))\s*\.(?:innerHTML\s*\+?=|insertAdjacentHTML\s*\()\s*/g;
   for (const m of plano.matchAll(ALVO)) {
-    const id = m[1] || varId.get(m[2]);
+    const id = m[1] || varId(m[2], m.index);
     if (!id) continue;
     const ini = m.index + m[0].length;
     // A janela termina no PRÓXIMO alvo de id DIFERENTE (teto de 6 KB). Cortar
@@ -143,12 +172,12 @@ function fonteJs() {
     { const re = new RegExp(ALVO.source, "g"); re.lastIndex = ini;
       let n;
       while ((n = re.exec(plano))) {
-        const outro = n[1] || varId.get(n[2]);
+        const outro = n[1] || varId(n[2], n.index);
         if (!outro || outro === id) continue;
         jan = Math.min(jan, n.index - ini); break;
       } }
     const regiao = plano.slice(ini, ini + jan);
-    let html = blocos(plano, ini, jan).filter((h) => /class="/.test(h)).join("");
+    let html = blocos(plano, ini, jan).filter((h) => /class="|style="/.test(h)).join("");
     for (const c of regiao.slice(0, 300).matchAll(/\b(\w+)\s*\(/g))
       if (fnHtml.has(c[1])) html += fnHtml.get(c[1]);
     html = limparClasses(html);
@@ -156,6 +185,32 @@ function fonteJs() {
     alvos.set(id, (alvos.get(id) || "") + html);
   }
   return { raizes, alvos: [...alvos] };
+}
+
+/**
+ * Valor COMPLETO de cada `style="…"` de um arquivo do frontend, com a linha.
+ * Trata `${ … }` como nível aninhado: o `[^"]*` de um `rg` para na primeira aspa
+ * DENTRO do ternário, então `border:2px solid ${sel ? "#fff" : "transparent"}`
+ * nunca mostrava o `#fff` no match — e o `rg` por LINHA nem casava, porque o
+ * `style="` cai numa linha e o `${` em outra. Foi assim que quatro varreduras
+ * anteriores deram esta categoria como limpa.
+ * Isto é medição ESTÁTICA: prova que o CONSTRUTO não existe, não prova
+ * comportamento. Anda ao lado do ΔE, nunca no lugar dele.
+ */
+export function estilosInline(arquivo) {
+  const src = readFileSync(join(FRONTEND, arquivo), "utf8"), out = [];
+  for (const m of src.matchAll(/style="/g)) {
+    let i = m.index + m[0].length, prof = 0, val = "";
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "$" && src[i + 1] === "{") { prof++; val += "${"; i += 2; continue; }
+      if (c === "}" && prof > 0) { prof--; val += "}"; i++; continue; }
+      if (c === '"' && prof === 0) break;
+      val += c; i++;
+    }
+    out.push({ linha: src.slice(0, m.index).split("\n").length, val });
+  }
+  return out;
 }
 
 const PSEUDO = /:(hover|focus-visible|focus|active)\b/g;
@@ -188,8 +243,14 @@ export async function medir(browser, ORIGIN, { claro, hover, esperar }) {
   await page.addStyleTag({
     content: "*,*::before,*::after{transition:none !important;animation:none !important}" });
 
-  const { raizes, alvos } = fonteJs();
-  assert.equal(raizes.length, 9,
+  // Um passe por RAMO do ternário. A chave do alvo leva o prefixo do ramo para
+  // que os dois sobrevivam no Map (mesmo id nos dois passes) e para o relatório
+  // dizer de qual ramo veio o achado.
+  const [A, B] = [fonteJs(true), fonteJs(false)];
+  const raizes = [...A.raizes, ...B.raizes];
+  const alvos = [...A.alvos.map(([k, v]) => [`T:${k}`, v]),
+                 ...B.alvos.map(([k, v]) => [`F:${k}`, v])];
+  assert.equal(raizes.length, 18,
     "recorte dos modais do dashboard.js mudou — reveja o extrator antes de confiar no verde");
 
   // Montagem e LEITURA em passos separados, para o caso-guarda poder esperar
@@ -202,11 +263,17 @@ export async function medir(browser, ORIGIN, { claro, hover, esperar }) {
     caixa.innerHTML = raizes.join("");
     document.body.append(caixa);
     const ids = [];
-    for (const [id, html] of alvos) {
-      const alvo = document.getElementById(id);
+    for (const [chave, html] of alvos) {
+      const alvo = document.getElementById(chave.slice(2));   // tira o `T:`/`F:`
       if (!alvo?.closest(".modal")) continue;      // só contêiner DENTRO de modal
-      alvo.innerHTML = html;
-      ids.push(id);
+      // Um invólucro por ramo, em vez de `innerHTML =`: o 2º passe sobrescreveria
+      // o 1º, e sem invólucro os dois ramos ficariam IRMÃOS no mesmo pai — o que
+      // move `:last-child`/`:nth-child` (24 seletores estruturais na folha, entre
+      // eles `border-bottom:0`, que é propriedade que este harness mede).
+      const inv = document.createElement("div");
+      inv.innerHTML = html;
+      alvo.append(inv);
+      ids.push(chave);
     }
     if (hover) for (const el of document.querySelectorAll(".modal, .modal *"))
       el.classList.add("pb-force-hover", "pb-force-focus", "pb-force-focus-visible", "pb-force-active");
@@ -234,7 +301,18 @@ export async function medir(browser, ORIGIN, { claro, hover, esperar }) {
                  // caso-guarda de transição: cor de texto é justamente a
                  // categoria das rodadas 1 e 2, e era ela que lia o tema errado.
                  cor: s.color,
-                 border: parseFloat(s.borderTopWidth) > 0 ? s.borderTopColor : null });
+                 border: parseFloat(s.borderTopWidth) > 0 ? s.borderTopColor : null,
+                 // Os TRÊS lados que o `border` acima não vê: ele lê só
+                 // `borderTopColor` e só com `borderTopWidth > 0`, então elemento
+                 // com borda apenas embaixo — e a folha tem — era invisível POR
+                 // CONSTRUÇÃO.
+                 lados: ["Right", "Bottom", "Left"].reduce((o, L) =>
+                   (parseFloat(s[`border${L}Width`]) > 0
+                     ? { ...o, [L]: s[`border${L}Color`] } : o), {}),
+                 // `fill`/`stroke` só existem em SVG: 3ª rodada do Codex, nunca
+                 // teve enumerador nem constava das cegueiras.
+                 svg: el.ownerSVGElement || el.tagName.toLowerCase() === "svg"
+                   ? { fill: s.fill, stroke: s.stroke } : null });
     });
     return out;
   });
@@ -262,3 +340,6 @@ export const lab = ({ r, g, b }) => {
   return { L: 116 * Y - 16, A: 500 * (X - Y), B: 200 * (Y - Z) };
 };
 export const dE = (p, q) => Math.hypot(p.L - q.L, p.A - q.A, p.B - q.B);
+/** Superfície EFETIVA do `.modal` ancestral, e ΔE de uma tinta contra ela. */
+export const sup = (e) => sobre(rgba(e.superficie), rgba(e.pagina));
+export const dSup = (tinta, s) => dE(lab(sobre(tinta, s)), lab(s));
