@@ -13,6 +13,12 @@
   --purple: #FF2D8E; --yellow: #fbbf24;
   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
   --purple-ink: var(--purple);  /* mesmo padrão do --neon-ink: o rosa da marca como TINTA, não como superfície */
+  /* Tinta que vai EM CIMA do rosa da marca. Branco sobre #FF2D8E dá 3,49:1 e os
+     rótulos têm 11-13px; este quase-preto (o mesmo --text do tema claro) dá
+     5,12:1 sem tirar um grau do #FF2D8E, que é identidade visual. Vale nos DOIS
+     temas porque o fundo é o mesmo rosa nos dois — por isso é literal aqui e
+     não `var(--text)`, que inverte por tema. */
+  --on-purple: #0f172a;
   --text:   rgba(255,255,255,0.92);
   /* Piso AA (4,5:1) sobre as duas superfícies reais, página #111 e card #222.
      --text-3 estava em .28 → 2,48:1, e é o token oficial de rótulo discreto:
@@ -1559,9 +1565,9 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 .ov-period-tabs { display:flex; gap:3px; background:rgba(255,255,255,.05); border:1px solid var(--glass-border); border-radius:9px; padding:3px; }
 .ov-period-tabs button { font-size:.72rem; font-weight:600; color:var(--text-3); padding:4px 11px; border-radius:6px; border:none; background:transparent; cursor:pointer; transition:background .15s var(--ease),color .15s var(--ease); }
 .ov-period-tabs button:hover { color:var(--text-2); }
-/* Branco sobre --purple dá 3,49:1 e o rótulo tem 11,5px. O #C7186B é o mesmo
-   rosa escuro da ponta do gradiente do FAB, e leva a 5,57:1. */
-.ov-period-tabs button.on { background:#C7186B; color:#fff; }
+/* O fundo continua sendo o rosa da marca; quem muda é a tinta. Branco aqui dava
+   3,49:1 num rótulo de 11,5px. Ver --on-purple. */
+.ov-period-tabs button.on { background:var(--purple); color:var(--on-purple); }
 body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
@@ -2253,10 +2259,9 @@ html.pb-app #piggy-fab { touch-action: none; }
   font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
   border: 1px solid transparent; font-family: inherit;
 }
-/* Mesmo caso da .ov-period-tabs button.on: rosa chapado com texto branco dá
-   3,49:1. Estas duas eram as únicas regras com --purple sólido sob texto —
-   as demais usam o gradiente, que fecha em #C7186B. */
-.ag-btn-on { background: #C7186B; color: #fff; }
+/* Mesmo caso da .ov-period-tabs button.on: estas duas eram as únicas regras com
+   --purple sólido sob texto. O rosa fica, a tinta escurece. */
+.ag-btn-on { background: var(--purple); color: var(--on-purple); }
 .ag-btn-on:hover { filter: brightness(1.08); }
 .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
