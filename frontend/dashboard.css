@@ -1764,13 +1764,25 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .tipo-opt.active.credito { background:rgba(255,45,142,.16);border-color:rgba(255,45,142,.45);color:#ddd6fe; }
 .tipo-opt.active.aporte    { background:rgba(0,240,120,.14);border-color:rgba(0,240,120,.45);color:#a7f3d0; }
 .tipo-opt.active.resgate   { background:rgba(255,45,45,.14);border-color:rgba(255,45,45,.45);color:#fecaca; }
-/* #fecaca e #a7f3d0 são tintas para fundo ESCURO: davam 1,18:1 depois que o
-   modal passou a ser claro. Sobre fundo claro quem serve é o token. */
+.tipo-opt.active.novo-inv  { background:rgba(255,128,184,.16);border-color:rgba(255,128,184,.45);color:#bfdbfe; }
+
+/* ── Estados de modal: a FAMÍLIA inteira, não uma instância ────────────────
+   #fecaca, #a7f3d0, #ddd6fe e #bfdbfe são tintas pastel para fundo ESCURO.
+   Com o modal branco elas caem para 1,1-1,25:1 sobre o próprio véu de 10-16%.
+   São OITO regras e elas ficam juntas de propósito: consertei quatro numa
+   primeira passada e o revisor achou as outras quatro. Cada uma recebe o token
+   da cor que o véu do fundo já anuncia — vermelho, verde, rosa ou azul. */
 body.light .tipo-opt.active.despesa,
-body.light .tipo-opt.active.resgate { color:var(--red); }
+body.light .tipo-opt.active.resgate,
+body.light .modal-error            { color:var(--red); }
 body.light .tipo-opt.active.receita,
 body.light .tipo-opt.active.aporte  { color:var(--green); }
-.tipo-opt.active.novo-inv  { background:rgba(255,128,184,.16);border-color:rgba(255,128,184,.45);color:#bfdbfe; }
+/* Estes dois têm véu ROSA por fundo, e é o caso do --on-purple: o --purple-ink
+   dá 5,57:1 sobre branco puro mas só 4,47:1 sobre o véu de 16%, num rótulo de
+   11,8px. O véu e a borda já anunciam a cor; a tinta é a da interface. */
+body.light .tipo-opt.active.credito,
+body.light .vmode-opt.active        { color:var(--on-purple); }
+body.light .tipo-opt.active.novo-inv { color:var(--blue); }
 /* Toggle "valor da parcela" vs "valor total" + preview do parcelamento */
 .valor-mode-toggle { display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px; }
 .vmode-opt { background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
