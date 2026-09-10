@@ -184,8 +184,9 @@ function pixApagarDoc() {
 /**
  * Só a FORMA: 11 dígitos (CPF) ou 14 (CNPJ), depois de tirar a pontuação.
  *
- * O dígito verificador NÃO se confere aqui: quem valida documento é o Asaas, e
- * uma segunda cópia da regra recusaria na tela o que o provedor aceita (§0.7).
+ * O dígito verificador NÃO se confere aqui: quem confere o mod-11 é o SERVIDOR,
+ * e uma cópia só da regra é a do §0.7. O Asaas segue sendo a autoridade final —
+ * ele recusa por regras próprias documento estruturalmente válido.
  */
 const pixDigitos = (v) => String(v || "").replace(/\D/g, "");
 const pixFormaOk = (d) => d.length === 11 || d.length === 14;
@@ -293,7 +294,12 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
     }
-    if (!r.ok) return showToast(det.message || "Não consegui gerar o código Pix agora.", "err");
+    // `detail` do FastAPI é STRING quando o raise passa texto (400 do documento) e
+    // OBJETO nos 409 — sem esta linha a mensagem específica virava o genérico.
+    if (!r.ok) {
+      const msg = (typeof det === "string" ? det : det.message);
+      return showToast(msg || "Não consegui gerar o código Pix agora.", "err");
+    }
     pixApagarDoc();          // o QR vai entrar: o documento sai da tela antes
     pixModalQr(d, plano, ctx);
   } catch {
