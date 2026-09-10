@@ -56,8 +56,11 @@ def test_409_de_cobertura_paga_leva_covered_until_em_iso(user_id, monkeypatch):
         raise CoberturaJaPaga("pro_max", ate)
 
     monkeypatch.setattr(rotas, "criar_checkout", _recusa)
+    # O #355 pôs mod-11 no servidor: `12345678901` agora para no 400 do documento
+    # e nunca chega ao `criar_checkout`. Este é o mesmo CPF estruturalmente válido
+    # do test_pix_documento_invalido.py — uma fonte só para o número (§0.7).
     r = client.post("/billing/pix/checkout", headers=_csrf(),
-                    json={"plan": "pro", "cpf_cnpj": "12345678901"})
+                    json={"plan": "pro", "cpf_cnpj": "52998224725"})
     assert r.status_code == 409, r.text
     detalhe = r.json()["detail"]
     assert detalhe["error"] == CoberturaJaPaga.ERRO
