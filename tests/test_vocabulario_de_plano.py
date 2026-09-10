@@ -156,10 +156,12 @@ def test_os_dois_mapas_de_plano_sao_inversos():
     for publico, legado in TIER_TO_STORED_PLAN.items():
         assert _STORED_PLAN_TO_TIER[legado] == publico, (
             f"'{publico}' → '{legado}' → '{_STORED_PLAN_TO_TIER.get(legado)}'")
-        # `tier_publico` é a FUNÇÃO do mesmo mapa, e o que ela prendia era a
-        # cópia local do monólito (`_plan_publico`), que deixou de existir: hoje
-        # o /billing/subscription chama esta mesma função. Quem cobre a rota,
-        # pela rota, é `test_o_consumidor_real_continua_casando` em
+        # NÃO é a repetição da linha acima: aquela prende o DICIONÁRIO, esta
+        # prende a FUNÇÃO. Trocar `tier_publico` pela identidade deixa vermelha
+        # só a segunda — medido. Ela substituiu a asserção sobre a cópia local
+        # do monólito (`_plan_publico`), que deixou de existir: hoje o
+        # /billing/subscription chama esta mesma função. Quem cobre a rota, pela
+        # rota, é `test_o_consumidor_real_continua_casando` em
         # `tests/test_vocabulario_de_plano_nas_saidas.py`.
         assert tier_publico(legado) == publico
     # E todo plano vendável tem preço: um valor sem entrada aqui viraria 503

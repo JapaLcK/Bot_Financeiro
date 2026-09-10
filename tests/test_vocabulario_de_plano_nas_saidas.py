@@ -6,8 +6,12 @@ entra). Arquivo separado, e não mais uma seção lá, porque o teto de 350 linh
 caiu bem: entra × sai são as duas metades da mesma fronteira, e cada uma tem os
 seus controles.
 
-CINCO saídas carregavam o valor LEGADO da coluna, medidas na `main` em
-`b71de69`:
+CINCO saídas DO PIX carregavam o valor LEGADO da coluna, medidas na `main` em
+`b71de69`. **Cinco do Pix, e não cinco no produto**: fora daqui a categoria
+segue ABERTA — `/auth/login`, `/auth/dashboard-profile`, `/auth/mfa/verify-login`
+e `/settings/{id}/security` devolvem `plan` cru, e os `PLAN_ALIASES` de
+`frontend/home.html` e `frontend/nav-auth.js` são o tradutor copiado em JS, sem
+teste ligando-os a `_STORED_PLAN_TO_TIER` (§0.7). Fora do escopo deste PR (§2).
 
     resposta do checkout   `core/services/pix_checkout_resposta.py`
     resposta do poll       `frontend/routes/billing_pix.py`
@@ -45,12 +49,15 @@ CONTROLES DESTE GRUPO (medidos, não prometidos):
     `[essencial]` continua VERDE em todas de propósito: ali o legado e o público
     são a MESMA string, e é `[plus]`/`[pro]` que discriminam.
 
-    O PORTÃO tem mutação própria, porque a primeira versão dele não media o que
-    prometia: um campo novo vazando SÓ o legado do Plus
-    (`"tier_atual": linha["plan"] if linha["plan"] == "pro" else None`, em
-    `pix_checkout_resposta.py`) passava com o grupo inteiro verde. Parametrizado,
-    ele fica VERMELHO em `PORTAO[plus]` — e só nele, que é o caso que a versão
-    anterior nunca chegava a rodar.
+    O PORTÃO tem DUAS mutações próprias, uma por versão dele, e cada uma pega o
+    que a versão anterior deixava passar (as duas em `pix_checkout_resposta.py`):
+
+      * legado SÓ do Plus (`"tier_atual": linha["plan"] if linha["plan"] ==
+        "pro" else None`): a 1ª versão comprava só Pro e ficava VERDE com o
+        grupo inteiro. Parametrizada → VERMELHO em `PORTAO[plus]`, e só nele.
+      * legado EMBUTIDO NUMA FRASE (`"resumo": f"plano {linha['plan']} anual"`):
+        a 2ª versão comparava VALOR e ficava VERDE nos dois cards (13 passed).
+        Por substring → VERMELHO em `PORTAO[plus]` E `PORTAO[pro]`.
   * POSITIVO — `test_o_consumidor_real_continua_casando`. O único consumidor de
     `plan` que existe hoje é `pixSub.plan === plano`
     (`frontend/pix-checkout.js:101`), e ele lê o `/billing/subscription`, que
@@ -145,17 +152,30 @@ _DISCRIMINAM = [(p, l) for p, l in _CARDS if p != l]
 _IDS_DISCRIMINAM = [publico for publico, _ in _DISCRIMINAM]
 
 
-def _valores(corpo):
-    """Todo escalar de um corpo JSON, em profundidade — inclusive o do campo que
-    ainda não existe, que é o ponto do portão."""
+# Campos OPACOS: string que a MÁQUINA gera e ninguém lê como plano. Ficam fora
+# da busca por substring porque o acaso os faz conter `pro` — `public_token` é
+# `secrets.token_urlsafe(16)` (alfabeto de 64, ~20 posições: ~7,6e-5 por token) e
+# `qr_image` é base64 de milhares de caracteres. Nenhum dos dois abre buraco: o
+# `qr_image` é só o DESENHO do `qr_payload`, que CONTINUA sendo varrido, e num
+# token aleatório plano nenhum tem como cair.
+_OPACOS = {"qr_image", "public_token"}
+
+
+def _valores(corpo, chave=None):
+    """Todo escalar de um corpo JSON, em profundidade, COM a chave que o carrega
+    — inclusive o do campo que ainda não existe, que é o ponto do portão.
+
+    A chave sai junto por causa do `_OPACOS`: sem ela a exclusão teria de ser
+    por conteúdo, que é adivinhação. Item de lista herda a chave da lista.
+    """
     if isinstance(corpo, dict):
-        for valor in corpo.values():
-            yield from _valores(valor)
+        for k, valor in corpo.items():
+            yield from _valores(valor, k)
     elif isinstance(corpo, list):
         for valor in corpo:
-            yield from _valores(valor)
+            yield from _valores(valor, chave)
     else:
-        yield corpo
+        yield chave, corpo
 
 
 @pytest.mark.parametrize("publico,legado", _CARDS, ids=_IDS)
@@ -246,11 +266,14 @@ def test_nenhuma_saida_do_pix_deixa_o_valor_de_coluna_escapar(
     inteiro verde — medido pelo Tester. Um consumidor futuro desse campo marcaria
     "Renovar" no card Pro (R$ 499) para quem comprou Plus (R$ 199).
 
-    Compara VALOR, não substring, e é por isso que dá para procurar `pro`: o
-    `qr_image` é um data URL de milhares de caracteres, e `"pro" in corpo`
-    acusaria o ruído do base64 — falha intermitente com cara de vazamento. O que
-    a comparação por valor não pega é o legado EMBUTIDO numa frase maior; contra
-    isso vale a `descricao` da fatura, que é texto curto e determinístico.
+    **SUBSTRING, não igualdade de valor.** A versão anterior comparava valor e
+    se justificava com um ruído de base64 no `qr_image` que NÃO existe: 500 data
+    URLs de `qr_svg_data_url` sobre BR Codes aleatórios (média de 17.321 chars)
+    deram `"pro" in url` ZERO vezes. E igualdade é cega ao modo que ESTE PR
+    nomeou — `PigBank anual (pro_max)`, o legado EMBUTIDO numa frase —, que só a
+    `descricao` cobria, campo a campo: o jeito de errar que o portão existe para
+    não deixar errar. Substring cobre igualdade também: `legado` é sempre string,
+    e escalar não-string nunca a igualaria.
     """
     r = _checkout(logado, publico)
     assert r.status_code == 200, r.text
@@ -259,9 +282,11 @@ def test_nenhuma_saida_do_pix_deixa_o_valor_de_coluna_escapar(
 
     assert legado == TIER_TO_STORED_PLAN[publico]   # o que se procura, da fonte
     for onde, corpo in (("checkout", r.json()), ("poll", poll.json())):
-        assert legado not in list(_valores(corpo)), (
-            f"o {onde} do card '{publico}' devolveu o valor de coluna "
-            f"'{legado}' em algum campo: {corpo}")
+        vazou = [(c, v) for c, v in _valores(corpo)
+                 if c not in _OPACOS and isinstance(v, str) and legado in v]
+        assert not vazou, (
+            f"o {onde} do card '{publico}' carrega o valor de coluna "
+            f"'{legado}' em {vazou}")
     assert legado not in asaas_falso["descricoes"][0], (
         f"a fatura do card '{publico}' carrega o valor de coluna '{legado}': "
         f"{asaas_falso['descricoes'][0]}")
