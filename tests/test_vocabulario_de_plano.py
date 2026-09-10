@@ -156,17 +156,13 @@ def test_os_dois_mapas_de_plano_sao_inversos():
     assert set(TIER_TO_STORED_PLAN.values()) <= set(PRECOS_ANUAIS_CENTS)
 
 
-# `""` está FORA desta tabela, e não por conveniência: as duas rotas de fato
-# divergem nele, por um motivo que não é vocabulário e é ANTERIOR a este PR — o
-# Stripe faz `("" or "plus")` (`finance_bot_websocket_custom.py:4471`), então
-# plano vazio vira Plus em silêncio, enquanto o Pix responde 400. Achado
-# relatado ao Arquiteto; consertar o default de uma rota de dinheiro não estava
-# no plano deste PR, e ampliá-lo por conta própria é o que o §2 proíbe.
 @pytest.mark.parametrize("plan", [
     "essencial", "plus", "pro",   # públicos: nenhuma das duas rotas recusa
     "pro_max", "free",            # nenhuma das duas rotas aceita
     "PLUS",                       # as duas normalizam a caixa antes de validar
-])
+    "",                           # vazio: 400 nas duas (o Stripe fazia Plus, #352)
+    " plus ",                     # espaços: as duas dão `.strip()` antes de validar
+], ids=["essencial", "plus", "pro", "pro_max", "free", "PLUS", "vazio", "com-espacos"])
 def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
                                                       asaas_falso, plan):
     """O gêmeo do Stripe (`/billing/create-checkout`) e o do Pix têm de concordar

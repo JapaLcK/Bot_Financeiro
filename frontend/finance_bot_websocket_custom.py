@@ -4148,7 +4148,11 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
+    # `plan` NÃO tem default de plano: ausente ou vazio é 400 na rota, nunca uma
+    # compra de Plus em silêncio (o default histórico era `"plus"`). O `""` aqui
+    # existe só pra o caso ausente cair no MESMO 400 `plan inválido` do gêmeo do
+    # Pix, em vez de num 422 com outro formato de corpo.
+    plan: str = ""             # "essencial" | "plus" | "pro"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4461,14 +4465,18 @@ async def billing_create_checkout(
     user_id: int = Depends(_get_current_user),
 ):
     """
-    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    Cria uma sessão de checkout no Stripe para o plano escolhido.
+    Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
+           "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
     """
     interval = (payload.interval if payload else "monthly")
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = ((payload.plan if payload else "plus") or "plus").lower()
+    # Mesma normalização do gêmeo do Pix (`frontend/routes/billing_pix.py`): sem o
+    # `.strip()` aqui, `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando
+    # as duas. Sem plano é 400, não Plus (issue #352).
+    plan = (payload.plan if payload else "").strip().lower()
     if plan not in ("essencial", "plus", "pro"):
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
