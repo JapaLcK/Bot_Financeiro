@@ -124,3 +124,29 @@ def limpa_para_pg(valor):
                 elif isinstance(filho, (dict, list)):
                     pilha.append(filho)
     return valor
+
+
+def recusa_veneno(modelo):
+    """Recusa (em vez de sanear) NUL/surrogate solitário em campo `str` de um
+    modelo Pydantic. Para usar num `model_validator(mode="after")`.
+
+    Sanear serve para dado que o sistema só GRAVA; e-mail é IDENTIFICADOR, e
+    trocar `a\\x00@x.com` por `a�@x.com` inventaria identidade — o mesmo motivo
+    pelo qual o `limpa_para_pg` substitui em vez de apagar. Nenhum e-mail,
+    senha, nome ou código legítimo contém os dois: navegador nenhum os produz.
+    O `ValueError` vira 422 pelo caminho normal do FastAPI (#369).
+
+    ponytail: teto conhecido — só campo `str` de PRIMEIRO nível é olhado.
+    MEDIDO: `list[str]`, `dict` e submodelo com surrogate PASSAM. Não é
+    alcançável hoje (os herdeiros de `_CorpoSemVeneno` só têm `str`,
+    `str | None` e `bool` — este último não é `str` e sai do laço sem olhar —,
+    e o `extra="allow"` do pydantic v2 entra neste mesmo laço),
+    mas um herdeiro futuro com campo composto passaria veneno SEM AVISO. Se
+    aparecer um, o conserto é trocar o `isinstance(valor, str)` por uma
+    comparação `limpa_para_pg` sobre o valor inteiro — que já caminha
+    dict/list com pilha explícita. Não implementado por não ter chamador.
+    """
+    for nome, valor in modelo:
+        if isinstance(valor, str) and _limpa_str(valor) != valor:
+            raise ValueError(f"O campo '{nome}' contém caractere inválido.")
+    return modelo
