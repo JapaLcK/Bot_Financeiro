@@ -131,7 +131,11 @@ def test_creating_sem_cobranca_remota_substitui_sem_delete(
     r = _comprar(user_id, "pro")
 
     assert not [p for p in asaas_falso["ordem"] if p.startswith("delete:")]
-    assert r["plan"] == "pro"
+    # `plus` para um `plan_stored="pro"`: a RESPOSTA fala o público da /precos
+    # desde o #350, e `pro` é o valor legado do tier Plus. O que a coluna guarda
+    # continua legado — quem prende os dois lados é
+    # `tests/test_vocabulario_de_plano_nas_saidas.py`.
+    assert r["plan"] == "plus"
     assert [l["status"] for l in _linhas(user_id)] == ["canceled", "pending"]
 
 

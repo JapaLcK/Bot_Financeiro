@@ -306,6 +306,7 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     (b) do §10.1 acharia seguro apagar.
     """
     from core.services.asaas_customers import criar_cliente
+    from core.services.email_service import PIX_PLAN_NAMES
     from db.pix_charges import transicionar
     from db.pix_charges_saga import attach_pagamento
 
@@ -317,7 +318,14 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             customer_id=cliente, valor_cents=int(linha["amount_cents"]),
             due_date=vence.isoformat(),
             external_reference=linha["external_reference"],
-            descricao=f"PigBank anual ({linha['plan']})")
+            # NOME COMERCIAL, não o slug: esta linha é a descrição da FATURA que
+            # o pagador lê no app do banco, e ela vinha saindo "PigBank anual
+            # (pro_max)". Nome, e não o tier público (`pro`), porque ali não há
+            # legenda nenhuma para traduzir um slug. `PIX_PLAN_NAMES` é a fonte
+            # que o e-mail de confirmação já usa, chaveada pelo MESMO valor
+            # legado da coluna (§0.7) — o cliente lê o mesmo nome nos dois.
+            descricao=f"{PIX_PLAN_NAMES.get(linha['plan'], 'PigBank')} — "
+                      f"plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
         raise CheckoutIndisponivel("asaas_emissao_falhou") from exc
