@@ -79,7 +79,10 @@ def test_substituicao_deleta_no_asaas_antes_de_criar(user_id, vendavel, asaas_fa
     linhas = _linhas(user_id)
     assert [l["status"] for l in linhas] == ["canceled", "pending"]
     assert linhas[0]["qr_payload_enc"] is None, "o QR da cancelada não foi apagado"
-    assert r["plan"] == "pro"
+    # `plus` para um `plan_stored="pro"`: a RESPOSTA fala o público da /precos
+    # desde o #350, e `pro` é o valor legado do tier Plus. A coluna continua
+    # legada — ver `tests/test_vocabulario_de_plano_nas_saidas.py`.
+    assert r["plan"] == "plus"
     assert buscar_ativa(user_id)["id"] == linhas[1]["id"]
 
 
