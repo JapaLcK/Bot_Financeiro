@@ -45,6 +45,17 @@ _STORED_PLAN_TO_TIER = {
     "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
 }
 
+# O INVERSO do de cima, restrito ao que se VENDE: tier público que o cliente
+# escolhe na /precos → valor legado que a coluna guarda. Não é derivado de
+# `_STORED_PLAN_TO_TIER` porque aquele não é injetor ('pro' e 'plus' dão o mesmo
+# tier); quem ata os dois é `test_vocabulario_de_plano.py`, ida e volta.
+# `free` fica de fora de propósito: não é venda, e `PRECOS_ANUAIS_CENTS` não o tem.
+TIER_TO_STORED_PLAN = {
+    "essencial": "essencial",
+    "plus": "pro",       # legado: o tier Plus grava 'pro'
+    "pro": "pro_max",    # legado: o tier Pro grava 'pro_max'
+}
+
 TRIAL_DAYS_DEFAULT = 15
 
 

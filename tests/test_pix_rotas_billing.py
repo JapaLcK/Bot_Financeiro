@@ -172,7 +172,7 @@ def test_webhook_nao_precisa_de_csrf_e_o_checkout_precisa():
     assert sem_csrf.status_code in (401, 503), sem_csrf.status_code
 
     checkout = client.post("/billing/pix/checkout",
-                           json={"plan": "pro_max", "cpf_cnpj": "12345678901"})
+                           json={"plan": "pro", "cpf_cnpj": "12345678901"})
     assert checkout.status_code == 403, "o checkout ganhou isenção de CSRF"
 
 
@@ -214,6 +214,27 @@ def test_poll_pelo_id_do_asaas_e_404_e_o_qr_nao_sai(user_id, monkeypatch):
     assert not [c for c in corpo if "qr" in c.lower()], (
         f"o poll devolveu o instrumento de pagamento: {sorted(corpo)}"
     )
+
+
+def test_poll_expoe_agendada_como_a_resposta_do_checkout(user_id, monkeypatch):
+    """§0.7: duas montagens da MESMA resposta, e só uma tem o campo que decide.
+
+    Não compara as chaves inteiras de propósito — os dois contratos divergem
+    legitimamente (o poll não leva QR, o checkout não leva `status`). O que se
+    trava aqui é o campo cuja ausência reproduz o bug original na tela.
+    """
+    conta(user_id, "free", None)
+    linha = _cobranca(user_id)
+    monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id", lambda req: user_id)
+
+    corpo = client.get(f"/billing/pix/{linha['public_token']}").json()
+    assert "starts_at" in corpo, f"contrato do poll mudou: {sorted(corpo)}"
+    assert "agendada" in corpo, (
+        f"o poll expõe `starts_at` sem `agendada`: {sorted(corpo)}"
+    )
+    # Só o campo, e nulo: a FÓRMULA (`inicio > agora`) é medida nas três datas
+    # por tests/test_pix_poll_agendada.py, que compara poll × checkout.
+    assert corpo["agendada"] is False, f"agendada sem data: {corpo['agendada']}"
 
 
 def _cobranca(uid: int) -> dict:

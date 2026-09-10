@@ -33,6 +33,18 @@ def qr_da_linha(linha: dict) -> str | None:
         subject_user_id=linha["user_id"], field="qr_payload"))
 
 
+def agendada(starts_at) -> bool:
+    """"Começa depois" — a conta que separa compra imediata de agendada.
+
+    Mora aqui, e não copiada em cada montagem, porque quem a lê são DOIS
+    contratos: a resposta do checkout (abaixo) e o poll
+    (`frontend/routes/billing_pix.py`). Duas cópias divergiriam (§0.7), e a
+    tela que gatilha pela presença de `starts_at` promete "começa em <hoje>"
+    a quem começa ao pagar.
+    """
+    return bool(starts_at and starts_at > datetime.now(timezone.utc))
+
+
 def resposta(linha: dict, qr_payload: str) -> dict:
     """O contrato que a tela do PR 2 consome. Uma função para os dois caminhos
     (cobrança nova e cobrança reaproveitada) — duas montagens divergiriam.
@@ -41,9 +53,17 @@ def resposta(linha: dict, qr_payload: str) -> dict:
     da venda ser paga é o checkout, com o valor que `plano_da_cobranca` calculou:
     a COLUNA só é escrita no pagamento (§7), então ler a linha crua aqui devolvia
     nulo em todo checkout.
+
+    `agendada` existe porque **a data sozinha não separa os dois casos**: na
+    compra IMEDIATA o `access_starts_at` também vem preenchido (com `agora`),
+    então "tem `starts_at`" não quer dizer "começa depois". A tela que gatilhava
+    pela presença da data prometia "começa em <hoje>, assim que o plano atual
+    terminar" para quem tinha acesso naquele instante e não tinha plano nenhum
+    antes.
     """
     from core.services.pix_brcode import qr_svg_data_url
 
+    starts_at = linha["access_starts_at"]
     return {
         "public_token": linha["public_token"],
         "qr_payload": qr_payload,
@@ -51,7 +71,11 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         "expires_at": linha["qr_expires_at"],
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
-        "starts_at": linha["access_starts_at"],
+        "starts_at": starts_at,
+        # Mesma conta do `agendada` que `plano_da_cobranca` devolve em TODOS os
+        # ramos (`inicio > agora`) — e não o campo dele, porque o
+        # `_reaproveitar` chega aqui só com a data, sem o resto do snapshot.
+        "agendada": agendada(starts_at),
         "plan": linha["plan"],
     }
 
