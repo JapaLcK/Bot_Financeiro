@@ -247,6 +247,7 @@ def test_subscription_reconhece_pix_antes_do_stripe(user_id, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
     from db.plan_grants import upsert_grant
+    from utils_date import day_tz
 
     conta(user_id, "pro_max", None)
     _guardar_stripe_customer(user_id, "cus_antigo")
@@ -262,7 +263,14 @@ def test_subscription_reconhece_pix_antes_do_stripe(user_id, monkeypatch):
     assert corpo["active"] is True and corpo["gateway"] == "pix"
     assert corpo["plan"] == "pro", "o plano LEGADO vazou para a tela sem tradução"
     assert corpo["interval"] == "annual"
-    assert corpo["current_period_end"] == fim.date().isoformat()
+    # `day_tz`, e não `fim.date()`: o handler colapsa um INSTANTE em dia de
+    # parede, e o `ends_at` que ele lê volta do Postgres no fuso da SESSÃO
+    # (America/Sao_Paulo, via `align_process_tz`), não em UTC. Derivar o dia
+    # aqui em UTC punha os dois lados em referenciais diferentes e o teste
+    # ficava vermelho entre 00:00 e 03:00 UTC — `'2027-09-04' == '2027-09-05'`,
+    # medido às 00:36 UTC. Um dia de tolerância esconderia o desalinhamento;
+    # `day_tz` é o mesmo referencial do servidor, em qualquer hora do dia.
+    assert corpo["current_period_end"] == day_tz(fim).isoformat()
 
 
 def test_subscription_sem_grant_pix_segue_para_o_stripe(user_id, monkeypatch):

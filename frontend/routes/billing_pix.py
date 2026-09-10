@@ -231,7 +231,10 @@ def _titular(user_id: int) -> tuple[str, str | None]:
     from db import get_auth_user
 
     conta = get_auth_user(user_id) or {}
-    nome = (conta.get("name") or conta.get("email") or f"PigBank {user_id}").strip()
+    # `display_name`, e NÃO `name`: é a chave que `get_auth_user` devolve
+    # (db_support.py:578, decifrada de `display_name_enc` em :607). Com `name` o
+    # `.get` era sempre `None` e o e-mail ia no campo `name` do Asaas.
+    nome = (conta.get("display_name") or conta.get("email") or f"PigBank {user_id}").strip()
     return (nome or f"PigBank {user_id}", conta.get("email"))
 
 
