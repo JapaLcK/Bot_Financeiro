@@ -177,16 +177,16 @@
       ".pb-acct-link.danger:hover{background:rgba(248,113,113,.15);color:#fff1f2}",
       ".pb-acct-ico{width:18px;text-align:center;flex-shrink:0}",
       /* ── Nav mobile: menu recolhido ───────────────────────────────────
-         Os links ficavam SEMPRE abertos numa 2ª linha, e a nav é fixa: o bloco
-         acompanhava a rolagem comendo a tela o tempo todo. Agora recolhem. */
+         Os links ficavam SEMPRE abertos numa 2ª linha, e a nav é sticky (não
+         fixed): o bloco acompanhava a rolagem comendo a tela. Agora recolhem. */
       ".pb-burger{display:none}",
       "@media (max-width:900px){",
-      /* UM auto por linha, o resto por justify-content: dois `margin-left:auto`
-         na mesma linha flex REPARTEM a sobra em vez de empurrar para a direita,
-         e o "Entrar / Começar agora" descolava da borda (medido: 313px de folga
-         a 899px). A sobra da 1ª linha vai toda para o logo; a 2ª, quando o botão
-         quebra, alinha pelo container. O column-gap cai de 10px para 6px: a
-         linha pedia 356px onde há 349, e são esses 7px que faltavam a 375px. */
+      /* UM auto por linha, o resto por justify-content: dois `margin-left:auto` na
+         mesma linha flex REPARTEM a sobra em vez de empurrar para a direita, e o
+         "Entrar / Criar conta" descolava da borda. A sobra da 1ª linha vai para o
+         logo; a 2ª, quando o botão quebra, alinha pelo container. O column-gap de
+         6px nasceu para salvar 375px com o CTA LONGO e já não é o que segura essa
+         largura. Os números que moravam aqui envelheceram duas vezes, então em vez de outro número, o comando (console, na largura que interessa): n=document.querySelector('.nav'),c=getComputedStyle(n),i=[...n.children].filter(e=>e.getBoundingClientRect().width>0),{pede:i.reduce((s,e)=>s+e.getBoundingClientRect().width,0)+parseFloat(c.columnGap)*(i.length-1),ha:n.clientWidth-parseFloat(c.paddingLeft)-parseFloat(c.paddingRight)} */
       ".nav{flex-wrap:wrap;row-gap:0;column-gap:6px;justify-content:flex-end}",
       ".nav .nav-logo{order:1;margin-right:auto}",
       ".nav .nav-right{order:2;margin-left:0}",
@@ -328,8 +328,8 @@
 
   fetch("/auth/validate", { credentials: "same-origin" })
     .then(function (r) {
-      if (!r.ok) return; // deslogado: mantém "Entrar / Começar agora" padrão
-      // 1) Nav direita: "Entrar / Começar agora" → menu da conta (com logout).
+      if (!r.ok) return; // deslogado: mantém "Entrar / Criar conta" padrão
+      // 1) Nav direita: "Entrar / Criar conta" → menu da conta (com logout).
       const nr = document.querySelector(".nav .nav-right");
       if (nr) renderAccountMenu(nr);
       // 2) E-mail + plano no dropdown.

@@ -262,6 +262,29 @@ img { max-width: 100%; display: block; }
 @media (max-width: 900px) {
   .nav-links { display: none; }
   .section { padding: 60px 0; }
+  /* Alvo de toque na barra mobile: 44px (mínimo iOS/WCAG 2.5.5), o mesmo piso
+     que o .pb-burger do nav-auth.js já respeita — e 900px é o mesmo gate que ele
+     usa para entrar em modo mobile, por isso estas três moram AQUI, no bloco de
+     900 que já existia, em vez de num segundo bloco igual (a ordem dos blocos da
+     nav fica 900 -> 480 -> 340, monotônica).
+     Antes: CTA 137×40, "Entrar" 44×21 e o botão do menu da conta 154×37 — três
+     alvos abaixo de 44 numa barra tocada com o polegar.
+     O custo em altura NÃO é zero, e depende da página (16 carregam esta .nav):
+       · as 12 com nav-auth.js — o burger de 44px já ditava a altura, então a
+         barra não muda: 66px a 320 e 70px a 500/700/899, antes e depois;
+       · as 4 SEM nav-auth.js (cadastro, completar-cadastro, reset-password: sem
+         burger e sem CTA; login: com CTA) — aí a barra CRESCE em toda largura
+         <=900, e é a consequência desejada de dar 44px ao "Entrar":
+             cadastro / completar-cadastro / reset-password   52->66  e  56->70
+             login                                          62,4->66  e  69,6->70
+     Acima de 900 nada disto vale (o bloco não se aplica): 56 e 69,6 intactos.
+     No desktop o CTA segue com 43,6px (medido a 901 e a 1280, base e branch;
+     os 40,4px são a figura do bloco <=480), acima do piso de 24px da WCAG 2.5.8.
+     `.nav .pb-acct-btn` (0,2,0) precisa vencer o `.pb-acct-btn` (0,1,0) que o
+     nav-auth.js injeta — mesma razão do `.nav.nav` no bloco de 340 abaixo. */
+  .nav .btn { min-height: 44px; }
+  .nav-right .link-entrar { min-height: 44px; display: flex; align-items: center; }
+  .nav .pb-acct-btn { min-height: 44px; }
 }
 
 /* Nav em tela estreita: o mínimo necessário era 374px (padding 36 + logo 111 +
@@ -272,9 +295,68 @@ img { max-width: 100%; display: block; }
    ("Ir para o dashboard", do usuário logado, fica em 352px — também cabe). */
 @media (max-width: 480px) {
   .nav { gap: 10px; padding: 10px 12px; }
-  .nav-right { gap: 10px; }
-  .nav .btn { padding: 10px 14px; font-size: .85rem; }
+  .nav-right { gap: 6px; }
+  .nav .btn { padding: 10px 10px; font-size: .85rem; }
 }
+/* Abaixo de 340px (320 e 328 na prática) a barra ainda pedia mais do que cabia:
+   deslogado, 320px dava 2 linhas e faltavam 54,2px. Com "Criar conta" no lugar
+   de "Começar agora" a linha já fecha sozinha a partir de 329px, então este
+   bloco só existe para a faixa 320-328 — o corte em 340 deixa 11px de folga e
+   NÃO altera 360/375/390. Ponto mais apertado acima do corte: 341px, 8,8px de
+   sobra.
+
+   `.nav.nav` NÃO é typo, e trocar por `.nav` mata o conserto em silêncio: o
+   nav-auth.js injeta um <style id="pb-nav-css"> no <head> em RUNTIME contendo
+   `.nav{...column-gap:6px}` dentro de @media (max-width:900px). Mesma
+   especificidade (0,1,0) e documento posterior => o injetado ganha. Repetir a
+   classe sobe para (0,2,0) e passa a valer. Reproduzir, no console de qualquer
+   página com nav-auth.js e viewport ≤900px:
+       getComputedStyle(document.querySelector('.nav')).columnGap
+   escrito `.nav     {column-gap:4px}` -> "6px"  (perde para o injetado)
+   escrito `.nav.nav {column-gap:4px}` -> "4px"  (vence)
+   É a mesma razão de `.nav{gap:10px}` no bloco de 480 já ser letra morta no
+   eixo horizontal nas páginas que carregam o nav-auth.js. */
+@media (max-width: 340px) {
+  .nav.nav { padding-left: 8px; padding-right: 8px; column-gap: 4px; }
+  .nav-right { gap: 4px; }
+  .nav .btn { padding-left: 8px; padding-right: 8px; }
+  .nav .pb-acct-btn { padding-left: 10px; padding-right: 10px; }
+}
+/* O painel da conta (288px fixos, `right:0` ancorado no .pb-acct) transbordava
+   PELA ESQUERDA e o corte é permanente: `documentElement.scrollWidth` continua
+   igual a `innerWidth`, então não há rolagem que alcance o pedaço cortado.
+   O mecanismo: com a barra numa linha só, o botão da conta deixou de ficar
+   sozinho numa 2ª linha colada na borda direita e passou a ficar À ESQUERDA do
+   burger — a âncora andou 44px e os 288px pararam de caber.
+   Medido em varredura de 1px, borda esquerda do painel (negativo = cortado),
+   com o rótulo de perfil REAL ("Ana Beatriz"; com o placeholder "Minha conta" a
+   base vira 1 faixa só em 338 e a tabela muda inteira — é a mesma medição em
+   outra condição, não outro resultado):
+     largura    base 45f4987    sem esta regra    com esta regra
+     316-331    +15 a +30          -29 a -14          +14      <- regressão nossa
+     332-340    -19 a -11          -13 a  -5          +14      <- melhoramos a base
+     341-350    -10 a  -1          -10 a  -1           +8      <- herdado, idêntico
+     351-358    +0 a +7            +0 a +7             +8
+      >=359     ok                 ok            (no-op: o min() escolhe 288)
+   Ou seja: a faixa que o conserto piorou é 316-331 (onde a base estava em 2
+   faixas e sobrava espaço); de 332 a 340 o branch SEM esta regra já era melhor
+   que a base; de 341 para cima os dois são iguais e o corte é herdado. A base
+   cortava de 332 a 350 (1 a 19px), e não "340 a 354".
+   O clamp é por LARGURA, não por estado, e isso tem um efeito cosmético
+   conhecido: no layout de 2 faixas (rótulo longo abaixo de ~332px), onde o botão
+   volta a ficar colado na borda direita e caberiam os 288px inteiros, o painel
+   ainda assim encolhe (245-249px a 316-320). Não corta nada e não some conteúdo;
+   distinguir os dois estados custaria mais CSS do que vale.
+   `min()` em vez de @media: acima de 359px o 288px ganha sozinho e a regra vira
+   no-op, então não há breakpoint novo para manter. Os 71px são a maior distância
+   medida entre a borda direita do painel e a da viewport (44 do burger + 6 do
+   column-gap + 12 do padding + 1 da borda) mais 8 de respiro.
+   ponytail: `100vw` inclui a barra de rolagem clássica; num desktop com janela
+   abaixo de 359px e scrollbar não-overlay sobra ~15px a menos — ainda assim
+   melhor que o corte de 25px de hoje. Se isso um dia importar, a saída sem
+   número mágico é `.pb-acct{position:static}` + `width:min(288px,100%)`, que
+   ancora no .nav e se autoajusta, ao custo de descer o painel 12px. */
+.nav .pb-acct-dd { width: min(288px, calc(100vw - 71px)); }
 /* Abaixo de 380px (iPhone SE e afins) esconde o nome ao lado do mascote:
    o mínimo cai pra ~249px e sobra folga até em 320px. */
 @media (max-width: 380px) {
