@@ -1814,6 +1814,33 @@ body.light .modal-inp.cat-select {
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(15,23,42,.55)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
+/* ── Véus de fundo dentro do modal claro ───────────────────────────────────
+   Terceira e última categoria do modal branco, depois das cores de texto e do
+   SVG da seta: FUNDO branco translúcido. Sobre superfície escura um véu de 3 a
+   9% desenha o campo, a linha e o botão; sobre branco ele é branco no branco e
+   some. São 16 regras, e vão juntas para não virar mais uma rodada de caça a
+   irmãos — cada uma mantém o MESMO alpha, só trocando a tinta do véu, que é o
+   `rgba(15,23,42,…)` que o resto do tema claro já usa.
+   Aqui mora o custo de um erro meu: quando o modal virou branco eu atualizei o
+   comentário da `.cl-row` sem reexaminar a regra que ele descreve, e o hover
+   dela ficou invisível até o revisor apontar. */
+body.light .pkt-move-form                            { background:rgba(15,23,42,.03); }
+body.light .pkt-hist-summary,
+body.light .pkt-hist-row,
+body.light .pkt-move-btn,
+body.light .pkt-move-form-acts button,
+body.light .ld-desc,
+body.light .receipt-cell                             { background:rgba(15,23,42,.04); }
+body.light .tipo-opt,
+body.light .vmode-opt,
+body.light .bill-opt                                 { background:rgba(15,23,42,.05); }
+body.light .cl-row:hover                             { background:rgba(15,23,42,.055); }
+body.light .modal-inp                                { background:rgba(15,23,42,.07); }
+body.light .pkt-move-btn:hover,
+body.light .tipo-opt:hover,
+body.light .vmode-opt:hover                          { background:rgba(15,23,42,.08); }
+body.light .bill-opt:hover                           { background:rgba(15,23,42,.09); }
+
 .modal-error { background:rgba(255,45,45,.1);border:1px solid rgba(255,45,45,.28);
   color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
 .modal-error.show { display:block; }
@@ -2364,16 +2391,14 @@ body.balance-hidden #bill-detail-summary .v {
    clipa os DOIS eixos), então uma linha mais larga que o conteúdo perdia as
    bordas laterais do anel de foco — sobrava um traço em cima e outro embaixo. */
 .cl-row { border-radius:10px; cursor:pointer; transition:background .16s var(--ease); }
-/* Branco a 5,5% nos DOIS temas, e é medido: o FUNDO da `.modal` é
-   `rgba(14,16,30,.94)` com e sem `body.light` — a regra `body.light .modal` do
-   topo do arquivo troca só a TINTA, não a superfície. A linha desta lista está
-   SEMPRE sobre superfície escura, então o par `body.light` que a barra da
-   Distribuição tem (fim do arquivo) seria errado aqui: aquela barra fica na
-   PÁGINA, que no tema claro é `--bg-page:#F6F4F1`. Aplicar
-   `rgba(15,23,42,.05)` aqui apaga o hover em vez de consertá-lo.
-   (O buraco de tinta que este comentário registrava — `--text` virando
-   `#0f172a` dentro de modal escuro, atingindo `.modal h3` e `.ld-desc` — está
-   fechado pela rampa do topo, que declara `color` e não só as variáveis.) */
+/* Branco a 5,5% no tema ESCURO. O par claro está no bloco de véus, junto das
+   outras 15 regras da mesma categoria — o `.cl-modal` é `.modal`, então no tema
+   claro esta linha fica sobre branco e o véu branco desaparece.
+   Este comentário afirmou por um tempo que a `.modal` era escura nos dois temas.
+   Era verdade quando foi escrito, deixou de ser quando a superfície mudou, e eu
+   o reeditei sem reexaminar a regra que ele descreve: o hover ficou invisível
+   até o revisor apontar. Se a superfície do modal mudar de novo, esta regra e o
+   bloco de véus mudam junto. */
 .cl-row:hover { background:rgba(255,255,255,.055); }
 .cl-row:focus-visible { outline:2px solid rgba(255,45,142,.55); outline-offset:-2px; }
 .cl-row .bar-head { align-items:baseline; }
