@@ -62,6 +62,7 @@ def resposta(linha: dict, qr_payload: str) -> dict:
     antes.
     """
     from core.services.pix_brcode import qr_svg_data_url
+    from core.services.plan_service import tier_publico
 
     starts_at = linha["access_starts_at"]
     return {
@@ -76,7 +77,11 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         # ramos (`inicio > agora`) — e não o campo dele, porque o
         # `_reaproveitar` chega aqui só com a data, sem o resto do snapshot.
         "agendada": agendada(starts_at),
-        "plan": linha["plan"],
+        # PÚBLICO, e a coluna continua legada: quem pediu `plus` tem de ler
+        # `plus` de volta, não o `pro` que a coluna guarda. Sai daqui como entrou
+        # no corpo do POST — é o mesmo vocabulário do `/billing/subscription`,
+        # que é quem a tela compara (`pixSub.plan === plano`).
+        "plan": tier_publico(linha["plan"]),
     }
 
 
