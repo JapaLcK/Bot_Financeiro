@@ -47,8 +47,11 @@ def asaas_falso(monkeypatch):
     # (linha `creating` sem `asaas_payment_id`): sem o stub o teste sairia para a
     # rede, e com `[]` o comportamento é o de antes — nada remoto para deletar.
     # Uma exceção aqui simula o provedor fora do ar.
+    # `descricoes` guarda o que foi para o campo que o PAGADOR lê na fatura —
+    # a única saída deste PR visível para cliente hoje. Lista, e não o último
+    # valor: um teste que compra duas vezes tem de conseguir ver as duas.
     estado = {"ordem": [], "delete_falha": False, "n": 0, "marca": marca,
-              "remotas": [], "qr_falha": False}
+              "remotas": [], "qr_falha": False, "descricoes": []}
 
     def _cliente(**kw):
         estado["ordem"].append("customer")
@@ -58,6 +61,7 @@ def asaas_falso(monkeypatch):
     def _pagamento(**kw):
         estado["n"] += 1
         estado["ordem"].append("create")
+        estado["descricoes"].append(kw.get("descricao"))
         return {"id": f"pay_{marca}_{estado['n']}"}
 
     def _qr(pid):

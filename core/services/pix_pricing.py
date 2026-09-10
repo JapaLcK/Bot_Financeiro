@@ -54,7 +54,7 @@ class CoberturaJaPaga(RuntimeError):
 
         except CoberturaJaPaga as exc:
             raise HTTPException(409, detail={"error": exc.ERRO,
-                                             "plan": exc.plano,
+                                             "plan": tier_publico(exc.plano),
                                              "covered_until": exc.cobertura_ate})
 
     Exceção e não campo `recusada` num dict: campo pode ser ignorado em

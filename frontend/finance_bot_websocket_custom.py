@@ -4632,10 +4632,14 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     # e chamaria `/billing/change-plan`, que não tem assinatura para trocar.
     # Grant Pix vigente é a resposta autoritativa: ele foi criado pelo dinheiro
     # que entrou, e não depende de o Stripe estar de pé.
+    # `tier_publico` e não uma cópia local do `{"pro": "plus", ...}`: quem é dono
+    # do vocabulário é o `_STORED_PLAN_TO_TIER` do `plan_service` (§0.1/§0.7).
+    from core.services.plan_service import tier_publico
+
     pix = await asyncio.to_thread(_grant_pix_vigente, user_id)
     if pix is not None:
         return {"active": True, "lifetime": False, "gateway": "pix",
-                "plan": _plan_publico(pix["plan_stored"]), "interval": "annual",
+                "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
                 "current_period_end": pix["ends_at"].date().isoformat(),
                 "scheduled_change": None}
 
@@ -4708,12 +4712,6 @@ def _grant_pix_vigente(user_id: int) -> dict | None:
     if not grant_vigente(pix, agora):
         return None
     return max(pix, key=lambda g: g["ends_at"])
-
-
-def _plan_publico(plan_stored: str) -> str:
-    """Valor LEGADO da coluna → o nome que a /precos usa. Uma tradução, um
-    lugar: `_plan_interval_for_price` já devolve `plus`/`pro` para o Stripe."""
-    return {"pro": "plus", "pro_max": "pro"}.get(plan_stored, plan_stored)
 
 
 @app.post("/billing/change-plan")
