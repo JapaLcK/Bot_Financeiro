@@ -4702,7 +4702,10 @@ async def billing_change_plan(
     interval = (payload.interval or "monthly").lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = (payload.plan or "").lower()
+    # Terceira rota que recebe plano, mesma normalização das duas de checkout
+    # (§2: um caso corrigido não é a categoria resolvida). Sem plano continua
+    # 400 aqui — nunca houve `or "plus"` nesta rota (issue #352).
+    plan = (payload.plan or "").strip().lower()
     if plan not in ("essencial", "plus", "pro"):
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     target_price = _resolve_price_id(plan, interval)

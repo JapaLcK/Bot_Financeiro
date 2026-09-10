@@ -183,3 +183,60 @@ def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
     assert stripe.status_code != 401, "o cliente do Stripe não autenticou"
     assert _recusa_o_plano(pix) == _recusa_o_plano(stripe), (
         f"'{plan}': Pix {pix.status_code} × Stripe {stripe.status_code}")
+
+
+# ── /billing/change-plan: a mesma normalização, com semântica própria ────────
+#
+# Esta rota fica FORA da tabela de duas colunas acima de propósito: ela não é
+# checkout — não cobra nada, e o veredito dela para um plano válido é 409
+# `no_subscription` (estado da assinatura), não 200/503 (estado da venda).
+# Comparar os dois vereditos na mesma parametrização forçaria semântica
+# diferente para dentro da mesma tabela; o que se compartilha é o vocabulário,
+# que é o assunto do arquivo.
+#
+# CONTROLES DO GRUPO:
+#   * NEGATIVO — tire o `.strip()` de `plan = (payload.plan or "").strip().lower()`
+#     em `frontend/finance_bot_websocket_custom.py` (rota `/billing/change-plan`)
+#     e `test_change_plan_normaliza_como_o_checkout[com-espacos]` fica VERMELHO
+#     (400 `plan inválido` onde se espera 409 `no_subscription`). Injetado num
+#     caso que estava VERDE — `plus` sem espaços passa com e sem o conserto.
+#   * POSITIVO — o caso `plus` prova que o plano legítimo continua atravessando
+#     a validação e chegando a LER a conta; sem ele o grupo passaria numa rota
+#     que recusasse tudo.
+
+_ACEITA, _RECUSA = "aceita", "recusa"
+
+
+@pytest.mark.parametrize("plan,veredito", [
+    ("plus", _ACEITA),      # positivo: o plano correto continua funcionando
+    (" plus ", _ACEITA),    # o conserto desta rodada
+    ("pro_max", _RECUSA),   # o vocabulário da COLUNA continua fora da fronteira
+    ("", _RECUSA),          # vazio nunca vira Plus (esta rota nunca teve default)
+], ids=["plus", "com-espacos", "pro_max", "vazio"])
+def test_change_plan_normaliza_como_o_checkout(logado, monkeypatch, plan, veredito):
+    """Aceitar/recusar é medido pelo TRABALHO, não só pelo status: quando a rota
+    recusa o plano ela não pode ter lido a conta, e quando aceita ela tem de ter
+    lido — senão o teste ficaria verde numa rota que recusa tudo cedo demais."""
+    import db as db_mod
+
+    chamadas: list[int] = []
+    real = db_mod.get_auth_user
+    monkeypatch.setattr(db_mod, "get_auth_user",
+                        lambda uid: (chamadas.append(uid), real(uid))[1])
+    # Sem price ID configurado, TODO plano válido morre em 503 antes de a rota
+    # fazer qualquer coisa — e aí o teste mediria configuração, não plano.
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_vocabulario")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_test_plus_mensal")
+
+    r = logado.http.post("/billing/change-plan", headers=_cabecalhos(),
+                         json={"plan": plan})
+
+    if veredito == _RECUSA:
+        assert r.status_code == 400, r.text
+        assert "plan inválido" in str(r.json()["detail"])
+        assert chamadas == [], f"'{plan}' foi recusado mas a rota leu a conta"
+    else:
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error"] == "no_subscription", r.text
+        assert chamadas == [logado.user_id], (
+            f"'{plan}' foi aceito mas a rota não chegou a ler a conta")
