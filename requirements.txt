@@ -4,7 +4,7 @@ PyJWT==2.13.0
 aiohttp==3.14.3
 aiosignal==1.4.0
 annotated-types==0.8.0
-anyio==4.14.2
+anyio==4.15.0
 attrs==26.1.0
 audioop-lts==0.2.2
 certifi==2026.7.22
@@ -24,13 +24,13 @@ idna==3.19
 iniconfig==2.3.0
 jiter==0.16.0
 multidict==6.7.1
-openai==3.6.0
+openai==3.8.0
 openpyxl==3.1.5
 packaging==26.3
 pluggy==1.6.0
 propcache==0.5.2
-psycopg==3.3.4
-psycopg-binary==3.3.4
+psycopg==3.3.5
+psycopg-binary==3.3.5
 psycopg_pool==3.3.1
 pyasn1==0.6.4
 pyasn1_modules==0.4.2
@@ -65,7 +65,7 @@ python-multipart==0.0.32
 uvicorn[standard]==0.52.4
 websockets==17.1
 slowapi==0.1.10
-stripe==15.6.0
+stripe==15.6.1
 resend==2.42.0
 pyotp==2.10.0
 qrcode==8.2
