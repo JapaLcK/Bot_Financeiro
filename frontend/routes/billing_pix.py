@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from core.observability import log_system_event_sync
 from core.secure_compare import constant_time_eq
+from core.services.asaas_customers import TitularRecusado
 from core.services.pix_checkout import (
     CheckoutIndisponivel,
     StripeAtivo,
@@ -140,6 +141,25 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             "error": exc.ERRO,
             "current_period_end": exc.current_period_end.date().isoformat(),
         }) from exc
+    except TitularRecusado as exc:
+        # ANTES do `CheckoutIndisponivel`: as duas descem de `RuntimeError` e a
+        # herança não separa nada — `except` na ordem errada engoliria esta e
+        # devolveria o 503 de "tenta de novo", que aqui é mentira.
+        # `details` leva o motivo e o `code` JÁ filtrado, e NADA mais: nome,
+        # e-mail e `cpf_cnpj` não entram: `system_event_logs` é a tabela que a
+        # purga do §13.3 não alcança. O `detail` é literal NOSSO, jamais o texto
+        # do Asaas — e não acusa o CPF de propósito, porque a recusa pode vir do
+        # e-mail do cadastro, que o cliente não digitou nesta tela.
+        log_system_event_sync("warning", "pix_titular_recusado",
+                              "Asaas recusou o titular do checkout Pix.",
+                              source="pix", user_id=user_id,
+                              details={"motivo": "titular_recusado",
+                                       "code": exc.codigo or ""})
+        raise HTTPException(
+            status_code=400,
+            detail="O banco recusou esses dados. Confere o CPF ou CNPJ — se "
+                   "estiver certo, fala com a gente.",
+        ) from exc
     except CheckoutIndisponivel as exc:
         log_system_event_sync("warning", "pix_checkout_indisponivel",
                               "Checkout Pix recusado.", source="pix",

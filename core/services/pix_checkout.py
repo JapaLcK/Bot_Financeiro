@@ -198,8 +198,10 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     """Emite (ou reaproveita) a cobrança Pix anual. **Roda sob lock do usuário.**
 
     Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e
-    `CoberturaJaPaga` (409) — nenhum dos quatro escreve nada antes de levantar. O
-    `cpf_cnpj` atravessa sem tocar em disco: vai para `criar_cliente` e morre lá."""
+    `CoberturaJaPaga` (409) — esses quatro decidem ANTES de escrever qualquer
+    coisa. A quinta é `TitularRecusado` (400, de `asaas_customers`): ela sai do
+    meio da saga e **deixa a linha em `draft`** (ver `_emitir`). O `cpf_cnpj`
+    atravessa sem tocar em disco: vai para `criar_cliente` e morre lá."""
     if not pix_annual_available():
         raise CheckoutIndisponivel("pix_annual_desligado")
     # DEPOIS da env: com a flag em 0 o vitalício leva 503 `pix_annual_desligado`, não
@@ -305,10 +307,10 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     haver cobrança lá que não conhecemos". Depois, seria um `draft` que a regra
     (b) do §10.1 acharia seguro apagar.
     """
-    from core.services.asaas_customers import criar_cliente
+    from core.services.asaas_customers import TitularRecusado, criar_cliente
     from core.services.email_service import plan_display_name
     from db.pix_charges import transicionar
-    from db.pix_charges_saga import attach_pagamento
+    from db.pix_charges_saga import attach_pagamento, voltar_para_draft
 
     transicionar(linha["id"], de=("draft",), para="creating")
     vence = date.today() + timedelta(days=VENCIMENTO_DIAS)
@@ -330,6 +332,11 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             # e o hífen não perde nada. O texto era ASCII puro antes do #350.
             descricao=f"{plan_display_name(linha['plan'])} - plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
+    except TitularRecusado:
+        # Nada existe no Asaas: `criar_pagamento_pix` nem rodou (o porquê, em
+        # `asaas_customers`). `draft` poupa a passada seguinte de perguntar.
+        voltar_para_draft(linha["id"])
+        raise
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
         raise CheckoutIndisponivel("asaas_emissao_falhou") from exc
 
