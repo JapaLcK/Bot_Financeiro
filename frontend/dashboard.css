@@ -56,16 +56,39 @@ body.light {
 /* O modal era a única superfície grande que continuava ESCURA no tema claro —
    `rgba(14,16,30,.94)` com e sem `body.light` — e o `CLAUDE.md` da `.cl-row` já
    registrava isso como "um buraco pré-existente e geral": `--text` virava
-   #0f172a dentro dele, deixando os 18 títulos de modal a 1,01:1.
+   #0f172a dentro dele, deixando TODO título de modal a 1,01:1
+   (`document.querySelectorAll(".modal h3").length` para saber quantos são —
+   estava escrito 18 aqui, o comando responde 20 só no HTML estático, e ainda há
+   os modais que o `dashboard.js` monta; contagem não é fato de documentação).
    A saída NÃO é pintar a tinta de branco. Tentei, e a cada rodada aparecia
    outro filho com fundo próprio CLARO — `.user-dropdown`, `.period-pill
    option`, depois `.hbtn` e `.mock-cta.outline`, este último a 1,00:1 no hover.
    São uma FAMÍLIA inteira de regras `body.light X { background: claro }`
    (:85-105, :141, :499, :645, :1423…), e qualquer uma delas pode aparecer
    dentro de um modal hoje ou amanhã: consertar por instância é enxugar gelo.
-   O modal passa a ser claro no tema claro. Aí não há tinta branca em lugar
-   nenhum, os filhos de fundo claro funcionam sozinhos e os tokens normais
-   valem. Nenhuma regra escopada em modal escreve branco na mão (conferido). */
+   O modal passa a ser claro no tema claro. Os filhos que JÁ tinham fundo claro
+   funcionam sozinhos e quem pinta por TOKEN (`--glass-bg`, `--glass-border`,
+   `--div`, todos redefinidos no `body.light` acima) acompanha de graça.
+   O que NÃO acompanha, e é o custo real desta linha: quem escreveu
+   `rgba(255,255,255,…)` na mão. Aqui morava a frase "nenhuma regra escopada em
+   modal escreve branco na mão (conferido)", e ela era FALSA — escrita sem
+   reexaminar as regras que descrevia, virou fonte de verdade errada e produziu
+   CINCO rodadas de revisão, uma categoria por rodada: cor de texto (2×), o SVG
+   da seta do `.cat-select`, `background` branco translúcido (o bloco "Véus
+   dentro do modal claro") e `border` branca translúcida. É o mesmo erro que
+   aquele bloco também registra, e ele se repetiu porque a correção anterior
+   editou o comentário sem remedir a regra que ele descreve.
+   Não confie nesta frase nem na anterior: `tests/frontend/modal_claro_veu.test.mjs`
+   ENUMERA, por estilo computado de cada elemento real dentro de `.modal`, quem
+   pinta igual nos dois temas e some sobre a superfície clara. A pergunta se
+   responde rodando o teste, não lendo daqui.
+   O critério é por DECLARAÇÃO, nunca por seletor: `.sd-note` pinta a borda com
+   `var(--glass-border)` e ela seguiu viva; `.help-step` e `.detail-cell`
+   escreveram o literal e desapareceram. E o mesmo seletor pode estar dos dois
+   lados — `.bill-opt` usa o token em repouso e sobreviveu, mas o `:hover` dela
+   escrevia `rgba(255,255,255,.22)` na mão e sumia. Esta frase já esteve errada
+   uma vez, afirmando que a borda da `.bill-opt` estava inteira: estava, no
+   repouso; no hover, não. Remeça antes de reescrever esta frase. */
 body.light .modal { background:#fff; }
 
 html { scroll-behavior: smooth; }
@@ -1412,11 +1435,18 @@ input[type="checkbox"]:disabled {
   opacity: .45;
   cursor: not-allowed;
 }
-body.light input[type="checkbox"] {
+/* `:not(:checked)` nos dois: sem ele esta regra (0,2,2) vence
+   `input[type="checkbox"]:checked` (0,2,1) e apaga O ESTADO — o gradiente rosa
+   E a borda rosa. Enquanto o modal era escuro isso ficava mascarado: a caixa
+   compunha em rgb(14,16,28) e o ✓ branco do `::after` dava 18,97:1. Com o modal
+   branco a mesma caixa compõe em rgb(247,247,247) e o ✓ cai para 1,07:1 —
+   marcado e desmarcado viram a mesma coisa. Medido nas duas árvores.
+   Não é véu, é indicação de estado, e por isso não vai no bloco de véus. */
+body.light input[type="checkbox"]:not(:checked) {
   background: rgba(0,0,0,.03);
   border-color: rgba(0,0,0,.18);
 }
-body.light input[type="checkbox"]:hover:not(:disabled) {
+body.light input[type="checkbox"]:hover:not(:disabled):not(:checked) {
   background: rgba(255,45,142,.08);
   border-color: rgba(255,45,142,.45);
 }
@@ -1814,32 +1844,134 @@ body.light .modal-inp.cat-select {
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(15,23,42,.55)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
-/* ── Véus de fundo dentro do modal claro ───────────────────────────────────
-   Terceira e última categoria do modal branco, depois das cores de texto e do
-   SVG da seta: FUNDO branco translúcido. Sobre superfície escura um véu de 3 a
-   9% desenha o campo, a linha e o botão; sobre branco ele é branco no branco e
-   some. São 16 regras, e vão juntas para não virar mais uma rodada de caça a
-   irmãos — cada uma mantém o MESMO alpha, só trocando a tinta do véu, que é o
-   `rgba(15,23,42,…)` que o resto do tema claro já usa.
+/* Veio do `style` inline do `<pre>` no dashboard.html, sem trocar uma
+   declaração. O véu dele (`background` de 4%) é da mesma família do bloco
+   abaixo, e no atributo ele era INVISÍVEL para todo enumerador de CSS — foi o
+   único membro da categoria que sobreviveu às quatro primeiras rodadas por
+   isso. Fora do atributo ele ganha par `body.light` como todos os irmãos, numa
+   fonte de verdade só (§0.7). O `#id` é a especificidade que o inline tinha:
+   nada mais no arquivo mira este elemento, e o JS só escreve `textContent`. */
+#ofx-result-body {
+  white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text);
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:10px;padding:14px;max-height:60vh;overflow:auto;margin-bottom:18px;
+}
+/* ── Véus dentro do modal claro ────────────────────────────────────────────
+   Categoria do modal branco que veio depois das cores de texto e do SVG da
+   seta: VÉU branco translúcido. Sobre superfície escura um véu de 3 a 12%
+   desenha o campo, a linha e o botão; sobre branco ele é branco no branco e
+   some. A regra é trocar só a TINTA: onde o escuro escreve um literal branco, o
+   claro escreve `rgba(15,23,42,…)` com a mesma alpha; onde o escuro pinta por
+   TOKEN, o claro fica no token (`--glass-border` é .13 no escuro e .09 no
+   claro, e é assim que tem de ser — o token é a fonte de verdade da borda de
+   vidro). Por isso as duas bordas que este bloco repõe (`.help-step` e
+   `.detail-cell`, literal .08 no escuro) voltam por `var(--glass-border)` e não
+   por um literal escuro novo.
    Aqui mora o custo de um erro meu: quando o modal virou branco eu atualizei o
    comentário da `.cl-row` sem reexaminar a regra que ele descreve, e o hover
-   dela ficou invisível até o revisor apontar. */
-body.light .pkt-move-form                            { background:rgba(15,23,42,.03); }
+   dela ficou invisível até o revisor apontar. Isso se repetiu: o bloco nasceu
+   cuidando só de `background` — e `border` branca translúcida é véu igual, some
+   igual, e virou a rodada seguinte (`.help-step`, `.detail-cell`).
+   "Faltou alguém?" se responde rodando `tests/frontend/modal_claro_veu.test.mjs`,
+   não lendo uma lista escrita aqui — mas ele cobre `background-color`,
+   `border-color`, morte e ladrilhamento de `background-image` e salto de hover.
+   COR DE TEXTO e a cor do traço do SVG, que são as categorias das rodadas 1, 2
+   e 3, ele NÃO cobre; hoje o conjunto é vazio (os brancos que sobram são texto
+   sobre gradiente rosa ou vermelho), e é à mão que se confere. */
+body.light .pkt-move-form                            { background-color:rgba(15,23,42,.03); }
 body.light .pkt-hist-summary,
 body.light .pkt-hist-row,
 body.light .pkt-move-btn,
 body.light .pkt-move-form-acts button,
 body.light .ld-desc,
-body.light .receipt-cell                             { background:rgba(15,23,42,.04); }
+body.light .receipt-cell,
+body.light .bill-summary,
+body.light .bill-tx,
+body.light .sd-note,
+body.light #ofx-result-body                          { background-color:rgba(15,23,42,.04); }
 body.light .tipo-opt,
 body.light .vmode-opt,
-body.light .bill-opt                                 { background:rgba(15,23,42,.05); }
-body.light .cl-row:hover                             { background:rgba(15,23,42,.055); }
-body.light .modal-inp                                { background:rgba(15,23,42,.07); }
+body.light .bill-opt                                 { background-color:rgba(15,23,42,.05); }
+body.light .cl-row:hover,
+body.light .help-step,
+body.light .detail-cell                              { background-color:rgba(15,23,42,.055); }
+body.light .help-step,
+body.light .detail-cell                              { border-color:var(--glass-border); }
+body.light .modal-inp,
+body.light .btn-cancel                               { background-color:rgba(15,23,42,.07); }
 body.light .pkt-move-btn:hover,
 body.light .tipo-opt:hover,
-body.light .vmode-opt:hover                          { background:rgba(15,23,42,.08); }
-body.light .bill-opt:hover                           { background:rgba(15,23,42,.09); }
+body.light .vmode-opt:hover                          { background-color:rgba(15,23,42,.08); }
+/* A borda do HOVER é a 6ª irmã da categoria, e escapou de novo: `.bill-opt`
+   pinta a borda de repouso com `var(--glass-border)` (por isso sobrevive) mas
+   o `:hover` dela escreve `rgba(255,255,255,.22)` na mão. Sobre modal branco a
+   borda SUMIA justamente ao passar o mouse — |ΔL*| 7,27 em repouso, 0,00 no
+   hover, o inverso do feedback. Mesma alpha, tinta trocada. */
+body.light .bill-opt:hover                           { background-color:rgba(15,23,42,.09);
+                                                       border-color:rgba(15,23,42,.22); }
+body.light .btn-cancel:hover                         { background-color:rgba(15,23,42,.12); }
+/* Daqui para baixo vêm as regras ESCOPADAS EM `.modal`, e o motivo é sempre o
+   mesmo: a classe também vive fora de modal, onde já estava quebrada no tema
+   claro antes deste PR (véu branco sobre `--bg-page` claro) e continua fora do
+   escopo dele. Contagem por `document.querySelectorAll(sel)` filtrando
+   `closest('.modal')`, no dashboard.html estático:
+     `.field input`/`.field select` .. 23 dentro, 10 fora (boleto e simulador)
+     `.bar-icon` .................... 0 dentro, 3 fora  (o de dentro vem do JS)
+     `.hbtn` ....................... 2 dentro, 5 fora
+     `.mock-cta.outline` ........... 0 dentro, 2 fora  (os de dentro vêm do JS)
+   Remedir com o comando acima antes de reusar estes números.
+   `:not([type="checkbox"])` não é enfeite: sem ele esta regra bate no checkbox
+   e ele perde o véu próprio de `body.light input[type="checkbox"]:not(:checked)`
+   — que era, aliás, o falso positivo que casamento de seletor por TEXTO não
+   enxerga e estilo computado enxerga. Com o `:not` a regra é (0,4,2) e a do
+   checkbox (0,3,2); sem ele seriam (0,3,2) as duas, e quem decidiria seria a
+   ORDEM DE ORIGEM — esta regra vem depois e ganharia.
+   `background-color`, NUNCA o shorthand `background`: estas regras batem em
+   `<select>` que é `.modal-inp.cat-select`, cuja seta é um `background-image`
+   embutido (a correção da 3ª rodada, logo acima). O shorthand zera
+   `background-image` E a geometria (`repeat`/`position`): a 1ª versão daqui
+   apagou a seta de 4 selects, e a 2ª, com a imagem reposta por regra mais
+   específica, deixou a seta LADRILHADA nos 9. O caso 'nenhum background-image
+   morre no tema claro' guarda as duas coisas.
+   Sobre esta regra passar por cima de `body.light .modal-inp` (0,2,1): é de
+   propósito e reproduz o ESCURO, onde `.field input` (0,1,1) já vence
+   `.modal-inp` (0,1,0). Medido: input/select dentro de `.field` dá .06 nos DOIS
+   temas; `.modal-inp` fora de `.field` dá .07 nos dois.
+   A mesma alpha em cada elemento nos dois temas é a INTENÇÃO deste bloco, e
+   nada a verifica: o teste compara a tinta dos dois temas só para descartar o
+   que foi pensado por tema, e o cabeçalho dele registra, na cegueira (a), que
+   assertar paridade de alpha esbarra em exceções legítimas (`--glass-border` é
+   .13 no escuro e .09 no claro). Quem mexer aqui confere à mão. */
+body.light .modal .field input:not([type="checkbox"]),
+body.light .modal .field select                      { background-color:rgba(15,23,42,.06); }
+body.light .modal .field input:not([type="checkbox"]):focus,
+body.light .modal .field select:focus                { background-color:rgba(15,23,42,.1); }
+/* `.bar-icon` também vive dos dois lados: no gráfico de distribuição e nos
+   cards (fora de modal, quebrado no claro desde antes) E dentro do `.cl-modal`,
+   porque `_clRowsHtml` monta `<div class="bar-row cl-row">` com um `.bar-icon`
+   dentro e joga em `#cl-list`. Só apareceu quando o extrator do teste passou a
+   resolver o markup que vem de função auxiliar. */
+body.light .modal .bar-icon                          { background-color:rgba(15,23,42,.06); }
+/* `.hbtn` é superfície clara DELIBERADA (`rgba(255,255,255,.7)` no claro), e a
+   borda por token segura o botão em repouso. O que este PR quebrou foi o HOVER:
+   ele ia para `#fff`, o que sobre o modal ESCURO dava ΔE 25,50 e sobre o modal
+   branco dá 0,00 — os dois botões de navegação da fatura ficaram sem retorno
+   nenhum ao passar o mouse. Só o hover muda, e só dentro de modal. */
+body.light .modal .hbtn:hover                        { background-color:rgba(15,23,42,.08); }
+/* Mesmo defeito, outra família, e esta o `body.light` já tratava — mal:
+   `body.light .mock-cta.outline:hover { background:#fff }` era um hover forte
+   enquanto o modal era escuro e virou ZERO sobre o modal branco, em 4 botões,
+   entre eles o "Carregar mais" e os de arquivar/desarquivar. Os três saltos,
+   medidos com o harness do teste (ΔE entre repouso e hover, composto sobre a
+   superfície do modal ancestral):
+     tema claro sobre o modal escuro da `main` .... 32,34
+     tema ESCURO (o que o teste usa como noEscuro)   6,78
+     tema claro sobre o modal branco, já corrigido   6,51
+   A frase anterior colava o 6,78 na primeira linha, que é a errada: 6,78 é o
+   salto do tema escuro. É a classe que o teste declarava como cega —
+   regressão escrita DENTRO do ramo `body.light` — e ela deixou de ser teórica:
+   o caso do hover a pegou. */
+body.light .modal .mock-cta.outline:hover            { background-color:rgba(15,23,42,.08); }
 
 .modal-error { background:rgba(255,45,45,.1);border:1px solid rgba(255,45,45,.28);
   color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
