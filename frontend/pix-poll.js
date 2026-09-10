@@ -302,11 +302,21 @@ function pixModalMigracao(plano, det, documento, ctx) {
 }
 
 // 409 pix_future_purchase_conflict: caixa e não toast — reenviar dá o mesmo 409.
+//
+// A frase NÃO nomeia plano, de propósito: quem bloqueia pode ser um grant de
+// OUTRO tier. O `plano_da_cobranca` junta `pix_futuro_pago` (qualquer Pix futuro,
+// de qualquer tier) com `cobre_o_tier` e levanta `CoberturaJaPaga(plano_novo, …)`
+// — o `plan` que volta no corpo do 409 é o PEDIDO, não o pago
+// (core/services/pix_pricing.py:230-240; o caso Plus futuro → Pro está em
+// tests/test_pix_recompra.py:109). "Você já pagou esse plano" era falso ali, numa
+// tela de dinheiro. O que é verdade nos dois caminhos: existe período pago até
+// tal dia, e por isso não há cobrança agora.
 function pixModalJaPago(dia, ctx) {
   pixApagarDoc();                       // o formulário sai, e o CPF com ele
-  ctx.titulo.textContent = "Esse ano já é seu";
+  ctx.titulo.textContent = "Você já tem tempo pago";
   const ok = pixBotao("btn-primary", "Entendi");
   ok.addEventListener("click", () => ctx.fechar());
-  ctx.box.replaceChildren(ctx.titulo, pixLinha("Você já pagou esse plano até " + fmtBrDate(dia) + ". Não cobramos nada agora."), ok);
+  ctx.box.replaceChildren(ctx.titulo, pixLinha("Seu período pago vai até "
+    + fmtBrDate(dia) + ". Por isso não cobramos nada agora."), ok);
   ok.focus();
 }

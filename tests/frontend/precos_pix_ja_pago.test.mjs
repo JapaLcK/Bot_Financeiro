@@ -99,7 +99,7 @@ test("conflito: a caixa nomeia a data já paga, e não o genérico", async () =>
   const page = await tentarComprar({ httpStatus: 409, corpo: CONFLITO });
   const t = await tela(page);
   assert.match(t.caixa, /06\/07\/2028/, "a data de covered_until não apareceu na tela");
-  assert.match(t.caixa, /Esse ano já é seu/);
+  assert.match(t.caixa, /Você já tem tempo pago/);
   assert.equal(t.toastVisivel, false, "o aviso genérico apareceu junto da caixa");
   assert.ok(!t.corpo.includes(GENERICO), "a tela ainda mostra a frase genérica");
   // PII: o formulário sai da tela junto com o documento digitado.
@@ -119,6 +119,44 @@ test("conflito em 390x844: a caixa cabe na tela do celular", async () => {
   assert.match(await page.$eval(".pix-box", (e) => e.textContent), /06\/07\/2028/);
   await page.close();
 });
+
+// ── O tier que bloqueia não é o tier pedido (P2 do Codex no #361) ───────────
+//
+// `plano_da_cobranca` junta `pix_futuro_pago` — QUALQUER Pix futuro, de qualquer
+// tier — com `cobre_o_tier`, e levanta `CoberturaJaPaga(plano_novo, …)`: o `plan`
+// do corpo é o PEDIDO, não o pago (core/services/pix_pricing.py:230-240, caso em
+// tests/test_pix_recompra.py:109 — grant Plus futuro, compra de Pro, recusada com
+// a data do PLUS). Aqui o clique é no Plus e o 409 volta com "pro_max": a caixa
+// não pode afirmar que o plano clicado (nem o do corpo) já foi pago, senão manda
+// o cliente esperar um acesso que ele não comprou.
+//
+// Negativo: volte a frase antiga ("Esse ano já é seu" / "Você já pagou esse
+// plano até …") e ESTE caso fica vermelho — ele estava verde.
+test("conflito: a caixa não afirma QUAL plano foi pago", async () => {
+  const page = await tentarComprar({ httpStatus: 409, corpo: CONFLITO });
+  const t = await tela(page);
+  assert.doesNotMatch(t.caixa, /esse plano|este plano|já é seu|seu plano/i,
+    `a caixa afirma posse do plano pedido: ${JSON.stringify(t.caixa)}`);
+  assert.doesNotMatch(t.caixa, /\b(pro|pro_max|plus|essencial)\b/i,
+    `a caixa nomeia um plano que pode não ser o pago: ${JSON.stringify(t.caixa)}`);
+  assert.match(t.caixa, /06\/07\/2028/, "a data já paga sumiu junto com a frase");
+  await page.close();
+});
+
+// Controle POSITIVO da dupla acima: sem ele, uma caixa VAZIA (ou só "Entendi")
+// passaria nas duas asserções de ausência. O caso simples — o plano do corpo é o
+// mesmo que foi clicado — tem de continuar dizendo o que houve e até quando.
+test("conflito do MESMO plano: a caixa segue dizendo até quando e que não cobrou",
+  async () => {
+    const page = await tentarComprar({ httpStatus: 409, corpo: {
+      error: "pix_future_purchase_conflict", plan: "plus",
+      covered_until: "2027-03-02T00:00:00+00:00" } });
+    const t = await tela(page);
+    assert.match(t.caixa, /02\/03\/2027/, "a data de covered_until não apareceu");
+    assert.match(t.caixa, /não cobramos nada agora/i,
+      `a caixa não explica que a compra não foi cobrada: ${JSON.stringify(t.caixa)}`);
+    await page.close();
+  });
 
 // Controle POSITIVO: sem este caso, um código que desse mensagem específica para
 // qualquer erro passaria no caso de cima.
@@ -140,7 +178,7 @@ test("500 continua no genérico", async () => {
   const t = await tela(page);
   assert.equal(t.toast, GENERICO, "o 500 devia cair no aviso genérico");
   assert.equal(t.toastVisivel, true);
-  assert.ok(!t.caixa.includes("Esse ano já é seu"), "o 500 abriu a caixa do conflito");
+  assert.ok(!t.caixa.includes("Você já tem tempo pago"), "o 500 abriu a caixa do conflito");
   await page.close();
 });
 
@@ -151,7 +189,7 @@ test("conflito sem covered_until cai no genérico, sem 'undefined'", async () =>
   const t = await tela(page);
   assert.equal(t.toast, GENERICO);
   assert.ok(!t.corpo.includes("undefined"), "escreveu 'undefined' na tela");
-  assert.ok(!t.caixa.includes("Esse ano já é seu"));
+  assert.ok(!t.caixa.includes("Você já tem tempo pago"));
   await page.close();
 });
 
