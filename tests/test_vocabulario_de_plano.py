@@ -185,14 +185,40 @@ def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
         f"'{plan}': Pix {pix.status_code} × Stripe {stripe.status_code}")
 
 
+# CEGUEIRA CONHECIDA da tabela acima: ela sempre manda a chave `plan` (nem que
+# seja `""`), então nunca vê um corpo SEM a chave — e é exatamente aí que as
+# três rotas divergem (medido em 2026-09-10; comando: POST com
+# `{"interval":"annual"}` em cada uma):
+#
+#   /billing/create-checkout → 400 `plan inválido ...`   (detail STRING)
+#   /billing/pix/checkout    → 422 `Field required`      (detail LISTA)
+#   /billing/change-plan     → 422 `Field required`      (detail LISTA)
+#
+# Só o Stripe dá 400 porque só ele tem `plan: str = ""` no modelo, e só ele tem
+# porque só ele aceita POST sem body nenhum (`payload: ... | None = None`) —
+# a razão inteira está na docstring de `billing_create_checkout`. Não entra na
+# tabela: a asserção dela é de IGUALDADE entre as colunas, e aqui a diferença é
+# intencional. Fica ANOTADO porque `frontend/pix-checkout.js:269` tem a mesma
+# forma de `JSON.stringify` que apagou a chave e gerou a #352: se um dia ela
+# apagar `plan`, o Pix responde 422 e a /precos mostra o fallback genérico.
+
+
 # ── /billing/change-plan: a mesma normalização, com semântica própria ────────
 #
-# Esta rota fica FORA da tabela de duas colunas acima de propósito: ela não é
-# checkout — não cobra nada, e o veredito dela para um plano válido é 409
-# `no_subscription` (estado da assinatura), não 200/503 (estado da venda).
-# Comparar os dois vereditos na mesma parametrização forçaria semântica
-# diferente para dentro da mesma tabela; o que se compartilha é o vocabulário,
-# que é o assunto do arquivo.
+# Esta rota fica FORA da tabela de duas colunas acima, e a razão NÃO é
+# incompatibilidade de status — essa foi medida e é FALSA: `_recusa_o_plano` já
+# colapsa 200 e 503 em "não é recusa de plano", e colapsaria 409 igual. Uma
+# terceira coluna PASSA: medido em 2026-09-10, as 8 linhas concordaram
+# (`essencial/plus/pro/PLUS/" plus "` → pix 200, stripe 503, change 503, os três
+# `recusa=False`; `pro_max/free/""` → 400 nos três), sem monkeypatch nenhum.
+#
+# O que a coluna não saberia dizer é o que este grupo mede a mais:
+#   * a ACEITAÇÃO aqui é o 409 `no_subscription` ESPECÍFICO, não "qualquer
+#     coisa que não seja 400 `plan inválido`";
+#   * a RECUSA é medida pelo TRABALHO — `chamadas == []`, a rota nem leu a
+#     conta. O predicado da tabela só enxerga status.
+# Pôr a coluna e ainda manter isto deixaria a metade do vocabulário em dois
+# lugares (§0.7); fica o teste, que mede as duas coisas.
 #
 # CONTROLES DO GRUPO:
 #   * NEGATIVO — tire o `.strip()` de `plan = (payload.plan or "").strip().lower()`

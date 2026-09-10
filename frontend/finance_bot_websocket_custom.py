@@ -4150,8 +4150,11 @@ class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
     # `plan` NÃO tem default de plano: ausente ou vazio é 400 na rota, nunca uma
     # compra de Plus em silêncio (o default histórico era `"plus"`). O `""` aqui
-    # existe só pra o caso ausente cair no MESMO 400 `plan inválido` do gêmeo do
-    # Pix, em vez de num 422 com outro formato de corpo.
+    # faz a chave AUSENTE cair no mesmo 400 `plan inválido` da chave vazia, em
+    # vez de num 422 `Field required` que a /precos só sabe mostrar como erro
+    # genérico. Por que 400 e não corpo obrigatório: docstring de
+    # `billing_create_checkout`. O Pix, com `plan: str`, dá 422 na chave ausente
+    # — divergência anotada em `tests/test_vocabulario_de_plano.py`.
     plan: str = ""             # "essencial" | "plus" | "pro"
 
 
@@ -4464,19 +4467,56 @@ async def billing_create_checkout(
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
-    """
-    Cria uma sessão de checkout no Stripe para o plano escolhido.
+    """Cria a sessão de checkout no Stripe para o plano escolhido.
+
     Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
            "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+
+    `plan` é obrigatório NA ROTA e opcional no modelo. A terceira opção (§1) —
+    corpo obrigatório, `payload: CreateCheckoutBody` sem `| None` — foi
+    enumerada antes de ser descartada, e são duas coisas diferentes:
+
+      * campo obrigatório no modelo (`plan: str` sem default) NÃO fecha o caso
+        do relato. Com `| None = None` na assinatura, um POST sem body nenhum
+        não chega a instanciar o modelo: o FastAPI entrega `payload is None` e
+        a rota respondia 200 sem plano nenhum. Nenhum 422 sairia daí — é esta
+        a razão que sustenta a guarda ser aqui, na rota;
+      * corpo obrigatório fecharia OS DOIS casos na camada do Pydantic, e é uma
+        alternativa legítima. Fica de fora porque troca o 400 `plan inválido
+        (use 'essencial', 'plus' ou 'pro')` por um 422 cujo `detail` é uma
+        LISTA: a /precos (`precos.html:1018-1023`) lê `detail` como string ou
+        `detail.message`, uma lista não casa com nenhum dos dois e o clique cai
+        no fallback "Não foi possível iniciar o checkout." — genérico, porém
+        CORRETO (não é JSON cru na tela nem mensagem errada). O 400 daqui ganha
+        por ser específico, não por evitar um estrago.
+
+    Cliente antigo: `startCheckout('monthly', this)`, SEM plano, existiu em 30
+    das 60 revisões da precos.html, a última em `0a37439` (2026-08-06); esse JS
+    manda `{"interval":"monthly"}` e a partir daqui leva 400. Sobra UM chamador
+    real, o mesmo vetor da `/billing/select-free` logo abaixo: a aba com a
+    /precos ANTIGA já carregada no instante do deploy — ali o 400 vira o texto
+    de erro do próprio `startCheckout`, e um reload traz a página nova. Os
+    outros vetores estão fechados: o HTML sai `no-store`
+    (`frontend/routes/shared.py:266`) e o service worker não intercepta
+    navegação (`frontend/service-worker.js:103`), então não existe /precos
+    velha servida por cache HTTP nem por PWA.
     """
-    interval = (payload.interval if payload else "monthly")
+    # Sem body, `payload` chega None (o modelo nem é instanciado) — um default
+    # aqui evita repetir `if payload else` em cada campo. Não é caminho de
+    # sucesso: sem `plan` a validação abaixo recusa com 400.
+    payload = payload if payload is not None else CreateCheckoutBody()
+    # Expressão IDÊNTICA à da `/billing/change-plan`, a única outra rota que
+    # recebe `interval` (o Pix é anual e só): sem o `.lower()`, `"ANNUAL"` era
+    # 400 aqui e 409 lá. `.strip()` não entra — `plan` precisa dele porque
+    # divergia de verdade entre as rotas, `interval` não (§0.2).
+    interval = (payload.interval or "monthly").lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
     # Mesma normalização do gêmeo do Pix (`frontend/routes/billing_pix.py`): sem o
     # `.strip()` aqui, `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando
     # as duas. Sem plano é 400, não Plus (issue #352).
-    plan = (payload.plan if payload else "").strip().lower()
+    plan = (payload.plan or "").strip().lower()
     if plan not in ("essencial", "plus", "pro"):
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
@@ -4699,12 +4739,14 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
+    # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
+    # únicas rotas que recebem `interval`, e o `.lower()` faltava LÁ, não aqui.
     interval = (payload.interval or "monthly").lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    # Terceira rota que recebe plano, mesma normalização das duas de checkout
-    # (§2: um caso corrigido não é a categoria resolvida). Sem plano continua
-    # 400 aqui — nunca houve `or "plus"` nesta rota (issue #352).
+    # Terceira rota que recebe plano, mesma normalização de `plan` das duas de
+    # checkout (§2: um caso corrigido não é a categoria resolvida). Sem plano
+    # continua 400 aqui — nunca houve `or "plus"` nesta rota (issue #352).
     plan = (payload.plan or "").strip().lower()
     if plan not in ("essencial", "plus", "pro"):
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")

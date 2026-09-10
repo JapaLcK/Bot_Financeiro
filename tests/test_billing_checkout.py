@@ -6,7 +6,8 @@ Cobre:
   desde #352: sem ele é 400, não uma compra de Plus em silêncio)
 - interval=annual usa STRIPE_PRICE_ID_PRO_ANUAL
 - interval=monthly cai no fallback STRIPE_PRICE_ID_PRO se MENSAL nao setado
-- interval invalido retorna 400
+- interval invalido retorna 400, e `"ANNUAL"` NÃO é inválido (mesma
+  normalização da /billing/change-plan)
 - 503 se Stripe nao configurado para o interval pedido
 - reaproveita stripe_customer_id existente
 """
@@ -250,7 +251,10 @@ def _stripe_pronto(monkeypatch):
     {},                        # body vazio
     {"interval": "annual"},    # o caso do relato: interval sem plan
     {"plan": ""},
-    {"plan": "   "},           # só espaços — o `.strip()` não pode ressuscitar o default
+    # `"   "` NÃO discrimina: sob a mutação do bug (`or "plus"`), `"   " or
+    # "plus"` devolve `"   "`, que já era 400 antes do conserto. Fica como
+    # companhia do grupo, e não pode ser citado como prova de nada (§7).
+    {"plan": "   "},
 ], ids=["sem-body", "body-vazio", "so-interval", "plan-vazio", "plan-so-espacos"])
 def test_checkout_sem_plano_e_400_e_nao_vende_plus(request, user_id, monkeypatch, corpo):
     """Sem plano no corpo, a rota RECUSA — não vende Plus em silêncio (#352).
@@ -303,6 +307,33 @@ def test_checkout_aceita_plano_com_espacos_como_o_pix(user_id, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert resp.json()["plan"] == "plus"
     assert fake.session_create_calls == 1
+
+
+def test_checkout_aceita_interval_em_caixa_alta_como_a_troca(user_id, monkeypatch):
+    """`interval` normaliza IGUAL à `/billing/change-plan` (§0.7): `"ANNUAL"`
+    era 400 aqui e 409 lá, com UM só JS alimentando as duas.
+
+    A asserção é o PRICE ID, não só o status: um `annual` mal normalizado que
+    caísse em `monthly` sairia 200 e venderia o plano mensal com cara de acerto.
+
+    CONTROLE NEGATIVO deste caso: troque a linha do `interval` na rota
+    (`frontend/finance_bot_websocket_custom.py`, `billing_create_checkout`) de
+    `(payload.interval or "monthly").lower()` por `(payload.interval or
+    "monthly")` e este teste fica VERMELHO em 400
+    `interval inválido`. Injetado num caso VERDE — `annual` sem espaços passa
+    com e sem o conserto (`test_checkout_annual_uses_annual_price` é ele).
+    """
+    _, _, client = _auth_user_setup(f"interval-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout",
+                       json={"plan": "plus", "interval": "ANNUAL"},
+                       headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["interval"] == "annual"
+    assert fake.last_session_kwargs["line_items"] == [
+        {"price": "price_anual_xyz", "quantity": 1}
+    ]
 
 
 def test_checkout_returns_503_when_annual_price_missing(user_id, monkeypatch):
