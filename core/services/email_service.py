@@ -1374,3 +1374,83 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
         to=to, subject=f"{nome} — assinatura cancelada",
         html_body=html, text_body=text,
     )
+
+
+def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
+                                cobranca_pendente: bool = False) -> bool:
+    """Aviso de que o acesso Grátis termina na DATA DO CORTE.
+
+    Disparado à mão por `scripts/aviso_fim_do_gratis.py`, antes de a regra de
+    acesso entrar no ar (o merge daquele PR é o evento de corte, porque o
+    Railway faz deploy da `main`). Vai para quem tem acesso HOJE e não terá
+    depois — quem já está barrado pela escolha de plano não recebe.
+
+    **TRANSACIONAL, no molde de `send_payment_failed_email` e
+    `send_subscription_canceled_email`: sem `make_unsub_url` e sem
+    `unsub_headers`.** Quem desligou os e-mails do Piggy desligou dicas e
+    insights (`engagement_opt_out` é derivado de `tip_email_opt_out AND
+    insight_email_opt_out`, `db/reports.py`), e o bot lhe prometeu que "os
+    emails de segurança continuam normais" (`core/intent_router.py`). Ninguém
+    consentiu em abrir mão do aviso de que o serviço acaba.
+
+    **SEM promessa de trial**, e isso é requisito medido, não estilo: o trial é
+    de 15 dias por TELEFONE, na vida (`db/plans.py::claim_trial_for_user`), e
+    esta lista tem ex-assinante que já o usou. Prometer "teste 15 dias grátis"
+    a quem não pode mais tê-lo é copy falsa.
+
+    **DOIS COORTES, e `cobranca_pendente` é o que os separa.** A população do
+    aviso não é só gente no Grátis: entra também quem tem assinatura VIVA na
+    Stripe com o cartão recusado há mais que a carência (o smart retry vai a
+    ~3 semanas) e o período pago já vencido. Chamar essa conta de "plano
+    Grátis" é falso e contradiz os dois e-mails que ela já recebeu (falha de
+    pagamento e lembrete de cobrança) — então a frase da situação e o CTA
+    mudam: para ela o caminho é atualizar o cartão, não escolher um plano.
+    Quem passa o flag é `scripts/aviso_fim_do_gratis.py`, com leitura fresca
+    de `db.dunning.ciclo_de_atraso_aberto` no ponto do envio.
+    """
+    data = _fmt_brl_date(corte)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    if cobranca_pendente:
+        situacao_html = ("A cobrança da sua assinatura <strong>não passou</strong> "
+                         "e o período que você já pagou venceu")
+        situacao_text = ("A cobranca da sua assinatura nao passou e o periodo que "
+                         "voce ja pagou venceu")
+        acao_html, acao_text = "Atualizar cartão", "Atualize o cartao"
+        destino = f"{dash}/conta"
+    else:
+        situacao_html = ("Sua conta hoje está no plano <strong>Grátis</strong> "
+                         "(ou sem plano ativo)")
+        situacao_text = "Sua conta hoje esta no plano Gratis (ou sem plano ativo)"
+        acao_html, acao_text = "Ver os planos", "Escolha um plano"
+        destino = f"{dash}/precos"
+    content = f"""
+      <p>🐷 Oi! Preciso te contar uma mudança importante.</p>
+      <p>A partir de <strong>{data}</strong>, o PigBank passa a funcionar
+      <strong>só para assinantes</strong>. {situacao_html}, então nessa data o
+      <strong>Piggy no WhatsApp</strong> e o <strong>dashboard</strong> param
+      de responder.</p>
+      <p>Seus dados continuam guardados — nada é apagado. Para não ter
+      interrupção, resolva antes de {data}:</p>
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{destino}">{acao_html}</a>
+      </p>
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Se sua assinatura
+      já estiver ativa quando você ler isto, pode ignorar este email: quem está
+      com plano ativo não é afetado.</p>
+    """
+    html = _base_html(f"Seu acesso ao PigBank termina em {data}", content)
+    text = (
+        f"PigBank — seu acesso termina em {data}.\n\n"
+        f"A partir de {data} o PigBank passa a funcionar so para assinantes. "
+        f"{situacao_text}, entao nessa data o Piggy no WhatsApp e o dashboard "
+        "param de responder.\n\n"
+        "Seus dados continuam guardados — nada e apagado. Para nao ter "
+        f"interrupcao, resolva antes de {data}:\n"
+        f"{acao_text}: {destino}\n\n"
+        "Se sua assinatura ja estiver ativa quando voce ler isto, pode ignorar "
+        "este email: quem esta com plano ativo nao e afetado."
+    )
+    return send_email(
+        to=to, subject=f"🐷 PigBank — seu acesso termina em {data}",
+        html_body=html, text_body=text,
+    )
