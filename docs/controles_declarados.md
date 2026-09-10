@@ -53,7 +53,17 @@ coisa que o conserto **é**, e o nome da variável é só onde ele mora hoje.
 
 E um corolário, quando a mesma injeção tem mais de uma grafia: **se duas
 variantes produzem o MESMO vermelho, fique com uma** (é a patologia
-"degenerado", abaixo); **se produzem vermelhos DIFERENTES, elas são injeções
+"degenerado", abaixo) — **e "mesmo vermelho" é critério de GRAFIA, não de
+controle.** Num teste DIFERENCIAL (uma SQL comparada com um predicado Python
+sobre um espaço de contas) qualquer injeção em qualquer termo do `where` cai
+nas mesmas duas ou três asserções, então o nome do vermelho não separa nada:
+medidos, três controles de `tests/test_aviso_fim_do_gratis.py` (caixa do
+status, largura da janela, restrição do relógio ao Grátis) dão o MESMO
+conjunto de vermelhos e nenhum é degenerado. Ali o critério é **qual CONTA
+muda de lado e em que DIREÇÃO** — falso positivo (avisa quem tem direito) e
+falso negativo (corta sem avisar) são propriedades opostas, e um controle que
+só existe numa das direções não é cópia do outro. Nesses arquivos, **nomeie a
+conta e a direção junto com o vermelho**; **se produzem vermelhos DIFERENTES, elas são injeções
 diferentes — nomeie qual delas a instrução manda aplicar.** O segundo caso não
 é teórico: um controle desta família oferecia "descarte o retorno do gate" e
 "apague o bloco do gate" como equivalentes, e um teste novo de fail-closed
@@ -100,10 +110,38 @@ O remédio não é redigir com mais cuidado, é **trocar o eixo da injeção: AL
 em vez de apagar.** Onde a instrução mandava apagar o termo de status do `where`,
 ela passou a mandar trocar `list(PAST_DUE_PAYMENT_STATUSES)` por
 `list(PAST_DUE_PAYMENT_STATUSES) + ["active"]` — o termo continua lá e deixa de
-discriminar, nada é removido, **não há expressão para quebrar sob nenhuma
-leitura**, e as duas grafias plausíveis foram medidas dando o mesmo vermelho.
-Regra prática: se o guard é fail-closed, prefira injeção que muda um VALOR à
-que apaga um PEDAÇO DE CÓDIGO.
+discriminar, nada é removido, e as duas grafias plausíveis foram medidas dando
+o mesmo vermelho. Regra prática: se o guard é fail-closed, prefira injeção que
+muda um VALOR à que apaga um PEDAÇO DE CÓDIGO.
+
+**Mas "alargar" não é seguro por construção, e esta seção já afirmou que era.**
+A versão anterior dizia que assim "não há expressão para quebrar sob nenhuma
+leitura". Há: alargar ALÉM DO DOMÍNIO do tipo quebra igual. Medido na guarda de
+data de `scripts/aviso_fim_do_gratis.py`, cuja faixa é
+`hoje <= corte <= hoje + timedelta(days=MAX_DIAS_ATE_O_CORTE)`:
+
+| injeção | resultado |
+|---|---|
+| `MAX_DIAS_ATE_O_CORTE = 100000` | **tudo verde** — não alcança o caso |
+| `= 100_000_000` | **cinco vermelhos, incluindo o POSITIVO**, e o declarado entre eles por motivo errado |
+| trocar o teto por `date.max` | só o vermelho declarado |
+
+No caso de `100_000_000` quem estoura **não é sempre a comparação**: para uma
+data no passado a comparação encadeada faz curto-circuito em `hoje <= corte` e
+nunca avalia o teto — quem morre é a **própria mensagem de erro**, que recomputa
+`hoje + timedelta(days=MAX)` para dizer a faixa ao operador. Nos dois ramos sai
+`OverflowError` no lugar do `SystemExit` esperado, e a leitura se inverte do
+mesmo jeito. Alargue **até o valor que faz o guard deixar de discriminar**, não
+até o infinito; se o tipo tiver domínio finito (data, inteiro de coluna,
+enum), a injeção certa é a CONSTANTE DE FRONTEIRA daquele domínio.
+
+**Injeção pela constante de que o próprio caso do teste é DERIVADO** — a
+segunda patologia nova, e ela deixa tudo verde. O caso de borda daquele teste
+era `hoje + MAX_DIAS_ATE_O_CORTE + 1`: alargar `MAX` move o caso junto com o
+guard, e a injeção fica invisível. O remédio é o teste ter também um caso
+**absoluto** (ali, `9999-12-31`, o ano digitado errado que a guarda existe para
+pegar). Regra prática: **se o caso do teste se escreve em função da constante,
+ele não pode ser o único caso.**
 
 ## Como conferir
 

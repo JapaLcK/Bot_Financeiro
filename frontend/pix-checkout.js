@@ -1,9 +1,9 @@
 /**
  * Pix anual na /precos — o CTA nos cards, o overlay e o checkout.
  *
- * O QR, a cópia e o poll moram no pix-poll.js (par deste arquivo; os dois
- * dividem o escopo global e a divisão é do teto de 350 linhas do
- * `quality/max-lines`).
+ * O QR, a cópia, o poll e as duas caixas de recusa do 409 moram no pix-poll.js
+ * (par deste arquivo; os dois dividem o escopo global e a divisão é do teto de
+ * 350 linhas do `quality/max-lines` — foi ele que mandou as caixas para lá).
  *
  * Script CLÁSSICO (sem módulo ES) de propósito: a precos.html chama
  * `pbPixInit`/`pbPixRefresh` do escopo global e este arquivo lê de lá o que ela já
@@ -184,8 +184,9 @@ function pixApagarDoc() {
 /**
  * Só a FORMA: 11 dígitos (CPF) ou 14 (CNPJ), depois de tirar a pontuação.
  *
- * O dígito verificador NÃO se confere aqui: quem valida documento é o Asaas, e
- * uma segunda cópia da regra recusaria na tela o que o provedor aceita (§0.7).
+ * O dígito verificador NÃO se confere aqui: quem confere o mod-11 é o SERVIDOR,
+ * e uma cópia só da regra é a do §0.7. O Asaas segue sendo a autoridade final —
+ * ele recusa por regras próprias documento estruturalmente válido.
  */
 const pixDigitos = (v) => String(v || "").replace(/\D/g, "");
 const pixFormaOk = (d) => d.length === 11 || d.length === 14;
@@ -289,10 +290,32 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
       }, 900);
       return;
     }
-    const det = (d && d.detail) || {};
+    // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`
+    // em todo `HTTPException(detail="…")`, e aqui isso caía num `det.message`
+    // undefined — a frase que o servidor escreveu era descartada e o cliente lia o
+    // genérico. São cinco: os dois 400 (plano, documento), o 429 do limitador (por
+    // IP — routes/shared.py:98, então não é só quem digitou que o toma), o 503 da
+    // indisponibilidade e o 403 do CSRF, de que o checkout não tem isenção.
+    // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
+    // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
+    // no genérico. O #355 consertou o mesmo defeito só no toast; normalizar aqui
+    // em cima cobre o toast E as duas caixas do 409 de uma vez — por isso o
+    // rebase deixou UMA das duas versões, não as duas.
+    const det = (d && (typeof d.detail === "string" ? { message: d.detail } : d.detail)) || {};
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
     }
+    // Guarda de FORMA, não de data: "2028-13-45" passa e a tela escreve
+    // "45/13/2028" (medido). Não se aperta porque não é alcançável — o
+    // `covered_until` é o `isoformat()` de um timestamptz (billing_pix.py:107). O
+    // que ela barra é o que já chegava: ausente, ou texto livre virando "undefined".
+    // ponytail: e o dia recortado é o do calendário UTC, não o de Brasília — compra
+    // entre 21h e 24h (3 das 24 horas) nomeia o dia seguinte. Categoria, não caso:
+    // o `pixModalMigracao` e o pix-poll.js:54 recortam igual. Fechar é converter o
+    // fuso nos três, não recortar string.
+    const pago = det.error === "pix_future_purchase_conflict"
+      && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
+    if (r.status === 409 && pago) return pixModalJaPago(pago[0], ctx);
     if (!r.ok) return showToast(det.message || "Não consegui gerar o código Pix agora.", "err");
     pixApagarDoc();          // o QR vai entrar: o documento sai da tela antes
     pixModalQr(d, plano, ctx);
@@ -303,30 +326,6 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // formulário e reanimá-lo seria escrever num nó que ninguém vê.
     if (botao.isConnected) { botao.disabled = false; botao.textContent = rotulo; }
   }
-}
-
-/** 409 stripe_active: a migração cartão → Pix (§9 do plano). Mesmo modal. */
-function pixModalMigracao(plano, det, documento, ctx) {
-  const { box, fechar, titulo } = ctx;
-  // O documento sai da tela agora — esta caixa decide sobre o Stripe, e o número
-  // segue vivo só na closure do botão abaixo.
-  pixApagarDoc();
-  titulo.textContent = "Trocar o cartão pelo Pix?";
-  box.replaceChildren(titulo);
-  const data = fmtBrDate(String(det.current_period_end || "").slice(0, 10));
-  box.append(
-    pixLinha("Sua assinatura no cartão é cancelada no fim do período que você já"
-      + " pagou (" + data + "). Não existe cobrança dupla."),
-    pixLinha("Não cancele pelo painel do Stripe: quem cancela somos nós, na data"
-      + " certa. Cancelando por lá você perde o acesso antes."),
-    pixLinha("Seu ano de Pix começa em " + data + ", quando o cartão termina."),
-  );
-  const ok = pixBotao("btn-primary", "Continuar no Pix");
-  ok.addEventListener("click", () => pixEnviar(plano, documento, true, ctx, ok));
-  const nao = pixBotao("pix-ghost", "Manter o cartão");
-  nao.addEventListener("click", () => fechar());
-  box.append(ok, nao);
-  ok.focus();
 }
 
 // A precos.html chama o `pbPixInit` depois de duas requisições, guardada por

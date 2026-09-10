@@ -210,7 +210,10 @@ def test_poll_pelo_id_do_asaas_e_404_e_o_qr_nao_sai(user_id, monkeypatch):
     ok = client.get(f"/billing/pix/{linha['public_token']}")
     assert ok.status_code == 200
     corpo = ok.json()
-    assert corpo["status"] == "pending" and corpo["plan"] == "pro_max"
+    # `pro`, não `pro_max`: a linha guarda o legado e a RESPOSTA fala o público
+    # da /precos (#350). Quem prende esse contrato, com os dois controles, é
+    # `tests/test_vocabulario_de_plano_nas_saidas.py` — aqui é só de passagem.
+    assert corpo["status"] == "pending" and corpo["plan"] == "pro"
     assert not [c for c in corpo if "qr" in c.lower()], (
         f"o poll devolveu o instrumento de pagamento: {sorted(corpo)}"
     )
