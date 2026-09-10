@@ -25,6 +25,49 @@ updates:
           - "minor"
           - "patch"
 
+  # Dependências npm da raiz (tooling de teste/lint do frontend: Playwright, ESLint).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dependências npm do app iOS (casca Capacitor). São poucas e diretas, mas a
+  # cadeia de build é o que assina o binário — CVE aqui é supply-chain de release.
+  - package-ecosystem: "npm"
+    directory: "/mobile"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      mobile-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
   # Actions usadas nos workflows (.github/workflows)
   - package-ecosystem: "github-actions"
     directory: "/"
