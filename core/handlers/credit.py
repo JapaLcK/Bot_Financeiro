@@ -1087,6 +1087,23 @@ def _parse_day(text: str) -> int | None:
     return None
 
 
+def _recusa_nome_longo(name: str) -> str | None:
+    """Mensagem de recusa se `name` estoura o teto do banco, senão `None`.
+
+    Fonte única da recusa nos QUATRO pontos deste arquivo onde um nome de
+    cartão é ACEITO (nome inferido do comando, step `name`, substituto do
+    `duplicate_card_name`, e o comando inline com fecha/vence). Validar na
+    ENTRADA e não em cada `create_card` é o que fecha a categoria: quem chega
+    ao banco lê `payload["card_name"]`, e o payload só é escrito por estes
+    quatro. Sem isto, o `ValueError("nome_muito_longo:N")` estourava dois
+    steps adiante — e o `except` de lá só pega `PlanLimitExceeded`.
+    """
+    if len(name) > MAX_CARD_NAME_LEN:
+        return (f"Esse nome é muito longo (máx. **{MAX_CARD_NAME_LEN}** caracteres). "
+                "Me diga um mais curto. Ex: **Nubank**")
+    return None
+
+
 def _parse_card_name_from_create(text: str) -> str | None:
     m = re.search(
         r"(?:criar|cadastrar|registrar|adicionar|incluir)\s+(?:um\s+|novo\s+|meu\s+)?cart[aã]o\s+(.+)$",
@@ -1436,6 +1453,13 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
     inferred_name = _parse_card_name_from_create(text)
     inferred_closing, inferred_due = _parse_inline_days(text) if text else (None, None)
 
+    # Nome inferido longo demais: esquece o nome e cai no fluxo que PEDE o nome
+    # (step `name`), dizendo o porquê em vez da pergunta genérica. Antes daqui
+    # ele seguia adiante e só quebrava no `create_card`, dois steps depois.
+    recusa = _recusa_nome_longo(inferred_name or "")
+    if recusa:
+        inferred_name = None
+
     # Detecta duplicata imediatamente ao inferir o nome
     if inferred_name and card_name_exists(user_id, inferred_name):
         payload = {
@@ -1489,7 +1513,7 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
         return f"Perfeito. E qual é o dia de vencimento do cartão **{inferred_name}**?"
     if inferred_name:
         return f"Perfeito. Quando fecha a fatura do cartão **{inferred_name}**?"
-    return "Qual cartão deseja registrar?"
+    return recusa or "Qual cartão deseja registrar?"
 
 
 def _ask_set_primary_flow(user_id: int, card_name: str | None = None) -> str:
@@ -1682,6 +1706,13 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             consume_pending_action(user_id, pending)
             return "❌ Cadastro de cartão cancelado."
 
+        # Substituto longo demais: o pending fica DE PÉ no mesmo step, então ele
+        # digita outro nome na sequência — sem isto, o `create_card` de dois
+        # blocos abaixo levantava com o payload já completo.
+        recusa = _recusa_nome_longo(new_name)
+        if recusa:
+            return recusa
+
         # Verifica se o novo nome também é duplicado
         if card_name_exists(user_id, new_name):
             payload["existing_card_name"] = new_name
@@ -1779,11 +1810,10 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if not name:
             return "Qual é o nome do cartão? Ex: **Nubank**"
         # Re-pergunta em vez de deixar o `create_card` levantar dois passos
-        # adiante, quando o usuário já tiver respondido fechamento e
-        # vencimento. Os outros pontos de criação criam na hora, então ali o
-        # erro do banco já é imediato.
-        if len(name) > MAX_CARD_NAME_LEN:
-            return f"Esse nome é muito longo (máx. **{MAX_CARD_NAME_LEN}** caracteres). Me diga um mais curto. Ex: **Nubank**"
+        # adiante, quando o usuário já tiver respondido fechamento e vencimento.
+        recusa = _recusa_nome_longo(name)
+        if recusa:
+            return recusa
 
         # Detecta duplicata antes de pedir os dias
         if card_name_exists(user_id, name):
@@ -2076,7 +2106,10 @@ def handle(user_id: int, text: str) -> str | None:
             t,
             re.IGNORECASE,
         )
-        if not m:
+        # Nome longo demais cai no fluxo por steps, que recusa com mensagem e
+        # já deixa o pending no step `name` — aqui embaixo não há pending, e o
+        # `except Exception` do fim devolveria o `nome_muito_longo:N` cru.
+        if not m or _recusa_nome_longo(m.group(1).strip()):
             return start_card_create_flow(user_id, t)
 
         name = m.group(1).strip()

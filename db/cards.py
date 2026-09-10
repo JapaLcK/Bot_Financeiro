@@ -579,11 +579,11 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     due_day = credit_day_from_iso(credit.get("balanceDueDate"), 10)
     # Terceiro caminho de escrita do nome, e o único que não pode RECUSAR: o
     # nome vem do provedor (Pluggy) durante o sync, e levantar aqui abortaria a
-    # importação da conta por um campo cosmético. Apara, e apara o BASE com
-    # folga para os sufixos de desempate abaixo, para que o nome final também
-    # caiba no teto.
-    folga = max(len(" · Open Finance"), len(f" · OF{of_account_id}"))
-    base_name = (name or "Cartão").strip()[:MAX_CARD_NAME_LEN - folga] or "Cartão"
+    # importação da conta por um campo cosmético. Apara só no teto — a folga do
+    # sufixo NÃO entra aqui: quem procura o cartão manual para adotar é o nome
+    # inteiro, e encurtá-lo antes da busca fazia a reconciliação errar por 15
+    # caracteres e inserir um segundo cartão (P2 do Codex no #323).
+    full_name = (name or "Cartão").strip()[:MAX_CARD_NAME_LEN] or "Cartão"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -606,7 +606,7 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                 order by id
                 limit 1
                 """,
-                (user_id, base_name),
+                (user_id, full_name),
             )
             manual = cur.fetchone()
             if manual:
@@ -618,8 +618,12 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                 conn.commit()
                 return manual["id"]
 
+            # Só o candidato NOVO precisa de folga: os dois com sufixo saem de
+            # um base aparado, o sem sufixo é o nome inteiro.
+            folga = max(len(" · Open Finance"), len(f" · OF{of_account_id}"))
+            base_name = full_name[:MAX_CARD_NAME_LEN - folga] or "Cartão"
             card_name = None
-            for cand in (base_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
+            for cand in (full_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
                 cur.execute("select 1 from credit_cards where user_id=%s and name=%s", (user_id, cand))
                 if not cur.fetchone():
                     card_name = cand
