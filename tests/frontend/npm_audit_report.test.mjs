@@ -219,12 +219,12 @@ nodeTest("stderr do npm não vira comando do Actions", () => {
 // dois steps podiam ser APAGADOS e o mesmo texto deixado num comentário do YAML
 // que o teste continuava verde — e o CI parava de auditar npm.
 //
-// ponytail: js-yaml é dependência TRANSITIVA do eslint (eslint > @eslint/eslintrc
-// > js-yaml), instalada pelo mesmo `npm ci` do job `frontend`, e está no
-// package-lock.json. Não é declarada nossa: se um bump do eslint a deixar cair, a
-// saída é declarar `js-yaml` em devDependencies. Não usei `yaml.safe_load` do
-// Python: PyYAML NÃO é premissa paga aqui (ausente do requirements.txt, zero
-// imports no repo, `Required-by:` vazio) — o teste ficaria vermelho no CI.
+// ponytail: js-yaml é declarada em devDependencies porque só o eslint a trazia
+// (eslint > @eslint/eslintrc > js-yaml) e o bump do eslint 10 (PR #344) faz o
+// `@eslint/eslintrc` sumir inteiro do lock — medido em 2026-09-10. Não usei
+// `yaml.safe_load` do Python: PyYAML NÃO é premissa paga aqui (ausente do
+// requirements.txt, zero imports no repo, `Required-by:` vazio) — o teste
+// ficaria vermelho no CI.
 let YAML;
 try {
   YAML = (await import("js-yaml")).default;
