@@ -48,7 +48,8 @@ const PAYLOAD = "00020126580014BR.GOV.BCB.PIX0136pigbank-teste-qr-payload-520400
 // atributo SOME, não o desenho.
 const QR_IMG = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 // O documento do pagador. Dígito verificador NÃO é conferido na tela (quem
-// valida é o Asaas, §0.7), então o que importa aqui é a FORMA: 11 e 14 dígitos.
+// confere o mod-11 é o servidor, uma cópia só, §0.7; e o Asaas ainda pode
+// recusar depois), então o que importa aqui é a FORMA: 11 e 14 dígitos.
 // São strings improváveis de aparecer por acaso — o PT12d procura por elas no
 // storage, no DOM, no console e no corpo de TODA requisição da página.
 const CPF = "11122233344";
@@ -1175,5 +1176,46 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
   // A consequência visível para o usuário: o próximo checkout tem de abrir.
   await page.click('[data-pix-cta="plus"]');
   await page.waitForSelector(".pix-doc", { timeout: 3000 });
+  await page.close();
+});
+
+/**
+ * PT18 — A MENSAGEM DA RECUSA CHEGA À TELA, NOS DOIS FORMATOS DE `detail`.
+ *
+ * O `detail` do FastAPI é STRING quando o `raise` passa texto (o 400 do CPF
+ * inválido) e OBJETO nos 409. O ramo do `!r.ok` lia só `det.message`: com
+ * string, `det.message` é `undefined` e a pessoa recebia o genérico "não
+ * consegui gerar o código Pix agora" — que sugere problema nosso, quando o
+ * conserto é digitar o documento certo.
+ *
+ * *Negativo (rodado): volte o `!r.ok` para `det.message || …` → PT18a vermelho.*
+ * O PT18b é o par que uma correção do tipo `String(d.detail)` destruiria: o
+ * objeto tem de continuar sendo lido pela `message`.
+ */
+test("PT18a: o 400 com detail string mostra a mensagem do servidor no toast", async () => {
+  const { page } = await abrirForm({
+    pix: { httpStatus: 400, corpo: { detail: "Informe um CPF ou CNPJ válido." } },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(300);
+  const toast = await page.textContent("#toast");
+  assert.equal(toast, "Informe um CPF ou CNPJ válido.",
+    `a recusa do documento virou outra coisa na tela: "${toast}"`);
+  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("err")),
+    "a recusa apareceu sem a classe de erro");
+  await page.close();
+});
+
+test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () => {
+  const { page } = await abrirForm({
+    pix: { httpStatus: 409,
+           corpo: { detail: { error: "lifetime",
+                              message: "Você já tem acesso vitalício de brinde." } } },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(300);
+  const toast = await page.textContent("#toast");
+  assert.equal(toast, "Você já tem acesso vitalício de brinde.",
+    `o detail objeto parou de ser lido pela message: "${toast}"`);
   await page.close();
 });
