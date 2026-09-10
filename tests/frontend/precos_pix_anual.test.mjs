@@ -1180,7 +1180,7 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
 });
 
 /**
- * PT18 — A MENSAGEM DA RECUSA CHEGA À TELA, NOS DOIS FORMATOS DE `detail`.
+ * PT18 — A RECUSA CHEGA À TELA, NO LUGAR ONDE ELA SE LÊ.
  *
  * O `detail` do FastAPI é STRING quando o `raise` passa texto (o 400 do CPF
  * inválido) e OBJETO nos 409. O ramo do `!r.ok` lia só `det.message`: com
@@ -1188,21 +1188,252 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
  * consegui gerar o código Pix agora" — que sugere problema nosso, quando o
  * conserto é digitar o documento certo.
  *
- * *Negativo (rodado): volte o `!r.ok` para `det.message || …` → PT18a vermelho.*
- * O PT18b é o par que uma correção do tipo `String(d.detail)` destruiria: o
- * objeto tem de continuar sendo lido pela `message`.
+ * Ler a mensagem certa não bastava: ela ia toda para o `#toast`, que fica ATRÁS
+ * do véu do modal. Quem digita 11 dígitos com DV errado (o caminho comum desde
+ * que o servidor passou a conferir o mod-11) via a caixa não fazer nada. Agora
+ * o 400 é erro DO CAMPO e vai para o `#pix-doc-erro` — o alvo do
+ * `aria-describedby` do `<input>`, dentro do modal —, e o resto (409, 503, 429,
+ * 403, 401), que NÃO é erro do documento, continua no toast, que passou a ficar
+ * por cima do véu.
+ *
+ * E a mensagem velha morre num PONTO SÓ: no início do envio. A enumeração
+ * (desfecho do `pixEnviar` × toast) não achou um único desfecho em que o toast
+ * anterior devesse sobreviver — o que trocasse o corpo do modal (QR, migração,
+ * inline) deixava a frase velha por cima do véu, agora perfeitamente legível
+ * com o z-index 1000. `showToast("")` limpa CLASSE e TEXTO: o `#toast` é
+ * `role="status"` e o texto velho seguia na árvore de acessibilidade.
+ *
+ * *Negativos (rodados um a um, medidos em 2026-09-10 sobre a ceca7ff; remeça
+ * antes de reusar os números):*
+ * - troque `r.status === 400` por `false` → PT18a vermelho (inline sai `""`);
+ * - volte o `#toast` da `precos.html` para `z-index: 999` → PT18c vermelho nos
+ *   2 viewports (brilho máximo cai para 30/255);
+ * - tire o `showToast("")` do início do `pixEnviar` → PT18d, PT18e e os DOIS
+ *   PT18f vermelhos nos 2 viewports, 8 falhas (o toast do 503 fica por cima do
+ *   campo, do QR, da migração e do "já pago");
+ * - tire o `showToast("")` do ramo da forma inválida → PT18g vermelho (só ele:
+ *   é o único desfecho que não passa pelo `pixEnviar`);
+ * - `.pix-erro { display: none !important }` → 6 vermelhos: PT18a nos 2
+ *   viewports e os 4 PT12b junto (a `isVisible(".pix-erro")` da linha 873, que
+ *   já existia). O que o PT18a acrescenta é a visibilidade do inline no caminho
+ *   do 400 DO SERVIDOR — o da forma inválida já tinha quem o medisse;
+ * - `showToast` de volta ao `add("show")` → PT18d (×2) e PT18g vermelhos: o
+ *   `remove` implícito é o que apaga a frase velha do `role="status"`.
+ * *Positivos do grupo:* PT18b (o 409 objeto continua sendo lido pela `message`,
+ * o par que um `String(d.detail)` destruiria) e o PT12c (documento válido ainda
+ * vende — uma correção que sequestrasse todo erro para o campo passaria no a/c
+ * e mataria a venda).
  */
-test("PT18a: o 400 com detail string mostra a mensagem do servidor no toast", async () => {
-  const { page } = await abrirForm({
-    pix: { httpStatus: 400, corpo: { detail: "Informe um CPF ou CNPJ válido." } },
+const TELAS = [["desktop", { width: 1280, height: 900 }],
+               ["mobile", { width: 390, height: 844 }]];
+// A falha do provedor: é ela que convida ao reenvio ("tenta de novo"), e é o
+// reenvio que põe o toast velho por cima do desfecho novo.
+const FALHA_503 = "Não consegui emitir o Pix agora. Tenta de novo em instantes.";
+
+/**
+ * Brilho máximo (0–255) dentro do retângulo de um elemento — o instrumento do
+ * PT18c. `elementFromPoint` NÃO serve aqui: o `#toast` tem `pointer-events:
+ * none`, então o hit-test devolve o `pix-ov` com z-index 999 E com 1000, e o
+ * teste ficaria vermelho com e sem o conserto (§3, teatro). O que discrimina é
+ * a foto: com o toast atrás do véu, o pixel mais claro do retângulo é o preto
+ * translúcido do overlay.
+ */
+async function brilhoMax(page, seletor) {
+  const r = await page.$eval(seletor, (e) => {
+    const b = e.getBoundingClientRect();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
   });
+  const png = (await page.screenshot({ clip: r })).toString("base64");
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const ctx2 = c.getContext("2d");
+    ctx2.drawImage(img, 0, 0);
+    const d = ctx2.getImageData(0, 0, c.width, c.height).data;
+    let max = 0;
+    for (let i = 0; i < d.length; i += 4) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+    return max;
+  }, png);
+}
+
+for (const [tela, viewport] of TELAS) {
+  test(`PT18a (${tela}): o 400 do documento fica DENTRO do modal, não no toast`, async () => {
+    const { page } = await abrirForm({
+      viewport,
+      pix: { httpStatus: 400, corpo: { detail: "Informe um CPF ou CNPJ válido." } },
+    });
+    await enviarDoc(page);
+    await page.waitForTimeout(300);
+    const visto = await page.evaluate(() => ({
+      texto: document.getElementById("pix-doc-erro").textContent,
+      foco: document.activeElement.className,
+      toast: document.getElementById("toast").textContent,
+    }));
+    assert.equal(visto.texto, "Informe um CPF ou CNPJ válido.",
+      `a recusa do documento não chegou ao campo: "${visto.texto}"`);
+    assert.equal(visto.toast, "",
+      `a recusa do documento ainda foi para o toast, atrás do véu: "${visto.toast}"`);
+    // O `botao.disabled` do envio largou o foco no <body>: quem vai corrigir o
+    // número tem de estar com o cursor nele.
+    assert.equal(visto.foco, "pix-doc",
+      `depois da recusa o foco ficou em ".${visto.foco}" em vez do campo`);
+    // Texto no `textContent` não é texto NA TELA: com `.pix-erro { display: none }`
+    // as três asserções acima passam (medido, rects=0). A vizinha `:empty` já mexe
+    // no `display` deste seletor — uma regra de CSS reintroduzia o bug original com
+    // o grupo inteiro verde. O brilho é o mesmo instrumento do toast: o `#ffb4b4`
+    // do `.pix-erro` pinta o retângulo bem acima do fundo da caixa.
+    assert.ok(await page.$eval("#pix-doc-erro", (e) => e.getClientRects().length > 0),
+      "a recusa está no DOM mas não ocupa área nenhuma: ninguém a lê na tela");
+    const brilhoInline = await brilhoMax(page, "#pix-doc-erro");
+    assert.ok(brilhoInline >= 150,
+      `a recusa não foi pintada: brilho máximo ${brilhoInline}/255 no retângulo do <p>`);
+    await page.close();
+  });
+
+  test(`PT18c (${tela}): o 503 não sequestra o campo, e o toast é legível`, async () => {
+    const { page } = await abrirForm({
+      viewport,
+      pix: { httpStatus: 503, corpo: { detail: FALHA_503 } },
+    });
+    await enviarDoc(page);
+    await page.waitForTimeout(500);          // o toast entra com transição de .25s
+    const visto = await page.evaluate(() => ({
+      inline: document.getElementById("pix-doc-erro").textContent,
+      toast: document.getElementById("toast").textContent,
+    }));
+    assert.equal(visto.inline, "",
+      `falha do provedor virou erro do CPF no campo: "${visto.inline}"`);
+    assert.equal(visto.toast, FALHA_503,
+      `a falha do provedor não chegou ao toast: "${visto.toast}"`);
+    const brilho = await brilhoMax(page, "#toast");
+    assert.ok(brilho >= 200,
+      `o toast ficou atrás do véu do modal: brilho máximo ${brilho}/255 no retângulo dele`);
+    await page.close();
+  });
+
+  test(`PT18d (${tela}): o inline do 400 apaga o toast anterior — UMA mensagem na tela`, async () => {
+    // O objeto `pix` é lido pela rota a CADA requisição: mudá-lo aqui troca a
+    // resposta do REENVIO sem tocar no harness. É a sequência real — o Pix caiu,
+    // a pessoa tenta de novo, e agora o servidor recusa o documento.
+    const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+    const { page } = await abrirForm({ viewport, pix });
+    await enviarDoc(page);
+    await page.waitForTimeout(500);
+    assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+      "o 503 nem chegou a mostrar o toast: o cenário das duas mensagens não foi montado");
+    pix.httpStatus = 400;
+    pix.corpo = { detail: "Informe um CPF ou CNPJ válido." };
+    await enviarDoc(page, CPF);            // dentro dos 3800 ms do timer do showToast
+    await page.waitForTimeout(400);        // > .25s da transição de opacidade
+    const visto = await page.evaluate(() => {
+      const t = document.getElementById("toast");
+      return {
+        inline: document.getElementById("pix-doc-erro").textContent,
+        toastVisivel: t.classList.contains("show"),
+        opacidade: getComputedStyle(t).opacity,
+        toastTexto: t.textContent,
+      };
+    });
+    assert.equal(visto.inline, "Informe um CPF ou CNPJ válido.",
+      `a recusa do documento não chegou ao campo: "${visto.inline}"`);
+    assert.equal(visto.toastVisivel, false,
+      `DUAS mensagens na tela: o toast do 503 ("${await page.textContent("#toast")}") continua`
+      + " por cima do véu, contradizendo o campo");
+    assert.ok(parseFloat(visto.opacidade) <= 0.05,
+      `o toast velho ainda está visível: opacidade ${visto.opacidade}`);
+    // Opacidade 0 não some para leitor de tela: o `#toast` é `role="status"` e
+    // seguia com `display: block`, `visibility: visible` e o TEXTO velho na
+    // árvore de acessibilidade, contradizendo o campo para quem não vê a tela.
+    assert.equal(visto.toastTexto, "",
+      `o texto velho continua no \`role="status"\`: "${visto.toastTexto}"`);
+    await page.close();
+  });
+
+  test(`PT18e (${tela}): reenviar depois do 503 não deixa o toast velho por cima do QR`,
+    async () => {
+      const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+      const { page } = await abrirForm({ viewport, pix });
+      await enviarDoc(page);
+      await page.waitForTimeout(500);
+      assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+        "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+      pix.httpStatus = 200;
+      pix.corpo = null;                    // volta ao corpo padrão do harness: o QR
+      await enviarDoc(page, CPF);          // dentro dos 3800 ms do timer do showToast
+      await page.waitForSelector(".pix-code");
+      await page.waitForTimeout(400);
+      const brilho = await brilhoMax(page, "#toast");
+      assert.ok(brilho < 100,
+        `o QR está na tela e o toast do 503 ("${await page.textContent("#toast")}")`
+        + ` continua por cima: brilho máximo ${brilho}/255 no retângulo dele`);
+      await page.close();
+    });
+
+  // Os DOIS 409 que TROCAM o corpo do modal — migração e "já pago" (este entrou
+  // no #361, depois da enumeração) — são a mesma classe: caixa nova por baixo do
+  // toast velho. Mesmo corpo de teste, um `for` em vez de um irmão copiado.
+  for (const [caso, corpo, marca] of [
+    ["migração", { detail: { error: "stripe_active", current_period_end: "2026-12-05" } },
+      /trocar o cartão pelo pix/i],
+    ["já pago", { detail: { error: "pix_future_purchase_conflict",
+                            covered_until: "2027-03-04T00:00:00+00:00" } },
+      /já tem tempo pago/i],
+  ]) {
+    test(`PT18f (${tela}, ${caso}): reenviar depois do 503 não deixa o toast por cima da caixa nova`,
+      async () => {
+        const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+        const { page } = await abrirForm({ viewport, pix });
+        await enviarDoc(page);
+        await page.waitForTimeout(500);
+        assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+          "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+        pix.httpStatus = 409;
+        pix.corpo = corpo;
+        await enviarDoc(page, CPF);
+        await page.waitForTimeout(400);
+        assert.match(await page.textContent(".pix-box"), marca,
+          `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`);
+        const brilho = await brilhoMax(page, "#toast");
+        assert.ok(brilho < 100,
+          `a caixa de ${caso} está na tela e o toast do 503 continua por cima:`
+          + ` brilho máximo ${brilho}/255 no retângulo dele`);
+        await page.close();
+      });
+  }
+}
+
+/**
+ * O desfecho que NÃO passa pelo `pixEnviar`: a forma inválida é recusada no
+ * submit e volta na hora. Sem a limpeza no início do submit, o único ponto do
+ * `pixEnviar` não alcança este caso — e era o que a mutação do Tester provou
+ * (só o sítio da forma revertido: 47 pass, 0 fail).
+ */
+test("PT18g: a recusa de FORMA também apaga o toast do 503, sem POST nenhum", async () => {
+  const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+  const { page, chamadas } = await abrirForm({ pix });
   await enviarDoc(page);
-  await page.waitForTimeout(300);
-  const toast = await page.textContent("#toast");
-  assert.equal(toast, "Informe um CPF ou CNPJ válido.",
-    `a recusa do documento virou outra coisa na tela: "${toast}"`);
-  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("err")),
-    "a recusa apareceu sem a classe de erro");
+  await page.waitForTimeout(500);
+  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+    "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+  await enviarDoc(page, "1112223334");     // 10 dígitos: nem chega a sair
+  await page.waitForTimeout(400);
+  assert.equal(chamadas.pixCheckout, 1,
+    `o documento malformado foi para o servidor (${chamadas.pixCheckout} chamadas)`);
+  const visto = await page.evaluate(() => ({
+    inline: document.getElementById("pix-doc-erro").textContent,
+    toast: document.getElementById("toast").classList.contains("show"),
+  }));
+  assert.equal(visto.inline, "Informe os 11 dígitos do CPF ou os 14 do CNPJ.",
+    `a recusa de forma não chegou ao campo: "${visto.inline}"`);
+  assert.equal(visto.toast, false,
+    "DUAS mensagens na tela: o toast do 503 continua por cima do véu, contradizendo o campo");
+  const brilho = await brilhoMax(page, "#toast");
+  assert.ok(brilho < 100,
+    `o toast do 503 continua legível por cima do modal: brilho máximo ${brilho}/255`);
   await page.close();
 });
 
