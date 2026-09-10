@@ -147,6 +147,7 @@ async def billing_pix_status(request: Request, public_token: str):
     compartilham IP, e `shared.limiter` chaveia por endereço remoto, não por
     usuário. Estourar aqui apagaria o QR da tela de quem só esperou.
     """
+    from core.services.pix_checkout_resposta import agendada  # noqa: PLC0415
     from db.pix_charges import buscar_por_public_token  # noqa: PLC0415
 
     user_id = shared.resolve_dashboard_user_id(request)
@@ -162,6 +163,11 @@ async def billing_pix_status(request: Request, public_token: str):
                        if linha["qr_expires_at"] else None),
         "starts_at": (linha["access_starts_at"].isoformat()
                       if linha["access_starts_at"] else None),
+        # A /home lê ESTA resposta (e não mais a query string) para dizer se o
+        # ano começa agora ou no fim do plano vigente: `starts_at` sozinho não
+        # separa os dois casos — na compra imediata ele também vem preenchido,
+        # com `agora`. Mesma função do contrato do checkout (§0.7).
+        "agendada": agendada(linha["access_starts_at"]),
         "expires_access_at": (linha["access_expires_at"].isoformat()
                               if linha["access_expires_at"] else None),
     }

@@ -47,7 +47,10 @@ function pixModalQr(d, plano, ctx) {
   if (credito && d.credit_cents > 0) {
     vivo.appendChild(pixLinha("Já com " + credito + " de crédito do seu plano atual."));
   }
-  vivo.appendChild(pixLinha(d.starts_at
+  // Mesma regra da l.88: quem separa agendado de imediato é `agendada`, não a
+  // presença de `starts_at` — que na compra imediata vem com `agora` e fazia
+  // esta linha dizer "Seu ano começa em <hoje>" a quem começa ao pagar.
+  vivo.appendChild(pixLinha(d.agendada && d.starts_at
     ? "Seu ano começa em " + fmtBrDate(String(d.starts_at).slice(0, 10)) + "."
     : "Seu ano começa agora, assim que o pagamento cair."));
 
@@ -83,6 +86,11 @@ function pixModalQr(d, plano, ctx) {
   pixPoll = {
     token: d.public_token, plano, vivo, img, code, status, fechar,
     inicio: Date.now(), falhas: 0, timer: null,
+    // Nem a data nem o valor viajam daqui para a /home: ela busca os dois no
+    // `GET /billing/pix/<token>`, que é autenticado e filtra por dono. Este
+    // objeto é um retrato tirado no checkout, e o retrato ENVELHECE — na
+    // migração Stripe→Pix o `_stripe_cancel` adia o começo do acesso depois
+    // que o QR já está na tela.
     // `Date.parse(undefined)` é NaN, e NaN é falsy: sem `expires_at` legível
     // sobra o teto do cliente. COM ele, quem manda é o servidor.
     deadline: Date.parse(d.expires_at) || Date.now() + PIX_TETO_MS,
@@ -215,8 +223,12 @@ function pixPago() {
   pixApagarQr();
   // `sid` = public_token (§13.6): vira o eventID do pixel da Meta e o
   // transaction_id do GA4 na /home. Sem `ia=` — a home.html trata a ausência.
+  // `gw=pix` é só o MARCADOR de gateway: ele manda a /home buscar a cobrança em
+  // `/billing/pix/<sid>` e tirar de lá o valor e a data. Dinheiro não viaja na
+  // query string — `vl=` e `inicio=` saíram daqui porque qualquer um os digita,
+  // e o `vl` forjado virava receita inventada na NOSSA conta de anúncios.
   window.location.href = "/home?upgrade=success&sid=" + encodeURIComponent(token)
-    + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano);
+    + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano) + "&gw=pix";
 }
 
 /**

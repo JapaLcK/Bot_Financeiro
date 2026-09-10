@@ -1922,7 +1922,10 @@ Object.assign(window, {
     <img class="wp-mark" style="--i:0" src="/brand/icon.png?v=2" alt="" aria-hidden="true"
          width="45" height="48" />
     <p class="wp-eyebrow" style="--i:1">
-      Assinatura confirmada
+      <!-- num <span> próprio porque o chip é irmão dele: `textContent` no <p>
+           levaria o chip junto. O Pix anual troca por "Pagamento confirmado" —
+           não há assinatura nenhuma ali (compra à vista, sem cartão). -->
+      <span id="wp-eyebrow-txt">Assinatura confirmada</span>
       <span class="wp-chip" id="wp-chip" hidden></span>
     </p>
     <h2 id="wp-title" style="--i:2">Tá dentro do PigBank+</h2>
@@ -2007,14 +2010,22 @@ const WP_PLANOS = {
   },
 };
 
-function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } = {}) {
+function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null,
+                         pix = false, inicio = null } = {}) {
   const ov = document.getElementById("welcome-pro-overlay");
   if (!ov) return;
 
   // `plano` vem da URL, então nunca entra em HTML: só serve de chave do mapa, e
   // valor desconhecido cai no Plus, que era o texto único de antes.
   const cfg = WP_PLANOS[String(plano).toLowerCase()] || WP_PLANOS.plus;
-  document.getElementById("wp-title").textContent = `Tá dentro do ${cfg.nome}`;
+  // UMA decisão de ramo, lida pelo título e pelo corpo. Eram duas: o título
+  // olhava `pix && inicio` e o corpo a cadeia `trial → pix → else`, onde o
+  // trial ganha — com `?ev=trial&gw=pix&inicio=…` saía título do Pix com sub
+  // de trial.
+  const modo = trial ? "trial" : (pix ? "pix" : "cartao");
+  document.getElementById("wp-title").textContent = modo === "pix" && inicio
+    ? `Seu ${cfg.nome} tá garantido`
+    : `Tá dentro do ${cfg.nome}`;
   const ul = document.getElementById("wp-feats");
   ul.replaceChildren(...cfg.feats(ia).map((texto) => {
     const li = document.createElement("li");
@@ -2030,11 +2041,30 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } =
   // lia "seus 30 dias grátis começam agora", que é falso pra essa pessoa.
   const chip = document.getElementById("wp-chip");
   const sub = document.getElementById("wp-sub");
-  if (trial) {
+  // O olho é setado em TODOS os ramos, como o título, o sub e o chip: só o Pix
+  // escrevia nele, e o modal é o mesmo elemento reusado — uma vez trocado por
+  // "Pagamento confirmado", nenhum outro ramo o devolvia para o texto do HTML.
+  const olho = document.getElementById("wp-eyebrow-txt");
+  if (modo === "trial") {
+    olho.textContent = "Assinatura confirmada";
     chip.textContent = `${days} dias grátis`;
     chip.hidden = false;
     sub.textContent = `Seus ${days} dias grátis começam agora. A primeira cobrança só vem depois disso, e dá pra cancelar quando quiser.`;
+  } else if (modo === "pix") {
+    olho.textContent = "Pagamento confirmado";
+    /* O Pix anual é compra À VISTA: não há assinatura para cancelar nem cartão
+       para renovar, e quem já tinha plano vigente comprou um ano AGENDADO para
+       o fim dele. `inicio` chega do servidor, já validado como AAAA-MM-DD;
+       aqui ele só vira DD/MM/AAAA, por textContent. */
+    chip.hidden = true;
+    const quando = inicio
+      ? `começa em ${inicio.split("-").reverse().join("/")}, assim que o plano atual terminar`
+      : "já começou";
+    sub.textContent = `Pagamento confirmado! Seu ano de ${cfg.nome} ${quando}.`
+      + " Foi pago à vista: sem cartão e sem renovação automática — a gente te"
+      + " avisa por e-mail antes de acabar.";
   } else {
+    olho.textContent = "Assinatura confirmada";
     chip.hidden = true;
     sub.textContent = "Sua assinatura já está ativa. Dá pra cancelar quando quiser, direto nas configurações.";
   }
@@ -2118,14 +2148,43 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   if (e.target === e.currentTarget) dismissWelcomePro();
 });
 
-(function handleUpgradeReturn() {
+/* A data que vira a promessa "seu ano começa em <data>" na tela. Ela hoje sai
+   do servidor (`/billing/pix/<token>`), e não mais da query string — este
+   validador ficou porque corpo malformado ou coluna estranha também não podem
+   virar compromisso escrito, e porque ele custa zero linha nova.
+
+   A regex sozinha barra markup e formato, e o `Date.parse` NÃO completa o
+   serviço: ele normaliza em vez de recusar, então "2027-02-30" virava
+   "30/02/2027" e "2027-11-31" virava "31/11/2027" — datas que não existem,
+   escritas na tela com cara de compromisso nosso. Quem valida de verdade é a
+   ida e volta: reconstrói e exige que os três campos voltem iguais.
+
+   O ano tem uma janela FIXA (2020–2100), e fixa de propósito: uma faixa
+   relativa ao relógio (`anoAtual + 2`) recusava a renovação legítima —
+   `plano_da_cobranca` empilha ano sobre ano sem teto, a 4ª compra Pix seguida
+   já começa em `anoAtual + 3` — e ainda dependia do relógio do aparelho, que
+   num celular com bateria zerada volta para 1970 e reprovaria QUALQUER data.
+   Ela só existe para `9999-12-31`, que passa na ida e volta acima e não é
+   compra, é URL forjada. O que não passa vira null, que é o texto do
+   imediato. */
+function wpInicioValido(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s || "")) return null;
+  const [a, m, d] = s.split("-").map(Number);
+  const dt = new Date(a, m - 1, d);
+  const bate = dt.getFullYear() === a && dt.getMonth() === m - 1 && dt.getDate() === d;
+  return bate && a >= 2020 && a <= 2100 ? s : null;
+}
+
+(async function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
-  const sid = params.get("sid");  // id da sessão Stripe → event_id do evento
+  const sid = params.get("sid");  // sessão Stripe, ou o public_token do Pix →
+                                  // event_id do evento e chave da busca abaixo
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
   const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
+  const gw = params.get("gw");    // "pix" quando veio do Pix anual (pix-poll.js)
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -2136,9 +2195,89 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   cleanUrl.searchParams.delete("td");
   cleanUrl.searchParams.delete("pl");
   cleanUrl.searchParams.delete("ia");
+  cleanUrl.searchParams.delete("gw");
+  cleanUrl.searchParams.delete("inicio");
+  cleanUrl.searchParams.delete("vl");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
+    /* No Pix, o VALOR e a DATA saem do servidor — nunca da URL.
+
+       `sid` é o `public_token` da cobrança, e `GET /billing/pix/<token>` é
+       autenticado e filtra por dono (404 para token inexistente OU de outro
+       usuário). Antes daqui a página acreditava na query string, e as duas
+       consequências eram reais: `?vl=999999` mandava um Purchase de
+       R$ 999.999 para a NOSSA conta de anúncios — sem deduplicar com a CAPI,
+       porque o `eventID` carrega o `sid` que o forjador escolheu — e o
+       `inicio=` era um retrato tirado no checkout, que na migração
+       Stripe→Pix o `_stripe_cancel` já tinha adiado (a tela prometia a data
+       velha enquanto o acesso e o e-mail usavam a nova).
+
+       Falhou a busca (404, rede, corpo sem `amount_cents`)? Nada é inventado:
+       o Purchase vai sem `value`, que é o objeto de sempre, e o texto cai no
+       imediato. O `fbq` só dispara DEPOIS — algumas centenas de ms a mais é o
+       preço de mandar número verdadeiro. */
+    const ehPix = String(gw).toLowerCase() === "pix";
+    let cobranca = null;
+    if (ehPix && sid) {
+      try {
+        // O teto de 4 s é o que impede a busca de segurar a CELEBRAÇÃO: o modal
+        // só sobe depois daqui, e sem teto uma conexão pendurada deixava quem
+        // acabou de pagar olhando para a tela de sempre. Vencido, cai no
+        // `catch` e vira o caminho sem valor. NÃO use `AbortSignal.timeout`
+        // aqui: ele só existe no Safari/WKWebView 16.4+ e o alvo do app é iOS
+        // 14.0 (IPHONEOS_DEPLOYMENT_TARGET, mobile/ios/App/App.xcodeproj), onde
+        // a expressão lança ANTES de a requisição sair — o `catch` engoliria e
+        // TODA compra Pix perderia o valor do Pixel, e a agendada seria
+        // anunciada como "já começou". `AbortController` + `setTimeout` é o
+        // mesmo teto e roda desde o Safari 12.1 (é o idioma já usado no
+        // `loadAuthMe` e no `_boundedValidate`, acima).
+        // MEDIDO: com o backend a 3 s (rede ruim DENTRO do teto), o modal sobe
+        // em 3905 ms de tela parada para quem acabou de pagar — não empilha com
+        // o overlay `_checkoutSettled` (as duas esperas correm em paralelo; pior
+        // caso com as duas penduradas: 21 s, o mesmo de antes desta busca).
+        // ponytail: sem tela de carregamento nesta rodada; se 4 s incomodar,
+        // o caminho é baixar o teto, não inventar spinner.
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000);
+        try {
+          const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
+                                { credentials: "same-origin", signal: ctrl.signal });
+          if (r.ok) cobranca = await r.json();
+        } finally { clearTimeout(timer); }
+      } catch { /* sem valor é melhor que valor inventado */ }
+    }
+    /* Dono NÃO é pagamento. O poll responde 200 com `amount_cents` para
+       `pending`, `expired`, `canceled` e `refunded` também — só o `status`
+       separa venda de intenção. Sem esta linha, o próprio dono de uma cobrança
+       PENDENTE abrindo esta URL na mão mandava um Purchase de R$ 499 sem venda
+       nenhuma: número CRÍVEL (mais difícil de achar no relatório que um
+       R$ 999.999) e SEM par na CAPI, porque o evento do servidor só sai no
+       pagamento — não deduplica com nada. E repetível: `criar_cobranca` só
+       barra uma segunda cobrança ATIVA (`ESTADOS_ATIVOS`, no módulo `db/` da
+       cobrança), então cada ciclo expirado ou cancelado dá um `public_token`
+       novo, logo um `eventID` novo e um Purchase fantasma novo.
+
+       O TEXTO cai no mesmo lugar do 404: o modal abre com a cópia do imediato.
+       Quem não pagou não pode ler promessa de data — e não abrir modal nenhum
+       seria tela nova para um caso que ninguém alcança PAGANDO. */
+    const pago = !!cobranca && cobranca.status === "paid";
+    const cents = pago && cobranca.amount_cents;
+    // O teto (R$ 1.000.000 em centavos) sobreviveu à troca de fonte: a coluna é
+    // nossa, mas o plano mais caro custa R$ 499 — acima disso é dado corrompido,
+    // não receita, e receita inventada é o que este commit inteiro existe para
+    // impedir.
+    const valorPix = Number.isInteger(cents) && cents > 0 && cents < 1e8
+      ? cents / 100 : null;
+    // `starts_at` vem ISO do servidor; `agendada` é quem separa imediato de
+    // agendado (na compra imediata a data também vem preenchida, com `agora`).
+    // `=== true` pela MESMA razão do `Number.isInteger` acima, e não pela metade:
+    // `agendada: 1` e `agendada: "false"` são verdadeiros em JS e prometeriam
+    // "começa em <data>" na tela. O `wpInicioValido` fica: corpo malformado não
+    // vira promessa escrita.
+    const inicioPix = pago && cobranca.agendada === true && cobranca.starts_at
+      ? wpInicioValido(String(cobranca.starts_at).slice(0, 10)) : null;
+
     // Conversão pro Meta Ads — só dispara com `sid` (id real da sessão de
     // checkout que a Stripe injeta no success_url). Sem sid = alguém abriu a URL
     // na mão → não conta. `ev` diz se foi início de trial (StartTrial) ou compra
@@ -2148,7 +2287,15 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
       if (ev === "trial") {
         fbq("track", "StartTrial", { currency: "BRL" }, { eventID: "trial_" + sid });
       } else {
-        fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
+        // A receita vem do `amount_cents` da cobrança do PRÓPRIO dono, lido do
+        // servidor logo acima — não de query string. Não há valor a validar
+        // aqui: URL forjada não chega neste ponto, e sem cobrança lida o objeto
+        // fica IGUAL ao da Stripe (`{ currency: "BRL" }`), cujo valor continua
+        // vindo só da CAPI.
+        const dados = valorPix
+          ? { currency: "BRL", value: valorPix }
+          : { currency: "BRL" };
+        fbq("track", "Purchase", dados, { eventID: "purchase_" + sid });
       }
     }
     // GA4: só o `start_trial`, e de propósito. O `purchase` sai do SERVIDOR
@@ -2181,6 +2328,10 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
           days: Number.isFinite(dias) && dias > 0 ? dias : 30,
           plano: pl || "plus",
           ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
+          // `ehPix` normaliza como o `pl` já fazia: `?gw=PIX` caía no ramo da
+          // Stripe depois de uma compra Pix.
+          pix: ehPix,
+          inicio: inicioPix,
         });
       };
 
