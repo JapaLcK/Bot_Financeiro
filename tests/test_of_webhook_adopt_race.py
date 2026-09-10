@@ -32,10 +32,10 @@ O que cada teste prende:
 CONTROLES do grupo (medidos, não deduzidos):
   • negativo (desfazimento): trocar por `pass` o `unregister_item(
     adocao_registro_id, user_id)` do aborto de RASTRO de outra porta —
-    `frontend/routes/open_finance.py:464`, o ramo `if outras:`. A string é
-    IDÊNTICA à do aborto de dono alheio (`:385`, a guarda de posse), que este
+    `frontend/routes/open_finance.py:477`, o ramo `if outras:`. A string é
+    IDÊNTICA à do aborto de dono alheio (`:397`, a guarda de posse), que este
     arquivo não mede: patchear aquele deixa tudo aqui VERDE e conclui o oposto.
-    Com o `:464` trocado, discrimina
+    Com o `:477` trocado, discrimina
     `test_aborto_mutuo_...`, que falha em "rodada 0: 0 conexões", o P0
     reproduzido; os outros vermelhos caem no rastro que sobra. Sem CONTAR os
     vermelhos: o número envelhece a cada teste novo aqui (CLAUDE.md §2);

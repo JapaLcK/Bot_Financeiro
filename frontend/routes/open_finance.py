@@ -143,14 +143,14 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 #
 # CUIDADO com `DB_CONNECT_TIMEOUT`: são QUATRO definições da mesma env var com
 # DOIS defaults. `db/connection.py:78` = "30" (o pool sync, o da tabela acima);
-# `core/admin_dashboard.py:48`, `frontend/routes/shared.py:51` e
-# `frontend/finance_bot_websocket_custom.py:275` = "5". Ler o número do vizinho
+# `core/admin_dashboard.py:49`, `frontend/routes/shared.py:51` e
+# `frontend/finance_bot_websocket_custom.py:304` = "5". Ler o número do vizinho
 # errado já produziu uma conta 3× maior neste mesmo comentário.
 #
 # Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
 # `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
 # um abre conexão async NOVA (`core.admin_dashboard.db_connect`, com o
-# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48` — default **5**) e faz um
+# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49` — default **5**) e faz um
 # INSERT SEM `statement_timeout`. O `connect_timeout` limita o handshake e nada
 # limita o INSERT nem o commit, então o pior caso de cada log era ILIMITADO e
 # qualquer número fechado aqui era PISO. Os dois passaram a ir pelo
@@ -174,7 +174,7 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # (`folga // 2`), ≤ 2,0s o log do retry, ~0,4s de backoff (`_backoff_sec(1)`,
 # 0,375–0,625s) e o resto na 2ª.
 #
-# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:48` SAIU da conta: o
+# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:49` SAIU da conta: o
 # `wait_for` corta em 2,0s independentemente dele. Era dele que vinham o piso de
 # 25,0s desta conta (5 + 5 nos dois logs) e o de 70s da versão anterior dela — o
 # cenário "e se o Railway definir 30?", que `.env.example` não define (grep vazio)
@@ -268,6 +268,18 @@ def _retryable(exc: BaseException) -> bool:
         return False
 
 
+def _folga_ms(budget_ms: int | None, t0: float) -> int | None:
+    """O que sobrou de `budget_ms` desde `t0`. `None` = sem orçamento.
+
+    Piso de 1 ms num só lugar: dentro do lock, desistir por prazo vencido seria
+    largar o lock já pago sem gravar — o que se garante é que a espera não é
+    INDEFINIDA, não que ela caiba num prazo que já venceu.
+    """
+    if budget_ms is None:
+        return None
+    return max(1, budget_ms - int((time.monotonic() - t0) * 1000))
+
+
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
                          tinha_conexao_propria: bool = False,
@@ -328,7 +340,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #      ordem de escrita do código e não regra.
         #   2. PRESSÃO DE POOL, essa sim numericamente relevante: é aquisição
         #      por TENTATIVA, e é a conta que o `ponytail:` do `except` de
-        #      `_grava_reconexao` (`:656`) usa para adiar a política de retry.
+        #      `_grava_reconexao` (`:668`) usa para adiar a política de retry.
         #
         # Leituras de pool DENTRO do lock, por caminho, MEDIDAS (0,93–1,49 ms
         # cada; no caminho da rota o `resto` ficou em 9994 de 10000 ms) — fato
@@ -336,23 +348,23 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
         #     `item_registry_origins` da revalidação da adoção, mais abaixo
         #     nesta mesma função, que abre `get_conn()`
-        #     (`db/open_finance_state.py:320`).
+        #     (`db/open_finance_state.py:348`).
         #   • rota com item NOVO (`tinha_conexao_propria=False`,
         #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
         #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
         #   • rota reconectando: 1 → 1; a leitura só saiu de dentro do `if
         #     tinha_conexao_propria`.
-        linhas = get_connections_by_item_id(item_id)
+        linhas = get_connections_by_item_id(item_id, budget_ms=_folga_ms(budget_ms, t0))
         from core.observability import log_system_event_sync
 
         # DONO ALHEIO. Revalidação num caminho, 1ª CHECAGEM no outro — e os dois
         # chegam aqui:
         #   • ROTA: revalidação. O `POST /pluggy-item` lê os donos FORA do lock
-        #     (`get_connections_by_item_id`, `:1486`) e devolve o 409 lá; entre
+        #     (`get_connections_by_item_id`, `:1498`) e devolve o 409 lá; entre
         #     aquela leitura e este lock outro dono pode nascer.
         #   • ADOÇÃO: primeira e ÚNICA checagem de dono alheio que esse caminho
         #     já teve. `_adota_item_orfao` NUNCA leu conexões antes do lock — a
-        #     1ª guarda dele é `item_registry_origins` (`:1048`), que responde
+        #     1ª guarda dele é `item_registry_origins` (`:1060`), que responde
         #     "este item já teve dono NO RASTRO", pergunta diferente de "outra
         #     conta tem conexão deste item". Medido: na adoção
         #     `get_connections_by_item_id` é chamada UMA vez, e é esta. Sem ela,
@@ -444,9 +456,9 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
         # último a pegar o lock ganha e os outros saem sem deixar rastro. São
         # TRÊS os pontos que apagam, e DOIS deles estão nesta função: o aborto de
-        # DONO ALHEIO da guarda acima (`:385`), este aborto de RASTRO de outra
-        # porta (`:464`) e — o único fora daqui — a desistência do lock no 503 de
-        # `_grava_reconexao` (`:761`). Nos três a linha é a que a própria adoção
+        # DONO ALHEIO da guarda acima (`:397`), este aborto de RASTRO de outra
+        # porta (`:477`) e — o único fora daqui — a desistência do lock no 503 de
+        # `_grava_reconexao` (`:773`). Nos três a linha é a que a própria adoção
         # acabou de escrever (`db.unregister_item`, que filtra por `user_id`).
         #
         # REGISTRADO, não consertado: quando quem "ganhou" foi o `POST
@@ -459,7 +471,8 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # rival no aborto, e a distinção não muda decisão nenhuma hoje.
         if adocao_registro_id is not None:
             outras = item_registry_origins(item_id, exceto_registro_id=adocao_registro_id,
-                                           exceto_user_id=user_id)
+                                           exceto_user_id=user_id,
+                                           budget_ms=_folga_ms(budget_ms, t0))
             if outras:
                 unregister_item(adocao_registro_id, user_id)
                 raise HTTPException(
@@ -485,8 +498,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # `PoolClosed` e `TooManyRequests` do `psycopg_pool`) virava o mesmo log
         # falso, e o tipo do erro não aparecia em lugar nenhum. Sem contagem de
         # propósito: o número muda com a versão do psycopg e envelhece errado.
-        resto = None if budget_ms is None else max(
-            1, budget_ms - int((time.monotonic() - t0) * 1000))
+        resto = _folga_ms(budget_ms, t0)
         # A ÚNICA linha que responde "a escrita chegou a ser tentada?" (Codex
         # #313, P1). Ela atravessa o `except` do chamador porque é a lista DELE
         # que está sendo mutada — `return` não sobrevive a exceção, e o tipo do
@@ -657,7 +669,7 @@ async def _grava_reconexao(
             # `TooManyConnections` este POST ainda tenta até 8 conexões num
             # servidor que acabou de recusar uma. RECONTADO: 2 tentativas × 4
             # aquisições por tentativa — a DEDICADA do `pluggy_item_lock`
-            # (`psycopg.connect`, `db/open_finance_state.py:661`), o pool da
+            # (`psycopg.connect`, `db/open_finance_state.py:701`), o pool da
             # leitura das revalidações (`get_connections_by_item_id`), o pool da
             # escrita (`get_conn` do `save_pluggy_open_finance_item`) e a
             # conexão NOVA do log de diagnóstico (um por tentativa: o
@@ -701,7 +713,7 @@ async def _grava_reconexao(
                          "erro": causa},
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
-            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48`, default 5) e
+            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49`, default 5) e
             # faz INSERT SEM `statement_timeout`, dentro da janela do prazo — é o
             # maior componente do que sobra dentro do prazo (a conta está em
             # `_prazo_reconexao_ms`). Medir a folga antes fazia o backoff dormir

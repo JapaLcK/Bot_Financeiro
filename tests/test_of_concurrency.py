@@ -1257,7 +1257,7 @@ def test_erro_de_bug_na_escrita_nao_vira_503(user_id, monkeypatch, erro, esperad
     A fronteira é a hierarquia do psycopg, medida: `UniqueViolation`,
     `ProgrammingError` e `ValueError` NÃO são `psycopg.OperationalError`. Por
     isso continuam subindo — `ValueError` vira o 400 da rota
-    (open_finance.py:855) e os outros dois o 500 de sempre.
+    (open_finance.py:1573) e os outros dois o 500 de sempre.
 
     CONTROLE NEGATIVO: trocar o `except psycopg.OperationalError` do
     `_grava_reconexao` por `except psycopg.Error` → os dois casos de psycopg

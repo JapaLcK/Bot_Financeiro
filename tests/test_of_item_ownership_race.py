@@ -22,14 +22,15 @@ CONTROLES do grupo (rodados, não deduzidos):
   • negativo (a guarda): `if False and outros:` → `test_guarda_le_TODAS_...`
     vermelho;
   • negativo (o desfazimento): `pass` no `unregister_item` do aborto de DONO
-    ALHEIO (`frontend/routes/open_finance.py:385`, NÃO o `:464` do rastro, cuja
+    ALHEIO (`frontend/routes/open_finance.py:397`, NÃO o `:477` do rastro, cuja
     linha é idêntica) → `test_adocao_com_dono_novo_no_lock_...` vermelho;
   • negativo (leitura PLURAL): trocar `get_connections_by_item_id` pela singular
     `get_open_finance_connection_by_item_id` → `test_guarda_le_TODAS_...`
-    vermelho (500, `AmbiguousItemError`) e os dois primeiros VERDES — uma linha
-    alheia não é ambígua, duas são. É o único caso que discrimina a troca pelo
-    DESFECHO; `test_a_rota_com_item_novo_le_conexoes_uma_vez` também fica
-    vermelho, mas por contagem de chamada (a singular não é o nome espiado);
+    vermelho — mas o MOTIVO envelheceu: era o desfecho (500 por
+    `AmbiguousItemError`, porque uma linha alheia não é ambígua e duas são) e
+    hoje vem antes dele, `TypeError`, porque a chamada passou a levar `budget_ms=`
+    (prazo da etapa 4) e a singular não tem o parâmetro; mais a contagem em
+    `test_a_rota_com_item_novo_le_conexoes_uma_vez`. Discrimina igual;
   • negativo (ponto de inserção): mover a guarda para dentro do
     `if tinha_conexao_propria:` → os três casos de dono alheio e o da adoção
     vermelhos, porque item novo e item órfão chegam ao lock com
@@ -43,13 +44,13 @@ LIMITE CONHECIDO 1 (a injeção): todos injetam a corrida num ponto
 DETERMINÍSTICO, dentro de um processo só — nenhum mede intercalação real entre
 dois processos. A justificativa de não precisar é o inventário, não a
 conveniência: o `pluggy_item_lock` é chaveado por `item_id`
-(`db/open_finance_state.py:549`) e há UM escritor de conexão pluggy em produção
-— `frontend/routes/open_finance.py:503`, a chamada de
+(`db/open_finance_state.py:589`) e há UM escritor de conexão pluggy em produção
+— `frontend/routes/open_finance.py:515`, a chamada de
 `save_pluggy_open_finance_item`, cujo INSERT é `db/open_finance.py:683` —, então
 a serialização que estes testes presumem é a que o lock garante. O único outro
 INSERT em `open_finance_connections` é `create_mock_open_finance_connection`
 (`db/open_finance.py:125`), alcançável em produção sem lock por
-`POST /open-finance/{user_id}/mock-connect` (`open_finance.py:1903`), mas ele
+`POST /open-finance/{user_id}/mock-connect` (`open_finance.py:1915`), mas ele
 grava `provider='mock_pluggy'` (`db/open_finance.py:142`) e item id escopado por
 usuário (`:82`), e a leitura da guarda filtra `provider='pluggy'` — então ele
 nunca produz o estado guardado.
@@ -57,7 +58,7 @@ nunca produz o estado guardado.
 LIMITE CONHECIDO 2 (o enquadramento): NENHUMA corrida foi construída — nem pelo
 Arquiteto, nem no código, nem pelo Tester, nem pelo Manager. Os dois pontos de
 entrada de HOJE derivam o dono de `remote["clientUserId"]` — a rota devolve 403 se
-ele não for o da sessão (`frontend/routes/open_finance.py:1477-1484`) e a adoção
+ele não for o da sessão (`frontend/routes/open_finance.py:1489-1496`) e a adoção
 faz `dono = int(...)` (`:1021`) —, então duas escritas concorrentes do MESMO item
 com donos DIFERENTES exigiriam que o `clientUserId` mudasse entre duas chamadas de
 `get_pluggy_item`. Os 7 testes daqui FORÇAM o estado, semeando a linha alheia com
