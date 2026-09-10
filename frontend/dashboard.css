@@ -1274,6 +1274,9 @@ body.light .hbtn.hbtn-pink:hover {
   text-align:center;color:var(--text-2);font-size:.82rem;padding:24px 12px;
 }
 .pkt-hist-error { color:#fecaca; }
+/* Este erro mora dentro de `.modal wide` (histórico da caixinha) e é a ÚNICA
+   mensagem de falha daquele fluxo: com o modal branco, #fecaca dá 1,45:1. */
+body.light .pkt-hist-error { color:var(--red); }
 
 .pkt-move-actions { display:flex;gap:8px;margin:10px 0 14px; }
 .pkt-move-btn {
@@ -1744,6 +1747,9 @@ body.light .ld-del { color:var(--red); }
 .upgrade-modal .upg-perk::before {
   content: "✓"; color: #00F078; font-weight: 700;
 }
+/* .upgrade-modal é `class="modal upgrade-modal"`, então herdou o fundo branco:
+   o neon nos checks cai para 1,53:1. */
+body.light .upgrade-modal .upg-perk::before { color:var(--green); }
 .btn-upgrade {
   background: linear-gradient(135deg,#FF2D8E,#C7186B);
   border: none; color: #fff;
