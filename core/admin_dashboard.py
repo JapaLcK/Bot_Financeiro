@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from slowapi.util import get_remote_address
+from starlette.requests import ClientDisconnect
 
 from config.env import load_app_env
 
@@ -1568,6 +1569,15 @@ async def admin_error_logging_middleware(request: Request, call_next):
         return await call_next(request)
     except HTTPException:
         raise
+    except ClientDisconnect:
+        # Cliente sumiu antes de mandar o corpo (rede móvel caindo no meio de um
+        # upload). Não é erro do servidor: 499 e NENHUM evento — o uvicorn já
+        # descartou a resposta (`if self.disconnected: return` em
+        # RequestResponseCycle.send), e gravar poluiria o feed de erro do painel
+        # com um evento por cliente que some. O `except` carrega 100% do
+        # diagnóstico: a mensagem é sempre a mesma constante.
+        _admin_log.info("client disconnect: %s %s", request.method, request.url.path)
+        return Response(status_code=499)
     except Exception as exc:
         import traceback
         tb_str = traceback.format_exc()
