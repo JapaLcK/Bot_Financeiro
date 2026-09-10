@@ -568,17 +568,13 @@ async def get_financial_data(
             -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
             -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
             --
-            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
-            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
-            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
-            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
-            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
-            -- dashboard -> barra de categoria -> linha ainda escreve
-            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
-            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
-            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
-            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
-            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            -- ESCOPO: `_renderLaunchDetail` e `openEditLaunchModal` (dashboard.js)
+            -- têm DOIS alimentadores. Este é o da Visão Geral (`recent_launches`);
+            -- o outro é `_catLaunchesRows`, que vem de
+            -- `list_launches_by_category` (db/accounts.py) e TAMBÉM canoniza,
+            -- pela issue 296. Ele ficou fora da 287 porque a mesma query monta o
+            -- texto do WhatsApp (`_listar_categoria`, core/handlers/launches.py),
+            -- superfície que a 287 não cobria.
             SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
