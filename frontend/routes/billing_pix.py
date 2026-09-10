@@ -49,13 +49,10 @@ from core.services.pix_checkout import (
     criar_checkout,
 )
 from core.services.pix_pricing import CoberturaJaPaga
+from core.services.plan_service import TIER_TO_STORED_PLAN
 from frontend.routes import shared
 
 router = APIRouter()
-
-# Planos vendáveis no Pix, no valor LEGADO da coluna (`pro` = Plus, `pro_max` =
-# Pro). Mesma lista que `_STORED_PLAN_TO_TIER` conhece; `free` não é venda.
-_PLANOS = ("essencial", "pro", "pro_max")
 
 # CPF tem 11 dígitos, CNPJ tem 14. A validação aqui é de FORMA e só: quem
 # valida de verdade é o Asaas, e replicar o dígito verificador seria uma segunda
@@ -80,9 +77,16 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     primeira. Import tardio para não inverter a direção do import.
     """
     user_id = shared.resolve_dashboard_user_id(request)
+    # O corpo fala o vocabulário PÚBLICO da /precos, o mesmo do gêmeo do Stripe
+    # (`finance_bot_websocket_custom.py:4472`) — o JS que alimenta os dois é UM
+    # só. Aceitar o legado aqui era a armadilha: `plus` levava 400 e o card Pro
+    # mandava `pro`, que no banco é o tier Plus (R$ 199 num card de R$ 499).
     plan = (payload.plan or "").strip().lower()
-    if plan not in _PLANOS:
-        raise HTTPException(status_code=400, detail="plan inválido.")
+    if plan not in TIER_TO_STORED_PLAN:
+        raise HTTPException(
+            status_code=400,
+            detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
+    plan_stored = TIER_TO_STORED_PLAN[plan]
     doc = "".join(c for c in (payload.cpf_cnpj or "") if c.isdigit())
     if len(doc) not in _TAMANHOS_DOC:
         raise HTTPException(status_code=400,
@@ -94,7 +98,7 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     try:
         async with _billing_user_lock(user_id):
             return await asyncio.to_thread(
-                criar_checkout, user_id, plan_stored=plan, cpf_cnpj=doc,
+                criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
                 confirm_cancel_stripe=bool(payload.confirm_cancel_stripe))
     except CoberturaJaPaga as exc:
