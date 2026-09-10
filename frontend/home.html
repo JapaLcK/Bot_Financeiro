@@ -2224,18 +2224,27 @@ function wpInicioValido(s) {
         // O teto de 4 s é o que impede a busca de segurar a CELEBRAÇÃO: o modal
         // só sobe depois daqui, e sem teto uma conexão pendurada deixava quem
         // acabou de pagar olhando para a tela de sempre. Vencido, cai no
-        // `catch` e vira o caminho sem valor. `AbortSignal.timeout` é nativo
-        // (Safari 16+); em navegador mais velho ele lança e cai no mesmo lugar.
+        // `catch` e vira o caminho sem valor. NÃO use `AbortSignal.timeout`
+        // aqui: ele só existe no Safari/WKWebView 16.4+ e o alvo do app é iOS
+        // 14.0 (IPHONEOS_DEPLOYMENT_TARGET, mobile/ios/App/App.xcodeproj), onde
+        // a expressão lança ANTES de a requisição sair — o `catch` engoliria e
+        // TODA compra Pix perderia o valor do Pixel, e a agendada seria
+        // anunciada como "já começou". `AbortController` + `setTimeout` é o
+        // mesmo teto e roda desde o Safari 12.1 (é o idioma já usado no
+        // `loadAuthMe` e no `_boundedValidate`, acima).
         // MEDIDO: com o backend a 3 s (rede ruim DENTRO do teto), o modal sobe
         // em 3905 ms de tela parada para quem acabou de pagar — não empilha com
         // o overlay `_checkoutSettled` (as duas esperas correm em paralelo; pior
         // caso com as duas penduradas: 21 s, o mesmo de antes desta busca).
         // ponytail: sem tela de carregamento nesta rodada; se 4 s incomodar,
         // o caminho é baixar o teto, não inventar spinner.
-        const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
-                              { credentials: "same-origin",
-                                signal: AbortSignal.timeout(4000) });
-        if (r.ok) cobranca = await r.json();
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000);
+        try {
+          const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
+                                { credentials: "same-origin", signal: ctrl.signal });
+          if (r.ok) cobranca = await r.json();
+        } finally { clearTimeout(timer); }
       } catch { /* sem valor é melhor que valor inventado */ }
     }
     /* Dono NÃO é pagamento. O poll responde 200 com `amount_cents` para

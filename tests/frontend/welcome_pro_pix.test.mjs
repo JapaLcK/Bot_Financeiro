@@ -15,7 +15,8 @@
  *     Hoje os dois saem de `GET /billing/pix/<sid>`, que é autenticado e filtra
  *     por dono (404 para token de outro usuário).
  *
- * Os controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos):
+ * Os controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos) — as três
+ * contagens abaixo são ANTERIORES ao WP18, remeça antes de reusar:
  *   · negativo da CÓPIA — troque no `openWelcomePro` o ramo do Pix pelo `else`
  *     da Stripe (`} else if (false && modo === "pix") {`) e ficam vermelhos 20
  *     de 33 (remedido depois do WP15/WP16/WP17; era 13 de 24), por nome: WP1,
@@ -66,11 +67,18 @@ after(async () => { await browser?.close(); server?.kill(); });
  * suja não pode quebrar JS) e `pix.n` conta as requisições a `/billing/pix/`,
  * que no caminho da Stripe têm de ser ZERO.
  */
-async function abrirHome(query, cobranca = null, pendurar = false) {
+async function abrirHome(query, cobranca = null, pendurar = false,
+                         semTimeoutNativo = false) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const erros = [];
   const pix = { n: 0 };
   page.on("pageerror", (e) => erros.push(String(e)));
+  // Safari/WKWebView < 16.4 (o alvo do app é iOS 14.0): `AbortSignal.timeout`
+  // não existe. Apagar a propriedade ANTES do load é o que reproduz esse
+  // navegador aqui — o Chromium do Playwright sempre a tem.
+  if (semTimeoutNativo) {
+    await page.addInitScript(() => { delete AbortSignal.timeout; });
+  }
   // O pixel da Meta vem de CDN, que este arquivo bloqueia — sem stub o
   // `window.fbq` é undefined e o disparo nem acontece (`window.fbq && sid`).
   // Empilha os argumentos crus: o teste mede o objeto que a página MANDOU.
@@ -374,11 +382,12 @@ test("WP13: com inicio antigo na URL, o modal mostra a data que o servidor deu",
 /* ── WP14: a busca não pode segurar a celebração ─────────────────────────────
  * O `fbq` e o modal passaram a esperar a resposta do servidor. Sem teto, uma
  * conexão pendurada deixava quem ACABOU DE PAGAR olhando para a /home de
- * sempre, sem confirmação nenhuma. O `AbortSignal.timeout(4000)` fecha isso, e
- * o caminho vencido é o mesmo do 404: cópia do imediato, Purchase sem `value`.
+ * sempre, sem confirmação nenhuma. O teto de 4 s (`AbortController` +
+ * `setTimeout`) fecha isso, e o caminho vencido é o mesmo do 404: cópia do
+ * imediato, Purchase sem `value`.
  *
- * Controle negativo: tire o `signal: AbortSignal.timeout(4000)` do fetch e este
- * caso estoura no `waitForSelector` (15 s) — os outros 24 seguem verdes.
+ * Controle negativo: tire o `signal: ctrl.signal` do fetch e este caso estoura
+ * no `waitForSelector` (15 s) — os outros seguem verdes.
  */
 test("WP14: busca pendurada — o modal sobe assim mesmo, sem valor inventado", async () => {
   const t0 = Date.now();
@@ -466,5 +475,33 @@ test("WP17: amount_cents=999999999999 cai no caso sem valor", async () => {
     { ...AGENDADA, amount_cents: 999999999999 });
   const [, , dados] = await purchase(page);
   assert.deepEqual(Object.keys(dados), ["currency"], `objeto: ${JSON.stringify(dados)}`);
+  await page.close();
+});
+
+/* ── WP18: Safari/WKWebView sem `AbortSignal.timeout` ────────────────────────
+ * O app roda com IPHONEOS_DEPLOYMENT_TARGET 14.0, e `AbortSignal.timeout` só
+ * existe no WKWebView 16.4+. Como ele era avaliado ao MONTAR as opções do
+ * fetch, num aparelho velho o `TypeError` estourava ANTES de a requisição sair:
+ * o `catch` engolia, `cobranca` ficava nula e — com o backend PERFEITAMENTE
+ * saudável — toda compra Pix perdia o `value` do Pixel e a compra AGENDADA era
+ * anunciada como "já começou". `AbortController` + `setTimeout` roda desde o
+ * Safari 12.1 e mantém o mesmo teto.
+ *
+ * Controle negativo MEDIDO: volte o fetch para `signal: AbortSignal.timeout(4000)`
+ * e SÓ este caso fica vermelho (`sub` vira "já começou" e o objeto perde o
+ * `value`). Positivo do grupo: WP1/WP6, os mesmos dados com a propriedade no
+ * lugar — verdes nas duas versões, que é o que prova que a correção não trocou
+ * o comportamento do navegador moderno.
+ */
+test("WP18: sem AbortSignal.timeout (iOS 14), a agendada mantém data e value", async () => {
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, false, true);
+  const semTimeout = await page.evaluate(() => typeof AbortSignal.timeout);
+  assert.equal(semTimeout, "undefined", "o ambiente do teste não foi degradado");
+  const [, , dados] = await purchase(page);
+  const t = await textos(page);
+  assert.equal(dados.value, 499, `Purchase sem value no Safari velho: ${JSON.stringify(dados)}`);
+  assert.match(t.sub, /26\/08\/2027/, `agendada anunciada sem a data: ${t.sub}`);
+  assert.doesNotMatch(t.sub, /já começou/, `agendada virou "já começou": ${t.sub}`);
+  assert.deepEqual(erros, [], `pageerror sem AbortSignal.timeout: ${erros.join(" | ")}`);
   await page.close();
 });
