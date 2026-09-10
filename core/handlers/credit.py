@@ -6,7 +6,7 @@ from collections import defaultdict
 
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
-from core.intent_classifier import classify
+from core.intent_classifier import classify, NEGATIVAS_EXATAS
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
@@ -347,36 +347,54 @@ _FILLER = {"a", "o", "as", "os", "um", "uma", "do", "da", "de", "dos", "das",
            "esse", "essa", "este", "esta"}
 
 
+# Maneiras de dizer "eu escolho X" — o que se poda do COMEÇO, junto com o
+# `_FILLER`. Allowlist de propósito, e a razão é estrutural, não de gosto:
+# enquanto a poda era livre ("qualquer prefixo, salvo veto de verbo"), TODO
+# verbo fora do veto virava porta. Medido no #323, com `pay_bill_choice`
+# pendente e fatura de R$ 300 aberta: `somei 50 no nubank`, `depositei 50 no
+# nubank`, `investi 50 no nubank`, `saquei 50 no nubank`, `transferi 50 no
+# nubank` e `coloquei 50 no nubank` PAGAVAM a fatura, e nenhum desses verbos
+# estava no veto — eles moram nas regexes de caixinha, investimento e saque, não
+# nas de lançamento. Varrida palavra a palavra, a alternância inicial do
+# `_ALIAS_PATTERNS` tinha MAIORIA ainda casando. Estender o veto com elas é a
+# sexta rodada da mesma revisão: "verbo de comando do bot inteiro" é ABERTO.
+#
+# Invertido, o conjunto que precisa ser enumerado é "maneiras de dizer que
+# ESCOLHO um cartão", que é pequeno e fechado. Verbo desconhecido para de ser
+# porta por CONSTRUÇÃO — não por lembrar dele.
+#
+# Só entra o que é seleção ou fala; NUNCA verbo que descreve operação.
+# `coloca`, `bota`, `poe`, `deixa`, `guarda`, `junta` ficam de FORA mesmo
+# parecendo conversacionais: são a alternância literal do `pockets.deposit`
+# (`core/intent_classifier.py`), e `coloca o nubank` — resposta plausível, cujo
+# custo de recusa é uma re-pergunta — não paga a porta que `coloca ... no
+# nubank` abriria.
+#
+# `acho`, `ai` e `que` também estão no `_FALA_E_MOEDA`/`_UNIDADE_DE_CARTAO`
+# abaixo. Não é a mesma regra em dois lugares (§0.7): lá eles dizem "isto ainda
+# é um número", aqui dizem "isto ainda não é o nome". Coincidem no vocabulário
+# de enchimento de fala, não na decisão.
+_SELECAO = {"quero", "pode", "ser", "escolho", "prefiro", "vai", "manda",
+            "acho", "que", "ai"}
+
+_PODAVEL_NO_PREFIXO = _FILLER | _SELECAO
+
+
 # Cortesia de FIM de mensagem. Conjunto pequeno e fechado DE PROPÓSITO, e
 # deliberadamente diferente do `_FILLER`: as duas pontas não correm o mesmo
 # risco. No começo, o perigo é o comando vir ANTES do nome
 # (`excluir cartao nubank`); no fim, é o comando vir DEPOIS (`nubank excluir`).
 # Aparar o sufixo com a mesma lista do prefixo reabriria a segunda forma — por
 # isso aqui só entram palavras que não são comando de nada.
-# Verbo/pronome que faz da mensagem um COMANDO, não uma escolha de cartão.
-# Conjunto FECHADO e do domínio — é a inversão que este repositório já escolheu
-# duas vezes (a nota do `ABANDONA`, :165-171): enumerar o que é INOFENSIVO é
-# conjunto aberto ("quero", "pode ser", "escolho", "prefiro", "vai ser"...) e
-# rende uma rodada de revisão por palavra esquecida; enumerar o que é PERIGOSO
-# é fechado, porque os comandos deste domínio são contáveis.
 #
-# NÃO se usa o oráculo (`classify`) aqui, ao contrário do `_so_numero`, e a
-# medição é a razão: `nubank excluir` é `out_of_scope/0.00` — o classificador
-# não vê comando nenhum —, então o oráculo o deixaria passar, ele casaria
-# `nubank` e PAGARIA os R$ 300. A veto-list pega porque olha a mensagem
-# INTEIRA, não só o começo.
-#
-# `fatura` fica de FORA de propósito: é filler ("a fatura do nubank" é resposta
-# legítima). Quem barra `nubank fatura` é a poda ser por SUFIXO — ver abaixo.
-_VERBO_DE_COMANDO = {
-    "excluir", "apagar", "deletar", "remover", "delete", "cancelar",
-    "pagar", "paguei", "gastei", "gasto", "gastos", "comprei", "parcelei",
-    "quanto", "quando", "qual", "quais",
-    "ver", "mostrar", "mostra", "listar", "lista",
-    "vence", "vencimento", "fecha", "fechamento", "limite",
-    "saldo", "extrato", "criar", "cadastrar", "definir", "mudar", "trocar",
-    "desfazer", "ajuda",
-}
+# Este conjunto é o outro lado do `_PODAVEL_NO_PREFIXO` e obedece à MESMA
+# regra: verbo de comando nunca entra em nenhum dos dois. Enquanto isso valer,
+# nenhuma leitura de uma mensagem que contenha um verbo de comando consegue se
+# livrar dele. Quem MEDE isso é o
+# `test_verbo_que_move_dinheiro_nunca_e_podavel`, e ele olha só o
+# `_PODAVEL_NO_PREFIXO`: `por` está em "por favor" E no `DEPOSIT_VERBS`, então
+# a mesma interseção aqui seria falso positivo. A guarda desta ponta é o
+# controle P do catálogo (`tests/_pendencia_credito_helpers.py`).
 
 _CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
                    "valeu", "vlw", "pls", "please", "plz"}
@@ -387,7 +405,10 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
 
     Três aparos, e o terceiro é o que custou um bug de dinheiro:
 
-    - PREFIXO de filler: `a do banco do brasil` tem de virar `banco do brasil`.
+    - PREFIXO, e só o que está no `_PODAVEL_NO_PREFIXO` — filler e seleção
+      conversacional. Para no PRIMEIRO token de fora, e é essa parada que faz
+      da recusa uma propriedade de CONSTRUÇÃO: `somei 50 no nubank` não gera
+      `nubank` porque `somei` não é podável, sem ninguém ter enumerado `somei`.
       Só o prefixo, nunca o miolo — um filtro global comeria o `do` do MEIO do
       nome, e `a conta` tem de virar `conta` mesmo com "conta" sendo filler,
       porque o nome do cartão pode SER uma palavra de enfeite.
@@ -405,37 +426,43 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
 
     O que NÃO se faz é voltar ao `re.search` — é ele que fazia
     `excluir cartao nubank` casar `nubank` e pagar R$ 300. Os dois ataques
-    seguem fora: em `excluir cartao nubank` a primeira palavra não é filler e a
-    varredura de prefixo para na hora; em `nubank excluir` o último token não é
-    cortesia e a de sufixo também.
+    seguem fora pelas duas pontas: em `excluir cartao nubank` a primeira palavra
+    não é podável e a varredura de prefixo para na hora; em `nubank excluir` o
+    último token não é cortesia e a de sufixo também. Como nem
+    `_PODAVEL_NO_PREFIXO` nem `_CORTESIA_FINAL` contêm verbo de comando, toda
+    leitura de uma mensagem que tenha um continua contendo esse verbo — o que
+    tornou o veto de mensagem inteira que existia aqui código morto, medido e
+    removido — a suíte de `tests/test_pendencia_credito_*.py` fica inteira
+    verde sem ele, e a interseção que garante isso tem teste próprio.
     """
     tokens = alvo.split()
-    # VETO: a mensagem inteira tem verbo de comando → só a leitura literal, que
-    # na prática é "não casa cartão nenhum". É o que segura `nubank excluir`,
-    # onde o comando vem DEPOIS do nome e nenhuma poda de prefixo alcançaria.
-    if any(t in _VERBO_DE_COMANDO for t in tokens):
-        return [alvo]
-
     # `> 1`: resposta que é SÓ cortesia ("obrigado") não pode virar string
     # vazia e casar um cartão de nome vazio.
     sem_cortesia = len(tokens)
     while sem_cortesia > 1 and tokens[sem_cortesia - 1] in _CORTESIA_FINAL:
         sem_cortesia -= 1
 
+    # Até onde o prefixo pode ser podado: para no PRIMEIRO token fora do
+    # `_PODAVEL_NO_PREFIXO`. É a diferença entre fechar a classe por construção
+    # e fechá-la por enumeração — ver a nota do conjunto.
+    podavel = 0
+    while podavel < len(tokens) and tokens[podavel] in _PODAVEL_NO_PREFIXO:
+        podavel += 1
+
     leituras: set[str] = set()
     # Todo corte de sufixo entre "nenhuma cortesia aparada" e "toda aparada",
     # não só os dois extremos: a poda é gulosa e em `nubank pf por favor` ela
     # comeria o `pf` junto, deixando sem o `nubank pf`, que é o nome do cartão.
     #
-    # E QUALQUER prefixo, não só o de filler: sem isso `quero o nubank` e
-    # `pode ser o nubank` não casavam nada. O que impede isso de virar busca por
-    # substring é a leitura terminar SEMPRE no fim (só se poda prefixo, nunca
-    # miolo nem cauda) — é isso que mantém `nubank fatura` e `nubank saldo`
-    # fora, porque ali o nome não é sufixo da mensagem.
+    # `min(podavel, fim - 1)`: o `fim - 1` garante leitura não vazia (a mesma
+    # razão do `> 1` acima), e o `podavel` é o allowlist. A leitura também
+    # termina SEMPRE no fim (só se poda prefixo, nunca miolo nem cauda) — é isso
+    # que mantém `nubank fatura` e `nubank saldo` fora, porque ali o nome não é
+    # sufixo da mensagem.
     # ponytail: O(n²) em tokens de UMA resposta de WhatsApp; se algum dia
     # importar, corte pelo maior nome de cartão do usuário.
     for fim in range(len(tokens), sem_cortesia - 1, -1):
-        for i in range(fim):
+        for i in range(min(podavel, fim - 1) + 1):
             leituras.add(" ".join(tokens[i:fim]))
     return sorted(leituras, key=len, reverse=True)
 
@@ -956,15 +983,24 @@ def _is_yes(text: str) -> bool:
     return normalize_text(text) in {"sim", "s", "yes", "y", "quero", "claro", "ok", "pode"}
 
 
-_NEGATIVAS_EXATAS = {"nao", "não", "n", "no", "cancelar", "cancela",
-                     "agora nao", "agora não"}
+# IMPORTADAS do classificador (§0.7), não copiadas: `NEGATIVAS_EXATAS` é a
+# seleção de `confirm.no` do `_EXACT`. A cópia à mão perdia CINCO das dez
+# (`nope`, `negativo`, `melhor nao`, `deixa pra la`, `deixa quieto`) — frases
+# que o classificador chama de negativa e o portão daqui não reconhecia (Codex,
+# #323). `nao`/`agora nao` já vinham de lá; as versões acentuadas saíram porque
+# o `normalize_text` tira acento antes da comparação e elas eram inalcançáveis.
+#
+# `n` e `no` ficam à mão: soltos são ambíguos demais para o `_EXACT`, que é
+# global, mas aqui já existe uma pergunta de sim/não na mesa.
+_NEGATIVAS_EXATAS = NEGATIVAS_EXATAS | {"n", "no"}
 
 
 def _is_no(text: str) -> bool:
     """Negativa, em pergunta de sim/não.
 
-    UNIÃO, não substituição: os literais de sempre MAIS "começa com não". Só os
-    literais deixavam de fora a negativa natural — `nao quero`, `não obrigado`,
+    UNIÃO, não substituição: as negativas canônicas do classificador MAIS
+    "começa com não". Só os literais deixavam de fora a negativa natural —
+    `nao quero`, `não obrigado`,
     `nao precisa`, `nao agora` —, e o efeito não era só "não entendi": o portão
     devolvia `None`, o `route()` abandonava, e `não quero` (que é
     `confirm.no/1.00`) saía como **"Nada a cancelar."**, resposta de outro

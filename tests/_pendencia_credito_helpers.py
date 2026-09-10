@@ -199,17 +199,16 @@ do palpite: sozinho, o oráculo QUEBRA 10 respostas legítimas que hoje funciona
 
 A QUINTA porta: PREFIXO CONVERSACIONAL no nome e NEGATIVA NATURAL (#323).
 
-CONTROLE NEGATIVO T — volte a podar só o prefixo de `_FILLER` (o `for i in
-range(fim)` vira a varredura que parava no primeiro não-filler): 13 vermelhos
-em `test_pay_bill_choice_aceita_prefixo_conversacional` e
-`test_set_primary_choose_aceita_prefixo_conversacional`.
+CONTROLE NEGATIVO T — tire o `_SELECAO` do `_PODAVEL_NO_PREFIXO` (poda só o
+`_FILLER`): 13 vermelhos em `test_pay_bill_choice_aceita_prefixo_conversacional`
+e `test_set_primary_choose_aceita_prefixo_conversacional`.
 
-CONTROLE NEGATIVO U — tire o veto de `_VERBO_DE_COMANDO`: 8 vermelhos em
-`test_pay_bill_choice_nao_paga_com_comando_apesar_da_poda_livre`. Note QUAIS:
-só os casos em que o nome do cartão é SUFIXO da mensagem (`excluir cartao
-nubank`, `limite do nubank`, `ver fatura nubank`...). `nubank excluir` e
-`nubank fatura` seguem verdes sem o veto, porque ali quem segura é a poda ser
-só de prefixo. São DOIS mecanismos independentes, e o teste mede os dois.
+CONTROLE NEGATIVO U — a poda de prefixo volta a ser LIVRE (`for i in
+range(fim)`): 32 vermelhos, entre eles os 6 verbos que veto nenhum alcançava
+(`test_pay_bill_choice_nao_paga_com_verbo_de_outro_dominio`) e os 4 de cartão
+com nome podável (`Vai`/`Pode`/`Minha Conta`). O veto `_VERBO_DE_COMANDO` saiu
+nesta rodada: com o allowlist ele não muda uma leitura sequer (interseção vazia
+com `_PODAVEL_NO_PREFIXO`), medido em 4550 frases e 316 verdes sem ele.
 
 CONTROLE NEGATIVO V — `_is_no` volta a só aceitar literais: 10 vermelhos em
 `test_reminder_opt_in_aceita_negativa_natural` e
@@ -300,8 +299,8 @@ def diga(uid: int, texto: str) -> str:
     return "\n".join(m.text for m in out)
 
 
-def cartao(uid: int) -> int:
-    return db.create_card(uid, "Nubank", 10, 17)
+def cartao(uid: int, nome: str = "Nubank") -> int:
+    return db.create_card(uid, nome, 10, 17)
 
 
 # ---------------------------------------------------------------------------
@@ -315,8 +314,8 @@ def arma_installment(uid: int) -> None:
     })
 
 
-def arma_pay_bill_choice(uid: int) -> None:
-    card_id = cartao(uid)
+def arma_pay_bill_choice(uid: int, nome: str = "Nubank") -> None:
+    card_id = cartao(uid, nome)
     db.add_credit_purchase_installments(
         user_id=uid, card_id=card_id, valor_total=300.0, categoria="outros",
         nota="mercado", purchased_at=date.today(), installments=1,

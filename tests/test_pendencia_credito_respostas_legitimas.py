@@ -289,14 +289,15 @@ def test_pay_bill_choice_o_generico_continua_pagando_o_generico(
 # `quero o Nubank`, `pode ser o Nubank`, `escolho o Nubank`: a poda parava no
 # primeiro token fora do `_FILLER`, e a `main` casava por substring.
 #
-# A correção é a INVERSÃO: poda QUALQUER prefixo, a não ser que a mensagem
-# contenha verbo de comando (`_VERBO_DE_COMANDO`, conjunto fechado do domínio).
-# Enumerar prefixo inofensivo é conjunto aberto — foi o que custou quatro
-# rodadas no `_so_numero`. O ataque continua fora por dois mecanismos
-# independentes, e os dois têm teste em `test_pendencia_credito_portoes.py`:
-# o veto de verbo (pega `nubank excluir`, que o classificador vê como
-# out_of_scope) e a poda ser só de PREFIXO (pega `nubank fatura`, cujo nome não
-# é sufixo da mensagem).
+# A correção é ALARGAR o conjunto podável, não abrir a poda: `_SELECAO` (as
+# maneiras de dizer "eu escolho X") entra junto com o `_FILLER`, e a poda segue
+# parando no primeiro token de fora. A tentativa anterior — podar QUALQUER
+# prefixo e vetar por lista de verbos — durou uma rodada: o veto não conhecia
+# `somei`, `depositei`, `investi`, `saquei`, e os quatro PAGAVAM a fatura.
+# "Verbo de comando" é conjunto ABERTO; "maneiras de dizer que escolho um
+# cartão" é fechado. O ataque fica fora por dois mecanismos independentes, os
+# dois com teste em `test_pendencia_credito_portoes.py`: a poda parar no
+# primeiro token não-podável e a leitura terminar sempre no fim da mensagem.
 # ===========================================================================
 
 @pytest.mark.parametrize("resposta_do_user", [

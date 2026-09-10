@@ -249,17 +249,17 @@ def test_pay_bill_choice_nao_paga_com_comando_depois_do_nome(frase):
         f"{frase!r} debitou a fatura: {resposta!r}"
 
 
-# P2-5, o lado do ATAQUE. A inversão poda QUALQUER prefixo, então o que segura
-# o ataque muda de mecanismo — e são DOIS, independentes:
+# P2-5, o lado do ATAQUE. São DOIS mecanismos, independentes, e nenhum dos dois
+# é uma lista de comandos — foi a lista que vazou seis vezes seguidas:
 #
-#   1. VETO de `_VERBO_DE_COMANDO` sobre a mensagem inteira. É o único que pega
-#      `nubank excluir`: medido, ele é `out_of_scope/0.00`, então o oráculo do
-#      `_so_numero` o deixaria passar e ele pagaria os R$ 300. Por isso aqui
-#      NÃO se usa o classificador.
-#   2. A poda ser só de PREFIXO (a leitura sempre termina no fim da mensagem).
-#      É o que pega `nubank fatura` e `nubank saldo`, onde o nome do cartão não
-#      é sufixo — e é por isso que `fatura` não precisa estar no veto, o que
-#      manteria `a fatura do nubank` funcionando.
+#   1. A poda de prefixo PARA no primeiro token fora do `_PODAVEL_NO_PREFIXO`.
+#      É o que pega `excluir cartao nubank`, `gastei 50 no nubank` e todo verbo
+#      que ninguém enumerou. Aqui NÃO se usa o classificador: `nubank excluir`
+#      é `out_of_scope/0.00`, o oráculo o deixaria passar.
+#   2. A leitura sempre termina no FIM da mensagem (poda-se prefixo, nunca
+#      cauda). É o que pega `nubank fatura`, `nubank saldo` e `nubank excluir`,
+#      onde o nome do cartão não é sufixo — e é por isso que `fatura` pode ser
+#      filler, mantendo `a fatura do nubank` funcionando.
 @pytest.mark.parametrize("frase", [
     "excluir cartao nubank", "nubank excluir", "nubank apagar", "nubank deletar",
     "nubank remover", "quanto gastei no nubank", "quando vence o nubank",
