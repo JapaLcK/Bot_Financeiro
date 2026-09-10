@@ -274,7 +274,9 @@ def _email(cobranca, evt) -> None:
     if not destino or recent_event_exists("pix_paid_email_sent",
                                           cobranca["user_id"], 1.0):
         return
-    if not send_pix_paid_email(destino, int(cobranca["amount_cents"]) / 100,
+    if not send_pix_paid_email(destino, cobranca["plan"],
+                               int(cobranca["amount_cents"]) / 100,
+                               cobranca["access_starts_at"],
                                cobranca["access_expires_at"]):
         raise RuntimeError("send_pix_paid_email devolveu False")
     log_system_event_sync("info", "pix_paid_email_sent",

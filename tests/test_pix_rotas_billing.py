@@ -216,6 +216,41 @@ def test_poll_pelo_id_do_asaas_e_404_e_o_qr_nao_sai(user_id, monkeypatch):
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="DÍVIDA: o poll monta a resposta À MÃO (frontend/routes/billing_pix.py, "
+           "no billing_pix_status) em vez de passar pelo pix_checkout_resposta."
+           "resposta(), e por isso não expõe `agendada` — o campo que existe "
+           "justamente porque `starts_at` SOZINHO não separa compra imediata de "
+           "agendada (na imediata ele também vem preenchido, com `agora`). Hoje "
+           "ninguém consome (pix-poll.js:53,94 leem `starts_at` da resposta do "
+           "POST), então é dívida e não bug. ESTA DÍVIDA NÃO TEM DONO: nenhum PR "
+           "aberto conserta o poll — o `fix/pix-plano-vocabulario` (#347) altera "
+           "só o `billing_pix_checkout` e não encosta no `billing_pix_status`, "
+           "então este teste segue XFAIL depois que ele mergear. Para remover o "
+           "marcador é preciso primeiro consertar o router: fazer o poll montar a "
+           "resposta pelo `resposta()` (hoje `starts_at` é montado à mão em "
+           "frontend/routes/billing_pix.py:159). A issue de rastreio ainda vai ser "
+           "aberta.",
+)
+def test_poll_expoe_agendada_como_a_resposta_do_checkout(user_id, monkeypatch):
+    """§0.7: duas montagens da MESMA resposta, e só uma tem o campo que decide.
+
+    Não compara as chaves inteiras de propósito — os dois contratos divergem
+    legitimamente (o poll não leva QR, o checkout não leva `status`). O que se
+    trava aqui é o campo cuja ausência reproduz o bug original na tela.
+    """
+    conta(user_id, "free", None)
+    linha = _cobranca(user_id)
+    monkeypatch.setattr(rotas.shared, "resolve_dashboard_user_id", lambda req: user_id)
+
+    corpo = client.get(f"/billing/pix/{linha['public_token']}").json()
+    assert "starts_at" in corpo, f"contrato do poll mudou: {sorted(corpo)}"
+    assert "agendada" in corpo, (
+        f"o poll expõe `starts_at` sem `agendada`: {sorted(corpo)}"
+    )
+
+
 def _cobranca(uid: int) -> dict:
     return criar_cobranca(uid, public_token=uuid.uuid4().hex, plan="pro_max",
                           plan_stored="pro_max", price_cents=49900,

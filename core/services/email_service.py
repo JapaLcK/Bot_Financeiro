@@ -1105,22 +1105,66 @@ def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard
     )
 
 
-def send_pix_paid_email(to: str, amount_brl: float, access_expires_at,
-                        dashboard_url: str = "") -> bool:
+# O nome COMERCIAL de cada plano, igual ao que o cliente acabou de ler no modal
+# da /home (`WP_PLANOS` em frontend/home.html). Os mapas de
+# `handlers/billing_commands.py` e do monólito são outra coisa — dizem
+# "Essencial"/"Plus"/"Pro", sem a marca — e por isso não servem aqui.
+#
+# **A chave é o valor LEGADO da coluna `plan` da cobrança, não o slug do
+# frontend.** `pro` é o Plus e `pro_max` é o Pro — a mesma tradução que o
+# frontend já faz em `PLAN_ALIASES = { pro: "plus", pro_max: "pro" }`
+# (frontend/home.html e frontend/nav-auth.js). Chavear em `plus`/`pro` mandava
+# "PigBank Pro" para quem comprou Plus e o fallback genérico para quem comprou
+# Pro: o router só aceita `("essencial", "pro", "pro_max")`
+# (frontend/routes/billing_pix.py) e a coluna guarda exatamente isso.
+PIX_PLAN_NAMES = {
+    "essencial": "PigBank Essencial",
+    "pro": "PigBank+",
+    "pro_max": "PigBank Pro",
+}
+
+
+def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
+                        access_expires_at, dashboard_url: str = "") -> bool:
     """Confirmação da compra Pix ANUAL (§8.2, efeito `email`).
 
     Não reusa `send_pro_charged_email` por causa de duas frases que ficariam
     mentindo para quem pagou por Pix: "próxima cobrança" (não há — o Pix anual
     não renova sozinho) e "portal Stripe" (o cliente não tem um). O que muda é o
     TEXTO; o transporte, o layout e o `send_email` são os mesmos.
+
+    `plan` existe porque o e-mail dizia "PigBank+" para todo mundo — quem pagou
+    Essencial ou Pro recebia o nome de outro plano no assunto e no corpo. Ele é
+    a coluna `plan` da cobrança crua, ou seja o valor LEGADO (`essencial`,
+    `pro` = Plus, `pro_max` = Pro) — ver `PIX_PLAN_NAMES` logo acima.
+    `access_starts_at` no futuro é a compra AGENDADA (quem já tinha plano
+    vigente): o ano só começa quando o período atual terminar, e prometer acesso
+    imediato ali é a mesma mentira de outro jeito.
     """
+    from datetime import datetime as _dt, timezone as _tz
+
+    nome = PIX_PLAN_NAMES.get(plan, "PigBank")
+    # Naive vira UTC antes de comparar, do mesmo jeito que o `_fmt_brl_date`
+    # logo acima faz com ESTE MESMO valor: a coluna é `timestamptz` e hoje só
+    # chega aware, mas comparar aware com naive levanta `TypeError` DENTRO do
+    # efeito `email` — e aí o efeito nunca é registrado, o drain retenta para
+    # sempre e o cliente que pagou fica sem confirmação nenhuma.
+    _inicio = access_starts_at
+    if getattr(_inicio, "tzinfo", "") is None:
+        _inicio = _inicio.replace(tzinfo=_tz.utc)
+    agendado = _inicio is not None and _inicio > _dt.now(_tz.utc)
     valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     ate = _fmt_brl_date(access_expires_at)
+    de = _fmt_brl_date(access_starts_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    abertura = (f"Seu {nome} tá garantido — o ano começa quando o plano atual terminar."
+                if agendado else f"Seu {nome} tá liberado.")
+    inicio_li = f"<li><strong>Acesso a partir de:</strong> {de}</li>" if agendado else ""
     content = f"""
-      <p>🐷✨ <strong>Pagamento confirmado!</strong> Seu PigBank+ tá liberado.</p>
+      <p>🐷✨ <strong>Pagamento confirmado!</strong> {abertura}</p>
       <ul>
         <li><strong>Valor pago:</strong> {valor}</li>
+        {inicio_li}
         <li><strong>Acesso até:</strong> {ate}</li>
       </ul>
       <p>É um plano anual pago por Pix: <strong>não tem renovação automática</strong> e não tem cartão
@@ -1128,15 +1172,16 @@ def send_pix_paid_email(to: str, amount_brl: float, access_expires_at,
       <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>
       <p>Qualquer dúvida, é só responder este email ou usar <strong>ajuda</strong> no bot.</p>
     """
-    html = _base_html("Pagamento confirmado — PigBank+", content)
+    html = _base_html(f"Pagamento confirmado — {nome}", content)
     text = (
-        f"PigBank+ liberado.\n\n"
+        f"{abertura}\n\n"
         f"Valor pago: {valor}\n"
-        f"Acesso até: {ate}\n\n"
+        + (f"Acesso a partir de: {de}\n" if agendado else "")
+        + f"Acesso até: {ate}\n\n"
         f"Plano anual por Pix, sem renovação automática.\n{dash}/app"
     )
     return send_email(
-        to=to, subject=f"✓ Pagamento confirmado — PigBank+ anual ({valor})",
+        to=to, subject=f"✓ Pagamento confirmado — {nome} anual ({valor})",
         html_body=html, text_body=text,
     )
 

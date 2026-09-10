@@ -41,9 +41,17 @@ def resposta(linha: dict, qr_payload: str) -> dict:
     da venda ser paga é o checkout, com o valor que `plano_da_cobranca` calculou:
     a COLUNA só é escrita no pagamento (§7), então ler a linha crua aqui devolvia
     nulo em todo checkout.
+
+    `agendada` existe porque **a data sozinha não separa os dois casos**: na
+    compra IMEDIATA o `access_starts_at` também vem preenchido (com `agora`),
+    então "tem `starts_at`" não quer dizer "começa depois". A tela que gatilhava
+    pela presença da data prometia "começa em <hoje>, assim que o plano atual
+    terminar" para quem tinha acesso naquele instante e não tinha plano nenhum
+    antes.
     """
     from core.services.pix_brcode import qr_svg_data_url
 
+    starts_at = linha["access_starts_at"]
     return {
         "public_token": linha["public_token"],
         "qr_payload": qr_payload,
@@ -51,7 +59,11 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         "expires_at": linha["qr_expires_at"],
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
-        "starts_at": linha["access_starts_at"],
+        "starts_at": starts_at,
+        # Mesma conta do `agendada` que `plano_da_cobranca` devolve em TODOS os
+        # ramos (`inicio > agora`) — e não o campo dele, porque o
+        # `_reaproveitar` chega aqui só com a data, sem o resto do snapshot.
+        "agendada": bool(starts_at and starts_at > datetime.now(timezone.utc)),
         "plan": linha["plan"],
     }
 

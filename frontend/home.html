@@ -1922,7 +1922,10 @@ Object.assign(window, {
     <img class="wp-mark" style="--i:0" src="/brand/icon.png?v=2" alt="" aria-hidden="true"
          width="45" height="48" />
     <p class="wp-eyebrow" style="--i:1">
-      Assinatura confirmada
+      <!-- num <span> próprio porque o chip é irmão dele: `textContent` no <p>
+           levaria o chip junto. O Pix anual troca por "Pagamento confirmado" —
+           não há assinatura nenhuma ali (compra à vista, sem cartão). -->
+      <span id="wp-eyebrow-txt">Assinatura confirmada</span>
       <span class="wp-chip" id="wp-chip" hidden></span>
     </p>
     <h2 id="wp-title" style="--i:2">Tá dentro do PigBank+</h2>
@@ -2007,14 +2010,22 @@ const WP_PLANOS = {
   },
 };
 
-function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } = {}) {
+function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null,
+                         pix = false, inicio = null } = {}) {
   const ov = document.getElementById("welcome-pro-overlay");
   if (!ov) return;
 
   // `plano` vem da URL, então nunca entra em HTML: só serve de chave do mapa, e
   // valor desconhecido cai no Plus, que era o texto único de antes.
   const cfg = WP_PLANOS[String(plano).toLowerCase()] || WP_PLANOS.plus;
-  document.getElementById("wp-title").textContent = `Tá dentro do ${cfg.nome}`;
+  // UMA decisão de ramo, lida pelo título e pelo corpo. Eram duas: o título
+  // olhava `pix && inicio` e o corpo a cadeia `trial → pix → else`, onde o
+  // trial ganha — com `?ev=trial&gw=pix&inicio=…` saía título do Pix com sub
+  // de trial.
+  const modo = trial ? "trial" : (pix ? "pix" : "cartao");
+  document.getElementById("wp-title").textContent = modo === "pix" && inicio
+    ? `Seu ${cfg.nome} tá garantido`
+    : `Tá dentro do ${cfg.nome}`;
   const ul = document.getElementById("wp-feats");
   ul.replaceChildren(...cfg.feats(ia).map((texto) => {
     const li = document.createElement("li");
@@ -2030,11 +2041,30 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null } =
   // lia "seus 30 dias grátis começam agora", que é falso pra essa pessoa.
   const chip = document.getElementById("wp-chip");
   const sub = document.getElementById("wp-sub");
-  if (trial) {
+  // O olho é setado em TODOS os ramos, como o título, o sub e o chip: só o Pix
+  // escrevia nele, e o modal é o mesmo elemento reusado — uma vez trocado por
+  // "Pagamento confirmado", nenhum outro ramo o devolvia para o texto do HTML.
+  const olho = document.getElementById("wp-eyebrow-txt");
+  if (modo === "trial") {
+    olho.textContent = "Assinatura confirmada";
     chip.textContent = `${days} dias grátis`;
     chip.hidden = false;
     sub.textContent = `Seus ${days} dias grátis começam agora. A primeira cobrança só vem depois disso, e dá pra cancelar quando quiser.`;
+  } else if (modo === "pix") {
+    olho.textContent = "Pagamento confirmado";
+    /* O Pix anual é compra À VISTA: não há assinatura para cancelar nem cartão
+       para renovar, e quem já tinha plano vigente comprou um ano AGENDADO para
+       o fim dele. `inicio` chega da URL e já veio validado como AAAA-MM-DD;
+       aqui ele só vira DD/MM/AAAA, por textContent. */
+    chip.hidden = true;
+    const quando = inicio
+      ? `começa em ${inicio.split("-").reverse().join("/")}, assim que o plano atual terminar`
+      : "já começou";
+    sub.textContent = `Pagamento confirmado! Seu ano de ${cfg.nome} ${quando}.`
+      + " Foi pago à vista: sem cartão e sem renovação automática — a gente te"
+      + " avisa por e-mail antes de acabar.";
   } else {
+    olho.textContent = "Assinatura confirmada";
     chip.hidden = true;
     sub.textContent = "Sua assinatura já está ativa. Dá pra cancelar quando quiser, direto nas configurações.";
   }
@@ -2118,6 +2148,31 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   if (e.target === e.currentTarget) dismissWelcomePro();
 });
 
+/* Fronteira de confiança: `inicio` é query string, qualquer um digita, e o que
+   sair daqui vira a promessa "seu ano começa em <data>" na tela.
+
+   A regex sozinha barra markup e formato, e o `Date.parse` NÃO completa o
+   serviço: ele normaliza em vez de recusar, então "2027-02-30" virava
+   "30/02/2027" e "2027-11-31" virava "31/11/2027" — datas que não existem,
+   escritas na tela com cara de compromisso nosso. Quem valida de verdade é a
+   ida e volta: reconstrói e exige que os três campos voltem iguais.
+
+   O ano tem uma janela FIXA (2020–2100), e fixa de propósito: uma faixa
+   relativa ao relógio (`anoAtual + 2`) recusava a renovação legítima —
+   `plano_da_cobranca` empilha ano sobre ano sem teto, a 4ª compra Pix seguida
+   já começa em `anoAtual + 3` — e ainda dependia do relógio do aparelho, que
+   num celular com bateria zerada volta para 1970 e reprovaria QUALQUER data.
+   Ela só existe para `9999-12-31`, que passa na ida e volta acima e não é
+   compra, é URL forjada. O que não passa vira null, que é o texto do
+   imediato. */
+function wpInicioValido(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s || "")) return null;
+  const [a, m, d] = s.split("-").map(Number);
+  const dt = new Date(a, m - 1, d);
+  const bate = dt.getFullYear() === a && dt.getMonth() === m - 1 && dt.getDate() === d;
+  return bate && a >= 2020 && a <= 2100 ? s : null;
+}
+
 (function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
@@ -2126,6 +2181,9 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
   const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
+  const gw = params.get("gw");    // "pix" quando veio do Pix anual (pix-poll.js)
+  const inicio = params.get("inicio");  // AAAA-MM-DD do começo do ano comprado
+  const vl = params.get("vl");    // valor cobrado em reais (só o Pix manda)
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -2136,6 +2194,9 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   cleanUrl.searchParams.delete("td");
   cleanUrl.searchParams.delete("pl");
   cleanUrl.searchParams.delete("ia");
+  cleanUrl.searchParams.delete("gw");
+  cleanUrl.searchParams.delete("inicio");
+  cleanUrl.searchParams.delete("vl");
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
@@ -2148,7 +2209,22 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
       if (ev === "trial") {
         fbq("track", "StartTrial", { currency: "BRL" }, { eventID: "trial_" + sid });
       } else {
-        fbq("track", "Purchase", { currency: "BRL" }, { eventID: "purchase_" + sid });
+        // Fronteira de confiança: `vl` é query string, qualquer um digita. Vira
+        // receita só o que o `Number` converte por INTEIRO — e não o
+        // `parseFloat`, que aceitava "99abc" e "99,00" lendo só o começo. Por
+        // inteiro inclui as notações do próprio JS: `0x63` também vira 99, e
+        // fica, porque o efeito de forjar `vl` é sujar o pixel de quem forjou —
+        // apertar isso custaria uma regex a mais sem nada em troca. Entre
+        // 0 e R$ 1.000.000 — o teto existe porque `&vl=9e99` mandava um
+        // `Purchase` de 9e+99 BRL para a conta de anúncios, e o plano mais caro
+        // custa R$ 499. O resto é ausência, e aí o objeto fica IGUAL ao de antes
+        // deste parâmetro existir (o Stripe não manda `vl`, e o valor dele
+        // continua vindo só da CAPI).
+        const valor = Number(vl);
+        const dados = Number.isFinite(valor) && valor > 0 && valor < 1e6
+          ? { currency: "BRL", value: valor }
+          : { currency: "BRL" };
+        fbq("track", "Purchase", dados, { eventID: "purchase_" + sid });
       }
     }
     // GA4: só o `start_trial`, e de propósito. O `purchase` sai do SERVIDOR
@@ -2181,6 +2257,10 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
           days: Number.isFinite(dias) && dias > 0 ? dias : 30,
           plano: pl || "plus",
           ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
+          // `toLowerCase` porque `pl` já normaliza e este não normalizava:
+          // `?gw=PIX` caía no ramo da Stripe depois de uma compra Pix.
+          pix: String(gw).toLowerCase() === "pix",
+          inicio: wpInicioValido(inicio),
         });
       };
 

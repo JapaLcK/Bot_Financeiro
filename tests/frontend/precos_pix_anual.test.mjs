@@ -476,9 +476,93 @@ test("PT6: pago -> /home?upgrade=success com sid = public_token", async () => {
   assert.equal(url.searchParams.get("ia"), null, `sobrou ia= na URL: ${page.url()}`);
   assert.ok(!page.url().includes("pay_"), `o id do provedor vazou: ${page.url()}`);
   assert.ok(!page.url().includes("9999"), `o id do provedor vazou: ${page.url()}`);
+  // `gw=pix` sempre; `inicio=` só quando o checkout disse `agendada: true`, e
+  // este corpo não diz. Sem o par, a /home inventaria "seu ano começa em
+  // <hoje>" pra quem começou agora.
+  assert.equal(url.searchParams.get("gw"), "pix");
+  assert.equal(url.searchParams.get("inicio"), null,
+    `inventou inicio sem starts_at: ${page.url()}`);
+  // `vl` = os 19900 centavos deste corpo, em reais e com ponto (ver PT6c).
+  assert.equal(url.searchParams.get("vl"), "199.00", `vl errado: ${page.url()}`);
   assert.deepEqual(corposPix[0],
     { plan: "plus", interval: "annual", cpf_cnpj: CPF });
   await page.close();
+});
+
+// ── PT6b: quem separa agendado de imediato é `agendada`, não a data ──────────
+/**
+ * Os DOIS casos no mesmo teste, de propósito: eles só provam alguma coisa
+ * juntos. `access_starts_at` é preenchido nas duas compras — na imediata, com
+ * `agora` —, então "tem `starts_at`" NÃO quer dizer "começa depois". Gatilhar
+ * pela presença da data mandava `&inicio=<hoje>` na compra imediata, e a /home
+ * dizia "começa em 10/09/2026, assim que o plano atual terminar" para quem
+ * tinha acesso naquele segundo e nunca teve plano nenhum.
+ *
+ * E a fonte é o CHECKOUT, não o poll: o `starts_at` de 2026 que o poll devolve
+ * abaixo é o do PAGAMENTO — se ele fosse a fonte, a data agendada sairia 2026.
+ *
+ * Controle negativo: troque o `d.agendada && d.starts_at` do pix-poll.js de
+ * volta por `d.starts_at` e o caso IMEDIATO fica vermelho; apague o `agendada`
+ * da `resposta()` do backend (ou o `&inicio=`) e o AGENDADO fica.
+ */
+test("PT6b: agendada=true manda inicio; agendada=false com starts_at, não", async () => {
+  const base = { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                 amount_cents: 19900, credit_cents: 0, plan: "plus" };
+  const pago = { status: (n) => (n >= 2
+    ? { status: "paid", starts_at: "2026-01-02T12:00:00+00:00" }
+    : { status: "pending" }) };
+
+  const ag = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: true, starts_at: "2027-08-26T03:00:00+00:00" } } });
+  // A MESMA promessa já na tela do QR, antes de pagar.
+  assert.match(await ag.page.textContent(".pix-box"), /começa em 26\/08\/2027/,
+    "a tela do QR não repetiu a data do agendamento");
+  await ag.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  const url = new URL(ag.page.url());
+  assert.equal(url.searchParams.get("gw"), "pix");
+  assert.equal(url.searchParams.get("inicio"), "2027-08-26", `URL: ${ag.page.url()}`);
+  await ag.page.close();
+
+  // Compra IMEDIATA: o backend preenche `access_starts_at` com `agora` e diz
+  // `agendada: false`. Nem a tela do QR nem a URL podem falar em data.
+  const hoje = new Date().toISOString();
+  const im = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: false, starts_at: hoje } } });
+  assert.match(await im.page.textContent(".pix-box"), /começa agora/,
+    "a tela do QR datou uma compra imediata");
+  await im.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  assert.equal(new URL(im.page.url()).searchParams.get("inicio"), null,
+    `mandou inicio numa compra imediata: ${im.page.url()}`);
+  await im.page.close();
+});
+
+// ── PT6c: o valor COBRADO viaja na URL, para o Purchase do pixel ─────────────
+/**
+ * `vl=` é o `amount_cents` do CHECKOUT em reais, com ponto (formato de máquina:
+ * quem lê é a Meta). Sai daí e não de tabela de preço porque no upgrade Pix→Pix
+ * o cobrado é menor que o de tabela (crédito proporcional). Os dois valores
+ * diferentes — 199,00 no PT6 e 99,00 aqui — são o que separa derivar de chutar.
+ * Sem `amount_cents` inteiro > 0 o param não é escrito, e a /home cai no objeto
+ * de hoje, `{ currency: "BRL" }`.
+ *
+ * Controle negativo: tire o `+ (vl ? "&vl=" + vl : "")` do `pixPago` e PT6, PT6c
+ * e o caso do zero ficam vermelhos.
+ */
+test("PT6c: amount_cents vira vl em reais, e some quando não dá número", async () => {
+  const base = { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                 credit_cents: 0, starts_at: null, plan: "essencial" };
+  const pago = { status: (n) => (n >= 2 ? { status: "paid" } : { status: "pending" }) };
+
+  const a = await abrirQr({ ...pago, pix: { corpo: { ...base, amount_cents: 9900 } } });
+  await a.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  assert.equal(new URL(a.page.url()).searchParams.get("vl"), "99.00", `URL: ${a.page.url()}`);
+  await a.page.close();
+
+  const b = await abrirQr({ ...pago, pix: { corpo: { ...base, amount_cents: 0 } } });
+  await b.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  assert.equal(new URL(b.page.url()).searchParams.get("vl"), null,
+    `escreveu vl com amount_cents 0: ${b.page.url()}`);
+  await b.page.close();
 });
 
 // ── PT8: "Copiar código Pix" não pode mentir ────────────────────────────────
