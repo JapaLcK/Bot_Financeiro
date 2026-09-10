@@ -298,7 +298,9 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // indisponibilidade e o 403 do CSRF, de que o checkout não tem isenção.
     // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
     // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
-    // no genérico.
+    // no genérico. O #355 consertou o mesmo defeito só no toast; normalizar aqui
+    // em cima cobre o toast E as duas caixas do 409 de uma vez — por isso o
+    // rebase deixou UMA das duas versões, não as duas.
     const det = (d && (typeof d.detail === "string" ? { message: d.detail } : d.detail)) || {};
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
@@ -314,12 +316,7 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     const pago = det.error === "pix_future_purchase_conflict"
       && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
     if (r.status === 409 && pago) return pixModalJaPago(pago[0], ctx);
-    // `detail` do FastAPI é STRING quando o raise passa texto (400 do documento) e
-    // OBJETO nos 409 — sem esta linha a mensagem específica virava o genérico.
-    if (!r.ok) {
-      const msg = (typeof det === "string" ? det : det.message);
-      return showToast(msg || "Não consegui gerar o código Pix agora.", "err");
-    }
+    if (!r.ok) return showToast(det.message || "Não consegui gerar o código Pix agora.", "err");
     pixApagarDoc();          // o QR vai entrar: o documento sai da tela antes
     pixModalQr(d, plano, ctx);
   } catch {
