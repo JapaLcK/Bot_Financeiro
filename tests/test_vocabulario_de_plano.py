@@ -94,8 +94,12 @@ def _cabecalhos() -> dict[str, str]:
 
 
 def _checkout(logado, plan: str):
+    # CPF com o mod-11 fechando: o que este arquivo mede é o VOCABULÁRIO de plano,
+    # e desde 2026-09-10 o router recusa documento estruturalmente inválido antes
+    # de chegar ao preço. `12345678901` levava 400 aqui e o teste media a recusa
+    # do documento achando que media a do plano.
     return logado.http.post("/billing/pix/checkout", headers=_cabecalhos(),
-                            json={"plan": plan, "cpf_cnpj": "12345678901"})
+                            json={"plan": plan, "cpf_cnpj": "52998224725"})
 
 
 # ── os três cards da /precos, ponta a ponta pela rota ────────────────────────
