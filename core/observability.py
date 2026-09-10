@@ -9,6 +9,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config.env import load_app_env
+from core.pg_text import limpa_para_pg
 
 
 load_app_env()
@@ -233,10 +234,15 @@ def log_system_event_sync(
                     INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (level, event_type, message[:1000], source, user_id, Jsonb(details or {})),
+                    (limpa_para_pg(level), limpa_para_pg(event_type),
+                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(details or {}))),
                 )
             conn.commit()
     except Exception as exc:
+        # Desde o saneamento com `limpa_para_pg` na tupla acima, NUL e surrogate
+        # solitário não derrubam mais este INSERT (issue #357): das duas causas
+        # conhecidas de perda silenciosa aqui, sobra só a de baixo.
         # ponytail: teto conhecido — `user_id` fora de `users` derruba o INSERT
         # INTEIRO pela `system_event_logs_user_id_fkey` e o evento se PERDE; antes
         # deste PR ele ficava gravado com a coluna NULL. Caminho medido: token de
