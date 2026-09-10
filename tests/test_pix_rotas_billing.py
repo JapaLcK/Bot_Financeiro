@@ -172,7 +172,7 @@ def test_webhook_nao_precisa_de_csrf_e_o_checkout_precisa():
     assert sem_csrf.status_code in (401, 503), sem_csrf.status_code
 
     checkout = client.post("/billing/pix/checkout",
-                           json={"plan": "pro_max", "cpf_cnpj": "12345678901"})
+                           json={"plan": "pro", "cpf_cnpj": "12345678901"})
     assert checkout.status_code == 403, "o checkout ganhou isenção de CSRF"
 
 
