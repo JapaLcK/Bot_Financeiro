@@ -300,14 +300,19 @@ def test_assinar_de_quem_tem_pro_max_nao_diz_pigbank_mais(patches):
     assert "PigBank+" not in out, f"nome de outro plano pra quem paga Pro: {out}"
 
 
-def test_assinar_de_quem_tem_plus_continua_pigbank_mais(patches):
+@pytest.mark.parametrize("plano", ["pro", "plus"])
+def test_assinar_de_quem_tem_plus_continua_pigbank_mais(patches, plano):
     """CONTROLE POSITIVO do par: `pro` já lia o nome certo e continua lendo.
 
     Sem ele o conserto poderia trocar todo mundo pelo genérico "PigBank" e o
     teste de cima ficaria verde do mesmo jeito.
+
+    `plus` é o mesmo tier gravado com o valor ANTIGO da coluna (achado do Codex
+    no #358): `is_pro` o aceita, então esta linha é alcançável, e sem a entrada
+    em `PLAN_DISPLAY_NAMES` ele lê "PigBank" seco.
     """
     patches["is_pro"] = True
-    patches["auth_user"] = {"plan": "pro", "last_payment_status": "active",
+    patches["auth_user"] = {"plan": plano, "last_payment_status": "active",
                             "plan_expires_at": None}
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")

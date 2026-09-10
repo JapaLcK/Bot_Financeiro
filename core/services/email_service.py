@@ -1032,9 +1032,20 @@ def _fmt_brl_date(value) -> str:
 # (frontend/routes/billing_pix.py), e no Stripe o `plan_value` do webhook sai de
 # `_stored_plan_for_price` (frontend/finance_bot_websocket_custom.py:293), que
 # devolve exatamente os mesmos três.
+#
+# `plus` é o QUARTO, e entra por ser valor de COLUNA aceito, não por ser escrito
+# hoje: `_STORED_PLAN_TO_TIER` (core/services/plan_service.py:44) o mapeia para o
+# mesmo tier de `pro`, e `frontend/admin-dashboard.html:2192` já o trata como
+# "valor antigo em algumas contas". Sem a entrada, tal conta lê o genérico
+# "PigBank" — em `billing_commands.py:109`, entre outros. Nenhum escritor atual o
+# produz e a produção tinha ZERO linhas com ele (medido 2026-09-10 por
+# `SELECT plan, count(*) FROM auth_accounts GROUP BY 1`; remeça antes de reusar):
+# é defesa contra valor que o repositório declara ter existido, não regressão
+# viva. Quem amarra este mapa ao dos tiers é `tests/test_vocabulario_de_plano.py`.
 PLAN_DISPLAY_NAMES = {
     "essencial": "PigBank Essencial",
     "pro": "PigBank+",
+    "plus": "PigBank+",
     "pro_max": "PigBank Pro",
 }
 

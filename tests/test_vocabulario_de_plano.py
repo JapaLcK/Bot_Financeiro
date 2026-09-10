@@ -43,6 +43,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.billing_pix as rotas
 from _billing_grants_helpers import conta
 from _pix_checkout_helpers import asaas_falso, vendavel  # noqa: F401 — fixtures
+from core.services.email_service import PLAN_DISPLAY_NAMES
 from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
 from core.services.plan_service import _STORED_PLAN_TO_TIER, TIER_TO_STORED_PLAN
 from db.pix_charges import buscar_por_public_token
@@ -158,6 +159,39 @@ def test_os_dois_mapas_de_plano_sao_inversos():
     # E todo plano vendável tem preço: um valor sem entrada aqui viraria 503
     # `preco_anual_nao_configurado` só na hora da venda.
     assert set(TIER_TO_STORED_PLAN.values()) <= set(PRECOS_ANUAIS_CENTS)
+
+
+def test_todo_plano_pago_da_coluna_tem_nome_comercial():
+    """O terceiro mapa entra no amarre: valor de coluna → nome que o cliente lê.
+
+    Fecha a CLASSE do achado do Codex no #358, em vez da instância. `plus` era a
+    instância: `_STORED_PLAN_TO_TIER` o aceita (mesmo tier de `pro`) e
+    `frontend/admin-dashboard.html:2192` afirma que há contas com ele, mas
+    `PLAN_DISPLAY_NAMES` não o tinha — e essas contas liam o genérico "PigBank"
+    no e-mail e em `billing_commands.py:109`. Um SEXTO valor futuro nasce
+    vermelho aqui em vez de virar genérico numa cobrança.
+
+    `free` fica de fora, e não por conveniência: é o estado de plano INATIVO, não
+    um plano comprado. `_stored_plan_for_price` nunca o devolve (nenhum e-mail
+    desta família o nomeia) e `billing_commands.py:109` é inalcançável para ele,
+    porque `is_pro` é falso. Dar-lhe nome comercial seria escrever copy de
+    assinatura para quem não assinou.
+
+    NEGATIVO deste teste: tire `"plus"` de `PLAN_DISPLAY_NAMES` e ele fica
+    vermelho por NOME, citando `['plus']`.
+    """
+    nomes_por_tier: dict[str, set[str]] = {}
+    for plano, tier in _STORED_PLAN_TO_TIER.items():
+        if plano == "free":
+            continue
+        assert plano in PLAN_DISPLAY_NAMES, (
+            f"'{plano}' vale um plano pago na coluna e não tem nome comercial: "
+            "e-mail e bot chamariam a conta de 'PigBank' genérico")
+        nomes_por_tier.setdefault(tier, set()).add(PLAN_DISPLAY_NAMES[plano])
+    # Ter entrada não basta: dois valores do MESMO tier têm de nomear o MESMO
+    # plano, senão `plus` diria "PigBank Pro" e o teste acima ficaria verde.
+    for tier, nomes in nomes_por_tier.items():
+        assert len(nomes) == 1, f"tier '{tier}' com dois nomes: {sorted(nomes)}"
 
 
 # `""` está FORA desta tabela, e não por conveniência: as duas rotas de fato
