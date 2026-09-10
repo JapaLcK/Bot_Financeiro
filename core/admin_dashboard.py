@@ -2262,6 +2262,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
@@ -2295,6 +2299,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
