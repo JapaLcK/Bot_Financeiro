@@ -202,17 +202,13 @@ def test_todo_plano_pago_da_coluna_tem_nome_comercial():
         assert len(nomes) == 1, f"tier '{tier}' com dois nomes: {sorted(nomes)}"
 
 
-# `""` está FORA desta tabela, e não por conveniência: as duas rotas de fato
-# divergem nele, por um motivo que não é vocabulário e é ANTERIOR a este PR — o
-# Stripe faz `("" or "plus")` (`finance_bot_websocket_custom.py:4471`), então
-# plano vazio vira Plus em silêncio, enquanto o Pix responde 400. Achado
-# relatado ao Arquiteto; consertar o default de uma rota de dinheiro não estava
-# no plano deste PR, e ampliá-lo por conta própria é o que o §2 proíbe.
 @pytest.mark.parametrize("plan", [
     "essencial", "plus", "pro",   # públicos: nenhuma das duas rotas recusa
     "pro_max", "free",            # nenhuma das duas rotas aceita
     "PLUS",                       # as duas normalizam a caixa antes de validar
-])
+    "",                           # vazio: 400 nas duas (o Stripe fazia Plus, #352)
+    " plus ",                     # espaços: as duas dão `.strip()` antes de validar
+], ids=["essencial", "plus", "pro", "pro_max", "free", "PLUS", "vazio", "com-espacos"])
 def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
                                                       asaas_falso, plan):
     """O gêmeo do Stripe (`/billing/create-checkout`) e o do Pix têm de concordar
@@ -233,3 +229,114 @@ def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
     assert stripe.status_code != 401, "o cliente do Stripe não autenticou"
     assert _recusa_o_plano(pix) == _recusa_o_plano(stripe), (
         f"'{plan}': Pix {pix.status_code} × Stripe {stripe.status_code}")
+
+
+# CEGUEIRA CONHECIDA da tabela acima: ela sempre manda a chave `plan` (nem que
+# seja `""`), então nunca vê um corpo SEM a chave — e é exatamente aí que as
+# três rotas divergem (medido em 2026-09-10; comando: POST com
+# `{"interval":"annual"}` em cada uma):
+#
+#   /billing/create-checkout → 400 `plan inválido ...`   (detail STRING)
+#   /billing/pix/checkout    → 422 `Field required`      (detail LISTA)
+#   /billing/change-plan     → 422 `Field required`      (detail LISTA)
+#
+# Só o Stripe dá 400 porque só ele tem `plan: str = ""` no modelo, e só ele tem
+# porque só ele aceita POST sem body nenhum (`payload: ... | None = None`) —
+# a razão inteira está na docstring de `billing_create_checkout`. Não entra na
+# tabela: a asserção dela é de IGUALDADE entre as colunas, e aqui a diferença é
+# intencional. Fica ANOTADO porque `frontend/pix-checkout.js:269` tem a mesma
+# forma de `JSON.stringify` que apagou a chave e gerou a #352: se um dia ela
+# apagar `plan`, o Pix responde 422 e a /precos mostra o fallback genérico.
+
+
+# ── /billing/change-plan: a mesma normalização, com semântica própria ────────
+#
+# Esta rota fica FORA da tabela de duas colunas acima, e a razão NÃO é
+# incompatibilidade de status — essa foi medida e é FALSA: `_recusa_o_plano` já
+# colapsa 200 e 503 em "não é recusa de plano", e colapsaria 409 igual. Uma
+# terceira coluna PASSA: medido em 2026-09-10, as 8 linhas concordaram
+# (`essencial/plus/pro/PLUS/" plus "` → pix 200, stripe 503, change 503, os três
+# `recusa=False`; `pro_max/free/""` → 400 nos três), sem monkeypatch nenhum.
+#
+# Ela fica de fora porque a duplicação que vigiaria FOI REMOVIDA em vez de
+# vigiada (§0.7 é sobre UMA fonte; o teste comparador é o que se faz quando a
+# cópia é inevitável, e aqui não era): as três rotas de plano não têm mais tupla
+# literal — todas validam contra `TIER_TO_STORED_PLAN`
+# (`core/services/plan_service.py`), e um quarto tier entra num lugar só. Nenhum
+# comentário guarda isso; o `not in` guarda.
+#
+# O que sobra medir é COMPORTAMENTO, e a coluna não saberia dizer:
+#   * a ACEITAÇÃO aqui é o 409 `no_subscription` ESPECÍFICO, não "qualquer
+#     coisa que não seja 400 `plan inválido`";
+#   * a RECUSA é medida pelo TRABALHO — `chamadas == []`, a rota nem leu a
+#     conta. O predicado da tabela só enxerga status.
+#
+# CONTROLES DO GRUPO:
+#   * NEGATIVO — tire o `.strip()` de `plan = (payload.plan or "").strip().lower()`
+#     em `frontend/finance_bot_websocket_custom.py` (rota `/billing/change-plan`)
+#     e `test_change_plan_normaliza_como_o_checkout[com-espacos]` fica VERMELHO
+#     (400 `plan inválido` onde se espera 409 `no_subscription`). Injetado num
+#     caso que estava VERDE — `plus` sem espaços passa com e sem o conserto.
+#   * POSITIVO — o caso `plus` prova que o plano legítimo continua atravessando
+#     a validação e chegando a LER a conta; sem ele o grupo passaria numa rota
+#     que recusasse tudo.
+
+_ACEITA, _RECUSA = "aceita", "recusa"
+
+
+@pytest.mark.parametrize("plan,veredito", [
+    ("plus", _ACEITA),      # positivo: o plano correto continua funcionando
+    (" plus ", _ACEITA),    # o conserto desta rodada
+    ("pro_max", _RECUSA),   # o vocabulário da COLUNA continua fora da fronteira
+    ("", _RECUSA),          # vazio nunca vira Plus (esta rota nunca teve default)
+], ids=["plus", "com-espacos", "pro_max", "vazio"])
+def test_change_plan_normaliza_como_o_checkout(logado, monkeypatch, plan, veredito):
+    """Aceitar/recusar é medido pelo TRABALHO, não só pelo status: quando a rota
+    recusa o plano ela não pode ter lido a conta, e quando aceita ela tem de ter
+    lido — senão o teste ficaria verde numa rota que recusa tudo cedo demais."""
+    import db as db_mod
+
+    chamadas: list[int] = []
+    real = db_mod.get_auth_user
+    monkeypatch.setattr(db_mod, "get_auth_user",
+                        lambda uid: (chamadas.append(uid), real(uid))[1])
+    # Sem price ID configurado, TODO plano válido morre em 503 antes de a rota
+    # fazer qualquer coisa — e aí o teste mediria configuração, não plano.
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_vocabulario")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_test_plus_mensal")
+
+    r = logado.http.post("/billing/change-plan", headers=_cabecalhos(),
+                         json={"plan": plan})
+
+    if veredito == _RECUSA:
+        assert r.status_code == 400, r.text
+        assert "plan inválido" in str(r.json()["detail"])
+        assert chamadas == [], f"'{plan}' foi recusado mas a rota leu a conta"
+    else:
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error"] == "no_subscription", r.text
+        assert chamadas == [logado.user_id], (
+            f"'{plan}' foi aceito mas a rota não chegou a ler a conta")
+
+
+@pytest.mark.parametrize("rota", ["/billing/create-checkout", "/billing/change-plan"],
+                         ids=["stripe", "change-plan"])
+def test_interval_vazio_e_400_nas_duas_rotas(logado, rota):
+    """`interval: ""` é recusado nas duas — é a #352 com `interval` no lugar de
+    `plan`. As duas tinham `(payload.interval or "monthly")`, que vendia o ciclo
+    MENSAL para um corpo que não escolheu ciclo nenhum, em silêncio e com 200.
+
+    CONTROLE NEGATIVO: reponha o `or "monthly"` em qualquer uma das duas
+    (`frontend/finance_bot_websocket_custom.py`) e a linha correspondente fica
+    VERMELHA — 503 `Pagamentos ainda não configurados` no `stripe`, 503 `Esse
+    plano ainda não está configurado` no `change-plan`, porque sem price ID a
+    rota segue adiante em vez de recusar. Injetado nos dois casos VERDES.
+    CONTROLE POSITIVO: `interval` legítimo continua atravessando —
+    `test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos` manda `"annual"` no
+    Stripe e `test_change_plan_normaliza_como_o_checkout[plus]` omite o campo
+    (default `monthly`); os dois passam da validação de `interval`.
+    """
+    r = logado.http.post(rota, headers=_cabecalhos(),
+                         json={"plan": "plus", "interval": ""})
+    assert r.status_code == 400, r.text
+    assert "interval inválido" in str(r.json()["detail"]), r.text

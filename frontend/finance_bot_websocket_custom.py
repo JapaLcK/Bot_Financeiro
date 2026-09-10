@@ -4148,7 +4148,13 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
+    # Sem default de plano: ausente ou vazio é 400 na rota, nunca uma compra de
+    # Plus em silêncio (o default histórico era `"plus"`, issue #352). O `""`
+    # faz a chave AUSENTE cair no mesmo 400 `plan inválido` da vazia, em vez de
+    # num 422 cujo `detail` é lista — o porquê está na docstring da rota. O Pix,
+    # com `plan: str`, dá 422 na ausente: anotado em
+    # `tests/test_vocabulario_de_plano.py`.
+    plan: str = ""             # "essencial" | "plus" | "pro"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4460,16 +4466,44 @@ async def billing_create_checkout(
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
-    """
-    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    """Cria a sessão de checkout no Stripe para o plano escolhido.
+
+    Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
+           "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+
+    `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
+    (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos
+    (`precos.html:1019-1024`) só lê `detail` string ou `detail.message` — cai no
+    fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
+    `| None = None` o POST sem body nenhum nem instancia o modelo.
+
+    Cliente antigo (`startCheckout('monthly', this)`, sem plano) morreu em
+    `0a37439` e a partir daqui leva 400. Sobra a aba com a /precos ANTIGA aberta
+    no instante do deploy — o 400 vira o erro do próprio `startCheckout` e um
+    reload resolve; não há /precos velha em cache (`no-store` em
+    `frontend/routes/shared.py:266`, e o SW não intercepta navegação).
     """
-    interval = (payload.interval if payload else "monthly")
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Sem body, `payload` chega None (o modelo nem é instanciado). Não é caminho
+    # de sucesso: sem `plan` a validação abaixo recusa com 400.
+    payload = payload if payload is not None else CreateCheckoutBody()
+    # Expressão IDÊNTICA à da `/billing/change-plan`, a única outra rota que
+    # recebe `interval` (o Pix é anual e só): sem o `.lower()`, `"ANNUAL"` era
+    # 400 aqui e 409 lá. Sem `or "monthly"` nas duas: valor VAZIO é 400, e não
+    # uma venda mensal em silêncio — é a #352 com `interval` no lugar de `plan`.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = ((payload.plan if payload else "plus") or "plus").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Vocabulário público em UMA fonte (§0.7): as três rotas de plano validam
+    # contra o MESMO dicionário, e não contra uma tupla literal por rota. O
+    # `.strip().lower()` é o do gêmeo do Pix (`frontend/routes/billing_pix.py`) —
+    # sem ele `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando as duas.
+    # Sem plano é 400, não Plus (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
     price_id = _resolve_price_id(plan, interval)
@@ -4689,11 +4723,19 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
-    interval = (payload.interval or "monthly").lower()
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
+    # únicas rotas que recebem `interval`, o `.lower()` faltava LÁ e o
+    # `or "monthly"` saiu daqui — `""` é 400 nas duas, não mensal em silêncio.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = (payload.plan or "").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Terceira rota que recebe plano: mesma normalização e o MESMO dicionário
+    # das duas de checkout (§2: um caso corrigido não é a categoria resolvida).
+    # Sem plano continua 400 — nunca houve `or "plus"` aqui (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     target_price = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not target_price:
