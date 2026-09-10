@@ -47,15 +47,21 @@ seria vazio == vazio e o teste passaria num gerador que devolve nada.
 Rodar:  .venv/bin/python -m pytest tests/test_pendencia_credito_leituras_limite.py -q
 """
 
+import string
 import time
 
 import pytest
 
+import core.handlers.credit as credit
 from _pendencia_credito_helpers import novo_uid
 from core.handlers.credit import (_CORTESIA_FINAL, _PODAVEL_NO_PREFIXO,
                                   _card_name_da_resposta,
                                   _leituras_da_resposta)
+from db.cards import MAX_CARD_NAME_LEN
+from db.connection import get_conn
 from utils_text import normalize_text
+
+_TETO = (MAX_CARD_NAME_LEN + 1) // 2   # o mesmo cálculo de `_card_name_da_resposta`
 
 
 def _sem_limite(alvo: str) -> set[str]:
@@ -160,3 +166,80 @@ def test_leitura_nunca_tem_mais_tokens_que_o_maior_nome(chars):
 def test_usuario_sem_cartao_nenhum_nao_gera_leitura():
     """O limite viraria 0. Curto-circuita antes, com usuário real e sem mock."""
     assert _card_name_da_resposta(novo_uid(), "a do nubank por favor") is None
+
+
+# ---------------------------------------------------------------------------
+# O teto ABSOLUTO (segunda rodada do mesmo P1)
+# ---------------------------------------------------------------------------
+# O corte pelo maior nome guardado era controlado pelo atacante: `name` é
+# `text` sem restrição, então bastava guardar um cartão de mil tokens para o
+# produto cartesiano voltar. `validate_card_name` fecha a porta para o dado
+# NOVO; estas linhas cobrem o dado VELHO, que validação nenhuma alcança.
+#
+# Medido neste branch (remedir antes de reusar, §2), nome guardado de 1.000
+# tokens e a resposta de pior caso:
+#
+#     chars   sem teto   memória   tempo      com teto (40)
+#     2.506    260.347    341,7 MB  1,578 s    820 leituras / 0,2 MB / 0,003 s
+#     4.095    450.097    729,3 MB  3,315 s    820 leituras / 0,2 MB / 0,005 s
+#
+# CONTROLE NEGATIVO W — tire o `min(..., (MAX_CARD_NAME_LEN + 1) // 2)` de
+# `_card_name_da_resposta`. VERMELHOS:
+#
+#     test_teto_absoluto_vale_mesmo_com_nome_gigante_ja_guardado
+
+
+def _cartao_de_nome_longo(uid: int, tokens: int) -> str:
+    """Linha ANTIGA: escreve direto na tabela, sem passar pela fronteira.
+
+    Tokens de UM caractere porque `unique(user_id, name)` é um btree e recusa
+    valor acima de ~2.704 bytes (`ProgramLimitExceeded`) — esse é o teto que o
+    banco já tinha, e ele deixa passar 1.352 tokens.
+    """
+    nome = " ".join(string.ascii_lowercase[i % 26] for i in range(tokens))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into credit_cards (user_id, name, closing_day, due_day) "
+                "values (%s, %s, 1, 8)",
+                (uid, nome),
+            )
+        conn.commit()
+    return nome
+
+
+def test_teto_absoluto_vale_mesmo_com_nome_gigante_ja_guardado(monkeypatch):
+    """Espiona o `max_tokens` REAL que sai do caminho alterado: sem o teto ele
+    é 1.000 (o nome guardado) e a resposta de 4.095 vira 450 mil leituras."""
+    uid = novo_uid()
+    nome = _cartao_de_nome_longo(uid, 1000)
+    assert len(nome.split()) == 1000
+
+    vistos = []
+    real = credit._leituras_da_resposta
+
+    def espiao(alvo, max_tokens):
+        vistos.append(max_tokens)
+        return real(alvo, max_tokens)
+
+    monkeypatch.setattr(credit, "_leituras_da_resposta", espiao)
+    t0 = time.perf_counter()
+    assert credit._card_name_da_resposta(uid, _pior_caso(4095)) is None
+    decorrido = time.perf_counter() - t0
+
+    assert vistos == [_TETO], vistos
+    assert decorrido < 0.5, decorrido
+    # O pior caso continua sendo pior caso: medido barato (756 caracteres, ~13
+    # MB) para não pagar os 729 MB do de 4.095 dentro da suíte.
+    assert len(_leituras_da_resposta(_pior_caso(756), 1000)) > 2000
+
+
+def test_o_teto_em_tokens_cobre_todo_nome_que_a_fronteira_aceita():
+    """A coerência entre as duas pernas, enumerada em vez de afirmada: nome
+    dentro do limite de CARACTERES nunca passa do teto de TOKENS, porque cada
+    token custa ao menos 1 caractere e cada token além do primeiro custa também
+    o separador. O mais fatiado que cabe é `a a a ...`."""
+    mais_fatiado = ("a " * _TETO).strip()
+    assert len(mais_fatiado) <= MAX_CARD_NAME_LEN
+    assert len(mais_fatiado.split()) == _TETO
+    assert len(mais_fatiado + " a") > MAX_CARD_NAME_LEN   # um token a mais não cabe

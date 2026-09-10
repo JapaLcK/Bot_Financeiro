@@ -39,6 +39,7 @@ from db import (
     undo_installment_group,
     update_card_reminder_settings,
 )
+from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number,
@@ -503,7 +504,20 @@ def _card_name_da_resposta(user_id: int, answer: str):
             por_nome.setdefault(nome, card["id"])
     if not por_nome:
         return None
-    max_tokens = max(len(nome.split()) for nome in por_nome)
+    # O `min` é o que fecha o buraco do maior nome GUARDADO: `credit_cards.name`
+    # é `text` e o teto de `validate_card_name` nasceu neste PR, então linha
+    # antiga (ou vinda do Open Finance antes da poda) pode ter mil tokens e
+    # devolver o produto cartesiano que o corte tinha eliminado — o limite era
+    # controlado pelo atacante (P1 do Codex no #323). Validação nova não
+    # conserta dado velho; o teto absoluto conserta.
+    #
+    # O teto SAI do limite de caracteres (§0.7) e por isso não corta nome
+    # válido: nome de N caracteres tem no máximo (N+1)//2 tokens. O que ele
+    # corta é só nome fora do limite atual — que deixa de casar por resposta de
+    # pendência, e o custo prático disso é uma re-pergunta ("qual cartão?") até
+    # o usuário renomeá-lo para dentro do teto.
+    max_tokens = min(max(len(nome.split()) for nome in por_nome),
+                     (MAX_CARD_NAME_LEN + 1) // 2)
     for leitura in _leituras_da_resposta(alvo, max_tokens):
         if leitura in por_nome:
             return por_nome[leitura]
@@ -1764,6 +1778,12 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         name = name.strip()
         if not name:
             return "Qual é o nome do cartão? Ex: **Nubank**"
+        # Re-pergunta em vez de deixar o `create_card` levantar dois passos
+        # adiante, quando o usuário já tiver respondido fechamento e
+        # vencimento. Os outros pontos de criação criam na hora, então ali o
+        # erro do banco já é imediato.
+        if len(name) > MAX_CARD_NAME_LEN:
+            return f"Esse nome é muito longo (máx. **{MAX_CARD_NAME_LEN}** caracteres). Me diga um mais curto. Ex: **Nubank**"
 
         # Detecta duplicata antes de pedir os dias
         if card_name_exists(user_id, name):
