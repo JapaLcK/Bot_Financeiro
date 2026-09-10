@@ -232,10 +232,8 @@ def test_poll_expoe_agendada_como_a_resposta_do_checkout(user_id, monkeypatch):
     assert "agendada" in corpo, (
         f"o poll expõe `starts_at` sem `agendada`: {sorted(corpo)}"
     )
-    # A FÓRMULA (`inicio > agora`) é medida em
-    # test_pix_checkout.py::test_agendada_sai_da_data_e_nao_da_presenca_dela,
-    # nas três datas. Aqui basta que o poll passe pela mesma função: cobrança
-    # recém-criada tem `access_starts_at` nulo, e nulo não é agendado.
+    # Só o campo, e nulo: a FÓRMULA (`inicio > agora`) é medida nas três datas
+    # por tests/test_pix_poll_agendada.py, que compara poll × checkout.
     assert corpo["agendada"] is False, f"agendada sem data: {corpo['agendada']}"
 
 

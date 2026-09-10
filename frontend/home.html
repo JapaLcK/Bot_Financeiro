@@ -2226,18 +2226,47 @@ function wpInicioValido(s) {
         // acabou de pagar olhando para a tela de sempre. Vencido, cai no
         // `catch` e vira o caminho sem valor. `AbortSignal.timeout` é nativo
         // (Safari 16+); em navegador mais velho ele lança e cai no mesmo lugar.
+        // MEDIDO: com o backend a 3 s (rede ruim DENTRO do teto), o modal sobe
+        // em 3905 ms de tela parada para quem acabou de pagar — não empilha com
+        // o overlay `_checkoutSettled` (as duas esperas correm em paralelo; pior
+        // caso com as duas penduradas: 21 s, o mesmo de antes desta busca).
+        // ponytail: sem tela de carregamento nesta rodada; se 4 s incomodar,
+        // o caminho é baixar o teto, não inventar spinner.
         const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
                               { credentials: "same-origin",
                                 signal: AbortSignal.timeout(4000) });
         if (r.ok) cobranca = await r.json();
       } catch { /* sem valor é melhor que valor inventado */ }
     }
-    const cents = cobranca && cobranca.amount_cents;
-    const valorPix = Number.isInteger(cents) && cents > 0 ? cents / 100 : null;
+    /* Dono NÃO é pagamento. O poll responde 200 com `amount_cents` para
+       `pending`, `expired`, `canceled` e `refunded` também — só o `status`
+       separa venda de intenção. Sem esta linha, o próprio dono de uma cobrança
+       PENDENTE abrindo esta URL na mão mandava um Purchase de R$ 499 sem venda
+       nenhuma: número CRÍVEL (mais difícil de achar no relatório que um
+       R$ 999.999) e SEM par na CAPI, porque o evento do servidor só sai no
+       pagamento — não deduplica com nada. E repetível: `criar_cobranca` só
+       barra uma segunda cobrança ATIVA (`ESTADOS_ATIVOS`, no módulo `db/` da
+       cobrança), então cada ciclo expirado ou cancelado dá um `public_token`
+       novo, logo um `eventID` novo e um Purchase fantasma novo.
+
+       O TEXTO cai no mesmo lugar do 404: o modal abre com a cópia do imediato.
+       Quem não pagou não pode ler promessa de data — e não abrir modal nenhum
+       seria tela nova para um caso que ninguém alcança PAGANDO. */
+    const pago = !!cobranca && cobranca.status === "paid";
+    const cents = pago && cobranca.amount_cents;
+    // O teto (R$ 1.000.000 em centavos) sobreviveu à troca de fonte: a coluna é
+    // nossa, mas o plano mais caro custa R$ 499 — acima disso é dado corrompido,
+    // não receita, e receita inventada é o que este commit inteiro existe para
+    // impedir.
+    const valorPix = Number.isInteger(cents) && cents > 0 && cents < 1e8
+      ? cents / 100 : null;
     // `starts_at` vem ISO do servidor; `agendada` é quem separa imediato de
     // agendado (na compra imediata a data também vem preenchida, com `agora`).
-    // O `wpInicioValido` fica: corpo malformado não vira promessa na tela.
-    const inicioPix = cobranca && cobranca.agendada && cobranca.starts_at
+    // `=== true` pela MESMA razão do `Number.isInteger` acima, e não pela metade:
+    // `agendada: 1` e `agendada: "false"` são verdadeiros em JS e prometeriam
+    // "começa em <data>" na tela. O `wpInicioValido` fica: corpo malformado não
+    // vira promessa escrita.
+    const inicioPix = pago && cobranca.agendada === true && cobranca.starts_at
       ? wpInicioValido(String(cobranca.starts_at).slice(0, 10)) : null;
 
     // Conversão pro Meta Ads — só dispara com `sid` (id real da sessão de
