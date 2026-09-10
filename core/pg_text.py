@@ -34,6 +34,13 @@ def _limpa_str(s: str) -> str:
     # ponytail: um surrogate solitário vira 3 U+FFFD (são 3 bytes em
     # `surrogatepass`). Cosmético — o que importa é não casar com id real. A
     # alternativa char-a-char é O(n) em Python puro num corpo de 100 KB.
+    # Consequência para quem trunca ANTES de sanear (é o caso dos dois
+    # `message[:1000]` de `system_event_logs`, e a ordem é de propósito: saneia
+    # 1000 chars em vez do log inteiro): o valor gravado chega a 3× o corte —
+    # MEDIDO, `len(message) == 3000` com a entrada toda de surrogates. Cabe:
+    # `message` é `TEXT` e nenhum índice a cobre (`core/admin_dashboard.py:117`
+    # e os dois `CREATE INDEX` de `:137`/`:143`, que são `created_at` e
+    # `(level, event_type, created_at)`).
     return s.replace("\x00", _FFFD).encode("utf-8", "surrogatepass").decode("utf-8", "replace")
 
 
@@ -42,6 +49,22 @@ def limpa_para_pg(valor):
 
     `str` → string saneada. `dict`/`list` → percorridos **no lugar** (chave e
     valor) e devolvidos. Qualquer outra coisa volta como veio.
+
+    **"No lugar" é visível para quem chamou, e há chamador vivo que reusa o
+    objeto**: `adapters/whatsapp/wa_app.py:311` passa a lista `status["errors"]`
+    do payload por referência para o `details`, e `:325` enfileira o MESMO
+    payload — a lista chega na fila com U+FFFD onde estava o byte podre
+    (MEDIDO). Aceito: a troca é veneno→U+FFFD, ninguém compara byte a byte, e
+    um `deepcopy` custaria mais que o saneamento inteiro. Quem precisar do
+    original intacto copia ANTES de chamar.
+
+    ponytail: teto conhecido — **`tuple` NÃO é percorrida**, volta como veio, e
+    um NUL lá dentro derruba o INSERT do mesmo jeito:
+    `details={"campo": ("valor\\x00podre",)}` → 0 linhas gravadas; a mesma coisa
+    em `list` → 1 linha (medido). Não há chamador vivo com tupla no `details`
+    (grep), por isso está documentado e não implementado. Se aparecer um, o
+    conserto é tratar `tuple` no laço devolvendo `list` — `tuple` é imutável,
+    então não dá para sanear no lugar.
 
     Cada `dict`/`list` é visitado **uma vez**: estrutura cíclica termina em vez
     de rodar para sempre, e o mesmo objeto alcançável por N caminhos custa N,
@@ -81,6 +104,14 @@ def limpa_para_pg(valor):
                 # Não é explorável: o saneamento só introduz U+FFFD, e as chaves
                 # que este código lê são ASCII — `{"itemId":"REAL",
                 # "itemI\x00d":"FALSO"}` sai com `itemId` intacto.
+                # RESSALVA (#357): isso vale para o webhook da Pluggy, que LÊ
+                # chaves ASCII fixas. NÃO vale para o `details` forense de
+                # auditoria, que grava o dict INTEIRO e é lido por humano:
+                # `{"cpf�": "111.222.333-44", "cpf\x00": "ATACANTE"}` grava
+                # `{"cpf�": "ATACANTE"}` — o campo legítimo SOME e o valor
+                # do atacante é que fica. Registrado, não consertado: alternativa
+                # (sufixar chave em colisão) inventa chave que não veio de
+                # ninguém, e a linha existir saneada continua melhor que sumir.
                 no[_limpa_str(chave) if isinstance(chave, str) else chave] = (
                     _limpa_str(filho) if isinstance(filho, str) else filho
                 )
