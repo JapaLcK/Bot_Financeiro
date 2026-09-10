@@ -1,14 +1,17 @@
 """
-db/webhook_outbox.py — a outbox do webhook do Asaas e o registro de efeitos.
+db/webhook_outbox.py — a outbox do webhook do Asaas.
 
-Duas tabelas e nenhuma mensageria: sem broker, sem DLQ, sem backoff
-configurável (§3.4 do plano). O handler grava aqui e responde 200; quem executa
-é o dreno.
+Uma tabela, `pix_webhook_events`, e nenhuma mensageria: sem broker, sem DLQ, sem
+backoff configurável (§3.4 do plano). O handler grava aqui e responde 200; quem
+executa é o dreno.
+
+O registro de efeitos (`pix_payment_effects`) mora em `db/pix_effects.py` desde
+o 1b-B — dois assuntos, duas tabelas, dois arquivos.
 
 Plano: docs/plano_pix_anual_asaas.md §3.3, §3.4, §8.1, §8.2 e §13.3.
 
-**Fatia INERTE (PR 1b-A): nenhum módulo de produção importa este arquivo.**
-O handler e o dreno são o PR 1b-B.
+**Deixou de ser inerte no 1b-B**: o handler (`frontend/routes/billing_pix.py`)
+grava, o dreno (`core/services/pix_drain.py`) lê e a varredura purga.
 
 # ponytail: outbox por varredura em loop, não fila. Generalizar só quando
 # houver um SEGUNDO produtor de eventos — com um, broker é infraestrutura
@@ -16,27 +19,30 @@ O handler e o dreno são o PR 1b-B.
 
 O que este arquivo NÃO tem, e o corte é deliberado:
 
-  • **o `select … for update skip locked` do dreno**. Ele é a semântica de concorrência
-    da leitura, e semântica de concorrência sem consumidor não se mede: um `skip locked`
-    escrito hoje passaria verde sem provar que duas instâncias não executam o mesmo
-    efeito. Vai junto com o dreno, no 1b-B.
   • **a leitura do `payload_enc`**. Decifrar exige um `PiiAccessContext`, e o
     `subject_user_id` dele só existe DEPOIS de casar o evento com a cobrança — que é
     trabalho do dreno. Inventar um sujeito aqui (0, -1) gravaria linha falsa em
-    `pii_access_log`, que é registro de compliance.
-  • **as três constantes de retenção** (`RETENCAO_*`). O plano congelou
-    `RETENCAO_PAGAMENTO_DIAS` "sem valor em código até validação jurídica" (§13.1), e as
-    outras duas só têm sentido com a varredura que as consome.
+    `pii_access_log`, que é registro de compliance. `reservar_evento` entrega o
+    `payload_enc` CIFRADO e para aí.
+  • **as outras duas constantes de retenção**. `RETENCAO_OUTBOX_DIAS` está aqui porque a
+    varredura que o consome está aqui (§13.3); as de `pix_charges` moram em
+    `db/pix_charges_saga.py`, e o plano congelou `RETENCAO_PAGAMENTO_DIAS` até
+    validação jurídica (§13.1).
 """
 
 from __future__ import annotations
 
 import json
-import re
+from contextlib import contextmanager
 
 from core.crypto import encrypt_pii_optional
 
 from .connection import get_conn
+
+# Retenção da outbox (§13.1/§13.3): 7 dias a partir de `received_at`, processado
+# ou não. Mora aqui, e não em `db/pix_charges.py`, porque constante mora com a
+# query que a consome — `purgar_payloads_antigos`, logo abaixo.
+RETENCAO_OUTBOX_DIAS = 7
 
 # MINIMIZAÇÃO NA ESCRITA (§13.3): o resto do corpo do webhook é descartado
 # ANTES do insert, não depois. O que sobra é o que o dreno precisa para casar o
@@ -54,15 +60,6 @@ CAMPOS_MINIMOS: frozenset[str] = frozenset({
     "dateCreated",
     "customer",             # id do cliente no Asaas, não o nome nem o CPF
 })
-
-# Efeitos válidos do §3.4. A lista existe para o insert recusar typo — um
-# `'grantt'` gravado seria um efeito que NUNCA é encontrado pela consulta e que
-# portanto reexecuta para sempre.
-EFEITOS = (
-    "stripe_cancel", "grant", "ga4", "capi", "email", "revoke",
-    "orphan_notified",
-)
-
 
 # Tipos que podem ser guardados como VALOR de um campo permitido. A allowlist de CHAVES
 # não basta: `customer` é permitido e o Asaas pode mandá-lo **expandido** —
@@ -158,6 +155,71 @@ def registrar_evento(event_id: str, event_type: str, corpo: dict,
     return novo
 
 
+@contextmanager
+def reservar_evento(event_id: str):
+    """Reserva o evento para UMA passada do dreno. Rende a linha, ou `None`.
+
+    É o `select … and processed_at is null for update skip locked` do §8.2.
+    **Context manager, e não função, porque `for update` só vale enquanto a transação
+    viver**: devolver a linha e fechar a conexão soltaria o lock no `return` e o
+    `skip locked` viraria decoração. Quem drena roda DENTRO do `with`.
+
+    `None` rende para evento inexistente, já processado ou travado por outra passada —
+    o chamador não precisa distinguir, a ação é a mesma. O `payload_enc` sai
+    **cifrado**: decifrar é do dreno, que é quem tem o `subject_user_id` do
+    `PiiAccessContext` (ver o cabeçalho).
+
+    `ponytail:` teto — a transação fica aberta pelo dreno inteiro, chamadas externas
+    incluídas: uma conexão do pool presa por evento. Com a vazão de uma venda anual
+    isso não chega perto do teto do pool; se chegar, a saída é reservar, soltar e
+    reconferir `processed_at` antes de cada efeito.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select event_id, event_type, payload_enc, event_version,"
+                "       attempts, received_at, purged_at"
+                "  from pix_webhook_events"
+                " where event_id = %s and processed_at is null"
+                " for update skip locked",
+                (event_id,),
+            )
+            row = cur.fetchone()
+        yield row
+
+
+def purgar_payloads_antigos() -> int:
+    """Zera `payload_enc` **e** `last_error` dos eventos com mais de
+    `RETENCAO_OUTBOX_DIAS`; devolve quantas linhas foram purgadas.
+
+    §13.3, e as três cláusulas são o conteúdo — nenhuma é zelo:
+      • **conta de `received_at`, processado ou não** (correção nº 10): contar de
+        `processed_at` deixaria o evento TRAVADO — que é justamente o órfão, de quem
+        pediu exclusão da conta — guardando PII para sempre;
+      • **`last_error = null` na MESMA operação**, porque quem escreve nessa coluna é um
+        filtro de FORMA (`_erro_seguro`) e forma não separa nome de código: `'Fulano'` e
+        `'joao_silva'` atravessam inteiros;
+      • **`purged_at is null`** — sem ela o carimbo seria reescrito todo dia.
+
+    **Sem `user_id` no `where`, e não é esquecimento:** a tabela não tem a coluna nem FK,
+    e o único vínculo com o titular mora dentro do `payload_enc`, cifrado com Fernet
+    não-determinístico. Copiar o predicado da varredura vizinha do §13.2 (`user_id is
+    null and purged_at is null`) dá erro de coluna inexistente.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_webhook_events"
+                "   set payload_enc = null, last_error = null, purged_at = now()"
+                " where received_at < now() - %s * interval '1 day'"
+                "   and purged_at is null",
+                (RETENCAO_OUTBOX_DIAS,),
+            )
+            purgadas = cur.rowcount
+        conn.commit()
+    return purgadas
+
+
 def marcar_processado(event_id: str) -> bool:
     """Fecha o evento. Devolve True se ele estava aberto.
 
@@ -197,13 +259,19 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
     retenção automática por idade não existe (as duas purgas da tabela são manuais).
     **`_erro_seguro` continua obrigatório apesar da purga**: o que passa fica para sempre.
 
-    TETO CONHECIDO, a corrigir no 1b-B (#316): este UPDATE não tem `and purged_at is null`,
-    guarda que `marcar_processado` tem. **O caminho alcançável é a CORRIDA, e só ela:** a
-    passada que já leu o payload executa os efeitos quando a varredura do §13.3 carimba
-    `purged_at` e zera as duas colunas; um efeito falha, e esta função REPÕE `last_error`
-    numa linha purgada, que a varredura (filtro `purged_at is null`) nunca revisita: PII
-    permanente. Passada NOVA não chega aqui: sem payload o dreno carimba `processed_at` e sai
-    (§13.3), sem falhar. Sem chamador de produção, a guarda e o teste são critério do #316.
+    **`and purged_at is null` (#316) é o que impede esta função de repor PII.** O caminho
+    alcançável é a CORRIDA: a passada que já leu o payload executa os efeitos enquanto a
+    varredura do §13.3 carimba `purged_at` e zera as duas colunas; um efeito falha, e sem
+    a guarda esta função REPORIA `last_error` numa linha que a varredura (filtro
+    `purged_at is null`) nunca revisita — PII permanente. Passada NOVA não chega aqui:
+    sem payload o dreno carimba `processed_at` e sai (§13.3), sem falhar.
+
+    TETO QUE A GUARDA CRIA, e quem lê o retorno precisa saber: em linha purgada o
+    `returning` vem vazio e a função devolve **`0`**, então `0` passa a significar duas
+    coisas — "não existe" e "está purgada" —, e o `admin_notify` de `attempts > 5` (§8.2)
+    **nunca dispara para linha purgada**. Aceitável porque o dreno que encontra
+    `payload_enc is null` carimba `processed_at` e sai sem falhar (§13.3): purgada não
+    volta a acumular tentativa. Distinguir os dois zeros exige consultar a linha.
 
     `tipo` é o NOME DA CLASSE da exceção (`type(exc).__name__`) e `codigo` é o
     `AsaasApiError.code`, que já nasce filtrado por `_codigo_seguro`. Os dois
@@ -216,7 +284,7 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
             cur.execute(
                 "update pix_webhook_events"
                 "   set attempts = attempts + 1, last_error = %s"
-                " where event_id = %s"
+                " where event_id = %s and purged_at is null"
                 " returning attempts",
                 (_erro_seguro(tipo, codigo), event_id),
             )
@@ -225,125 +293,53 @@ def registrar_falha(event_id: str, tipo: str, codigo: str | None = None) -> int:
     return int(row["attempts"]) if row else 0
 
 
-# Separadores ACEITOS pelo filtro de forma — e removidos antes de procurar
-# corrida de dígito. Aceitar um separador sem normalizá-lo é o defeito (§2).
-_SEPARADORES = "_-."
-
-
 def _erro_seguro(tipo: str, codigo: str | None) -> str:
     """`Tipo(codigo)`, com os dois filtrados por FORMA — nunca por confiança.
 
-    Réplica **passo a passo** do `_codigo_seguro` de `core/services/asaas.py`:
-    até 60 chars, alfanumérico mais `_`, `-` e `.`, só-dígitos recusado, e
-    **corrida de 11+ dígitos recusada** (CPF tem 11, CNPJ 14).
+    **Era uma CÓPIA passo a passo do `_codigo_seguro` de
+    `core/services/asaas.py`, e agora é um import** (§5.2 do plano do 1b-B). A
+    cópia não era preferência: importar aquele módulo daqui deixava
+    `tests/test_pix_inerte.py` vermelho, porque a varredura por `ast` não
+    distinguia inerte importando inerte. O 1b-B pôs os módulos do Pix na própria
+    `CHAMADORES_PERMITIDOS`, e com isso a única diferença medida entre as duas —
+    `"?"` aqui, `""` lá — virou o parâmetro `fallback`.
 
-    A categoria é "corrida com forma de documento em QUALQUER grafia que o
-    filtro permita", e por isso a normalização remove TODO separador de
-    `_SEPARADORES`: normalizar só parte deles fecha uma grafia e deixa as
-    outras. Foi assim que o MESMO defeito voltou três vezes — só-dígitos,
-    prefixo alfabético (`CPF12345678901`), separador `_` (`cpf_123_456_789_01`)
-    —, cada rodada consertando o caso achado em vez da categoria (§2).
-    O que não casa vira `?` (lá vira `""`, e é a única diferença), e é isso que
-    impede uma mensagem inteira de entrar por um parâmetro que se chama `tipo`.
+    `test_erro_seguro_nao_divergiu_do_codigo_seguro` morreu junto, e os **29**
+    valores que ela media migraram para `tests/test_asaas_codigo_seguro.py` — não
+    para `tests/test_asaas_client.py`, e não eram "três". Teste apagado sem os
+    casos migrados é o buraco por onde o CPF já passou uma vez, e a migração de
+    fato perdeu três (`"x"*60`, `"0001-12345-6"`, `"42"`), repostos em
+    2026-09-09.
 
-    **A recusa de só-dígitos é a linha que faltava, e o defeito era ela.** A
-    versão anterior dizia no docstring ser "a mesma regra" e aceitava
-    `"12345678901"`, porque todo dígito é `isalnum()` — a forma de um CPF é
-    exatamente a de um código curto. Isso mandava CPF para o `last_error` e
-    para `system_event_logs` (P2 do Codex no #304).
-
-    **Por que uma CÓPIA e não um import, que é o que o §0.7 pede:** importar
-    `core.services.asaas` daqui viola o portão de inércia do 1b-A — medido,
-    `tests/test_pix_inerte.py::test_nenhum_modulo_de_producao_importa_os_modulos_inertes`
-    vermelho, porque a varredura é por `ast` sobre os `.py` de produção e não
-    distingue inerte importando inerte. O `safe_code` de `pluggy_health` (não
-    inerte) tampouco serve: o teto dele é 20 chars e corta nome de exceção
-    legítimo (`TransactionRollbackError`) para `?`. Enquanto a cópia existir, é
-    `test_erro_seguro_nao_divergiu_do_codigo_seguro` que impede a divergência de
-    voltar — foi ela que criou este bug. Quando o 1b-B puser o dreno na
-    allowlist do portão, isto aqui vira um import e o teste morre junto.
+    `tipo` é o NOME DA CLASSE da exceção (`type(exc).__name__`) e `codigo` é o
+    `AsaasApiError.code`. Os dois passam pelo mesmo filtro **aqui**, porque "o
+    chamador promete que é seguro" é como a PII entra.
     """
-    def limpo(valor: str | None) -> str:
-        texto = str(valor or "")
-        if not texto or len(texto) > 60:
-            return "?"
-        if not all(c.isalnum() or c in _SEPARADORES for c in texto):
-            return "?"
-        nu = texto.translate(str.maketrans("", "", _SEPARADORES))
-        if nu.isdigit():
-            return "?"
-        return "?" if re.search(r"\d{11,}", nu) else texto
+    from core.services.asaas import _codigo_seguro
 
-    base = limpo(tipo)
-    return f"{base}({limpo(codigo)})" if codigo else base
+    base = _codigo_seguro(tipo, "?")
+    return f"{base}({_codigo_seguro(codigo, '?')})" if codigo else base
 
 
-def efeito_registrado(asaas_payment_id: str, effect: str) -> bool:
-    """O par `(asaas_payment_id, effect)` já rodou? (§3.4, correção nº 8b.)
+def eventos_pendentes(limite: int = 100) -> list[str]:
+    """`event_id` dos eventos ainda abertos, mais antigos primeiro.
 
-    Chave pelo PAGAMENTO e não pelo evento: `PAYMENT_RECEIVED` reentregue com
-    `event_id` NOVO — que a plataforma pode emitir — reexecutaria `ga4`, `capi`
-    e `email` se a chave fosse o evento. Receita duplicada no GA4 e segundo
-    Purchase na CAPI em cima do mesmo dinheiro.
+    É o que o laço de 60 s do monólito drena. O `background_tasks` do handler é
+    o caminho rápido; este é o que RECUPERA — processo reiniciado no meio, efeito
+    que levantou, evento que chegou enquanto o worker morria.
 
-    **`False` aqui não é permissão para executar: é a leitura de um instante.**
-    Entre este `select` e o `registrar_efeito` que o segue, outra passada do
-    dreno pode ter respondido `False` à mesma pergunta. Quem fecha essa janela é
-    o DRENO, serializando por `(asaas_payment_id, effect)` — ver
-    `registrar_efeito`.
+    Sem `for update` de propósito: quem reserva é `reservar_evento`, com
+    `skip locked`, uma linha de cada vez. Uma lista morna é o certo aqui — dois
+    workers pegando a mesma lista disputam a reserva, e o perdedor sai.
+
+    Indexado por `idx_pix_webhook_pendentes` (`processed_at is null`).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select 1 from pix_payment_effects"
-                " where asaas_payment_id = %s and effect = %s",
-                (asaas_payment_id, effect),
+                "select event_id from pix_webhook_events"
+                " where processed_at is null"
+                " order by received_at asc limit %s",
+                (int(limite),),
             )
-            return cur.fetchone() is not None
-
-
-def registrar_efeito(asaas_payment_id: str, effect: str, event_id: str) -> bool:
-    """Marca o efeito como executado. Devolve **False** se outra passada já o
-    tinha registrado.
-
-    O `on conflict do nothing` fecha a janela que o `efeito_registrado` sozinho
-    deixa: entre a consulta e o registro cabe outra passada do dreno. A consulta
-    evita o TRABALHO no caso comum; este insert evita a LINHA duplicada — as duas
-    são necessárias e nenhuma substitui a outra.
-
-    **O par consulta+insert protege a LINHA, e NÃO o trabalho externo.** Ele é
-    idempotência de BOOKKEEPING: quando duas passadas concorrentes leem `False` e
-    ambas executam, o e-mail já saiu duas vezes, o `purchase` do GA4 e o
-    `Purchase` da CAPI já foram enviados duas vezes, e este insert só desempata
-    depois — devolvendo `False` a uma delas para uma execução que já aconteceu.
-
-    E o `for update skip locked` do dreno (1b-B) **não** serializa esse caso:
-    dois eventos DISTINTOS do mesmo `payment.id` (um `PAYMENT_CONFIRMED` e um
-    `PAYMENT_RECEIVED`, ou uma reentrega com `event_id` novo) travam linhas de
-    OUTBOX diferentes, e nada em `pix_webhook_events` os põe em fila. A chave que
-    precisa ser serializada é `(asaas_payment_id, effect)`, que não é a chave da
-    linha travada.
-
-    **Serializar por `(asaas_payment_id, effect)` é obrigação do DRENO**, e ela
-    tem de segurar a consulta, a execução externa e o registro dentro do mesmo
-    escopo — não só o insert. Sem isso, este módulo garante uma linha por par, e
-    nada sobre quantas vezes o mundo lá fora foi tocado. Apontamento do Codex no
-    #304; direções em avaliação no §17.1 do plano.
-
-    `event_id` é forense: diz QUAL entrega executou o efeito. Nada é decidido
-    por ele.
-    """
-    if effect not in EFEITOS:
-        raise ValueError(f"efeito desconhecido: {effect!r}")
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "insert into pix_payment_effects (asaas_payment_id, effect, event_id)"
-                " values (%s, %s, %s)"
-                " on conflict (asaas_payment_id, effect) do nothing"
-                " returning effect",
-                (asaas_payment_id, effect, event_id),
-            )
-            novo = cur.fetchone() is not None
-        conn.commit()
-    return novo
+            return [r["event_id"] for r in cur.fetchall()]

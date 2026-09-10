@@ -409,6 +409,27 @@ def build_user_export_zip(user_id: int) -> bytes:
                 "select id, level, event_type, message, source, user_id, details, created_at from system_event_logs where user_id = %s",
                 (user_id,),
             ),
+            # Cobranças Pix (§3.2). Colunas NOMEADAS e não `select *`: o
+            # `qr_payload_enc` fica de fora porque é o "copia e cola" que MOVE
+            # dinheiro (§13.6) — cifrado no banco, ele sairia daqui em texto
+            # inútil para a pessoa e útil para quem interceptasse o ZIP. O
+            # rastreio (`ga_client_id`, `fbp`, `fbc`) entra: é dado sobre a
+            # pessoa, e é justamente o que ela tem direito de ver.
+            (
+                "cobrancas_pix",
+                """
+                select id, user_id, external_reference, asaas_payment_id,
+                       asaas_customer_id, plan, plan_stored, price_cents,
+                       credit_cents, amount_cents, currency, duration_days,
+                       stripe_subscription_id, public_token, status,
+                       due_date, qr_expires_at, access_starts_at,
+                       access_expires_at, ga_client_id, fbp, fbc,
+                       created_at, paid_at, canceled_at, refunded_at, purged_at
+                from pix_charges
+                where user_id = %s
+                """,
+                (user_id,),
+            ),
         ]
         for name, sql, params in optional_queries:
             table_name = sql.split(" from ", 1)[-1].split()[0].strip()
@@ -894,6 +915,35 @@ def delete_user_data(user_id: int) -> dict:
             # UPDATE aqui: um UPDATE perde a corrida com um
             # `claim_trial_for_user` que commite depois dele, e a varredura
             # pós-commit nunca revisita esta tabela.
+
+            # `pix_charges` NÃO entra em `user_owned_tables` pelo mesmo motivo
+            # da `plan_trials`: a linha SOBREVIVE à exclusão — é o registro do
+            # dinheiro que entrou, e reconciliar pagamento é obrigação fiscal.
+            # Quem desfaz o vínculo é a FK `on delete set null` (§13.2), não um
+            # UPDATE aqui, porque UPDATE perde a corrida com um webhook que
+            # commite depois e a varredura pós-commit não revisita a tabela.
+            #
+            # O que este UPDATE faz é o outro lado: apagar o que NÃO é registro
+            # financeiro. `ga_client_id`, `fbp` e `fbc` são os identificadores
+            # com que GA e Meta reidentificam a pessoa e não reconciliam
+            # centavo nenhum; `qr_payload_enc` é instrumento de pagamento ao
+            # portador (§13.6); `asaas_customer_id` liga a linha ao cadastro da
+            # pessoa no provedor. Valores, ids e datas ficam. Sem `where
+            # purged_at is null` de propósito: aqui a conta está sendo excluída
+            # AGORA e reescrever o carimbo de uma linha já purgada não tem
+            # custo, enquanto pular uma linha teria — a varredura diária do
+            # §13.2 é que precisa do filtro, para não reescrever todo dia.
+            if _table_exists(cur, "pix_charges"):
+                cur.execute(
+                    """
+                    update pix_charges
+                       set ga_client_id = null, fbp = null, fbc = null,
+                           qr_payload_enc = null, asaas_customer_id = null,
+                           purged_at = now()
+                     where user_id = %s
+                    """,
+                    (user_id,),
+                )
 
             for table in user_owned_tables:
                 if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
