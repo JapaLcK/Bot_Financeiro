@@ -219,21 +219,29 @@ nodeTest("stderr do npm não vira comando do Actions", () => {
 // dois steps podiam ser APAGADOS e o mesmo texto deixado num comentário do YAML
 // que o teste continuava verde — e o CI parava de auditar npm.
 //
-// ponytail: js-yaml é dependência TRANSITIVA do eslint (eslint > @eslint/eslintrc
-// > js-yaml), instalada pelo mesmo `npm ci` do job `frontend`, e está no
-// package-lock.json. Não é declarada nossa: se um bump do eslint a deixar cair, a
-// saída é declarar `js-yaml` em devDependencies. Não usei `yaml.safe_load` do
-// Python: PyYAML NÃO é premissa paga aqui (ausente do requirements.txt, zero
-// imports no repo, `Required-by:` vazio) — o teste ficaria vermelho no CI.
+// ponytail: js-yaml é declarada em devDependencies porque só o eslint a trazia
+// (eslint > @eslint/eslintrc > js-yaml) e o bump do eslint 10 (PR #344) faz o
+// `@eslint/eslintrc` sumir inteiro do lock — medido em 2026-09-10. Não usei
+// `yaml.safe_load` do Python: PyYAML NÃO é premissa paga aqui (ausente do
+// requirements.txt, zero imports no repo, `Required-by:` vazio) — o teste
+// ficaria vermelho no CI.
 let YAML;
+let semYaml = false;
 try {
-  YAML = (await import("js-yaml")).default;
+  const mod = await import("js-yaml");
+  // A 4.x exporta `default`, a 5.x só nomeados. Sem o `?? mod` o `.default` vinha
+  // `undefined` com a 5.x, o catch nada via (o import SUCEDE) e o teste pulava em
+  // silêncio no CI — medido em 2026-09-10 com js-yaml 5.4.1.
+  YAML = mod.default ?? mod;
+  // O import suceder não prova a forma: sem esta checagem, uma 6.x que renomeie
+  // `load` cairia num TypeError longe daqui em vez de reprovar no CI (ou pular local).
+  if (typeof YAML.load !== "function") {
+    throw new Error(`js-yaml sem \`.load\` (exporta: ${Object.keys(mod).join(", ")})`);
+  }
 } catch (erro) {
   if (process.env.CI) throw erro;
+  semYaml = `js-yaml indisponível (${erro.message}): rode \`npm ci\` na raiz (no CI isto REPROVA, não pula)`;
 }
-const semYaml = YAML
-  ? false
-  : "js-yaml não está no node_modules: rode `npm ci` na raiz (no CI a ausência REPROVA, não pula)";
 
 nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semYaml }, () => {
   const doc = YAML.load(readFileSync(join(RAIZ, ".github/workflows/tests.yml"), "utf8"));
