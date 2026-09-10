@@ -277,3 +277,44 @@ def test_assinar_v2_com_consulta_indisponivel_delega_confirmacao_ao_checkout(pat
 
     assert "15 dias grátis" not in out
     assert "checkout confirma" in out
+
+
+# ─── #351: o nome do plano de quem JÁ assina ────────────────────────────────
+
+
+def test_assinar_de_quem_tem_pro_max_nao_diz_pigbank_mais(patches):
+    """`pro_max` (PigBank Pro) lia "🐷 Você já tá no PigBank+!".
+
+    Quem chega nesta linha é só `pro` (Plus) e `pro_max` (Pro): `is_pro` exige
+    tier >= plus, então Essencial NÃO passa por aqui — ao contrário do que a
+    revisão supôs. E a linha não tem gate de `PLANS_V2_ENABLED`: ela sai com a
+    flag ligada ou desligada, porque o nome vem da coluna `plan`, não do tier.
+    """
+    patches["is_pro"] = True
+    patches["auth_user"] = {"plan": "pro_max", "last_payment_status": "active",
+                            "plan_expires_at": None}
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "PigBank Pro" in out, out
+    assert "PigBank+" not in out, f"nome de outro plano pra quem paga Pro: {out}"
+
+
+@pytest.mark.parametrize("plano", ["pro", "plus"])
+def test_assinar_de_quem_tem_plus_continua_pigbank_mais(patches, plano):
+    """CONTROLE POSITIVO do par: `pro` já lia o nome certo e continua lendo.
+
+    Sem ele o conserto poderia trocar todo mundo pelo genérico "PigBank" e o
+    teste de cima ficaria verde do mesmo jeito.
+
+    `plus` é o mesmo tier gravado com o valor ANTIGO da coluna (achado do Codex
+    no #358): `is_pro` o aceita, então esta linha é alcançável, e sem a entrada
+    em `PLAN_DISPLAY_NAMES` ele lê "PigBank" seco.
+    """
+    patches["is_pro"] = True
+    patches["auth_user"] = {"plan": plano, "last_payment_status": "active",
+                            "plan_expires_at": None}
+
+    out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
+
+    assert "já tá no *PigBank+*" in out, out

@@ -4,10 +4,27 @@ core/services/billing_dunning.py — vocabulário da inadimplência de cartão.
 Este módulo NÃO tira acesso de ninguém. Quem está com a cobrança do cartão
 falhada continua com o plano e o bot exatamente como antes; o que existe aqui é
 a mecânica de cobrança: a lista de status que descreve "cartão em atraso" e a
-janela de 7 dias usada pelo lembrete de pagamento
-(`core/services/payment_reminder.py`) e pela dedupe do e-mail de falha no
-webhook. A regra de acesso é assunto de outro PR — não escreva aqui, nem em
-mensagem, e-mail ou docstring, nada que prometa perda de acesso.
+janela de 7 dias.
+
+**São TRÊS os consumidores da janela, não dois** (a enumeração anterior parava
+em dois e envelheceu no PR do aviso de corte):
+
+  1. o lembrete de pagamento (`core/services/payment_reminder.py`);
+  2. a dedupe do e-mail de falha no webhook;
+  3. o **aviso de fim do Grátis** — `carencia_aberta` (abaixo) é o lado
+     direito do OR de `core.services.plan_service.tem_direito_hoje`, que a
+     população de `scripts/aviso_fim_do_gratis.py` nega no `where` e cujo
+     coorte decide a copy do e-mail.
+
+**A DIREÇÃO DO OR importa e é o que segura as células 18, 29 e 30 de
+`docs/dunning_estados_eventos.md` fora daquele trabalho**: a autoridade é o
+direito pago; o relógio só CONCEDE tempo a quem já o perdeu, nunca subtrai. Lê
+isto antes de escrever qualquer gate — lido como autoridade, o status de
+cobrança bloquearia cliente pagante por um ciclo inteiro de retentativa.
+
+Nem aqui nem no aviso alguém perde acesso: o aviso manda e-mail. A regra de
+acesso é assunto do PR seguinte — não escreva aqui, nem em mensagem, e-mail ou
+docstring, nada que prometa perda de acesso enquanto ela não existir.
 
 **A INVARIANTE**: relógio (`auth_accounts.past_due_since`) não nulo só existe
 em conta cujo `last_payment_status` está em `PAST_DUE_PAYMENT_STATUSES`. Quem a
@@ -80,3 +97,44 @@ DUNNING_GRACE_DAYS = 7
 # é ele que eleva o caso.
 PAYMENT_REMINDER_WINDOW_DAYS = 3
 PAYMENT_REMINDER_DEDUPE_DAYS = 6.0
+
+
+def carencia_aberta(past_due_since, last_payment_status, agora) -> bool:
+    """A carência de `DUNNING_GRACE_DAYS` deste ciclo ainda está correndo?
+
+    Os três termos são o par relógio × status da INVARIANTE mais a idade:
+    relógio carimbado, `last_payment_status` em `PAST_DUE_PAYMENT_STATUSES`, e
+    MENOS de `DUNNING_GRACE_DAYS` desde o carimbo. Qualquer outra combinação é
+    False.
+
+    **Ela só CONCEDE tempo, nunca tira acesso.** Quem chama a usa no lado
+    DIREITO de um OR cujo lado esquerdo é o direito pago
+    (`plan_service.tem_direito_hoje`): False aqui não bloqueia ninguém que
+    tenha plano vigente. É isso que impede o status de cobrança de virar
+    autoridade sobre o acesso — lido como autoridade, ele bloquearia cliente
+    pagante por um ciclo inteiro de retentativa (célula 29 de
+    `docs/dunning_estados_eventos.md`).
+
+    Mora aqui porque `DUNNING_GRACE_DAYS` mora aqui (§0.7): o 7 não se repete
+    em `plan_service`. O módulo continua com import ZERO no topo — o `datetime`
+    entra DENTRO da função, o padrão que a docstring do módulo prescreve.
+
+    Normalização IDÊNTICA à do SQL irmão (`db/dunning.py`,
+    `lower(coalesce(last_payment_status, ''))`): `lower()` e nada mais. Sem
+    `strip()`, de propósito — o que o SQL não apara, o Python também não pode
+    aparar, ou os dois lados discordam em `' past_due '`.
+
+    Naive vira UTC nos dois lados: `past_due_since` é `timestamptz` e chega
+    aware do banco, mas script e teste podem passar naive, e misturar naive com
+    aware levanta TypeError no meio de uma decisão de acesso.
+    """
+    if past_due_since is None:
+        return False
+    if (last_payment_status or "").lower() not in PAST_DUE_PAYMENT_STATUSES:
+        return False
+    from datetime import timedelta, timezone
+    if past_due_since.tzinfo is None:
+        past_due_since = past_due_since.replace(tzinfo=timezone.utc)
+    if agora.tzinfo is None:
+        agora = agora.replace(tzinfo=timezone.utc)
+    return agora - past_due_since < timedelta(days=DUNNING_GRACE_DAYS)
