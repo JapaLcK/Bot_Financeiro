@@ -89,14 +89,14 @@ from _billing_grants_helpers import conta, garantir_system_event_logs
 from _dreno_pix_helpers import entregar, mundo_externo, nova_cobranca
 from _pix_checkout_helpers import (  # noqa: F401 — fixtures
     _marcar_paga, asaas_falso, vendavel)
-from core.services.email_service import PIX_PLAN_NAMES
+from core.services.email_service import PLAN_DISPLAY_NAMES
 from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
 from core.services.plan_service import TIER_TO_STORED_PLAN
 
 _CSRF = "test-csrf-saidas"
 
 # O molde da `descricao`, para o assert não repetir o literal três vezes. O NOME
-# vem de `PIX_PLAN_NAMES` (§0.7) — cravá-lo aqui criaria a segunda fonte do nome
+# vem de `PLAN_DISPLAY_NAMES` (§0.7) — cravá-lo aqui criaria a segunda fonte do nome
 # que o e-mail de confirmação já usa.
 _FATURA = "{} - plano anual"
 
@@ -216,7 +216,7 @@ def test_a_fatura_do_pagador_traz_o_nome_comercial(logado, vendavel,
     traduzir slug.
     """
     assert _checkout(logado, publico).status_code == 200
-    assert asaas_falso["descricoes"] == [_FATURA.format(PIX_PLAN_NAMES[legado])]
+    assert asaas_falso["descricoes"] == [_FATURA.format(PLAN_DISPLAY_NAMES[legado])]
     assert legado not in asaas_falso["descricoes"][0], (
         f"o valor de coluna '{legado}' foi para a fatura do pagador")
 

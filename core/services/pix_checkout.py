@@ -306,7 +306,7 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     (b) do §10.1 acharia seguro apagar.
     """
     from core.services.asaas_customers import criar_cliente
-    from core.services.email_service import PIX_PLAN_NAMES
+    from core.services.email_service import plan_display_name
     from db.pix_charges import transicionar
     from db.pix_charges_saga import attach_pagamento
 
@@ -321,14 +321,14 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             # NOME COMERCIAL, não o slug: esta linha é a descrição da FATURA que
             # o pagador lê no app do banco, e ela vinha saindo "PigBank anual
             # (pro_max)". Nome, e não o tier público (`pro`), porque ali não há
-            # legenda nenhuma para traduzir um slug. `PIX_PLAN_NAMES` é a fonte
-            # que o e-mail de confirmação já usa, chaveada pelo MESMO valor
-            # legado da coluna (§0.7) — o cliente lê o mesmo nome nos dois.
+            # legenda nenhuma para traduzir um slug. `plan_display_name` é a
+            # fonte que o e-mail de confirmação já usa, chaveada pelo MESMO
+            # valor legado da coluna (§0.7) — o cliente lê o mesmo nome nos
+            # dois, e o fallback genérico mora lá dentro em vez de aqui.
             # Separador ASCII de propósito: como cada app de banco renderiza um
             # travessão (U+2014) na descrição do Pix não dá para verificar aqui,
             # e o hífen não perde nada. O texto era ASCII puro antes do #350.
-            descricao=f"{PIX_PLAN_NAMES.get(linha['plan'], 'PigBank')} - "
-                      f"plano anual")
+            descricao=f"{plan_display_name(linha['plan'])} - plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
         raise CheckoutIndisponivel("asaas_emissao_falhou") from exc
