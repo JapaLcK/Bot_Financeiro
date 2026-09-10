@@ -41,7 +41,7 @@ from fastapi.exception_handlers import http_exception_handler, request_validatio
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -107,6 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.pg_text import limpa_para_pg, recusa_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -2394,7 +2395,81 @@ async def http_exception_page_handler(request: Request, exc: StarletteHTTPExcept
 async def validation_exception_page_handler(request: Request, exc: RequestValidationError):
     if wants_html(request):
         return error_page_response(422)
-    return vary_accept(await request_validation_exception_handler(request, exc))
+    # O `input` de cada erro é o CORPO INTEIRO da requisição, devolvido ao
+    # cliente — **inclusive a senha em claro**. MEDIDO nesta árvore:
+    # `POST /auth/login {"password": "senhaforte123"}`, sem o `email`,
+    # respondia `{"type":"missing","loc":["body","email"],"msg":"Field
+    # required","input":{"password":"senhaforte123"}}`. Não é das rotas de auth
+    # nem do validador de veneno do #369: o `input` de um erro `missing` é o
+    # objeto PAI, então QUALQUER rota com modelo Pydantic ecoava o corpo —
+    # medido também em `/investments/{id}`. Por isso a supressão é aqui, no
+    # handler único de 422 do app, e não na recusa do nosso validador.
+    # Reentregue ao handler do FastAPI em vez de montar JSON aqui: o formato
+    # continua sendo o DELE (`type`/`loc`/`msg`/`ctx`/`url`), menos um campo —
+    # nada de terceiro formato de erro. Custo medido: ZERO consumidor do
+    # `input` no repositório (grep em `frontend/`, `.js`, `.html`, `.py`); ele
+    # só servia para depurar pelo console, e quem manda o corpo já o tem.
+    sem_input = RequestValidationError(
+        [{campo: v for campo, v in erro.items() if campo != "input"}
+         for erro in exc.errors()]
+    )
+    try:
+        return vary_accept(await request_validation_exception_handler(request, sem_input))
+    except (ValueError, RecursionError) as veneno:
+        # `as veneno`, nunca `as exc`: o `except` REBINDA o nome, e um `as exc`
+        # aqui trocaria o RequestValidationError pelo UnicodeEncodeError —
+        # medido, o `exc.errors()` lá embaixo virava
+        # `AttributeError: 'UnicodeEncodeError' object has no attribute 'errors'`
+        # e as 4 rotas de surrogate voltavam a 500.
+        #
+        # Registra ANTES de responder: sem esta linha o ramo é 100% mudo
+        # (medido), e um ataque de veneno em massa — que antes gerava 500 mais
+        # uma linha em `system_event_logs` — passaria a sair como 422 sem
+        # rastro nenhum.
+        # `info` e não `warning` DE PROPÓSITO: o `_DashboardHandler`
+        # (core/observability.py:24) está no root logger e espelha WARNING+ com
+        # um `psycopg.connect()` + INSERT BLOQUEANTE por registro, dentro do
+        # event loop — num caminho anônimo e barato de disparar isso é o vetor
+        # de DoS, não o conserto. Mesmo motivo do `_admin_log.info` do
+        # ClientDisconnect e do `_error_degraded` de `frontend/routes/shared.py`
+        # ("um bot varrendo URL vira um INSERT por 404"). Fica no stderr, que é
+        # onde o `[unhandled]` também aparece.
+        logging.getLogger(__name__).info(
+            "422 sem input (%s): %s %s",
+            veneno.__class__.__name__, request.method, request.url.path,
+        )
+        # CINTO. Os três venenos do #369 entravam aqui pelo `input`: surrogate
+        # solitário (`UnicodeEncodeError`), `NaN`/`Infinity`/`-Infinity`/`1e400`
+        # (`ValueError: Out of range float values are not JSON compliant`, a
+        # família que o #310 fechou no webhook da Pluggy) e aninhamento fundo
+        # (`RecursionError` no `jsonable_encoder`). Com o `input` suprimido
+        # ACIMA nenhum deles chega mais — MEDIDO: com este `except` REMOVIDO,
+        # os 136 casos dos dois arquivos de teste do assunto continuam verdes,
+        # menos o único que chama este ramo direto.
+        # Fica mesmo assim porque o que sobra no erro NÃO é nosso: o `ctx` vai
+        # para o cliente (medido: `"ctx":{"error":{}}`) e a `msg` é do
+        # validador — hoje o nosso, único do app, ecoa só o NOME do campo, mas
+        # um que ecoasse o VALOR recebido reabre o 500 em um `raise ValueError`
+        # de uma linha. Custo do cinto: este bloco, num caminho anônimo cuja
+        # alternativa é 500.
+        # `UnicodeEncodeError` é subclasse de `ValueError`, então os dois
+        # primeiros entram por `ValueError`; `RecursionError` (RuntimeError) é
+        # o terceiro. Não é `except Exception`: o que roda no `try` é só a
+        # serialização do erro.
+        # A resposta é montada sem `input` e sem `ctx` — raso por construção,
+        # e nenhum dos três venenos tem por onde voltar. `type` é da biblioteca
+        # e `loc` é raso. O `limpa_para_pg` (fonte única do que é codificável,
+        # core/pg_text.py; `list()` porque ele não percorre `tuple`) saneia a
+        # `msg`: com o `input` fora, ele deixou de ser no-op aqui — é o que
+        # transforma o surrogate da `msg` em U+FFFD em vez de 500.
+        return vary_accept(JSONResponse(
+            status_code=422,
+            content={"detail": limpa_para_pg([
+                {"type": e.get("type"), "loc": list(e.get("loc") or ()),
+                 "msg": e.get("msg")}
+                for e in exc.errors()
+            ])},
+        ))
 
 
 async def unhandled_exception_page_handler(request: Request, exc: Exception):
@@ -2664,24 +2739,53 @@ def _require_pro(user_id: int, feature: str) -> None:
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
 
-class RegisterBody(BaseModel):
+class _CorpoSemVeneno(BaseModel):
+    """Base dos corpos de auth ANÔNIMA: recusa na borda NUL e surrogate
+    solitário em qualquer campo `str` (#369).
+
+    Recusa, e não saneia: `email` é identificador (ver `recusa_veneno`), e
+    `password`/`name`/`code` também estavam abertos — `password` com NUL
+    COMPLETAVA um cadastro (medido: 200). Sem isto o veneno chega ao
+    `_check_persistent_rate_limit` (INSERT em `text`) e ao `hash_pii`, os dois
+    em 500 anônimo.
+
+    Quem herda é a CATEGORIA "rota anônima com modelo Pydantic", enumerada
+    varrendo `app.routes` e medindo cada uma sem cookie (§2): as 4 de
+    credencial (`register`/`login`/`verify-email`/`forgot-password`) mais
+    `reset-password`, `mfa/verify-login` e `google/complete-signup` — estas
+    três estavam em 500 anônimo (`token`/`challenge` chegando ao `text` do
+    Postgres), e o `google/complete-signup` ainda devolvia a mensagem interna
+    da exceção no `detail` do 400.
+    Ficaram DE FORA, medidas: `/contact` (`send_email` nunca levanta e o
+    `_log_email_event` engole tudo — 200/502, nunca 500) e
+    `/api/prospect/status` (exige `X-Prospect-Key`, recusada antes do banco, e
+    o campo é `list[str]`, que o `recusa_veneno` não olha). Todo o resto tem
+    401 antes do banco. Os outros modelos, autenticados, são a #321.
+    """
+
+    @model_validator(mode="after")
+    def _sem_veneno(self):
+        return recusa_veneno(self)
+
+
+class RegisterBody(_CorpoSemVeneno):
     email: str
     password: str
     phone: str
     name: str | None = None
 
-class LoginBody(BaseModel):
+class LoginBody(_CorpoSemVeneno):
     email: str
     password: str
 
-class EmailBody(BaseModel):
+class EmailBody(_CorpoSemVeneno):
     email: str
 
-class VerifyEmailBody(BaseModel):
+class VerifyEmailBody(_CorpoSemVeneno):
     email: str
     code: str
 
-class ResetPasswordBody(BaseModel):
+class ResetPasswordBody(_CorpoSemVeneno):
     token: str
     new_password: str
 
@@ -3379,7 +3483,9 @@ class MFADisableBody(BaseModel):
     code: str | None = None
 
 
-class MFAVerifyLoginBody(BaseModel):
+class MFAVerifyLoginBody(_CorpoSemVeneno):
+    # `challenge` e `code` são gerados por nós (hex e 6 dígitos); o `use_backup`
+    # é `bool` e o `recusa_veneno` só olha `str`.
     challenge: str
     code: str
     use_backup: bool = False
@@ -3867,7 +3973,7 @@ GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 
 
-class GoogleSignupCompleteBody(BaseModel):
+class GoogleSignupCompleteBody(_CorpoSemVeneno):
     token: str
     name: str
     phone: str
