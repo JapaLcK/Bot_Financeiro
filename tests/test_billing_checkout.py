@@ -2,10 +2,12 @@
 tests/test_billing_checkout.py — POST /billing/create-checkout.
 
 Cobre:
-- default sem body == monthly e usa STRIPE_PRICE_ID_PRO_MENSAL
+- interval ausente == monthly e usa STRIPE_PRICE_ID_PRO_MENSAL (`plan` é obrigatório
+  desde #352: sem ele é 400, não uma compra de Plus em silêncio)
 - interval=annual usa STRIPE_PRICE_ID_PRO_ANUAL
 - interval=monthly cai no fallback STRIPE_PRICE_ID_PRO se MENSAL nao setado
-- interval invalido retorna 400
+- interval invalido retorna 400, e `"ANNUAL"` NÃO é inválido (mesma
+  normalização da /billing/change-plan)
 - 503 se Stripe nao configurado para o interval pedido
 - reaproveita stripe_customer_id existente
 """
@@ -155,7 +157,10 @@ def _patch_stripe(monkeypatch) -> _FakeStripe:
     return fake
 
 
-def test_checkout_default_uses_monthly_price(user_id, monkeypatch):
+def test_checkout_omitted_interval_uses_monthly_price(user_id, monkeypatch):
+    """`interval` ausente cai no default do modelo (`monthly`). O nome já disse
+    só `default`, quando `plan` também tinha um; hoje `plan` é obrigatório
+    (#352) e o único default que sobrou é este."""
     _, _, client = _auth_user_setup(f"def-{user_id}")
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
@@ -166,7 +171,7 @@ def test_checkout_default_uses_monthly_price(user_id, monkeypatch):
     monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["interval"] == "monthly"
@@ -195,7 +200,7 @@ def test_checkout_annual_uses_annual_price(user_id, monkeypatch):
     monkeypatch.setenv("PRO_TRIAL_DAYS", "7")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", json={"interval": "annual"}, headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": "annual"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["interval"] == "annual"
@@ -214,21 +219,137 @@ def test_checkout_monthly_falls_back_to_legacy_price(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "price_legacy_pro")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", json={"interval": "monthly"}, headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": "monthly"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.last_session_kwargs["line_items"] == [
         {"price": "price_legacy_pro", "quantity": 1}
     ]
 
 
-def test_checkout_invalid_interval_returns_400(user_id, monkeypatch):
-    _, _, client = _auth_user_setup(f"inv-{user_id}")
+@pytest.mark.parametrize("interval", ["weekly", ""], ids=["weekly", "vazio"])
+def test_checkout_invalid_interval_returns_400(request, user_id, monkeypatch, interval):
+    """`""` entra aqui pelo mesmo motivo de `plan` (#352): um `or "monthly"`
+    nesta rota transformava valor VAZIO em venda MENSAL silenciosa — 200 com
+    `interval: "monthly"` num corpo que não escolheu ciclo nenhum.
+
+    CONTROLE NEGATIVO do caso `vazio`: em `billing_create_checkout`
+    (`frontend/finance_bot_websocket_custom.py`) troque `payload.interval.lower()`
+    por `(payload.interval or "monthly").lower()` e
+    `test_checkout_invalid_interval_returns_400[vazio]` fica VERMELHO em 200.
+    Injetado num caso VERDE — `weekly` é 400 com e sem o `or`.
+
+    A sessão zero é o que dá dinheiro à medição: 400 sozinho também sairia de
+    uma validação depois de a cobrança nascer.
+    """
+    _, _, client = _auth_user_setup(f"inv-{request.node.callspec.id}-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": interval}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 400, resp.text
+    assert "interval" in resp.json()["detail"].lower()
+    assert fake.session_create_calls == 0, "recusa de interval abriu checkout no Stripe"
+
+
+def _stripe_pronto(monkeypatch):
+    """Stripe inteiramente configurado: mensal, anual e legado com price ID.
+
+    É o que impede um 400 de plano de ser confundido com o 503 de "pagamentos
+    não configurados" — com todos os preços no lugar, 503 aqui seria bug.
+    """
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
+    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "price_legacy_pro")
+    return _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", json={"interval": "weekly"}, headers=_CSRF_HEADERS)
-    assert resp.status_code == 400
-    assert "interval" in resp.json()["detail"].lower()
+
+@pytest.mark.parametrize("corpo", [
+    None,                      # POST sem body nenhum
+    {},                        # body vazio
+    {"interval": "annual"},    # o caso do relato: interval sem plan
+    {"plan": ""},
+    # `"   "` NÃO discrimina: sob a mutação do bug (`or "plus"`), `"   " or
+    # "plus"` devolve `"   "`, que já era 400 antes do conserto. Fica como
+    # companhia do grupo, e não pode ser citado como prova de nada (§7).
+    {"plan": "   "},
+], ids=["sem-body", "body-vazio", "so-interval", "plan-vazio", "plan-so-espacos"])
+def test_checkout_sem_plano_e_400_e_nao_vende_plus(request, user_id, monkeypatch, corpo):
+    """Sem plano no corpo, a rota RECUSA — não vende Plus em silêncio (#352).
+
+    O default histórico era `("" or "plus")`: um bug no JS que parasse de mandar
+    o campo faria todo mundo comprar Plus sem escolher, e o sintoma ("as vendas
+    migraram pro Plus") não aponta pra cá.
+
+    A asserção de sessão zero é o que dá dinheiro à medição: 400 sozinho também
+    sairia de um erro de validação depois da cobrança nascer.
+    """
+    _, _, client = _auth_user_setup(f"{request.node.callspec.id}-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    kwargs = {"headers": _CSRF_HEADERS}
+    if corpo is not None:
+        kwargs["json"] = corpo
+    resp = client.post("/billing/create-checkout", **kwargs)
+
+    assert resp.status_code == 400, resp.text
+    assert "plan" in str(resp.json()["detail"]).lower()
+    assert fake.session_create_calls == 0, "recusa de plano abriu checkout no Stripe"
+
+
+def test_checkout_com_plano_explicito_continua_vendendo(user_id, monkeypatch):
+    """POSITIVO do grupo: `plan` explícito segue abrindo o checkout.
+
+    Sem ele o grupo passaria numa rota que recusasse tudo — pior que o bug.
+    """
+    _, _, client = _auth_user_setup(f"complan-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout",
+                       json={"plan": "plus", "interval": "annual"},
+                       headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["plan"] == "plus"
+    assert fake.session_create_calls == 1
+
+
+def test_checkout_aceita_plano_com_espacos_como_o_pix(user_id, monkeypatch):
+    """`" plus "` era 200 no Pix (`.strip().lower()`) e 400 aqui (só `.lower()`),
+    com UM só JS alimentando as duas rotas. As gêmeas normalizam igual."""
+    _, _, client = _auth_user_setup(f"espacos-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout",
+                       json={"plan": " plus ", "interval": "annual"},
+                       headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["plan"] == "plus"
+    assert fake.session_create_calls == 1
+
+
+def test_checkout_aceita_interval_em_caixa_alta_como_a_troca(user_id, monkeypatch):
+    """`interval` normaliza IGUAL à `/billing/change-plan` (§0.7): `"ANNUAL"`
+    era 400 aqui e 409 lá, com UM só JS alimentando as duas.
+
+    A asserção é o PRICE ID, não só o status: um `annual` mal normalizado que
+    caísse em `monthly` sairia 200 e venderia o plano mensal com cara de acerto.
+
+    CONTROLE NEGATIVO deste caso: troque a linha do `interval` na rota
+    (`frontend/finance_bot_websocket_custom.py`, `billing_create_checkout`) de
+    `payload.interval.lower()` por `payload.interval` e este teste fica VERMELHO
+    em 400 `interval inválido`. Injetado num caso VERDE — `annual` sem espaços
+    passa com e sem o conserto (`test_checkout_annual_uses_annual_price` é ele).
+    """
+    _, _, client = _auth_user_setup(f"interval-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout",
+                       json={"plan": "plus", "interval": "ANNUAL"},
+                       headers=_CSRF_HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["interval"] == "annual"
+    assert fake.last_session_kwargs["line_items"] == [
+        {"price": "price_anual_xyz", "quantity": 1}
+    ]
 
 
 def test_checkout_returns_503_when_annual_price_missing(user_id, monkeypatch):
@@ -239,7 +360,7 @@ def test_checkout_returns_503_when_annual_price_missing(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO", "price_legacy_pro")
 
-    resp = client.post("/billing/create-checkout", json={"interval": "annual"}, headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": "annual"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 503
 
 
@@ -254,7 +375,7 @@ def test_checkout_creates_new_customer_with_brazil_country_and_locale(user_id, m
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
 
     assert fake.customer_create_calls == 1
@@ -272,7 +393,7 @@ def test_checkout_reuses_existing_stripe_customer(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200
     assert fake.customer_create_calls == 0
     assert fake.last_session_kwargs["customer"] == "cus_existing_999"
@@ -295,7 +416,7 @@ def test_checkout_bloqueia_quem_ja_assina(user_id, monkeypatch):
 
     fake.Subscription = _Subscription
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["error"] == "already_subscribed"
     assert fake.last_session_kwargs is None  # checkout NUNCA foi criado
@@ -317,7 +438,7 @@ def test_checkout_fail_closed_com_stripe_fora(user_id, monkeypatch):
 
     fake.Subscription = _SubscriptionBoom
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 503, resp.text
     assert fake.last_session_kwargs is None  # nada de checkout no escuro
 
@@ -339,7 +460,7 @@ def test_checkout_recupera_customer_apagado_no_stripe(user_id, monkeypatch):
 
     fake.Subscription = _MissingCustomerSubscription
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.customer_create_calls == 1
     assert fake.session_create_calls == 1
@@ -355,7 +476,7 @@ def test_checkout_sem_customer_segue_normal(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.last_session_kwargs is not None
 
@@ -374,7 +495,7 @@ def test_checkout_v2_elegivel_manda_trial_de_30(user_id, monkeypatch):
     monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: True)
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 30
 
@@ -390,7 +511,7 @@ def test_checkout_v2_inelegivel_cobra_na_hora(user_id, monkeypatch):
     monkeypatch.setattr("db.plans.is_trial_eligible_for_user", lambda uid: False)
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
     assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]
 
@@ -442,7 +563,7 @@ def test_checkout_v2_falha_fechada_se_elegibilidade_indisponivel(user_id, monkey
     monkeypatch.setattr("db.plans.is_trial_eligible_for_user", fail)
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
 
     assert resp.status_code == 503
     assert fake.session_create_calls == 0
@@ -460,7 +581,7 @@ def test_checkout_concorrente_reutiliza_uma_unica_sessao(user_id, monkeypatch):
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         responses = list(executor.map(
-            lambda client: client.post("/billing/create-checkout", headers=_CSRF_HEADERS),
+            lambda client: client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS),
             (client_a, client_b),
         ))
 
@@ -477,10 +598,10 @@ def test_checkout_novo_plano_expira_sessao_aberta_incompativel(user_id, monkeypa
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_ANUAL", "price_anual_xyz")
     fake = _patch_stripe(monkeypatch)
 
-    first = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    first = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     second = client.post(
         "/billing/create-checkout",
-        json={"interval": "annual"},
+        json={"plan": "plus", "interval": "annual"},
         headers=_CSRF_HEADERS,
     )
 
@@ -504,7 +625,7 @@ def test_checkout_grava_started_no_funil_com_session_id(user_id, monkeypatch):
     _patch_stripe(monkeypatch)
 
     resp = client.post(
-        "/billing/create-checkout", json={"interval": "monthly"}, headers=_CSRF_HEADERS
+        "/billing/create-checkout", json={"plan": "plus", "interval": "monthly"}, headers=_CSRF_HEADERS
     )
     assert resp.status_code == 200, resp.text
     assert "session_id" not in resp.json(), "session_id não pode vazar pro cliente"
@@ -529,7 +650,7 @@ def test_checkout_falho_nao_grava_started(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "")  # 503: pagamentos off
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 503
 
     with get_conn() as conn:
@@ -554,8 +675,8 @@ def test_checkout_reaproveitado_propaga_session_id_no_funil(user_id, monkeypatch
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     fake = _patch_stripe(monkeypatch)
 
-    r1 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
-    r2 = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r1 = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
+    r2 = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert r1.status_code == 200 and r2.status_code == 200
     # 2ª chamada reaproveitou a sessão da 1ª (não criou nova)
     assert fake.session_create_calls == 1
@@ -586,7 +707,7 @@ def test_checkout_nao_fecha_gate_da_precos_na_abertura(user_id, monkeypatch):
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
     fake = _patch_stripe(monkeypatch)
 
-    resp = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    resp = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert resp.status_code == 200, resp.text
 
     # plan_selected_at continua NULL — o gate NÃO foi fechado na abertura

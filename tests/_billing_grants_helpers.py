@@ -121,6 +121,22 @@ def evt_checkout(uid: int, subscription, created: int, session_id: str) -> dict:
             "created": created, "data": {"object": objeto}}
 
 
+def espiao_email(vistos: dict, nome: str):
+    """Substitui um remetente de e-mail e GRAVA a tupla de argumentos.
+
+    Duas coisas não são detalhe. `__name__` é a CHAVE da dedupe do `_fire_email`
+    (`finance_bot_websocket_custom.py`): três espiões com o mesmo nome viram um
+    balde só e os e-mails 2 e 3 saem DEDUPADOS, com o teste acusando "não
+    chamou". E o `return True` é o que faz o envio contar como confirmado —
+    `_fire_email` trata falsy como falha, não grava a chave e não segue.
+    """
+    def _fn(*a, **kw):
+        vistos[nome] = a
+        return True
+    _fn.__name__ = nome
+    return _fn
+
+
 class FakeStripeSubs:
     """Só o `Subscription.list` que o `_find_active_subscription` usa.
 
