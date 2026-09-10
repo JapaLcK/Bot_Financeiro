@@ -1105,6 +1105,41 @@ def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard
     )
 
 
+def send_pix_paid_email(to: str, amount_brl: float, access_expires_at,
+                        dashboard_url: str = "") -> bool:
+    """Confirmação da compra Pix ANUAL (§8.2, efeito `email`).
+
+    Não reusa `send_pro_charged_email` por causa de duas frases que ficariam
+    mentindo para quem pagou por Pix: "próxima cobrança" (não há — o Pix anual
+    não renova sozinho) e "portal Stripe" (o cliente não tem um). O que muda é o
+    TEXTO; o transporte, o layout e o `send_email` são os mesmos.
+    """
+    valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    ate = _fmt_brl_date(access_expires_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    content = f"""
+      <p>🐷✨ <strong>Pagamento confirmado!</strong> Seu PigBank+ tá liberado.</p>
+      <ul>
+        <li><strong>Valor pago:</strong> {valor}</li>
+        <li><strong>Acesso até:</strong> {ate}</li>
+      </ul>
+      <p>É um plano anual pago por Pix: <strong>não tem renovação automática</strong> e não tem cartão
+      cadastrado. A gente te avisa por e-mail antes de acabar.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>
+      <p>Qualquer dúvida, é só responder este email ou usar <strong>ajuda</strong> no bot.</p>
+    """
+    html = _base_html("Pagamento confirmado — PigBank+", content)
+    text = (
+        f"PigBank+ liberado.\n\n"
+        f"Valor pago: {valor}\n"
+        f"Acesso até: {ate}\n\n"
+        f"Plano anual por Pix, sem renovação automática.\n{dash}/app"
+    )
+    return send_email(
+        to=to, subject=f"✓ Pagamento confirmado — PigBank+ anual ({valor})",
+        html_body=html, text_body=text,
+    )
+
 def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
     """E-mail quando pagamento falha — Stripe vai retentar (item 40)."""
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")

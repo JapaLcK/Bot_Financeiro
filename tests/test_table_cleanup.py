@@ -17,14 +17,11 @@ Rodar:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-import subprocess
-import sys
 import uuid
-from pathlib import Path
 
 from _billing_grants_helpers import garantir_system_event_logs
+from _lifespan_probe import sondar
 from core.services.table_cleanup import run_table_cleanup, run_table_cleanup_loop
 from db.connection import get_conn
 
@@ -145,93 +142,21 @@ def test_intervalo_zero_desliga_o_loop_sem_podar(monkeypatch):
 # T5 — a tarefa SOBE no lifespan. É o teste que prende o bug original: as três
 # funções de poda existiam e ninguém as chamava. Ler o arquivo com `read_text()`
 # procurando o nome da função não mede nada (CLAUDE.md §3), então isto sobe um
-# processo com o `app` de verdade e vê a corrotina ser executada. O loop real é
-# trocado por um marcador ANTES do import do app — o wrapper do lifespan faz
-# import tardio, que resolve o atributo do módulo na hora da chamada.
-_SUBPROCESSO = r'''
-import os
-_ENV_INICIAL = set(os.environ)   # antes de tudo; o diff no fim acusa o disco
-
-# PRIMEIRA linha de projeto, antes de tudo: `config/env.py:95-97` faz
-# `os.environ.setdefault` com o `.env` do DISCO, e `load_app_env` roda no IMPORT de
-# `core.observability`, `frontend.routes.shared` e do monólito. Sem isto, as 17
-# tarefas de fundo sobem com o `.env` inteiro na mão — não só as chaves de saída:
-# medido no checkout principal, `load_app_env` acendeu 9 segredos (SMTP_PASSWORD,
-# MFA_ENCRYPTION_KEY, WA_APP_SECRET, GOOGLE_CLIENT_SECRET…) que a env montada
-# abaixo nunca passou. `ROOT_DIR` é o único ponto por onde o disco entra
-# (`config/env.py:32-39`); apontá-lo para um diretório vazio faz `merged = {}` e
-# fecha a CATEGORIA, em vez de nomear chaves uma a uma.
-# A ordem é o contrato: qualquer import de projeto ACIMA desta linha reabre o buraco.
-import pathlib, tempfile
-import config.env
-config.env.ROOT_DIR = pathlib.Path(tempfile.mkdtemp())
-
-import json, time
-import core.services.table_cleanup as tc
-
-estado = {"iniciou": False}
-
-async def _marcador():
-    estado["iniciou"] = True
-
-tc.run_table_cleanup_loop = _marcador
-
-import frontend.finance_bot_websocket_custom as m
-from fastapi.testclient import TestClient
-
-with TestClient(m.app):          # lifespan de verdade, como no processo web
-    for _ in range(80):          # o wrapper dorme 2s antes do import tardio
-        if estado["iniciou"]:
-            break
-        time.sleep(0.25)
-
-# Prova que o disco não entrou: `load_app_env` já rodou (o import do monólito o
-# chama), então qualquer chave lida do `.env` estaria aqui. A lista é DERIVADA do
-# ambiente — não há nomes de segredo a manter, então ela não envelhece junto com o
-# `.env`. Os três excluídos são escritos pelo próprio `config/env.py`, com ou sem
-# disco: `APP_ENV` (`:108`), `TZ` (import de `utils_date`) e `PGTZ`
-# (`align_process_tz`, `:121`). Se um quarto aparecer, isto fica VERMELHO — que é
-# a direção certa da falha, ao contrário da lista de 5 nomes que estava aqui e
-# passava verde deixando o resto do `.env` vivo.
-estado["do_disco"] = sorted(set(os.environ) - _ENV_INICIAL - {"APP_ENV", "TZ", "PGTZ"})
-print("RESULTADO:" + json.dumps(estado))
-'''
-
-
+# processo com o `app` de verdade e vê a corrotina ser executada.
+#
+# O harness mora em `tests/_lifespan_probe.py` desde que o segundo consumidor
+# apareceu (a purga de retenção do Pix): a blindagem de ambiente é o que não
+# podia virar duas cópias (§0.7).
 def test_processo_do_app_liga_a_poda_no_lifespan():
     """CONTRATO: um processo que serve o `app` com RUN_BACKGROUND_TASKS=1
-    executa o loop de poda. Sem o `create_task`, `{"iniciou": false}`."""
-    raiz = Path(__file__).resolve().parent.parent
-    # env MONTADA, não `{**os.environ}`: com `RUN_BACKGROUND_TASKS=1` este é o
-    # único teste do repositório que sobe as 17 tarefas de fundo, e herdar o
-    # ambiente entregava as credenciais de terceiros VIVAS a elas por ~6s.
-    # Enxugar a env SOZINHO não protegia nada — o `.env` do disco repunha o que
-    # faltasse. Quem fecha o disco é o `ROOT_DIR` do `_SUBPROCESSO` acima; esta
-    # env é a outra metade (o que o processo pai NÃO repassa).
-    # É o MÍNIMO medido para o boot chegar ao lifespan: sem `JWT_SECRET` o
-    # processo aborta ("Refusing to start with insecure default"); com estas
-    # quatro chaves ele sobe e imprime RESULTADO (medido: `iniciou: true`).
-    env = {
-        "PATH": os.environ.get("PATH", ""),
-        "PYTHONPATH": ".",
-        "RUN_BACKGROUND_TASKS": "1",
-        "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
-        "JWT_SECRET": os.environ.get("JWT_SECRET", ""),
-    }
-    proc = subprocess.run(
-        [sys.executable, "-c", _SUBPROCESSO], cwd=raiz, env=env,
-        capture_output=True, text=True, timeout=180,
-    )
-    linha = next((l for l in proc.stdout.splitlines()
-                  if l.startswith("RESULTADO:")), None)
-    assert linha, f"subprocesso não chegou ao fim:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
-    assert json.loads(linha[len("RESULTADO:"):]) == {
-        "iniciou": True, "do_disco": []
-    }, (
+    executa o loop de poda. Sem o `create_task`, `{"poda": false}`."""
+    resultado, diagnostico = sondar(
+        {"poda": "core.services.table_cleanup:run_table_cleanup_loop"})
+    assert resultado, f"subprocesso não chegou ao fim:\n{diagnostico}"
+    assert resultado == {"poda": True, "do_disco": []}, (
         "a poda existe e ninguém a chama (lifespan sem a tarefa de fundo), OU "
-        "o `.env` do disco entrou e as 17 tarefas de fundo subiram com "
-        "credencial de terceiro viva.\n"
-        f"{proc.stderr[-2000:]}"
+        "o `.env` do disco entrou e as tarefas de fundo subiram com "
+        f"credencial de terceiro viva.\n{diagnostico}"
     )
 
 

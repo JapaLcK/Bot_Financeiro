@@ -6,13 +6,10 @@ regra de NÃO carregar o corpo da resposta.
 
 Plano: docs/plano_pix_anual_asaas.md §10 e §10.1.
 
-**Fatia INERTE (PR 1b-A): nenhum módulo de produção importa este arquivo.**
-Os chamadores são o checkout e a varredura de reconciliação, no PR 1b-B.
-
-Fora daqui de propósito: a criação de CLIENTE (`POST /customers`). Ela carrega
-`cpfCnpj` — obrigatório para o Asaas e **não persistido** por nós —, e essa
-decisão é de fluxo de checkout, não de transporte HTTP. Entra no 1b-B, junto de
-quem a chama.
+**Deixou de ser inerte no 1b-B**: chamam daqui o dreno
+(`core/services/pix_drain.py`), o checkout (`core/services/pix_checkout.py`) e a
+varredura (`core/services/pix_sweeps.py`). `criar_cliente` mora em
+`core/services/asaas_customers.py` — é lá que o `cpfCnpj` passa sem ser gravado.
 """
 
 from __future__ import annotations
@@ -96,9 +93,17 @@ def _api_key() -> str:
 _SEPARADORES = "_-."
 
 
-def _codigo_seguro(valor: Any) -> str:
-    """Só o que PARECE código curto passa (mesma regra do `safe_code` do
-    Pluggy): letras, dígitos, `_`, `-` e `.`, até 60 chars.
+def _codigo_seguro(valor: Any, fallback: str = "") -> str:
+    """Letras, dígitos, `_`, `-` e `.`, até 60 chars, sem corrida com forma de
+    documento. `fallback` é o que sai quando a forma NÃO passa.
+
+    **NÃO é a mesma regra do `safe_code` do Pluggy**, e esta docstring dizia que
+    era: medido em 2026-09-09 (remedir antes de reusar), divergem nos DOIS
+    sentidos — `"42"` (aqui recusado por `isdigit()`, lá aceito) e `"x"*60` (aqui
+    aceito, lá não: o `_CODE_FORMAT` para em 20). Coincidem no que importa,
+    CPF/CNPJ/agência-conta. `_erro_seguro` (`db/webhook_outbox.py`) era CÓPIA
+    disto e virou import no 1b-B; os 29 casos que a guardavam migraram para
+    `tests/test_asaas_codigo_seguro.py`.
 
     A descrição do erro do Asaas vem no MESMO objeto que o `code`
     (`{"errors": [{"code": …, "description": "O CPF/CNPJ 123… é inválido"}]}`),
@@ -107,9 +112,9 @@ def _codigo_seguro(valor: Any) -> str:
     """
     texto = str(valor or "")
     if not texto or len(texto) > 60:
-        return ""
+        return fallback
     if not all(c.isalnum() or c in _SEPARADORES for c in texto):
-        return ""
+        return fallback
     nu = texto.translate(str.maketrans("", "", _SEPARADORES))
     # Só-dígitos é recusado: a forma de um CPF ("12345678901") é exatamente a de
     # um código curto, e o código do Asaas é sempre nominal
@@ -117,7 +122,7 @@ def _codigo_seguro(valor: Any) -> str:
     # não existe `code` só-dígitos na API — e fecha o caminho por onde um
     # documento entraria numa string persistida.
     if nu.isdigit():
-        return ""
+        return fallback
     # …e só-dígitos NÃO basta. A CATEGORIA é "corrida com forma de documento,
     # em QUALQUER grafia que o filtro permita": prefixo (`CPF12345678901`),
     # separador (`123.456.789-01`) ou os dois. Por isso a normalização acima
@@ -128,7 +133,7 @@ def _codigo_seguro(valor: Any) -> str:
     # 11+ dígitos porque CPF tem 11 e CNPJ 14; código legítimo com número é
     # curto (`error_400`, `HTTP_502`, `v1.2.3`), então não colide.
     if re.search(r"\d{11,}", nu):
-        return ""
+        return fallback
     return texto
 
 
@@ -292,3 +297,53 @@ def deletar_pagamento(asaas_payment_id: str) -> dict:
     """
     return _request("DELETE", f"/v3/payments/{asaas_payment_id}",
                     contexto="Falha ao cancelar cobranca no Asaas")
+
+
+def buscar_pagamento(asaas_payment_id: str) -> dict:
+    """`GET /v3/payments/{id}` — a leitura AUTORITATIVA de um pagamento.
+
+    Existe para o alerta de estorno acumulado (§17.1, pendência 4), que **não é
+    derivável do que guardamos**: `CAMPOS_MINIMOS` (`db/webhook_outbox.py`)
+    descarta `refunds[]` antes do insert, `payload_enc` vira `NULL` aos 7 dias
+    (§13.3), `pix_payment_effects` não tem valor e `pix_charges` não tem
+    `refunded_cents`. Quem sabe o acumulado é o Asaas.
+
+    Forma inesperada levanta, mesma regra do `buscar_por_external_reference`: o
+    alerta sai com `acumulado indisponível` em vez de número inventado.
+    """
+    dados = _request("GET", f"/v3/payments/{asaas_payment_id}",
+                     contexto="Falha ao consultar pagamento no Asaas")
+    if not isinstance(dados, dict):
+        raise AsaasApiError(
+            "Consulta de pagamento no Asaas devolveu forma inesperada — "
+            "corpo sem objeto NÃO é pagamento inexistente",
+            status_code=None,
+        )
+    return dados
+
+
+def obter_qr_pix(asaas_payment_id: str) -> dict:
+    """`GET /v3/payments/{id}/pixQrCode` — o "copia e cola" e a validade dele.
+
+    Chamada SEPARADA porque o `POST /v3/payments` não devolve o BR Code: ele
+    responde a cobrança, e o instrumento de pagamento vem daqui. Sem esta
+    chamada o checkout não tem o que mostrar.
+
+    Devolve o dict cru. **O `encodedImage` do Asaas é descartado por quem
+    chama**: a imagem sai de `core.services.pix_brcode.qr_svg_data_url` sobre o
+    `payload`, mesmo caminho do QR do MFA, sem PNG base64 de terceiro no CSP.
+
+    `payload` ausente levanta, mesma regra do `buscar_por_external_reference`:
+    cobrança sem instrumento de pagamento viraria modal em branco, e o certo é
+    o 503 que a varredura reconcilia.
+    """
+    dados = _request("GET", f"/v3/payments/{asaas_payment_id}/pixQrCode",
+                     contexto="Falha ao obter o QR do Pix no Asaas")
+    payload = dados.get("payload") if isinstance(dados, dict) else None
+    if not isinstance(payload, str) or not payload:
+        raise AsaasApiError(
+            "Asaas devolveu cobranca Pix sem `payload` de QR — cobranca sem "
+            "instrumento de pagamento NAO e cobranca emitida",
+            status_code=None,
+        )
+    return dados

@@ -1,4 +1,4 @@
-"""O PR 1b-A é a fundação INERTE do Pix anual (docs/plano_pix_anual_asaas.md).
+"""O portão de IMPORT do Pix anual (docs/plano_pix_anual_asaas.md).
 
 A propriedade que este arquivo existe para provar, e que é o critério de
 aceitação do dono:
@@ -6,8 +6,12 @@ aceitação do dono:
 > **nenhuma versão intermediária deve conseguir emitir uma cobrança sem já
 > possuir o caminho que recebe o pagamento e concede o acesso.**
 
-Checkout e webhook não se separam — os dois são o 1b-B. Enquanto isso, os quatro
-módulos novos existem e ninguém os chama.
+Checkout e webhook não se separam — os dois são o 1b-B, e entraram juntos.
+**A allowlist deixou de ser vazia neste PR**, e com isso o portão passou de
+"ninguém importa" para "SÓ ESTES importam" — que continua sendo propriedade, e
+mede mais: um import novo em `db/`, num handler ou num scheduler reprova pelo
+nome do arquivo. O nome do módulo não mudou junto porque o assunto não mudou;
+o que ele afirma está em `CHAMADORES_PERMITIDOS`, não no título.
 
 **"Ninguém os chama" vale para os `.py` de PRODUÇÃO — não para o repositório
 inteiro.** A versão anterior dizia "repositório INTEIRO" e era falso: o universo
@@ -19,11 +23,11 @@ em silêncio (§2).
 
 ## Quatro caminhos de alcance, um arquivo cada
 
-  1. **rota** — `tests/test_pix_rota_inerte.py` (fechá-lo exigiu TRÊS
-     introspecções);
-  2. **import** — AQUI: nenhum módulo de produção importa os módulos novos. É
-     como o próprio app chegaria, inclusive por `background_tasks` e pelo loop
-     de 60 s — os dois precisam do import para chamar;
+  1. **rota** — `tests/test_pix_rota_registrada.py` (fechá-lo exigiu TRÊS
+     introspecções; no 1b-B ele INVERTEU e passou a exigir as três rotas);
+  2. **import** — AQUI: só a allowlist importa os módulos do Pix. É como o
+     próprio app chegaria, inclusive por `background_tasks` e pelo loop de
+     60 s — os dois precisam do import para chamar;
   3. **destino** — `tests/test_pix_destino_inerte.py`, que vê o HOST e não o
      nome do módulo, e cujo universo é todo rastreado fora de `tests/`
      (`git ls-files | grep -vc '^tests/'`), não só `.py`;
@@ -40,9 +44,10 @@ primeiro é cego ao que os testes não escrevem — os arquivos desta leva impor
 só na forma ABSOLUTA, então apagar o ramo do import RELATIVO deixava as duas
 metades verdes com um chamador de produção real em `db/`. Medido pelo Tester.
 
-`CHAMADORES_PERMITIDOS` nasce como allowlist VAZIA de propósito: o 1b-B
-acrescenta uma linha em vez de apagar o teste, e o portão passa a medir "só
-estes chamam", que continua sendo uma propriedade.
+`CHAMADORES_PERMITIDOS` nasceu VAZIA no 1b-A de propósito, e o 1b-B a ABRIU em
+vez de apagar o teste — é a diferença entre um portão que mudou de pergunta e um
+portão que foi desligado. `test_a_allowlist_nao_tem_caminho_morto` é o par: sem
+ele, a lista cresceria com entradas que não permitem nada e ninguém reconfere.
 
 ## CEGUEIRAS DECLARADAS — o que sobra descoberto depois dos três portões
 
@@ -72,19 +77,49 @@ import subprocess
 
 import pytest
 
-# Os três módulos que NÃO podem ser alcançáveis nesta fatia. `pix_pricing` fica
-# de fora da lista de propósito: ele é função pura, não emite cobrança nem
-# concede acesso, então importá-lo não violaria o critério do dono — mas
-# ninguém o importa hoje, e há teste próprio para isso mais abaixo.
-MODULOS_INERTES = ("core.services.asaas", "db.pix_charges", "db.webhook_outbox")
+# Os módulos cujo alcance é medido por este portão. `pix_pricing` fica de fora
+# da lista de propósito: ele é função pura, não emite cobrança nem concede
+# acesso, então importá-lo não violaria o critério do dono — os chamadores dele
+# são medidos separado, mais abaixo.
+#
+# `db.pix_effects` nasceu da divisão de `db.webhook_outbox` (1b-B) e entra AQUI
+# no mesmo commit: módulo novo do Pix fora desta lista é buraco no dia 1. Vale
+# igual para `db.pix_charges_saga` e `core.services.asaas_customers`, que
+# nasceram das divisões de tamanho do C6/C7 — o segundo é por onde o CPF passa.
+MODULOS_INERTES = ("core.services.asaas", "core.services.asaas_customers",
+                   "db.pix_charges", "db.pix_charges_saga",
+                   "db.webhook_outbox", "db.pix_effects")
 
 # Allowlist do portão de IMPORT: caminhos (POSIX) que PODEM importar os módulos
 # acima. É um conjunto de caminhos, não um mapa — quem importa o quê fica no
 # portão, e a granularidade por módulo só vale a pena quando houver mais de um
-# chamador. Vazia no 1b-A; o 1b-B acrescenta o router do checkout e o do webhook
-# JUNTOS (emitir cobrança sem o caminho que recebe o pagamento é o que o corte
-# proíbe).
-CHAMADORES_PERMITIDOS: frozenset[str] = frozenset()
+# chamador. Vazia no 1b-A; o 1b-B a abre, e com isso o portão passa de "ninguém
+# importa" para "só estes importam" — que continua sendo propriedade.
+#
+# **Só entra caminho que faz o import DE VERDADE hoje.** Entrada de allowlist
+# que não permite nada é linha que ninguém reconfere; o portão vale porque cada
+# uma foi olhada no commit que precisou dela.
+#
+# **Os próprios módulos do Pix estão na lista, e é decisão de desenho.** A
+# varredura trata inerte→inerte como violação porque o universo inclui os
+# `MODULOS_INERTES` — e `db/webhook_outbox.py` PRECISA importar
+# `core/services/asaas.py` (o `_erro_seguro` deixou de ser cópia). Pô-los aqui,
+# em vez de excluí-los do universo em silêncio, mantém a lista legível e a
+# propriedade intacta: **o primeiro salto, produção → Pix, continua sendo o que
+# este portão mede.**
+CHAMADORES_PERMITIDOS: frozenset[str] = frozenset({
+    # O caminho que RECEBE o pagamento.
+    "core/services/pix_drain.py",          # reserva, roteia, transiciona
+    "core/services/pix_drain_effects.py",  # grant, ga4, capi, e-mail, revoke
+    # O caminho que EMITE a cobrança — entrou no MESMO PR, que é o corte do dono.
+    "core/services/pix_checkout.py",       # a saga, a flag, o preço, o 409/503
+    "core/services/pix_sweeps.py",         # reconciliação da saga (§10.1)
+    "frontend/routes/billing_pix.py",      # as três rotas, finas
+    # Módulos do Pix importando módulos do Pix (ver o parágrafo acima).
+    "core/services/asaas_customers.py",
+    "db/pix_charges_saga.py",
+    "db/webhook_outbox.py",
+})
 
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -171,11 +206,28 @@ def test_nenhum_modulo_de_producao_importa_os_modulos_inertes():
     fora = {rel: sorted(m) for rel, m in achados.items()
             if rel not in CHAMADORES_PERMITIDOS}
     assert not fora, (
-        "1b-A deixou de ser inerte — módulo de produção importando o Pix: "
+        "módulo de produção fora da allowlist importando o Pix: "
         + repr(dict(sorted(fora.items())))
-        + ". Se isto é o 1b-B, acrescente o caminho a CHAMADORES_PERMITIDOS "
-          "(e traga o webhook junto: emitir cobrança sem o caminho que recebe o "
-          "pagamento é o que o corte proíbe)."
+        + ". Acrescentar o caminho a CHAMADORES_PERMITIDOS é uma decisão, não "
+          "um conserto: quem emite cobrança tem de trazer junto o caminho que "
+          "recebe o pagamento — é o que o corte do dono proíbe separar."
+    )
+
+
+def test_a_allowlist_nao_tem_caminho_morto():
+    """POSITIVO da allowlist, e ele impede o modo de falha oposto.
+
+    Uma entrada que não importa mais nada é linha que "permite" algo inexistente
+    — e no dia em que um arquivo com aquele nome voltar, ele nasce autorizado
+    sem revisão. Cada caminho aqui tem de existir E importar um módulo do Pix.
+
+    Sem este teste, a allowlist poderia crescer até virar "qualquer coisa em
+    `core/services/`" sem uma linha vermelha.
+    """
+    achados = _quem_importa(MODULOS_INERTES, raiz="")
+    mortos = sorted(CHAMADORES_PERMITIDOS - set(achados))
+    assert not mortos, (
+        f"caminhos na allowlist que não importam módulo nenhum do Pix: {mortos}"
     )
 
 
@@ -223,7 +275,7 @@ def test_a_varredura_acha_os_imports_que_os_testes_fazem():
     Regex/AST quebrada, arquivo movido, `git ls-files` sem saída: qualquer uma
     faz este teste ficar vermelho ANTES de o portão de produção passar por vácuo.
 
-    Os três módulos, um a um — e isto também valida os NOMES em
+    Um a um, cada módulo inerte — e isto também valida os NOMES em
     `MODULOS_INERTES`: um typo (`db.pix_chargez`) nunca seria encontrado e cai
     aqui, em vez de deixar o portão verde para sempre.
     """
@@ -239,18 +291,28 @@ def test_a_varredura_acha_os_imports_que_os_testes_fazem():
     )
 
 
-def test_pix_pricing_tambem_nao_tem_chamador():
-    """`pix_pricing` fica fora de `MODULOS_INERTES` porque importá-lo não
-    emitiria cobrança — é aritmética pura. Mas também não tem chamador nesta
-    fatia, e medir isso separado impede alguém de ligar o preço à tela achando
-    que "pricing não conta"."""
-    achados = _quem_importa(("core.services.pix_pricing",), raiz="")
-    assert not achados, f"pix_pricing ganhou chamador em produção: {sorted(achados)}"
+def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
+    """`pix_pricing` INVERTEU junto com o resto (§5.2 do plano).
+
+    Ele fica fora de `MODULOS_INERTES` porque importá-lo não emite cobrança — é
+    aritmética pura —, mas medir o chamador separado continua valendo: é o que
+    impede alguém de ligar o preço a outra tela achando que "pricing não conta".
+
+    São DOIS chamadores e não um: o checkout chama `plano_da_cobranca`, e a rota
+    importa `CoberturaJaPaga` para traduzir a recusa em 409 sem reconsultar o
+    banco (é o contrato escrito na docstring da própria exceção).
+    """
+    esperado = {"core/services/pix_checkout.py", "frontend/routes/billing_pix.py"}
+    achados = set(_quem_importa(("core.services.pix_pricing",), raiz=""))
+    assert achados == esperado, (
+        f"chamadores de pix_pricing mudaram — sobrando: {sorted(achados - esperado)}; "
+        f"faltando: {sorted(esperado - achados)}"
+    )
 
 
 def test_db_init_nao_reexporta_os_modulos_novos():
     """Precedente do 1a. Re-export é ALCANCE: `from db import *` traria o
     módulo para dentro de qualquer arquivo."""
     fonte = (RAIZ / "db" / "__init__.py").read_text(encoding="utf-8")
-    for nome in ("pix_charges", "webhook_outbox"):
+    for nome in ("pix_charges", "pix_charges_saga", "webhook_outbox", "pix_effects"):
         assert nome not in fonte, f"db/__init__.py re-exporta {nome}"
