@@ -1329,6 +1329,12 @@ def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
     """
     data = _fmt_brl_date(corte)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    # Preço E frase de valor só na coorte Grátis (decisão do dono, 2026-09-10):
+    # quem tem cobrança pendente já COMPROU o plano — está inadimplente, não
+    # indecisa. Pitch de produto quando a ação dela é atualizar o cartão é o
+    # mesmo desconforto que tirou a palavra "Grátis" da mensagem dela, e menos
+    # superfície de marketing reforça o caráter transacional deste e-mail.
+    pitch_html = pitch_text = ""
     if cobranca_pendente:
         situacao_html = ("A cobrança da sua assinatura <strong>não passou</strong> "
                          "e o período que você já pagou venceu")
@@ -1342,6 +1348,33 @@ def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
         situacao_text = "Sua conta hoje esta no plano Gratis (ou sem plano ativo)"
         acao_html, acao_text = "Ver os planos", "Escolha um plano"
         destino = f"{dash}/precos"
+        # Preço DERIVADO do anual (§0.7): o mensal só existe na
+        # `frontend/precos.html` (markup e script, as duas metades); o anual é
+        # constante em código, atada às duas metades daquela página por teste.
+        # `min` para o "a partir de" não cravar qual plano é o mais barato —
+        # ATENÇÃO: `PRECOS_ANUAIS_CENTS` é o que a rota do PIX vende, e este
+        # e-mail linka para a página do CARTÃO; plano que saia de linha só no
+        # cartão continua entrando neste `min`.
+        # Import local como o resto do arquivo — `pix_pricing` arrasta
+        # `billing_access` → `db.connection`, e o topo aqui não importa banco.
+        from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
+        from utils_text import fmt_brl
+        _anual_cents = min(PRECOS_ANUAIS_CENTS.values())
+        _anual, _mensal = fmt_brl(_anual_cents / 100), fmt_brl(_anual_cents / 12 / 100)
+        # "no plano anual" com todas as letras: a `/precos` abre em Mensal e não
+        # lê `?cycle=`, então quem clicar vê o preço mensal avulso.
+        pitch_html = (
+            "\n      <p>Com um plano ativo, o Piggy registra seus gastos por "
+            "texto, áudio e foto de cupom no WhatsApp, com boletos, caixinhas e "
+            "cartões sem limite.</p>"
+            f"\n      <p>Planos a partir de {_anual}/ano — {_mensal} por mês "
+            "no plano anual.</p>")
+        pitch_text = (
+            "\nCom um plano ativo, o Piggy registra seus gastos por texto, "
+            "audio e foto de cupom no WhatsApp, com boletos, caixinhas e "
+            "cartoes sem limite.\n\n"
+            f"Planos a partir de {_anual}/ano — {_mensal} por mes no plano "
+            "anual.\n\n")
     content = f"""
       <p>🐷 Oi! Preciso te contar uma mudança importante.</p>
       <p>A partir de <strong>{data}</strong>, o PigBank passa a funcionar
@@ -1349,7 +1382,7 @@ def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
       <strong>Piggy no WhatsApp</strong> e o <strong>dashboard</strong> param
       de responder.</p>
       <p>Seus dados continuam guardados — nada é apagado. Para não ter
-      interrupção, resolva antes de {data}:</p>
+      interrupção, resolva antes de {data}:</p>{pitch_html}
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{destino}">{acao_html}</a>
       </p>
@@ -1365,6 +1398,7 @@ def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
         "param de responder.\n\n"
         "Seus dados continuam guardados — nada e apagado. Para nao ter "
         f"interrupcao, resolva antes de {data}:\n"
+        f"{pitch_text}"
         f"{acao_text}: {destino}\n\n"
         "Se sua assinatura ja estiver ativa quando voce ler isto, pode ignorar "
         "este email: quem esta com plano ativo nao e afetado."

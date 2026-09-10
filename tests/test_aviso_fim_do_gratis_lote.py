@@ -31,6 +31,15 @@ testes daqui — a lista deles está lá.
     descartava o flag e o teste de copy chamava a função de e-mail direto, com
     os dois valores na mão. A copy forkava e ninguém media QUEM escolhe o
     fork.
+  • J — na copy do e-mail, alargue o "a partir de" para o plano mais caro:
+    `min(PRECOS_ANUAIS_CENTS.values())` → `max(...)`:
+      VERMELHO: test_copy_traz_a_data_do_corte_e_nao_promete_trial.
+  • K — troque a derivação do preço pelos valores de hoje escritos à mão
+    (R$ 99,00 e R$ 8,25):
+      VERMELHO: test_copy_traz_a_data_do_corte_e_nao_promete_trial.
+  • L — faça o pitch (frase de valor + preço) sair também quando
+    `cobranca_pendente` é verdadeiro:
+      VERMELHO: test_copy_traz_a_data_do_corte_e_nao_promete_trial.
   • G — alargue a borda de BAIXO da faixa do `--corte`: em `main`, troque
     `hoje <= corte_dia` por `hoje - timedelta(days=3650) <= corte_dia`:
       VERMELHO: test_corte_no_passado_e_recusado.
@@ -237,14 +246,42 @@ def test_corte_de_hoje_e_o_caminho_legitimo_passam(monkeypatch):
     assert enviados == [], "dry-run mandou e-mail"
 
 
+def _corpos(capturado: dict):
+    """`(nome, corpo, tokens da frase de valor)` dos dois corpos.
+
+    Espaço normalizado — o HTML quebra linha no meio da frase e o token não pode
+    depender de onde caiu a quebra; o `text_body` é sem acento por convenção. Os
+    tokens saem DAQUI para os dois coortes: a 1 exige, a 2 proíbe, e com listas
+    separadas um dos lados pararia de medir. Nenhum colide com o resto da copy da
+    coorte 2 (medido) — "cartões" colidiria com o CTA "Atualizar cartão"."""
+    return ((nome, " ".join(capturado[nome].lower().split()),
+             ("cupom", "boletos", audio, "sem limite"))
+            for nome, audio in (("html", "áudio"), ("text", "audio")))
+
+
 def test_copy_traz_a_data_do_corte_e_nao_promete_trial(monkeypatch):
     """A data tem de atravessar o script inteiro (`--corte` → `_corte_para_email`
     → `_fmt_brl_date`): meia-noite UTC vira o DIA ANTERIOR em BRT. E a copy não
     pode prometer trial — são 15 dias por TELEFONE na vida
     (`db.plans.claim_trial_for_user`), e esta lista tem ex-assinante que já
-    usou o dele."""
+    usou o dele.
+
+    O preço é medido por DERIVAÇÃO: a fonte (`PRECOS_ANUAIS_CENTS`) é trocada em
+    runtime e o e-mail tem de renderizar o valor NOVO — literal cravado na copy
+    reprova, que é o modo de falha que importa (o preço muda e o e-mail mente).
+    A divisão por 12 continua duplicada aqui; quem a mede contra fonte
+    independente é `test_aviso_fim_do_gratis_preco.py`."""
     import core.services.email_service as es
+    import core.services.pix_pricing as pp
     from scripts.aviso_fim_do_gratis import _corte_para_email
+    from utils_text import fmt_brl
+
+    # A fonte do preço trocada ANTES do envio. 30000 é ACIMA do `pro` de
+    # propósito: o mínimo deixa de ser o `essencial`, e trocar o `min(...)` da
+    # produção por `["essencial"]` reprova (com 8900 os dois coincidiam). Não é
+    # valor de produção nem redondo, então literal cravado não coincide por acaso.
+    monkeypatch.setitem(pp.PRECOS_ANUAIS_CENTS, "essencial", 30000)
+    proibidos = ("15 dias", "trial", "teste grátis", "teste gratis")
 
     capturado: dict = {}
 
@@ -261,7 +298,7 @@ def test_copy_traz_a_data_do_corte_e_nao_promete_trial(monkeypatch):
     assert "24/09/2026" in capturado["text"]
     assert "24/09/2026" in capturado["subject"]
     corpo = (capturado["html"] + capturado["text"]).lower()
-    for proibido in ("15 dias", "trial", "teste grátis", "teste gratis"):
+    for proibido in proibidos:
         assert proibido not in corpo, f"copy promete {proibido!r}"
     # Transacional: sem link nem cabeçalho de descadastro (o molde do
     # `send_payment_failed_email`, não o dos e-mails de ciclo de vida).
@@ -270,6 +307,19 @@ def test_copy_traz_a_data_do_corte_e_nao_promete_trial(monkeypatch):
     assert capturado["kw"] == {}
     # Coorte 1: Grátis/sem plano — a frase da situação é essa mesma.
     assert "grátis" in corpo
+    # ...e o pitch. Esperado calculado DEPOIS do envio, da fonte já trocada.
+    anual_cents = min(pp.PRECOS_ANUAIS_CENTS.values())
+    preco_anual = fmt_brl(anual_cents / 100).lower()
+    preco_mensal = fmt_brl(anual_cents / 12 / 100).lower()
+    # HTML e texto conferidos SEPARADO: concatenar deixaria passar o parágrafo
+    # perdido em um dos dois corpos, com metade dos leitores vendo cada um. Os
+    # tokens são DISCRIMINANTES ("plano ativo" já existe na copy, seria verde por
+    # construção) e cobrem quatro promessas: "cupom boletos" sozinho reprova.
+    for nome, parte, tokens in _corpos(capturado):
+        assert preco_anual in parte, f"coorte 1, {nome}: sem o anual ({preco_anual})"
+        assert preco_mensal in parte, f"coorte 1, {nome}: sem o mensal ({preco_mensal})"
+        for token in tokens:
+            assert token in parte, f"coorte 1, {nome}: sem a frase de valor ({token!r})"
 
     # Coorte 2: assinatura VIVA com cartão recusado além da carência. Ela entra
     # na população (vai perder acesso), mas chamá-la de "plano Grátis" é falso
@@ -281,3 +331,16 @@ def test_copy_traz_a_data_do_corte_e_nao_promete_trial(monkeypatch):
     assert "grátis" not in corpo2 and "gratis" not in corpo2
     assert "cartão" in corpo2 or "cartao" in corpo2
     assert "24/09/2026" in corpo2
+    # Nem preço nem frase de valor (decisão do dono, 2026-09-10): essa conta já
+    # COMPROU o plano e está inadimplente, não indecisa — a ação dela é o cartão,
+    # e o e-mail dela encolhe em vez de crescer. Mesmos tokens da coorte 1, pela
+    # mesma fonte, com o sinal trocado.
+    for nome, parte, tokens in _corpos(capturado):
+        assert preco_anual not in parte, f"coorte 2, {nome}: recebeu o 'a partir de'"
+        assert preco_mensal not in parte, f"coorte 2, {nome}: recebeu o mensal"
+        for token in tokens:
+            assert token not in parte, f"coorte 2, {nome}: recebeu o pitch ({token!r})"
+    # Proibição de trial: aqui a direção segura é a oposta — tem de valer nos
+    # dois corpos, e a concatenação garante isso.
+    for proibido in proibidos:
+        assert proibido not in corpo2, f"copy da coorte 2 promete {proibido!r}"
