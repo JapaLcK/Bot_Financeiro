@@ -1,24 +1,32 @@
 /**
- * O modal de boas-vindas da /home depois do Pix ANUAL.
+ * O modal de boas-vindas da /home depois do Pix ANUAL, e o `Purchase` do pixel.
  *
- * O que estava errado: quem pagava o Pix anual lia "Sua assinatura já está
- * ativa. Dá pra cancelar quando quiser, direto nas configurações" — e não tem
- * assinatura nenhuma (compra à vista, sem cartão, sem renovação). Quem comprava
- * Essencial ou Pro ainda lia o título do plano certo, mas o corpo era o da
- * Stripe.
+ * Duas coisas moram aqui, e viraram uma só quando a FONTE mudou:
  *
- * Os dois controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos):
- *   · negativo — troque no `openWelcomePro` o ramo do Pix pelo `else` da
- *     Stripe e ficam vermelhos, por nome: WP1, WP2, WP10 e os SETE casos do
- *     WP4 (10 de 22). **WP5 e WP9 continuam VERDES** — eles só medem
- *     `searchParams.delete`, que a mutação não toca, e uma versão anterior
- *     deste cabeçalho os listava como cobertura que eles nunca deram;
- *   · positivo — WP3 é o caminho da Stripe SEM `gw`, provando que a cópia de
- *     quem assina no cartão continua exatamente a de hoje.
+ *   · a CÓPIA — quem pagava o Pix anual lia "Sua assinatura já está ativa. Dá
+ *     pra cancelar quando quiser" e não tem assinatura nenhuma (compra à vista,
+ *     sem cartão, sem renovação);
+ *   · a FONTE — o valor e a data vinham da QUERY STRING (`vl=`, `inicio=`).
+ *     Qualquer visitante abria `/home?upgrade=success&sid=<forjado>&vl=999999`
+ *     e mandava um Purchase de R$ 999.999 para a NOSSA conta de anúncios, sem
+ *     deduplicar com a CAPI (o `eventID` leva o `sid` que ele escolheu). E a
+ *     data era um retrato do checkout, que envelhece: na migração Stripe→Pix o
+ *     `_stripe_cancel` adia o começo do acesso depois de o QR estar na tela.
+ *     Hoje os dois saem de `GET /billing/pix/<sid>`, que é autenticado e filtra
+ *     por dono (404 para token de outro usuário).
  *
- * WP4 e WP8 são a fronteira de confiança: `inicio` e `vl` vêm da URL, que
- * qualquer um digita. Os controles negativos de cada conserto estão no
- * comentário do próprio caso.
+ * Os controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos):
+ *   · negativo da CÓPIA — troque no `openWelcomePro` o ramo do Pix pelo `else`
+ *     da Stripe (`} else if (false && modo === "pix") {`) e ficam vermelhos 13
+ *     de 24, por nome: WP1, WP2, os SETE casos do WP4, WP4b, WP8, WP10 e WP13.
+ *     **WP5 e WP9 continuam VERDES** — eles só medem `searchParams.delete`,
+ *     que a mutação não toca;
+ *   · negativo da FONTE — volte a ler `vl` e `inicio` da URL no `home.html`
+ *     (`cents` do `params.get("vl")`, `inicioPix` do `wpInicioValido(inicio)`)
+ *     e ficam vermelhos 5: WP1, WP4b, WP6, WP8 e WP13;
+ *   · positivo — WP3 e WP7 são o caminho da Stripe SEM `gw`, VERDES nas duas
+ *     mutações: cópia igual à de hoje, objeto do pixel sem `value`, e ZERO
+ *     requisição a `/billing/pix/`.
  *
  * O que este arquivo NÃO alcança: a compra de verdade e o e-mail. O e-mail é
  * `tests/test_pix_paid_email_copy.py`; a compra, só no aparelho.
@@ -44,12 +52,19 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 /**
  * Abre a /home com o backend inteiro em `{}` e o modal já aberto.
- * Devolve `{ page, erros }` — `erros` é a lista de `pageerror`, porque o WP4
- * mede JS quebrado por entrada suja, não só o texto que sobrou na tela.
+ *
+ * `cobranca` é o corpo de `GET /billing/pix/<sid>`; `null` (o padrão) responde
+ * **404**, que é o caminho de token forjado — e o que prova que nada é
+ * inventado quando a busca falha.
+ *
+ * Devolve `{ page, erros, pix }` — `erros` é a lista de `pageerror` (entrada
+ * suja não pode quebrar JS) e `pix.n` conta as requisições a `/billing/pix/`,
+ * que no caminho da Stripe têm de ser ZERO.
  */
-async function abrirHome(query) {
+async function abrirHome(query, cobranca = null, pendurar = false) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const erros = [];
+  const pix = { n: 0 };
   page.on("pageerror", (e) => erros.push(String(e)));
   // O pixel da Meta vem de CDN, que este arquivo bloqueia — sem stub o
   // `window.fbq` é undefined e o disparo nem acontece (`window.fbq && sid`).
@@ -75,10 +90,19 @@ async function abrirHome(query) {
   // (inclusive o controle positivo da Stripe) morria no timeout.
   await page.route("**/auth/me", (route) => route.fulfill(
     json({ user_id: 1, plan: "pro", plan_expires_at: null })));
+  // Depois do `**/*`, de propósito: no Playwright a rota mais recente ganha.
+  await page.route("**/billing/pix/**", (route) => {
+    pix.n += 1;
+    if (pendurar) return;                 // nunca responde: exercita o teto
+    return cobranca
+      ? route.fulfill(json(cobranca))
+      : route.fulfill({ status: 404, contentType: "application/json",
+                        body: JSON.stringify({ detail: "Cobrança não encontrada." }) });
+  });
   await page.goto(`${ORIGIN}/home.html${query}`);
   // O modal sobe 450 ms depois do load, e só se a validação de sessão passou.
   await page.waitForSelector("#welcome-pro-overlay.open", { timeout: 15000 });
-  return { page, erros };
+  return { page, erros, pix };
 }
 
 const textos = (page) => page.evaluate(() => ({
@@ -90,10 +114,18 @@ const textos = (page) => page.evaluate(() => ({
 }));
 
 const BASE = "?upgrade=success&sid=tok_x&ev=purchase&td=0";
+// Cobrança AGENDADA e cobrança IMEDIATA, como o servidor as devolve. Na
+// imediata `starts_at` também vem preenchido (com `agora`) — é por isso que
+// quem separa os dois casos é `agendada`, e não a presença da data.
+const AGENDADA = { status: "paid", plan: "pro_max", amount_cents: 49900,
+                   credit_cents: 0, agendada: true,
+                   starts_at: "2027-08-26T03:00:00+00:00" };
+const IMEDIATA = { ...AGENDADA, agendada: false,
+                   starts_at: new Date().toISOString() };
 
 // ── WP1: Pix AGENDADO ───────────────────────────────────────────────────────
-test("WP1: Pix agendado diz o plano, a data e que não renova", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=essencial&gw=pix&inicio=2027-08-26`);
+test("WP1: Pix agendado diz o plano, a data do servidor e que não renova", async () => {
+  const { page } = await abrirHome(`${BASE}&pl=essencial&gw=pix`, AGENDADA);
   const t = await textos(page);
   assert.match(t.titulo, /PigBank Essencial/, `título: ${t.titulo}`);
   assert.match(t.sub, /26\/08\/2027/, `sub sem a data: ${t.sub}`);
@@ -109,7 +141,7 @@ test("WP1: Pix agendado diz o plano, a data e que não renova", async () => {
 
 // ── WP2: Pix IMEDIATO ───────────────────────────────────────────────────────
 test("WP2: Pix imediato diz que já começou, sem data e sem cancelamento", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix`);
+  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix`, IMEDIATA);
   const t = await textos(page);
   assert.match(t.titulo, /PigBank Pro/, `título: ${t.titulo}`);
   assert.match(t.sub, /já começou/, `sub: ${t.sub}`);
@@ -118,34 +150,35 @@ test("WP2: Pix imediato diz que já começou, sem data e sem cancelamento", asyn
   await page.close();
 });
 
-// ── WP3: CONTROLE POSITIVO — a Stripe não mudou ─────────────────────────────
-test("WP3: compra no cartão (sem gw) mantém a cópia de hoje", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=plus`);
+// ── WP3: CONTROLE POSITIVO — a Stripe não mudou e não busca nada ────────────
+test("WP3: compra no cartão (sem gw) mantém a cópia de hoje, sem buscar cobrança", async () => {
+  const { page, pix } = await abrirHome(`${BASE}&pl=plus`, AGENDADA);
   const t = await textos(page);
   assert.equal(t.titulo, "Tá dentro do PigBank+");
   assert.equal(t.sub,
     "Sua assinatura já está ativa. Dá pra cancelar quando quiser, direto nas configurações.");
   assert.equal(t.olho, "Assinatura confirmada", `o olho da Stripe mudou: ${t.olho}`);
+  assert.equal(pix.n, 0, `a Stripe bateu ${pix.n}× em /billing/pix/`);
   await page.close();
 });
 
-// ── WP4: `inicio` é entrada de fronteira ────────────────────────────────────
-// "2027-02-30" e "2027-11-31" TÊM o formato e passam no `Date.parse` (que
-// normaliza em vez de recusar) — eram os que chegavam à tela como "30/02/2027".
-// "0000-01-01" também morre na ida e volta, e não na faixa de ano: o `Date` do
-// JS mapeia ano 0 para 1900, então o `getFullYear()` volta diferente. O ÚNICO
-// que depende da faixa é "9999-12-31" — ele passa na ida e volta (medido), e
-// sem a janela fixa viraria "começa em 31/12/9999" na tela.
+// ── WP4: `starts_at` do servidor também passa pelo validador ────────────────
+// Ele deixou de vir da URL, mas continua virando a promessa "seu ano começa em
+// <data>" na tela — coluna estranha ou corpo malformado não podem escrever
+// compromisso nosso. "2027-02-30" e "2027-11-31" TÊM o formato e passam no
+// `Date.parse` (que normaliza em vez de recusar): eram os que chegavam à tela
+// como "30/02/2027". "0000-01-01" morre na ida e volta (o `Date` do JS mapeia
+// ano 0 para 1900). O ÚNICO que depende da faixa fixa é "9999-12-31".
 for (const sujo of ["<img src=x onerror=alert(1)>", "2027-13-99", "amanhã",
                     "2027-02-30", "2027-11-31", "0000-01-01", "9999-12-31"]) {
-  test(`WP4: inicio=${sujo} cai no texto imediato, sem markup e sem erro`, async () => {
-    const { page, erros } = await abrirHome(
-      `${BASE}&pl=plus&gw=pix&inicio=${encodeURIComponent(sujo)}`);
+  test(`WP4: starts_at=${sujo} cai no texto imediato, sem markup e sem erro`, async () => {
+    const { page, erros } = await abrirHome(`${BASE}&pl=plus&gw=pix`,
+      { ...AGENDADA, starts_at: sujo });
     const t = await textos(page);
     assert.match(t.sub, /já começou/, `data inválida virou texto de agendado: ${t.sub}`);
     assert.ok(!t.subHtml.includes("<"), `entrou markup no sub: ${t.subHtml}`);
     assert.ok(!t.sub.includes(sujo), `a entrada crua foi para a tela: ${t.sub}`);
-    assert.deepEqual(erros, [], `pageerror com inicio sujo: ${erros.join(" | ")}`);
+    assert.deepEqual(erros, [], `pageerror com starts_at sujo: ${erros.join(" | ")}`);
     await page.close();
   });
 }
@@ -161,7 +194,8 @@ for (const sujo of ["<img src=x onerror=alert(1)>", "2027-13-99", "amanhã",
  * continuam verdes, que é o que o separa de teatro.
  */
 test("WP4b: inicio 3+ anos à frente sai como agendado, com a data", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&inicio=2029-09-09`);
+  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix`,
+    { ...AGENDADA, starts_at: "2029-09-09T03:00:00+00:00" });
   const t = await textos(page);
   assert.match(t.sub, /09\/09\/2029/, `renovação empilhada virou imediato: ${t.sub}`);
   assert.doesNotMatch(t.sub, /já começou/, `sub: ${t.sub}`);
@@ -169,8 +203,10 @@ test("WP4b: inicio 3+ anos à frente sai como agendado, com a data", async () =>
 });
 
 // ── WP5: a URL não guarda os parâmetros novos ───────────────────────────────
+// `inicio` não é mais escrito pelo pix-poll.js, mas continua sendo APAGADO:
+// link antigo, de antes desta mudança, ainda existe em aba e histórico.
 test("WP5: gw e inicio somem da URL depois do load", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&inicio=2027-08-26`);
+  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&inicio=2027-08-26`, IMEDIATA);
   const busca = await page.evaluate(() => location.search);
   assert.ok(!busca.includes("gw="), `sobrou gw na URL: ${busca}`);
   assert.ok(!busca.includes("inicio="), `sobrou inicio na URL: ${busca}`);
@@ -182,53 +218,71 @@ test("WP5: gw e inicio somem da URL depois do load", async () => {
  * levava receita. Enquanto os dois chegam, deduplicam e ninguém perde nada; no
  * dia em que o do servidor falhar, a venda entra com R$ 0.
  *
+ * A receita sai do `amount_cents` da COBRANÇA DO DONO, lida do servidor: no
+ * upgrade Pix→Pix o cobrado é menor que o de tabela (crédito proporcional), e
+ * a URL não é fonte de dinheiro.
+ *
  * Controles:
- *   · negativo — tire o `value` do objeto do fbq no home.html e WP6 fica
- *     vermelho (WP7, o positivo, continua verde: é o caminho que NÃO muda);
- *   · positivo — WP7 é a Stripe, que não manda `vl` e cujo objeto tem de
- *     continuar sendo `{ currency: "BRL" }` e nada mais.
- *   · WP8 é a fronteira: `vl` vem da URL.
+ *   · negativo — leia o `vl` da URL de novo no home.html e WP6 fica vermelho
+ *     (WP7, o positivo, continua verde: é o caminho que NÃO muda);
+ *   · positivo — WP7 é a Stripe, cujo objeto tem de continuar sendo
+ *     `{ currency: "BRL" }` e nada mais;
+ *   · WP8 e WP8b são a falha da busca: nada é inventado.
  */
 const purchase = (page) => page.evaluate(() =>
   (window.__fbq || []).filter((a) => a[0] === "track" && a[1] === "Purchase")[0]);
 
-// ── WP6: Pix com valor ──────────────────────────────────────────────────────
-test("WP6: vl=99.00 vira value 99 no Purchase, com o eventID de sempre", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=essencial&gw=pix&vl=99.00`);
+// ── WP6: o valor é o do SERVIDOR, mesmo com a URL gritando outro ────────────
+test("WP6: vl=999999 na URL é ignorado; value sai dos 49900 centavos do servidor", async () => {
+  const { page } = await abrirHome(`${BASE}&pl=essencial&gw=pix&vl=999999`, AGENDADA);
   const [, , dados, ids] = await purchase(page);
-  assert.equal(dados.value, 99, `value: ${JSON.stringify(dados)}`);
+  assert.equal(dados.value, 499, `value: ${JSON.stringify(dados)}`);
   assert.equal(dados.currency, "BRL");
   assert.equal(ids.eventID, "purchase_tok_x");
   await page.close();
 });
 
-// ── WP7: CONTROLE POSITIVO — Stripe (sem vl) segue byte a byte ──────────────
-test("WP7: compra sem vl manda só currency, sem a chave value", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=plus`);
+// ── WP7: CONTROLE POSITIVO — Stripe segue byte a byte ───────────────────────
+test("WP7: compra no cartão manda só currency, sem a chave value", async () => {
+  const { page, pix } = await abrirHome(`${BASE}&pl=plus`, AGENDADA);
   const [, , dados] = await purchase(page);
   assert.deepEqual(Object.keys(dados), ["currency"], `objeto: ${JSON.stringify(dados)}`);
   assert.equal(dados.currency, "BRL");
+  assert.equal(pix.n, 0, `a Stripe bateu ${pix.n}× em /billing/pix/`);
   await page.close();
 });
 
-// ── WP8: `vl` é entrada de fronteira ────────────────────────────────────────
-// `1e308` e `9e99` são o achado que dói: um link forjado mandava um Purchase
-// de 9e+99 BRL para a conta de anúncios. `99abc` e `99,00` são a leniência do
-// `parseFloat`, que lia o começo e descartava o resto.
-for (const sujo of ["abc", "-5", "1e308", "9e99", "99abc", "99,00"]) {
-  test(`WP8: vl=${sujo} cai no caso sem valor, sem erro de JS`, async () => {
-    const { page, erros } = await abrirHome(
-      `${BASE}&pl=plus&gw=pix&vl=${encodeURIComponent(sujo)}`);
+// ── WP8: token forjado (404) não vira receita ───────────────────────────────
+// É o caso do apontamento: `?sid=<qualquer coisa>&vl=999999` de um visitante
+// que nunca comprou. O 404 do endpoint (token inexistente OU de outro dono) tem
+// de deixar o objeto igual ao da Stripe.
+test("WP8: 404 na busca manda só currency, mesmo com vl na URL", async () => {
+  const { page, erros, pix } = await abrirHome(
+    `${BASE}&pl=plus&gw=pix&vl=999999&inicio=2027-08-26`);
+  const [, , dados] = await purchase(page);
+  const t = await textos(page);
+  assert.deepEqual(Object.keys(dados), ["currency"], `objeto: ${JSON.stringify(dados)}`);
+  assert.match(t.sub, /já começou/, `a data da URL virou promessa: ${t.sub}`);
+  assert.equal(pix.n, 1, `buscas: ${pix.n}`);
+  assert.deepEqual(erros, [], `pageerror no 404: ${erros.join(" | ")}`);
+  await page.close();
+});
+
+// ── WP8b: `amount_cents` estranho no corpo não vira valor ───────────────────
+for (const sujo of ["499", null, 0, -5, 49900.5]) {
+  test(`WP8b: amount_cents=${JSON.stringify(sujo)} cai no caso sem valor`, async () => {
+    const { page, erros } = await abrirHome(`${BASE}&pl=plus&gw=pix`,
+      { ...IMEDIATA, amount_cents: sujo });
     const [, , dados] = await purchase(page);
     assert.deepEqual(Object.keys(dados), ["currency"], `objeto: ${JSON.stringify(dados)}`);
-    assert.deepEqual(erros, [], `pageerror com vl sujo: ${erros.join(" | ")}`);
+    assert.deepEqual(erros, [], `pageerror com amount_cents sujo: ${erros.join(" | ")}`);
     await page.close();
   });
 }
 
 // ── WP9: `vl` também some da URL ────────────────────────────────────────────
 test("WP9: vl some da URL depois do load", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&vl=99.00`);
+  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&vl=99.00`, IMEDIATA);
   const busca = await page.evaluate(() => location.search);
   assert.ok(!busca.includes("vl="), `sobrou vl na URL: ${busca}`);
   await page.close();
@@ -238,26 +292,28 @@ test("WP9: vl some da URL depois do load", async () => {
 /**
  * `pl` já passava por `toLowerCase` e `gw` era comparado cru: `?gw=PIX` caía no
  * ramo da Stripe DEPOIS de uma compra Pix — a pessoa que pagou à vista lia
- * "sua assinatura já está ativa, dá pra cancelar quando quiser".
+ * "sua assinatura já está ativa, dá pra cancelar quando quiser". Hoje o mesmo
+ * `ehPix` também decide a BUSCA, então o normalizado vale por dois.
  *
  * Controle negativo: volte o `String(gw).toLowerCase() === "pix"` para
  * `gw === "pix"` e este caso fica vermelho (WP1 e WP2, minúsculos, seguem
  * verdes — é o que separa medir do teatro).
  */
 test("WP10: gw=PIX (maiúsculo) cai no ramo do Pix, não no da Stripe", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=PIX`);
+  const { page, pix } = await abrirHome(`${BASE}&pl=pro&gw=PIX`, IMEDIATA);
   const t = await textos(page);
   assert.match(t.sub, /já começou/, `gw maiúsculo virou cópia da Stripe: ${t.sub}`);
   assert.equal(t.olho, "Pagamento confirmado", `olho: ${t.olho}`);
+  assert.equal(pix.n, 1, `gw maiúsculo não buscou a cobrança: ${pix.n}`);
   await page.close();
 });
 
 // ── WP11: título e corpo decidem pelo MESMO ramo ────────────────────────────
 /**
  * O título olhava `pix && inicio` e o corpo a cadeia `trial → pix → else`, onde
- * o trial ganha. Com `ev=trial&gw=pix&inicio=…` saía "Seu PigBank+ tá garantido"
- * (ramo Pix) em cima de "seus 30 dias grátis começam agora" (ramo trial): duas
- * promessas incompatíveis no mesmo card.
+ * o trial ganha. Com `ev=trial&gw=pix` saía "Seu PigBank+ tá garantido"
+ * (ramo Pix) em cima de "seus 30 dias grátis começam agora": duas promessas
+ * incompatíveis no mesmo card.
  *
  * Qual dos dois ramos vence não é o que se testa aqui — é que os DOIS textos
  * saiam do mesmo.
@@ -267,7 +323,7 @@ test("WP10: gw=PIX (maiúsculo) cai no ramo do Pix, não no da Stripe", async ()
  */
 test("WP11: ev=trial com gw=pix não mistura título de Pix com sub de trial", async () => {
   const { page } = await abrirHome(
-    "?upgrade=success&sid=tok_x&ev=trial&td=30&pl=plus&gw=pix&inicio=2027-08-26");
+    "?upgrade=success&sid=tok_x&ev=trial&td=30&pl=plus&gw=pix", AGENDADA);
   const t = await textos(page);
   assert.match(t.sub, /dias grátis/, `sub: ${t.sub}`);
   assert.equal(t.titulo, "Tá dentro do PigBank+",
@@ -289,3 +345,45 @@ test("WP11: ev=trial com gw=pix não mistura título de Pix com sub de trial", a
  * superfície de produção por causa do teste. O conserto fica pela simetria; a
  * cobertura, honesta sobre o que não tem.
  */
+
+/* ── WP13: a data do servidor GANHA da data que a URL trazia ─────────────────
+ * O caso do apontamento P2, e o motivo de a busca existir: quem cria o QR pouco
+ * antes de a assinatura Stripe renovar tem o `access_starts_at` ADIADO pelo
+ * `_stripe_cancel` no momento do pagamento. O `inicio=` da URL era a estimativa
+ * do checkout, então a /home prometia a data VELHA enquanto o acesso e o e-mail
+ * usavam a nova.
+ *
+ * Controle negativo: volte a passar `wpInicioValido(inicio)` (o da URL) para o
+ * `openWelcomePro` e este caso fica vermelho — WP1 continua verde, porque lá as
+ * duas datas seriam a mesma.
+ */
+test("WP13: com inicio antigo na URL, o modal mostra a data que o servidor deu", async () => {
+  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix&inicio=2027-08-26`,
+    { ...AGENDADA, starts_at: "2028-01-15T03:00:00+00:00" });
+  const t = await textos(page);
+  assert.match(t.sub, /15\/01\/2028/, `mostrou a data da URL: ${t.sub}`);
+  assert.doesNotMatch(t.sub, /26\/08\/2027/, `a data velha sobreviveu: ${t.sub}`);
+  await page.close();
+});
+
+/* ── WP14: a busca não pode segurar a celebração ─────────────────────────────
+ * O `fbq` e o modal passaram a esperar a resposta do servidor. Sem teto, uma
+ * conexão pendurada deixava quem ACABOU DE PAGAR olhando para a /home de
+ * sempre, sem confirmação nenhuma. O `AbortSignal.timeout(4000)` fecha isso, e
+ * o caminho vencido é o mesmo do 404: cópia do imediato, Purchase sem `value`.
+ *
+ * Controle negativo: tire o `signal: AbortSignal.timeout(4000)` do fetch e este
+ * caso estoura no `waitForSelector` (15 s) — os outros 24 seguem verdes.
+ */
+test("WP14: busca pendurada — o modal sobe assim mesmo, sem valor inventado", async () => {
+  const t0 = Date.now();
+  const { page, erros } = await abrirHome(`${BASE}&pl=plus&gw=pix`, AGENDADA, true);
+  const decorrido = Date.now() - t0;
+  const [, , dados] = await purchase(page);
+  const t = await textos(page);
+  assert.deepEqual(Object.keys(dados), ["currency"], `objeto: ${JSON.stringify(dados)}`);
+  assert.match(t.sub, /já começou/, `sub: ${t.sub}`);
+  assert.ok(decorrido < 12000, `o modal levou ${decorrido}ms para subir`);
+  assert.deepEqual(erros, [], `pageerror no timeout: ${erros.join(" | ")}`);
+  await page.close();
+});

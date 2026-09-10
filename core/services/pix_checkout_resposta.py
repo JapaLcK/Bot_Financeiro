@@ -33,6 +33,18 @@ def qr_da_linha(linha: dict) -> str | None:
         subject_user_id=linha["user_id"], field="qr_payload"))
 
 
+def agendada(starts_at) -> bool:
+    """"Começa depois" — a conta que separa compra imediata de agendada.
+
+    Mora aqui, e não copiada em cada montagem, porque quem a lê são DOIS
+    contratos: a resposta do checkout (abaixo) e o poll
+    (`frontend/routes/billing_pix.py`). Duas cópias divergiriam (§0.7), e a
+    tela que gatilha pela presença de `starts_at` promete "começa em <hoje>"
+    a quem começa ao pagar.
+    """
+    return bool(starts_at and starts_at > datetime.now(timezone.utc))
+
+
 def resposta(linha: dict, qr_payload: str) -> dict:
     """O contrato que a tela do PR 2 consome. Uma função para os dois caminhos
     (cobrança nova e cobrança reaproveitada) — duas montagens divergiriam.
@@ -63,7 +75,7 @@ def resposta(linha: dict, qr_payload: str) -> dict:
         # Mesma conta do `agendada` que `plano_da_cobranca` devolve em TODOS os
         # ramos (`inicio > agora`) — e não o campo dele, porque o
         # `_reaproveitar` chega aqui só com a data, sem o resto do snapshot.
-        "agendada": bool(starts_at and starts_at > datetime.now(timezone.utc)),
+        "agendada": agendada(starts_at),
         "plan": linha["plan"],
     }
 

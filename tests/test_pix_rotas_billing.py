@@ -216,23 +216,6 @@ def test_poll_pelo_id_do_asaas_e_404_e_o_qr_nao_sai(user_id, monkeypatch):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="DÍVIDA: o poll monta a resposta À MÃO (frontend/routes/billing_pix.py, "
-           "no billing_pix_status) em vez de passar pelo pix_checkout_resposta."
-           "resposta(), e por isso não expõe `agendada` — o campo que existe "
-           "justamente porque `starts_at` SOZINHO não separa compra imediata de "
-           "agendada (na imediata ele também vem preenchido, com `agora`). Hoje "
-           "ninguém consome (pix-poll.js:53,94 leem `starts_at` da resposta do "
-           "POST), então é dívida e não bug. ESTA DÍVIDA NÃO TEM DONO: nenhum PR "
-           "aberto conserta o poll — o `fix/pix-plano-vocabulario` (#347) altera "
-           "só o `billing_pix_checkout` e não encosta no `billing_pix_status`, "
-           "então este teste segue XFAIL depois que ele mergear. Para remover o "
-           "marcador é preciso primeiro consertar o router: fazer o poll montar a "
-           "resposta pelo `resposta()` (hoje `starts_at` é montado à mão em "
-           "frontend/routes/billing_pix.py:159). A issue de rastreio ainda vai ser "
-           "aberta.",
-)
 def test_poll_expoe_agendada_como_a_resposta_do_checkout(user_id, monkeypatch):
     """§0.7: duas montagens da MESMA resposta, e só uma tem o campo que decide.
 
@@ -249,6 +232,11 @@ def test_poll_expoe_agendada_como_a_resposta_do_checkout(user_id, monkeypatch):
     assert "agendada" in corpo, (
         f"o poll expõe `starts_at` sem `agendada`: {sorted(corpo)}"
     )
+    # A FÓRMULA (`inicio > agora`) é medida em
+    # test_pix_checkout.py::test_agendada_sai_da_data_e_nao_da_presenca_dela,
+    # nas três datas. Aqui basta que o poll passe pela mesma função: cobrança
+    # recém-criada tem `access_starts_at` nulo, e nulo não é agendado.
+    assert corpo["agendada"] is False, f"agendada sem data: {corpo['agendada']}"
 
 
 def _cobranca(uid: int) -> dict:

@@ -2054,7 +2054,7 @@ function openWelcomePro({ trial = true, days = 30, plano = "plus", ia = null,
     olho.textContent = "Pagamento confirmado";
     /* O Pix anual é compra À VISTA: não há assinatura para cancelar nem cartão
        para renovar, e quem já tinha plano vigente comprou um ano AGENDADO para
-       o fim dele. `inicio` chega da URL e já veio validado como AAAA-MM-DD;
+       o fim dele. `inicio` chega do servidor, já validado como AAAA-MM-DD;
        aqui ele só vira DD/MM/AAAA, por textContent. */
     chip.hidden = true;
     const quando = inicio
@@ -2148,8 +2148,10 @@ document.getElementById("welcome-pro-overlay")?.addEventListener("click", (e) =>
   if (e.target === e.currentTarget) dismissWelcomePro();
 });
 
-/* Fronteira de confiança: `inicio` é query string, qualquer um digita, e o que
-   sair daqui vira a promessa "seu ano começa em <data>" na tela.
+/* A data que vira a promessa "seu ano começa em <data>" na tela. Ela hoje sai
+   do servidor (`/billing/pix/<token>`), e não mais da query string — este
+   validador ficou porque corpo malformado ou coluna estranha também não podem
+   virar compromisso escrito, e porque ele custa zero linha nova.
 
    A regex sozinha barra markup e formato, e o `Date.parse` NÃO completa o
    serviço: ele normaliza em vez de recusar, então "2027-02-30" virava
@@ -2173,17 +2175,16 @@ function wpInicioValido(s) {
   return bate && a >= 2020 && a <= 2100 ? s : null;
 }
 
-(function handleUpgradeReturn() {
+(async function handleUpgradeReturn() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("upgrade");
-  const sid = params.get("sid");  // id da sessão Stripe → event_id do evento
+  const sid = params.get("sid");  // sessão Stripe, ou o public_token do Pix →
+                                  // event_id do evento e chave da busca abaixo
   const ev = params.get("ev");    // "trial" | "purchase" (definido pelo success_url)
   const td = params.get("td");    // dias de trial concedidos (0 quando ev=purchase)
   const pl = params.get("pl");    // plano escolhido: essencial | plus | pro
   const ia = params.get("ia");    // cota mensal de mensagens da Piggy nesse plano
   const gw = params.get("gw");    // "pix" quando veio do Pix anual (pix-poll.js)
-  const inicio = params.get("inicio");  // AAAA-MM-DD do começo do ano comprado
-  const vl = params.get("vl");    // valor cobrado em reais (só o Pix manda)
   if (!status) return;
 
   // Limpa os query params da URL pra nao reaparecer em refresh.
@@ -2200,6 +2201,45 @@ function wpInicioValido(s) {
   window.history.replaceState({}, "", cleanUrl.toString());
 
   if (status === "success") {
+    /* No Pix, o VALOR e a DATA saem do servidor — nunca da URL.
+
+       `sid` é o `public_token` da cobrança, e `GET /billing/pix/<token>` é
+       autenticado e filtra por dono (404 para token inexistente OU de outro
+       usuário). Antes daqui a página acreditava na query string, e as duas
+       consequências eram reais: `?vl=999999` mandava um Purchase de
+       R$ 999.999 para a NOSSA conta de anúncios — sem deduplicar com a CAPI,
+       porque o `eventID` carrega o `sid` que o forjador escolheu — e o
+       `inicio=` era um retrato tirado no checkout, que na migração
+       Stripe→Pix o `_stripe_cancel` já tinha adiado (a tela prometia a data
+       velha enquanto o acesso e o e-mail usavam a nova).
+
+       Falhou a busca (404, rede, corpo sem `amount_cents`)? Nada é inventado:
+       o Purchase vai sem `value`, que é o objeto de sempre, e o texto cai no
+       imediato. O `fbq` só dispara DEPOIS — algumas centenas de ms a mais é o
+       preço de mandar número verdadeiro. */
+    const ehPix = String(gw).toLowerCase() === "pix";
+    let cobranca = null;
+    if (ehPix && sid) {
+      try {
+        // O teto de 4 s é o que impede a busca de segurar a CELEBRAÇÃO: o modal
+        // só sobe depois daqui, e sem teto uma conexão pendurada deixava quem
+        // acabou de pagar olhando para a tela de sempre. Vencido, cai no
+        // `catch` e vira o caminho sem valor. `AbortSignal.timeout` é nativo
+        // (Safari 16+); em navegador mais velho ele lança e cai no mesmo lugar.
+        const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
+                              { credentials: "same-origin",
+                                signal: AbortSignal.timeout(4000) });
+        if (r.ok) cobranca = await r.json();
+      } catch { /* sem valor é melhor que valor inventado */ }
+    }
+    const cents = cobranca && cobranca.amount_cents;
+    const valorPix = Number.isInteger(cents) && cents > 0 ? cents / 100 : null;
+    // `starts_at` vem ISO do servidor; `agendada` é quem separa imediato de
+    // agendado (na compra imediata a data também vem preenchida, com `agora`).
+    // O `wpInicioValido` fica: corpo malformado não vira promessa na tela.
+    const inicioPix = cobranca && cobranca.agendada && cobranca.starts_at
+      ? wpInicioValido(String(cobranca.starts_at).slice(0, 10)) : null;
+
     // Conversão pro Meta Ads — só dispara com `sid` (id real da sessão de
     // checkout que a Stripe injeta no success_url). Sem sid = alguém abriu a URL
     // na mão → não conta. `ev` diz se foi início de trial (StartTrial) ou compra
@@ -2209,20 +2249,13 @@ function wpInicioValido(s) {
       if (ev === "trial") {
         fbq("track", "StartTrial", { currency: "BRL" }, { eventID: "trial_" + sid });
       } else {
-        // Fronteira de confiança: `vl` é query string, qualquer um digita. Vira
-        // receita só o que o `Number` converte por INTEIRO — e não o
-        // `parseFloat`, que aceitava "99abc" e "99,00" lendo só o começo. Por
-        // inteiro inclui as notações do próprio JS: `0x63` também vira 99, e
-        // fica, porque o efeito de forjar `vl` é sujar o pixel de quem forjou —
-        // apertar isso custaria uma regex a mais sem nada em troca. Entre
-        // 0 e R$ 1.000.000 — o teto existe porque `&vl=9e99` mandava um
-        // `Purchase` de 9e+99 BRL para a conta de anúncios, e o plano mais caro
-        // custa R$ 499. O resto é ausência, e aí o objeto fica IGUAL ao de antes
-        // deste parâmetro existir (o Stripe não manda `vl`, e o valor dele
-        // continua vindo só da CAPI).
-        const valor = Number(vl);
-        const dados = Number.isFinite(valor) && valor > 0 && valor < 1e6
-          ? { currency: "BRL", value: valor }
+        // A receita vem do `amount_cents` da cobrança do PRÓPRIO dono, lido do
+        // servidor logo acima — não de query string. Não há valor a validar
+        // aqui: URL forjada não chega neste ponto, e sem cobrança lida o objeto
+        // fica IGUAL ao da Stripe (`{ currency: "BRL" }`), cujo valor continua
+        // vindo só da CAPI.
+        const dados = valorPix
+          ? { currency: "BRL", value: valorPix }
           : { currency: "BRL" };
         fbq("track", "Purchase", dados, { eventID: "purchase_" + sid });
       }
@@ -2257,10 +2290,10 @@ function wpInicioValido(s) {
           days: Number.isFinite(dias) && dias > 0 ? dias : 30,
           plano: pl || "plus",
           ia: Number.isFinite(cotaIA) && cotaIA > 0 ? cotaIA : null,
-          // `toLowerCase` porque `pl` já normaliza e este não normalizava:
-          // `?gw=PIX` caía no ramo da Stripe depois de uma compra Pix.
-          pix: String(gw).toLowerCase() === "pix",
-          inicio: wpInicioValido(inicio),
+          // `ehPix` normaliza como o `pl` já fazia: `?gw=PIX` caía no ramo da
+          // Stripe depois de uma compra Pix.
+          pix: ehPix,
+          inicio: inicioPix,
         });
       };
 

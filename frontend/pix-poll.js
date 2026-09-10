@@ -86,19 +86,11 @@ function pixModalQr(d, plano, ctx) {
   pixPoll = {
     token: d.public_token, plano, vivo, img, code, status, fechar,
     inicio: Date.now(), falhas: 0, timer: null,
-    // A data que a linha acima acabou de mostrar, para a /home repetir a MESMA
-    // promessa no modal de sucesso. Quem gatilha é `agendada`, NUNCA a presença
-    // da data: `starts_at` vem preenchido nos dois casos (na compra imediata,
-    // com `agora`), então gatilhar por ele fazia quem comprou sem ter plano
-    // nenhum ler "começa em <hoje>, assim que o plano atual terminar".
-    comeca: d.agendada && d.starts_at ? String(d.starts_at).slice(0, 10) : null,
-    // O valor COBRADO (o mesmo que a l.34 mostrou no título), para o Purchase do
-    // pixel na /home sair com receita. Sai do checkout e não de tabela de preço:
-    // no upgrade Pix→Pix o cobrado é menor que o de tabela (crédito
-    // proporcional). Formato de máquina, com ponto: quem lê é a Meta, não gente.
-    // Sem inteiro > 0 fica null e o param nem é escrito — mesma regra do `comeca`.
-    vl: Number.isInteger(d.amount_cents) && d.amount_cents > 0
-      ? (d.amount_cents / 100).toFixed(2) : null,
+    // Nem a data nem o valor viajam daqui para a /home: ela busca os dois no
+    // `GET /billing/pix/<token>`, que é autenticado e filtra por dono. Este
+    // objeto é um retrato tirado no checkout, e o retrato ENVELHECE — na
+    // migração Stripe→Pix o `_stripe_cancel` adia o começo do acesso depois
+    // que o QR já está na tela.
     // `Date.parse(undefined)` é NaN, e NaN é falsy: sem `expires_at` legível
     // sobra o teto do cliente. COM ele, quem manda é o servidor.
     deadline: Date.parse(d.expires_at) || Date.now() + PIX_TETO_MS,
@@ -223,7 +215,7 @@ async function pixBater() {
 }
 
 function pixPago() {
-  const { token, plano, status, comeca, vl } = pixPoll;
+  const { token, plano, status } = pixPoll;
   clearTimeout(pixPoll.timer);
   document.removeEventListener("visibilitychange", pixVisivel);
   pixRotular(status, "ph-check-circle", "Pagamento confirmado! Liberando seu acesso…");
@@ -231,15 +223,12 @@ function pixPago() {
   pixApagarQr();
   // `sid` = public_token (§13.6): vira o eventID do pixel da Meta e o
   // transaction_id do GA4 na /home. Sem `ia=` — a home.html trata a ausência.
-  // `gw=pix` e `inicio=` mudam a CÓPIA da /home: sem eles ela diz "sua
-  // assinatura já está ativa, dá pra cancelar quando quiser" — e o Pix anual não
-  // é assinatura, não tem cartão e pode começar só no fim do plano vigente.
-  // `vl=` leva a RECEITA para o Purchase do pixel: sem ele a venda chega sem
-  // valor quando o evento do servidor (CAPI) falha e só o do navegador sobra.
+  // `gw=pix` é só o MARCADOR de gateway: ele manda a /home buscar a cobrança em
+  // `/billing/pix/<sid>` e tirar de lá o valor e a data. Dinheiro não viaja na
+  // query string — `vl=` e `inicio=` saíram daqui porque qualquer um os digita,
+  // e o `vl` forjado virava receita inventada na NOSSA conta de anúncios.
   window.location.href = "/home?upgrade=success&sid=" + encodeURIComponent(token)
-    + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano) + "&gw=pix"
-    + (comeca ? "&inicio=" + encodeURIComponent(comeca) : "")
-    + (vl ? "&vl=" + vl : "");
+    + "&ev=purchase&td=0&pl=" + encodeURIComponent(plano) + "&gw=pix";
 }
 
 /**
