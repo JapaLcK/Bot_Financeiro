@@ -157,7 +157,10 @@ def _patch_stripe(monkeypatch) -> _FakeStripe:
     return fake
 
 
-def test_checkout_default_uses_monthly_price(user_id, monkeypatch):
+def test_checkout_omitted_interval_uses_monthly_price(user_id, monkeypatch):
+    """`interval` ausente cai no default do modelo (`monthly`). O nome já disse
+    só `default`, quando `plan` também tinha um; hoje `plan` é obrigatório
+    (#352) e o único default que sobrou é este."""
     _, _, client = _auth_user_setup(f"def-{user_id}")
     monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
@@ -223,14 +226,28 @@ def test_checkout_monthly_falls_back_to_legacy_price(user_id, monkeypatch):
     ]
 
 
-def test_checkout_invalid_interval_returns_400(user_id, monkeypatch):
-    _, _, client = _auth_user_setup(f"inv-{user_id}")
-    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "sk_test_xxx")
-    monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_PRO_MENSAL", "price_mensal_abc")
+@pytest.mark.parametrize("interval", ["weekly", ""], ids=["weekly", "vazio"])
+def test_checkout_invalid_interval_returns_400(request, user_id, monkeypatch, interval):
+    """`""` entra aqui pelo mesmo motivo de `plan` (#352): um `or "monthly"`
+    nesta rota transformava valor VAZIO em venda MENSAL silenciosa — 200 com
+    `interval: "monthly"` num corpo que não escolheu ciclo nenhum.
 
-    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": "weekly"}, headers=_CSRF_HEADERS)
-    assert resp.status_code == 400
+    CONTROLE NEGATIVO do caso `vazio`: em `billing_create_checkout`
+    (`frontend/finance_bot_websocket_custom.py`) troque `payload.interval.lower()`
+    por `(payload.interval or "monthly").lower()` e
+    `test_checkout_invalid_interval_returns_400[vazio]` fica VERMELHO em 200.
+    Injetado num caso VERDE — `weekly` é 400 com e sem o `or`.
+
+    A sessão zero é o que dá dinheiro à medição: 400 sozinho também sairia de
+    uma validação depois de a cobrança nascer.
+    """
+    _, _, client = _auth_user_setup(f"inv-{request.node.callspec.id}-{user_id}")
+    fake = _stripe_pronto(monkeypatch)
+
+    resp = client.post("/billing/create-checkout", json={"plan": "plus", "interval": interval}, headers=_CSRF_HEADERS)
+    assert resp.status_code == 400, resp.text
     assert "interval" in resp.json()["detail"].lower()
+    assert fake.session_create_calls == 0, "recusa de interval abriu checkout no Stripe"
 
 
 def _stripe_pronto(monkeypatch):
@@ -318,10 +335,9 @@ def test_checkout_aceita_interval_em_caixa_alta_como_a_troca(user_id, monkeypatc
 
     CONTROLE NEGATIVO deste caso: troque a linha do `interval` na rota
     (`frontend/finance_bot_websocket_custom.py`, `billing_create_checkout`) de
-    `(payload.interval or "monthly").lower()` por `(payload.interval or
-    "monthly")` e este teste fica VERMELHO em 400
-    `interval inválido`. Injetado num caso VERDE — `annual` sem espaços passa
-    com e sem o conserto (`test_checkout_annual_uses_annual_price` é ele).
+    `payload.interval.lower()` por `payload.interval` e este teste fica VERMELHO
+    em 400 `interval inválido`. Injetado num caso VERDE — `annual` sem espaços
+    passa com e sem o conserto (`test_checkout_annual_uses_annual_price` é ele).
     """
     _, _, client = _auth_user_setup(f"interval-{user_id}")
     fake = _stripe_pronto(monkeypatch)

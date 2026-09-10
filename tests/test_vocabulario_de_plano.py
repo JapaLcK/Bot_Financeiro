@@ -212,13 +212,18 @@ def test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos(logado, vendavel,
 # (`essencial/plus/pro/PLUS/" plus "` → pix 200, stripe 503, change 503, os três
 # `recusa=False`; `pro_max/free/""` → 400 nos três), sem monkeypatch nenhum.
 #
-# O que a coluna não saberia dizer é o que este grupo mede a mais:
+# Ela fica de fora porque a duplicação que vigiaria FOI REMOVIDA em vez de
+# vigiada (§0.7 é sobre UMA fonte; o teste comparador é o que se faz quando a
+# cópia é inevitável, e aqui não era): as três rotas de plano não têm mais tupla
+# literal — todas validam contra `TIER_TO_STORED_PLAN`
+# (`core/services/plan_service.py`), e um quarto tier entra num lugar só. Nenhum
+# comentário guarda isso; o `not in` guarda.
+#
+# O que sobra medir é COMPORTAMENTO, e a coluna não saberia dizer:
 #   * a ACEITAÇÃO aqui é o 409 `no_subscription` ESPECÍFICO, não "qualquer
 #     coisa que não seja 400 `plan inválido`";
 #   * a RECUSA é medida pelo TRABALHO — `chamadas == []`, a rota nem leu a
 #     conta. O predicado da tabela só enxerga status.
-# Pôr a coluna e ainda manter isto deixaria a metade do vocabulário em dois
-# lugares (§0.7); fica o teste, que mede as duas coisas.
 #
 # CONTROLES DO GRUPO:
 #   * NEGATIVO — tire o `.strip()` de `plan = (payload.plan or "").strip().lower()`
@@ -266,3 +271,26 @@ def test_change_plan_normaliza_como_o_checkout(logado, monkeypatch, plan, veredi
         assert r.json()["detail"]["error"] == "no_subscription", r.text
         assert chamadas == [logado.user_id], (
             f"'{plan}' foi aceito mas a rota não chegou a ler a conta")
+
+
+@pytest.mark.parametrize("rota", ["/billing/create-checkout", "/billing/change-plan"],
+                         ids=["stripe", "change-plan"])
+def test_interval_vazio_e_400_nas_duas_rotas(logado, rota):
+    """`interval: ""` é recusado nas duas — é a #352 com `interval` no lugar de
+    `plan`. As duas tinham `(payload.interval or "monthly")`, que vendia o ciclo
+    MENSAL para um corpo que não escolheu ciclo nenhum, em silêncio e com 200.
+
+    CONTROLE NEGATIVO: reponha o `or "monthly"` em qualquer uma das duas
+    (`frontend/finance_bot_websocket_custom.py`) e a linha correspondente fica
+    VERMELHA — 503 `Pagamentos ainda não configurados` no `stripe`, 503 `Esse
+    plano ainda não está configurado` no `change-plan`, porque sem price ID a
+    rota segue adiante em vez de recusar. Injetado nos dois casos VERDES.
+    CONTROLE POSITIVO: `interval` legítimo continua atravessando —
+    `test_pix_e_stripe_aceitam_a_MESMA_lista_de_planos` manda `"annual"` no
+    Stripe e `test_change_plan_normaliza_como_o_checkout[plus]` omite o campo
+    (default `monthly`); os dois passam da validação de `interval`.
+    """
+    r = logado.http.post(rota, headers=_cabecalhos(),
+                         json={"plan": "plus", "interval": ""})
+    assert r.status_code == 400, r.text
+    assert "interval inválido" in str(r.json()["detail"]), r.text
