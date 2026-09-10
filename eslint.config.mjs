@@ -75,6 +75,12 @@ export default defineConfig([
         pixCheckout: "readonly",
         pixModalQr: "readonly",
         pixEncerrar: "readonly",
+        // Declaradas no pix-poll.js e chamadas pelo `pixEnviar` do
+        // pix-checkout.js — e o `pixModalMigracao` chama o `pixEnviar` de volta.
+        // As caixas foram para lá pelo teto de 350 linhas, não por assunto.
+        pixModalMigracao: "readonly",
+        pixModalJaPago: "readonly",
+        pixEnviar: "readonly",
         // Declarado no pix-checkout.js e chamado pelo `pixApagarQr` do
         // pix-poll.js: o documento e o payload saem do DOM na mesma hora.
         pixApagarDoc: "readonly",

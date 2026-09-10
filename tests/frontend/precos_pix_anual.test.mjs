@@ -48,7 +48,8 @@ const PAYLOAD = "00020126580014BR.GOV.BCB.PIX0136pigbank-teste-qr-payload-520400
 // atributo SOME, não o desenho.
 const QR_IMG = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 // O documento do pagador. Dígito verificador NÃO é conferido na tela (quem
-// valida é o Asaas, §0.7), então o que importa aqui é a FORMA: 11 e 14 dígitos.
+// confere o mod-11 é o servidor, uma cópia só, §0.7; e o Asaas ainda pode
+// recusar depois), então o que importa aqui é a FORMA: 11 e 14 dígitos.
 // São strings improváveis de aparecer por acaso — o PT12d procura por elas no
 // storage, no DOM, no console e no corpo de TODA requisição da página.
 const CPF = "11122233344";
@@ -476,8 +477,91 @@ test("PT6: pago -> /home?upgrade=success com sid = public_token", async () => {
   assert.equal(url.searchParams.get("ia"), null, `sobrou ia= na URL: ${page.url()}`);
   assert.ok(!page.url().includes("pay_"), `o id do provedor vazou: ${page.url()}`);
   assert.ok(!page.url().includes("9999"), `o id do provedor vazou: ${page.url()}`);
+  // `gw=pix` é o MARCADOR de gateway e viaja sempre; dinheiro e data NÃO
+  // viajam (ver PT6c): a /home busca os dois em `/billing/pix/<sid>`.
+  assert.equal(url.searchParams.get("gw"), "pix");
   assert.deepEqual(corposPix[0],
     { plan: "plus", interval: "annual", cpf_cnpj: CPF });
+  await page.close();
+});
+
+// ── PT6b: quem separa agendado de imediato é `agendada`, não a data ──────────
+/**
+ * Os DOIS casos no mesmo teste, de propósito: eles só provam alguma coisa
+ * juntos. `access_starts_at` é preenchido nas duas compras — na imediata, com
+ * `agora` —, então "tem `starts_at`" NÃO quer dizer "começa depois". Gatilhar
+ * pela presença da data fazia a TELA DO QR dizer "seu ano começa em 10/09/2026"
+ * para quem começa ao pagar.
+ *
+ * Aqui se mede só a tela do QR: é o único lugar onde a resposta do CHECKOUT é
+ * fonte legítima da data (é a promessa de antes de pagar). A promessa DEPOIS de
+ * pagar é da /home, que busca a cobrança no servidor — por isso a URL de
+ * sucesso não leva `inicio` em nenhum dos dois casos, e os dois casos verificam
+ * isso.
+ *
+ * Controle negativo: troque o `d.agendada && d.starts_at` do pix-poll.js de
+ * volta por `d.starts_at` e o caso IMEDIATO fica vermelho; apague o `agendada`
+ * da `resposta()` do backend e o AGENDADO fica.
+ */
+test("PT6b: agendada=true data na tela do QR; agendada=false com starts_at, não", async () => {
+  const base = { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                 amount_cents: 19900, credit_cents: 0, plan: "plus" };
+  const pago = { status: (n) => (n >= 2
+    ? { status: "paid", starts_at: "2026-01-02T12:00:00+00:00" }
+    : { status: "pending" }) };
+
+  const ag = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: true, starts_at: "2027-08-26T03:00:00+00:00" } } });
+  // A MESMA promessa já na tela do QR, antes de pagar.
+  assert.match(await ag.page.textContent(".pix-box"), /começa em 26\/08\/2027/,
+    "a tela do QR não repetiu a data do agendamento");
+  await ag.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  const url = new URL(ag.page.url());
+  assert.equal(url.searchParams.get("gw"), "pix");
+  assert.equal(url.searchParams.get("inicio"), null,
+    `a data do checkout viajou na URL: ${ag.page.url()}`);
+  await ag.page.close();
+
+  // Compra IMEDIATA: o backend preenche `access_starts_at` com `agora` e diz
+  // `agendada: false`. Nem a tela do QR nem a URL podem falar em data.
+  const hoje = new Date().toISOString();
+  const im = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: false, starts_at: hoje } } });
+  assert.match(await im.page.textContent(".pix-box"), /começa agora/,
+    "a tela do QR datou uma compra imediata");
+  await im.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  assert.equal(new URL(im.page.url()).searchParams.get("inicio"), null,
+    `mandou inicio numa compra imediata: ${im.page.url()}`);
+  await im.page.close();
+});
+
+// ── PT6c: a URL de sucesso não carrega dinheiro nem data ────────────────────
+/**
+ * Ela carregava: `vl=` (o valor cobrado) e `inicio=` (a data do começo). Os dois
+ * eram retrato tirado no checkout e query string editável — `?vl=999999` num
+ * link forjado virava um Purchase de R$ 999.999 na NOSSA conta de anúncios, sem
+ * deduplicar com a CAPI, e a data envelhecia quando o `_stripe_cancel` adiava o
+ * acesso depois de o QR já estar na tela. Agora a /home busca a cobrança em
+ * `/billing/pix/<sid>`, e a URL só leva IDENTIFICADORES.
+ *
+ * O corpo do checkout aqui traz valor E data agendada de propósito: é o caso em
+ * que o código antigo escrevia os dois. Enumera a lista inteira de params em vez
+ * de checar dois nomes — param novo de dinheiro entra vermelho.
+ *
+ * Controle negativo: reponha `+ (vl ? "&vl=" + vl : "")` (ou o `&inicio=`) no
+ * `pixPago` do pix-poll.js e este caso fica vermelho.
+ */
+test("PT6c: a URL de sucesso leva só identificadores, sem vl e sem inicio", async () => {
+  const { page } = await abrirQr({
+    status: (n) => (n >= 2 ? { status: "paid" } : { status: "pending" }),
+    pix: { corpo: { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                    amount_cents: 9900, credit_cents: 0, plan: "essencial",
+                    agendada: true, starts_at: "2027-08-26T03:00:00+00:00" } },
+  });
+  await page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  const params = [...new URL(page.url()).searchParams.keys()].sort();
+  assert.deepEqual(params, ["ev", "gw", "pl", "sid", "td", "upgrade"],
+    `params da URL de sucesso: ${page.url()}`);
   await page.close();
 });
 
@@ -1092,5 +1176,46 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
   // A consequência visível para o usuário: o próximo checkout tem de abrir.
   await page.click('[data-pix-cta="plus"]');
   await page.waitForSelector(".pix-doc", { timeout: 3000 });
+  await page.close();
+});
+
+/**
+ * PT18 — A MENSAGEM DA RECUSA CHEGA À TELA, NOS DOIS FORMATOS DE `detail`.
+ *
+ * O `detail` do FastAPI é STRING quando o `raise` passa texto (o 400 do CPF
+ * inválido) e OBJETO nos 409. O ramo do `!r.ok` lia só `det.message`: com
+ * string, `det.message` é `undefined` e a pessoa recebia o genérico "não
+ * consegui gerar o código Pix agora" — que sugere problema nosso, quando o
+ * conserto é digitar o documento certo.
+ *
+ * *Negativo (rodado): volte o `!r.ok` para `det.message || …` → PT18a vermelho.*
+ * O PT18b é o par que uma correção do tipo `String(d.detail)` destruiria: o
+ * objeto tem de continuar sendo lido pela `message`.
+ */
+test("PT18a: o 400 com detail string mostra a mensagem do servidor no toast", async () => {
+  const { page } = await abrirForm({
+    pix: { httpStatus: 400, corpo: { detail: "Informe um CPF ou CNPJ válido." } },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(300);
+  const toast = await page.textContent("#toast");
+  assert.equal(toast, "Informe um CPF ou CNPJ válido.",
+    `a recusa do documento virou outra coisa na tela: "${toast}"`);
+  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("err")),
+    "a recusa apareceu sem a classe de erro");
+  await page.close();
+});
+
+test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () => {
+  const { page } = await abrirForm({
+    pix: { httpStatus: 409,
+           corpo: { detail: { error: "lifetime",
+                              message: "Você já tem acesso vitalício de brinde." } } },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(300);
+  const toast = await page.textContent("#toast");
+  assert.equal(toast, "Você já tem acesso vitalício de brinde.",
+    `o detail objeto parou de ser lido pela message: "${toast}"`);
   await page.close();
 });

@@ -112,6 +112,10 @@ def mundo_externo(monkeypatch) -> dict:
     zero em qualquer versão do código — a tautologia clássica.
     """
     contas = {"ga4": 0, "capi": 0, "email": 0, "alerta": [], "grant": 0,
+              # Os kwargs de CADA `send_purchase`, na ordem. Contar chamadas e
+              # jogar o conteúdo fora deixa cego para o que VAI no evento — e o
+              # `plan` do GA4 é `item_id`/`item_name`, a linha de receita.
+              "ga4_kw": [],
               # `send_email` NUNCA levanta: Resend fora do ar e Resend sem chave
               # saem os dois por `return False`. O falso devolve o mesmo `bool`
               # que a produção, senão o efeito `email` seria medido contra uma
@@ -127,9 +131,13 @@ def mundo_externo(monkeypatch) -> dict:
         contas["email"] += 1
         return contas["email_ok"]
 
+    def _purchase(**kw):
+        contas["ga4"] += 1
+        contas["ga4_kw"].append(kw)
+        return True
+
     monkeypatch.setattr(ga4, "mp_configured", lambda: True)
-    monkeypatch.setattr(ga4, "send_purchase",
-                        lambda **kw: contas.__setitem__("ga4", contas["ga4"] + 1))
+    monkeypatch.setattr(ga4, "send_purchase", _purchase)
     monkeypatch.setattr(capi, "capi_configured", lambda: True)
     monkeypatch.setattr(capi, "send_event",
                         lambda **kw: contas.__setitem__("capi", contas["capi"] + 1))

@@ -71,8 +71,18 @@ def test_venda_nova_emite_pending_com_o_qr_cifrado(user_id, vendavel, asaas_fals
     assert r["qr_image"].startswith("data:image/svg+xml;base64,")
     assert r["public_token"] == linha["public_token"]
     assert set(r) == {"public_token", "qr_payload", "qr_image", "expires_at",
-                      "amount_cents", "credit_cents", "starts_at", "plan"}, (
+                      "amount_cents", "credit_cents", "starts_at", "agendada",
+                      "plan"}, (
         "o contrato que a tela do PR 2 consome mudou de forma"
+    )
+    # O PAR que prova por que `agendada` teve de existir: nesta compra — conta
+    # `free`, sem plano nenhum — o acesso é IMEDIATO e mesmo assim `starts_at`
+    # vem preenchido (com `agora`). A tela gatilhava pela presença da data e
+    # dizia "começa em <hoje>, assim que o plano atual terminar" a quem já tinha
+    # acesso e nunca teve plano.
+    assert r["starts_at"] is not None, "o contrato perdeu a data do começo"
+    assert r["agendada"] is False, (
+        f"compra imediata marcada como agendada: starts_at={r['starts_at']}"
     )
 
 
@@ -241,3 +251,25 @@ def test_rastreio_e_gravado_e_a_exclusao_o_zera(user_id, vendavel, asaas_falso):
     assert (depois["ga_client_id"], depois["fbp"], depois["fbc"]) == (None, None, None)
     assert depois["qr_payload_enc"] is None
     assert depois["amount_cents"] == PRECO, "o valor financeiro não podia sumir"
+
+
+def test_agendada_sai_da_data_e_nao_da_presenca_dela():
+    """O OUTRO lado do par acima, sem banco: a `resposta()` é função pura.
+
+    `test_venda_nova_emite_pending_com_o_qr_cifrado` prova o imediato
+    (`agendada is False` com `starts_at` preenchido). Sem este, `agendada`
+    poderia ser a constante `False` e aquele caso continuaria verde — a compra
+    agendada é a que carrega a promessa de data para a tela.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from core.services.pix_checkout_resposta import resposta
+
+    base = {"public_token": "tok", "qr_expires_at": None, "amount_cents": 19900,
+            "credit_cents": 0, "plan": "pro", "user_id": 1}
+    agora = datetime.now(timezone.utc)
+    futuro = agora + timedelta(days=40)
+
+    assert resposta(dict(base, access_starts_at=futuro), "000201")["agendada"] is True
+    assert resposta(dict(base, access_starts_at=agora), "000201")["agendada"] is False
+    assert resposta(dict(base, access_starts_at=None), "000201")["agendada"] is False
