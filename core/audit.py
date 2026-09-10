@@ -20,6 +20,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from core.crypto import PiiAccessContext, decrypt_pii_optional
+from core.pg_text import limpa_para_pg
 from db.connection import get_conn
 
 
@@ -150,7 +151,8 @@ def record_audit_event(
                     insert into audit_events (user_id, event, ip, user_agent, details)
                     values (%s, %s, %s, %s, %s)
                     """,
-                    (user_id, event, ip, user_agent, Jsonb(details or {})),
+                    (user_id, limpa_para_pg(event), limpa_para_pg(ip),
+                     limpa_para_pg(user_agent), Jsonb(limpa_para_pg(details or {}))),
                 )
             conn.commit()
     except Exception as exc:
