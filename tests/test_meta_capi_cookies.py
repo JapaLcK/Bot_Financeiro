@@ -153,7 +153,7 @@ def test_cookies_do_pixel_viram_metadata_do_checkout(user_id, monkeypatch):
     client.cookies.set("_fbp", _FBP)
     client.cookies.set("_fbc", _FBC)
 
-    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert r.status_code == 200, r.text
 
     kwargs = fake.last_session_kwargs
@@ -180,7 +180,7 @@ def test_cookie_forjado_nao_vira_metadata(user_id, monkeypatch):
     fake = _patch_stripe(monkeypatch)
     client.cookies.set("_fbp", "sou-um-cookie-inventado")
 
-    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert r.status_code == 200, r.text
     assert "fbp" not in fake.last_session_kwargs["metadata"]
 

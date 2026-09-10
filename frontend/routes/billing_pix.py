@@ -49,7 +49,7 @@ from core.services.pix_checkout import (
     criar_checkout,
 )
 from core.services.pix_pricing import CoberturaJaPaga
-from core.services.plan_service import TIER_TO_STORED_PLAN
+from core.services.plan_service import TIER_TO_STORED_PLAN, tier_publico
 from frontend.routes import shared
 
 router = APIRouter()
@@ -115,8 +115,10 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     except CoberturaJaPaga as exc:
         # `plano` e `cobertura_ate` vêm da PRÓPRIA exceção: reconsultar o banco
         # aqui poderia devolver um estado diferente do que motivou a recusa.
+        # `exc.plano` é o valor LEGADO (a exceção nasce depois da tradução da
+        # linha 89), e a fronteira fala público nos dois sentidos.
         raise HTTPException(status_code=409, detail={
-            "error": exc.ERRO, "plan": exc.plano,
+            "error": exc.ERRO, "plan": tier_publico(exc.plano),
             "covered_until": exc.cobertura_ate.isoformat()}) from exc
     except Vitalicio as exc:
         # Sem consultar nada de novo: quem decidiu foi o `criar_checkout`. A
@@ -167,7 +169,9 @@ async def billing_pix_status(request: Request, public_token: str):
         raise HTTPException(status_code=404, detail="Cobrança não encontrada.")
     return {
         "status": linha["status"],
-        "plan": linha["plan"],
+        # Público, como no contrato do checkout (§0.7): a mesma tela lê as duas
+        # respostas, e um `pro` aqui e um `plus` lá seriam dois vocabulários.
+        "plan": tier_publico(linha["plan"]),
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
         "expires_at": (linha["qr_expires_at"].isoformat()

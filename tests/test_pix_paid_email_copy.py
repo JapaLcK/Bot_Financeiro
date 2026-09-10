@@ -14,7 +14,7 @@ os slugs do frontend, e por isso ficou verde em cima de um mapa que mandava
 comprou Pro.
 
 Os dois controles do CLAUDE.md §3, para o GRUPO:
-  · negativo — chaveie o `PIX_PLAN_NAMES` no vocabulário do frontend
+  · negativo — chaveie o `PLAN_DISPLAY_NAMES` no vocabulário do frontend
     (`plus`/`pro`) e `test_pro_e_o_plus` e `test_pro_max_e_o_pro` ficam
     vermelhos; volte o `nome` para a constante "PigBank+" (ou apague o
     `agendado`) e `test_essencial_agendado` fica;
