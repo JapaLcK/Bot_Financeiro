@@ -141,8 +141,12 @@ _PENDENCIAS_VIVAS = [
     ("bill_amount_expected", _arma_bill_amount),
     # :532 — resolve_multi_launch_value abandona a fila: pending_actions 1 → 0.
     ("multi_launch_values", _arma_multi_launch),
-    # :539 — o conjunto do h_credit.resolve_pending, SEM escotilha de abandono.
-    # "Quando fecha a fatura do cartão *ajuda?*?" — virou o NOME do cartão.
+    # :539 — o conjunto do h_credit.resolve_pending. Na época deste arquivo ele
+    # NÃO tinha escotilha de abandono: "Quando fecha a fatura do cartão
+    # *ajuda?*?" virava o NOME do cartão. Hoje tem (ver
+    # `tests/test_pendencia_credito_abandono.py`), mas isso não muda o que ESTE
+    # arquivo mede: para quem é BARRADO o gate responde antes do `route()`, e a
+    # escotilha nem chega a rodar — a pendência tem de sobreviver intacta.
     ("credit_card_setup", _arma_card_setup),
     # "Responda *sim* para tornar *Nubank* o principal..." — sequestra a ajuda.
     ("credit_card_set_primary", _arma_set_primary),
@@ -202,20 +206,64 @@ def test_barrado_com_parcelamento_pendente_nao_registra_parcela():
 
 def test_com_plano_a_pendencia_continua_sendo_resolvida():
     """CONTROLE POSITIVO da mudança: quem NÃO é barrado segue no fluxo de
-    sempre. `route()` continua resolvendo a pendência antes do ramo de ajuda —
-    o gate não pode ter mudado nada para quem paga.
+    sempre. `route()` continua resolvendo a pendência do cartão — o gate não
+    pode ter mudado nada para quem paga.
 
     É o risco desta correção: se o gate tivesse virado atalho para todo mundo,
-    este parcelamento não seria registrado."""
+    este parcelamento não seria registrado.
+
+    O veículo era `ajuda?`, e a asserção antiga cobrava que ele registrasse o
+    parcelamento com a descrição "ajuda?". Isso NÃO foi afrouxado: aquilo era o
+    bug — a escotilha de abandono das cinco pendências de cartão
+    (`core/intent_router.py`, `tests/test_pendencia_credito_abandono.py`) fez
+    `ajuda?` passar a abandonar a pergunta em vez de virar a descrição da
+    compra. O propósito do teste é o mesmo; o veículo virou uma resposta
+    LEGÍTIMA, que é o que sempre se quis provar aqui."""
+    uid = _com_plano()
+    _arma_installment(uid)
+
+    resposta = _diga(uid, "tv samsung")
+
+    assert not _barrado(resposta), resposta
+    assert "parcelamento registrado" in resposta.lower(), resposta
+    grupos = db.list_installment_groups(uid)
+    assert len(grupos) == 1, f"o parcelamento de quem paga sumiu: {grupos!r}"
+    with db.get_conn() as conn, conn.cursor() as cur:
+        notas = cur.execute(
+            "select nota from credit_transactions where user_id = %s", (uid,)
+        ).fetchall()
+    assert len(notas) == 5, f"esperava 5 parcelas, veio {len(notas)}"
+    assert all("tv samsung" in (r["nota"] or "").lower() for r in notas), notas
+
+
+def test_com_plano_a_mensagem_passa_pelo_route_e_nao_pelo_atalho_do_gate():
+    """O OUTRO propósito que vivia misturado no teste acima: para quem paga, o
+    gate não pode responder no lugar do `route()`.
+
+    O discriminador é o `_AVISO_PERGUNTA_CANCELADA`: ele só é produzido dentro
+    do `route()` (`core/intent_router.py`), nunca pelo gate. Se o gate tivesse
+    virado atalho para todo mundo, o pagante receberia a MESMA ajuda seca do
+    barrado — sem aviso e com a pendência intacta, exatamente como o
+    `test_barrado_com_pendencia_viva_pede_ajuda_e_nada_acontece` mede acima.
+
+    A expectativa antiga desta metade ("`ajuda?` de quem paga registrava o
+    parcelamento") era o bug, não o contrato: `ajuda?` classifica `help`, que
+    está no `_ABANDONA_CREDITO` (`core/intent_router.py`), então agora ABANDONA
+    a pergunta — avisando, que é o ponto. Uma DESCRIÇÃO de compra não está no
+    conjunto e continua sendo resolvida: é o teste acima."""
     uid = _com_plano()
     _arma_installment(uid)
 
     resposta = _diga(uid, "ajuda?")
 
     assert not _barrado(resposta), resposta
-    assert "parcelamento registrado" in resposta.lower(), resposta
-    grupos = db.list_installment_groups(uid)
-    assert len(grupos) == 1, f"o parcelamento de quem paga sumiu: {grupos!r}"
+    assert "cancelei a pergunta anterior" in resposta.lower(), \
+        f"não passou pelo route(): {resposta!r}"
+    assert "comece aqui" in resposta.lower(), resposta
+    # Abandonada, não resolvida: nada de parcelamento com descrição "ajuda?".
+    assert db.get_pending_action(uid) is None, "a pendência sobreviveu"
+    assert db.list_installment_groups(uid) == [], "registrou o parcelamento"
+    assert db.list_launches(uid) == []
 
 
 @pytest.mark.parametrize("texto,esperado", [

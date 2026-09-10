@@ -77,6 +77,35 @@ def card_bill_due_date(period_end: date, closing_day: int, due_day: int) -> date
 # Cartões
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Teto do nome de cartão, EM CARACTERES, e fonte única dele (§0.7). Não é
+# número novo: as duas rotas HTTP (`frontend/routes/cards.py`) já recusavam
+# nome acima de 80 — o que faltava era a fronteira do BANCO, por onde o bot e a
+# IA entram sem passar por rota nenhuma.
+#
+# `core/handlers/credit.py` deriva daqui o teto EM TOKENS das leituras de uma
+# resposta: nome de N caracteres tem no máximo (N+1)//2 tokens, porque todo
+# token custa pelo menos 1 caractere e todo token além do primeiro custa também
+# o separador. Enquanto os dois lados saírem desta constante, nome válido nunca
+# fica grande demais para casar.
+MAX_CARD_NAME_LEN = 80
+
+
+def validate_card_name(name: str) -> str:
+    """Nome aparado, não vazio e dentro do teto — ou `ValueError`.
+
+    Fronteira de confiança: `credit_cards.name` é `text` sem restrição, e nome
+    grande guardado hoje é custo de CPU em toda resposta de pendência de
+    crédito amanhã (P1 do Codex no #323). Vale para os dois verbos, criar e
+    renomear, porque renomear escreve a mesma coluna.
+    """
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("nome do cartão vazio")
+    if len(n) > MAX_CARD_NAME_LEN:
+        raise ValueError(f"nome_muito_longo:{len(n)}")
+    return n
+
+
 def card_name_exists(user_id: int, name: str) -> bool:
     name = (name or "").strip()
     with get_conn() as conn:
@@ -120,9 +149,7 @@ def create_card(
     credit_limit: float | None = None,
 ) -> int:
     ensure_user(user_id)
-    name = (name or "").strip()
-    if not name:
-        raise ValueError("nome do cartão vazio")
+    name = validate_card_name(name)
     if card_name_exists(user_id, name):
         raise ValueError(f"nome_duplicado:{name}")
 
@@ -167,9 +194,7 @@ def update_card_meta(
     params: list = []
 
     if name is not None:
-        n = (name or "").strip()
-        if not n:
-            raise ValueError("nome do cartão vazio")
+        n = validate_card_name(name)
         # Checa duplicado entre cartões DIFERENTES do mesmo user
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -552,7 +577,13 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     credit = (raw or {}).get("creditData") or {}
     closing_day = credit_day_from_iso(credit.get("balanceCloseDate"), 1)
     due_day = credit_day_from_iso(credit.get("balanceDueDate"), 10)
-    base_name = (name or "Cartão").strip() or "Cartão"
+    # Terceiro caminho de escrita do nome, e o único que não pode RECUSAR: o
+    # nome vem do provedor (Pluggy) durante o sync, e levantar aqui abortaria a
+    # importação da conta por um campo cosmético. Apara só no teto — a folga do
+    # sufixo NÃO entra aqui: quem procura o cartão manual para adotar é o nome
+    # inteiro, e encurtá-lo antes da busca fazia a reconciliação errar por 15
+    # caracteres e inserir um segundo cartão (P2 do Codex no #323).
+    full_name = (name or "Cartão").strip()[:MAX_CARD_NAME_LEN] or "Cartão"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -575,7 +606,7 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                 order by id
                 limit 1
                 """,
-                (user_id, base_name),
+                (user_id, full_name),
             )
             manual = cur.fetchone()
             if manual:
@@ -587,8 +618,12 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
                 conn.commit()
                 return manual["id"]
 
+            # Só o candidato NOVO precisa de folga: os dois com sufixo saem de
+            # um base aparado, o sem sufixo é o nome inteiro.
+            folga = max(len(" · Open Finance"), len(f" · OF{of_account_id}"))
+            base_name = full_name[:MAX_CARD_NAME_LEN - folga] or "Cartão"
             card_name = None
-            for cand in (base_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
+            for cand in (full_name, f"{base_name} · Open Finance", f"{base_name} · OF{of_account_id}"):
                 cur.execute("select 1 from credit_cards where user_id=%s and name=%s", (user_id, cand))
                 if not cur.fetchone():
                     card_name = cand

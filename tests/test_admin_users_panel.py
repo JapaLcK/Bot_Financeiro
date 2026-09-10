@@ -1052,7 +1052,7 @@ def test_reset_faz_o_checkout_voltar_a_mandar_trial(panel_accounts, monkeypatch)
             dashboard.limiter._storage.reset()
         except Exception:
             pass
-        r1 = user_client.post("/billing/create-checkout", headers=headers)
+        r1 = user_client.post("/billing/create-checkout", json={"plan": "plus"}, headers=headers)
         assert r1.status_code == 200, r1.text
         assert "trial_period_days" not in fake.last_session_kwargs["subscription_data"]
 
@@ -1070,7 +1070,7 @@ def test_reset_faz_o_checkout_voltar_a_mandar_trial(panel_accounts, monkeypatch)
             dashboard.limiter._storage.reset()
         except Exception:
             pass
-        r2 = user_client.post("/billing/create-checkout", headers=headers)
+        r2 = user_client.post("/billing/create-checkout", json={"plan": "plus"}, headers=headers)
         assert r2.status_code == 200, r2.text
         assert fake.last_session_kwargs["subscription_data"]["trial_period_days"] == 15
     finally:
