@@ -296,8 +296,8 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // genérico. São cinco: os dois 400 (plano, documento), o 429 do limitador (por
     // IP — routes/shared.py:98, então não é só quem digitou que o toma), o 503 da
     // indisponibilidade e o 403 do CSRF, de que o checkout não tem isenção.
-    // Mesma forma do `apiError` do comecar.js:171 — o 500 real não tem `detail`
-    // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2416), então segue
+    // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
+    // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
     // no genérico.
     const det = (d && (typeof d.detail === "string" ? { message: d.detail } : d.detail)) || {};
     if (r.status === 409 && det.error === "stripe_active") {

@@ -46,7 +46,7 @@ const CPF = "11122233344";
 const GENERICO = "Não consegui gerar o código Pix agora.";
 
 /** Abre a /precos com o checkout mockado, digita o CPF e envia. */
-async function tentarComprar({ httpStatus, corpo, viewport } = {}) {
+async function tentarComprar({ httpStatus, corpo, corpoBruto, viewport } = {}) {
   const page = await browser.newPage({
     viewport: viewport || { width: 1440, height: 900 },
   });
@@ -64,7 +64,7 @@ async function tentarComprar({ httpStatus, corpo, viewport } = {}) {
   }));
   await page.route("**/billing/pix/checkout", (r) => r.fulfill({
     status: httpStatus, contentType: "application/json",
-    body: JSON.stringify({ detail: corpo }),
+    body: corpoBruto || JSON.stringify({ detail: corpo }),
   }));
 
   await page.goto(`${ORIGIN}/precos.html`);
@@ -123,14 +123,20 @@ test("conflito em 390x844: a caixa cabe na tela do celular", async () => {
 // Controle POSITIVO: sem este caso, um código que desse mensagem específica para
 // qualquer erro passaria no caso de cima.
 //
-// `corpo: undefined` é o 500 REAL desta app, não uma facilidade: o handler de
-// exceção não tratada responde `{"error": "Erro interno do servidor."}`
-// (finance_bot_websocket_custom.py:2416) — sem `detail` nenhum, que é o que o
-// `JSON.stringify({detail: undefined})` daqui produz. Antes deste commit o caso
-// mandava `detail: "erro interno"`, e ele passava por ler a frase do servidor
-// como se fosse o genérico.
+// O corpo é o do 500 REAL desta app, byte a byte: o handler de exceção não
+// tratada responde `{"error": "Erro interno do servidor."}`
+// (finance_bot_websocket_custom.py:2415) — sem `detail` nenhum. Vai como
+// `corpoBruto` de propósito: `JSON.stringify({detail: undefined})` dá `{}`, que
+// é mais POBRE que o real — no dia em que alguém somar `|| d.error` como fonte
+// de mensagem (a app tem DOIS formatos de erro em circulação), o `{}` continua
+// verde com a tela mostrando "Erro interno do servidor." ao cliente. Hoje os
+// dois dão o mesmo porque ninguém lê `d.error` no topo: o corpo real mede o
+// requisito, o `{}` media o código de hoje.
 test("500 continua no genérico", async () => {
-  const page = await tentarComprar({ httpStatus: 500, corpo: undefined });
+  const page = await tentarComprar({
+    httpStatus: 500,
+    corpoBruto: JSON.stringify({ error: "Erro interno do servidor." }),
+  });
   const t = await tela(page);
   assert.equal(t.toast, GENERICO, "o 500 devia cair no aviso genérico");
   assert.equal(t.toastVisivel, true);
