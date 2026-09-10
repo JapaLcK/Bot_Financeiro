@@ -1213,9 +1213,10 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
  *   campo, do QR, da migração e do "já pago");
  * - tire o `showToast("")` do ramo da forma inválida → PT18g vermelho (só ele:
  *   é o único desfecho que não passa pelo `pixEnviar`);
- * - `.pix-erro { display: none !important }` → só PT18a vermelho, nos 2
- *   viewports (era o buraco: o grupo media o toast por pixel e o inline só por
- *   `textContent`);
+ * - `.pix-erro { display: none !important }` → 6 vermelhos: PT18a nos 2
+ *   viewports e os 4 PT12b junto (a `isVisible(".pix-erro")` da linha 873, que
+ *   já existia). O que o PT18a acrescenta é a visibilidade do inline no caminho
+ *   do 400 DO SERVIDOR — o da forma inválida já tinha quem o medisse;
  * - `showToast` de volta ao `add("show")` → PT18d (×2) e PT18g vermelhos: o
  *   `remove` implícito é o que apaga a frase velha do `role="status"`.
  * *Positivos do grupo:* PT18b (o 409 objeto continua sendo lido pela `message`,
