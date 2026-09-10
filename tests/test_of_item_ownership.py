@@ -135,8 +135,10 @@ def test_item_de_outra_conta_local_devolve_409(user_id, monkeypatch, eventos):
         assert resp.status_code == 409, resp.text
         linhas = db.get_connections_by_item_id("item-disputado")
         assert len(linhas) == 1 and int(linhas[0]["user_id"]) == outro, "o dono original ficou intacto"
-        assert any(e["event"] == "of_item_owner_conflict" and e["level"] == "error"
-                   for e in eventos), eventos
+        # `origin` separa este 409 do 409 de `_salva_item_sob_lock`, que tem
+        # `detail` IDÊNTICO: sem o campo, o log não responde "houve corrida?".
+        assert [(e["level"], e["details"].get("origin")) for e in eventos
+                if e["event"] == "of_item_owner_conflict"] == [("error", "pluggy_item_route")], eventos
     finally:
         db.disconnect_open_finance_connection(outro)
         with get_conn() as c:

@@ -26,11 +26,16 @@ O que cada teste prende:
     outra entrega leva 503 sem nunca ter tentado escrever. Consertar só o aborto
     sob o lock TROCAVA o dono do estado terminal em vez de fechá-lo: a
     reivindicação da perdedora do lock ficava para trás. O desfazimento vale nos
-    DOIS desfechos em que a escrita provadamente não aconteceu.
+    TRÊS desfechos em que a escrita provadamente não aconteceu: os dois abortos
+    sob o lock (dono alheio na espera e rastro de outra porta) e este 503.
 
 CONTROLES do grupo (medidos, não deduzidos):
-  • negativo (desfazimento): trocar `unregister_item(adocao_registro_id,
-    user_id)` por `pass` em `_salva_item_sob_lock` → discrimina
+  • negativo (desfazimento): trocar por `pass` o `unregister_item(
+    adocao_registro_id, user_id)` do aborto de RASTRO de outra porta —
+    `frontend/routes/open_finance.py:464`, o ramo `if outras:`. A string é
+    IDÊNTICA à do aborto de dono alheio (`:385`, a guarda de posse), que este
+    arquivo não mede: patchear aquele deixa tudo aqui VERDE e conclui o oposto.
+    Com o `:464` trocado, discrimina
     `test_aborto_mutuo_...`, que falha em "rodada 0: 0 conexões", o P0
     reproduzido; os outros vermelhos caem no rastro que sobra. Sem CONTAR os
     vermelhos: o número envelhece a cada teste novo aqui (CLAUDE.md §2);
