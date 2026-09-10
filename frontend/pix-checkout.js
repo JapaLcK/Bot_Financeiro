@@ -294,6 +294,9 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     if (r.status === 409 && det.error === "stripe_active") {
       return pixModalMigracao(plano, det, documento, ctx);
     }
+    const pago = det.error === "pix_future_purchase_conflict"
+      && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
+    if (r.status === 409 && pago) return pixModalJaPago(pago[0], ctx);
     // `detail` do FastAPI é STRING quando o raise passa texto (400 do documento) e
     // OBJETO nos 409 — sem esta linha a mensagem específica virava o genérico.
     if (!r.ok) {
@@ -332,6 +335,16 @@ function pixModalMigracao(plano, det, documento, ctx) {
   const nao = pixBotao("pix-ghost", "Manter o cartão");
   nao.addEventListener("click", () => fechar());
   box.append(ok, nao);
+  ok.focus();
+}
+
+// 409 pix_future_purchase_conflict: caixa e não toast — reenviar dá o mesmo 409.
+function pixModalJaPago(dia, ctx) {
+  pixApagarDoc();                       // o formulário sai, e o CPF com ele
+  ctx.titulo.textContent = "Esse ano já é seu";
+  const ok = pixBotao("btn-primary", "Entendi");
+  ok.addEventListener("click", () => ctx.fechar());
+  ctx.box.replaceChildren(ctx.titulo, pixLinha("Você já pagou esse plano até " + fmtBrDate(dia) + ". Não cobramos nada agora."), ok);
   ok.focus();
 }
 
