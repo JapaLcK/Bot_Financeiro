@@ -1638,6 +1638,9 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
   padding:8px 14px;border-radius:9px;cursor:pointer;font-size:.82rem;
   display:inline-flex;align-items:center;gap:6px;transition:background .2s; }
 .ld-del:hover { background:rgba(255,45,45,.12); }
+/* Fundo transparente: esta ação senta direto no modal, que no claro é branco —
+   o #ff6b6b dá 2,78:1 ali, e é o botão de EXCLUIR lançamento. */
+body.light .ld-del { color:var(--red); }
 .modal h3 { font-size:1rem;font-weight:650;margin-bottom:5px; }
 .modal .msub { font-size:.78rem;color:var(--text-2);margin-bottom:18px; }
 .modal-inp { width:100%;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);
@@ -1798,6 +1801,12 @@ body.light .tipo-opt.active.novo-inv { color:var(--blue); }
 .modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
+/* A seta é um SVG embutido, não uma cor: com `appearance:none` a nativa não
+   volta, e um traço branco a 50% some no modal claro — o campo fica sem
+   affordance nenhuma de que é um select. Mesmo desenho, traço escuro. */
+body.light .modal-inp.cat-select {
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(15,23,42,.55)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
 textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .modal-error { background:rgba(255,45,45,.1);border:1px solid rgba(255,45,45,.28);
   color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
