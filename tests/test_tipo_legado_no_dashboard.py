@@ -194,7 +194,7 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
 #   1. NEGATIVO. Troque a projeção de FORA da query 4 por `tipo` cru
 #      (`SELECT id, tipo, valor, ...`, frontend/finance_bot_websocket_custom.py,
 #      a linha do `TIPO_CANON_SQL AS tipo` na query 4) → os dois
-#      `test_projecao_*` ficam VERMELHOS e os outros quatro, verdes.
+#      `test_projecao_*` ficam VERMELHOS e o resto do grupo, verde.
 #   2. POSITIVO do filtro. Tire a forma legada das DUAS pernas de
 #      `_dashboard_launch_filter_sql` (mesmo arquivo), deixando
 #      `tipo IN ('despesa')` e `tipo IN ('receita')` → caem DOIS:
@@ -319,9 +319,10 @@ def test_contagem_sob_filtro_bate_com_a_lista_pagina_a_pagina(pro_user_id):
     `total_pages` é 1 e ela devolve "" (dashboard.js:7841) — sem isso não há "N
     de M" para conferir; e a asserção é a RELAÇÃO, não um literal.
     """
-    # `limite` = `LAUNCHES_LIMIT` (frontend/dashboard.js:273) e o default de
-    # `get_financial_data`; os seeds passam dele e diferem entre si, então a
-    # última página sai parcial nos dois filtros (2 e 1 linha).
+    # `limite` é o `limit` que o front manda hoje (`LAUNCHES_LIMIT`,
+    # frontend/dashboard.js:273); o teste passa o seu e assere relação, então
+    # não vira mentira se os dois divergirem. Os seeds passam dele e diferem
+    # entre si: a última página sai parcial nos dois filtros (2 e 1 linha).
     limite, despesas, receitas = 25, 27, 26
     for tipo, n in (("saida", despesas), ("entrada", receitas)):
         for _ in range(n):
