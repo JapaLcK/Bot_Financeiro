@@ -261,6 +261,18 @@ def is_pro(user_id: int) -> bool:
 # user_ids liberados (admin/teste) na perna LEGADA do paywall — is_pro/paywall.
 # Com o v2 ligado ela não vale para o gate de escolha de plano:
 # needs_plan_selection não consulta esta lista (nem no bot, nem na web).
+#
+# **E, desde o corte do Grátis, ela também não vale para o ACESSO** — o `if
+# plans_v2_enabled()` de `has_app_access` sai antes de chegar aqui. Era inócuo
+# enquanto aquele ramo devolvia True incondicional; agora estas duas contas são
+# cortadas como qualquer outra se não tiverem plano vigente.
+#
+# **Decisão: fica como está, e a lista NÃO é reintroduzida no caminho v2.** O
+# jeito de liberar uma conta hoje é o grant de admin
+# (`core.admin_dashboard.set_account_plan`), que é auditado, tem validade e
+# aparece no painel — uma allowlist hardcoded no código não tem nenhum dos três,
+# e ressuscitá-la abriria um bypass do corte que ninguém enxerga fora do fonte.
+# `tests/test_access_gate.py::test_allowlist_legada_nao_isenta_do_corte` amarra.
 _ACCESS_ALLOWLIST = {88648360, 832398038}
 
 
@@ -402,12 +414,30 @@ def has_app_access(user_id: int, *, user=_UNSET) -> bool:
     **SEM `try/except` que devolva False, e isso é regra dura.** São TRÊS
     estados, não dois: *tem direito* / *não tem* / **não sei**. Só o veredito
     conhecido "não tem" fecha a porta; exceção é "não sei" e tem de SUBIR, para
-    que cada chamador aplique a política dele (o gate do bot e o
-    `gate_plan_selection` são fail-open, o backstop de dados devolve 402).
-    `get_auth_user` LEVANTA em erro em vez de devolver `None`, e é essa
-    distinção que um `except: return False` aqui destruiria — um soluço de
-    banco barraria a base pagante inteira e o bot mandaria ASSINAR para quem
-    já assinou."""
+    que cada chamador aplique a política DELE. `get_auth_user` LEVANTA em erro
+    em vez de devolver `None`, e é essa distinção que um `except: return False`
+    aqui destruiria — um soluço de banco barraria a base pagante inteira e o bot
+    mandaria ASSINAR para quem já assinou.
+
+    **O que cada chamador faz com a exceção, MEDIDO** (2026-09-10; uma versão
+    anterior desta docstring dizia "o backstop de dados devolve 402" e isso é
+    falso — ele deixa propagar e vira 500):
+
+    | chamador | com a exceção | é regressão? |
+    |---|---|---|
+    | `_paywall_gate` (bot) | fail-open: atende e REGISTRA o lançamento | não |
+    | `gate_plan_selection` (HTML) | fail-open: serve a página | não |
+    | `_enforce_subscription_gate` (rotas de dados) | propaga → **500**, não 402 | não |
+    | gate do `/ws/{id}` | propaga → a conexão morre | não |
+    | `filtrar_por_acesso` (relatórios) | propaga → o tick inteiro morre | não |
+
+    **Nenhum é regressão deste PR**: os quatro últimos já chamavam
+    `needs_plan_selection(user_id)` na linha de cima, que estoura igual num
+    soluço de banco. Os dois primeiros são fail-open declarado; os três de baixo
+    são "morre alto", que num soluço de banco é o comportamento de sempre do
+    resto do app. Está escrito aqui porque a docstring afirmava um 402 que
+    ninguém entrega, e porque três dos cinco NÃO são fail-open — o "não sei"
+    vira "não" para eles, e isso tem de ser lido, não descoberto."""
     if plans_v2_enabled():
         if not access_gate_enabled():
             return True

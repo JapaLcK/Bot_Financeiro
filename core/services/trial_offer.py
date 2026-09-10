@@ -22,42 +22,48 @@ from .billing_commands import _bold
 
 
 def texto_da_oferta(user_id: int, platform: str) -> str:
-    """A frase sobre o trial que é VERDADE para ESTA conta — os TRÊS estados
-    (elegível / não elegível / não sei) num lugar só.
+    """A frase sobre o trial que é VERDADE para ESTA conta — TRÊS estados.
 
-    EXTRAÍDA de `_handle_assinar` (§0.1), não criada, quando a mensagem de
-    bloqueio do bot (`core.handle_incoming._paywall_gate`) passou a precisar da
-    mesma verdade. A copy de lá prometia "15 dias grátis (um teste por número)"
-    a todo mundo, e ela é FALSA justamente para quem o corte do Grátis manda
-    para cá: o trial é 15 dias por telefone NA VIDA (`plan_trials`), então o
-    ex-assinante que já o queimou leria uma promessa que o checkout não cumpre.
+    EXTRAÍDA de `_handle_assinar` (§0.1) quando a mensagem de bloqueio do bot
+    (`core.handle_incoming._paywall_gate`) passou a precisar da mesma verdade. A
+    copy de lá prometia "15 dias grátis (um teste por número)" a todo mundo, e
+    ela é FALSA justamente para quem o corte do Grátis manda para cá: o trial é
+    15 dias por telefone NA VIDA (`plan_trials`).
 
-    `eligible is None` = a consulta LEVANTOU. "Não sei" nunca vira "não tem":
-    a frase do meio não afirma nem nega, deixa o checkout dizer.
+    **Lê o MOTIVO (`db.plans.motivo_trial_indisponivel`), não o booleano**, e
+    isso é o conserto de uma segunda mentira, na direção oposta.
+    `is_trial_eligible_for_user` devolve `False` também quando a conta não tem
+    `phone_hash` — cadastro web que nunca vinculou WhatsApp —, e a frase saía
+    "esse telefone já usou o período grátis" sem que telefone nenhum tivesse
+    usado. Enquanto isso vivia só no `assinar plano` era opt-in; este PR
+    promoveu a frase a mensagem de BLOQUEIO não-solicitada da coorte cortada, e
+    aí ela deixa de ser dívida herdada e passa a ser dano novo. Corrigido na
+    RAIZ, não aqui: os dois chamadores ganham a verdade junto (ponytail — um
+    guard na função compartilhada é diff menor que um em cada chamador).
 
-    TETO CONHECIDO, herdado: `is_trial_eligible_for_user` devolve False também
-    quando a conta não tem `phone_hash` (nenhum WhatsApp vinculado), então lá a
-    frase diz "esse telefone já usou o período grátis" sem que telefone nenhum
-    tenha usado. É o comportamento de hoje do `assinar plano` e o checkout
-    concorda com ele (mesmo valor alimenta `trial_period_days`), então a frase
-    acerta o RESULTADO e erra a RAZÃO. Não foi tocado aqui: é anterior a este
-    PR (§0.3).
+    Os três estados, e o do meio é o "não sei":
+
+      • elegível        → promete os 15 dias;
+      • `telefone_ja_usou` → nomeia o telefone, que é o que de fato aconteceu;
+      • `sem_telefone` **ou exceção** → não afirma nem nega, deixa o checkout
+        dizer. São coisas diferentes com a MESMA resposta honesta: nos dois
+        casos não sabemos de telefone nenhum que tenha usado trial.
 
     Não é chamada com o v2 desligado: `_handle_assinar` a gateia por
     `plans_v2_enabled()` e o gate do bot só chega aqui com a linha em mão.
     """
     b = lambda s: _bold(s, platform)
     try:
-        from db.plans import is_trial_eligible_for_user
-        eligible = is_trial_eligible_for_user(user_id)
+        from db.plans import motivo_trial_indisponivel
+        motivo = motivo_trial_indisponivel(user_id)
     except Exception:
-        eligible = None
-    if eligible is False:
+        motivo = "sem_telefone"   # "não sei" cai na frase que não afirma nada
+    if motivo == "telefone_ja_usou":
         return (
             "Aqui ó, link pra assinar. Como esse telefone já usou o período grátis, "
             "o checkout mostra o valor da cobrança imediata antes da confirmação:"
         )
-    if eligible is None:
+    if motivo is not None:
         return (
             "Aqui ó, link pra assinar. O checkout confirma seu período grátis ou o "
             "valor da primeira cobrança antes da confirmação:"

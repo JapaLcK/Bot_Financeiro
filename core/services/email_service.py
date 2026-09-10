@@ -1364,7 +1364,7 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
             "<p>Se mudar de ideia, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
         access_text = ("Sua conta ficou sem plano ativo a partir de agora e o acesso ao PigBank foi "
-                       "encerrado. Nao existe mais plano Free pra onde voltar.")
+                       "encerrado. Não existe mais plano Free pra onde voltar.")
 
     content = f"""
       <p>🐷 Sua assinatura {nome} foi cancelada.</p>

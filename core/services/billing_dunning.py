@@ -81,10 +81,18 @@ PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
 
 # A janela da inadimplência: 7 dias contados de `auth_accounts.past_due_since`.
 # Constante de módulo, não env — é regra de produto (decisão do dono), e não
-# parâmetro de rollout. Neste PR ela decide DUAS coisas e nenhuma delas é
-# acesso: o DIA em que o lembrete de pagamento começa a valer
-# (`payment_reminder`, janela abrindo em `DUNNING_GRACE_DAYS - 1`) e a janela de
-# dedupe do e-mail de falha de pagamento no webhook.
+# parâmetro de rollout. Ela decide TRÊS coisas, e **desde o corte do Grátis uma
+# delas É ACESSO** (esta linha dizia "nenhuma delas é acesso" e passou a mentir):
+#
+#   1. o DIA em que o lembrete de pagamento começa a valer (`payment_reminder`,
+#      janela abrindo em `DUNNING_GRACE_DAYS - 1`);
+#   2. a janela de dedupe do e-mail de falha de pagamento no webhook;
+#   3. **por quantos dias `carencia_aberta` CONCEDE acesso** a quem já perdeu o
+#      direito pago — `tem_direito_hoje` → `has_app_access`, e por ele os quatro
+#      enforcements mais o filtro dos relatórios.
+#
+# Mexer no 7 mexe em quanto tempo um inadimplente continua dentro do produto.
+# Só CONCEDE: nunca tira acesso de quem tem plano vigente.
 DUNNING_GRACE_DAYS = 7
 
 # ── A JANELA DO LEMBRETE, e a invariante que amarra os dois números ──────────

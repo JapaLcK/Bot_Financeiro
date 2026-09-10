@@ -24,16 +24,24 @@ por::
     return (_tem_plano_pago_vigente(user)
             and (user.get("last_payment_status") or "") not in PAST_DUE_PAYMENT_STATUSES)
 
-VERMELHO: `test_pagante_em_retentativa_de_cobranca_continua_entrando`.
+VERMELHOS (medido 2026-09-10; a instrução anterior nomeava só o primeiro):
+  `test_pagante_em_retentativa_de_cobranca_continua_entrando`
+  `test_carencia_aberta_concede_acesso`
 Direção: falso NEGATIVO de acesso, e é o mais caro dos dois — um cliente
 PAGANTE, com `plan_expires_at` no futuro, seria barrado por um ciclo inteiro de
 smart retry, e o bot mandaria ASSINAR para quem já assinou. É a célula 29 de
 `docs/dunning_estados_eventos.md` amarrada por teste; antes deste arquivo
 nenhum teste cobria a direção do OR.
 
-**Positivos** (ficam VERDES nas duas injeções, e é isso que os torna positivos):
-`test_pagante_vigente_entra`, `test_grandfathered_sem_validade_entra`,
-`test_carencia_aberta_concede_acesso`, `test_freio_de_emergencia_devolve_tudo`.
+Fora deste arquivo a mesma injeção derruba
+`tests/test_corte_do_gratis_no_webhook.py::test_carencia_aberta_mantem_o_acesso_ate_a_janela_fechar`
+e `tests/test_relatorios_param_no_corte.py::test_carencia_aberta_continua_no_lote`.
+
+**Positivos, e a classificação anterior estava ERRADA**: `test_carencia_aberta_concede_acesso`
+era listado aqui como positivo das DUAS injeções, e ele **tem** que cair na 2ª —
+ela apaga o lado direito do OR, que é exatamente o que aquele caso mede.
+Positivos de verdade (verdes nas duas): `test_pagante_vigente_entra`,
+`test_grandfathered_sem_validade_entra`, `test_freio_de_emergencia_devolve_tudo`.
 """
 from __future__ import annotations
 
@@ -153,8 +161,12 @@ def test_erro_de_banco_sobe_em_vez_de_virar_false(monkeypatch):
     destruiria: um soluço de banco barraria a base pagante inteira e o bot
     mandaria ASSINAR para quem já assinou.
 
-    Cada chamador aplica a própria política sobre a exceção — o gate do bot e o
-    `gate_plan_selection` são fail-open, o backstop de dados devolve 402."""
+    Cada chamador aplica a própria política sobre a exceção, e elas NÃO são
+    todas fail-open: o gate do bot e o `gate_plan_selection` engolem; o backstop
+    de dados, o WebSocket e o filtro dos relatórios deixam propagar (o backstop
+    vira **500**, não 402 — medido). A tabela dos cinco está na docstring de
+    `has_app_access`. O que este teste amarra é só o contrato DAQUI: a exceção
+    sobe."""
     def _falha(uid):
         raise RuntimeError("pool esgotado")
 
@@ -174,3 +186,23 @@ def test_linha_em_mao_nao_consulta_o_banco(monkeypatch):
     monkeypatch.setattr(plan_service, "get_auth_user", _explode)
     assert plan_service.has_app_access(1, user=_user("pro", FUTURO)) is True
     assert plan_service.has_app_access(1, user=None) is False
+
+
+def test_allowlist_legada_nao_isenta_do_corte(monkeypatch):
+    """`_ACCESS_ALLOWLIST` é da perna LEGADA e não isenta ninguém no v2.
+
+    Era inócuo enquanto `has_app_access` devolvia True incondicional; com o
+    corte, essas contas caem como qualquer outra. Decisão registrada: fica
+    assim — quem precisa de liberação usa o grant de admin, que é auditado, tem
+    validade e aparece no painel. Este teste existe para que reintroduzir a
+    lista no caminho v2 seja uma escolha VISÍVEL, não um `or uid in ...` que
+    passa despercebido numa revisão.
+    """
+    uid = next(iter(plan_service._ACCESS_ALLOWLIST))
+    _com_linha(monkeypatch, _user("free"))
+    assert plan_service.has_app_access(uid) is False
+
+    # E ela continua valendo onde sempre valeu: a perna legada do paywall.
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    monkeypatch.setenv("PAYWALL_ENABLED", "true")
+    assert plan_service.has_app_access(uid) is True

@@ -249,9 +249,16 @@ def test_ramo_free_do_sql_bate_com_o_python():
     (`customer.subscription.deleted` + `reason='payment_failure'`), e o rótulo
     tem de ser "Cancelado" — não "Grátis", que é o de quem nunca assinou.
 
-    **Este teste é a metade que mantém o portão fechado**: mudar o `CASE` SQL
-    sem a função Python (ou o contrário) continua ficando vermelho, agora nos
-    dois territórios em vez de num só.
+    **Este teste é UNIDIRECIONAL por construção, e o crédito da paridade não é
+    dele.** Ele itera o mapa lido do SQL, então um status REMOVIDO do SQL some
+    do mapa e simplesmente não é comparado. Medido: tirar `'unpaid'` do
+    `_ACCOUNT_STATUS_SQL` deixa este teste VERDE; tirar do Python derruba os
+    dois. Quem fecha a direção que falta é
+    `test_unpaid_e_a_unica_colisao_entre_terminal_no_free_e_vivo_na_stripe`, que
+    prende o conjunto ABSOLUTO em vez de derivá-lo do SQL.
+
+    Os dois juntos é que mantêm o portão fechado nas duas direções — nenhum
+    sozinho basta, e é por isso que são dois.
     """
     mapa = _status_do_case_sql("free")
     for st, cat in mapa.items():
@@ -1064,6 +1071,9 @@ def test_trial_reset_le_o_par_e_nao_o_status(panel_accounts, plan, pay, esperado
     o status sozinho; o termo continua lá e deixa de discriminar). VERMELHOS:
       `test_trial_reset_le_o_par_e_nao_o_status[pro-unpaid-409]`
       `test_trial_reset_le_o_par_e_nao_o_status[essencial-unpaid-409]`
+      `test_trial_reset_recusa_unpaid_com_plano_pago_vencido`
+    (a lista parava em 2 e a injeção dá 3 — o caso do plano VENCIDO cai junto,
+    porque `plan` continua pago e é o `plan` que a guarda lê)
     Direção: falso positivo de liberação — o admin apaga a trava anti-abuso de
     uma conta cuja assinatura a Stripe ainda tem viva, e o checkout seguinte
     esbarra nela. O caso `free-unpaid-200` fica VERDE sob essa injeção, e é isso

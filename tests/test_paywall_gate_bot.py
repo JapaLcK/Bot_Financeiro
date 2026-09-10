@@ -21,13 +21,27 @@ por `return True`. VERMELHOS:
   `test_ex_assinante_e_barrado_e_nao_registra_nada`
   `test_so_whatsapp_e_barrado_e_recebe_a_copy_sem_painel`
   `test_conversa_dois_assuntos_bloqueado_nao_escreve_nada`
+  `test_copy_do_gate_nao_promete_isencao_de_cobranca`
+  `test_copy_do_ex_assinante_nao_culpa_um_telefone_que_nao_existe`
+  `test_copy_do_ex_assinante_com_telefone_queimado_nomeia_o_telefone`
+  (as três últimas medem a MENSAGEM do gate, que deixa de existir quando
+   ninguém é barrado — a lista anterior parava em 3 e a injeção dava 4)
 Direção: falso positivo de acesso — o bot volta a registrar o gasto de quem não
 paga, e é a asserção do SALDO que discrimina (um gate que responde a mensagem
 certa mas registra o lançamento assim mesmo passaria sem ela).
 
 CONTROLE NEGATIVO da perna da ESCOLHA: troque
 `sem_plano = estado is not None and needs_plan_selection(uid, estado)` por
-`sem_plano = False`. VERMELHO: `test_cadastro_novo_e_barrado_e_nao_registra_nada`.
+`sem_plano = False`. VERMELHO:
+  `test_com_direito_e_sem_escolha_e_barrado_so_pela_perna_da_escolha`
+
+**A instrução anterior nomeava `test_cadastro_novo_e_barrado_e_nao_registra_nada`
+e estava MORTA — medido: a injeção literal dava ZERO vermelhos.** O motivo é o
+§3 pela letra: `_cadastro_novo()` não tem escolha NEM direito, então desde o
+corte a perna do DIREITO já o barra sozinha e a da ESCOLHA parou de
+discriminar. O negativo tem de ser injetado ONDE ele discrimina — a única conta
+em que a perna da escolha é a única coisa que barra é uma COM direito vigente e
+SEM `plan_selected_at`, que é o que o grant de admin produz.
 
 CONTROLE POSITIVO: `test_pagante_registra_normal` — sem ele o grupo inteiro
 passaria num bot que recusa todo mundo, que é pior que o bug. Ele fica VERDE nas
@@ -38,8 +52,6 @@ o banco é real: o que quebra aqui é o estado que o turno anterior deixou.
 """
 from __future__ import annotations
 
-import pathlib
-import re
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -53,22 +65,6 @@ from _paywall_gate_helpers import (  # noqa: F401  (v2_ligado é fixture autouse
 )
 
 
-def _copy_da_precos_promete_trial() -> str:
-    """A frase do trial que a /precos mostra ao VISITANTE, lida do HTML.
-
-    Serve à direção OPOSTA da de antes. Este arquivo comparava a copy do bot com
-    ela para exigir PARIDADE, e a paridade era o defeito: a mensagem do gate
-    prometia "15 dias grátis (um teste por número)" a quem o corte manda para
-    lá, e o trial é um por telefone NA VIDA — o ex-assinante que já o queimou
-    lia uma promessa que o checkout não cumpre. Hoje ela existe para provar que
-    o bot NÃO repete essa frase."""
-    html = (pathlib.Path(__file__).resolve().parent.parent
-            / "frontend" / "precos.html").read_text(encoding="utf-8")
-    m = re.search(r"15 dias grátis pra testar</strong>\s*\(([^)]+)\)", html)
-    assert m, "não achei a frase do trial na precos.html"
-    return m.group(1)
-
-
 def test_cadastro_novo_e_barrado_e_nao_registra_nada():
     uid = _cadastro_novo()
 
@@ -79,6 +75,51 @@ def test_cadastro_novo_e_barrado_e_nao_registra_nada():
     # O que discrimina: barrar é responder E não mexer no dinheiro.
     assert db.list_launches(uid) == [], "o gate respondeu mas registrou o gasto"
     assert db.get_balance(uid) == 0, "o gate respondeu mas debitou o saldo"
+
+
+def test_com_direito_e_sem_escolha_e_barrado_so_pela_perna_da_escolha():
+    """A ÚNICA configuração em que a perna da ESCOLHA é o que barra — e achá-la
+    exigiu enumerar, porque a primeira tentativa (plano pago vigente sem
+    `plan_selected_at`) é IMPOSSÍVEL por construção.
+
+    `needs_plan_selection` termina em `return not _tem_plano_pago_vigente(user)`
+    — "assinante pago já escolheu implicitamente no checkout". Logo
+    `needs_plan_selection is True` **implica** sem plano pago vigente, e desde o
+    corte o único jeito de ainda ter acesso nesse estado é pelo lado DIREITO do
+    OR de `tem_direito_hoje`: a carência de inadimplência.
+
+    **Vale registrar o que a enumeração mostrou**: depois do corte, a perna da
+    ESCOLHA é quase inteiramente subsumida pela do DIREITO. A brecha entre as
+    duas é só esta — carência aberta + `plan_selected_at` NULL — e é um canto
+    (o webhook do checkout carimba `mark_plan_selected` antes de a primeira
+    cobrança poder falhar). O caso existe para o controle negativo daquela perna
+    ter onde discriminar, não porque seja tráfego comum.
+    """
+    from datetime import datetime, timedelta, timezone
+    from db.connection import get_conn
+    from db_support import invalidate_auth_user_cache
+
+    uid = _cadastro_novo()
+    agora = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan='pro', plan_expires_at=%s,"
+                "       past_due_since=%s, last_payment_status='past_due',"
+                "       plan_selected_at=null where user_id=%s",
+                (agora - timedelta(days=1), agora - timedelta(days=2), uid),
+            )
+        conn.commit()
+    invalidate_auth_user_cache(uid)
+
+    from core.services.plan_service import has_app_access, needs_plan_selection
+    assert has_app_access(uid) is True, "pré-condição: a perna do DIREITO deixa passar"
+    assert needs_plan_selection(uid) is True, "pré-condição: a perna da ESCOLHA barra"
+
+    resposta = _diga(uid, "gastei 50 no mercado")
+
+    assert _barrado(resposta), f"a perna da escolha parou de morder: {resposta!r}"
+    assert db.list_launches(uid) == [], "o gate respondeu mas registrou o gasto"
 
 
 def test_pagante_registra_normal():
@@ -109,30 +150,6 @@ def test_ex_assinante_e_barrado_e_nao_registra_nada():
     assert _barrado(resposta), f"o bot atendeu quem não tem direito: {resposta!r}"
     assert db.list_launches(uid) == [], "o gate respondeu mas registrou o gasto"
     assert db.get_balance(uid) == 0, "o gate respondeu mas debitou o saldo"
-
-
-def test_so_whatsapp_e_barrado_e_recebe_a_copy_sem_painel():
-    """A população sem cadastro web é cortada (decisão do dono), e a mensagem do
-    gate é a ÚNICA comunicação que ela recebe.
-
-    As três asserções de conteúdo são requisito, não estilo: quem nunca viu o
-    dashboard não pode ser mandado para "seu painel", e nada pode ser afirmado
-    sobre o período grátis — `db.plans.is_trial_eligible_for_user` devolve False
-    para TODA esta população (não há `phone_hash` porque não há linha), então
-    reusar a frase do `assinar` diria "esse telefone já usou o período grátis",
-    mentira na direção oposta."""
-    uid = _so_whatsapp()
-
-    resposta = _diga(uid, "gastei 50 no mercado")
-
-    assert _barrado(resposta), f"a população só-WhatsApp não foi cortada: {resposta!r}"
-    assert db.list_launches(uid) == [], "o gate respondeu mas registrou o gasto"
-    baixa = resposta.lower()
-    assert "painel" not in baixa, resposta
-    assert "dashboard" not in baixa, resposta
-    assert "grátis" not in baixa and "gratis" not in baixa, (
-        "a copy da população sem cadastro afirmou algo sobre o período grátis: "
-        f"{resposta!r}")
 
 
 def test_conversa_dois_assuntos_bloqueado_nao_escreve_nada():
@@ -239,21 +256,3 @@ def test_barrar_nao_deixa_rastro_no_banco(monkeypatch):
     assert auditoria == 0, f"{auditoria} linha(s) de auditoria de PII por mensagem barrada"
 
 
-def test_copy_do_gate_nao_promete_isencao_de_cobranca():
-    """O trial é 1 por telefone NA VIDA (db/plans.py): quem recria a conta com o
-    mesmo número é cobrado na hora (trial_days=0). A copy não pode afirmar 'sem
-    cobrança agora' — a moldura é a do send_welcome_email: o checkout confirma
-    antes de cobrar."""
-    resposta = _diga(_so_whatsapp(), "gastei 50 no mercado")
-
-    assert _barrado(resposta), "pré-condição: a mensagem medida é a do gate"
-    assert "sem cobrança agora" not in resposta.lower()
-    assert "checkout" in resposta.lower(), "a copy não diz quem confirma a cobrança"
-    # A comparação com a /precos mudou de DIREÇÃO: antes exigia paridade, hoje
-    # exige o contrário. A frase do visitante ("um teste por número") é falsa
-    # para quem o gate manda para lá, e o bot não pode repeti-la. Continua lida
-    # do HTML de verdade (§0.7) para não virar uma terceira cópia do literal.
-    frase_de_visitante = _copy_da_precos_promete_trial()
-    assert frase_de_visitante.lower() not in resposta.lower(), (
-        f"o bot repetiu a promessa de visitante da /precos ({frase_de_visitante!r}) "
-        "para quem está sendo cortado")

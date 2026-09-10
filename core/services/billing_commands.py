@@ -20,6 +20,7 @@ import unicodedata
 from datetime import datetime, timezone
 
 from core.dashboard_links import build_dashboard_link
+from core.services import billing_copy
 
 
 # "assinar"/"cancelar" puros são ambíguos (colisão com confirmação de outros
@@ -141,50 +142,31 @@ def _handle_assinar(user_id: int, platform: str) -> str:
     )
 
 
-# Cadastro sem plano escolhido é BARRADO pelo bot (`_paywall_gate`), e `plano` /
-# `cancelar` são justamente os comandos que ele é levado a mandar: a copy do
-# Grátis ("30 lançamentos/mês", "tá tudo de graça mesmo") prometeria a ele
-# direitos que a próxima mensagem leva um "sua conta precisa estar ativa".
-_SEM_PLANO_MSG = (
-    "🐷 Sua conta ainda não escolheu um plano — por isso eu ainda não consigo "
-    "anotar nada por aqui, e não há assinatura a cancelar.\n\n"
-    "Escolhe um e eu já começo: manda {assinar} 🐷✨"
-)
-
-# O ex-assinante: JÁ escolheu plano um dia e hoje não tem direito vigente. As
-# copies que ele recebia ("Plano: Grátis · 30 lançamentos por mês", "tá tudo de
-# graça mesmo") descreviam um lugar onde dava pra ficar, e o corte o tirou.
-#
-# Deliberadamente NÃO diz "eu não consigo anotar nada": a mesma frase serve a
-# quem está na CARÊNCIA (plano vencido, relógio aberto), que tem tier `free` e
-# continua com acesso pelo lado direito do OR de `tem_direito_hoje`. "Sem plano
-# ativo" é verdade nos dois estados; "você está bloqueado" só é verdade num.
-_SEM_ACESSO_MSG = (
-    "🐷 Sua conta está sem plano ativo no momento — o PigBank não tem mais "
-    "versão gratuita, então não há plano Grátis pra onde voltar nem assinatura "
-    "a cancelar.\n\n"
-    "Pra voltar a usar, escolhe um plano: manda {assinar} 🐷✨"
-)
-
-
-def _sem_plano_escolhido(user_id: int, user: dict | None = None) -> bool:
-    """Fonte única do estado: o mesmo `needs_plan_selection` que o gate do bot
-    usa pra barrar. Import defensivo pelo mesmo motivo do `_handle_plano` —
-    testes (e deploys sem a escada v2) mockam plan_service só com `is_pro`."""
-    try:
-        from core.services.plan_service import needs_plan_selection
-    except ImportError:
-        return False
-    return needs_plan_selection(user_id, user)
-
-
 def _handle_cancelar(user_id: int, platform: str) -> str:
-    from core.services.plan_service import is_pro
+    """Entrega o portal da Stripe a quem TEM o que cancelar.
 
-    if not is_pro(user_id):
-        if _sem_plano_escolhido(user_id):
-            return _SEM_PLANO_MSG.format(assinar=_bold("assinar plano", platform))
-        return _SEM_ACESSO_MSG.format(assinar=_bold("assinar plano", platform))
+    **O predicado é `plano pago vigente OR carência`, não `is_pro`** — aquele é
+    `tier >= plus` e mandava o assinante ESSENCIAL (que paga) e a conta em
+    CARÊNCIA (assinatura viva em retentativa) para a copy de quem não tem nada.
+    """
+    # Import defensivo, mesmo motivo do `_handle_plano`: testes (e deploys sem a
+    # escada v2) mockam plan_service só com `is_pro`. Sem os símbolos v2 cai no
+    # binário legado, onde Essencial não existe e `is_pro` É o predicado certo.
+    try:
+        from core.services.plan_service import get_plan_tier
+        tier = get_plan_tier(user_id)
+    except ImportError:
+        from core.services.plan_service import is_pro
+        tier = "plus" if is_pro(user_id) else "free"
+
+    if tier == "free":
+        estado = billing_copy.estado_sem_plano_pago(user_id)
+        if estado == "sem_plano":
+            return billing_copy.SEM_PLANO.format(assinar=_bold("assinar plano", platform))
+        if estado == "sem_acesso":
+            return billing_copy.SEM_ACESSO.format(assinar=_bold("assinar plano", platform))
+        # carência: a assinatura EXISTE e está em retentativa — segue para o
+        # portal, que é onde se atualiza o cartão ou se encerra de vez.
 
     link = build_dashboard_link(user_id, hours=1.0, next_path="/conta")
     if not link:
@@ -223,15 +205,18 @@ def _handle_plano(user_id: int, platform: str) -> str:
         tier = get_plan_tier(user_id)
 
         if tier == "free":
-            # `user` já veio do get_auth_user acima — sem SELECT novo.
-            if _sem_plano_escolhido(user_id, user):
-                return _SEM_PLANO_MSG.format(assinar=b("assinar plano"))
             # Aqui vinha a ficha do plano Grátis ("30 lançamentos por mês · 1
             # caixinha · 20 mensagens de IA"). Ela descrevia um plano em que
-            # dava pra ficar, e o corte tirou esse lugar: tier `free` hoje é
-            # ex-assinante sem direito vigente (ou conta em carência), nunca
-            # alguém com esses limites.
-            return _SEM_ACESSO_MSG.format(assinar=b("assinar plano"))
+            # dava pra ficar, e o corte tirou esse lugar. Tier `free` hoje é um
+            # de TRÊS estados, e a carência não recebe a frase dos outros dois:
+            # nela a assinatura está VIVA na Stripe, em retentativa.
+            # `user` já veio do get_auth_user acima — sem SELECT novo.
+            estado = billing_copy.estado_sem_plano_pago(user_id, user)
+            if estado == "sem_plano":
+                return billing_copy.SEM_PLANO.format(assinar=b("assinar plano"))
+            if estado == "carencia":
+                return billing_copy.COBRANCA_EM_ATRASO.format(cancelar=b("cancelar plano"))
+            return billing_copy.SEM_ACESSO.format(assinar=b("assinar plano"))
 
         # Nota: o trial de 15 dias hoje é uma assinatura Stripe do plano escolhido
         # (status trialing) — cai no ramo pago abaixo com status_label "Período

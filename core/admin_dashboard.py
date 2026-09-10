@@ -875,12 +875,20 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         # apareceria como 'free' — o rótulo de quem nunca assinou — e o motivo
         # se perderia exatamente onde ele foi guardado.
         #
-        # **`unpaid` é o ÚNICO status cuja categoria depende do `plan`**, e é a
-        # diferença entre "a Stripe já deletou" (aqui) e "assinatura VIVA em
-        # dunning" (a perna de baixo, via _PAST_DUE_PAYMENT_STATUSES). Quem lê
-        # esse par por `status` sozinho erra um dos dois — ver a guarda do
-        # /trial-reset e `tests/test_admin_users_panel.py`, que ata os TRÊS
-        # espelhos (esta função, o SQL e a constante) por plano.
+        # **`unpaid` é a única COLISÃO entre "terminal no ramo free" e
+        # "assinatura viva na Stripe"** — e a frase que estava aqui, "o único
+        # status cuja categoria depende do `plan`", é FALSA. Medido: SEIS
+        # divergem entre `plan='free'` e plano pago (`active`, `trialing`,
+        # `past_due`, `incomplete`, `unpaid` e o vazio), porque neste ramo TODO
+        # status vivo vira `'free'` — sem plano o painel não vê assinatura
+        # nenhuma, e divergir é o normal aqui.
+        #
+        # O que é raro é a colisão: um status que ESTE ramo chama de terminal
+        # (`canceled`) e que ao mesmo tempo está em `_LIVE_PAYMENT_STATUSES`.
+        # É ela que torna o status sozinho um discriminador errado — ver a
+        # guarda do /trial-reset e
+        # `tests/test_admin_users_panel.py::test_unpaid_e_a_unica_colisao_entre_terminal_no_free_e_vivo_na_stripe`,
+        # que enumera e prende o conjunto.
         return "canceled" if pay in ("canceled", "incomplete_expired", "unpaid") else "free"
     # Expiração vem ANTES do status de pagamento: plan_service._paid_plan_active
     # trata tier pago vencido como inativo mesmo com status 'active' (webhook

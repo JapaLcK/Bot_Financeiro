@@ -404,6 +404,18 @@ deixar órfão; invertida, o `CASE` apagaria antes e o clear viraria no-op.
 Função IRMÃ, e não `clear_past_due_since(..., nao_mais_novo_que=None)`: dar
 significado ao `None` transformaria o valor que um descuido produz no valor que
 DESLIGA a proteção que o parâmetro obrigatório comprou.
+
+> **A ordem NÃO torna o par atômico, e a docstring da irmã dizia que sim.** São
+> dois UPDATEs em transações separadas: se `encerrar_ciclo_de_atraso` morrer
+> depois do `set_payment_status('unpaid')`, sobra relógio + `unpaid` — o **órfão
+> que o ramo antigo não deixava**, porque lá o `canceled` era apagado pelo
+> próprio `CASE` no mesmo UPDATE. Fica ABERTO de propósito, e o que sustenta
+> isso é a DIREÇÃO do erro: o órfão CONCEDE acesso (a carência reabre) em vez de
+> tirar, a Stripe reentrega o `deleted`, e a reentrega é idempotente aqui — esta
+> função não tem predicado que a recuse. Fechar exigiria os dois UPDATEs numa
+> transação só, juntando a camada de status com a do relógio; o custo não paga
+> um estado transitório que a reentrega limpa. **É defeito NOVO deste PR, não
+> herdado** — está escrito para quem vier depois não o descobrir sozinho.
 `tests/test_dunning_encerramento_terminal.py` prende a contagem de call sites
 da irmã em 1, e o caso dele tem o `created` do evento ANTERIOR ao carimbo do
 relógio — a ÚNICA configuração em que as duas escritas divergem (com um

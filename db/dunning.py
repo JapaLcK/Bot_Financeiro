@@ -147,26 +147,22 @@ def encerrar_ciclo_de_atraso(user_id: int) -> None:
     """Zera o relógio INCONDICIONALMENTE, porque o ciclo acabou de vez.
 
     Irmã de `clear_past_due_since`, e a diferença é a REGRA, não o caso: lá o
-    predicado `past_due_since <= to_timestamp(<created>)` preserva um ciclo ainda
-    recuperável por uma cobrança futura (célula 5 de
-    `docs/dunning_estados_eventos.md`). **Num evento TERMINAL não há cobrança a
-    recuperar, logo não há ciclo a preservar, e por construção não existe evento
-    mais novo que queira o relógio de volta.** Preservar ali deixa o órfão, que
-    prende o ciclo SEGUINTE na data velha.
+    predicado preserva um ciclo ainda recuperável por uma cobrança futura. **Num
+    evento TERMINAL não há cobrança a recuperar, logo não há ciclo a preservar,
+    e por construção não existe evento mais novo que queira o relógio de volta.**
 
-    **SEM parâmetro de versão, e a ausência é o desenho.** `nao_mais_novo_que=None`
-    foi RECUSADO: dar significado ao `None` transforma o valor que um descuido
+    **SEM parâmetro de versão, e a ausência é o desenho**: `nao_mais_novo_que=None`
+    foi RECUSADO — dar significado ao `None` transforma o valor que um descuido
     produz no valor que DESLIGA a proteção que o parâmetro obrigatório comprou.
 
-    **UM call site, e é regra**: a perna terminal de
-    `customer.subscription.deleted`. `tests/test_dunning_encerramento_terminal.py`
-    prende a contagem e nomeia o arquivo (precedente do `test_phosphor_subset`).
+    **NÃO escreve `last_payment_status`** (os writers continuam DOIS) e **UM
+    call site**, prendido por `tests/test_dunning_encerramento_terminal.py`.
 
-    **NÃO escreve `last_payment_status`** — os writers continuam DOIS. O ramo
-    chama `set_payment_status(uid, 'unpaid')` PRIMEIRO e esta função depois:
-    nessa ordem `unpaid` está DENTRO de `PAST_DUE_PAYMENT_STATUSES`, o `CASE`
-    daquele UPDATE preserva o relógio, e quem o apaga é esta. Invertida, o
-    `CASE` apagaria antes e esta viraria no-op.
+    A ordem no ramo (`set_payment_status('unpaid')` e só então esta), por que
+    ela importa, e o que ela NÃO garante — o par não é atômico, e falha entre os
+    dois UPDATEs deixa órfão, aberto de propósito porque erra para o lado que
+    CONCEDE acesso e a reentrega limpa — estão na seção E4 de
+    `docs/dunning_estados_eventos.md`, junto com a célula 32.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:

@@ -26,7 +26,10 @@ def patches(monkeypatch):
         "auth_user": {"plan": "free", "last_payment_status": None, "plan_expires_at": None},
         "dashboard_link": "https://pigbankai.com/d/TOKEN?next=/precos",
         "plans_v2": False,
-        "trial_eligible": True,
+        # O MOTIVO, não o booleano: `None` = elegível; "telefone_ja_usou" e
+        # "sem_telefone" são inelegíveis por razões DIFERENTES e a copy os
+        # separa (ver `core.services.trial_offer.texto_da_oferta`).
+        "trial_motivo": None,
         "trial_eligibility_raises": False,
     }
 
@@ -55,12 +58,17 @@ def patches(monkeypatch):
     monkeypatch.setattr(db, "get_auth_user", fake_get_auth, raising=False)
     import db.plans
 
-    def fake_trial_eligible(user_id):
+    def fake_motivo(user_id):
         if state["trial_eligibility_raises"]:
             raise RuntimeError("db down")
-        return state["trial_eligible"]
+        return state["trial_motivo"]
 
-    monkeypatch.setattr(db.plans, "is_trial_eligible_for_user", fake_trial_eligible)
+    # Patcha a FONTE (`motivo_trial_indisponivel`) e deixa o wrapper booleano
+    # derivar dela, como em produção — patchar os dois deixaria os dois livres
+    # para divergir dentro do teste, que é o §0.7 ao contrário.
+    monkeypatch.setattr(db.plans, "motivo_trial_indisponivel", fake_motivo)
+    monkeypatch.setattr(db.plans, "is_trial_eligible_for_user",
+                        lambda uid: fake_motivo(uid) is None)
 
     # build_dashboard_link foi importado direto pra namespace local do mod,
     # então patchamos a referência lá em vez de no core.dashboard_links.
@@ -269,7 +277,7 @@ def test_whatsapp_usa_single_asterisk_pra_negrito(patches):
 
 def test_assinar_v2_inelegivel_nao_promete_trial(patches):
     patches["plans_v2"] = True
-    patches["trial_eligible"] = False
+    patches["trial_motivo"] = "telefone_ja_usou"
 
     out = mod.handle_billing_command(99, "assinar plano", platform="whatsapp")
 

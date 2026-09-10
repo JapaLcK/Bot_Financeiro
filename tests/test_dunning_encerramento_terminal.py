@@ -35,6 +35,8 @@ O predicado volta, nada é apagado. VERMELHOS:
      relógio sobrevive com o status `unpaid` DENTRO da lista)
   `test_payment_failed_depois_do_terminal_nao_devolve_nada`  (a pré-condição
      dele é o relógio limpo pelo terminal)
+  `test_encerrar_ciclo_de_atraso_tem_um_unico_call_site`  (a injeção APAGA o
+     único call site; o portão exige exatamente um)
 Direção: falso POSITIVO de acesso — o relógio sobrevivente reabre a carência e
 devolve o app a quem a Stripe acabou de encerrar.
 
@@ -285,13 +287,22 @@ def test_encerrar_ciclo_de_atraso_tem_um_unico_call_site():
     um segundo call site muda ESTE teste — e é essa a conversa que ele força.
     """
     permitido = "frontend/finance_bot_websocket_custom.py"
-    # USO, não MENÇÃO. A primeira versão casava a substring e ficou vermelha
-    # quando a docstring de `core/services/billing_dunning.py` passou a CITAR a
-    # função — falso positivo do próprio portão. O padrão exige o nome colado a
-    # `(`/`,`/`)` ou precedido de `import`, que é como uma chamada de verdade se
-    # escreve; citação em prosa vem entre crases e não casa. Erra para o lado
-    # VERMELHO (prosa com `nome(` conta), que é o lado seguro num portão.
-    uso = re.compile(r"import\s+encerrar_ciclo_de_atraso|encerrar_ciclo_de_atraso\s*[(,)]")
+    # USO, não MENÇÃO. A 1ª versão casava a substring e ficou vermelha quando a
+    # docstring de `core/services/billing_dunning.py` passou a CITAR a função —
+    # falso positivo do próprio portão. A 2ª exigia o nome colado a `(`/`,`/`)`
+    # ou precedido de `import`, e tinha DOIS furos medidos: `getattr(_d,
+    # "encerrar_ciclo_de_atraso")(uid)` (o `"` depois do nome) e
+    # `fn = _d.encerrar_ciclo_de_atraso` seguido de `fn(uid)` (o nome no fim da
+    # linha). Os dois passavam verdes.
+    #
+    # Esta versão casa o nome **exceto quando ele está entre crases** — a única
+    # forma que a prosa deste repositório usa para citar. Ou seja: volta a ser
+    # por substring (que não tem furo) e abre UMA exceção nomeada, em vez de
+    # enumerar as formas de chamar, que é a lista que nunca fecha.
+    #
+    # Erra para o lado VERMELHO: prosa que cite o nome SEM crases conta como
+    # call site. Num portão, o lado seguro é esse.
+    uso = re.compile(r"(?<!`)\bencerrar_ciclo_de_atraso\b(?!`)")
     achados = []
     for arq in RAIZ.rglob("*.py"):
         rel = arq.relative_to(RAIZ).as_posix()

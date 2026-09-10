@@ -9,12 +9,24 @@ asserções são em `has_app_access`, **nunca nas colunas** — só ela passa pe
 caminho que o PR alterou; conferir `plan`/`plan_expires_at` mediria o webhook,
 que é código de antes.
 
-**Este é o CONTROLE POSITIVO do PR e não tem negativo próprio**, e a ausência é
-deliberada: não há conserto a desligar aqui. Estes casos existem para provar que
-o gate não recusa TODO MUNDO — a metade que o §3 exige quando um conserto
+**Estes casos são o CONTROLE POSITIVO do PR e não têm negativo PRÓPRIO**, e a
+ausência é deliberada: não há conserto a desligar aqui. Eles existem para provar
+que o gate não recusa TODO MUNDO — a metade que o §3 exige quando um conserto
 RESTRINGE algo. Cobrar mutação num caminho que só demonstra o legítimo é a
-cerimônia que o mesmo §3 dispensa. Quem quiser vê-los vermelhos aplica o
-negativo nº 2 de `tests/test_access_gate.py` (o status virando autoridade).
+cerimônia que o mesmo §3 dispensa.
+
+**Qual injeção derruba qual, medido** (2026-09-10; a instrução anterior mandava
+aplicar o negativo nº 2 de `tests/test_access_gate.py` para ver os três
+vermelhos, e isso era FALSO — a nº 2 só alcança um deles):
+
+| injeção (de `tests/test_access_gate.py`) | vermelhos AQUI |
+|---|---|
+| nº 1 — `has_app_access` → `return True` | os QUATRO (as pré-condições `has_app_access is False` caem) |
+| nº 2 — o status virando autoridade | só `test_carencia_aberta_mantem_o_acesso_ate_a_janela_fechar` |
+
+A nº 2 não alcança os dois de restauração porque `_cortar` grava
+`last_payment_status='canceled'` — fora de `PAST_DUE_PAYMENT_STATUSES` —, então
+o termo injetado não muda o veredito daquelas contas.
 
 **O que este arquivo NÃO cobre, e onde está**: o ramo TERMINAL do
 `customer.subscription.deleted` (gravar `unpaid` + limpar o relógio

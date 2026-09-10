@@ -377,7 +377,7 @@ def _daily_report_tick() -> None:
     today = now.date()
     instance = _runtime_instance_details()
 
-    for uid in filtrar_por_acesso(list_users_with_daily_report_enabled()):
+    for uid in list_users_with_daily_report_enabled():
         prefs = get_daily_report_prefs(uid)
         if not prefs["enabled"]:
             continue
@@ -385,6 +385,13 @@ def _daily_report_tick() -> None:
         hour = prefs["hour"]
         minute = prefs["minute"]
         if (now.hour, now.minute) < (hour, minute):
+            continue
+        # O corte do Grátis vem DEPOIS dos filtros baratos, e a POSIÇÃO é o
+        # ponto: este laço roda a cada 30 s (`_daily_report_loop`) sobre a lista
+        # INTEIRA, e a hora de entrega descarta quase todo mundo. Filtrando
+        # antes, cada volta pagava uma consulta por usuário — o dia todo, para
+        # gente que não receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
             continue
         ids = list_identities_by_user(uid)
         wa_targets = _dedupe_whatsapp_targets(ids)
@@ -698,11 +705,16 @@ def _periodic_report_tick() -> None:
 
     instance = _runtime_instance_details()
 
-    for uid in filtrar_por_acesso(weekly_users | monthly_users):
+    for uid in (weekly_users | monthly_users):
         prefs = get_daily_report_prefs(uid)
 
         # entrega no mesmo horário configurado para o report diário do usuário
         if (now.hour, now.minute) < (prefs["hour"], prefs["minute"]):
+            continue
+
+        # Mesma razão do irmão diário: o corte vem DEPOIS do filtro de hora,
+        # porque este tick também roda a cada 30 s sobre a lista inteira.
+        if not filtrar_por_acesso([uid]):
             continue
 
         ids = list_identities_by_user(uid)

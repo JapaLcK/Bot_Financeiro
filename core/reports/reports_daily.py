@@ -49,10 +49,22 @@ def filtrar_por_acesso(user_ids):
     (`core.handle_incoming._paywall_gate`), e é para ele que a sentinela
     `_UNSET` existe.
 
-    Sem `try/except` por usuário, como o resto destes laços: `build_daily_report_text`
-    e `list_identities_by_user` também não têm, então uma exceção aqui derruba o
-    tick igual às de hoje. `ponytail: sem isolamento por usuário; se um tick
-    inteiro cair por causa de UMA conta, o lugar do try é o laço, não este helper.`
+    **CHAME NO FIM DO FUNIL, não no topo do laço.** Os dois ticks de WhatsApp
+    rodam a cada 30 s (`asyncio.sleep(30)`) sobre a lista INTEIRA, e os filtros
+    baratos que vêm depois — `prefs["enabled"]` e a hora de entrega — descartam
+    quase todo mundo. Filtrando antes deles, cada volta pagava uma consulta por
+    usuário o dia todo, para gente que não receberia nada naquele tick. Os
+    chamadores do WhatsApp passam UM id de cada vez, depois do filtro de hora;
+    os de Discord passam a lista, porque lá o `tasks.loop` dispara uma vez ao
+    dia. A assinatura aceita os dois de propósito.
+
+    Sem `try/except` por usuário. **E isso NÃO é "igual aos laços de hoje"**, que
+    era o que esta docstring dizia: os de hoje estouram DENTRO do laço, numa
+    iteração; chamado sobre a lista, este helper estoura ANTES da primeira, e o
+    tick inteiro morre sem nenhum envio. Chamá-lo por usuário (como o WhatsApp
+    faz agora) reduz isso a uma iteração perdida.
+    `ponytail: sem isolamento por usuário nos laços de Discord; se um tick lá
+    cair por causa de UMA conta, o lugar do try é o laço, não este helper.`
     """
     from core.services.plan_service import has_app_access
     from db.reports import get_plan_gate_state

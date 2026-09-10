@@ -228,3 +228,4 @@ def test_pagante_ve_a_ficha_do_plano_dele_e_nao_a_do_gratis():
     assert "30 lançamentos" not in resposta, resposta
     assert "sem plano ativo" not in resposta.lower(), resposta
     assert "plus" in resposta.lower(), resposta
+
