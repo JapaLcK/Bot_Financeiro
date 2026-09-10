@@ -49,6 +49,43 @@ export default defineConfig([
     },
   },
   {
+    // Bloco PRÓPRIO, e não nomes soltos no `frontend/**` acima: global
+    // declarada lá enfraquece o `no-undef` do repositório INTEIRO — `showToast`
+    // ou `getCsrfToken` escrito por engano num arquivo que não os carrega
+    // passaria calado. Aqui o alcance é o par de arquivos que de fato os usa.
+    //
+    // `currentCycle` e `PLAN_NAMES` vêm do <script> inline da precos.html: são
+    // `let`/`const` de topo de script clássico, que vão para o escopo léxico
+    // global e NÃO viram propriedade de `window` — por isso, nome nu.
+    // O resto é o que um destes dois arquivos publica e o outro consome: eles
+    // são um módulo só, partido pelo teto de 350 linhas.
+    files: ["frontend/pix-checkout.js", "frontend/pix-poll.js"],
+    languageOptions: {
+      globals: {
+        currentCycle: "readonly",
+        PLAN_NAMES: "readonly",
+        fmtBrDate: "readonly",
+        getCsrfToken: "readonly",
+        showToast: "readonly",
+        pixBrl: "readonly",
+        pixLinha: "readonly",
+        pixBotao: "readonly",
+        pixRotular: "readonly",
+        pixOverlay: "readonly",
+        pixCheckout: "readonly",
+        pixModalQr: "readonly",
+        pixEncerrar: "readonly",
+        // Declarado no pix-checkout.js e chamado pelo `pixApagarQr` do
+        // pix-poll.js: o documento e o payload saem do DOM na mesma hora.
+        pixApagarDoc: "readonly",
+        // "writable" porque é o pix-poll.js que declara e reatribui o `pixPoll`
+        // (o `let` do topo dele é ESTE nome, não outro). O pix-checkout.js só
+        // LÊ, para não abrir um segundo QR por cima do primeiro.
+        pixPoll: "writable",
+      },
+    },
+  },
+  {
     // Harness de testes e scripts de smoke: Node com ESM.
     files: ["**/*.mjs"],
     languageOptions: {

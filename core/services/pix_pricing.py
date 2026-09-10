@@ -8,8 +8,8 @@ pessoa achar que pode ler o banco aqui.
 
 Plano: docs/plano_pix_anual_asaas.md §7 e §9.
 
-**Fatia INERTE (PR 1b-A): nenhum módulo de produção importa este arquivo.**
-O chamador é o checkout, no PR 1b-B.
+**Deixou de ser inerte no 1b-B**: importam daqui o checkout
+(`core/services/pix_checkout.py`) e o router (`frontend/routes/billing_pix.py`).
 """
 
 from __future__ import annotations
@@ -23,6 +23,20 @@ from core.services.billing_access import _tier_do_stored
 # (§7). Crédito NUNCA vira tempo — quem compra upgrade recebe desconto em
 # dinheiro, não meses a mais.
 DURACAO_DIAS = 365
+
+# Preço CHEIO do anual, em centavos, por valor LEGADO de `auth_accounts.plan`.
+# **Constante em CÓDIGO, não env** (dono, 2026-09-09): o número já existe no
+# repositório, em markup ESTÁTICO na `/precos`. Env seria a terceira fonte do mesmo
+# valor, e a divergência sai como preço errado cobrado de verdade (§0.7).
+# `tests/test_pix_preco_bate_com_a_precos.py` ata este dict às DUAS metades da
+# `frontend/precos.html` — o `PLAN_PRICES` do script e os `data-price-annual` que o
+# usuário lê. **O que o cartão de fato cobra mora no painel do Stripe**: o teste ata
+# código ↔ HTML, nunca Stripe ↔ HTML.
+PRECOS_ANUAIS_CENTS: dict[str, int] = {
+    "essencial": 9900,   # R$ 99/ano
+    "pro": 19900,        # legado: tier Plus, R$ 199/ano
+    "pro_max": 49900,    # legado: tier Pro,  R$ 499/ano
+}
 
 
 class CoberturaJaPaga(RuntimeError):

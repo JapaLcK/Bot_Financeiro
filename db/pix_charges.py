@@ -6,45 +6,48 @@ congelam na criação; `access_starts_at` é decidido no PAGAMENTO (§7 do plano
 
 Plano: docs/plano_pix_anual_asaas.md §3.2, §10, §11 e §13.6.
 
-**Fatia INERTE (PR 1b-A): nenhum módulo de produção importa este arquivo.**
-Os chamadores — checkout e dreno do webhook — são o PR 1b-B, e os dois entram
-juntos de propósito: nenhuma versão intermediária pode emitir cobrança sem já
-possuir o caminho que recebe o pagamento e concede o acesso.
+**Deixou de ser inerte no 1b-B**: os chamadores são o checkout
+(`core/services/pix_checkout.py`) e o dreno (`core/services/pix_drain.py`), e
+entraram no MESMO PR de propósito — emitir cobrança sem já possuir o caminho que
+recebe o pagamento é o que o corte do dono proíbe. Quem mede é a
+`CHAMADORES_PERMITIDOS` de `tests/test_pix_inerte.py`, que virou allowlist.
 
 Três regras que valem para TODA escrita daqui:
 
-  • **Uma cobrança ativa por usuário é do BANCO** (`uniq_pix_charge_ativa`), não
-    de um `select`+`insert` em Python. Duas requisições concorrentes seriam
+  • **Uma cobrança ativa por usuário é do BANCO** (`uniq_pix_charge_ativa`), e
+    não de um `select`+`insert` em Python: duas requisições concorrentes seriam
     precificadas contra o mesmo crédito (§10).
   • **Transição é condicional** (`update … where status = <esperado> returning`).
     O `returning` vazio reúne "já estava lá" e "foi para outro terminal" — e
     **não** autoriza pular efeito nenhum (§8.2 C; ver `transicionar`). Ler o
     status e depois escrever seria a mesma corrida com mais linhas.
   • **Toda query do dado do usuário filtra por `user_id`** (CLAUDE.md §0), com
-    **QUATRO exceções, e duas delas são ESCRITA**. Todas do dreno, todas
-    nomeadas nas próprias funções:
+    **TRÊS exceções, e uma delas é ESCRITA**. Todas do dreno, todas nomeadas
+    nas próprias funções:
 
     | função | leitura/escrita | chave |
     |---|---|---|
     | `buscar_por_external_reference` | leitura | `external_reference` (unique) |
     | `buscar_por_asaas_payment_id`   | leitura | `asaas_payment_id` (unique) |
     | `transicionar`                  | **ESCRITA** | `charge_id` |
-    | `attach_pagamento`              | **ESCRITA** | `charge_id` |
 
-    O motivo é o mesmo para as quatro: o dreno não tem usuário na requisição, e
+    O motivo é o mesmo para as três: o dreno não tem usuário na requisição, e
     a cobrança pode legitimamente ter `user_id is null` (conta excluída, §13.4).
 
-    **Mas as duas de escrita são chaveadas por `charge_id`, que é um bigserial
-    ENUMERÁVEL** — e isso não é detalhe de estilo. Elas são seguras HOJE só
+    **Mas a de escrita é chaveada por `charge_id`, que é um bigserial
+    ENUMERÁVEL** — e isso não é detalhe de estilo. Ela é segura HOJE só
     porque o único chamador é o dreno, e o `charge_id` dele veio de uma busca
     pelo `asaas_payment_id`/`external_reference` do próprio evento assinado: não
     há entrada do usuário no caminho.
 
-    **Quem for escrever o 1b-B leia isto antes:** um endpoint "cancelar minha
-    cobrança" que chame `transicionar(charge_id=<vindo da URL>)` é um IDOR — o
-    usuário A cancela a cobrança de B trocando um número. O caminho do usuário
-    passa por `buscar_por_public_token` (que FILTRA por dono) e usa o `id` que
-    ela devolveu; nunca um `charge_id` cru da requisição.
+    **A armadilha, e o 1b-B a respeitou:** um endpoint "cancelar minha cobrança"
+    que chame `transicionar(charge_id=<vindo da URL>)` é um IDOR — A cancela a
+    cobrança de B trocando um número. O caminho do usuário passa por
+    `buscar_por_public_token`/`buscar_ativa` (que FILTRAM por dono) e usa o `id`
+    que elas devolveram, nunca um `charge_id` cru da requisição.
+
+`attach_pagamento` e `gravar_stripe_period_end` moram em `db/pix_charges_saga.py`
+desde o 1b-B, e a ressalva do `charge_id` enumerável vale igual para as duas.
 """
 
 from __future__ import annotations
@@ -69,7 +72,9 @@ _COLUNAS = (
     "duration_days, stripe_subscription_id, stripe_cancel_scheduled_at, "
     "stripe_period_end_at, public_token, status, due_date, qr_expires_at, "
     "access_starts_at, access_expires_at, created_at, paid_at, canceled_at, "
-    "refunded_at, purged_at"
+    # As três de rastreio: sem elas o dreno manda a venda ao GA4 sem origem e o
+    # Purchase da Meta sem `fbp`/`fbc` (§3.2). `qr_payload_enc` fica FORA (§13.6).
+    "refunded_at, purged_at, ga_client_id, fbp, fbc"
 )
 
 
@@ -85,6 +90,7 @@ def criar_cobranca(
     duration_days: int,
     stripe_subscription_id: str | None = None,
     stripe_period_end_at=None,
+    rastreio: dict[str, str] | None = None,
 ) -> dict | None:
     """Cria a cobrança em `draft`. Devolve a linha, ou **`None`** quando o
     usuário JÁ tem uma cobrança ativa.
@@ -120,7 +126,13 @@ def criar_cobranca(
     um valor que o checkout já leu — sem chamada extra ao Stripe. Ela é
     reconfirmada no efeito `stripe_cancel`, e é o que tira o `NULL` do caminho
     comum quando o fallback das 6 falhas precisar dela.
+
+    `rastreio` são os identificadores de anúncio já sanitizados pelo endpoint
+    (`ga_client_id`, `fbp`, `fbc`), mesma forma que `_billing_checkout_for_user`.
+    Chave ausente vira `NULL` e é o normal (cookie bloqueado, visita orgânica).
+    O dreno as lê em `ga4`/`capi`; a exclusão de conta as zera (§13.2).
     """
+    rastreio = rastreio or {}
     with get_conn() as conn:
         with conn.cursor() as cur:
             # O id primeiro, para a referência nascer com ele na MESMA linha.
@@ -132,8 +144,10 @@ def criar_cobranca(
                 "insert into pix_charges "
                 " (id, user_id, external_reference, public_token, plan, plan_stored,"
                 "  price_cents, credit_cents, amount_cents, duration_days,"
-                "  stripe_subscription_id, stripe_period_end_at, status)"
-                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')"
+                "  stripe_subscription_id, stripe_period_end_at,"
+                "  ga_client_id, fbp, fbc, status)"
+                " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,"
+                "         %s, %s, %s, 'draft')"
                 # Inferência pelo índice PARCIAL: `uniq_pix_charge_ativa` é
                 # `create unique index … where`, não uma constraint, então
                 # `on conflict on constraint` não o alcança — o Postgres só casa
@@ -144,7 +158,8 @@ def criar_cobranca(
                 (novo_id, int(user_id), f"pix:{novo_id}", public_token, plan, plan_stored,
                  int(price_cents), int(credit_cents), int(amount_cents),
                  int(duration_days), stripe_subscription_id,
-                 stripe_period_end_at),
+                 stripe_period_end_at, rastreio.get("ga_client_id"),
+                 rastreio.get("fbp"), rastreio.get("fbc")),
             )
             row = cur.fetchone()
         conn.commit()
@@ -252,43 +267,6 @@ def transicionar(
     return dict(row) if row else None
 
 
-def attach_pagamento(charge_id: int, asaas_payment_id: str, *, qr_payload_enc: str | None = None,
-                     due_date=None, qr_expires_at=None) -> bool:
-    """Grava o id remoto na cobrança `creating` e a leva a `pending`. Devolve
-    True se aplicou.
-
-    É a saída do estado AMBÍGUO do §10: o POST ao Asaas pode ter efetivado com a
-    resposta perdida, então a varredura reconcilia por `externalReference` e
-    chama isto. `where asaas_payment_id is null` faz o attach ser idempotente
-    sem `select` antes — duas passadas da varredura não sobrescrevem o id que a
-    primeira gravou, e a segunda devolve False em vez de mentir.
-
-    `qr_payload_enc` chega **já cifrado** por quem chama (§13.6): este módulo não
-    decide política de PII, e o QR nunca aparece em log, em `details` de
-    auditoria nem em mensagem de erro.
-
-    Sem `user_id` no `where` pelo mesmo motivo do `transicionar` — e com a mesma
-    ressalva: `charge_id` é enumerável, então a segurança é do chamador.
-    """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update pix_charges"
-                "   set asaas_payment_id = %s, status = 'pending',"
-                "       qr_payload_enc = coalesce(%s, qr_payload_enc),"
-                "       due_date = coalesce(%s, due_date),"
-                "       qr_expires_at = coalesce(%s, qr_expires_at)"
-                " where id = %s and status in ('creating', 'draft')"
-                "   and asaas_payment_id is null"
-                " returning id",
-                (asaas_payment_id, qr_payload_enc, due_date, qr_expires_at,
-                 int(charge_id)),
-            )
-            aplicou = cur.fetchone() is not None
-        conn.commit()
-    return aplicou
-
-
 def buscar_por_public_token(user_id: int, public_token: str) -> dict | None:
     """A leitura do POLL (`GET /billing/pix/{token}`), e por isso ela filtra por
     `user_id` (CLAUDE.md §0).
@@ -313,6 +291,30 @@ def buscar_por_public_token(user_id: int, public_token: str) -> dict | None:
             )
             row = cur.fetchone()
     return dict(row) if row else None
+
+
+def rezerar_rastreio_de_orfas() -> int:
+    """A varredura diária do §13.2, e o outro lado do UPDATE de `db/privacy.py`.
+
+    Aquele UPDATE (`:936`) não é a garantia: quem desfaz o vínculo é a FK
+    `on delete set null`, e entre ele e o `delete from users` cabe um webhook que
+    commite depois — a linha fica com `user_id` nulo e `purged_at` NUNCA escrito.
+    Esta passada é quem alcança essas. `purged_at is null` a torna datável: sem
+    ele o carimbo seria reescrito todo dia. Predicado DIFERENTE do da outbox de
+    propósito — `pix_webhook_events` não tem `user_id` (§13.3).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update pix_charges"
+                "   set ga_client_id = null, fbp = null, fbc = null,"
+                "       qr_payload_enc = null, asaas_customer_id = null,"
+                "       purged_at = now()"
+                " where user_id is null and purged_at is null"
+            )
+            rezeradas = cur.rowcount
+        conn.commit()
+    return rezeradas
 
 
 def buscar_por_external_reference(external_reference: str) -> dict | None:

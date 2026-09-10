@@ -2161,14 +2161,12 @@ def init_db():
         # sobrevive à exclusão da conta com o VÍNCULO ao titular desfeito pelo
         # banco (§13.2, molde da `plan_trials`).
         #
-        # **`ga_client_id`, `fbp` e `fbc` NÃO existem aqui, e é decisão do dono.**
-        # O §3.2 do plano as lista, mas elas não têm escritor nem leitor nesta
-        # fatia: nascem só para o 1b-B. Criá-las agora produziria colunas que
-        # sobrevivem à exclusão da conta sem a purga que o §13.2 manda — os
-        # identificadores com que Meta e GA reidentificam a pessoa, sem nenhum
-        # uso na reconciliação do dinheiro —, e um gap que só um teste invertido
-        # descreveria. Elas entram no 1b-B, no MESMO PR que trouxer seus
-        # escritores e a purga (§14, regra registrada no plano).
+        # **`ga_client_id`, `fbp` e `fbc` entram no 1b-B, e não antes**, por
+        # decisão do dono (§14): coluna de rastreio publicitário sem a purga do
+        # §13.2 é dado que sobrevive à exclusão da conta. Elas nascem no `alter
+        # table` logo abaixo, no mesmo PR do escritor (o checkout) e da purga
+        # (`delete_user_data`, db/privacy.py) — a purga vem DOIS commits antes
+        # do escritor, e é essa ordem que a regra exige.
         #
         # Quem garante o `set null` em RUNTIME é `_USER_FK_SET_NULL_TABLES`
         # em db/schema_repairs.py — sem "pix_charges" lá, o
@@ -2213,6 +2211,18 @@ def init_db():
           -- bloco `alter table` logo abaixo.
         )
         """,
+        # As três colunas de rastreio (§3.2, §13.2). `alter table … add column
+        # if not exists` e NÃO inline no `create table` acima, pelo mesmo motivo
+        # das invariantes logo abaixo: `create table if not exists` não alcança
+        # tabela que já existe, e `pix_charges` já existe em produção e no
+        # `pigbank_ci_test` desde o 1b-A. Elas guardam o `_ga` do GA4 e os
+        # cookies `_fbp`/`_fbc` da Meta, lidos no checkout e usados pelo dreno
+        # nos efeitos `ga4`/`capi`; a exclusão da conta as zera
+        # (`db/privacy.py::delete_user_data`).
+        """alter table pix_charges add column if not exists ga_client_id text""",
+        """alter table pix_charges add column if not exists fbp text""",
+        """alter table pix_charges add column if not exists fbc text""",
+
         # ── as CINCO invariantes de `pix_charges`, no BANCO e não em Python ──
         #
         # **Fora do `create table`, e as cinco juntas.** `create table if not
@@ -2392,6 +2402,61 @@ def init_db():
           primary key (asaas_payment_id, effect)
         )
         """,
+
+        # Pagamento com `externalReference` NOSSO (`^pix:[0-9]+$`) e sem linha em
+        # `pix_charges` — o `orphan_unknown` do §8.2 A, que o `check
+        # pix_charges_status_valido` recusa de propósito: sem `plan`,
+        # `price_cents`, `public_token` nem `user_id`, a linha era ininserível lá
+        # (P1-2 do Codex no #304). Fila de conciliação, não venda.
+        #
+        # **SEM `user_id`, e é esse o ponto:** não há dono conhecido — é
+        # justamente o que a tabela registra. Ela também NÃO entra em
+        # `user_owned_tables` de `db/privacy.py`, porque não há coluna por onde
+        # ligá-la a uma conta; a retenção dela é por idade
+        # (`RETENCAO_PAGAMENTO_DIAS`, §13.1), na varredura diária.
+        #
+        # `value`/`net_value` são `numeric(12,2)` e não centavos em `bigint`:
+        # eles vêm do provedor em reais, verbatim do webhook, e converter dinheiro
+        # de terceiro na entrada é onde nasce erro de arredondamento que ninguém
+        # reconcilia. `date_created` é `text` pelo mesmo motivo — o formato é do
+        # Asaas, e nenhuma query nossa filtra por ele (a retenção conta de
+        # `received_at`, que é nosso). `customer` é o ID do cliente no Asaas,
+        # nunca o nome nem o CPF (§13.3).
+        """
+        create table if not exists pix_unmatched_payments (
+          asaas_payment_id text not null,
+          external_reference text not null,
+          value numeric(12,2),
+          net_value numeric(12,2),
+          status text,
+          date_created text,
+          customer text,
+          received_at timestamptz not null default now(),
+          notified_at timestamptz
+        )
+        """,
+        # Uma linha por pagamento: o Asaas reentrega, e o dreno não pode
+        # empilhar a mesma conciliação a cada entrega. Índice único e não
+        # `primary key` inline pela mesma razão do bloco de invariantes acima —
+        # `create unique index if not exists` é o único que alcança a tabela que
+        # JÁ existe, e `create table if not exists` não.
+        """
+        create unique index if not exists uniq_pix_unmatched_payment
+          on pix_unmatched_payments (asaas_payment_id)
+        """,
+        """alter table pix_unmatched_payments
+             drop constraint if exists pix_unmatched_ref_formato""",
+        # O MESMO `^pix:[0-9]+$` do `pix_charges_ref_formato`, e a regra é a que
+        # separa nosso dinheiro do de terceiros (§6/§8.2 A): fora do formato o
+        # dreno loga `asaas_evento_fora_do_escopo` e NÃO grava linha. Sem esta
+        # constraint, um dia em que o filtro do dreno afrouxar enche a fila de
+        # conciliação com Pix avulso do negócio — dado de terceiro numa tabela
+        # que ninguém revisita. `not valid` pelo mesmo motivo do bloco acima: um
+        # `add` simples que levante mata a subida do app e deixa o banco sem a
+        # constraint, porque o `drop` do par já commitou (autocommit).
+        """alter table pix_unmatched_payments
+             add constraint pix_unmatched_ref_formato
+             check (external_reference ~ '^pix:[0-9]+$') not valid""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks
