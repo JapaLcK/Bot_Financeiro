@@ -1039,11 +1039,11 @@ PLAN_DISPLAY_NAMES = {
 }
 
 
-def _plan_name(plan: str | None) -> str:
+def plan_display_name(plan: str | None) -> str:
     """Nome comercial do plano; valor fora do mapa cai na marca sem sufixo.
 
-    **Quem chega pelo Stripe NUNCA cai no genérico**, e a versão anterior desta
-    docstring afirmava o contrário ("linha antiga, plano descontinuado ou dado
+    **Nenhum e-mail COM ASSINATURA cai no genérico**, e a versão anterior desta
+    docstring afirmava outra coisa ("linha antiga, plano descontinuado ou dado
     corrompido"). Não é o que acontece: naqueles ramos o `plan` sai de
     `_stored_plan_for_price` (`frontend/finance_bot_websocket_custom.py:293`),
     que devolve `'pro'` para price desconhecido, price nulo E assinatura sem
@@ -1069,7 +1069,7 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
     três e-mails desta família diziam "PigBank+" para todo mundo, e quem
     assinava Essencial ou Pro lia o nome de outro plano.
     """
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     trial_end = _fmt_brl_date(trial_end_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
@@ -1106,7 +1106,7 @@ def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str
 
     `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`.
     """
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     trial_end = _fmt_brl_date(trial_end_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
@@ -1141,7 +1141,7 @@ def send_pro_charged_email(to: str, plan: str, amount_brl: float, next_charge_at
     e-mail de maior volume da família: dizia "Seu PigBank+ tá renovado" em toda
     cobrança, inclusive nas de Essencial e de Pro.
     """
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     proxima = _fmt_brl_date(next_charge_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1188,7 +1188,7 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
     """
     from datetime import datetime as _dt, timezone as _tz
 
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     # Naive vira UTC antes de comparar, do mesmo jeito que o `_fmt_brl_date`
     # logo acima faz com ESTE MESMO valor: a coluna é `timestamptz` e hoje só
     # chega aware, mas comparar aware com naive levanta `TypeError` DENTRO do
@@ -1245,19 +1245,19 @@ def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = ""
     trouxer a regra reescreve as duas copies, esta e a do
     `send_subscription_canceled_email`.
     """
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Opa, tivemos um problema.</p>
       <p>A cobrança do seu {nome} <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
       ou banco recusando a transação.</p>
       <p>Não se preocupa — a gente vai tentar de novo automaticamente nos próximos dias. Mas pra evitar perder o
-      acesso aos recursos Pro, vale dar uma olhada agora:</p>
+      acesso aos recursos do seu plano, vale dar uma olhada agora:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
       </p>
       <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso, seu plano fica como <strong>past_due</strong>.
-      Se as tentativas falharem, ele volta pra Free e os recursos Pro são bloqueados.</p>
+      Se as tentativas falharem, ele volta pra Free e os recursos do plano são bloqueados.</p>
     """
     html = _base_html("Pagamento falhou — atualize seu cartão", content)
     text = (
@@ -1320,7 +1320,7 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
     DÍVIDA DE COPY, deliberadamente não tocada aqui: a mesma promessa de volta
     ao "Free" do `send_payment_failed_email` — ver a docstring de lá.
     """
-    nome = _plan_name(plan)
+    nome = plan_display_name(plan)
     has_grace = expires_at is not None
     fim = _fmt_brl_date(expires_at) if has_grace else None
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1328,20 +1328,20 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
 
     if has_grace:
         access_html = (
-            f"<p>Tudo certo — você continua com acesso aos recursos Pro <strong>até {fim}</strong>. "
-            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites Pro são desativados.</p>"
+            f"<p>Tudo certo — você continua com acesso aos recursos do seu plano <strong>até {fim}</strong>. "
+            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites do plano são desativados.</p>"
             f"<p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
         access_text = (
-            f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free."
+            f"Você mantém acesso aos recursos do seu plano até {fim}. Depois disso, a conta volta pra Free."
         )
     else:
         access_html = (
             "<p>Tudo certo — sua conta voltou pro plano <strong>Free</strong> a partir de agora. "
-            "Os limites Pro foram desativados.</p>"
+            "Os limites do plano foram desativados.</p>"
             "<p>Se mudar de ideia, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
-        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites Pro foram desativados."
+        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites do plano foram desativados."
 
     content = f"""
       <p>🐷 Sua assinatura {nome} foi cancelada.</p>

@@ -125,8 +125,9 @@ def test_a_conversa_do_webhook_manda_o_plano_nos_tres_emails(user_id, monkeypatc
 
     Aqui é onde a ordem dos argumentos erra CALADA: `_fire_email` chama
     `fn(email, *args, DASHBOARD_URL)` posicionalmente e engole toda exceção
-    (`finance_bot_websocket_custom.py:5137`) — trocar `plan` com `amount_brl`
-    não levanta nada visível, só manda e-mail errado (ou nenhum). Por isso o
+    (`finance_bot_websocket_custom.py:5164`, `except` em `:5171`) — trocar
+    `plan` com `amount_brl` não levanta nada visível, só manda e-mail errado
+    (ou nenhum). Por isso o
     teste posta o evento inteiro no `/billing/webhook` e lê a tupla que chegou
     do outro lado, em vez de chamar a função de e-mail direto.
 

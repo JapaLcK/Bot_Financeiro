@@ -4,14 +4,14 @@ Separado de `test_billing_email_nome_do_plano.py` pelo teto de 350 linhas
 (§0.5). Lá estão os três e-mails do caminho FELIZ (boas-vindas, fim de trial,
 cobrança confirmada); aqui os dois do caminho em que a cobrança falha ou a
 assinatura morre. Os dois grupos compartilham o mapa `PLAN_DISPLAY_NAMES` e o
-`_plan_name`, e isso foi MEDIDO: chavear o mapa no vocabulário público
+`plan_display_name`, e isso foi MEDIDO: chavear o mapa no vocabulário público
 (`plus`/`pro`) derruba 9 casos nos três arquivos do assunto — 3 lá, 4 aqui e 2
 no do Pix.
 
 Uma versão anterior do commit dizia que estes dois ficavam de fora porque
 "nenhum dos dois tem o plano em escopo no chamador". **Era falso, e o Tester
 provou:** o ramo `invoice.payment_failed` já faz um `Subscription.retrieve`
-para decidir se o evento é obsoleto (`finance_bot_websocket_custom.py:5666`), e
+para decidir se o evento é obsoleto (`finance_bot_websocket_custom.py:5626`), e
 no `customer.subscription.deleted` o próprio `event.data.object` É a
 Subscription. Medido antes do conserto: assinante Essencial cujo cartão falha
 recebia `⚠️ PigBank+ — pagamento falhou, atualize seu cartão`, e quem cancelava
@@ -45,6 +45,7 @@ O que este arquivo NÃO alcança: o envio de verdade (`send_email` é
 monkeypatchado) e o e-mail de fatura AVULSA em produção — aqui ele é provado
 só até o argumento (`None`) e a copy genérica.
 """
+import re
 from datetime import datetime, timedelta, timezone
 
 from _billing_grants_helpers import (
@@ -62,6 +63,16 @@ from test_billing_webhook_lifecycle import _post, _setup
 PROXIMA = datetime.now(timezone.utc) + timedelta(days=30)
 
 
+def _sem_tier_solto(parte: str, nome: str) -> None:
+    """Nenhum tier SOLTO no corpo, sem a marca — "os recursos Pro", "os limites
+    Pro". `assert "PigBank Pro" not in parte` NÃO pega essa forma, e foi assim
+    que o assunto passou a dizer "PigBank Essencial" com o corpo ainda dizendo
+    o nome de outro tier. Tira o nome legítimo primeiro; o que sobrar é leak.
+    """
+    resto = parte.replace(nome, "")
+    assert not re.search(r"\b(Pro|Plus)\b", resto), f"tier solto no corpo: {parte}"
+
+
 # ── a copy, por plano ────────────────────────────────────────────────────────
 # A copy destes dois NÃO foi tocada além do nome: continua prometendo volta ao
 # "Free". Os asserts abaixo afirmam só o NOME de propósito — o dia em que o
@@ -73,6 +84,7 @@ def test_falha_de_pagamento_do_essencial_nao_vira_plus(capturado):  # noqa: F811
     for parte in _tudo(capturado):
         assert "PigBank Essencial" in parte, parte
         assert "PigBank+" not in parte, f"nome de outro plano na falha: {parte}"
+        _sem_tier_solto(parte, "PigBank Essencial")
 
 
 def test_falha_de_pagamento_do_pro_max_e_o_pro(capturado):  # noqa: F811
@@ -80,6 +92,7 @@ def test_falha_de_pagamento_do_pro_max_e_o_pro(capturado):  # noqa: F811
     for parte in _tudo(capturado):
         assert "PigBank Pro" in parte, parte
         assert "PigBank+" not in parte, f"nome de outro plano na falha: {parte}"
+        _sem_tier_solto(parte, "PigBank Pro")
 
 
 def test_falha_de_pagamento_do_plus_continua_pigbank_mais(capturado):  # noqa: F811
@@ -88,13 +101,15 @@ def test_falha_de_pagamento_do_plus_continua_pigbank_mais(capturado):  # noqa: F
     for parte in _tudo(capturado):
         assert "PigBank+" in parte, parte
         assert "PigBank Pro" not in parte, f"nome do plano mais caro: {parte}"
+        _sem_tier_solto(parte, "PigBank+")
 
 
 def test_fatura_avulsa_sem_assinatura_usa_o_generico(capturado):  # noqa: F811
     """`plan=None` é a fatura AVULSA — sem assinatura, não há plano a nomear.
 
-    É o ÚNICO caminho que alcança o fallback genérico (ver `_plan_name`): pelo
-    Stripe o plano sai de `_stored_plan_for_price`, que nunca devolve nada fora
+    É o ÚNICO caminho que alcança o fallback genérico (ver
+    `plan_display_name`): pelo Stripe o plano sai de `_stored_plan_for_price`,
+    que nunca devolve nada fora
     do mapa. O precedente da copy neutra é o `send_payment_reminder_email`, que
     já diz "PigBank" sem sufixo.
     """
@@ -103,6 +118,7 @@ def test_fatura_avulsa_sem_assinatura_usa_o_generico(capturado):  # noqa: F811
         assert "PigBank" in parte, parte
         for outro in ("PigBank+", "PigBank Essencial", "PigBank Pro"):
             assert outro not in parte, f"nomeou plano numa fatura avulsa: {parte}"
+        _sem_tier_solto(parte, "PigBank")
 
 
 def test_cancelamento_do_essencial_nao_vira_plus(capturado):  # noqa: F811
@@ -111,6 +127,7 @@ def test_cancelamento_do_essencial_nao_vira_plus(capturado):  # noqa: F811
     for parte in _tudo(capturado):
         assert "PigBank Essencial" in parte, parte
         assert "PigBank+" not in parte, f"nome de outro plano no cancelamento: {parte}"
+        _sem_tier_solto(parte, "PigBank Essencial")
 
 
 def test_cancelamento_do_pro_max_e_o_pro(capturado):  # noqa: F811
@@ -119,6 +136,7 @@ def test_cancelamento_do_pro_max_e_o_pro(capturado):  # noqa: F811
     for parte in _tudo(capturado):
         assert "PigBank Pro" in parte, parte
         assert "PigBank+" not in parte, f"nome de outro plano no cancelamento: {parte}"
+        _sem_tier_solto(parte, "PigBank Pro")
 
 
 def test_cancelamento_do_plus_continua_pigbank_mais(capturado):  # noqa: F811
@@ -127,6 +145,7 @@ def test_cancelamento_do_plus_continua_pigbank_mais(capturado):  # noqa: F811
     for parte in _tudo(capturado):
         assert "PigBank+" in parte, parte
         assert "PigBank Pro" not in parte, f"nome do plano mais caro: {parte}"
+        _sem_tier_solto(parte, "PigBank+")
 
 
 # ── os seams dos dois irmãos ────────────────────────────────────────────────
