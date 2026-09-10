@@ -18,6 +18,10 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
   * dê default a `ASAAS_MIN_CHARGE_CENTS` →
     `test_env_de_dinheiro_ausente_recusa_a_venda` VERMELHO, e é o caso em que um
     número inventado vira cobrança de verdade;
+  * devolva a leitura da env para `if not bruto.isdigit() or int(bruto) <= 0` →
+    `test_env_de_dinheiro_malformada_recusa_a_venda` VERMELHO em `²` (o `int()`
+    estoura, 500 no lugar do 503) e em `٥٠٠` (`int("٥٠٠") == 500` e a venda SAI, a
+    500 centavos que ninguém digitou). `-5` e `abc` seguem verdes com e sem;
   * apague a guarda de `grandfathered` de `criar_checkout` →
     `test_vitalicio_nao_compra_o_anual` VERMELHO, com a cobrança criada e o Asaas
     chamado — o dinheiro entrando por acesso que o cliente já tem.
@@ -113,6 +117,24 @@ def test_env_de_dinheiro_ausente_recusa_a_venda(user_id, vendavel, asaas_falso,
     """
     conta(user_id, "free", None)
     monkeypatch.delenv("ASAAS_MIN_CHARGE_CENTS")
+    with pytest.raises(CheckoutIndisponivel):
+        _comprar(user_id)
+    assert _linhas(user_id) == [] and asaas_falso["ordem"] == []
+
+
+@pytest.mark.parametrize("bruto", ["²", "٥٠٠", "-5", "abc"])
+def test_env_de_dinheiro_malformada_recusa_a_venda(user_id, vendavel, asaas_falso,
+                                                   monkeypatch, bruto):
+    """DISCRIMINA. Env MALFORMADA é o mesmo estado da ausente: recusa, não default.
+
+    Os dois primeiros casos são os que mordiam. `"²"` tem `isdigit()` True e
+    `int()` que estoura — `ValueError` cru saindo do contrato do módulo. `"٥٠٠"`
+    é pior porque é silencioso: `int("٥٠٠") == 500` (medido), então a venda ia
+    até o fim com um mínimo que ninguém digitou. `-5` e `abc` já eram recusados
+    com e sem o conserto, e estão aqui como a moldura da categoria.
+    """
+    conta(user_id, "free", None)
+    monkeypatch.setenv("ASAAS_MIN_CHARGE_CENTS", bruto)
     with pytest.raises(CheckoutIndisponivel):
         _comprar(user_id)
     assert _linhas(user_id) == [] and asaas_falso["ordem"] == []

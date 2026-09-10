@@ -212,7 +212,7 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     # **Sem default, nunca** — ver o topo. Inline: virou a única leitura de env
     # de dinheiro do módulo quando o preço deixou de ser env (§0.2).
     bruto = (os.getenv("ASAAS_MIN_CHARGE_CENTS") or "").strip()
-    if not bruto.isdigit() or int(bruto) <= 0:
+    if not (bruto.isascii() and bruto.isdigit()) or int(bruto) <= 0:
         raise CheckoutIndisponivel("asaas_min_charge_nao_configurado")
     min_cents = int(bruto)
     # `None` = plano fora da tabela (`free`, ou lixo que passou pela rota) → 503.
