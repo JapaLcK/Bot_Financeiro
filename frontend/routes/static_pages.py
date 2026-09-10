@@ -74,7 +74,18 @@ async def serve_settings(request: Request):
     # usuário pra cá (?view=open-finance&onb=1) pra conectar o banco, e gatear
     # aqui viraria loop settings → onboarding → settings. Além disso /settings é
     # a saída de emergência de quem travou a conta.
-    gate = gate_plan_selection(request)
+    #
+    # `exige_direito=False` é a MESMA razão, e virou obrigação no corte do fim
+    # do Grátis (decisão do dono): esta página é o único lugar do produto com a
+    # UI de EXPORTAR os dados e EXCLUIR a conta (medido:
+    # `grep -rln "auth/account" frontend/` acha só o settings.html). Cortar o
+    # acesso e trancar esta porta junto tiraria da pessoa a saída da própria
+    # conta. A perna da ESCOLHA continua valendo — cadastro novo sem plano vai
+    # pra /precos como antes; quem perdeu o DIREITO entra aqui.
+    #
+    # O par do lado cliente está em `settings.html`, no bloco do `/auth/me`: os
+    # dois têm de concordar, senão o JS expulsa quem o servidor deixou entrar.
+    gate = gate_plan_selection(request, exige_direito=False)
     if gate is not None:
         return gate
     return html_file(FRONTEND_DIR / "settings.html", pixel=False)

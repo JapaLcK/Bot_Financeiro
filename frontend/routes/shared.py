@@ -867,17 +867,42 @@ def _resolve_page_user_id(request: Request) -> int | None:
         return None
 
 
-def gate_plan_selection(request: Request):
+def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     """Gate de PÁGINA do cadastro: obriga a escolher um plano na /precos antes
     de servir o HTML do dashboard (home/app/settings). É o enforcement REAL —
     os redirects em JS são só UX e são burláveis (JS em cache, navegação direta,
     página sem o script). Aqui o servidor decide antes de entregar a página.
 
+    **DUAS pernas, e elas se desligam separadamente:**
+
+    • **ESCOLHA** (`needs_plan_selection`) — o cadastro novo que ainda não passou
+      pela /precos. Vale em TODA página que chama este gate, sem exceção.
+    • **DIREITO** (`has_app_access`) — o corte do fim do Grátis. `exige_direito=False`
+      a desliga **só** para quem passar o parâmetro.
+
+    **O único chamador com `exige_direito=False` é `/settings`, por decisão do
+    dono, e o motivo é que ele é a SAÍDA DE EMERGÊNCIA.** Medido:
+    `grep -rln "auth/account" frontend/` acha `settings.html` e mais nada — a UI
+    de **exportar os dados e excluir a conta** existe ali e em lugar nenhum. Os
+    endpoints `/auth/*` seguem isentos por prefixo (`_GATE_EXEMPT_PREFIXES`),
+    mas sem a página não sobra porta para alcançá-los. Trancar quem foi cortado
+    fora da própria exclusão de conta contradiz o comentário de
+    `routes/static_pages.serve_settings` e a docstring de `gate_onboarding`
+    ("nunca trancar a saída de emergência") — e é o tipo de porta que se fecha
+    sem ninguém notar, porque `app_access === false` era inalcançável até este PR.
+
+    **O lado CLIENTE tem de concordar**: `frontend/settings.html` tinha um
+    `me.app_access === false → replace("/precos?ativar=1")` DORMENTE (nunca
+    disparava, porque `has_app_access` devolvia True incondicional) que este PR
+    acordaria. Isentar só o servidor deixaria o JS expulsar a pessoa de qualquer
+    jeito, e a saída de emergência continuaria fechada — com o servidor
+    dizendo 200. Os dois lados mudaram juntos, e o porquê está escrito nos dois.
+
     Retorna None quando pode servir (deslogado — o próprio HTML manda pro login;
     ou já escolheu plano). Devolve RedirectResponse pra /precos quando o usuário
     está logado e ainda não escolheu. Nunca levanta — é navegação de browser."""
     from fastapi.responses import RedirectResponse
-    from core.services.plan_service import needs_plan_selection
+    from core.services.plan_service import has_app_access, needs_plan_selection
 
     # Aqui havia `if _is_pigbank_app(request): return None`, pela diretriz 3.1.1
     # da App Store. Saiu porque o UA é escolhido pelo cliente: a isenção liberava
@@ -899,11 +924,25 @@ def gate_plan_selection(request: Request):
     if user_id is None:
         return None
     try:
+        # As DUAS pernas mandam para o MESMO destino, e não é descuido: quem foi
+        # cortado no fim do Grátis (`has_app_access` False) precisa exatamente
+        # da mesma tela que quem nunca escolheu — a /precos com a copy do gate.
+        # Quem separa as duas mensagens lá é o `/auth/me`
+        # (`needs_plan_selection` × `app_access`), nunca o marcador da URL:
+        # `frontend/precos.html` explica por que o marcador não decide nada.
+        #
+        # A ordem do `or` importa para o CUSTO: a perna da escolha sai primeiro
+        # e, com `exige_direito=False`, a segunda nem é avaliada — a /settings
+        # não paga o SELECT do direito.
         if needs_plan_selection(user_id):
+            return RedirectResponse(url="/precos?escolha=1", status_code=302)
+        if exige_direito and not has_app_access(user_id):
             return RedirectResponse(url="/precos?escolha=1", status_code=302)
     except Exception:
         # Nunca trava a navegação por erro no gate; o backstop de dados (402) e o
-        # redirect em JS seguem valendo como rede de segurança.
+        # redirect em JS seguem valendo como rede de segurança. É o "não sei" do
+        # `has_app_access` (que LEVANTA em vez de devolver False, de propósito)
+        # virando fail-open aqui: soluço de banco não pode barrar a base paga.
         logging.getLogger(__name__).warning("gate_plan_selection falhou", exc_info=True)
     return None
 

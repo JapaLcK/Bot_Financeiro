@@ -122,31 +122,17 @@ def _handle_assinar(user_id: int, platform: str) -> str:
             "ou abre direto pigbankai.com/precos no navegador."
         )
     b = lambda s: _bold(s, platform)
-    offer_text = (
-        f"Aqui ó, link pra assinar com {b('15 dias grátis')} "
-        "(cancela quando quiser, sem cobrança no trial):"
-    )
     try:
         from core.services.plan_service import plans_v2_enabled
         v2_enabled = plans_v2_enabled()
     except ImportError:
         v2_enabled = False
-    if v2_enabled:
-        try:
-            from db.plans import is_trial_eligible_for_user
-            eligible = is_trial_eligible_for_user(user_id)
-        except Exception:
-            eligible = None
-        if eligible is False:
-            offer_text = (
-                "Aqui ó, link pra assinar. Como esse telefone já usou o período grátis, "
-                "o checkout mostra o valor da cobrança imediata antes da confirmação:"
-            )
-        elif eligible is None:
-            offer_text = (
-                "Aqui ó, link pra assinar. O checkout confirma seu período grátis ou o "
-                "valor da primeira cobrança antes da confirmação:"
-            )
+    # Import local: `trial_offer` importa `_bold` DAQUI; no topo fecharia o ciclo.
+    from .trial_offer import texto_da_oferta
+    offer_text = texto_da_oferta(user_id, platform) if v2_enabled else (
+        f"Aqui ó, link pra assinar com {b('15 dias grátis')} "
+        "(cancela quando quiser, sem cobrança no trial):"
+    )
     return (
         f"🐷✨ Bora pro {b('PigBank+')}?\n\n"
         f"{offer_text}\n"
@@ -163,6 +149,21 @@ _SEM_PLANO_MSG = (
     "🐷 Sua conta ainda não escolheu um plano — por isso eu ainda não consigo "
     "anotar nada por aqui, e não há assinatura a cancelar.\n\n"
     "Escolhe um e eu já começo: manda {assinar} 🐷✨"
+)
+
+# O ex-assinante: JÁ escolheu plano um dia e hoje não tem direito vigente. As
+# copies que ele recebia ("Plano: Grátis · 30 lançamentos por mês", "tá tudo de
+# graça mesmo") descreviam um lugar onde dava pra ficar, e o corte o tirou.
+#
+# Deliberadamente NÃO diz "eu não consigo anotar nada": a mesma frase serve a
+# quem está na CARÊNCIA (plano vencido, relógio aberto), que tem tier `free` e
+# continua com acesso pelo lado direito do OR de `tem_direito_hoje`. "Sem plano
+# ativo" é verdade nos dois estados; "você está bloqueado" só é verdade num.
+_SEM_ACESSO_MSG = (
+    "🐷 Sua conta está sem plano ativo no momento — o PigBank não tem mais "
+    "versão gratuita, então não há plano Grátis pra onde voltar nem assinatura "
+    "a cancelar.\n\n"
+    "Pra voltar a usar, escolhe um plano: manda {assinar} 🐷✨"
 )
 
 
@@ -183,7 +184,7 @@ def _handle_cancelar(user_id: int, platform: str) -> str:
     if not is_pro(user_id):
         if _sem_plano_escolhido(user_id):
             return _SEM_PLANO_MSG.format(assinar=_bold("assinar plano", platform))
-        return "🐷 Você tá no plano Free — não tem o que cancelar. Tá tudo de graça mesmo."
+        return _SEM_ACESSO_MSG.format(assinar=_bold("assinar plano", platform))
 
     link = build_dashboard_link(user_id, hours=1.0, next_path="/conta")
     if not link:
@@ -196,7 +197,7 @@ def _handle_cancelar(user_id: int, platform: str) -> str:
         f"🐷 Quer cancelar? Sem hard feelings.\n\n"
         f"Abre esse link pra gerenciar sua assinatura no portal da Stripe:\n{link}\n\n"
         f"Você continua com acesso {b('até o fim do período já pago')} — "
-        f"depois o plano volta pra Free automaticamente."
+        f"depois disso a conta fica sem plano ativo e eu paro de anotar por aqui."
     )
 
 
@@ -225,15 +226,12 @@ def _handle_plano(user_id: int, platform: str) -> str:
             # `user` já veio do get_auth_user acima — sem SELECT novo.
             if _sem_plano_escolhido(user_id, user):
                 return _SEM_PLANO_MSG.format(assinar=b("assinar plano"))
-            return (
-                f"🐷 Plano: {b('Grátis')}\n\n"
-                f"O que vem aqui:\n"
-                f"• 30 lançamentos por mês · histórico do mês corrente\n"
-                f"• 1 caixinha e 1 cartão\n"
-                f"• Piggy IA com 20 mensagens/mês\n\n"
-                f"Quer bancos conectados, agentes e IA sem limite? "
-                f"Manda {b('assinar plano')} 🐷✨"
-            )
+            # Aqui vinha a ficha do plano Grátis ("30 lançamentos por mês · 1
+            # caixinha · 20 mensagens de IA"). Ela descrevia um plano em que
+            # dava pra ficar, e o corte tirou esse lugar: tier `free` hoje é
+            # ex-assinante sem direito vigente (ou conta em carência), nunca
+            # alguém com esses limites.
+            return _SEM_ACESSO_MSG.format(assinar=b("assinar plano"))
 
         # Nota: o trial de 15 dias hoje é uma assinatura Stripe do plano escolhido
         # (status trialing) — cai no ramo pago abaixo com status_label "Período

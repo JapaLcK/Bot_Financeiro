@@ -490,11 +490,17 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # o `route()` resolve pendências antes do ramo de ajuda, e uma delas
     # registra parcelamento. Nesse caso devolve a mensagem do gate.
     barrado = False
+    # A linha de `auth_accounts` deste usuário, ou None quando não existe. Vive
+    # FORA do try porque a mensagem lá embaixo depende dela: `None` = população
+    # só-WhatsApp, que nunca viu o dashboard e para quem "acesse seu painel"
+    # não faz sentido nenhum.
+    estado = None
     try:
         # Mesma expressão do gate do WS e do _post_login_url. A perna do
         # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
-        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py) e é a
-        # única que morde hoje — `has_app_access` devolve True com o v2 ligado.
+        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py). Desde
+        # o corte do Grátis a perna do `has_app_access` também morde — ela é
+        # quem barra o ex-assinante e a população só-WhatsApp.
         # A política (onde vale, e por que sem isenção de app) mora na docstring
         # de plan_service.needs_plan_selection.
         from core.services.billing_commands import is_billing_command
@@ -521,7 +527,13 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # repetir a consulta pelo get_auth_user (era a 2ª query do usuário
             # só-WhatsApp, que é a maioria aqui).
             sem_plano = estado is not None and needs_plan_selection(uid, estado)
-        if not (sem_plano or not has_app_access(uid)):
+        # `user=estado`, e o keyword é o ponto: passar `has_app_access(uid)` cru
+        # faria ele buscar a linha DE NOVO pelo `get_auth_user`, reabrindo
+        # exatamente o que o SELECT enxuto acima comprou (decrypt de PII + uma
+        # escrita em `pii_access_log` POR MENSAGEM). `None` aqui é RESPOSTA
+        # ("não existe cadastro web"), não "não busquei" — é por isso que o
+        # default do parâmetro é a sentinela `_UNSET` e não `None`.
+        if not (sem_plano or not has_app_access(uid, user=estado)):
             return None
         barrado = True
 
@@ -580,14 +592,49 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # igual: redireciona pra /precos e quem vai pagar loga de qualquer jeito.
     link = "https://pigbankai.com/precos"
 
+    # DUAS formas, e o que as separa é `estado is None` — ou seja, se existe
+    # linha em `auth_accounts`. A copy única de antes prometia
+    # "15 dias grátis (um teste por número)" para os dois, e era FALSA para o
+    # ex-assinante que já queimou o trial: são 15 dias por telefone NA VIDA.
+    if estado is None:
+        # População só-WhatsApp: nunca fez cadastro web, nunca viu o dashboard,
+        # e o dono decidiu cortá-la SEM aviso prévio — esta mensagem é a ÚNICA
+        # comunicação que ela recebe (docstring de plan_service.tem_direito_hoje).
+        # Logo: nada de "acesse seu painel", nada de supor cadastro existente e
+        # NADA sobre o período grátis. Este último não é estilo: para toda esta
+        # população `db.plans.is_trial_eligible_for_user` devolve False (não há
+        # `phone_hash` em `auth_accounts` porque não há linha nenhuma), então
+        # `texto_da_oferta` diria "esse telefone já usou o período grátis" — a
+        # mesma mentira na direção oposta. Quem diz a verdade é o checkout.
+        return [OutgoingMessage(text=(
+            "🐷 Oi! Que bom te ver por aqui.\n\n"
+            "Pra eu cuidar do seu dinheiro, agora é preciso ter um plano ativo — "
+            "o PigBank não tem mais versão gratuita.\n\n"
+            "Dá uma olhada nos planos e no que vem em cada um (o checkout mostra "
+            "o que vai ser cobrado, e quando, antes de você confirmar):\n"
+            f"👉 {link}\n\n"
+            "Assim que ativar, é só me mandar uma mensagem que eu já começo a "
+            "anotar tudo pra você 💚"
+        ))]
+
+    # Ex-assinante (ou cadastro web sem plano vigente): a verdade sobre o trial
+    # sai de `trial_offer.texto_da_oferta`, que é o MOLDE já existente dos
+    # três estados — elegível / não elegível / não sei (§0.1). Fora do `try` de
+    # cima de propósito: se a consulta de elegibilidade levantar, ela devolve a
+    # frase do "não sei", que não afirma nem nega.
+    #
+    # ponytail: `texto_da_oferta` custa 2 SELECTs, e eles rodam por MENSAGEM
+    # BARRADA — não por mensagem. O caminho quente (assinante) sai lá em cima no
+    # `return None`, e quem está barrado já pagou o `classify` da isenção. Se o
+    # volume de mensagem barrada virar problema, o lugar de cachear é
+    # `is_trial_eligible_for_user`, não uma cópia da frase aqui.
+    from core.services.trial_offer import texto_da_oferta
     return [OutgoingMessage(text=(
-        "🐷 Oi! Que bom te ver por aqui.\n\n"
-        "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra testar {_bold('15 dias grátis', platform)} (um teste por número) "
-        "— o checkout mostra o que vai ser cobrado, e quando, antes de você "
-        "confirmar.\n\n"
+        "🐷 Oi! Sua conta está sem plano ativo, então eu não consigo anotar "
+        "nada por aqui agora.\n\n"
+        f"{texto_da_oferta(uid, platform)}\n"
         f"👉 {link}\n\n"
-        "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "
+        "Assim que ativar, é só me mandar uma mensagem que eu já volto a anotar "
         "tudo pra você 💚"
     ))]
 

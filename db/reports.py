@@ -158,17 +158,27 @@ def mark_plan_selected(user_id: int) -> None:
 
 
 def get_plan_gate_state(user_id: int) -> dict | None:
-    """As três colunas que `plan_service.needs_plan_selection` lê — nada mais.
+    """As colunas que o gate do bot lê — nada mais.
+
+    São CINCO desde o corte do Grátis: as três de
+    `plan_service.needs_plan_selection` (`plan`, `plan_expires_at`,
+    `plan_selected_at`) mais o par do relógio de inadimplência
+    (`past_due_since`, `last_payment_status`), que é o lado direito do OR de
+    `plan_service.tem_direito_hoje` — sem elas `has_app_access` cortaria quem
+    está na carência de 7 dias, que é justamente quem o relógio existe para
+    proteger.
 
     Mesmo motivo do SELECT enxuto do onboarding logo abaixo: `get_auth_user`
     traz PII cifrada e cada decrypt grava em `pii_access_log`, e o gate do bot
     (`core.handle_incoming._paywall_gate`) roda em TODA mensagem recebida.
     None quando não há cadastro web — igual ao que `get_auth_user` devolve, que
-    é o que o `needs_plan_selection` espera."""
+    é o que `needs_plan_selection` e `tem_direito_hoje` esperam (o segundo lê
+    esse None como "sem direito", que é o corte da população só-WhatsApp)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select plan, plan_expires_at, plan_selected_at "
+                "select plan, plan_expires_at, plan_selected_at, "
+                "       past_due_since, last_payment_status "
                 "from auth_accounts where user_id=%s",
                 (int(user_id),),
             )

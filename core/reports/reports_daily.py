@@ -13,6 +13,53 @@ from core.observability import get_logger
 logger = get_logger(__name__)
 
 
+def filtrar_por_acesso(user_ids):
+    """Só quem tem direito de uso HOJE. O corte do Grátis para os relatórios
+    proativos junto com o resto do produto (decisão do dono).
+
+    QUATRO laços em DOIS arquivos passam por aqui — os dois de Discord logo
+    abaixo e os dois de WhatsApp em `adapters/whatsapp/wa_app.py`, que importam
+    daqui. Uma função, não quatro cópias do predicado (§0.7).
+
+    **Em Python, e não como um termo a mais no `where` de
+    `list_users_with_*_report_enabled`**: o predicado em SQL já existe uma vez
+    em `scripts/aviso_fim_do_gratis.py`, amarrado ao Python por teste
+    diferencial (`tests/test_aviso_fim_do_gratis.py`). Um terceiro dialeto da
+    mesma regra é exatamente o que aquele teste existe para não deixar nascer.
+
+    `has_app_access` e não `tem_direito_hoje` cru, de propósito: é por ele que
+    passa o freio `ACCESS_GATE_ENABLED`, então puxar o freio devolve os
+    relatórios junto com o acesso. Com `tem_direito_hoje` direto, o freio
+    reabriria o app e deixaria os relatórios cortados.
+
+    **`user=get_plan_gate_state(uid)`, e NÃO `has_app_access(uid)` cru.** Aquele
+    busca por `get_auth_user`, que decifra PII e grava em `pii_access_log` — e
+    aqui a decriptação seria de gente **filtrada fora, que não recebe nada**. É
+    o defeito que a célula 28-b de `docs/dunning_estados_eventos.md` registra
+    como FECHADO ("o lote registrava acesso ao e-mail de gente que nunca recebeu
+    nada"), e passar por cima dele num quarto call site seria reabri-lo.
+    Medido (2026-09-10, `PII_AUDIT_DISABLED=0`, cache invalidado entre as
+    passadas; remedir antes de reusar): com `has_app_access(uid)` cru, **2
+    linhas por conta cortada por passada**; com a linha em mão, **0**. Em
+    produção são mais: nome e telefone também são cifrados.
+
+    `get_plan_gate_state` devolve `None` sem cadastro web, que é exatamente o
+    que `tem_direito_hoje` lê como "sem direito" — mesma resposta do
+    `get_auth_user`, sem o custo. É o MESMO par que o gate do bot usa
+    (`core.handle_incoming._paywall_gate`), e é para ele que a sentinela
+    `_UNSET` existe.
+
+    Sem `try/except` por usuário, como o resto destes laços: `build_daily_report_text`
+    e `list_identities_by_user` também não têm, então uma exceção aqui derruba o
+    tick igual às de hoje. `ponytail: sem isolamento por usuário; se um tick
+    inteiro cair por causa de UMA conta, o lugar do try é o laço, não este helper.`
+    """
+    from core.services.plan_service import has_app_access
+    from db.reports import get_plan_gate_state
+    return [uid for uid in user_ids
+            if has_app_access(uid, user=get_plan_gate_state(uid))]
+
+
 def _fmt_brl(v: float) -> str:
     s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"R$ {s}"
@@ -201,7 +248,7 @@ def build_monthly_report_text(user_id: int, closed: bool = False) -> str:
 @tasks.loop(time=time(hour=9, minute=0, tzinfo=_tz()))
 async def _daily_report_discord(bot):
     # busca usuários com report habilitado
-    user_ids = list_users_with_daily_report_enabled(9, 0)
+    user_ids = filtrar_por_acesso(list_users_with_daily_report_enabled(9, 0))
     logger.info("Daily report iniciado para %d usuários", len(user_ids))
 
     for uid in user_ids:
@@ -243,7 +290,10 @@ async def _periodic_reports_discord(bot):
     # toggles independentes: cada resumo tem seu próprio liga/desliga
     weekly_users  = set(list_users_with_weekly_report_enabled())  if is_monday else set()
     monthly_users = set(list_users_with_monthly_report_enabled()) if is_first else set()
-    user_ids = weekly_users | monthly_users
+    # Filtra a UNIÃO, não cada conjunto: os dois `if uid in ...` abaixo leem os
+    # conjuntos originais, e filtrá-los separadamente daria o mesmo resultado
+    # por duas leituras a mais do banco por usuário.
+    user_ids = filtrar_por_acesso(weekly_users | monthly_users)
     logger.info(
         "Resumos periódicos iniciados (semanal=%d, mensal=%d usuários)",
         len(weekly_users), len(monthly_users),

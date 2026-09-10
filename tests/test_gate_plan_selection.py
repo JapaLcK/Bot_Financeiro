@@ -26,11 +26,15 @@ class _Req:
 
 
 def _patch(monkeypatch, *, token="tok", payload=None, needs=True, session=None,
-           dashboard_uid=None):
+           dashboard_uid=None, acesso=True):
     monkeypatch.setattr(shared, "get_auth_token_from_request", lambda req, creds: token)
     monkeypatch.setattr(shared, "decode_jwt", lambda t: payload)
     monkeypatch.setattr(shared, "get_active_session", lambda jti: session)
     monkeypatch.setattr(plan_service, "needs_plan_selection", lambda uid: needs)
+    # `acesso` é a SEGUNDA perna do gate, que chegou com o corte do Grátis. O
+    # default True preserva a intenção dos casos que já existiam ("o que se mede
+    # aqui é a escolha de plano"); quem mede o corte passa acesso=False.
+    monkeypatch.setattr(plan_service, "has_app_access", lambda uid: acesso)
 
     # Fallback do dashboard_token (12h): resolve o user OU levanta 401.
     def _fake_dash(req):
@@ -231,3 +235,133 @@ def test_backstop_402_ainda_isenta_as_rotas_que_resolvem_o_gate(monkeypatch):
     monkeypatch.setattr(plan_service, "has_app_access", lambda uid: True)
     assert shared._enforce_subscription_gate(
         _DataReq(path="/billing/create-checkout"), 7) is None
+
+
+# ── a perna do CORTE DO GRÁTIS ──────────────────────────────────────────────
+#
+# CONTROLES DECLARADOS (`docs/controles_declarados.md`)
+# Negativo: em `frontend/routes/shared.gate_plan_selection`, troque
+# `has_app_access(user_id)` por `True` dentro do `if`. VERMELHO:
+#   `test_sem_direito_vigente_tambem_vai_pra_precos`
+# Direção: falso positivo de acesso — o HTML do dashboard é servido a quem foi
+# cortado, e este gate é o ÚNICO enforcement de HTML ("o enforcement REAL").
+#
+# **NÃO use a variante "apague o bloco do `if`"**, e a proibição é medida: o
+# `except` daqui é FAIL-OPEN e devolve `None`, então apagar texto serve a página
+# por OUTRO motivo (a expressão quebrada cai no `except`) e o leitor conclui o
+# oposto do que o controle afirma — é a patologia "injeção que apaga texto" do
+# `docs/controles_declarados.md`. Troque o VALOR, não apague o pedaço.
+#
+# Positivos (VERDES sob a injeção acima): `test_pagante_recebe_a_pagina`,
+# `test_deslogado_nao_forca_precos`, `test_upgrade_success_continua_isento`.
+
+
+def test_sem_direito_vigente_tambem_vai_pra_precos(monkeypatch):
+    """Já escolheu plano (needs=False) mas não tem direito hoje: cortado.
+
+    Mesmo destino da outra perna, de propósito — quem separa as duas mensagens
+    é o `/auth/me` na própria /precos, nunca o marcador da URL."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False, acesso=False)
+    out = shared.gate_plan_selection(_Req())
+    assert isinstance(out, RedirectResponse)
+    assert out.headers["location"] == "/precos?escolha=1"
+
+
+def test_pagante_recebe_a_pagina(monkeypatch):
+    """POSITIVO: sem gate pendente e com direito vigente, o HTML é servido.
+    Sem ele o grupo passaria num gate que recusa todo mundo."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False, acesso=True)
+    assert shared.gate_plan_selection(_Req()) is None
+
+
+def test_upgrade_success_continua_isento(monkeypatch):
+    """POSITIVO: quem ACABOU de pagar não pode ser jogado de volta pra /precos
+    enquanto o webhook está em trânsito — a isenção roda ANTES das duas pernas."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True, acesso=False)
+    assert shared.gate_plan_selection(_Req(query={"upgrade": "success"})) is None
+
+
+def test_erro_no_veredito_de_acesso_serve_a_pagina(monkeypatch):
+    """"Não sei" é fail-open AQUI: `has_app_access` LEVANTA em vez de devolver
+    False, e este gate engole. Um soluço de banco não pode trancar a base
+    pagante fora do próprio produto — o backstop de dados (402) e o redirect em
+    JS seguem valendo como rede de segurança."""
+    def _falha(uid):
+        raise RuntimeError("pool esgotado")
+
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False)
+    monkeypatch.setattr(plan_service, "has_app_access", _falha)
+    assert shared.gate_plan_selection(_Req()) is None
+
+
+# ── /settings é a SAÍDA DE EMERGÊNCIA: isenta da perna do DIREITO ────────────
+#
+# Decisão do dono. Medido: `grep -rln "auth/account" frontend/` acha
+# `settings.html` e mais nada — a UI de exportar os dados e excluir a conta mora
+# só ali. Os endpoints `/auth/*` continuam isentos por prefixo, mas sem a página
+# não sobra porta para alcançá-los.
+#
+# CONTROLE DECLARADO (`docs/controles_declarados.md`) — troque o VALOR, não
+# apague o bloco: em `frontend/routes/static_pages.serve_settings`, troque
+# `gate_plan_selection(request, exige_direito=False)` por
+# `gate_plan_selection(request)`. VERMELHO:
+#   `test_settings_nao_tranca_quem_perdeu_o_direito`
+# Direção: falso NEGATIVO de acesso — quem foi cortado perde a única porta para
+# exportar os dados e excluir a própria conta.
+#
+# Positivo do PAR, e ele fica VERDE sob essa injeção (é o que o torna positivo):
+#   `test_settings_ainda_barra_quem_nunca_escolheu_plano`
+
+
+def test_settings_nao_tranca_quem_perdeu_o_direito(monkeypatch):
+    """Cortado alcança /settings: 200 com o HTML, não 302 pra /precos."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False, acesso=False)
+    assert shared.gate_plan_selection(_Req(), exige_direito=False) is None
+
+
+def test_settings_ainda_barra_quem_nunca_escolheu_plano(monkeypatch):
+    """A perna da ESCOLHA sobrevive à isenção — ela não foi desligada junto.
+
+    Sem este caso, `exige_direito=False` poderia ter aberto a página inteira e o
+    teste de cima ficaria verde do mesmo jeito."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True, acesso=True)
+    out = shared.gate_plan_selection(_Req(), exige_direito=False)
+    assert isinstance(out, RedirectResponse)
+    assert out.headers["location"] == "/precos?escolha=1"
+
+
+def test_isencao_do_direito_nem_consulta_o_veredito(monkeypatch):
+    """`exige_direito=False` não paga o SELECT do direito — a perna nem roda."""
+    def _explode(uid):
+        raise AssertionError("consultou o direito numa rota isenta dele")
+
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False)
+    monkeypatch.setattr(plan_service, "has_app_access", _explode)
+    assert shared.gate_plan_selection(_Req(), exige_direito=False) is None
+
+
+def test_as_outras_paginas_continuam_exigindo_o_direito(monkeypatch):
+    """A isenção é de UMA rota, não do gate. O default é `exige_direito=True`, e
+    é ele que /app, /home e /onboarding usam."""
+    _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False, acesso=False)
+    out = shared.gate_plan_selection(_Req())
+    assert isinstance(out, RedirectResponse)
+
+
+def test_so_o_settings_e_isento_do_direito():
+    """Quem é isento é UMA rota — enumerado no arquivo, não confiado à memória.
+
+    Uma segunda rota com `exige_direito=False` abriria o corte por uma porta que
+    ninguém declarou. Cita o PREDICADO (`exige_direito=False`), que é a coisa
+    que a isenção É — nome local e forma de bloco envelhecem
+    (`docs/controles_declarados.md`).
+    """
+    import re
+    from pathlib import Path
+
+    fonte = (Path(__file__).resolve().parent.parent
+             / "frontend" / "routes" / "static_pages.py").read_text(encoding="utf-8")
+    isentos = re.findall(r"async def serve_(\w+)\(request[^)]*\):(?:(?!async def).)*?"
+                         r"gate_plan_selection\(request,\s*exige_direito=False\)",
+                         fonte, re.S)
+    assert isentos == ["settings"], isentos

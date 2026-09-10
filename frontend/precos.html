@@ -934,11 +934,31 @@ async function cancelChange(btn) {
   // (routes/shared.py), então quem abre a /precos de dentro dele está travado
   // como qualquer um. Esconder o mandato deixaria a tela sem explicar por que
   // o dashboard não abre.
-  if (!me || !me.needs_plan_selection) return;  // copy padrão
+  if (!me) return;
   const sub = document.getElementById("precos-sub");
-  if (sub) sub.textContent =
-    "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
-    + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+  if (!sub) return;
+  // DOIS estados de gate, não um. `needs_plan_selection` é o cadastro NOVO que
+  // ainda não escolheu; `app_access === false` é quem foi CORTADO no fim do
+  // Grátis — e para ele a copy de cima ("15 dias grátis pra testar") é falsa
+  // duas vezes: ele não está escolhendo pela primeira vez, e o trial é um por
+  // telefone NA VIDA, então o ex-assinante que já o usou não vai ganhar outro.
+  // A ordem importa: quem foi cortado tem `needs_plan_selection` FALSE (já
+  // escolheu um plano um dia), então as duas condições não se sobrepõem.
+  if (me.needs_plan_selection) {
+    sub.textContent =
+      "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
+      + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+    return;
+  }
+  if (me.app_access === false) {
+    // Sem afirmar nem negar o período grátis: quem diz é o checkout, que lê a
+    // mesma `is_trial_eligible_for_user` (§0.7). Prometer o trial aqui seria a
+    // mentira que esta perna existe para consertar.
+    sub.textContent =
+      "Sua conta está sem plano ativo — o PigBank não tem mais versão gratuita. "
+      + "Escolha um plano pra voltar a usar: o checkout mostra o que vai ser "
+      + "cobrado, e quando, antes de você confirmar.";
+  }
 })();
 
 (async function loadPlansState(){

@@ -237,11 +237,19 @@ def test_plano_pro_status_past_due_mostra_atraso(patches):
 # ─── Free pedindo cancelar ──────────────────────────────────────────────────
 
 
-def test_free_cancelar_recebe_mensagem_explicativa(patches):
+def test_sem_plano_ativo_cancelar_recebe_mensagem_explicativa(patches):
+    """Quem não tem assinatura ouve que não há o que cancelar — e NÃO ouve mais
+    "Você tá no plano Free… tá tudo de graça mesmo".
+
+    A frase saiu no corte do Grátis: ela prometia um lugar onde ficar, e depois
+    do corte não existe plano Free. O teste trocou de asserção junto e passou a
+    proibir a promessa em vez de exigi-la."""
     patches["is_pro"] = False
     out = mod.handle_billing_command(99, "cancelar plano", platform="whatsapp")
-    assert "Free" in out
-    assert "não tem o que cancelar" in out or "nao tem o que cancelar" in out
+    assert "Free" not in out
+    assert "tudo de graça" not in out
+    assert "sem plano ativo" in out.lower()
+    assert "a cancelar" in out
 
 
 # ─── Discord vs WhatsApp ────────────────────────────────────────────────────

@@ -9,12 +9,19 @@
 // NÃO redireciona — só ajusta o nav pra não parecer deslogado.
 // Estilos injetados via <style> (prefixo pb-) pra não depender do cache do site.css.
 (function () {
-  // Paywall (/precos?ativar=1): conta criada, ainda SEM assinatura. O menu da
-  // conta APARECE (é exatamente onde o "quero sair" acontece); só os CTAs do
-  // corpo ficam quietos — ali os botões são os planos.
+  // Paywall (/precos?ativar=1 ou ?escolha=1): conta criada, ainda SEM
+  // assinatura — ou cortada no fim do Grátis. O menu da conta APARECE (é
+  // exatamente onde o "quero sair" acontece); só os CTAs do corpo ficam
+  // quietos — ali os botões são os planos.
+  //
+  // Os DOIS marcadores, e não só o novo: `home.html` e `settings.html`
+  // continuam mandando `ativar=1` (§2 — a categoria tem quatro sites e este PR
+  // migrou dois), e um bloqueado que chegue por lá veria os CTAs de marketing
+  // na página onde ele deveria assinar.
+  const qs = new URLSearchParams(location.search);
   const isPaywall =
     location.pathname.replace(/\/+$/, "") === "/precos" &&
-    new URLSearchParams(location.search).get("ativar") === "1";
+    (qs.get("ativar") === "1" || qs.get("escolha") === "1");
 
   function getCsrf() {
     const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);

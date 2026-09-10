@@ -299,6 +299,86 @@ for (const query of ["?escolha=1", ""]) {
   });
 }
 
+// ── o CORTE DO GRÁTIS: um terceiro estado de gate, e a copy dele ────────────
+// Quem foi cortado tem `needs_plan_selection` FALSE (escolheu um plano um dia)
+// e `app_access` FALSE. Antes deste PR ele caía na COPY_PADRAO — "15 dias
+// grátis pra testar" —, falsa duas vezes: ele não está escolhendo pela primeira
+// vez, e o trial é UM por telefone na vida, então o ex-assinante que já o
+// queimou não ganha outro.
+//
+// Decidido pelo /auth/me e NUNCA pela URL, igual às células acima: as duas
+// colunas de marcador têm de dar a mesma linha.
+//
+// Os dois VIEWPORTS existem porque a mudança é de texto num subtítulo, e
+// subtítulo mais longo é exatamente o que estoura a caixa no celular: além da
+// copy, cada célula mede a largura do #precos-sub contra a do container.
+const COPY_CORTE = /Sua conta está sem plano ativo/;
+const TELAS = [["desktop", { width: 1280, height: 900 }],
+               ["mobile", { width: 390, height: 844 }]];
+
+for (const [tela, viewport] of TELAS) {
+  for (const query of ["?escolha=1", ""]) {
+    const rotulo = query ? "com marcador" : "sem marcador";
+    test(`copy do subtítulo: cortado no fim do Grátis, ${tela}, ${rotulo}`, async () => {
+      const { page } = await abrirPrecos({
+        me: { user_id: 42, needs_plan_selection: false, app_access: false },
+        query, viewport,
+      });
+      const sub = await page.textContent("#precos-sub");
+      assert.match(sub, COPY_CORTE,
+        `cortado ${tela} ${rotulo} devia ler a copy do corte e leu: "${sub}"`);
+      // Não promete NEM nega o período grátis: quem diz é o checkout, que lê a
+      // mesma is_trial_eligible_for_user (§0.7). Prometer aqui é a mentira que
+      // esta célula existe para consertar.
+      assert.ok(!sub.includes("15 dias grátis"),
+        `a copy do corte prometeu o trial a um ex-assinante: "${sub}"`);
+      assert.ok(sub.includes("checkout"),
+        `a copy do corte perdeu a deferência ao checkout: "${sub}"`);
+
+      // Overflow: o subtítulo tem de caber na largura do pai, nos dois tamanhos.
+      // É a classe de bug que uma troca de TEXTO causa — a copy do corte é a
+      // mais longa das três da página.
+      //
+      // Aqui havia também `documentElement.scrollWidth <= clientWidth`, e ela
+      // SAIU por medição, não por conveniência: em 390px ela dá 544 nos TRÊS
+      // estados do subtítulo (visitante, gate de escolha, corte), porque quem
+      // rola é a tabela comparativa — de propósito, e o caso "dica de arrastar
+      // — 390px" logo abaixo existe para exigir que ela role. Um número igual
+      // com e sem a mudança não mede nada (§3).
+      const medida = await page.evaluate(() => {
+        const el = document.getElementById("precos-sub");
+        return { sub: el.scrollWidth, caixa: el.parentElement.clientWidth,
+                 altura: el.getBoundingClientRect().height };
+      });
+      assert.ok(medida.sub <= medida.caixa + 1,
+        `${tela}: o subtítulo tem ${medida.sub}px numa caixa de ${medida.caixa}px`);
+      await page.close();
+    });
+  }
+}
+
+test("cortado que TAMBÉM não escolheu plano lê a copy da escolha, não a do corte", async () => {
+  // As duas pernas não se sobrepõem em produção (quem foi cortado já escolheu),
+  // mas a ORDEM do if é o que garante isso — este caso a fixa.
+  const { page } = await abrirPrecos({
+    me: { user_id: 42, needs_plan_selection: true, app_access: false },
+  });
+  assert.match(await page.textContent("#precos-sub"), COPY_GATE);
+  await page.close();
+});
+
+test("pagante continua lendo a copy padrão (app_access true)", async () => {
+  // POSITIVO da perna nova: sem ele, um `me.app_access === false` escrito como
+  // `!me.app_access` passaria verde e trocaria a copy de todo mundo que o
+  // /auth/me responde sem o campo.
+  const { page } = await abrirPrecos({
+    me: { user_id: 42, needs_plan_selection: false, app_access: true },
+  });
+  assert.match(await page.textContent("#precos-sub"), COPY_PADRAO);
+  await page.close();
+});
+
+
 // ── controle POSITIVO: o caminho legítimo continua funcionando ───────────────
 
 test("controle positivo: 'Assinar Plus' dispara exatamente 1 POST /billing/create-checkout", async () => {

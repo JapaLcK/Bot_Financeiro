@@ -21,6 +21,9 @@ from core.reports.reports_daily import (
     build_due_bill_reminders,
     build_weekly_report_summary,
     build_monthly_report_summary,
+    # O corte do Grátis vale nos DOIS canais: o mesmo helper que os laços de
+    # Discord usam, importado daqui em vez de reescrito (§0.7).
+    filtrar_por_acesso,
 )
 from core.secure_compare import constant_time_eq
 from db import (
@@ -374,7 +377,7 @@ def _daily_report_tick() -> None:
     today = now.date()
     instance = _runtime_instance_details()
 
-    for uid in list_users_with_daily_report_enabled():
+    for uid in filtrar_por_acesso(list_users_with_daily_report_enabled()):
         prefs = get_daily_report_prefs(uid)
         if not prefs["enabled"]:
             continue
@@ -695,7 +698,7 @@ def _periodic_report_tick() -> None:
 
     instance = _runtime_instance_details()
 
-    for uid in (weekly_users | monthly_users):
+    for uid in filtrar_por_acesso(weekly_users | monthly_users):
         prefs = get_daily_report_prefs(uid)
 
         # entrega no mesmo horário configurado para o report diário do usuário

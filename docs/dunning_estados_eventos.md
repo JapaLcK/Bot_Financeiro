@@ -27,8 +27,12 @@ só CONCEDE tempo a quem já o perdeu. Quem for escrever o gate de acesso (o PR
 seguinte) reusa aquele predicado em vez de ler o status como autoridade — do
 contrário a célula 29 bloqueia cliente pagante por um ciclo de retentativa.
 
-**Dois recados do PR do aviso para quem escrever o gate**: (a) `has_app_access`
-e `needs_plan_selection` continuam intocados, de propósito; (b) o dono decidiu
+**O gate FOI escrito (PR A, #274/#354)** e fez exatamente isto: `has_app_access`
+consulta `tem_direito_hoje` em vez de devolver `True` incondicional, e
+`needs_plan_selection` continua intocado. Os dois recados do PR do aviso viram,
+então, registro do que foi cumprido: (a) o predicado foi REUSADO, não recriado —
+o status nunca virou autoridade, e `tests/test_access_gate.py` amarra isso com
+controle negativo próprio; (b) o dono decidiu
 cortar SEM aviso prévio a população só-WhatsApp (sem linha em `auth_accounts`,
 "a maioria" segundo `core/handle_incoming.py`), então a **mensagem de bloqueio
 do bot é a única comunicação que ela recebe** — ela tem de fazer sentido para
@@ -371,8 +375,9 @@ são anteriores a este PR e ficam como estão (§0.3).
 
 | # | validade | estado antes | COMPORTAMENTO | DEVERIA |
 |---|---|---|---|---|
-| 16 | NOVO | S3 | `canceled` ⇒ o próprio `set_payment_status` zera o relógio; o clear é no-op | ✔ |
-| 17 | NOVO | S4 | idem | ✔ |
+| 16 | NOVO | S3, motivo NÃO-terminal (ou ausente/desconhecido) | `canceled` ⇒ o próprio `set_payment_status` zera o relógio; o clear é no-op | ✔ |
+| 17 | NOVO | S4, motivo NÃO-terminal | idem | ✔ |
+| 32 | NOVO | S3, `cancellation_details.reason == 'payment_failure'` | **PR A** — grava `unpaid` (PRESERVA o motivo, que `canceled` apagaria) e então `db.dunning.encerrar_ciclo_de_atraso`, INCONDICIONAL. Nesta perna o `CASE` de `set_payment_status_impl` NÃO zera (o status fica na lista): o clear é a ÚNICA coisa que tira o relógio | ✔ — evento terminal: não há cobrança a recuperar, logo não há ciclo a preservar |
 | 18 | REENTREGA/VELHO | S3 de OUTRA assinatura viva | **✗ ABERTA —** `plan=free` + `canceled` + relógio zerado; `revoke_grant` é recusado por versão e `recompute_entitlement` devolve o plano, mas o status fica `canceled` | não deveria — **anterior a este PR** |
 
 **O `subscription.deleted` sobrevive ao predicado**: nas três células o
@@ -380,6 +385,97 @@ são anteriores a este PR e ficam como estão (§0.3).
 UPDATE, então o clear daquele ramo é no-op em todo estado alcançável. Passar o
 `created` do evento ali não muda comportamento nenhum — e é o que se faz, para
 que a regra seja UMA só e nenhum call site futuro herde a versão incondicional.
+
+### O ramo TERMINAL, e o par que ele grava
+
+**Decisão do dono, verbatim:** *"Quando a Stripe encerrar definitivamente a
+assinatura por inadimplência, grave `unpaid` e limpe **incondicionalmente** o
+relógio de carência."* O motivo de gravar `unpaid` em vez de `canceled` é
+PRESERVAR a razão da perda de acesso — `canceled` a apaga, e é ela que o painel
+e o suporte precisam ler depois.
+
+**Na célula 32 o clear é o OPOSTO das outras três**, e o comentário do ramo
+chamava aquele clear de "REDUNDANTE hoje" sem qualificar a perna — afirmava o
+contrário das duas, e foi reescrito. Com `unpaid` o status FICA na lista, o
+`CASE` PRESERVA o relógio, e `encerrar_ciclo_de_atraso` é a única escrita que o
+apaga. A ORDEM (`set_payment_status` antes, clear depois) é o que faz o par não
+deixar órfão; invertida, o `CASE` apagaria antes e o clear viraria no-op.
+
+Função IRMÃ, e não `clear_past_due_since(..., nao_mais_novo_que=None)`: dar
+significado ao `None` transformaria o valor que um descuido produz no valor que
+DESLIGA a proteção que o parâmetro obrigatório comprou.
+`tests/test_dunning_encerramento_terminal.py` prende a contagem de call sites
+da irmã em 1, e o caso dele tem o `created` do evento ANTERIOR ao carimbo do
+relógio — a ÚNICA configuração em que as duas escritas divergem (com um
+`deleted` em ordem a versão antiga limparia igual e o grupo não mediria nada).
+
+#### O par `(plan, last_payment_status)` é lido pelo PAR em DOIS lugares
+
+`unpaid` sozinho continua significando **"assinatura VIVA na Stripe, em
+dunning"** — é a definição certa enquanto a assinatura existir, e é por isso que
+ele **não** saiu de `core.admin_dashboard._LIVE_PAYMENT_STATUSES` (varredura:
+`grep -rn "_LIVE_PAYMENT_STATUSES"` — UM leitor de produção, mais a definição e
+o teste de paridade). O que muda o significado é o `plan`:
+
+| par | leitura | painel | `/trial-reset` |
+|---|---|---|---|
+| `unpaid` + plano PAGO | assinatura viva em dunning | `past_due` | **409** — dar trial a quem tem assinatura viva é o que a guarda existe para impedir |
+| `unpaid` + `plan='free'` | **COMPATÍVEL com** "a Stripe encerrou" (esta célula) — não prova disso | `canceled` | **libera** — decisão do dono: *"pode, libero caso a caso"* |
+
+**A segunda linha diz "compatível", e não "é", de propósito.** Uma versão
+anterior desta seção afirmava a implicação, e ela é falsa: o par tem **outros
+produtores**, e neles a assinatura pode continuar viva na Stripe.
+
+| produtor | como chega em `(free, unpaid)` | assinatura na Stripe |
+|---|---|---|
+| ramo terminal do `customer.subscription.deleted` (célula 32) | grava `unpaid` de propósito | **deletada** |
+| `core.services.billing_access.recompute_entitlement` | `update_user_plan(uid, 'free', …)` sob veredito `reduz`, **sem tocar** em `last_payment_status`. A matriz depende de `_find_active_subscription`, que consulta só `active`/`trialing`/`past_due` — assinatura em `unpaid` é **invisível** para ela e conta como "nenhuma ativa". Loop de 60 s, sem admin e sem webhook | **pode estar viva** |
+| `core.admin_dashboard.set_account_plan('free')` | **célula 24**: "não mexe no par" | **pode estar viva** |
+
+**Medido** (2026-09-10, conta com grant vencido + `last_payment_status='unpaid'`,
+`recompute_entitlement(origem="varredura")`, **nenhum** evento `deleted`;
+remedir antes de reusar):
+
+    antes  : pro  | unpaid
+    depois : free | unpaid
+
+Amarrado por
+`tests/test_admin_users_panel.py::test_o_par_terminal_nao_prova_que_a_stripe_encerrou`,
+que é executável de propósito: a ressalva escrita só em prosa envelheceria em
+silêncio, e esta é a premissa de uma trava anti-abuso.
+
+**O que sustenta a liberação, então, não é o par — é o HUMANO NO LAÇO.** É ação
+de admin, uma conta por vez, e o dono disse "caso a caso". O custo de errar está
+declarado: a trava cai, o checkout seguinte também não enxerga `unpaid` (mesma
+cegueira do `_find_active_subscription`) e nasce a **segunda assinatura da
+célula 30**. Agrava que o painel rotula o par como "Cancelado", que o admin lê
+como "a Stripe encerrou".
+
+**Um discriminador honesto existe e ficou de FORA**: o grant revogado com motivo
+`stripe_subscription_deleted`, que só o ramo terminal escreve. É query nova num
+caminho de admin, com a decisão já tomada e humano no laço — fica nomeado aqui
+para quem quiser estreitar depois não ter de redescobrir.
+
+**Estreitou-se a CONDIÇÃO, não a lista** (`encerrada_por_inadimplencia =
+plan_atual == "free" and pay == "unpaid"`). Alargar/encurtar
+`_LIVE_PAYMENT_STATUSES` consertaria o `/trial-reset` e estragaria a DEFINIÇÃO,
+que o próximo leitor herdaria.
+
+E a guarda **não** reusa `_derive_account_status`, apesar de ele já computar o
+par: aquela função dobra `plan_expires_at` no veredito, e vencimento é do nosso
+ENTITLEMENT, não de "a Stripe ainda tem assinatura". Reusá-la liberaria também o
+pago VENCIDO em `unpaid` — dunning com assinatura viva, que ninguém autorizou.
+Amarrado por `test_trial_reset_recusa_unpaid_com_plano_pago_vencido`.
+
+**O espelho do painel veio junto e é obrigatório**: sem ele,
+`_derive_account_status({'plan':'free','last_payment_status':'unpaid'})` devolve
+`'free'` — o rótulo de quem NUNCA assinou — e o motivo se perde exatamente onde
+o dono quis preservá-lo. O teste de paridade de `tests/test_admin_users_panel.py`
+passou a ler o CASE **por território** (`plan='free'` × plano pago), porque
+`unpaid` é o único status que os dois classificam diferente. Medido: mudar o SQL
+sem o Python, ou o Python sem o SQL, continua ficando VERMELHO — que é o efeito
+que aquele teste existe para ter.
+
 A célula 18 continua aberta: quem a destrói é o `set_payment_status`, não o
 clear, e gatear só o clear não fecharia nada (§0.3).
 

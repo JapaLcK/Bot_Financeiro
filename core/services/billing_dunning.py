@@ -1,20 +1,23 @@
 """
 core/services/billing_dunning.py — vocabulário da inadimplência de cartão.
 
-Este módulo NÃO tira acesso de ninguém. Quem está com a cobrança do cartão
-falhada continua com o plano e o bot exatamente como antes; o que existe aqui é
-a mecânica de cobrança: a lista de status que descreve "cartão em atraso" e a
-janela de 7 dias.
+Este módulo NÃO tira acesso de ninguém, e isso continua verdade DEPOIS do corte
+do Grátis: quem está com a cobrança do cartão falhada e o plano vigente continua
+com o produto exatamente como antes. O que existe aqui é a mecânica de cobrança
+— a lista de status que descreve "cartão em atraso" e a janela de 7 dias — mais
+`carencia_aberta`, que agora CONCEDE acesso (nunca subtrai) pelo lado direito do
+OR de `plan_service.tem_direito_hoje`.
 
 **São TRÊS os consumidores da janela, não dois** (a enumeração anterior parava
 em dois e envelheceu no PR do aviso de corte):
 
   1. o lembrete de pagamento (`core/services/payment_reminder.py`);
   2. a dedupe do e-mail de falha no webhook;
-  3. o **aviso de fim do Grátis** — `carencia_aberta` (abaixo) é o lado
-     direito do OR de `core.services.plan_service.tem_direito_hoje`, que a
-     população de `scripts/aviso_fim_do_gratis.py` nega no `where` e cujo
-     coorte decide a copy do e-mail.
+  3. o **aviso de fim do Grátis e, desde o PR A, o próprio GATE DE ACESSO** —
+     `carencia_aberta` (abaixo) é o lado direito do OR de
+     `core.services.plan_service.tem_direito_hoje`, que `has_app_access`
+     consulta e que a população de `scripts/aviso_fim_do_gratis.py` nega no
+     `where`. São os mesmos três consumidores; o terceiro é que ganhou peso.
 
 **A DIREÇÃO DO OR importa e é o que segura as células 18, 29 e 30 de
 `docs/dunning_estados_eventos.md` fora daquele trabalho**: a autoridade é o
@@ -22,9 +25,16 @@ direito pago; o relógio só CONCEDE tempo a quem já o perdeu, nunca subtrai. L
 isto antes de escrever qualquer gate — lido como autoridade, o status de
 cobrança bloquearia cliente pagante por um ciclo inteiro de retentativa.
 
-Nem aqui nem no aviso alguém perde acesso: o aviso manda e-mail. A regra de
-acesso é assunto do PR seguinte — não escreva aqui, nem em mensagem, e-mail ou
-docstring, nada que prometa perda de acesso enquanto ela não existir.
+A regra de acesso CHEGOU (PR A, #274/#354): `has_app_access` consulta
+`tem_direito_hoje`, e quem não tem direito pago nem carência aberta perde o
+produto. O que NÃO mudou é de quem é a autoridade — o par
+(`plan`, `plan_expires_at`), nunca o status de cobrança.
+
+**A copy do lembrete do 6º dia continua PROIBIDA de prometer corte**
+(`email_service.send_payment_reminder_email`): ele sai dentro da carência, com
+o acesso ainda de pé, e prometer perda que não veio naquele dia é mentira na
+mesma medida que a antiga. Quem PODE falar em perda de acesso são o e-mail de
+falha e o de cancelamento, que foram reescritos junto.
 
 **A INVARIANTE**: relógio (`auth_accounts.past_due_since`) não nulo só existe
 em conta cujo `last_payment_status` está em `PAST_DUE_PAYMENT_STATUSES`. Quem a
@@ -32,6 +42,11 @@ mantém é ESTRUTURAL e mora na escrita: `db_support.set_payment_status_impl`
 zera o relógio no MESMO UPDATE quando o status vai para fora da lista, e
 `core/admin_dashboard.set_account_plan` faz o mesmo no SQL cru dele. Ler a
 docstring de `set_payment_status_impl` antes de mexer em qualquer um dos lados.
+
+**Uma escrita a mantém pela ORDEM, e não pelo `CASE`**: a perna terminal do
+`customer.subscription.deleted` grava `unpaid` (que está DENTRO da lista, então
+o `CASE` PRESERVA) e só então chama `db.dunning.encerrar_ciclo_de_atraso`.
+Invertida, o clear viraria no-op e o par ficaria órfão — ver a célula 32.
 
 Órfão (relógio com status fora da lista) NÃO é dado morto: enquanto ele
 existir, o próximo `invoice.payment_failed` devolve o status para a lista, o

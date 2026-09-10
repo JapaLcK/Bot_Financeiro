@@ -187,27 +187,47 @@ _WHEN_STATUS_RX = re.compile(
 )
 
 
-def _status_do_case_sql() -> dict:
-    """Mapa {status cru -> categoria} lido do _ACCOUNT_STATUS_SQL."""
+# Fronteira entre o ramo `plan='free'` e o resto do CASE. Texto de PREDICADO
+# SQL, não forma de bloco nem nome local — é a família que sobrevive a
+# refatoração (`docs/controles_declarados.md`).
+_FRONTEIRA_DO_RAMO_FREE = "WHEN a.plan_expires_at IS NOT NULL"
+
+
+def _status_do_case_sql(plan: str) -> dict:
+    """Mapa {status cru -> categoria} lido do _ACCOUNT_STATUS_SQL, **POR PLANO**.
+
+    O `plan` no parâmetro não é generalidade especulativa: o CASE tem DOIS
+    territórios (o ramo `plan='free'` e os de plano pago) e desde o corte do
+    Grátis eles discordam sobre um status. Um mapa único não conseguia
+    representar isso — `mapa.setdefault(st, cat) == cat` estourava em `unpaid`,
+    que é exatamente o teste fazendo o trabalho dele.
+    """
     sql = admin_dashboard._ACCOUNT_STATUS_SQL
-    ramos = list(_WHEN_STATUS_RX.finditer(sql))
+    corte = sql.index(_FRONTEIRA_DO_RAMO_FREE)
+    trecho = sql[:corte] if plan == "free" else sql[corte:]
+    ramos = list(_WHEN_STATUS_RX.finditer(trecho))
     # Guarda contra parse cego: cada ramo cita a coluna exatamente uma vez, então
     # ramo novo numa forma que o regex não casa faz ESTA linha ficar vermelha em
     # vez de o ramo sumir da comparação em silêncio.
-    assert len(ramos) == sql.count("last_payment_status"), ramos
+    assert len(ramos) == trecho.count("last_payment_status"), (plan, ramos)
     mapa = {}
     for m in ramos:
         unico, lista, categoria = m.groups()
         for st in ([unico] if unico else re.findall(r"'([a-z_]+)'", lista)):
-            assert mapa.setdefault(st, categoria) == categoria, st
+            assert mapa.setdefault(st, categoria) == categoria, (plan, st)
     return mapa
 
 
 def test_status_vivos_do_sql_batem_com_a_constante_python():
     """Divergir aqui é o bug real que aconteceu: o CASE tratava 'unpaid' e
     'incomplete' como Past due (assinatura viva) e o gate do /trial-reset não —
-    passavam e a trava era apagada."""
-    mapa = _status_do_case_sql()
+    passavam e a trava era apagada.
+
+    A leitura é do território de PLANO PAGO, e é lá que `_LIVE_PAYMENT_STATUSES`
+    fala: "assinatura viva na Stripe" pressupõe uma assinatura, logo um plano.
+    O território `plan='free'` tem teste próprio, logo abaixo.
+    """
+    mapa = _status_do_case_sql("pro")
     vivos_sql = {st for st, cat in mapa.items() if cat in ("trial", "paying", "past_due")}
     assert vivos_sql == set(admin_dashboard._LIVE_PAYMENT_STATUSES)
     assert {st for st, cat in mapa.items() if cat == "past_due"} == set(
@@ -218,6 +238,61 @@ def test_status_vivos_do_sql_batem_com_a_constante_python():
         assert admin_dashboard._derive_account_status(
             {"plan": "pro", "last_payment_status": st}, NOW
         ) == cat, st
+
+
+def test_ramo_free_do_sql_bate_com_o_python():
+    """O MESMO espelhamento no território `plan='free'` — o que faltava.
+
+    Antes do corte do Grátis os dois territórios concordavam sobre todo status e
+    um mapa só bastava. Hoje não: quem cai aqui com `unpaid` é a conta que a
+    Stripe encerrou por inadimplência
+    (`customer.subscription.deleted` + `reason='payment_failure'`), e o rótulo
+    tem de ser "Cancelado" — não "Grátis", que é o de quem nunca assinou.
+
+    **Este teste é a metade que mantém o portão fechado**: mudar o `CASE` SQL
+    sem a função Python (ou o contrário) continua ficando vermelho, agora nos
+    dois territórios em vez de num só.
+    """
+    mapa = _status_do_case_sql("free")
+    for st, cat in mapa.items():
+        assert admin_dashboard._derive_account_status(
+            {"plan": "free", "last_payment_status": st}, NOW
+        ) == cat, st
+    # E o `else` do CASE, que o regex não vê: status fora da lista é 'free'.
+    assert admin_dashboard._derive_account_status(
+        {"plan": "free", "last_payment_status": "active"}, NOW) == "free"
+
+
+def test_unpaid_e_a_unica_colisao_entre_terminal_no_free_e_vivo_na_stripe():
+    """A afirmação que AUTORIZA a guarda do `/trial-reset` a discriminar pelo
+    PAR, enunciada onde ela pode ser conferida.
+
+    Não é "só `unpaid` depende do plano" — essa seria FALSA e medi-la mostra por
+    quê: no território `plan='free'` TODO status vivo (`active`, `trialing`,
+    `past_due`, `incomplete`) vira `'free'`, porque sem plano o painel não vê
+    assinatura nenhuma. Divergir é o normal ali.
+
+    O que é raro, e é o que importa, é a COLISÃO: um status que o ramo
+    `plan='free'` classifica como TERMINAL (`canceled`) e que ao mesmo tempo
+    está em `_LIVE_PAYMENT_STATUSES` ("assinatura viva na Stripe"). É essa
+    sobreposição que torna o status sozinho um discriminador errado, e hoje ela
+    tem um membro só.
+
+    **Se um segundo status entrar na colisão, este teste fica vermelho e a
+    guarda do `/trial-reset` (que casa `pay == "unpaid"`) passa a ser estreita
+    demais.** É o efeito desejado: quem alargar a colisão tem de olhar a guarda.
+    """
+    terminais_no_free = {
+        st for st, cat in _status_do_case_sql("free").items() if cat == "canceled"
+    }
+    assert terminais_no_free == {"canceled", "incomplete_expired", "unpaid"}, terminais_no_free
+    colisao = terminais_no_free & set(admin_dashboard._LIVE_PAYMENT_STATUSES)
+    assert colisao == {"unpaid"}, colisao
+    # E a direção de cada lado, nomeada: é o par que a guarda do /trial-reset lê.
+    assert admin_dashboard._derive_account_status(
+        {"plan": "free", "last_payment_status": "unpaid"}, NOW) == "canceled"
+    assert admin_dashboard._derive_account_status(
+        {"plan": "pro", "last_payment_status": "unpaid"}, NOW) == "past_due"
 
 
 # ── Resumo Stripe (MRR / ticket médio) ─────────────────────────────────────
@@ -918,14 +993,25 @@ def test_trial_reset_409_com_assinatura_viva_e_nao_apaga_nada(panel_accounts):
         _drop_locks(h)
 
 
+# ATENÇÃO à fixture: todos os casos abaixo rodam em `uids["free"]`, ou seja com
+# `plan='free'`. Isso não importava enquanto a guarda lia o STATUS sozinho, e
+# passou a importar quando ela passou a ler o PAR — por isso `unpaid` mudou de
+# coluna AQUI e ganhou um teste PRÓPRIO com plano pago logo abaixo, em vez de
+# ser simplesmente virado nesta tabela. Virar o assertivo no lugar teria
+# apagado o controle positivo da guarda.
 @pytest.mark.parametrize("pay,esperado", [
-    # Vivos na Stripe: o gate recusa e a trava fica de pé. 'unpaid' (dunning) e
-    # 'incomplete' (3DS pendente) entram aqui porque o painel já os mostra como
-    # "Past due" — assinatura viva (_LIVE_PAYMENT_STATUSES).
+    # Vivos na Stripe: o gate recusa e a trava fica de pé. 'incomplete' (3DS
+    # pendente) entra aqui porque o painel o mostra como "Past due" — assinatura
+    # viva (_LIVE_PAYMENT_STATUSES) — e num plano `free` ele NÃO é terminal.
     ("active", 409),
     ("past_due", 409),
-    ("unpaid", 409),
     ("incomplete", 409),
+    # 'unpaid' + `plan='free'` é o ESTADO TERMINAL que o
+    # `customer.subscription.deleted` grava quando a Stripe encerra por
+    # inadimplência: a assinatura não existe mais lá, e o dono decidiu liberar
+    # ("pode, libero caso a caso"). Com plano PAGO ele continua 409 — ver
+    # `test_trial_reset_recusa_unpaid_com_plano_pago`.
+    ("unpaid", 200),
     # Terminais/ausentes: o botão TEM de funcionar. Controle positivo do grupo —
     # sem estes, um gate que recusa tudo passaria no teste, e é pior que o bug.
     ("canceled", 200),
@@ -950,6 +1036,92 @@ def test_trial_reset_gate_por_status_de_pagamento(panel_accounts, pay, esperado)
         resp = _reset_trial(_admin_client(), uid)
         assert resp.status_code == esperado, resp.text
         assert _trial_lock_exists(h) is (esperado == 409)
+    finally:
+        _drop_locks(h)
+
+
+@pytest.mark.parametrize("plan,pay,esperado", [
+    # CONTROLE POSITIVO DA GUARDA — o caso que ela existe para impedir. A
+    # assinatura está VIVA na Stripe, em dunning; liberar a trava aqui não
+    # cancela nada e o checkout novo esbarraria nela. Sem este caso, a decisão
+    # do dono ("pode, libero caso a caso") teria aberto TUDO sem ninguém ver.
+    ("pro", "unpaid", 409),
+    ("essencial", "unpaid", 409),
+    # O CASO NOVO: mesma coluna de status, plano `free` — a Stripe já deletou.
+    ("free", "unpaid", 200),
+])
+def test_trial_reset_le_o_par_e_nao_o_status(panel_accounts, plan, pay, esperado):
+    """`unpaid` com plano PAGO continua 409; `unpaid` com `plan='free'` libera.
+
+    **O status é O MESMO nos três casos** — é o `plan` que muda, e é essa a
+    prova de que a guarda passou a discriminar pelo PAR. Um teste que variasse
+    o status junto não separaria as duas coisas.
+
+    CONTROLE DECLARADO (`docs/controles_declarados.md`) — ALARGUE, não apague:
+    em `core/admin_dashboard.py`, troque
+    `encerrada_por_inadimplencia = plan_atual == "free" and pay == "unpaid"`
+    por `encerrada_por_inadimplencia = pay == "unpaid"` (a condição volta a ser
+    o status sozinho; o termo continua lá e deixa de discriminar). VERMELHOS:
+      `test_trial_reset_le_o_par_e_nao_o_status[pro-unpaid-409]`
+      `test_trial_reset_le_o_par_e_nao_o_status[essencial-unpaid-409]`
+    Direção: falso positivo de liberação — o admin apaga a trava anti-abuso de
+    uma conta cuja assinatura a Stripe ainda tem viva, e o checkout seguinte
+    esbarra nela. O caso `free-unpaid-200` fica VERDE sob essa injeção, e é isso
+    que o torna o caso novo e não uma terceira cópia.
+    """
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    h = _set_phone(uid, f"+5511{uid % 100000000:08d}")
+    _lock_trial(h, uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # `plan_expires_at` no FUTURO no caso pago: vigente de verdade, para
+            # o 409 não vir por vencimento. Delta absoluto.
+            cur.execute(
+                "update auth_accounts set plan=%s, last_payment_status=%s,"
+                "       plan_expires_at=%s where user_id=%s",
+                (plan, pay, None if plan == "free" else NOW + timedelta(days=30), uid),
+            )
+        conn.commit()
+    try:
+        resp = _reset_trial(_admin_client(), uid)
+        assert resp.status_code == esperado, resp.text
+        assert _trial_lock_exists(h) is (esperado == 409)
+        if esperado == 409:
+            assert "assinatura viva na Stripe" in resp.text
+    finally:
+        _drop_locks(h)
+
+
+def test_trial_reset_recusa_unpaid_com_plano_pago_vencido(panel_accounts):
+    """A fronteira que o reuso preguiçoso teria aberto sozinho.
+
+    Plano pago VENCIDO + `unpaid` é dunning com assinatura ainda viva na
+    Stripe — o vencimento é do nosso ENTITLEMENT, não da assinatura de lá. Se a
+    guarda tivesse reusado `_derive_account_status` (que devolve `'canceled'`
+    aqui, por causa do `plan_expires_at`), este caso teria virado 200 sem
+    ninguém pedir. Ela lê o par (`plan`, `status`) e ignora o vencimento.
+    """
+    _tag, uids = panel_accounts
+    uid = uids["free"]
+    h = _set_phone(uid, f"+5511{uid % 100000000:08d}")
+    _lock_trial(h, uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set plan='pro', last_payment_status='unpaid',"
+                "       plan_expires_at=%s where user_id=%s",
+                (NOW - timedelta(days=3), uid),
+            )
+        conn.commit()
+    try:
+        # Pré-condição que dá sentido ao caso: o PAINEL já chama isto de
+        # 'canceled', e mesmo assim a guarda recusa.
+        assert admin_dashboard._derive_account_status(
+            {"plan": "pro", "last_payment_status": "unpaid",
+             "plan_expires_at": NOW - timedelta(days=3)}, NOW) == "canceled"
+        assert _reset_trial(_admin_client(), uid).status_code == 409
+        assert _trial_lock_exists(h) is True
     finally:
         _drop_locks(h)
 

@@ -211,11 +211,20 @@ def test_barrado_manda_assinar_e_continua_recebendo_o_link():
     assert "http" in resposta, resposta
 
 
-def test_quem_escolheu_o_gratis_continua_vendo_a_franquia_do_gratis():
-    """A copy do Grátis não pode ter sumido para quem NÃO está barrado — ela é
-    verdadeira para quem já escolheu um plano e caiu no Grátis."""
+def test_pagante_ve_a_ficha_do_plano_dele_e_nao_a_do_gratis():
+    """Controle positivo do par acima: o `plano` continua respondendo a ficha
+    real de quem paga.
+
+    **Este teste substitui um que afirmava o CONTRÁRIO** — que a franquia do
+    Grátis ("30 lançamentos por mês") continuava valendo "para quem já escolheu
+    um plano e caiu no Grátis". Ela deixou de ser verdadeira: depois do corte
+    não existe lugar chamado Grátis onde ficar, então a ficha saiu do
+    `billing_commands._handle_plano` e o estado passou a responder "sem plano
+    ativo". A conta deste teste é PAGANTE, não "escolheu e caiu no Grátis"."""
     uid = _com_plano()
 
     resposta = _diga(uid, "plano")
 
-    assert "30 lançamentos" in resposta, resposta
+    assert "30 lançamentos" not in resposta, resposta
+    assert "sem plano ativo" not in resposta.lower(), resposta
+    assert "plus" in resposta.lower(), resposta
