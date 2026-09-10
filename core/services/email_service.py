@@ -1040,11 +1040,23 @@ PLAN_DISPLAY_NAMES = {
 
 
 def _plan_name(plan: str | None) -> str:
-    """Nome comercial do plano; valor fora do mapa cai no genérico.
+    """Nome comercial do plano; valor fora do mapa cai na marca sem sufixo.
 
-    O fallback é a marca sem sufixo de propósito: linha antiga, plano
-    descontinuado ou dado corrompido não podem chamar a pessoa de assinante de
-    um plano que ela não comprou — nem derrubar o envio.
+    **Quem chega pelo Stripe NUNCA cai no genérico**, e a versão anterior desta
+    docstring afirmava o contrário ("linha antiga, plano descontinuado ou dado
+    corrompido"). Não é o que acontece: naqueles ramos o `plan` sai de
+    `_stored_plan_for_price` (`frontend/finance_bot_websocket_custom.py:293`),
+    que devolve `'pro'` para price desconhecido, price nulo E assinatura sem
+    item — as três formas de "dado ruim" viram Plus, e o e-mail sai "PigBank+".
+    O genérico é alcançável por UM caminho só: `plan=None` explícito, que é o
+    que a fatura AVULSA (`invoice.payment_failed` sem assinatura) manda, por não
+    ter plano nenhum para nomear.
+
+    O atenuante de o Stripe errar sempre para `'pro'`: esse MESMO valor é o que
+    grava a coluna `plan` da conta (`_stored_plan_for_price` alimenta os dois),
+    então o nome do e-mail erra JUNTO com o entitlement, nunca sozinho — quem
+    receber "PigBank+" indevidamente está, no banco, com o Plus que o e-mail
+    nomeia. Consertar isso é consertar o mapa de prices, não este fallback.
     """
     return PLAN_DISPLAY_NAMES.get(plan, "PigBank")
 
@@ -1218,12 +1230,26 @@ def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
         html_body=html, text_body=text,
     )
 
-def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
-    """E-mail quando pagamento falha — Stripe vai retentar (item 40)."""
+def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = "") -> bool:
+    """E-mail quando pagamento falha — Stripe vai retentar (item 40).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`. Vem do
+    price da assinatura que o ramo do webhook JÁ tinha em mão (o
+    `Subscription.retrieve` que decide se o evento é obsoleto), e é `None` na
+    fatura AVULSA, que não tem assinatura de onde tirar plano: ali sai o
+    genérico "PigBank", como no `send_payment_reminder_email` logo abaixo.
+
+    DÍVIDA DE COPY, deliberadamente não tocada aqui: o texto promete que o
+    plano "volta pra Free", e plano Free não existe mais no produto. É decisão
+    de produto (o que acontece hoje com quem não paga), não erro de nome — quem
+    trouxer a regra reescreve as duas copies, esta e a do
+    `send_subscription_canceled_email`.
+    """
+    nome = _plan_name(plan)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Opa, tivemos um problema.</p>
-      <p>A cobrança do seu PigBank+ <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
+      <p>A cobrança do seu {nome} <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
       ou banco recusando a transação.</p>
       <p>Não se preocupa — a gente vai tentar de novo automaticamente nos próximos dias. Mas pra evitar perder o
       acesso aos recursos Pro, vale dar uma olhada agora:</p>
@@ -1235,13 +1261,13 @@ def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
     """
     html = _base_html("Pagamento falhou — atualize seu cartão", content)
     text = (
-        f"PigBank+ — pagamento falhou.\n\n"
+        f"{nome} — pagamento falhou.\n\n"
         f"Vamos tentar de novo automaticamente, mas pra evitar perder acesso:\n"
         f"Atualize o cartão em {dash}/conta\n\n"
         f"Se as tentativas falharem, o plano volta pra Free."
     )
     return send_email(
-        to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão",
+        to=to, subject=f"⚠️ {nome} — pagamento falhou, atualize seu cartão",
         html_body=html, text_body=text,
     )
 
@@ -1282,8 +1308,19 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     )
 
 
-def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
-    """E-mail de confirmação de cancelamento (item 41)."""
+def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
+                                     dashboard_url: str = "") -> bool:
+    """E-mail de confirmação de cancelamento (item 41).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`. Sai do
+    price da própria Subscription que o `customer.subscription.deleted` entrega,
+    e NÃO da conta: o `update_user_plan(user_id, "free", None)` do ramo roda
+    antes deste e-mail, então ler a conta devolveria "free" para todo mundo.
+
+    DÍVIDA DE COPY, deliberadamente não tocada aqui: a mesma promessa de volta
+    ao "Free" do `send_payment_failed_email` — ver a docstring de lá.
+    """
+    nome = _plan_name(plan)
     has_grace = expires_at is not None
     fim = _fmt_brl_date(expires_at) if has_grace else None
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1307,7 +1344,7 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
         access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites Pro foram desativados."
 
     content = f"""
-      <p>🐷 Sua assinatura PigBank+ foi cancelada.</p>
+      <p>🐷 Sua assinatura {nome} foi cancelada.</p>
       {access_html}
       <p>Valeu por ter dado uma chance pra gente. Se quiser contar o que faltou ou poderia melhorar,
       responde este email ou escreve pra <a href="mailto:{support_email}">{support_email}</a> — leitura garantida.</p>
@@ -1315,14 +1352,14 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
         <a class="btn" href="{dash}/app">Abrir o dashboard</a>
       </p>
     """
-    html = _base_html("Assinatura cancelada — PigBank+", content)
+    html = _base_html(f"Assinatura cancelada — {nome}", content)
     text = (
-        f"PigBank+ cancelado.\n\n"
+        f"{nome} cancelado.\n\n"
         f"{access_text}\n\n"
         f"Mudou de ideia? Mande 'assinar plano' no bot.\n\n"
         f"Dúvidas ou feedback? Responde este email ou escreve pra {support_email} — leitura garantida."
     )
     return send_email(
-        to=to, subject="PigBank+ — assinatura cancelada",
+        to=to, subject=f"{nome} — assinatura cancelada",
         html_body=html, text_body=text,
     )

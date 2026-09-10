@@ -25,29 +25,36 @@ RODADAS, não previstas — cada uma com o vermelho que produziu:
     `test_plus_cobrado_continua_pigbank_mais`, além de dois casos do arquivo do
     Pix, que compartilham o mesmo mapa.
   · **negativo, o seam** — tire `plan_value` da chamada de
-    `_fire_email(user_id, send_pro_charged_email, ...)`
-    (`finance_bot_websocket_custom.py:5410`): só
+    `_fire_email(user_id, send_pro_charged_email, ...)`: só
     `test_a_conversa_do_webhook...` fica vermelho, com
-    `send_pro_charged_email recebeu 9.9`. Esta mutação não levanta erro nenhum
-    em produção — manda o VALOR no lugar do plano e o cliente recebe
-    "PigBank" genérico. É a única das três que a copy não alcança, e por isso
-    este teste existe.
+    `send_pro_charged_email recebeu 9.9`. **Em produção esta mutação não
+    levanta nada**, e o que ela produz foi RODADO, não deduzido: os argumentos
+    andam uma casa, `amount_brl` recebe o `datetime` do vencimento e o
+    `f"R$ {amount_brl:,.2f}"` cai no `__format__` do `datetime` — que é o
+    `strftime` e devolve a própria string de formato. O e-mail sai
+    `✓ Pagamento confirmado — PigBank (R$ .,2f)`: nome genérico, valor
+    destruído, zero exceção. É a única das três que a copy não alcança, e por
+    isso este teste existe.
   · **positivo** — `test_plus_cobrado_continua_pigbank_mais` é o plano que já
     estava CERTO com o texto fixo, e continua verde na 1ª mutação. Sem ele, o
     grupo passaria num conserto que trocasse todo mundo por um genérico — que
     é pior que o bug.
 
+Os outros DOIS e-mails da mesma família — `send_payment_failed_email` e
+`send_subscription_canceled_email` — moram em
+`tests/test_billing_email_nome_do_plano_irmaos.py`, e o motivo de estarem lá é
+o teto de 350 linhas por arquivo (§0.5): são outro assunto (o que acontece
+quando a cobrança FALHA), com seams em outros dois ramos do webhook.
+
 O que este arquivo NÃO alcança: o envio de verdade (`send_email` é
-monkeypatchado), o `_check_trial_ending` do scheduler (nenhum teste do repo
-exercita aquele laço) e os dois irmãos que ficaram de fora do escopo da #351 —
-`send_payment_failed_email` (`email_service.py:1193`) e
-`send_subscription_canceled_email` (`:1277`) continuam com "PigBank+" fixo.
+monkeypatchado) e o `_check_trial_ending` do scheduler (nenhum teste do repo
+exercita aquele laço).
 """
 from datetime import datetime, timedelta, timezone
 
 from _billing_grants_helpers import (
-    conta as _conta, evt_checkout as _evt_checkout, evt_paid as _evt_paid,
-    garantir_system_event_logs, sub_stripe as _sub,
+    conta as _conta, espiao_email as _espiao, evt_checkout as _evt_checkout,
+    evt_paid as _evt_paid, garantir_system_event_logs, sub_stripe as _sub,
 )
 import frontend.finance_bot_websocket_custom as dashboard
 from core.services import email_service as es
@@ -134,21 +141,9 @@ def test_a_conversa_do_webhook_manda_o_plano_nos_tres_emails(user_id, monkeypatc
     monkeypatch.setattr(dashboard, "STRIPE_PRICE_ID_ESSENCIAL_MENSAL", "price_ess")
 
     vistos: dict[str, tuple] = {}
-
-    def _espiao(nome):
-        def _fn(*a, **kw):
-            vistos[nome] = a
-            return True                      # confirma o envio: senão o
-                                             # `_fire_email` trata como falha
-        # `__name__` é a CHAVE da dedup do `_fire_email`. Três espiões com o
-        # mesmo nome viram um só balde: medido — o 1º e-mail gravava a chave e
-        # os outros dois saíam DEDUPADOS, com o teste acusando "não chamou".
-        _fn.__name__ = nome
-        return _fn
-
     for nome in ("send_pro_welcome_email", "send_pro_charged_email",
                  "send_trial_ending_email"):
-        monkeypatch.setattr(es, nome, _espiao(nome), raising=False)
+        monkeypatch.setattr(es, nome, _espiao(vistos, nome), raising=False)
 
     subs = {"sub_nome": _sub("active", "price_ess", 30)}
 

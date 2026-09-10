@@ -5088,6 +5088,22 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
+        **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
+        Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
+        `invoice.paid` de planos diferentes no MESMO dia (upgrade
+        Essencial→Pro, que gera fatura proporcional na hora) deixam de ser
+        indistinguíveis: o segundo é suprimido pela chave que o primeiro gravou
+        e o cliente fica com "PigBank Essencial" para uma cobrança de Pro. Antes
+        do #351 os dois e-mails eram idênticos e suprimir era de graça.
+        ponytail: teto conhecido e não fechado. O custo de fechar é maior que o
+        do caso: `chave` é TAMBÉM o `event_type` gravado em
+        `system_event_logs`, lido de fora daqui por nome literal (o
+        `recent_event_exists("trial_ending_email_sent", ...)` do ramo
+        `trial_will_end`, :5547) e pelos painéis — pendurar o plano nela
+        fragmenta a série histórica e quebra aquele leitor. Se o upgrade
+        no mesmo dia virar volume, o conserto é `chave` com sufixo do plano
+        MAIS o leitor de fora migrado junto, num commit só.
+
         Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
@@ -5116,6 +5132,16 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         cada retry não é; e ZERO e-mail na janela inteira — o que uma dedupe
         gravada sem olhar o retorno produz — é o pior dos três.
         """
+        # `fn.__name__` FORA do try, e isto é uma mina, não um estilo: um
+        # `functools.partial` ou qualquer wrapper sem `__name__` levanta
+        # `AttributeError` AQUI, onde nada captura — e o webhook devolve 5xx
+        # para a Stripe por causa de um e-mail. Passe funções nomeadas (todos
+        # os call sites de hoje passam); se algum dia precisar de argumentos
+        # pré-ligados, use `*args` desta função, não `partial`.
+        #
+        # ponytail: mina pré-existente e não alcançável hoje — não mexi. Quem
+        # precisar mesmo de wrapper: `getattr(fn, "__name__", ...)` resolve, ou
+        # mover a linha para dentro do try.
         chave = f"{fn.__name__}_sent"
         try:
             from core.observability import recent_event_exists  # noqa: PLC0415
@@ -5573,6 +5599,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         _sub_id = _invoice_subscription_id(invoice)
         _status_agora = ""
+        _sub_agora = None
         if user_id and _sub_id:
             # `to_thread` porque este handler é `async` e roda no event loop
             # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
@@ -5661,9 +5688,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # deixavam o segundo mudo. Fora do ciclo novo vale
             # `DUNNING_GRACE_DAYS`: cada smart retry do MESMO ciclo cai na
             # janela e não vira um e-mail a mais.
+            #
+            # O PLANO vem do `retrieve` que este ramo JÁ fez para decidir se o
+            # evento é obsoleto — mesma fonte dos outros e-mails da família
+            # (#351). Sem ele, o assinante Essencial cujo cartão falha recebia
+            # "⚠️ PigBank+ — pagamento falhou". `None` quando `_sub_agora` é
+            # None, que é a fatura AVULSA (sem `subscription` em nenhuma das
+            # duas formas da API): ali não há assinatura de onde tirar plano, e
+            # `_plan_name` devolve o genérico "PigBank".
+            _plano_falha = (_stored_plan_for_price(_subscription_price_id(_sub_agora))
+                            if _sub_agora is not None else None)
             from core.services.email_service import send_payment_failed_email
             await _fire_email(
-                user_id, send_payment_failed_email,
+                user_id, send_payment_failed_email, _plano_falha,
                 dedup_days=0.0 if _abriu_ciclo else float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
@@ -5753,11 +5790,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email de confirmacao de cancelamento (item 41)
+            # O plano sai do PRICE do `obj`, que é a própria Subscription do
+            # evento (#351) — e não da conta, porque o `update_user_plan(...,
+            # "free", None)` lá em cima já rodou e a conta diria "free" para
+            # todo mundo. Sem isto, quem cancelava Essencial lia "PigBank+ —
+            # assinatura cancelada".
+            _plano_cancelado = _stored_plan_for_price(_subscription_price_id(obj))
             from core.services.email_service import send_subscription_canceled_email
             try:
                 email = await _user_email(user_id)
                 if email:
-                    await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
+                    await asyncio.to_thread(send_subscription_canceled_email, email,
+                                            _plano_cancelado, expires_for_email,
+                                            DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email canceled falhou user={user_id}: {exc}")
             # Notificação admin
