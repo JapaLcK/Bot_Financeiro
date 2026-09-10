@@ -154,12 +154,15 @@ pagamento/cancelamento (`clear_past_due_since`, que os ramos `checkout` e
 decidiu o acesso). Os três helpers moram em `db/dunning.py`, não em `db/plans.py`.
 `DUNNING_GRACE_DAYS = 7` é a carência.
 
-**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna só
-alimenta duas coisas: o **lembrete de pagamento do 6º dia**
+**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna
+alimenta **três** coisas: o **lembrete de pagamento do 6º dia**
 (`core/services/payment_reminder.py`, no tick de `engagement_scheduler`; e-mail
 sempre, WhatsApp só se `WA_TEMPLATE_PAYMENT_REMINDER` apontar para um template
-aprovado na Meta — vazio por padrão → caminho dormente) e a janela de dedupe do
-e-mail de falha no webhook. O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
+aprovado na Meta — vazio por padrão → caminho dormente), a janela de dedupe do
+e-mail de falha no webhook e o predicado `carencia_aberta`, lado DIREITO do OR
+de `plan_service.tem_direito_hoje` (o relógio só CONCEDE tempo; a autoridade é
+o direito pago), consumido pelo aviso de corte
+(`scripts/aviso_fim_do_gratis.py`). O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
 (**default off**, lida a cada tick, sem redeploy; a guarda é a 1ª linha de
 `check_payment_reminder`, então desligada nem consulta o funil). Grant
 `pix`/`admin` vigente pula o lembrete (`legacy` não). Nenhuma copy deste caminho
