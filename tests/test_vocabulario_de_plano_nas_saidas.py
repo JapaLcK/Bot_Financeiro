@@ -6,49 +6,68 @@ entra). Arquivo separado, e não mais uma seção lá, porque o teto de 350 linh
 caiu bem: entra × sai são as duas metades da mesma fronteira, e cada uma tem os
 seus controles.
 
-Quatro saídas carregavam o valor LEGADO da coluna, medidas na `main` em
+CINCO saídas carregavam o valor LEGADO da coluna, medidas na `main` em
 `b71de69`:
 
     resposta do checkout   `core/services/pix_checkout_resposta.py`
     resposta do poll       `frontend/routes/billing_pix.py`
     corpo do 409           `frontend/routes/billing_pix.py`
     `descricao` da fatura  `core/services/pix_checkout.py`
+    `purchase` do GA4      `core/services/pix_drain_effects.py`
 
 As três primeiras não têm consumidor nenhum hoje — é por isso que ninguém viu.
 A quarta o cliente lê: saía `PigBank anual (pro_max)` no app do banco de quem
-paga.
+paga. A QUINTA saiu da primeira varredura deste arquivo (achado do Tester) e é a
+que vira dinheiro em relatório: o `plan` do `purchase` é `item_id` e `item_name`
+no GA4, e o Stripe já mandava o público no mesmo campo — o legado daqui colidia
+o Pro consigo mesmo e o Plus do Pix (R$ 199) com o Pro do Stripe.
 
 CONTROLES DESTE GRUPO (medidos, não prometidos):
 
-  * NEGATIVO — uma mutação por saída, RODADAS, com os nomes que caem:
+  * NEGATIVO — uma mutação por saída, RODADAS (as cinco de novo depois de o
+    portão ser parametrizado, porque o nome dele mudou), com os nomes que caem.
+    `PORTAO` abaixo é `..._deixa_o_valor_de_coluna_escapar`:
 
       resposta do checkout   `tier_publico(linha["plan"])` → `linha["plan"]`
-        em `pix_checkout_resposta.py`  → 4 vermelhos:
-        `..._falam_publico[plus]`, `[pro]`, `..._pro_max_escapar`,
+        em `pix_checkout_resposta.py`  → 5 vermelhos:
+        `..._falam_publico[plus]`, `[pro]`, `PORTAO[plus]`, `PORTAO[pro]`,
         `..._consumidor_real_continua_casando`
       resposta do poll       idem em `frontend/routes/billing_pix.py`
-        → `..._falam_publico[plus]`, `[pro]`, `..._pro_max_escapar`
+        → 4: `..._falam_publico[plus]`, `[pro]`, `PORTAO[plus]`, `PORTAO[pro]`
       corpo do 409           `tier_publico(exc.plano)` → `exc.plano`
-        → `test_o_409_de_cobertura_ja_paga_fala_publico`
+        → 1: `test_o_409_de_cobertura_ja_paga_fala_publico`
       `descricao` da fatura  volta a `f"PigBank anual ({linha['plan']})"`
-        → os 3 `..._nome_comercial[*]` e `..._pro_max_escapar`
+        → 5: os 3 `..._nome_comercial[*]`, `PORTAO[plus]` e `PORTAO[pro]`
+      `purchase` do GA4      `tier_publico(cobranca["plan"])` → `cobranca["plan"]`
+        em `pix_drain_effects.py`
+        → 2: `..._purchase_do_ga4_leva_o_plano_publico[plus]` e `[pro]`
 
-    `[essencial]` continua VERDE nas três primeiras de propósito: ali o legado e
-    o público são a MESMA string, e é `[plus]`/`[pro]` que discriminam.
+    `[essencial]` continua VERDE em todas de propósito: ali o legado e o público
+    são a MESMA string, e é `[plus]`/`[pro]` que discriminam.
+
+    O PORTÃO tem mutação própria, porque a primeira versão dele não media o que
+    prometia: um campo novo vazando SÓ o legado do Plus
+    (`"tier_atual": linha["plan"] if linha["plan"] == "pro" else None`, em
+    `pix_checkout_resposta.py`) passava com o grupo inteiro verde. Parametrizado,
+    ele fica VERMELHO em `PORTAO[plus]` — e só nele, que é o caso que a versão
+    anterior nunca chegava a rodar.
   * POSITIVO — `test_o_consumidor_real_continua_casando`. O único consumidor de
     `plan` que existe hoje é `pixSub.plan === plano`
     (`frontend/pix-checkout.js:101`), e ele lê o `/billing/subscription`, que
-    JÁ falava público. Que ele MEDE está provado por uma quinta mutação:
+    JÁ falava público. Que ele MEDE está provado por mais uma mutação:
     `tier_publico` devolvendo um vocabulário TERCEIRO
     (`{"pro": "PLUS", "pro_max": "PRO"}`) o deixa vermelho junto com
-    `..._falam_publico[plus]`, `[pro]` e o 409 — e o portão do `pro_max` fica
-    VERDE, porque legado nenhum vazou. Sem este caso o grupo aprovaria a
-    tradução que quebra o botão "Renovar" de quem já é assinante.
+    `..._falam_publico[plus]`, `[pro]`, o 409 e os dois do GA4 — e o `PORTAO`
+    fica VERDE nos dois cards, porque legado nenhum vazou. Sem este caso o
+    grupo aprovaria a tradução que quebra o botão "Renovar" de quem já é
+    assinante.
 
 O que este arquivo NÃO pega: o provedor é falso (`asaas_falso`), então o que ele
-faz com a `descricao` não é medido — só o texto que sai daqui. E o JS não roda:
-a ponta do `pixSub.plan === plano` é verificada comparando as respostas das duas
-rotas, não clicando no botão.
+faz com a `descricao` não é medido — só o texto que sai daqui; e o GA4 também é
+falso (`mundo_externo`), então o que se afirma é o valor que chega ao
+`send_purchase`, não o que o relatório do Google mostra. E o JS não roda: a ponta
+do `pixSub.plan === plano` é verificada comparando as respostas das duas rotas,
+não clicando no botão.
 """
 from __future__ import annotations
 
@@ -59,10 +78,12 @@ from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.billing_pix as rotas
-from _billing_grants_helpers import conta
+from _billing_grants_helpers import conta, garantir_system_event_logs
+from _dreno_pix_helpers import entregar, mundo_externo, nova_cobranca
 from _pix_checkout_helpers import (  # noqa: F401 — fixtures
     _marcar_paga, asaas_falso, vendavel)
 from core.services.email_service import PIX_PLAN_NAMES
+from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
 from core.services.plan_service import TIER_TO_STORED_PLAN
 
 _CSRF = "test-csrf-saidas"
@@ -70,7 +91,7 @@ _CSRF = "test-csrf-saidas"
 # O molde da `descricao`, para o assert não repetir o literal três vezes. O NOME
 # vem de `PIX_PLAN_NAMES` (§0.7) — cravá-lo aqui criaria a segunda fonte do nome
 # que o e-mail de confirmação já usa.
-_FATURA = "{} — plano anual"
+_FATURA = "{} - plano anual"
 
 
 @pytest.fixture(autouse=True)
@@ -113,8 +134,28 @@ def _checkout(logado, plan: str):
         json={"plan": plan, "cpf_cnpj": "12345678901"})
 
 
-_CARDS = [("essencial", "essencial"), ("plus", "pro"), ("pro", "pro_max")]
-_IDS = ["essencial", "plus", "pro"]
+# Os cards da /precos, na ordem da escada e LIDOS da fonte (§0.7): plano vendável
+# novo entra sozinho em todo `parametrize` daqui, o portão de categoria incluído.
+_CARDS = list(TIER_TO_STORED_PLAN.items())
+_IDS = [publico for publico, _ in _CARDS]
+
+# O portão de categoria só DISCRIMINA onde as duas strings diferem: em
+# `essencial` o legado É o público, e procurá-lo acusaria o próprio campo `plan`.
+_DISCRIMINAM = [(p, l) for p, l in _CARDS if p != l]
+_IDS_DISCRIMINAM = [publico for publico, _ in _DISCRIMINAM]
+
+
+def _valores(corpo):
+    """Todo escalar de um corpo JSON, em profundidade — inclusive o do campo que
+    ainda não existe, que é o ponto do portão."""
+    if isinstance(corpo, dict):
+        for valor in corpo.values():
+            yield from _valores(valor)
+    elif isinstance(corpo, list):
+        for valor in corpo:
+            yield from _valores(valor)
+    else:
+        yield corpo
 
 
 @pytest.mark.parametrize("publico,legado", _CARDS, ids=_IDS)
@@ -188,30 +229,74 @@ def test_o_409_de_cobertura_ja_paga_fala_publico(logado, vendavel, asaas_falso):
     assert asaas_falso["ordem"][-1] != "create", "a recusa emitiu cobrança"
 
 
-def test_nenhuma_saida_do_pix_deixa_o_pro_max_escapar(logado, vendavel,
-                                                      asaas_falso):
+@pytest.mark.parametrize("publico,legado", _DISCRIMINAM, ids=_IDS_DISCRIMINAM)
+def test_nenhuma_saida_do_pix_deixa_o_valor_de_coluna_escapar(
+        logado, vendavel, asaas_falso, publico, legado):
     """O PORTÃO DA CATEGORIA: a próxima saída nova nasce vermelha aqui.
 
     Os asserts acima olham o campo `plan` POR NOME, e por isso são cegos a um
     campo que ainda não existe — foi assim que quatro saídas passaram
-    despercebidas. Este olha o corpo INTEIRO, serializado: qualquer chave que
-    venha a carregar o valor da coluna cai aqui sem ninguém ter de se lembrar de
-    escrever o assert.
+    despercebidas. Este olha o corpo INTEIRO: qualquer chave, em qualquer
+    profundidade, que venha a carregar `TIER_TO_STORED_PLAN[publico]` cai aqui
+    sem ninguém ter de se lembrar de escrever o assert.
 
-    **O que ele NÃO pega, de propósito:** o legado do tier Plus é `pro`, que
-    também é valor PÚBLICO válido (o tier Pro) — procurá-lo daria falso positivo
-    em toda compra de Pro. `pro_max` é o único token puramente legado, e é por
-    isso que a compra medida aqui é a de Pro. Contra o vazamento de `pro` valem
-    os casos por campo acima, um por card.
+    **Roda nos DOIS cards que discriminam, e a primeira versão não rodava.** Ela
+    comprava só Pro e procurava o literal `pro_max`, então um campo novo que
+    vazasse só o legado do Plus (`"tier_atual": "pro"`) passava com o grupo
+    inteiro verde — medido pelo Tester. Um consumidor futuro desse campo marcaria
+    "Renovar" no card Pro (R$ 499) para quem comprou Plus (R$ 199).
+
+    Compara VALOR, não substring, e é por isso que dá para procurar `pro`: o
+    `qr_image` é um data URL de milhares de caracteres, e `"pro" in corpo`
+    acusaria o ruído do base64 — falha intermitente com cara de vazamento. O que
+    a comparação por valor não pega é o legado EMBUTIDO numa frase maior; contra
+    isso vale a `descricao` da fatura, que é texto curto e determinístico.
     """
-    r = _checkout(logado, "pro")
+    r = _checkout(logado, publico)
     assert r.status_code == 200, r.text
     poll = logado.http.get(f"/billing/pix/{r.json()['public_token']}")
+    assert poll.status_code == 200, poll.text
 
-    for onde, corpo in (("checkout", r.text), ("poll", poll.text),
-                        ("fatura", asaas_falso["descricoes"][0])):
-        assert "pro_max" not in corpo, (
-            f"a resposta do {onde} carrega o valor de coluna 'pro_max': {corpo}")
+    assert legado == TIER_TO_STORED_PLAN[publico]   # o que se procura, da fonte
+    for onde, corpo in (("checkout", r.json()), ("poll", poll.json())):
+        assert legado not in list(_valores(corpo)), (
+            f"o {onde} do card '{publico}' devolveu o valor de coluna "
+            f"'{legado}' em algum campo: {corpo}")
+    assert legado not in asaas_falso["descricoes"][0], (
+        f"a fatura do card '{publico}' carrega o valor de coluna '{legado}': "
+        f"{asaas_falso['descricoes'][0]}")
+
+
+@pytest.mark.parametrize("publico,legado", _CARDS, ids=_IDS)
+def test_o_purchase_do_ga4_leva_o_plano_publico(user_id, monkeypatch,
+                                                publico, legado):
+    """A QUINTA saída, e a única que vira DINHEIRO em relatório: o `plan` do
+    `purchase` do GA4 (`core/services/pix_drain_effects.py`), que
+    `core/services/ga4_mp.py` usa como `item_id` E `item_name`.
+
+    O Stripe já traduz no mesmo destino (`_ga_plano_publico`), então o legado
+    daqui colidia DUAS linhas de receita: o Pro virava dois produtos (`pro` pelo
+    Stripe, `pro_max` pelo Pix) e o Plus do Pix (`pro`, R$ 199) caía na mesma
+    linha do Pro do Stripe (R$ 39,90/mês). É o achado do Codex no #244.
+
+    Pelo DRENO, não chamando `_ga4` na mão: o que se afirma é que o valor
+    traduzido chega ao seam, e o `cobranca` que o efeito lê é montado pelo
+    caminho real.
+    """
+    garantir_system_event_logs()
+    conta(user_id, "free", None)
+    externo = mundo_externo(monkeypatch)
+    cobranca = nova_cobranca(user_id, plan=legado, plan_stored=legado,
+                             price_cents=PRECOS_ANUAIS_CENTS[legado],
+                             amount_cents=PRECOS_ANUAIS_CENTS[legado])
+
+    entregar("PAYMENT_RECEIVED", cobranca)
+
+    assert externo["ga4"] == 1, "o efeito ga4 não rodou — o assert abaixo mediria zero"
+    enviado = externo["ga4_kw"][0]
+    assert enviado["plan"] == publico, (
+        f"o purchase do card '{publico}' foi para o GA4 como '{enviado['plan']}'")
+    assert enviado["value"] == PRECOS_ANUAIS_CENTS[legado] / 100
 
 
 def test_o_consumidor_real_continua_casando(logado, vendavel, asaas_falso):

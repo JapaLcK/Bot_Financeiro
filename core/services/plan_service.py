@@ -62,12 +62,14 @@ def tier_publico(plan_stored: str) -> str:
     """Valor legado da coluna → o tier PÚBLICO, sem tocar no banco.
 
     O irmão sem-banco de `get_plan_tier`, para quem já tem a string na mão e não
-    o `user_id`: as respostas HTTP do checkout Pix e do poll dele. Mora aqui
-    porque quem é dono do vocabulário é `_STORED_PLAN_TO_TIER` — uma quarta
-    cópia do `{"pro": "plus", "pro_max": "pro"}` é o §0.7 ao contrário.
+    o `user_id`: as respostas HTTP do Pix (checkout, poll e o 409), o `plan` do
+    `purchase` do GA4 e o `/billing/subscription`. Mora aqui porque quem é dono
+    do vocabulário é `_STORED_PLAN_TO_TIER` — outra cópia do
+    `{"pro": "plus", "pro_max": "pro"}` é o §0.7 ao contrário.
 
-    Desconhecido volta como veio, igual ao `_plan_publico` do monólito: numa
-    resposta de venda, apagar o plano é pior que devolver um nome estranho.
+    Desconhecido volta como veio: numa resposta de venda, apagar o plano é pior
+    que devolver um nome estranho. Era o comportamento do `_plan_publico` do
+    monólito, a cópia local que esta função substituiu.
     """
     return _STORED_PLAN_TO_TIER.get(plan_stored, plan_stored)
 

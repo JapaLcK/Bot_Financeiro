@@ -45,7 +45,8 @@ from _billing_grants_helpers import conta
 from _pix_checkout_helpers import asaas_falso, vendavel  # noqa: F401 — fixtures
 from core.services.email_service import PLAN_DISPLAY_NAMES
 from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
-from core.services.plan_service import _STORED_PLAN_TO_TIER, TIER_TO_STORED_PLAN
+from core.services.plan_service import (
+    _STORED_PLAN_TO_TIER, TIER_TO_STORED_PLAN, tier_publico)
 from db.pix_charges import buscar_por_public_token
 
 
@@ -126,8 +127,8 @@ def test_cada_card_cobra_o_preco_que_anuncia(logado, vendavel, asaas_falso,
 
     linha = buscar_por_public_token(logado.user_id, r.json()["public_token"])
     assert linha is not None, "a cobrança não foi gravada"
-    # As DUAS colunas continuam no vocabulário legado: grants, projeção e o
-    # `_plan_publico` do /billing/subscription dependem disso.
+    # As DUAS colunas continuam no vocabulário legado: grants, projeção e a
+    # tradução do /billing/subscription dependem disso.
     assert linha["plan"] == legado
     assert linha["plan_stored"] == legado
     assert int(linha["price_cents"]) == esperado
@@ -155,7 +156,12 @@ def test_os_dois_mapas_de_plano_sao_inversos():
     for publico, legado in TIER_TO_STORED_PLAN.items():
         assert _STORED_PLAN_TO_TIER[legado] == publico, (
             f"'{publico}' → '{legado}' → '{_STORED_PLAN_TO_TIER.get(legado)}'")
-        assert dashboard._plan_publico(legado) == publico
+        # `tier_publico` é a FUNÇÃO do mesmo mapa, e o que ela prendia era a
+        # cópia local do monólito (`_plan_publico`), que deixou de existir: hoje
+        # o /billing/subscription chama esta mesma função. Quem cobre a rota,
+        # pela rota, é `test_o_consumidor_real_continua_casando` em
+        # `tests/test_vocabulario_de_plano_nas_saidas.py`.
+        assert tier_publico(legado) == publico
     # E todo plano vendável tem preço: um valor sem entrada aqui viraria 503
     # `preco_anual_nao_configurado` só na hora da venda.
     assert set(TIER_TO_STORED_PLAN.values()) <= set(PRECOS_ANUAIS_CENTS)

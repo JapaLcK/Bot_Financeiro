@@ -324,7 +324,10 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             # legenda nenhuma para traduzir um slug. `PIX_PLAN_NAMES` é a fonte
             # que o e-mail de confirmação já usa, chaveada pelo MESMO valor
             # legado da coluna (§0.7) — o cliente lê o mesmo nome nos dois.
-            descricao=f"{PIX_PLAN_NAMES.get(linha['plan'], 'PigBank')} — "
+            # Separador ASCII de propósito: como cada app de banco renderiza um
+            # travessão (U+2014) na descrição do Pix não dá para verificar aqui,
+            # e o hífen não perde nada. O texto era ASCII puro antes do #350.
+            descricao=f"{PIX_PLAN_NAMES.get(linha['plan'], 'PigBank')} - "
                       f"plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
