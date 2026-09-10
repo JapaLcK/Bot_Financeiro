@@ -1,12 +1,14 @@
 /**
- * O QR do Pix anual da /precos: o modal, a cópia, o poll e o §13.6.
+ * O QR do Pix anual da /precos: o modal, a cópia, o poll, o §13.6 e as duas
+ * caixas de recusa do 409.
  *
  * Metade de trás do pix-checkout.js, e não um arquivo por gosto: juntos os dois
  * passam das 350 linhas do `quality/max-lines`. Os dois são script CLÁSSICO e
- * dividem o mesmo escopo global — daqui saem `pixModalQr` e `pixEncerrar`, e de
- * lá vêm `pixLinha`, `pixBotao`, `pixRotular`, `pixBrl`, `pixApagarDoc` e
- * `pixCheckout`. O `pixPoll` (estado do modal aberto) mora SÓ aqui; o `pixDoc`
- * mora SÓ lá: nenhum dos dois arquivos escreve variável do outro.
+ * dividem o mesmo escopo global — daqui saem `pixModalQr`, `pixEncerrar` e as
+ * duas caixas de recusa, e de lá vêm `pixLinha`, `pixBotao`, `pixRotular`,
+ * `pixBrl`, `pixApagarDoc`, `pixCheckout` e `pixEnviar`. O `pixPoll` (estado do
+ * modal aberto) mora SÓ aqui; o `pixDoc` mora SÓ lá: nenhum dos dois arquivos
+ * escreve variável do outro.
  *
  * O modal é UM só, com dois estados: o pix-checkout.js abre a caixa pedindo o
  * CPF/CNPJ (o Asaas exige o documento do pagador) e o `pixModalQr` daqui troca o
@@ -267,4 +269,54 @@ function pixDesistir() {
   pixRotular(pixPoll.status, "ph-clock", "Não consegui confirmar por aqui — o"
     + " código continua válido. Entre de novo e a gente confirma.");
   pixAgendar(Math.max(0, pixPoll.deadline - Date.now()));
+}
+
+// ── As duas caixas de recusa do 409 ─────────────────────────────────────────
+//
+// Aqui e não no pix-checkout.js por TETO: aquele bateu nas 350 linhas do
+// `quality/max-lines`, e este é a metade de trás dele. Quem chama as duas é o
+// `pixEnviar` de lá, e as duas tiram o formulário — com o CPF digitado dentro
+// dele — da tela antes de escrever.
+/** 409 stripe_active: a migração cartão → Pix (§9 do plano). Mesmo modal. */
+function pixModalMigracao(plano, det, documento, ctx) {
+  const { box, fechar, titulo } = ctx;
+  // O documento sai da tela agora — esta caixa decide sobre o Stripe, e o número
+  // segue vivo só na closure do botão abaixo.
+  pixApagarDoc();
+  titulo.textContent = "Trocar o cartão pelo Pix?";
+  box.replaceChildren(titulo);
+  const data = fmtBrDate(String(det.current_period_end || "").slice(0, 10));
+  box.append(
+    pixLinha("Sua assinatura no cartão é cancelada no fim do período que você já"
+      + " pagou (" + data + "). Não existe cobrança dupla."),
+    pixLinha("Não cancele pelo painel do Stripe: quem cancela somos nós, na data"
+      + " certa. Cancelando por lá você perde o acesso antes."),
+    pixLinha("Seu ano de Pix começa em " + data + ", quando o cartão termina."),
+  );
+  const ok = pixBotao("btn-primary", "Continuar no Pix");
+  ok.addEventListener("click", () => pixEnviar(plano, documento, true, ctx, ok));
+  const nao = pixBotao("pix-ghost", "Manter o cartão");
+  nao.addEventListener("click", () => fechar());
+  box.append(ok, nao);
+  ok.focus();
+}
+
+// 409 pix_future_purchase_conflict: caixa e não toast — reenviar dá o mesmo 409.
+//
+// A frase NÃO nomeia plano, de propósito: quem bloqueia pode ser um grant de
+// OUTRO tier. O `plano_da_cobranca` junta `pix_futuro_pago` (qualquer Pix futuro,
+// de qualquer tier) com `cobre_o_tier` e levanta `CoberturaJaPaga(plano_novo, …)`
+// — o `plan` que volta no corpo do 409 é o PEDIDO, não o pago
+// (core/services/pix_pricing.py:230-240; o caso Plus futuro → Pro está em
+// tests/test_pix_recompra.py:109). "Você já pagou esse plano" era falso ali, numa
+// tela de dinheiro. O que é verdade nos dois caminhos: existe período pago até
+// tal dia, e por isso não há cobrança agora.
+function pixModalJaPago(dia, ctx) {
+  pixApagarDoc();                       // o formulário sai, e o CPF com ele
+  ctx.titulo.textContent = "Você já tem tempo pago";
+  const ok = pixBotao("btn-primary", "Entendi");
+  ok.addEventListener("click", () => ctx.fechar());
+  ctx.box.replaceChildren(ctx.titulo, pixLinha("Seu período pago vai até "
+    + fmtBrDate(dia) + ". Por isso não cobramos nada agora."), ok);
+  ok.focus();
 }
