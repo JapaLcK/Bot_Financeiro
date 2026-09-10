@@ -1,4 +1,9 @@
-"""Portão de DESTINO: nada de produção fala com o Asaas (PR 1b-A).
+"""Portão de DESTINO: só a allowlist nomeia o Asaas e as tabelas do Pix.
+
+**É o portão que MENOS mudou no 1b-B, e o que mais continua valendo.** Ele nunca
+mediu "ninguém importa" — mede que o gateway não é nomeado fora dos arquivos que
+declaram precisar dele. Ligar o Pix acrescentou quatro entradas na allowlist e
+não mudou uma linha do mecanismo.
 
 Assunto próprio, e não uma seção de `tests/test_pix_inerte.py`, porque o
 UNIVERSO e o MECANISMO são outros: lá são os `.py` lidos com `ast`; aqui é
@@ -11,7 +16,7 @@ A forma provável de furo neste repositório não é import dinâmico, é **CÓP
 o `CLAUDE.md` §0.1 registra o precedente com nome e sobrenome
 (`handlers/credit.py` × `core/handlers/credit.py`). O Tester plantou um router
 novo com `httpx.post` para `https://api.asaas.com/v3/payments` e `insert into
-pix_charges` em SQL crua, **sem importar nenhum dos três módulos**: os portões
+pix_charges` em SQL crua, **sem importar nenhum dos módulos inertes**: os portões
 de rota e de import ficaram verdes.
 
 ## Por que o universo NÃO é só `.py`
@@ -46,7 +51,15 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
 # Literais que denunciam o DESTINO, não o nome do módulo.
 MARCAS_DO_ASAAS = ("asaas.com", "ASAAS_")
-TABELAS_NOVAS = ("pix_charges", "pix_webhook_events", "pix_payment_effects")
+# FONTE ÚNICA da lista (CLAUDE.md §0.7). `tests/test_pix_ddl_sem_escrita.py`
+# IMPORTA daqui em vez de manter a própria cópia — as duas listas responderam à
+# mesma pergunta ("quais são as tabelas novas do Pix?") e divergiram em silêncio:
+# `pix_unmatched_payments` nasceu no 1b-B e ficou de fora das DUAS, deixando a
+# tabela nova descoberta pelo portão de escrita no boot e pelo de destino.
+# Mora AQUI, e não lá, porque este arquivo não importa `pytest` nem `db` — a
+# direção do import é do módulo leve para o pesado.
+TABELAS_NOVAS = ("pix_charges", "pix_webhook_events", "pix_payment_effects",
+                 "pix_unmatched_payments")
 
 
 # PROSA: documentação DEVE falar do Asaas, e `.md` não executa. É o ÚNICO falso
@@ -62,19 +75,55 @@ PREFIXOS_DE_PROSA = ("docs/",)
 # Tester plantou ali a cópia natural, com o mesmo host e a mesma env, zero
 # ofuscação: **34 testes verdes**.
 #
-# Agora cada arquivo declara SÓ as marcas de que precisa. Os dois de
-# infraestrutura ficam com as tabelas e perdem o host e a env; os quatro módulos
-# do Pix, que são inertes e provados inertes pelo portão de import, ficam com
-# tudo.
+# Agora cada arquivo declara SÓ as marcas de que precisa, e isso é MEDIDO desde
+# 2026-09-09 por `test_a_allowlist_nao_tem_marca_morta` (o gêmeo do
+# `test_a_allowlist_nao_tem_caminho_morto` de `tests/test_pix_inerte.py`). Antes
+# a frase era só uma intenção: **11 das 16 entradas declaravam marca que o
+# arquivo não usava** — `MARCAS_DO_ASAAS + TABELAS_NOVAS` era o default preguiçoso
+# e liberava o host e a env dentro de arquivos que só precisavam do nome de uma
+# tabela, `db/schema_repairs.py` (que o app INTEIRO carrega) incluído.
+#
+# Consequência prática, e ela é o ponto: acrescentar uma marca a um arquivo passa
+# a exigir editar esta linha. É trabalho de propósito — é a revisão acontecendo.
 MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
-    # Módulos do Pix: falam do Asaas por definição, e ninguém os importa.
-    "core/services/asaas.py": MARCAS_DO_ASAAS + TABELAS_NOVAS,
-    "core/services/pix_pricing.py": MARCAS_DO_ASAAS + TABELAS_NOVAS,
-    "db/pix_charges.py": MARCAS_DO_ASAAS + TABELAS_NOVAS,
-    "db/webhook_outbox.py": MARCAS_DO_ASAAS + TABELAS_NOVAS,
+    # O CLIENTE HTTP é o único que precisa das duas marcas de gateway junto com
+    # as tabelas: ele monta a URL, lê `ASAAS_API_KEY` e cita as tabelas na prosa.
+    "core/services/asaas.py": MARCAS_DO_ASAAS + ("pix_charges",
+                                                 "pix_webhook_events",
+                                                 "pix_payment_effects"),
+    # Os que leem alguma env `ASAAS_*` — e nenhum deles monta host.
+    # `ASAAS_PIX_ANNUAL_ENABLED` mora no checkout de propósito (§5.3 do plano):
+    # o monólito chama `pix_annual_available()` em vez de ler a env, justamente
+    # para não derrubar este portão. O portão está fazendo trabalho real ali.
+    "core/services/pix_checkout.py": ("ASAAS_", "pix_charges"),
+    "core/services/pix_pricing.py": ("ASAAS_", "pix_charges"),
+    "frontend/routes/billing_pix.py": ("ASAAS_", "pix_charges"),
+    # O resto do Pix: só o nome das tabelas que cada um de fato toca. Nenhum
+    # deles nomeia o host nem uma env — e agora não pode passar a nomear sem que
+    # esta linha mude junto.
+    "core/services/asaas_customers.py": ("pix_charges",),
+    "core/services/pix_sweeps.py": ("pix_charges",),
+    "db/pix_charges.py": ("pix_charges", "pix_webhook_events",
+                          "pix_payment_effects"),
+    "db/pix_charges_saga.py": ("pix_charges",),
+    "db/webhook_outbox.py": ("pix_charges", "pix_webhook_events",
+                             "pix_payment_effects"),
+    "db/pix_effects.py": ("pix_webhook_events", "pix_payment_effects"),
+    # O DRENO (1b-B) — entrada MÍNIMA desde sempre, e agora ela é a regra e não
+    # a exceção. Sem `MARCAS_DO_ASAAS`: ler `ASAAS_PIX_ANNUAL_ENABLED` aqui
+    # derrubaria o portão, e é isso que mantém a flag dentro do checkout.
+    "core/services/pix_drain.py": ("pix_charges", "pix_payment_effects",
+                                   "pix_unmatched_payments"),
+    "core/services/pix_drain_effects.py": ("pix_charges", "pix_payment_effects"),
     # INFRAESTRUTURA — só o nome das tabelas, nunca o host nem a env.
-    "db/schema.py": TABELAS_NOVAS,          # o DDL das três tabelas
-    "db/schema_repairs.py": TABELAS_NOVAS,  # a linha do _USER_FK_SET_NULL_TABLES
+    "db/schema.py": TABELAS_NOVAS,            # o DDL das quatro tabelas
+    "db/schema_repairs.py": ("pix_charges",),  # a linha do _USER_FK_SET_NULL_TABLES
+    # `db/privacy.py` fala de UMA tabela e só dela: a exclusão de conta zera o
+    # rastreio/QR/customer de `pix_charges` e o export leva a cobrança (§13.2,
+    # caso 43). Entrada mínima de propósito — `pix_webhook_events` e
+    # `pix_payment_effects` NÃO são alcançáveis por `user_id` e não têm o que
+    # fazer aqui, então deixá-las de fora mantém o portão medindo.
+    "db/privacy.py": ("pix_charges",),
 }
 
 
@@ -140,6 +189,45 @@ def test_nenhum_arquivo_de_producao_fala_com_o_asaas():
         "arquivo de produção fora da allowlist falando com o Pix/Asaas — é a "
         "CÓPIA que os portões de import não veem: "
         + repr(dict(sorted(achados.items())))
+    )
+
+
+def test_a_allowlist_nao_tem_marca_morta():
+    """POSITIVO da allowlist, gêmeo do `test_a_allowlist_nao_tem_caminho_morto`
+    de `tests/test_pix_inerte.py:229` — e ele faltava aqui.
+
+    Marca declarada que o arquivo não usa é linha que "permite" algo inexistente:
+    no dia em que o `db/schema_repairs.py` — carregado pelo app INTEIRO — passar a
+    montar `https://api.asaas.com`, ele nasce autorizado, sem revisão. Não é
+    hipótese: a versão anterior deste dict dava `MARCAS_DO_ASAAS + TABELAS_NOVAS`
+    a 11 dos 16 arquivos, incluindo esse, e o docstring acima já afirmava que
+    "cada arquivo declara SÓ as marcas de que precisa". A afirmação era falsa e
+    nada no arquivo notava.
+
+    Sem este teste a allowlist volta a crescer até virar "qualquer coisa em
+    `core/services/`" sem uma linha vermelha — que é o modo de falha oposto ao
+    que `test_nenhum_arquivo_de_producao_fala_com_o_asaas` pega, e nenhum dos
+    dois enxerga o do outro.
+
+    **A folga que ele deixa de propósito:** um arquivo que perde a última
+    ocorrência de uma marca fica vermelho AQUI, não lá. É a direção certa —
+    obriga a apagar a linha em vez de deixá-la de herança.
+    """
+    mortas = {}
+    for rel, marcas in MARCAS_PERMITIDAS.items():
+        caminho = RAIZ / rel
+        if not caminho.exists():
+            mortas[rel] = "ARQUIVO NÃO EXISTE"
+            continue
+        texto = caminho.read_text(encoding="utf-8")
+        sobrando = [m for m in marcas if m not in texto]
+        if sobrando:
+            mortas[rel] = sobrando
+
+    assert not mortas, (
+        "entradas de MARCAS_PERMITIDAS liberando marca que o arquivo NÃO usa — "
+        "cada uma é uma autorização pré-concedida a código que ainda não existe: "
+        + repr(dict(sorted(mortas.items())))
     )
 
 

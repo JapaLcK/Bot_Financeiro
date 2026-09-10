@@ -563,6 +563,28 @@ async def serve_of_connect_js():
     )
 
 
+@router.get("/pix-checkout.js")
+async def serve_pix_checkout_js():
+    """CTA, overlay e checkout do Pix anual da /precos. Sem esta rota o arquivo
+    dá 404 e o sintoma só aparece no navegador — não há StaticFiles mount aqui."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-checkout.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/pix-poll.js")
+async def serve_pix_poll_js():
+    """Par do /pix-checkout.js: o modal do QR, a cópia e o poll da cobrança.
+    São dois arquivos porque juntos passam do teto de 350 linhas do lint."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-poll.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/open-finance-connect.css")
 async def serve_of_connect_css():
     """CSS do modal de conectar banco (ver /open-finance-connect.js)."""

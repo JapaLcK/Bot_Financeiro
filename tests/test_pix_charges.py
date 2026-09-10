@@ -38,13 +38,15 @@ import pytest
 from db.connection import get_conn
 from db.pix_charges import (
     ESTADOS_ATIVOS,
-    attach_pagamento,
     buscar_por_asaas_payment_id,
     buscar_por_external_reference,
     buscar_por_public_token,
     criar_cobranca,
     transicionar,
 )
+# `attach_pagamento` mudou de módulo no 1b-B (§2.2): o `rastreio` de
+# `criar_cobranca` estourou o teto de 350 linhas e a saga saiu inteira.
+from db.pix_charges_saga import attach_pagamento
 
 
 def _nova(user_id: int, **kw) -> dict | None:

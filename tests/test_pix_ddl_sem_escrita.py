@@ -43,7 +43,10 @@ import re
 
 import pytest
 
-TABELAS_NOVAS = ("pix_charges", "pix_webhook_events", "pix_payment_effects")
+# Lista IMPORTADA, não recopiada (§0.7): ver o comentário na fonte. Precedente
+# do repositório para teste importar teste: `test_pix_transicao_efeitos.py`
+# lendo `_JANELA` de `test_pix_charges.py`.
+from test_pix_destino_inerte import TABELAS_NOVAS  # noqa: E402
 
 # `with` entra porque uma CTE esconde o `insert` do segundo token; `do` por
 # causa do bloco anônimo `do $$ … $$`; `copy` e `merge` porque são escrita que
@@ -61,7 +64,7 @@ def sem_comentarios(sql: str) -> str:
 
 
 def escreve_nas_tabelas_novas(sql: str) -> bool:
-    """O statement escreve numa das três tabelas novas?
+    """O statement escreve numa das tabelas novas do Pix?
 
     Duas condições, e as duas importam: o VERBO (depois de tirar comentário) e o
     NOME da tabela. Só o verbo daria falso positivo no `update plan_trials` dos
@@ -280,7 +283,7 @@ def test_init_db_de_verdade_nao_muda_a_contagem():
     )
 
 
-def test_as_tres_tabelas_existem_depois_do_boot():
+def test_as_tabelas_novas_existem_depois_do_boot():
     """O piso dos dois acima: sem ele, ambos passam verdes num mundo onde o DDL
     não criou tabela nenhuma."""
     from db.connection import get_conn

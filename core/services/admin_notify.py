@@ -144,3 +144,14 @@ def notify_security_alert(message: str) -> bool:
     """Alerta de segurança (ex.: spike de falha de login). Mensagem já formatada
     pelo chamador. No-op silencioso sem ADMIN_NOTIFY_WEBHOOK_URL, como os demais."""
     return _send(message)
+
+
+def notify_pix_alerta(message: str) -> bool:
+    """Alerta do fluxo Pix (§8.2/§12): estorno parcial, chargeback aberto,
+    pagamento órfão, evento travado. Mensagem já formatada pelo chamador.
+
+    Existe separado do `notify_security_alert` porque nada disto é incidente de
+    segurança, e canal cujo nome não descreve o que chega é canal que alguém
+    filtra errado. **Não é efeito registrado** — reentrega do webhook pode
+    duplicá-lo, mesmo precedente do `notify_new_pro`."""
+    return _send(message)
