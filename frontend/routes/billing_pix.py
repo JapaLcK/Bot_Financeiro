@@ -54,10 +54,21 @@ from frontend.routes import shared
 
 router = APIRouter()
 
-# CPF tem 11 dígitos, CNPJ tem 14. A validação aqui é de FORMA e só: quem
-# valida de verdade é o Asaas, e replicar o dígito verificador seria uma segunda
-# fonte da mesma regra (§0.7).
-_TAMANHOS_DOC = (11, 14)
+# Os pesos do mod-11, por tamanho de documento — CPF tem 11 dígitos, CNPJ tem 14,
+# e esta tabela é a fonte única dos tamanhos aceitos NO SERVIDOR. A mesma regra
+# 11/14 vive também no cliente, porque o JS não importa Python: `pix-checkout.js`
+# em `pixFormaOk`, no texto de erro do submit e no `campo.maxLength = 18` (14
+# dígitos + os 4 separadores do CNPJ) — são TRÊS sites derivados deste 11/14.
+# Não há teste comparando as duas fontes — quem mudar um lado muda os outros na
+# mão (`grep -n 'pixFormaOk\|maxLength\|14 do CNPJ' frontend/pix-checkout.js`).
+# O que se confere aqui é ESTRUTURA: dígito verificador que fecha. A autoridade
+# final continua sendo o Asaas, que recusa por regras próprias documento
+# estruturalmente válido.
+_PESOS_DOC = {
+    11: ((10, 9, 8, 7, 6, 5, 4, 3, 2), (11, 10, 9, 8, 7, 6, 5, 4, 3, 2)),
+    14: ((5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2),
+         (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)),
+}
 
 
 class PixCheckoutBody(BaseModel):
@@ -87,8 +98,8 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             status_code=400,
             detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     plan_stored = TIER_TO_STORED_PLAN[plan]
-    doc = "".join(c for c in (payload.cpf_cnpj or "") if c.isdigit())
-    if len(doc) not in _TAMANHOS_DOC:
+    doc = "".join(c for c in (payload.cpf_cnpj or "") if c in "0123456789")
+    if not _documento_valido(doc):
         raise HTTPException(status_code=400,
                             detail="Informe um CPF ou CNPJ válido.")
 
@@ -233,6 +244,27 @@ async def asaas_webhook(request: Request, background_tasks: BackgroundTasks):
         # levanta — falha vira `attempts` e o laço de 60 s retoma.
         background_tasks.add_task(drenar_evento, event_id)
     return {"ok": True}
+
+
+def _documento_valido(doc: str) -> bool:
+    """Só dígitos. Confere o mod-11 de CPF (11) ou CNPJ (14) — ESTRUTURA, não
+    existência: quem sabe se o documento existe é o Asaas, e ele pode recusar
+    depois um número que fecha aqui. Uma implementação para os dois documentos:
+    a diferença é a lista de pesos, e ela tem de existir de qualquer jeito."""
+    pesos = _PESOS_DOC.get(len(doc))
+    if pesos is None:          # tamanho errado (ou string vazia), da mesma tabela
+        return False
+    # Caso especial EXPLÍCITO, e não consequência do algoritmo: `11111111111`,
+    # `00000000000`, `99999999999` e `00000000000000` PASSAM no mod-11 puro
+    # (medido). Sem esta linha, o CPF que mais chega errado é aceito.
+    if len(set(doc)) == 1:
+        return False
+    n = [int(c) for c in doc]
+    for p in pesos:
+        r = sum(a * b for a, b in zip(n, p)) % 11
+        if n[len(p)] != (0 if r < 2 else 11 - r):
+            return False
+    return True
 
 
 def _titular(user_id: int) -> tuple[str, str | None]:
