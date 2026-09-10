@@ -15,8 +15,24 @@ escrita aqui de propósito**: ela sobe a cada rodada e envelhece em silêncio
 
 Vocabulário e constantes: `core/services/billing_dunning.py`.
 Escrita: `db/dunning.py`. Leitura: `core/services/payment_reminder.py`.
-**Nada aqui tira acesso de ninguém** — o relógio alimenta o lembrete do 6º dia e
-a janela de dedupe do e-mail de falha, e só.
+**Nada aqui tira acesso de ninguém** — o relógio alimenta TRÊS coisas: o
+lembrete do 6º dia, a janela de dedupe do e-mail de falha e, desde o PR do
+aviso de corte, o predicado `core.services.billing_dunning.carencia_aberta`.
+
+Esse terceiro é o lado DIREITO do OR de `plan_service.tem_direito_hoje`
+(`_tem_plano_pago_vigente(user) or carencia_aberta(...)`), consumido por
+`scripts/aviso_fim_do_gratis.py`. **A direção do OR é o que mantém as células
+18, 29 e 30 fora daquele trabalho**: a autoridade é o direito pago e o relógio
+só CONCEDE tempo a quem já o perdeu. Quem for escrever o gate de acesso (o PR
+seguinte) reusa aquele predicado em vez de ler o status como autoridade — do
+contrário a célula 29 bloqueia cliente pagante por um ciclo de retentativa.
+
+**Dois recados do PR do aviso para quem escrever o gate**: (a) `has_app_access`
+e `needs_plan_selection` continuam intocados, de propósito; (b) o dono decidiu
+cortar SEM aviso prévio a população só-WhatsApp (sem linha em `auth_accounts`,
+"a maioria" segundo `core/handle_incoming.py`), então a **mensagem de bloqueio
+do bot é a única comunicação que ela recebe** — ela tem de fazer sentido para
+quem nunca viu o dashboard e não tem conta web.
 
 ---
 
