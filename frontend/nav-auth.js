@@ -4,9 +4,8 @@
 //   Início / Dashboard / Conectar WhatsApp / Configurações / Assinatura / Sair.
 //   Os CTAs do corpo (hero/seções) continuam apontando pro dashboard.
 // - Mobile: os MESMOS botões do site (Funcionalidades / Como funciona / Planos
-//   / WhatsApp) ficam recolhidos atrás de um botão de menu, ao lado do
-//   entrar/conta. Antes ocupavam uma segunda linha sempre aberta, e a nav é
-//   fixa: o bloco acompanhava a rolagem comendo a tela o tempo todo.
+//   / WhatsApp) recolhem atrás de um botão, ao lado do entrar/conta. Antes
+//   ocupavam uma 2ª linha sempre aberta, e a nav é fixa: comia tela o tempo todo.
 // NÃO redireciona — só ajusta o nav pra não parecer deslogado.
 // Estilos injetados via <style> (prefixo pb-) pra não depender do cache do site.css.
 (function () {
@@ -178,19 +177,16 @@
       ".pb-acct-link.danger:hover{background:rgba(248,113,113,.15);color:#fff1f2}",
       ".pb-acct-ico{width:18px;text-align:center;flex-shrink:0}",
       /* ── Nav mobile: menu recolhido ───────────────────────────────────
-         Os links ficavam SEMPRE abertos numa 2ª linha, e a nav é fixa: o
-         bloco acompanhava a rolagem comendo a tela o tempo todo, antes de
-         qualquer conteúdo. Agora recolhem atrás de um botão. */
+         Os links ficavam SEMPRE abertos numa 2ª linha, e a nav é fixa: o bloco
+         acompanhava a rolagem comendo a tela o tempo todo. Agora recolhem. */
       ".pb-burger{display:none}",
       "@media (max-width:900px){",
-      /* UM auto por linha, e o resto por justify-content. Dois `margin-left:auto`
-         na mesma linha flex REPARTEM a sobra em vez de empurrar tudo para a
-         direita: com um no .nav-right e outro no botão, o "Entrar / Começar
-         agora" descolava da borda e flutuava no meio (medido: 313px de folga a
-         899px). Aqui a sobra da 1ª linha vai toda para o logo, e a 2ª linha —
-         quando o botão quebra — é alinhada pelo justify-content do container.
-         O column-gap cai de 10px para 6px porque a linha pedia 356px onde há
-         349: são os 7px que faltavam para o botão caber a 375px. */
+      /* UM auto por linha, o resto por justify-content: dois `margin-left:auto`
+         na mesma linha flex REPARTEM a sobra em vez de empurrar para a direita,
+         e o "Entrar / Começar agora" descolava da borda (medido: 313px de folga
+         a 899px). A sobra da 1ª linha vai toda para o logo; a 2ª, quando o botão
+         quebra, alinha pelo container. O column-gap cai de 10px para 6px: a
+         linha pedia 356px onde há 349, e são esses 7px que faltavam a 375px. */
       ".nav{flex-wrap:wrap;row-gap:0;column-gap:6px;justify-content:flex-end}",
       ".nav .nav-logo{order:1;margin-right:auto}",
       ".nav .nav-right{order:2;margin-left:0}",
@@ -270,23 +266,17 @@
 
   // ── Botão do menu mobile ──────────────────────────────────────────────────
   // O CSS acima recolhe .nav-links abaixo de 900px; sem este botão não haveria
-  // como reabrir. Quem mostra ou esconde o botão é o CSS
-  // (.pb-burger{display:none}); o JS só precisa zerar o estado ao SAIR do
-  // breakpoint, senão a classe pb-nav-open e o aria-expanded="true" ficariam de
-  // pé num botão invisível — e quem gira o aparelho e volta reencontraria o
-  // menu aberto sem ter pedido.
+  // como reabrir. Quem mostra ou esconde o botão é o CSS; o JS só zera o estado
+  // ao SAIR do breakpoint, senão pb-nav-open e aria-expanded="true" ficariam de
+  // pé num botão invisível e quem gira o aparelho reencontraria o menu aberto.
   //
-  // O botão entra ANTES do .nav-links, e isso é deliberado: um DOM só serve a
-  // DUAS ordens visuais diferentes (desktop é logo→links→entrar, mobile é
-  // logo→entrar→botão→links), então alguma das duas vai divergir do Tab.
-  // Aqui a conta foi feita:
-  //   - antes dos links (atual): com o menu ABERTO o Tab entra nos links logo
-  //     depois do botão, e o desktop segue igual ao visual. O desvio fica no
-  //     mobile FECHADO, onde o botão é tabulado antes do "Entrar".
-  //   - depois do .nav-right: consertaria o mobile fechado e deixaria os links
-  //     INALCANÇÁVEIS por Tab com o menu aberto — nada vem depois deles.
-  // Quem só pode abrir o menu pelo teclado precisa conseguir entrar nele, então
-  // fica como está. Não mova sem medir os dois estados.
+  // O botão entra ANTES do .nav-links de propósito: um DOM só serve a UMA das
+  // duas ordens visuais (desktop logo→links→entrar, mobile logo→entrar→botão→
+  // links), então uma delas sempre diverge do Tab. Esta posição mantém o
+  // desktop igual ao visual e deixa o Tab entrar no menu ABERTO logo depois do
+  // botão; o desvio sobra no mobile fechado. Pô-lo depois do .nav-right faria o
+  // contrário e deixaria os links inalcançáveis por Tab com o menu aberto —
+  // nada vem depois deles. Não mova sem medir os dois estados.
   function mountBurger() {
     const nav = document.querySelector(".nav");
     const links = nav && nav.querySelector(".nav-links");
@@ -325,8 +315,8 @@
       if (e.target.closest("a")) setOpen(false);
     });
     // Passou de 900px: o botão some e o menu volta a ser a barra do desktop.
-    var mq = window.matchMedia("(max-width:900px)");
-    var onBreakpoint = function (e) { if (!e.matches) setOpen(false); };
+    const mq = window.matchMedia("(max-width:900px)");
+    const onBreakpoint = e => { if (!e.matches) setOpen(false); };
     if (mq.addEventListener) mq.addEventListener("change", onBreakpoint);
     else if (mq.addListener) mq.addListener(onBreakpoint); // Safari < 14
 
