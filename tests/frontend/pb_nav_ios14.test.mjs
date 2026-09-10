@@ -20,21 +20,17 @@
  *     primeiros casos ficam vermelhos (o assert é sobre o title montado);
  *   · negativo — teto removido (`const timer = 0`) ou elevado (5000 → 12000):
  *     o 3º caso fica vermelho;
+ *   · negativo — `ctrl.abort()` fora do `finally` (pb-nav.js:~392): o 4º caso
+ *     fica vermelho. O discriminador é a MEDIDA de dentro da página (ms do
+ *     início do fetch até o abort), não o relógio do Playwright: só o
+ *     `setTimeout` de 5s sobra abortando, e ele dá ~5000ms;
  *   · positivo — o 2º caso, sem degradar nada, prova que o navegador moderno
  *     continua navegando pelo motor.
  *
- * ponytail: `finally { }` (timer vazado) passa VERDE aqui — a sonda que o via
- * acusava página inocente; para cobrir, instrumentar o próprio pb-nav.js.
- *
- * ponytail: corrida conhecida, e NÃO é flake de ambiente — não reexecute. O
- * `prefetchOk()` resolve DENTRO do handler de rota (abaixo), antes de o abort
- * chegar ao `.catch()` do `warmUp` (frontend/pb-nav.js:~333) que apaga
- * `warm`/`inflight`. Se o `go()` sair nessa janela, `warm.comandos !== undefined`
- * e o `navigate()` entra no ramo warm (pb-nav.js:~353), não no do fetch:
- * `inflight` resolve null → `hard()` → `tipos: ["document"]` e `msAteHard` nulo.
- * Máquina carregada alarga a janela. O modo de falha é sempre FALSO VERMELHO,
- * nunca falso verde. Fechar de vez exige expor `warm`/`inflight`, hoje privados
- * do closure; resolver no evento `requestfailed` só aperta, não fecha.
+ * ponytail: `finally { }` (timer vazado, com o `ctrl.abort()` junto) passa
+ * VERDE nos 3 primeiros casos — quem o mata é o 4º, e só pela parte do abort; o
+ * timer vazado sozinho continua invisível daqui. Para cobrir, instrumentar o
+ * próprio pb-nav.js.
  *
  * O que este teste NÃO alcança: um WKWebView de iOS 14 de verdade. Chromium
  * com a API apagada reproduz o TypeError, não o motor de renderização dele.
@@ -55,10 +51,45 @@ const TITULO_COMANDOS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "comandos-app.html"),
   "utf8").match(/<title>(.*?)<\/title>/)[1];
 
+// `PigBankApp` no UA é o que faz o app-mode.js pôr `html.pb-app`.
+const UA_APP = "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) PigBankApp/1.0";
+
 let ORIGIN, server, browser;
 before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
                      browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
+
+/**
+ * Queima o prefetch DENTRO da página, e avisa num macrotask.
+ *
+ * O filtro casa o path do PREFETCH (`/comandos-app`, sem `.html`), não o do
+ * tap: o `warmUp` itera as chaves de ROUTES e a primeira do par já marca
+ * `warm.comandos`, então a variante `.html` nunca é aquecida — e o tap, que vai
+ * para `/comandos-app.html`, passa direto pelo `orig`. Se um dia ROUTES ganhar
+ * outro path terminando em `/comandos-app`, o stub pega os dois junto.
+ *
+ * Rejeitar (em vez de segurar) é obrigatório: com o prefetch preso,
+ * `warm.comandos` fica `null` para sempre e o tap pendura no ramo warm, que não
+ * é o caminho alterado.
+ *
+ * A bandeira sobe num `setTimeout(0)` — MACROtask — e a cadeia
+ * `.then().then().catch()` do `warmUp` (frontend/pb-nav.js:~330) é toda de
+ * MICROtasks. O event loop drena a fila de microtasks inteira antes de qualquer
+ * macrotask, então quando `__prefetchMorreu` fica true o `delete warm[key]` já
+ * aconteceu POR ESPECIFICAÇÃO. Era isto que o `page.route` não dava: o abort
+ * viajava CDP → browser → rede → renderer enquanto o `evaluate` seguinte falava
+ * direto com o renderer, sem ordenação nenhuma entre os dois.
+ */
+function queimaPrefetch() {
+  const orig = window.fetch;
+  window.fetch = function (u) {
+    if (String(u).endsWith("/comandos-app")) {
+      setTimeout(() => { window.__prefetchMorreu = true; }, 0);
+      return Promise.reject(new Error("prefetch queimado"));
+    }
+    return orig.apply(this, arguments);
+  };
+}
 
 /**
  * Abre a /home.html dentro do "app" com o motor ligado e o prefetch da
@@ -70,27 +101,17 @@ after(async () => { await browser?.close(); server?.kill(); });
  * ganha um caso que o exercita.
  */
 async function tap(degradar, pendurar) {
-  // `PigBankApp` no UA é o que faz o app-mode.js pôr `html.pb-app`; `?pbspa=1`
-  // liga a flag na sessão. Sem os dois, `PBNav.enabled` é false.
-  const ctx = await browser.newContext({
-    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) PigBankApp/1.0",
-  });
+  // `?pbspa=1` liga a flag na sessão; sem ela e sem o UA, `PBNav.enabled` é false.
+  const ctx = await browser.newContext({ userAgent: UA_APP });
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push(String(e)));
 
   if (degradar) await page.addInitScript(() => { delete AbortSignal.timeout; });
 
-  // O prefetch do warmUp vai para `/comandos-app` SEM `.html`: o `warmUp`
-  // itera as chaves de ROUTES e a primeira do par (`/comandos-app`) já marca
-  // `warm.comandos`, então a variante `.html` nunca é aquecida. Abortá-lo faz o
-  // `.catch()` apagar warm/inflight, e o tap em `/comandos-app.html` cai no
-  // fetch — que é a linha alterada. (Sem este route ele 404aria no
-  // `http.server` e daria no mesmo por acidente; explícito não depende disso.)
+  await page.addInitScript(queimaPrefetch);
+
   const tipos = [];
-  let prefetchOk;
-  const prefetch = new Promise(ok => { prefetchOk = ok; });
-  await page.route("**/comandos-app", r => { prefetchOk(); r.abort(); });
   if (pendurar) {
     // Segura o fetch do motor sem responder nunca. O `document` passa: é a
     // navegação do `hard()`, o resultado que este caso quer medir.
@@ -110,16 +131,12 @@ async function tap(degradar, pendurar) {
     vt: typeof document.startViewTransition === "function",
   }));
 
-  // O warmUp roda 1200ms após o boot; esperar o prefetch queimar (por condição,
-  // não por relógio — espera fixa aperta em runner lento). O TETO não é
-  // enfeite: `node --test` não tem timeout por caso, então um prefetch que
-  // nunca sai penduraria o processo inteiro, sem sumário e sem nome de teste.
-  let tTeto;
-  await Promise.race([
-    prefetch,
-    new Promise((_, no) => { tTeto = setTimeout(
-      () => no(new Error("o prefetch de /comandos-app não saiu em 10s")), 10_000); }),
-  ]).finally(() => clearTimeout(tTeto));
+  // O warmUp roda 1200ms após o boot; esperar o prefetch queimar. Quando a
+  // bandeira sobe, o `delete warm[key]` JÁ aconteceu (ver `queimaPrefetch`).
+  // O teto de 30s é o padrão do Playwright, e não é enfeite: `node --test` não
+  // tem timeout por caso, então uma bandeira que nunca sobe penduraria o
+  // processo inteiro, sem sumário e sem nome de teste.
+  await page.waitForFunction(() => window.__prefetchMorreu);
 
   tipos.length = 0;                       // do tap pra frente é o que importa
   const t0 = Date.now();
@@ -205,4 +222,100 @@ test("fetch que nunca responde: o teto de 5s derruba o tap no hard()", async () 
   // runner lento sem aceitar os 12s.
   assert.equal(r.msAteHard >= 4000 && r.msAteHard <= 10_000, true,
     `caiu no hard() em ${r.msAteHard}ms — fora da janela de 4–10s do teto de 5s`);
+});
+
+/**
+ * O 4º caso, e o único que mata o `ctrl.abort()`.
+ *
+ * O guard de geração (`if (my !== seq) return;`) fica ENTRE os headers e o
+ * corpo. Nesse `return` o `finally` cancela o único relógio agendado; sem o
+ * `abort()` junto, ninguém mais aborta e o corpo não lido fica pendurado até
+ * EOF/GC — o teto de 5s prometido no cabeçalho do pb-nav.js deixa de existir
+ * nesse ramo. Alcançável sem corrida exótica: `PBNav.go` só recusa quando
+ * `key === currentKey`, e `currentKey` só muda dentro do `commit()`, que roda no
+ * swap — enquanto o 1º fetch está em voo a aba corrente ainda é a velha, então
+ * um SEGUNDO toque na MESMA aba (duplo toque no dock, o gesto mais comum de
+ * mobile) passa o guard e leva `seq` a 2. O passo 3 abaixo prova isso de quebra.
+ *
+ * Os dois `go()` são para a mesma URL de propósito. O discriminador NÃO é o teto
+ * de 1s do `waitForFunction` — esse é de relógio, e um estol basta para
+ * confundi-lo: com `finally { }` (timer vazado) mais ~4,5s de atraso antes do
+ * release, o abort do `setTimeout` de 5s cai dentro da janela e o caso passaria.
+ * Quem separa é `__abortado[0]`, medido DENTRO da página a partir do início do
+ * fetch: o abort do conserto dá 7–24ms (medido) e o do relógio dá ~5000ms,
+ * qualquer que seja o instante do release.
+ *
+ * O que este caso NÃO cobre: ele para antes do `mountNew` — sem swap, sem
+ * commit — então mede exclusivamente "o `AbortSignal` do navigate #1 disparou".
+ * Um `mountNew` no-op ou um `html` de outra página passam verde AQUI; quem os
+ * mata são os casos 1–3.
+ *
+ * E ele amarra a FORMA atual, não só o contrato: mover o guard `my !== seq` para
+ * DEPOIS de `html = await r.text()` deixa este caso vermelho. O alternativo é
+ * defensável em contrato (o corpo não fica pendurado) mas baixa o download
+ * inteiro de uma navegação já superada e só abortaria aos 5s — quem refatorar
+ * precisa decidir isso de olho aberto, não descobrir pelo vermelho.
+ */
+test("navegação superada: o corpo pendurado é abortado, não esquecido", async () => {
+  const ctx = await browser.newContext({ userAgent: UA_APP });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on("pageerror", e => erros.push(String(e)));
+
+  await page.addInitScript(() => {
+    // ms do INÍCIO do fetch até o abort, por navegação (o índice tira a
+    // ambiguidade). É medida relativa ao fetch e não ao release de propósito:
+    // o abort do `setTimeout` de 5s dá SEMPRE ~5000 aqui, qualquer que seja o
+    // instante em que o teste solta a resposta — é isso que separa o abort do
+    // conserto do abort do relógio (ver o cabeçalho do caso).
+    window.__abortado = [];
+    window.__lib = [];           // resolvedores, um por fetch do tap
+    const orig = window.fetch;
+    window.fetch = function (u, o) {
+      const s = String(u);
+      // o prefetch do warmUp, queimado como nos outros casos
+      if (s.endsWith("/comandos-app")) return Promise.reject(new Error("prefetch queimado"));
+      if (s.endsWith("/comandos-app.html")) {
+        const i = window.__lib.length, t = Date.now();
+        o.signal.addEventListener("abort", () => { window.__abortado[i] = Date.now() - t; });
+        return new Promise(ok => { window.__lib.push(ok); });
+      }
+      return orig.apply(this, arguments);
+    };
+  });
+
+  await page.goto(`${ORIGIN}/home.html?pbspa=1`);
+  await page.waitForFunction(() => window.PBNav !== undefined);
+  assert.equal(await page.evaluate(() => window.PBNav.enabled), true,
+               "o motor SPA precisa estar LIGADO");
+
+  // 1º toque: navigate #1 preso ANTES dos headers.
+  assert.equal(await page.evaluate(() => window.PBNav.go("/comandos-app.html")), true);
+  await page.waitForFunction(() => window.__lib.length === 1);
+
+  // 2º toque na MESMA aba: passa o guard do go() e leva seq a 2.
+  assert.equal(await page.evaluate(() => window.PBNav.go("/comandos-app.html")), true,
+               "o duplo toque na mesma aba devia passar o guard do go()");
+  await page.waitForFunction(() => window.__lib.length === 2,
+                             null, { timeout: 2000 });
+
+  // Solta o #1 com headers prontos e o CORPO ABERTO: ele cai exatamente no
+  // `if (my !== seq) return;` de pb-nav.js, com o body por ler.
+  await page.evaluate(() => window.__lib[0](
+    new Response(new ReadableStream({ start() {} }), { status: 200 })));
+
+  const abortou = await page
+    .waitForFunction(() => typeof window.__abortado[0] === "number", null, { timeout: 1000 })
+    .then(() => true, () => false);
+  assert.equal(abortou, true,
+    "o fetch superado não foi abortado em 1s: sem o abort() no finally o corpo não lido fica pendurado até EOF/GC, sem teto nenhum");
+  // O discriminador de verdade, medido DENTRO da página: o abort do conserto
+  // chega junto com o `return` do guard (7–24ms limpo); o do `setTimeout`
+  // chegaria aos ~5000ms contados do mesmo zero. O corte de 1s é ~40× o medido
+  // e 5× abaixo do teto: estol vira falso VERMELHO, nunca falso verde.
+  const msAteAbort = await page.evaluate(() => window.__abortado[0]);
+  assert.equal(msAteAbort < 1000, true,
+    `o abort chegou ${msAteAbort}ms após o início do fetch: é o teto de 5s disparando, não o abort() do finally`);
+  assert.deepEqual(erros, []);
+  await ctx.close();
 });

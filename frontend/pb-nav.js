@@ -389,7 +389,11 @@
         // Redirect = auth/gate (login, /precos): fluxo de verdade, navegação real
         if (r.redirected || !r.ok) { hard(path); return; }
         html = await r.text();
-      } finally { clearTimeout(timer); }
+      // O `abort()` mora no finally porque cobre as DUAS saídas do meio (o
+      // superado logo acima e o redirect/erro), onde o clearTimeout tira o
+      // único relógio e ninguém mais abortaria o corpo não lido; no caminho
+      // feliz o texto já foi lido e abortar depois de settled é no-op.
+      } finally { clearTimeout(timer); ctrl.abort(); }
       sw.mark("net");
       if (my !== seq) return;
       await mountNew(key, path, html, push, my, sw);
