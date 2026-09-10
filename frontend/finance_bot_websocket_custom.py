@@ -109,6 +109,7 @@ from db import (
 from core.observability import _log_falha, get_logger
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
+from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
@@ -404,6 +405,17 @@ def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> 
         clauses.append("is_internal_movement = true")
 
     if query:
+        # `tipo` CRU na busca livre, e a divergência com a TELA foi CRIADA aqui,
+        # não herdada: antes deste PR a query 4 devolvia o tipo cru, então a tela
+        # dizia "saida" e buscar "saida" achava. Agora a projeção de FORA da
+        # query 4 canoniza (`TIPO_CANON_SQL`) e a busca não: a linha legada sai como
+        # "despesa" e digitar "despesa" NÃO a acha — digitar "saida" acha.
+        # Fica cru de propósito. Canonizar aqui é o oposto do que o filtro por
+        # tipo faz três linhas acima (ele lê as DUAS formas, de propósito, pra
+        # não esconder dinheiro), e trocaria um casamento a menos por um a menos
+        # do outro lado. Incidência ZERO: nenhuma linha legada em produção
+        # (04/09/2026, ver a issue 287) — nenhum usuário passa por isto hoje.
+        # Se um dia passar, o conserto é `TIPO_CANON_SQL LIKE %s` OR o cru.
         clauses.append(
             """
             (
@@ -544,7 +556,30 @@ async def get_financial_data(
         # 4) Launches paginado
         _q(
             f"""
-            SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+            -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
+            -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
+            -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
+            -- alvo é quem CONSOME `recent_launches`, e só ele: home.html:944
+            -- imprime o tipo cru como rótulo ("Última atividade: saida"), :1094
+            -- não conta a linha legada no onboarding e :1147 desenha a receita
+            -- legada como despesa; dashboard.js:7954 (linha do Histórico), :8035
+            -- (`_renderLaunchDetail`, "Tipo: saida") e :8479 (resumo do editor,
+            -- "saida - R$ 100,00") usam o cru como label. São 6 sites, não 5.
+            -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
+            -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
+            --
+            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
+            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
+            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
+            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
+            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
+            -- dashboard -> barra de categoria -> linha ainda escreve
+            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
+            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
+            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
+            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
+            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
@@ -1931,6 +1966,52 @@ async def lifespan(app: FastAPI):
                 print(f"[plan_grants] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(60)
 
+    async def _pix_worker():
+        """O laço do Pix: dreno a cada 60 s, saga + purga de retenção a cada 24 h.
+
+        Molde do `_plan_grants_reprojection` logo acima — 60 s + 24 h —, e pelo
+        mesmo motivo: as duas passadas medem coisas diferentes.
+
+        • **60 s, o dreno.** O `background_tasks` do handler é o caminho rápido;
+          este é o que RECUPERA — processo reiniciado no meio, efeito que
+          levantou, evento que chegou enquanto o worker morria. Ele chama o
+          SERVIÇO e não o `db/` do Pix: o portão de import mede o primeiro salto
+          produção → Pix, e este arquivo na allowlist apagaria a propriedade.
+        • **24 h, a reconciliação (§10.1).** Ela fala com o Asaas por linha, e é
+          por isso que não roda a cada minuto. Nada aqui apaga por relógio: a
+          idade só decide quando perguntar.
+        • **24 h, a purga de retenção (§13.2 + §13.3).** `RETENCAO_OUTBOX_DIAS`
+          e a re-zeragem do rastreio órfão só existem se ALGUÉM as chamar — a
+          função sem chamador é o defeito que já custou a poda das três tabelas
+          (`core/services/table_cleanup.py`). Ela zera coluna, não apaga linha.
+
+        As três varreduras do §14 item 13 (e-mail de fim de anual, cancelamento
+        aos 60 d, retenção POR PRAZO) ficaram para a issue #329.
+        """
+        from core.services.pix_sweeps import (  # noqa: PLC0415
+            drenar_pendentes, purgar_retencao, reconciliar_saga,
+        )
+        proxima_saga = datetime.now(timezone.utc)   # 1ª volta já reconcilia
+        while True:
+            try:
+                n = await asyncio.to_thread(drenar_pendentes)
+                if n:
+                    print(f"[pix] {n} evento(s) drenado(s).", flush=True)
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_saga:
+                    proxima_saga = agora + timedelta(hours=24)
+                    conta = await asyncio.to_thread(reconciliar_saga)
+                    if any(conta.values()):
+                        print(f"[pix] reconciliacao: {conta}", flush=True)
+                    purgadas = await asyncio.to_thread(purgar_retencao)
+                    if any(purgadas.values()):
+                        print(f"[pix] purga de retencao: {purgadas}", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[pix] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2025,6 +2106,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
                 asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
+                asyncio.create_task(_pix_worker(), name="pix_worker"),
             ]
         )
     else:
@@ -2067,6 +2149,12 @@ CSRF_EXEMPT_PATHS = {
     # Consulta do lead engine: server-to-server, sem cookie de sessão —
     # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
     "/api/prospect/status",
+    # Webhook do gateway de Pix: server-to-server, autenticado por header
+    # (frontend/routes/billing_pix.py). É o ÚNICO path do Pix aqui —
+    # `/billing/pix/checkout` e o poll são do navegador logado, com cookie e
+    # token de CSRF, e isenção que não é necessária é privilégio esquecido.
+    # `tests/test_pix_rota_registrada.py` prende essa unicidade.
+    "/billing/asaas/webhook",
 }
 
 _SECURITY_HEADERS = {
@@ -4139,6 +4227,17 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
                     "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
         )
 
+    # Pix → Stripe NÃO tem fluxo (§9): quem já pagou o ano à vista assinando no
+    # cartão pagaria o mesmo período duas vezes, e não há como "creditar" para
+    # dentro do Stripe. A recusa é a resposta, e ela vem ANTES de qualquer
+    # criação de customer — o caminho de volta é esperar o anual acabar.
+    if await asyncio.to_thread(_grant_pix_vigente, user_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "pix_active",
+                    "message": "Você já tem o plano anual pago no Pix. Ele vale até o fim do período — depois disso dá pra assinar no cartão."},
+        )
+
     customer_id = user.get("stripe_customer_id")
     if customer_id:
         try:
@@ -4337,6 +4436,7 @@ async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
     layout legado de plano único. Flag off = página atual intacta."""
+    from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
         "plans_v2_enabled": plans_v2_enabled(),
@@ -4345,6 +4445,11 @@ async def billing_plans_config():
                                or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
+        # A flag vem de uma FUNÇÃO, e não de `os.getenv` aqui:
+        # `tests/test_pix_destino_inerte.py` é textual e proíbe o nome da env
+        # fora dos módulos do Pix. Ele está fazendo trabalho real — a flag mora
+        # com quem a obedece.
+        "pix_annual_available": pix_annual_available(),
     }
 
 
@@ -4486,6 +4591,20 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     if (user.get("last_payment_status") or "") == "grandfathered":
         return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
                 "current_period_end": None, "scheduled_change": None}
+
+    # PIX ANTES DO STRIPE, e a ordem é o conteúdo (§14 item 12). Quem migrou do
+    # cartão fica com `stripe_customer_id` preenchido para sempre — perguntando
+    # ao Stripe primeiro, a tela de quem paga no Pix mostraria "Trocar de plano"
+    # e chamaria `/billing/change-plan`, que não tem assinatura para trocar.
+    # Grant Pix vigente é a resposta autoritativa: ele foi criado pelo dinheiro
+    # que entrou, e não depende de o Stripe estar de pé.
+    pix = await asyncio.to_thread(_grant_pix_vigente, user_id)
+    if pix is not None:
+        return {"active": True, "lifetime": False, "gateway": "pix",
+                "plan": _plan_publico(pix["plan_stored"]), "interval": "annual",
+                "current_period_end": pix["ends_at"].date().isoformat(),
+                "scheduled_change": None}
+
     cust = user.get("stripe_customer_id")
     if not STRIPE_SECRET_KEY or not cust:
         return {"active": False}
@@ -4532,8 +4651,35 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         except Exception:
             pass
 
-    return {"active": True, "lifetime": False, "plan": plan, "interval": interval,
-            "current_period_end": period_end_iso, "scheduled_change": scheduled}
+    return {"active": True, "lifetime": False, "gateway": "stripe", "plan": plan,
+            "interval": interval, "current_period_end": period_end_iso,
+            "scheduled_change": scheduled}
+
+
+def _grant_pix_vigente(user_id: int) -> dict | None:
+    """O grant `source='pix'` que sustenta o acesso, ou None. Síncrono.
+
+    Quem decide SE há cobertura é `grant_vigente` — a mesma função do
+    `projetar_grants` e do `payment_reminder`, para a janela semiaberta
+    `[starts_at, ends_at)` não ganhar uma terceira versão (§0.7). Havendo, o
+    escolhido é o que termina POR ÚLTIMO: com um downgrade Pix já agendado, o
+    fim da cobertura é o do grant futuro, e é isso que a tela mostra.
+    """
+    from core.services.billing_access import grant_vigente
+    from db.plan_grants import list_grants
+
+    agora = datetime.now(timezone.utc)
+    pix = [g for g in list_grants(user_id)
+           if g["source"] == "pix" and g["status"] == "active"]
+    if not grant_vigente(pix, agora):
+        return None
+    return max(pix, key=lambda g: g["ends_at"])
+
+
+def _plan_publico(plan_stored: str) -> str:
+    """Valor LEGADO da coluna → o nome que a /precos usa. Uma tradução, um
+    lugar: `_plan_interval_for_price` já devolve `plus`/`pro` para o Stripe."""
+    return {"pro": "plus", "pro_max": "pro"}.get(plan_stored, plan_stored)
 
 
 @app.post("/billing/change-plan")
@@ -7768,6 +7914,18 @@ app.include_router(push_router)
 
 # ─── Onboarding (wizard de primeira configuração) → frontend/routes/onboarding.py ─
 app.include_router(onboarding_router)
+
+# ─── Pix anual (Asaas) → frontend/routes/billing_pix.py ──────────────────────
+# Registro INCONDICIONAL, e isso é requisito, não descuido: pôr a flag de venda
+# num `if os.getenv(...)` aqui passaria verde no portão
+# `tests/test_pix_rota_registrada.py`, que mede o app IMPORTADO e roda num CI
+# sem a env. A flag mora dentro do checkout (`pix_annual_available()`), onde ela
+# recusa a VENDA sem esconder a rota — e o webhook precisa responder mesmo com a
+# venda desligada, senão o provedor pausa a fila (caso 56 do §16).
+#
+# O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
+# é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
+app.include_router(billing_pix_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

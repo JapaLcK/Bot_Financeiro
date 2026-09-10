@@ -1,4 +1,10 @@
-"""Portão de ROTA: nada do Pix é alcançável pelo mundo externo (PR 1b-A).
+"""Portão de ROTA: as TRÊS rotas do Pix estão registradas, e só elas (PR 1b-B).
+
+**Este arquivo mudou de direção, e o nome mudou junto.** Ele era
+`tests/test_pix_rota_inerte.py` e PROIBIA rota de Pix; com o router registrado,
+um arquivo chamado "inerte" afirmando o contrário seria a mentira verde que o
+próprio docstring abaixo manda evitar. Agora ele EXIGE — conjunto exato, rota a
+mais também reprova.
 
 Assunto próprio, e não uma seção de `tests/test_pix_inerte.py`, porque fechá-lo
 exigiu **três** introspecções — e o porquê de duas não bastarem é a parte que
@@ -30,31 +36,28 @@ Um webhook escondido precisaria de isenção de CSRF, e
 quem de fato emite a cobrança — é POST autenticado com token de CSRF e não
 precisa de isenção nenhuma. O portão de rota tem de enxergar sozinho.
 
-## O LIMITE QUE NÃO TEM CONSERTO POR TRAVESSIA — leia antes de confiar no portão
+## A CEGUEIRA DECLARADA VIROU DETECÇÃO — é o que a inversão comprou
 
-Este portão mede o app **IMPORTADO**, nunca o que **RODA**. Duas formas passam
-verdes, e as duas têm precedente neste próprio monólito:
+Este portão mede o app **IMPORTADO**, nunca o que **RODA**. Na direção antiga
+("proíbe"), duas formas de registrar passavam verdes com a rota respondendo em
+produção, e as duas têm precedente neste próprio monólito:
 
   * **(a) registro condicionado a env** —
-    `if os.getenv("PIX_ANUAL_ENABLED") == "1": app.include_router(pix)`. Sem a
-    env (CI) a rota não existe; com ela (produção) existe. O monólito já faz
-    isso literalmente: `if ENABLE_DEV_ENDPOINTS: app.add_api_route(...)`
-    (`frontend/finance_bot_websocket_custom.py:2062`).
+    `if os.getenv("ASAAS_PIX_ANNUAL_ENABLED") == "1": app.include_router(pix)`.
+    Sem a env a rota não existe; com ela existe. O monólito já faz isso
+    literalmente: `if ENABLE_DEV_ENDPOINTS: app.add_api_route(...)`.
   * **(b) registro no `lifespan`** — antes do startup não está nas rotas, depois
     está. Este portão importa o módulo e nunca sobe o app.
-    (`@app.on_event("startup")` NÃO reproduz: o app define `lifespan=`, e o
-    Starlette ignora `on_event` quando há lifespan.)
 
-Não é *como* a rota é registrada, é *quando* — travessia nenhuma alcança isso, e
-tentar fechar seria construir um segundo app runner dentro do teste.
+Na direção **"exige"**, as duas ficam **VERMELHAS** no CI, que não tem a env e
+não sobe o app. É a mesma medição lendo o outro lado, e por isso
+`test_a_rota_existe_sem_a_flag_no_ambiente` é o caso que fecha (a) por nome.
 
-**E o aviso vale mais que a declaração: é exatamente assim que uma flag de "Pix
-anual" seria entregue no 1b-B.** Registro atrás de `if os.getenv(...)` passa por
-este portão sem uma linha vermelha. Por isso, **quando o 1b-B registrar o
-router, este portão tem de MUDAR DE FORMA junto** — passar a EXIGIR a rota, em
-vez de proibi-la. Um portão que continua dizendo "não existe rota de Pix" depois
-que o Pix foi ligado não é um portão, é uma mentira verde. Registrado também em
-`docs/plano_pix_anual_asaas.md`, §14.
+**A troca de risco, e ela é a direção segura:** introspecção quebrada antes dava
+falso **VERDE** (portão cego, rota escondida respondendo); agora dá falso
+**VERMELHO**. `test_a_introspeccao_ve_as_quatro_classes_de_rota` continua sendo
+quem distingue "a rota sumiu" de "a árvore quebrou" — sem ele, uma quebra do
+FastAPI viraria "alguém apagou o checkout".
 
 CEGUEIRA DECLARADA: rota DENTRO de um sub-app montado é encontrada; o prefixo do
 `Mount` é concatenado. O repositório não tem nenhum `Mount(` nem `app.mount(`
@@ -239,33 +242,82 @@ def _paths_do_app() -> set[str]:
     return paths_expostos(app_mod.app)
 
 
-def test_nenhuma_rota_de_pix_ou_asaas_esta_registrada():
-    """O caminho pelo qual o mundo EXTERNO alcançaria o código novo.
+# As três, e SÓ estas três. Conjunto exato: rota a mais reprova junto com rota a
+# menos. Uma quarta rota de Pix aparecendo sem passar por aqui é exatamente o
+# que este portão existe para não deixar acontecer em silêncio.
+ROTAS_DO_PIX = {
+    "/billing/pix/checkout",
+    "/billing/pix/{public_token}",
+    "/billing/asaas/webhook",
+}
 
-    A atenuante que NÃO cobre a metade perigosa: um webhook escondido precisaria
-    de isenção de CSRF, e o teste abaixo o pegaria — mas o **checkout**, que é
-    quem emite a cobrança, é POST autenticado com token de CSRF e não precisa de
-    isenção nenhuma. Por isso o portão de rota tem de enxergar sozinho.
+
+def _rotas_de_pix_no_app() -> set[str]:
+    return {p for p in _paths_do_app()
+            if p.startswith("/billing/pix") or "asaas" in p.lower()}
+
+
+def test_as_tres_rotas_do_pix_estao_registradas():
+    """A INVERSÃO. O 1b-B ligou o Pix, e o portão passa a exigir as três.
+
+    Conjunto EXATO nos dois sentidos:
+
+      * faltando → o checkout, o poll ou o webhook não foram registrados, e o
+        deploy sobe com o Asaas mandando evento para um 404 (15 falhas seguidas
+        pausam a fila do painel deles);
+      * sobrando → rota nova de Pix que ninguém revisou. `/billing/pix` é
+        prefixo de dinheiro; cada path aqui foi olhado no commit que o trouxe.
     """
     caminhos = _paths_do_app()
     assert "/billing/webhook" in caminhos, "introspecção quebrada no app real"
+    assert _rotas_de_pix_no_app() == ROTAS_DO_PIX, (
+        "o conjunto de rotas do Pix não é o esperado — faltando: "
+        f"{sorted(ROTAS_DO_PIX - _rotas_de_pix_no_app())}; sobrando: "
+        f"{sorted(_rotas_de_pix_no_app() - ROTAS_DO_PIX)}"
+    )
 
-    suspeitas = sorted(p for p in caminhos
-                       if p.startswith("/billing/pix") or "asaas" in p.lower())
-    assert not suspeitas, f"1b-A é inerte, mas há rota registrada: {suspeitas}"
+
+def test_a_rota_existe_sem_a_flag_no_ambiente(monkeypatch):
+    """O caso que fecha a cegueira (a): registro atrás de env.
+
+    O CI não tem `ASAAS_PIX_ANNUAL_ENABLED`, então o teste acima já roda nessa
+    condição — mas isso é acidente do ambiente, não asserção. Aqui a ausência é
+    EXPLÍCITA: quem puser o `include_router` atrás de um `if os.getenv(...)`
+    para "ligar só em produção" vê vermelho com o nome do problema.
+
+    A env some do processo, o módulo do app é **recarregado**, e as três rotas
+    têm de continuar lá. Sem o reload o módulo já importado esconderia o
+    registro condicional, e o teste passaria por vácuo.
+    """
+    import importlib
+
+    import frontend.finance_bot_websocket_custom as app_mod
+
+    monkeypatch.delenv("ASAAS_PIX_ANNUAL_ENABLED", raising=False)
+    recarregado = importlib.reload(app_mod)
+    assert ROTAS_DO_PIX <= paths_expostos(recarregado.app), (
+        "as rotas do Pix sumiram sem a env — o registro está condicionado a "
+        "flag, e é exatamente o que este portão passou a proibir"
+    )
 
 
-def test_csrf_exempt_paths_nao_tem_entrada_de_asaas():
-    """O webhook do Asaas vai precisar de isenção de CSRF (o Pluggy tem). Ela
-    entrando ANTES do handler abriria um POST sem cookie de sessão para um path
-    que ninguém atende — e isenção é o tipo de linha que se adiciona "para
-    depois" e fica esquecida."""
+def test_csrf_exempt_paths_tem_so_o_webhook_do_asaas():
+    """A isenção de CSRF é do webhook, e de mais NADA do Pix.
+
+    O webhook é server-to-server e precisa dela. O checkout e o poll são
+    chamadas do navegador logado, com cookie e token de CSRF — isenção ali seria
+    um POST de emissão de cobrança aberto a qualquer origem. É o par do teste
+    acima: um mede que a rota existe, este mede que ela não veio com privilégio
+    a mais.
+    """
     import frontend.finance_bot_websocket_custom as app_mod
 
     isentos = app_mod.CSRF_EXEMPT_PATHS
     assert "/open-finance/pluggy/webhook" in isentos, "CSRF_EXEMPT_PATHS mudou de forma"
-    suspeitas = [p for p in isentos
-                 if "asaas" in p.lower() or p.startswith("/billing/pix")]
-    assert not suspeitas, f"isenção de CSRF para rota que não existe: {suspeitas}"
+    do_pix = {p for p in isentos
+              if "asaas" in p.lower() or p.startswith("/billing/pix")}
+    assert do_pix == {"/billing/asaas/webhook"}, (
+        f"isenção de CSRF do Pix não é só o webhook: {sorted(do_pix)}"
+    )
 
 
