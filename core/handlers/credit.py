@@ -400,7 +400,7 @@ _CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
                    "valeu", "vlw", "pls", "please", "plz"}
 
 
-def _leituras_da_resposta(alvo: str) -> list[str]:
+def _leituras_da_resposta(alvo: str, max_tokens: int) -> list[str]:
     """Como esta resposta pode ser lida, da leitura MAIS LONGA para a mais curta.
 
     Três aparos, e o terceiro é o que custou um bug de dinheiro:
@@ -423,6 +423,15 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
     A ordem do retorno é o desempate, e por isso é lista e não conjunto: a
     leitura mais LONGA vem primeiro, então o nome mais específico (`nubank pf`)
     ganha do genérico (`nubank`) quando os dois existem.
+
+    `max_tokens` é o maior nome de cartão do usuário, EM TOKENS, e não é
+    heurística: o casamento é por IGUALDADE, então leitura com mais tokens que o
+    maior nome guardado não pode casar nada — gerá-la era trabalho jogado fora.
+    Sem esse corte os dois laços materializam o produto prefixo × sufixo: 2.007
+    caracteres viravam 160.801 leituras e 168 MB, e uma mensagem no limite do
+    WhatsApp esgotava o worker (P1 do Codex no #323). O corte é só de TAMANHO —
+    `i` continua limitado pelo allowlist e `fim` pela cortesia, então o conjunto
+    de leituras que PODEM casar é idêntico.
 
     O que NÃO se faz é voltar ao `re.search` — é ele que fazia
     `excluir cartao nubank` casar `nubank` e pagar R$ 300. Os dois ataques
@@ -459,10 +468,8 @@ def _leituras_da_resposta(alvo: str) -> list[str]:
     # termina SEMPRE no fim (só se poda prefixo, nunca miolo nem cauda) — é isso
     # que mantém `nubank fatura` e `nubank saldo` fora, porque ali o nome não é
     # sufixo da mensagem.
-    # ponytail: O(n²) em tokens de UMA resposta de WhatsApp; se algum dia
-    # importar, corte pelo maior nome de cartão do usuário.
     for fim in range(len(tokens), sem_cortesia - 1, -1):
-        for i in range(min(podavel, fim - 1) + 1):
+        for i in range(max(0, fim - max_tokens), min(podavel, fim - 1) + 1):
             leituras.add(" ".join(tokens[i:fim]))
     return sorted(leituras, key=len, reverse=True)
 
@@ -494,7 +501,10 @@ def _card_name_da_resposta(user_id: int, answer: str):
         nome = normalize_text(card["name"])
         if nome:
             por_nome.setdefault(nome, card["id"])
-    for leitura in _leituras_da_resposta(alvo):
+    if not por_nome:
+        return None
+    max_tokens = max(len(nome.split()) for nome in por_nome)
+    for leitura in _leituras_da_resposta(alvo, max_tokens):
         if leitura in por_nome:
             return por_nome[leitura]
     return None
