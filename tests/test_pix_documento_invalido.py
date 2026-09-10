@@ -42,8 +42,14 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
     VERMELHO pela `consulta` extra: a linha fica `creating` e a passada seguinte
     vai PERGUNTAR ao Asaas por uma cobrança que nunca existiu;
   * troque `exc.status_code in (400, 422)` por `400 <= exc.status_code < 500` →
-    `test_throttle_do_asaas_nao_acusa_o_dado_do_cliente` VERMELHO, que é o 429 (e,
-    pela mesma condição, o 401/403 da NOSSA chave) acusando o CPF do cliente.
+    `test_erro_que_nao_e_do_cliente_continua_503` VERMELHO nos TRÊS casos (429, 401
+    e 403), todos acusando o CPF do cliente por erro que não é dele;
+  * troque por `exc.status_code in (400, 422, 401, 403)` — a mutação que
+    DISCRIMINA, porque atinge só a nossa credencial e deixa o 429 de fora → o mesmo
+    teste VERMELHO em 401 e 403, e verde em 429. Até 2026-09-10 essa mutação não
+    derrubava caso NENHUM da suíte: o parêntese "e, pela mesma condição, o 401/403"
+    estava escrito aqui e não era medido. É o incidente de 10/09 — a NOSSA chave de
+    API errada dizendo ao cliente que o CPF dele não presta.
 
 POSITIVOS do grupo (`..._cpf_valido_...`, `..._cnpj_valido_...` e
 `test_asaas_fora_do_ar_continua_503_com_a_linha_em_creating`): sem eles, um
@@ -219,17 +225,26 @@ def test_asaas_fora_do_ar_continua_503_com_a_linha_em_creating(
     assert _linhas(user_id)[0]["status"] == "creating"
 
 
-def test_throttle_do_asaas_nao_acusa_o_dado_do_cliente(
-        user_id, vendavel, asaas_falso, monkeypatch):
-    """429 é fila cheia, e retentar ajuda — exatamente o que o 503 pede. Um
-    `400 <= status < 500` levaria junto o 401/403 da NOSSA `ASAAS_API_KEY`, que
-    foi o incidente de 10/09: o cliente lendo que o CPF dele não presta."""
+@pytest.mark.parametrize("status", [429, 401, 403])
+def test_erro_que_nao_e_do_cliente_continua_503(
+        user_id, vendavel, asaas_falso, monkeypatch, status):
+    """4xx que NÃO é o dado do titular: 503, e nunca "confere o CPF".
+
+    429 é fila cheia e retentar ajuda — exatamente o que o 503 pede. 401 e 403 são
+    a NOSSA `ASAAS_API_KEY`, e foram o incidente de 10/09: acusar o documento do
+    cliente por credencial nossa errada é o pior desfecho possível. Os três juntos
+    porque a condição que os separa é uma só, e 401/403 não tinham caso nenhum.
+
+    A linha fica `creating` como no 502: daqui em diante o estado é ambíguo para a
+    varredura, e é o que separa este grupo do `draft` da recusa do titular.
+    """
     conta(user_id, "free", None)
-    asaas_falso["cliente_falha"] = _recusa(429, code=None)
+    asaas_falso["cliente_falha"] = _recusa(status, code=None)
     r = _checkout(user_id, monkeypatch, CPF_OK)
 
     assert r.status_code == 503, r.text
     assert r.json()["detail"] == INDISPONIVEL
+    assert _linhas(user_id)[0]["status"] == "creating"
 
 
 def test_a_recusa_nao_vaza_o_documento_nem_o_corpo(user_id, vendavel, asaas_falso,

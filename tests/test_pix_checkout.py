@@ -21,7 +21,13 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
   * devolva a leitura da env para `if not bruto.isdigit() or int(bruto) <= 0` →
     `test_env_de_dinheiro_malformada_recusa_a_venda` VERMELHO em `²` (o `int()`
     estoura, 500 no lugar do 503) e em `٥٠٠` (`int("٥٠٠") == 500` e a venda SAI, a
-    500 centavos que ninguém digitou). `-5` e `abc` seguem verdes com e sem;
+    500 centavos que ninguém digitou). `-5` e `abc` seguem verdes com e sem.
+    **O que a guarda fecha é o ALFABETO, não a FAIXA**: `'9'*30` é aceito como
+    mínimo, e um mínimo maior que o crédito faz `plano_da_cobranca` DESCARTAR o
+    crédito e AGENDAR a compra (medido em 2026-09-10, chamando a função pura com um
+    grant Pix de 30 dias restantes: crédito 1636 → 0, cobrança 48264 → 49900,
+    `agendada` False → True). Teto conhecido e deixado de fora de propósito —
+    nenhum limite salva `500` digitado como `5000`, e onde cortar é do dono;
   * apague a guarda de `grandfathered` de `criar_checkout` →
     `test_vitalicio_nao_compra_o_anual` VERMELHO, com a cobrança criada e o Asaas
     chamado — o dinheiro entrando por acesso que o cliente já tem.
@@ -125,13 +131,16 @@ def test_env_de_dinheiro_ausente_recusa_a_venda(user_id, vendavel, asaas_falso,
 @pytest.mark.parametrize("bruto", ["²", "٥٠٠", "-5", "abc"])
 def test_env_de_dinheiro_malformada_recusa_a_venda(user_id, vendavel, asaas_falso,
                                                    monkeypatch, bruto):
-    """DISCRIMINA. Env MALFORMADA é o mesmo estado da ausente: recusa, não default.
+    """DISCRIMINA. Env com dígito que não é 0-9 é o mesmo estado da ausente: recusa.
 
     Os dois primeiros casos são os que mordiam. `"²"` tem `isdigit()` True e
     `int()` que estoura — `ValueError` cru saindo do contrato do módulo. `"٥٠٠"`
     é pior porque é silencioso: `int("٥٠٠") == 500` (medido), então a venda ia
     até o fim com um mínimo que ninguém digitou. `-5` e `abc` já eram recusados
     com e sem o conserto, e estão aqui como a moldura da categoria.
+
+    O que este grupo NÃO mede: valor absurdo em dígito ASCII. `'9'*30` passa e a
+    venda sai (ver o topo) — o conserto fechou o alfabeto, não a faixa.
     """
     conta(user_id, "free", None)
     monkeypatch.setenv("ASAAS_MIN_CHARGE_CENTS", bruto)

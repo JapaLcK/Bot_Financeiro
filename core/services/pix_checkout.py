@@ -211,8 +211,9 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     from db import get_auth_user  # noqa: PLC0415
     if ((get_auth_user(user_id) or {}).get("last_payment_status") or "").lower() == "grandfathered":
         raise Vitalicio()
-    # **Sem default, nunca** — ver o topo. Inline: virou a única leitura de env
-    # de dinheiro do módulo quando o preço deixou de ser env (§0.2).
+    # **Sem default, nunca** — ver o topo. Inline: única leitura de env de dinheiro do módulo
+    # desde que o preço deixou de ser env (§0.2). O `isascii()` fecha o ALFABETO — nada estoura
+    # no `int()`, nada vira dígito de outro alfabeto — e **não** a FAIXA: `'9'*30` passa.
     bruto = (os.getenv("ASAAS_MIN_CHARGE_CENTS") or "").strip()
     if not (bruto.isascii() and bruto.isdigit()) or int(bruto) <= 0:
         raise CheckoutIndisponivel("asaas_min_charge_nao_configurado")
@@ -333,8 +334,8 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             descricao=f"{plan_display_name(linha['plan'])} - plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
     except TitularRecusado:
-        # Nada existe no Asaas: `criar_pagamento_pix` nem rodou (o porquê, em
-        # `asaas_customers`). `draft` poupa a passada seguinte de perguntar.
+        # ANTES do `except Exception`, que engoliria esta e a devolveria como o 503 de "tenta de novo".
+        # Nada existe no Asaas (`criar_pagamento_pix` nem rodou): `draft`, e a passada seguinte não pergunta.
         voltar_para_draft(linha["id"])
         raise
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito

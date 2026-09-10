@@ -33,7 +33,10 @@ class TitularRecusado(RuntimeError):
         que este módulo não pode sequer NOMEAR: o portão de
         `tests/test_pix_destino_inerte.py` mede a marca no texto). Foi o
         incidente de 10/09, e acusar o CPF do cliente por chave nossa errada é o
-        pior desfecho possível;
+        pior desfecho possível. Os dois têm caso próprio desde 2026-09-10
+        (`test_erro_que_nao_e_do_cliente_continua_503`): até lá, esta lista
+        AFIRMAVA a separação e nenhum teste a media — pôr 401/403 dentro do
+        `in (...)` de `criar_cliente` deixava a suíte Pix inteira verde;
       * **429** — throttle. Retentar ajuda, que é exatamente o que o 503 pede;
       * **5xx** e falha de transporte (`status_code is None`) — o Asaas, não o
         dado. Continuam 503.

@@ -60,6 +60,11 @@ def asaas_falso(monkeypatch):
     real_cliente = ac.criar_cliente
 
     def _request_falso(*a, **kw):
+        if estado["cliente_falha"] is None:
+            raise AssertionError(
+                "`asaas_customers._request` foi chamado com `cliente_falha` desligado: "
+                "há caminho novo no módulo que este falso não cobre (o `criar_cliente` "
+                "patchado só delega ao real quando o interruptor está ligado).")
         raise estado["cliente_falha"]
 
     def _cliente(**kw):

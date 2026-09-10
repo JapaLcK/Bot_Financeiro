@@ -142,9 +142,9 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             "current_period_end": exc.current_period_end.date().isoformat(),
         }) from exc
     except TitularRecusado as exc:
-        # ANTES do `CheckoutIndisponivel`: as duas descem de `RuntimeError` e a
-        # herança não separa nada — `except` na ordem errada engoliria esta e
-        # devolveria o 503 de "tenta de novo", que aqui é mentira.
+        # A ordem entre este `except` e o do `CheckoutIndisponivel` NÃO importa: as duas
+        # são IRMÃS (`RuntimeError` direto), então nenhuma engole a outra — invertendo os
+        # dois blocos, o grupo segue verde. A ordem que importa é a de `_emitir`.
         # `details` leva o motivo e o `code` JÁ filtrado, e NADA mais: nome,
         # e-mail e `cpf_cnpj` não entram: `system_event_logs` é a tabela que a
         # purga do §13.3 não alcança. O `detail` é literal NOSSO, jamais o texto
