@@ -5218,9 +5218,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     "status": sub_status,
                 },
             )
-            # Email de boas-vindas Pro (item 37)
+            # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
+            # acabou de ser gravado e logado acima (vocabulário legado, de
+            # `_stored_plan_for_price`): sem ele o e-mail chamava todo
+            # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -5407,7 +5410,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
-                await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
+                await _fire_email(user_id, send_pro_charged_email,
+                                  plan_value, amount_brl, expires_dt)
 
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
@@ -5516,8 +5520,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.observability import recent_event_exists
             if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
                 expires_dt = _subscription_period_end(sub)
+                # Mesma fonte do plano dos outros ramos (#351): o PRICE da
+                # assinatura, não o texto do e-mail. Quem está em trial de
+                # Essencial ou de Pro lia "seu trial do PigBank+".
+                plan_value = _stored_plan_for_price(_subscription_price_id(sub))
                 from core.services.email_service import send_trial_ending_email
-                await _fire_email(user_id, send_trial_ending_email, expires_dt)
+                await _fire_email(user_id, send_trial_ending_email,
+                                  plan_value, expires_dt)
                 await log_system_event(
                     "info",
                     "trial_ending_email_sent",
