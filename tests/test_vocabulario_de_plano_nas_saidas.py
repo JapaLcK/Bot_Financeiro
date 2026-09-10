@@ -136,9 +136,10 @@ def logado(monkeypatch, user_id):
 
 
 def _checkout(logado, plan: str):
+    # CPF que fecha o mod-11 (#355): documento inválido leva 400 antes do plano.
     return logado.http.post(
         "/billing/pix/checkout", headers={dashboard.CSRF_HEADER_NAME: _CSRF},
-        json={"plan": plan, "cpf_cnpj": "12345678901"})
+        json={"plan": plan, "cpf_cnpj": "52998224725"})
 
 
 # Os cards da /precos, na ordem da escada e LIDOS da fonte (§0.7): plano vendável
