@@ -112,9 +112,14 @@ class TestTierResolution:
         assert plan_service.get_plan_tier(1) == "plus"
 
     def test_free_sem_trial(self, v2, monkeypatch):
+        # A asserção `has_app_access(1) is True  # Grátis ENTRA no app` VIVIA
+        # aqui e codificava a regra que o corte do Grátis derrubou. Ela saiu em
+        # vez de ser invertida no lugar: reescrever um assertivo existente é
+        # como se fabrica verde, então o caso novo é um caso NOVO e mora em
+        # `tests/test_access_gate.py::test_sem_direito_nao_entra[free-sem-nada]`.
+        # Este teste volta a medir só o que o nome dele diz — o TIER.
         _patch_user(monkeypatch, _user("free"))
         assert plan_service.get_plan_tier(1) == "free"
-        assert plan_service.has_app_access(1) is True  # Grátis ENTRA no app
 
 
 # ─── Gate de escolha de plano no cadastro (2026-08-11) ───────────────────────

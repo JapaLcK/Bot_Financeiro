@@ -90,16 +90,28 @@ def claim_trial_for_user(user_id: int) -> datetime | None:
         raise TrialClaimError("Falha ao persistir o uso do trial.") from exc
 
 
-def is_trial_eligible_for_user(user_id: int) -> bool:
-    """O telefone deste usuário ainda tem direito ao trial de 15 dias?
+def motivo_trial_indisponivel(user_id: int) -> str | None:
+    """POR QUE o trial não vale para esta conta — `None` quando vale.
 
-    Regra: 1 trial por telefone na vida. Elegível = o phone_hash NUNCA apareceu
-    em plan_trials (nesta conta ou em outra, mesmo deletada). Usado na criação
-    do checkout pra decidir se manda trial_period_days=30 ou cobra na hora.
+    Dois motivos, e eles NÃO são a mesma coisa:
 
-    Sem telefone vinculado → inelegível, pois não há como aplicar a regra por
-    número. Falha de banco levanta TrialEligibilityError: o checkout responde
-    503 em vez de cobrar na hora ou conceder trial repetido no escuro.
+      • `"sem_telefone"` — não há `phone_hash` em `auth_accounts`. A regra é por
+        NÚMERO e não há número; ninguém "já usou" nada.
+      • `"telefone_ja_usou"` — o `phone_hash` já aparece em `plan_trials` (nesta
+        conta ou em outra, mesmo deletada). 1 trial por telefone NA VIDA.
+
+    **A distinção existe porque a COPY mente sem ela.** `is_trial_eligible_for_user`
+    devolve `False` nos dois, e quem escrevesse a frase a partir do booleano diria
+    "esse telefone já usou o período grátis" para uma conta que nunca teve
+    telefone — ver `core.services.trial_offer.texto_da_oferta`. Para decidir
+    `trial_period_days` o booleano basta e continua sendo o que o checkout usa;
+    para FALAR com a pessoa, não.
+
+    Fonte ÚNICA da regra (§0.7): `is_trial_eligible_for_user` é um wrapper fino
+    sobre esta função, não uma segunda cópia da query.
+
+    Falha de banco levanta TrialEligibilityError: o checkout responde 503 em vez
+    de cobrar na hora ou conceder trial repetido no escuro.
     """
     try:
         with get_conn() as conn:
@@ -110,15 +122,29 @@ def is_trial_eligible_for_user(user_id: int) -> bool:
                 )
                 row = cur.fetchone()
                 if not row or not row.get("phone_hash"):
-                    return False
+                    return "sem_telefone"
                 cur.execute(
                     "select 1 from plan_trials where phone_hash = %s",
                     (row["phone_hash"],),
                 )
-                return cur.fetchone() is None
+                return None if cur.fetchone() is None else "telefone_ja_usou"
     except Exception as exc:
-        logger.warning("is_trial_eligible_for_user falhou pro user %s", user_id, exc_info=True)
+        logger.warning("motivo_trial_indisponivel falhou pro user %s", user_id, exc_info=True)
         raise TrialEligibilityError("Falha ao consultar a elegibilidade do trial.") from exc
+
+
+def is_trial_eligible_for_user(user_id: int) -> bool:
+    """O telefone deste usuário ainda tem direito ao trial de 15 dias?
+
+    Regra: 1 trial por telefone na vida. Usado na criação do checkout pra decidir
+    se manda `trial_period_days` ou cobra na hora — ali o booleano basta e a
+    resposta certa para "sem telefone" é a MESMA de "já usou": não há trial.
+
+    Wrapper fino sobre `motivo_trial_indisponivel`, que separa os dois motivos
+    para quem precisa FALAR com a pessoa. Contrato inalterado (bool; levanta
+    TrialEligibilityError em falha de banco).
+    """
+    return motivo_trial_indisponivel(user_id) is None
 
 
 def reset_trial_for_user(user_id: int) -> dict | None:

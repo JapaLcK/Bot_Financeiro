@@ -1235,6 +1235,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                     claim_agent_events_for_email,
                     unclaim_agent_events, touch_agent_emailed,
                     get_user_email, get_auth_user)
+    from core.reports.reports_daily import filtrar_por_acesso
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
 
     now = now or datetime.now(timezone.utc)
@@ -1289,6 +1290,21 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
                 continue  # teto de cadência: e-mail desse agente ainda tá no intervalo
             events = _ripe(kind, list_unemailed_events(agent_id), user_id)
             if not events:
+                continue
+            # O corte do Grátis, na MESMA posição dos outros laços proativos:
+            # depois dos filtros baratos (cadência, evento maduro) e antes de
+            # qualquer escrita.
+            #
+            # **`agent_kind_allowed` NÃO cobre isto, e essa era a crença errada.**
+            # Ele devolve True INCONDICIONAL para tester do beta
+            # (`plan_service.agents_beta_tester`, `plan_service.py`), ANTES de
+            # olhar o tier — e é assim de propósito, para o tester ver todos os
+            # agentes sem assinar. O efeito colateral era que uma conta de
+            # tester BLOQUEADA continuava recebendo relatório financeiro por
+            # e-mail depois do corte. O beta segue valendo para a UI e para a
+            # ativação; o que ele não pode é mandar e-mail proativo para quem
+            # não tem acesso.
+            if not filtrar_por_acesso([user_id]):
                 continue
             auth = get_auth_user(user_id)
             if auth and auth.get("engagement_opt_out"):
