@@ -33,8 +33,19 @@
      o JS só liga/desliga .is-active + aria-pressed. */
   /* Coluna, não linha: embaixo do segmented control mora a etiqueta do Pix, e
      ela precisa ficar CENTRADA sob ele — não ao lado, que empurraria o toggle
-     para fora do centro da escada. */
-  .cycle-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0 0 30px; }
+     para fora do centro da escada.
+     O respiro de 10px é `margin-top` da etiqueta e NÃO `gap` do wrap: a etiqueta
+     mora dentro do `#pix-cycle-live`, que é um item flex de verdade (vazio, mas
+     presente desde o parse — é a região aria-live). Com `gap`, esse item vazio
+     somava 10px sob o toggle em TODA visita sem a flag do Pix; com a margem na
+     própria etiqueta, `hidden` não gera caixa e não gera margem: 0px. */
+  .cycle-wrap { display: flex; flex-direction: column; align-items: center; margin: 0 0 30px; }
+  /* inline-block porque margem vertical em elemento inline não desloca nada — e
+     `:not([hidden])` porque um seletor de ID com `display` VENCE a regra
+     `[hidden] { display: none }` do navegador: sem ele a etiqueta ficava visível
+     com a flag do Pix desligada, anunciando meio de pagamento que a página não
+     vende (medido: `offsetParent` não-nulo com `pix_annual_available: false`). */
+  #pix-cycle-note:not([hidden]) { display: inline-block; margin-top: 10px; }
   .cycle-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 15px; }
   .cycle-btn {
     display: inline-flex; align-items: center; gap: 8px;
@@ -337,7 +348,13 @@
                ou para quem tem acesso vitalício, que não compra — a página fica
                igual à de hoje: anunciar meio de pagamento que não existe é pior
                que não anunciar. -->
-          <span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span>
+          <!-- A região `aria-live` existe desde o parse e fica VAZIA aos olhos:
+               quem aparece dentro dela é a pílula, e é essa inserção que o
+               leitor de tela anuncia. Registrar a região e revelá-la no mesmo
+               instante não anuncia nada — por isso são dois elementos, e não um
+               `aria-live` na própria pílula. O vínculo com o botão Anual é o
+               `aria-describedby` que o pbPixInit põe e tira junto com ela. -->
+          <span id="pix-cycle-live" aria-live="polite"><span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span></span>
         </div>
 
         <div class="plans" id="plans-v2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
@@ -1126,8 +1143,9 @@ enviarViewItemList();
        depois do bloco inline — eles publicam pbPixInit/pbPixRefresh no escopo
        global. A corrida com o loadPlansState acima não depende desta ordem: quem
        chegar por último lê o `window.pbPixState` que o outro deixou.
-       O pix-poll.js vem ANTES: ele declara o `pixPoll` que o pix-checkout.js lê,
-       e `let` de topo de script clássico tem TDZ até o script rodar. -->
+       O pix-ui.js vem PRIMEIRO (ele declara o `const pixBrl` que os dois leem) e
+       o pix-poll.js antes do pix-checkout.js (ele declara o `pixPoll` que o outro
+       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar. -->
   <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
        scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
        `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
@@ -1136,6 +1154,7 @@ enviarViewItemList();
        Se este script falhar ou não carregar, fica o markup do servidor acima —
        que vende sozinho, com o mesmo visual. -->
   <script src="/precos-app.js?v=1"></script>
+  <script src="/pix-ui.js?v=1"></script>
   <script src="/pix-poll.js?v=1"></script>
   <script src="/pix-checkout.js?v=1"></script>
   <script src="/nav-auth.js?v=7" defer></script>

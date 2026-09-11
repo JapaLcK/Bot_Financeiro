@@ -414,9 +414,15 @@ async def serve_precos_app_js():
     """Ilha React do `#plans-v2` da /precos — artefato do build de `webapp/`,
     commitado no repositório. Nome FIXO e sem hash porque a rota é escrita à mão
     (não há StaticFiles mount); quem invalida cache é o `stamp_asset_versions`,
-    que carimba o `?v=` do HTML com um hash do conteúdo deste arquivo."""
+    que carimba o `?v=` do HTML com um hash do conteúdo deste arquivo.
+
+    `no-cache` como o par `.css` e como o /site.css: sem ele esta rota era a
+    ÚNICA de asset deste arquivo sem `Cache-Control` — e o par de um asset muda
+    junto (§2)."""
     return FileResponse(
-        FRONTEND_DIR / "precos-app.js", media_type="application/javascript"
+        FRONTEND_DIR / "precos-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
     )
 
 
@@ -593,6 +599,18 @@ async def serve_pix_checkout_js():
     dá 404 e o sintoma só aparece no navegador — não há StaticFiles mount aqui."""
     return FileResponse(
         FRONTEND_DIR / "pix-checkout.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/pix-ui.js")
+async def serve_pix_ui_js():
+    """Peças de UI compartilhadas pelo /pix-checkout.js e pelo /pix-poll.js
+    (rótulo, linha, botão e overlay). Carrega ANTES dos dois: o `const pixBrl`
+    tem TDZ até este script rodar."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-ui.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

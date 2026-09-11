@@ -57,9 +57,10 @@ export default defineConfig([
     // `currentCycle` e `PLAN_NAMES` vêm do <script> inline da precos.html: são
     // `let`/`const` de topo de script clássico, que vão para o escopo léxico
     // global e NÃO viram propriedade de `window` — por isso, nome nu.
-    // O resto é o que um destes dois arquivos publica e o outro consome: eles
-    // são um módulo só, partido pelo teto de 350 linhas.
-    files: ["frontend/pix-checkout.js", "frontend/pix-poll.js"],
+    // O resto é o que um destes TRÊS arquivos publica e os outros consomem. O
+    // pix-ui.js é divisão por assunto (as peças de UI que os dois usam); a
+    // divisão entre checkout e poll é do teto de 350 linhas.
+    files: ["frontend/pix-ui.js", "frontend/pix-checkout.js", "frontend/pix-poll.js"],
     languageOptions: {
       globals: {
         currentCycle: "readonly",

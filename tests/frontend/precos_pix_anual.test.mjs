@@ -1467,8 +1467,13 @@ test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () =
  *     para o vitalício. Sem ele, um `nota.hidden = false` fixo passaria no PT19
  *     anunciando meio de pagamento que a página não vende.
  */
+// Só `offsetParent`, e o `&& !e.hidden` SAIU: ele olhava o atributo em vez da
+// tela, e com isso o grupo ficava cego para CSS que vence o `hidden`. Foi um bug
+// real — `#pix-cycle-note { display: inline-block }` (seletor de ID) vence o
+// `[hidden] { display: none }` do navegador, e a etiqueta aparecia com a flag
+// desligada enquanto PT19b continuava verde porque `e.hidden` ainda era true.
 const etiquetaVisivel = (page) => page.$eval(
-  "#pix-cycle-note", (e) => e.offsetParent !== null && !e.hidden);
+  "#pix-cycle-note", (e) => e.offsetParent !== null);
 
 test("PT19: a etiqueta de Pix aparece no ciclo mensal e continua no anual", async () => {
   const { page } = await abrirPrecos();
@@ -1498,5 +1503,51 @@ test("PT19b: sem a flag, e para o vitalício, a etiqueta não aparece", async ()
     assert.equal(await etiquetaVisivel(page), false,
       `${nome}: a página anunciou Pix que ela não vende (anual)`);
     await page.close();
+  }
+});
+
+/**
+ * PT19c — A ETIQUETA PARA QUEM NÃO VÊ A TELA.
+ *
+ * Ela é revelada DEPOIS do load (o `pbPixInit` só roda quando as duas
+ * requisições voltam), e quem navega controle por controle chega ao botão
+ * "Anual" sem passar por ela. Duas amarras, medidas aqui:
+ *
+ *   · `#pix-cycle-live` com `aria-live="polite"` EM VOLTA da pílula, presente
+ *     desde o parse — região registrada e revelada no mesmo instante não
+ *     anuncia, então são dois elementos e não um `aria-live` na própria pílula;
+ *   · `aria-describedby` no `#cycle-annual`, posto e RETIRADO junto com ela.
+ *
+ * O `aria-describedby` sair é a metade que vale dinheiro: elemento diretamente
+ * referenciado é lido mesmo `hidden` (accname), então um atributo fixo no HTML
+ * anunciaria "Pix disponível no anual" para quem não pode comprar — o mesmo
+ * defeito que o `hidden` existe para evitar, por outra porta. O caso sem flag é
+ * o controle positivo deste par.
+ */
+test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com ela", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  const lido = (page) => page.evaluate(() => ({
+    live: document.getElementById("pix-cycle-live")?.getAttribute("aria-live"),
+    // O `aria-live` precisa ENVOLVER a pílula: irmão não anuncia a revelação.
+    envolve: !!document.getElementById("pix-cycle-live")
+      ?.contains(document.getElementById("pix-cycle-note")),
+    describedby: document.getElementById("cycle-annual")?.getAttribute("aria-describedby"),
+  }));
+
+  const { page } = await abrirPrecos();
+  assert.deepEqual(await lido(page),
+    { live: "polite", envolve: true, describedby: "pix-cycle-note" });
+  await page.click("#cycle-annual");
+  assert.equal((await lido(page)).describedby, "pix-cycle-note",
+    "o vínculo caiu ao trocar de ciclo");
+  await page.close();
+
+  for (const plansConfig of [base, { ...base, pix_annual_available: false }]) {
+    const semPix = await abrirPrecos({ plansConfig });
+    const r = await lido(semPix.page);
+    assert.equal(r.live, "polite", "a região aria-live tem de existir mesmo sem a flag");
+    assert.equal(r.describedby, null,
+      "o botão Anual descreve um Pix que a página não vende");
+    await semPix.page.close();
   }
 });
