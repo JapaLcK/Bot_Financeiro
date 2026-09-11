@@ -17,6 +17,10 @@
  *   medem o nível que faltava, o dos filhos de cada CARD, e as duas formas de
  *   sair dele: nó que o card não conhece, e filho repetido.
  *
+ *   PI7 é o oráculo de CONTEÚDO que faltava (a árvore canônica do servidor ==
+ *   a da ilha, nos dois ciclos) e PI8 a janela em que o `refreshPlanButtons`
+ *   roda ANTES do mount — medida, não suposta.
+ *
  * PO — O PÓDIO. A regra era `@media (min-width: 900px)` com um comentário
  *   afirmando que "abaixo de 900px o grid vira uma coluna". Era falso: o
  *   `style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"` inline
@@ -49,6 +53,38 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 const MARCA = "<!--pb-detector-de-mount-->";
 const ABRE_PLANS = '<div class="plans" id="plans-v2"';
+
+/**
+ * A ÁRVORE CANÔNICA do `#plans-v2` — nome da tag, atributos ORDENADOS por nome
+ * e texto com espaço normalizado — mais o que o usuário LÊ em cada bloco de
+ * preço. Roda dentro da página.
+ *
+ * Canônica porque só a ordem dos atributos e o espaço em branco entre os nós
+ * separam legitimamente o markup do servidor (indentado, atributos na ordem em
+ * que foram escritos) do que o React emite. Todo o resto — cada atributo, cada
+ * `style="display:none"`, cada `&nbsp;` — tem de bater, e é isso que torna esta
+ * comparação um oráculo de CONTEÚDO em vez de presença.
+ *
+ * `innerText` e não `textContent` no preço: ele respeita o `display` que o
+ * `setCycle` alterna, então é o número que está na tela, não os dois colados.
+ */
+function arvoreEPrecos() {
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+  const no = (n) => {
+    // Texto em branco fora (o servidor indenta, o React não) e comentário fora
+    // (é o detector de mount, e o `lerPlanos` o ignora de propósito).
+    if (n.nodeType === 3) return norm(n.textContent) || null;
+    if (n.nodeType !== 1) return null;
+    return [n.nodeName,
+            [...n.attributes].map((a) => `${a.name}=${norm(a.value)}`).sort(),
+            [...n.childNodes].map(no).filter((x) => x !== null)];
+  };
+  return {
+    arvore: no(document.getElementById("plans-v2")),
+    precos: [...document.querySelectorAll("#plans-v2 article.plan .price-block")]
+      .map((e) => norm(e.innerText)),
+  };
+}
 
 /**
  * Abre a /precos com o markup mutado por `mutar` (string → string) e devolve o
@@ -91,8 +127,15 @@ async function abrir({ mutar = (h) => h, semIlha = false } = {}) {
       precos: cards.map((c) => !!c.querySelector(".price-block")),
     };
   });
+  // Os dois ciclos, na ordem em que o usuário os vê: o mensal é o estado inicial
+  // e o anual só existe depois do clique, que é quem move os `[data-price-*]`.
+  const ciclos = {};
+  for (const [ciclo, botao] of [["mensal", null], ["anual", "#cycle-annual"]]) {
+    if (botao) await pagina.click(botao);
+    ciclos[ciclo] = await pagina.evaluate(arvoreEPrecos);
+  }
   await pagina.close();
-  return { ...medido, erros, avisos };
+  return { ...medido, ciclos, erros, avisos };
 }
 
 /**
@@ -216,6 +259,170 @@ test("PI6: um 2º <button> no card cai no fallback em vez de desaparecer", async
   assert.deepEqual(ilha.erros, []);
   assert.ok(ilha.avisos.some((a) => a.includes("#plans-v2 fora do contrato")),
     `o fallback foi silencioso: ${JSON.stringify(ilha.avisos)}`);
+});
+
+/**
+ * PI7 — SERVIDOR × ILHA, o oráculo que faltava.
+ *
+ * Os PI2–PI6 medem markup MUTADO; o PI1 mede que a ilha monta. Nenhum comparava
+ * o que a ilha reemite com o que o servidor mandou no markup de HOJE, e o
+ * comparador de preço (`tests/test_pix_preco_bate_com_a_precos.py`) lê o TEXTO
+ * CRU do `precos.html` — ou seja, prova metade: que o markup do servidor tem o
+ * preço certo. A outra metade é esta.
+ *
+ * *Negativo medido: `precoHtml: filhos.get(".price-block").innerHTML` →
+ * `.textContent` (`webapp/src/precos/lerPlanos.js`) + rebuild. A página passa a
+ * mostrar os dois preços colados (perde os `display:none` que o `setCycle`
+ * alterna) e o PI1, os 3 do gate do bundle e o comparador de preço seguem
+ * VERDES — só este caso fica vermelho.*
+ *
+ * Por que os dois ciclos: o preço anual mora no MESMO `.price-block`, escondido
+ * por `style="display:none"`. Comparar só o mensal deixa passar a perda do
+ * atributo (o mensal continuaria certo e o anual nunca apareceria).
+ *
+ * O que ele NÃO pega: defeito nos DOIS lados ao mesmo tempo — se o `setCycle`
+ * parar de alternar, servidor e ilha erram igual e a árvore bate. Por isso o
+ * bloco final mede o marcador do ciclo (`/mês` × `/ano`), que é estrutura, não
+ * uma quarta cópia do preço (§0.7).
+ */
+test("PI7: a ilha reproduz o #plans-v2 do servidor, atributo por atributo, nos dois ciclos", async () => {
+  const servidor = await abrir({ semIlha: true });
+  const ilha = await abrir();
+  // As duas âncoras, sem as quais a comparação é servidor × servidor:
+  assert.equal(servidor.montou, false, "o lado de controle montou a ilha");
+  assert.equal(ilha.montou, true, "a ilha não montou — nada foi comparado");
+
+  for (const ciclo of ["mensal", "anual"]) {
+    assert.deepEqual(ilha.ciclos[ciclo].arvore, servidor.ciclos[ciclo].arvore,
+      `a árvore do #plans-v2 divergiu do markup do servidor no ciclo ${ciclo}`);
+    assert.deepEqual(ilha.ciclos[ciclo].precos, servidor.ciclos[ciclo].precos,
+      `os preços VISÍVEIS divergiram no ciclo ${ciclo}`);
+  }
+  // Os QUATRO cards: três com preço e o Premium ("Em breve"), que não tem — e o
+  // marcador do ciclo tem de ser o do ciclo selecionado, um só por card. O
+  // `/mês` com barra de propósito: o "Equivale a R$ 8,25 por mês" do anual
+  // contém "mês" e não é preço de ciclo.
+  for (const [ciclo, tem, naoTem] of [["mensal", /\/mês/, /\/ano/], ["anual", /\/ano/, /\/mês/]]) {
+    const p = ilha.ciclos[ciclo].precos;
+    assert.equal(p.length, 4, `cards com .price-block no ${ciclo}: ${p.length}`);
+    assert.equal(p.filter((t) => tem.test(t)).length, 3,
+      `no ciclo ${ciclo} os preços na tela são ${JSON.stringify(p)}`);
+    assert.equal(p.filter((t) => naoTem.test(t)).length, 0,
+      `o ciclo ${ciclo} está mostrando o preço do outro: ${JSON.stringify(p)}`);
+    assert.ok(!tem.test(p[3]) && !naoTem.test(p[3]), `o Premium ganhou preço: ${p[3]}`);
+  }
+});
+
+/**
+ * PI8 — A JANELA DO `refreshPlanButtons`, e por que a linha 36 do `main.jsx` é
+ * load-bearing.
+ *
+ * `refreshPlanButtons` tem quatro ramos, e dois NÃO são idempotentes por
+ * reemissão: os que deixam `disabled = false` e põem o handler em PROPRIEDADE
+ * (`btn.onclick = function () { openChangeModal(p); }`, `precos.html:875`, e o
+ * `cancelChange` do `:864`). Handler de propriedade não vira atributo, e o
+ * `lerCartao` lê `btn.getAttribute("onclick")` — que continua valendo
+ * `startCheckout(...)`. Se o `refreshPlanButtons` rodar ANTES do mount, a ilha
+ * reemite um botão escrito "Trocar pro Pro", HABILITADO, cujo clique abre um
+ * checkout novo para quem já assina. O `globalThis.refreshPlanButtons?.()` do
+ * `main.jsx` é o que reemite o handler em cima do botão novo.
+ *
+ * A JANELA É ALCANÇÁVEL SÓ POR REDE, e isto foi MEDIDO (não é hipótese): o
+ * `refreshPlanButtons` não é chamado por um `<script>` — ele é chamado de dentro
+ * do `await` do `loadPlansState`, que é inline e roda continuação enquanto o
+ * parser está BLOQUEADO baixando o `/precos-app.js`. Com o bundle atrasado
+ * 1500 ms, o observador abaixo viu o texto do botão do SERVIDOR virar "Trocar
+ * pro Pro" em ~60 ms e o mount só chegar em ~1555 ms. A ordem dos `<script>` no
+ * documento não protege nada aqui (ela protege o `pbPixInit`, que é outra coisa).
+ *
+ * Controles do §3, os dois nas linhas da tabela:
+ *   · negativo — apague `globalThis.refreshPlanButtons?.()` do `main.jsx` e
+ *     rebuilde: a linha de 1500 ms fica vermelha (o clique vira POST de
+ *     `/billing/create-checkout`);
+ *   · positivo — a 2ª linha é o caminho legítimo na ordem NORMAL (mount primeiro,
+ *     `/billing/subscription` lento): o botão de troca abre o MODAL. Sem ela, um
+ *     `refreshPlanButtons` que desabilitasse tudo passaria.
+ */
+const SUB_STRIPE = { active: true, gateway: "stripe", plan: "plus", interval: "monthly" };
+
+test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async () => {
+  // Os dois lados da janela, os DOIS forçados por atraso explícito — nunca pela
+  // ordem natural: sem o `atrasoSub` a linha de baixo depende de o bundle local
+  // chegar antes de duas respostas mockadas, e a margem medida era de 22 ms.
+  // Teste que depende de 22 ms é flake esperando a máquina carregada.
+  for (const { atrasoBundle, atrasoSub, preMount } of [
+    { atrasoBundle: 1500, atrasoSub: 0, preMount: "Trocar pro Pro" },
+    { atrasoBundle: 0, atrasoSub: 800, preMount: "Assinar Pro" },
+  ]) {
+    const pagina = await browser.newPage();
+    const erros = [];
+    pagina.on("pageerror", (e) => erros.push(String(e)));
+    // Guarda o nó do botão que o SERVIDOR mandou, no instante em que o parser o
+    // insere. É o que separa "a ilha montou" de "a ilha nem rodou" depois, e o
+    // que prova QUANDO o refreshPlanButtons mexeu: `preMount` é o texto daquele
+    // nó, não do que está na tela.
+    await pagina.addInitScript(() => {
+      new MutationObserver((_, obs) => {
+        const b = document.querySelector('#plans-v2 [data-plan-btn="pro"]');
+        if (!b) return;
+        window.__noDoServidor = b;
+        obs.disconnect();
+      }).observe(document, { subtree: true, childList: true });
+    });
+    let checkouts = 0;
+    await pagina.route("**/billing/plans-config", (r) => r.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+    }));
+    await pagina.route("**/billing/subscription", async (r) => {
+      if (atrasoSub) await new Promise((ok) => setTimeout(ok, atrasoSub));
+      return r.fulfill({ contentType: "application/json", body: JSON.stringify(SUB_STRIPE) });
+    });
+    await pagina.route("**/billing/create-checkout", (r) => {
+      checkouts += 1;
+      return r.fulfill({ contentType: "application/json",
+                         body: JSON.stringify({ checkout_url: `${ORIGIN}/precos.html?stripe=1` }) });
+    });
+    if (atrasoBundle) {
+      await pagina.route("**/precos-app.js*", async (r) => {
+        await new Promise((ok) => setTimeout(ok, atrasoBundle));
+        return r.fallback();
+      });
+    }
+    await pagina.goto(`${ORIGIN}/precos.html`, { waitUntil: "load" });
+    const alvo = '#plans-v2 [data-plan-btn="pro"]';
+    await pagina.waitForFunction((sel) =>
+      document.querySelector(sel)?.textContent.startsWith("Trocar"), alvo);
+    const estado = await pagina.evaluate((sel) => {
+      const b = document.querySelector(sel);
+      return { preMount: window.__noDoServidor.textContent,
+               montou: b !== window.__noDoServidor,
+               texto: b.textContent, disabled: b.disabled };
+    }, alvo);
+
+    const onde = `com bundle atrasado ${atrasoBundle}ms e /billing/subscription ${atrasoSub}ms`;
+    assert.equal(estado.montou, true, `a ilha não montou ${onde} — nada é medido`);
+    // A ÂNCORA da ordem: `preMount` é o texto do nó que o servidor mandou. Se ele
+    // virou "Trocar pro Pro", o refreshPlanButtons rodou ANTES do mount; se
+    // continuou "Assinar Pro", o mount veio primeiro e o nó nunca foi tocado.
+    assert.equal(estado.preMount, preMount,
+      `o refreshPlanButtons não rodou na ordem que este caso mede ${onde}`);
+    assert.equal(estado.texto, "Trocar pro Pro", `o rótulo da troca não sobreviveu ${onde}`);
+    assert.equal(estado.disabled, false, `o botão de troca ficou desabilitado ${onde}`);
+
+    await pagina.click(alvo);
+    await pagina.waitForTimeout(300);
+    // O POST vem ANTES do modal na ordem das asserções de propósito: com o
+    // defeito a página navega para o checkout, e aí um `waitForSelector` daria
+    // timeout de seletor no lugar de nomear a causa.
+    assert.equal(checkouts, 0,
+      `o clique em "Trocar pro Pro" abriu um checkout NOVO para quem já assina ${onde}`);
+    assert.equal(await pagina.evaluate(() =>
+      document.getElementById("chg-overlay")?.style.display), "flex",
+      `o clique em "Trocar pro Pro" não abriu o modal de troca ${onde}`);
+    assert.deepEqual(erros, [], onde);
+    await pagina.close();
+  }
 });
 
 // ── PO: o pódio ─────────────────────────────────────────────────────────────
