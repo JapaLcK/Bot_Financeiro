@@ -480,3 +480,76 @@ for (const [rotulo, largura, deveAparecer] of [
     await page.close();
   });
 }
+
+// ── A NOTA DOS PLANOS, o SEGUNDO texto que prometia o trial ─────────────────
+//
+// A perna do corte reescrevia só o #precos-sub. Três parágrafos abaixo dele o
+// #plans-note-v2 continuava dizendo "Todo plano vem com 15 dias grátis pra
+// testar (um teste por número)" — a mesma promessa falsa, na mesma tela, para
+// o mesmo ex-assinante cujo telefone já queimou o trial.
+//
+// CONTROLE DECLARADO (`docs/controles_declarados.md`) — em `precos.html`, na
+// perna `me.app_access === false`, troque o `if (nota)` por `if (false)` (o
+// bloco continua lá e deixa de agir; nada é apagado). VERMELHOS:
+//   `a nota dos planos não promete trial ao cortado — desktop`
+//   `a nota dos planos não promete trial ao cortado — mobile`
+// Direção: promessa falsa de trial a quem já o usou.
+//
+// Positivo do PAR, VERDE sob a injeção (é o que o torna positivo):
+//   `a nota dos planos continua prometendo o trial a quem não foi cortado`
+const NOTA = "#plans-note-v2";
+
+for (const [tela, viewport] of TELAS) {
+  test(`a nota dos planos não promete trial ao cortado — ${tela}`, async () => {
+    const { page } = await abrirPrecos({
+      me: { user_id: 42, needs_plan_selection: false, app_access: false },
+      viewport,
+    });
+    const nota = await page.textContent(NOTA);
+
+    assert.ok(!nota.includes("15 dias grátis"),
+      `a nota prometeu o trial a um ex-assinante: "${nota}"`);
+    assert.ok(!/\btrial\b/i.test(nota),
+      `a nota ainda pressupõe um trial que pode não existir: "${nota}"`);
+    // As duas frases que continuam verdadeiras para todo mundo têm de ficar —
+    // sem elas o conserto tiraria informação de pagamento em vez de corrigir
+    // uma promessa.
+    assert.ok(nota.includes("Stripe"), `a nota perdeu a frase da Stripe: "${nota}"`);
+    assert.ok(nota.includes("nunca vê os dados do seu cartão"),
+      `a nota perdeu a garantia sobre o cartão: "${nota}"`);
+    assert.ok(nota.includes("checkout"),
+      `a nota perdeu a deferência ao checkout: "${nota}"`);
+
+    // O ícone sobrevive à troca do texto: `textContent =` apaga os filhos, e
+    // sem o `prepend` a nota ficaria sem o glifo — some calado (§5).
+    const icone = await page.getAttribute(`${NOTA} i`, "class");
+    assert.equal(icone, "ph ph-info", `a nota ficou sem ícone: ${icone}`);
+
+    // Não vaza da caixa em nenhuma das duas larguras.
+    const medida = await page.$eval(NOTA, (el) => ({
+      largura: el.scrollWidth, caixa: el.parentElement.clientWidth,
+    }));
+    assert.ok(medida.largura <= medida.caixa + 1,
+      `${tela}: a nota tem ${medida.largura}px numa caixa de ${medida.caixa}px`);
+    await page.close();
+  });
+}
+
+test("a nota dos planos continua prometendo o trial a quem não foi cortado", async () => {
+  // POSITIVO: sem ele, apagar a promessa do HTML estático passaria verde e
+  // todo visitante deixaria de ler a oferta que a página existe para fazer.
+  const { page } = await abrirPrecos({
+    me: { user_id: 42, needs_plan_selection: false, app_access: true },
+  });
+  const nota = await page.textContent(NOTA);
+  assert.ok(nota.includes("15 dias grátis"),
+    `a nota deixou de oferecer o trial a quem pode tê-lo: "${nota}"`);
+  await page.close();
+});
+
+test("visitante deslogado (sem /auth/me) continua lendo a nota original", async () => {
+  // A perna só roda com `me`; deslogado é a maioria da página e não pode mudar.
+  const { page } = await abrirPrecos();
+  assert.ok((await page.textContent(NOTA)).includes("15 dias grátis"));
+  await page.close();
+});

@@ -173,6 +173,17 @@ _WA_INTERACTIVE_ISENTOS = {
 }
 
 
+# `action_type`s das `pending_actions` interceptadas AQUI (antes do
+# `handle_incoming`) que ESCREVEM: a recategorização reescreve a categoria de um
+# lançamento, a pergunta de valor chama `mark_bill_paid` e debita saldo. As
+# demais pendências deste produto são resolvidas pelo `route()` DEPOIS do
+# `_paywall_gate`, então já estão cobertas — só estas duas furam o caminho.
+#
+# Lista, e não "toda pendência", porque o gate custa uma consulta: ver a nota de
+# ORDEM no bloco que a usa.
+_PENDENCIAS_QUE_ESCREVEM = {"recategorize_launch_text", "bill_pay_amount"}
+
+
 def _bloqueado_pelo_corte(uid: int, reply_to: str, texto: str = "") -> bool:
     """O corte aplicado a um caminho que NÃO passa pelo `handle_incoming`.
 
@@ -969,24 +980,33 @@ def process_message(message: InboundMessage) -> None:
         # a categoria que quer aplicar ao lançamento.
         # ---------------------------------------------------------------
         if (message.text or "").strip():
-            # O CORTE, antes de CONSUMIR qualquer `pending_action`. Estas
-            # interceptações também dão `return` sem passar pelo
-            # `handle_incoming`: a recategorização por texto reescreve a
-            # categoria de um lançamento e a pergunta de valor chama
-            # `mark_bill_paid`. Sem esta linha, quem foi cortado enquanto tinha
-            # uma pergunta de pé pagava a conta respondendo o número.
-            #
-            # Vai com o TEXTO REAL: é o que faz as isenções de ajuda e de
-            # billing julgarem o que a pessoa escreveu. Para quem TEM acesso
-            # isto devolve None e nada muda; para quem não tem, a mesma copy
-            # que o `handle_incoming` mandaria logo abaixo, só que antes de a
-            # pendência ser consumida.
-            if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):
-                return
             try:
                 pending_recat = get_pending_action(uid)
             except Exception:
                 pending_recat = None
+            # O CORTE, antes de CONSUMIR a pendência, e SÓ quando existe uma que
+            # escreve. As duas interceptações abaixo dão `return` sem passar
+            # pelo `handle_incoming`: a recategorização por texto reescreve a
+            # categoria de um lançamento e a pergunta de valor chama
+            # `mark_bill_paid`. Sem gate aqui, quem foi cortado com uma pergunta
+            # de pé pagava a conta respondendo o número.
+            #
+            # **A ORDEM é o ponto, e ela é sobre CUSTO.** Gatear antes de ler a
+            # pendência fazia o veredito rodar em TODA mensagem de texto: o
+            # `get_plan_gate_state` saía uma vez aqui e outra dentro do
+            # `handle_incoming` lá embaixo, duas consultas por mensagem no
+            # caminho mais quente do produto, para uma pendência que na
+            # esmagadora maioria das vezes não existe. É o mesmo custo que a
+            # sentinela `_UNSET` de `plan_service.has_app_access` existe para
+            # não pagar. Lida a pendência primeiro, quem não tem nenhuma segue
+            # direto e paga o veredito UMA vez, no `handle_incoming`.
+            #
+            # Vai com o TEXTO REAL: é o que faz as isenções de ajuda e de
+            # billing julgarem o que a pessoa escreveu.
+            if (pending_recat
+                    and pending_recat.get("action_type") in _PENDENCIAS_QUE_ESCREVEM
+                    and _bloqueado_pelo_corte(uid, reply_to, message.text or "")):
+                return
             if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
                 launch_id = (pending_recat.get("payload") or {}).get("launch_id")
                 # Porteiro: `_apply_recategorize` reescreve a categoria do

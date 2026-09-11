@@ -194,3 +194,130 @@ def test_pagante_clicando_ja_paguei_quita_normalmente(monkeypatch, bancada):
     _clique(uid, monkeypatch, "bill_paid:1")
 
     assert quitou == [1], f"o pagante foi barrado pelo gate do corte: {respostas}"
+
+
+# ── As PENDÊNCIAS: o mesmo gate, e o CUSTO dele ─────────────────────────────
+#
+# As duas interceptações de `pending_actions` feitas antes do `handle_incoming`
+# — recategorizar por texto e responder o valor do boleto — também escrevem e
+# também dão `return`. O gate delas tem uma restrição a mais que o dos botões:
+# ele roda no caminho de TEXTO, que é o mais quente do produto, e cada chamada
+# custa um `db.get_plan_gate_state`. Gateando antes de ler a pendência, quem tem
+# acesso pagava a consulta DUAS vezes por mensagem (uma aqui, outra dentro do
+# `handle_incoming`) por causa de uma pendência que quase nunca existe.
+#
+# CONTROLES DECLARADOS (`docs/controles_declarados.md`), e são DOIS porque o
+# conserto tem duas metades que se medem em direções opostas.
+#
+# **(a) o gate existe** — em `wa_runtime`, troque
+# `pending_recat.get("action_type") in _PENDENCIAS_QUE_ESCREVEM` por
+# `... not in _PENDENCIAS_QUE_ESCREVEM` (troca de operador; nada apagado).
+# VERMELHO:
+#   `test_cortado_com_pendencia_de_boleto_nao_paga_respondendo_o_valor`
+# Direção: escrita sem direito — o cortado quita a conta, debitando saldo,
+# respondendo o número a uma pergunta feita antes do corte.
+#
+# **(b) o gate não roda à toa** — apague os dois primeiros termos do `if`,
+# deixando `if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):`
+# (é literalmente a versão anterior deste código). VERMELHO:
+#   `test_mensagem_comum_de_quem_tem_acesso_paga_o_veredito_uma_vez`
+# Direção: custo — duas consultas por mensagem no caminho principal.
+#
+# As duas metades se medem sozinhas: (a) é falso negativo de gate, (b) é
+# desperdício. Uma injeção que consertasse (b) quebrando (a) fica vermelha em
+# (a), e vice-versa — é o par que impede "resolvi tirando o gate".
+
+
+def _texto(uid: int, monkeypatch, corpo: str):
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.get_or_create_canonical_user",
+                        lambda provider, external_id: uid)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
+                        lambda wa_id, current_user_id=None: {"status": "noop", "user_id": uid})
+    process_message(InboundMessage(
+        wa_id="5511999990000", text=corpo, timestamp="1", attachments=[],
+        raw={"id": f"wamid.{uuid.uuid4().hex[:10]}", "type": "text"},
+    ))
+
+
+def test_cortado_com_pendencia_de_boleto_nao_paga_respondendo_o_valor(monkeypatch, bancada):
+    """A pergunta ficou de pé de ontem; o corte veio hoje; ele responde "132,50".
+
+    Sem o gate, `mark_bill_paid` roda e o saldo é debitado — escrita de dinheiro
+    por uma conta sem direito."""
+    respostas, _ = bancada
+    uid = _conta(cortada=True)
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_pending_action", lambda u: {
+        "action_type": "bill_pay_amount",
+        "payload": {"bill_id": 1, "name": "Luz"},
+    })
+    monkeypatch.setattr(wr, "consume_pending_action", lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("o cortado consumiu a pendência")))
+    import db.bills as bills
+    monkeypatch.setattr(bills, "mark_bill_paid", lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("o cortado quitou a conta")))
+
+    _texto(uid, monkeypatch, "132,50")
+
+    assert respostas, "o cortado respondeu e não recebeu nada"
+    assert "plano" in respostas[0].lower(), respostas
+
+
+def test_cortado_com_pendencia_de_boleto_e_o_pagante_nao(monkeypatch, bancada):
+    """POSITIVO do par (a): mesma pendência, conta com direito, a conta é paga."""
+    respostas, _ = bancada
+    uid = _conta(cortada=False)
+    quitou: list[int] = []
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_pending_action", lambda u: {
+        "action_type": "bill_pay_amount",
+        "payload": {"bill_id": 1, "name": "Luz"},
+    })
+    monkeypatch.setattr(wr, "consume_pending_action", lambda *a, **k: True)
+    import db.bills as bills
+    monkeypatch.setattr(bills, "mark_bill_paid",
+                        lambda u, b, *a, **k: quitou.append(b) or {
+                            "name": "Luz", "paid_amount": 132.5, "amount": 132.5})
+
+    _texto(uid, monkeypatch, "132,50")
+
+    assert quitou == [1], f"o pagante foi barrado na pendência: {respostas}"
+
+
+def test_mensagem_comum_de_quem_tem_acesso_paga_o_veredito_uma_vez(monkeypatch, bancada):
+    """O CUSTO, contado: "gastei 50 no mercado" sem pendência nenhuma.
+
+    Conta as chamadas a `db.get_plan_gate_state`, que é o SELECT que o
+    `_paywall_gate` paga por avaliação. Uma é o `handle_incoming` real; a
+    segunda seria o gate daqui rodando à toa.
+
+    **O `handle_incoming` aqui é o DE VERDADE** — a `bancada` o substitui por
+    uma sentinela, e com ela o número seria 0 com e sem o conserto, que é a
+    medição que não mede nada (§3).
+    """
+    _, _ = bancada
+    uid = _conta(cortada=False)
+
+    import core.handle_incoming as hi
+    import db as dbmod
+    chamadas: list[int] = []
+    real = dbmod.get_plan_gate_state
+
+    def _contando(u):
+        chamadas.append(u)
+        return real(u)
+
+    monkeypatch.setattr(dbmod, "get_plan_gate_state", _contando)
+    monkeypatch.setattr(hi.db, "get_plan_gate_state", _contando, raising=False)
+    monkeypatch.setattr("adapters.whatsapp.wa_runtime.handle_incoming",
+                        hi.handle_incoming)
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_pending_action", lambda u: None)
+
+    _texto(uid, monkeypatch, "gastei 50 no mercado")
+
+    assert len(chamadas) == 1, (
+        f"o veredito foi consultado {len(chamadas)}x numa mensagem comum "
+        "(esperado 1: só o do handle_incoming)")
