@@ -1,6 +1,7 @@
 """Contrato de instalação do Microsoft Clarity nas páginas públicas seguras."""
 
 import ast
+import asyncio
 import json
 import shutil
 import subprocess
@@ -69,7 +70,7 @@ def _scripts_carregados_do_clarity(url: str, referrer: str) -> list[str]:
         f"global.document = {{ referrer: {json.dumps(referrer)}, "
         "createElement: function(){ return {}; }, "
         "getElementsByTagName: function(){ return [{ parentNode: { "
-        "insertBefore: function(tag){ global.carregados.push(tag.src); } }]; } };\n"
+        "insertBefore: function(tag){ global.carregados.push(tag.src); } } }]; } };\n"
         "global.carregados = [];\n"
         f"{inline}\n"
         "console.log(JSON.stringify(global.carregados));\n"
@@ -122,11 +123,20 @@ def test_rotas_institucionais_e_precos_fazem_opt_in():
     }
 
 
-def test_suporte_faz_opt_in_sem_expor_login_ou_cadastro():
+def test_suporte_nao_grava_formulario_nem_paginas_de_conta(monkeypatch):
+    from frontend.routes.static_pages import serve_suporte
+
+    monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", _PROJECT_ID)
+    corpo = asyncio.run(serve_suporte()).body.decode()
+    assert "<form" in corpo
+    assert "www.clarity.ms/tag/" not in corpo
+    assert _PROJECT_ID not in corpo
+
     source = STATIC_PAGES.read_text(encoding="utf-8")
     trecho_suporte = source[source.index("async def serve_suporte"):source.index("@router.get(\"/ddf")]
 
-    assert "inject_tracking(template.replace(\"{{FAQ}}\", faq), clarity=True)" in trecho_suporte
+    assert "inject_tracking(template.replace(\"{{FAQ}}\", faq))" in trecho_suporte
+    assert "clarity=True" not in trecho_suporte
     for page in ("login.html", "cadastro.html", "completar-cadastro.html", "home.html", "comecar.html"):
         assert page not in _paginas_com_clarity()
 

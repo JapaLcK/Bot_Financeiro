@@ -333,7 +333,8 @@ async def serve_suporte():
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
     # /suporte é público → recebe pixel e GA4 como as demais páginas públicas.
-    page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq), clarity=True))
+    # O formulário recebe dados pessoais e mensagens livres: não gravar no Clarity.
+    page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq)))
     return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
