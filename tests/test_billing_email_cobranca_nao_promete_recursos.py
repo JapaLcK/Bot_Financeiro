@@ -68,6 +68,41 @@ nada) e derruba três, este entre eles::
 É a diferença entre "parou de mentir" e "parou de falar": sem o aviso do
 bloqueio o cliente perde a informação que o #354 pagou para colocar ali.
 
+A VARREDURA DA CATEGORIA (2026-09-11)
+────────────────────────────────────
+A categoria é "copy que afirma o que o usuário PODE FAZER enquanto está em
+carência ou cortado". Fechada por busca, não por leitura::
+
+    grep -rnE "continua (funcionando|usando|anotando|valendo|ativo|ativa|com acesso|tudo)|normalmente|sem interrupç|segue funcionando|nada muda|acesso (continua|segue)" \
+      --include=*.py --include=*.html --include=*.js --include=*.mjs . \
+      | grep -v __pycache__ | grep -vE "^\./(tests|node_modules|\.venv)/" | grep -v "^\./docs/"
+
+Tirados os comentários de código, sobram QUATRO copies, e o discriminador é a
+JANELA a que a frase se refere:
+
+| copy | janela | veredito |
+|---|---|---|
+| `send_payment_failed_email` | a da retentativa | **era falsa** na 2ª metade — consertada |
+| `send_payment_reminder_email` | o 6º dia do relógio | **era falsa** quase sempre — consertada |
+| `send_subscription_canceled_email` (ramo com carência) | até `plan_expires_at` | **verdadeira** |
+| `billing_commands._handle_cancelar` | "até o fim do período já pago" | **verdadeira** |
+
+As duas de baixo prometem acesso ATÉ O FIM DO PERÍODO JÁ PAGO, e essa é
+exatamente a janela em que o tier ainda não caiu. Medido, conta `plus`
+`canceled` com `plan_expires_at` 10 dias no futuro::
+
+    has_app_access=True  get_plan_tier='plus'
+    launches_month_max=None  of_banks_max=2  agents_max=3
+
+E o ramo SEM carência do cancelamento (`plan_expires_at` vencido) diz que o
+acesso foi encerrado — `has_app_access=False`, também verdadeiro. Nenhuma das
+duas foi tocada, e isso está aqui para que "não mexi" seja uma medição e não um
+esquecimento.
+
+**A regra que separa as falsas das verdadeiras**, para a próxima copy: frase
+escopada ao PERÍODO PAGO é segura; frase escopada à JANELA DE INADIMPLÊNCIA não
+pode prometer recursos, porque ali o tier já é `free`.
+
 O que este arquivo NÃO alcança: o envio de verdade. `send_email` é
 monkeypatchado pela fixture `capturado`, e este ambiente não tem `RESEND_API_KEY`
 — nenhum e-mail sai daqui (§6).
