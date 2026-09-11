@@ -649,6 +649,46 @@ quem sobrar volta no tick seguinte ainda dentro da janela.
 
 ---
 
+## Dívida declarada: a carência CONCEDE acesso, mas com os limites do Grátis
+
+Medido 2026-09-11, conta em S3 (relógio aberto, `past_due`, `plan_expires_at`
+vencido): `has_app_access` é `True`, e ao mesmo tempo
+
+```
+get_plan_tier          → "free"
+get_user_limits        → {launches_month_max: 30, of_banks_max: 0, agents_max: 0,
+                          history_current_month_only: True, pockets_max: 1}
+```
+
+Ou seja, o lado direito do OR de `tem_direito_hoje` concede **entrada**, não o
+**plano**. Quem está na carência perde Open Finance, agentes e histórico no
+instante em que o `plan_expires_at` vence, e no 31º lançamento do mês ouve *"No
+Grátis você registra 30 lançamentos por mês — e esse mês lotou!"*, nomeando o
+plano que o corte do Grátis declara inexistente em todas as outras copies.
+
+**Não é regressão do PR do corte**: a `main` faz o mesmo, porque
+`get_plan_tier` lê `plan`/`plan_expires_at` e não olha o relógio. O PR do corte
+só tornou a contradição VISÍVEL, ao passar a mandar uma copy de carência que
+prometia "seu acesso continua por enquanto" — a copy foi corrigida
+(`core/services/billing_copy.COBRANCA_EM_ATRASO` agora enumera o que cai), os
+limites não.
+
+**Fica ABERTA de propósito, para PR próprio**, e a pergunta a responder lá é
+qual dos dois é o certo, porque as duas leituras são defensáveis:
+
+1. **carência mantém o tier pago** — `get_plan_tier` passa a olhar o relógio.
+   Coerente com "o relógio só CONCEDE", mas dá 7 dias de plano pago a quem
+   falhou a cobrança, e o mesmo predicado precisa entrar em `get_user_limits`,
+   no gate de Open Finance e no de agentes (§2: a categoria, não a instância).
+2. **carência é entrada sem plano** — o comportamento de hoje, e aí o que falta
+   é o produto **dizer** isso em todo lugar que hoje nomeia "Grátis". A copy do
+   limite de lançamentos é o primeiro site.
+
+Quem for fazer: o inventário começa em `grep -rn "get_plan_tier\|get_user_limits"
+--include="*.py" .` e o alvo do §2 é *quem mais lê o tier sem olhar o relógio*.
+
+---
+
 ## O que a enumeração fechou
 
 | célula | quem achou | estado |

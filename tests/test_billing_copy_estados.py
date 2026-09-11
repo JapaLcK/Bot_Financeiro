@@ -163,3 +163,73 @@ def test_cortado_de_verdade_continua_recebendo_a_copy_do_corte():
     assert has_app_access(uid) is False, "pré-condição: a conta tem de estar cortada"
 
     assert _diga(uid, "cancelar plano") == _copy_do_cortado()
+
+
+# ── O FREIO DE EMERGÊNCIA não pode fazer a copy mentir ───────────────────────
+#
+# `estado_sem_plano_pago` deduzia a carência de `has_app_access`, com o argumento
+# de que — descartado o plano pago vigente — "ainda tem acesso" só podia vir do
+# relógio. O argumento vale só enquanto `has_app_access` chega ao OR. Ele tem
+# TRÊS curtos-circuitos que devolvem True sem olhar relógio nenhum:
+# `ACCESS_GATE_ENABLED=0`, `PLANS_V2_ENABLED=0` e exceção. Nos três, o cortado
+# ouvia "a cobrança da sua assinatura não passou… seu acesso continua por
+# enquanto" e `cancelar plano` entregava o portal da Stripe de uma assinatura
+# que não existe.
+#
+# Isto é o pior lugar possível para um bug de copy: o freio é a alavanca que se
+# puxa às 3 da manhã se o corte der errado, e era exatamente nesse estado que a
+# mentira alcançava a base INTEIRA. O predicado certo é `carencia_aberta`, que
+# responde só o relógio e não tem freio.
+#
+# CONTROLE DECLARADO (`docs/controles_declarados.md`) — em
+# `core.services.billing_copy.estado_sem_plano_pago`, troque o bloco do
+# `carencia_aberta` pelo gate de novo. Troca de PREDICADO, nada apagado, e o
+# `is not None` TEM de vir junto::
+#
+#     from core.services.plan_service import has_app_access
+#     aberta = (has_app_access(user_id, user=user) if user is not None
+#               else has_app_access(user_id))
+#
+# **Sem o `is not None` a injeção mede outra coisa** — medido: `user=None` cru é
+# VEREDITO ("não existe conta") para o `has_app_access`, e aí o POSITIVO
+# (`test_carencia_manda_cancelar_e_recebe_o_portal`) cai junto, 3 vermelhos em
+# vez de 2. Injeção que derruba o positivo inverte a leitura de quem a segue
+# (`docs/controles_declarados.md`): muda UM termo por vez.
+#
+# VERMELHOS (medido 2026-09-11):
+#   `test_freio_do_corte_nao_transforma_cortado_em_carencia`
+#   `test_freio_da_escada_nao_transforma_cortado_em_carencia`
+# Direção: falso POSITIVO de assinatura — o bot afirma a quem não tem nada que
+# existe uma cobrança em retentativa, e manda ao portal da Stripe.
+#
+# Positivo do PAR, VERDE sob a injeção (é o que o torna positivo):
+#   `test_carencia_manda_cancelar_e_recebe_o_portal` — a carência DE VERDADE
+#   continua sendo carência; o conserto restringe, e não recusa tudo.
+
+
+def _cortado_sem_relogio() -> int:
+    """Cortada de verdade: plano vencido, `canceled`, `past_due_since` NULL."""
+    return _com_tier("pro", expira_em_dias=-1, status="canceled")
+
+
+def test_freio_do_corte_nao_transforma_cortado_em_carencia(monkeypatch):
+    """`ACCESS_GATE_ENABLED=0`: o freio devolve ACESSO, não uma assinatura."""
+    uid = _cortado_sem_relogio()
+    monkeypatch.setenv("ACCESS_GATE_ENABLED", "0")
+    from core.services.plan_service import has_app_access
+    assert has_app_access(uid) is True, "pré-condição: o freio tem de abrir o acesso"
+
+    assert _diga(uid, "cancelar plano") == _copy_do_cortado()
+    baixa = _diga(uid, "plano").lower()
+    assert "não passou" not in baixa and "nao passou" not in baixa, baixa
+
+
+def test_freio_da_escada_nao_transforma_cortado_em_carencia(monkeypatch):
+    """`PLANS_V2_ENABLED=0` com `PAYWALL_ENABLED=0`: o binário legado também
+    devolve True cru de `has_app_access`, pelo `paywall_enabled()`."""
+    uid = _cortado_sem_relogio()
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    from core.services.plan_service import has_app_access
+    assert has_app_access(uid) is True, "pré-condição: o freio legado abre o acesso"
+
+    assert _diga(uid, "cancelar plano") == _copy_do_cortado()

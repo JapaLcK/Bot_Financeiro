@@ -63,9 +63,24 @@ SEM_ACESSO = (
 #
 # Não promete data de fim de propósito: quem decide quando a retentativa acaba é
 # a Stripe, e `DUNNING_GRACE_DAYS` é a janela do NOSSO lembrete, não a dela.
+#
+# E não promete "seu acesso continua", que era o que ela dizia. Medido
+# 2026-09-11 para a conta em carência: `has_app_access` é True, mas
+# `get_plan_tier` já é `"free"` e `get_user_limits` devolve
+# `{launches_month_max: 30, of_banks_max: 0, agents_max: 0,
+#   history_current_month_only: True, pockets_max: 1}` — ela perde Open
+# Finance, agentes e histórico no mesmo instante. A frase antiga prometia o que
+# o produto não entrega, e no 31º lançamento a pessoa ouvia o limite nomeando o
+# plano que as outras copies declaram inexistente.
+#
+# Os LIMITES não foram tocados aqui de propósito: `get_plan_tier` é de outro PR
+# (a dívida está em `docs/dunning_estados_eventos.md`). O que este PR conserta é
+# a copy parar de prometer o que ela não entrega.
 COBRANCA_EM_ATRASO = (
     "🐷 A cobrança da sua assinatura não passou e a operadora está tentando de "
-    "novo — seu acesso continua por enquanto.\n\n"
+    "novo — eu continuo anotando por aqui enquanto isso, mas com os recursos "
+    "reduzidos: 30 lançamentos no mês, histórico só do mês atual, e sem Open "
+    "Finance nem agentes até a cobrança entrar.\n\n"
     "Pra atualizar o cartão ou encerrar a assinatura: manda {cancelar}"
 )
 
@@ -78,32 +93,54 @@ def estado_sem_plano_pago(user_id: int, user: dict | None = None) -> str:
     precisam do MESMO julgamento e antes cada um fazia o seu (o `cancelar`
     roteava por `is_pro`, que é False para Essencial e para a carência).
 
-    `has_app_access` é o predicado da carência: chegado aqui o plano pago
-    vigente já foi descartado, então "ainda tem acesso" só pode vir do lado
-    direito do OR de `tem_direito_hoje` — o relógio. Reusa o gate em vez de
-    reimplementar `carencia_aberta` (§0.1/§0.7).
+    **O predicado da carência é `carencia_aberta`, e NÃO `has_app_access`.** Uma
+    versão anterior deduzia a carência de "ainda tem acesso", com o argumento de
+    que, descartado o plano pago vigente, o acesso só podia vir do lado direito
+    do OR de `tem_direito_hoje`. O argumento é falso todas as vezes em que
+    `has_app_access` devolve True por CURTO-CIRCUITO, sem chegar ao OR:
 
-    **`user` vai para as DUAS pernas, e o `is not None` não é defensivo**: em
-    `has_app_access` o `None` é VEREDITO ("consultei, não existe conta"), e só o
-    `_UNSET` significa "não consultei" — passar `None` cru diria "sem conta" e
-    devolveria `sem_acesso` a quem só não tinha a linha em mão. Quando ela veio
-    (o `_handle_plano` já a tem), as duas pernas têm de julgar a MESMA linha:
-    em produção o cache de 10 s do `get_auth_user` esconde a diferença, mas se
-    o TTL expirar entre as duas a copy sai de dois julgamentos distintos.
+    | curto-circuito | o que o cortado ouvia |
+    |---|---|
+    | `ACCESS_GATE_ENABLED=0` (freio do corte) | a copy da carência, e `cancelar` entregava o portal de uma assinatura que não existe |
+    | `PLANS_V2_ENABLED=0` (freio da escada) | idem |
+    | exceção (soluço de banco) | idem, pelo `except` daqui |
+
+    O freio de emergência é a alavanca que se puxa às 3 da manhã se o corte der
+    errado, e era exatamente aí que a copy passava a mentir para a base INTEIRA.
+    Reusar um gate cujo contrato inclui "devolve True quando o freio está
+    puxado" para responder uma pergunta sobre o RELÓGIO era reuso da função
+    errada: `carencia_aberta` responde só o relógio, e não tem freio nenhum.
+
+    `user` é buscado uma vez e serve às duas pernas — em produção o cache de 10 s
+    do `get_auth_user` esconderia a diferença, mas se o TTL expirar entre elas a
+    copy sai de dois julgamentos distintos.
 
     Import defensivo pelo mesmo motivo do `_handle_plano`: testes (e deploys sem
     a escada v2) mockam plan_service só com `is_pro`.
     """
     try:
-        from core.services.plan_service import has_app_access, needs_plan_selection
+        from core.services.plan_service import needs_plan_selection
     except ImportError:
         return "sem_acesso"
+    # `sem_plano` ganha de `carencia`: carência com `plan_selected_at` NULL ouve a
+    # copy de quem não escolheu. Alcançabilidade ~nula — `mark_plan_selected` roda
+    # no `checkout.session.completed` E no `invoice.paid`, então quem tem
+    # assinatura na Stripe já tem a marca. Decisão registrada, não esquecimento.
     if needs_plan_selection(user_id, user):
         return "sem_plano"
     try:
-        acesso = (has_app_access(user_id, user=user) if user is not None
-                  else has_app_access(user_id))
-        return "carencia" if acesso else "sem_acesso"
+        from datetime import datetime, timezone
+
+        from core.services.billing_dunning import carencia_aberta
+        if user is None:
+            from db import get_auth_user
+            user = get_auth_user(int(user_id))
+        aberta = bool(user) and carencia_aberta(
+            user.get("past_due_since"),
+            user.get("last_payment_status"),
+            datetime.now(timezone.utc),
+        )
+        return "carencia" if aberta else "sem_acesso"
     except Exception:
         # "Não sei" NÃO vira "não tem" numa copy: `sem_acesso` afirmaria que não
         # há assinatura a cancelar. `carencia` só oferece o portal, que não

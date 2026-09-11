@@ -877,11 +877,27 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         #
         # **`unpaid` é a única COLISÃO entre "terminal no ramo free" e
         # "assinatura viva na Stripe"** — e a frase que estava aqui, "o único
-        # status cuja categoria depende do `plan`", é FALSA. Medido: SEIS
-        # divergem entre `plan='free'` e plano pago (`active`, `trialing`,
-        # `past_due`, `incomplete`, `unpaid` e o vazio), porque neste ramo TODO
-        # status vivo vira `'free'` — sem plano o painel não vê assinatura
-        # nenhuma, e divergir é o normal aqui.
+        # status cuja categoria depende do `plan`", é FALSA: divergir entre
+        # `plan='free'` e plano pago é o NORMAL deste ramo, porque aqui todo
+        # status vivo vira `'free'` (sem plano o painel não vê assinatura
+        # nenhuma).
+        #
+        # Quantos divergem NÃO fica escrito aqui (§2) — o número depende do
+        # alfabeto que se assume, e a versão anterior dizia "SEIS" por ter
+        # esquecido `'inactive'` (que é o **DEFAULT da coluna**,
+        # `db/schema.py`: `last_payment_status text not null default
+        # 'inactive'`) e `'grandfathered'`. Quem precisar do número remede::
+        #
+        #     from datetime import datetime, timedelta, timezone
+        #     from core.admin_dashboard import _derive_account_status
+        #     agora = datetime.now(timezone.utc); fut = agora + timedelta(days=30)
+        #     [s for s in ("active", "trialing", "past_due", "incomplete", "unpaid",
+        #                  "canceled", "incomplete_expired", "inactive",
+        #                  "grandfathered", "")
+        #      if _derive_account_status({"plan": "free", "last_payment_status": s,
+        #                                 "plan_expires_at": None}, agora)
+        #      != _derive_account_status({"plan": "pro", "last_payment_status": s,
+        #                                 "plan_expires_at": fut}, agora)]
         #
         # O que é raro é a colisão: um status que ESTE ramo chama de terminal
         # (`canceled`) e que ao mesmo tempo está em `_LIVE_PAYMENT_STATUSES`.

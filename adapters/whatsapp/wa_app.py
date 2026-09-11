@@ -566,6 +566,16 @@ def _bill_reminder_tick() -> None:
         if not due:
             continue
 
+        # O corte do Grátis, na MESMA posição dos dois irmãos de relatório:
+        # depois dos filtros baratos. `list_users_with_pending_bills` é um
+        # `select distinct user_id from bill_instances where status='pending'`,
+        # sem nenhum termo de acesso, e o `if not due` acima já descartou quase
+        # todo mundo — filtrando antes, cada volta pagaria uma consulta de
+        # acesso por usuário com boleto pendente, todo dia, para gente que não
+        # receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
+            continue
+
         wa_targets = _dedupe_whatsapp_targets(list_identities_by_user(uid))
         if not wa_targets:
             continue

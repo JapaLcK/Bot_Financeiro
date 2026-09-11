@@ -740,6 +740,28 @@ def process_message(message: InboundMessage) -> None:
                 if not (bill_id and uid):
                     _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
                     return
+                # O corte do Grátis também vale para o BOTÃO, e ele não chega
+                # aqui sozinho: este ramo ESCREVE (`mark_bill_paid`) e não passa
+                # pelo `handle_incoming` — ver o comentário abaixo —, então o
+                # gate tem de ser chamado à mão. Reusar `_paywall_gate` em vez
+                # de reimplementar o veredito (§0.1) traz junto o fail-open, as
+                # isenções e a copy certa para cada população. `text=""` porque
+                # não há texto: clique de botão não é comando, e nenhuma isenção
+                # de ajuda/billing deve casar.
+                #
+                # Botão VELHO na tela é o caso real: o `_bill_reminder_tick` já
+                # não manda lembrete para quem foi cortado (wa_app.py), mas o
+                # template enviado ANTES do corte continua clicável para sempre.
+                from core.handle_incoming import _paywall_gate
+                gated = _paywall_gate(
+                    IncomingMessage(platform="whatsapp", user_id=uid, text="",
+                                    external_id=message.wa_id),
+                    "whatsapp",
+                )
+                if gated:
+                    for out in gated:
+                        _send_reply(reply_to, out.text)
+                    return
                 from db.bills import get_bill, mark_bill_paid
                 from utils_text import fmt_brl
                 try:
