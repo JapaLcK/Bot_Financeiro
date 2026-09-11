@@ -514,3 +514,9 @@ jobs:
 
       - name: npm audit mobile (informativo, nao bloqueia)
         run: node scripts/npm_audit_report.mjs mobile
+
+      # Terceiro lock do repositorio: as deps da ilha React (react, react-dom,
+      # vite, rolldown, lightningcss) que produzem o arquivo servido na pagina
+      # que VENDE. Sem este step o lock novo nao era escaneado por ninguem.
+      - name: npm audit webapp (informativo, nao bloqueia)
+        run: node scripts/npm_audit_report.mjs webapp

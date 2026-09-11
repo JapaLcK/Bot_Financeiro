@@ -16,7 +16,7 @@
 import nodeTest from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -243,7 +243,23 @@ try {
   semYaml = `js-yaml indisponível (${erro.message}): rode \`npm ci\` na raiz (no CI isto REPROVA, não pula)`;
 }
 
-nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semYaml }, () => {
+/**
+ * Os locks são LEVANTADOS DO DISCO, não escritos aqui.
+ *
+ * A versão anterior comparava com a lista literal `[". ", "mobile"]`, e por isso
+ * o terceiro lock do repositório (`webapp/`, a ilha React da /precos) entrou sem
+ * uma linha vermelha: 45 pacotes novos na cadeia que produz um arquivo servido
+ * na página que vende, fora do `npm audit` e fora do Dependabot. Lista literal
+ * mede o passado; `readdirSync` mede o repositório de hoje — o quarto lock
+ * reprova até ser auditado.
+ */
+const LOCKS = ["."].concat(readdirSync(RAIZ, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name !== "node_modules" && !d.name.startsWith(".")
+    && existsSync(join(RAIZ, d.name, "package-lock.json")))
+  .map((d) => d.name)
+  .sort());
+
+nodeTest("o workflow chama o script em TODO lock do repo, sem `|| echo`", { skip: semYaml }, () => {
   const doc = YAML.load(readFileSync(join(RAIZ, ".github/workflows/tests.yml"), "utf8"));
   assert.ok(doc.jobs.audit, "o job `audit` sumiu (ou foi renomeado) no workflow");
   // Step/job com `if:` existe e não roda — o audit sairia do ar sem sumir do YAML.
@@ -255,8 +271,9 @@ nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semY
   // alguém adicione amanhã também não é problema deste teste.
   const meus = steps.filter((s) => (s.run || "").includes("npm_audit_report.mjs"));
   assert.deepEqual(
-    meus.map((s) => s.run.trim()),
-    ["node scripts/npm_audit_report.mjs .", "node scripts/npm_audit_report.mjs mobile"],
+    meus.map((s) => s.run.trim()).sort(),
+    LOCKS.map((d) => `node scripts/npm_audit_report.mjs ${d}`).sort(),
+    `locks no disco: ${LOCKS.join(", ")}`,
   );
   for (const s of meus) {
     assert.ok(!s.run.includes("|| echo"), `${s.name}: o \`|| echo\` voltou`);
@@ -264,4 +281,16 @@ nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semY
     assert.equal(s["working-directory"], undefined, s.name);
     assert.equal(s.if, undefined, `${s.name}: step condicional não audita nada`);
   }
+});
+
+/**
+ * O par do teste acima: escanear é achar a CVE, o Dependabot é quem a conserta.
+ * Um lock auditado e sem Dependabot fica avisando para sempre sem PR nenhum —
+ * foi o estado do `webapp/` no dia em que ele entrou.
+ */
+nodeTest("todo lock do repo tem um ecossistema npm no Dependabot", { skip: semYaml }, () => {
+  const doc = YAML.load(readFileSync(join(RAIZ, ".github/dependabot.yml"), "utf8"));
+  const npm = doc.updates.filter((u) => u["package-ecosystem"] === "npm")
+    .map((u) => u.directory.replace(/^\/(.*)$/, "$1") || ".");
+  assert.deepEqual(npm.sort(), [...LOCKS].sort(), `locks no disco: ${LOCKS.join(", ")}`);
 });
