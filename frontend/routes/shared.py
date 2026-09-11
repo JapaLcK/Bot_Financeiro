@@ -81,6 +81,11 @@ META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
 # o site sem rastreio, como o pixel já fazia.
 GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
 
+# Microsoft Clarity — identifica o projeto público e pode aparecer no HTML, como
+# o Measurement ID do GA4. O opt-in por rota fica em `html_file`: gravações não
+# entram por acidente nas telas de conta, autenticação ou erro.
+CLARITY_PROJECT_ID = os.getenv("CLARITY_PROJECT_ID", "ygqwjmx49a").strip()
+
 # Parâmetros de query que NUNCA podem viajar dentro do `page_location` do GA4:
 #   token — é credencial. `/completar-cadastro?token=` (cadastro via Google) e o
 #           `/unsubscribe?token=` do rodapé de todo e-mail são páginas rastreadas;
@@ -188,17 +193,47 @@ def ga4_snippet() -> str:
     )
 
 
-def inject_tracking(html_text: str) -> str:
-    """Insere Meta Pixel + GA4 imediatamente antes de </head> (o mais alto possível).
+def clarity_snippet() -> str:
+    """Código de coleta do Clarity para páginas públicas autorizadas.
 
-    Os dois entram pelo MESMO ponto de propósito: enquanto o GA4 morava solto no
+    O ID não é segredo, mas serializá-lo como string JavaScript impede que uma
+    configuração inválida altere o script injetado. Em staging, definir a env
+    vazia desliga a coleta sem alterar as rotas.
+    """
+    if not CLARITY_PROJECT_ID:
+        return ""
+    project_id = json.dumps(CLARITY_PROJECT_ID)
+    return (
+        "<!-- Microsoft Clarity -->\n"
+        "<script>\n"
+        "(function(c,l,a,r,i,t,y){\n"
+        "  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};\n"
+        "  t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;\n"
+        "  y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);\n"
+        f"}})(window,document,'clarity','script',{project_id});\n"
+        "</script>\n"
+        "<!-- End Microsoft Clarity -->\n"
+    )
+
+
+def inject_tracking(html_text: str, clarity: bool = False) -> str:
+    """Insere tags de marketing antes de </head> (o mais alto possível).
+
+    Meta e GA4 entram pelo mesmo ponto de propósito: enquanto o GA4 morava solto no
     <head> da index.html, ele existia só na landing — e os eventos de funil
     disparam na /precos, /cadastro e /home. Página nova nasce coberta pelos dois
     ou por nenhum; não há terceira opção para esquecer.
 
+    Clarity é deliberadamente separado: ele produz gravações de sessão, então só
+    páginas institucionais e /precos fazem opt-in. Não basta a rota ser pública
+    para ser apropriada a uma gravação (cadastro e login, por exemplo, têm campos
+    de credencial e identificação).
+
     No-op para o que não estiver configurado, ou se a página não tiver </head>.
     """
     snippet = meta_pixel_snippet() + ga4_snippet()
+    if clarity:
+        snippet += clarity_snippet()
     if not snippet:
         return html_text
     idx = html_text.lower().find("</head>")
@@ -250,17 +285,18 @@ def stamp_asset_versions(html_text: str) -> str:
     return _ASSET_VER_RE.sub(repl, html_text)
 
 
-def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
+def html_file(path: pathlib.Path, pixel: bool = True, clarity: bool = False) -> Response:
     """Serve um .html do frontend com cache desligado.
 
     Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
-    estiver configurado. As páginas da área logada (dashboard, settings,
+    estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
+    sem campos sensíveis. As páginas da área logada (dashboard, settings,
     onboarding) passam `pixel=False`: o rastreio fica nas páginas públicas e na
     /home, que é onde a volta do checkout (?upgrade=success) dispara a conversão.
     """
     text = path.read_text(encoding="utf-8")
     if pixel:
-        text = inject_tracking(text)
+        text = inject_tracking(text, clarity=clarity)
     response = Response(content=stamp_asset_versions(text),
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"

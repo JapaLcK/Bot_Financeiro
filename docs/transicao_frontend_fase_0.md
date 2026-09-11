@@ -108,7 +108,8 @@ ganho de conversão.
 ## Ambiente de ensaio e aceite do piloto
 
 - Usar credenciais e provedores de teste; rastreamento real desligado por
-  `META_PIXEL_ID=` e `GA4_MEASUREMENT_ID=` vazios no ambiente de ensaio.
+  `META_PIXEL_ID=`, `GA4_MEASUREMENT_ID=` e `CLARITY_PROJECT_ID=` vazios no
+  ambiente de ensaio.
 - Entregar o HTML compilado pelo FastAPI, com seleção explícita por rota. Não
   montar um diretório exportado como fallback para APIs ou rotas protegidas.
 - Validar no documento final: status, MIME, chunks tardios, rastreamento uma vez,

@@ -39,7 +39,7 @@ class ContactBody(BaseModel):
 
 @router.get("/")
 async def serve_landing():
-    return html_file(FRONTEND_DIR / "index.html")
+    return html_file(FRONTEND_DIR / "index.html", clarity=True)
 
 
 @router.get("/app")
@@ -223,17 +223,17 @@ async def serve_blog_guide(slug: str, request: Request):
 
 @router.get("/whatsapp")
 async def serve_whatsapp():
-    return html_file(FRONTEND_DIR / "whatsapp.html")
+    return html_file(FRONTEND_DIR / "whatsapp.html", clarity=True)
 
 
 @router.get("/funcionalidades")
 async def serve_funcionalidades():
-    return html_file(FRONTEND_DIR / "funcionalidades.html")
+    return html_file(FRONTEND_DIR / "funcionalidades.html", clarity=True)
 
 
 @router.get("/comandos")
 async def serve_comandos():
-    return html_file(FRONTEND_DIR / "comandos.html")
+    return html_file(FRONTEND_DIR / "comandos.html", clarity=True)
 
 
 @router.get("/comandos-app")
@@ -290,17 +290,17 @@ async def get_blog_news(limit: int = 12):
 async def serve_agents():
     """Galeria pública dos Agentes do Piggy — só apresenta a utilidade de cada
     um. A ativação de fato acontece no painel (dashboard), não aqui."""
-    return html_file(FRONTEND_DIR / "agents.html")
+    return html_file(FRONTEND_DIR / "agents.html", clarity=True)
 
 
 @router.get("/como-funciona")
 async def serve_como_funciona():
-    return html_file(FRONTEND_DIR / "como-funciona.html")
+    return html_file(FRONTEND_DIR / "como-funciona.html", clarity=True)
 
 
 @router.get("/precos")
 async def serve_precos():
-    return html_file(FRONTEND_DIR / "precos.html")
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
 @router.get("/suporte")
@@ -321,7 +321,7 @@ async def serve_suporte():
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
     # /suporte é público → recebe pixel e GA4 como as demais páginas públicas.
-    page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq)))
+    page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq), clarity=True))
     return Response(content=page,
                     media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Pragma": "no-cache"})

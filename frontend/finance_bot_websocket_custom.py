@@ -2067,7 +2067,7 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
-        "https://www.googletagmanager.com; "
+        "https://www.googletagmanager.com https://www.clarity.ms; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
