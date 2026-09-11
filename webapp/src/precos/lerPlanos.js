@@ -39,6 +39,22 @@
  * era engolido pelo `querySelector`) e ordem trocada (que o mount reordenaria em
  * silêncio), e o fallback é o `console.warn` do `main.jsx`.
  *
+ * ── O QUE ISTO ATA AO RESTO DA PÁGINA ──────────────────────────────────────
+ *
+ * O `pixCriarCta` insere um SEGUNDO `<button>` dentro do card
+ * (`pix-checkout.js:97`, `cartao.after(b)`). Com o CTA de Pix na tela, o card
+ * está FORA deste contrato — e isso não é bug hoje porque o mount é provadamente
+ * anterior: `precos-app.js` é IIFE, executa síncrono no parse, e os três
+ * `pix-*.js` vêm DEPOIS dele na precos.html (`:1156-1159`), então `pbPixInit` nem
+ * existe ainda. O `markUnavailable` e o `refreshPlanButtons`, que o fetch pode ter
+ * rodado antes, só mudam `textContent`/`disabled` do botão que já existe.
+ *
+ * O que quebra se alguém mexer nisso: qualquer mudança que ATRASE o mount (trocar
+ * a IIFE por `type="module"`, reordenar os `<script>`, remontar depois de um
+ * fetch) faz a ilha parar de montar quando o CTA existe — fallback silencioso,
+ * só o `console.warn`. Antes desta guarda o mesmo cenário era PIOR e mais calado:
+ * a ilha montava e APAGAVA o CTA de Pix, que é botão de venda.
+ *
  * Comentário (`nodeType 8`) é ignorado de propósito: é invisível, perdê-lo não
  * muda a página, e é o que o `precos_ilha_react.test.mjs` usa para saber se a
  * ilha montou ou caiu no fallback. Um deles mora dentro de um `<ul>` da
