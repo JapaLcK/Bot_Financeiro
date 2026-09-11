@@ -76,6 +76,15 @@ def _envia(chamadas: set[str]) -> bool:
 # critério obrigaria a gatear coisas que não devem ser gateadas, e a saída fácil
 # seria apagar o portão em vez de declarar a entrada.
 _ISENTOS_COM_RAZAO = {
+    "frontend/finance_bot_websocket_custom.py::lifespan":
+        "FALSO POSITIVO do predicado, e vale registrar por quê: `lifespan` não "
+        "é laço nenhum — é o startup do app, que REGISTRA as tarefas de fundo. "
+        "Os dois termos vêm de jobs DIFERENTES que ele menciona (`list_users` "
+        "de um, `send_account_deletion_completed_email` de outro), e o "
+        "predicado exige os dois na mesma função sem saber que a função é "
+        "grande demais para isso significar alguma coisa. É o espelho da "
+        "cegueira 2c: lá o laço partido em duas funções escapa, aqui duas "
+        "coisas na mesma função entram.",
     "core/services/engagement_scheduler.py::_check_free_upgrade_nudge":
         "WIN-BACK, mesma família do downsell: o funil é `plan = 'free'` ativo, "
         "que DEPOIS DO CORTE é exatamente a população sem acesso — filtrar por "
@@ -134,6 +143,13 @@ def _lacos_proativos() -> dict[str, bool]:
        `send_update_email.py`, que só entra por acidente de outro nome.
     2. **Envio por um nome que não case `_ENVIO`.** Um `notificar()` ou
        `disparar()` novo passa.
+    2b. **Enumerador com nome fora de `^list_|^get_\\w*users`.** Um
+       `buscar_contas_ativas()` passa — e este é o eixo que já mordeu três
+       vezes, sempre pelo mesmo motivo: enumerar as formas conhecidas.
+    2c. **Enumeração numa função e ENVIO em outra.** O predicado exige os dois
+       termos na MESMA função; quebrar o laço em duas o esconde inteiro.
+       Nenhum laço de produção está assim hoje (varrido), então é o que ele não
+       cobre da PRÓXIMA vez, não defeito aberto.
     3. **As RAZÕES do `_ISENTOS_COM_RAZAO` nunca são lidas por asserção
        nenhuma** — são valores de dict. Pendurar um laço ali silencia as DUAS
        asserções de uma vez, e nada verifica se a razão é verdadeira. Limite
@@ -173,8 +189,19 @@ def _lacos_proativos() -> dict[str, bool]:
                 # chamada nenhuma para casar. Foi por aqui que
                 # `engagement_scheduler._check_and_send` mandou dica e insight
                 # para conta cortada, 1×/dia, sem flag que o segurasse.
-                if getattr(n.func, "attr", None) == "run_in_executor" and len(n.args) >= 2:
-                    alvo = n.args[1]
+                nome = getattr(n.func, "attr", None) or getattr(n.func, "id", None)
+                if nome in ("run_in_executor", "to_thread") and n.args:
+                    # `to_thread(fn, ...)` passa a função no args[0];
+                    # `run_in_executor(None, fn, ...)` no args[1]. `to_thread` é
+                    # a forma idiomática desde o 3.9 e estava invisível.
+                    alvo = n.args[1] if (nome == "run_in_executor" and len(n.args) >= 2) \
+                        else n.args[0]
+                    # `partial(fn, ...)`: sem desembrulhar, o alvo vira um Call
+                    # de `partial` e o nome da função some.
+                    if isinstance(alvo, ast.Call) and \
+                            (getattr(alvo.func, "id", None) == "partial"
+                             or getattr(alvo.func, "attr", None) == "partial") and alvo.args:
+                        alvo = alvo.args[0]
                     if isinstance(alvo, ast.Name):
                         chamadas.add(alvo.id)
                     elif isinstance(alvo, ast.Attribute):

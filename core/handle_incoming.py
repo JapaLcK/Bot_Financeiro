@@ -621,9 +621,16 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 # chame de ajuda cai aqui, nos DOIS canais, e recebe a mesma
                 # resposta honesta. É o ponto único que os três buracos anteriores
                 # não tinham.
-                from core.help_text import render_help
+                # `estado` é a linha de `auth_accounts`, ou None. A MESMA
+                # distinção que as duas formas da mensagem de bloqueio fazem
+                # mais abaixo: quem nunca fez cadastro web não tem "seus dados
+                # guardados" nem `/settings`, e mandá-lo para lá supõe um
+                # cadastro que não existe. A ajuda tinha uma forma só e voltou a
+                # cometer a mentira que o gate evita há três rodadas.
+                from core.help_text import render_ajuda_sem_acesso
                 return [OutgoingMessage(text=format_for_platform(
-                    render_help("sem_acesso", platform), platform))]
+                    render_ajuda_sem_acesso(platform, estado is not None),
+                    platform))]
             if is_billing_command(texto):
                 from core.services.billing_commands import handle_billing_command
                 resposta = handle_billing_command(uid, texto, platform=platform)

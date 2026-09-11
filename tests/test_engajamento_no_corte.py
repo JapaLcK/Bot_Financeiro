@@ -22,9 +22,10 @@ e do nudge de upgrade (`FREE_UPGRADE_NUDGE_ENABLED`), os dois off por padrão.
 
 CONTROLE DECLARADO (`docs/controles_declarados.md`) — em `_check_and_send`,
 apague o bloco `if users:` que chama `filtrar_por_acesso` (é a única forma aqui:
-não há valor a trocar, e o bloco inteiro É o conserto). VERMELHO (medido
-2026-09-11):
+não há valor a trocar, e o bloco inteiro É o conserto). VERMELHOS (medido
+2026-09-11 — são DOIS, e a instrução anterior nomeava um):
   `test_cortado_nao_recebe_email_de_engajamento`
+  `test_o_lote_separa_os_dois_na_mesma_passada`
 Direção: e-mail proativo para conta sem acesso, com convite a usar o bot.
 
 Positivo do par, VERDE sob a injeção (é o que o torna positivo):

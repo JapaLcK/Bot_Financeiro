@@ -260,8 +260,16 @@ def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
         return False
     if not gated:
         return False
-    from core.help_text import render_help
-    _send_reply(reply_to, render_help("sem_acesso", "whatsapp"))
+    # A forma certa para a população: quem não tem linha em `auth_accounts` não
+    # tem "seus dados guardados" nem `/settings`. `get_plan_gate_state` é o
+    # mesmo SELECT enxuto que o `_paywall_gate` usa — sem PII, sem auditoria.
+    try:
+        import db
+        tem_cadastro_web = db.get_plan_gate_state(uid) is not None
+    except Exception:
+        tem_cadastro_web = True   # na dúvida, a forma que não nega nada
+    from core.help_text import render_ajuda_sem_acesso
+    _send_reply(reply_to, render_ajuda_sem_acesso("whatsapp", tem_cadastro_web))
     return True
 
 
@@ -722,11 +730,14 @@ def process_message(message: InboundMessage) -> None:
                 #
                 # A frase que estava aqui — "o menu de AJUDA e o de COMANDOS
                 # seguem sem gate, porque explicam sem mandar tentar" — era
-                # FALSA para o de ajuda, e foi ela que cobriu o furo: o item
-                # "🚀 Tutorial" é dele, e a seção `credit` também manda tentar.
-                # Hoje o menu de ajuda passa por `_ajuda_do_cortado`. O de
-                # COMANDOS continua isento e aí a frase é verdadeira — medido:
-                # nenhum "gastei"/"recebi"/"Tente" em `wa_commands_menu.py`.
+                # FALSA para os DOIS, e foi ela que cobriu o furo duas vezes.
+                #
+                # A segunda versão dela dizia que o de COMANDOS era limpo,
+                # "medido: nenhum gastei/recebi em `wa_commands_menu.py`". A
+                # medição estava certa e a conclusão não: aquele arquivo só
+                # RENDERIZA, e o conteúdo vem de
+                # `core/commands_catalog.py::render_category_body`, onde o mesmo
+                # grep dá 5. Hoje os dois menus passam por `_ajuda_do_cortado`.
                 if _bloqueado_pelo_corte(uid, reply_to):
                     return
                 logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
@@ -767,6 +778,14 @@ def process_message(message: InboundMessage) -> None:
             # Itens do menu "O que pedir" (catalogo de comandos)
             cmds_id = get_commands_menu_id(raw_msg)
             if cmds_id:
+                # O catálogo é um convite a TENTAR, igual ao tutorial, e eu
+                # tinha medido o arquivo errado: `wa_commands_menu.py` só
+                # renderiza (zero "gastei/recebi"), mas o conteúdo mora em
+                # `core/commands_catalog.py::render_category_body`, onde o mesmo
+                # grep dá 5. Medir o renderizador e concluir sobre o conteúdo
+                # foi o que manteve esta porta aberta.
+                if _ajuda_do_cortado(uid, reply_to):
+                    return
                 logger.info("WA commands menu id=%s wa_id=%s", cmds_id, reply_to)
                 try:
                     send_commands_section(reply_to, cmds_id)
@@ -790,14 +809,15 @@ def process_message(message: InboundMessage) -> None:
             # o ponto por onde todos passam (§0.1 — o conserto na função
             # compartilhada é diff menor que um em cada chamador).
             #
-            # Dos ramos ACIMA, que já retornaram: só o menu de COMANDOS é de
-            # leitura e fica isento — medido, nenhum "gastei"/"recebi"/"Tente"
-            # em `wa_commands_menu.py`. O TUTORIAL e o menu de AJUDA **não** são
-            # de leitura e já passaram por `_ajuda_do_cortado` lá em cima. A
-            # frase anterior listava os três juntos como leitura e era falsa
-            # para dois deles — foi ela que manteve o item "🚀 Tutorial" do menu
-            # aberto. Os de OPT-OUT ficam ABAIXO e por isso precisam da isenção
-            # explícita: `_WA_INTERACTIVE_ISENTOS`.
+            # Nenhum dos ramos ACIMA é de leitura: tutorial, menu de AJUDA e
+            # menu de COMANDOS convidam a tentar um comando, e os TRÊS já
+            # passaram por `_ajuda_do_cortado` lá em cima. As duas versões
+            # anteriores desta frase listavam um ou dois deles como "leitura", e
+            # as duas vezes foi a frase que manteve a porta aberta — a última
+            # media `wa_commands_menu.py` (que só renderiza) para concluir sobre
+            # `core/commands_catalog.py` (onde o conteúdo está). Os de OPT-OUT
+            # ficam ABAIXO e por isso precisam da isenção explícita:
+            # `_WA_INTERACTIVE_ISENTOS`.
             if (interactive_id.strip().lower() not in _WA_INTERACTIVE_ISENTOS
                     and interactive_id not in _WA_INTERACTIVE_ISENTOS
                     and _bloqueado_pelo_corte(uid, reply_to)):
@@ -1235,6 +1255,13 @@ def process_message(message: InboundMessage) -> None:
         # antes caíam na IA e viravam texto improvisado.
         from core.services.commands_intent import is_commands_intent
         if is_commands_intent(message.text):
+            # `comandos`, `exemplos`, `o que você faz`, `me ajuda com o que`
+            # (`core/services/commands_intent.py`) chegam aqui ANTES do
+            # `handle_incoming`. No Discord a mesma frase já era barrada pelo
+            # gate — a afirmação de que os dois canais diziam a mesma coisa era
+            # falsa justamente por este ramo.
+            if _ajuda_do_cortado(uid, reply_to):
+                return
             logger.info("WA commands menu via intent wa_id=%s", reply_to)
             try:
                 send_commands_menu(reply_to)

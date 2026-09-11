@@ -63,13 +63,16 @@ from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
 # **(b) a renderização compartilhada** — em `core/handle_incoming.py`, troque
 # `render_help("sem_acesso", platform)` por
 # `h_help.answer_help(ajuda, texto, platform)` (a forma anterior; nada apagado).
-# VERMELHOS, e são OUTROS — `2 failed, 9 passed`:
+# VERMELHOS, e são OUTROS:
 #   `test_cortado_digitando_tutorial_tambem_e_barrado`
 #   `test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado`
 # É a perna dos DOIS canais; o Discord só cai por esta.
 #
-# **(c) a superfície de ajuda do WhatsApp** — troque o corpo de
-# `_ajuda_do_cortado` por `return False`. VERMELHOS — `3 failed, 8 passed`:
+# **(c) a superfície de ajuda do WhatsApp** — em `_ajuda_do_cortado`, troque a
+# ÚLTIMA linha (`return True`) por `return False`. **Não** "troque o corpo": há
+# dois imports de `_paywall_gate` no arquivo, e aplicar a instrução no primeiro
+# quebra a coleção com `SyntaxError` — a instrução ambígua fazia o leitor medir
+# outra coisa. VERMELHOS:
 #   `test_cortado_continua_recebendo_AJUDA_mas_a_dele`
 #   `test_cortado_tocando_TUTORIAL_no_menu_de_ajuda_nao_recebe_o_tour`
 #   `test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour`
@@ -213,50 +216,6 @@ def test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour(monkeypatch, ba
     assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
 
 
-def test_a_ajuda_do_cortado_nao_manda_tentar_comando():
-    """Porta (d), a que o próprio conserto anterior abriu: a ajuda GENÉRICA que
-    ficou isenta dizia "• `gastei 50 mercado`". Convidar a tentar e recusar em
-    seguida é a pior ordem possível das duas mensagens."""
-    from core.help_text import render_help
-    texto = render_help("sem_acesso", "whatsapp").lower()
-    for instrucao in ("gastei ", "recebi ", "tente", "experimenta"):
-        assert instrucao not in texto, f"a ajuda do cortado manda tentar: {texto}"
-
-
-def test_a_ajuda_do_cortado_nao_aponta_pro_tutorial():
-    """E não manda digitar a palavra que devolve o paywall."""
-    from core.help_text import render_help
-    assert "tutorial" not in render_help("sem_acesso", "whatsapp").lower()
-
-
-def test_a_ajuda_do_cortado_diz_o_que_importa():
-    """POSITIVO do par: ela não pode ter virado uma parede.
-
-    As três coisas que quem foi cortado precisa: por que parou, que os dados
-    estão guardados, e para onde ir."""
-    from core.help_text import render_help
-    texto = render_help("sem_acesso", "whatsapp").lower()
-    assert "sem plano ativo" in texto, texto
-    assert "guardados" in texto, texto
-    assert "precos" in texto, texto
-
-
-def test_pagante_continua_vendo_o_tutorial(monkeypatch, bancada):
-    """POSITIVO: o gate DISCRIMINA. Quem paga continua entrando no tutorial."""
-    respostas, _ = bancada
-    uid = _conta(cortada=False)
-    tocados: list[str] = []
-
-    import adapters.whatsapp.wa_runtime as wr
-    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: "tut_skip")
-    monkeypatch.setattr(wr, "handle_tutorial_button",
-                        lambda wa_id, bid: tocados.append(bid))
-
-    _clique(uid, monkeypatch, "tut_skip")
-
-    assert tocados == ["tut_skip"], f"o pagante foi barrado no tutorial: {respostas}"
-
-
 def test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado():
     """A prova de que o conserto do `help.tutorial` vale para os DOIS canais.
 
@@ -289,3 +248,75 @@ def test_pagante_continua_lendo_o_tutorial_no_DISCORD():
 
     assert "gastei" in resposta.lower(), (
         f"o pagante perdeu o tutorial no Discord: {resposta!r}")
+
+
+# ── O menu de COMANDOS, a porta que a MEDIÇÃO ERRADA manteve aberta ──────────
+#
+# Eu declarei duas vezes, em dois arquivos, que o menu de comandos era isento
+# "porque explica sem mandar tentar — medido: nenhum `gastei`/`recebi`/`Tente`
+# em `wa_commands_menu.py`". A medição estava certa e a conclusão não: aquele
+# arquivo só RENDERIZA. O conteúdo vem de
+# `core/commands_catalog.py::render_category_body`, onde o mesmo grep dá 5.
+# Medi o renderizador e concluí sobre o conteúdo.
+#
+# Agrava duas vezes: é a categoria que este PR declara fechada ("o que decide é
+# o DESTINO, não o caminho"), e no Discord a mesma frase JÁ era barrada — logo a
+# afirmação de que os dois canais diziam a mesma coisa também era falsa.
+#
+# CONTROLE DECLARADO (`docs/controles_declarados.md`) — troque os dois
+# `_ajuda_do_cortado(uid, reply_to)` dos ramos de COMANDOS (o do
+# `get_commands_menu_id` e o do `is_commands_intent`) por `False`. VERMELHOS:
+#   `test_cortado_tocando_o_menu_de_comandos_nao_recebe_o_catalogo`
+#   `test_cortado_digitando_comandos_tambem_e_barrado`
+# Direção: catálogo de comandos de escrita entregue a quem não pode executá-los.
+
+
+def test_cortado_tocando_o_menu_de_comandos_nao_recebe_o_catalogo(monkeypatch, bancada):
+    respostas, _ = bancada
+    uid = _conta(cortada=True)
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: None)
+    monkeypatch.setattr(wr, "get_help_menu_id", lambda raw: None)
+    monkeypatch.setattr(wr, "get_commands_menu_id", lambda raw: "cmds_lancamentos")
+    monkeypatch.setattr(wr, "send_commands_section", lambda to, cid: (
+        _ for _ in ()).throw(AssertionError("o cortado recebeu o catálogo")))
+
+    _clique(uid, monkeypatch, "cmds_lancamentos")
+
+    assert respostas, "o cortado tocou o menu e não recebeu nada"
+    baixa = " ".join(respostas).lower()
+    assert "plano ativo" in baixa, respostas
+    assert "gastei" not in baixa, f"o catálogo vazou: {respostas}"
+
+
+def test_cortado_digitando_comandos_tambem_e_barrado(monkeypatch, bancada):
+    """`comandos`, `exemplos`, `o que você faz` (`commands_intent`) chegam ANTES
+    do `handle_incoming` — por isso o Discord já barrava e o WhatsApp não."""
+    respostas, _ = bancada
+    uid = _conta(cortada=True)
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "send_commands_menu", lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("o cortado abriu o menu de comandos")))
+
+    _texto(uid, monkeypatch, "comandos")
+
+    assert respostas and "plano ativo" in respostas[0].lower(), respostas
+
+
+def test_pagante_continua_vendo_o_menu_de_comandos(monkeypatch, bancada):
+    """POSITIVO: o gate discrimina — quem paga continua recebendo o catálogo."""
+    respostas, _ = bancada
+    uid = _conta(cortada=False)
+    secoes: list[str] = []
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: None)
+    monkeypatch.setattr(wr, "get_help_menu_id", lambda raw: None)
+    monkeypatch.setattr(wr, "get_commands_menu_id", lambda raw: "cmds_lancamentos")
+    monkeypatch.setattr(wr, "send_commands_section", lambda to, cid: secoes.append(cid))
+
+    _clique(uid, monkeypatch, "cmds_lancamentos")
+
+    assert secoes == ["cmds_lancamentos"], f"o pagante foi barrado: {respostas}"

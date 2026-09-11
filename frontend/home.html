@@ -1579,11 +1579,13 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   //
   // RESÍDUO, e ele é MAIOR do que a versão anterior deste comentário dizia.
   // Ela falava só de "quem pagou e cujo webhook demorar mais que ~20 s".
-  // Medido: **todo cortado** paga os ~21 s do polling em TODA recarga da
-  // Início, porque nunca satisfaz `_checkoutSettled` — e durante essa espera a
-  // página pinta o snapshot do próprio usuário. É o preço de o servidor não
-  // conseguir distinguir "acabou de pagar" de "digitou a URL": os dois chegam
-  // aqui sem direito, e só o tempo separa.
+  // Medido: o cortado que chega COM `?upgrade=success` paga a espera do
+  // polling, porque nunca satisfaz `_checkoutSettled` — e durante ela a página
+  // pinta o snapshot do próprio usuário. **Só com o parâmetro**: sem ele
+  // `_justUpgraded` é falso, não há polling e o redirect é imediato. (A versão
+  // anterior desta frase dizia "todo cortado, em toda recarga", e isso é
+  // falso.) É o preço de o servidor não conseguir distinguir "acabou de pagar"
+  // de "digitou a URL": os dois chegam aqui sem direito, e só o tempo separa.
   //
   // Duas coisas o encurtam, e as duas estão feitas: o `_limparSnapshots()`
   // abaixo impede que a recarga SEGUINTE repinte saldo (o dashboard já fazia

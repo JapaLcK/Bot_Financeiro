@@ -65,7 +65,6 @@ after(async () => { await browser?.close(); server?.kill(); });
  */
 async function abrirHome(me, antes = null) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  if (antes) await antes(page);
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== ORIGIN) return route.abort();
@@ -77,6 +76,12 @@ async function abrirHome(me, antes = null) {
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
   if (me) await page.route("**/auth/me", (route) => route.fulfill(json(me)));
+  // `antes` DEPOIS das rotas, e isso não é estilo: no Playwright a rota mais
+  // recente ganha, então registrando antes o `**/*` deste helper sombreava o
+  // `/auth/me` do caller e o `me` chegava `{}` — sem `app_access`, sem
+  // `needs_plan_selection`, nenhum redirect, TODOS os casos terminando em
+  // /home. Foi assim que a bateria do relógio nasceu tautológica.
+  if (antes) await antes(page);
   await page.goto(`${ORIGIN}/home.html?upgrade=success`);
   return page;
 }
@@ -165,16 +170,16 @@ test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
   await page.close();
 });
 
-test("pagante cujo webhook cai NO FIM da janela continua na Início", async () => {
-  // O caso de DINHEIRO, e o que a bateria anterior não tinha: o `/auth/me`
-  // responde "sem plano" até o webhook cair, e o veredito final tem de ser o
-  // ÚLTIMO que o servidor deu, não o de 1,5 s atrás.
-  //
-  // Medido antes do conserto: polls em 571…18795 ms, redirect em 21140 ms —
-  // o último 1,2 s era tempo morto, e webhook em 19 s (DENTRO da janela que o
-  // comentário promete) caía em `/precos?escolha=1`, segundos depois de pagar.
-  //
-  // O relógio é falso (`page.clock`) porque o caso real custa 20 s de parede.
+/**
+ * Roda o retorno de checkout com relógio FALSO, avançando em passos de 250 ms,
+ * e vira o `/auth/me` para "pago" quando o relógio chega em `webhookMs`.
+ *
+ * **O passo pequeno é o que faz o caso medir.** A primeira versão deste teste
+ * dava `runFor(19000)` de uma vez: nesse salto ainda cabia um poll DEPOIS do
+ * flip, então o 1,2 s morto no fim da janela nunca era exercido e o caso
+ * passava COM E SEM o conserto — tautológico, a 1ª das três regras do §3.
+ */
+async function comWebhookEm(webhookMs) {
   let confirmado = false;
   const page = await abrirHome(null, async (p) => {
     await p.clock.install();
@@ -183,14 +188,52 @@ test("pagante cujo webhook cai NO FIM da janela continua na Início", async () =
                  : { user_id: 1, plan: "free", plan_expires_at: null,
                      app_access: false })));
   });
-  // Avança até depois do último poll da versão antiga (18,8 s) e confirma o
-  // webhook ali — o ponto exato em que o pagante era expulso.
-  await page.clock.runFor(19000);
-  confirmado = true;
-  await page.clock.runFor(4000);
-
-  const url = await destino(page, 4000);
-  assert.match(url, /^\/home/,
-    `pagante com webhook no fim da janela foi mandado pra ${url}`);
+  for (let t = 0; t < 40000; t += 250) {
+    if (!confirmado && t >= webhookMs) confirmado = true;
+    await page.clock.runFor(250);
+    // Tempo REAL entre os passos: o relógio é falso, mas o `/auth/me` é um
+    // fetch de verdade (roteado) e precisa de ms reais para resolver. Sem esta
+    // pausa a página fica parada esperando uma promessa que nunca ganha CPU, e
+    // TODOS os casos terminam em /home — inclusive sem o conserto, que é como
+    // esta bateria nasceu tautológica pela segunda vez.
+    await new Promise((r) => setTimeout(r, 15));
+    const saiu = await page.evaluate(
+      () => location.pathname.replace(/\.html$/, "") !== "/home").catch(() => true);
+    if (saiu) break;
+  }
+  const url = await page.evaluate(() => location.pathname + location.search)
+    .catch(() => "/precos");
   await page.close();
-});
+  return url;
+}
+
+// O caso de DINHEIRO, e a tabela abaixo é MEDIDA em duas colunas, não esperada.
+//
+// Antes do conserto os polls saíam em 571…18795 ms e o redirect em 21140 ms: o
+// último 1,2 s da janela era tempo morto em que nada era observado, e um
+// webhook em 19 s — DENTRO da janela que o comentário promete — caía em
+// `/precos?escolha=1` segundos depois de a pessoa pagar, numa tela que diz
+// "sua conta está sem plano ativo" com o checkout ao lado.
+//
+// | webhook | sem o conserto | com o conserto |
+// |---|---|---|
+// | 1 s  | /home   | /home   |
+// | 19 s | /precos | **/home**  ← é ESTE caso que mede o conserto |
+// | 21 s | /precos | /precos |
+// | 25 s | /precos | /precos |
+//
+// Os de 1 s, 21 s e 25 s não mudam de coluna, e ficam de propósito: 1 s é o
+// positivo (quem pagou e confirmou rápido não pode ser expulso) e os outros
+// dois prendem o RESÍDUO — o conserto estende a janela, não a elimina, e um
+// "conserto" que mandasse todo mundo para /home passaria sem eles.
+//
+// CONTROLE: apague o bloco `if (!_checkoutSettled(me))` do fim de
+// `awaitCheckoutConfirmation`. VERMELHO: `webhook em 19000 ms`.
+for (const [ms, destinoEsperado] of [
+  [1000, /^\/home/], [19000, /^\/home/], [21000, /^\/precos/],
+  [25000, /^\/precos/],
+]) {
+  test(`webhook em ${ms} ms`, async () => {
+    assert.match(await comWebhookEm(ms), destinoEsperado);
+  });
+}
