@@ -265,21 +265,23 @@ def _conta_eventos() -> int:
 
 
 def test_inundacao_de_log_por_d_envenenado_grava_zero_linhas():
-    """`/d/{code}` é anônima e NÃO tem `@limiter.limit` (medido:
-    `"limiter.limit" not in inspect.getsource`). Enquanto respondia 500, cada
-    requisição virava uma linha em `system_event_logs` pelo
-    `admin_error_logging_middleware` — MEDIDO nesta árvore com a guarda
-    desligada: 25 req → 25/25 em 500 e 25 linhas, em 0,25 s.
+    """Enquanto `/d/{code}` respondia 500, cada requisição virava uma linha em
+    `system_event_logs` pelo `admin_error_logging_middleware` — MEDIDO nesta
+    árvore com a guarda desligada: 25 req → 25/25 em 500 e 25 linhas, em 0,25 s.
 
-    Com a guarda, o 500 some e o middleware não grava nada — por isso o PR NÃO
-    acrescenta rate limit: sem 500 não há linha, e o teto de `/d/` vira outro
-    assunto (ponytail).
+    Com a guarda, o 500 some e o middleware não grava nada. O teto de `/d/`
+    (30/min) mora em `tests/test_d_rate_limit.py`; daí o reset do storage do
+    limiter, em memória e compartilhado entre testes. Na suíte inteira parte
+    destas 25 volta 429 — o `importlib.reload` do monólito em
+    `test_pix_rota_registrada.py` duplica o limite e o teto efetivo cai para 15
+    (medido) —, e isso não muda o que se mede aqui: 429 não é 500 nem grava.
     """
     import asyncio
 
     import core.admin_dashboard as admin_dashboard
     asyncio.run(admin_dashboard.ensure_admin_tables())
 
+    dashboard.limiter._storage.reset()
     client = _client()
     antes = _conta_eventos()
     status = [client.get(f"/d/abc%00{i}", follow_redirects=False).status_code
