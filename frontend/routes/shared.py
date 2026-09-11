@@ -925,11 +925,35 @@ def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     # lançado ele precisa de credencial que o servidor consiga verificar.
     #
     # Retorno do checkout com sucesso: o webhook checkout.session.completed
-    # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
-    # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
-    # confirmação em /home espera o webhook e libera (fail-open). Espelha o
-    # bypass _justUpgraded do cliente. Só o gate de ESCOLHA é dispensado aqui;
-    # o paywall por feature/tier segue valendo normalmente.
+    # pode ainda estar em trânsito. Não jogamos quem ACABOU de pagar de volta
+    # pra /precos — a tela de confirmação em /home espera o webhook e libera
+    # (fail-open). Espelha o bypass `_justUpgraded` do cliente.
+    #
+    # **Este `return None` dispensa AS DUAS PERNAS, e a frase que estava aqui —
+    # "só o gate de ESCOLHA é dispensado; o paywall por feature/tier segue
+    # valendo" — era verdade antes do corte, quando só existia a perna da
+    # escolha.** Deixou de ser, e este comentário mentia sobre o próprio código.
+    #
+    # **Dispensar só a escolha foi MEDIDO e não serve** (2026-09-11): o webhook
+    # escreve `mark_plan_selected` E o `plan`/`plan_expires_at` no mesmo evento,
+    # então as duas pernas estão pendentes JUNTAS para quem acabou de pagar.
+    # Com `needs=True, acesso=False` — que é exatamente o estado de quem pagou
+    # há 3 segundos — a perna do direito devolve `302 /precos`. A opção que
+    # parecia mais apertada barra justamente quem o bypass existe para proteger.
+    #
+    # **O que o parâmetro NÃO compra**, e é por isso que o furo é cosmético e
+    # não vazamento: ele libera o HTML, que é igual para todo mundo. As rotas de
+    # DADOS têm gate próprio (`_enforce_subscription_gate`, 402), o WebSocket
+    # tem o dele e o bot tem o `_paywall_gate`. Um cortado que digite
+    # `/home?upgrade=success` recebe a casca e o snapshot que já estava no
+    # localStorage DELE — não há dado novo nem de outra conta.
+    #
+    # **Quem fecha o resto é o CLIENTE, quando o polling termina**:
+    # `frontend/home.html` roda `awaitCheckoutConfirmation()` por ~20 s e, na
+    # saída, aplica os dois vereditos do `/auth/me`. Antes ele os pulava com
+    # `!_justUpgraded` e a dispensa virava permanente. O servidor não consegue
+    # distinguir "acabou de pagar" de "digitou a URL" — nenhum dos dois tem
+    # direito ainda —, e por isso a decisão mora onde existe o tempo de espera.
     if request.query_params.get("upgrade") == "success":
         return None
 

@@ -1531,11 +1531,28 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // Gate de escolha de plano: cadastro novo tem que passar pela /precos e
   // assinar um plano pago antes de entrar no dashboard (o Grátis não é mais
   // uma escolha oferecida na /precos).
-  if (me && me.needs_plan_selection && !_justUpgraded) {
+  // O `!_justUpgraded` SAIU das duas condições, e é o que fecha o bypass.
+  //
+  // Ele valia durante a espera do webhook — e essa espera já aconteceu: quando
+  // a execução chega aqui, `awaitCheckoutConfirmation()` já rodou o seu ciclo
+  // de ~20 s e o `me` abaixo é o ÚLTIMO veredito que o `/auth/me` deu. Se o
+  // webhook caiu, `app_access` é true e nada muda para quem pagou. Se não caiu,
+  // a dispensa virava PERMANENTE: `?upgrade=success` é escolhido pelo cliente,
+  // então qualquer cortado abria `/home?upgrade=success` e ficava na Início com
+  // o snapshot restaurado do `restoreHomeCache`, sem nunca ser mandado pra
+  // /precos. O servidor não consegue separar os dois casos (quem acabou de
+  // pagar também tem `app_access` false), então quem decide é este ponto, que é
+  // o único que tem o tempo de espera atrás de si.
+  //
+  // RESÍDUO ACEITO: quem pagou e cujo webhook demorar MAIS que os ~20 s cai na
+  // /precos. Antes ficava na Início com as rotas de dados devolvendo 402 — uma
+  // tela vazia sem explicação. Trocamos "quebrado em silêncio" por "mandado pra
+  // uma tela que explica", e recarregar resolve assim que o webhook chega.
+  if (me && me.needs_plan_selection) {
     window.location.replace("/precos?escolha=1");
     return;
   }
-  if (me && me.app_access === false && !_justUpgraded) {
+  if (me && me.app_access === false) {
     if (window.PB_IN_APP) {
       // App iOS: sem link de compra (diretriz 3.1.1 da App Store)
       document.getElementById("page-root").innerHTML = `

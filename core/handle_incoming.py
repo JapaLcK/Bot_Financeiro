@@ -580,7 +580,23 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # `installment_pending` vivo, `ajuda?` virava a descrição da compra e
             # registrava N parcelas. Não dava pra enumerar essas portas para
             # sempre — a resposta ela mesma fecha a classe.
-            if ajuda in ("help", "help.tutorial"):
+            # `help.tutorial` SAIU da isenção, e a distinção é de conteúdo, não
+            # de tom: a ajuda genérica EXPLICA, o tutorial MANDA TENTAR. Seis
+            # dos dez passos de `adapters/whatsapp/wa_tutorial.py` pedem um
+            # comando ("gastei 50 no mercado", "Tente: gastei 10 no café"), e o
+            # `answer_help("help.tutorial", ...)` responde a mesma coisa por
+            # texto. Para quem foi cortado isso é convite para fazer algo que a
+            # mensagem seguinte recusa — a pior ordem possível das duas.
+            #
+            # Medido 2026-09-11: `classify("tutorial")` devolve `help.tutorial`
+            # e `classify("ajuda")` devolve `help`, então tirar UM token separa
+            # exatamente as duas coisas sem fechar a ajuda.
+            #
+            # Vale para os DOIS canais, e é por isso que o conserto mora aqui e
+            # não no `wa_runtime`: o Discord chega neste mesmo gate. O gêmeo
+            # interativo (o BOTÃO do tutorial no WhatsApp) não passa por aqui e
+            # tem gate próprio em `wa_runtime`.
+            if ajuda == "help":
                 from core.handlers import help_handler as h_help
                 return [OutgoingMessage(text=format_for_platform(
                     h_help.answer_help(ajuda, texto, platform), platform))]

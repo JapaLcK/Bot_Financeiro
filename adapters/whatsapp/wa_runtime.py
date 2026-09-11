@@ -657,6 +657,22 @@ def process_message(message: InboundMessage) -> None:
             # Botões do tutorial
             tut_bid = get_tutorial_button_id(raw_msg)
             if tut_bid:
+                # O tutorial NÃO é leitura, e é por isso que ele tem gate mesmo
+                # ficando acima do gate único: SEIS dos dez passos mandam a
+                # pessoa tentar um comando ("gastei 50 no mercado", "Tente:
+                # gastei 10 no café"), e o `tut_skip` responde "Pode usar à
+                # vontade!". Para quem foi cortado isso é instrução para fazer
+                # algo que a mensagem seguinte recusa.
+                #
+                # **Gatear a entrada, e não reescrever os passos**: copy própria
+                # de bloqueado exigiria ramo em seis lugares de
+                # `wa_tutorial.py`, que hoje não conhece plano nenhum — e a
+                # mensagem do `_paywall_gate` já diz o que fazer (link pra
+                # assinar). A ajuda genérica continua alcançável: o menu de
+                # AJUDA e o de COMANDOS, logo abaixo, seguem sem gate, porque
+                # explicam sem mandar tentar.
+                if _bloqueado_pelo_corte(uid, reply_to):
+                    return
                 logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
                 try:
                     handle_tutorial_button(reply_to, tut_bid)
@@ -714,10 +730,13 @@ def process_message(message: InboundMessage) -> None:
             # o ponto por onde todos passam (§0.1 — o conserto na função
             # compartilhada é diff menor que um em cada chamador).
             #
-            # Os ramos ACIMA já retornaram e são de leitura: tutorial, menu de
-            # ajuda e menu de comandos — a isenção de ajuda, a mesma do
-            # `_paywall_gate`. Os de OPT-OUT ficam ABAIXO e por isso precisam da
-            # isenção explícita: `_WA_INTERACTIVE_ISENTOS`.
+            # Dos ramos ACIMA, que já retornaram: o menu de AJUDA e o de
+            # COMANDOS são de leitura e ficam isentos — a mesma isenção de ajuda
+            # do `_paywall_gate`. O TUTORIAL **não** é de leitura e tem gate
+            # próprio lá em cima; a frase que estava aqui o listava junto com os
+            # outros dois e era falsa (seis dos dez passos mandam a pessoa
+            # tentar um comando). Os de OPT-OUT ficam ABAIXO e por isso precisam
+            # da isenção explícita: `_WA_INTERACTIVE_ISENTOS`.
             if (interactive_id.strip().lower() not in _WA_INTERACTIVE_ISENTOS
                     and interactive_id not in _WA_INTERACTIVE_ISENTOS
                     and _bloqueado_pelo_corte(uid, reply_to)):
@@ -1158,6 +1177,11 @@ def process_message(message: InboundMessage) -> None:
                 return
 
         if text_cmd in {"tutorial", "/tutorial"}:
+            # O gêmeo DIGITADO do botão acima, e ele também não passa pelo
+            # `handle_incoming`. Gatear um e não o outro deixaria a porta aberta
+            # por uma palavra (§2: a categoria, não a instância).
+            if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):
+                return
             logger.info("WA tutorial welcome via texto wa_id=%s", reply_to)
             try:
                 send_welcome(reply_to)
