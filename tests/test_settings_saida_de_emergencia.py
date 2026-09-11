@@ -8,38 +8,47 @@ MEDIÇÃO: o defeito é QUAL FUNÇÃO A ROTA CHAMA, então todo caso vai pela UR
 `tests/test_gate_plan_selection.py` exercita `_enforce_subscription_gate` com um
 `Request` falso e, por construção, nunca veria isso (§3, "rode a conversa").
 
+As guardas que NÃO caíram junto (dono, sessão revogada, conta em exclusão, a
+perna da ESCOLHA e o teto da conta sem e-mail) moram em
+`tests/test_settings_saida_guardas.py`, que importa os helpers daqui — uma fonte
+só (§0.7), mesmo padrão de `tests/test_gate_saida_de_emergencia.py`. A divisão é
+por assunto (§0.5) e porque este arquivo bateu no teto de 350 linhas
+(`tests/test_max_lines_python.py`).
+
 O gate é DORMENTE na suíte (`conftest.py` põe `PLANS_V2_ENABLED=0` por
 `setdefault`, e sem `PAYWALL_ENABLED` o `has_app_access` devolve True antes de
-consultar qualquer coisa). Sem a fixture `_gate_ligado`, TODO caso de 402 deste
-arquivo passa verde com e sem o conserto — medido, não deduzido.
+consultar qualquer coisa). A fixture `_gate_ligado` é PRÉ-CONDIÇÃO, não
+decoração: sem ela o arquivo não fica verde nem tautológico — ele EXPLODE, porque
+o `assert has_app_access(user_id) is False` de `_cortar` cai primeiro. Medido
+neutralizando o corpo da fixture (2026-09-11, esta árvore): o ÚNICO caso que
+sobrevive nos dois arquivos é `test_pagante_continua_entrando_nas_cinco_rotas` —
+é o único que não passa por `_cortar` nem espera 402. Para remedir:
+
+    # neutralize o corpo da fixture `_gate_ligado` e rode os dois arquivos
+    .venv/bin/python -m pytest tests/test_settings_saida_de_emergencia.py \
+                              tests/test_settings_saida_guardas.py -q
 
 CONTROLES DECLARADOS (`docs/controles_declarados.md`) — injeção -> VERMELHO
 ──────────────────────────────────────────────────────────────────────────
+Os vermelhos são nomeados dentro dos DOIS arquivos deste par; injeção em
+`_enforce_subscription_gate` alcança a suíte inteira e o resto não é escopo aqui.
 1. **A isenção existe?** Em `security_sessions_list_route`
    (`frontend/routes/settings.py`): `shared.authorize_account_access` ->
    `shared.authorize_dashboard_access`. -> `test_cortado_lista_sessoes`.
    Direção: falso NEGATIVO — a saída de emergência volta a trancar.
+   NÃO derruba `test_sem_escolha_de_plano_nao_abre_a_saida` (guardas), e isso é
+   o positivo do par: quem não escolheu plano já recebia 402 pelas duas funções.
 2. **A isenção vazou?** Em `shared.authorize_dashboard_access`, a linha
    `_enforce_subscription_gate(request, current_user_id)` -> `pass`. ->
    `test_cortado_nao_ve_atividade`, `test_cortado_nao_ve_notificacoes`,
-   `test_cortado_nao_ve_open_finance`. Direção: falso POSITIVO — o #380 vira
-   decoração nas rotas de dados.
-3. **O dono é checado?** Em `shared.authorize_account_access`,
-   `if current_user_id != int(user_id):` -> `if False:`. ->
-   `test_cortado_nao_alcanca_sessoes_de_outro_usuario`. Direção: vazamento entre
-   contas (`CLAUDE.md` §0) na função que nasceu neste PR.
-4. **Vale para a perna da ESCOLHA?** Em `security_settings_route` (alvo
-   DIFERENTE do nº 1): `shared.authorize_account_access` ->
-   `shared.authorize_dashboard_access`. -> `test_cortado_le_a_secao_de_seguranca`
-   (perna do CORTE) E `test_sem_escolha_de_plano_tem_a_mesma_saida` (perna da
-   ESCOLHA). Direção: falso NEGATIVO nas duas pernas pela MESMA rota — prova que
-   os dois casos medem motivos diferentes de 402.
-5. **A sessão corrente é poupada?** Em `security_sessions_revoke_others_route`,
+   `test_cortado_nao_salva_notificacoes`, `test_cortado_nao_ve_open_finance`.
+   Direção: falso POSITIVO — o #380 vira decoração nas rotas de dados.
+3. **A sessão corrente é poupada?** Em `security_sessions_revoke_others_route`,
    `current_jti = _current_session_jti(request)` -> `current_jti = None`. ->
    `test_cortado_encerra_as_outras_sessoes`. Direção: "encerrar os OUTROS
    dispositivos" desloga quem clicou. Com o cliente sem `jti` (como era até a
    rodada 2) esta injeção é INVISÍVEL: a chamada já passava None.
-6. **O guard da própria sessão existe?** Em `security_session_revoke_route`,
+4. **O guard da própria sessão existe?** Em `security_session_revoke_route`,
    `if current_jti and jti == current_jti:` -> `if False:`. ->
    `test_cortado_nao_encerra_a_propria_sessao_pelo_jti`.
 
@@ -60,7 +69,7 @@ from fastapi.testclient import TestClient
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
 from core.sessions import create_session, get_active_session
-from core.services.plan_service import has_app_access, needs_plan_selection
+from core.services.plan_service import has_app_access
 from db.connection import get_conn
 from db.users import _hash_password
 from tests._helpers_pii import insert_auth_account_pii
@@ -235,7 +244,7 @@ def test_cortado_so_google_pede_o_link_de_definir_senha(user_id, monkeypatch):
     assert enviados, "respondeu 200 sem mandar e-mail nenhum"
 
 
-# ── 6-8: a isenção NÃO vazou para as rotas de dados ─────────────────────────
+# ── 7-10: a isenção NÃO vazou para as rotas de dados ─────────────────────────
 
 def _corpo_do_gate(resp) -> str:
     detail = resp.json().get("detail")
@@ -258,6 +267,20 @@ def test_cortado_nao_ve_notificacoes(user_id):
     assert _corpo_do_gate(r) == "subscription_required", r.text
 
 
+def test_cortado_nao_salva_notificacoes(user_id):
+    """O gêmeo de ESCRITA do GET acima. Sem este caso o teto declarado do PR ("o
+    servidor recusa") não estava medido em nenhuma das duas metades: o front
+    desabilita os toggles, mas quem decide é o PATCH."""
+    client, headers, _ = _cortado(user_id)
+    r = client.patch(
+        f"/settings/{user_id}/notifications",
+        json={"daily_report_enabled": True},
+        headers=headers,
+    )
+    assert r.status_code == 402, r.text
+    assert _corpo_do_gate(r) == "subscription_required", r.text
+
+
 def test_cortado_nao_ve_open_finance(user_id):
     """Outro router: a isenção é das cinco rotas nominais, não de
     `authorize_dashboard_access` inteira."""
@@ -267,68 +290,7 @@ def test_cortado_nao_ve_open_finance(user_id):
     assert _corpo_do_gate(r) == "subscription_required", r.text
 
 
-# ── 9-11: as guardas que NÃO caíram junto com o gate ────────────────────────
-
-def test_cortado_nao_alcanca_sessoes_de_outro_usuario(user_id):
-    """Isolamento (`CLAUDE.md` §0): tirar o gate não tira a guarda do DONO. A
-    sessão é de A, o `{user_id}` do path é de B."""
-    outro = user_id + 1
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("insert into users (id) values (%s) on conflict do nothing", (outro,))
-        conn.commit()
-    _conta(outro, com_senha=True)
-    create_session(outro, ip="203.0.113.10")
-    client, headers, _ = _cortado(user_id)
-
-    r = client.get(f"/settings/{outro}/sessions", headers=headers)
-    assert r.status_code == 403, r.text
-    assert "sessions" not in r.text, "vazou a lista do outro usuário no corpo do 403"
-
-
-def test_sessao_revogada_continua_dando_401(user_id):
-    """A guarda (a): o `jti` do token não está em `auth_sessions`, então nem chega
-    ao gate de plano — 401, nunca 402."""
-    email = _conta(user_id)
-    _cortar(user_id)
-    client, headers = _cliente(user_id, email, jti=f"jti-revogado-{uuid.uuid4().hex[:8]}")
-    r = client.get(f"/settings/{user_id}/security", headers=headers)
-    assert r.status_code == 401, r.text
-
-
-def test_conta_agendada_para_exclusao_continua_dando_403(user_id):
-    """A guarda (b): `raise_if_account_scheduled_for_deletion` ficou DENTRO da
-    função nova."""
-    from db import schedule_account_deletion
-    email = _conta(user_id, com_senha=True)
-    _cortar(user_id)
-    schedule_account_deletion(user_id, SENHA)
-    client, headers = _cliente(user_id, email)
-
-    r = client.get(f"/settings/{user_id}/security", headers=headers)
-    assert r.status_code == 403, r.text
-    assert "exclusão" in r.json()["detail"], r.text
-
-
-def test_sem_escolha_de_plano_tem_a_mesma_saida(user_id):
-    """A OUTRA perna do gate: `_cortar` fixa `plan_selected_at=now()` de
-    propósito, então todo caso acima mede só a perna do CORTE. Aqui ele é NULL
-    (default dropado no schema) e o 402 sairia `plan_selection_required`. A
-    decisão de derrubar as duas está na docstring de `authorize_account_access`.
-    A rota de DADOS no fim é o par que separa "isentou a CONTA" de "isentou o
-    gate inteiro"."""
-    email = _conta(user_id)
-    assert needs_plan_selection(user_id) is True, "pré-condição: a escolha não foi feita"
-    create_session(user_id, ip="203.0.113.12")
-    client, headers = _cliente(user_id, email)
-
-    assert client.get(f"/settings/{user_id}/security", headers=headers).status_code == 200
-    assert client.get(f"/settings/{user_id}/sessions", headers=headers).status_code == 200
-    r = client.get(f"/settings/{user_id}/notifications", headers=headers)
-    assert r.status_code == 402, r.text
-    assert _corpo_do_gate(r) == "plan_selection_required", r.text
-
-
-# ── 12: o POSITIVO — o legítimo não mudou ──────────────────────────────────
+# ── 11: o POSITIVO — o legítimo não mudou ──────────────────────────────────
 
 def test_pagante_continua_entrando_nas_cinco_rotas(user_id, monkeypatch):
     """Sem este caso o grupo passaria num código que recusa todo mundo (§3). As

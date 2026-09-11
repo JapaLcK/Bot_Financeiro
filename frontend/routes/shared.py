@@ -779,13 +779,21 @@ def signup_source_from_request(request: Request, *, google: bool = False) -> str
     return "app" if in_app else "web"
 
 
-def _enforce_subscription_gate(request: Request, user_id: int) -> None:
+def _enforce_subscription_gate(
+    request: Request, user_id: int, *, exige_direito: bool = True
+) -> None:
     """Backstop server-side das rotas de dados do dashboard. Além do paywall
     (assinatura ativa/trial), fecha o gate de escolha de plano no cadastro: sem
     ele, um cadastro novo poderia pular a /precos batendo direto numa API
     autenticada (ex.: /data/{id}) ou navegando pro /settings. Retorna 402 pro
     front mandar ao paywall/escolha. As rotas de /billing, /auth e /conta são
-    isentas (são elas que resolvem o gate — checkout, /auth/me)."""
+    isentas (são elas que resolvem o gate — checkout, /auth/me).
+
+    `exige_direito=False` desliga **só** a perna do DIREITO (o corte do #380) e
+    deixa a da ESCOLHA valendo. Mesmo nome e mesma semântica do
+    `gate_plan_selection(request, exige_direito=False)` que serve o HTML de
+    /settings — um conceito, um parâmetro, uma regra (§0.7). O único chamador
+    com `False` é `authorize_account_access`; leia a docstring dela."""
     path = request.url.path or ""
     if any(path.startswith(p) for p in _GATE_EXEMPT_PREFIXES):
         return
@@ -794,16 +802,17 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
     # é escolhido pelo cliente — bastava mandar "PigBankApp" pra pular o gate.
     if needs_plan_selection(user_id):
         raise HTTPException(status_code=402, detail={"error": "plan_selection_required"})
-    if not has_app_access(user_id):
+    if exige_direito and not has_app_access(user_id):
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
 
 
 def authorize_account_access(request: Request, user_id: int) -> int:
-    """Autoriza a rota da PRÓPRIA CONTA e **NÃO aplica o gate de plano**
-    (`_enforce_subscription_gate`, o 402 do #380). É a SAÍDA DE EMERGÊNCIA.
+    """Autoriza a rota da PRÓPRIA CONTA e **derruba só a perna do DIREITO** do
+    gate de plano (`_enforce_subscription_gate`, o 402 do #380). É a SAÍDA DE
+    EMERGÊNCIA de quem foi CORTADO — não de quem nunca escolheu plano.
 
     **Rota de DADOS nunca usa esta função** — use `authorize_dashboard_access`,
-    que é esta MAIS o gate. Esta existe para as CINCO rotas de conta de
+    que é esta MAIS a perna do DIREITO. Esta existe para as CINCO rotas de conta de
     `frontend/routes/settings.py`, nominalmente: `GET /settings/{id}/security`,
     `POST /settings/{id}/password-reset`, `GET /settings/{id}/sessions`,
     `DELETE /settings/{id}/sessions/{jti}` e `DELETE /settings/{id}/sessions`.
@@ -822,31 +831,36 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     As sessões entram junto porque "encerrar os outros dispositivos" é a metade
     de segurança da mesma saída.
 
-    **A isenção derruba as DUAS pernas do gate, e isso é DECIDIDO, não acidente.**
-    `_enforce_subscription_gate` levanta 402 por dois motivos independentes:
-    `needs_plan_selection` -> `plan_selection_required` (cadastro que nunca
-    passou pela /precos) e `not has_app_access` -> `subscription_required` (o
-    corte do #380). Descer para esta função derruba os DOIS. Para a segunda perna
-    é o objetivo do PR; para a PRIMEIRA a decisão é a mesma e pelo mesmo motivo:
-    quem nunca escolheu plano também é dono dos próprios dados, e ler o próprio
-    e-mail, pedir o link de definir senha e encerrar as próprias sessões não
-    entrega nada do produto — é a conta, não o serviço. Trancar a saída de
-    emergência de um cadastro novo dá o mesmo beco sem saída do #380, com menos
-    motivo. Pelo NAVEGADOR esse caso nem chega: `initSettings`
-    (`frontend/settings.html`) redireciona `needs_plan_selection` para
-    `/precos?escolha=1` antes de qualquer fetch — a isenção vale por SCRIPT, e é
-    para isso que ela está escrita aqui. Coberta por
-    `test_sem_escolha_de_plano_tem_a_mesma_saida` (`tests/
-    test_settings_saida_de_emergencia.py`), que mede a perna da ESCOLHA — os
-    outros casos daquele arquivo fixam `plan_selected_at=now()` e medem só a do
-    corte. As rotas de DADOS continuam 402 nas duas pernas.
+    **A isenção derruba SÓ a perna do DIREITO. A da ESCOLHA continua valendo, e
+    isso é decisão do dono.** `_enforce_subscription_gate` levanta 402 por dois
+    motivos independentes: `needs_plan_selection` -> `plan_selection_required`
+    (cadastro que nunca passou pela /precos) e `not has_app_access` ->
+    `subscription_required` (o corte do #380). Esta função chama o MESMO gate
+    com `exige_direito=False` — não há segunda cópia da regra (§0.7), e o
+    parâmetro é o mesmo do `gate_plan_selection(request, exige_direito=False)`
+    que serve o HTML em `frontend/routes/static_pages.serve_settings`. O
+    comentário de lá conta esta mesma história e aponta para cá; os dois têm de
+    concordar.
+
+    **Por que só quem foi CORTADO** (decisão do dono, #380): quem nunca escolheu
+    plano acabou de se cadastrar e não tem dado financeiro para exportar. A saída
+    de emergência existe para quem USOU o produto e perdeu o direito. Cadastro
+    novo sem plano vai para a /precos como sempre foi — 302 no HTML, 402
+    `plan_selection_required` nestas cinco rotas. Coberto por
+    `test_sem_escolha_de_plano_nao_abre_a_saida`
+    (`tests/test_settings_saida_guardas.py`); os casos de
+    `tests/test_settings_saida_de_emergencia.py` fixam `plan_selected_at=now()`
+    e medem só a perna do CORTE. As rotas de DADOS continuam 402 nas duas pernas.
 
     **TETO ACEITO E DECLARADO (decisão do dono, #380): conta SEM e-mail E SEM
     senha não tem saída autônoma — ela sai por suporte.**
     `PATCH /settings/{id}/security/contact` (vincular e-mail) **não** é isenta de
     propósito: é ESCRITA de dado de conta, e isentá-la abriria porta de gravação
     para quem foi cortado. Sem e-mail, o `/password-reset` não tem para onde
-    mandar o link. Não "conserte" isso isentando o `/contact` por conta própria.
+    mandar o link — e responde 400 com instrução, não 500
+    (`test_conta_sem_email_sai_por_400_e_nao_por_500`,
+    `tests/test_settings_saida_guardas.py`). Não "conserte" isso isentando o
+    `/contact` por conta própria.
 
     Também seguem NÃO isentas, e é intencional: `/settings/{id}/activity`,
     `/settings/{id}/notifications` (GET e PATCH) e `/open-finance/*`. O 402
@@ -855,19 +869,26 @@ def authorize_account_access(request: Request, user_id: int) -> int:
 
     Ordem das exceções, idêntica à de `authorize_dashboard_access`: 401 (sessão
     inválida/revogada) -> 403 (não é o dono) -> 403 (conta agendada para
-    exclusão). Só o 402 cai."""
+    exclusão) -> 402 da ESCOLHA. Só o 402 do DIREITO cai."""
     current_user_id = resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
     raise_if_account_scheduled_for_deletion(current_user_id)
+    _enforce_subscription_gate(request, current_user_id, exige_direito=False)
     return current_user_id
 
 
 def authorize_dashboard_access(request: Request, user_id: int) -> int:
     """Gate completo das rotas de DADOS: a conta (`authorize_account_access`)
-    MAIS o plano (`_enforce_subscription_gate`, 402). É o DEFAULT — descer para
+    MAIS a perna do DIREITO. É o DEFAULT — descer para
     `authorize_account_access` exige decisão do dono; leia a docstring dela."""
     current_user_id = authorize_account_access(request, user_id)
+    # ponytail: a perna da ESCOLHA é avaliada duas vezes nas rotas de dados (uma
+    # aqui, outra dentro de authorize_account_access). O preço é um
+    # `get_auth_user`, que é cacheado com TTL (db_support, AUTH_USER_CACHE_TTL_
+    # SECONDS) — uma deepcopy de dict, não um round-trip. Vale menos que manter
+    # duas cópias da regra do 402; se algum dia pesar, o caminho é o gate
+    # devolver o veredito em vez de levantar.
     _enforce_subscription_gate(request, current_user_id)
     return current_user_id
 
