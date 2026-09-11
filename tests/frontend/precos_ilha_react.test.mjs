@@ -11,12 +11,18 @@
  *   `refreshPlanButtons`); e uma lista aninhada era IÇADA para o topo e
  *   DUPLICADA, porque o seletor era `ul > li` em vez de `:scope > ul > li`.
  *
+ *   Mais duas (PI5/PI6) vieram do conserto da terceira: trocar `ul > li` por
+ *   `:scope > ul > li` deixou de içar a lista aninhada e passou a APAGAR a lista
+ *   embrulhada — 5 features viravam 0, com `montou: true` e nenhum aviso. Elas
+ *   medem o nível que faltava, o dos filhos de cada CARD, e as duas formas de
+ *   sair dele: nó que o card não conhece, e filho repetido.
+ *
  * PO — O PÓDIO. A regra era `@media (min-width: 900px)` com um comentário
  *   afirmando que "abaixo de 900px o grid vira uma coluna". Era falso: o
  *   `style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"` inline
  *   vence o `@media (max-width:900px)` do site.css, então de 508 a 899px havia
  *   2 ou 3 colunas SEM pódio. O critério é "mais de uma coluna", e este grupo
- *   exige a equivalência em 10 larguras.
+ *   exige a equivalência em cada largura da lista `LARGURAS`.
  *
  * Como se sabe se a ilha MONTOU, já que ela reemite o mesmo markup de propósito:
  * por um COMENTÁRIO HTML plantado dentro do `#plans-v2`. Comentário não é lido
@@ -77,6 +83,7 @@ async function abrir({ mutar = (h) => h, semIlha = false } = {}) {
       extra: !!document.getElementById("extra"),
       liTopoDo1: topo(cards[0]).length,
       liTotalDo1: cards[0].querySelectorAll("li").length,
+      botoesDo1: cards[0].querySelectorAll("button").length,
       // O sub-item continua ANINHADO (dentro de um `<li>`) ou foi içado?
       subAninhado: [...cards[0].querySelectorAll("li")]
         .some((li) => li.textContent.includes("sub-item") && li.parentElement.closest("li") !== null),
@@ -163,6 +170,52 @@ test("PI4: lista aninhada num card não é içada nem duplicada", async () => {
   assert.equal(ilha.subAninhado, true, "o sub-item foi içado para o nível de topo");
   assert.deepEqual(ilha.textoTopo, servidor.textoTopo);
   assert.deepEqual(ilha.erros, []);
+});
+
+/**
+ * PI5 — O `<ul>` de features embrulhado num `<div>`. É o defeito que o conserto
+ * do PI4 criou: com `:scope > ul > li`, o `<ul>` de dentro do wrapper não é mais
+ * alcançado, e o card era reemitido com a lista VAZIA — as 5 features do plano
+ * sumiam da página que vende, com `montou: true`, zero erro e zero aviso.
+ *
+ * O controle é o markup do servidor, não um número escrito aqui.
+ */
+test("PI5: <ul> embrulhado num <div> cai no fallback em vez de perder as features", async () => {
+  const embrulhar = (h) => {
+    const i = h.indexOf("<ul>", h.indexOf(MARCA));
+    const j = h.indexOf("</ul>", i) + "</ul>".length;
+    return `${h.slice(0, i)}<div class="features">${h.slice(i, j)}</div>${h.slice(j)}`;
+  };
+  const servidor = await abrir({ mutar: embrulhar, semIlha: true });
+  const ilha = await abrir({ mutar: embrulhar });
+
+  assert.equal(ilha.liTotalDo1, servidor.liTotalDo1,
+    `features do 1º card: ${ilha.liTotalDo1} com a ilha, ${servidor.liTotalDo1} no servidor`);
+  assert.equal(ilha.montou, false, "montou um card cuja lista ele não sabe ler");
+  assert.deepEqual(ilha.erros, []);
+  assert.ok(ilha.avisos.some((a) => a.includes("#plans-v2 fora do contrato")),
+    `o fallback foi silencioso: ${JSON.stringify(ilha.avisos)}`);
+});
+
+/**
+ * PI6 — Filho REPETIDO. Mesma classe do PI5 pelo outro ramo: `querySelector`
+ * devolve o primeiro e o segundo desaparecia no mount. Um 2º `<button>` é o caso
+ * que dói (botão de checkout), e é o mesmo predicado que cobre `<h3>`,
+ * `.price-block` e `<ul>` repetidos, e ordem trocada.
+ */
+test("PI6: um 2º <button> no card cai no fallback em vez de desaparecer", async () => {
+  const doisBotoes = (h) => h.replace("</ul>\n            <button", "</ul>\n"
+    + '            <button type="button" id="b2">Falar com vendas</button>\n            <button');
+  const servidor = await abrir({ mutar: doisBotoes, semIlha: true });
+  const ilha = await abrir({ mutar: doisBotoes });
+
+  assert.equal(servidor.botoesDo1, 2, "a mutação não pegou: o 1º card não ficou com 2 botões");
+  assert.equal(ilha.botoesDo1, servidor.botoesDo1,
+    `botões do 1º card: ${ilha.botoesDo1} com a ilha, ${servidor.botoesDo1} no servidor`);
+  assert.equal(ilha.montou, false, "montou engolindo um botão que não sabe reemitir");
+  assert.deepEqual(ilha.erros, []);
+  assert.ok(ilha.avisos.some((a) => a.includes("#plans-v2 fora do contrato")),
+    `o fallback foi silencioso: ${JSON.stringify(ilha.avisos)}`);
 });
 
 // ── PO: o pódio ─────────────────────────────────────────────────────────────

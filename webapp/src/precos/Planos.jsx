@@ -41,7 +41,10 @@ function Cartao({ plano }) {
         />
       )}
       <h3>{plano.titulo}</h3>
-      <div className="plan-sub">{plano.sub}</div>
+      {/* Só quando existia: card sem `.plan-sub` no markup do servidor ganhava
+          aqui um `<div>` vazio — 4 filhos onde o servidor manda 3, e uma caixa
+          com o `margin` da classe entre o nome e o preço. */}
+      {plano.sub !== null && <div className="plan-sub">{plano.sub}</div>}
       <div className="price-block" dangerouslySetInnerHTML={{ __html: plano.precoHtml }} />
       <ul>
         {plano.itens.map((html, i) => (
