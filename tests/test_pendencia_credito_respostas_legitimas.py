@@ -16,6 +16,7 @@ from datetime import date
 import pytest
 
 import db
+from core.handlers.credit import _MONTH_NAMES_PT
 from _pendencia_credito_helpers import (
     AVISO as _AVISO,
     AS_CINCO as _AS_CINCO,
@@ -93,13 +94,31 @@ def test_installment_todas_as_descricoes_registram(descricao):
         f"{descricao!r} virou lançamento: {db.list_launches(uid)!r}"
 
 
-@pytest.mark.parametrize("resposta_do_user", ["1", "nubank", "setembro"])
+# NÃO volte ao literal "setembro" (4bce49c): era verde só de 11/ago a 10/set —
+# compra de HOJE, `cartao()` fechando dia 10; nos outros 334 dias a fatura em
+# aberto é a do mês SEGUINTE (§3, "verde por construção"). Apagar o caso não
+# serve: desligar o ramo de mês (credit.py:285-292) deixa vermelhos SÓ estes 2.
+_MES = "mes-da-fatura-em-aberto"
+
+
+def _mes_da_fatura(uid: int) -> str:
+    """O mês que o bot IMPRIMIU na pergunta, lido da fatura em aberto."""
+    abertas = db.list_open_bills(uid)
+    assert len(abertas) == 1, f"esperava 1 fatura em aberto, veio {len(abertas)}"
+    return _MONTH_NAMES_PT[abertas[0]["period_end"].month - 1].lower()
+
+
+def _resolve(uid: int, resposta: str) -> str:
+    return _mes_da_fatura(uid) if resposta == _MES else resposta
+
+
+@pytest.mark.parametrize("resposta_do_user", ["1", "nubank", _MES])
 def test_pay_bill_choice_paga_com_resposta_legitima(resposta_do_user):
     """O número e o nome do cartão sozinhos continuam escolhendo a fatura."""
     uid = _uid()
     _arma_pay_bill_choice(uid)
 
-    resposta = _diga(uid, resposta_do_user)
+    resposta = _diga(uid, _resolve(uid, resposta_do_user))
 
     assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
     assert db.list_open_bills(uid) == [], \
@@ -116,7 +135,7 @@ def test_pay_bill_choice_paga_com_resposta_legitima(resposta_do_user):
 # funcionar é feature, e feature não entra em PR de dinheiro.
 # Medido em duas colunas (main × branch): as 20 dão o MESMO resultado nas duas.
 _PAY_LEGITIMAS = [
-    "1", "#1", "setembro", "nubank", "Nubank", "NUBANK", "o nubank",
+    "1", "#1", _MES, "nubank", "Nubank", "NUBANK", "o nubank",
     "a do nubank", "a fatura do nubank", "minha fatura do nubank",
     "fatura do nubank", "essa do nubank",
 ]
@@ -127,7 +146,7 @@ def test_pay_bill_choice_legitimas_continuam_pagando(resposta_do_user):
     uid = _uid()
     _arma_pay_bill_choice(uid)
 
-    resposta = _diga(uid, resposta_do_user)
+    resposta = _diga(uid, _resolve(uid, resposta_do_user))
 
     assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
     assert db.list_open_bills(uid) == [], \
