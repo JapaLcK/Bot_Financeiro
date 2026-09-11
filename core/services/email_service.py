@@ -183,14 +183,42 @@ def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date
 def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """Fim do trial de 15 dias sem assinatura → downsell pro Essencial.
 
-    Parte da escada v2: o teste dá o Plus completo; quem não assina cai pro
-    Grátis (banco pausa, agentes silenciam) e este e-mail oferece a saída de
-    R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at)."""
+    Parte da escada v2: o teste dá o Plus completo, e este e-mail oferece a
+    saída de R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at).
+
+    **A premissa mudou com o corte do Grátis, e a copy junto.** Ela dizia que
+    "quem não assina cai pro Grátis (banco pausa, agentes silenciam)" e que a
+    conta "continua no plano Grátis... e a Piggy voltou pro modo básico". Isso
+    descrevia um estado que deixou de existir como DESTINO. Medido 2026-09-11,
+    conta cujo trial venceu há 1 dia sem assinatura — que é exatamente a
+    população do funil (`db.plans.list_trial_downsell_candidates`)::
+
+        has_app_access = False        ← sem acesso ao bot, não "no básico"
+        get_plan_tier  = 'free'
+        motivo_trial_indisponivel = 'telefone_ja_usou'
+
+    `get_plan_tier` continua `'free'` porque o tier existe como conjunto de
+    LIMITES; o que não existe mais é o Grátis como destino com acesso. É a
+    distinção que a copy antiga apagava — ela vendia os limites como se viessem
+    com a porta aberta.
+
+    **Não afirma nem nega o período grátis**, e aqui a razão é diferente da da
+    `/precos`. Medido, o caso comum é `telefone_ja_usou`: quem recebe este
+    e-mail acabou de gastar o trial daquele telefone. Mas `claim_trial_for_user`
+    exige `phone_hash` e o funil filtra por `trial_started_at`, então uma conta
+    que desvinculou o telefone depois do teste cairia em `sem_telefone` — e aí
+    "seu telefone já usou" seria falso. Quem sabe é o checkout, que lê a mesma
+    `is_trial_eligible_for_user` (§0.7).
+
+    **"Seus dados estão todos guardados" FICA**, e é requisito: o corte bloqueia
+    acesso, não apaga nada. Preso por
+    `tests/test_billing_email_downsell_nao_promete_gratis.py`."""
     base = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>Oi! Seus <strong>15 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
-      <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
-      mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
+      <p>Sua conta ficou <strong>sem plano ativo</strong>: seus dados estão todos guardados —
+      lançamentos, histórico, tudo —, mas o acesso ao PigBank fica bloqueado até você escolher um
+      plano. Não existe mais versão gratuita.</p>
       <p>Pra continuar de onde parou:</p>
       <ul>
         <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos

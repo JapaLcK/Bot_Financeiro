@@ -103,6 +103,34 @@ esquecimento.
 escopada ao PERÍODO PAGO é segura; frase escopada à JANELA DE INADIMPLÊNCIA não
 pode prometer recursos, porque ali o tier já é `free`.
 
+O CRITÉRIO ERA ESTREITO, e essa é a 4ª vez que o furo está no ESCOPO da
+varredura (2026-09-11)
+─────────────────────────────────────────────────────────────────────────────
+O grep acima enumera VERBOS que eu já tinha visto (`continua funcionando`,
+`continua usando`, …). Ele não acha `Sua conta continua no plano Grátis`, do
+`send_trial_downsell_email` — medido: zero linhas. Enumerar as formas
+conhecidas de dizer uma coisa é o mesmo erro de enumerar os arquivos conhecidos
+que têm laço proativo.
+
+O critério largo é pelo SUBSTANTIVO, não pelo verbo — o Grátis como estado ou
+destino::
+
+    grep -rnE "plano (Grátis|Gratis|Free)|volta(r)? (pro|para o|ao) (Grátis|Gratis|Free)|retorna ao plano|versão gratuita|versao gratuita|modo básico|modo basico|continua no plano" \
+      --include=*.py --include=*.html --include=*.js --include=*.mjs . \
+      | grep -v __pycache__ | grep -vE "^\./(tests|node_modules|\.venv)/" | grep -v "^\./docs/"
+
+**26 linhas**, e não vira ruído porque a maioria é a copy JÁ consertada deste PR
+dizendo que o Grátis não existe — que é o resultado certo. O triage:
+
+| onde | veredito |
+|---|---|
+| `email_service.send_trial_downsell_email` | **era falsa** — consertada; testes em `test_billing_email_downsell_nao_promete_gratis.py` |
+| `frontend/termos.html` §3, §5 (×2), §6 | **eram falsas** — reescritas nesta rodada |
+| `email_service` (falha, lembrete, cancelamento), `billing_copy`, `handle_incoming`, `precos.html`, rota `select-free` | dizem que o Grátis NÃO existe — é o alvo, não o defeito |
+| `statement_service._PRO_REQUIRED_STATEMENT_MSG` e o gêmeo em `ofx_service` | "No plano Free voce pode lançar gastos manualmente" — **não é falsa para quem a lê**: o gate do bot barra antes quem não tem acesso, e quem chega ali (carência, Essencial, Plus) de fato pode lançar manualmente. Nomeia um plano que não se compra mais — frescor de copy, não promessa falsa. **Não tocada**, e registrada aqui para não ser "descoberta" de novo |
+| `email_service` ~:1502, aviso do corte | "Sua conta hoje está no plano Grátis (ou sem plano ativo)" — hedge deliberado, descreve a coluna `plan`. **Não tocada** |
+| `db/reports.py:366`, `comecar.js:420`, `billing_commands.py:208`, `handle_incoming.py:898` | comentário ou nome de função, não copy |
+
 O que este arquivo NÃO alcança: o envio de verdade. `send_email` é
 monkeypatchado pela fixture `capturado`, e este ambiente não tem `RESEND_API_KEY`
 — nenhum e-mail sai daqui (§6).
