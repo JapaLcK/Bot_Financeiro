@@ -43,8 +43,7 @@
   // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
-  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
-                  "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
+  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
   // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
   // com dados do site bloqueados, e a avaliação do argumento ficava fora do
@@ -191,18 +190,12 @@
       ".nav .nav-logo{order:1;margin-right:auto}",
       ".nav .nav-right{order:2;margin-left:0}",
       /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
-      ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;",
-      "width:44px;height:44px;margin-left:0;padding:0;flex-shrink:0;",
-      "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);",
-      "border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
+      ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin-left:0;padding:0;flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
       ".pb-burger:hover{background:rgba(255,255,255,.12)}",
-      ".nav .nav-links{order:4;display:none;width:100%;flex-direction:column;",
-      "align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;",
-      "border-top:1px solid rgba(255,255,255,.08)}",
+      ".nav .nav-links{order:4;display:none;width:100%;flex-direction:column;align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}",
       ".nav.pb-nav-open .nav-links{display:flex}",
       /* linha de 44px: item de menu, não link solto no meio da barra */
-      ".nav .nav-links a{font-size:.95rem;white-space:nowrap;padding:11px 12px;",
-      "border-radius:10px;min-height:44px;display:flex;align-items:center}",
+      ".nav .nav-links a{font-size:.95rem;white-space:nowrap;padding:11px 12px;border-radius:10px;min-height:44px;display:flex;align-items:center}",
       ".nav .nav-links a:hover{background:rgba(255,255,255,.06)}",
       "}",
     ].join("");
@@ -232,12 +225,15 @@
 
     const btn = document.getElementById("pb-acct-btn");
     const dd = document.getElementById("pb-acct-dd");
-    btn.addEventListener("click", function (e) {
-      e.stopPropagation();
+    btn.addEventListener("click", function () {
       const open = dd.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     });
-    document.addEventListener("click", function () {
+    // Esta guarda É o `stopPropagation` que ficava no toggle acima, movido para
+    // cá: lá ele barrava também o listener do burger e os dois menus abriam
+    // juntos — e tirá-lo sem pôr a guarda abre e fecha o dropdown no MESMO clique.
+    document.addEventListener("click", function (e) {
+      if (e.target.closest(".pb-acct-btn")) return;  // do BOTÃO: .pb-acct-link ainda fecha
       dd.classList.remove("open");
       btn.setAttribute("aria-expanded", "false");
     });
@@ -307,12 +303,16 @@
       }
     });
     document.addEventListener("click", function (e) {
-      if (!nav.contains(e.target)) setOpen(false);
+      if (!e.target.closest(".pb-burger,.nav-links")) setOpen(false);  // fecha em TODO clique fora do gatilho e de dentro do menu — categoria MAIS LARGA que o `nav.contains` que substituiu, não só "o menu da conta também fecha": logo, `.nav-right` e o padding da barra passaram a fechar (medido; nas 12 páginas eles navegam, então o estado não chega a ser visto). `closest` pede target Element, e o `nav.contains` era total: `document.dispatchEvent(new MouseEvent("click"))` estoura (1 erro deslogado, 2 logado) e o setOpen não roda — sem emissor no frontend/, fica sem guarda (§0.2)
     });
-    // Clicar num link fecha: em navegação normal a página troca, mas em âncora
-    // (#planos) não trocaria e o menu ficaria aberto por cima do destino.
+    // Clicar num link fecha; em âncora a página não troca e o foco cairia no body.
+    // Quem conserta é o `tabindex`: medido no Chromium, a navegação para o
+    // fragmento foca o alvo sozinha quando ele vira focável — o `focus()` abaixo é
+    // inerte aqui, e fica para motor onde isso não é garantido (NÃO medido).
     links.addEventListener("click", function (e) {
-      if (e.target.closest("a")) setOpen(false);
+      const a = e.target.closest("a"), alvo = a && a.hash && document.getElementById(a.hash.slice(1));
+      if (a) setOpen(false);
+      if (alvo) { alvo.setAttribute("tabindex", "-1"); alvo.focus({ preventScroll: true }); }  // o tabindex fica no DOM pelo resto da sessão (as 2 seções da index, depois de ativadas): não muda ordem de Tab nem pinta anel fora do foco, mas é mutação permanente
     });
     // Passou de 900px: o botão some e o menu volta a ser a barra do desktop.
     const mq = window.matchMedia("(max-width:900px)");
