@@ -1045,6 +1045,29 @@ async function startCheckout(interval, btn, plan) {
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
+  /* A restauração RESOLVE o botão na hora, em vez de escrever no nó capturado
+     lá em cima: a ilha React do #plans-v2 REEMITE os botões dos cards no mount,
+     e o mount pode cair no meio deste fetch — o parser fica bloqueado baixando o
+     /precos-app.js enquanto as continuações de promessa desta página rodam
+     (medido; é a mesma janela do PI8). O nó capturado sai do documento ali, e
+     restaurá-LO deixava o botão da TELA em "Carregando…" para sempre: o
+     `loading` viaja no mount (o lerCartao lê `className`) e a guarda da 1ª linha
+     desta função então mata todo clique seguinte — botão de compra morto até dar
+     F5, com o toast de erro pedindo pra tentar de novo.
+     `isConnected` é o mesmo predicado do `finally` do pixCheckout
+     (pix-checkout.js); a diferença é que lá ele DESISTE e aqui ele resolve,
+     porque o botão da tela existe e é ele que precisa voltar. Os botões do tfoot
+     da tabela comparativa nunca são reemitidos, então para eles isto é `btn`.
+     ponytail: o alcance é este par de escritas. Função nova que guarde um nó de
+     dentro do #plans-v2 através de um `await` precisa do mesmo cuidado — quem
+     faz isso hoje está enumerado no cabeçalho do PI9
+     (tests/frontend/precos_ilha_react.test.mjs). */
+  const restaurar = () => {
+    const vivo = btn.isConnected ? btn
+      : document.querySelector('#plans-v2 [data-plan-btn="' + btn.dataset.planBtn + '"]') || btn;
+    vivo.classList.remove("loading");
+    vivo.textContent = originalText;
+  };
   const payload = { interval };
   if (plan) payload.plan = plan;
 
@@ -1080,8 +1103,7 @@ async function startCheckout(interval, btn, plan) {
         if (typeof data.detail === "string") detail = data.detail;
         else if (data.detail && data.detail.message) { detail = data.detail.message; code = data.detail.error; }
       } catch {}
-      btn.classList.remove("loading");
-      btn.textContent = originalText;
+      restaurar();
       // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
       // de deixar o clique morrer num erro.
       if (code === "already_subscribed" && plan) {
@@ -1114,13 +1136,11 @@ async function startCheckout(interval, btn, plan) {
       }
     } else {
       showToast("Resposta inesperada do servidor.", "err");
-      btn.classList.remove("loading");
-      btn.textContent = originalText;
+      restaurar();
     }
   } catch (e) {
     showToast("Erro de conexão. Tente novamente.", "err");
-    btn.classList.remove("loading");
-    btn.textContent = originalText;
+    restaurar();
   }
 }
 

@@ -425,6 +425,144 @@ test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async
   }
 });
 
+/**
+ * PI9 — O NÓ CAPTURADO ATRAVÉS DE UM `await`, na janela do PI8 e no botão que
+ * VENDE para visitante deslogado — o funil inteiro.
+ *
+ * O `startCheckout` põe `loading` + "Carregando…" no botão, espera o
+ * `/billing/create-checkout` e restaura depois. Se a ilha montar no meio do voo,
+ * o nó que ele capturou SAI do documento: o estado sobrevive (o `lerCartao` lê
+ * `className` e `textContent`, então o botão novo também nasce "Carregando…"),
+ * mas a restauração escrevia no FANTASMA — e a guarda anti-duplo-clique
+ * (`if (btn.classList.contains("loading")) return;`) matava todo clique seguinte.
+ * Botão de compra morto até dar F5, com o toast dizendo "tente novamente".
+ *
+ * O `refreshPlanButtons` do `main.jsx` NÃO resgata este caso: sem assinatura ele
+ * sai na 2ª linha (`if (!subState …) return`), que é exatamente quem clica
+ * "Assinar".
+ *
+ * ── A CLASSE, enumerada (quem escreve no `#plans-v2` antes do mount) ─────────
+ *
+ *   `markUnavailable`      `disabled`/`textContent`/`dataset.unavailable` — as três
+ *                          são LIDAS pelo `lerCartao`, reemitidas iguais.
+ *   `refreshPlanButtons`   idem, mais o handler em PROPRIEDADE, que o `lerCartao`
+ *                          não vê — resgatado pelo `main.jsx` (é o PI8).
+ *   `setCycle`             `style.display` nos `[data-price-*]`, que viaja dentro
+ *                          do `innerHTML` do `.price-block`.
+ *   `pixCriarCta`          2º `<button>` no card → o card sai do contrato e NÃO se
+ *                          monta (é o PI6); e ele carrega depois do bundle.
+ *   `startCheckout`        guarda a REFERÊNCIA do nó através do fetch → este caso.
+ *   `cancelChange`         guarda a referência igual, mas o `refreshPlanButtons`
+ *                          pós-mount reemite o `disabled=false` dele; o que sobra
+ *                          é a guarda de duplo clique perdida DURANTE o voo (um
+ *                          POST extra em `/billing/cancel-change`, medido, sem
+ *                          botão morto e sem dinheiro). Teto conhecido, aberto de
+ *                          propósito.
+ *
+ * Os três casos medem a MESMA equivalência em vez de um número escrito: com a
+ * ilha ou sem ela, o botão volta ao rótulo original e o 2º clique dispara um POST
+ * novo. O `semIlha` é o lado de controle (o comportamento da `main`).
+ *
+ * Controles do §3:
+ *   · negativo — troque `restaurar()` pelas duas linhas de antes
+ *     (`btn.classList.remove("loading"); btn.textContent = originalText;`) nos
+ *     três sites do `startCheckout`: o caso "mount DENTRO do fetch" fica
+ *     vermelho (`POSTs 1 -> 1`, botão em "Carregando…"), e os outros dois seguem
+ *     verdes — é a linha do meio que discrimina;
+ *   · positivo — o caso "mount ANTES do clique" é o caminho normal (bundle já
+ *     chegou): a compra continua repetível depois de um erro. Sem ele, um
+ *     `restaurar` que nunca limpasse o `loading` passaria.
+ */
+test("PI9: clicar em Assinar com o bundle em voo não mata o botão de compra", async () => {
+  for (const { nome, atrasoBundle = 0, semIlha = false, noServidor, montou } of [
+    { nome: "mount ANTES do clique", noServidor: false, montou: true },
+    { nome: "mount DENTRO do fetch", atrasoBundle: 1000, noServidor: true, montou: true },
+    { nome: "sem ilha (markup do servidor)", semIlha: true, noServidor: true, montou: false },
+  ]) {
+    const pagina = await browser.newPage();
+    const erros = [];
+    pagina.on("pageerror", (e) => erros.push(String(e)));
+    // O nó que o SERVIDOR mandou, guardado no instante em que o parser o insere:
+    // é ele que separa "cliquei antes do mount" de "cliquei depois".
+    await pagina.addInitScript(() => {
+      new MutationObserver((_, obs) => {
+        const b = document.querySelector('#plans-v2 [data-plan-btn="plus"]');
+        if (!b) return;
+        window.__noDoServidor = b;
+        obs.disconnect();
+      }).observe(document, { subtree: true, childList: true });
+    });
+    // Visitante DESLOGADO, que é quem clica "Assinar": 401 nos dois.
+    for (const rota of ["**/auth/me", "**/billing/subscription"]) {
+      await pagina.route(rota, (r) =>
+        r.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
+    }
+    await pagina.route("**/billing/plans-config", (r) => r.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+    }));
+    let posts = 0;
+    // A falha chega DEPOIS do mount de propósito: a janela que interessa é o
+    // fetch EM VOO quando a ilha reemite o botão.
+    await pagina.route("**/billing/create-checkout", async (r) => {
+      posts += 1;
+      await new Promise((ok) => setTimeout(ok, atrasoBundle + 1500));
+      return r.abort();
+    });
+    if (semIlha) await pagina.route("**/precos-app.js*", (r) => r.abort());
+    else if (atrasoBundle) {
+      await pagina.route("**/precos-app.js*", async (r) => {
+        await new Promise((ok) => setTimeout(ok, atrasoBundle));
+        return r.fallback();
+      });
+    }
+    // `commit` e não `load`: durante a janela o `load` ainda não aconteceu — é
+    // justamente o bundle que o segura.
+    await pagina.goto(`${ORIGIN}/precos.html`, { waitUntil: "commit" });
+    const alvo = '#plans-v2 [data-plan-btn="plus"]';
+    await pagina.waitForSelector(alvo);
+    // `.click()` do elemento, não o mouse: durante a janela a nav grudenta ainda
+    // intercepta ponteiro, e o que se mede aqui é o handler, não a hit area.
+    const clicouNoNoDoServidor = await pagina.$eval(alvo, (b) => {
+      const foi = b === window.__noDoServidor;
+      b.click();
+      return foi;
+    });
+    await pagina.waitForTimeout(atrasoBundle + 600);   // mount já aconteceu, fetch ainda em voo
+    const voando = await pagina.evaluate((sel) => {
+      const b = document.querySelector(sel);
+      return { texto: b.textContent, loading: b.classList.contains("loading"),
+               montou: b !== window.__noDoServidor };
+    }, alvo);
+
+    // As ÂNCORAS, sem as quais o caso não mede o que o nome dele diz:
+    assert.equal(clicouNoNoDoServidor, noServidor,
+      `${nome}: o clique caiu do outro lado do mount`);
+    assert.equal(voando.montou, montou, `${nome}: a ilha montou ${voando.montou}`);
+    assert.equal(voando.loading, true, `${nome}: o botão não está em voo (${voando.texto})`);
+
+    await pagina.waitForTimeout(1200);                 // o fetch falha
+    // O estado é lido ANTES do 2º clique: depois dele o botão volta LEGITIMAMENTE
+    // para "Carregando…" (é o POST novo), e aí "Carregando…" não distingue mais
+    // botão morto de botão funcionando.
+    const depois = await pagina.evaluate((sel) => {
+      const b = document.querySelector(sel);
+      return { texto: b.textContent, loading: b.classList.contains("loading"), disabled: b.disabled };
+    }, alvo);
+    const postsAntes = posts;
+    await pagina.$eval(alvo, (b) => b.click());        // o usuário tenta de novo
+    await pagina.waitForTimeout(400);
+
+    assert.equal(depois.texto, "Assinar Plus", `${nome}: o rótulo não voltou`);
+    assert.equal(depois.loading, false, `${nome}: o botão ficou preso em "Carregando…"`);
+    assert.equal(depois.disabled, false, `${nome}: o botão ficou desabilitado`);
+    assert.equal(posts, postsAntes + 1,
+      `${nome}: o 2º clique não fez POST nenhum — o botão de compra está morto`);
+    assert.deepEqual(erros, [], nome);
+    await pagina.close();
+  }
+});
+
 // ── PO: o pódio ─────────────────────────────────────────────────────────────
 //
 // A equivalência, não o número: para CADA largura, mais de uma coluna tem de
