@@ -50,12 +50,31 @@ def asaas_falso(monkeypatch):
     # `descricoes` guarda o que foi para o campo que o PAGADOR lê na fatura —
     # a única saída deste PR visível para cliente hoje. Lista, e não o último
     # valor: um teste que compra duas vezes tem de conseguir ver as duas.
+    # `cliente_falha` é o `AsaasApiError` que o `POST /v3/customers` levanta —
+    # o interruptor do `qr_falha`/`delete_falha`, com o erro dentro em vez de um
+    # booleano: quem classifica 400/422 é o `criar_cliente` DE VERDADE, e o
+    # status é justamente o que se quer variar.
     estado = {"ordem": [], "delete_falha": False, "n": 0, "marca": marca,
-              "remotas": [], "qr_falha": False, "descricoes": []}
+              "remotas": [], "qr_falha": False, "descricoes": [],
+              "cliente_falha": None}
+    real_cliente = ac.criar_cliente
+
+    def _request_falso(*a, **kw):
+        if estado["cliente_falha"] is None:
+            raise AssertionError(
+                "`asaas_customers._request` foi chamado com `cliente_falha` desligado: "
+                "há caminho novo no módulo que este falso não cobre (o `criar_cliente` "
+                "patchado só delega ao real quando o interruptor está ligado).")
+        raise estado["cliente_falha"]
 
     def _cliente(**kw):
         estado["ordem"].append("customer")
         estado["cpf_visto"] = kw.get("cpf_cnpj")
+        if estado["cliente_falha"] is not None:
+            # Passa pelo `criar_cliente` real, só sem transporte: um falso que
+            # já levantasse `TitularRecusado` mediria a si mesmo, e a regra dos
+            # status (400/422 sim, 401/403/429/5xx não) não seria testada.
+            return real_cliente(**kw)
         return "cus_1"
 
     def _pagamento(**kw):
@@ -82,6 +101,7 @@ def asaas_falso(monkeypatch):
             raise a.AsaasApiError("Falha ao cancelar", status_code=502)
         return {"deleted": True}
 
+    monkeypatch.setattr(ac, "_request", _request_falso)
     monkeypatch.setattr(ac, "criar_cliente", _cliente)
     monkeypatch.setattr(a, "criar_pagamento_pix", _pagamento)
     monkeypatch.setattr(a, "obter_qr_pix", _qr)

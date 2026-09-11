@@ -24,9 +24,40 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, em `frontend/routes/billing_pix.py`):
     positivo `52998224725５` vermelho junto (400: o `５` sobrevive e viram 12
     dígitos). Os demais positivos seguem verdes.
 
-POSITIVOS do grupo (`..._cpf_valido_...` e `..._cnpj_valido_...`): sem eles, um
-`_documento_valido` que devolvesse `False` para tudo passaria em todos os
-negativos e mataria a venda inteira.
+O SEGUNDO grupo (desde 2026-09-10) é o documento que passa aqui e o **Asaas**
+recusa: estruturalmente válido, e mesmo assim o `POST /v3/customers` devolve 400.
+Isso virava o 503 de "tenta de novo em instantes" — mentira, porque o mesmo corpo
+dá o mesmo erro para sempre. Agora é 400 com texto próprio, e a linha volta para
+`draft` (nada existe no Asaas: `criar_pagamento_pix` nem chegou a rodar).
+
+CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
+
+  * apague o `raise TitularRecusado(exc.code)` de
+    `core/services/asaas_customers.py` → TRÊS VERMELHOS, todos com 503 no lugar
+    do 400: `test_asaas_recusa_o_titular_devolve_400_e_deixa_a_linha_em_draft`,
+    `test_retentativa_depois_da_recusa_nao_pergunta_nada_ao_asaas` e
+    `test_a_recusa_nao_vaza_o_documento_nem_o_corpo` — este último também exige o
+    400, e ficava de fora desta lista;
+  * apague **só** o `voltar_para_draft(linha["id"])` de `_emitir`, mantendo o
+    `raise` → o primeiro VERMELHO na asserção `status == "draft"` e o segundo na
+    ordem do Asaas, que vira `['consulta', 'customer', 'create', 'qr']`: a linha
+    fica `creating` e a passada seguinte vai PERGUNTAR ao Asaas por uma cobrança
+    que nunca existiu;
+  * troque `exc.status_code in (400, 422)` por `400 <= exc.status_code < 500` →
+    `test_erro_que_nao_e_do_cliente_continua_503` VERMELHO nos TRÊS casos (429, 401
+    e 403), todos acusando o CPF do cliente por erro que não é dele;
+  * troque por `exc.status_code in (400, 422, 401, 403)` — a mutação que
+    DISCRIMINA, porque atinge só a nossa credencial e deixa o 429 de fora → o mesmo
+    teste VERMELHO em 401 e 403, e verde em 429. Até 2026-09-10 essa mutação não
+    derrubava caso NENHUM da suíte: o parêntese "e, pela mesma condição, o 401/403"
+    estava escrito aqui e não era medido. É o incidente de 10/09 — a NOSSA chave de
+    API errada dizendo ao cliente que o CPF dele não presta.
+
+POSITIVOS do grupo (`..._cpf_valido_...`, `..._cnpj_valido_...` e
+`test_asaas_fora_do_ar_continua_503_com_a_linha_em_creating`): sem eles, um
+`_documento_valido` que devolvesse `False` para tudo — ou um `criar_cliente` que
+levantasse `TitularRecusado` para qualquer erro — passaria em todos os negativos e
+mataria a venda inteira.
 """
 from __future__ import annotations
 
@@ -41,6 +72,15 @@ from _pix_checkout_helpers import (  # noqa: F401 - `asaas_falso`/`vendavel` sã
     asaas_falso,
     vendavel,
 )
+from core.services.asaas import AsaasApiError
+from db.connection import get_conn
+
+# O CPF estruturalmente válido dos casos do Asaas: ele PRECISA passar pelo
+# `_documento_valido` para a recusa medida ser a de lá, não a daqui.
+CPF_OK = "52998224725"
+RECUSA_DO_ASAAS = ("O banco recusou esses dados. Confere o CPF ou CNPJ — se "
+                   "estiver certo, fala com a gente.")
+INDISPONIVEL = "Não consegui emitir o Pix agora. Tenta de novo em instantes."
 
 client = TestClient(dashboard.app)
 
@@ -125,3 +165,108 @@ def test_cpf_com_lixo_ao_redor_dos_digitos_passa(user_id, vendavel, asaas_falso,
 
     assert r.status_code == 200, r.text
     assert len(_linhas(user_id)) == 1
+
+
+# ── o documento que passa aqui e o ASAAS recusa ──────────────────────────────
+
+def _recusa(status: int, code: str | None = "invalid_cpfCnpj") -> AsaasApiError:
+    """O erro como `_raise_for_asaas_response` o constrói: contexto + status +
+    `code` já filtrado, e **sem** corpo."""
+    return AsaasApiError(
+        f"Falha ao criar cliente no Asaas: Asaas retornou HTTP {status}"
+        + (f" (code={code})" if code else ""),
+        status_code=status, code=code)
+
+
+def test_asaas_recusa_o_titular_devolve_400_e_deixa_a_linha_em_draft(
+        user_id, vendavel, asaas_falso, monkeypatch):
+    """DISCRIMINA. 400 do Asaas é culpa do dado, e o 503 dizia o contrário."""
+    conta(user_id, "free", None)
+    asaas_falso["cliente_falha"] = _recusa(400)
+    r = _checkout(user_id, monkeypatch, CPF_OK)
+
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == RECUSA_DO_ASAAS
+    linhas = _linhas(user_id)
+    assert len(linhas) == 1 and linhas[0]["status"] == "draft", linhas
+    # Nem `create` nem `qr`: a saga parou no titular, então NÃO há cobrança lá.
+    assert asaas_falso["ordem"] == ["customer"], asaas_falso["ordem"]
+
+
+def test_retentativa_depois_da_recusa_nao_pergunta_nada_ao_asaas(
+        user_id, vendavel, asaas_falso, monkeypatch):
+    """A CONVERSA, não a função (§3): duas requisições, mesmo usuário, mesmo
+    banco. É este teste que mede a escolha do `draft` — com a linha em `creating`
+    a substituição chama `id_remoto_vivo`, que é um GET no Asaas por uma cobrança
+    que nunca existiu (e cujo modo de falha, `asaas_cancelamento_falhou`, já foi
+    visto em produção)."""
+    conta(user_id, "free", None)
+    asaas_falso["cliente_falha"] = _recusa(400)
+    assert _checkout(user_id, monkeypatch, CPF_OK).status_code == 400
+
+    asaas_falso["cliente_falha"] = None
+    asaas_falso["ordem"].clear()
+    r = _checkout(user_id, monkeypatch, CPF_OK)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["qr_payload"]
+    # A ordem INTEIRA, não só a ausência de `consulta`: o nome promete "nada ao
+    # Asaas", e um `delete:pay_...` na retentativa passaria verde num `not in`.
+    assert asaas_falso["ordem"] == ["customer", "create", "qr"], asaas_falso["ordem"]
+
+
+def test_asaas_fora_do_ar_continua_503_com_a_linha_em_creating(
+        user_id, vendavel, asaas_falso, monkeypatch):
+    """POSITIVO do grupo. 5xx é o Asaas, não o dado: segue 503, com o mesmo texto
+    de antes, e a linha fica `creating` — o estado ambíguo que a varredura trata,
+    porque daí em diante pode haver cobrança lá."""
+    conta(user_id, "free", None)
+    asaas_falso["cliente_falha"] = _recusa(502, code=None)
+    r = _checkout(user_id, monkeypatch, CPF_OK)
+
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == INDISPONIVEL
+    assert _linhas(user_id)[0]["status"] == "creating"
+
+
+@pytest.mark.parametrize("status", [429, 401, 403])
+def test_erro_que_nao_e_do_cliente_continua_503(
+        user_id, vendavel, asaas_falso, monkeypatch, status):
+    """4xx que NÃO é o dado do titular: 503, e nunca "confere o CPF".
+
+    429 é fila cheia e retentar ajuda — exatamente o que o 503 pede. 401 e 403 são
+    a NOSSA `ASAAS_API_KEY`, e foram o incidente de 10/09: acusar o documento do
+    cliente por credencial nossa errada é o pior desfecho possível. Os três juntos
+    porque a condição que os separa é uma só, e 401/403 não tinham caso nenhum.
+
+    A linha fica `creating` como no 502: daqui em diante o estado é ambíguo para a
+    varredura, e é o que separa este grupo do `draft` da recusa do titular.
+    """
+    conta(user_id, "free", None)
+    asaas_falso["cliente_falha"] = _recusa(status, code=None)
+    r = _checkout(user_id, monkeypatch, CPF_OK)
+
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == INDISPONIVEL
+    assert _linhas(user_id)[0]["status"] == "creating"
+
+
+def test_a_recusa_nao_vaza_o_documento_nem_o_corpo(user_id, vendavel, asaas_falso,
+                                                   monkeypatch):
+    """O corpo do erro do Asaas traz o documento por extenso ("O CPF 529... é
+    inválido"), e `system_event_logs` é a tabela que a purga do §13.3 NÃO alcança.
+    Nem a resposta nem a linha de log podem carregar os 11 dígitos."""
+    conta(user_id, "free", None)
+    asaas_falso["cliente_falha"] = AsaasApiError(
+        f"Falha ao criar cliente no Asaas: o CPF {CPF_OK} e invalido",
+        status_code=400, code="invalid_cpfCnpj")
+    r = _checkout(user_id, monkeypatch, CPF_OK)
+
+    assert r.status_code == 400, r.text
+    assert CPF_OK not in r.text
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select message, details from system_event_logs "
+                    "where user_id = %s", (user_id,))
+        linhas = [dict(x) for x in cur.fetchall()]
+    assert linhas, "o log da recusa não foi escrito"
+    assert not [x for x in linhas if CPF_OK in str(x)], linhas

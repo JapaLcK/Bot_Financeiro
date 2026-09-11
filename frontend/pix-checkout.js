@@ -248,6 +248,7 @@ function pixFormulario(plano, ctx) {
     e.preventDefault();
     const d = pixDigitos(campo.value);
     if (!pixFormaOk(d)) {
+      showToast("");   // o único desfecho que NÃO passa pelo `pixEnviar` (limpeza lá)
       erro.textContent = "Informe os 11 dígitos do CPF ou os 14 do CNPJ.";
       campo.focus();
       return;
@@ -265,6 +266,9 @@ function pixFormulario(plano, ctx) {
 async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, botao) {
   if (botao.disabled) return;   // Enter repetido não vira duas cobranças
   botao.disabled = true;
+  // Clicou em enviar: a mensagem anterior deixou de valer, DÊ NO QUE DER — QR,
+  // migração, "já pago", inline do 400 ou toast novo. Um ponto só, em vez de um por desfecho.
+  showToast("");
   const rotulo = botao.textContent;
   pixRotular(botao, "ph-clock", "Gerando o código…");
   const corpo = { plan: plano, interval: "annual", cpf_cnpj: documento };
@@ -293,9 +297,9 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`
     // em todo `HTTPException(detail="…")`, e aqui isso caía num `det.message`
     // undefined — a frase que o servidor escreveu era descartada e o cliente lia o
-    // genérico. São cinco: os dois 400 (plano, documento), o 429 do limitador (por
-    // IP — routes/shared.py:98, então não é só quem digitou que o toma), o 503 da
-    // indisponibilidade e o 403 do CSRF, de que o checkout não tem isenção.
+    // genérico. São seis: os três 400 (plano, documento e o titular recusado pelo
+    // Asaas), o 429 do limitador (por IP — routes/shared.py:98, então não é só quem
+    // digitou que o toma), o 503 da indisponibilidade e o 403 do CSRF, sem isenção.
     // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
     // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
     // no genérico. O #355 consertou o mesmo defeito só no toast; normalizar aqui
@@ -316,6 +320,9 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     const pago = det.error === "pix_future_purchase_conflict"
       && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
     if (r.status === 409 && pago) return pixModalJaPago(pago[0], ctx);
+    // 400 é erro DO CAMPO: vai para o `#pix-doc-erro` (alvo do `aria-describedby`), DENTRO do modal, e não para o toast. O `disabled` largou o foco no <body>: volta pro campo.
+    const alvo = r.status === 400 && det.message && document.getElementById("pix-doc-erro");
+    if (alvo) { alvo.textContent = det.message; pixDoc?.focus(); return; }
     if (!r.ok) return showToast(det.message || "Não consegui gerar o código Pix agora.", "err");
     pixApagarDoc();          // o QR vai entrar: o documento sai da tela antes
     pixModalQr(d, plano, ctx);
