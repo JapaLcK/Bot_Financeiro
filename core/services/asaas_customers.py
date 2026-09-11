@@ -19,6 +19,41 @@ from __future__ import annotations
 
 from core.services.asaas import AsaasApiError, _request
 
+
+class TitularRecusado(RuntimeError):
+    """O Asaas recusou o CADASTRO do titular → **400**, e não os nossos 503.
+
+    A separação é por CULPA, e ela é medível pelo status HTTP:
+
+      * **400 e 422** — o Asaas leu o corpo e disse que o dado não presta
+        (`cpfCnpj`, ou o e-mail que veio do nosso cadastro). Retentar com o mesmo
+        corpo dá o mesmo erro para sempre, então 503 "tenta de novo em instantes"
+        é mentira: o cliente tem de saber que precisa mudar alguma coisa;
+      * **401 e 403** — é a NOSSA credencial de API (a env que `asaas.py` lê, e
+        que este módulo não pode sequer NOMEAR: o portão de
+        `tests/test_pix_destino_inerte.py` mede a marca no texto). Foi o
+        incidente de 10/09, e acusar o CPF do cliente por chave nossa errada é o
+        pior desfecho possível. Os dois têm caso próprio desde 2026-09-10
+        (`test_erro_que_nao_e_do_cliente_continua_503`): até lá, esta lista
+        AFIRMAVA a separação e nenhum teste a media — pôr 401/403 dentro do
+        `in (...)` de `criar_cliente` deixava a suíte Pix inteira verde;
+      * **429** — throttle. Retentar ajuda, que é exatamente o que o 503 pede;
+      * **5xx** e falha de transporte (`status_code is None`) — o Asaas, não o
+        dado. Continuam 503.
+
+    Carrega **só** o `code`, que já passou pelo `_codigo_seguro` (`asaas.py:96`).
+    Nunca `str(exc)`, nunca o corpo, nunca o `description`: a descrição do erro do
+    Asaas vem no mesmo objeto que o `code` e traz o documento do titular por
+    extenso — e o `details` de quem loga isto é PERSISTIDO em `system_event_logs`,
+    que a purga do §13.3 não alcança. Mesma forma de `CheckoutIndisponivel`: uma
+    classe com `codigo`, e não uma classe por motivo.
+    """
+
+    def __init__(self, codigo: str | None = None):
+        super().__init__(codigo or "titular_recusado")
+        self.codigo = codigo
+
+
 def criar_cliente(*, nome: str, cpf_cnpj: str, email: str | None = None) -> str:
     """`POST /v3/customers` — devolve **só o `id`** do cliente no Asaas.
 
@@ -34,8 +69,15 @@ def criar_cliente(*, nome: str, cpf_cnpj: str, email: str | None = None) -> str:
     corpo: dict = {"name": nome, "cpfCnpj": cpf_cnpj}
     if email:
         corpo["email"] = email
-    dados = _request("POST", "/v3/customers",
-                     contexto="Falha ao criar cliente no Asaas", json=corpo)
+    try:
+        dados = _request("POST", "/v3/customers",
+                         contexto="Falha ao criar cliente no Asaas", json=corpo)
+    except AsaasApiError as exc:
+        # Só o que o Asaas classificou como corpo ruim. Todo o resto sobe INTACTO
+        # e continua virando o 503 de quem chama — ver a classe acima.
+        if exc.status_code in (400, 422):
+            raise TitularRecusado(exc.code) from exc
+        raise
     cliente_id = dados.get("id") if isinstance(dados, dict) else None
     if not isinstance(cliente_id, str) or not cliente_id:
         raise AsaasApiError(
