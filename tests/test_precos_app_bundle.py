@@ -7,10 +7,13 @@ ou trocado por um placeholder que não renderiza card nenhum.
 
 **O que ele NÃO prova**, e a divisão importa:
 
-- **não prova que o artefato está EM DIA com `webapp/src`.** Isso é medição que
-  exige rodar o build, e quem a faz é o step `webapp` do `.github/workflows/tests.yml`
-  (`npm --prefix webapp ci && npm --prefix webapp run build` + `git diff
-  --exit-code frontend/precos-app.*`). É o análogo do gate do `CACHE_NAME`;
+- **não prova que o artefato está EM DIA com `webapp/`.** Isso é o carimbo
+  (`webapp/build-stamp.txt`, escrito pelo `postbuild` do webapp e conferido por
+  `node scripts/precos_bundle_stamp.mjs --check` no CI e no
+  `tests/frontend/precos_bundle_stamp.test.mjs`). É o análogo do gate do
+  `CACHE_NAME` — e é por hash de fonte, não por rebuild: o build usa binários
+  nativos (rolldown/lightningcss) e comparar bytes de build entre plataformas
+  deixaria o CI inteiro vermelho por diferença de arquitetura;
 - **não prova que a rota existe.** Isso é o `tests/test_frontend_assets_e_rotas.py`,
   que pareia asset ↔ rota — sem ele o arquivo daria 404 em produção com CI verde;
 - **não prova que o React renderiza.** Isso é o harness de frontend

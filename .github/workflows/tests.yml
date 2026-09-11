@@ -445,34 +445,27 @@ jobs:
       # anterior com o CI verde. É o mesmo mecanismo do gate do CACHE_NAME: o
       # repositório carrega dois artefatos que só um comando reconcilia.
       #
-      # `--prefix webapp` de propósito: `webapp/` tem package.json e lockfile
-      # PRÓPRIOS, e o da RAIZ não pode ganhar um script `build` — é a ausência
-      # dele que mantém a detecção automática do Railway apontando para o Python
-      # em vez de tentar publicar um site Node.
+      # Por CARIMBO e não rebuildando aqui: a versão anterior deste step rodava
+      # `npm --prefix webapp ci && npm run build` e reprovava se o `git status`
+      # sujasse os dois arquivos. O Vite 8 buda com rolldown e lightningcss, os
+      # dois binários NATIVOS (27 pacotes com `os`/`cpu` no lockfile de webapp/):
+      # o artefato commitado sai de darwin-arm64, este runner é linux-x64-gnu, e
+      # nenhum dos dois projetos promete saída byte a byte igual entre
+      # arquiteturas. Como o step não tem `if: paths:`, um byte de diferença
+      # deixaria vermelho TODO PR do repositório — inclusive os que não tocam
+      # `webapp/`. O carimbo compara hash de fonte com hash de fonte e hash de
+      # artefato commitado com ele mesmo: nenhum byte de build é comparado com
+      # outro byte de build.
       #
-      # O que este gate NÃO garante: que o bundle RENDERIZA. Ele prova apenas
-      # que o artefato commitado é o que `webapp/src` produz hoje. Quem prova o
-      # render é o `npm run test:frontend` (step abaixo), e quem prova que a
-      # ROTA existe é o pytest (`tests/test_frontend_assets_e_rotas.py`).
+      # Sem `npm ci` e sem rede: o script é `node:crypto` + `node:fs` puros, e
+      # reprova em menos de um segundo, antes do Chromium (~95 MB).
       #
-      # Antes do Chromium (~95 MB) pelo mesmo motivo dos outros dois: reprova em
-      # segundos em vez de esperar o job inteiro.
-      - name: Gate do artefato da ilha React (webapp -> frontend/precos-app.*)
-        run: |
-          set -euo pipefail
-          npm --prefix webapp ci
-          npm --prefix webapp run build
-          # `git status --porcelain` e não `git diff --exit-code`: o `diff` só vê
-          # arquivo RASTREADO, então um asset NOVO que o build passou a emitir
-          # (um `precos-app.css` que ninguém commitou) sairia como untracked e o
-          # gate aprovaria. O `status` pega as duas formas — modificado e novo.
-          SUJO=$(git status --porcelain -- frontend/precos-app.js frontend/precos-app.css)
-          if [ -n "$SUJO" ]; then
-            git diff -- frontend/precos-app.js frontend/precos-app.css | head -40 || true
-            echo "$SUJO"
-            echo "::error file=frontend/precos-app.js,title=Artefato da ilha React desatualizado::O build de webapp/src produziu um frontend/precos-app.* DIFERENTE do que esta commitado (lista acima; '??' e arquivo novo que ninguem commitou). Rode 'npm --prefix webapp ci && npm --prefix webapp run build' e commite o resultado junto com a mudanca no .jsx. Sem isso a producao continua servindo o bundle anterior, com este CI verde."
-            exit 1
-          fi
+      # O que este gate NÃO garante: que o bundle RENDERIZA. Quem prova o render
+      # é o `npm run test:frontend` (step abaixo), quem prova que a ROTA existe é
+      # o pytest (`tests/test_frontend_assets_e_rotas.py`), e o controle negativo
+      # do próprio carimbo é o `tests/frontend/precos_bundle_stamp.test.mjs`.
+      - name: Gate do carimbo da ilha React (webapp -> frontend/precos-app.*)
+        run: node scripts/precos_bundle_stamp.mjs --check
 
       - name: Install Playwright + Chromium
         run: npx playwright install --with-deps chromium
