@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
+from core.pg_text import detalhe_seguro
 from db.affiliates import (
     MIN_PAYOUT_CENTS,
     REF_COOKIE_MAX_AGE_DAYS,
@@ -135,7 +136,7 @@ async def affiliate_request_payout(request: Request, body: PayoutRequestBody):
     try:
         payout = await asyncio.to_thread(request_payout, affiliate["id"], pix_enc)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
     # Guarda a chave no cadastro do afiliado pros próximos saques
     await asyncio.to_thread(set_affiliate_pix_key, affiliate["id"], pix_hash, pix_enc)
