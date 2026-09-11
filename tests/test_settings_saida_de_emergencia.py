@@ -2,53 +2,48 @@
 tests/test_settings_saida_de_emergencia.py — as CINCO rotas de conta que o corte
 do #380 não pode trancar, batidas pela URL real.
 
-O #380 passou a cortar quem não tem plano pago vigente, e a copy do bot
-(`core/help_text.py`) manda o cortado para `pigbankai.com/settings`. A página
-abre (`static_pages.serve_settings` usa só `gate_plan_selection`), mas as APIs
-que ela chama passavam por `authorize_dashboard_access` ->
-`_enforce_subscription_gate` e respondiam **402**: `GET /settings/{id}/security`
-caía no `catch` do front, `hasEmail` virava False e o botão de reset de senha
-ficava `disabled`. Conta só-Google não tem senha, e `/auth/account/export` e
-`DELETE /auth/account` exigem uma — esses dois já eram isentos por prefixo
-(`_GATE_EXEMPT_PREFIXES`); o que estava trancado era o CAMINHO até eles.
+**Por que estas cinco e por que só elas** mora na docstring de
+`shared.authorize_account_access` (§0.7). O que este arquivo acrescenta é a
+MEDIÇÃO: o defeito é QUAL FUNÇÃO A ROTA CHAMA, então todo caso vai pela URL real.
+`tests/test_gate_plan_selection.py` exercita `_enforce_subscription_gate` com um
+`Request` falso e, por construção, nunca veria isso (§3, "rode a conversa").
 
-O conserto é `shared.authorize_account_access`: as guardas (a) sessão válida,
-(b) é o dono e (c) conta agendada para exclusão continuam; só o gate de plano
-cai. **O que se mede aqui é QUAL FUNÇÃO A ROTA CHAMA** — por isso todo caso vai
-pela URL, com o `{user_id}` no path. `tests/test_gate_plan_selection.py` já
-exercita `_enforce_subscription_gate` com um `Request` falso e, por construção,
-nunca veria este defeito (`CLAUDE.md` §3, "rode a conversa, não a função").
-
-O gate é DORMENTE na suíte (`tests/conftest.py` põe `PLANS_V2_ENABLED=0` por
+O gate é DORMENTE na suíte (`conftest.py` põe `PLANS_V2_ENABLED=0` por
 `setdefault`, e sem `PAYWALL_ENABLED` o `has_app_access` devolve True antes de
-consultar qualquer coisa). Sem a fixture `_gate_ligado` abaixo, TODO caso de 402
-deste arquivo passa verde com e sem o conserto — medido, não deduzido.
+consultar qualquer coisa). Sem a fixture `_gate_ligado`, TODO caso de 402 deste
+arquivo passa verde com e sem o conserto — medido, não deduzido.
 
-CONTROLES DECLARADOS (`docs/controles_declarados.md`)
-────────────────────────────────────────────────────
-**Negativo 1 — a isenção existe?** Em `security_sessions_list_route`
-(`frontend/routes/settings.py`), troque a chamada
-`shared.authorize_account_access(request, user_id)` por
-`shared.authorize_dashboard_access(request, user_id)`. VERMELHO:
-  `test_cortado_lista_sessoes`
-Direção: falso NEGATIVO de acesso — a saída de emergência volta a trancar.
+CONTROLES DECLARADOS (`docs/controles_declarados.md`) — injeção -> VERMELHO
+──────────────────────────────────────────────────────────────────────────
+1. **A isenção existe?** Em `security_sessions_list_route`
+   (`frontend/routes/settings.py`): `shared.authorize_account_access` ->
+   `shared.authorize_dashboard_access`. -> `test_cortado_lista_sessoes`.
+   Direção: falso NEGATIVO — a saída de emergência volta a trancar.
+2. **A isenção vazou?** Em `shared.authorize_dashboard_access`, a linha
+   `_enforce_subscription_gate(request, current_user_id)` -> `pass`. ->
+   `test_cortado_nao_ve_atividade`, `test_cortado_nao_ve_notificacoes`,
+   `test_cortado_nao_ve_open_finance`. Direção: falso POSITIVO — o #380 vira
+   decoração nas rotas de dados.
+3. **O dono é checado?** Em `shared.authorize_account_access`,
+   `if current_user_id != int(user_id):` -> `if False:`. ->
+   `test_cortado_nao_alcanca_sessoes_de_outro_usuario`. Direção: vazamento entre
+   contas (`CLAUDE.md` §0) na função que nasceu neste PR.
+4. **Vale para a perna da ESCOLHA?** Em `security_settings_route` (alvo
+   DIFERENTE do nº 1): `shared.authorize_account_access` ->
+   `shared.authorize_dashboard_access`. -> `test_cortado_le_a_secao_de_seguranca`
+   (perna do CORTE) E `test_sem_escolha_de_plano_tem_a_mesma_saida` (perna da
+   ESCOLHA). Direção: falso NEGATIVO nas duas pernas pela MESMA rota — prova que
+   os dois casos medem motivos diferentes de 402.
+5. **A sessão corrente é poupada?** Em `security_sessions_revoke_others_route`,
+   `current_jti = _current_session_jti(request)` -> `current_jti = None`. ->
+   `test_cortado_encerra_as_outras_sessoes`. Direção: "encerrar os OUTROS
+   dispositivos" desloga quem clicou. Com o cliente sem `jti` (como era até a
+   rodada 2) esta injeção é INVISÍVEL: a chamada já passava None.
+6. **O guard da própria sessão existe?** Em `security_session_revoke_route`,
+   `if current_jti and jti == current_jti:` -> `if False:`. ->
+   `test_cortado_nao_encerra_a_propria_sessao_pelo_jti`.
 
-**Negativo 2 — a isenção vazou?** Em `shared.authorize_dashboard_access`, troque
-a linha `_enforce_subscription_gate(request, current_user_id)` por `pass`.
-VERMELHOS:
-  `test_cortado_nao_ve_atividade`
-  `test_cortado_nao_ve_notificacoes`
-  `test_cortado_nao_ve_open_finance`
-Direção: falso POSITIVO de acesso — o corte simplesmente não acontece nas rotas
-de dados, e o #380 vira decoração.
-
-**Negativo 3 — o dono é checado?** Em `shared.authorize_account_access`, troque
-`if current_user_id != int(user_id):` por `if False:`. VERMELHO:
-  `test_cortado_nao_alcanca_sessoes_de_outro_usuario`
-Direção: vazamento entre contas (`CLAUDE.md` §0) na função que nasceu neste PR —
-é o risco de extrair a guarda do dono para uma função nova.
-
-**Positivos** (VERDES sob o negativo 1, que é o que RESTRINGE):
+**Positivos** (VERDES sob o nº 1, que é o que RESTRINGE):
   `test_pagante_continua_entrando_nas_cinco_rotas` — o legítimo não mudou; sem
   ele o grupo passaria num código que recusa todo mundo.
   `test_cortado_nao_ve_atividade` — pôr o gate de volta numa rota não afrouxa o
@@ -65,7 +60,7 @@ from fastapi.testclient import TestClient
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
 from core.sessions import create_session, get_active_session
-from core.services.plan_service import has_app_access
+from core.services.plan_service import has_app_access, needs_plan_selection
 from db.connection import get_conn
 from db.users import _hash_password
 from tests._helpers_pii import insert_auth_account_pii
@@ -93,9 +88,8 @@ def _sem_rate_limit(monkeypatch):
 
 
 def _conta(user_id: int, *, com_senha: bool = False, plan: str = "free") -> str:
-    """Conta web pelo helper PII: insert cru sem `email_hash` vira órfão
-    invisível para `create_password_reset_token`. `com_senha=False` é a conta
-    só-Google, que é justamente quem depende desta saída."""
+    """Conta web pelo helper PII: insert cru sem `email_hash` vira órfão invisível
+    para `create_password_reset_token`. `com_senha=False` é a conta só-Google."""
     email = f"saida-{uuid.uuid4().hex[:10]}@test.local"
     with get_conn() as conn, conn.cursor() as cur:
         insert_auth_account_pii(
@@ -108,13 +102,12 @@ def _conta(user_id: int, *, com_senha: bool = False, plan: str = "free") -> str:
 
 
 def _cortar(user_id: int) -> None:
-    """Estado do corte: plano pago VENCIDO, sem relógio de carência, e a escolha
-    de plano já feita — senão o 402 sairia como `plan_selection_required` e o
-    caso mediria a outra perna do gate.
+    """Estado do corte: plano pago VENCIDO, sem carência, e a escolha de plano já
+    feita — senão o 402 sairia `plan_selection_required` e o caso mediria a outra
+    perna (a que `test_sem_escolha_de_plano_tem_a_mesma_saida` cobre).
 
     Delta ABSOLUTO (30 dias), nunca `DUNNING_GRACE_DAYS ± n`: escrito em função
-    da constante, alargar a carência moveria o caso junto com o guard
-    (`docs/controles_declarados.md`)."""
+    da constante, alargar a carência moveria o caso junto com o guard."""
     vencido = datetime.now(timezone.utc) - timedelta(days=30)
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -172,9 +165,8 @@ def _cortado(user_id: int, *, com_senha: bool = False):
 # ── 1-5: a saída de emergência abre para quem foi cortado ───────────────────
 
 def test_cortado_le_a_secao_de_seguranca(user_id):
-    """O PRIMEIRO passo da saída. Com 402 aqui o front caía em
-    `applySecuritySettings({})` e o botão de reset ficava `disabled` — a saída
-    travava antes de começar."""
+    """O PRIMEIRO passo da saída: com 402 aqui o front caía em
+    `applySecuritySettings({})` e o botão de reset ficava `disabled`."""
     client, headers, email = _cortado(user_id)
     r = client.get(f"/settings/{user_id}/security", headers=headers)
     assert r.status_code == 200, r.text
@@ -190,11 +182,33 @@ def test_cortado_lista_sessoes(user_id):
 
 
 def test_cortado_encerra_as_outras_sessoes(user_id):
-    create_session(user_id, ip="203.0.113.8")
-    client, headers, _ = _cortado(user_id)
+    """O cliente vai com um `jti` REAL. Sem ele `_current_session_jti` devolve
+    None, `revoke_other_sessions` cai no ramo "revoga TODAS" (`core/sessions.py`)
+    e o `revoked == 1` sairia igual se a rota matasse a sessão corrente junto —
+    o que discrimina é a corrente SOBREVIVER."""
+    outra = create_session(user_id, ip="203.0.113.8")
+    email = _conta(user_id)
+    _cortar(user_id)
+    atual = create_session(user_id, ip="203.0.113.80")
+    client, headers = _cliente(user_id, email, jti=atual)
     r = client.delete(f"/settings/{user_id}/sessions", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["revoked"] == 1
+    assert get_active_session(outra) is None, "respondeu 200 sem revogar a outra"
+    assert get_active_session(atual) is not None, "revogou a sessão CORRENTE junto"
+
+
+def test_cortado_nao_encerra_a_propria_sessao_pelo_jti(user_id):
+    """O guard `jti == current_jti -> 400` (`security_session_revoke_route`) não
+    era exercitado: todo caso ia sem `jti`, e com `current_jti` None ele nunca
+    entra."""
+    email = _conta(user_id)
+    _cortar(user_id)
+    atual = create_session(user_id, ip="203.0.113.90")
+    client, headers = _cliente(user_id, email, jti=atual)
+    r = client.delete(f"/settings/{user_id}/sessions/{atual}", headers=headers)
+    assert r.status_code == 400, r.text
+    assert get_active_session(atual) is not None, "revogou a corrente mesmo com 400"
 
 
 def test_cortado_encerra_uma_sessao_especifica(user_id):
@@ -207,8 +221,7 @@ def test_cortado_encerra_uma_sessao_especifica(user_id):
 
 def test_cortado_so_google_pede_o_link_de_definir_senha(user_id, monkeypatch):
     """O NÓ do fluxo só-Google: exportar e excluir exigem senha, a conta não tem
-    nenhuma, e este é o único endereço que a cria. Com 402 aqui a pessoa ficava
-    sem saída mesmo com o `/auth/*` isento."""
+    nenhuma, e este é o único endereço que a cria."""
     import core.services.email_service as es
     enviados: list[tuple] = []
     monkeypatch.setattr(
@@ -246,8 +259,8 @@ def test_cortado_nao_ve_notificacoes(user_id):
 
 
 def test_cortado_nao_ve_open_finance(user_id):
-    """Outro router (`frontend/routes/open_finance.py`): prova que a isenção é
-    das cinco rotas nominais, não de `authorize_dashboard_access` inteira."""
+    """Outro router: a isenção é das cinco rotas nominais, não de
+    `authorize_dashboard_access` inteira."""
     client, headers, _ = _cortado(user_id)
     r = client.get(f"/open-finance/{user_id}", headers=headers)
     assert r.status_code == 402, r.text
@@ -257,8 +270,8 @@ def test_cortado_nao_ve_open_finance(user_id):
 # ── 9-11: as guardas que NÃO caíram junto com o gate ────────────────────────
 
 def test_cortado_nao_alcanca_sessoes_de_outro_usuario(user_id):
-    """Isolamento por usuário (`CLAUDE.md` §0): tirar o gate de plano não pode
-    tirar a guarda do DONO. A sessão é de A, o `{user_id}` do path é de B."""
+    """Isolamento (`CLAUDE.md` §0): tirar o gate não tira a guarda do DONO. A
+    sessão é de A, o `{user_id}` do path é de B."""
     outro = user_id + 1
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("insert into users (id) values (%s) on conflict do nothing", (outro,))
@@ -273,8 +286,8 @@ def test_cortado_nao_alcanca_sessoes_de_outro_usuario(user_id):
 
 
 def test_sessao_revogada_continua_dando_401(user_id):
-    """A guarda (a): autenticação não caiu junto. O `jti` do token não está em
-    `auth_sessions`, então nem chega ao gate de plano — 401, nunca 402."""
+    """A guarda (a): o `jti` do token não está em `auth_sessions`, então nem chega
+    ao gate de plano — 401, nunca 402."""
     email = _conta(user_id)
     _cortar(user_id)
     client, headers = _cliente(user_id, email, jti=f"jti-revogado-{uuid.uuid4().hex[:8]}")
@@ -284,7 +297,7 @@ def test_sessao_revogada_continua_dando_401(user_id):
 
 def test_conta_agendada_para_exclusao_continua_dando_403(user_id):
     """A guarda (b): `raise_if_account_scheduled_for_deletion` ficou DENTRO da
-    função nova. Quem já pediu exclusão não volta a mexer na conta."""
+    função nova."""
     from db import schedule_account_deletion
     email = _conta(user_id, com_senha=True)
     _cortar(user_id)
@@ -296,12 +309,31 @@ def test_conta_agendada_para_exclusao_continua_dando_403(user_id):
     assert "exclusão" in r.json()["detail"], r.text
 
 
+def test_sem_escolha_de_plano_tem_a_mesma_saida(user_id):
+    """A OUTRA perna do gate: `_cortar` fixa `plan_selected_at=now()` de
+    propósito, então todo caso acima mede só a perna do CORTE. Aqui ele é NULL
+    (default dropado no schema) e o 402 sairia `plan_selection_required`. A
+    decisão de derrubar as duas está na docstring de `authorize_account_access`.
+    A rota de DADOS no fim é o par que separa "isentou a CONTA" de "isentou o
+    gate inteiro"."""
+    email = _conta(user_id)
+    assert needs_plan_selection(user_id) is True, "pré-condição: a escolha não foi feita"
+    create_session(user_id, ip="203.0.113.12")
+    client, headers = _cliente(user_id, email)
+
+    assert client.get(f"/settings/{user_id}/security", headers=headers).status_code == 200
+    assert client.get(f"/settings/{user_id}/sessions", headers=headers).status_code == 200
+    r = client.get(f"/settings/{user_id}/notifications", headers=headers)
+    assert r.status_code == 402, r.text
+    assert _corpo_do_gate(r) == "plan_selection_required", r.text
+
+
 # ── 12: o POSITIVO — o legítimo não mudou ──────────────────────────────────
 
 def test_pagante_continua_entrando_nas_cinco_rotas(user_id, monkeypatch):
-    """Sem este caso o grupo passaria num código que recusa todo mundo (§3).
-    Cobre as CINCO de uma vez porque o que se mede é o mesmo: o pagante atravessa
-    `authorize_account_access` exatamente como atravessava a outra."""
+    """Sem este caso o grupo passaria num código que recusa todo mundo (§3). As
+    CINCO de uma vez: o pagante atravessa a função nova como atravessava a
+    outra."""
     import core.services.email_service as es
     monkeypatch.setattr(es, "send_password_reset_email", lambda *a, **k: True)
 

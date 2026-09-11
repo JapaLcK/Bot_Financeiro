@@ -822,6 +822,25 @@ def authorize_account_access(request: Request, user_id: int) -> int:
     As sessões entram junto porque "encerrar os outros dispositivos" é a metade
     de segurança da mesma saída.
 
+    **A isenção derruba as DUAS pernas do gate, e isso é DECIDIDO, não acidente.**
+    `_enforce_subscription_gate` levanta 402 por dois motivos independentes:
+    `needs_plan_selection` -> `plan_selection_required` (cadastro que nunca
+    passou pela /precos) e `not has_app_access` -> `subscription_required` (o
+    corte do #380). Descer para esta função derruba os DOIS. Para a segunda perna
+    é o objetivo do PR; para a PRIMEIRA a decisão é a mesma e pelo mesmo motivo:
+    quem nunca escolheu plano também é dono dos próprios dados, e ler o próprio
+    e-mail, pedir o link de definir senha e encerrar as próprias sessões não
+    entrega nada do produto — é a conta, não o serviço. Trancar a saída de
+    emergência de um cadastro novo dá o mesmo beco sem saída do #380, com menos
+    motivo. Pelo NAVEGADOR esse caso nem chega: `initSettings`
+    (`frontend/settings.html`) redireciona `needs_plan_selection` para
+    `/precos?escolha=1` antes de qualquer fetch — a isenção vale por SCRIPT, e é
+    para isso que ela está escrita aqui. Coberta por
+    `test_sem_escolha_de_plano_tem_a_mesma_saida` (`tests/
+    test_settings_saida_de_emergencia.py`), que mede a perna da ESCOLHA — os
+    outros casos daquele arquivo fixam `plan_selected_at=now()` e medem só a do
+    corte. As rotas de DADOS continuam 402 nas duas pernas.
+
     **TETO ACEITO E DECLARADO (decisão do dono, #380): conta SEM e-mail E SEM
     senha não tem saída autônoma — ela sai por suporte.**
     `PATCH /settings/{id}/security/contact` (vincular e-mail) **não** é isenta de
