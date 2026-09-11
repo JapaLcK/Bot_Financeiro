@@ -75,23 +75,29 @@ function pixBotao(classe, texto) {
 
 // ── O CTA nos cards ─────────────────────────────────────────────────────────
 
+/**
+ * Pix está à venda para ESTE usuário? Fonte única do CTA dos cards e da etiqueta
+ * do toggle (§0.7). `!== true` e não `!`: portão de venda não abre com truthy
+ * qualquer. Vitalício não compra — o backend recusa com 409 `lifetime`.
+ */
+function pixAVenda() {
+  return !!pixCfg && pixCfg.pix_annual_available === true && !(pixSub && pixSub.lifetime === true);
+}
+
 /** Chamado pelo loadPlansState da precos.html, com o que ela já buscou. */
 function pbPixInit(cfg, sub) {
   pixCfg = cfg || null;
   pixSub = sub || null;
+  // A etiqueta do toggle é o único anúncio de Pix que o ciclo MENSAL tem (o CTA
+  // dos cards só nasce no anual), então quem a revela é o init, não o refresh.
+  const nota = document.getElementById("pix-cycle-note");
+  if (nota) nota.hidden = !pixAVenda();
   pbPixRefresh();
 }
 
 /** Chamado pelo setCycle: o CTA de Pix só existe no ciclo anual. */
 function pbPixRefresh() {
-  // `!== true` e não `!`: portão de venda não abre com valor truthy qualquer.
-  if (!pixCfg || pixCfg.pix_annual_available !== true) return;
-  // Vitalício NÃO compra: o `refreshPlanButtons` da precos.html já marca os
-  // cards como acesso permanente, e o backend recusa o checkout com 409
-  // `lifetime` — um CTA aqui é um clique rumo ao erro, com CPF digitado antes.
-  // Mesmo caminho do mensal: sai do DOM (escondido ainda recebe Tab), o que
-  // também apaga o CTA já criado quando a assinatura chega depois do cfg.
-  const anual = currentCycle === "annual" && !(pixSub && pixSub.lifetime === true);
+  const anual = currentCycle === "annual" && pixAVenda();
   for (const plano of PIX_PLANOS) {
     const existente = document.querySelector('[data-pix-cta="' + plano + '"]');
     // Sai do DOM no mensal em vez de ficar escondido: escondido ainda recebe Tab.

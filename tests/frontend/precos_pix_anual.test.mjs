@@ -1450,3 +1450,53 @@ test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () =
     `o detail objeto parou de ser lido pela message: "${toast}"`);
   await page.close();
 });
+
+/**
+ * PT19 — A ETIQUETA DO TOGGLE: O PIX PRECISA SER VISÍVEL NO CICLO MENSAL.
+ *
+ * O CTA "Pagar no Pix" só nasce no anual (PT1), então quem abre a página — que
+ * carrega em `monthly` — não tinha nenhum sinal de que Pix existe. A etiqueta
+ * `#pix-cycle-note` é esse sinal, e por isso NÃO pode depender do ciclo.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — apague `if (nota) nota.hidden = !pixAVenda();` do `pbPixInit`
+ *     (pix-checkout.js), ou mova a linha para dentro do `pbPixRefresh` com o
+ *     `anual` na condição: o caso do MENSAL fica vermelho, e ele é o que estava
+ *     verde antes da mutação;
+ *   · positivo — o PT19b prova que a etiqueta continua ESCONDIDA sem a flag e
+ *     para o vitalício. Sem ele, um `nota.hidden = false` fixo passaria no PT19
+ *     anunciando meio de pagamento que a página não vende.
+ */
+const etiquetaVisivel = (page) => page.$eval(
+  "#pix-cycle-note", (e) => e.offsetParent !== null && !e.hidden);
+
+test("PT19: a etiqueta de Pix aparece no ciclo mensal e continua no anual", async () => {
+  const { page } = await abrirPrecos();
+  assert.equal(await contarCtas(page), 0, "âncora: no mensal não há CTA de Pix nenhum");
+  assert.equal(await etiquetaVisivel(page), true,
+    "o ciclo mensal não anuncia o Pix em lugar nenhum da tela");
+  assert.match(await page.textContent("#pix-cycle-note"), /Pix/,
+    "a etiqueta existe mas não diz Pix");
+  await page.click("#cycle-annual");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu ao trocar para o anual");
+  await page.click("#cycle-monthly");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu na volta para o mensal");
+  await page.close();
+});
+
+test("PT19b: sem a flag, e para o vitalício, a etiqueta não aparece", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  for (const [nome, plansConfig, sub] of [
+    ["sem pix_annual_available", base, { active: false }],
+    ["flag false", { ...base, pix_annual_available: false }, { active: false }],
+    ["vitalício", { ...base, pix_annual_available: true }, { active: true, lifetime: true }],
+  ]) {
+    const { page } = await abrirPrecos({ plansConfig, sub });
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (mensal)`);
+    await page.click("#cycle-annual");
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (anual)`);
+    await page.close();
+  }
+});

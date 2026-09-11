@@ -31,7 +31,10 @@
      remontando className (e reinjetando btn-block só pra desfazer o
      width:100% na linha seguinte). Vira um segmented control de verdade:
      o JS só liga/desliga .is-active + aria-pressed. */
-  .cycle-wrap { display: flex; justify-content: center; margin: 0 0 30px; }
+  /* Coluna, não linha: embaixo do segmented control mora a etiqueta do Pix, e
+     ela precisa ficar CENTRADA sob ele — não ao lado, que empurraria o toggle
+     para fora do centro da escada. */
+  .cycle-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0 0 30px; }
   .cycle-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 15px; }
   .cycle-btn {
     display: inline-flex; align-items: center; gap: 8px;
@@ -43,6 +46,12 @@
   .cycle-btn:active { transform: scale(.98); }
   .cycle-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
   .cycle-btn.is-active { background: linear-gradient(135deg,var(--pink),var(--pink-dark)); color: #fff; box-shadow: 0 6px 18px rgba(255,45,142,.3); }
+  /* Duas etiquetas usam esta pílula: o "−17%" DENTRO do botão Anual e a do Pix,
+     que fica FORA dos botões (logo abaixo do toggle) e por isso não é alcançada
+     pela regra de .is-active — a cor dela é a mesma nos dois ciclos, de
+     propósito: o Pix não deixa de existir porque o usuário está olhando o
+     mensal. Neon aqui é valor positivo (desconto, pagamento à vista), não
+     decoração. */
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
   .cycle-btn.is-active .cycle-save { background: rgba(255,255,255,.22); color: #fff; }
 
@@ -316,6 +325,19 @@
             <button type="button" id="cycle-monthly" class="cycle-btn is-active" aria-pressed="true" onclick="setCycle('monthly')">Mensal</button>
             <button type="button" id="cycle-annual" class="cycle-btn" aria-pressed="false" onclick="setCycle('annual')">Anual <span class="cycle-save">−17%</span></button>
           </div>
+          <!-- O CTA "Pagar no Pix" só nasce no ciclo anual, então quem fica no
+               mensal nunca descobria que Pix existe. Esta etiqueta é o anúncio, e
+               fica FORA dos dois botões de propósito: dentro do Anual ela some
+               justamente para o público que precisa ler (e o toggle passava de
+               248,7px para 289,5px, estourando os 272px disponíveis a 320px de
+               viewport — medido).
+               Nasce `hidden`: a disponibilidade é a flag `pix_annual_available`
+               do /billing/plans-config, e quem a revela é o pbPixInit
+               (pix-checkout.js), no mesmo lugar que decide o CTA. Sem a flag —
+               ou para quem tem acesso vitalício, que não compra — a página fica
+               igual à de hoje: anunciar meio de pagamento que não existe é pior
+               que não anunciar. -->
+          <span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span>
         </div>
 
         <div class="plans" id="plans-v2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
