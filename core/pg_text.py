@@ -124,3 +124,76 @@ def limpa_para_pg(valor):
                 elif isinstance(filho, (dict, list)):
                     pilha.append(filho)
     return valor
+
+
+def recusa_veneno(modelo):
+    """Recusa (em vez de sanear) NUL/surrogate solitário em campo `str` de um
+    modelo Pydantic. Para usar num `model_validator(mode="after")`.
+
+    Sanear serve para dado que o sistema só GRAVA; e-mail é IDENTIFICADOR, e
+    trocar `a\\x00@x.com` por `a�@x.com` inventaria identidade — o mesmo motivo
+    pelo qual o `limpa_para_pg` substitui em vez de apagar. Nenhum e-mail,
+    senha, nome ou código legítimo contém os dois: navegador nenhum os produz.
+    O `ValueError` vira 422 pelo caminho normal do FastAPI (#369).
+
+    ponytail: teto conhecido — só campo `str` de PRIMEIRO nível é olhado.
+    MEDIDO: `list[str]`, `dict` e submodelo com surrogate PASSAM. Não é
+    alcançável hoje (os herdeiros de `_CorpoSemVeneno` só têm `str`,
+    `str | None` e `bool` — este último não é `str` e sai do laço sem olhar —,
+    e o `extra="allow"` do pydantic v2 entra neste mesmo laço),
+    mas um herdeiro futuro com campo composto passaria veneno SEM AVISO. Se
+    aparecer um, o conserto é trocar o `isinstance(valor, str)` por uma
+    comparação `limpa_para_pg` sobre o valor inteiro — que já caminha
+    dict/list com pilha explícita. Não implementado por não ter chamador.
+    """
+    for nome, valor in modelo:
+        if isinstance(valor, str) and _limpa_str(valor) != valor:
+            raise ValueError(f"O campo '{nome}' contém caractere inválido.")
+    return modelo
+# A frase que substitui a mensagem do codec. Uma só, e aqui: o texto do erro é
+# o mesmo em toda rota porque a CAUSA é a mesma (byte que o Postgres não
+# guarda), e duas versões dela divergiriam na primeira edição (CLAUDE.md §0.7).
+_ERRO_DE_CODIFICACAO = "Tem um caractere que não consigo salvar nesse texto. Apaga e digita de novo."
+
+
+def detalhe_seguro(exc: Exception) -> str:
+    """`str(exc)` para erro de DOMÍNIO; frase fixa para erro de CODIFICAÇÃO.
+
+    Existe porque **`UnicodeEncodeError` é subclasse de `ValueError`** — o MRO é
+    `UnicodeEncodeError → UnicodeError → ValueError`. Todo handler escrito como
+    `except ValueError as exc: raise HTTPException(400, detail=str(exc))`
+    captura, sem querer, o erro que o psycopg levanta ao codificar um surrogate
+    solitário, e manda a mensagem interna para o cliente. MEDIDO em
+    `POST /pockets/{user_id}` com usuário autenticado comum:
+
+        {"name":"cofre\\ud800x"}
+        → 400 {"detail":"'utf-8' codec can't encode character '\\ud800'
+                          in position 5: surrogates not allowed"}
+
+    O que o cliente recebia dizia o codec, o code point e o OFFSET dentro do
+    campo — nada disso é para ele, e nada disso diz o que fazer.
+
+    **Só `UnicodeError` é trocado**, e é de propósito: o `ValueError` que a
+    camada `db/` levanta É a mensagem do usuário (`EMPTY_NAME`,
+    `INTEREST_RATE_INVALID`, "Valor acima do limite…"), e trocá-lo por um
+    genérico apagaria a única instrução útil da tela — regressão pior que o
+    vazamento. Por isso o helper DISCRIMINA em vez de generalizar.
+
+    ponytail: teto conhecido — NUL (`\\x00`) NÃO passa por aqui. O psycopg o
+    recusa com `psycopg.DataError` ("PostgreSQL text fields cannot contain NUL
+    (0x00) bytes"), que não é `ValueError`, não é capturado por estes handlers e
+    continua virando 500 (MEDIDO em `/auth/login` e `/auth/register`). Fechar o
+    NUL é recusar na fronteira, não remendar no handler — é o que o
+    `recusa_veneno` faz nos corpos de auth. Aqui só se corrige o que ESTES
+    `except` alcançam.
+    """
+    return _ERRO_DE_CODIFICACAO if isinstance(exc, UnicodeError) else str(exc)
+
+
+if __name__ == "__main__":  # pragma: no cover - autocheck
+    try:
+        "cofre\ud800x".encode("utf-8")
+    except UnicodeError as e:
+        assert detalhe_seguro(e) == _ERRO_DE_CODIFICACAO, detalhe_seguro(e)
+    assert detalhe_seguro(ValueError("EMPTY_NAME")) == "EMPTY_NAME"
+    print("ok")
