@@ -1,7 +1,9 @@
-// Tier único de lint. O projeto é JavaScript puro servido estático (sem build,
-// sem TypeScript), então não existe aqui o tier type-aware do template
+// Tier único de lint. O que este arquivo linta é JavaScript puro servido estático,
+// sem TypeScript, então não existe aqui o tier type-aware do template
 // (eslint.typed.config.mjs) nem o bloco de fronteiras do import-x: os scripts
-// de frontend/ são <script> clássicos, sem imports entre si.
+// de frontend/ são <script> clássicos, sem imports entre si. O JS que passa por
+// build — a ilha React de `webapp/` e o artefato `frontend/precos-app.js` — está
+// no `globalIgnores` do fim do arquivo, com o motivo de cada um.
 //
 // Adaptado de templates/eslint/eslint.config.mjs.example (vibe-coding-toolkit).
 // As severidades vêm da MEDIÇÃO de 2026-09-03 (`npm run lint` neste branch),
@@ -215,7 +217,9 @@ export default defineConfig([
   },
 
   {
-    // Mesmo orçamento de tamanho para os testes, em "warn" (8 acima de 350).
+    // Mesmo orçamento de tamanho para os testes, em "warn" (quantos estouram
+    // hoje: `wc -l tests/frontend/*.mjs | awk '$1 > 350'` — o número que estava
+    // escrito aqui dizia 8 e já eram 10).
     // Vem DEPOIS do bloco que liga a regra em "error": para um arquivo casado
     // pelos dois, o flat config aplica o bloco posterior por último.
     files: ["tests/frontend/**/*.mjs"],

@@ -21,8 +21,10 @@ boletos, recorrentes, investimentos com CDI, importação de extrato (OFX/CSV/PD
 Open Finance.
 
 **Stack:** Python 3.13 · FastAPI · PostgreSQL (psycopg 3) · discord.py · Railway
-(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **sem build e
-sem framework**. App iOS em Capacitor carregando o próprio site.
+(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **com UMA
+ilha React** (`webapp/` → `frontend/precos-app.*`, o `#plans-v2` da /precos); o
+`package.json` da raiz continua sem script `build`, e o porquê está em "Decisões
+tomadas". App iOS em Capacitor carregando o próprio site.
 
 ---
 
@@ -402,7 +404,12 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   (módulo é deferido e reintroduz corrida com script clássico da página), mount
   síncrono com `flushSync`, e o componente **lê os dados do markup** em vez de
   trazer literal — no caso da `/precos` isso é o que impede uma quarta cópia do
-  preço (§0.7). O artefato commitado tem gate próprio no CI (job `frontend`): o
+  preço (§0.7). **CSS da ilha é CSS comum** — importado pelo `main.jsx`, emitido
+  como `frontend/precos-app.css` e consumindo os tokens que a página já carrega
+  (`var(--pink-dark)` e irmãos, do `site.css`/`brand.css`). **Sem Tailwind**: o
+  plano da primeira ilha previa, e ele foi abandonado porque utilitário novo não
+  paga onde já existe sistema de design — sem este parágrafo, a próxima ilha
+  reabre o assunto lendo o plano. O artefato commitado tem gate próprio no CI (job `frontend`): o
   step REBUILDA (`npm --prefix webapp ci && npm --prefix webapp run build`) e
   reprova se `git status --porcelain -- frontend/` não ficar limpo. Só o build
   prova que o bundle commitado veio das fontes commitadas — um carimbo de hash das

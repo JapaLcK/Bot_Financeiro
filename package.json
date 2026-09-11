@@ -1,7 +1,7 @@
 {
   "name": "pigbank-frontend-tests",
   "private": true,
-  "description": "Só o harness de testes de frontend (tests/frontend/). O site é HTML estático servido pelo backend; não há build de JS.",
+  "description": "Só o harness de testes de frontend (tests/frontend/). O site é HTML estático servido pelo backend, com uma ilha React que tem build PRÓPRIO em webapp/; este package.json não tem script build de propósito.",
   "scripts": {
     "test:frontend": "node --test tests/frontend/*.test.mjs",
     "lint": "eslint .",

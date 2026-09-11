@@ -4474,8 +4474,8 @@ async def billing_create_checkout(
 
     `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
     (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
-    400 específico por um 422 cujo `detail` é LISTA, e a /precos
-    (`precos.html:1019-1024`) só lê `detail` string ou `detail.message` — cai no
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos (o ramo
+    `if (!resp.ok)` do `startCheckout`) só lê `detail` string ou `detail.message` — cai no
     fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
     `| None = None` o POST sem body nenhum nem instancia o modelo.
 

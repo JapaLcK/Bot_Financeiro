@@ -29,7 +29,8 @@ BUNDLE = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "precos-a
 # O contrato de DOM que o bundle é obrigado a emitir. Cada um destes é lido por
 # OUTRO arquivo em tempo de execução, e perder qualquer um quebra dinheiro:
 #
-#   `#plans-v2`     — `pix-checkout.js:109`, onde o CTA de Pix é inserido;
+#   `#plans-v2`     — o seletor do `pixCriarCta` (pix-checkout.js), onde o CTA de
+#                     Pix é inserido;
 #   `data-plan-btn` — o mesmo seletor, mais o `markUnavailable` e o
 #                     `refreshPlanButtons` da precos.html;
 #   `price-block`   — envelope dos `[data-price-*]` que o `setCycle` alterna;

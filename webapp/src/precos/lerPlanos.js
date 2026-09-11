@@ -41,19 +41,29 @@
  *
  * ── O QUE ISTO ATA AO RESTO DA PÁGINA ──────────────────────────────────────
  *
- * O `pixCriarCta` insere um SEGUNDO `<button>` dentro do card
- * (`pix-checkout.js:97`, `cartao.after(b)`). Com o CTA de Pix na tela, o card
+ * O `pixCriarCta` insere um SEGUNDO `<button>` dentro do card (o
+ * `cartao.after(b)` do `pixCriarCta`, em `pix-checkout.js`). Com ele na tela, o card
  * está FORA deste contrato — e isso não é bug hoje porque o mount é provadamente
  * anterior: `precos-app.js` é IIFE, executa síncrono no parse, e os três
- * `pix-*.js` vêm DEPOIS dele na precos.html (`:1156-1159`), então `pbPixInit` nem
- * existe ainda. O `markUnavailable` e o `refreshPlanButtons`, que o fetch pode ter
- * rodado antes, só mudam `textContent`/`disabled` do botão que já existe.
+ * `<script src="/pix-*.js">` vêm DEPOIS dele no fim do `<body>` da precos.html,
+ * então `pbPixInit` nem existe ainda. O `markUnavailable` e o
+ * `refreshPlanButtons`, que o fetch pode ter rodado antes, só mudam
+ * `textContent`/`disabled` do botão que já existe.
  *
- * O que quebra se alguém mexer nisso: qualquer mudança que ATRASE o mount (trocar
- * a IIFE por `type="module"`, reordenar os `<script>`, remontar depois de um
- * fetch) faz a ilha parar de montar quando o CTA existe — fallback silencioso,
- * só o `console.warn`. Antes desta guarda o mesmo cenário era PIOR e mais calado:
- * a ilha montava e APAGAVA o CTA de Pix, que é botão de venda.
+ * ATRASO DE REDE NÃO QUEBRA ISTO, e a distinção é medida, não teórica: rede lenta
+ * atrasa o mount mas atrasa junto os `pix-*.js` — eles estão atrás deste script na
+ * MESMA fila do parser, e a ordem de execução de script clássico não depende de
+ * quem baixa primeiro. O que quebra é atraso de EXECUÇÃO: trocar a IIFE por
+ * `type="module"`, reordenar os `<script>`, remontar depois de um fetch. Aí a ilha
+ * para de montar quando o CTA existe — fallback silencioso, só o `console.warn`.
+ * Antes desta guarda o mesmo cenário era PIOR e mais calado: a ilha montava e
+ * APAGAVA o CTA de Pix, que é botão de venda.
+ *
+ * O que a rede JÁ move é outra coisa, e é real: as continuações de promessa desta
+ * página (`refreshPlanButtons`, `markUnavailable`) rodam ANTES do mount com o
+ * bundle lento — 62 ms contra 1555 ms, medido. Quem cobre isso é o
+ * `refreshPlanButtons` do `main.jsx` (PI8), e o nó capturado pelo `startCheckout`
+ * através do fetch é o PI9.
  *
  * Comentário (`nodeType 8`) é ignorado de propósito: é invisível, perdê-lo não
  * muda a página, e é o que o `precos_ilha_react.test.mjs` usa para saber se a

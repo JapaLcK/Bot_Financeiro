@@ -39,8 +39,9 @@
  * O critério é MAIS DE UMA COLUNA, e 508px é onde a segunda aparece — não é
  * número escolhido, é aritmética do grid: o `#plans-v2` tem
  * `grid-template-columns:repeat(auto-fit,minmax(220px,1fr))` INLINE
- * (precos.html:360, que por ser id+inline vence o `@media (max-width:900px)`
- * do site.css:552), `gap: 20px` (site.css:306) e largura
+ * (no `<div class="plans" id="plans-v2">` da precos.html, que por ser
+ * id+inline vence o `@media (max-width:900px)`
+ * do `.plans` no site.css), `gap: 20px` (do mesmo `.plans`) e largura
  * `min(1560px, 100vw - 48px)` (o `#plans-v2-wrap`). Duas faixas pedem
  * 220+20+220 = 460px de container, ou seja `100vw >= 508`. O par 507/508 que
  * cerca o degrau está na `LARGURAS` do PO1, que MEDE a equivalência em vez de
@@ -68,7 +69,11 @@
  *    var(--pink-dark))`, e branco sobre `--pink` (#FF2D8E) dá **3,49:1** —
  *    reprova o AA de 4,5:1, e o texto é `.68rem` em maiúsculas, ou seja NÃO é
  *    "texto grande" (que só vale de 18,66px negrito pra cima). Descer o gradiente
- *    para `--pink-dark` → #A8115A põe o pior ponto em **5,57:1**.
+ *    para a FAIXA `var(--pink-dark)` (#C7186B) → #A8115A põe o pior ponto em
+ *    **5,57:1** — o pior ponto é o mais claro dos dois, o próprio `--pink-dark`,
+ *    e é dele que sai o 5,57. O #A8115A não tem token: é um quarto rosa, e fica
+ *    literal aqui de propósito enquanto for usado só nesta regra. O outro stop
+ *    NÃO fica: ele é `--pink-dark` e vai pelo token (§0.7).
  *    Escopado aqui e não corrigido no site.css de propósito: `.plan-badge` é
  *    compartilhado, e a mesma medição vale para todo card `.plan` do site — é um
  *    achado para outro PR, não uma mudança silenciosa em páginas alheias.
@@ -78,7 +83,7 @@
  *    custa estas 8 linhas em vez de ~40 kB gzip de dependência.
  */
 #plans-v2 .plan.featured .plan-badge {
-  background: linear-gradient(135deg, #c7186b, #a8115a, #c7186b);
+  background: linear-gradient(135deg, var(--pink-dark), #a8115a, var(--pink-dark));
   background-size: 200% 100%;
   animation: pb-badge-pan 3s linear infinite;
 }
