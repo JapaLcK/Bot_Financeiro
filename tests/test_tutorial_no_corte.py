@@ -49,13 +49,33 @@ from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
 # mensagem do `_paywall_gate` já entrega o próximo passo certo (o link). A ajuda
 # genérica continua alcançável — é a mesma razão do opt-out e do `/settings`.
 #
-# CONTROLE DECLARADO (`docs/controles_declarados.md`) — troque os dois
-# `_bloqueado_pelo_corte(...)` dos ramos do tutorial por `False` (troca de
-# valor; os blocos continuam lá). VERMELHOS (medido 2026-09-11):
+# CONTROLES DECLARADOS (`docs/controles_declarados.md`) — o conserto tem TRÊS
+# pernas, em camadas diferentes, e cada uma é uma injeção com vermelhos
+# próprios. A declaração anterior nomeava só a primeira, e o
+# `docs/controles_declarados.md` é explícito: vermelhos diferentes são injeções
+# diferentes, e cada uma tem de ser nomeada. Todas medidas em 2026-09-11.
+#
+# **(a) os gates do WhatsApp** — troque os dois `_bloqueado_pelo_corte(...)` dos
+# ramos do tutorial em `wa_runtime.py` por `False`. VERMELHOS:
 #   `test_cortado_tocando_o_botao_do_tutorial_nao_e_convidado_a_tentar`
 #   `test_cortado_digitando_tutorial_tambem_e_barrado`
-# Direção: o produto convida quem não tem acesso a registrar um gasto, e o
-# registro seguinte é recusado — a pior ordem possível das duas mensagens.
+#
+# **(b) a renderização compartilhada** — em `core/handle_incoming.py`, troque
+# `render_help("sem_acesso", platform)` por
+# `h_help.answer_help(ajuda, texto, platform)` (a forma anterior; nada apagado).
+# VERMELHOS, e são OUTROS — `2 failed, 9 passed`:
+#   `test_cortado_digitando_tutorial_tambem_e_barrado`
+#   `test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado`
+# É a perna dos DOIS canais; o Discord só cai por esta.
+#
+# **(c) a superfície de ajuda do WhatsApp** — troque o corpo de
+# `_ajuda_do_cortado` por `return False`. VERMELHOS — `3 failed, 8 passed`:
+#   `test_cortado_continua_recebendo_AJUDA_mas_a_dele`
+#   `test_cortado_tocando_TUTORIAL_no_menu_de_ajuda_nao_recebe_o_tour`
+#   `test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour`
+#
+# Direção das três: o produto convida quem não tem acesso a registrar um gasto,
+# e o registro seguinte é recusado — a pior ordem possível das duas mensagens.
 #
 # Positivos do grupo, VERDES sob a injeção:
 #   `test_cortado_ainda_alcanca_o_menu_de_ajuda`
@@ -109,13 +129,19 @@ def test_cortado_continua_recebendo_AJUDA_mas_a_dele(monkeypatch, bancada):
     uid = _conta(cortada=True)
     secoes: list[str] = []
 
+    # Id REAL do menu e despacho REAL. A versão anterior monkeypatchava
+    # `get_help_menu_id` para devolver `"help_gastos"` — id que NÃO existe em
+    # `HELP_MENU_IDS` — e substituía `send_help_section` inteiro: provava que o
+    # ramo não era gateado sem nunca executar o despacho, que é exatamente onde
+    # o furo morava. Um positivo que não podia ver o furo que ele cobria.
     import adapters.whatsapp.wa_runtime as wr
-    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: None)
-    monkeypatch.setattr(wr, "get_help_menu_id", lambda raw: "help_gastos")
+    from adapters.whatsapp.wa_help_menu import HELP_MENU_IDS
+
+    real = next(i for i in HELP_MENU_IDS if "tutorial" not in i)
     monkeypatch.setattr(wr, "send_help_section",
                         lambda to, hid: secoes.append(hid))
 
-    _clique(uid, monkeypatch, "help_gastos")
+    _clique(uid, monkeypatch, real)
 
     assert secoes == [], f"o cortado recebeu a seção normal do menu: {secoes}"
     assert respostas, "o cortado pediu ajuda e não recebeu nada"

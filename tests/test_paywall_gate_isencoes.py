@@ -110,15 +110,23 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
     ("/assinar", "assinar"),     # prefixo do Discord
     ("plano", "plano"),
     ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
-    ("ajuda", "comece aqui"),
-    # Ajuda COM seção. O esperado é a seção PEDIDA: o `answer_help` passava só o
-    # argumento ("ofx") pro resolve_section, que espera o texto inteiro ("ajuda
-    # ofx"), e toda seção caía no fallback "start". Consertado neste branch
-    # (core/handlers/help_handler.py) — antes, os dois casos esperavam "comece
-    # aqui". O que se mede aqui continua sendo o gate deixar passar; a seção
-    # resolvida é de tests/test_help_section_aliases.py.
-    ("ajuda ofx", "importar extrato ou fatura"),
-    ("help investimentos", "investimentos"),
+    # As TRÊS formas de ajuda de quem está BARRADO devolvem a mesma seção,
+    # `sem_acesso`, e isso é o conserto e não um ajuste de teste.
+    #
+    # Antes, o esperado era a seção PEDIDA, e o comentário aqui celebrava isso.
+    # Medido depois: a `start` manda "• `gastei 50 mercado` / • `tutorial` →
+    # guia rápido" e a `ofx` explica como importar extrato — as duas dizem a
+    # quem está barrado para fazer algo que a mensagem seguinte recusa. Pior, a
+    # seção `tutorial` era alcançável por `ajuda tutorial`/`ajuda guia`, e foi
+    # por aí que o tutorial continuou saindo depois de duas rodadas de conserto.
+    #
+    # O que este caso mede continua sendo **o gate deixar passar** — a pessoa
+    # recebe resposta, a ajuda não virou parede. Qual seção o texto resolve é de
+    # `tests/test_help_section_aliases.py`, e para quem TEM plano nada mudou
+    # (`test_com_plano_a_ajuda_continua_igual`).
+    ("ajuda", "sem plano ativo"),
+    ("ajuda ofx", "sem plano ativo"),
+    ("help investimentos", "sem plano ativo"),
 ])
 def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
     """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o

@@ -177,7 +177,14 @@ def test_barrado_com_pendencia_viva_pede_ajuda_e_nada_acontece(action_type, arma
 
     resposta = _diga(uid, "ajuda?")
 
-    assert "comece aqui" in resposta.lower(), f"{action_type}: {resposta!r}"
+    # A ajuda do BARRADO passou a ser a seção `sem_acesso`, não a `start`. Não é
+    # ajuste de teste para acomodar código: a `start` dizia "• `gastei 50
+    # mercado` / • `tutorial` → guia rápido", ou seja mandava quem está barrado
+    # tentar um comando que o gate recusa e digitar a palavra que devolve o
+    # paywall. Era o defeito, e esta asserção o fixava.
+    # O que o caso MEDE continua o mesmo, nas linhas de baixo: nada é escrito e
+    # a pendência fica intacta.
+    assert "sem plano ativo" in resposta.lower(), f"{action_type}: {resposta!r}"
     assert db.list_launches(uid) == [], f"{action_type} registrou lançamento"
     assert db.get_balance(uid) == 0, f"{action_type} mexeu no saldo"
     assert _escrituras(uid) == antes, f"{action_type} escreveu no banco"
@@ -197,7 +204,9 @@ def test_barrado_com_parcelamento_pendente_nao_registra_parcela():
 
     resposta = _diga(uid, "ajuda?")
 
-    assert "comece aqui" in resposta.lower(), resposta
+    # A ajuda do BARRADO é a seção `sem_acesso`, não a `start` — ver a nota no
+    # caso acima. O que se mede aqui é o dinheiro, nas linhas seguintes.
+    assert "sem plano ativo" in resposta.lower(), resposta
     assert db.list_installment_groups(uid) == [], "registrou o parcelamento"
     assert db.list_launches(uid) == []
     assert db.get_balance(uid) == 0

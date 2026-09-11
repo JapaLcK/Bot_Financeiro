@@ -231,7 +231,16 @@ def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
     outras seções também mandam tentar comando (`credit`, medido).
 
     Fechar porta a porta já falhou três vezes; o que decide aqui é o DESTINO
-    (vai renderizar ajuda) e não o caminho. A seção é a mesma dos dois canais
+    (vai renderizar ajuda) e não o caminho.
+
+    Quanto do tutorial instrui, medido em vez de estimado — de todos os alvos de
+    `wa_tutorial._ACTION_MAP`, só o do dashboard (`tut_6`) é leitura pura::
+
+        [k for k, fn in wa_tutorial._ACTION_MAP.items()
+         if re.search(r"gastei|recebi|paguei|desfazer|apagar |criar cart|"
+                      r"credito |parcelar|pagar fatura|criar caixinha|coloquei|"
+                      r"apliquei|retirei|importar ofx",
+                      inspect.getsource(fn), re.I)] A seção é a mesma dos dois canais
     (`core.help_text` → `sem_acesso`), então WhatsApp e Discord dizem a mesma
     coisa a quem foi cortado.
 
@@ -698,19 +707,26 @@ def process_message(message: InboundMessage) -> None:
             tut_bid = get_tutorial_button_id(raw_msg)
             if tut_bid:
                 # O tutorial NÃO é leitura, e é por isso que ele tem gate mesmo
-                # ficando acima do gate único: SEIS dos dez passos mandam a
-                # pessoa tentar um comando ("gastei 50 no mercado", "Tente:
-                # gastei 10 no café"), e o `tut_skip` responde "Pode usar à
-                # vontade!". Para quem foi cortado isso é instrução para fazer
-                # algo que a mensagem seguinte recusa.
+                # ficando acima do gate único: de todos os passos, **só o do
+                # dashboard (`tut_6`) é leitura pura** — os demais nomeiam
+                # comando de ESCRITA ("gastei 50 no mercado", "desfazer",
+                # "apagar 42", "criar cartao", "parcelar"), e o `tut_skip`
+                # responde "Pode usar à vontade!". (A contagem não fica escrita
+                # aqui, §2; o comando que a produz está na docstring de
+                # `_ajuda_do_cortado`.) Para quem foi cortado isso é instrução
+                # para fazer algo que a mensagem seguinte recusa.
                 #
                 # **Gatear a entrada, e não reescrever os passos**: copy própria
-                # de bloqueado exigiria ramo em seis lugares de
-                # `wa_tutorial.py`, que hoje não conhece plano nenhum — e a
-                # mensagem do `_paywall_gate` já diz o que fazer (link pra
-                # assinar). A ajuda genérica continua alcançável: o menu de
-                # AJUDA e o de COMANDOS, logo abaixo, seguem sem gate, porque
-                # explicam sem mandar tentar.
+                # exigiria ramo em quase todos os passos de `wa_tutorial.py`,
+                # que não conhece plano nenhum.
+                #
+                # A frase que estava aqui — "o menu de AJUDA e o de COMANDOS
+                # seguem sem gate, porque explicam sem mandar tentar" — era
+                # FALSA para o de ajuda, e foi ela que cobriu o furo: o item
+                # "🚀 Tutorial" é dele, e a seção `credit` também manda tentar.
+                # Hoje o menu de ajuda passa por `_ajuda_do_cortado`. O de
+                # COMANDOS continua isento e aí a frase é verdadeira — medido:
+                # nenhum "gastei"/"recebi"/"Tente" em `wa_commands_menu.py`.
                 if _bloqueado_pelo_corte(uid, reply_to):
                     return
                 logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
@@ -774,13 +790,14 @@ def process_message(message: InboundMessage) -> None:
             # o ponto por onde todos passam (§0.1 — o conserto na função
             # compartilhada é diff menor que um em cada chamador).
             #
-            # Dos ramos ACIMA, que já retornaram: o menu de AJUDA e o de
-            # COMANDOS são de leitura e ficam isentos — a mesma isenção de ajuda
-            # do `_paywall_gate`. O TUTORIAL **não** é de leitura e tem gate
-            # próprio lá em cima; a frase que estava aqui o listava junto com os
-            # outros dois e era falsa (seis dos dez passos mandam a pessoa
-            # tentar um comando). Os de OPT-OUT ficam ABAIXO e por isso precisam
-            # da isenção explícita: `_WA_INTERACTIVE_ISENTOS`.
+            # Dos ramos ACIMA, que já retornaram: só o menu de COMANDOS é de
+            # leitura e fica isento — medido, nenhum "gastei"/"recebi"/"Tente"
+            # em `wa_commands_menu.py`. O TUTORIAL e o menu de AJUDA **não** são
+            # de leitura e já passaram por `_ajuda_do_cortado` lá em cima. A
+            # frase anterior listava os três juntos como leitura e era falsa
+            # para dois deles — foi ela que manteve o item "🚀 Tutorial" do menu
+            # aberto. Os de OPT-OUT ficam ABAIXO e por isso precisam da isenção
+            # explícita: `_WA_INTERACTIVE_ISENTOS`.
             if (interactive_id.strip().lower() not in _WA_INTERACTIVE_ISENTOS
                     and interactive_id not in _WA_INTERACTIVE_ISENTOS
                     and _bloqueado_pelo_corte(uid, reply_to)):

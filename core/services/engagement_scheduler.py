@@ -1,17 +1,12 @@
 """
 core/services/engagement_scheduler.py
 
-Loop assíncrono que roda uma vez por dia e dispara emails de engajamento
-para os usuários do PigBank.
+Loop diário de e-mails de engajamento. Lógica:
+  - Inativo há 7+ dias → reengajamento (uma vez por período de inatividade)
+  - Ativo (usou nos últimos 7 dias): dica e insight, a cada 28 dias, com
+    mínimo de 1 dia entre os dois (nunca no mesmo dia)
 
-Lógica:
-  - Usuário inativo há 7+ dias  → email de reengajamento (uma vez por período de
-                                   inatividade — não repete até o usuário voltar
-                                   e sumir de novo)
-  - Usuário ativo (usou nos últimos 7 dias):
-      → email de dica de uso     uma vez a cada 28 dias
-      → email de insight         uma vez a cada 28 dias, com mínimo de 1 dia de
-                                   distância do email de dica (nunca no mesmo dia)
+Só alcança quem TEM acesso — ver o filtro em `_check_and_send`.
 """
 from __future__ import annotations
 
@@ -127,6 +122,16 @@ async def _check_and_send() -> None:
 
     # db.py é síncrono — roda em thread pool para não bloquear o event loop
     users: list[dict] = await loop.run_in_executor(None, db.get_users_for_engagement)
+
+    # O corte: `get_users_for_engagement` filtra só `engagement_opt_out`, então
+    # a conta BLOQUEADA recebia dica/insight/reengajamento — e a dica fecha com
+    # "é só chamar no bot". Não está dormente (1×/dia, sem flag). Por quê e o
+    # controle: `tests/test_engajamento_no_corte.py`.
+    if users:
+        from core.reports.reports_daily import filtrar_por_acesso
+        _ok = set(await loop.run_in_executor(
+            None, filtrar_por_acesso, [u["user_id"] for u in users]))
+        users = [u for u in users if u["user_id"] in _ok]
 
     now = datetime.now(timezone.utc)
     inactive_threshold = now - timedelta(days=INACTIVE_DAYS)

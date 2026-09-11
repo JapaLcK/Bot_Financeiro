@@ -17,9 +17,10 @@ def filtrar_por_acesso(user_ids):
     """Só quem tem direito de uso HOJE. O corte do Grátis para os relatórios
     proativos junto com o resto do produto (decisão do dono).
 
-    QUATRO laços em DOIS arquivos passam por aqui — os dois de Discord logo
-    abaixo e os dois de WhatsApp em `adapters/whatsapp/wa_app.py`, que importam
-    daqui. Uma função, não quatro cópias do predicado (§0.7).
+    Todo laço proativo do repositório passa por aqui. **Quantos são NÃO fica
+    escrito** (§2): dizia "QUATRO laços em DOIS arquivos" e já estava errado
+    antes desta rodada. A lista viva é `_LACOS_ESPERADOS`
+    (`tests/test_relatorios_param_no_corte.py`).
 
     **Em Python, e não como um termo a mais no `where` de
     `list_users_with_*_report_enabled`**: o predicado em SQL já existe uma vez

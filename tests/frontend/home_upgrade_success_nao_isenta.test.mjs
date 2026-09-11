@@ -126,7 +126,12 @@ test("cortado com ?upgrade=success não deixa snapshot repintável", async () =>
   // era medida: o dashboard limpava antes de redirecionar e a Início não, então
   // o saldo do próprio usuário voltava à tela a cada recarga durante os ~21 s.
   const page = await abrirHome(CORTADO, (p) =>
+    // Semeia UMA vez: `addInitScript` roda em toda navegação, inclusive no
+    // redirect para /precos — sem a trava, o teste replantava as chaves que o
+    // conserto tinha acabado de apagar e media a si mesmo.
     p.addInitScript(() => {
+      if (sessionStorage.getItem("__semeado")) return;
+      sessionStorage.setItem("__semeado", "1");
       sessionStorage.setItem("pb_home_1", JSON.stringify({ saldo: 4242.42 }));
       sessionStorage.setItem("pb_snap_1_2026_9", JSON.stringify({ x: 1 }));
     }));

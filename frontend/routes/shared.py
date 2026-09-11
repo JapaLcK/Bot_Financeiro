@@ -948,12 +948,23 @@ def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     # `/home?upgrade=success` recebe a casca e o snapshot que já estava no
     # localStorage DELE — não há dado novo nem de outra conta.
     #
-    # **Quem fecha o resto é o CLIENTE, quando o polling termina**:
-    # `frontend/home.html` roda `awaitCheckoutConfirmation()` por ~20 s e, na
-    # saída, aplica os dois vereditos do `/auth/me`. Antes ele os pulava com
-    # `!_justUpgraded` e a dispensa virava permanente. O servidor não consegue
-    # distinguir "acabou de pagar" de "digitou a URL" — nenhum dos dois tem
-    # direito ainda —, e por isso a decisão mora onde existe o tempo de espera.
+    # **Quem fecha o resto é o CLIENTE, quando o polling termina** — e SÓ na
+    # /home. O servidor não consegue distinguir "acabou de pagar" de "digitou a
+    # URL" (nenhum dos dois tem direito ainda), então a decisão mora onde existe
+    # o tempo de espera: `frontend/home.html` roda
+    # `awaitCheckoutConfirmation()` e, na saída, aplica os dois vereditos do
+    # `/auth/me`. Antes ele os pulava com `!_justUpgraded` e a dispensa virava
+    # permanente.
+    #
+    # **A versão anterior desta frase prometia cobertura que não existe.** Este
+    # gate guarda QUATRO rotas (`static_pages.py`: /home, /app, /settings,
+    # /onboarding) e só a /home tem veredito de cliente. Medido: `grep -c
+    # "app_access|needs_plan_selection|auth/me" frontend/comecar.html
+    # frontend/comecar.js` devolve ZERO nos dois, então o cortado que abrir
+    # `/onboarding?upgrade=success` recebe o wizard e fica. É CASCA — sem dado
+    # de outro usuário e sem caminho de dinheiro, porque as rotas de dados têm
+    # gate próprio (402) — mas é resíduo declarado, não coberto. Gatear o
+    # /onboarding é decisão do dono, não deste comentário.
     if request.query_params.get("upgrade") == "success":
         return None
 

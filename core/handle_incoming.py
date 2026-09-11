@@ -612,7 +612,9 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 # E a ajuda genérica também não servia: `render_help("start")`
                 # abre com "• `tutorial` → guia rápido / • `gastei 50 mercado`",
                 # ou seja mandava o cortado tentar um comando E digitar a palavra
-                # que devolve o paywall.
+                # que devolve o paywall. (No tutorial em si a proporção é maior
+                # ainda: só o passo do dashboard é leitura pura — o comando que
+                # mede está em `wa_runtime._ajuda_do_cortado`.)
                 #
                 # Renderizar UMA seção resolve a categoria inteira de uma vez, em
                 # vez de a lista de grafias: qualquer texto que o classificador
