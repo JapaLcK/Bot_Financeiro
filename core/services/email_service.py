@@ -1016,13 +1016,76 @@ def _fmt_brl_date(value) -> str:
     return str(value)
 
 
-def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bool:
-    """E-mail pós-checkout — usuário acabou de assinar (item 37)."""
+# O nome COMERCIAL de cada plano, igual ao que o cliente acabou de ler no modal
+# da /home (`WP_PLANOS` em frontend/home.html). Os mapas de
+# `handlers/billing_commands.py` e do monólito são outra coisa — dizem
+# "Essencial"/"Plus"/"Pro", sem a marca — e por isso não servem aqui.
+#
+# **A chave é o valor LEGADO do plano na cobrança, não o slug do frontend.**
+# `pro` é o Plus e `pro_max` é o Pro — a mesma tradução que o frontend já faz em
+# `PLAN_ALIASES = { pro: "plus", pro_max: "pro" }` (frontend/home.html e
+# frontend/nav-auth.js). Chavear em `plus`/`pro` mandava "PigBank Pro" para quem
+# comprou Plus e o fallback genérico para quem comprou Pro.
+#
+# O mapa deixou de ser só do Pix porque os DOIS gateways chegam com ESSE mesmo
+# vocabulário: o router do Pix só aceita `("essencial", "pro", "pro_max")`
+# (frontend/routes/billing_pix.py), e no Stripe o `plan_value` do webhook sai de
+# `_stored_plan_for_price` (frontend/finance_bot_websocket_custom.py:293), que
+# devolve exatamente os mesmos três.
+#
+# `plus` é o QUARTO, e entra por ser valor de COLUNA aceito, não por ser escrito
+# hoje: `_STORED_PLAN_TO_TIER` (core/services/plan_service.py:44) o mapeia para o
+# mesmo tier de `pro`, e `frontend/admin-dashboard.html:2192` já o trata como
+# "valor antigo em algumas contas". Sem a entrada, tal conta lê o genérico
+# "PigBank" — em `billing_commands.py:109`, entre outros. Nenhum escritor atual o
+# produz e a produção tinha ZERO linhas com ele (medido 2026-09-10 por
+# `SELECT plan, count(*) FROM auth_accounts GROUP BY 1`; remeça antes de reusar):
+# é defesa contra valor que o repositório declara ter existido, não regressão
+# viva. Quem amarra este mapa ao dos tiers é `tests/test_vocabulario_de_plano.py`.
+PLAN_DISPLAY_NAMES = {
+    "essencial": "PigBank Essencial",
+    "pro": "PigBank+",
+    "plus": "PigBank+",
+    "pro_max": "PigBank Pro",
+}
+
+
+def plan_display_name(plan: str | None) -> str:
+    """Nome comercial do plano; valor fora do mapa cai na marca sem sufixo.
+
+    **Nenhum e-mail COM ASSINATURA cai no genérico**, e a versão anterior desta
+    docstring afirmava outra coisa ("linha antiga, plano descontinuado ou dado
+    corrompido"). Não é o que acontece: naqueles ramos o `plan` sai de
+    `_stored_plan_for_price` (`frontend/finance_bot_websocket_custom.py:293`),
+    que devolve `'pro'` para price desconhecido, price nulo E assinatura sem
+    item — as três formas de "dado ruim" viram Plus, e o e-mail sai "PigBank+".
+    O genérico é alcançável por UM caminho só: `plan=None` explícito, que é o
+    que a fatura AVULSA (`invoice.payment_failed` sem assinatura) manda, por não
+    ter plano nenhum para nomear.
+
+    O atenuante de o Stripe errar sempre para `'pro'`: esse MESMO valor é o que
+    grava a coluna `plan` da conta (`_stored_plan_for_price` alimenta os dois),
+    então o nome do e-mail erra JUNTO com o entitlement, nunca sozinho — quem
+    receber "PigBank+" indevidamente está, no banco, com o Plus que o e-mail
+    nomeia. Consertar isso é consertar o mapa de prices, não este fallback.
+    """
+    return PLAN_DISPLAY_NAMES.get(plan, "PigBank")
+
+
+def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
+    """E-mail pós-checkout — usuário acabou de assinar (item 37).
+
+    `plan` é o valor LEGADO da coluna `plan` (`essencial`, `pro` = Plus,
+    `pro_max` = Pro) — ver `PLAN_DISPLAY_NAMES` logo acima. Existe porque os
+    três e-mails desta família diziam "PigBank+" para todo mundo, e quem
+    assinava Essencial ou Pro lia o nome de outro plano.
+    """
+    nome = plan_display_name(plan)
     trial_end = _fmt_brl_date(trial_end_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     cta = f'<p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>'
     content = f"""
-      <p>🐷✨ <strong>Tá dentro do PigBank+!</strong></p>
+      <p>🐷✨ <strong>Tá dentro do {nome}!</strong></p>
       <p>Sua assinatura começou agora. Os <strong>15 dias grátis</strong> vão até <strong>{trial_end}</strong> —
       só tem cobrança depois disso, e você pode cancelar quando quiser sem ser cobrado.</p>
       <p>Agora você desbloqueou:</p>
@@ -1036,26 +1099,30 @@ def send_pro_welcome_email(to: str, trial_end_at, dashboard_url: str = "") -> bo
       {cta}
       <p style="font-size:13px;color:rgba(255,255,255,.55)">Pra cancelar antes do fim do trial, é só mandar <strong>cancelar plano</strong> no bot ou acessar <a href="{dash}/conta">{dash}/conta</a>.</p>
     """
-    html = _base_html("Bem-vindo ao PigBank+", content)
+    html = _base_html(f"Bem-vindo ao {nome}", content)
     text = (
-        f"PigBank+ ativado!\n\n"
+        f"{nome} ativado!\n\n"
         f"Sua assinatura começou. 15 dias grátis até {trial_end} — só tem cobrança depois.\n\n"
         f"Abra o dashboard: {dash}/app\n"
         f"Pra cancelar antes: mande 'cancelar plano' no bot ou acesse {dash}/conta"
     )
     return send_email(
-        to=to, subject="🐷 Tá dentro do PigBank+!",
+        to=to, subject=f"🐷 Tá dentro do {nome}!",
         html_body=html, text_body=text,
     )
 
 
-def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> bool:
-    """E-mail 3 dias antes do trial acabar (item 38)."""
+def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:
+    """E-mail 3 dias antes do trial acabar (item 38).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`.
+    """
+    nome = plan_display_name(plan)
     trial_end = _fmt_brl_date(trial_end_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Oi, parceiro.</p>
-      <p>Seu trial do PigBank+ termina em <strong>3 dias</strong> ({trial_end}).
+      <p>Seu trial do {nome} termina em <strong>3 dias</strong> ({trial_end}).
       Na sequência, a primeira cobrança vai entrar automaticamente no cartão que você cadastrou.</p>
       <p>Se tá curtindo, não precisa fazer nada — só relaxar e seguir usando.</p>
       <p>Se mudou de ideia, sem stress: manda <strong>cancelar plano</strong> no bot até {trial_end} e
@@ -1066,25 +1133,32 @@ def send_trial_ending_email(to: str, trial_end_at, dashboard_url: str = "") -> b
     """
     html = _base_html("Seu trial termina em 3 dias", content)
     text = (
-        f"PigBank+ — trial termina em 3 dias ({trial_end}).\n\n"
+        f"{nome} — trial termina em 3 dias ({trial_end}).\n\n"
         f"Pra continuar: não precisa fazer nada, a cobrança entra automaticamente.\n"
         f"Pra cancelar sem ser cobrado: mande 'cancelar plano' no bot até {trial_end}.\n\n"
         f"Gerenciar: {dash}/conta"
     )
     return send_email(
-        to=to, subject="🐷 Seu trial PigBank+ termina em 3 dias",
+        to=to, subject=f"🐷 Seu trial {nome} termina em 3 dias",
         html_body=html, text_body=text,
     )
 
 
-def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard_url: str = "") -> bool:
-    """E-mail de confirmação de cobrança após o trial (item 39)."""
+def send_pro_charged_email(to: str, plan: str, amount_brl: float, next_charge_at,
+                           dashboard_url: str = "") -> bool:
+    """E-mail de confirmação de cobrança após o trial (item 39).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`. É o
+    e-mail de maior volume da família: dizia "Seu PigBank+ tá renovado" em toda
+    cobrança, inclusive nas de Essencial e de Pro.
+    """
+    nome = plan_display_name(plan)
     valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     proxima = _fmt_brl_date(next_charge_at)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Cobrança confirmada — valeu por continuar com a gente!</p>
-      <p>Seu PigBank+ tá renovado. Detalhes da cobrança:</p>
+      <p>Seu {nome} tá renovado. Detalhes da cobrança:</p>
       <ul>
         <li><strong>Valor:</strong> {valor}</li>
         <li><strong>Próxima cobrança:</strong> {proxima}</li>
@@ -1092,43 +1166,119 @@ def send_pro_charged_email(to: str, amount_brl: float, next_charge_at, dashboard
       <p>Sua nota fiscal e histórico de pagamentos ficam no portal Stripe — abra em <a href="{dash}/conta">{dash}/conta</a>.</p>
       <p>Qualquer dúvida, é só responder este email ou usar <strong>ajuda</strong> no bot.</p>
     """
-    html = _base_html("Pagamento confirmado — PigBank+", content)
+    html = _base_html(f"Pagamento confirmado — {nome}", content)
     text = (
-        f"PigBank+ renovado.\n\n"
+        f"{nome} renovado.\n\n"
         f"Valor: {valor}\n"
         f"Próxima cobrança: {proxima}\n\n"
         f"Histórico de pagamentos: {dash}/conta"
     )
     return send_email(
-        to=to, subject=f"✓ Pagamento confirmado — PigBank+ ({valor})",
+        to=to, subject=f"✓ Pagamento confirmado — {nome} ({valor})",
         html_body=html, text_body=text,
     )
 
 
-def send_payment_failed_email(to: str, dashboard_url: str = "") -> bool:
-    """E-mail quando pagamento falha — Stripe vai retentar (item 40)."""
+def send_pix_paid_email(to: str, plan: str, amount_brl: float, access_starts_at,
+                        access_expires_at, dashboard_url: str = "") -> bool:
+    """Confirmação da compra Pix ANUAL (§8.2, efeito `email`).
+
+    Não reusa `send_pro_charged_email` por causa de duas frases que ficariam
+    mentindo para quem pagou por Pix: "próxima cobrança" (não há — o Pix anual
+    não renova sozinho) e "portal Stripe" (o cliente não tem um). O que muda é o
+    TEXTO; o transporte, o layout e o `send_email` são os mesmos.
+
+    `plan` existe porque o e-mail dizia "PigBank+" para todo mundo — quem pagou
+    Essencial ou Pro recebia o nome de outro plano no assunto e no corpo. Ele é
+    a coluna `plan` da cobrança crua, ou seja o valor LEGADO (`essencial`,
+    `pro` = Plus, `pro_max` = Pro) — ver `PLAN_DISPLAY_NAMES`, que desde a #351
+    serve também os e-mails do Stripe.
+    `access_starts_at` no futuro é a compra AGENDADA (quem já tinha plano
+    vigente): o ano só começa quando o período atual terminar, e prometer acesso
+    imediato ali é a mesma mentira de outro jeito.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    nome = plan_display_name(plan)
+    # Naive vira UTC antes de comparar, do mesmo jeito que o `_fmt_brl_date`
+    # logo acima faz com ESTE MESMO valor: a coluna é `timestamptz` e hoje só
+    # chega aware, mas comparar aware com naive levanta `TypeError` DENTRO do
+    # efeito `email` — e aí o efeito nunca é registrado, o drain retenta para
+    # sempre e o cliente que pagou fica sem confirmação nenhuma.
+    _inicio = access_starts_at
+    if getattr(_inicio, "tzinfo", "") is None:
+        _inicio = _inicio.replace(tzinfo=_tz.utc)
+    agendado = _inicio is not None and _inicio > _dt.now(_tz.utc)
+    valor = f"R$ {amount_brl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    ate = _fmt_brl_date(access_expires_at)
+    de = _fmt_brl_date(access_starts_at)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    abertura = (f"Seu {nome} tá garantido — o ano começa quando o plano atual terminar."
+                if agendado else f"Seu {nome} tá liberado.")
+    inicio_li = f"<li><strong>Acesso a partir de:</strong> {de}</li>" if agendado else ""
+    content = f"""
+      <p>🐷✨ <strong>Pagamento confirmado!</strong> {abertura}</p>
+      <ul>
+        <li><strong>Valor pago:</strong> {valor}</li>
+        {inicio_li}
+        <li><strong>Acesso até:</strong> {ate}</li>
+      </ul>
+      <p>É um plano anual pago por Pix: <strong>não tem renovação automática</strong> e não tem cartão
+      cadastrado. A gente te avisa por e-mail antes de acabar.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">🐷 Abrir meu dashboard</a></p>
+      <p>Qualquer dúvida, é só responder este email ou usar <strong>ajuda</strong> no bot.</p>
+    """
+    html = _base_html(f"Pagamento confirmado — {nome}", content)
+    text = (
+        f"{abertura}\n\n"
+        f"Valor pago: {valor}\n"
+        + (f"Acesso a partir de: {de}\n" if agendado else "")
+        + f"Acesso até: {ate}\n\n"
+        f"Plano anual por Pix, sem renovação automática.\n{dash}/app"
+    )
+    return send_email(
+        to=to, subject=f"✓ Pagamento confirmado — {nome} anual ({valor})",
+        html_body=html, text_body=text,
+    )
+
+def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = "") -> bool:
+    """E-mail quando pagamento falha — Stripe vai retentar (item 40).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`. Vem do
+    price da assinatura que o ramo do webhook JÁ tinha em mão (o
+    `Subscription.retrieve` que decide se o evento é obsoleto), e é `None` na
+    fatura AVULSA, que não tem assinatura de onde tirar plano: ali sai o
+    genérico "PigBank", como no `send_payment_reminder_email` logo abaixo.
+
+    DÍVIDA DE COPY, deliberadamente não tocada aqui: o texto promete que o
+    plano "volta pra Free", e plano Free não existe mais no produto. É decisão
+    de produto (o que acontece hoje com quem não paga), não erro de nome — quem
+    trouxer a regra reescreve as duas copies, esta e a do
+    `send_subscription_canceled_email`.
+    """
+    nome = plan_display_name(plan)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Opa, tivemos um problema.</p>
-      <p>A cobrança do seu PigBank+ <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
+      <p>A cobrança do seu {nome} <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
       ou banco recusando a transação.</p>
       <p>Não se preocupa — a gente vai tentar de novo automaticamente nos próximos dias. Mas pra evitar perder o
-      acesso aos recursos Pro, vale dar uma olhada agora:</p>
+      acesso aos recursos do seu plano, vale dar uma olhada agora:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
       </p>
       <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso, seu plano fica como <strong>past_due</strong>.
-      Se as tentativas falharem, ele volta pra Free e os recursos Pro são bloqueados.</p>
+      Se as tentativas falharem, ele volta pra Free e os recursos do plano são bloqueados.</p>
     """
     html = _base_html("Pagamento falhou — atualize seu cartão", content)
     text = (
-        f"PigBank+ — pagamento falhou.\n\n"
+        f"{nome} — pagamento falhou.\n\n"
         f"Vamos tentar de novo automaticamente, mas pra evitar perder acesso:\n"
         f"Atualize o cartão em {dash}/conta\n\n"
         f"Se as tentativas falharem, o plano volta pra Free."
     )
     return send_email(
-        to=to, subject="⚠️ PigBank+ — pagamento falhou, atualize seu cartão",
+        to=to, subject=f"⚠️ {nome} — pagamento falhou, atualize seu cartão",
         html_body=html, text_body=text,
     )
 
@@ -1169,8 +1319,19 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     )
 
 
-def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "") -> bool:
-    """E-mail de confirmação de cancelamento (item 41)."""
+def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
+                                     dashboard_url: str = "") -> bool:
+    """E-mail de confirmação de cancelamento (item 41).
+
+    `plan` é o valor LEGADO da coluna `plan` — ver `PLAN_DISPLAY_NAMES`. Sai do
+    price da própria Subscription que o `customer.subscription.deleted` entrega,
+    e NÃO da conta: o `update_user_plan(user_id, "free", None)` do ramo roda
+    antes deste e-mail, então ler a conta devolveria "free" para todo mundo.
+
+    DÍVIDA DE COPY, deliberadamente não tocada aqui: a mesma promessa de volta
+    ao "Free" do `send_payment_failed_email` — ver a docstring de lá.
+    """
+    nome = plan_display_name(plan)
     has_grace = expires_at is not None
     fim = _fmt_brl_date(expires_at) if has_grace else None
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1178,23 +1339,23 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
 
     if has_grace:
         access_html = (
-            f"<p>Tudo certo — você continua com acesso aos recursos Pro <strong>até {fim}</strong>. "
-            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites Pro são desativados.</p>"
+            f"<p>Tudo certo — você continua com acesso aos recursos do seu plano <strong>até {fim}</strong>. "
+            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites do plano são desativados.</p>"
             f"<p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
         access_text = (
-            f"Você mantém acesso aos recursos Pro até {fim}. Depois disso, a conta volta pra Free."
+            f"Você mantém acesso aos recursos do seu plano até {fim}. Depois disso, a conta volta pra Free."
         )
     else:
         access_html = (
             "<p>Tudo certo — sua conta voltou pro plano <strong>Free</strong> a partir de agora. "
-            "Os limites Pro foram desativados.</p>"
+            "Os limites do plano foram desativados.</p>"
             "<p>Se mudar de ideia, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
-        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites Pro foram desativados."
+        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites do plano foram desativados."
 
     content = f"""
-      <p>🐷 Sua assinatura PigBank+ foi cancelada.</p>
+      <p>🐷 Sua assinatura {nome} foi cancelada.</p>
       {access_html}
       <p>Valeu por ter dado uma chance pra gente. Se quiser contar o que faltou ou poderia melhorar,
       responde este email ou escreve pra <a href="mailto:{support_email}">{support_email}</a> — leitura garantida.</p>
@@ -1202,14 +1363,128 @@ def send_subscription_canceled_email(to: str, expires_at, dashboard_url: str = "
         <a class="btn" href="{dash}/app">Abrir o dashboard</a>
       </p>
     """
-    html = _base_html("Assinatura cancelada — PigBank+", content)
+    html = _base_html(f"Assinatura cancelada — {nome}", content)
     text = (
-        f"PigBank+ cancelado.\n\n"
+        f"{nome} cancelado.\n\n"
         f"{access_text}\n\n"
         f"Mudou de ideia? Mande 'assinar plano' no bot.\n\n"
         f"Dúvidas ou feedback? Responde este email ou escreve pra {support_email} — leitura garantida."
     )
     return send_email(
-        to=to, subject="PigBank+ — assinatura cancelada",
+        to=to, subject=f"{nome} — assinatura cancelada",
+        html_body=html, text_body=text,
+    )
+
+
+def send_free_plan_sunset_email(to: str, corte, dashboard_url: str = "",
+                                cobranca_pendente: bool = False) -> bool:
+    """Aviso de que o acesso Grátis termina na DATA DO CORTE.
+
+    Disparado à mão por `scripts/aviso_fim_do_gratis.py`, antes de a regra de
+    acesso entrar no ar (o merge daquele PR é o evento de corte, porque o
+    Railway faz deploy da `main`). Vai para quem tem acesso HOJE e não terá
+    depois — quem já está barrado pela escolha de plano não recebe.
+
+    **TRANSACIONAL, no molde de `send_payment_failed_email` e
+    `send_subscription_canceled_email`: sem `make_unsub_url` e sem
+    `unsub_headers`.** Quem desligou os e-mails do Piggy desligou dicas e
+    insights (`engagement_opt_out` é derivado de `tip_email_opt_out AND
+    insight_email_opt_out`, `db/reports.py`), e o bot lhe prometeu que "os
+    emails de segurança continuam normais" (`core/intent_router.py`). Ninguém
+    consentiu em abrir mão do aviso de que o serviço acaba.
+
+    **SEM promessa de trial**, e isso é requisito medido, não estilo: o trial é
+    de 15 dias por TELEFONE, na vida (`db/plans.py::claim_trial_for_user`), e
+    esta lista tem ex-assinante que já o usou. Prometer "teste 15 dias grátis"
+    a quem não pode mais tê-lo é copy falsa.
+
+    **DOIS COORTES, e `cobranca_pendente` é o que os separa.** A população do
+    aviso não é só gente no Grátis: entra também quem tem assinatura VIVA na
+    Stripe com o cartão recusado há mais que a carência (o smart retry vai a
+    ~3 semanas) e o período pago já vencido. Chamar essa conta de "plano
+    Grátis" é falso e contradiz os dois e-mails que ela já recebeu (falha de
+    pagamento e lembrete de cobrança) — então a frase da situação e o CTA
+    mudam: para ela o caminho é atualizar o cartão, não escolher um plano.
+    Quem passa o flag é `scripts/aviso_fim_do_gratis.py`, com leitura fresca
+    de `db.dunning.ciclo_de_atraso_aberto` no ponto do envio.
+    """
+    data = _fmt_brl_date(corte)
+    dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
+    # Preço E frase de valor só na coorte Grátis (decisão do dono, 2026-09-10):
+    # quem tem cobrança pendente já COMPROU o plano — está inadimplente, não
+    # indecisa. Pitch de produto quando a ação dela é atualizar o cartão é o
+    # mesmo desconforto que tirou a palavra "Grátis" da mensagem dela, e menos
+    # superfície de marketing reforça o caráter transacional deste e-mail.
+    pitch_html = pitch_text = ""
+    if cobranca_pendente:
+        situacao_html = ("A cobrança da sua assinatura <strong>não passou</strong> "
+                         "e o período que você já pagou venceu")
+        situacao_text = ("A cobranca da sua assinatura nao passou e o periodo que "
+                         "voce ja pagou venceu")
+        acao_html, acao_text = "Atualizar cartão", "Atualize o cartao"
+        destino = f"{dash}/conta"
+    else:
+        situacao_html = ("Sua conta hoje está no plano <strong>Grátis</strong> "
+                         "(ou sem plano ativo)")
+        situacao_text = "Sua conta hoje esta no plano Gratis (ou sem plano ativo)"
+        acao_html, acao_text = "Ver os planos", "Escolha um plano"
+        destino = f"{dash}/precos"
+        # Preço DERIVADO do anual (§0.7): o mensal só existe na
+        # `frontend/precos.html` (markup e script, as duas metades); o anual é
+        # constante em código, atada às duas metades daquela página por teste.
+        # `min` para o "a partir de" não cravar qual plano é o mais barato —
+        # ATENÇÃO: `PRECOS_ANUAIS_CENTS` é o que a rota do PIX vende, e este
+        # e-mail linka para a página do CARTÃO; plano que saia de linha só no
+        # cartão continua entrando neste `min`.
+        # Import local como o resto do arquivo — `pix_pricing` arrasta
+        # `billing_access` → `db.connection`, e o topo aqui não importa banco.
+        from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
+        from utils_text import fmt_brl
+        _anual_cents = min(PRECOS_ANUAIS_CENTS.values())
+        _anual, _mensal = fmt_brl(_anual_cents / 100), fmt_brl(_anual_cents / 12 / 100)
+        # "no plano anual" com todas as letras: a `/precos` abre em Mensal e não
+        # lê `?cycle=`, então quem clicar vê o preço mensal avulso.
+        pitch_html = (
+            "\n      <p>Com um plano ativo, o Piggy registra seus gastos por "
+            "texto, áudio e foto de cupom no WhatsApp, com boletos, caixinhas e "
+            "cartões sem limite.</p>"
+            f"\n      <p>Planos a partir de {_anual}/ano — {_mensal} por mês "
+            "no plano anual.</p>")
+        pitch_text = (
+            "\nCom um plano ativo, o Piggy registra seus gastos por texto, "
+            "audio e foto de cupom no WhatsApp, com boletos, caixinhas e "
+            "cartoes sem limite.\n\n"
+            f"Planos a partir de {_anual}/ano — {_mensal} por mes no plano "
+            "anual.\n\n")
+    content = f"""
+      <p>🐷 Oi! Preciso te contar uma mudança importante.</p>
+      <p>A partir de <strong>{data}</strong>, o PigBank passa a funcionar
+      <strong>só para assinantes</strong>. {situacao_html}, então nessa data o
+      <strong>Piggy no WhatsApp</strong> e o <strong>dashboard</strong> param
+      de responder.</p>
+      <p>Seus dados continuam guardados — nada é apagado. Para não ter
+      interrupção, resolva antes de {data}:</p>{pitch_html}
+      <p style="text-align:center;margin:24px 0">
+        <a class="btn" href="{destino}">{acao_html}</a>
+      </p>
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Se sua assinatura
+      já estiver ativa quando você ler isto, pode ignorar este email: quem está
+      com plano ativo não é afetado.</p>
+    """
+    html = _base_html(f"Seu acesso ao PigBank termina em {data}", content)
+    text = (
+        f"PigBank — seu acesso termina em {data}.\n\n"
+        f"A partir de {data} o PigBank passa a funcionar so para assinantes. "
+        f"{situacao_text}, entao nessa data o Piggy no WhatsApp e o dashboard "
+        "param de responder.\n\n"
+        "Seus dados continuam guardados — nada e apagado. Para nao ter "
+        f"interrupcao, resolva antes de {data}:\n"
+        f"{pitch_text}"
+        f"{acao_text}: {destino}\n\n"
+        "Se sua assinatura ja estiver ativa quando voce ler isto, pode ignorar "
+        "este email: quem esta com plano ativo nao e afetado."
+    )
+    return send_email(
+        to=to, subject=f"🐷 PigBank — seu acesso termina em {data}",
         html_body=html, text_body=text,
     )

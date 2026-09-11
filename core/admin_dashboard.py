@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from slowapi.util import get_remote_address
+from starlette.requests import ClientDisconnect
 
 from config.env import load_app_env
 
@@ -156,7 +157,16 @@ async def log_auth_login_event(
     failure_reason: str | None = None,
 ):
     try:
-        normalized_email = (email or "").strip().lower() or None
+        # Mesmo mecanismo do `log_system_event` 50 linhas abaixo (issue #357):
+        # NUL/surrogate em QUALQUER campo `text` recusa o INSERT inteiro e o
+        # `except` no fim engole — a linha de auditoria some sem 500 e sem
+        # rastro. Aqui é pior: `auth_login_events` é a trilha de tentativa de
+        # login, e o vetor vivo é o `email` do corpo JSON de `/auth/login`
+        # (`LoginBody.email` é `str` puro, sem `EmailStr`).
+        # O e-mail é saneado ANTES de cifrar, senão a coluna clara e a
+        # `email_enc` guardariam valores diferentes — e `encrypt_pii` faz
+        # `.encode("utf-8")`, que estoura com surrogate solitário.
+        normalized_email = limpa_para_pg((email or "").strip().lower()) or None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -167,7 +177,8 @@ async def log_auth_login_event(
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (user_id, normalized_email, encrypt_pii_optional(normalized_email),
-                     success, ip_address, user_agent, failure_reason),
+                     success, limpa_para_pg(ip_address), limpa_para_pg(user_agent),
+                     limpa_para_pg(failure_reason)),
                 )
             await conn.commit()
         # A09 — spike de falha de login: agenda a detecção FORA desta transação
@@ -201,7 +212,9 @@ async def log_system_event(
                     INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (level, event_type, message[:1000], source, user_id, Jsonb(details or {})),
+                    (limpa_para_pg(level), limpa_para_pg(event_type),
+                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(details or {}))),
                 )
             await conn.commit()
     except Exception as exc:
@@ -1556,6 +1569,15 @@ async def admin_error_logging_middleware(request: Request, call_next):
         return await call_next(request)
     except HTTPException:
         raise
+    except ClientDisconnect:
+        # Cliente sumiu antes de mandar o corpo (rede móvel caindo no meio de um
+        # upload). Não é erro do servidor: 499 e NENHUM evento — o uvicorn já
+        # descartou a resposta (`if self.disconnected: return` em
+        # RequestResponseCycle.send), e gravar poluiria o feed de erro do painel
+        # com um evento por cliente que some. O `except` carrega 100% do
+        # diagnóstico: a mensagem é sempre a mesma constante.
+        _admin_log.info("client disconnect: %s %s", request.method, request.url.path)
+        return Response(status_code=499)
     except Exception as exc:
         import traceback
         tb_str = traceback.format_exc()

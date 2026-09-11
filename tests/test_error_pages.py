@@ -5,6 +5,8 @@ Os asserts de `Accept: text/html` são a medição (falham sem a correção); os
 """
 
 import asyncio
+import hashlib
+import hmac
 import html as html_lib
 import json
 import logging
@@ -16,10 +18,14 @@ import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
+import adapters.whatsapp.wa_app as wa_app
 import core.admin_dashboard as admin_dashboard
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.shared as shared
+# PAYLOAD_META e SEGREDO vêm de lá para não virar segunda fonte da mesma
+# constante (CLAUDE.md §0.7); o helper `_wa_webhook` de lá fica intocado.
+from test_wa_webhook_signature import PAYLOAD_META, SEGREDO
 
 HTML = {"Accept": "text/html,application/xhtml+xml"}
 
@@ -200,6 +206,97 @@ def test_500_html_na_navegacao_json_na_api_e_log_preservado(monkeypatch, boom_ro
     assert "accept" in _vary_values(response)
     assert len(logged) == 1
     assert logged[0][0][1] == "http_unhandled_exception"
+
+
+# ─── 499 (cliente some antes de mandar o corpo) ──────────────────────────────
+# 9 rotas leem corpo cru e 5 ficam fora de qualquer try — o upload de OFX
+# autenticado (celular com sinal ruim) é o mais provável em produção, o webhook
+# da Meta é só um deles. O ponto comum das 5 é este middleware, então o grupo
+# mede aqui e não junto de uma rota específica. Antes: 500 + 1
+# `http_unhandled_exception` por cliente que some, poluindo o feed de erro do
+# painel com uma mensagem que é sempre a mesma constante.
+
+
+@pytest.fixture
+def rotas_de_corpo():
+    """Três rotas efêmeras no app REAL (mesmo middleware do boom_route): perder
+    o cliente lendo o corpo, quebrar de verdade, e responder 200."""
+    base = f"/__cd-{uuid.uuid4().hex}"
+
+    @dashboard.app.post(base + "/disconnect")
+    async def _disconnect(request: Request):
+        async def _receive():
+            return {"type": "http.disconnect"}
+
+        # ClientDisconnect vem do ponto REAL onde starlette a levanta
+        # (Request.stream(), o único do pacote), não de um `raise` sintético.
+        await Request(request.scope, _receive).body()
+        return {"inalcancavel": True}
+
+    @dashboard.app.post(base + "/bug")
+    async def _bug():
+        raise ValueError("bug de verdade")
+
+    @dashboard.app.post(base + "/ok")
+    async def _ok():
+        return {"ok": True}
+
+    yield base
+    dashboard.app.router.routes = [
+        r for r in dashboard.app.router.routes
+        if not (getattr(r, "path", "") or "").startswith(base)
+    ]
+
+
+@pytest.mark.parametrize("sufixo, status, eventos", [
+    pytest.param("/disconnect", 499, 0, id="cliente_sumiu"),
+    pytest.param("/bug", 500, 1, id="bug_de_verdade"),
+    pytest.param("/ok", 200, 0, id="rota_normal"),
+])
+def test_cliente_que_some_da_499_sem_evento_e_bug_de_verdade_segue_500(
+    monkeypatch, rotas_de_corpo, sufixo, status, eventos
+):
+    """Prova negativa: apagando o `except ClientDisconnect` de
+    admin_error_logging_middleware, o caso `cliente_sumiu` (verde hoje) fica
+    vermelho em status E em eventos. Os outros dois são o controle positivo — é
+    `bug_de_verdade` que mata o mutante "engole tudo e devolve 499 mudo", que
+    seria pior que o ruído que estamos removendo."""
+    logged = []
+
+    async def _spy(*args, **kwargs):
+        logged.append((args, kwargs))
+
+    monkeypatch.setattr(admin_dashboard, "log_system_event", _spy)
+
+    client = TestClient(dashboard.app, raise_server_exceptions=False)
+    response = client.post(rotas_de_corpo + sufixo, headers=_csrf_headers(client))
+
+    assert response.status_code == status
+    assert len(logged) == eventos
+
+
+def test_payload_da_meta_continua_enfileirado_pelo_app(monkeypatch):
+    """Controle positivo ponta a ponta: o 499 não pode ter custado o caminho
+    legítimo de quem mais lê corpo cru neste app. Vai pelo POST /webhook real,
+    com HMAC calculado de verdade e passando pelo MESMO middleware — o helper
+    `_wa_webhook` do outro arquivo chama o handler direto e pularia o
+    middleware, que é justamente o que mudou."""
+    corpo = json.dumps(PAYLOAD_META).encode()
+    monkeypatch.setattr(wa_app, "APP_SECRET", SEGREDO)
+    monkeypatch.setattr(wa_app, "log_system_event_sync", lambda *a, **k: None)
+    fila = asyncio.Queue(maxsize=500)
+    monkeypatch.setattr(wa_app, "_queue", fila)
+    digest = hmac.new(SEGREDO.encode(), corpo, hashlib.sha256).hexdigest()
+
+    response = TestClient(dashboard.app, raise_server_exceptions=False).post(
+        "/webhook",
+        content=corpo,
+        headers={"X-Hub-Signature-256": f"sha256={digest}"},
+    )
+
+    assert response.status_code == 200
+    assert fila.qsize() == 1
+    assert fila.get_nowait() == PAYLOAD_META
 
 
 # ─── 405 (Allow do exc.headers tem que sobreviver ao ramo HTML) ──────────────

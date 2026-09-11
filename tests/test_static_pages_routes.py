@@ -421,6 +421,10 @@ _401_RENOVAVEL = {
     ("frontend/routes/prospects.py", "prospect_status", "Chave inválida."): False,
     ("frontend/routes/open_finance.py", "open_finance_pluggy_webhook",
      "Não autorizado."): False,
+    # Webhook do gateway de Pix: mesma família do da Pluggy. Quem toma este 401
+    # é o provedor, não um navegador — não há sessão para renovar, e o
+    # `auth-refresh.js` nem roda do outro lado.
+    ("frontend/routes/billing_pix.py", "asaas_webhook", "Não autorizado."): False,
     # ── família C: 401 que o INTERCEPTOR nem alcança ──────────────────────────
     # Os dois do `POST /auth/refresh` (montados como `JSONResponse` porque o
     # `raise` descarta o Set-Cookie da limpeza, #175). O interceptor sai antes
@@ -688,3 +692,32 @@ def test_401_de_autenticacao_declara_familia():
         "classificado como True acima), atualize o 8 para o número novo. Se você "
         f"não mexeu em nenhum 401, alguém apagou um `headers=`: {com_header}"
     )
+
+
+def test_par_pix_sai_versionado_por_hash_do_conteudo():
+    """O par pix-poll/pix-checkout não pode divergir de versão entre si.
+
+    Antes do #361 quem CHAMAVA `pixModalJaPago` e quem a DEFINIA moravam no
+    mesmo arquivo — não havia como divergir. Agora a chamada está no
+    pix-checkout.js e a definição no pix-poll.js, e o service worker busca e faz
+    fallback de cada asset de forma independente (frontend/service-worker.js:111).
+    Um cliente com o pix-poll.js VELHO em cache e o pix-checkout.js novo chamaria
+    um handler que não existe.
+
+    Quem fecha isso é o `stamp_asset_versions`: o `?v=1` literal da precos.html
+    NUNCA chega ao navegador — sai o hash do conteúdo, e os dois arquivos mudam
+    juntos neste commit. `caches.match` casa a URL INTEIRA (query incluída), então
+    a entrada velha deixa de ser consultada. Não há bump manual a fazer.
+
+    Vermelho se alguém referenciar a URL nua (ou com `?v=` não-numérico, que o
+    `_ASSET_VER_RE` não casa) — aí o cache-buster morre e a divergência volta.
+    """
+    html = client.get("/precos").text
+    for nome in ["pix-poll.js", "pix-checkout.js"]:
+        esperado = _asset_hash(nome, (FRONTEND_DIR / nome).stat().st_mtime_ns)
+        m = re.search(rf"/{re.escape(nome)}\?v=([0-9a-f]{{12}})\b", html)
+        assert m, f"/{nome} sai sem hash na /precos — o cache velho continua valendo"
+        assert m.group(1) == esperado, nome
+    # E o literal do arquivo não vaza: `?v=1` seria a MESMA chave de cache de antes.
+    assert "/pix-poll.js?v=1\"" not in html
+    assert "/pix-checkout.js?v=1\"" not in html

@@ -98,16 +98,19 @@ def _format_plan_expires(expires_at) -> str:
 
 
 def _handle_assinar(user_id: int, platform: str) -> str:
+    from core.services.email_service import plan_display_name
     from core.services.plan_service import is_pro
     from db import get_auth_user
 
     if is_pro(user_id):
         user = get_auth_user(user_id)
         expires = _format_plan_expires((user or {}).get("plan_expires_at"))
+        # #351 no bot: `pro_max` (PigBank Pro) lia "PigBank+" aqui, sem gate de v2.
+        nome = plan_display_name((user or {}).get("plan"))
         link = build_dashboard_link(user_id, hours=1.0, next_path="/conta") or "https://pigbankai.com/conta"
         b = lambda s: _bold(s, platform)
         return (
-            f"🐷 Você já tá no {b('PigBank+')}!\n\n"
+            f"🐷 Você já tá no {b(nome)}!\n\n"
             f"Próxima renovação: {b(expires)}\n\n"
             f"Pra ver detalhes ou cancelar:\n{link}"
         )

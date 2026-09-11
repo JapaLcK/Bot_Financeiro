@@ -57,6 +57,11 @@ fastapi==0.141.1
 # declara `starlette>=0.46.0` SEM teto, entao o pin exato e nosso: sem ele, uma
 # resolucao limpa sobe de major sozinha.
 starlette==1.6.0
+# `await request.form()` no upload de OFX (frontend/finance_bot_websocket_custom.py:6911).
+# A starlette so declara python-multipart no extra `full` (nao instalado aqui), entao
+# sem esta linha a rota /ofx/import/{user_id} da 500 com AssertionError em producao —
+# foi o que aconteceu no deploy 7a9dc67d (issue #375). Piso da starlette 1.6.0: >=0.0.18.
+python-multipart==0.0.32
 uvicorn[standard]==0.52.4
 websockets==17.1
 slowapi==0.1.10

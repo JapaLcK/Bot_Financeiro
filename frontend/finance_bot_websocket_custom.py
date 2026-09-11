@@ -109,6 +109,7 @@ from db import (
 from core.observability import _log_falha, get_logger
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
+from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
@@ -1965,6 +1966,52 @@ async def lifespan(app: FastAPI):
                 print(f"[plan_grants] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(60)
 
+    async def _pix_worker():
+        """O laço do Pix: dreno a cada 60 s, saga + purga de retenção a cada 24 h.
+
+        Molde do `_plan_grants_reprojection` logo acima — 60 s + 24 h —, e pelo
+        mesmo motivo: as duas passadas medem coisas diferentes.
+
+        • **60 s, o dreno.** O `background_tasks` do handler é o caminho rápido;
+          este é o que RECUPERA — processo reiniciado no meio, efeito que
+          levantou, evento que chegou enquanto o worker morria. Ele chama o
+          SERVIÇO e não o `db/` do Pix: o portão de import mede o primeiro salto
+          produção → Pix, e este arquivo na allowlist apagaria a propriedade.
+        • **24 h, a reconciliação (§10.1).** Ela fala com o Asaas por linha, e é
+          por isso que não roda a cada minuto. Nada aqui apaga por relógio: a
+          idade só decide quando perguntar.
+        • **24 h, a purga de retenção (§13.2 + §13.3).** `RETENCAO_OUTBOX_DIAS`
+          e a re-zeragem do rastreio órfão só existem se ALGUÉM as chamar — a
+          função sem chamador é o defeito que já custou a poda das três tabelas
+          (`core/services/table_cleanup.py`). Ela zera coluna, não apaga linha.
+
+        As três varreduras do §14 item 13 (e-mail de fim de anual, cancelamento
+        aos 60 d, retenção POR PRAZO) ficaram para a issue #329.
+        """
+        from core.services.pix_sweeps import (  # noqa: PLC0415
+            drenar_pendentes, purgar_retencao, reconciliar_saga,
+        )
+        proxima_saga = datetime.now(timezone.utc)   # 1ª volta já reconcilia
+        while True:
+            try:
+                n = await asyncio.to_thread(drenar_pendentes)
+                if n:
+                    print(f"[pix] {n} evento(s) drenado(s).", flush=True)
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_saga:
+                    proxima_saga = agora + timedelta(hours=24)
+                    conta = await asyncio.to_thread(reconciliar_saga)
+                    if any(conta.values()):
+                        print(f"[pix] reconciliacao: {conta}", flush=True)
+                    purgadas = await asyncio.to_thread(purgar_retencao)
+                    if any(purgadas.values()):
+                        print(f"[pix] purga de retencao: {purgadas}", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[pix] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
     async def _account_deletion_worker():
         while True:
             try:
@@ -2059,6 +2106,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
                 asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
+                asyncio.create_task(_pix_worker(), name="pix_worker"),
             ]
         )
     else:
@@ -2101,6 +2149,12 @@ CSRF_EXEMPT_PATHS = {
     # Consulta do lead engine: server-to-server, sem cookie de sessão —
     # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
     "/api/prospect/status",
+    # Webhook do gateway de Pix: server-to-server, autenticado por header
+    # (frontend/routes/billing_pix.py). É o ÚNICO path do Pix aqui —
+    # `/billing/pix/checkout` e o poll são do navegador logado, com cookie e
+    # token de CSRF, e isenção que não é necessária é privilégio esquecido.
+    # `tests/test_pix_rota_registrada.py` prende essa unicidade.
+    "/billing/asaas/webhook",
 }
 
 _SECURITY_HEADERS = {
@@ -4094,7 +4148,13 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
+    # Sem default de plano: ausente ou vazio é 400 na rota, nunca uma compra de
+    # Plus em silêncio (o default histórico era `"plus"`, issue #352). O `""`
+    # faz a chave AUSENTE cair no mesmo 400 `plan inválido` da vazia, em vez de
+    # num 422 cujo `detail` é lista — o porquê está na docstring da rota. O Pix,
+    # com `plan: str`, dá 422 na ausente: anotado em
+    # `tests/test_vocabulario_de_plano.py`.
+    plan: str = ""             # "essencial" | "plus" | "pro"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4171,6 +4231,17 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             status_code=409,
             detail={"error": "lifetime",
                     "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
+        )
+
+    # Pix → Stripe NÃO tem fluxo (§9): quem já pagou o ano à vista assinando no
+    # cartão pagaria o mesmo período duas vezes, e não há como "creditar" para
+    # dentro do Stripe. A recusa é a resposta, e ela vem ANTES de qualquer
+    # criação de customer — o caminho de volta é esperar o anual acabar.
+    if await asyncio.to_thread(_grant_pix_vigente, user_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "pix_active",
+                    "message": "Você já tem o plano anual pago no Pix. Ele vale até o fim do período — depois disso dá pra assinar no cartão."},
         )
 
     customer_id = user.get("stripe_customer_id")
@@ -4371,6 +4442,7 @@ async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
     layout legado de plano único. Flag off = página atual intacta."""
+    from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
         "plans_v2_enabled": plans_v2_enabled(),
@@ -4379,6 +4451,11 @@ async def billing_plans_config():
                                or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
+        # A flag vem de uma FUNÇÃO, e não de `os.getenv` aqui:
+        # `tests/test_pix_destino_inerte.py` é textual e proíbe o nome da env
+        # fora dos módulos do Pix. Ele está fazendo trabalho real — a flag mora
+        # com quem a obedece.
+        "pix_annual_available": pix_annual_available(),
     }
 
 
@@ -4389,16 +4466,44 @@ async def billing_create_checkout(
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
-    """
-    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    """Cria a sessão de checkout no Stripe para o plano escolhido.
+
+    Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
+           "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+
+    `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
+    (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos
+    (`precos.html:1019-1024`) só lê `detail` string ou `detail.message` — cai no
+    fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
+    `| None = None` o POST sem body nenhum nem instancia o modelo.
+
+    Cliente antigo (`startCheckout('monthly', this)`, sem plano) morreu em
+    `0a37439` e a partir daqui leva 400. Sobra a aba com a /precos ANTIGA aberta
+    no instante do deploy — o 400 vira o erro do próprio `startCheckout` e um
+    reload resolve; não há /precos velha em cache (`no-store` em
+    `frontend/routes/shared.py:266`, e o SW não intercepta navegação).
     """
-    interval = (payload.interval if payload else "monthly")
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Sem body, `payload` chega None (o modelo nem é instanciado). Não é caminho
+    # de sucesso: sem `plan` a validação abaixo recusa com 400.
+    payload = payload if payload is not None else CreateCheckoutBody()
+    # Expressão IDÊNTICA à da `/billing/change-plan`, a única outra rota que
+    # recebe `interval` (o Pix é anual e só): sem o `.lower()`, `"ANNUAL"` era
+    # 400 aqui e 409 lá. Sem `or "monthly"` nas duas: valor VAZIO é 400, e não
+    # uma venda mensal em silêncio — é a #352 com `interval` no lugar de `plan`.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = ((payload.plan if payload else "plus") or "plus").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Vocabulário público em UMA fonte (§0.7): as três rotas de plano validam
+    # contra o MESMO dicionário, e não contra uma tupla literal por rota. O
+    # `.strip().lower()` é o do gêmeo do Pix (`frontend/routes/billing_pix.py`) —
+    # sem ele `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando as duas.
+    # Sem plano é 400, não Plus (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
     price_id = _resolve_price_id(plan, interval)
@@ -4520,6 +4625,24 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     if (user.get("last_payment_status") or "") == "grandfathered":
         return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
                 "current_period_end": None, "scheduled_change": None}
+
+    # PIX ANTES DO STRIPE, e a ordem é o conteúdo (§14 item 12). Quem migrou do
+    # cartão fica com `stripe_customer_id` preenchido para sempre — perguntando
+    # ao Stripe primeiro, a tela de quem paga no Pix mostraria "Trocar de plano"
+    # e chamaria `/billing/change-plan`, que não tem assinatura para trocar.
+    # Grant Pix vigente é a resposta autoritativa: ele foi criado pelo dinheiro
+    # que entrou, e não depende de o Stripe estar de pé.
+    # `tier_publico` e não uma cópia local do `{"pro": "plus", ...}`: quem é dono
+    # do vocabulário é o `_STORED_PLAN_TO_TIER` do `plan_service` (§0.1/§0.7).
+    from core.services.plan_service import tier_publico
+
+    pix = await asyncio.to_thread(_grant_pix_vigente, user_id)
+    if pix is not None:
+        return {"active": True, "lifetime": False, "gateway": "pix",
+                "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
+                "current_period_end": pix["ends_at"].date().isoformat(),
+                "scheduled_change": None}
+
     cust = user.get("stripe_customer_id")
     if not STRIPE_SECRET_KEY or not cust:
         return {"active": False}
@@ -4566,8 +4689,29 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         except Exception:
             pass
 
-    return {"active": True, "lifetime": False, "plan": plan, "interval": interval,
-            "current_period_end": period_end_iso, "scheduled_change": scheduled}
+    return {"active": True, "lifetime": False, "gateway": "stripe", "plan": plan,
+            "interval": interval, "current_period_end": period_end_iso,
+            "scheduled_change": scheduled}
+
+
+def _grant_pix_vigente(user_id: int) -> dict | None:
+    """O grant `source='pix'` que sustenta o acesso, ou None. Síncrono.
+
+    Quem decide SE há cobertura é `grant_vigente` — a mesma função do
+    `projetar_grants` e do `payment_reminder`, para a janela semiaberta
+    `[starts_at, ends_at)` não ganhar uma terceira versão (§0.7). Havendo, o
+    escolhido é o que termina POR ÚLTIMO: com um downgrade Pix já agendado, o
+    fim da cobertura é o do grant futuro, e é isso que a tela mostra.
+    """
+    from core.services.billing_access import grant_vigente
+    from db.plan_grants import list_grants
+
+    agora = datetime.now(timezone.utc)
+    pix = [g for g in list_grants(user_id)
+           if g["source"] == "pix" and g["status"] == "active"]
+    if not grant_vigente(pix, agora):
+        return None
+    return max(pix, key=lambda g: g["ends_at"])
 
 
 @app.post("/billing/change-plan")
@@ -4579,11 +4723,19 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
-    interval = (payload.interval or "monthly").lower()
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
+    # únicas rotas que recebem `interval`, o `.lower()` faltava LÁ e o
+    # `or "monthly"` saiu daqui — `""` é 400 nas duas, não mensal em silêncio.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = (payload.plan or "").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Terceira rota que recebe plano: mesma normalização e o MESMO dicionário
+    # das duas de checkout (§2: um caso corrigido não é a categoria resolvida).
+    # Sem plano continua 400 — nunca houve `or "plus"` aqui (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     target_price = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not target_price:
@@ -4976,6 +5128,40 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
+        **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
+        Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
+        `invoice.paid` de planos diferentes no MESMO dia (upgrade
+        Essencial→Pro, que gera fatura proporcional na hora) deixam de ser
+        indistinguíveis: o segundo é suprimido pela chave que o primeiro gravou
+        e o cliente fica com "PigBank Essencial" para uma cobrança de Pro. Antes
+        do #351 os dois e-mails eram idênticos e suprimir era de graça.
+        ponytail: teto conhecido, deixado aberto DE PROPÓSITO — e o custo é
+        menor do que uma versão anterior deste comentário dizia. Ela alegava
+        que `chave` era lida de fora por
+        `recent_event_exists("trial_ending_email_sent", ...)` e pelos painéis.
+        Medido, é falso nas duas pontas, e quem for mexer aqui precisa saber:
+
+          · **não há leitor externo.** `chave` é `f"{fn.__name__}_sent"`, ou
+            seja `send_trial_ending_email_sent`. O `recent_event_exists` de
+            :5555 lê `trial_ending_email_sent` — outra string, gravada por
+            outro escritor (o `log_system_event` de :5566 e o
+            `engagement_scheduler.py:287`). Busca literal pelas quatro chaves
+            desta família em `*.py`/`*.js`/`*.sql`/`*.html`: zero ocorrências
+            fora de uma menção em docstring de teste.
+          · **nenhum painel usa.** `core/admin_dashboard.py:742-755` filtra
+            `event_type IN ('email_sent','email_failed')`, que saem do
+            `email_service.py:95` — outro evento; e os rótulos de
+            `frontend/admin-dashboard.html` não citam chave desta família.
+
+        Sobra de custo real: (a) a série histórica em `system_event_logs`
+        fragmenta — série que hoje nenhum consumidor consulta; e (b) a dedupe
+        deixa de significar "um e-mail desta função por janela" e passa a ser
+        "um por função E plano", o que solta um segundo e-mail quando o plano
+        muda dentro da janela longa do `send_payment_failed_email`. Fica como
+        está porque o caso é raro e o conserto não é de graça, não porque algo
+        quebre. Se o upgrade no mesmo dia virar volume: sufixo do plano na
+        `chave`, sem leitor nenhum para migrar junto.
+
         Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
@@ -5106,9 +5292,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     "status": sub_status,
                 },
             )
-            # Email de boas-vindas Pro (item 37)
+            # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
+            # acabou de ser gravado e logado acima (vocabulário legado, de
+            # `_stored_plan_for_price`): sem ele o e-mail chamava todo
+            # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -5295,7 +5484,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
-                await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
+                await _fire_email(user_id, send_pro_charged_email,
+                                  plan_value, amount_brl, expires_dt)
 
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
@@ -5404,8 +5594,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.observability import recent_event_exists
             if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
                 expires_dt = _subscription_period_end(sub)
+                # Mesma fonte do plano dos outros ramos (#351): o PRICE da
+                # assinatura, não o texto do e-mail. Quem está em trial de
+                # Essencial ou de Pro lia "seu trial do PigBank+".
+                plan_value = _stored_plan_for_price(_subscription_price_id(sub))
                 from core.services.email_service import send_trial_ending_email
-                await _fire_email(user_id, send_trial_ending_email, expires_dt)
+                await _fire_email(user_id, send_trial_ending_email,
+                                  plan_value, expires_dt)
                 await log_system_event(
                     "info",
                     "trial_ending_email_sent",
@@ -5452,6 +5647,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         _sub_id = _invoice_subscription_id(invoice)
         _status_agora = ""
+        _sub_agora = None
         if user_id and _sub_id:
             # `to_thread` porque este handler é `async` e roda no event loop
             # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
@@ -5540,9 +5736,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # deixavam o segundo mudo. Fora do ciclo novo vale
             # `DUNNING_GRACE_DAYS`: cada smart retry do MESMO ciclo cai na
             # janela e não vira um e-mail a mais.
+            #
+            # O PLANO vem do `retrieve` que este ramo JÁ fez para decidir se o
+            # evento é obsoleto — mesma fonte dos outros e-mails da família
+            # (#351). Sem ele, o assinante Essencial cujo cartão falha recebia
+            # "⚠️ PigBank+ — pagamento falhou". `None` quando `_sub_agora` é
+            # None, que é a fatura AVULSA (sem `subscription` em nenhuma das
+            # duas formas da API): ali não há assinatura de onde tirar plano, e
+            # `plan_display_name` devolve o genérico "PigBank".
+            _plano_falha = (_stored_plan_for_price(_subscription_price_id(_sub_agora))
+                            if _sub_agora is not None else None)
             from core.services.email_service import send_payment_failed_email
             await _fire_email(
-                user_id, send_payment_failed_email,
+                user_id, send_payment_failed_email, _plano_falha,
                 dedup_days=0.0 if _abriu_ciclo else float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
@@ -5632,14 +5838,28 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email de confirmacao de cancelamento (item 41)
+            # O plano sai do PRICE do `obj`, que é a própria Subscription do
+            # evento (#351) — e não da conta, porque o `update_user_plan(...,
+            # "free", None)` lá em cima já rodou e a conta diria "free" para
+            # todo mundo. Sem isto, quem cancelava Essencial lia "PigBank+ —
+            # assinatura cancelada".
+            _plano_cancelado = _stored_plan_for_price(_subscription_price_id(obj))
             from core.services.email_service import send_subscription_canceled_email
             try:
                 email = await _user_email(user_id)
                 if email:
-                    await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
+                    await asyncio.to_thread(send_subscription_canceled_email, email,
+                                            _plano_cancelado, expires_for_email,
+                                            DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email canceled falhou user={user_id}: {exc}")
             # Notificação admin
+            # DÍVIDA PRÉ-EXISTENTE, não deste PR: `email` só nasce se o
+            # `_user_email` acima RETORNAR. Se ele levantar, o except de cima
+            # engole e o `email=email` daqui vira `NameError` — engolido pelo
+            # except deste try, com a notificação admin sumindo calada. Mesma
+            # classe do `_sub_agora` que o #351 fechou dez linhas acima; fica
+            # anotado para não ser "descoberto" depois como defeito novo.
             try:
                 from core.services.admin_notify import notify_subscription_canceled
                 await asyncio.to_thread(
@@ -7802,6 +8022,18 @@ app.include_router(push_router)
 
 # ─── Onboarding (wizard de primeira configuração) → frontend/routes/onboarding.py ─
 app.include_router(onboarding_router)
+
+# ─── Pix anual (Asaas) → frontend/routes/billing_pix.py ──────────────────────
+# Registro INCONDICIONAL, e isso é requisito, não descuido: pôr a flag de venda
+# num `if os.getenv(...)` aqui passaria verde no portão
+# `tests/test_pix_rota_registrada.py`, que mede o app IMPORTADO e roda num CI
+# sem a env. A flag mora dentro do checkout (`pix_annual_available()`), onde ela
+# recusa a VENDA sem esconder a rota — e o webhook precisa responder mesmo com a
+# venda desligada, senão o provedor pausa a fila (caso 56 do §16).
+#
+# O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
+# é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
+app.include_router(billing_pix_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
