@@ -506,6 +506,17 @@ async def serve_dashboard_js():
     )
 
 
+@router.get("/launch-type-labels.js")
+async def serve_launch_type_labels_js():
+    """Fonte única dos rótulos de `tipo` de lançamento — dashboard.html e
+    home.html carregam o mesmo arquivo (CLAUDE.md §0.7)."""
+    return FileResponse(
+        FRONTEND_DIR / "launch-type-labels.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard-chat.js")
 async def serve_dashboard_chat_js():
     """Widget de chat IA (Piggy) do dashboard, extraído do inline."""

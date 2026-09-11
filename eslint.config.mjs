@@ -49,6 +49,15 @@ export default defineConfig([
     },
   },
   {
+    // Bloco PRÓPRIO pelo mesmo motivo do bloco abaixo: `LAUNCH_TYPE_LABELS` é
+    // `const` de topo de script clássico (frontend/launch-type-labels.js), vai
+    // para o escopo léxico global e NÃO vira propriedade de `window`.
+    files: ["frontend/dashboard.js"],
+    languageOptions: {
+      globals: { LAUNCH_TYPE_LABELS: "readonly" },
+    },
+  },
+  {
     // Bloco PRÓPRIO, e não nomes soltos no `frontend/**` acima: global
     // declarada lá enfraquece o `no-undef` do repositório INTEIRO — `showToast`
     // ou `getCsrfToken` escrito por engano num arquivo que não os carrega
@@ -214,7 +223,11 @@ export default defineConfig([
   },
 
   {
-    // Mesmo orçamento de tamanho para os testes, em "warn" (8 acima de 350).
+    // Mesmo orçamento de tamanho para os testes, em "warn". Quantos estouram
+    // hoje é comando, não fato de documentação (CLAUDE.md §2) — o número que
+    // morava aqui ("8 acima de 350") já estava errado antes deste bloco ser
+    // relido. Para remedir:
+    //   for f in tests/frontend/*.mjs; do wc -l "$f"; done | awk '$1>350'
     // Vem DEPOIS do bloco que liga a regra em "error": para um arquivo casado
     // pelos dois, o flat config aplica o bloco posterior por último.
     files: ["tests/frontend/**/*.mjs"],

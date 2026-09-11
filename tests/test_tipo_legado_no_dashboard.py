@@ -165,11 +165,16 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
 #
 # Query 4 de `get_financial_data` devolvia o `tipo` CRU para fora. Quem consome
 # `recent_launches` decide rótulo, cor, sinal e ícone com igualdade estrita:
-# home.html:944 imprime o cru ("Última atividade: saida"), :1094 não conta a
-# linha legada no onboarding, :1147 desenha a receita legada como DESPESA
-# (vermelho, sinal de menos, ícone de queda), e dashboard.js:7954/:8035/:8479
-# usam o cru como label. O conserto é `TIPO_CANON_SQL AS tipo` na projeção de
-# FORA — mesma decisão de db/analytics.py:784-791.
+# `renderOnboarding` (home.html) não conta a linha legada, `renderActivity`
+# desenha a receita legada como DESPESA (vermelho, sinal de menos, ícone de
+# queda), e `renderLaunches`/`_renderLaunchDetail`/`openEditLaunchModal`
+# (dashboard.js) usam o cru como label. Citados por símbolo, não por linha:
+# os 5 números que estavam aqui envelheceram sozinhos (CLAUDE.md §2).
+# O `#greeting-sub` (`renderGreeting`) saiu desta lista na issue 293 — passou a
+# ler o rótulo de frontend/launch-type-labels.js, e um `saida` legado cai no
+# fallback "Lançamento" em vez de sair cru.
+# O conserto é `TIPO_CANON_SQL AS tipo` na projeção de FORA — mesma decisão de
+# db/analytics.py:784-791.
 #
 # NÃO fecha o modal de detalhe inteiro: ele tem um SEGUNDO alimentador
 # (`_catLaunchesRows`, de `list_launches_by_category`), que segue cru — issue

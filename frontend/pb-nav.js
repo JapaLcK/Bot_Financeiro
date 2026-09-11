@@ -47,7 +47,7 @@
   //   - auth-refresh.js:84-86 (só UA PigBankApp; também liga PB_IN_APP)
   //   - app-mode.js:46 (decisão em :42 — UA PigBankApp OU PWA standalone)
   // Nas duas únicas páginas que carregam este arquivo os dois já executaram:
-  // home.html:455 (auth-refresh) e :458 (app-mode), antes do :459 daqui;
+  // home.html:455 (auth-refresh) e :459 (app-mode), antes do :460 daqui;
   // comandos-app.html:84 (app-mode, sem auth-refresh) antes do :85. Ou seja,
   // a classe pb-app já está no <html> quando esta linha executa — por isso o
   // gate abaixo pode usar a classe, e não repetir o sinal de ambiente

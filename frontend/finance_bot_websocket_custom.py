@@ -559,12 +559,20 @@ async def get_financial_data(
             -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
             -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
             -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
-            -- alvo é quem CONSOME `recent_launches`, e só ele: home.html:944
-            -- imprime o tipo cru como rótulo ("Última atividade: saida"), :1094
-            -- não conta a linha legada no onboarding e :1147 desenha a receita
-            -- legada como despesa; dashboard.js:7954 (linha do Histórico), :8035
-            -- (`_renderLaunchDetail`, "Tipo: saida") e :8479 (resumo do editor,
-            -- "saida - R$ 100,00") usam o cru como label. São 6 sites, não 5.
+            -- alvo é quem CONSOME `recent_launches`, e só ele. Citados por
+            -- SÍMBOLO e não por linha de propósito (CLAUDE.md §2: número de
+            -- linha envelhece sozinho; este bloco já citou 5 errados):
+            -- home.html `renderOnboarding` não conta a linha legada, e
+            -- `renderActivity` desenha a receita legada como DESPESA (vermelho,
+            -- sinal de menos, ícone de queda); no dashboard.js, `renderLaunches`
+            -- (o card "Lançamentos"), `_renderLaunchDetail` ("Tipo: saida") e
+            -- `openEditLaunchModal` (resumo, "saida - R$ 100,00") usam o cru
+            -- como label.
+            -- O `#greeting-sub` da Início (`renderGreeting`) SAIU desta lista na
+            -- issue 293: ele lê o rótulo de frontend/launch-type-labels.js, e um
+            -- `saida` legado cai no fallback ("Lançamento") em vez de sair cru.
+            -- Degrada em vez de vazar — os outros sítios é que sustentam esta
+            -- projeção.
             -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
             -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
             --
