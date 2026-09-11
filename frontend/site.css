@@ -263,7 +263,7 @@ img { max-width: 100%; display: block; }
   .nav-links { display: none; }
   .section { padding: 60px 0; }
   /* Alvo de toque na barra mobile: 44px (mínimo iOS/WCAG 2.5.5), o mesmo piso
-     que o .pb-burger do nav-auth.js já respeita — e 900px é o mesmo gate que ele
+     que o .pb-burger do nav-burger.js já respeita — e 900px é o mesmo gate que ele
      usa para entrar em modo mobile, por isso estas três moram AQUI, no bloco de
      900 que já existia, em vez de num segundo bloco igual (a ordem dos blocos da
      nav fica 900 -> 480 -> 340, monotônica).
@@ -306,7 +306,7 @@ img { max-width: 100%; display: block; }
    sobra.
 
    `.nav.nav` NÃO é typo, e trocar por `.nav` mata o conserto em silêncio: o
-   nav-auth.js injeta um <style id="pb-nav-css"> no <head> em RUNTIME contendo
+   nav-burger.js injeta um <style id="pb-nav-css"> no <head> em RUNTIME contendo
    `.nav{...column-gap:6px}` dentro de @media (max-width:900px). Mesma
    especificidade (0,1,0) e documento posterior => o injetado ganha. Repetir a
    classe sobe para (0,2,0) e passa a valer. Reproduzir, no console de qualquer

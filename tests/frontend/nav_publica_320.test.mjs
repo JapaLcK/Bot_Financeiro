@@ -102,7 +102,7 @@ async function abrirNav(w, { logado = false, rota = "/index.html", rotulo = "Ana
   }
   const page = await ctx.newPage();
   await page.goto(`${ORIGIN}${rota}`);
-  // o burger é injetado pelo nav-auth.js; o menu da conta, só depois do fetch.
+  // o burger é injetado pelo nav-burger.js; o menu da conta, pelo nav-auth.js só depois do fetch.
   // `attached`, não visível: no desktop o burger existe no DOM com display:none,
   // e esperar por visibilidade faria o caso de 1280 morrer de timeout.
   await page.waitForSelector(logado ? ".pb-acct-btn" : ".pb-burger", { state: "attached" });
@@ -245,7 +245,7 @@ test("8) a regra de column-gap da site.css vence o #pb-nav-css injetado", async 
   // acima do bloco de 340 quem manda é o valor injetado: guarda o breakpoint
   const b2 = await abrirNav(360);
   assert.equal((await medir(b2.page)).columnGap, "6px",
-    "a 360 o column-gap devia ser o 6px injetado pelo nav-auth.js");
+    "a 360 o column-gap devia ser o 6px injetado pelo nav-burger.js");
   await b2.ctx.close();
 });
 

@@ -472,6 +472,16 @@ async def serve_nav_auth_js():
     )
 
 
+@router.get("/nav-burger.js")
+async def serve_nav_burger_js():
+    """Menu recolhido da nav pública abaixo de 900px (par do nav-auth.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "nav-burger.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/blog-news.js")
 async def serve_blog_news_js():
     """JS da seção 'Notícias do mercado' do /blog (consome /api/blog/news).
