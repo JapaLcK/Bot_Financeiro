@@ -11,7 +11,9 @@ Uso (precisa do CSS completo do pacote upstream):
     python3 scripts/build_phosphor_subset.py package/src/regular/style.css
 
 O conjunto usado sai de três fontes, nesta ordem:
-  1. qualquer token `ph-<nome>` literal em frontend/**.{html,js,css};
+  1. qualquer token `ph-<nome>` literal em frontend/**.{html,js,css} e em
+     webapp/src/**.{js,jsx,css} — a FONTE da ilha React, e não o bundle
+     minificado que ela produz (ver ARTEFATOS abaixo);
   2. os valores dos mapas fechados EMOJI_TO_PH (dashboard.js), ACTIVITY_ICONS e
      CAT_ICONS (settings.html), que alimentam as interpolações `ph-${...}`;
   3. os fallbacks literais desses três helpers: tag, circle, trend-down.
@@ -30,6 +32,15 @@ import sys
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FRONTEND = RAIZ / "frontend"
 DESTINO = FRONTEND / "phosphor.css"
+# Artefato de build, não código-fonte. Fica fora da varredura nos DOIS sentidos:
+# um `ph-algo` que o minificador emita por acidente viraria ícone FANTASMA (e
+# vermelho no test_phosphor_subset.py por um nome que ninguém escreveu), e um
+# ícone de verdade que o componente use está na fonte (`webapp/src`), que a
+# varredura lê. Hoje o bundle tem ZERO ocorrências de `ph-`; é do dia em que
+# tiver que esta linha trata.
+ARTEFATOS = {FRONTEND / "precos-app.js", FRONTEND / "precos-app.css"}
+# A ilha React: fonte de frontend que NÃO mora em frontend/.
+WEBAPP_SRC = RAIZ / "webapp" / "src"
 
 # mapas fechados que alimentam as interpolações `ph-${...}`
 MAPAS = [("dashboard.js", "EMOJI_TO_PH"), ("settings.html", "ACTIVITY_ICONS"),
@@ -47,8 +58,10 @@ CABECALHO = """/* Phosphor Icons — peso Regular, self-hosted (MIT). SUBSET GER
 
 def icones_usados() -> set[str]:
     usados = set()
-    for f in FRONTEND.rglob("*"):
-        if f.suffix not in (".html", ".js", ".css") or f == DESTINO:
+    for f in (*FRONTEND.rglob("*"), *WEBAPP_SRC.rglob("*")):
+        if f.suffix not in (".html", ".js", ".jsx", ".css") or f == DESTINO:
+            continue
+        if f in ARTEFATOS:
             continue
         usados |= set(re.findall(r"\bph-([a-z0-9-]+)", f.read_text(encoding="utf-8", errors="ignore")))
     for arquivo, var in MAPAS:

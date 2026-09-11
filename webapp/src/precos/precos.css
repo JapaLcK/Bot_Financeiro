@@ -1,0 +1,99 @@
+/*
+ * O visual dos cards de plano. Camada FINA sobre o `site.css` — não uma segunda
+ * folha de estilo para `.plan`.
+ *
+ * O que o `site.css` já resolve e NÃO se repete aqui: card escuro com borda
+ * `--line` (`:307`), rosa só no destaque (`.plan.featured`, `:308`), badge rosa
+ * em pill (`:309`), check neon (`.tick`, `:232`). A identidade visual da marca
+ * já estava lá; o que faltava é o que este arquivo faz.
+ *
+ * Escopado em `#plans-v2` de propósito: `.plan`, `.plan-badge` e `.tick` são
+ * classes COMPARTILHADAS do site de marketing, e o pódio é uma decisão da
+ * escada de preços — não de todo card que reuse `.plan`.
+ */
+
+/* ── O pódio ─────────────────────────────────────────────────────────────────
+ * `align-items: end` troca o `stretch` do grid (que hoje iguala os 4 cards na
+ * altura do maior) por bases alinhadas com alturas próprias. O degrau então
+ * cresce PARA CIMA, que é o que faz um pódio ler como hierarquia em vez de card
+ * inchado.
+ *
+ * DOIS níveis, não quatro, e a escolha é MEDIDA — não estética.
+ *
+ * A primeira versão tinha um degrau intermediário no Pro (`padding-block: 42px`).
+ * Medido em duas larguras, ele INVERTE: em 1024px dava Essencial 613 < Pro 656 <
+ * Plus 741, a escada certa; em 1440px dava Pro 539 < Essencial 553, porque o
+ * texto do Essencial quebra em mais linhas ali e 12px de respiro não vencem os
+ * 38px de diferença de conteúdo. Uma escada que mente em algumas larguras é pior
+ * que nenhuma, e fechar isso exigiria altura fixa — que quebra quando o usuário
+ * aumenta o corpo do texto. Então o pódio é o que se sustenta em toda largura:
+ * bases alinhadas e o DESTAQUE subindo sobre elas.
+ *
+ * Uma escada monótona de 4 degraus também estava fora por um motivo de venda:
+ * ela coroaria o Premium, que é o card "Em breve" com o botão desabilitado.
+ *
+ * O degrau é `padding-block`, o próprio respiro do card, e não `min-height`,
+ * pelo mesmo motivo do parágrafo acima: altura fixa quebra quando o usuário
+ * aumenta o corpo do texto.
+ *
+ * O critério é MAIS DE UMA COLUNA, e 508px é onde a segunda aparece — não é
+ * número escolhido, é aritmética do grid: o `#plans-v2` tem
+ * `grid-template-columns:repeat(auto-fit,minmax(220px,1fr))` INLINE
+ * (no `<div class="plans" id="plans-v2">` da precos.html, que por ser
+ * id+inline vence o `@media (max-width:900px)`
+ * do `.plans` no site.css), `gap: 20px` (do mesmo `.plans`) e largura
+ * `min(1560px, 100vw - 48px)` (o `#plans-v2-wrap`). Duas faixas pedem
+ * 220+20+220 = 460px de container, ou seja `100vw >= 508`. O par 507/508 que
+ * cerca o degrau está na `LARGURAS` do PO1, que MEDE a equivalência em vez de
+ * confiar nesta aritmética.
+ *
+ * Empilhado em UMA coluna não há pódio nenhum a fazer: ali altura diferente é
+ * card mais gordo que o vizinho, sem hierarquia para ler.
+ *
+ * A versão anterior desta regra dizia 900px e o comentário afirmava que abaixo
+ * disso "o grid vira uma coluna". Era FALSO: de 508 a 899px o grid tem 2 ou 3
+ * colunas, e o pódio simplesmente não aparecia. Quem prende isto agora é o
+ * grupo PO do `tests/frontend/precos_ilha_react.test.mjs`, que exige a equivalência
+ * (mais de uma coluna ⟺ `align-items: end`) em cada largura da sua lista
+ * `LARGURAS` — mudar a aritmética do grid sem mudar esta regra deixa vermelho.
+ */
+@media (min-width: 508px) {
+  #plans-v2 { align-items: end; }
+  #plans-v2 .plan.featured { padding-block: 54px; }
+}
+
+/* ── O badge do destaque ──────────────────────────────────────────────────────
+ * Duas mudanças, e a primeira é de ACESSIBILIDADE.
+ *
+ * 1. Contraste. O badge herda `linear-gradient(135deg, var(--pink),
+ *    var(--pink-dark))`, e branco sobre `--pink` (#FF2D8E) dá **3,49:1** —
+ *    reprova o AA de 4,5:1, e o texto é `.68rem` em maiúsculas, ou seja NÃO é
+ *    "texto grande" (que só vale de 18,66px negrito pra cima). Descer o gradiente
+ *    para a FAIXA `var(--pink-dark)` (#C7186B) → #A8115A põe o pior ponto em
+ *    **5,57:1** — o pior ponto é o mais claro dos dois, o próprio `--pink-dark`,
+ *    e é dele que sai o 5,57. O #A8115A não tem token: é um quarto rosa, e fica
+ *    literal aqui de propósito enquanto for usado só nesta regra. O outro stop
+ *    NÃO fica: ele é `--pink-dark` e vai pelo token (§0.7).
+ *    Escopado aqui e não corrigido no site.css de propósito: `.plan-badge` é
+ *    compartilhado, e a mesma medição vale para todo card `.plan` do site — é um
+ *    achado para outro PR, não uma mudança silenciosa em páginas alheias.
+ *
+ * 2. Movimento. Um pan lento do gradiente, que era o ÚNICO uso de
+ *    framer-motion no protótipo (`backgroundPositionX`). Em `@keyframes` ele
+ *    custa estas 8 linhas em vez de ~40 kB gzip de dependência.
+ */
+#plans-v2 .plan.featured .plan-badge {
+  background: linear-gradient(135deg, var(--pink-dark), #a8115a, var(--pink-dark));
+  background-size: 200% 100%;
+  animation: pb-badge-pan 3s linear infinite;
+}
+
+@keyframes pb-badge-pan {
+  from { background-position-x: 0%; }
+  to   { background-position-x: 200%; }
+}
+
+/* Regra do §"Implementação" da skill, e o padrão do resto do site. */
+@media (prefers-reduced-motion: reduce) {
+  #plans-v2 .plan.featured .plan-badge { animation: none; }
+}
