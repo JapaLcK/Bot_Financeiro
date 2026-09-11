@@ -47,8 +47,8 @@ function uso() {
 
 Cada rota recebe N contextos frios e N medições quentes. A visita de aquecimento
 não entra na amostra quente e espera os recursos da primeira origem encerrarem,
-inclusive quando o navegador aborta uma transferência já satisfeita. Requisições
-que não populam cache, como POSTs de API, não bloqueiam o aquecimento.
+inclusive quando o navegador cancela uma transferência já satisfeita. Falhas reais
+de GET/HEAD reprovam a coleta; POSTs de API não bloqueiam o aquecimento.
 O JSON registra todas as amostras, a mediana e a dispersão; não o edite manualmente.`;
 }
 

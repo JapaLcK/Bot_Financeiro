@@ -44,9 +44,9 @@ mede as rotas públicas reais por Chromium/Playwright. Para cada rota, ele cria
 cinco contextos sem cache e cinco navegações medidas após uma visita de aquecimento
 sem throttle. A visita de aquecimento só libera a coleta quente quando todos os
 recursos da primeira origem encerrarem, seja por conclusão ou por cancelamento
-do navegador após satisfazer a leitura. POSTs e outros métodos que não populam
-cache não bloqueiam essa espera; se algum GET/HEAD continuar aberto por 90 segundos,
-a coleta falha em vez de rotular uma amostra parcialmente aquecida como quente.
+intencional do navegador após satisfazer a leitura. POSTs e outros métodos que
+não populam cache não bloqueiam essa espera; falha real ou GET/HEAD ainda aberto
+após 90 segundos reprova a coleta, em vez de rotular uma amostra parcialmente quente.
 Registra todas as amostras, mediana, mínimo e máximo de TTFB, FCP, LCP, load e bytes
 efetivamente recebidos da primeira origem/terceiros. A rede 4G e CPU 4x são
 fixadas por padrão nas amostras medidas.

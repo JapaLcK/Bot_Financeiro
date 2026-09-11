@@ -30,12 +30,13 @@ export async function instrumentarRede(page, { throttle, rede }) {
     ativos.set(evento.requestId, recurso);
     recursos.push(recurso);
   };
-  const finalizar = (evento, concluido) => {
+  const finalizar = (evento, estado) => {
     const recurso = atual(evento.requestId);
     if (!recurso) return;
     recurso.bytes = Math.max(recurso.bytes, evento.encodedDataLength || 0);
-    recurso.concluido = concluido;
-    recurso.estado = concluido ? "concluido" : "interrompido";
+    recurso.concluido = estado === "concluido";
+    recurso.estado = estado;
+    recurso.erro = evento.errorText || evento.blockedReason || null;
   };
 
   cdp.on("Network.requestWillBeSent", registrar);
@@ -53,8 +54,9 @@ export async function instrumentarRede(page, { throttle, rede }) {
     const recurso = atual(evento.requestId);
     if (recurso) recurso.bytes += evento.encodedDataLength || 0;
   });
-  cdp.on("Network.loadingFinished", evento => finalizar(evento, true));
-  cdp.on("Network.loadingFailed", evento => finalizar(evento, false));
+  cdp.on("Network.loadingFinished", evento => finalizar(evento, "concluido"));
+  cdp.on("Network.loadingFailed", evento =>
+    finalizar(evento, evento.canceled ? "interrompido" : "falhou"));
 
   await cdp.send("Network.enable");
   if (throttle) {
@@ -62,11 +64,13 @@ export async function instrumentarRede(page, { throttle, rede }) {
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   }
 
-  const pendentesDaOrigem = origem => recursos.filter(recurso =>
-    recurso.estado === "em_andamento"
-      && ["GET", "HEAD"].includes(recurso.metodo)
-      && new URL(recurso.url).origin === origem,
+  const cacheaveisDaOrigem = origem => recursos.filter(recurso =>
+    ["GET", "HEAD"].includes(recurso.metodo) && new URL(recurso.url).origin === origem,
   );
+  const pendentesDaOrigem = origem => cacheaveisDaOrigem(origem)
+    .filter(recurso => recurso.estado === "em_andamento");
+  const falhosDaOrigem = origem => cacheaveisDaOrigem(origem)
+    .filter(recurso => recurso.estado === "falhou");
 
   return {
     recursos: () => recursos.map(recurso => ({
@@ -78,7 +82,14 @@ export async function instrumentarRede(page, { throttle, rede }) {
     })),
     async esperarCacheDaOrigem(origem, limiteMs) {
       const inicio = Date.now();
-      while (pendentesDaOrigem(origem).length) {
+      while (true) {
+        const falhos = falhosDaOrigem(origem);
+        if (falhos.length) {
+          const detalhes = falhos.map(recurso =>
+            `${recurso.url} (${recurso.erro || "erro de rede"})`).join(", ");
+          throw new Error(`cache falhou ao aquecer: ${detalhes}`);
+        }
+        if (!pendentesDaOrigem(origem).length) return;
         if (Date.now() - inicio >= limiteMs) {
           const pendentes = pendentesDaOrigem(origem).map(recurso => recurso.url).join(", ");
           throw new Error(`cache não aqueceu dentro de ${limiteMs} ms: ${pendentes}`);
