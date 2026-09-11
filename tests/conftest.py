@@ -371,6 +371,26 @@ def _all_user_ids() -> set[int]:
 
 
 @pytest.fixture(autouse=True)
+def _zera_rate_limit_em_memoria():
+    """Storage do slowapi zerado por teste — ele é EM MEMÓRIA e vale pela sessão
+    inteira do pytest, então teto de rota vaza de um arquivo para o outro.
+
+    Não é zelo: `GET /d/{code}` ganhou `shared_limit("30/minute", scope=...)` e,
+    com o balde deixando de ser por URL, os /d/ somados de
+    `test_rotas_anonimas_venenosas.py`, `test_sessions.py` e
+    `test_auth_cookie.py` passaram dos 30 numa rodada inteira — dois testes
+    VERDES isolados e VERMELHOS na suíte (medido). Oito arquivos já faziam este
+    reset à mão numa fixture própria; aqui ele vira um lugar só (§0.7).
+
+    `frontend.routes.shared` e não o monólito de propósito: é onde o `Limiter`
+    mora e o import é bem mais barato. O teto em PRODUÇÃO não é afrouxado —
+    isto só existe no conftest.
+    """
+    from frontend.routes.shared import limiter
+    limiter._storage.reset()
+
+
+@pytest.fixture(autouse=True)
 def _auto_cleanup_orphan_users():
     """Salva quem ja existia em `users` antes do teste e apaga qualquer
     novo registro depois — pega ids secundarios criados manualmente
