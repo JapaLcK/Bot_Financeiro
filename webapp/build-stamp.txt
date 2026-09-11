@@ -1,6 +1,0 @@
-# Carimbo do build da ilha React da /precos. NÃO edite à mão.
-# Escrito pelo `postbuild` de webapp/ (roda junto com `npm --prefix webapp run build`)
-# e conferido por `node scripts/precos_bundle_stamp.mjs --check`.
-fontes 7e1de2d8bc7ae4a57daaa4038842a5a3024440250523659db67c94b229968646
-frontend/precos-app.js 1e9c6cfde4dcff909107080f02a037e27f4b17ccfcc3fcf3bda6a8ef9cafbf2f
-frontend/precos-app.css 26423026b3da3dcb43f04b33ba4e1d4b4ef8432f0f15108743ad0b4189e408d4

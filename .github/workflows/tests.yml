@@ -445,27 +445,54 @@ jobs:
       # anterior com o CI verde. É o mesmo mecanismo do gate do CACHE_NAME: o
       # repositório carrega dois artefatos que só um comando reconcilia.
       #
-      # Por CARIMBO e não rebuildando aqui: a versão anterior deste step rodava
-      # `npm --prefix webapp ci && npm run build` e reprovava se o `git status`
-      # sujasse os dois arquivos. O Vite 8 buda com rolldown e lightningcss, os
-      # dois binários NATIVOS (27 pacotes com `os`/`cpu` no lockfile de webapp/):
-      # o artefato commitado sai de darwin-arm64, este runner é linux-x64-gnu, e
-      # nenhum dos dois projetos promete saída byte a byte igual entre
-      # arquiteturas. Como o step não tem `if: paths:`, um byte de diferença
-      # deixaria vermelho TODO PR do repositório — inclusive os que não tocam
-      # `webapp/`. O carimbo compara hash de fonte com hash de fonte e hash de
-      # artefato commitado com ele mesmo: nenhum byte de build é comparado com
-      # outro byte de build.
+      # REBUILDANDO, e não por carimbo de hash. A versão anterior deste step
+      # comparava um sha256 das FONTES de `webapp/` com um carimbo commitado
+      # (`webapp/build-stamp.txt`), para não depender de o build ser byte a byte
+      # igual entre darwin-arm64 e linux-x64-gnu (o Vite 8 buda com rolldown e
+      # lightningcss, os dois binários nativos). Ele media a coisa errada: hash de
+      # fonte prova "as fontes não mudaram desde o último carimbo", NUNCA "este
+      # bundle veio destas fontes" — e era falsificável com um comando que a
+      # própria CLI documentava (`--write` recalculava o carimbo do disco, sem
+      # buildar), justamente o comando que alguém roda ao ver o gate vermelho.
+      # Só um build prova a procedência do artefato.
       #
-      # Sem `npm ci` e sem rede: o script é `node:crypto` + `node:fs` puros, e
-      # reprova em menos de um segundo, antes do Chromium (~95 MB).
+      # A premissa que tinha derrubado o rebuild nunca foi medida por ninguém: a
+      # divergência de bytes entre arquiteturas era HIPÓTESE. Medido o que dá para
+      # medir de fora do CI: o build é determinístico em darwin-arm64 (duas
+      # rodadas, `cmp` byte a byte nos dois artefatos) e o bundle não carrega
+      # nenhum caminho absoluto (`grep -c "/Users/"` = 0). Cross-arch é esta
+      # execução aqui que responde — e responde ALTO, não em silêncio.
       #
-      # O que este gate NÃO garante: que o bundle RENDERIZA. Quem prova o render
-      # é o `npm run test:frontend` (step abaixo), quem prova que a ROTA existe é
-      # o pytest (`tests/test_frontend_assets_e_rotas.py`), e o controle negativo
-      # do próprio carimbo é o `tests/frontend/precos_bundle_stamp.test.mjs`.
-      - name: Gate do carimbo da ilha React (webapp -> frontend/precos-app.*)
-        run: node scripts/precos_bundle_stamp.mjs --check
+      # Se divergir: o log traz o `git diff --stat`, e aí a decisão (container
+      # para fixar o build, ou comparação normalizada) se toma com o dado na mão.
+      # Enquanto não divergir, este é o gate honesto e não há script nenhum para
+      # manter.
+      #
+      # `git status --porcelain` e não `git diff`: ele vê também o arquivo NOVO
+      # que o build emita. `assetFileNames: "precos-app.[ext]"` nomeia TODO asset
+      # assim, então uma fonte que o bundle passe a importar sai em
+      # `frontend/precos-app.woff2` — e asset em `frontend/` sem rota escrita à
+      # mão em `static_pages.py` é 404 no navegador com o CI verde (§5).
+      #
+      # O `npm ci` aqui é metade do ponto: o lockfile de `webapp/` não era
+      # instalado por nenhum job, então nada amarrava o artefato à versão de vite
+      # que o produziu. Com ele, um PR do Dependabot que suba o vite e não
+      # rebuilde fica vermelho.
+      #
+      # O que este gate NÃO garante: que o bundle RENDERIZA. Quem prova o render é
+      # o `npm run test:frontend` (step abaixo), e quem prova que a ROTA existe é
+      # o pytest (`tests/test_frontend_assets_e_rotas.py`).
+      - name: Gate do artefato da ilha React (webapp -> frontend/precos-app.*)
+        run: |
+          npm --prefix webapp ci
+          npm --prefix webapp run build
+          sujo=$(git status --porcelain -- frontend/)
+          if [ -n "$sujo" ]; then
+            git diff --stat -- frontend/
+            echo "$sujo"
+            echo "::error title=Artefato da ilha React desatualizado::O build de webapp/ neste runner não reproduziu o que está commitado em frontend/precos-app.*. Se você editou webapp/, rode \`npm --prefix webapp ci && npm --prefix webapp run build\` e commite o resultado. Se não editou, o build não é reprodutível entre plataformas — leve o diff acima para a decisão (container ou comparação normalizada)."
+            exit 1
+          fi
 
       - name: Install Playwright + Chromium
         run: npx playwright install --with-deps chromium

@@ -7,13 +7,12 @@ ou trocado por um placeholder que não renderiza card nenhum.
 
 **O que ele NÃO prova**, e a divisão importa:
 
-- **não prova que o artefato está EM DIA com `webapp/`.** Isso é o carimbo
-  (`webapp/build-stamp.txt`, escrito pelo `postbuild` do webapp e conferido por
-  `node scripts/precos_bundle_stamp.mjs --check` no CI e no
-  `tests/frontend/precos_bundle_stamp.test.mjs`). É o análogo do gate do
-  `CACHE_NAME` — e é por hash de fonte, não por rebuild: o build usa binários
-  nativos (rolldown/lightningcss) e comparar bytes de build entre plataformas
-  deixaria o CI inteiro vermelho por diferença de arquitetura;
+- **não prova que o artefato está EM DIA com `webapp/`.** Nada que leia o
+  artefato de fora consegue provar isso: hash de fonte prova "as fontes não
+  mudaram desde o último carimbo", nunca "este bundle veio destas fontes". Quem
+  prova é o BUILD, e ele roda no CI (`.github/workflows/tests.yml`, step "Gate do
+  artefato da ilha React": `npm --prefix webapp ci && npm --prefix webapp run
+  build` e `git status --porcelain -- frontend/` limpo);
 - **não prova que a rota existe.** Isso é o `tests/test_frontend_assets_e_rotas.py`,
   que pareia asset ↔ rota — sem ele o arquivo daria 404 em produção com CI verde;
 - **não prova que o React renderiza.** Isso é o harness de frontend
@@ -65,4 +64,23 @@ def test_o_bundle_carrega_o_contrato_de_dom_da_precos():
         f"o bundle não menciona {faltando} — o componente parou de emitir o "
         "markup que a precos.html e o pix-checkout.js consomem, ou o build saiu "
         f"de outra fonte. Marcas exigidas: {list(MARCAS)}"
+    )
+
+
+def test_o_build_nao_emitiu_asset_fora_da_dupla_js_css():
+    """`assetFileNames: "precos-app.[ext]"` (webapp/vite.config.js) nomeia TODO
+    asset assim: uma fonte ou imagem que o bundle passe a importar sai em
+    `frontend/precos-app.woff2`. Asset em `frontend/` só é servido por uma rota
+    escrita à mão em `static_pages.py` (§5), e o
+    `tests/test_frontend_assets_e_rotas.py` pareia asset ↔ rota apenas para
+    `.html`/`.js`/`.css` — um terceiro tipo daria 404 em produção com o CI verde.
+
+    *Controle negativo (§3): `touch frontend/precos-app.woff2` → vermelho.*
+    """
+    emitidos = sorted(p.name for p in BUNDLE.parent.glob("precos-app.*"))
+    assert emitidos == ["precos-app.css", "precos-app.js"], (
+        f"assets `precos-app.*` em frontend/: {emitidos}. O build emitiu um "
+        "artefato novo; ele precisa de rota própria em "
+        "frontend/routes/static_pages.py (e entrar nesta lista) — sem rota, 404 "
+        "no navegador com o CI verde."
     )

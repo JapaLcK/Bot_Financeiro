@@ -117,7 +117,7 @@ updates:
     # ATENÇÃO ao mergear qualquer PR daqui: o artefato `frontend/precos-app.*` é
     # COMMITADO, e o Dependabot não roda o build. Depois de subir dep, rode
     # `npm --prefix webapp ci && npm --prefix webapp run build` e commite o
-    # resultado junto — senão o gate do carimbo reprova (e é para reprovar: a
+    # resultado junto — senão o gate que rebuilda no CI reprova (e é para reprovar: a
     # produção estaria servindo o bundle da versão anterior).
 
   # Actions usadas nos workflows (.github/workflows)

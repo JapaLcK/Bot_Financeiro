@@ -402,12 +402,12 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   (módulo é deferido e reintroduz corrida com script clássico da página), mount
   síncrono com `flushSync`, e o componente **lê os dados do markup** em vez de
   trazer literal — no caso da `/precos` isso é o que impede uma quarta cópia do
-  preço (§0.7). O artefato commitado tem gate próprio no CI (job `frontend`), no
-  molde do gate do `CACHE_NAME`: um CARIMBO (`webapp/build-stamp.txt`) que o
-  `postbuild` do webapp escreve com o hash das fontes e dos artefatos, e o CI só
-  confere (`node scripts/precos_bundle_stamp.mjs --check`). Não se rebuilda no CI
-  de propósito — rolldown e lightningcss são binários nativos, e comparar bytes
-  de build entre arquiteturas reprova PR que não tocou em `webapp/`. Dep nova
-  aqui exige rebuildar e commitar `frontend/precos-app.*` no mesmo commit.
+  preço (§0.7). O artefato commitado tem gate próprio no CI (job `frontend`): o
+  step REBUILDA (`npm --prefix webapp ci && npm --prefix webapp run build`) e
+  reprova se `git status --porcelain -- frontend/` não ficar limpo. Só o build
+  prova que o bundle commitado veio das fontes commitadas — um carimbo de hash das
+  fontes, que é o que existiu aqui por um commit, prova apenas que as fontes não
+  mudaram desde o último carimbo, e era falsificável sem buildar. Dep nova aqui
+  exige rebuildar e commitar `frontend/precos-app.*` no mesmo commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar
   framework em página nova por gosto, ou pôr script `build` na raiz.
