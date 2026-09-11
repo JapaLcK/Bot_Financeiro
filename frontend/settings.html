@@ -256,7 +256,10 @@ a { color: inherit; text-decoration: none; }
 /* ─── Main column ────────────────────────────── */
 .main { display: flex; flex-direction: column; gap: 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
-.settings-section[hidden] { display: none !important; }
+/* O atributo `hidden` sozinho perde para o `display` de qualquer classe.
+   Uma regra só, e não uma por seletor: .settings-section, .notification-list,
+   .email-warning e .info-banner precisavam da MESMA declaração (§0.7). */
+[hidden] { display: none !important; }
 
 /* ─── Card ───────────────────────────────────── */
 .card {
@@ -638,9 +641,6 @@ body.balance-hidden .account-balance {
   gap: 14px;
 }
 .notification-list { display: flex; flex-direction: column; gap: 10px; }
-/* O atributo `hidden` sozinho perde para o `display` da classe — mesma
-   declaração que .settings-section[hidden] e .email-warning[hidden] já usam. */
-.notification-list[hidden] { display: none !important; }
 .email-warning {
   display: flex;
   align-items: flex-start;
@@ -651,7 +651,6 @@ body.balance-hidden .account-balance {
   border-radius: var(--radius-md);
   background: rgba(217,119,6,.08);
 }
-.email-warning[hidden] { display: none !important; }
 .email-warning-title {
   font-size: .86rem;
   font-weight: 800;
@@ -947,12 +946,15 @@ body.balance-hidden .account-balance {
 .empty-icon { font-size: 1.8rem; opacity: .45; }
 .empty-title { font-weight: 760; font-size: .88rem; color: var(--muted); }
 .empty-sub { color: var(--faint); font-size: .76rem; line-height: 1.55; max-width: 260px; }
-/* Único CTA rosa da página (a identidade pede o rosa na AÇÃO, não em toda
-   superfície): o caminho pro /precos do estado "sem plano ativo". Herda o resto
-   do .btn-sm — e as transições dele são de cor, sem movimento, então não há o
-   que desligar em prefers-reduced-motion. */
+/* Rosa na AÇÃO, não em toda superfície: o caminho pro /precos do estado "sem
+   plano ativo". NÃO é o único rosa da página (medido: `.pb-protect button` e
+   mais dois gradientes #FF2D8E) — é o único da SEÇÃO onde aparece, que é o que
+   mantém a ação principal evidente. Herda o resto do .btn-sm; as transições dele
+   são de cor, sem movimento, então não há o que desligar em
+   prefers-reduced-motion. O hover usa o #C7186B do .pb-protect button — o rosa
+   escuro já estabelecido da página (§0.7), não um tom novo. */
 .empty-cta { margin-top: 8px; background: var(--accent); border-color: transparent; color: #fff; text-decoration: none; }
-.empty-cta:hover { background: #e01f7d; border-color: transparent; color: #fff; }
+.empty-cta:hover { background: #C7186B; border-color: transparent; color: #fff; }
 
 /* ─── Toast ──────────────────────────────────── */
 #toast {
@@ -1614,7 +1616,11 @@ body.balance-hidden .account-balance {
                   <div class="mini-kpi-label">Status</div>
                   <div class="mini-kpi-value" id="notif-status-value">Carregando preferências</div>
                 </div>
-                <div class="info-banner">
+                <!-- Mora FORA do #notif-list (é da coluna dos mini-KPIs), então
+                     some por conta própria no estado 402: oferecer "pausar dicas
+                     e insights" logo abaixo de "Indisponível sem plano ativo" é a
+                     tela se contradizendo. -->
+                <div class="info-banner" id="notif-tip">
                   <span class="info-banner-icon"><i class="ph ph-lightbulb" aria-hidden="true"></i></span>
                   <span>Você pode pausar dicas e insights separadamente sem afetar os fluxos do WhatsApp.</span>
                 </div>
@@ -1859,16 +1865,20 @@ window.addEventListener("storage", (event) => {
 // quem foi cortado pelo #380 (conectar banco, salvar preferência) passa por um
 // deles. Os loaders que sabem em qual seção estão têm tratamento próprio abaixo
 // (SEM_PLANO_HTML) e nem chegam a mostrar toast.
-const ERRO_DE_GATE = {
-  subscription_required: "Sua conta está sem plano ativo.",
-  plan_selection_required: "Escolha um plano para continuar.",
-};
+// Map, e NÃO objeto literal: `detail.error` vem do servidor e com um literal o
+// lookup cai na cadeia de protótipo — `{"error":"constructor"}` devolvia
+// `function Object() { [native code] }` (medido), quebrando o contrato "string"
+// de readApiError e comendo o `detail.code` real, que antes deste PR ganhava.
+const ERRO_DE_GATE = new Map([
+  ["subscription_required", "Sua conta está sem plano ativo."],
+  ["plan_selection_required", "Escolha um plano para continuar."],
+]);
 async function readApiError(resp) {
   const raw = await resp.text();
   try {
     const detail = JSON.parse(raw).detail;
     // detail pode ser string OU objeto estruturado {code, message, ...} (ex.: limite de banco por plano)
-    if (detail && typeof detail === "object") return detail.message || ERRO_DE_GATE[detail.error] || detail.code || raw;
+    if (detail && typeof detail === "object") return detail.message || ERRO_DE_GATE.get(detail.error) || detail.code || raw;
     return detail || raw;
   } catch { return raw || "Erro inesperado"; }
 }
@@ -2518,6 +2528,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
       if (myGen === _notifGen) {
         semPlano = true;
         pintarSemPlano("notif-sem-plano", SEM_PLANO_HTML, "notif-list");
+        document.getElementById("notif-tip").hidden = true;
         document.getElementById("notif-email-value").textContent = "—";
         document.getElementById("notif-status-value").textContent = "Indisponível sem plano ativo";
       }
@@ -2530,6 +2541,7 @@ async function loadNotificationSettings({ propagate = false } = {}) {
       // precisa devolver os toggles, senão a seção fica escondida para sempre.
       document.getElementById("notif-sem-plano").hidden = true;
       document.getElementById("notif-list").hidden = false;
+      document.getElementById("notif-tip").hidden = false;
       applyNotificationSettings(data);
       notificationSettingsLoaded = true;
     }
@@ -3213,6 +3225,20 @@ async function refreshOpenFinance(opts) {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
     }));
+    // 402 = sem plano ativo (#380). Esta é a QUARTA porta da mesma classe (as
+    // outras três são loadData, loadActivityLog e loadNotificationSettings), e é
+    // a que o pull-to-refresh da aba open-finance usa — sem este ramo o gesto
+    // rejeitava e o indicador virava ÂMBAR em cima de um painel que acabara de
+    // dizer "Indisponível sem plano ativo", e pelo botão vinha um toast "ok"
+    // seguido de um de erro. Repinta pela porta canônica (`loadData`, dona do
+    // `_dataGen` e do fan-out) em vez de pintar aqui — é a mesma razão do
+    // `await loadData` da branch de sucesso abaixo. O GET dela responde o mesmo
+    // 402 e cai no ramo que pinta o estado, sem toast.
+    if (resp.status === 402) {
+      await loadData({ propagate });
+      if (!propagate) showToast("Indisponível sem plano ativo.", "info");
+      return;
+    }
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     const veredito = refreshVerdict(data.sync || {});
