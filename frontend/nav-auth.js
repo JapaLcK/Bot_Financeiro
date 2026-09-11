@@ -43,8 +43,7 @@
   // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
-  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
-                  "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
+  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
   // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
   // com dados do site bloqueados, e a avaliação do argumento ficava fora do
@@ -203,12 +202,15 @@
 
     const btn = document.getElementById("pb-acct-btn");
     const dd = document.getElementById("pb-acct-dd");
-    btn.addEventListener("click", function (e) {
-      e.stopPropagation();
+    btn.addEventListener("click", function () {
       const open = dd.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     });
-    document.addEventListener("click", function () {
+    // Esta guarda É o `stopPropagation` que ficava no toggle acima, movido para
+    // cá: lá ele barrava também o listener do burger e os dois menus abriam
+    // juntos — e tirá-lo sem pôr a guarda abre e fecha o dropdown no MESMO clique.
+    document.addEventListener("click", function (e) {
+      if (e.target.closest(".pb-acct-btn")) return;  // do BOTÃO: .pb-acct-link ainda fecha
       dd.classList.remove("open");
       btn.setAttribute("aria-expanded", "false");
     });
