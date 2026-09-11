@@ -562,6 +562,11 @@
       throw new Error("Widget da Pluggy não carregou. Recarregue a página e tente novamente.");
     }
 
+    // §0.7 — esta lista NÃO bate com `_CONNECTABLE_TYPES` de
+    // frontend/routes/open_finance.py, que serve o picker do site e é só
+    // {"PERSONAL_BANK"}. O desacordo é conhecido e está escrito nos dois
+    // lados; `tests/test_of_caixinha_regra_emissor.py` fixa o par, então
+    // mexer aqui sem mexer lá dá teste vermelho, não surpresa em produção.
     const connectorTypes = ["PERSONAL_BANK", "BUSINESS_BANK"];
     if (data.includeSandbox) connectorTypes.push("SANDBOX");
 

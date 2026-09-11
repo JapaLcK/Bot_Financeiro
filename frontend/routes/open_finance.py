@@ -1195,6 +1195,19 @@ async def open_finance_snapshot_route(request: Request, user_id: int):
 
 # Só contas de pessoa física no modal (bate com o preview aprovado; evita os
 # duplicados "… Empresas"). Pra incluir PJ, adicionar "BUSINESS_BANK".
+#
+# §0.7 — DUAS LISTAS QUE DISCORDAM, de propósito e com o desacordo escrito:
+# `frontend/open-finance-connect.js` abre o widget da Pluggy com
+# `connectorTypes: ["PERSONAL_BANK", "BUSINESS_BANK"]`. O picker do site só
+# oferece o que sai DAQUI, e o widget abre em `selectedConnectorId`; se a
+# navegação interna do widget deixa voltar para a lista dele, um conector PJ
+# é alcançável por ali — e `/pluggy-item` grava `institution_name` sem
+# validar tipo. NÃO foi verificado (é UI de terceiro, não roda neste
+# ambiente). Consequência aceita: a regra de caixinha (`db.open_finance`)
+# é calibrada só contra os PERSONAL_BANK desta lista, e em BUSINESS_BANK ela é
+# PIOR que a regra anterior: falso negativo 8/36 → 17/36 (medido 2026-09-10, os
+# nomes e o comando estão em `tests/test_of_caixinha_regra_emissor.py`). Quem
+# mexer em um lado mexe no outro — esse mesmo arquivo fixa o par.
 _CONNECTABLE_TYPES = {"PERSONAL_BANK"}
 
 

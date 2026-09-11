@@ -588,21 +588,50 @@ def check_can_create_launch(user_id: int) -> None:
         )
 
 
+def pockets_restantes(user_id: int) -> int | None:
+    """Quantas caixinhas ainda cabem no plano. `None` = tier sem teto.
+
+    Existe pra quem cria em LOTE dentro de uma transação e não pode chamar
+    `check_can_create_pocket` a cada item: o gate abre conexão própria, então
+    dentro de uma transação aberta ele (a) pegaria uma 2ª conexão do pool sem
+    soltar a 1ª e (b) contaria só o que já está commitado — cada caixinha do
+    lote passaria como se fosse a primeira. É o caso do auto-import de Open
+    Finance (`db.sync_open_finance_caixinhas`), que lê isto ANTES de abrir a
+    transação e desconta uma vaga por inserção.
+
+    NÃO é a fonte única da conta, e dizer que era seria falso: a MESMA regra
+    está escrita à mão uma 3ª vez em `frontend/routes/pockets.py:47-51`
+    (`len(list_pockets(user_id)) >= pockets_max`), que é o gate HTTP da criação
+    manual e não passa por aqui. Essa cópia é anterior a esta função e não foi
+    tocada de propósito (§0.3) — unificá-la é mudança no caminho HTTP de
+    criação, fora do escopo deste branch. O que esta função unifica são os
+    DOIS chamadores de baixo: `check_can_create_pocket` e o auto-import de OF.
+    """
+    pockets_max = get_user_limits(user_id)["pockets_max"]
+    if pockets_max is None:
+        return None
+    from db.pockets import list_pockets
+    # `accrue=False`: só se quer CONTAR. O default `accrue=True` roda o
+    # accrual de juros de toda caixinha do usuário, e o auto-import de OF
+    # chama isto a cada sync — contagem idêntica, trabalho de dinheiro à toa.
+    # (Hoje o ramo nem é alcançável pelo import: só o tier grátis tem
+    # `pockets_max`, e o sync exige Essencial+. Fica correto para o dia em
+    # que um tier pago ganhar teto, que é quando o custo apareceria.)
+    return max(pockets_max - len(list_pockets(user_id, accrue=False)), 0)
+
+
 def check_can_create_pocket(user_id: int) -> None:
     """Levanta PlanLimitExceeded se já atingiu o limite de caixinhas do tier.
     Chamado do DB layer pra blindar TODOS os canais (HTTP, bot, IA)."""
-    limits = get_user_limits(user_id)
-    pockets_max = limits["pockets_max"]
-    if pockets_max is None:
+    if pockets_restantes(user_id) != 0:
         return
-    from db.pockets import list_pockets
-    if len(list_pockets(user_id)) >= pockets_max:
-        raise PlanLimitExceeded(
-            "pockets_unlimited",
-            f"🐷 No seu plano você cria {pockets_max} caixinha. "
-            "Com um plano pago é ilimitado — separe sua reserva, viagens, "
-            "presentes…\nFaça upgrade: https://pigbankai.com/precos",
-        )
+    pockets_max = get_user_limits(user_id)["pockets_max"]
+    raise PlanLimitExceeded(
+        "pockets_unlimited",
+        f"🐷 No seu plano você cria {pockets_max} caixinha. "
+        "Com um plano pago é ilimitado — separe sua reserva, viagens, "
+        "presentes…\nFaça upgrade: https://pigbankai.com/precos",
+    )
 
 
 def check_can_create_card(user_id: int) -> None:

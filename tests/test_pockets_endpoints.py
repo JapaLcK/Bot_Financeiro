@@ -296,8 +296,8 @@ def test_history_endpoint_marks_caixinha_do_banco(user_id):
     aparecia no POST (OF_POCKET_READONLY)."""
     from tests.test_of_caixinha_autoimport import _nubank_raws, _save, _seed_connection
 
-    # a manual vem ANTES do import: a caixinha do banco também ocupa vaga do plano
-    # (decisão do dono), e criar depois esbarraria no pockets_max.
+    # `_seed_connection` promove o user pra plano pago: o import só roda pra
+    # Essencial+ e agora desconta do `pockets_max` como a criação manual.
     db.create_pocket(user_id, "manual")
     conn_id = _seed_connection(user_id, institution="Nubank")
     _save(conn_id, _nubank_raws([500.0]))

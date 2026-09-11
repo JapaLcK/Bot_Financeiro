@@ -342,11 +342,25 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         # No Grátis (pós-trial) o OF nem sincroniza (conexão PAUSED barra acima); este gate é
         # a segunda trava: se o usuário caiu de plano, as caixinhas congelam (não atualizam).
         # Renda variável (ações/FIIs) é lida à parte no snapshot, também gated. Fail-soft.
-        caixinha_result = {"caixinhas_created": 0, "caixinhas_linked": 0, "caixinhas_mirrored": 0}
+        caixinha_result = {"caixinhas_created": 0, "caixinhas_mirrored": 0,
+                           "caixinhas_sem_vaga": 0}
         try:
             from core.services.plan_service import require_min_tier
             if require_min_tier(connection["user_id"], "essencial"):
                 caixinha_result = sync_open_finance_caixinhas(connection["id"], connection["user_id"])
+                # O import obedece ao teto de caixinhas do plano. O que não coube
+                # não aparece em lugar nenhum da tela (a caixinha simplesmente não
+                # existe) — este log é o único rastro, até haver aviso de upgrade.
+                if caixinha_result.get("caixinhas_sem_vaga"):
+                    print(f"[pluggy_sync] caixinha auto-import: "
+                          f"{caixinha_result['caixinhas_sem_vaga']} fora do teto do plano "
+                          f"(user={connection['user_id']})")
+                # 50 nomes ocupados na mesma base: a posição fica de fora sem
+                # nada na tela. Implausível, e por isso mesmo tem de aparecer.
+                if caixinha_result.get("caixinhas_sem_nome"):
+                    print(f"[pluggy_sync] caixinha auto-import: "
+                          f"{caixinha_result['caixinhas_sem_nome']} sem nome livre "
+                          f"(user={connection['user_id']})")
         except Exception as exc:
             print(f"[pluggy_sync] caixinha auto-import: {exc}")
 

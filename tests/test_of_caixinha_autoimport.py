@@ -1,8 +1,9 @@
 """Testes do auto-import de caixinhas do Open Finance (db.sync_open_finance_caixinhas).
 
-Cobre: auto-create só pra investimento com CARA de caixinha (CDB comum fica fora),
-dedup por nome, espelho do saldo do banco, e o guard que impede o accrual de pocket
-tocar no saldo espelhado.
+Cobre: auto-create pela regra de caixinha (nome OU CDB do próprio banco conectado),
+o teto de caixinhas do plano, o espelho do saldo do banco, e o guard que impede o
+accrual de pocket tocar no saldo espelhado. A regra emissor × banco em si é medida
+contra o catálogo em `tests/test_of_caixinha_regra_emissor.py`.
 """
 import pytest
 
@@ -10,10 +11,16 @@ import db
 from db import get_conn
 from db.pockets import accrue_all_pockets
 from core.services.pluggy_sync import normalize_pluggy_investment
+from conftest import promote_to_pro
 
 
 def _seed_connection(user_id: int, institution: str = "Pluggy Bank",
                     item: str = "test-cx-item") -> int:
+    # Plano pago: o auto-import só roda pra Essencial+ (`require_min_tier` em
+    # pluggy_sync) e agora respeita o `pockets_max` do tier — no Grátis (teto 1)
+    # nenhum destes cenários existiria. Quem mede o teto é
+    # tests/test_of_caixinha_teto_e_nome.py.
+    promote_to_pro(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -73,23 +80,6 @@ def test_mirror_updates_balance_on_resync(user_id):
     assert res["caixinhas_created"] == 0          # não duplica
     assert res["caixinhas_mirrored"] == 1
     assert float(_pockets(user_id)["Reserva de emergência"]["balance"]) == 1250.0
-
-
-def test_dedup_binds_existing_manual_pocket(user_id):
-    # usuário já tem uma caixinha manual "Reserva"
-    db.create_pocket(user_id, "Reserva")
-    conn_id = _seed_connection(user_id)
-    _save(conn_id, [{"id": "cx3", "name": "Reserva", "type": "FIXED_INCOME",
-                     "subtype": "CDB", "balance": 777.0}])
-    res = db.sync_open_finance_caixinhas(conn_id, user_id)
-    assert res["caixinhas_created"] == 0
-    assert res["caixinhas_linked"] == 1           # vinculou na existente, não duplicou
-
-    pk = _pockets(user_id)
-    names = [n for n in pk if n.lower() == "reserva"]
-    assert len(names) == 1                         # uma só (sem duplicata)
-    assert pk["Reserva"]["of_investment_id"] is not None
-    assert float(pk["Reserva"]["balance"]) == 777.0
 
 
 def test_zero_balance_caixinha_not_imported(user_id):
@@ -248,7 +238,13 @@ def test_cdb_de_outro_emissor_nao_vira_caixinha(user_id):
     assert _rf_names(user_id) == {"CDB · Nu Financeira"}   # segue contando como renda fixa
 
 
-def test_import_nao_muda_a_soma(user_id):
+def test_invariante_de_conservacao_do_total(user_id):
+    """INVARIANTE, não controle do conserto: mede que o total (renda fixa +
+    caixinhas) não muda com o import — nada some, nada conta duas vezes. Fica
+    VERDE com a regra do emissor desligada (aí nada vira caixinha e a soma
+    também bate), então não prova nada sobre ela. Quem prova é
+    `tests/test_of_caixinha_regra_emissor.py` e `test_cdb_do_proprio_banco_*`.
+    """
     from db.rv import list_of_fixed_income
     conn_id = _seed_connection(user_id, institution="Nubank")
     _save(conn_id, _nubank_raws() + [CDB_TERCEIRO, TESOURO])
