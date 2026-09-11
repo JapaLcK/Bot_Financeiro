@@ -472,6 +472,10 @@ test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async
  *                          aberto de propósito: o dano é MENSAGEM DE FALHA FALSA sobre
  *                          uma troca que foi desfeita, sem perda de dinheiro e sem
  *                          duplo efeito (o `release` não se reaplica).
+ *   `document.activeElement`  o FOCO, que não é escrita de ninguém desta lista:
+ *                          é estado do NAVEGADOR e some quando o `createRoot`
+ *                          limpa o container → é o PI10, com a varredura do
+ *                          resto da categoria no cabeçalho dele.
  *
  * Os três casos medem a MESMA equivalência em vez de um número escrito: com a
  * ilha ou sem ela, o botão volta ao rótulo original e o 2º clique dispara um POST
@@ -574,6 +578,132 @@ test("PI9: clicar em Assinar com o bundle em voo não mata o botão de compra", 
       `${nome}: o 2º clique não fez POST nenhum — o botão de compra está morto`);
     assert.deepEqual(erros, [], nome);
     await pagina.close();
+  }
+});
+
+/**
+ * PI10 — O FOCO, o QUARTO membro da classe enumerada no PI9, e o único que não
+ * mora no markup: `document.activeElement` é estado do NAVEGADOR. O `lerCartao`
+ * lê `className`, `textContent`, `disabled` e `dataset` — nada disso é foco, e
+ * `createRoot` LIMPA o container, então o nó focado sai do documento e o
+ * navegador devolve o foco ao `<body>`.
+ *
+ * Alcançável pela MESMA janela do PI8/PI9, e medido nesta árvore antes do
+ * conserto (bundle atrasado 1500 ms): `activeElement` BUTTON[plus] antes do
+ * mount, BODY depois — o botão continua na tela, mas quem navega por teclado ou
+ * leitor de tela é jogado para o começo do documento no meio da página que
+ * vende. Os cards do servidor já são acionáveis nessa janela porque o handler é
+ * ATRIBUTO inline (`onclick="startCheckout(…)"`), não um listener que o bundle
+ * registra.
+ *
+ * ── O resto da classe "estado do navegador dentro do #plans-v2", MEDIDO ──────
+ *
+ *   focáveis        os 4 `<button>` do card e mais nada (nenhum `<a>`, nenhum
+ *                   `tabindex`) — e o 4º (Premium) nasce `disabled`, logo não é
+ *                   focável. Por isso `[data-plan-btn]` cobre a categoria toda
+ *                   em vez de ser um atalho.
+ *   `:focus-visible`  derivado do foco, não guardado: com o foco restaurado o
+ *                   anel continua (medido `matches(":focus-visible") === true`
+ *                   depois do mount). É por isso que este caso o assere.
+ *   scroll          NENHUM contêiner rolável dentro do `#plans-v2` (medido:
+ *                   `overflow` calculado é `visible` na raiz e em todos os
+ *                   descendentes), então não há posição de rolagem a preservar.
+ *                   O que HÁ é o risco inverso, e é defeito que o próprio
+ *                   conserto criaria: `focus()` sem `preventScroll` rolou a
+ *                   página 0 → 881px na medição. Daí a asserção de `scrollY`.
+ *   seleção de texto  PERDIDA no mount (medido: "R$ 9,90/mês" selecionado antes,
+ *                   `getSelection()` vazia depois). Teto ACEITO de propósito:
+ *                   ninguém depende de seleção para comprar, restaurá-la exigiria
+ *                   remapear `Range` por caminho de nó, e o dano é cosmético num
+ *                   gesto que o usuário refaz. ponytail: se um dia der problema,
+ *                   o conserto é guardar `startContainer`/`offset` por índice de
+ *                   filho e refazer o Range depois do `flushSync`.
+ *   `aria-*`        nenhum é escrito pelo usuário aqui; os do markup
+ *                   (`aria-hidden` dos ícones) viajam dentro do `innerHTML` que
+ *                   o `lerCartao` copia. O `aria-live` da página (`#pix-cycle-live`)
+ *                   está FORA do `#plans-v2` e o mount não o toca.
+ *   `:hover`/`:active`  re-derivados pelo navegador no próximo evento de ponteiro;
+ *                   não há estado a restaurar.
+ *   IME / valor de campo  não há `<input>`, `<select>` nem `contenteditable`
+ *                   dentro do `#plans-v2`.
+ *   animação CSS    o `.plan-badge` tem `pb-badge-pan` e ela REINICIA no mount.
+ *                   Não é afetado no sentido que importa: é decorativa, infinita
+ *                   e o reinício não é percebido num nó que acabou de entrar.
+ *
+ * Controles do §3:
+ *   · negativo — apague o par captura/restauração do `main.jsx` e rebuilde: a
+ *     1ª linha fica vermelha (`activeElement` BODY, `mesmoNo` inconclusivo), e as
+ *     outras duas seguem VERDES — é a 1ª que discrimina;
+ *   · positivo — a 2ª linha foca FORA da ilha (`#cycle-annual`) e exige que o
+ *     foco continue no MESMO nó. Sem ela, um conserto que focasse o card sempre
+ *     passaria — e roubar foco de quem está no toggle é pior que o bug. A 3ª
+ *     ("ninguém focou") prende o outro lado: o mount não pode INVENTAR foco.
+ */
+test("PI10: o foco dentro do card sobrevive ao mount, e o de fora não é roubado", async () => {
+  const PLUS = '#plans-v2 [data-plan-btn="plus"]';
+  for (const { nome, focar, esperado, mesmoNo } of [
+    { nome: "foco no botão do card", focar: PLUS, esperado: "plus", mesmoNo: false },
+    { nome: "foco fora da ilha", focar: "#cycle-annual", esperado: "cycle-annual", mesmoNo: true },
+    { nome: "ninguém focou nada", focar: null, esperado: "BODY", mesmoNo: true },
+  ]) {
+    const pagina = await browser.newPage();
+    const erros = [];
+    pagina.on("pageerror", (e) => erros.push(String(e)));
+    // O nó que o SERVIDOR mandou: é o detector de mount deste caso (ele SAI do
+    // documento quando a ilha reemite o card) e a âncora de "o foco foi posto
+    // ANTES do mount".
+    await pagina.addInitScript(() => {
+      new MutationObserver((_, obs) => {
+        const b = document.querySelector('#plans-v2 [data-plan-btn="plus"]');
+        if (!b) return;
+        window.__noDoServidor = b;
+        obs.disconnect();
+      }).observe(document, { subtree: true, childList: true });
+    });
+    await pagina.route("**/precos-app.js*", async (r) => {
+      await new Promise((ok) => setTimeout(ok, 1500));
+      return r.fallback();
+    });
+    // `commit`: durante a janela o `load` ainda não aconteceu — é o bundle que
+    // o segura, e é exatamente aí que o usuário já pode tabular até o card.
+    await pagina.goto(`${ORIGIN}/precos.html`, { waitUntil: "commit" });
+    await pagina.waitForSelector(PLUS);
+    const antes = await pagina.evaluate((sel) => {
+      if (sel) document.querySelector(sel).focus();
+      window.__foco = document.activeElement;
+      window.scrollTo(0, 0);   // o zero é o referencial do `scrollY` de depois
+      return { ae: document.activeElement === document.body ? "BODY"
+                 : document.activeElement.dataset.planBtn || document.activeElement.id,
+               noDoServidor: document.activeElement === window.__noDoServidor,
+               scrollY: window.scrollY };
+    }, focar);
+    // O mount: o nó do servidor deixa de estar no documento.
+    await pagina.waitForFunction(() => window.__noDoServidor?.isConnected === false);
+    const depois = await pagina.evaluate(() => {
+      const ae = document.activeElement;
+      return { ae: ae === document.body ? "BODY" : ae.dataset.planBtn || ae.id,
+               mesmoNo: ae === window.__foco,
+               anel: ae !== document.body && ae.matches(":focus-visible"),
+               scrollY: window.scrollY };
+    });
+    await pagina.close();
+
+    // As ÂNCORAS, sem as quais o caso não mede o que o nome dele diz:
+    assert.equal(antes.ae, esperado, `${nome}: o foco não foi para onde este caso mede`);
+    assert.equal(antes.noDoServidor, focar === PLUS,
+      `${nome}: o foco caiu do outro lado do mount`);
+    assert.equal(antes.scrollY, 0, `${nome}: a página não estava no topo antes do mount`);
+
+    assert.equal(depois.ae, esperado,
+      `${nome}: depois do mount o foco está em "${depois.ae}" e devia estar em "${esperado}"`);
+    // Para o botão do card, `mesmoNo: false` é o que separa "o conserto
+    // restaurou" de "o mount nunca tocou no nó" — sem isto o caso ficaria verde
+    // numa ilha que não montou. Para o de fora, `true` é a exigência: o mesmo nó.
+    assert.equal(depois.mesmoNo, mesmoNo, `${nome}: mesmoNo=${depois.mesmoNo}`);
+    if (focar) assert.equal(depois.anel, true, `${nome}: o anel de foco sumiu`);
+    assert.equal(depois.scrollY, 0,
+      `${nome}: o mount rolou a página para ${depois.scrollY}px`);
+    assert.deepEqual(erros, [], nome);
   }
 });
 

@@ -25,7 +25,32 @@ const raiz = document.getElementById("plans-v2");
 const planos = raiz && lerPlanos(raiz);
 
 if (planos) {
+  // O FOCO é estado do navegador, não do markup: o `lerPlanos` lê o DOM e o
+  // `createRoot` LIMPA o container, então o nó focado sai do documento e o
+  // navegador devolve o foco ao `<body>` — medido nesta árvore, com o bundle
+  // atrasado 1500 ms: `activeElement` BUTTON[plus] antes, BODY depois. Quem
+  // navega por teclado ou leitor de tela perde o lugar no meio da página que
+  // vende, sem um evento para avisar. A janela é a mesma do PI8/PI9 (bundle
+  // parser-blocking, `Cache-Control: no-cache`, e os `onclick` inline já tornam
+  // os cards do servidor clicáveis antes de o bundle chegar).
+  //
+  // Só `[data-plan-btn]`, e é cobertura e não atalho: os únicos focáveis dentro
+  // do `#plans-v2` são os quatro `<button>` do card, e o quarto (Premium) nasce
+  // `disabled` — logo não é focável. O predicado é o MESMO do `restaurar()` do
+  // `startCheckout` (`precos.html`), que já resolve "o nó foi trocado, ache o
+  // equivalente".
+  const plano = raiz.contains(document.activeElement)
+    ? document.activeElement.dataset.planBtn : null;
   flushSync(() => createRoot(raiz).render(<Planos planos={planos} />));
+  // Fora da ilha ⟹ nada: restaurar cegamente ROUBARIA o foco de quem está no
+  // toggle de ciclo ou na nav. `preventScroll` porque o mount não pode mover a
+  // viewport — sem ele, com a página rolada de volta ao topo durante a espera, o
+  // `focus()` medido saltou de 0 para 881px. O anel não se perde nisso: o
+  // `:focus-visible` continua casando depois do `focus()` programático (medido).
+  if (plano) {
+    document.querySelector(`#plans-v2 [data-plan-btn="${plano}"]`)
+      ?.focus({ preventScroll: true });
+  }
   // OBRIGATÓRIA, não uma precaução barata — e a janela dela é alcançável SÓ POR
   // ATRASO DE REDE, medido, não suposto.
   //
