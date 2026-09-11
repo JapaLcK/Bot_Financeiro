@@ -107,7 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
-from core.pg_text import limpa_para_pg, recusa_veneno
+from core.pg_text import limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -2254,6 +2254,52 @@ async def csrf_middleware(request: Request, call_next):
     if request.method.upper() in CSRF_SAFE_METHODS and not token:
         _set_csrf_cookie(response, _make_csrf_token())
     return response
+
+
+@app.middleware("http")
+async def query_venenosa_middleware(request: Request, call_next):
+    """NUL/surrogate em QUERY param vira 422 na borda, nunca 500 lá no `execute`.
+
+    O #369 fechou o corpo (modelo Pydantic, `recusa_veneno`) e o #321 fechou o
+    path (guarda nas funções de `db/`). Sobrava a query, e a varredura desta
+    árvore mediu **8** rotas em 500 com `?campo=a%00b` — 4 de admin
+    (`/admin/api/users?plan`, `/admin/api/pii-access?actor` e `?field`,
+    `/admin/grant-pro?email`) e 4 de usuário autenticado comum
+    (`/categories/{id}/launches?categoria`, `/data/{id}?q`,
+    `/history/{id}/list?categoria` e `?q`) — cada 500 gravando uma linha em
+    `system_event_logs` pelo `admin_error_logging_middleware`.
+
+    **Um ponto, não 8 remendos** (§2): os 8 sinks moram em 6 funções de 4
+    módulos, e nenhum é chamador comum dos outros — a única coisa que eles têm
+    em comum é a query string. Guarda por função deixaria aberta a rota que o
+    próximo PR acrescentar; aqui a categoria fecha inteira, inclusive o que
+    ainda não existe.
+
+    **Recusar, não sanear** — a mesma decisão do `recusa_veneno` e pelo mesmo
+    motivo: `?q=` e `?plan=` são o que o usuário digitou, e trocar por `U+FFFD`
+    devolveria silenciosamente o resultado de OUTRA busca. Nenhuma query
+    legítima traz os dois: navegador nenhum os produz.
+
+    O que MUDA fora dos 8: os outros params `str` respondiam 4xx (parser de
+    data, whitelist) ou 200 tratando o veneno como texto qualquer — `?q=a\x00b`
+    no admin dava 200 com zero resultado. Esses passam a 422. Ninguém legítimo
+    está nessa faixa, e o 422 é honesto onde o 200 dizia "procurei e não achei".
+
+    Middleware e não `Depends`: `Depends` obrigaria a tocar as 38 rotas.
+    `_with_security_headers` porque este `return` não desce ao
+    `security_headers_middleware`, exatamente como no `csrf_middleware`.
+    """
+    if any(tem_veneno(valor) for valor in request.query_params.values()):
+        return _with_security_headers(
+            error_page_response(422) if wants_html(request)
+            else vary_accept(JSONResponse(
+                status_code=422,
+                content={"detail": "Parâmetro de busca contém caractere inválido."},
+                headers={"Cache-Control": "no-store"},
+            ))
+        )
+    return await call_next(request)
+
 
 # ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
 # Importar wa_app no nível de módulo puxava toda a cadeia de lógica do bot
@@ -6186,6 +6232,23 @@ async def conta_redirect(request: Request):
 # ─── Magic link de acesso ao dashboard ───────────────────────────────────────
 
 @app.get("/d/{code}")
+# Teto de 30/min por IP: sem ele, 200 requisições anônimas com código bem formado
+# viravam 200 DELETEs no Postgres a 589 req/s, e zero 429 (medido).
+#
+# `shared_limit(..., scope=)` e NÃO `limit()`, e isso não é estilo: o `Limiter`
+# de `frontend/routes/shared.py` roda com o `key_style="url"` default do slowapi,
+# então o balde de um `@limiter.limit` é (IP, **URL exata**). Numa rota com path
+# param, cada código inventado cai num balde novo e o teto nunca é alcançado —
+# MEDIDO nesta árvore: 35 GETs em `/d/x0..x34` com `@limiter.limit("30/minute")`
+# deram 0 × 429; os mesmos 35 na MESMA URL deram 5 × 429. `scope` fixo tira a URL
+# da chave e faz o balde ser (IP, este endpoint), que é o que o teto quer dizer.
+#
+# Janela de MINUTO, não de hora, porque o `rate_limit_exceeded_handler` devolve
+# `Retry-After: 60` fixo — com teto por hora o 429 mentiria a hora inteira. O
+# limitador é por IP e um CGNAT de operadora põe vários usuários na mesma chave:
+# 30 cliques/min do mesmo IP fica muito acima do tráfego real, e quem esbarrar
+# volta em 60 s em vez de ficar uma hora sem o magic link do bot.
+@limiter.shared_limit("30/minute", scope="magic_link_do_bot")
 async def dashboard_short_link(
     request: Request,
     code: str,

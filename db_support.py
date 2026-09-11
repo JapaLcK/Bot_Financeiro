@@ -646,22 +646,6 @@ def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> s
     raise RuntimeError("Falha ao criar sessão temporária do dashboard.")
 
 
-def get_dashboard_session_impl(get_conn, code: str) -> int | None:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from dashboard_sessions
-                where code = %s and expires_at > now()
-                returning user_id
-                """,
-                (code,),
-            )
-            row = cur.fetchone()
-        conn.commit()
-    return row["user_id"] if row else None
-
-
 def update_user_plan_impl(get_conn, user_id: int, plan: str, expires_at=None) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
