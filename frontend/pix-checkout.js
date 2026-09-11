@@ -256,11 +256,12 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     }
     // Guarda de FORMA, não de data: "2028-13-45" passa e a tela escreve
     // "45/13/2028" (medido). Não se aperta porque não é alcançável — o
-    // `covered_until` é o `isoformat()` de um timestamptz (billing_pix.py:107). O
+    // `covered_until` é o `isoformat()` de um timestamptz (o `CoberturaJaPaga` do
+    // `criar_checkout_pix`, em `frontend/routes/billing_pix.py`). O
     // que ela barra é o que já chegava: ausente, ou texto livre virando "undefined".
     // ponytail: e o dia recortado é o do calendário UTC, não o de Brasília — compra
     // entre 21h e 24h (3 das 24 horas) nomeia o dia seguinte. Categoria, não caso:
-    // o `pixModalMigracao` e o pix-poll.js:54 recortam igual. Fechar é converter o
+    // o `pixModalMigracao` e o `pixModalQr` (`pix-poll.js`) recortam igual. Fechar é converter o
     // fuso nos três, não recortar string.
     const pago = det.error === "pix_future_purchase_conflict"
       && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");

@@ -454,10 +454,24 @@ test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async
  *   `startCheckout`        guarda a REFERÊNCIA do nó através do fetch → este caso.
  *   `cancelChange`         guarda a referência igual, mas o `refreshPlanButtons`
  *                          pós-mount reemite o `disabled=false` dele; o que sobra
- *                          é a guarda de duplo clique perdida DURANTE o voo (um
- *                          POST extra em `/billing/cancel-change`, medido, sem
- *                          botão morto e sem dinheiro). Teto conhecido, aberto de
- *                          propósito.
+ *                          é a guarda de duplo clique perdida DURANTE o voo — um 2º
+ *                          POST em `/billing/cancel-change` numa operação que JÁ deu
+ *                          certo. NÃO é um "POST idempotente": o endpoint
+ *                          `cancel_change` (`finance_bot_websocket_custom.py`) devolve
+ *                          ERRO no 2º, por um de dois ramos — 502 se o
+ *                          `stripe.SubscriptionSchedule.release` recusar soltar um
+ *                          schedule já solto, ou 400 `no_change` se a releitura da
+ *                          assinatura não trouxer mais `schedule`. Qual dos dois
+ *                          dispara é LEITURA do código, não medição: a Stripe não foi
+ *                          exercitada aqui, e o `cancelChange` também não tem teste.
+ *                          No ramo 502 o `detail` é string, então o
+ *                          `d.detail && d.detail.message` do `cancelChange`
+ *                          (`precos.html`) dá `undefined` e o usuário lê o genérico
+ *                          "Não consegui desfazer." — com `btn.disabled = false` logo
+ *                          depois, convidando a uma 3ª tentativa. Teto conhecido,
+ *                          aberto de propósito: o dano é MENSAGEM DE FALHA FALSA sobre
+ *                          uma troca que foi desfeita, sem perda de dinheiro e sem
+ *                          duplo efeito (o `release` não se reaplica).
  *
  * Os três casos medem a MESMA equivalência em vez de um número escrito: com a
  * ilha ou sem ela, o botão volta ao rótulo original e o 2º clique dispara um POST
