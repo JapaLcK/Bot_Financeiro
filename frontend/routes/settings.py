@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.crypto import encrypt_pii_optional, hash_pii_optional
+from core.pg_text import detalhe_seguro
 from core.sessions import (
     device_label,
     list_user_sessions,
@@ -302,7 +303,7 @@ async def update_security_contact_route(
         try:
             normalized_phone = normalize_phone_e164(phone)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     old_email = (auth_user.get("email") or "").strip().lower() or None
     email_actually_changed = bool(email) and email != old_email

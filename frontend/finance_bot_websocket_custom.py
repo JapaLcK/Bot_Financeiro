@@ -107,7 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
-from core.pg_text import limpa_para_pg, recusa_veneno
+from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -2942,7 +2942,7 @@ async def auth_register(request: Request, body: RegisterBody):
     try:
         normalize_phone_e164(body.phone)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
         code = create_email_verification(
@@ -2963,7 +2963,7 @@ async def auth_register(request: Request, body: RegisterBody):
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
         return {"status": "verification_sent", "email": body.email.strip().lower()}
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
     sent = send_verification_email(body.email.strip().lower(), code)
     if not sent:
@@ -2993,7 +2993,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
             body.email, body.code, source=signup_source_from_request(request)
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
@@ -3912,7 +3912,7 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     if email:
         from core.services.email_service import send_account_deletion_scheduled_email
@@ -4202,7 +4202,7 @@ async def auth_google_complete_signup(
             signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
     user_id = int(result["user_id"])
     email = result["email"]
@@ -6550,7 +6550,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                     reason=inferred.reason,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
             except Exception as exc:
                 logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
@@ -6591,7 +6591,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 reason=inferred.reason,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
 
@@ -6638,7 +6638,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             reason=inferred.reason,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
@@ -7135,7 +7135,7 @@ async def export_email(
         try:
             period_start, period_end = _normalize_export_period(start_date, end_date)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     else:
         y = year or now.year
         m = month or now.month
