@@ -1102,6 +1102,14 @@ enviarViewItemList();
        chegar por último lê o `window.pbPixState` que o outro deixou.
        O pix-poll.js vem ANTES: ele declara o `pixPoll` que o pix-checkout.js lê,
        e `let` de topo de script clássico tem TDZ até o script rodar. -->
+  <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
+       scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
+       `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
+       rodar antes dos cards existirem. O mount é síncrono (flushSync), então
+       quando esta linha termina o DOM dos cards já está pronto.
+       Se este script falhar ou não carregar, fica o markup do servidor acima —
+       que vende sozinho, com o mesmo visual. -->
+  <script src="/precos-app.js?v=1"></script>
   <script src="/pix-poll.js?v=1"></script>
   <script src="/pix-checkout.js?v=1"></script>
   <script src="/nav-auth.js?v=7" defer></script>

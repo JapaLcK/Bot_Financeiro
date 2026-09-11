@@ -439,6 +439,41 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
+      # Gate do artefato da ilha React: o `frontend/precos-app.js` é BUILDADO de
+      # `webapp/src` e COMMITADO, então ele pode ficar velho em silêncio — editei
+      # o `.jsx`, esqueci de buildar, e a produção continua servindo o bundle
+      # anterior com o CI verde. É o mesmo mecanismo do gate do CACHE_NAME: o
+      # repositório carrega dois artefatos que só um comando reconcilia.
+      #
+      # `--prefix webapp` de propósito: `webapp/` tem package.json e lockfile
+      # PRÓPRIOS, e o da RAIZ não pode ganhar um script `build` — é a ausência
+      # dele que mantém a detecção automática do Railway apontando para o Python
+      # em vez de tentar publicar um site Node.
+      #
+      # O que este gate NÃO garante: que o bundle RENDERIZA. Ele prova apenas
+      # que o artefato commitado é o que `webapp/src` produz hoje. Quem prova o
+      # render é o `npm run test:frontend` (step abaixo), e quem prova que a
+      # ROTA existe é o pytest (`tests/test_frontend_assets_e_rotas.py`).
+      #
+      # Antes do Chromium (~95 MB) pelo mesmo motivo dos outros dois: reprova em
+      # segundos em vez de esperar o job inteiro.
+      - name: Gate do artefato da ilha React (webapp -> frontend/precos-app.*)
+        run: |
+          set -euo pipefail
+          npm --prefix webapp ci
+          npm --prefix webapp run build
+          # `git status --porcelain` e não `git diff --exit-code`: o `diff` só vê
+          # arquivo RASTREADO, então um asset NOVO que o build passou a emitir
+          # (um `precos-app.css` que ninguém commitou) sairia como untracked e o
+          # gate aprovaria. O `status` pega as duas formas — modificado e novo.
+          SUJO=$(git status --porcelain -- frontend/precos-app.js frontend/precos-app.css)
+          if [ -n "$SUJO" ]; then
+            git diff -- frontend/precos-app.js frontend/precos-app.css | head -40 || true
+            echo "$SUJO"
+            echo "::error file=frontend/precos-app.js,title=Artefato da ilha React desatualizado::O build de webapp/src produziu um frontend/precos-app.* DIFERENTE do que esta commitado (lista acima; '??' e arquivo novo que ninguem commitou). Rode 'npm --prefix webapp ci && npm --prefix webapp run build' e commite o resultado junto com a mudanca no .jsx. Sem isso a producao continua servindo o bundle anterior, com este CI verde."
+            exit 1
+          fi
+
       - name: Install Playwright + Chromium
         run: npx playwright install --with-deps chromium
 

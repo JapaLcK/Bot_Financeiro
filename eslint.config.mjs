@@ -239,5 +239,15 @@ export default defineConfig([
     "mobile/ios/**",
     "mobile/node_modules/**",
     "package-lock.json",
+    // Ilha React da /precos. O `webapp/**` é FONTE de outro projeto npm (JSX,
+    // módulos ES, react no escopo) — a config de `frontend/**/*.js` aqui é para
+    // script clássico e o lint dela não descreve aquele código. O
+    // `frontend/precos-app.*` é ARTEFATO: um bundle minificado de uma linha
+    // longa passa o `quality/max-lines` de 350 por acidente, e acidente não é
+    // contrato. Quem prende o artefato é o step de build do CI (ele reprova se o
+    // `.js` commitado divergir do `webapp/src`), não o eslint.
+    "webapp/**",
+    "frontend/precos-app.js",
+    "frontend/precos-app.css",
   ]),
 ]);

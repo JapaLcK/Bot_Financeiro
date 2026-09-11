@@ -409,6 +409,17 @@ async def serve_sw():
     return resp
 
 
+@router.get("/precos-app.js")
+async def serve_precos_app_js():
+    """Ilha React do `#plans-v2` da /precos — artefato do build de `webapp/`,
+    commitado no repositório. Nome FIXO e sem hash porque a rota é escrita à mão
+    (não há StaticFiles mount); quem invalida cache é o `stamp_asset_versions`,
+    que carimba o `?v=` do HTML com um hash do conteúdo deste arquivo."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.js", media_type="application/javascript"
+    )
+
+
 @router.get("/modals.js")
 async def serve_modals_js():
     """Componente de modal estilizado (alertModal/confirmModal) usado em todas
