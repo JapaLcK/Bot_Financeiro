@@ -1330,12 +1330,43 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     PR nada é cortado por inadimplência, e prometer corte que não vem é
     exatamente o defeito que este trabalho existe para não cometer. Quem trouxer
     a regra de acesso reescreve esta copy junto — não antes.
+
+    **DUAS regras diferentes, e alguém vai confundi-las.** A de cima é sobre
+    PERDA DE ACESSO e continua valendo: este e-mail não pode prometer corte. A
+    de baixo é sobre RECURSOS, é nova, e não afrouxa a primeira:
+
+    > este e-mail também não pode prometer funcionamento PLENO.
+
+    Ele dizia "Seu PigBank continua funcionando normalmente — só a cobrança está
+    pendente", e ali é PIOR que no `send_payment_failed_email`, onde a mesma
+    frase era falsa em metade da janela. Aqui ela é falsa para quase toda a
+    população alcançada: o lembrete sai no 6º dia do relógio, e o relógio começa
+    na falha da fatura de RENOVAÇÃO — então o `plan_expires_at` já venceu.
+    Medido 2026-09-11, conta `plus`, relógio de 6,2 dias, `plan_expires_at` 6
+    dias no passado:
+
+        has_app_access = True     get_plan_tier = 'free'
+        launches_month_max=30  of_banks_max=0  agents_max=0
+        history_current_month_only=True
+
+    O que sobrevive das duas regras ao mesmo tempo: **entrar** é verdade
+    (`has_app_access` True, a carência concede), **os recursos** não são. Por
+    isso a frase enuncia a REGRA ("valem até o fim do período que você já
+    pagou") em vez de afirmar um estado, e fecha no que reverte a situação
+    ("voltam assim que a cobrança entrar") em vez de no que a piora — que seria
+    falar em corte e quebrar a regra de cima.
+
+    Preso por `tests/test_billing_email_cobranca_nao_promete_recursos.py`, junto
+    com o irmão. A dívida dos LIMITES (a carência dar tier `free`) é outro PR e
+    está em `docs/dunning_estados_eventos.md`; aqui o conserto é a copy parar de
+    prometer o que o produto não entrega.
     """
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Oi! Passando pra lembrar de uma coisinha.</p>
       <p>A cobrança do seu plano <strong>não passou</strong> e já faz quase uma semana.
-      Seu PigBank continua funcionando normalmente — só a cobrança está pendente.</p>
+      Você continua entrando no PigBank. Os recursos do seu plano valem até o fim do período que você já
+      pagou — eles voltam assim que a cobrança entrar.</p>
       <p>Atualizar o cartão leva menos de um minuto:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
@@ -1344,9 +1375,10 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     html = _base_html("Lembrete: sua cobrança está pendente", content)
     text = (
         "PigBank — sua cobranca continua pendente.\n\n"
-        "A cobranca do seu plano nao passou e ja faz quase uma semana. Seu PigBank "
-        "continua funcionando normalmente; atualizar o cartao leva menos de um "
-        "minuto:\n"
+        "A cobranca do seu plano nao passou e ja faz quase uma semana. Voce continua "
+        "entrando no PigBank; os recursos do seu plano valem ate o fim do periodo que "
+        "voce ja pagou e voltam assim que a cobranca entrar. Atualizar o cartao leva "
+        "menos de um minuto:\n"
         f"{dash}/conta\n"
     )
     return send_email(

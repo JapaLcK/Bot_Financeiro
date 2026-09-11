@@ -1,11 +1,18 @@
 """
-tests/test_billing_email_falha_nao_promete_recursos.py — o e-mail de pagamento
-falhou não promete o que o produto não entrega na carência.
+tests/test_billing_email_cobranca_nao_promete_recursos.py — os DOIS e-mails de
+cobrança em atraso não prometem o que o produto não entrega na carência.
 
 Arquivo próprio por assunto: `test_billing_email_nome_do_plano_irmaos.py` cobre
 o NOME DO PLANO nesta mesma copy, e diz com todas as letras que "os asserts
-abaixo afirmam só o NOME de propósito". A CONTEÚDO da promessa não tinha dono —
+abaixo afirmam só o NOME de propósito". O CONTEÚDO da promessa não tinha dono —
 e foi exatamente por isso que ela envelheceu.
+
+**Nasceu cobrindo só o `send_payment_failed_email` e cresceu no mesmo dia**, o
+que é o registro da lição: a frase foi consertada num e-mail e o irmão
+(`send_payment_reminder_email`) ficou dizendo o contrário. "Achei um caso" ≠
+"resolvi a categoria" (§2), e aqui a categoria são os dois e-mails que falam
+com quem está com a cobrança em atraso. O nome do arquivo diz `cobranca`, e não
+`falha`, por isso.
 
 **A frase envelhecida**: "Enquanto isso, seu plano fica como past_due e você
 continua usando normalmente." Ela é verdade em METADE da janela. Medido
@@ -135,3 +142,97 @@ def test_a_falha_continua_avisando_do_bloqueio_se_as_tentativas_falharem(captura
     html = _html_da_falha(capturado)
     assert "o acesso ao PigBank é bloqueado" in html, html
     assert "não existe mais plano Free" in html, html
+
+
+# ── O IRMÃO: o lembrete do 6º dia ───────────────────────────────────────────
+#
+# `send_payment_reminder_email` dizia "Seu PigBank continua funcionando
+# normalmente — só a cobrança está pendente", em HTML e em texto. Nele a frase é
+# PIOR que no e-mail de falha: lá era falsa em metade da janela, aqui é falsa
+# para quase toda a população alcançada. O lembrete sai no 6º dia do relógio, e
+# o relógio começa na falha da fatura de RENOVAÇÃO — então o `plan_expires_at`
+# já venceu. Medido 2026-09-11, conta `plus`, relógio de 6,2 dias:
+#
+#     has_app_access = True     get_plan_tier = 'free'
+#     launches_month_max=30  of_banks_max=0  agents_max=0
+#
+# **DUAS regras diferentes, e é para não confundi-las que isto está escrito.**
+# A antiga — este e-mail NÃO fala em perda de acesso — continua valendo inteira:
+# no 6º dia o acesso não caiu, e prometer corte que não vem é o defeito que o
+# trabalho do corte existe para não cometer. A nova — ele também não promete
+# funcionamento PLENO — não afrouxa a primeira: uma é sobre ACESSO, a outra
+# sobre RECURSOS. `test_o_lembrete_continua_sem_falar_em_perda_de_acesso`
+# prende a antiga, e ele é o positivo que impede o conserto de virar ameaça.
+#
+# CONTROLE DECLARADO (`docs/controles_declarados.md`) — em
+# `send_payment_reminder_email`, reponha a frase antiga no HTML::
+#
+#       Seu PigBank continua funcionando normalmente — só a cobrança está pendente.</p>
+#
+# VERMELHOS (medido 2026-09-11):
+#   `test_o_lembrete_nao_promete_funcionamento_pleno`
+#   `test_o_lembrete_diz_a_regra_dos_recursos`
+# Direção: promessa falsa de recursos, para uma população que no 6º dia já está
+# com 30 lançamentos, sem Open Finance e sem agentes.
+#
+# **Positivos do grupo**, e os DOIS ficam verdes sob essa injeção — o parágrafo
+# antigo também prometia entrar e também não falava em corte:
+#   `test_o_lembrete_continua_dizendo_que_da_pra_entrar`
+#   `test_o_lembrete_continua_sem_falar_em_perda_de_acesso`
+# O primeiro separa "parou de mentir" de "parou de falar": apagar o parágrafo
+# derruba ele e deixa o negativo VERDE. O segundo separa "parou de mentir" de
+# "passou a ameaçar", que é o outro jeito de errar aqui.
+
+
+def _partes_do_lembrete(capturado) -> list[str]:  # noqa: F811
+    """HTML **e** texto, os dois normalizados. A frase antiga vivia nos DOIS, e
+    consertar só o HTML deixaria o cliente de e-mail em texto puro lendo a
+    promessa velha — foi assim que ela sobreviveu ao conserto do irmão."""
+    assert es.send_payment_reminder_email("a@b.com")
+    partes = [re.sub(r"\s+", " ", p) for p in _tudo(capturado)]
+    assert any("nao passou" in p or "não passou" in p for p in partes), partes
+    return partes
+
+
+def test_o_lembrete_nao_promete_funcionamento_pleno(capturado):  # noqa: F811
+    """No 6º dia o tier já é `free`: 30 lançamentos, sem OF, sem agentes."""
+    for parte in _partes_do_lembrete(capturado):
+        baixa = parte.lower()
+        assert "funcionando normalmente" not in baixa, (
+            f"o lembrete promete funcionamento pleno no 6º dia: {parte}")
+        assert "usando normalmente" not in baixa, parte
+
+
+def test_o_lembrete_diz_a_regra_dos_recursos(capturado):  # noqa: F811
+    """E não a afirmação oposta. A regra não tem tempo verbal e é verdadeira
+    antes e depois da virada do `plan_expires_at`."""
+    for parte in _partes_do_lembrete(capturado):
+        assert ("período que você já pagou" in parte
+                or "periodo que voce ja pagou" in parte), parte
+        assert ("assim que a cobrança entrar" in parte
+                or "assim que a cobranca entrar" in parte), parte
+
+
+def test_o_lembrete_continua_dizendo_que_da_pra_entrar(capturado):  # noqa: F811
+    """POSITIVO: `has_app_access` é True no 6º dia — a carência concede. Sem
+    este caso, apagar o parágrafo passaria no negativo acima."""
+    for parte in _partes_do_lembrete(capturado):
+        assert ("continua entrando no PigBank" in parte
+                or "continua entrando no PigBank" in parte.replace("Voce", "Você")), parte
+
+
+def test_o_lembrete_continua_sem_falar_em_perda_de_acesso(capturado):  # noqa: F811
+    """POSITIVO da regra ANTIGA, que o conserto novo não pode ter afrouxado.
+
+    No 6º dia o acesso NÃO caiu, e este e-mail continua proibido de prometer
+    corte — a diferença para o `send_payment_failed_email` é de fato, não de
+    tom. Sem este caso, "parar de prometer recursos" poderia ter virado "avisar
+    que vai bloquear", que é mentira na direção oposta.
+    """
+    for parte in _partes_do_lembrete(capturado):
+        baixa = parte.lower()
+        for proibido in ("bloquead", "bloqueio", "encerrad", "perde o acesso",
+                         "perder o acesso", "sem acesso", "suspens"):
+            assert proibido not in baixa, (
+                f"o lembrete do 6º dia ameaça o acesso ({proibido!r}), e no 6º dia "
+                f"o acesso não caiu: {parte}")
