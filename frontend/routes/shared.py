@@ -880,6 +880,20 @@ def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     • **DIREITO** (`has_app_access`) — o corte do fim do Grátis. `exige_direito=False`
       a desliga **só** para quem passar o parâmetro.
 
+    **A perna da ESCOLHA não é redundante com a do DIREITO, e a razão é o FREIO
+    DE EMERGÊNCIA.** À primeira vista quem não tem direito também não escolheu
+    plano, e a perna de cima pareceria um caso de canto (carência aberta com
+    `plan_selected_at` NULL). Não é: `ACCESS_GATE_ENABLED=0` desliga **só** a
+    perna do DIREITO — `plan_service.has_app_access` devolve True antes de
+    consultar `tem_direito_hoje`, e `needs_plan_selection` **não lê aquele
+    freio** (só o `PLANS_V2_ENABLED`). Medido 2026-09-11, com o v2 ligado e
+    `ACCESS_GATE_ENABLED=0`: `has_app_access` → True, `needs_plan_selection` →
+    True para cadastro sem `plan_selected_at`. Ou seja, com o freio puxado — que
+    é exatamente o cenário para o qual ele existe — a ESCOLHA é a ÚNICA coisa
+    que impede um cadastro novo de pular a /precos, e ela restaura o enforcement
+    pré-corte. Removê-la porque "o DIREITO já cobre" faria o freio de emergência
+    abrir uma segunda porta que ninguém pediu.
+
     **O único chamador com `exige_direito=False` é `/settings`, por decisão do
     dono, e o motivo é que ele é a SAÍDA DE EMERGÊNCIA.** Medido:
     `grep -rln "account/export" frontend/*.html frontend/*.js` (2026-09-11) acha

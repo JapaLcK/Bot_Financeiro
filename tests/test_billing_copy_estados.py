@@ -55,6 +55,16 @@ from _paywall_gate_helpers import (  # noqa: F401  (v2_ligado é fixture autouse
 # cortado"), não um discriminador do predicado de roteamento. Fica declarado
 # assim em vez de fingir que mede o que não mede.
 #
+# Dito sem rodeio, porque o leitor supõe o contrário: **a troca de `is_pro` por
+# `get_plan_tier` neste caminho de cobrança NÃO TEM EFEITO MEDIDO.** Remedido
+# 2026-09-11 com a injeção do roteamento antigo e mais nada: 43 passed, 0
+# failed. O predicado novo é o correto — `is_pro` é `tier >= plus` e mente sobre
+# o Essencial, e o fall-through que hoje o salva é acidente de duas metades se
+# cobrindo, não contrato — e ninguém pede reverter. Mas nenhum teste deste
+# arquivo, nem de outro, cai se ele voltar sozinho. Quem mexer aqui e quiser um
+# discriminador do roteamento precisa de um estado onde as duas metades NÃO se
+# cubram; ele não existe hoje e não foi inventado só para fechar a declaração.
+#
 # Direção das duas: falso NEGATIVO de assinatura — o bot afirma a cliente
 # pagante que não há assinatura a cancelar, e some com o link que a encerra.
 #

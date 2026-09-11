@@ -501,6 +501,17 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py). Desde
         # o corte do Grátis a perna do `has_app_access` também morde — ela é
         # quem barra o ex-assinante e a população só-WhatsApp.
+        #
+        # E a do `needs_plan_selection` NÃO virou redundante com ela. Os dois
+        # freios de emergência são separados: `ACCESS_GATE_ENABLED=0` desliga só
+        # o DIREITO (`has_app_access` devolve True antes de consultar
+        # `tem_direito_hoje`), e `needs_plan_selection` não lê aquele freio —
+        # medido 2026-09-11, com v2 ligado e `ACCESS_GATE_ENABLED=0`:
+        # has_app_access → True, needs_plan_selection → True para cadastro sem
+        # `plan_selected_at`. Com o freio puxado, esta perna é a ÚNICA que ainda
+        # barra o cadastro novo pelo bot, e é ela que devolve o enforcement
+        # pré-corte. Apagá-la por parecer coberta abriria uma porta que só
+        # aparece no dia em que o freio for puxado.
         # A política (onde vale, e por que sem isenção de app) mora na docstring
         # de plan_service.needs_plan_selection.
         from core.services.billing_commands import is_billing_command
