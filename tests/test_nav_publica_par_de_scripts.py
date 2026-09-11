@@ -35,10 +35,15 @@ PAR = ["nav-auth.js", "nav-burger.js"]
 
 
 def _paginas_com(nome: str) -> set:
-    """Páginas cuja tag <script> carrega `nome`. Menção em comentário não conta."""
+    """Páginas cujo texto contém `src="/<nome>`. Menção em prosa não casa com o
+    `src="/`, mas tag COMENTADA casa e conta como presente — é substring, não
+    parser. Serve porque o defeito procurado é tag ausente, não tag desligada.
+    """
     alvo = f'src="/{nome}'
     return {
-        p.name for p in FRONTEND_DIR.glob("*.html") if alvo in p.read_text()
+        p.name
+        for p in FRONTEND_DIR.glob("*.html")
+        if alvo in p.read_text(encoding="utf-8")
     }
 
 
