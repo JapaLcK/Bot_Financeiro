@@ -41,9 +41,13 @@ somente um servidor Next futuramente não prova o documento entregue ao visitant
 
 O coletor [`scripts/medir_frontend_publico.mjs`](../scripts/medir_frontend_publico.mjs)
 mede as rotas públicas reais por Chromium/Playwright. Para cada rota, ele cria
-cinco contextos sem cache e cinco navegações medidas após uma visita de aquecimento.
-Registra todas as amostras, mediana, mínimo e máximo de TTFB, FCP, LCP, load e
-bytes da primeira origem/terceiros. A rede 4G e CPU 4x são fixadas por padrão.
+cinco contextos sem cache e cinco navegações medidas após uma visita de aquecimento
+sem throttle. A visita de aquecimento só libera a coleta quente quando todos os
+recursos da primeira origem terminarem; se não terminar em 90 segundos, a coleta
+falha em vez de rotular uma amostra parcialmente aquecida como quente. Registra
+todas as amostras, mediana, mínimo e máximo de TTFB, FCP, LCP, load e bytes
+efetivamente recebidos da primeira origem/terceiros. A rede 4G e CPU 4x são
+fixadas por padrão nas amostras medidas.
 
 ```sh
 npm ci
@@ -59,14 +63,18 @@ o relatório PageSpeed isolado, será o controle da decisão sobre Next.
 Esta coleta é laboratório reproduzível, não RUM e não uma prova de conversão.
 LCP de campo, INP e conversão exigem dados de produção com amostra suficiente.
 
-### Resultado inicial — remedir antes de reutilizar
+### Resultado inicial — inválido para transferência; remedir
 
 Coleta em `2026-09-11T16:33:33Z`, a partir do checkout local `64f1ed1`, pelo
 comando `node scripts/medir_frontend_publico.mjs --runs 5 --output
 tmp/frontend-baseline-2026-09-11.json`. O SHA de produção não foi confirmado
 nesta sessão; portanto estes números descrevem a resposta pública observada,
 mas não comprovam qual commit a produziu. O JSON bruto está em
-`tmp/frontend-baseline-2026-09-11.json` e deve acompanhar a revisão que o usar.
+`tmp/frontend-baseline-2026-09-11.json`. A versão original do coletor encerrava
+a página antes de aguardar respostas lentas e aquecia a cache sob throttle; logo,
+as transferências e a classificação de cache quente abaixo não são comparáveis.
+Os números ficam apenas como registro histórico e não devem orientar decisão até
+uma nova coleta com o coletor corrigido.
 
 | Rota | Cache | TTFB mediano | FCP mediano | LCP mediano | Transferência mediana | Elemento LCP |
 | --- | --- | ---: | ---: | ---: | ---: | --- |

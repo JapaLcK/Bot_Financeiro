@@ -7,12 +7,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { chromium, devices } from "playwright";
+import { instrumentarRede } from "./lib/medicao_rede_playwright.mjs";
 
 const ORIGIN_PADRAO = "https://pigbankai.com";
 const ROTAS_PADRAO = ["/", "/precos", "/como-funciona"];
 const PERFIL_PADRAO = "iPhone 13";
 const ESPERA_ESTABILIZACAO_MS = 1_000;
 const LIMITE_LOAD_MS = 10_000;
+const LIMITE_AQUECIMENTO_CACHE_MS = 90_000;
 const REDE_4G = {
   offline: false,
   latency: 150,
@@ -43,9 +45,9 @@ function uso() {
   --output ARQUIVO    JSON de saída (padrão: tmp/frontend-baseline-<data>.json)
   --help              Mostra esta ajuda
 
-Cada rota recebe N contextos frios e N medições quentes. A visita que aquece o
-cache não entra na amostra quente. O JSON registra todas as amostras, a mediana
-e a dispersão; não edite o resultado manualmente.`;
+Cada rota recebe N contextos frios e N medições quentes. A visita de aquecimento
+não entra na amostra quente e precisa concluir os recursos da primeira origem.
+O JSON registra todas as amostras, a mediana e a dispersão; não o edite manualmente.`;
 }
 
 // eslint-disable-next-line complexity -- opções independentes da CLI precisam validar cada argumento.
@@ -108,29 +110,9 @@ function resumo(amostras) {
   }));
 }
 
-async function configurarThrottle(page, ativo) {
-  if (!ativo) return;
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Network.enable");
-  await cdp.send("Network.emulateNetworkConditions", REDE_4G);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-}
-
 async function medirUmaVez(contexto, url, throttle) {
   const page = await contexto.newPage();
-  const transferencias = [];
-  const pendentes = [];
-  page.on("response", resposta => {
-    // A API de tamanhos pertence a Request (e não a Response) no Playwright.
-    // Mantemos a resposta para URL/status, que descrevem o recurso entregue.
-    pendentes.push(resposta.request().sizes().then(tamanhos => transferencias.push({
-      url: resposta.url(),
-      tipo: resposta.request().resourceType(),
-      status: resposta.status(),
-      bytes: tamanhos.responseBodySize + tamanhos.responseHeadersSize,
-    })).catch(() => {}));
-  });
-  await configurarThrottle(page, throttle);
+  const rede = await instrumentarRede(page, { throttle, rede: REDE_4G });
   const inicio = Date.now();
   const resposta = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
   let loadConcluido = true;
@@ -151,10 +133,11 @@ async function medirUmaVez(contexto, url, throttle) {
       lcp: window.__pbUltimoLcp || null,
     };
   });
+  // Fotografa antes de fechar: respostas que ainda baixam entram com os bytes
+  // efetivamente recebidos, em vez de serem perdidas ao abortar a página.
+  const transferencias = rede.recursos();
+  await rede.detach();
   await page.close();
-  // Uma tag de terceiro pode manter a resposta aberta indefinidamente. Fechar a
-  // página primeiro encerra essas requisições e impede uma amostra sem fim.
-  await Promise.allSettled(pendentes);
   const origem = new URL(url).origin;
   const somar = filtro => transferencias.filter(filtro).reduce((total, item) => total + item.bytes, 0);
   return {
@@ -174,6 +157,19 @@ async function medirUmaVez(contexto, url, throttle) {
     lcp: navegacao.lcp,
     recursos_maiores: transferencias.sort((a, b) => b.bytes - a.bytes).slice(0, 10),
   };
+}
+
+async function aquecerCache(contexto, url) {
+  const page = await contexto.newPage();
+  const rede = await instrumentarRede(page, { throttle: false, rede: REDE_4G });
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForLoadState("load", { timeout: LIMITE_AQUECIMENTO_CACHE_MS });
+    await rede.esperarCacheDaOrigem(new URL(url).origin, LIMITE_AQUECIMENTO_CACHE_MS);
+  } finally {
+    await rede.detach();
+    await page.close();
+  }
 }
 
 async function medirRota(browser, opcoes, rota) {
@@ -230,7 +226,7 @@ async function medirRota(browser, opcoes, rota) {
       }
     }).observe({ type: "largest-contentful-paint", buffered: true });
   });
-  await medirUmaVez(contextoQuente, url, opcoes.throttle);
+  await aquecerCache(contextoQuente, url);
   const quente = [];
   for (let i = 0; i < opcoes.runs; i += 1) {
     quente.push(await medirUmaVez(contextoQuente, url, opcoes.throttle));
@@ -266,6 +262,7 @@ async function main() {
         throttle: opcoes.throttle ? { rede: REDE_4G, cpu_rate: 4 } : null,
         espera_estabilizacao_ms: ESPERA_ESTABILIZACAO_MS,
         limite_load_ms: LIMITE_LOAD_MS,
+        limite_aquecimento_cache_ms: LIMITE_AQUECIMENTO_CACHE_MS,
       },
       rotas,
     };
