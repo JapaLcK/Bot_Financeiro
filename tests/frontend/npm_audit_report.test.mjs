@@ -16,7 +16,7 @@
 import nodeTest from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -250,14 +250,19 @@ try {
  * o terceiro lock do repositório (`webapp/`, a ilha React da /precos) entrou sem
  * uma linha vermelha: 45 pacotes novos na cadeia que produz um arquivo servido
  * na página que vende, fora do `npm audit` e fora do Dependabot. Lista literal
- * mede o passado; `readdirSync` mede o repositório de hoje — o quarto lock
- * reprova até ser auditado.
+ * mede o passado; o disco mede o repositório de hoje — o quarto lock reprova até
+ * ser auditado.
+ *
+ * Por `git ls-files` e não `readdirSync`: a primeira versão listava só a
+ * PROFUNDIDADE 1, então um lock em `webapp/ilha2/` ficaria fora das duas
+ * varreduras sem uma linha vermelha (medido). O `git` resolve a recursão, o
+ * `node_modules` e o `.gitignore` de uma vez — e lock não versionado não é lock
+ * do repositório.
  */
-const LOCKS = ["."].concat(readdirSync(RAIZ, { withFileTypes: true })
-  .filter((d) => d.isDirectory() && d.name !== "node_modules" && !d.name.startsWith(".")
-    && existsSync(join(RAIZ, d.name, "package-lock.json")))
-  .map((d) => d.name)
-  .sort());
+const LOCKS = spawnSync("git", ["-C", RAIZ, "ls-files", "--", "*package-lock.json"],
+  { encoding: "utf8" }).stdout.trim().split("\n")
+  .map((f) => f.replace(/package-lock\.json$/, "").replace(/\/$/, "") || ".")
+  .sort();
 
 nodeTest("o workflow chama o script em TODO lock do repo, sem `|| echo`", { skip: semYaml }, () => {
   const doc = YAML.load(readFileSync(join(RAIZ, ".github/workflows/tests.yml"), "utf8"));
@@ -290,7 +295,11 @@ nodeTest("o workflow chama o script em TODO lock do repo, sem `|| echo`", { skip
  */
 nodeTest("todo lock do repo tem um ecossistema npm no Dependabot", { skip: semYaml }, () => {
   const doc = YAML.load(readFileSync(join(RAIZ, ".github/dependabot.yml"), "utf8"));
+  // `directories` (plural) também: o Dependabot aceita as duas chaves, e com a
+  // plural o `u.directory.replace(...)` estourava `TypeError` longe daqui em vez
+  // de reprovar com a lista dos locks.
   const npm = doc.updates.filter((u) => u["package-ecosystem"] === "npm")
-    .map((u) => u.directory.replace(/^\/(.*)$/, "$1") || ".");
+    .flatMap((u) => u.directories ?? [u.directory])
+    .map((d) => String(d).replace(/^\//, "") || ".");
   assert.deepEqual(npm.sort(), [...LOCKS].sort(), `locks no disco: ${LOCKS.join(", ")}`);
 });

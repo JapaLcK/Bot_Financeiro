@@ -348,12 +348,22 @@
                ou para quem tem acesso vitalício, que não compra — a página fica
                igual à de hoje: anunciar meio de pagamento que não existe é pior
                que não anunciar. -->
-          <!-- A região `aria-live` existe desde o parse e fica VAZIA aos olhos:
-               quem aparece dentro dela é a pílula, e é essa inserção que o
-               leitor de tela anuncia. Registrar a região e revelá-la no mesmo
-               instante não anuncia nada — por isso são dois elementos, e não um
-               `aria-live` na própria pílula. O vínculo com o botão Anual é o
-               `aria-describedby` que o pbPixInit põe e tira junto com ela. -->
+          <!-- A região `aria-live` existe desde o parse, e é por isso que são
+               DOIS elementos: região registrada e revelada no mesmo instante não
+               anuncia nada, então o `aria-live` não pode morar na própria pílula.
+               O vínculo com o botão Anual é o `aria-describedby` que o pbPixInit
+               põe e tira junto com o `hidden`.
+               TETO conhecido, e ele não é o que este comentário dizia antes: a
+               pílula NÃO é inserida aqui. Ela está no HTML desde o parse e o
+               `pbPixInit` só faz `hidden = false` — isso é mudança de
+               RELEVÂNCIA, não inserção de conteúdo, e o quanto cada leitor de
+               tela anuncia nesse caso varia. Se algum não anunciar, a saída é
+               esvaziar esta região no HTML e o `pbPixInit` copiar para dentro
+               dela o texto da pílula (uma inserção de verdade, sem duplicar a
+               string). Não foi feito às cegas: nenhum leitor de tela roda neste
+               ambiente, e o oráculo do PT19c só lê ATRIBUTO — ele é cego a esta
+               classe, que é a mesma que deixou o PT19b verde com o defeito do
+               `display` aceso. Decidir isso é aparelho, pós-deploy. -->
           <span id="pix-cycle-live" aria-live="polite"><span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span></span>
         </div>
 
