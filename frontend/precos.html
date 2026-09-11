@@ -12,6 +12,10 @@
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
+<!-- Camada do #plans-v2 (pódio + badge), emitida pelo build de webapp/.
+     DEPOIS do site.css de propósito: ela refina `.plan`/`.plan-badge`, que
+     nascem lá, e a mesma especificidade tem de ganhar pela ordem. -->
+<link rel="stylesheet" href="/precos-app.css?v=1" />
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

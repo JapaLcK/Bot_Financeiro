@@ -420,6 +420,19 @@ async def serve_precos_app_js():
     )
 
 
+@router.get("/precos-app.css")
+async def serve_precos_app_css():
+    """Par da ilha React da /precos — pódio dos cards e o badge do destaque.
+    Artefato do mesmo build de `webapp/`. no-cache como o /site.css: o
+    `stamp_asset_versions` carimba o `?v=` com o hash do conteúdo, e a página
+    está em iteração ativa."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/modals.js")
 async def serve_modals_js():
     """Componente de modal estilizado (alertModal/confirmModal) usado em todas

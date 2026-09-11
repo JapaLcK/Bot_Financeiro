@@ -21,6 +21,13 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   build: {
+    // `safari14` e não o default: sem isto o minificador reescreve
+    // `@media (min-width: 900px)` como `@media (width >= 900px)` — sintaxe de
+    // range do Media Queries 4, que só existe do Safari 16.4 pra frente. Este
+    // repositório suporta iOS 14 explicitamente (`tests/frontend/pb_nav_ios14.test.mjs`
+    // e o caso de iOS 14 do `precos_pix_anual.test.mjs`), e ali o bloco inteiro
+    // seria DESCARTADO — o pódio simplesmente não apareceria, sem erro nenhum.
+    cssTarget: "safari14",
     outDir: resolve(import.meta.dirname, "..", "frontend"),
     emptyOutDir: false,
     cssCodeSplit: false,

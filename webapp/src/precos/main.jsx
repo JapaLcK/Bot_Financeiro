@@ -11,6 +11,8 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
+import "./precos.css";
+
 import { Planos } from "./Planos.jsx";
 import { lerPlanos } from "./lerPlanos.js";
 

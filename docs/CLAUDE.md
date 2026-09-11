@@ -275,11 +275,15 @@ faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`)
 O detalhamento das armadilhas está no **§5 do `CLAUDE.md` da raiz** (é lá que ele
 mora; não duplicar aqui). O essencial de domínio:
 
-- **Sem build, sem bundler, sem framework.** O `package.json` da raiz serve só ao
-  harness de testes de frontend.
+- **O site é HTML/CSS/JS à mão, com UMA ilha React.** O `package.json` da raiz
+  continua servindo só ao harness de testes de frontend — e continua **sem script
+  `build`** de propósito: é a ausência dele que mantém a detecção automática do
+  Railway apontando para o Python. O build de JS que existe é o de `webapp/`,
+  projeto npm separado, com package.json e lockfile próprios.
 - **Páginas públicas e área logada são as duas MPA.** Existe um POC de navegação
   client-side (`pb-nav.js`) **desligado por padrão**, restrito ao modo app e a duas
-  rotas. Não trate a área logada como SPA e não presuma migração para framework.
+  rotas. Não trate a área logada como SPA: a migração para React que existe é por
+  ILHA (abaixo, em "Decisões tomadas") e não alcança a navegação.
 - **`dashboard.js` tem 10.587 linhas e 414 funções globais**, e `dashboard.html` tem
   139 handlers `onclick=` que dependem disso. Funcionalidade nova de dashboard deve
   nascer em arquivo próprio (§0.5 da raiz), com rota própria em `static_pages.py`.
@@ -387,6 +391,18 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
 - **Resend** para e-mail — SMTP/Gmail foi abandonado.
 - **Sem Google Sheets.**
 - **Sem Redis** até hoje: não há fila nem cache externo no repositório.
-- **Frontend sem build** — HTML/CSS/JS à mão, servidos pelo FastAPI. Não há React,
-  Vite, bundler nem processo de build de JS neste repositório, e a discussão de
-  migração **não** tem decisão tomada.
+- **A migração para React COMEÇOU, e a decisão está tomada.** O padrão é **ilha**,
+  não SPA: Vite + React 19 em `webapp/` (projeto npm separado), um bundle por
+  página, saída de nome FIXO e sem hash em `frontend/`, **artefato commitado** —
+  porque não há `StaticFiles` mount e cada asset precisa de rota escrita à mão.
+  Hoje existe UMA ilha: `frontend/precos-app.js` + `.css`, que renderiza só o
+  `#plans-v2` da `/precos`. Todo o resto daquela página — o `#comparar`, o
+  `<head>`, os ~420 linhas de `<script>` inline — continua sendo o clássico, e o
+  resto do site também. Regras da convenção: **IIFE, nunca `type="module"`**
+  (módulo é deferido e reintroduz corrida com script clássico da página), mount
+  síncrono com `flushSync`, e o componente **lê os dados do markup** em vez de
+  trazer literal — no caso da `/precos` isso é o que impede uma quarta cópia do
+  preço (§0.7). O artefato commitado tem gate próprio no CI (job `frontend`), no
+  molde do gate do `CACHE_NAME`.
+  **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar
+  framework em página nova por gosto, ou pôr script `build` na raiz.
