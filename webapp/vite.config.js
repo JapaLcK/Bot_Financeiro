@@ -21,12 +21,22 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   build: {
-    // `safari14` e não o default: sem isto o minificador reescreve
-    // `@media (min-width: 900px)` como `@media (width >= 900px)` — sintaxe de
-    // range do Media Queries 4, que só existe do Safari 16.4 pra frente. Este
-    // repositório suporta iOS 14 explicitamente (`tests/frontend/pb_nav_ios14.test.mjs`
-    // e o caso de iOS 14 do `precos_pix_anual.test.mjs`), e ali o bloco inteiro
-    // seria DESCARTADO — o pódio simplesmente não apareceria, sem erro nenhum.
+    // `safari14` nos DOIS, e não o default (`ios16.4`) em nenhum: este
+    // repositório suporta iOS 14 explicitamente
+    // (`tests/frontend/pb_nav_ios14.test.mjs` e o caso de iOS 14 do
+    // `precos_pix_anual.test.mjs`), e ali cada um falha de um jeito:
+    //
+    //  · CSS — sem isto o minificador reescreve `@media (min-width: 508px)`
+    //    como `@media (width >= 508px)`, sintaxe de range do Media Queries 4
+    //    que só existe do Safari 16.4 pra frente, e o bloco inteiro é
+    //    DESCARTADO: o pódio não aparece, sem erro nenhum;
+    //  · JS — o `target` no default deixa o bundle emitir sintaxe de iOS 16.4.
+    //    O artefato de hoje não usa nenhuma (`static{`, `#privado` e `.at(`
+    //    saem em zero), mas isso é sorte da versão instalada de React/Vite: um
+    //    bump que emita `static{}` mataria a ilha no iOS 14 com o CI verde.
+    //    Assimetria no mesmo objeto de config é a forma que esse bug tem de
+    //    entrar sem ninguém decidir por ele.
+    target: "safari14",
     cssTarget: "safari14",
     outDir: resolve(import.meta.dirname, "..", "frontend"),
     emptyOutDir: false,
@@ -36,7 +46,6 @@ export default defineConfig({
       input: resolve(import.meta.dirname, "src", "precos", "main.jsx"),
       output: {
         format: "iife",
-        inlineDynamicImports: true,
         entryFileNames: "precos-app.js",
         assetFileNames: "precos-app.[ext]",
       },

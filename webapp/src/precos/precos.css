@@ -36,10 +36,26 @@
  * 573px — por altura de conteúdo com base comum. O degrau é `padding-block`, o
  * próprio respiro do card, e não `min-height`, pelo mesmo motivo acima.
  *
- * Só a partir de 900px: abaixo disso o grid empilha em uma coluna, e ali altura
- * diferente não é pódio — é um card mais gordo que os vizinhos sem motivo.
+ * O critério é MAIS DE UMA COLUNA, e 508px é onde a segunda aparece — não é
+ * número escolhido, é aritmética do grid: o `#plans-v2` tem
+ * `grid-template-columns:repeat(auto-fit,minmax(220px,1fr))` INLINE
+ * (precos.html:343, que por ser id+inline vence o `@media (max-width:900px)`
+ * do site.css:552), `gap: 20px` (site.css:306) e largura
+ * `min(1560px, 100vw - 48px)` (o `#plans-v2-wrap`). Duas faixas pedem
+ * 220+20+220 = 460px de container, ou seja `100vw >= 508`. Medido em 23
+ * larguras: 507 → 1 coluna, 508 → 2.
+ *
+ * Empilhado em UMA coluna não há pódio nenhum a fazer: ali altura diferente é
+ * card mais gordo que o vizinho, sem hierarquia para ler.
+ *
+ * A versão anterior desta regra dizia 900px e o comentário afirmava que abaixo
+ * disso "o grid vira uma coluna". Era FALSO: de 508 a 899px o grid tem 2 ou 3
+ * colunas, e o pódio simplesmente não aparecia. Quem prende isto agora é o
+ * `tests/frontend/precos_podio.test.mjs`, que exige a equivalência
+ * (mais de uma coluna ⟺ `align-items: end`) em 10 larguras — mudar a aritmética
+ * do grid sem mudar este número deixa vermelho.
  */
-@media (min-width: 900px) {
+@media (min-width: 508px) {
   #plans-v2 { align-items: end; }
   #plans-v2 .plan.featured { padding-block: 54px; }
 }

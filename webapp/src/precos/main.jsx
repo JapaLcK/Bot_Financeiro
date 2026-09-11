@@ -17,12 +17,14 @@ import { Planos } from "./Planos.jsx";
 import { lerPlanos } from "./lerPlanos.js";
 
 const raiz = document.getElementById("plans-v2");
-const planos = raiz ? lerPlanos(raiz) : [];
+// `null` = o markup saiu do contrato enumerado no lerPlanos.js, e aí NÃO se
+// monta: `createRoot` LIMPA o container, então montar sobre um markup que este
+// bundle não sabe reproduzir apagaria justamente o que ele não leu — no melhor
+// caso um parágrafo, no pior a escada de preços inteira. Fica o markup do
+// servidor, que vende sozinho.
+const planos = raiz && lerPlanos(raiz);
 
-// Sem cartão lido, não monta: `createRoot` LIMPA o container, então montar sobre
-// um markup que mudou de forma trocaria os cards por nada — a página inteira
-// perderia a venda. Nesse caso fica o markup do servidor, que funciona sozinho.
-if (planos.length) {
+if (planos) {
   flushSync(() => createRoot(raiz).render(<Planos planos={planos} />));
   // Os MESMOS dois que o `setCycle` já chama, e ambos idempotentes: o
   // `pbPixRefresh` reusa o `[data-pix-cta]` existente (pix-checkout.js:96) e o
@@ -32,4 +34,9 @@ if (planos.length) {
   // barato que raciocinar sobre a janela.
   globalThis.pbPixRefresh?.();
   globalThis.refreshPlanButtons?.();
+} else if (raiz) {
+  // O fallback é seguro, mas SILENCIOSO — e silencioso é como ele ficaria meses
+  // no ar sem ninguém saber que a ilha parou de montar.
+  console.warn("#plans-v2 fora do contrato do lerPlanos: a ilha React não"
+    + " montou, ficou o markup do servidor.");
 }
