@@ -15,10 +15,6 @@ Cada seta é um commit local. O mundo remoto NÃO é transacional, então a
 varredura (`core/services/pix_sweeps.py`) é quem fecha o que morrer no meio —
 `creating` é o estado ambíguo por definição e **nunca** é apagado por relógio.
 
-**A substituição cancela no Asaas ANTES de criar a nova** (§10, correção nº 6), igual
-ao `Session.expire` do caminho do Stripe. Falhando o `DELETE`, é 503 e **nada é criado**:
-dois QRs pagáveis do mesmo usuário seriam duas cobranças contra o mesmo crédito.
-
 ## O caso "fechei a aba e voltei" — 200 com o MESMO QR
 
 Decisão do dono, 2026-09-09: cobrança ativa **do mesmo plano** devolve o mesmo
@@ -197,11 +193,15 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                    confirm_cancel_stripe: bool = False) -> dict:
     """Emite (ou reaproveita) a cobrança Pix anual. **Roda sob lock do usuário.**
 
-    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e
-    `CoberturaJaPaga` (409) — esses quatro decidem ANTES de escrever qualquer
-    coisa. A quinta é `TitularRecusado` (400, de `asaas_customers`): ela sai do
-    meio da saga e **deixa a linha em `draft`** (ver `_emitir`). O `cpf_cnpj`
-    atravessa sem tocar em disco: vai para `criar_cliente` e morre lá."""
+    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e `CoberturaJaPaga`
+    (409); a quinta é `TitularRecusado` (400, de `asaas_customers`). **Nem todo 503 sai
+    antes da primeira escrita**: dos nove do módulo, três levantam com a linha JÁ gravada
+    — `asaas_cancelamento_falhou` (em `canceling`), `cobranca_ativa_persistiu` (a antiga
+    em `canceled`, e a cobrança que houvesse no Asaas já apagada) e `asaas_emissao_falhou`
+    (a nova em `creating`). O que distingue a `TitularRecusado` não é escrever ou não: é o
+    ESTADO que sobra. `draft` diz que NENHUMA cobrança existe lá, e a passada seguinte não
+    precisa perguntar; `creating` é o ambíguo, que só a varredura fecha (§10.1). O
+    `cpf_cnpj` atravessa sem tocar em disco: vai para `criar_cliente` e morre lá."""
     if not pix_annual_available():
         raise CheckoutIndisponivel("pix_annual_desligado")
     # DEPOIS da env: com a flag em 0 o vitalício leva 503 `pix_annual_desligado`, não

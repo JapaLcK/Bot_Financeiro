@@ -297,9 +297,9 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`
     // em todo `HTTPException(detail="…")`, e aqui isso caía num `det.message`
     // undefined — a frase que o servidor escreveu era descartada e o cliente lia o
-    // genérico. São cinco: os dois 400 (plano, documento), o 429 do limitador (por
-    // IP — routes/shared.py:98, então não é só quem digitou que o toma), o 503 da
-    // indisponibilidade e o 403 do CSRF, de que o checkout não tem isenção.
+    // genérico. São seis: os três 400 (plano, documento e o titular recusado pelo
+    // Asaas), o 429 do limitador (por IP — routes/shared.py:98, então não é só quem
+    // digitou que o toma), o 503 da indisponibilidade e o 403 do CSRF, sem isenção.
     // Mesma forma do `apiError` do comecar.js:175 — o 500 real não tem `detail`
     // nenhum (`{"error": …}`, finance_bot_websocket_custom.py:2415), então segue
     // no genérico. O #355 consertou o mesmo defeito só no toast; normalizar aqui

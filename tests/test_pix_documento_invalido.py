@@ -33,14 +33,16 @@ dá o mesmo erro para sempre. Agora é 400 com texto próprio, e a linha volta p
 CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
 
   * apague o `raise TitularRecusado(exc.code)` de
-    `core/services/asaas_customers.py` →
-    `test_asaas_recusa_o_titular_devolve_400_e_deixa_a_linha_em_draft` VERMELHO
-    (503 no lugar do 400) e
-    `test_retentativa_depois_da_recusa_nao_pergunta_nada_ao_asaas` VERMELHO junto;
+    `core/services/asaas_customers.py` → TRÊS VERMELHOS, todos com 503 no lugar
+    do 400: `test_asaas_recusa_o_titular_devolve_400_e_deixa_a_linha_em_draft`,
+    `test_retentativa_depois_da_recusa_nao_pergunta_nada_ao_asaas` e
+    `test_a_recusa_nao_vaza_o_documento_nem_o_corpo` — este último também exige o
+    400, e ficava de fora desta lista;
   * apague **só** o `voltar_para_draft(linha["id"])` de `_emitir`, mantendo o
-    `raise` → o primeiro VERMELHO na asserção `status == "draft"` e o segundo
-    VERMELHO pela `consulta` extra: a linha fica `creating` e a passada seguinte
-    vai PERGUNTAR ao Asaas por uma cobrança que nunca existiu;
+    `raise` → o primeiro VERMELHO na asserção `status == "draft"` e o segundo na
+    ordem do Asaas, que vira `['consulta', 'customer', 'create', 'qr']`: a linha
+    fica `creating` e a passada seguinte vai PERGUNTAR ao Asaas por uma cobrança
+    que nunca existiu;
   * troque `exc.status_code in (400, 422)` por `400 <= exc.status_code < 500` →
     `test_erro_que_nao_e_do_cliente_continua_503` VERMELHO nos TRÊS casos (429, 401
     e 403), todos acusando o CPF do cliente por erro que não é dele;
@@ -208,7 +210,9 @@ def test_retentativa_depois_da_recusa_nao_pergunta_nada_ao_asaas(
 
     assert r.status_code == 200, r.text
     assert r.json()["qr_payload"]
-    assert "consulta" not in asaas_falso["ordem"], asaas_falso["ordem"]
+    # A ordem INTEIRA, não só a ausência de `consulta`: o nome promete "nada ao
+    # Asaas", e um `delete:pay_...` na retentativa passaria verde num `not in`.
+    assert asaas_falso["ordem"] == ["customer", "create", "qr"], asaas_falso["ordem"]
 
 
 def test_asaas_fora_do_ar_continua_503_com_a_linha_em_creating(
