@@ -77,8 +77,9 @@ async def serve_settings(request: Request):
     #
     # `exige_direito=False` é a MESMA razão, e virou obrigação no corte do fim
     # do Grátis (decisão do dono): esta página é o único lugar do produto com a
-    # UI de EXPORTAR os dados e EXCLUIR a conta (medido:
-    # `grep -rln "auth/account" frontend/` acha só o settings.html). Cortar o
+    # UI de EXPORTAR os dados e EXCLUIR a conta (medido 2026-09-11:
+    # `grep -rln "account/export" frontend/*.html frontend/*.js` acha só o
+    # settings.html). Cortar o
     # acesso e trancar esta porta junto tiraria da pessoa a saída da própria
     # conta. A perna da ESCOLHA continua valendo — cadastro novo sem plano vai
     # pra /precos como antes; quem perdeu o DIREITO entra aqui.

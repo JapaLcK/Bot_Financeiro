@@ -602,10 +602,22 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # comunicação que ela recebe (docstring de plan_service.tem_direito_hoje).
         # Logo: nada de "acesse seu painel", nada de supor cadastro existente e
         # NADA sobre o período grátis. Este último não é estilo: para toda esta
-        # população `db.plans.is_trial_eligible_for_user` devolve False (não há
-        # `phone_hash` em `auth_accounts` porque não há linha nenhuma), então
-        # `texto_da_oferta` diria "esse telefone já usou o período grátis" — a
-        # mesma mentira na direção oposta. Quem diz a verdade é o checkout.
+        # população não há `phone_hash` em `auth_accounts` (não há linha
+        # nenhuma), e `db.plans.motivo_trial_indisponivel` devolve
+        # `"sem_telefone"` — que é o "não sei", não o "já usou".
+        #
+        # O motivo escrito aqui ANTES dizia que `texto_da_oferta` responderia
+        # "esse telefone já usou o período grátis": isso valia enquanto ela lia
+        # o booleano, e deixou de valer no mesmo PR. Medido em 2026-09-11, com
+        # `motivo_trial_indisponivel` devolvendo `"sem_telefone"`, ela responde
+        # "O checkout confirma seu período grátis ou o valor da primeira
+        # cobrança antes da confirmação:" — neutra, não mentirosa.
+        #
+        # O ramo continua certo por OUTRA razão: essa frase é a resposta do
+        # comando `assinar`, e ela abre com "Aqui ó, link pra assinar" e afirma
+        # que EXISTE período grátis a confirmar. Numa mensagem de BLOQUEIO
+        # não-solicitada, para quem nunca pediu link nenhum, isso é oferta
+        # implícita de trial que não sabemos se existe. Quem diz é o checkout.
         return [OutgoingMessage(text=(
             "🐷 Oi! Que bom te ver por aqui.\n\n"
             "Pra eu cuidar do seu dinheiro, agora é preciso ter um plano ativo — "

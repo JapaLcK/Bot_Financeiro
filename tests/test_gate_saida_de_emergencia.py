@@ -10,36 +10,55 @@ Os helpers (`_Req`, `_patch`) vêm por IMPORT do irmão — uma fonte só (§0.7
 mesmo padrão de `tests/_billing_grants_helpers.py`. O par ponta a ponta por
 HTTP, com banco real, mora em `tests/test_corte_do_gratis_no_webhook.py`.
 """
+import asyncio
+
 from fastapi.responses import RedirectResponse
 
 import core.services.plan_service as plan_service
 import frontend.routes.shared as shared
+import frontend.routes.static_pages as static_pages
 from test_gate_plan_selection import _Req, _patch
 
 
 # ── /settings é a SAÍDA DE EMERGÊNCIA: isenta da perna do DIREITO ────────────
 #
-# Decisão do dono. Medido: `grep -rln "auth/account" frontend/` acha
-# `settings.html` e mais nada — a UI de exportar os dados e excluir a conta mora
-# só ali. Os endpoints `/auth/*` continuam isentos por prefixo, mas sem a página
-# não sobra porta para alcançá-los.
+# Decisão do dono. Medido (2026-09-11):
+# `grep -rln "account/export" frontend/*.html frontend/*.js` acha `settings.html`
+# e mais nada — a UI de exportar os dados e excluir a conta mora só ali. (O grep
+# por `auth/account`, que esta nota citava antes, acha CINCO arquivos: o JS de
+# refresh, o monólito e os dois routers também casam o prefixo. Substância certa,
+# comando errado — §2: o número vem com o comando que o produziu.) Os endpoints
+# `/auth/*` continuam isentos por prefixo, mas sem a página não sobra porta para
+# alcançá-los.
 #
 # CONTROLE DECLARADO (`docs/controles_declarados.md`) — troque o VALOR, não
 # apague o bloco: em `frontend/routes/static_pages.serve_settings`, troque
 # `gate_plan_selection(request, exige_direito=False)` por
-# `gate_plan_selection(request)`. VERMELHO:
+# `gate_plan_selection(request)`. VERMELHOS (medido 2026-09-11):
 #   `test_settings_nao_tranca_quem_perdeu_o_direito`
+#   `test_so_o_settings_e_isento_do_direito`
+#   `tests/test_corte_do_gratis_no_webhook.py::test_cortado_ainda_alcanca_settings_e_a_secao_da_conta`
 # Direção: falso NEGATIVO de acesso — quem foi cortado perde a única porta para
 # exportar os dados e excluir a própria conta.
 #
 # Positivo do PAR, e ele fica VERDE sob essa injeção (é o que o torna positivo):
 #   `test_settings_ainda_barra_quem_nunca_escolheu_plano`
+#
+# Os dois do par chamam `serve_settings`, não o gate cru, e isso é o conserto de
+# um controle que nasceu MORTO: a versão anterior escrevia
+# `gate_plan_selection(_Req(), exige_direito=False)` à mão no teste, então a
+# injeção na ROTA não o alcançava e o vermelho declarado ficava verde. O que
+# estes dois casos provam é a ESCOLHA DO CALL SITE, e ela só se mede chamando o
+# call site. Os outros três casos do arquivo continuam no gate: o assunto deles
+# é o contrato do parâmetro, não a rota.
 
 
 def test_settings_nao_tranca_quem_perdeu_o_direito(monkeypatch):
-    """Cortado alcança /settings: 200 com o HTML, não 302 pra /precos."""
+    """Cortado alcança /settings: o HTML, não 302 pra /precos."""
     _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=False, acesso=False)
-    assert shared.gate_plan_selection(_Req(), exige_direito=False) is None
+    out = asyncio.run(static_pages.serve_settings(_Req()))
+    assert not isinstance(out, RedirectResponse), out.headers.get("location")
+    assert out.status_code == 200
 
 
 def test_settings_ainda_barra_quem_nunca_escolheu_plano(monkeypatch):
@@ -48,7 +67,7 @@ def test_settings_ainda_barra_quem_nunca_escolheu_plano(monkeypatch):
     Sem este caso, `exige_direito=False` poderia ter aberto a página inteira e o
     teste de cima ficaria verde do mesmo jeito."""
     _patch(monkeypatch, payload={"type": "auth", "sub": "7"}, needs=True, acesso=True)
-    out = shared.gate_plan_selection(_Req(), exige_direito=False)
+    out = asyncio.run(static_pages.serve_settings(_Req()))
     assert isinstance(out, RedirectResponse)
     assert out.headers["location"] == "/precos?escolha=1"
 

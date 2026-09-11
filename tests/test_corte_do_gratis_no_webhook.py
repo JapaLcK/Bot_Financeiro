@@ -160,7 +160,9 @@ def test_cortado_ainda_alcanca_settings_e_a_secao_da_conta(user_id, monkeypatch)
     """O corte NÃO pode trancar a porta de sair do produto (decisão do dono).
 
     `/settings` é a única tela com a UI de EXPORTAR os dados e EXCLUIR a conta
-    (`grep -rln "auth/account" frontend/`). Os endpoints `/auth/*` continuam
+    (medido 2026-09-11:
+    `grep -rln "account/export" frontend/*.html frontend/*.js`). Os endpoints
+    `/auth/*` continuam
     isentos por prefixo, mas sem a página não sobra porta para alcançá-los.
 
     Mede o HTML servido, não só o status: um 200 com a página errada passaria

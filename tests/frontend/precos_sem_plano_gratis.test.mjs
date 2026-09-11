@@ -358,8 +358,11 @@ for (const [tela, viewport] of TELAS) {
 }
 
 test("cortado que TAMBÉM não escolheu plano lê a copy da escolha, não a do corte", async () => {
-  // As duas pernas não se sobrepõem em produção (quem foi cortado já escolheu),
-  // mas a ORDEM do if é o que garante isso — este caso a fixa.
+  // Não é um canto: é o caso COMUM da página. Todo cadastro novo que ainda não
+  // passou pelo checkout tem needs_plan_selection true E app_access false, e o
+  // que o manda para a copy da escolha é a ORDEM do if (o `return` da primeira
+  // perna). Este caso fixa a ordem; sem ele, inverter o if diria "sua conta
+  // está sem plano ativo" a quem nunca teve um.
   const { page } = await abrirPrecos({
     me: { user_id: 42, needs_plan_selection: true, app_access: false },
   });

@@ -15,6 +15,10 @@ troque `return tem_direito_hoje(user)` por `return True`. VERMELHOS:
   `test_sem_direito_nao_entra[carencia-estourada]`
   `test_so_whatsapp_sem_linha_nao_entra`
   `test_linha_em_mao_nao_consulta_o_banco`  (a metade `user=None`)
+  `test_allowlist_legada_nao_isenta_do_corte`  (remedido 2026-09-11: a lista
+      nasceu com cinco nomes e este caso entrou no mesmo commit, sem ser
+      acrescentado aqui — é a patologia do `docs/controles_declarados.md`, onde
+      o que envelhece é sempre o que está EM VOLTA do vermelho)
 Direção: falso positivo de acesso — o corte simplesmente não acontece.
 
 **Negativo 2, o que este arquivo existe para ter** — o status virando

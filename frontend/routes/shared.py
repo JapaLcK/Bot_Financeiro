@@ -882,7 +882,8 @@ def gate_plan_selection(request: Request, *, exige_direito: bool = True):
 
     **O único chamador com `exige_direito=False` é `/settings`, por decisão do
     dono, e o motivo é que ele é a SAÍDA DE EMERGÊNCIA.** Medido:
-    `grep -rln "auth/account" frontend/` acha `settings.html` e mais nada — a UI
+    `grep -rln "account/export" frontend/*.html frontend/*.js` (2026-09-11) acha
+    `settings.html` e mais nada — a UI
     de **exportar os dados e excluir a conta** existe ali e em lugar nenhum. Os
     endpoints `/auth/*` seguem isentos por prefixo (`_GATE_EXEMPT_PREFIXES`),
     mas sem a página não sobra porta para alcançá-los. Trancar quem foi cortado

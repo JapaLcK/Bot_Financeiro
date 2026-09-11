@@ -56,10 +56,16 @@ def test_so_whatsapp_e_barrado_e_recebe_a_copy_sem_painel():
 
     As três asserções de conteúdo são requisito, não estilo: quem nunca viu o
     dashboard não pode ser mandado para "seu painel", e nada pode ser afirmado
-    sobre o período grátis — `db.plans.is_trial_eligible_for_user` devolve False
-    para TODA esta população (não há `phone_hash` porque não há linha), então
-    reusar a frase do `assinar` diria "esse telefone já usou o período grátis",
-    mentira na direção oposta."""
+    sobre o período grátis. Para TODA esta população não há `phone_hash` (não há
+    linha), então `motivo_trial_indisponivel` devolve `"sem_telefone"` — o "não
+    sei". Medido 2026-09-11: `texto_da_oferta` aí responde "O checkout confirma
+    seu período grátis ou o valor da primeira cobrança antes da confirmação:".
+    A justificativa anterior ("diria 'esse telefone já usou o período grátis'")
+    valia enquanto ela lia o booleano e MORREU no mesmo PR que a fez ler o
+    motivo. O que continua proibido é reusar a frase do `assinar` do mesmo
+    jeito: ela abre com "Aqui ó, link pra assinar" e afirma que existe período
+    grátis a confirmar — oferta implícita de trial, numa mensagem de BLOQUEIO
+    que ninguém pediu."""
     uid = _so_whatsapp()
 
     resposta = _diga(uid, "gastei 50 no mercado")

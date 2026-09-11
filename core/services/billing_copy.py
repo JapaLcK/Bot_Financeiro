@@ -83,6 +83,14 @@ def estado_sem_plano_pago(user_id: int, user: dict | None = None) -> str:
     direito do OR de `tem_direito_hoje` — o relógio. Reusa o gate em vez de
     reimplementar `carencia_aberta` (§0.1/§0.7).
 
+    **`user` vai para as DUAS pernas, e o `is not None` não é defensivo**: em
+    `has_app_access` o `None` é VEREDITO ("consultei, não existe conta"), e só o
+    `_UNSET` significa "não consultei" — passar `None` cru diria "sem conta" e
+    devolveria `sem_acesso` a quem só não tinha a linha em mão. Quando ela veio
+    (o `_handle_plano` já a tem), as duas pernas têm de julgar a MESMA linha:
+    em produção o cache de 10 s do `get_auth_user` esconde a diferença, mas se
+    o TTL expirar entre as duas a copy sai de dois julgamentos distintos.
+
     Import defensivo pelo mesmo motivo do `_handle_plano`: testes (e deploys sem
     a escada v2) mockam plan_service só com `is_pro`.
     """
@@ -93,7 +101,9 @@ def estado_sem_plano_pago(user_id: int, user: dict | None = None) -> str:
     if needs_plan_selection(user_id, user):
         return "sem_plano"
     try:
-        return "carencia" if has_app_access(user_id) else "sem_acesso"
+        acesso = (has_app_access(user_id, user=user) if user is not None
+                  else has_app_access(user_id))
+        return "carencia" if acesso else "sem_acesso"
     except Exception:
         # "Não sei" NÃO vira "não tem" numa copy: `sem_acesso` afirmaria que não
         # há assinatura a cancelar. `carencia` só oferece o portal, que não

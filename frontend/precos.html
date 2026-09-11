@@ -942,8 +942,12 @@ async function cancelChange(btn) {
   // Grátis — e para ele a copy de cima ("15 dias grátis pra testar") é falsa
   // duas vezes: ele não está escolhendo pela primeira vez, e o trial é um por
   // telefone NA VIDA, então o ex-assinante que já o usou não vai ganhar outro.
-  // A ordem importa: quem foi cortado tem `needs_plan_selection` FALSE (já
-  // escolheu um plano um dia), então as duas condições não se sobrepõem.
+  // A ordem importa, e é ela que resolve — NÃO a ausência de sobreposição, que
+  // era o que este comentário afirmava e é falso: todo cadastro novo antes do
+  // checkout tem `needs_plan_selection === true` E `app_access === false`, que
+  // é o caso COMUM desta página, não um canto. O `return` da primeira perna é
+  // quem garante que ele leia a copy da escolha. Inverter a ordem diria "sua
+  // conta está sem plano ativo" a quem nunca teve um.
   if (me.needs_plan_selection) {
     sub.textContent =
       "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "

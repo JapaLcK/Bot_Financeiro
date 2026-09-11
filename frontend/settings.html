@@ -3510,8 +3510,10 @@ async function initSettings() {
       // acordaria justamente nesta página.
       //
       // Esta é a ÚNICA tela do produto com a UI de EXPORTAR os dados e EXCLUIR
-      // a conta (medido: `grep -rln "auth/account" frontend/` acha só este
-      // arquivo). Expulsar daqui quem foi cortado tiraria da pessoa a saída da
+      // a conta (medido 2026-09-11: `grep -rln "account/export" frontend/*.html
+      // frontend/*.js` acha só este arquivo; o grep por `auth/account` que esta
+      // nota citava antes acha CINCO — o prefixo casa também no JS de refresh,
+      // no monólito e nos dois routers). Expulsar daqui quem foi cortado tiraria da pessoa a saída da
       // própria conta — e o servidor já decidiu deixar entrar
       // (`routes/static_pages.serve_settings` chama o gate com
       // `exige_direito=False`, por decisão do dono). Os dois lados têm de
