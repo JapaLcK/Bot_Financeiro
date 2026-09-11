@@ -220,6 +220,42 @@ def _bloqueado_pelo_corte(uid: int, reply_to: str, texto: str = "") -> bool:
     return True
 
 
+def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
+    """Quem não tem acesso recebe a ajuda DELE, e nenhuma outra. True = tratado.
+
+    **Ponto único de toda a superfície de ajuda do WhatsApp.** O conserto
+    anterior gateou o BOTÃO do tutorial e o texto `tutorial`, e sobraram três
+    portas medidas: o item "🚀 Tutorial" do MENU (que é uma lista, não um
+    `button_reply`, então `get_tutorial_button_id` devolve `None` e ele cai no
+    ramo do menu), a SAUDAÇÃO depois do auto-link, e o menu inteiro — cujas
+    outras seções também mandam tentar comando (`credit`, medido).
+
+    Fechar porta a porta já falhou três vezes; o que decide aqui é o DESTINO
+    (vai renderizar ajuda) e não o caminho. A seção é a mesma dos dois canais
+    (`core.help_text` → `sem_acesso`), então WhatsApp e Discord dizem a mesma
+    coisa a quem foi cortado.
+
+    Fail-open pelo mesmo motivo dos outros gates: `_bloqueado_pelo_corte` já
+    engole a exceção e devolve False, e aí a ajuda normal segue.
+    """
+    from core.handle_incoming import _paywall_gate
+
+    try:
+        gated = _paywall_gate(
+            IncomingMessage(platform="whatsapp", user_id=uid, text="",
+                            external_id=reply_to),
+            "whatsapp",
+        )
+    except Exception as exc:
+        logger.warning("WA gate da ajuda falhou uid=%s: %s", uid, exc)
+        return False
+    if not gated:
+        return False
+    from core.help_text import render_help
+    _send_reply(reply_to, render_help("sem_acesso", "whatsapp"))
+    return True
+
+
 def _pending_supports_confirmation_buttons(pending: dict[str, Any] | None) -> bool:
     if not pending:
         return False
@@ -609,6 +645,10 @@ def process_message(message: InboundMessage) -> None:
                 # "gastei 50..."), ele já sabe usar — a gente executa o comando
                 # e não interrompe com o tour.
                 if _is_greeting(message.text or ""):
+                    # Ex-assinante que acabou de vincular manda `oi` e recebia o
+                    # tutorial inteiro — medido. É a porta mais alta do arquivo.
+                    if _ajuda_do_cortado(uid, reply_to):
+                        return
                     try:
                         send_welcome(reply_to, user_id=uid)
                     except Exception as e:
@@ -690,6 +730,10 @@ def process_message(message: InboundMessage) -> None:
             # Itens do menu de ajuda
             help_id = get_help_menu_id(raw_msg)
             if help_id:
+                # TODO item do menu, não só o `help_tutorial`: `credit` também
+                # manda tentar comando, e a lista cresce sem ninguém revisar.
+                if _ajuda_do_cortado(uid, reply_to):
+                    return
                 logger.info("WA help menu id=%s wa_id=%s", help_id, reply_to)
                 try:
                     send_help_section(reply_to, help_id)
@@ -1155,6 +1199,12 @@ def process_message(message: InboundMessage) -> None:
         # "ajuda" → tutor pra quem ta aprendendo (send_help_menu, com link
         # pro tutorial).
         if text_cmd in HELP_TRIGGERS:
+            # Este ramo intercepta ANTES do `handle_incoming`, então o
+            # `_paywall_gate` não o alcança: sem isto, `ajuda` no WhatsApp abria
+            # a lista e o `ajuda` do Discord (que passa pelo gate) respondia
+            # outra coisa. Os dois canais dizem a mesma coisa agora.
+            if _ajuda_do_cortado(uid, reply_to):
+                return
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)

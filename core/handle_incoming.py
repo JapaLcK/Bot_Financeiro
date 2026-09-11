@@ -596,10 +596,32 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # não no `wa_runtime`: o Discord chega neste mesmo gate. O gêmeo
             # interativo (o BOTÃO do tutorial no WhatsApp) não passa por aqui e
             # tem gate próprio em `wa_runtime`.
-            if ajuda == "help":
-                from core.handlers import help_handler as h_help
+            if ajuda in ("help", "help.tutorial"):
+                # A isenção de ajuda VOLTOU a cobrir `help.tutorial`, e o que
+                # mudou é o que ela RENDERIZA: a seção `sem_acesso`, nunca a que
+                # o texto pediu.
+                #
+                # Decidir pelo CLASSIFICADOR era a pergunta errada, e custou três
+                # portas abertas. `classify` responde "isto é ajuda?"; quem
+                # responde "isto renderiza o tutorial?" é `help_text.resolve_section`.
+                # Medido 2026-09-11: `classify("ajuda tutorial")` devolve `help`
+                # (a regra `^(ajuda|help)\s+\w+`), e `resolve_section` devolve
+                # `"tutorial"` — então tirar `help.tutorial` do classificador não
+                # fechava `ajuda tutorial`, `help tutorial` nem `ajuda guia`.
+                #
+                # E a ajuda genérica também não servia: `render_help("start")`
+                # abre com "• `tutorial` → guia rápido / • `gastei 50 mercado`",
+                # ou seja mandava o cortado tentar um comando E digitar a palavra
+                # que devolve o paywall.
+                #
+                # Renderizar UMA seção resolve a categoria inteira de uma vez, em
+                # vez de a lista de grafias: qualquer texto que o classificador
+                # chame de ajuda cai aqui, nos DOIS canais, e recebe a mesma
+                # resposta honesta. É o ponto único que os três buracos anteriores
+                # não tinham.
+                from core.help_text import render_help
                 return [OutgoingMessage(text=format_for_platform(
-                    h_help.answer_help(ajuda, texto, platform), platform))]
+                    render_help("sem_acesso", platform), platform))]
             if is_billing_command(texto):
                 from core.services.billing_commands import handle_billing_command
                 resposta = handle_billing_command(uid, texto, platform=platform)

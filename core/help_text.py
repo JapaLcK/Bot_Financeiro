@@ -35,6 +35,31 @@ HELP_SECTIONS: dict[str, str] = {
         "\n"
         "Dica: digite `ajuda` para abrir o menu completo."
     ),
+    # A ajuda de quem NÃO TEM ACESSO. Seção própria, e não um filtro nas outras,
+    # por medição: hoje TRÊS das doze seções mandam tentar um comando ou apontam
+    # para o `tutorial` (`start`, `tutorial`, `credit`), e esse conjunto cresce
+    # em silêncio — filtrar seção a seção reabre o buraco na próxima que disser
+    # "gastei 50". Além disso a necessidade é outra: quem foi cortado não precisa
+    # saber COMO lançar, precisa saber por que nada funciona e como voltar.
+    #
+    # **Nada aqui manda tentar**, e é requisito e não estilo: o comando seguinte
+    # seria recusado pelo gate, e mandar tentar antes de recusar é a pior ordem
+    # possível das duas mensagens. Também não aponta para `tutorial`, que é
+    # justamente a palavra que devolve o paywall.
+    #
+    # Renderizada pelo `_paywall_gate` (os dois canais) e pelos ramos de ajuda de
+    # `adapters/whatsapp/wa_runtime.py` (menu, seção, saudação).
+    "sem_acesso": (
+        "🐷 **Sua conta está sem plano ativo**\n\n"
+        "Por isso eu não consigo anotar nada por aqui agora — o PigBank não tem "
+        "mais versão gratuita.\n\n"
+        "Seus dados continuam guardados: lançamentos, histórico, tudo. Assim que "
+        "houver um plano ativo, o acesso volta e nada se perde.\n\n"
+        "Escolha um plano em pigbankai.com/precos — o checkout mostra o que vai "
+        "ser cobrado, e quando, antes de você confirmar.\n\n"
+        "Pra cuidar da conta (exportar os seus dados ou excluí-la), "
+        "pigbankai.com/settings continua aberto."
+    ),
     "tutorial": (
         "🚀 **Tutorial rápido (1–2 min)**\n\n"
         "1) **Registre o básico**\n"
