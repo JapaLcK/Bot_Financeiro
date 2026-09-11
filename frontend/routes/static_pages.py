@@ -422,6 +422,36 @@ async def serve_sw():
     return resp
 
 
+@router.get("/precos-app.js")
+async def serve_precos_app_js():
+    """Ilha React do `#plans-v2` da /precos — artefato do build de `webapp/`,
+    commitado no repositório. Nome FIXO e sem hash porque a rota é escrita à mão
+    (não há StaticFiles mount); quem invalida cache é o `stamp_asset_versions`,
+    que carimba o `?v=` do HTML com um hash do conteúdo deste arquivo.
+
+    `no-cache` como o par `.css` e como o /site.css: sem ele esta rota era a
+    ÚNICA de asset deste arquivo sem `Cache-Control` — e o par de um asset muda
+    junto (§2)."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/precos-app.css")
+async def serve_precos_app_css():
+    """Par da ilha React da /precos — pódio dos cards e o badge do destaque.
+    Artefato do mesmo build de `webapp/`. no-cache como o /site.css: o
+    `stamp_asset_versions` carimba o `?v=` com o hash do conteúdo, e a página
+    está em iteração ativa."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/modals.js")
 async def serve_modals_js():
     """Componente de modal estilizado (alertModal/confirmModal) usado em todas
@@ -582,6 +612,18 @@ async def serve_pix_checkout_js():
     dá 404 e o sintoma só aparece no navegador — não há StaticFiles mount aqui."""
     return FileResponse(
         FRONTEND_DIR / "pix-checkout.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/pix-ui.js")
+async def serve_pix_ui_js():
+    """Peças de UI compartilhadas pelo /pix-checkout.js e pelo /pix-poll.js
+    (rótulo, linha, botão e overlay). Carrega ANTES dos dois: o `const pixBrl`
+    tem TDZ até este script rodar."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-ui.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

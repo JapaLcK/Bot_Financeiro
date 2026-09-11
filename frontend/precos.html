@@ -12,6 +12,10 @@
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
+<!-- Camada do #plans-v2 (pódio + badge), emitida pelo build de webapp/.
+     DEPOIS do site.css de propósito: ela refina `.plan`/`.plan-badge`, que
+     nascem lá, e a mesma especificidade tem de ganhar pela ordem. -->
+<link rel="stylesheet" href="/precos-app.css?v=1" />
 <style>
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -27,7 +31,21 @@
      remontando className (e reinjetando btn-block só pra desfazer o
      width:100% na linha seguinte). Vira um segmented control de verdade:
      o JS só liga/desliga .is-active + aria-pressed. */
-  .cycle-wrap { display: flex; justify-content: center; margin: 0 0 30px; }
+  /* Coluna, não linha: embaixo do segmented control mora a etiqueta do Pix, e
+     ela precisa ficar CENTRADA sob ele — não ao lado, que empurraria o toggle
+     para fora do centro da escada.
+     O respiro de 10px é `margin-top` da etiqueta e NÃO `gap` do wrap: a etiqueta
+     mora dentro do `#pix-cycle-live`, que é um item flex de verdade (vazio, mas
+     presente desde o parse — é a região aria-live). Com `gap`, esse item vazio
+     somava 10px sob o toggle em TODA visita sem a flag do Pix; com a margem na
+     própria etiqueta, `hidden` não gera caixa e não gera margem: 0px. */
+  .cycle-wrap { display: flex; flex-direction: column; align-items: center; margin: 0 0 30px; }
+  /* inline-block porque margem vertical em elemento inline não desloca nada — e
+     `:not([hidden])` porque um seletor de ID com `display` VENCE a regra
+     `[hidden] { display: none }` do navegador: sem ele a etiqueta ficava visível
+     com a flag do Pix desligada, anunciando meio de pagamento que a página não
+     vende (medido: `offsetParent` não-nulo com `pix_annual_available: false`). */
+  #pix-cycle-note:not([hidden]) { display: inline-block; margin-top: 10px; }
   .cycle-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 15px; }
   .cycle-btn {
     display: inline-flex; align-items: center; gap: 8px;
@@ -39,6 +57,12 @@
   .cycle-btn:active { transform: scale(.98); }
   .cycle-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
   .cycle-btn.is-active { background: linear-gradient(135deg,var(--pink),var(--pink-dark)); color: #fff; box-shadow: 0 6px 18px rgba(255,45,142,.3); }
+  /* Duas etiquetas usam esta pílula: o "−17%" DENTRO do botão Anual e a do Pix,
+     que fica FORA dos botões (logo abaixo do toggle) e por isso não é alcançada
+     pela regra de .is-active — a cor dela é a mesma nos dois ciclos, de
+     propósito: o Pix não deixa de existir porque o usuário está olhando o
+     mensal. Neon aqui é valor positivo (desconto, pagamento à vista), não
+     decoração. */
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
   .cycle-btn.is-active .cycle-save { background: rgba(255,255,255,.22); color: #fff; }
 
@@ -312,6 +336,35 @@
             <button type="button" id="cycle-monthly" class="cycle-btn is-active" aria-pressed="true" onclick="setCycle('monthly')">Mensal</button>
             <button type="button" id="cycle-annual" class="cycle-btn" aria-pressed="false" onclick="setCycle('annual')">Anual <span class="cycle-save">−17%</span></button>
           </div>
+          <!-- O CTA "Pagar no Pix" só nasce no ciclo anual, então quem fica no
+               mensal nunca descobria que Pix existe. Esta etiqueta é o anúncio, e
+               fica FORA dos dois botões de propósito: dentro do Anual ela some
+               justamente para o público que precisa ler (e o toggle passava de
+               248,7px para 289,5px, estourando os 272px disponíveis a 320px de
+               viewport — medido).
+               Nasce `hidden`: a disponibilidade é a flag `pix_annual_available`
+               do /billing/plans-config, e quem a revela é o pbPixInit
+               (pix-checkout.js), no mesmo lugar que decide o CTA. Sem a flag —
+               ou para quem tem acesso vitalício, que não compra — a página fica
+               igual à de hoje: anunciar meio de pagamento que não existe é pior
+               que não anunciar. -->
+          <!-- A região `aria-live` existe desde o parse, e é por isso que são
+               DOIS elementos: região registrada e revelada no mesmo instante não
+               anuncia nada, então o `aria-live` não pode morar na própria pílula.
+               O vínculo com o botão Anual é o `aria-describedby` que o pbPixInit
+               põe e tira junto com o `hidden`.
+               TETO conhecido, e ele não é o que este comentário dizia antes: a
+               pílula NÃO é inserida aqui. Ela está no HTML desde o parse e o
+               `pbPixInit` só faz `hidden = false` — isso é mudança de
+               RELEVÂNCIA, não inserção de conteúdo, e o quanto cada leitor de
+               tela anuncia nesse caso varia. Se algum não anunciar, a saída é
+               esvaziar esta região no HTML e o `pbPixInit` copiar para dentro
+               dela o texto da pílula (uma inserção de verdade, sem duplicar a
+               string). Não foi feito às cegas: nenhum leitor de tela roda neste
+               ambiente, e o oráculo do PT19c só lê ATRIBUTO — ele é cego a esta
+               classe, que é a mesma que deixou o PT19b verde com o defeito do
+               `display` aceso. Decidir isso é aparelho, pós-deploy. -->
+          <span id="pix-cycle-live" aria-live="polite"><span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span></span>
         </div>
 
         <div class="plans" id="plans-v2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
@@ -750,6 +803,7 @@ function updateCmpFade() {
 // (/billing/subscription) diz o plano atual e se há troca agendada; os botões
 // dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
 let subState = null;
+let cancelChangePending = false;
 const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
 const PLAN_PRICES = {
   essencial: { monthly: "R$ 9,90/mês", annual: "R$ 99/ano" },
@@ -774,12 +828,14 @@ function fmtBrDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Só uma resposta válida ou o 401 do deslogado resolve a elegibilidade do Pix.
 async function loadSubscription() {
   try {
     const r = await fetch("/billing/subscription", { credentials: "same-origin" });
-    if (!r.ok) { subState = null; return; }
-    subState = await r.json();
-  } catch { subState = null; }
+    if (!r.ok) { subState = null; return r.status === 401; }
+    subState = await r.json();   // JSON malformado lança → catch → não resolvida
+    return true;
+  } catch { subState = null; return false; }
 }
 
 function refreshPlanButtons() {
@@ -806,9 +862,9 @@ function refreshPlanButtons() {
     }
     const sc = subState.scheduled_change;
     if (sc && sc.plan === p) {
-      btn.disabled = false;
+      btn.disabled = cancelChangePending;
       btn.textContent = `Agendado pra ${fmtBrDate(sc.effective_at)} ✓ · desfazer`;
-      btn.onclick = function () { cancelChange(btn); };
+      btn.onclick = cancelChange;
       return;
     }
     if (p === subState.plan && currentCycle === (subState.interval || "monthly")) {
@@ -890,8 +946,11 @@ function openChangeModal(plan) {
   document.getElementById("chg-overlay").style.display = "flex";
 }
 
-async function cancelChange(btn) {
-  btn.disabled = true;
+// A operação sobrevive à remontagem dos cards e é compartilhada com a tabela.
+async function cancelChange() {
+  if (cancelChangePending) return;
+  cancelChangePending = true;
+  refreshPlanButtons();
   try {
     const r = await fetch("/billing/cancel-change", {
       method: "POST", credentials: "same-origin",
@@ -900,15 +959,16 @@ async function cancelChange(btn) {
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
       showToast((d.detail && d.detail.message) || "Não consegui desfazer.", "err");
-      btn.disabled = false;
       return;
     }
     showToast("Troca desfeita. Seu plano continua como está.");
-    await loadSubscription();
-    refreshPlanButtons();
+    // O POST confirmou o cancelamento; o plano atual permanece o mesmo.
+    if (subState) subState.scheduled_change = null;
   } catch {
     showToast("Erro de conexão. Tente novamente.", "err");
-    btn.disabled = false;
+  } finally {
+    cancelChangePending = false;
+    refreshPlanButtons();
   }
 }
 
@@ -1001,9 +1061,14 @@ async function cancelChange(btn) {
   // sendo baixados quando as requisições daqui terminam, e aí é o pix-checkout.js
   // que lê este estado ao carregar. Sem isso o `typeof` abaixo dava falso e
   // ninguém tentava de novo — página sem CTA de Pix com a flag ligada.
-  const publicarPix = (sub) => {
-    window.pbPixState = { cfg: cfgPlanos, sub };
-    if (typeof pbPixInit === "function") pbPixInit(cfgPlanos, sub);
+  // `resolvida` = resposta válida ou 401 do /billing/subscription.
+  // `sub: null` sozinho não diz isso: ele é o mesmo valor do DESLOGADO, que é quem a etiqueta do Pix existe
+  // para convencer. Sem este terceiro campo o pix-checkout.js não separa "ainda
+  // não sei" de "sei que não tem assinatura" — e viaja no `window.pbPixState`
+  // porque é por ele que o script que chega atrasado lê tudo.
+  const publicarPix = (sub, resolvida) => {
+    window.pbPixState = { cfg: cfgPlanos, sub, resolvida };
+    if (typeof pbPixInit === "function") pbPixInit(cfgPlanos, sub, resolvida);
   };
   try {
     const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
@@ -1025,12 +1090,18 @@ async function cancelChange(btn) {
     // cliente do Stripe aquela chamada consulta o Stripe e pode demorar ou
     // travar, e era justamente a migração cartão → Pix que ficava sem botão
     // enquanto o Stripe está ruim. Os rótulos ("Renovar", vitalício) são
-    // corrigidos na segunda chamada, quando a assinatura chega.
-    publicarPix(null);
+    // corrigidos na segunda chamada, quando a assinatura chega. A ETIQUETA do
+    // toggle não nasce aqui (`resolvida` falso): CTA é caminho de resgate, e
+    // etiqueta é anúncio — anunciar Pix ao vitalício enquanto o Stripe trava é
+    // vender o que o backend recusa com 409.
+    publicarPix(null, false);
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
-    await loadSubscription();
+    const resolvida = await loadSubscription();
     refreshPlanButtons();
-    publicarPix(subState);
+    // `resolvida`, não `true`: 5xx, rede fora e JSON malformado guardam o mesmo
+    // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a
+    // etiqueta ao vitalício indefinidamente sempre que a consulta falhasse.
+    publicarPix(subState, resolvida);
   } catch {}
 })();
 
@@ -1039,6 +1110,29 @@ async function startCheckout(interval, btn, plan) {
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
+  /* A restauração RESOLVE o botão na hora, em vez de escrever no nó capturado
+     lá em cima: a ilha React do #plans-v2 REEMITE os botões dos cards no mount,
+     e o mount pode cair no meio deste fetch — o parser fica bloqueado baixando o
+     /precos-app.js enquanto as continuações de promessa desta página rodam
+     (medido; é a mesma janela do PI8). O nó capturado sai do documento ali, e
+     restaurá-LO deixava o botão da TELA em "Carregando…" para sempre: o
+     `loading` viaja no mount (o lerCartao lê `className`) e a guarda da 1ª linha
+     desta função então mata todo clique seguinte — botão de compra morto até dar
+     F5, com o toast de erro pedindo pra tentar de novo.
+     `isConnected` é o mesmo predicado do `finally` do pixCheckout
+     (pix-checkout.js); a diferença é que lá ele DESISTE e aqui ele resolve,
+     porque o botão da tela existe e é ele que precisa voltar. Os botões do tfoot
+     da tabela comparativa nunca são reemitidos, então para eles isto é `btn`.
+     ponytail: o alcance é este par de escritas. Função nova que guarde um nó de
+     dentro do #plans-v2 através de um `await` precisa do mesmo cuidado — quem
+     faz isso hoje está enumerado no cabeçalho do PI9
+     (tests/frontend/precos_ilha_react.test.mjs). */
+  const restaurar = () => {
+    const vivo = btn.isConnected ? btn
+      : document.querySelector('#plans-v2 [data-plan-btn="' + btn.dataset.planBtn + '"]') || btn;
+    vivo.classList.remove("loading");
+    vivo.textContent = originalText;
+  };
   const payload = { interval };
   if (plan) payload.plan = plan;
 
@@ -1074,8 +1168,7 @@ async function startCheckout(interval, btn, plan) {
         if (typeof data.detail === "string") detail = data.detail;
         else if (data.detail && data.detail.message) { detail = data.detail.message; code = data.detail.error; }
       } catch {}
-      btn.classList.remove("loading");
-      btn.textContent = originalText;
+      restaurar();
       // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
       // de deixar o clique morrer num erro.
       if (code === "already_subscribed" && plan) {
@@ -1108,13 +1201,11 @@ async function startCheckout(interval, btn, plan) {
       }
     } else {
       showToast("Resposta inesperada do servidor.", "err");
-      btn.classList.remove("loading");
-      btn.textContent = originalText;
+      restaurar();
     }
   } catch (e) {
     showToast("Erro de conexão. Tente novamente.", "err");
-    btn.classList.remove("loading");
-    btn.textContent = originalText;
+    restaurar();
   }
 }
 
@@ -1147,8 +1238,18 @@ enviarViewItemList();
        depois do bloco inline — eles publicam pbPixInit/pbPixRefresh no escopo
        global. A corrida com o loadPlansState acima não depende desta ordem: quem
        chegar por último lê o `window.pbPixState` que o outro deixou.
-       O pix-poll.js vem ANTES: ele declara o `pixPoll` que o pix-checkout.js lê,
-       e `let` de topo de script clássico tem TDZ até o script rodar. -->
+       O pix-ui.js vem PRIMEIRO (ele declara o `const pixBrl` que os dois leem) e
+       o pix-poll.js antes do pix-checkout.js (ele declara o `pixPoll` que o outro
+       lê): `const`/`let` de topo de script clássico tem TDZ até o script rodar. -->
+  <!-- Ilha React do #plans-v2 (build de webapp/, artefato commitado). ANTES dos
+       scripts do Pix e SEM `type="module"`: módulo é deferido, e o defer faria o
+       `document.querySelector('#plans-v2 [data-plan-btn=…]')` do pix-checkout.js
+       rodar antes dos cards existirem. O mount é síncrono (flushSync), então
+       quando esta linha termina o DOM dos cards já está pronto.
+       Se este script falhar ou não carregar, fica o markup do servidor acima —
+       que vende sozinho, com o mesmo visual. -->
+  <script src="/precos-app.js?v=1"></script>
+  <script src="/pix-ui.js?v=1"></script>
   <script src="/pix-poll.js?v=1"></script>
   <script src="/pix-checkout.js?v=1"></script>
   <script src="/nav-auth.js?v=7" defer></script>

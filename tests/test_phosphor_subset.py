@@ -64,8 +64,12 @@ def test_nao_surgiu_fonte_dinamica_de_icone_fora_dos_mapas_conhecidos():
         ("settings.html", 'ACTIVITY_ICONS[ev.event] || "circle"'),
     }
     achados = set()
-    for f in (RAIZ / "frontend").rglob("*"):
-        if f.suffix not in (".html", ".js"):
+    # As mesmas raízes do gerador (frontend/ E webapp/src), e a mesma exclusão de
+    # artefato: varrer só frontend/ deixava um `ph-${...}` num `.jsx` invisível
+    # para o teste que existe exatamente para achá-lo. Hoje `grep -rn "ph-"
+    # webapp/src` não acha nada — é do dia em que achar que isto trata.
+    for f in (*_gerador.FRONTEND.rglob("*"), *_gerador.WEBAPP_SRC.rglob("*")):
+        if f.suffix not in (".html", ".js", ".jsx") or f in _gerador.ARTEFATOS:
             continue
         for expr in re.findall(r"ph-\$\{([^}]*)\}", f.read_text(encoding="utf-8", errors="ignore")):
             achados.add((f.name, expr.strip()))
