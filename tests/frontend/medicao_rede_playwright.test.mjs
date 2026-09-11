@@ -49,6 +49,27 @@ test("considera a contagem final do CDP para recursos concluídos", async () => 
   assert.equal(rede.recursos()[0].estado, "concluido");
 });
 
+test("preserva status e bytes do salto anterior em um redirecionamento", async () => {
+  const cdp = new CdpFalso();
+  const page = {
+    context: () => ({ newCDPSession: async () => cdp }),
+    waitForTimeout: async () => {},
+  };
+  const rede = await instrumentarRede(page, { throttle: false, rede: {} });
+  cdp.emitir("Network.requestWillBeSent", {
+    requestId: "pagina", request: { url: "https://pigbankai.com/antiga" }, type: "Document",
+  });
+  cdp.emitir("Network.requestWillBeSent", {
+    requestId: "pagina", request: { url: "https://pigbankai.com/nova" }, type: "Document",
+    redirectResponse: { url: "https://pigbankai.com/antiga", status: 301, encodedDataLength: 96 },
+  });
+
+  assert.deepEqual(rede.recursos()[0], {
+    url: "https://pigbankai.com/antiga", tipo: "Document", status: 301,
+    bytes: 96, estado: "concluido",
+  });
+});
+
 test("aquecimento só termina depois do recurso da primeira origem", async () => {
   const cdp = new CdpFalso();
   let aguardou = false;

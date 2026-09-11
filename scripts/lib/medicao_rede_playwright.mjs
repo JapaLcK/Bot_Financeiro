@@ -9,6 +9,10 @@ export async function instrumentarRede(page, { throttle, rede }) {
   const registrar = evento => {
     const anterior = atual(evento.requestId);
     if (anterior) {
+      const redirecionamento = evento.redirectResponse;
+      anterior.url = redirecionamento?.url || anterior.url;
+      anterior.status = redirecionamento?.status ?? anterior.status;
+      anterior.bytes = Math.max(anterior.bytes, redirecionamento?.encodedDataLength || 0);
       anterior.concluido = true;
       anterior.estado = "concluido";
     }
