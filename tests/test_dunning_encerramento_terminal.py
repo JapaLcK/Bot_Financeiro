@@ -44,11 +44,29 @@ devolve o app a quem a Stripe acabou de encerrar.
 **Negativo do MOTIVO** — em `core/services/billing_dunning.py`, troque
 `STRIPE_CANCEL_REASON_INADIMPLENCIA = "payment_failed"` por
 `= "nunca_isso"` (troca de VALOR; o critério continua lá e deixa de
-discriminar). VERMELHOS:
-  `test_motivo_nao_terminal_mantem_o_comportamento_de_hoje`
-  `test_deleted_sem_cancellation_details_nao_e_terminal`
-Direção: falso positivo — cancelamento a pedido do cliente passa a gravar
-`unpaid`, e o painel o rotula "Cancelado por inadimplência" sem que tenha sido.
+discriminar). VERMELHOS (remedido 2026-09-11):
+  `test_terminal_apaga_o_relogio[dentro-da-janela-do-lembrete]`
+  `test_terminal_apaga_o_relogio[relogio-de-21-dias]`
+Direção: falso NEGATIVO do terminal — a Stripe encerra por inadimplência, o
+ramo cai no `else`, grava `canceled` e o MOTIVO se perde; o relógio sobrevive
+com o predicado de versão em vez de ser apagado.
+
+**Esta instrução estava ERRADA das duas formas, e as duas são o mesmo defeito.**
+Ela nomeava `test_motivo_nao_terminal_mantem_o_comportamento_de_hoje` e
+`test_deleted_sem_cancellation_details_nao_e_terminal` — que ficam VERDES: não
+ser terminal continua não sendo terminal com qualquer valor. E ela era
+INAPLICÁVEL, porque até 2026-09-11 os casos daqui e o código liam a MESMA
+string (`payment_failure`, que não existe no enum da Stripe): a injeção movia os
+dois juntos e não produzia vermelho nenhum. Por isso `_MOTIVO_TERMINAL` é
+escrito à mão neste arquivo — ver o comentário dele.
+
+**Negativo da GRAFIA, e é o que teria pego o bug original** — troque o valor da
+constante por `"payment_failure"` (a grafia que o webhook usou desde sempre).
+VERMELHOS:
+  `tests/test_stripe_cancel_reason.py::test_o_motivo_terminal_existe_no_enum_da_stripe`
+  `test_terminal_apaga_o_relogio[dentro-da-janela-do-lembrete]`
+  `test_terminal_apaga_o_relogio[relogio-de-21-dias]`
+Antes deste PR, esse mesmo estado era VERDE no repositório inteiro.
 
 **Negativo do grupo do `payment_failed` atrasado** — ALARGUE, não apague: no
 ramo `invoice.payment_failed`, troque a lista contra a qual o status LIVE é

@@ -156,6 +156,59 @@ def _send_reply(to_wa_id: str, body: str) -> None:
             raise
 
 
+# Ids interativos ISENTOS do corte do Grátis — o análogo do
+# `_GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")` da web
+# (`frontend/routes/shared.py`) e da isenção de `/settings`: quem foi cortado
+# tem de conseguir PARAR de receber mensagem nossa. Os quatro desligam envio
+# proativo e não escrevem dado financeiro nenhum.
+#
+# `WA_UNDO_LAUNCH_ID` NÃO está aqui de propósito: ele não responde nada, só faz
+# `message.text = "desfazer"` e cai no `handle_incoming`, que tem o
+# `_paywall_gate` dele. Gatear aqui seria o segundo gate no mesmo caminho.
+_WA_INTERACTIVE_ISENTOS = {
+    WA_DAILY_REPORT_DISABLE_ID,
+    WA_WEEKLY_REPORT_DISABLE_ID,
+    WA_MONTHLY_REPORT_DISABLE_ID,
+    *WA_UPDATES_DISABLE_IDS,
+}
+
+
+def _bloqueado_pelo_corte(uid: int, reply_to: str, texto: str = "") -> bool:
+    """O corte aplicado a um caminho que NÃO passa pelo `handle_incoming`.
+
+    Botão do WhatsApp **fica no histórico da conversa para sempre**. Quem for
+    cortado hoje rola a tela e clica no "Desfazer", no "Apagar" ou no "✅ Já
+    paguei" de ontem, e cada um desses ramos dá `return` antes do
+    `handle_incoming` — a escrita acontece sem gate nenhum. Vale igual para as
+    `pending_actions`: a pergunta de valor da conta e a recategorização por
+    texto são consumidas ANTES do roteamento.
+
+    **Reusa `_paywall_gate` em vez de reimplementar o veredito** (§0.1): vêm
+    juntos o fail-open, as isenções de ajuda/billing e a copy certa para cada
+    população (só-WhatsApp × ex-assinante). `texto` é o da mensagem quando
+    existe, para que as isenções julguem o que o usuário realmente escreveu;
+    clique de botão manda `""`, que não casa isenção nenhuma.
+
+    Fail-open no `except` pelo mesmo motivo dos outros gates: trancar quem está
+    pagando é pior que escapar um clique.
+    """
+    try:
+        from core.handle_incoming import _paywall_gate
+        gated = _paywall_gate(
+            IncomingMessage(platform="whatsapp", user_id=uid, text=texto,
+                            external_id=reply_to),
+            "whatsapp",
+        )
+    except Exception as exc:
+        logger.warning("WA gate do corte falhou uid=%s: %s", uid, exc)
+        return False
+    if not gated:
+        return False
+    for out in gated:
+        _send_reply(reply_to, out.text)
+    return True
+
+
 def _pending_supports_confirmation_buttons(pending: dict[str, Any] | None) -> bool:
     if not pending:
         return False
@@ -641,6 +694,24 @@ def process_message(message: InboundMessage) -> None:
                     )
                 return
 
+            # ── O CORTE, UMA VEZ, antes de TODOS os botões que escrevem ─────
+            #
+            # Daqui para baixo os ramos interativos escrevem no banco e dão
+            # `return` antes do `handle_incoming`: recategorizar (três ramos),
+            # desfazer lançamento, apagar compra no crédito e quitar conta a
+            # pagar. Um gate por ramo seriam seis cópias da mesma regra; este é
+            # o ponto por onde todos passam (§0.1 — o conserto na função
+            # compartilhada é diff menor que um em cada chamador).
+            #
+            # Os ramos ACIMA já retornaram e são de leitura: tutorial, menu de
+            # ajuda e menu de comandos — a isenção de ajuda, a mesma do
+            # `_paywall_gate`. Os de OPT-OUT ficam ABAIXO e por isso precisam da
+            # isenção explícita: `_WA_INTERACTIVE_ISENTOS`.
+            if (interactive_id.strip().lower() not in _WA_INTERACTIVE_ISENTOS
+                    and interactive_id not in _WA_INTERACTIVE_ISENTOS
+                    and _bloqueado_pelo_corte(uid, reply_to)):
+                return
+
             # Botão "Categoria errada?" pós-lançamento (legado — agora a lista
             # vem direto na confirmação, mas mantemos o handler para mensagens
             # antigas ainda na tela do usuário).
@@ -740,28 +811,8 @@ def process_message(message: InboundMessage) -> None:
                 if not (bill_id and uid):
                     _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
                     return
-                # O corte do Grátis também vale para o BOTÃO, e ele não chega
-                # aqui sozinho: este ramo ESCREVE (`mark_bill_paid`) e não passa
-                # pelo `handle_incoming` — ver o comentário abaixo —, então o
-                # gate tem de ser chamado à mão. Reusar `_paywall_gate` em vez
-                # de reimplementar o veredito (§0.1) traz junto o fail-open, as
-                # isenções e a copy certa para cada população. `text=""` porque
-                # não há texto: clique de botão não é comando, e nenhuma isenção
-                # de ajuda/billing deve casar.
-                #
-                # Botão VELHO na tela é o caso real: o `_bill_reminder_tick` já
-                # não manda lembrete para quem foi cortado (wa_app.py), mas o
-                # template enviado ANTES do corte continua clicável para sempre.
-                from core.handle_incoming import _paywall_gate
-                gated = _paywall_gate(
-                    IncomingMessage(platform="whatsapp", user_id=uid, text="",
-                                    external_id=message.wa_id),
-                    "whatsapp",
-                )
-                if gated:
-                    for out in gated:
-                        _send_reply(reply_to, out.text)
-                    return
+                # (o corte já foi aplicado no gate único lá em cima, junto com
+                # os outros cinco botões que escrevem)
                 from db.bills import get_bill, mark_bill_paid
                 from utils_text import fmt_brl
                 try:
@@ -918,6 +969,20 @@ def process_message(message: InboundMessage) -> None:
         # a categoria que quer aplicar ao lançamento.
         # ---------------------------------------------------------------
         if (message.text or "").strip():
+            # O CORTE, antes de CONSUMIR qualquer `pending_action`. Estas
+            # interceptações também dão `return` sem passar pelo
+            # `handle_incoming`: a recategorização por texto reescreve a
+            # categoria de um lançamento e a pergunta de valor chama
+            # `mark_bill_paid`. Sem esta linha, quem foi cortado enquanto tinha
+            # uma pergunta de pé pagava a conta respondendo o número.
+            #
+            # Vai com o TEXTO REAL: é o que faz as isenções de ajuda e de
+            # billing julgarem o que a pessoa escreveu. Para quem TEM acesso
+            # isto devolve None e nada muda; para quem não tem, a mesma copy
+            # que o `handle_incoming` mandaria logo abaixo, só que antes de a
+            # pendência ser consumida.
+            if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):
+                return
             try:
                 pending_recat = get_pending_action(uid)
             except Exception:

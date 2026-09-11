@@ -2,18 +2,22 @@
 tests/test_relatorios_param_no_corte.py — os relatórios proativos param junto
 com o resto do produto no corte do Grátis (decisão do dono).
 
-CINCO laços em DOIS arquivos passam pelo mesmo helper
-(`core.reports.reports_daily.filtrar_por_acesso`): o diário e o periódico do
-Discord (`core/reports/reports_daily.py`) e TRÊS do WhatsApp
-(`adapters/whatsapp/wa_app.py`) — o diário, o periódico e o **lembrete de conta
-a pagar**. O teste cobre **os dois canais**, um caso por canal — com um só, a
-categoria fica meio fechada (§2).
+Todo laço proativo do repositório passa pelo mesmo helper
+(`core.reports.reports_daily.filtrar_por_acesso`). Quais são eles NÃO fica
+escrito aqui (§2) — a lista viva é `_LACOS_ESPERADOS`, lá embaixo, e o portão
+que a compara com a árvore é `test_todo_laco_proativo_passa_pelo_helper`. Os
+casos de comportamento cobrem **os dois canais**, um por canal — com um só, a
+categoria fica meio fechada.
 
-O terceiro do WhatsApp entrou em 2026-09-11, e a história dele é o motivo de
-este arquivo ter mudado de método: `_bill_reminder_tick` mandava template pago
-com o botão "✅ Já paguei" para conta cortada, e o portão daqui ficou VERDE o
-tempo todo porque contava chamadas em vez de enumerar laços (ver
-`test_todo_laco_proativo_passa_pelo_helper`).
+**Este portão já falhou DUAS vezes, e as duas custaram um laço mandando mensagem
+paga a quem foi cortado.** Primeiro ele CONTAVA ocorrências de
+`filtrar_por_acesso(` por arquivo, e estava invertido: laço novo sem filtro
+mantinha a contagem e ficava verde — foi assim que `_bill_reminder_tick`
+(template com o botão "✅ Já paguei") passou. Consertado para enumerar, ele
+ainda olhava uma LISTA DE ARQUIVOS, e `core/services/open_finance_proactive.py`
+— salário identificado e pedido de reconexão — não estava nela. Hoje ele varre a
+árvore inteira. Se você vier acrescentar um terceiro remendo, o padrão é claro:
+o buraco sempre esteve no ESCOPO da varredura, não no predicado.
 
 CONTROLES DECLARADOS (`docs/controles_declarados.md`)
 ────────────────────────────────────────────────────
@@ -30,19 +34,24 @@ vermelhos, um por asserção, e são bugs diferentes:
 
 **(a) o IRMÃO ESQUECIDO** — apague a chamada `filtrar_por_acesso([uid])` do
 `_periodic_report_tick` em `adapters/whatsapp/wa_app.py`. VERMELHO:
-  `test_todo_laco_proativo_passa_pelo_helper[adapters/whatsapp/wa_app.py-esperados1]`
+  `test_todo_laco_proativo_passa_pelo_helper`
 
-**(b) o LAÇO NOVO, que é o caso que a versão anterior deste teste NÃO pegava** —
-cole em `adapters/whatsapp/wa_app.py` um laço proativo novo, sem filtro::
+**(b) o LAÇO NOVO, EM ARQUIVO NOVO e com listador de OUTRO NOME** — é o caso
+que as duas versões anteriores deste teste não pegavam, e por isso a injeção usa
+as duas variações de uma vez. Crie `core/services/laco_novo_proativo.py`::
 
-    def _laco_novo_tick() -> None:
-        for uid in list_users_with_daily_report_enabled():
-            send_text(str(uid), "oi")
+    from db import list_open_finance_user_ids
+    from adapters.whatsapp.wa_client import send_template
 
-VERMELHO: o MESMO id acima. Medido 2026-09-11 — com o teste antigo, que contava
-ocorrências de `filtrar_por_acesso(` por arquivo, esta injeção dava **8 passed,
-0 failed**, e um laço novo COM filtro é que ficava vermelho. O portão estava
-invertido.
+    def run_laco_novo() -> None:
+        for uid in list_open_finance_user_ids():
+            send_template(str(uid), "oi")
+
+VERMELHO: o MESMO nome acima, pela asserção do CONJUNTO. Medido 2026-09-11.
+Histórico das duas versões anteriores, para não repetir: contando ocorrências
+por arquivo, a injeção (b) dava **8 passed, 0 failed** e um laço novo COM filtro
+é que ficava vermelho; enumerando só dois arquivos, ela continuava verde por o
+arquivo não ser olhado.
 
 **Positivos** (VERDES sob a injeção): `test_pagante_continua_no_lote` e
 `test_carencia_aberta_continua_no_lote`, nos dois canais. Sem eles o grupo
@@ -60,6 +69,7 @@ Direção: reabre a célula 28-b — decriptação e trilha de auditoria de gent
 from __future__ import annotations
 
 import ast
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -126,61 +136,100 @@ def test_a_ordem_e_a_composicao_do_lote_sobrevivem():
     assert filtrar_por_acesso([dentro, fora, outro]) == [dentro, outro]
 
 
-def _lacos_proativos(arquivo: str) -> dict[str, bool]:
-    """{nome da função: ela chama `filtrar_por_acesso`}, para toda função que
-    ENUMERA uma população proativa (`list_users_with_*`).
+# Enumerador de POPULAÇÃO: devolve um conjunto de usuários a varrer. Os três
+# prefixos são os que existem hoje, medido. **Não** casa `list_user_categories`
+# nem `list_identities_by_user`, que são dados DE UM usuário já escolhido.
+_POPULACAO = re.compile(r"^list_users$|^list_users_with_|^list_\w*_user_ids$")
 
-    Enumera, não conta. A versão anterior contava ocorrências de
-    `filtrar_por_acesso(` por arquivo e estava INVERTIDA: laço novo SEM filtro
-    mantinha a contagem e ficava verde; laço novo COM filtro quebrava a
-    contagem e ficava vermelho — o oposto exato do que a docstring prometia.
-    Foi assim que `_bill_reminder_tick` (o TERCEIRO laço proativo do
-    `wa_app.py`, que manda template pago para boleto vencendo) passou por este
-    portão sem filtro nenhum.
+# Enviar por qualquer canal. `send` cru é o Discord (`await user.send(...)`), e
+# o prefixo `_send_` pega os wrappers locais (`_send_periodic_template`).
+_ENVIO = {"send", "send_template", "send_text", "send_message"}
 
-    `list_users_with_*` é o predicado, e é ele que sobrevive: toda população
-    proativa deste repositório sai de um enumerador com esse prefixo. AST em
-    vez de regex porque a forma do laço varia — `_periodic_report_tick` itera
-    `weekly_users | monthly_users`, uma união de dois conjuntos, e nenhum
-    `for ... in list_users_with_*(...)` casaria com ele.
+
+def _lacos_proativos() -> dict[str, bool]:
+    """{"arquivo::função": ela chama `filtrar_por_acesso`} — REPOSITÓRIO INTEIRO.
+
+    Um laço proativo é uma função que ENUMERA uma população de usuários **e**
+    ENVIA alguma coisa. Os dois termos são necessários: só o enumerador pegaria
+    `piggy_agents.run_*_once` e `investment_scheduler`, que varrem população e
+    não mandam nada (escrevem em tabela); só o envio pegaria
+    `payment_reminder_wa._wa_lembrete`, que manda mas é POR usuário já
+    escolhido, com gate próprio (`ciclo_de_atraso_aberto`).
+
+    **Varre o repositório, e não uma lista de arquivos**, porque a lista de
+    arquivos foi a falha anterior: o portão cobria `wa_app.py` e
+    `reports_daily.py`, e `core/services/open_finance_proactive.py` — dois laços
+    mandando salário e pedido de reconexão a quem foi cortado — simplesmente não
+    era olhado. Antes disso o portão CONTAVA ocorrências e estava INVERTIDO
+    (laço novo sem filtro mantinha a contagem e ficava verde). Terceira mordida
+    da mesma categoria neste PR; o remédio do §2 é enumerar, e enumerar TUDO.
+
+    AST e não regex porque a forma do laço varia — `_periodic_report_tick` itera
+    `weekly_users | monthly_users`, e nenhum `for ... in list_users_with_*(...)`
+    casaria com ele. Nomes de chamada por `Name` **e** por `Attribute`, senão
+    `user.send(...)` do Discord não conta como envio.
     """
-    tree = ast.parse((RAIZ / arquivo).read_text(encoding="utf-8"))
     achados: dict[str, bool] = {}
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    for caminho in sorted(RAIZ.rglob("*.py")):
+        partes = caminho.relative_to(RAIZ).parts
+        if {".venv", "__pycache__", "node_modules", ".claude", "tests"} & set(partes):
             continue
-        chamadas = {n.func.id for n in ast.walk(fn)
-                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-        if any(c.startswith("list_users_with_") for c in chamadas):
-            achados[fn.name] = "filtrar_por_acesso" in chamadas
+        try:
+            arvore = ast.parse(caminho.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for fn in ast.walk(arvore):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            chamadas = set()
+            for n in ast.walk(fn):
+                if not isinstance(n, ast.Call):
+                    continue
+                if isinstance(n.func, ast.Name):
+                    chamadas.add(n.func.id)
+                elif isinstance(n.func, ast.Attribute):
+                    chamadas.add(n.func.attr)
+            enumera = any(_POPULACAO.match(c) for c in chamadas)
+            envia = bool(chamadas & _ENVIO) or any(c.startswith("_send_") for c in chamadas)
+            if enumera and envia:
+                rel = "/".join(caminho.relative_to(RAIZ).parts)
+                achados[f"{rel}::{fn.name}"] = "filtrar_por_acesso" in chamadas
     return achados
 
 
-@pytest.mark.parametrize("arquivo,esperados", [
-    ("core/reports/reports_daily.py", {"_daily_report_discord", "_periodic_reports_discord"}),
-    ("adapters/whatsapp/wa_app.py",
-     {"_daily_report_tick", "_periodic_report_tick", "_bill_reminder_tick"}),
-])
-def test_todo_laco_proativo_passa_pelo_helper(arquivo, esperados):
+_LACOS_ESPERADOS = {
+    "adapters/whatsapp/wa_app.py::_daily_report_tick",
+    "adapters/whatsapp/wa_app.py::_periodic_report_tick",
+    "adapters/whatsapp/wa_app.py::_bill_reminder_tick",
+    "core/reports/reports_daily.py::_daily_report_discord",
+    "core/reports/reports_daily.py::_periodic_reports_discord",
+    "core/services/open_finance_proactive.py::run_salary_notifications",
+    "core/services/open_finance_proactive.py::run_reconnect_notifications",
+}
+
+
+def test_todo_laco_proativo_passa_pelo_helper():
     """É a CATEGORIA que tem de estar fechada, não a instância (§2).
 
     Duas asserções, e as duas são necessárias:
 
-    • **cada laço conhecido filtra** — o irmão esquecido;
-    • **o conjunto de laços é o esperado** — o laço NOVO. Sem esta, um laço
-      novo que não filtrasse simplesmente não seria olhado, que é a falha que
-      este teste acabou de ter.
+    • **cada laço filtra** — o irmão esquecido;
+    • **o conjunto é o esperado** — o laço NOVO, e o ARQUIVO novo. Sem esta,
+      um laço que não filtrasse podia simplesmente não ser olhado, que é a
+      falha que este teste já teve duas vezes.
 
-    Quem adicionar laço proativo legítimo tem DUAS linhas para mexer aqui, e é
-    de propósito: a lista é a declaração de que alguém olhou.
+    Quem adicionar laço proativo legítimo tem DUAS linhas para mexer: a chamada
+    do filtro e esta lista. É de propósito — a lista é a declaração de que
+    alguém olhou, e ela é o único lugar do repositório onde a categoria inteira
+    está escrita.
     """
-    achados = _lacos_proativos(arquivo)
+    achados = _lacos_proativos()
     sem_filtro = sorted(n for n, filtra in achados.items() if not filtra)
     assert not sem_filtro, (
-        f"{arquivo}: {sem_filtro} enumera(m) população proativa e não passa(m) por "
+        f"{sem_filtro} enumera(m) população de usuários e envia(m) sem passar por "
         "`filtrar_por_acesso` — manda(m) mensagem para quem foi cortado")
-    assert set(achados) == esperados, (
-        f"{arquivo}: laços proativos {sorted(achados)}, esperado {sorted(esperados)} — "
+    assert set(achados) == _LACOS_ESPERADOS, (
+        f"laços proativos {sorted(achados)}, esperado {sorted(_LACOS_ESPERADOS)} — "
         "laço novo entra nesta lista junto com o filtro, não depois")
 
 
