@@ -3,7 +3,8 @@ tests/test_dunning_encerramento_terminal.py — o ramo TERMINAL do
 `customer.subscription.deleted` e o que ele deixa de verdade no banco.
 
 Quando a Stripe encerra a assinatura DE VEZ por inadimplência
-(`cancellation_details.reason == 'payment_failure'`), o ramo grava `unpaid` (o
+(`cancellation_details.reason == 'payment_failed'`, a constante
+`billing_dunning.STRIPE_CANCEL_REASON_INADIMPLENCIA`), o ramo grava `unpaid` (o
 MOTIVO, que `canceled` apagaria) e limpa o relógio de carência
 INCONDICIONALMENTE, por `db.dunning.encerrar_ciclo_de_atraso`. Nos outros
 motivos nada muda: `canceled` + `clear_past_due_since` com predicado de versão.
@@ -40,8 +41,10 @@ O predicado volta, nada é apagado. VERMELHOS:
 Direção: falso POSITIVO de acesso — o relógio sobrevivente reabre a carência e
 devolve o app a quem a Stripe acabou de encerrar.
 
-**Negativo do MOTIVO** — troque `== "payment_failure"` por `!= "nunca_isso"` (o
-critério continua lá e deixa de discriminar; nada é apagado). VERMELHOS:
+**Negativo do MOTIVO** — em `core/services/billing_dunning.py`, troque
+`STRIPE_CANCEL_REASON_INADIMPLENCIA = "payment_failed"` por
+`= "nunca_isso"` (troca de VALOR; o critério continua lá e deixa de
+discriminar). VERMELHOS:
   `test_motivo_nao_terminal_mantem_o_comportamento_de_hoje`
   `test_deleted_sem_cancellation_details_nao_e_terminal`
 Direção: falso positivo — cancelamento a pedido do cliente passa a gravar
@@ -112,6 +115,16 @@ def _relogio(uid: int):
             return cur.fetchone()["past_due_since"]
 
 
+# O motivo terminal ESCRITO À MÃO, e nunca importado de
+# `billing_dunning.STRIPE_CANCEL_REASON_INADIMPLENCIA`. Importar faria o caso
+# DERIVAR da constante e se mover junto com ela: trocar a constante moveria os
+# casos daqui e o controle do MOTIVO (declarado acima) ficaria verde — que é
+# exatamente como `payment_failure` sobreviveu neste arquivo. A duplicação é
+# deliberada e tem o par que o §0.7 exige: `tests/test_stripe_cancel_reason.py`
+# ancora a constante no enum do pacote `stripe` instalado.
+_MOTIVO_TERMINAL = "payment_failed"
+
+
 def _evento_deleted(uid: int, *, created: int, reason: str | None):
     detalhes = {"reason": reason} if reason is not None else None
     return {
@@ -159,7 +172,7 @@ def test_terminal_apaga_o_relogio(user_id, monkeypatch, rotulo, idade_relogio, i
     assert _relogio(uid) is not None, "pré-condição: o ciclo tem de estar aberto"
 
     r = _post(client, fake,
-              _evento_deleted(uid, created=_epoch(idade_evento), reason="payment_failure"))
+              _evento_deleted(uid, created=_epoch(idade_evento), reason=_MOTIVO_TERMINAL))
     assert r.status_code == 200, r.text
 
     assert _relogio(uid) is None
@@ -183,7 +196,7 @@ def test_terminal_nao_deixa_orfao_nem_e_lido_como_gratis(user_id, monkeypatch):
     _por_a_conta_em_atraso(uid, idade_do_relogio=timedelta(days=6, hours=12))
     assert _post(client, fake,
                  _evento_deleted(uid, created=_epoch(timedelta(days=8)),
-                                 reason="payment_failure")).status_code == 200
+                                 reason=_MOTIVO_TERMINAL)).status_code == 200
 
     conta = db.get_auth_user(uid)
     assert conta["past_due_since"] is None, "órfão: relógio sobreviveu ao status na lista"
@@ -238,7 +251,7 @@ def test_payment_failed_depois_do_terminal_nao_devolve_nada(user_id, monkeypatch
     # 1) o terminal chega e encerra tudo
     assert _post(client, fake,
                  _evento_deleted(uid, created=_epoch(timedelta(days=8)),
-                                 reason="payment_failure")).status_code == 200
+                                 reason=_MOTIVO_TERMINAL)).status_code == 200
     assert _relogio(uid) is None and has_app_access(uid) is False
 
     # 2) e SÓ ENTÃO o falho atrasado

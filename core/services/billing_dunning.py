@@ -79,6 +79,25 @@ webhook importam daqui. Quem trouxer uma função para cá importa
 # compondo dela. NÃO crie uma quarta lista.
 PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
 
+# `cancellation_details.reason` do `customer.subscription.deleted` que significa
+# "a Stripe encerrou DE VEZ por inadimplência" — o único desfecho TERMINAL de
+# uma cobrança, e o gatilho do ramo que grava `unpaid` em vez de `canceled`.
+#
+# **O valor é `payment_failed`.** Até 2026-09-11 o webhook comparava com
+# `payment_failure`, que NÃO EXISTE no enum da Stripe: o ramo terminal caía
+# sempre no `else`, gravava `canceled`, e o motivo do bloqueio — a única coisa
+# que aquele ramo existe para preservar — se perdia em toda conta encerrada por
+# inadimplência desde que o ramo foi escrito. Os testes não pegaram porque
+# montavam o evento com a MESMA string errada: o caso derivava da constante,
+# que é a patologia que `docs/controles_declarados.md` documenta.
+#
+# Constante nomeada e não literal no `if` justamente por isso (§0.7), e
+# `tests/test_stripe_cancel_reason.py` compara este valor com o enum do pacote
+# `stripe` INSTALADO — mesmo padrão do subset de ícones
+# (`tests/test_phosphor_subset.py`). Sem esse teste, o próximo valor que a
+# Stripe renomear repete o defeito em silêncio.
+STRIPE_CANCEL_REASON_INADIMPLENCIA = "payment_failed"
+
 # A janela da inadimplência: 7 dias contados de `auth_accounts.past_due_since`.
 # Constante de módulo, não env — é regra de produto (decisão do dono), e não
 # parâmetro de rollout. Ela decide TRÊS coisas, e **desde o corte do Grátis uma

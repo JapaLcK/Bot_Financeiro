@@ -5787,8 +5787,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # ou um motivo novo que a Stripe invente amanhã dão False e mantêm o
             # comportamento de sempre. Default seguro: a perna terminal apaga
             # dado, a outra não.
+            from core.services.billing_dunning import (
+                STRIPE_CANCEL_REASON_INADIMPLENCIA,
+            )
             encerramento_por_inadimplencia = (
-                (_g(obj, "cancellation_details") or {}).get("reason") == "payment_failure"
+                (_g(obj, "cancellation_details") or {}).get("reason")
+                == STRIPE_CANCEL_REASON_INADIMPLENCIA
             )
             if encerramento_por_inadimplencia:
                 # Grava `unpaid` e não `canceled` (decisão do dono): o MOTIVO da
