@@ -34,43 +34,56 @@ from db import init_db, ensure_user, get_conn
 #
 # A condição é a ausência do pacote, não o erro: no CI o ofxparse está no
 # requirements.txt, então nada aqui é ignorado e todos rodam normalmente.
+#
+# A lista ENCOLHEU para um nome só quando `core/handle_incoming.py` passou a
+# importar o `ofx_service` dentro do bloco que trata o anexo OFX. Antes disso
+# ela crescia a cada teste novo que tocasse o bot: importar
+# `core.handle_incoming` — o que adaptadores, rotas e helpers de teste fazem —
+# arrastava `ofx_service -> ofx_import -> ofxparse`. O que sobra aqui é o único
+# arquivo que importa o PARSER direto, e esse é dependência legítima dele.
 _OFXPARSE_DEPENDENTES = [
-    "test_audio_clarification.py",
-    "test_audio_multi_launch_ask_value.py",
-    "test_category_normalization.py",
-    "test_full_handler_smoke.py",
-    "test_handle_incoming_routing.py",
-    "test_paywall_gate_bot.py",
-    "test_paywall_gate_isencoes.py",
-    "test_recurring_value.py",
-    "test_split_audio_transactions.py",
-    "test_whatsapp_confirmations.py",
-    "test_whatsapp_daily_report.py",
-    "test_whatsapp_simulation.py",
+    "test_local_rules_marcas_alimentacao.py",
 ]
 
-# Estes quatro NÃO estouram na coleta: importam `core.handle_incoming` ou
-# `statement_import` DENTRO do corpo do teste, e a cadeia
-# handle_incoming -> ofx_service -> ofx_import -> ofxparse só é percorrida
-# quando o teste roda. O collect_ignore acima não os alcança, então sem este
-# skip a suíte "de dependências reduzidas" ainda termina com 4 vermelhos que
-# nada têm a ver com a mudança em revisão.
+# Estes NÃO estouram na coleta: chamam `import_ofx_bytes`/`import_statement_bytes`
+# DENTRO do corpo do teste, e a cadeia até o `ofxparse` só é percorrida quando o
+# teste roda. O collect_ignore acima não os alcança, então sem este skip a suíte
+# "de dependências reduzidas" ainda termina com vermelhos que nada têm a ver com
+# a mudança em revisão.
+#
+# Medido com o pacote bloqueado e a flag DESLIGADA (nenhuma lista em vigor):
+# são exatamente estes 8, todos `ModuleNotFoundError: ofxparse` — nenhum erro de
+# comportamento disfarçado. Os dois que saíram (`test_attachment_detection` e o
+# `test_handle_incoming_clarification_...`) chegavam ao parser por
+# `core.handle_incoming`, caminho que deixou de existir.
 _OFXPARSE_IMPORT_TARDIO = [
-    "tests/test_statement_import.py::test_attachment_detection",
+    "tests/test_category_launches_query.py::test_has_time_e_posted_at_espelham_a_visao_geral",
+    "tests/test_category_launches_query.py::test_editar_a_data_de_um_extrato_vence_o_posted_at",
+    "tests/test_category_normalization.py::test_import_extrato_nao_cria_gemea",
+    "tests/test_category_normalization.py::test_import_ofx_conta_nao_cria_gemea",
+    "tests/test_category_normalization.py::test_import_ofx_fatura_nao_cria_gemea",
+    "tests/test_ofx_import_route.py::test_ofx_bancario_importa_pela_rota",
     "tests/test_statement_import.py::test_import_statement_bytes_csv_idempotente",
     "tests/test_statement_import.py::test_import_statement_bytes_vazio_ou_grande",
-    "tests/test_nlp_and_pending_flow.py::test_handle_incoming_clarification_tem_precedencia_sobre_fallback_ia",
 ]
 
 # O alívio NÃO é automático: exige PYTEST_ALLOW_MISSING_OPTIONAL_DEPS=1.
 #
 # Detectar a ausência sozinho seria pior que o problema — se o ofxparse caísse
-# do requirements.txt por engano, ou sumisse do CI, a suíte silenciaria 9
-# arquivos e pularia 4 testes e passaria VERDE, enquanto `core.handle_incoming`
-# estaria quebrado em produção. Um ambiente de dependências reduzidas é uma
-# decisão consciente de quem o monta (o .claude/hooks/session-start.sh exporta
-# a variável); a execução normal do dev e do CI continua estourando, que é o
-# comportamento certo para dependência obrigatória faltando.
+# do requirements.txt por engano, ou sumisse do CI, a suíte silenciaria as duas
+# listas acima e passaria VERDE com o importador de OFX quebrado em produção. Um
+# ambiente de dependências reduzidas é uma decisão consciente de quem o monta (o
+# .claude/hooks/session-start.sh exporta a variável); a execução normal do dev e
+# do CI continua estourando, que é o comportamento certo para dependência
+# obrigatória faltando.
+#
+# O opt-in é o que segura o sinal agora que o import é preguiçoso. Com o
+# `ofx_service` no topo de `core/handle_incoming.py`, um requirements.txt sem o
+# `ofxparse` derrubava a suíte inteira na coleta — alto e cedo. Agora ele só
+# quebra no caminho do OFX, que é mais tarde e mais baixo. O que compensa:
+# `tests/test_ofx_import_route.py` exercita a rota de upload de ponta a ponta e
+# `tests/test_ofxparse_import_preguicoso.py` o anexo pelo bot, então sem o pacote
+# há vermelho por nome de teste — só não há mais o aborto de coleta.
 _DEPS_REDUZIDAS = os.getenv("PYTEST_ALLOW_MISSING_OPTIONAL_DEPS") == "1"
 
 # find_spec em vez de `try: import`: `except ImportError` também captura um
