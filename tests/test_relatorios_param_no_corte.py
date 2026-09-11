@@ -136,14 +136,54 @@ def test_a_ordem_e_a_composicao_do_lote_sobrevivem():
     assert filtrar_por_acesso([dentro, fora, outro]) == [dentro, outro]
 
 
-# Enumerador de POPULAÇÃO: devolve um conjunto de usuários a varrer. Os três
-# prefixos são os que existem hoje, medido. **Não** casa `list_user_categories`
-# nem `list_identities_by_user`, que são dados DE UM usuário já escolhido.
-_POPULACAO = re.compile(r"^list_users$|^list_users_with_|^list_\w*_user_ids$")
+# Enumerador de POPULAÇÃO. Era `^list_users$|^list_users_with_|^list_\w*_user_ids$`
+# — três prefixos escolhidos por serem os que eu já tinha visto — e deixou
+# passar `list_agents_pending_email`, o laço que manda relatório financeiro por
+# e-mail para quem foi cortado. **É a quinta vez neste PR que o furo está no
+# ESCOPO da varredura**, e sempre pelo mesmo mecanismo: enumerar as formas
+# conhecidas de dizer uma coisa em vez de enumerar a categoria.
+#
+# Hoje é `^list_` e nada mais. Medido 2026-09-11: o alargamento custa ZERO
+# ruído — passou de 7 para 10 funções, e as TRÊS novas são membros legítimos da
+# categoria (uma era o defeito, duas são isenções com razão). Quem discrimina
+# não é mais o nome do listador; é o segundo termo, o ENVIO.
+_POPULACAO = re.compile(r"^list_")
 
-# Enviar por qualquer canal. `send` cru é o Discord (`await user.send(...)`), e
-# o prefixo `_send_` pega os wrappers locais (`_send_periodic_template`).
+# Enviar por qualquer canal. `send` cru é o Discord (`await user.send(...)`) e o
+# prefixo `_send_` pega os wrappers locais (`_send_periodic_template`).
 _ENVIO = {"send", "send_template", "send_text", "send_message"}
+
+
+def _envia(chamadas: set[str]) -> bool:
+    """Manda alguma coisa para fora, por qualquer canal.
+
+    `send_*_email` entra porque foi por aí que o laço dos agentes escapou: ele
+    não chama `send_template` nem `send_text` — chama `send_agent_report_email`.
+    """
+    return (bool(chamadas & _ENVIO)
+            or any(c.startswith("_send_")
+                   or (c.startswith("send_") and c.endswith("_email"))
+                   for c in chamadas))
+
+
+# Laços proativos que NÃO passam por `filtrar_por_acesso`, cada um com a razão
+# escrita — o análogo do `_ISENTAS_COM_RAZAO` de
+# `tests/test_portao_pendencias_interceptadas.py`. Sem este escape, alargar o
+# critério obrigaria a gatear coisas que não devem ser gateadas, e a saída fácil
+# seria apagar o portão em vez de declarar a entrada.
+_ISENTOS_COM_RAZAO = {
+    "core/services/trial_downsell.py::send_trial_downsell_emails":
+        "É o e-mail de WIN-BACK: existe PARA falar com quem ficou sem plano no "
+        "fim do teste, e filtrar por acesso o mataria inteiro. O próprio laço "
+        "já filtra o oposto (`get_plan_tier(user_id) != 'free'` → pula), e a "
+        "copy dele é presa por "
+        "`tests/test_billing_email_downsell_nao_promete_gratis.py`.",
+    "core/services/payment_reminder_wa.py::_wa_lembrete":
+        "Não é laço de população: roda POR usuário já escolhido pelo funil do "
+        "lembrete, e tem gate próprio e mais estrito — "
+        "`db.dunning.ciclo_de_atraso_aberto`, lido fresco imediatamente antes "
+        "do envio (célula 31 de `docs/dunning_estados_eventos.md`).",
+}
 
 
 def _lacos_proativos() -> dict[str, bool]:
@@ -189,9 +229,7 @@ def _lacos_proativos() -> dict[str, bool]:
                     chamadas.add(n.func.id)
                 elif isinstance(n.func, ast.Attribute):
                     chamadas.add(n.func.attr)
-            enumera = any(_POPULACAO.match(c) for c in chamadas)
-            envia = bool(chamadas & _ENVIO) or any(c.startswith("_send_") for c in chamadas)
-            if enumera and envia:
+            if any(_POPULACAO.match(c) for c in chamadas) and _envia(chamadas):
                 rel = "/".join(caminho.relative_to(RAIZ).parts)
                 achados[f"{rel}::{fn.name}"] = "filtrar_por_acesso" in chamadas
     return achados
@@ -205,6 +243,8 @@ _LACOS_ESPERADOS = {
     "core/reports/reports_daily.py::_periodic_reports_discord",
     "core/services/open_finance_proactive.py::run_salary_notifications",
     "core/services/open_finance_proactive.py::run_reconnect_notifications",
+    "core/services/piggy_agents.py::run_agent_emails_once",
+    *_ISENTOS_COM_RAZAO,
 }
 
 
@@ -224,10 +264,13 @@ def test_todo_laco_proativo_passa_pelo_helper():
     está escrita.
     """
     achados = _lacos_proativos()
-    sem_filtro = sorted(n for n, filtra in achados.items() if not filtra)
+    sem_filtro = sorted(n for n, filtra in achados.items()
+                        if not filtra and n not in _ISENTOS_COM_RAZAO)
     assert not sem_filtro, (
         f"{sem_filtro} enumera(m) população de usuários e envia(m) sem passar por "
-        "`filtrar_por_acesso` — manda(m) mensagem para quem foi cortado")
+        "`filtrar_por_acesso` — manda(m) mensagem para quem foi cortado. Se o "
+        "laço tiver razão para não filtrar, ela vai POR ESCRITO em "
+        "`_ISENTOS_COM_RAZAO`, não por omissão.")
     assert set(achados) == _LACOS_ESPERADOS, (
         f"laços proativos {sorted(achados)}, esperado {sorted(_LACOS_ESPERADOS)} — "
         "laço novo entra nesta lista junto com o filtro, não depois")

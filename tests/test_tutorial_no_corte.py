@@ -1,6 +1,9 @@
 """
-tests/test_wa_tutorial_no_corte.py — o tutorial não convida quem foi cortado a
+tests/test_tutorial_no_corte.py — o tutorial não convida quem foi cortado a
 fazer o que a próxima mensagem recusa.
+
+Sem o prefixo `wa_` de propósito: metade do conserto mora no `_paywall_gate`,
+que é dos DOIS canais, e o caso do Discord está aqui embaixo.
 
 Arquivo próprio porque `tests/test_wa_botao_velho_no_corte.py` passou de 350
 linhas (`tests/test_max_lines_python.py`) e porque o assunto é outro: lá é o
@@ -27,6 +30,7 @@ from __future__ import annotations
 # módulo que a define, e sem ela o `conftest` roda com `PLANS_V2_ENABLED=0` — o
 # gate se auto-desliga, nada é barrado e os dois negativos daqui ficariam verdes
 # medindo NADA. Custou dois vermelhos antes de eu notar.
+from _paywall_gate_helpers import diga as _diga
 from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
     _clique, _conta, _gate_ligado, _texto, bancada,
 )
@@ -123,3 +127,37 @@ def test_pagante_continua_vendo_o_tutorial(monkeypatch, bancada):
     _clique(uid, monkeypatch, "tut_skip")
 
     assert tocados == ["tut_skip"], f"o pagante foi barrado no tutorial: {respostas}"
+
+
+def test_cortado_digitando_tutorial_no_DISCORD_tambem_e_barrado():
+    """A prova de que o conserto do `help.tutorial` vale para os DOIS canais.
+
+    Isto estava DEDUZIDO ("os dois entram no mesmo `_paywall_gate`") e virou
+    medição, porque o Discord tem ordenação própria: `discord_bot.py:180` chama
+    `core_handle_incoming(incoming)` ANTES dos cogs e, se ele responder, os cogs
+    não rodam. A dedução estava certa — mas a razão de escrever o caso é que uma
+    ordenação diferente a teria invalidado sem nenhum teste ficar vermelho.
+
+    Vai pelo `handle_incoming` com `platform="discord"`, que é o mesmo objeto
+    que o adapter monta (§3: rode a conversa, não a função). Não sobe o bot: o
+    que muda entre os canais é o despacho, e o despacho está lido acima.
+    """
+    uid = _conta(cortada=True)
+
+    resposta = _diga(uid, "tutorial", plataforma="discord")
+
+    baixa = resposta.lower()
+    assert "plano" in baixa, f"o cortado leu o tutorial no Discord: {resposta!r}"
+    assert "gastei" not in baixa, (
+        f"o cortado foi convidado a registrar um gasto no Discord: {resposta!r}")
+
+
+def test_pagante_continua_lendo_o_tutorial_no_DISCORD():
+    """POSITIVO do par acima: o conserto tirou o tutorial de quem NÃO tem
+    acesso, não de todo mundo. Sem ele, um gate que recusasse tudo passaria."""
+    uid = _conta(cortada=False)
+
+    resposta = _diga(uid, "tutorial", plataforma="discord")
+
+    assert "gastei" in resposta.lower(), (
+        f"o pagante perdeu o tutorial no Discord: {resposta!r}")
