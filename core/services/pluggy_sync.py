@@ -179,12 +179,6 @@ def normalize_pluggy_investment(raw: dict) -> dict:
     }
 
 
-def is_caixinha(investment: dict) -> bool:
-    """Caixinha do Nubank / Cofrinho do PicPay = CDB de renda fixa (doc Pluggy)."""
-    return (str(investment.get("type") or "").upper() == "FIXED_INCOME"
-            and str(investment.get("subtype") or "").upper() == "CDB")
-
-
 def sync_pluggy_item(provider_item_id: str) -> dict:
     """Sincroniza um item Pluggy: contas + transações → tabelas OF. Idempotente.
 

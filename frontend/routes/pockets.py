@@ -396,7 +396,8 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
                 """
                 SELECT id, name, balance, target_amount, target_date, emoji, color, status,
                        description, interest_enabled, interest_rate, interest_period,
-                       interest_tax_profile, last_interest_date
+                       interest_tax_profile, last_interest_date,
+                       source, of_investment_id
                 FROM pockets
                 WHERE user_id = %s AND lower(name) = lower(%s)
                 LIMIT 1
@@ -459,6 +460,11 @@ async def get_pocket_history_route(request: Request, user_id: int, pocket_name: 
             "interest_tax_profile": pocket_row.get("interest_tax_profile"),
             "last_interest_date": pocket_row["last_interest_date"].isoformat()
                                   if pocket_row.get("last_interest_date") else None,
+            # a UI usa os dois pra esconder Depositar/Sacar: caixinha do banco é
+            # read-only (db/pockets.py recusa com OF_POCKET_READONLY).
+            "source": pocket_row.get("source"),
+            "of_investment_id": (int(pocket_row["of_investment_id"])
+                                 if pocket_row.get("of_investment_id") is not None else None),
         },
         "totals": {
             "deposits": deposits_total,

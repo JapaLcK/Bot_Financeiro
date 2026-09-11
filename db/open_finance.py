@@ -820,24 +820,81 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
 
+# ── Regra de caixinha — FONTE ÚNICA (sync de auto-import + tela de vínculo) ───
+# Uma posição do Open Finance é caixinha quando:
+#   a) o nome tem cara de caixinha (o que já funcionava antes desta regra); OU
+#   b) é CDB de renda fixa EMITIDO PELO PRÓPRIO BANCO CONECTADO — é assim que a
+#      caixinha do Nubank chega hoje: `name` e `issuer` trazem o nome jurídico do
+#      papel ("CDB - NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E
+#      INVESTIMENTO"), idêntico em todas as posições e sem nada de "caixinha".
+# CDB de TERCEIRO (emitido por outro banco) fica de fora de propósito: ali é
+# investimento, não caixinha — e continua contado em db/rv.py.
+_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
+
+# Palavras que não identificam banco nenhum, e por isso não podem decidir o
+# casamento emissor × instituição ("Banco do Brasil" → brasil, "Cartão
+# Carrefour" → carrefour, "Mercado Pago" → pago).
+_MARCA_GENERICA = "banco|bco|caixa|cartao|conta|mercado|do|da|de|dos|das"
+
+
+def _marca_sql(expr: str) -> str:
+    """SQL que reduz um nome de instituição/emissor ao token de marca.
+
+    "NU FINANCEIRA S.A. - SOCIEDADE ..." → nu; "Banco do Brasil" → brasil.
+    Sem acento, sem caixa, cortado no primeiro separador.
+    """
+    sem_acento = (
+        f"translate(lower(coalesce({expr}, '')),"
+        " 'áàâãäéèêëíìîïóòôõöúùûüçñ', 'aaaaaeeeeiiiiooooouuuucn')"
+    )
+    return (
+        f"regexp_replace(regexp_replace({sem_acento},"
+        f" '^[[:space:]]*(({_MARCA_GENERICA})[[:space:]]+)+', ''),"
+        " '[^a-z0-9].*$', '')"
+    )
+
+
+_MARCA_EMISSOR = _marca_sql("i.raw->>'issuer'")
+_MARCA_BANCO = _marca_sql("c.institution_name")
+
+# Fragmento pra colar no WHERE: exige `open_finance_investments i` JOIN
+# `open_finance_connections c`. Os `%%` só funcionam porque as duas queries que
+# usam este fragmento passam parâmetros para o psycopg.
+_CAIXINHA_SQL = f"""(
+                    i.name ilike any (array[{", ".join(repr(p.replace("%", "%%")) for p in _CAIXINHA_NAME_PATTERNS)}])
+                    or (
+                      upper(coalesce(i.type, '')) = 'FIXED_INCOME'
+                      and upper(coalesce(i.subtype, '')) = 'CDB'
+                      and length({_MARCA_EMISSOR}) >= 2
+                      and length({_MARCA_BANCO}) >= 2
+                      and (starts_with({_MARCA_EMISSOR}, {_MARCA_BANCO})
+                           or starts_with({_MARCA_BANCO}, {_MARCA_EMISSOR}))
+                    )
+                  )"""
+
+
+def _nome_de_caixinha(nome: str) -> bool:
+    """O nome do banco já serve de rótulo? (mesma lista de padrões da regra SQL)"""
+    minusculo = (nome or "").lower()
+    return any(p.strip("%") in minusculo for p in _CAIXINHA_NAME_PATTERNS)
+
+
 def list_caixinha_candidates(user_id: int) -> list[dict]:
-    """Caixinhas/cofrinhos OF do usuário (CDB de renda fixa OU nome de caixinha),
-    já com a meta vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
+    """Caixinhas/cofrinhos OF do usuário (regra `_CAIXINHA_SQL`), já com a meta
+    vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
                        p.id as pocket_id, p.name as pocket_name, p.target_amount
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 left join pockets p on p.of_investment_id = i.id and p.user_id = %s
                 where c.user_id = %s
-                  and (
-                    (upper(coalesce(i.type,'')) = 'FIXED_INCOME'
-                       and upper(coalesce(i.subtype,'')) = 'CDB')
-                    or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
-                  )
+                  -- já vinculada continua na lista mesmo que a regra não case
+                  -- mais (deixa desvincular pela UI).
+                  and ({_CAIXINHA_SQL} or p.id is not null)
                   -- Nubank devolve toda posição de CDB via OF, inclusive caixinhas já
                   -- esvaziadas (saldo 0). Elas poluem a tela de vínculo sem servir pra
                   -- nada, então só mostramos candidatos com saldo > 0 — exceto os que já
@@ -957,17 +1014,12 @@ def update_pocket_of_last_seen(pocket_id: int, balance, profit=None) -> None:
         conn.commit()
 
 
-# Regra de auto-import de caixinha: só investimentos com CARA de caixinha (nome ~
-# reserva/objetivo/cofrinho). Um CDB comum é investimento, não meta — não vira pocket
-# (evita "caixinha fantasma"). Decisão de produto 2026-08-11.
-_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
-
-
 def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
 
-    1. Auto-cria um pocket pra cada caixinha OF (com cara de caixinha) ainda não
-       vinculada — `source='open_finance'`, read-only, juros interno OFF.
+    1. Auto-cria um pocket pra cada caixinha OF (regra `_CAIXINHA_SQL`: nome de
+       caixinha OU CDB do próprio banco conectado) ainda não vinculada —
+       `source='open_finance'`, read-only, juros interno OFF.
     2. Dedup: se já existe um pocket de mesmo nome não vinculado, VINCULA nele em
        vez de duplicar.
     3. Espelha o saldo do banco (`open_finance_investments.balance`) em TODAS as
@@ -979,25 +1031,38 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     created = linked = mirrored = 0
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1. caixinhas OF desta conexão com cara de caixinha E SALDO > 0.
+            # 1. caixinhas OF desta conexão (regra `_CAIXINHA_SQL`) E SALDO > 0.
             # Saldo 0 = fundo/reserva vazia (ex.: Nubank "Reserva Planejada" que o
             # Pluggy devolve zerado) — não vira caixinha fantasma.
+            # `order by i.id`: a numeração do nome não pode depender do saldo, que
+            # muda a cada sync — ordem de chegada do banco é estável.
             cur.execute(
-                """
+                f"""
                 select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as profit
+                       nullif(i.raw->>'amountProfit', '')::numeric as profit,
+                       c.institution_name
                 from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
                 where i.connection_id = %s
-                  and i.name ilike any (%s)
+                  and {_CAIXINHA_SQL}
                   and coalesce(i.balance, 0) > 0
+                order by i.id
                 """,
-                (connection_id, _CAIXINHA_NAME_PATTERNS),
+                (connection_id,),
             )
             of_caixinhas = [dict(r) for r in (cur.fetchall() or [])]
 
             for oc in of_caixinhas:
                 of_id = oc["of_id"]
-                name = (oc["name"] or "Caixinha").strip()
+                # Rótulo: o nome do banco, quando ele já é de caixinha. Quando é o
+                # nome jurídico do papel ("CDB - NU FINANCEIRA S.A. - ..."), igual
+                # em TODAS as posições, vira "Caixinha <banco>" + número.
+                # O nome é escolhido UMA VEZ, na criação, e nunca recalculado: o
+                # vínculo é o of_investment_id, então renomear no app sobrevive ao
+                # sync e nenhum saldo mexe no rótulo.
+                of_name = (oc["name"] or "").strip()
+                name = of_name if _nome_de_caixinha(of_name) else \
+                    f"Caixinha {(oc['institution_name'] or 'do banco').strip()}"
                 bal = oc["balance"]
                 profit = oc["profit"]  # baseline de rendimento (amountProfit), p/ o Banqueiro
 
@@ -1037,7 +1102,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                     if not cur.fetchone():
                         break
                     suffix += 1
-                    new_name = f"{name} (banco)" if suffix == 1 else f"{name} (banco {suffix})"
+                    new_name = f"{name} {suffix + 1}"
                 cur.execute(
                     """
                     insert into pockets(

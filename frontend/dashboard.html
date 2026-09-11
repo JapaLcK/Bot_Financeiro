@@ -1181,6 +1181,8 @@
       <button class="pkt-move-btn wd"  type="button" onclick="pocketWithdrawAll()">⤓ Sacar tudo</button>
     </div>
 
+    <p class="msub" id="pkt-of-note" style="display:none"><i class="ph ph-bank" aria-hidden="true"></i> Esse dinheiro está guardado no seu banco. Pra mexer nele, use o app do banco — aqui o saldo é só o espelho.</p>
+
     <form class="pkt-move-form" id="pkt-move-form" onsubmit="submitPocketMove(event)" novalidate>
       <span class="pkt-move-form-title" id="pkt-move-form-title">Depositar</span>
       <input type="number" id="pkt-move-amount" inputmode="decimal" step="0.01" min="0.01" placeholder="Valor (R$)" required />

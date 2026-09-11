@@ -3262,7 +3262,7 @@ function _renderGoalCard(g, idx = 0) {
         <div class="ring-pct">${pct.toFixed(0)}%</div>
       </div>
       <div class="goal-info">
-        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)}</div>
+        <div class="goal-name">${phIcon(emoji)} ${escapeHtmlSafe(g.name)} ${_ofPocketBadge(g)}</div>
         <div class="goal-amt">${_fmtBRL(g.balance || 0)} / ${_fmtBRL(g.target_amount || 0)}</div>
         <div class="bar-track" style="margin-top:6px"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
         <div class="goal-deadline" style="color:${deadlineColor}">${deadlineText}${g.days_left !== null ? " · " + (g.days_left >= 0 ? "em " + g.days_left + " dias" : "vencido há " + (-g.days_left) + " dias") : ""}</div>
@@ -9068,6 +9068,8 @@ async function openPocketHistory(pocketName) {
   subEl.textContent   = "Depósitos e saques desta caixinha.";
   sumEl.style.display = "none";
   if (actionsEl) actionsEl.style.display = "none";
+  const ofNoteEl = document.getElementById("pkt-of-note");
+  if (ofNoteEl) ofNoteEl.style.display = "none";
   bodyEl.innerHTML    = `<div class="pkt-hist-loading">Carregando…</div>`;
   overlay.classList.add("open");
 
@@ -9091,8 +9093,12 @@ async function openPocketHistory(pocketName) {
     document.getElementById("pkt-hist-deposits").textContent     = fmt(t.deposits || 0);
     document.getElementById("pkt-hist-withdrawals").textContent  = fmt(t.withdrawals || 0);
     sumEl.style.display = "grid";
+    // Caixinha do banco é read-only (db/pockets.py recusa com OF_POCKET_READONLY):
+    // mostrar Depositar/Sacar só adiava o erro pro POST.
+    const ofPocket = _isOfPocket(p);
     const actionsEl = document.getElementById("pkt-move-actions");
-    if (actionsEl) actionsEl.style.display = "flex";
+    if (actionsEl) actionsEl.style.display = ofPocket ? "none" : "flex";
+    if (ofNoteEl) ofNoteEl.style.display = ofPocket ? "" : "none";
 
     const items = data.history || [];
     if (!items.length) {
