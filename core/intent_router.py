@@ -65,12 +65,30 @@ WRITE_INTENTS = {
 # armada (esperando "sim"/"não"). Diferente de DESTRUCTIVE_INTENTS (nomes de
 # intent): aqui são os action_type gravados por propose_delete no DB. Usado
 # pelo guard anti-órfão em route().
+#
+# OS TIPOS DE CARTÃO FICAM FORA DAQUI DE PROPÓSITO — não é esquecimento, e mover
+# `credit_delete_card` (ou o step `confirm_delete_existing_card`) para cá QUEBRA
+# a confirmação. Este conjunto só protege pendências que o `confirm.yes` sabe
+# resolver: o ramo `intent == "confirm.yes"` chama `h_pending.resolve_delete`,
+# que trata SEIS tipos — `confirm_media_launch`, `confirm_recurring_offer`,
+# `delete_launch`, `delete_launch_bulk`, `delete_pocket` e `delete_investment`
+# (`core/handlers/pending.py`, um ramo por tipo; o `:16-40` que este comentário
+# citava é só o PRIMEIRO deles, e `delete_launch_bulk` é membro DESTE conjunto).
+# Nenhum tipo de cartão está na lista, então um `sim` de cartão sairia em
+# `NOT_UNDERSTOOD_MSG` e a exclusão nunca aconteceria. Confira com:
+#   grep -n 'action_type ==' core/handlers/pending.py
+#
+# A proteção equivalente para cartão é outra e mora em dois lugares: o
+# `abandona_pergunta_de_credito` (comando conhecido abandona) e os portões que
+# devolvem `None` no `core/handlers/credit.py` (resposta não reconhecida
+# abandona). Ver o bloco das cinco pendências dentro do `route()`.
 DESTRUCTIVE_PENDING_TYPES = {
     "delete_launch",
     "delete_launch_bulk",
     "delete_pocket",
     "delete_investment",
 }
+
 
 OUT_OF_SCOPE_MSG = (
     "Só consigo ajudar com finanças pessoais: "
@@ -236,6 +254,138 @@ def abandona_pergunta_de_valor(text: str) -> bool:
     return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
 
 
+# As CINCO pendências de cartão (`credit_card_setup`, `credit_card_set_primary`,
+# `credit_delete_card`, `installment_pending`, `pay_bill_choice`) precisam da
+# mesma escotilha das portas de valor, e pelo mesmo motivo: nessas etapas
+# QUALQUER texto vira resposta.
+#
+# MUNDO FECHADO, derivado do `ABANDONA` com `|` — não é cópia, e não cria uma
+# segunda verdade sobre os seis de lá (§0.7).
+#
+# Blacklist ("é comando claro?": confiança >= 0.55 e intent != out_of_scope) foi
+# tentada e MEDIDA em duas colunas, com o `handle_incoming` de um pagante:
+#   "comprei uma tv"  main: 5 parcelas, R$ 500  ->  blacklist: despesa de R$ 1,00
+#   "2 passagens"     main: 5 parcelas          ->  blacklist: despesa de R$ 2,00
+#   "10 cadeiras"     main: 5 parcelas          ->  blacklist: despesa de R$ 10,00
+# 14 de 24 respostas legítimas quebradas: o tier 2 casa `^\d+\s+[a-z]` e os
+# verbos de lançamento como `launches.add`/0.95, e o comando misclassificado
+# EXECUTA — grava valor errado e joga o parcelamento fora. É o defeito que a
+# nota do `ABANDONA` (:165-171) registra ter aposentado: numa blacklist sobre um
+# oráculo ilimitado todo intent novo e toda alucinação do LLM nascem destruindo
+# pendência; numa whitelist, nascem inertes.
+#
+# Os CINCO somados ao `ABANDONA` são comandos de LEITURA que ninguém digita como
+# descrição de compra nem como escolha de fatura:
+#   help, help.tutorial, report.daily, categories.list, dashboard.open
+#
+# `credit.handle` fica de FORA, pelo motivo já medido em :181-185: "fatura" é
+# 1.0 e "132 no cartao" é 0.95 — mesmo intent, e o segundo é resposta legítima.
+# CONSEQUÊNCIA ACEITA, não esquecimento: `faturas`, `listar cartoes` e
+# `investimentos` continuam virando descrição de parcelamento. Fechar custaria
+# 13 respostas legítimas, porque `fatura` é comando E é resposta no mesmo
+# idioma. Comentário, não remendo: o preço de fechar é maior que o do buraco.
+#
+# NÃO edite o `ABANDONA` para incluir estes cinco: ele é lido por três portas de
+# pergunta de valor e cada membro foi medido NAQUELE contexto.
+# O CRITÉRIO, e ele vale para os 25 intents do `_EXACT`, não só para os que
+# alguém lembrou: entra quem é comando de LEITURA ou de CONFIGURAÇÃO que ninguém
+# digita como resposta a uma das cinco perguntas de cartão (descrição de compra,
+# nome de cartão, sim/não, número, escolha de fatura).
+#
+# Enumerado, não lembrado. Medido em 2026-09-08 com:
+#   python -c "from core.intent_classifier import _EXACT; \
+#              from core.intent_router import _ABANDONA_CREDITO as A; \
+#              print(sorted({v for v in _EXACT.values()} - A))"
+# Remeça antes de reusar este número: 193 strings, 25 intents, e os TRÊS abaixo
+# são os únicos de fora — cada um com a razão, nenhum por herança.
+#
+#   `confirm.yes` / `confirm.no`  — DECISÃO, não esquecimento: "não"/"cancelar"
+#       precisam CHEGAR no handler para cancelar a pendência, e um "sim" solto é
+#       resposta à pergunta destrutiva, não comando novo. Abandoná-los quebraria
+#       exatamente o cancelamento que o usuário pediu.
+#   `credit.handle` — MEDIDO em :181-185 e no #281: "fatura" é 1.0 e
+#       "132 no cartao" é 0.95, mesmo intent, e o segundo é resposta legítima.
+#       Nenhum corte de confiança separa os dois. Custo aceito: `faturas` e
+#       `listar cartoes` ainda viram descrição de parcelamento.
+#
+# Os outros 12 estavam de fora porque HERDARAM a ausência do `ABANDONA`, que foi
+# medido para a pergunta de VALOR e não para esta — não porque alguém os tivesse
+# medido aqui. Isso produzia duas assimetrias que critério nenhum sustenta
+# (`report.monthly` dentro e `report.weekly` fora; `pockets.list` dentro e
+# `investments.list` fora), e `desligar resumo semanal` respondendo "qual a
+# descrição?" gravava 5 parcelas de R$ 500. Os 12 entraram, cobrindo 48 strings
+# exatas, e o corpus adversarial de 60 respostas legítimas (descrição de compra,
+# nome de cartão, sim/não, número, escolha de fatura) não perdeu NENHUMA.
+#
+# `greeting` também entra, e NÃO no `ABANDONA` (que é lido pelas portas de
+# valor). Sem ele, `bom dia` virava parcelamento de R$ 500 e reabria o footgun.
+# ATENÇÃO, e isto já foi escrito errado aqui: `greeting` NÃO é mundo fechado.
+# São 11 strings exatas MAIS 4 regexes (`core/intent_classifier.py:269-273`)
+# aplicados com `re.search` e ancorados só no começo — então ele casa a
+# saudação SEGUIDA de outra coisa. Medido: `opa 5000`, `opa pode ser dia 10`,
+# `oi, a do nubank`, `hey nubank` e `e ai comprei uma tv` abandonam, e as cinco
+# são respostas legítimas. É custo REAL, aceito porque a direção é fail-safe —
+# abandona com aviso e não escreve nada, o usuário repete sem a saudação. Se um
+# dia incomodar, o conserto é a saudação ceder quando sobra conteúdo depois
+# dela, não tirar `greeting` daqui.
+_ABANDONA_CREDITO = ABANDONA | {
+    "help", "help.tutorial", "greeting",
+    "categories.list", "dashboard.open",
+    "report.daily", "report.weekly",
+    "report.enable", "report.disable",
+    "report.weekly_enable", "report.weekly_disable",
+    "report.monthly_enable", "report.monthly_disable",
+    "investments.list", "launches.undo", "cdi.check",
+    "emails.resubscribe", "emails.unsubscribe",
+}
+
+
+def abandona_pergunta_de_credito(text: str) -> bool:
+    """True quando a resposta a uma pergunta de cartão é OUTRO comando.
+
+    `allow_ai=False` é REQUISITO, não otimização: o `result` que chega ao
+    `route()` já passou pelo tier 3, então reclassificar sem IA é o que torna a
+    decisão determinística. Com o tier 3 no meio o oráculo volta a ser
+    ilimitado e uma alucinação do LLM apaga pendência — mesma razão do
+    `abandona_pergunta_de_valor` acima. Custo ~19 µs, e só quando uma das cinco
+    pendências está viva.
+
+    Sem `user_id` de propósito: ele só é usado dentro do `_classify_llm_call`,
+    inalcançável com `allow_ai=False`. O `abandona_pergunta_de_valor` o omite
+    pelo mesmo motivo.
+    """
+    return classify((text or "").strip(), allow_ai=False).intent in _ABANDONA_CREDITO
+
+
+_PENDENCIAS_CARTAO = {"credit_card_setup", "credit_card_set_primary",
+                      "credit_delete_card", "installment_pending",
+                      "pay_bill_choice"}
+
+
+def _resposta_restrita(pending: dict) -> bool:
+    """O espaço de resposta desta pendência é ENUMERÁVEL?
+
+    O corte é por MECANISMO, não por `action_type`. O `credit_card_setup` tem
+    nove steps e DOIS são texto livre — `name` e `duplicate_card_name`, os dois
+    esperando um nome de cartão que o usuário inventa. Os outros sete são
+    sim/não, número ou nome existente, todos com portão no
+    `core/handlers/credit.py`. Enumere com:
+      grep -n 'step == "' core/handlers/credit.py
+
+    Onde é restrito, `resolve_pending` devolvendo `None` quer dizer "isto não
+    era resposta" e o `route()` abandona. Onde é livre (a descrição da compra do
+    `installment_pending`, o nome do cartão no step `name`), `None` não
+    distingue nada e a pendência fica de pé.
+    """
+    action_type = pending.get("action_type")
+    if action_type == "installment_pending":
+        return False
+    if action_type == "credit_card_setup":
+        return (pending.get("payload") or {}).get("step") not in (
+            "name", "duplicate_card_name")
+    return True
+
+
 # O QUINTO SINAL do #281, e o portão inteiro da via de comando da porta 2:
 # **a quantidade é a ÚLTIMA coisa da mensagem?**
 #
@@ -396,10 +546,11 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     abandoná-la (o `resolve_bill_amount` a apaga; o `resolve_multi_launch_value`
     apaga a fila inteira). Ver o mesmo tratamento na porta 2, logo abaixo.
 
-    O segundo é este próprio `route()`, uma vez, no `abandona_avisa`: a linha
-    ACABOU de ser consumida, e a reentrada existe só para pôr o aviso na frente
-    da resposta do comando. Recursão de um nível — o segundo passe não pode
-    reabrir o ramo, porque a `clarification` já não está lá.
+    O segundo é este próprio `route()`, no `abandona_avisa` da clarification e
+    no abandono das pendências de cartão: a linha ACABOU de ser consumida, e a
+    reentrada existe só para pôr o aviso na frente da resposta do comando.
+    Recursão de um nível nos dois casos — o segundo passe faz `pending = None`
+    logo abaixo e não pode reabrir ramo nenhum, porque nada mais é lido do DB.
     """
     user_id  = int(msg.user_id)
     text     = (msg.text or "").strip()
@@ -536,10 +687,60 @@ def route(result: IntentResult, msg: IncomingMessage, *,
         if resp is not None:
             return resp
         pending = None  # abandonado → mensagem roteia como comando novo
-    if pending and pending.get("action_type") in {"credit_card_setup", "credit_card_set_primary", "credit_delete_card", "installment_pending", "pay_bill_choice"}:
-        resp = h_credit.resolve_pending(user_id, text, pending)
-        if resp is not None:
-            return resp
+    # As CINCO pendências de cartão. Mesma escotilha de escape do
+    # `investment_pick` e do `funding_source_choice` logo abaixo: nestas etapas
+    # QUALQUER texto vira resposta, então sem ela um comando novo é engolido —
+    # e com dinheiro no meio. Medido: `installment_pending` + `saldo` gravava
+    # "✅ Parcelamento Registrado! Descrição: saldo" (5 linhas, R$ 500);
+    # `pay_bill_choice` + `quanto gastei no nubank` PAGAVA a fatura (R$ 300),
+    # porque `_find_card_name_in_text` casa o nome do cartão dentro de qualquer
+    # frase; e `excluir cartao nubank` → `saldo` → `sim` apagava o cartão em
+    # cascata — o mesmo footgun de 3 turnos que o guard anti-órfão do `0c`
+    # existe para impedir, só que aqui ele estava SOMBREADO, porque este bloco
+    # retorna antes dele.
+    #
+    # O predicado é o `abandona_pergunta_de_credito` (whitelist), NÃO um "é
+    # comando claro?" sobre o `intent`/`confidence` que já vieram no `result`.
+    # A razão está medida na nota do `_ABANDONA_CREDITO`: o `result` passou pelo
+    # tier 3, e uma blacklist sobre oráculo ilimitado come a resposta legítima —
+    # `comprei uma tv` e `2 passagens` são `launches.add`/0.95 e viravam despesa
+    # de R$ 1,00 e R$ 2,00 com o parcelamento jogado fora.
+    #
+    # FICA ABERTO de propósito: `faturas`, `listar cartoes` e `investimentos`
+    # ainda viram descrição de parcelamento, porque `credit.handle` está fora do
+    # conjunto (:181-185). Fechar custaria 13 respostas legítimas.
+    if pending and pending.get("action_type") in _PENDENCIAS_CARTAO:
+        # DUAS portas de abandono, porque o problema tem duas metades e uma só
+        # não cobre a outra:
+        #
+        #   1. comando CONHECIDO (`abandona_pergunta_de_credito`) — allowlist de
+        #      intent. Pega "saldo", "ajuda", "bom dia";
+        #   2. resposta NÃO RECONHECIDA num espaço ENUMERÁVEL — o handler
+        #      devolve `None` e isso significa "não era resposta". Pega o que
+        #      allowlist nenhuma pegaria: `quanto tenho na fatura do nubank`,
+        #      `excluir cartao nubank` e `tchau` são out_of_scope/0.00.
+        #
+        # Só vale para espaço de resposta RESTRITO (`_resposta_restrita`): onde
+        # a resposta é texto livre — a descrição da compra, o nome do cartão —
+        # `None` continua caindo fora sem consumir, porque ali "não reconheci"
+        # não distingue resposta de comando.
+        abandona = abandona_pergunta_de_credito(text)
+        if not abandona:
+            resp = h_credit.resolve_pending(user_id, text, pending)
+            if resp is not None:
+                return resp
+            abandona = _resposta_restrita(pending)
+        if abandona:
+            # Mesmo desenho do `abandona_avisa` da clarification acima: a
+            # pergunta que morre estava na tela, então o comando roda COM aviso.
+            # CAS e não `clear_pending_action` — se a linha já é de outra
+            # tarefa, deixar as guardas abaixo rodarem deixaria órfã a pergunta
+            # nova, então a saída é rotear ignorando pendências.
+            if db.consume_pending_action(user_id, pending):
+                return _AVISO_PERGUNTA_CANCELADA + route(
+                    result, msg, ignora_pendencias=True)
+            ignora_pendencias = True
+            pending = None
 
     # Pergunta "de onde sai o dinheiro?" (funding_source_choice). Nas etapas de
     # escolha qualquer texto poderia virar resposta, então vale a mesma regra do
@@ -883,15 +1084,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_dashboard.open_dashboard(user_id)
 
     # --- ajuda ---
-    if intent == "help":
-        parts = text.split(maxsplit=1)
-        section_arg = parts[1] if len(parts) > 1 else None
-        if section_arg:
-            return h_help.help_section(section_arg, platform)
-        return h_help.help_general(platform)
-
-    if intent == "help.tutorial":
-        return h_help.tutorial(platform)
+    # A montagem mora no `h_help.answer_help` porque o `_paywall_gate` responde
+    # à ajuda ele mesmo (o barrado não pode chegar aqui — as pendências são
+    # resolvidas ANTES deste ramo).
+    if intent in ("help", "help.tutorial"):
+        return h_help.answer_help(intent, text, platform)
 
     # --- CDI ---
     if intent == "cdi.check":

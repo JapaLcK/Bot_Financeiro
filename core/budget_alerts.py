@@ -19,8 +19,6 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
-from typing import Iterable
 
 from db.connection import get_conn, cat_key_sql, CAT_CANON_ORDER
 from utils_date import day_tz

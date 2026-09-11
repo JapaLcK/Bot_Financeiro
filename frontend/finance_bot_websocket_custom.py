@@ -107,7 +107,9 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
+from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
@@ -403,6 +405,17 @@ def _dashboard_launch_filter_sql(filter_type: str | None, query: str | None) -> 
         clauses.append("is_internal_movement = true")
 
     if query:
+        # `tipo` CRU na busca livre, e a divergência com a TELA foi CRIADA aqui,
+        # não herdada: antes deste PR a query 4 devolvia o tipo cru, então a tela
+        # dizia "saida" e buscar "saida" achava. Agora a projeção de FORA da
+        # query 4 canoniza (`TIPO_CANON_SQL`) e a busca não: a linha legada sai como
+        # "despesa" e digitar "despesa" NÃO a acha — digitar "saida" acha.
+        # Fica cru de propósito. Canonizar aqui é o oposto do que o filtro por
+        # tipo faz três linhas acima (ele lê as DUAS formas, de propósito, pra
+        # não esconder dinheiro), e trocaria um casamento a menos por um a menos
+        # do outro lado. Incidência ZERO: nenhuma linha legada em produção
+        # (04/09/2026, ver a issue 287) — nenhum usuário passa por isto hoje.
+        # Se um dia passar, o conserto é `TIPO_CANON_SQL LIKE %s` OR o cru.
         clauses.append(
             """
             (
@@ -543,7 +556,30 @@ async def get_financial_data(
         # 4) Launches paginado
         _q(
             f"""
-            SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+            -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
+            -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
+            -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
+            -- alvo é quem CONSOME `recent_launches`, e só ele: home.html:944
+            -- imprime o tipo cru como rótulo ("Última atividade: saida"), :1094
+            -- não conta a linha legada no onboarding e :1147 desenha a receita
+            -- legada como despesa; dashboard.js:7954 (linha do Histórico), :8035
+            -- (`_renderLaunchDetail`, "Tipo: saida") e :8479 (resumo do editor,
+            -- "saida - R$ 100,00") usam o cru como label. São 6 sites, não 5.
+            -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
+            -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
+            --
+            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
+            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
+            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
+            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
+            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
+            -- dashboard -> barra de categoria -> linha ainda escreve
+            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
+            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
+            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
+            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
+            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
@@ -1884,6 +1920,17 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[login_events_retention] erro: {exc}", file=sys.stderr)
 
+    async def _table_cleanup():
+        # Poda de auth_refresh_tokens/mfa_login_challenges/pending_google_signups.
+        # As três funções são síncronas (get_conn bloqueante); o loop as chama por
+        # asyncio.to_thread — ver core/services/table_cleanup.py.
+        try:
+            await asyncio.sleep(2)
+            from core.services.table_cleanup import run_table_cleanup_loop  # noqa: PLC0415
+            await run_table_cleanup_loop()
+        except Exception as exc:
+            print(f"[table_cleanup] erro: {exc}", file=sys.stderr)
+
     async def _plan_grants_reprojection():
         """Reprojeta acesso de quem teve grant começando ou vencendo (§4.3).
 
@@ -1917,6 +1964,52 @@ async def lifespan(app: FastAPI):
                 raise
             except Exception as exc:
                 print(f"[plan_grants] erro: {exc}", file=sys.stderr)
+            await asyncio.sleep(60)
+
+    async def _pix_worker():
+        """O laço do Pix: dreno a cada 60 s, saga + purga de retenção a cada 24 h.
+
+        Molde do `_plan_grants_reprojection` logo acima — 60 s + 24 h —, e pelo
+        mesmo motivo: as duas passadas medem coisas diferentes.
+
+        • **60 s, o dreno.** O `background_tasks` do handler é o caminho rápido;
+          este é o que RECUPERA — processo reiniciado no meio, efeito que
+          levantou, evento que chegou enquanto o worker morria. Ele chama o
+          SERVIÇO e não o `db/` do Pix: o portão de import mede o primeiro salto
+          produção → Pix, e este arquivo na allowlist apagaria a propriedade.
+        • **24 h, a reconciliação (§10.1).** Ela fala com o Asaas por linha, e é
+          por isso que não roda a cada minuto. Nada aqui apaga por relógio: a
+          idade só decide quando perguntar.
+        • **24 h, a purga de retenção (§13.2 + §13.3).** `RETENCAO_OUTBOX_DIAS`
+          e a re-zeragem do rastreio órfão só existem se ALGUÉM as chamar — a
+          função sem chamador é o defeito que já custou a poda das três tabelas
+          (`core/services/table_cleanup.py`). Ela zera coluna, não apaga linha.
+
+        As três varreduras do §14 item 13 (e-mail de fim de anual, cancelamento
+        aos 60 d, retenção POR PRAZO) ficaram para a issue #329.
+        """
+        from core.services.pix_sweeps import (  # noqa: PLC0415
+            drenar_pendentes, purgar_retencao, reconciliar_saga,
+        )
+        proxima_saga = datetime.now(timezone.utc)   # 1ª volta já reconcilia
+        while True:
+            try:
+                n = await asyncio.to_thread(drenar_pendentes)
+                if n:
+                    print(f"[pix] {n} evento(s) drenado(s).", flush=True)
+                agora = datetime.now(timezone.utc)
+                if agora >= proxima_saga:
+                    proxima_saga = agora + timedelta(hours=24)
+                    conta = await asyncio.to_thread(reconciliar_saga)
+                    if any(conta.values()):
+                        print(f"[pix] reconciliacao: {conta}", flush=True)
+                    purgadas = await asyncio.to_thread(purgar_retencao)
+                    if any(purgadas.values()):
+                        print(f"[pix] purga de retencao: {purgadas}", flush=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[pix] erro: {exc}", file=sys.stderr)
             await asyncio.sleep(60)
 
     async def _account_deletion_worker():
@@ -2011,7 +2104,9 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_news_bot(), name="news_bot"),
                 asyncio.create_task(_piggy_agents(), name="piggy_agents"),
                 asyncio.create_task(_login_events_retention(), name="login_events_retention"),
+                asyncio.create_task(_table_cleanup(), name="table_cleanup"),
                 asyncio.create_task(_plan_grants_reprojection(), name="plan_grants_reprojection"),
+                asyncio.create_task(_pix_worker(), name="pix_worker"),
             ]
         )
     else:
@@ -2054,6 +2149,12 @@ CSRF_EXEMPT_PATHS = {
     # Consulta do lead engine: server-to-server, sem cookie de sessão —
     # autenticado pelo header X-Prospect-Key (frontend/routes/prospects.py).
     "/api/prospect/status",
+    # Webhook do gateway de Pix: server-to-server, autenticado por header
+    # (frontend/routes/billing_pix.py). É o ÚNICO path do Pix aqui —
+    # `/billing/pix/checkout` e o poll são do navegador logado, com cookie e
+    # token de CSRF, e isenção que não é necessária é privilégio esquecido.
+    # `tests/test_pix_rota_registrada.py` prende essa unicidade.
+    "/billing/asaas/webhook",
 }
 
 _SECURITY_HEADERS = {
@@ -2125,7 +2226,7 @@ async def csrf_middleware(request: Request, call_next):
 
     if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
-        if not token or not header_token or not secrets.compare_digest(token, header_token):
+        if not token or not header_token or not constant_time_eq(header_token, token):
             # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
             # olha método não-seguro, e o produto não tem submit de formulário —
             # os 13 `<form>` de frontend/*.html não têm um `method=`/`action=`
@@ -3849,7 +3950,7 @@ async def auth_google_callback(
     if error:
         return _google_redirect_to_landing(f"Login com Google cancelado: {error}")
 
-    if not code or not state or not cookie_state or not secrets.compare_digest(state, cookie_state):
+    if not code or not state or not cookie_state or not constant_time_eq(state, cookie_state):
         return _google_redirect_to_landing("Sessão de login expirou. Tente novamente.")
 
     try:
@@ -4047,7 +4148,13 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
+    # Sem default de plano: ausente ou vazio é 400 na rota, nunca uma compra de
+    # Plus em silêncio (o default histórico era `"plus"`, issue #352). O `""`
+    # faz a chave AUSENTE cair no mesmo 400 `plan inválido` da vazia, em vez de
+    # num 422 cujo `detail` é lista — o porquê está na docstring da rota. O Pix,
+    # com `plan: str`, dá 422 na ausente: anotado em
+    # `tests/test_vocabulario_de_plano.py`.
+    plan: str = ""             # "essencial" | "plus" | "pro"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4124,6 +4231,17 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             status_code=409,
             detail={"error": "lifetime",
                     "message": "Você já tem acesso vitalício de brinde — assinar um plano substituiria isso. Fala com a gente se quiser mudar."},
+        )
+
+    # Pix → Stripe NÃO tem fluxo (§9): quem já pagou o ano à vista assinando no
+    # cartão pagaria o mesmo período duas vezes, e não há como "creditar" para
+    # dentro do Stripe. A recusa é a resposta, e ela vem ANTES de qualquer
+    # criação de customer — o caminho de volta é esperar o anual acabar.
+    if await asyncio.to_thread(_grant_pix_vigente, user_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "pix_active",
+                    "message": "Você já tem o plano anual pago no Pix. Ele vale até o fim do período — depois disso dá pra assinar no cartão."},
         )
 
     customer_id = user.get("stripe_customer_id")
@@ -4324,6 +4442,7 @@ async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
     layout legado de plano único. Flag off = página atual intacta."""
+    from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
         "plans_v2_enabled": plans_v2_enabled(),
@@ -4332,6 +4451,11 @@ async def billing_plans_config():
                                or _resolve_price_id("plus", "annual")),
         "pro_available": bool(STRIPE_PRICE_ID_PROMAX_MENSAL),
         "trial_days": trial_days_total(),
+        # A flag vem de uma FUNÇÃO, e não de `os.getenv` aqui:
+        # `tests/test_pix_destino_inerte.py` é textual e proíbe o nome da env
+        # fora dos módulos do Pix. Ele está fazendo trabalho real — a flag mora
+        # com quem a obedece.
+        "pix_annual_available": pix_annual_available(),
     }
 
 
@@ -4342,16 +4466,44 @@ async def billing_create_checkout(
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
-    """
-    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    """Cria a sessão de checkout no Stripe para o plano escolhido.
+
+    Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
+           "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+
+    `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
+    (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos
+    (`precos.html:1019-1024`) só lê `detail` string ou `detail.message` — cai no
+    fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
+    `| None = None` o POST sem body nenhum nem instancia o modelo.
+
+    Cliente antigo (`startCheckout('monthly', this)`, sem plano) morreu em
+    `0a37439` e a partir daqui leva 400. Sobra a aba com a /precos ANTIGA aberta
+    no instante do deploy — o 400 vira o erro do próprio `startCheckout` e um
+    reload resolve; não há /precos velha em cache (`no-store` em
+    `frontend/routes/shared.py:266`, e o SW não intercepta navegação).
     """
-    interval = (payload.interval if payload else "monthly")
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Sem body, `payload` chega None (o modelo nem é instanciado). Não é caminho
+    # de sucesso: sem `plan` a validação abaixo recusa com 400.
+    payload = payload if payload is not None else CreateCheckoutBody()
+    # Expressão IDÊNTICA à da `/billing/change-plan`, a única outra rota que
+    # recebe `interval` (o Pix é anual e só): sem o `.lower()`, `"ANNUAL"` era
+    # 400 aqui e 409 lá. Sem `or "monthly"` nas duas: valor VAZIO é 400, e não
+    # uma venda mensal em silêncio — é a #352 com `interval` no lugar de `plan`.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = ((payload.plan if payload else "plus") or "plus").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Vocabulário público em UMA fonte (§0.7): as três rotas de plano validam
+    # contra o MESMO dicionário, e não contra uma tupla literal por rota. O
+    # `.strip().lower()` é o do gêmeo do Pix (`frontend/routes/billing_pix.py`) —
+    # sem ele `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando as duas.
+    # Sem plano é 400, não Plus (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
     price_id = _resolve_price_id(plan, interval)
@@ -4473,6 +4625,24 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     if (user.get("last_payment_status") or "") == "grandfathered":
         return {"active": True, "lifetime": True, "plan": "plus", "interval": None,
                 "current_period_end": None, "scheduled_change": None}
+
+    # PIX ANTES DO STRIPE, e a ordem é o conteúdo (§14 item 12). Quem migrou do
+    # cartão fica com `stripe_customer_id` preenchido para sempre — perguntando
+    # ao Stripe primeiro, a tela de quem paga no Pix mostraria "Trocar de plano"
+    # e chamaria `/billing/change-plan`, que não tem assinatura para trocar.
+    # Grant Pix vigente é a resposta autoritativa: ele foi criado pelo dinheiro
+    # que entrou, e não depende de o Stripe estar de pé.
+    # `tier_publico` e não uma cópia local do `{"pro": "plus", ...}`: quem é dono
+    # do vocabulário é o `_STORED_PLAN_TO_TIER` do `plan_service` (§0.1/§0.7).
+    from core.services.plan_service import tier_publico
+
+    pix = await asyncio.to_thread(_grant_pix_vigente, user_id)
+    if pix is not None:
+        return {"active": True, "lifetime": False, "gateway": "pix",
+                "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
+                "current_period_end": pix["ends_at"].date().isoformat(),
+                "scheduled_change": None}
+
     cust = user.get("stripe_customer_id")
     if not STRIPE_SECRET_KEY or not cust:
         return {"active": False}
@@ -4519,8 +4689,29 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
         except Exception:
             pass
 
-    return {"active": True, "lifetime": False, "plan": plan, "interval": interval,
-            "current_period_end": period_end_iso, "scheduled_change": scheduled}
+    return {"active": True, "lifetime": False, "gateway": "stripe", "plan": plan,
+            "interval": interval, "current_period_end": period_end_iso,
+            "scheduled_change": scheduled}
+
+
+def _grant_pix_vigente(user_id: int) -> dict | None:
+    """O grant `source='pix'` que sustenta o acesso, ou None. Síncrono.
+
+    Quem decide SE há cobertura é `grant_vigente` — a mesma função do
+    `projetar_grants` e do `payment_reminder`, para a janela semiaberta
+    `[starts_at, ends_at)` não ganhar uma terceira versão (§0.7). Havendo, o
+    escolhido é o que termina POR ÚLTIMO: com um downgrade Pix já agendado, o
+    fim da cobertura é o do grant futuro, e é isso que a tela mostra.
+    """
+    from core.services.billing_access import grant_vigente
+    from db.plan_grants import list_grants
+
+    agora = datetime.now(timezone.utc)
+    pix = [g for g in list_grants(user_id)
+           if g["source"] == "pix" and g["status"] == "active"]
+    if not grant_vigente(pix, agora):
+        return None
+    return max(pix, key=lambda g: g["ends_at"])
 
 
 @app.post("/billing/change-plan")
@@ -4532,11 +4723,19 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
-    interval = (payload.interval or "monthly").lower()
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
+    # únicas rotas que recebem `interval`, o `.lower()` faltava LÁ e o
+    # `or "monthly"` saiu daqui — `""` é 400 nas duas, não mensal em silêncio.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = (payload.plan or "").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Terceira rota que recebe plano: mesma normalização e o MESMO dicionário
+    # das duas de checkout (§2: um caso corrigido não é a categoria resolvida).
+    # Sem plano continua 400 — nunca houve `or "plus"` aqui (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     target_price = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not target_price:
@@ -4926,29 +5125,75 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         await asyncio.to_thread(recompute_entitlement, int(uid))
         return True
 
-    async def _fire_email(uid: int, fn, *args):
+    async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
-        Dedup por (função, usuário, 1 dia) porque o handler agora devolve 5xx
+        **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
+        Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
+        `invoice.paid` de planos diferentes no MESMO dia (upgrade
+        Essencial→Pro, que gera fatura proporcional na hora) deixam de ser
+        indistinguíveis: o segundo é suprimido pela chave que o primeiro gravou
+        e o cliente fica com "PigBank Essencial" para uma cobrança de Pro. Antes
+        do #351 os dois e-mails eram idênticos e suprimir era de graça.
+        ponytail: teto conhecido, deixado aberto DE PROPÓSITO — e o custo é
+        menor do que uma versão anterior deste comentário dizia. Ela alegava
+        que `chave` era lida de fora por
+        `recent_event_exists("trial_ending_email_sent", ...)` e pelos painéis.
+        Medido, é falso nas duas pontas, e quem for mexer aqui precisa saber:
+
+          · **não há leitor externo.** `chave` é `f"{fn.__name__}_sent"`, ou
+            seja `send_trial_ending_email_sent`. O `recent_event_exists` de
+            :5555 lê `trial_ending_email_sent` — outra string, gravada por
+            outro escritor (o `log_system_event` de :5566 e o
+            `engagement_scheduler.py:287`). Busca literal pelas quatro chaves
+            desta família em `*.py`/`*.js`/`*.sql`/`*.html`: zero ocorrências
+            fora de uma menção em docstring de teste.
+          · **nenhum painel usa.** `core/admin_dashboard.py:742-755` filtra
+            `event_type IN ('email_sent','email_failed')`, que saem do
+            `email_service.py:95` — outro evento; e os rótulos de
+            `frontend/admin-dashboard.html` não citam chave desta família.
+
+        Sobra de custo real: (a) a série histórica em `system_event_logs`
+        fragmenta — série que hoje nenhum consumidor consulta; e (b) a dedupe
+        deixa de significar "um e-mail desta função por janela" e passa a ser
+        "um por função E plano", o que solta um segundo e-mail quando o plano
+        muda dentro da janela longa do `send_payment_failed_email`. Fica como
+        está porque o caso é raro e o conserto não é de graça, não porque algo
+        quebre. Se o upgrade no mesmo dia virar volume: sufixo do plano na
+        `chave`, sem leitor nenhum para migrar junto.
+
+        Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
         Cobre os transacionais que a REENTREGA repete: os dos ramos pagos
-        (`send_pro_welcome_email`, `send_pro_charged_email`) e o aviso de fim de
-        trial. NÃO é o ponto único do arquivo — `send_payment_failed_email` e
-        `send_subscription_canceled_email` são chamados direto, cada um no seu
-        try/except. Sem consequência hoje (nenhum dos dois está depois de uma
-        escrita que possa falhar e forçar reentrega), mas quem mover um deles
-        para cá ganha a dedup de graça, e quem NÃO mover não deve achar que
-        tem. Mesmo padrão do `trial_ending_email_sent` já usado no repo.
+        (`send_pro_welcome_email`, `send_pro_charged_email`), o aviso de fim de
+        trial e o `send_payment_failed_email` — este com `dedup_days` maior,
+        ver o call site. Fora daqui sobrou o
+        `send_subscription_canceled_email`, chamado direto no seu try/except;
+        quem mover também ele para cá ganha a dedup de graça, e quem NÃO mover
+        não deve achar que tem. Mesmo padrão do `trial_ending_email_sent` já
+        usado no repo.
+
+        **O registro vem DEPOIS do envio E SÓ SE O ENVIO CONFIRMOU, e é isso
+        que torna a entrega retentável.** O `if not ok` não é código defensivo:
+        os quatro remetentes daqui terminam em `return send_email(...)`, e
+        `send_email` (`core/services/email_service.py:64`) documenta "nunca
+        lança exceção" — todo caminho de falha dela sai por `return False`
+        (`:72` sem RESEND_API_KEY, `:100` no except). Uma versão anterior disto
+        só protegia o `raise`, que é justamente o caminho que a produção NÃO
+        toma: Resend fora do ar gravava a chave de dedupe com zero e-mail
+        enviado, e a janela inteira ficava muda (medido pelo Manager: 3 entregas
+        do mesmo evento = 1 tentativa, 0 e-mails, chave gravada 1x).
 
         Entrega continua "pelo menos uma vez" na janela residual (cair ENTRE
         enviar e registrar). E-mail repetido é o pior caso aceitável; e-mail a
-        cada retry não é.
+        cada retry não é; e ZERO e-mail na janela inteira — o que uma dedupe
+        gravada sem olhar o retorno produz — é o pior dos três.
         """
         chave = f"{fn.__name__}_sent"
         try:
             from core.observability import recent_event_exists  # noqa: PLC0415
-            if await asyncio.to_thread(recent_event_exists, chave, int(uid), 1.0):
+            if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
                 return
         except Exception as exc:
             print(f"[billing] dedup de email falhou user={uid}: {exc}")
@@ -4956,7 +5201,11 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             email = await _user_email(uid)
             if not email:
                 return
-            await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            ok = await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
+            if not ok:
+                print(f"[billing] email {fn.__name__} nao enviado user={uid}"
+                      " — chave de dedupe NAO gravada, a reentrega tenta de novo")
+                return
             await log_system_event("info", chave, f"Email {fn.__name__} enviado.",
                                    source="billing", user_id=int(uid))
         except Exception as exc:
@@ -4975,12 +5224,45 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
         # tudo uma vez só, em vez de repetir a metade que já tinha passado.
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            # As TRÊS chamadas de `Subscription.retrieve` deste handler são a
+            # mesma classe (I/O síncrono no event loop único) e foram
+            # embrulhadas juntas — fechar duas e deixar a terceira é o erro de
+            # instância que este PR já pagou cinco vezes (§2). Estas duas
+            # (`checkout` e `invoice.paid`) são as mais FREQUENTES das três.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "trialing"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
-            await _materializar_assinatura(user_id, sub_id, plan_value,
-                                           expires_dt, sub_status)
+            _decidiu_acesso = await _materializar_assinatura(
+                user_id, sub_id, plan_value, expires_dt, sub_status)
+            # Assinatura nova por cima de um ciclo de inadimplência: fecha o
+            # ciclo e zera o relógio (core/services/billing_dunning).
+            #
+            # DUAS condições, e elas respondem perguntas diferentes — ver a
+            # tabela de estados × eventos em `docs/dunning_estados_eventos.md`:
+            #
+            #  • `_decidiu_acesso` — "este evento decidiu o acesso?". False
+            #    quando a guarda de versão de `upsert_grant` o recusou por
+            #    VELHO; aí quem decidiu foi um evento mais novo e um `checkout`
+            #    atrasado não pode apagar o ciclo que o novo estabeleceu
+            #    (célula nº 7).
+            #  • `nao_mais_novo_que` — "este evento é mais novo que o ciclo que
+            #    estou apagando?". O gate acima NÃO responde isso: `upsert_grant`
+            #    devolve o `id` para versão IGUAL de propósito, e o
+            #    `payment_failed` que abre o ciclo novo não avança a versão do
+            #    grant — a REENTREGA de um `checkout`/`paid` anterior ao ciclo
+            #    atual passava pelo gate e zerava o relógio (célula nº 5). O
+            #    predicado mora na ESCRITA, como o do `claim`.
+            #
+            # É o MESMO par do `invoice.paid` abaixo, nas duas correções: os
+            # dois ramos tiveram os dois defeitos (§2, a classe, não a
+            # instância — o apontamento citava só o `invoice.paid`).
+            if _decidiu_acesso:
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -5010,9 +5292,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     "status": sub_status,
                 },
             )
-            # Email de boas-vindas Pro (item 37)
+            # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
+            # acabou de ser gravado e logado acima (vocabulário legado, de
+            # `_stored_plan_for_price`): sem ele o e-mail chamava todo
+            # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -5136,15 +5421,54 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id  = _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
-            sub = stripe.Subscription.retrieve(sub_id)
+            # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
+            sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
             sub_status = _g(sub, "status") or "active"
             plan_value = _stored_plan_for_price(_subscription_price_id(sub))
             # Grant primeiro, sempre (§4.1.2): falha aqui vira 5xx retryable e
             # nada abaixo — e-mail de cobrança, comissão, GA4 — chega a rodar.
-            await _materializar_assinatura(user_id, sub_id, plan_value,
-                                           expires_dt, sub_status)
+            _decidiu_acesso = await _materializar_assinatura(
+                user_id, sub_id, plan_value, expires_dt, sub_status)
             await asyncio.to_thread(mark_plan_selected, user_id)
+            # Pagou: o ciclo de inadimplência fechou e o relógio zera.
+            #
+            # NÃO é redundante com a limpeza condicional de
+            # `set_payment_status_impl`, e a razão do comentário que estava aqui
+            # ("mexeria em call sites que este PR não auditou") era falsa — o
+            # call site não auditado, `recompute_entitlement`, era justamente o
+            # que produzia relógio órfão. Os writers da coluna de status foram
+            # auditados (`db_support.set_payment_status_impl` e o SQL cru de
+            # `admin_dashboard.set_account_plan`) e a limpeza virou ESTRUTURAL
+            # nos dois. O que sobra para ESTA linha é o caso em
+            # que as duas regras divergem: se o `Subscription.retrieve` acima
+            # ainda devolver `past_due` (consistência eventual, ou outra fatura
+            # aberta), `sub_status` está NA lista e o UPDATE preserva o relógio
+            # — é este clear que fecha o ciclo de quem acabou de pagar.
+            #
+            # E ele tem DUAS condições. `_decidiu_acesso` é o veredito do
+            # evento: quando `upsert_grant` recusa um `invoice.paid` VELHO,
+            # `_materializar_assinatura` devolve False sem escrever status
+            # nenhum, e o retorno era descartado aqui (célula nº 7 de
+            # `docs/dunning_estados_eventos.md`).
+            #
+            # `nao_mais_novo_que` é o que faltava, e é a célula nº 5: o gate
+            # acima ACEITA a reentrega do mesmo evento, porque `upsert_grant`
+            # devolve o `id` para versão IGUAL de propósito (é o que faz o 5xx
+            # da Stripe ser retryable). Como o `invoice.payment_failed` não
+            # escreve grant, ele não avança a marca d'água de versão — então a
+            # reentrega de um `paid` ANTERIOR ao ciclo atual passava pelo gate e
+            # apagava o relógio que a falha nova acabara de carimbar, deixando a
+            # conta `past_due` com o relógio zerado. O predicado mora na
+            # ESCRITA (`db.dunning.clear_past_due_since`), como o do `claim`, e
+            # é ele que distingue essa reentrega VELHA da reentrega DO MESMO
+            # CICLO (5xx entre o grant e este clear, célula nº 6), que precisa
+            # continuar limpando. Mesmo par no `checkout.session.completed`.
+            if _decidiu_acesso:
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(
+                    clear_past_due_since, int(user_id),
+                    nao_mais_novo_que=_event_version(event))
             print(f"[billing] user {user_id} → {plan_value} até {expires_dt.date() if expires_dt else 'sem data'}")
             await log_system_event(
                 "info",
@@ -5160,7 +5484,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
-                await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
+                await _fire_email(user_id, send_pro_charged_email,
+                                  plan_value, amount_brl, expires_dt)
 
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
@@ -5269,8 +5594,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.observability import recent_event_exists
             if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
                 expires_dt = _subscription_period_end(sub)
+                # Mesma fonte do plano dos outros ramos (#351): o PRICE da
+                # assinatura, não o texto do e-mail. Quem está em trial de
+                # Essencial ou de Pro lia "seu trial do PigBank+".
+                plan_value = _stored_plan_for_price(_subscription_price_id(sub))
                 from core.services.email_service import send_trial_ending_email
-                await _fire_email(user_id, send_trial_ending_email, expires_dt)
+                await _fire_email(user_id, send_trial_ending_email,
+                                  plan_value, expires_dt)
                 await log_system_event(
                     "info",
                     "trial_ending_email_sent",
@@ -5285,8 +5615,103 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # customer.subscription.deleted quando a sub for de fato cancelada.
         invoice = event["data"]["object"]
         user_id = _resolve_user(invoice)
-        if user_id:
+        # EVENTO FORA DE ORDEM não pode carimbar o relógio de quem já PAGOU.
+        # Medido: falha → `invoice.paid` (relógio zerado, status `active`) → um
+        # `payment_failed` atrasado, com `created` ANTERIOR ao do paid, punha
+        # `past_due` e carimbava de novo. Nada limpa até o `invoice.paid` do mês
+        # seguinte: ~3 semanas com a conta rotulada "em atraso" no painel e
+        # recebendo lembrete de pagamento, para quem está pagando em dia.
+        #
+        # A fonte de verdade é o status ATUAL da assinatura, não a ordem dos
+        # eventos. `_event_version` serve o `subscription.deleted` porque lá ele
+        # é comparado com `plan_grants.event_version` — coluna que `esticar_grant`
+        # de propósito NÃO escreve (invariante 3) e que nem existe quando a
+        # assinatura não tem `expires_dt`, então aqui ele daria proteção com
+        # buraco. O `Subscription.retrieve` custa uma chamada de API no caminho
+        # do webhook e é o MESMO padrão dos ramos `invoice.paid` e
+        # `checkout.session.completed`, dez linhas acima.
+        #
+        # DECISÃO, o `retrieve` sem try: a exceção PROPAGA e vira 5xx, então a
+        # Stripe reentrega (por até 3 dias) e a reentrega decide com informação
+        # melhor. Nada foi escrito antes dela — o `set_payment_status` está no
+        # ramo de baixo. O custo declarado é o oposto: `retrieve` que falha de
+        # forma PERMANENTE (assinatura apagada na Stripe, chave revogada) esgota
+        # as reentregas e o ciclo fica sem `past_due` e sem e-mail de falha.
+        # Escolhido assim porque as duas pontas do erro só mandam e-mail errado
+        # (nenhum acesso depende disto neste PR) e a ponta "reentrega" erra em
+        # favor de quem paga. Coberto por
+        # `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`.
+        from core.services.billing_dunning import (  # noqa: PLC0415
+            DUNNING_GRACE_DAYS,
+            PAST_DUE_PAYMENT_STATUSES,
+        )
+        _sub_id = _invoice_subscription_id(invoice)
+        _status_agora = ""
+        _sub_agora = None
+        if user_id and _sub_id:
+            # `to_thread` porque este handler é `async` e roda no event loop
+            # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
+            # inteiro enquanto espera o Stripe — e não por milissegundos, mas
+            # pelo timeout do cliente HTTP, com request e OUTROS webhooks de
+            # pagamento parados atrás. `to_thread` é o padrão JÁ estabelecido
+            # neste arquivo para chamada Stripe em handler async (as cinco de
+            # `SubscriptionSchedule`, :4503-:4660), então embrulhar aqui é
+            # CONVERGIR com o arquivo, não divergir.
+            #
+            # A propagação de exceção fica IDÊNTICA — `to_thread` relança na
+            # corrotina que espera —, e o guard depende disso: falha do
+            # `retrieve` tem de virar 5xx e não "status vazio", senão um evento
+            # obsoleto passaria pela guarda. Amarrado por
+            # `test_T7_retrieve_que_estoura_devolve_5xx_sem_escrever_nada`.
+            _sub_agora = await asyncio.to_thread(
+                stripe.Subscription.retrieve, _sub_id)
+            _status_agora = (_g(_sub_agora, "status") or "").strip().lower()
+        if user_id and _status_agora and _status_agora not in PAST_DUE_PAYMENT_STATUSES:
+            await log_system_event(
+                "warning",
+                "billing_payment_failed_obsoleto",
+                f"invoice.payment_failed ignorado: assinatura esta '{_status_agora}'.",
+                source="billing",
+                user_id=user_id,
+                details={"subscription": str(_sub_id),
+                         "status_atual": _status_agora,
+                         "event_id": _g(event, "id"),
+                         "event_version": _event_version(event)},
+            )
+        elif user_id:
             set_payment_status(user_id, "past_due")
+            # Relógio da inadimplência (core/services/billing_dunning).
+            # Idempotente no SQL: a Stripe manda um payment_failed por smart
+            # retry e reentrega o mesmo evento em cima de 5xx — nenhum dos dois
+            # reinicia a contagem, e o `rowcount` diz se ESTA entrega abriu um
+            # ciclo novo.
+            #
+            # SÓ com `_sub_id`: `past_due_since` é o relógio do ciclo de
+            # inadimplência DA ASSINATURA, e `_invoice_subscription_id`
+            # (:4810) já cobre as duas formas da API (`subscription` e
+            # `parent.subscription_details`) — devolver None aqui significa
+            # fatura AVULSA, que não tem ciclo de assinatura para medir. Sem
+            # esta guarda o ramo era fail-CLOSED ao contrário do resto: uma
+            # fatura avulsa de um `stripe_customer_id` conhecido carimbava o
+            # relógio de quem tem assinatura viva, e a pessoa recebia o
+            # lembrete do dia 6 sem nada em atraso. O `set_payment_status` da
+            # linha acima é comportamento PRÉ-EXISTENTE da `main` e fica como
+            # está (§0.3) — a invariante continua válida nos dois casos, porque
+            # a guarda só deixa de CRIAR relógio, nunca cria órfão.
+            #
+            # O predicado de STATUS do `where` (o relógio só nasce em conta
+            # cujo `last_payment_status` ainda está em
+            # `PAST_DUE_PAYMENT_STATUSES`) fecha a corrida entre ESTE ramo e o
+            # `invoice.paid` de outra requisição: entre o `set_payment_status`
+            # da linha acima e este `to_thread` cabe o ramo pago escrevendo
+            # `active` e zerando o relógio, e o UPDATE incondicional o repunha
+            # com o status fora da lista — o órfão que a invariante declara
+            # impossível. `rowcount 0` passa a significar "já carimbado" OU
+            # "status não elegível", e o `_abriu_ciclo` abaixo continua correto
+            # porque só AMPLIA (ver a docstring de `claim_past_due_since`).
+            from db.dunning import claim_past_due_since
+            _abriu_ciclo = bool(_sub_id) and await asyncio.to_thread(
+                claim_past_due_since, int(user_id))
             await log_system_event(
                 "warning",
                 "billing_payment_failed",
@@ -5295,20 +5720,43 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email com link pra atualizar cartao (item 40)
+            #
+            # A SUPRESSÃO é sempre `_fire_email` (evento em system_event_logs
+            # gravado DEPOIS de o envio confirmar), nunca o rowcount de
+            # `claim_past_due_since`: aquele carimbo COMMITA antes do envio, e
+            # usá-lo como gate fazia SMTP fora do ar na 1ª entrega calar a
+            # janela inteira — medido: 1ª entrega + 3 reentregas da Stripe = 0
+            # e-mails.
+            #
+            # `_abriu_ciclo` só AMPLIA: ciclo novo (rowcount 1) manda com
+            # `dedup_days=0`, que é "não suprima". É o que amarra a dedupe ao
+            # CICLO em vez de a 7 dias de calendário — sem isso, dois ciclos
+            # distintos dentro da mesma semana (troca de plano gerando fatura
+            # nova, segunda assinatura, falha logo depois de um pagamento)
+            # deixavam o segundo mudo. Fora do ciclo novo vale
+            # `DUNNING_GRACE_DAYS`: cada smart retry do MESMO ciclo cai na
+            # janela e não vira um e-mail a mais.
+            #
+            # O PLANO vem do `retrieve` que este ramo JÁ fez para decidir se o
+            # evento é obsoleto — mesma fonte dos outros e-mails da família
+            # (#351). Sem ele, o assinante Essencial cujo cartão falha recebia
+            # "⚠️ PigBank+ — pagamento falhou". `None` quando `_sub_agora` é
+            # None, que é a fatura AVULSA (sem `subscription` em nenhuma das
+            # duas formas da API): ali não há assinatura de onde tirar plano, e
+            # `plan_display_name` devolve o genérico "PigBank".
+            _plano_falha = (_stored_plan_for_price(_subscription_price_id(_sub_agora))
+                            if _sub_agora is not None else None)
             from core.services.email_service import send_payment_failed_email
-            try:
-                email = await _user_email(user_id)
-                if email:
-                    await asyncio.to_thread(send_payment_failed_email, email, DASHBOARD_URL)
-            except Exception as exc:
-                print(f"[billing] email payment_failed falhou user={user_id}: {exc}")
+            await _fire_email(
+                user_id, send_payment_failed_email, _plano_falha,
+                dedup_days=0.0 if _abriu_ciclo else float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
                 from core.services.admin_notify import notify_payment_failed
-                _attempt = _g(invoice, "attempt_count")
                 await asyncio.to_thread(
                     notify_payment_failed,
-                    user_id=user_id, email=email, attempt_count=_attempt,
+                    user_id=user_id, email=await _user_email(user_id),
+                    attempt_count=_g(invoice, "attempt_count"),
                 )
             except Exception as exc:
                 print(f"[billing] admin notify payment_failed falhou user={user_id}: {exc}")
@@ -5324,6 +5772,37 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
             set_payment_status(user_id, "canceled")
+            # A assinatura morreu: o relógio da inadimplência não tem mais o
+            # que medir. REDUNDANTE hoje — `canceled` está fora de
+            # `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status` da linha
+            # acima já zerou o relógio no mesmo UPDATE. Fica como declaração de
+            # intenção do ramo (e cobertura se o status deste ramo mudar), e não
+            # como a proteção: órfão em conta `canceled` NÃO é dado morto — é
+            # dado dormente que prende o relógio do ciclo seguinte na data
+            # velha e tira a conta da janela do lembrete de pagamento.
+            #
+            # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o gate
+            # de "o evento decidiu o acesso" que o `checkout` e o
+            # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
+            # escritas acima (`update_user_plan` e `set_payment_status`) são
+            # comportamento PRÉ-EXISTENTE da main e já rodam sem checar versão
+            # de evento, então gatear só o clear não fecharia nada — a
+            # staleness deste ramo é do ramo inteiro, é anterior a este PR
+            # (§0.3) e continua aberta (célula nº 18 de
+            # `docs/dunning_estados_eventos.md`). A categoria "clear que ignora
+            # o veredito do evento" está fechada nos dois ramos onde o veredito
+            # EXISTE; este fica pendente de propósito.
+            #
+            # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro: o
+            # parâmetro é OBRIGATÓRIO para que nenhum call site futuro herde a
+            # versão incondicional, a regra passa a ser UMA só, e nas três
+            # células alcançáveis deste ramo (16, 17, 18) ele não muda nada —
+            # o `set_payment_status('canceled')` acima já zerou o relógio no
+            # mesmo UPDATE, então este clear é no-op. `_versao` é o mesmo
+            # `_event_version(event)` que o `revoke_grant` abaixo usa.
+            from db.dunning import clear_past_due_since
+            await asyncio.to_thread(clear_past_due_since, int(user_id),
+                                    nao_mais_novo_que=_event_version(event))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
             #
             # A amplitude é dinheiro: quem tem uma assinatura nova já paga e
@@ -5359,14 +5838,28 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email de confirmacao de cancelamento (item 41)
+            # O plano sai do PRICE do `obj`, que é a própria Subscription do
+            # evento (#351) — e não da conta, porque o `update_user_plan(...,
+            # "free", None)` lá em cima já rodou e a conta diria "free" para
+            # todo mundo. Sem isto, quem cancelava Essencial lia "PigBank+ —
+            # assinatura cancelada".
+            _plano_cancelado = _stored_plan_for_price(_subscription_price_id(obj))
             from core.services.email_service import send_subscription_canceled_email
             try:
                 email = await _user_email(user_id)
                 if email:
-                    await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
+                    await asyncio.to_thread(send_subscription_canceled_email, email,
+                                            _plano_cancelado, expires_for_email,
+                                            DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email canceled falhou user={user_id}: {exc}")
             # Notificação admin
+            # DÍVIDA PRÉ-EXISTENTE, não deste PR: `email` só nasce se o
+            # `_user_email` acima RETORNAR. Se ele levantar, o except de cima
+            # engole e o `email=email` daqui vira `NameError` — engolido pelo
+            # except deste try, com a notificação admin sumindo calada. Mesma
+            # classe do `_sub_agora` que o #351 fechou dez linhas acima; fica
+            # anotado para não ser "descoberto" depois como defeito novo.
             try:
                 from core.services.admin_notify import notify_subscription_canceled
                 await asyncio.to_thread(
@@ -5650,7 +6143,7 @@ def _verify_unsub_token(user_id: int, email: str, token: str) -> bool:
     payload  = f"{user_id}:{email}".encode()
     sig      = _hmac.new(secret, payload, _hashlib.sha256).digest()
     expected = _base64.urlsafe_b64encode(sig).decode().rstrip("=")
-    return _hmac.compare_digest(expected, token)
+    return constant_time_eq(token, expected)
 
 
 async def _apply_unsubscribe(uid: int, token: str) -> bool:
@@ -7529,6 +8022,18 @@ app.include_router(push_router)
 
 # ─── Onboarding (wizard de primeira configuração) → frontend/routes/onboarding.py ─
 app.include_router(onboarding_router)
+
+# ─── Pix anual (Asaas) → frontend/routes/billing_pix.py ──────────────────────
+# Registro INCONDICIONAL, e isso é requisito, não descuido: pôr a flag de venda
+# num `if os.getenv(...)` aqui passaria verde no portão
+# `tests/test_pix_rota_registrada.py`, que mede o app IMPORTADO e roda num CI
+# sem a env. A flag mora dentro do checkout (`pix_annual_available()`), onde ela
+# recusa a VENDA sem esconder a rota — e o webhook precisa responder mesmo com a
+# venda desligada, senão o provedor pausa a fila (caso 56 do §16).
+#
+# O nome da env não aparece neste arquivo de propósito: `test_pix_destino_inerte`
+# é TEXTUAL e pega até comentário. É ele que mantém a flag com quem a obedece.
+app.include_router(billing_pix_router)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

@@ -1754,6 +1754,25 @@ def init_db():
         """alter table auth_accounts add column if not exists trial_started_at timestamptz""",
         # Downsell do fim do trial: 1 e-mail por conta, na vida.
         """alter table auth_accounts add column if not exists trial_downsell_sent_at timestamptz""",
+        # Relógio da inadimplência de cartão — o instante da PRIMEIRA falha de
+        # cobrança do ciclo, carimbado pelo webhook `invoice.payment_failed`
+        # (db.dunning.claim_past_due_since). NULLABLE e SEM DEFAULT: NULL
+        # significa "não há ciclo de inadimplência aberto".
+        #
+        # Coluna e não derivação: `system_event_logs` é purgável por decisão de
+        # projeto (o "Limpar" do painel; ver o comentário do
+        # checkout_funnel_events mais abaixo), e o relógio da cobrança não pode
+        # morar em log que alguém apaga pelo painel.
+        #
+        # SEM BACKFILL, por decisão do dono. Quem já está inadimplente no
+        # deploy fica com NULL até o `invoice.payment_failed` seguinte (a Stripe
+        # continua tentando por ~3 semanas de smart retries) — e o único efeito
+        # de NULL é ficar de fora do lembrete de pagamento do dia 6 daquele
+        # ciclo. Nenhum acesso depende desta coluna.
+        #
+        # A versão que tinha backfill era um `do $$` com `information_schema`
+        # para rodar uma vez só; sem backfill sobra o idioma normal do arquivo.
+        """alter table auth_accounts add column if not exists past_due_since timestamptz""",
         # Gate de escolha de plano no cadastro (2026-08-11): depois de criar a
         # conta o usuário é OBRIGADO a passar pela /precos e escolher um plano
         # antes de entrar no dashboard — desde 2026-09-02 só planos PAGOS, o
@@ -1786,10 +1805,12 @@ def init_db():
         # quem já está carimbado em onboarding_completed_at nunca lê esta coluna.
         """alter table auth_accounts add column if not exists onboarding_step smallint not null default 0""",
         # Origem do cadastro (2026-08-17): de onde a conta nasceu, pra separar
-        # no painel de admin quem se cadastrou pela web (passa pelo gate da
-        # /precos) de quem veio pelo app iOS (isento do gate — diretriz 3.1.1
-        # da Apple). Valores: 'web' | 'app' | 'google' | 'google_app' |
-        # 'whatsapp'. NULL = conta anterior a esta coluna (origem desconhecida);
+        # no painel de admin quem se cadastrou pela web de quem veio pelo app
+        # iOS. Só TELEMETRIA — não concede nada: o gate de plano não isenta o
+        # app (política em plan_service.needs_plan_selection).
+        # Valores (os únicos que signup_source_from_request produz):
+        # 'web' | 'app' | 'google' | 'google_app'.
+        # NULL = conta anterior a esta coluna (origem desconhecida);
         # sem backfill por data chutado — o painel mostra "—" pra elas.
         """alter table auth_accounts add column if not exists signup_source text""",
         """
@@ -2124,6 +2145,318 @@ def init_db():
         # Resync do §5.1 — a SQL mora em RESYNC_LEGACY_GRANTS_SQL (topo do
         # arquivo), com o porquê do `do update`.
         RESYNC_LEGACY_GRANTS_SQL,
+
+        # ── Pix anual via Asaas: as três tabelas (PR 1b-A) ───────────────────
+        # docs/plano_pix_anual_asaas.md §3.2, §3.3 e §3.4. Esta fatia é INERTE:
+        # as tabelas nascem e ficam vazias, nenhum módulo de produção importa
+        # `db/pix_charges.py`, `db/webhook_outbox.py` ou `core/services/asaas.py`,
+        # e não há rota. Quem prova é `tests/test_pix_inerte.py`.
+        #
+        # ZERO `insert` aqui, e isso é decisão, não descuido: o
+        # `CardinalityViolation` do PR 1a nasceu de um `insert … on conflict`
+        # rodando dentro do `init_db`. Estas tabelas nascem vazias — não existe
+        # backfill do que nunca foi vendido.
+
+        # `user_id` é `on delete set null` e NÃO `cascade`: o registro financeiro
+        # sobrevive à exclusão da conta com o VÍNCULO ao titular desfeito pelo
+        # banco (§13.2, molde da `plan_trials`).
+        #
+        # **`ga_client_id`, `fbp` e `fbc` entram no 1b-B, e não antes**, por
+        # decisão do dono (§14): coluna de rastreio publicitário sem a purga do
+        # §13.2 é dado que sobrevive à exclusão da conta. Elas nascem no `alter
+        # table` logo abaixo, no mesmo PR do escritor (o checkout) e da purga
+        # (`delete_user_data`, db/privacy.py) — a purga vem DOIS commits antes
+        # do escritor, e é essa ordem que a regra exige.
+        #
+        # Quem garante o `set null` em RUNTIME é `_USER_FK_SET_NULL_TABLES`
+        # em db/schema_repairs.py — sem "pix_charges" lá, o
+        # `repair_user_fk_cascades` converte esta declaração em CASCADE na
+        # primeira subida. Declarar aqui só alinha o DDL com o reparo
+        # (tests/test_schema_repairs.py::test_ddl_nao_contradiz_o_alvo_do_repair).
+        #
+        # Centavos são `bigint`, nunca float. `plan_stored` é o valor LEGADO já
+        # resolvido na CRIAÇÃO (§3.2), o que mata o fallback silencioso de
+        # `_stored_plan_for_price`. `qr_payload_enc` guarda o "copia e cola"
+        # CIFRADO (§13.6): em texto puro é instrumento ao portador.
+        """
+        create table if not exists pix_charges (
+          id bigserial primary key,
+          user_id bigint references users(id) on delete set null,
+          external_reference text not null unique,        -- "pix:<id>"
+          asaas_payment_id text unique,
+          asaas_customer_id text,
+          plan text not null,
+          plan_stored text not null,
+          price_cents bigint not null,
+          credit_cents bigint not null,
+          amount_cents bigint not null,
+          currency text not null default 'BRL',
+          duration_days int not null default 365,
+          stripe_subscription_id text,
+          stripe_cancel_scheduled_at timestamptz,
+          stripe_period_end_at timestamptz,
+          public_token text not null unique,              -- id OPACO, o único que sai daqui
+          status text not null default 'draft',
+          qr_payload_enc text,
+          due_date date,
+          qr_expires_at timestamptz,
+          access_starts_at timestamptz,
+          access_expires_at timestamptz,
+          created_at timestamptz not null default now(),
+          paid_at timestamptz,
+          canceled_at timestamptz,
+          refunded_at timestamptz,
+          purged_at timestamptz
+          -- As CINCO invariantes NÃO estão aqui, e é decisão medida: ver o
+          -- bloco `alter table` logo abaixo.
+        )
+        """,
+        # As três colunas de rastreio (§3.2, §13.2). `alter table … add column
+        # if not exists` e NÃO inline no `create table` acima, pelo mesmo motivo
+        # das invariantes logo abaixo: `create table if not exists` não alcança
+        # tabela que já existe, e `pix_charges` já existe em produção e no
+        # `pigbank_ci_test` desde o 1b-A. Elas guardam o `_ga` do GA4 e os
+        # cookies `_fbp`/`_fbc` da Meta, lidos no checkout e usados pelo dreno
+        # nos efeitos `ga4`/`capi`; a exclusão da conta as zera
+        # (`db/privacy.py::delete_user_data`).
+        """alter table pix_charges add column if not exists ga_client_id text""",
+        """alter table pix_charges add column if not exists fbp text""",
+        """alter table pix_charges add column if not exists fbc text""",
+
+        # ── as CINCO invariantes de `pix_charges`, no BANCO e não em Python ──
+        #
+        # **Fora do `create table`, e as cinco juntas.** `create table if not
+        # exists` NÃO acrescenta constraint a tabela que já existe, e o
+        # `pigbank_ci_test` (como o Railway) persiste entre subidas. Enquanto
+        # quatro delas ficaram inline, o buraco foi MEDIDO no `pigbank_ci_test`,
+        # onde `pix_charges` já existia: `pg_constraint` com `contype='c'`
+        # listava SÓ `pix_charges_pago_tem_janela`, e o banco ACEITAVA
+        # `status='pendng'` (typo que tira a linha de `uniq_pix_charge_ativa` e
+        # LIBERA uma segunda cobrança ativa), `external_reference` de terceiro,
+        # `price_cents` negativo e `amount_cents` que não fecha. `drop
+        # constraint if exists` + `add constraint` é o par idempotente que este
+        # arquivo já usa (`recurring_expenses_amount_check`, :1372) e o único
+        # que alcança as duas populações. Elas ficam AQUI e não também inline,
+        # porque duas cópias da mesma expressão é a §0.7.
+        #
+        # **`not valid`, e não `add` simples** — medido contra o Postgres com UMA
+        # linha legada violando. `add` simples levanta `CheckViolation`; o
+        # `_run_ddl` faz `raise` no primeiro erro e o `_startup_required`
+        # (`frontend/finance_bot_websocket_custom.py`) MATA a subida do app. E
+        # como a conexão é autocommit, o `drop` do par JÁ commitou: o banco fica
+        # SEM o constraint e nenhum statement seguinte roda —
+        # `uniq_pix_charge_ativa`, `pix_webhook_events`, `pix_payment_effects` e
+        # o `repair_user_fk_cascades` somem junto, e o reboot repete. Com `not
+        # valid` a subida segue, o constraint FICA, e toda linha NOVA ou
+        # ATUALIZADA continua barrada; só a população já existente escapa da
+        # checagem — que é exatamente o que se quer de dado legado.
+        #
+        # **Sem `validate constraint` depois, e não é por custo:** medido em
+        # 2026-09-08 num banco descartável, `alter table … validate constraint`
+        # levou 3 ms com 50 mil linhas e 22 ms com 200 mil — barato. O motivo é
+        # outro: ele só falha no único caso em que faria diferença (existe linha
+        # legada ruim), e ali um `try` que só loga não decide nada. Quando esse
+        # dia chegar, o `validate` se roda à mão, depois de olhar a linha.
+        #
+        # `orphan_unknown` NÃO está na lista de status, de propósito: ver o
+        # comentário logo abaixo.
+        """alter table pix_charges
+             drop constraint if exists pix_charges_status_valido""",
+        # `status` é texto livre, e um typo (`pendng`) tira a linha do índice
+        # parcial `uniq_pix_charge_ativa` — que só cobre 4 estados nomeados — e
+        # LIBERA uma segunda cobrança ativa do mesmo usuário. Dois QRs pagáveis é
+        # o furo financeiro que o §10 existe para fechar, e ele voltaria por um
+        # erro de digitação.
+        """alter table pix_charges
+             add constraint pix_charges_status_valido check (status in (
+               'draft', 'creating', 'pending', 'canceling', 'canceled',
+               'paid', 'paid_orphan', 'expired',
+               'refunded', 'refunded_partial', 'chargeback'
+             )) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_ref_formato""",
+        # `^pix:[0-9]+$` é o formato que separa NOSSO dinheiro do de terceiros
+        # (§11): o dreno só classifica como `orphan_unknown` — dinheiro nosso que
+        # perdeu a linha — o que casa esta regex. Uma referência fora do formato
+        # faz o pagamento ser descartado em SILÊNCIO, que é o oposto do que a
+        # célula existe para impedir. A regex mora no banco porque é o único
+        # lugar que nenhum chamador pode contornar.
+        """alter table pix_charges
+             add constraint pix_charges_ref_formato
+             check (external_reference ~ '^pix:[0-9]+$') not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_centavos_nao_negativos""",
+        # Centavos são inteiros e não-negativos. Sem isto, um crédito maior que o
+        # preço produz `amount_cents` negativo e a cobrança sai com valor
+        # negativo para o provedor.
+        """alter table pix_charges
+             add constraint pix_charges_centavos_nao_negativos check (
+               price_cents >= 0 and credit_cents >= 0 and amount_cents >= 0
+             ) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_amount_fecha""",
+        # O que se COBRA é sempre preço menos crédito (§7). É a única relação
+        # entre as três colunas, e deixá-la implícita permitiria uma cobrança
+        # cujo valor não bate com o snapshot que a justifica.
+        """alter table pix_charges
+             add constraint pix_charges_amount_fecha
+             check (amount_cents = price_cents - credit_cents) not valid""",
+        """alter table pix_charges
+             drop constraint if exists pix_charges_pago_tem_janela""",
+        # **Pagamento com titular tem janela de acesso.** Sem ela, o dreno do
+        # 1b-B pode gravar `paid_at` e esquecer `access_*`, e a linha fica pagando
+        # sem conceder — em SILÊNCIO, que é o modo caro. O que ela NÃO cobre está
+        # escrito em `tests/test_pix_invariantes_do_banco.py`.
+        #
+        # **A exceção é `user_id is null`, NÃO `status = 'paid_orphan'`**, e a
+        # diferença foi medida contra o Postgres: a exceção por status aceita o
+        # órfão pago mas RECUSA o estorno posterior dele (`paid_orphan` →
+        # `refunded` deixa o status para trás e a linha continua sem janela). A
+        # condição do titular ausente PERSISTE pela transição — a FK é `on delete
+        # set null` e `pix_charges` está em `_USER_FK_SET_NULL_TABLES` —, então
+        # ela cobre também a conta excluída DEPOIS de pagar (§13.4). A medição
+        # das três formulações está no mesmo arquivo de teste.
+        """alter table pix_charges
+             add constraint pix_charges_pago_tem_janela check (
+               paid_at is null or user_id is null
+               or (access_starts_at is not null and access_expires_at is not null)
+             ) not valid""",
+        # **`orphan_unknown` NÃO é um estado desta tabela**, e a decisão está no
+        # `check` acima em vez de numa frase. O §8.2 A manda registrar o
+        # pagamento que chega com `externalReference` NOSSO e sem linha local —
+        # mas esse registro não tem `plan`, `plan_stored`, `price_cents`,
+        # `credit_cents`, `public_token` nem `user_id`, que são todos `not null`
+        # aqui. A linha era literalmente ininserível (P1-2 do Codex no #304).
+        #
+        # Das duas saídas, a escolhida é **tabela própria** (`pix_unmatched_payments`),
+        # não colunas anuláveis: o registro NÃO é uma cobrança nossa — não tem
+        # plano, preço nem dono —, e afrouxar seis `not null` tiraria a garantia
+        # do caminho de 100% das vendas para acomodar um caso que não é venda.
+        # Todo leitor futuro de `amount_cents` passaria a precisar de um ramo de
+        # NULL.
+        #
+        # **Ela nasce no 1b-B, junto do dreno que a escreve** — é a mesma regra
+        # que o dono fixou para `ga_client_id`/`fbp`/`fbc` (§14): tabela sem
+        # escritor é tabela que alguém preenche errado. O `check` acima garante
+        # que ninguém tente enfiar o estado aqui enquanto isso.
+
+        # UMA cobrança ativa por usuário, garantida pelo BANCO e não por
+        # `select`+`insert` em Python (§3.2 + §10): duas requisições
+        # concorrentes não podem produzir dois QRs pagáveis, senão as duas são
+        # precificadas contra o MESMO crédito. `canceling` está na lista porque
+        # a substituição cancela no Asaas ANTES de criar a nova (correção nº 6),
+        # então `canceling` e `draft` do mesmo dono não coexistem mais.
+        """
+        create unique index if not exists uniq_pix_charge_ativa
+          on pix_charges (user_id)
+          where status in ('draft', 'creating', 'pending', 'canceling')
+        """,
+        # O índice do lado que REFERENCIA, igual ao que a `plan_trials` ganhou:
+        # sem ele, todo `delete from users` varre `pix_charges` inteira para
+        # aplicar o `set null`.
+        """
+        create index if not exists idx_pix_charges_user
+          on pix_charges (user_id)
+        """,
+
+        # Outbox do webhook (§3.3). O handler só grava aqui e responde 200; quem
+        # concede acesso é o dreno, que é PR 1b-B. `payload_enc` é minimizado
+        # (só os 9 campos do §13.3) e cifrado; ele e o `last_error` viram NULL
+        # na MESMA purga por idade, e a linha fica só com os metadados.
+        """
+        create table if not exists pix_webhook_events (
+          event_id text primary key,
+          event_type text not null,
+          payload_enc text,
+          event_version bigint not null,
+          received_at timestamptz not null default now(),
+          processed_at timestamptz,
+          purged_at timestamptz,
+          attempts int not null default 0,
+          last_error text
+        )
+        """,
+        # A fila do dreno: parcial porque o interesse é só o que falta processar.
+        """
+        create index if not exists idx_pix_webhook_pendentes
+          on pix_webhook_events (processed_at) where processed_at is null
+        """,
+        # A purga do §13.3 conta de `received_at`, processado ou não — evento
+        # travado é justamente o de quem pediu exclusão da conta.
+        """
+        create index if not exists idx_pix_webhook_received
+          on pix_webhook_events (received_at)
+        """,
+
+        # Um registro por efeito, chaveado pelo PAGAMENTO e não pelo evento
+        # (§3.4, correção nº 8b): `PAYMENT_RECEIVED` reentregue com `event_id`
+        # NOVO não pode reexecutar `ga4`/`capi`/`email`. `event_id` fica só como
+        # forense de quem executou. Tabela de servidor — nunca sai daqui, então
+        # o id do provedor pode viver nela (§13.6).
+        """
+        create table if not exists pix_payment_effects (
+          asaas_payment_id text not null,
+          effect text not null,
+          event_id text not null,
+          done_at timestamptz not null default now(),
+          primary key (asaas_payment_id, effect)
+        )
+        """,
+
+        # Pagamento com `externalReference` NOSSO (`^pix:[0-9]+$`) e sem linha em
+        # `pix_charges` — o `orphan_unknown` do §8.2 A, que o `check
+        # pix_charges_status_valido` recusa de propósito: sem `plan`,
+        # `price_cents`, `public_token` nem `user_id`, a linha era ininserível lá
+        # (P1-2 do Codex no #304). Fila de conciliação, não venda.
+        #
+        # **SEM `user_id`, e é esse o ponto:** não há dono conhecido — é
+        # justamente o que a tabela registra. Ela também NÃO entra em
+        # `user_owned_tables` de `db/privacy.py`, porque não há coluna por onde
+        # ligá-la a uma conta; a retenção dela é por idade
+        # (`RETENCAO_PAGAMENTO_DIAS`, §13.1), na varredura diária.
+        #
+        # `value`/`net_value` são `numeric(12,2)` e não centavos em `bigint`:
+        # eles vêm do provedor em reais, verbatim do webhook, e converter dinheiro
+        # de terceiro na entrada é onde nasce erro de arredondamento que ninguém
+        # reconcilia. `date_created` é `text` pelo mesmo motivo — o formato é do
+        # Asaas, e nenhuma query nossa filtra por ele (a retenção conta de
+        # `received_at`, que é nosso). `customer` é o ID do cliente no Asaas,
+        # nunca o nome nem o CPF (§13.3).
+        """
+        create table if not exists pix_unmatched_payments (
+          asaas_payment_id text not null,
+          external_reference text not null,
+          value numeric(12,2),
+          net_value numeric(12,2),
+          status text,
+          date_created text,
+          customer text,
+          received_at timestamptz not null default now(),
+          notified_at timestamptz
+        )
+        """,
+        # Uma linha por pagamento: o Asaas reentrega, e o dreno não pode
+        # empilhar a mesma conciliação a cada entrega. Índice único e não
+        # `primary key` inline pela mesma razão do bloco de invariantes acima —
+        # `create unique index if not exists` é o único que alcança a tabela que
+        # JÁ existe, e `create table if not exists` não.
+        """
+        create unique index if not exists uniq_pix_unmatched_payment
+          on pix_unmatched_payments (asaas_payment_id)
+        """,
+        """alter table pix_unmatched_payments
+             drop constraint if exists pix_unmatched_ref_formato""",
+        # O MESMO `^pix:[0-9]+$` do `pix_charges_ref_formato`, e a regra é a que
+        # separa nosso dinheiro do de terceiros (§6/§8.2 A): fora do formato o
+        # dreno loga `asaas_evento_fora_do_escopo` e NÃO grava linha. Sem esta
+        # constraint, um dia em que o filtro do dreno afrouxar enche a fila de
+        # conciliação com Pix avulso do negócio — dado de terceiro numa tabela
+        # que ninguém revisita. `not valid` pelo mesmo motivo do bloco acima: um
+        # `add` simples que levante mata a subida do app e deixa o banco sem a
+        # constraint, porque o `drop` do par já commitou (autocommit).
+        """alter table pix_unmatched_payments
+             add constraint pix_unmatched_ref_formato
+             check (external_reference ~ '^pix:[0-9]+$') not valid""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

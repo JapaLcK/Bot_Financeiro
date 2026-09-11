@@ -92,6 +92,21 @@ async def run_engagement_loop() -> None:
                 source="engagement_scheduler",
             )
 
+        # Lembrete de pagamento do 6º dia de cartão em atraso. Isolado como os
+        # demais checks, e INERTE sem PAYMENT_REMINDER_ENABLED (default off).
+        # Não bloqueia acesso de ninguém — ver payment_reminder.py.
+        try:
+            from core.services.payment_reminder import check_payment_reminder
+            await check_payment_reminder()
+        except Exception as exc:
+            logger.error("[engagement] Erro no lembrete de pagamento: %s", exc, exc_info=True)
+            log_system_event_sync(
+                "error",
+                "payment_reminder_error",
+                f"Erro no lembrete de pagamento: {exc}",
+                source="engagement_scheduler",
+            )
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except asyncio.CancelledError:
@@ -206,7 +221,6 @@ TRIAL_ENDING_WINDOW_MAX_DAYS = 3.5
 async def _check_trial_ending() -> None:
     """Envia email pra users em trial cujo PigBank+ termina em ~3 dias (item 38)."""
     import os
-    import db
     from core.services.email_service import send_trial_ending_email
     from db.connection import get_conn
 
@@ -220,7 +234,7 @@ async def _check_trial_ending() -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    select user_id, email, email_enc, plan_expires_at
+                    select user_id, email, email_enc, plan, plan_expires_at
                     from auth_accounts
                     where plan = 'pro'
                       and last_payment_status = 'trialing'
@@ -262,7 +276,10 @@ async def _check_trial_ending() -> None:
         ):
             continue
         try:
-            ok = await loop.run_in_executor(None, send_trial_ending_email, email, expires_at, dashboard_url)
+            # `row["plan"]`, não o literal 'pro' do WHERE (§0.7): o dia em que
+            # o filtro deixar de ser só Plus, a cópia mentiria (#351).
+            ok = await loop.run_in_executor(
+                None, send_trial_ending_email, email, row["plan"], expires_at, dashboard_url)
             if ok:
                 logger.info("[trial-ending] enviado → user_id=%s (%s)", user_id, _mask_email(email))
                 log_system_event_sync(

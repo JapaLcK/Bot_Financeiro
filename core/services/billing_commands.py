@@ -42,6 +42,27 @@ _PLANO_TRIGGERS = {
 }
 
 
+def _norm_cmd(text: str) -> str:
+    """Normaliza e tira o "/" do Discord (ex: "/assinar" → "assinar")."""
+    norm = _normalize(text)
+    return norm[1:].strip() if norm.startswith("/") else norm
+
+
+def is_billing_command(text: str) -> bool:
+    """True se o texto é assinar/cancelar/plano. Sem DB, sem efeito colateral.
+
+    Existe pro gate de plano (core.handle_incoming._paywall_gate) poder isentar
+    estes comandos SEM reimplementar os triggers: é o mesmo papel do
+    `_GATE_EXEMPT_PREFIXES = ("/billing", ...)` da web (frontend/routes/shared.py)
+    — quem está barrado precisa conseguir assinar."""
+    norm = _norm_cmd(text)
+    return bool(norm) and (
+        norm in _ASSINAR_TRIGGERS
+        or norm in _CANCELAR_TRIGGERS
+        or norm in _PLANO_TRIGGERS
+    )
+
+
 def _normalize(text: str) -> str:
     """Lowercase + remove acentos + colapsa espacos."""
     if not text:
@@ -77,16 +98,19 @@ def _format_plan_expires(expires_at) -> str:
 
 
 def _handle_assinar(user_id: int, platform: str) -> str:
+    from core.services.email_service import plan_display_name
     from core.services.plan_service import is_pro
     from db import get_auth_user
 
     if is_pro(user_id):
         user = get_auth_user(user_id)
         expires = _format_plan_expires((user or {}).get("plan_expires_at"))
+        # #351 no bot: `pro_max` (PigBank Pro) lia "PigBank+" aqui, sem gate de v2.
+        nome = plan_display_name((user or {}).get("plan"))
         link = build_dashboard_link(user_id, hours=1.0, next_path="/conta") or "https://pigbankai.com/conta"
         b = lambda s: _bold(s, platform)
         return (
-            f"🐷 Você já tá no {b('PigBank+')}!\n\n"
+            f"🐷 Você já tá no {b(nome)}!\n\n"
             f"Próxima renovação: {b(expires)}\n\n"
             f"Pra ver detalhes ou cancelar:\n{link}"
         )
@@ -131,10 +155,34 @@ def _handle_assinar(user_id: int, platform: str) -> str:
     )
 
 
+# Cadastro sem plano escolhido é BARRADO pelo bot (`_paywall_gate`), e `plano` /
+# `cancelar` são justamente os comandos que ele é levado a mandar: a copy do
+# Grátis ("30 lançamentos/mês", "tá tudo de graça mesmo") prometeria a ele
+# direitos que a próxima mensagem leva um "sua conta precisa estar ativa".
+_SEM_PLANO_MSG = (
+    "🐷 Sua conta ainda não escolheu um plano — por isso eu ainda não consigo "
+    "anotar nada por aqui, e não há assinatura a cancelar.\n\n"
+    "Escolhe um e eu já começo: manda {assinar} 🐷✨"
+)
+
+
+def _sem_plano_escolhido(user_id: int, user: dict | None = None) -> bool:
+    """Fonte única do estado: o mesmo `needs_plan_selection` que o gate do bot
+    usa pra barrar. Import defensivo pelo mesmo motivo do `_handle_plano` —
+    testes (e deploys sem a escada v2) mockam plan_service só com `is_pro`."""
+    try:
+        from core.services.plan_service import needs_plan_selection
+    except ImportError:
+        return False
+    return needs_plan_selection(user_id, user)
+
+
 def _handle_cancelar(user_id: int, platform: str) -> str:
     from core.services.plan_service import is_pro
 
     if not is_pro(user_id):
+        if _sem_plano_escolhido(user_id):
+            return _SEM_PLANO_MSG.format(assinar=_bold("assinar plano", platform))
         return "🐷 Você tá no plano Free — não tem o que cancelar. Tá tudo de graça mesmo."
 
     link = build_dashboard_link(user_id, hours=1.0, next_path="/conta")
@@ -174,6 +222,9 @@ def _handle_plano(user_id: int, platform: str) -> str:
         tier = get_plan_tier(user_id)
 
         if tier == "free":
+            # `user` já veio do get_auth_user acima — sem SELECT novo.
+            if _sem_plano_escolhido(user_id, user):
+                return _SEM_PLANO_MSG.format(assinar=b("assinar plano"))
             return (
                 f"🐷 Plano: {b('Grátis')}\n\n"
                 f"O que vem aqui:\n"
@@ -273,21 +324,11 @@ def handle_billing_command(user_id: int, text: str, platform: str = "whatsapp") 
     a confirmação. Senão "cancelar" puro durante uma confirmação de delete
     viraria comando de billing.
     """
-    norm = _normalize(text)
-    if not norm:
+    # Match rápido: se nem encosta nos triggers, retorna sem mexer no DB (e sem
+    # normalizar duas vezes — a maioria das mensagens sai por aqui).
+    if not is_billing_command(text):
         return None
-
-    # Aceita prefixo "/" do Discord (ex: "/assinar")
-    if norm.startswith("/"):
-        norm = norm[1:].strip()
-
-    # Match rápido: se nem encosta nos triggers, retorna sem mexer no DB.
-    if (
-        norm not in _ASSINAR_TRIGGERS
-        and norm not in _CANCELAR_TRIGGERS
-        and norm not in _PLANO_TRIGGERS
-    ):
-        return None
+    norm = _norm_cmd(text)
 
     # Pending action → cede o turno pro ai_chat_command. Cobre "cancelar"
     # puro durante confirmação de delete, etc.

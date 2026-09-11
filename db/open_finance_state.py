@@ -302,6 +302,102 @@ def list_connections_for_health_check(*, older_than_sec: int, limit: int) -> lis
             return [dict(r) for r in (cur.fetchall() or [])]
 
 
+# Item visto no registry (o único rastro: o `GET /items` da Pluggy devolve 401)
+# que não tem NENHUMA conexão local. Uma fonte só, porque dois leitores precisam
+# enxergar exatamente o mesmo universo: o contador do painel de saúde abaixo e o
+# `scripts/adotar_items_of_orfaos.py`, que adota justamente esses items.
+ITEMS_SEM_CONEXAO = """
+  from open_finance_item_registry r
+ where r.provider_item_id is not null
+   and not exists (
+       select 1 from open_finance_connections c
+        where c.provider = r.provider
+          and c.provider_item_id = r.provider_item_id
+   )
+"""
+
+
+def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
+                          exceto_registro_id: int | None = None,
+                          exceto_user_id: int | None = None) -> set[str]:
+    """Por quais portas este item já foi visto COM DONO.
+
+    Uma pergunta, uma fonte (CLAUDE.md §0.7). Vazio = o item nunca foi atribuído
+    a ninguém, e é isso que separa ADOTAR de RESSUSCITAR: nem o disconnect nem o
+    reset apagam o registry (`db/privacy.py` o preserva), então banco REMOVIDO
+    fica para sempre "sem conexão local" e só o rastro com dono
+    (`pluggy_item`/`webhook_adopt`) conta que ele existiu. Os leitores:
+
+      • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
+        de `item/created`, entrega at-least-once, ressuscitava o removido), e a
+        MESMA pergunta de novo dentro do lock, em `_salva_item_sob_lock`
+        (`exceto_registro_id`, abaixo);
+      • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
+        este item, logo a conexão que existe não é a que o webhook acabou de
+        adotar (auditoria de reconexão);
+      • `scripts/adotar_items_of_orfaos.py` — o alvo do one-shot.
+
+    `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
+    chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer
+    a pergunta do 1º leitor DENTRO do `pluggy_item_lock` ("alguém MAIS já tem
+    este item?") sem que a adoção em curso responda a si mesma (Codex #313, P1).
+    Um parâmetro na fonte única em vez de uma 2ª query com o mesmo `user_id is
+    not null`: a regra "teve dono" continua escrita uma vez (CLAUDE.md §0.7).
+    Ele ANDA COM `exceto_user_id`, e o `ValueError` abaixo OBRIGA: a query filtra
+    por `provider + provider_item_id`, então um `id` de OUTRO item nunca mascara
+    nada, mas o mesmo item pode ter linha de outro USUÁRIO — e esconder a origem
+    dela seria vazar decisão entre usuários (CLAUDE.md §0, isolamento). O par só
+    ignora a linha que é do próprio dono em curso. Sem a guarda, meio par era
+    SILENCIOSAMENTE pior que nenhum: só `exceto_registro_id` faz o `user_id = %s`
+    virar `= null`, o `not (...)` inteiro vira NULL, e o `where` descarta TODA
+    linha — `set()` no lugar de `{'webhook_adopt'}`, ou seja "item nunca teve
+    dono" para um item que tem. O chamador de produção passa os dois; isto é
+    fronteira para o PRÓXIMO (CLAUDE.md §0.2, validação não se simplifica).
+
+    Devolve ORIGENS, nunca `user_id`: o chamador decide sobre o item, e nenhum
+    dado de outro usuário sai daqui.
+    """
+    if (exceto_registro_id is None) != (exceto_user_id is None):
+        raise ValueError("exceto_registro_id e exceto_user_id andam juntos ou nenhum")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select distinct origin from open_finance_item_registry
+                 where provider = %s and provider_item_id = %s and user_id is not null
+                   and (%s::bigint is null or not (id = %s and user_id = %s))
+                """,
+                (provider, str(provider_item_id or ""),
+                 exceto_registro_id, exceto_registro_id, exceto_user_id),
+            )
+            return {r["origin"] for r in (cur.fetchall() or []) if r["origin"]}
+
+
+def unregister_item(registro_id: int, user_id: int) -> int:
+    """Apaga UMA linha do rastro: a reivindicação que a própria adoção ABANDONOU.
+
+    O registry é log de append ("este item existiu, visto por esta porta") e
+    continua sendo — o único caso que apaga é a linha que ESTA adoção gravou
+    segundos atrás e não vai honrar, porque outra entrega ficou com o item. Sem
+    isso o aborto era TERMINAL: rastro com dono e zero conexão recusa toda
+    retentativa (1ª guarda de `_adota_item_orfao`) e some do
+    `scripts/adotar_items_of_orfaos.py` (o filtro dele exclui rastro com dono),
+    e o usuário fica com 0 bancos sem saída pelo produto.
+
+    `user_id` no `where` não é decoração: é o isolamento por usuário do
+    CLAUDE.md §0 aplicado a um DELETE que recebe um `id` cru.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "delete from open_finance_item_registry where id = %s and user_id = %s",
+                (registro_id, user_id),
+            )
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
 def register_item(
     user_id: int | None,
     *,
@@ -378,18 +474,7 @@ def of_health_counters() -> dict[str, Any]:
             row["stale_por_produto"] = {r["produto"]: int(r["n"]) for r in (cur.fetchall() or [])}
 
             # Items vistos (registry) que não têm conexão local nenhuma.
-            cur.execute(
-                """
-                select count(distinct r.provider_item_id) as n
-                  from open_finance_item_registry r
-                 where r.provider_item_id is not null
-                   and not exists (
-                       select 1 from open_finance_connections c
-                        where c.provider = r.provider
-                          and c.provider_item_id = r.provider_item_id
-                   )
-                """
-            )
+            cur.execute(f"select count(distinct r.provider_item_id) as n {ITEMS_SEM_CONEXAO}")
             row["items_sem_conexao"] = int((cur.fetchone() or {}).get("n") or 0)
 
             # Deadlocks/retries recentes (24h) — o log de sistema é a fonte.

@@ -340,7 +340,7 @@ def test_cookie_ga_vira_metadata_do_checkout(user_id, monkeypatch):
     fake = _patch_stripe(monkeypatch)
     client.cookies.set("_ga", f"GA1.1.{_CID_REAL}")
 
-    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert r.status_code == 200, r.text
 
     kwargs = fake.last_session_kwargs
@@ -366,7 +366,7 @@ def test_sem_cookie_ga_o_checkout_nasce_sem_o_campo(user_id, monkeypatch):
     fake = _patch_stripe(monkeypatch)
     client.cookies.set("_ga", "lixo-que-nao-e-cookie-do-ga")
 
-    r = client.post("/billing/create-checkout", headers=_CSRF_HEADERS)
+    r = client.post("/billing/create-checkout", json={"plan": "plus"}, headers=_CSRF_HEADERS)
     assert r.status_code == 200, r.text
     assert "ga_client_id" not in fake.last_session_kwargs["metadata"]
 

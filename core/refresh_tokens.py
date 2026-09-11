@@ -251,20 +251,25 @@ def revoke_user_refresh_tokens(user_id: int) -> int:
 
 
 def cleanup_expired_refresh_tokens() -> int:
-    """Limpeza periódica de refresh tokens expirados/revogados há mais de 30d.
-    Não usar pra produção sem chamar de um cron — só housekeeping."""
-    try:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                delete from auth_refresh_tokens
-                where (revoked_at is not null and revoked_at < now() - interval '30 days')
-                   or (expires_at < now() - interval '7 days')
-                """
-            )
-            n = cur.rowcount
-            conn.commit()
-        return n or 0
-    except Exception as exc:
-        print(f"[refresh] cleanup falhou: {exc}", file=sys.stderr)
-        return 0
+    """Limpeza periódica: revogado há mais de 30d OU expirado há mais de 7d.
+
+    Os dois prazos são diferentes de propósito e o SQL abaixo é a fonte: token
+    REVOGADO ainda serve de trilha de auditoria de logout/roubo por 30 dias;
+    token que só EXPIROU não prova nada depois de 7.
+
+    Chamada pela tarefa de fundo do app (core/services/table_cleanup.py) e, à
+    mão, por scripts/cleanup_job.py. A falha PROPAGA de propósito: engolir a
+    exceção e devolver 0 deixaria o job verde enquanto a tabela cresce sem
+    poda. Quem chama já loga (e o script sai rc=1).
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            delete from auth_refresh_tokens
+            where (revoked_at is not null and revoked_at < now() - interval '30 days')
+               or (expires_at < now() - interval '7 days')
+            """
+        )
+        n = cur.rowcount
+        conn.commit()
+    return n or 0

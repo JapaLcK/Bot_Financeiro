@@ -5,7 +5,6 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 """
 
 import asyncio
-import hmac
 import html as _html
 import os
 from urllib.parse import quote
@@ -14,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
+from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
     gate_onboarding,
@@ -563,6 +563,28 @@ async def serve_of_connect_js():
     )
 
 
+@router.get("/pix-checkout.js")
+async def serve_pix_checkout_js():
+    """CTA, overlay e checkout do Pix anual da /precos. Sem esta rota o arquivo
+    dá 404 e o sintoma só aparece no navegador — não há StaticFiles mount aqui."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-checkout.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/pix-poll.js")
+async def serve_pix_poll_js():
+    """Par do /pix-checkout.js: o modal do QR, a cópia e o poll da cobrança.
+    São dois arquivos porque juntos passam do teto de 350 linhas do lint."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-poll.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/open-finance-connect.css")
 async def serve_of_connect_css():
     """CSS do modal de conectar banco (ver /open-finance-connect.js)."""
@@ -773,6 +795,6 @@ async def health(request: Request):
     # deploy ANTERIOR, e o gate abriria cedo: o verde falso que ele impede.
     corpo = {"status": "ok"}
     esperado = os.getenv("SMOKE_HEALTH_TOKEN", "")
-    if esperado and hmac.compare_digest(request.headers.get("x-smoke-token", ""), esperado):
+    if esperado and constant_time_eq(request.headers.get("x-smoke-token", ""), esperado):
         corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
     return JSONResponse(corpo, headers={"Cache-Control": "no-store"})

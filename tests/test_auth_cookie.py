@@ -5,6 +5,7 @@ import uuid
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -822,3 +823,70 @@ def test_401_de_autenticacao_manda_www_authenticate_e_o_de_aplicacao_nao(monkeyp
         "401 de aplicação marcado como renovável — o interceptor volta a gastar "
         "refresh + retry, que é o bug da #176"
     )
+
+
+def test_csrf_com_header_nao_ascii_da_403_e_nao_500():
+    """Cookie e header do CSRF são AMBOS escolhidos por quem chama, e o
+    middleware não passa por exception handler nenhum: `compare_digest` sobre
+    str não-ASCII levanta TypeError e vira 500 cru em qualquer POST do site."""
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "test-csrf-token")
+
+    # Em bytes: o httpx recusa str não-ASCII em header antes de a requisição sair.
+    response = client.post(
+        "/auth/dashboard-token",
+        headers={dashboard.CSRF_HEADER_NAME: "café".encode("latin-1")},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Token CSRF inválido ou ausente."
+
+
+_ERRO_DE_STATE = "Sessão de login expirou. Tente novamente."
+
+
+def _google_error(response) -> str:
+    """A mensagem do redirect, decodificada. Asserir o PREFIXO `/?google_error=`
+    não distingue nada: todo caminho de erro do callback usa o mesmo prefixo."""
+    qs = urlparse(response.headers["location"]).query
+    return parse_qs(qs)["google_error"][0]
+
+
+def test_google_callback_com_state_nao_ascii_redireciona_e_nao_500():
+    """O `state` volta na query do redirect do Google — qualquer um chama a URL
+    com o valor que quiser. Recusa é o redirect pra landing, não 500."""
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.GOOGLE_OAUTH_STATE_COOKIE, "state-ascii-do-cookie")
+
+    response = client.get(
+        "/auth/google/callback?code=qualquer&state=café",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert _google_error(response) == _ERRO_DE_STATE
+
+
+def test_google_callback_com_state_ascii_que_bate_passa_do_portao():
+    """Controle positivo do par acima: sem ele o grupo passaria num portão que
+    RECUSA TODO state — que derrubaria 100% dos logins com Google.
+
+    `state` ASCII igual ao cookie tem de atravessar o portão e morrer só
+    depois, no token exchange. Nesta suíte as vars do Google estão ausentes de
+    `os.environ`, então quem mata o exchange é o `_required_env`
+    (`get_client_id()`, antes do bloco `httpx`) e o `httpx` nem é tocado; a
+    fixture autouse `_block_outbound_network` (`tests/conftest.py`), que
+    mockeia `httpx.AsyncClient.request`, é a segunda barreira, para o ambiente
+    onde as vars existirem. Medido nos dois mundos, verde nos dois.
+    O que se afirma é o negativo: a mensagem NÃO é a de state expirado.
+    """
+    client = TestClient(dashboard.app)
+    client.cookies.set(dashboard.GOOGLE_OAUTH_STATE_COOKIE, "state-ascii-do-cookie")
+
+    response = client.get(
+        "/auth/google/callback?code=qualquer&state=state-ascii-do-cookie",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert _google_error(response) != _ERRO_DE_STATE

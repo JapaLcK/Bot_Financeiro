@@ -805,8 +805,8 @@ def _is_pigbank_app(request: Request) -> bool:
 
 def signup_source_from_request(request: Request, *, google: bool = False) -> str:
     """Origem do cadastro, gravada em auth_accounts.signup_source. Distingue web
-    de app iOS (mesmo UA que isenta o gate da /precos) pra o painel de admin
-    separar quem passou pela escolha de plano de quem entrou pelo acesso base.
+    de app iOS pro painel de admin, e SÓ isso: nenhum gate isenta o app nem lê
+    esta coluna (política em plan_service.needs_plan_selection).
 
       web | app | google | google_app"""
     in_app = _is_pigbank_app(request)

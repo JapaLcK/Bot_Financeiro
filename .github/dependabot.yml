@@ -24,6 +24,67 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # O `pydantic` prende o `pydantic-core` numa versão EXATA (não num piso).
+    # Subir o core sozinho dá `ResolutionImpossible` — aconteceu no #301 e no
+    # #342. Ele só deve andar junto com o `pydantic`, que o arrasta.
+    ignore:
+      - dependency-name: "pydantic_core"
+
+  # Dependências npm da raiz (tooling de teste/lint do frontend: Playwright, ESLint).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # `eslint` e `@eslint/js` são versionados EM PAR: um em 10 com o outro
+      # em 9 não instala (#335/#337 morreram no `npm ci`). Salto maior não cai
+      # no grupo de minor/patch, então precisa de grupo próprio.
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+
+  # Dependências npm do app iOS (casca Capacitor). São poucas e diretas, mas a
+  # cadeia de build é o que assina o binário — CVE aqui é supply-chain de release.
+  - package-ecosystem: "npm"
+    directory: "/mobile"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      mobile-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # As peças do Capacitor sobem JUNTAS: `ios`, `core`, `cli`, `app` e
+      # `push-notifications` são o mesmo framework, e uma sozinha deixa o app
+      # iOS com versões misturadas (#336, #338-#341).
+      capacitor:
+        patterns:
+          - "@capacitor/*"
 
   # Actions usadas nos workflows (.github/workflows)
   - package-ecosystem: "github-actions"
@@ -33,7 +94,6 @@ updates:
       day: "monday"
     cooldown:
       default-days: 7
-      semver-major-days: 14
     labels:
       - "dependencies"
     commit-message:

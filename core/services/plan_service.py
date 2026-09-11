@@ -28,6 +28,7 @@ from utils_date import day_tz
 
 from db import get_auth_user
 
+from .billing_dunning import carencia_aberta
 from .plan_limits import (
     PlanLimits,
     PlanLimitExceeded,
@@ -45,7 +46,35 @@ _STORED_PLAN_TO_TIER = {
     "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
 }
 
+# O INVERSO do de cima, restrito ao que se VENDE: tier público que o cliente
+# escolhe na /precos → valor legado que a coluna guarda. Não é derivado de
+# `_STORED_PLAN_TO_TIER` porque aquele não é injetor ('pro' e 'plus' dão o mesmo
+# tier); quem ata os dois é `test_vocabulario_de_plano.py`, ida e volta.
+# `free` fica de fora de propósito: não é venda, e `PRECOS_ANUAIS_CENTS` não o tem.
+TIER_TO_STORED_PLAN = {
+    "essencial": "essencial",
+    "plus": "pro",       # legado: o tier Plus grava 'pro'
+    "pro": "pro_max",    # legado: o tier Pro grava 'pro_max'
+}
+
+
 TRIAL_DAYS_DEFAULT = 15
+
+
+def tier_publico(plan_stored: str) -> str:
+    """Valor legado da coluna → o tier PÚBLICO, sem tocar no banco.
+
+    O irmão sem-banco de `get_plan_tier`, para quem já tem a string na mão e não
+    o `user_id`: as respostas HTTP do Pix (checkout, poll e o 409), o `plan` do
+    `purchase` do GA4 e o `/billing/subscription`. Mora aqui porque quem é dono
+    do vocabulário é `_STORED_PLAN_TO_TIER` — outra cópia do
+    `{"pro": "plus", "pro_max": "pro"}` é o §0.7 ao contrário.
+
+    Desconhecido volta como veio: numa resposta de venda, apagar o plano é pior
+    que devolver um nome estranho. Era o comportamento do `_plan_publico` do
+    monólito, a cópia local que esta função substituiu.
+    """
+    return _STORED_PLAN_TO_TIER.get(plan_stored, plan_stored)
 
 
 def plans_v2_enabled() -> bool:
@@ -76,6 +105,79 @@ def _paid_plan_active(user: dict) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at > datetime.now(timezone.utc)
+
+
+def _tem_plano_pago_vigente(user: dict | None) -> bool:
+    """A conta tem DIREITO pago vigente — o par (`plan`, `plan_expires_at`)?
+
+    EXTRAÍDA, não criada (§0.1): o par `_STORED_PLAN_TO_TIER` +
+    `_paid_plan_active` já estava escrito inline em `get_plan_tier` e em
+    `needs_plan_selection`, e os dois passaram a chamar daqui — não há um
+    terceiro lugar guardando a mesma regra.
+
+    **`plan_expires_at` NULL é VITALÍCIO e devolve True** (grandfathered), que é
+    o que `_paid_plan_active` já dizia. Quem reescrever isto como
+    `plan_expires_at > now()` sem essa perna trata todo grandfathered como
+    expirado — e num aviso de corte por e-mail isso é a base inteira dos
+    vitalícios recebendo "seu acesso acaba".
+    """
+    if not user:
+        return False
+    tier = _STORED_PLAN_TO_TIER.get((user.get("plan") or "").lower(), "free")
+    return tier != "free" and _paid_plan_active(user)
+
+
+def tem_direito_hoje(user: dict | None) -> bool:
+    """Esta conta tem direito de uso HOJE: plano pago vigente OU carência aberta.
+
+    **A direção do OR é o desenho.** A AUTORIDADE é o direito
+    (`plan`/`plan_expires_at`, que já são a projeção de `plan_grants`); o
+    relógio de inadimplência entra só do lado direito, e só CONCEDE tempo extra
+    a quem já perdeu o direito. Invertida, ela faria o status de cobrança
+    bloquear cliente pagante durante um ciclo de retentativa — as células 18,
+    29 e 30 de `docs/dunning_estados_eventos.md` ficam fora deste trabalho
+    justamente por causa dessa direção.
+
+    `user is None` (conta só-WhatsApp, sem linha em `auth_accounts`) é False.
+    **DECISÃO REGISTRADA DO DONO, não constatação técnica** — e a versão
+    anterior desta docstring dizia "não há para onde mandar aviso", que é
+    FALSO e escondia a decisão:
+
+      • quem usa o bot só pelo WhatsApp e nunca fez cadastro web não tem linha
+        em `auth_accounts` e tem o produto COMPLETO hoje: `has_app_access`
+        devolve True incondicional com o v2 ligado, e o gate do bot só exige
+        plano quando a linha existe (`core/handle_incoming._paywall_gate`:
+        `sem_plano = estado is not None and ...`, com
+        `db.reports.get_plan_gate_state` devolvendo None sem cadastro web). O
+        comentário de lá chama essa população de "a maioria aqui";
+      • ela NÃO entra na varredura do aviso, que é sobre `auth_accounts`, e
+        PERDE acesso no corte, porque este predicado devolve False;
+      • **existe** canal para alcançá-la — o WhatsApp, o canal principal do
+        produto. O que falta é template aprovado na Meta, e submeter um tem
+        prazo de aprovação;
+      • **o dono decidiu, explicitamente, cortar essa população sem aviso
+        prévio.** A comunicação dela passa a ser a mensagem de bloqueio do
+        próprio bot, que é do PR A.
+
+    Logo, a garantia deste PR é **"ninguém com cadastro web e e-mail é cortado
+    sem aviso"** — não "ninguém é cortado sem aviso".
+
+    **REQUISITO PARA O PR A, que nasce dessa decisão**: se a mensagem de
+    bloqueio do bot vira a ÚNICA comunicação dessa população, ela tem de fazer
+    sentido para quem nunca viu o dashboard e não tem conta web — sem "acesse
+    seu painel", sem supor cadastro existente.
+
+    **Neste PR ela não gateia nada**: `has_app_access` continua como está (é
+    assunto do PR A). Quem a consome são `scripts/aviso_fim_do_gratis.py` e o
+    teste diferencial que compara aquela SQL com este predicado.
+    """
+    if not user:
+        return False
+    return _tem_plano_pago_vigente(user) or carencia_aberta(
+        user.get("past_due_since"),
+        user.get("last_payment_status"),
+        datetime.now(timezone.utc),
+    )
 
 
 def get_trial_status(user_id: int, user: dict | None = None) -> dict:
@@ -115,11 +217,8 @@ def get_plan_tier(user_id: int) -> str:
     user = get_auth_user(int(user_id))
     if not user:
         return "free"
-    stored = (user.get("plan") or "").lower()
-    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
-    if tier != "free" and _paid_plan_active(user):
-        return tier
-    return "free"
+    tier = _STORED_PLAN_TO_TIER.get((user.get("plan") or "").lower(), "free")
+    return tier if _tem_plano_pago_vigente(user) else "free"
 
 
 def is_pro(user_id: int) -> bool:
@@ -141,7 +240,9 @@ def is_pro(user_id: int) -> bool:
     return _paid_plan_active(user)
 
 
-# user_ids sempre liberados (admin/teste), mesmo sem assinatura.
+# user_ids liberados (admin/teste) na perna LEGADA do paywall — is_pro/paywall.
+# Com o v2 ligado ela não vale para o gate de escolha de plano:
+# needs_plan_selection não consulta esta lista (nem no bot, nem na web).
 _ACCESS_ALLOWLIST = {88648360, 832398038}
 
 
@@ -280,6 +381,19 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     Nunca trava quem já tem assinatura paga/trial vigente (escolha implícita no
     checkout) nem contas antigas (backfill em schema.py). Com o v2 desligado
     (freio de emergência) o gate fica dormente — o fluxo legado do paywall vale.
+
+    Onde vale (âncora da política — os pontos de enforcement apontam pra cá em
+    vez de repetir o texto): HTML do dashboard (`gate_plan_selection`), rotas de
+    dados (`_enforce_subscription_gate`), WebSocket
+    (`frontend/finance_bot_websocket_custom.py`, gate do `/ws`), `_post_login_url`
+    e o BOT (`core.handle_incoming._paywall_gate`).
+
+    SEM isenção por `signup_source` (`app`/`google_app` não ganham passe) nem por
+    User-Agent/header — o UA é escolhido pelo cliente, então "isentar o app" por
+    ele é o mesmo que isentar quem pedir. A diretriz 3.1.1 da App Store está
+    ADIADA: falta credencial que o servidor consiga verificar, e não existe
+    mecanismo de isenção neste repositório. O que o app suprime é só o CTA de
+    compra (`app_access === false`), nunca o gate.
     """
     if not plans_v2_enabled():
         return False
@@ -290,11 +404,7 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     if user.get("plan_selected_at"):
         return False
     # Assinante pago/trial ativo já escolheu implicitamente no checkout.
-    stored = (user.get("plan") or "").lower()
-    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
-    if tier != "free" and _paid_plan_active(user):
-        return False
-    return True
+    return not _tem_plano_pago_vigente(user)
 
 
 def get_user_limits(user_id: int) -> PlanLimits:

@@ -1,9 +1,18 @@
 # core/help_text.py
 from __future__ import annotations
 import re
-from typing import Literal, Tuple
+from typing import Literal
 
 Platform = Literal["discord", "whatsapp"]
+
+# Texto exato que faz o WhatsApp desviar pro menu interativo (wa_runtime), antes
+# do handle_incoming. Mora aqui porque é vocabulário de ajuda, não do adapter.
+# Não confundir com a isenção do gate de plano (handle_incoming): aquela pergunta
+# ao intent_classifier, então `menu` — que o classificador manda pra
+# out_of_scope — NÃO é isento lá.
+HELP_TRIGGERS: frozenset[str] = frozenset({
+    "ajuda", "help", "menu", "/ajuda", "/help", "/menu",
+})
 
 HELP_TEXT_SHORT = (
     "❓ **Não entendi esse comando.**\n"
@@ -263,7 +272,6 @@ HELP_ALIASES: dict[str, str] = {
     "lancamentos": "launches",
     "gastos": "launches",
     "despesas": "launches",
-    "extrato": "launches",
     "historico": "launches",
     "histórico": "launches",
     "limite": "credit",
@@ -298,7 +306,9 @@ _SECTION_ALIASES = {
     "invest": {"invest", "investimentos", "investimento"},
     "cdi": {"cdi"},
     "dashboard": {"dashboard", "painel", "sheets", "planilha", "exportar"},
-    "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas", "extrato"},
+    # "extrato" é do `ofx` (importação), não daqui — o usuário que pede "ajuda
+    # extrato" quer importar o arquivo do banco.
+    "launches": {"lancamentos", "lançamentos", "historico", "histórico", "gastos", "despesas"},
     "confirm": {"confirm", "confirmacoes", "confirmações", "sim", "nao", "não"},
     "credit": {"cartao", "cartoes", "cartão", "cartões", "credito", "crédito", "fatura", "faturas", "parcel", "parcelamento", "parcelas", "limite", "limites"},
     "categories": {"categoria", "categorias", "regras", "regra", "linkar", "aprender", "palavras", "palavra-chave", "palavras-chave"},

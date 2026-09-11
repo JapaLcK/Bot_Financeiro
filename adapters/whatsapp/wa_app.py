@@ -22,6 +22,7 @@ from core.reports.reports_daily import (
     build_weekly_report_summary,
     build_monthly_report_summary,
 )
+from core.secure_compare import constant_time_eq
 from db import (
     claim_daily_report_send,
     claim_weekly_report_send,
@@ -223,7 +224,8 @@ async def wa_verify(request: Request):
         )
         return PlainTextResponse("forbidden", status_code=403)
 
-    if mode == "subscribe" and token == VERIFY_TOKEN and challenge:
+    # `token` vem da query (pode ser None): a guarda antes do compare fica.
+    if mode == "subscribe" and token and constant_time_eq(token, VERIFY_TOKEN) and challenge:
         log_system_event_sync(
             "info",
             "whatsapp_webhook_verified",
@@ -254,7 +256,36 @@ async def wa_webhook(request: Request):
         )
         return PlainTextResponse("forbidden", status_code=403)
 
-    payload = json.loads(raw.decode("utf-8"))
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        # 200, e não 400. O HMAC já passou, então estes bytes são exatamente os
+        # que o dono do APP_SECRET assinou: corpo ilegível não tem nada a perder,
+        # e 200 e 400 quebram igualmente o laço de 500. O 200 vence porque é o
+        # que o resto deste handler já faz com payload que não entende — tanto o
+        # `except` do resumo quanto o ramo sem `messages`/`statuses` seguem em
+        # 200. HIPÓTESE NÃO CONFIRMADA (ninguém checou contra a Meta): que ela
+        # reenvie em não-2xx. A decisão acima não depende dela; se a hipótese
+        # cair, isto continua 200.
+        # ponytail: `except Exception` largo em vez da tupla das 4 classes
+        # medidas (JSONDecodeError, UnicodeDecodeError, RecursionError e o
+        # ValueError do limite de 4300 dígitos do int). Teto medido: engole
+        # também MemoryError — aceito, porque exige o APP_SECRET e descartar em
+        # 200 é melhor que o laço de 500 — e engoliria qualquer exceção futura
+        # vinda de dentro do `try`. Upgrade: trocar pela tupla explícita quando
+        # entrar mais alguma coisa no `try`.
+        logger.warning("WA webhook: corpo ilegivel, ignorado (%s bytes)", len(raw))
+        log_system_event_sync(
+            "warning",
+            "whatsapp_webhook_corpo_invalido",
+            "Webhook do WhatsApp com corpo que nao parseia; ignorado.",
+            source="wa_app",
+            # só inteiro e nome de classe: nada do corpo no jsonb. Sem o `erro`,
+            # o painel perde o diagnóstico que o traceback do 500 dava.
+            details={"bytes": len(raw), "erro": type(e).__name__},
+        )
+        return JSONResponse({"ok": True, "ignored": True})
+
     try:
         value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         statuses = value.get("statuses") or []

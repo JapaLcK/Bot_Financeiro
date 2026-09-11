@@ -953,7 +953,6 @@ function _renderCardItem(c, idx = 0) {
           <div class="row"><span class="label">Melhor dia</span><span class="val">${_bestPurchaseDay(c.closing_day)}</span></div>
           <div class="row"><span class="label">Fecha em</span><span class="val">${c.closing_day ? "dia " + c.closing_day : "—"}</span></div>
           <div class="row"><span class="label">Vence em</span><span class="val">${c.due_day ? "dia " + c.due_day : "—"}</span></div>
-          <div class="row"><span class="label">Próxima fatura</span><span class="val cc-money">${_fmtBRL(c.next_bill?.total || 0)}</span></div>
         </div>
         ${lim != null ? `
           <div class="bar-body" style="margin-top:12px">
@@ -7540,7 +7539,7 @@ function setStatus(s) {
 // o que essa saída exige já foi executado aqui. Uma fonte só, usada pelo boot
 // e pela revalidação disparada por reconexões rejeitadas.
 function applyAccessVerdict(me) {
-  if (me && me.needs_plan_selection && !window.PB_IN_APP) {
+  if (me && me.needs_plan_selection) {
     clearSessionSnapshots();  // veredito negativo: reload não repinta saldo
     stopWsRetries();
     window.location.replace("/precos?escolha=1");
@@ -10870,8 +10869,9 @@ function _showAccessError(title, msg) {
         }
         // Gate de escolha de plano: cadastro novo passa pela /precos e assina um
         // plano pago antes de acessar o app (o Grátis não é mais uma escolha
-        // oferecida na /precos). Só na web — no app iOS o gate fica de fora pra
-        // não forçar a tela de planos/compra (diretriz 3.1.1).
+        // oferecida na /precos). Vale também no app iOS — a política (e por que
+        // não há isenção por app) mora na docstring de
+        // plan_service.needs_plan_selection.
         // Paywall/escolha de plano: mesmo veredito da revalidação por WS
         // rejeitado (applyAccessVerdict já limpa snapshot e para o retry).
         if (!applyAccessVerdict(me)) return false;

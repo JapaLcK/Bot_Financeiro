@@ -145,6 +145,45 @@ emergência e colapsa no binário legado). **A fonte de verdade é
 `core/services/plan_service.py`** — não duplique a tabela de tiers, limites ou nomes
 em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.py`.
 
+**Inadimplência de cartão** (`core/services/billing_dunning.py`): a coluna
+`auth_accounts.past_due_since` guarda a **primeira falha de cobrança do ciclo**,
+carimbada pelo webhook `invoice.payment_failed` (`db.dunning.claim_past_due_since`,
+idempotente no SQL **e condicionada ao status atual**) e zerada por
+pagamento/cancelamento (`clear_past_due_since`, que os ramos `checkout` e
+`invoice.paid` só chamam quando `_materializar_assinatura` disse que o evento
+decidiu o acesso). Os três helpers moram em `db/dunning.py`, não em `db/plans.py`.
+`DUNNING_GRACE_DAYS = 7` é a carência.
+
+**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna
+alimenta **três** coisas: o **lembrete de pagamento do 6º dia**
+(`core/services/payment_reminder.py`, no tick de `engagement_scheduler`; e-mail
+sempre, WhatsApp só se `WA_TEMPLATE_PAYMENT_REMINDER` apontar para um template
+aprovado na Meta — vazio por padrão → caminho dormente), a janela de dedupe do
+e-mail de falha no webhook e o predicado `carencia_aberta`, lado DIREITO do OR
+de `plan_service.tem_direito_hoje` (o relógio só CONCEDE tempo; a autoridade é
+o direito pago), consumido pelo aviso de corte
+(`scripts/aviso_fim_do_gratis.py`). O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
+(**default off**, lida a cada tick, sem redeploy; a guarda é a 1ª linha de
+`check_payment_reminder`, então desligada nem consulta o funil). Grant
+`pix`/`admin` vigente pula o lembrete (`legacy` não). Nenhuma copy deste caminho
+pode prometer pausa ou perda de acesso.
+
+**A INVARIANTE**: `past_due_since` não nulo só existe em conta com
+`last_payment_status` em `PAST_DUE_PAYMENT_STATUSES`. Ela é mantida na ESCRITA,
+e os dois writers da coluna de status são `db_support.set_payment_status_impl` e
+o SQL cru de `core/admin_dashboard.set_account_plan` — mexeu num, leia o outro.
+
+**A máquina inteira está enumerada em `docs/dunning_estados_eventos.md`**:
+estados (o par relógio × status) × eventos (os quatro webhooks de cobrança, o
+`recompute_entitlement`, o `set_account_plan` e o tick do lembrete) × validade
+do evento (novo / reentrega / velho), com o que cada célula faz hoje, o que
+deveria fazer, e as células deixadas abertas de propósito. **Leia antes de
+tocar em qualquer writer do relógio** — o subsistema levou VÁRIAS rodadas de
+revisão porque cada conserto foi feito como transição isolada, e a tabela existe
+para a próxima não repetir o método (raiz §4, registro do PR #60). Quais rodadas
+apontaram o quê está na coluna "quem achou" da tabela do fim daquele arquivo; a
+contagem não vive aqui de propósito, porque ela sobe a cada rodada (§2).
+
 ### Open Finance
 
 Via **Pluggy**. Endpoints em `frontend/routes/open_finance.py`
@@ -211,8 +250,13 @@ por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_du
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
 investimento, Open Finance (abaixo), cobrança de recorrentes, agendadores de
-engajamento e de IA proativa, retenção de eventos de login. Em teste e no
-`dashboard_dev.py` ficam desligadas.
+engajamento e de IA proativa, retenção de eventos de login, poda das tabelas de
+refresh token / challenge de MFA / cadastro Google pendente
+(`core/services/table_cleanup.py`). Ficam desligadas só onde
+`RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
+`scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
+teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
+`"1"` de propósito, para ver a tarefa subir.
 
 O Open Finance tem **três** trabalhos, não dois: expiração de trial
 (`_open_finance_trial_expiry`), refresh proativo e **job de saúde** — os dois últimos no
@@ -316,7 +360,9 @@ Grupos: `DATABASE_URL`/`DB_POOL_*` · `JWT_SECRET`/`DASHBOARD_*` ·
 `PII_ENCRYPTION_KEY`/`PII_HASH_PEPPER`/`PII_AUDIT_DISABLED` · `MFA_ENCRYPTION_KEY` ·
 `WA_*` · `DISCORD_BOT_TOKEN` · `OPENAI_*`/`AI_*`/`AGENTS_*` · `STRIPE_*`/`PLANS_V2_ENABLED` ·
 `PLUGGY_*`/`OF_*` · `RESEND_API_KEY`/`EMAIL_FROM*` · `APNS_*` · `ADMIN_DASHBOARD_*` ·
-`META_PIXEL_ID` · `RUN_BACKGROUND_TASKS`/`SKIP_INIT_DB`/`ENABLE_DEV_ENDPOINTS`.
+`META_PIXEL_ID` · `RUN_BACKGROUND_TASKS`/`SKIP_INIT_DB`/`ENABLE_DEV_ENDPOINTS` ·
+`ACCOUNT_DELETION_JOB_LIMIT`/`TABLE_CLEANUP_INTERVAL_HOURS` (os dois kill switches
+de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
 
 ---
 

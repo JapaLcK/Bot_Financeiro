@@ -206,7 +206,7 @@ class PiiAccessContext:
     """Contexto registrado a cada decrypt_pii. Vai pra pii_access_log."""
     purpose: str          # 'login', 'send_email', 'render_admin', 'bot_message', etc
     actor: str            # 'system', 'admin:lucas', 'user:88648360', 'webhook:stripe'
-    subject_user_id: int  # de QUEM são os dados que estão sendo decifrados
+    subject_user_id: int | None  # de quem são os dados; None = ainda desconhecido
     field: str = "?"      # 'email', 'phone', 'discord_id', 'name', etc
     endpoint: str | None = None
     extra: dict | None = None
@@ -285,7 +285,7 @@ def _ctx_to_row(ctx: PiiAccessContext) -> tuple:
     return (
         (ctx.purpose or "?")[:120],
         (ctx.actor or "?")[:160],
-        int(ctx.subject_user_id),
+        int(ctx.subject_user_id) if ctx.subject_user_id else None,
         (ctx.field or "?")[:60],
         (ctx.endpoint or None) and ctx.endpoint[:200],
         Jsonb(ctx.extra) if ctx.extra else None,

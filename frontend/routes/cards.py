@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from core.observability import _log_falha
 from db import create_card
+from db.cards import MAX_CARD_NAME_LEN
 from frontend.routes import shared
 
 router = APIRouter()
@@ -48,8 +49,8 @@ async def create_card_route(request: Request, user_id: int, payload: CardCreateP
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Nome do cartão é obrigatório.")
-    if len(name) > 80:
-        raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+    if len(name) > MAX_CARD_NAME_LEN:
+        raise HTTPException(status_code=400, detail=f"Nome muito longo (máx. {MAX_CARD_NAME_LEN} caracteres).")
     if not (1 <= payload.closing_day <= 31):
         raise HTTPException(status_code=400, detail="Dia de fechamento deve estar entre 1 e 31.")
     if not (1 <= payload.due_day <= 31):
@@ -198,7 +199,6 @@ async def cards_summary_route(request: Request, user_id: int):
                     "due_amount": float(r["open_due"] or 0),
                     "period_end": r["open_period_end"].isoformat() if r.get("open_period_end") else None,
                 },
-                "next_bill": {"total": 0.0, "period_end": None},  # TODO Sprint 2: calcular se necessário
                 "credit_used": usage,
                 "credit_available": available,
             })
@@ -239,8 +239,8 @@ async def update_card_route(request: Request, user_id: int, card_id: int, payloa
         n = (payload.name or "").strip()
         if not n:
             raise HTTPException(status_code=400, detail="Nome do cartão é obrigatório.")
-        if len(n) > 80:
-            raise HTTPException(status_code=400, detail="Nome muito longo (máx. 80 caracteres).")
+        if len(n) > MAX_CARD_NAME_LEN:
+            raise HTTPException(status_code=400, detail=f"Nome muito longo (máx. {MAX_CARD_NAME_LEN} caracteres).")
     if payload.closing_day is not None and not (1 <= payload.closing_day <= 31):
         raise HTTPException(status_code=400, detail="Dia de fechamento deve estar entre 1 e 31.")
     if payload.due_day is not None and not (1 <= payload.due_day <= 31):

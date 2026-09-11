@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 from utils_text import (
     normalize_text,
@@ -19,8 +18,6 @@ from utils_text import (
     MEMORY_STOP_TOKENS,
 )
 from db import (
-    get_memorized_category,
-    get_memorized_rule,
     get_memorized_rules,
     upsert_category_rule,
     list_custom_categories_com_data,
@@ -189,17 +186,10 @@ def reconciliar_regras_com_categoria(user_id: int, nome_categoria: str) -> int:
 
 # Tickers brasileiros (B3): 4 letras + 1 ou 2 dígitos.
 # Pega ações ON/PN (PETR3, VALE3, ITUB4), units (SANB11) e FIIs/ETFs
-# (MXRF11, HGLG11, BOVA11, IVVB11). Em MAIÚSCULAS aceita sem contexto;
-# em minúsculas (wege3, mxrf11) exige palavra-chave de operação financeira
-# na mesma frase pra evitar falsos positivos como "casa12 brinquedos".
+# (MXRF11, HGLG11, BOVA11, IVVB11). SÓ em MAIÚSCULAS: em minúsculas
+# (wege3, capa15) não bate, pra evitar falso positivo como
+# "comprei capa15 brinquedo" — nesse caso quem decide é o GPT.
 _BR_TICKER_UPPER_RE = re.compile(r"\b[A-Z]{4}\d{1,2}\b")
-_BR_TICKER_ANY_RE   = re.compile(r"\b[A-Za-z]{4}\d{1,2}\b")
-_INVEST_CONTEXT_RE  = re.compile(
-    r"\b(comprei|comprou|vendi|vendeu|aporte|aportei|investi|investir|"
-    r"aplique[ei]|aplicacao|aplicação|cotas?|dividendos?|proventos?|"
-    r"acoes|ações|acao|ação|fiis?|ticker|cot)\b",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)

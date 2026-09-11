@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import secrets
 import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -20,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from slowapi.util import get_remote_address
+from starlette.requests import ClientDisconnect
 
 from config.env import load_app_env
 
@@ -29,6 +29,8 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
+from core.pg_text import limpa_para_pg
+from core.secure_compare import constant_time_eq
 
 
 load_app_env()
@@ -155,7 +157,16 @@ async def log_auth_login_event(
     failure_reason: str | None = None,
 ):
     try:
-        normalized_email = (email or "").strip().lower() or None
+        # Mesmo mecanismo do `log_system_event` 50 linhas abaixo (issue #357):
+        # NUL/surrogate em QUALQUER campo `text` recusa o INSERT inteiro e o
+        # `except` no fim engole — a linha de auditoria some sem 500 e sem
+        # rastro. Aqui é pior: `auth_login_events` é a trilha de tentativa de
+        # login, e o vetor vivo é o `email` do corpo JSON de `/auth/login`
+        # (`LoginBody.email` é `str` puro, sem `EmailStr`).
+        # O e-mail é saneado ANTES de cifrar, senão a coluna clara e a
+        # `email_enc` guardariam valores diferentes — e `encrypt_pii` faz
+        # `.encode("utf-8")`, que estoura com surrogate solitário.
+        normalized_email = limpa_para_pg((email or "").strip().lower()) or None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -166,7 +177,8 @@ async def log_auth_login_event(
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (user_id, normalized_email, encrypt_pii_optional(normalized_email),
-                     success, ip_address, user_agent, failure_reason),
+                     success, limpa_para_pg(ip_address), limpa_para_pg(user_agent),
+                     limpa_para_pg(failure_reason)),
                 )
             await conn.commit()
         # A09 — spike de falha de login: agenda a detecção FORA desta transação
@@ -200,7 +212,9 @@ async def log_system_event(
                     INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (level, event_type, message[:1000], source, user_id, Jsonb(details or {})),
+                    (limpa_para_pg(level), limpa_para_pg(event_type),
+                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(details or {}))),
                 )
             await conn.commit()
     except Exception as exc:
@@ -248,8 +262,8 @@ def _check_admin_password(password: str) -> bool:
             return False
     if not ADMIN_DASHBOARD_PASSWORD:
         return False
-    # compare_digest pra evitar timing leak no fallback plaintext.
-    return secrets.compare_digest(password, ADMIN_DASHBOARD_PASSWORD)
+    # Tempo constante pra evitar timing leak no fallback plaintext.
+    return constant_time_eq(password, ADMIN_DASHBOARD_PASSWORD)
 
 
 def _make_admin_jwt(username: str, jwt_secret: str) -> str:
@@ -366,6 +380,22 @@ def _decrypt_admin_row(row: dict, admin_user: str, purpose: str) -> dict:
     row.pop("phone_enc", None)
     row.pop("display_name_enc", None)
     return row
+
+
+async def _json_object_body(request: Request) -> dict:
+    """Corpo JSON de topo objeto. Parse falho, lista, escalar ou null → 400.
+
+    `await request.json()` aceita qualquer JSON válido (`[1,2,3]`, `"abc"`,
+    `42`, `null`, `true`), e o `payload.get(...)` seguinte levantava
+    AttributeError → 500 com stack trace (issue #310).
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+    return payload
 
 
 async def fetch_admin_overview(days: int = 30, admin_user: str = "admin") -> dict[str, Any]:
@@ -806,8 +836,18 @@ _USER_STATUSES = ("paying", "trial", "past_due", "canceled", "granted", "free")
 # db_support.set_payment_status) que ainda descrevem uma assinatura VIVA lá:
 # 'unpaid' é dunning e 'incomplete' é 3DS pendente — não são terminais. Os
 # terminais são 'canceled' e 'incomplete_expired'. Uma lista só porque a mesma
-# regra decide o rótulo do painel e o gate de /trial-reset (§0.7).
-_PAST_DUE_PAYMENT_STATUSES = ("past_due", "unpaid", "incomplete")
+# regra decide o rótulo do painel, o gate de /trial-reset e a mecânica de
+# cobrança por inadimplência (§0.7).
+#
+# A lista MUDOU DE CASA para core/services/billing_dunning: este módulo importa
+# fastapi/bcrypt/jwt/slowapi e é caro de importar, caro demais para módulo que
+# entra no caminho de cobrança e do bot. Meça antes de reusar o argumento:
+# `python3 -X importtime -c "import core.admin_dashboard" 2>&1 | tail -1`.
+# O espelho SQL em _ACCOUNT_STATUS_SQL abaixo continua com a lista literal, como
+# sempre — o teste de paridade de tests/test_admin_users_panel.py compara os dois.
+from core.services.billing_dunning import (  # noqa: E402
+    PAST_DUE_PAYMENT_STATUSES as _PAST_DUE_PAYMENT_STATUSES,
+)
 _LIVE_PAYMENT_STATUSES = frozenset({"trialing", "active", *_PAST_DUE_PAYMENT_STATUSES})
 
 
@@ -1365,6 +1405,25 @@ def set_account_plan(
                                     in ('canceled', 'incomplete_expired', 'unpaid')
                            then 'inactive'
                            else last_payment_status
+                       end,
+                       -- A INVARIANTE do relógio de inadimplência, no MESMO
+                       -- UPDATE (leia db_support.set_payment_status_impl): este
+                       -- statement é o único writer de last_payment_status em
+                       -- Python fora dela, e o CASE acima tira 'unpaid' — que
+                       -- está em PAST_DUE_PAYMENT_STATUSES — da lista. Sem esta
+                       -- linha sobrava relógio órfão (medido: past_due_since
+                       -- preenchido com status 'inactive'), e órfão prende o
+                       -- relógio do ciclo seguinte na data velha, tirando a
+                       -- conta da janela do lembrete de pagamento.
+                       -- O predicado é o MESMO do CASE acima de propósito: as
+                       -- duas colunas descrevem a mesma transição, e todo
+                       -- `set` de um UPDATE lê os valores ANTIGOS da linha.
+                       past_due_since = case
+                           when %(plan)s::text <> 'free'
+                                and lower(coalesce(last_payment_status, ''))
+                                    in ('canceled', 'incomplete_expired', 'unpaid')
+                           then null
+                           else past_due_since
                        end
                  where {where}
                 returning user_id, email, plan, plan_expires_at, last_payment_status
@@ -1510,6 +1569,15 @@ async def admin_error_logging_middleware(request: Request, call_next):
         return await call_next(request)
     except HTTPException:
         raise
+    except ClientDisconnect:
+        # Cliente sumiu antes de mandar o corpo (rede móvel caindo no meio de um
+        # upload). Não é erro do servidor: 499 e NENHUM evento — o uvicorn já
+        # descartou a resposta (`if self.disconnected: return` em
+        # RequestResponseCycle.send), e gravar poluiria o feed de erro do painel
+        # com um evento por cliente que some. O `except` carrega 100% do
+        # diagnóstico: a mensagem é sempre a mesma constante.
+        _admin_log.info("client disconnect: %s %s", request.method, request.url.path)
+        return Response(status_code=499)
     except Exception as exc:
         import traceback
         tb_str = traceback.format_exc()
@@ -1580,10 +1648,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         if not admin_enabled():
             raise HTTPException(status_code=503, detail="Painel admin não configurado.")
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         username = str(payload.get("username") or "").strip()
         password = str(payload.get("password") or "")
@@ -1757,16 +1822,14 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         hora; o que já existe acima do teto do plano novo (bancos de Open
         Finance, agentes) cai na varredura de downgrade, que roda a cada 6h.
         """
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         months = payload.get("months")
         try:
             months = 12 if months is None else int(months)
-        except (TypeError, ValueError):
+        # OverflowError: json.loads aceita `Infinity`/`-Infinity`/`1e400` e devolve
+        # float('inf'), e int(inf) NÃO levanta TypeError nem ValueError — era 500.
+        # (`NaN` levanta ValueError, e por isso já caía aqui.)
+        except (TypeError, ValueError, OverflowError):
             raise HTTPException(status_code=422, detail="months inválido.")
         try:
             row = await asyncio.to_thread(
@@ -1989,10 +2052,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         from db import find_user_id_by_email
         from db.affiliates import DEFAULT_COMMISSION_BPS, create_affiliate
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
 
         email = str(payload.get("email") or "").strip()
         if not email:
@@ -2002,7 +2062,18 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             raise HTTPException(status_code=404, detail="Nenhuma conta com esse email.")
 
         code = (payload.get("code") or None)
-        bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        # `code` não-string chegava em _normalize_code (db/affiliates.py), que faz
+        # .strip() → AttributeError → 500. O `except ValueError` abaixo não pega.
+        if code is not None and not isinstance(code, str):
+            raise HTTPException(status_code=422, detail="code inválido.")
+        # int() FORA do try dava 500: 'abc'/NaN → ValueError, [10]/{'a':1}/null →
+        # TypeError, Infinity/1e400 → OverflowError. São as TRÊS que int() levanta
+        # sobre valor vindo de json.loads, e o try abaixo só embrulha o
+        # create_affiliate e só pega ValueError. Mesmo tratamento do `months`.
+        try:
+            bps = int(payload.get("commission_bps") or DEFAULT_COMMISSION_BPS)
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status_code=422, detail="commission_bps inválido.")
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
@@ -2029,10 +2100,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         comissão nova; o saldo já acumulado continua sacável."""
         from db.affiliates import set_affiliate_status
 
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Corpo da requisição inválido.")
+        payload = await _json_object_body(request)
         status = str(payload.get("status") or "")
         try:
             ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
@@ -2096,7 +2164,16 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(mark_payout_paid, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")
@@ -2120,7 +2197,16 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             payload = await request.json()
         except Exception:
             payload = {}
-        note = (payload.get("note") or "").strip() or None
+        if not isinstance(payload, dict):
+            payload = {}
+        # str(): `note` não-string (42, lista, objeto) quebrava o .strip() → 500.
+        # Mesmo idioma do resto do arquivo (username/plan/status), e os casos de
+        # hoje seguem idênticos: ausente/null/""/"   " → None.
+        # limpa_para_pg(): NUL e surrogate solitário na string também davam 500,
+        # aqui no `note text` de db/affiliates.py (#317). Helper compartilhado e
+        # não replace() inline porque "o que o Postgres aceita" tem de ter uma
+        # fonte só (CLAUDE.md §0.7).
+        note = limpa_para_pg(str(payload.get("note") or "")).strip() or None
         ok = await asyncio.to_thread(reject_payout, payout_id, note)
         if not ok:
             raise HTTPException(status_code=404, detail="Saque não encontrado ou já processado.")

@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
 <style>
-  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 999; backdrop-filter: blur(12px); }
+  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(23,23,26,.96); border: 1px solid rgba(255,45,142,.3); color: #fff; padding: 12px 20px; border-radius: 12px; font-size: .88rem; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 1000; backdrop-filter: blur(12px); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { border-color: rgba(255,45,45,.5); }
   .btn.loading { opacity: .7; pointer-events: none; }
@@ -68,6 +68,79 @@
      nascia 2px mais baixo que os outros três. Borda transparente iguala. */
   #plans-v2 .plan .btn-primary, .cmp-table tfoot .btn-primary { border: 1px solid transparent; }
   #plans-v2 .plan .btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+  /* ── Pix anual ─────────────────────────────────────────────────────────
+     Mora aqui, e não em arquivo próprio: é CSS de uma página só, e um .css
+     novo pediria uma segunda rota em routes/static_pages.py sem ganho (§0.2).
+     O CTA do Pix é o SEGUNDO botão do card, e os cards são flex-column com
+     `.plan .btn { margin-top:auto }` — o auto do primeiro já empurra o par
+     inteiro para o rodapé, então basta o respiro entre os dois. */
+  #plans-v2 .plan .pix-cta { margin-top: 8px; }
+
+  /* O overlay é `position: fixed`, então NÃO herda o padding de área segura do
+     body (docs/armadilhas.md, "o app é o mesmo site"): ele reserva os quatro
+     lados sozinho. A /precos é alcançável de dentro do app iOS pelo "Ver
+     planos" do paywall. */
+  .pix-ov {
+    position: fixed; inset: 0; z-index: 999; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.72); backdrop-filter: blur(4px);
+    padding: calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+             calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  }
+  /* max-height + overflow: em paisagem no celular a caixa passava da tela. */
+  .pix-box {
+    background: var(--card); border: 1px solid var(--line-2); border-radius: 18px;
+    padding: 24px; width: 100%; max-width: 400px; max-height: 100%;
+    overflow-y: auto; text-align: center;
+  }
+  .pix-box h3 { margin: 0 0 10px; font-size: 1.15rem; }
+  .pix-line { color: var(--ink-2); font-size: .86rem; line-height: 1.55; margin: 0 0 6px; }
+  /* Fundo branco: leitor de QR não lê código claro sobre fundo escuro. */
+  .pix-qr {
+    display: block; width: min(230px,100%); height: auto; aspect-ratio: 1;
+    background: #fff; border-radius: 12px; padding: 8px; margin: 14px auto 12px;
+  }
+  .pix-code {
+    width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line-2);
+    background: rgba(255,255,255,.05); color: var(--ink); font-family: var(--font);
+    font-size: .68rem; text-overflow: ellipsis;
+  }
+  /* Estado 1 do modal: o CPF/CNPJ. `text-align: left` porque a caixa é centrada
+     e rótulo de formulário centrado é o que faz uma tela de pagamento parecer
+     um pop-up. */
+  .pix-form { margin-top: 16px; text-align: left; }
+  .pix-rot { display: block; font-size: .76rem; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+  .pix-doc {
+    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line-2);
+    background: rgba(255,255,255,.05); color: var(--ink); font-family: var(--font);
+    font-size: 1rem; letter-spacing: .04em;
+  }
+  /* 16px de fonte no campo evita o zoom automático do Safari no iOS ao focar —
+     a /precos abre dentro do app. O `1rem` acima já é isso; não baixe. */
+  .pix-doc::placeholder { color: var(--ink-3); letter-spacing: normal; }
+  .pix-doc:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+  /* Mesmo par de cores do `.contact-msg.err` do site.css (§0.7): vermelho de
+     erro é um só. `:empty` some para a caixa não nascer com um buraco. */
+  .pix-erro { color: #ffb4b4; font-size: .78rem; line-height: 1.45; margin: 8px 0 0; }
+  .pix-erro:empty { display: none; }
+  /* `white-space: normal` pelo mesmo motivo do tfoot logo abaixo: `.btn` é
+     nowrap no site.css e o rótulo destes é REESCRITO em runtime. O de falha da
+     cópia ("Não consegui copiar — o código está selecionado, copie à mão")
+     vazava 60px para fora do botão e para fora do card em 390px (medido). */
+  .pix-box .btn { margin-top: 10px; white-space: normal; line-height: 1.35; }
+  .pix-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-2); }
+  .pix-ghost:hover { background: rgba(255,255,255,.06); }
+  .pix-status {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    color: var(--ink-3); font-size: .82rem; margin: 14px 0 0;
+  }
+  /* Verde só no sucesso. */
+  .pix-status.ok { color: var(--neon); }
+  @media (prefers-reduced-motion: no-preference) {
+    .pix-ov { animation: pix-in 160ms var(--ease); }
+    @keyframes pix-in { from { opacity: 0; } }
+  }
+
   /* O badge é absoluto com left:50%, então a largura disponível é metade do
      card e "Mais popular" quebrava em duas linhas. Com 4 colunas ainda quebra:
      medido 2026-09-02 em Chromium headless, o badge pede 139,5px e a metade do
@@ -603,7 +676,11 @@ function showToast(msg, type) {
   if (!el) return;
   el.textContent = msg;
   el.classList.toggle("err", type === "err");
-  el.classList.add("show");
+  // `toggle` e não `add`: showToast("") APAGA o toast, e é assim que o modal do
+  // Pix zera a mensagem anterior ao enviar. O texto já saiu na linha de cima de
+  // propósito — `remove("show")` sozinho só zera a opacidade, e o `role="status"`
+  // seguia ditando a frase velha ao leitor de tela (medido com ariaSnapshot).
+  el.classList.toggle("show", !!msg);
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => el.classList.remove("show"), 3800);
 }
@@ -635,6 +712,8 @@ function setCycle(cycle) {
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();
+  // O CTA de Pix só existe no ciclo anual (Pix é à vista, §7 do plano).
+  if (typeof pbPixRefresh === "function") pbPixRefresh();
   // Trocar de ciclo é uma impressão NOVA: outros preços na tela. Sem isto o
   // `view_item_list` do load (sempre "monthly", que é o estado inicial) seria o
   // único, e a comparação mensal × anual nunca teria o lado anual.
@@ -711,6 +790,17 @@ function refreshPlanButtons() {
     if (subState.lifetime) {
       btn.disabled = true;
       btn.textContent = "Você tem acesso vitalício";
+      btn.onclick = null;
+      return;
+    }
+    // Assinante do Pix: NÃO existe troca de plano por aqui. O /billing/change-plan
+    // recusa com `no_subscription` (não há stripe_customer_id), então oferecer
+    // "Trocar pro Pro" mandaria o clique para um erro. Quem troca é o CTA do Pix.
+    // Fora do `if` de ciclo de propósito: no MENSAL o `currentCycle !==
+    // subState.interval` faria o código abaixo voltar a oferecer a troca.
+    if (subState.gateway === "pix") {
+      btn.disabled = true;
+      btn.textContent = p === subState.plan ? "✓ Seu plano atual" : "Disponível no Pix";
       btn.onclick = null;
       return;
     }
@@ -856,10 +946,23 @@ async function cancelChange(btn) {
 })();
 
 (async function loadPlansState(){
+  let cfgPlanos = null;   // o mesmo corpo alimenta os CTAs de cartão e o de Pix
+  // Pix anual: reusa o `plans-config` e o `subscription` que esta página já
+  // buscou — nenhum fetch novo. Sem `pix_annual_available` no cfg, o pbPixInit
+  // não cria botão nenhum e a página fica igual à de hoje.
+  // Publica em `window` ANTES de chamar: os scripts do Pix podem ainda estar
+  // sendo baixados quando as requisições daqui terminam, e aí é o pix-checkout.js
+  // que lê este estado ao carregar. Sem isso o `typeof` abaixo dava falso e
+  // ninguém tentava de novo — página sem CTA de Pix com a flag ligada.
+  const publicarPix = (sub) => {
+    window.pbPixState = { cfg: cfgPlanos, sub };
+    if (typeof pbPixInit === "function") pbPixInit(cfgPlanos, sub);
+  };
   try {
     const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
     if (resp.ok) {
-      const cfg = await resp.json();
+      cfgPlanos = await resp.json();
+      const cfg = cfgPlanos;
       // Plano sem price configurado no Stripe → botão vira "Indisponível" (não
       // deixa o usuário clicar pra tomar um erro). querySelectorAll, não
       // querySelector: cada plano pago tem DOIS botões (card + rodapé da
@@ -871,9 +974,16 @@ async function cancelChange(btn) {
       if (!cfg.plus_available) markUnavailable('[data-plan-btn="plus"]');
       if (!cfg.pro_available) markUnavailable('[data-plan-btn="pro"]');
     }
+    // O CTA de Pix nasce AQUI, antes do /billing/subscription: para quem já é
+    // cliente do Stripe aquela chamada consulta o Stripe e pode demorar ou
+    // travar, e era justamente a migração cartão → Pix que ficava sem botão
+    // enquanto o Stripe está ruim. Os rótulos ("Renovar", vitalício) são
+    // corrigidos na segunda chamada, quando a assinatura chega.
+    publicarPix(null);
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     await loadSubscription();
     refreshPlanButtons();
+    publicarPix(subState);
   } catch {}
 })();
 
@@ -981,6 +1091,19 @@ function enviarViewItemList() {
 }
 enviarViewItemList();
 </script>
+  <!-- Só pelo `pigTrapTab`: o modal do QR é um instrumento ao portador e o Tab
+       tem de ficar preso dentro dele (é o mesmo helper do modal_keys.test.mjs).
+       Nada é injetado no carregamento — o CSS dos modais dele só entra no
+       primeiro alertModal/confirmModal, que esta página não usa. -->
+  <script src="/modals.js?v=1"></script>
+  <!-- Pix anual: CTA, modal do QR e poll. Scripts clássicos e SEM `defer` logo
+       depois do bloco inline — eles publicam pbPixInit/pbPixRefresh no escopo
+       global. A corrida com o loadPlansState acima não depende desta ordem: quem
+       chegar por último lê o `window.pbPixState` que o outro deixou.
+       O pix-poll.js vem ANTES: ele declara o `pixPoll` que o pix-checkout.js lê,
+       e `let` de topo de script clássico tem TDZ até o script rodar. -->
+  <script src="/pix-poll.js?v=1"></script>
+  <script src="/pix-checkout.js?v=1"></script>
   <script src="/nav-auth.js?v=7" defer></script>
 </body>
 </html>

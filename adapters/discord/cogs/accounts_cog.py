@@ -10,7 +10,6 @@ Comandos tratados:
 """
 import io
 import re
-from datetime import date
 
 import discord
 from discord.ext import commands

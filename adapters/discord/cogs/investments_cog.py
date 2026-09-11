@@ -21,7 +21,6 @@ from db import (
     investment_deposit_from_account,
     investment_withdraw_to_account,
     set_pending_action,
-    get_balance,
 )
 from utils_text import fmt_brl, fmt_rate, parse_money
 
