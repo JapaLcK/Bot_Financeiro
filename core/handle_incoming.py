@@ -23,7 +23,6 @@ from core.types import IncomingMessage, OutgoingMessage
 from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
-from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
 from core.services.open_finance import handle_open_finance_whatsapp_command
 from core.services.media_service import (
     is_audio_attachment,
@@ -739,6 +738,17 @@ def handle_incoming(msg: IncomingMessage, *,
 
                 uid = _normalize_user_id(msg)
                 db.ensure_user(uid)
+
+                # Import aqui dentro, e não no topo: `ofx_service` puxa
+                # `ofx_import` -> `ofxparse`, e `core.handle_incoming` é
+                # importado por meio repositório (adaptadores, rotas, testes).
+                # No topo, um anexo OFX — caminho raro — custava o `ofxparse`
+                # a todo mundo. Mesmo motivo do `detect_ofx_type` abaixo e do
+                # `statement_service` no bloco 1b.
+                from core.services.ofx_service import (
+                    handle_ofx_import,
+                    handle_credit_ofx_import,
+                )
 
                 # Detecta se é extrato bancário ou fatura de cartão de crédito
                 from ofx_import import detect_ofx_type
