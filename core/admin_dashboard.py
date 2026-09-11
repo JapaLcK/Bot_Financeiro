@@ -871,7 +871,7 @@ def _derive_account_status(row: dict, now: datetime) -> str:
         # 'unpaid' entra com os dois terminais, e SÓ nesta perna: é o ESTADO
         # TERMINAL que o ramo `customer.subscription.deleted` grava quando a
         # Stripe encerra por inadimplência (`cancellation_details.reason ==
-        # 'payment_failure'`), para PRESERVAR o motivo. Sem esta linha a conta
+        # 'payment_failed'`), para PRESERVAR o motivo. Sem esta linha a conta
         # apareceria como 'free' — o rótulo de quem nunca assinou — e o motivo
         # se perderia exatamente onde ele foi guardado.
         #

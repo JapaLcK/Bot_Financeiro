@@ -246,7 +246,7 @@ def test_ramo_free_do_sql_bate_com_o_python():
     Antes do corte do Grátis os dois territórios concordavam sobre todo status e
     um mapa só bastava. Hoje não: quem cai aqui com `unpaid` é a conta que a
     Stripe encerrou por inadimplência
-    (`customer.subscription.deleted` + `reason='payment_failure'`), e o rótulo
+    (`customer.subscription.deleted` + `reason='payment_failed'`), e o rótulo
     tem de ser "Cancelado" — não "Grátis", que é o de quem nunca assinou.
 
     **Este teste é UNIDIRECIONAL por construção, e o crédito da paridade não é

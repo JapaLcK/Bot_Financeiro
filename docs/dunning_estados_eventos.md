@@ -377,7 +377,7 @@ são anteriores a este PR e ficam como estão (§0.3).
 |---|---|---|---|---|
 | 16 | NOVO | S3, motivo NÃO-terminal (ou ausente/desconhecido) | `canceled` ⇒ o próprio `set_payment_status` zera o relógio; o clear é no-op | ✔ |
 | 17 | NOVO | S4, motivo NÃO-terminal | idem | ✔ |
-| 32 | NOVO | S3, `cancellation_details.reason == 'payment_failure'` | **PR A** — grava `unpaid` (PRESERVA o motivo, que `canceled` apagaria) e então `db.dunning.encerrar_ciclo_de_atraso`, INCONDICIONAL. Nesta perna o `CASE` de `set_payment_status_impl` NÃO zera (o status fica na lista): o clear é a ÚNICA coisa que tira o relógio | ✔ — evento terminal: não há cobrança a recuperar, logo não há ciclo a preservar |
+| 32 | NOVO | S3, `cancellation_details.reason == 'payment_failed'` | **PR A** — grava `unpaid` (PRESERVA o motivo, que `canceled` apagaria) e então `db.dunning.encerrar_ciclo_de_atraso`, INCONDICIONAL. Nesta perna o `CASE` de `set_payment_status_impl` NÃO zera (o status fica na lista): o clear é a ÚNICA coisa que tira o relógio | ✔ — evento terminal: não há cobrança a recuperar, logo não há ciclo a preservar |
 | 18 | REENTREGA/VELHO | S3 de OUTRA assinatura viva | **✗ ABERTA —** `plan=free` + `canceled` + relógio zerado; `revoke_grant` é recusado por versão e `recompute_entitlement` devolve o plano, mas o status fica `canceled` | não deveria — **anterior a este PR** |
 
 **O `subscription.deleted` sobrevive ao predicado**: nas três células o
