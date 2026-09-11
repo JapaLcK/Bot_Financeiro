@@ -164,34 +164,63 @@ def test_a_falha_continua_avisando_do_bloqueio_se_as_tentativas_falharem(captura
 # sobre RECURSOS. `test_o_lembrete_continua_sem_falar_em_perda_de_acesso`
 # prende a antiga, e ele é o positivo que impede o conserto de virar ameaça.
 #
-# CONTROLE DECLARADO (`docs/controles_declarados.md`) — em
-# `send_payment_reminder_email`, reponha a frase antiga no HTML::
+# CONTROLES DECLARADOS (`docs/controles_declarados.md`) — TRÊS injeções, e o que
+# prova que os quatro casos medem coisas diferentes é que os conjuntos de
+# vermelhos NÃO se repetem. Todas medidas em 2026-09-11.
+#
+# **(a) a frase antiga de volta** — no HTML de `send_payment_reminder_email`,
+# troque o parágrafo novo por::
 #
 #       Seu PigBank continua funcionando normalmente — só a cobrança está pendente.</p>
 #
-# VERMELHOS (medido 2026-09-11):
-#   `test_o_lembrete_nao_promete_funcionamento_pleno`
-#   `test_o_lembrete_diz_a_regra_dos_recursos`
+# VERMELHOS: `..._nao_promete_funcionamento_pleno`, `..._diz_a_regra_dos_recursos`,
+#            `..._continua_dizendo_que_da_pra_entrar`
 # Direção: promessa falsa de recursos, para uma população que no 6º dia já está
 # com 30 lançamentos, sem Open Finance e sem agentes.
 #
-# **Positivos do grupo**, e os DOIS ficam verdes sob essa injeção — o parágrafo
-# antigo também prometia entrar e também não falava em corte:
-#   `test_o_lembrete_continua_dizendo_que_da_pra_entrar`
-#   `test_o_lembrete_continua_sem_falar_em_perda_de_acesso`
-# O primeiro separa "parou de mentir" de "parou de falar": apagar o parágrafo
-# derruba ele e deixa o negativo VERDE. O segundo separa "parou de mentir" de
-# "passou a ameaçar", que é o outro jeito de errar aqui.
+# **(b) o "conserto" preguiçoso: apagar o parágrafo inteiro.**
+# VERMELHOS: `..._diz_a_regra_dos_recursos`, `..._continua_dizendo_que_da_pra_entrar`
+# E repare no que fica VERDE: `..._nao_promete_funcionamento_pleno`. A frase
+# sumiu, logo não promete nada — é a diferença entre "parou de mentir" e "parou
+# de falar", e sem (b) o grupo aceitaria o segundo.
+#
+# **(c) o outro jeito de errar: o conserto vira AMEAÇA.** Acrescente ao
+# parágrafo "Se a cobrança não passar, o acesso é bloqueado."
+# VERMELHO: `..._continua_sem_falar_em_perda_de_acesso` — e SÓ ele.
+# Direção: mentira na direção oposta. No 6º dia o acesso não caiu.
+#
+# **Não há um positivo do grupo inteiro, e tentar nomear um foi erro meu duas
+# vezes.** Quando a injeção troca o PARÁGRAFO, todo caso que afirme texto novo
+# cai junto — "continua entrando no PigBank" parece positivo e é vermelho em (a)
+# e em (b). O que separa os casos aqui é a TABELA acima: cada injeção tem um
+# conjunto de vermelhos próprio, e cada caso é verde em pelo menos uma delas.
+# Essa é a forma certa de declarar controle num grupo de COPY, onde a unidade
+# injetada é o parágrafo e não um predicado.
 
 
 def _partes_do_lembrete(capturado) -> list[str]:  # noqa: F811
-    """HTML **e** texto, os dois normalizados. A frase antiga vivia nos DOIS, e
-    consertar só o HTML deixaria o cliente de e-mail em texto puro lendo a
-    promessa velha — foi assim que ela sobreviveu ao conserto do irmão."""
+    """Assunto, HTML e texto, normalizados — para as asserções de AUSÊNCIA.
+
+    Inclui o assunto de propósito: uma promessa não pode reaparecer ali.
+    """
     assert es.send_payment_reminder_email("a@b.com")
-    partes = [re.sub(r"\s+", " ", p) for p in _tudo(capturado)]
-    assert any("nao passou" in p or "não passou" in p for p in partes), partes
-    return partes
+    return [re.sub(r"\s+", " ", parte) for parte in _tudo(capturado)]
+
+
+def _corpos_do_lembrete(capturado) -> list[str]:  # noqa: F811
+    """Só HTML e texto — para as asserções de PRESENÇA.
+
+    O assunto fica de fora porque ele não carrega a frase, e exigi-la dele
+    reprovaria por motivo errado (custou dois vermelhos falsos antes de esta
+    separação existir). Os DOIS corpos entram: a frase antiga vivia nos dois, e
+    consertar só o HTML deixaria quem lê em texto puro com a promessa velha.
+    """
+    partes = _partes_do_lembrete(capturado)
+    corpos = [p for p in partes if "nao passou" in p or "não passou" in p]
+    assert len(corpos) == 2, (
+        f"esperava achar a frase da falha no HTML e no texto, achei em "
+        f"{len(corpos)}: {partes}")
+    return corpos
 
 
 def test_o_lembrete_nao_promete_funcionamento_pleno(capturado):  # noqa: F811
@@ -206,7 +235,7 @@ def test_o_lembrete_nao_promete_funcionamento_pleno(capturado):  # noqa: F811
 def test_o_lembrete_diz_a_regra_dos_recursos(capturado):  # noqa: F811
     """E não a afirmação oposta. A regra não tem tempo verbal e é verdadeira
     antes e depois da virada do `plan_expires_at`."""
-    for parte in _partes_do_lembrete(capturado):
+    for parte in _corpos_do_lembrete(capturado):
         assert ("período que você já pagou" in parte
                 or "periodo que voce ja pagou" in parte), parte
         assert ("assim que a cobrança entrar" in parte
@@ -216,9 +245,8 @@ def test_o_lembrete_diz_a_regra_dos_recursos(capturado):  # noqa: F811
 def test_o_lembrete_continua_dizendo_que_da_pra_entrar(capturado):  # noqa: F811
     """POSITIVO: `has_app_access` é True no 6º dia — a carência concede. Sem
     este caso, apagar o parágrafo passaria no negativo acima."""
-    for parte in _partes_do_lembrete(capturado):
-        assert ("continua entrando no PigBank" in parte
-                or "continua entrando no PigBank" in parte.replace("Voce", "Você")), parte
+    for parte in _corpos_do_lembrete(capturado):
+        assert "continua entrando no PigBank" in parte, parte
 
 
 def test_o_lembrete_continua_sem_falar_em_perda_de_acesso(capturado):  # noqa: F811
