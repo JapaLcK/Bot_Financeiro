@@ -1039,20 +1039,61 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
             record_audit_event, dono, AuditEvent.OPEN_FINANCE_CONNECTED,
             details={"provider": "pluggy", "item_id": item_id, "origin": "webhook_adopt"},
         )
-        # Sync em tudo MENOS `UPDATING`/`CREATED` (`ITEM_UPDATING` é só esses
-        # dois): o que está barrado é o item que a Pluggy ainda está montando —
-        # em `item/created` esse é o status normal, e sincronizar ali é uma task
-        # esperando o item sair de UPDATING (`pluggy_sync`, que já faz essa
-        # espera) para achar zero conta. O `item/updated` seguinte sincroniza
-        # sozinho, e a essa altura a conexão JÁ existe, então ele entra pelo
-        # caminho comum (`len(conexoes) == 1`). É menos código rodando, não mais.
-        # Os outros status AGENDAM: `WAITING_USER_INPUT`, `WAITING_USER_ACTION`,
-        # `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um sync que provavelmente
-        # não traz nada — e isso NÃO vira estado errado na tela, porque
-        # `connection_ui_state` testa `_NEEDS_USER` antes de `no_accounts`.
-        # `_UPDATING` vem de `pluggy_health` — a fonte que o `pluggy_sync` também
-        # usa; não é uma segunda lista de status (CLAUDE.md §0.7).
-        if str(remote.get("status") or "").upper() not in ITEM_UPDATING:
+        # Pular o sync em `UPDATING`/`CREATED` (`ITEM_UPDATING` é só esses dois)
+        # só se paga quando vem OUTRO evento atrás — e isso vale de UM caminho: o
+        # `item/created` que a Pluggy acabou de emitir. Ali o status é o normal de
+        # item recém-nascido, o `item/updated` é ESPERADO logo atrás, e a essa
+        # altura a conexão JÁ existe, então ele entra pelo caminho comum
+        # (`len(conexoes) == 1`). É menos código rodando, não mais.
+        # ESPERADO, não garantido: entrega de webhook é best-effort e a Pluggy não
+        # promete o evento seguinte. Sondado: `item/created` adotado em `UPDATING`
+        # + evento seguinte perdido = card em "Atualizando…" permanente. Teto
+        # conhecido, IGUAL ao de antes deste conserto — fechá-lo é mexer na
+        # máquina de estados do `pluggy_health`, que é outro PR.
+        #
+        # ADOÇÃO RETROATIVA NÃO TEM ESSE EVENTO (defeito de produção, relato do
+        # dono): o item do `scripts/adotar_items_of_orfaos` foi abandonado dias
+        # atrás e está congelado no status daquela sessão. Sem sync agendado e sem
+        # evento nenhum a caminho, NADA lê a Pluggy por essa conexão — e o que
+        # falta é o EXTRATO: zero conta, zero transação, carteira vazia.
+        #
+        # O QUE ESTE GATE ENTREGA, MEDIDO com sync de verdade e o remoto ainda em
+        # `UPDATING` (que é o caso do dono: o `status` local só está `UPDATING`
+        # porque `_grava_reconexao` copiou o remoto, e o GET do sync um instante
+        # depois vê o mesmo):
+        #   • `/accounts` trazendo conta → sync ok, `last_sync_at` carimbado,
+        #     CONTAS E TRANSAÇÕES IMPORTADAS. É o ganho, e é imediato.
+        #   • `/accounts` vazia E `/investments` vazia → `ok=False`, `last_sync_at`
+        #     NULL, nada importado. As DUAS: o gate do sync é `not accounts and
+        #     not investments` (grep em `core/services/pluggy_sync.py`), então
+        #     conta zerada com carteira cheia — o caso corretora, que o próprio
+        #     gate comenta — ainda importa.
+        # O RÓTULO não muda em nenhum dos dois — segue "Atualizando…" —, e a versão
+        # anterior deste comentário afirmava o contrário. Por quê: `connection_ui_state`
+        # decide pelo ramo do `health` ANTES de olhar o `sem_sync`, e
+        # `health.item_status in _UPDATING` devolve `updating` independentemente do
+        # `last_sync_at` (`core/services/pluggy_health.py:498-504`). Quem tira o
+        # rótulo de lá é a passada seguinte do job de saúde (medido com
+        # `OF_HEALTH_MAX_AGE_SEC=0`: com conta → "Atualizado", sem conta → "Sem
+        # dados"), e nos defaults isso leva de 12h a 18h — 15h em média, 18h é o
+        # TOPO da faixa e não o comum (`OF_HEALTH_MAX_AGE_SEC` 12h + o tick de
+        # `OF_REFRESH_INTERVAL_SEC` 6h, que cai em qualquer ponto dessas 6h), e
+        # MAIS se houver deploy no meio. Nem as 18h são teto: o
+        # tick DORME PRIMEIRO (`_open_finance_refresh`,
+        # `frontend/finance_bot_websocket_custom.py`) e o Railway sobe container
+        # novo a cada deploy — um redeploy pouco antes da passada reinicia as 6h
+        # e empurra o rótulo para além das 18h. Ou seja: agendar o sync é
+        # NECESSÁRIO e não é SUFICIENTE para o rótulo. O "Atualizando…" eterno da
+        # tela é o outro PR; o que este fecha é o dinheiro que não entrava.
+        #
+        # Os outros status AGENDAM nos dois caminhos: `WAITING_USER_INPUT`,
+        # `WAITING_USER_ACTION`, `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um
+        # sync que provavelmente não traz nada — e isso NÃO vira estado errado na
+        # tela, porque `connection_ui_state` testa `_NEEDS_USER` antes de
+        # `no_accounts`. `_UPDATING` vem de `pluggy_health` — a fonte que o
+        # `pluggy_sync` também usa; não é uma segunda lista de status (§0.7).
+        fresco = last_event == "item/created"
+        if not fresco or str(remote.get("status") or "").upper() not in ITEM_UPDATING:
             _schedule_pluggy_sync(item_id)
     except Exception as exc:
         await log_system_event(
