@@ -1260,6 +1260,34 @@ def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = ""
     `send_payment_reminder_email` continua NÃO podendo: aquele sai no 6º dia,
     ainda DENTRO da carência de `DUNNING_GRACE_DAYS`, quando o acesso de fato
     não caiu. A diferença é de fato, não de tom.
+
+    **A frase do "enquanto isso" enuncia a REGRA, não o estado, e isso é o
+    conserto de uma promessa falsa.** Ela dizia "seu plano fica como past_due e
+    você continua usando normalmente", e isso é verdade em metade da janela só.
+    Medido 2026-09-11, conta `plus` com `last_payment_status='past_due'`:
+
+    | trecho | `has_app_access` | `get_plan_tier` | limites |
+    |---|---|---|---|
+    | período pago ainda VIGENTE | True | `plus` | cheios (`of_banks_max=2`, `agents_max=3`) |
+    | `plan_expires_at` VENCIDO, carência aberta | True | **`free`** | 30 lançamentos, `of_banks_max=0`, `agents_max=0`, histórico do mês |
+
+    O e-mail sai na hora da falha, que é a virada entre os dois trechos, e é
+    lido depois — então a frase tem de ser verdadeira NOS DOIS. Por isso ela
+    enuncia a regra ("os recursos valem até o fim do período que você já pagou"),
+    que não tem tempo verbal, em vez de afirmar um estado. Trocar "usando
+    normalmente" por "conta limitada" seria a mesma classe de erro na direção
+    oposta: falsa no primeiro trecho.
+
+    O que ela promete e continua verdadeiro nos dois: **entrar** no PigBank
+    (`has_app_access` é True até a carência estourar). O que ela parou de
+    prometer: os RECURSOS. É a mesma correção feita em
+    `billing_copy.COBRANCA_EM_ATRASO`, e a dívida dos limites está registrada em
+    `docs/dunning_estados_eventos.md` — é outro PR.
+
+    O `past_due` cru saiu junto: status técnico em inglês num e-mail de cliente.
+
+    O `text_body` NÃO repete a promessa (conferido) — ele nunca teve a frase do
+    "enquanto isso". Continua sem, porque omitir não é afirmar falso.
     """
     nome = plan_display_name(plan)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1272,8 +1300,9 @@ def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = ""
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
       </p>
-      <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso, seu plano fica como <strong>past_due</strong>
-      e você continua usando normalmente. Se as tentativas falharem, a assinatura é encerrada e
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso você continua entrando no PigBank. Os
+      recursos do {nome} valem até o fim do período que você já pagou — depois disso a conta fica limitada até a
+      cobrança entrar. Se as tentativas falharem, a assinatura é encerrada e
       <strong>o acesso ao PigBank é bloqueado</strong> — não existe mais plano Free pra onde voltar.</p>
     """
     html = _base_html("Pagamento falhou — atualize seu cartão", content)
