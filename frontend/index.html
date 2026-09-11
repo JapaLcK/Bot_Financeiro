@@ -226,7 +226,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
              dia houver o arquivo, o <track> volta e o `.vtt` volta pro
              _BRAND_MEDIA de frontend/routes/static_pages.py. -->
         <video id="vsl-video" class="vsl-video" controls playsinline
-               preload="metadata" poster="/brand/vsl-poster.jpg?v=1"
+               preload="none" poster="/brand/vsl-poster.jpg?v=1"
                src="/brand/vsl.mp4?v=1"></video>
       </div>
       <!-- É um <a href="/cadastro"> de verdade, e não um <button>: assim ele entra
@@ -809,8 +809,10 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     try { visto = localStorage.getItem(CHAVE) === "1"; } catch (e) {}
     if (visto) { liberar("memoria"); } else { travar(); }
 
-    // A porta de saída: `error` no <video> cobre os dois jeitos de o vídeo não
-    // existir pro usuário — 404 e codec que o navegador não toca.
+    // A porta de saída: depois da tentativa de reprodução, `error` no <video>
+    // cobre os dois jeitos de o vídeo não existir pro usuário — 404 e codec que
+    // o navegador não toca. Com preload="none", não há como detectar antes da
+    // interação sem voltar a transferir mídia na visita inicial.
     video.addEventListener("error", function () { liberar("erro"); });
 
     // A outra porta: o nav-auth.js reescreve o href dos CTAs quando o /auth/validate
