@@ -638,6 +638,9 @@ body.balance-hidden .account-balance {
   gap: 14px;
 }
 .notification-list { display: flex; flex-direction: column; gap: 10px; }
+/* O atributo `hidden` sozinho perde para o `display` da classe — mesma
+   declaração que .settings-section[hidden] e .email-warning[hidden] já usam. */
+.notification-list[hidden] { display: none !important; }
 .email-warning {
   display: flex;
   align-items: flex-start;
@@ -944,6 +947,12 @@ body.balance-hidden .account-balance {
 .empty-icon { font-size: 1.8rem; opacity: .45; }
 .empty-title { font-weight: 760; font-size: .88rem; color: var(--muted); }
 .empty-sub { color: var(--faint); font-size: .76rem; line-height: 1.55; max-width: 260px; }
+/* Único CTA rosa da página (a identidade pede o rosa na AÇÃO, não em toda
+   superfície): o caminho pro /precos do estado "sem plano ativo". Herda o resto
+   do .btn-sm — e as transições dele são de cor, sem movimento, então não há o
+   que desligar em prefers-reduced-motion. */
+.empty-cta { margin-top: 8px; background: var(--accent); border-color: transparent; color: #fff; text-decoration: none; }
+.empty-cta:hover { background: #e01f7d; border-color: transparent; color: #fff; }
 
 /* ─── Toast ──────────────────────────────────── */
 #toast {
@@ -1495,7 +1504,12 @@ body.balance-hidden .account-balance {
           </div>
           <div class="card-body">
             <div class="notice-grid">
-              <div class="notification-list">
+              <!-- Vazio de propósito: preenchido com SEM_PLANO_HTML quando o
+                   GET de /notifications responde 402 (conta sem plano ativo,
+                   #380). Esconder a lista em vez de trocar o innerHTML dela
+                   preserva os toggles pro repaint seguinte. -->
+              <div id="notif-sem-plano" hidden></div>
+              <div class="notification-list" id="notif-list">
                 <div class="email-warning" id="notif-email-warning" hidden>
                   <div>
                     <div class="email-warning-title">Adicione um e-mail para ativar estes avisos</div>
@@ -1838,12 +1852,23 @@ function redirectHome() {
 window.addEventListener("storage", (event) => {
   if (event.key === "finbot_logout_at") redirectHome();
 });
+// Os gates de plano levantam `{"error": "..."}` — sem `message` e sem `code`,
+// então o fallback do readApiError caía no `raw` e o toast exibia
+// `{"detail":{"error":"subscription_required"}}`. O conserto é aqui e não em cada
+// chamador: são 21 `showToast(err.message …)` nesta página, e QUALQUER ação de
+// quem foi cortado pelo #380 (conectar banco, salvar preferência) passa por um
+// deles. Os loaders que sabem em qual seção estão têm tratamento próprio abaixo
+// (SEM_PLANO_HTML) e nem chegam a mostrar toast.
+const ERRO_DE_GATE = {
+  subscription_required: "Sua conta está sem plano ativo.",
+  plan_selection_required: "Escolha um plano para continuar.",
+};
 async function readApiError(resp) {
   const raw = await resp.text();
   try {
     const detail = JSON.parse(raw).detail;
     // detail pode ser string OU objeto estruturado {code, message, ...} (ex.: limite de banco por plano)
-    if (detail && typeof detail === "object") return detail.message || detail.code || raw;
+    if (detail && typeof detail === "object") return detail.message || ERRO_DE_GATE[detail.error] || detail.code || raw;
     return detail || raw;
   } catch { return raw || "Erro inesperado"; }
 }
@@ -1851,6 +1876,34 @@ async function readApiError(resp) {
 function filenameFromDisposition(header, fallback) {
   const match = String(header || "").match(/filename="?([^"]+)"?/i);
   return match ? match[1] : fallback;
+}
+
+/* ── Seção indisponível sem plano ativo (402) ──
+   O #380 corta quem não tem plano pago vigente, e as rotas de DADOS desta página
+   respondem 402. A /settings continua abrindo de propósito — é a saída de
+   emergência (exportar os dados, excluir a conta), e as rotas que a sustentam
+   são isentas no servidor (`shared.authorize_account_access`). Nas seções que
+   NÃO são isentas o 402 não é erro, é ESTADO: copy no lugar da lista e um
+   caminho pro /precos, sem toast. Uma constante só — o mesmo bloco serve as três. */
+const SEM_PLANO_HTML = `
+  <div class="empty-state">
+    <div class="empty-icon"><i class="ph ph-lock" aria-hidden="true"></i></div>
+    <div class="empty-title">Indisponível sem plano ativo</div>
+    <div class="empty-sub">Exportar dados e excluir a conta continuam em "Meus dados".</div>
+    <a class="btn-sm empty-cta" href="/precos">Ver planos</a>
+  </div>`;
+// Variante sem CTA pros cards secundários da mesma seção: repetir o botão três
+// vezes na tela do Open Finance tira a "ação principal evidente" de qualquer um.
+const SEM_PLANO_CURTO = `
+  <div class="empty-state">
+    <div class="empty-icon"><i class="ph ph-lock" aria-hidden="true"></i></div>
+    <div class="empty-title">Indisponível sem plano ativo</div>
+  </div>`;
+function pintarSemPlano(alvoId, html = SEM_PLANO_HTML, ocultarId = null) {
+  const alvo = document.getElementById(alvoId);
+  if (alvo) { alvo.innerHTML = html; alvo.hidden = false; }
+  const ocultar = ocultarId && document.getElementById(ocultarId);
+  if (ocultar) ocultar.hidden = true;
 }
 
 /* ── Toast ───────────────────────────────────── */
@@ -2214,6 +2267,18 @@ async function loadActivityLog({ propagate = false } = {}) {
   const myGen = ++_activityGen;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/activity?limit=10`, authOptions({ headers: authHeaders() }));
+    // 402 = sem plano ativo (#380): a atividade não é isenta de propósito. Zera o
+    // cache junto — ele também alimenta o modal (openActivityModal), e deixá-lo
+    // stale mostraria eventos num painel que diz "indisponível".
+    if (resp.status === 402) {
+      if (myGen === _activityGen) {
+        _activityCache = [];
+        pintarSemPlano("activity-list");
+        const semPlanoBtn = document.getElementById("activity-show-all-btn");
+        if (semPlanoBtn) semPlanoBtn.hidden = true;
+      }
+      return;
+    }
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     if (myGen !== _activityGen) return;   // superado por um load mais novo: não pinta
@@ -2443,11 +2508,28 @@ async function loadNotificationSettings({ propagate = false } = {}) {
   const myGen = ++_notifGen;
   setNotificationControlsDisabled(true);
   let refreshErr = null;
+  let semPlano = false;
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/notifications`, authOptions({ headers: authHeaders() }));
+    // 402 = sem plano ativo (#380): as preferências não são isentas. `semPlano`
+    // existe porque o finally abaixo REABILITA os controles — reabilitar toggles
+    // que o servidor vai recusar com 402 é pior que deixá-los desligados.
+    if (resp.status === 402) {
+      if (myGen === _notifGen) {
+        semPlano = true;
+        pintarSemPlano("notif-sem-plano", SEM_PLANO_HTML, "notif-list");
+        document.getElementById("notif-email-value").textContent = "—";
+        document.getElementById("notif-status-value").textContent = "Indisponível sem plano ativo";
+      }
+      return;
+    }
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     if (myGen === _notifGen) {   // só a geração mais nova pinta
+      // Desfaz o estado "sem plano ativo": um PBRefresh depois de o plano voltar
+      // precisa devolver os toggles, senão a seção fica escondida para sempre.
+      document.getElementById("notif-sem-plano").hidden = true;
+      document.getElementById("notif-list").hidden = false;
       applyNotificationSettings(data);
       notificationSettingsLoaded = true;
     }
@@ -2464,7 +2546,9 @@ async function loadNotificationSettings({ propagate = false } = {}) {
     // dispara um PATCH cujos controles/estado o GET pré-PATCH sobrescreveria,
     // furando o invariante "no máximo um save". O load mais novo restaura no
     // próprio finally (e, como é o último a assentar, sempre restaura).
-    if (myGen === _notifGen) {
+    // `!semPlano`: com 402 os toggles ficam escondidos e o servidor recusaria o
+    // PATCH — reabilitá-los seria oferecer um controle que não funciona.
+    if (myGen === _notifGen && !semPlano) {
       const daily = document.getElementById("notif-daily-report")?.checked;
       const anyScheduled = daily
         || document.getElementById("notif-weekly-report")?.checked
@@ -2943,6 +3027,27 @@ async function loadData({ propagate = false } = {}) {
   let ownErr = null;
   try {
     const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
+    // 402 = sem plano ativo (#380). Este GET dispara no boot em QUALQUER aba, então
+    // sem este ramo o cortado leva um toast de erro só por abrir a saída de
+    // emergência. Estado, não erro — e nem com propagate ele tinge o PTR de âmbar.
+    // Os contadores voltam a zero (são CONTAGENS, não dinheiro) pra não deixar
+    // número de uma carga anterior por cima de um painel que diz "indisponível".
+    if (resp.status === 402) {
+      if (myGen === _dataGen) {
+        updateStats([], [], []);
+        pintarSemPlano("connections-list");
+        pintarSemPlano("accounts-list", SEM_PLANO_CURTO);
+        pintarSemPlano("transactions-list", SEM_PLANO_CURTO);
+        // O fan-out do caixinhas fica ABAIXO do try e esta geração é a dona dele
+        // (invariante documentado no fim desta função). Aqui ele é resolvido sem
+        // fetch: `/open-finance/{id}/caixinhas` responde o mesmo 402, e o
+        // loadCaixinhas leria isso como falha transitória — escondendo o card com
+        // um console.error, ou rejeitando o PTR em âmbar. Some o card e pronto.
+        const caixCard = document.getElementById("caixinhas-card");
+        if (caixCard) caixCard.style.display = "none";
+      }
+      return;
+    }
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     if (myGen !== _dataGen) return;   // superado: não pinta nem chama o caixinhas (quem superou faz os dois)

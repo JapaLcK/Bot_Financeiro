@@ -798,11 +798,57 @@ def _enforce_subscription_gate(request: Request, user_id: int) -> None:
         raise HTTPException(status_code=402, detail={"error": "subscription_required"})
 
 
-def authorize_dashboard_access(request: Request, user_id: int) -> int:
+def authorize_account_access(request: Request, user_id: int) -> int:
+    """Autoriza a rota da PRÓPRIA CONTA e **NÃO aplica o gate de plano**
+    (`_enforce_subscription_gate`, o 402 do #380). É a SAÍDA DE EMERGÊNCIA.
+
+    **Rota de DADOS nunca usa esta função** — use `authorize_dashboard_access`,
+    que é esta MAIS o gate. Esta existe para as CINCO rotas de conta de
+    `frontend/routes/settings.py`, nominalmente: `GET /settings/{id}/security`,
+    `POST /settings/{id}/password-reset`, `GET /settings/{id}/sessions`,
+    `DELETE /settings/{id}/sessions/{jti}` e `DELETE /settings/{id}/sessions`.
+    Uma sexta chamada reabre o #380 para o dado que ela servir.
+
+    **Por que elas, e por que só elas.** O #380 cortou quem não tem plano pago
+    vigente, e a `/settings` continua servindo o HTML de propósito
+    (`static_pages.serve_settings`, `gate_plan_selection(exige_direito=False)`):
+    é o único lugar do produto com a UI de EXPORTAR os dados e EXCLUIR a conta.
+    Os endpoints `/auth/account/export` e `DELETE /auth/account` já eram isentos
+    por `_GATE_EXEMPT_PREFIXES`; o que estava trancado era o CAMINHO até eles.
+    Os dois exigem senha, e conta só-Google não tem nenhuma — então a saída passa
+    por ler o e-mail (`/security`) e pedir o link de definir senha
+    (`/password-reset`). Com o gate, `/security` respondia 402, o front caía em
+    `applySecuritySettings({})` e o botão de reset ficava `disabled`.
+    As sessões entram junto porque "encerrar os outros dispositivos" é a metade
+    de segurança da mesma saída.
+
+    **TETO ACEITO E DECLARADO (decisão do dono, #380): conta SEM e-mail E SEM
+    senha não tem saída autônoma — ela sai por suporte.**
+    `PATCH /settings/{id}/security/contact` (vincular e-mail) **não** é isenta de
+    propósito: é ESCRITA de dado de conta, e isentá-la abriria porta de gravação
+    para quem foi cortado. Sem e-mail, o `/password-reset` não tem para onde
+    mandar o link. Não "conserte" isso isentando o `/contact` por conta própria.
+
+    Também seguem NÃO isentas, e é intencional: `/settings/{id}/activity`,
+    `/settings/{id}/notifications` (GET e PATCH) e `/open-finance/*`. O 402
+    delas é tratado como ESTADO de seção no front (`frontend/settings.html`,
+    `SEM_PLANO_HTML`), não como erro.
+
+    Ordem das exceções, idêntica à de `authorize_dashboard_access`: 401 (sessão
+    inválida/revogada) -> 403 (não é o dono) -> 403 (conta agendada para
+    exclusão). Só o 402 cai."""
     current_user_id = resolve_dashboard_user_id(request)
     if current_user_id != int(user_id):
         raise HTTPException(status_code=403, detail="Acesso negado para este usuário.")
     raise_if_account_scheduled_for_deletion(current_user_id)
+    return current_user_id
+
+
+def authorize_dashboard_access(request: Request, user_id: int) -> int:
+    """Gate completo das rotas de DADOS: a conta (`authorize_account_access`)
+    MAIS o plano (`_enforce_subscription_gate`, 402). É o DEFAULT — descer para
+    `authorize_account_access` exige decisão do dono; leia a docstring dela."""
+    current_user_id = authorize_account_access(request, user_id)
     _enforce_subscription_gate(request, current_user_id)
     return current_user_id
 
