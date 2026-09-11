@@ -75,9 +75,9 @@ const snapshot = (launches) => ({
  * Abre a home REAL e deixa `loadHomeData` rodar com o `/data` injetado.
  *
  * `/history/**` é OBRIGATÓRIO stubar: na carga inicial o `Promise.all` do
- * `loadHomeData` (home.html:1569-1571) rejeita se ele não responder, o catch
- * troca o `#content` inteiro pela tela de erro (:1578-1599) e todos os asserts
- * caem por "elemento não existe" — sintoma errado da causa certa.
+ * `loadHomeData` (o `Promise.all([dataRes, histRes])` da home.html) rejeita se
+ * ele não responder, o catch troca o `#content` inteiro pela `.access-error` e
+ * todos os asserts caem por "elemento não existe" — sintoma errado da causa certa.
  *
  * `seed`: quando presente, pré-carrega `sessionStorage.pb_home_1` ANTES do
  * boot, para exercer o repaint instantâneo do `restoreHomeCache`.
@@ -234,7 +234,7 @@ test("onboarding: despesa E receita marcam o item; interno não marca", async ()
 });
 
 test("repaint por sessionStorage.pb_home_1 desenha o mesmo contrato", async () => {
-  // `restoreHomeCache` (home.html:1432) pinta ANTES do /data. O tipo guardado
+  // `restoreHomeCache` (home.html) pinta ANTES do /data. O tipo guardado
   // no cache é o que o servidor devolveu — então já vem canônico, e o repaint
   // tem de respeitar o mesmo contrato de cor/sinal/ícone.
   const seed = {

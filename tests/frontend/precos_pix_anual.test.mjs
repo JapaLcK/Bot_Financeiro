@@ -1450,3 +1450,141 @@ test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () =
     `o detail objeto parou de ser lido pela message: "${toast}"`);
   await page.close();
 });
+
+/**
+ * PT19 — O POLL NÃO PODE MORRER EM SILÊNCIO NUM FETCH PENDURADO.
+ *
+ * `pixBater` perguntava sem teto nenhum. Uma requisição que nunca responde (rede
+ * que engasga com o app do banco em primeiro plano, proxy de operadora) não
+ * estourava, o `catch` nunca rodava, `pixAgendar` nunca era rechamado: o poll
+ * MORRIA. O pagamento caía e o modal ficava em "aguardando" para sempre — e nem
+ * a mensagem de vencimento aparecia, porque o `venceu` só é avaliado dentro do
+ * `pixBater`. É o único dos consertos deste PR com sintoma visível para quem
+ * acabou de pagar, e está no ar desde 2026-09-10.
+ *
+ * Com o teto de 10 s, o abort cai no `catch` → `++meu.falhas` → no 3º,
+ * `pixDesistir` (copy segura: "o código continua válido"). Duas medidas, porque
+ * uma só não separa: o NÚMERO de perguntas (sem teto sai 1 e para) e o RÓTULO
+ * (o poll chegou até a desistência anunciada).
+ *
+ * Relógio falso: os ~36 s da sequência (10+3+10+3+10) andam por `fastForward`,
+ * então o caso custa o respiro real dos passos, não 36 s de parede.
+ *
+ * Controles do CLAUDE.md §3:
+ *   · negativo — tire o teto do `pixBater` (o `signal: ctrl.signal` do fetch, ou
+ *     o `setTimeout` que o arma): `perguntas` fica em 1 e o rótulo não muda;
+ *   · positivo — PT6 (pago → `/home?upgrade=success`) e PT2b (o poll normal
+ *     continua perguntando de 3 em 3 s) seguem verdes: o teto não atropelou o
+ *     caminho de quem é respondido.
+ *
+ * O que este caso NÃO alcança: a rede de verdade pendurando no aparelho, e a
+ * retomada por `document.hidden` (o cabeçalho deste arquivo já registra que o
+ * Playwright não emula visibilidade de forma confiável).
+ */
+test("PT19: fetch pendurado não mata o poll — o teto de 10 s desiste anunciando",
+  async () => {
+    let liberar = () => {};
+    const preso = new Promise((ok) => { liberar = ok; });
+    const { page, chamadas } = await abrirQr({
+      relogio: true,
+      // TODA pergunta fica pendurada: é o estado que matava o poll.
+      status: async () => { await preso; return { status: "pending" }; },
+    });
+    assert.equal(chamadas.poll, 1, "a primeira pergunta não chegou a sair");
+
+    // 40 s de relógio falso em passos de 1 s: cada `fastForward` dispara os
+    // timers vencidos e o respiro real deixa o abort virar `catch` e agendar a
+    // próxima. 40 > 10+3+10+3+10 = 36, com folga para o passo grosso.
+    for (let i = 0; i < 40; i++) {
+      await page.clock.fastForward(1000);
+      await page.waitForTimeout(40);
+    }
+    await page.waitForTimeout(300);
+
+    assert.ok(chamadas.poll >= 3,
+      `o poll morreu no fetch pendurado: só ${chamadas.poll} pergunta(s) em 40 s`
+      + " — sem teto o `catch` nunca roda e `pixAgendar` nunca é rechamado");
+    const texto = await page.textContent(".pix-box");
+    assert.match(texto, /código continua válido/,
+      `depois de 3 perguntas penduradas a tela não anunciou a desistência: "${texto}"`);
+    // A copy da desistência NÃO pode virar a do vencimento: quem talvez tenha
+    // pago não pode ler "nada foi cobrado" nem ganhar o "Gerar novo código",
+    // que CANCELA a cobrança remota (§10).
+    assert.doesNotMatch(texto, /nada foi cobrado/,
+      `o fetch pendurado virou "expirou e nada foi cobrado": "${texto}"`);
+    // Pelo TEXTO, e não por `.btn-primary`: o copia-e-cola da própria caixa usa
+    // essa classe, e o assert por classe ficava vermelho por causa dele.
+    assert.equal(
+      await page.$$eval(".pix-box button", (e) =>
+        e.filter((b) => b.textContent.includes("Gerar novo código")).length), 0,
+      "apareceu 'Gerar novo código' sem o servidor ter confirmado que não foi pago");
+
+    liberar();                     // solta as rotas antes de fechar a página
+    await page.close();
+  });
+
+/**
+ * PT20 — FECHAR O MODAL ENTRE OS CABEÇALHOS E O CORPO DO POLL.
+ *
+ * A outra metade do conserto do `pixBater`, e a que é a classe do #367: o
+ * `return` do `if (pixPoll !== meu)` sai ENTRE os headers e o `r.json()`, e no
+ * `finally` o `clearTimeout` tira o único relógio armado. Sem o `ctrl.abort()`
+ * junto, ninguém aborta e o corpo não lido fica pendurado até EOF/GC. O PT19
+ * mede só a metade "falta de teto" (o fetch dele nunca entrega headers, então
+ * este `return` nunca é exercido).
+ *
+ * Caminho real, sem corrida exótica: Esc com a pergunta em voo → `pixEncerrar`
+ * → `pixPoll = null` → a resposta chega. É fluxo de dinheiro e está no ar.
+ *
+ * O Esc sai de DENTRO do stub do `fetch`, e não por `page.route`: o
+ * `route.fulfill` não separa cabeçalho de corpo (mesma limitação registrada no
+ * PT17). O corpo é um `ReadableStream` ABERTO — se alguém o LER, o caso
+ * pendura; é justamente o corpo que o `return` deixa para trás.
+ *
+ * Controles do CLAUDE.md §3, MEDIDOS:
+ *   · negativo — tirar SÓ o abort, mantendo o teto
+ *     (`} finally { clearTimeout(timer); }`): este caso fica vermelho,
+ *     `__pollAbort` fica null. É a mutação que passava 43/43 neste arquivo e
+ *     442 verdes na suíte inteira antes deste caso existir;
+ *   · negativo — tirar o teto (o `signal` ou o `setTimeout`): PT19 vermelho;
+ *   · positivo — PT6 (pago → `/home?upgrade=success`) e PT2b (o poll normal
+ *     continua perguntando de 3 em 3 s): o abort não atropela quem é respondido.
+ */
+test("PT20: fechar o modal com a pergunta em voo aborta o corpo por ler",
+  async () => {
+    const { page } = await abrirQr({
+      initScript: () => {
+        window.__pollAbort = null;   // ms do início do fetch até o abort
+        const orig = window.fetch;
+        window.fetch = function (u, o) {
+          const s = String(u);
+          if (s.includes("/billing/pix/") && !s.endsWith("/checkout")) {
+            const t = Date.now();
+            if (o && o.signal) {
+              o.signal.addEventListener("abort", () => { window.__pollAbort = Date.now() - t; });
+            }
+            // O usuário fecha AGORA, com a pergunta em voo: `pixPoll = null`.
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+            return Promise.resolve(
+              new Response(new ReadableStream({ start() {} }), { status: 200 }));
+          }
+          return orig.apply(this, arguments);
+        };
+      },
+    });
+
+    assert.equal(await page.$$eval(".pix-ov", (e) => e.length), 0,
+      "âncora: o Esc durante a pergunta devia ter fechado o modal");
+    const abortou = await page
+      .waitForFunction(() => window.__pollAbort !== null, null, { timeout: 1000 })
+      .then(() => true, () => false);
+    assert.equal(abortou, true,
+      "o poll da cobrança fechada não foi abortado em 1s: sem o abort() no"
+      + " finally do pixBater o clearTimeout tira o único relógio e o corpo não"
+      + " lido fica pendurado até EOF/GC");
+    const ms = await page.evaluate(() => window.__pollAbort);
+    assert.equal(ms < 1000, true,
+      `o abort chegou ${ms}ms depois do início do fetch: é o teto de 10 s`
+      + " disparando, não o abort() do finally");
+    await page.close();
+  });

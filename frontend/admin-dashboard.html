@@ -1818,17 +1818,30 @@ async function loadOverview(force=false) {
     headers: authH(), cache: 'no-store', signal: refreshController.signal
   });
 
-  clearTimeout(refreshTimeout);
-  refreshController = null;
+  // Desligar o relógio ANTES dos dois desvios abaixo (o return do 401 e o
+  // throw do !ok) tirava o único abort agendado com o corpo ainda não lido — e
+  // o `refreshController = null` ainda impedia o abort da iteração seguinte
+  // (lá em cima) de alcançá-lo. Num poll de 60 s com a aba aberta por horas,
+  // cada erro deixava mais um corpo baixando até EOF. Uma guarda cobrindo
+  // TODAS as saídas, em vez de um abort antes de cada return.
+  // O abort do finally não passa razão, e não precisa: o catch do `refresh`
+  // separa só por `e?.name === 'AbortError'`, e nesses dois desvios já
+  // retornamos/lançamos antes — o texto na tela do admin não muda.
+  let data;
+  try {
+    if (res.status === 401) {
+      localStorage.removeItem(tokenKey);
+      window.location.href = '/admin/login';
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  if (res.status === 401) {
-    localStorage.removeItem(tokenKey);
-    window.location.href = '/admin/login';
-    return;
+    data = await res.json();
+  } finally {
+    clearTimeout(refreshTimeout);
+    refreshController?.abort();
+    refreshController = null;
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-  const data = await res.json();
 
   $id('generated-at').textContent = `Atualizado ${fRelTime(data.generated_at)}`;
   renderSummary(data.summary);

@@ -186,9 +186,21 @@ async function pixBater() {
 
   let corpo = null;
   let desistir = false;
+  // Teto de 10 s (= o intervalo da cauda). Sem ele, UM fetch pendurado não
+  // estourava nunca, `pixAgendar` não era rechamado e o poll morria em
+  // silêncio: o pagamento caía e o modal ficava em "aguardando" para sempre —
+  // nem a mensagem de vencimento aparecia, porque o `venceu` só é avaliado
+  // dentro daqui. Vencido, o abort cai no catch abaixo → `++meu.falhas` → no
+  // 3º, `pixDesistir` ("o código continua válido", copy segura para quem
+  // talvez tenha pago). O `abort()` no finally cobre também o `return` do
+  // `pixPoll !== meu`, que sai entre os headers e a leitura do corpo.
+  // `AbortController` + `setTimeout`, e não `AbortSignal.timeout`, pelo alvo
+  // iOS 14 (o mesmo motivo já escrito no home.html e no pb-nav.js).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
     const r = await fetch("/billing/pix/" + encodeURIComponent(meu.token),
-      { credentials: "same-origin" });
+      { credentials: "same-origin", signal: ctrl.signal });
     if (pixPoll !== meu) return;                // fechou ou trocou de cobrança
     if (r.status === 401) desistir = true;      // sobrou do auth-refresh: não insiste
     else if (!r.ok) throw new Error("http " + r.status);
@@ -196,7 +208,7 @@ async function pixBater() {
   } catch {
     if (pixPoll !== meu) return;
     if (++meu.falhas >= 3) desistir = true;
-  }
+  } finally { clearTimeout(timer); ctrl.abort(); }
   if (pixPoll !== meu) return;
   if (corpo) {
     meu.falhas = 0;
