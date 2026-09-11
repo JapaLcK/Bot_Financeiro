@@ -256,9 +256,22 @@ a { color: inherit; text-decoration: none; }
 /* ─── Main column ────────────────────────────── */
 .main { display: flex; flex-direction: column; gap: 14px; }
 .settings-section { display: flex; flex-direction: column; gap: 14px; }
-/* O atributo `hidden` sozinho perde para o `display` de qualquer classe.
-   Uma regra só, e não uma por seletor: .settings-section, .notification-list,
-   .email-warning e .info-banner precisavam da MESMA declaração (§0.7). */
+/* O atributo `hidden` sozinho perde para o `display` de QUALQUER classe do
+   autor — folha do autor ganha da folha do UA, independente de especificidade.
+   Uma regra só, e não uma por seletor. Quem precisa dela nesta página (comando
+   que produz a lista: `grep -n "hidden" frontend/settings.html` e cruzar com as
+   classes que declaram `display`): .settings-section, .notification-list,
+   .email-warning, .info-banner e .btn-sm (§0.7). O `.card` não entra: ele não
+   declara `display`, então o `hidden` do UA já basta nele.
+
+   MUDANÇA DE TELA PARA TODO MUNDO, inclusive pagante, e é bug a menos: o
+   `#sessions-revoke-others-btn` é `.btn-sm`, e `.btn-sm { display: inline-flex }`
+   vencia o `[hidden]` do UA. `loadSessions` faz `btn.hidden = otherCount === 0`
+   — ou seja, hoje em produção "Encerrar todas as outras" aparece para quem tem
+   UMA sessão só. Medido nos dois viewports (1440x900 e iPhone 13), com
+   `hidden=true` nos dois casos: sem esta regra o computado é `flex` (o
+   `inline-flex` blocifica dentro do pai flex); com ela, `none`. Não estava na
+   lista de decisões do dono; está declarado aqui e na mensagem do commit. */
 [hidden] { display: none !important; }
 
 /* ─── Card ───────────────────────────────────── */
@@ -946,13 +959,26 @@ body.balance-hidden .account-balance {
 .empty-icon { font-size: 1.8rem; opacity: .45; }
 .empty-title { font-weight: 760; font-size: .88rem; color: var(--muted); }
 .empty-sub { color: var(--faint); font-size: .76rem; line-height: 1.55; max-width: 260px; }
-/* Rosa na AÇÃO, não em toda superfície: o caminho pro /precos do estado "sem
-   plano ativo". NÃO é o único rosa da página (medido: `.pb-protect button` e
-   mais dois gradientes #FF2D8E) — é o único da SEÇÃO onde aparece, que é o que
-   mantém a ação principal evidente. Herda o resto do .btn-sm; as transições dele
-   são de cor, sem movimento, então não há o que desligar em
-   prefers-reduced-motion. O hover usa o #C7186B do .pb-protect button — o rosa
-   escuro já estabelecido da página (§0.7), não um tom novo. */
+/* Rosa na AÇÃO: o caminho pro /precos do estado "sem plano ativo". Herda o
+   resto do .btn-sm; as transições dele são de cor, sem movimento, então não há
+   o que desligar em prefers-reduced-motion. O hover usa o #C7186B do
+   `.pb-protect button` — o rosa escuro já estabelecido da página (§0.7), não um
+   tom novo.
+
+   NÃO é "o único rosa da seção" — essa frase estava aqui e é FALSA, medida nos
+   dois lugares onde este bloco aparece: a seção de segurança (#section-security)
+   contém o #activity-list que recebe o CTA e também o #mfa-toggle-btn e o
+   #security-reset-btn, os dois `.btn-connect` rosa — e o security-reset-btn é o
+   botão da própria saída de emergência. A seção de open-finance tem o
+   #connect-btn rosa de largura total logo acima do #connections-list.
+
+   CONTRASTE, medido (WCAG 2.1, texto #fff): repouso #FF2D8E = 3,49:1; hover
+   #C7186B = 5,57:1. O repouso fica abaixo do 4,5:1 de AA para texto normal e
+   passa no 3:1 de AA-large (este rótulo tem .76rem/700, então NÃO é large).
+   Isso é DÍVIDA PAGE-WIDE ACEITA pelo dono, não escolha local: o mesmo par
+   #fff-sobre-#FF2D8E já é o de `.btn-connect` e o do começo do gradiente de
+   `.pb-protect button`, que são anteriores a este PR. Trocar só aqui deixaria a
+   página com dois rosas de ação. A paleta inteira vira issue separada. */
 .empty-cta { margin-top: 8px; background: var(--accent); border-color: transparent; color: #fff; text-decoration: none; }
 .empty-cta:hover { background: #C7186B; border-color: transparent; color: #fff; }
 
@@ -1242,8 +1268,12 @@ body.balance-hidden .account-balance {
       <!-- Connect row -->
       <div class="connect-grid">
 
-        <!-- Connect card -->
-        <div class="card">
+        <!-- Connect card. `hidden` pelo loadData no 402 (#380): "Conectar Open
+             Finance" e "Remover todas as conexões" batem em rotas que o servidor
+             recusa com 402, e oferecer controle que não funciona é o mesmo
+             raciocínio dos toggles de notificação. O caminho pro /precos
+             continua na tela, no #connections-list logo abaixo. -->
+        <div class="card" id="connect-card">
           <div class="card-head">
             <div>
               <div class="card-title">Conectar banco</div>
@@ -1861,10 +1891,10 @@ window.addEventListener("storage", (event) => {
 // Os gates de plano levantam `{"error": "..."}` — sem `message` e sem `code`,
 // então o fallback do readApiError caía no `raw` e o toast exibia
 // `{"detail":{"error":"subscription_required"}}`. O conserto é aqui e não em cada
-// chamador: são 21 `showToast(err.message …)` nesta página, e QUALQUER ação de
-// quem foi cortado pelo #380 (conectar banco, salvar preferência) passa por um
-// deles. Os loaders que sabem em qual seção estão têm tratamento próprio abaixo
-// (SEM_PLANO_HTML) e nem chegam a mostrar toast.
+// chamador: `grep -c "showToast(err\.message" frontend/settings.html` conta
+// quantos são, e QUALQUER ação de quem foi cortado pelo #380 (conectar banco,
+// salvar preferência) passa por um deles. Os loaders que sabem em qual seção
+// estão têm tratamento próprio abaixo (SEM_PLANO_HTML) e nem chegam a toastar.
 // Map, e NÃO objeto literal: `detail.error` vem do servidor e com um literal o
 // lookup cai na cadeia de protótipo — `{"error":"constructor"}` devolvia
 // `function Object() { [native code] }` (medido), quebrando o contrato "string"
@@ -3050,6 +3080,12 @@ async function loadData({ propagate = false } = {}) {
         pintarSemPlano("connections-list");
         pintarSemPlano("accounts-list", SEM_PLANO_CURTO);
         pintarSemPlano("transactions-list", SEM_PLANO_CURTO);
+        // Os dois botões do card de conectar (#connect-btn e "Remover todas as
+        // conexões") batem em rotas que respondem o mesmo 402 — é o argumento
+        // dos toggles de notificação aplicado ao caminho irmão, que a rodada
+        // anterior tinha deixado de fora. O #connections-list abaixo continua
+        // mostrando o estado e o CTA pro /precos, então nada de saída se perde.
+        document.getElementById("connect-card").hidden = true;
         // O fan-out do caixinhas fica ABAIXO do try e esta geração é a dona dele
         // (invariante documentado no fim desta função). Aqui ele é resolvido sem
         // fetch: `/open-finance/{id}/caixinhas` responde o mesmo 402, e o
@@ -3063,6 +3099,10 @@ async function loadData({ propagate = false } = {}) {
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
     if (myGen !== _dataGen) return;   // superado: não pinta nem chama o caixinhas (quem superou faz os dois)
+    // Desfaz o estado "sem plano ativo": um PBRefresh depois de o plano voltar
+    // precisa devolver o card de conectar, senão ele some para sempre. Mesmo
+    // par do #notif-list no loadNotificationSettings.
+    document.getElementById("connect-card").hidden = false;
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];

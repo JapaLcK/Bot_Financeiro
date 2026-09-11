@@ -29,6 +29,10 @@
  * 4. Na CSS, `[hidden] { display: none !important; }` -> `[hidden] { }`. -> o
  *    mesmo teste do nº 2, pelos dois asserts de `display === "none"`. Direção: o
  *    atributo `hidden` perde para o `display` da classe e nada esconde.
+ * 5. Em `loadData`, `document.getElementById("connect-card").hidden = true;` ->
+ *    `= false`. -> "open finance: 402 vira estado e o PTR resolve". Direção: a
+ *    tela oferece "Conectar Open Finance" e "Remover todas as conexões" em cima
+ *    de rotas que o servidor recusa com 402.
  *
  * POSITIVO: "pagante não vê 'Indisponível' em seção nenhuma" — sem ele o grupo
  * passaria num código que pinta o estado de corte para todo mundo.
@@ -119,11 +123,14 @@ test("open finance: 402 vira estado e o PTR resolve, sem toast de erro", async (
       cta: document.querySelector("#connections-list .empty-cta")?.getAttribute("href"),
       contas: document.getElementById("accounts-list").textContent,
       caixinhas: document.getElementById("caixinhas-card").style.display,
+      conectar: getComputedStyle(document.getElementById("connect-card")).display,
     }));
     assert.match(carga.conexoes, /Indisponível sem plano ativo/);
     assert.equal(carga.cta, "/precos", "o estado de corte precisa do caminho pro /precos");
     assert.match(carga.contas, /Indisponível sem plano ativo/);
     assert.equal(carga.caixinhas, "none", "card de caixinhas visível num painel indisponível");
+    assert.equal(carga.conectar, "none",
+      "'Conectar Open Finance' e 'Remover todas as conexões' seguem clicáveis no 402");
     assert.equal(await toastClass(page), "", "402 no boot não pode virar toast");
 
     // O gesto: sem o ramo de 402 no refreshOpenFinance ele REJEITA (indicador âmbar).
@@ -209,9 +216,11 @@ test("pagante não vê 'Indisponível' em seção nenhuma (positivo)", async () 
       corpo: document.body.innerText,
       dica: getComputedStyle(document.getElementById("notif-tip")).display,
       lista: getComputedStyle(document.getElementById("notif-list")).display,
+      conectar: getComputedStyle(document.getElementById("connect-card")).display,
     }));
     assert.ok(!tela.corpo.includes("Indisponível sem plano ativo"),
       "o estado de corte apareceu para quem está pagando");
+    assert.notEqual(tela.conectar, "none", "o pagante perdeu o card de conectar banco");
     assert.notEqual(tela.dica, "none", "o pagante perdeu a dica das notificações");
     assert.notEqual(tela.lista, "none", "o pagante perdeu os toggles");
   } finally { await page.close(); }
@@ -230,7 +239,12 @@ test("readApiError não lê o Object.prototype", async () => {
         code: await window.readApiError(fake({ code: "OF_BANK_LIMIT" })),
       };
     });
-    // Com o objeto literal isto vinha "function Object() { [native code] }".
+    // Com o objeto literal, `readApiError` DEVOLVE a função `Object` — mas o que
+    // se vê no vermelho é `undefined`, porque função não sobrevive à
+    // serialização do `page.evaluate` do Playwright. Reexecutado: o assert falha
+    // com `undefined !== 'CODIGO_REAL'`. Vale como controle do mesmo jeito (o
+    // `detail.code` real some nos dois casos); o que estava errado era a
+    // afirmação sobre a TELA do vermelho.
     assert.equal(lido.proto, "CODIGO_REAL", "chave do servidor caiu na cadeia de protótipo");
     assert.equal(lido.gate, "Sua conta está sem plano ativo.", "o mapa do gate parou de traduzir");
     assert.equal(lido.code, "OF_BANK_LIMIT", "o caminho pré-existente do detail.code quebrou");
