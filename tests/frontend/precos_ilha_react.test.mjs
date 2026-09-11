@@ -748,12 +748,16 @@ test("PO2: em 1024px o destaque é o card mais alto, com bases alinhadas", async
 });
 
 // PI11: o cancelamento atravessa o mount sem duplicar POST; após falha pode repetir.
-// Negativo: com o HTML anterior à correção, card e tabela repetem o POST.
+// O POST confirmado limpa só o agendamento local; erros continuam permitindo retry.
+// Negativo: restaurar a releitura pós-POST torna os casos de sucesso vermelhos.
 for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
-  for (const falha of [false, true]) {
-    test(`PI11: desfazer troca em ${largura}px com bundle ${atrasoBundle}ms e resposta ${falha ? 500 : 200}`, async () => {
+  for (const [falha, releitura] of [
+    [false, "200"], [true, "200"], [false, "500"], [false, "rede"],
+    [false, "JSON malformado"], [false, "degradada"],
+  ]) {
+    test(`PI11: desfazer troca em ${largura}px com bundle ${atrasoBundle}ms e resposta ${falha ? 500 : 200}${releitura === "200" ? "" : `, releitura ${releitura}`}`, async () => {
       const pagina = await browser.newPage({ viewport: { width: largura, height: 900 } });
-      let posts = 0, agendada = true, liberar;
+      let posts = 0, consultas = 0, agendada = true, liberar;
       const resposta = new Promise((ok) => { liberar = ok; });
       await pagina.addInitScript(() => {
         new MutationObserver((_, obs) => {
@@ -765,10 +769,18 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
         contentType: "application/json",
         body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
       }));
-      await pagina.route("**/billing/subscription", (r) => r.fulfill({
-        contentType: "application/json", body: JSON.stringify({ ...SUB_STRIPE,
-          scheduled_change: agendada ? { plan: "pro", effective_at: "2026-10-01" } : null }),
-      }));
+      await pagina.route("**/billing/subscription", (r) => {
+        consultas += 1;
+        if (consultas > 1) {
+          if (releitura === "500") return r.fulfill({ status: 500, body: "erro interno" });
+          if (releitura === "rede") return r.abort();
+          if (releitura === "JSON malformado") return r.fulfill({ body: "{" });
+          if (releitura === "degradada") return r.fulfill({ contentType: "application/json",
+            body: JSON.stringify({ active: false, degraded: true }) });
+        }
+        return r.fulfill({ contentType: "application/json", body: JSON.stringify({ ...SUB_STRIPE,
+          scheduled_change: agendada ? { plan: "pro", effective_at: "2026-10-01" } : null }) });
+      });
       await pagina.route("**/billing/cancel-change", async (r) => {
         posts += 1;
         await resposta;
@@ -804,7 +816,21 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
           await pagina.waitForTimeout(100);
           assert.equal(posts, 2, "uma falha não pode bloquear a tentativa seguinte");
         } else {
-          assert.equal(await pagina.locator(alvo).innerText(), "Trocar pro Pro");
+          // O POST confirmou que só o agendamento mudou; nenhuma consulta nova é necessária.
+          for (const ciclo of ["annual", "monthly"]) {
+            await pagina.locator(`#cycle-${ciclo}`).click();
+            for (const sel of [alvo, '.cmp-table [data-plan-btn="pro"]']) {
+              assert.equal(await pagina.locator(sel).innerText(), "Trocar pro Pro");
+              await pagina.$eval(sel, (b) => b.click());
+              assert.equal(await pagina.locator("#chg-overlay").isVisible(), true,
+                "o controle deve oferecer uma nova troca, não cancelar a anterior");
+              await pagina.evaluate(() => closeChangeModal());
+            }
+          }
+          assert.equal(await pagina.locator('#plans-v2 [data-plan-btn="plus"]').innerText(),
+            "✓ Seu plano atual", "cancelar a troca não pode mudar o plano vigente");
+          assert.equal(posts, 1, "uma troca já desfeita não pode ser cancelada novamente");
+          assert.equal(consultas, 1, "o cancelamento voltou a depender de uma releitura");
         }
       } finally {
         liberar();

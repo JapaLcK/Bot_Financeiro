@@ -864,7 +864,7 @@ function refreshPlanButtons() {
     if (sc && sc.plan === p) {
       btn.disabled = cancelChangePending;
       btn.textContent = `Agendado pra ${fmtBrDate(sc.effective_at)} ✓ · desfazer`;
-      btn.onclick = function () { cancelChange(btn); };
+      btn.onclick = cancelChange;
       return;
     }
     if (p === subState.plan && currentCycle === (subState.interval || "monthly")) {
@@ -947,7 +947,7 @@ function openChangeModal(plan) {
 }
 
 // A operação sobrevive à remontagem dos cards e é compartilhada com a tabela.
-async function cancelChange(btn) {
+async function cancelChange() {
   if (cancelChangePending) return;
   cancelChangePending = true;
   refreshPlanButtons();
@@ -962,15 +962,12 @@ async function cancelChange(btn) {
       return;
     }
     showToast("Troca desfeita. Seu plano continua como está.");
-    await loadSubscription();
+    // O POST confirmou o cancelamento; o plano atual permanece o mesmo.
+    if (subState) subState.scheduled_change = null;
   } catch {
     showToast("Erro de conexão. Tente novamente.", "err");
   } finally {
     cancelChangePending = false;
-    // A releitura pode falhar: libere também o botão atual quando subState é null.
-    document.querySelectorAll("[data-plan-btn]").forEach(b => {
-      if (b.dataset.planBtn === btn.dataset.planBtn) b.disabled = false;
-    });
     refreshPlanButtons();
   }
 }
