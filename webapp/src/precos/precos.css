@@ -13,53 +13,21 @@
  */
 
 /* ── O pódio ─────────────────────────────────────────────────────────────────
- * `align-items: end` troca o `stretch` do grid (que hoje iguala os 4 cards na
- * altura do maior) por bases alinhadas com alturas próprias. O degrau então
- * cresce PARA CIMA, que é o que faz um pódio ler como hierarquia em vez de card
- * inchado.
- *
- * DOIS níveis, não quatro, e a escolha é MEDIDA — não estética.
- *
- * A primeira versão tinha um degrau intermediário no Pro (`padding-block: 42px`).
- * Medido em duas larguras, ele INVERTE: em 1024px dava Essencial 613 < Pro 656 <
- * Plus 741, a escada certa; em 1440px dava Pro 539 < Essencial 553, porque o
- * texto do Essencial quebra em mais linhas ali e 12px de respiro não vencem os
- * 38px de diferença de conteúdo. Uma escada que mente em algumas larguras é pior
- * que nenhuma, e fechar isso exigiria altura fixa — que quebra quando o usuário
- * aumenta o corpo do texto. Então o pódio é o que se sustenta em toda largura:
- * bases alinhadas e o DESTAQUE subindo sobre elas.
- *
- * Uma escada monótona de 4 degraus também estava fora por um motivo de venda:
- * ela coroaria o Premium, que é o card "Em breve" com o botão desabilitado.
- *
- * O degrau é `padding-block`, o próprio respiro do card, e não `min-height`,
- * pelo mesmo motivo do parágrafo acima: altura fixa quebra quando o usuário
- * aumenta o corpo do texto.
- *
- * O critério é MAIS DE UMA COLUNA, e 508px é onde a segunda aparece — não é
- * número escolhido, é aritmética do grid: o `#plans-v2` tem
- * `grid-template-columns:repeat(auto-fit,minmax(220px,1fr))` INLINE
- * (no `<div class="plans" id="plans-v2">` da precos.html, que por ser
- * id+inline vence o `@media (max-width:900px)`
- * do `.plans` no site.css), `gap: 20px` (do mesmo `.plans`) e largura
- * `min(1560px, 100vw - 48px)` (o `#plans-v2-wrap`). Duas faixas pedem
- * 220+20+220 = 460px de container, ou seja `100vw >= 508`. O par 507/508 que
- * cerca o degrau está na `LARGURAS` do PO1, que MEDE a equivalência em vez de
- * confiar nesta aritmética.
- *
- * Empilhado em UMA coluna não há pódio nenhum a fazer: ali altura diferente é
- * card mais gordo que o vizinho, sem hierarquia para ler.
- *
- * A versão anterior desta regra dizia 900px e o comentário afirmava que abaixo
- * disso "o grid vira uma coluna". Era FALSO: de 508 a 899px o grid tem 2 ou 3
- * colunas, e o pódio simplesmente não aparecia. Quem prende isto agora é o
- * grupo PO do `tests/frontend/precos_ilha_react.test.mjs`, que exige a equivalência
- * (mais de uma coluna ⟺ `align-items: end`) em cada largura da sua lista
- * `LARGURAS` — mudar a aritmética do grid sem mudar esta regra deixa vermelho.
+ * O trio só vira pódio quando os três cards cabem na mesma linha. As bases
+ * ficam alinhadas e os três preservam o mesmo padding: o degrau vem da altura
+ * mínima de 620px no Pro e 700px no Plus, sem empurrar o conteúdo para baixo.
+ * No mobile, os cards empilham com a altura natural.
  */
-@media (min-width: 508px) {
+#plans-v2 {
+  grid-template-columns: minmax(0, min(380px, 100%));
+  justify-content: center;
+}
+
+@media (min-width: 901px) {
+  #plans-v2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #plans-v2 { align-items: end; }
-  #plans-v2 .plan.featured { padding-block: 54px; }
+  #plans-v2 .plan.featured { min-height: 700px; }
+  #plans-v2 .plan:nth-child(3) { min-height: 620px; }
 }
 
 /* ── O badge do destaque ──────────────────────────────────────────────────────

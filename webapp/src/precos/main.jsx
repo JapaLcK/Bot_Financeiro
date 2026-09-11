@@ -35,8 +35,7 @@ if (planos) {
   // os cards do servidor clicáveis antes de o bundle chegar).
   //
   // Só `[data-plan-btn]`, e é cobertura e não atalho: os únicos focáveis dentro
-  // do `#plans-v2` são os quatro `<button>` do card, e o quarto (Premium) nasce
-  // `disabled` — logo não é focável. O predicado é o MESMO do `restaurar()` do
+  // do `#plans-v2` são os três `<button>` dos cards. O predicado é o MESMO do `restaurar()` do
   // `startCheckout` (`precos.html`), que já resolve "o nó foi trocado, ache o
   // equivalente".
   const plano = raiz.contains(document.activeElement)
