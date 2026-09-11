@@ -130,24 +130,26 @@ def recusa_veneno(modelo):
     """Recusa (em vez de sanear) NUL/surrogate solitário em campo `str` de um
     modelo Pydantic. Para usar num `model_validator(mode="after")`.
 
+    Quem decide o que é veneno é o `tem_veneno` (§0.7); aqui só mora o que é
+    específico do Pydantic: percorrer os campos e virar 422.
+
     Sanear serve para dado que o sistema só GRAVA; e-mail é IDENTIFICADOR, e
     trocar `a\\x00@x.com` por `a�@x.com` inventaria identidade — o mesmo motivo
     pelo qual o `limpa_para_pg` substitui em vez de apagar. Nenhum e-mail,
     senha, nome ou código legítimo contém os dois: navegador nenhum os produz.
     O `ValueError` vira 422 pelo caminho normal do FastAPI (#369).
 
-    ponytail: teto conhecido — só campo `str` de PRIMEIRO nível é olhado.
-    MEDIDO: `list[str]`, `dict` e submodelo com surrogate PASSAM. Não é
-    alcançável hoje (os herdeiros de `_CorpoSemVeneno` só têm `str`,
-    `str | None` e `bool` — este último não é `str` e sai do laço sem olhar —,
-    e o `extra="allow"` do pydantic v2 entra neste mesmo laço),
-    mas um herdeiro futuro com campo composto passaria veneno SEM AVISO. Se
-    aparecer um, o conserto é trocar o `isinstance(valor, str)` por uma
-    comparação `limpa_para_pg` sobre o valor inteiro — que já caminha
-    dict/list com pilha explícita. Não implementado por não ter chamador.
+    ponytail: teto conhecido — herda o do `tem_veneno` (só `str`), então só
+    campo `str` de PRIMEIRO nível é olhado. MEDIDO: `list[str]`, `dict` e
+    submodelo com surrogate PASSAM. Não é alcançável hoje (os herdeiros de
+    `_CorpoSemVeneno` só têm `str`, `str | None` e `bool` — este último não é
+    `str` e sai do laço sem olhar —, e o `extra="allow"` do pydantic v2 entra
+    neste mesmo laço), mas um herdeiro futuro com campo composto passaria
+    veneno SEM AVISO. Se aparecer um, o conserto é no `tem_veneno`, e vale para
+    os dois.
     """
     for nome, valor in modelo:
-        if isinstance(valor, str) and _limpa_str(valor) != valor:
+        if tem_veneno(valor):
             raise ValueError(f"O campo '{nome}' contém caractere inválido.")
     return modelo
 # A frase que substitui a mensagem do codec. Uma só, e aqui: o texto do erro é
@@ -197,3 +199,34 @@ if __name__ == "__main__":  # pragma: no cover - autocheck
         assert detalhe_seguro(e) == _ERRO_DE_CODIFICACAO, detalhe_seguro(e)
     assert detalhe_seguro(ValueError("EMPTY_NAME")) == "EMPTY_NAME"
     print("ok")
+
+
+def tem_veneno(valor) -> bool:
+    """True se `valor` é `str` com NUL ou surrogate solitário — o que o Postgres
+    não guarda e o psycopg não codifica.
+
+    Predicado para **identificador** (token, código de link): quem recebe um
+    devolve "não existe" em vez de consultar o banco. É a fonte única do que
+    conta como veneno — o `recusa_veneno` chama isto (§0.7) e só acrescenta o
+    laço dos campos do Pydantic e o `ValueError`. A mesma decisão de RECUSAR em
+    vez de sanear, pelo mesmo motivo:
+    sanear `<token-real>\\x00` para `<token-real>�` inventaria identidade, e
+    apagar o byte casaria com um token DE VERDADE.
+
+    Mede com `_limpa_str` de propósito (§0.7): um `in` char-a-char aqui e o
+    `replace`/`surrogatepass` lá são duas definições de "veneno" que divergem no
+    dia em que uma das duas mudar.
+
+    ponytail: teto conhecido — só `str`. `list`, `dict`, `bytes` e `int` voltam
+    `False` EM SILÊNCIO, e o veneno dentro deles derruba o `execute` do mesmo
+    jeito (MEDIDO: `["a\\x00b"]` → `DataError: ... cannot contain NUL`). Não é
+    alcançável hoje — os 3 chamadores de `db/` passam path param, que é sempre
+    `str`, e o `recusa_veneno` documenta o mesmo teto para os campos do modelo
+    —, mas `db/prospects.list_prospect_status` já consulta com `= any(%s)` sobre
+    `list[str]`: quem reusar isto ali recebe `False` sem aviso. Se esse chamador
+    aparecer, o conserto é caminhar o valor com a mesma pilha explícita do
+    `limpa_para_pg` e devolver True no primeiro `str` envenenado. NÃO dá para
+    reusar o `limpa_para_pg` direto no predicado: ele saneia dict/list NO LUGAR,
+    então `limpa_para_pg(v) != v` dá sempre False (medido).
+    """
+    return isinstance(valor, str) and _limpa_str(valor) != valor
