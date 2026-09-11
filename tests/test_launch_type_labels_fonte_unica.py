@@ -67,13 +67,33 @@ def test_no_dashboard_a_fonte_vem_antes_do_dashboard_js():
     )
 
 
-# NÃO existe aqui um `test_na_home_a_fonte_carrega_sem_defer`, e a remoção é
-# deliberada. A razão que ele trazia era FALSA: dizia que o boot inline
-# (`PBNav.boot("home")`) roda durante o parse e alcança o `renderGreeting` — mas
-# o `data-pb-boot` é o ÚLTIMO script do documento (home.html:2394) e as duas
-# chamadas de `renderGreeting` estão atrás de um `await` no /auth/validate
-# (home.html:1539 e :1632). Sobrava um risco estreitíssimo (download lento do
-# .js + /auth/validate resolvendo instantâneo com o parser ainda girando) que,
-# desde que o home.html lê o mapa com `typeof` + `hasOwnProperty`, custa um
-# rótulo genérico por milissegundos — e não um `ReferenceError`. Lacre sem
-# defeito para prender não merece um caso.
+def test_na_home_a_fonte_nao_bloqueia_o_parse():
+    """A tag da Início tem de ser NÃO-BLOQUEANTE — e a razão é medida, não teórica.
+
+    A rodada 3 deste PR tinha o lacre INVERTIDO (prendia a home SEM `defer`) com
+    uma razão falsa: dizia que o boot inline alcança `renderGreeting` durante o
+    parse. Não alcança — `data-pb-boot` é o ÚLTIMO script do documento
+    (home.html:2394) e as duas chamadas estão atrás de um `await` no
+    /auth/validate (:1539 e :1632). O lacre voltou apontando para o outro lado
+    porque existe um defeito REAL a prender:
+
+    Medido 2026-09-10, com o /launch-type-labels.js PENDURADO (request aberta,
+    não 404), Chromium/Playwright:
+      tag bloqueante → `document.body` NULL, `readyState` "loading",
+                       `#greeting-sub` inexistente, 0 pageerror — Início EM BRANCO;
+      tag com defer  → `body.children` 13, `readyState` "interactive",
+                       `#greeting-sub` = "Lançamento" (guarda do :969 fazendo efeito).
+    O parser para na própria tag (:457), antes do `</head>` (:461): as guardas
+    `typeof`/`hasOwnProperty` não salvam nada porque nada roda.
+
+    Remedir: `npm run test:frontend` — caso "com /launch-type-labels.js
+    PENDURADO, a Início ainda renderiza" em tests/frontend/home_tipo_atividade.test.mjs.
+    """
+    tag = _tag(HOME, "/launch-type-labels.js")
+    assert tag, "home.html não tem a TAG <script src='/launch-type-labels.js'>"
+    assert re.search(r"\s(defer|async)\b", tag.group(0)), (
+        "a tag de /launch-type-labels.js na home.html voltou a BLOQUEAR o parse: "
+        f"{tag.group(0)!r}. Uma resposta pendurada do asset trava o parser antes "
+        "do <body> e a Início fica EM BRANCO — as guardas do home.html:969 não "
+        "rodam porque renderGreeting nunca é alcançada. Ponha `defer` de volta."
+    )

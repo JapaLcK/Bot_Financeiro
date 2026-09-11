@@ -83,7 +83,7 @@ const snapshot = (launches) => ({
  * `seed`: quando presente, pré-carrega `sessionStorage.pb_home_1` ANTES do
  * boot, para exercer o repaint instantâneo do `restoreHomeCache`.
  */
-async function abrirHome(launches, { seed = null, semMapa = false } = {}) {
+async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.__errs = [];
@@ -104,6 +104,9 @@ async function abrirHome(launches, { seed = null, semMapa = false } = {}) {
     await page.route(/launch-type-labels\.js/,
                      (r) => acaoSegura(() => r.fulfill({ status: 404, body: "nao existe" })));
   }
+  // PENDURADO != 404. O handler que NUNCA resolve a rota deixa a request aberta,
+  // que é o caso que o 404 não alcança: o 404 volta rápido e o parser segue.
+  if (mapaPendurado) await page.route(/launch-type-labels\.js/, () => { /* nunca resolve */ });
 
   if (seed) {
     await page.addInitScript((entrada) => {
@@ -111,7 +114,10 @@ async function abrirHome(launches, { seed = null, semMapa = false } = {}) {
     }, seed);
   }
 
-  await page.goto(`${ORIGIN}/home.html`);
+  // `commit` é obrigatório com o asset pendurado: o "load" (padrão do goto)
+  // nunca chega enquanto a request estiver aberta, e o goto estouraria por
+  // timeout antes de qualquer assert — sintoma errado da causa certa.
+  await page.goto(`${ORIGIN}/home.html`, mapaPendurado ? { waitUntil: "commit" } : undefined);
   page.__ctx = ctx;
   return page;
 }
@@ -340,6 +346,33 @@ test("tipo com HTML dentro: nada de <img> no #greeting-sub", async () => {
  * Controle negativo do 2º: tirar o `hasOwnProperty.call` do :970.
  * Controle POSITIVO dos dois: os 8 casos de rótulo acima, que provam que a
  * guarda não trocou tudo por "Lançamento". */
+
+/* PENDURADO — a request que nunca volta, que o 404 acima NÃO alcança.
+ *
+ * O 404 volta rápido: o parser segue, o `<body>` existe, e a guarda `typeof` do
+ * home.html:969 faz o trabalho dela. Com a resposta PENDURADA e a tag
+ * BLOQUEANTE, nada disso acontece — o parser para na própria tag (home.html:457,
+ * antes do `</head>` de :461) e a página não tem `<body>`. Medido 2026-09-10 com
+ * a tag sem `defer`: `document.body` NULL, `readyState` "loading",
+ * `#greeting-sub` inexistente e ZERO `pageerror` — a guarda nunca é alcançada
+ * porque `renderGreeting` nunca roda.
+ *
+ * CONTROLE NEGATIVO deste caso: tirar o `defer` da tag de home.html:457.
+ * O lacre textual irmão é `tests/test_launch_type_labels_fonte_unica.py`
+ * (`test_na_home_a_fonte_nao_bloqueia_o_parse`). */
+test("com /launch-type-labels.js PENDURADO, a Início ainda renderiza", async () => {
+  const page = await abrirHome([lancamento({ tipo: "credito", valor: 80, alvo: "nubank" })],
+                               { mapaPendurado: true });
+  try {
+    const linhas = await linhasDaAtividade(page);
+    assert.equal(linhas.length, 1,
+                 `asset pendurado travou a Início: ${linhas.length} linhas de atividade`);
+    const { forte } = await saudacao(page);
+    assert.equal(forte, "Lançamento",
+                 `mapa pendurado devia degradar o rótulo, veio "${forte}"`);
+    assert.deepEqual(page.__errs, [], "a Início estourou com o mapa pendurado");
+  } finally { await fechar(page); }
+});
 
 test("sem /launch-type-labels.js (404), a Início inteira continua renderizando", async () => {
   const page = await abrirHome([lancamento({ tipo: "credito", valor: 80, alvo: "nubank" })],
