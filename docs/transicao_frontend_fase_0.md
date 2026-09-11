@@ -43,9 +43,11 @@ O coletor [`scripts/medir_frontend_publico.mjs`](../scripts/medir_frontend_publi
 mede as rotas públicas reais por Chromium/Playwright. Para cada rota, ele cria
 cinco contextos sem cache e cinco navegações medidas após uma visita de aquecimento
 sem throttle. A visita de aquecimento só libera a coleta quente quando todos os
-recursos da primeira origem terminarem; se não terminar em 90 segundos, a coleta
-falha em vez de rotular uma amostra parcialmente aquecida como quente. Registra
-todas as amostras, mediana, mínimo e máximo de TTFB, FCP, LCP, load e bytes
+recursos da primeira origem encerrarem, seja por conclusão ou por cancelamento
+do navegador após satisfazer a leitura. POSTs e outros métodos que não populam
+cache não bloqueiam essa espera; se algum GET/HEAD continuar aberto por 90 segundos,
+a coleta falha em vez de rotular uma amostra parcialmente aquecida como quente.
+Registra todas as amostras, mediana, mínimo e máximo de TTFB, FCP, LCP, load e bytes
 efetivamente recebidos da primeira origem/terceiros. A rede 4G e CPU 4x são
 fixadas por padrão nas amostras medidas.
 
@@ -63,34 +65,34 @@ o relatório PageSpeed isolado, será o controle da decisão sobre Next.
 Esta coleta é laboratório reproduzível, não RUM e não uma prova de conversão.
 LCP de campo, INP e conversão exigem dados de produção com amostra suficiente.
 
-### Resultado inicial — inválido para transferência; remedir
+### Resultado válido — controle anterior à fase 1
 
-Coleta em `2026-09-11T16:33:33Z`, a partir do checkout local `64f1ed1`, pelo
-comando `node scripts/medir_frontend_publico.mjs --runs 5 --output
-tmp/frontend-baseline-2026-09-11.json`. O SHA de produção não foi confirmado
-nesta sessão; portanto estes números descrevem a resposta pública observada,
-mas não comprovam qual commit a produziu. O JSON bruto está em
-`tmp/frontend-baseline-2026-09-11.json`. A versão original do coletor encerrava
-a página antes de aguardar respostas lentas e aquecia a cache sob throttle; logo,
-as transferências e a classificação de cache quente abaixo não são comparáveis.
-Os números ficam apenas como registro histórico e não devem orientar decisão até
-uma nova coleta com o coletor corrigido.
+Coleta iniciada em `2026-09-11T21:47:03Z`, a partir do checkout local
+`1d6d3a9`, pelo comando `node scripts/medir_frontend_publico.mjs --runs 5
+--output tmp/frontend-baseline-corrigida-2026-09-11.json`. O SHA de produção
+não foi exposto pela resposta pública; portanto os números descrevem o deploy
+observado, sem afirmar qual commit o produziu. O perfil foi iPhone 13, rede 4G
+simulada (150 ms, 1,6 Mbps de download) e CPU 4x. O JSON bruto está em `tmp/`,
+fora do Git. Cada célula mostra mediana e, entre parênteses, mínimo–máximo.
 
-| Rota | Cache | TTFB mediano | FCP mediano | LCP mediano | Transferência mediana | Elemento LCP |
+| Rota | Cache | TTFB | FCP | LCP | Transferência | Elemento LCP |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| `/` | frio | 201 ms | 972 ms | 972 ms | 11,43 MiB | `p.hero-sub` |
-| `/` | quente | 129 ms | 428 ms | 428 ms | 10,45 MiB | `p.hero-sub` |
-| `/precos` | frio | 184 ms | 964 ms | 1.224 ms | 957 KiB | mascote (`img`) |
-| `/precos` | quente | 125 ms | 420 ms | 420 ms | 27 KiB | mascote (`img`) |
-| `/como-funciona` | frio | 193 ms | 756 ms | 756 ms | 827 KiB | parágrafo da primeira seção |
-| `/como-funciona` | quente | 119 ms | 284 ms | 284 ms | 6 KiB | parágrafo da primeira seção |
+| `/` | frio | 169 ms (166–208) | 936 ms (924–944) | 936 ms (924–944) | 1,17 MiB (1,17–1,17) | `p.hero-sub` |
+| `/` | quente | 134 ms (123–142) | 420 ms (412–420) | 420 ms (412–420) | 20,1 KiB (20,1–22,4) | `p.hero-sub` |
+| `/precos` | frio | 183 ms (178–191) | 956 ms (920–1.004) | 1.060 ms (1.040–1.240) | 970 KiB (969–971) | mascote (`img`) |
+| `/precos` | quente | 126 ms (119–144) | 408 ms (404–412) | 408 ms (404–412) | 30,6 KiB (30,6–33,1) | mascote (`img`) |
+| `/como-funciona` | frio | 171 ms (169–194) | 744 ms (720–756) | 744 ms (720–756) | 838 KiB (838–839) | parágrafo da primeira seção |
+| `/como-funciona` | quente | 117 ms (115–122) | 268 ms (268–280) | 268 ms (268–280) | 7,64 KiB (7,63–9,96) | parágrafo da primeira seção |
 
-Em todas as cinco amostras da landing, o maior recurso foi
-`/brand/vsl.mp4?v=1`: resposta `206` de aproximadamente 10,43 MiB, inclusive
-com cache quente. Isso confirma a investigação prioritária da fase 1: determinar
-por que `preload="metadata"` baixa esse intervalo, antes de escolher a mudança de
-atribuição do `src`, fast-start ou recompressão. Não atribuir esse custo ao LCP
-atual: o elemento LCP observado foi o subtítulo da hero.
+Nas cinco amostras frias da landing, `/brand/vsl.mp4?v=1` respondeu `206`,
+transferiu cerca de 193 KiB e foi encerrado pelo Chromium depois de obter os
+metadados. Nas amostras quentes não houve nova transferência do vídeo. O arquivo
+já tem os metadados no início; a hipótese anterior de download integral de
+10,43 MiB era erro de contagem do coletor. Em comparação controlada no mesmo
+Chromium, `preload="none"` reduziu a transferência pré-interação de cerca de
+194 KB para zero e `play()` iniciou a transmissão normalmente. A fase 1 adota
+essa opção, preservando `src`, reprodução, portão de cadastro e eventos. O vídeo
+não é o LCP atual; o elemento observado foi o subtítulo da hero.
 
 ## Funil e medição
 

@@ -20,6 +20,7 @@ export async function instrumentarRede(page, { throttle, rede }) {
       id: `${evento.requestId}:${sequencia += 1}`,
       requestId: evento.requestId,
       url: evento.request.url,
+      metodo: evento.request.method || "GET",
       tipo: evento.type || "Other",
       status: null,
       bytes: 0,
@@ -62,7 +63,9 @@ export async function instrumentarRede(page, { throttle, rede }) {
   }
 
   const pendentesDaOrigem = origem => recursos.filter(recurso =>
-    !recurso.concluido && new URL(recurso.url).origin === origem,
+    recurso.estado === "em_andamento"
+      && ["GET", "HEAD"].includes(recurso.metodo)
+      && new URL(recurso.url).origin === origem,
   );
 
   return {
