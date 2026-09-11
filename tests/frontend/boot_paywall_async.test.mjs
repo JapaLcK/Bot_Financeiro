@@ -153,9 +153,13 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
 }
 
 test("sem plano ativo: continua caindo em /precos quando o /me chega", async () => {
+  // O marcador virou `escolha=1` no corte do Grátis: as DUAS pernas do veredito
+  // pedem a mesma coisa (assinar), e é ele que o nav-auth.js usa pra calar os
+  // CTAs de marketing da /precos. O marcador antigo continua aceitado LÁ porque
+  // home.html e settings.html ainda o mandam.
   const { ctx, page } = await bootApp({ me: { app_access: false } });
-  await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
-  assert.match(page.url(), /\/precos\?ativar=1/);
+  await page.waitForURL("**/precos?escolha=1", { timeout: 5000 });
+  assert.match(page.url(), /\/precos\?escolha=1/);
   await ctx.close();
 });
 
@@ -178,7 +182,7 @@ const SEED_KEYS = ["pb_home_42", `pb_snap_42_${SEED_ANO}_${SEED_MES}`];
 
 test("paywall NEGA: pb_snap_* E pb_home_* somem — reload da aba não repinta saldo", async () => {
   const { ctx, page } = await bootApp({ me: { app_access: false }, seedSnap: true });
-  await page.waitForURL("**/precos?ativar=1", { timeout: 5000 });
+  await page.waitForURL("**/precos?escolha=1", { timeout: 5000 });
   const chaves = await snapKeys(page);
   assert.deepEqual(chaves, [], `snapshot sobreviveu ao veredito negativo: ${chaves}`);
   await ctx.close();
@@ -211,7 +215,7 @@ test("plano revogado no meio da sessão: revalida, redireciona e PARA de reconec
     me: { app_access: true }, meAfter: { app_access: false },
     meDelayMs: 30, wsMode: "open-then-reject",
   });
-  await page.waitForURL("**/precos?ativar=1", { timeout: 15000 });
+  await page.waitForURL("**/precos?escolha=1", { timeout: 15000 });
   const antes = await page.evaluate(() => window._wsCount || 0);
   await page.waitForTimeout(5000);
   const depois = await page.evaluate(() => window._wsCount || 0);
