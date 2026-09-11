@@ -37,6 +37,12 @@ const PIX_PLANOS = ["essencial", "plus", "pro"];
 
 let pixCfg = null;
 let pixSub = null;
+// `pixSub = null` é AMBÍGUO e significa duas coisas opostas: "ainda não sei"
+// (a publicação antecipada do loadPlansState, antes do /billing/subscription) e
+// "sei: não tem assinatura" — que é o DESLOGADO, o público-alvo da etiqueta.
+// Sem este terceiro estado não dá para separar as duas, e qualquer guarda que só
+// teste `pixSub == null` esconde a etiqueta de quem ela existe para convencer.
+let pixSubResolvida = false;
 
 // ── O CTA nos cards ─────────────────────────────────────────────────────────
 
@@ -49,15 +55,27 @@ function pixAVenda() {
   return !!pixCfg && pixCfg.pix_annual_available === true && !(pixSub && pixSub.lifetime === true);
 }
 
-/** Chamado pelo loadPlansState da precos.html, com o que ela já buscou. */
-function pbPixInit(cfg, sub) {
+/**
+ * Chamado pelo loadPlansState da precos.html, com o que ela já buscou.
+ * `subResolvida` só é true na segunda chamada, com o /billing/subscription na mão.
+ */
+function pbPixInit(cfg, sub, subResolvida) {
   pixCfg = cfg || null;
   pixSub = sub || null;
+  pixSubResolvida = subResolvida === true;
   // A etiqueta do toggle é o único anúncio de Pix que o ciclo MENSAL tem (o CTA
   // dos cards só nasce no anual), então quem a revela é o init, não o refresh.
+  //
+  // E ela é o único dos dois que ESPERA a assinatura. O CTA é caminho de
+  // RESGATE — nascer cedo ajuda quem quer migrar do cartão enquanto o Stripe
+  // está lento (é o que a publicação antecipada da precos.html existe para
+  // consertar, e o vitalício que clicar nele toma o 409 `lifetime`). A etiqueta
+  // é ANÚNCIO: revelá-la antes de saber quem está olhando é propaganda enganosa
+  // para o vitalício, e ela fica até a requisição voltar — indefinidamente, se
+  // ela travar. Por isso `pixSubResolvida` entra aqui e não no `pixAVenda`.
   const nota = document.getElementById("pix-cycle-note");
   const btnAnual = document.getElementById("cycle-annual");
-  if (nota) nota.hidden = !pixAVenda();
+  if (nota) nota.hidden = !(pixAVenda() && pixSubResolvida);
   // Leitor de tela: a etiqueta é revelada DEPOIS do load, e quem está no botão
   // "Anual" nunca passa por ela. O `#pix-cycle-live` em volta dela é a região
   // `aria-live` que anuncia a revelação (a região tem de existir desde o parse
@@ -286,4 +304,4 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
 // sendo BAIXADOS quando elas terminam: ali a guarda daria falso e ninguém
 // tentaria de novo, deixando a página sem CTA nenhum com a flag ligada. Então
 // quem chegar por ÚLTIMO lê o estado que o outro deixou, seja qual for a ordem.
-if (window.pbPixState) pbPixInit(window.pbPixState.cfg, window.pbPixState.sub);
+if (window.pbPixState) pbPixInit(window.pbPixState.cfg, window.pbPixState.sub, window.pbPixState.resolvida);

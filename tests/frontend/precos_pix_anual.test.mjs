@@ -68,6 +68,10 @@ const CNPJ = "11222333000181";
  */
 async function abrirPrecos({
   sub = { active: false },
+  // O DESLOGADO não é `{active:false}` com 200: o /billing/subscription responde
+  // não-ok e o `loadSubscription` guarda `subState = null`. É o caso que separa
+  // "ainda não sei" de "sei que não tem assinatura" (PT19e).
+  subStatus = 200,
   plansConfig = { essencial_available: true, plus_available: true,
                   pro_available: true, pix_annual_available: true },
   pix = {},
@@ -95,7 +99,7 @@ async function abrirPrecos({
     contentType: "application/json", body: JSON.stringify(plansConfig),
   }));
   await page.route("**/billing/subscription", (r) => r.fulfill({
-    contentType: "application/json", body: JSON.stringify(sub),
+    status: subStatus, contentType: "application/json", body: JSON.stringify(sub),
   }));
   await page.route("**/billing/change-plan", (r) => {
     chamadas.changePlan += 1;
@@ -1550,4 +1554,67 @@ test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com
       "o botão Anual descreve um Pix que a página não vende");
     await semPix.page.close();
   }
+});
+
+/**
+ * PT19d–f — A ETIQUETA ESPERA SABER QUEM ESTÁ OLHANDO; O CTA NÃO.
+ *
+ * O `loadPlansState` publica o estado do Pix DUAS vezes: `publicarPix(null,
+ * false)` antes do /billing/subscription e `publicarPix(subState, true)` depois.
+ * A primeira existe para o CTA nascer cedo (PT15) e é deliberada — caminho de
+ * RESGATE de quem migra do cartão enquanto o Stripe está lento. Mas `sub = null`
+ * também é o valor do DESLOGADO, então o `pixAVenda()` lia o estado ainda
+ * desconhecido como elegível e a ETIQUETA — que é ANÚNCIO — subia para o
+ * vitalício até a requisição voltar. Se ela pendura, o anúncio fica.
+ *
+ * O conserto é o terceiro estado (`resolvida`), não um teste de `null`: testar
+ * `null` esconderia a etiqueta justamente de quem ela existe para convencer.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — tire o `&& pixSubResolvida` do `pbPixInit` (pix-checkout.js) ou
+ *     troque o `publicarPix(null, false)` da precos.html por `(null, true)`: o
+ *     PT19d fica VERMELHO, e ele é caso novo que já nasce verde com o conserto;
+ *   · positivo — PT19e (deslogado, que é 401 e não 200) e PT19f (assinante não
+ *     vitalício) provam que a etiqueta continua aparecendo para quem pode
+ *     comprar. Sem eles, `nota.hidden = true` fixo passaria no PT19d.
+ *
+ * Teto conhecido: erro de REDE no /billing/subscription conta como RESOLVIDO —
+ * o `loadSubscription` guarda `null` no `catch` igual ao 401 do deslogado, e é
+ * o deslogado que manda. Separar os dois pediria um sinal novo naquela função.
+ */
+test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, lifetime: true },
+    atrasos: { "/billing/subscription": 4000 },
+  });
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta anunciou Pix antes de saber se este usuário pode comprar");
+  await page.waitForTimeout(1500);
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta subiu durante a janela do /billing/subscription (1,5 s depois)");
+  // Âncora do PT15: o que espera é a ETIQUETA, não o CTA. Se este 3 virar 0, o
+  // conserto atropelou a migração cartão → Pix com o Stripe ruim.
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "o CTA de Pix passou a esperar o /billing/subscription");
+  await page.close();
+});
+
+test("PT19e: deslogado (401 no /billing/subscription) continua vendo a etiqueta", async () => {
+  const { page } = await abrirPrecos({ subStatus: 401, sub: { detail: "Não autenticado" } });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para o deslogado, que é o público que ela existe para convencer");
+  assert.equal(
+    await page.$eval("#cycle-annual", (e) => e.getAttribute("aria-describedby")),
+    "pix-cycle-note", "o vínculo com o botão Anual não voltou para o deslogado");
+  await page.close();
+});
+
+test("PT19f: assinante não vitalício vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, gateway: "stripe", plan: "plus", interval: "monthly" },
+  });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para quem PODE comprar o anual no Pix");
+  await page.close();
 });

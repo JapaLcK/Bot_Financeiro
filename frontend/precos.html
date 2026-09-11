@@ -1054,9 +1054,14 @@ async function cancelChange(btn) {
   // sendo baixados quando as requisições daqui terminam, e aí é o pix-checkout.js
   // que lê este estado ao carregar. Sem isso o `typeof` abaixo dava falso e
   // ninguém tentava de novo — página sem CTA de Pix com a flag ligada.
-  const publicarPix = (sub) => {
-    window.pbPixState = { cfg: cfgPlanos, sub };
-    if (typeof pbPixInit === "function") pbPixInit(cfgPlanos, sub);
+  // `resolvida` = o /billing/subscription já voltou. `sub: null` sozinho não diz
+  // isso: ele é o mesmo valor do DESLOGADO, que é quem a etiqueta do Pix existe
+  // para convencer. Sem este terceiro campo o pix-checkout.js não separa "ainda
+  // não sei" de "sei que não tem assinatura" — e viaja no `window.pbPixState`
+  // porque é por ele que o script que chega atrasado lê tudo.
+  const publicarPix = (sub, resolvida) => {
+    window.pbPixState = { cfg: cfgPlanos, sub, resolvida };
+    if (typeof pbPixInit === "function") pbPixInit(cfgPlanos, sub, resolvida);
   };
   try {
     const resp = await fetch("/billing/plans-config", { credentials: "same-origin" });
@@ -1078,12 +1083,18 @@ async function cancelChange(btn) {
     // cliente do Stripe aquela chamada consulta o Stripe e pode demorar ou
     // travar, e era justamente a migração cartão → Pix que ficava sem botão
     // enquanto o Stripe está ruim. Os rótulos ("Renovar", vitalício) são
-    // corrigidos na segunda chamada, quando a assinatura chega.
-    publicarPix(null);
+    // corrigidos na segunda chamada, quando a assinatura chega. A ETIQUETA do
+    // toggle não nasce aqui (`resolvida` falso): CTA é caminho de resgate, e
+    // etiqueta é anúncio — anunciar Pix ao vitalício enquanto o Stripe trava é
+    // vender o que o backend recusa com 409.
+    publicarPix(null, false);
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
     await loadSubscription();
     refreshPlanButtons();
-    publicarPix(subState);
+    // ponytail: erro de REDE aqui conta como resolvido — o `catch` do
+    // loadSubscription guarda o mesmo `null` do 401 do deslogado, e é o
+    // deslogado que manda. Separar os dois pede um sinal novo naquela função.
+    publicarPix(subState, true);
   } catch {}
 })();
 
