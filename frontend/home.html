@@ -1364,6 +1364,22 @@ async function awaitCheckoutConfirmation() {
       if (Date.now() >= deadline) break;
       await wait(1500);
     }
+    // UMA observação a mais antes de desistir, e ela é caminho de DINHEIRO.
+    //
+    // Medido: os polls saem em 571, 2102, …, 17289, 18795 ms e o redirect em
+    // 21140 ms. O último poll é aos 18,8 s; depois vem `await wait(1500)` com o
+    // `while` já falhando, então o último 1,2 s era TEMPO MORTO em que nada era
+    // observado. Resultado: webhook em 19 s — dentro da janela que o comentário
+    // promete — caía em `/precos?escolha=1`, segundos depois de a pessoa pagar,
+    // numa tela que diz "sua conta está sem plano ativo" com o checkout ao lado.
+    //
+    // Esta releitura fecha justamente esse intervalo: o veredito passa a ser o
+    // do ÚLTIMO `/auth/me`, não o de 1,5 s atrás. Custa uma request só no caso
+    // em que o polling não confirmou — quem já confirmou saiu pelo `break`.
+    if (!_checkoutSettled(me)) {
+      const ultimo = await _boundedAuthMe(3000);
+      if (ultimo) me = ultimo;
+    }
   } finally {
     _closeCheckoutOverlay();
   }
@@ -1412,6 +1428,23 @@ if (!window.__pbResetAtListener) {
    Guardamos o último resultado em sessionStorage (some ao fechar o app; nada
    gravado no disco a longo prazo) e pintamos na hora, revalidando em seguida. */
 const _HOME_CACHE_PREFIX = "pb_home_";
+
+/* Veredito negativo: reload não pode repintar saldo.
+   Gêmeo do `clearSessionSnapshots()` de `dashboard.js:407`, e a assimetria era
+   um defeito medido: o dashboard limpava antes de redirecionar e a Início não,
+   então o snapshot financeiro do próprio usuário continuava repintável a cada
+   recarga — com `SALDO R$ 4.242,42` na tela durante os ~21 s do polling.
+   Apaga os DOIS prefixos, como o irmão: `pb_home_` é desta página e `pb_snap_`
+   é do dashboard, e quem foi cortado sai dos dois. */
+function _limparSnapshots() {
+  try {
+    Object.keys(sessionStorage).forEach((k) => {
+      if (k.startsWith("pb_snap_") || k.startsWith(_HOME_CACHE_PREFIX)) {
+        sessionStorage.removeItem(k);
+      }
+    });
+  } catch {}
+}
 function _homeCacheKey(userId) { return _HOME_CACHE_PREFIX + userId; }
 function persistHomeCache(userId, snapshot, history, email, displayName, requestedAt) {
   if (!userId) return;
@@ -1544,15 +1577,31 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // pagar também tem `app_access` false), então quem decide é este ponto, que é
   // o único que tem o tempo de espera atrás de si.
   //
-  // RESÍDUO ACEITO: quem pagou e cujo webhook demorar MAIS que os ~20 s cai na
-  // /precos. Antes ficava na Início com as rotas de dados devolvendo 402 — uma
-  // tela vazia sem explicação. Trocamos "quebrado em silêncio" por "mandado pra
-  // uma tela que explica", e recarregar resolve assim que o webhook chega.
+  // RESÍDUO, e ele é MAIOR do que a versão anterior deste comentário dizia.
+  // Ela falava só de "quem pagou e cujo webhook demorar mais que ~20 s".
+  // Medido: **todo cortado** paga os ~21 s do polling em TODA recarga da
+  // Início, porque nunca satisfaz `_checkoutSettled` — e durante essa espera a
+  // página pinta o snapshot do próprio usuário. É o preço de o servidor não
+  // conseguir distinguir "acabou de pagar" de "digitou a URL": os dois chegam
+  // aqui sem direito, e só o tempo separa.
+  //
+  // Duas coisas o encurtam, e as duas estão feitas: o `_limparSnapshots()`
+  // abaixo impede que a recarga SEGUINTE repinte saldo (o dashboard já fazia
+  // isso, `dashboard.js:407` — a assimetria era o defeito), e a releitura do
+  // `/auth/me` no fim de `awaitCheckoutConfirmation` fecha o intervalo em que
+  // quem pagou perdia por 1,2 s de tempo morto.
+  //
+  // O que sobra: quem pagou e cujo webhook passar dos ~20 s cai na /precos.
+  // Antes ficava na Início com as rotas devolvendo 402 — tela vazia sem
+  // explicação. Trocamos "quebrado em silêncio" por "mandado pra uma tela que
+  // explica", e recarregar resolve assim que o webhook chega.
   if (me && me.needs_plan_selection) {
+    _limparSnapshots();
     window.location.replace("/precos?escolha=1");
     return;
   }
   if (me && me.app_access === false) {
+    _limparSnapshots();
     if (window.PB_IN_APP) {
       // App iOS: sem link de compra (diretriz 3.1.1 da App Store)
       document.getElementById("page-root").innerHTML = `

@@ -94,10 +94,17 @@ def test_cortado_digitando_tutorial_tambem_e_barrado(monkeypatch, bancada):
     assert "plano" in respostas[0].lower(), respostas
 
 
-def test_cortado_ainda_alcanca_o_menu_de_ajuda(monkeypatch, bancada):
-    """POSITIVO: a ajuda genérica EXPLICA sem mandar tentar, e continua aberta —
-    mesma razão do opt-out e do `/settings`. Sem este caso, "gatear o tutorial"
-    poderia ter fechado a ajuda junto."""
+def test_cortado_continua_recebendo_AJUDA_mas_a_dele(monkeypatch, bancada):
+    """POSITIVO, e a versão anterior deste caso PROVAVA O BUG.
+
+    Ele afirmava que o ramo do menu de ajuda era isento, e escolhia
+    `help_gastos` como id — com `help_tutorial` a mesma asserção teria mostrado
+    o tutorial saindo para conta cortada. Positivo que fixa o comportamento
+    errado é pior que positivo nenhum.
+
+    O que se mede agora é o certo: o cortado NÃO fica sem resposta (a ajuda é
+    saída de emergência, como o opt-out e o `/settings`) e o que ele recebe é a
+    seção `sem_acesso` — que explica sem mandar tentar."""
     respostas, _ = bancada
     uid = _conta(cortada=True)
     secoes: list[str] = []
@@ -110,7 +117,102 @@ def test_cortado_ainda_alcanca_o_menu_de_ajuda(monkeypatch, bancada):
 
     _clique(uid, monkeypatch, "help_gastos")
 
-    assert secoes == ["help_gastos"], f"a ajuda do cortado foi barrada: {respostas}"
+    assert secoes == [], f"o cortado recebeu a seção normal do menu: {secoes}"
+    assert respostas, "o cortado pediu ajuda e não recebeu nada"
+    assert "sem plano ativo" in respostas[0].lower(), respostas
+    assert "gastei" not in " ".join(respostas).lower(), respostas
+
+
+# ── As TRÊS portas que sobraram do conserto anterior ─────────────────────────
+#
+# Gatear o BOTÃO do tutorial e o texto `tutorial` fechou duas entradas e deixou
+# três, todas medidas com conta cortada real:
+#
+#   (a) o item "🚀 Tutorial" do MENU de ajuda — o menu é uma LISTA, não
+#       `button_reply`, então `get_tutorial_button_id` devolve `None` e a
+#       mensagem cai no ramo do menu, que estava isento;
+#   (b) `ajuda tutorial` / `help tutorial` / `ajuda guia` — `classify` os chama
+#       de `help` (regra `^(ajuda|help)\s+\w+`) e `resolve_section` devolve
+#       `"tutorial"`. Decidir pelo CLASSIFICADOR era a pergunta errada;
+#   (c) a SAUDAÇÃO depois do auto-link, acima de tudo no arquivo.
+#
+# O conserto não fecha as três portas: move a decisão para o DESTINO. Se vai
+# renderizar ajuda, o cortado recebe a seção `sem_acesso` — venha ele por onde
+# vier, nos dois canais.
+#
+# CONTROLE DECLARADO (`docs/controles_declarados.md`) — em `core/help_text.py`,
+# troque o corpo da seção `sem_acesso` pelo da `start` (troca de VALOR; a seção
+# continua existindo e o gate continua roteando para ela). VERMELHOS:
+#   `test_a_ajuda_do_cortado_nao_manda_tentar_comando`
+#   `test_a_ajuda_do_cortado_nao_aponta_pro_tutorial`
+# Direção: o cortado é mandado a tentar um comando que o gate recusa — e a
+# apontar para a palavra que devolve o paywall. A pior ordem das duas mensagens.
+
+
+def test_cortado_tocando_TUTORIAL_no_menu_de_ajuda_nao_recebe_o_tour(monkeypatch, bancada):
+    """Porta (a): o item do menu é LISTA, não botão — escapava do gate do botão."""
+    respostas, _ = bancada
+    uid = _conta(cortada=True)
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "get_tutorial_button_id", lambda raw: None)
+    monkeypatch.setattr(wr, "get_help_menu_id", lambda raw: "help_tutorial")
+    monkeypatch.setattr(wr, "send_help_section", lambda to, hid: (
+        _ for _ in ()).throw(AssertionError("o cortado recebeu a seção do menu")))
+
+    _clique(uid, monkeypatch, "help_tutorial")
+
+    assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
+
+
+def test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour(monkeypatch, bancada):
+    """Porta (c): a saudação, no topo do arquivo, antes de qualquer gate."""
+    respostas, _ = bancada
+    uid = _conta(cortada=True)
+
+    import adapters.whatsapp.wa_runtime as wr
+    monkeypatch.setattr(wr, "send_welcome", lambda *a, **k: (
+        _ for _ in ()).throw(AssertionError("o cortado recebeu o welcome")))
+    monkeypatch.setattr(wr, "attempt_whatsapp_phone_link",
+                        lambda wa_id, current_user_id=None: {"status": "linked",
+                                                             "user_id": uid})
+    monkeypatch.setattr(wr, "get_or_create_canonical_user",
+                        lambda provider, external_id: uid)
+    from adapters.whatsapp.wa_parse import InboundMessage
+    import uuid as _uuid
+    wr.process_message(InboundMessage(
+        wa_id="5511999990000", text="oi", timestamp="1", attachments=[],
+        raw={"id": f"wamid.{_uuid.uuid4().hex[:10]}", "type": "text"}))
+
+    assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
+
+
+def test_a_ajuda_do_cortado_nao_manda_tentar_comando():
+    """Porta (d), a que o próprio conserto anterior abriu: a ajuda GENÉRICA que
+    ficou isenta dizia "• `gastei 50 mercado`". Convidar a tentar e recusar em
+    seguida é a pior ordem possível das duas mensagens."""
+    from core.help_text import render_help
+    texto = render_help("sem_acesso", "whatsapp").lower()
+    for instrucao in ("gastei ", "recebi ", "tente", "experimenta"):
+        assert instrucao not in texto, f"a ajuda do cortado manda tentar: {texto}"
+
+
+def test_a_ajuda_do_cortado_nao_aponta_pro_tutorial():
+    """E não manda digitar a palavra que devolve o paywall."""
+    from core.help_text import render_help
+    assert "tutorial" not in render_help("sem_acesso", "whatsapp").lower()
+
+
+def test_a_ajuda_do_cortado_diz_o_que_importa():
+    """POSITIVO do par: ela não pode ter virado uma parede.
+
+    As três coisas que quem foi cortado precisa: por que parou, que os dados
+    estão guardados, e para onde ir."""
+    from core.help_text import render_help
+    texto = render_help("sem_acesso", "whatsapp").lower()
+    assert "sem plano ativo" in texto, texto
+    assert "guardados" in texto, texto
+    assert "precos" in texto, texto
 
 
 def test_pagante_continua_vendo_o_tutorial(monkeypatch, bancada):

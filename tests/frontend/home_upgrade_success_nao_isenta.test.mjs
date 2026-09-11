@@ -63,8 +63,9 @@ after(async () => { await browser?.close(); server?.kill(); });
  * rodar os 20 s. O que está sob teste é a decisão DEPOIS da espera, não a
  * duração dela.
  */
-async function abrirHome(me) {
+async function abrirHome(me, antes = null) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  if (antes) await antes(page);
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== ORIGIN) return route.abort();
@@ -75,7 +76,7 @@ async function abrirHome(me) {
     route.fulfill({ status: 200, contentType: "application/javascript",
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
-  await page.route("**/auth/me", (route) => route.fulfill(json(me)));
+  if (me) await page.route("**/auth/me", (route) => route.fulfill(json(me)));
   await page.goto(`${ORIGIN}/home.html?upgrade=success`);
   return page;
 }
@@ -98,11 +99,21 @@ async function destino(page, timeout = 12000) {
 }
 
 // Plano pago e vigente: `_checkoutSettled` devolve true e o polling sai na 1ª
-// volta. É o que torna estes casos rápidos.
-const SETTLED = { user_id: 1, plan: "pro", plan_expires_at: null };
+// volta. Só para o caso em que o webhook JÁ caiu.
+const PAGO = { user_id: 1, plan: "pro", plan_expires_at: null };
+
+// O CORTADO DE VERDADE. A versão anterior deste arquivo usava
+// `{plan:"pro", plan_expires_at:null, app_access:false}` — estado que o
+// servidor NUNCA produz: `plan_expires_at` nulo é vitalício, então
+// `has_app_access` devolve True (medido). O efeito colateral era pior que a
+// imprecisão: com aquele corpo o `_checkoutSettled` era verdadeiro, o polling
+// saía na PRIMEIRA volta e os casos nunca exercitavam a espera — exatamente o
+// trecho onde mora o bug do pagante de 19 s.
+const CORTADO = { user_id: 1, plan: "free", plan_expires_at: null,
+                  app_access: false };
 
 test("cortado com ?upgrade=success vai pra /precos depois do polling", async () => {
-  const page = await abrirHome({ ...SETTLED, app_access: false });
+  const page = await abrirHome(CORTADO);
   const url = await destino(page);
   assert.match(url, /^\/precos/,
     `o cortado ficou na Início com ?upgrade=success: ${url}`);
@@ -110,10 +121,28 @@ test("cortado com ?upgrade=success vai pra /precos depois do polling", async () 
   await page.close();
 });
 
+test("cortado com ?upgrade=success não deixa snapshot repintável", async () => {
+  // O gêmeo do `clearSessionSnapshots()` de `dashboard.js:407`. A assimetria
+  // era medida: o dashboard limpava antes de redirecionar e a Início não, então
+  // o saldo do próprio usuário voltava à tela a cada recarga durante os ~21 s.
+  const page = await abrirHome(CORTADO, (p) =>
+    p.addInitScript(() => {
+      sessionStorage.setItem("pb_home_1", JSON.stringify({ saldo: 4242.42 }));
+      sessionStorage.setItem("pb_snap_1_2026_9", JSON.stringify({ x: 1 }));
+    }));
+  await destino(page);
+  const sobrou = await page.evaluate(() => Object.keys(sessionStorage)
+    .filter((k) => k.startsWith("pb_home_") || k.startsWith("pb_snap_")));
+  assert.deepEqual(sobrou, [],
+    `snapshot sobreviveu ao veredito negativo e repinta no reload: ${sobrou}`);
+  await page.close();
+});
+
 test("cadastro sem plano com ?upgrade=success vai pra /precos depois do polling", async () => {
   // A outra perna. Sem este caso, um conserto que mexesse só no `app_access`
   // deixaria a da ESCOLHA aberta — "achei um caso" ≠ "resolvi a categoria" (§2).
-  const page = await abrirHome({ ...SETTLED, needs_plan_selection: true });
+  const page = await abrirHome({ user_id: 1, plan: "free", plan_expires_at: null,
+                                 needs_plan_selection: true });
   const url = await destino(page);
   assert.match(url, /^\/precos/,
     `o cadastro sem plano ficou na Início com ?upgrade=success: ${url}`);
@@ -124,9 +153,39 @@ test("cadastro sem plano com ?upgrade=success vai pra /precos depois do polling"
 test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
   // POSITIVO: é o que o bypass existe para proteger. Se este caso ficar
   // vermelho, o conserto passou a barrar cliente pagante — pior que o furo.
-  const page = await abrirHome({ ...SETTLED, app_access: true,
+  const page = await abrirHome({ ...PAGO, app_access: true,
                                  needs_plan_selection: false });
   const url = await destino(page, 4000);
   assert.match(url, /^\/home/, `quem pagou foi expulso da Início: ${url}`);
+  await page.close();
+});
+
+test("pagante cujo webhook cai NO FIM da janela continua na Início", async () => {
+  // O caso de DINHEIRO, e o que a bateria anterior não tinha: o `/auth/me`
+  // responde "sem plano" até o webhook cair, e o veredito final tem de ser o
+  // ÚLTIMO que o servidor deu, não o de 1,5 s atrás.
+  //
+  // Medido antes do conserto: polls em 571…18795 ms, redirect em 21140 ms —
+  // o último 1,2 s era tempo morto, e webhook em 19 s (DENTRO da janela que o
+  // comentário promete) caía em `/precos?escolha=1`, segundos depois de pagar.
+  //
+  // O relógio é falso (`page.clock`) porque o caso real custa 20 s de parede.
+  let confirmado = false;
+  const page = await abrirHome(null, async (p) => {
+    await p.clock.install();
+    await p.route("**/auth/me", (route) => route.fulfill(json(
+      confirmado ? { ...PAGO, app_access: true }
+                 : { user_id: 1, plan: "free", plan_expires_at: null,
+                     app_access: false })));
+  });
+  // Avança até depois do último poll da versão antiga (18,8 s) e confirma o
+  // webhook ali — o ponto exato em que o pagante era expulso.
+  await page.clock.runFor(19000);
+  confirmado = true;
+  await page.clock.runFor(4000);
+
+  const url = await destino(page, 4000);
+  assert.match(url, /^\/home/,
+    `pagante com webhook no fim da janela foi mandado pra ${url}`);
   await page.close();
 });
