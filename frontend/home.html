@@ -706,6 +706,11 @@ function csrfHeaders(extra = {}) {
   return csrf ? { ...extra, "X-CSRF-Token": csrf } : { ...extra };
 }
 
+// O `detail` do 422 do FastAPI é uma LISTA de objetos ({loc,msg,type,input}):
+// truthy, e na tela vira "[object Object]". Só string passa; o resto cai no
+// fallback de cada chamada. Mesma regra do `_errDetail` (dashboard.js).
+function strDetail(d) { return d && typeof d.detail === "string" ? d.detail : ""; }
+
 function shortAccount(email) {
   if (!email) return "Minha conta";
   const [name] = email.split("@");
@@ -885,7 +890,7 @@ async function connectWhatsAppFromHome(event) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.whatsapp_link) {
-      await alertModal(data.detail || "Não foi possível gerar seu link do WhatsApp agora.", { title: "WhatsApp" });
+      await alertModal(strDetail(data) || "Não foi possível gerar seu link do WhatsApp agora.", { title: "WhatsApp" });
       return;
     }
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
