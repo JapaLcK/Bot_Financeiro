@@ -1,7 +1,12 @@
 """Contrato de instalação do Microsoft Clarity nas páginas públicas seguras."""
 
 import ast
+import json
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from frontend.routes import shared
 
@@ -50,6 +55,50 @@ def test_snippet_do_clarity_usa_o_projeto_configurado(monkeypatch):
 def test_staging_desliga_o_snippet_do_clarity(monkeypatch):
     monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", "")
     assert shared.clarity_snippet() == ""
+
+
+def _scripts_carregados_do_clarity(url: str, referrer: str) -> list[str]:
+    """Executa o snippet real e observa se ele tenta inserir a tag externa."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node não disponível nesta máquina")
+    inline = shared.clarity_snippet().split("<script>", 1)[1].split("</script>", 1)[0]
+    programa = (
+        "global.window = global;\n"
+        f"global.location = {{ href: {json.dumps(url)}, origin: 'https://pigbankai.com' }};\n"
+        f"global.document = {{ referrer: {json.dumps(referrer)}, "
+        "createElement: function(){ return {}; }, "
+        "getElementsByTagName: function(){ return [{ parentNode: { "
+        "insertBefore: function(tag){ global.carregados.push(tag.src); } }]; } };\n"
+        "global.carregados = [];\n"
+        f"{inline}\n"
+        "console.log(JSON.stringify(global.carregados));\n"
+    )
+    saida = subprocess.run([node, "-e", programa], capture_output=True, text=True, timeout=30)
+    assert saida.returncode == 0, saida.stderr
+    return json.loads(saida.stdout)
+
+
+def test_clarity_nao_carrega_com_referrer_mesma_origem_e_token(monkeypatch):
+    monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", _PROJECT_ID)
+
+    scripts = _scripts_carregados_do_clarity(
+        "https://pigbankai.com/",
+        "https://pigbankai.com/completar-cadastro?token=SEGREDO-123",
+    )
+
+    assert scripts == []
+
+
+def test_clarity_carrega_sem_credencial_no_referrer(monkeypatch):
+    monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", _PROJECT_ID)
+
+    scripts = _scripts_carregados_do_clarity(
+        "https://pigbankai.com/",
+        "https://pigbankai.com/completar-cadastro",
+    )
+
+    assert scripts == [f"https://www.clarity.ms/tag/{_PROJECT_ID}"]
 
 
 def test_html_so_injeta_clarity_por_opt_in(monkeypatch):
