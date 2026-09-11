@@ -6,8 +6,8 @@
  * ║ NEGATIVO. Ele passa COM e SEM o conserto do PR, e isso é o esperado:    ║
  * ║ sob a decisão (a) — canonizar no SERVIDOR, sem tocar no home.html — o   ║
  * ║ navegador NUNCA VÊ a forma legada. O vermelho que prova o conserto mora ║
- * ║ em N1/N2 do grupo Python (`tests/test_tipo_legado_no_dashboard.py`,     ║
- * ║ `test_projecao_nao_devolve_forma_legada_nenhuma` e                      ║
+ * ║ em N1/N2 de `tests/test_tipo_legado_na_projecao_do_dashboard.py`        ║
+ * ║ (`test_projecao_nao_devolve_forma_legada_nenhuma` e                     ║
  * ║ `test_projecao_colapsa_saida_em_despesa_sem_tocar_no_valor`), que ficam ║
  * ║ vermelhos ao reverter a projeção da query 4.                            ║
  * ║                                                                          ║
