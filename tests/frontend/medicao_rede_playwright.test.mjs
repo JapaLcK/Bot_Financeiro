@@ -22,14 +22,16 @@ test("conta bytes recebidos antes de uma resposta ser abortada", async () => {
     requestId: "video", request: { url: "https://pigbankai.com/brand/vsl.mp4" }, type: "Media",
   });
   cdp.emitir("Network.responseReceived", {
-    requestId: "video", type: "Media", response: { url: "https://pigbankai.com/brand/vsl.mp4", status: 206 },
+    requestId: "video", type: "Media",
+    response: { url: "https://pigbankai.com/brand/vsl.mp4", status: 206, encodedDataLength: 96 },
   });
   cdp.emitir("Network.dataReceived", { requestId: "video", encodedDataLength: 512 });
+  assert.equal(rede.recursos()[0].bytes, 608, "resposta aberta inclui cabeçalhos e corpo");
   cdp.emitir("Network.loadingFailed", { requestId: "video" });
 
   assert.deepEqual(rede.recursos(), [{
     url: "https://pigbankai.com/brand/vsl.mp4", tipo: "Media", status: 206,
-    bytes: 512, estado: "interrompido",
+    bytes: 608, estado: "interrompido",
   }]);
 });
 
@@ -43,6 +45,11 @@ test("considera a contagem final do CDP para recursos concluídos", async () => 
   cdp.emitir("Network.requestWillBeSent", {
     requestId: "css", request: { url: "https://pigbankai.com/style.css" }, type: "Stylesheet",
   });
+  cdp.emitir("Network.responseReceived", {
+    requestId: "css", type: "Stylesheet",
+    response: { url: "https://pigbankai.com/style.css", status: 200, encodedDataLength: 32 },
+  });
+  cdp.emitir("Network.dataReceived", { requestId: "css", encodedDataLength: 96 });
   cdp.emitir("Network.loadingFinished", { requestId: "css", encodedDataLength: 128 });
 
   assert.equal(rede.recursos()[0].bytes, 128);

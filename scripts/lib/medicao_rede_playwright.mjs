@@ -44,6 +44,9 @@ export async function instrumentarRede(page, { throttle, rede }) {
     recurso.url = evento.response.url;
     recurso.tipo = evento.type || recurso.tipo;
     recurso.status = evento.response.status;
+    // O acumulado inicial inclui os cabeçalhos; os próximos dataReceived
+    // acrescentam o corpo. loadingFinished reconcilia o total sem somá-lo de novo.
+    recurso.bytes = Math.max(recurso.bytes, evento.response.encodedDataLength || 0);
   });
   cdp.on("Network.dataReceived", evento => {
     const recurso = atual(evento.requestId);
