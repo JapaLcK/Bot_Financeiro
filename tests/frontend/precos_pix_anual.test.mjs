@@ -72,6 +72,7 @@ async function abrirPrecos({
   // não-ok e o `loadSubscription` guarda `subState = null`. É o caso que separa
   // "ainda não sei" de "sei que não tem assinatura" (PT19e).
   subStatus = 200,
+  subRoute = null,
   plansConfig = { essencial_available: true, plus_available: true,
                   pro_available: true, pix_annual_available: true },
   pix = {},
@@ -98,9 +99,9 @@ async function abrirPrecos({
   await page.route("**/billing/plans-config", (r) => r.fulfill({
     contentType: "application/json", body: JSON.stringify(plansConfig),
   }));
-  await page.route("**/billing/subscription", (r) => r.fulfill({
+  await page.route("**/billing/subscription", subRoute || ((r) => r.fulfill({
     status: subStatus, contentType: "application/json", body: JSON.stringify(sub),
-  }));
+  })));
   await page.route("**/billing/change-plan", (r) => {
     chamadas.changePlan += 1;
     return r.fulfill({ contentType: "application/json", body: "{}" });
@@ -1560,7 +1561,7 @@ test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com
  * PT19d–f — A ETIQUETA ESPERA SABER QUEM ESTÁ OLHANDO; O CTA NÃO.
  *
  * O `loadPlansState` publica o estado do Pix DUAS vezes: `publicarPix(null,
- * false)` antes do /billing/subscription e `publicarPix(subState, true)` depois.
+ * false)` antes do /billing/subscription e `publicarPix(subState, resolvida)` depois.
  * A primeira existe para o CTA nascer cedo (PT15) e é deliberada — caminho de
  * RESGATE de quem migra do cartão enquanto o Stripe está lento. Mas `sub = null`
  * também é o valor do DESLOGADO, então o `pixAVenda()` lia o estado ainda
@@ -1578,9 +1579,12 @@ test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com
  *     vitalício) provam que a etiqueta continua aparecendo para quem pode
  *     comprar. Sem eles, `nota.hidden = true` fixo passaria no PT19d.
  *
- * Teto conhecido: erro de REDE no /billing/subscription conta como RESOLVIDO —
- * o `loadSubscription` guarda `null` no `catch` igual ao 401 do deslogado, e é
- * o deslogado que manda. Separar os dois pediria um sinal novo naquela função.
+ * PT19g fecha a outra metade: a consulta que FALHA (5xx, rede fora, JSON
+ * malformado) também guarda `subState = null`, e chamá-la de resolvida deixava o
+ * anúncio de pé para o vitalício indefinidamente. O sinal é o retorno novo do
+ * `loadSubscription` — 200 com JSON válido e 401 resolvem, o resto não.
+ * Negativo dele: troque o `publicarPix(subState, resolvida)` da precos.html de
+ * volta por `(subState, true)` — PT19g fica VERMELHO e PT19d/e/f seguem verdes.
  */
 test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
   const { page } = await abrirPrecos({
@@ -1618,3 +1622,21 @@ test("PT19f: assinante não vitalício vê a etiqueta", async () => {
     "a etiqueta sumiu para quem PODE comprar o anual no Pix");
   await page.close();
 });
+
+// Falha de consulta não identifica o visitante; o CTA continua nascendo cedo.
+for (const [nome, subRoute] of [
+  ["500", (r) => r.fulfill({ status: 500, body: "erro interno" })],
+  ["403", (r) => r.fulfill({ status: 403, body: "proibido" })],
+  ["rede", (r) => r.abort()],
+  ["JSON malformado", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{" })],
+]) {
+  test(`PT19g: /billing/subscription em ${nome} não resolve — a etiqueta não aparece`, async () => {
+    const { page } = await abrirPrecos({ subRoute });
+    assert.equal(await etiquetaVisivel(page), false,
+      "a falha do /billing/subscription foi lida como 'sem assinatura' e anunciou Pix");
+    await page.click("#cycle-annual");
+    assert.equal(await contarCtas(page), 3,
+      "o CTA de resgate morreu junto com a etiqueta quando a consulta falhou");
+    await page.close();
+  });
+}

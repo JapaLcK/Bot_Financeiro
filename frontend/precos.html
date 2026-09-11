@@ -803,6 +803,7 @@ function updateCmpFade() {
 // (/billing/subscription) diz o plano atual e se há troca agendada; os botões
 // dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
 let subState = null;
+let cancelChangePending = false;
 const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
 const PLAN_PRICES = {
   essencial: { monthly: "R$ 9,90/mês", annual: "R$ 99/ano" },
@@ -827,12 +828,14 @@ function fmtBrDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Só uma resposta válida ou o 401 do deslogado resolve a elegibilidade do Pix.
 async function loadSubscription() {
   try {
     const r = await fetch("/billing/subscription", { credentials: "same-origin" });
-    if (!r.ok) { subState = null; return; }
-    subState = await r.json();
-  } catch { subState = null; }
+    if (!r.ok) { subState = null; return r.status === 401; }
+    subState = await r.json();   // JSON malformado lança → catch → não resolvida
+    return true;
+  } catch { subState = null; return false; }
 }
 
 function refreshPlanButtons() {
@@ -859,7 +862,7 @@ function refreshPlanButtons() {
     }
     const sc = subState.scheduled_change;
     if (sc && sc.plan === p) {
-      btn.disabled = false;
+      btn.disabled = cancelChangePending;
       btn.textContent = `Agendado pra ${fmtBrDate(sc.effective_at)} ✓ · desfazer`;
       btn.onclick = function () { cancelChange(btn); };
       return;
@@ -943,8 +946,11 @@ function openChangeModal(plan) {
   document.getElementById("chg-overlay").style.display = "flex";
 }
 
+// A operação sobrevive à remontagem dos cards e é compartilhada com a tabela.
 async function cancelChange(btn) {
-  btn.disabled = true;
+  if (cancelChangePending) return;
+  cancelChangePending = true;
+  refreshPlanButtons();
   try {
     const r = await fetch("/billing/cancel-change", {
       method: "POST", credentials: "same-origin",
@@ -953,15 +959,19 @@ async function cancelChange(btn) {
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
       showToast((d.detail && d.detail.message) || "Não consegui desfazer.", "err");
-      btn.disabled = false;
       return;
     }
     showToast("Troca desfeita. Seu plano continua como está.");
     await loadSubscription();
-    refreshPlanButtons();
   } catch {
     showToast("Erro de conexão. Tente novamente.", "err");
-    btn.disabled = false;
+  } finally {
+    cancelChangePending = false;
+    // A releitura pode falhar: libere também o botão atual quando subState é null.
+    document.querySelectorAll("[data-plan-btn]").forEach(b => {
+      if (b.dataset.planBtn === btn.dataset.planBtn) b.disabled = false;
+    });
+    refreshPlanButtons();
   }
 }
 
@@ -1054,8 +1064,8 @@ async function cancelChange(btn) {
   // sendo baixados quando as requisições daqui terminam, e aí é o pix-checkout.js
   // que lê este estado ao carregar. Sem isso o `typeof` abaixo dava falso e
   // ninguém tentava de novo — página sem CTA de Pix com a flag ligada.
-  // `resolvida` = o /billing/subscription já voltou. `sub: null` sozinho não diz
-  // isso: ele é o mesmo valor do DESLOGADO, que é quem a etiqueta do Pix existe
+  // `resolvida` = resposta válida ou 401 do /billing/subscription.
+  // `sub: null` sozinho não diz isso: ele é o mesmo valor do DESLOGADO, que é quem a etiqueta do Pix existe
   // para convencer. Sem este terceiro campo o pix-checkout.js não separa "ainda
   // não sei" de "sei que não tem assinatura" — e viaja no `window.pbPixState`
   // porque é por ele que o script que chega atrasado lê tudo.
@@ -1089,12 +1099,12 @@ async function cancelChange(btn) {
     // vender o que o backend recusa com 409.
     publicarPix(null, false);
     // Assinante logado: botões viram "Seu plano atual / Trocar / Agendado".
-    await loadSubscription();
+    const resolvida = await loadSubscription();
     refreshPlanButtons();
-    // ponytail: erro de REDE aqui conta como resolvido — o `catch` do
-    // loadSubscription guarda o mesmo `null` do 401 do deslogado, e é o
-    // deslogado que manda. Separar os dois pede um sinal novo naquela função.
-    publicarPix(subState, true);
+    // `resolvida`, não `true`: 5xx, rede fora e JSON malformado guardam o mesmo
+    // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a
+    // etiqueta ao vitalício indefinidamente sempre que a consulta falhasse.
+    publicarPix(subState, resolvida);
   } catch {}
 })();
 

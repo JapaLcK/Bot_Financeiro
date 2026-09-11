@@ -452,26 +452,8 @@ test("PI8: com o bundle lento, o botão de TROCA não vira checkout novo", async
  *   `pixCriarCta`          2º `<button>` no card → o card sai do contrato e NÃO se
  *                          monta (é o PI6); e ele carrega depois do bundle.
  *   `startCheckout`        guarda a REFERÊNCIA do nó através do fetch → este caso.
- *   `cancelChange`         guarda a referência igual, mas o `refreshPlanButtons`
- *                          pós-mount reemite o `disabled=false` dele; o que sobra
- *                          é a guarda de duplo clique perdida DURANTE o voo — um 2º
- *                          POST em `/billing/cancel-change` numa operação que JÁ deu
- *                          certo. NÃO é um "POST idempotente": o endpoint
- *                          `cancel_change` (`finance_bot_websocket_custom.py`) devolve
- *                          ERRO no 2º, por um de dois ramos — 502 se o
- *                          `stripe.SubscriptionSchedule.release` recusar soltar um
- *                          schedule já solto, ou 400 `no_change` se a releitura da
- *                          assinatura não trouxer mais `schedule`. Qual dos dois
- *                          dispara é LEITURA do código, não medição: a Stripe não foi
- *                          exercitada aqui, e o `cancelChange` também não tem teste.
- *                          No ramo 502 o `detail` é string, então o
- *                          `d.detail && d.detail.message` do `cancelChange`
- *                          (`precos.html`) dá `undefined` e o usuário lê o genérico
- *                          "Não consegui desfazer." — com `btn.disabled = false` logo
- *                          depois, convidando a uma 3ª tentativa. Teto conhecido,
- *                          aberto de propósito: o dano é MENSAGEM DE FALHA FALSA sobre
- *                          uma troca que foi desfeita, sem perda de dinheiro e sem
- *                          duplo efeito (o `release` não se reaplica).
+ *   `cancelChange`         operação compartilhada entre card e tabela; a guarda
+ *                          cancelChangePending sobrevive ao mount (PI11).
  *   `document.activeElement`  o FOCO, que não é escrita de ninguém desta lista:
  *                          é estado do NAVEGADOR e some quando o `createRoot`
  *                          limpa o container → é o PI10, com a varredura do
@@ -764,3 +746,70 @@ test("PO2: em 1024px o destaque é o card mais alto, com bases alinhadas", async
     `o destaque (${r.alturas[r.destaque]}px) não é mais alto que todos: ${r.alturas.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);
 });
+
+// PI11: o cancelamento atravessa o mount sem duplicar POST; após falha pode repetir.
+// Negativo: com o HTML anterior à correção, card e tabela repetem o POST.
+for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
+  for (const falha of [false, true]) {
+    test(`PI11: desfazer troca em ${largura}px com bundle ${atrasoBundle}ms e resposta ${falha ? 500 : 200}`, async () => {
+      const pagina = await browser.newPage({ viewport: { width: largura, height: 900 } });
+      let posts = 0, agendada = true, liberar;
+      const resposta = new Promise((ok) => { liberar = ok; });
+      await pagina.addInitScript(() => {
+        new MutationObserver((_, obs) => {
+          const b = document.querySelector('#plans-v2 [data-plan-btn="pro"]');
+          if (b) { window.__noDoServidor = b; obs.disconnect(); }
+        }).observe(document, { subtree: true, childList: true });
+      });
+      await pagina.route("**/billing/plans-config", (r) => r.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+      }));
+      await pagina.route("**/billing/subscription", (r) => r.fulfill({
+        contentType: "application/json", body: JSON.stringify({ ...SUB_STRIPE,
+          scheduled_change: agendada ? { plan: "pro", effective_at: "2026-10-01" } : null }),
+      }));
+      await pagina.route("**/billing/cancel-change", async (r) => {
+        posts += 1;
+        await resposta;
+        if (!falha) agendada = false;
+        await r.fulfill({ status: falha ? 500 : 200, contentType: "application/json", body: "{}" });
+      });
+      if (atrasoBundle) await pagina.route("**/precos-app.js*", async (r) => {
+        await new Promise((ok) => setTimeout(ok, atrasoBundle));
+        await r.fallback();
+      });
+      try {
+        await pagina.goto(`${ORIGIN}/precos.html`, { waitUntil: "commit" });
+        if (!atrasoBundle) await pagina.waitForLoadState("load");
+        const alvo = '#plans-v2 [data-plan-btn="pro"]';
+        await pagina.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes("desfazer"), alvo);
+        const antesDoMount = await pagina.$eval(alvo, (b) => {
+          const antes = b === window.__noDoServidor;
+          b.click();
+          return antes;
+        });
+        assert.equal(antesDoMount, !!atrasoBundle, "o clique precisa cair do lado esperado do mount");
+        await pagina.waitForLoadState("load");
+        assert.equal(await pagina.evaluate(() => window.__noDoServidor.isConnected), false);
+        await pagina.$eval(alvo, (b) => b.click());
+        // O botão equivalente na tabela também não pode duplicar a operação.
+        await pagina.$eval('.cmp-table [data-plan-btn="pro"]', (b) => b.click());
+        await pagina.waitForTimeout(100);
+        assert.equal(posts, 1, "o cancelamento foi reenviado durante a mesma operação");
+        liberar();
+        await pagina.waitForFunction((sel) => !document.querySelector(sel).disabled, alvo);
+        if (falha) {
+          await pagina.$eval(alvo, (b) => b.click());
+          await pagina.waitForTimeout(100);
+          assert.equal(posts, 2, "uma falha não pode bloquear a tentativa seguinte");
+        } else {
+          assert.equal(await pagina.locator(alvo).innerText(), "Trocar pro Pro");
+        }
+      } finally {
+        liberar();
+        await pagina.close();
+      }
+    });
+  }
+}
