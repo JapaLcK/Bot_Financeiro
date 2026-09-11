@@ -42,8 +42,10 @@ core/
   intent_classifier.py    — classificação de intenção
   intent_router.py        — despacho por intenção
   handlers/               — handlers por domínio do fluxo de mensagem
-  services/               — 35 módulos + 2 pacotes: e-mail, Pluggy, planos, push,
-                            agentes, agendadores, OFX, PIX, categorias, cartão…
+  services/               — e-mail, Pluggy, planos, push, agentes, agendadores,
+                            OFX, PIX, categorias, cartão… (quantos: `ls
+                            core/services/*.py | wc -l`; o número que estava
+                            aqui dizia 35 e envelheceu no PR seguinte — §2)
   reports/                — relatório diário (reports_daily.py)
   crypto.py, audit.py     — PII cifrada e trilha de auditoria
 
@@ -156,19 +158,27 @@ pagamento/cancelamento (`clear_past_due_since`, que os ramos `checkout` e
 decidiu o acesso). Os três helpers moram em `db/dunning.py`, não em `db/plans.py`.
 `DUNNING_GRACE_DAYS = 7` é a carência.
 
-**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna
-alimenta **três** coisas: o **lembrete de pagamento do 6º dia**
+**Ninguém perde acesso POR INADIMPLÊNCIA** — o relógio só CONCEDE tempo. Desde
+o corte do Grátis (#274/#354) existe gate de acesso, e a autoridade dele é o
+DIREITO pago (`plan_service.has_app_access` → `tem_direito_hoje`), nunca o
+status de cobrança. A coluna alimenta **três** coisas: o **lembrete de pagamento
+do 6º dia**
 (`core/services/payment_reminder.py`, no tick de `engagement_scheduler`; e-mail
 sempre, WhatsApp só se `WA_TEMPLATE_PAYMENT_REMINDER` apontar para um template
 aprovado na Meta — vazio por padrão → caminho dormente), a janela de dedupe do
 e-mail de falha no webhook e o predicado `carencia_aberta`, lado DIREITO do OR
 de `plan_service.tem_direito_hoje` (o relógio só CONCEDE tempo; a autoridade é
 o direito pago), consumido pelo aviso de corte
-(`scripts/aviso_fim_do_gratis.py`). O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
+(`scripts/aviso_fim_do_gratis.py`) **e pelo GATE DE ACESSO** — `has_app_access`,
+e por ele os quatro enforcements (HTML, rotas de dados, WebSocket, bot) mais o
+filtro dos relatórios proativos. Freio de emergência do gate:
+`ACCESS_GATE_ENABLED=0`, gêmeo exato do `PLANS_V2_ENABLED`. O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
 (**default off**, lida a cada tick, sem redeploy; a guarda é a 1ª linha de
 `check_payment_reminder`, então desligada nem consulta o funil). Grant
-`pix`/`admin` vigente pula o lembrete (`legacy` não). Nenhuma copy deste caminho
-pode prometer pausa ou perda de acesso.
+`pix`/`admin` vigente pula o lembrete (`legacy` não). **A copy do LEMBRETE
+continua proibida de prometer pausa ou perda de acesso** — ele sai no 6º dia,
+dentro da carência, com o acesso ainda de pé. Quem PODE falar em perda são o
+e-mail de falha e o de cancelamento, reescritos no PR do corte (#354).
 
 **A INVARIANTE**: `past_due_since` não nulo só existe em conta com
 `last_payment_status` em `PAST_DUE_PAYMENT_STATUSES`. Ela é mantida na ESCRITA,

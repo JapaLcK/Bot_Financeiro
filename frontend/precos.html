@@ -991,11 +991,58 @@ async function cancelChange(btn) {
   // (routes/shared.py), então quem abre a /precos de dentro dele está travado
   // como qualquer um. Esconder o mandato deixaria a tela sem explicar por que
   // o dashboard não abre.
-  if (!me || !me.needs_plan_selection) return;  // copy padrão
+  if (!me) return;
   const sub = document.getElementById("precos-sub");
-  if (sub) sub.textContent =
-    "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
-    + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+  if (!sub) return;
+  // DOIS estados de gate, não um. `needs_plan_selection` é o cadastro NOVO que
+  // ainda não escolheu; `app_access === false` é quem foi CORTADO no fim do
+  // Grátis — e para ele a copy de cima ("15 dias grátis pra testar") é falsa
+  // duas vezes: ele não está escolhendo pela primeira vez, e o trial é um por
+  // telefone NA VIDA, então o ex-assinante que já o usou não vai ganhar outro.
+  // A ordem importa, e é ela que resolve — NÃO a ausência de sobreposição, que
+  // era o que este comentário afirmava e é falso: todo cadastro novo antes do
+  // checkout tem `needs_plan_selection === true` E `app_access === false`, que
+  // é o caso COMUM desta página, não um canto. O `return` da primeira perna é
+  // quem garante que ele leia a copy da escolha. Inverter a ordem diria "sua
+  // conta está sem plano ativo" a quem nunca teve um.
+  if (me.needs_plan_selection) {
+    sub.textContent =
+      "Escolha um plano pra continuar: 15 dias grátis pra testar (um teste por número). "
+      + "O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.";
+    return;
+  }
+  if (me.app_access === false) {
+    // Sem afirmar nem negar o período grátis: quem diz é o checkout, que lê a
+    // mesma `is_trial_eligible_for_user` (§0.7). Prometer o trial aqui seria a
+    // mentira que esta perna existe para consertar.
+    sub.textContent =
+      "Sua conta está sem plano ativo — o PigBank não tem mais versão gratuita. "
+      + "Escolha um plano pra voltar a usar: o checkout mostra o que vai ser "
+      + "cobrado, e quando, antes de você confirmar.";
+    // São DOIS textos na página, não um. O `#plans-note-v2` promete "todo plano
+    // vem com 15 dias grátis pra testar (um teste por número)" — a MESMA
+    // mentira que o `#precos-sub` acima acabou de consertar, três parágrafos
+    // abaixo dele. O trial é um por telefone NA VIDA, então para o ex-assinante
+    // que já o queimou a frase é falsa; e não dá para trocá-la por "você não
+    // tem trial", porque a conta web que nunca vinculou WhatsApp não queimou
+    // nada (`motivo_trial_indisponivel` devolve `sem_telefone`). A saída é a
+    // mesma das outras: não afirmar nem negar, e deixar o checkout dizer.
+    //
+    // As duas frases que continuam VERDADEIRAS para todo mundo ficam: a da
+    // Stripe e a de que a PigBank não vê os dados do cartão. O ícone sai do
+    // `ph-confetti` porque não há o que comemorar nesta versão do texto.
+    const nota = document.getElementById("plans-note-v2");
+    if (nota) {
+      nota.textContent =
+        " O checkout mostra o que vai ser cobrado, e quando, antes de você "
+        + "confirmar. Cancele quando quiser pelo dashboard. Pagamentos "
+        + "processados pela Stripe. A PigBank nunca vê os dados do seu cartão.";
+      const icone = document.createElement("i");
+      icone.className = "ph ph-info";
+      icone.setAttribute("aria-hidden", "true");
+      nota.prepend(icone);
+    }
+  }
 })();
 
 (async function loadPlansState(){

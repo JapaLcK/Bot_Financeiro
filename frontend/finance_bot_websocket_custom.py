@@ -2168,7 +2168,7 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
-        "https://www.googletagmanager.com; "
+        "https://www.googletagmanager.com https://www.clarity.ms; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -2565,7 +2565,10 @@ def _post_login_url(user_id: int | None = None) -> str:
         if needs_plan_selection(int(user_id)):
             return f"{DASHBOARD_URL}/precos?escolha=1"
         if not has_app_access(int(user_id)):
-            return f"{DASHBOARD_URL}/precos?ativar=1"
+            # Mesmo destino da perna de cima: depois do corte do Grátis as duas
+            # pernas pedem a MESMA coisa (assinar), e `escolha=1` é o marcador
+            # que o `nav-auth.js` reconhece para calar os CTAs de marketing.
+            return f"{DASHBOARD_URL}/precos?escolha=1"
     return _dashboard_url("/home")
 
 
@@ -3329,7 +3332,12 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
         "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
-        "app_access": has_app_access(user_id),
+        # `user=user_dict` pelo mesmo motivo do `needs_plan_selection` da linha
+        # de baixo: a linha JÁ está em mão (get_auth_user, :3290). Sem ela o
+        # gate faria um SELECT novo — e, pior, um SELECT SÍNCRONO dentro deste
+        # handler async, bloqueando o event loop em toda carga de página
+        # autenticada. `user_dict` nunca é None aqui (o 404 acima já saiu).
+        "app_access": has_app_access(user_id, user=user_dict),
         "needs_plan_selection": needs_plan_selection(user_id, user_dict),
         "paywall_enabled": paywall_enabled(),
         "plans_v2_enabled": plans_v2_enabled(),
@@ -5771,38 +5779,74 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             user_snapshot = await asyncio.to_thread(_gau, int(user_id))
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
-            set_payment_status(user_id, "canceled")
-            # A assinatura morreu: o relógio da inadimplência não tem mais o
-            # que medir. REDUNDANTE hoje — `canceled` está fora de
-            # `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status` da linha
-            # acima já zerou o relógio no mesmo UPDATE. Fica como declaração de
-            # intenção do ramo (e cobertura se o status deste ramo mudar), e não
-            # como a proteção: órfão em conta `canceled` NÃO é dado morto — é
-            # dado dormente que prende o relógio do ciclo seguinte na data
-            # velha e tira a conta da janela do lembrete de pagamento.
-            #
-            # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o gate
-            # de "o evento decidiu o acesso" que o `checkout` e o
-            # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
-            # escritas acima (`update_user_plan` e `set_payment_status`) são
-            # comportamento PRÉ-EXISTENTE da main e já rodam sem checar versão
-            # de evento, então gatear só o clear não fecharia nada — a
-            # staleness deste ramo é do ramo inteiro, é anterior a este PR
-            # (§0.3) e continua aberta (célula nº 18 de
-            # `docs/dunning_estados_eventos.md`). A categoria "clear que ignora
-            # o veredito do evento" está fechada nos dois ramos onde o veredito
-            # EXISTE; este fica pendente de propósito.
-            #
-            # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro: o
-            # parâmetro é OBRIGATÓRIO para que nenhum call site futuro herde a
-            # versão incondicional, a regra passa a ser UMA só, e nas três
-            # células alcançáveis deste ramo (16, 17, 18) ele não muda nada —
-            # o `set_payment_status('canceled')` acima já zerou o relógio no
-            # mesmo UPDATE, então este clear é no-op. `_versao` é o mesmo
-            # `_event_version(event)` que o `revoke_grant` abaixo usa.
-            from db.dunning import clear_past_due_since
-            await asyncio.to_thread(clear_past_due_since, int(user_id),
-                                    nao_mais_novo_que=_event_version(event))
+            # O critério em LOCAL NOMEADO, não embutido na expressão do `if`: é
+            # a Stripe encerrando a assinatura DE VEZ por inadimplência
+            # (esgotou o smart retry), o único desfecho deste ramo que é
+            # TERMINAL para uma cobrança. **Desconhecido e ausente caem na perna
+            # NÃO-terminal** — `cancellation_details` ausente, `reason` ausente
+            # ou um motivo novo que a Stripe invente amanhã dão False e mantêm o
+            # comportamento de sempre. Default seguro: a perna terminal apaga
+            # dado, a outra não.
+            from core.services.billing_dunning import (
+                STRIPE_CANCEL_REASON_INADIMPLENCIA,
+            )
+            encerramento_por_inadimplencia = (
+                (_g(obj, "cancellation_details") or {}).get("reason")
+                == STRIPE_CANCEL_REASON_INADIMPLENCIA
+            )
+            if encerramento_por_inadimplencia:
+                # Grava `unpaid` e não `canceled` (decisão do dono): o MOTIVO da
+                # perda de acesso é o que o painel e o suporte precisam ler
+                # depois, e `canceled` o apaga. Vem ANTES do clear porque
+                # `unpaid` está DENTRO de `PAST_DUE_PAYMENT_STATUSES`, então o
+                # `CASE` de `set_payment_status_impl` PRESERVA o relógio aqui —
+                # quem o apaga é a linha seguinte, e é essa ordem que faz o par
+                # não deixar órfão.
+                #
+                # O estado que isto grava é o PAR (`plan='free'`, `unpaid`), e
+                # ele é lido pelo PAR nos dois lugares que importam, nunca pelo
+                # status sozinho: `core.admin_dashboard._derive_account_status`
+                # (rótulo "Cancelado" em vez de "Grátis") e a guarda do
+                # `/trial-reset`, que LIBERA este estado e continua recusando
+                # `unpaid` com plano pago — decisão do dono, "pode, libero caso
+                # a caso". `unpaid` sozinho continua significando "assinatura
+                # VIVA em dunning", que é por isso que ele NÃO saiu de
+                # `_LIVE_PAYMENT_STATUSES`.
+                set_payment_status(user_id, "unpaid")
+                from db.dunning import encerrar_ciclo_de_atraso
+                await asyncio.to_thread(encerrar_ciclo_de_atraso, int(user_id))
+            else:
+                set_payment_status(user_id, "canceled")
+                # A assinatura morreu: o relógio da inadimplência não tem mais o
+                # que medir. NESTA perna o clear é no-op — `canceled` está fora
+                # de `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status`
+                # da linha acima já zerou o relógio no mesmo UPDATE. Na perna
+                # TERMINAL é o oposto: o status fica na lista, o `CASE` preserva,
+                # e `encerrar_ciclo_de_atraso` é a ÚNICA coisa que tira o
+                # relógio. Este comentário chamava o clear de "REDUNDANTE hoje"
+                # sem qualificar a perna, e assim afirmava o contrário das duas.
+                #
+                # Órfão em conta `canceled` NÃO é dado morto — é dado dormente
+                # que prende o relógio do ciclo seguinte na data velha e tira a
+                # conta da janela do lembrete de pagamento.
+                #
+                # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o
+                # gate de "o evento decidiu o acesso" que o `checkout` e o
+                # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
+                # escritas acima (`update_user_plan` e `set_payment_status`) são
+                # comportamento PRÉ-EXISTENTE da main e já rodam sem checar
+                # versão de evento, então gatear só o clear não fecharia nada —
+                # a staleness deste ramo é do ramo inteiro, é anterior a este PR
+                # (§0.3) e continua aberta (célula nº 18 de
+                # `docs/dunning_estados_eventos.md`).
+                #
+                # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro:
+                # o parâmetro é OBRIGATÓRIO para que nenhum call site futuro
+                # herde a versão incondicional, e nas células alcançáveis desta
+                # perna (16, 17, 18) ele não muda nada.
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(clear_past_due_since, int(user_id),
+                                        nao_mais_novo_que=_event_version(event))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
             #
             # A amplitude é dinheiro: quem tem uma assinatura nova já paga e

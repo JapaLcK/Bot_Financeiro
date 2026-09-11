@@ -868,7 +868,44 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     plan = (row.get("plan") or "free").strip().lower() or "free"
     pay = (row.get("last_payment_status") or "").strip().lower()
     if plan == "free":
-        return "canceled" if pay in ("canceled", "incomplete_expired") else "free"
+        # 'unpaid' entra com os dois terminais, e SÓ nesta perna: é o ESTADO
+        # TERMINAL que o ramo `customer.subscription.deleted` grava quando a
+        # Stripe encerra por inadimplência (`cancellation_details.reason ==
+        # 'payment_failed'`), para PRESERVAR o motivo. Sem esta linha a conta
+        # apareceria como 'free' — o rótulo de quem nunca assinou — e o motivo
+        # se perderia exatamente onde ele foi guardado.
+        #
+        # **`unpaid` é a única COLISÃO entre "terminal no ramo free" e
+        # "assinatura viva na Stripe"** — e a frase que estava aqui, "o único
+        # status cuja categoria depende do `plan`", é FALSA: divergir entre
+        # `plan='free'` e plano pago é o NORMAL deste ramo, porque aqui todo
+        # status vivo vira `'free'` (sem plano o painel não vê assinatura
+        # nenhuma).
+        #
+        # Quantos divergem NÃO fica escrito aqui (§2) — o número depende do
+        # alfabeto que se assume, e a versão anterior dizia "SEIS" por ter
+        # esquecido `'inactive'` (que é o **DEFAULT da coluna**,
+        # `db/schema.py`: `last_payment_status text not null default
+        # 'inactive'`) e `'grandfathered'`. Quem precisar do número remede::
+        #
+        #     from datetime import datetime, timedelta, timezone
+        #     from core.admin_dashboard import _derive_account_status
+        #     agora = datetime.now(timezone.utc); fut = agora + timedelta(days=30)
+        #     [s for s in ("active", "trialing", "past_due", "incomplete", "unpaid",
+        #                  "canceled", "incomplete_expired", "inactive",
+        #                  "grandfathered", "")
+        #      if _derive_account_status({"plan": "free", "last_payment_status": s,
+        #                                 "plan_expires_at": None}, agora)
+        #      != _derive_account_status({"plan": "pro", "last_payment_status": s,
+        #                                 "plan_expires_at": fut}, agora)]
+        #
+        # O que é raro é a colisão: um status que ESTE ramo chama de terminal
+        # (`canceled`) e que ao mesmo tempo está em `_LIVE_PAYMENT_STATUSES`.
+        # É ela que torna o status sozinho um discriminador errado — ver a
+        # guarda do /trial-reset e
+        # `tests/test_admin_users_panel.py::test_unpaid_e_a_unica_colisao_entre_terminal_no_free_e_vivo_na_stripe`,
+        # que enumera e prende o conjunto.
+        return "canceled" if pay in ("canceled", "incomplete_expired", "unpaid") else "free"
     # Expiração vem ANTES do status de pagamento: plan_service._paid_plan_active
     # trata tier pago vencido como inativo mesmo com status 'active' (webhook
     # perdido) — o painel tem de concordar com o entitlement real.
@@ -892,7 +929,7 @@ _ACCOUNT_STATUS_SQL = """
     CASE
         WHEN lower(coalesce(nullif(trim(a.plan), ''), 'free')) = 'free' THEN
             CASE WHEN lower(coalesce(a.last_payment_status, ''))
-                      IN ('canceled', 'incomplete_expired')
+                      IN ('canceled', 'incomplete_expired', 'unpaid')
                  THEN 'canceled' ELSE 'free' END
         WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
         WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
@@ -1870,6 +1907,12 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         /plan, mexe só no banco — não fala com a Stripe. Por isso recusa com
         409 quando há assinatura viva lá: apagar a trava não cancelaria nada, e
         o checkout novo esbarraria na assinatura existente de qualquer forma.
+
+        **UMA exceção, e ela é decisão do dono** ("pode, libero caso a caso"):
+        o par (`plan='free'`, `unpaid`), que é o estado que o ramo terminal do
+        `customer.subscription.deleted` grava quando a Stripe encerra por
+        inadimplência. Ali a assinatura NÃO existe mais lá, então nada do
+        parágrafo acima se aplica. Ver o bloco de comentários da guarda.
         """
         # Uma coluna, sem passar pelo fetch_admin_user_detail: aquele decifra
         # e-mail/telefone/nome e grava pii_access_log — acesso a PII que esta
@@ -1877,14 +1920,71 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT last_payment_status FROM auth_accounts WHERE user_id = %s",
+                    "SELECT plan, last_payment_status FROM auth_accounts WHERE user_id = %s",
                     (int(user_id),),
                 )
                 acc = await cur.fetchone()
         if acc is None:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         pay = (acc.get("last_payment_status") or "").strip().lower()
-        if pay in _LIVE_PAYMENT_STATUSES:
+        plan_atual = (acc.get("plan") or "free").strip().lower() or "free"
+        # **O discriminador é o PAR, não o status sozinho** — e `unpaid` é o
+        # único status em que os dois divergem:
+        #
+        #   `unpaid` + plano PAGO  = assinatura VIVA em dunning na Stripe. O 409
+        #                            continua certo: é exatamente o que a guarda
+        #                            existe para impedir.
+        #   `unpaid` + `plan='free'` = **COMPATÍVEL com "a Stripe encerrou", e
+        #                            não prova disso.** O dono decidiu liberar
+        #                            ("pode, libero caso a caso").
+        #
+        # **A ressalva acima é literal, e a versão anterior deste comentário
+        # afirmava a implicação — errado.** O par é gravado pelo ramo terminal do
+        # `customer.subscription.deleted`, mas ele tem OUTROS produtores, e neles
+        # a assinatura pode continuar viva lá:
+        #
+        #   • `core.services.billing_access.recompute_entitlement` grava
+        #     `update_user_plan(uid, 'free', ...)` sob veredito `reduz` e NÃO
+        #     toca em `last_payment_status`. A matriz depende de
+        #     `_find_active_subscription`, que consulta a Stripe só em `active`,
+        #     `trialing` e `past_due` — assinatura em `unpaid` é invisível para
+        #     ela e conta como "nenhuma ativa". É o loop de 60 s, sem admin e sem
+        #     webhook. **Medido** (2026-09-10, grant vencido + status `unpaid`,
+        #     `origem="varredura"`, nenhum evento `deleted`; remedir antes de
+        #     reusar): `pro|unpaid` → `free|unpaid`. Coberto por
+        #     `tests/test_admin_users_panel.py::test_o_par_terminal_nao_prova_que_a_stripe_encerrou`.
+        #   • `set_account_plan('free')` — célula 24 de
+        #     `docs/dunning_estados_eventos.md`: "não mexe no par".
+        #
+        # **O que sustenta a liberação não é o par, é o HUMANO NO LAÇO.** Isto é
+        # ação de admin, uma conta por vez, com o dono dizendo "caso a caso"; a
+        # trava final é o julgamento de quem clica, não este predicado. O custo
+        # de errar está declarado: a trava anti-abuso cai e o checkout seguinte
+        # não vê `unpaid` (mesma cegueira do `_find_active_subscription`), então
+        # nasce a segunda assinatura da célula 30.
+        #
+        # E o painel AGRAVA a leitura: ele rotula este par como "Cancelado", que
+        # o admin lê como "a Stripe encerrou". Um discriminador honesto existiria
+        # — o grant revogado com motivo `stripe_subscription_deleted`, que só o
+        # ramo terminal escreve — e ficou de FORA de propósito: é query nova num
+        # caminho de admin, com a decisão já tomada e humano no laço. Está
+        # nomeado aqui para quem quiser estreitar depois não ter de redescobrir.
+        #
+        # **`_LIVE_PAYMENT_STATUSES` NÃO foi alargada nem encurtada**, e a
+        # decisão é medida: `grep -rn "_LIVE_PAYMENT_STATUSES"` acha UM leitor de
+        # produção (esta linha) mais a definição e o teste de paridade — mas a
+        # lista SIGNIFICA "assinatura viva na Stripe", e `unpaid` é vivo enquanto
+        # a assinatura existir. Tirá-lo de lá trocaria um caso liberado por uma
+        # DEFINIÇÃO errada, que o próximo leitor herdaria. Estreita-se a
+        # condição, não a lista.
+        #
+        # Mesmo par, e de propósito, do `_derive_account_status` acima (§0.7).
+        # NÃO se chama aquela função aqui: ela dobra `plan_expires_at` no
+        # veredito, e vencimento é ENTITLEMENT, não "a Stripe ainda tem
+        # assinatura" — reusá-la liberaria também o pago VENCIDO em `unpaid`,
+        # que é dunning com assinatura viva e ninguém autorizou.
+        encerrada_por_inadimplencia = plan_atual == "free" and pay == "unpaid"
+        if pay in _LIVE_PAYMENT_STATUSES and not encerrada_por_inadimplencia:
             raise HTTPException(
                 status_code=409,
                 detail=(
