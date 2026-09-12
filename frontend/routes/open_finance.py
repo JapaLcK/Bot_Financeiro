@@ -143,14 +143,14 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 #
 # CUIDADO com `DB_CONNECT_TIMEOUT`: são QUATRO definições da mesma env var com
 # DOIS defaults. `db/connection.py:78` = "30" (o pool sync, o da tabela acima);
-# `core/admin_dashboard.py:48`, `frontend/routes/shared.py:51` e
-# `frontend/finance_bot_websocket_custom.py:275` = "5". Ler o número do vizinho
+# `core/admin_dashboard.py:49`, `frontend/routes/shared.py:51` e
+# `frontend/finance_bot_websocket_custom.py:304` = "5". Ler o número do vizinho
 # errado já produziu uma conta 3× maior neste mesmo comentário.
 #
 # Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
 # `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
 # um abre conexão async NOVA (`core.admin_dashboard.db_connect`, com o
-# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48` — default **5**) e faz um
+# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49` — default **5**) e faz um
 # INSERT SEM `statement_timeout`. O `connect_timeout` limita o handshake e nada
 # limita o INSERT nem o commit, então o pior caso de cada log era ILIMITADO e
 # qualquer número fechado aqui era PISO. Os dois passaram a ir pelo
@@ -174,7 +174,7 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # (`folga // 2`), ≤ 2,0s o log do retry, ~0,4s de backoff (`_backoff_sec(1)`,
 # 0,375–0,625s) e o resto na 2ª.
 #
-# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:48` SAIU da conta: o
+# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:49` SAIU da conta: o
 # `wait_for` corta em 2,0s independentemente dele. Era dele que vinham o piso de
 # 25,0s desta conta (5 + 5 nos dois logs) e o de 70s da versão anterior dela — o
 # cenário "e se o Railway definir 30?", que `.env.example` não define (grep vazio)
@@ -268,6 +268,26 @@ def _retryable(exc: BaseException) -> bool:
         return False
 
 
+def _folga_ms(budget_ms: int | None, t0: float) -> int | None:
+    """O que sobrou de `budget_ms` desde `t0`. `None` = sem orçamento.
+
+    Piso de 1 ms num só lugar: dentro do lock, desistir por prazo vencido seria
+    largar o lock já pago sem gravar — o que se garante é que a espera não é
+    INDEFINIDA, não que ela caiba num prazo que já venceu.
+    """
+    if budget_ms is None:
+        return None
+    return max(1, budget_ms - int((time.monotonic() - t0) * 1000))
+
+
+class _ConflitoReconexao(HTTPException):
+    """Transporta o diagnóstico para ser gravado após liberar o lock."""
+
+    def __init__(self, detail: str, level: str, event: str, message: str, **context):
+        super().__init__(status_code=409, detail=detail)
+        self.diagnostico = ((level, event, message), context)
+
+
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
                          tinha_conexao_propria: bool = False,
@@ -310,7 +330,86 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
-        # Revalidação SOB o lock (Codex PR #217, 4º): se a conexão própria que
+        # UMA leitura, incondicional, alimentando as DUAS revalidações de estado
+        # abaixo (a de dono alheio e a de conexão própria que sumiu). Roda ANTES
+        # do cálculo do `resto`: o tempo gasto aqui sai do orçamento da escrita
+        # sozinho (o monotonic é relido lá embaixo).
+        #
+        # POR QUE UMA e não duas — e NÃO é o orçamento. A conta de prazo não
+        # sustenta a escolha: as leituras medidas dão 0,93–1,49 ms cada contra
+        # um `_RECONNECT_DEADLINE_MS` de 20000 (`:203`) dividido por 2
+        # tentativas, então a 3ª leitura custaria ~0,015% do prazo. A 1ª versão
+        # deste bloco decidia por aí e a aritmética estava errada; a escolha é a
+        # mesma, a razão é outra:
+        #   1. SNAPSHOT. As duas revalidações abaixo julgam a MESMA foto. Com
+        #      duas leituras elas podem DISCORDAR — linha própria presente na
+        #      1ª e ausente na 2ª (um disconnect commitando no meio) —, e aí o
+        #      desfecho passa a depender de qual guarda leu qual estado, que é
+        #      ordem de escrita do código e não regra.
+        #   2. PRESSÃO DE POOL, essa sim numericamente relevante: é aquisição
+        #      por TENTATIVA, e é a conta que o `ponytail:` do `except` de
+        #      `_grava_reconexao` (`:668`) usa para adiar a política de retry.
+        #
+        # Leituras de pool DENTRO do lock, por caminho, MEDIDAS (0,93–1,49 ms
+        # cada; no caminho da rota o `resto` ficou em 9994 de 10000 ms) — fato
+        # medido e útil para a razão 2, não argumento de prazo:
+        #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
+        #     `item_registry_origins` da revalidação da adoção, mais abaixo
+        #     nesta mesma função, que abre `get_conn()`
+        #     (`db/open_finance_state.py:348`).
+        #   • rota com item NOVO (`tinha_conexao_propria=False`,
+        #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
+        #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
+        #   • rota reconectando: 1 → 1; a leitura só saiu de dentro do `if
+        #     tinha_conexao_propria`.
+        linhas = get_connections_by_item_id(item_id, budget_ms=_folga_ms(budget_ms, t0))
+        # DONO ALHEIO. Revalidação num caminho, 1ª CHECAGEM no outro — e os dois
+        # chegam aqui:
+        #   • ROTA: revalidação. O `POST /pluggy-item` lê os donos FORA do lock
+        #     (`get_connections_by_item_id`, `:1498`) e devolve o 409 lá; entre
+        #     aquela leitura e este lock outro dono pode nascer.
+        #   • ADOÇÃO: primeira e ÚNICA checagem de dono alheio que esse caminho
+        #     já teve. `_adota_item_orfao` NUNCA leu conexões antes do lock — a
+        #     1ª guarda dele é `item_registry_origins` (`:1060`), que responde
+        #     "este item já teve dono NO RASTRO", pergunta diferente de "outra
+        #     conta tem conexão deste item". Medido: na adoção
+        #     `get_connections_by_item_id` é chamada UMA vez, e é esta. Sem ela,
+        #     item de rastro vazio com conexão alheia era adotado sem checagem
+        #     nenhuma de posse.
+        # Nos dois, o upsert de `save_pluggy_open_finance_item` tem `on conflict
+        # (user_id, provider, provider_item_id)`, que para o NOSSO user_id não
+        # conflita: INSERE. Com o índice
+        # `uq_of_conn_provider_item` de pé → `UniqueViolation`, que não é
+        # `OperationalError` e sobe como 500; sem ele (é criado num bloco que só
+        # emite warning, db/schema.py) → o item ganha DOIS donos, e daí em diante
+        # `get_open_finance_connection_by_item_id` levanta `AmbiguousItemError`
+        # para os dois e o refresh pinta "Ainda não sincronizou" para sempre.
+        #
+        # PLURAL de propósito: a versão singular levanta `AmbiguousItemError`
+        # com mais de uma linha, virando 500 exatamente no estado que esta
+        # guarda existe para conter.
+        #
+        # E desfaz a reivindicação da adoção ANTES de subir, pela mesma razão do
+        # aborto de rastro logo abaixo: `HTTPException` não é
+        # `psycopg.OperationalError`, então atravessa o `except` de infra do
+        # `_grava_reconexao` e o desfazimento do 503 NUNCA roda — sem isto o 409
+        # recria o estado terminal (rastro com dono, zero conexões).
+        #
+        # `len(outros)` e nunca os user_id alheios: isolamento por usuário vale
+        # para log também (mesma régua do 409 pré-lock da rota).
+        outros = [c for c in linhas if int(c["user_id"]) != int(user_id)]
+        if outros:
+            if adocao_registro_id is not None:
+                unregister_item(adocao_registro_id, user_id)
+            raise _ConflitoReconexao(
+                "Este item já está vinculado a outra conta.",
+                "error", "of_item_owner_conflict",
+                f"Item {item_id} ganhou dono em outra conta na espera do lock",
+                source="open_finance", user_id=user_id,
+                details={"item_id": item_id, "connections": len(outros),
+                         "origin": "salva_item_sob_lock"},
+            )
+        # 2ª revalidação SOB o lock (Codex PR #217, 4º): se a conexão própria que
         # existia na validação da rota sumiu enquanto esperávamos o lock, quem
         # a apagou foi um reset de conta ou um disconnect — os dois únicos
         # fluxos que deletam conexão. Gravar agora ressuscitaria a linha que o
@@ -319,26 +418,18 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # HTTPException passa por cima do except de infra do _grava_reconexao).
         # Item NOVO (sem conexão própria antes) não passa por aqui: conectar
         # banco DEPOIS de um reset é fluxo legítimo e não pode ser bloqueado.
-        # Roda ANTES do cálculo do `resto`: o tempo gasto aqui sai do orçamento
-        # da escrita sozinho (o monotonic é relido lá embaixo).
         if tinha_conexao_propria:
             propria_ainda_existe = any(
-                int(c["user_id"]) == int(user_id)
-                for c in get_connections_by_item_id(item_id)
+                int(c["user_id"]) == int(user_id) for c in linhas
             )
             if not propria_ainda_existe:
-                from core.observability import log_system_event_sync
-
-                log_system_event_sync(
+                raise _ConflitoReconexao(
+                    "Sua conta foi reiniciada ou o banco foi desconectado enquanto "
+                    "a conexão era concluída. Conecte o banco de novo.",
                     "warning", "of_reconnect_aborted_state_gone",
                     f"Reconexão abortada: conexão do item {item_id} sumiu na espera do lock "
                     "(reset/disconnect concorrente)",
                     source="open_finance", user_id=user_id, details={"item_id": item_id},
-                )
-                raise HTTPException(
-                    status_code=409,
-                    detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
-                           "a conexão era concluída. Conecte o banco de novo.",
                 )
         # A MESMA revalidação, pelo lado da ADOÇÃO (Codex #313, P1). O fato que a
         # adoção leu fora do lock não é "a conexão existe" — é "NENHUMA linha do
@@ -364,9 +455,11 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # Apagando a linha AQUI, com o lock na mão, quem entrar depois não vê
         # mais reivindicação nenhuma e adota: com N entregas simultâneas, o
         # último a pegar o lock ganha e os outros saem sem deixar rastro. São
-        # DOIS os pontos que apagam (o outro é a desistência do lock, no 503 de
-        # `_grava_reconexao`), e nos dois a linha é a que a própria adoção acabou
-        # de escrever (`db.unregister_item`, que filtra por `user_id`).
+        # TRÊS os pontos que apagam, e DOIS deles estão nesta função: o aborto de
+        # DONO ALHEIO da guarda acima (`:397`), este aborto de RASTRO de outra
+        # porta (`:477`) e — o único fora daqui — a desistência do lock no 503 de
+        # `_grava_reconexao` (`:773`). Nos três a linha é a que a própria adoção
+        # acabou de escrever (`db.unregister_item`, que filtra por `user_id`).
         #
         # REGISTRADO, não consertado: quando quem "ganhou" foi o `POST
         # /pluggy-item` do MESMO usuário (o navegador voltou enquanto o webhook
@@ -378,7 +471,8 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # rival no aborto, e a distinção não muda decisão nenhuma hoje.
         if adocao_registro_id is not None:
             outras = item_registry_origins(item_id, exceto_registro_id=adocao_registro_id,
-                                           exceto_user_id=user_id)
+                                           exceto_user_id=user_id,
+                                           budget_ms=_folga_ms(budget_ms, t0))
             if outras:
                 unregister_item(adocao_registro_id, user_id)
                 raise HTTPException(
@@ -404,15 +498,14 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         # `PoolClosed` e `TooManyRequests` do `psycopg_pool`) virava o mesmo log
         # falso, e o tipo do erro não aparecia em lugar nenhum. Sem contagem de
         # propósito: o número muda com a versão do psycopg e envelhece errado.
-        resto = None if budget_ms is None else max(
-            1, budget_ms - int((time.monotonic() - t0) * 1000))
+        resto = _folga_ms(budget_ms, t0)
         # A ÚNICA linha que responde "a escrita chegou a ser tentada?" (Codex
         # #313, P1). Ela atravessa o `except` do chamador porque é a lista DELE
         # que está sendo mutada — `return` não sobrevive a exceção, e o tipo do
         # erro não sabe responder isso: `psycopg.OperationalError` sai tanto
         # daqui de dentro (commit ambíguo) quanto de tudo que veio ANTES (o
         # `psycopg.connect` dedicado do `pluggy_item_lock`, o `set_config`, o
-        # `pg_advisory_lock`, as leituras das duas revalidações). Marcado ANTES
+        # `pg_advisory_lock`, as leituras das revalidações). Marcado ANTES
         # da chamada, e não no `except`, porque a pergunta é do CHAMADOR ("pode
         # ter escrito?"): se o erro vier da saída do `with` depois de um commit
         # que deu certo, ele ainda tem de contar como escrita tentada.
@@ -522,6 +615,12 @@ async def _grava_reconexao(
                 tinha_conexao_propria, criar_usuario, adocao_registro_id,
                 escrita_tentada=escrita_tentada)
             causa = None
+        except _ConflitoReconexao as exc:
+            # O context manager já liberou o lock. O diagnóstico tem o mesmo
+            # teto dos demais logs da reconexão e não prolonga sua seção crítica.
+            args, context = exc.diagnostico
+            await _log_com_teto(_LOG_DIAG_TIMEOUT_S, *args, **context)
+            raise
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
             # O Codex apontou oito vezes o mesmo fenômeno por portas diferentes,
@@ -573,11 +672,20 @@ async def _grava_reconexao(
             # `test_causa_e_a_da_ultima_tentativa`.
             #
             # ponytail: o teto é a política de retry sob infra — sob
-            # `TooManyConnections` este POST ainda tenta até 6 conexões (2
-            # tentativas × dedicada do lock + pool da escrita + o log) num
-            # servidor que acabou de recusar uma. Mudar isso é decidir não
-            # retentar quando `causa` é da família de conexão; o gancho já existe
-            # (é a própria `causa`), a decisão é de outro PR.
+            # `TooManyConnections` este POST ainda tenta até 8 conexões num
+            # servidor que acabou de recusar uma. RECONTADO: 2 tentativas × 4
+            # aquisições por tentativa — a DEDICADA do `pluggy_item_lock`
+            # (`psycopg.connect`, `db/open_finance_state.py:701`), o pool da
+            # leitura das revalidações (`get_connections_by_item_id`), o pool da
+            # escrita (`get_conn` do `save_pluggy_open_finance_item`) e a
+            # conexão NOVA do log de diagnóstico (um por tentativa: o
+            # `of_reconnect_lock_retry` da 1ª e o `of_reconnect_lock_timeout`
+            # final). Eram 6 enquanto a leitura vivia dentro do `if
+            # tinha_conexao_propria`; ela é incondicional agora. Pela ADOÇÃO o
+            # teto é 11: +1 por tentativa (`item_registry_origins` sob o lock)
+            # = 10, mais o `unregister_item` do desfazimento no 503. Mudar isso
+            # é decidir não retentar quando `causa` é da família de conexão; o
+            # gancho já existe (é a própria `causa`), a decisão é de outro PR.
             connection, sob_lock = None, False
             causa = f"{type(exc).__name__}: {exc}"
         if sob_lock:
@@ -611,7 +719,7 @@ async def _grava_reconexao(
                          "erro": causa},
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
-            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:48`, default 5) e
+            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49`, default 5) e
             # faz INSERT SEM `statement_timeout`, dentro da janela do prazo — é o
             # maior componente do que sobra dentro do prazo (a conta está em
             # `_prazo_reconexao_ms`). Medir a folga antes fazia o backoff dormir
@@ -851,10 +959,13 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     pelo usuário. Aí NÃO há recuperação automática: o script one-shot deixa de
     listar o item (o filtro dele exclui rastro com dono, de propósito — a mesma
     regra, `db/open_finance_state.item_registry_origins`) e a retentativa do
-    `item/created` não readota (a 1ª guarda acima). É por isso que os DOIS
+    `item/created` não readota (a 1ª guarda acima). É por isso que os TRÊS
     desfechos em que a escrita provadamente não aconteceu apagam o rastro que a
-    adoção acabou de gravar, em vez de deixá-lo: o aborto sob o lock
-    (`_salva_item_sob_lock`) e o 503 em que NENHUMA tentativa do prazo chegou ao
+    adoção acabou de gravar, em vez de deixá-lo: os DOIS abortos sob o lock de
+    `_salva_item_sob_lock` — o de DONO ALHEIO nascido na espera (a guarda de
+    posse, que na adoção é a primeira checagem de dono que existe) e o de RASTRO
+    de outra porta (a revalidação da adoção) — e o 503 em que NENHUMA tentativa
+    do prazo chegou ao
     `save_pluggy_open_finance_item` — lock ocupado (`if not locked`) ou infra
     PRÉ-escrita, que é `psycopg.OperationalError` idêntica à do commit e vem do
     `psycopg.connect` dedicado do lock, do `set_config`, do `pg_advisory_lock`,
@@ -862,7 +973,7 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
     `save_pluggy_open_finance_item` (Codex #313, P1). Quem responde isso é a
     marca feita na linha anterior à escrita — desfeita quando o erro é
     `PoolTimeout`/`PoolClosed`, que só sai do `getconn` —, não o tipo do erro.
-    Sem os dois desfazimentos, duas
+    Sem o desfazimento no aborto de rastro E no 503, duas
     entregas concorrentes caíam neste estado sozinhas, sem falha nenhuma de
     escrita: consertar só o primeiro TROCAVA o perdedor (quem aborta limpa, quem
     perde o lock fica), e era regressão contra a `main`, onde a mesma
@@ -1015,11 +1126,12 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         await _grava_reconexao(dono, remote, item_id, tinha_conexao_propria=False,
                                criar_usuario=False, adocao_registro_id=registro_id)
     except Exception as exc:
-        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de quatro
+        # `motivo` sozinho não basta AQUI: `HTTPException` é o nome de cinco
         # desfechos com ações de operador diferentes — 402 (teto de bancos do
         # plano), 409 do estado que sumiu na espera do lock, 409 do item que
-        # OUTRA entrega já atribuiu (a revalidação da adoção) e 503 (lock
-        # ocupado); os dois 409 se separam pelo texto do `detail`. O
+        # OUTRA entrega já atribuiu (a revalidação da adoção), 409 do item que
+        # ganhou dono em OUTRA CONTA na espera do lock e 503 (lock ocupado); os
+        # três 409 se separam pelo texto do `detail`. O
         # `str()` do `HTTPException` já é `"{status_code}: {detail}"`
         # (starlette), então não precisa de formatação nossa.
         await log_system_event(
@@ -1400,7 +1512,14 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
             "error", "of_item_owner_conflict",
             "Item Pluggy já vinculado a outra conta",
             source="open_finance",
-            details={"item_id": new_item_id, "connections": len(outros)},
+            # `origin` nos TRÊS emissores de `of_item_owner_conflict`, não em
+            # dois: os dois 409 têm `detail` IDÊNTICO de propósito (o pré-lock
+            # daqui e o de `_salva_item_sob_lock`), então sem este campo eles
+            # não se separam no log pelo separador escolhido — e "o 409 é
+            # pré-lock ou nasceu na espera do lock?" é a pergunta que decide se
+            # houve corrida.
+            details={"item_id": new_item_id, "connections": len(outros),
+                     "origin": "pluggy_item_route"},
         )
         raise HTTPException(status_code=409, detail="Este item já está vinculado a outra conta.")
 

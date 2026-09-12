@@ -198,7 +198,7 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         # bloqueia SEGURANDO um dos 8 slots do pool sync (db/connection.py:77).
         #
         # Capturar a folha era copiar a forma do precedente e perder a lição
-        # dele: `frontend/routes/open_finance.py:393` captura `OperationalError`
+        # dele: `frontend/routes/open_finance.py:618` captura `OperationalError`
         # justamente porque o Codex apontou OITO vezes o mesmo fenômeno por
         # portas diferentes, e nomeia o `DeadlockDetected` como uma delas.
         #

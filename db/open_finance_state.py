@@ -31,6 +31,14 @@ from psycopg.types.json import Jsonb
 from utils_date import _tz
 
 from .connection import get_conn
+# `_CursorComTeto` mora em `db/open_finance.py` porque a escrita da reconexão foi
+# quem precisou dele primeiro; a regra que ele carrega (teto por STATEMENT,
+# reajustado antes de cada `execute`) é a mesma aqui, e ter uma segunda cópia
+# dela seria a mesma regra em dois lugares (CLAUDE.md §0.7). O import é de mão
+# única: `open_finance.py` só usa este módulo em import LOCAL de função
+# (`:1099`), então não há ciclo — se algum dia ele subir para o topo de lá, este
+# é o import que quebra.
+from .open_finance import _CursorComTeto
 
 # Estados locais terminais: nenhum resultado de sync pode sobrescrevê-los.
 # PAUSED = trial venceu (o item nem existe mais na Pluggy); DELETED = removido.
@@ -53,13 +61,33 @@ class AmbiguousItemError(RuntimeError):
         self.connections = connections
 
 
-def get_connections_by_item_id(item_id: str, provider: str = "pluggy") -> list[dict]:
-    """TODAS as conexões daquele item — sem `limit`, para que a ambiguidade apareça."""
+def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
+                               budget_ms: int | None = None) -> list[dict]:
+    """TODAS as conexões daquele item — sem `limit`, para que a ambiguidade apareça.
+
+    `budget_ms` é o teto desta leitura de ponta a ponta, nas DUAS metades: a
+    espera do POOL (`get_conn(timeout=...)`) e a QUERY parada numa linha ou numa
+    tabela travada (`_CursorComTeto`, que reajusta o `statement_timeout` pelo que
+    sobrou). `None` (o default, e o que todo chamador de fora do prazo passa)
+    mantém o comportamento de sempre — `DB_CONNECT_TIMEOUT`, default 30s de
+    espera e statement sem teto. Existe porque `_salva_item_sob_lock` chama esta
+    leitura com o advisory lock do item NA MÃO e um cliente HTTP esperando: ali a
+    leitura tem de caber no que sobrou do prazo. Só a metade do pool não bastava —
+    a conexão vem do pool, que não tem `statement_timeout` (o do `pluggy_item_lock`
+    é da conexão DEDICADA, outra sessão), então um `alter table` do `init_db`
+    (`db/schema.py`, ACCESS EXCLUSIVE) segurava a query MEDIDO 6,02 s contra
+    prazo de 1000 ms, com o advisory lock retido e a escrita commitando depois de
+    o cliente ter desistido.
+    """
     item = (item_id or "").strip()
     if not item:
         return []
-    with get_conn() as conn:
+    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
+    t0 = time.monotonic()
+    with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
+            if budget_ms is not None:
+                cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
                 """
                 select id, user_id, provider, provider_item_id, status, institution_name,
@@ -319,7 +347,8 @@ ITEMS_SEM_CONEXAO = """
 
 def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
                           exceto_registro_id: int | None = None,
-                          exceto_user_id: int | None = None) -> set[str]:
+                          exceto_user_id: int | None = None,
+                          budget_ms: int | None = None) -> set[str]:
     """Por quais portas este item já foi visto COM DONO.
 
     Uma pergunta, uma fonte (CLAUDE.md §0.7). Vazio = o item nunca foi atribuído
@@ -356,11 +385,22 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
 
     Devolve ORIGENS, nunca `user_id`: o chamador decide sobre o item, e nenhum
     dado de outro usuário sai daqui.
+
+    `budget_ms` é o teto desta leitura nas DUAS metades — espera do POOL e QUERY
+    travada —, exatamente como em `get_connections_by_item_id`, que documenta a
+    medição. `None` (o default, e o que todo chamador de fora do prazo passa)
+    mantém o comportamento de sempre. Existe pela revalidação da adoção em
+    `_salva_item_sob_lock`, que roda com o advisory lock do item NA MÃO e um
+    cliente HTTP esperando: ali a leitura tem de caber no que sobrou do prazo.
     """
     if (exceto_registro_id is None) != (exceto_user_id is None):
         raise ValueError("exceto_registro_id e exceto_user_id andam juntos ou nenhum")
-    with get_conn() as conn:
+    espera = None if budget_ms is None else max(0.001, budget_ms / 1000.0)
+    t0 = time.monotonic()
+    with get_conn(timeout=espera) as conn:
         with conn.cursor() as cur:
+            if budget_ms is not None:
+                cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
                 """
                 select distinct origin from open_finance_item_registry
