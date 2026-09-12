@@ -14,6 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from core.crypto import PiiAccessContext, decrypt_pii_optional, encrypt_pii_optional
+from core.pg_text import tem_veneno
 
 from .connection import get_conn
 from .users import _check_password, ensure_user_tx
@@ -125,7 +126,11 @@ def consume_data_export_token(token: str) -> int | None:
     Retorna o `user_id` associado se o token era válido (existe, não expirou
     e não foi usado). Retorna `None` em qualquer outro caso.
     """
-    if not token:
+    # NUL/surrogate morre aqui e não no `cur.execute`: o token vem do path de
+    # `/auth/account/export/download/{token}`, que é ANÔNIMA, e o psycopg
+    # estoura antes de comparar — 500 em vez do 410 que esta rota já dá para
+    # token inválido (#321). "Token inválido" é o que ele é.
+    if not token or tem_veneno(token):
         return None
     now = datetime.now(timezone.utc)
     with get_conn() as conn, conn.cursor() as cur:

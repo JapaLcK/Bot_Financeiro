@@ -1,0 +1,67 @@
+/*
+ * O visual dos cards de plano. Camada FINA sobre o `site.css` — não uma segunda
+ * folha de estilo para `.plan`.
+ *
+ * O que o `site.css` já resolve e NÃO se repete aqui: card escuro com borda
+ * `--line` (`:307`), rosa só no destaque (`.plan.featured`, `:308`), badge rosa
+ * em pill (`:309`), check neon (`.tick`, `:232`). A identidade visual da marca
+ * já estava lá; o que faltava é o que este arquivo faz.
+ *
+ * Escopado em `#plans-v2` de propósito: `.plan`, `.plan-badge` e `.tick` são
+ * classes COMPARTILHADAS do site de marketing, e o pódio é uma decisão da
+ * escada de preços — não de todo card que reuse `.plan`.
+ */
+
+/* ── O pódio ─────────────────────────────────────────────────────────────────
+ * O trio só vira pódio quando os três cards cabem na mesma linha. As bases
+ * ficam alinhadas e os três preservam o mesmo padding: o degrau vem da altura
+ * mínima de 620px no Pro e 700px no Plus, sem empurrar o conteúdo para baixo.
+ * No mobile, os cards empilham com a altura natural.
+ */
+#plans-v2 {
+  grid-template-columns: minmax(0, min(380px, 100%));
+  justify-content: center;
+}
+
+@media (min-width: 901px) {
+  #plans-v2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #plans-v2 { align-items: end; }
+  #plans-v2 .plan.featured { min-height: 700px; }
+  #plans-v2 .plan:nth-child(3) { min-height: 620px; }
+}
+
+/* ── O badge do destaque ──────────────────────────────────────────────────────
+ * Duas mudanças, e a primeira é de ACESSIBILIDADE.
+ *
+ * 1. Contraste. O badge herda `linear-gradient(135deg, var(--pink),
+ *    var(--pink-dark))`, e branco sobre `--pink` (#FF2D8E) dá **3,49:1** —
+ *    reprova o AA de 4,5:1, e o texto é `.68rem` em maiúsculas, ou seja NÃO é
+ *    "texto grande" (que só vale de 18,66px negrito pra cima). Descer o gradiente
+ *    para a FAIXA `var(--pink-dark)` (#C7186B) → #A8115A põe o pior ponto em
+ *    **5,57:1** — o pior ponto é o mais claro dos dois, o próprio `--pink-dark`,
+ *    e é dele que sai o 5,57. O #A8115A não tem token: é um quarto rosa, e fica
+ *    literal aqui de propósito enquanto for usado só nesta regra. O outro stop
+ *    NÃO fica: ele é `--pink-dark` e vai pelo token (§0.7).
+ *    Escopado aqui e não corrigido no site.css de propósito: `.plan-badge` é
+ *    compartilhado, e a mesma medição vale para todo card `.plan` do site — é um
+ *    achado para outro PR, não uma mudança silenciosa em páginas alheias.
+ *
+ * 2. Movimento. Um pan lento do gradiente, que era o ÚNICO uso de
+ *    framer-motion no protótipo (`backgroundPositionX`). Em `@keyframes` ele
+ *    custa estas 8 linhas em vez de ~40 kB gzip de dependência.
+ */
+#plans-v2 .plan.featured .plan-badge {
+  background: linear-gradient(135deg, var(--pink-dark), #a8115a, var(--pink-dark));
+  background-size: 200% 100%;
+  animation: pb-badge-pan 3s linear infinite;
+}
+
+@keyframes pb-badge-pan {
+  from { background-position-x: 0%; }
+  to   { background-position-x: 200%; }
+}
+
+/* Regra do §"Implementação" da skill, e o padrão do resto do site. */
+@media (prefers-reduced-motion: reduce) {
+  #plans-v2 .plan.featured .plan-badge { animation: none; }
+}

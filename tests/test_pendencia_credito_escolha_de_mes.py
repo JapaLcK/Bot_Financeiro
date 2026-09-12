@@ -179,3 +179,29 @@ def test_nenhum_outro_numero_por_extenso_e_apelido_de_mes():
     assert colisoes == {"dez": 12}, (
         "número por extenso virando mês. `dez` é a única colisão aceita "
         f"(abreviação canônica de dezembro); veio: {colisoes}")
+
+
+@pytest.mark.parametrize("texto", ["excluir cartao 2", "paguei 7 reais", "C6"])
+def test_digito_dentro_de_texto_nao_seleciona_indice(texto):
+    uid = _uid()
+    faturas = _faturas(uid, *range(1, 13))
+    _diga(uid, texto)
+    assert db.list_open_bills(uid) == faturas
+
+
+def test_c6_escolhe_o_cartao_e_nao_o_sexto_item(monkeypatch):
+    monkeypatch.setattr("core.services.plan_service.check_can_create_card", lambda uid: None)
+    uid = _uid()
+    faturas = _faturas(uid, *range(1, 13))
+    card_id = db.create_card(uid, "C6", 10, 20)
+    db.add_credit_purchase_installments(user_id=uid, card_id=card_id,
+        valor_total=123, categoria="outros", nota="compra C6",
+        purchased_at=date(2026, 1, 5), installments=1)
+    todas = db.list_open_bills(uid)
+    alvo = next(b for b in todas if b["card_id"] == card_id)
+    db.set_pending_action(uid, "pay_bill_choice",
+        {"bill_ids": [int(b["id"]) for b in todas], "amount": None})
+    _diga(uid, "C6")
+    abertas = {int(b["id"]) for b in db.list_open_bills(uid)}
+    assert int(alvo["id"]) not in abertas
+    assert abertas == {int(b["id"]) for b in faturas}

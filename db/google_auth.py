@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from core.crypto import encrypt_pii_optional, hash_pii_optional
+from core.pg_text import tem_veneno
 
 from .connection import get_conn
 from .users import create_link_code, get_or_create_canonical_user
@@ -132,7 +133,11 @@ def create_pending_google_signup(sub: str, email: str, name_hint: str | None) ->
 
 
 def get_pending_google_signup(token: str) -> dict | None:
-    if not token:
+    # Idem `consume_data_export_token`: o token vem do path da rota ANÔNIMA
+    # `/auth/google/pending/{token}` e envenenado dava 500 em vez do 404 de
+    # "cadastro expirado ou inválido" (#321). Guarda aqui, não na rota, porque
+    # `consume_pending_google_signup` também passa por esta função.
+    if not token or tem_veneno(token):
         return None
     now = datetime.now(timezone.utc)
     with get_conn() as conn, conn.cursor() as cur:

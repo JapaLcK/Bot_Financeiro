@@ -287,7 +287,10 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
     # os ramos abaixo (mês, nome do cartão) continuam valendo — é o que mantém
     # `dez` significando dezembro quando não existe item 10.
     m_num = re.match(r"^#?(\d+)$", norm)
-    n = float(m_num.group(1)) if m_num else parse_pt_number(norm)
+    # parse_pt_number também procura dígitos dentro de texto livre (C6,
+    # "excluir cartão 2"). Só uma frase numérica inteira pode escolher índice.
+    n = (int(m_num.group(1)) if m_num else
+         parse_pt_number(norm) if re.fullmatch(PT_PHRASE, norm) else None)
     if n is not None and float(n).is_integer():
         idx = int(n) - 1
         if 0 <= idx < len(candidates):
