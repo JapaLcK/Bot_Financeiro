@@ -47,15 +47,6 @@ function Cartao({ plano }) {
           com o `margin` da classe entre o nome e o preço. */}
       {plano.sub !== null && <div className="plan-sub">{plano.sub}</div>}
       <div className="price-block" dangerouslySetInnerHTML={{ __html: plano.precoHtml }} />
-      <ul>
-        {plano.itens.map((html, i) => (
-          // A chave é o índice porque a lista é ESTÁTICA: o componente nunca
-          // rerenderiza (ver o topo do arquivo), então não há reordenação nem
-          // remoção para uma chave estável proteger.
-          // eslint-disable-next-line react/no-array-index-key
-          <li key={i} dangerouslySetInnerHTML={{ __html: html }} />
-        ))}
-      </ul>
       <button
         className={botao.classe}
         type="button"
@@ -66,6 +57,15 @@ function Cartao({ plano }) {
       >
         {botao.texto}
       </button>
+      <ul>
+        {plano.itens.map((html, i) => (
+          // A chave é o índice porque a lista é ESTÁTICA: o componente nunca
+          // rerenderiza (ver o topo do arquivo), então não há reordenação nem
+          // remoção para uma chave estável proteger.
+          // eslint-disable-next-line react/no-array-index-key
+          <li key={i} dangerouslySetInnerHTML={{ __html: html }} />
+        ))}
+      </ul>
     </article>
   );
 }

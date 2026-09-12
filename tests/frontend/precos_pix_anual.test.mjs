@@ -202,6 +202,13 @@ test("PT1: nenhum CTA de Pix no mensal, 3 no anual, e some na volta", async () =
   assert.equal(await page.$$eval("#plans-v2 [data-pix-cta]", (e) => e.length), 3);
   assert.equal(await page.$$eval(".cmp-table [data-pix-cta]", (e) => e.length), 0,
     "CTA de Pix vazou para a tabela comparativa");
+  const ordem = await page.$$eval("#plans-v2 article.plan", (cards) => cards.map((card) => {
+    const principal = card.querySelector("[data-plan-btn]");
+    const pix = card.querySelector("[data-pix-cta]");
+    return principal.nextElementSibling === pix && pix.nextElementSibling === card.querySelector("ul");
+  }));
+  assert.deepEqual(ordem, [true, true, true],
+    "os CTAs de cartão e Pix devem ficar juntos, antes dos benefícios");
 
   await page.click("#cycle-annual");
   assert.equal(await contarCtas(page), 0, "o CTA de Pix não sumiu na volta pro mensal");

@@ -127,9 +127,9 @@
   /* ── Pix anual ─────────────────────────────────────────────────────────
      Mora aqui, e não em arquivo próprio: é CSS de uma página só, e um .css
      novo pediria uma segunda rota em routes/static_pages.py sem ganho (§0.2).
-     O CTA do Pix é o SEGUNDO botão do card, e os cards são flex-column com
-     `.plan .btn { margin-top:auto }` — o auto do primeiro já empurra o par
-     inteiro para o rodapé, então basta o respiro entre os dois. */
+     O CTA do Pix é inserido logo DEPOIS do botão principal. Como o principal
+     mora abaixo do preço, os dois caminhos de compra continuam agrupados antes
+     dos benefícios; esta regra só põe o respiro entre eles. */
   #plans-v2 .plan .pix-cta { margin-top: 8px; }
 
   /* O overlay é `position: fixed`, então NÃO herda o padding de área segura do
@@ -418,6 +418,7 @@
               <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;8,25 por mês</div>
             </div>
+            <button class="btn btn-outline btn-block" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button>
             <ul>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>1&nbsp;banco conectado</strong> (Open&nbsp;Finance)</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Lançamentos ilimitados: áudio, foto de cupom, OFX</li>
@@ -425,7 +426,6 @@
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Caixinhas, metas e cartões ilimitados</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Boletos com lembrete de vencimento</li>
             </ul>
-            <button class="btn btn-outline btn-block" type="button" data-plan-btn="essencial" onclick="startCheckout(currentCycle, this, 'essencial')">Assinar Essencial</button>
           </article>
 
           <article class="plan featured">
@@ -437,6 +437,7 @@
               <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;16,58 por mês</div>
             </div>
+            <button class="btn btn-primary btn-block" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button>
             <ul>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>2&nbsp;bancos conectados</strong> (Open&nbsp;Finance)</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Agentes</strong>: energia pra até 3 (ex.: caça-assinaturas, cobranças duplicadas)</span></li>
@@ -446,9 +447,13 @@
                    ali. Mudou a env, muda aqui e na tabela comparativa também. -->
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Alertas de gastos fora do padrão</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 12 meses + tudo do Essencial</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 12 meses</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Investimentos no painel</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Gastos recorrentes e boletos com lembretes</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Caixinhas, metas e cartões ilimitados</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Importe extratos em OFX, CSV e PDF</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Exporte seus dados quando quiser</li>
             </ul>
-            <button class="btn btn-primary btn-block" type="button" data-plan-btn="plus" onclick="startCheckout(currentCycle, this, 'plus')">Assinar Plus</button>
           </article>
 
           <article class="plan">
@@ -459,14 +464,19 @@
               <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;41,58 por mês</div>
             </div>
+            <button class="btn btn-outline btn-block" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button>
             <ul>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>5&nbsp;bancos conectados</strong></span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> <span><strong>Todos os 7 agentes</strong>: energia pra rodar a equipe inteira</span></li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Previsão de saldo 30/60/90 dias</li>
               <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Histórico de 24 meses</li>
-              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Relatórios semanais + tudo do Plus</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Relatórios semanais</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Piggy IA · 1.000 mensagens/mês</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Alertas de gastos fora do padrão</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Investimentos no painel</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Gastos recorrentes e boletos com lembretes</li>
+              <li><span class="tick"><i class="ph ph-check" aria-hidden="true"></i></span> Exporte seus dados quando quiser</li>
             </ul>
-            <button class="btn btn-outline btn-block" type="button" data-plan-btn="pro" onclick="startCheckout(currentCycle, this, 'pro')">Assinar Pro</button>
           </article>
 
         </div>

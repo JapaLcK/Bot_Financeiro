@@ -250,8 +250,8 @@ test("PI5: <ul> embrulhado num <div> cai no fallback em vez de perder as feature
  * `.price-block` e `<ul>` repetidos, e ordem trocada.
  */
 test("PI6: um 2º <button> no card cai no fallback em vez de desaparecer", async () => {
-  const doisBotoes = (h) => h.replace("</ul>\n            <button", "</ul>\n"
-    + '            <button type="button" id="b2">Falar com vendas</button>\n            <button');
+  const doisBotoes = (h) => h.replace("</button>\n            <ul>", "</button>\n"
+    + '            <button type="button" id="b2">Falar com vendas</button>\n            <ul>');
   const servidor = await abrir({ mutar: doisBotoes, semIlha: true });
   const ilha = await abrir({ mutar: doisBotoes });
 
@@ -738,13 +738,16 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
         c.querySelector(".price").getBoundingClientRect().top
           - c.querySelector("h3").getBoundingClientRect().bottom,
       )),
-      finaisTexto: cards.map((c) => Math.round(
-        c.querySelector("ul > li:last-child").getBoundingClientRect().bottom,
-      )),
-      vaosAteCta: cards.map((c) => Math.round(
-        c.querySelector("[data-plan-btn]").getBoundingClientRect().top
-          - c.querySelector("ul > li:last-child").getBoundingClientRect().bottom,
-      )),
+      listas: cards.map((c) => {
+        const lista = c.querySelector("ul");
+        const cta = c.querySelector("[data-plan-btn]");
+        return {
+          gap: getComputedStyle(lista).rowGap,
+          itens: lista.children.length,
+          ctaAntes: !!(cta.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING),
+          vao: Math.round(lista.getBoundingClientRect().top - cta.getBoundingClientRect().bottom),
+        };
+      }),
       destaque: cards.findIndex((c) => c.classList.contains("featured")),
       bases: cards.map((c) => Math.round(cx(c).bottom)),
     };
@@ -766,10 +769,12 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
   assert.ok(r.espacosTituloPreco.every((espaco) => espaco <= 36),
     `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
-  assert.ok(Math.max(...r.finaisTexto) - Math.min(...r.finaisTexto) <= 1,
-    `os últimos benefícios não terminam na mesma linha: ${r.finaisTexto.join("/")}px`);
-  assert.ok(r.vaosAteCta.every((vao) => vao >= 20 && vao <= 30),
-    `o vão entre o texto final e o CTA não é o respiro previsto: ${r.vaosAteCta.join("/")}px`);
+  assert.deepEqual(r.listas.map((l) => l.gap), ["12px", "12px", "12px"],
+    `o espaçamento dos benefícios divergiu: ${JSON.stringify(r.listas)}`);
+  assert.deepEqual(r.listas.map((l) => l.itens), [5, 10, 10],
+    `Plus e Pro não receberam os benefícios que preenchem o pódio: ${JSON.stringify(r.listas)}`);
+  assert.ok(r.listas.every((l) => l.ctaAntes && l.vao >= 20 && l.vao <= 24),
+    `o CTA não ficou logo após o preço e antes dos benefícios: ${JSON.stringify(r.listas)}`);
   assert.equal(new Set(r.paddingsTopo).size, 1,
     `o conteúdo não começa no mesmo recuo: ${r.paddingsTopo.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);
