@@ -7,6 +7,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 import asyncio
 import html as _html
 import os
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -27,6 +28,14 @@ from frontend.routes.shared import (
 )
 
 router = APIRouter()
+
+_CACHE_IMUTAVEL = "public, max-age=31536000, immutable"
+
+
+def _cache_asset_versionado(request: Request) -> str:
+    """Cache longo só quando `?v=` é o hash de conteúdo aplicado ao HTML."""
+    version = request.query_params.get("v", "")
+    return _CACHE_IMUTAVEL if re.fullmatch(r"[0-9a-f]{12}", version) else "no-cache"
 
 
 class ContactBody(BaseModel):
@@ -493,25 +502,25 @@ async def serve_pb_nav_js():
 
 
 @router.get("/safe-area.js")
-async def serve_safe_area_js():
+async def serve_safe_area_js(request: Request):
     """Reserva de safe area para as páginas fora do modo app (precos, landing,
     legal…). O WebView usa contentInset "never" e vai até a borda em todas as
     rotas; o app-mode.css só cobre seis páginas. Inerte fora do app."""
     return FileResponse(
         FRONTEND_DIR / "safe-area.js",
         media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/nav-auth.js")
-async def serve_nav_auth_js():
+async def serve_nav_auth_js(request: Request):
     """Nav ciente de login nas páginas de marketing: troca 'Entrar/Começar'
     por 'Ir para o dashboard' quando o usuário está autenticado."""
     return FileResponse(
         FRONTEND_DIR / "nav-auth.js",
         media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
@@ -661,47 +670,46 @@ async def serve_dashboard_mobile_css():
 
 
 @router.get("/site.css")
-async def serve_site_css():
+async def serve_site_css(request: Request):
     """Sistema de design do site de marketing (protótipo v2).
-    no-cache: revalida sempre (304 se não mudou) — o site está em iteração
-    ativa, então mudanças de CSS precisam aparecer na hora."""
+    A URL carimbada pelo conteúdo pode ser imutável; a URL nua revalida."""
     return FileResponse(
         FRONTEND_DIR / "site.css",
         media_type="text/css",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/site-redesign.css")
-async def serve_site_redesign_css():
+async def serve_site_redesign_css(request: Request):
     """Camada de refino da landing (escopada em body.rd), sobre o site.css.
-    Carregada pela index.html. no-cache como o /site.css: iteração ativa."""
+    Carregada pela index.html e cacheada só quando a URL traz o hash."""
     return FileResponse(
         FRONTEND_DIR / "site-redesign.css",
         media_type="text/css",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/brand.css")
-async def serve_brand_css():
+async def serve_brand_css(request: Request):
     """Design tokens da marca (paleta, tokens semânticos, @font-face Inter).
-    Cache longo — muda pouco; querystring de versão invalida se precisar."""
+    O hash de conteúdo na query permite cache imutável sem versão manual."""
     return FileResponse(
         FRONTEND_DIR / "brand.css",
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/phosphor.css")
-async def serve_phosphor_css():
+async def serve_phosphor_css(request: Request):
     """CSS dos icones Phosphor (peso Regular), self-hosted. Aponta pro
-    /fonts/Phosphor.woff2. Cache longo — muda pouco."""
+    /fonts/Phosphor.woff2. O hash na query permite cache imutável."""
     return FileResponse(
         FRONTEND_DIR / "phosphor.css",
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
