@@ -15,6 +15,7 @@ import re
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CSS = RAIZ / "frontend" / "phosphor.css"
+FONTE = RAIZ / "frontend" / "fonts" / "Phosphor.woff2"
 
 _spec = importlib.util.spec_from_file_location(
     "build_phosphor_subset", RAIZ / "scripts" / "build_phosphor_subset.py"
@@ -39,6 +40,13 @@ def test_css_e_subset_nao_o_pacote_inteiro():
     """Se alguém regerar o arquivo cheio por cima, o subset se perde sem aviso."""
     n = len(_declarados())
     assert n < 400, f"phosphor.css tem {n} ícones — parece o pacote inteiro, não o subset."
+
+
+def test_fonte_de_icones_tambem_e_subset():
+    """O CSS já era curto, mas apontava para o WOFF2 inteiro de 144 KiB."""
+    assert FONTE.stat().st_size < 40_000, (
+        f"Phosphor.woff2 tem {FONTE.stat().st_size} B — parece a fonte completa"
+    )
 
 
 def test_fallbacks_dos_helpers_estao_no_css():
