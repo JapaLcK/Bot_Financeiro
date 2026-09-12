@@ -986,7 +986,12 @@ body.balance-hidden .account-balance {
   padding: 9px 18px;
   font-size: .8rem;
   font-weight: 760;
-  z-index: 50;
+  /* Acima dos overlays DESTA página (`.mfa-overlay`, aqui, e `.bankpick-overlay`,
+     em open-finance-connect.css — ambas 9999) e abaixo da `.pig-modal-overlay`
+     (modals.js, 99999), que precisa tapar o toast. Só é seguro porque o
+     `pointer-events: none` acima continua lá: sem ele o toast passa a roubar
+     clique e hit-test dos modais — não remova um sem o outro. */
+  z-index: 10000;
   /* `nowrap` + `left:50%` sem teto = frase longa sai da viewport pelos DOIS
      lados, e `scrollWidth` continua o da tela: não há scroll que revele o
      final. Medido a 390x844: 11 das 12 mensagens do toast cortavam, inclusive
