@@ -14,6 +14,7 @@ import { createRoot } from "react-dom/client";
 import "./precos.css";
 
 import { Planos } from "./Planos.jsx";
+import { montarPriceFlows } from "./PriceFlow.jsx";
 import { lerPlanos } from "./lerPlanos.js";
 
 const raiz = document.getElementById("plans-v2");
@@ -41,6 +42,7 @@ if (planos) {
   const plano = raiz.contains(document.activeElement)
     ? document.activeElement.dataset.planBtn : null;
   flushSync(() => createRoot(raiz).render(<Planos planos={planos} />));
+  montarPriceFlows(raiz, globalThis.pbBillingCycle || "monthly");
   // Fora da ilha ⟹ nada: restaurar cegamente ROUBARIA o foco de quem está no
   // toggle de ciclo ou na nav. `preventScroll` porque o mount não pode mover a
   // viewport — sem ele, com a página rolada de volta ao topo durante a espera, o
