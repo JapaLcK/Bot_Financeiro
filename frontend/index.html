@@ -103,7 +103,9 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
      procurando o botão em vez de assistir ao vídeo. */
   .btn.is-locked { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
 </style>
-<script src="/safe-area.js?v=1"></script>
+<!-- O shim só depende do DOM já analisado e precisa terminar antes de
+     DOMContentLoaded; defer tira sua ida à rede do caminho da primeira pintura. -->
+<script defer src="/safe-area.js?v=1"></script>
 </head>
 <body class="rd">
 <div class="glow"></div>
@@ -147,7 +149,10 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
       <!-- Visual: chat + resumo + mascote -->
       <div class="hero-visual">
-        <img class="hero-mascot" src="/brand/landing-mascot.webp?v=1" width="300" height="486" alt="Piggy" />
+        <picture>
+          <source media="(max-width: 560px)" srcset="/brand/landing-mascot-150.webp?v=1" />
+          <img class="hero-mascot" src="/brand/landing-mascot.webp?v=1" width="300" height="486" alt="Piggy" />
+        </picture>
 
         <div class="chat-card">
           <div class="chat-head">

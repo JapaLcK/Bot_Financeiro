@@ -42,6 +42,7 @@ def test_imagens_exclusivas_da_landing_tem_dimensoes_e_orcamento():
     esperadas = {
         "landing-logo.webp": ((202, 60), 8_000),
         "landing-mascot.webp": ((300, 486), 35_000),
+        "landing-mascot-150.webp": ((150, 243), 12_000),
         "landing-icon.webp": ((52, 55), 3_000),
         "vsl-poster-860.webp": ((860, 484), 35_000),
     }
@@ -57,6 +58,8 @@ def test_imagens_exclusivas_da_landing_tem_dimensoes_e_orcamento():
     assert 'preload="none"' in html
     assert 'width="101" height="30"' in html
     assert 'width="300" height="486"' in html
+    assert 'media="(max-width: 560px)"' in html
+    assert 'srcset="/brand/landing-mascot-150.webp?v=1"' in html
 
 
 def test_mascote_preserva_proporcao_quando_o_mobile_reduz_a_largura():
@@ -64,3 +67,16 @@ def test_mascote_preserva_proporcao_quando_o_mobile_reduz_a_largura():
     regra = re.search(r"\.hero-mascot\s*\{([^}]+)\}", css)
     assert regra
     assert "height: auto" in regra.group(1)
+
+
+def test_lcp_nao_fica_em_animacao_nao_composta():
+    css = (FRONTEND_DIR / "site-redesign.css").read_text(encoding="utf-8")
+    regra = re.search(r"\.rd \.grad\s*\{([^}]+)\}", css)
+    assert regra
+    assert "animation:" not in regra.group(1)
+    assert "@keyframes rdGrad" not in css
+
+
+def test_safe_area_nao_bloqueia_primeira_pintura():
+    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    assert '<script defer src="/safe-area.js?v=1"></script>' in html
