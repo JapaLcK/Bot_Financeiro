@@ -738,6 +738,13 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
         c.querySelector(".price").getBoundingClientRect().top
           - c.querySelector("h3").getBoundingClientRect().bottom,
       )),
+      finaisTexto: cards.map((c) => Math.round(
+        c.querySelector("ul > li:last-child").getBoundingClientRect().bottom,
+      )),
+      vaosAteCta: cards.map((c) => Math.round(
+        c.querySelector("[data-plan-btn]").getBoundingClientRect().top
+          - c.querySelector("ul > li:last-child").getBoundingClientRect().bottom,
+      )),
       destaque: cards.findIndex((c) => c.classList.contains("featured")),
       bases: cards.map((c) => Math.round(cx(c).bottom)),
     };
@@ -759,6 +766,10 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
   assert.ok(r.espacosTituloPreco.every((espaco) => espaco <= 36),
     `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
+  assert.ok(Math.max(...r.finaisTexto) - Math.min(...r.finaisTexto) <= 1,
+    `os últimos benefícios não terminam na mesma linha: ${r.finaisTexto.join("/")}px`);
+  assert.ok(r.vaosAteCta.every((vao) => vao >= 20 && vao <= 30),
+    `o vão entre o texto final e o CTA não é o respiro previsto: ${r.vaosAteCta.join("/")}px`);
   assert.equal(new Set(r.paddingsTopo).size, 1,
     `o conteúdo não começa no mesmo recuo: ${r.paddingsTopo.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);
