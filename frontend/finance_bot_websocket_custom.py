@@ -494,7 +494,7 @@ async def get_financial_data(
         # cabeçalho a somava (lista vazia com gasto no topo).
         credit_union_sql = """
             UNION ALL
-            SELECT t.id AS id,
+            SELECT 1 AS source_order, t.id AS id,
                    'credito' AS tipo,
                    t.valor AS valor,
                    c.name AS alvo,
@@ -538,7 +538,7 @@ async def get_financial_data(
         _q(
             f"""
             SELECT COUNT(*) AS total FROM (
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                SELECT 0 AS source_order, id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
@@ -587,7 +587,7 @@ async def get_financial_data(
             SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                SELECT 0 AS source_order, id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
@@ -600,7 +600,7 @@ async def get_financial_data(
                   {launch_filter_sql}
                 {credit_union_sql}
             ) merged
-            ORDER BY criado_em DESC, id ASC
+            ORDER BY criado_em DESC, id ASC, source_order ASC
             LIMIT %s OFFSET %s
             """,
             (user_id, query_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),

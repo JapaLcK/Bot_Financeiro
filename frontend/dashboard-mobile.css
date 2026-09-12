@@ -9,7 +9,10 @@ html, body { overflow-x: hidden; }
 
 @media (max-width: 640px) {
 
-  .page { padding: 10px 10px 48px; }
+  /* 96px de baixo reservam a coluna do #piggy-fab, que é `fixed` e não empurra
+     nada: aqui ele vai a 14px da borda e tem 58px, então cobria o último card
+     com os 48px antigos. */
+  .page { padding: 10px 10px 96px; }
 
   /* ── Header compacto: marca + navegação de mês na MESMA linha ──────────
      (anula o flex-direction:column da regra de 600px do dashboard.css) */
@@ -33,15 +36,19 @@ html, body { overflow-x: hidden; }
   .header-right { width: 100%; gap: 8px; flex-wrap: wrap; }
   #status { flex-shrink: 0; }
   #status-text { display: none; } /* a cor do dot já diz o estado */
+  /* 44px é o alvo de polegar que o próprio “+ Lançar” já usa aqui embaixo;
+     com 38px estes três botões ficavam abaixo dele. */
   .hbtn {
     flex: 1 1 0;
     justify-content: center;
-    min-height: 38px;
+    min-height: 44px;
     padding: 6px 4px;
     font-size: .72rem;
   }
   .user-menu { flex: 1 1 100%; } /* “Minha conta” continua em linha própria */
-  .user-menu-btn { min-height: 40px; }
+  /* "Minha conta" é .hbtn como os outros quatro: ficava 4px abaixo do alvo de
+     polegar por estar numa regra separada, oito linhas abaixo. */
+  .user-menu-btn { min-height: 44px; }
 
   /* ── Botão “+ Lançar” vira alvo de polegar: largura total ────────────── */
   .dashboard-tabs { margin: -4px 0 16px; }

@@ -24,10 +24,29 @@ deste PR: `count(*) filter (where tipo='saida')` = 0 e o mesmo para 'entrada' em
 conserto é da convenção, não de um incêndio.
 
 Controle NEGATIVO: volte a query 5 para `SELECT tipo, ... GROUP BY tipo` em
-frontend/finance_bot_websocket_custom.py — `test_barras_nao_passam_do_total_do_mes`
-fica vermelho (barras 150 × total 50).
+frontend/finance_bot_websocket_custom.py — fica VERMELHO todo caso deste arquivo
+que semeia linha legada E lê número do mês, porque a query 5 alimenta as três
+linhas divergentes da tabela acima de uma vez só (o primeiro é
+`test_barras_nao_passam_do_total_do_mes`, `assert 50.0 == 150.0`). O controle
+nomeia a CLASSE de propósito: a lista de nomes envelhece a cada caso novo com
+seed legado (docs/controles_declarados.md) — e envelheceu, esta mesma linha
+nomeava 1 vermelho onde caem 3. Caso com seed legado que fique VERDE sob esta
+injeção é caso que parou de medir.
 Controle POSITIVO: `test_base_sem_linha_legada_nao_muda_nenhum_numero` prova que
 uma base normal (que é 100% da produção hoje) responde exatamente o mesmo.
+
+Este arquivo cobre só os NÚMEROS DO MÊS (queries 5, 6 e 9 mais
+`get_monthly_history`). Os outros dois assuntos da mesma armadilha moram em
+arquivo próprio (CLAUDE.md §0.5), e os controles de cada um moram com ele:
+
+* `tests/test_tipo_legado_na_projecao_do_dashboard.py` — a projeção de
+  `recent_launches` (query 4) devolver a forma canônica;
+* `tests/test_tipo_legado_no_filtro_do_dashboard.py` — `_dashboard_launch_filter_sql`
+  ler as duas formas, e o COUNT (query 3) bater com a LISTA (query 4).
+
+Os três helpers abaixo continuam aqui porque já são o ponto de importação dos
+irmãos (`test_tipo_legado_na_cauda.py`, `_sem_numero.py`, `_no_dedupe_do_of.py`)
+— mover viraria diff em arquivo que não precisa mudar (§0.3).
 """
 from __future__ import annotations
 
@@ -159,150 +178,3 @@ def test_base_sem_linha_legada_nao_muda_nenhum_numero(pro_user_id):
     assert d["monthly_income"] == 80.0, d["monthly_income"]
     assert sum(c["total"] for c in d["expense_categories"]) == 50.0, d["expense_categories"]
     assert sum(x["total"] for x in d["daily_expenses"]) == 50.0, d["daily_expenses"]
-
-
-# ── PR 3 (#287): a PROJEÇÃO de `recent_launches` devolve a forma canônica ───
-#
-# Query 4 de `get_financial_data` devolvia o `tipo` CRU para fora. Quem consome
-# `recent_launches` decide rótulo, cor, sinal e ícone com igualdade estrita:
-# `renderOnboarding` (home.html) não conta a linha legada, `renderActivity`
-# desenha a receita legada como DESPESA (vermelho, sinal de menos, ícone de
-# queda), e `renderLaunches`/`_renderLaunchDetail`/`openEditLaunchModal`
-# (dashboard.js) usam o cru como label. Citados por símbolo, não por linha:
-# os 5 números que estavam aqui envelheceram sozinhos (CLAUDE.md §2).
-# O `#greeting-sub` (`renderGreeting`) saiu desta lista na issue 293 — passou a
-# ler o rótulo de frontend/launch-type-labels.js, e um `saida` legado cai no
-# fallback "Lançamento" em vez de sair cru.
-# O conserto é `TIPO_CANON_SQL AS tipo` na projeção de FORA — mesma decisão de
-# db/analytics.py:784-791.
-#
-# NÃO fecha o modal de detalhe inteiro: ele tem um SEGUNDO alimentador
-# (`_catLaunchesRows`, de `list_launches_by_category`), que segue cru — issue
-# 296, e o comentário da query 4 diz por que ficou fora.
-#
-# Incidência: ZERO linhas legadas em 4.964 `launches` na produção, medido pelo
-# dono em 04/09/2026 com
-#
-#     select count(*) filter (where tipo = 'saida')   as saida,
-#            count(*) filter (where tipo = 'entrada') as entrada,
-#            count(*)                                 as total_launches
-#       from launches;
-#
-# REMEDIR antes de reusar este número: ele envelhece a cada import. É
-# fechamento PREVENTIVO de classe, não conserto de incêndio — nenhum número de
-# usuário muda hoje.
-#
-# Controles do grupo. As três mutações abaixo foram RODADAS, e cada uma diz
-# quais casos ficam vermelhos — se o resultado for outro, o conserto mudou de
-# lugar e o grupo parou de medir o que diz medir:
-#
-#   1. NEGATIVO. Troque a projeção de FORA da query 4 por `tipo` cru
-#      (`SELECT id, tipo, valor, ...`, frontend/finance_bot_websocket_custom.py,
-#      a linha do `TIPO_CANON_SQL AS tipo` na query 4) → os dois
-#      `test_projecao_*` ficam VERMELHOS e os outros três, verdes.
-#   2. POSITIVO do filtro. Tire a forma legada das DUAS pernas de
-#      `_dashboard_launch_filter_sql` (mesmo arquivo), deixando
-#      `tipo IN ('despesa')` e `tipo IN ('receita')` → só
-#      `test_filtro_continua_achando_as_duas_formas` cai.
-#      NÃO é `TIPO_DESPESA_SQL` (db/connection.py): mexer lá derruba 5 casos,
-#      inclusive os dois de projeção, e deixa este verde — medido. O filtro do
-#      dashboard tem literal próprio, e é ele que este caso positivo guarda.
-#   3. POSITIVO do `ELSE`. Troque o `ELSE tipo` de `TIPO_CANON_SQL` por
-#      `ELSE 'despesa'` → só `test_canonizacao_nao_toca_nos_outros_tipos` cai.
-#
-# O que NÃO discrimina, e já enganou uma leitura deste arquivo: injetar
-# `TIPO_CANON_SQL` na perna de DENTRO. O WHERE avalia a tabela base, não a
-# projeção da subquery — os 10 casos do arquivo passam. É no-op funcional, não
-# controle.
-#
-# Os casos positivos são TRÊS (`test_canonizacao_nao_toca_nos_outros_tipos`,
-# `test_lista_e_contagem_nao_mudam_de_tamanho`,
-# `test_filtro_continua_achando_as_duas_formas`) e só UM casa `-k
-# canonizacao_nao`. Para rodar o grupo inteiro:
-# `pytest tests/test_tipo_legado_no_dashboard.py -k "projecao or canonizacao or contagem or filtro_continua"`.
-
-
-def test_projecao_nao_devolve_forma_legada_nenhuma(pro_user_id):
-    """N1 — com as duas formas legadas na base, nenhuma sai pela projeção."""
-    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
-    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
-
-    tipos = [r["tipo"] for r in _dados(pro_user_id)["recent_launches"]]
-    assert tipos, "as duas linhas legadas têm de aparecer na lista"
-    assert not ({"saida", "entrada"} & set(tipos)), tipos
-
-
-def test_projecao_colapsa_saida_em_despesa_sem_tocar_no_valor(pro_user_id):
-    """N2 — a linha 'saida' 100 chega como 'despesa', com o valor intacto."""
-    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
-
-    linhas = _dados(pro_user_id)["recent_launches"]
-    assert len(linhas) == 1, linhas
-    assert linhas[0]["tipo"] == "despesa", linhas[0]
-    assert float(linhas[0]["valor"]) == 100.0, linhas[0]
-
-
-def test_canonizacao_nao_toca_nos_outros_tipos(pro_user_id):
-    """P1 — controle POSITIVO, o que reprova canonizar DEMAIS.
-
-    `TIPO_CANON_SQL` tem `ELSE tipo`: só os dois pares colapsam. Todo o resto
-    (moderno, interno, investimento) sai IDÊNTICO ao gravado. `criar_caixinha`
-    é o par oposto: a perna de DENTRO o exclui pela coluna crua, e ele tem de
-    continuar fora — é o que prova que a canonização não vazou para o WHERE.
-    """
-    db.add_launch_and_update_balance(
-        pro_user_id, "despesa", 50, "compra", None,
-        categoria="mercado", criado_em=_hoje_as(10),
-    )
-    db.add_launch_and_update_balance(
-        pro_user_id, "receita", 80, "freela", None,
-        categoria="rendimentos", criado_em=_hoje_as(11),
-    )
-    # `_grava_tipo_legado` é o inserter SQL genérico do arquivo (§0.1): os tipos
-    # internos entram por ele porque o que se mede aqui é a PROJEÇÃO, não o
-    # caminho de escrita de caixinha/investimento.
-    for tipo in ("deposito_caixinha", "aporte_investimento", "criar_caixinha"):
-        _grava_tipo_legado(pro_user_id, tipo, 20, None, interno=True)
-
-    card_id = db.create_card(pro_user_id, "Nubank", closing_day=31, due_day=10)
-    db.add_credit_purchase(pro_user_id, card_id, 70, "mercado", "pão", today_tz())
-
-    tipos = sorted(r["tipo"] for r in _dados(pro_user_id)["recent_launches"])
-    assert tipos == ["aporte_investimento", "credito", "deposito_caixinha",
-                     "despesa", "receita"], tipos
-
-
-def test_lista_e_contagem_nao_mudam_de_tamanho(pro_user_id):
-    """P2 — canonizar o RÓTULO não pode criar, sumir nem duplicar linha."""
-    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
-    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
-
-    d = _dados(pro_user_id)
-    assert d["launches_pagination"]["total"] == 2, d["launches_pagination"]
-    assert len(d["recent_launches"]) == 2, d["recent_launches"]
-
-
-def test_filtro_continua_achando_as_duas_formas(pro_user_id):
-    """P3 — controle POSITIVO do caminho que RESTRINGE.
-
-    O filtro (`_dashboard_launch_filter_sql`) roda no WHERE da perna de DENTRO,
-    contra a coluna CRUA, e lê os dois pares. A canonização entrou no SELECT de
-    FORA, então "Despesas" tem de continuar trazendo a linha 'saida' e
-    "Receitas" a 'entrada' — se o filtro tivesse sido levado junto, um dos dois
-    voltaria vazio.
-    """
-    _grava_tipo_legado(pro_user_id, "saida", 100, "mercado")
-    _grava_tipo_legado(pro_user_id, "entrada", 300, "salario")
-    hoje = today_tz()
-
-    def _filtrado(ft):
-        return asyncio.run(dashboard.get_financial_data(
-            pro_user_id, year=hoje.year, month=hoje.month, filter_type=ft,
-        ))["recent_launches"]
-
-    # Só o VALOR, de propósito: o tipo devolvido é o que os dois testes de
-    # projeção acima medem. Aqui o observável é QUAIS linhas o WHERE trouxe —
-    # é o que mantém este caso verde com e sem o conserto, que é o que um
-    # controle positivo tem de fazer.
-    assert [float(r["valor"]) for r in _filtrado("despesa")] == [100.0]
-    assert [float(r["valor"]) for r in _filtrado("receita")] == [300.0]

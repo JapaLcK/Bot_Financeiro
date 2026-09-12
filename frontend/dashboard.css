@@ -7,12 +7,25 @@
   --glass-border:  rgba(255,255,255,0.13);
   --glass-shadow:  0 8px 32px rgba(0,0,0,0.35);
   --radius:        22px;
-  --green:  #00F078; --neon:   #C6F11A; --red:    #FF2D2D; --blue:   #FF80B8;
+  /* --red era #FF2D2D: 4,31:1 sobre o card, abaixo do AA justamente onde pinta
+     valor negativo. #FF5A5A dá 5,22:1 sem sair do vermelho da marca. */
+  --green:  #00F078; --neon:   #C6F11A; --red:    #FF5A5A; --blue:   #FF80B8;
   --purple: #FF2D8E; --yellow: #fbbf24;
   --neon-ink: var(--neon);  /* lima legível: neon puro no escuro, escurece no claro (ver body.light) */
+  --purple-ink: var(--purple);  /* mesmo padrão do --neon-ink: o rosa da marca como TINTA, não como superfície */
+  /* Tinta que vai EM CIMA do rosa da marca. Branco sobre #FF2D8E dá 3,49:1 e os
+     rótulos têm 11-13px; este quase-preto (o mesmo --text do tema claro) dá
+     5,12:1 sem tirar um grau do #FF2D8E, que é identidade visual. Vale nos DOIS
+     temas porque o fundo é o mesmo rosa nos dois — por isso é literal aqui e
+     não `var(--text)`, que inverte por tema. */
+  --on-purple: #0f172a;
   --text:   rgba(255,255,255,0.92);
-  --text-2: rgba(255,255,255,0.52);
-  --text-3: rgba(255,255,255,0.28);
+  /* Piso AA (4,5:1) sobre as duas superfícies reais, página #111 e card #222.
+     --text-3 estava em .28 → 2,48:1, e é o token oficial de rótulo discreto:
+     um valor conserta os 112 usos do arquivo. --text-2 sobe junto porque .52
+     ao lado de .50 deixaria de existir como segundo nível de hierarquia. */
+  --text-2: rgba(255,255,255,0.66);
+  --text-3: rgba(255,255,255,0.50);
   --div:    rgba(255,255,255,0.08);
   --ease:   cubic-bezier(.4,0,.2,1);
   --orb-opacity: .42;
@@ -25,12 +38,67 @@ body.light {
   --glass-border:  rgba(15,23,42,0.09);
   --glass-shadow:  0 6px 20px rgba(15,23,42,0.07);
   --text:   #0f172a;
-  --text-2: #475569;
-  --text-3: #94a3b8;
+  --text-2: #334155;   /* era #475569; desce um passo porque --text-3 assume esse valor */
+  --text-3: #475569;   /* era #94a3b8 → 2,34:1 sobre --bg-page; slate-600 dá 6,90:1 */
+  /* Verde e vermelho não eram redefinidos aqui, e são cor de DINHEIRO
+     (.tx-amt, .ov-val, .stat-delta). Sobre o fundo claro o neon dava 1,39:1 —
+     valor positivo praticamente invisível — e o vermelho, 3,38:1. Escurecem
+     como o --neon-ink logo abaixo já faz: mesma função, mesma identidade. */
+  --green:  #067647;
+  --red:    #C81E1E;
+  --blue:   #A32D6B;   /* #FF80B8 dava 2,18:1 no claro, e é cor de texto em 9 regras (aporte, investimento) */
+  --purple-ink: #C7186B;  /* o #FF2D8E como texto dá 3,49:1 sobre branco; SUPERFÍCIE segue --purple */
   --div:    rgba(15,23,42,0.08);
   --neon-ink: #5E8000;  /* neon puro fica ilegível sobre fundo claro; olive-lima escuro mantém a identidade */
   --orb-opacity: .12;
 }
+
+/* O modal era a única superfície grande que continuava ESCURA no tema claro —
+   `rgba(14,16,30,.94)` com e sem `body.light` — e o `CLAUDE.md` da `.cl-row` já
+   registrava isso como "um buraco pré-existente e geral": `--text` virava
+   #0f172a dentro dele, deixando TODO título de modal a 1,01:1
+   (`document.querySelectorAll(".modal h3").length` para saber quantos são —
+   estava escrito 18 aqui, o comando responde 20 só no HTML estático, e ainda há
+   os modais que o `dashboard.js` monta; contagem não é fato de documentação).
+   A saída NÃO é pintar a tinta de branco. Tentei, e a cada rodada aparecia
+   outro filho com fundo próprio CLARO — `.user-dropdown`, `.period-pill
+   option`, depois `.hbtn` e `.mock-cta.outline`, este último a 1,00:1 no hover.
+   São uma FAMÍLIA inteira de regras `body.light X { background: claro }`
+   (:85-105, :141, :499, :645, :1423…), e qualquer uma delas pode aparecer
+   dentro de um modal hoje ou amanhã: consertar por instância é enxugar gelo.
+   O modal passa a ser claro no tema claro. Os filhos que JÁ tinham fundo claro
+   funcionam sozinhos, e a frase que vinha aqui — "quem pinta por TOKEN
+   (`--glass-bg`, `--glass-border`, `--div`) acompanha de graça" — é FALSA para um
+   dos três, o que virou a 7ª rodada. Remedido em 2026-09-10, ΔE76 do token
+   compositado contra a superfície do modal de cada tema:
+     `--glass-border` .. claro 7,33  escuro 14,77   acompanha
+     `--div` ........... claro 6,51  escuro  9,11   acompanha
+     `--glass-bg` ...... claro 0,00  escuro  7,95   NÃO acompanha
+   `--glass-bg` no claro é rgba(255,255,255,.85), pensado para a página
+   (`--bg-page` #F6F4F1) e não para o modal BRANCO: sobre #fff ele é o próprio
+   #fff. Quem depende só dele para desenhar a caixa fica invisível — foi o caso dos
+   50 botões dos pickers de emoji (ver `body.light .modal .sw-emoji`, adiante).
+   O que também NÃO acompanha, e é o custo original desta linha: quem escreveu
+   `rgba(255,255,255,…)` na mão. Aqui morava a frase "nenhuma regra escopada em
+   modal escreve branco na mão (conferido)", e ela era FALSA — escrita sem
+   reexaminar as regras que descrevia, virou fonte de verdade errada e produziu
+   CINCO rodadas de revisão, uma categoria por rodada: cor de texto (2×), o SVG
+   da seta do `.cat-select`, `background` branco translúcido (o bloco "Véus
+   dentro do modal claro") e `border` branca translúcida. É o mesmo erro que
+   aquele bloco também registra, e ele se repetiu porque a correção anterior
+   editou o comentário sem remedir a regra que ele descreve.
+   Não confie nesta frase nem na anterior: `tests/frontend/modal_claro_veu.test.mjs`
+   ENUMERA, por estilo computado de cada elemento real dentro de `.modal`, quem
+   pinta igual nos dois temas e some sobre a superfície clara. A pergunta se
+   responde rodando o teste, não lendo daqui.
+   O critério é por DECLARAÇÃO, nunca por seletor: `.sd-note` pinta a borda com
+   `var(--glass-border)` e ela seguiu viva; `.help-step` e `.detail-cell`
+   escreveram o literal e desapareceram. E o mesmo seletor pode estar dos dois
+   lados — `.bill-opt` usa o token em repouso e sobreviveu, mas o `:hover` dela
+   escrevia `rgba(255,255,255,.22)` na mão e sumia. Esta frase já esteve errada
+   uma vez, afirmando que a borda da `.bill-opt` estava inteira: estava, no
+   repouso; no hover, não. Remeça antes de reescrever esta frase. */
+body.light .modal { background:#fff; }
 
 html { scroll-behavior: smooth; }
 body {
@@ -82,7 +150,10 @@ body::before { content:""; position:fixed; inset:0; z-index:1; pointer-events:no
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); opacity:.6; }
 
 /* ─── Layout ────────────────────────────────────────────────────────── */
-.page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 64px; }
+/* O padding de baixo reserva a coluna do #piggy-fab, que é `fixed` e por isso
+   não empurra nada: ele ocupa de 22px a 80px da borda inferior da viewport e
+   estava cobrindo a última linha de tabela e o último card. 96px = 80 + folga. */
+.page { position:relative; z-index:2; max-width:1400px; margin:0 auto; padding:24px 20px 96px; }
 
 /* ─── Side navigation (estilo YouTube — overlay full-height) ────────── */
 /* Sidebar oculta por padrão. Click no hamburger abre overlay sobre o
@@ -176,6 +247,10 @@ body.light .sidenav-toggle:hover { background:rgba(15,23,42,.05); color:var(--te
 }
 .sidenav-item .sn-tag.beta { background:rgba(255,128,184,.18); color:#FF80B8; }
 .sidenav-item .sn-tag.new  { background:rgba(198,241,26,.18); color:#C6F11A; }
+/* No claro os três selos ficam entre 1,2:1 e 1,5:1: são cores pensadas para
+   brilhar sobre fundo escuro, e o fundo do selo é só um véu de 18%. A tinta
+   identifica o selo, a tinta do texto passa a ser a do resto da interface. */
+body.light .sidenav-item .sn-tag { color:var(--text); }
 
 .sidenav-footer {
   margin-top:auto; padding-top:12px; border-top:1px solid var(--div);
@@ -720,7 +795,8 @@ details.inst-card[open] .inst-chevron {
   text-transform:uppercase; letter-spacing:.1em;
 }
 .inst-pay-summary { display:flex; gap:14px; font-size:.78rem; }
-.inst-pay-summary .paid-amt { color:#00F078; font-weight:600; }
+/* Dinheiro pago: usa o token, senão o neon puro fica ~1,5:1 no tema claro. */
+.inst-pay-summary .paid-amt { color:var(--green); font-weight:600; }
 .inst-pay-summary .left-amt { color:#fb923c; font-weight:600; }
 .inst-pay-summary .paid-amt::before, .inst-pay-summary .left-amt::before {
   content:""; display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; vertical-align:middle;
@@ -783,7 +859,7 @@ body.light .parcel-status-icon.next { color:#FF2D8E; }
   font-size:.62rem; padding:2px 7px; border-radius:5px;
   text-transform:uppercase; letter-spacing:.06em; font-weight:700;
 }
-.parcel-tag.paid { background:rgba(0,240,120,.16); color:#00F078; }
+.parcel-tag.paid { background:rgba(0,240,120,.16); color:var(--green); }
 .parcel-tag.next { background:linear-gradient(135deg, rgba(255,45,142,.25), rgba(199,24,107,.18)); color:#F7D7E3; border:1px solid rgba(255,45,142,.3); }
 body.light .parcel-tag.next { color:#5b21b6; }
 .parcel-val { font-size:.95rem; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
@@ -931,6 +1007,8 @@ header h1 { font-size:1.1rem; font-weight:650; letter-spacing:-.02em; }
   background:rgba(255,45,45,.12);
   color:#fecaca;
 }
+/* #fecaca é tinta de fundo escuro: 1,22:1 sobre o menu branco do tema claro. */
+body.light .user-menu-link.danger { color:var(--red); }
 .user-menu-link.danger:hover {
   background:rgba(255,45,45,.2);
   color:#fff1f2;
@@ -1000,7 +1078,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-stat .ov-ico {
   position:absolute; top:16px; right:16px; width:34px; height:34px; border-radius:10px;
   display:grid; place-items:center;
-  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple);
+  background:rgba(255,45,142,.12); border:1px solid rgba(255,45,142,.28); color:var(--purple-ink);
 }
 .ov-stat .ov-ico.neon { background:rgba(198,241,26,.12); border-color:rgba(198,241,26,.28); color:var(--neon); }
 .ov-stat .ov-ico svg { width:18px; height:18px; }
@@ -1010,7 +1088,7 @@ body.light #alert-banner.warning  { background:rgba(245,158,11,.04); border-colo
 .ov-delta { font-size:.74rem; font-weight:600; color:var(--text-3); font-variant-numeric:tabular-nums; }
 .ov-delta.up { color:var(--green); } .ov-delta.down { color:var(--red); }
 .ov-adjust-lnk { background:none; border:none; padding:0; cursor:pointer; font:inherit;
-  font-weight:700; color:var(--purple); text-decoration:underline; text-underline-offset:2px; }
+  font-weight:700; color:var(--purple-ink); text-decoration:underline; text-underline-offset:2px; }
 .ov-adjust-lnk:hover { color:var(--pink, var(--purple)); }
 
 .ov-section-lbl { font-size:.67rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
@@ -1063,12 +1141,14 @@ body.light .hbtn.hbtn-pink:hover {
 .ov-cc-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ov-cc-status { flex-shrink:0; font-size:.6rem; font-weight:700; text-transform:uppercase;
   letter-spacing:.04em; padding:3px 8px; border-radius:999px; }
-.ov-cc-status.s-open  { background:rgba(255,45,142,.16); color:var(--purple); }
+.ov-cc-status.s-open  { background:rgba(255,45,142,.16); color:var(--purple-ink); }
 .ov-cc-status.s-paid  { background:rgba(0,240,120,.16);  color:var(--green); }
 .ov-cc-status.s-due   { background:rgba(255,45,45,.16);  color:var(--red); }
 .ov-cc-status.s-empty { background:rgba(255,255,255,.06); color:var(--text-3); }
 .ov-cc-sub { font-size:.68rem; color:var(--text-3); margin:-5px 0 8px; }
-@media(max-width:600px) { .page{padding:12px 10px 48px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
+/* 96px de baixo = folga do FAB, mesmo valor da .page base e do
+   dashboard-mobile.css, que é quem de fato vence abaixo de 640px. */
+@media(max-width:600px) { .page{padding:12px 10px 96px} header{flex-direction:column;align-items:flex-start}.user-menu,.user-menu-btn{width:100%;max-width:none}.user-dropdown{left:0;right:auto;width:min(100%,300px)} }
 
 /* ─── Skeleton ──────────────────────────────────────────────────────── */
 .sk { border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.06) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.06) 75%);
@@ -1096,7 +1176,7 @@ body.light .hbtn.hbtn-pink:hover {
 .row:last-child { border-bottom:none; }
 .row .lbl { color:var(--text-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:10px; }
 .row .val { font-weight:600;color:var(--text);white-space:nowrap; }
-.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple)}
+.g{color:var(--green)} .r{color:var(--red)} .b{color:var(--blue)} .p{color:var(--purple-ink)}
 
 .mrow { display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--div); }
 .mrow:last-child { border-bottom:none; }
@@ -1131,7 +1211,7 @@ body.light .hbtn.hbtn-pink:hover {
 .tag.saida,.tag.despesa   { background:rgba(255,45,45,.14);color:var(--red);  border:1px solid rgba(255,45,45,.22); }
 .tag.entrada,.tag.receita { background:rgba(0,240,120,.12); color:var(--green);border:1px solid rgba(0,240,120,.2); }
 .tag.investimento         { background:rgba(255,128,184,.12); color:var(--blue); border:1px solid rgba(255,128,184,.2); }
-.tag.credito              { background:rgba(255,45,142,.14); color:var(--purple);border:1px solid rgba(255,45,142,.28); }
+.tag.credito              { background:rgba(255,45,142,.14); color:var(--purple-ink);border:1px solid rgba(255,45,142,.28); }
 .tag.deposito_caixinha,
 .tag.saque_caixinha,
 .tag.aporte_investimento,
@@ -1226,6 +1306,9 @@ body.light .hbtn.hbtn-pink:hover {
   text-align:center;color:var(--text-2);font-size:.82rem;padding:24px 12px;
 }
 .pkt-hist-error { color:#fecaca; }
+/* Este erro mora dentro de `.modal wide` (histórico da caixinha) e é a ÚNICA
+   mensagem de falha daquele fluxo: com o modal branco, #fecaca dá 1,45:1. */
+body.light .pkt-hist-error { color:var(--red); }
 
 .pkt-move-actions { display:flex;gap:8px;margin:10px 0 14px; }
 .pkt-move-btn {
@@ -1273,7 +1356,7 @@ body.light .hbtn.hbtn-pink:hover {
 .filter-tabs { display:flex;gap:6px;flex-wrap:wrap; }
 .ftab { background:rgba(255,255,255,.06);border:1px solid var(--glass-border);color:var(--text-2);
   padding:5px 12px;border-radius:8px;font-size:.74rem;cursor:pointer;transition:all .2s;white-space:nowrap; }
-.ftab.active { background:rgba(255,45,142,.18);border-color:rgba(255,45,142,.4);color:var(--purple); }
+.ftab.active { background:rgba(255,45,142,.18);border-color:rgba(255,45,142,.4);color:var(--purple-ink); }
 .ftab:hover:not(.active) { background:rgba(255,255,255,.1);color:var(--text); }
 
 /* ─── Dashboard tabs ────────────────────────────────────────────────── */
@@ -1361,11 +1444,18 @@ input[type="checkbox"]:disabled {
   opacity: .45;
   cursor: not-allowed;
 }
-body.light input[type="checkbox"] {
+/* `:not(:checked)` nos dois: sem ele esta regra (0,2,2) vence
+   `input[type="checkbox"]:checked` (0,2,1) e apaga O ESTADO — o gradiente rosa
+   E a borda rosa. Enquanto o modal era escuro isso ficava mascarado: a caixa
+   compunha em rgb(14,16,28) e o ✓ branco do `::after` dava 18,97:1. Com o modal
+   branco a mesma caixa compõe em rgb(247,247,247) e o ✓ cai para 1,07:1 —
+   marcado e desmarcado viram a mesma coisa. Medido nas duas árvores.
+   Não é véu, é indicação de estado, e por isso não vai no bloco de véus. */
+body.light input[type="checkbox"]:not(:checked) {
   background: rgba(0,0,0,.03);
   border-color: rgba(0,0,0,.18);
 }
-body.light input[type="checkbox"]:hover:not(:disabled) {
+body.light input[type="checkbox"]:hover:not(:disabled):not(:checked) {
   background: rgba(255,45,142,.08);
   border-color: rgba(255,45,142,.45);
 }
@@ -1517,11 +1607,18 @@ body.light .chip-val.b { background:linear-gradient(135deg, #C7186B, #FF2D8E); -
 .ov-period-tabs { display:flex; gap:3px; background:rgba(255,255,255,.05); border:1px solid var(--glass-border); border-radius:9px; padding:3px; }
 .ov-period-tabs button { font-size:.72rem; font-weight:600; color:var(--text-3); padding:4px 11px; border-radius:6px; border:none; background:transparent; cursor:pointer; transition:background .15s var(--ease),color .15s var(--ease); }
 .ov-period-tabs button:hover { color:var(--text-2); }
-.ov-period-tabs button.on { background:var(--purple); color:#fff; }
+/* O fundo continua sendo o rosa da marca; quem muda é a tinta. Branco aqui dava
+   3,49:1 num rótulo de 11,5px. Ver --on-purple. */
+.ov-period-tabs button.on { background:var(--purple); color:var(--on-purple); }
 body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 
 /* ─── Toast ─────────────────────────────────────────────────────────── */
-#toast { position:fixed;bottom:26px;right:26px;z-index:999;
+/* Sai da frente do #piggy-fab pelo LADO, não por cima: os dois são `fixed` no
+   mesmo canto e o toast nascia atrás da bolinha. O FAB ocupa de 22px a 80px da
+   borda direita, então 92px o limpa. Subir o toast em vez disso o jogaria em
+   cima do #piggy-panel, que começa em bottom:90px e tem o campo de digitar no
+   rodapé. */
+#toast { position:fixed;bottom:26px;right:92px;z-index:999;
   background:rgba(0,240,120,.14);backdrop-filter:blur(20px);
   border:1px solid rgba(0,240,120,.3);color:var(--green);
   padding:9px 18px;border-radius:12px;font-size:.8rem;font-weight:600;
@@ -1583,6 +1680,9 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
   padding:8px 14px;border-radius:9px;cursor:pointer;font-size:.82rem;
   display:inline-flex;align-items:center;gap:6px;transition:background .2s; }
 .ld-del:hover { background:rgba(255,45,45,.12); }
+/* Fundo transparente: esta ação senta direto no modal, que no claro é branco —
+   o #ff6b6b dá 2,78:1 ali, e é o botão de EXCLUIR lançamento. */
+body.light .ld-del { color:var(--red); }
 .modal h3 { font-size:1rem;font-weight:650;margin-bottom:5px; }
 .modal .msub { font-size:.78rem;color:var(--text-2);margin-bottom:18px; }
 .modal-inp { width:100%;background:rgba(255,255,255,.07);border:1px solid var(--glass-border);
@@ -1686,6 +1786,9 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .upgrade-modal .upg-perk::before {
   content: "✓"; color: #00F078; font-weight: 700;
 }
+/* .upgrade-modal é `class="modal upgrade-modal"`, então herdou o fundo branco:
+   o neon nos checks cai para 1,53:1. */
+body.light .upgrade-modal .upg-perk::before { color:var(--green); }
 .btn-upgrade {
   background: linear-gradient(135deg,#FF2D8E,#C7186B);
   border: none; color: #fff;
@@ -1710,6 +1813,24 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .tipo-opt.active.aporte    { background:rgba(0,240,120,.14);border-color:rgba(0,240,120,.45);color:#a7f3d0; }
 .tipo-opt.active.resgate   { background:rgba(255,45,45,.14);border-color:rgba(255,45,45,.45);color:#fecaca; }
 .tipo-opt.active.novo-inv  { background:rgba(255,128,184,.16);border-color:rgba(255,128,184,.45);color:#bfdbfe; }
+
+/* ── Estados de modal: a FAMÍLIA inteira, não uma instância ────────────────
+   #fecaca, #a7f3d0, #ddd6fe e #bfdbfe são tintas pastel para fundo ESCURO.
+   Com o modal branco elas caem para 1,1-1,25:1 sobre o próprio véu de 10-16%.
+   São OITO regras e elas ficam juntas de propósito: consertei quatro numa
+   primeira passada e o revisor achou as outras quatro. Cada uma recebe o token
+   da cor que o véu do fundo já anuncia — vermelho, verde, rosa ou azul. */
+body.light .tipo-opt.active.despesa,
+body.light .tipo-opt.active.resgate,
+body.light .modal-error            { color:var(--red); }
+body.light .tipo-opt.active.receita,
+body.light .tipo-opt.active.aporte  { color:var(--green); }
+/* Estes dois têm véu ROSA por fundo, e é o caso do --on-purple: o --purple-ink
+   dá 5,57:1 sobre branco puro mas só 4,47:1 sobre o véu de 16%, num rótulo de
+   11,8px. O véu e a borda já anunciam a cor; a tinta é a da interface. */
+body.light .tipo-opt.active.credito,
+body.light .vmode-opt.active        { color:var(--on-purple); }
+body.light .tipo-opt.active.novo-inv { color:var(--blue); }
 /* Toggle "valor da parcela" vs "valor total" + preview do parcelamento */
 .valor-mode-toggle { display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:8px; }
 .vmode-opt { background:rgba(255,255,255,.05);border:1px solid var(--glass-border);
@@ -1725,7 +1846,164 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .modal-inp.cat-select { appearance:none;-webkit-appearance:none;cursor:pointer;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(255,255,255,.5)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat:no-repeat;background-position:right 14px center;padding-right:36px; }
+/* A seta é um SVG embutido, não uma cor: com `appearance:none` a nativa não
+   volta, e um traço branco a 50% some no modal claro — o campo fica sem
+   affordance nenhuma de que é um select. Mesmo desenho, traço escuro. */
+body.light .modal-inp.cat-select {
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='rgba(15,23,42,.55)' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
 textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
+/* Veio do `style` inline do `<pre>` no dashboard.html, sem trocar uma
+   declaração. O véu dele (`background` de 4%) é da mesma família do bloco
+   abaixo, e no atributo ele era INVISÍVEL para todo enumerador de CSS — foi o
+   único membro da categoria que sobreviveu às quatro primeiras rodadas por
+   isso. Fora do atributo ele ganha par `body.light` como todos os irmãos, numa
+   fonte de verdade só (§0.7). O `#id` é a especificidade que o inline tinha:
+   nada mais no arquivo mira este elemento, e o JS só escreve `textContent`. */
+#ofx-result-body {
+  white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text);
+  background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
+  border-radius:10px;padding:14px;max-height:60vh;overflow:auto;margin-bottom:18px;
+}
+/* ── Véus dentro do modal claro ────────────────────────────────────────────
+   Categoria do modal branco que veio depois das cores de texto e do SVG da
+   seta: VÉU branco translúcido. Sobre superfície escura um véu de 3 a 12%
+   desenha o campo, a linha e o botão; sobre branco ele é branco no branco e
+   some. A regra é trocar só a TINTA: onde o escuro escreve um literal branco, o
+   claro escreve `rgba(15,23,42,…)` com a mesma alpha; onde o escuro pinta por
+   TOKEN, o claro fica no token (`--glass-border` é .13 no escuro e .09 no
+   claro, e é assim que tem de ser — o token é a fonte de verdade da borda de
+   vidro). Por isso as duas bordas que este bloco repõe (`.help-step` e
+   `.detail-cell`, literal .08 no escuro) voltam por `var(--glass-border)` e não
+   por um literal escuro novo.
+   Aqui mora o custo de um erro meu: quando o modal virou branco eu atualizei o
+   comentário da `.cl-row` sem reexaminar a regra que ele descreve, e o hover
+   dela ficou invisível até o revisor apontar. Isso se repetiu: o bloco nasceu
+   cuidando só de `background` — e `border` branca translúcida é véu igual, some
+   igual, e virou a rodada seguinte (`.help-step`, `.detail-cell`).
+   "Faltou alguém?" se responde rodando `tests/frontend/modal_claro_veu.test.mjs`,
+   não lendo uma lista escrita aqui — mas ele cobre `background-color`,
+   `border-color`, morte e ladrilhamento de `background-image` e salto de hover.
+   COR DE TEXTO e a cor do traço do SVG, que são as categorias das rodadas 1, 2
+   e 3, ele NÃO cobre; hoje o conjunto é vazio (os brancos que sobram são texto
+   sobre gradiente rosa ou vermelho), e é à mão que se confere. */
+body.light .pkt-move-form                            { background-color:rgba(15,23,42,.03); }
+body.light .pkt-hist-summary,
+body.light .pkt-hist-row,
+body.light .pkt-move-btn,
+body.light .pkt-move-form-acts button,
+body.light .ld-desc,
+body.light .receipt-cell,
+body.light .bill-summary,
+body.light .bill-tx,
+body.light .sd-note,
+body.light #ofx-result-body                          { background-color:rgba(15,23,42,.04); }
+body.light .tipo-opt,
+body.light .vmode-opt,
+body.light .bill-opt                                 { background-color:rgba(15,23,42,.05); }
+body.light .cl-row:hover,
+body.light .help-step,
+body.light .detail-cell                              { background-color:rgba(15,23,42,.055); }
+body.light .help-step,
+body.light .detail-cell                              { border-color:var(--glass-border); }
+body.light .modal-inp,
+body.light .btn-cancel                               { background-color:rgba(15,23,42,.07); }
+body.light .pkt-move-btn:hover,
+body.light .tipo-opt:hover,
+body.light .vmode-opt:hover                          { background-color:rgba(15,23,42,.08); }
+/* A borda do HOVER é a 6ª irmã da categoria, e escapou de novo: `.bill-opt`
+   pinta a borda de repouso com `var(--glass-border)` (por isso sobrevive) mas
+   o `:hover` dela escreve `rgba(255,255,255,.22)` na mão. Sobre modal branco a
+   borda SUMIA justamente ao passar o mouse — |ΔL*| 7,27 em repouso, 0,00 no
+   hover, o inverso do feedback. Mesma alpha, tinta trocada. */
+body.light .bill-opt:hover                           { background-color:rgba(15,23,42,.09);
+                                                       border-color:rgba(15,23,42,.22); }
+body.light .btn-cancel:hover                         { background-color:rgba(15,23,42,.12); }
+/* Daqui para baixo vêm as regras ESCOPADAS EM `.modal`, e o motivo é sempre o
+   mesmo: a classe também vive fora de modal, onde já estava quebrada no tema
+   claro antes deste PR (véu branco sobre `--bg-page` claro) e continua fora do
+   escopo dele. Contagem por `document.querySelectorAll(sel)` filtrando
+   `closest('.modal')`, no dashboard.html estático:
+     `.field input`/`.field select` .. 23 dentro, 10 fora (boleto e simulador)
+     `.bar-icon` .................... 0 dentro, 3 fora  (o de dentro vem do JS)
+     `.hbtn` ....................... 2 dentro, 5 fora
+     `.mock-cta.outline` ........... 0 dentro, 2 fora  (os de dentro vêm do JS)
+   Remedir com o comando acima antes de reusar estes números.
+   `:not([type="checkbox"])` não é enfeite: sem ele esta regra bate no checkbox
+   e ele perde o véu próprio de `body.light input[type="checkbox"]:not(:checked)`
+   — que era, aliás, o falso positivo que casamento de seletor por TEXTO não
+   enxerga e estilo computado enxerga. Com o `:not` a regra é (0,4,2) e a do
+   checkbox (0,3,2); sem ele seriam (0,3,2) as duas, e quem decidiria seria a
+   ORDEM DE ORIGEM — esta regra vem depois e ganharia.
+   `background-color`, NUNCA o shorthand `background`: estas regras batem em
+   `<select>` que é `.modal-inp.cat-select`, cuja seta é um `background-image`
+   embutido (a correção da 3ª rodada, logo acima). O shorthand zera
+   `background-image` E a geometria (`repeat`/`position`): a 1ª versão daqui
+   apagou a seta de 4 selects, e a 2ª, com a imagem reposta por regra mais
+   específica, deixou a seta LADRILHADA nos 9. O caso 'nenhum background-image
+   morre no tema claro' guarda as duas coisas.
+   Sobre esta regra passar por cima de `body.light .modal-inp` (0,2,1): é de
+   propósito e reproduz o ESCURO, onde `.field input` (0,1,1) já vence
+   `.modal-inp` (0,1,0). Medido: input/select dentro de `.field` dá .06 nos DOIS
+   temas; `.modal-inp` fora de `.field` dá .07 nos dois.
+   A mesma alpha em cada elemento nos dois temas é a INTENÇÃO deste bloco, e
+   nada a verifica: o teste compara a tinta dos dois temas só para descartar o
+   que foi pensado por tema, e o cabeçalho dele registra, na cegueira (a), que
+   assertar paridade de alpha esbarra em exceções legítimas (`--glass-border` é
+   .13 no escuro e .09 no claro). Quem mexer aqui confere à mão. */
+body.light .modal .field input:not([type="checkbox"]),
+body.light .modal .field select                      { background-color:rgba(15,23,42,.06); }
+body.light .modal .field input:not([type="checkbox"]):focus,
+body.light .modal .field select:focus                { background-color:rgba(15,23,42,.1); }
+/* `.bar-icon` também vive dos dois lados: no gráfico de distribuição e nos
+   cards (fora de modal, quebrado no claro desde antes) E dentro do `.cl-modal`,
+   porque `_clRowsHtml` monta `<div class="bar-row cl-row">` com um `.bar-icon`
+   dentro e joga em `#cl-list`. Só apareceu quando o extrator do teste passou a
+   resolver o markup que vem de função auxiliar. */
+body.light .modal .bar-icon                          { background-color:rgba(15,23,42,.06); }
+/* Regressão que o revisor NÃO apontou, achada enumerando a consequência da
+   cegueira (a): `var(--glass-bg)` é rgba(255,255,255,.07) no escuro e
+   rgba(255,255,255,.85) no CLARO — pensado para a página clara (#F6F4F1), não
+   para o modal branco. Sobre #fff dá ΔE 0,00 (1,00:1) nos DOIS valores, e o botão
+   do picker não tem outra fronteira (`border:3px solid transparent`): são os 30
+   botões de emoji da categoria e os 20 da meta INVISÍVEIS no tema claro, não só o
+   selecionado. No escuro o mesmo elemento dá ΔE 7,95, então é regressão deste PR.
+   A enumeração achou 6 elementos nesta categoria e este é o único defeito: os
+   outros 5 (`.stat-tile`, `.rate-tile`, `.cl-box` e os dois `.hbtn` de fatura)
+   têm `border:1px solid var(--glass-border)`, que no claro dá ΔE 7,33 — a
+   fronteira deles sobrevive pela borda, e por isso NÃO cabe um override
+   transversal de `--glass-bg`. Os cinco estão travados por nome no caso
+   "nenhum elemento perde a fronteira INTEIRA" do `modal_claro_veu.test.mjs`. Valor: rgba(15,23,42,.06), ΔE 4,87, o mesmo que `.field input` em
+   repouso duas regras acima. Medida e descartada: `.09` (ΔE 7,33, paridade melhor
+   com os 7,95 do escuro, e também já usada neste bloco) — `.06` mantém o botão
+   mais discreto que o campo de texto. Escopado em `body.light` porque `.06` sobre
+   o modal ESCURO dá ΔE 0,40, invisível.
+   `:not(.selected)` não é enfeite: sem ele esta regra é (0,3,1) e passaria por
+   cima de `.sw-emoji.selected` (0,2,0), devolvendo o selecionado ao cinza de
+   repouso no tema claro. Com o `:not`, ela simplesmente não casa o selecionado —
+   uma declaração só, em vez de repetir o fill rosa num seletor mais específico. */
+body.light .modal .sw-emoji:not(.selected)           { background-color:rgba(15,23,42,.06); }
+/* `.hbtn` é superfície clara DELIBERADA (`rgba(255,255,255,.7)` no claro), e a
+   borda por token segura o botão em repouso. O que este PR quebrou foi o HOVER:
+   ele ia para `#fff`, o que sobre o modal ESCURO dava ΔE 25,50 e sobre o modal
+   branco dá 0,00 — os dois botões de navegação da fatura ficaram sem retorno
+   nenhum ao passar o mouse. Só o hover muda, e só dentro de modal. */
+body.light .modal .hbtn:hover                        { background-color:rgba(15,23,42,.08); }
+/* Mesmo defeito, outra família, e esta o `body.light` já tratava — mal:
+   `body.light .mock-cta.outline:hover { background:#fff }` era um hover forte
+   enquanto o modal era escuro e virou ZERO sobre o modal branco, em 4 botões,
+   entre eles o "Carregar mais" e os de arquivar/desarquivar. Os três saltos,
+   medidos com o harness do teste (ΔE entre repouso e hover, composto sobre a
+   superfície do modal ancestral):
+     tema claro sobre o modal escuro da `main` .... 32,34
+     tema ESCURO (o que o teste usa como noEscuro)   6,78
+     tema claro sobre o modal branco, já corrigido   6,51
+   A frase anterior colava o 6,78 na primeira linha, que é a errada: 6,78 é o
+   salto do tema escuro. É a classe que o teste declarava como cega —
+   regressão escrita DENTRO do ramo `body.light` — e ela deixou de ser teórica:
+   o caso do hover a pegou. */
+body.light .modal .mock-cta.outline:hover            { background-color:rgba(15,23,42,.08); }
+
 .modal-error { background:rgba(255,45,45,.1);border:1px solid rgba(255,45,45,.28);
   color:#fecaca;border-radius:9px;padding:8px 12px;font-size:.78rem;margin-bottom:12px;display:none; }
 .modal-error.show { display:block; }
@@ -1760,8 +2038,88 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .bill-opt.selected { background:rgba(255,45,142,.14);border-color:rgba(255,45,142,.45); }
 .bill-opt .b-name { font-size:.85rem;font-weight:650;color:var(--text-1); }
 .bill-opt .b-period { font-size:.7rem;color:var(--text-3); }
-.bill-opt .b-due { font-size:.92rem;font-weight:740;color:var(--purple);font-variant-numeric:tabular-nums; }
+.bill-opt .b-due { font-size:.92rem;font-weight:740;color:var(--purple-ink);font-variant-numeric:tabular-nums; }
 .bill-opt .b-due-sub { font-size:.65rem;color:var(--text-3);font-weight:500; }
+
+/* ── Swatch: os botões dos TRÊS pickers de emoji/cor ───────────────────────────
+   Pendência NOMINAL, não conserto deste PR: `.tipo-opt.active`,
+   `.vmode-opt.active` e `.bill-opt.selected` (logo acima) indicam seleção com
+   `border-color:rgba(255,45,142,.45)`, que dá 1,91:1 no escuro e 1,88:1 no claro
+   — REPROVA nos dois temas contra o piso de 3:1 do WCAG 2.2 SC 1.4.11. A `main`
+   tem o mesmo número, então não é regressão daqui e não foi tocado. Foi por isso
+   que este bloco NÃO reusou aquela declaração: reusar seria adotar o defeito.
+   Toda razão de contraste citada aqui foi medida em 2026-09-10 entre a tinta
+   compositada e a superfície do `.modal` (rgba(14,16,30,.94) sobre #111111 no
+   escuro; #fff no claro) — remedir antes de reusar.
+   REGRA QUE ESTE BLOCO INSTAURA, e o motivo dele existir em CSS e não inline:
+   `style` inline interpolado carrega DADO (a cor que o usuário escolheu, uma
+   largura em %, um delay); tudo que depende de TEMA mora aqui.
+   Inline não segue o flip de tema, e isto foi MEDIDO em 2026-09-10, não deduzido:
+   modal aberto no escuro, tema trocado para claro sem re-render nenhum —
+     árvore atual (CSS) .... anel rgb(255,45,142) -> rgb(199,24,107)   acompanha
+     aeb5264 (inline) ...... anel rgba(255,45,142,.5) e borda rgb(255,255,255),
+                             IDÊNTICOS depois do flip                 não acompanha
+   ou seja, a borda continuava branca sobre o modal que acabara de virar branco.
+   A causa é estrutural e o `grep` a confirma: `_renderCategoryPickers()` só é
+   chamada por `openCategoryEditModal()` e pelos `_setCat*`; ninguém a chama na
+   troca de tema. O caso "o anel de seleção tem 3:1 … nos dois temas" do
+   `swatch_anel_selecao.test.mjs` renderiza UMA vez e só então alterna o tema, de
+   propósito — é esse flip que ele mede. E inline interpolado é inauditável:
+   `border:2px solid ${sel ? "#fff" : "transparent"}` passou por seis rodadas de
+   revisão porque nenhum enumerador estático nem o harness de estilo computado o
+   alcançava.
+   A MAQUINARIA DO VÃO fica só nos dois pickers de COR, e o motivo é que só ali o
+   fundo é DADO DO USUÁRIO: `--purple-ink` contra um swatch `#FF2D8E` (o 1º da
+   paleta e o default de toda categoria/meta nova) dá 1,00:1 no escuro, então o
+   anel encostado não indicaria seleção, só faria o swatch parecer maior. O vão
+   sai de `border:3px solid transparent` + `background-clip:padding-box` (a faixa
+   da borda revela o PAI, sem precisar nomear cor de superfície) com o anel jogado
+   para fora por `box-shadow`. `background-clip` só sobrevive porque o JS usa os
+   longhands `background-color`/`background-image`: o shorthand `background:`
+   RESSETA `background-clip`, o mesmo mecanismo que apagou a seta do `<select>`.
+   O `.sw-emoji` NÃO leva nada disso, e isso é conserto de uma regressão que a
+   1ª versão deste bloco causou: com a borda comum em 3px e `padding-box`, o
+   ladrilho pintado dos 50 botões caía de 36×36 para 30×30 (~30% de área) e o
+   selecionado ficava com tamanho aparente diferente do repouso. Aqui o anel É a
+   borda, o fundo do selecionado é conhecido e não há fundo de usuário nenhum,
+   então a borda volta aos 2px de `aeb5264` e o recorte volta ao `border-box`
+   padrão. Medido: o fill volta a começar no índice 6 da faixa, como antes.
+   Não é `outline`: outline aqui apagaria o anel de FOCO do botão selecionado. */
+.sw-opt { border-radius:8px;cursor:pointer; }
+/* `color:inherit` e não um token: `<button>` não herda cor, ele nasce com o
+   `buttontext` do agente de usuário. Medido nesta árvore, antes deste bloco: os
+   ícones dos 50 botões de emoji computavam rgb(0,0,0) — pretos sobre o ladrilho
+   `--glass-bg` do modal ESCURO, ~1,31:1. Não use `var(--text-1)` aqui — esse token
+   é FANTASMA, nenhuma regra o define. Inventário com o comando, não com número
+   colado (§2). O `[-]` no meio do padrão não é enfeite: ele quebra o literal para
+   que o padrão NÃO case com a própria linha em que está escrito. Sem isso o comando
+   se autoconta, e este comentário já errou o número DUAS vezes por esse mecanismo —
+   primeiro contando 6 onde eram 4, depois "consertando" com uma âncora em `color:`
+   que também casava consigo mesma e dava 5. Rode antes de reescrever o número.
+     git grep -n 'color:var(--text[-]1)' -- frontend/
+     git grep -n -- '--text[-]1[[:space:]]*:[[:space:]]*[^;]' -- frontend/
+   Em 2026-09-10 deram QUATRO linhas de uso e ZERO de definição: `.bill-opt` e
+   `.bill-opt .b-name` aqui, mais dois `.tx-desc` do `dashboard.js` que são `style`
+   inline interpolado — a categoria desta rodada, fora de escopo só porque
+   `#insights-list` e `#analytics-patterns-list` não estão em modal.
+   (`-n` e não `-c` de propósito: `git grep -c` conta POR ARQUIVO, então ele nunca
+   devolveria "4" — devolveria 2 e 2, e foi assim que "devolve 4" virou relato.)
+   `var()` inválido em propriedade herdada vira `inherit`, e é só por isso que
+   aquilo "funciona". Isto aqui é aquilo, escrito. */
+.sw-emoji { width:36px;height:36px;font-size:1.2rem;border:2px solid transparent;
+  background-color:var(--glass-bg);
+  color:inherit;display:flex;align-items:center;justify-content:center; }
+.sw-color { width:32px;height:32px; }
+.sw-card  { width:44px;height:30px; }
+.sw-color, .sw-card { border:3px solid transparent;background-clip:padding-box; }
+/* Anel ENCOSTADO no picker de emoji, porque aqui o fundo do selecionado é
+   conhecido: `--purple-ink` contra esse fill dá 4,07:1 no escuro e 3,94:1 no
+   claro, e o `gap:6px` do contêiner não sobraria para um anel externo. */
+.sw-emoji.selected { background-color:rgba(255,45,142,.25);border-color:var(--purple-ink); }
+/* Anel DESTACADO nos dois pickers de cor, medido contra a SUPERFÍCIE do modal
+   (5,41:1 no escuro, 5,57:1 no claro) e não contra o swatch. */
+.sw-color.selected,
+.sw-card.selected { box-shadow:0 0 0 2px var(--purple-ink); }
 
 .bill-summary {
   background:rgba(255,255,255,.04);border:1px solid var(--glass-border);
@@ -1771,7 +2129,7 @@ textarea.modal-inp { resize:vertical;min-height:60px;font-family:inherit; }
 .bill-summary .it { display:flex;flex-direction:column;gap:2px; }
 .bill-summary .it .k { color:var(--text-3);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;font-weight:650; }
 .bill-summary .it .v { font-weight:700;font-variant-numeric:tabular-nums; }
-.bill-summary .it.due .v { color:var(--purple); }
+.bill-summary .it.due .v { color:var(--purple-ink); }
 
 .bill-tx-list { max-height:38vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:14px; }
 .bill-tx { display:flex;align-items:center;justify-content:space-between;gap:8px;
@@ -2198,7 +2556,9 @@ html.pb-app #piggy-fab { touch-action: none; }
   font-size: 13px; font-weight: 700; border-radius: 11px; padding: 9px 0;
   border: 1px solid transparent; font-family: inherit;
 }
-.ag-btn-on { background: var(--purple); color: #fff; }
+/* Mesmo caso da .ov-period-tabs button.on: estas duas eram as únicas regras com
+   --purple sólido sob texto. O rosa fica, a tinta escurece. */
+.ag-btn-on { background: var(--purple); color: var(--on-purple); }
 .ag-btn-on:hover { filter: brightness(1.08); }
 .ag-btn-active { background: transparent; border-color: var(--neon); color: var(--neon); }
 .ag-btn-soon { background: var(--glass-bg); color: var(--text-3); cursor: default; }
@@ -2274,16 +2634,14 @@ body.balance-hidden #bill-detail-summary .v {
    clipa os DOIS eixos), então uma linha mais larga que o conteúdo perdia as
    bordas laterais do anel de foco — sobrava um traço em cima e outro embaixo. */
 .cl-row { border-radius:10px; cursor:pointer; transition:background .16s var(--ease); }
-/* Branco a 5,5% nos DOIS temas, e é medido: `.modal` é
-   `rgba(14,16,30,.94)` com e sem `body.light` — não existe regra
-   `body.light .modal`/`.overlay` na dashboard.css inteira. A linha desta lista
-   está SEMPRE sobre superfície escura, então o par `body.light` que a barra da
-   Distribuição tem (fim do arquivo) seria errado aqui: aquela barra fica na
-   PÁGINA, que no tema claro é `--bg-page:#F6F4F1`. Aplicar
-   `rgba(15,23,42,.05)` aqui apaga o hover em vez de consertá-lo.
-   (O tema claro dos MODAIS é um buraco pré-existente e geral — `--text` vira
-   `#0f172a` dentro de um modal que continua escuro, o que atinge `.modal h3`,
-   `.ld-desc` e todo o resto. Não é desta feature.) */
+/* Branco a 5,5% no tema ESCURO. O par claro está no bloco de véus, junto das
+   outras 15 regras da mesma categoria — o `.cl-modal` é `.modal`, então no tema
+   claro esta linha fica sobre branco e o véu branco desaparece.
+   Este comentário afirmou por um tempo que a `.modal` era escura nos dois temas.
+   Era verdade quando foi escrito, deixou de ser quando a superfície mudou, e eu
+   o reeditei sem reexaminar a regra que ele descreve: o hover ficou invisível
+   até o revisor apontar. Se a superfície do modal mudar de novo, esta regra e o
+   bloco de véus mudam junto. */
 .cl-row:hover { background:rgba(255,255,255,.055); }
 .cl-row:focus-visible { outline:2px solid rgba(255,45,142,.55); outline-offset:-2px; }
 .cl-row .bar-head { align-items:baseline; }

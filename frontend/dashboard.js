@@ -969,24 +969,55 @@ function _renderCardItem(c, idx = 0) {
   `;
 }
 
+// ── Pickers de swatch (cartão, categoria, meta) ───────────────────────
+/**
+ * Re-renderiza um picker e devolve o foco ao botão que ficou selecionado.
+ *
+ * Os cinco `_set*`/`_pick*` refazem o `innerHTML` inteiro do contêiner, e um
+ * `<button>` que sai do DOM leva o foco junto para o `<body>`. Medido antes deste
+ * helper: clicar num swatch levava `document.activeElement` de
+ * `BUTTON.sw-opt.sw-color` para `BODY.has-sidenav`. O efeito é duplo e é por isso
+ * que ele existe — sem foco no nó novo, o leitor de tela não anuncia a mudança de
+ * `aria-pressed` (o atributo vira num elemento que ninguém está observando), e o
+ * usuário de teclado é jogado para o começo do documento no meio de 30 botões.
+ * A guarda `tinhaFoco` NÃO separa mouse de teclado — o clique foca o botão antes
+ * do `onclick`, então ela é verdadeira nos dois e a restauração acontece nos dois.
+ * Medido nesta árvore, com `page.click()` e com `Enter` reais:
+ *   mouse ...... foco volta ao selecionado, `:focus-visible` false, `outline none`
+ *   teclado .... foco volta ao selecionado, `:focus-visible` true,  `outline auto 1px`
+ *   foco fora .. com o cursor em `#card-edit-name`, o foco FICA lá (guarda pega)
+ * Ou seja: quem decide se o anel de foco aparece é o `:focus-visible`, não esta
+ * função; ela só garante que o foco não caia no `<body>`. A guarda existe para o
+ * terceiro caso — um `_set*` chamado com o foco em outro lugar não rouba o cursor
+ * de quem está digitando o nome.
+ */
+function _rerenderPicker(idContainer, render) {
+  const tinhaFoco = document.getElementById(idContainer)?.contains(document.activeElement);
+  render();
+  if (tinhaFoco) document.getElementById(idContainer)?.querySelector(".selected")?.focus();
+}
+
 // ── Modal cadastrar/editar cartão ─────────────────────────────────────
 function _renderCardColorPicker(selected) {
   const wrap = document.getElementById("card-edit-colors");
   if (!wrap) return;
+  // `sample` é um GRADIENTE, então o dado vai em `background-image` (não em
+  // `background-color`, que o rejeitaria, nem no shorthand `background`, que
+  // resseta o `background-clip:padding-box` de que o anel de seleção depende).
+  // Geometria, borda e anel moram em `.sw-opt`/`.sw-card` no dashboard.css.
   wrap.innerHTML = CARD_COLOR_OPTIONS.map(opt => `
-    <button type="button" data-color="${opt.key}"
-      title="${opt.label}"
+    <button type="button" class="sw-opt sw-card${opt.key === selected ? " selected" : ""}"
+      data-color="${opt.key}"
+      title="${opt.label}" aria-label="${opt.label}" aria-pressed="${opt.key === selected}"
       onclick="_pickCardColor('${opt.key}')"
-      style="width:44px;height:30px;border-radius:8px;border:2px solid ${opt.key === selected ? "#fff" : "transparent"};
-             background:${opt.sample};cursor:pointer;
-             box-shadow:${opt.key === selected ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"
+      style="background-image:${opt.sample}"
     ></button>
   `).join("");
 }
 
 function _pickCardColor(key) {
   _cardEditState.color = key;
-  _renderCardColorPicker(key);
+  _rerenderPicker("card-edit-colors", () => _renderCardColorPicker(key));
 }
 
 function openCardEditModal(card) {
@@ -2484,25 +2515,46 @@ function _ensureCategoryModal() {
 function _renderCategoryPickers() {
   const ePick = document.getElementById("cat-emoji-picker");
   const cPick = document.getElementById("cat-color-picker");
+  // `aria-label` com o PRÓPRIO emoji: o `phIcon` devolve um `<i>` `aria-hidden`,
+  // então sem isto o botão não tem nome acessível nenhum e o `aria-pressed`
+  // decora um controle anônimo. O caractere é lido pelo nome nativo do leitor de
+  // tela, no idioma do usuário — não inventa uma segunda fonte de verdade.
   ePick.innerHTML = CATEGORY_EMOJI_OPTIONS.map(e => {
     const sel = e === _catEditState.emoji;
-    return `<button type="button" onclick="_setCatEmoji('${e}')"
-      style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
+    return `<button type="button" class="sw-opt sw-emoji${sel ? " selected" : ""}"
+      aria-label="${e}" aria-pressed="${sel}" onclick="_setCatEmoji('${e}')">${phIcon(e)}</button>`;
   }).join("");
-  cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map(c => {
+  // Swatch de cor não tem nome natural: ler "#FF2D8E" em voz alta não ajuda, e
+  // batizar 15 hexadecimais criaria uma 2ª fonte de verdade (§0.7). A posição é o
+  // que o usuário consegue usar para navegar e conferir o que está pressionado.
+  //
+  // INCONSISTÊNCIA ASSUMIDA, e ela é do dado, não do critério: os 6 swatches do
+  // cartão ganham nome REAL (`aria-label="Rosa"`) porque `CARD_COLOR_OPTIONS` já
+  // carrega um `label`; estes 25 ficam posicionais porque `CATEGORY_COLOR_OPTIONS`
+  // e `GOAL_COLOR_OPTIONS` são listas de hexadecimais crus. O critério é o mesmo
+  // nos três — usar o nome que a fonte de verdade já tem, e não inventar um. O
+  // teto conhecido: com `Cor 7` o usuário de leitor de tela CONFIRMA o que está
+  // pressionado, mas não ESCOLHE por cor. Fechar isso é dar `label` às duas
+  // paletas, e aí o lugar certo é a própria constante.
+  // PENDÊNCIA NOMINAL na mesma vizinhança, pré-existente e fora do escopo deste PR:
+  // `CATEGORY_COLOR_OPTIONS[0..9]` é IGUAL a `GOAL_COLOR_OPTIONS` — duas cópias da
+  // mesma lista de 10 cores (§0.7). É justamente a fonte de verdade única que
+  // faltaria para nomear as cores em um lugar só.
+  cPick.innerHTML = CATEGORY_COLOR_OPTIONS.map((c, i) => {
     const sel = c === _catEditState.color;
-    return `<button type="button" onclick="_setCatColor('${c}')"
-      style="width:32px;height:32px;border-radius:8px;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
+    return `<button type="button" class="sw-opt sw-color${sel ? " selected" : ""}"
+      aria-label="Cor ${i + 1}" aria-pressed="${sel}" onclick="_setCatColor('${c}')"
+      style="background-color:${c}"></button>`;
   }).join("");
 }
-function _setCatEmoji(e) { _catEditState.emoji = e; _renderCategoryPickers(); }
-function _setCatColor(c) { _catEditState.color = c; _renderCategoryPickers(); }
+function _setCatEmoji(e) {
+  _catEditState.emoji = e;
+  _rerenderPicker("cat-emoji-picker", _renderCategoryPickers);
+}
+function _setCatColor(c) {
+  _catEditState.color = c;
+  _rerenderPicker("cat-color-picker", _renderCategoryPickers);
+}
 
 function openCategoryEditModal(category) {
   _ensureCategoryModal();
@@ -2763,8 +2815,8 @@ function _renderBudgetRow(b, idx = 0) {
   const pct = b.pct || 0;
   const fillClass = b.status === "vermelho" ? "red" : (b.status === "amarelo" ? "yellow" : "green");
   const widthPct = Math.min(100, pct);
-  const subColor = b.status === "vermelho" ? "color:#FF2D2D" : "";
-  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "#22c55e")}"></span>`;
+  const subColor = b.status === "vermelho" ? "color:var(--red)" : "";
+  const dotEmoji = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:middle;margin-right:5px;background:${b.status === "vermelho" ? "#ef4444" : (b.status === "amarelo" ? "#fbbf24" : "var(--green)")}"></span>`;
   let subText = `${pct.toFixed(0)}%, ${_fmtBRL(b.remaining)} restantes`;
   if (b.status === "vermelho") {
     subText = `<i class="ph ph-warning" aria-hidden="true"></i> ${pct.toFixed(0)}%, estourou ${_fmtBRL(-b.remaining)}`;
@@ -3241,15 +3293,15 @@ function _renderGoalCard(g, idx = 0) {
     const today = new Date();
     const proj = new Date(today.getFullYear(), today.getMonth() + Math.ceil(g.projected_months), 1);
     const projStr = proj.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
-    alertText = `<div class="goal-deadline" style="color:#FF2D2D"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--red)"><i class="ph ph-warning" aria-hidden="true"></i> Ritmo atual chega só em ${projStr}${g.target_date ? ", prazo era " + deadlineText.replace("Prazo: ", "") : ""}</div>`;
   } else if (g.indicator === "tight") {
     alertText = `<div class="goal-deadline" style="color:#fbbf24">Ritmo apertado, pode atrasar</div>`;
   } else if (g.indicator === "ahead") {
-    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)"><i class="ph ph-rocket-launch" aria-hidden="true"></i> Adiantado, no melhor caminho</div>`;
   } else if (g.indicator === "on_track") {
-    alertText = `<div class="goal-deadline" style="color:#00F078">No prazo</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)">No prazo</div>`;
   } else if (g.indicator === "achieved") {
-    alertText = `<div class="goal-deadline" style="color:#00F078"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
+    alertText = `<div class="goal-deadline" style="color:var(--green)"><i class="ph ph-check" aria-hidden="true"></i> Meta atingida</div>`;
   }
 
   return `
@@ -3360,25 +3412,27 @@ function _ensureGoalModal() {
 function _renderGoalPickers() {
   const ePick = document.getElementById("goal-emoji-picker");
   const cPick = document.getElementById("goal-color-picker");
+  // Nomes acessíveis pelo mesmo critério do picker de categoria, acima.
   ePick.innerHTML = GOAL_EMOJI_OPTIONS.map(e => {
     const sel = e === _goalEditState.emoji;
-    return `<button type="button" onclick="_setGoalEmoji('${e}')"
-      style="width:36px;height:36px;border-radius:8px;font-size:1.2rem;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${sel ? "rgba(255,45,142,.25)" : "var(--glass-bg)"};
-             display:flex;align-items:center;justify-content:center">${phIcon(e)}</button>`;
+    return `<button type="button" class="sw-opt sw-emoji${sel ? " selected" : ""}"
+      aria-label="${e}" aria-pressed="${sel}" onclick="_setGoalEmoji('${e}')">${phIcon(e)}</button>`;
   }).join("");
-  cPick.innerHTML = GOAL_COLOR_OPTIONS.map(c => {
+  cPick.innerHTML = GOAL_COLOR_OPTIONS.map((c, i) => {
     const sel = c === _goalEditState.color;
-    return `<button type="button" onclick="_setGoalColor('${c}')"
-      style="width:32px;height:32px;border-radius:8px;cursor:pointer;
-             border:2px solid ${sel ? "#fff" : "transparent"};
-             background:${c};
-             box-shadow:${sel ? "0 0 0 2px rgba(255,45,142,.5)" : "none"}"></button>`;
+    return `<button type="button" class="sw-opt sw-color${sel ? " selected" : ""}"
+      aria-label="Cor ${i + 1}" aria-pressed="${sel}" onclick="_setGoalColor('${c}')"
+      style="background-color:${c}"></button>`;
   }).join("");
 }
-function _setGoalEmoji(e) { _goalEditState.emoji = e; _renderGoalPickers(); }
-function _setGoalColor(c) { _goalEditState.color = c; _renderGoalPickers(); }
+function _setGoalEmoji(e) {
+  _goalEditState.emoji = e;
+  _rerenderPicker("goal-emoji-picker", _renderGoalPickers);
+}
+function _setGoalColor(c) {
+  _goalEditState.color = c;
+  _rerenderPicker("goal-color-picker", _renderGoalPickers);
+}
 
 function syncGoalInterestConfig() {
   const enabled = document.getElementById("goal-interest-enabled")?.checked ?? true;
@@ -3746,7 +3800,7 @@ function _renderFixedView(items) {
   upEl.innerHTML = upcoming.length
     ? upcoming.map(x => `
         <div class="tx-row">
-          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? '#FF2D2D' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
+          <div class="tx-icon" style="color:${(x.date - today) / (1000 * 60 * 60 * 24) <= 2 ? 'var(--red)' : '#fbbf24'}">${phIcon(_recurringEmoji(x.rec))}</div>
           <div class="tx-main">
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
@@ -3814,7 +3868,7 @@ function _renderRecurringRow(r) {
     const delta = r.amount - r.last_amount;
     if (Math.abs(delta) > 0.005) {
       const arrow = delta > 0 ? "↑" : "↓";
-      const color = delta > 0 ? "#fbbf24" : "#22c55e";
+      const color = delta > 0 ? "#fbbf24" : "var(--green)";
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
@@ -4302,7 +4356,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const saidas = totalGastos + totalPend;
   const resultado = entradas - saidas;
   const positivo = resultado >= 0;
-  const resColor = positivo ? "#22c55e" : "#FF2D2D";
+  const resColor = positivo ? "var(--green)" : "var(--red)";
   const plural = (n) => n === 1 ? "" : "s";
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4339,7 +4393,7 @@ async function loadRecurringOverview({ background = false } = {}) {
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
-          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:#22c55e">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:var(--green)">${_fmtBRL(resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
@@ -4365,7 +4419,7 @@ async function loadRecurringOverview({ background = false } = {}) {
       </div>
     </div>`;
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard("#22c55e", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "#22c55e",
+    ${statCard("var(--green)", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "var(--green)",
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
     ${statCard("#fb7185", "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), "#fb7185",
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
@@ -4380,7 +4434,7 @@ async function loadRecurringOverview({ background = false } = {}) {
       <div style="width:30px;text-align:center;font-size:1rem">${x.tag}</div>
       <div style="flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtmlSafe(x.name)}</div>
       <div style="font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:20px;background:${b.bg};color:${b.fg}">${b.txt}</div>
-      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? '#22c55e' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
+      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? 'var(--green)' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
     </div>`;
   }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
   const vencCard = `
@@ -4397,7 +4451,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const resumoCard = `
     <div class="mock-card">
       <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
-      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "#22c55e")}
+      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "var(--green)")}
       ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
       ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
       <div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
@@ -4518,7 +4572,7 @@ function _renderBillsView(bills) {
       <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
   const buckets = [
-    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "#FF2D2D", items: pending.filter(b => _billDaysUntil(b) < 0) },
+    { label: "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos", color: "var(--red)", items: pending.filter(b => _billDaysUntil(b) < 0) },
     { label: "Hoje", color: "#fbbf24", items: pending.filter(b => _billDaysUntil(b) === 0) },
     { label: "Próximos 7 dias", color: "#fbbf24", items: pending.filter(b => { const n = _billDaysUntil(b); return n >= 1 && n <= 7; }) },
     { label: "Ainda este mês", color: "var(--text-2)", items: pending.filter(b => _billDaysUntil(b) > 7 && _billDate(b) <= endMonth) },
@@ -4543,7 +4597,7 @@ function _renderBillRow(b) {
   const due = _billDate(b);
   const overdue = _billOverdue(b);
   const quando = overdue ? "vencido" : _formatDueIn(due);
-  const color = overdue ? "#FF2D2D" : "#fbbf24";
+  const color = overdue ? "var(--red)" : "#fbbf24";
   const variavel = !!b.variable_amount;
   const temEstimativa = (b.amount || 0) > 0;
   const amtLabel = variavel
@@ -4573,7 +4627,7 @@ function _renderBillPaidRow(b) {
   const when = b.paid_at ? new Date(b.paid_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) : "";
   return `
     <div class="tx-row">
-      <div class="tx-icon" style="color:#22c55e"><i class="ph ph-check" aria-hidden="true"></i></div>
+      <div class="tx-icon" style="color:var(--green)"><i class="ph ph-check" aria-hidden="true"></i></div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(b.name || "Conta")}</div>
         <div class="tx-meta">paga ${when}</div>
@@ -4745,7 +4799,7 @@ function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
   const ok = p.tranquilo;
-  const accent = ok ? "#22c55e" : "#FF2D2D";
+  const accent = ok ? "var(--green)" : "var(--red)";
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
     ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
@@ -4798,7 +4852,7 @@ function _renderForecast(fc) {
   const tile = (dias, p) => {
     if (!p) return "";
     const ok = p.tranquilo;
-    const accent = ok ? "#22c55e" : "#FF2D2D";
+    const accent = ok ? "var(--green)" : "var(--red)";
     return `
       <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
         <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
@@ -5029,7 +5083,7 @@ function _renderRecurringIncomeView(items) {
         const when = r.last_amount_changed_at ? new Date(r.last_amount_changed_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
         return `
           <div class="tx-row">
-            <div class="tx-icon" style="color:${delta > 0 ? "#22c55e" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
+            <div class="tx-icon" style="color:${delta > 0 ? "var(--green)" : "#fbbf24"}">${delta > 0 ? '<i class="ph ph-confetti" aria-hidden="true"></i>' : '<i class="ph ph-warning" aria-hidden="true"></i>'}</div>
             <div class="tx-main">
               <div class="tx-desc">${escapeHtmlSafe(r.name)} ${delta > 0 ? "aumentou" : "diminuiu"} ${sign}${_fmtBRL(Math.abs(delta))}</div>
               <div class="tx-meta">${pct}% vs valor anterior · detectado em ${when}</div>
@@ -5061,7 +5115,7 @@ function _renderRecurringIncomeRow(r) {
     const delta = r.amount - r.last_amount;
     if (Math.abs(delta) > 0.005) {
       const arrow = delta > 0 ? "↑" : "↓";
-      const color = delta > 0 ? "#22c55e" : "#fbbf24";
+      const color = delta > 0 ? "var(--green)" : "#fbbf24";
       adjustText = ` · <span style="color:${color}">${_fmtBRL(r.last_amount)} → ${_fmtBRL(r.amount)} ${arrow}</span>`;
     }
   }
@@ -5540,7 +5594,9 @@ function renderAnalyticsIncomeExpense(evolution) {
     data: {
       labels,
       datasets: [
+        // Canvas: o Chart.js pinta em bitmap e nao resolve var(--green).
         { label: "Receita", data: evolution.map(b => b.income),  backgroundColor: "#00F078", borderRadius: 6 },
+        // Canvas: o Chart.js pinta em bitmap e nao resolve var(--red).
         { label: "Despesa", data: evolution.map(b => b.expense), backgroundColor: "#FF2D2D", borderRadius: 6 },
       ]
     },
@@ -5603,6 +5659,7 @@ function renderAnalyticsWeekday(weekday) {
   const data    = weekday.map(w => w.avg);
   const max     = Math.max(...data, 1);
   const colors  = weekday.map(w => {
+    // Idem: estas cores vao para o backgroundColor do Chart.js, em canvas.
     if ([0, 6].includes(w.dow)) return "#FF2D2D"; // dom/sáb
     if (w.avg / max > 0.8)       return "#fbbf24";
     return "#FF2D8E";
@@ -6137,7 +6194,7 @@ function renderHistoryStats(s) {
     {
       value: s.despesas_count != null ? s.despesas_count : "—",
       sub: "débito + cartão",
-      color: "#FF2D2D",
+      color: "var(--red)",
     },
     {
       value: s.total_count != null ? s.total_count : "—",
@@ -6299,7 +6356,7 @@ function _historyRowHTML(i) {
   const clickable = i._ldx != null ? ` style="cursor:pointer" onclick="openHistoryDetail(${i._ldx})"` : "";
   return `
     <div class="tx-row"${clickable}>
-      <div class="tx-icon" style="color:${isReceita ? "#00F078" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
+      <div class="tx-icon" style="color:${isReceita ? "var(--green)" : (isCredito ? "#7E5FE6" : "#fbbf24")}">${icon}</div>
       <div class="tx-main">
         <div class="tx-desc">${escapeHtmlSafe(_truncate(desc, 60))}</div>
         <div class="tx-meta">${escapeHtmlSafe(meta.join(" • "))}</div>
@@ -11045,7 +11102,7 @@ function _renderAgentes(data) {
       ? `<button onclick="toggleAgentEmail('${card.kind}', ${emailOn ? "false" : "true"})"
            title="Receber os avisos deste agente por e-mail"
            style="margin-top:8px;width:100%;padding:7px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.6);font-size:.72rem;cursor:pointer">
-           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "#22c55e" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
+           <i class="ph ph-envelope" aria-hidden="true"></i> E-mail: <b style="color:${emailOn ? "var(--green)" : "rgba(255,255,255,.4)"}">${emailOn ? "ligado" : "desligado"}</b>
          </button>`
       : "";
     return `
