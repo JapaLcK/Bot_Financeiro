@@ -7959,20 +7959,17 @@ function renderLaunchesPagination(totalItems, totalPages) {
   return html;
 }
 
-const LAUNCH_TYPE_LABELS = {
-  deposito_caixinha: "dep. caixinha",
-  saque_caixinha: "saque caixinha",
-  aporte_investimento: "aporte invest.",
-  resgate_investimento: "resgate invest.",
-  transferencia_interna: "transf. interna",
-  pagamento_fatura: "pgto. fatura",
-  ajuste_saldo: "ajuste saldo",
-  criar_caixinha: "criar caixinha",
-  create_investment: "criar invest.",
-  delete_pocket: "remover caixinha",
-  delete_investment: "remover invest.",
-  credito: "crédito",
-};
+// O mapa mora em frontend/launch-type-labels.js (fonte única, CLAUDE.md §0.7),
+// que a dashboard.html carrega ANTES deste arquivo. O `typeof` é a guarda de
+// 404/blip: o identificador NU estouraria `ReferenceError` dentro de
+// renderLaunches(), que roda dentro do render() (:10524) — e levaria junto
+// alertas, gráficos, contadores e o last-update (:10525-10539), sem tela de
+// erro. `window.LAUNCH_TYPE_LABELS` NÃO serve de guarda: `const` de topo de
+// script clássico vai pro escopo léxico global e nunca vira propriedade de
+// `window`. Uma guarda só, no lugar onde o literal morava, para os dois
+// consumidores (renderLaunches e _renderLaunchDetail).
+const TYPE_LABELS = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
+
 // Guarda os lançamentos renderizados pra o clique na linha abrir o detalhe.
 let _renderedLaunches = [];
 
@@ -8002,8 +7999,6 @@ function renderLaunches() {
   };
 
   launchesPage = meta.page || 1;
-
-	  const TYPE_LABELS = LAUNCH_TYPE_LABELS;
 
 		  card.innerHTML =
 		    items.map((l, idx) => {
@@ -8091,7 +8086,7 @@ function closeLaunchDetail() {
 
 function _renderLaunchDetail(l) {
   _ensureLaunchDetailModal();
-  const typeLabel = LAUNCH_TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
+  const typeLabel = TYPE_LABELS[l.tipo] || String(l.tipo || "").replaceAll("_", " ");
   const desc = describeLaunch(l).replace(/<[^>]+>/g, "").trim() || "—";
   document.getElementById("ld-desc").textContent = desc;
 

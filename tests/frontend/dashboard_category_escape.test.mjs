@@ -38,6 +38,13 @@ import { chromium } from "playwright";
 const DASHBOARD_JS = join(
   dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "dashboard.js",
 );
+// A dashboard.html carrega /launch-type-labels.js ANTES do dashboard.js (é lá
+// que `LAUNCH_TYPE_LABELS` mora). Injetar aqui é FIDELIDADE à página real, não
+// necessidade: desde a guarda `typeof` do dashboard.js:7911 o arquivo ausente
+// só degrada o rótulo — sem a injeção o arquivo inteiro passa igual, medido em
+// 10/09/2026 com `if (false)` no lugar do `if (!semMapa)`. É o caso `semMapa` do
+// fim deste arquivo que exerce a ausência de propósito.
+const LABELS_JS = DASHBOARD_JS.replace("dashboard.js", "launch-type-labels.js");
 
 /** IDs que o nível superior do dashboard.js acessa sem `?.` (grep:
     `^document.getElementById("…").`) mais os que o `render()` toca. */
@@ -56,12 +63,15 @@ let browser;
 before(async () => { browser = await chromium.launch(); });
 after(async () => { await browser?.close(); });
 
-async function loadDashboardJs() {
+/** `semMapa`: não injeta o /launch-type-labels.js — simula o 404/blip dele. */
+async function loadDashboardJs({ semMapa = false } = {}) {
   const page = await browser.newPage();
   const errs = [];
+  page.__errs = errs;
   page.on("pageerror", (e) => errs.push(String(e)));
   await page.setContent(IDS.map((i) => `<div id="${i}"></div>`).join(""));
   await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
+  if (!semMapa) await page.addScriptTag({ path: LABELS_JS });
   await page.addScriptTag({ path: DASHBOARD_JS });
   assert.deepEqual(errs, [], "dashboard.js não executou até o fim");
   return page;
@@ -614,6 +624,7 @@ async function loadComEditor() {
     + EDIT_LAUNCH_HTML,
   );
   await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
+  await page.addScriptTag({ path: LABELS_JS });
   await page.addScriptTag({ path: DASHBOARD_JS });
   assert.deepEqual(errs, [], "dashboard.js não executou até o fim");
   return page;
@@ -1714,5 +1725,47 @@ test("E6 controle: ESC no detalhe fecha só o detalhe, sem refetch", async () =>
   assert.equal(r.lista, true, "o ESC levou a lista junto");
   assert.equal(r.linhas, 100, "o ESC descartou as páginas anexadas");
   assert.equal(r.pedidos, 2, "o ESC disparou refetch");
+  await page.close();
+});
+
+/* ── O rótulo de tipo não pode derrubar o dashboard ─────────────────────────
+ * `LAUNCH_TYPE_LABELS` saiu do dashboard.js para frontend/launch-type-labels.js
+ * (fonte única com a Início, issue #293). Isso criou uma dependência de REDE
+ * onde antes havia um literal: um 404/blip no arquivo faria o identificador nu
+ * estourar `ReferenceError` dentro de `renderLaunches()`, que roda DENTRO do
+ * `render()` (dashboard.js:10524) — e levaria junto alertas (:10525), os
+ * gráficos (:10528-10535), os contadores (:10537) e o last-update (:10539),
+ * sem tela de erro nenhuma. A guarda é o `typeof` de dashboard.js:7911.
+ *
+ * Controle NEGATIVO deste caso: trocar o :7911 pelo identificador nu
+ * (`const TYPE_LABELS = LAUNCH_TYPE_LABELS;`) → vermelho aqui.
+ * Controle POSITIVO: todos os outros casos do arquivo, que bootam COM o mapa e
+ * continuam verdes — a guarda não trocou os rótulos por um genérico. */
+test("sem /launch-type-labels.js: lista e detalhe do dashboard continuam de pé", async () => {
+  const page = await loadDashboardJs({ semMapa: true });
+  const r = await page.evaluate(() => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="launches-card"></div>');
+    lastData = { recent_launches: [
+      { tipo: "deposito_caixinha", valor: 25, categoria: null, nota: "reserva",
+        alvo: "reserva", data: "2026-02-10", criado_em: "2026-02-10T09:00:00-03:00",
+        posted_at: "2026-02-10", has_time: false, is_internal_movement: true, id: null },
+    ] };
+    renderLaunches();                      // dashboard.js:7948 (a lista)
+    const tag = document.querySelector("#launches-card .tag");
+    openLaunchDetail(0);                   // dashboard.js:8029 (o detalhe)
+    return {
+      linhas: document.querySelectorAll("#launches-card .row").length,
+      tag: tag ? tag.textContent.trim() : null,
+      detalhe: document.getElementById("launch-detail-overlay") !== null,
+      meta: document.getElementById("ld-meta").textContent,
+    };
+  });
+  assert.equal(r.linhas, 1, `a lista não renderizou (${r.linhas} linhas)`);
+  assert.equal(r.detalhe, true, "o detalhe não foi montado");
+  // Rótulo DEGRADADO: sem o mapa sobra o fallback histórico do dashboard
+  // (`replaceAll("_", " ")`), não "dep. caixinha" — e nunca o `_` cru.
+  assert.equal(r.tag, "deposito caixinha", `tag da lista veio "${r.tag}"`);
+  assert.match(r.meta, /deposito caixinha/, r.meta);
+  assert.deepEqual(page.__errs, [], "o dashboard estourou sem o mapa");
   await page.close();
 });

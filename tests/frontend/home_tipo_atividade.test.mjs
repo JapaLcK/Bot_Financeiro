@@ -28,11 +28,12 @@
  *   - credito (perna do cartão) → ícone `ph-credit-card`, tag `expense`
  *     (o que o home.html FAZ hoje; o porquê está no comentário do caso)
  *   - despesa descrita como "cartão" → tag `credit` (o par que a alcança)
- *   - os 4 tipos internos do filtro (home.html:1134) ficam FORA da lista, e
- *     `deposito_caixinha` — que não está nesse filtro — fica DENTRO
- *   - `#greeting-sub` (home.html:944) diz "Despesa"/"Receita" e nunca valor cru
- *     — o tipo INTERNO cru ainda escapa por ali, e é a issue 293, não este PR
- *   - onboarding (home.html:1094): marca com despesa E com receita (as DUAS
+ *   - os 4 tipos internos do filtro (home.html:1161, `renderActivity`) ficam
+ *     FORA da lista, e `deposito_caixinha` — fora do filtro — fica DENTRO
+ *   - `#greeting-sub` (home.html:969-971) diz "Despesa"/"Receita" e nunca cru
+ *     — o tipo INTERNO cru escapava por ali até a issue 293, fechada no grupo
+ *     do fim deste arquivo (rótulo pela fonte única + as duas guardas)
+ *   - onboarding (home.html:1121): marca com despesa E com receita (as DUAS
  *     pernas do `||`, que é o requisito do dono), e não marca com 1 interno
  *   - o repaint por `sessionStorage.pb_home_1` desenha o mesmo contrato
  *
@@ -82,9 +83,11 @@ const snapshot = (launches) => ({
  * `seed`: quando presente, pré-carrega `sessionStorage.pb_home_1` ANTES do
  * boot, para exercer o repaint instantâneo do `restoreHomeCache`.
  */
-async function abrirHome(launches, { seed = null } = {}) {
+async function abrirHome(launches, { seed = null, semMapa = false, mapaPendurado = false } = {}) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
+  page.__errs = [];
+  page.on("pageerror", (e) => page.__errs.push(String(e)));
 
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
@@ -95,6 +98,15 @@ async function abrirHome(launches, { seed = null } = {}) {
   await page.route("**/auth/validate", (r) => acaoSegura(() => r.fulfill(json({ user_id: 1 }))));
   await page.route("**/data/**",       (r) => acaoSegura(() => r.fulfill(json(snapshot(launches)))));
   await page.route("**/history/**",    (r) => acaoSegura(() => r.fulfill(json({ data: [] }))));
+  // Rota registrada DEPOIS de propósito: no Playwright a última vence, e a
+  // `**/*` acima deixaria o arquivo real passar (`route.continue()`).
+  if (semMapa) {
+    await page.route(/launch-type-labels\.js/,
+                     (r) => acaoSegura(() => r.fulfill({ status: 404, body: "nao existe" })));
+  }
+  // PENDURADO != 404. O handler que NUNCA resolve a rota deixa a request aberta,
+  // que é o caso que o 404 não alcança: o 404 volta rápido e o parser segue.
+  if (mapaPendurado) await page.route(/launch-type-labels\.js/, () => { /* nunca resolve */ });
 
   if (seed) {
     await page.addInitScript((entrada) => {
@@ -102,7 +114,10 @@ async function abrirHome(launches, { seed = null } = {}) {
     }, seed);
   }
 
-  await page.goto(`${ORIGIN}/home.html`);
+  // `commit` é obrigatório com o asset pendurado: o "load" (padrão do goto)
+  // nunca chega enquanto a request estiver aberta, e o goto estouraria por
+  // timeout antes de qualquer assert — sintoma errado da causa certa.
+  await page.goto(`${ORIGIN}/home.html`, mapaPendurado ? { waitUntil: "commit" } : undefined);
   page.__ctx = ctx;
   return page;
 }
@@ -149,7 +164,7 @@ test("credito (perna do cartão): ícone ph-credit-card, tag `expense`", async (
   // perna de crédito da query 4 emite (`'credito' AS tipo`).
   //
   // MEDIDO, e diferente do que o plano previa: o home.html dá tag `expense`,
-  // não `credit`. A tag `credit` exige `isCredito && isDespesa` (home.html:1149)
+  // não `credit`. A tag `credit` exige `isCredito && isDespesa` (home.html:1176)
   // e `isDespesa` só é true para 'despesa'/'saida' (:1147) — nunca para
   // 'credito'. O ícone, esse sim, sai `ph-credit-card`, porque o `emoji`
   // (:1154) olha só `isCredito`. Ou seja: hoje a linha de cartão sai com ícone
@@ -179,7 +194,7 @@ test("despesa descrita como cartão: aí sim a tag `credit`", async () => {
 });
 
 test("os 4 tipos internos do filtro ficam fora; deposito_caixinha fica dentro", async () => {
-  // home.html:1134 exclui exatamente estes 4. `deposito_caixinha` NÃO está na
+  // home.html:1161 exclui exatamente estes 4. `deposito_caixinha` NÃO está na
   // lista, então tem de aparecer — o servidor também o deixa passar (o
   // `NOT IN` da query 4 tem os mesmos 4 nomes).
   const fora = ["criar_caixinha", "delete_pocket", "create_investment", "delete_investment"];
@@ -219,7 +234,7 @@ test("onboarding: despesa E receita marcam o item; interno não marca", async ()
     } finally { await fechar(page); }
   };
 
-  // As DUAS pernas do `||` em home.html:1094, não só a primeira: com só
+  // As DUAS pernas do `||` em home.html:1121, não só a primeira: com só
   // 'despesa' aqui, apagar `|| r.tipo === "receita"` daquela linha deixava o
   // grupo inteiro verde — quem só tem receita nunca via o item marcado, e
   // nenhum caso reclamava. Mutação medida: sem a perna, ESTE `for` fica
@@ -249,3 +264,140 @@ test("repaint por sessionStorage.pb_home_1 desenha o mesmo contrato", async () =
     assert.match(linha.icone, /ph-trend-up/, linha.icone);
   } finally { await fechar(page); }
 });
+
+/* ─── issue #293: o `tipo` cru no `#greeting-sub` ────────────────────────────
+ * Os casos abaixo são o controle NEGATIVO que faltava ao grupo acima: eles
+ * ficam vermelhos ao reverter o home.html:969-971 para o ternário
+ * `receita/despesa/l.tipo`. O caso "#greeting-sub diz Despesa/Receita" lá em
+ * cima é o par POSITIVO — prova que o conserto não trocou tudo por um rótulo
+ * genérico. */
+
+/** Texto e <strong> do #greeting-sub, com a lista de <img> que ele desenhou. */
+async function saudacao(page) {
+  await page.waitForSelector("#greeting-sub strong", { timeout: 15000 });
+  return page.$eval("#greeting-sub", (el) => ({
+    texto: el.textContent,
+    forte: el.querySelector("strong")?.textContent || "",
+    imgs: el.querySelectorAll("img").length,
+  }));
+}
+
+// Os rótulos vêm do LAUNCH_TYPE_LABELS (fonte única) com a 1ª maiúscula. Um
+// `test()` por tipo, e não um `for` dentro de um caso só: o `for` para no
+// primeiro assert e esconde os outros 7 no controle negativo.
+for (const [tipo, rotulo] of [
+  ["credito", "Crédito"],
+  ["deposito_caixinha", "Dep. caixinha"],
+  ["saque_caixinha", "Saque caixinha"],
+  ["aporte_investimento", "Aporte invest."],
+  ["resgate_investimento", "Resgate invest."],
+  ["pagamento_fatura", "Pgto. fatura"],
+  ["ajuste_saldo", "Ajuste saldo"],
+  ["transferencia_interna", "Transf. interna"],
+]) {
+  test(`#greeting-sub: ${tipo} sai como "${rotulo}", nunca cru`, async () => {
+    const page = await abrirHome([lancamento({ tipo, valor: 30, alvo: "reserva",
+                                               is_internal_movement: true })]);
+    try {
+      const { texto, forte } = await saudacao(page);
+      assert.equal(forte, rotulo, `${tipo}: <strong> devia ser "${rotulo}", veio "${forte}"`);
+      // invariante barata: nem `_` nem o valor cru do payload sobrevivem
+      assert.doesNotMatch(texto, /_/, `${tipo}: sobrou underscore em "${texto}"`);
+      assert.ok(!texto.includes(tipo), `${tipo}: valor cru vazou em "${texto}"`);
+    } finally { await fechar(page); }
+  });
+}
+
+test("tipo desconhecido vira 'Lançamento', não o valor cru", async () => {
+  const page = await abrirHome([lancamento({ tipo: "tipo_do_futuro_13", valor: 12 })]);
+  try {
+    const { texto, forte } = await saudacao(page);
+    assert.equal(forte, "Lançamento", texto);
+    assert.ok(!texto.includes("tipo_do_futuro_13"), texto);
+    assert.doesNotMatch(texto, /_/, texto);
+  } finally { await fechar(page); }
+});
+
+test("tipo com HTML dentro: nada de <img> no #greeting-sub", async () => {
+  // INALCANÇÁVEL pelo servidor de hoje: o `tipo` sai de uma whitelist
+  // (finance_bot_websocket_custom.py:6330) e nunca carrega marcação. Este caso
+  // lacra a garantia DO CLIENTE: o `tipoLbl` entra num template literal sem
+  // escapeHtml, então quem um dia trocar a origem do `tipo` (import, webhook,
+  // outra query) vê vermelho aqui em vez de injetar no DOM.
+  const page = await abrirHome([lancamento({ tipo: '<img src=x onerror="document.title=1">',
+                                             valor: 9 })]);
+  try {
+    const { texto, forte, imgs } = await saudacao(page);
+    assert.equal(imgs, 0, `#greeting-sub desenhou ${imgs} <img>`);
+    assert.equal(forte, "Lançamento", texto);
+  } finally { await fechar(page); }
+});
+
+/* ─── O rótulo NÃO pode estar no caminho crítico da Início ──────────────────
+ * Os dois grupos abaixo não são sobre o rótulo certo: são sobre a página
+ * continuar de pé quando o rótulo não sai. O `#greeting-sub` é cosmético; o
+ * `renderGreeting` que o desenha é o PRIMEIRO de uma sequência que segue com
+ * stats, alertas, onboarding e atividade (home.html:1632-1636) — e está dentro
+ * do `try {} catch {}` do `restoreHomeCache` (:1459), que engole o erro e leva
+ * os outros quatro junto, em silêncio, sem tela de erro.
+ *
+ * Controle negativo do 1º grupo: trocar o `typeof …` do home.html:969 pelo
+ * identificador nu (`LAUNCH_TYPE_LABELS`).
+ * Controle negativo do 2º: tirar o `hasOwnProperty.call` do :970.
+ * Controle POSITIVO dos dois: os 8 casos de rótulo acima, que provam que a
+ * guarda não trocou tudo por "Lançamento". */
+
+/* PENDURADO — a request que nunca volta, que o 404 acima NÃO alcança.
+ *
+ * O 404 volta rápido: o parser segue, o `<body>` existe, e a guarda `typeof` do
+ * home.html:969 faz o trabalho dela. Com a resposta PENDURADA e a tag
+ * BLOQUEANTE, nada disso acontece — o parser para na própria tag (home.html:457,
+ * antes do `</head>` de :461) e a página não tem `<body>`. Medido 2026-09-10 com
+ * a tag sem `defer`: `document.body` NULL, `readyState` "loading",
+ * `#greeting-sub` inexistente e ZERO `pageerror` — a guarda nunca é alcançada
+ * porque `renderGreeting` nunca roda.
+ *
+ * CONTROLE NEGATIVO deste caso: tirar o `defer` da tag de home.html:457.
+ * O lacre textual irmão é `tests/test_launch_type_labels_fonte_unica.py`
+ * (`test_na_home_a_fonte_nao_bloqueia_o_parse`). */
+test("com /launch-type-labels.js PENDURADO, a Início ainda renderiza", async () => {
+  const page = await abrirHome([lancamento({ tipo: "credito", valor: 80, alvo: "nubank" })],
+                               { mapaPendurado: true });
+  try {
+    const linhas = await linhasDaAtividade(page);
+    assert.equal(linhas.length, 1,
+                 `asset pendurado travou a Início: ${linhas.length} linhas de atividade`);
+    const { forte } = await saudacao(page);
+    assert.equal(forte, "Lançamento",
+                 `mapa pendurado devia degradar o rótulo, veio "${forte}"`);
+    assert.deepEqual(page.__errs, [], "a Início estourou com o mapa pendurado");
+  } finally { await fechar(page); }
+});
+
+test("sem /launch-type-labels.js (404), a Início inteira continua renderizando", async () => {
+  const page = await abrirHome([lancamento({ tipo: "credito", valor: 80, alvo: "nubank" })],
+                               { semMapa: true });
+  try {
+    const { forte } = await saudacao(page);
+    assert.equal(forte, "Lançamento",
+                 `mapa ausente devia degradar o rótulo, veio "${forte}"`);
+    const linhas = await linhasDaAtividade(page);
+    assert.equal(linhas.length, 1, `atividade sumiu: ${linhas.length} linhas`);
+    assert.deepEqual(page.__errs, [], "a Início estourou sem o mapa");
+  } finally { await fechar(page); }
+});
+
+// Chave que só existe no PROTÓTIPO: `mapa["constructor"]` devolve a função
+// `Object`, e `.charAt` dela é TypeError — página morta por um rótulo.
+for (const tipo of ["constructor", "__proto__", "toString"]) {
+  test(`tipo "${tipo}" não alcança o protótipo do mapa`, async () => {
+    const page = await abrirHome([lancamento({ tipo, valor: 42, alvo: "mercado" })]);
+    try {
+      const { forte } = await saudacao(page);
+      assert.equal(forte, "Lançamento", `${tipo}: <strong> veio "${forte}"`);
+      const linhas = await linhasDaAtividade(page);
+      assert.equal(linhas.length, 1, `${tipo}: atividade sumiu (${linhas.length} linhas)`);
+      assert.deepEqual(page.__errs, [], `${tipo}: a Início estourou`);
+    } finally { await fechar(page); }
+  });
+}

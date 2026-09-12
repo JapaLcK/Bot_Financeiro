@@ -454,6 +454,7 @@ footer a:hover { color:var(--text); }
 </style>
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
+<script defer src="/launch-type-labels.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
   <script src="/pb-nav.js?v=6"></script>
@@ -946,7 +947,33 @@ function renderGreeting(snapshot, email, displayName) {
   const sub = document.getElementById("greeting-sub");
   if (last) {
     const ago = timeAgo(last.criado_em);
-    const tipoLbl = last.tipo === "receita" ? "Receita" : last.tipo === "despesa" ? "Despesa" : last.tipo;
+    // Rótulo pela fonte única (/launch-type-labels.js). Sem ela, tipo interno
+    // ("deposito_caixinha", "credito") era impresso CRU aqui — issue #293.
+    //
+    // As duas guardas existem porque um rótulo COSMÉTICO não pode matar a
+    // Início inteira (o catch do restoreHomeCache engole e leva junto stats,
+    // alertas e atividade; o renderGreeting de :1632 rejeita a init):
+    //   `typeof` — se o .js não carregar (404, blip; a rota manda no-cache, ou
+    //     seja revalida a cada load), o identificador nu é ReferenceError.
+    //     `window.LAUNCH_TYPE_LABELS` NÃO serve de guarda: `const` de topo de
+    //     script clássico vai pro escopo léxico global e nunca vira propriedade
+    //     de `window` — medido `undefined` COM o script carregado.
+    //   `hasOwnProperty` — `tipo` = "constructor"/"toString" acha o protótipo,
+    //     e `.charAt` de uma função é TypeError. Inalcançável pelo servidor de
+    //     hoje — mas a prova NÃO é a whitelist do POST manual
+    //     (`create_launch_route`, frontend/finance_bot_websocket_custom.py), que
+    //     só governa receita/despesa/credito e não diz nada sobre
+    //     deposito_caixinha/transferencia_interna/pagamento_fatura/ajuste_saldo.
+    //     Quem fecha é a query 4 de `get_financial_data`, a que alimenta
+    //     `recent_launches`: projeta `{TIPO_CANON_SQL} AS tipo` e filtra
+    //     `tipo NOT IN (...)`. Alcançável no dia em que a origem do `tipo`
+    //     mudar (import, webhook, outra query).
+    //   `String()` — o PAR do `hasOwnProperty`: um guarda a CHAVE, o outro o
+    //     VALOR. Um número ou array no mapa faria `bruto.charAt` voltar a ser o
+    //     mesmo TypeError que mata a página.
+    const mapa = (typeof LAUNCH_TYPE_LABELS === "object" && LAUNCH_TYPE_LABELS) || {};
+    const bruto = (Object.prototype.hasOwnProperty.call(mapa, last.tipo) && String(mapa[last.tipo])) || "lançamento";
+    const tipoLbl = bruto.charAt(0).toUpperCase() + bruto.slice(1);
     const desc = last.nota || last.alvo || "—";
     sub.innerHTML = `<span class="live-dot">●</span> Última atividade: <strong>${tipoLbl}</strong> · ${escapeHtml(desc)} · ${ago}`;
   } else {
