@@ -197,13 +197,13 @@ test("PT1: nenhum CTA de Pix no mensal, 3 no anual, e some na volta", async () =
   assert.equal(await contarCtas(page), 3, "o ciclo anual devia ter 3 CTAs de Pix");
   const planos = await page.$$eval("[data-pix-cta]", (e) => e.map((b) => b.dataset.pixCta));
   assert.deepEqual(planos, ["essencial", "plus", "pro"]);
-  // Nos cards, nunca no tfoot: o precos_sem_plano_gratis.test.mjs assevera as 5
+  // Nos cards, nunca no tfoot: o precos_sem_plano_gratis.test.mjs assevera as 4
   // células daquele rodapé, e uma célula nova o deixa vermelho.
   assert.equal(await page.$$eval("#plans-v2 [data-pix-cta]", (e) => e.length), 3);
   assert.equal(await page.$$eval(".cmp-table [data-pix-cta]", (e) => e.length), 0,
     "CTA de Pix vazou para a tabela comparativa");
 
-  await page.click("#cycle-monthly");
+  await page.click("#cycle-annual");
   assert.equal(await contarCtas(page), 0, "o CTA de Pix não sumiu na volta pro mensal");
   await page.close();
 });
@@ -1489,7 +1489,7 @@ test("PT19: a etiqueta de Pix aparece no ciclo mensal e continua no anual", asyn
     "a etiqueta existe mas não diz Pix");
   await page.click("#cycle-annual");
   assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu ao trocar para o anual");
-  await page.click("#cycle-monthly");
+  await page.click("#cycle-annual");
   assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu na volta para o mensal");
   await page.close();
 });

@@ -27,11 +27,10 @@
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 
   /* ── Ciclo mensal × anual ──────────────────────────────────────────────
-     Era dois .btn colados por border-radius inline, com o setCycle
-     remontando className (e reinjetando btn-block só pra desfazer o
-     width:100% na linha seguinte). Vira um segmented control de verdade:
-     o JS só liga/desliga .is-active + aria-pressed. */
-  /* Coluna, não linha: embaixo do segmented control mora a etiqueta do Pix, e
+     Um switch binário, como o componente de referência: os rótulos ficam
+     estáveis e o knob mostra o ciclo. O botão usa role=switch + aria-checked;
+     o JS alterna estado, preços e rótulo ativo sem remontar o controle. */
+  /* Coluna, não linha: embaixo do switch mora a etiqueta do Pix, e
      ela precisa ficar CENTRADA sob ele — não ao lado, que empurraria o toggle
      para fora do centro da escada.
      O respiro de 10px é `margin-top` da etiqueta e NÃO `gap` do wrap: a etiqueta
@@ -46,25 +45,39 @@
      com a flag do Pix desligada, anunciando meio de pagamento que a página não
      vende (medido: `offsetParent` não-nulo com `pix_annual_available: false`). */
   #pix-cycle-note:not([hidden]) { display: inline-block; margin-top: 10px; }
-  .cycle-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 15px; }
-  .cycle-btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: var(--font); font-size: .9rem; font-weight: 700; color: var(--ink-2);
-    background: transparent; border: none; border-radius: 11px; padding: 10px 22px;
-    cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
+  .cycle-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 12px; }
+  .cycle-label {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    color: var(--ink-3); font-size: .9rem; font-weight: 700;
+    transition: color var(--dur) var(--ease);
   }
-  .cycle-btn:hover { color: var(--ink); }
-  .cycle-btn:active { transform: scale(.98); }
-  .cycle-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-  .cycle-btn.is-active { background: linear-gradient(135deg,var(--pink),var(--pink-dark)); color: #fff; box-shadow: 0 6px 18px rgba(255,45,142,.3); }
-  /* Duas etiquetas usam esta pílula: o "−17%" DENTRO do botão Anual e a do Pix,
-     que fica FORA dos botões (logo abaixo do toggle) e por isso não é alcançada
-     pela regra de .is-active — a cor dela é a mesma nos dois ciclos, de
-     propósito: o Pix não deixa de existir porque o usuário está olhando o
-     mensal. Neon aqui é valor positivo (desconto, pagamento à vista), não
-     decoração. */
+  .cycle-label.is-active { color: var(--ink); }
+  /* A caixa clicável tem 44px; o trilho visual continua compacto como no
+     mockup, sem sacrificar o alvo mínimo de toque. */
+  .cycle-switch {
+    position: relative; flex: 0 0 52px; width: 52px; height: 44px; padding: 0;
+    background: transparent; border: 0; border-radius: 999px; cursor: pointer;
+  }
+  .cycle-switch-track {
+    position: absolute; inset: 9px 1px; border-radius: 999px;
+    background: linear-gradient(135deg,var(--pink),var(--pink-dark));
+    box-shadow: 0 5px 16px rgba(255,45,142,.28);
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  .cycle-switch-thumb {
+    position: absolute; top: 4px; left: 4px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    transition: transform .3s var(--ease);
+  }
+  .cycle-switch[aria-checked="true"] .cycle-switch-thumb { transform: translateX(22px); }
+  .cycle-switch:hover .cycle-switch-track { filter: brightness(1.08); }
+  .cycle-switch:active .cycle-switch-track { transform: scale(.96); }
+  .cycle-switch:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+  /* Duas etiquetas usam esta pílula: o "−17%" junto do rótulo Anual e a do Pix
+     logo abaixo do toggle. A cor fica igual nos dois ciclos, de propósito: o
+     Pix não deixa de existir porque o usuário está olhando o mensal. Neon aqui
+     é valor positivo (desconto, pagamento à vista), não decoração. */
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
-  .cycle-btn.is-active .cycle-save { background: rgba(255,255,255,.22); color: #fff; }
 
   /* ── Cards: as 3 listas têm de começar no mesmo Y ──────────────────────
      A regra é a categoria, não o caso: TUDO que fica acima da lista e tem
@@ -338,16 +351,19 @@
            largura disponível e deixa o grid reduzir as colunas. -->
       <div id="plans-v2-wrap" style="width:min(1080px,calc(100vw - 48px));margin-left:50%;transform:translateX(-50%)">
         <div class="cycle-wrap">
-          <div class="cycle-toggle" role="group" aria-label="Ciclo de cobrança">
-            <button type="button" id="cycle-monthly" class="cycle-btn is-active" aria-pressed="true" onclick="setCycle('monthly')">Mensal</button>
-            <button type="button" id="cycle-annual" class="cycle-btn" aria-pressed="false" onclick="setCycle('annual')">Anual <span class="cycle-save">−17%</span></button>
+          <div class="cycle-toggle">
+            <span class="cycle-label is-active" id="cycle-monthly-label">Mensal</span>
+            <button type="button" id="cycle-annual" class="cycle-switch" role="switch"
+                    aria-label="Cobrança anual" aria-checked="false"
+                    onclick="setCycle(currentCycle === 'monthly' ? 'annual' : 'monthly')">
+              <span class="cycle-switch-track" aria-hidden="true"><span class="cycle-switch-thumb"></span></span>
+            </button>
+            <span class="cycle-label" id="cycle-annual-label">Anual <span class="cycle-save">−17%</span></span>
           </div>
           <!-- O CTA "Pagar no Pix" só nasce no ciclo anual, então quem fica no
                mensal nunca descobria que Pix existe. Esta etiqueta é o anúncio, e
-               fica FORA dos dois botões de propósito: dentro do Anual ela some
-               justamente para o público que precisa ler (e o toggle passava de
-               248,7px para 289,5px, estourando os 272px disponíveis a 320px de
-               viewport — medido).
+               fica FORA do switch de propósito: dentro do rótulo Anual ela
+               alargaria o controle e disputaria espaço a 320px de viewport.
                Nasce `hidden`: a disponibilidade é a flag `pix_annual_available`
                do /billing/plans-config, e quem a revela é o pbPixInit
                (pix-checkout.js), no mesmo lugar que decide o CTA. Sem a flag —
@@ -357,7 +373,7 @@
           <!-- A região `aria-live` existe desde o parse, e é por isso que são
                DOIS elementos: região registrada e revelada no mesmo instante não
                anuncia nada, então o `aria-live` não pode morar na própria pílula.
-               O vínculo com o botão Anual é o `aria-describedby` que o pbPixInit
+               O vínculo com o switch é o `aria-describedby` que o pbPixInit
                põe e tira junto com o `hidden`.
                TETO conhecido, e ele não é o que este comentário dizia antes: a
                pílula NÃO é inserida aqui. Ela está no HTML desde o parse e o
@@ -696,14 +712,13 @@ let currentCycle = "monthly";
 
 function setCycle(cycle) {
   currentCycle = cycle;
-  // Segmented control: só liga/desliga a classe. Os [data-price-*] cobrem de
-  // uma vez os cards E o cabeçalho da tabela comparativa — os dois têm de
-  // mostrar o mesmo ciclo, senão o card diz "R$ 99/ano" e a tabela "R$ 9,90".
-  document.querySelectorAll(".cycle-btn").forEach(b => {
-    const on = b.id === "cycle-" + cycle;
-    b.classList.toggle("is-active", on);
-    b.setAttribute("aria-pressed", on ? "true" : "false");
-  });
+  // Switch único: aria-checked descreve o anual ligado/desligado; os rótulos
+  // visuais só acompanham o estado. Os [data-price-*] cobrem de uma vez cards
+  // E tabela, que precisam mostrar o mesmo ciclo.
+  const anual = cycle === "annual";
+  document.getElementById("cycle-annual")?.setAttribute("aria-checked", anual ? "true" : "false");
+  document.getElementById("cycle-monthly-label")?.classList.toggle("is-active", !anual);
+  document.getElementById("cycle-annual-label")?.classList.toggle("is-active", anual);
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();

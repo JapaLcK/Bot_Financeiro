@@ -117,6 +117,54 @@ async function abrirPrecos({ me = null, query = "", app = false,
   return { page, chamadas, corposCheckout, removeuClip };
 }
 
+test("o ciclo usa um switch único, animado e reversível", async () => {
+  const { page } = await abrirPrecos({ viewport: { width: 320, height: 844 } });
+  const estrutura = await page.evaluate(() => {
+    const controle = document.querySelector(".cycle-toggle");
+    const botao = document.getElementById("cycle-annual");
+    const caixa = botao?.getBoundingClientRect();
+    return {
+      botoes: controle?.querySelectorAll("button").length,
+      role: botao?.getAttribute("role"),
+      checked: botao?.getAttribute("aria-checked"),
+      altura: Math.round(caixa?.height || 0),
+      cabe: Math.ceil(controle?.getBoundingClientRect().right || 0) <= innerWidth,
+    };
+  });
+  assert.deepEqual(estrutura, {
+    botoes: 1, role: "switch", checked: "false", altura: 44, cabe: true,
+  });
+
+  const estado = () => page.evaluate(() => {
+    const visivel = (sel) => getComputedStyle(document.querySelector(sel)).display !== "none";
+    return {
+      checked: document.getElementById("cycle-annual").getAttribute("aria-checked"),
+      mensalAtivo: document.getElementById("cycle-monthly-label").classList.contains("is-active"),
+      anualAtivo: document.getElementById("cycle-annual-label").classList.contains("is-active"),
+      precoMensal: visivel("[data-price-monthly]"),
+      precoAnual: visivel("[data-price-annual]"),
+      xKnob: Math.round(document.querySelector(".cycle-switch-thumb").getBoundingClientRect().left),
+    };
+  });
+
+  const mensal = await estado();
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(350); // transição do knob: 300ms
+  const anual = await estado();
+  assert.equal(anual.checked, "true");
+  assert.equal(anual.mensalAtivo, false);
+  assert.equal(anual.anualAtivo, true);
+  assert.equal(anual.precoMensal, false);
+  assert.equal(anual.precoAnual, true);
+  assert.ok(anual.xKnob - mensal.xKnob >= 20,
+    `o knob moveu só ${anual.xKnob - mensal.xKnob}px`);
+
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(350);
+  assert.deepEqual(await estado(), mensal, "o segundo clique não restaurou o ciclo mensal");
+  await page.close();
+});
+
 // ── asserção do conserto ────────────────────────────────────────────────────
 
 for (const [rotulo, ctx] of [

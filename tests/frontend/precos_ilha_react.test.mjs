@@ -823,7 +823,9 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
         } else {
           // O POST confirmou que só o agendamento mudou; nenhuma consulta nova é necessária.
           for (const ciclo of ["annual", "monthly"]) {
-            await pagina.locator(`#cycle-${ciclo}`).click();
+            await pagina.locator("#cycle-annual").click();
+            assert.equal(await pagina.locator("#cycle-annual").getAttribute("aria-checked"),
+              ciclo === "annual" ? "true" : "false", `o switch não entrou no ciclo ${ciclo}`);
             for (const sel of [alvo, '.cmp-table [data-plan-btn="pro"]']) {
               assert.equal(await pagina.locator(sel).innerText(), "Trocar pro Pro");
               await pagina.$eval(sel, (b) => b.click());
