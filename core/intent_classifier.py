@@ -260,6 +260,48 @@ _EXACT: dict[str, str] = {
     "desfazer":                 "launches.undo",
 }
 
+# As negativas canônicas, DERIVADAS do `_EXACT` — é a fonte, não uma segunda
+# lista (§0.7). O `_is_no` de `core/handlers/credit.py` importa daqui: copiada à
+# mão ela já divergia em 5 das 10 (`nope`, `negativo`, `melhor nao`,
+# `deixa pra la`, `deixa quieto`), e numa pergunta de sim/não isso não era só
+# "não entendi" — o portão devolvia `None`, o `route()` abandonava, e a pessoa
+# via **"Nada a cancelar."** no lugar do ramo negativo (Codex, #323).
+NEGATIVAS_EXATAS = frozenset(k for k, v in _EXACT.items() if v == "confirm.no")
+
+# ---------------------------------------------------------------------------
+# Vocabulário de VERBO DE LANÇAMENTO — fonte única (§0.7)
+# ---------------------------------------------------------------------------
+# As regexes do Tier 2 abaixo são MONTADAS a partir destas tuplas, e a união é
+# lida de fora por `tests/test_pendencia_credito_vocabulario.py`, que exige
+# interseção VAZIA com o `_PODAVEL_NO_PREFIXO` de `core/handlers/credit.py`:
+# verbo que move dinheiro não pode ser podado do começo de uma resposta, senão
+# `debitei 50 no cartao Nubank` respondendo "qual fatura?" PAGA a fatura
+# (Codex, #323). Reescrever a lista de lá à mão repete a deriva que causou isso;
+# derivá-la daqui a torna impossível.
+#
+# São QUATRO tuplas e não uma porque as regexes já usavam vocabulários
+# DIFERENTES, e uniformizar mudaria ROTEAMENTO: só os cinco de `_VERBOS_CARTAO`
+# mandam para `credit.handle` (`mandei 50 no cartao` é `launches.add` hoje, e
+# continua sendo), e `gastando` só existe na forma solta, nunca na datada. As
+# quatro regexes montadas abaixo são idênticas, caractere a caractere, às que
+# estavam escritas à mão: medido no #323 comparando os 83 padrões de
+# `_ALIAS_PATTERNS` antes e depois, mais 80 frases pelo `classify` — 0 divergência.
+#
+# ATENÇÃO: isto NÃO é o vocabulário de comando inteiro do bot. Verbo de
+# caixinha/investimento/saldo (`somei`, `depositei`, `investi`, `saquei`…) mora
+# em OUTRAS regexes e segue fora do veto — medido, `somei 50 no nubank` ainda
+# paga a fatura. Ver o relato do #323 antes de assumir que a classe está fechada.
+_VERBOS_CARTAO = ("gastei", "paguei", "comprei", "debitei", "gasto")
+_VERBOS_ENVIO = ("mandei", "enviei", "pixei", "torrei", "queimei")
+_VERBOS_ENTRADA = ("recebi", "ganhei", "entrou", "caiu", "pingou", "pinguei",
+                   "embolsei")
+_VERBOS_SAIDA = _VERBOS_CARTAO + _VERBOS_ENVIO
+_VERBOS_SAIDA_SOLTA = _VERBOS_SAIDA + ("gastando",)
+
+# A UNIÃO — o que o veto do crédito lê. Verbo novo em QUALQUER uma das tuplas
+# entra no veto sem ninguém precisar lembrar de mexer no outro arquivo.
+VERBOS_DE_LANCAMENTO = frozenset(_VERBOS_SAIDA_SOLTA + _VERBOS_ENTRADA)
+
 # ---------------------------------------------------------------------------
 # Tier 2 — Regex / alias (normalizado)
 # ---------------------------------------------------------------------------
@@ -335,7 +377,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "credit.handle"),
 
     # compra no crédito em linguagem natural
-    (r"^(gastei|paguei|comprei|debitei|gasto)\b.*\b(cartao|credito)\b",
+    (r"^(" + "|".join(_VERBOS_CARTAO) + r")\b.*\b(cartao|credito)\b",
      "credit.handle"),
 
     # pagamento de fatura (precede launches.add para não capturar "paguei" como gasto)
@@ -343,11 +385,12 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "credit.handle"),
 
     # despesa / receita — detecta padrão sem chamar IA
-    (r"^(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|torrei|queimei|gastando)\b",
+    (r"^(" + "|".join(_VERBOS_SAIDA_SOLTA) + r")\b",
      "launches.add"),
-    (r"^(recebi|ganhei|entrou|caiu|pingou|pinguei|embolsei)\b",
+    (r"^(" + "|".join(_VERBOS_ENTRADA) + r")\b",
      "launches.add"),
-    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b(gastei|paguei|comprei|debitei|gasto|mandei|enviei|pixei|torrei|queimei|recebi|ganhei|entrou|caiu|pingou|pinguei|embolsei)\b",
+    (r"^(hoje|ontem|\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?|dia\s+\d{1,2}(?:[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)?)\b.*\b("
+     + "|".join(_VERBOS_SAIDA + _VERBOS_ENTRADA) + r")\b",
      "launches.add"),
 
     # cartões / crédito

@@ -8,8 +8,10 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     (PAYWALL_ENABLED). Comportamento 100% preservado.
   • ON (escada v2): 4 tiers free < essencial < plus < pro. O valor 'pro' no
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
-    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
-    (has_app_access sempre True) e os gates viram por-feature/por-tier.
+    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
+    (#274/#354) o tier free NÃO entra no app: has_app_access consulta
+    tem_direito_hoje, e o Grátis sobrevive só como ESTADO (fallback após falha
+    de cobrança), não como direito de uso. Freio: ACCESS_GATE_ENABLED=0.
     Trial (2026-08-06): 15 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
     (subscription trialing → cobra no dia 16). Escolheu Pro? 15 dias de Pro.
     Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
@@ -28,6 +30,7 @@ from utils_date import day_tz
 
 from db import get_auth_user
 
+from .billing_dunning import carencia_aberta
 from .plan_limits import (
     PlanLimits,
     PlanLimitExceeded,
@@ -45,7 +48,35 @@ _STORED_PLAN_TO_TIER = {
     "pro_max": "pro",    # tier novo de R$ 39,90 (ainda não vendido)
 }
 
+# O INVERSO do de cima, restrito ao que se VENDE: tier público que o cliente
+# escolhe na /precos → valor legado que a coluna guarda. Não é derivado de
+# `_STORED_PLAN_TO_TIER` porque aquele não é injetor ('pro' e 'plus' dão o mesmo
+# tier); quem ata os dois é `test_vocabulario_de_plano.py`, ida e volta.
+# `free` fica de fora de propósito: não é venda, e `PRECOS_ANUAIS_CENTS` não o tem.
+TIER_TO_STORED_PLAN = {
+    "essencial": "essencial",
+    "plus": "pro",       # legado: o tier Plus grava 'pro'
+    "pro": "pro_max",    # legado: o tier Pro grava 'pro_max'
+}
+
+
 TRIAL_DAYS_DEFAULT = 15
+
+
+def tier_publico(plan_stored: str) -> str:
+    """Valor legado da coluna → o tier PÚBLICO, sem tocar no banco.
+
+    O irmão sem-banco de `get_plan_tier`, para quem já tem a string na mão e não
+    o `user_id`: as respostas HTTP do Pix (checkout, poll e o 409), o `plan` do
+    `purchase` do GA4 e o `/billing/subscription`. Mora aqui porque quem é dono
+    do vocabulário é `_STORED_PLAN_TO_TIER` — outra cópia do
+    `{"pro": "plus", "pro_max": "pro"}` é o §0.7 ao contrário.
+
+    Desconhecido volta como veio: numa resposta de venda, apagar o plano é pior
+    que devolver um nome estranho. Era o comportamento do `_plan_publico` do
+    monólito, a cópia local que esta função substituiu.
+    """
+    return _STORED_PLAN_TO_TIER.get(plan_stored, plan_stored)
 
 
 def plans_v2_enabled() -> bool:
@@ -54,6 +85,20 @@ def plans_v2_enabled() -> bool:
     A env virou só FREIO DE EMERGÊNCIA: PLANS_V2_ENABLED=0/false desliga o
     comportamento v2 do backend sem redeploy se algo der errado."""
     raw = (os.getenv("PLANS_V2_ENABLED") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
+
+
+def access_gate_enabled() -> bool:
+    """O gate de acesso por direito pago. LANÇADO no corte do Grátis: default
+    LIGADO. Gêmeo exato de `plans_v2_enabled()` — ACCESS_GATE_ENABLED=0/false/
+    no/off é o FREIO DE EMERGÊNCIA que devolve o acesso a todo mundo sem
+    redeploy, lido a cada chamada.
+
+    Quem consome: `has_app_access` (e, por ele, os quatro enforcements de
+    acesso e o filtro dos relatórios). Puxar o freio desfaz o corte inteiro."""
+    raw = (os.getenv("ACCESS_GATE_ENABLED") or "").strip().lower()
     if raw in ("0", "false", "no", "off"):
         return False
     return True
@@ -76,6 +121,81 @@ def _paid_plan_active(user: dict) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at > datetime.now(timezone.utc)
+
+
+def _tem_plano_pago_vigente(user: dict | None) -> bool:
+    """A conta tem DIREITO pago vigente — o par (`plan`, `plan_expires_at`)?
+
+    EXTRAÍDA, não criada (§0.1): o par `_STORED_PLAN_TO_TIER` +
+    `_paid_plan_active` já estava escrito inline em `get_plan_tier` e em
+    `needs_plan_selection`, e os dois passaram a chamar daqui — não há um
+    terceiro lugar guardando a mesma regra.
+
+    **`plan_expires_at` NULL é VITALÍCIO e devolve True** (grandfathered), que é
+    o que `_paid_plan_active` já dizia. Quem reescrever isto como
+    `plan_expires_at > now()` sem essa perna trata todo grandfathered como
+    expirado — e num aviso de corte por e-mail isso é a base inteira dos
+    vitalícios recebendo "seu acesso acaba".
+    """
+    if not user:
+        return False
+    tier = _STORED_PLAN_TO_TIER.get((user.get("plan") or "").lower(), "free")
+    return tier != "free" and _paid_plan_active(user)
+
+
+def tem_direito_hoje(user: dict | None) -> bool:
+    """Esta conta tem direito de uso HOJE: plano pago vigente OU carência aberta.
+
+    **A direção do OR é o desenho.** A AUTORIDADE é o direito
+    (`plan`/`plan_expires_at`, que já são a projeção de `plan_grants`); o
+    relógio de inadimplência entra só do lado direito, e só CONCEDE tempo extra
+    a quem já perdeu o direito. Invertida, ela faria o status de cobrança
+    bloquear cliente pagante durante um ciclo de retentativa — as células 18,
+    29 e 30 de `docs/dunning_estados_eventos.md` ficam fora deste trabalho
+    justamente por causa dessa direção.
+
+    `user is None` (conta só-WhatsApp, sem linha em `auth_accounts`) é False.
+    **DECISÃO REGISTRADA DO DONO, não constatação técnica** — e a versão
+    anterior desta docstring dizia "não há para onde mandar aviso", que é
+    FALSO e escondia a decisão:
+
+      • quem usa o bot só pelo WhatsApp e nunca fez cadastro web não tem linha
+        em `auth_accounts` e tinha o produto COMPLETO até o corte:
+        `has_app_access` devolvia True incondicional com o v2 ligado. **Desde o
+        PR A ela é barrada por aqui**: o gate do bot passa a linha (que pode
+        ser `None`) para `has_app_access`, e `None` cai neste `return False`. O
+        comentário de `core/handle_incoming._paywall_gate` chama essa população
+        de "a maioria aqui";
+      • ela NÃO entra na varredura do aviso, que é sobre `auth_accounts`, e
+        PERDE acesso no corte, porque este predicado devolve False;
+      • **existe** canal para alcançá-la — o WhatsApp, o canal principal do
+        produto. O que falta é template aprovado na Meta, e submeter um tem
+        prazo de aprovação;
+      • **o dono decidiu, explicitamente, cortar essa população sem aviso
+        prévio.** A comunicação dela passa a ser a mensagem de bloqueio do
+        próprio bot, que é do PR A.
+
+    Logo, a garantia deste PR é **"ninguém com cadastro web e e-mail é cortado
+    sem aviso"** — não "ninguém é cortado sem aviso".
+
+    **REQUISITO PARA O PR A, que nasce dessa decisão**: se a mensagem de
+    bloqueio do bot vira a ÚNICA comunicação dessa população, ela tem de fazer
+    sentido para quem nunca viu o dashboard e não tem conta web — sem "acesse
+    seu painel", sem supor cadastro existente.
+
+    **Desde o PR A ela É o gate**: `has_app_access` a consulta, e por ele os
+    quatro enforcements (HTML, rotas de dados, WebSocket, bot) mais o filtro
+    dos relatórios. Os outros consumidores são `scripts/aviso_fim_do_gratis.py`
+    e o teste diferencial que compara aquela SQL com este predicado — quem
+    mexer AQUI vê `tests/test_aviso_fim_do_gratis.py` vermelho, de propósito.
+    """
+    if not user:
+        return False
+    return _tem_plano_pago_vigente(user) or carencia_aberta(
+        user.get("past_due_since"),
+        user.get("last_payment_status"),
+        datetime.now(timezone.utc),
+    )
 
 
 def get_trial_status(user_id: int, user: dict | None = None) -> dict:
@@ -115,11 +235,8 @@ def get_plan_tier(user_id: int) -> str:
     user = get_auth_user(int(user_id))
     if not user:
         return "free"
-    stored = (user.get("plan") or "").lower()
-    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
-    if tier != "free" and _paid_plan_active(user):
-        return tier
-    return "free"
+    tier = _STORED_PLAN_TO_TIER.get((user.get("plan") or "").lower(), "free")
+    return tier if _tem_plano_pago_vigente(user) else "free"
 
 
 def is_pro(user_id: int) -> bool:
@@ -144,6 +261,18 @@ def is_pro(user_id: int) -> bool:
 # user_ids liberados (admin/teste) na perna LEGADA do paywall — is_pro/paywall.
 # Com o v2 ligado ela não vale para o gate de escolha de plano:
 # needs_plan_selection não consulta esta lista (nem no bot, nem na web).
+#
+# **E, desde o corte do Grátis, ela também não vale para o ACESSO** — o `if
+# plans_v2_enabled()` de `has_app_access` sai antes de chegar aqui. Era inócuo
+# enquanto aquele ramo devolvia True incondicional; agora estas duas contas são
+# cortadas como qualquer outra se não tiverem plano vigente.
+#
+# **Decisão: fica como está, e a lista NÃO é reintroduzida no caminho v2.** O
+# jeito de liberar uma conta hoje é o grant de admin
+# (`core.admin_dashboard.set_account_plan`), que é auditado, tem validade e
+# aparece no painel — uma allowlist hardcoded no código não tem nenhum dos três,
+# e ressuscitá-la abriria um bypass do corte que ninguém enxerga fora do fonte.
+# `tests/test_access_gate.py::test_allowlist_legada_nao_isenta_do_corte` amarra.
 _ACCESS_ALLOWLIST = {88648360, 832398038}
 
 
@@ -254,15 +383,67 @@ def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool
     return str(user_id) in beta_ids
 
 
-def has_app_access(user_id: int) -> bool:
+# Sentinela do parâmetro `user` de `has_app_access`. Existe porque `None` já
+# TEM significado ali — "não há linha em `auth_accounts`", a população
+# só-WhatsApp, que o corte barra —, e `None` como "não busquei" faria o MESMO
+# valor querer dizer as duas coisas OPOSTAS. Quem passa a linha em mão é o gate
+# do bot (`core.handle_incoming._paywall_gate`), que já a tem de
+# `db.get_plan_gate_state` e não pode pagar o `get_auth_user` (decrypt de PII +
+# uma linha em `pii_access_log` POR MENSAGEM — ver o comentário de lá).
+_UNSET = object()
+
+
+def has_app_access(user_id: int, *, user=_UNSET) -> bool:
     """True se o usuário pode entrar no app.
 
-    v2 ON: sempre True — o Grátis entra no app e os limites são por feature
-    (o paywall binário dá lugar à escada).
+    v2 ON: o veredito é `tem_direito_hoje` — plano pago vigente OU carência de
+    inadimplência aberta. **A AUTORIDADE É O DIREITO**, e o relógio de cobrança
+    só CONCEDE tempo pelo lado direito daquele OR; ele nunca tira acesso. Lido
+    ao contrário, o status bloquearia cliente pagante por um ciclo inteiro de
+    retentativa — são as células 18, 29 e 30 de
+    `docs/dunning_estados_eventos.md`, que ficam fora deste caminho por causa
+    dessa direção. Freio `ACCESS_GATE_ENABLED=0` devolve o True incondicional
+    de antes do corte.
     v2 OFF: com o paywall ligado, exige assinatura ativa/trial (is_pro) —
-    menos a allowlist de admin/teste. Paywall desligado libera todo mundo."""
+    menos a allowlist de admin/teste. Paywall desligado libera todo mundo.
+
+    `user`: a linha de `auth_accounts` quando o chamador JÁ a tem (o gate do
+    bot, o `/auth/me`). `None` é uma RESPOSTA — "não existe cadastro web" —, e
+    não "não busquei"; ver `_UNSET` acima.
+
+    **SEM `try/except` que devolva False, e isso é regra dura.** São TRÊS
+    estados, não dois: *tem direito* / *não tem* / **não sei**. Só o veredito
+    conhecido "não tem" fecha a porta; exceção é "não sei" e tem de SUBIR, para
+    que cada chamador aplique a política DELE. `get_auth_user` LEVANTA em erro
+    em vez de devolver `None`, e é essa distinção que um `except: return False`
+    aqui destruiria — um soluço de banco barraria a base pagante inteira e o bot
+    mandaria ASSINAR para quem já assinou.
+
+    **O que cada chamador faz com a exceção, MEDIDO** (2026-09-10; uma versão
+    anterior desta docstring dizia "o backstop de dados devolve 402" e isso é
+    falso — ele deixa propagar e vira 500):
+
+    | chamador | com a exceção | é regressão? |
+    |---|---|---|
+    | `_paywall_gate` (bot) | fail-open: atende e REGISTRA o lançamento | não |
+    | `gate_plan_selection` (HTML) | fail-open: serve a página | não |
+    | `_enforce_subscription_gate` (rotas de dados) | propaga → **500**, não 402 | não |
+    | gate do `/ws/{id}` | propaga → a conexão morre | não |
+    | `filtrar_por_acesso` (relatórios) | propaga → o tick inteiro morre | não |
+
+    **Nenhum é regressão deste PR**: os quatro últimos já chamavam
+    `needs_plan_selection(user_id)` na linha de cima, que estoura igual num
+    soluço de banco. Os dois primeiros são fail-open declarado; os três de baixo
+    são "morre alto", que num soluço de banco é o comportamento de sempre do
+    resto do app. Está escrito aqui porque a docstring afirmava um 402 que
+    ninguém entrega, e porque três dos cinco NÃO são fail-open — o "não sei"
+    vira "não" para eles, e isso tem de ser lido, não descoberto."""
     if plans_v2_enabled():
-        return True
+        if not access_gate_enabled():
+            return True
+        if user is _UNSET:
+            user = get_auth_user(int(user_id))
+        return tem_direito_hoje(user)
     if not paywall_enabled():
         return True
     if int(user_id) in _ACCESS_ALLOWLIST:
@@ -305,11 +486,7 @@ def needs_plan_selection(user_id: int, user: dict | None = None) -> bool:
     if user.get("plan_selected_at"):
         return False
     # Assinante pago/trial ativo já escolheu implicitamente no checkout.
-    stored = (user.get("plan") or "").lower()
-    tier = _STORED_PLAN_TO_TIER.get(stored, "free")
-    if tier != "free" and _paid_plan_active(user):
-        return False
-    return True
+    return not _tem_plano_pago_vigente(user)
 
 
 def get_user_limits(user_id: int) -> PlanLimits:

@@ -5,7 +5,15 @@ Camada de banco de UM assunto: a PRIMEIRA falha de cobrança do ciclo. O
 vocabulário (lista de status, janela, largura) mora em
 `core/services/billing_dunning`; quem lê o funil é
 `core/services/payment_reminder`; quem escreve são os ramos de cobrança do
-webhook do Stripe. **NADA de acesso depende desta coluna.**
+webhook do Stripe.
+
+**Desde o corte do Grátis, o acesso DEPENDE desta coluna — e só numa direção.**
+`core.services.billing_dunning.carencia_aberta` a lê no lado DIREITO do OR de
+`plan_service.tem_direito_hoje`, que `has_app_access` consulta. O relógio só
+CONCEDE tempo a quem já perdeu o direito pago; ele NUNCA tira acesso de
+ninguém. Quem inverter essa direção bloqueia cliente pagante por um ciclo
+inteiro de retentativa (célula 29). Esta linha dizia "NADA de acesso depende
+desta coluna" e passou a mentir no PR do corte.
 
 **A máquina inteira — estados × eventos, com o que cada célula faz hoje e o que
 deveria fazer — está em `docs/dunning_estados_eventos.md`.** Leia antes de
@@ -129,6 +137,38 @@ def clear_past_due_since(user_id: int, *, nao_mais_novo_que: int) -> None:
                 "update auth_accounts set past_due_since = null"
                 " where user_id = %s and past_due_since <= to_timestamp(%s)",
                 (int(user_id), int(nao_mais_novo_que)),
+            )
+        conn.commit()
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
+
+
+def encerrar_ciclo_de_atraso(user_id: int) -> None:
+    """Zera o relógio INCONDICIONALMENTE, porque o ciclo acabou de vez.
+
+    Irmã de `clear_past_due_since`, e a diferença é a REGRA, não o caso: lá o
+    predicado preserva um ciclo ainda recuperável por uma cobrança futura. **Num
+    evento TERMINAL não há cobrança a recuperar, logo não há ciclo a preservar,
+    e por construção não existe evento mais novo que queira o relógio de volta.**
+
+    **SEM parâmetro de versão, e a ausência é o desenho**: `nao_mais_novo_que=None`
+    foi RECUSADO — dar significado ao `None` transforma o valor que um descuido
+    produz no valor que DESLIGA a proteção que o parâmetro obrigatório comprou.
+
+    **NÃO escreve `last_payment_status`** (os writers continuam DOIS) e **UM
+    call site**, prendido por `tests/test_dunning_encerramento_terminal.py`.
+
+    A ordem no ramo (`set_payment_status('unpaid')` e só então esta), por que
+    ela importa, e o que ela NÃO garante — o par não é atômico, e falha entre os
+    dois UPDATEs deixa órfão, aberto de propósito porque erra para o lado que
+    CONCEDE acesso e a reentrega limpa — estão na seção E4 de
+    `docs/dunning_estados_eventos.md`, junto com a célula 32.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update auth_accounts set past_due_since = null where user_id = %s",
+                (int(user_id),),
             )
         conn.commit()
     from db_support import invalidate_auth_user_cache

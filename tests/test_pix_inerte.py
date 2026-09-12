@@ -298,11 +298,32 @@ def test_pix_pricing_so_e_importado_pelo_checkout_e_pela_rota():
     aritmética pura —, mas medir o chamador separado continua valendo: é o que
     impede alguém de ligar o preço a outra tela achando que "pricing não conta".
 
-    São DOIS chamadores e não um: o checkout chama `plano_da_cobranca`, e a rota
-    importa `CoberturaJaPaga` para traduzir a recusa em 409 sem reconsultar o
-    banco (é o contrato escrito na docstring da própria exceção).
+    **O que este portão afirma, desde o consumidor não-Pix:** preço LIDO pode
+    sair do módulo; caminho de COBRANÇA não. Ele continua reprovando pelo nome
+    do arquivo um import novo em `db/`, num handler ou num scheduler — não virou
+    "qualquer um importa". O critério do dono (topo deste arquivo) é sobre EMITIR
+    cobrança sem o caminho que recebe o pagamento; ler um `dict[str, int]` não
+    emite nada, e o preço ANUAL não é do Pix (o cartão vende anual por
+    `STRIPE_PRICE_ID_*_ANUAL` desde antes, e o Pix anual ainda está atrás de
+    `ASAAS_PIX_ANNUAL_ENABLED`). Abrir o esperado, em vez de apagar o teste, é a
+    mesma escolha que o 1b-B fez com a allowlist.
+
+    São TRÊS chamadores: o checkout chama `plano_da_cobranca`, a rota importa
+    `CoberturaJaPaga` para traduzir a recusa em 409 sem reconsultar o banco (é o
+    contrato escrito na docstring da própria exceção), e o e-mail só LÊ o preço.
+
+    **Gatilho para o futuro:** um consumidor não-Pix é exceção justificada; no
+    dia em que aparecer o SEGUNDO, a constante está no módulo errado e o
+    conserto é extraí-la para um módulo neutro — PR próprio, porque mexe no
+    caminho de emissão de cobrança e arrisca ciclo de import.
     """
-    esperado = {"core/services/pix_checkout.py", "frontend/routes/billing_pix.py"}
+    esperado = {
+        "core/services/pix_checkout.py",      # chama `plano_da_cobranca`
+        "frontend/routes/billing_pix.py",     # traduz `CoberturaJaPaga` em 409
+        # o aviso de fim do Grátis lê só `PRECOS_ANUAIS_CENTS` para a copy;
+        # não emite cobrança e não fala com o Asaas
+        "core/services/email_service.py",
+    }
     achados = set(_quem_importa(("core.services.pix_pricing",), raiz=""))
     assert achados == esperado, (
         f"chamadores de pix_pricing mudaram — sobrando: {sorted(achados - esperado)}; "

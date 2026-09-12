@@ -9,6 +9,9 @@ mora aqui embaixo.
 import asyncio
 import hashlib
 import hmac
+import json
+
+import pytest
 
 from starlette.requests import Request
 
@@ -87,3 +90,84 @@ def test_wa_verify_token_nao_ascii_403_e_nao_500(monkeypatch):
     )
 
     assert resp.status_code == 403
+
+
+# ─── corpo do POST /webhook (adapters/whatsapp/wa_app.py) ─────────────────────
+# Com assinatura HMAC válida, o corpo ainda é escolhido por quem posta. O
+# `json.loads` estava fora de qualquer try: 4 classes de corpo viravam 500 em
+# laço. Por que a resposta é 200 e não 400: comentário do `except` em
+# `wa_app.wa_webhook` — não repito aqui para não virar segunda fonte.
+
+def _wa_webhook(corpo: bytes, monkeypatch):
+    """POST /webhook com X-Hub-Signature-256 calculado de verdade. Devolve
+    (resposta, fila, eventos) — fila fresca por teste, para não sujar a de
+    módulo; `eventos` captura as chamadas de log_system_event_sync (o mock
+    precisa guardar, não descartar, senão o `details` não é medido por
+    ninguém)."""
+    monkeypatch.setattr(wa_app, "APP_SECRET", SEGREDO)
+    eventos: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        wa_app, "log_system_event_sync", lambda *a, **k: eventos.append((a, k))
+    )
+    fila = asyncio.Queue(maxsize=500)
+    monkeypatch.setattr(wa_app, "_queue", fila)
+    digest = hmac.new(SEGREDO.encode(), corpo, hashlib.sha256).hexdigest()
+
+    async def receive():
+        return {"type": "http.request", "body": corpo, "more_body": False}
+
+    req = Request(
+        {"type": "http", "method": "POST", "query_string": b"",
+         "headers": [(b"x-hub-signature-256", f"sha256={digest}".encode())]},
+        receive=receive,
+    )
+    return asyncio.run(wa_app.wa_webhook(req)), fila, eventos
+
+
+PAYLOAD_META = {
+    "entry": [{"changes": [{"field": "messages", "value": {
+        "messages": [{"from": "5511999998888", "type": "text",
+                      "text": {"body": "gastei 50 no mercado"}}]}}]}]
+}
+
+
+def test_webhook_payload_da_meta_continua_enfileirado(monkeypatch):
+    """Controle positivo do grupo: sem ele, um handler que respondesse 200 a
+    TUDO e não processasse nada passaria nos casos abaixo — pior que o
+    bug. Segue verde sob a mutação usada na prova negativa (json.loads cru)."""
+    resp, fila, _ = _wa_webhook(json.dumps(PAYLOAD_META).encode(), monkeypatch)
+
+    assert resp.status_code == 200
+    assert fila.qsize() == 1
+    assert fila.get_nowait() == PAYLOAD_META
+
+
+@pytest.mark.parametrize("corpo, erro", [
+    pytest.param(b"", "JSONDecodeError", id="corpo_vazio"),
+    pytest.param(b"   ", "JSONDecodeError", id="so_espaco"),
+    pytest.param(b'{"entry":', "JSONDecodeError", id="json_truncado"),
+    pytest.param(b'{"a":"\xff\xfe"}', "UnicodeDecodeError", id="utf8_invalido"),
+    pytest.param(b"[" * 100_000, "RecursionError", id="aninhamento_fundo"),
+    pytest.param(b'{"a":' + b"1" * 5000 + b"}", "ValueError",
+                 id="int_acima_de_4300_digitos"),
+])
+def test_webhook_corpo_ilegivel_200_sem_enfileirar(corpo, erro, monkeypatch):
+    """Uma classe por caso: JSONDecodeError, UnicodeDecodeError, RecursionError
+    e o ValueError do limite de 4300 dígitos do int — todas 500 antes do
+    conserto.
+
+    Prova negativa: trocando o try/except de wa_app.wa_webhook de volta pelo
+    `payload = json.loads(raw.decode("utf-8"))` cru, estes ficam vermelhos por
+    exceção e o positivo acima continua verde.
+
+    Fila vazia importa tanto quanto o status: responder 200 e enfileirar lixo
+    seria outro defeito. E `details["erro"]` importa porque na main o 500 dava
+    traceback no mesmo painel: sem o nome da classe, o diagnóstico piora."""
+    resp, fila, eventos = _wa_webhook(corpo, monkeypatch)
+
+    assert resp.status_code == 200
+    assert json.loads(resp.body)["ignored"] is True
+    assert fila.qsize() == 0
+    (args, kwargs), = eventos
+    assert args[1] == "whatsapp_webhook_corpo_invalido"
+    assert kwargs["details"] == {"bytes": len(corpo), "erro": erro}

@@ -220,6 +220,7 @@ def _ga4(cobranca, evt) -> None:
     """`purchase` com `transaction_id = public_token` — a chave de dedupe do
     GA4, e o único identificador da cobrança que sai do servidor (§13.6)."""
     from core.services.ga4_mp import fallback_client_id, mp_configured, send_purchase
+    from core.services.plan_service import tier_publico
 
     if not mp_configured():
         return
@@ -227,7 +228,13 @@ def _ga4(cobranca, evt) -> None:
         transaction_id=cobranca["public_token"],
         value=int(cobranca["amount_cents"]) / 100,
         currency=cobranca["currency"] or "BRL",
-        plan=cobranca["plan"],
+        # PÚBLICO, e esta é a linha de RECEITA: `send_purchase` usa este valor
+        # como `item_id` E `item_name` do evento `purchase`. O Stripe já manda o
+        # público no mesmo campo (`_ga_plano_publico`), então o legado da coluna
+        # fazia o Pro virar dois produtos no relatório — e, pior, o Plus do Pix
+        # (`pro`, R$ 199) caía na MESMA linha do Pro do Stripe (`pro`, R$ 39,90).
+        # É o achado do Codex no #244, do lado do Pix.
+        plan=tier_publico(cobranca["plan"]),
         client_id=cobranca["ga_client_id"] or fallback_client_id(cobranca["user_id"]),
         user_id=cobranca["user_id"],
     )
@@ -274,7 +281,9 @@ def _email(cobranca, evt) -> None:
     if not destino or recent_event_exists("pix_paid_email_sent",
                                           cobranca["user_id"], 1.0):
         return
-    if not send_pix_paid_email(destino, int(cobranca["amount_cents"]) / 100,
+    if not send_pix_paid_email(destino, cobranca["plan"],
+                               int(cobranca["amount_cents"]) / 100,
+                               cobranca["access_starts_at"],
                                cobranca["access_expires_at"]):
         raise RuntimeError("send_pix_paid_email devolveu False")
     log_system_event_sync("info", "pix_paid_email_sent",

@@ -7,6 +7,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 import asyncio
 import html as _html
 import os
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -28,6 +29,14 @@ from frontend.routes.shared import (
 
 router = APIRouter()
 
+_CACHE_IMUTAVEL = "public, max-age=31536000, immutable"
+
+
+def _cache_asset_versionado(request: Request) -> str:
+    """Cache longo só quando `?v=` é o hash de conteúdo aplicado ao HTML."""
+    version = request.query_params.get("v", "")
+    return _CACHE_IMUTAVEL if re.fullmatch(r"[0-9a-f]{12}", version) else "no-cache"
+
 
 class ContactBody(BaseModel):
     name: str = ""
@@ -39,7 +48,7 @@ class ContactBody(BaseModel):
 
 @router.get("/")
 async def serve_landing():
-    return html_file(FRONTEND_DIR / "index.html")
+    return html_file(FRONTEND_DIR / "index.html", clarity=True)
 
 
 @router.get("/app")
@@ -74,7 +83,19 @@ async def serve_settings(request: Request):
     # usuário pra cá (?view=open-finance&onb=1) pra conectar o banco, e gatear
     # aqui viraria loop settings → onboarding → settings. Além disso /settings é
     # a saída de emergência de quem travou a conta.
-    gate = gate_plan_selection(request)
+    #
+    # `exige_direito=False` é a MESMA razão, e virou obrigação no corte do fim
+    # do Grátis (decisão do dono): esta página é o único lugar do produto com a
+    # UI de EXPORTAR os dados e EXCLUIR a conta (medido 2026-09-11:
+    # `grep -rln "account/export" frontend/*.html frontend/*.js` acha só o
+    # settings.html). Cortar o
+    # acesso e trancar esta porta junto tiraria da pessoa a saída da própria
+    # conta. A perna da ESCOLHA continua valendo — cadastro novo sem plano vai
+    # pra /precos como antes; quem perdeu o DIREITO entra aqui.
+    #
+    # O par do lado cliente está em `settings.html`, no bloco do `/auth/me`: os
+    # dois têm de concordar, senão o JS expulsa quem o servidor deixou entrar.
+    gate = gate_plan_selection(request, exige_direito=False)
     if gate is not None:
         return gate
     return html_file(FRONTEND_DIR / "settings.html", pixel=False)
@@ -223,17 +244,17 @@ async def serve_blog_guide(slug: str, request: Request):
 
 @router.get("/whatsapp")
 async def serve_whatsapp():
-    return html_file(FRONTEND_DIR / "whatsapp.html")
+    return html_file(FRONTEND_DIR / "whatsapp.html", clarity=True)
 
 
 @router.get("/funcionalidades")
 async def serve_funcionalidades():
-    return html_file(FRONTEND_DIR / "funcionalidades.html")
+    return html_file(FRONTEND_DIR / "funcionalidades.html", clarity=True)
 
 
 @router.get("/comandos")
 async def serve_comandos():
-    return html_file(FRONTEND_DIR / "comandos.html")
+    return html_file(FRONTEND_DIR / "comandos.html", clarity=True)
 
 
 @router.get("/comandos-app")
@@ -290,17 +311,17 @@ async def get_blog_news(limit: int = 12):
 async def serve_agents():
     """Galeria pública dos Agentes do Piggy — só apresenta a utilidade de cada
     um. A ativação de fato acontece no painel (dashboard), não aqui."""
-    return html_file(FRONTEND_DIR / "agents.html")
+    return html_file(FRONTEND_DIR / "agents.html", clarity=True)
 
 
 @router.get("/como-funciona")
 async def serve_como_funciona():
-    return html_file(FRONTEND_DIR / "como-funciona.html")
+    return html_file(FRONTEND_DIR / "como-funciona.html", clarity=True)
 
 
 @router.get("/precos")
 async def serve_precos():
-    return html_file(FRONTEND_DIR / "precos.html")
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
 @router.get("/suporte")
@@ -321,6 +342,7 @@ async def serve_suporte():
     # Mesmos headers de cache das demais páginas HTML (html_file): o /suporte é
     # montado à mão (injeta o FAQ), então precisa setar no-store explicitamente.
     # /suporte é público → recebe pixel e GA4 como as demais páginas públicas.
+    # O formulário recebe dados pessoais e mensagens livres: não gravar no Clarity.
     page = stamp_asset_versions(inject_tracking(template.replace("{{FAQ}}", faq)))
     return Response(content=page,
                     media_type="text/html; charset=utf-8",
@@ -409,6 +431,36 @@ async def serve_sw():
     return resp
 
 
+@router.get("/precos-app.js")
+async def serve_precos_app_js():
+    """Ilha React do `#plans-v2` da /precos — artefato do build de `webapp/`,
+    commitado no repositório. Nome FIXO e sem hash porque a rota é escrita à mão
+    (não há StaticFiles mount); quem invalida cache é o `stamp_asset_versions`,
+    que carimba o `?v=` do HTML com um hash do conteúdo deste arquivo.
+
+    `no-cache` como o par `.css` e como o /site.css: sem ele esta rota era a
+    ÚNICA de asset deste arquivo sem `Cache-Control` — e o par de um asset muda
+    junto (§2)."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/precos-app.css")
+async def serve_precos_app_css():
+    """Par da ilha React da /precos — pódio dos cards e o badge do destaque.
+    Artefato do mesmo build de `webapp/`. no-cache como o /site.css: o
+    `stamp_asset_versions` carimba o `?v=` com o hash do conteúdo, e a página
+    está em iteração ativa."""
+    return FileResponse(
+        FRONTEND_DIR / "precos-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/modals.js")
 async def serve_modals_js():
     """Componente de modal estilizado (alertModal/confirmModal) usado em todas
@@ -450,25 +502,25 @@ async def serve_pb_nav_js():
 
 
 @router.get("/safe-area.js")
-async def serve_safe_area_js():
+async def serve_safe_area_js(request: Request):
     """Reserva de safe area para as páginas fora do modo app (precos, landing,
     legal…). O WebView usa contentInset "never" e vai até a borda em todas as
     rotas; o app-mode.css só cobre seis páginas. Inerte fora do app."""
     return FileResponse(
         FRONTEND_DIR / "safe-area.js",
         media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/nav-auth.js")
-async def serve_nav_auth_js():
+async def serve_nav_auth_js(request: Request):
     """Nav ciente de login nas páginas de marketing: troca 'Entrar/Começar'
     por 'Ir para o dashboard' quando o usuário está autenticado."""
     return FileResponse(
         FRONTEND_DIR / "nav-auth.js",
         media_type="application/javascript",
-        headers={"Cache-Control": "public, max-age=300"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
@@ -574,6 +626,18 @@ async def serve_pix_checkout_js():
     )
 
 
+@router.get("/pix-ui.js")
+async def serve_pix_ui_js():
+    """Peças de UI compartilhadas pelo /pix-checkout.js e pelo /pix-poll.js
+    (rótulo, linha, botão e overlay). Carrega ANTES dos dois: o `const pixBrl`
+    tem TDZ até este script rodar."""
+    return FileResponse(
+        FRONTEND_DIR / "pix-ui.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/pix-poll.js")
 async def serve_pix_poll_js():
     """Par do /pix-checkout.js: o modal do QR, a cópia e o poll da cobrança.
@@ -606,47 +670,46 @@ async def serve_dashboard_mobile_css():
 
 
 @router.get("/site.css")
-async def serve_site_css():
+async def serve_site_css(request: Request):
     """Sistema de design do site de marketing (protótipo v2).
-    no-cache: revalida sempre (304 se não mudou) — o site está em iteração
-    ativa, então mudanças de CSS precisam aparecer na hora."""
+    A URL carimbada pelo conteúdo pode ser imutável; a URL nua revalida."""
     return FileResponse(
         FRONTEND_DIR / "site.css",
         media_type="text/css",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/site-redesign.css")
-async def serve_site_redesign_css():
+async def serve_site_redesign_css(request: Request):
     """Camada de refino da landing (escopada em body.rd), sobre o site.css.
-    Carregada pela index.html. no-cache como o /site.css: iteração ativa."""
+    Carregada pela index.html e cacheada só quando a URL traz o hash."""
     return FileResponse(
         FRONTEND_DIR / "site-redesign.css",
         media_type="text/css",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/brand.css")
-async def serve_brand_css():
+async def serve_brand_css(request: Request):
     """Design tokens da marca (paleta, tokens semânticos, @font-face Inter).
-    Cache longo — muda pouco; querystring de versão invalida se precisar."""
+    O hash de conteúdo na query permite cache imutável sem versão manual."""
     return FileResponse(
         FRONTEND_DIR / "brand.css",
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
 @router.get("/phosphor.css")
-async def serve_phosphor_css():
+async def serve_phosphor_css(request: Request):
     """CSS dos icones Phosphor (peso Regular), self-hosted. Aponta pro
-    /fonts/Phosphor.woff2. Cache longo — muda pouco."""
+    /fonts/Phosphor.woff2. O hash na query permite cache imutável."""
     return FileResponse(
         FRONTEND_DIR / "phosphor.css",
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": _cache_asset_versionado(request)},
     )
 
 
@@ -657,6 +720,7 @@ async def serve_font(name: str):
     allowed = {
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
+        "Inter-Variable.woff2",
         "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:

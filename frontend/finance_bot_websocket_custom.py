@@ -41,7 +41,7 @@ from fastapi.exception_handlers import http_exception_handler, request_validatio
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -107,6 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -568,17 +569,13 @@ async def get_financial_data(
             -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
             -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
             --
-            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
-            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
-            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
-            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
-            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
-            -- dashboard -> barra de categoria -> linha ainda escreve
-            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
-            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
-            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
-            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
-            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            -- ESCOPO: `_renderLaunchDetail` e `openEditLaunchModal` (dashboard.js)
+            -- têm DOIS alimentadores. Este é o da Visão Geral (`recent_launches`);
+            -- o outro é `_catLaunchesRows`, que vem de
+            -- `list_launches_by_category` (db/accounts.py) e TAMBÉM canoniza,
+            -- pela issue 296. Ele ficou fora da 287 porque a mesma query monta o
+            -- texto do WhatsApp (`_listar_categoria`, core/handlers/launches.py),
+            -- superfície que a 287 não cobria.
             SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
@@ -2168,7 +2165,7 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
-        "https://www.googletagmanager.com; "
+        "https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -2253,6 +2250,52 @@ async def csrf_middleware(request: Request, call_next):
     if request.method.upper() in CSRF_SAFE_METHODS and not token:
         _set_csrf_cookie(response, _make_csrf_token())
     return response
+
+
+@app.middleware("http")
+async def query_venenosa_middleware(request: Request, call_next):
+    """NUL/surrogate em QUERY param vira 422 na borda, nunca 500 lá no `execute`.
+
+    O #369 fechou o corpo (modelo Pydantic, `recusa_veneno`) e o #321 fechou o
+    path (guarda nas funções de `db/`). Sobrava a query, e a varredura desta
+    árvore mediu **8** rotas em 500 com `?campo=a%00b` — 4 de admin
+    (`/admin/api/users?plan`, `/admin/api/pii-access?actor` e `?field`,
+    `/admin/grant-pro?email`) e 4 de usuário autenticado comum
+    (`/categories/{id}/launches?categoria`, `/data/{id}?q`,
+    `/history/{id}/list?categoria` e `?q`) — cada 500 gravando uma linha em
+    `system_event_logs` pelo `admin_error_logging_middleware`.
+
+    **Um ponto, não 8 remendos** (§2): os 8 sinks moram em 6 funções de 4
+    módulos, e nenhum é chamador comum dos outros — a única coisa que eles têm
+    em comum é a query string. Guarda por função deixaria aberta a rota que o
+    próximo PR acrescentar; aqui a categoria fecha inteira, inclusive o que
+    ainda não existe.
+
+    **Recusar, não sanear** — a mesma decisão do `recusa_veneno` e pelo mesmo
+    motivo: `?q=` e `?plan=` são o que o usuário digitou, e trocar por `U+FFFD`
+    devolveria silenciosamente o resultado de OUTRA busca. Nenhuma query
+    legítima traz os dois: navegador nenhum os produz.
+
+    O que MUDA fora dos 8: os outros params `str` respondiam 4xx (parser de
+    data, whitelist) ou 200 tratando o veneno como texto qualquer — `?q=a\x00b`
+    no admin dava 200 com zero resultado. Esses passam a 422. Ninguém legítimo
+    está nessa faixa, e o 422 é honesto onde o 200 dizia "procurei e não achei".
+
+    Middleware e não `Depends`: `Depends` obrigaria a tocar as 38 rotas.
+    `_with_security_headers` porque este `return` não desce ao
+    `security_headers_middleware`, exatamente como no `csrf_middleware`.
+    """
+    if any(tem_veneno(valor) for valor in request.query_params.values()):
+        return _with_security_headers(
+            error_page_response(422) if wants_html(request)
+            else vary_accept(JSONResponse(
+                status_code=422,
+                content={"detail": "Parâmetro de busca contém caractere inválido."},
+                headers={"Cache-Control": "no-store"},
+            ))
+        )
+    return await call_next(request)
+
 
 # ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
 # Importar wa_app no nível de módulo puxava toda a cadeia de lógica do bot
@@ -2394,7 +2437,81 @@ async def http_exception_page_handler(request: Request, exc: StarletteHTTPExcept
 async def validation_exception_page_handler(request: Request, exc: RequestValidationError):
     if wants_html(request):
         return error_page_response(422)
-    return vary_accept(await request_validation_exception_handler(request, exc))
+    # O `input` de cada erro é o CORPO INTEIRO da requisição, devolvido ao
+    # cliente — **inclusive a senha em claro**. MEDIDO nesta árvore:
+    # `POST /auth/login {"password": "senhaforte123"}`, sem o `email`,
+    # respondia `{"type":"missing","loc":["body","email"],"msg":"Field
+    # required","input":{"password":"senhaforte123"}}`. Não é das rotas de auth
+    # nem do validador de veneno do #369: o `input` de um erro `missing` é o
+    # objeto PAI, então QUALQUER rota com modelo Pydantic ecoava o corpo —
+    # medido também em `/investments/{id}`. Por isso a supressão é aqui, no
+    # handler único de 422 do app, e não na recusa do nosso validador.
+    # Reentregue ao handler do FastAPI em vez de montar JSON aqui: o formato
+    # continua sendo o DELE (`type`/`loc`/`msg`/`ctx`/`url`), menos um campo —
+    # nada de terceiro formato de erro. Custo medido: ZERO consumidor do
+    # `input` no repositório (grep em `frontend/`, `.js`, `.html`, `.py`); ele
+    # só servia para depurar pelo console, e quem manda o corpo já o tem.
+    sem_input = RequestValidationError(
+        [{campo: v for campo, v in erro.items() if campo != "input"}
+         for erro in exc.errors()]
+    )
+    try:
+        return vary_accept(await request_validation_exception_handler(request, sem_input))
+    except (ValueError, RecursionError) as veneno:
+        # `as veneno`, nunca `as exc`: o `except` REBINDA o nome, e um `as exc`
+        # aqui trocaria o RequestValidationError pelo UnicodeEncodeError —
+        # medido, o `exc.errors()` lá embaixo virava
+        # `AttributeError: 'UnicodeEncodeError' object has no attribute 'errors'`
+        # e as 4 rotas de surrogate voltavam a 500.
+        #
+        # Registra ANTES de responder: sem esta linha o ramo é 100% mudo
+        # (medido), e um ataque de veneno em massa — que antes gerava 500 mais
+        # uma linha em `system_event_logs` — passaria a sair como 422 sem
+        # rastro nenhum.
+        # `info` e não `warning` DE PROPÓSITO: o `_DashboardHandler`
+        # (core/observability.py:24) está no root logger e espelha WARNING+ com
+        # um `psycopg.connect()` + INSERT BLOQUEANTE por registro, dentro do
+        # event loop — num caminho anônimo e barato de disparar isso é o vetor
+        # de DoS, não o conserto. Mesmo motivo do `_admin_log.info` do
+        # ClientDisconnect e do `_error_degraded` de `frontend/routes/shared.py`
+        # ("um bot varrendo URL vira um INSERT por 404"). Fica no stderr, que é
+        # onde o `[unhandled]` também aparece.
+        logging.getLogger(__name__).info(
+            "422 sem input (%s): %s %s",
+            veneno.__class__.__name__, request.method, request.url.path,
+        )
+        # CINTO. Os três venenos do #369 entravam aqui pelo `input`: surrogate
+        # solitário (`UnicodeEncodeError`), `NaN`/`Infinity`/`-Infinity`/`1e400`
+        # (`ValueError: Out of range float values are not JSON compliant`, a
+        # família que o #310 fechou no webhook da Pluggy) e aninhamento fundo
+        # (`RecursionError` no `jsonable_encoder`). Com o `input` suprimido
+        # ACIMA nenhum deles chega mais — MEDIDO: com este `except` REMOVIDO,
+        # os 136 casos dos dois arquivos de teste do assunto continuam verdes,
+        # menos o único que chama este ramo direto.
+        # Fica mesmo assim porque o que sobra no erro NÃO é nosso: o `ctx` vai
+        # para o cliente (medido: `"ctx":{"error":{}}`) e a `msg` é do
+        # validador — hoje o nosso, único do app, ecoa só o NOME do campo, mas
+        # um que ecoasse o VALOR recebido reabre o 500 em um `raise ValueError`
+        # de uma linha. Custo do cinto: este bloco, num caminho anônimo cuja
+        # alternativa é 500.
+        # `UnicodeEncodeError` é subclasse de `ValueError`, então os dois
+        # primeiros entram por `ValueError`; `RecursionError` (RuntimeError) é
+        # o terceiro. Não é `except Exception`: o que roda no `try` é só a
+        # serialização do erro.
+        # A resposta é montada sem `input` e sem `ctx` — raso por construção,
+        # e nenhum dos três venenos tem por onde voltar. `type` é da biblioteca
+        # e `loc` é raso. O `limpa_para_pg` (fonte única do que é codificável,
+        # core/pg_text.py; `list()` porque ele não percorre `tuple`) saneia a
+        # `msg`: com o `input` fora, ele deixou de ser no-op aqui — é o que
+        # transforma o surrogate da `msg` em U+FFFD em vez de 500.
+        return vary_accept(JSONResponse(
+            status_code=422,
+            content={"detail": limpa_para_pg([
+                {"type": e.get("type"), "loc": list(e.get("loc") or ()),
+                 "msg": e.get("msg")}
+                for e in exc.errors()
+            ])},
+        ))
 
 
 async def unhandled_exception_page_handler(request: Request, exc: Exception):
@@ -2565,7 +2682,10 @@ def _post_login_url(user_id: int | None = None) -> str:
         if needs_plan_selection(int(user_id)):
             return f"{DASHBOARD_URL}/precos?escolha=1"
         if not has_app_access(int(user_id)):
-            return f"{DASHBOARD_URL}/precos?ativar=1"
+            # Mesmo destino da perna de cima: depois do corte do Grátis as duas
+            # pernas pedem a MESMA coisa (assinar), e `escolha=1` é o marcador
+            # que o `nav-auth.js` reconhece para calar os CTAs de marketing.
+            return f"{DASHBOARD_URL}/precos?escolha=1"
     return _dashboard_url("/home")
 
 
@@ -2661,24 +2781,53 @@ def _require_pro(user_id: int, feature: str) -> None:
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
 
-class RegisterBody(BaseModel):
+class _CorpoSemVeneno(BaseModel):
+    """Base dos corpos de auth ANÔNIMA: recusa na borda NUL e surrogate
+    solitário em qualquer campo `str` (#369).
+
+    Recusa, e não saneia: `email` é identificador (ver `recusa_veneno`), e
+    `password`/`name`/`code` também estavam abertos — `password` com NUL
+    COMPLETAVA um cadastro (medido: 200). Sem isto o veneno chega ao
+    `_check_persistent_rate_limit` (INSERT em `text`) e ao `hash_pii`, os dois
+    em 500 anônimo.
+
+    Quem herda é a CATEGORIA "rota anônima com modelo Pydantic", enumerada
+    varrendo `app.routes` e medindo cada uma sem cookie (§2): as 4 de
+    credencial (`register`/`login`/`verify-email`/`forgot-password`) mais
+    `reset-password`, `mfa/verify-login` e `google/complete-signup` — estas
+    três estavam em 500 anônimo (`token`/`challenge` chegando ao `text` do
+    Postgres), e o `google/complete-signup` ainda devolvia a mensagem interna
+    da exceção no `detail` do 400.
+    Ficaram DE FORA, medidas: `/contact` (`send_email` nunca levanta e o
+    `_log_email_event` engole tudo — 200/502, nunca 500) e
+    `/api/prospect/status` (exige `X-Prospect-Key`, recusada antes do banco, e
+    o campo é `list[str]`, que o `recusa_veneno` não olha). Todo o resto tem
+    401 antes do banco. Os outros modelos, autenticados, são a #321.
+    """
+
+    @model_validator(mode="after")
+    def _sem_veneno(self):
+        return recusa_veneno(self)
+
+
+class RegisterBody(_CorpoSemVeneno):
     email: str
     password: str
     phone: str
     name: str | None = None
 
-class LoginBody(BaseModel):
+class LoginBody(_CorpoSemVeneno):
     email: str
     password: str
 
-class EmailBody(BaseModel):
+class EmailBody(_CorpoSemVeneno):
     email: str
 
-class VerifyEmailBody(BaseModel):
+class VerifyEmailBody(_CorpoSemVeneno):
     email: str
     code: str
 
-class ResetPasswordBody(BaseModel):
+class ResetPasswordBody(_CorpoSemVeneno):
     token: str
     new_password: str
 
@@ -2835,7 +2984,7 @@ async def auth_register(request: Request, body: RegisterBody):
     try:
         normalize_phone_e164(body.phone)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
         code = create_email_verification(
@@ -2856,7 +3005,7 @@ async def auth_register(request: Request, body: RegisterBody):
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
         return {"status": "verification_sent", "email": body.email.strip().lower()}
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
     sent = send_verification_email(body.email.strip().lower(), code)
     if not sent:
@@ -2886,7 +3035,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
             body.email, body.code, source=signup_source_from_request(request)
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
@@ -3329,7 +3478,12 @@ async def auth_me(user_id: int = Depends(_get_current_user)):
         # Lido do banco, não do cache do get_auth_user — uma fonte de verdade.
         "has_password": await asyncio.to_thread(auth_account_has_password, user_id),
         "mfa_enabled": bool(mfa.get("enabled")),
-        "app_access": has_app_access(user_id),
+        # `user=user_dict` pelo mesmo motivo do `needs_plan_selection` da linha
+        # de baixo: a linha JÁ está em mão (get_auth_user, :3290). Sem ela o
+        # gate faria um SELECT novo — e, pior, um SELECT SÍNCRONO dentro deste
+        # handler async, bloqueando o event loop em toda carga de página
+        # autenticada. `user_dict` nunca é None aqui (o 404 acima já saiu).
+        "app_access": has_app_access(user_id, user=user_dict),
         "needs_plan_selection": needs_plan_selection(user_id, user_dict),
         "paywall_enabled": paywall_enabled(),
         "plans_v2_enabled": plans_v2_enabled(),
@@ -3371,7 +3525,9 @@ class MFADisableBody(BaseModel):
     code: str | None = None
 
 
-class MFAVerifyLoginBody(BaseModel):
+class MFAVerifyLoginBody(_CorpoSemVeneno):
+    # `challenge` e `code` são gerados por nós (hex e 6 dígitos); o `use_backup`
+    # é `bool` e o `recusa_veneno` só olha `str`.
     challenge: str
     code: str
     use_backup: bool = False
@@ -3798,7 +3954,7 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     if email:
         from core.services.email_service import send_account_deletion_scheduled_email
@@ -3859,7 +4015,7 @@ GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 
 
-class GoogleSignupCompleteBody(BaseModel):
+class GoogleSignupCompleteBody(_CorpoSemVeneno):
     token: str
     name: str
     phone: str
@@ -4088,7 +4244,7 @@ async def auth_google_complete_signup(
             signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
     user_id = int(result["user_id"])
     email = result["email"]
@@ -4148,7 +4304,13 @@ async def auth_google_complete_signup(
 
 class CreateCheckoutBody(BaseModel):
     interval: str = "monthly"  # "monthly" | "annual"
-    plan: str = "plus"         # "essencial" | "plus" | "pro" (default = Plus, o plano histórico)
+    # Sem default de plano: ausente ou vazio é 400 na rota, nunca uma compra de
+    # Plus em silêncio (o default histórico era `"plus"`, issue #352). O `""`
+    # faz a chave AUSENTE cair no mesmo 400 `plan inválido` da vazia, em vez de
+    # num 422 cujo `detail` é lista — o porquê está na docstring da rota. O Pix,
+    # com `plan: str`, dá 422 na ausente: anotado em
+    # `tests/test_vocabulario_de_plano.py`.
+    plan: str = ""             # "essencial" | "plus" | "pro"
 
 
 def _resolve_price_id(plan: str, interval: str) -> str:
@@ -4460,16 +4622,44 @@ async def billing_create_checkout(
     payload: CreateCheckoutBody | None = None,
     user_id: int = Depends(_get_current_user),
 ):
-    """
-    Cria uma sessão de checkout no Stripe para upgrade para o plano Pro.
-    Body opcional: {"interval": "monthly" | "annual"} (default monthly).
+    """Cria a sessão de checkout no Stripe para o plano escolhido.
+
+    Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
+           "interval": "monthly" | "annual" (default monthly)}.
     Requer: STRIPE_SECRET_KEY + price ID do interval escolhido.
+
+    `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
+    (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos (o ramo
+    `if (!resp.ok)` do `startCheckout`) só lê `detail` string ou `detail.message` — cai no
+    fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
+    `| None = None` o POST sem body nenhum nem instancia o modelo.
+
+    Cliente antigo (`startCheckout('monthly', this)`, sem plano) morreu em
+    `0a37439` e a partir daqui leva 400. Sobra a aba com a /precos ANTIGA aberta
+    no instante do deploy — o 400 vira o erro do próprio `startCheckout` e um
+    reload resolve; não há /precos velha em cache (`no-store` em
+    `frontend/routes/shared.py:266`, e o SW não intercepta navegação).
     """
-    interval = (payload.interval if payload else "monthly")
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Sem body, `payload` chega None (o modelo nem é instanciado). Não é caminho
+    # de sucesso: sem `plan` a validação abaixo recusa com 400.
+    payload = payload if payload is not None else CreateCheckoutBody()
+    # Expressão IDÊNTICA à da `/billing/change-plan`, a única outra rota que
+    # recebe `interval` (o Pix é anual e só): sem o `.lower()`, `"ANNUAL"` era
+    # 400 aqui e 409 lá. Sem `or "monthly"` nas duas: valor VAZIO é 400, e não
+    # uma venda mensal em silêncio — é a #352 com `interval` no lugar de `plan`.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = ((payload.plan if payload else "plus") or "plus").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Vocabulário público em UMA fonte (§0.7): as três rotas de plano validam
+    # contra o MESMO dicionário, e não contra uma tupla literal por rota. O
+    # `.strip().lower()` é o do gêmeo do Pix (`frontend/routes/billing_pix.py`) —
+    # sem ele `" plus "` era 200 lá e 400 aqui, com UM só JS alimentando as duas.
+    # Sem plano é 400, não Plus (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
 
     price_id = _resolve_price_id(plan, interval)
@@ -4598,10 +4788,14 @@ async def billing_subscription(user_id: int = Depends(_get_current_user)):
     # e chamaria `/billing/change-plan`, que não tem assinatura para trocar.
     # Grant Pix vigente é a resposta autoritativa: ele foi criado pelo dinheiro
     # que entrou, e não depende de o Stripe estar de pé.
+    # `tier_publico` e não uma cópia local do `{"pro": "plus", ...}`: quem é dono
+    # do vocabulário é o `_STORED_PLAN_TO_TIER` do `plan_service` (§0.1/§0.7).
+    from core.services.plan_service import tier_publico
+
     pix = await asyncio.to_thread(_grant_pix_vigente, user_id)
     if pix is not None:
         return {"active": True, "lifetime": False, "gateway": "pix",
-                "plan": _plan_publico(pix["plan_stored"]), "interval": "annual",
+                "plan": tier_publico(pix["plan_stored"]), "interval": "annual",
                 "current_period_end": pix["ends_at"].date().isoformat(),
                 "scheduled_change": None}
 
@@ -4676,12 +4870,6 @@ def _grant_pix_vigente(user_id: int) -> dict | None:
     return max(pix, key=lambda g: g["ends_at"])
 
 
-def _plan_publico(plan_stored: str) -> str:
-    """Valor LEGADO da coluna → o nome que a /precos usa. Uma tradução, um
-    lugar: `_plan_interval_for_price` já devolve `plus`/`pro` para o Stripe."""
-    return {"pro": "plus", "pro_max": "pro"}.get(plan_stored, plan_stored)
-
-
 @app.post("/billing/change-plan")
 @limiter.limit("15/hour")
 async def billing_change_plan(
@@ -4691,11 +4879,19 @@ async def billing_change_plan(
 ):
     """Agenda a troca de plano pro fim do período já pago. Sem cobrança agora;
     a primeira fatura do plano novo sai na data da virada (cartão em arquivo)."""
-    interval = (payload.interval or "monthly").lower()
+    from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
+
+    # Expressão IDÊNTICA à da `/billing/create-checkout` (§0.7): são as duas
+    # únicas rotas que recebem `interval`, o `.lower()` faltava LÁ e o
+    # `or "monthly"` saiu daqui — `""` é 400 nas duas, não mensal em silêncio.
+    interval = payload.interval.lower()
     if interval not in ("monthly", "annual"):
         raise HTTPException(status_code=400, detail="interval inválido (use 'monthly' ou 'annual').")
-    plan = (payload.plan or "").lower()
-    if plan not in ("essencial", "plus", "pro"):
+    # Terceira rota que recebe plano: mesma normalização e o MESMO dicionário
+    # das duas de checkout (§2: um caso corrigido não é a categoria resolvida).
+    # Sem plano continua 400 — nunca houve `or "plus"` aqui (issue #352).
+    plan = (payload.plan or "").strip().lower()
+    if plan not in TIER_TO_STORED_PLAN:
         raise HTTPException(status_code=400, detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
     target_price = _resolve_price_id(plan, interval)
     if not STRIPE_SECRET_KEY or not target_price:
@@ -5088,6 +5284,40 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
+        **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
+        Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
+        `invoice.paid` de planos diferentes no MESMO dia (upgrade
+        Essencial→Pro, que gera fatura proporcional na hora) deixam de ser
+        indistinguíveis: o segundo é suprimido pela chave que o primeiro gravou
+        e o cliente fica com "PigBank Essencial" para uma cobrança de Pro. Antes
+        do #351 os dois e-mails eram idênticos e suprimir era de graça.
+        ponytail: teto conhecido, deixado aberto DE PROPÓSITO — e o custo é
+        menor do que uma versão anterior deste comentário dizia. Ela alegava
+        que `chave` era lida de fora por
+        `recent_event_exists("trial_ending_email_sent", ...)` e pelos painéis.
+        Medido, é falso nas duas pontas, e quem for mexer aqui precisa saber:
+
+          · **não há leitor externo.** `chave` é `f"{fn.__name__}_sent"`, ou
+            seja `send_trial_ending_email_sent`. O `recent_event_exists` de
+            :5555 lê `trial_ending_email_sent` — outra string, gravada por
+            outro escritor (o `log_system_event` de :5566 e o
+            `engagement_scheduler.py:287`). Busca literal pelas quatro chaves
+            desta família em `*.py`/`*.js`/`*.sql`/`*.html`: zero ocorrências
+            fora de uma menção em docstring de teste.
+          · **nenhum painel usa.** `core/admin_dashboard.py:742-755` filtra
+            `event_type IN ('email_sent','email_failed')`, que saem do
+            `email_service.py:95` — outro evento; e os rótulos de
+            `frontend/admin-dashboard.html` não citam chave desta família.
+
+        Sobra de custo real: (a) a série histórica em `system_event_logs`
+        fragmenta — série que hoje nenhum consumidor consulta; e (b) a dedupe
+        deixa de significar "um e-mail desta função por janela" e passa a ser
+        "um por função E plano", o que solta um segundo e-mail quando o plano
+        muda dentro da janela longa do `send_payment_failed_email`. Fica como
+        está porque o caso é raro e o conserto não é de graça, não porque algo
+        quebre. Se o upgrade no mesmo dia virar volume: sufixo do plano na
+        `chave`, sem leitor nenhum para migrar junto.
+
         Dedup por (função, usuário, `dedup_days`) porque o handler agora devolve 5xx
         de propósito quando a materialização falha, e a Stripe reentrega o
         evento INTEIRO: sem isto, cada retry mandaria um e-mail de compra novo.
@@ -5218,9 +5448,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                     "status": sub_status,
                 },
             )
-            # Email de boas-vindas Pro (item 37)
+            # Email de boas-vindas Pro (item 37) — `plan_value` é o MESMO que
+            # acabou de ser gravado e logado acima (vocabulário legado, de
+            # `_stored_plan_for_price`): sem ele o e-mail chamava todo
+            # assinante de PigBank+, que é só o Plus (#351).
             from core.services.email_service import send_pro_welcome_email
-            await _fire_email(user_id, send_pro_welcome_email, expires_dt)
+            await _fire_email(user_id, send_pro_welcome_email, plan_value, expires_dt)
             # Notificação admin (Slack/Discord webhook)
             try:
                 from core.services.admin_notify import notify_new_pro
@@ -5407,7 +5640,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             if amount_cents and amount_cents > 0:
                 amount_brl = float(amount_cents) / 100.0
                 from core.services.email_service import send_pro_charged_email
-                await _fire_email(user_id, send_pro_charged_email, amount_brl, expires_dt)
+                await _fire_email(user_id, send_pro_charged_email,
+                                  plan_value, amount_brl, expires_dt)
 
                 # Comissão de afiliado: se o pagante foi indicado por um afiliado
                 # ativo, credita a % da fatura. Idempotente por invoice id (retry
@@ -5516,8 +5750,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             from core.observability import recent_event_exists
             if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
                 expires_dt = _subscription_period_end(sub)
+                # Mesma fonte do plano dos outros ramos (#351): o PRICE da
+                # assinatura, não o texto do e-mail. Quem está em trial de
+                # Essencial ou de Pro lia "seu trial do PigBank+".
+                plan_value = _stored_plan_for_price(_subscription_price_id(sub))
                 from core.services.email_service import send_trial_ending_email
-                await _fire_email(user_id, send_trial_ending_email, expires_dt)
+                await _fire_email(user_id, send_trial_ending_email,
+                                  plan_value, expires_dt)
                 await log_system_event(
                     "info",
                     "trial_ending_email_sent",
@@ -5564,6 +5803,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         _sub_id = _invoice_subscription_id(invoice)
         _status_agora = ""
+        _sub_agora = None
         if user_id and _sub_id:
             # `to_thread` porque este handler é `async` e roda no event loop
             # ÚNICO do Uvicorn: um `retrieve` síncrono aqui congela o processo
@@ -5652,9 +5892,19 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             # deixavam o segundo mudo. Fora do ciclo novo vale
             # `DUNNING_GRACE_DAYS`: cada smart retry do MESMO ciclo cai na
             # janela e não vira um e-mail a mais.
+            #
+            # O PLANO vem do `retrieve` que este ramo JÁ fez para decidir se o
+            # evento é obsoleto — mesma fonte dos outros e-mails da família
+            # (#351). Sem ele, o assinante Essencial cujo cartão falha recebia
+            # "⚠️ PigBank+ — pagamento falhou". `None` quando `_sub_agora` é
+            # None, que é a fatura AVULSA (sem `subscription` em nenhuma das
+            # duas formas da API): ali não há assinatura de onde tirar plano, e
+            # `plan_display_name` devolve o genérico "PigBank".
+            _plano_falha = (_stored_plan_for_price(_subscription_price_id(_sub_agora))
+                            if _sub_agora is not None else None)
             from core.services.email_service import send_payment_failed_email
             await _fire_email(
-                user_id, send_payment_failed_email,
+                user_id, send_payment_failed_email, _plano_falha,
                 dedup_days=0.0 if _abriu_ciclo else float(DUNNING_GRACE_DAYS))
             # Notificação admin
             try:
@@ -5677,38 +5927,74 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             user_snapshot = await asyncio.to_thread(_gau, int(user_id))
             expires_for_email = (user_snapshot or {}).get("plan_expires_at")
             update_user_plan(user_id, "free", None)
-            set_payment_status(user_id, "canceled")
-            # A assinatura morreu: o relógio da inadimplência não tem mais o
-            # que medir. REDUNDANTE hoje — `canceled` está fora de
-            # `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status` da linha
-            # acima já zerou o relógio no mesmo UPDATE. Fica como declaração de
-            # intenção do ramo (e cobertura se o status deste ramo mudar), e não
-            # como a proteção: órfão em conta `canceled` NÃO é dado morto — é
-            # dado dormente que prende o relógio do ciclo seguinte na data
-            # velha e tira a conta da janela do lembrete de pagamento.
-            #
-            # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o gate
-            # de "o evento decidiu o acesso" que o `checkout` e o
-            # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
-            # escritas acima (`update_user_plan` e `set_payment_status`) são
-            # comportamento PRÉ-EXISTENTE da main e já rodam sem checar versão
-            # de evento, então gatear só o clear não fecharia nada — a
-            # staleness deste ramo é do ramo inteiro, é anterior a este PR
-            # (§0.3) e continua aberta (célula nº 18 de
-            # `docs/dunning_estados_eventos.md`). A categoria "clear que ignora
-            # o veredito do evento" está fechada nos dois ramos onde o veredito
-            # EXISTE; este fica pendente de propósito.
-            #
-            # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro: o
-            # parâmetro é OBRIGATÓRIO para que nenhum call site futuro herde a
-            # versão incondicional, a regra passa a ser UMA só, e nas três
-            # células alcançáveis deste ramo (16, 17, 18) ele não muda nada —
-            # o `set_payment_status('canceled')` acima já zerou o relógio no
-            # mesmo UPDATE, então este clear é no-op. `_versao` é o mesmo
-            # `_event_version(event)` que o `revoke_grant` abaixo usa.
-            from db.dunning import clear_past_due_since
-            await asyncio.to_thread(clear_past_due_since, int(user_id),
-                                    nao_mais_novo_que=_event_version(event))
+            # O critério em LOCAL NOMEADO, não embutido na expressão do `if`: é
+            # a Stripe encerrando a assinatura DE VEZ por inadimplência
+            # (esgotou o smart retry), o único desfecho deste ramo que é
+            # TERMINAL para uma cobrança. **Desconhecido e ausente caem na perna
+            # NÃO-terminal** — `cancellation_details` ausente, `reason` ausente
+            # ou um motivo novo que a Stripe invente amanhã dão False e mantêm o
+            # comportamento de sempre. Default seguro: a perna terminal apaga
+            # dado, a outra não.
+            from core.services.billing_dunning import (
+                STRIPE_CANCEL_REASON_INADIMPLENCIA,
+            )
+            encerramento_por_inadimplencia = (
+                (_g(obj, "cancellation_details") or {}).get("reason")
+                == STRIPE_CANCEL_REASON_INADIMPLENCIA
+            )
+            if encerramento_por_inadimplencia:
+                # Grava `unpaid` e não `canceled` (decisão do dono): o MOTIVO da
+                # perda de acesso é o que o painel e o suporte precisam ler
+                # depois, e `canceled` o apaga. Vem ANTES do clear porque
+                # `unpaid` está DENTRO de `PAST_DUE_PAYMENT_STATUSES`, então o
+                # `CASE` de `set_payment_status_impl` PRESERVA o relógio aqui —
+                # quem o apaga é a linha seguinte, e é essa ordem que faz o par
+                # não deixar órfão.
+                #
+                # O estado que isto grava é o PAR (`plan='free'`, `unpaid`), e
+                # ele é lido pelo PAR nos dois lugares que importam, nunca pelo
+                # status sozinho: `core.admin_dashboard._derive_account_status`
+                # (rótulo "Cancelado" em vez de "Grátis") e a guarda do
+                # `/trial-reset`, que LIBERA este estado e continua recusando
+                # `unpaid` com plano pago — decisão do dono, "pode, libero caso
+                # a caso". `unpaid` sozinho continua significando "assinatura
+                # VIVA em dunning", que é por isso que ele NÃO saiu de
+                # `_LIVE_PAYMENT_STATUSES`.
+                set_payment_status(user_id, "unpaid")
+                from db.dunning import encerrar_ciclo_de_atraso
+                await asyncio.to_thread(encerrar_ciclo_de_atraso, int(user_id))
+            else:
+                set_payment_status(user_id, "canceled")
+                # A assinatura morreu: o relógio da inadimplência não tem mais o
+                # que medir. NESTA perna o clear é no-op — `canceled` está fora
+                # de `PAST_DUE_PAYMENT_STATUSES`, então o `set_payment_status`
+                # da linha acima já zerou o relógio no mesmo UPDATE. Na perna
+                # TERMINAL é o oposto: o status fica na lista, o `CASE` preserva,
+                # e `encerrar_ciclo_de_atraso` é a ÚNICA coisa que tira o
+                # relógio. Este comentário chamava o clear de "REDUNDANTE hoje"
+                # sem qualificar a perna, e assim afirmava o contrário das duas.
+                #
+                # Órfão em conta `canceled` NÃO é dado morto — é dado dormente
+                # que prende o relógio do ciclo seguinte na data velha e tira a
+                # conta da janela do lembrete de pagamento.
+                #
+                # RESSALVA — este é o ÚNICO clear do arquivo que NÃO ganhou o
+                # gate de "o evento decidiu o acesso" que o `checkout` e o
+                # `invoice.paid` ganharam. Aqui não há retorno para ler: as duas
+                # escritas acima (`update_user_plan` e `set_payment_status`) são
+                # comportamento PRÉ-EXISTENTE da main e já rodam sem checar
+                # versão de evento, então gatear só o clear não fecharia nada —
+                # a staleness deste ramo é do ramo inteiro, é anterior a este PR
+                # (§0.3) e continua aberta (célula nº 18 de
+                # `docs/dunning_estados_eventos.md`).
+                #
+                # O `nao_mais_novo_que` vai aqui de todo jeito, e não é teatro:
+                # o parâmetro é OBRIGATÓRIO para que nenhum call site futuro
+                # herde a versão incondicional, e nas células alcançáveis desta
+                # perna (16, 17, 18) ele não muda nada.
+                from db.dunning import clear_past_due_since
+                await asyncio.to_thread(clear_past_due_since, int(user_id),
+                                        nao_mais_novo_que=_event_version(event))
             # Revoga SÓ a assinatura que o evento nomeia, e reprojeta (§4.2).
             #
             # A amplitude é dinheiro: quem tem uma assinatura nova já paga e
@@ -5744,14 +6030,28 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 user_id=user_id,
             )
             # Email de confirmacao de cancelamento (item 41)
+            # O plano sai do PRICE do `obj`, que é a própria Subscription do
+            # evento (#351) — e não da conta, porque o `update_user_plan(...,
+            # "free", None)` lá em cima já rodou e a conta diria "free" para
+            # todo mundo. Sem isto, quem cancelava Essencial lia "PigBank+ —
+            # assinatura cancelada".
+            _plano_cancelado = _stored_plan_for_price(_subscription_price_id(obj))
             from core.services.email_service import send_subscription_canceled_email
             try:
                 email = await _user_email(user_id)
                 if email:
-                    await asyncio.to_thread(send_subscription_canceled_email, email, expires_for_email, DASHBOARD_URL)
+                    await asyncio.to_thread(send_subscription_canceled_email, email,
+                                            _plano_cancelado, expires_for_email,
+                                            DASHBOARD_URL)
             except Exception as exc:
                 print(f"[billing] email canceled falhou user={user_id}: {exc}")
             # Notificação admin
+            # DÍVIDA PRÉ-EXISTENTE, não deste PR: `email` só nasce se o
+            # `_user_email` acima RETORNAR. Se ele levantar, o except de cima
+            # engole e o `email=email` daqui vira `NameError` — engolido pelo
+            # except deste try, com a notificação admin sumindo calada. Mesma
+            # classe do `_sub_agora` que o #351 fechou dez linhas acima; fica
+            # anotado para não ser "descoberto" depois como defeito novo.
             try:
                 from core.services.admin_notify import notify_subscription_canceled
                 await asyncio.to_thread(
@@ -5928,6 +6228,23 @@ async def conta_redirect(request: Request):
 # ─── Magic link de acesso ao dashboard ───────────────────────────────────────
 
 @app.get("/d/{code}")
+# Teto de 30/min por IP: sem ele, 200 requisições anônimas com código bem formado
+# viravam 200 DELETEs no Postgres a 589 req/s, e zero 429 (medido).
+#
+# `shared_limit(..., scope=)` e NÃO `limit()`, e isso não é estilo: o `Limiter`
+# de `frontend/routes/shared.py` roda com o `key_style="url"` default do slowapi,
+# então o balde de um `@limiter.limit` é (IP, **URL exata**). Numa rota com path
+# param, cada código inventado cai num balde novo e o teto nunca é alcançado —
+# MEDIDO nesta árvore: 35 GETs em `/d/x0..x34` com `@limiter.limit("30/minute")`
+# deram 0 × 429; os mesmos 35 na MESMA URL deram 5 × 429. `scope` fixo tira a URL
+# da chave e faz o balde ser (IP, este endpoint), que é o que o teto quer dizer.
+#
+# Janela de MINUTO, não de hora, porque o `rate_limit_exceeded_handler` devolve
+# `Retry-After: 60` fixo — com teto por hora o 429 mentiria a hora inteira. O
+# limitador é por IP e um CGNAT de operadora põe vários usuários na mesma chave:
+# 30 cliques/min do mesmo IP fica muito acima do tráfego real, e quem esbarrar
+# volta em 60 s em vez de ficar uma hora sem o magic link do bot.
+@limiter.shared_limit("30/minute", scope="magic_link_do_bot")
 async def dashboard_short_link(
     request: Request,
     code: str,
@@ -6292,7 +6609,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                     reason=inferred.reason,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
             except Exception as exc:
                 logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
@@ -6333,7 +6650,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 reason=inferred.reason,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
 
@@ -6380,7 +6697,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             reason=inferred.reason,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
@@ -6877,7 +7194,7 @@ async def export_email(
         try:
             period_start, period_end = _normalize_export_period(start_date, end_date)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     else:
         y = year or now.year
         m = month or now.month

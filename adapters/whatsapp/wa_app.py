@@ -21,6 +21,9 @@ from core.reports.reports_daily import (
     build_due_bill_reminders,
     build_weekly_report_summary,
     build_monthly_report_summary,
+    # O corte do Grátis vale nos DOIS canais: o mesmo helper que os laços de
+    # Discord usam, importado daqui em vez de reescrito (§0.7).
+    filtrar_por_acesso,
 )
 from core.secure_compare import constant_time_eq
 from db import (
@@ -256,7 +259,36 @@ async def wa_webhook(request: Request):
         )
         return PlainTextResponse("forbidden", status_code=403)
 
-    payload = json.loads(raw.decode("utf-8"))
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        # 200, e não 400. O HMAC já passou, então estes bytes são exatamente os
+        # que o dono do APP_SECRET assinou: corpo ilegível não tem nada a perder,
+        # e 200 e 400 quebram igualmente o laço de 500. O 200 vence porque é o
+        # que o resto deste handler já faz com payload que não entende — tanto o
+        # `except` do resumo quanto o ramo sem `messages`/`statuses` seguem em
+        # 200. HIPÓTESE NÃO CONFIRMADA (ninguém checou contra a Meta): que ela
+        # reenvie em não-2xx. A decisão acima não depende dela; se a hipótese
+        # cair, isto continua 200.
+        # ponytail: `except Exception` largo em vez da tupla das 4 classes
+        # medidas (JSONDecodeError, UnicodeDecodeError, RecursionError e o
+        # ValueError do limite de 4300 dígitos do int). Teto medido: engole
+        # também MemoryError — aceito, porque exige o APP_SECRET e descartar em
+        # 200 é melhor que o laço de 500 — e engoliria qualquer exceção futura
+        # vinda de dentro do `try`. Upgrade: trocar pela tupla explícita quando
+        # entrar mais alguma coisa no `try`.
+        logger.warning("WA webhook: corpo ilegivel, ignorado (%s bytes)", len(raw))
+        log_system_event_sync(
+            "warning",
+            "whatsapp_webhook_corpo_invalido",
+            "Webhook do WhatsApp com corpo que nao parseia; ignorado.",
+            source="wa_app",
+            # só inteiro e nome de classe: nada do corpo no jsonb. Sem o `erro`,
+            # o painel perde o diagnóstico que o traceback do 500 dava.
+            details={"bytes": len(raw), "erro": type(e).__name__},
+        )
+        return JSONResponse({"ok": True, "ignored": True})
+
     try:
         value = payload.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         statuses = value.get("statuses") or []
@@ -353,6 +385,13 @@ def _daily_report_tick() -> None:
         hour = prefs["hour"]
         minute = prefs["minute"]
         if (now.hour, now.minute) < (hour, minute):
+            continue
+        # O corte do Grátis vem DEPOIS dos filtros baratos, e a POSIÇÃO é o
+        # ponto: este laço roda a cada 30 s (`_daily_report_loop`) sobre a lista
+        # INTEIRA, e a hora de entrega descarta quase todo mundo. Filtrando
+        # antes, cada volta pagava uma consulta por usuário — o dia todo, para
+        # gente que não receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
             continue
         ids = list_identities_by_user(uid)
         wa_targets = _dedupe_whatsapp_targets(ids)
@@ -527,6 +566,16 @@ def _bill_reminder_tick() -> None:
         if not due:
             continue
 
+        # O corte do Grátis, na MESMA posição dos dois irmãos de relatório:
+        # depois dos filtros baratos. `list_users_with_pending_bills` é um
+        # `select distinct user_id from bill_instances where status='pending'`,
+        # sem nenhum termo de acesso, e o `if not due` acima já descartou quase
+        # todo mundo — filtrando antes, cada volta pagaria uma consulta de
+        # acesso por usuário com boleto pendente, todo dia, para gente que não
+        # receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
+            continue
+
         wa_targets = _dedupe_whatsapp_targets(list_identities_by_user(uid))
         if not wa_targets:
             continue
@@ -671,6 +720,11 @@ def _periodic_report_tick() -> None:
 
         # entrega no mesmo horário configurado para o report diário do usuário
         if (now.hour, now.minute) < (prefs["hour"], prefs["minute"]):
+            continue
+
+        # Mesma razão do irmão diário: o corte vem DEPOIS do filtro de hora,
+        # porque este tick também roda a cada 30 s sobre a lista inteira.
+        if not filtrar_por_acesso([uid]):
             continue
 
         ids = list_identities_by_user(uid)

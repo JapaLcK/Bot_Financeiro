@@ -9,6 +9,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config.env import load_app_env
+from core.pg_text import limpa_para_pg
 
 
 load_app_env()
@@ -169,6 +170,24 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
     )
 
 
+def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:
+    """WARNING do slowapi NÃO vira linha em `system_event_logs` (segue no stderr).
+
+    É o "laço quente logando por requisição" que o docstring do
+    `_DashboardHandler` nomeia como o que assusta: o slowapi loga um
+    `warning("ratelimit ... exceeded")` por requisição BARRADA, e cada record
+    vira um `psycopg.connect()` + INSERT bloqueante. MEDIDO: 40 GETs anônimos em
+    `/d/{code}` com teto de 30/min → 10 × 429 e **10 linhas** em
+    `system_event_logs`. Ou seja, o teto trocava 200 DELETEs baratos por uma
+    inundação de log pior que a do #321 — e vale para os tetos que já existiam
+    (um brute-force em `/auth/login` gravava uma linha por tentativa barrada).
+
+    Só WARNING: `logger.error` do slowapi (limite mal configurado, storage
+    morto) continua indo para o banco — é incidente, não tráfego.
+    """
+    return not (record.name == "slowapi" and record.levelno == logging.WARNING)
+
+
 def _configure_root_logger() -> None:
     global _root_configured
     if _root_configured:
@@ -185,6 +204,7 @@ def _configure_root_logger() -> None:
     if not any(isinstance(h, _DashboardHandler) for h in root.handlers):
         dash_handler = _DashboardHandler()
         dash_handler.setLevel(logging.WARNING)
+        dash_handler.addFilter(_sem_ratelimit_no_banco)
         root.addHandler(dash_handler)
 
     _root_configured = True
@@ -233,10 +253,15 @@ def log_system_event_sync(
                     INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (level, event_type, message[:1000], source, user_id, Jsonb(details or {})),
+                    (limpa_para_pg(level), limpa_para_pg(event_type),
+                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(details or {}))),
                 )
             conn.commit()
     except Exception as exc:
+        # Desde o saneamento com `limpa_para_pg` na tupla acima, NUL e surrogate
+        # solitário não derrubam mais este INSERT (issue #357): das duas causas
+        # conhecidas de perda silenciosa aqui, sobra só a de baixo.
         # ponytail: teto conhecido — `user_id` fora de `users` derruba o INSERT
         # INTEIRO pela `system_event_logs_user_id_fkey` e o evento se PERDE; antes
         # deste PR ele ficava gravado com a coluna NULL. Caminho medido: token de

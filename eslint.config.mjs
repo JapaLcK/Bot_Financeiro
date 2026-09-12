@@ -1,7 +1,9 @@
-// Tier único de lint. O projeto é JavaScript puro servido estático (sem build,
-// sem TypeScript), então não existe aqui o tier type-aware do template
+// Tier único de lint. O que este arquivo linta é JavaScript puro servido estático,
+// sem TypeScript, então não existe aqui o tier type-aware do template
 // (eslint.typed.config.mjs) nem o bloco de fronteiras do import-x: os scripts
-// de frontend/ são <script> clássicos, sem imports entre si.
+// de frontend/ são <script> clássicos, sem imports entre si. O JS que passa por
+// build — a ilha React de `webapp/` e o artefato `frontend/precos-app.js` — está
+// no `globalIgnores` do fim do arquivo, com o motivo de cada um.
 //
 // Adaptado de templates/eslint/eslint.config.mjs.example (vibe-coding-toolkit).
 // As severidades vêm da MEDIÇÃO de 2026-09-03 (`npm run lint` neste branch),
@@ -57,9 +59,10 @@ export default defineConfig([
     // `currentCycle` e `PLAN_NAMES` vêm do <script> inline da precos.html: são
     // `let`/`const` de topo de script clássico, que vão para o escopo léxico
     // global e NÃO viram propriedade de `window` — por isso, nome nu.
-    // O resto é o que um destes dois arquivos publica e o outro consome: eles
-    // são um módulo só, partido pelo teto de 350 linhas.
-    files: ["frontend/pix-checkout.js", "frontend/pix-poll.js"],
+    // O resto é o que um destes TRÊS arquivos publica e os outros consomem. O
+    // pix-ui.js é divisão por assunto (as peças de UI que os dois usam); a
+    // divisão entre checkout e poll é do teto de 350 linhas.
+    files: ["frontend/pix-ui.js", "frontend/pix-checkout.js", "frontend/pix-poll.js"],
     languageOptions: {
       globals: {
         currentCycle: "readonly",
@@ -75,6 +78,12 @@ export default defineConfig([
         pixCheckout: "readonly",
         pixModalQr: "readonly",
         pixEncerrar: "readonly",
+        // Declaradas no pix-poll.js e chamadas pelo `pixEnviar` do
+        // pix-checkout.js — e o `pixModalMigracao` chama o `pixEnviar` de volta.
+        // As caixas foram para lá pelo teto de 350 linhas, não por assunto.
+        pixModalMigracao: "readonly",
+        pixModalJaPago: "readonly",
+        pixEnviar: "readonly",
         // Declarado no pix-checkout.js e chamado pelo `pixApagarQr` do
         // pix-poll.js: o documento e o payload saem do DOM na mesma hora.
         pixApagarDoc: "readonly",
@@ -208,7 +217,9 @@ export default defineConfig([
   },
 
   {
-    // Mesmo orçamento de tamanho para os testes, em "warn" (8 acima de 350).
+    // Mesmo orçamento de tamanho para os testes, em "warn" (quantos estouram
+    // hoje: `wc -l tests/frontend/*.mjs | awk '$1 > 350'` — o número que estava
+    // escrito aqui dizia 8 e já eram 10).
     // Vem DEPOIS do bloco que liga a regra em "error": para um arquivo casado
     // pelos dois, o flat config aplica o bloco posterior por último.
     files: ["tests/frontend/**/*.mjs"],
@@ -233,5 +244,15 @@ export default defineConfig([
     "mobile/ios/**",
     "mobile/node_modules/**",
     "package-lock.json",
+    // Ilha React da /precos. O `webapp/**` é FONTE de outro projeto npm (JSX,
+    // módulos ES, react no escopo) — a config de `frontend/**/*.js` aqui é para
+    // script clássico e o lint dela não descreve aquele código. O
+    // `frontend/precos-app.*` é ARTEFATO: um bundle minificado de uma linha
+    // longa passa o `quality/max-lines` de 350 por acidente, e acidente não é
+    // contrato. Quem prende o artefato é o step de build do CI (ele reprova se o
+    // `.js` commitado divergir do `webapp/src`), não o eslint.
+    "webapp/**",
+    "frontend/precos-app.js",
+    "frontend/precos-app.css",
   ]),
 ]);

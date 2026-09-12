@@ -48,7 +48,8 @@ const PAYLOAD = "00020126580014BR.GOV.BCB.PIX0136pigbank-teste-qr-payload-520400
 // atributo SOME, não o desenho.
 const QR_IMG = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 // O documento do pagador. Dígito verificador NÃO é conferido na tela (quem
-// valida é o Asaas, §0.7), então o que importa aqui é a FORMA: 11 e 14 dígitos.
+// confere o mod-11 é o servidor, uma cópia só, §0.7; e o Asaas ainda pode
+// recusar depois), então o que importa aqui é a FORMA: 11 e 14 dígitos.
 // São strings improváveis de aparecer por acaso — o PT12d procura por elas no
 // storage, no DOM, no console e no corpo de TODA requisição da página.
 const CPF = "11122233344";
@@ -67,6 +68,11 @@ const CNPJ = "11222333000181";
  */
 async function abrirPrecos({
   sub = { active: false },
+  // O DESLOGADO não é `{active:false}` com 200: o /billing/subscription responde
+  // não-ok e o `loadSubscription` guarda `subState = null`. É o caso que separa
+  // "ainda não sei" de "sei que não tem assinatura" (PT19e).
+  subStatus = 200,
+  subRoute = null,
   plansConfig = { essencial_available: true, plus_available: true,
                   pro_available: true, pix_annual_available: true },
   pix = {},
@@ -93,9 +99,9 @@ async function abrirPrecos({
   await page.route("**/billing/plans-config", (r) => r.fulfill({
     contentType: "application/json", body: JSON.stringify(plansConfig),
   }));
-  await page.route("**/billing/subscription", (r) => r.fulfill({
-    contentType: "application/json", body: JSON.stringify(sub),
-  }));
+  await page.route("**/billing/subscription", subRoute || ((r) => r.fulfill({
+    status: subStatus, contentType: "application/json", body: JSON.stringify(sub),
+  })));
   await page.route("**/billing/change-plan", (r) => {
     chamadas.changePlan += 1;
     return r.fulfill({ contentType: "application/json", body: "{}" });
@@ -476,8 +482,91 @@ test("PT6: pago -> /home?upgrade=success com sid = public_token", async () => {
   assert.equal(url.searchParams.get("ia"), null, `sobrou ia= na URL: ${page.url()}`);
   assert.ok(!page.url().includes("pay_"), `o id do provedor vazou: ${page.url()}`);
   assert.ok(!page.url().includes("9999"), `o id do provedor vazou: ${page.url()}`);
+  // `gw=pix` é o MARCADOR de gateway e viaja sempre; dinheiro e data NÃO
+  // viajam (ver PT6c): a /home busca os dois em `/billing/pix/<sid>`.
+  assert.equal(url.searchParams.get("gw"), "pix");
   assert.deepEqual(corposPix[0],
     { plan: "plus", interval: "annual", cpf_cnpj: CPF });
+  await page.close();
+});
+
+// ── PT6b: quem separa agendado de imediato é `agendada`, não a data ──────────
+/**
+ * Os DOIS casos no mesmo teste, de propósito: eles só provam alguma coisa
+ * juntos. `access_starts_at` é preenchido nas duas compras — na imediata, com
+ * `agora` —, então "tem `starts_at`" NÃO quer dizer "começa depois". Gatilhar
+ * pela presença da data fazia a TELA DO QR dizer "seu ano começa em 10/09/2026"
+ * para quem começa ao pagar.
+ *
+ * Aqui se mede só a tela do QR: é o único lugar onde a resposta do CHECKOUT é
+ * fonte legítima da data (é a promessa de antes de pagar). A promessa DEPOIS de
+ * pagar é da /home, que busca a cobrança no servidor — por isso a URL de
+ * sucesso não leva `inicio` em nenhum dos dois casos, e os dois casos verificam
+ * isso.
+ *
+ * Controle negativo: troque o `d.agendada && d.starts_at` do pix-poll.js de
+ * volta por `d.starts_at` e o caso IMEDIATO fica vermelho; apague o `agendada`
+ * da `resposta()` do backend e o AGENDADO fica.
+ */
+test("PT6b: agendada=true data na tela do QR; agendada=false com starts_at, não", async () => {
+  const base = { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                 amount_cents: 19900, credit_cents: 0, plan: "plus" };
+  const pago = { status: (n) => (n >= 2
+    ? { status: "paid", starts_at: "2026-01-02T12:00:00+00:00" }
+    : { status: "pending" }) };
+
+  const ag = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: true, starts_at: "2027-08-26T03:00:00+00:00" } } });
+  // A MESMA promessa já na tela do QR, antes de pagar.
+  assert.match(await ag.page.textContent(".pix-box"), /começa em 26\/08\/2027/,
+    "a tela do QR não repetiu a data do agendamento");
+  await ag.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  const url = new URL(ag.page.url());
+  assert.equal(url.searchParams.get("gw"), "pix");
+  assert.equal(url.searchParams.get("inicio"), null,
+    `a data do checkout viajou na URL: ${ag.page.url()}`);
+  await ag.page.close();
+
+  // Compra IMEDIATA: o backend preenche `access_starts_at` com `agora` e diz
+  // `agendada: false`. Nem a tela do QR nem a URL podem falar em data.
+  const hoje = new Date().toISOString();
+  const im = await abrirQr({ ...pago, pix: { corpo: {
+    ...base, agendada: false, starts_at: hoje } } });
+  assert.match(await im.page.textContent(".pix-box"), /começa agora/,
+    "a tela do QR datou uma compra imediata");
+  await im.page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  assert.equal(new URL(im.page.url()).searchParams.get("inicio"), null,
+    `mandou inicio numa compra imediata: ${im.page.url()}`);
+  await im.page.close();
+});
+
+// ── PT6c: a URL de sucesso não carrega dinheiro nem data ────────────────────
+/**
+ * Ela carregava: `vl=` (o valor cobrado) e `inicio=` (a data do começo). Os dois
+ * eram retrato tirado no checkout e query string editável — `?vl=999999` num
+ * link forjado virava um Purchase de R$ 999.999 na NOSSA conta de anúncios, sem
+ * deduplicar com a CAPI, e a data envelhecia quando o `_stripe_cancel` adiava o
+ * acesso depois de o QR já estar na tela. Agora a /home busca a cobrança em
+ * `/billing/pix/<sid>`, e a URL só leva IDENTIFICADORES.
+ *
+ * O corpo do checkout aqui traz valor E data agendada de propósito: é o caso em
+ * que o código antigo escrevia os dois. Enumera a lista inteira de params em vez
+ * de checar dois nomes — param novo de dinheiro entra vermelho.
+ *
+ * Controle negativo: reponha `+ (vl ? "&vl=" + vl : "")` (ou o `&inicio=`) no
+ * `pixPago` do pix-poll.js e este caso fica vermelho.
+ */
+test("PT6c: a URL de sucesso leva só identificadores, sem vl e sem inicio", async () => {
+  const { page } = await abrirQr({
+    status: (n) => (n >= 2 ? { status: "paid" } : { status: "pending" }),
+    pix: { corpo: { public_token: "tok_abc123", qr_payload: PAYLOAD, qr_image: QR_IMG,
+                    amount_cents: 9900, credit_cents: 0, plan: "essencial",
+                    agendada: true, starts_at: "2027-08-26T03:00:00+00:00" } },
+  });
+  await page.waitForURL(/upgrade=success/, { timeout: 15000 });
+  const params = [...new URL(page.url()).searchParams.keys()].sort();
+  assert.deepEqual(params, ["ev", "gw", "pl", "sid", "td", "upgrade"],
+    `params da URL de sucesso: ${page.url()}`);
   await page.close();
 });
 
@@ -1094,3 +1183,460 @@ test("PT17: fechar durante o download do corpo não deixa QR nem poll órfãos",
   await page.waitForSelector(".pix-doc", { timeout: 3000 });
   await page.close();
 });
+
+/**
+ * PT18 — A RECUSA CHEGA À TELA, NO LUGAR ONDE ELA SE LÊ.
+ *
+ * O `detail` do FastAPI é STRING quando o `raise` passa texto (o 400 do CPF
+ * inválido) e OBJETO nos 409. O ramo do `!r.ok` lia só `det.message`: com
+ * string, `det.message` é `undefined` e a pessoa recebia o genérico "não
+ * consegui gerar o código Pix agora" — que sugere problema nosso, quando o
+ * conserto é digitar o documento certo.
+ *
+ * Ler a mensagem certa não bastava: ela ia toda para o `#toast`, que fica ATRÁS
+ * do véu do modal. Quem digita 11 dígitos com DV errado (o caminho comum desde
+ * que o servidor passou a conferir o mod-11) via a caixa não fazer nada. Agora
+ * o 400 é erro DO CAMPO e vai para o `#pix-doc-erro` — o alvo do
+ * `aria-describedby` do `<input>`, dentro do modal —, e o resto (409, 503, 429,
+ * 403, 401), que NÃO é erro do documento, continua no toast, que passou a ficar
+ * por cima do véu.
+ *
+ * E a mensagem velha morre num PONTO SÓ: no início do envio. A enumeração
+ * (desfecho do `pixEnviar` × toast) não achou um único desfecho em que o toast
+ * anterior devesse sobreviver — o que trocasse o corpo do modal (QR, migração,
+ * inline) deixava a frase velha por cima do véu, agora perfeitamente legível
+ * com o z-index 1000. `showToast("")` limpa CLASSE e TEXTO: o `#toast` é
+ * `role="status"` e o texto velho seguia na árvore de acessibilidade.
+ *
+ * *Negativos (rodados um a um, medidos em 2026-09-10 sobre a ceca7ff; remeça
+ * antes de reusar os números):*
+ * - troque `r.status === 400` por `false` → PT18a vermelho (inline sai `""`);
+ * - volte o `#toast` da `precos.html` para `z-index: 999` → PT18c vermelho nos
+ *   2 viewports (brilho máximo cai para 30/255);
+ * - tire o `showToast("")` do início do `pixEnviar` → PT18d, PT18e e os DOIS
+ *   PT18f vermelhos nos 2 viewports, 8 falhas (o toast do 503 fica por cima do
+ *   campo, do QR, da migração e do "já pago");
+ * - tire o `showToast("")` do ramo da forma inválida → PT18g vermelho (só ele:
+ *   é o único desfecho que não passa pelo `pixEnviar`);
+ * - `.pix-erro { display: none !important }` → 6 vermelhos: PT18a nos 2
+ *   viewports e os 4 PT12b junto (a `isVisible(".pix-erro")` da linha 873, que
+ *   já existia). O que o PT18a acrescenta é a visibilidade do inline no caminho
+ *   do 400 DO SERVIDOR — o da forma inválida já tinha quem o medisse;
+ * - `showToast` de volta ao `add("show")` → PT18d (×2) e PT18g vermelhos: o
+ *   `remove` implícito é o que apaga a frase velha do `role="status"`.
+ * *Positivos do grupo:* PT18b (o 409 objeto continua sendo lido pela `message`,
+ * o par que um `String(d.detail)` destruiria) e o PT12c (documento válido ainda
+ * vende — uma correção que sequestrasse todo erro para o campo passaria no a/c
+ * e mataria a venda).
+ */
+const TELAS = [["desktop", { width: 1280, height: 900 }],
+               ["mobile", { width: 390, height: 844 }]];
+// A falha do provedor: é ela que convida ao reenvio ("tenta de novo"), e é o
+// reenvio que põe o toast velho por cima do desfecho novo.
+const FALHA_503 = "Não consegui emitir o Pix agora. Tenta de novo em instantes.";
+
+/**
+ * Brilho máximo (0–255) dentro do retângulo de um elemento — o instrumento do
+ * PT18c. `elementFromPoint` NÃO serve aqui: o `#toast` tem `pointer-events:
+ * none`, então o hit-test devolve o `pix-ov` com z-index 999 E com 1000, e o
+ * teste ficaria vermelho com e sem o conserto (§3, teatro). O que discrimina é
+ * a foto: com o toast atrás do véu, o pixel mais claro do retângulo é o preto
+ * translúcido do overlay.
+ */
+async function brilhoMax(page, seletor) {
+  const r = await page.$eval(seletor, (e) => {
+    const b = e.getBoundingClientRect();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  });
+  const png = (await page.screenshot({ clip: r })).toString("base64");
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const ctx2 = c.getContext("2d");
+    ctx2.drawImage(img, 0, 0);
+    const d = ctx2.getImageData(0, 0, c.width, c.height).data;
+    let max = 0;
+    for (let i = 0; i < d.length; i += 4) max = Math.max(max, d[i], d[i + 1], d[i + 2]);
+    return max;
+  }, png);
+}
+
+for (const [tela, viewport] of TELAS) {
+  test(`PT18a (${tela}): o 400 do documento fica DENTRO do modal, não no toast`, async () => {
+    const { page } = await abrirForm({
+      viewport,
+      pix: { httpStatus: 400, corpo: { detail: "Informe um CPF ou CNPJ válido." } },
+    });
+    await enviarDoc(page);
+    await page.waitForTimeout(300);
+    const visto = await page.evaluate(() => ({
+      texto: document.getElementById("pix-doc-erro").textContent,
+      foco: document.activeElement.className,
+      toast: document.getElementById("toast").textContent,
+    }));
+    assert.equal(visto.texto, "Informe um CPF ou CNPJ válido.",
+      `a recusa do documento não chegou ao campo: "${visto.texto}"`);
+    assert.equal(visto.toast, "",
+      `a recusa do documento ainda foi para o toast, atrás do véu: "${visto.toast}"`);
+    // O `botao.disabled` do envio largou o foco no <body>: quem vai corrigir o
+    // número tem de estar com o cursor nele.
+    assert.equal(visto.foco, "pix-doc",
+      `depois da recusa o foco ficou em ".${visto.foco}" em vez do campo`);
+    // Texto no `textContent` não é texto NA TELA: com `.pix-erro { display: none }`
+    // as três asserções acima passam (medido, rects=0). A vizinha `:empty` já mexe
+    // no `display` deste seletor — uma regra de CSS reintroduzia o bug original com
+    // o grupo inteiro verde. O brilho é o mesmo instrumento do toast: o `#ffb4b4`
+    // do `.pix-erro` pinta o retângulo bem acima do fundo da caixa.
+    assert.ok(await page.$eval("#pix-doc-erro", (e) => e.getClientRects().length > 0),
+      "a recusa está no DOM mas não ocupa área nenhuma: ninguém a lê na tela");
+    const brilhoInline = await brilhoMax(page, "#pix-doc-erro");
+    assert.ok(brilhoInline >= 150,
+      `a recusa não foi pintada: brilho máximo ${brilhoInline}/255 no retângulo do <p>`);
+    await page.close();
+  });
+
+  test(`PT18c (${tela}): o 503 não sequestra o campo, e o toast é legível`, async () => {
+    const { page } = await abrirForm({
+      viewport,
+      pix: { httpStatus: 503, corpo: { detail: FALHA_503 } },
+    });
+    await enviarDoc(page);
+    await page.waitForTimeout(500);          // o toast entra com transição de .25s
+    const visto = await page.evaluate(() => ({
+      inline: document.getElementById("pix-doc-erro").textContent,
+      toast: document.getElementById("toast").textContent,
+    }));
+    assert.equal(visto.inline, "",
+      `falha do provedor virou erro do CPF no campo: "${visto.inline}"`);
+    assert.equal(visto.toast, FALHA_503,
+      `a falha do provedor não chegou ao toast: "${visto.toast}"`);
+    const brilho = await brilhoMax(page, "#toast");
+    assert.ok(brilho >= 200,
+      `o toast ficou atrás do véu do modal: brilho máximo ${brilho}/255 no retângulo dele`);
+    await page.close();
+  });
+
+  test(`PT18d (${tela}): o inline do 400 apaga o toast anterior — UMA mensagem na tela`, async () => {
+    // O objeto `pix` é lido pela rota a CADA requisição: mudá-lo aqui troca a
+    // resposta do REENVIO sem tocar no harness. É a sequência real — o Pix caiu,
+    // a pessoa tenta de novo, e agora o servidor recusa o documento.
+    const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+    const { page } = await abrirForm({ viewport, pix });
+    await enviarDoc(page);
+    await page.waitForTimeout(500);
+    assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+      "o 503 nem chegou a mostrar o toast: o cenário das duas mensagens não foi montado");
+    pix.httpStatus = 400;
+    pix.corpo = { detail: "Informe um CPF ou CNPJ válido." };
+    await enviarDoc(page, CPF);            // dentro dos 3800 ms do timer do showToast
+    await page.waitForTimeout(400);        // > .25s da transição de opacidade
+    const visto = await page.evaluate(() => {
+      const t = document.getElementById("toast");
+      return {
+        inline: document.getElementById("pix-doc-erro").textContent,
+        toastVisivel: t.classList.contains("show"),
+        opacidade: getComputedStyle(t).opacity,
+        toastTexto: t.textContent,
+      };
+    });
+    assert.equal(visto.inline, "Informe um CPF ou CNPJ válido.",
+      `a recusa do documento não chegou ao campo: "${visto.inline}"`);
+    assert.equal(visto.toastVisivel, false,
+      `DUAS mensagens na tela: o toast do 503 ("${await page.textContent("#toast")}") continua`
+      + " por cima do véu, contradizendo o campo");
+    assert.ok(parseFloat(visto.opacidade) <= 0.05,
+      `o toast velho ainda está visível: opacidade ${visto.opacidade}`);
+    // Opacidade 0 não some para leitor de tela: o `#toast` é `role="status"` e
+    // seguia com `display: block`, `visibility: visible` e o TEXTO velho na
+    // árvore de acessibilidade, contradizendo o campo para quem não vê a tela.
+    assert.equal(visto.toastTexto, "",
+      `o texto velho continua no \`role="status"\`: "${visto.toastTexto}"`);
+    await page.close();
+  });
+
+  test(`PT18e (${tela}): reenviar depois do 503 não deixa o toast velho por cima do QR`,
+    async () => {
+      const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+      const { page } = await abrirForm({ viewport, pix });
+      await enviarDoc(page);
+      await page.waitForTimeout(500);
+      assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+        "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+      pix.httpStatus = 200;
+      pix.corpo = null;                    // volta ao corpo padrão do harness: o QR
+      await enviarDoc(page, CPF);          // dentro dos 3800 ms do timer do showToast
+      await page.waitForSelector(".pix-code");
+      await page.waitForTimeout(400);
+      const brilho = await brilhoMax(page, "#toast");
+      assert.ok(brilho < 100,
+        `o QR está na tela e o toast do 503 ("${await page.textContent("#toast")}")`
+        + ` continua por cima: brilho máximo ${brilho}/255 no retângulo dele`);
+      await page.close();
+    });
+
+  // Os DOIS 409 que TROCAM o corpo do modal — migração e "já pago" (este entrou
+  // no #361, depois da enumeração) — são a mesma classe: caixa nova por baixo do
+  // toast velho. Mesmo corpo de teste, um `for` em vez de um irmão copiado.
+  for (const [caso, corpo, marca] of [
+    ["migração", { detail: { error: "stripe_active", current_period_end: "2026-12-05" } },
+      /trocar o cartão pelo pix/i],
+    ["já pago", { detail: { error: "pix_future_purchase_conflict",
+                            covered_until: "2027-03-04T00:00:00+00:00" } },
+      /já tem tempo pago/i],
+  ]) {
+    test(`PT18f (${tela}, ${caso}): reenviar depois do 503 não deixa o toast por cima da caixa nova`,
+      async () => {
+        const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+        const { page } = await abrirForm({ viewport, pix });
+        await enviarDoc(page);
+        await page.waitForTimeout(500);
+        assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+          "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+        pix.httpStatus = 409;
+        pix.corpo = corpo;
+        await enviarDoc(page, CPF);
+        await page.waitForTimeout(400);
+        assert.match(await page.textContent(".pix-box"), marca,
+          `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`);
+        const brilho = await brilhoMax(page, "#toast");
+        assert.ok(brilho < 100,
+          `a caixa de ${caso} está na tela e o toast do 503 continua por cima:`
+          + ` brilho máximo ${brilho}/255 no retângulo dele`);
+        await page.close();
+      });
+  }
+}
+
+/**
+ * O desfecho que NÃO passa pelo `pixEnviar`: a forma inválida é recusada no
+ * submit e volta na hora. Sem a limpeza no início do submit, o único ponto do
+ * `pixEnviar` não alcança este caso — e era o que a mutação do Tester provou
+ * (só o sítio da forma revertido: 47 pass, 0 fail).
+ */
+test("PT18g: a recusa de FORMA também apaga o toast do 503, sem POST nenhum", async () => {
+  const pix = { httpStatus: 503, corpo: { detail: FALHA_503 } };
+  const { page, chamadas } = await abrirForm({ pix });
+  await enviarDoc(page);
+  await page.waitForTimeout(500);
+  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
+    "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
+  await enviarDoc(page, "1112223334");     // 10 dígitos: nem chega a sair
+  await page.waitForTimeout(400);
+  assert.equal(chamadas.pixCheckout, 1,
+    `o documento malformado foi para o servidor (${chamadas.pixCheckout} chamadas)`);
+  const visto = await page.evaluate(() => ({
+    inline: document.getElementById("pix-doc-erro").textContent,
+    toast: document.getElementById("toast").classList.contains("show"),
+  }));
+  assert.equal(visto.inline, "Informe os 11 dígitos do CPF ou os 14 do CNPJ.",
+    `a recusa de forma não chegou ao campo: "${visto.inline}"`);
+  assert.equal(visto.toast, false,
+    "DUAS mensagens na tela: o toast do 503 continua por cima do véu, contradizendo o campo");
+  const brilho = await brilhoMax(page, "#toast");
+  assert.ok(brilho < 100,
+    `o toast do 503 continua legível por cima do modal: brilho máximo ${brilho}/255`);
+  await page.close();
+});
+
+test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () => {
+  const { page } = await abrirForm({
+    pix: { httpStatus: 409,
+           corpo: { detail: { error: "lifetime",
+                              message: "Você já tem acesso vitalício de brinde." } } },
+  });
+  await enviarDoc(page);
+  await page.waitForTimeout(300);
+  const toast = await page.textContent("#toast");
+  assert.equal(toast, "Você já tem acesso vitalício de brinde.",
+    `o detail objeto parou de ser lido pela message: "${toast}"`);
+  await page.close();
+});
+
+/**
+ * PT19 — A ETIQUETA DO TOGGLE: O PIX PRECISA SER VISÍVEL NO CICLO MENSAL.
+ *
+ * O CTA "Pagar no Pix" só nasce no anual (PT1), então quem abre a página — que
+ * carrega em `monthly` — não tinha nenhum sinal de que Pix existe. A etiqueta
+ * `#pix-cycle-note` é esse sinal, e por isso NÃO pode depender do ciclo.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — apague `if (nota) nota.hidden = !pixAVenda();` do `pbPixInit`
+ *     (pix-checkout.js), ou mova a linha para dentro do `pbPixRefresh` com o
+ *     `anual` na condição: o caso do MENSAL fica vermelho, e ele é o que estava
+ *     verde antes da mutação;
+ *   · positivo — o PT19b prova que a etiqueta continua ESCONDIDA sem a flag e
+ *     para o vitalício. Sem ele, um `nota.hidden = false` fixo passaria no PT19
+ *     anunciando meio de pagamento que a página não vende.
+ */
+// Só `offsetParent`, e o `&& !e.hidden` SAIU: ele olhava o atributo em vez da
+// tela, e com isso o grupo ficava cego para CSS que vence o `hidden`. Foi um bug
+// real — `#pix-cycle-note { display: inline-block }` (seletor de ID) vence o
+// `[hidden] { display: none }` do navegador, e a etiqueta aparecia com a flag
+// desligada enquanto PT19b continuava verde porque `e.hidden` ainda era true.
+const etiquetaVisivel = (page) => page.$eval(
+  "#pix-cycle-note", (e) => e.offsetParent !== null);
+
+test("PT19: a etiqueta de Pix aparece no ciclo mensal e continua no anual", async () => {
+  const { page } = await abrirPrecos();
+  assert.equal(await contarCtas(page), 0, "âncora: no mensal não há CTA de Pix nenhum");
+  assert.equal(await etiquetaVisivel(page), true,
+    "o ciclo mensal não anuncia o Pix em lugar nenhum da tela");
+  assert.match(await page.textContent("#pix-cycle-note"), /Pix/,
+    "a etiqueta existe mas não diz Pix");
+  await page.click("#cycle-annual");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu ao trocar para o anual");
+  await page.click("#cycle-monthly");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu na volta para o mensal");
+  await page.close();
+});
+
+test("PT19b: sem a flag, e para o vitalício, a etiqueta não aparece", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  for (const [nome, plansConfig, sub] of [
+    ["sem pix_annual_available", base, { active: false }],
+    ["flag false", { ...base, pix_annual_available: false }, { active: false }],
+    ["vitalício", { ...base, pix_annual_available: true }, { active: true, lifetime: true }],
+  ]) {
+    const { page } = await abrirPrecos({ plansConfig, sub });
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (mensal)`);
+    await page.click("#cycle-annual");
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (anual)`);
+    await page.close();
+  }
+});
+
+/**
+ * PT19c — A ETIQUETA PARA QUEM NÃO VÊ A TELA.
+ *
+ * Ela é revelada DEPOIS do load (o `pbPixInit` só roda quando as duas
+ * requisições voltam), e quem navega controle por controle chega ao botão
+ * "Anual" sem passar por ela. Duas amarras, medidas aqui:
+ *
+ *   · `#pix-cycle-live` com `aria-live="polite"` EM VOLTA da pílula, presente
+ *     desde o parse — região registrada e revelada no mesmo instante não
+ *     anuncia, então são dois elementos e não um `aria-live` na própria pílula;
+ *   · `aria-describedby` no `#cycle-annual`, posto e RETIRADO junto com ela.
+ *
+ * O `aria-describedby` sair é a metade que vale dinheiro: elemento diretamente
+ * referenciado é lido mesmo `hidden` (accname), então um atributo fixo no HTML
+ * anunciaria "Pix disponível no anual" para quem não pode comprar — o mesmo
+ * defeito que o `hidden` existe para evitar, por outra porta. O caso sem flag é
+ * o controle positivo deste par.
+ */
+test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com ela", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  const lido = (page) => page.evaluate(() => ({
+    live: document.getElementById("pix-cycle-live")?.getAttribute("aria-live"),
+    // O `aria-live` precisa ENVOLVER a pílula: irmão não anuncia a revelação.
+    envolve: !!document.getElementById("pix-cycle-live")
+      ?.contains(document.getElementById("pix-cycle-note")),
+    describedby: document.getElementById("cycle-annual")?.getAttribute("aria-describedby"),
+  }));
+
+  const { page } = await abrirPrecos();
+  assert.deepEqual(await lido(page),
+    { live: "polite", envolve: true, describedby: "pix-cycle-note" });
+  await page.click("#cycle-annual");
+  assert.equal((await lido(page)).describedby, "pix-cycle-note",
+    "o vínculo caiu ao trocar de ciclo");
+  await page.close();
+
+  for (const plansConfig of [base, { ...base, pix_annual_available: false }]) {
+    const semPix = await abrirPrecos({ plansConfig });
+    const r = await lido(semPix.page);
+    assert.equal(r.live, "polite", "a região aria-live tem de existir mesmo sem a flag");
+    assert.equal(r.describedby, null,
+      "o botão Anual descreve um Pix que a página não vende");
+    await semPix.page.close();
+  }
+});
+
+/**
+ * PT19d–f — A ETIQUETA ESPERA SABER QUEM ESTÁ OLHANDO; O CTA NÃO.
+ *
+ * O `loadPlansState` publica o estado do Pix DUAS vezes: `publicarPix(null,
+ * false)` antes do /billing/subscription e `publicarPix(subState, resolvida)` depois.
+ * A primeira existe para o CTA nascer cedo (PT15) e é deliberada — caminho de
+ * RESGATE de quem migra do cartão enquanto o Stripe está lento. Mas `sub = null`
+ * também é o valor do DESLOGADO, então o `pixAVenda()` lia o estado ainda
+ * desconhecido como elegível e a ETIQUETA — que é ANÚNCIO — subia para o
+ * vitalício até a requisição voltar. Se ela pendura, o anúncio fica.
+ *
+ * O conserto é o terceiro estado (`resolvida`), não um teste de `null`: testar
+ * `null` esconderia a etiqueta justamente de quem ela existe para convencer.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — tire o `&& pixSubResolvida` do `pbPixInit` (pix-checkout.js) ou
+ *     troque o `publicarPix(null, false)` da precos.html por `(null, true)`: o
+ *     PT19d fica VERMELHO, e ele é caso novo que já nasce verde com o conserto;
+ *   · positivo — PT19e (deslogado, que é 401 e não 200) e PT19f (assinante não
+ *     vitalício) provam que a etiqueta continua aparecendo para quem pode
+ *     comprar. Sem eles, `nota.hidden = true` fixo passaria no PT19d.
+ *
+ * PT19g fecha a outra metade: a consulta que FALHA (5xx, rede fora, JSON
+ * malformado) também guarda `subState = null`, e chamá-la de resolvida deixava o
+ * anúncio de pé para o vitalício indefinidamente. O sinal é o retorno novo do
+ * `loadSubscription` — 200 com JSON válido e 401 resolvem, o resto não.
+ * Negativo dele: troque o `publicarPix(subState, resolvida)` da precos.html de
+ * volta por `(subState, true)` — PT19g fica VERMELHO e PT19d/e/f seguem verdes.
+ */
+test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, lifetime: true },
+    atrasos: { "/billing/subscription": 4000 },
+  });
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta anunciou Pix antes de saber se este usuário pode comprar");
+  await page.waitForTimeout(1500);
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta subiu durante a janela do /billing/subscription (1,5 s depois)");
+  // Âncora do PT15: o que espera é a ETIQUETA, não o CTA. Se este 3 virar 0, o
+  // conserto atropelou a migração cartão → Pix com o Stripe ruim.
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "o CTA de Pix passou a esperar o /billing/subscription");
+  await page.close();
+});
+
+test("PT19e: deslogado (401 no /billing/subscription) continua vendo a etiqueta", async () => {
+  const { page } = await abrirPrecos({ subStatus: 401, sub: { detail: "Não autenticado" } });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para o deslogado, que é o público que ela existe para convencer");
+  assert.equal(
+    await page.$eval("#cycle-annual", (e) => e.getAttribute("aria-describedby")),
+    "pix-cycle-note", "o vínculo com o botão Anual não voltou para o deslogado");
+  await page.close();
+});
+
+test("PT19f: assinante não vitalício vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, gateway: "stripe", plan: "plus", interval: "monthly" },
+  });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para quem PODE comprar o anual no Pix");
+  await page.close();
+});
+
+// Falha de consulta não identifica o visitante; o CTA continua nascendo cedo.
+for (const [nome, subRoute] of [
+  ["500", (r) => r.fulfill({ status: 500, body: "erro interno" })],
+  ["403", (r) => r.fulfill({ status: 403, body: "proibido" })],
+  ["rede", (r) => r.abort()],
+  ["JSON malformado", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{" })],
+]) {
+  test(`PT19g: /billing/subscription em ${nome} não resolve — a etiqueta não aparece`, async () => {
+    const { page } = await abrirPrecos({ subRoute });
+    assert.equal(await etiquetaVisivel(page), false,
+      "a falha do /billing/subscription foi lida como 'sem assinatura' e anunciou Pix");
+    await page.click("#cycle-annual");
+    assert.equal(await contarCtas(page), 3,
+      "o CTA de resgate morreu junto com a etiqueta quando a consulta falhou");
+    await page.close();
+  });
+}

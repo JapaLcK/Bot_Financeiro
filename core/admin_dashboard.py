@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from slowapi.util import get_remote_address
+from starlette.requests import ClientDisconnect
 
 from config.env import load_app_env
 
@@ -28,7 +29,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
-from core.pg_text import limpa_para_pg
+from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.secure_compare import constant_time_eq
 
 
@@ -156,7 +157,16 @@ async def log_auth_login_event(
     failure_reason: str | None = None,
 ):
     try:
-        normalized_email = (email or "").strip().lower() or None
+        # Mesmo mecanismo do `log_system_event` 50 linhas abaixo (issue #357):
+        # NUL/surrogate em QUALQUER campo `text` recusa o INSERT inteiro e o
+        # `except` no fim engole — a linha de auditoria some sem 500 e sem
+        # rastro. Aqui é pior: `auth_login_events` é a trilha de tentativa de
+        # login, e o vetor vivo é o `email` do corpo JSON de `/auth/login`
+        # (`LoginBody.email` é `str` puro, sem `EmailStr`).
+        # O e-mail é saneado ANTES de cifrar, senão a coluna clara e a
+        # `email_enc` guardariam valores diferentes — e `encrypt_pii` faz
+        # `.encode("utf-8")`, que estoura com surrogate solitário.
+        normalized_email = limpa_para_pg((email or "").strip().lower()) or None
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -167,7 +177,8 @@ async def log_auth_login_event(
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (user_id, normalized_email, encrypt_pii_optional(normalized_email),
-                     success, ip_address, user_agent, failure_reason),
+                     success, limpa_para_pg(ip_address), limpa_para_pg(user_agent),
+                     limpa_para_pg(failure_reason)),
                 )
             await conn.commit()
         # A09 — spike de falha de login: agenda a detecção FORA desta transação
@@ -201,7 +212,9 @@ async def log_system_event(
                     INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (level, event_type, message[:1000], source, user_id, Jsonb(details or {})),
+                    (limpa_para_pg(level), limpa_para_pg(event_type),
+                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(details or {}))),
                 )
             await conn.commit()
     except Exception as exc:
@@ -855,7 +868,44 @@ def _derive_account_status(row: dict, now: datetime) -> str:
     plan = (row.get("plan") or "free").strip().lower() or "free"
     pay = (row.get("last_payment_status") or "").strip().lower()
     if plan == "free":
-        return "canceled" if pay in ("canceled", "incomplete_expired") else "free"
+        # 'unpaid' entra com os dois terminais, e SÓ nesta perna: é o ESTADO
+        # TERMINAL que o ramo `customer.subscription.deleted` grava quando a
+        # Stripe encerra por inadimplência (`cancellation_details.reason ==
+        # 'payment_failed'`), para PRESERVAR o motivo. Sem esta linha a conta
+        # apareceria como 'free' — o rótulo de quem nunca assinou — e o motivo
+        # se perderia exatamente onde ele foi guardado.
+        #
+        # **`unpaid` é a única COLISÃO entre "terminal no ramo free" e
+        # "assinatura viva na Stripe"** — e a frase que estava aqui, "o único
+        # status cuja categoria depende do `plan`", é FALSA: divergir entre
+        # `plan='free'` e plano pago é o NORMAL deste ramo, porque aqui todo
+        # status vivo vira `'free'` (sem plano o painel não vê assinatura
+        # nenhuma).
+        #
+        # Quantos divergem NÃO fica escrito aqui (§2) — o número depende do
+        # alfabeto que se assume, e a versão anterior dizia "SEIS" por ter
+        # esquecido `'inactive'` (que é o **DEFAULT da coluna**,
+        # `db/schema.py`: `last_payment_status text not null default
+        # 'inactive'`) e `'grandfathered'`. Quem precisar do número remede::
+        #
+        #     from datetime import datetime, timedelta, timezone
+        #     from core.admin_dashboard import _derive_account_status
+        #     agora = datetime.now(timezone.utc); fut = agora + timedelta(days=30)
+        #     [s for s in ("active", "trialing", "past_due", "incomplete", "unpaid",
+        #                  "canceled", "incomplete_expired", "inactive",
+        #                  "grandfathered", "")
+        #      if _derive_account_status({"plan": "free", "last_payment_status": s,
+        #                                 "plan_expires_at": None}, agora)
+        #      != _derive_account_status({"plan": "pro", "last_payment_status": s,
+        #                                 "plan_expires_at": fut}, agora)]
+        #
+        # O que é raro é a colisão: um status que ESTE ramo chama de terminal
+        # (`canceled`) e que ao mesmo tempo está em `_LIVE_PAYMENT_STATUSES`.
+        # É ela que torna o status sozinho um discriminador errado — ver a
+        # guarda do /trial-reset e
+        # `tests/test_admin_users_panel.py::test_unpaid_e_a_unica_colisao_entre_terminal_no_free_e_vivo_na_stripe`,
+        # que enumera e prende o conjunto.
+        return "canceled" if pay in ("canceled", "incomplete_expired", "unpaid") else "free"
     # Expiração vem ANTES do status de pagamento: plan_service._paid_plan_active
     # trata tier pago vencido como inativo mesmo com status 'active' (webhook
     # perdido) — o painel tem de concordar com o entitlement real.
@@ -879,7 +929,7 @@ _ACCOUNT_STATUS_SQL = """
     CASE
         WHEN lower(coalesce(nullif(trim(a.plan), ''), 'free')) = 'free' THEN
             CASE WHEN lower(coalesce(a.last_payment_status, ''))
-                      IN ('canceled', 'incomplete_expired')
+                      IN ('canceled', 'incomplete_expired', 'unpaid')
                  THEN 'canceled' ELSE 'free' END
         WHEN a.plan_expires_at IS NOT NULL AND a.plan_expires_at < now() THEN 'canceled'
         WHEN lower(coalesce(a.last_payment_status, '')) = 'trialing' THEN 'trial'
@@ -1556,6 +1606,15 @@ async def admin_error_logging_middleware(request: Request, call_next):
         return await call_next(request)
     except HTTPException:
         raise
+    except ClientDisconnect:
+        # Cliente sumiu antes de mandar o corpo (rede móvel caindo no meio de um
+        # upload). Não é erro do servidor: 499 e NENHUM evento — o uvicorn já
+        # descartou a resposta (`if self.disconnected: return` em
+        # RequestResponseCycle.send), e gravar poluiria o feed de erro do painel
+        # com um evento por cliente que some. O `except` carrega 100% do
+        # diagnóstico: a mensagem é sempre a mesma constante.
+        _admin_log.info("client disconnect: %s %s", request.method, request.url.path)
+        return Response(status_code=499)
     except Exception as exc:
         import traceback
         tb_str = traceback.format_exc()
@@ -1814,7 +1873,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                 set_account_plan, str(payload.get("plan") or ""), months, user_id=user_id
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         if not row:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         await log_system_event(
@@ -1848,6 +1907,12 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         /plan, mexe só no banco — não fala com a Stripe. Por isso recusa com
         409 quando há assinatura viva lá: apagar a trava não cancelaria nada, e
         o checkout novo esbarraria na assinatura existente de qualquer forma.
+
+        **UMA exceção, e ela é decisão do dono** ("pode, libero caso a caso"):
+        o par (`plan='free'`, `unpaid`), que é o estado que o ramo terminal do
+        `customer.subscription.deleted` grava quando a Stripe encerra por
+        inadimplência. Ali a assinatura NÃO existe mais lá, então nada do
+        parágrafo acima se aplica. Ver o bloco de comentários da guarda.
         """
         # Uma coluna, sem passar pelo fetch_admin_user_detail: aquele decifra
         # e-mail/telefone/nome e grava pii_access_log — acesso a PII que esta
@@ -1855,14 +1920,71 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         async with await db_connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "SELECT last_payment_status FROM auth_accounts WHERE user_id = %s",
+                    "SELECT plan, last_payment_status FROM auth_accounts WHERE user_id = %s",
                     (int(user_id),),
                 )
                 acc = await cur.fetchone()
         if acc is None:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         pay = (acc.get("last_payment_status") or "").strip().lower()
-        if pay in _LIVE_PAYMENT_STATUSES:
+        plan_atual = (acc.get("plan") or "free").strip().lower() or "free"
+        # **O discriminador é o PAR, não o status sozinho** — e `unpaid` é o
+        # único status em que os dois divergem:
+        #
+        #   `unpaid` + plano PAGO  = assinatura VIVA em dunning na Stripe. O 409
+        #                            continua certo: é exatamente o que a guarda
+        #                            existe para impedir.
+        #   `unpaid` + `plan='free'` = **COMPATÍVEL com "a Stripe encerrou", e
+        #                            não prova disso.** O dono decidiu liberar
+        #                            ("pode, libero caso a caso").
+        #
+        # **A ressalva acima é literal, e a versão anterior deste comentário
+        # afirmava a implicação — errado.** O par é gravado pelo ramo terminal do
+        # `customer.subscription.deleted`, mas ele tem OUTROS produtores, e neles
+        # a assinatura pode continuar viva lá:
+        #
+        #   • `core.services.billing_access.recompute_entitlement` grava
+        #     `update_user_plan(uid, 'free', ...)` sob veredito `reduz` e NÃO
+        #     toca em `last_payment_status`. A matriz depende de
+        #     `_find_active_subscription`, que consulta a Stripe só em `active`,
+        #     `trialing` e `past_due` — assinatura em `unpaid` é invisível para
+        #     ela e conta como "nenhuma ativa". É o loop de 60 s, sem admin e sem
+        #     webhook. **Medido** (2026-09-10, grant vencido + status `unpaid`,
+        #     `origem="varredura"`, nenhum evento `deleted`; remedir antes de
+        #     reusar): `pro|unpaid` → `free|unpaid`. Coberto por
+        #     `tests/test_admin_users_panel.py::test_o_par_terminal_nao_prova_que_a_stripe_encerrou`.
+        #   • `set_account_plan('free')` — célula 24 de
+        #     `docs/dunning_estados_eventos.md`: "não mexe no par".
+        #
+        # **O que sustenta a liberação não é o par, é o HUMANO NO LAÇO.** Isto é
+        # ação de admin, uma conta por vez, com o dono dizendo "caso a caso"; a
+        # trava final é o julgamento de quem clica, não este predicado. O custo
+        # de errar está declarado: a trava anti-abuso cai e o checkout seguinte
+        # não vê `unpaid` (mesma cegueira do `_find_active_subscription`), então
+        # nasce a segunda assinatura da célula 30.
+        #
+        # E o painel AGRAVA a leitura: ele rotula este par como "Cancelado", que
+        # o admin lê como "a Stripe encerrou". Um discriminador honesto existiria
+        # — o grant revogado com motivo `stripe_subscription_deleted`, que só o
+        # ramo terminal escreve — e ficou de FORA de propósito: é query nova num
+        # caminho de admin, com a decisão já tomada e humano no laço. Está
+        # nomeado aqui para quem quiser estreitar depois não ter de redescobrir.
+        #
+        # **`_LIVE_PAYMENT_STATUSES` NÃO foi alargada nem encurtada**, e a
+        # decisão é medida: `grep -rn "_LIVE_PAYMENT_STATUSES"` acha UM leitor de
+        # produção (esta linha) mais a definição e o teste de paridade — mas a
+        # lista SIGNIFICA "assinatura viva na Stripe", e `unpaid` é vivo enquanto
+        # a assinatura existir. Tirá-lo de lá trocaria um caso liberado por uma
+        # DEFINIÇÃO errada, que o próximo leitor herdaria. Estreita-se a
+        # condição, não a lista.
+        #
+        # Mesmo par, e de propósito, do `_derive_account_status` acima (§0.7).
+        # NÃO se chama aquela função aqui: ela dobra `plan_expires_at` no
+        # veredito, e vencimento é ENTITLEMENT, não "a Stripe ainda tem
+        # assinatura" — reusá-la liberaria também o pago VENCIDO em `unpaid`,
+        # que é dunning com assinatura viva e ninguém autorizou.
+        encerrada_por_inadimplencia = plan_atual == "free" and pay == "unpaid"
+        if pay in _LIVE_PAYMENT_STATUSES and not encerrada_por_inadimplencia:
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -2055,7 +2177,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
         await log_system_event(
             "info",
@@ -2083,7 +2205,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         if not ok:
             raise HTTPException(status_code=404, detail="Afiliado não encontrado.")
         await log_system_event(
@@ -2121,7 +2243,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             brcode = build_pix_brcode(pix_key, amount_cents=int(payout["amount_cents"]))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
 
         return {
             "brcode": brcode,
@@ -2140,6 +2262,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
@@ -2173,6 +2299,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):

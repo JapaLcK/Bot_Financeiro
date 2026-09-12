@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from core.observability import log_system_event_sync
 from core.secure_compare import constant_time_eq
+from core.services.asaas_customers import TitularRecusado
 from core.services.pix_checkout import (
     CheckoutIndisponivel,
     StripeAtivo,
@@ -49,18 +50,26 @@ from core.services.pix_checkout import (
     criar_checkout,
 )
 from core.services.pix_pricing import CoberturaJaPaga
+from core.services.plan_service import TIER_TO_STORED_PLAN, tier_publico
 from frontend.routes import shared
 
 router = APIRouter()
 
-# Planos vendáveis no Pix, no valor LEGADO da coluna (`pro` = Plus, `pro_max` =
-# Pro). Mesma lista que `_STORED_PLAN_TO_TIER` conhece; `free` não é venda.
-_PLANOS = ("essencial", "pro", "pro_max")
-
-# CPF tem 11 dígitos, CNPJ tem 14. A validação aqui é de FORMA e só: quem
-# valida de verdade é o Asaas, e replicar o dígito verificador seria uma segunda
-# fonte da mesma regra (§0.7).
-_TAMANHOS_DOC = (11, 14)
+# Os pesos do mod-11, por tamanho de documento — CPF tem 11 dígitos, CNPJ tem 14,
+# e esta tabela é a fonte única dos tamanhos aceitos NO SERVIDOR. A mesma regra
+# 11/14 vive também no cliente, porque o JS não importa Python: `pix-checkout.js`
+# em `pixFormaOk`, no texto de erro do submit e no `campo.maxLength = 18` (14
+# dígitos + os 4 separadores do CNPJ) — são TRÊS sites derivados deste 11/14.
+# Não há teste comparando as duas fontes — quem mudar um lado muda os outros na
+# mão (`grep -n 'pixFormaOk\|maxLength\|14 do CNPJ' frontend/pix-checkout.js`).
+# O que se confere aqui é ESTRUTURA: dígito verificador que fecha. A autoridade
+# final continua sendo o Asaas, que recusa por regras próprias documento
+# estruturalmente válido.
+_PESOS_DOC = {
+    11: ((10, 9, 8, 7, 6, 5, 4, 3, 2), (11, 10, 9, 8, 7, 6, 5, 4, 3, 2)),
+    14: ((5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2),
+         (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)),
+}
 
 
 class PixCheckoutBody(BaseModel):
@@ -80,11 +89,18 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     primeira. Import tardio para não inverter a direção do import.
     """
     user_id = shared.resolve_dashboard_user_id(request)
+    # O corpo fala o vocabulário PÚBLICO da /precos, o mesmo do gêmeo do Stripe
+    # (`finance_bot_websocket_custom.py:4472`) — o JS que alimenta os dois é UM
+    # só. Aceitar o legado aqui era a armadilha: `plus` levava 400 e o card Pro
+    # mandava `pro`, que no banco é o tier Plus (R$ 199 num card de R$ 499).
     plan = (payload.plan or "").strip().lower()
-    if plan not in _PLANOS:
-        raise HTTPException(status_code=400, detail="plan inválido.")
-    doc = "".join(c for c in (payload.cpf_cnpj or "") if c.isdigit())
-    if len(doc) not in _TAMANHOS_DOC:
+    if plan not in TIER_TO_STORED_PLAN:
+        raise HTTPException(
+            status_code=400,
+            detail="plan inválido (use 'essencial', 'plus' ou 'pro').")
+    plan_stored = TIER_TO_STORED_PLAN[plan]
+    doc = "".join(c for c in (payload.cpf_cnpj or "") if c in "0123456789")
+    if not _documento_valido(doc):
         raise HTTPException(status_code=400,
                             detail="Informe um CPF ou CNPJ válido.")
 
@@ -94,14 +110,16 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     try:
         async with _billing_user_lock(user_id):
             return await asyncio.to_thread(
-                criar_checkout, user_id, plan_stored=plan, cpf_cnpj=doc,
+                criar_checkout, user_id, plan_stored=plan_stored, cpf_cnpj=doc,
                 nome=nome, email=email, rastreio=_rastreio(request),
                 confirm_cancel_stripe=bool(payload.confirm_cancel_stripe))
     except CoberturaJaPaga as exc:
         # `plano` e `cobertura_ate` vêm da PRÓPRIA exceção: reconsultar o banco
         # aqui poderia devolver um estado diferente do que motivou a recusa.
+        # `exc.plano` é o valor LEGADO (a exceção nasce depois do
+        # `TIER_TO_STORED_PLAN[plan]` acima), e a fronteira fala público nos dois sentidos.
         raise HTTPException(status_code=409, detail={
-            "error": exc.ERRO, "plan": exc.plano,
+            "error": exc.ERRO, "plan": tier_publico(exc.plano),
             "covered_until": exc.cobertura_ate.isoformat()}) from exc
     except Vitalicio as exc:
         # Sem consultar nada de novo: quem decidiu foi o `criar_checkout`. A
@@ -123,6 +141,25 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             "error": exc.ERRO,
             "current_period_end": exc.current_period_end.date().isoformat(),
         }) from exc
+    except TitularRecusado as exc:
+        # A ordem entre este `except` e o do `CheckoutIndisponivel` NÃO importa: as duas
+        # são IRMÃS (`RuntimeError` direto), então nenhuma engole a outra — invertendo os
+        # dois blocos, o grupo segue verde. A ordem que importa é a de `_emitir`.
+        # `details` leva o motivo e o `code` JÁ filtrado, e NADA mais: nome,
+        # e-mail e `cpf_cnpj` não entram: `system_event_logs` é a tabela que a
+        # purga do §13.3 não alcança. O `detail` é literal NOSSO, jamais o texto
+        # do Asaas — e não acusa o CPF de propósito, porque a recusa pode vir do
+        # e-mail do cadastro, que o cliente não digitou nesta tela.
+        log_system_event_sync("warning", "pix_titular_recusado",
+                              "Asaas recusou o titular do checkout Pix.",
+                              source="pix", user_id=user_id,
+                              details={"motivo": "titular_recusado",
+                                       "code": exc.codigo or ""})
+        raise HTTPException(
+            status_code=400,
+            detail="O banco recusou esses dados. Confere o CPF ou CNPJ — se "
+                   "estiver certo, fala com a gente.",
+        ) from exc
     except CheckoutIndisponivel as exc:
         log_system_event_sync("warning", "pix_checkout_indisponivel",
                               "Checkout Pix recusado.", source="pix",
@@ -143,6 +180,7 @@ async def billing_pix_status(request: Request, public_token: str):
     compartilham IP, e `shared.limiter` chaveia por endereço remoto, não por
     usuário. Estourar aqui apagaria o QR da tela de quem só esperou.
     """
+    from core.services.pix_checkout_resposta import agendada  # noqa: PLC0415
     from db.pix_charges import buscar_por_public_token  # noqa: PLC0415
 
     user_id = shared.resolve_dashboard_user_id(request)
@@ -151,13 +189,20 @@ async def billing_pix_status(request: Request, public_token: str):
         raise HTTPException(status_code=404, detail="Cobrança não encontrada.")
     return {
         "status": linha["status"],
-        "plan": linha["plan"],
+        # Público, como no contrato do checkout (§0.7): a mesma tela lê as duas
+        # respostas, e um `pro` aqui e um `plus` lá seriam dois vocabulários.
+        "plan": tier_publico(linha["plan"]),
         "amount_cents": int(linha["amount_cents"]),
         "credit_cents": int(linha["credit_cents"]),
         "expires_at": (linha["qr_expires_at"].isoformat()
                        if linha["qr_expires_at"] else None),
         "starts_at": (linha["access_starts_at"].isoformat()
                       if linha["access_starts_at"] else None),
+        # A /home lê ESTA resposta (e não mais a query string) para dizer se o
+        # ano começa agora ou no fim do plano vigente: `starts_at` sozinho não
+        # separa os dois casos — na compra imediata ele também vem preenchido,
+        # com `agora`. Mesma função do contrato do checkout (§0.7).
+        "agendada": agendada(linha["access_starts_at"]),
         "expires_access_at": (linha["access_expires_at"].isoformat()
                               if linha["access_expires_at"] else None),
     }
@@ -223,6 +268,27 @@ async def asaas_webhook(request: Request, background_tasks: BackgroundTasks):
         # levanta — falha vira `attempts` e o laço de 60 s retoma.
         background_tasks.add_task(drenar_evento, event_id)
     return {"ok": True}
+
+
+def _documento_valido(doc: str) -> bool:
+    """Só dígitos. Confere o mod-11 de CPF (11) ou CNPJ (14) — ESTRUTURA, não
+    existência: quem sabe se o documento existe é o Asaas, e ele pode recusar
+    depois um número que fecha aqui. Uma implementação para os dois documentos:
+    a diferença é a lista de pesos, e ela tem de existir de qualquer jeito."""
+    pesos = _PESOS_DOC.get(len(doc))
+    if pesos is None:          # tamanho errado (ou string vazia), da mesma tabela
+        return False
+    # Caso especial EXPLÍCITO, e não consequência do algoritmo: `11111111111`,
+    # `00000000000`, `99999999999` e `00000000000000` PASSAM no mod-11 puro
+    # (medido). Sem esta linha, o CPF que mais chega errado é aceito.
+    if len(set(doc)) == 1:
+        return False
+    n = [int(c) for c in doc]
+    for p in pesos:
+        r = sum(a * b for a, b in zip(n, p)) % 11
+        if n[len(p)] != (0 if r < 2 else 11 - r):
+            return False
+    return True
 
 
 def _titular(user_id: int) -> tuple[str, str | None]:

@@ -6,6 +6,7 @@ from collections import defaultdict
 
 # Helper único das portas destrutivas (a docstring dele lista quais e explica o
 # critério de nível). Ele nunca põe `str(e)` no log.
+from core.intent_classifier import classify, NEGATIVAS_EXATAS
 from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.plan_limits import PlanLimitExceeded
@@ -38,10 +39,12 @@ from db import (
     undo_installment_group,
     update_card_reminder_settings,
 )
+from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number,
-    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE,
+    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    MEMORY_STOP_TOKENS,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,9 +294,10 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
     if chosen is None:
         cid = get_card_id_by_name(user_id, answer)
         if cid is None:
-            resolved_name = _find_card_name_in_text(user_id, answer)
-            if resolved_name:
-                cid = get_card_id_by_name(user_id, resolved_name)
+            # `_card_name_da_resposta`, NÃO `_find_card_name_in_text`: aqui a
+            # mensagem é RESPOSTA, e casar o nome do cartão dentro de uma frase
+            # fazia `excluir cartao nubank` PAGAR a fatura.
+            cid = _card_name_da_resposta(user_id, answer)
         if cid is not None:
             card_matches = [r for r in candidates if int(r["card_id"]) == int(cid)]
             if len(card_matches) == 1:
@@ -302,6 +306,9 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
                 return _ask_which_bill(user_id, card_matches, amount)
 
     if chosen is None:
+        # RE-PERGUNTA (regra acima): nada aqui é gatilho — `sim` não é
+        # referência de fatura, então manter a pergunta viva não arma nada. E o
+        # portão já garantiu que texto não reconhecido NÃO paga.
         lines = ["❓ Não entendi qual fatura. Responda com o número:", ""]
         for i, r in enumerate(candidates, start=1):
             lines.append(f"{i}. {_format_bill_label(r)} — em aberto {fmt_brl(_bill_due(r))}")
@@ -332,6 +339,337 @@ def _find_card_name_in_text(user_id: int, text: str) -> str | None:
         if name_norm and re.search(rf"\b{re.escape(name_norm)}\b", norm):
             return card["name"]
     return None
+
+
+# Palavras que só enfeitam a RESPOSTA e não fazem parte do nome do cartão.
+_FILLER = {"a", "o", "as", "os", "um", "uma", "do", "da", "de", "dos", "das",
+           "no", "na", "nos", "nas", "em", "meu", "minha", "meus", "minhas",
+           "fatura", "faturas", "cartao", "conta",
+           "esse", "essa", "este", "esta"}
+
+
+# Maneiras de dizer "eu escolho X" — o que se poda do COMEÇO, junto com o
+# `_FILLER`. Allowlist de propósito, e a razão é estrutural, não de gosto:
+# enquanto a poda era livre ("qualquer prefixo, salvo veto de verbo"), TODO
+# verbo fora do veto virava porta. Medido no #323, com `pay_bill_choice`
+# pendente e fatura de R$ 300 aberta: `somei 50 no nubank`, `depositei 50 no
+# nubank`, `investi 50 no nubank`, `saquei 50 no nubank`, `transferi 50 no
+# nubank` e `coloquei 50 no nubank` PAGAVAM a fatura, e nenhum desses verbos
+# estava no veto — eles moram nas regexes de caixinha, investimento e saque, não
+# nas de lançamento. Varrida palavra a palavra, a alternância inicial do
+# `_ALIAS_PATTERNS` tinha MAIORIA ainda casando. Estender o veto com elas é a
+# sexta rodada da mesma revisão: "verbo de comando do bot inteiro" é ABERTO.
+#
+# Invertido, o conjunto que precisa ser enumerado é "maneiras de dizer que
+# ESCOLHO um cartão", que é pequeno e fechado. Verbo desconhecido para de ser
+# porta por CONSTRUÇÃO — não por lembrar dele.
+#
+# Só entra o que é seleção ou fala; NUNCA verbo que descreve operação.
+# `coloca`, `bota`, `poe`, `deixa`, `guarda`, `junta` ficam de FORA mesmo
+# parecendo conversacionais: são a alternância literal do `pockets.deposit`
+# (`core/intent_classifier.py`), e `coloca o nubank` — resposta plausível, cujo
+# custo de recusa é uma re-pergunta — não paga a porta que `coloca ... no
+# nubank` abriria.
+#
+# `acho`, `ai` e `que` também estão no `_FALA_E_MOEDA`/`_UNIDADE_DE_CARTAO`
+# abaixo. Não é a mesma regra em dois lugares (§0.7): lá eles dizem "isto ainda
+# é um número", aqui dizem "isto ainda não é o nome". Coincidem no vocabulário
+# de enchimento de fala, não na decisão.
+_SELECAO = {"quero", "pode", "ser", "escolho", "prefiro", "vai", "manda",
+            "acho", "que", "ai"}
+
+_PODAVEL_NO_PREFIXO = _FILLER | _SELECAO
+
+
+# Cortesia de FIM de mensagem. Conjunto pequeno e fechado DE PROPÓSITO, e
+# deliberadamente diferente do `_FILLER`: as duas pontas não correm o mesmo
+# risco. No começo, o perigo é o comando vir ANTES do nome
+# (`excluir cartao nubank`); no fim, é o comando vir DEPOIS (`nubank excluir`).
+# Aparar o sufixo com a mesma lista do prefixo reabriria a segunda forma — por
+# isso aqui só entram palavras que não são comando de nada.
+#
+# Este conjunto é o outro lado do `_PODAVEL_NO_PREFIXO` e obedece à MESMA
+# regra: verbo de comando nunca entra em nenhum dos dois. Enquanto isso valer,
+# nenhuma leitura de uma mensagem que contenha um verbo de comando consegue se
+# livrar dele. Quem MEDE isso é o
+# `test_verbo_que_move_dinheiro_nunca_e_podavel`, e ele olha só o
+# `_PODAVEL_NO_PREFIXO`: `por` está em "por favor" E no `DEPOSIT_VERBS`, então
+# a mesma interseção aqui seria falso positivo. A guarda desta ponta é o
+# controle P do catálogo (`tests/_pendencia_credito_helpers.py`).
+
+_CORTESIA_FINAL = {"por", "favor", "pf", "obrigado", "obrigada", "obg",
+                   "valeu", "vlw", "pls", "please", "plz"}
+
+
+def _leituras_da_resposta(alvo: str, max_tokens: int) -> list[str]:
+    """Como esta resposta pode ser lida, da leitura MAIS LONGA para a mais curta.
+
+    Três aparos, e o terceiro é o que custou um bug de dinheiro:
+
+    - PREFIXO, e só o que está no `_PODAVEL_NO_PREFIXO` — filler e seleção
+      conversacional. Para no PRIMEIRO token de fora, e é essa parada que faz
+      da recusa uma propriedade de CONSTRUÇÃO: `somei 50 no nubank` não gera
+      `nubank` porque `somei` não é podável, sem ninguém ter enumerado `somei`.
+      Só o prefixo, nunca o miolo — um filtro global comeria o `do` do MEIO do
+      nome, e `a conta` tem de virar `conta` mesmo com "conta" sendo filler,
+      porque o nome do cartão pode SER uma palavra de enfeite.
+    - SUFIXO de cortesia: `nubank por favor` é resposta comum e a `main`
+      aceitava (por substring).
+    - As DUAS leituras, com e sem a cortesia. `pf` é cortesia E é nome de cartão
+      real ("PF" de pessoa física: `Nubank PF`, `Itaú PF` existem). Aparando o
+      sufixo ANTES de gerar os prefixos, `a do nubank pf` produzia `nubank` e
+      NUNCA `nubank pf` — com os dois cartões cadastrados e fatura aberta nos
+      dois, isso PAGAVA A FATURA DO CARTÃO ERRADO. Achado pelo Codex no #323.
+
+    A ordem do retorno é o desempate, e por isso é lista e não conjunto: a
+    leitura mais LONGA vem primeiro, então o nome mais específico (`nubank pf`)
+    ganha do genérico (`nubank`) quando os dois existem.
+
+    `max_tokens` é o maior nome de cartão do usuário, EM TOKENS, e não é
+    heurística: o casamento é por IGUALDADE, então leitura com mais tokens que o
+    maior nome guardado não pode casar nada — gerá-la era trabalho jogado fora.
+    Sem esse corte os dois laços materializam o produto prefixo × sufixo: 2.007
+    caracteres viravam 160.801 leituras e 168 MB, e uma mensagem no limite do
+    WhatsApp esgotava o worker (P1 do Codex no #323). O corte é só de TAMANHO —
+    `i` continua limitado pelo allowlist e `fim` pela cortesia, então o conjunto
+    de leituras que PODEM casar é idêntico.
+
+    O que NÃO se faz é voltar ao `re.search` — é ele que fazia
+    `excluir cartao nubank` casar `nubank` e pagar R$ 300. Os dois ataques
+    seguem fora pelas duas pontas: em `excluir cartao nubank` a primeira palavra
+    não é podável e a varredura de prefixo para na hora; em `nubank excluir` o
+    último token não é cortesia e a de sufixo também. Como nem
+    `_PODAVEL_NO_PREFIXO` nem `_CORTESIA_FINAL` contêm verbo de comando, toda
+    leitura de uma mensagem que tenha um continua contendo esse verbo — o que
+    tornou o veto de mensagem inteira que existia aqui código morto, medido e
+    removido — a suíte de `tests/test_pendencia_credito_*.py` fica inteira
+    verde sem ele, e a interseção que garante isso tem teste próprio.
+    """
+    tokens = alvo.split()
+    # `> 1`: resposta que é SÓ cortesia ("obrigado") não pode virar string
+    # vazia e casar um cartão de nome vazio.
+    sem_cortesia = len(tokens)
+    while sem_cortesia > 1 and tokens[sem_cortesia - 1] in _CORTESIA_FINAL:
+        sem_cortesia -= 1
+
+    # Até onde o prefixo pode ser podado: para no PRIMEIRO token fora do
+    # `_PODAVEL_NO_PREFIXO`. É a diferença entre fechar a classe por construção
+    # e fechá-la por enumeração — ver a nota do conjunto.
+    podavel = 0
+    while podavel < len(tokens) and tokens[podavel] in _PODAVEL_NO_PREFIXO:
+        podavel += 1
+
+    leituras: set[str] = set()
+    # Todo corte de sufixo entre "nenhuma cortesia aparada" e "toda aparada",
+    # não só os dois extremos: a poda é gulosa e em `nubank pf por favor` ela
+    # comeria o `pf` junto, deixando sem o `nubank pf`, que é o nome do cartão.
+    #
+    # `min(podavel, fim - 1)`: o `fim - 1` garante leitura não vazia (a mesma
+    # razão do `> 1` acima), e o `podavel` é o allowlist. A leitura também
+    # termina SEMPRE no fim (só se poda prefixo, nunca miolo nem cauda) — é isso
+    # que mantém `nubank fatura` e `nubank saldo` fora, porque ali o nome não é
+    # sufixo da mensagem.
+    for fim in range(len(tokens), sem_cortesia - 1, -1):
+        for i in range(max(0, fim - max_tokens), min(podavel, fim - 1) + 1):
+            leituras.add(" ".join(tokens[i:fim]))
+    return sorted(leituras, key=len, reverse=True)
+
+
+def _card_name_da_resposta(user_id: int, answer: str):
+    """Id do cartão quando a MENSAGEM INTEIRA é a resposta — não substring.
+
+    `_find_card_name_in_text` é para COMANDO, e nos oito chamadores dela casar
+    dentro da frase é CERTO ("parcelei 500 no nubank"). Numa RESPOSTA é errado,
+    e caro: `excluir cartao nubank` respondendo "qual fatura?" casava "nubank"
+    e PAGAVA R$ 300.
+
+    Normaliza OS DOIS LADOS, como o `_find_card_name_in_text` já fazia — é o que
+    dobra acento e pontuação, e é por isso que ele achava `Itaú`/`C6-Carbon` e a
+    versão anterior daqui não (ela normalizava só a resposta e consultava o
+    `get_card_id_by_name`, que só faz `lower()`). O que NÃO se reusa dele é o
+    `re.search` de substring, que é justamente o defeito.
+
+    Compara por IGUALDADE contra as leituras da resposta, nunca por substring.
+    # ponytail: filler fixo; se aparecer variante regional, some nela.
+    """
+    alvo = normalize_text(answer)
+    if not alvo:
+        return None
+    # Percorre as LEITURAS (mais longa primeiro), não os cartões: a ordem é o
+    # desempate entre `Nubank` e `Nubank PF`, e iterar os cartões a perderia.
+    por_nome: dict[str, int] = {}
+    for card in list_cards(user_id):
+        nome = normalize_text(card["name"])
+        if nome:
+            por_nome.setdefault(nome, card["id"])
+    if not por_nome:
+        return None
+    # O `min` é o que fecha o buraco do maior nome GUARDADO: `credit_cards.name`
+    # é `text` e o teto de `validate_card_name` nasceu neste PR, então linha
+    # antiga (ou vinda do Open Finance antes da poda) pode ter mil tokens e
+    # devolver o produto cartesiano que o corte tinha eliminado — o limite era
+    # controlado pelo atacante (P1 do Codex no #323). Validação nova não
+    # conserta dado velho; o teto absoluto conserta.
+    #
+    # O teto SAI do limite de caracteres (§0.7) e por isso não corta nome
+    # válido: nome de N caracteres tem no máximo (N+1)//2 tokens. O que ele
+    # corta é só nome fora do limite atual — que deixa de casar por resposta de
+    # pendência, e o custo prático disso é uma re-pergunta ("qual cartão?") até
+    # o usuário renomeá-lo para dentro do teto.
+    max_tokens = min(max(len(nome.split()) for nome in por_nome),
+                     (MAX_CARD_NAME_LEN + 1) // 2)
+    for leitura in _leituras_da_resposta(alvo, max_tokens):
+        if leitura in por_nome:
+            return por_nome[leitura]
+    return None
+
+
+# Palavras que acompanham um número numa RESPOSTA sem mudar o assunto dela.
+#
+# Divide-se em DUAS fatias de propósito, porque só uma delas é nossa:
+#
+# 1. `_FALA_E_MOEDA` — unidade de dinheiro e enchimento de fala. Isto NÃO é
+#    nosso: é a mesma coisa que o `MEMORY_STOP_TOKENS` (`utils_text.py`) já
+#    enumera, e escrever a segunda lista foi como nasceram quatro divergências
+#    medidas — `5000 pila` passava e `5000 pilas` não, `acho que 5000` era
+#    recusado com "acho" na lista canônica desde sempre.
+#    SELEÇÃO e não reuso literal: a lista canônica tem `dashboard`, `eu` e
+#    `meu`, e reusá-la inteira faria `dashboard 5000` virar limite. O
+#    `test_fala_e_moeda_nao_divergiu_do_memory_stop_tokens` prova que a seleção
+#    continua existindo na origem — renomeie um token lá e ele morre (§0.7).
+_FALA_E_MOEDA = MEMORY_STOP_TOKENS & {
+    "reais", "real", "centavos", "centavo", "conto", "contos",
+    "pila", "pilas", "mango", "mangos",
+    "acho", "tipo", "ai", "valor", "mais", "menos", "acredita",
+}
+
+# 2. `_UNIDADE_DE_CARTAO` — vocabulário DESTA pergunta (dia de fechamento,
+#    vencimento, limite). Não existe em lugar nenhum do repositório, e por isso
+#    é escrito aqui. "mil"/"milhão" entram aqui e não no vocabulário de números
+#    por extenso porque lá eles são MULTIPLICADOR, tratado à parte no
+#    `parse_money`. "r"/"rs" são a borda de "R$ 5.000,00" depois do
+#    `normalize_text` (que vira "r 5 000 00").
+_UNIDADE_DE_CARTAO = {
+    "r", "rs", "limite",
+    "mil", "milhao", "milhoes", "bilhao", "bilhoes",
+    "dia", "dias", "todo", "toda", "todos", "todas", "cada",
+    "mes", "meses", "antes", "depois", "fecha", "fechamento", "fechar",
+    "vence", "vencimento", "vencer", "e", "que", "uns", "umas", "por", "volta",
+    "cerca", "aproximadamente", "ate",
+}
+
+# A rodada 8 tinha aqui uma terceira fatia, `_VERBO_CONVERSACIONAL`
+# ("pode", "quero", "colocar"...), para aceitar resposta numérica dita
+# conversando. Ela MORREU na rodada 9 e não foi substituída: verbo do português
+# é conjunto ABERTO — faltavam `coloque`, `bote`, `ponha`, `deixe` — e a
+# segunda via do `_so_numero` (o oráculo `out_of_scope`) cobre a categoria
+# inteira sem enumerar nada. Medido: com e sem a lista, resultado IDÊNTICO nas
+# 64 strings do corpus (45 legítimas + 19 ataques). Enumerar conjugação era
+# garantir uma rodada de revisão por verbo esquecido.
+_UNIDADE_DE_RESPOSTA = _FALA_E_MOEDA | _UNIDADE_DE_CARTAO
+
+
+# `PT_NUM_ALT` (público desde sempre, `utils_text.py`) em vez de uma cópia do
+# dicionário: é a MESMA fonte que o `parse_money` usa, e as regexes derivadas
+# dele são congeladas no import — o conjunto cru não é exposto de propósito.
+_NUM_POR_EXTENSO_RE = re.compile(rf"(?:{PT_NUM_ALT})", re.IGNORECASE)
+
+
+def _so_numero(text: str) -> bool:
+    """A resposta traz um número e NENHUM comando reconhecível?
+
+    NÃO é "tem formato de número". Os parsers deste arquivo (`_parse_day`,
+    `parse_money`) fazem `search`, não `fullmatch`: acham o número DENTRO da
+    frase, e é assim que "gastei 50 no mercado" respondendo "qual o limite?"
+    gravava limite de R$ 50,00. O portão existe para recusar ESSE caso.
+
+    DUAS VIAS, em união, porque cada uma cobre o furo da outra — medido:
+
+    1. TOKENS: sobra alguma palavra que mude o assunto depois de tirar número,
+       filler, unidade e verbo de preenchimento? Cobre o vocabulário de moeda e
+       de fala ("5 mil", "3 dias antes", "5000 pilas", "5 de cada mes"), que o
+       classificador lê como `launches.add` e recusaria.
+    2. ORÁCULO: `classify(..., allow_ai=False).intent == "out_of_scope"`, ou
+       seja, o classificador NÃO reconheceu comando nenhum. Cobre a conjugação
+       que a lista de verbos nunca vai fechar — "coloque 5000", "bote 3000",
+       "ponha 5000", "quero que seja dia 10" são todos `out_of_scope/0.00`.
+       Verbo do português é conjunto ABERTO, e enumerar era garantir uma
+       rodada de revisão por conjugação esquecida.
+
+    POR QUE UNIÃO E NÃO SÓ O ORÁCULO (medido nesta árvore): sozinho, ele
+    QUEBRA 10 respostas legítimas que hoje funcionam — `5 mil`, `10 mil`,
+    `3 dias`, `3 dias antes`, `5 de cada mes`, `5000 pila`, `5000 pilas`,
+    `5000 contos`, `5000 mangos` e `5 mil reais e 50 centavos` classificam
+    `launches.add/0.95`, não `out_of_scope`. Trocar tokens POR oráculo seria
+    reabrir exatamente o R3-2.
+
+    O CUSTO da união, enumerado (só estes dois no corpus adversarial): as
+    frases sem comando reconhecível mas com assunto próprio — "dashboard 5000",
+    "quero comprar uma tv de 5000" — passam a ser aceitas e gravam 5000. É
+    METADADO (limite, dia de fechamento, dias de aviso), nunca dinheiro: o
+    `_so_numero` só guarda `closing_day`, `due_day`, `reminder_days` e
+    `credit_limit_ask`. O erro é visível na confirmação e o usuário corrige;
+    o erro oposto — recusar resposta legítima — já custou quatro rodadas.
+
+    `allow_ai=False` é requisito, não otimização: mesma razão do
+    `abandona_pergunta_de_credito` — com o tier 3 no meio o oráculo volta a ser
+    ilimitado e uma alucinação do LLM passa a decidir o portão.
+    """
+    tokens = normalize_text(text).split()
+    if not tokens:
+        return False
+    e_numero = lambda t: t.isdigit() or _NUM_POR_EXTENSO_RE.fullmatch(t)
+    if not any(e_numero(t) for t in tokens):
+        return False  # "nao", "sim", "amanha": não há número nenhum a ler
+    if all(e_numero(t) or t in _UNIDADE_DE_RESPOSTA or t in _FILLER
+           for t in tokens):
+        return True
+    return classify(text, allow_ai=False).intent == "out_of_scope"
+
+
+# ---------------------------------------------------------------------------
+# RESPOSTA NÃO RECONHECIDA: RE-PERGUNTAR ou ABANDONAR?
+#
+# A regra é UMA, e está escrita aqui porque ela se aplica a nove portões
+# espalhados por este arquivo — deixá-la implícita é como a próxima rodada
+# uniformiza os nove e reabre o footgun.
+#
+#   Manter a pergunta viva ARMA UM GATILHO DESTRUTIVO?
+#     SIM  -> `return None`: o `route()` abandona a pendência com aviso.
+#     NÃO  -> devolve a re-pergunta: a pendência segue viva.
+#
+# Por que re-perguntar é seguro no caso NÃO: o `route()` já testou a allowlist
+# de comandos (`abandona_pergunta_de_credito`) ANTES de chamar este arquivo.
+# Se a mensagem chegou aqui, ela não é comando conhecido — é muito mais provável
+# ser uma resposta malformada ("setembro/2026", "a primeira", "09/2026") do que
+# um comando, e para essas a re-pergunta é exatamente o que ajuda. Abandonar
+# daria "🔕 Cancelei a pergunta anterior" + "não entendi", que é pior.
+#
+# Por que abandonar é obrigatório no caso SIM: manter viva uma CONFIRMAÇÃO
+# destrutiva é precisamente o que o `sim` do turno seguinte vira delete em
+# cascata ("excluir cartao nubank" -> "tchau" -> "sim"). Perder a pergunta é
+# fail-safe, e é a mesma escolha que o `docs/armadilhas.md` registra.
+#
+# ABANDONAM (o `sim` seguinte destruiria):
+#   `_resolve_delete_card`, `_resolve_set_primary` confirm,
+#   step `confirm_delete_existing_card`  -> o `sim` seguinte APAGA cartão;
+#   step `set_primary`                   -> o `sim` seguinte TROCA o principal;
+#   step `reminder_opt_in`               -> o `sim` seguinte LIGA o lembrete;
+# NEM UM NEM OUTRO: o step `duplicate_card_name` é TEXTO LIVRE (o usuário
+#   inventa um nome novo de cartão), então "não reconheci" não distingue
+#   resposta de comando e o portão não existe. Resposta vazia ali é CANCELAR,
+#   igual aos dois irmãos deste arquivo.
+# RE-PERGUNTAM (nada a armar; `sim` não é resposta válida em nenhum deles):
+#   `_resolve_pay_bill_choice`     -> `sim` não é referência de fatura;
+#   `_resolve_set_primary` step `choose` -> `sim` não é nome de cartão;
+#   steps `closing_day`, `due_day`, `reminder_days`, `credit_limit_ask`
+#                                  -> `sim` não é número.
+#
+# O que separa os dois grupos é UMA pergunta, e ela é sempre a mesma: o texto
+# do PRÓXIMO turno pode ser lido como um "sim" que dispara algo? Nos de cima o
+# handler lê sim/não; nos de baixo ele lê número, nome ou referência de fatura,
+# e um "sim" solto não é nenhum dos três.
+# ---------------------------------------------------------------------------
 
 
 def _extract_unknown_card_candidate(text: str) -> str | None:
@@ -669,8 +1007,42 @@ def _is_yes(text: str) -> bool:
     return normalize_text(text) in {"sim", "s", "yes", "y", "quero", "claro", "ok", "pode"}
 
 
+# IMPORTADAS do classificador (§0.7), não copiadas: `NEGATIVAS_EXATAS` é a
+# seleção de `confirm.no` do `_EXACT`. A cópia à mão perdia CINCO das dez
+# (`nope`, `negativo`, `melhor nao`, `deixa pra la`, `deixa quieto`) — frases
+# que o classificador chama de negativa e o portão daqui não reconhecia (Codex,
+# #323). `nao`/`agora nao` já vinham de lá; as versões acentuadas saíram porque
+# o `normalize_text` tira acento antes da comparação e elas eram inalcançáveis.
+#
+# `n` e `no` ficam à mão: soltos são ambíguos demais para o `_EXACT`, que é
+# global, mas aqui já existe uma pergunta de sim/não na mesa.
+_NEGATIVAS_EXATAS = NEGATIVAS_EXATAS | {"n", "no"}
+
+
 def _is_no(text: str) -> bool:
-    return normalize_text(text) in {"nao", "não", "n", "no", "cancelar", "cancela", "agora nao", "agora não"}
+    """Negativa, em pergunta de sim/não.
+
+    UNIÃO, não substituição: as negativas canônicas do classificador MAIS
+    "começa com não". Só os literais deixavam de fora a negativa natural —
+    `nao quero`, `não obrigado`,
+    `nao precisa`, `nao agora` —, e o efeito não era só "não entendi": o portão
+    devolvia `None`, o `route()` abandonava, e `não quero` (que é
+    `confirm.no/1.00`) saía como **"Nada a cancelar."**, resposta de outro
+    assunto, pulando o resto do cadastro.
+
+    Medido: das 19 positivas do corpus (`sim`, `quero sim`, `pode sim`,
+    `claro que sim`, `beleza`...), NENHUMA começa com "não" — a união não
+    ambigua nada.
+
+    O lado positivo NÃO ganhou regra equivalente, e é decisão, não esquecimento:
+    `_is_yes` também perde `quero sim`/`pode sim`, mas alargar o SIM é alargar o
+    gatilho de uma confirmação DESTRUTIVA (`_resolve_delete_card`,
+    `confirm_delete_existing_card`). Não reconhecer um "sim" é fail-safe — o
+    cartão fica de pé; não reconhecer um "não" é só confuso. As duas pontas não
+    correm o mesmo risco, igual ao `_CORTESIA_FINAL`.
+    """
+    norm = normalize_text(text)
+    return norm in _NEGATIVAS_EXATAS or norm.startswith(("nao ", "não "))
 
 
 def _is_delete(text: str) -> bool:
@@ -712,6 +1084,23 @@ def _parse_day(text: str) -> int | None:
     day = int(m.group(1))
     if 1 <= day <= 31:
         return day
+    return None
+
+
+def _recusa_nome_longo(name: str) -> str | None:
+    """Mensagem de recusa se `name` estoura o teto do banco, senão `None`.
+
+    Fonte única da recusa nos QUATRO pontos deste arquivo onde um nome de
+    cartão é ACEITO (nome inferido do comando, step `name`, substituto do
+    `duplicate_card_name`, e o comando inline com fecha/vence). Validar na
+    ENTRADA e não em cada `create_card` é o que fecha a categoria: quem chega
+    ao banco lê `payload["card_name"]`, e o payload só é escrito por estes
+    quatro. Sem isto, o `ValueError("nome_muito_longo:N")` estourava dois
+    steps adiante — e o `except` de lá só pega `PlanLimitExceeded`.
+    """
+    if len(name) > MAX_CARD_NAME_LEN:
+        return (f"Esse nome é muito longo (máx. **{MAX_CARD_NAME_LEN}** caracteres). "
+                "Me diga um mais curto. Ex: **Nubank**")
     return None
 
 
@@ -1064,6 +1453,13 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
     inferred_name = _parse_card_name_from_create(text)
     inferred_closing, inferred_due = _parse_inline_days(text) if text else (None, None)
 
+    # Nome inferido longo demais: esquece o nome e cai no fluxo que PEDE o nome
+    # (step `name`), dizendo o porquê em vez da pergunta genérica. Antes daqui
+    # ele seguia adiante e só quebrava no `create_card`, dois steps depois.
+    recusa = _recusa_nome_longo(inferred_name or "")
+    if recusa:
+        inferred_name = None
+
     # Detecta duplicata imediatamente ao inferir o nome
     if inferred_name and card_name_exists(user_id, inferred_name):
         payload = {
@@ -1117,7 +1513,7 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
         return f"Perfeito. E qual é o dia de vencimento do cartão **{inferred_name}**?"
     if inferred_name:
         return f"Perfeito. Quando fecha a fatura do cartão **{inferred_name}**?"
-    return "Qual cartão deseja registrar?"
+    return recusa or "Qual cartão deseja registrar?"
 
 
 def _ask_set_primary_flow(user_id: int, card_name: str | None = None) -> str:
@@ -1153,9 +1549,13 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
         if _is_no(answer):
             consume_pending_action(user_id, pending)
             return "Perfeito. Mantive o cartão principal atual."
-        card_name = _find_card_name_in_text(user_id, answer) or answer.strip()
-        card_id = get_card_id_by_name(user_id, card_name)
+        card_id = (get_card_id_by_name(user_id, answer.strip())
+                   or _card_name_da_resposta(user_id, answer))
         if not card_id:
+            # RE-PERGUNTA (regra acima): o turno seguinte deste step só é lido
+            # como NOME de cartão — um `sim` velho vira
+            # `get_card_id_by_name("sim")` → None e cai aqui de novo. Nada a
+            # armar, então abandonar só custaria o fluxo do usuário.
             return "Não encontrei esse cartão. Me diga o nome exatamente como aparece na lista."
         set_pending_action(user_id, "credit_card_set_primary", {"card_id": card_id}, minutes=20)
         card = get_card_by_id(user_id, card_id)
@@ -1184,7 +1584,12 @@ def _resolve_set_primary(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return "Perfeito. Mantive o cartão principal atual."
 
-    return f"Responda **sim** para tornar **{card['name']}** o principal ou **não** para cancelar."
+    # `None`: sim/não é mundo fechado — os dois conjuntos são literais em
+    # `_is_yes`/`_is_no` logo acima; conte com
+    #   grep -A1 'def _is_yes\|def _is_no' core/handlers/credit.py
+    # Qualquer coisa fora deles não é resposta, e esta pendência sequestrava a
+    # conversa.
+    return None
 
 
 def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
@@ -1214,7 +1619,10 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
         consume_pending_action(user_id, pending)
         return f"Perfeito. Mantive o cartão **{card_name}**."
 
-    return f"Responda **sim** para excluir **{card_name}** ou **não** para cancelar."
+    # `None`: idem. É o footgun de 3 turnos — "excluir cartao nubank" → "oi" →
+    # "sim" apagava o cartão, e `oi` é out_of_scope/0.00 (nenhuma allowlist de
+    # intent o pegaria).
+    return None
 
 
 def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str | None:
@@ -1288,7 +1696,22 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         # Usuário digitou um novo nome
         new_name = answer.strip()
         if not new_name:
-            return "Digite o novo nome do cartão ou **excluir** para remover o existente."
+            # Vazio = desistiu, igual aos dois irmãos deste arquivo (o
+            # `_is_no` deste mesmo step, logo acima, e o do
+            # `_resolve_pay_bill_choice`). Antes eram TRÊS comportamentos para o
+            # mesmo caso no mesmo arquivo: cancelar, cancelar e abandonar.
+            # Inalcançável hoje — `core/handle_incoming.py` devolve [] com texto
+            # vazio antes de chegar aqui —, e é por isso que alinhar sai mais
+            # barato que manter a terceira leitura.
+            consume_pending_action(user_id, pending)
+            return "❌ Cadastro de cartão cancelado."
+
+        # Substituto longo demais: o pending fica DE PÉ no mesmo step, então ele
+        # digita outro nome na sequência — sem isto, o `create_card` de dois
+        # blocos abaixo levantava com o payload já completo.
+        recusa = _recusa_nome_longo(new_name)
+        if recusa:
+            return recusa
 
         # Verifica se o novo nome também é duplicado
         if card_name_exists(user_id, new_name):
@@ -1373,7 +1796,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
                 "Digite um **novo nome** para o cartão ou **cancelar** para desistir."
             )
 
-        return f"Responda **sim** para excluir **{existing_name}** ou **não** para cancelar."
+        # `None`: sim/não é mundo fechado. Mesmo footgun destrutivo do
+        # `_resolve_delete_card` — este step também apaga cartão em cascata.
+        return None
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -1384,6 +1809,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         name = name.strip()
         if not name:
             return "Qual é o nome do cartão? Ex: **Nubank**"
+        # Re-pergunta em vez de deixar o `create_card` levantar dois passos
+        # adiante, quando o usuário já tiver respondido fechamento e vencimento.
+        recusa = _recusa_nome_longo(name)
+        if recusa:
+            return recusa
 
         # Detecta duplicata antes de pedir os dias
         if card_name_exists(user_id, name):
@@ -1396,6 +1826,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         return f"Quando fecha a fatura do cartão **{name}**?"
 
     if step == "closing_day":
+        # Portão de FORMA antes do parser: `_parse_day` faz `search` e acharia o
+        # 10 de "gastei 10 no mercado". RE-PERGUNTA (regra acima): perder o
+        # cadastro do cartão no meio é chato e não há gatilho a armar.
+        if not _so_numero(answer):
+            return "Me diga o dia de fechamento com um número entre **1** e **31**. Ex: **dia 1**."
         closing_day = _parse_day(answer)
         if closing_day is None:
             return "Me diga o dia de fechamento com um número entre **1** e **31**. Ex: **dia 1**."
@@ -1405,6 +1840,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         return f"Quando vence a fatura do cartão **{payload['card_name']}**?"
 
     if step == "due_day":
+        if not _so_numero(answer):
+            return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
         due_day = _parse_day(answer)
         if due_day is None:
             return "Me diga o dia de vencimento com um número entre **1** e **31**. Ex: **dia 8**."
@@ -1446,6 +1883,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "reminder_opt_in":
         card_id = int(payload["card_id"])
+        # ABANDONA (regra acima): é pergunta de sim/não, e um `sim` velho aqui
+        # liga lembrete sozinho. Sem este portão, QUALQUER texto caía no
+        # `enabled=False` lá embaixo — "saldo" desligava o lembrete.
+        if not _is_yes(answer) and not _is_no(answer):
+            return None
         if _is_yes(answer):
             payload["step"] = "reminder_days"
             set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
@@ -1456,6 +1898,8 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "reminder_days":
         card_id = int(payload["card_id"])
+        if not _so_numero(answer):
+            return "Me diga em quantos dias antes devo avisar. Ex: **3**."
         days_before = _parse_day(answer)
         if days_before is None:
             return "Me diga em quantos dias antes devo avisar. Ex: **3**."
@@ -1464,6 +1908,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "credit_limit_ask":
         card_id = int(payload["card_id"])
+        # Portão de FORMA antes do `parse_money` (que NÃO é tocado): ele faz
+        # `search` e "gastei 50 no mercado" gravava limite de R$ 50,00.
+        # RE-PERGUNTA (regra acima).
+        if not _is_no(answer) and not _so_numero(answer):
+            return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
         if _is_no(answer):
             return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
         limit_val = parse_money(answer)
@@ -1475,6 +1924,11 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
 
     if step == "set_primary":
         card_id = int(payload["card_id"])
+        # ABANDONA (regra acima): sim/não, e um `sim` velho troca o cartão
+        # principal sozinho. Sem o portão, qualquer texto caía no "Mantive o
+        # principal atual" lá embaixo e consumia a pergunta.
+        if not _is_yes(answer) and not _is_no(answer):
+            return None
         card = get_card_by_id(user_id, card_id)
         if not card:
             consume_pending_action(user_id, pending)
@@ -1652,7 +2106,10 @@ def handle(user_id: int, text: str) -> str | None:
             t,
             re.IGNORECASE,
         )
-        if not m:
+        # Nome longo demais cai no fluxo por steps, que recusa com mensagem e
+        # já deixa o pending no step `name` — aqui embaixo não há pending, e o
+        # `except Exception` do fim devolveria o `nome_muito_longo:N` cru.
+        if not m or _recusa_nome_longo(m.group(1).strip()):
             return start_card_create_flow(user_id, t)
 
         name = m.group(1).strip()

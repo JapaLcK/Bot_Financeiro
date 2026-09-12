@@ -18,6 +18,16 @@ CONTROLES NEGATIVOS MEDIDOS (um a um, com o resto do grupo verde):
   * dê default a `ASAAS_MIN_CHARGE_CENTS` →
     `test_env_de_dinheiro_ausente_recusa_a_venda` VERMELHO, e é o caso em que um
     número inventado vira cobrança de verdade;
+  * devolva a leitura da env para `if not bruto.isdigit() or int(bruto) <= 0` →
+    `test_env_de_dinheiro_malformada_recusa_a_venda` VERMELHO em `²` (o `int()`
+    estoura, 500 no lugar do 503) e em `٥٠٠` (`int("٥٠٠") == 500` e a venda SAI, a
+    500 centavos que ninguém digitou). `-5` e `abc` seguem verdes com e sem.
+    **O que a guarda fecha é o ALFABETO, não a FAIXA**: `'9'*30` é aceito como
+    mínimo, e um mínimo maior que o crédito faz `plano_da_cobranca` DESCARTAR o
+    crédito e AGENDAR a compra (medido em 2026-09-10, chamando a função pura com um
+    grant Pix de 30 dias restantes: crédito 1636 → 0, cobrança 48264 → 49900,
+    `agendada` False → True). Teto conhecido e deixado de fora de propósito —
+    nenhum limite salva `500` digitado como `5000`, e onde cortar é do dono;
   * apague a guarda de `grandfathered` de `criar_checkout` →
     `test_vitalicio_nao_compra_o_anual` VERMELHO, com a cobrança criada e o Asaas
     chamado — o dinheiro entrando por acesso que o cliente já tem.
@@ -71,8 +81,18 @@ def test_venda_nova_emite_pending_com_o_qr_cifrado(user_id, vendavel, asaas_fals
     assert r["qr_image"].startswith("data:image/svg+xml;base64,")
     assert r["public_token"] == linha["public_token"]
     assert set(r) == {"public_token", "qr_payload", "qr_image", "expires_at",
-                      "amount_cents", "credit_cents", "starts_at", "plan"}, (
+                      "amount_cents", "credit_cents", "starts_at", "agendada",
+                      "plan"}, (
         "o contrato que a tela do PR 2 consome mudou de forma"
+    )
+    # O PAR que prova por que `agendada` teve de existir: nesta compra — conta
+    # `free`, sem plano nenhum — o acesso é IMEDIATO e mesmo assim `starts_at`
+    # vem preenchido (com `agora`). A tela gatilhava pela presença da data e
+    # dizia "começa em <hoje>, assim que o plano atual terminar" a quem já tinha
+    # acesso e nunca teve plano.
+    assert r["starts_at"] is not None, "o contrato perdeu a data do começo"
+    assert r["agendada"] is False, (
+        f"compra imediata marcada como agendada: starts_at={r['starts_at']}"
     )
 
 
@@ -103,6 +123,27 @@ def test_env_de_dinheiro_ausente_recusa_a_venda(user_id, vendavel, asaas_falso,
     """
     conta(user_id, "free", None)
     monkeypatch.delenv("ASAAS_MIN_CHARGE_CENTS")
+    with pytest.raises(CheckoutIndisponivel):
+        _comprar(user_id)
+    assert _linhas(user_id) == [] and asaas_falso["ordem"] == []
+
+
+@pytest.mark.parametrize("bruto", ["²", "٥٠٠", "-5", "abc"])
+def test_env_de_dinheiro_malformada_recusa_a_venda(user_id, vendavel, asaas_falso,
+                                                   monkeypatch, bruto):
+    """DISCRIMINA. Env com dígito que não é 0-9 é o mesmo estado da ausente: recusa.
+
+    Os dois primeiros casos são os que mordiam. `"²"` tem `isdigit()` True e
+    `int()` que estoura — `ValueError` cru saindo do contrato do módulo. `"٥٠٠"`
+    é pior porque é silencioso: `int("٥٠٠") == 500` (medido), então a venda ia
+    até o fim com um mínimo que ninguém digitou. `-5` e `abc` já eram recusados
+    com e sem o conserto, e estão aqui como a moldura da categoria.
+
+    O que este grupo NÃO mede: valor absurdo em dígito ASCII. `'9'*30` passa e a
+    venda sai (ver o topo) — o conserto fechou o alfabeto, não a faixa.
+    """
+    conta(user_id, "free", None)
+    monkeypatch.setenv("ASAAS_MIN_CHARGE_CENTS", bruto)
     with pytest.raises(CheckoutIndisponivel):
         _comprar(user_id)
     assert _linhas(user_id) == [] and asaas_falso["ordem"] == []
@@ -241,3 +282,25 @@ def test_rastreio_e_gravado_e_a_exclusao_o_zera(user_id, vendavel, asaas_falso):
     assert (depois["ga_client_id"], depois["fbp"], depois["fbc"]) == (None, None, None)
     assert depois["qr_payload_enc"] is None
     assert depois["amount_cents"] == PRECO, "o valor financeiro não podia sumir"
+
+
+def test_agendada_sai_da_data_e_nao_da_presenca_dela():
+    """O OUTRO lado do par acima, sem banco: a `resposta()` é função pura.
+
+    `test_venda_nova_emite_pending_com_o_qr_cifrado` prova o imediato
+    (`agendada is False` com `starts_at` preenchido). Sem este, `agendada`
+    poderia ser a constante `False` e aquele caso continuaria verde — a compra
+    agendada é a que carrega a promessa de data para a tela.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from core.services.pix_checkout_resposta import resposta
+
+    base = {"public_token": "tok", "qr_expires_at": None, "amount_cents": 19900,
+            "credit_cents": 0, "plan": "pro", "user_id": 1}
+    agora = datetime.now(timezone.utc)
+    futuro = agora + timedelta(days=40)
+
+    assert resposta(dict(base, access_starts_at=futuro), "000201")["agendada"] is True
+    assert resposta(dict(base, access_starts_at=agora), "000201")["agendada"] is False
+    assert resposta(dict(base, access_starts_at=None), "000201")["agendada"] is False
