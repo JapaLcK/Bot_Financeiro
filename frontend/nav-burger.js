@@ -32,7 +32,8 @@
       /* alvo de toque 44×44 (mínimo iOS/WCAG) mesmo com o glifo pequeno */
       ".pb-burger{order:3;display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin-left:0;padding:0;flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:12px;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;font-family:inherit}",
       ".pb-burger:hover{background:rgba(255,255,255,.12)}",
-      ".nav .nav-links{order:4;display:none;width:100%;flex-direction:column;align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}",
+      ".nav .nav-links{order:4;display:flex;width:100%;flex-direction:column;align-items:stretch;gap:2px;margin:10px 0 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}",
+      ".nav.pb-nav-ready .nav-links{display:none}",
       ".nav.pb-nav-open .nav-links{display:flex}",
       /* linha de 44px: item de menu, não link solto no meio da barra */
       ".nav .nav-links a{font-size:.95rem;white-space:nowrap;padding:11px 12px;border-radius:10px;min-height:44px;display:flex;align-items:center}",
@@ -103,6 +104,7 @@
     else if (mq.addListener) mq.addListener(onBreakpoint); // Safari < 14
 
     nav.insertBefore(b, links);
+    nav.classList.add("pb-nav-ready");
   }
 
   injectStyles();

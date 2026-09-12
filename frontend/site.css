@@ -185,7 +185,7 @@ img { max-width: 100%; display: block; }
 .trust .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px rgba(198,241,26,.6); }
 
 .hero-visual { position: relative; min-height: 500px; }
-.hero-mascot { position: absolute; left: -18px; bottom: -10px; width: 208px; z-index: 3; filter: drop-shadow(0 16px 30px rgba(0,0,0,.55)); pointer-events: none; }
+.hero-mascot { position: absolute; left: -18px; bottom: -10px; width: 208px; height: auto; z-index: 3; filter: drop-shadow(0 16px 30px rgba(0,0,0,.55)); pointer-events: none; }
 
 .chat-card {
   position: relative; z-index: 2; margin: 0 0 -30px auto; width: min(300px,86%);
@@ -260,7 +260,9 @@ img { max-width: 100%; display: block; }
   .tech-visual { order: -1; }
 }
 @media (max-width: 900px) {
-  .nav-links { display: none; }
+  .nav { flex-wrap: wrap; }
+  /* Os links só recolhem depois que o botão do menu está disponível. */
+  .nav-links { display: flex; flex-wrap: wrap; width: 100%; }
   .section { padding: 60px 0; }
   /* Alvo de toque na barra mobile: 44px (mínimo iOS/WCAG 2.5.5), o mesmo piso
      que o .pb-burger do nav-burger.js já respeita — e 900px é o mesmo gate que ele
@@ -749,3 +751,8 @@ section[id] { scroll-margin-top: 96px; }
 .sec-note .icon-box { margin: 2px 0 0; font-size: 1.6rem; flex: none; }
 .sec-note h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
 .sec-note p { color: var(--ink-2); font-size: .95rem; line-height: 1.6; }
+
+/* Mantém nomes longos na linha da navegação sem reduzir os alvos de toque. */
+@media (max-width: 480px) {
+  .nav .pb-acct-lbl { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

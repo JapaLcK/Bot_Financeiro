@@ -249,31 +249,18 @@ test("8) a regra de column-gap da site.css vence o #pb-nav-css injetado", async 
   await b2.ctx.close();
 });
 
-/* PENDÊNCIA NOMINAL, não regressão: com rótulo longo a barra logada continua em
-   2 faixas, exatamente como na base. Medido (sobra, rótulo -> largura):
-       "Ana Beatriz"      (11)  320 +10,8   341 +9,8    360 +28,8   375 +43,8
-       "Lucas Kuramoti"   (14)  320 -19,2   341 -20,2   360  -1,2   375 +13,8
-       "lucaskuramoti06"  (15)  320 -29,2   341 -30,2   360 -11,2   375  +3,8
-   O conserto não alcança este caso: a 341 e 360 a coluna é idêntica à da base.
-   Este caso trava o status quo para que ele não se perca de vista.
-
-   SE ELE FICAR VERMELHO, NÃO ATUALIZE A TABELA DIRETO. "Passou a caber" tem
-   causa legítima e causa ilegítima, e as duas produzem exatamente este vermelho:
-     · legítimo  — alguém apertou o botão da conta de propósito (truncar o
-       rótulo, encolher padding) e mediu; aí sim, atualize a tabela e a pendência;
-     · ilegítimo — alguma COISA ENCOLHEU SEM QUERER e liberou espaço. Já
-       aconteceu na bancada: pôr o logo em `height:12px` faz a barra caber e
-       deixa este caso vermelho sozinho, com tudo o mais verde.
-   Descubra POR QUE passou a caber antes de mexer aqui: compare o logo (caso 11),
-   o botão da conta e o burger com os tamanhos documentados. */
-test("9) 360 logado com rótulo longo AINDA não cabe (pendência conhecida)", async () => {
-  const { ctx, page } = await abrirNav(360, { logado: true, rotulo: "lucaskuramoti06" });
-  const m = await medir(page);
-  assert.equal(m.faixas, 2,
-    `360 com rótulo de 15 chars agora dá ${m.faixas} faixa(s), sobra ${m.sobra}. ` +
-    "ANTES de atualizar a tabela: descubra o que encolheu (logo? botão da conta?) — " +
-    "ver o comentário acima deste caso.");
-  await ctx.close();
+/* O rótulo trunca visualmente; seu texto e os alvos de toque são preservados. */
+test("9) nomes longos cabem sem reduzir os botões ou o logo", async () => {
+  for (const width of [320, 341, 360, 375]) {
+    const { ctx, page } = await abrirNav(width, { logado: true, rotulo: "lucaskuramoti06" });
+    const m = await medir(page);
+    umaFaixa(m, `${width} logado com nome longo`);
+    assert.ok(m.alvos.burger.w >= 44 && m.alvos.burger.h >= 44);
+    assert.ok(m.alvos.conta.h >= 44);
+    assert.equal(m.rotulo, "lucaskuramoti06");
+    assert.equal(await page.$eval(".pb-acct-lbl", e => getComputedStyle(e).textOverflow), "ellipsis");
+    await ctx.close();
+  }
 });
 
 /* O painel da conta (288px fixos, `right:0`) transbordava PELA ESQUERDA depois
@@ -345,4 +332,21 @@ test("11) o logo nunca é esmagado nem encolhido (aspecto E tamanho)", async () 
       `${w}px: o logo renderizou com ${g.w}px de largura, esperado ~101,16`);
     await ctx.close();
   }
+});
+
+
+test("12) links públicos continuam acessíveis quando nav-burger.js falha", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 320, height: 720 } });
+  await ctx.route("**/nav-burger.js*", r => r.fulfill({ status: 404, body: "" }));
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/index.html`);
+  assert.equal(await page.locator(".pb-burger").count(), 0);
+  const links = page.locator(".nav-links a");
+  assert.ok(await links.count() >= 5);
+  for (const link of await links.all()) {
+    assert.equal(await link.isVisible(), true);
+    const box = await link.boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= 320);
+  }
+  await ctx.close();
 });

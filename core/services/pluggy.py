@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from core.pg_text import limpa_para_pg
 from core.services.pluggy_health import safe_code
 
 
@@ -95,6 +96,24 @@ def create_pluggy_api_key() -> str:
     return str(api_key)
 
 
+# `limpa_para_pg` na RESPOSTA da Pluggy (#321): o `raw` de cada conta/transação/
+# item vai a `jsonb` e o `name`/`description` vai a `text`, e o Postgres não
+# guarda NUL nem surrogate solitário em nenhum dos dois. Fronteira diferente da
+# do #320 (lá é corpo de WEBHOOK), e sintoma diferente: isto roda em background,
+# sem 5xx e sem laço de reenvio — a falha não vira erro, vira linha que não nasce.
+#
+# SANEAR e não recusar (ao contrário do `tem_veneno` do path e da query): é blob
+# forense de terceiro, e perder a conta inteira é pior que gravar `U+FFFD` num
+# campo. Mesma política e mesma função do #320 (§0.1/§0.7).
+#
+# Aqui e não nos 8 `Jsonb(...)` de `db/open_finance.py`: `_pluggy_get` é a ÚNICA
+# porta de leitura da API (`/items/{id}`, `/accounts`, `/v2/transactions`,
+# `/investments`, `/connectors` — grep), então um ponto cobre também os campos
+# `text` que os `Jsonb` deixariam de fora. O `PATCH /items/{id}` não passa por
+# aqui e leva a sua própria chamada — os 2 chamadores descartam o retorno HOJE
+# (medido), e ela existe para a porta não ficar meio fechada quando alguém usar.
+# `create_pluggy_api_key` e `create_pluggy_connect_token` ficam de fora: o que
+# devolvem (`apiKey`, `accessToken`) vira header HTTP e hash, nunca linha.
 def _pluggy_get(path: str, api_key: str, params: dict[str, Any] | None = None) -> dict:
     """GET autenticado na Pluggy. `path` começa com '/'."""
     with httpx.Client(timeout=_pluggy_timeout()) as client:
@@ -104,7 +123,7 @@ def _pluggy_get(path: str, api_key: str, params: dict[str, Any] | None = None) -
             params=params or {},
         )
     _raise_for_pluggy_response(resp, f"Falha ao consultar {path} na Pluggy")
-    return resp.json()
+    return limpa_para_pg(resp.json())
 
 
 # O que a Pluggy emite como id de item é um UUID; o que CHEGA aqui pode não ser.
@@ -146,7 +165,7 @@ def update_pluggy_item(item_id: str, api_key: str | None = None) -> dict:
             json={},
         )
     _raise_for_pluggy_response(resp, f"Falha ao atualizar item {item_id} na Pluggy")
-    return resp.json()
+    return limpa_para_pg(resp.json())
 
 
 def delete_pluggy_item(item_id: str, api_key: str | None = None) -> bool:

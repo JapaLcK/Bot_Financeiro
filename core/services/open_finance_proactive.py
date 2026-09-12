@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 
+from core.reports.reports_daily import filtrar_por_acesso
 from utils_text import fmt_brl
 
 from db import (
@@ -49,6 +50,13 @@ def run_salary_notifications() -> dict:
             continue
         if not cand:
             continue
+        # O corte do Grátis, na MESMA posição dos outros laços proativos
+        # (`adapters/whatsapp/wa_app.py`, `core/reports/reports_daily.py`):
+        # depois dos filtros baratos. `list_open_finance_user_ids` não tem termo
+        # de acesso, e sem esta linha um cortado com conexões retidas continua
+        # recebendo o VALOR DO SALÁRIO por template pago.
+        if not filtrar_por_acesso([uid]):
+            continue
         params = [fmt_brl(float(cand["valor"]))]
         for to in _targets(uid):
             try:
@@ -73,6 +81,9 @@ def run_reconnect_notifications() -> dict:
         except Exception:
             continue
         if not need:
+            continue
+        # Mesma razão do irmão do salário, logo acima.
+        if not filtrar_por_acesso([uid]):
             continue
         banks = ", ".join(sorted({(n.get("institution_name") or "seu banco") for n in need}))
         for to in _targets(uid):

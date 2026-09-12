@@ -7611,7 +7611,10 @@ function applyAccessVerdict(me) {
       // App iOS: tela neutra, sem link de compra (diretriz 3.1.1).
       _showAccessError("Conta sem plano ativo", "Sua conta não tem um plano ativo no momento.");
     } else {
-      window.location.replace("/precos?ativar=1");
+      // `escolha=1`, o mesmo marcador da perna de cima: depois do corte do
+      // Grátis as duas pedem a mesma coisa, e é ele que o nav-auth.js
+      // reconhece pra calar os CTAs de marketing da /precos.
+      window.location.replace("/precos?escolha=1");
     }
     return false;
   }

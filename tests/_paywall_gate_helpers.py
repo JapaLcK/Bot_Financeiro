@@ -8,6 +8,7 @@ achando que medem a mesma — mesmo motivo do `tests/_billing_grants_helpers.py`
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -37,11 +38,29 @@ def cadastro_novo() -> int:
 
 
 def com_plano() -> int:
-    """Cadastro que já passou pela /precos — o gate deixa passar. É o controle
-    positivo dos dois arquivos: sem ele, um gate que recusa TODO MUNDO passaria
-    verde."""
+    """Conta PAGANTE: passou pela /precos E tem plano vigente. O gate deixa
+    passar. É o controle positivo dos três arquivos: sem ele, um gate que
+    recusa TODO MUNDO passaria verde.
+
+    O `mark_plan_selected` sozinho NÃO basta mais. Ele fecha só a perna do
+    `needs_plan_selection`; desde o corte do Grátis a outra perna do gate é
+    `has_app_access`, e ela pergunta pelo DIREITO (`plan` + `plan_expires_at`).
+    Uma conta "que escolheu plano" e ficou no Grátis é exatamente quem o corte
+    barra — usá-la como positivo mediria o gate contra si mesmo.
+    """
     uid = cadastro_novo()
     db.mark_plan_selected(uid)
+    db.update_user_plan(uid, "pro", datetime.now(timezone.utc) + timedelta(days=30))
+    return uid
+
+
+def so_whatsapp() -> int:
+    """A população só-WhatsApp: usa o bot e NUNCA fez cadastro web, logo não tem
+    linha em `auth_accounts`. O `core/handle_incoming` a chama de "a maioria
+    aqui". Desde o corte ela é barrada (decisão do dono), e a mensagem do gate é
+    a única comunicação que ela recebe."""
+    uid = int(uuid.uuid4().int % 1_000_000_000)
+    db.ensure_user(uid)
     return uid
 
 
@@ -55,5 +74,13 @@ def diga(uid: int, texto: str, plataforma: str = "whatsapp", anexos=None) -> str
     return "\n".join(m.text for m in out)
 
 
+# A LINHA DO LINK, e não uma frase da copy: as duas formas da mensagem do gate
+# (só-WhatsApp × ex-assinante) dizem coisas diferentes de propósito, e a única
+# coisa que as duas têm — e que nenhuma outra resposta do bot tem — é este
+# convite. `_handle_assinar` também manda para a /precos, mas por link
+# autenticado (`/auth/dashboard-token?...`) e sem o 👉.
+_MARCA_DO_GATE = "👉 https://pigbankai.com/precos"
+
+
 def barrado(resposta: str) -> bool:
-    return "sua conta precisa estar ativa" in resposta.lower()
+    return _MARCA_DO_GATE in resposta
