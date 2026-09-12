@@ -27,7 +27,7 @@
   #plans-v2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #plans-v2 { align-items: end; }
   #plans-v2 .plan.featured { min-height: 700px; }
-  #plans-v2 .plan:nth-child(3) { min-height: 620px; }
+  #plans-v2 .plan:nth-child(3) { min-height: 650px; }
 
 }
 
