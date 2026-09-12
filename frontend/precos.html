@@ -90,15 +90,40 @@
          também traz a equivalência mensal (medido: 32px). */
   #plans-v2 .plan .plan-sub { min-height: 3em; }
   #plans-v2 .price-block { min-height: 98px; display: flex; flex-direction: column; justify-content: center; margin: 6px 0 4px; }
-  #plans-v2 .price-block .price { margin: 0; }
+  #plans-v2 .price-block .price { position: relative; margin: 0; font-variant-numeric: tabular-nums; }
   #plans-v2 .price .per { font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
   #plans-v2 .price-eq, #plans-v2 .price-cycle-copy { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
   @media (prefers-reduced-motion: no-preference) {
-    #plans-v2 .cycle-price-in { animation: cycle-price-in 220ms var(--ease); }
-    @keyframes cycle-price-in {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+    #plans-v2 .price-cycle-copy.cycle-copy-in { animation: cycle-copy-in 220ms var(--ease); }
+    @keyframes cycle-copy-in { from { opacity: 0; transform: translateY(10px); } }
+  }
+  /* Cada dígito ganha seu próprio trilho, como contador mecânico: a trilha
+     sobe quando o preço aumenta e desce quando reduz. O preço semântico fica
+     nos [data-price-*] por baixo; o rolete é só apresentação e some ao fim. */
+  #plans-v2 .price.is-rolling > [data-price-monthly],
+  #plans-v2 .price.is-rolling > [data-price-annual] { opacity: 0; }
+  #plans-v2 .price-roller {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    white-space: nowrap; pointer-events: none; font: inherit; letter-spacing: inherit;
+  }
+  #plans-v2 .price-roller, #plans-v2 .price-roller * {
+    color: inherit !important; font-size: inherit !important; font-weight: inherit !important;
+  }
+  #plans-v2 .price-roller .roller-wheel {
+    display: inline-block; height: 1.05em; overflow: hidden; line-height: 1.05;
+    vertical-align: -.12em;
+  }
+  #plans-v2 .price-roller .roller-track { display: block; will-change: transform; }
+  #plans-v2 .price-roller .roller-digit { display: block; height: 1.05em; line-height: 1.05; }
+  #plans-v2 .price-roller .roller-prefix::before { content: attr(data-prefix); }
+  #plans-v2 .price-roller .roller-digit::before { content: attr(data-digit); }
+  #plans-v2 .price-roller .roller-separator::before { content: attr(data-separator); }
+  #plans-v2 .price-roller .roller-suffix::before { content: attr(data-suffix); }
+  #plans-v2 .price-roller .per { margin-left: 0; font-size: .95rem !important; font-weight: 600 !important; color: var(--ink-2) !important; letter-spacing: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #plans-v2 .price-roller { display: none; }
+    #plans-v2 .price.is-rolling > [data-price-monthly],
+    #plans-v2 .price.is-rolling > [data-price-annual] { opacity: 1; }
   }
   /* Nasceu do CTA do Grátis, que era <a> (line-height 1.5 herdado do body)
      contra os <button> dos pagos (o "normal" da UA) — 7px fora de esquadro.
@@ -720,7 +745,97 @@ function getCsrfToken() {
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
 let currentCycle = "monthly";
 
+function lerPrecoDoCard(el) {
+  const texto = (el?.textContent || "").replace(/\s+/g, " ").trim();
+  const m = texto.match(/^R\$\s*([\d,.]+)\s*(\/(?:mês|ano))$/);
+  if (!m) return null;
+  return { numero: m[1], sufixo: m[2], valor: Number(m[1].replace(".", "").replace(",", ".")) };
+}
+
+function criarRoda(de, para, direcao) {
+  const roda = document.createElement("span");
+  roda.className = "roller-wheel";
+  const trilho = document.createElement("span");
+  trilho.className = "roller-track";
+  // Três voltas bastam para qualquer dígito chegar ao próximo sem acabar a
+  // trilha; a volta inteira quando ele não muda deixa o rolete mecânico vivo.
+  for (let i = 0; i < 50; i += 1) {
+    const digito = document.createElement("span");
+    digito.className = "roller-digit";
+    digito.dataset.digit = String(i % 10);
+    trilho.append(digito);
+  }
+  const inicio = 20 + Number(de);
+  const passos = direcao === "up"
+    ? (Number(para) - Number(de) + 10) % 10 || 10
+    : (Number(de) - Number(para) + 10) % 10 || 10;
+  const fim = direcao === "up" ? inicio + passos : inicio - passos;
+  trilho.style.transform = `translateY(${-inicio * 1.05}em)`;
+  roda.append(trilho);
+  return { roda, trilho, fim };
+}
+
+function rodarPreco(precoAnterior, precoNovo) {
+  const origem = lerPrecoDoCard(precoAnterior);
+  const destino = lerPrecoDoCard(precoNovo);
+  if (!origem || !destino || origem.valor === destino.valor) return;
+
+  const caixa = precoNovo.closest(".price");
+  if (!caixa) return;
+  caixa.querySelector(".price-roller")?.remove();
+  if (caixa._rollerTimer) clearTimeout(caixa._rollerTimer);
+
+  const direcao = destino.valor > origem.valor ? "up" : "down";
+  const rolete = document.createElement("span");
+  rolete.className = `price-roller price-roller-${direcao}`;
+  rolete.dataset.direction = direcao;
+  rolete.setAttribute("aria-hidden", "true");
+  const prefixo = document.createElement("span");
+  prefixo.className = "roller-prefix";
+  prefixo.dataset.prefix = "R$\u00a0";
+  rolete.append(prefixo);
+
+  const digitosDestino = [...destino.numero].filter((c) => /\d/.test(c));
+  let posicao = 0;
+  const trilhos = [];
+  for (const caractere of origem.numero) {
+    if (!/\d/.test(caractere)) {
+      const separador = document.createElement("span");
+      separador.className = "roller-separator";
+      separador.dataset.separator = caractere;
+      rolete.append(separador);
+      continue;
+    }
+    const para = digitosDestino[Math.min(posicao, digitosDestino.length - 1)] || caractere;
+    const { roda, trilho, fim } = criarRoda(caractere, para, direcao);
+    rolete.append(roda);
+    trilhos.push({ trilho, fim });
+    posicao += 1;
+  }
+  const sufixo = document.createElement("small");
+  sufixo.className = "per roller-suffix";
+  sufixo.dataset.suffix = origem.sufixo;
+  rolete.append(sufixo);
+  caixa.classList.add("is-rolling");
+  caixa.append(rolete);
+  // Força o primeiro quadro antes de deslocar os trilhos; sem isso o browser
+  // comprime os dois transforms no mesmo paint e o contador não gira.
+  void rolete.offsetHeight;
+  requestAnimationFrame(() => {
+    trilhos.forEach(({ trilho, fim }) => {
+      trilho.style.transition = "transform 620ms cubic-bezier(.2,.8,.2,1)";
+      trilho.style.transform = `translateY(${-fim * 1.05}em)`;
+    });
+  });
+  caixa._rollerTimer = setTimeout(() => {
+    rolete.remove();
+    caixa.classList.remove("is-rolling");
+    caixa._rollerTimer = null;
+  }, 650);
+}
+
 function setCycle(cycle) {
+  const cicloAnterior = currentCycle;
   currentCycle = cycle;
   // Switch único: aria-checked descreve o anual ligado/desligado; os rótulos
   // visuais só acompanham o estado. Os [data-price-*] cobrem de uma vez cards
@@ -734,16 +849,23 @@ function setCycle(cycle) {
   document.querySelectorAll("#plans-v2 .price-cycle-copy").forEach(el => {
     el.textContent = anual ? el.dataset.copyAnnual : el.dataset.copyMonthly;
   });
-  // O componente de referência move número e copy quando o período muda.
-  // Mantemos a troca de valor já integrada ao checkout e animamos só o que
-  // acabou de entrar; o media query acima respeita redução de movimento.
+  // O componente de referência usa Number Flow. Aqui, sem uma segunda
+  // dependência no bundle, cada algarismo corre num trilho próprio de 0 a 9.
+  // O DOM de preço que checkout, tabela e ilha React já conhecem continua igual.
+  if (cicloAnterior !== cycle) {
+    document.querySelectorAll("#plans-v2 .price").forEach(caixa => {
+      rodarPreco(
+        caixa.querySelector(`[data-price-${cicloAnterior}]`),
+        caixa.querySelector(`[data-price-${cycle}]`),
+      );
+    });
+  }
   const entradas = document.querySelectorAll(
-    `#plans-v2 .price > [data-price-${cycle}], #plans-v2 .price-cycle-copy, ` +
-    `#plans-v2 .price-eq[data-price-${cycle}]`,
+    `#plans-v2 .price-cycle-copy, #plans-v2 .price-eq[data-price-${cycle}]`,
   );
-  entradas.forEach(el => el.classList.remove("cycle-price-in"));
+  entradas.forEach(el => el.classList.remove("cycle-copy-in"));
   if (entradas[0]) void entradas[0].offsetWidth;
-  entradas.forEach(el => el.classList.add("cycle-price-in"));
+  entradas.forEach(el => el.classList.add("cycle-copy-in"));
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();
   // O CTA de Pix só existe no ciclo anual (Pix é à vista, §7 do plano).
   if (typeof pbPixRefresh === "function") pbPixRefresh();

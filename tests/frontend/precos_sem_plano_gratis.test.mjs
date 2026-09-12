@@ -172,11 +172,11 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
       .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
     cobrancas: [...document.querySelectorAll("#plans-v2 .plan .price-cycle-copy")]
       .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
-    precosEmMovimento: document.querySelectorAll(
-      "#plans-v2 .plan .price > .cycle-price-in",
-    ).length,
+    roletes: [...document.querySelectorAll("#plans-v2 .plan .price-roller")]
+      .map((el) => el.dataset.direction),
+    rodas: document.querySelectorAll("#plans-v2 .plan .price-roller .roller-wheel").length,
     copiasEmMovimento: document.querySelectorAll(
-      "#plans-v2 .plan .price-cycle-copy.cycle-price-in",
+      "#plans-v2 .plan .price-cycle-copy.cycle-copy-in",
     ).length,
   }));
 
@@ -193,8 +193,13 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
   assert.ok(anual.cobrancas.every((texto) =>
     texto.startsWith("Cobrado em um único pagamento anual")),
   `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
-  assert.equal(anual.precosEmMovimento, 3);
+  assert.deepEqual(anual.roletes, ["up", "up", "up"]);
+  assert.ok(anual.rodas >= 9, `roletes insuficientes: ${anual.rodas}`);
   assert.equal(anual.copiasEmMovimento, 3);
+
+  await page.waitForTimeout(700);
+  await page.click("#cycle-annual");
+  assert.deepEqual((await lerCards()).roletes, ["down", "down", "down"]);
 
   await page.close();
 });
