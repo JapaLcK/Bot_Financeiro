@@ -1,19 +1,25 @@
-"""frontend/fonts/Inter-*.woff2 são subset (latin + latin-1 + pontuação).
+"""As fontes Inter ativa e legadas são subsets com os glifos do produto.
 
 O risco do subset é silencioso: glifo ausente não dá erro, vira tofu. Estes
 testes garantem que os glifos de texto pt-BR real existem em TODOS os pesos
 servidos — inclusive os acentuados, que é onde um subset "latin only" quebraria.
 
-Gerador: scripts/build_inter_subset.py.
+Geradores: scripts/build_inter_variable.py e scripts/build_inter_subset.py.
 """
 from __future__ import annotations
 
+import hashlib
 import pathlib
 
 from fontTools.ttLib import TTFont
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
-FONTES = sorted((RAIZ / "frontend" / "fonts").glob("Inter-*.woff2"))
+FONTE_VARIAVEL = RAIZ / "frontend" / "fonts" / "Inter-Variable.woff2"
+FONTES_LEGADAS = sorted(
+    path for path in (RAIZ / "frontend" / "fonts").glob("Inter-*.woff2")
+    if path != FONTE_VARIAVEL
+)
+FONTES = [FONTE_VARIAVEL, *FONTES_LEGADAS]
 
 # Texto pt-BR real: acentos dos dois casos, ç, moeda, número, travessão, aspas.
 TEXTO_PT_BR = "Ações à çedilha — R$ 1.234,56 até ô, José já viu: “ótimo”, né? Saúde ü í ú Â Ê Õ…"
@@ -27,8 +33,21 @@ def _faltando(path: pathlib.Path, texto: str) -> list[str]:
     return sorted({ch for ch in texto if ch != " " and ord(ch) not in cmap})
 
 
-def test_ha_seis_pesos_de_inter():
-    assert len(FONTES) == 6, f"esperava 6 pesos, achei {[f.name for f in FONTES]}"
+def test_ha_seis_pesos_legados_de_inter():
+    assert len(FONTES_LEGADAS) == 6, (
+        f"esperava 6 pesos legados, achei {[f.name for f in FONTES_LEGADAS]}"
+    )
+
+
+def test_fonte_ativa_e_variavel_e_substitui_os_seis_downloads():
+    font = TTFont(FONTE_VARIAVEL)
+    eixos = {eixo.axisTag for eixo in font["fvar"].axes}
+    assert eixos == {"wght"}
+    css = (RAIZ / "frontend" / "brand.css").read_text(encoding="utf-8")
+    versao = hashlib.blake2b(FONTE_VARIAVEL.read_bytes(), digest_size=6).hexdigest()
+    assert f'/fonts/Inter-Variable.woff2?v={versao}' in css
+    for path in FONTES_LEGADAS:
+        assert f'/fonts/{path.name}' not in css
 
 
 def test_todo_peso_tem_os_glifos_de_pt_br():

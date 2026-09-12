@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regera frontend/fonts/Inter-*.woff2 como subset latin + latin-1 + pontuação.
+"""Regera os seis pesos estáticos legados da Inter como subset.
+
+O frontend novo usa Inter-Variable.woff2, gerado por build_inter_variable.py.
+Estes arquivos permanecem no deploy para brand.css antigos em cache e este
+gerador continua disponível até terminar a janela de compatibilidade.
 
 A Inter completa traz ~112–115 KiB por peso × 6 pesos (~680 KiB por primeira
 visita). O produto é pt-BR: latin + latin-1 cobre todo o texto, e o bloco de
