@@ -71,7 +71,12 @@ _MONTH_BY_TOKEN: dict[str, int] = {
     "junho": 6, "jun": 6,
     "julho": 7, "jul": 7,
     "agosto": 8, "ago": 8,
-    "setembro": 9, "set": 9, "sete": 9,
+    # `sete` NÃO entra: é o número 7 em português, e a abreviação canônica de
+    # setembro é `set`. Como apelido de mês ele era redundante; como resposta a
+    # uma lista numerada, pagava a fatura de setembro no lugar do item 7.
+    # `dez` fica (é a canônica de dezembro) — a colisão dele com o número 10 é
+    # resolvida pela PRECEDÊNCIA no `_resolve_pay_bill_choice`: índice primeiro.
+    "setembro": 9, "set": 9,
     "outubro": 10, "out": 10,
     "novembro": 11, "nov": 11,
     "dezembro": 12, "dez": 12,
@@ -276,9 +281,18 @@ def _resolve_pay_bill_choice(user_id: int, text: str, pending: dict) -> str | No
 
     chosen: dict | None = None
 
+    # Índice ANTES de mês, e número por EXTENSO conta como índice: a pergunta
+    # é uma lista numerada ("Responda com o número"), então `dez` numa lista de
+    # 10+ é a posição 10, não dezembro. Fora do intervalo, `chosen` segue None e
+    # os ramos abaixo (mês, nome do cartão) continuam valendo — é o que mantém
+    # `dez` significando dezembro quando não existe item 10.
     m_num = re.match(r"^#?(\d+)$", norm)
-    if m_num:
-        idx = int(m_num.group(1)) - 1
+    # parse_pt_number também procura dígitos dentro de texto livre (C6,
+    # "excluir cartão 2"). Só uma frase numérica inteira pode escolher índice.
+    n = (int(m_num.group(1)) if m_num else
+         parse_pt_number(norm) if re.fullmatch(PT_PHRASE, norm) else None)
+    if n is not None and float(n).is_integer():
+        idx = int(n) - 1
         if 0 <= idx < len(candidates):
             chosen = candidates[idx]
 
