@@ -5,8 +5,9 @@
  * o React renderiza UMA vez e sai do caminho. Quem manda no ciclo continua sendo
  * o `setCycle` (mensal/anual por `style.display` nos `[data-price-*]`), quem
  * marca "Indisponível" continua sendo o `markUnavailable`, e quem troca o rótulo
- * do botão continua sendo o `refreshPlanButtons`. Todos mutam o DOM. Se este
- * componente tivesse estado e rerenderizasse, ele desfaria as três coisas.
+ * do botão continua sendo o `refreshPlanButtons`. Todos mutam o DOM. O NumberFlow
+ * vive em raízes irmãs menores; este componente não rerenderiza e não desfaz
+ * nenhuma dessas mutações.
  *
  * Os dados vêm do `lerPlanos` — nenhum preço, nome ou feature mora aqui.
  */

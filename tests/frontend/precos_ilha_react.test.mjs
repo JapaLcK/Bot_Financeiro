@@ -72,8 +72,14 @@ function arvoreEPrecos() {
     // (é o detector de mount, e o `lerPlanos` o ignora de propósito).
     if (n.nodeType === 3) return norm(n.textContent) || null;
     if (n.nodeType !== 1) return null;
+    // O NumberFlow é uma melhoria progressiva exclusiva do bundle. O contrato
+    // comparado aqui continua sendo o markup estático que também funciona sem JS.
+    if (n.matches(".price-flow-host")) return null;
     return [n.nodeName,
-            [...n.attributes].map((a) => `${a.name}=${norm(a.value)}`).sort(),
+            [...n.attributes].map((a) => {
+              if (a.name === "class" && n.matches(".price.has-number-flow")) return "class=price";
+              return `${a.name}=${norm(a.value)}`;
+            }).sort(),
             [...n.childNodes].map(no).filter((x) => x !== null)];
   };
   return {
