@@ -250,3 +250,21 @@ test("readApiError não lê o Object.prototype", async () => {
     assert.equal(lido.code, "OF_BANK_LIMIT", "o caminho pré-existente do detail.code quebrou");
   } finally { await page.close(); }
 });
+
+
+test("402 invalida a resposta de caixinhas iniciada antes do corte", async () => {
+  const page = await newPage({ ofUi: true });
+  let pendente;
+  try {
+    await page.route("**/open-finance/1", route => route.fulfill(json({ connections: [], accounts: [], transactions: [] })));
+    await page.route("**/open-finance/1/caixinhas", route => { pendente = route; });
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => Boolean(pendente), "requisição de caixinhas em voo");
+    await page.route("**/open-finance/1", route => route.fulfill(gate402()));
+    await page.evaluate(() => window.loadData());
+    await pendente.fulfill(json({ caixinhas: [{ id: 1, name: "Reserva antiga", balance: 100 }], metas: [] }));
+    await page.waitForLoadState("networkidle");
+    assert.equal(await page.locator("#caixinhas-card").isVisible(), false);
+    assert.match(await page.locator("#connections-list").textContent(), /Indisponível/);
+  } finally { await page.close(); }
+});

@@ -3096,6 +3096,8 @@ async function loadData({ propagate = false } = {}) {
         // fetch: `/open-finance/{id}/caixinhas` responde o mesmo 402, e o
         // loadCaixinhas leria isso como falha transitória — escondendo o card com
         // um console.error, ou rejeitando o PTR em âmbar. Some o card e pronto.
+        // Invalida também o filho iniciado por uma carga anterior bem-sucedida.
+        ++_caixGen;
         const caixCard = document.getElementById("caixinhas-card");
         if (caixCard) caixCard.style.display = "none";
       }
