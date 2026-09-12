@@ -29,6 +29,7 @@ from fontTools.ttLib import TTFont
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FONTS = RAIZ / "frontend" / "fonts"
+FONTE_VARIAVEL = FONTS / "Inter-Variable.woff2"
 
 # latin, latin-1, diacríticos combinantes (texto NFD não vira tofu), Δ,
 # pontuação geral (– — “ ” • … ‹ ›), setas/símbolos de UI que o frontend USA
@@ -55,8 +56,13 @@ def subset_font(path: pathlib.Path) -> None:
     print(f"  {path.name}: {antes/1024:.0f} KiB -> {path.stat().st_size/1024:.0f} KiB")
 
 
+def fontes_legadas() -> list[pathlib.Path]:
+    """Os seis pesos estáticos; nunca toca a fonte ativa/cache-buster dela."""
+    return sorted(path for path in FONTS.glob("Inter-*.woff2") if path != FONTE_VARIAVEL)
+
+
 def main() -> None:
-    alvos = sorted(FONTS.glob("Inter-*.woff2"))
+    alvos = fontes_legadas()
     if not alvos:
         raise SystemExit(f"nenhuma Inter-*.woff2 em {FONTS}")
     for path in alvos:

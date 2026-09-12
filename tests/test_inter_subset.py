@@ -13,6 +13,8 @@ import pathlib
 
 from fontTools.ttLib import TTFont
 
+from scripts import build_inter_subset as gerador_legado
+
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FONTE_VARIAVEL = RAIZ / "frontend" / "fonts" / "Inter-Variable.woff2"
 FONTES_LEGADAS = sorted(
@@ -37,6 +39,7 @@ def test_ha_seis_pesos_legados_de_inter():
     assert len(FONTES_LEGADAS) == 6, (
         f"esperava 6 pesos legados, achei {[f.name for f in FONTES_LEGADAS]}"
     )
+    assert gerador_legado.fontes_legadas() == FONTES_LEGADAS
 
 
 def test_fonte_ativa_e_variavel_e_substitui_os_seis_downloads():
@@ -84,3 +87,10 @@ def test_tnum_sobreviveu_ao_subset():
         font = TTFont(path)
         feats = {rec.FeatureTag for rec in font["GSUB"].table.FeatureList.FeatureRecord}
         assert "tnum" in feats, f"{path.name} perdeu a feature tnum"
+
+
+def test_fonte_variavel_preserva_kerning_e_marcas_combinantes():
+    font = TTFont(FONTE_VARIAVEL)
+    feats = {rec.FeatureTag for rec in font["GPOS"].table.FeatureList.FeatureRecord}
+    esperadas = {"cpsp", "kern", "mark", "mkmk"}
+    assert esperadas <= feats, f"Inter variável sem features GPOS: {sorted(esperadas - feats)}"

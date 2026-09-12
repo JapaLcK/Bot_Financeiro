@@ -29,7 +29,8 @@ from build_inter_subset import RAIZ, UNICODES
 
 DESTINO = RAIZ / "frontend" / "fonts" / "Inter-Variable.woff2"
 BRAND_CSS = RAIZ / "frontend" / "brand.css"
-FEATURES = ["calt", "ccmp", "locl", "pnum", "tnum"]
+FEATURES = ["calt", "ccmp", "cpsp", "kern", "locl", "mark", "mkmk", "pnum", "tnum"]
+GPOS_OBRIGATORIAS = {"cpsp", "kern", "mark", "mkmk"}
 
 
 def gerar(origem: pathlib.Path) -> str:
@@ -60,12 +61,15 @@ def gerar(origem: pathlib.Path) -> str:
 
     gerada = TTFont(DESTINO, recalcTimestamp=False)
     eixos_gerados = {eixo.axisTag for eixo in gerada["fvar"].axes}
-    features = {item.FeatureTag for item in gerada["GSUB"].table.FeatureList.FeatureRecord}
+    gsub = {item.FeatureTag for item in gerada["GSUB"].table.FeatureList.FeatureRecord}
+    gpos = {item.FeatureTag for item in gerada["GPOS"].table.FeatureList.FeatureRecord}
     gerada.close()
     if eixos_gerados != {"wght"}:
         raise SystemExit(f"fonte gerada com eixos inesperados: {sorted(eixos_gerados)}")
-    if "tnum" not in features:
+    if "tnum" not in gsub:
         raise SystemExit("fonte gerada perdeu a feature tnum")
+    if not GPOS_OBRIGATORIAS <= gpos:
+        raise SystemExit(f"fonte gerada perdeu features GPOS: {sorted(GPOS_OBRIGATORIAS - gpos)}")
 
     return hashlib.blake2b(DESTINO.read_bytes(), digest_size=6).hexdigest()
 

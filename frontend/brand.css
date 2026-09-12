@@ -21,7 +21,7 @@
    deploy somente para abas que ainda tenham o brand.css anterior em cache.
    font-display:swap = sem FOIT.
    -------------------------------------------------------------------------- */
-@font-face { font-family:"Inter"; font-style:normal; font-weight:100 900; font-display:swap; src:url("/fonts/Inter-Variable.woff2?v=bdb7d5f57b35") format("woff2-variations"); }
+@font-face { font-family:"Inter"; font-style:normal; font-weight:100 900; font-display:swap; src:url("/fonts/Inter-Variable.woff2?v=5059ef2a9db0") format("woff2-variations"); }
 
 :root {
   /* ----------------------------------------------------------------------
