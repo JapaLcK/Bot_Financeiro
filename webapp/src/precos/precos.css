@@ -35,7 +35,7 @@
  * para o rodapé, então o escopo da escada precisa anulá-la. As três listas usam
  * o mesmo gap fixo em vez de esticar seus itens conforme a altura do card. */
 #plans-v2 .plan > [data-plan-btn] { margin-top: 12px; }
-#plans-v2 .plan > ul { gap: 12px; margin: 22px 0 0; }
+#plans-v2 .plan > ul { gap: 16px; margin: 22px 0 0; }
 
 /* ── O badge do destaque ──────────────────────────────────────────────────────
  * Duas mudanças, e a primeira é de ACESSIBILIDADE.
