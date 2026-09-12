@@ -86,13 +86,20 @@
          no automático" vira duas linhas enquanto os outros ficam em uma
          (medido 2026-09-02 em Chromium headless, com min-height desligado:
          41,3px contra 20,6px — 20,7px de desalinho; remeça antes de reusar);
-       · bloco do preço — a linha de equivalência mensal só existe no ciclo
-         anual (medido: 32px). */
+       · bloco do preço — a explicação da cobrança muda entre ciclos e o anual
+         também traz a equivalência mensal (medido: 32px). */
   #plans-v2 .plan .plan-sub { min-height: 3em; }
   #plans-v2 .price-block { min-height: 98px; display: flex; flex-direction: column; justify-content: center; margin: 6px 0 4px; }
   #plans-v2 .price-block .price { margin: 0; }
   #plans-v2 .price .per { font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
-  #plans-v2 .price-eq { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  #plans-v2 .price-eq, #plans-v2 .price-cycle-copy { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: no-preference) {
+    #plans-v2 .cycle-price-in { animation: cycle-price-in 220ms var(--ease); }
+    @keyframes cycle-price-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
   /* Nasceu do CTA do Grátis, que era <a> (line-height 1.5 herdado do body)
      contra os <button> dos pagos (o "normal" da UA) — 7px fora de esquadro.
      Com o card do Grátis fora, os três CTAs são <button> e já casam entre si;
@@ -395,6 +402,7 @@
             <div class="plan-sub">Organize tudo, sem limites</div>
             <div class="price-block">
               <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;9,90<small class="per">/mês</small></span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;99<small class="per">/ano</small></span></div>
+              <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;8,25 por mês</div>
             </div>
             <ul>
@@ -413,6 +421,7 @@
             <div class="plan-sub">Seu dinheiro no automático</div>
             <div class="price-block">
               <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;19,90<small class="per">/mês</small></span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;199<small class="per">/ano</small></span></div>
+              <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;16,58 por mês</div>
             </div>
             <ul>
@@ -434,6 +443,7 @@
             <div class="plan-sub">Planejamento e previsão</div>
             <div class="price-block">
               <div class="price"><span data-price-monthly style="font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;49,90<small class="per">/mês</small></span><span data-price-annual style="display:none;font-size:inherit;font-weight:inherit;color:inherit">R$&nbsp;499<small class="per">/ano</small></span></div>
+              <div class="price-cycle-copy" data-copy-monthly="Cobrado mensalmente" data-copy-annual="Cobrado em um único pagamento anual">Cobrado mensalmente</div>
               <div class="price-eq" data-price-annual style="display:none">Equivale a R$&nbsp;41,58 por mês</div>
             </div>
             <ul>
@@ -721,13 +731,26 @@ function setCycle(cycle) {
   document.getElementById("cycle-annual-label")?.classList.toggle("is-active", anual);
   document.querySelectorAll("[data-price-monthly]").forEach(el => { el.style.display = cycle === "monthly" ? "" : "none"; });
   document.querySelectorAll("[data-price-annual]").forEach(el => { el.style.display = cycle === "annual" ? "" : "none"; });
+  document.querySelectorAll("#plans-v2 .price-cycle-copy").forEach(el => {
+    el.textContent = anual ? el.dataset.copyAnnual : el.dataset.copyMonthly;
+  });
+  // O componente de referência move número e copy quando o período muda.
+  // Mantemos a troca de valor já integrada ao checkout e animamos só o que
+  // acabou de entrar; o media query acima respeita redução de movimento.
+  const entradas = document.querySelectorAll(
+    `#plans-v2 .price > [data-price-${cycle}], #plans-v2 .price-cycle-copy, ` +
+    `#plans-v2 .price-eq[data-price-${cycle}]`,
+  );
+  entradas.forEach(el => el.classList.remove("cycle-price-in"));
+  if (entradas[0]) void entradas[0].offsetWidth;
+  entradas.forEach(el => el.classList.add("cycle-price-in"));
   if (typeof refreshPlanButtons === "function") refreshPlanButtons();
   // O CTA de Pix só existe no ciclo anual (Pix é à vista, §7 do plano).
   if (typeof pbPixRefresh === "function") pbPixRefresh();
   // Trocar de ciclo é uma impressão NOVA: outros preços na tela. Sem isto o
   // `view_item_list` do load (sempre "monthly", que é o estado inicial) seria o
   // único, e a comparação mensal × anual nunca teria o lado anual.
-  // `setCycle` só é chamada pelos dois botões (medido: não roda no load), então
+  // `setCycle` só é chamada pelo switch (medido: não roda no load), então
   // não há evento em duplicata na abertura da página.
   if (typeof enviarViewItemList === "function") enviarViewItemList();
 }

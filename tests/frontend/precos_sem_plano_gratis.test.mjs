@@ -165,6 +165,40 @@ test("o ciclo usa um switch único, animado e reversível", async () => {
   await page.close();
 });
 
+test("o switch troca os preços e explica a cobrança com movimento", async () => {
+  const { page } = await abrirPrecos();
+  const lerCards = () => page.evaluate(() => ({
+    precos: [...document.querySelectorAll("#plans-v2 .plan .price")]
+      .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+    cobrancas: [...document.querySelectorAll("#plans-v2 .plan .price-cycle-copy")]
+      .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+    precosEmMovimento: document.querySelectorAll(
+      "#plans-v2 .plan .price > .cycle-price-in",
+    ).length,
+    copiasEmMovimento: document.querySelectorAll(
+      "#plans-v2 .plan .price-cycle-copy.cycle-price-in",
+    ).length,
+  }));
+
+  assert.deepEqual((await lerCards()).precos, [
+    "R$ 9,90/mês", "R$ 19,90/mês", "R$ 49,90/mês",
+  ]);
+  assert.deepEqual((await lerCards()).cobrancas, [
+    "Cobrado mensalmente", "Cobrado mensalmente", "Cobrado mensalmente",
+  ]);
+
+  await page.click("#cycle-annual");
+  const anual = await lerCards();
+  assert.deepEqual(anual.precos, ["R$ 99/ano", "R$ 199/ano", "R$ 499/ano"]);
+  assert.ok(anual.cobrancas.every((texto) =>
+    texto.startsWith("Cobrado em um único pagamento anual")),
+  `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
+  assert.equal(anual.precosEmMovimento, 3);
+  assert.equal(anual.copiasEmMovimento, 3);
+
+  await page.close();
+});
+
 // ── asserção do conserto ────────────────────────────────────────────────────
 
 for (const [rotulo, ctx] of [
