@@ -1,0 +1,17 @@
+{
+  "name": "pigbank-webapp",
+  "private": true,
+  "type": "module",
+  "description": "Ilhas React do site. package.json e lockfile PRÓPRIOS, separados da raiz de propósito: a detecção automática do Railway olha a raiz, e um `build` lá muda como o site é publicado. Uma ilha por página (hoje só a /precos), saída de nome fixo em frontend/, artefato commitado.",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.0"
+  }
+}

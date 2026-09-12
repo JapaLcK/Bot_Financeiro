@@ -55,11 +55,21 @@ after(async () => { await browser?.close(); server?.kill(); });
 async function abrirPrecos({ me = null, query = "", app = false,
                              viewport = { width: 1280, height: 900 },
                              plansConfig = { essencial_available: true, plus_available: true, pro_available: true },
+                             semOverflowClip = false,
                            } = {}) {
   const page = await browser.newPage({ viewport,
                                        ...(app ? { userAgent: APP_UA } : {}) });
   const chamadas = { selectFree: 0, checkout: 0 };
   const corposCheckout = [];
+  let removeuClip = false;
+
+  if (semOverflowClip) await page.route("**/precos.html*", async (route) => {
+    const response = await route.fetch();
+    const html = await response.text();
+    const legado = html.replaceAll("overflow-x: clip", "overflow-x: valor-invalido");
+    removeuClip = legado !== html;
+    await route.fulfill({ response, body: legado });
+  });
 
   await page.route("**/auth/me", (route) => (me
     ? route.fulfill({ contentType: "application/json", body: JSON.stringify(me) })
@@ -104,7 +114,7 @@ async function abrirPrecos({ me = null, query = "", app = false,
   // Grátis. Sem esperar, "não existe CTA" passaria antes de o JS rodar — e o
   // teste ficaria verde por corrida, não pelo conserto.
   await page.waitForTimeout(600);
-  return { page, chamadas, corposCheckout };
+  return { page, chamadas, corposCheckout, removeuClip };
 }
 
 // ── asserção do conserto ────────────────────────────────────────────────────
@@ -120,7 +130,7 @@ for (const [rotulo, ctx] of [
       "sobrou [data-free-cta] na página");
 
     const nomes = await page.$$eval("#plans-v2 .plan h3", (e) => e.map((h) => h.textContent.trim()));
-    assert.deepEqual(nomes, ["Essencial", "Plus", "Pro", "Premium"]);
+    assert.deepEqual(nomes, ["Essencial", "Plus", "Pro"]);
 
     // Qualquer clicável com a copy do Grátis, em QUALQUER lugar da página (a
     // classe, não o caso: o card era um, o rodapé da tabela era outro).
@@ -140,7 +150,7 @@ for (const [rotulo, ctx] of [
 // A tabela é o par obrigatório do CLAUDE.md §2: colgroup, thead, os 23 <tr> de
 // dado, os 6 colspan das linhas de grupo e o tfoot só ficam alinhados se TODOS
 // mudarem juntos. Uma célula sobrando desloca a tabela inteira.
-const COLUNAS = 5;   // 1 de recursos + Essencial, Plus, Pro, Premium
+const COLUNAS = 4;   // 1 de recursos + Essencial, Plus e Pro
 
 /** Contagem de colunas de cada parte da tabela, contando `colspan`. */
 function lerColunas(page) {
@@ -157,28 +167,27 @@ function lerColunas(page) {
   });
 }
 
-test("a tabela comparativa não tem mais coluna Grátis, e as 5 colunas fecham", async () => {
+test("a tabela comparativa tem só os três planos à venda, e as 4 colunas fecham", async () => {
   const { page } = await abrirPrecos();
   const t = await lerColunas(page);
 
-  // O conserto: nenhum cabeçalho de plano fala em Grátis.
-  assert.ok(!t.nomes.some((n) => n.includes("Grátis")),
-    `thead ainda tem Grátis: ${JSON.stringify(t.nomes)}`);
-  assert.deepEqual(t.nomes.slice(1).map((n) => n.split(/R\$|Em breve/)[0].replace("Mais popular", "").trim()),
-    ["Essencial", "Plus", "Pro", "Premium"], `cabeçalhos: ${JSON.stringify(t.nomes)}`);
+  assert.ok(!t.nomes.some((n) => /Grátis|Premium/.test(n)),
+    `thead ainda tem plano removido: ${JSON.stringify(t.nomes)}`);
+  assert.deepEqual(t.nomes.slice(1).map((n) => n.split(/R\$/)[0].replace("Mais popular", "").trim()),
+    ["Essencial", "Plus", "Pro"], `cabeçalhos: ${JSON.stringify(t.nomes)}`);
 
   // Consistência: a MESMA contagem em todas as partes, e uma menos que as 6 de
   // antes do conserto (colgroup 6, thead 6, cada tbody 6, tfoot 6 — medido em
   // 7a87ae7). Cada linha entra na asserção, não só uma amostra.
   assert.equal(t.colgroup, COLUNAS, `colgroup com ${t.colgroup} <col>`);
   assert.deepEqual(t.thead, [COLUNAS], `thead: ${JSON.stringify(t.thead)}`);
-  assert.equal(t.tbody.length, 29, `tbody com ${t.tbody.length} linhas (23 de dado + 6 de grupo)`);
+  assert.equal(t.tbody.length, 25, `tbody com ${t.tbody.length} linhas (20 de dado + 5 de grupo)`);
   assert.deepEqual([...new Set(t.tbody)], [COLUNAS],
     `linhas do tbody fora das ${COLUNAS} colunas: ${JSON.stringify(t.tbody)}`);
   assert.deepEqual(t.tfoot, [COLUNAS], `tfoot: ${JSON.stringify(t.tfoot)}`);
 
-  // Rodapé: rótulo vazio + os 4 CTAs, sem célula órfã do Grátis no meio.
-  assert.deepEqual(t.celulas, ["", "Assinar Essencial", "Assinar Plus", "Assinar Pro", "Em breve"]);
+  // Rodapé: rótulo vazio + os 3 CTAs, sem célula órfã de plano removido.
+  assert.deepEqual(t.celulas, ["", "Assinar Essencial", "Assinar Plus", "Assinar Pro"]);
   await page.close();
 });
 
@@ -189,17 +198,41 @@ test("a tabela comparativa não tem mais coluna Grátis, e as 5 colunas fecham",
 for (const viewport of [{ width: 390, height: 844 }, { width: 1560, height: 900 }]) {
   test(`thead e tfoot alinhados coluna a coluna em ${viewport.width}x${viewport.height}`, async () => {
     const { page } = await abrirPrecos({ viewport });
-    const { thead, tfoot } = await page.evaluate(() => {
+    const { thead, tfoot, larguraViewport, documento } = await page.evaluate(() => {
       const lefts = (sel) => [...document.querySelectorAll(sel)]
         .map((e) => +e.getBoundingClientRect().left.toFixed(1));
-      return { thead: lefts(".cmp-table thead tr th"), tfoot: lefts(".cmp-table tfoot tr td") };
+      return { thead: lefts(".cmp-table thead tr th"), tfoot: lefts(".cmp-table tfoot tr td"),
+        larguraViewport: innerWidth, documento: document.documentElement.scrollWidth };
     });
     assert.equal(thead.length, COLUNAS, `thead com ${thead.length} células`);
     assert.deepEqual(tfoot, thead,
       `rodapé desalinhado do cabeçalho: thead=${JSON.stringify(thead)} tfoot=${JSON.stringify(tfoot)}`);
+    assert.ok(documento <= larguraViewport,
+      `a tabela alargou o documento: viewport=${larguraViewport}px, documento=${documento}px`);
     await page.close();
   });
 }
+
+test("Safari 14: sem overflow:clip, o cabeçalho desktop continua sticky", async () => {
+  const { page, removeuClip } = await abrirPrecos({
+    viewport: { width: 1024, height: 800 }, semOverflowClip: true,
+  });
+  assert.ok(removeuClip, "o controle não encontrou `overflow-x: clip` para invalidar");
+
+  const yTabela = await page.$eval(".cmp-table thead",
+    (e) => e.getBoundingClientRect().top + scrollY);
+  await page.evaluate((y) => scrollTo(0, y + 240), yTabela);
+  const posicao = await page.$eval(".cmp-table thead th", (e) => ({
+    topo: Math.round(e.getBoundingClientRect().top),
+    esperado: Math.round(parseFloat(getComputedStyle(e).top)),
+    overflowWrapper: getComputedStyle(document.querySelector(".cmp-scrollwrap")).overflowX,
+  }));
+
+  assert.ok(Math.abs(posicao.topo - posicao.esperado) <= 1,
+    `thead não grudou: topo=${posicao.topo}px, esperado=${posicao.esperado}px, `
+    + `overflow do wrapper=${posicao.overflowWrapper}`);
+  await page.close();
+});
 
 // Controle POSITIVO da remoção: os dados dos planos PAGOS continuam na tabela,
 // nas colunas certas. Sem ele, uma tabela que perdeu a coluna errada (ou duas)
@@ -216,15 +249,15 @@ test("controle positivo: os dados dos planos pagos seguem nas colunas certas", a
     return [...th.parentElement.querySelectorAll("td")].map(txt);
   }, nome);
 
-  // Valores de core/services/plan_limits.py, na ordem Essencial/Plus/Pro/Premium.
+  // Valores de core/services/plan_limits.py, na ordem Essencial/Plus/Pro.
   assert.deepEqual(await linha("Lançamentos por mês"),
-    ["Ilimitados", "Ilimitados", "Ilimitados", "Ilimitados"]);
+    ["Ilimitados", "Ilimitados", "Ilimitados"]);
   assert.deepEqual(await linha("Histórico que você enxerga"),
-    ["90 dias", "12 meses", "24 meses", "Completo"]);
+    ["90 dias", "12 meses", "24 meses"]);
   assert.deepEqual(await linha("Mensagens com a Piggy"),
-    ["200por mês", "1.000por mês", "1.000por mês", "1.000por mês"]);
+    ["200por mês", "1.000por mês", "1.000por mês"]);
   assert.deepEqual(await linha("Bancos conectados (Open Finance)"),
-    ["1", "2", "5", "Ilimitados"]);
+    ["1", "2", "5"]);
   await page.close();
 });
 

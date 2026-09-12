@@ -6,6 +6,7 @@ As funções delegam para db_support para manter lógica de negócio isolada.
 import db_support as _db_support
 
 from core.crypto import hash_pii_optional
+from core.pg_text import tem_veneno
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from .connection import get_conn
@@ -122,18 +123,18 @@ def create_dashboard_session(user_id: int, hours: float = 5 / 60) -> str:
     return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
 
 
-def get_dashboard_session(code: str) -> int | None:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id from dashboard_sessions where code = %s and expires_at > now()",
-                (code,),
-            )
-            row = cur.fetchone()
-    return row["user_id"] if row else None
-
-
 def consume_dashboard_session(code: str) -> int | None:
+    # `/d/{code}` é ANÔNIMA: com NUL no path o psycopg
+    # estourava antes do DELETE e o 500 virava uma linha em `system_event_logs`
+    # por requisição, de graça (#321). "Código com veneno" = "código que não
+    # existe" → a rota segue no 401 de link expirado que ela já dá.
+    # Nenhum código legítimo é recusado: `create_dashboard_session` gera
+    # `token_urlsafe`. Esta é a ÚNICA leitora de `dashboard_sessions` por código:
+    # a irmã `get_dashboard_session` (SELECT) e a `get_dashboard_session_impl`
+    # do `db_support` foram apagadas por não terem chamador nenhum, em vez de
+    # ganharem uma guarda que teste nenhum mediria.
+    if tem_veneno(code):
+        return None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

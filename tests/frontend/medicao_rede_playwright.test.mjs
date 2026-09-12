@@ -27,7 +27,7 @@ test("conta bytes recebidos antes de uma resposta ser abortada", async () => {
   });
   cdp.emitir("Network.dataReceived", { requestId: "video", encodedDataLength: 512 });
   assert.equal(rede.recursos()[0].bytes, 608, "resposta aberta inclui cabeçalhos e corpo");
-  cdp.emitir("Network.loadingFailed", { requestId: "video" });
+  cdp.emitir("Network.loadingFailed", { requestId: "video", canceled: true });
 
   assert.deepEqual(rede.recursos(), [{
     url: "https://pigbankai.com/brand/vsl.mp4", tipo: "Media", status: 206,
@@ -96,4 +96,68 @@ test("aquecimento só termina depois do recurso da primeira origem", async () =>
 
   assert.equal(aguardou, true);
   assert.equal(rede.recursos()[0].estado, "concluido");
+});
+
+test("aquecimento aceita recurso encerrado pelo navegador", async () => {
+  const cdp = new CdpFalso();
+  let aguardou = false;
+  const page = {
+    context: () => ({ newCDPSession: async () => cdp }),
+    waitForTimeout: async () => {
+      aguardou = true;
+      cdp.emitir("Network.loadingFailed", { requestId: "video", canceled: true });
+    },
+  };
+  const rede = await instrumentarRede(page, { throttle: false, rede: {} });
+  cdp.emitir("Network.requestWillBeSent", {
+    requestId: "video", request: { url: "https://pigbankai.com/brand/vsl.mp4" }, type: "Media",
+  });
+  cdp.emitir("Network.dataReceived", { requestId: "video", encodedDataLength: 95_034 });
+
+  await rede.esperarCacheDaOrigem("https://pigbankai.com", 100);
+
+  assert.equal(aguardou, true);
+  assert.equal(rede.recursos()[0].estado, "interrompido");
+  assert.equal(rede.recursos()[0].bytes, 95_034);
+});
+
+test("aquecimento não espera POST que não pode popular o cache", async () => {
+  const cdp = new CdpFalso();
+  const page = {
+    context: () => ({ newCDPSession: async () => cdp }),
+    waitForTimeout: async () => {},
+  };
+  const rede = await instrumentarRede(page, { throttle: false, rede: {} });
+  cdp.emitir("Network.requestWillBeSent", {
+    requestId: "refresh",
+    request: { url: "https://pigbankai.com/auth/refresh", method: "POST" },
+    type: "Fetch",
+  });
+
+  await rede.esperarCacheDaOrigem("https://pigbankai.com", 10);
+
+  assert.equal(rede.recursos()[0].estado, "em_andamento");
+});
+
+test("aquecimento reprova GET que falhou de verdade", async () => {
+  const cdp = new CdpFalso();
+  const page = {
+    context: () => ({ newCDPSession: async () => cdp }),
+    waitForTimeout: async () => {},
+  };
+  const rede = await instrumentarRede(page, { throttle: false, rede: {} });
+  cdp.emitir("Network.requestWillBeSent", {
+    requestId: "css",
+    request: { url: "https://pigbankai.com/site.css", method: "GET" },
+    type: "Stylesheet",
+  });
+  cdp.emitir("Network.loadingFailed", {
+    requestId: "css", canceled: false, errorText: "net::ERR_CONNECTION_RESET",
+  });
+
+  await assert.rejects(
+    rede.esperarCacheDaOrigem("https://pigbankai.com", 100),
+    /site\.css.*ERR_CONNECTION_RESET/,
+  );
+  assert.equal(rede.recursos()[0].estado, "falhou");
 });

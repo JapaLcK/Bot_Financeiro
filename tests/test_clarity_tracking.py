@@ -147,3 +147,4 @@ def test_csp_permite_biblioteca_do_clarity():
     csp = _SECURITY_HEADERS["Content-Security-Policy"]
     script_src = csp.split("script-src", 1)[1].split(";", 1)[0]
     assert "https://www.clarity.ms" in script_src
+    assert "https://scripts.clarity.ms" in script_src
