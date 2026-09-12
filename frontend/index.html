@@ -102,8 +102,38 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
   /* Travado fica VISÍVEL e legível de propósito: CTA que some deixa a pessoa
      procurando o botão em vez de assistir ao vídeo. */
   .btn.is-locked { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
+  html.pb-safe body {
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    box-sizing: border-box;
+  }
+  html.pb-safe .nav {
+    top: calc(16px + env(safe-area-inset-top));
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+  html.pb-safe #toast, html.pb-safe .toast {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
 </style>
-<script src="/safe-area.js?v=1"></script>
+<!-- A classe e o viewport precisam existir antes da primeira pintura dentro do
+     app. O bootstrap inline evita tanto o salto visual quanto uma ida à rede. -->
+<script>
+  (() => {
+    const standalone =
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+      window.navigator.standalone === true;
+    if (!/PigBankApp/.test(navigator.userAgent) && !standalone) return;
+
+    document.documentElement.classList.add("pb-safe");
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport && !/viewport-fit/.test(viewport.content)) {
+      viewport.content += ", viewport-fit=cover";
+    }
+  })();
+</script>
 </head>
 <body class="rd">
 <div class="glow"></div>
@@ -147,7 +177,10 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
       <!-- Visual: chat + resumo + mascote -->
       <div class="hero-visual">
-        <img class="hero-mascot" src="/brand/landing-mascot.webp?v=1" width="300" height="486" alt="Piggy" />
+        <picture>
+          <source media="(max-width: 560px)" srcset="/brand/landing-mascot-150.webp?v=1 1x, /brand/landing-mascot.webp?v=1 2x" />
+          <img class="hero-mascot" src="/brand/landing-mascot.webp?v=1" width="300" height="486" alt="Piggy" />
+        </picture>
 
         <div class="chat-card">
           <div class="chat-head">
