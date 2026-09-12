@@ -77,6 +77,10 @@ function getCookie(name) { return document.cookie.split("; ").find(function(r){ 
 function csrfHeaders(extra) { extra = extra || {}; var c = decodeURIComponent(getCookie("csrf_token") || ""); if (c) extra["X-CSRF-Token"] = c; return extra; }
 function showError(msg) { msgError.textContent = msg; msgError.classList.add("show"); }
 function hideError() { msgError.textContent = ""; msgError.classList.remove("show"); }
+// O `detail` do 422 do FastAPI é uma LISTA de objetos ({loc,msg,type,input}):
+// truthy, e na tela vira "[object Object]". Só string passa; o resto cai no
+// fallback de cada chamada. Mesma regra do `_errDetail` (dashboard.js).
+function strDetail(d) { return d && typeof d.detail === "string" ? d.detail : ""; }
 
 async function loadPending() {
   if (!signupToken) { showError("Link inválido. Inicie o login com Google novamente."); submitBtn.disabled = true; emailDisplay.textContent = "—"; return; }
@@ -84,7 +88,7 @@ async function loadPending() {
     const res = await fetch("/auth/google/pending/" + encodeURIComponent(signupToken), { credentials: "same-origin" });
     if (!res.ok) {
       const data = await res.json().catch(function(){ return {}; });
-      showError(data.detail || "Cadastro expirado. Faça login com Google novamente.");
+      showError(strDetail(data) || "Cadastro expirado. Faça login com Google novamente.");
       submitBtn.disabled = true; emailDisplay.textContent = "—"; return;
     }
     const data = await res.json();
@@ -113,7 +117,7 @@ document.getElementById("signup-form").addEventListener("submit", async function
       body: JSON.stringify({ token: signupToken, name: name, phone: phone, accepted_terms: true })
     });
     const data = await res.json().catch(function(){ return {}; });
-    if (!res.ok) { showError(data.detail || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; return; }
+    if (!res.ok) { showError(strDetail(data) || "Não foi possível criar sua conta."); submitBtn.disabled = false; submitBtn.textContent = "Criar minha conta"; return; }
     // Meta Ads: conta criada via Google. eventID casa com o CompleteRegistration
     // server-side (CAPI) pro Meta deduplicar.
     if (window.fbq && data.user_id) { fbq("track", "CompleteRegistration", {}, { eventID: "signup_" + data.user_id }); }

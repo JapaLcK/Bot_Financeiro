@@ -5,7 +5,7 @@
    Uso: <i class="ph ph-wallet"></i>  ·  cor via currentColor, tamanho via font-size. */
 @font-face {
   font-family: "Phosphor";
-  src: url("/fonts/Phosphor.woff2") format("woff2");
+  src: url("/fonts/Phosphor.woff2?v=2f963f24afc6") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: block;

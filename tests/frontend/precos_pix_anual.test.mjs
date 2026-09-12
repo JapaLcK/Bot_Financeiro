@@ -68,6 +68,11 @@ const CNPJ = "11222333000181";
  */
 async function abrirPrecos({
   sub = { active: false },
+  // O DESLOGADO não é `{active:false}` com 200: o /billing/subscription responde
+  // não-ok e o `loadSubscription` guarda `subState = null`. É o caso que separa
+  // "ainda não sei" de "sei que não tem assinatura" (PT19e).
+  subStatus = 200,
+  subRoute = null,
   plansConfig = { essencial_available: true, plus_available: true,
                   pro_available: true, pix_annual_available: true },
   pix = {},
@@ -94,9 +99,9 @@ async function abrirPrecos({
   await page.route("**/billing/plans-config", (r) => r.fulfill({
     contentType: "application/json", body: JSON.stringify(plansConfig),
   }));
-  await page.route("**/billing/subscription", (r) => r.fulfill({
-    contentType: "application/json", body: JSON.stringify(sub),
-  }));
+  await page.route("**/billing/subscription", subRoute || ((r) => r.fulfill({
+    status: subStatus, contentType: "application/json", body: JSON.stringify(sub),
+  })));
   await page.route("**/billing/change-plan", (r) => {
     chamadas.changePlan += 1;
     return r.fulfill({ contentType: "application/json", body: "{}" });
@@ -1450,3 +1455,188 @@ test("PT18b: o 409 com detail objeto continua mostrando a `message`", async () =
     `o detail objeto parou de ser lido pela message: "${toast}"`);
   await page.close();
 });
+
+/**
+ * PT19 — A ETIQUETA DO TOGGLE: O PIX PRECISA SER VISÍVEL NO CICLO MENSAL.
+ *
+ * O CTA "Pagar no Pix" só nasce no anual (PT1), então quem abre a página — que
+ * carrega em `monthly` — não tinha nenhum sinal de que Pix existe. A etiqueta
+ * `#pix-cycle-note` é esse sinal, e por isso NÃO pode depender do ciclo.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — apague `if (nota) nota.hidden = !pixAVenda();` do `pbPixInit`
+ *     (pix-checkout.js), ou mova a linha para dentro do `pbPixRefresh` com o
+ *     `anual` na condição: o caso do MENSAL fica vermelho, e ele é o que estava
+ *     verde antes da mutação;
+ *   · positivo — o PT19b prova que a etiqueta continua ESCONDIDA sem a flag e
+ *     para o vitalício. Sem ele, um `nota.hidden = false` fixo passaria no PT19
+ *     anunciando meio de pagamento que a página não vende.
+ */
+// Só `offsetParent`, e o `&& !e.hidden` SAIU: ele olhava o atributo em vez da
+// tela, e com isso o grupo ficava cego para CSS que vence o `hidden`. Foi um bug
+// real — `#pix-cycle-note { display: inline-block }` (seletor de ID) vence o
+// `[hidden] { display: none }` do navegador, e a etiqueta aparecia com a flag
+// desligada enquanto PT19b continuava verde porque `e.hidden` ainda era true.
+const etiquetaVisivel = (page) => page.$eval(
+  "#pix-cycle-note", (e) => e.offsetParent !== null);
+
+test("PT19: a etiqueta de Pix aparece no ciclo mensal e continua no anual", async () => {
+  const { page } = await abrirPrecos();
+  assert.equal(await contarCtas(page), 0, "âncora: no mensal não há CTA de Pix nenhum");
+  assert.equal(await etiquetaVisivel(page), true,
+    "o ciclo mensal não anuncia o Pix em lugar nenhum da tela");
+  assert.match(await page.textContent("#pix-cycle-note"), /Pix/,
+    "a etiqueta existe mas não diz Pix");
+  await page.click("#cycle-annual");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu ao trocar para o anual");
+  await page.click("#cycle-monthly");
+  assert.equal(await etiquetaVisivel(page), true, "a etiqueta sumiu na volta para o mensal");
+  await page.close();
+});
+
+test("PT19b: sem a flag, e para o vitalício, a etiqueta não aparece", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  for (const [nome, plansConfig, sub] of [
+    ["sem pix_annual_available", base, { active: false }],
+    ["flag false", { ...base, pix_annual_available: false }, { active: false }],
+    ["vitalício", { ...base, pix_annual_available: true }, { active: true, lifetime: true }],
+  ]) {
+    const { page } = await abrirPrecos({ plansConfig, sub });
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (mensal)`);
+    await page.click("#cycle-annual");
+    assert.equal(await etiquetaVisivel(page), false,
+      `${nome}: a página anunciou Pix que ela não vende (anual)`);
+    await page.close();
+  }
+});
+
+/**
+ * PT19c — A ETIQUETA PARA QUEM NÃO VÊ A TELA.
+ *
+ * Ela é revelada DEPOIS do load (o `pbPixInit` só roda quando as duas
+ * requisições voltam), e quem navega controle por controle chega ao botão
+ * "Anual" sem passar por ela. Duas amarras, medidas aqui:
+ *
+ *   · `#pix-cycle-live` com `aria-live="polite"` EM VOLTA da pílula, presente
+ *     desde o parse — região registrada e revelada no mesmo instante não
+ *     anuncia, então são dois elementos e não um `aria-live` na própria pílula;
+ *   · `aria-describedby` no `#cycle-annual`, posto e RETIRADO junto com ela.
+ *
+ * O `aria-describedby` sair é a metade que vale dinheiro: elemento diretamente
+ * referenciado é lido mesmo `hidden` (accname), então um atributo fixo no HTML
+ * anunciaria "Pix disponível no anual" para quem não pode comprar — o mesmo
+ * defeito que o `hidden` existe para evitar, por outra porta. O caso sem flag é
+ * o controle positivo deste par.
+ */
+test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com ela", async () => {
+  const base = { essencial_available: true, plus_available: true, pro_available: true };
+  const lido = (page) => page.evaluate(() => ({
+    live: document.getElementById("pix-cycle-live")?.getAttribute("aria-live"),
+    // O `aria-live` precisa ENVOLVER a pílula: irmão não anuncia a revelação.
+    envolve: !!document.getElementById("pix-cycle-live")
+      ?.contains(document.getElementById("pix-cycle-note")),
+    describedby: document.getElementById("cycle-annual")?.getAttribute("aria-describedby"),
+  }));
+
+  const { page } = await abrirPrecos();
+  assert.deepEqual(await lido(page),
+    { live: "polite", envolve: true, describedby: "pix-cycle-note" });
+  await page.click("#cycle-annual");
+  assert.equal((await lido(page)).describedby, "pix-cycle-note",
+    "o vínculo caiu ao trocar de ciclo");
+  await page.close();
+
+  for (const plansConfig of [base, { ...base, pix_annual_available: false }]) {
+    const semPix = await abrirPrecos({ plansConfig });
+    const r = await lido(semPix.page);
+    assert.equal(r.live, "polite", "a região aria-live tem de existir mesmo sem a flag");
+    assert.equal(r.describedby, null,
+      "o botão Anual descreve um Pix que a página não vende");
+    await semPix.page.close();
+  }
+});
+
+/**
+ * PT19d–f — A ETIQUETA ESPERA SABER QUEM ESTÁ OLHANDO; O CTA NÃO.
+ *
+ * O `loadPlansState` publica o estado do Pix DUAS vezes: `publicarPix(null,
+ * false)` antes do /billing/subscription e `publicarPix(subState, resolvida)` depois.
+ * A primeira existe para o CTA nascer cedo (PT15) e é deliberada — caminho de
+ * RESGATE de quem migra do cartão enquanto o Stripe está lento. Mas `sub = null`
+ * também é o valor do DESLOGADO, então o `pixAVenda()` lia o estado ainda
+ * desconhecido como elegível e a ETIQUETA — que é ANÚNCIO — subia para o
+ * vitalício até a requisição voltar. Se ela pendura, o anúncio fica.
+ *
+ * O conserto é o terceiro estado (`resolvida`), não um teste de `null`: testar
+ * `null` esconderia a etiqueta justamente de quem ela existe para convencer.
+ *
+ * Os dois controles do §3, no grupo:
+ *   · negativo — tire o `&& pixSubResolvida` do `pbPixInit` (pix-checkout.js) ou
+ *     troque o `publicarPix(null, false)` da precos.html por `(null, true)`: o
+ *     PT19d fica VERMELHO, e ele é caso novo que já nasce verde com o conserto;
+ *   · positivo — PT19e (deslogado, que é 401 e não 200) e PT19f (assinante não
+ *     vitalício) provam que a etiqueta continua aparecendo para quem pode
+ *     comprar. Sem eles, `nota.hidden = true` fixo passaria no PT19d.
+ *
+ * PT19g fecha a outra metade: a consulta que FALHA (5xx, rede fora, JSON
+ * malformado) também guarda `subState = null`, e chamá-la de resolvida deixava o
+ * anúncio de pé para o vitalício indefinidamente. O sinal é o retorno novo do
+ * `loadSubscription` — 200 com JSON válido e 401 resolvem, o resto não.
+ * Negativo dele: troque o `publicarPix(subState, resolvida)` da precos.html de
+ * volta por `(subState, true)` — PT19g fica VERMELHO e PT19d/e/f seguem verdes.
+ */
+test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, lifetime: true },
+    atrasos: { "/billing/subscription": 4000 },
+  });
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta anunciou Pix antes de saber se este usuário pode comprar");
+  await page.waitForTimeout(1500);
+  assert.equal(await etiquetaVisivel(page), false,
+    "a etiqueta subiu durante a janela do /billing/subscription (1,5 s depois)");
+  // Âncora do PT15: o que espera é a ETIQUETA, não o CTA. Se este 3 virar 0, o
+  // conserto atropelou a migração cartão → Pix com o Stripe ruim.
+  await page.click("#cycle-annual");
+  assert.equal(await contarCtas(page), 3,
+    "o CTA de Pix passou a esperar o /billing/subscription");
+  await page.close();
+});
+
+test("PT19e: deslogado (401 no /billing/subscription) continua vendo a etiqueta", async () => {
+  const { page } = await abrirPrecos({ subStatus: 401, sub: { detail: "Não autenticado" } });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para o deslogado, que é o público que ela existe para convencer");
+  assert.equal(
+    await page.$eval("#cycle-annual", (e) => e.getAttribute("aria-describedby")),
+    "pix-cycle-note", "o vínculo com o botão Anual não voltou para o deslogado");
+  await page.close();
+});
+
+test("PT19f: assinante não vitalício vê a etiqueta", async () => {
+  const { page } = await abrirPrecos({
+    sub: { active: true, gateway: "stripe", plan: "plus", interval: "monthly" },
+  });
+  assert.equal(await etiquetaVisivel(page), true,
+    "a etiqueta sumiu para quem PODE comprar o anual no Pix");
+  await page.close();
+});
+
+// Falha de consulta não identifica o visitante; o CTA continua nascendo cedo.
+for (const [nome, subRoute] of [
+  ["500", (r) => r.fulfill({ status: 500, body: "erro interno" })],
+  ["403", (r) => r.fulfill({ status: 403, body: "proibido" })],
+  ["rede", (r) => r.abort()],
+  ["JSON malformado", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{" })],
+]) {
+  test(`PT19g: /billing/subscription em ${nome} não resolve — a etiqueta não aparece`, async () => {
+    const { page } = await abrirPrecos({ subRoute });
+    assert.equal(await etiquetaVisivel(page), false,
+      "a falha do /billing/subscription foi lida como 'sem assinatura' e anunciou Pix");
+    await page.click("#cycle-annual");
+    assert.equal(await contarCtas(page), 3,
+      "o CTA de resgate morreu junto com a etiqueta quando a consulta falhou");
+    await page.close();
+  });
+}

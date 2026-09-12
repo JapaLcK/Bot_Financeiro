@@ -20,7 +20,7 @@ DUAS COLUNAS") — e as duas são **commit**, nunca uma árvore de trabalho:
 
 | coluna | o que é | como reproduzir |
 |---|---|---|
-| **`main`** | `12d643c` — o que está em produção. É o pai do commit deste documento. | a própria árvore deste branch (`git rev-list --count HEAD..origin/main` → **0** em 2026-09-10) |
+| **`main`** | `12d643c` — baseline histórico medido em 2026-09-10; não é o pai deste documento nem uma afirmação sobre a produção atual. | `git worktree add --detach /tmp/enum-main-12d643c 12d643c`; rodar as sondas nessa árvore |
 | **`leva`** | `1f1b57b` — ponta de `fix/321-rotas-anonimas-500`, que **contém** `fix/369-corpo-venenoso-auth` (`62b500d`) como ancestral. | `git worktree add /tmp/wt321 1f1b57b --detach` e rodar a sonda do §8 lá dentro |
 
 A coluna `leva` **não** é "o que estará na `main`": ela vale para aqueles dois
@@ -60,7 +60,7 @@ São **duas fronteiras diferentes**, e um saneador não cobre a outra:
 
 | sink | NUL | surrogate solitário | onde estoura |
 |---|---|---|---|
-| **Postgres** (`text`/`jsonb` via psycopg) | `DataError` | `UnicodeEncodeError` | NUL: no servidor. Surrogate: **na codificação do parâmetro, antes de o Postgres receber nada** |
+| **Postgres** (`text`/`jsonb` via psycopg) | `DataError` | `UnicodeEncodeError` | NUL em parâmetro `text`: no adaptador `_StrDumper` do psycopg, antes do envio. Surrogate: **na codificação do parâmetro, antes do envio**; o caminho de `jsonb` depende da serialização |
 | **`hash_pii`/`encrypt_pii`** (`core/crypto.py`) | **passa** (HMAC/Fernet aceitam byte zero) | `UnicodeEncodeError` | `.encode("utf-8")` estrito, `core/crypto.py:165` e `:190` |
 
 Medido em 2026-09-10 contra `12d643c`, chamando as funções direto, sem HTTP
@@ -189,7 +189,7 @@ da exceção no `detail`**.
 | rota | campo | NUL `main` → `leva` | surrogate `main` → `leva` | vaza? |
 |---|---|---|---|---|
 | `POST /auth/register` | `email` | 500 → **422** | 500 → **422** | não (na `leva`) |
-| `POST /auth/register` | `password` | **200 (conta criada!)** → 422 | 409⚠ → 422 | `main` vaza no 409 |
+| `POST /auth/register` | `password` | **200 (cadastro pendente de verificação de e-mail)** → 422 | 409⚠ → 422 | `main` vaza no 409 |
 | `POST /auth/register` | `phone` | 200 → 422 | 200 → 422 | não |
 | `POST /auth/register` | `name` | 500 → 422 | 409⚠ → 422 | `main` vaza no 409 |
 | `POST /auth/verify-email` | `email` | 500 → 422 | 500 → 422 | não |
@@ -555,6 +555,8 @@ for k in ("execute com params", "hash_pii/encrypt_pii", ".encode( sem errors=", 
 
 ### 8.2 `rotas.py` — a classificação do §3
 
+Reprodução da revisão: executado em `12d643c`, com FastAPI 0.141.1 e psycopg 3.3.5, em banco local isolado. Resultado: **111 rotas**, **56 modelos**, **128 campos str**, **105 Request**, **10 parâmetros str**; **83 auth / 15 anônimas / 9 admin / 4 segredo**. Estes números descrevem esse commit histórico, não o HEAD atual.
+
 ```python
 """Classifica as rotas de ESCRITA por quem consegue chamá-las.
 Uso:  DATABASE_URL=... JWT_SECRET=... PYTHONPATH=. python rotas.py"""
@@ -581,8 +583,18 @@ def deps(d, acc=None):
         deps(x, acc)
     return acc
 
+def rotas(routes):
+    # FastAPI pode manter include_router como _IncludedRouter, sem achatá-lo.
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        else:
+            router = getattr(route, "original_router", None)
+            if router is not None:
+                yield from rotas(router.routes)
+
 classes, modelos, campos_str, req_cru, param_str, total = Counter(), 0, 0, 0, 0, 0
-for r in dashboard.app.routes:
+for r in rotas(dashboard.app.routes):
     if not isinstance(r, APIRoute) or not (r.methods & ESCRITA):
         continue
     total += 1

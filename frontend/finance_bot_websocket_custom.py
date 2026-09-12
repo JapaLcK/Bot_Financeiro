@@ -41,7 +41,7 @@ from fastapi.exception_handlers import http_exception_handler, request_validatio
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
@@ -107,6 +107,7 @@ from db import (
     LaunchUnsafeRollback,
 )
 from core.observability import _log_falha, get_logger
+from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
@@ -568,17 +569,13 @@ async def get_financial_data(
             -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
             -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
             --
-            -- O QUE ISTO **NÃO** FECHA: `_renderLaunchDetail` (:8035) e
-            -- `openEditLaunchModal` (:8479) têm DOIS alimentadores. Este fecha o
-            -- da Visão Geral (`recent_launches`). O outro é `_catLaunchesRows`
-            -- (dashboard.js:2270 e :2426), que vem de `list_launches_by_category`
-            -- (db/accounts.py:912/:927) — essa projeta `tipo` CRU, e o caminho
-            -- dashboard -> barra de categoria -> linha ainda escreve
-            -- "Tipo: saida". Fica FORA da issue 287 de propósito: a mesma coluna
-            -- alimenta o texto do WhatsApp (core/handlers/launches.py:464), que é
-            -- superfície de produto que a 287 não cobre. Registrado na issue 296.
-            -- A LISTA daquela tela já está certa: dashboard.js:2154 trata
-            -- 'entrada' junto de 'receita'; o resíduo é só o rótulo do detalhe.
+            -- ESCOPO: `_renderLaunchDetail` e `openEditLaunchModal` (dashboard.js)
+            -- têm DOIS alimentadores. Este é o da Visão Geral (`recent_launches`);
+            -- o outro é `_catLaunchesRows`, que vem de
+            -- `list_launches_by_category` (db/accounts.py) e TAMBÉM canoniza,
+            -- pela issue 296. Ele ficou fora da 287 porque a mesma query monta o
+            -- texto do WhatsApp (`_listar_categoria`, core/handlers/launches.py),
+            -- superfície que a 287 não cobria.
             SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
@@ -2168,7 +2165,7 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.pluggy.ai https://cdn.jsdelivr.net "
         "https://static.cloudflareinsights.com https://connect.facebook.net "
-        "https://www.googletagmanager.com; "
+        "https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms; "
         "style-src 'self' 'unsafe-inline' "
         "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob: https:; "
@@ -2253,6 +2250,52 @@ async def csrf_middleware(request: Request, call_next):
     if request.method.upper() in CSRF_SAFE_METHODS and not token:
         _set_csrf_cookie(response, _make_csrf_token())
     return response
+
+
+@app.middleware("http")
+async def query_venenosa_middleware(request: Request, call_next):
+    """NUL/surrogate em QUERY param vira 422 na borda, nunca 500 lá no `execute`.
+
+    O #369 fechou o corpo (modelo Pydantic, `recusa_veneno`) e o #321 fechou o
+    path (guarda nas funções de `db/`). Sobrava a query, e a varredura desta
+    árvore mediu **8** rotas em 500 com `?campo=a%00b` — 4 de admin
+    (`/admin/api/users?plan`, `/admin/api/pii-access?actor` e `?field`,
+    `/admin/grant-pro?email`) e 4 de usuário autenticado comum
+    (`/categories/{id}/launches?categoria`, `/data/{id}?q`,
+    `/history/{id}/list?categoria` e `?q`) — cada 500 gravando uma linha em
+    `system_event_logs` pelo `admin_error_logging_middleware`.
+
+    **Um ponto, não 8 remendos** (§2): os 8 sinks moram em 6 funções de 4
+    módulos, e nenhum é chamador comum dos outros — a única coisa que eles têm
+    em comum é a query string. Guarda por função deixaria aberta a rota que o
+    próximo PR acrescentar; aqui a categoria fecha inteira, inclusive o que
+    ainda não existe.
+
+    **Recusar, não sanear** — a mesma decisão do `recusa_veneno` e pelo mesmo
+    motivo: `?q=` e `?plan=` são o que o usuário digitou, e trocar por `U+FFFD`
+    devolveria silenciosamente o resultado de OUTRA busca. Nenhuma query
+    legítima traz os dois: navegador nenhum os produz.
+
+    O que MUDA fora dos 8: os outros params `str` respondiam 4xx (parser de
+    data, whitelist) ou 200 tratando o veneno como texto qualquer — `?q=a\x00b`
+    no admin dava 200 com zero resultado. Esses passam a 422. Ninguém legítimo
+    está nessa faixa, e o 422 é honesto onde o 200 dizia "procurei e não achei".
+
+    Middleware e não `Depends`: `Depends` obrigaria a tocar as 38 rotas.
+    `_with_security_headers` porque este `return` não desce ao
+    `security_headers_middleware`, exatamente como no `csrf_middleware`.
+    """
+    if any(tem_veneno(valor) for valor in request.query_params.values()):
+        return _with_security_headers(
+            error_page_response(422) if wants_html(request)
+            else vary_accept(JSONResponse(
+                status_code=422,
+                content={"detail": "Parâmetro de busca contém caractere inválido."},
+                headers={"Cache-Control": "no-store"},
+            ))
+        )
+    return await call_next(request)
+
 
 # ─── WhatsApp webhook routes (lazy import) ───────────────────────────────────
 # Importar wa_app no nível de módulo puxava toda a cadeia de lógica do bot
@@ -2394,7 +2437,81 @@ async def http_exception_page_handler(request: Request, exc: StarletteHTTPExcept
 async def validation_exception_page_handler(request: Request, exc: RequestValidationError):
     if wants_html(request):
         return error_page_response(422)
-    return vary_accept(await request_validation_exception_handler(request, exc))
+    # O `input` de cada erro é o CORPO INTEIRO da requisição, devolvido ao
+    # cliente — **inclusive a senha em claro**. MEDIDO nesta árvore:
+    # `POST /auth/login {"password": "senhaforte123"}`, sem o `email`,
+    # respondia `{"type":"missing","loc":["body","email"],"msg":"Field
+    # required","input":{"password":"senhaforte123"}}`. Não é das rotas de auth
+    # nem do validador de veneno do #369: o `input` de um erro `missing` é o
+    # objeto PAI, então QUALQUER rota com modelo Pydantic ecoava o corpo —
+    # medido também em `/investments/{id}`. Por isso a supressão é aqui, no
+    # handler único de 422 do app, e não na recusa do nosso validador.
+    # Reentregue ao handler do FastAPI em vez de montar JSON aqui: o formato
+    # continua sendo o DELE (`type`/`loc`/`msg`/`ctx`/`url`), menos um campo —
+    # nada de terceiro formato de erro. Custo medido: ZERO consumidor do
+    # `input` no repositório (grep em `frontend/`, `.js`, `.html`, `.py`); ele
+    # só servia para depurar pelo console, e quem manda o corpo já o tem.
+    sem_input = RequestValidationError(
+        [{campo: v for campo, v in erro.items() if campo != "input"}
+         for erro in exc.errors()]
+    )
+    try:
+        return vary_accept(await request_validation_exception_handler(request, sem_input))
+    except (ValueError, RecursionError) as veneno:
+        # `as veneno`, nunca `as exc`: o `except` REBINDA o nome, e um `as exc`
+        # aqui trocaria o RequestValidationError pelo UnicodeEncodeError —
+        # medido, o `exc.errors()` lá embaixo virava
+        # `AttributeError: 'UnicodeEncodeError' object has no attribute 'errors'`
+        # e as 4 rotas de surrogate voltavam a 500.
+        #
+        # Registra ANTES de responder: sem esta linha o ramo é 100% mudo
+        # (medido), e um ataque de veneno em massa — que antes gerava 500 mais
+        # uma linha em `system_event_logs` — passaria a sair como 422 sem
+        # rastro nenhum.
+        # `info` e não `warning` DE PROPÓSITO: o `_DashboardHandler`
+        # (core/observability.py:24) está no root logger e espelha WARNING+ com
+        # um `psycopg.connect()` + INSERT BLOQUEANTE por registro, dentro do
+        # event loop — num caminho anônimo e barato de disparar isso é o vetor
+        # de DoS, não o conserto. Mesmo motivo do `_admin_log.info` do
+        # ClientDisconnect e do `_error_degraded` de `frontend/routes/shared.py`
+        # ("um bot varrendo URL vira um INSERT por 404"). Fica no stderr, que é
+        # onde o `[unhandled]` também aparece.
+        logging.getLogger(__name__).info(
+            "422 sem input (%s): %s %s",
+            veneno.__class__.__name__, request.method, request.url.path,
+        )
+        # CINTO. Os três venenos do #369 entravam aqui pelo `input`: surrogate
+        # solitário (`UnicodeEncodeError`), `NaN`/`Infinity`/`-Infinity`/`1e400`
+        # (`ValueError: Out of range float values are not JSON compliant`, a
+        # família que o #310 fechou no webhook da Pluggy) e aninhamento fundo
+        # (`RecursionError` no `jsonable_encoder`). Com o `input` suprimido
+        # ACIMA nenhum deles chega mais — MEDIDO: com este `except` REMOVIDO,
+        # os 136 casos dos dois arquivos de teste do assunto continuam verdes,
+        # menos o único que chama este ramo direto.
+        # Fica mesmo assim porque o que sobra no erro NÃO é nosso: o `ctx` vai
+        # para o cliente (medido: `"ctx":{"error":{}}`) e a `msg` é do
+        # validador — hoje o nosso, único do app, ecoa só o NOME do campo, mas
+        # um que ecoasse o VALOR recebido reabre o 500 em um `raise ValueError`
+        # de uma linha. Custo do cinto: este bloco, num caminho anônimo cuja
+        # alternativa é 500.
+        # `UnicodeEncodeError` é subclasse de `ValueError`, então os dois
+        # primeiros entram por `ValueError`; `RecursionError` (RuntimeError) é
+        # o terceiro. Não é `except Exception`: o que roda no `try` é só a
+        # serialização do erro.
+        # A resposta é montada sem `input` e sem `ctx` — raso por construção,
+        # e nenhum dos três venenos tem por onde voltar. `type` é da biblioteca
+        # e `loc` é raso. O `limpa_para_pg` (fonte única do que é codificável,
+        # core/pg_text.py; `list()` porque ele não percorre `tuple`) saneia a
+        # `msg`: com o `input` fora, ele deixou de ser no-op aqui — é o que
+        # transforma o surrogate da `msg` em U+FFFD em vez de 500.
+        return vary_accept(JSONResponse(
+            status_code=422,
+            content={"detail": limpa_para_pg([
+                {"type": e.get("type"), "loc": list(e.get("loc") or ()),
+                 "msg": e.get("msg")}
+                for e in exc.errors()
+            ])},
+        ))
 
 
 async def unhandled_exception_page_handler(request: Request, exc: Exception):
@@ -2664,24 +2781,53 @@ def _require_pro(user_id: int, feature: str) -> None:
 
 # ─── Auth models ─────────────────────────────────────────────────────────────
 
-class RegisterBody(BaseModel):
+class _CorpoSemVeneno(BaseModel):
+    """Base dos corpos de auth ANÔNIMA: recusa na borda NUL e surrogate
+    solitário em qualquer campo `str` (#369).
+
+    Recusa, e não saneia: `email` é identificador (ver `recusa_veneno`), e
+    `password`/`name`/`code` também estavam abertos — `password` com NUL
+    COMPLETAVA um cadastro (medido: 200). Sem isto o veneno chega ao
+    `_check_persistent_rate_limit` (INSERT em `text`) e ao `hash_pii`, os dois
+    em 500 anônimo.
+
+    Quem herda é a CATEGORIA "rota anônima com modelo Pydantic", enumerada
+    varrendo `app.routes` e medindo cada uma sem cookie (§2): as 4 de
+    credencial (`register`/`login`/`verify-email`/`forgot-password`) mais
+    `reset-password`, `mfa/verify-login` e `google/complete-signup` — estas
+    três estavam em 500 anônimo (`token`/`challenge` chegando ao `text` do
+    Postgres), e o `google/complete-signup` ainda devolvia a mensagem interna
+    da exceção no `detail` do 400.
+    Ficaram DE FORA, medidas: `/contact` (`send_email` nunca levanta e o
+    `_log_email_event` engole tudo — 200/502, nunca 500) e
+    `/api/prospect/status` (exige `X-Prospect-Key`, recusada antes do banco, e
+    o campo é `list[str]`, que o `recusa_veneno` não olha). Todo o resto tem
+    401 antes do banco. Os outros modelos, autenticados, são a #321.
+    """
+
+    @model_validator(mode="after")
+    def _sem_veneno(self):
+        return recusa_veneno(self)
+
+
+class RegisterBody(_CorpoSemVeneno):
     email: str
     password: str
     phone: str
     name: str | None = None
 
-class LoginBody(BaseModel):
+class LoginBody(_CorpoSemVeneno):
     email: str
     password: str
 
-class EmailBody(BaseModel):
+class EmailBody(_CorpoSemVeneno):
     email: str
 
-class VerifyEmailBody(BaseModel):
+class VerifyEmailBody(_CorpoSemVeneno):
     email: str
     code: str
 
-class ResetPasswordBody(BaseModel):
+class ResetPasswordBody(_CorpoSemVeneno):
     token: str
     new_password: str
 
@@ -2838,7 +2984,7 @@ async def auth_register(request: Request, body: RegisterBody):
     try:
         normalize_phone_e164(body.phone)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     try:
         code = create_email_verification(
@@ -2859,7 +3005,7 @@ async def auth_register(request: Request, body: RegisterBody):
             logging.getLogger(__name__).warning("account_exists_notice falhou: %s", notice_exc)
         return {"status": "verification_sent", "email": body.email.strip().lower()}
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=detalhe_seguro(e))
 
     sent = send_verification_email(body.email.strip().lower(), code)
     if not sent:
@@ -2889,7 +3035,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
             body.email, body.code, source=signup_source_from_request(request)
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(e))
 
     user_id    = result["user_id"]
     link_code  = result["link_code"]
@@ -3379,7 +3525,9 @@ class MFADisableBody(BaseModel):
     code: str | None = None
 
 
-class MFAVerifyLoginBody(BaseModel):
+class MFAVerifyLoginBody(_CorpoSemVeneno):
+    # `challenge` e `code` são gerados por nós (hex e 6 dígitos); o `use_backup`
+    # é `bool` e o `recusa_veneno` só olha `str`.
     challenge: str
     code: str
     use_backup: bool = False
@@ -3806,7 +3954,7 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     if email:
         from core.services.email_service import send_account_deletion_scheduled_email
@@ -3867,7 +4015,7 @@ GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 
 
-class GoogleSignupCompleteBody(BaseModel):
+class GoogleSignupCompleteBody(_CorpoSemVeneno):
     token: str
     name: str
     phone: str
@@ -4096,7 +4244,7 @@ async def auth_google_complete_signup(
             signup_source_from_request(request, google=True),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
     user_id = int(result["user_id"])
     email = result["email"]
@@ -4482,8 +4630,8 @@ async def billing_create_checkout(
 
     `plan` é obrigatório NA ROTA e opcional no modelo. Corpo obrigatório
     (sem `| None`) fecharia no Pydantic e foi descartado por UM motivo: troca o
-    400 específico por um 422 cujo `detail` é LISTA, e a /precos
-    (`precos.html:1019-1024`) só lê `detail` string ou `detail.message` — cai no
+    400 específico por um 422 cujo `detail` é LISTA, e a /precos (o ramo
+    `if (!resp.ok)` do `startCheckout`) só lê `detail` string ou `detail.message` — cai no
     fallback genérico. Campo obrigatório só no modelo não fecharia nada: com
     `| None = None` o POST sem body nenhum nem instancia o modelo.
 
@@ -6080,6 +6228,23 @@ async def conta_redirect(request: Request):
 # ─── Magic link de acesso ao dashboard ───────────────────────────────────────
 
 @app.get("/d/{code}")
+# Teto de 30/min por IP: sem ele, 200 requisições anônimas com código bem formado
+# viravam 200 DELETEs no Postgres a 589 req/s, e zero 429 (medido).
+#
+# `shared_limit(..., scope=)` e NÃO `limit()`, e isso não é estilo: o `Limiter`
+# de `frontend/routes/shared.py` roda com o `key_style="url"` default do slowapi,
+# então o balde de um `@limiter.limit` é (IP, **URL exata**). Numa rota com path
+# param, cada código inventado cai num balde novo e o teto nunca é alcançado —
+# MEDIDO nesta árvore: 35 GETs em `/d/x0..x34` com `@limiter.limit("30/minute")`
+# deram 0 × 429; os mesmos 35 na MESMA URL deram 5 × 429. `scope` fixo tira a URL
+# da chave e faz o balde ser (IP, este endpoint), que é o que o teto quer dizer.
+#
+# Janela de MINUTO, não de hora, porque o `rate_limit_exceeded_handler` devolve
+# `Retry-After: 60` fixo — com teto por hora o 429 mentiria a hora inteira. O
+# limitador é por IP e um CGNAT de operadora põe vários usuários na mesma chave:
+# 30 cliques/min do mesmo IP fica muito acima do tráfego real, e quem esbarrar
+# volta em 60 s em vez de ficar uma hora sem o magic link do bot.
+@limiter.shared_limit("30/minute", scope="magic_link_do_bot")
 async def dashboard_short_link(
     request: Request,
     code: str,
@@ -6444,7 +6609,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                     reason=inferred.reason,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
             except Exception as exc:
                 logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
@@ -6485,7 +6650,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 reason=inferred.reason,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
 
@@ -6532,7 +6697,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             reason=inferred.reason,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
 
@@ -7029,7 +7194,7 @@ async def export_email(
         try:
             period_start, period_end = _normalize_export_period(start_date, end_date)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
     else:
         y = year or now.year
         m = month or now.month

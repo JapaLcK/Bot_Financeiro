@@ -29,7 +29,7 @@ from core.crypto import (
     encrypt_pii_optional,
     pii_audit_batch,
 )
-from core.pg_text import limpa_para_pg
+from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.secure_compare import constant_time_eq
 
 
@@ -1873,7 +1873,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
                 set_account_plan, str(payload.get("plan") or ""), months, user_id=user_id
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         if not row:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         await log_system_event(
@@ -2177,7 +2177,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             affiliate = await asyncio.to_thread(create_affiliate, int(user_id), code, bps)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
 
         await log_system_event(
             "info",
@@ -2205,7 +2205,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             ok = await asyncio.to_thread(set_affiliate_status, affiliate_id, status)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
         if not ok:
             raise HTTPException(status_code=404, detail="Afiliado não encontrado.")
         await log_system_event(
@@ -2243,7 +2243,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         try:
             brcode = build_pix_brcode(pix_key, amount_cents=int(payout["amount_cents"]))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=detalhe_seguro(exc))
 
         return {
             "brcode": brcode,
@@ -2262,6 +2262,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
@@ -2295,6 +2299,10 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
 
         try:
             payload = await request.json()
+        except ClientDisconnect:
+            # Corpo ruim → `{}` é legítimo (`note` é opcional). Cliente que
+            # sumiu não é corpo ruim: liquidar aqui é agir sem mandato (#372).
+            raise
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
