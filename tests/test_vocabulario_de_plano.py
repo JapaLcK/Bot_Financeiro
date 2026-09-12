@@ -174,7 +174,7 @@ def test_todo_plano_pago_da_coluna_tem_nome_comercial():
 
     Fecha a CLASSE do achado do Codex no #358, em vez da instância. `plus` era a
     instância: `_STORED_PLAN_TO_TIER` o aceita (mesmo tier de `pro`) e
-    `frontend/admin-dashboard.html:2192` afirma que há contas com ele, mas
+    o `planNow` do `frontend/admin-dashboard.html` afirma que há contas com ele, mas
     `PLAN_DISPLAY_NAMES` não o tinha — e essas contas liam o genérico "PigBank"
     no e-mail e em `billing_commands.py:109`. Um SEXTO valor futuro nasce
     vermelho aqui em vez de virar genérico numa cobrança.

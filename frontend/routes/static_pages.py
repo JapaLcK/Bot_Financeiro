@@ -93,6 +93,12 @@ async def serve_settings(request: Request):
     # conta. A perna da ESCOLHA continua valendo — cadastro novo sem plano vai
     # pra /precos como antes; quem perdeu o DIREITO entra aqui.
     #
+    # As CINCO rotas de conta que sustentam esta página fazem o MESMO recorte no
+    # servidor: `shared.authorize_account_access` chama o
+    # `_enforce_subscription_gate(exige_direito=False)` — mesmo parâmetro, mesma
+    # decisão, uma regra só (§0.7). A docstring de lá é o texto longo; esta nota
+    # existe para o grep achar as duas pontas.
+    #
     # O par do lado cliente está em `settings.html`, no bloco do `/auth/me`: os
     # dois têm de concordar, senão o JS expulsa quem o servidor deixou entrar.
     gate = gate_plan_selection(request, exige_direito=False)

@@ -67,12 +67,21 @@ after(async () => { await browser?.close(); server?.kill(); });
  * suja não pode quebrar JS) e `pix.n` conta as requisições a `/billing/pix/`,
  * que no caminho da Stripe têm de ser ZERO.
  */
-async function abrirHome(query, cobranca = null, pendurar = false,
-                         semTimeoutNativo = false) {
+async function abrirHome(query, cobranca = null,
+                         { pendurar = false, semTimeoutNativo = false,
+                           initScript = null,
+                           esperar = "#welcome-pro-overlay.open" } = {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const erros = [];
   const pix = { n: 0 };
   page.on("pageerror", (e) => erros.push(String(e)));
+  // Antes de qualquer script da página: é assim que um stub de `window.fetch`
+  // fica ANTES do wrapper do auth-refresh.js e enxerga as opções cruas do
+  // fetch (o `signal`, que é o que os casos de teto medem). Aceita `fn` ou
+  // `[fn, arg]` — o `arg` é a única forma de passar dado para dentro da página.
+  if (initScript) {
+    await page.addInitScript(...(Array.isArray(initScript) ? initScript : [initScript]));
+  }
   // Safari/WKWebView < 16.4 (o alvo do app é iOS 14.0): `AbortSignal.timeout`
   // não existe. Apagar a propriedade ANTES do load é o que reproduz esse
   // navegador aqui — o Chromium do Playwright sempre a tem.
@@ -114,7 +123,10 @@ async function abrirHome(query, cobranca = null, pendurar = false,
   });
   await page.goto(`${ORIGIN}/home.html${query}`);
   // O modal sobe 450 ms depois do load, e só se a validação de sessão passou.
-  await page.waitForSelector("#welcome-pro-overlay.open", { timeout: 15000 });
+  // `esperar` só muda nos casos em que a validação NÃO passa (WP21/WP22): lá o
+  // `showAccessError` troca o #page-root e TIRA a classe `open` do overlay, então
+  // esperar por ela penduraria até os 15 s.
+  await page.waitForSelector(esperar, { timeout: 15000 });
   return { page, erros, pix };
 }
 
@@ -391,7 +403,7 @@ test("WP13: com inicio antigo na URL, o modal mostra a data que o servidor deu",
  */
 test("WP14: busca pendurada — o modal sobe assim mesmo, sem valor inventado", async () => {
   const t0 = Date.now();
-  const { page, erros } = await abrirHome(`${BASE}&pl=plus&gw=pix`, AGENDADA, true);
+  const { page, erros } = await abrirHome(`${BASE}&pl=plus&gw=pix`, AGENDADA, { pendurar: true });
   const decorrido = Date.now() - t0;
   const [, , dados] = await purchase(page);
   const t = await textos(page);
@@ -494,7 +506,7 @@ test("WP17: amount_cents=999999999999 cai no caso sem valor", async () => {
  * o comportamento do navegador moderno.
  */
 test("WP18: sem AbortSignal.timeout (iOS 14), a agendada mantém data e value", async () => {
-  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, false, true);
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, { semTimeoutNativo: true });
   const semTimeout = await page.evaluate(() => typeof AbortSignal.timeout);
   assert.equal(semTimeout, "undefined", "o ambiente do teste não foi degradado");
   const [, , dados] = await purchase(page);
@@ -503,5 +515,192 @@ test("WP18: sem AbortSignal.timeout (iOS 14), a agendada mantém data e value", 
   assert.match(t.sub, /26\/08\/2027/, `agendada anunciada sem a data: ${t.sub}`);
   assert.doesNotMatch(t.sub, /já começou/, `agendada virou "já começou": ${t.sub}`);
   assert.deepEqual(erros, [], `pageerror sem AbortSignal.timeout: ${erros.join(" | ")}`);
+  await page.close();
+});
+
+/* ── WP19/WP20: o teto que o `finally` cancelava sozinho ─────────────────────
+ *
+ * Irmãos do conserto de `pb-nav.js` (PR #367): quando a função volta por um
+ * `return` que fica ENTRE os headers e a leitura do corpo, o
+ * `finally { clearTimeout(timer) }` cancela o único abort agendado e ninguém
+ * aborta — o corpo não lido segue baixando até EOF/GC e o teto prometido deixa
+ * de valer NAQUELE ramo. O conserto é uma guarda cobrindo todas as saídas:
+ * `finally { clearTimeout(timer); ctrl.abort(); }`.
+ *
+ * A medida é os MILISSEGUNDOS DE DENTRO DA PÁGINA, do início do fetch até o
+ * abort — nunca o relógio do Playwright.
+ *
+ * As mutações dos QUATRO sites deste arquivo, RODADAS (não deduzidas) e
+ * rotuladas pelo TEXTO mutado — medidas em 2026-09-10, remeça antes de reusar:
+ *
+ *   | texto mutado (home.html)                            | resultado          |
+ *   |-----------------------------------------------------|--------------------|
+ *   | `} finally { clearTimeout(timer); ctrl.abort(); }`   | WP19 VERMELHO,     |
+ *   |   → sem o `ctrl.abort()` (busca da cobrança)         |   os outros 37 ✔   |
+ *   | o mesmo finally → `} finally { }`                    | WP19 VERMELHO,     |
+ *   |                                                      |   os outros 37 ✔   |
+ *   | `finally { if (timer) clearTimeout(timer); if (ctrl)` | WP20 VERMELHO,    |
+ *   |   `ctrl.abort(); }` → sem o abort (`loadAuthMe`)      |   os outros 37 ✔  |
+ *   | `finally { if (vctrl) vctrl.abort(); }` → `{ }`      | WP21 e WP22        |
+ *   |   (o bloco do validate, em initHome)                 |   VERMELHOS (36 ✔) |
+ *   | `.finally(() => clearTimeout(timer))` do             | 36 de 38 VERMELHOS |
+ *   |   `_boundedValidate` → `{ clearTimeout(timer);`      |   — só WP21 e WP22 |
+ *   |   `ctrl.abort(); }` (o abort no lugar ERRADO)        |   sobrevivem       |
+ *
+ * A última é a alternativa REJEITADA, e o número é o motivo: abortar no
+ * `.finally` da cadeia mata o `r.json()` de todo validate bem-sucedido.
+ *
+ * A do `} finally { }` é a do timer VAZADO, e o que a mata é o `notEqual null`: quando o
+ * caso lê `__abortado` (~1,2 s depois do load, assim que o modal sobe) o
+ * `setTimeout` de 4 s ainda NÃO disparou. O `< 1000` fica assim como guarda de
+ * regressão — ele prende o abort ao `return` do ramo, não ao teto —, mas quem
+ * discrimina hoje é o `null`: registrado aqui porque a versão anterior deste
+ * comentário atribuía a morte dessa mutação à janela, o que a medição desmentiu.
+ *
+ * Controle positivo dos dois: o resto deste arquivo. `abrirHome` só devolve
+ * depois de `#welcome-pro-overlay.open`, então todo caso aqui já prova que o
+ * caminho legítimo (cobrança respondida, `/auth/me` com plano pago) continua
+ * fechando o overlay e abrindo o modal.
+ */
+
+/**
+ * Stub in-page: responde a URL que casa `marca` com os headers prontos e o
+ * CORPO ABERTO (`ReadableStream` que nunca empurra nada), e anota, DE DENTRO da
+ * página, os ms do início do fetch até o abort.
+ *
+ * `so1a` serve o /auth/me: só a PRIMEIRA chamada com `signal` (a do poll
+ * pós-checkout, a única com teto) cai no corpo aberto; as seguintes seguem para
+ * o `page.route`, que devolve o plano pago e deixa o overlay fechar dentro dos
+ * 15 s do `waitForSelector`.
+ */
+function stubCorpoAberto({ marca, status, so1a }) {
+  window.__abortado = null;
+  window.__pedidos = 0;
+  // `pageerror` NÃO pega promise rejeitada sem catch, e é justamente o risco de
+  // abortar aqui: o `auth-refresh.js` renova o 401 com `_origFetch` SEM signal
+  // (ver o comentário do `_raceBudget`, home.html), e ele já perdeu a corrida
+  // quando o abort
+  // chega. Sem esta lista o caso ficaria calado sobre isso.
+  window.__rejeicoes = [];
+  window.addEventListener("unhandledrejection", (e) => {
+    window.__rejeicoes.push(String((e.reason && e.reason.name) || e.reason));
+  });
+  const orig = window.fetch;
+  window.fetch = function (u, o) {
+    // `o.signal` some quando a mutação tira o teto — sem esta guarda o stub
+    // lançaria e o caso ficaria vermelho pelo motivo errado.
+    const comSinal = !!(o && o.signal);
+    const casa = String(u).includes(marca) && (!so1a || (comSinal && window.__pedidos === 0));
+    if (!casa) return orig.apply(this, arguments);
+    window.__pedidos += 1;
+    const t = Date.now();
+    if (comSinal) {
+      o.signal.addEventListener("abort", () => { window.__abortado = Date.now() - t; });
+    }
+    return Promise.resolve(new Response(new ReadableStream({ start() {} }), { status }));
+  };
+}
+
+const msAteAbort = (page) => page.evaluate(() => window.__abortado);
+
+test("WP19: 404 do /billing/pix com o corpo aberto é ABORTADO, não esquecido", async () => {
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, null, {
+    initScript: [stubCorpoAberto, { marca: "/billing/pix/", status: 404 }],
+  });
+  const ms = await msAteAbort(page);
+  assert.notEqual(ms, null,
+    "o 404 com corpo aberto não foi abortado: sem o `ctrl.abort()` no finally o"
+    + " clearTimeout tira o único relógio e o corpo baixa sem teto nenhum");
+  assert.equal(ms < 1000, true,
+    `o abort chegou ${ms}ms depois do início do fetch: é o teto de 4 s disparando,`
+    + " não o abort() do finally");
+  // E o ramo continua sendo o do 404: nada inventado, texto do imediato.
+  assert.match((await textos(page)).sub, /já começou/);
+  assert.deepEqual(await page.evaluate(() => window.__rejeicoes), [],
+    "o abort virou promise rejeitada sem catch");
+  assert.deepEqual(erros, []);
+  await page.close();
+});
+
+test("WP20: /auth/me !ok com o corpo aberto é ABORTADO dentro do budget", async () => {
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, {
+    initScript: [stubCorpoAberto, { marca: "/auth/me", status: 503, so1a: true }],
+  });
+  const ms = await msAteAbort(page);
+  assert.notEqual(ms, null,
+    "o /auth/me !ok com corpo aberto não foi abortado: o `return null` do !ok sai"
+    + " entre os headers e o corpo, e o finally cancelava o único abort agendado");
+  assert.equal(ms < 1000, true,
+    `o abort chegou ${ms}ms depois do início do fetch: é o budget do poll`
+    + " disparando, não o abort() do finally");
+  // Controle positivo DENTRO do caso: o overlay fechou e o modal subiu, ou seja
+  // a 2ª volta do poll (plano pago) seguiu funcionando com o abort no lugar.
+  assert.match((await textos(page)).sub, /26\/08\/2027/);
+  // O risco nomeado no plano: o abort do `loadAuthMe` não alcança a renovação
+  // que o auth-refresh faz com `_origFetch` sem signal, e o `_raceBudget` já
+  // devolveu null pelo timer. Medido, não deduzido.
+  assert.deepEqual(await page.evaluate(() => window.__rejeicoes), [],
+    "o abort do loadAuthMe virou unhandled rejection no _raceBudget");
+  assert.deepEqual(erros, []);
+  await page.close();
+});
+
+/* ── WP21/WP22: o 6º site — o /auth/validate do retorno de checkout ──────────
+ *
+ * O `_boundedValidate` tem a MESMA doença dos outros cinco com uma forma
+ * diferente: a cadeia `.finally(() => clearTimeout(timer))` roda quando os
+ * HEADERS chegam, e dali em diante não há relógio nenhum. Só que aqui o corpo
+ * é consumido pelo CALLER (`r.json()`, duas linhas depois), então o abort não
+ * pode morar no `finally` da cadeia — mataria todo validate bem-sucedido. Quem
+ * abandona é quem aborta: o `vctrl` fica no bloco do caller, abortado num
+ * `finally` que cobre os quatro desfechos.
+ *
+ * Dois ramos, ambos no caminho de quem acabou de pagar (`_justUpgraded`):
+ *   · WP21 — `if (!r || !r.ok) { … return; }` sai entre headers e corpo
+ *     (sessão vencida no retorno do checkout é desfecho normal);
+ *   · WP22 — headers 200 e o corpo trava: o `_raceBudget` desiste do `r.json()`
+ *     aos 3 s e o caller retorna, abandonando a leitura.
+ *
+ * As duas mutações destes casos estão na tabela do cabeçalho do WP19/WP20, com
+ * o resultado medido — inclusive a do abort no lugar ERRADO, que é o motivo de
+ * o controller não morar dentro do `_boundedValidate`.
+ *
+ * Controle positivo: o resto do arquivo — `abrirHome` só volta com
+ * `#welcome-pro-overlay.open`, ou seja, validate 200 com corpo lido de verdade.
+ */
+
+test("WP21: /auth/validate !ok com o corpo aberto é ABORTADO, não esquecido", async () => {
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, {
+    initScript: [stubCorpoAberto, { marca: "/auth/validate", status: 503 }],
+    esperar: ".access-error",
+  });
+  const ms = await msAteAbort(page);
+  assert.notEqual(ms, null,
+    "o /auth/validate !ok com corpo aberto não foi abortado: o `return` do !r.ok"
+    + " sai entre os headers e o corpo, e o .finally() da cadeia já cancelou o timer");
+  assert.equal(ms < 1000, true,
+    `o abort chegou ${ms}ms depois do início do fetch: perto do teto de 8s é`
+    + " relógio vazado, não o abort() do finally do caller");
+  assert.deepEqual(await page.evaluate(() => window.__rejeicoes), []);
+  assert.deepEqual(erros, []);
+  await page.close();
+});
+
+test("WP22: /auth/validate 200 com o corpo travado é ABORTADO quando o caller desiste", async () => {
+  const { page, erros } = await abrirHome(`${BASE}&pl=pro&gw=pix`, AGENDADA, {
+    initScript: [stubCorpoAberto, { marca: "/auth/validate", status: 200 }],
+    esperar: ".access-error",
+  });
+  const ms = await msAteAbort(page);
+  assert.notEqual(ms, null,
+    "o corpo travado do /auth/validate não foi abortado: o `_raceBudget` desiste"
+    + " aos 3s e o caller retorna com o timer da cadeia já cancelado");
+  // Aqui o `< 1000` do WP19/WP20 NÃO vale: o abort legítimo chega em ~3000ms
+  // (o `_checkoutBudget(3000)` da leitura do corpo). 6000 ainda separa isso do
+  // teto de 8s do `_boundedValidate`, que é o relógio que não deve sobrar.
+  assert.equal(ms < 6000, true,
+    `o abort chegou ${ms}ms depois do início do fetch: acima do _raceBudget de 3s`);
+  assert.deepEqual(await page.evaluate(() => window.__rejeicoes), []);
+  assert.deepEqual(erros, []);
   await page.close();
 });

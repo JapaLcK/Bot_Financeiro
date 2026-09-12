@@ -666,8 +666,11 @@ def reset_user_data(
                 # então um writer preso trava as mensagens de TODOS na janela.
                 #
                 # Sem `lock_timeout` de propósito: o do repo vive nas conexões
-                # DEDICADAS do `pluggy_item_lock` (db/open_finance_state.py:595,
-                # :611, :676), feitas para ter teto próprio. No pool ele valeria
+                # DEDICADAS do `pluggy_item_lock` (os `set_config('lock_timeout',
+                # …)` de `pluggy_item_lock` e `pluggy_items_lock`, em
+                # db/open_finance_state.py — sem número: os três que estavam
+                # aqui apontavam para linha em branco muito antes desta leitura,
+                # CLAUDE.md §2), feitas para ter teto próprio. No pool ele valeria
                 # para TODO write do produto, e espera correta viraria erro. Se
                 # incomodar, a saída é ordem única de lock nos writers.
                 #

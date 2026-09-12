@@ -1224,7 +1224,14 @@ async function loadAuthMe(timeoutMs) {
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
-  finally { if (timer) clearTimeout(timer); }
+  // O `abort()` acompanha o `clearTimeout` porque o `return null` do !ok sai
+  // ENTRE os headers e a leitura do corpo: ali o clearTimeout tira o único
+  // relógio agendado e ninguém mais abortaria o corpo não lido, que segue
+  // baixando até EOF — o teto prometido ("nunca bloqueia mais que budgetMs")
+  // deixaria de valer nesse ramo. No caminho feliz o JSON já foi lido e
+  // abortar depois de settled é no-op. `if (ctrl)` não é defesa: `ctrl` é null
+  // quando `timeoutMs` é falsy (fluxo normal, sem teto).
+  finally { if (timer) clearTimeout(timer); if (ctrl) ctrl.abort(); }
 }
 
 /* "Assentou" = o webhook checkout.session.completed já ATIVOU o plano pago que
@@ -1342,9 +1349,10 @@ function _checkoutBudget(max) {
 }
 
 /* Corre uma promise de request contra o relógio. Precisa do Promise.race além
-   do AbortController porque o wrapper global (auth-refresh.js:44) renova via
-   /auth/refresh com _origFetch SEM signal, o abort do caller não alcança essa
-   renovação, então só o timer garante o teto. */
+   do AbortController porque o wrapper global do auth-refresh.js renova via
+   /auth/refresh com _origFetch SEM signal (o `_origFetch("/auth/refresh")` de
+   lá), o abort do caller não alcança essa renovação, então só o timer garante
+   o teto. */
 function _raceBudget(promise, budgetMs, onTimeout) {
   return Promise.race([
     promise,
@@ -1362,9 +1370,13 @@ function _boundedAuthMe(budgetMs) {
    ou null (estourou / falhou), o caller trata null como sessão inválida, que já
    era o caminho de um validate !ok.
    O .catch() é obrigatório: sem ele, um abort ou erro de rede que chegue DEPOIS
-   do timer ter vencido a corrida vira unhandled rejection no console. */
-function _boundedValidate(budgetMs) {
-  const ctrl = new AbortController();
+   do timer ter vencido a corrida vira unhandled rejection no console.
+   O ctrl vem de FORA porque o corpo é consumido pelo caller, não aqui: o
+   .finally() abaixo roda quando os HEADERS chegam e já cancela o timer, então
+   as saídas do caller (o return do !ok e o _raceBudget que desiste do r.json())
+   abandonariam a conexão sem relógio nenhum. Quem abandona o corpo é quem
+   aborta — ver o vctrl em initHome. */
+function _boundedValidate(budgetMs, ctrl) {
   const timer = setTimeout(() => ctrl.abort(), budgetMs);
   const req = fetch(`${API}/auth/validate`, { credentials: "same-origin", signal: ctrl.signal })
     .catch(() => null)
@@ -1553,13 +1565,19 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
   // 1) Valida sessão
   let userId = 0;
   let validateData = null;
+  // O controller do validate mora AQUI, não dentro do _boundedValidate: quem
+  // abandona o corpo da resposta é este bloco (o return do !r.ok e o _raceBudget
+  // que desiste do r.json() em 3s), com o timer da cadeia já cancelado desde a
+  // chegada dos headers. Abortar no .finally() de lá mataria o r.json() do
+  // caminho feliz — o .finally roda ANTES da leitura do corpo.
+  const vctrl = _justUpgraded ? new AbortController() : null;
   try {
     // No retorno de checkout esta request entra no orçamento compartilhado: um
     // /auth/validate travado (ou o /auth/refresh que o wrapper dispara e que não
     // herda signal) deixaria o overlay pendente pra sempre, sem nunca alcançar o
     // fail-open lá embaixo. Fora do checkout segue sem limite, como antes.
     const r = _justUpgraded
-      ? await _boundedValidate(_checkoutBudget(8000))
+      ? await _boundedValidate(_checkoutBudget(8000), vctrl)
       : await fetch(`${API}/auth/validate`, { credentials: "same-origin" });
     if (!r || !r.ok) { _closeCheckoutOverlay(); showAccessError(); return; }
     // A leitura do corpo é a MESMA request: headers podem ter chegado e o body
@@ -1570,6 +1588,9 @@ let _homeMe = null;   // /auth/me da abertura, reusado pelas recargas
     if (!validateData) { _closeCheckoutOverlay(); showAccessError(); return; }
     userId = USER_ID = validateData.user_id;
   } catch { _closeCheckoutOverlay(); showAccessError(); return; }
+  // Cobre os quatro desfechos: !r.ok, !validateData, o catch, e a saída normal
+  // (onde o abort é no-op sobre uma Response já consumida).
+  finally { if (vctrl) vctrl.abort(); }
 
   // Paint instantâneo: com o USER_ID já validado, pinta o cache DESSE usuário
   // na hora (troca de aba /home <-> /app), antes de /auth/me + /data + /history.
@@ -2344,7 +2365,12 @@ function wpInicioValido(s) {
           const r = await fetch("/billing/pix/" + encodeURIComponent(sid),
                                 { credentials: "same-origin", signal: ctrl.signal });
           if (r.ok) cobranca = await r.json();
-        } finally { clearTimeout(timer); }
+        // `abort()` junto do `clearTimeout` pelo ramo `!r.ok` (404 do token de
+        // outro dono, caminho previsto e testado): ele sai sem ler o corpo, e
+        // só o `clearTimeout` deixaria o corpo baixando sem nenhum relógio
+        // para abortá-lo. Nada aqui depende do corpo no !ok — `cobranca` fica
+        // null e o texto cai na cópia do imediato.
+        } finally { clearTimeout(timer); ctrl.abort(); }
       } catch { /* sem valor é melhor que valor inventado */ }
     }
     /* Dono NÃO é pagamento. O poll responde 200 com `amount_cents` para

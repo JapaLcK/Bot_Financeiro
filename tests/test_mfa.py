@@ -459,8 +459,9 @@ def test_cauda_do_onboarding_nao_pode_derrubar_a_ativacao(user_id, monkeypatch):
 
 def test_auth_validate_convida_conta_so_google_ao_mfa():
     """Anti-regressão contra repor o gate de senha na leitura: conta só-Google É
-    convidada. Vai pelo endpoint que a /home realmente lê (home.html:1543 usa o
-    `validateData` do /auth/validate, não o /auth/me)."""
+    convidada. Vai pelo endpoint que a /home realmente lê (a IIFE de boot da
+    home.html usa o `validateData` do /auth/validate, não o /auth/me — veja o
+    ramo `validateData.show_mfa_onboarding`)."""
     uid, _ = _conta_so_google(_seed())
     assert db.auth_account_has_password(uid) is False
     client = TestClient(dashboard.app)
