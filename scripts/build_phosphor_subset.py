@@ -8,7 +8,8 @@ usado e reescreve o CSS com esse subset.
 Uso (precisa do CSS completo do pacote upstream):
 
     npm pack @phosphor-icons/web@2.1.1 && tar xzf phosphor-icons-web-2.1.1.tgz
-    python3 scripts/build_phosphor_subset.py package/src/regular/style.css
+    python3 scripts/build_phosphor_subset.py \
+        package/src/regular/style.css package/src/regular/Phosphor.woff2
 
 O conjunto usado sai de três fontes, nesta ordem:
   1. qualquer token `ph-<nome>` literal em frontend/**.{html,js,css} e em
@@ -25,6 +26,7 @@ que todo ícone referenciado está no CSS servido.
 """
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import re
 import sys
@@ -32,6 +34,7 @@ import sys
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FRONTEND = RAIZ / "frontend"
 DESTINO = FRONTEND / "phosphor.css"
+DESTINO_FONTE = FRONTEND / "fonts" / "Phosphor.woff2"
 # Artefato de build, não código-fonte. Fica fora da varredura nos DOIS sentidos:
 # um `ph-algo` que o minificador emita por acidente viraria ícone FANTASMA (e
 # vermelho no test_phosphor_subset.py por um nome que ninguém escreveu), e um
@@ -55,6 +58,14 @@ CABECALHO = """/* Phosphor Icons — peso Regular, self-hosted (MIT). SUBSET GER
    Uso: <i class="ph ph-wallet"></i>  ·  cor via currentColor, tamanho via font-size. */
 """
 
+FONTE_CSS = """@font-face {
+  font-family: "Phosphor";
+  src: url("/fonts/Phosphor.woff2?v=__VERSAO__") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}"""
+
 
 def icones_usados() -> set[str]:
     usados = set()
@@ -73,10 +84,46 @@ def icones_usados() -> set[str]:
     return usados | FALLBACKS
 
 
+def _unicode_da_regra(regra: str, nome: str) -> int:
+    valor = re.search(r'content:\s*"\\([0-9a-fA-F]+)"', regra)
+    if not valor:
+        sys.exit(f"regra do ícone {nome!r} não tem um codepoint hexadecimal")
+    return int(valor.group(1), 16)
+
+
+def gerar_fonte_subset(origem: pathlib.Path, unicodes: set[int]) -> str:
+    """Mantém os codepoints usados e devolve o hash do WOFF2 gravado."""
+    try:
+        from fontTools import subset
+    except ImportError:
+        sys.exit("fontTools ausente — instale `fonttools[woff]` para regerar a fonte")
+
+    opcoes = subset.Options()
+    opcoes.flavor = "woff2"
+    opcoes.ignore_missing_unicodes = False
+    fonte = subset.load_font(str(origem), opcoes)
+    recorte = subset.Subsetter(options=opcoes)
+    recorte.populate(unicodes=unicodes)
+    recorte.subset(fonte)
+    subset.save_font(fonte, str(DESTINO_FONTE), opcoes)
+
+    # Verifica o artefato gravado, não apenas o objeto em memória: uma opção
+    # incorreta de serialização não pode deixar o CSS apontando para glifos ausentes.
+    fonte_gerada = subset.load_font(str(DESTINO_FONTE), opcoes)
+    cmap = fonte_gerada.getBestCmap() or {}
+    ausentes = unicodes - set(cmap)
+    fonte_gerada.close()
+    if ausentes:
+        codigos = ", ".join(f"U+{codigo:04X}" for codigo in sorted(ausentes))
+        sys.exit(f"fonte gerada sem os codepoints: {codigos}")
+    return hashlib.blake2b(DESTINO_FONTE.read_bytes(), digest_size=6).hexdigest()
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 3:
         sys.exit(__doc__)
     origem = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+    fonte_origem = pathlib.Path(sys.argv[2])
     regras = re.findall(r"(\.ph\.ph-([a-z0-9-]+):before\s*\{[^}]*\}\n?)", origem)
     disponiveis = {nome for _, nome in regras}
     if not disponiveis:
@@ -87,10 +134,11 @@ def main() -> None:
     if faltando:
         sys.exit("ícones referenciados que não existem no CSS de origem: " + ", ".join(faltando))
 
+    unicodes = {_unicode_da_regra(regra, nome) for regra, nome in regras if nome in usados}
+    versao_fonte = gerar_fonte_subset(fonte_origem, unicodes)
+
     # Remove as regras não usadas em vez de remontar a partir do cabeçalho: assim
-    # qualquer outra coisa no arquivo sobrevive. O upstream põe
-    # `.ph{vertical-align:-0.125em}` DEPOIS das regras de ícone, e remontar pelo
-    # cabeçalho a descartava calada — todo ícone desalinhava 0.125em.
+    # qualquer outra regra base do pacote sobrevive.
     saida = origem
     for regra, nome in regras:
         if nome not in usados:
@@ -98,9 +146,23 @@ def main() -> None:
     # troca só o comentário de topo do upstream pelo nosso, preservando o resto
     if saida.lstrip().startswith("/*"):
         saida = saida[saida.index("*/") + 2:].lstrip("\n")
+    # O pacote aponta para ./Phosphor.{woff2,woff,ttf,svg}; nosso servidor expõe
+    # somente /fonts/Phosphor.woff2. A versão pelo conteúdo é obrigatória porque
+    # a rota da fonte usa cache imutável de um ano; sem ela, um glifo adicionado
+    # numa regeneração poderia ficar invisível em clientes com o subset antigo.
+    fonte_css = FONTE_CSS.replace("__VERSAO__", versao_fonte)
+    saida, trocas = re.subn(r"@font-face\s*\{.*?\}", fonte_css, saida, count=1, flags=re.S)
+    if trocas != 1:
+        sys.exit("@font-face do Phosphor não encontrado no CSS de origem")
+    # Ajuste visual próprio do PigBank, deliberadamente fora do upstream.
+    if "vertical-align:-0.125em" not in saida:
+        saida = saida.rstrip() + "\n\n.ph{vertical-align:-0.125em}\n"
     saida = CABECALHO.format(n=len(usados), total=len(disponiveis)) + saida
     DESTINO.write_text(saida, encoding="utf-8")
-    print(f"{DESTINO.relative_to(RAIZ)}: {len(usados)} ícones de {len(disponiveis)} disponíveis")
+    print(
+        f"{DESTINO.relative_to(RAIZ)}: {len(usados)} ícones de {len(disponiveis)}; "
+        f"fonte com {DESTINO_FONTE.stat().st_size} bytes"
+    )
 
 
 if __name__ == "__main__":
