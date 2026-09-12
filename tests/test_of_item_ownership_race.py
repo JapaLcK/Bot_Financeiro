@@ -93,7 +93,6 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-import core.observability as observability
 import db
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
@@ -104,18 +103,16 @@ from test_of_webhook_adopt_guards import (_limpa_item, _mock_item,  # noqa: F401
 
 
 def _logs(monkeypatch) -> list[dict]:
-    """Coletor do `log_system_event_sync` — o canal da guarda nova.
-
-    O fixture `eventos` patcheia `of_routes.log_system_event` (async) e NÃO vê
-    esta guarda, que loga pelo canal SÍNCRONO com import local de
-    `core.observability`. Mesmo padrão de
-    `tests/test_open_finance_disconnect_route.py:170-172`.
-    """
+    """Coletor do diagnóstico async, emitido depois de liberar o lock."""
     capturados: list[dict] = []
-    monkeypatch.setattr(
-        observability, "log_system_event_sync",
-        lambda level, event_type, message, **kw: capturados.append(
-            {"level": level, "event": event_type, **kw}))
+
+    anterior = of_routes.log_system_event
+
+    async def captura(level, event_type, message, **kw):
+        capturados.append({"level": level, "event": event_type, **kw})
+        await anterior(level, event_type, message, **kw)
+
+    monkeypatch.setattr(of_routes, "log_system_event", captura)
     return capturados
 
 

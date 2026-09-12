@@ -280,6 +280,14 @@ def _folga_ms(budget_ms: int | None, t0: float) -> int | None:
     return max(1, budget_ms - int((time.monotonic() - t0) * 1000))
 
 
+class _ConflitoReconexao(HTTPException):
+    """Transporta o diagnóstico para ser gravado após liberar o lock."""
+
+    def __init__(self, detail: str, level: str, event: str, message: str, **context):
+        super().__init__(status_code=409, detail=detail)
+        self.diagnostico = ((level, event, message), context)
+
+
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                          budget_ms: int | None = None,
                          tinha_conexao_propria: bool = False,
@@ -355,8 +363,6 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #   • rota reconectando: 1 → 1; a leitura só saiu de dentro do `if
         #     tinha_conexao_propria`.
         linhas = get_connections_by_item_id(item_id, budget_ms=_folga_ms(budget_ms, t0))
-        from core.observability import log_system_event_sync
-
         # DONO ALHEIO. Revalidação num caminho, 1ª CHECAGEM no outro — e os dois
         # chegam aqui:
         #   • ROTA: revalidação. O `POST /pluggy-item` lê os donos FORA do lock
@@ -395,16 +401,13 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         if outros:
             if adocao_registro_id is not None:
                 unregister_item(adocao_registro_id, user_id)
-            log_system_event_sync(
+            raise _ConflitoReconexao(
+                "Este item já está vinculado a outra conta.",
                 "error", "of_item_owner_conflict",
                 f"Item {item_id} ganhou dono em outra conta na espera do lock",
                 source="open_finance", user_id=user_id,
                 details={"item_id": item_id, "connections": len(outros),
                          "origin": "salva_item_sob_lock"},
-            )
-            raise HTTPException(
-                status_code=409,
-                detail="Este item já está vinculado a outra conta.",
             )
         # 2ª revalidação SOB o lock (Codex PR #217, 4º): se a conexão própria que
         # existia na validação da rota sumiu enquanto esperávamos o lock, quem
@@ -420,16 +423,13 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
                 int(c["user_id"]) == int(user_id) for c in linhas
             )
             if not propria_ainda_existe:
-                log_system_event_sync(
+                raise _ConflitoReconexao(
+                    "Sua conta foi reiniciada ou o banco foi desconectado enquanto "
+                    "a conexão era concluída. Conecte o banco de novo.",
                     "warning", "of_reconnect_aborted_state_gone",
                     f"Reconexão abortada: conexão do item {item_id} sumiu na espera do lock "
                     "(reset/disconnect concorrente)",
                     source="open_finance", user_id=user_id, details={"item_id": item_id},
-                )
-                raise HTTPException(
-                    status_code=409,
-                    detail="Sua conta foi reiniciada ou o banco foi desconectado enquanto "
-                           "a conexão era concluída. Conecte o banco de novo.",
                 )
         # A MESMA revalidação, pelo lado da ADOÇÃO (Codex #313, P1). O fato que a
         # adoção leu fora do lock não é "a conexão existe" — é "NENHUMA linha do
@@ -615,6 +615,12 @@ async def _grava_reconexao(
                 tinha_conexao_propria, criar_usuario, adocao_registro_id,
                 escrita_tentada=escrita_tentada)
             causa = None
+        except _ConflitoReconexao as exc:
+            # O context manager já liberou o lock. O diagnóstico tem o mesmo
+            # teto dos demais logs da reconexão e não prolonga sua seção crítica.
+            args, context = exc.diagnostico
+            await _log_com_teto(_LOG_DIAG_TIMEOUT_S, *args, **context)
+            raise
         except psycopg.OperationalError as exc:
             # UM `except` para a CATEGORIA inteira, cobrindo o lock E a escrita.
             # O Codex apontou oito vezes o mesmo fenômeno por portas diferentes,
