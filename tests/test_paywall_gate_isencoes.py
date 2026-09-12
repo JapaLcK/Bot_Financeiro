@@ -110,15 +110,23 @@ def test_isencao_nao_alarga_para_o_que_nao_e_ajuda(texto):
     ("/assinar", "assinar"),     # prefixo do Discord
     ("plano", "plano"),
     ("cancelar", "cancelar"),    # o trigger da ressalva do `ponytail:` no gate
-    ("ajuda", "comece aqui"),
-    # Ajuda COM seção. O esperado é a seção PEDIDA: o `answer_help` passava só o
-    # argumento ("ofx") pro resolve_section, que espera o texto inteiro ("ajuda
-    # ofx"), e toda seção caía no fallback "start". Consertado neste branch
-    # (core/handlers/help_handler.py) — antes, os dois casos esperavam "comece
-    # aqui". O que se mede aqui continua sendo o gate deixar passar; a seção
-    # resolvida é de tests/test_help_section_aliases.py.
-    ("ajuda ofx", "importar extrato ou fatura"),
-    ("help investimentos", "investimentos"),
+    # As TRÊS formas de ajuda de quem está BARRADO devolvem a mesma seção,
+    # `sem_acesso`, e isso é o conserto e não um ajuste de teste.
+    #
+    # Antes, o esperado era a seção PEDIDA, e o comentário aqui celebrava isso.
+    # Medido depois: a `start` manda "• `gastei 50 mercado` / • `tutorial` →
+    # guia rápido" e a `ofx` explica como importar extrato — as duas dizem a
+    # quem está barrado para fazer algo que a mensagem seguinte recusa. Pior, a
+    # seção `tutorial` era alcançável por `ajuda tutorial`/`ajuda guia`, e foi
+    # por aí que o tutorial continuou saindo depois de duas rodadas de conserto.
+    #
+    # O que este caso mede continua sendo **o gate deixar passar** — a pessoa
+    # recebe resposta, a ajuda não virou parede. Qual seção o texto resolve é de
+    # `tests/test_help_section_aliases.py`, e para quem TEM plano nada mudou
+    # (`test_com_plano_a_ajuda_continua_igual`).
+    ("ajuda", "sem plano ativo"),
+    ("ajuda ofx", "sem plano ativo"),
+    ("help investimentos", "sem plano ativo"),
 ])
 def test_discord_barrado_alcanca_billing_e_ajuda(comando, esperado):
     """No Discord o handle_incoming responde assinar/plano/ajuda ELE MESMO — o
@@ -211,11 +219,21 @@ def test_barrado_manda_assinar_e_continua_recebendo_o_link():
     assert "http" in resposta, resposta
 
 
-def test_quem_escolheu_o_gratis_continua_vendo_a_franquia_do_gratis():
-    """A copy do Grátis não pode ter sumido para quem NÃO está barrado — ela é
-    verdadeira para quem já escolheu um plano e caiu no Grátis."""
+def test_pagante_ve_a_ficha_do_plano_dele_e_nao_a_do_gratis():
+    """Controle positivo do par acima: o `plano` continua respondendo a ficha
+    real de quem paga.
+
+    **Este teste substitui um que afirmava o CONTRÁRIO** — que a franquia do
+    Grátis ("30 lançamentos por mês") continuava valendo "para quem já escolheu
+    um plano e caiu no Grátis". Ela deixou de ser verdadeira: depois do corte
+    não existe lugar chamado Grátis onde ficar, então a ficha saiu do
+    `billing_commands._handle_plano` e o estado passou a responder "sem plano
+    ativo". A conta deste teste é PAGANTE, não "escolheu e caiu no Grátis"."""
     uid = _com_plano()
 
     resposta = _diga(uid, "plano")
 
-    assert "30 lançamentos" in resposta, resposta
+    assert "30 lançamentos" not in resposta, resposta
+    assert "sem plano ativo" not in resposta.lower(), resposta
+    assert "plus" in resposta.lower(), resposta
+

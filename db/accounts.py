@@ -785,6 +785,11 @@ def list_launches_by_category(
       telas (medido: compra em 25/08 gravada em 28/08 → "25/08" aqui, "28/08,
       HH:MM" na Visão Geral). Alinhar as duas é mudança de COMPORTAMENTO, não
       deste comentário.
+    - `tipo` sai CANÔNICO (`TIPO_CANON_SQL`), ao contrário de `categoria`/`nota`/
+      `alvo` abaixo: 'saida'/'entrada' chegam como 'despesa'/'receita'. Os tipos
+      internos ('pagamento_fatura', 'aporte_investimento' e irmãos) passam
+      intactos pelo `ELSE tipo` — `LAUNCH_TYPE_LABELS` (dashboard.js) rotula cada
+      um deles e o WhatsApp imprime o tipo cru na linha.
     - `categoria` também vem CRUA (NULL/'' saem como estão), pelo mesmo motivo
       de `nota`/`alvo` abaixo: o `coalesce(..., 'outros')` era um RÓTULO de
       mensagem de WhatsApp, e desde que o dashboard abre o editor por esta lista
@@ -909,7 +914,13 @@ def list_launches_by_category(
             cur.execute(
                 f"""
                 select * from (
-                select tipo, valor, categoria, descricao, nota, alvo, dt,
+                -- `TIPO_CANON_SQL` na projeção de FORA (mesma decisão de
+                -- db/analytics.py e da query 4 do dashboard); na de DENTRO seria
+                -- equivalente, mas seriam dois pontos de mudança. Os window
+                -- aggregates abaixo NÃO mudam: o Postgres não resolve alias da
+                -- SELECT list dentro de expressões da própria SELECT list — o
+                -- `tipo` deles continua sendo o de `agg`, cru.
+                select {TIPO_CANON_SQL} as tipo, valor, categoria, descricao, nota, alvo, dt,
                        posted_at, has_time, fonte,
                        user_seq, id, ord_id, is_internal_movement,
                        count(*) over () as n_total,

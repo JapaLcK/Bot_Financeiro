@@ -19,8 +19,8 @@ São três perguntas, e as três precisam da varredura:
 
 Fora do teto de propósito:
 
-- **`.mp4`** — o `vsl.mp4` tem 10,4 MB e é `preload="metadata"` (`index.html:229-230`),
-  decisão de produto: o navegador baixa o cabeçalho, não o vídeo. Está fora por
+- **`.mp4`** — o `vsl.mp4` tem 10,4 MB e é `preload="none"` (`index.html`),
+  decisão de produto: o navegador não baixa o vídeo antes do play. Está fora por
   EXTENSÃO, não por nome, então trocar o arquivo não fura o gate por engano.
 - **caminho montado em runtime** — `/brand/stickers/{{STICKER}}.webp` (`blog-article`)
   e `/brand/agents/${esc(kind)}.png` (`preview_agentes`, `dashboard.js`) não nomeiam

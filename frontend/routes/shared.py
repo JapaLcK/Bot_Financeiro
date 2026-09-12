@@ -81,6 +81,11 @@ META_PIXEL_ID = (os.getenv("META_PIXEL_ID") or "").strip()
 # o site sem rastreio, como o pixel já fazia.
 GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "G-0H8FHNQ3C4").strip()
 
+# Microsoft Clarity — identifica o projeto público e pode aparecer no HTML, como
+# o Measurement ID do GA4. O opt-in por rota fica em `html_file`: gravações não
+# entram por acidente nas telas de conta, autenticação ou erro.
+CLARITY_PROJECT_ID = os.getenv("CLARITY_PROJECT_ID", "ygqwjmx49a").strip()
+
 # Parâmetros de query que NUNCA podem viajar dentro do `page_location` do GA4:
 #   token — é credencial. `/completar-cadastro?token=` (cadastro via Google) e o
 #           `/unsubscribe?token=` do rodapé de todo e-mail são páginas rastreadas;
@@ -188,17 +193,60 @@ def ga4_snippet() -> str:
     )
 
 
-def inject_tracking(html_text: str) -> str:
-    """Insere Meta Pixel + GA4 imediatamente antes de </head> (o mais alto possível).
+def clarity_snippet() -> str:
+    """Código de coleta do Clarity para páginas públicas autorizadas.
 
-    Os dois entram pelo MESMO ponto de propósito: enquanto o GA4 morava solto no
+    O ID não é segredo, mas serializá-lo como string JavaScript impede que uma
+    configuração inválida altere o script injetado. Em staging, definir a env
+    vazia desliga a coleta sem alterar as rotas.
+    """
+    if not CLARITY_PROJECT_ID:
+        return ""
+    project_id = json.dumps(CLARITY_PROJECT_ID)
+    return (
+        "<!-- Microsoft Clarity -->\n"
+        "<script>\n"
+        "(function(){\n"
+        f"  var PB_CLARITY_SUJOS = {json.dumps(list(GA4_PARAMS_FORA_DA_URL))};\n"
+        "  // Uma navegação same-origin preserva a query no referrer. Não carregue\n"
+        "  // gravador algum quando ela traz token de cadastro ou sessão de checkout.\n"
+        "  if (document.referrer) {\n"
+        "    try {\n"
+        "      var veioDe = new URL(document.referrer);\n"
+        "      if (veioDe.origin === location.origin && PB_CLARITY_SUJOS.some(function(p){\n"
+        "        return veioDe.searchParams.has(p);\n"
+        "      })) return;\n"
+        "    } catch (e) { return; }\n"
+        "  }\n"
+        "  (function(c,l,a,r,i,t,y){\n"
+        "  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};\n"
+        "  t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;\n"
+        "  y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);\n"
+        f"  }})(window,document,'clarity','script',{project_id});\n"
+        "})();\n"
+        "</script>\n"
+        "<!-- End Microsoft Clarity -->\n"
+    )
+
+
+def inject_tracking(html_text: str, clarity: bool = False) -> str:
+    """Insere tags de marketing antes de </head> (o mais alto possível).
+
+    Meta e GA4 entram pelo mesmo ponto de propósito: enquanto o GA4 morava solto no
     <head> da index.html, ele existia só na landing — e os eventos de funil
     disparam na /precos, /cadastro e /home. Página nova nasce coberta pelos dois
     ou por nenhum; não há terceira opção para esquecer.
 
+    Clarity é deliberadamente separado: ele produz gravações de sessão, então só
+    páginas institucionais e /precos fazem opt-in. Não basta a rota ser pública
+    para ser apropriada a uma gravação (cadastro e login, por exemplo, têm campos
+    de credencial e identificação).
+
     No-op para o que não estiver configurado, ou se a página não tiver </head>.
     """
     snippet = meta_pixel_snippet() + ga4_snippet()
+    if clarity:
+        snippet += clarity_snippet()
     if not snippet:
         return html_text
     idx = html_text.lower().find("</head>")
@@ -250,17 +298,18 @@ def stamp_asset_versions(html_text: str) -> str:
     return _ASSET_VER_RE.sub(repl, html_text)
 
 
-def html_file(path: pathlib.Path, pixel: bool = True) -> Response:
+def html_file(path: pathlib.Path, pixel: bool = True, clarity: bool = False) -> Response:
     """Serve um .html do frontend com cache desligado.
 
     Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
-    estiver configurado. As páginas da área logada (dashboard, settings,
+    estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
+    sem campos sensíveis. As páginas da área logada (dashboard, settings,
     onboarding) passam `pixel=False`: o rastreio fica nas páginas públicas e na
     /home, que é onde a volta do checkout (?upgrade=success) dispara a conversão.
     """
     text = path.read_text(encoding="utf-8")
     if pixel:
-        text = inject_tracking(text)
+        text = inject_tracking(text, clarity=clarity)
     response = Response(content=stamp_asset_versions(text),
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"
@@ -867,17 +916,57 @@ def _resolve_page_user_id(request: Request) -> int | None:
         return None
 
 
-def gate_plan_selection(request: Request):
+def gate_plan_selection(request: Request, *, exige_direito: bool = True):
     """Gate de PÁGINA do cadastro: obriga a escolher um plano na /precos antes
     de servir o HTML do dashboard (home/app/settings). É o enforcement REAL —
     os redirects em JS são só UX e são burláveis (JS em cache, navegação direta,
     página sem o script). Aqui o servidor decide antes de entregar a página.
 
+    **DUAS pernas, e elas se desligam separadamente:**
+
+    • **ESCOLHA** (`needs_plan_selection`) — o cadastro novo que ainda não passou
+      pela /precos. Vale em TODA página que chama este gate, sem exceção.
+    • **DIREITO** (`has_app_access`) — o corte do fim do Grátis. `exige_direito=False`
+      a desliga **só** para quem passar o parâmetro.
+
+    **A perna da ESCOLHA não é redundante com a do DIREITO, e a razão é o FREIO
+    DE EMERGÊNCIA.** À primeira vista quem não tem direito também não escolheu
+    plano, e a perna de cima pareceria um caso de canto (carência aberta com
+    `plan_selected_at` NULL). Não é: `ACCESS_GATE_ENABLED=0` desliga **só** a
+    perna do DIREITO — `plan_service.has_app_access` devolve True antes de
+    consultar `tem_direito_hoje`, e `needs_plan_selection` **não lê aquele
+    freio** (só o `PLANS_V2_ENABLED`). Medido 2026-09-11, com o v2 ligado e
+    `ACCESS_GATE_ENABLED=0`: `has_app_access` → True, `needs_plan_selection` →
+    True para cadastro sem `plan_selected_at`. Ou seja, com o freio puxado — que
+    é exatamente o cenário para o qual ele existe — a ESCOLHA é a ÚNICA coisa
+    que impede um cadastro novo de pular a /precos, e ela restaura o enforcement
+    pré-corte. Removê-la porque "o DIREITO já cobre" faria o freio de emergência
+    abrir uma segunda porta que ninguém pediu.
+
+    **O único chamador com `exige_direito=False` é `/settings`, por decisão do
+    dono, e o motivo é que ele é a SAÍDA DE EMERGÊNCIA.** Medido:
+    `grep -rln "account/export" frontend/*.html frontend/*.js` (2026-09-11) acha
+    `settings.html` e mais nada — a UI
+    de **exportar os dados e excluir a conta** existe ali e em lugar nenhum. Os
+    endpoints `/auth/*` seguem isentos por prefixo (`_GATE_EXEMPT_PREFIXES`),
+    mas sem a página não sobra porta para alcançá-los. Trancar quem foi cortado
+    fora da própria exclusão de conta contradiz o comentário de
+    `routes/static_pages.serve_settings` e a docstring de `gate_onboarding`
+    ("nunca trancar a saída de emergência") — e é o tipo de porta que se fecha
+    sem ninguém notar, porque `app_access === false` era inalcançável até este PR.
+
+    **O lado CLIENTE tem de concordar**: `frontend/settings.html` tinha um
+    `me.app_access === false → replace("/precos?ativar=1")` DORMENTE (nunca
+    disparava, porque `has_app_access` devolvia True incondicional) que este PR
+    acordaria. Isentar só o servidor deixaria o JS expulsar a pessoa de qualquer
+    jeito, e a saída de emergência continuaria fechada — com o servidor
+    dizendo 200. Os dois lados mudaram juntos, e o porquê está escrito nos dois.
+
     Retorna None quando pode servir (deslogado — o próprio HTML manda pro login;
     ou já escolheu plano). Devolve RedirectResponse pra /precos quando o usuário
     está logado e ainda não escolheu. Nunca levanta — é navegação de browser."""
     from fastapi.responses import RedirectResponse
-    from core.services.plan_service import needs_plan_selection
+    from core.services.plan_service import has_app_access, needs_plan_selection
 
     # Aqui havia `if _is_pigbank_app(request): return None`, pela diretriz 3.1.1
     # da App Store. Saiu porque o UA é escolhido pelo cliente: a isenção liberava
@@ -885,11 +974,46 @@ def gate_plan_selection(request: Request):
     # lançado ele precisa de credencial que o servidor consiga verificar.
     #
     # Retorno do checkout com sucesso: o webhook checkout.session.completed
-    # (que fecha o gate via mark_plan_selected) pode ainda estar em trânsito.
-    # Não jogamos quem ACABOU de pagar de volta pra /precos — a tela de
-    # confirmação em /home espera o webhook e libera (fail-open). Espelha o
-    # bypass _justUpgraded do cliente. Só o gate de ESCOLHA é dispensado aqui;
-    # o paywall por feature/tier segue valendo normalmente.
+    # pode ainda estar em trânsito. Não jogamos quem ACABOU de pagar de volta
+    # pra /precos — a tela de confirmação em /home espera o webhook e libera
+    # (fail-open). Espelha o bypass `_justUpgraded` do cliente.
+    #
+    # **Este `return None` dispensa AS DUAS PERNAS, e a frase que estava aqui —
+    # "só o gate de ESCOLHA é dispensado; o paywall por feature/tier segue
+    # valendo" — era verdade antes do corte, quando só existia a perna da
+    # escolha.** Deixou de ser, e este comentário mentia sobre o próprio código.
+    #
+    # **Dispensar só a escolha foi MEDIDO e não serve** (2026-09-11): o webhook
+    # escreve `mark_plan_selected` E o `plan`/`plan_expires_at` no mesmo evento,
+    # então as duas pernas estão pendentes JUNTAS para quem acabou de pagar.
+    # Com `needs=True, acesso=False` — que é exatamente o estado de quem pagou
+    # há 3 segundos — a perna do direito devolve `302 /precos`. A opção que
+    # parecia mais apertada barra justamente quem o bypass existe para proteger.
+    #
+    # **O que o parâmetro NÃO compra**, e é por isso que o furo é cosmético e
+    # não vazamento: ele libera o HTML, que é igual para todo mundo. As rotas de
+    # DADOS têm gate próprio (`_enforce_subscription_gate`, 402), o WebSocket
+    # tem o dele e o bot tem o `_paywall_gate`. Um cortado que digite
+    # `/home?upgrade=success` recebe a casca e o snapshot que já estava no
+    # localStorage DELE — não há dado novo nem de outra conta.
+    #
+    # **Quem fecha o resto é o CLIENTE, quando o polling termina** — e SÓ na
+    # /home. O servidor não consegue distinguir "acabou de pagar" de "digitou a
+    # URL" (nenhum dos dois tem direito ainda), então a decisão mora onde existe
+    # o tempo de espera: `frontend/home.html` roda
+    # `awaitCheckoutConfirmation()` e, na saída, aplica os dois vereditos do
+    # `/auth/me`. Antes ele os pulava com `!_justUpgraded` e a dispensa virava
+    # permanente.
+    #
+    # **A versão anterior desta frase prometia cobertura que não existe.** Este
+    # gate guarda QUATRO rotas (`static_pages.py`: /home, /app, /settings,
+    # /onboarding) e só a /home tem veredito de cliente. Medido: `grep -c
+    # "app_access|needs_plan_selection|auth/me" frontend/comecar.html
+    # frontend/comecar.js` devolve ZERO nos dois, então o cortado que abrir
+    # `/onboarding?upgrade=success` recebe o wizard e fica. É CASCA — sem dado
+    # de outro usuário e sem caminho de dinheiro, porque as rotas de dados têm
+    # gate próprio (402) — mas é resíduo declarado, não coberto. Gatear o
+    # /onboarding é decisão do dono, não deste comentário.
     if request.query_params.get("upgrade") == "success":
         return None
 
@@ -899,11 +1023,25 @@ def gate_plan_selection(request: Request):
     if user_id is None:
         return None
     try:
+        # As DUAS pernas mandam para o MESMO destino, e não é descuido: quem foi
+        # cortado no fim do Grátis (`has_app_access` False) precisa exatamente
+        # da mesma tela que quem nunca escolheu — a /precos com a copy do gate.
+        # Quem separa as duas mensagens lá é o `/auth/me`
+        # (`needs_plan_selection` × `app_access`), nunca o marcador da URL:
+        # `frontend/precos.html` explica por que o marcador não decide nada.
+        #
+        # A ordem do `or` importa para o CUSTO: a perna da escolha sai primeiro
+        # e, com `exige_direito=False`, a segunda nem é avaliada — a /settings
+        # não paga o SELECT do direito.
         if needs_plan_selection(user_id):
+            return RedirectResponse(url="/precos?escolha=1", status_code=302)
+        if exige_direito and not has_app_access(user_id):
             return RedirectResponse(url="/precos?escolha=1", status_code=302)
     except Exception:
         # Nunca trava a navegação por erro no gate; o backstop de dados (402) e o
-        # redirect em JS seguem valendo como rede de segurança.
+        # redirect em JS seguem valendo como rede de segurança. É o "não sei" do
+        # `has_app_access` (que LEVANTA em vez de devolver False, de propósito)
+        # virando fail-open aqui: soluço de banco não pode barrar a base paga.
         logging.getLogger(__name__).warning("gate_plan_selection falhou", exc_info=True)
     return None
 

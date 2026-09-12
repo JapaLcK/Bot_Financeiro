@@ -13,9 +13,10 @@ regra é que nenhum dos dois pode andar sozinho.
 3. os `data-price-annual` do MARKUP — **o que o usuário lê**.
 
 A 3 é a que quase ficou de fora, e ela é a que importa para o cliente: o preço
-visível **não** sai do `PLAN_PRICES`. Ele está cravado no HTML (`precos.html`
-`:249`, `:267`, `:288`, e a tabela comparativa em `:352`, `:357`, `:361`), e o JS
-só faz `display:none` para alternar mensal ⇄ anual. Um comparador que olhasse só
+visível **não** sai do `PLAN_PRICES`. Ele está cravado no HTML, nos
+`data-price-annual` — um por card de plano, mais os da `<th>` da tabela
+comparativa (`.cmp-plan-price`) —, e o JS só faz `display:none` para alternar
+mensal ⇄ anual. Um comparador que olhasse só
 a 1 × 2 ficaria verde com a página anunciando outro número.
 
 ## A ponte de nomes é obrigatória
@@ -42,7 +43,9 @@ from test_pix_pricing_contrato import _precos_anuais_de_producao
 
 from core.services.pix_pricing import PRECOS_ANUAIS_CENTS
 
-# O que a rota do Pix aceita vender (`frontend/routes/billing_pix.py:58`).
+# O que a rota do Pix aceita vender, no vocabulário LEGADO: o `TIER_TO_STORED_PLAN`
+# é quem a `criar_checkout_pix` (`frontend/routes/billing_pix.py`) usa para barrar
+# `plan` desconhecido, e o que ela deixa passar chega aqui traduzido.
 _VENDAVEIS = {"essencial", "pro", "pro_max"}
 
 

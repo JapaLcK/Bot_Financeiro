@@ -1,9 +1,13 @@
 /**
- * Pix anual na /precos — o CTA nos cards, o overlay e o checkout.
+ * Pix anual na /precos — o CTA nos cards, a etiqueta do toggle e o checkout.
  *
- * O QR, a cópia, o poll e as duas caixas de recusa do 409 moram no pix-poll.js
- * (par deste arquivo; os dois dividem o escopo global e a divisão é do teto de
- * 350 linhas do `quality/max-lines` — foi ele que mandou as caixas para lá).
+ * São TRÊS arquivos no mesmo escopo global, carregados nesta ordem:
+ *
+ *   pix-ui.js        rótulo, linha, botão e overlay — o que os outros dois
+ *                    compartilham, sem estado do Pix dentro. Divisão por ASSUNTO.
+ *   pix-checkout.js  este: o CTA nos cards, a etiqueta do toggle e o POST.
+ *   pix-poll.js      o QR, a cópia, o poll e as duas caixas de recusa do 409.
+ *                    Divisão pelo teto de 350 linhas do `quality/max-lines`.
  *
  * Script CLÁSSICO (sem módulo ES) de propósito: a precos.html chama
  * `pbPixInit`/`pbPixRefresh` do escopo global e este arquivo lê de lá o que ela já
@@ -33,65 +37,61 @@ const PIX_PLANOS = ["essencial", "plus", "pro"];
 
 let pixCfg = null;
 let pixSub = null;
-
-// Fronteira de confiança de valor monetário: sem `amount_cents` o
-// `toLocaleString` escrevia "R$ NaN" no título do modal de pagamento. Devolve
-// string vazia, e quem chama decide o que mostrar sem o número.
-const pixBrl = (c) => (Number.isFinite(Number(c))
-  ? (Number(c) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-  : "");
-
-/**
- * Ícone + texto de uma vez. Por `createElement` e não por markup em string: o
- * handlers_inline.test.mjs levanta handler de dentro das strings dos `.js`, e sem
- * markup gerado a `handlers_inline.baseline.json` não muda.
- * Só ícones do subset de frontend/phosphor.css — o de QR code, por exemplo, não
- * está lá. E o nome não se escreve nem em COMENTÁRIO: o extrator de
- * scripts/build_phosphor_subset.py é `\bph-([a-z0-9-]+)` sobre o texto do
- * arquivo, então citá-lo em prosa já o torna "usado" e deixa o
- * test_phosphor_subset.py vermelho (medido).
- */
-function pixRotular(el, icone, texto) {
-  const i = document.createElement("i");
-  i.className = "ph " + icone;
-  i.setAttribute("aria-hidden", "true");
-  el.replaceChildren(i, document.createTextNode(" " + texto));
-}
-
-function pixLinha(texto) {
-  const p = document.createElement("p");
-  p.className = "pix-line";
-  p.textContent = texto;
-  return p;
-}
-
-function pixBotao(classe, texto) {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "btn btn-block " + classe;
-  b.textContent = texto;
-  return b;
-}
+// `pixSub = null` é AMBÍGUO e significa duas coisas opostas: "ainda não sei"
+// (a publicação antecipada do loadPlansState, antes do /billing/subscription) e
+// "sei: não tem assinatura" — que é o DESLOGADO, o público-alvo da etiqueta.
+// Sem este terceiro estado não dá para separar as duas, e qualquer guarda que só
+// teste `pixSub == null` esconde a etiqueta de quem ela existe para convencer.
+let pixSubResolvida = false;
 
 // ── O CTA nos cards ─────────────────────────────────────────────────────────
 
-/** Chamado pelo loadPlansState da precos.html, com o que ela já buscou. */
-function pbPixInit(cfg, sub) {
+/**
+ * Pix está à venda para ESTE usuário? Fonte única do CTA dos cards e da etiqueta
+ * do toggle (§0.7). `!== true` e não `!`: portão de venda não abre com truthy
+ * qualquer. Vitalício não compra — o backend recusa com 409 `lifetime`.
+ */
+function pixAVenda() {
+  return !!pixCfg && pixCfg.pix_annual_available === true && !(pixSub && pixSub.lifetime === true);
+}
+
+/**
+ * Chamado pelo loadPlansState da precos.html, com o que ela já buscou.
+ * `subResolvida` só é true na segunda chamada, com o /billing/subscription na mão.
+ */
+function pbPixInit(cfg, sub, subResolvida) {
   pixCfg = cfg || null;
   pixSub = sub || null;
+  pixSubResolvida = subResolvida === true;
+  // A etiqueta do toggle é o único anúncio de Pix que o ciclo MENSAL tem (o CTA
+  // dos cards só nasce no anual), então quem a revela é o init, não o refresh.
+  //
+  // E ela é o único dos dois que ESPERA a assinatura. O CTA é caminho de
+  // RESGATE — nascer cedo ajuda quem quer migrar do cartão enquanto o Stripe
+  // está lento (é o que a publicação antecipada da precos.html existe para
+  // consertar, e o vitalício que clicar nele toma o 409 `lifetime`). A etiqueta
+  // é ANÚNCIO: revelá-la antes de saber quem está olhando é propaganda enganosa
+  // para o vitalício, e ela fica até a requisição voltar — indefinidamente, se
+  // ela travar. Por isso `pixSubResolvida` entra aqui e não no `pixAVenda`.
+  const nota = document.getElementById("pix-cycle-note");
+  const btnAnual = document.getElementById("cycle-annual");
+  if (nota) nota.hidden = !(pixAVenda() && pixSubResolvida);
+  // Leitor de tela: a etiqueta é revelada DEPOIS do load, e quem está no botão
+  // "Anual" nunca passa por ela. O `#pix-cycle-live` em volta dela é a região
+  // `aria-live` que anuncia a revelação (a região tem de existir desde o parse
+  // — registrar e revelar no mesmo instante não anuncia); o `aria-describedby`
+  // é o que sobra para quem chega ao botão depois, navegando controle por
+  // controle. Ele entra e SAI com a etiqueta: elemento diretamente referenciado
+  // é lido mesmo `hidden`, então deixá-lo fixo anunciaria Pix para quem não
+  // pode comprar — o mesmo erro que o `hidden` do markup existe para evitar.
+  if (btnAnual && nota && !nota.hidden) btnAnual.setAttribute("aria-describedby", "pix-cycle-note");
+  else if (btnAnual) btnAnual.removeAttribute("aria-describedby");
   pbPixRefresh();
 }
 
 /** Chamado pelo setCycle: o CTA de Pix só existe no ciclo anual. */
 function pbPixRefresh() {
-  // `!== true` e não `!`: portão de venda não abre com valor truthy qualquer.
-  if (!pixCfg || pixCfg.pix_annual_available !== true) return;
-  // Vitalício NÃO compra: o `refreshPlanButtons` da precos.html já marca os
-  // cards como acesso permanente, e o backend recusa o checkout com 409
-  // `lifetime` — um CTA aqui é um clique rumo ao erro, com CPF digitado antes.
-  // Mesmo caminho do mensal: sai do DOM (escondido ainda recebe Tab), o que
-  // também apaga o CTA já criado quando a assinatura chega depois do cfg.
-  const anual = currentCycle === "annual" && !(pixSub && pixSub.lifetime === true);
+  const anual = currentCycle === "annual" && pixAVenda();
   for (const plano of PIX_PLANOS) {
     const existente = document.querySelector('[data-pix-cta="' + plano + '"]');
     // Sai do DOM no mensal em vez de ficar escondido: escondido ainda recebe Tab.
@@ -115,43 +115,6 @@ function pixCriarCta(plano) {
   b.addEventListener("click", () => pixCheckout(plano));
   cartao.after(b);
   return b;
-}
-
-// ── Overlay: fundo + caixa + Esc + Tab preso + devolução do foco ────────────
-function pixOverlay(titulo, aoFechar) {
-  const foco = document.activeElement;
-  const ov = document.createElement("div");
-  ov.className = "pix-ov";
-  ov.setAttribute("role", "dialog");
-  ov.setAttribute("aria-modal", "true");
-  ov.setAttribute("aria-labelledby", "pix-modal-titulo");
-  const box = document.createElement("div");
-  box.className = "pix-box";
-  const h = document.createElement("h3");
-  h.id = "pix-modal-titulo";
-  h.textContent = titulo;
-  box.appendChild(h);
-  ov.appendChild(box);
-  const tecla = (e) => {
-    if (e.key === "Escape") { fechar(); return; }
-    // Trap de Tab do modals.js (§0.1 — o mesmo helper que o modal_keys.test.mjs
-    // e o settings_security_fanout.test.mjs já asseveram). Sem ele o Tab
-    // alcançava o CTA ATRÁS do overlay e o Enter abria um SEGUNDO QR por cima:
-    // dois instrumentos ao portador na tela e duas cobranças no provedor.
-    if (window.pigTrapTab) window.pigTrapTab(e, ov);
-  };
-  function fechar() {
-    document.removeEventListener("keydown", tecla);
-    ov.remove();
-    if (aoFechar) aoFechar();
-    if (foco && foco.focus) foco.focus();
-  }
-  ov.addEventListener("click", (e) => { if (e.target === ov) fechar(); });
-  document.addEventListener("keydown", tecla);
-  document.body.appendChild(ov);
-  // `titulo` sai daqui porque o modal tem DOIS estados (formulário e QR) e o
-  // segundo reescreve o cabeçalho do primeiro em vez de abrir outra caixa.
-  return { box, fechar, titulo: h };
 }
 
 // ── Checkout: o documento primeiro, o QR depois ─────────────────────────────
@@ -311,11 +274,12 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     }
     // Guarda de FORMA, não de data: "2028-13-45" passa e a tela escreve
     // "45/13/2028" (medido). Não se aperta porque não é alcançável — o
-    // `covered_until` é o `isoformat()` de um timestamptz (billing_pix.py:107). O
+    // `covered_until` é o `isoformat()` de um timestamptz (o `CoberturaJaPaga` do
+    // `criar_checkout_pix`, em `frontend/routes/billing_pix.py`). O
     // que ela barra é o que já chegava: ausente, ou texto livre virando "undefined".
     // ponytail: e o dia recortado é o do calendário UTC, não o de Brasília — compra
     // entre 21h e 24h (3 das 24 horas) nomeia o dia seguinte. Categoria, não caso:
-    // o `pixModalMigracao` e o pix-poll.js:54 recortam igual. Fechar é converter o
+    // o `pixModalMigracao` e o `pixModalQr` (`pix-poll.js`) recortam igual. Fechar é converter o
     // fuso nos três, não recortar string.
     const pago = det.error === "pix_future_purchase_conflict"
       && /^\d{4}-\d{2}-\d{2}/.exec(det.covered_until || "");
@@ -340,4 +304,4 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
 // sendo BAIXADOS quando elas terminam: ali a guarda daria falso e ninguém
 // tentaria de novo, deixando a página sem CTA nenhum com a flag ligada. Então
 // quem chegar por ÚLTIMO lê o estado que o outro deixou, seja qual for a ordem.
-if (window.pbPixState) pbPixInit(window.pbPixState.cfg, window.pbPixState.sub);
+if (window.pbPixState) pbPixInit(window.pbPixState.cfg, window.pbPixState.sub, window.pbPixState.resolvida);

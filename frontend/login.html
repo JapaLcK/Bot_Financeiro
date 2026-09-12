@@ -83,7 +83,11 @@
 <script>
   function getCookie(n){return document.cookie.split('; ').find(r=>r.startsWith(n+'='))?.split('=')[1]||''}
   function csrfHeaders(e){e=e||{};var c=decodeURIComponent(getCookie('csrf_token')||'');if(c)e['X-CSRF-Token']=c;return e}
-  async function payload(r){var t=await r.text();if(!t)return{};try{return JSON.parse(t)}catch(_){return{detail:t}}}
+  // `detail` NÃO-string vira nulo aqui: o 422 do FastAPI manda uma LISTA de
+  // objetos ({loc,msg,type,input}), que é truthy e chega no `textContent` como
+  // "[object Object]". Zerando aqui, cada chamada cai no próprio fallback — que
+  // já é legível e específico. Mesma regra do `_errDetail` (dashboard.js).
+  async function payload(r){var t=await r.text();if(!t)return{};var d;try{d=JSON.parse(t)}catch(_){return{detail:t}}if(d&&typeof d==='object'&&typeof d.detail!=='string')d.detail=null;return d}
   function goDash(u){u=u||'/home';if(u.indexOf('DASHBOARD_URL=')===0)u=u.slice(14);if(u.indexOf('http')!==0)u=location.origin+'/'+u.replace(/^\//,'');location.replace(u)}
   // ?next= interno (allowlist anti open-redirect) tem prioridade sobre o destino padrão
   function nextParam(){
