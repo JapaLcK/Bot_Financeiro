@@ -26,6 +26,7 @@ que todo ícone referenciado está no CSS servido.
 """
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import re
 import sys
@@ -59,7 +60,7 @@ CABECALHO = """/* Phosphor Icons — peso Regular, self-hosted (MIT). SUBSET GER
 
 FONTE_CSS = """@font-face {
   font-family: "Phosphor";
-  src: url("/fonts/Phosphor.woff2") format("woff2");
+  src: url("/fonts/Phosphor.woff2?v=__VERSAO__") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: block;
@@ -90,8 +91,8 @@ def _unicode_da_regra(regra: str, nome: str) -> int:
     return int(valor.group(1), 16)
 
 
-def gerar_fonte_subset(origem: pathlib.Path, unicodes: set[int]) -> None:
-    """Mantém no WOFF2 somente os codepoints presentes no CSS gerado."""
+def gerar_fonte_subset(origem: pathlib.Path, unicodes: set[int]) -> str:
+    """Mantém os codepoints usados e devolve o hash do WOFF2 gravado."""
     try:
         from fontTools import subset
     except ImportError:
@@ -115,6 +116,7 @@ def gerar_fonte_subset(origem: pathlib.Path, unicodes: set[int]) -> None:
     if ausentes:
         codigos = ", ".join(f"U+{codigo:04X}" for codigo in sorted(ausentes))
         sys.exit(f"fonte gerada sem os codepoints: {codigos}")
+    return hashlib.blake2b(DESTINO_FONTE.read_bytes(), digest_size=6).hexdigest()
 
 
 def main() -> None:
@@ -133,6 +135,7 @@ def main() -> None:
         sys.exit("ícones referenciados que não existem no CSS de origem: " + ", ".join(faltando))
 
     unicodes = {_unicode_da_regra(regra, nome) for regra, nome in regras if nome in usados}
+    versao_fonte = gerar_fonte_subset(fonte_origem, unicodes)
 
     # Remove as regras não usadas em vez de remontar a partir do cabeçalho: assim
     # qualquer outra regra base do pacote sobrevive.
@@ -144,9 +147,11 @@ def main() -> None:
     if saida.lstrip().startswith("/*"):
         saida = saida[saida.index("*/") + 2:].lstrip("\n")
     # O pacote aponta para ./Phosphor.{woff2,woff,ttf,svg}; nosso servidor expõe
-    # somente /fonts/Phosphor.woff2. Normalizar aqui impede uma regeneração de
-    # criar quatro 404 silenciosos nas páginas.
-    saida, trocas = re.subn(r"@font-face\s*\{.*?\}", FONTE_CSS, saida, count=1, flags=re.S)
+    # somente /fonts/Phosphor.woff2. A versão pelo conteúdo é obrigatória porque
+    # a rota da fonte usa cache imutável de um ano; sem ela, um glifo adicionado
+    # numa regeneração poderia ficar invisível em clientes com o subset antigo.
+    fonte_css = FONTE_CSS.replace("__VERSAO__", versao_fonte)
+    saida, trocas = re.subn(r"@font-face\s*\{.*?\}", fonte_css, saida, count=1, flags=re.S)
     if trocas != 1:
         sys.exit("@font-face do Phosphor não encontrado no CSS de origem")
     # Ajuste visual próprio do PigBank, deliberadamente fora do upstream.
@@ -154,7 +159,6 @@ def main() -> None:
         saida = saida.rstrip() + "\n\n.ph{vertical-align:-0.125em}\n"
     saida = CABECALHO.format(n=len(usados), total=len(disponiveis)) + saida
     DESTINO.write_text(saida, encoding="utf-8")
-    gerar_fonte_subset(fonte_origem, unicodes)
     print(
         f"{DESTINO.relative_to(RAIZ)}: {len(usados)} ícones de {len(disponiveis)}; "
         f"fonte com {DESTINO_FONTE.stat().st_size} bytes"

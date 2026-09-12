@@ -9,6 +9,7 @@ A lista de referências vem da mesma extração do gerador
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import pathlib
 import re
@@ -47,6 +48,13 @@ def test_fonte_de_icones_tambem_e_subset():
     assert FONTE.stat().st_size < 40_000, (
         f"Phosphor.woff2 tem {FONTE.stat().st_size} B — parece a fonte completa"
     )
+
+
+def test_css_versiona_a_fonte_pelo_conteudo():
+    """A rota da fonte é imutável; cada novo subset precisa de outro URL."""
+    versao = hashlib.blake2b(FONTE.read_bytes(), digest_size=6).hexdigest()
+    css = CSS.read_text(encoding="utf-8")
+    assert f'/fonts/Phosphor.woff2?v={versao}' in css
 
 
 def test_fallbacks_dos_helpers_estao_no_css():
