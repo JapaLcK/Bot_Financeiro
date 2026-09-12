@@ -177,7 +177,17 @@ def test_barrado_com_pendencia_viva_pede_ajuda_e_nada_acontece(action_type, arma
 
     resposta = _diga(uid, "ajuda?")
 
-    assert "comece aqui" in resposta.lower(), f"{action_type}: {resposta!r}"
+    # A marca é `guardados`, EXCLUSIVA da seção de ajuda — e não "sem plano
+    # ativo", que a parede genérica do gate também diz. Medido: com
+    # `"sem plano ativo"` a injeção que desliga a isenção de ajuda deixava os 11
+    # casos VERDES, porque os dois textos começam igual. A asserção tinha
+    # deixado de separar "recebeu a AJUDA" de "recebeu a PAREDE", que é
+    # exatamente o que o caso diz medir.
+    #
+    # (A `start` de antes também não servia: ela mandava o barrado tentar
+    # `gastei 50 mercado` e digitar `tutorial`. O conserto é a seção `sem_acesso`
+    # — e a asserção tem de ser sobre algo que só ELA tem.)
+    assert "guardados" in resposta.lower(), f"{action_type}: {resposta!r}"
     assert db.list_launches(uid) == [], f"{action_type} registrou lançamento"
     assert db.get_balance(uid) == 0, f"{action_type} mexeu no saldo"
     assert _escrituras(uid) == antes, f"{action_type} escreveu no banco"
@@ -197,7 +207,9 @@ def test_barrado_com_parcelamento_pendente_nao_registra_parcela():
 
     resposta = _diga(uid, "ajuda?")
 
-    assert "comece aqui" in resposta.lower(), resposta
+    # `guardados` é exclusivo da seção de ajuda; "sem plano ativo" a parede
+    # também diz e não separa nada — ver a nota no caso acima.
+    assert "guardados" in resposta.lower(), resposta
     assert db.list_installment_groups(uid) == [], "registrou o parcelamento"
     assert db.list_launches(uid) == []
     assert db.get_balance(uid) == 0

@@ -172,6 +172,22 @@ async def check_payment_reminder() -> None:
     elegiveis = [r for r in rows
                  if int(r["user_id"]) not in plan_service._ACCESS_ALLOWLIST]
 
+    # O corte do Grátis, e aqui ele NÃO é redundante com o funil. A janela de
+    # `list_payment_reminder_candidates` é idade de `past_due_since` em
+    # **[GRACE-1, GRACE-1+WINDOW)** = [6, 9) dias, e `DUNNING_GRACE_DAYS = 7`:
+    # nos dias 7 e 8 a carência JÁ FECHOU, a conta perdeu o acesso e continuava
+    # no lote. E a copy deste e-mail diz "Você continua entrando no PigBank" —
+    # verdade no 6º dia, mentira no 7º e no 8º.
+    #
+    # Em LOTE, uma passada só, antes do laço: o filtro consulta o banco e o
+    # lote não tem `LIMIT`.
+    from core.reports.reports_daily import filtrar_por_acesso
+
+    if elegiveis:
+        _ids = [int(r["user_id"]) for r in elegiveis]
+        _com_acesso = set(await loop.run_in_executor(None, filtrar_por_acesso, _ids))
+        elegiveis = [r for r in elegiveis if int(r["user_id"]) in _com_acesso]
+
     for _linha_do_funil in elegiveis:
         user_id = int(_linha_do_funil["user_id"])
         # SEM `try`, e isso é medido, não descuido: `recent_event_exists`

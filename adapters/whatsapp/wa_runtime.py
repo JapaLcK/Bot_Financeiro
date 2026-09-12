@@ -156,6 +156,123 @@ def _send_reply(to_wa_id: str, body: str) -> None:
             raise
 
 
+# Ids interativos ISENTOS do corte do Grátis — o análogo do
+# `_GATE_EXEMPT_PREFIXES = ("/billing", "/auth", "/conta")` da web
+# (`frontend/routes/shared.py`) e da isenção de `/settings`: quem foi cortado
+# tem de conseguir PARAR de receber mensagem nossa. Os quatro desligam envio
+# proativo e não escrevem dado financeiro nenhum.
+#
+# `WA_UNDO_LAUNCH_ID` NÃO está aqui de propósito: ele não responde nada, só faz
+# `message.text = "desfazer"` e cai no `handle_incoming`, que tem o
+# `_paywall_gate` dele. Gatear aqui seria o segundo gate no mesmo caminho.
+_WA_INTERACTIVE_ISENTOS = {
+    WA_DAILY_REPORT_DISABLE_ID,
+    WA_WEEKLY_REPORT_DISABLE_ID,
+    WA_MONTHLY_REPORT_DISABLE_ID,
+    *WA_UPDATES_DISABLE_IDS,
+}
+
+
+# `action_type`s das `pending_actions` interceptadas AQUI (antes do
+# `handle_incoming`) que ESCREVEM: a recategorização reescreve a categoria de um
+# lançamento, a pergunta de valor chama `mark_bill_paid` e debita saldo. As
+# demais pendências deste produto são resolvidas pelo `route()` DEPOIS do
+# `_paywall_gate`, então já estão cobertas — só estas duas furam o caminho.
+#
+# Lista, e não "toda pendência", porque o gate custa uma consulta: ver a nota de
+# ORDEM no bloco que a usa.
+_PENDENCIAS_QUE_ESCREVEM = {"recategorize_launch_text", "bill_pay_amount"}
+
+
+def _bloqueado_pelo_corte(uid: int, reply_to: str, texto: str = "") -> bool:
+    """O corte aplicado a um caminho que NÃO passa pelo `handle_incoming`.
+
+    Botão do WhatsApp **fica no histórico da conversa para sempre**. Quem for
+    cortado hoje rola a tela e clica no "Desfazer", no "Apagar" ou no "✅ Já
+    paguei" de ontem, e cada um desses ramos dá `return` antes do
+    `handle_incoming` — a escrita acontece sem gate nenhum. Vale igual para as
+    `pending_actions`: a pergunta de valor da conta e a recategorização por
+    texto são consumidas ANTES do roteamento.
+
+    **Reusa `_paywall_gate` em vez de reimplementar o veredito** (§0.1): vêm
+    juntos o fail-open, as isenções de ajuda/billing e a copy certa para cada
+    população (só-WhatsApp × ex-assinante). `texto` é o da mensagem quando
+    existe, para que as isenções julguem o que o usuário realmente escreveu;
+    clique de botão manda `""`, que não casa isenção nenhuma.
+
+    Fail-open no `except` pelo mesmo motivo dos outros gates: trancar quem está
+    pagando é pior que escapar um clique.
+    """
+    try:
+        from core.handle_incoming import _paywall_gate
+        gated = _paywall_gate(
+            IncomingMessage(platform="whatsapp", user_id=uid, text=texto,
+                            external_id=reply_to),
+            "whatsapp",
+        )
+    except Exception as exc:
+        logger.warning("WA gate do corte falhou uid=%s: %s", uid, exc)
+        return False
+    if not gated:
+        return False
+    for out in gated:
+        _send_reply(reply_to, out.text)
+    return True
+
+
+def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
+    """Quem não tem acesso recebe a ajuda DELE, e nenhuma outra. True = tratado.
+
+    **Ponto único de toda a superfície de ajuda do WhatsApp.** O conserto
+    anterior gateou o BOTÃO do tutorial e o texto `tutorial`, e sobraram três
+    portas medidas: o item "🚀 Tutorial" do MENU (que é uma lista, não um
+    `button_reply`, então `get_tutorial_button_id` devolve `None` e ele cai no
+    ramo do menu), a SAUDAÇÃO depois do auto-link, e o menu inteiro — cujas
+    outras seções também mandam tentar comando (`credit`, medido).
+
+    Fechar porta a porta já falhou três vezes; o que decide aqui é o DESTINO
+    (vai renderizar ajuda) e não o caminho.
+
+    Quanto do tutorial instrui, medido em vez de estimado — de todos os alvos de
+    `wa_tutorial._ACTION_MAP`, só o do dashboard (`tut_6`) é leitura pura::
+
+        [k for k, fn in wa_tutorial._ACTION_MAP.items()
+         if re.search(r"gastei|recebi|paguei|desfazer|apagar |criar cart|"
+                      r"credito |parcelar|pagar fatura|criar caixinha|coloquei|"
+                      r"apliquei|retirei|importar ofx",
+                      inspect.getsource(fn), re.I)] A seção é a mesma dos dois canais
+    (`core.help_text` → `sem_acesso`), então WhatsApp e Discord dizem a mesma
+    coisa a quem foi cortado.
+
+    Fail-open pelo mesmo motivo dos outros gates: `_bloqueado_pelo_corte` já
+    engole a exceção e devolve False, e aí a ajuda normal segue.
+    """
+    from core.handle_incoming import _paywall_gate
+
+    try:
+        gated = _paywall_gate(
+            IncomingMessage(platform="whatsapp", user_id=uid, text="",
+                            external_id=reply_to),
+            "whatsapp",
+        )
+    except Exception as exc:
+        logger.warning("WA gate da ajuda falhou uid=%s: %s", uid, exc)
+        return False
+    if not gated:
+        return False
+    # A forma certa para a população: quem não tem linha em `auth_accounts` não
+    # tem "seus dados guardados" nem `/settings`. `get_plan_gate_state` é o
+    # mesmo SELECT enxuto que o `_paywall_gate` usa — sem PII, sem auditoria.
+    try:
+        import db
+        tem_cadastro_web = db.get_plan_gate_state(uid) is not None
+    except Exception:
+        tem_cadastro_web = True   # na dúvida, a forma que não nega nada
+    from core.help_text import render_ajuda_sem_acesso
+    _send_reply(reply_to, render_ajuda_sem_acesso("whatsapp", tem_cadastro_web))
+    return True
+
+
 def _pending_supports_confirmation_buttons(pending: dict[str, Any] | None) -> bool:
     if not pending:
         return False
@@ -545,6 +662,10 @@ def process_message(message: InboundMessage) -> None:
                 # "gastei 50..."), ele já sabe usar — a gente executa o comando
                 # e não interrompe com o tour.
                 if _is_greeting(message.text or ""):
+                    # Ex-assinante que acabou de vincular manda `oi` e recebia o
+                    # tutorial inteiro — medido. É a porta mais alta do arquivo.
+                    if _ajuda_do_cortado(uid, reply_to):
+                        return
                     try:
                         send_welcome(reply_to, user_id=uid)
                     except Exception as e:
@@ -593,6 +714,32 @@ def process_message(message: InboundMessage) -> None:
             # Botões do tutorial
             tut_bid = get_tutorial_button_id(raw_msg)
             if tut_bid:
+                # O tutorial NÃO é leitura, e é por isso que ele tem gate mesmo
+                # ficando acima do gate único: de todos os passos, **só o do
+                # dashboard (`tut_6`) é leitura pura** — os demais nomeiam
+                # comando de ESCRITA ("gastei 50 no mercado", "desfazer",
+                # "apagar 42", "criar cartao", "parcelar"), e o `tut_skip`
+                # responde "Pode usar à vontade!". (A contagem não fica escrita
+                # aqui, §2; o comando que a produz está na docstring de
+                # `_ajuda_do_cortado`.) Para quem foi cortado isso é instrução
+                # para fazer algo que a mensagem seguinte recusa.
+                #
+                # **Gatear a entrada, e não reescrever os passos**: copy própria
+                # exigiria ramo em quase todos os passos de `wa_tutorial.py`,
+                # que não conhece plano nenhum.
+                #
+                # A frase que estava aqui — "o menu de AJUDA e o de COMANDOS
+                # seguem sem gate, porque explicam sem mandar tentar" — era
+                # FALSA para os DOIS, e foi ela que cobriu o furo duas vezes.
+                #
+                # A segunda versão dela dizia que o de COMANDOS era limpo,
+                # "medido: nenhum gastei/recebi em `wa_commands_menu.py`". A
+                # medição estava certa e a conclusão não: aquele arquivo só
+                # RENDERIZA, e o conteúdo vem de
+                # `core/commands_catalog.py::render_category_body`, onde o mesmo
+                # grep dá 5. Hoje os dois menus passam por `_ajuda_do_cortado`.
+                if _bloqueado_pelo_corte(uid, reply_to):
+                    return
                 logger.info("WA tutorial button id=%s wa_id=%s", tut_bid, reply_to)
                 try:
                     handle_tutorial_button(reply_to, tut_bid)
@@ -610,6 +757,10 @@ def process_message(message: InboundMessage) -> None:
             # Itens do menu de ajuda
             help_id = get_help_menu_id(raw_msg)
             if help_id:
+                # TODO item do menu, não só o `help_tutorial`: `credit` também
+                # manda tentar comando, e a lista cresce sem ninguém revisar.
+                if _ajuda_do_cortado(uid, reply_to):
+                    return
                 logger.info("WA help menu id=%s wa_id=%s", help_id, reply_to)
                 try:
                     send_help_section(reply_to, help_id)
@@ -627,6 +778,14 @@ def process_message(message: InboundMessage) -> None:
             # Itens do menu "O que pedir" (catalogo de comandos)
             cmds_id = get_commands_menu_id(raw_msg)
             if cmds_id:
+                # O catálogo é um convite a TENTAR, igual ao tutorial, e eu
+                # tinha medido o arquivo errado: `wa_commands_menu.py` só
+                # renderiza (zero "gastei/recebi"), mas o conteúdo mora em
+                # `core/commands_catalog.py::render_category_body`, onde o mesmo
+                # grep dá 5. Medir o renderizador e concluir sobre o conteúdo
+                # foi o que manteve esta porta aberta.
+                if _ajuda_do_cortado(uid, reply_to):
+                    return
                 logger.info("WA commands menu id=%s wa_id=%s", cmds_id, reply_to)
                 try:
                     send_commands_section(reply_to, cmds_id)
@@ -639,6 +798,29 @@ def process_message(message: InboundMessage) -> None:
                         source="wa_runtime",
                         user_id=uid,
                     )
+                return
+
+            # ── O CORTE, UMA VEZ, antes de TODOS os botões que escrevem ─────
+            #
+            # Daqui para baixo os ramos interativos escrevem no banco e dão
+            # `return` antes do `handle_incoming`: recategorizar (três ramos),
+            # desfazer lançamento, apagar compra no crédito e quitar conta a
+            # pagar. Um gate por ramo seriam seis cópias da mesma regra; este é
+            # o ponto por onde todos passam (§0.1 — o conserto na função
+            # compartilhada é diff menor que um em cada chamador).
+            #
+            # Nenhum dos ramos ACIMA é de leitura: tutorial, menu de AJUDA e
+            # menu de COMANDOS convidam a tentar um comando, e os TRÊS já
+            # passaram por `_ajuda_do_cortado` lá em cima. As duas versões
+            # anteriores desta frase listavam um ou dois deles como "leitura", e
+            # as duas vezes foi a frase que manteve a porta aberta — a última
+            # media `wa_commands_menu.py` (que só renderiza) para concluir sobre
+            # `core/commands_catalog.py` (onde o conteúdo está). Os de OPT-OUT
+            # ficam ABAIXO e por isso precisam da isenção explícita:
+            # `_WA_INTERACTIVE_ISENTOS`.
+            if (interactive_id.strip().lower() not in _WA_INTERACTIVE_ISENTOS
+                    and interactive_id not in _WA_INTERACTIVE_ISENTOS
+                    and _bloqueado_pelo_corte(uid, reply_to)):
                 return
 
             # Botão "Categoria errada?" pós-lançamento (legado — agora a lista
@@ -740,6 +922,8 @@ def process_message(message: InboundMessage) -> None:
                 if not (bill_id and uid):
                     _send_reply(reply_to, "Não consegui identificar a conta desse lembrete.")
                     return
+                # (o corte já foi aplicado no gate único lá em cima, junto com
+                # os outros cinco botões que escrevem)
                 from db.bills import get_bill, mark_bill_paid
                 from utils_text import fmt_brl
                 try:
@@ -900,6 +1084,29 @@ def process_message(message: InboundMessage) -> None:
                 pending_recat = get_pending_action(uid)
             except Exception:
                 pending_recat = None
+            # O CORTE, antes de CONSUMIR a pendência, e SÓ quando existe uma que
+            # escreve. As duas interceptações abaixo dão `return` sem passar
+            # pelo `handle_incoming`: a recategorização por texto reescreve a
+            # categoria de um lançamento e a pergunta de valor chama
+            # `mark_bill_paid`. Sem gate aqui, quem foi cortado com uma pergunta
+            # de pé pagava a conta respondendo o número.
+            #
+            # **A ORDEM é o ponto, e ela é sobre CUSTO.** Gatear antes de ler a
+            # pendência fazia o veredito rodar em TODA mensagem de texto: o
+            # `get_plan_gate_state` saía uma vez aqui e outra dentro do
+            # `handle_incoming` lá embaixo, duas consultas por mensagem no
+            # caminho mais quente do produto, para uma pendência que na
+            # esmagadora maioria das vezes não existe. É o mesmo custo que a
+            # sentinela `_UNSET` de `plan_service.has_app_access` existe para
+            # não pagar. Lida a pendência primeiro, quem não tem nenhuma segue
+            # direto e paga o veredito UMA vez, no `handle_incoming`.
+            #
+            # Vai com o TEXTO REAL: é o que faz as isenções de ajuda e de
+            # billing julgarem o que a pessoa escreveu.
+            if (pending_recat
+                    and pending_recat.get("action_type") in _PENDENCIAS_QUE_ESCREVEM
+                    and _bloqueado_pelo_corte(uid, reply_to, message.text or "")):
+                return
             if pending_recat and pending_recat.get("action_type") == "recategorize_launch_text":
                 launch_id = (pending_recat.get("payload") or {}).get("launch_id")
                 # Porteiro: `_apply_recategorize` reescreve a categoria do
@@ -1029,6 +1236,12 @@ def process_message(message: InboundMessage) -> None:
         # "ajuda" → tutor pra quem ta aprendendo (send_help_menu, com link
         # pro tutorial).
         if text_cmd in HELP_TRIGGERS:
+            # Este ramo intercepta ANTES do `handle_incoming`, então o
+            # `_paywall_gate` não o alcança: sem isto, `ajuda` no WhatsApp abria
+            # a lista e o `ajuda` do Discord (que passa pelo gate) respondia
+            # outra coisa. Os dois canais dizem a mesma coisa agora.
+            if _ajuda_do_cortado(uid, reply_to):
+                return
             logger.info("WA help menu via texto wa_id=%s", reply_to)
             try:
                 send_help_menu(reply_to)
@@ -1042,6 +1255,13 @@ def process_message(message: InboundMessage) -> None:
         # antes caíam na IA e viravam texto improvisado.
         from core.services.commands_intent import is_commands_intent
         if is_commands_intent(message.text):
+            # `comandos`, `exemplos`, `o que você faz`, `me ajuda com o que`
+            # (`core/services/commands_intent.py`) chegam aqui ANTES do
+            # `handle_incoming`. No Discord a mesma frase já era barrada pelo
+            # gate — a afirmação de que os dois canais diziam a mesma coisa era
+            # falsa justamente por este ramo.
+            if _ajuda_do_cortado(uid, reply_to):
+                return
             logger.info("WA commands menu via intent wa_id=%s", reply_to)
             try:
                 send_commands_menu(reply_to)
@@ -1051,6 +1271,11 @@ def process_message(message: InboundMessage) -> None:
                 return
 
         if text_cmd in {"tutorial", "/tutorial"}:
+            # O gêmeo DIGITADO do botão acima, e ele também não passa pelo
+            # `handle_incoming`. Gatear um e não o outro deixaria a porta aberta
+            # por uma palavra (§2: a categoria, não a instância).
+            if _bloqueado_pelo_corte(uid, reply_to, message.text or ""):
+                return
             logger.info("WA tutorial welcome via texto wa_id=%s", reply_to)
             try:
                 send_welcome(reply_to)

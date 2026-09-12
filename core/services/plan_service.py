@@ -8,8 +8,10 @@ Dois mundos atrás do flag PLANS_V2_ENABLED (lido dinâmico, sem redeploy):
     (PAYWALL_ENABLED). Comportamento 100% preservado.
   • ON (escada v2): 4 tiers free < essencial < plus < pro. O valor 'pro' no
     banco é ALIAS LEGADO do tier plus (R$ 19,90 — antigo "Pro", hoje "Plus");
-    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Grátis entra no app
-    (has_app_access sempre True) e os gates viram por-feature/por-tier.
+    o tier pro novo (R$ 39,90) usa o valor 'pro_max'. Desde o CORTE DO GRÁTIS
+    (#274/#354) o tier free NÃO entra no app: has_app_access consulta
+    tem_direito_hoje, e o Grátis sobrevive só como ESTADO (fallback após falha
+    de cobrança), não como direito de uso. Freio: ACCESS_GATE_ENABLED=0.
     Trial (2026-08-06): 15 dias do PLANO ESCOLHIDO, via Stripe COM CARTÃO
     (subscription trialing → cobra no dia 16). Escolheu Pro? 15 dias de Pro.
     Nasce no checkout, não no cadastro; 1 por telefone na vida (plan_trials).
@@ -88,6 +90,20 @@ def plans_v2_enabled() -> bool:
     return True
 
 
+def access_gate_enabled() -> bool:
+    """O gate de acesso por direito pago. LANÇADO no corte do Grátis: default
+    LIGADO. Gêmeo exato de `plans_v2_enabled()` — ACCESS_GATE_ENABLED=0/false/
+    no/off é o FREIO DE EMERGÊNCIA que devolve o acesso a todo mundo sem
+    redeploy, lido a cada chamada.
+
+    Quem consome: `has_app_access` (e, por ele, os quatro enforcements de
+    acesso e o filtro dos relatórios). Puxar o freio desfaz o corte inteiro."""
+    raw = (os.getenv("ACCESS_GATE_ENABLED") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
+
+
 def trial_days_total() -> int:
     try:
         return int(os.getenv("PLANS_TRIAL_DAYS", str(TRIAL_DAYS_DEFAULT)))
@@ -144,12 +160,12 @@ def tem_direito_hoje(user: dict | None) -> bool:
     FALSO e escondia a decisão:
 
       • quem usa o bot só pelo WhatsApp e nunca fez cadastro web não tem linha
-        em `auth_accounts` e tem o produto COMPLETO hoje: `has_app_access`
-        devolve True incondicional com o v2 ligado, e o gate do bot só exige
-        plano quando a linha existe (`core/handle_incoming._paywall_gate`:
-        `sem_plano = estado is not None and ...`, com
-        `db.reports.get_plan_gate_state` devolvendo None sem cadastro web). O
-        comentário de lá chama essa população de "a maioria aqui";
+        em `auth_accounts` e tinha o produto COMPLETO até o corte:
+        `has_app_access` devolvia True incondicional com o v2 ligado. **Desde o
+        PR A ela é barrada por aqui**: o gate do bot passa a linha (que pode
+        ser `None`) para `has_app_access`, e `None` cai neste `return False`. O
+        comentário de `core/handle_incoming._paywall_gate` chama essa população
+        de "a maioria aqui";
       • ela NÃO entra na varredura do aviso, que é sobre `auth_accounts`, e
         PERDE acesso no corte, porque este predicado devolve False;
       • **existe** canal para alcançá-la — o WhatsApp, o canal principal do
@@ -167,9 +183,11 @@ def tem_direito_hoje(user: dict | None) -> bool:
     sentido para quem nunca viu o dashboard e não tem conta web — sem "acesse
     seu painel", sem supor cadastro existente.
 
-    **Neste PR ela não gateia nada**: `has_app_access` continua como está (é
-    assunto do PR A). Quem a consome são `scripts/aviso_fim_do_gratis.py` e o
-    teste diferencial que compara aquela SQL com este predicado.
+    **Desde o PR A ela É o gate**: `has_app_access` a consulta, e por ele os
+    quatro enforcements (HTML, rotas de dados, WebSocket, bot) mais o filtro
+    dos relatórios. Os outros consumidores são `scripts/aviso_fim_do_gratis.py`
+    e o teste diferencial que compara aquela SQL com este predicado — quem
+    mexer AQUI vê `tests/test_aviso_fim_do_gratis.py` vermelho, de propósito.
     """
     if not user:
         return False
@@ -243,6 +261,18 @@ def is_pro(user_id: int) -> bool:
 # user_ids liberados (admin/teste) na perna LEGADA do paywall — is_pro/paywall.
 # Com o v2 ligado ela não vale para o gate de escolha de plano:
 # needs_plan_selection não consulta esta lista (nem no bot, nem na web).
+#
+# **E, desde o corte do Grátis, ela também não vale para o ACESSO** — o `if
+# plans_v2_enabled()` de `has_app_access` sai antes de chegar aqui. Era inócuo
+# enquanto aquele ramo devolvia True incondicional; agora estas duas contas são
+# cortadas como qualquer outra se não tiverem plano vigente.
+#
+# **Decisão: fica como está, e a lista NÃO é reintroduzida no caminho v2.** O
+# jeito de liberar uma conta hoje é o grant de admin
+# (`core.admin_dashboard.set_account_plan`), que é auditado, tem validade e
+# aparece no painel — uma allowlist hardcoded no código não tem nenhum dos três,
+# e ressuscitá-la abriria um bypass do corte que ninguém enxerga fora do fonte.
+# `tests/test_access_gate.py::test_allowlist_legada_nao_isenta_do_corte` amarra.
 _ACCESS_ALLOWLIST = {88648360, 832398038}
 
 
@@ -353,15 +383,67 @@ def consolidated_balance_enabled(user_id: int, email: str | None = None) -> bool
     return str(user_id) in beta_ids
 
 
-def has_app_access(user_id: int) -> bool:
+# Sentinela do parâmetro `user` de `has_app_access`. Existe porque `None` já
+# TEM significado ali — "não há linha em `auth_accounts`", a população
+# só-WhatsApp, que o corte barra —, e `None` como "não busquei" faria o MESMO
+# valor querer dizer as duas coisas OPOSTAS. Quem passa a linha em mão é o gate
+# do bot (`core.handle_incoming._paywall_gate`), que já a tem de
+# `db.get_plan_gate_state` e não pode pagar o `get_auth_user` (decrypt de PII +
+# uma linha em `pii_access_log` POR MENSAGEM — ver o comentário de lá).
+_UNSET = object()
+
+
+def has_app_access(user_id: int, *, user=_UNSET) -> bool:
     """True se o usuário pode entrar no app.
 
-    v2 ON: sempre True — o Grátis entra no app e os limites são por feature
-    (o paywall binário dá lugar à escada).
+    v2 ON: o veredito é `tem_direito_hoje` — plano pago vigente OU carência de
+    inadimplência aberta. **A AUTORIDADE É O DIREITO**, e o relógio de cobrança
+    só CONCEDE tempo pelo lado direito daquele OR; ele nunca tira acesso. Lido
+    ao contrário, o status bloquearia cliente pagante por um ciclo inteiro de
+    retentativa — são as células 18, 29 e 30 de
+    `docs/dunning_estados_eventos.md`, que ficam fora deste caminho por causa
+    dessa direção. Freio `ACCESS_GATE_ENABLED=0` devolve o True incondicional
+    de antes do corte.
     v2 OFF: com o paywall ligado, exige assinatura ativa/trial (is_pro) —
-    menos a allowlist de admin/teste. Paywall desligado libera todo mundo."""
+    menos a allowlist de admin/teste. Paywall desligado libera todo mundo.
+
+    `user`: a linha de `auth_accounts` quando o chamador JÁ a tem (o gate do
+    bot, o `/auth/me`). `None` é uma RESPOSTA — "não existe cadastro web" —, e
+    não "não busquei"; ver `_UNSET` acima.
+
+    **SEM `try/except` que devolva False, e isso é regra dura.** São TRÊS
+    estados, não dois: *tem direito* / *não tem* / **não sei**. Só o veredito
+    conhecido "não tem" fecha a porta; exceção é "não sei" e tem de SUBIR, para
+    que cada chamador aplique a política DELE. `get_auth_user` LEVANTA em erro
+    em vez de devolver `None`, e é essa distinção que um `except: return False`
+    aqui destruiria — um soluço de banco barraria a base pagante inteira e o bot
+    mandaria ASSINAR para quem já assinou.
+
+    **O que cada chamador faz com a exceção, MEDIDO** (2026-09-10; uma versão
+    anterior desta docstring dizia "o backstop de dados devolve 402" e isso é
+    falso — ele deixa propagar e vira 500):
+
+    | chamador | com a exceção | é regressão? |
+    |---|---|---|
+    | `_paywall_gate` (bot) | fail-open: atende e REGISTRA o lançamento | não |
+    | `gate_plan_selection` (HTML) | fail-open: serve a página | não |
+    | `_enforce_subscription_gate` (rotas de dados) | propaga → **500**, não 402 | não |
+    | gate do `/ws/{id}` | propaga → a conexão morre | não |
+    | `filtrar_por_acesso` (relatórios) | propaga → o tick inteiro morre | não |
+
+    **Nenhum é regressão deste PR**: os quatro últimos já chamavam
+    `needs_plan_selection(user_id)` na linha de cima, que estoura igual num
+    soluço de banco. Os dois primeiros são fail-open declarado; os três de baixo
+    são "morre alto", que num soluço de banco é o comportamento de sempre do
+    resto do app. Está escrito aqui porque a docstring afirmava um 402 que
+    ninguém entrega, e porque três dos cinco NÃO são fail-open — o "não sei"
+    vira "não" para eles, e isso tem de ser lido, não descoberto."""
     if plans_v2_enabled():
-        return True
+        if not access_gate_enabled():
+            return True
+        if user is _UNSET:
+            user = get_auth_user(int(user_id))
+        return tem_direito_hoje(user)
     if not paywall_enabled():
         return True
     if int(user_id) in _ACCESS_ALLOWLIST:

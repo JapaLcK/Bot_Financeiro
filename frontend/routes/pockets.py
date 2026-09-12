@@ -11,6 +11,7 @@ import urllib.parse
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from core.pg_text import detalhe_seguro
 from db import (
     create_pocket,
     delete_pocket,
@@ -76,7 +77,7 @@ async def create_pocket_route(request: Request, user_id: int, payload: PocketCre
             interest_rate=interest_rate,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     shared.invalidate_dashboard_current_cache(user_id)
     return {
@@ -128,7 +129,7 @@ async def update_pocket_meta_route(
             clear_target=payload.clear_target,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc))
     if not row:
         raise HTTPException(status_code=404, detail="Caixinha não encontrada.")
     shared.invalidate_dashboard_current_cache(user_id)
