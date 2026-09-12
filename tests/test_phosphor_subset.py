@@ -9,12 +9,14 @@ A lista de referências vem da mesma extração do gerador
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import pathlib
 import re
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CSS = RAIZ / "frontend" / "phosphor.css"
+FONTE = RAIZ / "frontend" / "fonts" / "Phosphor.woff2"
 
 _spec = importlib.util.spec_from_file_location(
     "build_phosphor_subset", RAIZ / "scripts" / "build_phosphor_subset.py"
@@ -41,6 +43,20 @@ def test_css_e_subset_nao_o_pacote_inteiro():
     assert n < 400, f"phosphor.css tem {n} ícones — parece o pacote inteiro, não o subset."
 
 
+def test_fonte_de_icones_tambem_e_subset():
+    """O CSS já era curto, mas apontava para o WOFF2 inteiro de 144 KiB."""
+    assert FONTE.stat().st_size < 40_000, (
+        f"Phosphor.woff2 tem {FONTE.stat().st_size} B — parece a fonte completa"
+    )
+
+
+def test_css_versiona_a_fonte_pelo_conteudo():
+    """A rota da fonte é imutável; cada novo subset precisa de outro URL."""
+    versao = hashlib.blake2b(FONTE.read_bytes(), digest_size=6).hexdigest()
+    css = CSS.read_text(encoding="utf-8")
+    assert f'/fonts/Phosphor.woff2?v={versao}' in css
+
+
 def test_fallbacks_dos_helpers_estao_no_css():
     """phIcon/catIcon/atividade caem em nomes literais quando o mapa não bate.
     Eles não aparecem como `ph-x` em lugar nenhum, então só este teste os cobre."""
@@ -64,8 +80,12 @@ def test_nao_surgiu_fonte_dinamica_de_icone_fora_dos_mapas_conhecidos():
         ("settings.html", 'ACTIVITY_ICONS[ev.event] || "circle"'),
     }
     achados = set()
-    for f in (RAIZ / "frontend").rglob("*"):
-        if f.suffix not in (".html", ".js"):
+    # As mesmas raízes do gerador (frontend/ E webapp/src), e a mesma exclusão de
+    # artefato: varrer só frontend/ deixava um `ph-${...}` num `.jsx` invisível
+    # para o teste que existe exatamente para achá-lo. Hoje `grep -rn "ph-"
+    # webapp/src` não acha nada — é do dia em que achar que isto trata.
+    for f in (*_gerador.FRONTEND.rglob("*"), *_gerador.WEBAPP_SRC.rglob("*")):
+        if f.suffix not in (".html", ".js", ".jsx") or f in _gerador.ARTEFATOS:
             continue
         for expr in re.findall(r"ph-\$\{([^}]*)\}", f.read_text(encoding="utf-8", errors="ignore")):
             achados.add((f.name, expr.strip()))

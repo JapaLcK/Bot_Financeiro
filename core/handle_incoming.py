@@ -23,7 +23,6 @@ from core.types import IncomingMessage, OutgoingMessage
 from core.intent_classifier import classify
 from core.intent_router import route
 from core.response_formatter import format_for_platform
-from core.services.ofx_service import handle_ofx_import, handle_credit_ofx_import
 from core.services.open_finance import handle_open_finance_whatsapp_command
 from core.services.media_service import (
     is_audio_attachment,
@@ -490,11 +489,28 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # o `route()` resolve pendências antes do ramo de ajuda, e uma delas
     # registra parcelamento. Nesse caso devolve a mensagem do gate.
     barrado = False
+    # A linha de `auth_accounts` deste usuário, ou None quando não existe. Vive
+    # FORA do try porque a mensagem lá embaixo depende dela: `None` = população
+    # só-WhatsApp, que nunca viu o dashboard e para quem "acesse seu painel"
+    # não faz sentido nenhum.
+    estado = None
     try:
         # Mesma expressão do gate do WS e do _post_login_url. A perna do
         # `needs_plan_selection` NÃO passa por `paywall_enabled` de propósito:
-        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py) e é a
-        # única que morde hoje — `has_app_access` devolve True com o v2 ligado.
+        # ela se auto-desliga com PLANS_V2_ENABLED off (plan_service.py). Desde
+        # o corte do Grátis a perna do `has_app_access` também morde — ela é
+        # quem barra o ex-assinante e a população só-WhatsApp.
+        #
+        # E a do `needs_plan_selection` NÃO virou redundante com ela. Os dois
+        # freios de emergência são separados: `ACCESS_GATE_ENABLED=0` desliga só
+        # o DIREITO (`has_app_access` devolve True antes de consultar
+        # `tem_direito_hoje`), e `needs_plan_selection` não lê aquele freio —
+        # medido 2026-09-11, com v2 ligado e `ACCESS_GATE_ENABLED=0`:
+        # has_app_access → True, needs_plan_selection → True para cadastro sem
+        # `plan_selected_at`. Com o freio puxado, esta perna é a ÚNICA que ainda
+        # barra o cadastro novo pelo bot, e é ela que devolve o enforcement
+        # pré-corte. Apagá-la por parecer coberta abriria uma porta que só
+        # aparece no dia em que o freio for puxado.
         # A política (onde vale, e por que sem isenção de app) mora na docstring
         # de plan_service.needs_plan_selection.
         from core.services.billing_commands import is_billing_command
@@ -521,7 +537,13 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # repetir a consulta pelo get_auth_user (era a 2ª query do usuário
             # só-WhatsApp, que é a maioria aqui).
             sem_plano = estado is not None and needs_plan_selection(uid, estado)
-        if not (sem_plano or not has_app_access(uid)):
+        # `user=estado`, e o keyword é o ponto: passar `has_app_access(uid)` cru
+        # faria ele buscar a linha DE NOVO pelo `get_auth_user`, reabrindo
+        # exatamente o que o SELECT enxuto acima comprou (decrypt de PII + uma
+        # escrita em `pii_access_log` POR MENSAGEM). `None` aqui é RESPOSTA
+        # ("não existe cadastro web"), não "não busquei" — é por isso que o
+        # default do parâmetro é a sentinela `_UNSET` e não `None`.
+        if not (sem_plano or not has_app_access(uid, user=estado)):
             return None
         barrado = True
 
@@ -557,10 +579,57 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # `installment_pending` vivo, `ajuda?` virava a descrição da compra e
             # registrava N parcelas. Não dava pra enumerar essas portas para
             # sempre — a resposta ela mesma fecha a classe.
+            # `help.tutorial` SAIU da isenção, e a distinção é de conteúdo, não
+            # de tom: a ajuda genérica EXPLICA, o tutorial MANDA TENTAR. Seis
+            # dos dez passos de `adapters/whatsapp/wa_tutorial.py` pedem um
+            # comando ("gastei 50 no mercado", "Tente: gastei 10 no café"), e o
+            # `answer_help("help.tutorial", ...)` responde a mesma coisa por
+            # texto. Para quem foi cortado isso é convite para fazer algo que a
+            # mensagem seguinte recusa — a pior ordem possível das duas.
+            #
+            # Medido 2026-09-11: `classify("tutorial")` devolve `help.tutorial`
+            # e `classify("ajuda")` devolve `help`, então tirar UM token separa
+            # exatamente as duas coisas sem fechar a ajuda.
+            #
+            # Vale para os DOIS canais, e é por isso que o conserto mora aqui e
+            # não no `wa_runtime`: o Discord chega neste mesmo gate. O gêmeo
+            # interativo (o BOTÃO do tutorial no WhatsApp) não passa por aqui e
+            # tem gate próprio em `wa_runtime`.
             if ajuda in ("help", "help.tutorial"):
-                from core.handlers import help_handler as h_help
+                # A isenção de ajuda VOLTOU a cobrir `help.tutorial`, e o que
+                # mudou é o que ela RENDERIZA: a seção `sem_acesso`, nunca a que
+                # o texto pediu.
+                #
+                # Decidir pelo CLASSIFICADOR era a pergunta errada, e custou três
+                # portas abertas. `classify` responde "isto é ajuda?"; quem
+                # responde "isto renderiza o tutorial?" é `help_text.resolve_section`.
+                # Medido 2026-09-11: `classify("ajuda tutorial")` devolve `help`
+                # (a regra `^(ajuda|help)\s+\w+`), e `resolve_section` devolve
+                # `"tutorial"` — então tirar `help.tutorial` do classificador não
+                # fechava `ajuda tutorial`, `help tutorial` nem `ajuda guia`.
+                #
+                # E a ajuda genérica também não servia: `render_help("start")`
+                # abre com "• `tutorial` → guia rápido / • `gastei 50 mercado`",
+                # ou seja mandava o cortado tentar um comando E digitar a palavra
+                # que devolve o paywall. (No tutorial em si a proporção é maior
+                # ainda: só o passo do dashboard é leitura pura — o comando que
+                # mede está em `wa_runtime._ajuda_do_cortado`.)
+                #
+                # Renderizar UMA seção resolve a categoria inteira de uma vez, em
+                # vez de a lista de grafias: qualquer texto que o classificador
+                # chame de ajuda cai aqui, nos DOIS canais, e recebe a mesma
+                # resposta honesta. É o ponto único que os três buracos anteriores
+                # não tinham.
+                # `estado` é a linha de `auth_accounts`, ou None. A MESMA
+                # distinção que as duas formas da mensagem de bloqueio fazem
+                # mais abaixo: quem nunca fez cadastro web não tem "seus dados
+                # guardados" nem `/settings`, e mandá-lo para lá supõe um
+                # cadastro que não existe. A ajuda tinha uma forma só e voltou a
+                # cometer a mentira que o gate evita há três rodadas.
+                from core.help_text import render_ajuda_sem_acesso
                 return [OutgoingMessage(text=format_for_platform(
-                    h_help.answer_help(ajuda, texto, platform), platform))]
+                    render_ajuda_sem_acesso(platform, estado is not None),
+                    platform))]
             if is_billing_command(texto):
                 from core.services.billing_commands import handle_billing_command
                 resposta = handle_billing_command(uid, texto, platform=platform)
@@ -580,14 +649,61 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     # igual: redireciona pra /precos e quem vai pagar loga de qualquer jeito.
     link = "https://pigbankai.com/precos"
 
+    # DUAS formas, e o que as separa é `estado is None` — ou seja, se existe
+    # linha em `auth_accounts`. A copy única de antes prometia
+    # "15 dias grátis (um teste por número)" para os dois, e era FALSA para o
+    # ex-assinante que já queimou o trial: são 15 dias por telefone NA VIDA.
+    if estado is None:
+        # População só-WhatsApp: nunca fez cadastro web, nunca viu o dashboard,
+        # e o dono decidiu cortá-la SEM aviso prévio — esta mensagem é a ÚNICA
+        # comunicação que ela recebe (docstring de plan_service.tem_direito_hoje).
+        # Logo: nada de "acesse seu painel", nada de supor cadastro existente e
+        # NADA sobre o período grátis. Este último não é estilo: para toda esta
+        # população não há `phone_hash` em `auth_accounts` (não há linha
+        # nenhuma), e `db.plans.motivo_trial_indisponivel` devolve
+        # `"sem_telefone"` — que é o "não sei", não o "já usou".
+        #
+        # O motivo escrito aqui ANTES dizia que `texto_da_oferta` responderia
+        # "esse telefone já usou o período grátis": isso valia enquanto ela lia
+        # o booleano, e deixou de valer no mesmo PR. Medido em 2026-09-11, com
+        # `motivo_trial_indisponivel` devolvendo `"sem_telefone"`, ela responde
+        # "O checkout confirma seu período grátis ou o valor da primeira
+        # cobrança antes da confirmação:" — neutra, não mentirosa.
+        #
+        # O ramo continua certo por OUTRA razão: essa frase é a resposta do
+        # comando `assinar`, e ela abre com "Aqui ó, link pra assinar" e afirma
+        # que EXISTE período grátis a confirmar. Numa mensagem de BLOQUEIO
+        # não-solicitada, para quem nunca pediu link nenhum, isso é oferta
+        # implícita de trial que não sabemos se existe. Quem diz é o checkout.
+        return [OutgoingMessage(text=(
+            "🐷 Oi! Que bom te ver por aqui.\n\n"
+            "Pra eu cuidar do seu dinheiro, agora é preciso ter um plano ativo — "
+            "o PigBank não tem mais versão gratuita.\n\n"
+            "Dá uma olhada nos planos e no que vem em cada um (o checkout mostra "
+            "o que vai ser cobrado, e quando, antes de você confirmar):\n"
+            f"👉 {link}\n\n"
+            "Assim que ativar, é só me mandar uma mensagem que eu já começo a "
+            "anotar tudo pra você 💚"
+        ))]
+
+    # Ex-assinante (ou cadastro web sem plano vigente): a verdade sobre o trial
+    # sai de `trial_offer.texto_da_oferta`, que é o MOLDE já existente dos
+    # três estados — elegível / não elegível / não sei (§0.1). Fora do `try` de
+    # cima de propósito: se a consulta de elegibilidade levantar, ela devolve a
+    # frase do "não sei", que não afirma nem nega.
+    #
+    # ponytail: `texto_da_oferta` custa 2 SELECTs, e eles rodam por MENSAGEM
+    # BARRADA — não por mensagem. O caminho quente (assinante) sai lá em cima no
+    # `return None`, e quem está barrado já pagou o `classify` da isenção. Se o
+    # volume de mensagem barrada virar problema, o lugar de cachear é
+    # `is_trial_eligible_for_user`, não uma cópia da frase aqui.
+    from core.services.trial_offer import texto_da_oferta
     return [OutgoingMessage(text=(
-        "🐷 Oi! Que bom te ver por aqui.\n\n"
-        "Pra eu poder cuidar do seu dinheiro, sua conta precisa estar ativa — e "
-        f"dá pra testar {_bold('15 dias grátis', platform)} (um teste por número) "
-        "— o checkout mostra o que vai ser cobrado, e quando, antes de você "
-        "confirmar.\n\n"
+        "🐷 Oi! Sua conta está sem plano ativo, então eu não consigo anotar "
+        "nada por aqui agora.\n\n"
+        f"{texto_da_oferta(uid, platform)}\n"
         f"👉 {link}\n\n"
-        "Assim que ativar, é só me mandar uma mensagem que eu já começo a anotar "
+        "Assim que ativar, é só me mandar uma mensagem que eu já volto a anotar "
         "tudo pra você 💚"
     ))]
 
@@ -622,6 +738,17 @@ def handle_incoming(msg: IncomingMessage, *,
 
                 uid = _normalize_user_id(msg)
                 db.ensure_user(uid)
+
+                # Import aqui dentro, e não no topo: `ofx_service` puxa
+                # `ofx_import` -> `ofxparse`, e `core.handle_incoming` é
+                # importado por meio repositório (adaptadores, rotas, testes).
+                # No topo, um anexo OFX — caminho raro — custava o `ofxparse`
+                # a todo mundo. Mesmo motivo do `detect_ofx_type` abaixo e do
+                # `statement_service` no bloco 1b.
+                from core.services.ofx_service import (
+                    handle_ofx_import,
+                    handle_credit_ofx_import,
+                )
 
                 # Detecta se é extrato bancário ou fatura de cartão de crédito
                 from ofx_import import detect_ofx_type

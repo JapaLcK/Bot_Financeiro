@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
 from core.secure_compare import constant_time_eq
-from core.pg_text import limpa_para_pg
+from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.services.pluggy import (
     PluggyApiError,
     PluggyConfigError,
@@ -1457,7 +1457,7 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         connection = await _grava_reconexao(
             session_uid, remote, new_item_id, tinha_conexao_propria)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
     await asyncio.to_thread(
         register_item, session_uid,

@@ -142,6 +142,10 @@
     var box = document.getElementById('contact-msg');
     var btn = document.getElementById('contact-btn');
     function show(t, ok){ box.textContent = t; box.className = 'contact-msg show ' + (ok ? 'ok' : 'err'); }
+    // O `detail` do 422 do FastAPI é uma LISTA de objetos ({loc,msg,type,input}):
+    // truthy, e na tela vira "[object Object]". Só string passa; o resto cai no
+    // fallback de cada chamada. Mesma regra do `_errDetail` (dashboard.js).
+    function strDetail(d) { return d && typeof d.detail === "string" ? d.detail : ""; }
     var body = {
       name:    document.getElementById('nome').value.trim(),
       email:   document.getElementById('email').value.trim(),
@@ -160,7 +164,7 @@
       var data = await res.json().catch(function(){ return {}; });
       if (res.ok) { show('Mensagem enviada! Respondemos no seu e-mail em breve.', true); e.target.reset(); }
       else if (res.status === 429) { show('Muitas mensagens em pouco tempo. Tente mais tarde ou escreva pra contato@pigbankai.com.', false); }
-      else { show(data.detail || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
+      else { show(strDetail(data) || 'Não foi possível enviar. Escreva pra contato@pigbankai.com.', false); }
     } catch (err) { show('Erro de conexão. Tente de novo ou escreva pra contato@pigbankai.com.', false); }
     finally { btn.disabled = false; btn.textContent = orig; }
   });

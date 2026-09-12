@@ -49,7 +49,8 @@ function pixModalQr(d, plano, ctx) {
   if (credito && d.credit_cents > 0) {
     vivo.appendChild(pixLinha("Já com " + credito + " de crédito do seu plano atual."));
   }
-  // Mesma regra da l.88: quem separa agendado de imediato é `agendada`, não a
+  // Quem separa agendado de imediato é o `agendada` que o servidor manda
+  // (`agendada()` em `core/services/pix_checkout_resposta.py`), não a
   // presença de `starts_at` — que na compra imediata vem com `agora` e fazia
   // esta linha dizer "Seu ano começa em <hoje>" a quem começa ao pagar.
   vivo.appendChild(pixLinha(d.agendada && d.starts_at

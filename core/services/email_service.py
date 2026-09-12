@@ -183,14 +183,42 @@ def send_plan_change_scheduled_email(to: str, new_plan_name: str, effective_date
 def send_trial_downsell_email(to: str, dashboard_url: str = "") -> bool:
     """Fim do trial de 15 dias sem assinatura → downsell pro Essencial.
 
-    Parte da escada v2: o teste dá o Plus completo; quem não assina cai pro
-    Grátis (banco pausa, agentes silenciam) e este e-mail oferece a saída de
-    R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at)."""
+    Parte da escada v2: o teste dá o Plus completo, e este e-mail oferece a
+    saída de R$ 9,90 antes do churn. Enviado UMA vez (trial_downsell_sent_at).
+
+    **A premissa mudou com o corte do Grátis, e a copy junto.** Ela dizia que
+    "quem não assina cai pro Grátis (banco pausa, agentes silenciam)" e que a
+    conta "continua no plano Grátis... e a Piggy voltou pro modo básico". Isso
+    descrevia um estado que deixou de existir como DESTINO. Medido 2026-09-11,
+    conta cujo trial venceu há 1 dia sem assinatura — que é exatamente a
+    população do funil (`db.plans.list_trial_downsell_candidates`)::
+
+        has_app_access = False        ← sem acesso ao bot, não "no básico"
+        get_plan_tier  = 'free'
+        motivo_trial_indisponivel = 'telefone_ja_usou'
+
+    `get_plan_tier` continua `'free'` porque o tier existe como conjunto de
+    LIMITES; o que não existe mais é o Grátis como destino com acesso. É a
+    distinção que a copy antiga apagava — ela vendia os limites como se viessem
+    com a porta aberta.
+
+    **Não afirma nem nega o período grátis**, e aqui a razão é diferente da da
+    `/precos`. Medido, o caso comum é `telefone_ja_usou`: quem recebe este
+    e-mail acabou de gastar o trial daquele telefone. Mas `claim_trial_for_user`
+    exige `phone_hash` e o funil filtra por `trial_started_at`, então uma conta
+    que desvinculou o telefone depois do teste cairia em `sem_telefone` — e aí
+    "seu telefone já usou" seria falso. Quem sabe é o checkout, que lê a mesma
+    `is_trial_eligible_for_user` (§0.7).
+
+    **"Seus dados estão todos guardados" FICA**, e é requisito: o corte bloqueia
+    acesso, não apaga nada. Preso por
+    `tests/test_billing_email_downsell_nao_promete_gratis.py`."""
     base = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>Oi! Seus <strong>15 dias de teste do PigBank</strong> chegaram ao fim. 🐷</p>
-      <p>Sua conta continua no plano Grátis: seus dados estão todos guardados,
-      mas o banco conectado ficou <strong>pausado</strong> e a Piggy voltou pro modo básico.</p>
+      <p>Sua conta ficou <strong>sem plano ativo</strong>: seus dados estão todos guardados —
+      lançamentos, histórico, tudo —, mas o acesso ao PigBank fica bloqueado até você escolher um
+      plano. Não existe mais versão gratuita.</p>
       <p>Pra continuar de onde parou:</p>
       <ul>
         <li><strong>Essencial — R$ 9,90/mês</strong>: banco reconectado, lançamentos
@@ -1250,11 +1278,44 @@ def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = ""
     fatura AVULSA, que não tem assinatura de onde tirar plano: ali sai o
     genérico "PigBank", como no `send_payment_reminder_email` logo abaixo.
 
-    DÍVIDA DE COPY, deliberadamente não tocada aqui: o texto promete que o
-    plano "volta pra Free", e plano Free não existe mais no produto. É decisão
-    de produto (o que acontece hoje com quem não paga), não erro de nome — quem
-    trouxer a regra reescreve as duas copies, esta e a do
-    `send_subscription_canceled_email`.
+    A DÍVIDA DE COPY que esta docstring declarava está PAGA (#354): o texto
+    prometia que o plano "volta pra Free", e depois do corte do Grátis não há
+    Free para onde voltar — quem não paga fica SEM acesso. As duas copies foram
+    reescritas juntas, esta e a do `send_subscription_canceled_email`, porque a
+    promessa era a mesma nas duas.
+
+    Este e-mail PODE falar em perda de acesso, e o irmão
+    `send_payment_reminder_email` continua NÃO podendo: aquele sai no 6º dia,
+    ainda DENTRO da carência de `DUNNING_GRACE_DAYS`, quando o acesso de fato
+    não caiu. A diferença é de fato, não de tom.
+
+    **A frase do "enquanto isso" enuncia a REGRA, não o estado, e isso é o
+    conserto de uma promessa falsa.** Ela dizia "seu plano fica como past_due e
+    você continua usando normalmente", e isso é verdade em metade da janela só.
+    Medido 2026-09-11, conta `plus` com `last_payment_status='past_due'`:
+
+    | trecho | `has_app_access` | `get_plan_tier` | limites |
+    |---|---|---|---|
+    | período pago ainda VIGENTE | True | `plus` | cheios (`of_banks_max=2`, `agents_max=3`) |
+    | `plan_expires_at` VENCIDO, carência aberta | True | **`free`** | 30 lançamentos, `of_banks_max=0`, `agents_max=0`, histórico do mês |
+
+    O e-mail sai na hora da falha, que é a virada entre os dois trechos, e é
+    lido depois — então a frase tem de ser verdadeira NOS DOIS. Por isso ela
+    enuncia a regra ("os recursos valem até o fim do período que você já pagou"),
+    que não tem tempo verbal, em vez de afirmar um estado. Trocar "usando
+    normalmente" por "conta limitada" seria a mesma classe de erro na direção
+    oposta: falsa no primeiro trecho.
+
+    O que ela promete e continua verdadeiro nos dois: **entrar** no PigBank
+    (`has_app_access` é True até a carência estourar). O que ela parou de
+    prometer: os RECURSOS. É a mesma correção feita em
+    `billing_copy.COBRANCA_EM_ATRASO`, e a dívida dos limites está registrada em
+    `docs/dunning_estados_eventos.md` — é outro PR.
+
+    O `past_due` cru saiu junto: status técnico em inglês num e-mail de cliente.
+
+    O `text_body` NÃO repete a promessa (conferido) — ele nunca teve a frase do
+    "enquanto isso". Continua sem, porque omitir não é afirmar falso.
     """
     nome = plan_display_name(plan)
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
@@ -1263,19 +1324,22 @@ def send_payment_failed_email(to: str, plan: str | None, dashboard_url: str = ""
       <p>A cobrança do seu {nome} <strong>não passou</strong>. Pode ser cartão expirado, saldo insuficiente,
       ou banco recusando a transação.</p>
       <p>Não se preocupa — a gente vai tentar de novo automaticamente nos próximos dias. Mas pra evitar perder o
-      acesso aos recursos do seu plano, vale dar uma olhada agora:</p>
+      acesso ao PigBank, vale dar uma olhada agora:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
       </p>
-      <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso, seu plano fica como <strong>past_due</strong>.
-      Se as tentativas falharem, ele volta pra Free e os recursos do plano são bloqueados.</p>
+      <p style="font-size:13px;color:rgba(255,255,255,.55)">Enquanto isso você continua entrando no PigBank. Os
+      recursos do {nome} valem até o fim do período que você já pagou — depois disso a conta fica limitada até a
+      cobrança entrar. Se as tentativas falharem, a assinatura é encerrada e
+      <strong>o acesso ao PigBank é bloqueado</strong> — não existe mais plano Free pra onde voltar.</p>
     """
     html = _base_html("Pagamento falhou — atualize seu cartão", content)
     text = (
         f"{nome} — pagamento falhou.\n\n"
         f"Vamos tentar de novo automaticamente, mas pra evitar perder acesso:\n"
         f"Atualize o cartão em {dash}/conta\n\n"
-        f"Se as tentativas falharem, o plano volta pra Free."
+        f"Se as tentativas falharem, a assinatura é encerrada e o acesso ao PigBank "
+        f"é bloqueado — não existe mais plano Free pra onde voltar."
     )
     return send_email(
         to=to, subject=f"⚠️ {nome} — pagamento falhou, atualize seu cartão",
@@ -1294,12 +1358,43 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     PR nada é cortado por inadimplência, e prometer corte que não vem é
     exatamente o defeito que este trabalho existe para não cometer. Quem trouxer
     a regra de acesso reescreve esta copy junto — não antes.
+
+    **DUAS regras diferentes, e alguém vai confundi-las.** A de cima é sobre
+    PERDA DE ACESSO e continua valendo: este e-mail não pode prometer corte. A
+    de baixo é sobre RECURSOS, é nova, e não afrouxa a primeira:
+
+    > este e-mail também não pode prometer funcionamento PLENO.
+
+    Ele dizia "Seu PigBank continua funcionando normalmente — só a cobrança está
+    pendente", e ali é PIOR que no `send_payment_failed_email`, onde a mesma
+    frase era falsa em metade da janela. Aqui ela é falsa para quase toda a
+    população alcançada: o lembrete sai no 6º dia do relógio, e o relógio começa
+    na falha da fatura de RENOVAÇÃO — então o `plan_expires_at` já venceu.
+    Medido 2026-09-11, conta `plus`, relógio de 6,2 dias, `plan_expires_at` 6
+    dias no passado:
+
+        has_app_access = True     get_plan_tier = 'free'
+        launches_month_max=30  of_banks_max=0  agents_max=0
+        history_current_month_only=True
+
+    O que sobrevive das duas regras ao mesmo tempo: **entrar** é verdade
+    (`has_app_access` True, a carência concede), **os recursos** não são. Por
+    isso a frase enuncia a REGRA ("valem até o fim do período que você já
+    pagou") em vez de afirmar um estado, e fecha no que reverte a situação
+    ("voltam assim que a cobrança entrar") em vez de no que a piora — que seria
+    falar em corte e quebrar a regra de cima.
+
+    Preso por `tests/test_billing_email_cobranca_nao_promete_recursos.py`, junto
+    com o irmão. A dívida dos LIMITES (a carência dar tier `free`) é outro PR e
+    está em `docs/dunning_estados_eventos.md`; aqui o conserto é a copy parar de
+    prometer o que o produto não entrega.
     """
     dash = (dashboard_url or "https://pigbankai.com").rstrip("/")
     content = f"""
       <p>🐷 Oi! Passando pra lembrar de uma coisinha.</p>
       <p>A cobrança do seu plano <strong>não passou</strong> e já faz quase uma semana.
-      Seu PigBank continua funcionando normalmente — só a cobrança está pendente.</p>
+      Você continua entrando no PigBank. Os recursos do seu plano valem até o fim do período que você já
+      pagou — eles voltam assim que a cobrança entrar.</p>
       <p>Atualizar o cartão leva menos de um minuto:</p>
       <p style="text-align:center;margin:24px 0">
         <a class="btn" href="{dash}/conta">Atualizar cartão</a>
@@ -1308,9 +1403,10 @@ def send_payment_reminder_email(to: str, dashboard_url: str = "") -> bool:
     html = _base_html("Lembrete: sua cobrança está pendente", content)
     text = (
         "PigBank — sua cobranca continua pendente.\n\n"
-        "A cobranca do seu plano nao passou e ja faz quase uma semana. Seu PigBank "
-        "continua funcionando normalmente; atualizar o cartao leva menos de um "
-        "minuto:\n"
+        "A cobranca do seu plano nao passou e ja faz quase uma semana. Voce continua "
+        "entrando no PigBank; os recursos do seu plano valem ate o fim do periodo que "
+        "voce ja pagou e voltam assim que a cobranca entrar. Atualizar o cartao leva "
+        "menos de um minuto:\n"
         f"{dash}/conta\n"
     )
     return send_email(
@@ -1328,8 +1424,10 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
     e NÃO da conta: o `update_user_plan(user_id, "free", None)` do ramo roda
     antes deste e-mail, então ler a conta devolveria "free" para todo mundo.
 
-    DÍVIDA DE COPY, deliberadamente não tocada aqui: a mesma promessa de volta
-    ao "Free" do `send_payment_failed_email` — ver a docstring de lá.
+    A mesma DÍVIDA DE COPY do `send_payment_failed_email` — a promessa de volta
+    ao "Free" — foi paga junto (#354): as duas foram reescritas no mesmo commit
+    de propósito, porque duas versões da mesma regra em lugares diferentes é o
+    §0.7 ao contrário. Ver a docstring de lá.
     """
     nome = plan_display_name(plan)
     has_grace = expires_at is not None
@@ -1339,20 +1437,23 @@ def send_subscription_canceled_email(to: str, plan: str | None, expires_at,
 
     if has_grace:
         access_html = (
-            f"<p>Tudo certo — você continua com acesso aos recursos do seu plano <strong>até {fim}</strong>. "
-            f"Depois disso, sua conta volta automaticamente pro plano Free e os limites do plano são desativados.</p>"
+            f"<p>Tudo certo — você continua com acesso ao PigBank <strong>até {fim}</strong>. "
+            f"Depois disso sua conta fica sem plano ativo e o acesso é encerrado — o PigBank não tem mais "
+            f"versão gratuita, então não há plano Free pra onde voltar.</p>"
             f"<p>Se mudar de ideia antes dessa data, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
         access_text = (
-            f"Você mantém acesso aos recursos do seu plano até {fim}. Depois disso, a conta volta pra Free."
+            f"Você mantém acesso ao PigBank até {fim}. Depois disso a conta fica sem plano ativo e o "
+            f"acesso é encerrado — não existe mais plano Free pra onde voltar."
         )
     else:
         access_html = (
-            "<p>Tudo certo — sua conta voltou pro plano <strong>Free</strong> a partir de agora. "
-            "Os limites do plano foram desativados.</p>"
+            "<p>Tudo certo — sua conta ficou <strong>sem plano ativo</strong> a partir de agora, e o acesso "
+            "ao PigBank foi encerrado. Não existe mais versão gratuita, então não há plano Free pra onde voltar.</p>"
             "<p>Se mudar de ideia, é só mandar <strong>assinar plano</strong> no bot.</p>"
         )
-        access_text = "Sua conta voltou pro plano Free a partir de agora. Os limites do plano foram desativados."
+        access_text = ("Sua conta ficou sem plano ativo a partir de agora e o acesso ao PigBank foi "
+                       "encerrado. Não existe mais plano Free pra onde voltar.")
 
     content = f"""
       <p>🐷 Sua assinatura {nome} foi cancelada.</p>

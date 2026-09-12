@@ -86,6 +86,40 @@ updates:
         patterns:
           - "@capacitor/*"
 
+  # Dependências npm da ilha React da /precos (webapp/). Terceiro lockfile do
+  # repositório, e o que produz um arquivo SERVIDO na página que vende: react,
+  # react-dom, vite e a cadeia nativa de build (rolldown, lightningcss).
+  - package-ecosystem: "npm"
+    directory: "/webapp"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      webapp-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # `react` e `react-dom` são versionados EM PAR pelo próprio projeto: um em
+      # 19.3 com o outro em 19.4 é combinação que o React não suporta.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+    # ATENÇÃO ao mergear qualquer PR daqui: o artefato `frontend/precos-app.*` é
+    # COMMITADO, e o Dependabot não roda o build. Depois de subir dep, rode
+    # `npm --prefix webapp ci && npm --prefix webapp run build` e commite o
+    # resultado junto — senão o gate que rebuilda no CI reprova (e é para reprovar: a
+    # produção estaria servindo o bundle da versão anterior).
+
   # Actions usadas nos workflows (.github/workflows)
   - package-ecosystem: "github-actions"
     directory: "/"
