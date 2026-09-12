@@ -57,3 +57,10 @@ def test_imagens_exclusivas_da_landing_tem_dimensoes_e_orcamento():
     assert 'preload="none"' in html
     assert 'width="101" height="30"' in html
     assert 'width="300" height="486"' in html
+
+
+def test_mascote_preserva_proporcao_quando_o_mobile_reduz_a_largura():
+    css = (FRONTEND_DIR / "site.css").read_text(encoding="utf-8")
+    regra = re.search(r"\.hero-mascot\s*\{([^}]+)\}", css)
+    assert regra
+    assert "height: auto" in regra.group(1)
