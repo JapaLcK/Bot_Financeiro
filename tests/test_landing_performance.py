@@ -59,7 +59,10 @@ def test_imagens_exclusivas_da_landing_tem_dimensoes_e_orcamento():
     assert 'width="101" height="30"' in html
     assert 'width="300" height="486"' in html
     assert 'media="(max-width: 560px)"' in html
-    assert 'srcset="/brand/landing-mascot-150.webp?v=1"' in html
+    assert (
+        'srcset="/brand/landing-mascot-150.webp?v=1 1x, '
+        '/brand/landing-mascot.webp?v=1 2x"' in html
+    )
 
 
 def test_mascote_preserva_proporcao_quando_o_mobile_reduz_a_largura():
@@ -77,6 +80,9 @@ def test_lcp_nao_fica_em_animacao_nao_composta():
     assert "@keyframes rdGrad" not in css
 
 
-def test_safe_area_nao_bloqueia_primeira_pintura():
+def test_safe_area_critica_e_inicializada_inline_antes_da_primeira_pintura():
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
-    assert '<script defer src="/safe-area.js?v=1"></script>' in html
+    assert 'src="/safe-area.js' not in html
+    assert 'document.documentElement.classList.add("pb-safe")' in html
+    assert "viewport-fit=cover" in html
+    assert "html.pb-safe body" in html
