@@ -734,6 +734,10 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
       nomes: cards.map((c) => c.querySelector("h3").textContent.trim()),
       alturas: cards.map((c) => Math.round(cx(c).height)),
       paddingsTopo: cards.map((c) => getComputedStyle(c).paddingTop),
+      espacosTituloPreco: cards.map((c) => Math.round(
+        c.querySelector(".price").getBoundingClientRect().top
+          - c.querySelector("h3").getBoundingClientRect().bottom,
+      )),
       destaque: cards.findIndex((c) => c.classList.contains("featured")),
       bases: cards.map((c) => Math.round(cx(c).bottom)),
     };
@@ -753,6 +757,8 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     `o degrau Essencial→Pro é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
   assert.ok(r.alturas[1] - r.alturas[2] >= degrauMinimo,
     `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
+  assert.ok(r.espacosTituloPreco.every((espaco) => espaco <= 36),
+    `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
   assert.equal(new Set(r.paddingsTopo).size, 1,
     `o conteúdo não começa no mesmo recuo: ${r.paddingsTopo.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);

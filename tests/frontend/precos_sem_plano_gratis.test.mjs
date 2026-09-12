@@ -173,13 +173,17 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
     cobrancas: [...document.querySelectorAll("#plans-v2 .plan .price-cycle-copy")]
       .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
     fluxos: [...document.querySelectorAll("#plans-v2 .plan .price-flow-display")]
-      .map((el) => ({
-        ciclo: el.dataset.cycle,
-        direcao: el.dataset.direction,
-        numberFlow: !!el.querySelector("number-flow-react"),
-        tamanho: getComputedStyle(el.querySelector("number-flow-react")).fontSize,
-        peso: getComputedStyle(el.querySelector("number-flow-react")).fontWeight,
-      })),
+      .map((el) => {
+        const numberFlow = el.querySelector("number-flow-react");
+        return {
+          ciclo: el.dataset.cycle,
+          direcao: el.dataset.direction,
+          numberFlow: !!numberFlow,
+          sufixo: numberFlow._data.post.find((parte) => parte.type === "suffix")?.value,
+          tamanho: getComputedStyle(numberFlow).fontSize,
+          peso: getComputedStyle(numberFlow).fontWeight,
+        };
+      }),
     copiasEmMovimento: document.querySelectorAll(
       "#plans-v2 .plan .price-cycle-copy.cycle-copy-in",
     ).length,
@@ -199,18 +203,18 @@ test("o switch troca os preços e explica a cobrança com movimento", async () =
     texto.startsWith("Cobrado em um único pagamento anual")),
   `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
   assert.deepEqual(anual.fluxos, [
-    { ciclo: "annual", direcao: "up", numberFlow: true, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, tamanho: "40px", peso: "850" },
-    { ciclo: "annual", direcao: "up", numberFlow: true, tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", tamanho: "40px", peso: "850" },
   ]);
   assert.equal(anual.copiasEmMovimento, 3);
 
   await page.waitForTimeout(900);
   await page.click("#cycle-annual");
   assert.deepEqual((await lerCards()).fluxos, [
-    { ciclo: "monthly", direcao: "down", numberFlow: true, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, tamanho: "40px", peso: "850" },
-    { ciclo: "monthly", direcao: "down", numberFlow: true, tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", tamanho: "40px", peso: "850" },
   ]);
 
   await page.close();

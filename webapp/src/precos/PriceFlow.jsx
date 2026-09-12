@@ -29,11 +29,8 @@ function PrecoAnimado({ ciclo, mensal, anual }) {
         value={cicloAnual ? anual : mensal}
         locales="pt-BR"
         format={FORMATOS[ciclo]}
+        suffix={cicloAnual ? "/ano" : "/mês"}
         trend={cicloAnual ? 1 : -1}
-      />
-      <span
-        className="price-flow-suffix"
-        data-text={cicloAnual ? "/ano" : "/mês"}
       />
     </span>
   );

@@ -79,17 +79,11 @@
      é valor positivo (desconto, pagamento à vista), não decoração. */
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
 
-  /* ── Cards: as 3 listas têm de começar no mesmo Y ──────────────────────
-     A regra é a categoria, não o caso: TUDO que fica acima da lista e tem
-     altura variável precisa reservar a altura máxima, senão desalinha.
-       · subtítulo — a 1080px de viewport o card cai pra 243px e "Seu dinheiro
-         no automático" vira duas linhas enquanto os outros ficam em uma
-         (medido 2026-09-02 em Chromium headless, com min-height desligado:
-         41,3px contra 20,6px — 20,7px de desalinho; remeça antes de reusar);
-       · bloco do preço — a explicação da cobrança muda entre ciclos e o anual
-         também traz a equivalência mensal (medido: 32px). */
-  #plans-v2 .plan .plan-sub { min-height: 3em; }
-  #plans-v2 .price-block { min-height: 98px; display: flex; flex-direction: column; justify-content: center; margin: 6px 0 4px; }
+  /* Com três cards, o subtítulo mais longo cabe em uma linha quando o pódio
+     existe; no empilhamento ele pode crescer naturalmente. A reserva antiga de
+     três linhas e o bloco centralizado criavam um vazio entre título e preço. */
+  #plans-v2 .plan .plan-sub { min-height: 1.5em; margin-bottom: 6px; }
+  #plans-v2 .price-block { min-height: 98px; display: flex; flex-direction: column; justify-content: flex-start; margin: 0 0 4px; }
   #plans-v2 .price-block .price { position: relative; margin: 0; font-variant-numeric: tabular-nums; }
   #plans-v2 .price .per { font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
   #plans-v2 .price-eq, #plans-v2 .price-cycle-copy { color: var(--ink-3); font-size: .78rem; font-weight: 500; margin-top: 6px; font-variant-numeric: tabular-nums; }
@@ -114,9 +108,9 @@
     font: inherit; color: inherit; letter-spacing: inherit;
   }
   #plans-v2 .price-flow-display { display: inline-flex; align-items: baseline; white-space: nowrap; }
-  #plans-v2 .price-flow-prefix::before, #plans-v2 .price-flow-suffix::before { content: attr(data-text); }
+  #plans-v2 .price-flow-prefix::before { content: attr(data-text); }
   #plans-v2 .price-flow-display number-flow-react { font: inherit; line-height: inherit; }
-  #plans-v2 .price-flow-suffix {
+  #plans-v2 .price-flow-display number-flow-react::part(suffix) {
     font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0;
   }
   /* Nasceu do CTA do Grátis, que era <a> (line-height 1.5 herdado do body)
