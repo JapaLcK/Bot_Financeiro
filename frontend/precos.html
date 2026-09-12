@@ -104,7 +104,15 @@
   #plans-v2 .price.has-number-flow > [data-price-annual] {
     position: absolute; inset: 0 auto auto 0; opacity: 0; pointer-events: none;
   }
-  #plans-v2 .price-flow-host { display: inline-flex; font: inherit; letter-spacing: inherit; }
+  #plans-v2 .price-flow-host { display: inline-flex; }
+  /* site.css reduz TODO `span` dentro de `.price` para a tipografia do /mês.
+     O NumberFlow usa spans próprios, então precisa restaurar aqui a tipografia
+     do valor antes de reduzir somente o sufixo abaixo. */
+  #plans-v2 .price-flow-host,
+  #plans-v2 .price-flow-display,
+  #plans-v2 .price-flow-prefix {
+    font: inherit; color: inherit; letter-spacing: inherit;
+  }
   #plans-v2 .price-flow-display { display: inline-flex; align-items: baseline; white-space: nowrap; }
   #plans-v2 .price-flow-prefix::before, #plans-v2 .price-flow-suffix::before { content: attr(data-text); }
   #plans-v2 .price-flow-display number-flow-react { font: inherit; line-height: inherit; }
