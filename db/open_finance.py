@@ -820,24 +820,167 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
 
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
 
+# ── Regra de caixinha — FONTE ÚNICA (sync de auto-import + tela de vínculo) ───
+# Em Python e não em SQL de propósito: esta regra decide se um papel do banco
+# vira caixinha read-only (sai da renda fixa, o app para de deixar sacar), e
+# regra de dinheiro precisa ser medível contra o catálogo de bancos inteiro sem
+# subir um Postgres — ver `tests/test_of_caixinha_regra_emissor.py`.
+#
+# AUTOMÁTICO (`_e_caixinha`, usado por `sync_open_finance_caixinhas`):
+#   a) o nome tem cara de caixinha (o que já funcionava antes desta regra); OU
+#   b) é CDB de renda fixa EMITIDO PELO PRÓPRIO BANCO CONECTADO — é assim que a
+#      caixinha do Nubank chega hoje: `name` e `issuer` trazem o nome jurídico do
+#      papel ("CDB - NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E
+#      INVESTIMENTO"), idêntico em todas as posições e sem nada de "caixinha".
+#
+# MANUAL (`list_caixinha_candidates`, a tela do Banqueiro) é mais frouxo DE
+# PROPÓSITO: lá qualquer CDB entra na lista, porque quem decide é o usuário.
+# Automático errado mexe em dinheiro sozinho; a tela, não — e ela é a saída de
+# todo emissor que o automático não reconhece.
+_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
+
+# Palavras que sozinhas não identificam banco nenhum, descartadas só no COMEÇO
+# do nome ("Banco Inter" × "BANCO INTER S.A." têm de casar por "inter").
+# `caixa` e `mercado` NÃO entram aqui: ali são marca (Caixa Econômica, Mercado
+# Pago) e apagá-las zerava o lado do banco — com marca vazia nada casava.
+_PALAVRAS_GENERICAS = {"banco", "bco", "cartao", "conta", "cooperativo", "cooperativa",
+                       "do", "da", "de", "dos", "das"}
+
+# Forma societária do FIM da razão social ("BANCO BV S.A." → bv). Cortada só na
+# 2ª tentativa e só do lado do EMISSOR — é o que faz a razão social curta casar
+# com o conector que carrega um qualificador ("BV - Pessoa Física - APP",
+# "Banco do Brasil Previdência", "Safra Financeira").
+_FORMA_SOCIETARIA = {"s", "a", "sa", "ltda", "eireli", "me", "epp", "cia"}
+
+# Emissores que NÃO carregam o nome comercial do banco: heurística nenhuma separa
+# "NU FINANCEIRA" (que é o Nubank) de "NU INVESTIMENTOS S.A. - CORRETORA DE
+# TÍTULOS E VALORES MOBILIÁRIOS" (a corretora do MESMO grupo Nubank, ex-Easynvest,
+# que vende papel de terceiro) — as duas começam por "nu", e foi exatamente assim
+# que a versão anterior desta regra roubava um investimento de verdade. Tabela
+# curada, com a origem do par escrita ao lado: ou observado nos nossos dados, ou
+# razão social de registro público. O que NÃO entra é par por semelhança. Emissor
+# que não está aqui e não casa sozinho segue na tela de vínculo do Banqueiro, que
+# é a saída manual.
+_EMISSOR_ALIAS = {
+    # medido nas 10 posições do dono (Pluggy, conexão Nubank)
+    "nubank": ("nufinanceira", "nupagamentos"),
+    # razão social de registro público; ainda não observada nos nossos dados.
+    # Medido contra o catálogo: sem esta linha a conexão PagBank deixa de casar
+    # (1 falso negativo a mais) e nenhum falso positivo aparece com ela.
+    "pagbank": ("pagseguro",),
+}
+
+
+def _palavras(nome) -> list[str]:
+    """Nome em palavras minúsculas sem acento, sem as genéricas do começo."""
+    txt = unicodedata.normalize("NFKD", str(nome or ""))
+    txt = "".join(c for c in txt if not unicodedata.combining(c)).lower()
+    palavras = [w for w in re.split(r"[^a-z0-9]+", txt) if w]
+    while palavras and palavras[0] in _PALAVRAS_GENERICAS:
+        palavras.pop(0)
+    return palavras
+
+
+def _marca(nome) -> str:
+    """Nome de instituição/emissor reduzido a letras e dígitos, sem acento e sem
+    as palavras genéricas do começo. "BANCO BTG PACTUAL S.A." → "btgpactualsa".
+    """
+    return "".join(_palavras(nome))
+
+
+def _nucleo(nome) -> str:
+    """`_marca` sem a forma societária do fim: "BANCO BV S.A." → "bv"."""
+    palavras = _palavras(nome)
+    while palavras and palavras[-1] in _FORMA_SOCIETARIA:
+        palavras.pop()
+    return "".join(palavras)
+
+
+def _emitido_pelo_banco_conectado(issuer, institution_name) -> bool:
+    """O CDB foi emitido pelo próprio banco desta conexão?
+
+    Duas tentativas, as duas por prefixo do nome INTEIRO — nunca pelo primeiro
+    token, que é o que a versão em SQL fazia e o que roubava o CDB da Nu Invest:
+
+    1. a razão social começa com o nome do conector — "BANCO INTER S.A." →
+       "intersa" começa com "inter". Piso de 3 dos dois lados.
+    2. o nome do conector começa com o NÚCLEO da razão social (`_nucleo`, piso 2,
+       que é o tamanho de "bv" e de "c6") — é o caso em que quem carrega o
+       qualificador é o conector: "BANCO BV S.A." × "BV - Pessoa Física - APP",
+       "Banco do Brasil S.A." × "Banco do Brasil Previdência", "Banco Safra
+       S.A." × "Safra Financeira". Sem esta tentativa, 5 pares do catálogo eram
+       REGRESSÃO contra a regra SQL anterior, que os pegava: os 3 conectores do
+       BV (APP, Web, Private), o `Banco do Brasil Previdência` e o `Safra
+       Financeira`. Foi o Tester quem achou: a razão social ATUAL do BV no BACEN
+       (ISPB 01858774) é "BANCO BV S.A.", não "BANCO VOTORANTIM S.A." — com o
+       nome velho a perda não aparecia na medição.
+
+    O que ela erra, medido contra 473 razões sociais reais do BACEN × os 134
+    conectores PERSONAL_BANK do catálogo (comando e números em
+    `tests/test_of_caixinha_regra_emissor.py`): ela NÃO é livre de falso
+    positivo entre marcas diferentes — `Inter` × `INTERCAM CORRETORA DE CÂMBIO`
+    casa e não devia. Falso positivo aqui é pior que falso negativo e é por isso
+    que o piso existe: negativo tem saída (a tela de vínculo lista qualquer CDB),
+    positivo mexe no dinheiro sozinho.
+    """
+    banco = _marca(institution_name)
+    emissor = _marca(issuer)
+    if len(emissor) < 3:
+        return False
+    if len(banco) >= 3 and (emissor.startswith(banco)
+                            or emissor.startswith(_EMISSOR_ALIAS.get(banco, ()))):
+        return True
+    nucleo = _nucleo(issuer)
+    return len(nucleo) >= 2 and banco.startswith(nucleo)
+
+def _e_cdb(inv: dict) -> bool:
+    """Renda fixa do tipo CDB — o universo de onde a caixinha do banco sai."""
+    return (str(inv.get("type") or "").upper() == "FIXED_INCOME"
+            and str(inv.get("subtype") or "").upper() == "CDB")
+
+
+def _nome_de_caixinha(nome) -> bool:
+    """O nome que o banco mandou já diz "caixinha"? (serve de rótulo também)"""
+    minusculo = str(nome or "").lower()
+    return any(p.strip("%") in minusculo for p in _CAIXINHA_NAME_PATTERNS)
+
+
+def _e_caixinha(inv: dict) -> bool:
+    """Regra do AUTO-import. `inv` precisa de name/type/subtype/raw/institution_name."""
+    if _nome_de_caixinha(inv.get("name")):
+        return True
+    if not _e_cdb(inv):
+        return False
+    # `raw` é jsonb: o banco (ou um provider novo) pode mandar escalar/lista ali,
+    # e aí `.get` explode. No sync o `except` de pluggy_sync engole; em
+    # `list_caixinha_candidates` NÃO há guarda e o erro vira 500 na tela. A regra
+    # em SQL (`raw->>'issuer'`) era total nesse ponto — esta volta a ser.
+    raw = inv.get("raw")
+    issuer = raw.get("issuer") if isinstance(raw, dict) else None
+    return _emitido_pelo_banco_conectado(issuer, inv.get("institution_name"))
+
+
 def list_caixinha_candidates(user_id: int) -> list[dict]:
-    """Caixinhas/cofrinhos OF do usuário (CDB de renda fixa OU nome de caixinha),
-    já com a meta vinculada (se houver). Alimenta a UI de vínculo do Banqueiro."""
+    """Caixinhas/cofrinhos OF do usuário, já com a meta vinculada (se houver).
+    Alimenta a UI de vínculo do Banqueiro.
+
+    Regra MAIS FROUXA que a do auto-import de propósito: entra o que o
+    automático reconhece (`_e_caixinha`) MAIS qualquer CDB. Quem decide aqui é o
+    usuário, e esta tela é a única saída de quem o automático não reconhece —
+    emissor fora de `_EMISSOR_ALIAS`, banco que manda o papel com nome de
+    terceiro. Sem este ramo, o papel simplesmente some da tela.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 select i.id as of_investment_id, i.name, i.balance, i.type, i.subtype,
+                       i.raw, c.institution_name,
                        p.id as pocket_id, p.name as pocket_name, p.target_amount
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 left join pockets p on p.of_investment_id = i.id and p.user_id = %s
                 where c.user_id = %s
-                  and (
-                    (upper(coalesce(i.type,'')) = 'FIXED_INCOME'
-                       and upper(coalesce(i.subtype,'')) = 'CDB')
-                    or i.name ilike any (array['%%caixinha%%','%%cofrinho%%','%%reserva%%','%%objetivo%%'])
-                  )
                   -- Nubank devolve toda posição de CDB via OF, inclusive caixinhas já
                   -- esvaziadas (saldo 0). Elas poluem a tela de vínculo sem servir pra
                   -- nada, então só mostramos candidatos com saldo > 0 — exceto os que já
@@ -847,7 +990,17 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
                 """,
                 (user_id, user_id),
             )
-            return [dict(r) for r in (cur.fetchall() or [])]
+            linhas = [dict(r) for r in (cur.fetchall() or [])]
+
+    saida = []
+    for r in linhas:
+        # já vinculada continua na lista mesmo que nenhuma regra case (deixa desvincular).
+        if not (r["pocket_id"] is not None or _e_cdb(r) or _e_caixinha(r)):
+            continue
+        r.pop("raw", None)
+        r.pop("institution_name", None)
+        saida.append(r)
+    return saida
 
 
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
@@ -957,47 +1110,74 @@ def update_pocket_of_last_seen(pocket_id: int, balance, profit=None) -> None:
         conn.commit()
 
 
-# Regra de auto-import de caixinha: só investimentos com CARA de caixinha (nome ~
-# reserva/objetivo/cofrinho). Um CDB comum é investimento, não meta — não vira pocket
-# (evita "caixinha fantasma"). Decisão de produto 2026-08-11.
-_CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
-
-
 def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
 
-    1. Auto-cria um pocket pra cada caixinha OF (com cara de caixinha) ainda não
-       vinculada — `source='open_finance'`, read-only, juros interno OFF.
-    2. Dedup: se já existe um pocket de mesmo nome não vinculado, VINCULA nele em
-       vez de duplicar.
+    1. Auto-cria um pocket pra cada caixinha OF (regra `_e_caixinha`: nome de
+       caixinha OU CDB do próprio banco conectado) ainda não vinculada —
+       `source='open_finance'`, read-only, juros interno OFF, SEMPRE com nome
+       livre.
+    2. Respeita o teto de caixinhas do plano (`pockets_restantes`, a mesma conta
+       da criação manual): o que não couber fica de fora e volta contado em
+       `caixinhas_sem_vaga`.
     3. Espelha o saldo do banco (`open_finance_investments.balance`) em TODAS as
        caixinhas vinculadas (auto-criadas e vinculadas na mão).
 
-    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de aporte
-    continua funcionando sobre o delta como antes.
+    O que ele NÃO faz mais: adotar um pocket que já existe só porque o nome bate.
+    O rótulo gerado ("Caixinha Nubank") é exatamente o que uma pessoa escolhe, e
+    adotar significava SOBRESCREVER o saldo dela com o do banco e torná-la
+    read-only — dinheiro do usuário sumindo sem ele pedir nada. Juntar as duas é
+    decisão de gente: a tela de vínculo do Banqueiro faz isso num clique.
+
+    NÃO mexe em `of_last_seen_balance` (baseline do Banqueiro) — o detector de
+    aporte continua funcionando sobre o delta como antes.
     """
-    created = linked = mirrored = 0
+    created = mirrored = sem_vaga = sem_nome = 0
+    # Teto do plano — MESMA conta do `check_can_create_pocket`. Lido aqui, com a
+    # transação ainda FECHADA: o gate abre conexão própria, e chamá-lo lá dentro
+    # (a) pegaria uma 2ª conexão do pool sem soltar a 1ª — com DB_POOL_MAX_SYNC
+    # syncs simultâneos isso trava o pool e o rollback leva o import inteiro — e
+    # (b) contaria só o commitado, deixando as 10 do lote passarem como a 1ª.
+    # ponytail: o teto é lido uma vez, fora da transação — dois syncs concorrentes
+    # do mesmo usuário leem as mesmas vagas e importam o dobro (`caixinhas_sem_vaga=0`
+    # nos dois). Melhor que o HEAD, que não tinha gate nenhum; o conserto de verdade
+    # é contar dentro da transação com lock por usuário, se isso aparecer na prática.
+    from core.services.plan_service import pockets_restantes
+    vagas = pockets_restantes(user_id)  # None = tier sem teto
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1. caixinhas OF desta conexão com cara de caixinha E SALDO > 0.
-            # Saldo 0 = fundo/reserva vazia (ex.: Nubank "Reserva Planejada" que o
-            # Pluggy devolve zerado) — não vira caixinha fantasma.
+            # 1. posições desta conexão COM SALDO > 0; a regra de caixinha é
+            # aplicada em Python (`_e_caixinha`). Saldo 0 = fundo/reserva vazia
+            # (ex.: Nubank "Reserva Planejada") — não vira caixinha fantasma.
+            # `order by i.id`: a numeração do nome não pode depender do saldo, que
+            # muda a cada sync — ordem de chegada do banco é estável.
             cur.execute(
                 """
-                select i.id as of_id, i.name, coalesce(i.balance, 0) as balance,
-                       nullif(i.raw->>'amountProfit', '')::numeric as profit
+                select i.id as of_id, i.name, i.type, i.subtype, i.raw,
+                       coalesce(i.balance, 0) as balance,
+                       nullif(i.raw->>'amountProfit', '')::numeric as profit,
+                       c.institution_name
                 from open_finance_investments i
+                join open_finance_connections c on c.id = i.connection_id
                 where i.connection_id = %s
-                  and i.name ilike any (%s)
                   and coalesce(i.balance, 0) > 0
+                order by i.id
                 """,
-                (connection_id, _CAIXINHA_NAME_PATTERNS),
+                (connection_id,),
             )
-            of_caixinhas = [dict(r) for r in (cur.fetchall() or [])]
+            of_caixinhas = [dict(r) for r in (cur.fetchall() or []) if _e_caixinha(dict(r))]
 
             for oc in of_caixinhas:
                 of_id = oc["of_id"]
-                name = (oc["name"] or "Caixinha").strip()
+                # Rótulo: o nome do banco, quando ele já é de caixinha. Quando é o
+                # nome jurídico do papel ("CDB - NU FINANCEIRA S.A. - ..."), igual
+                # em TODAS as posições, vira "Caixinha <banco>" + número.
+                # O nome é escolhido UMA VEZ, na criação, e nunca recalculado: o
+                # vínculo é o of_investment_id, então renomear no app sobrevive ao
+                # sync e nenhum saldo mexe no rótulo.
+                of_name = (oc["name"] or "").strip()
+                name = of_name if _nome_de_caixinha(of_name) else \
+                    f"Caixinha {(oc['institution_name'] or 'do banco').strip()}"
                 bal = oc["balance"]
                 profit = oc["profit"]  # baseline de rendimento (amountProfit), p/ o Banqueiro
 
@@ -1009,48 +1189,58 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
                 if cur.fetchone():
                     continue
 
-                # dedup: pocket de mesmo nome, ainda sem vínculo → vincula nele
-                cur.execute(
-                    "select id from pockets where user_id=%s and lower(name)=lower(%s) "
-                    "and of_investment_id is null limit 1",
-                    (user_id, name),
-                )
-                same = cur.fetchone()
-                if same:
-                    cur.execute(
-                        "update pockets set of_investment_id=%s, of_last_seen_balance=%s, "
-                        "of_last_seen_profit=%s, balance=%s, interest_enabled=false "
-                        "where id=%s and user_id=%s",
-                        (of_id, bal, profit, bal, same["id"], user_id),
-                    )
-                    linked += 1
+                if vagas is not None and vagas <= 0:
+                    sem_vaga += 1
                     continue
 
-                # cria novo — resolve colisão de nome (unique(user_id,name)) com sufixo
-                new_name = name
-                suffix = 0
-                while True:
+                # Nome livre, via `on conflict do nothing` + nova tentativa. O
+                # SELECT-antes-do-INSERT que existia aqui é TOCTOU, e agora as
+                # posições disputam todas o MESMO nome base: dois syncs
+                # concorrentes colidiam em pockets_user_id_name_key, a transação
+                # inteira rolava pra trás e o `except Exception` de pluggy_sync
+                # engolia — zero caixinhas importadas, sem log.
+                # ponytail: 50 tentativas de sufixo é teto arbitrário; se algum
+                # banco devolver mais posições homônimas que isso, o nome vira
+                # determinístico pelo of_investment_id.
+                for tentativa in range(1, 51):
+                    new_name = name if tentativa == 1 else f"{name} {tentativa}"
+                    # Duas guardas, porque elas cobrem coisas diferentes:
+                    # `not exists` com lower() é a de NOME, porque o unique da
+                    # tabela é `unique(user_id, name)` — CASE-SENSITIVE
+                    # (db/schema.py:115) — enquanto o resto do código de caixinha
+                    # compara `lower(name)`. Sem ela, o usuário com "caixinha
+                    # nubank" ganhava uma "Caixinha Nubank" do banco: duas
+                    # caixinhas de mesmo nome na tela, e o `on conflict` nunca via
+                    # a colisão. `on conflict do nothing` é a de CORRIDA: fecha a
+                    # janela TOCTOU entre o `not exists` e o insert sem abortar a
+                    # transação (era a UniqueViolation que levava o import inteiro).
                     cur.execute(
-                        "select 1 from pockets where user_id=%s and lower(name)=lower(%s)",
-                        (user_id, new_name),
+                        """
+                        insert into pockets(
+                            user_id, name, balance, source, of_investment_id,
+                            of_last_seen_balance, of_last_seen_profit,
+                            interest_enabled, interest_rate, interest_period,
+                            interest_tax_profile, last_interest_date
+                        )
+                        select %s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date
+                        where not exists (
+                            select 1 from pockets where user_id=%s and lower(name)=lower(%s)
+                        )
+                        on conflict (user_id, name) do nothing
+                        """,
+                        (user_id, new_name, bal, of_id, bal, profit, user_id, new_name),
                     )
-                    if not cur.fetchone():
+                    if cur.rowcount:
                         break
-                    suffix += 1
-                    new_name = f"{name} (banco)" if suffix == 1 else f"{name} (banco {suffix})"
-                cur.execute(
-                    """
-                    insert into pockets(
-                        user_id, name, balance, source, of_investment_id,
-                        of_last_seen_balance, of_last_seen_profit,
-                        interest_enabled, interest_rate, interest_period,
-                        interest_tax_profile, last_interest_date
-                    )
-                    values (%s,%s,%s,'open_finance',%s,%s,%s,false,1,'cdi','regressive_ir_iof',current_date)
-                    """,
-                    (user_id, new_name, bal, of_id, bal, profit),
-                )
+                else:
+                    # 50 nomes ocupados: desiste desta posição em vez de estourar
+                    # a transação. Ela volta no próximo sync. Sai contada: sem
+                    # isso a caixinha some da tela sem rastro nenhum.
+                    sem_nome += 1
+                    continue
                 created += 1
+                if vagas is not None:
+                    vagas -= 1
 
             # 3. espelha o saldo do banco em todas as caixinhas vinculadas (auto + manual)
             cur.execute(
@@ -1070,6 +1260,19 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             # 4. Auto-cura: remove caixinhas AUTO-CRIADAS (source='open_finance') cujo
             # investimento do banco está zerado/sumiu — limpa as fantasmas já criadas
             # (ex.: "Reserva Planejada" do Nubank que veio com saldo 0).
+            #
+            # DECISÃO DO DONO, com o custo medido e aceito: apaga a LINHA inteira,
+            # então nome, emoji, meta e data que o usuário escolheu vão junto.
+            # Esvaziar a caixinha no banco e repor (sacar tudo hoje, devolver
+            # amanhã) perde tudo isso A CADA ida e volta — o próximo sync cria
+            # outra do zero com o rótulo padrão.
+            # Alcança só `source='open_finance'`, isto é, o que ESTE import criou.
+            # Isso já foi uma assimetria: o dedup por nome adotava a caixinha do
+            # usuário SEM tocar em `source` — que é `not null default 'manual'`
+            # (db/schema.py:750) —, então a adotada ficava fora deste delete e
+            # duas caixinhas do mesmo banco se comportavam ao contrário. Com o
+            # dedup removido, toda caixinha do banco nasce `source='open_finance'`
+            # e a assimetria acabou.
             cur.execute(
                 """
                 delete from pockets p
@@ -1083,8 +1286,9 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             )
             cleaned = cur.rowcount
         conn.commit()
-    return {"caixinhas_created": created, "caixinhas_linked": linked,
-            "caixinhas_mirrored": mirrored, "caixinhas_cleaned": cleaned}
+    return {"caixinhas_created": created, "caixinhas_mirrored": mirrored,
+            "caixinhas_cleaned": cleaned, "caixinhas_sem_vaga": sem_vaga,
+            "caixinhas_sem_nome": sem_nome}
 
 
 def get_open_finance_connection_by_item_id(provider_item_id: str, provider: str = "pluggy") -> dict | None:

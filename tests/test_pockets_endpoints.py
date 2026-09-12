@@ -288,3 +288,28 @@ def test_pocket_withdraw_applies_ir_iof_on_gain(user_id):
     assert Decimal(str(taxes["ir"])) == Decimal("7.65")
     assert Decimal(str(taxes["net"])) == Decimal("1026.35")
     assert Decimal(str(new_acc)) == Decimal("1026.35")
+
+
+def test_history_endpoint_marks_caixinha_do_banco(user_id):
+    """A UI esconde Depositar/Sacar por `source`/`of_investment_id`. Sem esses dois
+    campos na resposta ela mostrava os botões numa caixinha read-only, e o erro só
+    aparecia no POST (OF_POCKET_READONLY)."""
+    from tests.test_of_caixinha_autoimport import _nubank_raws, _save, _seed_connection
+
+    # `_seed_connection` promove o user pra plano pago: o import só roda pra
+    # Essencial+ e agora desconta do `pockets_max` como a criação manual.
+    db.create_pocket(user_id, "manual")
+    conn_id = _seed_connection(user_id, institution="Nubank")
+    _save(conn_id, _nubank_raws([500.0]))
+    assert db.sync_open_finance_caixinhas(conn_id, user_id)["caixinhas_created"] == 1
+
+    client = TestClient(dashboard.app)
+    _auth(client, user_id)
+
+    do_banco = client.get(f"/pockets/{user_id}/Caixinha Nubank/history").json()["pocket"]
+    assert do_banco["source"] == "open_finance"
+    assert do_banco["of_investment_id"] is not None
+
+    manual = client.get(f"/pockets/{user_id}/manual/history").json()["pocket"]
+    assert manual["source"] != "open_finance"
+    assert manual["of_investment_id"] is None
