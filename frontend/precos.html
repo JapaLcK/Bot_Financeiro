@@ -30,21 +30,15 @@
      Um switch binário, como o componente de referência: os rótulos ficam
      estáveis e o knob mostra o ciclo. O botão usa role=switch + aria-checked;
      o JS alterna estado, preços e rótulo ativo sem remontar o controle. */
-  /* Coluna, não linha: embaixo do switch mora a etiqueta do Pix, e
-     ela precisa ficar CENTRADA sob ele — não ao lado, que empurraria o toggle
-     para fora do centro da escada.
-     O respiro de 10px é `margin-top` da etiqueta e NÃO `gap` do wrap: a etiqueta
-     mora dentro do `#pix-cycle-live`, que é um item flex de verdade (vazio, mas
-     presente desde o parse — é a região aria-live). Com `gap`, esse item vazio
-     somava 10px sob o toggle em TODA visita sem a flag do Pix; com a margem na
-     própria etiqueta, `hidden` não gera caixa e não gera margem: 0px. */
+  /* O aviso discreto do Pix fica centralizado sob o switch. A margem pertence
+     ao próprio texto para não abrir espaço quando ele estiver oculto. */
   .cycle-wrap { display: flex; flex-direction: column; align-items: center; margin: 0 0 30px; }
-  /* inline-block porque margem vertical em elemento inline não desloca nada — e
-     `:not([hidden])` porque um seletor de ID com `display` VENCE a regra
-     `[hidden] { display: none }` do navegador: sem ele a etiqueta ficava visível
-     com a flag do Pix desligada, anunciando meio de pagamento que a página não
-     vende (medido: `offsetParent` não-nulo com `pix_annual_available: false`). */
-  #pix-cycle-note:not([hidden]) { display: inline-block; margin-top: 10px; }
+  /* `:not([hidden])` preserva o display nativo do atributo quando a compra por
+     Pix não está disponível. */
+  #pix-cycle-note:not([hidden]) {
+    display: inline-block; margin-top: 10px;
+    color: var(--ink-3); font-size: .78rem; line-height: 1.4;
+  }
   .cycle-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 12px; }
   .cycle-label {
     display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -73,10 +67,7 @@
   .cycle-switch:hover .cycle-switch-track { filter: brightness(1.08); }
   .cycle-switch:active .cycle-switch-track { transform: scale(.96); }
   .cycle-switch:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-  /* Duas etiquetas usam esta pílula: o "−17%" junto do rótulo Anual e a do Pix
-     logo abaixo do toggle. A cor fica igual nos dois ciclos, de propósito: o
-     Pix não deixa de existir porque o usuário está olhando o mensal. Neon aqui
-     é valor positivo (desconto, pagamento à vista), não decoração. */
+  /* A pílula verde pertence somente ao desconto anual. */
   .cycle-save { background: rgba(198,241,26,.16); color: var(--neon); font-weight: 700; padding: 2px 8px; border-radius: 999px; font-size: .78em; }
 
   /* Com três cards, o subtítulo mais longo cabe em uma linha quando o pódio
@@ -396,33 +387,11 @@
             </button>
             <span class="cycle-label" id="cycle-annual-label">Anual <span class="cycle-save">−17%</span></span>
           </div>
-          <!-- O CTA "Pagar no Pix" só nasce no ciclo anual, então quem fica no
-               mensal nunca descobria que Pix existe. Esta etiqueta é o anúncio, e
-               fica FORA do switch de propósito: dentro do rótulo Anual ela
-               alargaria o controle e disputaria espaço a 320px de viewport.
-               Nasce `hidden`: a disponibilidade é a flag `pix_annual_available`
-               do /billing/plans-config, e quem a revela é o pbPixInit
-               (pix-checkout.js), no mesmo lugar que decide o CTA. Sem a flag —
-               ou para quem tem acesso vitalício, que não compra — a página fica
-               igual à de hoje: anunciar meio de pagamento que não existe é pior
-               que não anunciar. -->
-          <!-- A região `aria-live` existe desde o parse, e é por isso que são
-               DOIS elementos: região registrada e revelada no mesmo instante não
-               anuncia nada, então o `aria-live` não pode morar na própria pílula.
-               O vínculo com o switch é o `aria-describedby` que o pbPixInit
-               põe e tira junto com o `hidden`.
-               TETO conhecido, e ele não é o que este comentário dizia antes: a
-               pílula NÃO é inserida aqui. Ela está no HTML desde o parse e o
-               `pbPixInit` só faz `hidden = false` — isso é mudança de
-               RELEVÂNCIA, não inserção de conteúdo, e o quanto cada leitor de
-               tela anuncia nesse caso varia. Se algum não anunciar, a saída é
-               esvaziar esta região no HTML e o `pbPixInit` copiar para dentro
-               dela o texto da pílula (uma inserção de verdade, sem duplicar a
-               string). Não foi feito às cegas: nenhum leitor de tela roda neste
-               ambiente, e o oráculo do PT19c só lê ATRIBUTO — ele é cego a esta
-               classe, que é a mesma que deixou o PT19b verde com o defeito do
-               `display` aceso. Decidir isso é aparelho, pós-deploy. -->
-          <span id="pix-cycle-live" aria-live="polite"><span class="cycle-save" id="pix-cycle-note" hidden><i class="ph ph-lightning" aria-hidden="true"></i> Pix disponível no anual</span></span>
+          <!-- O texto nasce oculto e só aparece quando o backend confirma que o
+               visitante pode comprar por Pix. A região externa permanece desde
+               o parse para anunciar a revelação e o switch recebe este texto por
+               aria-describedby. -->
+          <span id="pix-cycle-live" aria-live="polite"><span id="pix-cycle-note" hidden>Pix disponível no plano anual.</span></span>
         </div>
 
         <div class="plans" id="plans-v2">
