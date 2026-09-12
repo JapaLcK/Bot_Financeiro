@@ -7,6 +7,7 @@ primitivas (needs_plan_selection/has_app_access) e SEM isenção de app — como
 prova o test_ua_de_app_nao_abre_o_ws_sem_plano abaixo.
 """
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -82,14 +83,21 @@ def test_ua_de_app_nao_abre_o_ws_sem_plano(user_id, monkeypatch):
                 f"/ws/{user_id}", headers={"user-agent": "Mozilla/5.0 PigBankApp"}
             ) as ws:
                 ws.receive_json()
-        # Controle positivo: carimbado o plano, o MESMO UA de app conecta. Sem
+        # Controle positivo: com a conta PAGANTE, o MESMO UA de app conecta. Sem
         # isto o caso acima passaria num gate que recusa todo mundo.
         #
-        # Pelo db.mark_plan_selected, não por UPDATE cru: get_auth_user tem
-        # cache com TTL (db_support._auth_user_cache) e é a escrita oficial que
-        # o invalida. Um UPDATE em SQL deixa o cache quente e o gate segue
-        # negando — foi o que aconteceu na primeira versão deste teste.
+        # Pelo db.mark_plan_selected e db.update_user_plan, não por UPDATE cru:
+        # get_auth_user tem cache com TTL (db_support._auth_user_cache) e são as
+        # escritas oficiais que o invalidam. Um UPDATE em SQL deixa o cache
+        # quente e o gate segue negando — foi o que aconteceu na primeira versão
+        # deste teste.
+        #
+        # O `mark_plan_selected` sozinho BASTAVA e não basta mais: ele fecha só a
+        # perna do `needs_plan_selection`, e desde o corte do Grátis a outra
+        # perna do gate do WS é o `has_app_access`, que pergunta pelo DIREITO.
         db.mark_plan_selected(user_id)
+        db.update_user_plan(user_id, "pro",
+                            datetime.now(timezone.utc) + timedelta(days=30))
         with client.websocket_connect(
             f"/ws/{user_id}", headers={"user-agent": "Mozilla/5.0 PigBankApp"}
         ) as ws:

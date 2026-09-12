@@ -185,7 +185,7 @@ img { max-width: 100%; display: block; }
 .trust .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px rgba(198,241,26,.6); }
 
 .hero-visual { position: relative; min-height: 500px; }
-.hero-mascot { position: absolute; left: -18px; bottom: -10px; width: 208px; z-index: 3; filter: drop-shadow(0 16px 30px rgba(0,0,0,.55)); pointer-events: none; }
+.hero-mascot { position: absolute; left: -18px; bottom: -10px; width: 208px; height: auto; z-index: 3; filter: drop-shadow(0 16px 30px rgba(0,0,0,.55)); pointer-events: none; }
 
 .chat-card {
   position: relative; z-index: 2; margin: 0 0 -30px auto; width: min(300px,86%);

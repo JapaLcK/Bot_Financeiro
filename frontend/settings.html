@@ -986,7 +986,12 @@ body.balance-hidden .account-balance {
   padding: 9px 18px;
   font-size: .8rem;
   font-weight: 760;
-  z-index: 50;
+  /* Acima dos overlays DESTA página (`.mfa-overlay`, aqui, e `.bankpick-overlay`,
+     em open-finance-connect.css — ambas 9999) e abaixo da `.pig-modal-overlay`
+     (modals.js, 99999), que precisa tapar o toast. Só é seguro porque o
+     `pointer-events: none` acima continua lá: sem ele o toast passa a roubar
+     clique e hit-test dos modais — não remova um sem o outro. */
+  z-index: 10000;
   /* `nowrap` + `left:50%` sem teto = frase longa sai da viewport pelos DOIS
      lados, e `scrollWidth` continua o da tela: não há scroll que revele o
      final. Medido a 390x844: 11 das 12 mensagens do toast cortavam, inclusive
@@ -3504,10 +3509,23 @@ async function initSettings() {
       if (me && me.needs_plan_selection) {
         window.location.replace("/precos?escolha=1"); return;
       }
-      if (me && me.app_access === false) {
-        // App iOS: settings fica acessível sem redirect de compra (diretriz 3.1.1)
-        if (!window.PB_IN_APP) { window.location.replace("/precos?ativar=1"); return; }
-      }
+      // Aqui havia `me.app_access === false → replace("/precos?ativar=1")`, e
+      // ele SAIU. Era código DORMENTE — `has_app_access` devolvia True
+      // incondicional, então nunca disparou — e o corte do fim do Grátis o
+      // acordaria justamente nesta página.
+      //
+      // Esta é a ÚNICA tela do produto com a UI de EXPORTAR os dados e EXCLUIR
+      // a conta (medido 2026-09-11: `grep -rln "account/export" frontend/*.html
+      // frontend/*.js` acha só este arquivo; o grep por `auth/account` que esta
+      // nota citava antes acha CINCO — o prefixo casa também no JS de refresh,
+      // no monólito e nos dois routers). Expulsar daqui quem foi cortado tiraria da pessoa a saída da
+      // própria conta — e o servidor já decidiu deixar entrar
+      // (`routes/static_pages.serve_settings` chama o gate com
+      // `exige_direito=False`, por decisão do dono). Os dois lados têm de
+      // concordar: com só um deles mudado, o JS desfaz o 200 do servidor.
+      //
+      // A perna da ESCOLHA (acima) continua valendo: cadastro novo sem plano
+      // não entra aqui.
     }
   } catch (e) { /* segue; as rotas de dados protegem com 402 */ }
 
