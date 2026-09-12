@@ -21,6 +21,9 @@ from core.reports.reports_daily import (
     build_due_bill_reminders,
     build_weekly_report_summary,
     build_monthly_report_summary,
+    # O corte do Grátis vale nos DOIS canais: o mesmo helper que os laços de
+    # Discord usam, importado daqui em vez de reescrito (§0.7).
+    filtrar_por_acesso,
 )
 from core.secure_compare import constant_time_eq
 from db import (
@@ -383,6 +386,13 @@ def _daily_report_tick() -> None:
         minute = prefs["minute"]
         if (now.hour, now.minute) < (hour, minute):
             continue
+        # O corte do Grátis vem DEPOIS dos filtros baratos, e a POSIÇÃO é o
+        # ponto: este laço roda a cada 30 s (`_daily_report_loop`) sobre a lista
+        # INTEIRA, e a hora de entrega descarta quase todo mundo. Filtrando
+        # antes, cada volta pagava uma consulta por usuário — o dia todo, para
+        # gente que não receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
+            continue
         ids = list_identities_by_user(uid)
         wa_targets = _dedupe_whatsapp_targets(ids)
         proactive_template = _proactive_template_config()
@@ -556,6 +566,16 @@ def _bill_reminder_tick() -> None:
         if not due:
             continue
 
+        # O corte do Grátis, na MESMA posição dos dois irmãos de relatório:
+        # depois dos filtros baratos. `list_users_with_pending_bills` é um
+        # `select distinct user_id from bill_instances where status='pending'`,
+        # sem nenhum termo de acesso, e o `if not due` acima já descartou quase
+        # todo mundo — filtrando antes, cada volta pagaria uma consulta de
+        # acesso por usuário com boleto pendente, todo dia, para gente que não
+        # receberia nada naquele tick.
+        if not filtrar_por_acesso([uid]):
+            continue
+
         wa_targets = _dedupe_whatsapp_targets(list_identities_by_user(uid))
         if not wa_targets:
             continue
@@ -700,6 +720,11 @@ def _periodic_report_tick() -> None:
 
         # entrega no mesmo horário configurado para o report diário do usuário
         if (now.hour, now.minute) < (prefs["hour"], prefs["minute"]):
+            continue
+
+        # Mesma razão do irmão diário: o corte vem DEPOIS do filtro de hora,
+        # porque este tick também roda a cada 30 s sobre a lista inteira.
+        if not filtrar_por_acesso([uid]):
             continue
 
         ids = list_identities_by_user(uid)

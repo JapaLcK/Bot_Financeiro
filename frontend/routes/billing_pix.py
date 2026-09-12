@@ -116,8 +116,8 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     except CoberturaJaPaga as exc:
         # `plano` e `cobertura_ate` vêm da PRÓPRIA exceção: reconsultar o banco
         # aqui poderia devolver um estado diferente do que motivou a recusa.
-        # `exc.plano` é o valor LEGADO (a exceção nasce depois da tradução da
-        # linha 89), e a fronteira fala público nos dois sentidos.
+        # `exc.plano` é o valor LEGADO (a exceção nasce depois do
+        # `TIER_TO_STORED_PLAN[plan]` acima), e a fronteira fala público nos dois sentidos.
         raise HTTPException(status_code=409, detail={
             "error": exc.ERRO, "plan": tier_publico(exc.plano),
             "covered_until": exc.cobertura_ate.isoformat()}) from exc

@@ -6,6 +6,7 @@ As funções delegam para db_support para manter lógica de negócio isolada.
 import db_support as _db_support
 
 from core.crypto import hash_pii_optional
+from core.pg_text import tem_veneno
 from utils_phone import normalize_phone_e164, phone_lookup_candidates
 
 from .connection import get_conn
@@ -122,18 +123,18 @@ def create_dashboard_session(user_id: int, hours: float = 5 / 60) -> str:
     return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
 
 
-def get_dashboard_session(code: str) -> int | None:
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "select user_id from dashboard_sessions where code = %s and expires_at > now()",
-                (code,),
-            )
-            row = cur.fetchone()
-    return row["user_id"] if row else None
-
-
 def consume_dashboard_session(code: str) -> int | None:
+    # `/d/{code}` é ANÔNIMA: com NUL no path o psycopg
+    # estourava antes do DELETE e o 500 virava uma linha em `system_event_logs`
+    # por requisição, de graça (#321). "Código com veneno" = "código que não
+    # existe" → a rota segue no 401 de link expirado que ela já dá.
+    # Nenhum código legítimo é recusado: `create_dashboard_session` gera
+    # `token_urlsafe`. Esta é a ÚNICA leitora de `dashboard_sessions` por código:
+    # a irmã `get_dashboard_session` (SELECT) e a `get_dashboard_session_impl`
+    # do `db_support` foram apagadas por não terem chamador nenhum, em vez de
+    # ganharem uma guarda que teste nenhum mediria.
+    if tem_veneno(code):
+        return None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -158,17 +159,27 @@ def mark_plan_selected(user_id: int) -> None:
 
 
 def get_plan_gate_state(user_id: int) -> dict | None:
-    """As três colunas que `plan_service.needs_plan_selection` lê — nada mais.
+    """As colunas que o gate do bot lê — nada mais.
+
+    São CINCO desde o corte do Grátis: as três de
+    `plan_service.needs_plan_selection` (`plan`, `plan_expires_at`,
+    `plan_selected_at`) mais o par do relógio de inadimplência
+    (`past_due_since`, `last_payment_status`), que é o lado direito do OR de
+    `plan_service.tem_direito_hoje` — sem elas `has_app_access` cortaria quem
+    está na carência de 7 dias, que é justamente quem o relógio existe para
+    proteger.
 
     Mesmo motivo do SELECT enxuto do onboarding logo abaixo: `get_auth_user`
     traz PII cifrada e cada decrypt grava em `pii_access_log`, e o gate do bot
     (`core.handle_incoming._paywall_gate`) roda em TODA mensagem recebida.
     None quando não há cadastro web — igual ao que `get_auth_user` devolve, que
-    é o que o `needs_plan_selection` espera."""
+    é o que `needs_plan_selection` e `tem_direito_hoje` esperam (o segundo lê
+    esse None como "sem direito", que é o corte da população só-WhatsApp)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select plan, plan_expires_at, plan_selected_at "
+                "select plan, plan_expires_at, plan_selected_at, "
+                "       past_due_since, last_payment_status "
                 "from auth_accounts where user_id=%s",
                 (int(user_id),),
             )
