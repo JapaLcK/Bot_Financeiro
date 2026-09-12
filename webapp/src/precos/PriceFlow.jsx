@@ -29,9 +29,13 @@ function PrecoAnimado({ ciclo, mensal, anual }) {
         value={cicloAnual ? anual : mensal}
         locales="pt-BR"
         format={FORMATOS[ciclo]}
-        suffix={cicloAnual ? "/ano" : "/mês"}
         trend={cicloAnual ? 1 : -1}
       />
+      {/* O suffix do NumberFlow trata texto como símbolo e só faz fade. Este
+          trilho dá à unidade o mesmo sentido vertical dos dígitos. */}
+      <span className="price-flow-unit" aria-hidden="true">
+        <span className="price-flow-unit-track" data-monthly="/mês" data-annual="/ano" />
+      </span>
     </span>
   );
 }

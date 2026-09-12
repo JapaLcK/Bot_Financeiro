@@ -110,8 +110,24 @@
   #plans-v2 .price-flow-display { display: inline-flex; align-items: baseline; white-space: nowrap; }
   #plans-v2 .price-flow-prefix::before { content: attr(data-text); }
   #plans-v2 .price-flow-display number-flow-react { font: inherit; line-height: inherit; }
-  #plans-v2 .price-flow-display number-flow-react::part(suffix) {
+  #plans-v2 .price-flow-unit,
+  #plans-v2 .price-flow-unit-track {
     font-size: .95rem; font-weight: 600; color: var(--ink-2); letter-spacing: 0;
+  }
+  #plans-v2 .price-flow-unit { display: inline-block; height: 1em; line-height: 1; overflow: hidden; }
+  #plans-v2 .price-flow-unit-track {
+    display: block; line-height: 1; transform: translateY(0);
+    transition: transform 900ms var(--ease);
+  }
+  #plans-v2 .price-flow-unit-track::before,
+  #plans-v2 .price-flow-unit-track::after { display: block; height: 1em; }
+  #plans-v2 .price-flow-unit-track::before { content: attr(data-monthly); }
+  #plans-v2 .price-flow-unit-track::after { content: attr(data-annual); }
+  #plans-v2 .price-flow-display[data-cycle="annual"] .price-flow-unit-track {
+    transform: translateY(-50%);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #plans-v2 .price-flow-unit-track { transition: none; }
   }
   /* Nasceu do CTA do Grátis, que era <a> (line-height 1.5 herdado do body)
      contra os <button> dos pagos (o "normal" da UA) — 7px fora de esquadro.
