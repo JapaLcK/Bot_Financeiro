@@ -362,15 +362,38 @@
         setTimeout(warmUp, 400);
         return;
       }
-      const r = await fetch(path, {
-        credentials: "same-origin",
-        headers: { Accept: "text/html" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (my !== seq) return;                    // um tap mais novo venceu
-      // Redirect = auth/gate (login, /precos): fluxo de verdade, navegação real
-      if (r.redirected || !r.ok) { hard(path); return; }
-      const html = await r.text();
+      // NÃO volte para `AbortSignal.timeout`: ele é bem mais novo que o alvo do
+      // app (IPHONEOS_DEPLOYMENT_TARGET = 14.0, mobile/ios/App/App.xcodeproj) e
+      // é avaliado ao MONTAR as opções do fetch — no aparelho velho lançaria
+      // `TypeError` antes de a requisição sair — o catch lá embaixo cairia no
+      // `hard(path)`, ou seja, TODO tap viraria reload MPA e o motor SPA estaria
+      // morto na prática (não é "engolir": nada é silenciado, tudo é recarga).
+      // Hoje isso é INALCANÇÁVEL: o gate da linha ~87 exige
+      // `startViewTransition`, mais novo ainda que o `AbortSignal.timeout` —
+      // então isto vale como consistência e como seguro para quando o gate
+      // afrouxar, não como bug ativo. `AbortController` é o idioma já usado no
+      // home.html (`loadAuthMe`, `_boundedValidate`) e é suportado bem abaixo do
+      // alvo iOS 14. Irmão do corrigido em b71de69 (PR #348), onde o caminho ERA
+      // alcançável. (Versão exata de Safari fica de fora de propósito: ninguém
+      // aqui consegue medir tabela de compatibilidade.)
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      let html;
+      try {
+        const r = await fetch(path, {
+          credentials: "same-origin",
+          headers: { Accept: "text/html" },
+          signal: ctrl.signal,
+        });
+        if (my !== seq) return;                  // um tap mais novo venceu
+        // Redirect = auth/gate (login, /precos): fluxo de verdade, navegação real
+        if (r.redirected || !r.ok) { hard(path); return; }
+        html = await r.text();
+      // O `abort()` mora no finally porque cobre as DUAS saídas do meio (o
+      // superado logo acima e o redirect/erro), onde o clearTimeout tira o
+      // único relógio e ninguém mais abortaria o corpo não lido; no caminho
+      // feliz o texto já foi lido e abortar depois de settled é no-op.
+      } finally { clearTimeout(timer); ctrl.abort(); }
       sw.mark("net");
       if (my !== seq) return;
       await mountNew(key, path, html, push, my, sw);

@@ -83,6 +83,7 @@ const tela = (page) => page.evaluate(() => ({
   caixa: (document.querySelector(".pix-box") || {}).textContent || "",
   toast: document.getElementById("toast").textContent,
   toastVisivel: document.getElementById("toast").classList.contains("show"),
+  docErro: (document.getElementById("pix-doc-erro") || {}).textContent || "",
   campos: document.querySelectorAll(".pix-doc").length,
   corpo: document.body.innerText,
   // PII medida de VERDADE. `page.content()` serializa ATRIBUTOS e o `page.fill`
@@ -211,6 +212,14 @@ test("conflito com covered_until malformado cai no genérico, sem 'undefined'", 
 // alguém reescrever a frase lá, este arquivo não fica vermelho (o §0.7 não
 // alcança copy de erro). O que ele prende é a CATEGORIA: `detail` string chega
 // à tela em vez de virar o genérico.
+//
+// O DESTINO mudou por status: o 400 é erro DO CAMPO e escreve no `#pix-doc-erro`
+// dentro do modal; 429/503/403 continuam no toast. Ressalva medida: a guarda do
+// `pix-checkout.js:324` chaveia por STATUS 400, não por qual erro é — então o
+// "plan inválido…" também vira "erro do campo do documento". Ele é inalcançável
+// pela tela (`PIX_PLANOS` em `pix-checkout.js:32` é exatamente o conjunto de
+// chaves de `TIER_TO_STORED_PLAN`, `plan_service.py:54`) e só esta tabela o
+// dirige — mas quem acrescentar um 400 NOVO àquela rota precisa saber disso.
 const FRASES_DO_SERVIDOR = [
   [400, "plan inválido (use 'essencial', 'plus' ou 'pro').", "billing_pix.py:88"],
   [400, "Informe um CPF ou CNPJ válido.", "billing_pix.py:93"],
@@ -226,8 +235,14 @@ for (const [status, frase, onde] of FRASES_DO_SERVIDOR) {
   test(`${status}: a frase do servidor chega à tela (${onde})`, async () => {
     const page = await tentarComprar({ httpStatus: status, corpo: frase });
     const t = await tela(page);
-    assert.equal(t.toast, frase, "a frase do servidor foi descartada");
-    assert.equal(t.toastVisivel, true);
+    if (status === 400) {
+      assert.equal(t.docErro, frase, "a frase do servidor foi descartada");
+      assert.equal(t.toast, "", "o 400 deixou frase velha no toast");
+      assert.equal(t.toastVisivel, false, "o 400 ainda foi parar no toast");
+    } else {
+      assert.equal(t.toast, frase, "a frase do servidor foi descartada");
+      assert.equal(t.toastVisivel, true);
+    }
     assert.ok(!t.corpo.includes(GENERICO), "mostrou o genérico junto da frase");
     await page.close();
   });

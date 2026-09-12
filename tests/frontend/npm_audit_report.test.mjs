@@ -219,23 +219,52 @@ nodeTest("stderr do npm não vira comando do Actions", () => {
 // dois steps podiam ser APAGADOS e o mesmo texto deixado num comentário do YAML
 // que o teste continuava verde — e o CI parava de auditar npm.
 //
-// ponytail: js-yaml é dependência TRANSITIVA do eslint (eslint > @eslint/eslintrc
-// > js-yaml), instalada pelo mesmo `npm ci` do job `frontend`, e está no
-// package-lock.json. Não é declarada nossa: se um bump do eslint a deixar cair, a
-// saída é declarar `js-yaml` em devDependencies. Não usei `yaml.safe_load` do
-// Python: PyYAML NÃO é premissa paga aqui (ausente do requirements.txt, zero
-// imports no repo, `Required-by:` vazio) — o teste ficaria vermelho no CI.
+// ponytail: js-yaml é declarada em devDependencies porque só o eslint a trazia
+// (eslint > @eslint/eslintrc > js-yaml) e o bump do eslint 10 (PR #344) faz o
+// `@eslint/eslintrc` sumir inteiro do lock — medido em 2026-09-10. Não usei
+// `yaml.safe_load` do Python: PyYAML NÃO é premissa paga aqui (ausente do
+// requirements.txt, zero imports no repo, `Required-by:` vazio) — o teste
+// ficaria vermelho no CI.
 let YAML;
+let semYaml = false;
 try {
-  YAML = (await import("js-yaml")).default;
+  const mod = await import("js-yaml");
+  // A 4.x exporta `default`, a 5.x só nomeados. Sem o `?? mod` o `.default` vinha
+  // `undefined` com a 5.x, o catch nada via (o import SUCEDE) e o teste pulava em
+  // silêncio no CI — medido em 2026-09-10 com js-yaml 5.4.1.
+  YAML = mod.default ?? mod;
+  // O import suceder não prova a forma: sem esta checagem, uma 6.x que renomeie
+  // `load` cairia num TypeError longe daqui em vez de reprovar no CI (ou pular local).
+  if (typeof YAML.load !== "function") {
+    throw new Error(`js-yaml sem \`.load\` (exporta: ${Object.keys(mod).join(", ")})`);
+  }
 } catch (erro) {
   if (process.env.CI) throw erro;
+  semYaml = `js-yaml indisponível (${erro.message}): rode \`npm ci\` na raiz (no CI isto REPROVA, não pula)`;
 }
-const semYaml = YAML
-  ? false
-  : "js-yaml não está no node_modules: rode `npm ci` na raiz (no CI a ausência REPROVA, não pula)";
 
-nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semYaml }, () => {
+/**
+ * Os locks são LEVANTADOS DO DISCO, não escritos aqui.
+ *
+ * A versão anterior comparava com a lista literal `[". ", "mobile"]`, e por isso
+ * o terceiro lock do repositório (`webapp/`, a ilha React da /precos) entrou sem
+ * uma linha vermelha: 45 pacotes novos na cadeia que produz um arquivo servido
+ * na página que vende, fora do `npm audit` e fora do Dependabot. Lista literal
+ * mede o passado; o disco mede o repositório de hoje — o quarto lock reprova até
+ * ser auditado.
+ *
+ * Por `git ls-files` e não `readdirSync`: a primeira versão listava só a
+ * PROFUNDIDADE 1, então um lock em `webapp/ilha2/` ficaria fora das duas
+ * varreduras sem uma linha vermelha (medido). O `git` resolve a recursão, o
+ * `node_modules` e o `.gitignore` de uma vez — e lock não versionado não é lock
+ * do repositório.
+ */
+const LOCKS = spawnSync("git", ["-C", RAIZ, "ls-files", "--", "*package-lock.json"],
+  { encoding: "utf8" }).stdout.trim().split("\n")
+  .map((f) => f.replace(/package-lock\.json$/, "").replace(/\/$/, "") || ".")
+  .sort();
+
+nodeTest("o workflow chama o script em TODO lock do repo, sem `|| echo`", { skip: semYaml }, () => {
   const doc = YAML.load(readFileSync(join(RAIZ, ".github/workflows/tests.yml"), "utf8"));
   assert.ok(doc.jobs.audit, "o job `audit` sumiu (ou foi renomeado) no workflow");
   // Step/job com `if:` existe e não roda — o audit sairia do ar sem sumir do YAML.
@@ -247,8 +276,9 @@ nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semY
   // alguém adicione amanhã também não é problema deste teste.
   const meus = steps.filter((s) => (s.run || "").includes("npm_audit_report.mjs"));
   assert.deepEqual(
-    meus.map((s) => s.run.trim()),
-    ["node scripts/npm_audit_report.mjs .", "node scripts/npm_audit_report.mjs mobile"],
+    meus.map((s) => s.run.trim()).sort(),
+    LOCKS.map((d) => `node scripts/npm_audit_report.mjs ${d}`).sort(),
+    `locks no disco: ${LOCKS.join(", ")}`,
   );
   for (const s of meus) {
     assert.ok(!s.run.includes("|| echo"), `${s.name}: o \`|| echo\` voltou`);
@@ -256,4 +286,20 @@ nodeTest("o workflow chama o script nos dois locks, sem `|| echo`", { skip: semY
     assert.equal(s["working-directory"], undefined, s.name);
     assert.equal(s.if, undefined, `${s.name}: step condicional não audita nada`);
   }
+});
+
+/**
+ * O par do teste acima: escanear é achar a CVE, o Dependabot é quem a conserta.
+ * Um lock auditado e sem Dependabot fica avisando para sempre sem PR nenhum —
+ * foi o estado do `webapp/` no dia em que ele entrou.
+ */
+nodeTest("todo lock do repo tem um ecossistema npm no Dependabot", { skip: semYaml }, () => {
+  const doc = YAML.load(readFileSync(join(RAIZ, ".github/dependabot.yml"), "utf8"));
+  // `directories` (plural) também: o Dependabot aceita as duas chaves, e com a
+  // plural o `u.directory.replace(...)` estourava `TypeError` longe daqui em vez
+  // de reprovar com a lista dos locks.
+  const npm = doc.updates.filter((u) => u["package-ecosystem"] === "npm")
+    .flatMap((u) => u.directories ?? [u.directory])
+    .map((d) => String(d).replace(/^\//, "") || ".");
+  assert.deepEqual(npm.sort(), [...LOCKS].sort(), `locks no disco: ${LOCKS.join(", ")}`);
 });

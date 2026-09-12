@@ -1,0 +1,342 @@
+"""O ESPELHO, parte 1: DESCRIÇÃO de compra e escolha de FATURA.
+
+A pergunta inversa à dos arquivos de abandono, e a que faltou nas primeiras
+rodadas — um portão que recusa tudo passa em qualquer teste de ataque. Aqui
+estão as descrições de compra reais (com verbo e com número na frente) e os
+nomes de cartão com acento, pontuação e filler. As confirmações e os steps do
+cadastro estão em `test_pendencia_credito_steps_legitimos.py`.
+
+O CATÁLOGO DE CONTROLES NEGATIVOS (A–M) do grupo inteiro mora em
+`tests/_pendencia_credito_helpers.py`, uma vez só. Leia lá antes de mexer aqui.
+"""
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+import db
+from _fatura_data_helpers import (
+    MES_DA_FATURA as _MES_DA_FATURA,
+    resolve_resposta as _resolve_resposta,
+)
+from _pendencia_credito_helpers import (
+    AVISO as _AVISO,
+    AS_CINCO as _AS_CINCO,
+    arma_card_setup as _arma_card_setup,
+    arma_delete_card as _arma_delete_card,
+    arma_installment as _arma_installment,
+    arma_pay_bill_choice as _arma_pay_bill_choice,
+    arma_set_primary as _arma_set_primary,
+    cartao as _cartao,
+    diga as _diga,
+    escrituras as _escrituras,
+    novo_uid as _uid,
+)
+
+
+# ===========================================================================
+# POSITIVOS — a resposta LEGÍTIMA continua sendo resolvida.
+# Sem estes, o grupo inteiro passaria num código que abandona tudo.
+# ===========================================================================
+
+def test_installment_descricao_real_registra():
+    """`installment_pending` + "tv samsung" → as 5 parcelas, com a descrição."""
+    uid = _uid()
+    _arma_installment(uid)
+
+    resposta = _diga(uid, "tv samsung")
+
+    assert "parcelamento registrado" in resposta.lower(), resposta
+    assert _AVISO not in resposta, f"abandonou uma descrição legítima: {resposta!r}"
+    with db.get_conn() as conn, conn.cursor() as cur:
+        linhas = cur.execute(
+            "select nota from credit_transactions where user_id = %s", (uid,)
+        ).fetchall()
+    assert len(linhas) == 5, f"esperava 5 parcelas, veio {len(linhas)}"
+    assert all("tv samsung" in (r["nota"] or "").lower() for r in linhas), linhas
+    assert db.get_pending_action(uid) is None, "a pendência não foi consumida"
+
+
+# Descrições de compra REAIS, não o "mercado" bonitinho de sempre (§3 do
+# CLAUDE.md): é a entrada que o usuário digita que precisa sobreviver ao
+# predicado, não a que o teste projetou.
+_DESCRICOES = [
+    # substantivo puro
+    "tv samsung", "iphone", "notebook dell", "ps5", "airfryer",
+    "passagem aérea", "pneu do carro", "material escolar", "farmácia",
+    "mercado", "sofá da sala", "curso de inglês",
+    # COM VERBO na frente — o tier 2 casa `^(gastei|paguei|comprei…)` como
+    # `launches.add`/0.95. Era a metade da classe que a blacklist comia.
+    "comprei uma tv", "comprei um sofa", "paguei o notebook",
+    "gastei com o celular",
+    # COM NÚMERO na frente — o tier 2 casa `^\\d+\\s+[a-z]`, também
+    # `launches.add`/0.95, e o valor virava R$ 2,00 / R$ 10,00.
+    "2 passagens", "10 cadeiras", "3 camisas", "2 pneus",
+]
+
+
+@pytest.mark.parametrize("descricao", _DESCRICOES)
+def test_installment_todas_as_descricoes_registram(descricao):
+    """Nenhuma descrição de compra real pode ser lida como "outro comando"."""
+    uid = _uid()
+    _arma_installment(uid)
+
+    resposta = _diga(uid, descricao)
+
+    assert "parcelamento registrado" in resposta.lower(), \
+        f"{descricao!r} foi abandonada: {resposta!r}"
+    with db.get_conn() as conn, conn.cursor() as cur:
+        n = cur.execute("select count(*) as n from credit_transactions "
+                        "where user_id = %s", (uid,)).fetchone()["n"]
+    assert n == 5, f"{descricao!r}: esperava 5 parcelas, veio {n}"
+    # A metade que estava CEGA: a blacklist não só abandonava — o comando
+    # misclassificado EXECUTAVA e gravava uma despesa com o número da descrição
+    # ("2 passagens" → R$ 2,00). Contar parcelas não pegava isso.
+    assert db.list_launches(uid) == [], \
+        f"{descricao!r} virou lançamento: {db.list_launches(uid)!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["1", "nubank", _MES_DA_FATURA])
+def test_pay_bill_choice_paga_com_resposta_legitima(resposta_do_user):
+    """O número, o nome do cartão e o MÊS sozinhos continuam escolhendo a fatura.
+
+    O mês continua sendo respondido POR NOME, como o usuário faria — o que
+    mudou é que ele é derivado da fatura que o armador criou
+    (`_resolve_resposta`) em vez de cravado. Ver `mes_da_fatura`: cravar
+    "setembro" quebrava do dia 11 ao fim de todo mês, e cravar "outubro"
+    quebraria a partir do dia 1º."""
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+    resposta_do_user = _resolve_resposta(uid, resposta_do_user)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
+    assert db.list_open_bills(uid) == [], \
+        f"{resposta_do_user!r} não pagou a fatura: {resposta!r}"
+
+
+# FIXADO, NÃO CONSERTADO. Estas cinco já NÃO escolhem fatura na `main`: o
+# `_parse_month_year_token` (`core/handlers/credit.py:78`) só lê `maio` ou
+# `05/2026`, e o `normalize_text` apaga a barra antes (`09/2026` vira `09 2026`,
+# que a regex não casa). Antes caíam no fallback e re-perguntavam; agora o
+# portão devolve `None` e o `route()` abandona com aviso.
+#
+# O que MUDA é a mensagem; o que NÃO muda é o dinheiro — nunca pagam. Fazê-las
+# funcionar é feature, e feature não entra em PR de dinheiro.
+# Medido em duas colunas (main × branch): as 20 dão o MESMO resultado nas duas.
+_PAY_LEGITIMAS = [
+    "1", "#1", _MES_DA_FATURA, "nubank", "Nubank", "NUBANK", "o nubank",
+    "a do nubank", "a fatura do nubank", "minha fatura do nubank",
+    "fatura do nubank", "essa do nubank",
+]
+
+
+@pytest.mark.parametrize("resposta_do_user", _PAY_LEGITIMAS)
+def test_pay_bill_choice_legitimas_continuam_pagando(resposta_do_user):
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+    resposta_do_user = _resolve_resposta(uid, resposta_do_user)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
+    assert db.list_open_bills(uid) == [], \
+        f"{resposta_do_user!r} não pagou: {resposta!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["mercado pago", "o mercado pago",
+                                              "a do mercado pago",
+                                              "a fatura do mercado pago"])
+def test_pay_bill_choice_nome_de_duas_palavras(resposta_do_user):
+    """O `_FILLER` não pode comer parte de um nome composto."""
+    uid = _uid()
+    card_id = db.create_card(uid, "Mercado Pago", 10, 17)
+    db.add_credit_purchase_installments(
+        user_id=uid, card_id=card_id, valor_total=300.0, categoria="outros",
+        nota="mercado", purchased_at=date.today(), installments=1)
+    bill_ids = [int(b["id"]) for b in db.list_open_bills(uid)]
+    db.set_pending_action(uid, "pay_bill_choice", {"bill_ids": bill_ids, "amount": None})
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert db.list_open_bills(uid) == [], f"{resposta_do_user!r} não pagou: {resposta!r}"
+# ===========================================================================
+# O ESPELHO: o portão recusa RESPOSTA LEGÍTIMA? (rodada 6)
+# A pergunta destes é a inversa da de cima, e é a que faltava.
+# ===========================================================================
+
+# Nome de cartão com acento, pontuação, filler DENTRO do nome, e nome que É uma
+# palavra de filler. Medido em duas colunas: a versão anterior de
+# `_card_name_da_resposta` quebrava 12/39 destas, porque normalizava só a
+# resposta e ia ao `get_card_id_by_name`, que só faz `lower()`.
+_NOMES_E_RESPOSTAS = [
+    ("Itaú", "itau"), ("Itaú", "a do itau"), ("Itaú", "o itau"),
+    ("Itaú", "a fatura do itau"), ("Itaú", "minha fatura do itau"),
+    ("Cartão Único", "cartao unico"), ("Cartão Único", "a do cartao unico"),
+    ("Méliuz", "meliuz"), ("Méliuz", "a do meliuz"),
+    ("C6-Carbon", "c6 carbon"), ("C6-Carbon", "a do c6 carbon"),
+    ("BTG+", "btg"), ("BTG+", "a do btg"),
+    # filler DENTRO do nome: um filtro global de filler comeria o "do" do meio.
+    ("Banco do Brasil", "banco do brasil"),
+    ("Banco do Brasil", "a do banco do brasil"),
+    ("Banco do Brasil", "a fatura do banco do brasil"),
+    # o nome É uma palavra de filler.
+    ("Conta", "a conta"), ("Conta", "minha conta"),
+    ("Mercado Pago", "a do mercado pago"),
+    # P2-2 (Codex no #323): CORTESIA no fim. A `main` aceitava (casava por
+    # substring), e o `_leituras_da_resposta` só aparava o PREFIXO. O conjunto
+    # aparável é pequeno e fechado de propósito — ver `_CORTESIA_FINAL` e o
+    # teste do ataque em `test_pendencia_credito_portoes.py`.
+    ("Nubank", "nubank por favor"), ("Nubank", "nubank obrigado"),
+    ("Nubank", "nubank obrigada"), ("Nubank", "nubank valeu"),
+    ("Nubank", "nubank pf"), ("Nubank", "nubank pls"),
+    ("Nubank", "a do nubank por favor"),
+    ("Nubank", "a fatura do nubank por favor"),
+    ("Mercado Pago", "mercado pago por favor"),
+    ("Itaú", "itau obrigado"), ("C6-Carbon", "c6 carbon obrigado"),
+    ("BTG+", "btg por favor"),
+]
+
+
+@pytest.mark.parametrize("nome_do_cartao,resposta_do_user", _NOMES_E_RESPOSTAS,
+                         ids=[f"{n}-{r}" for n, r in _NOMES_E_RESPOSTAS])
+def test_pay_bill_choice_aceita_nome_com_acento_pontuacao_e_filler(
+        nome_do_cartao, resposta_do_user):
+    """O espelho do `_card_name_da_resposta`: normalizar os DOIS lados."""
+    uid = _uid()
+    card_id = db.create_card(uid, nome_do_cartao, 10, 17)
+    db.add_credit_purchase_installments(
+        user_id=uid, card_id=card_id, valor_total=300.0, categoria="outros",
+        nota="mercado", purchased_at=date.today(), installments=1)
+    bill_ids = [int(b["id"]) for b in db.list_open_bills(uid)]
+    db.set_pending_action(uid, "pay_bill_choice", {"bill_ids": bill_ids, "amount": None})
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert db.list_open_bills(uid) == [], \
+        f"{nome_do_cartao!r} + {resposta_do_user!r} não pagou: {resposta!r}"
+
+
+# Respostas de FORMA que os parsers deste arquivo entendem e que a regex
+# ancorada anterior derrubava (14 destas). `(step, resposta, o que aparece)`.
+
+
+# ===========================================================================
+# P2-3 (Codex no #323) — BUG DE DINHEIRO que a correção da rodada 8 criou.
+#
+# `pf` ("pessoa física") é cortesia E é nome de cartão real: `Nubank PF` e
+# `Itaú PF` existem. Aparando o sufixo ANTES de gerar os prefixos,
+# `a do nubank pf` produzia `nubank` e NUNCA `nubank pf` — com os dois cartões
+# cadastrados e fatura aberta nos dois, PAGAVA A FATURA DO CARTÃO ERRADO.
+#
+# Não basta gerar as duas leituras: a ORDEM é o desempate, e é por isso que
+# `_leituras_da_resposta` devolve lista (mais longa primeiro) e não conjunto.
+# ===========================================================================
+
+def _dois_cartoes_com_fatura(uid, monkeypatch):
+    """`Nubank` e `Nubank PF`, os dois com fatura em aberto de valor DIFERENTE.
+
+    Valores diferentes de propósito: é o que prova QUAL foi paga sem depender
+    de qual linha o banco devolveu primeiro."""
+    monkeypatch.setattr("core.services.plan_service.check_can_create_card",
+                        lambda _uid: None)
+    ids = {}
+    for nome, valor in (("Nubank", 300.0), ("Nubank PF", 700.0)):
+        card_id = db.create_card(uid, nome, 10, 17)
+        db.add_credit_purchase_installments(
+            user_id=uid, card_id=card_id, valor_total=valor, categoria="outros",
+            nota="mercado", purchased_at=date.today(), installments=1)
+        ids[nome] = card_id
+    abertas = db.list_open_bills(uid)
+    assert len(abertas) == 2, f"setup não gerou as duas faturas: {abertas!r}"
+    db.set_pending_action(uid, "pay_bill_choice", {
+        "bill_ids": [int(b["id"]) for b in abertas], "amount": None})
+    return ids
+
+
+def _fatura_aberta_do_cartao(uid, card_id):
+    return [b for b in db.list_open_bills(uid) if int(b["card_id"]) == int(card_id)]
+
+
+@pytest.mark.parametrize("resposta_do_user", ["nubank pf", "a do nubank pf",
+                                              "a fatura do nubank pf",
+                                              "nubank pf por favor"])
+def test_pay_bill_choice_paga_o_cartao_especifico_nao_o_generico(
+        resposta_do_user, monkeypatch):
+    uid = _uid()
+    ids = _dois_cartoes_com_fatura(uid, monkeypatch)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert not _fatura_aberta_do_cartao(uid, ids["Nubank PF"]), \
+        f"{resposta_do_user!r} não pagou o *Nubank PF*: {resposta!r}"
+    assert _fatura_aberta_do_cartao(uid, ids["Nubank"]), \
+        f"{resposta_do_user!r} PAGOU O CARTÃO ERRADO (*Nubank*): {resposta!r}"
+    assert "700" in resposta, f"pagou o valor do cartão errado: {resposta!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["nubank", "a do nubank",
+                                              "nubank por favor"])
+def test_pay_bill_choice_o_generico_continua_pagando_o_generico(
+        resposta_do_user, monkeypatch):
+    """O outro lado: desempatar pela leitura mais longa não pode fazer o nome
+    genérico passar a casar o específico."""
+    uid = _uid()
+    ids = _dois_cartoes_com_fatura(uid, monkeypatch)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert not _fatura_aberta_do_cartao(uid, ids["Nubank"]), \
+        f"{resposta_do_user!r} não pagou o *Nubank*: {resposta!r}"
+    assert _fatura_aberta_do_cartao(uid, ids["Nubank PF"]), \
+        f"{resposta_do_user!r} pagou o *Nubank PF* por engano: {resposta!r}"
+    assert "300" in resposta, resposta
+
+
+# ===========================================================================
+# P2-5 (Codex no #323) — PREFIXO CONVERSACIONAL no nome do cartão.
+#
+# `quero o Nubank`, `pode ser o Nubank`, `escolho o Nubank`: a poda parava no
+# primeiro token fora do `_FILLER`, e a `main` casava por substring.
+#
+# A correção é ALARGAR o conjunto podável, não abrir a poda: `_SELECAO` (as
+# maneiras de dizer "eu escolho X") entra junto com o `_FILLER`, e a poda segue
+# parando no primeiro token de fora. A tentativa anterior — podar QUALQUER
+# prefixo e vetar por lista de verbos — durou uma rodada: o veto não conhecia
+# `somei`, `depositei`, `investi`, `saquei`, e os quatro PAGAVAM a fatura.
+# "Verbo de comando" é conjunto ABERTO; "maneiras de dizer que escolho um
+# cartão" é fechado. O ataque fica fora por dois mecanismos independentes, os
+# dois com teste em `test_pendencia_credito_portoes.py`: a poda parar no
+# primeiro token não-podável e a leitura terminar sempre no fim da mensagem.
+# ===========================================================================
+
+@pytest.mark.parametrize("resposta_do_user", [
+    "quero o nubank", "pode ser o nubank", "escolho o nubank",
+    "prefiro o nubank", "vai ser o nubank", "manda o nubank",
+    "acho que o nubank", "quero nubank", "pode ser nubank",
+    "esse ai o nubank",
+])
+def test_pay_bill_choice_aceita_prefixo_conversacional(resposta_do_user):
+    uid = _uid()
+    _arma_pay_bill_choice(uid)
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert _AVISO not in resposta, f"{resposta_do_user!r} foi abandonada: {resposta!r}"
+    assert db.list_open_bills(uid) == [], \
+        f"{resposta_do_user!r} não pagou: {resposta!r}"
+
+
+@pytest.mark.parametrize("resposta_do_user", ["quero o nubank", "pode ser o nubank",
+                                              "escolho o nubank"])
+def test_set_primary_choose_aceita_prefixo_conversacional(resposta_do_user):
+    """A outra pergunta que lê nome de cartão."""
+    uid = _uid()
+    _cartao(uid)
+    db.set_pending_action(uid, "credit_card_set_primary", {"step": "choose"})
+
+    resposta = _diga(uid, resposta_do_user)
+
+    assert "principal" in resposta.lower(), f"{resposta_do_user!r}: {resposta!r}"

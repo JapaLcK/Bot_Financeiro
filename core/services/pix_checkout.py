@@ -15,10 +15,6 @@ Cada seta é um commit local. O mundo remoto NÃO é transacional, então a
 varredura (`core/services/pix_sweeps.py`) é quem fecha o que morrer no meio —
 `creating` é o estado ambíguo por definição e **nunca** é apagado por relógio.
 
-**A substituição cancela no Asaas ANTES de criar a nova** (§10, correção nº 6), igual
-ao `Session.expire` do caminho do Stripe. Falhando o `DELETE`, é 503 e **nada é criado**:
-dois QRs pagáveis do mesmo usuário seriam duas cobranças contra o mesmo crédito.
-
 ## O caso "fechei a aba e voltei" — 200 com o MESMO QR
 
 Decisão do dono, 2026-09-09: cobrança ativa **do mesmo plano** devolve o mesmo
@@ -197,8 +193,14 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
                    confirm_cancel_stripe: bool = False) -> dict:
     """Emite (ou reaproveita) a cobrança Pix anual. **Roda sob lock do usuário.**
 
-    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e
-    `CoberturaJaPaga` (409) — nenhum dos quatro escreve nada antes de levantar. O
+    Levanta `CheckoutIndisponivel` (503), `Vitalicio`, `StripeAtivo` e `CoberturaJaPaga`
+    (409); a quinta é `TitularRecusado` (400, de `asaas_customers`). **Nem todo 503 sai
+    antes da primeira escrita**: dos nove do módulo, três levantam com a linha JÁ gravada
+    — `asaas_cancelamento_falhou` (em `canceling`), `cobranca_ativa_persistiu` (a antiga
+    em `canceled`, e a cobrança que houvesse no Asaas já apagada) e `asaas_emissao_falhou`
+    (a nova em `creating`). O que distingue a `TitularRecusado` não é escrever ou não: é o
+    ESTADO que sobra. `draft` diz que NENHUMA cobrança existe lá, e a passada seguinte não
+    precisa perguntar; `creating` é o ambíguo, que só a varredura fecha (§10.1). O
     `cpf_cnpj` atravessa sem tocar em disco: vai para `criar_cliente` e morre lá."""
     if not pix_annual_available():
         raise CheckoutIndisponivel("pix_annual_desligado")
@@ -209,10 +211,11 @@ def criar_checkout(user_id: int, *, plan_stored: str, cpf_cnpj: str, nome: str,
     from db import get_auth_user  # noqa: PLC0415
     if ((get_auth_user(user_id) or {}).get("last_payment_status") or "").lower() == "grandfathered":
         raise Vitalicio()
-    # **Sem default, nunca** — ver o topo. Inline: virou a única leitura de env
-    # de dinheiro do módulo quando o preço deixou de ser env (§0.2).
+    # **Sem default, nunca** — ver o topo. Inline: única leitura de env de dinheiro do módulo
+    # desde que o preço deixou de ser env (§0.2). O `isascii()` fecha o ALFABETO — nada estoura
+    # no `int()`, nada vira dígito de outro alfabeto — e **não** a FAIXA: `'9'*30` passa.
     bruto = (os.getenv("ASAAS_MIN_CHARGE_CENTS") or "").strip()
-    if not bruto.isdigit() or int(bruto) <= 0:
+    if not (bruto.isascii() and bruto.isdigit()) or int(bruto) <= 0:
         raise CheckoutIndisponivel("asaas_min_charge_nao_configurado")
     min_cents = int(bruto)
     # `None` = plano fora da tabela (`free`, ou lixo que passou pela rota) → 503.
@@ -305,10 +308,10 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
     haver cobrança lá que não conhecemos". Depois, seria um `draft` que a regra
     (b) do §10.1 acharia seguro apagar.
     """
-    from core.services.asaas_customers import criar_cliente
+    from core.services.asaas_customers import TitularRecusado, criar_cliente
     from core.services.email_service import plan_display_name
     from db.pix_charges import transicionar
-    from db.pix_charges_saga import attach_pagamento
+    from db.pix_charges_saga import attach_pagamento, voltar_para_draft
 
     transicionar(linha["id"], de=("draft",), para="creating")
     vence = date.today() + timedelta(days=VENCIMENTO_DIAS)
@@ -330,6 +333,11 @@ def _emitir(linha: dict, cpf_cnpj: str, nome: str, email: str | None) -> dict:
             # e o hífen não perde nada. O texto era ASCII puro antes do #350.
             descricao=f"{plan_display_name(linha['plan'])} - plano anual")
         qr = asaas.obter_qr_pix(str(pagamento.get("id") or ""))
+    except TitularRecusado:
+        # ANTES do `except Exception`, que engoliria esta e a devolveria como o 503 de "tenta de novo".
+        # Nada existe no Asaas (`criar_pagamento_pix` nem rodou): `draft`, e a passada seguinte não pergunta.
+        voltar_para_draft(linha["id"])
+        raise
     except Exception as exc:  # noqa: BLE001 — a linha fica `creating` de propósito
         raise CheckoutIndisponivel("asaas_emissao_falhou") from exc
 

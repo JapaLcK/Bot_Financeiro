@@ -9,12 +9,22 @@
 // NÃO redireciona — só ajusta o nav pra não parecer deslogado.
 // Estilos injetados via <style> (prefixo pb-) pra não depender do cache do site.css.
 (function () {
-  // Paywall (/precos?ativar=1): conta criada, ainda SEM assinatura. O menu da
-  // conta APARECE (é exatamente onde o "quero sair" acontece); só os CTAs do
-  // corpo ficam quietos — ali os botões são os planos.
+  // Paywall (/precos?ativar=1 ou ?escolha=1): conta criada, ainda SEM
+  // assinatura — ou cortada no fim do Grátis. O menu da conta APARECE (é
+  // exatamente onde o "quero sair" acontece); só os CTAs do corpo ficam
+  // quietos — ali os botões são os planos.
+  //
+  // Os DOIS marcadores, e não só o novo. Medido 2026-09-11
+  // (`grep -rn 'precos?\(ativar\|escolha\)=1' frontend/`): sobrou UM redirect
+  // vivo com `ativar=1`, `home.html:1549` — o de `settings.html` saiu neste PR,
+  // e a linha que ainda casa o grep lá é o comentário que registra a remoção.
+  // Um bloqueado que chegue pelo redirect da home veria os CTAs de marketing na
+  // página onde ele deveria assinar, então a tolerância dupla fica. Ela também
+  // cobre link velho em cache e aba aberta antes do deploy, que nenhum grep vê.
+  const qs = new URLSearchParams(location.search);
   const isPaywall =
     location.pathname.replace(/\/+$/, "") === "/precos" &&
-    new URLSearchParams(location.search).get("ativar") === "1";
+    (qs.get("ativar") === "1" || qs.get("escolha") === "1");
 
   function getCsrf() {
     const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);

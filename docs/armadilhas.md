@@ -80,9 +80,13 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
 
 ### Frontend: como a navegação funciona hoje
 
-Não há build, não há bundler, não há framework: o `package.json` da raiz existe **só**
-para o harness de testes de frontend (`node --test tests/frontend/*.test.mjs`, com
-Playwright). O HTML é escrito à mão e servido pelo FastAPI; templating de servidor
+O `package.json` da raiz existe **só** para o harness de testes de frontend
+(`node --test tests/frontend/*.test.mjs`, com Playwright) e **não tem script
+`build`** — a detecção automática do Railway depende disso. O único build de JS
+do repositório é o de `webapp/`, projeto npm separado que produz a ilha React da
+`/precos` (`frontend/precos-app.js` + `.css`, artefato commitado); a convenção
+está no `docs/CLAUDE.md`. Fora daquele `#plans-v2`, o HTML é escrito à mão e
+servido pelo FastAPI; templating de servidor
 existe em dois lugares só, por `str.replace("{{X}}")` (`/blog/{slug}` e o `{{FAQ}}` do
 `/suporte`, ambos em `frontend/routes/static_pages.py`).
 
@@ -113,8 +117,9 @@ cabeçalho do arquivo antes de tocar em navegação. O que ele é, exatamente:
   rota não convertida) cai em `location.href`. O pior caso é o comportamento de hoje.
 
 Ao escrever qualquer coisa nova, o default é **MPA**. Não descreva nem trate a área
-logada como SPA, e não presuma que uma migração para framework aconteceu: ela não
-aconteceu, nem está decidida.
+logada como SPA: a migração que existe é por **ilha** — um componente React dentro
+de uma página clássica, hoje só o `#plans-v2` da `/precos` — e ela não tornou nada
+disto aqui uma SPA.
 
 ### `dashboard.js`: o arquivo grande demais
 

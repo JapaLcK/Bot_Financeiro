@@ -109,6 +109,8 @@ const assistirAteOFim = page => page.evaluate(() => new Promise(ok => {
 
 test("os CTAs de /cadastro nascem travados, e o clique não navega", async () => {
   const { page, ctx } = await abrirLanding();
+  assert.equal(await page.$eval("#vsl-video", video => video.preload), "none",
+               "a mídia não deve transferir bytes antes da intenção de reprodução");
   const estados = await travados(page);
   assert.equal(estados.length, 6, "a landing tem 6 CTAs de /cadastro (5 + o botão da VSL)");
   assert.match(await page.textContent("#vsl-cta"), /Assista ao vídeo/);
@@ -169,8 +171,9 @@ test("quem já assistiu não assiste de novo", async () => {
   await ctx.close();
 });
 
-test("vídeo que não carrega LIBERA — o portão falha aberto", async () => {
+test("vídeo que não carrega LIBERA após a tentativa — o portão falha aberto", async () => {
   const { page, ctx } = await abrirLanding({ midia: false });
+  await page.$eval("#vsl-video", video => video.play().catch(() => {}));
   await page.waitForFunction(
     () => !document.querySelector('.hero-cta a[href="/cadastro"]').classList.contains("is-locked"),
     null, { timeout: 5000 });

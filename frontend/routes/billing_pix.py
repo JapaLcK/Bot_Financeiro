@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from core.observability import log_system_event_sync
 from core.secure_compare import constant_time_eq
+from core.services.asaas_customers import TitularRecusado
 from core.services.pix_checkout import (
     CheckoutIndisponivel,
     StripeAtivo,
@@ -115,8 +116,8 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     except CoberturaJaPaga as exc:
         # `plano` e `cobertura_ate` vêm da PRÓPRIA exceção: reconsultar o banco
         # aqui poderia devolver um estado diferente do que motivou a recusa.
-        # `exc.plano` é o valor LEGADO (a exceção nasce depois da tradução da
-        # linha 89), e a fronteira fala público nos dois sentidos.
+        # `exc.plano` é o valor LEGADO (a exceção nasce depois do
+        # `TIER_TO_STORED_PLAN[plan]` acima), e a fronteira fala público nos dois sentidos.
         raise HTTPException(status_code=409, detail={
             "error": exc.ERRO, "plan": tier_publico(exc.plano),
             "covered_until": exc.cobertura_ate.isoformat()}) from exc
@@ -140,6 +141,25 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
             "error": exc.ERRO,
             "current_period_end": exc.current_period_end.date().isoformat(),
         }) from exc
+    except TitularRecusado as exc:
+        # A ordem entre este `except` e o do `CheckoutIndisponivel` NÃO importa: as duas
+        # são IRMÃS (`RuntimeError` direto), então nenhuma engole a outra — invertendo os
+        # dois blocos, o grupo segue verde. A ordem que importa é a de `_emitir`.
+        # `details` leva o motivo e o `code` JÁ filtrado, e NADA mais: nome,
+        # e-mail e `cpf_cnpj` não entram: `system_event_logs` é a tabela que a
+        # purga do §13.3 não alcança. O `detail` é literal NOSSO, jamais o texto
+        # do Asaas — e não acusa o CPF de propósito, porque a recusa pode vir do
+        # e-mail do cadastro, que o cliente não digitou nesta tela.
+        log_system_event_sync("warning", "pix_titular_recusado",
+                              "Asaas recusou o titular do checkout Pix.",
+                              source="pix", user_id=user_id,
+                              details={"motivo": "titular_recusado",
+                                       "code": exc.codigo or ""})
+        raise HTTPException(
+            status_code=400,
+            detail="O banco recusou esses dados. Confere o CPF ou CNPJ — se "
+                   "estiver certo, fala com a gente.",
+        ) from exc
     except CheckoutIndisponivel as exc:
         log_system_event_sync("warning", "pix_checkout_indisponivel",
                               "Checkout Pix recusado.", source="pix",

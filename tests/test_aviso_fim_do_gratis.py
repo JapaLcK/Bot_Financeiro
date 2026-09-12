@@ -147,9 +147,13 @@ def test_fora_do_universo_os_dois_lados_dizem_nao_avisa():
     As duas contas estão fora do universo por razões DIFERENTES, e a segunda é
     uma decisão, não uma limitação técnica. Quem nunca escolheu plano já está
     barrado e não perde nada no corte. Já o **só-WhatsApp** (sem linha em
-    `auth_accounts`) tem hoje o produto completo — `has_app_access` é True
-    incondicional com o v2 ligado e o gate do bot só exige plano quando a linha
-    existe —, **perde acesso no corte** e **não é avisado**. Existe canal para
+    `auth_accounts`) tinha o produto completo ATÉ este PR — `has_app_access` era
+    True incondicional com o v2 ligado, e o gate do bot só exigia plano quando a
+    linha existia. As duas afirmações morreram no commit que fez `has_app_access`
+    consultar `tem_direito_hoje`: sem linha, `get_auth_user` devolve `None` e o
+    veredito é False, então essa população **está cortada** e **não foi
+    avisada**. Ficam aqui na forma "era assim" porque é o estado de ANTES que
+    explica por que ela está fora do universo do aviso. Existe canal para
     alcançá-lo (o WhatsApp); o que falta é template aprovado na Meta, e **o
     dono decidiu cortar essa população sem aviso prévio**, deixando a
     comunicação para a mensagem de bloqueio do bot (PR A). A garantia deste PR

@@ -170,6 +170,24 @@ def _log_falha(op: str, user_id: int, e: Exception, *,
     )
 
 
+def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:
+    """WARNING do slowapi NÃO vira linha em `system_event_logs` (segue no stderr).
+
+    É o "laço quente logando por requisição" que o docstring do
+    `_DashboardHandler` nomeia como o que assusta: o slowapi loga um
+    `warning("ratelimit ... exceeded")` por requisição BARRADA, e cada record
+    vira um `psycopg.connect()` + INSERT bloqueante. MEDIDO: 40 GETs anônimos em
+    `/d/{code}` com teto de 30/min → 10 × 429 e **10 linhas** em
+    `system_event_logs`. Ou seja, o teto trocava 200 DELETEs baratos por uma
+    inundação de log pior que a do #321 — e vale para os tetos que já existiam
+    (um brute-force em `/auth/login` gravava uma linha por tentativa barrada).
+
+    Só WARNING: `logger.error` do slowapi (limite mal configurado, storage
+    morto) continua indo para o banco — é incidente, não tráfego.
+    """
+    return not (record.name == "slowapi" and record.levelno == logging.WARNING)
+
+
 def _configure_root_logger() -> None:
     global _root_configured
     if _root_configured:
@@ -186,6 +204,7 @@ def _configure_root_logger() -> None:
     if not any(isinstance(h, _DashboardHandler) for h in root.handlers):
         dash_handler = _DashboardHandler()
         dash_handler.setLevel(logging.WARNING)
+        dash_handler.addFilter(_sem_ratelimit_no_banco)
         root.addHandler(dash_handler)
 
     _root_configured = True
