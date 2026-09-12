@@ -88,8 +88,18 @@ def get_affiliate_by_user(user_id: int) -> dict | None:
 
 
 def get_affiliate_by_code(code: str) -> dict | None:
+    # Mesmo `_CODE_RE` que `create_affiliate` exige na ESCRITA, depois do mesmo
+    # `_normalize_code` — então nenhum código gravado por ele é recusado aqui —,
+    # e no mesmo lugar em que a gêmea `db/prospects.is_valid_prospect_code` já o
+    # aplicava: antes do SQL (§0.1). Sem isto, `/r/{code}` com NUL no path dava
+    # 500 anônimo em vez do 302 que a rota já dá para código inexistente (#321).
+    # O irmão `record_referral` chega aqui com o cookie `ref_code` do visitante
+    # e NÃO era 500, por dois motivos MEDIDOS: o parser do uvicorn recusa NUL em
+    # linha de header antes do app (h11 0.16.0 e httptools 0.8.0), e
+    # `_apply_referral_attribution` engole toda exceção — o cadastro responde 200
+    # de qualquer jeito. Aqui ele ganha o mesmo "código inválido = não existe".
     code = _normalize_code(code)
-    if not code:
+    if not _CODE_RE.fullmatch(code):
         return None
     with get_conn() as conn:
         with conn.cursor() as cur:

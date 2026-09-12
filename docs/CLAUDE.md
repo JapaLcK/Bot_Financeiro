@@ -21,8 +21,10 @@ boletos, recorrentes, investimentos com CDI, importação de extrato (OFX/CSV/PD
 Open Finance.
 
 **Stack:** Python 3.13 · FastAPI · PostgreSQL (psycopg 3) · discord.py · Railway
-(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **sem build e
-sem framework**. App iOS em Capacitor carregando o próprio site.
+(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **com UMA
+ilha React** (`webapp/` → `frontend/precos-app.*`, o `#plans-v2` da /precos); o
+`package.json` da raiz continua sem script `build`, e o porquê está em "Decisões
+tomadas". App iOS em Capacitor carregando o próprio site.
 
 ---
 
@@ -40,8 +42,10 @@ core/
   intent_classifier.py    — classificação de intenção
   intent_router.py        — despacho por intenção
   handlers/               — handlers por domínio do fluxo de mensagem
-  services/               — 35 módulos + 2 pacotes: e-mail, Pluggy, planos, push,
-                            agentes, agendadores, OFX, PIX, categorias, cartão…
+  services/               — e-mail, Pluggy, planos, push, agentes, agendadores,
+                            OFX, PIX, categorias, cartão… (quantos: `ls
+                            core/services/*.py | wc -l`; o número que estava
+                            aqui dizia 35 e envelheceu no PR seguinte — §2)
   reports/                — relatório diário (reports_daily.py)
   crypto.py, audit.py     — PII cifrada e trilha de auditoria
 
@@ -154,19 +158,27 @@ pagamento/cancelamento (`clear_past_due_since`, que os ramos `checkout` e
 decidiu o acesso). Os três helpers moram em `db/dunning.py`, não em `db/plans.py`.
 `DUNNING_GRACE_DAYS = 7` é a carência.
 
-**Nada perde acesso por inadimplência hoje** — não existe gate, e a coluna
-alimenta **três** coisas: o **lembrete de pagamento do 6º dia**
+**Ninguém perde acesso POR INADIMPLÊNCIA** — o relógio só CONCEDE tempo. Desde
+o corte do Grátis (#274/#354) existe gate de acesso, e a autoridade dele é o
+DIREITO pago (`plan_service.has_app_access` → `tem_direito_hoje`), nunca o
+status de cobrança. A coluna alimenta **três** coisas: o **lembrete de pagamento
+do 6º dia**
 (`core/services/payment_reminder.py`, no tick de `engagement_scheduler`; e-mail
 sempre, WhatsApp só se `WA_TEMPLATE_PAYMENT_REMINDER` apontar para um template
 aprovado na Meta — vazio por padrão → caminho dormente), a janela de dedupe do
 e-mail de falha no webhook e o predicado `carencia_aberta`, lado DIREITO do OR
 de `plan_service.tem_direito_hoje` (o relógio só CONCEDE tempo; a autoridade é
 o direito pago), consumido pelo aviso de corte
-(`scripts/aviso_fim_do_gratis.py`). O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
+(`scripts/aviso_fim_do_gratis.py`) **e pelo GATE DE ACESSO** — `has_app_access`,
+e por ele os quatro enforcements (HTML, rotas de dados, WebSocket, bot) mais o
+filtro dos relatórios proativos. Freio de emergência do gate:
+`ACCESS_GATE_ENABLED=0`, gêmeo exato do `PLANS_V2_ENABLED`. O lembrete fica atrás de `PAYMENT_REMINDER_ENABLED`
 (**default off**, lida a cada tick, sem redeploy; a guarda é a 1ª linha de
 `check_payment_reminder`, então desligada nem consulta o funil). Grant
-`pix`/`admin` vigente pula o lembrete (`legacy` não). Nenhuma copy deste caminho
-pode prometer pausa ou perda de acesso.
+`pix`/`admin` vigente pula o lembrete (`legacy` não). **A copy do LEMBRETE
+continua proibida de prometer pausa ou perda de acesso** — ele sai no 6º dia,
+dentro da carência, com o acesso ainda de pé. Quem PODE falar em perda são o
+e-mail de falha e o de cancelamento, reescritos no PR do corte (#354).
 
 **A INVARIANTE**: `past_due_since` não nulo só existe em conta com
 `last_payment_status` em `PAST_DUE_PAYMENT_STATUSES`. Ela é mantida na ESCRITA,
@@ -275,11 +287,15 @@ faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`)
 O detalhamento das armadilhas está no **§5 do `CLAUDE.md` da raiz** (é lá que ele
 mora; não duplicar aqui). O essencial de domínio:
 
-- **Sem build, sem bundler, sem framework.** O `package.json` da raiz serve só ao
-  harness de testes de frontend.
+- **O site é HTML/CSS/JS à mão, com UMA ilha React.** O `package.json` da raiz
+  continua servindo só ao harness de testes de frontend — e continua **sem script
+  `build`** de propósito: é a ausência dele que mantém a detecção automática do
+  Railway apontando para o Python. O build de JS que existe é o de `webapp/`,
+  projeto npm separado, com package.json e lockfile próprios.
 - **Páginas públicas e área logada são as duas MPA.** Existe um POC de navegação
   client-side (`pb-nav.js`) **desligado por padrão**, restrito ao modo app e a duas
-  rotas. Não trate a área logada como SPA e não presuma migração para framework.
+  rotas. Não trate a área logada como SPA: a migração para React que existe é por
+  ILHA (abaixo, em "Decisões tomadas") e não alcança a navegação.
 - **`dashboard.js` tem 10.587 linhas e 414 funções globais**, e `dashboard.html` tem
   139 handlers `onclick=` que dependem disso. Funcionalidade nova de dashboard deve
   nascer em arquivo próprio (§0.5 da raiz), com rota própria em `static_pages.py`.
@@ -387,6 +403,28 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
 - **Resend** para e-mail — SMTP/Gmail foi abandonado.
 - **Sem Google Sheets.**
 - **Sem Redis** até hoje: não há fila nem cache externo no repositório.
-- **Frontend sem build** — HTML/CSS/JS à mão, servidos pelo FastAPI. Não há React,
-  Vite, bundler nem processo de build de JS neste repositório, e a discussão de
-  migração **não** tem decisão tomada.
+- **A migração para React COMEÇOU, e a decisão está tomada.** O padrão é **ilha**,
+  não SPA: Vite + React 19 em `webapp/` (projeto npm separado), um bundle por
+  página, saída de nome FIXO e sem hash em `frontend/`, **artefato commitado** —
+  porque não há `StaticFiles` mount e cada asset precisa de rota escrita à mão.
+  Hoje existe UMA ilha: `frontend/precos-app.js` + `.css`, que renderiza só o
+  `#plans-v2` da `/precos`. Todo o resto daquela página — o `#comparar`, o
+  `<head>`, os ~420 linhas de `<script>` inline — continua sendo o clássico, e o
+  resto do site também. Regras da convenção: **IIFE, nunca `type="module"`**
+  (módulo é deferido e reintroduz corrida com script clássico da página), mount
+  síncrono com `flushSync`, e o componente **lê os dados do markup** em vez de
+  trazer literal — no caso da `/precos` isso é o que impede uma quarta cópia do
+  preço (§0.7). **CSS da ilha é CSS comum** — importado pelo `main.jsx`, emitido
+  como `frontend/precos-app.css` e consumindo os tokens que a página já carrega
+  (`var(--pink-dark)` e irmãos, do `site.css`/`brand.css`). **Sem Tailwind**: o
+  plano da primeira ilha previa, e ele foi abandonado porque utilitário novo não
+  paga onde já existe sistema de design — sem este parágrafo, a próxima ilha
+  reabre o assunto lendo o plano. O artefato commitado tem gate próprio no CI (job `frontend`): o
+  step REBUILDA (`npm --prefix webapp ci && npm --prefix webapp run build`) e
+  reprova se `git status --porcelain -- frontend/` não ficar limpo. Só o build
+  prova que o bundle commitado veio das fontes commitadas — um carimbo de hash das
+  fontes, que é o que existiu aqui por um commit, prova apenas que as fontes não
+  mudaram desde o último carimbo, e era falsificável sem buildar. Dep nova aqui
+  exige rebuildar e commitar `frontend/precos-app.*` no mesmo commit.
+  **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar
+  framework em página nova por gosto, ou pôr script `build` na raiz.
