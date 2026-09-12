@@ -21,12 +21,9 @@
  *   a da ilha, nos dois ciclos) e PI8 a janela em que o `refreshPlanButtons`
  *   roda ANTES do mount — medida, não suposta.
  *
- * PO — O PÓDIO. A regra era `@media (min-width: 900px)` com um comentário
- *   afirmando que "abaixo de 900px o grid vira uma coluna". Era falso: o
- *   `style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"` inline
- *   vence o `@media (max-width:900px)` do site.css, então de 508 a 899px havia
- *   2 ou 3 colunas SEM pódio. O critério é "mais de uma coluna", e este grupo
- *   exige a equivalência em cada largura da lista `LARGURAS`.
+ * PO — O PÓDIO. Os três cards ficam na mesma linha acima de 900px, com o
+ *   Plus no centro, mais alto e alinhado pela base aos planos laterais. Abaixo
+ *   disso a escada empilha em uma coluna, sem criar uma fileira órfã de um card.
  *
  * Como se sabe se a ilha MONTOU, já que ela reemite o mesmo markup de propósito:
  * por um COMENTÁRIO HTML plantado dentro do `#plans-v2`. Comentário não é lido
@@ -146,8 +143,8 @@ async function abrir({ mutar = (h) => h, semIlha = false } = {}) {
 test("PI1: no markup de hoje a ilha monta, sem erro e sem aviso", async () => {
   const r = await abrir();
   assert.equal(r.montou, true, "a ilha NÃO montou no markup de produção");
-  assert.equal(r.cards, 4, `cards: ${r.cards}`);
-  assert.deepEqual(r.precos, [true, true, true, true], "card sem .price-block");
+  assert.equal(r.cards, 3, `cards: ${r.cards}`);
+  assert.deepEqual(r.precos, [true, true, true], "card sem .price-block");
   assert.deepEqual(r.erros, []);
   assert.deepEqual(r.avisos, []);
 });
@@ -162,7 +159,7 @@ test("PI1: no markup de hoje a ilha monta, sem erro e sem aviso", async () => {
  * NÃO mediria a guarda de filhos — o `lerCartao` devolveria `null` nele e o
  * mount seria barrado pela outra guarda, então desligar esta ficaria verde
  * (medido: com `if (false && perdeConteudo)` o caso passava). Com o decoy,
- * desligá-la vira um QUINTO `article.plan` e o `#extra` some. O texto solto ao
+ * desligá-la vira um QUARTO `article.plan` e o `#extra` some. O texto solto ao
  * lado mede a mesma guarda pelo ramo dos nós de texto, que `children` não vê.
  */
 test("PI2: um nó estranho dentro do #plans-v2 impede o mount, sem perder o nó", async () => {
@@ -171,7 +168,7 @@ test("PI2: um nó estranho dentro do #plans-v2 impede o mount, sem perder o nó"
   const r = await abrir({ mutar: (h) => h.replace(MARCA, MARCA + decoy) });
   assert.equal(r.extra, true, "o #extra DESAPARECEU no mount (ou virou article.plan)");
   assert.equal(r.montou, false, "montou por cima de markup que não sabe reproduzir");
-  assert.equal(r.cards, 4, `os cards continuam 4 — o intruso não vira card (${r.cards})`);
+  assert.equal(r.cards, 3, `os cards continuam 3 — o intruso não vira card (${r.cards})`);
   assert.deepEqual(r.erros, []);
   assert.ok(r.avisos.some((a) => a.includes("#plans-v2 fora do contrato")),
     `o fallback foi silencioso: ${JSON.stringify(r.avisos)}`);
@@ -190,7 +187,7 @@ test("PI3: card sem <button> cai no fallback em vez de estourar TypeError", asyn
   });
   assert.deepEqual(r.erros, [], "a ilha estourou exceção no lugar de cair no fallback");
   assert.equal(r.montou, false);
-  assert.equal(r.cards, 5, `os 5 articles tinham de sobreviver (${r.cards})`);
+  assert.equal(r.cards, 4, `os 4 articles tinham de sobreviver (${r.cards})`);
   assert.ok(r.avisos.some((a) => a.includes("#plans-v2 fora do contrato")), JSON.stringify(r.avisos));
 });
 
@@ -298,18 +295,17 @@ test("PI7: a ilha reproduz o #plans-v2 do servidor, atributo por atributo, nos d
     assert.deepEqual(ilha.ciclos[ciclo].precos, servidor.ciclos[ciclo].precos,
       `os preços VISÍVEIS divergiram no ciclo ${ciclo}`);
   }
-  // Os QUATRO cards: três com preço e o Premium ("Em breve"), que não tem — e o
-  // marcador do ciclo tem de ser o do ciclo selecionado, um só por card. O
+  // Os três cards têm preço, e o marcador do ciclo tem de ser o do ciclo
+  // selecionado, um só por card. O
   // `/mês` com barra de propósito: o "Equivale a R$ 8,25 por mês" do anual
   // contém "mês" e não é preço de ciclo.
   for (const [ciclo, tem, naoTem] of [["mensal", /\/mês/, /\/ano/], ["anual", /\/ano/, /\/mês/]]) {
     const p = ilha.ciclos[ciclo].precos;
-    assert.equal(p.length, 4, `cards com .price-block no ${ciclo}: ${p.length}`);
+    assert.equal(p.length, 3, `cards com .price-block no ${ciclo}: ${p.length}`);
     assert.equal(p.filter((t) => tem.test(t)).length, 3,
       `no ciclo ${ciclo} os preços na tela são ${JSON.stringify(p)}`);
     assert.equal(p.filter((t) => naoTem.test(t)).length, 0,
       `o ciclo ${ciclo} está mostrando o preço do outro: ${JSON.stringify(p)}`);
-    assert.ok(!tem.test(p[3]) && !naoTem.test(p[3]), `o Premium ganhou preço: ${p[3]}`);
   }
 });
 
@@ -580,10 +576,9 @@ test("PI9: clicar em Assinar com o bundle em voo não mata o botão de compra", 
  *
  * ── O resto da classe "estado do navegador dentro do #plans-v2", MEDIDO ──────
  *
- *   focáveis        os 4 `<button>` do card e mais nada (nenhum `<a>`, nenhum
- *                   `tabindex`) — e o 4º (Premium) nasce `disabled`, logo não é
- *                   focável. Por isso `[data-plan-btn]` cobre a categoria toda
- *                   em vez de ser um atalho.
+ *   focáveis        os 3 `<button>` dos cards e mais nada (nenhum `<a>`, nenhum
+ *                   `tabindex`). Por isso `[data-plan-btn]` cobre a categoria
+ *                   toda em vez de ser um atalho.
  *   `:focus-visible`  derivado do foco, não guardado: com o foco restaurado o
  *                   anel continua (medido `matches(":focus-visible") === true`
  *                   depois do mount). É por isso que este caso o assere.
@@ -691,14 +686,11 @@ test("PI10: o foco dentro do card sobrevive ao mount, e o de fora não é roubad
 
 // ── PO: o pódio ─────────────────────────────────────────────────────────────
 //
-// A equivalência, não o número: para CADA largura, mais de uma coluna tem de
-// significar `align-items: end`, e uma coluna `normal`. Foi assim que o "abaixo
-// de 900px vira uma coluna" deixou de poder ser escrito sem alguém medir.
-// 507/508 são o par que cerca o degrau (2ª faixa = 220+20+220 = 460px de
-// container, e o wrap é `100vw - 48px`).
-const LARGURAS = [320, 390, 507, 508, 600, 760, 820, 899, 900, 1024, 1440];
+// O pódio só existe quando o trio cabe na mesma linha. 900/901 cerca o breakpoint
+// que separa o empilhamento mobile das três colunas.
+const LARGURAS = [320, 390, 600, 768, 820, 900, 901, 1024, 1440];
 
-test("PO1: pódio se e somente se o grid tem mais de uma coluna", async () => {
+test("PO1: pódio nas três colunas e cards contidos no empilhamento", async () => {
   const pagina = await browser.newPage();
   const fora = [];
   for (const largura of LARGURAS) {
@@ -707,23 +699,25 @@ test("PO1: pódio se e somente se o grid tem mais de uma coluna", async () => {
     const r = await pagina.evaluate(() => {
       const g = document.getElementById("plans-v2");
       const cs = getComputedStyle(g);
-      return { colunas: cs.gridTemplateColumns.split(" ").length, align: cs.alignItems };
+      return { colunas: cs.gridTemplateColumns.split(" ").length, align: cs.alignItems,
+        larguraCard: Math.round(g.querySelector("article.plan").getBoundingClientRect().width) };
     });
-    const esperado = r.colunas > 1 ? "end" : "normal";
+    const esperado = r.colunas === 3 ? "end" : "normal";
     if (r.align !== esperado) fora.push(`${largura}px: ${r.colunas} coluna(s) com align-items: ${r.align}`);
+    if (r.colunas === 1 && r.larguraCard > 380) {
+      fora.push(`${largura}px: card empilhado com ${r.larguraCard}px`);
+    }
   }
   await pagina.close();
   assert.deepEqual(fora, [], `o pódio e a contagem de colunas discordam em:\n${fora.join("\n")}`);
 });
 
 /**
- * PO2 — CONTROLE POSITIVO: o pódio EXISTE, e é pódio — o destaque é o card mais
- * alto e as bases estão alinhadas. O PO1 mede uma equivalência, então ele
- * ficaria verde num layout em que o grid nunca passa de uma coluna: a escada
- * inteira empilhada em qualquer tela passa em "uma coluna ⟹ normal". Este caso
- * é o que prende o outro lado.
+ * PO2 — CONTROLE POSITIVO: o pódio EXISTE, e é pódio — são três cards, o Plus
+ * ocupa o centro, é o mais alto, o Pro ocupa o degrau intermediário e as bases
+ * estão alinhadas.
  */
-test("PO2: em 1024px o destaque é o card mais alto, com bases alinhadas", async () => {
+test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async () => {
   const pagina = await browser.newPage();
   await pagina.setViewportSize({ width: 1024, height: 900 });
   await pagina.goto(ORIGIN + "/precos.html", { waitUntil: "load" });
@@ -731,19 +725,30 @@ test("PO2: em 1024px o destaque é o card mais alto, com bases alinhadas", async
     const cards = [...document.querySelectorAll("#plans-v2 article.plan")];
     const cx = (c) => c.getBoundingClientRect();
     return {
+      nomes: cards.map((c) => c.querySelector("h3").textContent.trim()),
       alturas: cards.map((c) => Math.round(cx(c).height)),
+      paddingsTopo: cards.map((c) => getComputedStyle(c).paddingTop),
       destaque: cards.findIndex((c) => c.classList.contains("featured")),
       bases: cards.map((c) => Math.round(cx(c).bottom)),
     };
   });
   await pagina.close();
+  assert.deepEqual(r.nomes, ["Essencial", "Plus", "Pro"]);
+  assert.equal(r.destaque, 1, "o Plus não está no centro do trio");
   // ESTRITAMENTE mais alto, e não `=== Math.max(...)`: sem as regras do pódio o
-  // grid volta ao `stretch` e iguala os quatro cards, e aí o destaque EMPATA em
+  // grid volta ao `stretch` e iguala os três cards, e aí o destaque EMPATA em
   // primeiro — a asserção por `max` ficava verde num layout sem pódio nenhum
   // (medido: apagando as duas regras do precos.css, este caso passava).
   const outros = r.alturas.filter((_, i) => i !== r.destaque);
   assert.ok(outros.every((h) => r.alturas[r.destaque] > h),
     `o destaque (${r.alturas[r.destaque]}px) não é mais alto que todos: ${r.alturas.join("/")}`);
+  const degrauMinimo = 40;
+  assert.ok(r.alturas[2] - r.alturas[0] >= degrauMinimo,
+    `o degrau Essencial→Pro é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
+  assert.ok(r.alturas[1] - r.alturas[2] >= degrauMinimo,
+    `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
+  assert.equal(new Set(r.paddingsTopo).size, 1,
+    `o conteúdo não começa no mesmo recuo: ${r.paddingsTopo.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);
 });
 
