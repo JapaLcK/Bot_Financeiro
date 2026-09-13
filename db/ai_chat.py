@@ -315,9 +315,18 @@ def try_consume_usage(user_id: int, monthly_limit: int) -> int | None:
     """Desconta uma resposta na cota compartilhada sem ultrapassar o teto.
 
     O reset e a comparação acontecem no mesmo UPDATE, inclusive entre workers.
-    Chamado somente após resposta bem-sucedida do chat especialista.
+    Especialistas consomem após responder; o chat geral reserva antes das tools.
     """
+    return _consume_usage(user_id, monthly_limit, _current_month_start())
+
+
+def reserve_usage(user_id: int, monthly_limit: int) -> date | None:
+    """Reserva uma vaga e devolve seu mês para eventual restituição segura."""
     month_start = _current_month_start()
+    return month_start if _consume_usage(user_id, monthly_limit, month_start) is not None else None
+
+
+def _consume_usage(user_id: int, monthly_limit: int, month_start: date) -> int | None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -336,3 +345,15 @@ def try_consume_usage(user_id: int, monthly_limit: int) -> int | None:
         row = cur.fetchone()
         conn.commit()
         return int(row["ai_messages_this_month"]) if row else None
+
+
+def refund_usage(user_id: int, reserved_month: date) -> None:
+    """Devolve uma reserva sem subtrair mensagens de um mês posterior."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """update auth_accounts
+               set ai_messages_this_month = greatest(0, coalesce(ai_messages_this_month, 0) - 1)
+               where user_id = %s and ai_month_reset_at = %s""",
+            (int(user_id), reserved_month),
+        )
+        conn.commit()

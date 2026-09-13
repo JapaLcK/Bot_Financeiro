@@ -202,7 +202,7 @@ def test_loop_recusa_tool_fora_do_tema_mesmo_quando_modelo_pede(monkeypatch):
     assert 'não permitida' in called[1]['messages'][-1]['content']
 
 
-@pytest.mark.parametrize('reply,consumed,expected_charge', [('Resposta do Piggy', 3, True), ('Resposta do Piggy', None, True), (None, None, False)])
+@pytest.mark.parametrize('reply,consumed,expected_charge', [('Resposta do Piggy', 3, True), ('Resposta do Piggy', None, False), (None, None, False)])
 def test_chat_geral_usa_mesma_cota_atomica(monkeypatch, armed, reply, consumed, expected_charge):
     from core.services.ai_chat import runner
     monkeypatch.setattr(db, 'ai_get_pending_action', lambda uid: None)
@@ -210,7 +210,14 @@ def test_chat_geral_usa_mesma_cota_atomica(monkeypatch, armed, reply, consumed, 
     monkeypatch.setattr(db, 'ai_append_message', lambda *a, **k: None)
     monkeypatch.setattr(runner, '_run_tool_loop', lambda *a: reply or runner.ERROR_MSG)
     charges = []
-    monkeypatch.setattr(quota, 'try_consume_usage', lambda *a: charges.append(a) or consumed)
+    from datetime import date
+    def reserve(*args):
+        if reply and consumed is None:
+            return None
+        charges.append(args)
+        return date.today().replace(day=1)
+    monkeypatch.setattr(quota, 'reserve_usage', reserve)
+    monkeypatch.setattr(quota, 'refund_usage', lambda *args: charges.pop())
     result = runner.chat(42, 'Como está meu mês?', monthly_limit=10)
     assert bool(charges) == expected_charge
     if reply and consumed is None:

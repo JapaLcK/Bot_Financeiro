@@ -33,7 +33,7 @@ Status: primeira versão implementada e validada localmente; avaliação com a I
 - Verificação adicional da resposta gerada quanto ao tema, alterações e indicações de operações. Essa verificação é feita por IA e não representa garantia absoluta de classificação semântica.
 - Detetive consulta os mesmos sinais de duplicidades e recorrências dos alertas, sem emitir eventos. A detecção atual de duplicidades cobre a janela e o valor mínimo do detector existente; ausência de indícios não prova ausência de duplicidades.
 - Barão lê o último saldo registrado, sem aplicar juros durante a consulta. Faria Limer recebe a renda fixa agregada como contexto de alocação, sem assumir que a carteira cadastrada representa todo o patrimônio.
-- Cota compartilhada descontada atomicamente no chat geral e nos especialistas. Redirecionamentos puros, assuntos sem agente e falhas do chat especialista não descontam mensagens. Perguntas mistas com resposta própria descontam uma mensagem.
+- Cota compartilhada descontada atomicamente. O chat geral reserva a vaga antes de gravar o turno ou despachar ferramentas; uma requisição sem vaga não executa alterações nem cria ações pendentes. Falhas sem tentativa de escrita devolvem a reserva somente no mês correspondente. Após tentativa de escrita, a reserva é mantida para não liberar capacidade sobre uma alteração possivelmente já efetivada. Os especialistas, que só consultam, descontam após responder. Redirecionamentos puros, assuntos sem agente e falhas do chat especialista não descontam mensagens. Perguntas mistas com resposta própria descontam uma mensagem.
 - Ações financeiras permanecem fora desta versão. Ativar um agente é uma ação explícita do botão de acesso.
 
 ## Fatos do sistema atual
