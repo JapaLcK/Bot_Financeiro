@@ -106,7 +106,7 @@ indica retorno do provedor e não confirma cobrança. Os eventos a preservar sã
 | --- | --- | --- |
 | visita | `page_view` / Meta `PageView` | Preservar `_ga`, `_fbp`, `_fbc`, UTMs e referenciador. |
 | início do vídeo | `vsl_play` | Uma vez por reprodução iniciada. |
-| progresso | `vsl_progress` | Marcos de 25%, 50% e 75%. |
+| progresso | `vsl_progress` | Marcos de 25%, 50% e 75% do tempo realmente reproduzido; saltos na barra não contam. |
 | cadastro | `sign_up` / `CompleteRegistration` | Deduplicar cliente e CAPI pelo identificador existente. |
 | checkout | `begin_checkout` e `checkout_funnel_events` | Uma ação deve criar uma única solicitação. |
 | aquisição | confirmação backend/webhook | Separar teste iniciado, compra imediata e primeira cobrança posterior. |

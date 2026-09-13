@@ -741,14 +741,25 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
     var video = document.getElementById("vsl-video");
     if (!video) return;
 
-    var assistido = 0, marcos = {};
+    var assistido = 0, ultimoTempo = video.currentTime, buscando = false, marcos = {};
 
     video.addEventListener("play", function () {
+      ultimoTempo = video.currentTime;
       if (window.gtag) gtag("event", "vsl_play", {});
     }, { once: true });
 
+    video.addEventListener("seeking", function () { buscando = true; });
+    video.addEventListener("seeked", function () {
+      buscando = false;
+      ultimoTempo = video.currentTime;
+    });
+
     video.addEventListener("timeupdate", function () {
-      if (video.currentTime > assistido) assistido = video.currentTime;
+      var tempoAtual = video.currentTime;
+      if (!buscando && !video.paused && tempoAtual > ultimoTempo) {
+        assistido += tempoAtual - ultimoTempo;
+      }
+      ultimoTempo = tempoAtual;
       var d = video.duration;
       if (!d || !isFinite(d)) return;
       var pct = Math.floor((assistido / d) * 100);

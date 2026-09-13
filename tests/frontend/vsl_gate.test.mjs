@@ -70,26 +70,34 @@ test("todos os CTAs levam ao cadastro sem exigir o vídeo", async () => {
 test("o visitante pode avançar o vídeo sem bloquear o cadastro", async () => {
   const { page, ctx } = await abrirLanding();
   const posicao = await page.evaluate(async () => {
+    window.__eventosVsl = [];
+    window.gtag = (...args) => window.__eventosVsl.push(args);
     const v = document.getElementById("vsl-video");
     v.currentTime = v.duration - 0.01;
     await new Promise(ok => setTimeout(ok, 300));
-    return { atual: v.currentTime, duracao: v.duration };
+    return {
+      atual: v.currentTime,
+      duracao: v.duration,
+      progresso: window.__eventosVsl.filter(e => e[1] === "vsl_progress"),
+    };
   });
   assert.ok(posicao.atual > posicao.duracao / 2,
             `a busca foi impedida: ${posicao.atual}/${posicao.duracao}`);
+  assert.deepEqual(posicao.progresso, [],
+                   "avançar o cursor não pode contar como tempo assistido");
   await ctx.close();
 });
 
 test("play e marcos de progresso continuam sendo medidos", async () => {
   const { page, ctx } = await abrirLanding();
-  const eventos = await page.evaluate(() => {
+  const eventos = await page.evaluate(async () => {
     window.__eventosVsl = [];
     window.gtag = (...args) => window.__eventosVsl.push(args);
     const v = document.getElementById("vsl-video");
-    v.dispatchEvent(new Event("play"));
-    [0.26, 0.51, 0.76].forEach(p => {
-      v.currentTime = v.duration * p;
-      v.dispatchEvent(new Event("timeupdate"));
+    v.muted = true;
+    await new Promise((ok, erro) => {
+      v.addEventListener("ended", ok, { once: true });
+      v.play().catch(erro);
     });
     return window.__eventosVsl;
   });
