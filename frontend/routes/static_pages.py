@@ -549,6 +549,15 @@ async def serve_dashboard_js():
     )
 
 
+@router.get("/dashboard-agent-chat.js")
+async def serve_dashboard_agent_chat_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-agent-chat.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard-chat.js")
 async def serve_dashboard_chat_js():
     """Widget de chat IA (Piggy) do dashboard, extraído do inline."""

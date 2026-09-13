@@ -225,8 +225,13 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
 
     final_text = _run_tool_loop(client, user_id, messages)
 
+    if final_text == ERROR_MSG:
+        return final_text
+    # Chat geral e especialistas disputam a mesma cota, inclusive entre workers.
+    from db.ai_chat import try_consume_usage
+    if try_consume_usage(user_id, monthly_limit) is None:
+        return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
     db.ai_append_message(user_id, "assistant", final_text)
-    db.ai_increment_usage(user_id)
     return final_text
 
 

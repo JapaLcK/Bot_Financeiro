@@ -309,3 +309,30 @@ def log_ai_fallback(user_id: int, question: str, ai_reason: str | None = None) -
     except Exception:
         # Telemetria silenciosa — não quebra o turno do user.
         pass
+
+
+def try_consume_usage(user_id: int, monthly_limit: int) -> int | None:
+    """Desconta uma resposta na cota compartilhada sem ultrapassar o teto.
+
+    O reset e a comparação acontecem no mesmo UPDATE, inclusive entre workers.
+    Chamado somente após resposta bem-sucedida do chat especialista.
+    """
+    month_start = _current_month_start()
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update auth_accounts
+            set ai_messages_this_month = case
+                  when ai_month_reset_at is null or ai_month_reset_at < %s then 1
+                  else coalesce(ai_messages_this_month, 0) + 1 end,
+                ai_month_reset_at = %s
+            where user_id = %s and (case
+                  when ai_month_reset_at is null or ai_month_reset_at < %s then 0
+                  else coalesce(ai_messages_this_month, 0) end) < %s
+            returning ai_messages_this_month
+            """,
+            (month_start, month_start, int(user_id), month_start, int(monthly_limit)),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return int(row["ai_messages_this_month"]) if row else None

@@ -380,17 +380,9 @@ def _detetive_cutoff(today: date) -> date:
     return date(y, m, 1)
 
 
-def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja cobranças que repetem (mesmo comerciante + mesmo valor) em >=3 meses
-    distintos e ainda não foram flagradas. Um evento por assinatura (dedupe pela
-    assinatura), então rodar todo dia não vira spam. Fonte = launches (inclui OF,
-    cujo criado_em é a data real da transação)."""
-    from db import record_agent_event
-
-    user_id = agent["user_id"]
+def find_recurring_charges(user_id: int, today: date) -> list[dict[str, Any]]:
+    """Consulta os sinais do Detetive sem gravar eventos nem alterar lançamentos."""
     cutoff = _detetive_cutoff(today)
-    fired = 0
-
     with get_conn() as conn:
         with conn.cursor() as cur:
             # merchant = descrição normalizada (tira ids/datas longas e espaço extra)
@@ -435,6 +427,21 @@ def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
             )
             achados = cur.fetchall() or []
 
+    return achados
+
+
+def _detetive_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Fareja cobranças que repetem (mesmo comerciante + mesmo valor) em >=3 meses
+    distintos e ainda não foram flagradas. Um evento por assinatura (dedupe pela
+    assinatura), então rodar todo dia não vira spam. Fonte = launches (inclui OF,
+    cujo criado_em é a data real da transação)."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    fired = 0
+
+    achados = find_recurring_charges(user_id, today)
+
     for s in achados:
         val = float(s["val"])
         meses = int(s["meses"])
@@ -473,29 +480,9 @@ DETETIVE_DUP_WINDOW_DAYS = 2      # teto do span da ilha isolada (modo B); mesmo
 DETETIVE_DUP_MIN_VALOR = 15.0     # ignora repetição miúda (ruído)
 
 
-def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Fareja a MESMA cobrança (comerciante + valor) repetida num burst curto — o
-    padrão de cobrança em dobro. Fontes = launches (inclui OF) + compras de cartão
-    (credit_transactions), unidas: cobrança dupla no cartão é o caso clássico.
-
-    Dois sinais complementares (e disjuntos), pra não perder a dobrada nem reabrir
-    falso positivo com hábito recorrente:
-      • MODO A (mesmo dia): 2+ cobranças iguais no mesmo dia civil. Mais fino que a
-        cadência diária, então pega a dobrada mesmo DENTRO de um hábito de todo dia
-        (o hábito tem 1/dia; a dobrada faz um dia ter 2).
-      • MODO B (ilha isolada): agrupa por ilha temporal (gaps-and-islands) e aceita
-        só quando há <= 1 cobrança por dia E a ilha inteira cabe na janela — cobre
-        o repost no dia seguinte sem deixar o hábito longo (ilha de 30–60 dias)
-        virar alerta.
-
-    Dedupe por (comerciante, valor, dia da repetição): roda todo tick sem repetir
-    alerta."""
-    from db import record_agent_event
-
-    user_id = agent["user_id"]
+def find_duplicate_charges(user_id: int, today: date) -> list[dict[str, Any]]:
+    """Consulta os sinais do Detetive sem gravar eventos nem alterar lançamentos."""
     cutoff = today - timedelta(days=DETETIVE_DUP_LOOKBACK_DAYS)
-    fired = 0
-
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -614,6 +601,33 @@ def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> i
                  DETETIVE_DUP_WINDOW_DAYS, DETETIVE_DUP_WINDOW_DAYS),
             )
             achados = cur.fetchall() or []
+
+    return achados
+
+
+def _detetive_duplicate_detect_for_user(agent: dict[str, Any], today: date) -> int:
+    """Fareja a MESMA cobrança (comerciante + valor) repetida num burst curto — o
+    padrão de cobrança em dobro. Fontes = launches (inclui OF) + compras de cartão
+    (credit_transactions), unidas: cobrança dupla no cartão é o caso clássico.
+
+    Dois sinais complementares (e disjuntos), pra não perder a dobrada nem reabrir
+    falso positivo com hábito recorrente:
+      • MODO A (mesmo dia): 2+ cobranças iguais no mesmo dia civil. Mais fino que a
+        cadência diária, então pega a dobrada mesmo DENTRO de um hábito de todo dia
+        (o hábito tem 1/dia; a dobrada faz um dia ter 2).
+      • MODO B (ilha isolada): agrupa por ilha temporal (gaps-and-islands) e aceita
+        só quando há <= 1 cobrança por dia E a ilha inteira cabe na janela — cobre
+        o repost no dia seguinte sem deixar o hábito longo (ilha de 30–60 dias)
+        virar alerta.
+
+    Dedupe por (comerciante, valor, dia da repetição): roda todo tick sem repetir
+    alerta."""
+    from db import record_agent_event
+
+    user_id = agent["user_id"]
+    fired = 0
+
+    achados = find_duplicate_charges(user_id, today)
 
     for s in achados:
         val = float(s["val"])
