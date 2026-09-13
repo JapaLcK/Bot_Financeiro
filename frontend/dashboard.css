@@ -2690,3 +2690,53 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
   .cl-row, .cl-more-btn,
   #categories-distribution .bar-row[role="button"] { transition:none; }
 }
+
+/* Conversas dos agentes: painel com a mesma linguagem do dashboard. */
+.ag-chat-btn { margin-top: 8px; background: var(--glass-bg); color: var(--text); border: 1px solid var(--glass-border); }
+.agent-chat-panel[hidden] { display: none; }
+.agent-chat-panel {
+  position: fixed; z-index: 1200; right: 24px; bottom: 24px;
+  width: min(440px, calc(100vw - 32px)); height: min(680px, calc(100dvh - 48px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-page); color: var(--text); border: 1px solid var(--glass-border); border-radius: 16px;
+  font-size: 14px; line-height: 1.5;
+}
+.agent-chat-panel .agent-chat-head {
+  position: static; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 12px; flex-shrink: 0;
+  margin: 0; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  padding: 16px; background: var(--glass-bg); border-bottom: 1px solid var(--div);
+}
+.agent-chat-head img { width: 48px; height: 48px; object-fit: contain; }
+.agent-chat-head h2 { font-size: 17px; margin: 0; }
+.agent-chat-head p { font-size: 12px; color: var(--text); }
+.agent-chat-head > button { margin-left: auto; }
+.agent-chat-panel button { font: inherit; cursor: pointer; }
+.agent-chat-head > button, #agent-chat-send {
+  min-width: 44px; min-height: 44px; border: 1px solid var(--glass-border); border-radius: 10px;
+  background: var(--glass-bg); color: var(--text); flex-shrink: 0;
+}
+.agent-chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 16px; scrollbar-color: var(--text-2) transparent; }
+.agent-chat-empty { padding: 16px 0; }
+.agent-chat-empty p { margin-bottom: 20px; }
+.agent-chat-message { margin-bottom: 20px; overflow-wrap: anywhere; }
+.agent-chat-message b { display: block; font-size: 12px; margin-bottom: 6px; }
+.agent-chat-message p { white-space: pre-wrap; }
+.agent-chat-user { margin-left: 32px; padding: 12px; border-radius: 12px; background: var(--glass-bg); }
+.agent-chat-action { display: block; max-width: 100%; padding: 10px 12px; min-height: 44px; margin-top: 10px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); text-align: left; }
+.agent-chat-action:hover, .ag-chat-btn:hover, .agent-chat-head > button:hover { background: var(--div); }
+.agent-chat-panel button:focus-visible, .agent-chat-panel textarea:focus-visible, .ag-chat-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.agent-chat-panel button:disabled { cursor: default; opacity: .5; }
+.agent-chat-feedback { padding: 0 16px; }
+#agent-chat-status:empty, #agent-chat-actions:empty { display: none; }
+#agent-chat-status { margin-top: 8px; }
+.agent-chat-foot { padding: 16px; border-top: 1px solid var(--div); flex-shrink: 0; }
+.agent-chat-foot label { display: block; margin-bottom: 8px; font-size: 12px; }
+.agent-chat-compose { display: flex; gap: 8px; align-items: flex-end; }
+#agent-chat-input { width: 100%; min-width: 0; resize: vertical; min-height: 48px; max-height: 120px; border: 1px solid var(--glass-border); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 16px; background: var(--glass-bg); color: var(--text); caret-color: var(--blue); }
+#agent-chat-input::placeholder { color: var(--text); opacity: .8; }
+#agent-chat-send { background: var(--neon); color: #111; }
+#agent-chat-usage { margin-top: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.agent-chat-panel ::selection { background: var(--purple); color: #fff; }
+@media (max-width: 600px) {
+  .agent-chat-panel { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); height: min(720px, calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+}

@@ -1226,7 +1226,12 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
     return launch_id, canon
 
 
-def list_investments(user_id: int):
+def list_investments(user_id: int, *, include_lots: bool = True):
+    """Lista os saldos registrados; consultas de resumo podem dispensar os lotes.
+
+    `include_lots=False` evita a consulta e a materialização do histórico de
+    aportes, preservando os mesmos campos e a ordenação dos investimentos.
+    """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1240,9 +1245,10 @@ def list_investments(user_id: int):
                 (user_id,),
             )
             rows = [dict(r) for r in cur.fetchall()]
-            lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in rows])
-            for row in rows:
-                row["lots"] = lots_by_inv.get(int(row["id"]), [])
+            if include_lots:
+                lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in rows])
+                for row in rows:
+                    row["lots"] = lots_by_inv.get(int(row["id"]), [])
             return rows
 
 

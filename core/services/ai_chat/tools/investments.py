@@ -290,6 +290,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_list_investments,
+        has_side_effects=True,
     ),
     Tool(
         schema={
@@ -302,6 +303,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_investment_summary,
+        has_side_effects=True,
     ),
     Tool(
         schema={

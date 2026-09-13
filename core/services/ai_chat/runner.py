@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import unicodedata
+from contextvars import ContextVar
 from datetime import date
 from typing import Any
 
@@ -38,6 +39,9 @@ from .tools import SCHEMAS, get_tool
 
 
 logger = logging.getLogger(__name__)
+
+# Isolado por requisição/thread; marca antes de qualquer tentativa de escrita.
+_TURN_WRITE_ATTEMPTED = ContextVar("ai_chat_turn_write_attempted", default=False)
 
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -111,7 +115,7 @@ def chat(
     "trocar categoria" só em `platform="whatsapp"`).
 
     NÃO checa plano Pro — quem chama (endpoint / bot) que decide se gateia.
-    Aplica rate limit mensal aqui (incrementa contador APÓS resposta bem-sucedida).
+    Reserva a cota mensal antes das ferramentas; falhas sem tentativa de escrita devolvem a vaga.
     """
     token_pf = CURRENT_PLATFORM.set(platform)
     token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
@@ -194,9 +198,6 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
         db.ai_append_message(user_id, "assistant", fast)
         return fast
 
-    # 3. Salva msg do user
-    db.ai_append_message(user_id, "user", user_text)
-
     # 4. Monta contexto + chama OpenAI
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
@@ -210,24 +211,40 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
         logger.error("falha ao inicializar OpenAI: %s", e)
         return ERROR_MSG
 
-    history = db.ai_get_recent_messages(user_id, limit=db.AI_DEFAULT_CONTEXT_WINDOW)
-    history = trim_history_for_openai(history)
-    # Limpa `###` que possa ter ficado em mensagens antigas — senão o LLM
-    # faz few-shot a partir do próprio histórico e replica o erro.
-    for m in history:
-        if m.get("role") == "assistant" and isinstance(m.get("content"), str):
-            m["content"] = strip_markdown_headers(m["content"])
+    # A reserva vem ANTES do histórico e de qualquer ferramenta: o perdedor
+    # não pode gravar lançamentos nem criar pendências e só depois ser rejeitado.
+    from db.ai_chat import reserve_usage, refund_usage
+    reservation = reserve_usage(user_id, monthly_limit)
+    if reservation is None:
+        return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
+    write_token = _TURN_WRITE_ATTEMPTED.set(False)
+    final_text = ERROR_MSG
+    completed = False
+    try:
+        db.ai_append_message(user_id, "user", user_text)
+        history = db.ai_get_recent_messages(user_id, limit=db.AI_DEFAULT_CONTEXT_WINDOW)
+        history = trim_history_for_openai(history)
+        # Limpa `###` que possa ter ficado em mensagens antigas — senão o LLM
+        # faz few-shot a partir do próprio histórico e replica o erro.
+        for m in history:
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str):
+                m["content"] = strip_markdown_headers(m["content"])
 
-    today_str = date.today().strftime("%d/%m/%Y")
-    system_with_date = SYSTEM_PROMPT + f"\n\nData de hoje: {today_str}."
+        today_str = date.today().strftime("%d/%m/%Y")
+        system_with_date = SYSTEM_PROMPT + f"\n\nData de hoje: {today_str}."
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
-    final_text = _run_tool_loop(client, user_id, messages)
-
-    db.ai_append_message(user_id, "assistant", final_text)
-    db.ai_increment_usage(user_id)
-    return final_text
+        final_text = _run_tool_loop(client, user_id, messages)
+        db.ai_append_message(user_id, "assistant", final_text)
+        completed = True
+        return final_text
+    finally:
+        attempted_write = _TURN_WRITE_ATTEMPTED.get()
+        _TURN_WRITE_ATTEMPTED.reset(write_token)
+        # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
+        if (not completed or final_text == ERROR_MSG) and not attempted_write:
+            refund_usage(user_id, reservation)
 
 
 def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:
@@ -457,6 +474,9 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
 
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
+        # Validação e resumo ainda não criaram uma ação. A marca é cumulativa
+        # no turno e começa imediatamente antes da primeira tentativa de gravação.
+        _TURN_WRITE_ATTEMPTED.set(True)
         db.ai_set_pending_action(user_id, name, args, summary)
         return (
             json.dumps(
@@ -473,6 +493,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
 
     if tool.is_write:
         # Auto-execute: ação rolou; a mensagem retornada é a resposta final.
+        _TURN_WRITE_ATTEMPTED.set(True)
         try:
             user_msg = tool.execute(user_id, args)
         except Exception as e:
@@ -487,6 +508,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         return (history, user_msg if isinstance(user_msg, str) else str(user_msg))
 
     # Read tool
+    if getattr(tool, "has_side_effects", False):
+        _TURN_WRITE_ATTEMPTED.set(True)
     try:
         result = tool.execute(user_id, args)
     except Exception as e:

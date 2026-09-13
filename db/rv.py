@@ -178,10 +178,11 @@ def _clean_of_name(name: str) -> str:
     return n
 
 
-def list_of_fixed_income(user_id: int) -> list[dict]:
+def list_of_fixed_income(user_id: int, *, currency: str | None = None) -> list[dict]:
     """Renda fixa do banco (FIXED_INCOME: CDB/Tesouro) via Open Finance, agregada por
     nome limpo, read-only. Exclui o que virou caixinha (of_investment_id vinculado) e
-    saldo <= 0. P&L = balance − amount."""
+    saldo <= 0. P&L = balance − amount. `currency` filtra antes de agregar; sem
+    filtro preserva a consulta legada usada pelo dashboard."""
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -194,12 +195,13 @@ def list_of_fixed_income(user_id: int) -> list[dict]:
                 where c.user_id = %s
                   and upper(coalesce(i.type, '')) = 'FIXED_INCOME'
                   and coalesce(i.balance, 0) > 0
+                  and (%s::text is null or upper(coalesce(i.currency, 'BRL')) = upper(%s))
                   and not exists (
                     select 1 from pockets p
                     where p.of_investment_id = i.id and p.user_id = %s
                   )
                 """,
-                (user_id, user_id),
+                (user_id, currency, currency, user_id),
             )
             rows = [dict(r) for r in (cur.fetchall() or [])]
 
@@ -221,8 +223,8 @@ def list_of_fixed_income(user_id: int) -> list[dict]:
     return out
 
 
-def of_fixed_income_summary(user_id: int) -> dict:
-    items = list_of_fixed_income(user_id)
+def of_fixed_income_summary(user_id: int, *, currency: str | None = None) -> dict:
+    items = list_of_fixed_income(user_id, currency=currency)
     bal = sum(i["balance"] for i in items)
     inv = sum(i["invested"] for i in items)
     return {"balance": bal, "invested": inv, "pnl": bal - inv, "count": sum(i["count"] for i in items)}

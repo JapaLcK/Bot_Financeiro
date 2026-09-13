@@ -43,6 +43,10 @@ class Tool:
     ID que nem existe (LLM pode ter inventado). Sem validate, o user
     confirma achando que era real e só depois vê o 'não achei'."""
 
+    has_side_effects: bool = False
+    """Consulta que sincroniza ou aplica juros. Não é comando de escrita,
+    mas uma falha após sua tentativa não pode restituir a reserva da cota."""
+
     @property
     def name(self) -> str:
         return self.schema["function"]["name"]

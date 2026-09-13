@@ -39,6 +39,21 @@ A decisão é sempre sua.
 Toda mensagem é descritiva e devolve a decisão ao usuário ("é só o retrato — não
 é recomendação", "decisão sua"). Posicionamento + regulatório: sem palpite.
 
+## Conversa no dashboard
+
+Além dos alertas factuais, o Faria Limer responde consultas e ensina conceitos de
+renda variável e composição da carteira. Pode convidar à reflexão com base nos
+dados, como “vale avaliar diversificação”, sem indicar compra ou venda de ativos,
+produtos específicos ou ordens de ação, inclusive com linguagem indireta.
+
+Concentração não significa automaticamente inadequação: objetivos, prazo e
+completude dos dados precisam ser considerados. Renda fixa pode compor a análise
+de alocação; perguntas sobre seus produtos são encaminhadas ao Barão. Vencimentos
+de contas são encaminhados ao Carteiro. O chat não executa operações.
+
+O contexto é separado por agente e reiniciado ao recarregar a página. Regras de
+acesso, energia e cota seguem [Conversas com agentes](conversas_agentes.md).
+
 ## Arte (ligada)
 
 A arte final já está plugada e é o que aparece em produção:
