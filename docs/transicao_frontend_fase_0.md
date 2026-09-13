@@ -24,7 +24,7 @@ para visitantes.
 
 | Rota ou recurso | Situação | Contratos que uma migração não pode assumir |
 | --- | --- | --- |
-| `/` | pública, candidata após otimização | VSL bloqueia CTAs de `/cadastro`; `vsl_play`, `vsl_progress` e `vsl_unlock`; falha da mídia libera; `pb_vsl_visto`; `nav-auth.js` reescreve CTAs de sessão viva. |
+| `/` | pública, candidata após otimização | VSL opcional; CTAs de `/cadastro` sempre acionáveis; `vsl_play` e `vsl_progress`; `nav-auth.js` reescreve CTAs de sessão viva. |
 | `/como-funciona` | pública, piloto técnico proposto | Conteúdo institucional, tags injetadas pelo FastAPI, navegação convencional e `safe-area.js`. |
 | `/precos` | pública com dados e escrita | Consulta sessão e configuração de planos; inicia checkout; GA4/Meta; não é piloto estático até existir contrato de catálogo e matriz de estados. |
 | `/cadastro`, `/login`, `/completar-cadastro` | entrada | Cookies HttpOnly, CSRF, Google e deduplicação de `sign_up`/`CompleteRegistration`. |
@@ -91,7 +91,9 @@ já tem os metadados no início; a hipótese anterior de download integral de
 10,43 MiB era erro de contagem do coletor. Em comparação controlada no mesmo
 Chromium, `preload="none"` reduziu a transferência pré-interação de cerca de
 194 KB para zero e `play()` iniciou a transmissão normalmente. A fase 1 adota
-essa opção, preservando `src`, reprodução, portão de cadastro e eventos. O vídeo
+essa opção, preservando `src`, reprodução e eventos de consumo. Em 13/09/2026,
+o portão de cadastro foi removido por decisão de produto: o vídeo continua
+opcional e nenhum CTA depende de sua reprodução. O vídeo
 não é o LCP atual; o elemento observado foi o subtítulo da hero.
 
 ## Funil e medição
@@ -104,8 +106,7 @@ indica retorno do provedor e não confirma cobrança. Os eventos a preservar sã
 | --- | --- | --- |
 | visita | `page_view` / Meta `PageView` | Preservar `_ga`, `_fbp`, `_fbc`, UTMs e referenciador. |
 | início do vídeo | `vsl_play` | Uma vez por reprodução iniciada. |
-| progresso | `vsl_progress` | Marcos de 25%, 50% e 75%. |
-| desbloqueio | `vsl_unlock` | Distinguir assistiu, memória, sessão e falha de mídia. |
+| progresso | `vsl_progress` | Marcos de 25%, 50% e 75% do tempo realmente reproduzido; saltos na barra não contam. |
 | cadastro | `sign_up` / `CompleteRegistration` | Deduplicar cliente e CAPI pelo identificador existente. |
 | checkout | `begin_checkout` e `checkout_funnel_events` | Uma ação deve criar uma única solicitação. |
 | aquisição | confirmação backend/webhook | Separar teste iniciado, compra imediata e primeira cobrança posterior. |
