@@ -1,87 +1,7 @@
-import { test, before, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
-
-const root = new URL('../../frontend/', import.meta.url);
-const source = await readFile(new URL('dashboard.html', root), 'utf8');
-const panel = source.match(/<section id="agent-chat-panel"[\s\S]*?<\/section>/)[0];
-const script = await readFile(new URL('dashboard-agent-chat.js', root), 'utf8');
-const css = await readFile(new URL('dashboard.css', root), 'utf8');
-let browser;
-let screenshots;
-before(async () => {
-  screenshots = await mkdtemp(join(tmpdir(), 'pigbank-agent-chat-'));
-  browser = await chromium.launch();
-});
-after(async () => {
-  await browser?.close();
-  if (screenshots) await rm(screenshots, { recursive: true, force: true });
-});
-
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {} } = {}) {
-  const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 } });
-  const requests = [];
-  const activations = [];
-  let release;
-  const pending = new Promise(resolve => { release = resolve; });
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  const names = { detetive: 'Detetive', barao: 'Barão', xerife: 'Xerife' };
-  await page.route('https://agents.test/**', async route => {
-    const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/chat')) {
-      const body = route.request().postDataJSON();
-      requests.push({ path, ...body });
-      if (holdFirst && requests.length === 1) await pending;
-      if (body.message === 'falhar') return route.fulfill({ status: 503, json: { detail: { error: 'unavailable', message: 'Tente novamente; cota preservada.' } } });
-      return route.fulfill({ json: {
-        reply: body.message === 'Analisar cobranças' ? 'Encontrei duas cobranças de R$ 49,90 para o mesmo serviço, no mesmo dia. Isso é um indício de duplicidade. Você reconhece duas compras nesse valor?' : 'Podemos avaliar essas cobranças. <img src=x onerror=alert(1)>', context: `contexto-${requests.length}`,
-        usage: { used: requests.length, limit: 100 },
-        redirects: body.message.includes('CDI') ? [{ kind: 'barao', name: 'Barão', question: 'O que é CDI?', access: 'ready' }] : [],
-      } });
-    }
-    if (path.endsWith('/activate')) {
-      activations.push(path);
-      active.push(path.split('/')[3]);
-      return route.fulfill({ json: { ok: true } });
-    }
-    if (path === '/agents/42') return route.fulfill({ json: {
-      energy_enabled: true, energy_budget: budget, energy_used: active.length * 3,
-      can_activate: budget > 0, catalog: Object.entries(names).map(([kind, nome]) => ({
-        kind, nome, disponivel: true, status: active.includes(kind) ? 'active' : null,
-        energy_cost: 3, desc: 'Investiga assinaturas, cobranças recorrentes e lançamentos possivelmente duplicados.',
-      })), ...accessOverride,
-    } });
-    if (path === '/chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
-    if (['/dashboard-mobile.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
-    if (path === '/dashboard.css') return route.fulfill({ contentType: 'text/css', body: css });
-    if (path.startsWith('/brand/agents/')) {
-      const file = new URL(`brand/agents/${path.split('/').pop()}`, root);
-      return route.fulfill({ contentType: 'image/png', body: await readFile(file) });
-    }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/dashboard.css"><link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width:900px)"><link rel="stylesheet" href="/phosphor.css"><body><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
-      const API=''; const USER_ID=42; let _agentesCache=null;
-      function csrfHeaders(h={}){return h;}
-      function _agentName(k){return k;}
-      function navigateTo(){}
-      async function loadAgentesView(){}
-      function showUpgradeModal(){window.upgradeOpened=true;}
-      </script><script src="/chat.js"></script></body>` });
-  });
-  await page.goto('https://agents.test/');
-  await page.click('#open');
-  await page.waitForFunction(() => !document.getElementById('agent-chat-status').textContent.includes('Verificando'));
-  return { page, requests, errors, release, activations };
-}
-
-async function ask(page, text) {
-  await page.fill('#agent-chat-input', text);
-  await page.click('#agent-chat-send');
-  await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
-}
+import { setup, ask, screenshots } from './agent_chat_fixture.mjs';
 
 test('mantém contexto ao reabrir, separa agentes e limpa no reload', async () => {
   const { page, requests, errors } = await setup();
@@ -127,8 +47,8 @@ test('falha preserva pergunta e contexto para tentar novamente', async () => {
     await ask(page, 'Primeira');
     await ask(page, 'falhar');
     assert.equal(await page.inputValue('#agent-chat-input'), 'falhar');
-    assert.match(await page.textContent('#agent-chat-status'), /cota preservada/);
-    assert.equal(await page.locator('.agent-chat-message').count(), 2);
+    assert.match(await page.locator('.agent-chat-assistant[data-state="error"]').textContent(), /cota preservada/);
+    assert.equal(await page.locator('.agent-chat-message').count(), 4);
     await ask(page, 'Segunda');
     assert.equal(requests[2].context, 'contexto-1');
   } finally { await page.close(); }
@@ -154,10 +74,14 @@ test('ativa agente inativo; sem energia apresenta upsell', async () => {
 
 test('painel utilizável em desktop e celular, tema claro e escuro', async () => {
   for (const [name, viewport, light] of [
-    ['desktop', { width: 1280, height: 900 }, false],
-    ['mobile', { width: 390, height: 844 }, true],
+    ['desktop-escuro', { width: 1280, height: 900 }, false],
+    ['desktop-claro', { width: 1280, height: 900 }, true],
+    ['mobile-escuro', { width: 390, height: 844 }, false],
+    ['mobile-claro', { width: 390, height: 844 }, true],
   ]) {
-    const { page } = await setup({ viewport });
+    const { page } = await setup({ viewport, failAt: [2], failureDetail: {
+      error: 'model_timeout', message: 'O agente demorou para responder. Tente novamente.', retryable: true,
+    } });
     try {
       if (light) await page.evaluate(() => document.body.classList.add('light'));
       await ask(page, 'Analisar cobranças');
@@ -165,7 +89,33 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
       assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width);
       assert.ok(bounds.y + bounds.height <= viewport.height);
       assert.equal(await page.locator('#agent-chat-send').isVisible(), true);
-      await page.screenshot({ path: join(screenshots, `agent-chat-${name}.png`) });
+      await page.locator('#agent-chat-panel').screenshot({ path: join(screenshots, `agent-chat-${name}.png`) });
+      await ask(page, 'Há mais algum indício de duplicidade?');
+      await page.locator('#agent-chat-panel').screenshot({ path: join(screenshots, `agent-chat-${name}-erro.png`) });
+      assert.equal(await page.getByRole('button', { name: 'Tentar novamente', exact: true }).isVisible(), true);
+      assert.equal(await page.locator('#agent-chat-log').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+      const contrast = await page.locator('#agent-chat-panel').evaluate(panel => {
+        function rgba(css) {
+          const values = css.match(/[\d.]+/g).map(Number);
+          const channels = css.startsWith('color(') ? values.slice(0, 3).map(n => n * 255) : values.slice(0, 3);
+          return [...channels, values[3] ?? 1];
+        }
+        function over(color, base) {
+          return color.slice(0, 3).map((n, i) => n * color[3] + base[i] * (1 - color[3]));
+        }
+        function luminance(rgb) {
+          const linear = rgb.map(n => n / 255 <= 0.04045 ? n / 255 / 12.92 : ((n / 255 + 0.055) / 1.055) ** 2.4);
+          return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+        }
+        const pageColor = rgba(getComputedStyle(panel).backgroundColor);
+        return [...panel.querySelectorAll('.agent-chat-message > p, .agent-chat-message > b')].map(el => {
+          const background = over(rgba(getComputedStyle(el.parentElement).backgroundColor), pageColor);
+          const foreground = over(rgba(getComputedStyle(el).color), background);
+          const [low, high] = [luminance(background), luminance(foreground)].sort((a, b) => a - b);
+          return (high + 0.05) / (low + 0.05);
+        });
+      });
+      assert.ok(Math.min(...contrast) >= 4.5, `${name}: contraste mínimo ${Math.min(...contrast)}`);
       await page.press('#agent-chat-input', 'Escape');
       assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'open');
@@ -186,7 +136,7 @@ test('resposta em andamento fica no agente de origem ao trocar de chat', async (
     assert.equal(await page.locator('.agent-chat-message').count(), 0);
     assert.equal(await page.inputValue('#agent-chat-input'), 'Rascunho do Barão');
     await page.evaluate(() => openAgentChat('detetive'));
-    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-assistant[data-state="complete"]').length === 1);
     assert.deepEqual(errors, []);
   } finally { release(); await page.close(); }
 });
@@ -239,7 +189,7 @@ for (const previous of ['falha HTTP', 'falha de rede', 'sucesso bloqueado']) {
       const sent = page.waitForRequest(request => request.url().endsWith('/chat'), { timeout: 1000 });
       await page.click('#agent-chat-send');
       await sent;
-      await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+      await page.waitForFunction(() => document.querySelectorAll('.agent-chat-assistant[data-state="complete"]').length === 1);
       assert.equal(requests[0].message, 'Rascunho preservado');
     } finally { await page.close(); }
   });
@@ -306,7 +256,7 @@ test('trocar de agente descarta catálogo antigo sem perder o rascunho atual', a
     assert.equal(await page.evaluate(() => _agentesCache.energy_budget), 14);
     assert.equal(await page.inputValue('#agent-chat-input'), 'Refletir sobre renda fixa');
     await page.click('#agent-chat-send');
-    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-assistant[data-state="complete"]').length === 1);
     assert.match(requests[0].path, /barao\/chat$/);
     assert.equal(requests[0].context, null);
   } finally { await page.close(); }
@@ -321,7 +271,7 @@ test('reabrir durante envio preserva resposta e contexto da mesma conversa', asy
     await page.evaluate(() => openAgentChat('detetive'));
     assert.equal(await page.isDisabled('#agent-chat-input'), true);
     release();
-    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-assistant[data-state="complete"]').length === 1);
     await ask(page, 'Continuar a reflexão');
     assert.equal(requests[1].context, 'contexto-1');
   } finally { release(); await page.close(); }

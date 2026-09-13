@@ -1,6 +1,8 @@
 # Conversas com agentes — decisões de produto
 
-Status: primeira versão implementada e validada localmente; avaliação com a IA real e publicação não realizadas.
+Status: primeira versão publicada no PR #412. Reparo do fluxo, da recuperação de
+erros e da qualidade das respostas avaliado com IA real e dados sintéticos; ver
+[inventário do reparo](revisao_chat_agentes_conversa.md).
 
 ## Decisões confirmadas
 
@@ -28,12 +30,12 @@ Status: primeira versão implementada e validada localmente; avaliação com a I
 
 - Endpoint autenticado `POST /agents/{user_id}/{kind}/chat`, com o gate de Agentes, validação de acesso/energia e limite de 12 requisições por minuto.
 - Contexto criptografado e autenticado, vinculado ao usuário e ao agente, mantido apenas na memória da página. Não utiliza nem modifica o histórico ou as ações pendentes do chat geral. A janela de contexto inclui até 20 mensagens e o token expira após 24 horas.
-- Classificação de tema antes da resposta. Em perguntas mistas, apenas a parte própria segue para o especialista; os destinos são validados contra o catálogo.
+- Classificação estruturada por partes antes da resposta. Em perguntas mistas, apenas a parte própria segue para o especialista; os destinos são validados contra o catálogo. Perguntas inteiramente próprias preservam o texto original, e relatos de objetivo/prazo podem contextualizar a conversa.
 - Ferramentas de consulta permitidas explicitamente por agente. Despacho bloqueia ferramentas de outros temas e ferramentas de escrita, mesmo que o modelo as solicite.
-- Verificação adicional da resposta gerada quanto ao tema, alterações e indicações de operações. Essa verificação é feita por IA e não representa garantia absoluta de classificação semântica.
+- Verificação adicional da resposta gerada quanto ao tema, alterações, indicações de operações e cobertura dos dados. Uma resposta recusada pode ser corrigida uma vez e deve passar pela verificação novamente. Essa verificação é feita por IA e não representa garantia absoluta de classificação semântica.
 - Detetive consulta os mesmos sinais de duplicidades e recorrências dos alertas, sem emitir eventos. A detecção atual de duplicidades cobre a janela e o valor mínimo do detector existente; ausência de indícios não prova ausência de duplicidades.
 - Barão lê o último saldo registrado, sem aplicar juros durante a consulta. Barão e Faria Limer filtram renda fixa em BRL antes de agregar, limitam detalhes e informam a cobertura das listas. Faria Limer recebe o total integral da renda fixa manual separado da amostra. Caixinhas e outras moedas não entram nesses retratos de renda fixa: zero não prova ausência de renda fixa, nem o cadastro representa necessariamente todo o patrimônio.
-- Cota compartilhada descontada atomicamente. O chat geral reserva a vaga antes de gravar o turno ou despachar ferramentas; uma requisição sem vaga não executa alterações nem cria ações pendentes. A leitura da cota não reseta nem grava o contador: o reset ocorre no consumo atômico, e uma reserva com mês antigo não pode retroceder o período. Falhas sem tentativa de escrita ou sincronização devolvem a reserva somente no mês correspondente, inclusive se a resposta foi gerada mas não pôde ser salva no histórico. Após tentativa de escrita, a reserva é mantida para não liberar capacidade sobre uma alteração possivelmente já efetivada. Os especialistas, que só consultam, descontam após responder. Redirecionamentos puros, assuntos sem agente e falhas do chat especialista não descontam mensagens. Perguntas mistas com resposta própria descontam uma mensagem.
+- Cota compartilhada descontada atomicamente. O chat geral reserva a vaga antes de gravar o turno ou despachar ferramentas; uma requisição sem vaga não executa alterações nem cria ações pendentes. A leitura da cota não reseta nem grava o contador: o reset ocorre no consumo atômico, e uma reserva com mês antigo não pode retroceder o período. Falhas sem tentativa de escrita ou sincronização devolvem a reserva somente no mês correspondente, inclusive se a resposta foi gerada mas não pôde ser salva no histórico. Após tentativa de escrita, a reserva é mantida para não liberar capacidade sobre uma alteração possivelmente já efetivada. Os especialistas, que só consultam, descontam após responder. Redirecionamentos puros, assuntos sem agente e falhas anteriores ao consumo do chat especialista não descontam mensagens. Se falhar a confirmação do consumo, o resultado da cobrança pode ser incerto; a resposta de erro informa essa limitação sem prometer devolução. Perguntas mistas com resposta própria descontam uma mensagem.
 - Carteiro consulta contas já registradas sem gerar instâncias; Banqueiro lê caixinhas com aplicação de juros desabilitada. Argumentos do modelo não podem habilitar essas gravações. As versões do chat geral que sincronizam dados ou aplicam juros são identificadas como tendo efeitos colaterais para proteger a reserva.
 - A reserva identifica o mês e os IDs das contas que receberam o incremento. A restituição filtra essas contas e esse mês, preservando contas já esgotadas, criadas posteriormente e consumo de outras conversas. A implementação de cota fica em `db/ai_quota.py`, com a API existente preservada por `db/ai_chat.py`.
 - A variante pura do Banqueiro informa a data disponível do saldo e que não atualizou juros; progresso e metas usam o último saldo registrado. A prateleira informa `can_chat` pelo mesmo gate do backend, separado da ativação gratuita permitida no legado. Respostas antigas de abertura são descartadas antes de alterar a sessão ou o cache.
@@ -51,11 +53,11 @@ Status: primeira versão implementada e validada localmente; avaliação com a I
 ## Verificação da interface
 
 - O painel amplia a linguagem existente do dashboard: fonte da marca herdada, cores e superfícies pelos tokens locais, avatares oficiais e botões de conversa nos cartões disponíveis. `PRODUCT.md`, `DESIGN.md` e seu sidecar permanecem com o escopo original da landing, sem redefinir o dashboard.
-- O código mantém foco visível, rótulo do campo, anúncio de mensagens e estados, retorno de foco ao fechar, alvos de ação de pelo menos 44px e dimensões adaptadas à área útil no celular. O corpo da conversa usa 14px, o campo 16px e o título 17px.
+- O código mantém foco visível, rótulo do campo, anúncio de mensagens e estados, retorno de foco ao fechar, alvos de ação de pelo menos 44px e dimensões adaptadas à área útil no celular. Usuário e agente possuem bolhas próprias, incluindo espera e falha. Nova tentativa preserva o turno, o contexto e o rascunho atual.
 - A revisão visual independente aprovou as capturas desktop e celular sem achados materiais. As capturas usaram dados simulados com o HTML/CSS reais do painel; essa evidência não substitui a validação da integração com a API e a IA.
 
 
-## Validação técnica
+## Validação histórica da primeira implementação
 
 - 170 testes Python únicos aprovados entre o chat especialista, detectores, energia, ícones e regressões do chat geral; incluem concorrência na cota e consulta real de duplicidades em Postgres descartável.
 - 6 testes de navegador do chat aprovados: histórico por agente, recarga, encaminhamento, recuperação de erro, ativação/upsell, adaptação desktop/celular e resposta em andamento durante a troca de agente.
