@@ -279,4 +279,7 @@ async def agent_chat_route(request: Request, user_id: int, kind: str, body: Agen
     try:
         return await asyncio.to_thread(chat, user_id, kind, message, body.context)
     except ChatError as exc:
-        raise HTTPException(status_code=exc.status, detail={"error": exc.code, "message": str(exc)}) from None
+        raise HTTPException(status_code=exc.status, detail={
+            "error": exc.code, "message": str(exc),
+            "retryable": exc.retryable, "request_id": exc.request_id,
+        }) from None

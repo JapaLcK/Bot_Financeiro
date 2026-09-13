@@ -74,11 +74,27 @@
     for (const message of s.messages) {
       const row = document.createElement('div');
       row.className = `agent-chat-message agent-chat-${message.role}`;
+      row.dataset.state = message.state || 'complete';
+      if (message.state === 'pending') row.setAttribute('aria-busy', 'true');
       const author = document.createElement('b');
-      author.textContent = message.role === 'user' ? 'Você' : title.textContent;
+      author.textContent = message.role === 'user' ? 'Você' : message.state === 'error' ? 'Resposta não concluída' : title.textContent;
       const body = document.createElement('p');
       body.textContent = message.content;
       row.append(author, body);
+      if (message.state === 'error' && message === s.messages.at(-1)) {
+        const kind = currentKind;
+        if (message.errorCode === 'invalid_context') {
+          row.append(button('Iniciar nova conversa', () => {
+            const draft = s.draft || message.question;
+            sessions.delete(kind);
+            window.openAgentChat(kind, draft);
+          }));
+        } else if (message.retryable && s.access === 'ready') {
+          const retry = button('Tentar novamente', () => sendTurn(kind, message.question, message));
+          retry.disabled = s.busy;
+          row.append(retry);
+        }
+      }
       for (const destination of message.redirects || []) {
         const label = destination.access === 'ready' ? `Conversar com ${destination.name}`
           : destination.access === 'activate' ? `Ativar ${destination.name} e conversar`
@@ -91,20 +107,18 @@
     let note = '';
     if (s.access === 'loading') note = 'Verificando acesso ao agente…';
     if (s.access === 'activate') {
-      note = 'Ative este agente para conversar. A ativação ocupa energia do seu plano.';
+      note = s.busy ? 'Ativando agente…' : 'Ative este agente para conversar. A ativação ocupa energia do seu plano.';
       const kind = currentKind;
-      actions.append(button('Ativar e conversar', () => activate(kind)));
+      const activateButton = button(s.busy ? 'Ativando…' : 'Ativar e conversar', () => activate(kind));
+      activateButton.disabled = s.busy;
+      actions.append(activateButton);
     } else if (s.access === 'upgrade' || s.access === 'no_energy') {
       note = s.access === 'no_energy' ? 'Falta energia para este agente. O plano Pro permite manter todos ativos.' : 'Seu plano não inclui a conversa com este agente.';
       actions.append(button('Ver opções de plano', upgrade));
       if (s.access === 'no_energy') actions.append(button('Gerenciar agentes', () => { close(); navigateTo('agentes'); }));
     }
     if (s.access === 'unavailable') note = 'Não foi possível verificar o acesso. Tente abrir a conversa novamente.';
-    status.textContent = s.busy ? 'Preparando a resposta…' : (s.error || note);
-    if (s.errorCode === 'invalid_context') actions.append(button('Iniciar nova conversa', () => {
-      sessions.delete(currentKind);
-      window.openAgentChat(currentKind);
-    }));
+    status.textContent = s.error || note;
     input.disabled = s.busy || s.access !== 'ready';
     send.disabled = input.disabled;
     input.value = s.draft;
@@ -181,40 +195,60 @@
     }
   }
 
-  async function submit(event) {
+  function submit(event) {
     event.preventDefault();
     const kind = currentKind;
     if (!kind) return;
     const s = state(kind);
     const text = input.value.trim();
+    const last = s.messages.at(-1);
+    const retry = last?.state === 'error' && last.retryable && last.question === text ? last : null;
+    sendTurn(kind, text, retry);
+  }
+
+  async function sendTurn(kind, text, reply = null) {
+    const s = state(kind);
     if (s.busy || s.access !== 'ready' || !text || text.length > 2000) return;
-    s.draft = '';
+    if (reply && (reply !== s.messages.at(-1) || reply.state !== 'error')) return;
+    if (!reply || s.draft === text) s.draft = '';
     s.busy = true;
     s.error = '';
-    s.errorCode = '';
-    s.messages.push({ role: 'user', content: text });
+    if (!reply) {
+      s.messages.push({ role: 'user', content: text });
+      reply = { role: 'assistant', question: text };
+      s.messages.push(reply);
+    }
+    Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', errorCode: '', redirects: [] });
     render();
     try {
       const response = await fetch(`${API}/agents/${USER_ID}/${kind}/chat`, {
         method: 'POST', credentials: 'same-origin', headers: csrfHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ message: text, context: s.context }),
       });
-      const data = await response.json();
-      if (!response.ok) {
-        const detail = data.detail || {};
-        s.errorCode = detail.error;
-        if (['activate', 'upgrade', 'no_energy'].includes(detail.error)) s.access = detail.error;
-        throw new Error(detail.message || 'Não consegui responder agora. Tente novamente.');
+      const data = await response.json().catch(() => null);
+      if (!response.ok || typeof data?.reply !== 'string' || !data.reply.trim()) {
+        const detail = data?.detail || {};
+        const fallback = response.status === 429
+          ? 'Muitas mensagens em pouco tempo. Aguarde um instante antes de tentar novamente.'
+          : 'Não foi possível obter a resposta agora. Tente novamente em instantes.';
+        throw Object.assign(new Error(typeof detail.message === 'string' ? detail.message : fallback), {
+          chatError: true, code: detail.error,
+          retryable: detail.retryable ?? ![400, 401, 403, 404, 422].includes(response.status),
+        });
       }
       s.context = data.context;
       s.usage = data.usage;
-      s.messages.push({ role: 'assistant', content: data.reply, redirects: data.redirects || [] });
+      Object.assign(reply, { state: 'complete', content: data.reply, redirects: data.redirects || [] });
       // Sincroniza o contador visível dos agentes sem compartilhar conversas.
       for (const other of sessions.values()) other.usage = data.usage;
     } catch (error) {
-      s.messages.pop();
-      s.draft = text;
-      s.error = error.message;
+      Object.assign(reply, {
+        state: 'error', errorCode: error.code,
+        content: error.chatError ? error.message : 'A conexão foi interrompida antes de recebermos a resposta. Sua pergunta continua aqui.',
+        retryable: error.chatError ? error.retryable : true,
+      });
+      if (['activate', 'upgrade', 'no_energy'].includes(error.code)) s.access = error.code;
+      if (!s.draft) s.draft = text;
     } finally {
       s.busy = false;
       if (currentKind === kind) { render(); if (!panel.hidden && !input.disabled) input.focus(); }

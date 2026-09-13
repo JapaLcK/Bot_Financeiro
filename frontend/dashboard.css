@@ -2718,10 +2718,14 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
 .agent-chat-log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 16px; scrollbar-color: var(--text-2) transparent; }
 .agent-chat-empty { padding: 16px 0; }
 .agent-chat-empty p { margin-bottom: 20px; }
-.agent-chat-message { margin-bottom: 20px; overflow-wrap: anywhere; }
+.agent-chat-message { width: fit-content; max-width: calc(100% - 24px); margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--glass-border); border-radius: 14px; overflow-wrap: anywhere; }
 .agent-chat-message b { display: block; font-size: 12px; margin-bottom: 6px; }
-.agent-chat-message p { white-space: pre-wrap; }
-.agent-chat-user { margin-left: 32px; padding: 12px; border-radius: 12px; background: var(--glass-bg); }
+.agent-chat-message p { white-space: pre-wrap; font-size: 15px; line-height: 1.55; }
+.agent-chat-user { margin-left: auto; border-bottom-right-radius: 4px; background: color-mix(in srgb, var(--purple) 12%, var(--bg-page)); }
+.agent-chat-assistant { margin-right: auto; border-bottom-left-radius: 4px; background: var(--glass-bg); }
+.agent-chat-assistant[data-state="pending"] p { color: var(--text-2); }
+.agent-chat-assistant[data-state="error"] { border-color: color-mix(in srgb, var(--red) 55%, transparent); }
+.agent-chat-assistant[data-state="error"] > b { color: var(--red); }
 .agent-chat-action { display: block; max-width: 100%; padding: 10px 12px; min-height: 44px; margin-top: 10px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); text-align: left; }
 .agent-chat-action:hover, .ag-chat-btn:hover, .agent-chat-head > button:hover { background: var(--div); }
 .agent-chat-panel button:focus-visible, .agent-chat-panel textarea:focus-visible, .ag-chat-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
@@ -2738,5 +2742,6 @@ body.light #categories-distribution .bar-row[role="button"]:hover { background:r
 #agent-chat-usage { margin-top: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .agent-chat-panel ::selection { background: var(--purple); color: #fff; }
 @media (max-width: 600px) {
+  .agent-chat-message p { font-size: 16px; }
   .agent-chat-panel { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); height: min(720px, calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
 }
