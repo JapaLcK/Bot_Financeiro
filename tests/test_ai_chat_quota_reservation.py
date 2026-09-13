@@ -84,14 +84,19 @@ def test_erro_sem_escrita_devolve_reserva(monkeypatch, user_id):
     assert db.ai_get_recent_messages(user_id)[-1]['content'] == runner.ERROR_MSG
 
 
-def test_restituicao_antiga_nao_desconta_mes_novo(user_id):
+def test_restituicao_antiga_nao_desconta_mes_novo(monkeypatch, user_id):
     from datetime import date
-    from db.ai_chat import refund_usage
+    import db.ai_quota as quota
+    monkeypatch.setattr(quota, '_current_month_start', lambda: date(2026, 9, 1))
     with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute('insert into auth_accounts (user_id, email, ai_messages_this_month, ai_month_reset_at) values (%s, %s, 1, %s)',
-                    (user_id, f'quota-{user_id}@test.invalid', date(2026, 10, 1)))
+        cur.execute('insert into auth_accounts (user_id, email) values (%s, %s)',
+                    (user_id, f'quota-{user_id}@test.invalid'))
         conn.commit()
-    refund_usage(user_id, date(2026, 9, 1))
+    reservation = quota.reserve_usage(user_id, 1)
+    assert reservation is not None
+    monkeypatch.setattr(quota, '_current_month_start', lambda: date(2026, 10, 1))
+    assert quota.try_consume_usage(user_id, 1) == 1
+    quota.refund_usage(user_id, reservation)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute('select ai_messages_this_month from auth_accounts where user_id=%s', (user_id,))
         assert cur.fetchone()['ai_messages_this_month'] == 1

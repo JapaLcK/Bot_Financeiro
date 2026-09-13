@@ -103,10 +103,21 @@ def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) ->
                 "interest_enabled": bool(r.get("interest_enabled")),
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
+                **({"last_interest_date": r.get("last_interest_date")} if not accrue else {}),
                 **insight,
             }
         )
-    return {"pockets": pockets}
+    result = {"pockets": pockets}
+    if not accrue:
+        result["note"] = (
+            "Consulta do último saldo registrado, sem atualizar juros. Progresso, "
+            "valor restante e monthly_needed usam somente esse saldo: o retrato "
+            "não confirma o saldo nem o atingimento da meta hoje. last_interest_date "
+            "indica a última aplicação de juros internos, não a sincronização de "
+            "caixinhas do banco. Quando ausente, a data de atualização é desconhecida. "
+            "Explique essa limitação ao avaliar a meta; não invente juros posteriores."
+        )
+    return result
 
 
 # ─── Write: create_pocket ───────────────────────────────────────────────────

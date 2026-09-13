@@ -162,7 +162,7 @@ def test_resposta_com_indicacao_de_compra_e_recusada():
 def test_barao_nao_aplica_juros_ao_consultar(monkeypatch):
     monkeypatch.setattr(db, 'accrue_all_investments', lambda *a: pytest.fail('alterou investimentos'))
     monkeypatch.setattr(db, 'list_investments', lambda uid: [{'name': 'CDB', 'balance': 100}])
-    monkeypatch.setattr(db, 'list_of_fixed_income', lambda uid: [])
+    monkeypatch.setattr(db, 'list_of_fixed_income', lambda uid, *, currency=None: [])
     result = chat.execute_read(42, 'barao', 'consultar_dados_do_agente', {})
     assert result['investimentos_manuais'][0]['balance'] == 100
     assert 'list_investments' not in chat.READ_TOOLS['barao']
@@ -215,7 +215,7 @@ def test_chat_geral_usa_mesma_cota_atomica(monkeypatch, armed, reply, consumed, 
         if reply and consumed is None:
             return None
         charges.append(args)
-        return date.today().replace(day=1)
+        return quota.UsageReservation(date.today().replace(day=1), (1,), 3)
     monkeypatch.setattr(quota, 'reserve_usage', reserve)
     monkeypatch.setattr(quota, 'refund_usage', lambda *args: charges.pop())
     result = runner.chat(42, 'Como está meu mês?', monthly_limit=10)

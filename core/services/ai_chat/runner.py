@@ -214,8 +214,8 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     # A reserva vem ANTES do histórico e de qualquer ferramenta: o perdedor
     # não pode gravar lançamentos nem criar pendências e só depois ser rejeitado.
     from db.ai_chat import reserve_usage, refund_usage
-    reserved_month = reserve_usage(user_id, monthly_limit)
-    if reserved_month is None:
+    reservation = reserve_usage(user_id, monthly_limit)
+    if reservation is None:
         return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
     write_token = _TURN_WRITE_ATTEMPTED.set(False)
     final_text = ERROR_MSG
@@ -244,7 +244,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
         _TURN_WRITE_ATTEMPTED.reset(write_token)
         # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
         if (not completed or final_text == ERROR_MSG) and not attempted_write:
-            refund_usage(user_id, reserved_month)
+            refund_usage(user_id, reservation)
 
 
 def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:

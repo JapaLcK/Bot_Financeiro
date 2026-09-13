@@ -20,6 +20,7 @@ from core.services.ai_chat.tools import get_tool
 from core.services.ai_chat.runner import MODEL, MAX_TOKENS, OPENAI_TIMEOUT, OPENAI_MAX_RETRIES
 
 logger = logging.getLogger(__name__)
+SNAPSHOT_ITEMS_LIMIT = 100
 
 DOMAINS = {
     "xerife": ("Xerife", "gastos fora do padrão, gastos exorbitantes e limites de categorias"),
@@ -73,11 +74,21 @@ def encode_context(user_id: int, kind: str, messages: list[dict]) -> str:
     }, ensure_ascii=False).encode()).decode()
 
 
+def plan_allows_chat(user_id: int) -> bool:
+    """Direito de conversar, separado da ativação gratuita permitida no legado."""
+    from core.services import plan_service as plans
+    if plans.plans_v2_enabled():
+        return plans.agents_energy_budget(user_id) > 0
+    return plans.is_pro(user_id)
+
+
 def access_state(user_id: int, kind: str) -> str:
     from core.services import plan_service as plans
     from core.services.plan_limits import agent_energy_cost
     if kind not in DOMAINS:
         return "unavailable"
+    if not plan_allows_chat(user_id):
+        return "upgrade"
     agents = db.list_agents(user_id)
     active = any(a["kind"] == kind and a["status"] == "active" for a in agents)
     if plans.plans_v2_enabled():
@@ -88,9 +99,6 @@ def access_state(user_id: int, kind: str) -> str:
         # Revalida também agentes ativos após downgrade, antes do sweep.
         if used > budget or (not active and used + agent_energy_cost(kind) > budget):
             return "no_energy"
-    elif not plans.is_pro(user_id):
-        # Chat no legado segue o gate pago do chat geral.
-        return "upgrade"
     return "ready" if active else "activate"
 
 
@@ -103,6 +111,11 @@ def require_access(user_id: int, kind: str) -> None:
             "activate": "Ative este agente para iniciar a conversa.",
             "unavailable": "Agente indisponível.",
         }[state])
+
+
+def _snapshot_coverage(rows: list) -> dict:
+    return {"total": len(rows), "incluidos": min(len(rows), SNAPSHOT_ITEMS_LIMIT),
+            "truncado": len(rows) > SNAPSHOT_ITEMS_LIMIT}
 
 
 def _snapshot(user_id: int, kind: str) -> dict:
@@ -121,14 +134,24 @@ def _snapshot(user_id: int, kind: str) -> dict:
     if kind == "faria_limer":
         positions = db.list_rv_positions(user_id)
         brl = [p for p in positions if (p.get("currency") or "BRL").upper() == "BRL"]
-        return {"posicoes": positions[:100], "resumo_brl": db.rv_portfolio_summary(user_id, positions=brl),
-                "renda_fixa_brl": db.of_fixed_income_summary(user_id),
-                "renda_fixa_manual": [{"name": r["name"], "balance": r["balance"], "last_date": r.get("last_date")} for r in db.list_investments(user_id)],
-                "nota": "Não some moedas diferentes. Renda fixa serve apenas à análise de alocação; detalhes são do Barão."}
+        manual = db.list_investments(user_id)
+        return {"posicoes": positions[:SNAPSHOT_ITEMS_LIMIT], "resumo_brl": db.rv_portfolio_summary(user_id, positions=brl),
+                "renda_fixa_brl": db.of_fixed_income_summary(user_id, currency="BRL"),
+                "renda_fixa_manual": [{"name": r["name"], "balance": r["balance"], "last_date": r.get("last_date")} for r in manual[:SNAPSHOT_ITEMS_LIMIT]],
+                "resumo_renda_fixa_manual_brl": {"balance": sum(r["balance"] for r in manual), "count": len(manual)},
+                "cobertura": {"posicoes": _snapshot_coverage(positions), "renda_fixa_manual": _snapshot_coverage(manual)},
+                "cobertura_renda_fixa": {"moeda": "BRL", "outras_moedas_incluidas": False, "caixinhas_incluidas": False, "patrimonio_completo": False},
+                "nota": "Não some moedas diferentes. Não some as listas parciais para calcular alocação; os resumos abrangem todos os registros consultados. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas. Zero nesses resumos não prova ausência de renda fixa nem permite concluir a alocação total. Explicite a cobertura: o cadastro pode não representar todo o patrimônio. Renda fixa serve apenas à análise de alocação; detalhes são do Barão e caixinhas são do Banqueiro."}
     if kind == "barao":
-        return {"renda_fixa": db.list_of_fixed_income(user_id)[:100],
-                "investimentos_manuais": db.list_investments(user_id)[:100],
-                "nota": "Saldos e taxas são do último cadastro/sync (last_date), sem atualizar juros. Não são cotações atuais. Não prometa rendimentos. O rate cru depende de period/indexer; não interprete sem essas unidades."}
+        fixed_income = db.list_of_fixed_income(user_id, currency="BRL")
+        manual = db.list_investments(user_id)
+        # Os lotes podem crescer indefinidamente dentro de um investimento;
+        # saldos, taxas e suas unidades bastam para este retrato de consulta.
+        return {"renda_fixa": fixed_income[:SNAPSHOT_ITEMS_LIMIT],
+                "investimentos_manuais": [{k: v for k, v in r.items() if k != "lots"} for r in manual[:SNAPSHOT_ITEMS_LIMIT]],
+                "cobertura": {"renda_fixa": _snapshot_coverage(fixed_income), "investimentos_manuais": _snapshot_coverage(manual)},
+                "cobertura_renda_fixa": {"moeda": "BRL", "outras_moedas_incluidas": False, "caixinhas_incluidas": False, "patrimonio_completo": False},
+                "nota": "Saldos e taxas são do último cadastro/sync (last_date), sem atualizar juros. Não são cotações atuais. Não prometa rendimentos. O rate cru depende de period/indexer; não interprete sem essas unidades. Detalhes de lotes não estão incluídos. Explicite a cobertura das listas; se truncadas, não trate sua soma como total nem descarte investimentos fora da amostra. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas, tema do Banqueiro. O cadastro pode não representar todo o patrimônio."}
     # Eventos só do próprio agente; não inclui alertas de outros especialistas.
     return {"alertas": [e for e in db.list_agent_events(user_id, limit=100) if e["kind"] == kind][:20],
             "nota": "Alertas são históricos, confira os dados atuais nas ferramentas antes de afirmar valores atuais."}

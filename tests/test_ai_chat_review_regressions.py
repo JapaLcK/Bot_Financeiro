@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 import db
-import db.ai_chat as quota
+import db.ai_quota as quota
 from core.services import agent_chat
 from core.services.ai_chat import runner
 
@@ -43,7 +43,8 @@ def test_leitura_atrasada_do_mes_nao_apaga_reserva(monkeypatch, user_id):
         return Connection() if opened == 1 else original()
     monkeypatch.setattr(quota, 'get_conn', connection)
     quota.get_usage_this_month(user_id)
-    assert reserved == [date(2026, 9, 1)]
+    assert len(reserved) == 1
+    assert reserved[0].month == date(2026, 9, 1)
     assert quota.reserve_usage(user_id, 1) is None, 'leitura atrasada não pode reabrir a última vaga'
 
 
@@ -64,7 +65,7 @@ def test_banqueiro_consulta_sem_aplicar_juros(monkeypatch):
         accruals.append(accrue)
         return []
     monkeypatch.setattr(db, 'list_pockets', pockets)
-    assert agent_chat.execute_read(42, 'cofre', 'list_pockets', {}) == {'pockets': []}
+    assert agent_chat.execute_read(42, 'cofre', 'list_pockets', {})['pockets'] == []
     assert accruals == [False]
 
 

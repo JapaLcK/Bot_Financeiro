@@ -120,6 +120,7 @@
     if (panel.hidden) opener = document.activeElement;
     currentKind = kind;
     const generation = ++openGeneration;
+    const ownsOpening = () => generation === openGeneration && currentKind === kind && !panel.hidden;
     const s = state(kind);
     if (question) s.draft = question;
     s.access = 'loading';
@@ -130,20 +131,24 @@
     try {
       const response = await fetch(`${API}/agents/${USER_ID}`, { credentials: 'same-origin' });
       const data = await response.json();
+      // Fechar, trocar ou reabrir o painel invalida esta leitura inteira,
+      // inclusive o cache compartilhado e o estado que submit consulta.
+      if (!ownsOpening()) return;
       if (!response.ok) throw new Error('Não foi possível abrir o agente. Tente novamente.');
       _agentesCache = { ...data, events: _agentesCache?.events || [] };
       const card = data.catalog.find(c => c.kind === kind);
       const used = Number(data.energy_used || 0);
       const budget = Number(data.energy_budget || 0);
       s.access = !card?.disponivel ? 'unavailable'
-        : data.can_activate === false ? 'upgrade'
+        : data.can_chat === false || data.can_activate === false ? 'upgrade'
         : data.energy_enabled && (used > budget || (card.status !== 'active' && used + card.energy_cost > budget)) ? 'no_energy'
         : card.status === 'active' ? 'ready' : 'activate';
     } catch (error) {
+      if (!ownsOpening()) return;
       s.access = 'unavailable';
       s.error = error.message;
     }
-    if (generation === openGeneration && currentKind === kind && !panel.hidden) {
+    if (ownsOpening()) {
       render();
       if (!input.disabled) input.focus();
       else document.getElementById('agent-chat-close').focus();

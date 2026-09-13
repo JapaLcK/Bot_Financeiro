@@ -21,9 +21,10 @@ after(async () => {
   if (screenshots) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false } = {}) {
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {} } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 } });
   const requests = [];
+  const activations = [];
   let release;
   const pending = new Promise(resolve => { release = resolve; });
   const errors = [];
@@ -43,6 +44,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       } });
     }
     if (path.endsWith('/activate')) {
+      activations.push(path);
       active.push(path.split('/')[3]);
       return route.fulfill({ json: { ok: true } });
     }
@@ -51,7 +53,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       can_activate: budget > 0, catalog: Object.entries(names).map(([kind, nome]) => ({
         kind, nome, disponivel: true, status: active.includes(kind) ? 'active' : null,
         energy_cost: 3, desc: 'Investiga assinaturas, cobranças recorrentes e lançamentos possivelmente duplicados.',
-      })),
+      })), ...accessOverride,
     } });
     if (path === '/chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
     if (['/dashboard-mobile.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
@@ -72,7 +74,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
   await page.goto('https://agents.test/');
   await page.click('#open');
   await page.waitForFunction(() => !document.getElementById('agent-chat-status').textContent.includes('Verificando'));
-  return { page, requests, errors, release };
+  return { page, requests, errors, release, activations };
 }
 
 async function ask(page, text) {
@@ -186,5 +188,141 @@ test('resposta em andamento fica no agente de origem ao trocar de chat', async (
     await page.evaluate(() => openAgentChat('detetive'));
     await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
     assert.deepEqual(errors, []);
+  } finally { release(); await page.close(); }
+});
+
+// A entrega manual elimina timers: cada abertura só termina quando o teste
+// libera sua resposta, inclusive quando a abertura mais antiga termina por último.
+async function controlAccess(page) {
+  let receive;
+  await page.route('https://agents.test/agents/42', route => receive(route));
+  return async (kind, name) => {
+    const pending = new Promise(resolve => { receive = resolve; });
+    await page.evaluate(({ kind, name }) => {
+      window[name] = openAgentChat(kind);
+    }, { kind, name });
+    return pending;
+  };
+}
+
+function accessSnapshot({ available = true, budget = 14 } = {}) {
+  return {
+    energy_enabled: true, energy_budget: budget, energy_used: 6,
+    can_activate: budget > 0,
+    catalog: ['detetive', 'barao'].map(kind => ({
+      kind, nome: kind, disponivel: available, status: 'active', energy_cost: 3,
+    })),
+  };
+}
+
+for (const previous of ['falha HTTP', 'falha de rede', 'sucesso bloqueado']) {
+  test(`abertura antiga com ${previous} não invalida acesso e envio após reabrir`, async () => {
+    const { page, requests } = await setup();
+    try {
+      await page.fill('#agent-chat-input', 'Rascunho preservado');
+      const open = await controlAccess(page);
+      const older = await open('detetive', 'olderOpening');
+      await page.click('#agent-chat-close');
+      const newer = await open('detetive', 'newerOpening');
+      await newer.fulfill({ json: accessSnapshot() });
+      await page.evaluate(() => window.newerOpening);
+      if (previous === 'falha de rede') await older.abort('failed');
+      else await older.fulfill(previous === 'falha HTTP'
+        ? { status: 503, json: {} }
+        : { json: accessSnapshot({ budget: 0 }) });
+      await page.evaluate(() => window.olderOpening);
+
+      assert.equal(await page.isDisabled('#agent-chat-input'), false);
+      assert.equal(await page.inputValue('#agent-chat-input'), 'Rascunho preservado');
+      assert.equal(await page.evaluate(() => _agentesCache.energy_budget), 14,
+        'a resposta antiga não pode regredir o catálogo compartilhado do dashboard');
+      const sent = page.waitForRequest(request => request.url().endsWith('/chat'), { timeout: 1000 });
+      await page.click('#agent-chat-send');
+      await sent;
+      await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+      assert.equal(requests[0].message, 'Rascunho preservado');
+    } finally { await page.close(); }
+  });
+}
+
+for (const latest of ['falha', 'sem acesso']) {
+  test(`sucesso antigo não desfaz ${latest} da abertura mais recente`, async () => {
+    const { page } = await setup();
+    try {
+      const open = await controlAccess(page);
+      const older = await open('detetive', 'olderOpening');
+      await page.click('#agent-chat-close');
+      const newer = await open('detetive', 'newerOpening');
+      await newer.fulfill(latest === 'falha'
+        ? { status: 503, json: {} }
+        : { json: accessSnapshot({ budget: 0 }) });
+      await page.evaluate(() => window.newerOpening);
+      const expectedStatus = await page.textContent('#agent-chat-status');
+      await older.fulfill({ json: accessSnapshot() });
+      await page.evaluate(() => window.olderOpening);
+      assert.equal(await page.isDisabled('#agent-chat-input'), true);
+      assert.equal(await page.textContent('#agent-chat-status'), expectedStatus);
+      assert.equal(await page.evaluate(() => _agentesCache.energy_budget), latest === 'falha' ? 14 : 0);
+
+      // Força um novo render pela tentativa de submit via Enter. Mesmo que o
+      // controle pareça desabilitado, o estado de acesso também precisa negar.
+      await page.evaluate(() => {
+        document.getElementById('agent-chat-input').value = 'Não enviar';
+        document.getElementById('agent-chat-form').dispatchEvent(new Event('submit', { cancelable: true }));
+      });
+      assert.equal(await page.locator('.agent-chat-message').count(), 0);
+    } finally { await page.close(); }
+  });
+}
+
+for (const active of [true, false]) {
+  test(`Free legado ${active ? 'ativo' : 'inativo'} oferece plano sem ativar ou enviar`, async () => {
+    const { page, requests, activations } = await setup({
+      active: active ? ['detetive'] : [],
+      accessOverride: { energy_enabled: false, can_activate: true, can_chat: false },
+    });
+    try {
+      assert.equal(await page.isDisabled('#agent-chat-input'), true);
+      assert.equal(await page.getByRole('button', { name: 'Ativar e conversar', exact: true }).count(), 0);
+      await page.getByRole('button', { name: 'Ver opções de plano' }).click();
+      assert.equal(await page.evaluate(() => window.upgradeOpened), true);
+      assert.deepEqual(requests, []);
+      assert.deepEqual(activations, []);
+    } finally { await page.close(); }
+  });
+}
+
+test('trocar de agente descarta catálogo antigo sem perder o rascunho atual', async () => {
+  const { page, requests } = await setup();
+  try {
+    const open = await controlAccess(page);
+    const older = await open('detetive', 'olderOpening');
+    const newer = await open('barao', 'newerOpening');
+    await newer.fulfill({ json: accessSnapshot() });
+    await page.evaluate(() => window.newerOpening);
+    await page.fill('#agent-chat-input', 'Refletir sobre renda fixa');
+    await older.fulfill({ json: accessSnapshot({ budget: 0 }) });
+    await page.evaluate(() => window.olderOpening);
+    assert.equal(await page.evaluate(() => _agentesCache.energy_budget), 14);
+    assert.equal(await page.inputValue('#agent-chat-input'), 'Refletir sobre renda fixa');
+    await page.click('#agent-chat-send');
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+    assert.match(requests[0].path, /barao\/chat$/);
+    assert.equal(requests[0].context, null);
+  } finally { await page.close(); }
+});
+
+test('reabrir durante envio preserva resposta e contexto da mesma conversa', async () => {
+  const { page, requests, release } = await setup({ holdFirst: true });
+  try {
+    await page.fill('#agent-chat-input', 'Pergunta em andamento');
+    await page.click('#agent-chat-send');
+    await page.click('#agent-chat-close');
+    await page.evaluate(() => openAgentChat('detetive'));
+    assert.equal(await page.isDisabled('#agent-chat-input'), true);
+    release();
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-message').length === 2);
+    await ask(page, 'Continuar a reflexão');
+    assert.equal(requests[1].context, 'contexto-1');
   } finally { release(); await page.close(); }
 });

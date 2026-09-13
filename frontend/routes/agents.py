@@ -121,16 +121,18 @@ async def agents_shelf_route(request: Request, user_id: int):
     from db import agents_summary, list_agents
     from core.services.plan_limits import agent_energy_cost
     from core.services.plan_service import agents_energy_budget, plans_v2_enabled
+    from core.services.agent_chat import plan_allows_chat
 
     # Modelo de energia SÓ vale com a escada v2 ligada. Com v2 off (freio de
     # emergência), o gate legado decide (Free 1 agente / pago todos) e a UI não
     # deve mostrar medidor nem travar por energia — senão trava botões que o
     # backend legado aceitaria.
     energy_enabled = plans_v2_enabled()
-    mine, summary, multi = await asyncio.gather(
+    mine, summary, multi, can_chat = await asyncio.gather(
         asyncio.to_thread(list_agents, user_id),
         asyncio.to_thread(agents_summary, user_id),
         asyncio.to_thread(_plan_allows_multiple, user_id),
+        asyncio.to_thread(plan_allows_chat, user_id),
     )
     energy_budget = await asyncio.to_thread(agents_energy_budget, user_id) if energy_enabled else 0
     by_kind = {a["kind"]: a for a in mine}
@@ -154,7 +156,7 @@ async def agents_shelf_route(request: Request, user_id: int):
     # que abre o upgrade). Com v2 off, o gate legado libera (can_activate True).
     can_activate = (energy_budget > 0) if energy_enabled else True
     return {"ok": True, "summary": summary, "catalog": catalog,
-            "multi_allowed": multi, "can_activate": can_activate,
+            "multi_allowed": multi, "can_activate": can_activate, "can_chat": can_chat,
             "energy_enabled": energy_enabled,
             "energy_budget": int(energy_budget), "energy_used": int(energy_used)}
 

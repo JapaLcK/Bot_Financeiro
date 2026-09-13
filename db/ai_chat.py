@@ -14,10 +14,15 @@ Pending action expira após 10 minutos (limpeza lazy no get).
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .connection import get_conn
+# Mantém a API pública de cota usada pelo chat geral, especialistas e db.__init__.
+from .ai_quota import (
+    UsageReservation, get_usage_this_month, increment_usage,
+    try_consume_usage, reserve_usage, refund_usage,
+)
 
 
 PENDING_TTL_MINUTES = 10
@@ -211,69 +216,6 @@ def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
         return apagou
 
 
-# ─── Rate limit mensal ──────────────────────────────────────────────────────
-
-def _current_month_start() -> date:
-    today = date.today()
-    return today.replace(day=1)
-
-
-def get_usage_this_month(user_id: int) -> int:
-    """
-    Retorna quantas mensagens o user mandou pra IA no mês atual.
-    Somente leitura: mês anterior equivale a zero. Apenas o consumo reseta
-    o contador, atomicamente; uma leitura atrasada nunca apaga uma reserva.
-    """
-    month_start = _current_month_start()
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            select ai_messages_this_month, ai_month_reset_at
-            from auth_accounts
-            where user_id = %s
-            """,
-            (int(user_id),),
-        )
-        row = cur.fetchone()
-        if not row:
-            return 0
-
-        used = row["ai_messages_this_month"]
-        reset_at = row["ai_month_reset_at"]
-        if reset_at is None or reset_at < month_start:
-            return 0
-        return int(used or 0)
-
-
-def increment_usage(user_id: int) -> int:
-    """
-    Incrementa o contador mensal (com reset lazy) e retorna o NOVO valor.
-    Chamar APÓS processar a mensagem do user com sucesso.
-    """
-    month_start = _current_month_start()
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            update auth_accounts
-            set
-              ai_messages_this_month = case
-                when ai_month_reset_at is null or ai_month_reset_at < %s then 1
-                else ai_messages_this_month + 1
-              end,
-              ai_month_reset_at = case
-                when ai_month_reset_at is null or ai_month_reset_at < %s then %s
-                else ai_month_reset_at
-              end
-            where user_id = %s
-            returning ai_messages_this_month
-            """,
-            (month_start, month_start, month_start, int(user_id)),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return int(row["ai_messages_this_month"]) if row else 0
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Telemetria de fallback (perguntas in-scope sem tool adequada)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -300,53 +242,3 @@ def log_ai_fallback(user_id: int, question: str, ai_reason: str | None = None) -
     except Exception:
         # Telemetria silenciosa — não quebra o turno do user.
         pass
-
-
-def try_consume_usage(user_id: int, monthly_limit: int) -> int | None:
-    """Desconta uma resposta na cota compartilhada sem ultrapassar o teto.
-
-    O reset e a comparação acontecem no mesmo UPDATE, inclusive entre workers.
-    Especialistas consomem após responder; o chat geral reserva antes das tools.
-    """
-    return _consume_usage(user_id, monthly_limit, _current_month_start())
-
-
-def reserve_usage(user_id: int, monthly_limit: int) -> date | None:
-    """Reserva uma vaga e devolve seu mês para eventual restituição segura."""
-    month_start = _current_month_start()
-    return month_start if _consume_usage(user_id, monthly_limit, month_start) is not None else None
-
-
-def _consume_usage(user_id: int, monthly_limit: int, month_start: date) -> int | None:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            update auth_accounts
-            set ai_messages_this_month = case
-                  when ai_month_reset_at is null or ai_month_reset_at < %s then 1
-                  else coalesce(ai_messages_this_month, 0) + 1 end,
-                ai_month_reset_at = %s
-            where user_id = %s
-              and (ai_month_reset_at is null or ai_month_reset_at <= %s)
-              and (case
-                  when ai_month_reset_at is null or ai_month_reset_at < %s then 0
-                  else coalesce(ai_messages_this_month, 0) end) < %s
-            returning ai_messages_this_month
-            """,
-            (month_start, month_start, int(user_id), month_start, month_start, int(monthly_limit)),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return int(row["ai_messages_this_month"]) if row else None
-
-
-def refund_usage(user_id: int, reserved_month: date) -> None:
-    """Devolve uma reserva sem subtrair mensagens de um mês posterior."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """update auth_accounts
-               set ai_messages_this_month = greatest(0, coalesce(ai_messages_this_month, 0) - 1)
-               where user_id = %s and ai_month_reset_at = %s""",
-            (int(user_id), reserved_month),
-        )
-        conn.commit()
