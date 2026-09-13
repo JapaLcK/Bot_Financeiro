@@ -1,6 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const root = new URL('../../frontend/', import.meta.url);
@@ -9,8 +11,15 @@ const panel = source.match(/<section id="agent-chat-panel"[\s\S]*?<\/section>/)[
 const script = await readFile(new URL('dashboard-agent-chat.js', root), 'utf8');
 const css = await readFile(new URL('dashboard.css', root), 'utf8');
 let browser;
-before(async () => { browser = await chromium.launch(); });
-after(async () => { await browser?.close(); });
+let screenshots;
+before(async () => {
+  screenshots = await mkdtemp(join(tmpdir(), 'pigbank-agent-chat-'));
+  browser = await chromium.launch();
+});
+after(async () => {
+  await browser?.close();
+  if (screenshots) await rm(screenshots, { recursive: true, force: true });
+});
 
 async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false } = {}) {
   const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 } });
@@ -154,7 +163,7 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
       assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width);
       assert.ok(bounds.y + bounds.height <= viewport.height);
       assert.equal(await page.locator('#agent-chat-send').isVisible(), true);
-      await page.screenshot({ path: `/private/tmp/agent-chat-${name}.png` });
+      await page.screenshot({ path: join(screenshots, `agent-chat-${name}.png`) });
       await page.press('#agent-chat-input', 'Escape');
       assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'open');
