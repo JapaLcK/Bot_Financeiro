@@ -81,7 +81,7 @@ def test_redirecionamento_puro_nao_consulta_dados_nem_desconta(monkeypatch, arme
 
 def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
     monkeypatch.setattr(chat, '_route', lambda *a: {'own_question': 'Há duplicatas?', 'redirects': [{'kind': 'barao', 'question': 'O que é CDI?'}], 'outside': False})
-    def answer(client, uid, kind, question, history):
+    def answer(client, uid, kind, question, history, *, needs_data=False):
         assert question == 'Há duplicatas?'
         assert history == []
         return 'Há indícios que podemos conferir.'
@@ -93,10 +93,11 @@ def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
 
 
 def test_falha_na_ia_nao_desconta(monkeypatch, armed):
-    monkeypatch.setattr(chat, '_route', lambda *a: (_ for _ in ()).throw(ValueError('failure')))
+    monkeypatch.setattr(chat, '_route', lambda *a: (_ for _ in ()).throw(chat.ModelResponseError('failure')))
     with pytest.raises(chat.ChatError) as exc:
         chat.chat(42, 'detetive', 'Há duplicatas?')
-    assert exc.value.status == 503
+    assert exc.value.status == 502
+    assert exc.value.code == 'invalid_model_response'
     assert armed == []
 
 
@@ -117,7 +118,7 @@ def test_detetive_consulta_duplicidades_sem_emitir_alertas(monkeypatch):
 
 
 def test_classificador_descarta_destinos_invalidos():
-    output = {'own_question': '', 'redirects': [{'kind': 'admin', 'question': 'x'}, {'kind': 'barao', 'question': 'CDI'}]}
+    output = {'parts': [{'kind': 'admin', 'question': 'x', 'needs_data': False}, {'kind': 'barao', 'question': 'CDI', 'needs_data': False}]}
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(output)))]))))
     assert chat._route(client, 'detetive', 'CDI', [])['redirects'] == [{'kind': 'barao', 'question': 'CDI'}]
 
