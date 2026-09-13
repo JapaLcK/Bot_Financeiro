@@ -24,3 +24,12 @@ Período em que a página permanece carregada: fechar e reabrir o painel preserv
 
 **Upsell de agentes**:
 Oferta de ampliação de acesso quando o usuário precisa de um agente não liberado ou não possui energia suficiente para utilizá-lo.
+
+
+**Conversa com o Piggy**:
+Atendimento geral sobre as finanças do usuário, incluindo consultas e ações financeiras disponíveis no produto.
+_Evitar_: conversa especialista.
+
+**Cota de mensagens**:
+Limite de uso compartilhado entre as conversas com o Piggy e com os agentes, conforme o plano.
+_Evitar_: energia por mensagem.

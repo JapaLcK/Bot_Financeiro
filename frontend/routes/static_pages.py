@@ -608,6 +608,25 @@ async def serve_dashboard_chat_js():
     )
 
 
+@router.get("/chat-app.js")
+async def serve_chat_app_js():
+    """Ilha React compartilhada dos chats; revalidação acompanha o HTML."""
+    return FileResponse(
+        FRONTEND_DIR / "chat-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/chat-app.css")
+async def serve_chat_app_css():
+    return FileResponse(
+        FRONTEND_DIR / "chat-app.css",
+        media_type="text/css",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard.css")
 async def serve_dashboard_css():
     """CSS do dashboard, extraído do inline de dashboard.html.

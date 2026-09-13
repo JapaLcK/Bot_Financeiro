@@ -8,7 +8,7 @@ test('mantém contexto ao reabrir, separa agentes e limpa no reload', async () =
   try {
     await ask(page, 'Duplicidades?');
     assert.equal(requests[0].context, null);
-    assert.equal(await page.locator('#agent-chat-log img').count(), 0, 'resposta precisa ser texto, nunca HTML');
+    assert.equal(await page.locator('#agent-chat-log img[src="x"], #agent-chat-log [onerror]').count(), 0, 'resposta não pode executar HTML recebido');
     await page.click('#agent-chat-close');
     await page.click('#open');
     assert.equal(await page.locator('.agent-chat-message').count(), 2);
@@ -38,6 +38,9 @@ test('encaminha pergunta preenchida sem envio automático nem histórico', async
     await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
     assert.equal(requests[1].context, null);
     assert.match(requests[1].path, /barao/);
+    await page.click('#agent-chat-close');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'open',
+      'encaminhar e remontar a conversa não pode perder o botão que abriu o painel');
   } finally { await page.close(); }
 });
 
@@ -108,13 +111,19 @@ test('painel utilizável em desktop e celular, tema claro e escuro', async () =>
           return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
         }
         const pageColor = rgba(getComputedStyle(panel).backgroundColor);
-        return [...panel.querySelectorAll('.agent-chat-message > p, .agent-chat-message > b')].map(el => {
-          const background = over(rgba(getComputedStyle(el.parentElement).backgroundColor), pageColor);
-          const foreground = over(rgba(getComputedStyle(el).color), background);
-          const [low, high] = [luminance(background), luminance(foreground)].sort((a, b) => a - b);
-          return (high + 0.05) / (low + 0.05);
+        return [...panel.querySelectorAll('.agent-chat-message .pc-message-content, .agent-chat-message .pc-message-author')].map(el => {
+          const bubbleStyle = getComputedStyle(el.parentElement);
+          const gradientStops = bubbleStyle.backgroundImage.match(/rgba?\([^)]+\)/g);
+          const backgrounds = gradientStops || [bubbleStyle.backgroundColor];
+          return Math.min(...backgrounds.map(color => {
+            const background = over(rgba(color), pageColor);
+            const foreground = over(rgba(getComputedStyle(el).color), background);
+            const [low, high] = [luminance(background), luminance(foreground)].sort((a, b) => a - b);
+            return (high + 0.05) / (low + 0.05);
+          }));
         });
       });
+      assert.ok(contrast.length >= 4, 'a medição precisa alcançar conteúdo e autoria das bolhas reais');
       assert.ok(Math.min(...contrast) >= 4.5, `${name}: contraste mínimo ${Math.min(...contrast)}`);
       await page.press('#agent-chat-input', 'Escape');
       assert.equal(await page.locator('#agent-chat-panel').isHidden(), true);

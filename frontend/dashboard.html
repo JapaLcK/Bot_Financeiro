@@ -29,6 +29,7 @@
 <script defer src="/launch-type-labels.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script defer src="/app-mode.js?v=34"></script>
+<link rel="stylesheet" href="/chat-app.css?v=1" />
 </head>
 <body class="has-sidenav">
 
@@ -1588,56 +1589,10 @@
   <span class="fab-badge" id="piggy-fab-badge"></span>
 </button>
 
-<div id="piggy-panel" role="dialog" aria-labelledby="piggy-title" aria-modal="false">
-  <div class="piggy-head">
-    <div class="avatar"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
-    <div class="title">
-      <b id="piggy-title">Piggy</b>
-      <small id="piggy-sub">IA das suas finanças</small>
-    </div>
-    <button class="close-btn" type="button" aria-label="Fechar" onclick="closePiggy()">×</button>
-  </div>
-  <div class="piggy-body" id="piggy-body">
-    <div class="piggy-empty" id="piggy-empty">
-      <div class="big"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
-      <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
-      <div class="piggy-suggestions">
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')"><i class="ph ph-trend-down" aria-hidden="true"></i> Quanto eu gastei esse mês?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')"><i class="ph ph-chart-pie" aria-hidden="true"></i> Quais minhas maiores categorias?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')"><i class="ph ph-wallet" aria-hidden="true"></i> Quanto tenho de saldo?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')"><i class="ph ph-receipt" aria-hidden="true"></i> Mostra meus últimos lançamentos</button>
-      </div>
-    </div>
-  </div>
-  <div class="piggy-foot">
-    <div class="piggy-input-row">
-      <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
-      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
-    </div>
-    <div class="piggy-usage" id="piggy-usage"></div>
-  </div>
-</div>
-
-<script defer src="/dashboard-chat.js"></script>
-
-<section id="agent-chat-panel" class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title" hidden>
-  <header class="agent-chat-head">
-    <img id="agent-chat-avatar" alt="" width="48" height="48">
-    <div><h2 id="agent-chat-title">Conversa com agente</h2><p id="agent-chat-subtitle"></p></div>
-    <button id="agent-chat-close" type="button" aria-label="Fechar conversa"><i class="ph ph-x" aria-hidden="true"></i></button>
-  </header>
-  <div id="agent-chat-log" class="agent-chat-log" role="log" aria-label="Mensagens da conversa" aria-live="polite" aria-relevant="additions"></div>
-  <div class="agent-chat-feedback"><p id="agent-chat-status" role="status"></p><div id="agent-chat-actions"></div></div>
-  <form id="agent-chat-form" class="agent-chat-foot">
-    <label for="agent-chat-input">Sua pergunta</label>
-    <div class="agent-chat-compose">
-      <textarea id="agent-chat-input" rows="2" maxlength="2000" placeholder="Pergunte sobre o meu tema…"></textarea>
-      <button id="agent-chat-send" type="submit" aria-label="Enviar pergunta"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
-    </div>
-    <p id="agent-chat-usage"></p>
-  </form>
-</section>
-<script defer src="/dashboard-agent-chat.js"></script>
+<div id="pigbank-chat-root"></div>
+<script defer src="/chat-app.js?v=1"></script>
+<script defer src="/dashboard-chat.js?v=1"></script>
+<script defer src="/dashboard-agent-chat.js?v=1"></script>
 
 </body>
 </html>

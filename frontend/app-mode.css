@@ -591,18 +591,7 @@ html.pb-app .user-dropdown {
 }
 
 /* Flutuantes (FAB do chat, toast) sobem acima da tab bar */
-/* O painel do chat é o par do FAB: mover só o botão deixaria o painel (e o
-   X de fechar) na área insegura. A altura conta também — a regra de ≤560px
-   do dashboard usa height:calc(100vh - 100px), o que põe o topo sob o
-   status bar quando o inset é real. */
-html.pb-app #piggy-panel {
-  right: calc(22px + env(safe-area-inset-right)) !important;
-  bottom: calc(88px + env(safe-area-inset-bottom)) !important;
-  width: min(400px, calc(100vw - 32px
-    - env(safe-area-inset-left) - env(safe-area-inset-right))) !important;
-  height: min(580px, calc(100vh - 130px
-    - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
-}
+/* Geometria dos painéis de conversa: chat-app.css, inclusive safe areas. */
 html.pb-app #piggy-fab {
   bottom: calc(84px + env(safe-area-inset-bottom)) !important;
   right: calc(14px + env(safe-area-inset-right)) !important;

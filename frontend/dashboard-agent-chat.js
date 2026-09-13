@@ -3,19 +3,11 @@
 (function () {
   const sessions = new Map();
   let currentKind = null;
-  let opener = null;
   let openGeneration = 0;
-  const panel = document.getElementById('agent-chat-panel');
-  if (!panel) return;
-  const title = document.getElementById('agent-chat-title');
-  const subtitle = document.getElementById('agent-chat-subtitle');
-  const avatar = document.getElementById('agent-chat-avatar');
-  const log = document.getElementById('agent-chat-log');
-  const input = document.getElementById('agent-chat-input');
-  const send = document.getElementById('agent-chat-send');
-  const status = document.getElementById('agent-chat-status');
-  const actions = document.getElementById('agent-chat-actions');
-  const usage = document.getElementById('agent-chat-usage');
+  let messageSequence = 0;
+  let registered = false;
+  const ui = window.PigBankChatUI;
+  if (!ui) return;
   const questions = {
     xerife: 'Algum gasto fugiu do meu padrão?',
     detetive: 'Há lançamentos que parecem duplicados?',
@@ -30,118 +22,86 @@
     if (!sessions.has(kind)) sessions.set(kind, { messages: [], context: null, draft: '', busy: false, access: 'loading', error: '', usage: null });
     return sessions.get(kind);
   }
-  function button(label, callback) {
-    const el = document.createElement('button');
-    el.type = 'button';
-    el.className = 'agent-chat-action';
-    el.textContent = label;
-    el.addEventListener('click', callback);
-    return el;
-  }
-  function saveDraft() {
-    if (currentKind) state(currentKind).draft = input.value;
-  }
   function close() {
-    saveDraft();
-    ++openGeneration;
-    panel.hidden = true;
-    if (opener?.isConnected) opener.focus();
+    ui.close('agent');
   }
   function upgrade() {
     close();
     showUpgradeModal('agents');
   }
-  function render() {
-    if (!currentKind) return;
-    const s = state(currentKind);
-    const card = ((_agentesCache || {}).catalog || []).find(c => c.kind === currentKind);
-    title.textContent = card?.nome || _agentName(currentKind);
-    subtitle.textContent = 'Consultas e ideias sobre o meu tema';
-    avatar.src = `/brand/agents/${currentKind}.png?v=3`;
-    log.replaceChildren();
-    if (!s.messages.length) {
-      const empty = document.createElement('div');
-      empty.className = 'agent-chat-empty';
-      const intro = document.createElement('p');
-      intro.textContent = card?.desc || 'Posso ajudar com perguntas sobre meu tema.';
-      empty.append(intro, button(questions[currentKind] || 'Como você pode me ajudar?', () => {
-        input.value = questions[currentKind] || 'Como você pode me ajudar?';
-        s.draft = input.value;
-        input.focus();
-      }));
-      log.append(empty);
-    }
-    for (const message of s.messages) {
-      const row = document.createElement('div');
-      row.className = `agent-chat-message agent-chat-${message.role}`;
-      row.dataset.state = message.state || 'complete';
-      if (message.state === 'pending') row.setAttribute('aria-busy', 'true');
-      const author = document.createElement('b');
-      author.textContent = message.role === 'user' ? 'Você' : message.state === 'error' ? 'Resposta não concluída' : title.textContent;
-      const body = document.createElement('p');
-      body.textContent = message.content;
-      row.append(author, body);
-      if (message.state === 'error' && message === s.messages.at(-1)) {
-        const kind = currentKind;
+  function view() {
+    const kind = currentKind;
+    const s = state(kind);
+    const card = ((_agentesCache || {}).catalog || []).find(c => c.kind === kind);
+    const name = card?.nome || _agentName(kind);
+    const messages = s.messages.map(message => {
+      const actions = [];
+      if (message.state === 'error' && message === s.messages[s.messages.length - 1]) {
         if (message.errorCode === 'invalid_context') {
-          row.append(button('Iniciar nova conversa', () => {
+          actions.push({ label: 'Iniciar nova conversa', onClick: () => {
             const draft = s.draft || message.question;
             sessions.delete(kind);
             window.openAgentChat(kind, draft);
-          }));
+          } });
         } else if (message.retryable && s.access === 'ready') {
-          const retry = button('Tentar novamente', () => sendTurn(kind, message.question, message));
-          retry.disabled = s.busy;
-          row.append(retry);
+          actions.push({ label: 'Tentar novamente', onClick: () => sendTurn(kind, message.question, message), disabled: s.busy });
         }
       }
       for (const destination of message.redirects || []) {
         const label = destination.access === 'ready' ? `Conversar com ${destination.name}`
           : destination.access === 'activate' ? `Ativar ${destination.name} e conversar`
           : `Ver acesso a ${destination.name}`;
-        row.append(button(label, () => window.openAgentChat(destination.kind, destination.question)));
+        actions.push({ label, onClick: () => window.openAgentChat(destination.kind, destination.question) });
       }
-      log.append(row);
-    }
-    actions.replaceChildren();
+      return { ...message, actions, author: message.role === 'user' ? 'Você'
+        : message.state === 'error' ? 'Resposta não concluída' : name };
+    });
+    const actions = [];
     let note = '';
     if (s.access === 'loading') note = 'Verificando acesso ao agente…';
     if (s.access === 'activate') {
       note = s.busy ? 'Ativando agente…' : 'Ative este agente para conversar. A ativação ocupa energia do seu plano.';
-      const kind = currentKind;
-      const activateButton = button(s.busy ? 'Ativando…' : 'Ativar e conversar', () => activate(kind));
-      activateButton.disabled = s.busy;
-      actions.append(activateButton);
+      actions.push({ label: s.busy ? 'Ativando…' : 'Ativar e conversar', onClick: () => activate(kind), disabled: s.busy });
     } else if (s.access === 'upgrade' || s.access === 'no_energy') {
       note = s.access === 'no_energy' ? 'Falta energia para este agente. O plano Pro permite manter todos ativos.' : 'Seu plano não inclui a conversa com este agente.';
-      actions.append(button('Ver opções de plano', upgrade));
-      if (s.access === 'no_energy') actions.append(button('Gerenciar agentes', () => { close(); navigateTo('agentes'); }));
+      actions.push({ label: 'Ver opções de plano', onClick: upgrade });
+      if (s.access === 'no_energy') actions.push({ label: 'Gerenciar agentes', onClick: () => { close(); navigateTo('agentes'); } });
     }
     if (s.access === 'unavailable') note = 'Não foi possível verificar o acesso. Tente abrir a conversa novamente.';
-    status.textContent = s.error || note;
-    input.disabled = s.busy || s.access !== 'ready';
-    send.disabled = input.disabled;
-    input.value = s.draft;
-    usage.textContent = s.usage
-      ? `${s.usage.used.toLocaleString('pt-BR')} de ${s.usage.limit.toLocaleString('pt-BR')} mensagens da cota compartilhada. Recarregar limpa a conversa.`
-      : 'Cota compartilhada com o Piggy. Recarregar limpa a conversa.';
-    log.scrollTop = log.scrollHeight;
+    return {
+      conversationId: kind, title: name, subtitle: 'Consultas e ideias sobre o meu tema',
+      avatar: `/brand/agents/${kind}.png?v=3`, messages, draft: s.draft,
+      disabled: s.busy || s.access !== 'ready', status: s.error || note, actions,
+      emptyText: card?.desc || 'Posso ajudar com perguntas sobre meu tema.',
+      suggestions: [{ label: questions[kind], onClick: () => {
+        s.draft = questions[kind];
+        render();
+        ui.focusInput('agent');
+      } }],
+      usage: s.usage
+        ? `${s.usage.used.toLocaleString('pt-BR')} de ${s.usage.limit.toLocaleString('pt-BR')} mensagens da cota compartilhada. Recarregar limpa a conversa.`
+        : 'Cota compartilhada com o Piggy. Recarregar limpa a conversa.',
+      onDraftChange: value => { s.draft = value; render(); },
+      onSend: submit,
+      onHidden: () => { ++openGeneration; },
+    };
+  }
+  function render() {
+    if (currentKind) ui.update('agent', view());
   }
 
   window.openAgentChat = async function (kind, question = '') {
-    if (!Object.hasOwn(questions, kind)) return;
-    saveDraft();
-    if (panel.hidden) opener = document.activeElement;
+    if (!Object.prototype.hasOwnProperty.call(questions, kind)) return;
     currentKind = kind;
     const generation = ++openGeneration;
-    const ownsOpening = () => generation === openGeneration && currentKind === kind && !panel.hidden;
+    const ownsOpening = () => generation === openGeneration && currentKind === kind && ui.isOpen('agent');
     const s = state(kind);
     if (question) s.draft = question;
     s.access = 'loading';
     s.error = '';
-    panel.hidden = false;
-    if (window.closePiggy) window.closePiggy();
-    render();
+    if (!registered) { ui.register('agent', view()); registered = true; }
+    else render();
+    ui.open('agent');
     try {
       const response = await fetch(`${API}/agents/${USER_ID}`, { credentials: 'same-origin' });
       const data = await response.json();
@@ -164,8 +124,7 @@
     }
     if (ownsOpening()) {
       render();
-      if (!input.disabled) input.focus();
-      else document.getElementById('agent-chat-close').focus();
+      ui.focusInput('agent');
     }
   };
 
@@ -191,17 +150,16 @@
       s.error = 'Não foi possível ativar o agente. Tente novamente.';
     } finally {
       s.busy = false;
-      if (currentKind === kind) { render(); if (!panel.hidden && !input.disabled) input.focus(); }
+      if (currentKind === kind) { render(); if (ui.isOpen('agent')) ui.focusInput('agent'); }
     }
   }
 
-  function submit(event) {
-    event.preventDefault();
+  function submit() {
     const kind = currentKind;
     if (!kind) return;
     const s = state(kind);
-    const text = input.value.trim();
-    const last = s.messages.at(-1);
+    const text = s.draft.trim();
+    const last = s.messages[s.messages.length - 1];
     const retry = last?.state === 'error' && last.retryable && last.question === text ? last : null;
     sendTurn(kind, text, retry);
   }
@@ -209,13 +167,13 @@
   async function sendTurn(kind, text, reply = null) {
     const s = state(kind);
     if (s.busy || s.access !== 'ready' || !text || text.length > 2000) return;
-    if (reply && (reply !== s.messages.at(-1) || reply.state !== 'error')) return;
+    if (reply && (reply !== s.messages[s.messages.length - 1] || reply.state !== 'error')) return;
     if (!reply || s.draft === text) s.draft = '';
     s.busy = true;
     s.error = '';
     if (!reply) {
-      s.messages.push({ role: 'user', content: text });
-      reply = { role: 'assistant', question: text };
+      s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text });
+      reply = { id: `agent-${++messageSequence}`, role: 'assistant', question: text };
       s.messages.push(reply);
     }
     Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', errorCode: '', redirects: [] });
@@ -251,20 +209,11 @@
       if (!s.draft) s.draft = text;
     } finally {
       s.busy = false;
-      if (currentKind === kind) { render(); if (!panel.hidden && !input.disabled) input.focus(); }
+      if (currentKind === kind) { render(); if (ui.isOpen('agent')) ui.focusInput('agent'); }
     }
   }
   document.getElementById('agentes-shelf')?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-agent-chat]');
     if (trigger) window.openAgentChat(trigger.dataset.agentChat);
-  });
-  document.getElementById('agent-chat-close').addEventListener('click', close);
-  document.getElementById('agent-chat-form').addEventListener('submit', submit);
-  input.addEventListener('input', saveDraft);
-  input.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) submit(event);
-  });
-  panel.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.stopPropagation(); close(); }
   });
 })();

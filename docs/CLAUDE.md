@@ -407,24 +407,17 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   não SPA: Vite + React 19 em `webapp/` (projeto npm separado), um bundle por
   página, saída de nome FIXO e sem hash em `frontend/`, **artefato commitado** —
   porque não há `StaticFiles` mount e cada asset precisa de rota escrita à mão.
-  Hoje existe UMA ilha: `frontend/precos-app.js` + `.css`, que renderiza só o
-  `#plans-v2` da `/precos`. Todo o resto daquela página — o `#comparar`, o
-  `<head>`, os ~420 linhas de `<script>` inline — continua sendo o clássico, e o
-  resto do site também. Regras da convenção: **IIFE, nunca `type="module"`**
-  (módulo é deferido e reintroduz corrida com script clássico da página), mount
-  síncrono com `flushSync`, e o componente **lê os dados do markup** em vez de
-  trazer literal — no caso da `/precos` isso é o que impede uma quarta cópia do
-  preço (§0.7). **CSS da ilha é CSS comum** — importado pelo `main.jsx`, emitido
-  como `frontend/precos-app.css` e consumindo os tokens que a página já carrega
-  (`var(--pink-dark)` e irmãos, do `site.css`/`brand.css`). **Sem Tailwind**: o
-  plano da primeira ilha previa, e ele foi abandonado porque utilitário novo não
-  paga onde já existe sistema de design — sem este parágrafo, a próxima ilha
-  reabre o assunto lendo o plano. O artefato commitado tem gate próprio no CI (job `frontend`): o
-  step REBUILDA (`npm --prefix webapp ci && npm --prefix webapp run build`) e
-  reprova se `git status --porcelain -- frontend/` não ficar limpo. Só o build
-  prova que o bundle commitado veio das fontes commitadas — um carimbo de hash das
-  fontes, que é o que existiu aqui por um commit, prova apenas que as fontes não
-  mudaram desde o último carimbo, e era falsificável sem buildar. Dep nova aqui
-  exige rebuildar e commitar `frontend/precos-app.*` no mesmo commit.
+  As ilhas de preços e dos chats convivem com os scripts clássicos. A convenção
+  é IIFE, mount síncrono com `flushSync` e propriedade exclusiva do trecho
+  renderizado pelo React: controladores publicam estado, sem alterar seus nós.
+  Preços continuam vindo do markup, evitando duplicar regras comerciais.
+  A ilha de preços usa CSS comum e os tokens da página. A integração dos chats,
+  solicitada explicitamente pelo usuário, usa TypeScript e Tailwind 3.4 com
+  prefixo, sem Preflight e com processamento de CSS exclusivo dessa ilha;
+  [a decisão](adr/0001-interface-compartilhada-dos-chats.md) registra o alcance.
+  Ao alterar o build, preserve o alvo Safari 14 nos artefatos JS e CSS e
+  `emptyOutDir: false`: o destino é o diretório do site.
+  O gate do CI recompila `webapp/` e exige artefatos idênticos aos commitados.
+  Dependências novas exigem rebuild e inclusão dos artefatos afetados no commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar
   framework em página nova por gosto, ou pôr script `build` na raiz.
