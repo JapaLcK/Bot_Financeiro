@@ -6,7 +6,10 @@ import { chromium } from 'playwright';
 
 const root = new URL('../../frontend/', import.meta.url);
 const source = await readFile(new URL('dashboard.html', root), 'utf8');
-const panel = source.match(/<section id="agent-chat-panel"[\s\S]*?<\/section>/)[0];
+const panel = source.match(/<div id="pigbank-chat-root"><\/div>/)?.[0];
+if (!panel) throw new Error('Dashboard não inclui a ilha React do chat.');
+const scripts = [...source.matchAll(/<script\b[^>]*src="\/(?:chat-app|dashboard-chat|dashboard-agent-chat)\.js[^"\s]*"[^>]*><\/script>/g)].map(match => match[0]).join('');
+const styles = [...source.matchAll(/<link\b[^>]*href="\/(?:dashboard|dashboard-mobile|phosphor|app-mode|chat-app)\.css[^"\s]*"[^>]*>/g)].map(match => match[0]).join('');
 const script = await readFile(new URL('dashboard-agent-chat.js', root), 'utf8');
 const css = await readFile(new URL('dashboard.css', root), 'utf8');
 let browser;
@@ -21,10 +24,14 @@ after(async () => {
   if (screenshots && !process.env.PIGBANK_CHAT_SCREENSHOTS) await rm(screenshots, { recursive: true, force: true });
 });
 
-async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503 } = {}) {
-  const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 } });
+async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, holdFirst = false, accessOverride = {}, failAt = [], failureDetail, failureStatus = 503, openAgent = true, piggyReply = "**Seu resumo** está pronto.", holdPiggy = false, pro = true, reducedMotion, hasTouch = false } = {}) {
+  const page = await browser.newPage({ viewport: viewport || { width: 1280, height: 900 }, reducedMotion, hasTouch });
   const requests = [];
   const activations = [];
+  const piggyRequests = [];
+  const usageRequests = [];
+  let releasePiggy;
+  const piggyPending = new Promise(resolve => { releasePiggy = resolve; });
   let release;
   const pending = new Promise(resolve => { release = resolve; });
   const errors = [];
@@ -32,6 +39,15 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
   const names = { detetive: 'Detetive', barao: 'Barão', xerife: 'Xerife' };
   await page.route('https://agents.test/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/ai/messages') {
+      usageRequests.push(path);
+      return route.fulfill({ json: { messages: [{ role: 'assistant', content: 'Histórico de outro canal' }], usage: { used: 81, limit: 100 } } });
+    }
+    if (path === '/ai/chat') {
+      piggyRequests.push(route.request().postDataJSON());
+      if (holdPiggy) await piggyPending;
+      return route.fulfill({ json: { reply: piggyReply, usage: { used: 82, limit: 100 } } });
+    }
     if (path.endsWith('/chat')) {
       const body = route.request().postDataJSON();
       requests.push({ path, ...body });
@@ -55,26 +71,32 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
         energy_cost: 3, desc: 'Investiga assinaturas, cobranças recorrentes e lançamentos possivelmente duplicados.',
       })), ...accessOverride,
     } });
-    if (path === '/chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
-    if (['/dashboard-mobile.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
+    if (path === '/dashboard-agent-chat.js') return route.fulfill({ contentType: 'application/javascript', body: script });
+    if (['/chat-app.js', '/dashboard-chat.js'].includes(path)) return route.fulfill({ contentType: 'application/javascript', body: await readFile(new URL(path.slice(1), root)) });
+    if (path === '/chat-app.css') return route.fulfill({ contentType: 'text/css', body: await readFile(new URL('chat-app.css', root)) });
+    if (['/dashboard-mobile.css', '/app-mode.css', '/phosphor.css', '/fonts/Phosphor.woff2'].includes(path)) return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'font/woff2', body: await readFile(new URL(path.slice(1), root)) });
     if (path === '/dashboard.css') return route.fulfill({ contentType: 'text/css', body: css });
-    if (path.startsWith('/brand/agents/')) {
-      const file = new URL(`brand/agents/${path.split('/').pop()}`, root);
-      return route.fulfill({ contentType: 'image/png', body: await readFile(file) });
+    if (path.startsWith('/brand/')) {
+      const file = new URL(path.slice(1), root);
+      return route.fulfill({ contentType: path.endsWith('.webp') ? 'image/webp' : 'image/png', body: await readFile(file) });
     }
-    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/dashboard.css"><link rel="stylesheet" href="/dashboard-mobile.css" media="(max-width:900px)"><link rel="stylesheet" href="/phosphor.css"><body><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${styles}<body><button id="piggy-fab" aria-label="Abrir Piggy IA">Piggy</button><div id="agentes-shelf"><button id="open" data-agent-chat="detetive">Conversar com Detetive</button></div>${panel}<script>
       const API=''; const USER_ID=42; let _agentesCache=null;
       function csrfHeaders(h={}){return h;}
       function _agentName(k){return k;}
       function navigateTo(){}
+      function isProUser(){return ${pro};}
       async function loadAgentesView(){}
       function showUpgradeModal(){window.upgradeOpened=true;}
-      </script><script src="/chat.js"></script></body>` });
+      </script>${scripts}</body>` });
   });
   await page.goto('https://agents.test/');
-  await page.click('#open');
-  await page.waitForFunction(() => !document.getElementById('agent-chat-status').textContent.includes('Verificando'));
-  return { page, requests, errors, release, activations };
+  await page.waitForFunction(() => Boolean(window.PigBankChatUI));
+  if (openAgent) {
+    await page.click('#open');
+    await page.waitForFunction(() => document.getElementById('agent-chat-status') && !document.getElementById('agent-chat-status').textContent.includes('Verificando'));
+  }
+  return { page, requests, errors, release, activations, piggyRequests, usageRequests, releasePiggy };
 }
 
 async function ask(page, text) {
