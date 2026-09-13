@@ -1620,5 +1620,24 @@
 
 <script defer src="/dashboard-chat.js"></script>
 
+<section id="agent-chat-panel" class="agent-chat-panel" role="dialog" aria-modal="false" aria-labelledby="agent-chat-title" hidden>
+  <header class="agent-chat-head">
+    <img id="agent-chat-avatar" alt="" width="48" height="48">
+    <div><h2 id="agent-chat-title">Conversa com agente</h2><p id="agent-chat-subtitle"></p></div>
+    <button id="agent-chat-close" type="button" aria-label="Fechar conversa"><i class="ph ph-x" aria-hidden="true"></i></button>
+  </header>
+  <div id="agent-chat-log" class="agent-chat-log" role="log" aria-label="Mensagens da conversa" aria-live="polite" aria-relevant="additions"></div>
+  <div class="agent-chat-feedback"><p id="agent-chat-status" role="status"></p><div id="agent-chat-actions"></div></div>
+  <form id="agent-chat-form" class="agent-chat-foot">
+    <label for="agent-chat-input">Sua pergunta</label>
+    <div class="agent-chat-compose">
+      <textarea id="agent-chat-input" rows="2" maxlength="2000" placeholder="Pergunte sobre o meu tema…"></textarea>
+      <button id="agent-chat-send" type="submit" aria-label="Enviar pergunta"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
+    </div>
+    <p id="agent-chat-usage"></p>
+  </form>
+</section>
+<script defer src="/dashboard-agent-chat.js"></script>
+
 </body>
 </html>

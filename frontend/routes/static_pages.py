@@ -574,6 +574,15 @@ async def serve_dashboard_js():
     )
 
 
+@router.get("/dashboard-agent-chat.js")
+async def serve_dashboard_agent_chat_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-agent-chat.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/launch-type-labels.js")
 async def serve_launch_type_labels_js():
     """Fonte única dos rótulos de `tipo` de lançamento — dashboard.html e

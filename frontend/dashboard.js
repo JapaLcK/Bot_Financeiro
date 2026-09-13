@@ -11114,6 +11114,7 @@ function _renderAgentes(data) {
         <p class="ag-desc">${esc(card.desc)}</p>
         <div class="ag-chips">${chips}</div>
         ${btn}
+        ${card.disponivel ? `<button type="button" class="ag-btn ag-chat-btn" data-agent-chat="${esc(card.kind)}"><i class="ph ph-chat-circle" aria-hidden="true"></i> Conversar</button>` : ""}
         ${emailToggle}
       </div>
     `;

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from frontend.routes import shared
 
@@ -39,7 +39,7 @@ AGENT_CATALOG: list[dict] = [
     {
         "kind": "detetive", "nome": "Detetive", "emoji": "🔍",
         "freq": "Contínuo · a cada sync",
-        "desc": "Fareja cobranças repetidas que parecem assinatura esquecida",
+        "desc": "Investiga assinaturas, cobranças recorrentes e lançamentos possivelmente duplicados",
         "disponivel": True,
     },
     {
@@ -58,7 +58,7 @@ AGENT_CATALOG: list[dict] = [
     {
         "kind": "faria_limer", "nome": "Faria Limer", "emoji": "📈",
         "freq": "Mensal · Open Finance",
-        "desc": "Acompanha sua renda variável (ações e FIIs): o retrato do mês e a concentração da carteira — só fatos, nunca recomendação",
+        "desc": "Acompanha ações e FIIs e ajuda a refletir sobre a composição da carteira",
         "disponivel": True,
     },
     {
@@ -258,3 +258,23 @@ async def agents_feed_seen_route(request: Request, user_id: int):
 
     n = await asyncio.to_thread(mark_agent_events_seen, user_id)
     return {"ok": True, "marked": n}
+
+
+class AgentChatBody(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    context: str | None = Field(default=None, max_length=160000)
+
+
+@router.post("/agents/{user_id}/{kind}/chat")
+@shared.limiter.limit("12/minute")
+async def agent_chat_route(request: Request, user_id: int, kind: str, body: AgentChatBody):
+    shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
+    from core.services.agent_chat import chat, ChatError
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Escreva uma pergunta para o agente.")
+    try:
+        return await asyncio.to_thread(chat, user_id, kind, message, body.context)
+    except ChatError as exc:
+        raise HTTPException(status_code=exc.status, detail={"error": exc.code, "message": str(exc)}) from None
