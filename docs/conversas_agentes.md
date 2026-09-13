@@ -38,6 +38,8 @@ Status: primeira versão implementada e validada localmente; avaliação com a I
 - A reserva identifica o mês e os IDs das contas que receberam o incremento. A restituição filtra essas contas e esse mês, preservando contas já esgotadas, criadas posteriormente e consumo de outras conversas. A implementação de cota fica em `db/ai_quota.py`, com a API existente preservada por `db/ai_chat.py`.
 - A variante pura do Banqueiro informa a data disponível do saldo e que não atualizou juros; progresso e metas usam o último saldo registrado. A prateleira informa `can_chat` pelo mesmo gate do backend, separado da ativação gratuita permitida no legado. Respostas antigas de abertura são descartadas antes de alterar a sessão ou o cache.
 - Barão e Faria Limer usam a listagem leve de investimentos, sem consultar ou materializar lotes. Saldo, taxa e cobertura vêm dos registros dos investimentos; os demais consumidores da listagem continuam recebendo lotes por padrão.
+- Uma validação recusada ou um erro ao preparar o resumo não marca tentativa de escrita. Essa marca começa antes da gravação da confirmação, da execução automática ou de uma consulta com efeitos; permanece ativa se outra ferramenta for recusada depois no mesmo turno.
+- O histórico de alertas consulta os 20 eventos recentes do próprio agente, filtrando o tema antes do limite. Eventos obsoletos ficam fora; leitura ou supressão de e-mail não retiram o evento do histórico. O feed geral mantém sua consulta sem filtro por agente.
 - Ações financeiras permanecem fora desta versão. Ativar um agente é uma ação explícita do botão de acesso.
 
 ## Fatos do sistema atual

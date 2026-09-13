@@ -459,9 +459,6 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             None,
         )
 
-    if tool.is_write or getattr(tool, "has_side_effects", False):
-        _TURN_WRITE_ATTEMPTED.set(True)
-
     if tool.is_write and tool.requires_confirmation:
         # Pre-check: se a tool define validate() e ele retorna erro, pula a
         # confirmação e mostra direto pro user. Evita IA pedir "confirma
@@ -477,6 +474,9 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
 
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
+        # Validação e resumo ainda não criaram uma ação. A marca é cumulativa
+        # no turno e começa imediatamente antes da primeira tentativa de gravação.
+        _TURN_WRITE_ATTEMPTED.set(True)
         db.ai_set_pending_action(user_id, name, args, summary)
         return (
             json.dumps(
@@ -493,6 +493,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
 
     if tool.is_write:
         # Auto-execute: ação rolou; a mensagem retornada é a resposta final.
+        _TURN_WRITE_ATTEMPTED.set(True)
         try:
             user_msg = tool.execute(user_id, args)
         except Exception as e:
@@ -507,6 +508,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         return (history, user_msg if isinstance(user_msg, str) else str(user_msg))
 
     # Read tool
+    if getattr(tool, "has_side_effects", False):
+        _TURN_WRITE_ATTEMPTED.set(True)
     try:
         result = tool.execute(user_id, args)
     except Exception as e:

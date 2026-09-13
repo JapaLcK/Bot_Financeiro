@@ -152,7 +152,7 @@ def _snapshot(user_id: int, kind: str) -> dict:
                 "cobertura_renda_fixa": {"moeda": "BRL", "outras_moedas_incluidas": False, "caixinhas_incluidas": False, "patrimonio_completo": False},
                 "nota": "Saldos e taxas são do último cadastro/sync (last_date), sem atualizar juros. Não são cotações atuais. Não prometa rendimentos. O rate cru depende de period/indexer; não interprete sem essas unidades. Detalhes de lotes não estão incluídos. Explicite a cobertura das listas; se truncadas, não trate sua soma como total nem descarte investimentos fora da amostra. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas, tema do Banqueiro. O cadastro pode não representar todo o patrimônio."}
     # Eventos só do próprio agente; não inclui alertas de outros especialistas.
-    return {"alertas": [e for e in db.list_agent_events(user_id, limit=100) if e["kind"] == kind][:20],
+    return {"alertas": db.list_agent_events(user_id, limit=20, kind=kind),
             "nota": "Alertas são históricos, confira os dados atuais nas ferramentas antes de afirmar valores atuais."}
 
 

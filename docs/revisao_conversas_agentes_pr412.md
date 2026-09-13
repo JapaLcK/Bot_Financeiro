@@ -29,16 +29,19 @@ Revisão de 13/09/2026. Escopo: diff completo do PR contra o merge-base de `main
 | Requisições antigas de acesso | Sucesso/falha antigos sobrescreviam acesso, erro ou cache de uma abertura mais recente | Falha HTTP e de transporte, reabertura, troca de agente, rascunho, envio em andamento e resposta/contexto na sessão de origem |
 | Permissão de conversa explícita | Free legado podia ativar um agente, mas a interface inferia daí o direito de conversar | `can_chat` comum ao backend e à prateleira; upsell antes de ativar/enviar; energia e ativação legada mantêm seus contratos |
 | Módulo próprio de cota | O CI anterior reprovou `db/ai_chat.py` no limite de tamanho do repositório | Cota separada por responsabilidade; nomes públicos preservados; gate conferido sem ampliar a lista de exceções |
+| Validação antes da marca de escrita | Validação recusada ou erro no resumo retinha cota se o turno falhasse, mesmo sem criar ação | Os três validadores de exclusão restituem em falhas posteriores sem ação; confirmação criada, execução automática e consulta com efeitos preservam a marca; uma recusa posterior não apaga a marca anterior |
+| Histórico filtrado antes do limite | Mais de 100 eventos de outros agentes escondiam os alertas do especialista | Xerife, Carteiro, Repórter e Banqueiro recebem seus 20 eventos recentes; isolamento por usuário e exclusão de eventos obsoletos; eventos lidos/suprimidos continuam visíveis; feed geral preservado |
 
 ## Estados e eventos verificados
 
 | Subsistema | Estados/eventos cobertos |
 |---|---|
-| Cota | Sem vaga, última vaga concorrente, múltiplas contas com contadores divergentes, conta criada depois, restituição após consumo de outra conversa, mês anterior/atual/posterior, falha sem escrita, falha após escrita e falha na persistência da resposta |
+| Cota | Sem vaga, última vaga concorrente, múltiplas contas com contadores divergentes, conta criada depois, restituição após consumo de outra conversa, mês anterior/atual/posterior, falha sem escrita, falha após escrita e falha na persistência da resposta; validação recusada/aprovada, exceção na validação/resumo e marca cumulativa entre ferramentas |
 | Abertura do painel | Aberto/fechado, mesmo agente/outro agente, resposta antiga/nova, sucesso/HTTP inválido/erro de rede, permitido/bloqueado, rascunho e envio em andamento |
 | Planos | Legado Free/Pro e modelo de energia, agente ativo/inativo, falta de acesso, falta de capacidade e downgrade |
 | Carteira | Coleção vazia, limite, truncamento, lotes internos, totais integrais, caixinhas excluídas, moedas diferentes e registros de outro usuário |
 | Consultas | Ferramenta fora do tema, comando de escrita, tentativa do modelo de habilitar sincronização/juros, saldo registrado sem atualização e detecção sem emitir evento |
+| Histórico de alertas | Mais de 100 eventos de outros temas, mais de 20 do tema próprio, ordenação, outro usuário, evento obsoleto, evento lido e e-mail suprimido; consulta não altera o feed |
 
 ## Validação reproduzível
 
