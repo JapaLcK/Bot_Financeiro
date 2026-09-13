@@ -30,7 +30,8 @@ def portfolios(monkeypatch):
         ]
         fixed_income = [{"name": f"Tesouro {i}", "balance": 30, "invested": 25,
                          "count": 1} for i in range(count)]
-        monkeypatch.setattr(db, "list_investments", lambda uid: manual)
+        monkeypatch.setattr(db, "list_investments", lambda uid, *, include_lots=True:
+                            manual if include_lots else [{k: v for k, v in r.items() if k != "lots"} for r in manual])
         monkeypatch.setattr(db, "list_rv_positions", lambda uid: positions)
         monkeypatch.setattr(db, "list_of_fixed_income", lambda uid, *, currency=None: fixed_income)
         monkeypatch.setattr(db, "of_fixed_income_summary", lambda uid, *, currency=None: {

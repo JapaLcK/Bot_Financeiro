@@ -5,7 +5,7 @@ Revisão de 13/09/2026. Escopo: diff completo do PR contra o merge-base de `main
 ## Mudanças do PR completo
 
 1. **Conversa por especialista:** serviço `core/services/agent_chat.py` e endpoint autenticado em `frontend/routes/agents.py`; classificação por tema, respostas educativas, validação adicional e encaminhamentos. O contexto é cifrado, ligado ao usuário/agente e guardado somente na memória da página.
-2. **Dados de consulta:** ferramentas permitidas por tema, sem comandos financeiros. Carteiro consulta instâncias registradas; Banqueiro consulta saldos sem aplicar juros; Barão e Faria Limer usam retratos dos investimentos cadastrados.
+2. **Dados de consulta:** ferramentas permitidas por tema, sem comandos financeiros. Carteiro consulta instâncias registradas; Banqueiro consulta saldos sem aplicar juros; Barão e Faria Limer usam retratos dos investimentos cadastrados. A leitura desses investimentos usa `include_lots=False` em `db/investments.py`, evitando consultar e materializar lotes que não serão usados; o padrão com lotes permanece para os outros fluxos.
 3. **Detetive:** extração das consultas de recorrências e duplicidades em `core/services/piggy_agents.py`. Os alertas automáticos reutilizam essas consultas e continuam responsáveis pela gravação e deduplicação dos eventos.
 4. **Cota compartilhada:** leitura, consumo atômico, reserva e restituição em `db/ai_quota.py`, com a API existente preservada por `db/ai_chat.py`. O chat geral reserva antes de executar ferramentas; especialistas descontam depois de produzir uma resposta de consulta.
 5. **Efeitos das ferramentas:** `core/services/ai_chat/runner.py` acompanha tentativas de gravação. O cadastro `tools/_base.py` identifica consultas que sincronizam contas, aplicam juros ou reconciliam faturas; flags em `bills.py`, `pockets.py`, `investments.py` e `cards.py` impedem restituição após esses efeitos.
@@ -22,7 +22,7 @@ Revisão de 13/09/2026. Escopo: diff completo do PR contra o merge-base de `main
 |---|---|---|
 | Reserva identifica contas e mês | Restituir uma reserva de uma conta também reduzia outras contas já esgotadas ou criadas depois | Restituição repetida, consumo simultâneo por especialista, virada de mês e API usada pelo chat geral |
 | Limite de detalhes do Faria Limer | Mais de 100 investimentos manuais entravam no payload do modelo | Total manual integral separado da amostra; precisão dos saldos; listas vazias, no limite e acima dele |
-| Cobertura das listas e lotes do Barão | Corte externo não limitava os lotes internos; amostra não informava registros excluídos | Remoção de lotes somente do payload; dados originais, saldos, taxas e unidades preservados |
+| Cobertura das listas e leitura sem lotes | Corte externo não limitava lotes internos; retirar do payload ainda carregava todos os lotes no banco | Barão e Faria Limer desabilitam a busca de lotes na origem; dados originais, saldos, taxas e unidades preservados; demais consumidores continuam recebendo lotes por padrão |
 | Cobertura de caixinhas | RF vinculada a caixinha era excluída, podendo resultar em RF zero no resumo | Exclusão explicitada; zero não prova ausência de RF; helper compartilhado mantém exclusão para evitar duplicação patrimonial em outros consumidores |
 | Moeda antes de agregar | BRL, USD e EUR com o mesmo nome eram somados e apresentados como reais | Filtro BRL antes do agrupamento nos dois especialistas; isolamento por usuário; comportamento padrão dos helpers preservado |
 | Data dos saldos do Banqueiro | Metas usavam saldo sem juros atualizados, sem informar a data disponível | Data e nota na variante pura; cálculo identificado como baseado no último saldo registrado; chat geral preserva sua variante com juros |
@@ -64,6 +64,6 @@ Use o Python do ambiente virtual preparado conforme `.claude/skills/baseline-tes
 
 - Chamadas ao modelo são simuladas nos testes. Classificação semântica e qualidade das respostas com IA real ainda precisam de avaliação; uma validação por IA não é uma garantia determinística de tema ou orientação.
 - Os resumos não representam necessariamente todo o patrimônio. RF vinculada a caixinhas e RF em outras moedas ficam fora dos retratos de BRL; a resposta deve explicitar essa cobertura.
-- O limite de itens restringe o payload enviado ao modelo. As consultas ainda leem a coleção necessária para produzir totais e cobertura; não foi introduzida paginação no banco.
+- O limite de itens restringe o payload enviado ao modelo. As consultas ainda leem as linhas compactas dos investimentos necessárias para produzir totais e cobertura; nenhum lote é carregado pelos retratos do Barão/Faria Limer. Não foi introduzida paginação no banco.
 - Carteiro consulta contas/instâncias já registradas, sem gerar novos ciclos. Esta rodada não acrescenta uma fonte de faturas de cartão ao especialista.
 - O navegador local não comprova integração em produção, comportamento nativo do WKWebView nem interpretação real de mensagens de WhatsApp. Não houve deploy ou merge nesta revisão.

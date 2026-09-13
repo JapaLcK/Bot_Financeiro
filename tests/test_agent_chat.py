@@ -161,7 +161,7 @@ def test_resposta_com_indicacao_de_compra_e_recusada():
 
 def test_barao_nao_aplica_juros_ao_consultar(monkeypatch):
     monkeypatch.setattr(db, 'accrue_all_investments', lambda *a: pytest.fail('alterou investimentos'))
-    monkeypatch.setattr(db, 'list_investments', lambda uid: [{'name': 'CDB', 'balance': 100}])
+    monkeypatch.setattr(db, 'list_investments', lambda uid, *, include_lots=True: [{'name': 'CDB', 'balance': 100}])
     monkeypatch.setattr(db, 'list_of_fixed_income', lambda uid, *, currency=None: [])
     result = chat.execute_read(42, 'barao', 'consultar_dados_do_agente', {})
     assert result['investimentos_manuais'][0]['balance'] == 100

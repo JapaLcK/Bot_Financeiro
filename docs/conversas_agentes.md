@@ -37,6 +37,7 @@ Status: primeira versão implementada e validada localmente; avaliação com a I
 - Carteiro consulta contas já registradas sem gerar instâncias; Banqueiro lê caixinhas com aplicação de juros desabilitada. Argumentos do modelo não podem habilitar essas gravações. As versões do chat geral que sincronizam dados ou aplicam juros são identificadas como tendo efeitos colaterais para proteger a reserva.
 - A reserva identifica o mês e os IDs das contas que receberam o incremento. A restituição filtra essas contas e esse mês, preservando contas já esgotadas, criadas posteriormente e consumo de outras conversas. A implementação de cota fica em `db/ai_quota.py`, com a API existente preservada por `db/ai_chat.py`.
 - A variante pura do Banqueiro informa a data disponível do saldo e que não atualizou juros; progresso e metas usam o último saldo registrado. A prateleira informa `can_chat` pelo mesmo gate do backend, separado da ativação gratuita permitida no legado. Respostas antigas de abertura são descartadas antes de alterar a sessão ou o cache.
+- Barão e Faria Limer usam a listagem leve de investimentos, sem consultar ou materializar lotes. Saldo, taxa e cobertura vêm dos registros dos investimentos; os demais consumidores da listagem continuam recebendo lotes por padrão.
 - Ações financeiras permanecem fora desta versão. Ativar um agente é uma ação explícita do botão de acesso.
 
 ## Fatos do sistema atual
