@@ -1,31 +1,68 @@
 """Guardas das otimizações de caminho crítico e imagens da landing."""
 
+import asyncio
 import re
 from types import SimpleNamespace
 
 from PIL import Image
 
-from frontend.routes.shared import FRONTEND_DIR, _asset_hash, stamp_asset_versions
-from frontend.routes.static_pages import _CACHE_IMUTAVEL, _cache_asset_versionado
+from frontend.routes.shared import (
+    FRONTEND_DIR,
+    _asset_hash,
+    html_file,
+    stamp_asset_versions,
+)
+from frontend.routes.static_pages import (
+    _CACHE_IMUTAVEL,
+    _cache_asset_versionado,
+    serve_landing,
+)
 
 
 def _landing_servida() -> str:
+    return asyncio.run(serve_landing()).body.decode("utf-8")
+
+
+def _landing_com_links_versionados() -> str:
     return stamp_asset_versions(
         (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
     )
 
 
-def test_css_da_landing_sai_versionado_por_conteudo():
+def test_css_da_landing_e_incorporado_no_html_para_nao_bloquear_a_primeira_pintura():
     html = _landing_servida()
-    folhas = re.findall(r'<link[^>]+rel="stylesheet"[^>]+href="([^"]+)', html)
-    assert len(folhas) == 4
-    for nome in ("brand.css", "phosphor.css", "site.css", "site-redesign.css"):
-        esperado = _asset_hash(nome, (FRONTEND_DIR / nome).stat().st_mtime_ns)
-        assert f"/{nome}?v={esperado}" in folhas
+    nomes = ("brand.css", "phosphor.css", "site.css", "site-redesign.css")
+    assert re.findall(r'<style data-pb-inline="([^"]+)">', html) == list(nomes)
+    for nome in nomes:
+        assert f'href="/{nome}?v=' not in html
+        inicio_css = (FRONTEND_DIR / nome).read_text(encoding="utf-8")[:200]
+        assert inicio_css in html
+
+
+def test_fonte_do_titulo_e_descoberta_antes_do_css_inline():
+    html = _landing_servida()
+    brand_css = (FRONTEND_DIR / "brand.css").read_text(encoding="utf-8")
+    url_fonte = re.search(
+        r'url\("(/fonts/Inter-Variable\.woff2\?v=[0-9a-f]{12})"\)',
+        brand_css,
+    ).group(1)
+    preload = re.search(
+        rf'<link rel="preload" href="{re.escape(url_fonte)}" '
+        r'as="font" type="font/woff2" crossorigin\s*/?>',
+        html,
+    )
+    assert preload
+    assert preload.start() < html.index('<style data-pb-inline="brand.css">')
+
+
+def test_css_continua_externo_nas_demais_paginas_publicas():
+    html = html_file(FRONTEND_DIR / "precos.html", pixel=False).body.decode("utf-8")
+    assert re.search(r'href="/brand\.css\?v=[0-9a-f]{12}"', html)
+    assert 'data-pb-inline="brand.css"' not in html
 
 
 def test_assets_versionados_tem_cache_imutavel_sem_cachear_url_nua():
-    html = _landing_servida()
+    html = _landing_com_links_versionados()
     versao = re.search(r'/site\.css\?v=([0-9a-f]{12})', html).group(1)
     assert _cache_asset_versionado(SimpleNamespace(query_params={"v": versao})) == _CACHE_IMUTAVEL
     assert _cache_asset_versionado(SimpleNamespace(query_params={})) == "no-cache"

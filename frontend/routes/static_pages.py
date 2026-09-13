@@ -48,7 +48,11 @@ class ContactBody(BaseModel):
 
 @router.get("/")
 async def serve_landing():
-    return html_file(FRONTEND_DIR / "index.html", clarity=True)
+    return html_file(
+        FRONTEND_DIR / "index.html",
+        clarity=True,
+        inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
+    )
 
 
 @router.get("/app")
