@@ -756,7 +756,7 @@ if (!/[?&]site=1(&|$)/.test(location.search) &&
 
     video.addEventListener("timeupdate", function () {
       var tempoAtual = video.currentTime;
-      if (!buscando && !video.paused && tempoAtual > ultimoTempo) {
+      if (!buscando && tempoAtual > ultimoTempo) {
         assistido += tempoAtual - ultimoTempo;
       }
       ultimoTempo = tempoAtual;

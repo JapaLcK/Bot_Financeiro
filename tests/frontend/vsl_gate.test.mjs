@@ -107,6 +107,27 @@ test("play e marcos de progresso continuam sendo medidos", async () => {
   await ctx.close();
 });
 
+test("o último intervalo antes da pausa também conta como assistido", async () => {
+  const { page, ctx } = await abrirLanding();
+  const eventos = await page.evaluate(() => {
+    window.__eventosVsl = [];
+    window.gtag = (...args) => window.__eventosVsl.push(args);
+    const v = document.getElementById("vsl-video");
+    Object.defineProperties(v, {
+      currentTime: { configurable: true, writable: true, value: 0 },
+      duration: { configurable: true, value: 1 },
+      paused: { configurable: true, value: true },
+    });
+    v.dispatchEvent(new Event("play"));
+    v.currentTime = 0.26;
+    // O navegador já expõe paused=true quando entrega o timeupdate final.
+    v.dispatchEvent(new Event("timeupdate"));
+    return window.__eventosVsl.filter(e => e[1] === "vsl_progress");
+  });
+  assert.deepEqual(eventos.map(e => e[2].percent), [25]);
+  await ctx.close();
+});
+
 test("quem já tem conta continua sendo direcionado ao dashboard", async () => {
   const { page, ctx } = await abrirLanding({ logado: true });
   await page.waitForFunction(
