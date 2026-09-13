@@ -146,6 +146,16 @@ def execute_read(user_id: int, kind: str, name: str, args: dict):
     tool = get_tool(name) if name in READ_TOOLS[kind] else None
     if tool is None or tool.is_write:
         return {"error": "Consulta fora do tema ou alteração não permitida."}
+    # O cadastro genérico destas consultas sincroniza dados. Aqui usamos
+    # variantes puras; args do modelo nunca podem reativar sync/accrual.
+    if name == "get_bills_to_pay":
+        from core.services.ai_chat.tools.bills import _get_bills_to_pay
+        return _get_bills_to_pay(user_id, args, sync=False)
+    if name == "list_pockets":
+        from core.services.ai_chat.tools.pockets import _list_pockets
+        return _list_pockets(user_id, args, accrue=False)
+    if getattr(tool, "has_side_effects", False):
+        return {"error": "Consulta com efeitos colaterais não permitida."}
     return tool.execute(user_id, args)
 
 

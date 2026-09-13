@@ -221,7 +221,8 @@ def _current_month_start() -> date:
 def get_usage_this_month(user_id: int) -> int:
     """
     Retorna quantas mensagens o user mandou pra IA no mês atual.
-    Aplica reset lazy: se ai_month_reset_at é de outro mês, zera antes.
+    Somente leitura: mês anterior equivale a zero. Apenas o consumo reseta
+    o contador, atomicamente; uma leitura atrasada nunca apaga uma reserva.
     """
     month_start = _current_month_start()
     with get_conn() as conn, conn.cursor() as cur:
@@ -240,16 +241,6 @@ def get_usage_this_month(user_id: int) -> int:
         used = row["ai_messages_this_month"]
         reset_at = row["ai_month_reset_at"]
         if reset_at is None or reset_at < month_start:
-            cur.execute(
-                """
-                update auth_accounts
-                set ai_messages_this_month = 0,
-                    ai_month_reset_at = %s
-                where user_id = %s
-                """,
-                (month_start, int(user_id)),
-            )
-            conn.commit()
             return 0
         return int(used or 0)
 
@@ -335,12 +326,14 @@ def _consume_usage(user_id: int, monthly_limit: int, month_start: date) -> int |
                   when ai_month_reset_at is null or ai_month_reset_at < %s then 1
                   else coalesce(ai_messages_this_month, 0) + 1 end,
                 ai_month_reset_at = %s
-            where user_id = %s and (case
+            where user_id = %s
+              and (ai_month_reset_at is null or ai_month_reset_at <= %s)
+              and (case
                   when ai_month_reset_at is null or ai_month_reset_at < %s then 0
                   else coalesce(ai_messages_this_month, 0) end) < %s
             returning ai_messages_this_month
             """,
-            (month_start, month_start, int(user_id), month_start, int(monthly_limit)),
+            (month_start, month_start, int(user_id), month_start, month_start, int(monthly_limit)),
         )
         row = cur.fetchone()
         conn.commit()

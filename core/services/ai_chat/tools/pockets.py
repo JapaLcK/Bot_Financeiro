@@ -84,8 +84,8 @@ def _pocket_goal_insight(balance: float, target_amount, target_date, today: date
     return out
 
 
-def _list_pockets(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    rows = db.list_pockets(user_id)
+def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) -> dict[str, Any]:
+    rows = db.list_pockets(user_id) if accrue else db.list_pockets(user_id, accrue=False)
     today = datetime.now(_tz()).date()
     pockets = []
     for r in rows:
@@ -335,6 +335,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_list_pockets,
+        has_side_effects=True,
     ),
     Tool(
         schema={

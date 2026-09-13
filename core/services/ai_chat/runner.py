@@ -219,6 +219,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
         return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
     write_token = _TURN_WRITE_ATTEMPTED.set(False)
     final_text = ERROR_MSG
+    completed = False
     try:
         db.ai_append_message(user_id, "user", user_text)
         history = db.ai_get_recent_messages(user_id, limit=db.AI_DEFAULT_CONTEXT_WINDOW)
@@ -236,12 +237,13 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
 
         final_text = _run_tool_loop(client, user_id, messages)
         db.ai_append_message(user_id, "assistant", final_text)
+        completed = True
         return final_text
     finally:
         attempted_write = _TURN_WRITE_ATTEMPTED.get()
         _TURN_WRITE_ATTEMPTED.reset(write_token)
         # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
-        if final_text == ERROR_MSG and not attempted_write:
+        if (not completed or final_text == ERROR_MSG) and not attempted_write:
             refund_usage(user_id, reserved_month)
 
 
@@ -457,7 +459,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             None,
         )
 
-    if tool.is_write:
+    if tool.is_write or getattr(tool, "has_side_effects", False):
         _TURN_WRITE_ATTEMPTED.set(True)
 
     if tool.is_write and tool.requires_confirmation:
