@@ -298,16 +298,60 @@ def stamp_asset_versions(html_text: str) -> str:
     return _ASSET_VER_RE.sub(repl, html_text)
 
 
-def html_file(path: pathlib.Path, pixel: bool = True, clarity: bool = False) -> Response:
+def _inline_css_assets(html_text: str, asset_names: tuple[str, ...]) -> str:
+    """Incorpora folhas locais no HTML sem duplicar o CSS-fonte.
+
+    O contrato é deliberadamente estrito: cada asset precisa ser um CSS na raiz
+    de ``frontend/`` e ter exatamente um ``<link>`` correspondente. Assim, uma
+    mudança futura no ``<head>`` falha visivelmente em vez de devolver a landing
+    sem estilos.
+    """
+    for asset_name in asset_names:
+        asset_path = FRONTEND_DIR / asset_name
+        if asset_path.parent != FRONTEND_DIR or asset_path.suffix != ".css":
+            raise ValueError(f"CSS inline inválido: {asset_name}")
+
+        pattern = re.compile(
+            rf'(?P<indent>[ \t]*)<link rel="stylesheet" '
+            rf'href="/{re.escape(asset_name)}\?v=\d+"\s*/?>'
+        )
+        css = asset_path.read_text(encoding="utf-8")
+
+        def replace_link(match: "re.Match[str]") -> str:
+            indent = match.group("indent")
+            return (
+                f'{indent}<style data-pb-inline="{asset_name}">\n'
+                f"{css}\n{indent}</style>"
+            )
+
+        html_text, replacements = pattern.subn(replace_link, html_text)
+        if replacements != 1:
+            raise ValueError(
+                f"Esperava um link para {asset_name}; encontrei {replacements}"
+            )
+
+    return html_text
+
+
+def html_file(
+    path: pathlib.Path,
+    pixel: bool = True,
+    clarity: bool = False,
+    inline_css: tuple[str, ...] = (),
+) -> Response:
     """Serve um .html do frontend com cache desligado.
 
     Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
     estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
-    sem campos sensíveis. As páginas da área logada (dashboard, settings,
-    onboarding) passam `pixel=False`: o rastreio fica nas páginas públicas e na
-    /home, que é onde a volta do checkout (?upgrade=success) dispara a conversão.
+    sem campos sensíveis. `inline_css` elimina viagens de rede bloqueantes em
+    páginas selecionadas, mantendo os mesmos arquivos como fonte única. As
+    páginas da área logada (dashboard, settings, onboarding) passam
+    `pixel=False`: o rastreio fica nas páginas públicas e na /home, que é onde a
+    volta do checkout (?upgrade=success) dispara a conversão.
     """
     text = path.read_text(encoding="utf-8")
+    if inline_css:
+        text = _inline_css_assets(text, inline_css)
     if pixel:
         text = inject_tracking(text, clarity=clarity)
     response = Response(content=stamp_asset_versions(text),
