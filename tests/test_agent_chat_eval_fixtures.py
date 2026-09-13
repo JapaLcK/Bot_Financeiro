@@ -71,4 +71,4 @@ def test_gates_continuam_recusando_redirecionamento_que_consulta_dados():
         'reply': 'Esse assunto é com o Repórter.', 'redirects': [{'kind': 'reporter'}],
         'quota_delta': 0, 'data_queries': [{'agent': 'carteiro', 'tool': 'get_bills_to_pay'}],
     })
-    assert failures == ['pure_redirect_queried_data']
+    assert failures == ['non_answer_queried_data']

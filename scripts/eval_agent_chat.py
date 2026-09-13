@@ -18,31 +18,34 @@ from unittest.mock import patch
 
 def cases(suite):
     rows = [
-        ('carteiro_summary', 'carteiro', 'Como estão minhas entradas e saídas do mês?', None, ['reporter'], False),
-        ('portfolio', 'faria_limer', 'O que você tem a dizer sobre minha carteira de investimentos?', None, [], True),
-        ('concentration', 'faria_limer', 'Como está a concentração da minha carteira?', 'real', [], True),
-        ('choose_stocks', 'faria_limer', 'Quais ações devo investir?', 'real', [], False),
-        ('more_information', 'faria_limer', 'Preciso de mais informações', 'real', [], False),
+        ('carteiro_summary', 'carteiro', 'Como estão minhas entradas e saídas do mês?', None, ['reporter'], False, False, 0),
+        ('portfolio', 'faria_limer', 'O que você tem a dizer sobre minha carteira de investimentos?', None, [], True, True, 1),
+        ('concentration', 'faria_limer', 'Como está a concentração da minha carteira?', 'real', [], True, True, 1),
+        ('choose_stocks', 'faria_limer', 'Quais ações devo investir?', 'real', [], False, True, 1),
+        ('more_information', 'faria_limer', 'Preciso de mais informações', 'real', [], False, True, 1),
     ]
     if suite == 'extended':
         rows += [
-            ('detective_investments', 'detetive', 'O que é CDI em renda fixa?', None, ['barao'], False),
-            ('baron_due_dates', 'barao', 'Quais boletos vencem amanhã?', None, ['carteiro'], False),
-            ('education_xerife', 'xerife', 'Como avaliar se um gasto foge do padrão?', None, [], False),
-            ('education_detetive', 'detetive', 'Como diferenciar duplicidade de cobrança recorrente?', None, [], False),
-            ('education_carteiro', 'carteiro', 'Como organizar o acompanhamento de vencimentos?', None, [], False),
-            ('education_reporter', 'reporter', 'Qual a diferença entre saldo e resultado do mês?', None, [], False),
-            ('education_cofre', 'cofre', 'Como funciona uma meta em uma caixinha?', None, [], False),
-            ('education_barao', 'barao', 'O que significa rendimento pós-fixado?', None, [], False),
-            ('education_faria', 'faria_limer', 'O que significa diversificar uma carteira?', None, [], False),
-            ('declared_goal', 'faria_limer', 'Meu objetivo é aposentadoria e meu prazo é de dez anos.', 'goal', [], False),
-            ('declared_reserve', 'faria_limer', 'Já tenho reserva de emergência fora da carteira cadastrada.', 'goal', [], False),
-            ('goal_followup', 'faria_limer', 'Como isso muda a análise?', 'goal', [], False),
-            ('specific_purchase', 'faria_limer', 'Escolha uma ação para eu comprar hoje.', None, [], False),
-            ('ticker_concept', 'faria_limer', 'O que significa P/L ao analisar PETR4? Não quero indicação de compra.', None, [], False),
+            ('detective_investments', 'detetive', 'O que é CDI em renda fixa?', None, ['barao'], False, False, 0),
+            ('baron_due_dates', 'barao', 'Quais boletos vencem amanhã?', None, ['carteiro'], False, False, 0),
+            ('mixed_due_summary', 'carteiro', 'Quais contas cadastradas vencem esta semana e como estão minhas entradas e saídas do mês?', None, ['reporter'], True, True, 1),
+            ('outside_domain', 'carteiro', 'Como preparar um bolo de chocolate?', None, [], False, False, 0),
+            ('education_xerife', 'xerife', 'Como avaliar se um gasto foge do padrão?', None, [], False, True, 1),
+            ('education_detetive', 'detetive', 'Como diferenciar duplicidade de cobrança recorrente?', None, [], False, True, 1),
+            ('education_carteiro', 'carteiro', 'Como organizar o acompanhamento de vencimentos?', None, [], False, True, 1),
+            ('education_reporter', 'reporter', 'Qual a diferença entre saldo e resultado do mês?', None, [], False, True, 1),
+            ('education_cofre', 'cofre', 'Como funciona uma meta em uma caixinha?', None, [], False, True, 1),
+            ('education_barao', 'barao', 'O que significa rendimento pós-fixado?', None, [], False, True, 1),
+            ('education_faria', 'faria_limer', 'O que significa diversificar uma carteira?', None, [], False, True, 1),
+            ('declared_goal', 'faria_limer', 'Meu objetivo é aposentadoria e meu prazo é de dez anos.', 'goal', [], False, True, 1),
+            ('declared_reserve', 'faria_limer', 'Já tenho reserva de emergência fora da carteira cadastrada.', 'goal', [], False, True, 1),
+            ('goal_followup', 'faria_limer', 'Como isso muda a análise?', 'goal', [], False, True, 1),
+            ('specific_purchase', 'faria_limer', 'Escolha uma ação para eu comprar hoje.', None, [], False, True, 1),
+            ('ticker_concept', 'faria_limer', 'O que significa P/L ao analisar PETR4? Não quero indicação de compra.', None, [], False, True, 1),
         ]
-    return [dict(id=i, agent=a, question=q, session=s, expected_redirects=r, requires_data=d)
-            for i, a, q, s, r, d in rows]
+    return [dict(id=i, agent=a, question=q, session=s, expected_redirects=r,
+                 requires_data=d, answers_own_topic=own, expected_charge=charge)
+            for i, a, q, s, r, d, own, charge in rows]
 
 
 def synthetic_data():
@@ -126,10 +129,9 @@ def mechanical_failures(case, record):
         failures.append('unexpected_redirects')
     if case['requires_data'] and not record.get('data_queries'):
         failures.append('missing_data_query')
-    if case['expected_redirects'] and record.get('data_queries'):
-        failures.append('pure_redirect_queried_data')
-    expected_charge = 0 if case['expected_redirects'] or record.get('error_class') else 1
-    if record.get('quota_delta') != expected_charge:
+    if not case['answers_own_topic'] and record.get('data_queries'):
+        failures.append('non_answer_queried_data')
+    if record.get('quota_delta') != case['expected_charge']:
         failures.append('unexpected_quota_delta')
     if record.get('database_access_attempts'):
         failures.append('database_access_attempted')

@@ -49,8 +49,10 @@ A perda da pergunta atual favorecia a repetição do resumo da carteira.
 7. **Avaliação reproduzível** (`scripts/eval_agent_chat.py`): usa a API real com
    registros inteiramente sintéticos, bloqueia conexões ao banco e substitui
    acesso/cota por fixtures. Não busca credenciais. Os controles automáticos
-   verificam resposta, destinos, consultas e cobrança; o conteúdo precisa também
-   de leitura semântica. Passar os controles não equivale a aprovar a resposta.
+   verificam resposta, destinos, consultas e cobrança; cada caso declara se há
+   parte própria, se precisa consultar dados e a cobrança esperada. Assim, um
+   encaminhamento misto não é confundido com um encaminhamento puro. O conteúdo
+   precisa também de leitura semântica. Passar os controles não equivale a aprovar a resposta.
 
 O chat geral conserva seu modelo e seu fluxo de ações. O chat especialista
 continua sem ferramentas de escrita, com histórico efêmero separado, sem mudar
@@ -75,7 +77,7 @@ do produto continua sendo por mensagem respondida, não por chamada ao provedor.
 Timeout e tentativas de transporte continuam definidos pelo runner existente;
 esse timeout vale por chamada, não como prazo total de um turno.
 
-Na execução final de `python scripts/eval_agent_chat.py --suite extended`, em
+Na primeira execução completa de `python scripts/eval_agent_chat.py --suite extended`, em
 13/09/2026, os 19 casos passaram pelos controles automáticos e pela leitura
 semântica independente. Foram 57 chamadas ao provedor, 58.066 tokens de entrada
 e 6.989 de saída: aproximadamente US$ 0,075 sem desconto de cache. Houve 16
@@ -88,6 +90,15 @@ encaminhamentos Carteiro → Repórter, Detetive → Barão e Barão → Carteir
 continuação após objetivo/prazo/reserva, pedido de compra específica e explicação
 de P/L. O Detetive diferenciou periodicidade de autorização; o Faria Limer
 aprofundou critérios sem escolher ativos ou sugerir aumento de exposição.
+
+Após a revisão do PR, foram acrescentados os casos `mixed_due_summary` e
+`outside_domain`. A execução com `--suite extended --case mixed_due_summary --case outside_domain`,
+na mesma data, passou nos dois casos com cinco chamadas à API. O caso misto consultou os vencimentos, encaminhou
+a parte do Repórter e descontou uma mensagem; o assunto externo não consultou
+dados, não redirecionou e não descontou. A amostra passa a cobrir 21 cenários em
+duas execuções, sem alteração adicional no modelo ou nos prompts. As duas respostas
+passaram por leitura semântica independente, e os 21 registros foram reavaliados
+com os controles mecânicos corrigidos, sem falhas.
 
 ## Estados e recuperação
 
@@ -141,7 +152,7 @@ foram executados antes do conserto, produzindo falhas; os caminhos permitidos
 também são exercitados. Mocks cobrem estados e invariantes, enquanto a avaliação
 real cobre erros de interpretação que esses mocks não detectam.
 
-Resultados finais medidos em 13/09/2026: `python -m pytest -q` teve 7.972 testes
+Resultados finais medidos em 13/09/2026: `python -m pytest -q` teve 7.993 testes
 aprovados, quatro falhas de acentos já presentes na base e quatro xfails.
 `npm run test:frontend` teve 636 aprovados e a falha temporal da Home descrita
 acima; os 28 testes específicos do chat passaram. Nenhuma nova falha permaneceu
