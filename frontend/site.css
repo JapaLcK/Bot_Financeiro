@@ -261,8 +261,18 @@ img { max-width: 100%; display: block; }
 }
 @media (max-width: 900px) {
   .nav { flex-wrap: wrap; }
-  /* Os links só recolhem depois que o botão do menu está disponível. */
-  .nav-links { display: flex; flex-wrap: wrap; width: 100%; }
+  /* Os links só recolhem depois que o botão do menu está disponível. Eles
+     ficam fora do fluxo desde o primeiro paint: assim, o nav-burger.js pode
+     escondê-los sem reduzir a altura da barra e puxar a página inteira para
+     cima. Se o script falhar, continuam visíveis e utilizáveis como painel. */
+  .nav-links {
+    position: absolute; inset: calc(100% + 8px) 0 auto;
+    display: flex; flex-wrap: wrap; width: 100%;
+    margin: 0; padding: 12px;
+    background: rgba(20,20,22,.96); backdrop-filter: blur(26px) saturate(160%);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: 0 16px 36px rgba(0,0,0,.42);
+  }
   .section { padding: 60px 0; }
   /* Alvo de toque na barra mobile: 44px (mínimo iOS/WCAG 2.5.5), o mesmo piso
      que o .pb-burger do nav-burger.js já respeita — e 900px é o mesmo gate que ele
