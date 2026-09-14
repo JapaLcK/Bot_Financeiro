@@ -21,8 +21,8 @@ boletos, recorrentes, investimentos com CDI, importação de extrato (OFX/CSV/PD
 Open Finance.
 
 **Stack:** Python 3.13 · FastAPI · PostgreSQL (psycopg 3) · discord.py · Railway
-(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **com UMA
-ilha React** (`webapp/` → `frontend/precos-app.*`, o `#plans-v2` da /precos); o
+(deploy) · Cloudflare (borda). Frontend em HTML/CSS/JS escritos à mão, **com
+ilhas React delimitadas** (`webapp/` → bundles IIFE em `frontend/`); o
 `package.json` da raiz continua sem script `build`, e o porquê está em "Decisões
 tomadas". App iOS em Capacitor carregando o próprio site.
 
@@ -287,8 +287,9 @@ faria essa verificação. Kill switch: `OF_HEALTH_CHECK_ENABLED=0` (default `1`)
 O detalhamento das armadilhas está no **§5 do `CLAUDE.md` da raiz** (é lá que ele
 mora; não duplicar aqui). O essencial de domínio:
 
-- **O site é HTML/CSS/JS à mão, com UMA ilha React.** O `package.json` da raiz
-  continua servindo só ao harness de testes de frontend — e continua **sem script
+- **O site é HTML/CSS/JS à mão, com ilhas React delimitadas.** O
+  `package.json` da raiz continua servindo só ao harness de testes de frontend —
+  e continua **sem script
   `build`** de propósito: é a ausência dele que mantém a detecção automática do
   Railway apontando para o Python. O build de JS que existe é o de `webapp/`,
   projeto npm separado, com package.json e lockfile próprios.
@@ -404,8 +405,9 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
 - **Sem Google Sheets.**
 - **Sem Redis** até hoje: não há fila nem cache externo no repositório.
 - **A migração para React COMEÇOU, e a decisão está tomada.** O padrão é **ilha**,
-  não SPA: Vite + React 19 em `webapp/` (projeto npm separado), um bundle por
-  página, saída de nome FIXO e sem hash em `frontend/`, **artefato commitado** —
+  não SPA: Vite + React 19 em `webapp/` (o único projeto de build do frontend),
+  bundles IIFE de escopo delimitado, saída de nome FIXO e sem hash em `frontend/`,
+  **artefato commitado** —
   porque não há `StaticFiles` mount e cada asset precisa de rota escrita à mão.
   As ilhas de preços e dos chats convivem com os scripts clássicos. A convenção
   é IIFE, mount síncrono com `flushSync` e propriedade exclusiva do trecho
@@ -415,9 +417,14 @@ de job que apaga linha; `TABLE_CLEANUP_INTERVAL_HOURS=0` desliga a poda).
   solicitada explicitamente pelo usuário, usa TypeScript e Tailwind 3.4 com
   prefixo, sem Preflight e com processamento de CSS exclusivo dessa ilha;
   [a decisão](adr/0001-interface-compartilhada-dos-chats.md) registra o alcance.
+  O piloto público de `/como-funciona` também está decidido, mas ainda não
+  implementado: terá mount exclusivo, fallback no markup legado e entrará no
+  mesmo `webapp/`, build, gate e deploy; ver o
+  [ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
   Ao alterar o build, preserve o alvo Safari 14 nos artefatos JS e CSS e
   `emptyOutDir: false`: o destino é o diretório do site.
   O gate do CI recompila `webapp/` e exige artefatos idênticos aos commitados.
   Dependências novas exigem rebuild e inclusão dos artefatos afetados no commit.
   **O que isto NÃO autoriza:** transformar a área logada em SPA, adicionar
-  framework em página nova por gosto, ou pôr script `build` na raiz.
+  framework em página nova por gosto, criar outro projeto/pipeline de build ou
+  deploy, ou pôr script `build` na raiz.

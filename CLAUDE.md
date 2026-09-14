@@ -242,8 +242,8 @@ os comandos de propósito — quando repetia, as duas versões divergiram (§0.7
 
 **Frontend:** `npm run test:frontend` (`node --test tests/frontend/*.test.mjs`, com
 Playwright). O `package.json` da raiz existe só para isso e segue **sem script
-`build`** de propósito. O único build de JS do repositório é o de `webapp/` (a ilha
-React da /precos), que é projeto npm separado, tem artefato commitado e gate próprio
+`build`** de propósito. O único build de JS do repositório é o de `webapp/` (as
+ilhas React), que é projeto npm separado, tem artefatos commitados e gate próprio
 no CI — `docs/CLAUDE.md`, "Decisões tomadas". Rodar a suíte não o invoca.
 
 Não use o CI como primeiro teste — ele é a confirmação, não a descoberta.
