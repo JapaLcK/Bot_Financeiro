@@ -166,6 +166,13 @@ def mark_sync_result(
     now = at or datetime.now(_tz())
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            owner = None
+            if status:
+                cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
+                owner = cur.fetchone()
+                if owner:
+                    _lock_user(cur, owner["user_id"])
             cur.execute(
                 f"""
                 update open_finance_connections
@@ -197,6 +204,8 @@ def mark_sync_result(
                 ),
             )
             updated = cur.rowcount
+            if owner:
+                reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
     return updated
 

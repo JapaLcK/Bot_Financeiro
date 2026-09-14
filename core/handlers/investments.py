@@ -1,7 +1,7 @@
 # core/handlers/investments.py
 from __future__ import annotations
 import db
-from utils_text import fmt_brl, fmt_rate, marcador_de_tudo
+from utils_text import fmt_brl, fmt_rate
 from core.dashboard_links import build_dashboard_link
 from core.handlers import pending as h_pending
 from core.services.plan_limits import PlanLimitExceeded
@@ -470,11 +470,20 @@ def check_cdi() -> str:
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
+    from core.financial_targets import ALVO_AMBIGUO, QUANTIDADE_AMBIGUA, resolve_saque
+
+    existentes = ([row.get("name") or "" for row in (db.list_investments(user_id, include_lots=False) or [])]
+                  if "want_all" not in entities else [])
+    entities, ambigua = resolve_saque(text, entities, "investment_name", existentes)
+    if ambigua:
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "investments.withdraw", entities,
+            ALVO_AMBIGUO if ambigua == "alvo_ambiguo" else QUANTIDADE_AMBIGUA,
+            "" if ambigua == "alvo_ambiguo" else text,
+            falta="investment_name" if ambigua == "alvo_ambiguo" else "amount")
     investment_name = entities.get("investment_name")
     amount = entities.get("amount")
-    # Entity antes do texto — ver o gêmeo em core/handlers/pockets.py.
-    want_all = (bool(entities["want_all"]) if "want_all" in (entities or {})
-                else marcador_de_tudo(text))
+    want_all = bool(entities.get("want_all"))
 
     if not investment_name:
         return list_investments(user_id, h_pending.pergunta_guardando_contexto(

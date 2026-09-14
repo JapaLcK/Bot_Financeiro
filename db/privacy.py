@@ -353,6 +353,7 @@ def build_user_export_zip(user_id: int) -> bytes:
             ("identidades", "select * from user_identities where user_id = %s", (user_id,)),
             ("contas", "select * from accounts where user_id = %s", (user_id,)),
             ("lancamentos", "select * from launches where user_id = %s", (user_id,)),
+            ("declaracoes_bancarias", "select * from bank_movement_declarations where user_id = %s", (user_id,)),
             ("orcamentos", "select * from category_budgets where user_id = %s", (user_id,)),
             ("regras_categorias", "select * from user_category_rules where user_id = %s", (user_id,)),
             ("gatilhos_categorias", "select * from user_category_triggers where user_id = %s", (user_id,)),

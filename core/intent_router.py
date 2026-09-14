@@ -9,6 +9,11 @@ Recebe um IntentResult + mensagem original e decide o que fazer:
   - confirm.yes/no   → tenta resolver pending
 """
 from __future__ import annotations
+from core.financial_targets import (
+    ALVO_AMBIGUO, QUANTIDADE_AMBIGUA, alvo_ambiguo, eh_nome_do_catalogo as _eh_nome_do_catalogo,
+    nome_do_alvo as _nome_do_alvo, pede_tudo as _pede_tudo,
+    resolve_saque, texto_da_quantidade,
+)
 
 import logging
 import re
@@ -559,7 +564,10 @@ def route(result: IntentResult, msg: IncomingMessage, *,
 
     intent     = result.intent
     confidence = result.confidence
-    entities   = result.entities or {}
+    # Quantidade resolvida é estado interno, nunca instrução do classificador.
+    # Filtrar antes de salvar qualquer pergunta; o payload da clarification
+    # permanece separado e conserva seu want_all=False sobre o texto antigo.
+    entities = {k: v for k, v in (result.entities or {}).items() if k != "want_all"}
 
     # Desempate do #281 armado no turno anterior. ANTES DE TUDO, inclusive do
     # `infer_help_from_text` logo abaixo: as respostas dele são `1`, `2` e o
@@ -1411,20 +1419,6 @@ def _cola_separador_decimal(resposta: str) -> str:
 # contexto via `h_pending.pergunta_guardando_contexto` (#136). Fonte única: quem
 # entra aqui tem de gravar `falta` no payload, e quem grava `falta` tem de estar
 # aqui. O `tests/test_perguntas_guardam_contexto.py` compara as duas pontas.
-# "da caixinha viagem" e "caixinha viagem" são a MESMA caixinha que "viagem" —
-# o usuário repete o substantivo da pergunta. Mesma limpeza do
-# `_pocket_name_from_text` (core/handlers/pockets.py), sem exigir a palavra
-# "caixinha" no texto, porque aqui a resposta curta ("viagem") é o caso comum.
-#
-# NÃO tira "reserva": "reserva de emergência" é nome legítimo de caixinha, e o
-# exemplo da própria pergunta do saque genérico usa esse nome.
-_PREP_RE = re.compile(r"^(?:d[aeo]|n[ao]|para|pra|em)\s+", re.I)
-# Mesma jogada do `_pocket_name_from_text` (core/handlers/pockets.py): o nome é
-# o que vem DEPOIS do substantivo. Generalizado para não EXIGIR o substantivo,
-# porque aqui a resposta curta ("viagem") é o caso comum.
-_SUBST_ALVO_RE = re.compile(r"(?:caixinha|investimento)\s+(.+)$", re.I)
-
-
 def _alvos_existentes(user_id: int, intent: str) -> list[str]:
     """Nomes de caixinha/investimento do usuário, conforme o que a intent move."""
     nomes: list[str] = []
@@ -1438,94 +1432,6 @@ def _alvos_existentes(user_id: int, intent: str) -> list[str]:
     return [n for n in nomes if n]
 
 
-def _eh_nome_do_catalogo(resposta: str, existentes: list[str] | None = None) -> bool:
-    """A resposta INTEIRA já é um alvo do usuário? Fonte única do desempate."""
-    alvo = normalize_text((resposta or "").strip())
-    return bool(alvo) and any(normalize_text(n) == alvo for n in (existentes or []))
-
-
-def _nome_do_alvo(resposta: str, existentes: list[str] | None = None) -> str:
-    """O nome do alvo dentro da resposta do usuário.
-
-    "caixinha" no MEIO da string é ambíguo: em "retirei 100 da caixinha viagem"
-    é prefixo sintático e o nome é "viagem"; em "minha caixinha viagem" — nome
-    literal de uma caixinha criada pelo dashboard — faz parte do nome. Recortar
-    sempre respondia "Caixinha *viagem* não encontrada" (medido); não recortar
-    nunca fazia o comando completo funcionar (medido). Apontado pelo Codex no
-    #184, as duas pontas.
-
-    Quem desempata é o CATÁLOGO do usuário, que é definitivo: se a resposta
-    inteira já é um alvo dele, ela é o nome e não se toca. Só quando não é é que
-    o recorte vale.
-    """
-    t = resposta.strip()
-    if _eh_nome_do_catalogo(t, existentes):
-        return t
-    achou = _SUBST_ALVO_RE.search(t)
-    if achou:
-        t = achou.group(1)
-    recortado = _PREP_RE.sub("", t).strip()
-    if recortado and _eh_nome_do_catalogo(recortado, existentes):
-        return recortado
-
-    # Nem a resposta inteira nem o recorte batem. Última tentativa, e ainda pelo
-    # CATÁLOGO: um nome do usuário aparecendo DENTRO da resposta. É o que salva
-    # "tira 100 da viagem" — sem o substantivo "caixinha" o recorte acima não
-    # tem onde cortar, e o nome inteiro virava "tira 100 da viagem".
-    #
-    # Só quando UM nome casa: com dois, escolher seria adivinhar, e o handler
-    # dizendo "não encontrada" é melhor que mover dinheiro no alvo errado.
-    # Palavra inteira, senão a caixinha "ana" casaria em "banana" — quem faz
-    # isso é o `contains_word` do `utils_text`, não uma regex repetida aqui (§0.7).
-    alvo_norm = normalize_text(resposta)
-    dentro = [n for n in (existentes or []) if contains_word(alvo_norm, normalize_text(n))]
-    if len(dentro) > 1:
-        # "viagem" e "minha viagem" casam os dois numa MENÇÃO só ("tira 100 da
-        # minha viagem"): ANINHADOS, o mais específico ganha. O teste é UMA
-        # MENÇÃO, não "um nome cabe no outro": em "tira 100 da viagem e 50 da
-        # viagem japao" um cabe no outro do mesmo jeito, e são DUAS menções —
-        # escolher ali seria adivinhar, e o handler dizendo "não encontrada" é
-        # melhor que mover dinheiro no alvo errado.
-        #
-        # Quem separa os dois casos é a REMOÇÃO (mesmo idioma do `_pede_tudo`):
-        # tira a ocorrência do maior e vê se algum candidato ainda casa no resto.
-        # Se casa, sobrou outra menção. Disjuntos ("ana" e "bruno") caem aqui
-        # também, e continuam recusados.
-        maior = max(dentro, key=lambda n: len(normalize_text(n)))
-        resto = re.sub(rf"\b{re.escape(normalize_text(maior))}\b", " ", alvo_norm, count=1)
-        if not any(contains_word(resto, normalize_text(n)) for n in dentro):
-            dentro = [maior]
-    # TETO deixado ABERTO de propósito: com catálogo ["viagem", "minha caixinha
-    # viagem"], "tira 100 da minha caixinha viagem" ainda devolve "viagem",
-    # porque o `_SUBST_ALVO_RE` recorta e o catálogo confirma ANTES de chegar
-    # aqui. Fechar isso mexeria na precedência documentada acima. Está em #260,
-    # com repro e plano de teste.
-    #
-    # SEGUNDO teto, deste desempate: menções SOBREPOSTAS. Com ["casa nova",
-    # "nova moto"], "tira da casa nova moto" devolve "casa nova" — a remoção do
-    # maior deixa " moto", que não casa "nova moto", e o código aceita. Exige
-    # duas caixinhas compartilhando um token e uma frase que as emenda; é raro,
-    # mas é dinheiro num alvo adivinhado, que é a classe que este bloco fecha.
-    if len(dentro) == 1:
-        return dentro[0]
-    return recortado or resposta.strip()
-
-
-def _pede_tudo(resposta: str, existentes: list[str] | None = None) -> bool:
-    """O marcador de TUDO conta só se sobreviver à remoção do nome do catálogo.
-
-    Nome de caixinha é string arbitrária: "zerar dívida" é um nome legítimo, e
-    "tira 100 da zerar dívida" pedia 100 — não esvaziar.
-    """
-    if not marcador_de_tudo(resposta):
-        return False
-    alvo = _nome_do_alvo(resposta, existentes)
-    # ESSENCIAL: sem esta guarda, "esvaziar" sozinho se removeria de si mesmo
-    # (o `_nome_do_alvo` devolve a própria resposta) e o marcador sumiria.
-    if not _eh_nome_do_catalogo(alvo, existentes):
-        return True
-    resto = re.sub(rf"\b{re.escape(normalize_text(alvo))}\b", " ", normalize_text(resposta))
-    return marcador_de_tudo(resto)
 
 
 _INTENTS_PERGUNTA_DE_HANDLER: frozenset[str] = frozenset({
@@ -1590,18 +1496,29 @@ def _funde_a_resposta(
     ents = dict(ents)
     resposta = (resposta or "").strip()
 
+    if alvo_ambiguo(resposta, existentes):
+        ents.pop(_CHAVE_DO_NOME[intent], None)
+        ents.pop("amount", None)
+        ents["want_all"] = False
+        return ents, "alvo_ambiguo"
+
     # ── quantity ────────────────────────────────────────────────────────────
     # Ordem: TUDO primeiro, porque "esvaziar" não tem número e o `_extract_valor`
     # devolveria None — o que antes virava "Não entendi o valor" em laço.
     eh_nome = _eh_nome_do_catalogo(resposta, existentes)
     # TETO conhecido: caixinha chamada `tudo`, respondida com `tudo`, é lida
     # como NOME — a mesma precedência já aceita em `meta 2028`.
+    quantidade = texto_da_quantidade(resposta, existentes)
+    if _pede_tudo(resposta, existentes) and _extract_valor(quantidade) is not None:
+        ents.pop("amount", None)
+        ents["want_all"] = False
+        return _funde_o_nome(intent, ents, resposta, existentes, eh_nome), "quantidade_ambigua"
     if _pede_tudo(resposta, existentes):
         ents["want_all"] = True
         ents.pop("amount", None)          # excludente: TUDO substitui a quantia
     elif not eh_nome:
-        valor = _extract_valor(resposta)
-        perigo = valor_perigoso(resposta, valor)
+        valor = _extract_valor(quantidade)
+        perigo = valor_perigoso(quantidade, valor)
         if perigo:
             # NÃO é `return` seco: o nome desta mesma resposta ainda vale. Antes
             # a recusa re-armava o payload ORIGINAL e o alvo novo se perdia.
@@ -1736,8 +1653,17 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
             # `consume_pending_action` no topo desta função já apagou a linha, e
             # entre lá e aqui outra tarefa pode ter posto uma pergunta NOVA —
             # que o usuário já viu. O upsert a atropelaria.
+            if recusa == "alvo_ambiguo":
+                payload = {**payload, "falta": _CHAVE_DO_NOME[original_intent],
+                           "question": ALVO_AMBIGUO, "orig_text": ""}
+            if recusa == "quantidade_ambigua":
+                payload = {**payload, "falta": "amount", "question": QUANTIDADE_AMBIGUA}
             db.create_pending_action_if_absent(
                 user_id, "clarification", {**payload, "entities": ents})
+            if recusa == "alvo_ambiguo":
+                return ALVO_AMBIGUO
+            if recusa == "quantidade_ambigua":
+                return QUANTIDADE_AMBIGUA
             texto = ("O valor precisa ser maior que zero." if recusa == "nao_positivo"
                      else "Não entendi o valor. Manda só o número, por exemplo: *132,50*")
             return f"{texto}\n\n{payload.get('question') or 'Qual o valor?'}"
@@ -1792,7 +1718,7 @@ def _resolve_clarification(clarif: dict, user_response: str, user_id: int, platf
             and res.confidence >= 0.55
             and not res.needs_clarification
             and res.intent not in ("out_of_scope", "confirm.yes", "confirm.no")):
-        merged_entities = {**original_entities, **(res.entities or {})}
+        merged_entities = {**original_entities, **{k: v for k, v in (res.entities or {}).items() if k != "want_all"}}
         if res.intent == "launches.add":
             # cai na construção de texto limpo do bloco legado de launches.add,
             # agora com as entities enriquecidas pela IA.
@@ -1927,18 +1853,19 @@ def _intent_label(intent: str) -> str:
 
 
 def _execute_generic_withdraw(user_id: int, text: str, entities: dict) -> str:
+    entities, ambigua = resolve_saque(
+        text, entities, "target_name",
+        _alvos_existentes(user_id, "funds.withdraw") if "want_all" not in entities else [])
+    if ambigua:
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "funds.withdraw", entities,
+            ALVO_AMBIGUO if ambigua == "alvo_ambiguo" else QUANTIDADE_AMBIGUA,
+            "" if ambigua == "alvo_ambiguo" else text,
+            falta="target_name" if ambigua == "alvo_ambiguo" else "amount")
     amount = entities.get("amount")
     target_name = (entities.get("target_name") or "").strip()
     target_kind = entities.get("target_kind")
-    # A quantidade "tudo" tem de sobreviver às QUATRO reconstruções de dict
-    # abaixo — elas montam as entities do zero e descartavam o marcador, então
-    # "esvaziar" por esta porta perguntava o valor para sempre. Irmão dos dois
-    # handlers de saque; fecha junto (§2). A PRESENÇA da chave manda (idioma de
-    # core/handlers/pockets.py:215): com `or`, o `want_all=False` que o resolver
-    # grava DE PROPÓSITO era religado pelo texto original — "esvaziar caixinha"
-    # seguido de "tira 100 da viagem" esvaziava a caixinha.
-    want_all = (bool(entities["want_all"]) if "want_all" in (entities or {})
-                else marcador_de_tudo(text))
+    want_all = bool(entities.get("want_all"))
     quantia = {"amount": amount, "want_all": want_all}
 
     if target_kind == "pocket":
