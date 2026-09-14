@@ -24,7 +24,7 @@ para visitantes.
 | Rota ou recurso | Situação | Contratos que uma migração não pode assumir |
 | --- | --- | --- |
 | `/` | pública, candidata após otimização | VSL opcional; CTAs de `/cadastro` sempre acionáveis; `vsl_play` e `vsl_progress`; `nav-auth.js` reescreve CTAs de sessão viva. |
-| `/como-funciona` | pública, piloto técnico decidido e ainda não implementado | Ilha React limitada a `#como-funciona-app`; HTML e rota continuam no FastAPI; conteúdo legado, tags injetadas, navegação convencional e `safe-area.js` permanecem. |
+| `/como-funciona` | pública, piloto técnico decidido e ainda não implementado | Ilha React limitada a `#como-funciona-app`; CTAs reescritos por `nav-auth.js` ficam fora do mount; HTML e rota continuam no FastAPI; conteúdo legado, tags injetadas, navegação convencional e `safe-area.js` permanecem. |
 | `/precos` | pública com dados e escrita | Consulta sessão e configuração de planos; inicia checkout; GA4/Meta; não é piloto estático até existir contrato de catálogo e matriz de estados. |
 | `/cadastro`, `/login`, `/completar-cadastro` | entrada | Cookies HttpOnly, CSRF, Google e deduplicação de `sign_up`/`CompleteRegistration`. |
 | `/app`, `/home`, `/settings`, `/onboarding` | autenticadas | Gates Python de plano/onboarding, refresh de sessão, PWA e pontes iOS. Não entram no piloto. |
@@ -125,13 +125,17 @@ ganho de conversão.
 - Manter o HTML servido pelo FastAPI via `html_file(..., clarity=True)`. A ilha
   pertence somente a `#como-funciona-app`; todo o resto continua HTML clássico e
   a navegação continua MPA.
+- Manter fora do mount todo CTA sujeito ao rewrite assíncrono de `nav-auth.js`,
+  inclusive a faixa final de `/cadastro`. Esses CTAs permanecem no HTML clássico;
+  React não os renderiza nem altera.
 - Compilar `como-funciona-app.js` como IIFE de nome fixo no `webapp/` existente,
   commitar o artefato em `frontend/` e servi-lo por rota explícita. Se o build
   emitir CSS, ele segue o mesmo contrato. Não criar projeto npm, exportação ou
   pipeline paralelo.
-- Preservar no mount o markup legado completo. Bundle ausente, tardio ou que
-  recuse um contrato desconhecido deixa conteúdo e CTAs de `/cadastro` intactos;
-  retirar a referência ao bundle é o rollback.
+- Preservar no mount o markup legado completo do subtree controlado por React.
+  Bundle ausente, tardio ou que recuse um contrato desconhecido deixa esse
+  conteúdo e os CTAs externos intactos. O rollback remove do HTML as referências
+  ao bundle JS e a todo CSS opcional emitido pela ilha.
 - Validar antes de ativar: equivalência do subtree, status, MIME, hash/cache,
   CSP, safe area, Safari 14, bundle ausente/tardio, rastreamento e Clarity uma vez,
   navegação/cadastro, artefato reproduzível, teste real de navegador e rollback.
