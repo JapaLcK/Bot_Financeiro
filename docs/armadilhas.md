@@ -83,10 +83,10 @@ O app iOS (Capacitor, `mobile/`) carrega `https://pigbankai.com` num WKWebView c
 O `package.json` da raiz existe **só** para o harness de testes de frontend
 (`node --test tests/frontend/*.test.mjs`, com Playwright) e **não tem script
 `build`** — a detecção automática do Railway depende disso. O único build de JS
-do repositório é o de `webapp/`, projeto npm separado que produz a ilha React da
-`/precos` (`frontend/precos-app.js` + `.css`, artefato commitado); a convenção
-está no `docs/CLAUDE.md`. Fora daquele `#plans-v2`, o HTML é escrito à mão e
-servido pelo FastAPI; templating de servidor
+do repositório é o de `webapp/`, que produz os bundles IIFE de nome fixo e demais
+artefatos commitados em `frontend/`; a convenção está no `docs/CLAUDE.md`.
+Fora dos subtrees de propriedade explícita dessas ilhas, o HTML é escrito à mão
+e servido pelo FastAPI; templating de servidor
 existe em dois lugares só, por `str.replace("{{X}}")` (`/blog/{slug}` e o `{{FAQ}}` do
 `/suporte`, ambos em `frontend/routes/static_pages.py`).
 
@@ -118,8 +118,10 @@ cabeçalho do arquivo antes de tocar em navegação. O que ele é, exatamente:
 
 Ao escrever qualquer coisa nova, o default é **MPA**. Não descreva nem trate a área
 logada como SPA: a migração que existe é por **ilha** — um componente React dentro
-de uma página clássica, hoje só o `#plans-v2` da `/precos` — e ela não tornou nada
-disto aqui uma SPA.
+de uma página clássica, hoje em preços e nos chats — e ela não tornou nada disto
+aqui uma SPA. O piloto ainda não implementado de `/como-funciona` seguirá o mesmo
+`webapp/`, build e deploy, com mount e fallback estritos; ver o
+[ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
 
 ### `dashboard.js`: o arquivo grande demais
 
