@@ -48,6 +48,8 @@ class AccountsCog(commands.Cog):
                     f"💰 **Saldo total:** {fmt_brl(float(cb['consolidated'] or 0))}\n"
                     f"  👛 Carteira: {fmt_brl(float(cb['manual'] or 0))}\n"
                     f"  🏦 Bancos conectados: {fmt_brl(float(cb['open_finance_bank'] or 0))}"
+                    + ("\n🔎 Movimentações não confirmadas; patrimônio a conferir no dashboard."
+                       if (cb.get("bank_movements") or {}).get("pending_count") else "")
                 )
             else:
                 await message.reply(f"🏦 **Conta Corrente:** {fmt_brl(float(cb['manual'] or 0))}")
@@ -232,6 +234,8 @@ class AccountsCog(commands.Cog):
         ws_dash.append(["Total Despesas", total_des])
         ws_dash.append(["Saldo do Período", saldo_periodo])
         ws_dash.append(["Saldo Atual", saldo_atual])
+        if (_cb.get("bank_movements") or {}).get("pending_count"):
+            ws_dash.append(["Patrimônio", "A conferir: movimentações bancárias não confirmadas"])
 
         title_fill = PatternFill("solid", fgColor="1F2937")
         card_fill = PatternFill("solid", fgColor="111827")

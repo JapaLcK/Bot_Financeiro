@@ -953,7 +953,10 @@ async def get_financial_data(
     for bucket in allocations:
         allocations[bucket]["by_target"].sort(key=lambda x: -x["total"])
 
+    from db.bank_movements import bank_movement_summary
+    movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
     return {
+        "bank_movements": movement_summary,
         "user_id":            user_id,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "year":               y,

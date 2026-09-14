@@ -339,6 +339,8 @@ def pocket_withdraw_to_account(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 "select id, name, balance, interest_tax_profile, of_investment_id from pockets "
                 "where user_id=%s and lower(name)=lower(%s) for update",
@@ -505,6 +507,8 @@ def pocket_withdraw_to_account(
                 (user_id, "saque_caixinha", total_gross, canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, launch_id, funding_source, total_net)
 
         conn.commit()
 
@@ -616,6 +620,8 @@ def pocket_deposit_from_account(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             debita_carteira = funding_source is None
             cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
             acc = cur.fetchone()
@@ -667,6 +673,8 @@ def pocket_deposit_from_account(
                 (user_id, "deposito_caixinha", v, canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, launch_id, funding_source, -v)
 
         conn.commit()
 

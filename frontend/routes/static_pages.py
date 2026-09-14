@@ -921,3 +921,9 @@ async def health(request: Request):
     if esperado and constant_time_eq(request.headers.get("x-smoke-token", ""), esperado):
         corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
     return JSONResponse(corpo, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/bank-movements.js")
+async def serve_bank_movements_js():
+    return FileResponse(FRONTEND_DIR / "bank-movements.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})

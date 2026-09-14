@@ -181,7 +181,11 @@
       "updateInvestmentTaxHint",
       "updateMoveFormVisibility"
     ],
-    "variaveis": []
+    "variaveis": [
+      "BankMovements",
+      "USER_ID",
+      "refreshDashboardAfterInvestment"
+    ]
   },
   "home.html": {
     "funcoes": [

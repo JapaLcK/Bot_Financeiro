@@ -619,3 +619,5 @@ __all__ = [
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
     "touch_agent_emailed", "set_agent_email_enabled",
 ]
+
+from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement

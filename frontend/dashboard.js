@@ -7236,7 +7236,7 @@ function renderInvestmentsPanel(d) {
   const netMonth = grossMonth * (1 - .15);
   document.getElementById("invest-summary").innerHTML = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
-      <div class="chip"><div class="chip-lbl">Patrimônio</div><div class="chip-val b">${fmt(total)}</div></div>
+      <div class="chip"><div class="chip-lbl">Patrimônio</div><div class="chip-val b">${Number(d.bank_movements?.pending_count || 0) ? "A conferir" : fmt(total)}</div></div>
       <div class="chip"><div class="chip-lbl">Rend. bruto/mês <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val g">${fmt(grossMonth)}</div></div>
       <div class="chip"><div class="chip-lbl">Líquido estimado <span style="opacity:.6;font-weight:400">(simulado)</span></div><div class="chip-val">${fmt(netMonth)}</div></div>
     </div>
@@ -10385,6 +10385,10 @@ function render(d) {
   const carteira = Number(d.balance || 0);
   const saldoAtual = carteira + ofBank;
   const pat = saldoAtual + ni + np;
+  const movementsPending = Number(d.bank_movements?.pending_count || 0);
+  const patrimonyHtml = movementsPending
+    ? `A conferir · <button type="button" class="ov-adjust-lnk" onclick="BankMovements.open(USER_ID, refreshDashboardAfterInvestment)">${movementsPending} movimentação(ões) não confirmada(s)</button>`
+    : `<span data-num="pat" data-val="${pat}">${fmt(pat)}</span>`;
 
   // Detalhamento do "Sobrou este mês" pro modal explicativo (clique no card).
   // Guarda exatamente o que está na tela, inclusive em mês histórico.
@@ -10484,8 +10488,8 @@ function render(d) {
         <div class="ov-val"><span data-num="balance" data-val="${saldoAtual}">${fmt(saldoAtual)}</span></div>
         ${hasBanks
           ? `<div class="ov-delta"><i class="ph ph-wallet" aria-hidden="true"></i> Carteira <b style="color:var(--text-2)">${fmt(carteira)}</b> · <i class="ph ph-bank" aria-hidden="true"></i> Bancos <b style="color:var(--text-2)">${fmt(ofBank)}</b> · <button type="button" class="ov-adjust-lnk" onclick="openAdjustWalletModal()">ajustar</button></div>
-             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`
-          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)"><span data-num="pat" data-val="${pat}">${fmt(pat)}</span></b></div>`}
+             <div class="ov-delta" style="opacity:.8">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`
+          : `<div class="ov-delta">Patrimônio total <b style="color:var(--text-2)">${patrimonyHtml}</b></div>`}
       </div>
       <div class="ov-stat ov-stat-clickable" style="animation-delay:60ms" role="button" tabindex="0" aria-label="${escapeHtmlSafe((sav>=0?'Sobrou este mês':'Déficit do mês') + ': ' + fmt(sav) + '. ' + savDeltaTxt + '. Toque para ver como este valor foi calculado.')}" onclick="openSobrouDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSobrouDetail();}">
         <div class="ov-ico neon">${svgTrend}</div>

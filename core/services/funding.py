@@ -88,7 +88,9 @@ def resolve(user_id: int, amount) -> dict:
     """
     v = _dec(amount)
     fontes = list_sources(user_id)
-    cobrem = [f for f in fontes if f["balance"] >= v]
+    from db.bank_movements import has_existing_bank_outflow
+    cobrem = [f for f in fontes if f["balance"] >= v or
+              (f["kind"] == BANK and has_existing_bank_outflow(user_id, f["of_account_id"], v))]
 
     if len(cobrem) == 1:
         return {"source": cobrem[0]}
@@ -146,23 +148,11 @@ def origem_txt(source: dict | None) -> str:
 
 
 def nota_sync(saida: bool = True) -> str:
-    """Aviso obrigatório quando a origem é o banco.
-
-    O Pig anota só metade da movimentação: o lado do investimento/caixinha entra na
-    hora, o lado do dinheiro só quando o banco sincronizar. Nesse intervalo o patrimônio
-    fica alto (saída) ou baixo (entrada) pelo valor da operação — e sem aviso o usuário
-    vê o número errado sem entender por quê.
-
-    A segunda frase não é enfeite: a transação do banco entra como lançamento próprio e
-    a reconciliação ainda não a funde com o aporte (`_find_manual_candidates` filtra por
-    `tipo` e `is_internal_movement = false`, e o aporte falha nos dois). Enquanto isso
-    não mudar, a segunda linha aparece — é mais honesto avisar do que deixar descobrir.
-    """
-    movimento = "saída" if saida else "entrada"
+    """Declaração de fato passado; confirmação só existe com prova no extrato."""
     return (
-        f"🔄 Anotei só o lado do investimento. A {movimento} do dinheiro aparece "
-        "quando o Open Finance sincronizar — até lá o saldo do banco fica como está, "
-        "e a transação pode surgir como uma segunda linha no extrato."
+        "🔎 Registrei sua declaração de movimentação no banco. "
+        "Confira a confirmação pelo extrato na área de movimentações bancárias do dashboard. "
+        "Enquanto houver movimentações não confirmadas, o patrimônio fica a conferir."
     )
 
 
@@ -193,7 +183,7 @@ def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list |
             linhas.append(
                 f"• **{b['label']}**: {fmt_brl(float(b['balance']))} disponíveis "
                 f"({fmt_brl(float(b.get('espelho') or 0))} no banco, "
-                f"{fmt_brl(float(comprometido))} já lançados aqui e ainda não sincronizados)"
+                f"{fmt_brl(float(comprometido))} declarados aqui e ainda não confirmados)"
             )
         else:
             linhas.append(f"• **{b['label']}**: {fmt_brl(float(b['balance']))}")
@@ -205,7 +195,7 @@ def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list |
     )
     if tem_comprometido:
         rodape += (
-            "\n\nO valor já lançado sai do disponível até o banco sincronizar, para você "
+            "\n\nO valor declarado sai do disponível até ser confirmado no extrato, para você "
             "não comprometer o mesmo dinheiro duas vezes."
         )
     return (

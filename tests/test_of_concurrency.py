@@ -1159,8 +1159,10 @@ def test_statement_timeout_desconta_a_espera_do_pool(user_id, monkeypatch):
     sem_teto = [sql for i, sql in reais if i == 0 or ordem[i - 1] != "TETO"]
     assert not sem_teto, \
         f"statement sem reajuste imediatamente antes: {sem_teto}\nordem: {ordem}"
-    assert len(reais) == 3, \
-        f"esperado users+accounts+upsert; veio {[s for _, s in reais]}"
+    # users+accounts do ensure, lock accounts pré-upsert, upsert da conexão,
+    # lock accounts da conferência e leitura das declarações (vazia neste caso).
+    assert len(reais) == 6, \
+        f"esperado ensure(2)+lock+upsert+lock+declarações; veio {[s for _, s in reais]}"
     assert set(vistos) == {"3000ms"}, \
         f"5000 − 2000 (espera do pool) = 3000; veio {vistos}"
 
