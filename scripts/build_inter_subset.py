@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regera frontend/fonts/Inter-*.woff2 como subset latin + latin-1 + pontuação.
+"""Regera os seis pesos estáticos legados da Inter como subset.
+
+O frontend novo usa Inter-Variable.woff2, gerado por build_inter_variable.py.
+Estes arquivos permanecem no deploy para brand.css antigos em cache e este
+gerador continua disponível até terminar a janela de compatibilidade.
 
 A Inter completa traz ~112–115 KiB por peso × 6 pesos (~680 KiB por primeira
 visita). O produto é pt-BR: latin + latin-1 cobre todo o texto, e o bloco de
@@ -25,6 +29,7 @@ from fontTools.ttLib import TTFont
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FONTS = RAIZ / "frontend" / "fonts"
+FONTE_VARIAVEL = FONTS / "Inter-Variable.woff2"
 
 # latin, latin-1, diacríticos combinantes (texto NFD não vira tofu), Δ,
 # pontuação geral (– — “ ” • … ‹ ›), setas/símbolos de UI que o frontend USA
@@ -51,8 +56,13 @@ def subset_font(path: pathlib.Path) -> None:
     print(f"  {path.name}: {antes/1024:.0f} KiB -> {path.stat().st_size/1024:.0f} KiB")
 
 
+def fontes_legadas() -> list[pathlib.Path]:
+    """Os seis pesos estáticos; nunca toca a fonte ativa/cache-buster dela."""
+    return sorted(path for path in FONTS.glob("Inter-*.woff2") if path != FONTE_VARIAVEL)
+
+
 def main() -> None:
-    alvos = sorted(FONTS.glob("Inter-*.woff2"))
+    alvos = fontes_legadas()
     if not alvos:
         raise SystemExit(f"nenhuma Inter-*.woff2 em {FONTS}")
     for path in alvos:

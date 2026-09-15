@@ -9,6 +9,7 @@ from db import (
 from datetime import time, timedelta, date
 from discord.ext import tasks
 from core.observability import get_logger
+from .formatting import _fmt_brl, finish_report
 
 logger = get_logger(__name__)
 
@@ -71,11 +72,6 @@ def filtrar_por_acesso(user_ids):
     from db.reports import get_plan_gate_state
     return [uid for uid in user_ids
             if has_app_access(uid, user=get_plan_gate_state(uid))]
-
-
-def _fmt_brl(v: float) -> str:
-    s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"R$ {s}"
 
 
 def _add_months(y: int, m: int, delta: int) -> tuple[int, int]:
@@ -173,7 +169,7 @@ def build_daily_report_text(user_id: int) -> str:
     lines.append(f"📈 Receitas de ontem: {summary['receita']}")
     lines.append(f"📊 Lançamentos de ontem: {summary['lancamentos']}")
 
-    return "\n".join(lines).strip()
+    return finish_report(user_id, lines)
 
 
 # --- resumos por período (semanal / mensal) ---
@@ -239,7 +235,7 @@ def build_weekly_report_text(user_id: int, closed: bool = False) -> str:
     lines.append(f"📈 Receitas da semana: {summary['receita']}")
     lines.append(f"📊 Lançamentos da semana: {summary['lancamentos']}")
 
-    return "\n".join(lines).strip()
+    return finish_report(user_id, lines)
 
 
 def build_monthly_report_text(user_id: int, closed: bool = False) -> str:
@@ -254,7 +250,7 @@ def build_monthly_report_text(user_id: int, closed: bool = False) -> str:
     lines.append(f"📈 Receitas do mês: {summary['receita']}")
     lines.append(f"📊 Lançamentos do mês: {summary['lancamentos']}")
 
-    return "\n".join(lines).strip()
+    return finish_report(user_id, lines)
 
 # --- scheduler Discord (09:00) ---
 

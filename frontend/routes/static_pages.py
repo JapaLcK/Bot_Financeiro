@@ -48,7 +48,11 @@ class ContactBody(BaseModel):
 
 @router.get("/")
 async def serve_landing():
-    return html_file(FRONTEND_DIR / "index.html", clarity=True)
+    return html_file(
+        FRONTEND_DIR / "index.html",
+        clarity=True,
+        inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
+    )
 
 
 @router.get("/app")
@@ -92,6 +96,12 @@ async def serve_settings(request: Request):
     # acesso e trancar esta porta junto tiraria da pessoa a saída da própria
     # conta. A perna da ESCOLHA continua valendo — cadastro novo sem plano vai
     # pra /precos como antes; quem perdeu o DIREITO entra aqui.
+    #
+    # As CINCO rotas de conta que sustentam esta página fazem o MESMO recorte no
+    # servidor: `shared.authorize_account_access` chama o
+    # `_enforce_subscription_gate(exige_direito=False)` — mesmo parâmetro, mesma
+    # decisão, uma regra só (§0.7). A docstring de lá é o texto longo; esta nota
+    # existe para o grep achar as duas pontas.
     #
     # O par do lado cliente está em `settings.html`, no bloco do `/auth/me`: os
     # dois têm de concordar, senão o JS expulsa quem o servidor deixou entrar.
@@ -524,6 +534,16 @@ async def serve_nav_auth_js(request: Request):
     )
 
 
+@router.get("/nav-burger.js")
+async def serve_nav_burger_js():
+    """Menu recolhido da nav pública abaixo de 900px (par do nav-auth.js)."""
+    return FileResponse(
+        FRONTEND_DIR / "nav-burger.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/blog-news.js")
 async def serve_blog_news_js():
     """JS da seção 'Notícias do mercado' do /blog (consome /api/blog/news).
@@ -558,12 +578,51 @@ async def serve_dashboard_js():
     )
 
 
+@router.get("/dashboard-agent-chat.js")
+async def serve_dashboard_agent_chat_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-agent-chat.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/launch-type-labels.js")
+async def serve_launch_type_labels_js():
+    """Fonte única dos rótulos de `tipo` de lançamento — dashboard.html e
+    home.html carregam o mesmo arquivo (CLAUDE.md §0.7)."""
+    return FileResponse(
+        FRONTEND_DIR / "launch-type-labels.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/dashboard-chat.js")
 async def serve_dashboard_chat_js():
     """Widget de chat IA (Piggy) do dashboard, extraído do inline."""
     return FileResponse(
         FRONTEND_DIR / "dashboard-chat.js",
         media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/chat-app.js")
+async def serve_chat_app_js():
+    """Ilha React compartilhada dos chats; revalidação acompanha o HTML."""
+    return FileResponse(
+        FRONTEND_DIR / "chat-app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/chat-app.css")
+async def serve_chat_app_css():
+    return FileResponse(
+        FRONTEND_DIR / "chat-app.css",
+        media_type="text/css",
         headers={"Cache-Control": "no-cache"},
     )
 
@@ -587,6 +646,20 @@ async def serve_comecar_js():
     dessincronizar do HTML (servido no-store) em deploys."""
     return FileResponse(
         FRONTEND_DIR / "comecar.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/purchase-intent.js")
+async def serve_purchase_intent_js():
+    """Mantém a escolha de plano durante autenticação e checkout.
+
+    O arquivo guarda somente plano, ciclo e meio de pagamento na aba atual;
+    nenhum dado do cartão, documento ou token de pagamento é persistido.
+    """
+    return FileResponse(
+        FRONTEND_DIR / "purchase-intent.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )
@@ -720,6 +793,7 @@ async def serve_font(name: str):
     allowed = {
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
+        "Inter-Variable.woff2",
         "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:
@@ -861,3 +935,9 @@ async def health(request: Request):
     if esperado and constant_time_eq(request.headers.get("x-smoke-token", ""), esperado):
         corpo["commit"] = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
     return JSONResponse(corpo, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/bank-movements.js")
+async def serve_bank_movements_js():
+    return FileResponse(FRONTEND_DIR / "bank-movements.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})

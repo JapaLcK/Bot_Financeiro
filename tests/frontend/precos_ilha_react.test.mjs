@@ -72,8 +72,14 @@ function arvoreEPrecos() {
     // (é o detector de mount, e o `lerPlanos` o ignora de propósito).
     if (n.nodeType === 3) return norm(n.textContent) || null;
     if (n.nodeType !== 1) return null;
+    // O NumberFlow é uma melhoria progressiva exclusiva do bundle. O contrato
+    // comparado aqui continua sendo o markup estático que também funciona sem JS.
+    if (n.matches(".price-flow-host")) return null;
     return [n.nodeName,
-            [...n.attributes].map((a) => `${a.name}=${norm(a.value)}`).sort(),
+            [...n.attributes].map((a) => {
+              if (a.name === "class" && n.matches(".price.has-number-flow")) return "class=price";
+              return `${a.name}=${norm(a.value)}`;
+            }).sort(),
             [...n.childNodes].map(no).filter((x) => x !== null)];
   };
   return {
@@ -244,8 +250,8 @@ test("PI5: <ul> embrulhado num <div> cai no fallback em vez de perder as feature
  * `.price-block` e `<ul>` repetidos, e ordem trocada.
  */
 test("PI6: um 2º <button> no card cai no fallback em vez de desaparecer", async () => {
-  const doisBotoes = (h) => h.replace("</ul>\n            <button", "</ul>\n"
-    + '            <button type="button" id="b2">Falar com vendas</button>\n            <button');
+  const doisBotoes = (h) => h.replace("</button>\n            <ul>", "</button>\n"
+    + '            <button type="button" id="b2">Falar com vendas</button>\n            <ul>');
   const servidor = await abrir({ mutar: doisBotoes, semIlha: true });
   const ilha = await abrir({ mutar: doisBotoes });
 
@@ -728,6 +734,20 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
       nomes: cards.map((c) => c.querySelector("h3").textContent.trim()),
       alturas: cards.map((c) => Math.round(cx(c).height)),
       paddingsTopo: cards.map((c) => getComputedStyle(c).paddingTop),
+      espacosTituloPreco: cards.map((c) => Math.round(
+        c.querySelector(".price").getBoundingClientRect().top
+          - c.querySelector("h3").getBoundingClientRect().bottom,
+      )),
+      listas: cards.map((c) => {
+        const lista = c.querySelector("ul");
+        const cta = c.querySelector("[data-plan-btn]");
+        return {
+          gap: getComputedStyle(lista).rowGap,
+          itens: lista.children.length,
+          ctaAntes: !!(cta.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING),
+          vao: Math.round(lista.getBoundingClientRect().top - cta.getBoundingClientRect().bottom),
+        };
+      }),
       destaque: cards.findIndex((c) => c.classList.contains("featured")),
       bases: cards.map((c) => Math.round(cx(c).bottom)),
     };
@@ -747,6 +767,14 @@ test("PO2: em 1024px os cards formam três degraus, com bases alinhadas", async 
     `o degrau Essencial→Pro é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
   assert.ok(r.alturas[1] - r.alturas[2] >= degrauMinimo,
     `o degrau Pro→Plus é menor que ${degrauMinimo}px: ${r.alturas.join("/")}`);
+  assert.ok(r.espacosTituloPreco.every((espaco) => espaco <= 36),
+    `há espaço demais entre título e preço: ${r.espacosTituloPreco.join("/")}px`);
+  assert.deepEqual(r.listas.map((l) => l.gap), ["16px", "16px", "16px"],
+    `o espaçamento dos benefícios divergiu: ${JSON.stringify(r.listas)}`);
+  assert.deepEqual(r.listas.map((l) => l.itens), [6, 8, 7],
+    `a seleção enxuta de benefícios divergiu: ${JSON.stringify(r.listas)}`);
+  assert.ok(r.listas.every((l) => l.ctaAntes && l.vao >= 20 && l.vao <= 24),
+    `o CTA não ficou logo após o preço e antes dos benefícios: ${JSON.stringify(r.listas)}`);
   assert.equal(new Set(r.paddingsTopo).size, 1,
     `o conteúdo não começa no mesmo recuo: ${r.paddingsTopo.join("/")}`);
   assert.equal(new Set(r.bases).size, 1, `as bases não estão alinhadas: ${r.bases.join("/")}`);
@@ -823,7 +851,9 @@ for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
         } else {
           // O POST confirmou que só o agendamento mudou; nenhuma consulta nova é necessária.
           for (const ciclo of ["annual", "monthly"]) {
-            await pagina.locator(`#cycle-${ciclo}`).click();
+            await pagina.locator("#cycle-annual").click();
+            assert.equal(await pagina.locator("#cycle-annual").getAttribute("aria-checked"),
+              ciclo === "annual" ? "true" : "false", `o switch não entrou no ciclo ${ciclo}`);
             for (const sel of [alvo, '.cmp-table [data-plan-btn="pro"]']) {
               assert.equal(await pagina.locator(sel).innerText(), "Trocar pro Pro");
               await pagina.$eval(sel, (b) => b.click());

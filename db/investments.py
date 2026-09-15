@@ -1059,6 +1059,8 @@ def create_investment_db(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 """
                 insert into investments(
@@ -1148,7 +1150,7 @@ def create_investment_db(
                 }
                 cur.execute(
                     "insert into launches(user_id, tipo, valor, alvo, nota, criado_em, efeitos, is_internal_movement) "
-                    "values (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "values (%s,%s,%s,%s,%s,%s,%s,%s) returning id",
                     (
                         user_id,
                         "aporte_investimento",
@@ -1160,6 +1162,10 @@ def create_investment_db(
                         True,
                     ),
                 )
+
+                deposit_id = cur.fetchone()["id"]
+                from .bank_movements import record_bank_movement
+                record_bank_movement(cur, user_id, deposit_id, funding_source, -initial)
 
         conn.commit()
 
@@ -1226,7 +1232,12 @@ def delete_investment(user_id: int, investment_name: str, nota: str | None = Non
     return launch_id, canon
 
 
-def list_investments(user_id: int):
+def list_investments(user_id: int, *, include_lots: bool = True):
+    """Lista os saldos registrados; consultas de resumo podem dispensar os lotes.
+
+    `include_lots=False` evita a consulta e a materialização do histórico de
+    aportes, preservando os mesmos campos e a ordenação dos investimentos.
+    """
     ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1240,9 +1251,10 @@ def list_investments(user_id: int):
                 (user_id,),
             )
             rows = [dict(r) for r in cur.fetchall()]
-            lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in rows])
-            for row in rows:
-                row["lots"] = lots_by_inv.get(int(row["id"]), [])
+            if include_lots:
+                lots_by_inv = _fetch_lots_for_investments(cur, user_id, [int(r["id"]) for r in rows])
+                for row in rows:
+                    row["lots"] = lots_by_inv.get(int(row["id"]), [])
             return rows
 
 
@@ -1469,6 +1481,8 @@ def investment_deposit_from_account(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             debita_carteira = funding_source is None
             cur.execute("select balance from accounts where user_id=%s for update", (user_id,))
             acc = cur.fetchone()
@@ -1533,6 +1547,8 @@ def investment_deposit_from_account(
                 (user_id, "aporte_investimento", v, canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, launch_id, funding_source, -v)
 
         conn.commit()
 
@@ -1579,6 +1595,8 @@ def investment_withdraw_to_account(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 "select id, name, tax_profile from investments "
                 "where user_id=%s and lower(name)=lower(%s) for update",
@@ -1740,6 +1758,8 @@ def investment_withdraw_to_account(
                 (user_id, "resgate_investimento", total_gross, canon, nota, criado_em, Jsonb(efeitos), True),
             )
             launch_id = cur.fetchone()["id"]
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, launch_id, funding_source, total_net)
 
         conn.commit()
 

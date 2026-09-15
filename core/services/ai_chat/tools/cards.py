@@ -409,6 +409,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_open_bill,
+        has_side_effects=True,  # A consulta pode criar ou reabrir a fatura.
     ),
     Tool(
         schema={
@@ -457,6 +458,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_total_debt,
+        has_side_effects=True,  # Reconcilia faturas pagas que voltaram a ter saldo.
     ),
     Tool(
         schema={
@@ -523,6 +525,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_forecast_next_bill,
+        has_side_effects=True,  # Reconcilia faturas pagas que voltaram a ter saldo.
     ),
     Tool(
         schema={

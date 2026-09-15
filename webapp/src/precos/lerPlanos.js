@@ -82,8 +82,8 @@ const FILHOS = [
   ["h3", true],
   [".plan-sub", false],
   [".price-block", true],
-  ["ul", true],
   ["button", true],
+  ["ul", true],
 ];
 
 /** Todo filho de `el` casa com `sel`? (texto em branco e comentário não contam.) */

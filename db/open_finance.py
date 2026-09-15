@@ -405,11 +405,18 @@ def pause_open_finance_connection(connection_id: int) -> int:
     (libera o slot pago do contrato)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
+            owner = cur.fetchone()
+            if owner:
+                _lock_user(cur, owner["user_id"])
             cur.execute(
                 "update open_finance_connections set status='PAUSED', updated_at=now() where id=%s",
                 (connection_id,),
             )
             updated = cur.rowcount
+            if owner:
+                reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
     return updated
 
@@ -678,6 +685,8 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
                 cur = _CursorComTeto(cur, budget_ms, t0)
             if criar_usuario:
                 ensure_user_tx(cur, user_id)
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            _lock_user(cur, user_id)
             cur.execute(
                 """
                 insert into open_finance_connections (
@@ -731,6 +740,7 @@ def save_pluggy_open_finance_item(user_id: int, item: dict, *,
                 ),
             )
             connection = cur.fetchone()
+            reconcile_bank_movements(cur, user_id)
         conn.commit()
 
     return connection
@@ -743,6 +753,11 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            cur.execute("select distinct user_id from open_finance_connections where provider='pluggy' and provider_item_id=%s order by user_id", (item_id,))
+            owners = [row["user_id"] for row in cur.fetchall()]
+            for owner in owners:
+                _lock_user(cur, owner)
             cur.execute(
                 """
                 update open_finance_connections
@@ -783,6 +798,8 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                 (status, Jsonb(raw) if raw is not None else None, item_id),
             )
             updated = cur.rowcount
+            for owner in owners:
+                reconcile_bank_movements(cur, owner)
         conn.commit()
 
     return updated
@@ -1142,11 +1159,17 @@ def delete_open_finance_transactions(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            owners = sorted({row["user_id"] for row in rows})
+            for owner in owners:
+                _lock_user(cur, owner)
             cur.execute(
                 "delete from open_finance_transactions where id = any(%s)",
                 ([r["id"] for r in rows],),
             )
             deleted = cur.rowcount
+            for owner in owners:
+                reconcile_bank_movements(cur, owner)
         conn.commit()
 
     return deleted
@@ -1165,6 +1188,12 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("select user_id from open_finance_connections where id=%s", (connection_id,))
+            owner = cur.fetchone()
+            if not owner:
+                return {"accounts_synced": 0, "transactions_synced": 0}
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            _lock_user(cur, owner["user_id"])
             for account in accounts:
                 cur.execute(
                     """
@@ -1233,6 +1262,7 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
             # ressuscitava conexão morta — DELETED/ERROR viravam ACTIVE com
             # "sincronizado agora". Quem afirma sucesso é `mark_sync_result`, no
             # sync, DEPOIS de o `GET /items/{id}` confirmar que o item existe.
+            reconcile_bank_movements(cur, owner["user_id"])
         conn.commit()
 
     return {"accounts_synced": account_count, "transactions_synced": transaction_count}
@@ -1246,9 +1276,8 @@ def save_open_finance_sync(connection_id: int, accounts: list[dict]) -> dict:
 # Baseado na taxonomia real do Pluggy (GET /categories). Caixinha do Nubank é um CDB:
 # aparece na conta como "Automatic investment"/"Fixed income" (aplicação/resgate).
 # NÃO inclui "Proceeds interests and dividends" (isso é RENDA de investimento).
-_OF_INTERNAL_CATEGORIES = (
-    "automatic investment",   # aplicação automática (Caixinha do Nubank)
-    "fixed income",           # CDB que lastreia a caixinha
+_OF_INVESTMENT_CATEGORIES = ("automatic investment", "fixed income")
+_OF_INTERNAL_CATEGORIES = _OF_INVESTMENT_CATEGORIES + (
     "same person transfer",   # transferência entre contas próprias (+ variantes por prefixo)
     "transfer - internal",
 )
@@ -1277,6 +1306,12 @@ def is_credit_card_payment(category: str | None = None, description: str | None 
         any(cat == c or cat.startswith(c) for c in _OF_CREDIT_PAYMENT_CATEGORIES)
         or any(k in desc for k in _OF_CREDIT_PAYMENT_KEYWORDS)
     )
+
+
+def investment_transfer_kind(category):
+    """Categoria do provider que identifica aplicação/resgate, não toda transferência."""
+    cat = (category or "").strip().lower()
+    return any(cat == c or cat.startswith(c + " -") for c in _OF_INVESTMENT_CATEGORIES)
 
 
 def classify_open_finance_launch(amount, category: str | None = None, description: str | None = None) -> dict:
@@ -1426,6 +1461,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import reconcile_bank_movements
+            reconcile_bank_movements(cur, user_id)
             cur.execute(
                 """
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
@@ -1805,57 +1842,11 @@ def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> i
     return bill_id
 
 
-def sync_imported_open_finance_updates(user_id: int, connection_id: int | None = None) -> dict:
-    """Propaga CORREÇÕES da Pluggy (transactions/updated) pros registros já importados.
-
-    Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
-    a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
-    registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
-    """
-    ensure_user(user_id)
-    launches_updated = 0
+def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> int:
+    """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
-
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # 1) Launches próprios do OF (conta BANK)
-            cur.execute(
-                """
-                select o.amount, o.transaction_date, o.category, o.description,
-                       l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
-                       l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
-                       coalesce(l.posted_at, l.criado_em::date) as cur_date
-                from open_finance_transactions o
-                join open_finance_accounts a on a.id = o.account_id
-                join open_finance_connections c on c.id = a.connection_id
-                join launches l on l.id = o.imported_launch_id
-                where c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
-                """,
-                (user_id, connection_id, connection_id),
-            )
-            for r in cur.fetchall():
-                cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
-                new_cat = r["category"] or "outros"
-                changed = (
-                    Decimal(str(r["cur_valor"])) != cls["valor"]
-                    or r["cur_tipo"] != cls["tipo"]
-                    or (r["cur_cat"] or "") != new_cat
-                    or bool(r["cur_internal"]) != cls["is_internal_movement"]
-                    or r["cur_date"] != r["transaction_date"]
-                )
-                if changed:
-                    cur.execute(
-                        """
-                        update launches set valor=%s, tipo=%s, categoria=%s,
-                               is_internal_movement=%s, posted_at=%s
-                        where id=%s
-                        """,
-                        (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
-                         r["transaction_date"], r["launch_id"]),
-                    )
-                    launches_updated += 1
-
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
             cur.execute(
                 """
@@ -1918,6 +1909,66 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                             (new_valor, new_bill_id, user_id),
                         )
                     credit_updated += 1
+
+        conn.commit()
+    return credit_updated
+
+
+def sync_imported_open_finance_updates(user_id: int, connection_id: int | None = None) -> dict:
+    """Propaga CORREÇÕES da Pluggy (transactions/updated) pros registros já importados.
+
+    Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
+    a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
+    registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    """
+    ensure_user(user_id)
+    launches_updated = 0
+    # CREDIT commita antes de BANK: pagamento segura fatura enquanto seu
+    # helper debita accounts em outra conexão. Não inverter essa ordem.
+    credit_updated = _sync_imported_credit_updates(user_id, connection_id)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            from .bank_movements import reconcile_bank_movements
+            reconcile_bank_movements(cur, user_id)
+            # 1) Launches próprios do OF (conta BANK)
+            cur.execute(
+                """
+                select o.amount, o.transaction_date, o.category, o.description,
+                       l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
+                       l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
+                       coalesce(l.posted_at, l.criado_em::date) as cur_date
+                from open_finance_transactions o
+                join open_finance_accounts a on a.id = o.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                join launches l on l.id = o.imported_launch_id
+                where c.user_id=%s and (%s::bigint is null or c.id=%s)
+                  and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
+                """,
+                (user_id, connection_id, connection_id),
+            )
+            for r in cur.fetchall():
+                cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                new_cat = r["category"] or "outros"
+                changed = (
+                    Decimal(str(r["cur_valor"])) != cls["valor"]
+                    or r["cur_tipo"] != cls["tipo"]
+                    or (r["cur_cat"] or "") != new_cat
+                    or bool(r["cur_internal"]) != cls["is_internal_movement"]
+                    or r["cur_date"] != r["transaction_date"]
+                )
+                if changed:
+                    cur.execute(
+                        """
+                        update launches set valor=%s, tipo=%s, categoria=%s,
+                               is_internal_movement=%s, posted_at=%s
+                        where id=%s
+                        """,
+                        (cls["valor"], cls["tipo"], new_cat, cls["is_internal_movement"],
+                         r["transaction_date"], r["launch_id"]),
+                    )
+                    launches_updated += 1
+
 
         conn.commit()
 
@@ -2110,41 +2161,11 @@ def bank_label(conta) -> str:
 
 
 def pending_bank_outflows(user_id: int) -> dict[int, Decimal]:
-    """Saídas já lançadas contra uma conta do banco que o sync ainda não refletiu.
-
-    O saldo em `open_finance_accounts` é um espelho: o Pig não escreve nele. Então um
-    aporte com origem `bank` não reduz nada, e sem esta conta o MESMO saldo autorizaria
-    infinitos lançamentos — medido: 3 aportes de R$ 800 aceitos contra R$ 1.387,76.
-
-    O corte é `criado_em > a.updated_at`: `updated_at` é carimbado a cada sync
-    (save_open_finance_sync), então lançamentos anteriores a ele já estão embutidos no
-    saldo que o banco mandou e não podem ser descontados duas vezes.
-
-    Só saídas. Resgate com destino `bank` devolve dinheiro pro banco, mas creditar
-    disponibilidade antes do sync confirmar seria adiantar dinheiro que ainda não chegou.
-
-    Devolve {of_account_id: total_pendente}.
-    """
+    """Saídas declaradas sem prova: sync sem transação não libera o compromisso."""
+    from .bank_movements import pending_outflows
     ensure_user(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select (l.efeitos->'funding_source'->>'of_account_id')::bigint as of_account_id,
-                       coalesce(sum(l.valor), 0) as total
-                from launches l
-                join open_finance_accounts a
-                  on a.id = (l.efeitos->'funding_source'->>'of_account_id')::bigint
-                where l.user_id = %s
-                  and l.efeitos->'funding_source'->>'kind' = 'bank'
-                  and l.tipo in ('aporte_investimento', 'deposito_caixinha')
-                  and l.criado_em > a.updated_at
-                group by 1
-                """,
-                (user_id,),
-            )
-            return {int(r["of_account_id"]): Decimal(str(r["total"] or 0))
-                    for r in (cur.fetchall() or []) if r["of_account_id"] is not None}
+    with get_conn() as conn, conn.cursor() as cur:
+        return pending_outflows(cur, user_id)
 
 
 # tipo do depósito -> chave de `efeitos` do lançamento que CRIOU o lote
@@ -2272,7 +2293,7 @@ def _regra_de_sempre(cur, user_id: int) -> dict | None:
     conta = cur.fetchone()
     if not conta:
         return None
-    return {"kind": "bank", "of_account_id": int(conta["id"]), "label": bank_label(conta)}
+    return {"kind": "bank", "of_account_id": int(conta["id"]), "label": bank_label(conta), "account_ambiguous": True}
 
 
 def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
@@ -2314,21 +2335,10 @@ def assert_bank_covers(cur, user_id: int, of_account_id, valor) -> None:
         # negar os dois, negar é o lado seguro — o custo é o caso raro de desconexão
         # virar uma recusa, e aí o usuário reconecta.
         raise ValueError("INSUFFICIENT_ACCOUNT")
-    cur.execute(
-        """
-        select coalesce(sum(l.valor), 0) as total
-        from launches l
-        where l.user_id = %s
-          and l.efeitos->'funding_source'->>'kind' = 'bank'
-          and (l.efeitos->'funding_source'->>'of_account_id')::bigint = %s
-          and l.tipo in ('aporte_investimento', 'deposito_caixinha')
-          and l.criado_em > %s
-        """,
-        (user_id, int(of_account_id), conta["updated_at"]),
-    )
-    pendente = Decimal(str(cur.fetchone()["total"] or 0))
+    from .bank_movements import pending_outflows, existing_bank_outflow
+    pendente = pending_outflows(cur, user_id).get(int(of_account_id), Decimal("0"))
     disponivel = Decimal(str(conta["balance"] or 0)) - pendente
-    if disponivel < Decimal(str(valor)):
+    if disponivel < Decimal(str(valor)) and not existing_bank_outflow(cur, user_id, int(of_account_id), valor):
         raise ValueError("INSUFFICIENT_ACCOUNT")
 
 
@@ -2354,7 +2364,9 @@ def get_consolidated_balance(user_id: int) -> dict:
             of_bank = of_row["b"]
             of_count = int(of_row["n"] or 0)
 
+    from .bank_movements import bank_movement_summary
     return {
+        "bank_movements": bank_movement_summary(user_id),
         "manual": manual,
         "open_finance_bank": of_bank,
         "of_bank_count": of_count,
@@ -2413,7 +2425,8 @@ def disconnect_open_finance_connection(
     # 2. reverte launches/fatura importados.
     _rollback_imported_of(rows)
 
-    # 3. apaga cartões auto-criados que ficaram sem transações + remove a conexão.
+    # 3. CREDIT: apagar cartão pode cascatear faturas. Commit antes de accounts,
+    # pois pagamento mantém a fatura enquanto outro helper adquire a conta.
     with get_conn() as conn:
         with conn.cursor() as cur:
             for cid in card_ids:
@@ -2421,6 +2434,14 @@ def disconnect_open_finance_connection(
                 if cur.fetchone()["n"] == 0:
                     cur.execute("delete from credit_cards where id=%s and user_id=%s", (cid, user_id))
 
+        conn.commit()
+
+    # 4. BANK: a FK do cartão sobrevivente é SET NULL, não cascade de faturas.
+    # Exclusão da conexão e invalidação das provas permanecem atômicas.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            from .bank_movements import _lock_user, reconcile_bank_movements
+            _lock_user(cur, user_id)
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
@@ -2435,13 +2456,16 @@ def disconnect_open_finance_connection(
                 )
             varridas = cur.fetchall()
             deleted = len(varridas)
-            if swept_out is not None:
-                swept_out.extend(sorted({
-                    r["provider_item_id"] for r in varridas
-                    if r["provider"] == "pluggy" and r["provider_item_id"]
-                    and str(r["status"] or "").upper() != "PAUSED"
-                }))
+            reconcile_bank_movements(cur, user_id)
+
         conn.commit()
+
+    if swept_out is not None:
+        swept_out.extend(sorted({
+            r["provider_item_id"] for r in varridas
+            if r["provider"] == "pluggy" and r["provider_item_id"]
+            and str(r["status"] or "").upper() != "PAUSED"
+        }))
 
     return deleted
 

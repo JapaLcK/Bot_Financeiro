@@ -385,7 +385,8 @@ def hold_agent_emails(user_id: int, kinds: list[str], minutes: int) -> int:
     return n
 
 
-def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+def list_agent_events(user_id: int, limit: int = 20, *, kind: str | None = None) -> list[dict[str, Any]]:
+    """Eventos visíveis, com filtro opcional de agente aplicado antes do limite."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -393,10 +394,11 @@ def list_agent_events(user_id: int, limit: int = 20) -> list[dict[str, Any]]:
                 select id, kind, fired_at, payload, channel, valor_impacto, seen_at
                 from agent_events
                 where user_id=%s and stale_at is null
+                  and (%s::text is null or kind=%s)
                 order by fired_at desc
                 limit %s
                 """,
-                (user_id, limit),
+                (user_id, kind, kind, limit),
             )
             return list(cur.fetchall() or [])
 

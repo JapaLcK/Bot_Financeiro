@@ -761,6 +761,25 @@ def init_db():
           references launches(id) on delete set null
         """,
 
+        """
+        create table if not exists bank_movement_declarations (
+          launch_id bigint primary key references launches(id) on delete cascade,
+          user_id bigint not null references users(id) on delete cascade,
+          account_id bigint references open_finance_accounts(id) on delete set null,
+          amount numeric,
+          declared_at timestamptz not null,
+          account_ambiguous boolean not null default false,
+          requires_review boolean not null default false,
+          matched_transaction_id bigint unique references open_finance_transactions(id) on delete set null,
+          confirmation_method text check (confirmation_method in ('automatic','manual')),
+          confirmed_at timestamptz
+        )
+        """,
+        """
+        create index if not exists idx_bank_movement_declarations_user
+          on bank_movement_declarations(user_id, matched_transaction_id)
+        """,
+
         # -----------------------------
         # Open Finance — instante real da transação (com hora), quando o banco
         # envia. NULL = só data (cai no fallback de meia-dia local no import).
@@ -2514,6 +2533,9 @@ def _run_ddl(conn, ddl_statements) -> None:
                     print(f"[init_db] erro no statement #{i}: {e}")
                     print(stmt)
                     raise
+
+            from .bank_movements import migrate_legacy_bank_movements
+            migrate_legacy_bank_movements(cur)
 
             # Corrige FKs em users(id) que ficaram com on_delete errado
             # porque a tabela já existia antes da FK ser declarada no schema.

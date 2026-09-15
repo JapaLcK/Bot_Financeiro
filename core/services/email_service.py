@@ -1063,7 +1063,7 @@ def _fmt_brl_date(value) -> str:
 #
 # `plus` é o QUARTO, e entra por ser valor de COLUNA aceito, não por ser escrito
 # hoje: `_STORED_PLAN_TO_TIER` (core/services/plan_service.py:44) o mapeia para o
-# mesmo tier de `pro`, e `frontend/admin-dashboard.html:2192` já o trata como
+# mesmo tier de `pro`, e o `planNow` do `frontend/admin-dashboard.html` já o trata como
 # "valor antigo em algumas contas". Sem a entrada, tal conta lê o genérico
 # "PigBank" — em `billing_commands.py:109`, entre outros. Nenhum escritor atual o
 # produz e a produção tinha ZERO linhas com ele (medido 2026-09-10 por

@@ -77,7 +77,6 @@
       "closeOfxResult",
       "closePayBillModal",
       "closePayReceiptModal",
-      "closePiggy",
       "closePocketHistory",
       "closePocketModal",
       "closePocketMove",
@@ -137,10 +136,6 @@
       "pauseAgent",
       "payBill",
       "payFromDetail",
-      "piggyAsk",
-      "piggyAutoresize",
-      "piggyKeyDown",
-      "piggySend",
       "pocketWithdrawAll",
       "quickAddBoleto",
       "requestAffiliatePayout",
@@ -186,7 +181,11 @@
       "updateInvestmentTaxHint",
       "updateMoveFormVisibility"
     ],
-    "variaveis": []
+    "variaveis": [
+      "BankMovements",
+      "USER_ID",
+      "refreshDashboardAfterInvestment"
+    ]
   },
   "home.html": {
     "funcoes": [

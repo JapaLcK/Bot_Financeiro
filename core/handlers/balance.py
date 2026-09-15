@@ -78,4 +78,6 @@ def check(user_id: int) -> str:
                     limite_str = ""
             lines.append(f"  • *{card['name']}* — fatura: {fatura_str}{limite_str}")
 
+    if (cb.get("bank_movements") or {}).get("pending_count"):
+        lines.append("🔎 Há movimentações bancárias não confirmadas. Patrimônio a conferir no dashboard; os saldos acima são os últimos observados.")
     return "\n".join(lines)

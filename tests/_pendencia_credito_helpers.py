@@ -314,11 +314,11 @@ def arma_installment(uid: int) -> None:
     })
 
 
-def arma_pay_bill_choice(uid: int, nome: str = "Nubank") -> None:
+def arma_pay_bill_choice(uid: int, nome: str = "Nubank", purchased_at: date | None = None) -> None:
     card_id = cartao(uid, nome)
     db.add_credit_purchase_installments(
         user_id=uid, card_id=card_id, valor_total=300.0, categoria="outros",
-        nota="mercado", purchased_at=date.today(), installments=1,
+        nota="mercado", purchased_at=purchased_at or date.today(), installments=1,
     )
     bill_ids = [int(b["id"]) for b in db.list_open_bills(uid)]
     assert bill_ids, "setup do pay_bill_choice não gerou fatura em aberto"

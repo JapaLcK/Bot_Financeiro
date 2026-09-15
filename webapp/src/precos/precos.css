@@ -27,8 +27,15 @@
   #plans-v2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #plans-v2 { align-items: end; }
   #plans-v2 .plan.featured { min-height: 700px; }
-  #plans-v2 .plan:nth-child(3) { min-height: 620px; }
+  #plans-v2 .plan:nth-child(3) { min-height: 650px; }
+
 }
+
+/* O CTA vem logo após o preço; a regra compartilhada do site empurra botões
+ * para o rodapé, então o escopo da escada precisa anulá-la. As três listas usam
+ * o mesmo gap fixo em vez de esticar seus itens conforme a altura do card. */
+#plans-v2 .plan > [data-plan-btn] { margin-top: 12px; }
+#plans-v2 .plan > ul { gap: 16px; margin: 22px 0 0; }
 
 /* ── O badge do destaque ──────────────────────────────────────────────────────
  * Duas mudanças, e a primeira é de ACESSIBILIDADE.
