@@ -396,7 +396,14 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
         ainda gravou quando o lock caiu. `connect_timeout` é cego para isso: o
         handshake foi instantâneo.
 
-    Guarda por `ast` para o connect NOVO que este módulo ganhar."""
+    Guarda por `ast` para o connect NOVO que este módulo ganhar.
+
+    ponytail: TETO DECLARADO — o portão casa a chamada pelo nome do módulo, e
+    `from psycopg import connect as _pg; _pg(url)` ESCAPA (medido: verde).
+    Fechar exigiria seguir o import; nada neste módulo usa essa forma. O que
+    NÃO escapa mais é `options=None`, que desligava o teto por completo com o
+    portão verde — daí conferir o VALOR do kwarg e não só a presença da chave.
+    """
     arvore = _arvore_do_system_event_log()
     connects = [
         no for no in ast.walk(arvore)
@@ -408,8 +415,15 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
         "nenhum psycopg.connect() em core/system_event_log.py — o portão está "
         "apontado para o arquivo errado e passaria por vacuidade"
     )
+
+    def _com_valor(no: ast.Call) -> set[str]:
+        """Kwargs que de fato configuram algo: `options=None` é o mesmo que não
+        passar `options`, e o libpq trata assim."""
+        return {k.arg for k in no.keywords
+                if not (isinstance(k.value, ast.Constant) and k.value.value is None)}
+
     faltando = {
-        arg: [no.lineno for no in connects if arg not in {k.arg for k in no.keywords}]
+        arg: [no.lineno for no in connects if arg not in _com_valor(no)]
         for arg in ("connect_timeout", "options")
     }
     assert not any(faltando.values()), (
@@ -430,7 +444,11 @@ def test_system_event_log_nao_referencia_logging():
 
     A guarda de `threading.local` fecha o ciclo em tempo de execução; este
     portão fecha a porta de entrada — um `logger.warning` bem-intencionado
-    acrescentado ali depois."""
+    acrescentado ali depois.
+
+    ponytail: varre SÓ `core/system_event_log.py`. Os módulos que ele importa
+    (`core/pg_text.py`, `config/env.py`) rodam DENTRO das duas funções e um
+    `logger.warning` neles reentraria igual, com este portão verde."""
     arvore = _arvore_do_system_event_log()
     achados: list[str] = []
     for no in ast.walk(arvore):

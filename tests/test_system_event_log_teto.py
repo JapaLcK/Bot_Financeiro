@@ -14,10 +14,18 @@ suíte: se o teto não funcionar, o teste falha na asserção de tempo em vez de
 travar até o pytest ser morto.
 
 CONTROLE NEGATIVO DO GRUPO: tire o `options=_statement_timeout_options()` dos
-DOIS `psycopg.connect` de `core/system_event_log.py`. Os dois testes de
-cronômetro (`test_insert_com_tabela_travada_desiste_dentro_do_teto` e
-`test_leitura_com_tabela_travada_desiste_dentro_do_teto`) ficam VERMELHOS — eles
-estavam verdes com o conserto, que é onde a injeção discrimina.
+DOIS `psycopg.connect` de `core/system_event_log.py`. VERMELHOS, os quatro:
+`test_insert_com_tabela_travada_desiste_dentro_do_teto`,
+`test_leitura_com_tabela_travada_desiste_dentro_do_teto`,
+`test_options_chega_no_connect` e `test_warning_do_psycopg_nao_reentra_no_handler`
+— este último porque, sem teto, o INSERT espera o lock cair e TERMINA BEM, e aí
+não há `__exit__` com exceção para o psycopg avisar nem reentrada a ignorar. Os
+quatro estavam verdes com o conserto, que é onde a injeção discrimina.
+
+CONTROLE NEGATIVO DA GUARDA (injeção SEPARADA, outro caminho de código): faça
+`_reentrou` devolver `False` sempre. VERMELHO: só
+`test_warning_do_psycopg_nao_reentra_no_handler`. Ele aparece nos dois controles
+por motivos opostos — aqui a reentrada acontece, ali ela nem chega a existir.
 
 CONTROLES POSITIVOS: a mudança RESTRINGE (passa a cancelar query). Sem
 `test_tabela_livre_continua_gravando`, `test_valor_sem_sentido_volta_ao_default`
@@ -44,6 +52,7 @@ import pytest
 
 import core.observability as observability
 from core.system_event_log import (
+    _TETO_MAX_MS,
     _statement_timeout_options,
     log_system_event_sync,
     recent_event_exists,
@@ -103,8 +112,12 @@ def tabela_travada(segundos: float):
     """`system_event_logs` em `access exclusive` por `segundos`, solta por Timer.
 
     Conexão DEDICADA de propósito: com `get_conn` o lock prenderia uma vaga do
-    pool que o resto do teste (e o cleanup) precisa."""
-    conn = psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5)
+    pool que o resto do teste (e o cleanup) precisa. `lock_timeout` porque o
+    próprio `lock table` pendura sem limite se outra transação estiver segurando
+    a tabela, e o Timer que solta só é armado DEPOIS dele: sem teto aqui, a
+    suíte trava em vez de falhar."""
+    conn = psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5,
+                           options="-c lock_timeout=5000ms")
     with conn.cursor() as cur:
         cur.execute("lock table system_event_logs in access exclusive mode")
     solta = threading.Timer(segundos, conn.rollback)
@@ -219,8 +232,13 @@ def test_destacar_o_handler_e_o_que_faz_o_cronometro_medir_a_funcao(
 
 
 def test_warning_do_psycopg_nao_reentra_no_handler(monkeypatch, capsys):
-    """O ciclo que o teto torna mais provável, fechado pela guarda de
-    `threading.local`.
+    """O ciclo PRÉ-EXISTENTE que a guarda de `threading.local` fecha — e que
+    este teto NÃO torna mais frequente: medido no cenário sem forçar o rollback
+    (tabela travada, teto de 300ms), dá 1 conexão por `warning` com e sem a
+    guarda, porque o `statement_timeout` deixa a conexão em `INERROR` mas sadia
+    e o `rollback()` funciona. O que alcança o ciclo é o rollback também falhar
+    (socket quebrado, servidor morto), que já era alcançável antes deste PR — e
+    é por isso que este teste o força explicitamente abaixo.
 
     `psycopg` tem `logging.getLogger("psycopg")` e emite
     `logger.warning("error ignored in rollback on %s: %s", …)` em
@@ -281,13 +299,20 @@ def test_tabela_livre_continua_gravando(user_id, capsys):
         _limpa(EVENTO_LIVRE)
 
 
-@pytest.mark.parametrize("valor", ["0", "-1", "abacaxi", "", "50"])
+@pytest.mark.parametrize("valor", ["0", "-1", "abacaxi", "", "50",
+                                   "2147483648", "99999999999999999999"])
 def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
     """`"0"` é o que mais importa: no Postgres `statement_timeout=0` significa
     SEM LIMITE, então obedecer a env INVERTERIA o sentido do parâmetro —
     "desligado" na cabeça de quem configura viraria "sem teto nenhum". `-1` o
     servidor recusa (o connect inteiro falharia) e `"50"` está abaixo do piso de
     100ms, onde nem o INSERT em tabela livre cabe.
+
+    O intervalo tem DOIS lados: `"2147483648"` é o primeiro valor que o Postgres
+    recusa no connect ("value exceeds integer range"), e com ele obedecido o
+    módulo perdia 100% dos registros com a suíte inteira verde — é a metade (b)
+    abaixo que pega isso. `"99999999999999999999"` é o mesmo defeito com um
+    inteiro que nem cabe em 64 bits.
 
     Duas metades: (a) o helper devolve o default; (b) com a tabela livre a linha
     AINDA é gravada — um valor que o servidor recusasse derrubaria o connect."""
@@ -300,6 +325,14 @@ def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
         assert _linhas(EVENTO_DEFAULT) == 1
     finally:
         _limpa(EVENTO_DEFAULT)
+
+
+def test_valor_no_limite_superior_e_obedecido(monkeypatch):
+    """Controle POSITIVO do lado de cima: NO limite a env ainda manda. Sem ele,
+    o caso acima passaria num helper que joga fora tudo que é grande — e aí a
+    env deixaria de configurar o que ela existe para configurar."""
+    monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", str(_TETO_MAX_MS))
+    assert _statement_timeout_options() == f"-c statement_timeout={_TETO_MAX_MS}ms"
 
 
 def test_options_chega_no_connect(monkeypatch, user_id):

@@ -46,6 +46,9 @@ load_app_env()
 #       `db/open_finance.py:609-610` já registra para o rollback.
 _TETO_PADRAO_MS = 2000
 _PISO_MS = 100
+# Teto do teto: acima de 60s isto não protege mais a thread do caller, e
+# `2147483648` o Postgres RECUSA no connect inteiro — 100% do log perdido.
+_TETO_MAX_MS = 60_000
 
 # Guarda de reentrância do ciclo handler → log → handler. Ver `_reentrou`.
 _local = threading.local()
@@ -61,32 +64,52 @@ def _statement_timeout_options() -> str:
     servidor recusa (o connect inteiro falharia), e abaixo de 100ms não cabe
     nem o INSERT em tabela livre.
 
+    O intervalo fecha dos DOIS lados, e o de cima pelos mesmos dois motivos do
+    de baixo: `2147483648` o servidor recusa igual ao negativo ("value exceeds
+    integer range" — derruba o connect, e com ele 100% do log), e um teto de
+    DIAS que ele aceita desliga a proteção em silêncio, que é o mesmo estrago
+    sem o erro. Acima de `_TETO_MAX_MS`, volta ao default.
+
     Construído POR CHAMADA, não como constante de módulo, para a conversão
     ficar dentro do `try` das duas funções: uma env inválida não pode virar
     exceção no import de `core.observability`, que meio repositório importa.
 
-    ponytail: `options=` SOBRESCREVE um `options` que viesse na `DATABASE_URL`
-    (mesmo teto de `db/open_finance_state.py:704-707`). Hoje a nossa URL não
-    traz nenhum; se um dia trouxer, este parâmetro o apaga em silêncio.
+    ponytail: `options=` SOBRESCREVE as DUAS outras fontes de `options` do
+    libpq, não só uma (mesmo teto de `db/open_finance_state.py:704-707`): um
+    `?options=` na `DATABASE_URL` E a env `PGOPTIONS` (medido: com
+    `-c application_name=x` em qualquer das duas, `show application_name`
+    devolve vazio nestas conexões). Hoje nenhuma das duas é usada em produção;
+    na suíte o `PGOPTIONS` aparece em `tests/test_category_launches_query.py` e
+    `tests/test_tipo_legado_no_filtro_do_dashboard.py`, mas pelo POOL — sem
+    conflito com estas funções.
     """
     try:
         ms = int(os.getenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", str(_TETO_PADRAO_MS)))
     except (TypeError, ValueError):
         ms = _TETO_PADRAO_MS
-    return f"-c statement_timeout={ms if ms >= _PISO_MS else _TETO_PADRAO_MS}ms"
+    if not _PISO_MS <= ms <= _TETO_MAX_MS:
+        ms = _TETO_PADRAO_MS
+    return f"-c statement_timeout={ms}ms"
 
 
 def _reentrou(o_que: str) -> bool:
     """True se esta thread já está dentro de uma escrita/leitura deste módulo.
 
-    Fecha o ciclo que o teto acima torna mais provável: `psycopg` tem
-    `logging.getLogger("psycopg")` e emite `logger.warning("error ignored in
-    rollback on %s: %s", …)` no `Connection.__exit__` (psycopg 3.3.5,
+    Fecha um ciclo PRÉ-EXISTENTE, que este teto NÃO torna mais frequente:
+    `psycopg` tem `logging.getLogger("psycopg")` e emite `logger.warning("error
+    ignored in rollback on %s: %s", …)` no `Connection.__exit__` (psycopg 3.3.5,
     `connection.py:170`) quando o `with` sai com exceção E o rollback também
-    falha. Esse record sobe ao root, o `_DashboardHandler` o pega (o único
-    filtro que existe lá, `_sem_ratelimit_no_banco`, só exclui o `slowapi`) e
-    chama `log_system_event_sync` de novo — connect novo na MESMA tabela
-    travada, cada volta custando um TCP connect mais o teto inteiro.
+    falha. São DUAS condições, e o corte por `statement_timeout` só produz a
+    primeira — medido no cenário real (tabela travada, teto de 300ms, sem forçar
+    o `rollback` a falhar): 1 conexão por `logger.warning` com a guarda e 1 sem
+    ela, zero recursão, porque a conexão fica em `INERROR` mas sadia e o
+    `rollback()` funciona. O que alcança as duas é socket quebrado ou servidor
+    morto, e isso já era alcançável antes deste PR.
+
+    Quando o ciclo acontece, o record sobe ao root, o `_DashboardHandler` o pega
+    (o único filtro que existe lá, `_sem_ratelimit_no_banco`, só exclui o
+    `slowapi`) e chama `log_system_event_sync` de novo — connect novo na MESMA
+    tabela travada, cada volta custando um TCP connect mais o teto inteiro.
 
     A guarda fica no ponto de estrangulamento (as duas funções deste módulo)
     e não num filtro por `record.name == "psycopg"`: toda volta do ciclo passa
@@ -209,6 +232,19 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     `within_days`. Usado pra dedup de emails transacionais que podem ser
     disparados por múltiplas fontes (webhook + scheduler).
     Falha silenciosa retorna False — melhor mandar duplicado que perder.
+
+    E o que esse corte custa NÃO é "um duplicado". Em 6 call sites esta função é
+    a metade de LEITURA de um check-then-act cuja metade de ESCRITA é o
+    `log_system_event_sync` acima — `pix_drain_effects.py:281`,
+    `engagement_scheduler.py:280` e `:333`, `payment_reminder.py:207`,
+    `billing_access.py:487` e `:514`, `launches.py:1261`. Com a tabela travada
+    as duas pontas falham na MESMA direção: a leitura devolve `False` e a
+    escrita do marcador é CANCELADA sem gravar a linha. Então o e-mail sai a
+    cada passada do scheduler enquanto o lock durar, e não uma vez a mais —
+    reenvio recorrente, que é a "falha ABERTA nas duas pontas" que
+    `scripts/aviso_fim_do_gratis.py:52` já nomeia. Antes do teto as duas
+    bloqueavam e terminavam corretas; o teto troca a espera por essa janela, que
+    deixa de ser só "banco fora" e passa a incluir DDL ou `vacuum full` de 2s.
     """
     database_url = _database_url()
     if not database_url:
