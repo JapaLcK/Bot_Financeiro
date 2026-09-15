@@ -651,6 +651,20 @@ async def serve_comecar_js():
     )
 
 
+@router.get("/purchase-intent.js")
+async def serve_purchase_intent_js():
+    """Mantém a escolha de plano durante autenticação e checkout.
+
+    O arquivo guarda somente plano, ciclo e meio de pagamento na aba atual;
+    nenhum dado do cartão, documento ou token de pagamento é persistido.
+    """
+    return FileResponse(
+        FRONTEND_DIR / "purchase-intent.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/comecar.css")
 async def serve_comecar_css():
     """CSS do wizard de primeira configuração (ver /comecar.js)."""
