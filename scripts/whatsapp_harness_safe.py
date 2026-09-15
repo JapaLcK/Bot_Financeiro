@@ -45,8 +45,8 @@ def main() -> int:
                 SafetyViolation,
                 run_adapter_case,
                 run_core_case,
-                run_policy_case,
             )
+            from harness_support.policy_runtime import run_policy_case
 
             if args.probe:
                 guards = SafetyGuards(allowed_write_root=Path(temp_dir))

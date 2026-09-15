@@ -228,6 +228,7 @@ class SafeRuntimeTests(unittest.TestCase):
             "como importar uma biblioteca Python?",
             "como usar o limite de velocidade?",
             "como usar importar em Python?",
+            "como chamar uma pessoa baixinha?",
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
@@ -248,6 +249,8 @@ class SafeRuntimeTests(unittest.TestCase):
             "como usar o report diário no PigBank?": "report diário",
             "como usar o report diário de gastos?": "report diário",
             "como faço para vincular minhas contas do WhatsApp ao PigBank?": "vincular",
+            "caxinha banana cosmica": "caixinhas",
+            "categoria marciana aleatoria": "categorias",
         }
         for text, expected in cases.items():
             with self.subTest(text=text):

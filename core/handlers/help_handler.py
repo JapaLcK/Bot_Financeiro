@@ -409,11 +409,13 @@ def _financial_topic(norm: str) -> str | None:
         return "credit"
     if re.search(r"\b(caixinha|caixinhas)\b", norm):
         return "pockets"
+    if re.search(r"\bcaxinhas?\b", norm):
+        return "pockets"
     if re.search(r"\b(investimento|investimentos|aporte|resgate|cdb|tesouro|cdi)\b", norm):
         return "investments"
     if re.search(r"\b(ofx|extrato)\b", norm):
         return "ofx"
-    if re.search(r"\b(regra|regras)\s+de\s+categorias?\b", norm) or re.search(
+    if re.search(r"\bcategorias?\b", norm) or re.search(
         r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm
     ):
         return "categories"
