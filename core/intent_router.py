@@ -116,6 +116,13 @@ NOT_UNDERSTOOD_MSG = (
     "Ou digite *ajuda* pra ver tudo que eu faço."
 )
 
+_INVESTMENT_ASSET_PATTERN = (
+    r"(?:acao|acoes|ativo|ativos|investimento|investimentos|bitcoin|bitcoins|"
+    r"cripto|criptos|criptomoeda|criptomoedas|petrobras|fundo|fundos|"
+    r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|renda fixa)"
+)
+_INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}"
+
 
 def _contextual_help_message(text: str, platform: str) -> str:
     return h_help.infer_contextual_fallback(text, platform)
@@ -125,14 +132,22 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     """Reconhece pedido para operar ou indicar um ativo, fora do papel do bot."""
     norm = normalize_text(text)
     asset_hint = re.search(
-        r"\b(acao|acoes|ativo|ativos|investimento|investimentos|bitcoin|cripto|criptomoeda|petrobras|vale|fundo|fundos|fii|fiis|etf|tesouro|cdb|renda fixa)\b",
-        norm,
-    ) or re.search(r"\b[A-Z]{4}\d{1,2}\b", text or "", flags=re.IGNORECASE)
+        rf"\b{_INVESTMENT_ASSET_PATTERN}\b", norm
+    ) or re.search(rf"\b{_INVESTMENT_TICKER_PATTERN}\b", text or "", flags=re.IGNORECASE)
     if not asset_hint:
         return False
 
-    portfolio_quality_query = bool(
+    owned_asset_in_portfolio = bool(
         re.search(
+            rf"\b(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN})\b"
+            r"\s+(?:da|na)\s+minha\s+carteira\b",
+            norm,
+            flags=re.IGNORECASE,
+        )
+    )
+    portfolio_quality_query = bool(
+        owned_asset_in_portfolio
+        or re.search(
             r"\b(meu|minha)\s+melhor\s+"
             r"(investimento|acao|ativo|fundo|fii|etf)\b",
             norm,
@@ -181,6 +196,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     return bool(
         re.search(r"\b(compre|comprar|vender|invista)\b", norm)
         or sell_command
+        or re.search(r"\bvale\s+a\s+pena\b.*\b(investir|comprar|vender)\b", norm)
+        or re.search(r"\b(investir|comprar|vender)\b.*\bvale\s+a\s+pena\b", norm)
         or re.search(
             r"\b(indica|indique|recomenda|recomende|sugere|sugira|aconselha|aconselhe)\b",
             norm,

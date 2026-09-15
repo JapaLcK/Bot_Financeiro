@@ -427,7 +427,9 @@ def _financial_topic(norm: str) -> str | None:
         return "account"
     if re.search(r"\b(saldo|lancamento|lancamentos|gasto|gastos|despesa|despesas|receita|receitas)\b", norm):
         return "launches"
-    if re.search(r"\b(dashboard|pigbank|piggy)\b", norm):
+    if re.search(r"\bdashboard\b", norm) or re.search(
+        r"\bpainel\s+(?:financeiro|do\s+pigbank)\b", norm
+    ):
         return "dashboard"
     return None
 

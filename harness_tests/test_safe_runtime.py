@@ -106,6 +106,12 @@ class SafeRuntimeTests(unittest.TestCase):
             "qual ação é boa para meus filhos?",
             "qual seria meu melhor investimento?",
             "qual deve ser meu melhor investimento?",
+            "vale a pena investir em CDB?",
+            "Piggy, vale a pena investir em CDB?",
+            "investir em CDB vale a pena?",
+            "qual CDB é bom comparado ao da minha carteira?",
+            "quais ETFs você recomenda?",
+            "vale a pena investir em CDBs?",
         )
         for text in cases:
             with self.subTest(text=text):
@@ -170,6 +176,14 @@ class SafeRuntimeTests(unittest.TestCase):
             "poderia mostrar meu melhor investimento?",
             "como estão meus investimentos?",
             "qual o rendimento do meu FII?",
+            "qual CDB da minha carteira foi o melhor?",
+            "qual das ações da minha carteira é boa?",
+            "qual dos CDBs da minha carteira foi o melhor?",
+            "qual criptomoeda da minha carteira foi a melhor?",
+            "qual renda fixa da minha carteira foi a melhor?",
+            "qual PETR4 da minha carteira foi o melhor?",
+            "PETR4 da minha carteira é boa?",
+            "como registrar no PigBank que comecei a investir em CDB?",
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
@@ -229,6 +243,9 @@ class SafeRuntimeTests(unittest.TestCase):
             "como usar o limite de velocidade?",
             "como usar importar em Python?",
             "como chamar uma pessoa baixinha?",
+            "PigBank, conte uma piada",
+            "vale a pena comprar um carro?",
+            "vale a pena investir em um curso?",
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
@@ -249,6 +266,7 @@ class SafeRuntimeTests(unittest.TestCase):
             "como usar o report diário no PigBank?": "report diário",
             "como usar o report diário de gastos?": "report diário",
             "como faço para vincular minhas contas do WhatsApp ao PigBank?": "vincular",
+            "como usar o dashboard?": "dashboard",
             "caxinha banana cosmica": "caixinhas",
             "categoria marciana aleatoria": "categorias",
         }
