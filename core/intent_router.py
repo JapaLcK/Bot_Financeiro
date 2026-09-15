@@ -101,6 +101,12 @@ OUT_OF_SCOPE_MSG = (
     "Digite *ajuda* para ver o que posso fazer."
 )
 
+INVESTMENT_ACTION_REFUSAL_MSG = (
+    "Não posso comprar, vender nem recomendar ativos por você. "
+    "Posso ajudar a registrar aportes e resgates e a acompanhar sua carteira de investimentos.\n"
+    "Digite *investimentos* para ver as opções disponíveis."
+)
+
 NOT_UNDERSTOOD_MSG = (
     "Não entendi bem o que você quis fazer. 🤔\n"
     "Tenta assim:\n"
@@ -113,6 +119,71 @@ NOT_UNDERSTOOD_MSG = (
 
 def _contextual_help_message(text: str, platform: str) -> str:
     return h_help.infer_contextual_fallback(text, platform)
+
+
+def _is_investment_action_or_advice_request(text: str) -> bool:
+    """Reconhece pedido para operar ou indicar um ativo, fora do papel do bot."""
+    norm = normalize_text(text)
+    asset_hint = re.search(
+        r"\b(acao|acoes|ativo|ativos|investimento|investimentos|bitcoin|cripto|criptomoeda|petrobras|vale|fundo|fundos|fii|fiis|etf|tesouro|cdb|renda fixa)\b",
+        norm,
+    ) or re.search(r"\b[A-Z]{4}\d{1,2}\b", text or "", flags=re.IGNORECASE)
+    if not asset_hint:
+        return False
+
+    portfolio_quality_query = bool(
+        re.search(
+            r"\b(meu|minha)\s+melhor\s+"
+            r"(investimento|acao|ativo|fundo|fii|etf)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(meus|minhas)\s+(investimentos|acoes|ativos|fundos|fiis|etfs)\b"
+            r".*\b(melhor|pior)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(melhor|pior)\b.*\b(meus|minhas)\s+"
+            r"(investimentos|acoes|ativos|fundos|fiis|etfs)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(meu|minha)\s+(investimento|acao|ativo|fundo|fii|etf)\s+"
+            r"(e|esta|foi)\s+(bom|boa)\b",
+            norm,
+        )
+    )
+    prospective_quality = bool(
+        re.search(
+            r"\b(seria|sera)\b.*\b(melhor|boa|bom)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(deve|deveria|poderia)\s+ser\b.*\b(melhor|boa|bom)\b",
+            norm,
+        )
+    )
+    quality_advice = bool(re.search(r"\b(melhor|boa|bom)\b", norm)) and (
+        prospective_quality or not portfolio_quality_query
+    )
+
+    return bool(
+        re.search(r"\b(compre|comprar|venda|vender|invista)\b", norm)
+        or re.search(
+            r"\b(indica|indique|recomenda|recomende|sugere|sugira|aconselha|aconselhe)\b",
+            norm,
+        )
+        or quality_advice
+        or re.search(r"\b(quais?|qual|que)\b.*\b(devo|devia)\b", norm)
+        or re.search(r"\b(devo|devia)\b.*\b(comprar|vender|investir)\b", norm)
+    )
+
+
+def investment_action_refusal(text: str) -> str | None:
+    """Aplica a política determinística antes de qualquer fallback de IA."""
+    if _is_investment_action_or_advice_request(text):
+        return INVESTMENT_ACTION_REFUSAL_MSG
+    return None
 
 
 def _should_redirect_launches_list_to_help(text: str) -> bool:
@@ -585,6 +656,16 @@ def route(result: IntentResult, msg: IncomingMessage, *,
             if resp is not None:
                 return resp
 
+    # Pedidos de operação ou recomendação de ativos precisam de uma recusa
+    # explícita. O bot acompanha a carteira, mas não atua como corretora nem
+    # escolhe investimentos pelo usuário.
+    policy_refusal = investment_action_refusal(text)
+    if policy_refusal is not None:
+        return policy_refusal
+
+    # Perguntas sobre como usar recursos financeiros podem cair no fallback
+    # `out_of_scope` do classificador. A ajuda precisa ter a chance de
+    # reconhecê-las antes da resposta final de fora do domínio.
     inferred_help = h_help.infer_help_from_text(text, platform)
     if inferred_help is not None:
         norm = normalize_text(text)
@@ -817,7 +898,8 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # 2. Fora do escopo
     # -----------------------------------------------------------------------
     if intent == "out_of_scope":
-        return _contextual_help_message(text, platform)
+        financial_help = h_help.infer_financial_contextual_fallback(text, platform)
+        return financial_help if financial_help is not None else OUT_OF_SCOPE_MSG
 
     # -----------------------------------------------------------------------
     # 3. Confiança muito baixa

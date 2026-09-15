@@ -398,7 +398,8 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
     return render_help("start", platform)
 
 
-def infer_contextual_fallback(text: str, platform: str) -> str:
+def infer_financial_contextual_fallback(text: str, platform: str) -> str | None:
+    """Retorna ajuda apenas quando o texto contém um tópico financeiro conhecido."""
     norm = normalize_text(text)
 
     if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite", "pagar", "paguei"):
@@ -427,6 +428,14 @@ def infer_contextual_fallback(text: str, platform: str) -> str:
 
     if _has_hint(norm, "saldo", "lancamento", "lancamentos", "gastei", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "receitas", "historico", "histórico", "extrato"):
         return _prepend_not_understood("lançamentos", _launches_contextual_fallback(norm))
+
+    return None
+
+
+def infer_contextual_fallback(text: str, platform: str) -> str:
+    financial_help = infer_financial_contextual_fallback(text, platform)
+    if financial_help is not None:
+        return financial_help
 
     return (
         "Não entendi exatamente o que você quer fazer.\n"

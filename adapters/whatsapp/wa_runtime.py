@@ -81,6 +81,10 @@ _SEEN: dict[str, float] = {}
 _SEEN_LOCK = threading.Lock()
 _SEEN_TTL = 180
 
+_PROCESSING_FAILURE_MESSAGE = (
+    "Não consegui processar sua mensagem agora. Tente novamente em instantes."
+)
+
 
 @dataclass
 class Attachment:
@@ -1327,20 +1331,40 @@ def process_message(message: InboundMessage) -> None:
             return
 
         logger.info("WA generated outgoing messages count=%s for from=%s", len(outs), message.wa_id)
+        sent_response = False
         for out in outs:
             body = safe_text(out)
             if body:
                 _send_reply_with_optional_buttons(reply_to, body, user_id=uid)
+                sent_response = True
+        if not sent_response:
+            logger.warning("WA outgoing messages had no deliverable text from=%s", message.wa_id)
+            _send_reply(reply_to, _PROCESSING_FAILURE_MESSAGE)
     except Exception as exc:
         logger.error("WA message processing failed wa_id=%s error=%s", message.wa_id, exc)
-        log_system_event_sync(
-            "error",
-            "whatsapp_message_processing_failed",
-            f"Falha no processamento da mensagem do WhatsApp: {exc}",
-            source="wa_runtime",
-            details={"wa_id": message.wa_id},
-        )
+        try:
+            log_system_event_sync(
+                "error",
+                "whatsapp_message_processing_failed",
+                f"Falha no processamento da mensagem do WhatsApp: {exc}",
+                source="wa_runtime",
+                details={"wa_id": message.wa_id},
+            )
+        except Exception as log_exc:
+            logger.error(
+                "WA processing failure could not be recorded wa_id=%s error=%s",
+                message.wa_id,
+                log_exc,
+            )
         traceback.print_exc()
+        try:
+            _send_reply(message.wa_id, _PROCESSING_FAILURE_MESSAGE)
+        except Exception as send_exc:
+            logger.error(
+                "WA failure notice could not be sent wa_id=%s error=%s",
+                message.wa_id,
+                send_exc,
+            )
 
 
 def process_payload(payload: dict[str, Any]) -> int:

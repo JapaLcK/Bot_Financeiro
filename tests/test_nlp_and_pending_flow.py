@@ -576,8 +576,8 @@ def test_contextual_help_generico_quando_nao_entende_nada(user_id):
 
     response = route(classify(msg.text), msg)
 
-    assert "Não entendi exatamente o que você quer fazer" in response
-    assert "`ajuda`" in response
+    assert "Só consigo ajudar com finanças pessoais" in response
+    assert "*ajuda*" in response
 
 
 def test_route_pergunta_como_registrar_compra_no_credito(user_id):
