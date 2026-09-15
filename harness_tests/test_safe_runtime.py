@@ -118,6 +118,39 @@ class SafeRuntimeTests(unittest.TestCase):
                 self.assertIn("não posso comprar", payload["response"].lower())
                 self.assertIn("por você", payload["response"].lower())
 
+    def test_receita_de_venda_de_ativo_nao_e_ordem_de_venda(self) -> None:
+        for text in (
+            "recebi 100 da venda de ações",
+            "quanto eu receberia se vendesse PETR4?",
+            "se eu vendesse PETR4 ontem, qual seria meu lucro?",
+        ):
+            with self.subTest(text=text):
+                result = _run("--layer", "policy", "--text", text)
+
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertFalse(payload["refused"])
+                self.assertEqual(payload["blocked"], [])
+
+    def test_ordem_explicita_de_venda_continua_recusada(self) -> None:
+        for text in (
+            "venda PETR4",
+            "por favor venda minhas ações",
+            "por gentileza, venda PETR4",
+            "me vende PETR4",
+            "Piggy, me vende PETR4",
+            "quero que você venda PETR4",
+            "vende PETR4 para mim",
+            "gostaria que você vendesse PETR4",
+            "faça a venda das minhas ações",
+        ):
+            with self.subTest(text=text):
+                result = _run("--layer", "policy", "--text", text)
+
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertTrue(payload["refused"])
+
     def test_recusa_de_investimento_antecede_fallback_de_ia(self) -> None:
         source = (REPO / "core" / "handle_incoming.py").read_text(encoding="utf-8")
 
@@ -186,6 +219,42 @@ class SafeRuntimeTests(unittest.TestCase):
                 self.assertEqual(payload["intent"], "out_of_scope")
                 self.assertTrue(payload["answered"])
                 self.assertEqual(payload["outcome"], "answered")
+                self.assertIn(expected, payload["response"].lower())
+
+    def test_palavra_ambigua_sem_contexto_financeiro_fica_fora_do_escopo(self) -> None:
+        for text in (
+            "qual é o limite de velocidade?",
+            "quando vence minha habilitação?",
+            "como importar uma biblioteca Python?",
+            "como usar o limite de velocidade?",
+            "como usar importar em Python?",
+        ):
+            with self.subTest(text=text):
+                result = _run("--layer", "core", "--text", text)
+
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                payload = json.loads(result.stdout)
+                self.assertIn("só consigo ajudar com finanças", payload["response"].lower())
+
+    def test_topicos_financeiros_secundarios_mantem_ajuda(self) -> None:
+        cases = {
+            "não consigo vincular minha conta do WhatsApp": "vinculação",
+            "não entendi o report diário": "report diário",
+            "não entendi as regras de categoria": "categorias",
+            "como usar o report diário?": "report diário",
+            "como usar a vinculação da conta?": "vincular",
+            "como faço para categorizar meu gasto?": "categorias",
+            "como faço para categorizar meus gastos?": "categorias",
+            "como usar o report diário no PigBank?": "report diário",
+            "como usar o report diário de gastos?": "report diário",
+            "como faço para vincular minhas contas do WhatsApp ao PigBank?": "vincular",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                result = _run("--layer", "core", "--text", text)
+
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                payload = json.loads(result.stdout)
                 self.assertIn(expected, payload["response"].lower())
 
     def test_excecao_do_nucleo_recebe_fallback(self) -> None:

@@ -17,7 +17,7 @@ sys.path.insert(0, str(REPO))
 def main() -> int:
     parser = argparse.ArgumentParser(description="Harness hermético do WhatsApp")
     parser.add_argument("--text", default="qual é meu saldo?")
-    parser.add_argument("--layer", choices=("adapter", "core"), default="adapter")
+    parser.add_argument("--layer", choices=("adapter", "core", "policy"), default="adapter")
     parser.add_argument("--probe", choices=("env", "network", "write"))
     parser.add_argument(
         "--handler-behavior",
@@ -45,6 +45,7 @@ def main() -> int:
                 SafetyViolation,
                 run_adapter_case,
                 run_core_case,
+                run_policy_case,
             )
 
             if args.probe:
@@ -67,6 +68,8 @@ def main() -> int:
                         args.text,
                         force_internal_error=args.core_error,
                     )
+                elif args.layer == "policy":
+                    result = run_policy_case(args.text)
                 else:
                     result = run_adapter_case(
                         args.text,
@@ -87,6 +90,8 @@ def main() -> int:
                 print(json.dumps(result, ensure_ascii=False, sort_keys=True))
                 if args.layer == "core":
                     return 0 if result["answered"] else 2
+                if args.layer == "policy":
+                    return 0
                 return 0 if result["delivered"] else 2
     except SafetyViolation as exc:
         print(json.dumps({"error": "SAFETY_VIOLATION", "detail": str(exc)}))

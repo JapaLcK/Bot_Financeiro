@@ -166,9 +166,21 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     quality_advice = bool(re.search(r"\b(melhor|boa|bom)\b", norm)) and (
         prospective_quality or not portfolio_quality_query
     )
+    sell_command = bool(
+        re.search(
+            r"^(?:(?:piggy|por favor|por gentileza)\s*){0,2}(?:me\s+)?(?:venda|vende)\b",
+            norm,
+        )
+        or re.search(
+            r"\b(quero|preciso|peco|gostaria)\s+(?:que\s+)?(?:voce\s+)?(?:venda|vendesse)\b",
+            norm,
+        )
+        or re.search(r"\b(faca|realize|execute)\s+(?:a\s+)?venda\b", norm)
+    )
 
     return bool(
-        re.search(r"\b(compre|comprar|venda|vender|invista)\b", norm)
+        re.search(r"\b(compre|comprar|vender|invista)\b", norm)
+        or sell_command
         or re.search(
             r"\b(indica|indique|recomenda|recomende|sugere|sugira|aconselha|aconselhe)\b",
             norm,
@@ -666,7 +678,11 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # Perguntas sobre como usar recursos financeiros podem cair no fallback
     # `out_of_scope` do classificador. A ajuda precisa ter a chance de
     # reconhecê-las antes da resposta final de fora do domínio.
-    inferred_help = h_help.infer_help_from_text(text, platform)
+    inferred_help = (
+        None
+        if intent == "out_of_scope" and not h_help.has_financial_context(text)
+        else h_help.infer_help_from_text(text, platform)
+    )
     if inferred_help is not None:
         norm = normalize_text(text)
         if (
@@ -898,6 +914,8 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # 2. Fora do escopo
     # -----------------------------------------------------------------------
     if intent == "out_of_scope":
+        if not h_help.has_financial_context(text):
+            return OUT_OF_SCOPE_MSG
         financial_help = h_help.infer_financial_contextual_fallback(text, platform)
         return financial_help if financial_help is not None else OUT_OF_SCOPE_MSG
 

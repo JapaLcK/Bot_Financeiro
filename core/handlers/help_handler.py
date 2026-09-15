@@ -1,5 +1,6 @@
 # core/handlers/help_handler.py
 from __future__ import annotations
+import re
 from difflib import get_close_matches
 from core.help_text import render_full, render_help, resolve_section
 from utils_text import normalize_text
@@ -381,52 +382,88 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
     if precise is not None:
         return precise
 
-    topic_hints = {
-        "credit": ("cartao", "cartão", "cartoes", "cartões", "credito", "crédito", "fatura", "parcela", "parcelamento", "limite"),
-        "pockets": ("caixinha", "caixinhas"),
-        "invest": ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro"),
-        "ofx": ("ofx", "extrato", "importar"),
-        "dashboard": ("dashboard", "painel"),
-        "categories": ("categoria", "categorias", "regra", "regras", "linkar"),
-        "launches": ("lancamento", "lançamentos", "lancamentos", "gasto", "gastos", "despesa", "despesas", "receita", "receitas", "saldo"),
-    }
-
-    for section, hints in topic_hints.items():
-        if any(hint in norm for hint in hints):
-            return render_help(section, platform)
+    normalized = normalize_text(raw)
+    topic = _financial_topic(normalized)
+    section = {
+        "credit": "credit",
+        "pockets": "pockets",
+        "investments": "invest",
+        "ofx": "ofx",
+        "dashboard": "dashboard",
+        "categories": "categories",
+        "launches": "launches",
+    }.get(topic)
+    if section is not None:
+        return render_help(section, platform)
+    if topic == "report":
+        return _report_contextual_fallback(normalized)
+    if topic == "account":
+        return _account_contextual_fallback(normalized)
 
     return render_help("start", platform)
+
+
+def _financial_topic(norm: str) -> str | None:
+    """Classifica somente sinais inequívocos do domínio do PigBank."""
+    if re.search(r"\b(cartao|cartoes|fatura|credito|parcela|parcelamento)\b", norm):
+        return "credit"
+    if re.search(r"\b(caixinha|caixinhas)\b", norm):
+        return "pockets"
+    if re.search(r"\b(investimento|investimentos|aporte|resgate|cdb|tesouro|cdi)\b", norm):
+        return "investments"
+    if re.search(r"\b(ofx|extrato)\b", norm):
+        return "ofx"
+    if re.search(r"\b(regra|regras)\s+de\s+categorias?\b", norm) or re.search(
+        r"\bcategoriz(?:ar|e)\b.*\b(gastos?|despesas?|receitas?|lancamentos?)\b", norm
+    ):
+        return "categories"
+    if re.search(r"\b(report diario|relatorio financeiro)\b", norm):
+        return "report"
+    if re.search(r"\bvincul(?:ar|acao)\b.*\b(contas?|whatsapp|discord)\b", norm) or re.search(
+        r"\bcodigo\s+de\s+vinculacao\b", norm
+    ):
+        return "account"
+    if re.search(r"\b(saldo|lancamento|lancamentos|gasto|gastos|despesa|despesas|receita|receitas)\b", norm):
+        return "launches"
+    if re.search(r"\b(dashboard|pigbank|piggy)\b", norm):
+        return "dashboard"
+    return None
+
+
+def has_financial_context(text: str) -> bool:
+    return _financial_topic(normalize_text(text)) is not None
 
 
 def infer_financial_contextual_fallback(text: str, platform: str) -> str | None:
     """Retorna ajuda apenas quando o texto contém um tópico financeiro conhecido."""
     norm = normalize_text(text)
+    topic = _financial_topic(norm)
 
-    if _has_hint(norm, "cartao", "cartoes", "fatura", "credito", "parcela", "parcelamento", "vence", "fecha", "limite", "pagar", "paguei"):
+    if topic == "credit":
         return _prepend_not_understood("cartões", _credit_contextual_fallback(text, platform))
 
-    if _has_hint(norm, "caixinha", "caixinhas"):
+    if topic == "pockets":
         return _prepend_not_understood("caixinhas", _pockets_contextual_fallback(norm))
 
-    if _has_hint(norm, "investimento", "investimentos", "aporte", "aplicar", "apliquei", "resgate", "resgatar", "cdb", "tesouro", "cdi"):
+    if topic == "investments":
         return _prepend_not_understood("investimentos", _investments_contextual_fallback(norm))
 
-    if _has_hint(norm, "categoria", "categorias", "regra", "regras", "linkar", "destinatario", "destinatário"):
+    if topic == "categories":
         return _prepend_not_understood("categorias", _categories_contextual_fallback(norm))
 
-    if _has_hint(norm, "dashboard", "painel"):
+    if topic == "dashboard":
         return _prepend_not_understood("dashboard", _dashboard_contextual_fallback())
 
-    if _has_hint(norm, "report", "relatorio", "relatório"):
+    if topic == "report":
         return _prepend_not_understood("report diário", _report_contextual_fallback(norm))
 
-    if _has_hint(norm, "link", "vincular", "codigo", "código", "whatsapp", "discord"):
+    if topic == "account":
         return _prepend_not_understood("vinculação de conta", _account_contextual_fallback(norm))
 
-    if _has_hint(norm, "ofx", "extrato", "importar"):
+    if topic == "ofx":
         return _prepend_not_understood("importação de extrato", _ofx_contextual_fallback())
 
-    if _has_hint(norm, "saldo", "lancamento", "lancamentos", "gastei", "gasto", "gastos", "despesa", "despesas", "recebi", "receita", "receitas", "historico", "histórico", "extrato"):
+    if topic == "launches":
         return _prepend_not_understood("lançamentos", _launches_contextual_fallback(norm))
 
     return None
