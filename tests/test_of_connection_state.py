@@ -19,13 +19,22 @@ grupo passaria num código que recusasse tudo.
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timedelta
 
 import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import core.services.pluggy_sync as ps
+import frontend.finance_bot_websocket_custom as dashboard
+import frontend.routes.open_finance as of_routes
 from core.services.pluggy import PluggyApiError
+from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN, derive_item_health
 from psycopg.types.json import Jsonb
 
 from db.connection import get_conn
@@ -1058,12 +1067,13 @@ def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentiment
 # Este teste NÃO monta o estado com UPDATE cru de propósito: ele passa pelo
 # `save_pluggy_open_finance_item`, que é o caminho de produção que abre a janela.
 #
-# ALCANCE, que é onde este conserto PARA: ele cobre o AVISO PROATIVO e só. A TELA
-# na mesma janela continua errada, porque `get_open_finance_snapshot` não
-# seleciona `raw` — o `connection_ui_state` recebe a linha pronta e não tem como
-# ver o `executionStatus`. Metade PENDENTE, de PR próprio; o motivo está no
-# comentário do snapshot (`db/open_finance.py`). Se alguém escrever um teste de
-# tela para esta janela esperando verde, é por não ter lido isto.
+# ALCANCE: este teste cobre o AVISO PROATIVO. A TELA na mesma janela era a metade
+# PENDENTE — `get_open_finance_snapshot` não selecionava nada do `raw`, então o
+# `connection_ui_state` recebia a linha pronta e mandava "Reautorize o banco" no
+# minuto do QR. Fechada: o snapshot passou a selecionar o DERIVADO
+# (`SQL_EXECUTION_STATUS`, escalar; o `raw` inteiro continua sem sair do
+# Postgres), e o grupo "a TELA na janela do device/QR", no fim deste arquivo,
+# prende as duas superfícies com a MESMA condição e o MESMO prazo.
 #
 # CONTROLE NEGATIVO: tirar o `raw->>'executionStatus'` da query → o caso da Caixa
 # fica vermelho (volta a ser avisado).
@@ -1119,9 +1129,19 @@ def test_aviso_pula_o_QR_na_janela_em_que_o_health_ainda_e_null(user_id, relogio
 # o passo 2 também (o `health` bom sobrevive e não há por que consultar o `raw`).
 # CONTROLE do `case when health is null`: o passo 3 — com `coalesce` puro o `raw`
 # VELHO calaria o aviso para sempre, porque `mark_sync_result` não toca em `raw`.
+#
+# SEM `relogio_fixo`, e isto é load-bearing desde que o `case` ganhou o PRAZO
+# (`SQL_RAW_AINDA_VALE`): o prazo é avaliado contra o `now()` do POSTGRES, e o
+# `relogio_fixo` só falsifica o relógio do PYTHON — ele carimbaria o
+# `reconnected_at` desta reconexão em 2026-08-20 (medido: 26 dias atrás do
+# `now()` do banco na data desta sessão), que é FORA da janela, e o passo 2 leria
+# como "aviso volta" um caso que quer dizer "acabei de reconectar". Nenhuma
+# asserção deste teste depende de data fixa. O prazo vencido tem teste próprio
+# (`test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar`), e ali o
+# recuo é feito no BANCO (`_envelhece_autorizacao`), não no Python.
 
 def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
-    user_id, relogio_fixo
+    user_id
 ):
     # 1) conexão que JÁ existia, saudável e com `health` medido
     conexao = db.save_pluggy_open_finance_item(user_id, {
@@ -1152,3 +1172,356 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
     assert "item-conflito" in _avisadas(user_id), (
         "o `raw` da reconexão continua VELHO (mark_sync_result não o toca): sem o "
         "`case when health is null` o aviso morria para sempre")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# A TELA na janela do device/QR — a metade que faltava do Codex #166
+#
+# O DEFEITO, medido nos dois ramos do `connection_ui_state` com o MESMO item cru
+# da Caixa (`status: OUTDATED` + `executionStatus: USER_AUTHORIZATION_PENDING`):
+#
+#   COM health -> detail = 'Autorize o acesso no app do banco'
+#   SEM health -> detail = 'Reautorize o banco'
+#
+# Mesmo estado, mesmo rótulo ("Ação necessária"), instrução OPOSTA. O ramo sem
+# health é o que o upsert produz — `save_pluggy_open_finance_item` grava
+# `status = item['status'] or item['executionStatus']` (→ `OUTDATED`) e
+# `health = null` —, ou seja, é o caminho de TODA conexão recém-gravada, inclusive
+# o `POST /pluggy-item`, que monta o snapshot ANTES do sync de fundo. E
+# "Reautorize o banco" no minuto do QR é a instrução que faz PERDER a janela.
+#
+# O CONSERTO: o snapshot passou a selecionar um DERIVADO calculado no Postgres
+# (`SQL_EXECUTION_STATUS`, em `db/open_finance_state.py`) — só o ESCALAR viaja, o
+# `raw` inteiro nunca sai do banco (ele carrega `clientUserId`) —, válido só
+# enquanto `health is null` E a autorização atual couber em
+# `JANELA_DEVICE_AUTH_MIN`. Ele é removido do dict (`pop`) antes da serialização:
+# o corpo HTTP fica idêntico em chaves ao de antes.
+#
+# NENHUM teste deste grupo monta `health` ou linha na mão: todos entram por
+# `save_pluggy_open_finance_item` (o caminho de produção) e saem pelo
+# `get_open_finance_snapshot` ou pela ROTA. Montar `health` à mão não cobriria o
+# caminho que quebrava.
+#
+# O grupo tem DUAS metades, e cada uma tem o seu controle negativo — porque uma
+# injeção só não discrimina as duas. Os dois foram MEDIDOS, não deduzidos:
+#
+#   (A) desligar o DETALHE: reverter `connection_ui_state` para
+#       `_detalhe_de_acao(status)` (um argumento só). Ficam VERMELHOS os casos
+#       1, 3-GET, 3-POST e 8; ficam VERDES 4, 5, 6, 7 e o do vazamento.
+#       O caso 7 fica VERDE de propósito e isso NÃO é buraco: ele afirma
+#       "Reautorize o banco", que é justamente o que o código quebrado devolve.
+#       Quem o discrimina é a injeção (B).
+#   (B) desligar o PRAZO: tirar a metade
+#       `coalesce(reconnected_at, created_at) > now() - ...` do
+#       `SQL_RAW_AINDA_VALE`, deixando só o `health is null`. Fica VERMELHO o
+#       caso 7, e SÓ ele.
+#   (C) desligar o derivado em `get_connections_by_item_id` (`null as
+#       execution_status`): fica VERMELHA a 2ª asserção do caso 1 — a do TOAST —
+#       e a metade do snapshot segue verde, que é o que prova serem DOIS selects.
+#
+# CONTROLE POSITIVO: casos 4, 5 e 6 — o caminho legítimo de "Reautorize o banco"
+# (e o de "Atualizando…") continua funcionando. Sem eles, o grupo passaria num
+# código que mandasse "Autorize o acesso no app do banco" para todo mundo, que é
+# pior que o bug. Eles ficam verdes nas TRÊS injeções.
+
+DETALHE_DISPOSITIVO = "Autorize o acesso no app do banco"
+DETALHE_REAUTORIZA = "Reautorize o banco"
+
+# Item cru da Caixa como a Pluggy o devolve na espera de autorização de
+# dispositivo: `status` OUTDATED com o `executionStatus` ao lado (nunca o
+# contrário — varredura das 183 páginas da doc, ver `pluggy_health.py`).
+ITEM_CAIXA_QR = {
+    "id": "item-tela-caixa", "status": "OUTDATED",
+    "executionStatus": "USER_AUTHORIZATION_PENDING",
+    "clientUserId": "1",
+    "connector": {"id": 219, "name": "Caixa"},
+}
+
+# Chaves que o corpo HTTP entrega HOJE por conexão: o select de
+# `get_open_finance_snapshot` + o `ui` montado no laço. O derivado NÃO está aqui,
+# e é isso que o `pop` garante.
+CHAVES_DA_CONEXAO = {
+    "id", "provider", "provider_item_id", "status", "institution_name",
+    "last_sync_at", "last_attempt_at", "status_reason", "health",
+    "reconnected_at", "ui",
+}
+
+
+def _auth(client: TestClient, uid: int, email: str = "of@t.com") -> dict:
+    client.cookies.set(dashboard.AUTH_COOKIE_NAME, dashboard._make_jwt(uid, email))
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME,
+                       dashboard.make_dashboard_token(uid, hours=1))
+    token = "test-csrf-token"
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, token)
+    return {dashboard.CSRF_HEADER_NAME: token, "Content-Type": "application/json"}
+
+
+def _ui_da_tela(uid: int, item_id: str) -> dict:
+    """O `ui` que a TELA recebe, pelo SNAPSHOT.
+
+    Distinto do `_ui(item_id)` lá de cima de propósito: aquele passa por
+    `get_connections_by_item_id` (o caminho INTERNO, que o toast do /refresh
+    usa), este por `get_open_finance_snapshot` (o caminho da TELA). São dois
+    selects diferentes, e o defeito vivia em um deles.
+    """
+    conexoes = db.get_open_finance_snapshot(uid)["connections"]
+    linha = next(c for c in conexoes if c["provider_item_id"] == item_id)
+    return linha["ui"]
+
+
+def _envelhece_autorizacao(connection_id: int, minutos: int) -> None:
+    """Recua a autorização NO BANCO.
+
+    Tem de ser em SQL: o prazo é avaliado contra o `now()` do POSTGRES, então
+    recuar pelo relógio do Python (o `relogio_fixo` deste arquivo) não mexeria na
+    conta — foi o que fez um teste verde deste arquivo ficar vermelho quando o
+    prazo entrou, porque o `relogio_fixo` carimbava `reconnected_at` 26 dias atrás.
+    Recua as DUAS pontas da âncora `coalesce(reconnected_at, created_at)`.
+    """
+    with get_conn() as c:
+        with c.cursor() as cur:
+            cur.execute(
+                """
+                update open_finance_connections
+                   set created_at = now() - make_interval(mins => %s),
+                       reconnected_at = now() - make_interval(mins => %s)
+                 where id = %s
+                """,
+                (minutos, minutos, connection_id),
+            )
+        c.commit()
+
+
+# ── caso 1: o defeito. Caixa recém-gravada, `health` ausente ─────────────────
+
+def test_caixa_sem_health_manda_autorizar_o_dispositivo_e_nao_reautorizar(user_id):
+    db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+
+    ui = _ui_da_tela(user_id, "item-tela-caixa")
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == DETALHE_DISPOSITIVO, (
+        "com `health` NULL a tela media 'Reautorize o banco' — a instrução que "
+        "faz PERDER a janela do QR, no minuto em que ela está aberta")
+
+    # A CLASSE, não a instância (§2): "Reautorize o banco" saía por DUAS
+    # superfícies, e consertar só a tela deixaria o TOAST do /refresh mandando o
+    # oposto. O toast monta o estado com `connection_ui_state(row)` sobre uma
+    # linha de `get_connections_by_item_id` (`_refresh_items_report`, em
+    # `core/services/pluggy_sync.py`) — que é exatamente o que o `_ui` lá de cima
+    # faz. Este é o SEGUNDO select, e ele também precisa do derivado.
+    assert _ui("item-tela-caixa")["detail"] == DETALHE_DISPOSITIVO, (
+        "o toast do /refresh lê outro select: sem o derivado lá também, ele "
+        "continuaria mandando reautorizar na janela do QR")
+
+
+# ── caso 2: o outro ramo. Não é controle negativo: é a prova de convergência ──
+
+def test_caixa_com_health_medido_diz_a_MESMA_coisa_que_sem_health(user_id):
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    # O job de saúde observa o MESMO item cru e grava o que o `derive_item_health`
+    # produzir — o par de produção, não um `health` montado à mão.
+    db.mark_sync_result(conexao["id"], ok=None, status="ERROR", status_reason="",
+                        health=derive_item_health(ITEM_CAIXA_QR))
+
+    ui = _ui_da_tela(user_id, "item-tela-caixa")
+
+    assert ui["detail"] == DETALHE_DISPOSITIVO, (
+        "os dois ramos do connection_ui_state têm de convergir: era isso que o "
+        "defeito quebrava (mesmo estado, instrução oposta)")
+
+
+# ── caso 3: ponta a ponta pela ROTA — é a PRIMEIRA tela ──────────────────────
+
+def test_rota_do_snapshot_entrega_a_instrucao_de_dispositivo(user_id):
+    db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    client = TestClient(dashboard.app)
+
+    resp = client.get(f"/open-finance/{user_id}", headers=_auth(client, user_id))
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["connections"][0]["ui"]["detail"] == DETALHE_DISPOSITIVO
+
+
+def test_POST_pluggy_item_ja_nasce_com_a_instrucao_certa(user_id, monkeypatch):
+    # O `POST /pluggy-item` monta o snapshot ANTES de o sync de fundo escrever
+    # saúde: é exatamente a janela em que `health` é NULL, e é a PRIMEIRA tela
+    # que a pessoa vê depois de fechar o widget.
+    remoto = {**ITEM_CAIXA_QR, "id": "item-tela-post", "clientUserId": str(user_id)}
+    monkeypatch.setattr(of_routes, "get_pluggy_item",
+                        lambda item_id, api_key=None: remoto)
+    monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda item_id: None)
+    client = TestClient(dashboard.app)
+
+    resp = client.post(f"/open-finance/{user_id}/pluggy-item",
+                       json={"item": {"id": "item-tela-post"}},
+                       headers=_auth(client, user_id))
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["connections"][0]["ui"]["detail"] == DETALHE_DISPOSITIVO
+
+
+# ── casos 4 e 5: CONTROLES POSITIVOS — "Reautorize o banco" continua vivo ────
+
+def test_login_error_sem_health_continua_mandando_reautorizar(user_id):
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-tela-login", "status": "LOGIN_ERROR",
+        "connector": {"id": 612, "name": "Nubank"}})
+
+    ui = _ui_da_tela(user_id, "item-tela-login")
+
+    assert ui["state"] == "needs_user_action"
+    assert ui["detail"] == DETALHE_REAUTORIZA, (
+        "CONTROLE POSITIVO: o caso MAJORITÁRIO de `_NEEDS_USER` não pode virar "
+        "instrução de dispositivo — senão o conserto recusa tudo e acerta nada")
+
+
+def test_outdated_SEM_executionStatus_continua_mandando_reautorizar(user_id):
+    # `OUTDATED` cai nos DOIS lados: sozinho é reautorização, acompanhado do
+    # `USER_AUTHORIZATION_PENDING` é dispositivo. É o par que discrimina.
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-tela-outdated", "status": "OUTDATED",
+        "connector": {"id": 612, "name": "Nubank"}})
+
+    ui = _ui_da_tela(user_id, "item-tela-outdated")
+
+    assert ui["detail"] == DETALHE_REAUTORIZA, (
+        "CONTROLE POSITIVO: sem o segundo campo, `OUTDATED` é reautorização")
+
+
+# ── caso 6: a ORDEM da máquina de estados não mudou ──────────────────────────
+
+def test_updating_com_executionStatus_de_dispositivo_continua_atualizando(user_id):
+    # `_UPDATING` é testado ANTES de `_NEEDS_USER` no `connection_ui_state`, e
+    # essa ordem foi medida (60 combinações). O derivado não pode furá-la.
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-tela-updating", "status": "UPDATING",
+        "executionStatus": "USER_AUTHORIZATION_PENDING",
+        "connector": {"id": 219, "name": "Caixa"}})
+
+    ui = _ui_da_tela(user_id, "item-tela-updating")
+
+    assert ui["state"] == "updating", "a ordem `_UPDATING` antes de `_NEEDS_USER` é a de sempre"
+    assert ui["detail"] != DETALHE_DISPOSITIVO
+
+
+# ── casos 7 e 8: o PRAZO. O `raw` é congelado; a instrução não pode ser ──────
+
+def test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar(user_id):
+    # `mark_sync_result` não toca em `raw` e `mark_sync_attempt` empurra
+    # `updated_at`/`last_attempt_at` sem que o `raw` mude. Sem prazo, uma linha
+    # que nunca mais fosse medida ficaria para sempre mandando ler um QR morto —
+    # e o aviso proativo, calado para sempre.
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    _envelhece_autorizacao(conexao["id"], JANELA_DEVICE_AUTH_MIN + 5)
+
+    ui = _ui_da_tela(user_id, "item-tela-caixa")
+
+    assert ui["detail"] == DETALHE_REAUTORIZA, (
+        "vencido o prazo, a ação certa é reautorizar: errar curto custa uma "
+        "instrução conservadora, errar longo manda esperar um QR morto")
+    assert "item-tela-caixa" in _avisadas(user_id), (
+        "o silêncio do aviso proativo tem de ser LIMITADO — antes do prazo ele "
+        "durava até o próximo tique de saúde (default 6 h), ou mais")
+
+
+def test_dentro_do_prazo_o_aviso_continua_calado(user_id):
+    # CONTROLE do prazo pelo outro lado, e preserva o conserto do #166: um prazo
+    # curto demais (ou uma âncora errada) reabriria o aviso dentro da janela.
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    _envelhece_autorizacao(conexao["id"], JANELA_DEVICE_AUTH_MIN - 5)
+
+    assert _ui_da_tela(user_id, "item-tela-caixa")["detail"] == DETALHE_DISPOSITIVO
+    assert "item-tela-caixa" not in _avisadas(user_id), (
+        "dentro da janela, 'reconecte seu banco' é o que faz PERDER o QR (#166)")
+
+
+# ── caso 9: isolamento por user_id (CLAUDE.md §0, regra dura) ────────────────
+
+def test_o_derivado_nao_vaza_a_conexao_de_um_usuario_para_outro(user_id):
+    outro = user_id + 1
+    db.ensure_user(outro)
+    try:
+        db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+        db.save_pluggy_open_finance_item(outro, {
+            "id": "item-tela-do-outro", "status": "LOGIN_ERROR",
+            "connector": {"id": 612, "name": "Nubank"}})
+
+        # 1) o snapshot de B não enxerga a Caixa de A
+        itens_de_b = {c["provider_item_id"]
+                      for c in db.get_open_finance_snapshot(outro)["connections"]}
+        assert itens_de_b == {"item-tela-do-outro"}, itens_de_b
+
+        # 2) e a ROTA de A, autenticada como B, nem responde
+        client = TestClient(dashboard.app)
+        resp = client.get(f"/open-finance/{user_id}",
+                          headers=_auth(client, outro, "outro@t.com"))
+        assert resp.status_code == 403, resp.text
+    finally:
+        db.disconnect_open_finance_connection(outro)
+        with get_conn() as c:
+            c.execute("delete from users where id=%s", (outro,))
+            c.commit()
+
+
+# ── caso 10: `raw` trocado pelo ENVELOPE do webhook ──────────────────────────
+
+def test_raw_do_webhook_nao_vira_instrucao_de_dispositivo(user_id):
+    # `update_pluggy_open_finance_item_status` grava em `raw` o ENVELOPE do
+    # evento, não o item: ele não carrega `executionStatus`. O derivado tem de
+    # virar NULL — nunca uma instrução de dispositivo tirada de um envelope.
+    db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    db.update_pluggy_open_finance_item_status(
+        "item-tela-caixa", "ERROR",
+        {"event": "item/error", "itemId": "item-tela-caixa",
+         "id": "evt-1", "triggeredBy": "SYNC"})
+
+    linha = _linha("item-tela-caixa")
+    assert linha["execution_status"] is None, (
+        "envelope de webhook não é item: `raw->>'executionStatus'` não existe ali")
+
+    ui = _ui_da_tela(user_id, "item-tela-caixa")
+    assert ui["detail"] != DETALHE_DISPOSITIVO
+    assert ui["state"] in ("error_recoverable", "no_accounts"), ui
+
+
+# ── O VAZAMENTO: o derivado não pode virar contrato público ──────────────────
+#
+# Guarda ESTRUTURAL, sobre a RESPOSTA HTTP e não sobre o dict Python: o derivado
+# nasce do `raw`, e o `raw` da Pluggy carrega `clientUserId` e `statusDetail`. A
+# varredura do corpo serializado INTEIRO pega o vazamento por qualquer caminho —
+# não só pela chave que alguém lembrou de proibir.
+#
+# CONTROLE NEGATIVO (medido, ver o relato): acrescentar `raw` ao select de
+# `get_open_finance_snapshot` sem o `pop` deixa as DUAS asserções vermelhas.
+
+@pytest.mark.parametrize("via", ["get", "post"])
+def test_a_resposta_HTTP_nao_ganhou_chave_nova_nem_vazou_o_raw(user_id, monkeypatch, via):
+    remoto = {**ITEM_CAIXA_QR, "id": "item-vaza", "clientUserId": str(user_id)}
+    client = TestClient(dashboard.app)
+    headers = _auth(client, user_id)
+
+    if via == "get":
+        db.save_pluggy_open_finance_item(user_id, remoto)
+        resp = client.get(f"/open-finance/{user_id}", headers=headers)
+    else:
+        monkeypatch.setattr(of_routes, "get_pluggy_item",
+                            lambda item_id, api_key=None: remoto)
+        monkeypatch.setattr(of_routes, "_schedule_pluggy_sync", lambda item_id: None)
+        resp = client.post(f"/open-finance/{user_id}/pluggy-item",
+                           json={"item": {"id": "item-vaza"}}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    conexao = next(c for c in body["connections"] if c["provider_item_id"] == "item-vaza")
+
+    assert set(conexao.keys()) == CHAVES_DA_CONEXAO, (
+        "o corpo HTTP tem de ficar IDÊNTICO em chaves ao de antes do derivado: "
+        f"sobrou {set(conexao.keys()) - CHAVES_DA_CONEXAO}, "
+        f"faltou {CHAVES_DA_CONEXAO - set(conexao.keys())}")
+
+    corpo = json.dumps(body)
+    assert "clientUserId" not in corpo, "o `raw` carrega o id do cliente na Pluggy"
+    assert "statusDetail" not in corpo, "e o detalhe por produto, que a tela não usa"

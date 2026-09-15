@@ -46,6 +46,51 @@ from .open_finance import _CursorComTeto
 # a UM elemento emitiria `('PAUSED',)` e quebraria o SQL. Ao mexer, vire lista SQL.
 _TERMINAL = ("PAUSED", "DELETED")
 
+# ── O `executionStatus` derivado do `raw` ────────────────────────────────────
+# FONTE ÚNICA (§0.7) da regra "o `raw` ainda descreve a autorização ATUAL". Dois
+# consumidores, formatos diferentes, MESMA condição e MESMO parâmetro: o select
+# do snapshot / `get_connections_by_item_id` (abaixo, via `SQL_EXECUTION_STATUS`)
+# e o predicado do aviso proativo (`list_connections_needing_reconnect`, em
+# `db/open_finance.py`, que precisa da condição CRUA dentro do `coalesce` dele).
+#
+# Por que em SQL e não em Python: `connection_ui_state` se declara "sem banco,
+# sem rede" (`core/services/pluggy_health.py`) e não tem relógio. E aqui o
+# `raw->>'executionStatus'` sai como TEXTO — nenhum `::timestamptz` sobre string
+# vinda do provedor, cujo `InvalidDatetimeFormat` viraria 500 na tela de todos.
+#
+# A ÂNCORA é `coalesce(reconnected_at, created_at)`, e não `updated_at` nem
+# `last_attempt_at`: `mark_sync_attempt` empurra esses dois para frente SEM que o
+# `raw` mude, o que renovaria a validade de um valor congelado. `reconnected_at`
+# tem um escritor só em toda a árvore (o `on conflict` de
+# `save_pluggy_open_finance_item`) e é gravado JUNTO com o `raw` que ele data;
+# `created_at` é `default now()` e o `on conflict` nunca o toca.
+#
+# O `health is null` é obrigatório, não enfeite (mesmo precedente medido do
+# predicado irmão): sem ele, um `health` observado DEPOIS e sem
+# `execution_status` cairia no `raw` VELHO — `mark_sync_result` não toca em
+# `raw`.
+SQL_RAW_AINDA_VALE = (
+    "health is null "
+    "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s)"
+)
+
+# Só o ESCALAR viaja. O `raw` inteiro nunca sai do Postgres: ele carrega
+# `clientUserId` (e `statusDetail`), e o snapshot vai para o navegador.
+SQL_EXECUTION_STATUS = (
+    f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
+)
+
+
+def janela_device_auth_min() -> int:
+    """O único `%s` de `SQL_RAW_AINDA_VALE` / `SQL_EXECUTION_STATUS`.
+
+    Import local porque `db` -> `core.services` é de mão única neste pacote (ver
+    `connection_ui_state` em `db/open_finance.py`); e função em vez de constante
+    para que os três chamadores não repitam o import.
+    """
+    from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN
+    return JANELA_DEVICE_AUTH_MIN
+
 
 class AmbiguousItemError(RuntimeError):
     """O mesmo provider_item_id aparece em mais de uma conexão (usuários diferentes).
@@ -89,15 +134,23 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
             if budget_ms is not None:
                 cur = _CursorComTeto(cur, budget_ms, t0)
             cur.execute(
-                """
+                f"""
                 select id, user_id, provider, provider_item_id, status, institution_name,
                        last_sync_at, last_attempt_at, status_reason, health,
-                       next_refresh_at, last_refresh_origin, reconnected_at
+                       next_refresh_at, last_refresh_origin, reconnected_at,
+                       -- Para o `connection_ui_state`: sem ele, o toast do
+                       -- /refresh manda "Reautorize o banco" na janela do QR
+                       -- (`_refresh_items_report` lê ESTA linha). `mark_sync_result`
+                       -- recebe `health` como OPCIONAL, então um sync que falhe
+                       -- antes do `GET /items` não grava saúde e cai aqui.
+                       -- Sem `pop` do lado de fora: estas linhas são internas
+                       -- (nenhum consumidor as devolve cruas ao navegador).
+                       {SQL_EXECUTION_STATUS}
                 from open_finance_connections
                 where provider=%s and provider_item_id=%s
                 order by id
                 """,
-                (provider, item),
+                (janela_device_auth_min(), provider, item),
             )
             return [dict(r) for r in (cur.fetchall() or [])]
 
