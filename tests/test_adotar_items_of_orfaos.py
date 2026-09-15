@@ -1,10 +1,12 @@
-"""G5e — o one-shot `scripts/adotar_items_of_orfaos.py`.
+"""G5e — a ADOÇÃO pela porta do one-shot `scripts/adotar_items_of_orfaos.py`.
 
-Arquivo próprio (CLAUDE.md §0.5): o assunto aqui é o SCRIPT, não o webhook — os
-três arquivos `test_of_webhook_adopt*.py` cobrem a adoção pela porta do webhook.
-Os helpers vêm de `test_of_webhook_adopt_guards.py`, que é a fonte única deles
-(CLAUDE.md §0.1); copiá-los para cá seria a mesma duplicação que já custou uma
-rodada.
+Arquivo próprio (CLAUDE.md §0.5): o assunto aqui é o que o script ESCREVE quando
+adota, com Postgres e o app inteiro — os três arquivos `test_of_webhook_adopt*.py`
+cobrem a adoção pela porta do webhook, e os irmãos deste cobrem os outros assuntos
+do script (`test_adotar_items_alvos.py`, em QUEM ele mexe; `_prazo.py`, a espera;
+`_saida.py`, o que o operador lê). Os helpers vêm de
+`test_of_webhook_adopt_guards.py`, que é a fonte única deles (CLAUDE.md §0.1);
+copiá-los para cá seria a mesma duplicação que já custou uma rodada.
 
 Por que o `--apply` precisa de teste PRÓPRIO, e não herda o do webhook: o
 conserto do webhook só vale para conexão FUTURA (o `item/created` de quem já
@@ -19,18 +21,23 @@ que chamava `_executar` passava `apply=False, delete=True`.
 CONTROLE NEGATIVO do grupo: trocar `elif apply:` por `elif False:` em
 `_executar` (ou devolver `None` de `_adota_item_orfao`) deixa
 `test_script_apply_adota_e_destrava_a_reconexao_do_dono` e
-`test_script_apply_com_status_de_item_created_real_nao_agenda_sync` vermelhos —
+`test_script_apply_em_item_congelado_em_updating_agenda_sync` vermelhos —
 os dois estão VERDES hoje, que é o que os torna discriminantes.
+2º CONTROLE NEGATIVO, da adoção retroativa: apagar o `not fresco or` do gate de
+sync em `_adota_item_orfao` (a `main` antes deste conserto) deixa vermelho só o
+`test_script_apply_em_item_congelado_em_updating_agenda_sync` — e o par positivo
+dele, `test_of_webhook_adopt.py::test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando`,
+fica VERDE nos dois lados: é ele que prova que o `item/created` fresco não passou
+a agendar sync à toa.
 CONTROLE POSITIVO do grupo: o mesmo
 `test_script_apply_adota_e_destrava_a_reconexao_do_dono` — sem ele, o caso de
-recusa abaixo passaria num script que não adota NADA, que é pior que o bug.
+recusa deste arquivo passaria num script que não adota NADA, que é pior que o bug.
 """
 
 from __future__ import annotations
 
 import asyncio
 
-import pytest
 from fastapi.testclient import TestClient
 
 import db
@@ -101,13 +108,22 @@ def test_script_apply_nao_ressuscita_o_banco_que_o_usuario_removeu(
     lista, e é por lá que um `--apply` reataria a conexão e agendaria sync,
     re-importando na carteira que o usuário acabou de limpar.
     """
-    from scripts.adotar_items_of_orfaos import _executar, listar_items_orfaos
+    from scripts.adotar_items_lista import alvos, listar_items_sem_conexao
+    from scripts.adotar_items_of_orfaos import _executar
 
     item = "s-removido"
     _mock_item(monkeypatch, user_id)
     db.register_item(user_id, provider_item_id=item, origin="pluggy_item")
     try:
-        assert item not in listar_items_orfaos(), "a lista não podia oferecê-lo"
+        # O par que o `main` compõe, e não um atalho com outro nome: UMA leitura,
+        # e `alvos` decidindo em cima dela. (Havia um `listar_items_orfaos()` que
+        # embrulhava exatamente isto e que o `main` não chamava — o teste media um
+        # caminho que ninguém percorre.)
+        sem_conexao = listar_items_sem_conexao()
+        assert item not in alvos(None, sem_conexao), "a lista não podia oferecê-lo"
+        # ...e a MESMA leitura tem de VÊ-LO, em banco real: é o grupo que o
+        # dry-run reporta à parte (adoção pela metade OU removido — sem separar).
+        assert sem_conexao[item] == {"pluggy_item"}
 
         asyncio.run(_executar([item], apply=True, delete=False))
 
@@ -123,15 +139,31 @@ def test_script_apply_nao_ressuscita_o_banco_que_o_usuario_removeu(
         _limpa_item(item)
 
 
-def test_script_apply_com_status_de_item_created_real_nao_agenda_sync(
+def test_script_apply_em_item_congelado_em_updating_agenda_sync(
         user_id, monkeypatch, eventos, webhook_pluggy):
-    """O status realista de quem ficou travado é `CREATED`/`UPDATING`, não `UPDATED`.
+    """A QUEIXA DO DONO em produção: "o card apareceu, mas fica carregando pra sempre".
 
-    O `_item_remoto` dos outros arquivos devolve `UPDATED` — o ramo que AGENDA
-    sync. Quem fechou a aba no meio do widget (o caso que este script existe para
-    destravar) está no ramo oposto: adota e NÃO agenda, porque a Pluggy ainda
-    está montando o item e o sync acharia zero conta.
+    O status realista de quem ficou travado é `CREATED`/`UPDATING` — o
+    `_item_remoto` dos outros arquivos devolve `UPDATED`. A adoção copiava esse
+    status congelado para a conexão e NÃO agendava sync, apostando no
+    `item/updated` seguinte. A aposta se paga no `item/created` FRESCO (o próximo
+    é esperado em segundos) e é FALSA aqui: o item foi abandonado dias atrás e não
+    vem evento nenhum.
+
+    Os dois asserts, e o que cada um prova (medido, não deduzido):
+      • `connection_ui_state` devolve "Atualizando…" na linha recém-escrita: é o
+        card do dono, e é PRÉ-CONDIÇÃO, não o discriminante. Medido: o rótulo
+        segue "Atualizando…" mesmo depois de um sync que deu certo, porque o ramo
+        do `health` decide antes do `sem_sync` (`pluggy_health.py:498-504`) —
+        tirá-lo de lá é outro PR;
+      • o sync TEM de ser agendado: o assert DISCRIMINANTE, vermelho na `main`,
+        onde `webhook_pluggy` volta vazio. O que ele compra é o EXTRATO — contas e
+        transações entram na hora; sem ele, nada lê a Pluggy por essa conexão.
+
+    O par oposto (item/created fresco continua SEM agendar) é
+    `test_of_webhook_adopt.py::test_adocao_nao_agenda_sync_de_item_que_a_pluggy_ainda_esta_montando`.
     """
+    from core.services.pluggy_health import connection_ui_state
     from scripts.adotar_items_of_orfaos import _executar
 
     item = "s-created"
@@ -143,129 +175,14 @@ def test_script_apply_com_status_de_item_created_real_nao_agenda_sync(
     try:
         asyncio.run(_executar([item], apply=True, delete=False))
 
-        assert len(db.get_connections_by_item_id(item)) == 1, "a adoção acontece"
+        linhas = db.get_connections_by_item_id(item)
+        assert len(linhas) == 1, "a adoção acontece"
         assert db.list_pluggy_item_ids(user_id) == [item]
-        assert webhook_pluggy == [], "sync agendado num item que a Pluggy ainda está montando"
+        # O card do dono, como a tela o desenha depois da adoção.
+        assert connection_ui_state(linhas[0])["label"] == "Atualizando…"
+        assert webhook_pluggy == [item], (
+            "adoção retroativa sem sync agendado: nenhum evento vem depois e nada "
+            "lê a Pluggy — a carteira do dono fica sem conta e sem transação")
     finally:
         db.disconnect_open_finance_connection(user_id)
         _limpa_item(item)
-
-
-# ── a lista, os args e o laço (vindos de `test_of_webhook_adopt.py`) ─────────
-
-def test_script_lista_so_o_item_sem_conexao_e_o_default_e_dry_run(user_id, monkeypatch):
-    """UM check do que decide o script: o predicado e o default dos args.
-
-    Se o predicado quebrar, o `--apply` passa a mexer em item que JÁ tem conexão;
-    se o default deixar de ser dry-run, um `-m scripts.…` sem flag escreve.
-    """
-    from scripts.adotar_items_of_orfaos import listar_items_orfaos, parse_args
-
-    assert parse_args([]).apply is False and parse_args([]).delete is False
-    assert parse_args(["--apply"]).apply is True
-
-    _mock_item(monkeypatch, user_id)
-    # o rastro do bug antigo: o webhook viu e NÃO conseguiu atribuir
-    db.register_item(None, provider_item_id="item-orfao-script", origin="webhook")
-    db.save_pluggy_open_finance_item(
-        user_id, {"id": "item-com-conexao", "status": "UPDATED",
-                  "connector": {"id": 612, "name": "Nubank"}})
-    db.register_item(user_id, provider_item_id="item-com-conexao", origin="pluggy_item")
-    # banco CONECTADO e depois REMOVIDO (o porquê de ele ficar assim para sempre:
-    # docstring de `db.item_registry_origins`): sem conexão, COM rastro de dono.
-    db.register_item(user_id, provider_item_id="item-removido", origin="pluggy_item")
-    # e o item que passou pelos dois estados: rastro sem dono E rastro com dono
-    db.register_item(None, provider_item_id="item-removido-2", origin="webhook")
-    db.register_item(user_id, provider_item_id="item-removido-2", origin="webhook_adopt")
-    # item de OUTRO provider: `ITEMS_SEM_CONEXAO` é compartilhado com o painel e
-    # não restringe provider — sem o filtro do script, ele entra na lista e o
-    # `--apply` manda o id para a Pluggy (auth + GET, 404 no log).
-    db.register_item(None, provider_item_id="item-belvo", origin="webhook", provider="belvo")
-    try:
-        orfaos = listar_items_orfaos()
-        assert "item-orfao-script" in orfaos
-        assert "item-com-conexao" not in orfaos, "item COM conexão não é órfão"
-        # `--apply` sobre estes dois RESSUSCITARIA o removido (ver
-        # `listar_items_orfaos`), e inflaria o número que o operador lê para
-        # decidir rodar o `--apply --delete`, que é irreversível.
-        assert "item-removido" not in orfaos, "banco REMOVIDO pelo usuário virou alvo de adoção"
-        assert "item-removido-2" not in orfaos, "basta UMA linha com dono para não ser órfão"
-        assert "item-belvo" not in orfaos, "item de outro provider virou alvo da Pluggy"
-    finally:
-        db.disconnect_open_finance_connection(user_id)
-        for i in ("item-orfao-script", "item-com-conexao", "item-removido",
-                  "item-removido-2", "item-belvo"):
-            _limpa_item(i)
-
-
-def test_script_apagar_na_pluggy_exige_apply(capsys):
-    """`--delete` sozinho já era destrutivo na PRIMEIRA invocação — só o
-    `--apply`, que é o menos destrutivo dos dois, exigia flag."""
-    from scripts.adotar_items_of_orfaos import parse_args
-
-    with pytest.raises(SystemExit):
-        parse_args(["--delete"])
-    assert "--apply" in capsys.readouterr().err
-    assert parse_args(["--apply", "--delete"]).delete is True
-
-
-def test_script_item_explicito_pula_a_lista_menos_o_que_tem_conexao_viva(
-        user_id, monkeypatch, capsys):
-    """A única saída do item que a lista NÃO vê (rastro com dono e sem conexão, de
-    uma adoção que falhou no meio): explícito, operacional, sem reabrir a lista.
-
-    Pular a lista é pular o predicado dela: com um id digitado errado, `--item
-    --apply --delete` apagava na Pluggy — IRREVERSÍVEL — o item de um usuário
-    SAUDÁVEL, e a linha local ficava apontando para item morto, sem aviso na tela.
-    """
-    import scripts.adotar_items_of_orfaos as script
-
-    monkeypatch.setattr(script, "listar_items_orfaos",
-                        lambda: pytest.fail("consultou a lista em vez de usar o --item"))
-    monkeypatch.setattr(script, "_executar",
-                        lambda *a, **k: pytest.fail("mexeu em item COM conexão viva"))
-    monkeypatch.setattr("sys.argv", ["adotar", "--item", "z-preso"])
-
-    script.main()   # dry-run: sem --apply, não escreve nada
-
-    # CONTROLE POSITIVO da guarda abaixo: item SEM conexão local continua passando
-    # — sem ele, tudo passaria numa guarda que recusa todo `--item`.
-    assert "z-preso" in capsys.readouterr().out
-
-    db.save_pluggy_open_finance_item(user_id, {"id": "z-vivo", "status": "UPDATED",
-                                               "connector": {"id": 612, "name": "Nubank"}})
-    try:
-        assert db.get_connections_by_item_id("z-vivo"), "pré-condição: conexão viva"
-        monkeypatch.setattr("sys.argv", ["adotar", "--item", "z-vivo", "--apply", "--delete"])
-        with pytest.raises(SystemExit):
-            script.main()
-    finally:
-        db.disconnect_open_finance_connection(user_id)
-        _limpa_item("z-vivo")
-
-
-def test_script_segue_para_o_proximo_item_quando_um_falha(monkeypatch, capsys):
-    """O try cobria só o `get_pluggy_item`: falha do `delete_pluggy_item` no item
-    2 subia e o item 3 nunca era processado — num one-shot que existe para
-    destravar N usuários, esse é o pior desfecho."""
-    import core.services.pluggy as pluggy_svc
-    import scripts.adotar_items_of_orfaos as script
-
-    # A chave da Pluggy FALHANDO: ela era montada uma vez, antes do laço e fora de
-    # todo `try` — 401/timeout dela derrubava o one-shot com ZERO item processado,
-    # o mesmo desfecho que o `try` por item veio evitar.
-    monkeypatch.setattr(pluggy_svc, "create_pluggy_api_key",
-                        lambda: (_ for _ in ()).throw(RuntimeError("Pluggy 401")))
-    monkeypatch.setattr(pluggy_svc, "get_pluggy_item",
-                        lambda i, api_key=None: {"id": i, "status": "UPDATED",
-                                                 "clientUserId": "1",
-                                                 "connector": {"name": "Nubank"}})
-    monkeypatch.setattr(pluggy_svc, "delete_pluggy_item",
-                        lambda item_id, api_key=None: (_ for _ in ()).throw(RuntimeError("Pluggy 500"))
-                        if item_id == "i2" else None)
-
-    asyncio.run(script._executar(["i1", "i2", "i3"], apply=False, delete=True))
-
-    saida = capsys.readouterr().out
-    assert "i3" in saida, f"o loop parou no i2 e nunca chegou no i3:\n{saida}"
-    assert "i1" in saida, f"o run morreu antes do primeiro item:\n{saida}"
