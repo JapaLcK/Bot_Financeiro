@@ -1558,6 +1558,14 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user, uses_bank_movement_lock
+            cur.execute("select source,efeitos from launches where id=%s and user_id=%s", (launch_id, user_id))
+            preview = cur.fetchone()
+            bank_lock = bool(preview and uses_bank_movement_lock(preview["source"], preview["efeitos"]))
+            if bank_lock:
+                # Matcher: conta → transação OF → sombra. Cartões manuais
+                # mantêm sua ordem anterior de fatura → conta.
+                _lock_user(cur, user_id)
             # `for update`: serializa duas reversões do MESMO lançamento. Sem
             # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
             # `delete` da segunda casa zero linhas sem levantar — o dinheiro
@@ -1569,13 +1577,16 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             # lê "erro técnico, continua aí" sobre algo que já não existe. É o
             # comportamento da `main` também; o balde que falta é outro PR.
             cur.execute(
-                "select id, tipo, valor, alvo, efeitos from launches "
+                "select id, tipo, valor, alvo, efeitos, source from launches "
                 "where id=%s and user_id=%s for update",
                 (launch_id, user_id),
             )
             row = cur.fetchone()
             if not row:
                 raise LookupError("NOT_FOUND")
+
+            if uses_bank_movement_lock(row["source"], row["efeitos"]) != bank_lock:
+                raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.")
 
             efeitos = row.get("efeitos")
             if isinstance(efeitos, str):

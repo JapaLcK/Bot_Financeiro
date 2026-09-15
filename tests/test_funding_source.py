@@ -172,7 +172,7 @@ def test_caixinha_nos_dois_sentidos(user_id):
 
     assert "saindo do Nubank" in dep
     assert float(db.get_balance(user_id)) == 0.0
-    assert "sincronizar" in saq                # aviso do sync também na saída
+    assert funding.nota_sync() in saq                # aviso do sync também na saída
     pockets = {p["name"]: float(p["balance"]) for p in db.list_pockets(user_id)}
     assert pockets["Viagem"] == 150.0
 
@@ -386,9 +386,8 @@ def test_o_que_sobra_do_banco_continua_disponivel(user_id):
     assert "✅" in ok
 
 
-def test_sync_novo_zera_o_comprometido(user_id):
-    """O corte é `criado_em > updated_at`: o que veio antes do sync já está embutido
-    no saldo que o banco mandou e não pode ser descontado duas vezes."""
+def test_sync_sem_transacao_nao_confirma_o_comprometido(user_id):
+    """Snapshot novo não prova que a declaração consta do extrato (#188)."""
     _connect_fake_bank(user_id, "1000.00")
     db.create_investment(user_id, "Renda Fixa", 0.14, "yearly")
     h_investments.deposit(user_id, "investi 600", {"investment_name": "Renda Fixa", "amount": 600})
@@ -398,8 +397,8 @@ def test_sync_novo_zera_o_comprometido(user_id):
     _connect_fake_bank(user_id, "400.00")
 
     banco = funding.list_sources(user_id)[1]
-    assert banco["comprometido"] == Decimal("0")
-    assert banco["balance"] == Decimal("400.00")
+    assert banco["comprometido"] == Decimal("600")
+    assert banco["balance"] == Decimal("0")
 
 
 def test_desfazer_devolve_a_disponibilidade(user_id):
@@ -433,7 +432,7 @@ def test_mensagem_explica_o_comprometido(user_id):
 
     assert "R$ 400,00 disponíveis" in msg
     assert "R$ 1.000,00 no banco" in msg
-    assert "R$ 600,00 já lançados aqui" in msg
+    assert "R$ 600,00 declarados aqui" in msg
 
 
 # ─── criar investimento já com valor inicial ────────────────────────────────
@@ -1226,7 +1225,7 @@ def test_deposito_do_banco_no_meio_do_saque_nao_credita_a_carteira(user_id):
     # SENTIDO B da mensagem (#286): antes do saque o único lote era da Carteira, e o
     # texto lia esse estado — o usuário via a caixinha esvaziar, a Conta parada e
     # NENHUMA explicação. É a forma exata do relato da #282, do lado da mensagem.
-    assert "Open Finance sincronizar" in msg, msg
+    assert funding.nota_sync() in msg, msg
 
     carteira = float(db.get_balance(user_id))
     assert carteira == 900.0, (
@@ -1273,7 +1272,7 @@ def test_aporte_do_banco_no_meio_do_resgate_nao_credita_a_carteira(user_id):
     # SENTIDO B no investimento, onde o texto é pior: o `, para o <banco>` fica DENTRO
     # da linha de sucesso, então a previsão errada não só omitia o aviso — ela afirmava
     # o destino errado no meio da confirmação.
-    assert "Open Finance sincronizar" in msg, msg
+    assert funding.nota_sync() in msg, msg
     assert f", para o {banco['label']}" in msg, msg
 
     carteira = float(db.get_balance(user_id))

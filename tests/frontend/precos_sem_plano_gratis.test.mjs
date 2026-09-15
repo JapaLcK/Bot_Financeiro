@@ -117,6 +117,115 @@ async function abrirPrecos({ me = null, query = "", app = false,
   return { page, chamadas, corposCheckout, removeuClip };
 }
 
+test("o ciclo usa um switch único, animado e reversível", async () => {
+  const { page } = await abrirPrecos({ viewport: { width: 320, height: 844 } });
+  const estrutura = await page.evaluate(() => {
+    const controle = document.querySelector(".cycle-toggle");
+    const botao = document.getElementById("cycle-annual");
+    const caixa = botao?.getBoundingClientRect();
+    return {
+      botoes: controle?.querySelectorAll("button").length,
+      role: botao?.getAttribute("role"),
+      checked: botao?.getAttribute("aria-checked"),
+      altura: Math.round(caixa?.height || 0),
+      cabe: Math.ceil(controle?.getBoundingClientRect().right || 0) <= innerWidth,
+    };
+  });
+  assert.deepEqual(estrutura, {
+    botoes: 1, role: "switch", checked: "false", altura: 44, cabe: true,
+  });
+
+  const estado = () => page.evaluate(() => {
+    const visivel = (sel) => getComputedStyle(document.querySelector(sel)).display !== "none";
+    return {
+      checked: document.getElementById("cycle-annual").getAttribute("aria-checked"),
+      mensalAtivo: document.getElementById("cycle-monthly-label").classList.contains("is-active"),
+      anualAtivo: document.getElementById("cycle-annual-label").classList.contains("is-active"),
+      precoMensal: visivel("[data-price-monthly]"),
+      precoAnual: visivel("[data-price-annual]"),
+      xKnob: Math.round(document.querySelector(".cycle-switch-thumb").getBoundingClientRect().left),
+    };
+  });
+
+  const mensal = await estado();
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(350); // transição do knob: 300ms
+  const anual = await estado();
+  assert.equal(anual.checked, "true");
+  assert.equal(anual.mensalAtivo, false);
+  assert.equal(anual.anualAtivo, true);
+  assert.equal(anual.precoMensal, false);
+  assert.equal(anual.precoAnual, true);
+  assert.ok(anual.xKnob - mensal.xKnob >= 20,
+    `o knob moveu só ${anual.xKnob - mensal.xKnob}px`);
+
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(350);
+  assert.deepEqual(await estado(), mensal, "o segundo clique não restaurou o ciclo mensal");
+  await page.close();
+});
+
+test("o switch troca os preços e explica a cobrança com movimento", async () => {
+  const { page } = await abrirPrecos();
+  const lerCards = () => page.evaluate(() => ({
+    precos: [...document.querySelectorAll("#plans-v2 .plan .price")]
+      .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+    cobrancas: [...document.querySelectorAll("#plans-v2 .plan .price-cycle-copy")]
+      .map((el) => el.innerText.replace(/\s+/g, " ").trim()),
+    fluxos: [...document.querySelectorAll("#plans-v2 .plan .price-flow-display")]
+      .map((el) => {
+        const numberFlow = el.querySelector("number-flow-react");
+        const unidade = el.querySelector(".price-flow-unit-track");
+        const quadros = unidade.getAnimations()[0]?.effect.getKeyframes() || [];
+        return {
+          ciclo: el.dataset.cycle,
+          direcao: el.dataset.direction,
+          numberFlow: !!numberFlow,
+          sufixo: unidade.dataset[el.dataset.cycle],
+          quadros: quadros.map((q) => q.transform),
+          fade: quadros.some((q) => q.opacity != null),
+          tamanho: getComputedStyle(numberFlow).fontSize,
+          peso: getComputedStyle(numberFlow).fontWeight,
+        };
+      }),
+    copiasEmMovimento: document.querySelectorAll(
+      "#plans-v2 .plan .price-cycle-copy.cycle-copy-in",
+    ).length,
+  }));
+
+  assert.deepEqual((await lerCards()).precos, [
+    "R$ 9,90/mês", "R$ 19,90/mês", "R$ 49,90/mês",
+  ]);
+  assert.deepEqual((await lerCards()).cobrancas, [
+    "Cobrado mensalmente", "Cobrado mensalmente", "Cobrado mensalmente",
+  ]);
+
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(80);
+  const anual = await lerCards();
+  assert.deepEqual(anual.precos, ["R$ 99/ano", "R$ 199/ano", "R$ 499/ano"]);
+  assert.ok(anual.cobrancas.every((texto) =>
+    texto.startsWith("Cobrado em um único pagamento anual")),
+  `copy anual ausente: ${JSON.stringify(anual.cobrancas)}`);
+  assert.deepEqual(anual.fluxos, [
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "annual", direcao: "up", numberFlow: true, sufixo: "/ano", quadros: ["translateY(0px)", "translateY(-50%)"], fade: false, tamanho: "40px", peso: "850" },
+  ]);
+  assert.equal(anual.copiasEmMovimento, 3);
+
+  await page.waitForTimeout(900);
+  await page.click("#cycle-annual");
+  await page.waitForTimeout(80);
+  assert.deepEqual((await lerCards()).fluxos, [
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
+    { ciclo: "monthly", direcao: "down", numberFlow: true, sufixo: "/mês", quadros: ["translateY(-50%)", "translateY(0px)"], fade: false, tamanho: "40px", peso: "850" },
+  ]);
+
+  await page.close();
+});
+
 // ── asserção do conserto ────────────────────────────────────────────────────
 
 for (const [rotulo, ctx] of [

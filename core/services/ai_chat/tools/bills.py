@@ -61,17 +61,18 @@ def _bill_view(r: dict[str, Any], today: date) -> dict[str, Any]:
 
 # ─── Read: get_bills_to_pay ───────────────────────────────────────────────────
 
-def _get_bills_to_pay(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+def _get_bills_to_pay(user_id: int, args: dict[str, Any], *, sync: bool = True) -> dict[str, Any]:
     from db.bills import list_bills
 
     include_paid = bool(args.get("include_paid"))
     today = _today()
-    # Garante que as instâncias do próximo ciclo existem (conta recém-criada).
-    try:
-        from core.services.recurring_charger import sync_manual_bills_once
-        sync_manual_bills_once(None, user_id)
-    except Exception:
-        pass
+    if sync:
+        # Garante que as instâncias do próximo ciclo existem (conta recém-criada).
+        try:
+            from core.services.recurring_charger import sync_manual_bills_once
+            sync_manual_bills_once(None, user_id)
+        except Exception:
+            pass
     rows = list_bills(user_id, include_paid=include_paid, limit=200)
     all_bills = [_bill_view(r, today) for r in rows]
     pend = [b for b in all_bills if b["status"] == "pending"]
@@ -343,6 +344,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_get_bills_to_pay,
+        has_side_effects=True,
     ),
     Tool(
         schema={

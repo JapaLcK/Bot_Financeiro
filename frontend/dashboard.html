@@ -26,8 +26,10 @@
      dashboard.js. Nenhum script inline depende deles durante o parse. -->
 <script defer src="/static/auth-refresh.js?v=1"></script>
 <script defer src="/modals.js"></script>
+<script defer src="/launch-type-labels.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script defer src="/app-mode.js?v=34"></script>
+<link rel="stylesheet" href="/chat-app.css?v=1" />
 </head>
 <body class="has-sidenav">
 
@@ -857,7 +859,7 @@
 <div class="overlay" id="ofx-result-overlay" onclick="if(event.target===this) closeOfxResult()">
   <div class="modal wide" role="dialog" aria-labelledby="ofx-result-title">
     <h3 id="ofx-result-title">Importação OFX</h3>
-    <pre id="ofx-result-body" style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text);background:rgba(255,255,255,.04);border:1px solid var(--glass-border);border-radius:10px;padding:14px;max-height:60vh;overflow:auto;margin-bottom:18px"></pre>
+    <pre id="ofx-result-body"></pre>
     <div class="modal-acts">
       <button class="btn-save" type="button" onclick="closeOfxResult()">Fechar</button>
     </div>
@@ -1580,6 +1582,7 @@
   </div>
 </div>
 
+<script defer src="/bank-movements.js"></script>
 <script defer src="/dashboard.js?v=16"></script>
 
 <!-- ─── Chat IA widget (Piggy) — Item #49 ──────────────────────────────── -->
@@ -1589,37 +1592,10 @@
   <span class="fab-badge" id="piggy-fab-badge"></span>
 </button>
 
-<div id="piggy-panel" role="dialog" aria-labelledby="piggy-title" aria-modal="false">
-  <div class="piggy-head">
-    <div class="avatar"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
-    <div class="title">
-      <b id="piggy-title">Piggy</b>
-      <small id="piggy-sub">IA das suas finanças</small>
-    </div>
-    <button class="close-btn" type="button" aria-label="Fechar" onclick="closePiggy()">×</button>
-  </div>
-  <div class="piggy-body" id="piggy-body">
-    <div class="piggy-empty" id="piggy-empty">
-      <div class="big"><img src="/brand/stickers/hello.webp" alt="Piggy"></div>
-      <div>Oi! Pergunta o que quiser sobre suas <b>finanças</b>.<br>Sei seus saldos, gastos, cartões e mais.</div>
-      <div class="piggy-suggestions">
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto eu gastei esse mês?')"><i class="ph ph-trend-down" aria-hidden="true"></i> Quanto eu gastei esse mês?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quais minhas maiores categorias de gasto?')"><i class="ph ph-chart-pie" aria-hidden="true"></i> Quais minhas maiores categorias?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Quanto tenho de saldo?')"><i class="ph ph-wallet" aria-hidden="true"></i> Quanto tenho de saldo?</button>
-        <button class="piggy-sugg" type="button" onclick="piggyAsk('Mostra meus últimos lançamentos')"><i class="ph ph-receipt" aria-hidden="true"></i> Mostra meus últimos lançamentos</button>
-      </div>
-    </div>
-  </div>
-  <div class="piggy-foot">
-    <div class="piggy-input-row">
-      <textarea class="piggy-input" id="piggy-input" placeholder="Pergunte algo…" rows="1" onkeydown="piggyKeyDown(event)" oninput="piggyAutoresize(this)"></textarea>
-      <button class="piggy-send" id="piggy-send" type="button" aria-label="Enviar" onclick="piggySend()"><i class="ph ph-paper-plane-tilt" aria-hidden="true"></i></button>
-    </div>
-    <div class="piggy-usage" id="piggy-usage"></div>
-  </div>
-</div>
-
-<script defer src="/dashboard-chat.js"></script>
+<div id="pigbank-chat-root"></div>
+<script defer src="/chat-app.js?v=1"></script>
+<script defer src="/dashboard-chat.js?v=1"></script>
+<script defer src="/dashboard-agent-chat.js?v=1"></script>
 
 </body>
 </html>

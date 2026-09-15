@@ -24,6 +24,7 @@ def _get_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if not consolidated_balance_enabled(user_id):
         return {"balance": float(cb["manual"] or 0)}
     return {
+        "bank_movements": cb.get("bank_movements") or {},
         "balance": float(cb["consolidated"] or 0),
         "wallet_balance": float(cb["manual"] or 0),
         "connected_banks_balance": float(cb["open_finance_bank"] or 0),
@@ -37,7 +38,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_balance",
-                "description": "Retorna o saldo atual do usuário no PigBank, em reais. `balance` é o saldo total (Carteira manual + contas bancárias conectadas via Open Finance); `wallet_balance` é só a Carteira e `connected_banks_balance` é a soma dos bancos conectados (`connected_bank_accounts` = nº de contas conectadas, 0 = nenhum banco). Use sempre que ele perguntar 'qual meu saldo?', 'quanto tenho?', 'quanto sobrou?' ou variações.",
+                "description": "Retorna o saldo atual do usuário no PigBank, em reais. `balance` é o saldo total (Carteira manual + contas bancárias conectadas via Open Finance); `wallet_balance` é só a Carteira e `connected_banks_balance` é a soma dos bancos conectados (`connected_bank_accounts` = nº de contas conectadas, 0 = nenhum banco). Se bank_movements.pending_count for maior que zero, informe que há declarações não confirmadas e o patrimônio está a conferir; os saldos são observados, não prova dessas operações. Use sempre que ele perguntar 'qual meu saldo?', 'quanto tenho?', 'quanto sobrou?' ou variações.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },

@@ -84,8 +84,8 @@ def _pocket_goal_insight(balance: float, target_amount, target_date, today: date
     return out
 
 
-def _list_pockets(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    rows = db.list_pockets(user_id)
+def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) -> dict[str, Any]:
+    rows = db.list_pockets(user_id) if accrue else db.list_pockets(user_id, accrue=False)
     today = datetime.now(_tz()).date()
     pockets = []
     for r in rows:
@@ -103,10 +103,21 @@ def _list_pockets(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
                 "interest_enabled": bool(r.get("interest_enabled")),
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
+                **({"last_interest_date": r.get("last_interest_date")} if not accrue else {}),
                 **insight,
             }
         )
-    return {"pockets": pockets}
+    result = {"pockets": pockets}
+    if not accrue:
+        result["note"] = (
+            "Consulta do último saldo registrado, sem atualizar juros. Progresso, "
+            "valor restante e monthly_needed usam somente esse saldo: o retrato "
+            "não confirma o saldo nem o atingimento da meta hoje. last_interest_date "
+            "indica a última aplicação de juros internos, não a sincronização de "
+            "caixinhas do banco. Quando ausente, a data de atualização é desconhecida. "
+            "Explique essa limitação ao avaliar a meta; não invente juros posteriores."
+        )
+    return result
 
 
 # ─── Write: create_pocket ───────────────────────────────────────────────────
@@ -335,6 +346,7 @@ TOOLS: list[Tool] = [
         },
         is_write=False,
         execute=_list_pockets,
+        has_side_effects=True,
     ),
     Tool(
         schema={

@@ -3,9 +3,9 @@
 //   PWA — /home): header com e-mail + badge do plano e os atalhos
 //   Início / Dashboard / Conectar WhatsApp / Configurações / Assinatura / Sair.
 //   Os CTAs do corpo (hero/seções) continuam apontando pro dashboard.
-// - Mobile: o nav quebra em duas linhas — logo + entrar/conta em cima e os
-//   MESMOS botões do site (Funcionalidades / Como funciona / Planos / WhatsApp)
-//   numa segunda linha, sempre visíveis (antes sumiam no celular).
+// - Mobile: o menu recolhido atrás de um botão saiu para o nav-burger.js, que
+//   as MESMAS 12 páginas carregam ao lado deste — o CSS de `.nav` de lá é o que
+//   põe este menu da conta em `order:2` na barra mobile.
 // NÃO redireciona — só ajusta o nav pra não parecer deslogado.
 // Estilos injetados via <style> (prefixo pb-) pra não depender do cache do site.css.
 (function () {
@@ -53,8 +53,7 @@
   // qualquer coisa derivada da CONTA sai. Lista do que preservar e não do que
   // apagar, para falhar fechado: chave nova derivada de conta é apagada por
   // default. `tests/frontend/sw_cache_privado.test.mjs` compara as duas (§0.7).
-  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos",
-                  "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
+  const PRESERVA = ["pigbank_theme", "pigbank_hide_balance", "pbFabPos", "pbDebug", "pbSpa", "finbot_logout_at", "finbot_reset_at"];
 
   // Recebe o NOME, não o objeto: `window.localStorage` é um getter que LANÇA
   // com dados do site bloqueados, e a avaliação do argumento ficava fora do
@@ -165,9 +164,9 @@
   ];
 
   function injectStyles() {
-    if (document.getElementById("pb-nav-css")) return;
+    if (document.getElementById("pb-acct-css")) return;
     const s = document.createElement("style");
-    s.id = "pb-nav-css";
+    s.id = "pb-acct-css";
     s.textContent = [
       /* ── Menu da conta (desktop + mobile linha 1) ── */
       ".pb-acct{position:relative}",
@@ -186,14 +185,6 @@
       ".pb-acct-link.danger{color:#fecaca}",
       ".pb-acct-link.danger:hover{background:rgba(248,113,113,.15);color:#fff1f2}",
       ".pb-acct-ico{width:18px;text-align:center;flex-shrink:0}",
-      /* ── Nav mobile: os 4 links vão pra uma 2ª linha, sempre visíveis ── */
-      "@media (max-width:900px){",
-      ".nav{flex-wrap:wrap;row-gap:0}",
-      ".nav .nav-logo{order:1}",
-      ".nav .nav-right{order:2;margin-left:auto}",
-      ".nav .nav-links{order:3;display:flex;flex-wrap:wrap;width:100%;justify-content:center;align-items:center;gap:8px 20px;margin:10px 0 0;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}",
-      ".nav .nav-links a{font-size:.9rem;white-space:nowrap}",
-      "}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -221,12 +212,15 @@
 
     const btn = document.getElementById("pb-acct-btn");
     const dd = document.getElementById("pb-acct-dd");
-    btn.addEventListener("click", function (e) {
-      e.stopPropagation();
+    btn.addEventListener("click", function () {
       const open = dd.classList.toggle("open");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     });
-    document.addEventListener("click", function () {
+    // Esta guarda É o `stopPropagation` que ficava no toggle acima, movido para
+    // cá: lá ele barrava também o listener do burger e os dois menus abriam
+    // juntos — e tirá-lo sem pôr a guarda abre e fecha o dropdown no MESMO clique.
+    document.addEventListener("click", function (e) {
+      if (e.target.closest(".pb-acct-btn")) return;  // do BOTÃO: .pb-acct-link ainda fecha
       dd.classList.remove("open");
       btn.setAttribute("aria-expanded", "false");
     });
@@ -257,8 +251,8 @@
 
   fetch("/auth/validate", { credentials: "same-origin" })
     .then(function (r) {
-      if (!r.ok) return; // deslogado: mantém "Entrar / Começar agora" padrão
-      // 1) Nav direita: "Entrar / Começar agora" → menu da conta (com logout).
+      if (!r.ok) return; // deslogado: mantém "Entrar / Criar conta" padrão
+      // 1) Nav direita: "Entrar / Criar conta" → menu da conta (com logout).
       const nr = document.querySelector(".nav .nav-right");
       if (nr) renderAccountMenu(nr);
       // 2) E-mail + plano no dropdown.

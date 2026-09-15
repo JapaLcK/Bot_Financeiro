@@ -30,16 +30,14 @@
 .rd .section-head { max-width: 680px; margin-bottom: 60px; }
 .rd .section-head p { font-size: 1.06rem; text-wrap: pretty; }
 
-/* Headline com gradiente vivo (rosa → neon → rosa), respiração lenta */
+/* Gradiente estático: o título da hero é o LCP no Lighthouse mobile. Animar
+   background-position nele mantinha uma repintura não composta ativa durante
+   a janela de medição, sem acrescentar informação ou resposta à interação. */
 .rd .grad {
   background: linear-gradient(100deg, var(--pink) 0%, #FF7AB8 40%, var(--pink) 80%);
-  background-size: 220% 100%;
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: rdGrad 9s ease-in-out infinite;
 }
-@keyframes rdGrad { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-@media (prefers-reduced-motion: reduce) { .rd .grad { animation: none; } }
 
 /* ─── 3. Nav: vidro mais refinado + borda superior de luz ──────────────── */
 .rd .nav {

@@ -47,7 +47,7 @@
   //   - auth-refresh.js:84-86 (só UA PigBankApp; também liga PB_IN_APP)
   //   - app-mode.js:46 (decisão em :42 — UA PigBankApp OU PWA standalone)
   // Nas duas únicas páginas que carregam este arquivo os dois já executaram:
-  // home.html:455 (auth-refresh) e :458 (app-mode), antes do :459 daqui;
+  // home.html:455 (auth-refresh) e :459 (app-mode), antes do :460 daqui;
   // comandos-app.html:84 (app-mode, sem auth-refresh) antes do :85. Ou seja,
   // a classe pb-app já está no <html> quando esta linha executa — por isso o
   // gate abaixo pode usar a classe, e não repetir o sinal de ambiente
@@ -327,10 +327,29 @@
       const key = ROUTES[path];
       if (key === currentKey || cache[key] || warm[key] !== undefined) return;
       warm[key] = null;
-      inflight[key] = fetch(path, { credentials: "same-origin", headers: { Accept: "text/html" } })
+      // Teto de 5 s no PREFETCH, pelo mesmo motivo do ramo fetch lá embaixo: o
+      // tap espera o pedido em voo (`Promise.resolve(warm[key] || inflight[key])`,
+      // sem timeout próprio), então um prefetch pendurado prendia o tap até o
+      // timeout de rede do navegador SEM cair no hard() — o oposto do
+      // "Fallback sempre-navega … nunca tela travada" do cabeçalho.
+      // Um teto SÓ, não dois: o abort cai no .catch, que já devolve null, e o
+      // ramo warm já trata null com hard(path). Espera máxima ≈5 s a partir do
+      // início do prefetch, logo ≤5 s a partir do tap — sem Promise.race no tap
+      // e sem somar dois relógios. `AbortSignal.timeout` está fora pelo motivo
+      // escrito no ramo fetch (alvo iOS 14).
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 5000);
+      inflight[key] = fetch(path, { credentials: "same-origin", headers: { Accept: "text/html" }, signal: c.signal })
         .then(r => (r.ok && !r.redirected ? r.text() : Promise.reject()))
         .then(html => { warm[key] = html; delete inflight[key]; return html; })
-        .catch(() => { delete warm[key]; delete inflight[key]; return null; });
+        .catch(() => { delete warm[key]; delete inflight[key]; return null; })
+        // O abort() acompanha o clearTimeout pelo mesmo motivo do ramo fetch
+        // (~50 linhas abaixo): o `Promise.reject()` do `!r.ok || r.redirected`
+        // sai ENTRE os headers e a leitura do corpo, e sem isto o clearTimeout
+        // tirava o único relógio armado — ninguém abortava o corpo por ler.
+        // Redirect é o desfecho normal do prefetch com sessão vencida (→
+        // /entrar, /precos): N páginas de login baixando sem teto.
+        .finally(() => { clearTimeout(t); c.abort(); });
     });
   }
 

@@ -4,7 +4,7 @@ import logging
 import re
 import db
 from core.handlers import pending as h_pending
-from utils_text import fmt_brl, marcador_de_tudo, parse_pocket_deposit_natural
+from utils_text import fmt_brl, parse_pocket_deposit_natural
 
 logger = logging.getLogger(__name__)
 
@@ -214,13 +214,20 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
 
 
 def withdraw(user_id: int, text: str, entities: dict) -> str:
+    from core.financial_targets import ALVO_AMBIGUO, QUANTIDADE_AMBIGUA, resolve_saque
+
+    existentes = ([row.get("name") or "" for row in (db.list_pockets(user_id) or [])]
+                  if "want_all" not in entities else [])
+    entities, ambigua = resolve_saque(text, entities, "pocket_name", existentes)
+    if ambigua:
+        return h_pending.pergunta_guardando_contexto(
+            user_id, "pockets.withdraw", entities,
+            ALVO_AMBIGUO if ambigua == "alvo_ambiguo" else QUANTIDADE_AMBIGUA,
+            "" if ambigua == "alvo_ambiguo" else text,
+            falta="pocket_name" if ambigua == "alvo_ambiguo" else "amount")
     pocket_name = entities.get("pocket_name")
-    amount      = entities.get("amount")
-    # A entity ANTES do texto: o resolver de clarification grava a quantidade
-    # "tudo" nas entities, para ela não depender de qual string chegou aqui.
-    # O `or` preserva o caminho direto ("esvaziar caixinha viagem") intocado.
-    want_all    = (bool(entities["want_all"]) if "want_all" in (entities or {})
-                else marcador_de_tudo(text))
+    amount = entities.get("amount")
+    want_all = bool(entities.get("want_all"))
 
     # tenta extrair do texto se as entidades não trouxerem
     if not pocket_name or (not amount and not want_all):

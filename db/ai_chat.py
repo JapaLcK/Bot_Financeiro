@@ -14,10 +14,15 @@ Pending action expira após 10 minutos (limpeza lazy no get).
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .connection import get_conn
+# Mantém a API pública de cota usada pelo chat geral, especialistas e db.__init__.
+from .ai_quota import (
+    UsageReservation, get_usage_this_month, increment_usage,
+    try_consume_usage, reserve_usage, refund_usage,
+)
 
 
 PENDING_TTL_MINUTES = 10
@@ -209,78 +214,6 @@ def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
         apagou = cur.rowcount == 1
         conn.commit()
         return apagou
-
-
-# ─── Rate limit mensal ──────────────────────────────────────────────────────
-
-def _current_month_start() -> date:
-    today = date.today()
-    return today.replace(day=1)
-
-
-def get_usage_this_month(user_id: int) -> int:
-    """
-    Retorna quantas mensagens o user mandou pra IA no mês atual.
-    Aplica reset lazy: se ai_month_reset_at é de outro mês, zera antes.
-    """
-    month_start = _current_month_start()
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            select ai_messages_this_month, ai_month_reset_at
-            from auth_accounts
-            where user_id = %s
-            """,
-            (int(user_id),),
-        )
-        row = cur.fetchone()
-        if not row:
-            return 0
-
-        used = row["ai_messages_this_month"]
-        reset_at = row["ai_month_reset_at"]
-        if reset_at is None or reset_at < month_start:
-            cur.execute(
-                """
-                update auth_accounts
-                set ai_messages_this_month = 0,
-                    ai_month_reset_at = %s
-                where user_id = %s
-                """,
-                (month_start, int(user_id)),
-            )
-            conn.commit()
-            return 0
-        return int(used or 0)
-
-
-def increment_usage(user_id: int) -> int:
-    """
-    Incrementa o contador mensal (com reset lazy) e retorna o NOVO valor.
-    Chamar APÓS processar a mensagem do user com sucesso.
-    """
-    month_start = _current_month_start()
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            update auth_accounts
-            set
-              ai_messages_this_month = case
-                when ai_month_reset_at is null or ai_month_reset_at < %s then 1
-                else ai_messages_this_month + 1
-              end,
-              ai_month_reset_at = case
-                when ai_month_reset_at is null or ai_month_reset_at < %s then %s
-                else ai_month_reset_at
-              end
-            where user_id = %s
-            returning ai_messages_this_month
-            """,
-            (month_start, month_start, month_start, int(user_id)),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return int(row["ai_messages_this_month"]) if row else 0
 
 
 # ──────────────────────────────────────────────────────────────────────────────

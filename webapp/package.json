@@ -2,16 +2,28 @@
   "name": "pigbank-webapp",
   "private": true,
   "type": "module",
-  "description": "Ilhas React do site. package.json e lockfile PRÓPRIOS, separados da raiz de propósito: a detecção automática do Railway olha a raiz, e um `build` lá muda como o site é publicado. Uma ilha por página (hoje só a /precos), saída de nome fixo em frontend/, artefato commitado.",
+  "description": "Ilhas React de preços e chats. Build separado da raiz, artefatos IIFE de nome fixo servidos pelo backend.",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build && vite build --config vite.chat.config.ts && tsc --noEmit",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@number-flow/react": "^0.6.2",
+    "clsx": "^2.1.1",
+    "framer-motion": "^13.2.0",
+    "lucide-react": "^1.45.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "tailwind-merge": "^2.6.1"
   },
   "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "6.1.1",
+    "autoprefixer": "^10.6.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "3.4",
+    "typescript": "^7.0.2",
     "vite": "8.3.0"
   }
 }

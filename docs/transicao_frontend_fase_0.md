@@ -6,9 +6,8 @@ somente a entrega de uma rota. Não autoriza publicação nem troca de rota.
 
 ## Referência da árvore
 
-Em 11/09/2026, a referência local `origin/main` (`12d643c`) é ancestral de
-`feat/implementacao-react` (`64f1ed1`), que está 133 commits à frente. Antes de
-cada pacote, conferir a árvore contra a main remota:
+Em 14/09/2026, este documento foi reconciliado com `origin/main` (`271e0b7`).
+Antes de cada pacote, conferir novamente a árvore contra a main remota:
 
 ```sh
 git fetch origin main
@@ -24,18 +23,20 @@ para visitantes.
 
 | Rota ou recurso | Situação | Contratos que uma migração não pode assumir |
 | --- | --- | --- |
-| `/` | pública, candidata após otimização | VSL bloqueia CTAs de `/cadastro`; `vsl_play`, `vsl_progress` e `vsl_unlock`; falha da mídia libera; `pb_vsl_visto`; `nav-auth.js` reescreve CTAs de sessão viva. |
-| `/como-funciona` | pública, piloto técnico proposto | Conteúdo institucional, tags injetadas pelo FastAPI, navegação convencional e `safe-area.js`. |
+| `/` | pública, candidata após otimização | VSL opcional; CTAs de `/cadastro` sempre acionáveis; `vsl_play` e `vsl_progress`; `nav-auth.js` reescreve CTAs de sessão viva. |
+| `/como-funciona` | pública, piloto técnico decidido e ainda não implementado | Ilha React limitada a `#como-funciona-app`; CTAs reescritos por `nav-auth.js` ficam fora do mount; HTML e rota continuam no FastAPI; conteúdo legado, tags injetadas, navegação convencional e `safe-area.js` permanecem. |
 | `/precos` | pública com dados e escrita | Consulta sessão e configuração de planos; inicia checkout; GA4/Meta; não é piloto estático até existir contrato de catálogo e matriz de estados. |
 | `/cadastro`, `/login`, `/completar-cadastro` | entrada | Cookies HttpOnly, CSRF, Google e deduplicação de `sign_up`/`CompleteRegistration`. |
-| `/app`, `/home`, `/settings`, `/onboarding` | autenticadas | Gates Python de plano/onboarding, refresh de sessão, PWA e pontes iOS. Não entram na primeira exportação. |
+| `/app`, `/home`, `/settings`, `/onboarding` | autenticadas | Gates Python de plano/onboarding, refresh de sessão, PWA e pontes iOS. Não entram no piloto. |
 | `/blog/*`, `/changelog` | protegidas | `gate_pro_page`; não podem virar arquivos públicos. |
 | `/brand/{path}` | asset com allowlist | MIME e cache imutável; a VSL e o poster dependem desta rota. |
 | `/service-worker.js`, `auth-refresh.js`, `app-mode.js` | compatibilidade | Cache de versões, logout, sessão e WebView. Um piloto não pode sobrescrever seus nomes nem seus contratos. |
 
 O HTML continua sendo servido por `frontend/routes/static_pages.py`. `html_file`
 em `frontend/routes/shared.py` injeta GA4 e Meta Pixel no HTML final; validar
-somente um servidor Next futuramente não prova o documento entregue ao visitante.
+somente o bundle isolado não prova o documento entregue ao visitante. A decisão e
+os limites do piloto estão no
+[ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
 
 ## Baseline de performance
 
@@ -60,7 +61,7 @@ node scripts/medir_frontend_publico.mjs --runs 5
 O JSON entra em `tmp/`, que não é versionado. Anexar o artefato bruto à revisão
 do pacote e registrar data, SHA do deploy confirmado, comando, rota, perfil,
 mediana e dispersão. Reexecutar depois da otimização do HTML; essa versão, e não
-o relatório PageSpeed isolado, será o controle da decisão sobre Next.
+o relatório PageSpeed isolado, será o controle de desempenho do piloto por ilha.
 
 Esta coleta é laboratório reproduzível, não RUM e não uma prova de conversão.
 LCP de campo, INP e conversão exigem dados de produção com amostra suficiente.
@@ -91,7 +92,9 @@ já tem os metadados no início; a hipótese anterior de download integral de
 10,43 MiB era erro de contagem do coletor. Em comparação controlada no mesmo
 Chromium, `preload="none"` reduziu a transferência pré-interação de cerca de
 194 KB para zero e `play()` iniciou a transmissão normalmente. A fase 1 adota
-essa opção, preservando `src`, reprodução, portão de cadastro e eventos. O vídeo
+essa opção, preservando `src`, reprodução e eventos de consumo. Em 13/09/2026,
+o portão de cadastro foi removido por decisão de produto: o vídeo continua
+opcional e nenhum CTA depende de sua reprodução. O vídeo
 não é o LCP atual; o elemento observado foi o subtítulo da hero.
 
 ## Funil e medição
@@ -104,8 +107,7 @@ indica retorno do provedor e não confirma cobrança. Os eventos a preservar sã
 | --- | --- | --- |
 | visita | `page_view` / Meta `PageView` | Preservar `_ga`, `_fbp`, `_fbc`, UTMs e referenciador. |
 | início do vídeo | `vsl_play` | Uma vez por reprodução iniciada. |
-| progresso | `vsl_progress` | Marcos de 25%, 50% e 75%. |
-| desbloqueio | `vsl_unlock` | Distinguir assistiu, memória, sessão e falha de mídia. |
+| progresso | `vsl_progress` | Marcos de 25%, 50% e 75% do tempo realmente reproduzido; saltos na barra não contam. |
 | cadastro | `sign_up` / `CompleteRegistration` | Deduplicar cliente e CAPI pelo identificador existente. |
 | checkout | `begin_checkout` e `checkout_funnel_events` | Uma ação deve criar uma única solicitação. |
 | aquisição | confirmação backend/webhook | Separar teste iniciado, compra imediata e primeira cobrança posterior. |
@@ -120,10 +122,23 @@ ganho de conversão.
 - Usar credenciais e provedores de teste; rastreamento real desligado por
   `META_PIXEL_ID=`, `GA4_MEASUREMENT_ID=` e `CLARITY_PROJECT_ID=` vazios no
   ambiente de ensaio.
-- Entregar o HTML compilado pelo FastAPI, com seleção explícita por rota. Não
-  montar um diretório exportado como fallback para APIs ou rotas protegidas.
-- Validar no documento final: status, MIME, chunks tardios, rastreamento uma vez,
-  CSRF, sessão existente, retorno ao legado, iOS/PWA, aba aberta e rollback.
+- Manter o HTML servido pelo FastAPI via `html_file(..., clarity=True)`. A ilha
+  pertence somente a `#como-funciona-app`; todo o resto continua HTML clássico e
+  a navegação continua MPA.
+- Manter fora do mount todo CTA sujeito ao rewrite assíncrono de `nav-auth.js`,
+  inclusive a faixa final de `/cadastro`. Esses CTAs permanecem no HTML clássico;
+  React não os renderiza nem altera.
+- Compilar `como-funciona-app.js` como IIFE de nome fixo no `webapp/` existente,
+  commitar o artefato em `frontend/` e servi-lo por rota explícita. Se o build
+  emitir CSS, ele segue o mesmo contrato. Não criar projeto npm, exportação ou
+  pipeline paralelo.
+- Preservar no mount o markup legado completo do subtree controlado por React.
+  Bundle ausente, tardio ou que recuse um contrato desconhecido deixa esse
+  conteúdo e os CTAs externos intactos. O rollback remove do HTML as referências
+  ao bundle JS e a todo CSS opcional emitido pela ilha.
+- Validar antes de ativar: equivalência do subtree, status, MIME, hash/cache,
+  CSP, safe area, Safari 14, bundle ausente/tardio, rastreamento e Clarity uma vez,
+  navegação/cadastro, artefato reproduzível, teste real de navegador e rollback.
 - Não avançar se houver quebra de cadastro/checkout, bloqueio indevido,
   duplicação/perda de conversão ou assets recorrentes indisponíveis.
 

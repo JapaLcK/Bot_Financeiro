@@ -494,7 +494,7 @@ async def get_financial_data(
         # cabeçalho a somava (lista vazia com gasto no topo).
         credit_union_sql = """
             UNION ALL
-            SELECT t.id AS id,
+            SELECT 1 AS source_order, t.id AS id,
                    'credito' AS tipo,
                    t.valor AS valor,
                    c.name AS alvo,
@@ -538,7 +538,7 @@ async def get_financial_data(
         _q(
             f"""
             SELECT COUNT(*) AS total FROM (
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                SELECT 0 AS source_order, id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
@@ -560,12 +560,20 @@ async def get_financial_data(
             -- `TIPO_CANON_SQL` na PROJEÇÃO de FORA, não no filtro: o filtro
             -- (`_dashboard_launch_filter_sql`) roda no WHERE da perna de
             -- DENTRO, contra a coluna crua, e já lê as duas formas. Aqui o
-            -- alvo é quem CONSOME `recent_launches`, e só ele: home.html:944
-            -- imprime o tipo cru como rótulo ("Última atividade: saida"), :1094
-            -- não conta a linha legada no onboarding e :1147 desenha a receita
-            -- legada como despesa; dashboard.js:7954 (linha do Histórico), :8035
-            -- (`_renderLaunchDetail`, "Tipo: saida") e :8479 (resumo do editor,
-            -- "saida - R$ 100,00") usam o cru como label. São 6 sites, não 5.
+            -- alvo é quem CONSOME `recent_launches`, e só ele. Citados por
+            -- SÍMBOLO e não por linha de propósito (CLAUDE.md §2: número de
+            -- linha envelhece sozinho; este bloco já citou 5 errados):
+            -- home.html `renderOnboarding` não conta a linha legada, e
+            -- `renderActivity` desenha a receita legada como DESPESA (vermelho,
+            -- sinal de menos, ícone de queda); no dashboard.js, `renderLaunches`
+            -- (o card "Lançamentos"), `_renderLaunchDetail` ("Tipo: saida") e
+            -- `openEditLaunchModal` (resumo, "saida - R$ 100,00") usam o cru
+            -- como label.
+            -- O `#greeting-sub` da Início (`renderGreeting`) SAIU desta lista na
+            -- issue 293: ele lê o rótulo de frontend/launch-type-labels.js, e um
+            -- `saida` legado cai no fallback ("Lançamento") em vez de sair cru.
+            -- Degrada em vez de vazar — os outros sítios é que sustentam esta
+            -- projeção.
             -- Mesma decisão, mesmo sintoma, já tomada em db/analytics.py:784-791.
             -- O `ELSE tipo` preserva 'credito' e os tipos internos intactos.
             --
@@ -579,7 +587,7 @@ async def get_financial_data(
             SELECT id, {TIPO_CANON_SQL} AS tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                    installments_total, installment_no, bill_period_end, posted_at, has_time
             FROM (
-                SELECT id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
+                SELECT 0 AS source_order, id, tipo, valor, alvo, nota, categoria, criado_em, is_internal_movement,
                        NULL::int AS installments_total,
                        NULL::int AS installment_no,
                        NULL::date AS bill_period_end,
@@ -592,7 +600,7 @@ async def get_financial_data(
                   {launch_filter_sql}
                 {credit_union_sql}
             ) merged
-            ORDER BY criado_em DESC, id ASC
+            ORDER BY criado_em DESC, id ASC, source_order ASC
             LIMIT %s OFFSET %s
             """,
             (user_id, query_start, month_end, *launch_filter_params, *credit_union_params, limit, offset),
@@ -945,7 +953,10 @@ async def get_financial_data(
     for bucket in allocations:
         allocations[bucket]["by_target"].sort(key=lambda x: -x["total"])
 
+    from db.bank_movements import bank_movement_summary
+    movement_summary = await asyncio.to_thread(bank_movement_summary, user_id)
     return {
+        "bank_movements": movement_summary,
         "user_id":            user_id,
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "year":               y,
@@ -4012,7 +4023,9 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
 # ─── Login social (Google OAuth) ─────────────────────────────────────────────
 
 GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
+GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
+GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/precos?compra=continuar"
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):
@@ -4022,15 +4035,31 @@ class GoogleSignupCompleteBody(_CorpoSemVeneno):
     accepted_terms: bool = False
 
 
+def _google_oauth_next_url(value: str | None) -> str | None:
+    """Aceita somente destinos internos conhecidos após o OAuth."""
+    return value if value == GOOGLE_OAUTH_PURCHASE_CONTINUE_URL else None
+
+
+def _clear_google_oauth_cookies(response: Response) -> None:
+    response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+    response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
+
+
 def _google_redirect_to_landing(message: str) -> RedirectResponse:
     """Volta pra landing com flag de erro pra UI mostrar."""
     qs = urllib.parse.urlencode({"google_error": message})
-    return RedirectResponse(url=f"/?{qs}", status_code=302)
+    response = RedirectResponse(url=f"/?{qs}", status_code=302)
+    _clear_google_oauth_cookies(response)
+    return response
 
 
 @app.get("/auth/google/start")
 @limiter.limit("10/minute")
-async def auth_google_start(request: Request, app: int = 0):
+async def auth_google_start(
+    request: Request,
+    app: int = 0,
+    next_url: str | None = Query(default=None, alias="next"),
+):
     """Gera state, salva em cookie short-lived e redireciona pro Google.
 
     `app=1`: fluxo iniciado pelo app iOS (via ASWebAuthenticationSession). O
@@ -4067,6 +4096,20 @@ async def auth_google_start(request: Request, app: int = 0):
         max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
         path="/auth/google",
     )
+    continue_url = _google_oauth_next_url(next_url)
+    if continue_url and app != 1:
+        response.set_cookie(
+            GOOGLE_OAUTH_NEXT_COOKIE,
+            continue_url,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
+            path="/auth/google",
+        )
+    else:
+        # Evita que uma tentativa abandonada contamine um login posterior.
+        response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
     return response
 
 
@@ -4100,6 +4143,7 @@ async def auth_google_callback(
     _log = _logging.getLogger("auth.google")
 
     cookie_state = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE) or ""
+    next_url = _google_oauth_next_url(request.cookies.get(GOOGLE_OAUTH_NEXT_COOKIE))
     # Fluxo do app iOS: o state carrega o prefixo "app-" (ver /auth/google/start)
     is_app_flow = bool(state) and state.startswith("app-")
 
@@ -4148,7 +4192,7 @@ async def auth_google_callback(
             onb_url = (f"pigbankai://auth?onboarding={token}" if is_app_flow
                        else f"/completar-cadastro?token={token}")
             signup_response = RedirectResponse(url=onb_url, status_code=302)
-            signup_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            _clear_google_oauth_cookies(signup_response)
             return signup_response
 
         # Usuário existente: bloqueia se conta agendada para deletar
@@ -4171,13 +4215,16 @@ async def auth_google_callback(
                 user_agent=request.headers.get("user-agent"),
             )
             app_response = RedirectResponse(url=f"pigbankai://auth?code={code}", status_code=302)
-            app_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+            _clear_google_oauth_cookies(app_response)
             return app_response
 
         # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-        success_response = RedirectResponse(url=_post_login_url(user_id), status_code=302)
-        success_response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
+        success_response = RedirectResponse(
+            url=next_url or _post_login_url(user_id),
+            status_code=302,
+        )
+        _clear_google_oauth_cookies(success_response)
         _set_auth_cookie(success_response, jwt_token)
         _set_refresh_cookie(success_response, refresh)
         _set_dashboard_cookie(success_response, int(user_id), jti=jti)

@@ -942,7 +942,7 @@ def test_item_salvo_durante_a_janela_do_reset_e_deletado_na_pluggy(user_id, monk
     """Codex PR #217 (P2, 11º): item Pluggy salvo DEPOIS de a limpeza remota
     enumerar os items (T1) e ANTES do DELETE local (T2) era varrido do banco
     sem nunca ser deletado na Pluggy — órfão que bloqueia reconexão ("já
-    possui conexão com este acesso", frontend/routes/open_finance.py:919).
+    possui conexão com este acesso", frontend/routes/open_finance.py:1939).
     O segundo passe compara o RETURNING do DELETE com a enumeração e deleta
     o que ela não viu. CONTROLE NEGATIVO: sem o segundo passe (código
     anterior), este teste fica vermelho (item novo nunca deletado)."""

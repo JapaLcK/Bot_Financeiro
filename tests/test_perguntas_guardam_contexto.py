@@ -470,7 +470,7 @@ def test_toda_pergunta_declara_intent_conhecida_e_falta():
     from core.intent_router import _INTENTS_PERGUNTA_DE_HANDLER
 
     chamadas = _chamadas_de_pergunta()
-    assert len(chamadas) == 9, f"o inventário mudou: {chamadas}"
+    assert len(chamadas) == 12, f"o inventário mudou: {chamadas}"
 
     for rel, linha, intent, tem_falta in chamadas:
         assert intent in _INTENTS_PERGUNTA_DE_HANDLER, f"{rel}:{linha} intent {intent!r} fora do conjunto"
@@ -1510,3 +1510,169 @@ def test_281_c2_quantidade_grande_no_comando_nao_cria_a_caixinha(uid):
     assert sorted(_saldos(uid)) == ["viagem"], \
         f"o comando rodou em vez de responder: {_saldos(uid)}"
     assert _despesas(uid) == [], respostas[-1]
+
+
+# #259/#260: o catálogo decide antes da sintaxe e da quantidade.
+@pytest.mark.parametrize("texto,catalogo,esperado", [
+    ("tira 100 da minha caixinha viagem", ["viagem", "minha caixinha viagem"], "minha caixinha viagem"),
+    ("retirei 100 da caixinha viagem", ["viagem"], "viagem"),
+    ("tira 100 da viagem e 50 da minha caixinha viagem", ["viagem", "minha caixinha viagem"], None),
+    ("tira 100 da casa nova moto", ["casa nova", "nova moto"], None),
+])
+def test_260_catalogo_antes_do_recorte(texto, catalogo, esperado):
+    from core.intent_router import _nome_do_alvo
+    alvo = _nome_do_alvo(texto, catalogo)
+    assert alvo == (esperado or texto)
+
+
+def test_260_caixinha_com_substantivo_pela_conversa(uid, sem_teto_de_caixinha):
+    _caixinhas_com_saldo(uid, "viagem", "minha caixinha viagem")
+    _conversa(uid, "tirar da caixinha", "tira 100 da minha caixinha viagem", "1")
+    assert _saldos(uid)["minha caixinha viagem"] == 200.0
+    assert _saldos(uid)["viagem"] == 300.0
+
+
+@pytest.mark.parametrize("resposta", [
+    "tira tudo menos 50 da viagem", "tira tudo menos cinquenta da viagem",
+    "tira 50 e tudo da viagem",
+])
+@pytest.mark.parametrize("guardado", [{}, {"amount": 100}, {"want_all": True}])
+def test_259_mistura_limpa_quantidade_guardada(resposta, guardado):
+    from core.intent_router import _funde_a_resposta
+    ents, recusa = _funde_a_resposta("pockets.withdraw", guardado, resposta, ["viagem"])
+    assert recusa == "quantidade_ambigua"
+    assert ents["pocket_name"] == "viagem"
+    assert "amount" not in ents
+    assert ents["want_all"] is False
+
+
+def test_259_mistura_repergunta_e_nao_recupera_tudo(uid):
+    _caixinhas_com_saldo(uid, "viagem")
+    _conversa(uid, "tirar da caixinha", "tira tudo menos 50 da viagem", "1")
+    assert _saldos(uid)["viagem"] == 300.0
+    pend = db.get_pending_action(uid)
+    assert pend["action_type"] == "clarification"
+    assert pend["payload"]["falta"] == "amount"
+    assert pend["payload"]["entities"]["want_all"] is False
+    _conversa(uid, "viagem")
+    assert _saldos(uid)["viagem"] == 300.0
+    assert db.get_pending_action(uid)["payload"]["falta"] == "amount"
+    _conversa(uid, "50")
+    assert _saldos(uid)["viagem"] == 250.0
+
+
+@pytest.mark.parametrize("intent,chave", [
+    ("pockets.withdraw", "pocket_name"), ("funds.withdraw", "target_name"),
+    ("investments.withdraw", "investment_name"),
+])
+@pytest.mark.parametrize("nome,texto,amount,saldo_esperado", [
+    ("zerar divida", "tira 100 da zerar divida", 100, 200),
+    ("meta 2028", "tira tudo da meta 2028", None, 0),
+    ("viagem", "tira tudo menos 50 da viagem", 50, 300),
+])
+def test_259_portas_diretas_pela_conversa(uid, monkeypatch, intent, chave, nome, texto, amount, saldo_esperado):
+    """Só a classificação externa é simulada; roteamento e banco são reais."""
+    import importlib
+    from core.intent_classifier import IntentResult
+    incoming = importlib.import_module("core.handle_incoming")
+    if intent == "investments.withdraw":
+        db.add_launch_and_update_balance(uid, "receita", 400, alvo="setup", nota="setup")
+        db.create_investment(uid, nome, 0.01, "yearly")
+        db.investment_deposit_from_account(uid, nome, 300, "setup")
+    else:
+        _caixinhas_com_saldo(uid, nome)
+    entities = {chave: nome}
+    if amount is not None:
+        entities["amount"] = amount
+    monkeypatch.setattr(incoming, "classify", lambda *a, **kw: IntentResult(
+        intent=intent, confidence=0.95, entities=entities))
+    _conversa(uid, texto)
+    if intent == "investments.withdraw":
+        saldo = next(i["balance"] for i in db.list_investments(uid) if i["name"] == nome)
+    else:
+        saldo = _saldos(uid)[nome]
+    assert float(saldo) == saldo_esperado
+    if saldo_esperado == 300:
+        pend = db.get_pending_action(uid)
+        assert pend["action_type"] == "clarification"
+        assert pend["payload"]["falta"] == "amount"
+        assert pend["payload"]["entities"][chave] == nome
+
+
+@pytest.mark.parametrize("texto,amount,recusa", [
+    ("tira 50,25 da viagem", 50.25, None),
+    ("-50 da viagem", None, "nao_positivo"),
+    ("tira 100 da meta 2028", 100, None),
+])
+def test_259_remover_nome_preserva_numero_e_sinal(texto, amount, recusa):
+    from core.intent_router import _funde_a_resposta
+    ents, motivo = _funde_a_resposta("pockets.withdraw", {}, texto, ["viagem", "meta 2028"])
+    assert motivo == recusa
+    assert ents.get("amount") == amount
+
+
+@pytest.mark.parametrize("texto", [
+    "tira 100 da viagem e 50 da minha caixinha viagem",
+    "tira 100 da minha caixinha viagem e 50 da viagem",
+    "tira 100 da viagem e da minha caixinha viagem",
+])
+def test_260_ambiguidade_nao_reutiliza_alvo_guardado(uid, sem_teto_de_caixinha, texto):
+    _caixinhas_com_saldo(uid, "viagem", "minha caixinha viagem")
+    saldo = db.get_balance(uid)
+    lancamentos = db.list_launches(uid, limit=50)
+    _conversa(uid, "tirar da caixinha", "viagem", texto, "1")
+    assert _saldos(uid) == {"viagem": 300.0, "minha caixinha viagem": 300.0}
+    assert db.get_balance(uid) == saldo
+    assert db.list_launches(uid, limit=50) == lancamentos
+    pend = db.get_pending_action(uid)
+    assert pend["action_type"] == "clarification"
+    assert pend["payload"]["falta"] == "pocket_name"
+    assert not pend["payload"]["entities"].get("pocket_name")
+    _conversa(uid, "minha caixinha viagem", "50")
+    assert _saldos(uid) == {"viagem": 300.0, "minha caixinha viagem": 250.0}
+
+
+@pytest.mark.parametrize("intent,chave,kind,target_kind", [
+    ("pockets.withdraw", "pocket_name", "pocket", None),
+    ("investments.withdraw", "investment_name", "investment", None),
+    ("funds.withdraw", "target_name", "pocket", None),
+    ("funds.withdraw", "target_name", "investment", None),
+    ("funds.withdraw", "target_name", "pocket", "pocket"),
+    ("funds.withdraw", "target_name", "investment", "investment"),
+])
+@pytest.mark.parametrize("flag,texto,nome,amount,retirado", [
+    (True, "tira 100 da zerar dívida", "zerar dívida", 100, 100),
+    (True, "tira tudo menos 50 da viagem", "viagem", 50, 0),
+    (False, "tira tudo menos 50 da viagem", "viagem", 50, 0),
+    (False, "esvaziar caixinha viagem", "viagem", None, 300),
+])
+def test_259_flag_do_classificador_nao_e_quantidade_resolvida(
+        uid, monkeypatch, intent, chave, kind, target_kind, flag, texto, nome, amount, retirado):
+    import importlib
+    from core.intent_classifier import IntentResult
+    if kind == "investment":
+        db.add_launch_and_update_balance(uid, "receita", 400, "setup", "setup")
+        db.create_investment(uid, nome, 0.01, "yearly")
+        db.investment_deposit_from_account(uid, nome, 300)
+    else:
+        _caixinhas_com_saldo(uid, nome)
+    carteira = float(db.get_balance(uid))
+    lancamentos = len(db.list_launches(uid, limit=50))
+    entities = {chave: nome, "want_all": flag}
+    if amount is not None:
+        entities["amount"] = amount
+    if target_kind:
+        entities["target_kind"] = target_kind
+    incoming = importlib.import_module("core.handle_incoming")
+    monkeypatch.setattr(incoming, "classify", lambda *a, **kw: IntentResult(
+        intent=intent, confidence=0.95, entities=dict(entities)))
+    _conversa(uid, texto)
+    saldos = db.list_investments(uid) if kind == "investment" else db.list_pockets(uid)
+    assert float(next(x["balance"] for x in saldos if x["name"] == nome)) == 300 - retirado
+    assert float(db.get_balance(uid)) == carteira + retirado
+    assert len(db.list_launches(uid, limit=50)) == lancamentos + (1 if retirado else 0)
+    if not retirado:
+        pend = db.get_pending_action(uid)
+        assert pend["action_type"] == "clarification"
+        assert pend["payload"]["falta"] == "amount"
+        assert pend["payload"]["entities"]["want_all"] is False

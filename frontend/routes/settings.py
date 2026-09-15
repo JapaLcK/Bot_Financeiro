@@ -198,7 +198,7 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
         # bloqueia SEGURANDO um dos 8 slots do pool sync (db/connection.py:77).
         #
         # Capturar a folha era copiar a forma do precedente e perder a lição
-        # dele: `frontend/routes/open_finance.py:393` captura `OperationalError`
+        # dele: `frontend/routes/open_finance.py:618` captura `OperationalError`
         # justamente porque o Codex apontou OITO vezes o mesmo fenômeno por
         # portas diferentes, e nomeia o `DeadlockDetected` como uma delas.
         #
@@ -262,7 +262,7 @@ async def account_reset_route(request: Request, payload: AccountResetPayload):
 
 @router.get("/settings/{user_id}/security")
 async def security_settings_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    shared.authorize_account_access(request, user_id)  # saída de emergência: sem a perna do DIREITO (#380)
     return await _get_security_settings(user_id)
 
 
@@ -272,6 +272,14 @@ async def update_security_contact_route(
     user_id: int,
     payload: SecurityContactPayload,
 ):
+    # authorize_dashboard_access (COM a perna do DIREITO), e não a
+    # authorize_account_access das cinco rotas vizinhas: esta ESCREVE dado de
+    # conta. Teto aceito e declarado (decisão do dono, #380): conta sem e-mail e
+    # sem senha não consegue vincular um e-mail aqui e portanto não tem saída
+    # autônoma — sai por suporte. Isentar esta rota é decisão do dono, não sua.
+    # O teto tem caso: `test_conta_sem_email_sai_por_400_e_nao_por_500`
+    # (`tests/test_settings_saida_guardas.py`) fixa que o /password-reset dessa
+    # conta responde 400 com instrução, não 500.
     shared.authorize_dashboard_access(request, user_id)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     if not auth_user:
@@ -381,7 +389,7 @@ async def update_security_contact_route(
 @router.post("/settings/{user_id}/password-reset")
 @shared.limiter.limit("3/minute")
 async def security_password_reset_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    shared.authorize_account_access(request, user_id)  # saída de emergência: sem a perna do DIREITO (#380)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     email = (auth_user or {}).get("email")
     if not email:
@@ -423,7 +431,7 @@ async def security_activity_route(
 @router.get("/settings/{user_id}/sessions")
 async def security_sessions_list_route(request: Request, user_id: int):
     """Lista as sessoes ativas (dispositivos conectados) do usuario."""
-    shared.authorize_dashboard_access(request, user_id)
+    shared.authorize_account_access(request, user_id)  # saída de emergência: sem a perna do DIREITO (#380)
     current_jti = _current_session_jti(request)
     rows = await asyncio.to_thread(list_user_sessions, user_id)
     sessions = []
@@ -443,7 +451,7 @@ async def security_sessions_list_route(request: Request, user_id: int):
 @router.delete("/settings/{user_id}/sessions/{jti}")
 async def security_session_revoke_route(request: Request, user_id: int, jti: str):
     """Revoga uma sessao especifica (que nao seja a corrente)."""
-    shared.authorize_dashboard_access(request, user_id)
+    shared.authorize_account_access(request, user_id)  # saída de emergência: sem a perna do DIREITO (#380)
     current_jti = _current_session_jti(request)
     if current_jti and jti == current_jti:
         raise HTTPException(
@@ -459,7 +467,7 @@ async def security_session_revoke_route(request: Request, user_id: int, jti: str
 @router.delete("/settings/{user_id}/sessions")
 async def security_sessions_revoke_others_route(request: Request, user_id: int):
     """Revoga todas as sessoes do usuario exceto a corrente."""
-    shared.authorize_dashboard_access(request, user_id)
+    shared.authorize_account_access(request, user_id)  # saída de emergência: sem a perna do DIREITO (#380)
     current_jti = _current_session_jti(request)
     revoked_count = await asyncio.to_thread(revoke_other_sessions, user_id, current_jti)
     return {"ok": True, "revoked": revoked_count}
