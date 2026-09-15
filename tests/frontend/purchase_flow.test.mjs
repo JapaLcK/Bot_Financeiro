@@ -40,7 +40,12 @@ test("plano escolhido atravessa cadastro e segue ao checkout sem voltar aos plan
     : route.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
   await page.route("**/billing/create-checkout", async (route) => {
     checkoutBodies.push(JSON.parse(route.request().postData() || "{}"));
-    if (!authenticated) return route.fulfill({ status: 401, contentType: "application/json", body: "{}" });
+    if (!authenticated) return route.fulfill({
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+      contentType: "application/json",
+      body: "{}",
+    });
     await new Promise((resolve) => setTimeout(resolve, 500));
     return route.fulfill({
       contentType: "application/json",
@@ -220,6 +225,153 @@ test("falha ao abrir checkout tem recuperação sem revelar a vitrine de planos"
   await page.click("#purchase-continuation-retry");
   await page.waitForFunction(() => document.querySelector("#purchase-continuation-actions")?.classList.contains("show"));
   assert.equal(checkoutCalls, 2);
+  await page.close();
+});
+
+test("sessão expirada leva ao login e mantém a compra pendente", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/login?*", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/login.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({ status: 500, body: "{}" }));
+  await page.route("**/billing/create-checkout", (route) => route.fulfill({
+    status: 401,
+    headers: { "WWW-Authenticate": "Bearer" },
+    contentType: "application/json",
+    body: "{}",
+  }));
+  await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(await page.textContent("#purchase-continuation-retry"), "Entrar novamente");
+  assert.deepEqual(await page.evaluate(() => {
+    const intent = window.PBPurchaseIntent.pending();
+    return intent && { plan: intent.plan, cycle: intent.cycle, method: intent.method };
+  }), { plan: "plus", cycle: "monthly", method: "card" });
+  await page.click("#purchase-continuation-retry");
+  await page.waitForURL("**/login?next=%2Fcontinuar-compra");
+  assert.match(await page.textContent(".purchase-intent"), /Plus · Mensal · Cartão/);
+  await page.close();
+});
+
+test("sessão expirada no Pix leva ao login e mantém plano, ciclo e meio", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "annual",
+      method: "pix",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/login?*", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/login.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      essencial_available: true,
+      plus_available: true,
+      pro_available: true,
+      pix_annual_available: true,
+    }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ active: false }),
+  }));
+  await page.route("**/billing/pix/checkout", (route) => route.fulfill({
+    status: 401,
+    headers: { "WWW-Authenticate": "Bearer" },
+    contentType: "application/json",
+    body: "{}",
+  }));
+  await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.fill(".pix-doc", "12345678901");
+  await page.click(".pix-form button[type=submit]");
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(await page.textContent("#purchase-continuation-retry"), "Entrar novamente");
+  assert.deepEqual(await page.evaluate(() => {
+    const intent = window.PBPurchaseIntent.pending();
+    return intent && { plan: intent.plan, cycle: intent.cycle, method: intent.method };
+  }), { plan: "plus", cycle: "annual", method: "pix" });
+  await page.click("#purchase-continuation-retry");
+  await page.waitForURL("**/login?next=%2Fcontinuar-compra");
+  assert.match(await page.textContent(".purchase-intent"), /Plus · Anual · Pix/);
+  await page.close();
+});
+
+test("resposta tardia da assinatura não dispara uma segunda retomada", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let checkoutCalls = 0;
+  let liberarAssinatura;
+  const assinaturaPendente = new Promise((resolve) => { liberarAssinatura = resolve; });
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", async (route) => {
+    await assinaturaPendente;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ active: false }) });
+  });
+  await page.route("**/billing/create-checkout", (route) => {
+    checkoutCalls += 1;
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Pagamento indisponível por alguns instantes." }),
+    });
+  });
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(checkoutCalls, 1);
+  liberarAssinatura();
+  await page.waitForTimeout(300);
+  assert.equal(checkoutCalls, 1, "a consulta tardia repetiu o checkout automaticamente");
   await page.close();
 });
 

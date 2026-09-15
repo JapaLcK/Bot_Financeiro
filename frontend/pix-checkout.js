@@ -1,4 +1,4 @@
-/* global purchaseResumePending: writable, purchaseContinuationError, purchaseContinuationPage */
+/* global preservePurchaseForAuth, purchaseResumePending: writable, purchaseContinuationError, purchaseContinuationPage */
 /**
  * Pix anual na /precos — o CTA nos cards, a etiqueta do toggle e o checkout.
  *
@@ -278,12 +278,12 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // criada lá expira sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      preservePurchaseForAuth(plano, "annual", "pix");
       if (typeof purchaseContinuationPage !== "undefined" && purchaseContinuationPage) {
         ctx.fechar();
         purchaseContinuationError(
           "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
-          true,
+          "login",
         );
         return;
       }

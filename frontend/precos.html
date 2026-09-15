@@ -849,6 +849,7 @@ function updateCmpFade() {
 let subState = null;
 let cancelChangePending = false;
 let purchaseResumePending = false;
+let purchaseResumeScheduled = false;
 window.pbPlanAuthState = "unknown";
 const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
 const PLAN_PRICES = {
@@ -893,12 +894,22 @@ async function loadSubscription() {
   }
 }
 
+/** Recria a intenção se o refresh expirado tiver limpado a sessionStorage. */
+function preservePurchaseForAuth(plan, cycle, method) {
+  if (!window.PBPurchaseIntent) return;
+  if (!window.PBPurchaseIntent.read()) {
+    window.PBPurchaseIntent.begin(plan, cycle, method);
+  }
+  window.PBPurchaseIntent.markAwaitingAuth();
+}
+
 /** Retoma uma escolha feita antes do cadastro sem pedir o plano outra vez. */
-function purchaseContinuationError(message, retryable) {
+function purchaseContinuationError(message, recoveryAction) {
   if (!purchaseContinuationPage) {
     showToast(message, "err");
     return;
   }
+  const action = recoveryAction === true ? "retry" : recoveryAction;
   const title = document.getElementById("purchase-continuation-title");
   const copy = document.getElementById("purchase-continuation-copy");
   const mark = document.querySelector(".purchase-continuation-mark i");
@@ -909,8 +920,16 @@ function purchaseContinuationError(message, retryable) {
   if (mark) mark.className = "ph ph-warning-circle";
   if (actions) actions.classList.add("show");
   if (retry) {
-    retry.hidden = retryable === false;
+    retry.hidden = !action;
+    retry.textContent = action === "login" ? "Entrar novamente" : "Tentar novamente";
     retry.onclick = () => {
+      if (action === "login") {
+        const next = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.continueUrl()
+          : "/continuar-compra";
+        window.location.href = "/login?next=" + encodeURIComponent(next);
+        return;
+      }
       purchaseResumePending = false;
       if (title) title.textContent = "Preparando seu pagamento";
       if (copy) copy.textContent = "Estamos tentando abrir o checkout novamente.";
@@ -964,6 +983,8 @@ function resumePurchaseAfterAuth() {
 }
 
 function schedulePurchaseResume() {
+  if (purchaseResumeScheduled) return;
+  purchaseResumeScheduled = true;
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", resumePurchaseAfterAuth, { once: true });
   } else {
@@ -1288,13 +1309,13 @@ async function startCheckout(interval, btn, plan, resuming) {
     });
 
     if (resp.status === 401) {
-      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      preservePurchaseForAuth(plan, interval, "card");
       if (resuming && purchaseContinuationPage) {
         restaurar();
         purchaseResumePending = false;
         purchaseContinuationError(
           "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
-          true,
+          "login",
         );
         return;
       }
