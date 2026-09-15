@@ -821,117 +821,34 @@ def save_open_finance_investments(connection_id: int, investments: list[dict]) -
 # ── Banqueiro (agente cofre): caixinha OF ↔ meta do PigBank ───────────────────
 
 # ── Regra de caixinha — FONTE ÚNICA (sync de auto-import + tela de vínculo) ───
-# Em Python e não em SQL de propósito: esta regra decide se um papel do banco
-# vira caixinha read-only (sai da renda fixa, o app para de deixar sacar), e
-# regra de dinheiro precisa ser medível contra o catálogo de bancos inteiro sem
-# subir um Postgres — ver `tests/test_of_caixinha_regra_emissor.py`.
-#
 # AUTOMÁTICO (`_e_caixinha`, usado por `sync_open_finance_caixinhas`):
 #   a) o nome tem cara de caixinha (o que já funcionava antes desta regra); OU
-#   b) é CDB de renda fixa EMITIDO PELO PRÓPRIO BANCO CONECTADO — é assim que a
-#      caixinha do Nubank chega hoje: `name` e `issuer` trazem o nome jurídico do
-#      papel ("CDB - NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E
-#      INVESTIMENTO"), idêntico em todas as posições e sem nada de "caixinha".
+#   b) é CDB de um par banco × emissor POSITIVAMENTE conhecido como caixinha
+#      (`_CAIXINHA_CDB`). A Pluggy não manda campo que separe caixinha de CDB
+#      comum ("Some banks such as NuBank and PicPay have investment options
+#      called 'Cofrinhos' and 'Caixinhas', which configure as CDBs" — doc da
+#      Pluggy, lida em 2026-09-10), então CDB de qualquer outro banco — inclusive
+#      o CDB comum que o Inter/C6/BTG emite para o próprio cliente — NÃO é
+#      caixinha automática: segue em `list_of_fixed_income`.
 #
 # MANUAL (`list_caixinha_candidates`, a tela do Banqueiro) é mais frouxo DE
 # PROPÓSITO: lá qualquer CDB entra na lista, porque quem decide é o usuário.
 # Automático errado mexe em dinheiro sozinho; a tela, não — e ela é a saída de
-# todo emissor que o automático não reconhece.
+# todo CDB que o automático não reconhece.
 _CAIXINHA_NAME_PATTERNS = ["%caixinha%", "%cofrinho%", "%reserva%", "%objetivo%", "%cofre%"]
 
-# Palavras que sozinhas não identificam banco nenhum, descartadas só no COMEÇO
-# do nome ("Banco Inter" × "BANCO INTER S.A." têm de casar por "inter").
-# `caixa` e `mercado` NÃO entram aqui: ali são marca (Caixa Econômica, Mercado
-# Pago) e apagá-las zerava o lado do banco — com marca vazia nada casava.
-_PALAVRAS_GENERICAS = {"banco", "bco", "cartao", "conta", "cooperativo", "cooperativa",
-                       "do", "da", "de", "dos", "das"}
-
-# Forma societária do FIM da razão social ("BANCO BV S.A." → bv). Cortada só na
-# 2ª tentativa e só do lado do EMISSOR — é o que faz a razão social curta casar
-# com o conector que carrega um qualificador ("BV - Pessoa Física - APP",
-# "Banco do Brasil Previdência", "Safra Financeira").
-_FORMA_SOCIETARIA = {"s", "a", "sa", "ltda", "eireli", "me", "epp", "cia"}
-
-# Emissores que NÃO carregam o nome comercial do banco: heurística nenhuma separa
-# "NU FINANCEIRA" (que é o Nubank) de "NU INVESTIMENTOS S.A. - CORRETORA DE
-# TÍTULOS E VALORES MOBILIÁRIOS" (a corretora do MESMO grupo Nubank, ex-Easynvest,
-# que vende papel de terceiro) — as duas começam por "nu", e foi exatamente assim
-# que a versão anterior desta regra roubava um investimento de verdade. Tabela
-# curada, com a origem do par escrita ao lado: ou observado nos nossos dados, ou
-# razão social de registro público. O que NÃO entra é par por semelhança. Emissor
-# que não está aqui e não casa sozinho segue na tela de vínculo do Banqueiro, que
-# é a saída manual.
-_EMISSOR_ALIAS = {
-    # medido nas 10 posições do dono (Pluggy, conexão Nubank)
-    "nubank": ("nufinanceira", "nupagamentos"),
-    # razão social de registro público; ainda não observada nos nossos dados.
-    # Medido contra o catálogo: sem esta linha a conexão PagBank deixa de casar
-    # (1 falso negativo a mais) e nenhum falso positivo aparece com ela.
-    "pagbank": ("pagseguro",),
+# institution_name da conexão (minúsculo, exato) → prefixo de raw.issuer (maiúsculo).
+# Entra só par com fonte escrita ao lado. Nome exato de propósito: "Nubank
+# Empresas" não herda, e corretora do grupo (NU INVEST / NU INVESTIMENTOS, que
+# vende papel de terceiro) não começa pelo prefixo do emissor.
+_CAIXINHA_CDB = {
+    # doc da Pluggy (acima) + issuer medido nas 10 posições do dono, conexão "Nubank"
+    "nubank": "NU FINANCEIRA S.A.",
+    # ponytail: PicPay fica de fora — a doc cita o banco, mas nenhum dado nosso
+    # mostra o issuer do cofrinho, e o prefixo óbvio ("PICPAY") pega a PICPAY
+    # INVEST DTVM. Entra quando houver posição real medida; até lá, vínculo manual.
 }
 
-
-def _palavras(nome) -> list[str]:
-    """Nome em palavras minúsculas sem acento, sem as genéricas do começo."""
-    txt = unicodedata.normalize("NFKD", str(nome or ""))
-    txt = "".join(c for c in txt if not unicodedata.combining(c)).lower()
-    palavras = [w for w in re.split(r"[^a-z0-9]+", txt) if w]
-    while palavras and palavras[0] in _PALAVRAS_GENERICAS:
-        palavras.pop(0)
-    return palavras
-
-
-def _marca(nome) -> str:
-    """Nome de instituição/emissor reduzido a letras e dígitos, sem acento e sem
-    as palavras genéricas do começo. "BANCO BTG PACTUAL S.A." → "btgpactualsa".
-    """
-    return "".join(_palavras(nome))
-
-
-def _nucleo(nome) -> str:
-    """`_marca` sem a forma societária do fim: "BANCO BV S.A." → "bv"."""
-    palavras = _palavras(nome)
-    while palavras and palavras[-1] in _FORMA_SOCIETARIA:
-        palavras.pop()
-    return "".join(palavras)
-
-
-def _emitido_pelo_banco_conectado(issuer, institution_name) -> bool:
-    """O CDB foi emitido pelo próprio banco desta conexão?
-
-    Duas tentativas, as duas por prefixo do nome INTEIRO — nunca pelo primeiro
-    token, que é o que a versão em SQL fazia e o que roubava o CDB da Nu Invest:
-
-    1. a razão social começa com o nome do conector — "BANCO INTER S.A." →
-       "intersa" começa com "inter". Piso de 3 dos dois lados.
-    2. o nome do conector começa com o NÚCLEO da razão social (`_nucleo`, piso 2,
-       que é o tamanho de "bv" e de "c6") — é o caso em que quem carrega o
-       qualificador é o conector: "BANCO BV S.A." × "BV - Pessoa Física - APP",
-       "Banco do Brasil S.A." × "Banco do Brasil Previdência", "Banco Safra
-       S.A." × "Safra Financeira". Sem esta tentativa, 5 pares do catálogo eram
-       REGRESSÃO contra a regra SQL anterior, que os pegava: os 3 conectores do
-       BV (APP, Web, Private), o `Banco do Brasil Previdência` e o `Safra
-       Financeira`. Foi o Tester quem achou: a razão social ATUAL do BV no BACEN
-       (ISPB 01858774) é "BANCO BV S.A.", não "BANCO VOTORANTIM S.A." — com o
-       nome velho a perda não aparecia na medição.
-
-    O que ela erra, medido contra 473 razões sociais reais do BACEN × os 134
-    conectores PERSONAL_BANK do catálogo (comando e números em
-    `tests/test_of_caixinha_regra_emissor.py`): ela NÃO é livre de falso
-    positivo entre marcas diferentes — `Inter` × `INTERCAM CORRETORA DE CÂMBIO`
-    casa e não devia. Falso positivo aqui é pior que falso negativo e é por isso
-    que o piso existe: negativo tem saída (a tela de vínculo lista qualquer CDB),
-    positivo mexe no dinheiro sozinho.
-    """
-    banco = _marca(institution_name)
-    emissor = _marca(issuer)
-    if len(emissor) < 3:
-        return False
-    if len(banco) >= 3 and (emissor.startswith(banco)
-                            or emissor.startswith(_EMISSOR_ALIAS.get(banco, ()))):
-        return True
-    nucleo = _nucleo(issuer)
-    return len(nucleo) >= 2 and banco.startswith(nucleo)
 
 def _e_cdb(inv: dict) -> bool:
     """Renda fixa do tipo CDB — o universo de onde a caixinha do banco sai."""
@@ -951,13 +868,13 @@ def _e_caixinha(inv: dict) -> bool:
         return True
     if not _e_cdb(inv):
         return False
+    prefixo = _CAIXINHA_CDB.get(str(inv.get("institution_name") or "").strip().lower())
     # `raw` é jsonb: o banco (ou um provider novo) pode mandar escalar/lista ali,
     # e aí `.get` explode. No sync o `except` de pluggy_sync engole; em
-    # `list_caixinha_candidates` NÃO há guarda e o erro vira 500 na tela. A regra
-    # em SQL (`raw->>'issuer'`) era total nesse ponto — esta volta a ser.
+    # `list_caixinha_candidates` NÃO há guarda e o erro vira 500 na tela.
     raw = inv.get("raw")
     issuer = raw.get("issuer") if isinstance(raw, dict) else None
-    return _emitido_pelo_banco_conectado(issuer, inv.get("institution_name"))
+    return bool(prefixo) and " ".join(str(issuer or "").split()).upper().startswith(prefixo)
 
 
 def list_caixinha_candidates(user_id: int) -> list[dict]:
@@ -967,8 +884,8 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
     Regra MAIS FROUXA que a do auto-import de propósito: entra o que o
     automático reconhece (`_e_caixinha`) MAIS qualquer CDB. Quem decide aqui é o
     usuário, e esta tela é a única saída de quem o automático não reconhece —
-    emissor fora de `_EMISSOR_ALIAS`, banco que manda o papel com nome de
-    terceiro. Sem este ramo, o papel simplesmente some da tela.
+    CDB de banco fora de `_CAIXINHA_CDB`. Sem este ramo, o papel simplesmente
+    some da tela.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1114,7 +1031,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
     """Espelha as caixinhas do Open Finance como caixinhas do Pig. Idempotente.
 
     1. Auto-cria um pocket pra cada caixinha OF (regra `_e_caixinha`: nome de
-       caixinha OU CDB do próprio banco conectado) ainda não vinculada —
+       caixinha OU CDB de banco × emissor em `_CAIXINHA_CDB`) ainda não vinculada —
        `source='open_finance'`, read-only, juros interno OFF, SEMPRE com nome
        livre.
     2. Respeita o teto de caixinhas do plano (`pockets_restantes`, a mesma conta

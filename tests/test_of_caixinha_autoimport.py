@@ -1,9 +1,9 @@
 """Testes do auto-import de caixinhas do Open Finance (db.sync_open_finance_caixinhas).
 
-Cobre: auto-create pela regra de caixinha (nome OU CDB do próprio banco conectado),
+Cobre: auto-create pela regra de caixinha (nome OU par banco × emissor conhecido),
 o teto de caixinhas do plano, o espelho do saldo do banco, e o guard que impede o
-accrual de pocket tocar no saldo espelhado. A regra emissor × banco em si é medida
-contra o catálogo em `tests/test_of_caixinha_regra_emissor.py`.
+accrual de pocket tocar no saldo espelhado. A allowlist banco × emissor em si
+está em `tests/test_of_caixinha_regra_emissor.py`.
 """
 import pytest
 
@@ -188,8 +188,8 @@ def test_accrual_does_not_touch_of_pocket_balance(user_id):
 # ── Caixinha do Nubank: o banco manda o nome JURÍDICO do papel ────────────────
 # Dado real do dono (10 posições com saldo > 0): `name` e `issuer` IDÊNTICOS nas
 # dez, sem nada de "caixinha" no nome. Nenhum padrão de nome casava — as dez
-# eram descartadas em silêncio. A regra passou a aceitar CDB emitido pelo
-# PRÓPRIO banco conectado.
+# eram descartadas em silêncio. O par Nubank × NU FINANCEIRA entrou na
+# allowlist `_CAIXINHA_CDB`.
 NU_NAME = "CDB - NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E INVESTIMENTO"
 NU_ISSUER = "NU FINANCEIRA S.A. - SOCIEDADE DE CREDITO, FINANCIAMENTO E INVESTIMENTO"
 NU_SALDOS = [11618.82, 10002.02, 8103.65, 1108.99, 464.76, 459.20, 455.10, 482.64, 381.81, 115.83]
@@ -241,8 +241,8 @@ def test_cdb_de_outro_emissor_nao_vira_caixinha(user_id):
 def test_invariante_de_conservacao_do_total(user_id):
     """INVARIANTE, não controle do conserto: mede que o total (renda fixa +
     caixinhas) não muda com o import — nada some, nada conta duas vezes. Fica
-    VERDE com a regra do emissor desligada (aí nada vira caixinha e a soma
-    também bate), então não prova nada sobre ela. Quem prova é
+    VERDE com a allowlist desligada (aí nada vira caixinha e a soma também
+    bate), então não prova nada sobre ela. Quem prova é
     `tests/test_of_caixinha_regra_emissor.py` e `test_cdb_do_proprio_banco_*`.
     """
     from db.rv import list_of_fixed_income
