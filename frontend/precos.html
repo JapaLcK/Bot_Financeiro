@@ -9,6 +9,12 @@
 <link rel="icon" type="image/png" href="/favicon.png?v=3" />
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png?v=3" />
 <meta name="theme-color" content="#0c0c0d" />
+<script>
+  if (window.location.pathname === "/continuar-compra") {
+    document.documentElement.classList.add("purchase-continuation");
+    document.title = "Preparando pagamento · PigBank";
+  }
+</script>
 <link rel="stylesheet" href="/brand.css?v=4" />
 <link rel="stylesheet" href="/phosphor.css?v=1" />
 <link rel="stylesheet" href="/site.css?v=4" />
@@ -21,6 +27,43 @@
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { border-color: rgba(255,45,45,.5); }
   .btn.loading { opacity: .7; pointer-events: none; }
+
+  /* A continuação usa o motor de checkout desta página sem devolver a pessoa
+     à vitrine. A classe nasce no <head>, antes do primeiro paint, para os cards
+     nunca piscarem entre o cadastro e o provedor de pagamento. */
+  .purchase-continuation body > .glow,
+  .purchase-continuation body > .nav,
+  .purchase-continuation body > .wrap,
+  .purchase-continuation body > footer { display: none !important; }
+  .purchase-continuation #purchase-continuation { display: grid; }
+  #purchase-continuation {
+    display: none; position: relative; z-index: 1; min-height: 100vh;
+    place-items: center; padding: calc(28px + env(safe-area-inset-top))
+      calc(20px + env(safe-area-inset-right))
+      calc(28px + env(safe-area-inset-bottom))
+      calc(20px + env(safe-area-inset-left));
+  }
+  .purchase-continuation-card {
+    width: min(430px,100%); padding: 34px 30px; text-align: center;
+    background: var(--card); border: 1px solid var(--line-2); border-radius: 16px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.42);
+  }
+  .purchase-continuation-logo { width: 148px; height: auto; margin: 0 auto 28px; }
+  .purchase-continuation-mark {
+    display: grid; place-items: center; width: 46px; height: 46px; margin: 0 auto 18px;
+    border-radius: 50%; background: rgba(255,45,142,.12); color: var(--pink);
+  }
+  .purchase-continuation-mark i { font-size: 24px; animation: purchase-spin 900ms linear infinite; }
+  .purchase-continuation-card h1 { margin: 0 0 9px; font-size: clamp(1.35rem,5vw,1.7rem); letter-spacing: -.025em; }
+  .purchase-continuation-card > p { margin: 0; color: var(--ink-2); line-height: 1.55; }
+  .purchase-continuation-summary { margin-top: 16px !important; color: var(--ink) !important; font-weight: 700; }
+  .purchase-continuation-actions { display: none; margin-top: 22px; }
+  .purchase-continuation-actions.show { display: grid; gap: 10px; }
+  .purchase-continuation-actions .btn { width: 100%; }
+  @keyframes purchase-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .purchase-continuation-mark i { animation: none; }
+  }
 
   /* Rótulo só pra leitor de tela: as células de ✓/— da tabela são ícones, e
      sem isto o leitor anuncia uma célula vazia. */
@@ -340,6 +383,20 @@
 </head>
 <body>
 <div class="glow"></div>
+
+<main id="purchase-continuation" aria-labelledby="purchase-continuation-title">
+  <section class="purchase-continuation-card" role="status" aria-live="polite">
+    <img class="purchase-continuation-logo" src="/brand/logo.webp?v=1" alt="PigBank" />
+    <div class="purchase-continuation-mark" aria-hidden="true"><i class="ph ph-clock"></i></div>
+    <h1 id="purchase-continuation-title">Preparando seu pagamento</h1>
+    <p id="purchase-continuation-copy">Sua conta está pronta. Estamos abrindo o checkout com o plano que você escolheu.</p>
+    <p class="purchase-continuation-summary" id="purchase-continuation-summary"></p>
+    <div class="purchase-continuation-actions" id="purchase-continuation-actions">
+      <button class="btn btn-primary" id="purchase-continuation-retry" type="button">Tentar novamente</button>
+      <a class="btn btn-outline" href="/precos">Voltar aos planos</a>
+    </div>
+  </section>
+</main>
 
   <nav class="nav">
     <a class="nav-logo" href="/"><img class="logo-full" src="/brand/logo.webp?v=1" alt="PigBank" /></a>
@@ -725,6 +782,7 @@ function getCsrfToken() {
 // carrega o estado da assinatura (troca de plano). Sem flash de conteúdo.
 let currentCycle = "monthly";
 window.pbBillingCycle = currentCycle;
+const purchaseContinuationPage = window.location.pathname === "/continuar-compra";
 
 function setCycle(cycle) {
   currentCycle = cycle;
@@ -836,14 +894,52 @@ async function loadSubscription() {
 }
 
 /** Retoma uma escolha feita antes do cadastro sem pedir o plano outra vez. */
+function purchaseContinuationError(message, retryable) {
+  if (!purchaseContinuationPage) {
+    showToast(message, "err");
+    return;
+  }
+  const title = document.getElementById("purchase-continuation-title");
+  const copy = document.getElementById("purchase-continuation-copy");
+  const mark = document.querySelector(".purchase-continuation-mark i");
+  const actions = document.getElementById("purchase-continuation-actions");
+  const retry = document.getElementById("purchase-continuation-retry");
+  if (title) title.textContent = "Não conseguimos abrir o pagamento";
+  if (copy) copy.textContent = message;
+  if (mark) mark.className = "ph ph-warning-circle";
+  if (actions) actions.classList.add("show");
+  if (retry) {
+    retry.hidden = retryable === false;
+    retry.onclick = () => {
+      purchaseResumePending = false;
+      if (title) title.textContent = "Preparando seu pagamento";
+      if (copy) copy.textContent = "Estamos tentando abrir o checkout novamente.";
+      if (mark) mark.className = "ph ph-clock";
+      if (actions) actions.classList.remove("show");
+      resumePurchaseAfterAuth();
+    };
+  }
+}
+
 function resumePurchaseAfterAuth() {
-  if (purchaseResumePending || window.pbPlanAuthState !== "authenticated"
-      || !window.PBPurchaseIntent) return;
+  if (purchaseResumePending || !window.PBPurchaseIntent
+      || (!purchaseContinuationPage && window.pbPlanAuthState !== "authenticated")) return;
   const intent = window.PBPurchaseIntent.pending();
-  if (!intent) return;
+  if (!intent) {
+    purchaseContinuationError(
+      "Sua escolha não está mais disponível. Volte aos planos para começar novamente.",
+      false,
+    );
+    return;
+  }
   purchaseResumePending = true;
   if (currentCycle !== intent.cycle) setCycle(intent.cycle);
-  showToast("Tudo certo com sua conta. Continuando para o pagamento…");
+  if (purchaseContinuationPage) {
+    const summary = document.getElementById("purchase-continuation-summary");
+    if (summary) summary.textContent = window.PBPurchaseIntent.summary(intent);
+  } else {
+    showToast("Tudo certo com sua conta. Continuando para o pagamento…");
+  }
 
   // O DOMContentLoaded garante que pix-checkout.js e a ilha dos cards já foram
   // carregados. O pequeno macrotask deixa a troca de ciclo terminar antes de
@@ -857,7 +953,13 @@ function resumePurchaseAfterAuth() {
       '#plans-v2 [data-plan-btn="' + intent.plan + '"]:not([disabled])'
     );
     if (button) startCheckout(intent.cycle, button, intent.plan, true);
-    else purchaseResumePending = false;
+    else {
+      purchaseResumePending = false;
+      purchaseContinuationError(
+        "Este plano não está disponível agora. Você pode voltar e escolher outra opção.",
+        false,
+      );
+    }
   }, 0);
 }
 
@@ -868,6 +970,12 @@ function schedulePurchaseResume() {
     resumePurchaseAfterAuth();
   }
 }
+
+// Nesta rota a própria tentativa de checkout confirma a sessão. Não esperamos
+// /billing/subscription: se essa consulta estiver lenta ou fora do ar, a pessoa
+// ainda segue para o pagamento e recebe o erro específico do checkout se a
+// autenticação tiver falhado.
+if (purchaseContinuationPage) schedulePurchaseResume();
 
 function refreshPlanButtons() {
   document.querySelectorAll("[data-plan-btn]").forEach(btn => {
@@ -1181,6 +1289,15 @@ async function startCheckout(interval, btn, plan, resuming) {
 
     if (resp.status === 401) {
       if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      if (resuming && purchaseContinuationPage) {
+        restaurar();
+        purchaseResumePending = false;
+        purchaseContinuationError(
+          "Sua sessão não foi confirmada. Entre novamente para continuar com o plano salvo.",
+          true,
+        );
+        return;
+      }
       showToast("Crie sua conta ou entre para continuar com este plano.");
       setTimeout(() => {
         window.location.href = window.PBPurchaseIntent
@@ -1191,7 +1308,9 @@ async function startCheckout(interval, btn, plan, resuming) {
     }
 
     if (resp.status === 403) {
-      await fetch("/precos", { credentials: "same-origin" });
+      await fetch(purchaseContinuationPage ? "/continuar-compra" : "/precos", {
+        credentials: "same-origin",
+      });
       resp = await fetch("/billing/create-checkout", {
         method: "POST",
         credentials: "same-origin",
@@ -1209,6 +1328,11 @@ async function startCheckout(interval, btn, plan, resuming) {
         else if (data.detail && data.detail.message) { detail = data.detail.message; code = data.detail.error; }
       } catch {}
       restaurar();
+      if (resuming && purchaseContinuationPage) {
+        purchaseResumePending = false;
+        purchaseContinuationError(detail, true);
+        return;
+      }
       // Guarda anti-assinatura-dupla: já assina → abre a TROCA de plano em vez
       // de deixar o clique morrer num erro.
       if (code === "already_subscribed" && plan) {
@@ -1241,24 +1365,26 @@ async function startCheckout(interval, btn, plan, resuming) {
         irPraStripe();
       }
     } else {
-      showToast("Resposta inesperada do servidor.", "err");
       restaurar();
+      purchaseResumePending = false;
+      purchaseContinuationError("Resposta inesperada do servidor.", true);
     }
   } catch (e) {
-    showToast("Erro de conexão. Tente novamente.", "err");
     restaurar();
+    purchaseResumePending = false;
+    purchaseContinuationError("A conexão falhou. Verifique sua internet e tente novamente.", true);
   }
 }
 
 // Meta Ads: visualização da página de planos → público de remarketing
 // "olhou o preço mas não assinou".
-if (window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
+if (!purchaseContinuationPage && window.fbq) fbq("track", "ViewContent", { content_name: "precos", content_category: "plans" });
 // GA4: mesma visualização, nome recomendado. Roda na abertura da página e a cada
 // troca de ciclo (chamada no fim do `setCycle`), com o ciclo selecionado AGORA —
 // é o que permite comparar quem olha mensal com quem olha anual.
 // Nada de `pbTrack` aqui: esta página não navega depois do evento.
 function enviarViewItemList() {
-  if (!window.gtag) return;
+  if (purchaseContinuationPage || !window.gtag) return;
   gtag("event", "view_item_list", {
     item_list_id: "precos",
     item_list_name: "Planos",

@@ -904,14 +904,14 @@ def test_google_start_guarda_retorno_da_compra_em_cookie_restrito(monkeypatch):
 
     client = TestClient(dashboard.app)
     response = client.get(
-        "/auth/google/start?next=%2Fprecos%3Fcompra%3Dcontinuar",
+        "/auth/google/start?next=%2Fcontinuar-compra",
         follow_redirects=False,
     )
 
     assert response.status_code == 302
     cookies = _parse_set_cookies(response.headers.get_list("set-cookie"))
     continuation = cookies[dashboard.GOOGLE_OAUTH_NEXT_COOKIE]
-    assert continuation["value"].strip('"') == "/precos?compra=continuar"
+    assert continuation["value"].strip('"') == "/continuar-compra"
     assert continuation["path"] == "/auth/google"
     assert continuation["samesite"].lower() == "lax"
     assert "httponly" in continuation
@@ -979,4 +979,4 @@ def test_google_callback_de_conta_existente_retorna_para_compra(monkeypatch):
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == "/precos?compra=continuar"
+    assert response.headers["location"] == "/continuar-compra"

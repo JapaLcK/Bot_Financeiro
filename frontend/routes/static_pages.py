@@ -334,6 +334,18 @@ async def serve_precos():
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
+@router.get("/continuar-compra")
+async def serve_continuar_compra():
+    """Retoma no checkout a escolha feita antes da autenticação.
+
+    Reusa o motor de cobrança da página de preços, mas o próprio HTML reconhece
+    esta rota e mostra somente o estado de preparação do pagamento. Assim a
+    pessoa não volta visualmente à seleção de planos e as regras de cartão/Pix
+    continuam com uma implementação única.
+    """
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
+
+
 @router.get("/suporte")
 async def serve_suporte():
     """Suporte + FAQ. As perguntas do FAQ são os guias/dicas evergreen

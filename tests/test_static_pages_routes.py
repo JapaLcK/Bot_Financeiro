@@ -30,6 +30,7 @@ HTML_PAGES = [
     "/comandos-app",
     "/como-funciona",
     "/precos",
+    "/continuar-compra",
     "/suporte",
 ]
 
