@@ -47,6 +47,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import core.observability as observability
+import core.system_event_log as system_event_log
 from core.handlers import pending as h_pending
 from core.services.ai_chat.tools import get_tool
 
@@ -372,28 +373,85 @@ def test_rota_http_continua_persistindo_o_traceback(user_id, monkeypatch, caplog
         "sem o traceback aqui o rastro fica MENOR que o da main"
 
 
-def test_todo_connect_do_observability_tem_timeout():
-    """A CLASSE, não a instância: as duas funções de `core/observability.py`
+def _arvore_do_system_event_log() -> ast.Module:
+    """O portão aponta para `core/system_event_log.py`, NÃO para
+    `core/observability.py`: as duas funções que abrem conexão mudaram de
+    arquivo. Apontado para o arquivo velho, este teste varreria um módulo sem
+    NENHUM `psycopg.connect` e ficaria verde por vacuidade — que é pior que não
+    existir."""
+    return ast.parse(Path(system_event_log.__file__).read_text(encoding="utf-8"))
+
+
+def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
+    """A CLASSE, não a instância: as duas funções de `core/system_event_log.py`
     abrem `psycopg.connect()` de forma bloqueante, e o `_DashboardHandler` é
-    root logger — sem `connect_timeout` o caller fica preso enquanto o banco
-    não responde (medido: >30s). O timeout do libpq limita o ESTABELECIMENTO da
-    conexão, não a query (medido: `connect_timeout=2` + `pg_sleep(5)` devolveu
-    em 5,00s): consulta lenta continua sendo esperada. A única diferença
-    observável é connect que demore >2s (banco vivo, porém lento) — vira
-    `False`, o mesmo que o `except` já devolvia.
+    root logger — logo o caller pode ser o event loop. São DOIS tetos, e cada um
+    cobre o que o outro não cobre:
+
+      - `connect_timeout` (libpq) limita o ESTABELECIMENTO da conexão. Sem ele,
+        banco inalcançável prendia o caller >30s (medido).
+      - `options=-c statement_timeout=…` (servidor) limita a EXECUÇÃO e a espera
+        de LOCK. Sem ele, `system_event_logs` em `access exclusive` prendia o
+        caller pelo lock inteiro — medido: 3,00s para um lock de 3s, e o INSERT
+        ainda gravou quando o lock caiu. `connect_timeout` é cego para isso: o
+        handshake foi instantâneo.
 
     Guarda por `ast` para o connect NOVO que este módulo ganhar."""
-    arvore = ast.parse(Path(observability.__file__).read_text(encoding="utf-8"))
-    sem_timeout = [
-        no.lineno for no in ast.walk(arvore)
+    arvore = _arvore_do_system_event_log()
+    connects = [
+        no for no in ast.walk(arvore)
         if isinstance(no, ast.Call)
         and getattr(no.func, "attr", None) == "connect"
         and getattr(getattr(no.func, "value", None), "id", None) == "psycopg"
-        and "connect_timeout" not in {k.arg for k in no.keywords}
     ]
-    assert not sem_timeout, (
-        "psycopg.connect() sem connect_timeout em core/observability.py, "
-        f"linha(s) {sem_timeout} — trava o caller com banco inalcançável"
+    assert connects, (
+        "nenhum psycopg.connect() em core/system_event_log.py — o portão está "
+        "apontado para o arquivo errado e passaria por vacuidade"
+    )
+    faltando = {
+        arg: [no.lineno for no in connects if arg not in {k.arg for k in no.keywords}]
+        for arg in ("connect_timeout", "options")
+    }
+    assert not any(faltando.values()), (
+        "psycopg.connect() sem teto em core/system_event_log.py: "
+        f"{ {k: v for k, v in faltando.items() if v} } — sem `connect_timeout` "
+        "trava o caller com banco inalcançável; sem `options` "
+        "(statement_timeout) trava com a tabela travada"
+    )
+
+
+def test_system_event_log_nao_referencia_logging():
+    """`core/system_event_log.py` não pode tocar em `logging`. NENHUMA forma.
+
+    O desfecho de falha deste módulo é `print` no stderr; um `logging.*` aqui
+    reentra no `_DashboardHandler` — ele está no ROOT logger em nível WARNING, e
+    chamaria de volta `log_system_event_sync`, a função que acabou de falhar.
+    Com a tabela travada cada volta custa um TCP connect mais o teto inteiro.
+
+    A guarda de `threading.local` fecha o ciclo em tempo de execução; este
+    portão fecha a porta de entrada — um `logger.warning` bem-intencionado
+    acrescentado ali depois."""
+    arvore = _arvore_do_system_event_log()
+    achados: list[str] = []
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.Import):
+            achados += [f"linha {no.lineno}: import {a.name}"
+                        for a in no.names if a.name.split(".")[0] == "logging"]
+        elif isinstance(no, ast.ImportFrom):
+            if (no.module or "").split(".")[0] == "logging":
+                achados.append(f"linha {no.lineno}: from {no.module} import …")
+            achados += [f"linha {no.lineno}: from {no.module} import {a.name}"
+                        for a in no.names if a.name in ("get_logger", "logging")]
+        elif isinstance(no, ast.Attribute):
+            if getattr(no.value, "id", None) in ("logging", "logger", "_logger"):
+                achados.append(f"linha {no.lineno}: {no.value.id}.{no.attr}")
+        elif isinstance(no, ast.Call):
+            if getattr(no.func, "id", None) == "get_logger":
+                achados.append(f"linha {no.lineno}: get_logger(…)")
+    assert not achados, (
+        "core/system_event_log.py referencia `logging`: " + "; ".join(achados) +
+        " — o desfecho deste módulo é `print` no stderr; um `logging.*` aqui "
+        "reentra no `_DashboardHandler` e chama de volta a função que falhou"
     )
 
 

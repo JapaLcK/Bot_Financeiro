@@ -209,12 +209,17 @@ def test_dedupe_com_erro_inesperado_devolve_false(monkeypatch):
     """O mesmo para uma falha que não é de conexão: o `except Exception` do
     callee é LARGO, e é dele que a ausência de `try` no laço depende. Sem este
     caso, os dois acima provariam só o caminho de rede."""
+    import psycopg
+
     import core.observability as obs
 
     def _explode(*a, **k):
         raise ValueError("erro inesperado no driver")
 
-    monkeypatch.setattr(obs.psycopg, "connect", _explode)
+    # O `psycopg` do módulo, e não `obs.psycopg`: a implementação de
+    # `recent_event_exists` mudou para `core/system_event_log.py` (`obs` só a
+    # reexporta), e as duas resolvem `psycopg.connect` no MESMO objeto módulo.
+    monkeypatch.setattr(psycopg, "connect", _explode)
     assert obs.recent_event_exists("payment_reminder_sent", 1, 6.0) is False
 
 
