@@ -1202,27 +1202,39 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 # `get_open_finance_snapshot` ou pela ROTA. Montar `health` à mão não cobriria o
 # caminho que quebrava.
 #
-# O grupo tem DUAS metades, e cada uma tem o seu controle negativo — porque uma
-# injeção só não discrimina as duas. Os dois foram MEDIDOS, não deduzidos:
+# O grupo tem METADES INDEPENDENTES, e cada uma tem o seu controle negativo —
+# uma injeção só não discrimina todas. As QUATRO foram MEDIDAS, não deduzidas
+# (números da rodada 2, com o arquivo em 62 passed):
 #
 #   (A) desligar o DETALHE: reverter `connection_ui_state` para
-#       `_detalhe_de_acao(status)` (um argumento só). Ficam VERMELHOS os casos
-#       1, 3-GET, 3-POST e 8; ficam VERDES 4, 5, 6, 7 e o do vazamento.
+#       `_detalhe_de_acao(status)` (um argumento só) → 10 failed / 52 passed.
+#       Vermelhos: casos 1, 3-GET, 3-POST, 8, a perna de +1 min do 8b e as 5
+#       células da varredura. Verdes: 4, 5, 6, 7, a perna de +10 dias do 8b e o
+#       do vazamento.
 #       O caso 7 fica VERDE de propósito e isso NÃO é buraco: ele afirma
 #       "Reautorize o banco", que é justamente o que o código quebrado devolve.
 #       Quem o discrimina é a injeção (B).
-#   (B) desligar o PRAZO: tirar a metade
-#       `coalesce(reconnected_at, created_at) > now() - ...` do
-#       `SQL_RAW_AINDA_VALE`, deixando só o `health is null`. Fica VERMELHO o
-#       caso 7, e SÓ ele.
-#   (C) desligar o derivado em `get_connections_by_item_id` (`null as
-#       execution_status`): fica VERMELHA a 2ª asserção do caso 1 — a do TOAST —
-#       e a metade do snapshot segue verde, que é o que prova serem DOIS selects.
+#   (B) desligar o PISO do prazo: trocar
+#       `coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s)`
+#       por uma tautologia que consome o mesmo `%s` (`(%s::int is not null)` —
+#       tirar a condição inteira quebraria a ARIDADE e faria 39 testes caírem por
+#       `psycopg`, que não é medição de nada) → 1 failed. Vermelho: o caso 7, e
+#       SÓ ele.
+#   (B') desligar o TETO do prazo: tirar
+#       `coalesce(reconnected_at, created_at) <= now() + interval '5 minutes'`
+#       → 1 failed. Vermelha: a perna de +10 dias do caso 8b, e só ela. A perna
+#       de +1 min segue VERDE, que é o que prova a folga ser uma decisão medida e
+#       não um número solto.
+#   (C) desligar o derivado em `get_connections_by_item_id` (`case when %s::int
+#       is null then null end as execution_status`, pela mesma razão de aridade)
+#       → 1 failed: a 2ª asserção do caso 1 — a do TOAST, que passa por
+#       `_refresh_items_report` — e a 1ª, a do snapshot, segue verde. É o que
+#       prova serem DOIS selects.
 #
 # CONTROLE POSITIVO: casos 4, 5 e 6 — o caminho legítimo de "Reautorize o banco"
 # (e o de "Atualizando…") continua funcionando. Sem eles, o grupo passaria num
 # código que mandasse "Autorize o acesso no app do banco" para todo mundo, que é
-# pior que o bug. Eles ficam verdes nas TRÊS injeções.
+# pior que o bug. Eles ficam verdes nas QUATRO injeções.
 
 DETALHE_DISPOSITIVO = "Autorize o acesso no app do banco"
 DETALHE_REAUTORIZA = "Reautorize o banco"
@@ -1306,13 +1318,21 @@ def test_caixa_sem_health_manda_autorizar_o_dispositivo_e_nao_reautorizar(user_i
 
     # A CLASSE, não a instância (§2): "Reautorize o banco" saía por DUAS
     # superfícies, e consertar só a tela deixaria o TOAST do /refresh mandando o
-    # oposto. O toast monta o estado com `connection_ui_state(row)` sobre uma
-    # linha de `get_connections_by_item_id` (`_refresh_items_report`, em
-    # `core/services/pluggy_sync.py`) — que é exatamente o que o `_ui` lá de cima
-    # faz. Este é o SEGUNDO select, e ele também precisa do derivado.
-    assert _ui("item-tela-caixa")["detail"] == DETALHE_DISPOSITIVO, (
+    # oposto. Este é o SEGUNDO select (`get_connections_by_item_id`), e ele
+    # também precisa do derivado.
+    #
+    # Pelo CAMINHO DO TOAST, não pelo `connection_ui_state` chamado direto: a
+    # versão anterior desta asserção era `_ui(...)`, que monta o estado à mão a
+    # partir de `_linha(...)` — o padrão que o CLAUDE.md §3 nomeia como teste que
+    # não passa pelo caminho alterado. Quem monta o toast é `_refresh_items_report`,
+    # e é ele que roda aqui: os dicionários vazios são o resultado do PATCH, dos
+    # motivos e da espera, que este caso não exercita.
+    rel = ps._refresh_items_report(
+        ["item-tela-caixa"], {"item-tela-caixa": "Caixa"}, {}, {}, set())
+
+    assert [r["detail"] for r in rel] == [DETALHE_DISPOSITIVO], (
         "o toast do /refresh lê outro select: sem o derivado lá também, ele "
-        "continuaria mandando reautorizar na janela do QR")
+        f"continuaria mandando reautorizar na janela do QR — {rel}")
 
 
 # ── caso 2: o outro ramo. Não é controle negativo: é a prova de convergência ──
@@ -1438,6 +1458,47 @@ def test_dentro_do_prazo_o_aviso_continua_calado(user_id):
         "dentro da janela, 'reconecte seu banco' é o que faz PERDER o QR (#166)")
 
 
+# ── caso 8b: o OUTRO LADO do intervalo — carimbo no FUTURO ───────────────────
+#
+# O prazo dos casos 7 e 8 tinha teto nenhum, e o grupo era ESTRUTURALMENTE CEGO a
+# isso: movendo o `AGORA` do arquivo de 2026 para 2027, NENHUM teste dele virava
+# — não havia caso com carimbo no futuro.
+#
+# Por que o carimbo pode estar no futuro: as duas pontas da comparação vêm de
+# RELÓGIOS DIFERENTES. `reconnected_at` é o `datetime.now(_tz())` do PYTHON
+# (`save_pluggy_open_finance_item`); o `now()` do `SQL_RAW_AINDA_VALE` é do
+# POSTGRES. Sem teto, cada segundo de adiantamento do app estende a janela um
+# segundo, e um relógio grosseiramente errado a torna PERMANENTE — medido com
+# `now() + 10 days`: `{'state': 'needs_user_action', 'detail': 'Autorize o acesso
+# no app do banco'}` na tela e `avisadas -> set()`, os dois PARA SEMPRE, que é
+# exatamente a falha que o prazo existe para fechar.
+#
+# OS DOIS CASOS SÃO UM PAR, e a folga de 5 min do teto é o que os separa:
+#   • +1 min (app adiantado, desvio NORMAL entre app e banco) → o conserto
+#     legítimo CONTINUA valendo. É o controle POSITIVO do teto: com `<= now()`
+#     puro, um app 2 s adiantado matava o conserto no item recém-gravado;
+#   • +10 dias → fora da folga, o derivado morre e a instrução volta a
+#     "Reautorize o banco", com o aviso proativo de volta.
+
+@pytest.mark.parametrize("minutos_no_futuro,detalhe,avisado", [
+    (1, DETALHE_DISPOSITIVO, False),
+    (10 * 24 * 60, DETALHE_REAUTORIZA, True),
+])
+def test_carimbo_no_futuro_nao_reabre_o_silencio_permanente(
+    user_id, minutos_no_futuro, detalhe, avisado
+):
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    # Minuto NEGATIVO em `_envelhece_autorizacao` = `now() - (-n)` = futuro. O
+    # recuo/avanço é no BANCO pelo mesmo motivo de sempre: o prazo é avaliado
+    # contra o `now()` do Postgres.
+    _envelhece_autorizacao(conexao["id"], -minutos_no_futuro)
+
+    assert _ui_da_tela(user_id, "item-tela-caixa")["detail"] == detalhe
+    assert ("item-tela-caixa" in _avisadas(user_id)) is avisado, (
+        "sem o TETO do intervalo, um carimbo no futuro cala o aviso proativo e "
+        "prende a tela na instrução de dispositivo — para sempre")
+
+
 # ── caso 9: isolamento por user_id (CLAUDE.md §0, regra dura) ────────────────
 
 def test_o_derivado_nao_vaza_a_conexao_de_um_usuario_para_outro(user_id):
@@ -1525,3 +1586,53 @@ def test_a_resposta_HTTP_nao_ganhou_chave_nova_nem_vazou_o_raw(user_id, monkeypa
     corpo = json.dumps(body)
     assert "clientUserId" not in corpo, "o `raw` carrega o id do cliente na Pluggy"
     assert "statusDetail" not in corpo, "e o detalhe por produto, que a tela não usa"
+
+
+# ── AS CÉLULAS QUE MUDARAM, medidas em DUAS COLUNAS ─────────────────────────
+#
+# Varredura combinatória pelo caminho de produção, base × branch: 12 `status` × 7
+# `executionStatus` × {com health, sem health} = 168 células. 162 IDÊNTICAS — a
+# ordem da máquina de estados não mudou, agora MEDIDO e não lido. As 6 que
+# mudaram são as de baixo, todas com `health` NULL, todas de "Reautorize o banco"
+# para "Autorize o acesso no app do banco".
+#
+# Este teste prende as 5 que NENHUM outro caso deste grupo segura (a 6ª, OUTDATED
+# + `USER_AUTHORIZATION_PENDING` em maiúscula, é o caso 1). Elas não são efeito
+# colateral: as duas DIAGONAIS (`LOGIN_ERROR`, `WAITING_USER_INPUT` ao lado do
+# `executionStatus` de dispositivo) são as que a docstring de `_detalhe_de_acao`
+# enumera como benignas, e passar a mostrar a instrução de dispositivo nelas é
+# CONVERGIR com o ramo que tem `health`, que já fazia isso. O que faltava era
+# teste: mudança medida e não presa é mudança que volta sozinha.
+#
+# A CAIXA (minúscula) é a outra metade. O derivado passa por `upper()`, então um
+# `executionStatus` em minúscula no `raw` agora casa onde antes não casava — hoje
+# INALCANÇÁVEL pelo caminho de produção (a Pluggy manda em maiúscula), e a razão
+# de ser assim está no comentário do `SQL_EXECUTION_STATUS`
+# (`db/open_finance_state.py`). Presa aqui porque foi a varredura que a achou.
+#
+# CONTROLE: as 162 células inalteradas não cabem num teste, mas os casos 4, 5 e 6
+# deste grupo são três delas (LOGIN_ERROR e OUTDATED sem `executionStatus`,
+# UPDATING com ele) e continuam exigindo o comportamento de antes.
+
+@pytest.mark.parametrize("status,execution_status", [
+    ("LOGIN_ERROR", "USER_AUTHORIZATION_PENDING"),
+    ("WAITING_USER_INPUT", "USER_AUTHORIZATION_PENDING"),
+    ("OUTDATED", "user_authorization_pending"),
+    ("LOGIN_ERROR", "user_authorization_pending"),
+    ("WAITING_USER_INPUT", "user_authorization_pending"),
+])
+def test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo(
+    user_id, status, execution_status
+):
+    db.save_pluggy_open_finance_item(user_id, {
+        "id": "item-celula", "status": status,
+        "executionStatus": execution_status,
+        "connector": {"id": 219, "name": "Caixa"}})
+
+    ui = _ui_da_tela(user_id, "item-celula")
+
+    assert ui["state"] == "needs_user_action", ui
+    assert ui["detail"] == DETALHE_DISPOSITIVO, (
+        f"célula ({status}, {execution_status}) com `health` NULL: o ramo com "
+        "health já mandava autorizar o dispositivo, e é com ele que este aqui "
+        f"converge — veio {ui['detail']!r}")

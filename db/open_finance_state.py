@@ -69,13 +69,42 @@ _TERMINAL = ("PAUSED", "DELETED")
 # predicado irmão): sem ele, um `health` observado DEPOIS e sem
 # `execution_status` cairia no `raw` VELHO — `mark_sync_result` não toca em
 # `raw`.
+#
+# O intervalo é FECHADO DOS DOIS LADOS, e o teto não é zelo: as duas pontas vêm
+# de RELÓGIOS DIFERENTES — o carimbo é `datetime.now(_tz())` do PYTHON
+# (`save_pluggy_open_finance_item`) e o `now()` aqui é do POSTGRES. Sem teto,
+# qualquer adiantamento do app estende a janela um-para-um e um relógio
+# grosseiramente errado a torna PERMANENTE. Medido com `reconnected_at = now() +
+# interval '10 days'`: a tela devolvia "Autorize o acesso no app do banco" e o
+# aviso proativo ficava calado — os dois para sempre, que é exatamente a falha
+# que o PRAZO existe para fechar.
+#
+# A folga de 5 min é o desvio NORMAL entre app e banco (segundos): com `<= now()`
+# puro, um app 2 s adiantado matava o conserto no item RECÉM-GRAVADO, que é o
+# caso que ele existe para cobrir. Ela custa 5 min a mais no pior caso legítimo
+# (65 em vez de 60) e continua descartando o relógio errado de verdade.
 SQL_RAW_AINDA_VALE = (
     "health is null "
-    "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s)"
+    "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s) "
+    "and coalesce(reconnected_at, created_at) <= now() + interval '5 minutes'"
 )
 
 # Só o ESCALAR viaja. O `raw` inteiro nunca sai do Postgres: ele carrega
 # `clientUserId` (e `statusDetail`), e o snapshot vai para o navegador.
+#
+# O `upper` É mudança de comportamento, a MESMA que o predicado irmão do aviso
+# documenta (`list_connections_needing_reconnect`, `db/open_finance.py`) — e
+# agora ela vale também para a TELA: um `executionStatus` em minúscula no `raw`
+# passa a virar a instrução de dispositivo, onde antes caía no detalhe fixo
+# "Reautorize o banco". Hoje é INALCANÇÁVEL pelo caminho de produção — a Pluggy
+# manda `USER_AUTHORIZATION_PENDING` em maiúscula, e `_DETALHE_POR_STATUS` só tem
+# chaves maiúsculas. Fica assim, e não numa comparação sensível a caixa, porque a
+# direção é a barata: se um dia entrar minúscula, a tela erra para o lado de
+# mandar ler o QR em vez de para o de fazer a pessoa PERDER a janela. Sem teste
+# próprio — não há entrada de produção que chegue lá; o que tem teste são as
+# células medidas na varredura em duas colunas
+# (`tests/test_of_connection_state.py`,
+# `test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo`).
 SQL_EXECUTION_STATUS = (
     f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
 )

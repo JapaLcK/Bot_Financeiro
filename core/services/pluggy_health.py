@@ -119,7 +119,7 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #   • PISO: a doc registrada abaixo (no bloco do `_DETALHE_POR_STATUS`) anota a
 #     autorização de dispositivo da Caixa como 30 min. Cortar antes disso tiraria
 #     a instrução CERTA de quem ainda está dentro da janela.
-#   • FOLGA: 60 = 2× a janela documentada. Cobre desvio de relógio e o fato de o
+#   • FOLGA: 60 = 2× a janela documentada. Cobre o fato de o
 #     carimbo ser a ESCRITA do item (`reconnected_at`/`created_at`), não o
 #     `userAction.expiresAt` da Pluggy — campo que NÃO existe nesta árvore
 #     (`grep userAction` acha só um comentário em `frontend/settings.html`), então
@@ -127,6 +127,12 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #   • TETO: quem reescreveria `health` é o tique de `OF_REFRESH_INTERVAL_SEC`,
 #     default 6 h (`frontend/finance_bot_websocket_custom.py`). 60 min vence muito
 #     antes: quem encerra a supressão é o PRAZO, não uma corrida com o tique.
+#   • DESVIO DE RELÓGIO: estes 60 min cobrem UM SENTIDO SÓ — o do app ATRASADO,
+#     que carimba no passado e come janela. O sentido oposto (app adiantado,
+#     carimbo no FUTURO) esta constante não cobre e não pode cobrir: ela é o piso
+#     do intervalo. Quem o cobre é o TETO do `SQL_RAW_AINDA_VALE`
+#     (`db/open_finance_state.py`), e é ele que impede o carimbo no futuro de
+#     tornar a supressão permanente.
 #   • DIREÇÃO DO ERRO: vencido o prazo, o detalhe volta a
 #     `_FIXED_DETAIL["needs_user_action"]` ("Reautorize o banco"), que é a ação
 #     correta depois que a janela fechou. Errar curto custa uma instrução
