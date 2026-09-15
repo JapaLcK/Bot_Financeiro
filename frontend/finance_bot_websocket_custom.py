@@ -4025,7 +4025,7 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
 GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
-GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/precos?compra=continuar"
+GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
 
 
 class GoogleSignupCompleteBody(_CorpoSemVeneno):

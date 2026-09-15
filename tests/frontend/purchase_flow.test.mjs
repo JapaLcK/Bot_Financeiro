@@ -16,7 +16,7 @@ after(async () => {
   server?.kill();
 });
 
-test("plano escolhido atravessa cadastro e retoma o checkout sem nova escolha", async () => {
+test("plano escolhido atravessa cadastro e segue ao checkout sem voltar aos planos", async () => {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   let authenticated = false;
   const checkoutBodies = [];
@@ -38,16 +38,33 @@ test("plano escolhido atravessa cadastro e retoma o checkout sem nova escolha", 
   await page.route("**/billing/subscription", (route) => authenticated
     ? route.fulfill({ contentType: "application/json", body: JSON.stringify({ active: false }) })
     : route.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
-  await page.route("**/billing/create-checkout", (route) => {
+  await page.route("**/billing/create-checkout", async (route) => {
     checkoutBodies.push(JSON.parse(route.request().postData() || "{}"));
-    return authenticated
-      ? route.fulfill({ contentType: "application/json", body: JSON.stringify({ checkout_url: `${ORIGIN}/checkout-ok` }) })
-      : route.fulfill({ status: 401, contentType: "application/json", body: "{}" });
+    if (!authenticated) return route.fulfill({ status: 401, contentType: "application/json", body: "{}" });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ checkout_url: `${ORIGIN}/checkout-ok` }),
+    });
   });
   await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.route("**/auth/register", (route) => route.fulfill({
+    contentType: "application/json", body: "{}",
+  }));
+  await page.route("**/auth/verify-email", (route) => {
+    authenticated = true;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ user_id: 42, dashboard_url: "/precos?escolha=1" }),
+    });
+  });
   await page.route("**/cadastro?*", (route) => route.fulfill({
     contentType: "text/html",
     body: fs.readFileSync("frontend/cadastro.html", "utf8"),
+  }));
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
   }));
   await page.route("**/checkout-ok", (route) => route.fulfill({
     contentType: "text/html", body: "<html><body>checkout</body></html>",
@@ -69,9 +86,30 @@ test("plano escolhido atravessa cadastro e retoma o checkout sem nova escolha", 
   assert.equal(pending.method, "card");
   assert.equal(pending.status, "awaiting_auth");
 
-  authenticated = true;
-  await page.goto(`${ORIGIN}/precos.html?compra=continuar`);
+  await page.fill("#reg-name", "Cliente Teste");
+  await page.fill("#reg-email", "cliente@teste.local");
+  await page.fill("#reg-phone", "11999999999");
+  await page.fill("#reg-password", "senha1234");
+  await page.fill("#reg-confirm", "senha1234");
+  await page.check("#terms");
+  await page.click("#btn-register");
+  await page.waitForSelector('#form-verify:not([style*="display:none"])');
+  await page.fill("#verify-code", "123456");
+  const navigations = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) navigations.push(new URL(frame.url()).pathname);
+  });
+  await page.click("#btn-verify");
+  await page.waitForURL("**/continuar-compra");
+  await page.waitForSelector("#purchase-continuation", { state: "visible" });
+  assert.equal(await page.isVisible("#plans-v2"), false, "a vitrine de planos reapareceu");
+  assert.match(await page.textContent("#purchase-continuation"), /Preparando seu pagamento/);
+  if (process.env.PB_CAPTURE) {
+    await page.screenshot({ path: "/tmp/pigbank-continuar-checkout-desktop.png", fullPage: true });
+  }
   await page.waitForURL("**/checkout-ok");
+  assert.ok(navigations.includes("/continuar-compra"), navigations);
+  assert.equal(navigations.includes("/precos"), false, navigations);
   assert.deepEqual(checkoutBodies, [
     { interval: "monthly", plan: "plus" },
     { interval: "monthly", plan: "plus" },
@@ -112,6 +150,10 @@ test("Pix pede autenticação antes do CPF e retoma no formulário do pagamento"
     contentType: "text/html",
     body: fs.readFileSync("frontend/cadastro.html", "utf8"),
   }));
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
 
   await page.goto(`${ORIGIN}/precos.html`);
   await page.waitForTimeout(650);
@@ -123,7 +165,7 @@ test("Pix pede autenticação antes do CPF e retoma no formulário do pagamento"
   assert.equal(pixPosts, 0);
 
   authenticated = true;
-  await page.goto(`${ORIGIN}/precos.html?compra=continuar`);
+  await page.goto(`${ORIGIN}/continuar-compra`);
   await page.waitForSelector(".pix-doc");
   if (process.env.PB_CAPTURE) {
     await page.screenshot({ path: "/tmp/pigbank-pix-retomado.png", fullPage: true });
@@ -132,6 +174,52 @@ test("Pix pede autenticação antes do CPF e retoma no formulário do pagamento"
   const resumed = await page.evaluate(() => window.PBPurchaseIntent.read());
   assert.equal(resumed.status, "checkout_started");
   assert.equal(resumed.method, "pix");
+  await page.close();
+});
+
+test("falha ao abrir checkout tem recuperação sem revelar a vitrine de planos", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  let checkoutCalls = 0;
+  await page.addInitScript(() => {
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "plus",
+      cycle: "monthly",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/subscription", (route) => route.fulfill({ status: 500, body: "{}" }));
+  await page.route("**/billing/create-checkout", (route) => {
+    checkoutCalls += 1;
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Pagamento indisponível por alguns instantes." }),
+    });
+  });
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(checkoutCalls, 1);
+  assert.equal(await page.isVisible("#plans-v2"), false);
+  assert.match(await page.textContent("#purchase-continuation"), /Pagamento indisponível/);
+  assert.equal(await page.isVisible("#purchase-continuation-retry"), true);
+  if (process.env.PB_CAPTURE) {
+    await page.screenshot({ path: "/tmp/pigbank-continuar-erro-mobile.png", fullPage: true });
+  }
+  await page.click("#purchase-continuation-retry");
+  await page.waitForFunction(() => document.querySelector("#purchase-continuation-actions")?.classList.contains("show"));
+  assert.equal(checkoutCalls, 2);
   await page.close();
 });
 
