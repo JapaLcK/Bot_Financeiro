@@ -396,13 +396,18 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
         ainda gravou quando o lock caiu. `connect_timeout` é cego para isso: o
         handshake foi instantâneo.
 
-    Guarda por `ast` para o connect NOVO que este módulo ganhar.
+    Guarda por `ast` para o connect NOVO que este módulo ganhar. Ele é o QUINTO
+    vermelho da injeção declarada em `tests/test_system_event_log_config.py` e
+    `tests/test_system_event_log_teto.py` (tirar `options=` dos dois connects):
+    4 testes de comportamento mais este portão, 5 no total.
 
     ponytail: TETO DECLARADO — o portão casa a chamada pelo nome do módulo, e
     `from psycopg import connect as _pg; _pg(url)` ESCAPA (medido: verde).
-    Fechar exigiria seguir o import; nada neste módulo usa essa forma. O que
-    NÃO escapa mais é `options=None`, que desligava o teto por completo com o
-    portão verde — daí conferir o VALOR do kwarg e não só a presença da chave.
+    Fechar exigiria seguir o import; nada neste módulo usa essa forma. Pelo
+    mesmo motivo escapa valor CALCULADO (`options=str()`, `options=f""`): só
+    constante literal é avaliável aqui. O que NÃO escapa é constante falsy —
+    `options=None`, `options=""`, `options=0` —, que desliga o teto por completo
+    com a chave presente; daí conferir o VALOR do kwarg, não só a chave.
     """
     arvore = _arvore_do_system_event_log()
     connects = [
@@ -417,10 +422,11 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
     )
 
     def _com_valor(no: ast.Call) -> set[str]:
-        """Kwargs que de fato configuram algo: `options=None` é o mesmo que não
-        passar `options`, e o libpq trata assim."""
+        """Kwargs que de fato configuram algo. A CLASSE é "constante falsy", não
+        só `None`: `options=None`, `options=""` e `options=0` desligam o teto
+        exatamente igual, com a chave presente e o portão verde."""
         return {k.arg for k in no.keywords
-                if not (isinstance(k.value, ast.Constant) and k.value.value is None)}
+                if not (isinstance(k.value, ast.Constant) and not k.value.value)}
 
     faltando = {
         arg: [no.lineno for no in connects if arg not in _com_valor(no)]

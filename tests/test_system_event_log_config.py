@@ -13,10 +13,13 @@ asserção só sobre a string do `options` nunca veria o connect ser recusado.
 
 CONTROLE NEGATIVO DO GRUPO: tire o `options=_statement_timeout_options()` dos
 DOIS `psycopg.connect` de `core/system_event_log.py`. VERMELHO AQUI, um só:
-`test_options_chega_no_connect`. A MESMA injeção derruba outros três no arquivo
-irmão (`test_insert_com_tabela_travada_desiste_dentro_do_teto`,
+`test_options_chega_no_connect`. A MESMA injeção derruba outros QUATRO fora
+deste arquivo — três em `tests/test_system_event_log_teto.py`
+(`test_insert_com_tabela_travada_desiste_dentro_do_teto`,
 `test_leitura_com_tabela_travada_desiste_dentro_do_teto` e
-`test_warning_do_psycopg_nao_reentra_no_handler`) — 4 somando os dois arquivos.
+`test_warning_do_psycopg_nao_reentra_no_handler`) e o portão estrutural
+`tests/test_log_falha_traceback.py::test_todo_connect_do_system_event_log_tem_timeout_e_teto`,
+que é a guarda do connect NOVO — 5 vermelhos somando os três arquivos.
 
 CONTROLE NEGATIVO DO TETO SUPERIOR (injeção SEPARADA, e é a que discrimina o
 conserto desta rodada): em `_statement_timeout_options`, troque
@@ -25,6 +28,14 @@ conserto desta rodada): em `_statement_timeout_options`, troque
 `[99999999999999999999]`, e só eles — os outros cinco valores do parametrize
 continuam verdes, que é o que separa "fechou o lado de cima" de "passou a
 recusar tudo".
+
+CONTROLE NEGATIVO DO VALOR DO TETO (terceira injeção, e nenhuma das duas acima a
+pega): troque `_TETO_MAX_MS = 60_000` por `_TETO_MAX_MS = 2147483647` em
+`core/system_event_log.py:51`. VERMELHO: só
+`test_valor_no_limite_superior_e_obedecido`. Esse valor o servidor ACEITA
+(`show statement_timeout` → `'2147483647ms'`), então a proteção some sem erro
+nenhum: com a tabela travada 6s a thread volta a pendurar 6,00s, contra 2,00s e
+`QueryCanceled` 57014 no código real.
 
 CONTROLE POSITIVO: `test_valor_no_limite_superior_e_obedecido`. Sem ele, o grupo
 passaria num helper que joga fora todo valor grande e devolve sempre o default —
@@ -64,12 +75,20 @@ def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
 
     O intervalo tem DOIS lados: `"2147483648"` é o primeiro valor que o Postgres
     recusa no connect ("value exceeds integer range"), e com ele obedecido o
-    módulo perdia 100% dos registros com a suíte inteira verde — é a metade (b)
-    abaixo que pega isso. `"99999999999999999999"` é o mesmo defeito com um
-    inteiro que nem cabe em 64 bits.
+    módulo perdia 100% dos registros com a suíte inteira verde.
+    `"99999999999999999999"` é o mesmo defeito com um inteiro que nem cabe em 64
+    bits.
 
     Duas metades: (a) o helper devolve o default; (b) com a tabela livre a linha
-    AINDA é gravada — um valor que o servidor recusasse derrubaria o connect."""
+    AINDA é gravada. Quem DISCRIMINA o teto superior é a metade (a) — a injeção
+    do lado de cima falha no `assert` abaixo, e a metade (b) vem depois dele e
+    nem chega a rodar (medido: apagar (b) inteira mantém os mesmos 2 vermelhos).
+    A metade (b) fica como controle POSITIVO do caminho default — ela é quem
+    provaria um valor que o servidor recusasse derrubando o connect, e é o que
+    separa "voltou ao default" de "devolveu uma string que não conecta". Pôr (b)
+    antes do `assert` a faria discriminar também, ao custo de um round-trip de
+    banco em todo caso do parametrize, sem achado novo: preferi deixar como está.
+    """
     monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", valor)
     assert _statement_timeout_options() == TETO_PADRAO_OPTIONS
 
@@ -84,9 +103,20 @@ def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
 def test_valor_no_limite_superior_e_obedecido(monkeypatch):
     """Controle POSITIVO do lado de cima: NO limite a env ainda manda. Sem ele,
     o caso acima passaria num helper que joga fora tudo que é grande — e aí a
-    env deixaria de configurar o que ela existe para configurar."""
-    monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", str(_TETO_MAX_MS))
-    assert _statement_timeout_options() == f"-c statement_timeout={_TETO_MAX_MS}ms"
+    env deixaria de configurar o que ela existe para configurar.
+
+    O limite é afirmado no LITERAL, não em `_TETO_MAX_MS`: afirmar a constante
+    contra ela mesma é verde por construção (CLAUDE.md §3) — com
+    `_TETO_MAX_MS = 2147483647` este arquivo e o irmão davam 14 passed, e esse
+    valor o Postgres ACEITA, então a faixa 60001…2147483647 desligava a proteção
+    em silêncio (6,00s pendurado no lock contra 2,00s)."""
+    assert _TETO_MAX_MS == 60_000, (
+        "o teto do teto mudou: acima de ~60s isto não protege mais a thread do "
+        "caller, e o Postgres aceita o valor sem reclamar — trocar o número aqui "
+        "e no módulo só com medida nova de quanto o caller fica pendurado"
+    )
+    monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", "60000")
+    assert _statement_timeout_options() == "-c statement_timeout=60000ms"
 
 
 def test_options_chega_no_connect(monkeypatch, user_id):

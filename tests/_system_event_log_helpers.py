@@ -82,22 +82,23 @@ def tabela_travada(segundos: float):
     pool que o resto do teste (e o cleanup) precisa. `lock_timeout` porque o
     próprio `lock table` pendura sem limite se outra transação estiver segurando
     a tabela, e o Timer que solta só é armado DEPOIS dele: sem teto aqui, a
-    suíte trava em vez de falhar."""
-    conn = psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5,
-                           options="-c lock_timeout=5000ms")
-    with conn.cursor() as cur:
-        cur.execute("lock table system_event_logs in access exclusive mode")
-    solta = threading.Timer(segundos, conn.rollback)
-    solta.start()
-    try:
-        yield
-    finally:
-        solta.cancel()
-        solta.join()
+    suíte trava em vez de falhar. `closing` porque o `lock table` pode estourar
+    esse `lock_timeout` (55P03) ANTES de haver Timer a cancelar — sem ele a
+    conexão vazava até o GC nesse caminho."""
+    with contextlib.closing(
+        psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5,
+                        options="-c lock_timeout=5000ms")
+    ) as conn:
+        with conn.cursor() as cur:
+            cur.execute("lock table system_event_logs in access exclusive mode")
+        solta = threading.Timer(segundos, conn.rollback)
+        solta.start()
         try:
-            conn.rollback()
+            yield
         finally:
-            conn.close()
+            solta.cancel()
+            solta.join()
+            conn.rollback()
 
 
 def _linhas(event_type: str) -> int:

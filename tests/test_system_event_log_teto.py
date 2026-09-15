@@ -25,9 +25,10 @@ DOIS `psycopg.connect` de `core/system_event_log.py`. VERMELHOS AQUI, os três:
 o INSERT espera o lock cair e TERMINA BEM, e aí não há `__exit__` com exceção
 para o psycopg avisar nem reentrada a ignorar. A MESMA injeção derruba
 `test_options_chega_no_connect` no arquivo irmão
-(`tests/test_system_event_log_config.py`) — são 4 vermelhos somando os dois, e
-nenhum deles aqui é o do irmão. Os três estavam verdes com o conserto, que é
-onde a injeção discrimina.
+(`tests/test_system_event_log_config.py`) e o portão estrutural
+`tests/test_log_falha_traceback.py::test_todo_connect_do_system_event_log_tem_timeout_e_teto`
+— são 5 vermelhos somando os três arquivos, e só três deles são daqui. Os três
+estavam verdes com o conserto, que é onde a injeção discrimina.
 
 CONTROLE NEGATIVO DA GUARDA (injeção SEPARADA, outro caminho de código): faça
 `_reentrou` devolver `False` sempre. VERMELHO: só
@@ -63,7 +64,10 @@ from _system_event_log_helpers import (  # noqa: F401  (fixtures autouse)
     _limpa,
     _linhas,
     sem_dashboard_handler,
-    sem_env_de_teto,
+    sem_env_de_teto,  # inerte hoje (4 testes fazem `setenv`, o 5º grava em ~4ms
+                      # e cabe em qualquer valor aceito); fica porque é ela que
+                      # torna verdadeira a premissa "default de 2000ms" do
+                      # controle positivo com qualquer env no ambiente
     tabela_travada,
     tabelas_admin,
 )
