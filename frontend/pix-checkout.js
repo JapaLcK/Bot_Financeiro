@@ -158,7 +158,24 @@ const pixFormaOk = (d) => d.length === 11 || d.length === 14;
  * O clique no CTA NÃO cobra mais: ele abre o formulário. O `POST` sai no submit
  * dele, com o documento — sem ele o Asaas recusa a cobrança.
  */
-function pixCheckout(plano) {
+function pixCheckout(plano, retomando) {
+  if (!retomando && window.PBPurchaseIntent) {
+    window.PBPurchaseIntent.begin(plano, "annual", "pix");
+  }
+  // Quando o estado de assinatura já provou que é visitante, autenticamos
+  // antes de pedir CPF/CNPJ. Assim a pessoa não digita um dado sensível para
+  // só então descobrir que precisava criar a conta.
+  if (window.pbPlanAuthState === "anonymous") {
+    if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+    showToast("Crie sua conta ou entre para continuar com este plano.");
+    setTimeout(() => {
+      window.location.href = window.PBPurchaseIntent
+        ? window.PBPurchaseIntent.authUrl()
+        : "/cadastro";
+    }, 500);
+    return;
+  }
+  if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
   // Um modal por vez, nos DOIS estados. Com o QR na tela cada checkout é uma
   // COBRANÇA NOVA no provedor; com o formulário aberto, um segundo overlay
   // deixaria o primeiro órfão no DOM com o documento digitado dentro dele.
@@ -251,10 +268,13 @@ async function pixEnviar(plano, documento, confirmarCancelamentoStripe, ctx, bot
     // criada lá expira sozinha; o que não pode é sobrar aqui.
     if (!ctx.box.isConnected) return;
     if (r.status === 401) {
-      showToast("Faça login pra continuar a assinatura.", "err");
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      showToast("Crie sua conta ou entre para continuar com este plano.");
       setTimeout(() => {
-        window.location.href = "/login?next=" + encodeURIComponent("/precos");
-      }, 900);
+        window.location.href = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.authUrl()
+          : "/cadastro";
+      }, 500);
       return;
     }
     // `detail` STRING é a metade que faltava: o FastAPI manda `{"detail": "<frase>"}`

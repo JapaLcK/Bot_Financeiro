@@ -290,6 +290,7 @@
      enquanto o dashboard_token do nav dura horas: sem isto o nav mostrava a
      conta logada e o clique em "Assinar" caía em "Faça login". -->
 <script src="/static/auth-refresh.js?v=1"></script>
+<script src="/purchase-intent.js?v=1"></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -803,6 +804,8 @@ function updateCmpFade() {
 // dos cards mudam de "Assinar" pra "Seu plano atual / Trocar / Agendado".
 let subState = null;
 let cancelChangePending = false;
+let purchaseResumePending = false;
+window.pbPlanAuthState = "unknown";
 const PLAN_NAMES = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
 const PLAN_PRICES = {
   essencial: { monthly: "R$ 9,90/mês", annual: "R$ 99/ano" },
@@ -831,10 +834,53 @@ function fmtBrDate(iso) {
 async function loadSubscription() {
   try {
     const r = await fetch("/billing/subscription", { credentials: "same-origin" });
-    if (!r.ok) { subState = null; return r.status === 401; }
+    if (!r.ok) {
+      subState = null;
+      window.pbPlanAuthState = r.status === 401 ? "anonymous" : "unknown";
+      return r.status === 401;
+    }
     subState = await r.json();   // JSON malformado lança → catch → não resolvida
+    window.pbPlanAuthState = "authenticated";
     return true;
-  } catch { subState = null; return false; }
+  } catch {
+    subState = null;
+    window.pbPlanAuthState = "unknown";
+    return false;
+  }
+}
+
+/** Retoma uma escolha feita antes do cadastro sem pedir o plano outra vez. */
+function resumePurchaseAfterAuth() {
+  if (purchaseResumePending || window.pbPlanAuthState !== "authenticated"
+      || !window.PBPurchaseIntent) return;
+  const intent = window.PBPurchaseIntent.pending();
+  if (!intent) return;
+  purchaseResumePending = true;
+  if (currentCycle !== intent.cycle) setCycle(intent.cycle);
+  showToast("Tudo certo com sua conta. Continuando para o pagamento…");
+
+  // O DOMContentLoaded garante que pix-checkout.js e a ilha dos cards já foram
+  // carregados. O pequeno macrotask deixa a troca de ciclo terminar antes de
+  // procurar o botão recém-renderizado.
+  setTimeout(() => {
+    if (intent.method === "pix" && typeof pixCheckout === "function") {
+      pixCheckout(intent.plan, true);
+      return;
+    }
+    const button = document.querySelector(
+      '#plans-v2 [data-plan-btn="' + intent.plan + '"]:not([disabled])'
+    );
+    if (button) startCheckout(intent.cycle, button, intent.plan, true);
+    else purchaseResumePending = false;
+  }, 0);
+}
+
+function schedulePurchaseResume() {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", resumePurchaseAfterAuth, { once: true });
+  } else {
+    resumePurchaseAfterAuth();
+  }
 }
 
 function refreshPlanButtons() {
@@ -1101,11 +1147,15 @@ async function cancelChange() {
     // `subState = null` do 401 do deslogado. Chamar de resolvido revelava a
     // etiqueta ao vitalício indefinidamente sempre que a consulta falhasse.
     publicarPix(subState, resolvida);
+    schedulePurchaseResume();
   } catch {}
 })();
 
-async function startCheckout(interval, btn, plan) {
+async function startCheckout(interval, btn, plan, resuming) {
   if (btn.classList.contains("loading")) return;
+  if (!resuming && window.PBPurchaseIntent) {
+    window.PBPurchaseIntent.begin(plan, interval, "card");
+  }
   const originalText = btn.textContent;
   btn.classList.add("loading");
   btn.textContent = "Carregando…";
@@ -1144,8 +1194,13 @@ async function startCheckout(interval, btn, plan) {
     });
 
     if (resp.status === 401) {
-      showToast("Faça login pra continuar a assinatura.", "err");
-      setTimeout(() => { window.location.href = "/login?next=" + encodeURIComponent("/precos"); }, 900);
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markAwaitingAuth();
+      showToast("Crie sua conta ou entre para continuar com este plano.");
+      setTimeout(() => {
+        window.location.href = window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.authUrl()
+          : "/cadastro";
+      }, 500);
       return;
     }
 
@@ -1180,6 +1235,7 @@ async function startCheckout(interval, btn, plan) {
 
     const data = await resp.json();
     if (data && data.checkout_url) {
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.markCheckoutStarted();
       // Meta Ads: usuário iniciou o checkout (antes de ir pra Stripe).
       if (window.fbq) fbq("track", "InitiateCheckout", { content_category: plan || "", content_name: interval || "" });
       // GA4: mesmo momento, nome recomendado (alimenta o funil de compra).

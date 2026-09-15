@@ -18,6 +18,7 @@
 </style>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
+  <script src="/purchase-intent.js?v=1" defer></script>
 </head>
 <body>
 <div class="glow"></div>
@@ -152,11 +153,16 @@
       // `pbTrack` porque o goDash troca de página logo em seguida (ver o comentário
       // no snippet, frontend/routes/shared.py): sem esperar, o cadastro some do
       // funil de quem tem conexão lenta.
-      var irPraDash=function(){goDash(d.dashboard_url)};
+      var irPraDash=function(){
+        var destino=window.PBPurchaseIntent
+          ? window.PBPurchaseIntent.afterAuth(d.dashboard_url)
+          : d.dashboard_url;
+        goDash(destino);
+      };
       if(window.pbTrack&&d.user_id){pbTrack('sign_up',{method:'email'},irPraDash);}
       else{irPraDash();}
     }catch(e){err('verify-error','Erro de conexão. Tente novamente.')}
-    finally{b.disabled=false;b.textContent='Confirmar'}
+    finally{b.disabled=false;b.textContent=window.PBPurchaseIntent&&window.PBPurchaseIntent.pending()?'Confirmar e continuar':'Confirmar'}
   }
 
   function backToRegister(ev){ev.preventDefault();document.getElementById('form-verify').style.display='none';document.getElementById('form-register').style.display='';clrErr()}

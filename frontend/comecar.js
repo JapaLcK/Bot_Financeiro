@@ -252,7 +252,10 @@
     // função: `pbTrack` espera o envio antes do replace (ver o snippet em
     // frontend/routes/shared.py). O `await` acima dá alguma folga, mas não é
     // garantia — gtag.js ainda carregando perde o evento do mesmo jeito.
-    const irPraHome = function () { window.location.replace("/home"); };
+    const irPraHome = function () {
+      if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
+      window.location.replace("/home");
+    };
     if (window.pbTrack && state.userId) {
       window.pbTrack("onboarding_complete", { step: state.step }, irPraHome);
     } else {
@@ -264,6 +267,7 @@
     // Pular é uma decisão do usuário: marca concluído pra o wizard não voltar
     // a aparecer no próximo login.
     await persist({ step: state.step, completed: true });
+    if (window.PBPurchaseIntent) window.PBPurchaseIntent.clearCompleted();
     window.location.replace("/home");
   }
 
