@@ -5,14 +5,14 @@ import vm from "node:vm";
 
 const source = fs.readFileSync("frontend/purchase-intent.js", "utf8");
 
-function loadIntent(now = 1_800_000_000_000) {
+function loadIntent(now = 1_800_000_000_000, documentOverride = null) {
   const values = new Map();
   const sessionStorage = {
     getItem: (key) => values.has(key) ? values.get(key) : null,
     setItem: (key, value) => values.set(key, String(value)),
     removeItem: (key) => values.delete(key),
   };
-  const document = {
+  const document = documentOverride || {
     readyState: "loading",
     addEventListener() {},
     querySelector() { return null; },
@@ -49,6 +49,34 @@ test("preserva plano, ciclo e meio durante a autenticação", () => {
 test("cadastro direto continua usando o destino normal", () => {
   const { api } = loadIntent();
   assert.equal(api.afterAuth("/precos?escolha=1"), "/precos?escolha=1");
+});
+
+test("login Google recebe o retorno para a compra pendente", () => {
+  const googleLink = { href: "/auth/google/start" };
+  const authCard = {};
+  const document = {
+    readyState: "loading",
+    addEventListener() {},
+    querySelector(selector) {
+      return selector === ".auth-card" ? authCard : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === '.auth-card .auth-sub') return [];
+      if (selector === 'a[href="/auth/google/start"]') return [googleLink];
+      return [];
+    },
+    getElementById() { return null; },
+  };
+  const { api } = loadIntent(1_800_000_000_000, document);
+  api.begin("plus", "monthly", "card");
+  api.markAwaitingAuth();
+
+  api.mountAuth();
+
+  assert.equal(
+    googleLink.href,
+    "/auth/google/start?next=%2Fprecos%3Fcompra%3Dcontinuar",
+  );
 });
 
 test("só uma compra iniciada vira confirmação do onboarding", () => {

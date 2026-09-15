@@ -143,6 +143,9 @@
     document.querySelectorAll('a[href="/cadastro"]').forEach(function (link) {
       link.href = authUrl();
     });
+    document.querySelectorAll('a[href="/auth/google/start"]').forEach(function (link) {
+      link.href = "/auth/google/start?next=" + encodeURIComponent(continueUrl());
+    });
   }
 
   function mountOnboarding() {
