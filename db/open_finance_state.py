@@ -1088,10 +1088,19 @@ def pluggy_items_lock(item_ids: list[str]):
             # DEPOIS do `release()`, e DENTRO deste `finally` (não depois dele):
             # aqui o WARNING sai mesmo quando o `close()` levanta — e `close()`
             # que levanta é a mesma infra morrendo que este log existe para
-            # contar. Ordem: `close()` → `release()` → log. `logger.warning` não
-            # levanta (o `logging` desfecha handler quebrado em
-            # `Handler.handleError`, que imprime no stderr em vez de propagar), e
-            # mesmo que levantasse a vaga JÁ voltou — é o que esta ordem garante.
+            # contar. Ordem: `close()` → `release()` → log.
+            # `logger.warning` PODE levantar — a versão anterior deste comentário
+            # dizia que o `logging` segurava, e estava errada: `Handler.handle`
+            # chama `self.emit(record)` SEM try/except, e o `handleError` só roda
+            # dentro do `emit` de quem se dá ao trabalho de chamá-lo (o
+            # `_DashboardHandler.emit` de `core/observability.py` não tem
+            # try/except próprio). Quem segura de verdade é o `except Exception`
+            # amplo de `log_system_event_sync` (`core/system_event_log.py`), que é
+            # o que aquele `emit` chama. Se ele sumir, o WARNING sobe DAQUI e
+            # mascara a exceção do `close()` (ela vira `__context__`) — e mesmo
+            # nesse caso a vaga JÁ VOLTOU, porque o `release()` vem antes
+            # (medido: 8 vagas livres → 8). É o que esta ordem garante, e é o que
+            # `tests/test_of_items_lock_ordem.py` prende.
             if nao_rotineiro is not None:
                 logger.warning(
                     "pluggy_items_lock: lock falhou por causa NÃO rotineira, "

@@ -7,6 +7,10 @@ acontece quando algo MORRE: para onde vai o `got`, se a vaga volta, e se o
 operador fica sabendo. Por isso quase todo teste daqui mede `_vagas()` além do
 `got` — o porquê está em `test_close_que_estoura_no_finally_nao_vaza_a_vaga`.
 
+TERCEIRO do trio: `tests/test_of_items_lock_ordem.py`, com o que SE a vaga volta
+não alcança — QUANDO ela volta, relativamente ao WARNING. Nenhum teste daqui vê a
+ordem (o `caplog` registra conteúdo, não instante), e foi essa a cegueira.
+
 A ASSIMETRIA DOS DOIS `except` é o que este arquivo prende: o de FORA (`connect`)
 loga TUDO, o de DENTRO só o NÃO ROTINEIRO. A razão de cada lado está no comentário
 do próprio `except`, em `db/open_finance_state.py` — aqui não se repete (§0.7).
