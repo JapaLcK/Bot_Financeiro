@@ -73,6 +73,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "execute a compra de 3 ativos",
             "compra um fundo para mim",
             "Piggy, compra petr4 para mim",
+            "Piggy, você compra PETR4 para mim agora?",
             "compre petr4 para mim",
             "qual PETR4 devo comprar?",
             "Piggy, compre Ethereum para mim",
@@ -140,6 +141,14 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "meu BTC é bom?",
             "meu btc é bom?",
             "Ethereum da minha carteira é bom?",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(_policy(text)["refused"])
+
+    def test_investimento_ja_feito_e_consulta_de_carteira(self) -> None:
+        for text in (
+            "qual é o melhor investimento que eu fiz?",
+            "qual foi o melhor fundo que eu comprei?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])

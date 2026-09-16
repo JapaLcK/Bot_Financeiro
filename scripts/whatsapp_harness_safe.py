@@ -29,6 +29,8 @@ def main() -> int:
     parser.add_argument("--send-error-once", action="store_true")
     parser.add_argument("--attachment", action="store_true")
     parser.add_argument("--core-error", action="store_true")
+    parser.add_argument("--core-unsafe-env", action="store_true")
+    parser.add_argument("--user-lookup-error", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -69,6 +71,7 @@ def main() -> int:
                     result = run_core_case(
                         args.text,
                         force_internal_error=args.core_error,
+                        force_safety_violation=args.core_unsafe_env,
                     )
                 elif args.layer == "policy":
                     result = run_policy_case(args.text)
@@ -83,6 +86,7 @@ def main() -> int:
                             if args.send_error
                             else "error-once" if args.send_error_once else "reply"
                         ),
+                        user_lookup_error=args.user_lookup_error,
                     )
                 result["cwd_is_temporary"] = Path.cwd() != REPO
                 result["environment_sanitized"] = not any(
@@ -95,12 +99,12 @@ def main() -> int:
                     )
                 )
                 print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+                if result["blocked"]:
+                    return 70
                 if args.layer == "core":
                     return 0 if result["answered"] else 2
                 if args.layer == "policy":
                     return 0
-                if result["blocked"]:
-                    return 70
                 return 0 if result["delivered"] else 2
     except SafetyViolation as exc:
         print(json.dumps({"error": "SAFETY_VIOLATION", "detail": str(exc)}))

@@ -29,7 +29,9 @@ def _is_internal_failure_response(response: str) -> bool:
     )
 
 
-def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str, Any]:
+def run_core_case(
+    text: str, *, force_internal_error: bool = False, force_safety_violation: bool = False,
+) -> dict[str, Any]:
     """Executa o núcleo real com bordas externas e leituras persistentes locais."""
     guards = SafetyGuards(allowed_write_root=Path.cwd())
     guards.install()
@@ -37,6 +39,15 @@ def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str,
         from core.handle_incoming import handle_incoming
         from core.intent_classifier import classify
         from core.types import IncomingMessage
+
+        billing_side_effect: Any = (
+            RuntimeError("falha interna simulada") if force_internal_error else None
+        )
+        if force_safety_violation:
+            def unsafe_billing(*_args: Any, **_kwargs: Any) -> None:
+                Path(".env").read_text(encoding="utf-8")
+
+            billing_side_effect = unsafe_billing
 
         with (
             patch("core.handle_incoming._paywall_gate", return_value=None),
@@ -50,11 +61,7 @@ def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str,
             patch(
                 "core.services.billing_commands.handle_billing_command",
                 return_value=None,
-                side_effect=(
-                    RuntimeError("falha interna simulada")
-                    if force_internal_error
-                    else None
-                ),
+                side_effect=billing_side_effect,
             ),
             patch(
                 "core.services.ai_chat_commands.handle_ai_chat_command",
@@ -94,7 +101,8 @@ def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str,
             and call.args[0].startswith("handle_incoming FAILED")
             for call in error_log.call_args_list
         )
-        answered = bool(response.strip()) and not internal_error
+        blocked = list(guards.events)
+        answered = bool(response.strip()) and not internal_error and not blocked
         return {
             "intent": intent.intent,
             "confidence": intent.confidence,
@@ -102,11 +110,12 @@ def run_core_case(text: str, *, force_internal_error: bool = False) -> dict[str,
             "answered": answered,
             "internal_error": internal_error,
             "outcome": (
-                "internal_error"
-                if internal_error
+                "safety_violation"
+                if blocked
+                else "internal_error" if internal_error
                 else "answered" if answered else "no_answer"
             ),
-            "blocked": guards.events,
+            "blocked": blocked,
         }
     finally:
         guards.close()

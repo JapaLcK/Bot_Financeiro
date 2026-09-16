@@ -4,6 +4,8 @@ import io
 import os
 import socket
 import tempfile
+import _thread
+import threading
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,27 @@ from harness_support.safe_runtime import SafetyGuards, SafetyViolation
 
 
 class GuardOperationsTests(unittest.TestCase):
+    def test_threads_de_baixo_nivel_nao_iniciam(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            guards = SafetyGuards(allowed_write_root=Path(root))
+            guards.install()
+            try:
+                starts = [
+                    getattr(module, name)
+                    for module, name in (
+                        (_thread, "start_new_thread"),
+                        (_thread, "start_joinable_thread"),
+                        (threading, "_start_joinable_thread"),
+                    )
+                    if hasattr(module, name)
+                ]
+                for start in starts:
+                    with self.assertRaises(SafetyViolation):
+                        start(lambda: None, ())
+                self.assertEqual(len(guards.events), len(starts))
+                self.assertTrue(all(event.startswith("thread:") for event in guards.events))
+            finally:
+                guards.close()
     def test_os_system_nao_inicia_processos(self) -> None:
         original_system = os.system
         calls: list[str] = []

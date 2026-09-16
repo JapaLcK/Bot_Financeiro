@@ -43,6 +43,7 @@ def install_runtime_boundaries(
     handler_behavior: str = "reply",
     event_log_error: bool = False,
     send_behavior: str = "reply",
+    user_lookup_error: bool = False,
 ) -> None:
     """Substitui somente I/O; o parser e o fluxo do adaptador continuam reais."""
     send_attempts = 0
@@ -123,6 +124,11 @@ def install_runtime_boundaries(
         def __exit__(self, *_args: Any) -> bool:
             return False
 
+    def canonical_user(*_args: Any, **_kwargs: Any) -> int:
+        if user_lookup_error:
+            raise RuntimeError("falha sintética antes do núcleo")
+        return 7
+
     modules.install(
         "db",
         attempt_whatsapp_phone_link=lambda _wa_id, current_user_id=None: {
@@ -132,7 +138,7 @@ def install_runtime_boundaries(
         claim_pending_action=lambda *_a, **_k: False,
         consume_pending_action=lambda *_a, **_k: False,
         get_conn=lambda: deny_boundary("database:get_conn"),
-        get_or_create_canonical_user=lambda _provider, _external_id: 7,
+        get_or_create_canonical_user=canonical_user,
         get_pending_action=lambda _uid: None,
         restore_pending_on_error=lambda *_a, **_k: RestorePending(),
         set_pending_action=lambda *_a, **_k: None,
@@ -167,6 +173,7 @@ def run_adapter_case(
     handler_behavior: str = "reply",
     event_log_error: bool = False,
     send_behavior: str = "reply",
+    user_lookup_error: bool = False,
 ) -> dict[str, Any]:
     replies: list[dict[str, str]] = []
     guards = SafetyGuards(allowed_write_root=Path.cwd())
@@ -180,6 +187,7 @@ def run_adapter_case(
             handler_behavior=handler_behavior,
             event_log_error=event_log_error,
             send_behavior=send_behavior,
+            user_lookup_error=user_lookup_error,
         )
         modules.remember("adapters.whatsapp.wa_runtime")
         from adapters.whatsapp.wa_runtime import process_payload

@@ -12,6 +12,29 @@ SCRIPT = REPO / "scripts" / "whatsapp_harness_safe.py"
 
 
 class DeliveryFailureTests(unittest.TestCase):
+    def test_violacao_no_nucleo_reprova_execucao(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--layer", "core", "--core-unsafe-env", "--text", "saldo"],
+            cwd=REPO,
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO)},
+            text=True, capture_output=True, timeout=15, check=False,
+        )
+        self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["outcome"], "safety_violation")
+        self.assertTrue(any(event.startswith("env:") for event in payload["blocked"]))
+
+    def test_falha_antes_do_nucleo_pede_nova_tentativa(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--user-lookup-error"],
+            cwd=REPO,
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO)},
+            text=True, capture_output=True, timeout=15, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertIn("Tente novamente", payload["replies"][0]["body"])
+        self.assertNotIn("pode ter sido concluída", payload["replies"][0]["body"])
     def test_download_sintetico_bloqueado_tambem_reprova_execucao(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--attachment"],

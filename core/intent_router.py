@@ -282,6 +282,11 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             r"(e|esta|foi)\s+(bom|boa)\b",
             norm,
         )
+        or re.search(
+            r"\b(investimento|acao|ativo|fundo|fii|etf)\s+que\s+(?:eu\s+)?"
+            r"(fiz|comprei|adquiri|apliquei)\b",
+            norm,
+        )
     )
     prospective_quality = bool(
         re.search(
@@ -316,7 +321,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     purchase_command = bool(
         re.search(
             r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
-            r"(?:me\s+)?compra\b(?!\s+d(?:e|a|o|as|os)\b)",
+            r"(?:(?:voce|vc)\s+)?(?:me\s+)?compra\b(?!\s+d(?:e|a|o|as|os)\b)",
             norm,
         )
     )

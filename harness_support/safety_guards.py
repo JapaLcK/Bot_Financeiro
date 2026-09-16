@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import _thread
 import io
 import os
 import socket
@@ -118,6 +119,18 @@ class SafetyGuards:
             if hasattr(os, name):
                 self._replace(os, name, deny_process)
         self._replace(threading.Thread, "start", deny_thread)
+
+        def deny_low_level_thread(*_args: Any, **_kwargs: Any) -> None:
+            self._deny("thread", "low-level")
+
+        for owner, name in (
+            (_thread, "start_new_thread"),
+            (_thread, "start_joinable_thread"),
+            (threading, "_start_new_thread"),
+            (threading, "_start_joinable_thread"),
+        ):
+            if hasattr(owner, name):
+                self._replace(owner, name, deny_low_level_thread)
 
         def guard_path_mutation(name: str, *, destination: bool = False) -> None:
             original = getattr(Path, name)
