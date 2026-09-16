@@ -59,6 +59,17 @@ def _insert_pocket_lot(
 
 
 def _ensure_pocket_lots(cur, user_id: int, pocket: dict) -> None:
+    # Vinculada ao Open Finance: `balance` é ESPELHO do banco (escrito pelo sync), não
+    # dinheiro que saiu da carteira. Virar lote transforma o espelho em saldo PRÓPRIO, e
+    # o próprio é sacável: medido pelo `PATCH /pockets/{u}/{p}/meta` de um rename (o
+    # `saveGoal` manda `interest_enabled` em toda edição), lote de 1000 → desvincular →
+    # sacar 1000 que estão no Nubank. A guarda mora AQUI, no caminho compartilhado, e não
+    # em cada chamador — foi exatamente assim que `update_pocket_meta` ficou de fora.
+    # Índice direto, sem `.get`: chamador que não trouxer a coluna quebra alto em vez de
+    # pular a guarda em silêncio.
+    if pocket["of_investment_id"]:
+        return
+
     cur.execute(
         "select count(*) as total from pocket_lots where user_id=%s and pocket_id=%s",
         (user_id, pocket["id"]),
@@ -266,7 +277,8 @@ def update_pocket_meta(
                 cur.execute(
                     """
                     select id, balance, interest_enabled, interest_rate,
-                           interest_period, interest_tax_profile, last_interest_date
+                           interest_period, interest_tax_profile, last_interest_date,
+                           of_investment_id
                       from pockets
                      where user_id=%s and id=%s
                      for update

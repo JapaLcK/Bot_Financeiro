@@ -95,6 +95,21 @@ for (const [rotulo, viewport] of [["desktop", { width: 1280, height: 800 }],
   });
 }
 
+test("sem vínculo ativo, a caixinha volta a aceitar Depositar/Sacar", async () => {
+  // O caso que separa as DUAS réguas: `source='open_finance'` com vínculo nulo. Quem
+  // manda é o `of_investment_id` — o backend recusa por ele (db/pockets.py:367), não
+  // por `source`. O estado é alcançável em dado legado: toda desconexão anterior ao
+  // bloco de db/open_finance.py:2614 deixou essa linha pra trás (não há backfill), e
+  // nela o POST de depósito/saque passa. Decidindo por `source`, a tela esconde botões
+  // de uma caixinha que a API aceita. Sem este caso, trocar `_isOfPocket` por
+  // `p.source === "open_finance"` deixa o arquivo inteiro verde.
+  const r = await abrirHistorico({ width: 1280, height: 800 },
+                                 pocket({ source: "open_finance", of_investment_id: null }));
+  assert.equal(r.botoes, true, "sem vínculo o saldo é do Pig: os botões têm de aparecer");
+  assert.equal(r.aviso, false);
+  await r.page.context().close();
+});
+
 test("card de META da caixinha do banco mantém o selo 'via banco'", async () => {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();

@@ -950,7 +950,7 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     lotes abertos, e zerar destruiria dinheiro de verdade. `_sync_pocket_from_lots`
     (db/pockets.py) recompõe exatamente o próprio — o sync nunca cria lote (só
     escreve a coluna) e depósito/saque são recusados enquanto vinculado
-    (db/pockets.py:354), então todo lote aberto aqui é aporte do usuário. Sem lote
+    (db/pockets.py:367), então todo lote aberto aqui é aporte do usuário. Sem lote
     nenhum dá 0, que é o caso do espelho puro.
 
     Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
@@ -975,7 +975,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
 
     Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo —
     recusa com OF_POCKET_READONLY, o mesmo código que o guard de depósito/saque
-    usa (db/pockets.py:354). Ela é espelho: o dinheiro está no banco e qualquer
+    usa (db/pockets.py:367). Ela é espelho: o dinheiro está no banco e qualquer
     posição reconhecida é reimportada no sync seguinte, então "não vincular" só
     produziria um pocket órfão com saldo mentiroso + uma cópia nova no sync."""
     with get_conn() as conn:
