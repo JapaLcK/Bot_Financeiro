@@ -655,6 +655,64 @@ test("sessão expirada ao confirmar troca preserva a compra e oferece novo login
   await page.close();
 });
 
+test("sessão expirada ao carregar assinatura após 409 preserva a compra", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  let subscriptionCalls = 0;
+  await page.addInitScript(() => {
+    if (location.pathname !== "/continuar-compra") return;
+    sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
+      version: 1,
+      plan: "pro",
+      cycle: "annual",
+      method: "card",
+      status: "awaiting_auth",
+      createdAt: Date.now(),
+    }));
+  });
+  await page.route("**/continuar-compra", (route) => route.fulfill({
+    contentType: "text/html",
+    body: fs.readFileSync("frontend/precos.html", "utf8"),
+  }));
+  await page.route("**/billing/plans-config", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true }),
+  }));
+  await page.route("**/billing/create-checkout", (route) => route.fulfill({
+    status: 409,
+    contentType: "application/json",
+    body: JSON.stringify({
+      detail: { error: "already_subscribed", message: "Você já possui uma assinatura ativa." },
+    }),
+  }));
+  await page.route("**/billing/subscription", (route) => {
+    subscriptionCalls += 1;
+    return route.fulfill({
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+      contentType: "application/json",
+      body: "{}",
+    });
+  });
+  await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.route("**/login?*", (route) => route.fulfill({
+    contentType: "text/html",
+    body: "<html><body>login</body></html>",
+  }));
+
+  await page.goto(`${ORIGIN}/continuar-compra`);
+  await page.waitForSelector("#purchase-continuation-actions.show");
+  assert.equal(subscriptionCalls, 1);
+  assert.equal(await page.$("#chg-overlay"), null, "não deve abrir troca sem assinatura carregada");
+  assert.equal(await page.textContent("#purchase-continuation-retry"), "Entrar novamente");
+  const restored = await page.evaluate(() => window.PBPurchaseIntent.pending());
+  assert.equal(restored?.plan, "pro");
+  assert.equal(restored?.cycle, "annual");
+  await page.click("#purchase-continuation-retry");
+  await page.waitForURL("**/login?*");
+  assert.equal(new URL(page.url()).searchParams.get("next"), "/continuar-compra");
+  await page.close();
+});
+
 test("continuação não consulta assinatura nem perde a intenção em sessão expirada", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let subscriptionCalls = 0;

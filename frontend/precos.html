@@ -1426,6 +1426,16 @@ async function startCheckout(interval, btn, plan, resuming) {
       // de deixar o clique morrer num erro.
       if (code === "already_subscribed" && plan) {
         if (!subState || !subState.active) await loadSubscription();
+        if (window.pbPlanAuthState === "anonymous"
+            && resuming && purchaseContinuationPage) {
+          preservePurchaseForAuth(plan, interval, "card");
+          purchaseResumePending = false;
+          purchaseContinuationError(
+            "Sua sessão expirou antes de confirmar sua assinatura. Entre novamente para continuar.",
+            "login",
+          );
+          return;
+        }
         if (subState && subState.active) {
           purchaseResumePending = false;
           if (subState.plan === plan
