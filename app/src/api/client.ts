@@ -155,14 +155,30 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
       }
 
       const novas = credenciaisSchema.parse(await resposta.json());
+      // Daqui em diante o token de origem está COMPROVADAMENTE consumido: o
+      // servidor respondeu 200 e rotacionou. Isso separa este caso do caso
+      // ambíguo lá do `catch` — e a diferença muda o que é seguro fazer.
+      //
+      // Se a gravação falhar (keychain recusando), deixar o token velho no
+      // cofre garantiria o replay na renovação seguinte, e o servidor trata
+      // replay como roubo: revoga tudo do usuário, em todos os aparelhos.
+      // Apagar troca isso por um login a mais neste aparelho. Entre perder a
+      // sessão aqui e perder em todos, a escolha não é difícil.
+      //
       // Compara-e-troca. A conta pode ter trocado com a requisição no ar, e
       // conferir numa chamada para gravar na seguinte deixa exatamente a janela
       // em que a outra conta cabe — o resultado seria a sessão antiga
       // restaurada por cima da nova.
-      const trocou = await trocarSe(refreshDeOrigem, {
-        access: novas.access_token,
-        refresh: novas.refresh_token,
-      });
+      let trocou: boolean;
+      try {
+        trocou = await trocarSe(refreshDeOrigem, {
+          access: novas.access_token,
+          refresh: novas.refresh_token,
+        });
+      } catch {
+        await limparSe(refreshDeOrigem).catch(() => undefined);
+        return { ok: false, motivo: "terminal" };
+      }
       if (!trocou) return { ok: false, motivo: "sessao-trocou" };
       ultimaRotacao = {
         consumido: refreshDeOrigem,

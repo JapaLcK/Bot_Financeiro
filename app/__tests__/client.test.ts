@@ -22,10 +22,16 @@ function resposta(status: number, corpo: unknown): Response {
 
 const fetchFalso = jest.fn();
 
+/** Faz a próxima escrita no cofre falhar, como um keychain recusando. */
+const falharEscrita = (
+  global as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+).__falharEscritaNoCofre;
+
 beforeEach(async () => {
   fetchFalso.mockReset();
   global.fetch = fetchFalso as unknown as typeof fetch;
   _resetRenovacao();
+  falharEscrita(false);
   await limparCredenciais();
 });
 
@@ -195,6 +201,32 @@ describe("renovação em 401", () => {
       access: "b1",
       refresh: "rt_B",
     });
+  });
+
+  it("gravação que falha DEPOIS da rotação apaga o token já consumido", async () => {
+    // Aqui o servidor respondeu 200 e rotacionou: o token velho está
+    // COMPROVADAMENTE gasto. Deixá-lo no cofre garantiria o replay na renovação
+    // seguinte, e o servidor trata replay como roubo — revoga tudo do usuário,
+    // em todos os aparelhos. Apagar troca isso por um login a mais AQUI.
+    //
+    // É o que separa este caso do ambíguo (resposta perdida), onde não se sabe
+    // se houve rotação e preservar é o certo.
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
+      .mockResolvedValueOnce(
+        resposta(200, {
+          access_token: "novo",
+          refresh_token: "rt_novo",
+          dashboard_token: "d",
+          expires_in: 900,
+        }),
+      );
+    falharEscrita(true);
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    falharEscrita(false);
+    await expect(lerCredenciais()).resolves.toBeNull();
   });
 
   it("refresh recusado vira SessaoExpirada e apaga a credencial", async () => {
