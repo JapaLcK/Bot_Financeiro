@@ -44,6 +44,7 @@ const IDS = [
   "pay-bill-amount", "overview-heading", "launches-title", "launches-wrap",
   "charts-title", "charts-grid", "alert-banner", "last-update",
   "categories-distribution", "history-title", "boleto-sim-result",
+  "history-stats",
 ];
 
 /**
@@ -652,24 +653,342 @@ test("previsão de saldo: horizonte em R$ 0,00 não é anunciado como 'no positi
 
 test("nenhum VALOR de dinheiro no dashboard.js tem cor fixa (literal ou por classe)", () => {
   // Estática, e de propósito: o defeito é do CONSTRUTO (verde/vermelho colado num
-  // valor), e teste de comportamento só pegaria a tela que ele renderizasse. Foi
-  // assim que o banner "Sobra R$ 0,00" em verde fixo escapou de uma rodada, e as
-  // classes `.tx-amt red`/`.stat-delta down` escaparam da seguinte — a primeira
-  // versão desta varredura só olhava cor LITERAL e passava vazia.
+  // valor), e teste de comportamento só pegaria a tela que ele renderizasse.
+  //
+  // NADA aqui é lista digitada à mão, porque foi sempre a lista digitada à mão
+  // que mentiu: primeiro faltava a classe (`ov-val pos|neg` viveu na Início com
+  // este teste verde), depois faltava o formatador (`fmtBillValue`/`fmtShort`/
+  // `fmtPnl` não casavam `\bfmt\(`, e `.bill-tx .tx-val` escapava por isso).
+  // Os dois conjuntos saem do código.
+
+  // ── 1. As classes que PINTAM, lidas do dashboard.css ──────────────────────
+  const css = readFileSync(DASHBOARD_CSS, "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const hexes = [...css.matchAll(/--(?:green|red):\s*(#[0-9a-fA-F]{3,8})/g)].map((m) => m[1]);
+  // Se um tema redefinir --green com rgb()/hsl(), a lista de hexes encolhe e a
+  // varredura passa a ignorar quem usa o hex — em SILÊNCIO. Aqui ela grita.
+  assert.equal((css.match(/--(?:green|red):/g) || []).length, hexes.length,
+    "há declaração de --green/--red que não é hex: a varredura ficaria cega para ela");
+  const PINTA = new RegExp(`color\\s*:\\s*(?:var\\(--(?:green|red)\\)|${hexes.join("|")})`, "i");
+  /** A classe MODIFICADORA do seletor: a última do último composto que tem duas
+      (`.pkt-hist-summary .it.dep .v` → `dep`, e não a base `v`, que é neutra e
+      cujo nome de uma letra acusaria linha inocente); sem nenhum composto
+      duplo, a última classe que aparecer (`.cl-sum .cl-in b` → `cl-in`, que a
+      versão anterior descartava inteiro por o último composto ser um `b`). */
+  const modificadora = (sel) => {
+    const comps = sel.trim().split(/\s+/);
+    let dupla = null;
+    const todas = [];
+    for (const c of comps) {
+      const n = [...c.matchAll(/\.([a-zA-Z0-9_-]+)/g)].map((m) => m[1]);
+      if (n.length >= 2) dupla = n[n.length - 1];
+      todas.push(...n);
+    }
+    return dupla || todas[todas.length - 1] || null;
+  };
+  const CLASSES = new Set();
+  for (const [, sel, corpo] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!PINTA.test(corpo)) continue;
+    for (const um of sel.split(",")) {
+      const c = modificadora(um);
+      if (c) CLASSES.add(c);
+    }
+  }
+  assert.ok(CLASSES.has("pos") && CLASSES.has("neg") && CLASSES.has("red"),
+    "o levantamento não leu o dashboard.css — a varredura mediria o vazio");
+  // Os dois cômodos que a versão anterior não enxergava, cada um com o seletor
+  // que os produz — são o controle negativo da regra `modificadora` acima.
+  assert.ok(CLASSES.has("cl-in"),
+    "`.cl-sum .cl-in b` (último composto sem classe) sumiu do levantamento");
+  assert.ok(CLASSES.has("dep") && !CLASSES.has("v"),
+    "`.pkt-hist-summary .it.dep .v` tem de entrar como `dep`, nunca como a base `v`");
+
+  // ── 2. Os formatadores de DINHEIRO, lidos do dashboard.js ─────────────────
+  // Semente: definição em COLUNA 0 cujo nome casa /^_?fmt/ E cujo corpo escreve
+  // "R$". Depois, ponto fixo: quem chama um deles também formata dinheiro
+  // (`fmtBillValue` → `fmt`, `fmtPnl` → `fmt`). `fmtDate`, `fmtPct` e os outros
+  // caem fora sozinhos, sem exceção escrita.
+  //
+  // A âncora `fmt` no NOME é limitação assumida, e é ela que segura o escopo: um
+  // `function brl(v)` ou `money(v)`, ou um formatador indentado dentro de closure,
+  // escapariam. Tirar a âncora NÃO melhora: medido em 16/09/2026 rodando a mesma
+  // derivação sem o `_?fmt`, o ponto fixo vai a 44 nomes, porque todo renderer que
+  // chama `fmt(` passa a contar como formatador. Varrer toda definição de coluna 0
+  // com "R$" no corpo não achou formatador de dinheiro fora da convenção de nome
+  // (mesma data; remedir antes de reusar o resultado).
   const js = readFileSync(DASHBOARD_JS, "utf-8").split("\n");
-  const VALOR   = /_fmtBRL\(|_fmtBRLshort\(|\bfmt\(|toFixed\(2\)/;
+  const defs = new Map();
+  js.forEach((l, i) => {
+    const m = /^(?:function|const|let)\s+(_?fmt[A-Za-z0-9_]*)\s*[=(]/.exec(l);
+    if (m) defs.set(m[1], i);
+  });
+  const corpos = new Map();
+  for (const [nome, i] of defs) {
+    let fim = i + 1;
+    while (fim < js.length && fim - i < 14 && !/^(function|const|let|\/\*|\})/.test(js[fim])) fim++;
+    corpos.set(nome, js.slice(i, fim + 1).join("\n"));
+  }
+  const DINHEIRO = new Set([...corpos].filter(([, c]) => c.includes("R$")).map(([n]) => n));
+  for (let mudou = true; mudou;) {
+    mudou = false;
+    for (const [n, c] of corpos) {
+      if (DINHEIRO.has(n)) continue;
+      if ([...DINHEIRO].some((d) => new RegExp(`\\b${d}\\(`).test(c))) { DINHEIRO.add(n); mudou = true; }
+    }
+  }
+  for (const obrigatorio of ["fmt", "_fmtBRL", "fmtPnl", "fmtBillValue", "fmtShort"]) {
+    assert.ok(DINHEIRO.has(obrigatorio), `a derivação perdeu o formatador ${obrigatorio}`);
+  }
+  assert.ok(!DINHEIRO.has("fmtDate") && !DINHEIRO.has("fmtPct"),
+    "a derivação varreu formatador que não é de dinheiro");
+  const VALOR = new RegExp(`\\b(?:${[...DINHEIRO].join("|")})\\(|toFixed\\(2\\)`);
+
+  // ── 3. Cor que NÃO é sinal do valor: exceção NOMEADA, com o porquê ────────
+  const EXCECOES = new Set([
+    // verde de ESTADO ("esta parcela está paga"), não de valor positivo.
+    "paid", "paid-amt",
+    // Cor de DOMÍNIO: a lista só tem um tipo de lançamento, então a cor diz o
+    // que a lista é, não se o número é bom. `.cat-val` é gasto por categoria;
+    // `.bill-tx .tx-val` é item de fatura (tudo despesa) e `.refund` é o estorno
+    // dentro dela; `.receipt-amount` é o valor de um comprovante de pagamento
+    // feito. É o conceito `catColors()` que o docstring do `_toneMoney` manda
+    // não confundir com cor de valor. Zero aqui não é ambíguo: a linha só
+    // existe porque houve lançamento.
+    "cat-val", "tx-val", "refund", "receipt-amount",
+    // `.cl-sum .cl-in b`: o total de ENTRADAS do detalhe da categoria. Verde
+    // fixo, mas o bloco está atrás de `resumo.receita > 0`, na linha logo acima
+    // (`sum.innerHTML = saidas + (resumo.receita > 0 ? …`), então não existe zero
+    // para pintar. Exceção pelo GUARDA, e não pela semântica — e por isso ela vem
+    // PRESA a ele na asserção abaixo: comentário não trava nada, e sem a trava o
+    // dia em que o `> 0` sair é o dia em que a exceção passa a esconder um bug.
+    // Mesmo padrão do `tests/test_phosphor_subset.py` (CLAUDE.md §0.7).
+    "cl-in",
+  ]);
+  const iClIn = js.findIndex((l) => /class="cl-in"/.test(l));
+  assert.ok(iClIn > 0 && /resumo\.receita\s*>\s*0/.test(js.slice(iClIn - 2, iClIn + 1).join("\n")),
+    'a exceção "cl-in" vale só enquanto o `resumo.receita > 0` guardar aquela ' +
+    "linha: o guarda saiu, então a exceção tem de sair junto");
+
+  // ── 4. A varredura ────────────────────────────────────────────────────────
+  // JANELA: o defeito atravessa linhas. No `fmtPnl` o literal "pnl-up" estava
+  // 2 linhas ACIMA do `fmt(`, e a linha do `fmt(` só via a variável `${cls}` —
+  // line-based, este teste passava verde com "↑ R$ 0,00" verde na tela.
+  // Por que 4, e não mais: a varredura casa NOME DE CLASSE, sem contexto de
+  // seletor nem especificidade, então alargar a janela multiplica falso positivo
+  // mais rápido que achado. Medido em 16/09/2026 variando só este número neste
+  // arquivo — 4→0 achados, 6→4, 8→8, 10→10, 15→20, 25→38 — e classificando os 38
+  // um a um: os já consertados nesta série, escadas de LIMIAR (o corte de 15% do
+  // `savingsCls`; o `_deltaLabel`, que já tem ramo de zero) e casamento por nome
+  // (o `fillClass` de `_renderBudgetRow` pinta a BARRA, não o valor). Nenhum
+  // defeito vivo entre 5 e 25. O 4 cobre a forma conhecida; REMEDIR antes de
+  // reusar o número — o comando é trocar este 4 e reclassificar os achados.
+  const JANELA = 4;
+  const semTone = (t) => t.replace(/_toneClass\([^)]*\)/g, "");
+  const achados = [];
+  js.forEach((l, i) => {
+    if (!VALOR.test(l)) return;
+    const volta = js.slice(Math.max(0, i - JANELA), i + 1).join("\n");
+    if (!/class=|classList|style\.color/.test(volta)) return;
+    const escritas = new Set();
+    for (const [, attr] of semTone(l).matchAll(/class="([^"]*)"/g)) {
+      for (const c of attr.split(/[^a-zA-Z0-9_-]+/)) escritas.add(c);
+    }
+    // Classe escrita entre aspas na vizinhança (ternário interpolado, variável
+    // `cls`, `classList.add`). O `_toneClass(...)` sai antes: ele é o conserto,
+    // e "pos"/"neg" ali são argumento dele, não marcação.
+    // Só das linhas VIZINHAS que não são marcação: numa linha com `class="…"` a
+    // aspa é do próprio atributo (`class="rv-badge"` de um irmão), e ler isso
+    // como cor deste valor acusa linha inocente. O caso que importa é o do
+    // `fmtPnl`: `const cls = up ? "pnl-up" : "pnl-down";`, sem `class=`.
+    const vizinhas = js.slice(Math.max(0, i - JANELA), i).filter((x) => !/class="/.test(x));
+    for (const [, c] of semTone(vizinhas.join("\n")).matchAll(/['"]([a-zA-Z0-9_-]+)['"]/g)) escritas.add(c);
+    for (const [, c] of semTone(l).matchAll(/['"]([a-zA-Z0-9_-]+)['"]/g)) escritas.add(c);
+    for (const c of escritas) {
+      if (CLASSES.has(c) && !EXCECOES.has(c)) {
+        achados.push(`dashboard.js:${i + 1}  [.${c}]  ${l.trim().slice(0, 90)}`);
+      }
+    }
+  });
   const LITERAL = /color:\s*(?:"|')?var\(--(?:green|red)\)/;
-  // Cor de dinheiro escrita DENTRO de ternário interpolado. Era o ponto cego
-  // declarado da rodada anterior, e o defeito estava vivo lá dentro: o `line()`
-  // de `_renderProjection` pintava "− R$ 0,00" de vermelho para quem não tem
-  // boleto nenhum. Ponto cego declarado ainda deixa o bug em produção.
   const INTERP  = /color:\s*\$\{[^}]*var\(--(?:green|red)\)/;
-  // As classes que a `dashboard.css` colore de verde/vermelho:
-  //   .tx-row .tx-amt.red|.green (429-430)   .stat-tile .stat-delta.up|.down (487-488)
-  const CLASSE  = /class="tx-amt (?:red|green)"|class="stat-delta (?:up|down)"/;
-  const achados = js
-    .map((l, i) => [i + 1, l])
-    .filter(([, l]) => VALOR.test(l) && (LITERAL.test(l) || CLASSE.test(l) || INTERP.test(l)))
-    .map(([n, l]) => `dashboard.js:${n}  ${l.trim().slice(0, 110)}`);
-  assert.deepEqual(achados, [], "cor de dinheiro tem de passar por _toneMoney/_toneClass");
+  js.forEach((l, i) => {
+    if (VALOR.test(l) && (LITERAL.test(l) || INTERP.test(l))) {
+      achados.push(`dashboard.js:${i + 1}  ${l.trim().slice(0, 110)}`);
+    }
+  });
+  assert.deepEqual([...new Set(achados)].sort(), [],
+    "cor de dinheiro tem de passar por _toneMoney/_toneClass");
+
+  // PONTOS CEGOS que sobram, nomeados: cor aplicada por `el.style.color = …` ou
+  // `classList.add(…)` a MAIS de 4 linhas do formatador, e classe montada por
+  // concatenação de pedaços. Nenhum caso VIVO hoje (esta varredura roda no
+  // arquivo inteiro e sai vazia); declarar só vale para forma não alcançada.
+});
+
+
+
+test("401 nos 4 painéis restantes: estado final COM ação", async () => {
+  // Os que tinham ficado de fora do achado 401: afiliados, agentes, previsão de
+  // saldo e simulação de prazo. Todos lançavam `Error` sem `.status` e o catch
+  // caía no texto genérico ("Não consegui calcular agora", "Erro: …") — nenhum
+  // deles diz ao usuário o que fazer quando a sessão é o problema.
+  // NEGATIVO: volte um `throw new Error(...)` (ou tire um `_sessaoExpirou`) e o
+  // painel correspondente cai.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="affiliate-stats"></div><div id="affiliate-body"></div>' +
+      '<div id="agentes-shelf"></div><div id="agentes-feed"></div>' +
+      '<div id="forecast-result"></div>' +
+      '<input id="boleto-sim-date" value="2026-12-01"><input id="boleto-sim-amount" value="">');
+    window.featureAllowed = () => true;   // 403 é paywall e tem caminho próprio
+    window.fetch = async () => ({
+      ok: false, status: 401, json: async () => ({ detail: "qualquer coisa" }),
+      text: async () => "",
+    });
+    const olha = (id) => {
+      const el = document.getElementById(id);
+      return {
+        texto: el.textContent.replace(/\s+/g, " ").trim(),
+        temBotao: !!el.querySelector("[data-relogin]"),
+        semOnclick: !el.querySelector("[onclick]"),
+      };
+    };
+    await loadAffiliateView(true);
+    const afiliados = olha("affiliate-body");
+    const statsSobrando = document.getElementById("affiliate-stats").innerHTML.trim();
+    await loadAgentesView(true);
+    const agentes = olha("agentes-shelf");
+    await loadForecast();
+    const previsao = olha("forecast-result");
+    await simularPrazo();
+    const prazo = olha("boleto-sim-result");
+    return { afiliados, agentes, previsao, prazo, statsSobrando };
+  });
+  for (const nome of ["afiliados", "agentes", "previsao", "prazo"]) {
+    assert.match(r[nome].texto, /sessão expirou/i,
+      `${nome}: 401 tem de virar estado final de sessão expirada, e não "${r[nome].texto}"`);
+    assert.equal(r[nome].temBotao, true, `${nome}: estado final sem AÇÃO não fecha o achado 401`);
+    assert.equal(r[nome].semOnclick, true, `${nome}: handler é addEventListener, não atributo inline`);
+  }
+  // Os skeletons de #affiliate-stats são irmãos do #affiliate-body: deixados
+  // pendurados, a tela mostra "sessão expirou" embaixo de 4 blocos carregando.
+  assert.equal(r.statsSobrando, "", `afiliados: skeletons pendurados — "${r.statsSobrando}"`);
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("contagem do histórico: 0 receitas / 0 despesas saem neutras", async () => {
+  // Contagem também é superfície de cor: `color: var(--green)` fixo escrevia
+  // "0 receitas" em verde (boa notícia que não houve) e "0 despesas" em vermelho.
+  // NEGATIVO: volte as duas cores fixas e o primeiro caso cai.
+  // POSITIVO: o segundo caso prova que 12/30 seguem verde/vermelho.
+  const { page, errs } = await bootPage();
+  const cores = await page.evaluate(() => {
+    const tiles = () => [...document.querySelectorAll("#history-stats .stat-tile .stat-value")]
+      .map((v) => v.style.color);
+    const medir = (s) => {
+      document.getElementById("history-stats").innerHTML =
+        '<div class="stat-tile"><div class="stat-value"></div></div>'.repeat(4);
+      renderHistoryStats(s);
+      return tiles();
+    };
+    return {
+      zerado: medir({ avg_per_month: 0, receitas_count: 0, despesas_count: 0, total_count: 0 }),
+      cheio: medir({ avg_per_month: 4, receitas_count: 12, despesas_count: 30, total_count: 42 }),
+    };
+  });
+  assert.equal(cores.zerado[1], "var(--text-2)", `"0 receitas" saiu ${cores.zerado[1]}`);
+  assert.equal(cores.zerado[2], "var(--text-2)", `"0 despesas" saiu ${cores.zerado[2]}`);
+  assert.equal(cores.cheio[1], "var(--green)", `12 receitas perderam o verde: ${cores.cheio[1]}`);
+  assert.equal(cores.cheio[2], "var(--red)", `30 despesas perderam o vermelho: ${cores.cheio[2]}`);
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("401 não apaga o painel IRMÃO que já mostra dado", async () => {
+  // O `stats.innerHTML = ""` do 401 dos afiliados era INCONDICIONAL: com cache
+  // quente, `loadAffiliateView()` (sem argumento, como em `initDashboard`) pinta
+  // os números de verdade e SÓ ENTÃO a revalidação toma 401 — a tela perdia
+  // "Indicados/Disponível/Já recebido" para ganhar uma caixa. Zerar dado bom é
+  // pior que deixar o skeleton.
+  // NEGATIVO: tire o `if (esqueleto)` e `statsDepois` volta a ficar vazio.
+  // O braço dos AGENTES não tem controle negativo, e isso é intencional: nenhuma
+  // linha viva de `loadAgentesView` consegue deixá-lo vermelho (o 401 de lá não
+  // toca no feed). Ele é SENTINELA de não-regressão — quebra no dia em que
+  // alguém "uniformizar" os dois painéis apagando o irmão dos agentes, que é
+  // exatamente o conserto errado. Não leia as duas asserções como equivalentes.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="affiliate-stats"></div><div id="affiliate-body"></div>' +
+      '<div id="agentes-shelf"></div><div id="agentes-feed"></div>');
+    const responde = (payload) => { window.fetch = async () => ({
+      ok: true, status: 200, json: async () => payload, text: async () => "",
+    }); };
+    const expira = () => { window.fetch = async () => ({
+      ok: false, status: 401, json: async () => ({}), text: async () => "",
+    }); };
+    const txt = (id) => document.getElementById(id).textContent.replace(/\s+/g, " ").trim();
+
+    responde({ referrals: [], stats: { referrals: 3 }, code: "PIG123" });
+    await loadAffiliateView(true);
+    const statsAntes = txt("affiliate-stats");
+    expira();
+    await loadAffiliateView();                     // sem argumento: cache quente
+    const statsDepois = txt("affiliate-stats");
+
+    responde({ agents: [], events: [{ title: "Disparo info", subtitle: "—" }] });
+    await loadAgentesView(true);
+    const feedAntes = txt("agentes-feed");
+    expira();
+    await loadAgentesView();
+    const feedDepois = txt("agentes-feed");
+    return {
+      statsAntes, statsDepois, feedAntes, feedDepois,
+      skeletonSobrando: !!document.getElementById("affiliate-stats").querySelector(".sk"),
+      corpo: txt("affiliate-body"), shelf: txt("agentes-shelf"),
+    };
+  });
+  assert.notEqual(r.statsAntes, "", "o teste não chegou a pintar as estatísticas");
+  assert.equal(r.skeletonSobrando, false,
+    "o que ficou no irmão é ESQUELETO, não dado — o teste mediria a coisa errada");
+  assert.equal(r.statsDepois, r.statsAntes,
+    `afiliados: o 401 apagou estatística já renderizada ("${r.statsAntes}" → "${r.statsDepois}")`);
+  assert.notEqual(r.feedAntes, "", "o teste não chegou a pintar o feed");
+  assert.equal(r.feedDepois, r.feedAntes,
+    `agentes: o 401 mexeu no feed já renderizado ("${r.feedAntes}" → "${r.feedDepois}")`);
+  // O painel principal continua assumindo o estado final nos dois.
+  assert.match(r.corpo, /sessão expirou/i);
+  assert.match(r.shelf, /sessão expirou/i);
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("fmtPnl: resultado zerado não tem cor NEM seta", async () => {
+  // `fmtPnl(0)` escrevia `<span class="pnl-up">↑ R$ 0,00</span>`: verde e seta
+  // pra cima num resultado que não subiu. E o zero é o DEFAULT — os dois
+  // chamadores passam `sum.pnl || 0`, então renda variável sem posição cai nele.
+  // A seta sai junto com a cor de propósito: "↑" afirma o mesmo que o verde.
+  // NEGATIVO: volte `const up = Number(v) >= 0` e os dois primeiros casos caem.
+  // POSITIVO: os dois últimos provam que ganho e perda reais seguem pintados.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(() => ["zero", "residuo", "ganho", "perda"].map((nome, i) => {
+    const v = [0, -2e-13, 50, -50][i];
+    const el = document.createElement("div");
+    el.innerHTML = fmtPnl(v, null);
+    const span = el.firstElementChild;
+    return { nome, classe: span.className, texto: span.textContent.trim() };
+  }));
+  const byName = Object.fromEntries(r.map((x) => [x.nome, x]));
+  for (const nome of ["zero", "residuo"]) {
+    assert.equal(byName[nome].classe, "", `${nome}: saiu com classe de cor (${byName[nome].classe})`);
+    assert.ok(!/[↑↓]/.test(byName[nome].texto), `${nome}: saiu com seta — "${byName[nome].texto}"`);
+    assert.match(byName[nome].texto, /R\$ 0,00/, `${nome}: o valor sumiu — "${byName[nome].texto}"`);
+  }
+  assert.equal(byName.ganho.classe, "pnl-up", "ganho real perdeu o verde");
+  assert.match(byName.ganho.texto, /^↑ R\$ 50,00$/, `ganho: "${byName.ganho.texto}"`);
+  assert.equal(byName.perda.classe, "pnl-down", "perda real perdeu o vermelho");
+  assert.match(byName.perda.texto, /^↓ R\$ 50,00$/, `perda: "${byName.perda.texto}"`);
+  await semErros(page, errs);
+  await page.close();
 });

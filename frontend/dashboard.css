@@ -1560,7 +1560,7 @@ body.light .rv-badge-stale { background:rgba(180,120,0,.1); color:#8a5a00; borde
 body.light .chip { background:rgba(255,255,255,0.85); }
 .chip-lbl { font-size:.66rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:600; }
 .chip-val { font-size:1.35rem;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.01em; }
-.chip-val.g { color:#22c55e; }
+.chip-val.g { color:var(--green); }   /* token, nunca hex: o hex não virava no tema claro */
 .chip-val.b {
   background:linear-gradient(135deg, #FF2D8E, #FF80B8);
   -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;

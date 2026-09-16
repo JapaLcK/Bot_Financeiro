@@ -33,49 +33,15 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { chromium } from "playwright";
+import {
+  abrirBrowser, fecharBrowser, loadDashboardJs, novaPagina,
+  IDS, DASHBOARD_JS, LABELS_JS,
+} from "./_dashboard_loader.mjs";
 
-const DASHBOARD_JS = join(
-  dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend", "dashboard.js",
-);
-// A dashboard.html carrega /launch-type-labels.js ANTES do dashboard.js (é lá
-// que `LAUNCH_TYPE_LABELS` mora). Injetar aqui é FIDELIDADE à página real, não
-// necessidade: desde a guarda `typeof` do dashboard.js:7911 o arquivo ausente
-// só degrada o rótulo — sem a injeção o arquivo inteiro passa igual, medido em
-// 10/09/2026 com `if (false)` no lugar do `if (!semMapa)`. É o caso `semMapa` do
-// fim deste arquivo que exerce a ausência de propósito.
-const LABELS_JS = DASHBOARD_JS.replace("dashboard.js", "launch-type-labels.js");
-
-/** IDs que o nível superior do dashboard.js acessa sem `?.` (grep:
-    `^document.getElementById("…").`) mais os que o `render()` toca. */
-const IDS = [
-  "grid", "bgt-overlay", "bgt-input", "investment-detail-overlay",
-  "investment-help-overlay", "edit-launch-overlay", "launch-overlay",
-  "launch-valor", "pocket-overlay", "pocket-name", "pocket-history-overlay",
-  "card-overlay", "card-name", "card-closing-day", "card-due-day",
-  "bill-detail-overlay", "pay-bill-overlay", "pay-bill-receipt-overlay",
-  "pay-bill-amount", "overview-heading", "launches-title", "launches-wrap",
-  "charts-title", "charts-grid", "alert-banner", "last-update",
-  "categories-distribution",
-];
-
-let browser;
-before(async () => { browser = await chromium.launch(); });
-after(async () => { await browser?.close(); });
-
-/** `semMapa`: não injeta o /launch-type-labels.js — simula o 404/blip dele. */
-async function loadDashboardJs({ semMapa = false } = {}) {
-  const page = await browser.newPage();
-  const errs = [];
-  page.__errs = errs;
-  page.on("pageerror", (e) => errs.push(String(e)));
-  await page.setContent(IDS.map((i) => `<div id="${i}"></div>`).join(""));
-  await page.evaluate(() => { window.fetch = () => new Promise(() => {}); });
-  if (!semMapa) await page.addScriptTag({ path: LABELS_JS });
-  await page.addScriptTag({ path: DASHBOARD_JS });
-  assert.deepEqual(errs, [], "dashboard.js não executou até o fim");
-  return page;
-}
+// O loader (IDs mínimos + injeção do dashboard.js) mora no módulo
+// compartilhado desde que um segundo teste passou a precisar dele.
+before(abrirBrowser);
+after(fecharBrowser);
 
 /** Renderiza uma pílula, injeta no documento e clica nela. */
 const clicarPilula = (page, cat) => page.evaluate((c) => {
@@ -616,7 +582,7 @@ const DASHBOARD_CSS = join(
 
 /** Como loadDashboardJs, mas com o modal de edição de lançamento DE VERDADE. */
 async function loadComEditor() {
-  const page = await browser.newPage();
+  const page = await novaPagina();
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   await page.setContent(
