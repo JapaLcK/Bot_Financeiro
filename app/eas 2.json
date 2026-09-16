@@ -8,17 +8,11 @@
     },
     "staging": {
       "distribution": "internal",
-      "env": {
-        "APP_ENV": "staging",
-        "EXPO_PUBLIC_API_URL": "https://staging.pigbankai.com"
-      }
+      "env": { "APP_ENV": "staging" }
     },
     "production": {
       "autoIncrement": true,
-      "env": {
-        "APP_ENV": "production",
-        "EXPO_PUBLIC_API_URL": "https://pigbankai.com"
-      }
+      "env": { "APP_ENV": "production" }
     }
   },
   "submit": { "production": {} }

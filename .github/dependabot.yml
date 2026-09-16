@@ -135,8 +135,16 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "expo-*"
         update-types: ["version-update:semver-major"]
+      # `react-native` está em 0.x, e em 0.x o TREM é o minor: 0.84 → 0.85 é
+      # mudança de versão do React Native, não correção. Ignorar só o major
+      # deixaria o Dependabot subir o trem sozinho, com o `expo` parado — o
+      # mesmo par misto que o bloqueio acima existe para impedir, por outra
+      # porta. E este workflow não faz build nativo, então a incompatibilidade
+      # mergearia verde.
       - dependency-name: "react-native"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   # Dependências npm da ilha React da /precos (webapp/). Terceiro lockfile do
   # repositório, e o que produz um arquivo SERVIDO na página que vende: react,

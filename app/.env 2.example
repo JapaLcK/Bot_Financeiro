@@ -1,0 +1,14 @@
+# Copie para .env.development / .env.staging / .env.production.
+# Tudo aqui é opcional: sem chave, o recurso correspondente vira no-op e o app
+# continua funcionando. Nada de segredo neste arquivo — ele é versionado.
+
+# Backend. Em simulador iOS, localhost funciona; em aparelho físico use o IP da
+# máquina na mesma rede (ex.: http://192.168.0.10:8000).
+EXPO_PUBLIC_API_URL=http://localhost:8000
+
+# Observabilidade (opcional). Sem DSN, o Sentry não inicializa.
+EXPO_PUBLIC_SENTRY_DSN=
+
+# Produto (opcional). Sem key, o analytics vira no-op e só loga em dev.
+EXPO_PUBLIC_POSTHOG_KEY=
+EXPO_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com

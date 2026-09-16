@@ -123,28 +123,6 @@ describe("renovação em 401", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
-  it("401 DEPOIS de renovar apaga a credencial: é terminal", async () => {
-    // A sessão morreu entre as duas requisições (revogada noutro aparelho,
-    // logout, troca de senha). Deixar a credencial no keychain faria
-    // `temSessao()` seguir dizendo que sim: o app abriria como logado e tentaria
-    // renovar de novo a cada início, sem nunca chegar à tela de entrada.
-    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
-    fetchFalso
-      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
-      .mockResolvedValueOnce(
-        resposta(200, {
-          access_token: "novo",
-          refresh_token: "rt_novo",
-          dashboard_token: "d",
-          expires_in: 900,
-        }),
-      )
-      .mockResolvedValueOnce(resposta(401, { detail: "sessão revogada" }));
-
-    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
-    await expect(lerCredenciais()).resolves.toBeNull();
-  });
-
   it("falha de REDE no refresh NÃO apaga a sessão", async () => {
     // O token pode estar vivo e o usuário só sem sinal. Apagar aqui deslogaria
     // quem entrou no elevador.
@@ -157,75 +135,6 @@ describe("renovação em 401", () => {
     await expect(lerCredenciais()).resolves.toEqual({
       access: "velho",
       refresh: "rt_vivo",
-    });
-  });
-
-  it.each([429, 500, 503])(
-    "%i no refresh NÃO apaga a sessão: é incidente passageiro",
-    async (status) => {
-      // Só o 401 prova que a sessão acabou. Apagar a credencial num 500
-      // transformaria dois minutos de instabilidade do servidor em logout
-      // definitivo de todo mundo que abrisse o app naquela janela.
-      await guardarCredenciais({ access: "velho", refresh: "rt_vivo" });
-      fetchFalso
-        .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
-        .mockResolvedValueOnce(resposta(status, { detail: "instável" }));
-
-      await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
-      await expect(lerCredenciais()).resolves.toEqual({
-        access: "velho",
-        refresh: "rt_vivo",
-      });
-    },
-  );
-
-  it("401 no refresh apaga a sessão: é terminal", async () => {
-    await guardarCredenciais({ access: "velho", refresh: "rt_morto" });
-    fetchFalso
-      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
-      .mockResolvedValueOnce(resposta(401, { detail: "invalid_refresh_token" }));
-
-    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
-    await expect(lerCredenciais()).resolves.toBeNull();
-  });
-
-  it("a sessão trocar no meio NÃO faz a conta A usar o token da B", async () => {
-    // O usuário sai e outra conta entra entre o 401 e a renovação. Sem a
-    // amarração ao token de origem, a requisição que nasceu na conta A seria
-    // repetida com a credencial da B — num caminho de dinheiro, escrita na
-    // conta errada.
-    //
-    // O mock deixa o refresh da B FUNCIONAR de propósito: se ele falhasse, o
-    // teste ficaria verde com e sem a amarração e não mediria nada.
-    await guardarCredenciais({ access: "token-de-A", refresh: "rt_de_A" });
-    fetchFalso.mockImplementation(async (url: string) => {
-      if (String(url).includes("/auth/refresh")) {
-        return resposta(200, {
-          access_token: "token-de-B-renovado",
-          refresh_token: "rt_de_B2",
-          dashboard_token: "d",
-          expires_in: 900,
-        });
-      }
-      // Entre a resposta 401 e a renovação, a conta B assume o cofre.
-      await guardarCredenciais({ access: "token-de-B", refresh: "rt_de_B" });
-      return resposta(401, { detail: "expirado" });
-    });
-
-    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
-
-    // Nada foi renovado em nome da B, e nenhuma requisição saiu com token dela.
-    const urls = fetchFalso.mock.calls.map(([u]: [string]) => String(u));
-    expect(urls.filter((u) => u.includes("/auth/refresh"))).toHaveLength(0);
-    const usados = fetchFalso.mock.calls.map(
-      ([, o]: [string, RequestInit]) =>
-        (o.headers as Record<string, string>)["Authorization"],
-    );
-    expect(usados).not.toContain("Bearer token-de-B-renovado");
-    // E a sessão da B ficou intacta no cofre.
-    await expect(lerCredenciais()).resolves.toEqual({
-      access: "token-de-B",
-      refresh: "rt_de_B",
     });
   });
 

@@ -3,5 +3,8 @@ node_modules/
 dist/
 *.log
 .env
+.env.development
+.env.staging
+.env.production
 ios/
 android/

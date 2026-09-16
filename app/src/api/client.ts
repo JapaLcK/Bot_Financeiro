@@ -48,26 +48,37 @@ function baseUrl(): string {
 }
 
 /**
- * Renovação DEDUPLICADA.
+ * Renovação DEDUPLICADA, e amarrada ao token que a originou.
  *
- * Sem isto, uma tela que dispara seis requisições ao abrir e toma seis 401
- * dispara seis refresh. Cinco deles apresentam um token já consumido, e o
- * backend trata token reapresentado como ROUBO: revoga tudo do usuário
- * (`core/refresh_tokens.py:129`). O sintoma seria logout aleatório ao abrir o
- * app — e a causa estaria no cliente, não no servidor.
+ * Sem a deduplicação, uma tela que dispara seis requisições ao abrir e toma
+ * seis 401 dispara seis refresh. Cinco apresentam um token já consumido, e o
+ * backend trata reapresentação como ROUBO: revoga tudo do usuário. O sintoma
+ * seria logout aleatório ao abrir o app, com a causa no cliente e não no
+ * servidor. É o mesmo raciocínio do `auth-refresh.js` do site.
  *
- * É o mesmo raciocínio do `frontend/static/auth-refresh.js` do site, que
- * deduplica pelo mesmo motivo.
+ * E a amarração ao token existe porque a deduplicação global tinha um segundo
+ * problema: se o usuário sair e outra conta entrar entre o 401 e a renovação,
+ * a promessa devolveria a credencial da conta NOVA para uma requisição que
+ * nasceu na antiga — e num caminho de dinheiro isso escreve na conta errada.
  */
-let renovacaoEmVoo: Promise<string | null> | null = null;
+let renovacaoEmVoo: { refresh: string; promessa: Promise<string | null> } | null =
+  null;
 
-async function renovar(): Promise<string | null> {
-  renovacaoEmVoo ??= (async () => {
+async function renovar(refreshDeOrigem: string): Promise<string | null> {
+  // Deduplicação POR TOKEN, não global. Uma renovação em voo só serve a quem
+  // partiu do MESMO refresh: se o usuário sair e outra conta entrar no meio, a
+  // promessa da conta A não pode entregar o token da B a uma requisição da A —
+  // e num caminho de dinheiro isso escreveria na conta errada.
+  if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
+
+  const promessa = (async () => {
     try {
       const guardadas = await lerCredenciais();
-      if (!guardadas) return null;
-      // O refresh token viaja no Authorization: no momento do refresh o access
-      // token é justamente o que expirou, então ele não serve de credencial.
+      // A sessão trocou por baixo (logout, outra conta): não renova nada, e
+      // sobretudo não devolve a credencial de outro dono para uma requisição
+      // que nasceu nesta.
+      if (!guardadas || guardadas.refresh !== refreshDeOrigem) return null;
+
       const resposta = await fetch(`${baseUrl()}/auth/refresh`, {
         method: "POST",
         headers: {
@@ -75,11 +86,18 @@ async function renovar(): Promise<string | null> {
           [HEADER_CLIENTE]: CLIENTE,
           "Content-Type": "application/json",
         },
+        credentials: "omit",
       });
-      if (!resposta.ok) {
+
+      // Só o 401 PROVA que a sessão acabou. Um 429 ou um 500 é incidente
+      // passageiro do servidor, e apagar a credencial ali transformaria dois
+      // minutos de instabilidade em logout definitivo de todo mundo.
+      if (resposta.status === 401) {
         await limparCredenciais();
         return null;
       }
+      if (!resposta.ok) return null;
+
       const novas = credenciaisSchema.parse(await resposta.json());
       await guardarCredenciais({
         access: novas.access_token,
@@ -87,15 +105,26 @@ async function renovar(): Promise<string | null> {
       });
       return novas.access_token;
     } catch {
-      // Falha de rede no refresh NÃO apaga a sessão: o token pode estar
-      // perfeitamente vivo e o usuário só estar no elevador. Quem apaga é o
-      // 401 acima, que é resposta do servidor.
+      // Falha de REDE não apaga a sessão: o token pode estar perfeitamente vivo
+      // e o usuário só estar no elevador. Quem apaga é o 401 acima, que é
+      // resposta do servidor.
+      //
+      // ponytail: fica o caso ambíguo — a resposta pode ter se perdido DEPOIS
+      // de o servidor rotacionar, e aí a renovação seguinte reapresenta um
+      // token gasto, que o servidor trata como roubo. A decisão do dono é
+      // manter assim e medir com app em produção; a mitigação certa é do lado
+      // do servidor (janela de graça na rotação), não um sinalizador no cliente
+      // que pode ficar presente e deslogar quem está bem.
       return null;
-    } finally {
-      renovacaoEmVoo = null;
     }
   })();
-  return renovacaoEmVoo;
+
+  renovacaoEmVoo = { refresh: refreshDeOrigem, promessa };
+  try {
+    return await promessa;
+  } finally {
+    if (renovacaoEmVoo?.refresh === refreshDeOrigem) renovacaoEmVoo = null;
+  }
 }
 
 type Opcoes = {
@@ -142,7 +171,10 @@ export async function chamar<T>(
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
 
   if (resposta.status === 401 && !opcoes.semAuth) {
-    const novoAccess = await renovar();
+    // Sem credencial de origem não há o que renovar — e renovar com a de outro
+    // dono é justamente o que a amarração abaixo impede.
+    if (!guardadas) throw new SessaoExpirada();
+    const novoAccess = await renovar(guardadas.refresh);
     if (!novoAccess) throw new SessaoExpirada();
     resposta = await enviar(rota, opcoes, novoAccess);
     if (resposta.status === 401) {

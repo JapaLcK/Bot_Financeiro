@@ -37,15 +37,5 @@ npx expo start          # precisa de um backend acessível (ver .env.example)
 
 ## Ambientes
 
-`APP_ENV` escolhe o id e o nome do binário, e é o que permite dev, staging e
-produção conviverem no mesmo aparelho.
-
-**Variável de ambiente só vem de arquivo em desenvolvimento.** O Expo escolhe o
-arquivo de `.env` pelo `NODE_ENV`, não pelo `APP_ENV`, então um `.env.staging`
-não seria lido e o app rotulado como staging apontaria para o backend de
-desenvolvimento sem avisar. Staging e produção declaram as variáveis no `env` do
-perfil do `eas.json` ou no ambiente do build.
-
-`EXPO_PUBLIC_API_URL` é obrigatória fora de `development`: sem ela a config
-falha na geração, antes de existir binário. Sentry e PostHog são no-op sem
-chave — o projeto roda sem nenhuma configuração externa.
+`app.config.ts` lê `.env.<ambiente>`. Ver `.env.example`. Sentry e PostHog são
+no-op sem chave — o projeto roda sem nenhuma configuração externa.

@@ -1,0 +1,40 @@
+{
+  "name": "pigbank-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PigBank Mobile 2.0 — app nativo (Expo/React Native). Projeto independente da raiz e de webapp/.",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "expo": "~57.0.23",
+    "expo-constants": "*",
+    "expo-router": "*",
+    "expo-secure-store": "*",
+    "expo-status-bar": "*",
+    "react": "*",
+    "react-dom": "*",
+    "react-native": "*",
+    "react-native-safe-area-context": "*",
+    "react-native-screens": "*",
+    "@sentry/react-native": "^8.26.0",
+    "posthog-react-native": "^4.74.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/jest": "^30.0.0",
+    "@types/react": "*",
+    "eslint": "^9.39.5",
+    "jest": "^30.0.0",
+    "jest-expo": "~57.0.0",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.46.0"
+  }
+}
