@@ -7739,11 +7739,25 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
   } catch(err) {
     if (err.name === "AbortError") return;   // superado por outro pedido: neutro
     console.error("fetchMonthHttp error:", err);
-    if (seq === monthRequestSeq && !background) {
-      stopSpin();
-      setLaunchesLoading(false);
+    if (seq === monthRequestSeq) {
+      if (!background) {
+        stopSpin();
+        setLaunchesLoading(false);
+      }
       // Sessão expirada: estado final com ação no card, em vez de deixar o
-      // render anterior (ou o vazio) com cara de tela carregada.
+      // render anterior (ou o vazio) com cara de tela carregada. Vale TAMBÉM
+      // com `background:true` — este `background` NÃO é o dos loaders de view
+      // (`:2205-2211`), que só é ligado pelo dispatcher do puxar-pra-atualizar.
+      // Aqui ele significa apenas "já pintei o cache, não mostre esqueleto": os
+      // chamadores são `changeMonth` (`Boolean(cached)`), `setTab`,
+      // `applyFilter`, `setLaunchesPage` e o próprio puxar-pra-atualizar (que
+      // chega com false). Ou seja, quem tem `background:true` aqui acabou de
+      // NAVEGAR de mês — mesma razão do `:2207`: a promessa é estado final com
+      // ação, e número velho sem aviso lê-se como saldo de agora.
+      // Consequências conhecidas e aceitas, iguais às dos 8 loaders:
+      // a caixa substitui a lista em cache no `launches-card`; e os saldos do
+      // `grid` seguem velhos sem marcador (já é assim hoje, nos dois caminhos —
+      // não é regressão deste commit).
       if (_sessaoExpirou(err, document.getElementById("launches-card"))) return false;
     }
     // O render antigo fica (certo), mas quem chamou precisa saber que nada

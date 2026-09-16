@@ -382,6 +382,46 @@ test("o puxar-pra-atualizar continua SEM estado terminal (decisão declarada)", 
   await page.close();
 });
 
+test("voltar pra um mês JÁ VISITADO com a sessão morta: estado final com ação", async () => {
+  // Terceiro achado do Codex no #435. `changeMonth` (`dashboard.js:7697`) pinta o
+  // cache e chama `requestMonthPage(1, {background: Boolean(cached)})`; o
+  // `_sessaoExpirou` do catch de `fetchMonthHttp` estava DENTRO do `!background`,
+  // então o mês já visitado ficava com lançamentos velhos e sem ação nenhuma.
+  // Este `background` NÃO é o do puxar-pra-atualizar (o caso acima prende aquele):
+  // aqui ele só diz "o cache já está pintado, não mostre esqueleto".
+  // NEGATIVO: devolva o `_sessaoExpirou` pra dentro do `if (!background)` e
+  // `comCache.caixa`/`comCache.botao` caem.
+  // POSITIVO: `semCache` prova que o caminho sem cache segue pintando, e
+  // `erro500` prova que a mudança não transformou QUALQUER falha em caixa
+  // terminal — só o 401.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="launches-card"></div><button id="refresh-btn"></button><div id="launches"></div>');
+    USER_ID = 1;
+    const card = document.getElementById("launches-card");
+    const rodar = async (status, background) => {
+      card.innerHTML = "<div id='velho'>lançamentos em cache</div>";
+      window.fetch = async () => ({ ok: false, status, json: async () => ({}), text: async () => "" });
+      await fetchMonthHttp(2026, 3, 1, 20, { background });
+      return { caixa: /sessão expirou/i.test(card.textContent),
+               botao: !!card.querySelector("[data-relogin]") };
+    };
+    return {
+      comCache: await rodar(401, true),    // mês JÁ visitado: era o buraco
+      semCache: await rodar(401, false),   // mês novo: já funcionava
+      erro500:  await rodar(500, true),
+    };
+  });
+  assert.equal(r.semCache.caixa, true, "premissa: o mês sem cache já pintava a caixa");
+  assert.equal(r.comCache.caixa, true,
+    "mês já visitado com 401 ficou com lançamentos velhos e sem ação de re-login");
+  assert.equal(r.comCache.botao, true, "estado final sem AÇÃO não fecha o achado");
+  assert.equal(r.erro500.caixa, false, "só o 401 é terminal: falha comum mantém o dado em cache");
+  await semErros(page, errs);
+  await page.close();
+});
+
 test("nenhuma revalidação nova volta a engolir o 401 em silêncio", () => {
   // Prende a CLASSE, não a instância: eram OITO loaders com o mesmo
   // `.catch(() => {})`. Quem quiser silêncio declara por escrito (`silencio-ok`)
