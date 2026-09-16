@@ -1,14 +1,21 @@
 """Guardas das otimizações de caminho crítico e imagens da landing."""
 
 import asyncio
+import json
 import re
+import shutil
+import subprocess
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
+from frontend.routes import shared
 from frontend.routes.shared import (
     FRONTEND_DIR,
     _asset_hash,
+    _deferred_tracking_bootstrap,
+    clarity_snippet,
     html_file,
     stamp_asset_versions,
 )
@@ -117,9 +124,99 @@ def test_lcp_nao_fica_em_animacao_nao_composta():
     assert "@keyframes rdGrad" not in css
 
 
+def test_mobile_nao_renderiza_secoes_abaixo_da_dobra_no_caminho_do_lcp():
+    css = (FRONTEND_DIR / "site-redesign.css").read_text(encoding="utf-8")
+    regra = re.search(
+        r"@media \(max-width: 760px\)\s*\{[^{}]*"
+        r"\.rd main > section:not\(\.hero-grid\):not\(#funcionalidades\),\s*"
+        r"\.rd > \.footer\s*\{([^}]+)\}",
+        css,
+        re.DOTALL,
+    )
+    assert regra
+    declaracoes = regra.group(1)
+    assert "content-visibility: auto" in declaracoes
+    assert "scroll-margin-top: 240px" not in css
+    estimativas = {
+        "#vsl": 600,
+        "#como-funciona": 1450,
+        "main > .tech-split": 850,
+        "#agentes": 1650,
+        "#precos": 950,
+        "#faq": 900,
+        "> .footer": 550,
+    }
+    for seletor, altura in estimativas.items():
+        assert f".rd {seletor} {{ contain-intrinsic-size: auto {altura}px; }}" in css
+
+
 def test_safe_area_critica_e_inicializada_inline_antes_da_primeira_pintura():
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
     assert 'src="/safe-area.js' not in html
     assert 'document.documentElement.classList.add("pb-safe")' in html
     assert "viewport-fit=cover" in html
     assert "html.pb-safe body" in html
+
+
+def test_clarity_da_landing_so_carrega_apos_caminho_critico(monkeypatch):
+    monkeypatch.setattr(shared, "META_PIXEL_ID", "pixel-teste")
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", "G-TESTE")
+    monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", "clarity-teste")
+    html = _landing_servida()
+
+    assert 'data-pb-tracking="deferred"' in html
+    assert '<script async src="https://www.googletagmanager.com/gtag/js?' in html
+    assert "pbAdiarTracking" in html
+    assert html.count("pbAdiarTracking") == 2
+
+    marcador = html.index('data-pb-tracking="deferred"')
+    assert html.index("www.clarity.ms/tag/") > marcador
+
+    # Page views de atribuição não entram na fila adiada: se o visitante clicar
+    # num CTA antes do timer, Meta e GA4 já estão no caminho normal de entrega.
+    assert "fbq('track', 'PageView')" in html
+    assert "window.dataLayer = window.dataLayer || []" in html
+    assert "c[a]=c[a]||function()" in html
+
+
+def test_clarity_deferido_respeita_o_atraso(monkeypatch):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node não disponível nesta máquina")
+    monkeypatch.setattr(shared, "META_PIXEL_ID", "pixel-teste")
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", "G-TESTE")
+    monkeypatch.setattr(shared, "CLARITY_PROJECT_ID", "clarity-teste")
+
+    snippets = _deferred_tracking_bootstrap() + clarity_snippet(defer_external=True)
+    scripts = re.findall(r"<script(?: [^>]*)?>(.*?)</script>", snippets, re.DOTALL)
+    programa = f"""
+global.window = global;
+global.location = {{ href: 'https://pigbankai.com/', origin: 'https://pigbankai.com' }};
+const carregados = [], ouvintes = {{}};
+global.document = {{
+  readyState: 'loading', referrer: '',
+  head: {{ appendChild: s => carregados.push(s.src) }},
+  createElement: () => ({{}}),
+  getElementsByTagName: () => [{{ parentNode: {{ insertBefore: s => carregados.push(s.src) }} }}],
+}};
+global.addEventListener = (nome, fn) => {{ ouvintes[nome] = fn; }};
+global.setTimeout = (fn, ms) => {{ ouvintes.timer = {{ fn, ms }}; return 1; }};
+eval({json.dumps(chr(10).join(scripts))});
+const antes = carregados.slice();
+const fila = {{ clarity: typeof clarity }};
+ouvintes.load();
+const aposLoad = carregados.slice();
+ouvintes.timer.fn();
+console.log(JSON.stringify({{ antes, aposLoad, depois: carregados, atraso: ouvintes.timer.ms, fila }}));
+"""
+    resultado = subprocess.run(
+        [node, "-e", programa], capture_output=True, text=True, timeout=30
+    )
+    assert resultado.returncode == 0, resultado.stderr
+    saida = json.loads(resultado.stdout)
+
+    assert saida["antes"] == []
+    assert saida["aposLoad"] == []
+    assert saida["atraso"] == 5_000
+    assert saida["fila"] == {"clarity": "function"}
+    assert any("clarity.ms" in url for url in saida["depois"])

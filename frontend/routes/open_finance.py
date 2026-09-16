@@ -1184,7 +1184,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # anterior deste comentário afirmava o contrário. Por quê: `connection_ui_state`
         # decide pelo ramo do `health` ANTES de olhar o `sem_sync`, e
         # `health.item_status in _UPDATING` devolve `updating` independentemente do
-        # `last_sync_at` (`core/services/pluggy_health.py:498-504`). Quem tira o
+        # `last_sync_at` (o ramo `if health:` de `connection_ui_state`,
+        # `core/services/pluggy_health.py`). Quem tira o
         # rótulo de lá é a passada seguinte do job de saúde (medido com
         # `OF_HEALTH_MAX_AGE_SEC=0`: com conta → "Atualizado", sem conta → "Sem
         # dados"), e nos defaults isso leva de 12h a 18h — 15h em média, 18h é o
@@ -1409,7 +1410,10 @@ async def open_finance_caixinhas_route(request: Request, user_id: int):
     caixinhas = [
         {"of_investment_id": c["of_investment_id"], "name": c["name"],
          "balance": float(c["balance"] or 0),
-         "pocket_id": c["pocket_id"], "pocket_name": c["pocket_name"]}
+         "pocket_id": c["pocket_id"], "pocket_name": c["pocket_name"],
+         # criada pelo sync: o vínculo é fixo (a rota recusa soltar), então a tela
+         # mostra a linha sem as opções que só dariam erro.
+         "pocket_auto": c.get("pocket_source") == "open_finance"}
         for c in candidates
     ]
     return {"ok": True, "caixinhas": caixinhas, "metas": metas}
@@ -1427,9 +1431,21 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
     await asyncio.to_thread(_require_caixinha_access, user_id)
     from db import bind_pocket_to_caixinha
 
-    ok = await asyncio.to_thread(
-        bind_pocket_to_caixinha, user_id, body.pocket_id, body.of_investment_id
-    )
+    try:
+        ok = await asyncio.to_thread(
+            bind_pocket_to_caixinha, user_id, body.pocket_id, body.of_investment_id
+        )
+    except ValueError as exc:
+        # OF_POCKET_READONLY (db/open_finance.py): caixinha criada pelo sync não
+        # solta o vínculo nem troca de posição. Mesmo código do guard de depósito/saque
+        # (`_is_of_mirror`, db/pockets.py) e mesmo 400 do resto desta API; a frase é
+        # a desta tela, que é sobre vínculo e não sobre mover dinheiro.
+        if str(exc) != "OF_POCKET_READONLY":
+            raise
+        raise HTTPException(
+            status_code=400,
+            detail="Essa caixinha vem do seu banco: o vínculo é automático e não pode ser desfeito aqui.",
+        ) from exc
     if not ok:
         raise HTTPException(status_code=400, detail="Não foi possível vincular (meta ou caixinha inválida).")
     return {"ok": True}
