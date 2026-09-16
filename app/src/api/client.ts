@@ -145,7 +145,15 @@ export async function chamar<T>(
     const novoAccess = await renovar();
     if (!novoAccess) throw new SessaoExpirada();
     resposta = await enviar(rota, opcoes, novoAccess);
-    if (resposta.status === 401) throw new SessaoExpirada();
+    if (resposta.status === 401) {
+      // Renovou e AINDA assim tomou 401: a sessão morreu entre as duas
+      // requisições (revogada noutro aparelho, logout, troca de senha). É
+      // terminal, e a credencial recém-guardada tem de sair do keychain junto —
+      // senão `temSessao()` segue dizendo que sim, o app abre como logado e
+      // tenta renovar de novo a cada início, sem nunca chegar à tela de entrada.
+      await limparCredenciais();
+      throw new SessaoExpirada();
+    }
   }
 
   if (!resposta.ok) {

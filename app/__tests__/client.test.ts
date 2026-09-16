@@ -123,6 +123,28 @@ describe("renovação em 401", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
+  it("401 DEPOIS de renovar apaga a credencial: é terminal", async () => {
+    // A sessão morreu entre as duas requisições (revogada noutro aparelho,
+    // logout, troca de senha). Deixar a credencial no keychain faria
+    // `temSessao()` seguir dizendo que sim: o app abriria como logado e tentaria
+    // renovar de novo a cada início, sem nunca chegar à tela de entrada.
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
+      .mockResolvedValueOnce(
+        resposta(200, {
+          access_token: "novo",
+          refresh_token: "rt_novo",
+          dashboard_token: "d",
+          expires_in: 900,
+        }),
+      )
+      .mockResolvedValueOnce(resposta(401, { detail: "sessão revogada" }));
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
   it("falha de REDE no refresh NÃO apaga a sessão", async () => {
     // O token pode estar vivo e o usuário só sem sinal. Apagar aqui deslogaria
     // quem entrou no elevador.
