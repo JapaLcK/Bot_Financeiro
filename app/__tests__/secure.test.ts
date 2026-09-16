@@ -2,17 +2,18 @@ import {
   guardarCredenciais,
   lerCredenciais,
   limparCredenciais,
+  jtiDe,
   limparSe,
   trocarSe,
 } from "@/storage/secure";
 
 /** O cofre em memória do dublê de `expo-secure-store` (ver `jest.setup.js`). */
-const cofre = (global as unknown as { __cofreDeTeste: Map<string, string> })
+const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 
 /** Faz a próxima escrita no cofre falhar, como um keychain recusando. */
 const falharEscrita = (
-  global as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+  globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
 ).__falharEscritaNoCofre;
 
 beforeEach(async () => {
@@ -139,5 +140,28 @@ describe("as operações de sessão são serializadas", () => {
       access: "ok",
       refresh: "rt_ok",
     });
+  });
+});
+
+describe("jtiDe", () => {
+  it("lê o jti sem depender de Buffer nem de atob", () => {
+    // `Buffer` é do Node e não existe no Hermes; `atob` não é garantido em toda
+    // versão do runtime. A primeira versão usava `Buffer`, o `ReferenceError`
+    // era engolido pelo `catch`, e TODO token passava a "não ter jti" — um
+    // conserto inerte no aparelho, verde no Jest, que roda no Node.
+    expect(jtiDe("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLXh5eiJ9.assinatura")).toBe(
+      "sessao-xyz",
+    );
+  });
+
+  it("aguenta carga com `-` e `_` (o alfabeto base64URL)", () => {
+    expect(jtiDe("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAiYT9iPmN-ZC9lK2YifQ.assinatura")).toBe("a?b>c~d/e+f");
+  });
+
+  it("token sem jti, malformado ou vazio devolve null", () => {
+    expect(jtiDe("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSJ9.assinatura")).toBeNull();
+    expect(jtiDe("nao.e.jwt")).toBeNull();
+    expect(jtiDe("")).toBeNull();
+    expect(jtiDe("a.!!!!.c")).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { entrar, sair, verificarMfa } from "@/services/auth";
 import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
-const cofre = (global as unknown as { __cofreDeTeste: Map<string, string> })
+const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 const fetchFalso = jest.fn();
 
@@ -13,7 +13,7 @@ const ACCESS_B = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUIif
 
 beforeEach(() => {
   fetchFalso.mockReset();
-  global.fetch = fetchFalso as unknown as typeof fetch;
+  globalThis.fetch = fetchFalso as unknown as typeof fetch;
   cofre.clear();
 });
 

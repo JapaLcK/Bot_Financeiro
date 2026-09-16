@@ -24,17 +24,17 @@ const fetchFalso = jest.fn();
 
 /** Faz a GRAVAÇÃO no cofre falhar, como um keychain recusando. */
 const falharEscrita = (
-  global as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+  globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
 ).__falharEscritaNoCofre;
 
 /** Faz a LIMPEZA no cofre falhar. Separado da gravação de propósito. */
 const falharApagar = (
-  global as unknown as { __falharApagarNoCofre: (v: boolean) => void }
+  globalThis as unknown as { __falharApagarNoCofre: (v: boolean) => void }
 ).__falharApagarNoCofre;
 
 beforeEach(async () => {
   fetchFalso.mockReset();
-  global.fetch = fetchFalso as unknown as typeof fetch;
+  globalThis.fetch = fetchFalso as unknown as typeof fetch;
   _resetRenovacao();
   falharEscrita(false);
   falharApagar(false);

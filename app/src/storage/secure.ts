@@ -121,15 +121,44 @@ export function limparSe(esperado: string): Promise<boolean> {
  * é leitura de um dado que o próprio app guardou. Token ilegível devolve null,
  * e aí quem chama cai no critério anterior.
  */
+const ALFABETO =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * base64url → texto, sem `Buffer` e sem `atob`.
+ *
+ * O `Buffer` é do Node: no Hermes ele não existe, e usá-lo aqui lançava
+ * `ReferenceError` que o `catch` engolia — todo token passaria a "não ter jti"
+ * e o logout cairia calado no critério antigo. Pior: o `@types/node` fazia a
+ * referência compilar, então nem o typecheck acusava, e o Jest roda no Node,
+ * onde `Buffer` existe. Um conserto inerte no aparelho, verde em tudo aqui.
+ *
+ * O `atob` também não é garantido em toda versão do runtime. Doze linhas de
+ * decodificação não dependem de nenhum dos dois.
+ */
+function deBase64Url(texto: string): string {
+  const limpo = texto.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  let bits = 0;
+  let acumulado = 0;
+  let saida = "";
+  for (const caractere of limpo) {
+    const valor = ALFABETO.indexOf(caractere);
+    if (valor < 0) throw new Error("base64 inválido");
+    acumulado = (acumulado << 6) | valor;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      saida += String.fromCharCode((acumulado >> bits) & 0xff);
+    }
+  }
+  return saida;
+}
+
 export function jtiDe(access: string): string | null {
   try {
     const carga = access.split(".")[1];
     if (!carga) return null;
-    const json = JSON.parse(
-      Buffer.from(carga.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
-        "utf8",
-      ),
-    ) as { jti?: unknown };
+    const json = JSON.parse(deBase64Url(carga)) as { jti?: unknown };
     return typeof json.jti === "string" ? json.jti : null;
   } catch {
     return null;
