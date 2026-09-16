@@ -10,6 +10,11 @@ const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 const fetchFalso = jest.fn();
 
+/** Faz a GRAVAÇÃO no cofre falhar, como um keychain recusando. */
+const falharEscrita = (
+  globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+).__falharEscritaNoCofre;
+
 /** Prende a próxima gravação no cofre até a promessa resolver. */
 const atrasarEscrita = (
   globalThis as unknown as { __atrasarEscritaNoCofre: (p: Promise<void>) => void }
@@ -22,6 +27,7 @@ const ACCESS_A2 = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUEi
 const ACCESS_B = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUIifQ.assinatura";
 
 beforeEach(() => {
+  falharEscrita(false);
   fetchFalso.mockReset();
   globalThis.fetch = fetchFalso as unknown as typeof fetch;
   cofre.clear();
@@ -311,6 +317,37 @@ describe("entrar", () => {
 
     await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
     await expect(a).rejects.not.toThrow("E-mail ou senha incorretos.");
+  });
+
+  it("falha de GRAVAÇÃO de entrada superada também vira EntradaSuperada", async () => {
+    // O invólucro tem de cobrir até o fim: uma falha de keychain numa tentativa
+    // que já foi superada não é problema do keychain para o usuário, é uma
+    // entrada que perdeu a vez. Mostrar o erro de armazenamento faria a pessoa
+    // achar que o aparelho está com defeito.
+    fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
+      const corpo = JSON.parse(String(o.body)) as { email: string };
+      return resposta(200, {
+        user_id: 1,
+        email: corpo.email,
+        access_token: "access",
+        refresh_token: "rt",
+        dashboard_token: "d",
+        expires_in: 900,
+      });
+    });
+
+    let soltar: () => void = () => {};
+    const presa = new Promise<void>((r) => (soltar = r));
+    atrasarEscrita(presa);
+    const a = entrar("a@x.com", "s");
+    await new Promise<void>((r) => setImmediate(() => r()));
+    falharEscrita(true);
+    const b = entrar("b@x.com", "s");
+    soltar();
+
+    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+    await expect(b).rejects.toThrow();
+    falharEscrita(false);
   });
 
   it("sair invalida entrada em voo", async () => {

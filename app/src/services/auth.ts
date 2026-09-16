@@ -43,17 +43,23 @@ export type Entrada =
   | { fase: "mfa"; desafio: string; email: string };
 
 /**
- * Executa uma tentativa de entrada e devolve o resultado SÓ se ela ainda for a
- * mais recente — inclusive quando ela falha.
+ * Envolve uma tentativa de entrada INTEIRA — requisição, decisão e gravação.
  *
- * O erro de uma tentativa superada também é ruído: a conta A responde 401 e a
- * pessoa veria "senha incorreta" enquanto a entrada da conta B, que ela pediu
- * depois, estava indo bem. Descartar o sucesso e mostrar a falha seria escolher
- * o pior dos dois.
+ * Cobre os dois desfechos, e isso é o ponto. O erro de uma tentativa superada
+ * também é ruído: a conta A responde 401 e a pessoa veria "senha incorreta"
+ * enquanto a entrada da conta B, que ela pediu depois, estava indo bem.
+ * Descartar o sucesso e mostrar a falha seria escolher o pior dos dois.
+ *
+ * E o invólucro vai até o FIM, não só até a resposta do servidor: uma falha de
+ * gravação também precisa ser lida à luz de quem chegou depois. Manter a
+ * conferência espalhada por cada ponto de saída foi exatamente como o ramo do
+ * desafio ficou de fora antes, nesta mesma revisão — com um lugar só, não há
+ * saída para esquecer.
  */
-async function tentativa<T>(minhaVez: number, executar: () => Promise<T>): Promise<T> {
+async function tentativa<T>(executar: (vez: number) => Promise<T>): Promise<T> {
+  const minhaVez = ++ultimaTentativa;
   try {
-    const r = await executar();
+    const r = await executar(minhaVez);
     if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
     return r;
   } catch (e) {
@@ -63,34 +69,29 @@ async function tentativa<T>(minhaVez: number, executar: () => Promise<T>): Promi
 }
 
 export async function entrar(email: string, senha: string): Promise<Entrada> {
-  const minhaVez = ++ultimaTentativa;
-  const r = await tentativa(minhaVez, () =>
-    chamar("/auth/login", respostaLoginSchema, {
+  return tentativa(async (minhaVez): Promise<Entrada> => {
+    const r = await chamar("/auth/login", respostaLoginSchema, {
       metodo: "POST",
       corpo: { email, password: senha },
       semAuth: true,
-    }),
-  );
-  // A conferência de `tentativa` já cobriu o caminho até aqui, inclusive o do
-  // desafio: um desafio velho levaria a tela para a etapa de código da conta
-  // ERRADA, e o usuário digitaria o token de uma conta para completar a
-  // entrada de outra.
-  if ("mfa_required" in r) {
-    return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
-  }
-  // A conferência acontece DENTRO da gravação, não antes: entre um passo e o
-  // outro caberia uma entrada mais nova, e o aparelho ficaria logado nesta
-  // enquanto a tela mostra a outra.
-  const gravou = await guardarCredenciaisSe(
-    () => minhaVez === ultimaTentativa,
-    { access: r.access_token, refresh: r.refresh_token },
-  );
-  if (!gravou) throw new EntradaSuperada();
-  _esquecerRotacoes();
-  return {
-    fase: "pronta",
-    perfil: { user_id: r.user_id, email: r.email, plan: r.plan },
-  };
+    });
+    if ("mfa_required" in r) {
+      return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
+    }
+    // A conferência acontece DENTRO da gravação, não antes: entre um passo e o
+    // outro caberia uma entrada mais nova, e o aparelho ficaria logado nesta
+    // enquanto a tela mostra a outra.
+    const gravou = await guardarCredenciaisSe(
+      () => minhaVez === ultimaTentativa,
+      { access: r.access_token, refresh: r.refresh_token },
+    );
+    if (!gravou) throw new EntradaSuperada();
+    _esquecerRotacoes();
+    return {
+      fase: "pronta",
+      perfil: { user_id: r.user_id, email: r.email, plan: r.plan },
+    };
+  });
 }
 
 /** Completa a entrada de quem tem dois fatores. `backup` usa código de reserva. */
@@ -99,21 +100,20 @@ export async function verificarMfa(
   codigo: string,
   backup = false,
 ): Promise<Perfil> {
-  const minhaVez = ++ultimaTentativa;
-  const r = await tentativa(minhaVez, () =>
-    chamar("/auth/mfa/verify-login", loginSchema, {
+  return tentativa(async (minhaVez) => {
+    const r = await chamar("/auth/mfa/verify-login", loginSchema, {
       metodo: "POST",
       corpo: { challenge: desafio, code: codigo, use_backup: backup },
       semAuth: true,
-    }),
-  );
-  const gravou = await guardarCredenciaisSe(
-    () => minhaVez === ultimaTentativa,
-    { access: r.access_token, refresh: r.refresh_token },
-  );
-  if (!gravou) throw new EntradaSuperada();
-  _esquecerRotacoes();
-  return { user_id: r.user_id, email: r.email, plan: r.plan };
+    });
+    const gravou = await guardarCredenciaisSe(
+      () => minhaVez === ultimaTentativa,
+      { access: r.access_token, refresh: r.refresh_token },
+    );
+    if (!gravou) throw new EntradaSuperada();
+    _esquecerRotacoes();
+    return { user_id: r.user_id, email: r.email, plan: r.plan };
+  });
 }
 
 export async function perfil(): Promise<Perfil> {
