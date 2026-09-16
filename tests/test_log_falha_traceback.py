@@ -399,7 +399,11 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
     Guarda por `ast` para o connect NOVO que este módulo ganhar. Ele é o QUINTO
     vermelho da injeção declarada em `tests/test_system_event_log_config.py` e
     `tests/test_system_event_log_teto.py` (tirar `options=` dos dois connects):
-    4 testes de comportamento mais este portão, 5 no total.
+    4 testes de comportamento mais este portão, 5 no total. Os 4, nomeados —
+    `test_system_event_log_config.py::test_options_chega_no_connect`,
+    `test_system_event_log_teto.py::test_insert_com_tabela_travada_desiste_dentro_do_teto`,
+    `::test_leitura_com_tabela_travada_desiste_dentro_do_teto` e
+    `::test_warning_do_psycopg_nao_reentra_no_handler`.
 
     ponytail: TETO DECLARADO — o portão casa a chamada pelo nome do módulo, e
     `from psycopg import connect as _pg; _pg(url)` ESCAPA (medido: verde).

@@ -61,8 +61,17 @@ def _statement_timeout_options() -> str:
     e pelo mesmo motivo elevado a um grau: aqui `0` não é só "sem sentido", é
     INVERSÃO — no Postgres `statement_timeout=0` significa SEM LIMITE, então
     obedecer a env desligaria exatamente o que ela configura. Negativo o
-    servidor recusa (o connect inteiro falharia), e abaixo de 100ms não cabe
-    nem o INSERT em tabela livre.
+    servidor recusa (o connect inteiro falharia).
+
+    O piso de 100ms é MARGEM, não o mínimo físico — e a medição que provaria o
+    contrário está neste mesmo PR: o INSERT em tabela LIVRE grava em ~4ms (nota
+    da fixture `sem_env_de_teto` em `tests/test_system_event_log_teto.py`) e o
+    connect leva 3–6ms (medição citada no comentário de `recent_event_exists`,
+    abaixo). ~10ms somados, então 50ms CABERIA. Os 100ms são ~10× a soma medida,
+    e a folga é o argumento: a medição é de localhost com a tabela livre, e
+    banco remoto, RTT pior ou uma espera de lock curta comem essa diferença —
+    com a env obedecida abaixo disso, o corte deixa de ser proteção e vira
+    perda de log.
 
     O intervalo fecha dos DOIS lados, e o de cima pelos mesmos dois motivos do
     de baixo: `2147483648` o servidor recusa igual ao negativo ("value exceeds
@@ -233,18 +242,39 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     disparados por múltiplas fontes (webhook + scheduler).
     Falha silenciosa retorna False — melhor mandar duplicado que perder.
 
-    E o que esse corte custa NÃO é "um duplicado". Em 6 call sites esta função é
-    a metade de LEITURA de um check-then-act cuja metade de ESCRITA é o
-    `log_system_event_sync` acima — `pix_drain_effects.py:281`,
+    E o que esse corte custa NÃO é "um duplicado". Em 10 call sites esta função
+    é a metade de LEITURA de um check-then-act (`grep -rn "recent_event_exists"`
+    fora de `tests/`, remedir antes de reusar o número). E este PR deixa os 10
+    em DOIS REGIMES, porque só a metade de leitura ganhou o teto:
+
+    (A) OITO em que a ESCRITA é o `log_system_event_sync` acima — as duas pontas
+    falham na MESMA direção. `pix_drain_effects.py:281`,
     `engagement_scheduler.py:280` e `:333`, `payment_reminder.py:207`,
-    `billing_access.py:487` e `:514`, `launches.py:1261`. Com a tabela travada
-    as duas pontas falham na MESMA direção: a leitura devolve `False` e a
-    escrita do marcador é CANCELADA sem gravar a linha. Então o e-mail sai a
-    cada passada do scheduler enquanto o lock durar, e não uma vez a mais —
-    reenvio recorrente, que é a "falha ABERTA nas duas pontas" que
-    `scripts/aviso_fim_do_gratis.py:52` já nomeia. Antes do teto as duas
-    bloqueavam e terminavam corretas; o teto troca a espera por essa janela, que
-    deixa de ser só "banco fora" e passa a incluir DDL ou `vacuum full` de 2s.
+    `billing_access.py:487` e `:514`, `launches.py:1261`,
+    `scripts/aviso_fim_do_gratis.py:216`. Com a tabela travada a leitura devolve
+    `False` e a escrita do marcador é CANCELADA sem gravar a linha. Então o
+    e-mail sai a cada passada do scheduler enquanto o lock durar, e não uma vez
+    a mais — reenvio recorrente, que é a "falha ABERTA nas duas pontas" que
+    `scripts/aviso_fim_do_gratis.py:52` já nomeia (e o call site dele é um
+    destes oito). Antes do teto as duas bloqueavam e terminavam corretas; o teto
+    troca a espera por essa janela, que deixa de ser só "banco fora" e passa a
+    incluir DDL ou `vacuum full` de 2s.
+
+    (B) DOIS em que a ESCRITA é o `log_system_event` de
+    `core/admin_dashboard.py:198` — as pontas falham em direções DIFERENTES, e
+    isso é criado por este PR. `frontend/finance_bot_websocket_custom.py:5399`
+    (dedup genérico de billing, `_fire_email`) e `:5798`
+    (`trial_ending_email_sent`, webhook `trial_will_end`). Aquele gravador abre
+    por `core/admin_dashboard.py:56 db_connect`, que tem
+    `connect_timeout=DB_CONNECT_TIMEOUT` e NÃO tem `options` — é o irmão que
+    ficou declarado para issue. Logo, com a tabela travada: a leitura desiste
+    ABERTA (`False`) dentro do teto, e a escrita continua ESPERANDO o lock
+    inteiro e acaba gravando a linha quando ele cai (o comportamento "sem
+    `options`" medido em `tests/test_system_event_log_teto.py`). Efeito: um
+    reenvio, não o reenvio recorrente do regime (A) — a passada seguinte já
+    encontra o marcador. Não é o pior dos dois, mas é um regime diferente, e
+    descrevê-lo como uniforme é que seria a mentira. Uniformizar = dar o mesmo
+    teto ao gravador async do `admin_dashboard`.
     """
     database_url = _database_url()
     if not database_url:

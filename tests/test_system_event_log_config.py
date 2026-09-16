@@ -71,7 +71,11 @@ def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
     SEM LIMITE, então obedecer a env INVERTERIA o sentido do parâmetro —
     "desligado" na cabeça de quem configura viraria "sem teto nenhum". `-1` o
     servidor recusa (o connect inteiro falharia) e `"50"` está abaixo do piso de
-    100ms, onde nem o INSERT em tabela livre cabe.
+    100ms. O piso é MARGEM, não o mínimo físico: medido neste mesmo PR, connect
+    3–6ms + INSERT em tabela livre ~4ms ≈ 10ms, então 50ms caberia com folga. O
+    que `"50"` exercita é "valor abaixo do piso volta ao default", não "tempo
+    que não cabe" — o motivo dos 100ms é ~10× a soma medida, para que RTT de
+    banco remoto ou espera curta de lock não virem perda de log.
 
     O intervalo tem DOIS lados: `"2147483648"` é o primeiro valor que o Postgres
     recusa no connect ("value exceeds integer range"), e com ele obedecido o

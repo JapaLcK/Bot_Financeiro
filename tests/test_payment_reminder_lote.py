@@ -18,7 +18,7 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 | `row.get("email_enc")`              | `dict.get` não levanta | — |
 | **`decrypt_pii_optional`** (em `_resolver_email`, no ponto do envio) | **SIM** — `RuntimeError` de `core/crypto.py:238` (`InvalidToken`) e de `:115` (env de chave ausente) | `except` próprio |
 | `email = row["email"]`              | `KeyError` só se a coluna sair do `select` | — |
-| `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (`core/observability.py:311`) | o callee, medido em `test_dedupe_indisponivel_*` |
+| `recent_event_exists`               | **NÃO** — `except Exception` → `False` no CALLEE (o `except Exception` final de `recent_event_exists`, em `core/system_event_log.py` — saiu de `core/observability.py`, que hoje só reexporta o nome) | o callee, medido em `test_dedupe_indisponivel_*` |
 | `_pago_por_outro_caminho`           | sim | `except` próprio (já existia) |
 | `lembrete_ainda_vale`            | sim | `except` próprio (já existia) |
 | envio + `_wa_lembrete` + log        | sim | `except` próprio (já existia) |
@@ -26,8 +26,8 @@ enumerá-la é o ponto deste arquivo. O laço tem estas operações, nesta ordem
 Ou seja: **um buraco só**, e o segundo candidato óbvio já estava fechado do
 lado de dentro. O teste do `recent_event_exists` aqui não protege o laço — ele
 amarra a DEPENDÊNCIA da decisão de não pôr um `try` lá. Se aquele `except` sair
-de `core/observability.py`, este arquivo fica vermelho antes de o lote começar a
-morrer em produção.
+de `core/system_event_log.py`, este arquivo fica vermelho antes de o lote
+começar a morrer em produção.
 
 **Proveniência**: o padrão desprotegido não nasceu neste PR. O
 `_check_trial_ending` (`core/services/engagement_scheduler.py:260`) tem o mesmo
