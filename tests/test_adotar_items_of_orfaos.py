@@ -152,11 +152,14 @@ def test_script_apply_em_item_congelado_em_updating_agenda_sync(
 
     Os dois asserts, e o que cada um prova (medido, não deduzido):
       • `connection_ui_state` devolve "Atualizando…" na linha recém-escrita: é o
-        card do dono, e é PRÉ-CONDIÇÃO, não o discriminante. Medido: o rótulo
-        segue "Atualizando…" mesmo depois de um sync que deu certo, porque o ramo
-        do `health` decide antes do `sem_sync` (o ramo `if health:` de
-        `connection_ui_state`, `core/services/pluggy_health.py`) —
-        tirá-lo de lá é outro PR;
+        card do dono, e é PRÉ-CONDIÇÃO, não o discriminante. A linha adotada
+        ainda não tem `last_sync_at` (o sync é agendado, não rodou), então ela
+        cai no `_UPDATING and sem_sync` de `connection_ui_state` — que é o caso
+        em que "Atualizando…" é verdade. Depois de um sync que carimbe
+        `last_sync_at`, o rótulo passa a ser o do dado SE a Pluggy tiver mandado
+        `statusDetail` nesse mesmo `GET /items`; sem informação de produto ele
+        segue "Atualizando…" de propósito. Era isso que o "outro PR" citado aqui
+        devia; o assert não muda porque o sync não rodou;
       • o sync TEM de ser agendado: o assert DISCRIMINANTE, vermelho na `main`,
         onde `webhook_pluggy` volta vazio. O que ele compra é o EXTRATO — contas e
         transações entram na hora; sem ele, nada lê a Pluggy por essa conexão.

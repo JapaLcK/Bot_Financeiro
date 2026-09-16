@@ -5,8 +5,16 @@ função que decide em que estado uma conexão está. Antes, quem decidia era um
 `connStatusPill` no settings.html que só olhava o `status` — e por isso não sabia
 diferenciar "atualizado" de "atualizei o que deu" nem de "o item sumiu".
 
-CONTROLE NEGATIVO do grupo: fazer `derive_item_health` devolver `{}` fixo deixa
-9–13 vermelhos.
+CONTROLE NEGATIVO do grupo: pôr um `return {}` na 1ª linha de
+`derive_item_health` deixa vermelha boa parte do arquivo. A CONTAGEM não mora
+aqui de propósito (`CLAUDE.md` §2: número que um comando responde envelhece em
+silêncio — a que estava escrita dizia "9–13" e a medição dava mais que o dobro).
+Quem quiser o número roda a mutação e conta — com `DATABASE_URL` apontando
+para um Postgres onde o papel tenha CREATEDB (o `conftest.py` cria um database
+isolado por execução e, sem a variável, todos os testes saem como ERROR e não
+como falha):
+
+    DATABASE_URL=postgresql://... PYTHONPATH=. python -m pytest -q tests/test_of_health.py
 """
 
 from __future__ import annotations
@@ -65,11 +73,71 @@ def test_tudo_atualizado_vira_updated():
     assert (ui["state"], ui["label"], ui["detail"]) == ("updated", "Atualizado", None)
 
 
-def test_updating_e_updating():
-    health = derive_item_health({"status": "UPDATING"}, now=AGORA)
-    ui = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
-    assert ui["state"] == "updating"
-    assert ui["label"] == "Atualizando…"
+def test_updating_so_e_updating_enquanto_a_conexao_nao_sincronizou():
+    """O portão de `_UPDATING` exige `sem_sync` (ramo `if health:` de
+    `connection_ui_state`). Coleta de banco real não cabe na espera do refresh,
+    então o item fica em `UPDATING` DEPOIS de o espelho já estar escrito — e o
+    card dizia "Atualizando…" para sempre em cima de dado importado e de um
+    `last_sync_at` carimbado. Este teste afirmava a linha de cima com
+    `last_sync_at=AGORA`, que é exatamente o caso consertado.
+
+    CONTROLE NEGATIVO do conserto: tirar ` and sem_sync` do `if item_status in
+    _UPDATING` deixa a 1ª asserção vermelha.
+    CONTROLE POSITIVO: as três últimas. Sem sync — 1ª conexão ou reconexão ainda
+    não espelhada — "Atualizando…" é verdade e continua saindo, inclusive por
+    cima de produto atrasado. A do produto atrasado é a que ainda DISCRIMINA o
+    portão inteiro: sem ele, ela cai em "partial".
+
+    O health aqui traz informação de produto de propósito: o caso SEM ela é o
+    outro portão, e mora em
+    `test_updating_sem_informacao_de_produto_nao_pode_ficar_verde`."""
+    health = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
+
+    com_sync = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
+    assert com_sync["state"] == "updated", com_sync
+
+    parado = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": None})
+    assert (parado["state"], parado["label"]) == ("updating", "Atualizando…")
+
+    # Reconexão: o sync que existe é ANTERIOR à religada, então o espelho na tela
+    # é o de antes — `sem_sync` cobre os dois lados do portão.
+    religado = connection_ui_state({
+        "status": "ACTIVE", "health": health,
+        "last_sync_at": AGORA.replace(hour=9), "reconnected_at": AGORA})
+    assert religado["state"] == "updating", religado
+
+    atrasado = derive_item_health({**ITEM_PARCIAL, "status": "UPDATING"}, now=AGORA)
+    ui = connection_ui_state({"status": "ACTIVE", "health": atrasado, "last_sync_at": None})
+    assert ui["state"] == "updating", ui
+
+
+def test_updating_sem_informacao_de_produto_nao_pode_ficar_verde():
+    """O SEGUNDO portão do item em coleta, e o que ele impede é um verde que
+    APAGA aviso: `derive_item_health` pula produto sem `statusDetail`, o job de
+    saúde sobrescreve `health` sem condição, e um cartão atrasado desde 12/08
+    virava "Atualizado" assim que o item entrasse em `UPDATING` — o aviso sumia
+    da tela. `products` vazio não é "nada atrasado", é "não medi".
+
+    CONTROLE NEGATIVO: tirar o `elif state == "updated" and coletando_sem_info`
+    do `out()` deixa a 1ª asserção vermelha.
+    CONTROLE POSITIVO: as duas últimas. Com informação de produto o conserto do
+    PR continua valendo — verde quando tudo veio, e o aviso do cartão de pé
+    quando não veio. Sem isso, este portão viraria "UPDATING nunca é verde", que
+    é o comportamento que o PR existe para tirar."""
+    cego = derive_item_health({"status": "UPDATING"}, now=AGORA)
+    ui = connection_ui_state({"status": "ACTIVE", "health": cego, "last_sync_at": AGORA})
+    assert (ui["state"], ui["detail"]) == ("updating", None), ui
+
+    # LIMITE CONHECIDO, NÃO GARANTIA: `_SAUDAVEL` só traz `accounts`. Este verde
+    # vale igual para um cartão que estava atrasado na foto anterior e sumiu
+    # desta — o aviso dele desaparece (issue #444; ver `coletando_sem_info`).
+    completo = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
+    assert connection_ui_state({"status": "ACTIVE", "health": completo,
+                                "last_sync_at": AGORA})["state"] == "updated"
+
+    atrasado = derive_item_health({**ITEM_PARCIAL, "status": "UPDATING"}, now=AGORA)
+    parcial = connection_ui_state({"status": "ACTIVE", "health": atrasado, "last_sync_at": AGORA})
+    assert (parcial["state"], "12/08" in (parcial["detail"] or "")) == ("partial", True), parcial
 
 
 def test_login_error_e_waiting_user_input_pedem_acao_do_usuario():
@@ -278,6 +346,39 @@ def test_sem_sync_nao_engole_o_motivo_do_default_seguro():
                                   "health": saudavel, "last_sync_at": None})
         assert ui["state"] == esperado, f"{motivo} perdeu o veredito por falta de sync"
         assert ui["detail"] != "Ainda não sincronizou", motivo
+
+
+def test_item_em_coleta_com_sync_tambem_nao_engole_o_motivo():
+    """O irmão do de cima na combinação que o ` and sem_sync` TORNOU alcançável:
+    item em `UPDATING`, `last_sync_at` carimbado (o portão não segura mais) e
+    motivo pendente. Antes, o ramo do `health` devolvia "Atualizando…" e o
+    `out()` nem era consultado nesse caso; agora o fluxo desce até ele, e quem
+    fala é o MOTIVO — nem o verde, nem o "Atualizando…".
+
+    CONTROLE NEGATIVO (medido): desligar o default seguro do `out()` (trocar
+    `if state == "updated" and reason not in _REASONS_OK` por `and False`) deixa
+    os três casos vermelhos. E pôr o `elif ... coletando_sem_info` ANTES do
+    motivo deixa vermelho o caso do health SEM produto — é o que prende a ordem
+    que o `out()` declara.
+    CONTROLE POSITIVO: o mesmo health sem motivo nenhum continua chegando a
+    "Atualizado" — a guarda não pode recusar tudo."""
+    coletando = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
+    # O health SEM informação de produto é o único em que `coletando_sem_info`
+    # vale, e portanto o único que vê a ordem entre ele e o motivo.
+    cego = derive_item_health({"status": "UPDATING"}, now=AGORA)
+    for health in (coletando, cego):
+        for motivo, esperado in (("no_accounts", "no_accounts"),
+                                 ("read_failed", "error_recoverable"),
+                                 ("motivo_que_ninguem_escreveu_ainda", "error_recoverable")):
+            ui = connection_ui_state({"status": "ACTIVE", "status_reason": motivo,
+                                      "health": health, "last_sync_at": AGORA})
+            assert ui["state"] == esperado, (
+                f"{motivo} virou {ui['state']} com o item em coleta "
+                f"(produtos: {sorted(health['products'])})")
+
+    limpo = connection_ui_state({"status": "ACTIVE", "status_reason": "",
+                                 "health": coletando, "last_sync_at": AGORA})
+    assert limpo["state"] == "updated", limpo
 
 
 # ── RODADA 4: espelho vazio NÃO pode deixar o ERROR grudado ─────────────────
@@ -508,6 +609,16 @@ def test_conjunto_verde_e_o_mesmo_nos_dois_lados():
         f"verde só no JS (toast verde em cima de falha): {sorted(js - py)}")
 
 
+def test_motivo_que_nao_e_falha_e_o_mesmo_nos_dois_lados():
+    """O toast só fica neutro para `updating` SEM motivo de falha (Codex #455);
+    a lista do JS é espelho de `_REASONS_OK`, e as duas não podem divergir."""
+    from core.services.pluggy_health import _REASONS_OK
+
+    js = set(re.findall(r'"(\w*)"', _bloco("OF_REASONS_OK", "[", "]")))
+    assert set(_REASONS_OK) == js, (
+        f"só no Python: {sorted(set(_REASONS_OK) - js)}; só no JS: {sorted(js - set(_REASONS_OK))}")
+
+
 def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
     """OF_VERDICT é a tabela de gravidade: estado sem linha lá cai no genérico."""
     from core.services.pluggy_health import _LABELS
@@ -548,14 +659,22 @@ def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
 # não falha sozinho — quem falha é a revisão. O que ele pega é a regressão:
 # alguém tirar um dos cinco de `_NEEDS_USER`/`_UPDATING` por engano.
 #
-# CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa 1 vermelho
-# (o caso OUTDATED); tirar "UPDATING" de `_UPDATING` deixa 2 (o caso UPDATING e o
-# `test_updating_e_updating`, que já existia).
+# CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa vermelho o
+# caso OUTDATED. Tirar "UPDATING" de `_UPDATING` deixa vermelho, NESTE arquivo, o
+# caso UPDATING desta tabela e os dois testes dos portões de item em coleta
+# (`test_updating_so_e_updating_enquanto_a_conexao_nao_sincronizou` e
+# `test_updating_sem_informacao_de_produto_nao_pode_ficar_verde`) — e fora dele
+# também, porque `ITEM_UPDATING` de `pluggy_sync` é o mesmo objeto.
 # CONTROLE POSITIVO: o caso UPDATED prova que a guarda não recusa tudo.
 
 _STATUS_DOCUMENTADOS = [
     # (item_status, (status, reason) esperados do resolve, estado da tela)
     ("UPDATED",            ("ACTIVE", ""), "updated"),
+    # Segue "updating" apesar do `last_sync_at` carimbado lá embaixo: o health
+    # desta tabela tem `products: {}`, e sem informação de produto nenhuma o
+    # `out()` não deixa o item em coleta ficar verde. O outro lado — com produto
+    # medido, que é onde este PR libera o verde — está em
+    # `test_updating_sem_informacao_de_produto_nao_pode_ficar_verde`.
     ("UPDATING",           ("ACTIVE", ""), "updating"),
     ("WAITING_USER_INPUT", ("ERROR",  ""), "needs_user_action"),
     ("LOGIN_ERROR",        ("ERROR",  ""), "needs_user_action"),

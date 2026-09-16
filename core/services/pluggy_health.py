@@ -259,10 +259,13 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
         mostra a instrução de dispositivo. Benigna: o BALDE continua certo, só o
         detalhe é discutível;
       • `_UPDATING` (`UPDATING`/`CREATED`) + `execution_status` de device/QR →
-        esta função NEM É CHAMADA: `connection_ui_state` testa `_UPDATING` antes
-        e devolve "Atualizando…" direto. Seria a mentira de fiapo girando que
-        esta onda existe para matar — e por isso vale a pena dizer o que
-        sustenta não fechá-la.
+        esta função NÃO É CHAMADA em nenhum dos dois lados. Sem sync,
+        `connection_ui_state` testa `_UPDATING and sem_sync` antes e devolve
+        "Atualizando…" direto; COM sync ele desce para os ramos de dado, que
+        também não consultam o detalhe de ação. A instrução de dispositivo
+        continua não aparecendo — o que o `and sem_sync` mudou foi só o rótulo
+        do lado já sincronizado, que deixou de ser a mentira de fiapo girando.
+        Ainda assim vale dizer o que sustenta não fechar a diagonal.
 
     O que sustenta: a varredura das 183 páginas (`docs.pluggy.ai/llms.txt`) achou
     `USER_AUTHORIZATION_PENDING` em seis páginas, e em TODAS o `status` ao lado é
@@ -529,6 +532,24 @@ def connection_ui_state(connection_row: dict) -> dict:
     ultimo, religado = row.get("last_sync_at"), row.get("reconnected_at")
     sem_sync = ultimo is None or (religado is not None and ultimo < religado)
 
+    # Item em coleta cujo health não traz informação de produto NENHUMA:
+    # `derive_item_health` pula o produto cujo `statusDetail` não veio
+    # (`if not isinstance(detail, dict): continue`), então `products` vazio não é
+    # "nada atrasado", é "não sei". E o job de saúde sobrescreve `health` sem
+    # condição — um "Parcial — Cartão desatualizado desde 12/08" vira health sem
+    # `statusDetail` assim que o item entra em `UPDATING`, e o aviso do cartão
+    # sumiria com a tela dizendo "Atualizado". Só o VERDE é interceptado (no
+    # `out()`, depois do motivo pendente): "Atualizando…" é o que a base dizia
+    # e é a resposta honesta para o que não se mediu.
+    # LIMITE CONHECIDO, e é o mesmo cenário por outra porta: a guarda pega
+    # "nenhuma informação de produto", não "informação a menos". Se a foto nova
+    # trouxer só `accounts`, o cartão que estava atrasado na foto ANTERIOR some
+    # dela, `stale_products` fica vazio e o card vira "Atualizado". Fechar isso
+    # exige comparar com a foto anterior — que o job de saúde sobrescreve — e
+    # ficou para a issue #444.
+    coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
+                          and not (health or {}).get("products"))
+
     def out(state: str, detail: str | None = None) -> dict:
         # DEFAULT SEGURO: estado desconhecido nunca é verde. Um `status_reason`
         # pendente que este arquivo não conhece (gravado por um caminho novo)
@@ -550,6 +571,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # motivo é que vira "Ainda não sincronizou".
         elif state == "updated" and sem_sync:
             state, detail = "updating", "Ainda não sincronizou"
+        # Mesma família da linha de cima, e no mesmo lugar de propósito: DEPOIS
+        # do motivo pendente (`no_accounts`/`read_failed`/desconhecido continuam
+        # falando primeiro) e só contra o verde. Sem `detail`: é o "Atualizando…"
+        # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
+        elif state == "updated" and coletando_sem_info:
+            state, detail = "updating", None
         return {
             "state": state,
             "label": _LABELS[state],
@@ -569,7 +596,15 @@ def connection_ui_state(connection_row: dict) -> dict:
         if item_status in _NEEDS_USER:
             return out("needs_user_action", _detalhe_de_acao(
                 item_status, str(health.get("execution_status") or "").upper()))
-        if item_status in _UPDATING:
+        # `and sem_sync`: coleta de banco real demora MUITO mais que o sync, então
+        # o item fica em `UPDATING` depois de o espelho já estar escrito — e o card
+        # dizia "Atualizando…" para sempre em cima de dado importado e de um
+        # `last_sync_at` carimbado. Com sync posterior à autorização atual, quem
+        # fala é o ESTADO DO DADO (ramos abaixo: "Atualizado"/"Parcial"/"Sem
+        # dados"/"Erro temporário"). Sem sync — 1ª conexão ou reconexão ainda não
+        # espelhada — "Atualizando…" é verdade e continua sendo a guarda que
+        # impede o card de dizer "tudo em dia" com espelho vazio.
+        if item_status in _UPDATING and sem_sync:
             return out("updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
         # e rotulá-lo de "Parcial" ("atualizei o que deu") subestima o estado.

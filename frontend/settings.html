@@ -3356,6 +3356,21 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
 // serve de fallback do `updating`, que tem item na mão.
 const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
 
+// "Banco ainda coletando" NÃO é erro, e os DOIS caminhos que dizem isso usam
+// este tom: o ramo do lote (`still_updating`) e a entrada `updating` da tabela
+// abaixo. Uma constante e não duas literais porque a decisão é UMA (§0.7) — as
+// duas frases já foram cópias divergentes uma vez. Qualquer valor fora de
+// "ok"/"error" pinta o toast neutro (`#toast` sem classe de cor, ícone
+// `ph-info`) e, o que mais importa, não dispara o `throw` do
+// `refreshOpenFinance` — que é o que virava âmbar no pull-to-refresh.
+const OF_TOM_COLETANDO = "info";
+
+// Motivo que NÃO é falha: espelho de `_REASONS_OK` (core/services/pluggy_health.py),
+// preso por `test_motivo_que_nao_e_falha_e_o_mesmo_nos_dois_lados`. O backend
+// devolve `updating` também para a 1ª conexão cujo sync FALHOU (o portão não olha
+// o motivo), então neutro só vale sem motivo de falha.
+const OF_REASONS_OK = ["", "ok"];
+
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
   ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
@@ -3367,9 +3382,6 @@ const OF_VERDICT = [
       ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Ação necessária no ${ofNome(i)}.`],
   ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
-  ["updating",          (i) => i.detail
-      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
-      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
   // O `ofNome(i)` NÃO é enfeite: com dois bancos conectados, "cartão
   // desatualizado desde 12/08" não diz de qual. **As oito entradas desta tabela
   // falam de UM item e as oito nomeiam o item** — a única frase sem nome é a do
@@ -3379,6 +3391,9 @@ const OF_VERDICT = [
       ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
   ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
+  ["updating",          (i) => i.detail
+      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
+      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
 ];
 
 function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
@@ -3395,19 +3410,36 @@ function ofInstrucao(d) { const s = String(d); return `${s.charAt(0).toLowerCase
 
 function refreshVerdict(sync) {
   const items = Array.isArray(sync.items) ? sync.items : [];
+  // TODO ERRO DECIDE ANTES DE QUALQUER NEUTRO. O neutro (banco coletando) só é
+  // devolvido depois de o laço ter visto TODOS os itens e de o estado
+  // desconhecido ter tido a vez: senão um banco coletando esconde o erro de outro
+  // banco, de um estado novo que esta tela não conhece, ou de uma coleta que
+  // falhou (Codex #455, três apontamentos — por isso a regra, não a ordem).
+  // `updating` só é neutro SEM motivo de falha: o backend devolve `updating`
+  // também para a 1ª conexão cujo sync falhou. Quão frequente é a coleta
+  // legítima num refresh que funcionou NÃO foi medido (depende do
+  // `statusDetail` que a Pluggy manda durante `UPDATING`).
+  const erro = { tone: "error", msg: "Não consegui atualizar agora. Tente de novo em instantes." };
+  let coletando = null;
   for (const [estado, msg] of OF_VERDICT) {
-    const achado = items.find((i) => i.state === estado);
-    if (achado) return { tone: "error", msg: msg(achado) };
+    for (const i of items) {
+      if (i.state !== estado) continue;
+      if (estado === "updating" && OF_REASONS_OK.includes(String(i.reason ?? "").toLowerCase())) {
+        if (!coletando) coletando = { tone: OF_TOM_COLETANDO, msg: msg(i) };
+      } else {
+        return { tone: "error", msg: msg(i) };
+      }
+    }
   }
+  // Default SEGURO: estado fora da lista de permissão nunca termina neutro nem verde.
+  if (items.some((i) => !OF_VERDICT_OK.includes(i.state) && i.state !== "updating")) return erro;
+  if (coletando) return coletando;
+  // `still_updating` conta item que a Pluggy ainda reporta coletando quando o
+  // servidor olha (fim da espera, ou health regravado no cooldown). A FRASE é a
+  // mesma de antes (decisão do dono); só o tom é neutro.
   if (Number(sync.still_updating) > 0)
-    return { tone: "error", msg: OF_UPDATING_LOTE };
-  // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
-  // sem item nenhum, não pode terminar em verde.
-  const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));
-  if (desconhecido || (items.length === 0 && sync.ok === false))
-    return { tone: "error", msg: "Não consegui atualizar agora. Tente de novo em instantes." };
-  // Nada foi pedido ao banco porque acabamos de pedir: verde (os dados SÃO
-  // recentes), mas dizendo o que aconteceu em vez de fingir uma busca nova.
+    return { tone: OF_TOM_COLETANDO, msg: OF_UPDATING_LOTE };
+  if (items.length === 0 && sync.ok === false) return erro;
   if (items.length && items.every((i) => i.state === "rate_limited"))
     return { tone: "ok", msg: "Você acabou de atualizar — já está tudo em dia." };
   return { tone: "ok", msg: "Tudo em dia!" };
