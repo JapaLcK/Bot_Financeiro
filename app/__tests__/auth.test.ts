@@ -60,18 +60,29 @@ describe("sair", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
-  it("NÃO apaga a conta que entrou durante a saída", async () => {
-    // A requisição de logout passa pela rede, e nesse tempo outra conta pode
-    // entrar. Uma limpeza incondicional no fim deletaria a sessão nova — e o
-    // efeito para o usuário seria entrar e ser deslogado em seguida, sem
-    // explicação nenhuma.
+  it("outra conta que entra com o logout ainda em voo continua no cofre", async () => {
+    // A revogação sai no `finally` sem `await`, então a garantia de não apagar
+    // a conta que entra depois não pode depender de a requisição terminar
+    // primeiro — precisa valer com ela ainda pendurada na rede.
     await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    let soltarChegou: () => void = () => {};
+    const chegou = new Promise<void>((r) => (soltarChegou = r));
+    let soltarPortao: () => void = () => {};
+    const portao = new Promise<void>((r) => (soltarPortao = r));
     fetchFalso.mockImplementation(async () => {
-      await guardarCredenciais({ access: ACCESS_B, refresh: "rt_B" });
+      soltarChegou();
+      await portao;
       return resposta(200, {});
     });
 
-    await sair();
+    const saida = sair();
+    await chegou;
+    await guardarCredenciais({ access: ACCESS_B, refresh: "rt_B" });
+    soltarPortao();
+    await saida;
+    // Drena a microtarefa do `.catch` da revogação antes de conferir.
+    await new Promise<void>((r) => setTimeout(r, 0));
+
     await expect(lerCredenciais()).resolves.toEqual({
       access: ACCESS_B,
       refresh: "rt_B",
@@ -121,21 +132,41 @@ describe("sair", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
-  it("renovação DURANTE a saída não salva a sessão do logout", async () => {
-    // Entre a captura e a limpeza há tempo de rede, e outra tela pode renovar
-    // esta mesma sessão. Comparar pelo refresh token recusaria apagar — e o
-    // usuário sairia com uma credencial rotacionada e VÁLIDA no aparelho.
-    // O `jti` é o que não muda na rotação, e é por ele que a saída identifica
-    // a própria sessão.
+  it("renovação que grava ANTES da limpeza não sobrevive à saída", async () => {
+    // Uma renovação real grava via `trocarSe`; aqui usamos `guardarCredenciais`
+    // para simular uma renovação que já tenha comitado antes da limpeza — o
+    // `jti` (que não muda na rotação) é o que faz a saída reconhecer que ainda
+    // é a própria sessão e apagar mesmo assim.
     await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
-    fetchFalso.mockImplementation(async () => {
-      // Outra tela renova a MESMA sessão: refresh novo, `jti` igual.
-      await guardarCredenciais({ access: ACCESS_A2, refresh: "rt_A2" });
-      return resposta(200, {});
+    fetchFalso.mockResolvedValue(resposta(200, {}));
+
+    const s = sair();
+    await guardarCredenciais({ access: ACCESS_A2, refresh: "rt_A2" });
+    await s;
+
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  // O caso "renovação real que termina DEPOIS da limpeza" mora em
+  // `auth_sair.test.ts`: este arquivo bateu no teto de linhas do eslint.
+
+  it("logout pendurado para sempre não atrasa a limpeza do cofre", async () => {
+    // A decisão de não esperar a rede: um `fetch` que nunca resolve (o caso do
+    // Android sem timeout) não pode manter a credencial no aparelho.
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    let soltarChegou: () => void = () => {};
+    const chegou = new Promise<void>((r) => (soltarChegou = r));
+    fetchFalso.mockImplementation(() => {
+      soltarChegou();
+      return new Promise<Response>(() => {}); // nunca resolve
     });
 
-    await sair();
+    const s = sair();
+    await chegou;
+    // O cofre já está vazio com a requisição ainda no ar.
     await expect(lerCredenciais()).resolves.toBeNull();
+    // E `sair()` resolve mesmo assim — não espera a rede.
+    await expect(s).resolves.toBeUndefined();
   });
 
   it("saída sem sessão capturada não manda requisição nenhuma", async () => {

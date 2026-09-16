@@ -54,7 +54,9 @@ let fila: Promise<void> = Promise.resolve();
  * ponytail: uma ação que nunca termina segura a fila, e a tela fica em
  * `carregando` até o app ser fechado. O caso real é o `fetch` sem timeout no
  * Android, cuja correção seria em `client.ts`. O spinner é o limite aceito:
- * deixar a montagem passar na frente é o que mostrava "Olá" com o cofre vazio.
+ * deixar a montagem passar na frente é o que faz ela ler o cofre antes de a
+ * limpeza do Sair terminar e mostrar um estado que não corresponde a ele —
+ * hoje, o erro falso "Esta tela era de outra conta."
  */
 function enfileirar(acao: () => Promise<Estado>, aplicar: (e: Estado) => void): Promise<void> {
   pendentes += 1;

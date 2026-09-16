@@ -223,5 +223,11 @@ describe("tela de entrada", () => {
     await tocar(sairNaTela, aplicar);
     expect(aplicados).toEqual([C, erro, C, E]);
     await expect(lerCredenciais()).resolves.toBeNull();
+    // Os DOIS Sair mandaram logout: a revogação sai mesmo quando a limpeza
+    // local falha, e o segundo Sair revoga de novo um refresh já capturado.
+    expect(chamadas().map((c) => c.caminho)).toEqual([
+      "/auth/logout",
+      "/auth/logout",
+    ]);
   });
 });

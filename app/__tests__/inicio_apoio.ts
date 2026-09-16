@@ -11,6 +11,10 @@ export const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, str
 export const falharApagar = (
   globalThis as unknown as { __falharApagarNoCofre: (v: boolean) => void }
 ).__falharApagarNoCofre;
+/** Prende a próxima gravação no cofre até a promessa resolver. */
+export const atrasarEscrita = (
+  globalThis as unknown as { __atrasarEscritaNoCofre: (p: Promise<void>) => void }
+).__atrasarEscritaNoCofre;
 export const fetchFalso = jest.fn();
 
 export const C: Estado = { fase: "carregando" };

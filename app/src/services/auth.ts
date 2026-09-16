@@ -132,12 +132,19 @@ export async function temSessao(): Promise<boolean> {
 }
 
 /**
- * Sair: avisa o servidor e apaga o que está no aparelho — nesta ordem, mas o
- * apagar acontece mesmo se o aviso falhar.
+ * Sair: apaga o que está no aparelho e dispara o aviso ao servidor sem
+ * esperar por ele.
  *
- * Se a limpeza dependesse da rede, um logout feito no metrô deixaria a
- * credencial no keychain e o próximo a abrir o app entraria na conta de quem
+ * A limpeza vem PRIMEIRO e não depende da rede: um logout feito no metrô, com
+ * o fetch do Android sem timeout, podia ficar pendurado para sempre — e com a
+ * limpeza no `finally` de depois da resposta, a credencial continuava no
+ * keychain enquanto isso, e o próximo a abrir o app entraria na conta de quem
  * achou que tinha saído.
+ *
+ * A revogação é disparada e esquecida (`void ... .catch`): esperar a resposta
+ * não dava durabilidade nenhuma (ela já era engolida antes) e tinha custo
+ * concreto — a tela ficaria em "carregando" até a rede resolver, com o cofre
+ * já vazio.
  *
  * A requisição fala pela sessão que INICIOU a saída, e a limpeza identifica
  * essa sessão pelo `jti`, não pelo refresh token. Os dois detalhes vêm do mesmo
@@ -156,7 +163,27 @@ export async function sair(): Promise<void> {
   // entrou depois. Saída duplicada ou tardia cai exatamente aqui.
   if (!daSaida) return;
   try {
-    await chamar("/auth/logout", perfilSchema.partial(), {
+    // Esquece a linhagem SÓ se a sessão apagada era mesmo a desta saída. Se
+    // outra conta assumiu o cofre no meio, a linhagem já é dela, e apagá-la
+    // faria as renovações em voo daquela conta virarem fim de sessão.
+    //
+    // ponytail: esta guarda NÃO tem teste que a discrimine, e a ausência é
+    // declarada em vez de escondida. Para alcançá-la, a outra conta precisa
+    // entrar E rotacionar dentro da janela da limpeza do cofre — entrar
+    // sozinho já zera a linhagem, então só a rotação seguinte a recria. Montar
+    // isso exigiria reentrância no dublê de rede, e o teste ficaria medindo o
+    // andaime. A guarda fica porque é correta e custa uma condição; quem for
+    // mexer aqui não deve confiar em vermelho para perceber que a quebrou.
+    if (await limparSessaoDe(daSaida.access, daSaida.refresh)) {
+      _esquecerRotacoes();
+    }
+  } finally {
+    // Sem `await`: a resposta não muda nada por aqui (a rejeição é engolida) e
+    // esperá-la só atrasaria a tela, com o cofre já limpo. O `.catch` evita a
+    // rejeição não tratada — o `fetch` em si já saiu de forma síncrona, dentro
+    // de `enviar`, então os testes que contam chamadas logo após `await
+    // sair()` continuam vendo o logout.
+    void chamar("/auth/logout", perfilSchema.partial(), {
       metodo: "POST",
       // O REFRESH token como credencial, não o access. O servidor revoga a
       // sessão por qualquer um dos dois, mas o access pode estar expirado — e é
@@ -165,23 +192,6 @@ export async function sair(): Promise<void> {
       // logout voltaria 200 sem ter encerrado sessão nenhuma. O refresh dura
       // catorze dias e resolve a sessão sozinho.
       credencial: { access: daSaida.refresh, refresh: daSaida.refresh },
-    });
-  } catch {
-    // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.
-  } finally {
-    // Esquece a linhagem SÓ se a sessão apagada era mesmo a desta saída. Se
-    // outra conta assumiu o cofre no meio, a linhagem já é dela, e apagá-la
-    // faria as renovações em voo daquela conta virarem fim de sessão.
-    //
-    // ponytail: esta guarda NÃO tem teste que a discrimine, e a ausência é
-    // declarada em vez de escondida. Para alcançá-la, a outra conta precisa
-    // entrar E rotacionar dentro da janela da requisição de logout — entrar
-    // sozinho já zera a linhagem, então só a rotação seguinte a recria. Montar
-    // isso exigiria reentrância no dublê de rede, e o teste ficaria medindo o
-    // andaime. A guarda fica porque é correta e custa uma condição; quem for
-    // mexer aqui não deve confiar em vermelho para perceber que a quebrou.
-    if (await limparSessaoDe(daSaida.access, daSaida.refresh)) {
-      _esquecerRotacoes();
-    }
+    }).catch(() => undefined);
   }
 }

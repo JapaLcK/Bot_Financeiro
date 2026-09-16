@@ -17,6 +17,7 @@ import {
   C,
   E,
   S,
+  atrasarEscrita,
   chamadas,
   credencialDe,
   gravador,
@@ -73,26 +74,25 @@ describe("tela de entrada com ação em andamento", () => {
   });
 
   it("a tela nova, montada com um Sair em voo, espera o Sair", async () => {
-    // A rota remonta com o Sair em voo: a tela nova monta, e o abrir dela espera o Sair terminar.
+    // A rota remonta com o Sair em voo: a tela nova monta, e o abrir dela
+    // espera o Sair terminar. O portão fica na GRAVAÇÃO do cofre, não no
+    // `/auth/logout`: desde que `sair()` deixou de esperar a rede, gatear ali
+    // não segura mais nada — o portão certo é o que a limpeza local atravessa.
     await guardarCredenciais(S);
-    const chegou = segurar();
+    rotear();
     const portao = segurar();
-    rotear({
-      "/auth/logout": async () => {
-        chegou.soltar();
-        await portao.promessa;
-        return resposta(200, {});
-      },
-    });
+    atrasarEscrita(portao.promessa);
+    // Presa na fila do cofre até o portão abrir.
+    const g = guardarCredenciais(S);
     const velho = gravador();
     const novo = gravador();
 
     const saida = tocar(sairNaTela, velho.aplicar);
-    await chegou.promessa;
+    // A leitura do Sair entra na fila do cofre atrás da gravação presa.
     const montagem = montar(novo.aplicar);
     await respirar();
     portao.soltar();
-    await Promise.all([saida, montagem]);
+    await Promise.all([saida, montagem, g]);
 
     expect(novo.aplicados).toEqual([C, E]);
     await expect(lerCredenciais()).resolves.toBeNull();
