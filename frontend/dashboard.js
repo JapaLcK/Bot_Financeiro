@@ -6486,7 +6486,7 @@ function applyTheme(theme) {
   const overviewVisible = document.getElementById("overview-view")?.classList.contains("active");
   if (overviewVisible && lastData) {
     const d = lastData;
-    if ((d.expense_categories || []).length) buildCatChart(d.expense_categories);
+    renderCatChart(d.expense_categories);
     if (_expenseSeries) buildExpenseChart(_expenseSeries, _expensePeriod);
     if (_lastHistory && _lastHistory.length) buildHistoryChart(_lastHistory);
   }
@@ -10074,6 +10074,24 @@ window.pigModalKeys && pigModalKeys("export-overlay", closeExportModal);
 /* ═══════════════════════════════════════════════════════════════════════
    CHARTS
 ═══════════════════════════════════════════════════════════════════════ */
+/* Ponto ÚNICO de decisão do gráfico de categorias: sem a destruição, o mês
+   vazio mantinha na tela o donut do mês anterior (a guarda antiga só pulava a
+   chamada). Mesma classe de bug segue em chartHistory (:10278) e chartDay
+   (:10165) — fora do escopo desta ficha. */
+function renderCatChart(cats) {
+  const vazio = !(cats || []).length;
+  const el = document.getElementById("chart-cat");
+  const empty = document.getElementById("chart-cat-empty");
+  if (vazio) {
+    if (chartCat) { chartCat.destroy(); chartCat = null; }
+    if (el) el.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (el) el.hidden = false;
+  if (empty) empty.hidden = true;
+  buildCatChart(cats);
+}
 function buildCatChart(cats) {
   const el = document.getElementById("chart-cat"); if (!el) return;
   const labels = cats.map(c => c.categoria === "sem categoria" ? " Sem Cat." : c.categoria);
@@ -10605,7 +10623,7 @@ function render(d) {
   document.getElementById("charts-title").style.display = "";
   document.getElementById("charts-grid").style.display  = "";
   setTimeout(() => {
-    if ((d.expense_categories||[]).length) buildCatChart(d.expense_categories);
+    renderCatChart(d.expense_categories);
     // Gráfico de evolução: janela rolante via /expenses/daily (7D/30D/3M).
     loadExpenseChart(_expensePeriod);
   }, 50);

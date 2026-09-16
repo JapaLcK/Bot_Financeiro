@@ -771,3 +771,33 @@ section[id] { scroll-margin-top: 96px; }
 @media (max-width: 480px) {
   .nav .pb-acct-lbl { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+/* iOS Safari dá zoom automático ao focar campo com fonte <16px, e o zoom desloca
+   o layout inteiro. Os campos públicos vinham de `.field input{font-size:.92rem}`
+   (14,72px), na linha 582 deste arquivo.
+
+   ESTE É O QUARTO LUGAR com o mesmo conserto, e a divergência é deliberada — os
+   outros três são de OUTRAS superfícies, nenhum alcança as páginas públicas:
+     · dashboard-mobile.css:86-88 — todo controle, ≤640px, `!important`. Só
+       carrega no dashboard (o <link> tem media ≤900px) e o `!important` existe
+       para vencer `.filter-input`/`.piggy-input`, que aqui não existem.
+     · admin-dashboard.html:507   — inline, página de admin, sem rota pública.
+     · chat-app.css               — escopado no painel de chat.
+   Por que `.field` e não todo input: `.field` é o wrapper dos formulários
+   públicos — as seis páginas públicas que usam `.field` (login, cadastro,
+   suporte, comecar, completar-cadastro, reset-password; só as três primeiras
+   têm caso de teste) — e é de onde vem o 14,72px. Alargar para
+   `input` global mexeria em campo que ninguém mediu, sem sintoma relatado (§0.3).
+   Por que 900px e não 640: o breakpoint de tablet já usado no repo, e o zoom do
+   iOS vale no iPad também; a faixa 641–900 não tem regra concorrente aqui.
+   FICA DE FORA, conscientemente: input público que não esteja dentro de
+   `.field`. Varridas as seis, o único é o checkbox de
+   completar-cadastro.html:59 — e o `:not()` abaixo o exclui de propósito. Se
+   aparecer outro, ele não herda esta regra.
+   O `:not([type=checkbox]):not([type=radio])` deixa as caixas de marcação em
+   paz: nelas `font-size` muda o tamanho do controle. */
+@media (max-width: 900px) {
+  .field input:not([type="checkbox"]):not([type="radio"]),
+  .field select,
+  .field textarea { font-size: 16px; }
+}

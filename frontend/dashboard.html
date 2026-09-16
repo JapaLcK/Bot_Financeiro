@@ -132,12 +132,12 @@
         <span id="status-text">Conectando…</span>
       </div>
       <button class="hbtn" id="hide-balance-btn" type="button" onclick="toggleHideBalance()" aria-pressed="false" title="Esconder saldo"><i class="ph ph-eye" aria-hidden="true"></i></button>
-      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> Atualizar</button>
-      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()"><i class="ph ph-download-simple" aria-hidden="true"></i> Importar OFX</button>
+      <button class="hbtn" id="refresh-btn" onclick="sendRefresh()" aria-label="Atualizar"><span id="ref-icon"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i></span> <span class="hbtn-label">Atualizar</span></button>
+      <button class="hbtn" data-pro-feature="ofx_import" onclick="openOfxImport()" aria-label="Importar OFX"><i class="ph ph-download-simple" aria-hidden="true"></i> <span class="hbtn-label">Importar OFX</span></button>
       <input type="file" id="ofx-file-input" accept=".ofx" style="display:none" onchange="handleOfxFileSelected(event)" />
-      <button class="hbtn" data-pro-feature="export" onclick="openExportModal()"><i class="ph ph-envelope" aria-hidden="true"></i> Exportar</button>
+      <button class="hbtn" data-pro-feature="export" onclick="openExportModal()" aria-label="Exportar"><i class="ph ph-envelope" aria-hidden="true"></i> <span class="hbtn-label">Exportar</span></button>
       <div class="user-menu" id="user-menu">
-        <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleUserMenu(event)">
+        <button class="hbtn user-menu-btn" id="user-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Menu da conta" onclick="toggleUserMenu(event)">
           <span class="user-menu-main">
             <span class="user-dot"></span>
             <span id="user-label">Minha conta</span>
@@ -231,7 +231,7 @@
       </div>
       <div class="chart-wrap line"><canvas id="chart-day"></canvas></div>
     </div>
-    <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas></div></div>
+    <div class="card"><h2>Gastos por categoria</h2><div class="chart-wrap donut"><canvas id="chart-cat"></canvas><div id="chart-cat-empty" class="empty" hidden>Sem despesas este mês.</div></div></div>
   </div>
 
   <p class="section-title" id="history-title" style="display:none">Histórico Mensal</p>
