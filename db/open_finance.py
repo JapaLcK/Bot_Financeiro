@@ -950,8 +950,8 @@ def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
     lotes abertos, e zerar destruiria dinheiro de verdade. `_sync_pocket_from_lots`
     (db/pockets.py) recompõe exatamente o próprio — o sync nunca cria lote (só
     escreve a coluna) e depósito/saque são recusados enquanto vinculado
-    (db/pockets.py:367), então todo lote aberto aqui é aporte do usuário. Sem lote
-    nenhum dá 0, que é o caso do espelho puro.
+    (`_is_of_mirror`, db/pockets.py), então todo lote aberto aqui é aporte do
+    usuário. Sem lote nenhum dá 0, que é o caso do espelho puro.
 
     Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
     apagador de saldo."""
@@ -973,23 +973,27 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
     Inicializa of_last_seen_balance com o saldo ATUAL da caixinha, pra o Banqueiro
     contar só os aportes daqui pra frente (não o saldo histórico já acumulado).
 
-    Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo —
-    recusa com OF_POCKET_READONLY, o mesmo código que o guard de depósito/saque
-    usa (db/pockets.py:367). Ela é espelho: o dinheiro está no banco e qualquer
-    posição reconhecida é reimportada no sync seguinte, então "não vincular" só
-    produziria um pocket órfão com saldo mentiroso + uma cópia nova no sync."""
+    Caixinha CRIADA pelo sync (`source='open_finance'`) nunca solta o vínculo nem
+    TROCA de posição — recusa com OF_POCKET_READONLY, o mesmo código que o guard de
+    depósito/saque usa (`_is_of_mirror`, db/pockets.py). Ela é espelho: o dinheiro
+    está no banco e qualquer posição reconhecida é reimportada no sync seguinte, então
+    "não vincular" só produziria um pocket órfão com saldo mentiroso + uma cópia nova
+    no sync. Trocar A por B é o mesmo estrago por outro caminho: A fica sem vínculo e
+    volta no sync seguinte, e o pocket passa a espelhar B com o NOME de A."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "select source, of_investment_id from pockets where id=%s and user_id=%s",
+                (pocket_id, user_id),
+            )
+            alvo = cur.fetchone()
+            if not alvo:
+                return False
+            if alvo["source"] == "open_finance" and (
+                of_investment_id is None or of_investment_id != alvo["of_investment_id"]
+            ):
+                raise ValueError("OF_POCKET_READONLY")
             if of_investment_id is None:
-                cur.execute(
-                    "select source from pockets where id=%s and user_id=%s",
-                    (pocket_id, user_id),
-                )
-                row = cur.fetchone()
-                if not row:
-                    return False
-                if row["source"] == "open_finance":
-                    raise ValueError("OF_POCKET_READONLY")
                 ok = _unbind_pocket(cur, user_id, pocket_id) > 0
                 conn.commit()
                 return ok
@@ -1251,7 +1255,7 @@ def sync_open_finance_caixinhas(connection_id: int, user_id: int) -> dict:
             # Alcança só `source='open_finance'`, isto é, o que ESTE import criou.
             # Isso já foi uma assimetria: o dedup por nome adotava a caixinha do
             # usuário SEM tocar em `source` — que é `not null default 'manual'`
-            # (db/schema.py:750) —, então a adotada ficava fora deste delete e
+            # (db/schema.py:763) —, então a adotada ficava fora deste delete e
             # duas caixinhas do mesmo banco se comportavam ao contrário. Com o
             # dedup removido, toda caixinha do banco nasce `source='open_finance'`
             # e a assimetria acabou.
@@ -2613,7 +2617,7 @@ def disconnect_open_finance_connection(
             _lock_user(cur, user_id)
             # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
             # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
-            # db/schema.py:734) e sobrava uma caixinha fantasma com o último saldo
+            # db/schema.py:719) e sobrava uma caixinha fantasma com o último saldo
             # espelhado — que o accrual seguinte transforma em LOTE
             # (`_ensure_pocket_lots`, db/pockets.py) e o "Sacar" credita na carteira
             # dinheiro que está no Nubank (medido: 800 + 1000 saíram do nada).

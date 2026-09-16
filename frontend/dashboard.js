@@ -3226,13 +3226,13 @@ function _renderGoalsView(goals) {
 }
 
 // Caixinha vinda do banco (Open Finance): saldo espelhado, sem rendimento interno.
-// Quem decide é o VÍNCULO ativo, não o `source` — é a mesma régua do backend
-// (db/pockets.py:367 e :658 recusam por `of_investment_id`, não por `source`). As duas
-// réguas AINDA discordam em dado legado: desconexão anterior a db/open_finance.py:2614
-// deixou caixinha com `source='open_finance'` e vínculo nulo, e essa o backend aceita
-// depositar/sacar. Com `source` no OR, a tela esconde os botões de uma caixinha que o
-// POST aceita (o caso está em tests/frontend/pocket_history_of.test.mjs).
-function _isOfPocket(p) { return p && p.of_investment_id != null; }
+// Vínculo ativo OU criada pelo sync — a MESMA régua do backend (`_is_of_mirror`,
+// db/pockets.py, que recusa depósito/saque pelos dois). O `source` no OR é o dado
+// LEGADO: desconexão anterior ao bloco de `disconnect_open_finance_connection`
+// (db/open_finance.py) deixou caixinha com `source='open_finance'` e vínculo nulo, e
+// nela o saque materializava o espelho como saldo próprio. Enquanto esses espelhos não
+// forem migrados, a linha é read-only nos dois lados (tests/frontend/pocket_history_of.test.mjs).
+function _isOfPocket(p) { return !!p && (p.of_investment_id != null || p.source === "open_finance"); }
 // No Grátis (pós-trial) o OF não está ativo → a caixinha do banco fica congelada.
 function _isOfStale(p) { return _isOfPocket(p) && p.of_plan_active === false; }
 function _ofPocketBadge(p) {

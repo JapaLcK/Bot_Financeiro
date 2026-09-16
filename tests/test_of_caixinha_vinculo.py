@@ -12,7 +12,7 @@ reaproveita os helpers daqui. A divisão é o teto de 350 linhas por arquivo
 pode, lá o EFEITO no saldo.
 
 CONTROLE NEGATIVO deste arquivo: tirar o `raise ValueError("OF_POCKET_READONLY")`
-do `bind_pocket_to_caixinha` deixa vermelhos os dois de recusa e o da rota; tirar o
+do `bind_pocket_to_caixinha` deixa vermelhos os três de recusa e o da rota; tirar o
 `user_id` do update deixa vermelho o de isolamento; tirar o `of_investment_id is
 not null` deixa vermelho o de desvincular quem não está vinculado. CONTROLE
 POSITIVO: a meta manual continua desvinculando (`test_meta_manual_desvincula...`) e
@@ -145,6 +145,31 @@ def test_roubar_a_caixinha_de_um_pocket_do_sync_e_recusado(user_id):
     pk = _pockets(user_id)
     assert pk["Caixinha Viagem"]["of_investment_id"] == auto["of_investment_id"]
     assert pk["Outra meta"]["of_investment_id"] is None
+
+
+def test_mudar_a_posicao_que_a_caixinha_do_sync_espelha_e_recusado(user_id):
+    """O outro lado da mesma troca: o ALVO é o pocket do sync, e o pedido (forjado ou
+    velho — a tela deixa a linha read-only) manda apontar pra OUTRA posição. Sem
+    conferir o `source` do alvo, A ficava sem vínculo (e voltava no sync seguinte) e o
+    pocket passava a espelhar B com o NOME de A. CONTROLE POSITIVO: a meta manual
+    continua trocando de posição livremente."""
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [CDB, {"id": "cx-auto", "name": "Caixinha Viagem", "type": "FIXED_INCOME",
+                          "subtype": "CDB", "balance": 500.0}])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    auto = _pockets(user_id)["Caixinha Viagem"]
+    outro_investimento = _of_id(conn_id, "cdb-vinc")
+
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.bind_pocket_to_caixinha(user_id, auto["id"], outro_investimento)
+
+    pk = _pockets(user_id)
+    assert pk["Caixinha Viagem"]["of_investment_id"] == auto["of_investment_id"]
+    assert float(pk["Caixinha Viagem"]["balance"]) == 500.0
+
+    manual = _meta_manual(user_id)                      # POSITIVO: a manual troca
+    assert db.bind_pocket_to_caixinha(user_id, manual, outro_investimento) is True
+    assert _pockets(user_id)["Viagem"]["of_investment_id"] == outro_investimento
 
 
 

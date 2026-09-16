@@ -13,7 +13,9 @@ desconexão; tirar a guarda do `_ensure_pocket_lots` (db/pockets.py) deixa verme
 o da edição de meta; tirar o `and p.of_investment_id is null` do backfill de
 `db/schema.py` deixa vermelho o do `init_db`; tirar o `balance <= 0` do delete
 deixa vermelho o da caixinha do sync com aporte; tirar o filtro `source ==
-'open_finance'` deixa vermelho o da manual zerada. O do isolamento só fica vermelho
+'open_finance'` deixa vermelho o da manual zerada; voltar `_is_of_mirror`
+(db/pockets.py) a decidir só por `of_investment_id` deixa vermelho o do espelho
+legado. O do isolamento só fica vermelho
 com as TRÊS guardas de `user_id` do disconnect fora juntas — o porquê está no
 docstring dele.
 """
@@ -234,8 +236,11 @@ def test_desconectar_nao_apaga_a_caixinha_do_sync_que_tem_aporte_do_usuario(user
     db.disconnect_open_finance_connection(user_id, conn_id)
 
     assert float(_pockets(user_id)["Viagem"]["balance"]) == 300.0   # o aporte ficou
-    db.pocket_withdraw_to_account(user_id, "Viagem", 300.0)
-    assert _carteira(user_id) == 2000.0                             # e voltou inteiro
+    # A linha é `source='open_finance'`: read-only até ser migrada (`_is_of_mirror`).
+    # O aporte continua NA caixinha — congelado, não destruído; o delete é que não a leva.
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.pocket_withdraw_to_account(user_id, "Viagem", 300.0)
+    assert _carteira(user_id) == 1700.0
 
 
 def test_desconectar_de_um_usuario_nao_toca_nas_caixinhas_do_outro(user_id):
@@ -287,3 +292,41 @@ def test_auto_cura_limpa_a_do_banco_e_nao_toca_na_manual_zerada(user_id):
     pk = _pockets(user_id)
     assert "Caixinha Viagem" not in pk        # a do banco saiu
     assert float(pk["Viagem"]["balance"]) == 0.0   # a do usuário ficou, zerada
+
+
+def test_espelho_legado_sem_vinculo_continua_read_only(user_id):
+    """O espelho LEGADO: `source='open_finance'`, vínculo NULO e o último saldo do
+    banco na coluna — o que toda desconexão anterior ao bloco de
+    `disconnect_open_finance_connection` deixou pra trás (não há backfill; o dono
+    mediu: no banco dele não existe uma dessas, isto é blindagem do caso geral).
+
+    Decidindo só pelo vínculo, o saque não vê OF nenhum: `_ensure_pocket_lots`
+    materializa os 800 espelhados como lote aberto e credita na carteira dinheiro que
+    está no Nubank. CONTROLE NEGATIVO: voltar `_is_of_mirror` (db/pockets.py) a decidir
+    só por `of_investment_id` deixa este teste vermelho pelo nome. CONTROLE POSITIVO: a
+    caixinha comum (`source='manual'`) segue aceitando depósito e saque, logo abaixo."""
+    conn_id = _seed_connection(user_id)
+    _save(conn_id, [{"id": "cx-auto", "name": "Caixinha Nubank", "type": "FIXED_INCOME",
+                     "subtype": "CDB", "balance": 800.0}])
+    db.sync_open_finance_caixinhas(conn_id, user_id)
+    auto_id = _pockets(user_id)["Caixinha Nubank"]["id"]
+    manual_id = _meta_manual(user_id)                       # carteira = 2000
+    with get_conn() as conn:                                # o que o FK antigo deixava
+        with conn.cursor() as cur:
+            cur.execute("update pockets set of_investment_id=null where id=%s and user_id=%s",
+                        (auto_id, user_id))
+        conn.commit()
+
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.pocket_withdraw_to_account(user_id, "Caixinha Nubank", 800.0)
+    with pytest.raises(ValueError, match="OF_POCKET_READONLY"):
+        db.pocket_deposit_from_account(user_id, "Caixinha Nubank", 100.0)
+
+    assert _lotes_abertos(user_id, auto_id) == 0            # o espelho não virou lote
+    assert _carteira(user_id) == 2000.0                     # nem dinheiro na carteira
+    assert float(_pockets(user_id)["Caixinha Nubank"]["balance"]) == 800.0
+
+    db.pocket_deposit_from_account(user_id, "Viagem", 300.0)      # POSITIVO: a comum
+    db.pocket_withdraw_to_account(user_id, "Viagem", 300.0)       # deposita e saca
+    assert _carteira(user_id) == 2000.0
+    assert _lotes_abertos(user_id, manual_id) == 0

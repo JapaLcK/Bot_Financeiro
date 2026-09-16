@@ -1436,9 +1436,9 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
         )
     except ValueError as exc:
         # OF_POCKET_READONLY (db/open_finance.py): caixinha criada pelo sync não
-        # solta o vínculo. Mesmo código do guard de depósito/saque (db/pockets.py:367)
-        # e mesmo 400 do resto desta API; a frase é a desta tela, que é sobre
-        # vínculo e não sobre mover dinheiro.
+        # solta o vínculo nem troca de posição. Mesmo código do guard de depósito/saque
+        # (`_is_of_mirror`, db/pockets.py) e mesmo 400 do resto desta API; a frase é
+        # a desta tela, que é sobre vínculo e não sobre mover dinheiro.
         if str(exc) != "OF_POCKET_READONLY":
             raise
         raise HTTPException(
