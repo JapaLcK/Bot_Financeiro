@@ -72,10 +72,15 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre ETH para mim",
             "venda Solana",
             "compre SOL",
+            "Piggy, compre aapl para mim",
+            "Piggy, compre btc para mim",
+            "venda eth para mim",
             "Piggy, eu deveria investir em CDB?",
             "eu deveria comprar PETR4?",
             "qual ativo eu deveria comprar?",
             "Piggy, venda todos os meus ativos",
+            "Piggy, venda todos os meus ativos agora",
+            "venda 3 ativos amanhã",
             "venda os meus fundos",
             "venda 3 ativos",
         ):
@@ -102,6 +107,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre BOLO para mim",
             "compre um livro para mim",
             "compre sol para o jardim",
+            "compre uma meta de vendas",
             "recebi 100 de um bom investimento",
             "recebi bons rendimentos do CDB",
             "recebi 100 pela venda de todos os meus ativos",
@@ -116,6 +122,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "meu AAPL é bom?",
             "PETR4F da minha carteira é boa?",
             "meu BTC é bom?",
+            "meu btc é bom?",
             "Ethereum da minha carteira é bom?",
         ):
             with self.subTest(text=text):

@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--event-log-error", action="store_true")
     parser.add_argument("--send-error", action="store_true")
     parser.add_argument("--send-error-once", action="store_true")
+    parser.add_argument("--attachment", action="store_true")
     parser.add_argument("--core-error", action="store_true")
     args = parser.parse_args()
 
@@ -74,6 +75,7 @@ def main() -> int:
                 else:
                     result = run_adapter_case(
                         args.text,
+                        attachment=args.attachment,
                         handler_behavior=args.handler_behavior,
                         event_log_error=args.event_log_error,
                         send_behavior=(

@@ -625,6 +625,7 @@ def _maybe_send_autolink_greeting_warning(
 
 
 def process_message(message: InboundMessage) -> None:
+    attachment_preprocessing = False
     try:
         reply_to = message.wa_id
         logger.info(
@@ -1311,6 +1312,7 @@ def process_message(message: InboundMessage) -> None:
 
         att_refs = message.attachments or []
         if att_refs:
+            attachment_preprocessing = True
             _send_reply(reply_to, "Recebi seu arquivo. Processando agora...")
 
         attachments: list[Any] = []
@@ -1328,6 +1330,7 @@ def process_message(message: InboundMessage) -> None:
             attachments=attachments,
         )
 
+        attachment_preprocessing = False
         outs = handle_incoming(incoming, ignora_pendencias=ignora_pendencias) or []
         if not outs:
             logger.info("WA no outgoing messages for from=%s", message.wa_id)
@@ -1362,7 +1365,12 @@ def process_message(message: InboundMessage) -> None:
             )
         traceback.print_exc()
         try:
-            _send_reply(message.wa_id, _DELIVERY_FAILURE_MESSAGE)
+            failure_message = (
+                _PROCESSING_FAILURE_MESSAGE
+                if attachment_preprocessing
+                else _DELIVERY_FAILURE_MESSAGE
+            )
+            _send_reply(message.wa_id, failure_message)
         except Exception as send_exc:
             logger.error(
                 "WA failure notice could not be sent wa_id=%s error=%s",

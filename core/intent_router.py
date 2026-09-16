@@ -135,11 +135,16 @@ _INVESTMENT_ASSET_PATTERN = (
     rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN})"
 )
 _INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}F?"
-# Tickers só de letras são indistinguíveis de palavras comuns; use símbolos
-# conhecidos em maiúsculas para não recusar compras como "compre BOLO".
+# Alguns tickers alfabéticos são palavras comuns. Esses só contam como ativos
+# em maiúsculas; os demais aceitam a grafia informal usada no WhatsApp.
+_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN = (
+    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|NFLX|"
+    r"BTC|ETH|XRP|USDT|USDC|BNB|DOGE|LTC)"
+)
+_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN = r"(?:META|SOL)"
 _COMMON_ALPHABETIC_TICKER_PATTERN = (
-    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|META|NFLX|"
-    r"BTC|ETH|SOL|XRP|USDT|USDC|BNB|DOGE|LTC)"
+    rf"(?:{_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN}|"
+    rf"{_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN})"
 )
 
 
@@ -163,7 +168,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     bare_ambiguous_asset = (
         rf"(?<!de )(?<!da )(?<!do )\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b"
     )
-    polite_ending = r"(?:\s+(?:para mim|por favor))?\s*[?.!]*$"
+    polite_ending = r"(?:\s+(?:para mim|por favor|agora|hoje|amanha|ja))*\s*[?.!]*$"
     ambiguous_action_context = (
         re.search(
             rf"\b{ambiguous_action}\b\s+"
@@ -205,7 +210,12 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             text or "",
             flags=re.IGNORECASE,
         )
-        or re.search(rf"\b{_COMMON_ALPHABETIC_TICKER_PATTERN}\b", text or "")
+        or re.search(
+            rf"\b{_UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN}\b",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+        or re.search(rf"\b{_AMBIGUOUS_ALPHABETIC_TICKER_PATTERN}\b", text or "")
     )
     if not asset_hint:
         return False

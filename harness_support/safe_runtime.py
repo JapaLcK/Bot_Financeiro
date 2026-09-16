@@ -233,17 +233,21 @@ def install_runtime_boundaries(
     )
 
 
-def whatsapp_payload(text: str) -> dict[str, Any]:
+def whatsapp_payload(text: str, *, attachment: bool = False) -> dict[str, Any]:
+    inbound = {
+        "id": "harness-in-1",
+        "from": "5511999999999",
+        "timestamp": "1710000000",
+        "type": "document" if attachment else "text",
+    }
+    if attachment:
+        inbound["document"] = {"id": "harness-media-1", "filename": "teste.pdf"}
+    else:
+        inbound["text"] = {"body": text}
     return {
         "entry": [{"changes": [{"value": {
             "contacts": [{"wa_id": "5511999999999"}],
-            "messages": [{
-                "id": "harness-in-1",
-                "from": "5511999999999",
-                "timestamp": "1710000000",
-                "type": "text",
-                "text": {"body": text},
-            }],
+            "messages": [inbound],
         }}]}]
     }
 
@@ -251,6 +255,7 @@ def whatsapp_payload(text: str) -> dict[str, Any]:
 def run_adapter_case(
     text: str,
     *,
+    attachment: bool = False,
     handler_behavior: str = "reply",
     event_log_error: bool = False,
     send_behavior: str = "reply",
@@ -270,7 +275,7 @@ def run_adapter_case(
         modules.remember("adapters.whatsapp.wa_runtime")
         from adapters.whatsapp.wa_runtime import process_payload
 
-        processed = process_payload(whatsapp_payload(text))
+        processed = process_payload(whatsapp_payload(text, attachment=attachment))
         delivered = bool(replies)
         return {
             "extracted": processed,
