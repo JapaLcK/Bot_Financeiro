@@ -63,19 +63,21 @@ const LONGA = "✓ Lançamento salvo e a fatura do cartão foi recalculada com s
 
 /**
  * Folga de projeto entre o rodapé do toast e o topo do FAB, no piso do
- * arrasto, e a tolerância com que ela é asserida.
+ * arrasto — asserida EXATA, sem tolerância.
  *
- * A tolerância NÃO é frescura de arredondamento: os dois lados medem o
- * viewport de fontes diferentes. O rodapé do toast é CSS — sai de
- * `altura_do_viewport - 158`, com a altura FRACIONÁRIA que o layout usa
- * (812,3694… neste headless). O topo do FAB é JS — o clampTop lê
- * `window.innerHeight`, que é INTEIRO (812). A folga real vale
- * `828 - altura_fracionária`, ou seja, 8px MENOS a parte fracionária do
- * viewport: medi 7,9987 numa execução e 7,6306 em outra, e nenhuma das duas é
- * bug. Daí 1px, que absorve a fração inteira e continua pegando qualquer
- * regressão de verdade — o menor passo que o CSS ou o RESERVE_BOTTOM dão é 8.
+ * Não há fração a absorver: o viewport é 812 inteiro, o toast é ancorado por
+ * `bottom: calc(92px + 58px + 8px)` inteiro (app-mode.css) → rodapé em
+ * 812 − 158 = 654, e o piso do FAB é 812 − 58 − 92 = 662 (clampTop,
+ * dashboard-chat.js). Folga = 8, exata. Os 7,9987 e 7,6306 que uma versão
+ * anterior deste comentário atribuía a "viewport fracionário" eram a cauda do
+ * `translateY(10px)` da transição de entrada, lida por um `waitForTimeout`
+ * fixo — o defeito que o `comToast` (`_toast.mjs`) barra ao esperar
+ * `getAnimations().length === 0`. Medido com `FOLGA = 9` para forçar o
+ * vermelho e ler o valor: 10 rodadas normais + 2 com `PB_TEST_CPU_THROTTLE=50`,
+ * 24 medições (right/left), todas `8px`. Uma tolerância aqui só esconderia
+ * o retorno desse defeito.
  */
-const FOLGA = 8, EPS = 1;
+const FOLGA = 8;
 
 /**
  * O host TEM que ser 127.0.0.1: o app-mode.js só mapeia `/dashboard.html` para
@@ -324,7 +326,7 @@ test("(c) FAB em REPOUSO (bottom do CSS) não toca o toast", async () => {
   const m = await medir(page);
   assert.equal(m.area, 0,
     `FAB em repouso sobrepõe o toast: ${m.ow}×${m.oh} = ${m.area}px² — ${JSON.stringify(m)}`);
-  assert.ok(m.outro.top - m.toast.bottom >= FOLGA - EPS,
+  assert.ok(m.outro.top - m.toast.bottom >= FOLGA,
     `folga de repouso menor que ${FOLGA}px: ${m.outro.top - m.toast.bottom}px — ${JSON.stringify(m)}`);
   await page.__ctx.close();
 });
@@ -345,9 +347,9 @@ for (const side of ["right", "left"]) {
     // anterior disfarçado e a cobertura do arrasto é fantasia.
     assert.ok(m.outro.top < 670,
       `o clamp não subiu o FAB acima do repouso (top ${m.outro.top}) — caso vacuo`);
-    // `- EPS`: aqui a folga de projeto é EXATAMENTE FOLGA, e o layout devolve
-    // 7.99871826171875. Ver o comentário de FOLGA.
-    assert.ok(m.outro.top - m.toast.bottom >= FOLGA - EPS,
+    // Aqui a folga de projeto é EXATAMENTE FOLGA, e é isso que se assere: ver
+    // o comentário de FOLGA.
+    assert.ok(m.outro.top - m.toast.bottom >= FOLGA,
       `folga no piso menor que ${FOLGA}px: ${m.outro.top - m.toast.bottom}px — ${JSON.stringify(m)}`);
 
     await comSafeAreaDeIphone(page);
