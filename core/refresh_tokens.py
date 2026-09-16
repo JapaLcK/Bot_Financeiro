@@ -197,6 +197,33 @@ def consume_refresh_token(
         return None
 
 
+def session_of(plain_token: str) -> tuple[int, str] | None:
+    """`(user_id, session_jti)` do refresh token, ou None.
+
+    Existe porque o logout precisa revogar a SESSÃO, não só a linha do token.
+    Quem sai pelo app com o access token já expirado só tem o refresh na mão —
+    e revogar só aquela linha deixava `auth_sessions` viva, então o
+    `dashboard_token` de 12h seguia abrindo as rotas de dados depois do logout.
+
+    Não filtra por `revoked_at`/`expires_at` de propósito: sair com um token já
+    revogado ainda tem de derrubar a sessão. O logout é idempotente e é a
+    última chance de fechar a porta.
+    """
+    if not plain_token or not plain_token.startswith(REFRESH_TOKEN_PREFIX):
+        return None
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select user_id, session_jti from auth_refresh_tokens where token_hash = %s",
+                (_hash(plain_token),),
+            )
+            row = cur.fetchone()
+        return (int(row["user_id"]), row["session_jti"]) if row else None
+    except Exception as exc:
+        logger.error("[refresh] erro ao resolver sessão do token: %s", exc, exc_info=True)
+        return None
+
+
 def revoke_refresh_token(plain_token: str) -> bool:
     """Revoga um único refresh token (usado no logout). Retorna True se algo foi revogado."""
     if not plain_token or not plain_token.startswith(REFRESH_TOKEN_PREFIX):

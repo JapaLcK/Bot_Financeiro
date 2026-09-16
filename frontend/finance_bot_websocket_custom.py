@@ -49,6 +49,7 @@ from token_utils import decode_dashboard_token_full, make_dashboard_token
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
+    ADMIN_AUTH_COOKIE_NAME,
     ensure_admin_tables,
     log_auth_login_event,
     log_system_event,
@@ -75,7 +76,9 @@ from db.connection import (
     TIPO_RECEITA_SQL,
     cat_key_sql,
 )
-from db.open_finance import BANK_ACCOUNTS_SQL
+from db.open_finance import (
+    BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
+)
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -134,6 +137,7 @@ from frontend.routes.shared import (
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
+    extract_bearer_token as _extract_bearer_token,
     get_auth_token_from_request as _get_auth_token_from_request,
     invalidate_dashboard_current_cache as _invalidate_dashboard_current_cache,
     jdump,
@@ -804,6 +808,12 @@ async def get_financial_data(
     of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
     of_bank_count = int(of_bank_rows[0]["n"]) if of_bank_rows else 0
 
+    # O dashboard NÃO passa por `get_consolidated_balance` — monta o snapshot com
+    # query própria. A mesma correção de leitura tem de valer aqui, senão a tela
+    # segue contando o gasto fundido duas vezes (§0.7: o fragmento é um só).
+    merged_delta_rows = await _q(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
+    delta_fundido = float(merged_delta_rows[0]["d"]) if merged_delta_rows else 0.0
+
     # Reformat cards (era loop dentro do bloco de queries)
     cards = []
     for r in card_rows:
@@ -963,7 +973,7 @@ async def get_financial_data(
         "month":              m,
         "is_current_month":   is_current,
         "history_earliest_date": earliest_history_date.isoformat() if earliest_history_date else None,
-        "balance":            float(account["balance"]) if account else 0.0,
+        "balance":            (float(account["balance"]) if account else 0.0) + delta_fundido,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
         "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
@@ -1402,12 +1412,18 @@ def _render_xlsx(
 
 
 async def _fetch_export_balance(user_id: int) -> float:
-    """Saldo atual da conta, compartilhado pelos anexos de resumo."""
+    """Saldo atual da conta, compartilhado pelos anexos de resumo.
+
+    Carteira EXIBIDA (com o gasto fundido devolvido), a mesma do dashboard: um
+    PDF que contradiz a tela é pior que um PDF sem saldo.
+    """
+    from db.open_finance import merged_wallet_delta_async
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
             row = await cur.fetchone()
-    return float(row["balance"]) if row else 0.0
+            delta_fundido = await merged_wallet_delta_async(cur, user_id)
+    return (float(row["balance"]) if row else 0.0) + float(delta_fundido)
 
 
 async def build_pdf(
@@ -2228,11 +2244,77 @@ def _csrf_exempt(path: str) -> bool:
     return path in CSRF_EXEMPT_PATHS
 
 
+def _sem_credencial_ambiente(request: Request) -> bool:
+    """True quando a requisição não traz cookie NENHUM.
+
+    O CSRF defende contra credencial **ambiente**: o navegador anexa o cookie
+    sozinho, então uma página de terceiro dispara uma escrita autenticada sem
+    precisar ler nada da vítima. Sem cookie de sessão não existe credencial
+    ambiente, e o par cookie+header deixa de proteger alguma coisa.
+
+    **A condição é a ausência de cookie, e só.** Nenhum cabeçalho participa
+    dela — nem `Authorization`, nem `X-PigBank-Client`. É o ponto: cabeçalho é
+    ALEGAÇÃO de quem chama, e uma isenção que dependesse dele seria contornável
+    mandando a alegação. O que o atacante não controla é o cookie: se a vítima
+    tem sessão, o navegador o envia sozinho, e aí o par volta a ser exigido.
+
+    A versão anterior exigia `Authorization: Bearer` presente, e a revisão
+    mostrou duas consequências. Uma, o app não conseguia fazer LOGIN: ali ele
+    ainda não tem token nenhum. Outra, um Bearer de lixo bastava para tirar o
+    CSRF de rota pública de escrita, porque a presença nunca foi validada.
+
+    **O CORS não sustenta esta isenção e não é ele o argumento.** A allowlist
+    estrita continua valendo e é útil, mas cliente nativo não passa por CORS —
+    quem sustenta é a ausência de credencial ambiente.
+
+    A condição é **nenhum cookie**, e não "nenhum cookie de sessão" — é mais
+    estrita e inclui a outra. Dois motivos. O `csrf_token` é plantado pelo
+    próprio middleware em qualquer método seguro sem cookie, então todo
+    navegador que carregou uma página nossa o tem: um pedido com jar vazio não
+    é um navegador com relação conosco. E, medido na suíte, o recorte por
+    "sessão" tirava o CSRF de requisições que a suíte usava para provar
+    comportamento do site — entre elas a guarda contra 500 com header
+    não-ASCII, que só corre se a comparação acontecer.
+
+    A checagem é pela PRESENÇA da chave, não pelo valor, e `request.cookies`
+    já é o mapa inteiro. `Cookie: x=v; x=` faz o parser guardar a ÚLTIMA
+    ocorrência e `cookies.get("x")` devolve `""`, que é falsy — por valor, uma
+    duplicata vazia apagaria do teste uma credencial que está no jar.
+
+    **A ausência de cookie não basta, e a revisão mostrou por quê.** Os cookies
+    de SESSÃO são `SameSite=lax`, então eles nunca viajaram num POST cross-site
+    — quem barrava o `<form method=post>` de terceiro contra `/auth/login`,
+    `/auth/register` e `/auth/forgot-password` era o cookie de CSRF, que é
+    `strict`. Só com "sem cookie" a isenção reabria **login CSRF**: a página do
+    atacante faz o navegador da vítima entrar na CONTA DELE, e a vítima segue
+    usando o site achando que é a sua.
+
+    Daí a segunda condição: o corpo tem de ser `application/json`. Um `<form>`
+    cross-site só consegue emitir `urlencoded`, `multipart` ou `text/plain` —
+    os três tipos que dispensam preflight —, e um `fetch` cross-origin com JSON
+    precisa de uma aprovação de preflight que esta borda não dá. Não é o CORS
+    sustentando a isenção do cliente nativo: é a regra do NAVEGADOR fechando a
+    única porta pela qual um navegador atacaria. Cliente nativo não é atacante
+    de CSRF — CSRF, por definição, precisa do navegador da vítima.
+
+    Credencial inválida continua morrendo em 401 no `Depends`, que é o erro
+    certo: um 403 de CSRF no lugar esconderia o motivo real de quem depura.
+    """
+    if request.cookies:
+        return False
+    tipo = (request.headers.get("content-type") or "").split(";")[0].strip()
+    return tipo.lower() == "application/json"
+
+
 @app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
     token = request.cookies.get(CSRF_COOKIE_NAME) or ""
 
-    if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
+    if (
+        request.method.upper() not in CSRF_SAFE_METHODS
+        and not _csrf_exempt(request.url.path)
+        and not _sem_credencial_ambiente(request)
+    ):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
         if not token or not header_token or not constant_time_eq(header_token, token):
             # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
@@ -2258,7 +2340,22 @@ async def csrf_middleware(request: Request, call_next):
             )
 
     response = await call_next(request)
-    if request.method.upper() in CSRF_SAFE_METHODS and not token:
+    # Cookie de CSRF só para quem vai USAR cookie. Um GET do app plantava o
+    # `csrf_token`, e um cliente nativo com cookie jar ligado o guardaria — aí a
+    # escrita SEGUINTE chegaria com jar não-vazio, perderia a isenção e tomaria
+    # 403, e o `/auth/refresh` cairia no canal de navegador sem devolver token
+    # no corpo. O sintoma seria "funciona na primeira tela e quebra depois", que
+    # é caro de depurar porque parece intermitente.
+    #
+    # O header aqui está no papel legítimo dele: escolher o fluxo, não conceder
+    # nada. Navegador nenhum o manda, e quem o mandar só abre mão de receber um
+    # cookie que não ia usar.
+    if (
+        request.method.upper() in CSRF_SAFE_METHODS
+        and not token
+        and (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
+        != APP_CLIENT_APP
+    ):
         _set_csrf_cookie(response, _make_csrf_token())
     return response
 
@@ -2576,6 +2673,18 @@ REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_MAX_AGE = 14 * 24 * 3600  # 14 dias absolutos
 REFRESH_COOKIE_PATH = "/auth/refresh"     # só vai em request específica
 
+# Os cookies que dão credencial AMBIENTE a uma requisição. São QUATRO: o quarto
+# é o do painel de admin, cujas rotas são registradas no MESMO `app`
+# (`core/admin_dashboard.register_admin_routes`) e portanto passam por este
+# mesmo middleware. A lista tinha três e a revisão pegou a ausência. O nome vem
+# IMPORTADO do módulo dono, não copiado, para não existirem duas versões (§0.7).
+COOKIES_DE_SESSAO = (
+    AUTH_COOKIE_NAME,
+    DASHBOARD_COOKIE_NAME,
+    REFRESH_COOKIE_NAME,
+    ADMIN_AUTH_COOKIE_NAME,
+)
+
 def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str, str]:
     """Cria uma sessao em auth_sessions + emite access JWT + refresh token.
 
@@ -2623,6 +2732,104 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
         max_age=int(DASHBOARD_SESSION_HOURS * 3600),
     )
     return token
+
+
+APP_CLIENT_HEADER = "x-pigbank-client"
+APP_CLIENT_APP = "app"
+
+
+def _entrega_sessao(
+    request: Request,
+    response: Response,
+    *,
+    user_id: int,
+    access: str,
+    jti: str,
+    refresh: str,
+) -> dict[str, str | int]:
+    """Entrega a sessão pelo canal do cliente. Devolve o que vai no CORPO.
+
+    Navegador recebe os três cookies, exatamente como sempre, e um dicionário
+    vazio — a resposta sai byte a byte idêntica à de antes desta mudança.
+
+    App (`X-PigBank-Client: app`, **e sem cookie nenhum**) recebe os três tokens
+    no corpo e nenhum cookie. As duas metades da decisão são a mesma decisão, e por isso moram
+    na mesma função: um cliente que recebe token no corpo não pode receber
+    cookie junto.
+
+    **Por que o app não pode receber cookie.** O `fetch` do React Native tem
+    cookie jar ligado por padrão. Se o servidor mandasse `Set-Cookie`, o app
+    guardaria os cookies sem querer e a requisição SEGUINTE carregaria
+    credencial ambiente — aí o CSRF volta a exigir o par cookie+header, que o
+    app não tem, e a segunda escrita toma 403 depois de a primeira ter
+    funcionado. É um sintoma caro de depurar (parece intermitente, e não é), e
+    `tests/test_auth_app_csrf.py` o reproduziu antes de virar bug.
+
+    **O header é ALEGAÇÃO do cliente, nunca autorização.** Quem chega aqui já
+    passou pela autenticação, e o que recebe é a própria credencial — a mesma
+    que sairia no cookie. Não isenta gate nenhum: é a lição do `_is_pigbank_app`
+    (`_is_pigbank_app`, em `frontend/routes/shared.py`), onde o UA CONCEDIA e
+    virou brecha. Aqui ele só escolhe o canal de entrega.
+    """
+    # O header ESCOLHE o canal; quem AUTORIZA o canal do corpo é a ausência de
+    # cookie. Sem a segunda metade, um script same-origin (XSS) mandava o header
+    # no `/auth/refresh`, o navegador anexava o cookie `HttpOnly` de refresh
+    # sozinho, e a resposta devolvia o refresh rotacionado de 14 dias NO CORPO —
+    # legível por JavaScript. Ou seja: o `HttpOnly` seria anulado por um header
+    # que o atacante controla. Com cookie no jar, a resposta é a de navegador.
+    pedido = (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
+    if pedido != APP_CLIENT_APP or request.cookies:
+        _set_auth_cookie(response, access)
+        _set_refresh_cookie(response, refresh)
+        _set_dashboard_cookie(response, int(user_id), jti=jti)
+        return {}
+    # Corpo com refresh token de 14 dias não pode ser guardado por ninguém no
+    # caminho. O `/auth/refresh` já fazia `_no_store`; o login, a verificação de
+    # e-mail e o MFA não faziam, e passaram a carregar credencial no corpo.
+    _no_store(response)
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "dashboard_token": make_dashboard_token(
+            int(user_id), hours=DASHBOARD_SESSION_HOURS, jti=jti
+        ),
+        "expires_in": AUTH_COOKIE_MAX_AGE,
+    }
+
+
+def _limpa_e_reemite_csrf(request: Request, resp: Response) -> None:
+    """Fim de sessão: apaga os cookies e devolve um CSRF novo — só para QUEM TEM.
+
+    O CSRF novo existe porque `_clear_session_cookies` apaga o `csrf_token`
+    junto, e o middleware só o reemite em método seguro sem cookie: a /login já
+    carregou, então o `POST /auth/login` seguinte sairia sem token e tomaria
+    403. Foi o que derrubou o smoke de produção do #224.
+
+    A guarda de jar vazio é o mesmo princípio do `_entrega_sessao`: não plantar
+    cookie em cliente que não usa cookie. Para o app o bloco todo é ruído — ele
+    manda `credentials: "omit"` e nada seria guardado — e, pior, um cookie
+    plantado aqui faria a requisição SEGUINTE ter credencial ambiente e voltar
+    a exigir o par do CSRF. Medido: era o que derrubava o terceiro passo do
+    teste de replay.
+    """
+    if not request.cookies:
+        return
+    _clear_session_cookies(resp)
+    _set_csrf_cookie(resp, _make_csrf_token())
+
+
+def _refresh_token_do_header(request: Request) -> str:
+    """O refresh token vindo de `Authorization: Bearer rt_...`, ou "".
+
+    Exige o prefixo `rt_` de propósito: sem ele, um access JWT mandado por
+    engano no header seria encaminhado a `consume_refresh_token` — que o
+    rejeitaria, mas só depois de a string inteira passear pelo log de erro
+    daquele módulo. O prefixo é o mesmo que `core/refresh_tokens.py:32`
+    declara, e a checagem lá continua valendo; esta aqui é a porta, não a
+    fechadura.
+    """
+    token = (_extract_bearer_token(request) or "").strip()
+    return token if token.startswith("rt_") else ""
 
 
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -2855,6 +3062,7 @@ class DashboardLinkBody(BaseModel):
     code: str
 
 
+
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
@@ -3051,9 +3259,9 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token, jti, refresh = _issue_session_token(user_id, body.email.strip().lower(), request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     await _apply_referral_attribution(request, response, int(user_id))
     await _apply_prospect_attribution(request, response, int(user_id))
@@ -3092,6 +3300,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -3157,9 +3366,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
     link_code  = create_link_code(user_id, minutes_valid=15)
     token, jti, refresh = _issue_session_token(user_id, result["email"], request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     # Fire ANTES do log_auth_login_event: senao o IP atual ja vira "conhecido".
     await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
@@ -3181,6 +3390,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -3209,16 +3419,44 @@ async def auth_logout(request: Request, response: Response):
                         user_id_raw, jti, exc_info=True,
                     )
 
-    # Revoga também o refresh_token específico do cookie (caso a sessão já
-    # não bata — defesa em profundidade).
-    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
-    if refresh_in_cookie:
+    # Revoga também o refresh_token APRESENTADO (caso a sessão já não bata —
+    # defesa em profundidade). Cookie no navegador, `Authorization` no app: a
+    # segunda fonte é a mesma do `/auth/refresh`, e sem ela este ramo era
+    # inerte para quem não tem cookie. Com o access token expirado — o caso
+    # comum de um app parado por mais de 15 minutos — o ramo de cima não
+    # decodifica o JWT e não revoga nada, então ESTE era o único que sobrava, e
+    # ele lia só o cookie. Resultado: 200 com cara de sucesso e um refresh vivo
+    # por 14 dias no aparelho que o usuário acabou de deslogar.
+    refresh_apresentado = (
+        request.cookies.get(REFRESH_COOKIE_NAME) or ""
+    ).strip() or _refresh_token_do_header(request)
+    if refresh_apresentado:
         try:
-            from core.refresh_tokens import revoke_refresh_token
-            await asyncio.to_thread(revoke_refresh_token, refresh_in_cookie)
+            from core.refresh_tokens import (
+                revoke_refresh_token,
+                revoke_session_refresh_tokens,
+                session_of,
+            )
+            await asyncio.to_thread(revoke_refresh_token, refresh_apresentado)
+            # E a SESSÃO junto. Revogar só a linha do token deixava
+            # `auth_sessions` viva, e o `dashboard_token` de 12h seguia abrindo
+            # as rotas de dados depois do logout — o usuário via sucesso e a
+            # sessão continuava de pé. Acontece quando o access token já
+            # expirou (app parado >15 min) e a credencial apresentada é o
+            # refresh: o ramo do JWT acima não recupera `jti` nenhum.
+            #
+            # É a MESMA classe que já mordeu duas vezes neste PR: sair tem de
+            # revogar a sessão, venha o `jti` de onde vier.
+            dona = await asyncio.to_thread(session_of, refresh_apresentado)
+            if dona:
+                dono_id, jti_do_refresh = dona
+                await asyncio.to_thread(revoke_session, dono_id, jti_do_refresh)
+                await asyncio.to_thread(
+                    revoke_session_refresh_tokens, jti_do_refresh
+                )
         except Exception:
             logging.getLogger(__name__).warning(
-                "logout: falha ao revogar refresh token do cookie", exc_info=True,
+                "logout: falha ao revogar refresh token / sessão", exc_info=True,
             )
 
     _clear_session_cookies(response)
@@ -3239,10 +3477,12 @@ async def auth_logout(request: Request, response: Response):
 @app.post("/auth/refresh")
 @limiter.limit("60/minute")
 async def auth_refresh(request: Request, response: Response):
-    """Renova o access token usando o refresh_token do cookie.
+    """Renova o access token usando o refresh_token do cookie ou do Authorization.
 
     Fluxo:
-      1. Lê refresh_token do cookie (path=/auth/refresh).
+      1. Lê refresh_token do cookie (path=/auth/refresh) ou, na falta dele, do
+         header `Authorization: Bearer rt_...` — é assim que o app nativo
+         renova, sem cookie jar.
       2. Rotaciona: marca antigo como usado, emite novo refresh com mesmo session_jti.
       3. Emite novo access token (15min) + dashboard_token.
       4. Atualiza auth_sessions.last_seen_at.
@@ -3271,9 +3511,27 @@ async def auth_refresh(request: Request, response: Response):
     cai em 400 — e tudo bem, porque chegar neste ramo exige ter perdido o cookie
     de refresh TAMBÉM. Enquanto ele estiver no jar a revogação é vista pelo
     `consume_refresh_token` e o ramo é 401, mesmo quando quem revogou foi outro
-    aparelho (reset de senha → `revoke_user_refresh_tokens`). E quem se autentica
-    por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
-    clientes desta rota, `login.html` e o interceptor, são de cookie).
+    aparelho (reset de senha → `revoke_user_refresh_tokens`).
+
+    **O `Authorization` é a SEGUNDA fonte do token, nunca um atalho.** Cookie
+    primeiro, header só na ausência dele; daí em diante o caminho é um só. A
+    rotação e a detecção de replay continuam inteiras em
+    `core/refresh_tokens.py:73` (`consume_refresh_token`) — quem renova pelo
+    header apresenta o mesmo token opaco, sofre a mesma rotação, e um replay
+    revoga tudo do usuário igual. Antes disto, quem se autenticava por
+    `Authorization: Bearer` caía em 401 aqui, porque os dois clientes da rota
+    eram de cookie.
+
+    **Por que o header e não o corpo.** O app chega nesta rota justamente
+    quando o access token expirou, então ele não tem Bearer de sessão para
+    apresentar — e sem Bearer nenhum a requisição não satisfaz
+    `_sem_credencial_ambiente` e morre em 403 no CSRF antes de chegar aqui.
+    Medido por `tests/test_auth_app_refresh.py`. Pôr o refresh token no
+    `Authorization` resolve o CSRF pela porta da frente (a credencial não é
+    ambiente porque está num header que só quem a possui consegue mandar) e
+    dispensa modelo de corpo novo, que traria junto o risco de 422 nos dois
+    clientes web, que mandam JSON com corpo VAZIO (`login.html:113` e
+    `static/auth-refresh.js:57`).
 
     Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
     `HTTPException` descarta os headers do sub-response injetado (medido,
@@ -3281,8 +3539,10 @@ async def auth_refresh(request: Request, response: Response):
     dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
     ver o comentário no primeiro ramo.
     """
-    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
-    if not refresh_in_cookie:
+    refresh_apresentado = (
+        request.cookies.get(REFRESH_COOKIE_NAME) or ""
+    ).strip() or _refresh_token_do_header(request)
+    if not refresh_apresentado:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
         if sessao_viva:
@@ -3294,34 +3554,20 @@ async def auth_refresh(request: Request, response: Response):
         # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
         # olha o dashboard_token, não o access. Nem assinava, nem relogava.
         resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
-        _clear_session_cookies(resp)
-        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
-        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
-        # reemite em método seguro sem cookie — a /login já carregou, então o
-        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
-        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
-        # não pode levar junto a credencial de que o formulário precisa.
-        _set_csrf_cookie(resp, _make_csrf_token())
+        _limpa_e_reemite_csrf(request, resp)
         return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
     ip = get_remote_address(request) or None
     ua = request.headers.get("user-agent") or None
     result = await asyncio.to_thread(
-        consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
+        consume_refresh_token, refresh_apresentado, ip=ip, user_agent=ua,
     )
     if not result:
         # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
         # do ramo acima para montar a resposta em vez de dar raise (#175).
         resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
-        _clear_session_cookies(resp)
-        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
-        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
-        # reemite em método seguro sem cookie — a /login já carregou, então o
-        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
-        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
-        # não pode levar junto a credencial de que o formulário precisa.
-        _set_csrf_cookie(resp, _make_csrf_token())
+        _limpa_e_reemite_csrf(request, resp)
         return _no_store(resp)
 
     user_id = int(result["user_id"])
@@ -3337,12 +3583,14 @@ async def auth_refresh(request: Request, response: Response):
         email = ""
 
     access = _make_jwt(user_id, email, jti=session_jti)
-    _set_auth_cookie(response, access)
-    _set_refresh_cookie(response, new_refresh)
-    # Renova dashboard_token também (mesmo jti)
-    _set_dashboard_cookie(response, user_id, jti=session_jti)
+    # Navegador: renova os três cookies (o dashboard_token com o MESMO jti).
+    # App: recebe os três no corpo, e nenhum cookie.
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=access, jti=session_jti,
+        refresh=new_refresh,
+    )
     _no_store(response)
-    return {"ok": True}
+    return {"ok": True, **credenciais}
 
 
 @app.post("/auth/forgot-password")
@@ -3739,9 +3987,9 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
 
     link_code = await asyncio.to_thread(create_link_code, user_id, 15)
     token, jti, refresh = _issue_session_token(user_id, user["email"], request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     # New-IP audit ANTES do log_auth_login_event de sucesso. Rows de
     # mfa_pending (criadas em /auth/login) sao filtradas pelo helper.
@@ -3763,6 +4011,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -4297,9 +4546,9 @@ async def auth_google_complete_signup(
     email = result["email"]
 
     jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-    _set_auth_cookie(response, jwt_token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, user_id, jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=jwt_token, jti=jti, refresh=refresh
+    )
 
     await _apply_referral_attribution(request, response, user_id)
     await _apply_prospect_attribution(request, response, user_id)
@@ -4344,6 +4593,7 @@ async def auth_google_complete_signup(
         "link_code": result["link_code"],
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -6726,6 +6976,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     # ── Receita / Despesa → fluxo padrão de launches ──────────────────────
     from db import add_launch_and_update_balance
+    from db.accounts import carteira_exibida
 
     nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
     inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
@@ -6774,7 +7025,13 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "categoria": categoria,
         "alvo": alvo,
         "nota": nota,
-        "new_balance": float(new_balance),
+        # `new_balance` foi lido ANTES do `reconcile_manual_launch` acima, que
+        # funde o lançamento com o espelho do banco — mesma defasagem de
+        # `core/handlers/launches.py:1223` e `core/services/quick_entry.py:63`,
+        # terceiro chamador. Aqui é contrato JSON, sem copy: reusa
+        # `carteira_exibida` em vez de um helper novo.
+        "new_balance": float(await asyncio.to_thread(
+            carteira_exibida, int(user_id), new_balance)),
         "is_internal_movement": is_internal,
     }
 
@@ -7628,9 +7885,14 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     Se delta == 0, não cria nada (idempotente).
     """
     _authorize_dashboard_access(request, user_id)
-    from db.accounts import get_balance, add_launch_and_update_balance
+    from db.accounts import add_launch_and_update_balance, carteira_exibida
+    from db import get_consolidated_balance
 
-    current = await asyncio.to_thread(get_balance, user_id)
+    # A Carteira EXIBIDA, não `accounts.balance` cru: com um gasto fundido no
+    # Open Finance os dois diferem, e calcular o delta contra o cru faria quem
+    # vê 0,00 e pede alvo 0 ganhar um real do nada na tela.
+    cb = await asyncio.to_thread(get_consolidated_balance, user_id)
+    current = float(cb["manual"] or 0)
     delta = float(payload.target_balance) - float(current)
     if abs(delta) < 0.005:
         return {"ok": True, "balance": float(current), "delta": 0.0, "launch_id": None}
@@ -7639,13 +7901,21 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     valor = abs(delta)
     nota = "Ajuste de saldo manual"
 
-    launch_id, _seq, new_bal = await asyncio.to_thread(
+    launch_id, _seq, _new_bal = await asyncio.to_thread(
         add_launch_and_update_balance,
         user_id, tipo, valor, "ajuste", nota,
         categoria="ajuste", is_internal_movement=True,
     )
     _invalidate_dashboard_current_cache(user_id)
-    return {"ok": True, "balance": float(new_bal), "delta": delta, "launch_id": launch_id}
+    # RELÊ em vez de afirmar. `_new_bal` é o `accounts.balance` CRU e `delta`
+    # foi calculado contra a Carteira exibida — devolver os dois faz os campos
+    # da mesma resposta falarem de bases diferentes. Devolver `target_balance`
+    # fecharia a álgebra, mas seria verdadeiro POR CONSTRUÇÃO: com o sync
+    # fundindo entre a leitura de `current` e a escrita, a resposta declararia
+    # um saldo que nunca existiu. A releitura mede.
+    novo = await asyncio.to_thread(carteira_exibida, user_id, _new_bal)
+    return {"ok": True, "balance": float(novo),
+            "delta": delta, "launch_id": launch_id}
 
 
 # ─── Recurring expenses / Gastos Fixos (Sprint 4) ────────────────────────────

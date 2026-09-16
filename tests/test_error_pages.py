@@ -456,16 +456,35 @@ def test_accept_sem_text_html_continua_json():
 
 # ─── F. 403 do CSRF (middleware, sem exception handler nenhum) ───────────────
 
+def _navegador_sem_token_de_csrf() -> TestClient:
+    """Navegador com jar NÃO vazio e sem o header de CSRF.
+
+    O jar precisa ter alguma coisa: desde o ADR 0004 o middleware só exige o
+    par cookie+header quando a requisição traz cookie, porque é o cookie que dá
+    credencial AMBIENTE. Um pedido com jar vazio é cliente de API, não aba de
+    navegador — e a cena que estes testes descrevem (aba antiga, cookie de
+    sessão perdido na volta do OAuth) continua tendo o `csrf_token`, que o
+    próprio middleware planta em todo GET.
+    """
+    client = _client()
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "token-que-o-header-nao-vai-repetir")
+    return client
+
+
 def test_csrf_403_navegacao_recebe_html():
     """Chega por navegação de verdade: aba antiga com cookie expirado, SameSite
     perdendo o cookie na volta do OAuth."""
-    response = _client().post("/auth/forgot-password", headers=HTML, json={"email": "x@example.com"})
+    response = _navegador_sem_token_de_csrf().post(
+        "/auth/forgot-password", headers=HTML, json={"email": "x@example.com"}
+    )
     _assert_error_page(response, 403, "Acesso negado")
     assert "CSRF" not in response.text  # nada de vocabulário interno na tela
 
 
 def test_csrf_403_api_continua_json():
-    response = _client().post("/auth/forgot-password", json={"email": "x@example.com"})
+    response = _navegador_sem_token_de_csrf().post(
+        "/auth/forgot-password", json={"email": "x@example.com"}
+    )
     assert response.status_code == 403
     assert response.json() == {"detail": "Token CSRF inválido ou ausente."}
     assert response.headers["cache-control"] == "no-store"
