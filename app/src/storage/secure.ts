@@ -218,7 +218,11 @@ export function guardarCredenciaisSe(
     // de incrementá-lo. Como a escrita ainda não foi lida por ninguém, apagar
     // não perde informação.
     if (permitido()) return true;
-    await SecureStore.deleteItemAsync(PAR).catch(() => undefined);
+    // Se o desfazer falhar, a falha PROPAGA. Engoli-la e devolver `false` diria
+    // "não persistiu" com a credencial velha ainda no cofre — e quem chamou
+    // traduz `false` em "outra entrada assumiu", que é uma mentira tranquila
+    // sobre um aparelho que ficou com a sessão errada guardada.
+    await SecureStore.deleteItemAsync(PAR);
     return false;
   });
 }

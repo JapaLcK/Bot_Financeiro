@@ -2,6 +2,7 @@ import {
   guardarCredenciais,
   lerCredenciais,
   limparCredenciais,
+  guardarCredenciaisSe,
   jtiDe,
   limparSe,
   trocarSe,
@@ -11,6 +12,11 @@ import {
 const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 
+/** Faz a LIMPEZA no cofre falhar. Separado da gravação de propósito. */
+const falharApagar = (
+  globalThis as unknown as { __falharApagarNoCofre: (v: boolean) => void }
+).__falharApagarNoCofre;
+
 /** Faz a próxima escrita no cofre falhar, como um keychain recusando. */
 const falharEscrita = (
   globalThis as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
@@ -18,6 +24,7 @@ const falharEscrita = (
 
 beforeEach(async () => {
   falharEscrita(false);
+  falharApagar(false);
   cofre.clear();
   await limparCredenciais();
 });
@@ -163,5 +170,36 @@ describe("jtiDe", () => {
     expect(jtiDe("nao.e.jwt")).toBeNull();
     expect(jtiDe("")).toBeNull();
     expect(jtiDe("a.!!!!.c")).toBeNull();
+  });
+});
+
+describe("guardarCredenciaisSe", () => {
+  it("grava quando permitido", async () => {
+    await expect(
+      guardarCredenciaisSe(() => true, { access: "a", refresh: "rt_a" }),
+    ).resolves.toBe(true);
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "a",
+      refresh: "rt_a",
+    });
+  });
+
+  it("não grava quando já chegou proibido", async () => {
+    await expect(
+      guardarCredenciaisSe(() => false, { access: "a", refresh: "rt_a" }),
+    ).resolves.toBe(false);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  it("falha ao DESFAZER propaga, em vez de mentir que não persistiu", async () => {
+    // Devolver `false` com a credencial velha no cofre seria o pior dos dois
+    // mundos: quem chamou traduz `false` em "outra entrada assumiu" e segue
+    // tranquilo, com o aparelho guardando a sessão errada.
+    let vezes = 0;
+    falharApagar(true);
+    await expect(
+      guardarCredenciaisSe(() => ++vezes === 1, { access: "a", refresh: "rt_a" }),
+    ).rejects.toThrow();
+    falharApagar(false);
   });
 });
