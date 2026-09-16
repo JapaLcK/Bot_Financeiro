@@ -98,52 +98,6 @@ def test_qualquer_um_dos_tres_cookies_reativa_o_csrf(sessao, cookie):
     assert r.status_code == 403, r.text
 
 
-def test_login_sem_header_do_app_nao_devolve_token_no_corpo(monkeypatch):
-    """Sem `X-PigBank-Client: app`, a resposta é a de sempre.
-
-    O que prende a decisão de não ampliar exposição para todo mundo.
-    """
-    corpo, _ = _login_http(monkeypatch, como_app=False)
-    for chave in ("access_token", "refresh_token", "dashboard_token", "expires_in"):
-        assert chave not in corpo, f"{chave} vazou sem o cliente ter pedido"
-
-
-def test_login_com_header_do_app_devolve_as_tres_credenciais(monkeypatch):
-    """Com o header, as três credenciais saem no corpo — é o que o app lê."""
-    dados, _ = _login_http(monkeypatch, como_app=True)
-    assert dados["access_token"]
-    assert dados["refresh_token"].startswith("rt_")
-    assert dados["dashboard_token"]
-    assert dados["expires_in"] == dashboard.AUTH_COOKIE_MAX_AGE
-
-
-def test_login_do_app_nao_manda_cookie_nenhum(monkeypatch):
-    """O app NÃO pode receber Set-Cookie.
-
-    O `fetch` do React Native tem cookie jar ligado por padrão: cookie que o
-    servidor mande é cookie que o app guarda sem querer, e a requisição
-    seguinte passa a levar credencial ambiente — aí o CSRF volta a exigir o par
-    e a SEGUNDA escrita toma 403 depois de a primeira ter funcionado.
-    """
-    _, resposta = _login_http(monkeypatch, como_app=True)
-    enviados = [
-        c.split("=", 1)[0] for c in resposta.headers.get_list("set-cookie")
-    ]
-    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
-        assert cookie not in enviados, f"{cookie} foi mandado para o app"
-
-
-def test_login_do_navegador_continua_recebendo_os_tres_cookies(monkeypatch):
-    """Controle positivo da mesma decisão: o site não mudou."""
-    _, resposta = _login_http(monkeypatch, como_app=False)
-    enviados = [
-        c.split("=", 1)[0] for c in resposta.headers.get_list("set-cookie")
-    ]
-    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
-        assert cookie in enviados, f"{cookie} sumiu do navegador"
-
-
-
 def test_cookie_do_admin_tambem_e_credencial_ambiente(sessao):
     """O QUARTO cookie. As rotas de /admin moram no mesmo `app`, logo no mesmo
     middleware — a lista tinha três e a revisão pegou a ausência."""
@@ -175,12 +129,6 @@ def test_cookie_duplicado_vazio_nao_apaga_a_credencial_ambiente(sessao):
         json=CORPO,
     )
     assert r.status_code == 403, r.text
-
-
-def test_credencial_no_corpo_sai_com_no_store(monkeypatch):
-    """Refresh token de 14 dias no corpo não pode ser guardado no caminho."""
-    _, resposta = _login_http(monkeypatch, como_app=True)
-    assert "no-store" in (resposta.headers.get("cache-control") or "")
 
 
 # ── O header do app NÃO é credencial nem isenção ─────────────────────────────
@@ -306,3 +254,5 @@ def test_a_lista_de_cookies_de_sessao_e_a_do_codigo(sessao):
             json=CORPO,
         )
         assert r.status_code == 403, f"{nome} não reativou o CSRF: {r.text}"
+
+

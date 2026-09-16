@@ -4491,9 +4491,9 @@ async def auth_google_complete_signup(
     email = result["email"]
 
     jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
-    _set_auth_cookie(response, jwt_token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, user_id, jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=jwt_token, jti=jti, refresh=refresh
+    )
 
     await _apply_referral_attribution(request, response, user_id)
     await _apply_prospect_attribution(request, response, user_id)
@@ -4538,6 +4538,7 @@ async def auth_google_complete_signup(
         "link_code": result["link_code"],
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
