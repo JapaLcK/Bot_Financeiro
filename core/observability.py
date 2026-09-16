@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Jsonb
-
-from config.env import load_app_env
-from core.pg_text import limpa_para_pg
-
-
-load_app_env()
+# Reexportação de FACHADA, de propósito — não é import morto nem sobra de
+# refatoração. A tabela `system_event_logs` mudou de arquivo (CLAUDE.md §0.5: o
+# teto de 350 linhas do `tests/test_max_lines_python.py`), mas os call sites
+# importam os dois nomes DAQUI, e vários testes fazem
+# `monkeypatch.setattr(observability, "log_system_event_sync", …)`. Reescrevê-los
+# violaria §0.3 e quebraria os patches — e o `_DashboardHandler.emit` abaixo
+# resolve o nome NESTE módulo, que é o que faz o monkeypatch continuar valendo.
+#   grep -rn "from core.observability import" --include="*.py" --exclude-dir=.venv .
+#   grep -rn "setattr(observability" --include="*.py" --exclude-dir=.venv .
+# A direção é ÚNICA: `core.system_event_log` NÃO importa nada daqui (e não pode
+# — ele é o módulo sem `logging`, justamente para não reentrar no handler).
+# `load_app_env()` sai junto: quem o chama agora é o módulo importado abaixo,
+# então o efeito colateral de import continua acontecendo.
+from core.system_event_log import log_system_event_sync, recent_event_exists
 
 # ── Logger centralizado ───────────────────────────────────────────────────────
 
@@ -38,10 +43,13 @@ class _DashboardHandler(logging.Handler):
     contorno em pelo menos um ponto: `frontend/routes/shared.py` loga a queda da
     página de erro uma vez por TRANSIÇÃO (flag `_error_degraded`) em vez de por
     requisição, senão um bot varrendo URL vira um INSERT por 404.
-    Contido em dois pontos, não resolvido: (1) `connect_timeout=2` nas DUAS
-    funções que abrem conexão aqui (`log_system_event_sync` e
-    `recent_event_exists`), limitando o travamento a 2s com banco inalcançável
-    (era >30s, medido); (2) os 5 call sites das 4 rotas destrutivas `async`
+    Contido em três pontos, não resolvido: (1) `connect_timeout=2` nas DUAS
+    funções que abrem conexão (`log_system_event_sync` e `recent_event_exists`,
+    hoje em `core/system_event_log.py`), limitando o travamento a 2s com banco
+    inalcançável (era >30s, medido); (1b) `statement_timeout` nas mesmas duas,
+    que é o que limita a ESPERA DE LOCK e a execução — sem ele a tabela travada
+    pendurava o caller pelo lock inteiro (medido: 3,00s para um lock de 3s);
+    (2) os 5 call sites das 4 rotas destrutivas `async`
     (`frontend/routes/cards.py`, `frontend/finance_bot_websocket_custom.py` —
     incluindo o ramo WARNING da `/launches`) chamam o `_log_falha` por
     `asyncio.to_thread`, tirando o INSERT do event loop NAQUELE call site. Todo
@@ -219,120 +227,3 @@ def get_logger(name: str) -> logging.Logger:
     """
     _configure_root_logger()
     return logging.getLogger(name)
-
-
-# ── DB event log ──────────────────────────────────────────────────────────────
-
-def _database_url() -> str:
-    return (os.getenv("DATABASE_URL") or "").strip()
-
-
-def log_system_event_sync(
-    level: str,
-    event_type: str,
-    message: str,
-    *,
-    source: str | None = None,
-    user_id: int | None = None,
-    details: dict[str, Any] | None = None,
-) -> None:
-    database_url = _database_url()
-    if not database_url:
-        return
-
-    try:
-        # `connect_timeout=2`: este INSERT é síncrono e bloqueante, e com banco
-        # inalcançável o connect ficava preso (medido: >30s) — travando a thread
-        # do caller, que pode ser o event loop. 2s é o MÍNIMO que o libpq aceita
-        # (valor menor é promovido a 2). Perder um log é melhor que travar a
-        # requisição: a falha já cai no `except` abaixo, que só imprime no stderr.
-        with psycopg.connect(database_url, connect_timeout=2) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO system_event_logs (level, event_type, message, source, user_id, details)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    (limpa_para_pg(level), limpa_para_pg(event_type),
-                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
-                     user_id, Jsonb(limpa_para_pg(details or {}))),
-                )
-            conn.commit()
-    except Exception as exc:
-        # Desde o saneamento com `limpa_para_pg` na tupla acima, NUL e surrogate
-        # solitário não derrubam mais este INSERT (issue #357): das duas causas
-        # conhecidas de perda silenciosa aqui, sobra só a de baixo.
-        # ponytail: teto conhecido — `user_id` fora de `users` derruba o INSERT
-        # INTEIRO pela `system_event_logs_user_id_fkey` e o evento se PERDE; antes
-        # deste PR ele ficava gravado com a coluna NULL. Caminho medido: token de
-        # dashboard LEGADO (sem `jti`) de conta já apagada: o ramo
-        # `frontend/routes/shared.py:538-543` só invalida via
-        # `get_password_changed_at` (`:542`), que numa conta apagada não devolve
-        # nada, e a rota roda com um `user_id` sem linha em `users`. Token COM
-        # `jti` cai no `:533-536`, onde `auth_sessions` já foi apagado junto com
-        # a conta (`db/privacy.py:429`) e vira 401 ANTES da rota.
-        # Quem ainda emite token de dashboard SEM `jti` HOJE, já depois do
-        # rollout: `POST /auth/dashboard-token` e `POST /auth/dashboard-link`
-        # (`frontend/finance_bot_websocket_custom.py:3440` e `:3453`), que leem
-        # `request.state.session_jti` com `getattr(…, None)` (`:3443`, `:3467`)
-        # — e esse atributo só é setado DENTRO do ramo `if jti:` (`shared.py:537`
-        # e `finance_bot_websocket_custom.py:2325`), nunca no ramo legado de
-        # `_get_current_user` (`finance_bot_websocket_custom.py:2328-2335`).
-        # Então a janela é a UNIÃO de dois conjuntos, não só a dos tokens
-        # pré-rollout: (a) token de dashboard pré-rollout, teto de 12h
-        # (`DASHBOARD_SESSION_HOURS`, `finance_bot_websocket_custom.py:298`); e (b)
-        # token de dashboard novo mintado a partir de um JWT de auth LEGADO.
-        # Esse JWT vive 15 MINUTOS (`frontend/routes/shared.py:472`, que é o
-        # único lugar que minta `"type": "auth"`; espelhado em
-        # `AUTH_COOKIE_MAX_AGE`, `finance_bot_websocket_custom.py:2169`), e JWT
-        # legado novo não nasce — todo `_make_jwt` de produção passa `jti` real
-        # (`:2190`, `:2829`, `:4969`). Nem estica: rotacionar exige
-        # `session_jti` (`core/refresh_tokens.py:51`, coluna `not null` em
-        # `db/schema.py:1485`), que um JWT sem `jti` não tem. Logo (b) só é
-        # MINTADO nos 15 min seguintes ao rollout, e o último token dele morre
-        # 12h depois: 15min + 12h — a união fecha em ~12h15. Os dois prazos
-        # vieram do `timedelta`/`max_age`, não de comentário que fale deles.
-        # A perda é DECISÃO REGISTRADA, não esquecimento: retry com `user_id=None`
-        # gravaria linha órfã com o id do titular no texto, nascida DEPOIS da
-        # exclusão de conta e fora do alcance de qualquer `delete` — a mesma forma
-        # de bug que este PR fecha (#220). O rastro que sobra é o `print` abaixo,
-        # no stderr, e é de propósito.
-        print(f"[observability] failed to record {event_type}: {exc}", file=sys.stderr)
-
-
-def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0) -> bool:
-    """
-    True se existe um system_event_logs com (event_type, user_id) nos últimos
-    `within_days`. Usado pra dedup de emails transacionais que podem ser
-    disparados por múltiplas fontes (webhook + scheduler).
-    Falha silenciosa retorna False — melhor mandar duplicado que perder.
-    """
-    database_url = _database_url()
-    if not database_url:
-        return False
-    try:
-        # `connect_timeout=2` pelo mesmo motivo do `log_system_event_sync` acima.
-        # O timeout do libpq limita o ESTABELECIMENTO da conexão, não a query
-        # (medido: `connect_timeout=2` + `pg_sleep(5)` devolveu o resultado em
-        # 5,00s; connect real 3–6 ms), então consulta lenta continua sendo
-        # esperada. Com banco inalcançável o retorno vira `False` em ~2s em vez
-        # de >30s — e `False` já é o que o `except` abaixo devolve. A dedup só
-        # muda numa janela estreita: banco VIVO cujo connect demore mais de 2s
-        # passa a devolver `False` e o e-mail sai duplicado — que é a política
-        # já declarada no docstring ("melhor mandar duplicado que perder").
-        with psycopg.connect(database_url, connect_timeout=2) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT 1 FROM system_event_logs
-                    WHERE event_type = %s
-                      AND user_id = %s
-                      AND created_at > now() - %s::interval
-                    LIMIT 1
-                    """,
-                    (event_type, int(user_id), f"{within_days} days"),
-                )
-                return cur.fetchone() is not None
-    except Exception as exc:
-        print(f"[observability] failed to check {event_type}: {exc}", file=sys.stderr)
-        return False

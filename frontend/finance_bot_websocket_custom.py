@@ -6919,7 +6919,7 @@ async def delete_launch_route(
         # `com_traceback=True` aqui não restaura rastro: CRIA persistência nova
         # do `DETAIL: Key (…)=(…)` em `system_event_logs`.
         # `to_thread`: a rota é async e o `_DashboardHandler` grava com
-        # `psycopg.connect()` bloqueante (ver `core/observability.py`).
+        # `psycopg.connect()` bloqueante (ver `core/system_event_log.py`).
         await asyncio.to_thread(_log_falha, "delete_launch", user_id, exc,
                                 launch_id=int(launch_id))
         raise HTTPException(status_code=500, detail=_ERRO_APAGAR_HTTP) from exc

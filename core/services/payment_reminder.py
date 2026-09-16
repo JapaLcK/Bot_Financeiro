@@ -190,14 +190,14 @@ async def check_payment_reminder() -> None:
 
     for _linha_do_funil in elegiveis:
         user_id = int(_linha_do_funil["user_id"])
-        # SEM `try`, e isso é medido, não descuido: `recent_event_exists`
-        # (`core/observability.py:288-313`) tem `except Exception` próprio e
-        # devolve `False` em QUALQUER falha ("melhor mandar duplicado que
-        # perder", docstring dela). Medido nos três modos — banco inalcançável,
-        # URL inválida, `DATABASE_URL` vazia — nenhum levantou. Um `try` aqui
-        # embrulharia código que provadamente não levanta (§0.2);
-        # `tests/test_payment_reminder_lote.py` amarra essa dependência para o
-        # dia em que aquele `except` sair.
+        # SEM `try`, e isso é medido, não descuido: `recent_event_exists` (hoje
+        # em `core/system_event_log.py`, não mais em `core/observability.py`)
+        # tem `except Exception` próprio e devolve `False` em QUALQUER falha
+        # ("melhor mandar duplicado que perder", docstring dela). Medido nos
+        # três modos — banco inalcançável, URL inválida, `DATABASE_URL` vazia —
+        # nenhum levantou. Um `try` aqui embrulharia código que provadamente não
+        # levanta (§0.2); `tests/test_payment_reminder_lote.py` amarra essa
+        # dependência para o dia em que aquele `except` sair.
         #
         # A assimetria com `lembrete_ainda_vale` abaixo é de PROPÓSITO: a
         # dedupe falha ABERTA (manda, no pior caso duplicado) e a revalidação

@@ -26,8 +26,9 @@ mock. Importa porque `str(exc)` vai para `log_system_event` (persistido em
 
 O alcance da purga em `system_event_logs` é PARCIAL, e o resíduo é o que pesa:
 a exclusão de conta apaga a linha por `user_id` (`db/privacy.py:837`), mas
-`log_system_event_sync` tem `user_id: int | None = None`
-(`core/observability.py:216`) e o erro do Asaas nasce sem dono — linha
+`log_system_event_sync` tem `user_id: int | None = None` (assinatura em
+`core/system_event_log.py`, para onde ela saiu de `core/observability.py`, que
+hoje só reexporta o nome) e o erro do Asaas nasce sem dono — linha
 `user_id is null` nenhuma exclusão alcança. E não existe retenção automática
 por idade: as duas purgas da tabela são MANUAIS (`admin.py purge`, que pergunta
 `[y/N]`, e o `Limpar` do painel), nenhum agendador chama qualquer uma.
