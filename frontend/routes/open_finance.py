@@ -142,18 +142,25 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # onda fecha é a etapa 4, que estava SEM teto nenhum e escrevia no banco.
 #
 # CUIDADO com `DB_CONNECT_TIMEOUT`: são QUATRO definições da mesma env var com
-# DOIS defaults. `db/connection.py:78` = "30" (o pool sync, o da tabela acima);
-# `core/admin_dashboard.py:49`, `frontend/routes/shared.py:51` e
-# `frontend/finance_bot_websocket_custom.py:304` = "5". Ler o número do vizinho
-# errado já produziu uma conta 3× maior neste mesmo comentário.
+# DOIS defaults. Em `db/connection.py` = "30" (o pool sync, o da tabela acima);
+# em `core/admin_dashboard.py`, `frontend/routes/shared.py` e
+# `frontend/finance_bot_websocket_custom.py` = "5". Ler o número do vizinho
+# errado já produziu uma conta 3× maior neste mesmo comentário. Sem número de
+# linha de propósito: os quatro ponteiros já envelheceram (medido: dois estavam
+# errados, um por 2). A lista se refaz com um `grep -rn --include='*.py'` pelo
+# nome da env dentro de um `getenv(` — quatro acertos, e nenhum deles mente.
 #
 # Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
 # `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
-# um abre conexão async NOVA (`core.admin_dashboard.db_connect`, com o
-# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49` — default **5**) e faz um
-# INSERT SEM `statement_timeout`. O `connect_timeout` limita o handshake e nada
-# limita o INSERT nem o commit, então o pior caso de cada log era ILIMITADO e
-# qualquer número fechado aqui era PISO. Os dois passaram a ir pelo
+# um abre conexão async NOVA (com o `DB_CONNECT_TIMEOUT` de
+# `core/admin_dashboard.py` — default **5**) e fazia um INSERT SEM
+# `statement_timeout`. O `connect_timeout` limita o handshake e nada limitava o
+# INSERT nem o commit, então o pior caso de cada log era ILIMITADO e qualquer
+# número fechado aqui era PISO. Desde a issue #429 aquele INSERT tem
+# `options=statement_timeout_options()` (default 2000ms), o que limita a query e
+# a espera de LOCK — mas NÃO o commit, que continua sem knob por query no libpq.
+# Ou seja: o pior caso deixou de ser ilimitado, e mesmo assim os dois continuam
+# indo pelo
 # `_log_com_teto` (`asyncio.wait_for`), e aí o número vira TETO (Codex #166, P2):
 #
 #     ≤ 20,0s   o prazo INTEIRO      = as duas tentativas + o log do RETRY
@@ -174,7 +181,7 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # (`folga // 2`), ≤ 2,0s o log do retry, ~0,4s de backoff (`_backoff_sec(1)`,
 # 0,375–0,625s) e o resto na 2ª.
 #
-# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:49` SAIU da conta: o
+# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py` SAIU da conta: o
 # `wait_for` corta em 2,0s independentemente dele. Era dele que vinham o piso de
 # 25,0s desta conta (5 + 5 nos dois logs) e o de 70s da versão anterior dela — o
 # cenário "e se o Railway definir 30?", que `.env.example` não define (grep vazio)
@@ -214,11 +221,19 @@ _LOG_DIAG_TIMEOUT_S = 2.0
 async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     """`log_system_event` que não pode furar o prazo da reconexão.
 
-    `log_system_event` (`core/admin_dashboard.py:180`) abre conexão async NOVA e
-    faz um INSERT sem `statement_timeout`: o `connect_timeout` limita o
-    handshake e NADA limita o INSERT nem o commit. Era o que deixava o teto do
-    `_grava_reconexao` ilimitado exatamente sob sobrecarga do banco, que é
-    quando ele importa (Codex #166, P2).
+    `log_system_event` (`core/admin_dashboard.py`) abre conexão async NOVA e faz
+    um INSERT. Antes da issue #429 ele não tinha `statement_timeout` nenhum, e
+    era o que deixava o teto do `_grava_reconexao` ilimitado exatamente sob
+    sobrecarga do banco, que é quando ele importa (Codex #166, P2).
+
+    Hoje aquele INSERT tem teto (`options=statement_timeout_options()`), e
+    mesmo assim este wrapper FICA — não é redundância. O `statement_timeout` é
+    aplicado pelo SERVIDOR e cobre a query e a espera de lock; o `asyncio.wait_for`
+    daqui cobre os DOIS furos que ele não alcança, os mesmos que
+    `core/system_event_log.py:40-46` nomeia: o COMMIT (não há knob por query no
+    libpq) e o servidor que aceita o socket e nunca responde (se ele não
+    processa, não há quem cancele). Tirar este `wait_for` reabriria o prazo
+    ilimitado por esses dois caminhos.
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
     diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
@@ -356,7 +371,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
         #     `item_registry_origins` da revalidação da adoção, mais abaixo
         #     nesta mesma função, que abre `get_conn()`
-        #     (`db/open_finance_state.py:348`).
+        #     (`db/open_finance_state.py`).
         #   • rota com item NOVO (`tinha_conexao_propria=False`,
         #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
         #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
@@ -656,7 +671,7 @@ async def _grava_reconexao(
             # diagnóstico falso que o `_prazo_reconexao_ms` já tinha registrado
             # uma vez. Ela vai para os dois `log_system_event` abaixo E para o
             # `logging` local, e a segunda parte NÃO é redundância:
-            # `log_system_event` (core/admin_dashboard.py:190-201) abre conexão
+            # `log_system_event` (`core/admin_dashboard.py`) abre conexão
             # NOVA para gravar e engole TODA exceção com um `print` que não
             # carrega nem `message` nem `details`. Na família "o banco recusa
             # conexão" — `TooManyConnections`, `DiskFull`, `AdminShutdown`,
@@ -719,9 +734,10 @@ async def _grava_reconexao(
                          "erro": causa},
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
-            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49`, default 5) e
-            # faz INSERT SEM `statement_timeout`, dentro da janela do prazo — é o
-            # maior componente do que sobra dentro do prazo (a conta está em
+            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py`, default 5) e
+            # faz INSERT dentro da janela do prazo — desde a issue #429 com
+            # `statement_timeout`, mas o commit continua fora de qualquer teto por
+            # query; é o maior componente do que sobra dentro do prazo (a conta está em
             # `_prazo_reconexao_ms`). Medir a folga antes fazia o backoff dormir
             # POR CIMA de tempo já gasto. A recontagem NÃO é o que limita o log —
             # quem limita é o `_log_com_teto` acima, com `min(_LOG_DIAG_TIMEOUT_S,
@@ -733,7 +749,8 @@ async def _grava_reconexao(
     # sobrevive à família de erro que o `causa` existe para diagnosticar. O
     # `log_system_event` precisa de conexão NOVA para gravar (§ o comentário no
     # `except` acima), então sob `TooManyConnections`/`AdminShutdown` ele não
-    # grava nada e engole a exceção. Mesmo padrão de `frontend/routes/shared.py:695`.
+    # grava nada e engole a exceção. Mesmo padrão do `except` de
+    # `gate_plan_selection`, em `frontend/routes/shared.py`.
     logging.getLogger(__name__).warning(
         "of_reconnect_lock_timeout item_id=%s causa=%s", item_id,
         causa or "lock do item ocupado")
@@ -1592,7 +1609,8 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await asyncio.to_thread(item_registry_origins, new_item_id))
     if conexao_recem_adotada:
         # ...e o webhook TEM de ter auditado de verdade. `record_audit_event`
-        # ENGOLE falha de banco (core/audit.py:156) — o rastro prova a adoção, não
+        # ENGOLE falha de banco (o `except Exception` que desfecha em `print`, em
+        # `core/audit.py`) — o rastro prova a adoção, não
         # a auditoria —, então o insert dele podia falhar lá e esta guarda suprimir
         # aqui: NENHUM `OPEN_FINANCE_CONNECTED` para uma conexão que nasceu. Num
         # log de segurança duplicata é ruído e buraco é perda (Codex #313, P2).

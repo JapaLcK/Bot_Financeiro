@@ -17,6 +17,7 @@ A separação é toda a ideia:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
 import time
@@ -39,6 +40,12 @@ from .connection import get_conn
 # (`:1099`), então não há ciclo — se algum dia ele subir para o topo de lá, este
 # é o import que quebra.
 from .open_finance import _CursorComTeto
+
+# `logging` da stdlib e não o `_log_falha` de `core/observability.py`: aquele
+# helper exige um `user_id` (2º posicional, cobrado por `ast` em
+# `tests/test_log_falha_user_id.py`) e esta camada não tem um. É o mesmo padrão
+# dos vizinhos `db/accounts.py`, `db/mfa.py` e `db/plans.py`.
+logger = logging.getLogger(__name__)
 
 # Estados locais terminais: nenhum resultado de sync pode sobrescrevê-los.
 # PAUSED = trial venceu (o item nem existe mais na Pluggy); DELETED = removido.
@@ -853,8 +860,13 @@ def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
     finally:
         # Fechar a conexão libera o advisory lock de sessão — não há unlock a
         # esquecer, e um processo morto no meio não deixa o item travado.
-        conn.close()
-        _lock_slots().release()
+        # `try/finally` pelo mesmo motivo do irmão `pluggy_items_lock`: `close()`
+        # que levanta pulava o `release()` e a vaga do `_lock_slots()` não voltava
+        # nunca (issue #429). Mesma classe, mesmo conserto, nos dois.
+        try:
+            conn.close()
+        finally:
+            _lock_slots().release()
 
 
 @contextmanager
@@ -869,8 +881,12 @@ def pluggy_items_lock(item_ids: list[str]):
     chamador segurava: False sempre, reset impossível (Codex, PR #217).
 
     A semântica contra um sync concorrente é IDÊNTICA à do singular: mesma
-    chave por item (`_lock_key`), mesmo `lock_timeout` — sync com a chave
-    ocupada leva LockNotAvailable → False → reporta sync_in_progress.
+    chave por item (`_lock_key`), mesmo prazo (`_lock_wait_ms`) — sync com a
+    chave ocupada não entra, vira False e reporta sync_in_progress. O
+    cancelamento chega como `QueryCanceled`, igual ao irmão singular, e NÃO como
+    `LockNotAvailable`: o porquê está no comentário do `connect` abaixo (o
+    `statement_timeout` corta antes do `lock_timeout` quando os dois valem o
+    mesmo). Os dois caem no mesmo `except` e dão o mesmo `got=False`.
 
     Devolve True só se TODOS os locks entraram (lista vazia → True: nada a
     serializar). Fechar a conexão libera todos de uma vez — não há unlock
@@ -898,21 +914,210 @@ def pluggy_items_lock(item_ids: list[str]):
         yield False
         return
     try:
-        conn = psycopg.connect(url, autocommit=True)
+        # Mesmo idioma do irmão singular (`pluggy_item_lock`, ramo COM orçamento),
+        # e NENHUM número novo: os dois saem de `_lock_wait_ms()`, que já é a fonte
+        # de verdade (`OF_SYNC_LOCK_WAIT_MS`, default 15000, piso documentado lá).
+        # Aqui não é zelo — tem CLIENTE ESPERANDO nos dois chamadores:
+        # `db/privacy.py reset_user_data` e `frontend/routes/open_finance.py
+        # _disconnect_sob_lock`, e este último roda por `asyncio.to_thread` DENTRO
+        # da rota, sem try/except. Sem `connect_timeout`, banco que aceita o socket
+        # e não responde penduraria a thread para SEMPRE, segurando uma vaga do
+        # `_lock_slots()` — e a vaga não volta nunca (issue #429).
+        # `statement_timeout` e `lock_timeout` ficam IGUAIS, e isso NÃO deixa
+        # indeterminado quem corta primeiro — a versão anterior deste comentário
+        # dizia que sim, e estava errada: o `statement_timeout` conta desde o
+        # início do STATEMENT e o `lock_timeout` só desde o início da ESPERA pelo
+        # lock, então com valores iguais o primeiro vence SEMPRE. MEDIDO: chave
+        # ocupada por outra sessão sai `QueryCanceled` (57014) em 60/60, e
+        # também nos valores de produção (15000/15000 → 15,00 s). É o mesmo fato
+        # que o irmão singular já declara ("o cancelamento chega como
+        # `QueryCanceled`") — duas versões dele no mesmo módulo era o §0.7.
+        # COROLÁRIO, e por isso ele está escrito: o `set_config('lock_timeout',
+        # …)` lá embaixo é INERTE — nunca é ele quem dispara. Continua onde está
+        # de propósito: é o PRIMEIRO statement desta conexão e é a morte DELE que
+        # o `except` de baixo passou a cobrir; trocar o valor dele (ou tirá-lo) é
+        # outro PR, não este. De todo jeito os dois desfechos caem no MESMO
+        # `except` abaixo e dão o mesmo `got=False`, que o chamador já traduz em
+        # 503 "tente de novo".
+        conn = psycopg.connect(
+            url, autocommit=True,
+            # libpq conta em segundos inteiros e trata 0 como "sem limite"; o piso
+            # de 1s é dele, não nosso.
+            connect_timeout=max(1, _lock_wait_ms() // 1000),
+            options=f"-c statement_timeout={_lock_wait_ms()}ms",
+        )
+    except psycopg.OperationalError:
+        # SIMÉTRICO com o `except` de baixo, de propósito. O `connect_timeout` que
+        # esta função ganhou trocou "pendura para sempre" por exceção — melhora — mas
+        # a exceção subia crua numa rota SEM try/except, virando 500 numa função cuja
+        # docstring promete 503/"tente de novo". Fechar o 500 do `set_config` e abrir
+        # o do `connect` no mesmo commit seria trocar um furo de lugar.
+        #
+        # A FRONTEIRA REAL, MEDIDA (psycopg 3.3.5, contra o Postgres local), e não
+        # a que a versão anterior deste comentário imaginava:
+        #   ProgrammingError (sobe → 500): URL malformada, esquema errado (`mysql://`)
+        #   OperationalError (aqui → 503): host inalcançável, banco INEXISTENTE,
+        #                                  usuário/credencial ERRADA
+        # Ou seja, config quebrada NÃO fica toda do lado do 500 — "role does not
+        # exist" e "database does not exist" caem aqui, são defeito PERMANENTE, e
+        # o usuário só vê "sincronização em andamento, tente de novo"
+        # (`frontend/routes/open_finance.py`, `db/privacy.py`). Daí o `warning`:
+        # o 503 continua sendo a resposta certa para o transitório, e o permanente
+        # deixa de ser MUDO — era o único valor que o 500 anterior comprava.
+        #
+        # `exc_info=True` porque o `sqlstate` NÃO discrimina: nas três falhas de
+        # connect acima ele é `None` (medido), então tipo+sqlstate — o formato do
+        # `_log_falha` — sairia idêntico para "servidor caiu" e para "usuário não
+        # existe". Quem separa os dois é a mensagem do libpq, que traz host, porta,
+        # base e papel — infraestrutura, não dado do cliente: não há `DETAIL: Key
+        # (…)=(…)` num erro de connect (é a razão de privacidade que mantém o
+        # traceback desligado por padrão no `_log_falha`), e a senha o libpq não
+        # ecoa (medido).
+        #
+        # NÃO reentra no `_DashboardHandler` (medido, com o handler real no root):
+        # profundidade máxima de `emit` = 1, 1 connect, 3–5 ms. O ciclo não fecha
+        # porque `core/system_event_log.py` desfecha em `print`, não em `logging`;
+        # e com a `DATABASE_URL` quebrada o INSERT do handler também falha e vira
+        # `[observability] failed to record …` no stderr — a causa continua saindo
+        # duas vezes lá, que é o que o operador perdeu em `935b2a7`.
+        #
+        # A VAGA VOLTA ANTES DO LOG, e a ordem é conserto, não estilo: este
+        # WARNING passa pelo `_DashboardHandler` (`core/observability.py`), que
+        # grava abrindo `psycopg.connect` + INSERT — o log é uma ida ao banco.
+        # Com o banco bom ela custa milissegundos: a medição dessa grandeza é o
+        # `ponytail:` do docstring de `_DashboardHandler`, e com `exc_info=True`
+        # a 1ª chamada sai no mesmo intervalo (remedido 2026-09-16) — traceback
+        # + `exc_info` + JSONB não mudam a ordem. Os 390,6 ms que uma versão
+        # anterior desta frase dava para a 1ª chamada vieram de uma medição
+        # feita com a suíte inteira rodando em paralelo na mesma máquina; sob
+        # carga o número sobe (2026-09-16: até 88,3 ms com 12 workers de
+        # connect+INSERT+CPU e CREATE/DROP DATABASE concorrentes), sem chegar a
+        # 390 ms — carga é a causa provável, não confirmada. Remedir antes de
+        # reusar. E com o host INALCANÇÁVEL ela custa ~2 s — o `connect_timeout=2`
+        # de `core/system_event_log.py`; 2006,8 ms em 2026-09-16 com:
+        #   python3 -c "import time,psycopg; t=time.perf_counter()
+        #   try: psycopg.connect('postgresql://u:p@10.255.255.1/db', connect_timeout=2)
+        #   except psycopg.OperationalError: print(f'{(time.perf_counter()-t)*1000:.1f} ms')"
+        # É justamente aí que este `except`
+        # dispara: quando o banco está indo embora. Logar com a vaga na mão
+        # somava 2 s a uma das 8 do `_lock_slots()`, e o disconnect e o
+        # `reset_user_data` enfileiravam atrás do log de um 503 — num caminho que
+        # existe para não pendurar ninguém. Logar continua obrigatório (503 mudo
+        # é o que `935b2a7` fechou); segurar a vaga para logar, não.
+        # ponytail: os 2 s continuam na conta de QUEM PEDIU (o log roda antes do
+        # `yield`, na mesma thread) — o que deixa de ser compartilhado é a vaga.
+        # Tirar os 2 s do requisitante exigiria log fora da thread; se um dia
+        # importar, é lá, não aqui.
+        _lock_slots().release()
+        logger.warning(
+            "pluggy_items_lock: conexão dedicada falhou, devolvendo 503 (itens=%d)",
+            len(itens), exc_info=True,
+        )
+        yield False
+        return
     except Exception:
         _lock_slots().release()
         raise
+    # Guardado aqui e logado lá embaixo, DEPOIS do `release()`: mesmo motivo
+    # medido do `except` do `connect` (2006,3 ms de log com o host inalcançável).
+    # `AdminShutdown`/`DiskFull`/`TooManyConnections` são exatamente o caso em que
+    # o handler paga o `connect_timeout` inteiro, e o padrão dos dois `except`
+    # tem de ser UM só.
+    nao_rotineiro: Exception | None = None
     try:
-        conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
         got = True
-        for item in itens:
-            try:
+        # O `set_config` entra no MESMO `try` dos advisory locks de propósito: ele
+        # é o PRIMEIRO statement desta conexão e agora tem teto (o `options` acima).
+        # Fora do `except`, qualquer morte dele subia como exceção e virava 500 na
+        # rota do disconnect (o `await asyncio.to_thread(_disconnect_sob_lock, ...)`
+        # de `open_finance_disconnect_route`, em `frontend/routes/open_finance.py`,
+        # não tem try/except — nome de construção e não número de linha, porque o
+        # número desta citação já envelheceu uma vez), enquanto a docstring promete
+        # 503/"tente de novo" e é o que o resto da função entrega.
+        # O modo de morte PROVÁVEL deste statement não é o cancelamento: é a conexão
+        # morrer (servidor fechou o socket, blip de rede, restart, pgbouncer). O
+        # cancelamento por `statement_timeout` NÃO REPRODUZ — medido com
+        # `OF_SYNC_LOCK_WAIT_MS=1` contra o Postgres local, 0 de 300 tentativas pela
+        # réplica direta (o `set_config` cabe folgado em 1ms). Por isso o `except` é
+        # `psycopg.OperationalError`, o PAI comum: `LockNotAvailable`,
+        # `QueryCanceled` e `DeadlockDetected` são todos subclasses dele (medido:
+        # `.__mro__[1]` é `OperationalError` nos três), então este nome só cobre
+        # ESTRITAMENTE MAIS que a tupla anterior — e o que ele acrescenta é
+        # justamente o modo provável. Os três nomes não se perdem: continuam sendo o
+        # que os advisory locks levantam quando a chave está ocupada.
+        # O teste do desfecho INJETA a exceção em vez de cronometrar: com 0/300, um
+        # teste por cronômetro ali seria flaky e não prenderia nada.
+        try:
+            conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
+            for item in itens:
                 conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
-            except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
-                    psycopg.errors.DeadlockDetected):
-                got = False
-                break
+        except psycopg.OperationalError as exc:
+            # ASSIMÉTRICO com o `except` do `connect` lá em cima, e de propósito:
+            #   • lá, TODO `OperationalError` vira WARNING, porque o defeito
+            #     PERMANENTE (base/usuário inexistente, credencial errada) cai
+            #     justamente nele — mudo ali significa 503 eterno sem rastro;
+            #   • aqui, o defeito permanente NÃO passa por este `except`: config
+            #     quebrada destes dois statements é `ProgrammingError`
+            #     (`UndefinedObject`/`UndefinedFunction` se `hashtext` sumir) ou
+            #     `DataError` (`InvalidParameterValue` num `lock_timeout`
+            #     inválido, sqlstate 22023); nenhuma das duas é
+            #     `OperationalError` (medido pelo `__mro__` das três), então já
+            #     sobem e viram 500 com traceback.
+            # Por isso o filtro: as TRÊS rotineiras abaixo são o desfecho
+            # PROJETADO desta função — outro sync segurando a mesma chave —, e um
+            # WARNING por sync contendido seria laço quente no log. O resto
+            # (`AdminShutdown`, `DiskFull`, `TooManyConnections`,
+            # `ConnectionFailure`…) é infra morrendo e deixa de ser mudo.
+            # O `exc_info` vai pela mesma razão do `connect`: o `sqlstate` sozinho
+            # não discrimina, e a mensagem do libpq é infraestrutura — sem senha,
+            # sem URL, sem `DETAIL: Key (…)=(…)` (medido). Aqui ele é a EXCEÇÃO
+            # guardada, e não `True`, porque o registro saiu para o `finally`
+            # (onde não há mais exceção "corrente"); o `logging` normaliza
+            # instância em `(tipo, exc, exc.__traceback__)`, então o traceback é o
+            # mesmo — é o que a 1ª metade de
+            # `test_lock_nao_rotineiro_deixa_rastro_e_o_rotineiro_fica_mudo` afere
+            # ao procurar `AdminShutdown` no traceback formatado.
+            if not isinstance(exc, (psycopg.errors.LockNotAvailable,
+                                    psycopg.errors.QueryCanceled,
+                                    psycopg.errors.DeadlockDetected)):
+                nao_rotineiro = exc
+            got = False
         yield got
     finally:
-        conn.close()
-        _lock_slots().release()
+        # `try/finally` e não `conn.close(); release()` em sequência: se o `close()`
+        # levantar, o `release()` da versão anterior nunca rodava e a vaga do
+        # `_lock_slots()` sumia PARA SEMPRE — medido, 8 slots livres viravam 7,
+        # permanente. É a própria classe que a issue #429 nomeia ("a vaga não volta
+        # nunca"), uma linha abaixo do conserto dela. O irmão `pluggy_item_lock`
+        # tinha o padrão idêntico e foi consertado junto.
+        # TETO CONHECIDO, e fica: com os DOIS levantando, a exceção do `close()`
+        # vira `__context__` da do `release()`. `threading.Semaphore.release()` não
+        # levanta (só a `BoundedSemaphore` levanta, por excesso, e esta não é uma),
+        # então o caso é inalcançável — e o conserto exigiria engolir a do
+        # `release()`, que é trocar um mascaramento impossível por um real.
+        try:
+            conn.close()
+        finally:
+            _lock_slots().release()
+            # DEPOIS do `release()`, e DENTRO deste `finally` (não depois dele):
+            # aqui o WARNING sai mesmo quando o `close()` levanta — e `close()`
+            # que levanta é a mesma infra morrendo que este log existe para
+            # contar. Ordem: `close()` → `release()` → log.
+            # `logger.warning` PODE levantar — a versão anterior deste comentário
+            # dizia que o `logging` segurava, e estava errada: `Handler.handle`
+            # chama `self.emit(record)` SEM try/except, e o `handleError` só roda
+            # dentro do `emit` de quem se dá ao trabalho de chamá-lo (o
+            # `_DashboardHandler.emit` de `core/observability.py` não tem
+            # try/except próprio). Quem segura de verdade é o `except Exception`
+            # amplo de `log_system_event_sync` (`core/system_event_log.py`), que é
+            # o que aquele `emit` chama. Se ele sumir, o WARNING sobe DAQUI e
+            # mascara a exceção do `close()` (ela vira `__context__`) — e mesmo
+            # nesse caso a vaga JÁ VOLTOU, porque o `release()` vem antes
+            # (medido: 8 vagas livres → 8). É o que esta ordem garante, e é o que
+            # `tests/test_of_items_lock_ordem.py` prende.
+            if nao_rotineiro is not None:
+                logger.warning(
+                    "pluggy_items_lock: lock falhou por causa NÃO rotineira, "
+                    "devolvendo 503 (itens=%d)", len(itens),
+                    exc_info=nao_rotineiro,
+                )

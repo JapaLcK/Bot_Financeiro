@@ -1,4 +1,4 @@
-"""O VALOR do teto: `_statement_timeout_options()` de `core/system_event_log.py`.
+"""O VALOR do teto: `statement_timeout_options()` de `core/system_event_log.py`.
 
 A outra metade do assunto — o teto EXERCITADO com a tabela travada (cronômetro,
 lock, reentrância) — mora em `tests/test_system_event_log_teto.py`; as fixtures
@@ -11,7 +11,7 @@ não protege (teto de dias) faz o mesmo estrago sem o erro. Por isso o intervalo
 fecha dos dois lados, e por isso todo caso tem uma metade que GRAVA de verdade —
 asserção só sobre a string do `options` nunca veria o connect ser recusado.
 
-CONTROLE NEGATIVO DO GRUPO: tire o `options=_statement_timeout_options()` dos
+CONTROLE NEGATIVO DO GRUPO: tire o `options=statement_timeout_options()` dos
 DOIS `psycopg.connect` de `core/system_event_log.py`. VERMELHO AQUI, um só:
 `test_options_chega_no_connect`. A MESMA injeção derruba outros QUATRO fora
 deste arquivo — três em `tests/test_system_event_log_teto.py`
@@ -22,7 +22,7 @@ deste arquivo — três em `tests/test_system_event_log_teto.py`
 que é a guarda do connect NOVO — 5 vermelhos somando os três arquivos.
 
 CONTROLE NEGATIVO DO TETO SUPERIOR (injeção SEPARADA, e é a que discrimina o
-conserto desta rodada): em `_statement_timeout_options`, troque
+conserto desta rodada): em `statement_timeout_options`, troque
 `if not _PISO_MS <= ms <= _TETO_MAX_MS` por `if ms < _PISO_MS`. VERMELHOS:
 `test_valor_sem_sentido_volta_ao_default[2147483648]` e
 `[99999999999999999999]`, e só eles — os outros cinco valores do parametrize
@@ -48,9 +48,9 @@ import pytest
 
 from core.system_event_log import (
     _TETO_MAX_MS,
-    _statement_timeout_options,
     log_system_event_sync,
     recent_event_exists,
+    statement_timeout_options,
 )
 
 from _system_event_log_helpers import (  # noqa: F401  (fixtures autouse)
@@ -94,7 +94,7 @@ def test_valor_sem_sentido_volta_ao_default(valor, monkeypatch, user_id):
     banco em todo caso do parametrize, sem achado novo: preferi deixar como está.
     """
     monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", valor)
-    assert _statement_timeout_options() == TETO_PADRAO_OPTIONS
+    assert statement_timeout_options() == TETO_PADRAO_OPTIONS
 
     try:
         log_system_event_sync("warning", EVENTO_DEFAULT, "mensagem",
@@ -120,7 +120,7 @@ def test_valor_no_limite_superior_e_obedecido(monkeypatch):
         "e no módulo só com medida nova de quanto o caller fica pendurado"
     )
     monkeypatch.setenv("SYSTEM_EVENT_LOG_TIMEOUT_MS", "60000")
-    assert _statement_timeout_options() == "-c statement_timeout=60000ms"
+    assert statement_timeout_options() == "-c statement_timeout=60000ms"
 
 
 def test_options_chega_no_connect(monkeypatch, user_id):

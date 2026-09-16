@@ -1,6 +1,6 @@
 """Teto de EXECUÇÃO das duas conexões de `core/system_event_log.py`, medido com
 a tabela TRAVADA. A outra metade do assunto — o helper
-`_statement_timeout_options`, que decide o valor — mora em
+`statement_timeout_options`, que decide o valor — mora em
 `tests/test_system_event_log_config.py`; as fixtures e o `tabela_travada` dos
 dois moram em `tests/_system_event_log_helpers.py`.
 
@@ -17,7 +17,7 @@ e um `threading.Timer` solta. O Timer é o que impede o vermelho de pendurar a
 suíte: se o teto não funcionar, o teste falha na asserção de tempo em vez de
 travar até o pytest ser morto.
 
-CONTROLE NEGATIVO DO GRUPO: tire o `options=_statement_timeout_options()` dos
+CONTROLE NEGATIVO DO GRUPO: tire o `options=statement_timeout_options()` dos
 DOIS `psycopg.connect` de `core/system_event_log.py`. VERMELHOS AQUI, os três:
 `test_insert_com_tabela_travada_desiste_dentro_do_teto`,
 `test_leitura_com_tabela_travada_desiste_dentro_do_teto` e
