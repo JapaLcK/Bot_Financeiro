@@ -121,6 +121,8 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre wifi6 para mim",
             "recebi 100 da compra de ações",
             "recebi 100 pela compra de um fundo",
+            "compra de CDB",
+            "compra de ações",
             "qual ação devo tomar?",
             "recebi 100 de um bom investimento",
             "recebi bons rendimentos do CDB",

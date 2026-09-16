@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import io
 import os
 import socket
 import subprocess
@@ -42,6 +43,7 @@ class SafetyGuards:
 
     def install(self) -> None:
         original_open = builtins.open
+        original_io_open = io.open
 
         def guarded_open(file: Any, *args: Any, **kwargs: Any):
             if self._is_env_path(file):
@@ -50,6 +52,14 @@ class SafetyGuards:
             if any(flag in mode for flag in ("w", "a", "x", "+")):
                 self._guard_write(file)
             return original_open(file, *args, **kwargs)
+
+        def guarded_io_open(file: Any, *args: Any, **kwargs: Any):
+            if self._is_env_path(file):
+                self._deny("env", str(file))
+            mode = str(args[0] if args else kwargs.get("mode", "r"))
+            if any(flag in mode for flag in ("w", "a", "x", "+")):
+                self._guard_write(file)
+            return original_io_open(file, *args, **kwargs)
 
         original_path_open = Path.open
 
@@ -88,6 +98,7 @@ class SafetyGuards:
             self._deny("thread", thread.name)
 
         self._replace(builtins, "open", guarded_open)
+        self._replace(io, "open", guarded_io_open)
         self._replace(Path, "open", guarded_path_open)
         self._replace(os, "open", guarded_os_open)
         self._replace(socket.socket, "connect", deny_network)
@@ -97,6 +108,15 @@ class SafetyGuards:
                 self._replace(socket.socket, name, deny_send)
         self._replace(socket, "create_connection", deny_create_connection)
         self._replace(subprocess, "Popen", deny_process)
+        process_names = (
+            "system", "popen", "fork", "forkpty", "posix_spawn", "posix_spawnp",
+            "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve",
+            "spawnvp", "spawnvpe", "execl", "execle", "execlp", "execlpe",
+            "execv", "execve", "execvp", "execvpe", "startfile",
+        )
+        for name in process_names:
+            if hasattr(os, name):
+                self._replace(os, name, deny_process)
         self._replace(threading.Thread, "start", deny_thread)
 
         def guard_path_mutation(name: str, *, destination: bool = False) -> None:
