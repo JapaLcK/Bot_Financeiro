@@ -118,6 +118,7 @@ NOT_UNDERSTOOD_MSG = (
 
 _UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
     r"(?:acao|acoes|investimento|investimentos|bitcoin|bitcoins|"
+    r"ethereum|ether|solana|cardano|dogecoin|litecoin|"
     r"cripto|criptos|criptomoeda|criptomoedas|petrobras|"
     r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|lci|lcis|lca|lcas|"
     r"debenture|debentures|commodity|commodities|"
@@ -137,7 +138,8 @@ _INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}F?"
 # Tickers só de letras são indistinguíveis de palavras comuns; use símbolos
 # conhecidos em maiúsculas para não recusar compras como "compre BOLO".
 _COMMON_ALPHABETIC_TICKER_PATTERN = (
-    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|META|NFLX)"
+    r"(?:AAPL|MSFT|GOOG|GOOGL|AMZN|NVDA|TSLA|META|NFLX|"
+    r"BTC|ETH|SOL|XRP|USDT|USDC|BNB|DOGE|LTC)"
 )
 
 

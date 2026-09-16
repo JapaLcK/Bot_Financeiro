@@ -67,6 +67,11 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "Piggy, venda PETR4F",
             "compre MSFT para mim",
             "compre PETR4F",
+            "Piggy, compre Ethereum para mim",
+            "Piggy, compre BTC para mim",
+            "compre ETH para mim",
+            "venda Solana",
+            "compre SOL",
         ):
             with self.subTest(text=text):
                 self.assertTrue(_policy(text)["refused"])
@@ -90,6 +95,7 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "qual fundo musical devo aplicar?",
             "compre BOLO para mim",
             "compre um livro para mim",
+            "compre sol para o jardim",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])
@@ -98,6 +104,8 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
         for text in (
             "meu AAPL é bom?",
             "PETR4F da minha carteira é boa?",
+            "meu BTC é bom?",
+            "Ethereum da minha carteira é bom?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])
