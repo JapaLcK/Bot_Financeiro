@@ -5,3 +5,9 @@ dist/
 .env
 ios/
 android/
+
+# Cópias que o sincronizador do macOS cria ao resolver conflito ("arquivo 2.js").
+# Doze delas chegaram a ser commitadas neste projeto: são código morto, quebram
+# o lint e confundem quem procura o arquivo certo.
+* 2.*
+* [0-9].*
