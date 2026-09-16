@@ -175,6 +175,15 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         rf"(?<!de )(?<!da )(?<!do )\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b"
     )
     polite_ending = r"(?:\s+(?:para mim|por favor|agora|hoje|amanha|ja))*\s*[?.!]*$"
+    purchase_noun_command = bool(
+        re.search(r"\b(?:faca|realize|execute)\s+(?:a|uma)\s+compra\b", norm)
+    )
+    ambiguous_purchase_noun_context = purchase_noun_command and re.search(
+        rf"\bcompra\s+(?:de\s+)?"
+        rf"(?:(?:um|uma|o|a|os|as|\d+)\s+){{0,2}}"
+        rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}{polite_ending}",
+        norm,
+    )
     ambiguous_action_context = (
         re.search(
             rf"\b{ambiguous_action}\b\s+"
@@ -209,7 +218,8 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     asset_hint = (
         re.search(rf"\b{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
         or (
-            (financial_context or ambiguous_action_context or ambiguous_quality_context)
+            (financial_context or ambiguous_action_context or ambiguous_quality_context
+             or ambiguous_purchase_noun_context)
             and re.search(rf"\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
         )
         or re.search(
@@ -315,6 +325,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         re.search(r"\b(aplicar|aplique|compre|comprar|vender|invista)\b", norm)
         or sell_command
         or purchase_command
+        or purchase_noun_command
         or re.search(r"\bvale\s+a\s+pena\b.*\b(investir|comprar|vender)\b", norm)
         or re.search(r"\b(investir|comprar|vender)\b.*\bvale\s+a\s+pena\b", norm)
         or re.search(

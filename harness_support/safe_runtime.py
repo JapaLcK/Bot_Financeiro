@@ -74,6 +74,9 @@ class SafetyGuards:
         def deny_network(sock: socket.socket, address: Any) -> None:
             self._deny("network", repr(address))
 
+        def deny_send(sock: socket.socket, *args: Any, **kwargs: Any) -> None:
+            self._deny("network", repr(args[-1] if args else kwargs))
+
         def deny_create_connection(address: Any, *args: Any, **kwargs: Any) -> None:
             self._deny("network", repr(address))
 
@@ -89,9 +92,51 @@ class SafetyGuards:
         self._replace(os, "open", guarded_os_open)
         self._replace(socket.socket, "connect", deny_network)
         self._replace(socket.socket, "connect_ex", deny_network)
+        for name in ("send", "sendall", "sendto", "sendmsg", "sendfile"):
+            if hasattr(socket.socket, name):
+                self._replace(socket.socket, name, deny_send)
         self._replace(socket, "create_connection", deny_create_connection)
         self._replace(subprocess, "Popen", deny_process)
         self._replace(threading.Thread, "start", deny_thread)
+
+        def guard_path_mutation(name: str, *, destination: bool = False) -> None:
+            original = getattr(Path, name)
+
+            def guarded(path: Path, *args: Any, **kwargs: Any) -> Any:
+                self._guard_write(path)
+                if destination:
+                    self._guard_write(args[0] if args else kwargs["target"])
+                return original(path, *args, **kwargs)
+
+            self._replace(Path, name, guarded)
+
+        for name in ("mkdir", "rmdir", "unlink", "touch", "chmod", "symlink_to"):
+            guard_path_mutation(name)
+        for name in ("rename", "replace", "hardlink_to"):
+            guard_path_mutation(name, destination=True)
+
+        def guard_os_mutation(name: str, *, destination: bool = False) -> None:
+            original = getattr(os, name)
+
+            def guarded(path: Any, *args: Any, **kwargs: Any) -> Any:
+                self._guard_write(path)
+                if destination:
+                    self._guard_write(args[0] if args else kwargs["dst"])
+                return original(path, *args, **kwargs)
+
+            self._replace(os, name, guarded)
+
+        for name in ("mkdir", "rmdir", "remove", "unlink", "chmod", "utime"):
+            guard_os_mutation(name)
+        for name in ("rename", "replace", "link"):
+            guard_os_mutation(name, destination=True)
+        original_symlink = os.symlink
+
+        def guarded_symlink(source: Any, destination: Any, *args: Any, **kwargs: Any) -> Any:
+            self._guard_write(destination)
+            return original_symlink(source, destination, *args, **kwargs)
+
+        self._replace(os, "symlink", guarded_symlink)
 
     def _guard_write(self, value: Any) -> None:
         if isinstance(value, int):
