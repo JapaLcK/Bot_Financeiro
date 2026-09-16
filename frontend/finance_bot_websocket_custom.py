@@ -7780,11 +7780,8 @@ async def forecast_route(request: Request, user_id: int, threshold: float = 0.0)
     # estoura na serialização JSON da resposta (500).
     if not isfinite(threshold):
         raise HTTPException(status_code=400, detail="Limite inválido.")
-    from core.services.cashflow import forecast_horizons, daily_trajectory
-    result = await asyncio.to_thread(forecast_horizons, user_id)
-    traj = await asyncio.to_thread(daily_trajectory, user_id, 90, threshold)
-    for campo in ("trajectory", "worst_day", "vencidos", "threshold", "period", "premises"):
-        result[campo] = traj[campo]
+    from core.services.cashflow_forecast import forecast_with_trajectory
+    result = await asyncio.to_thread(forecast_with_trajectory, user_id, 90, threshold)
     return {"ok": True, "forecast": result}
 
 

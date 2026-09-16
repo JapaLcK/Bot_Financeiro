@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import calendar
 import math
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 
@@ -102,7 +102,7 @@ def _open_card_bills_detail(user_id: int, until: date) -> list[dict]:
 
 def _cashflow_events(user_id: int, today: date, until: date) -> list[tuple[date, str, str, float]]:
     """Fonte ÚNICA dos compromissos da projeção, `(data, tipo, nome, valor_com_sinal)`,
-    consumida por `project` (soma até a data) e `daily_trajectory` (por dia).
+    consumida por `project` (soma até a data) e `forecast_with_trajectory` (por dia).
     Todo filtro mora aqui — filtro fora deste gerador é uma segunda versão da regra.
 
     - receita fixa ativa com valor > 0: ocorrências em (today, until], +valor;
@@ -201,23 +201,22 @@ def _starting_balance(user_id: int) -> dict[str, Any]:
     }
 
 
-def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
-    """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
-    novo de `extra_amount`. Ver docstring do módulo."""
-    today = date.today()
-
-    sb = _starting_balance(user_id)
+def _projection(today: date, sb: dict[str, Any], events: list[tuple[date, str, str, float]],
+                target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
+    """Projeção até `target_date` sobre saldo e eventos já lidos. Soma só os eventos
+    com data até o alvo, então aceita os eventos de um horizonte maior."""
     saldo = sb["saldo"]
     balance_source = sb["balance_source"]
     of_bank_count = sb["of_bank_count"]
     banks_excluded = sb["banks_excluded"]
 
     valores: dict[str, list[float]] = {"receita": [], "gasto_fixo": [], "boleto": [], "fatura_cartao": []}
-    for _d, tipo, _nome, valor in _cashflow_events(user_id, today, target_date):
-        valores[tipo].append(valor)
+    for d, tipo, _nome, valor in events:
+        if d <= target_date:
+            valores[tipo].append(valor)
 
     # Soma exata (`math.fsum`), arredondada só na saída: não depende da ordem nem do
-    # agrupamento, e é o que faz `daily_trajectory` (que soma os mesmos eventos por
+    # agrupamento, e é o que faz `forecast_with_trajectory` (que soma os mesmos eventos por
     # dia) bater no centavo com os horizontes mesmo com fração de centavo do banco.
     receitas = math.fsum(valores["receita"])
     gastos_fixos = math.fsum(-v for v in valores["gasto_fixo"])
@@ -245,123 +244,12 @@ def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[
     }
 
 
-def forecast_horizons(user_id: int, horizons: tuple[int, ...] = (30, 60, 90)) -> dict[str, Any]:
-    """Previsão de saldo em vários horizontes (default 30/60/90 dias).
-
-    Feature paga (Pro+): reusa `project()` em hoje+N pra cada N e devolve
-    ``{"today": ..., "horizons": {"30": <projeção>, "60": ..., "90": ...}}`` —
-    formato pensado pro card do dashboard e pra tool de IA. Cada projeção mantém
-    a mesma semântica de `project` (saldo + receitas fixas − gastos fixos −
-    boletos até a data); ver docstring do módulo."""
+def project(user_id: int, target_date: date, extra_amount: float = 0.0) -> dict[str, Any]:
+    """Projeção de caixa até `target_date`, opcionalmente considerando um boleto
+    novo de `extra_amount`. Ver docstring do módulo."""
     today = date.today()
-    hz = {str(n): project(user_id, today + timedelta(days=n)) for n in horizons}
-    # A origem do saldo é a mesma em todos os horizontes; sobe pro topo pra o
-    # dashboard renderizar o aviso sem precisar abrir cada projeção.
-    any_h = next(iter(hz.values()), {})
-    return {
-        "today": today.isoformat(),
-        "balance_source": any_h.get("balance_source", "manual"),
-        "of_bank_count": any_h.get("of_bank_count", 0),
-        "banks_excluded": any_h.get("banks_excluded", False),
-        "horizons": hz,
-    }
+    sb = _starting_balance(user_id)
+    return _projection(today, sb, _cashflow_events(user_id, today, target_date), target_date, extra_amount)
 
 
-def daily_trajectory(user_id: int, days: int = 90, threshold: float = 0.0) -> dict[str, Any]:
-    """Trajetória diária de saldo projetado (default 90 dias) e o "pior dia" no
-    caminho, com os compromissos que levaram até ele. Mesmos eventos de `project`
-    (`_cashflow_events`), distribuídos dia a dia em vez de somados no horizonte —
-    pensada pra achar aperto de saldo que os marcos de `forecast_horizons` não
-    mostram. Feature Pro+; ver docstring do módulo."""
-    today = date.today()
-    days = max(0, int(days))
-    horizon_end = today + timedelta(days=days)
-    threshold = round(float(threshold), 2)
-
-    # Parcelas do saldo até o dia corrente; o saldo do dia é a soma exata delas,
-    # a mesma conta de `project`.
-    parcelas = [_starting_balance(user_id)["saldo"]]
-    vencidos: list[dict] = []
-    eventos_por_dia: dict[date, list[dict]] = {}
-    valores_por_dia: dict[date, list[float]] = {}
-    for d, tipo, nome, valor in _cashflow_events(user_id, today, horizon_end):
-        # `valor` exposto é o cadastrado; a direção vem do `tipo` (só receita entra).
-        compromisso = {"tipo": tipo, "nome": nome, "valor": round(valor if tipo == "receita" else -valor, 2)}
-        if d <= today:
-            # Boleto/fatura já vencido (ou vencendo hoje): `project()` o soma em
-            # qualquer horizonte, então ele pesa no saldo de partida — e é listado
-            # em `vencidos` pra não sumir da resposta. Recorrente nunca cai aqui
-            # (`_recurring_occurrence_dates` exige `after < d`).
-            parcelas.append(valor)
-            vencidos.append({"date": d.isoformat(), **compromisso})
-            continue
-        eventos_por_dia.setdefault(d, []).append(compromisso)
-        valores_por_dia.setdefault(d, []).append(valor)
-    vencidos.sort(key=lambda v: v["date"])  # mais antigo primeiro; estável no empate
-
-    saldo_projetado = round(math.fsum(parcelas), 2)
-    saldos = [saldo_projetado]  # posição N = saldo no fim do dia N; 0 = partida
-    worst: dict[str, Any] | None = None
-    worst_i = 0
-    trajectory: list[dict] = []
-    for i in range(1, days + 1):
-        d = today + timedelta(days=i)
-        if d in valores_por_dia:  # dia sem evento repete o saldo, sem refazer a soma
-            parcelas.extend(valores_por_dia[d])
-            saldo_projetado = round(math.fsum(parcelas), 2)
-        item = {
-            "date": d.isoformat(),
-            "saldo_projetado": saldo_projetado,
-            "abaixo_do_limite": saldo_projetado < threshold,
-            "compromissos": eventos_por_dia.get(d, []),
-        }
-        trajectory.append(item)
-        saldos.append(saldo_projetado)
-        if worst is None or saldo_projetado < worst["saldo_projetado"]:
-            worst, worst_i = item, i
-
-    worst_day = None
-    if worst is not None:
-        # Causas = saídas desde o último pico: o maior saldo em [dia 0, pior dia),
-        # o mais recente em empate (`topo`). Num patamar (mesmo saldo vários dias
-        # seguidos), `desde` é o dia em que o saldo CHEGOU lá, mas as causas só
-        # contam depois do último dia parado nele: uma saída compensada no mesmo
-        # dia por uma receita, no meio do patamar, não derrubou nada.
-        topo = max(range(worst_i), key=lambda n: (saldos[n], n))
-        if worst["saldo_projetado"] >= saldos[topo]:
-            # Não houve queda (só possível com o pior dia no dia 1, sem cair em
-            # relação à partida): nada a explicar, então sem causas e sem `desde`.
-            causas, desde = [], None
-        else:
-            pico = topo
-            while pico > 0 and saldos[pico - 1] == saldos[pico]:
-                pico -= 1
-            causas = [
-                {"date": it["date"], **c}
-                for it in trajectory[topo:worst_i]  # dias topo+1 .. pior dia
-                for c in it["compromissos"]
-                if c["tipo"] != "receita"
-            ]
-            desde = (today + timedelta(days=pico)).isoformat()
-        # Dict novo: `worst` é o próprio item de `trajectory`, e não pode ganhar chave.
-        worst_day = {**worst, "causas": causas, "desde": desde}
-
-    return {
-        "period": {"start": (today + timedelta(days=1)).isoformat(), "end": horizon_end.isoformat()} if days > 0 else None,
-        "threshold": threshold,
-        "trajectory": trajectory,
-        "worst_day": worst_day,
-        "vencidos": vencidos,
-        "premises": (
-            "Estimativa dia a dia: saldo + receitas fixas − gastos fixos automáticos "
-            "(mensais e anuais) − boletos pendentes − faturas de cartão em aberto, na data "
-            "de vencimento de cada compromisso. Boletos e faturas já vencidos entram no "
-            "saldo de partida e são listados à parte como vencidos. Receitas fixas entram "
-            "uma vez por mês no dia do pagamento (as anuais, só no mês delas), qualquer que "
-            "seja a frequência cadastrada. Não inclui gastos avulsos futuros nem gastos "
-            "fixos semanais, diários ou únicos."
-        ),
-    }
-
-
-__all__ = ["project", "forecast_horizons", "daily_trajectory"]
+__all__ = ["project"]
