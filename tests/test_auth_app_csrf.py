@@ -256,3 +256,32 @@ def test_a_lista_de_cookies_de_sessao_e_a_do_codigo(sessao):
         assert r.status_code == 403, f"{nome} não reativou o CSRF: {r.text}"
 
 
+
+
+def test_get_do_app_nao_planta_cookie_de_csrf(sessao):
+    """O contrato "sem cookie" tem de sobreviver a um GET.
+
+    O middleware planta o `csrf_token` em todo método seguro sem cookie. Um
+    cliente nativo com jar ligado o guardaria, e a escrita SEGUINTE chegaria com
+    jar não-vazio: perderia a isenção e tomaria 403, e o `/auth/refresh` cairia
+    no canal de navegador sem devolver token no corpo. "Funciona na primeira
+    tela e quebra depois" é caro de depurar porque parece intermitente.
+    """
+    client, dados = sessao
+    r = client.get(
+        "/auth/me", headers={
+            "Authorization": f"Bearer {dados['access_token']}",
+            dashboard.APP_CLIENT_HEADER: "app",
+        },
+    )
+    enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
+    assert dashboard.CSRF_COOKIE_NAME not in enviados, "plantou cookie no app"
+
+
+def test_get_do_navegador_continua_recebendo_o_cookie_de_csrf():
+    """Controle positivo: o site DEPENDE desse cookie para poder escrever."""
+    from fastapi.testclient import TestClient
+
+    r = TestClient(dashboard.app).get("/login")
+    enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
+    assert dashboard.CSRF_COOKIE_NAME in enviados, "o navegador ficou sem token de CSRF"

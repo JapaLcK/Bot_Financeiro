@@ -2326,7 +2326,22 @@ async def csrf_middleware(request: Request, call_next):
             )
 
     response = await call_next(request)
-    if request.method.upper() in CSRF_SAFE_METHODS and not token:
+    # Cookie de CSRF só para quem vai USAR cookie. Um GET do app plantava o
+    # `csrf_token`, e um cliente nativo com cookie jar ligado o guardaria — aí a
+    # escrita SEGUINTE chegaria com jar não-vazio, perderia a isenção e tomaria
+    # 403, e o `/auth/refresh` cairia no canal de navegador sem devolver token
+    # no corpo. O sintoma seria "funciona na primeira tela e quebra depois", que
+    # é caro de depurar porque parece intermitente.
+    #
+    # O header aqui está no papel legítimo dele: escolher o fluxo, não conceder
+    # nada. Navegador nenhum o manda, e quem o mandar só abre mão de receber um
+    # cookie que não ia usar.
+    if (
+        request.method.upper() in CSRF_SAFE_METHODS
+        and not token
+        and (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
+        != APP_CLIENT_APP
+    ):
         _set_csrf_cookie(response, _make_csrf_token())
     return response
 
