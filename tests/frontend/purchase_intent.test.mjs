@@ -43,7 +43,7 @@ test("preserva plano, ciclo e meio durante a autenticação", () => {
       createdAt: 1_800_000_000_000,
     },
   );
-  assert.equal(api.afterAuth("/home"), "/precos?compra=continuar");
+  assert.equal(api.afterAuth("/home"), "/continuar-compra");
 });
 
 test("cadastro direto continua usando o destino normal", () => {
@@ -75,7 +75,7 @@ test("login Google recebe o retorno para a compra pendente", () => {
 
   assert.equal(
     googleLink.href,
-    "/auth/google/start?next=%2Fprecos%3Fcompra%3Dcontinuar",
+    "/auth/google/start?next=%2Fcontinuar-compra",
   );
 });
 

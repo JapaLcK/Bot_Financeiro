@@ -92,7 +92,7 @@
     return done;
   }
 
-  function continueUrl() { return "/precos?compra=continuar"; }
+  function continueUrl() { return "/continuar-compra"; }
   function authUrl() { return "/cadastro?compra=1"; }
   function afterAuth(fallback) { return pending() ? continueUrl() : (fallback || "/home"); }
 
