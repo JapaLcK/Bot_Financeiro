@@ -24,6 +24,9 @@ def _refresh_do_app(client: TestClient, token: str):
         headers={
             "Authorization": f"Bearer {token}",
             dashboard.APP_CLIENT_HEADER: "app",
+            # Toda escrita do app declara JSON: é a 2ª condição da isenção, e
+            # é o que um `<form>` cross-site não consegue emitir.
+            "Content-Type": "application/json",
         },
     )
 
@@ -52,7 +55,10 @@ def test_refresh_do_app_passa_sem_cookie_e_sem_csrf(sessao):
     client, dados = sessao
     r = client.post(
         "/auth/refresh",
-        headers={"Authorization": f"Bearer {dados['refresh_token']}"},
+        headers={
+            "Authorization": f"Bearer {dados['refresh_token']}",
+            "Content-Type": "application/json",
+        },
     )
     assert r.status_code == 200, r.text
 
@@ -72,7 +78,10 @@ def test_access_jwt_no_header_do_refresh_nao_serve_de_refresh(sessao):
     client, dados = sessao
     r = client.post(
         "/auth/refresh",
-        headers={"Authorization": f"Bearer {dados['access_token']}"},
+        headers={
+            "Authorization": f"Bearer {dados['access_token']}",
+            "Content-Type": "application/json",
+        },
     )
     assert r.status_code == 400, r.text
     assert r.json()["detail"] == "missing_refresh_token"
@@ -199,6 +208,18 @@ def test_rate_limit_sem_token_cai_no_ip():
 
 # ── Logout: o app precisa conseguir SAIR ─────────────────────────────────────
 
+def _logout_do_app(client: TestClient, credencial: str):
+    """Como o app sai: credencial no Authorization, sem cookie, declarando JSON."""
+    return client.post(
+        "/auth/logout",
+        headers={
+            "Authorization": f"Bearer {credencial}",
+            dashboard.APP_CLIENT_HEADER: "app",
+            "Content-Type": "application/json",
+        },
+    )
+
+
 def test_logout_do_app_revoga_a_sessao(sessao):
     """O defeito mais caro que a revisão achou: o logout do app era no-op TOTAL.
 
@@ -214,10 +235,7 @@ def test_logout_do_app_revoga_a_sessao(sessao):
     jti = dashboard._decode_jwt(dados["access_token"])["jti"]
     assert get_active_session(jti), "pré-condição: a sessão tem de existir"
 
-    r = client.post(
-        "/auth/logout",
-        headers={"Authorization": f"Bearer {dados['access_token']}"},
-    )
+    r = _logout_do_app(client, dados["access_token"])
     assert r.status_code == 200, r.text
     assert not get_active_session(jti), "a sessão sobreviveu ao logout"
 
@@ -225,10 +243,7 @@ def test_logout_do_app_revoga_a_sessao(sessao):
 def test_logout_do_app_mata_o_access_token(sessao):
     """Sessão revogada ⇒ o token não abre mais rota de dados."""
     client, dados = sessao
-    client.post(
-        "/auth/logout",
-        headers={"Authorization": f"Bearer {dados['access_token']}"},
-    )
+    _logout_do_app(client, dados["access_token"])
     r = client.post(
         ALVO,
         headers={"Authorization": f"Bearer {dados['access_token']}"},
@@ -240,10 +255,7 @@ def test_logout_do_app_mata_o_access_token(sessao):
 def test_logout_do_app_mata_o_refresh_token(sessao):
     """E o refresh junto: senão o aparelho renova a sessão que o usuário fechou."""
     client, dados = sessao
-    client.post(
-        "/auth/logout",
-        headers={"Authorization": f"Bearer {dados['access_token']}"},
-    )
+    _logout_do_app(client, dados["access_token"])
     r = _refresh_do_app(client, dados["refresh_token"])
     assert r.status_code == 401, r.text
 
@@ -259,6 +271,37 @@ def test_rate_limit_do_admin_continua_por_ip(sessao):
     chave = chave_de_rate_limit(
         _req(
             "/admin/auth/login",
+            cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
+        )
+    )
+    assert chave == "10.0.0.1"
+
+
+def test_logout_do_app_com_access_expirado_mata_o_refresh(sessao):
+    """O irmão que o conserto do P0 não alcançou, e a auditoria pegou.
+
+    Com o access token expirado — um app parado por mais de 15 minutos, que é o
+    caso comum — o ramo do `jti` não decodifica nada e não revoga. Sobrava o
+    ramo do refresh, e ele lia SÓ o cookie. Resultado: 200 com cara de sucesso e
+    um refresh vivo por 14 dias no aparelho recém-deslogado.
+    """
+    client, dados = sessao
+    r = _logout_do_app(client, dados["refresh_token"])
+    assert r.status_code == 200, r.text
+    assert _refresh_do_app(client, dados["refresh_token"]).status_code == 401
+
+
+def test_rate_limit_do_link_magico_continua_por_ip(sessao):
+    """A TERCEIRA família que adivinha segredo: `/d/{code}`.
+
+    O código do link mágico é credencial de login de uso único — adivinhá-lo é
+    tomar a conta. Com a chave por usuário, o teto de 30/min de lá passava a ser
+    contado pela conta do próprio atacante.
+    """
+    _, dados = sessao
+    chave = chave_de_rate_limit(
+        _req(
+            "/d/abcdef",
             cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
         )
     )

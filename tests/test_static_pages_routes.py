@@ -330,6 +330,14 @@ def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
     contêm uma chamada a `_clear_session_cookies` e devolve o caminho do
     decorador. Uma quarta rota que limpe cookie e não esteja no JS deixa isto
     vermelho.
+
+    **A varredura segue um nível de indireção**, e isso não é zelo: quando a
+    limpeza do `/auth/refresh` passou a morar num helper
+    (`_limpa_e_reemite_csrf`), o gate parou de ver a rota e ficou VERDE com o
+    fluxo descoberto — sintoma clássico de portão que deixa de medir em
+    silêncio. Os nomes dos intermediários vêm de uma varredura, não de uma
+    lista escrita à mão: qualquer função do módulo que chame
+    `_clear_session_cookies` conta como limpeza para quem a chamar.
     """
     import ast
     import pathlib
@@ -339,16 +347,28 @@ def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
              / "frontend" / "finance_bot_websocket_custom.py").read_text(encoding="utf-8")
     arvore = ast.parse(fonte)
 
-    do_python: set[str] = set()
-    for no in ast.walk(arvore):
-        if not isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        limpa = any(
-            isinstance(c, ast.Call)
-            and getattr(c.func, "id", None) == "_clear_session_cookies"
+    def _chama(no, nomes: set[str]) -> bool:
+        return any(
+            isinstance(c, ast.Call) and getattr(c.func, "id", None) in nomes
             for c in ast.walk(no)
         )
-        if not limpa:
+
+    funcoes = [
+        no for no in ast.walk(arvore)
+        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    # Nível 1: quem chama a limpeza direto. Nível 2: quem chama esses — é onde
+    # o `_limpa_e_reemite_csrf` entra, e sem isto o `/auth/refresh` sumia da
+    # varredura sem deixar vermelho.
+    limpam = {"_clear_session_cookies"}
+    limpam |= {
+        no.name for no in funcoes
+        if not no.decorator_list and _chama(no, limpam)
+    }
+
+    do_python: set[str] = set()
+    for no in funcoes:
+        if not _chama(no, limpam):
             continue
         for dec in no.decorator_list:
             # Só o decorador de ROTA (`@app.post("/x")`). Sem este recorte

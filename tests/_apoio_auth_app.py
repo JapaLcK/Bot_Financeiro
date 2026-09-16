@@ -32,8 +32,8 @@ def limpa_rate_limits(bucket: str, email: str) -> None:
     O storage em memória do slowapi já é zerado por teste pelo conftest
     (`_zera_rate_limit_em_memoria`), mas este outro mora no banco e sobrevive.
     Os identificadores levam prefixo — `ip:` e `email:`
-    (`finance_bot_websocket_custom.py:2441` e `:2447`) — e o teste que só
-    apagava o e-mail cru não apagava nada.
+    montados em `_check_auth_rate_limits` — e o teste que só apagava o
+    e-mail cru não apagava nada.
     """
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -81,9 +81,8 @@ def sessao():
     o rate limit no assunto. Quem exercita o login de verdade são os dois
     testes do bloco "Tokens no corpo", que é onde ele importa.
 
-    `_issue_session_token` é a MESMA função que o login usa
-    (`finance_bot_websocket_custom.py:2579`), então a sessão, o `jti` e o
-    refresh são os de produção.
+    `_issue_session_token` é a MESMA função que o login usa, então a sessão,
+    o `jti` e o refresh são os de produção.
     """
     db.ensure_user(UID)
     access, jti, refresh = dashboard._issue_session_token(UID, EMAIL, req("/auth/login"))

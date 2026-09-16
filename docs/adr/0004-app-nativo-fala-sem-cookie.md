@@ -8,9 +8,13 @@ A escolha não é de conveniência. Com cookie jar perde-se rotação limpa de t
 
 ## A isenção de CSRF, e o que a sustenta
 
-O CSRF é dispensado quando a requisição não traz **nenhum** cookie de sessão. O que o CSRF protege é credencial **ambiente**: o navegador anexa o cookie sozinho, então uma página de terceiro dispara uma escrita autenticada sem precisar ler nada da vítima. Sem cookie de sessão não existe credencial ambiente, e o par deixa de proteger alguma coisa.
+O CSRF é dispensado quando a requisição não traz **nenhum** cookie e declara corpo JSON. O que o CSRF protege é credencial **ambiente**: o navegador anexa o cookie sozinho, então uma página de terceiro dispara uma escrita autenticada sem precisar ler nada da vítima. Sem cookie de sessão não existe credencial ambiente, e o par deixa de proteger alguma coisa.
 
-A condição é a ausência de cookie, e nada além dela. Nenhum cabeçalho participa da decisão, nem `Authorization`, nem `X-PigBank-Client`. Isso é deliberado: cabeçalho é alegação de quem chama, e uma isenção que dependesse dele seria contornável mandando a alegação. O que o atacante não controla é o cookie — se a vítima tem sessão, o navegador o envia sozinho, e o par volta a ser exigido.
+Nenhum cabeçalho de identificação participa da decisão, nem `Authorization`, nem `X-PigBank-Client`. Isso é deliberado: cabeçalho de identidade é alegação de quem chama, e uma isenção que dependesse dele seria contornável mandando a alegação. O que o atacante não controla é o cookie — se a vítima tem sessão, o navegador o envia sozinho, e o par volta a ser exigido.
+
+A ausência de cookie, porém, não basta, e a revisão mostrou por quê. Os cookies de sessão são declarados com `SameSite=lax`, de modo que nunca viajaram num envio cross-site; quem barrava um formulário de terceiro apontado para a entrada, o cadastro ou a recuperação de senha era o cookie de proteção, que é estrito. Com apenas a ausência de cookie, a isenção reabriria a entrada forçada: a página do atacante faria o navegador da vítima entrar na conta dele, e a vítima seguiria usando o site achando que é a sua.
+
+Por isso a segunda condição: o corpo precisa ser JSON. Um formulário cross-site só consegue emitir os três tipos que dispensam verificação prévia, e um envio por script de outra origem com JSON depende de uma aprovação que esta borda não concede. Isso não é o CORS sustentando a isenção do cliente nativo, e a distinção importa: é a regra do navegador fechando a única porta pela qual um navegador atacaria. Cliente nativo não é atacante de falsificação de requisição, porque esse ataque precisa, por definição, do navegador da vítima.
 
 A primeira versão desta regra exigia um `Authorization: Bearer` presente, e a revisão mostrou duas consequências. A primeira é que o aplicativo não conseguia fazer login, porque ali ele ainda não tem token algum. A segunda é que um cabeçalho de lixo bastava para remover o CSRF de rota pública de escrita, já que a presença nunca era validada. A regra atual não tem nenhum dos dois problemas.
 
@@ -30,12 +34,6 @@ A rotação e a detecção de reapresentação permanecem inteiras e não foram 
 
 O app carrega apenas o access token. A resolução de identidade das rotas de dados passa a aceitar tanto o token de dashboard quanto o access JWT. Não é ampliação de privilégio: os dois são assinados pelo mesmo segredo, apontam para o mesmo usuário, carregam o mesmo identificador de sessão e continuam sujeitos à mesma revogação. O access token é o mais curto dos dois, então aceitar quinze minutos onde doze horas já valiam não afrouxa nada. O que se evita é obrigar um cliente sem cookie jar a guardar, rotacionar e renovar dois segredos para a mesma sessão.
 
-## Rate limit
-
-A chave do teto passa a ser o usuário quando há credencial legível, e continua o endereço de rede quando não há. O motivo é o CGNAT das operadoras móveis, onde uma antena inteira compartilha um endereço e um usuário ativo derrubaria os vizinhos — cenário em que o app entra por definição.
-
-As rotas sob `/auth` continuam por endereço de rede, de propósito. É onde mora a defesa contra força bruta e onde ainda não existe usuário identificado; trocar a chave ali mudaria um controle de segurança de lado sem nada a ganhar. Com essa exceção, a mudança é provadamente não enfraquecedora.
-
 ## Sair também precisa funcionar
 
 A leitura do token de acesso passa a considerar o cabeçalho `Authorization` mesmo quando a rota não declara a dependência que o injeta. Sem isso, encerrar a sessão pelo aplicativo era operação vazia com aparência de sucesso: o token saía nulo, nada era revogado, e a resposta voltava com duzentos. O usuário apertava sair, via confirmação, e a sessão seguia de pé pelos catorze dias do token de renovação. A correção fica na função que todos os chamadores atravessam, não no encerramento de sessão isoladamente.
@@ -44,7 +42,7 @@ A leitura do token de acesso passa a considerar o cabeçalho `Authorization` mes
 
 A chave do teto passa a ser o usuário quando há credencial legível, e continua o endereço de rede quando não há. O motivo é o CGNAT das operadoras móveis, onde uma antena inteira compartilha um endereço e um usuário ativo derrubaria os vizinhos — cenário em que o aplicativo entra por definição.
 
-As rotas de autenticação e as do painel administrativo continuam por endereço de rede. É onde se adivinha senha, e onde a credencial sob ataque não é a do token apresentado. O painel ficara de fora na primeira versão, porque seu caminho de entrada não começa com o prefixo de autenticação; com a chave por usuário, o teto daquela rota passava a ser contado pela conta do próprio atacante, e como o cadastro é livre isso daria tantos baldes quantas contas ele quisesse criar.
+Três famílias continuam por endereço de rede: as rotas de autenticação, as do painel administrativo e a do link mágico. É onde se adivinha segredo, e onde a credencial sob ataque não é a do token apresentado. As duas últimas ficaram de fora na primeira versão e a revisão as encontrou. O painel, porque seu caminho de entrada não começa com o prefixo de autenticação. O link mágico, porque o código de uso único que ele carrega é credencial de login: adivinhá-lo é tomar a conta, e o teto daquela rota existe por uma medição registrada nela mesma, de duzentas requisições anônimas com código bem formado virando duzentas exclusões no banco. Nos dois casos, com a chave por usuário o teto passava a ser contado pela conta do próprio atacante, e como o cadastro é livre isso daria tantos baldes quantas contas ele quisesse criar.
 
 ## O que isto não autoriza
 

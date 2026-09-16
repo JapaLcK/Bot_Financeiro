@@ -101,8 +101,9 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 # Prefixos cujo teto continua contado por IP. Ver a docstring abaixo: é onde se
-# adivinha senha, e onde a credencial sob ataque não é a do token apresentado.
-PREFIXOS_SEM_CHAVE_DE_USUARIO = ("/auth", "/admin")
+# adivinha SEGREDO (senha de conta, senha do painel, código de link mágico), e
+# onde a credencial sob ataque não é a do token apresentado.
+PREFIXOS_SEM_CHAVE_DE_USUARIO = ("/auth", "/admin", "/d/")
 
 
 def chave_de_rate_limit(request: Request) -> str:
@@ -118,12 +119,16 @@ def chave_de_rate_limit(request: Request) -> str:
     sob ataque é OUTRA que não a do token apresentado. Trocar a chave nessas
     rotas mudaria um controle de segurança de lado, sem nada a ganhar.
 
-    `/admin` estava de fora e a revisão pegou: `"/admin/auth/login"` não começa
-    com `"/auth"`, então o teto de 10/min daquela rota passou a ser contado pela
-    conta do PRÓPRIO atacante. Como o cadastro é self-service, N contas davam N
-    baldes do mesmo IP para adivinhar a senha do painel, e o teto virava
-    decorativo. Com os dois prefixos, a mudança é provadamente
-    não-enfraquecedora: o que protegia senha continua como estava.
+    São TRÊS famílias, e as duas últimas a revisão pegou. `"/admin/auth/login"`
+    não começa com `"/auth"`, então o teto de 10/min do painel passou a ser
+    contado pela conta do PRÓPRIO atacante; como o cadastro é self-service, N
+    contas davam N baldes do mesmo IP para adivinhar a senha, e o teto virava
+    decorativo. `/d/{code}` é o mesmo caso com outro nome: o código do link
+    mágico é credencial de login de uso único, adivinhá-lo é tomar a conta, e o
+    teto de 30/min de lá existe porque 200 requisições anônimas com código bem
+    formado viravam 200 DELETEs no banco (medido, e registrado na própria
+    rota). Com os três prefixos, a mudança é provadamente não-enfraquecedora: o
+    que protegia segredo continua como estava.
 
     Nunca levanta. Token ilegível, expirado ou ausente cai no IP, que é o
     comportamento de antes.

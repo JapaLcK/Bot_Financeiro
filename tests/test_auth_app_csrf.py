@@ -2,9 +2,9 @@
 
 Os dois controles que o `CLAUDE.md` §3 exige:
 
-  * **negativo** — faça `_sem_credencial_ambiente` devolver False: este grupo
-    fica com 7 vermelhos (medido). Sem a isenção, Bearer sem cookie tomava 403.
-    E force `_entrega_sessao` a mandar cookie sempre: mais 3 vermelhos.
+  * **negativo** — três mutações, cada uma medida NESTE arquivo: desligar a
+    isenção do CSRF (4 vermelhos); mandar cookie para o app em `_entrega_sessao`
+    (1); tirar a condição de corpo JSON, que reabre login CSRF (2).
   * **positivo** — `test_cookie_sem_csrf_continua_403`,
     `test_cookie_com_csrf_continua_passando` e
     `test_login_do_navegador_continua_recebendo_os_tres_cookies` provam que o
@@ -255,3 +255,54 @@ def test_rate_limit_do_login_do_app_continua_por_ip():
     from _apoio_auth_app import req as _req
 
     assert chave_de_rate_limit(_req("/auth/login")) == "10.0.0.1"
+
+
+def test_formulario_cross_site_nao_ganha_isencao(sessao):
+    """Login CSRF, a porta que a auditoria achou aberta.
+
+    Os cookies de SESSÃO são `SameSite=lax` e nunca viajaram num POST
+    cross-site; quem barrava um `<form>` de terceiro apontado para `/auth/login`
+    era o cookie de CSRF, que é `strict`. Com a isenção só por ausência de
+    cookie, a página do atacante faria o navegador da vítima entrar na CONTA
+    DELE — e a vítima seguiria usando o site achando que é a sua.
+
+    A 2ª condição (corpo JSON) fecha isso: um formulário cross-site só emite
+    `urlencoded`, `multipart` ou `text/plain`, os três tipos que dispensam
+    preflight.
+    """
+    client, _ = sessao
+    r = client.post(
+        "/auth/login",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        content="email=vitima@example.com&password=x",
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_texto_puro_tambem_nao_ganha_isencao(sessao):
+    """`text/plain` é o terceiro tipo que um `<form>` consegue emitir."""
+    client, _ = sessao
+    r = client.post(
+        "/auth/login",
+        headers={"Content-Type": "text/plain"},
+        content='{"email":"vitima@example.com","password":"x"}',
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_a_lista_de_cookies_de_sessao_e_a_do_codigo(sessao):
+    """Deriva do CÓDIGO, não copia a lista — fecha a CLASSE, não a instância.
+
+    O parametrizado acima enumera três nomes à mão, então um QUINTO cookie
+    nascer não deixaria nenhum vermelho. Este varre a tupla real.
+    """
+    client, dados = sessao
+    for nome in dashboard.COOKIES_DE_SESSAO:
+        client.cookies.clear()
+        client.cookies.set(nome, "valor-qualquer")
+        r = client.post(
+            ALVO,
+            headers={"Authorization": f"Bearer {dados['access_token']}"},
+            json=CORPO,
+        )
+        assert r.status_code == 403, f"{nome} não reativou o CSRF: {r.text}"

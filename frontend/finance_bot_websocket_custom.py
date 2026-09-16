@@ -2231,7 +2231,7 @@ def _csrf_exempt(path: str) -> bool:
 
 
 def _sem_credencial_ambiente(request: Request) -> bool:
-    """True quando a requisição não traz NENHUM cookie de sessão.
+    """True quando a requisição não traz cookie NENHUM.
 
     O CSRF defende contra credencial **ambiente**: o navegador anexa o cookie
     sozinho, então uma página de terceiro dispara uma escrita autenticada sem
@@ -2253,15 +2253,43 @@ def _sem_credencial_ambiente(request: Request) -> bool:
     estrita continua valendo e é útil, mas cliente nativo não passa por CORS —
     quem sustenta é a ausência de credencial ambiente.
 
-    A checagem é pela PRESENÇA da chave (`in`), não pelo valor. `Cookie: x=v;
-    x=` faz o parser guardar a ÚLTIMA ocorrência, e `cookies.get("x")` devolve
-    `""`, que é falsy — uma duplicata vazia apagaria do teste uma credencial
-    que está no jar. Medido na revisão.
+    A condição é **nenhum cookie**, e não "nenhum cookie de sessão" — é mais
+    estrita e inclui a outra. Dois motivos. O `csrf_token` é plantado pelo
+    próprio middleware em qualquer método seguro sem cookie, então todo
+    navegador que carregou uma página nossa o tem: um pedido com jar vazio não
+    é um navegador com relação conosco. E, medido na suíte, o recorte por
+    "sessão" tirava o CSRF de requisições que a suíte usava para provar
+    comportamento do site — entre elas a guarda contra 500 com header
+    não-ASCII, que só corre se a comparação acontecer.
+
+    A checagem é pela PRESENÇA da chave, não pelo valor, e `request.cookies`
+    já é o mapa inteiro. `Cookie: x=v; x=` faz o parser guardar a ÚLTIMA
+    ocorrência e `cookies.get("x")` devolve `""`, que é falsy — por valor, uma
+    duplicata vazia apagaria do teste uma credencial que está no jar.
+
+    **A ausência de cookie não basta, e a revisão mostrou por quê.** Os cookies
+    de SESSÃO são `SameSite=lax`, então eles nunca viajaram num POST cross-site
+    — quem barrava o `<form method=post>` de terceiro contra `/auth/login`,
+    `/auth/register` e `/auth/forgot-password` era o cookie de CSRF, que é
+    `strict`. Só com "sem cookie" a isenção reabria **login CSRF**: a página do
+    atacante faz o navegador da vítima entrar na CONTA DELE, e a vítima segue
+    usando o site achando que é a sua.
+
+    Daí a segunda condição: o corpo tem de ser `application/json`. Um `<form>`
+    cross-site só consegue emitir `urlencoded`, `multipart` ou `text/plain` —
+    os três tipos que dispensam preflight —, e um `fetch` cross-origin com JSON
+    precisa de uma aprovação de preflight que esta borda não dá. Não é o CORS
+    sustentando a isenção do cliente nativo: é a regra do NAVEGADOR fechando a
+    única porta pela qual um navegador atacaria. Cliente nativo não é atacante
+    de CSRF — CSRF, por definição, precisa do navegador da vítima.
 
     Credencial inválida continua morrendo em 401 no `Depends`, que é o erro
     certo: um 403 de CSRF no lugar esconderia o motivo real de quem depura.
     """
-    return not any(nome in request.cookies for nome in COOKIES_DE_SESSAO)
+    if request.cookies:
+        return False
+    tipo = (request.headers.get("content-type") or "").split(";")[0].strip()
+    return tipo.lower() == "application/json"
 
 
 @app.middleware("http")
@@ -2706,12 +2734,12 @@ def _entrega_sessao(
     credencial ambiente — aí o CSRF volta a exigir o par cookie+header, que o
     app não tem, e a segunda escrita toma 403 depois de a primeira ter
     funcionado. É um sintoma caro de depurar (parece intermitente, e não é), e
-    `tests/test_auth_bearer_app.py` o reproduziu antes de virar bug.
+    `tests/test_auth_app_csrf.py` o reproduziu antes de virar bug.
 
     **O header é ALEGAÇÃO do cliente, nunca autorização.** Quem chega aqui já
     passou pela autenticação, e o que recebe é a própria credencial — a mesma
     que sairia no cookie. Não isenta gate nenhum: é a lição do `_is_pigbank_app`
-    (`frontend/routes/shared.py:851`), onde o User-Agent chegou a CONCEDER e
+    (`_is_pigbank_app`, em `frontend/routes/shared.py`), onde o UA CONCEDIA e
     virou brecha. Aqui ele só escolhe o canal de entrega.
     """
     pedido = (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
@@ -2732,6 +2760,27 @@ def _entrega_sessao(
         ),
         "expires_in": AUTH_COOKIE_MAX_AGE,
     }
+
+
+def _limpa_e_reemite_csrf(request: Request, resp: Response) -> None:
+    """Fim de sessão: apaga os cookies e devolve um CSRF novo — só para QUEM TEM.
+
+    O CSRF novo existe porque `_clear_session_cookies` apaga o `csrf_token`
+    junto, e o middleware só o reemite em método seguro sem cookie: a /login já
+    carregou, então o `POST /auth/login` seguinte sairia sem token e tomaria
+    403. Foi o que derrubou o smoke de produção do #224.
+
+    A guarda de jar vazio é o mesmo princípio do `_entrega_sessao`: não plantar
+    cookie em cliente que não usa cookie. Para o app o bloco todo é ruído — ele
+    manda `credentials: "omit"` e nada seria guardado — e, pior, um cookie
+    plantado aqui faria a requisição SEGUINTE ter credencial ambiente e voltar
+    a exigir o par do CSRF. Medido: era o que derrubava o terceiro passo do
+    teste de replay.
+    """
+    if not request.cookies:
+        return
+    _clear_session_cookies(resp)
+    _set_csrf_cookie(resp, _make_csrf_token())
 
 
 def _refresh_token_do_header(request: Request) -> str:
@@ -3335,13 +3384,21 @@ async def auth_logout(request: Request, response: Response):
                         user_id_raw, jti, exc_info=True,
                     )
 
-    # Revoga também o refresh_token específico do cookie (caso a sessão já
-    # não bata — defesa em profundidade).
-    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
-    if refresh_in_cookie:
+    # Revoga também o refresh_token APRESENTADO (caso a sessão já não bata —
+    # defesa em profundidade). Cookie no navegador, `Authorization` no app: a
+    # segunda fonte é a mesma do `/auth/refresh`, e sem ela este ramo era
+    # inerte para quem não tem cookie. Com o access token expirado — o caso
+    # comum de um app parado por mais de 15 minutos — o ramo de cima não
+    # decodifica o JWT e não revoga nada, então ESTE era o único que sobrava, e
+    # ele lia só o cookie. Resultado: 200 com cara de sucesso e um refresh vivo
+    # por 14 dias no aparelho que o usuário acabou de deslogar.
+    refresh_apresentado = (
+        request.cookies.get(REFRESH_COOKIE_NAME) or ""
+    ).strip() or _refresh_token_do_header(request)
+    if refresh_apresentado:
         try:
             from core.refresh_tokens import revoke_refresh_token
-            await asyncio.to_thread(revoke_refresh_token, refresh_in_cookie)
+            await asyncio.to_thread(revoke_refresh_token, refresh_apresentado)
         except Exception:
             logging.getLogger(__name__).warning(
                 "logout: falha ao revogar refresh token do cookie", exc_info=True,
@@ -3414,7 +3471,7 @@ async def auth_refresh(request: Request, response: Response):
     quando o access token expirou, então ele não tem Bearer de sessão para
     apresentar — e sem Bearer nenhum a requisição não satisfaz
     `_sem_credencial_ambiente` e morre em 403 no CSRF antes de chegar aqui.
-    Medido por `tests/test_auth_bearer_app.py`. Pôr o refresh token no
+    Medido por `tests/test_auth_app_refresh.py`. Pôr o refresh token no
     `Authorization` resolve o CSRF pela porta da frente (a credencial não é
     ambiente porque está num header que só quem a possui consegue mandar) e
     dispensa modelo de corpo novo, que traria junto o risco de 422 nos dois
@@ -3442,14 +3499,7 @@ async def auth_refresh(request: Request, response: Response):
         # dava 401, e o /login rebatia de volta pro app porque o /auth/validate
         # olha o dashboard_token, não o access. Nem assinava, nem relogava.
         resp = JSONResponse(status_code=401, content={"detail": "missing_refresh_token"})
-        _clear_session_cookies(resp)
-        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
-        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
-        # reemite em método seguro sem cookie — a /login já carregou, então o
-        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
-        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
-        # não pode levar junto a credencial de que o formulário precisa.
-        _set_csrf_cookie(resp, _make_csrf_token())
+        _limpa_e_reemite_csrf(request, resp)
         return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
@@ -3462,14 +3512,7 @@ async def auth_refresh(request: Request, response: Response):
         # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
         # do ramo acima para montar a resposta em vez de dar raise (#175).
         resp = JSONResponse(status_code=401, content={"detail": "invalid_refresh_token"})
-        _clear_session_cookies(resp)
-        # ...e um CSRF NOVO junto, senão o login seguinte é impossível. O
-        # `_clear_session_cookies` apaga o csrf_token também, e o middleware só
-        # reemite em método seguro sem cookie — a /login já carregou, então o
-        # POST /auth/login sairia sem token e tomaria 403. Foi o que derrubou o
-        # smoke de produção do #224 ("HTTP 403 em /auth/login"): fim de sessão
-        # não pode levar junto a credencial de que o formulário precisa.
-        _set_csrf_cookie(resp, _make_csrf_token())
+        _limpa_e_reemite_csrf(request, resp)
         return _no_store(resp)
 
     user_id = int(result["user_id"])
