@@ -18,6 +18,7 @@ import os
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
@@ -2150,3 +2151,31 @@ async def bank_movement_confirm_route(request: Request, user_id: int, body: Bank
         raise HTTPException(status_code=409, detail="Esses registros não podem ser vinculados. Atualize a lista e confira novamente.") from exc
     shared.invalidate_dashboard_current_cache(user_id)
     return {"ok": True}
+
+
+@router.get("/open-finance/{user_id}/reconciliations")
+@shared.limiter.limit("60/minute")
+async def reconciliations_route(request: Request, user_id: int):
+    shared.authorize_dashboard_access(request, user_id)
+    from db.reconciliation import list_reconciliations
+    rows = await asyncio.to_thread(list_reconciliations, user_id)
+    return {"ok": True, "reconciliations": rows}
+
+
+@router.post("/open-finance/{user_id}/reconciliations/{of_tx_id}/{action}")
+@shared.limiter.limit("30/minute")
+async def reconciliation_action_route(
+    request: Request, user_id: int, of_tx_id: int, action: Literal["confirm", "reject", "undo"],
+):
+    shared.authorize_dashboard_access(request, user_id)
+    from db import reconciliation as recon
+    fn = {"confirm": recon.confirm_reconciliation, "reject": recon.reject_reconciliation,
+          "undo": recon.undo_reconciliation}[action]
+    try:
+        result = await asyncio.to_thread(fn, user_id, of_tx_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Transação não encontrada.") from exc
+    except (ValueError, recon.ReconciliationConflict) as exc:
+        raise HTTPException(status_code=409, detail="Não foi possível concluir. Atualize a lista e confira novamente.") from exc
+    shared.invalidate_dashboard_current_cache(user_id)
+    return result

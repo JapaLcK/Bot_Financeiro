@@ -49,7 +49,8 @@ def list_sources(user_id: int) -> list[dict]:
         "kind": CARTEIRA,
         "of_account_id": None,
         "label": "Carteira",
-        "balance": _dec(cb.get("manual")),
+        # Mesma conta da guarda (`wallet_guard_delta`): receita pendente não autoriza.
+        "balance": _dec(cb.get("manual")) + _dec(cb["reconciliation"]["receita_back"]),
         "espelho": _dec(cb.get("manual")),
         "comprometido": Decimal("0"),
     }]

@@ -1125,8 +1125,8 @@ def create_investment_db(
                 if debita_carteira:
                     # ver db/pockets.py: a guarda soma o manual fundido, que o
                     # espelho do banco já conta.
-                    from .open_finance import merged_wallet_delta
-                    if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < initial:
+                    from .reconciliation import wallet_guard_delta
+                    if Decimal(str(acc["balance"])) + wallet_guard_delta(cur, user_id) < initial:
                         raise ValueError("INSUFFICIENT_ACCOUNT")
                 if not debita_carteira:
                     from .open_finance import assert_bank_covers
@@ -1494,8 +1494,8 @@ def investment_deposit_from_account(
                 raise RuntimeError("ACCOUNT_MISSING")
             if debita_carteira:
                 # idem: Carteira disponível = balance + delta do manual fundido.
-                from .open_finance import merged_wallet_delta
-                if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < v:
+                from .reconciliation import wallet_guard_delta
+                if Decimal(str(acc["balance"])) + wallet_guard_delta(cur, user_id) < v:
                     raise ValueError("INSUFFICIENT_ACCOUNT")
             if not debita_carteira:
                 from .open_finance import assert_bank_covers
