@@ -1218,7 +1218,7 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #         test_rota_do_snapshot_entrega_a_instrucao_de_dispositivo
 #         test_POST_pluggy_item_ja_nasce_com_a_instrucao_certa
 #         test_dentro_do_prazo_o_aviso_continua_calado
-#         test_o_piso_do_prazo_vale_60_minutos[59-…-False]
+#         test_o_piso_do_prazo_vale_60_minutos[55-…-False]
 #         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[1-…-False]
 #         test_a_folga_do_teto_vale_ate_5_minutos_exatos[299-…] e [300-…]
 #         test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo
@@ -1228,7 +1228,7 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #       também derruba `test_caixa_com_health_medido_diz_a_MESMA_coisa_que_sem_health`,
 #       que este PR não mudou, e a injeção passa a acusar código alheio.
 #       Verdes: casos 4, 5, 6, 7, a perna de 61 min do 8a, a de +10 dias do 8b, a
-#       de 5m01s do 8c e o do vazamento.
+#       de 5m30s do 8c e o do vazamento.
 #       O caso 7 fica VERDE de propósito e isso NÃO é buraco: ele afirma
 #       "Reautorize o banco", que é justamente o que o código quebrado devolve.
 #       Quem o discrimina é a injeção (B).
@@ -1240,12 +1240,12 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #         test_o_piso_do_prazo_vale_60_minutos[61-…-True]
 #       Esta injeção prova que o piso EXISTE, e não que ele vale 60 — quem prende
 #       o VALOR é o caso 8a, e a prova dele é mutar a CONSTANTE, não o predicado
-#       (`JANELA_DEVICE_AUTH_MIN` em 1 → a perna de 59 vermelha; em 1440 → a de
+#       (`JANELA_DEVICE_AUTH_MIN` em 1 → a perna de 55 vermelha; em 1440 → a de
 #       61). As duas pernas do 8a estão nas duas listas por isso.
 #   (B') desligar o TETO do prazo: ALARGAR o literal, de `interval '5 minutes'`
 #       para `interval '10 years'`. Vermelhos:
 #         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[14400-…-True]
-#         test_a_folga_do_teto_vale_ate_5_minutos_exatos[301-…-True]
+#         test_a_folga_do_teto_vale_ate_5_minutos_exatos[330-…-True]
 #       e as pernas de +1 min, 4m59s e 5m00s seguem VERDES, que é o que prova a
 #       folga ser decisão medida e não número solto.
 #   (C) desligar o derivado em `get_connections_by_item_id`: `case when %s::int
@@ -1324,9 +1324,14 @@ def _envelhece_autorizacao(connection_id: int, minutos: int = 0, segundos: int =
     prazo entrou, porque o `relogio_fixo` carimbava `reconnected_at` 26 dias atrás.
     Recua as DUAS pontas da âncora `coalesce(reconnected_at, created_at)`.
 
-    Os SEGUNDOS existem para a fronteira do teto (4m59s / 5m00s / 5m01s): em
+    Os SEGUNDOS existem para a fronteira do teto (4m59s / 5m00s / 5m30s): em
     minutos ela não é expressável, e fazer a conta em Python traria de volta o
     relógio errado. É o mesmo `make_interval`, com o segundo argumento.
+
+    ORÇAMENTO: o carimbo é relativo ao `now()` DESTE update e a condição é
+    reavaliada contra um `now()` POSTERIOR. Enquanto o teste roda, portanto, o
+    carimbo anda para DENTRO do teto e para FORA do piso — quem escrever caso
+    novo aqui olha a tabela do 8c antes de escolher a margem.
     """
     with get_conn() as c:
         with c.cursor() as cur:
@@ -1521,10 +1526,16 @@ def test_dentro_do_prazo_o_aviso_continua_calado(user_id):
 # conectar) — o bug do #166 de volta, sem uma linha vermelha.
 #
 # Estes dois casos prendem o 60 pelas duas pontas, em minutos ABSOLUTOS (medido:
-# com a constante em 1 a perna de 59 fica vermelha; em 1440, a de 61).
+# com a constante em 1, 5 ou 15 a perna de 55 fica vermelha; em 1440 ou 525600,
+# a de 61).
+#
+# A perna de DENTRO é 55, e não 59, pelo motivo do 8c: ela é a outra metade da
+# classe de veredito que anda com o tempo (a tabela está lá). A 59 tinha 60 s de
+# orçamento entre o `update` e a leitura; a 55 tem 300 s. O pino perdido é o de
+# 56–59 min, onde nenhuma mutação declarada vive.
 
 @pytest.mark.parametrize("minutos_de_idade,detalhe,avisado", [
-    (59, DETALHE_DISPOSITIVO, False),
+    (55, DETALHE_DISPOSITIVO, False),
     (61, DETALHE_REAUTORIZA, True),
 ])
 def test_o_piso_do_prazo_vale_60_minutos(
@@ -1594,25 +1605,56 @@ def test_carimbo_no_futuro_nao_reabre_o_silencio_permanente(
 # HORAS, e nada ficava vermelho. Fronteira sem teste é a próxima regressão.
 #
 # Estes três casos prendem o número: 4m59s e 5m00s DENTRO (o `<=` é inclusivo),
-# 5m01s FORA. Qualquer teto que erre a borda por mais de 1 s derruba uma das
-# pernas — medido, `'10 seconds'`, `'1 minute'`, `'1 hour'`, `'5 hours'`,
-# `'9 days'` e `'10 years'` ficam TODOS vermelhos.
+# 5m30s FORA. Só um teto na faixa [5m00s, 5m30s) deixa as três verdes — medido,
+# `'10 seconds'`, `'1 minute'`, `'1 hour'`, `'5 hours'`, `'9 days'` e `'10 years'`
+# ficam TODOS vermelhos.
 #
 # Em SEGUNDOS pelo `make_interval` do helper: a aritmética de minuto não expressa
 # a borda, e fazê-la em Python traria de volta o relógio que o teto existe para
 # descartar.
 #
-# ponytail: a perna de 5m01s tem ORÇAMENTO DE 1 s entre o `update` e a leitura —
-# o carimbo é `now() + 5 min 1 s` no instante do update e a condição é reavaliada
-# contra um `now()` posterior. O arquivo inteiro roda em ~3 s, dezenas de ms por
-# caso — duas ordens de grandeza abaixo do orçamento. Se algum dia ficar
-# intermitente, o conserto é 4m30s/5m30s (a borda passa a ficar presa a ±30 s em
-# vez de ±1 s), não remover o caso.
+# ── A CLASSE do veredito que ANDA COM O TEMPO (Codex #428, P2) ───────────────
+#
+# `_envelhece_autorizacao` grava o carimbo relativo ao `now()` do UPDATE; o
+# predicado é reavaliado contra o `now()` das consultas seguintes. Passado Δ, o
+# `now() + 5 min` do teto SOBE e o `now() - 60 min` do piso também: carimbo de
+# FUTURO anda para DENTRO, carimbo de PASSADO anda para FORA. Só duas das quatro
+# combinações podem virar de veredito, e o ORÇAMENTO é a distância à borda:
+#
+#   futuro  esperado FORA   → vira DENTRO  → 8c, a perna de +5m30s .... 30 s
+#                                          → 8b, a perna de +10 dias .. ~10 dias
+#   passado esperado DENTRO → vira FORA    → 8a, a perna de −55 min ... 300 s
+#                                          → caso 8 (`JANELA−5`) ...... 300 s
+#                                          → todo caso sem envelhecer . ~60 min
+#   futuro  esperado DENTRO (+1 min, 4m59s, 5m00s) ............. não vira nunca
+#   passado esperado FORA   (−61 min, caso 7 em −65 min) ....... não vira nunca
+#
+# Só a perna do teto estava em 1 s, e só ela era risco real — as outras entradas
+# que andam já tinham orçamento em minutos ou dias. A do piso entrou no conserto
+# (59 → 55) por ser o MESMO defeito, não por flakear: 60 s já era folgado.
+#
+# ponytail: as duas pernas que podiam virar foram ALARGADAS — +5m01s virou
+# +5m30s (1 s de orçamento → 30 s) e −59 min virou −55 min (60 s → 300 s). NÃO se
+# congelou o `now()` do Postgres: o teste existe para medir a passagem do tempo
+# contra o relógio do BANCO, e um relógio fixo trocaria o risco de flake por um
+# caso que deixa de exercer o mecanismo (CLAUDE.md §3).
+#
+# Δ MEDIDO em 2026-09-16, 3 rodadas, envolvendo `_envelhece_autorizacao` num
+# espião de `time.monotonic()` e comparando com o fim do caso (limite SUPERIOR do
+# Δ que conta, já que a última consulta vem antes): máximo de 3,0 ms em qualquer
+# caso do arquivo, 1,9 ms na perna de +5m30s e 2,8 ms na de −55 min. Folga real da
+# perna mais apertada: 30 s − 1,9 ms, ~15.000× o Δ observado (antes, ~500×).
+# NÚMERO DATADO (CLAUDE.md §2): remeça o espião antes de reusar — máquina mais
+# lenta, Postgres remoto ou runner carregado mudam a conta, não a conclusão.
+#
+# O preço é o pino: um teto entre 5m00s e 5m29s passa verde (antes, entre 5m00s e
+# 5m00s). Se um dia um teto nessa faixa importar, o conserto é um caso a MAIS em
+# 5m01s tolerante a flake, não estreitar esta perna de volta.
 
 @pytest.mark.parametrize("segundos_no_futuro,detalhe,avisado", [
     (4 * 60 + 59, DETALHE_DISPOSITIVO, False),
     (5 * 60, DETALHE_DISPOSITIVO, False),
-    (5 * 60 + 1, DETALHE_REAUTORIZA, True),
+    (5 * 60 + 30, DETALHE_REAUTORIZA, True),
 ])
 def test_a_folga_do_teto_vale_ate_5_minutos_exatos(
     user_id, segundos_no_futuro, detalhe, avisado
