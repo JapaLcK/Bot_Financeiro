@@ -14,9 +14,10 @@ loop (ex.: `frontend/routes/open_finance.py`, etapa 4 da reconexão). Agora ele
 abre conexão PRÓPRIA com `options=statement_timeout_options()`, o mesmo helper
 do gravador síncrono.
 
-ESCOPO, e ele é decisão e não esquecimento: `db_connect` continua SEM teto. Ele
-tem 11 chamadores (DDL de boot, agregações do overview, retenção diária, 4 rotas
-do painel), e um teto único ali cortaria DDL, agregação e purga.
+ESCOPO, e ele é decisão e não esquecimento: `db_connect` continua SEM teto. Ele é
+COMPARTILHADO entre DDL de boot (`ensure_admin_tables`), agregações do overview,
+retenção diária e rotas do painel, e um teto único ali cortaria DDL, agregação e
+purga.
 `test_db_connect_do_painel_continua_sem_teto` é quem prende isso — sem ele um PR
 futuro põe teto no painel sem discussão.
 
@@ -58,6 +59,7 @@ from _system_event_log_helpers import (  # noqa: F401  (fixtures autouse)
     TETO_PADRAO_OPTIONS,
     _limpa,
     _linhas,
+    kwargs_com_valor,
     sem_dashboard_handler,
     sem_env_de_teto,
     tabela_travada,
@@ -128,14 +130,18 @@ def test_options_chega_no_connect_async(monkeypatch, user_id):
 
 
 def test_db_connect_do_painel_continua_sem_teto():
-    """DECISÃO DE ESCOPO presa em teste, não em prosa. `db_connect` tem 11
-    chamadores — DDL de boot (`ensure_admin_tables`), agregações do overview,
-    retenção diária, 4 rotas do painel —, e um `statement_timeout` único ali
+    """DECISÃO DE ESCOPO presa em teste, não em prosa. `db_connect` é
+    COMPARTILHADO — DDL de boot (`ensure_admin_tables`), agregações do overview,
+    retenção diária, rotas do painel —, e um `statement_timeout` único ali
     cortaria DDL, agregação e purga, que são exatamente as operações longas e
     legítimas. Quem precisa de teto pede o seu, como o `log_system_event` faz.
 
-    Remedir os chamadores antes de reusar o número:
-        grep -rn "db_connect()" --include="*.py" --exclude-dir=.venv .
+    SEM CONTAGEM, de propósito (CLAUDE.md §2). A versão anterior desta docstring
+    dizia "11 chamadores" em quatro arquivos, e o comando abaixo devolvia 51 — o
+    número não era reproduzível por nada e envelhecia em silêncio. O que sustenta
+    a decisão é a MISTURA de usos, que é qualitativa; se você precisar do número,
+    meça na hora, e só o `core/admin_dashboard.py` é o escopo certo:
+        grep -n "db_connect()" core/admin_dashboard.py
 
     Sem este caso, um PR futuro (ou um apontamento de revisor) põe teto no painel
     sem discussão, e o efeito só aparece num boot que falha ou numa purga cortada
@@ -166,14 +172,18 @@ def _funcao(modulo, nome: str) -> ast.AsyncFunctionDef:
 
 def _kwargs_do_connect(no_funcao) -> set[str]:
     """Kwargs que de fato CONFIGURAM algo em algum `*.connect(...)` de dentro da
-    função. Constante falsy não conta: `options=None`, `options=""` e `options=0`
-    desligam o teto exatamente igual, com a chave presente — o mesmo critério do
-    portão irmão."""
+    função.
+
+    O critério "constante falsy não conta" NÃO é reescrito aqui: ele é o
+    `kwargs_com_valor` compartilhado, que o portão irmão
+    (`tests/test_log_falha_traceback.py`) usa também. Era a mesma regra em duas
+    cópias — e duas cópias de um critério é como um portão passa a medir menos que
+    o irmão sem ninguém notar (CLAUDE.md §0.1/§0.7). O que sobra aqui é o que de
+    fato difere: varrer uma FUNÇÃO atrás dos `.connect(...)` dela."""
     encontrados: set[str] = set()
     for no in ast.walk(no_funcao):
         if isinstance(no, ast.Call) and getattr(no.func, "attr", None) == "connect":
-            encontrados |= {k.arg for k in no.keywords
-                            if not (isinstance(k.value, ast.Constant) and not k.value.value)}
+            encontrados |= kwargs_com_valor(no)
     return encontrados
 
 

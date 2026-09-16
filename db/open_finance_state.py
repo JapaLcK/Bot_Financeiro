@@ -853,8 +853,13 @@ def pluggy_item_lock(item_id: str, *, budget_ms: int | None = None):
     finally:
         # Fechar a conexão libera o advisory lock de sessão — não há unlock a
         # esquecer, e um processo morto no meio não deixa o item travado.
-        conn.close()
-        _lock_slots().release()
+        # `try/finally` pelo mesmo motivo do irmão `pluggy_items_lock`: `close()`
+        # que levanta pulava o `release()` e a vaga do `_lock_slots()` não voltava
+        # nunca (issue #429). Mesma classe, mesmo conserto, nos dois.
+        try:
+            conn.close()
+        finally:
+            _lock_slots().release()
 
 
 @contextmanager
@@ -918,32 +923,59 @@ def pluggy_items_lock(item_ids: list[str]):
             connect_timeout=max(1, _lock_wait_ms() // 1000),
             options=f"-c statement_timeout={_lock_wait_ms()}ms",
         )
+    except psycopg.OperationalError:
+        # SIMÉTRICO com o `except` de baixo, de propósito. O `connect_timeout` que
+        # esta função ganhou trocou "pendura para sempre" por exceção — melhora — mas
+        # a exceção subia crua numa rota SEM try/except, virando 500 numa função cuja
+        # docstring promete 503/"tente de novo". Fechar o 500 do `set_config` e abrir
+        # o do `connect` no mesmo commit seria trocar um furo de lugar.
+        # `OperationalError` e não `Exception`: banco inalcançável, timeout de
+        # connect e conexão recusada são "não dá agora, tente de novo" — 503 é a
+        # resposta HONESTA. Já `RuntimeError`/`ProgrammingError` (URL ausente,
+        # credencial malformada) são DEFEITO nosso, continuam subindo, e 500 é a
+        # resposta honesta para eles: um 503 eterno esconderia config quebrada.
+        _lock_slots().release()
+        yield False
+        return
     except Exception:
         _lock_slots().release()
         raise
     try:
         got = True
         # O `set_config` entra no MESMO `try` dos advisory locks de propósito: ele
-        # é o PRIMEIRO statement desta conexão e agora tem teto (o `options` acima),
-        # então ele PODE ser cancelado. Fora do `except` isso subia como exceção e
-        # virava 500 na rota do disconnect (nenhum try/except no `to_thread` de
+        # é o PRIMEIRO statement desta conexão e agora tem teto (o `options` acima).
+        # Fora do `except`, qualquer morte dele subia como exceção e virava 500 na
+        # rota do disconnect (nenhum try/except no `to_thread` de
         # `frontend/routes/open_finance.py:2075-2078`), enquanto a docstring promete
         # 503/"tente de novo" e é o que o resto da função entrega.
-        # ALCANÇÁVEL, mas é CORRIDA e não certeza — medido com
-        # `OF_SYNC_LOCK_WAIT_MS=1` contra o Postgres local: uma execução isolada deu
-        # `QueryCanceled` sqlstate 57014 em 0,006s, e 20 seguidas completaram sem
-        # corte (o `set_config` cabe folgado em 1ms na maioria das vezes). Por isso
-        # o teste do desfecho INJETA a exceção em vez de cronometrar: teste que só
-        # fica vermelho às vezes não prende nada. Em produção quem alarga a janela
-        # é servidor sob carga, não a env.
+        # O modo de morte PROVÁVEL deste statement não é o cancelamento: é a conexão
+        # morrer (servidor fechou o socket, blip de rede, restart, pgbouncer). O
+        # cancelamento por `statement_timeout` NÃO REPRODUZ — medido com
+        # `OF_SYNC_LOCK_WAIT_MS=1` contra o Postgres local, 0 de 300 tentativas pela
+        # réplica direta (o `set_config` cabe folgado em 1ms). Por isso o `except` é
+        # `psycopg.OperationalError`, o PAI comum: `LockNotAvailable`,
+        # `QueryCanceled` e `DeadlockDetected` são todos subclasses dele (medido:
+        # `.__mro__[1]` é `OperationalError` nos três), então este nome só cobre
+        # ESTRITAMENTE MAIS que a tupla anterior — e o que ele acrescenta é
+        # justamente o modo provável. Os três nomes não se perdem: continuam sendo o
+        # que os advisory locks levantam quando a chave está ocupada.
+        # O teste do desfecho INJETA a exceção em vez de cronometrar: com 0/300, um
+        # teste por cronômetro ali seria flaky e não prenderia nada.
         try:
             conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
             for item in itens:
                 conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
-        except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
-                psycopg.errors.DeadlockDetected):
+        except psycopg.OperationalError:
             got = False
         yield got
     finally:
-        conn.close()
-        _lock_slots().release()
+        # `try/finally` e não `conn.close(); release()` em sequência: se o `close()`
+        # levantar, o `release()` da versão anterior nunca rodava e a vaga do
+        # `_lock_slots()` sumia PARA SEMPRE — medido, 8 slots livres viravam 7,
+        # permanente. É a própria classe que a issue #429 nomeia ("a vaga não volta
+        # nunca"), uma linha abaixo do conserto dela. O irmão `pluggy_item_lock`
+        # tinha o padrão idêntico e foi consertado junto.
+        try:
+            conn.close()
+        finally:
+            _lock_slots().release()

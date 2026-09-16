@@ -14,6 +14,7 @@ vale só nos arquivos que a importam.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import logging
@@ -113,3 +114,21 @@ def _limpa(event_type: str) -> None:
     with get_conn() as c:
         c.execute("delete from system_event_logs where event_type = %s", (event_type,))
         c.commit()
+
+
+def kwargs_com_valor(no: ast.Call) -> set[str]:
+    """Kwargs de uma chamada que de fato CONFIGURAM algo.
+
+    A CLASSE é "constante falsy", não só `None`: `options=None`, `options=""` e
+    `options=0` desligam o teto exatamente igual, com a chave PRESENTE — um portão
+    que só checasse a presença da chave ficaria verde com o teto desligado.
+
+    Mora aqui porque tem DOIS chamadores reais, em arquivos diferentes
+    (`tests/test_log_falha_traceback.py::_com_valor` e
+    `tests/test_admin_log_system_event_teto.py::_kwargs_do_connect` eram a mesma
+    regra reescrita), e duas cópias de um critério é como um portão passa a medir
+    menos que o irmão sem ninguém notar (CLAUDE.md §0.1/§0.7). Não é helper de uso
+    único nem abstração especulada: os dois chamadores já existiam.
+    """
+    return {k.arg for k in no.keywords
+            if not (isinstance(k.value, ast.Constant) and not k.value.value)}

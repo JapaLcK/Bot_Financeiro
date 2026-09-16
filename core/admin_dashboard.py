@@ -209,9 +209,9 @@ async def log_system_event(
     # helper do gravador sincrono (issue #429). Tres coisas sustentam o recorte:
     #   - `db_connect` NAO tem pool: ele abre uma `AsyncConnection` nova por
     #     chamada, entao isto nao custa uma conexao a mais, so muda os kwargs dela.
-    #   - `db_connect` tem 11 chamadores (DDL de boot, agregacoes do overview,
-    #     retencao diaria, 4 rotas do painel). Um teto unico la cortaria DDL,
-    #     agregacao e purga — decisao de escopo, presa por
+    #   - `db_connect` e COMPARTILHADO entre DDL de boot (`ensure_admin_tables`),
+    #     agregacoes do overview, retencao diaria e rotas do painel. Um teto unico
+    #     la cortaria DDL, agregacao e purga — decisao de escopo, presa por
     #     `tests/test_admin_log_system_event_teto.py::test_db_connect_do_painel_continua_sem_teto`.
     #   - o `statement_timeout` e o unico que cobre ESPERA DE LOCK: o
     #     `connect_timeout` limita so o handshake, e com `system_event_logs` em

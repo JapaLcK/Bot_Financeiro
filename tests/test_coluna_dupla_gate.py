@@ -1166,11 +1166,22 @@ def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
     sobrevivia a pre-analise e era comido no fim: medido na main, exit 0 e
     `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor` — APROVADO
     falso VIVO, nao teorico. Hoje quem recusa e a guarda de `--testes` (alvo
-    comecado por `-`), que decide ANTES de o pytest existir, e o desfecho e abortar
-    com o nome do alvo em vez de `pytest saiu 4`.
+    comecado por `-` ou `@`), que decide ANTES de o pytest existir, e o desfecho e
+    abortar com o nome do alvo em vez de `pytest saiu 4`.
 
-    Controle negativo: tire o `or opcao` da guarda de `scripts/coluna_dupla.py`.
-    VERMELHO: este teste, de volta ao `APROVADO, prova FORTE` citando o irmao.
+    O `@` e a MESMA classe por OUTRO prefixo, e a versao anterior deste teste nao
+    o veria: `@x.py` nao comeca por `-`, termina em `.py` e `isabs("@/tmp/x.py")` e
+    False, entao passava pelas tres recusas. O `PytestArgumentParser` liga
+    `fromfile_prefix_chars="@"` (`_pytest/config/argparsing.py:382-397`) e o
+    argparse troca o token pelo CONTEUDO do arquivo — vazio apaga o alvo, e
+    `-k\\ntest_irmao` injeta a opcao que a recusa de `-` existe para barrar. Os
+    tres foram medidos com exit 0 e `APROVADO, prova FORTE` citando o irmao.
+
+    Controle negativo: na guarda de `scripts/coluna_dupla.py`,
+    - tirar o `"-"` da tupla -> VERMELHO no caso `--basetemp=`;
+    - tirar o `"@"` da tupla -> VERMELHO nos tres casos `@`;
+    - tirar o `or opcao` inteiro -> VERMELHO nos quatro.
+    Em todos, de volta ao `APROVADO, prova FORTE` citando o irmao.
 
     A segunda metade e o controle positivo, e e obrigatoria: uma guarda que
     recusasse alvo demais (ou um `--` mal posto, antes do `--junitxml`) quebraria
@@ -1179,14 +1190,27 @@ def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
     _commita(lab, {"lib.py": _LIB_CORRIGIDA,
                    "tests/test_taut.py": "def test_taut():\n    assert True\n"})
 
-    r = _gate(lab, f"--testes=--basetemp={tmp_path / 'base.py'}")
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "nao aponta para um arquivo de teste .py" in r.stderr
-    # O prefixo acima e comum aos TRES motivos; sao os dois asserts abaixo que
-    # prendem o motivo da OPCAO a este caso.
-    assert "Comeca por `-`" in r.stderr
-    assert "Um DIRETORIO" not in r.stderr
-    assert "prova FORTE" not in r.stdout and "test_irmao" not in r.stdout
+    # `@` PRECISA de um arquivo que exista: se nao existir, o argparse ja recusa
+    # sozinho e o caso passaria verde sem a guarda. O vazio e o `-k` sao as duas
+    # cargas medidas — a primeira APAGA o alvo, a segunda injeta OPCAO arbitraria,
+    # que e a mesma carga que a recusa de `-` existe para barrar.
+    de_arquivo_vazio = tmp_path / "vazio.py"
+    de_arquivo_vazio.write_text("")
+    de_arquivo_com_k = tmp_path / "injeta.py"
+    de_arquivo_com_k.write_text("-k\ntest_irmao\n")
+
+    for alvo in (f"--basetemp={tmp_path / 'base.py'}",
+                 f"@{de_arquivo_vazio}",
+                 f"@{de_arquivo_com_k}",
+                 "@vazio.py"):  # relativo tambem: `isabs` e `..` nao o pegam
+        r = _gate(lab, f"--testes={alvo}")
+        assert r.returncode == 1, f"{alvo}: {r.stdout}{r.stderr}"
+        assert "nao aponta para um arquivo de teste .py" in r.stderr, alvo
+        # O prefixo acima e comum aos TRES motivos; sao os dois asserts abaixo que
+        # prendem o motivo do PREFIXO ESPECIAL a este caso.
+        assert "Comeca por `-` ou `@`" in r.stderr, alvo
+        assert "Um DIRETORIO" not in r.stderr, alvo
+        assert "prova FORTE" not in r.stdout and "test_irmao" not in r.stdout, alvo
 
     r = _gate(lab, "--testes", "tests/test_taut.py")  # arquivo: chega ao veredito...
     assert r.returncode == 1, r.stdout + r.stderr

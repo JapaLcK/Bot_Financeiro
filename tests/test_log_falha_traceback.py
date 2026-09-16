@@ -48,6 +48,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 import db
 import core.observability as observability
 import core.system_event_log as system_event_log
+from _system_event_log_helpers import kwargs_com_valor
 from core.handlers import pending as h_pending
 from core.services.ai_chat.tools import get_tool
 
@@ -425,15 +426,13 @@ def test_todo_connect_do_system_event_log_tem_timeout_e_teto():
         "apontado para o arquivo errado e passaria por vacuidade"
     )
 
-    def _com_valor(no: ast.Call) -> set[str]:
-        """Kwargs que de fato configuram algo. A CLASSE é "constante falsy", não
-        só `None`: `options=None`, `options=""` e `options=0` desligam o teto
-        exatamente igual, com a chave presente e o portão verde."""
-        return {k.arg for k in no.keywords
-                if not (isinstance(k.value, ast.Constant) and not k.value.value)}
-
+    # O critério "constante falsy" mora em `tests/_system_event_log_helpers.py`:
+    # era esta função e o `_kwargs_do_connect` de
+    # `tests/test_admin_log_system_event_teto.py`, a MESMA regra reescrita em dois
+    # arquivos (CLAUDE.md §0.1/§0.7). Dois portões que medem o mesmo critério não
+    # podem divergir em silêncio.
     faltando = {
-        arg: [no.lineno for no in connects if arg not in _com_valor(no)]
+        arg: [no.lineno for no in connects if arg not in kwargs_com_valor(no)]
         for arg in ("connect_timeout", "options")
     }
     assert not any(faltando.values()), (

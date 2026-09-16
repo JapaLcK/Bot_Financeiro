@@ -387,19 +387,26 @@ def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str, *,
     # o desfecho.
     coleta = ["--continue-on-collection-errors"] if continuar_na_coleta else []
     # `-o junit_family=xunit1` so pelo `file=` de cada `<testcase>`.
-    # O `--` FICA, mas ele NAO e a protecao contra alvo com cara de opcao — quem
-    # protege e a guarda de `main()` que recusa alvo comecado por `-`. Esta linha
-    # ja prometeu o contrario: "com o `--` vira alvo inexistente -> rc=4 ->
+    # O `--` FICA, mas ele NAO protege contra alvo com cara de opcao — quem protege
+    # e a guarda de `main()`, que recusa alvo comecado por `-` OU por `@`. Esta
+    # linha ja prometeu o contrario: "com o `--` vira alvo inexistente -> rc=4 ->
     # REPROVADO" foi medido, e deixou de valer. O pytest 9.1.1 faz o parse FINAL
     # com `argparse.parse_intermixed_args` (`Parser.parse`,
     # `_pytest/config/argparsing.py:121-141`), e essa funcao IGNORA o `--` —
     # medido, com um parser de brinquedo:
     #     parse_known_args(['--','--basetemp=x.py'])            -> files=['--basetemp=x.py']
     #     parse_known_intermixed_args(['--','--basetemp=x.py']) -> basetemp='x.py', files=[]
-    # O `_preparse` usa a PRIMEIRA e o parse final usa a SEGUNDA: o alvo sobrevive
-    # a pre-analise e e comido no fim, sobra ZERO alvo posicional e a coleta varre a
-    # arvore inteira — o mesmo modo de falha do `--testes tests/`, e era um APROVADO
-    # falso VIVO (`tests/test_coluna_dupla_gate.py::test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira`
+    # O `--` tambem nao alcanca o `@`, que e OUTRA porta: o
+    # `PytestArgumentParser` passa `fromfile_prefix_chars="@"`
+    # (`_pytest/config/argparsing.py:382-397`), entao o argparse le o ARQUIVO e
+    # troca o token pelo conteudo — medido no mesmo parser de brinquedo,
+    # `parse_intermixed_args(['--','@vazio.py'])` -> `files=[]`, e com
+    # `-k\ntest_irmao` dentro -> `k='test_irmao', files=[]`.
+    # Nos dois casos o `_preparse` usa `parse_known_args` e o parse final usa o
+    # intermixed: o alvo sobrevive a pre-analise e some no fim, sobra ZERO alvo
+    # posicional e a coleta varre a arvore inteira — o mesmo modo de falha do
+    # `--testes tests/`, e o do `-` era um APROVADO falso VIVO
+    # (`tests/test_coluna_dupla_gate.py::test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira`
     # vermelho na main, citando `tests/test_irmao.py::test_valor`).
     # Ele continua aqui porque o `_preparse` respeita: e a segunda camada, gratis,
     # sobre uma guarda que decide ANTES de o pytest existir.
@@ -684,23 +691,38 @@ def main() -> int:
     for t in alvos:
         arq = t.split("::", 1)[0]
         fora = os.path.isabs(arq) or os.path.normpath(arq).startswith("..")
-        # Alvo comecado por `-` e a TERCEIRA recusa, e ela e a unica protecao real
-        # contra "alvo com cara de opcao": o `--` da `roda_pytest` NAO fecha isso
-        # (o pytest 9.1.1 faz o parse final com `parse_intermixed_args`, que ignora
-        # o `--` — a medicao esta la). Sem ela, `--testes=--basetemp=<x>.py` passa
-        # pela checagem de sufixo, o pytest o consome como OPCAO, sobra ZERO alvo e
-        # a coleta varre a arvore inteira: medido na main 62fdc23, exit 0 e
-        # `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor`, um
-        # teste que a mudanca nunca exercitou. A checagem e por PREFIXO e no ALVO
-        # inteiro (nao no `arq`), porque e assim que o argv chega ao pytest.
-        opcao = t.startswith("-")
+        # A TERCEIRA recusa e por PREFIXO, e sao DOIS caracteres porque o pytest da
+        # significado especial a dois — cada um por um motivo diferente, e nenhum e
+        # fechado pelo `--` da `roda_pytest`:
+        #   `-`  e o `prefix_chars` (padrao do argparse): o token vira OPCAO. O `--`
+        #        nao protege porque o parse FINAL do pytest usa
+        #        `parse_intermixed_args`, que IGNORA o `--` (medicao em `roda_pytest`).
+        #   `@`  e o `fromfile_prefix_chars`, que o pytest passa explicitamente ao
+        #        construir o parser (`PytestArgumentParser.__init__`,
+        #        `_pytest/config/argparsing.py:382-397`): o argparse ABRE o arquivo e
+        #        substitui o token pelo CONTEUDO dele. Arquivo vazio -> o alvo
+        #        simplesmente some; arquivo com `-k\ntest_irmao` -> injeta OPCAO
+        #        arbitraria, que e exatamente a carga que a recusa de `-` existe para
+        #        barrar, entrando por outra porta.
+        # Em ambos o desfecho e o mesmo: ZERO alvo posicional, a coleta varre a
+        # ARVORE INTEIRA e o vermelho de qualquer teste alheio vira 'prova'. Medido
+        # nos dois: exit 0 e `APROVADO, prova FORTE` citando
+        # `tests/test_irmao.py::test_valor`, um teste que a mudanca nunca exercitou.
+        # Sao os DOIS unicos: o parser do pytest nao mexe em `prefix_chars`, e
+        # `allow_abbrev=False` — nao ha terceiro caractere com significado no argv.
+        # A checagem e no ALVO inteiro (nao no `arq`), porque e assim que o argv
+        # chega ao pytest.
+        opcao = t.startswith(("-", "@"))
         if not arq.endswith(".py") or fora or opcao:
-            motivo = ("Comeca por `-`, entao o pytest o consome como OPCAO e\n"
-                      "                sobra ZERO alvo posicional — a coleta varre a ARVORE INTEIRA e o\n"
-                      "                vermelho de qualquer teste alheio vira 'prova'. Medido: exit 0 e\n"
-                      "                `APROVADO, prova FORTE` citando um teste nao relacionado. O `--`\n"
-                      "                NAO protege: o parse final do pytest usa `parse_intermixed_args`,\n"
-                      "                que ignora o `--` (ver `roda_pytest`)."
+            motivo = ("Comeca por `-` ou `@`, os dois prefixos que o argparse do\n"
+                      "                pytest trata como ESPECIAIS: `-` vira OPCAO (`prefix_chars`) e `@`\n"
+                      "                e trocado pelo CONTEUDO do arquivo (`fromfile_prefix_chars`, que o\n"
+                      "                `PytestArgumentParser` liga). Nos dois sobra ZERO alvo posicional —\n"
+                      "                a coleta varre a ARVORE INTEIRA e o vermelho de qualquer teste\n"
+                      "                alheio vira 'prova'. Medido nos dois: exit 0 e `APROVADO, prova\n"
+                      "                FORTE` citando um teste nao relacionado. O `--` NAO protege: o\n"
+                      "                parse final do pytest usa `parse_intermixed_args`, que ignora o\n"
+                      "                `--` (ver `roda_pytest`)."
                       if opcao else
                       "Absoluto (ou com `..`) sai das DUAS colunas: o\n"
                       "                `cwd` do pytest e o worktree, entao o alvo e coletado do checkout\n"

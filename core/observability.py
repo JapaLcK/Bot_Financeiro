@@ -52,8 +52,8 @@ class _DashboardHandler(logging.Handler):
     helper (`statement_timeout_options`) em vez de ir pelo `db_connect` do
     painel. É o que limita a ESPERA DE LOCK e a execução: sem ele a tabela
     travada pendurava o caller pelo lock inteiro (medido: 3,00s para um lock de
-    3s). O `db_connect` do painel continua sem teto, de propósito — 11
-    chamadores, entre eles DDL de boot, agregações e a retenção diária;
+    3s). O `db_connect` do painel continua sem teto, de propósito — é
+    compartilhado com DDL de boot, agregações e a retenção diária;
     (2) os 5 call sites das 4 rotas destrutivas `async`
     (`frontend/routes/cards.py`, `frontend/finance_bot_websocket_custom.py` —
     incluindo o ramo WARNING da `/launches`) chamam o `_log_falha` por

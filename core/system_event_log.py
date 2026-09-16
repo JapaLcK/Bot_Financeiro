@@ -284,9 +284,9 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     `scripts/aviso_fim_do_gratis.py:52`.
 
     O `db_connect` do PAINEL (`core/admin_dashboard.py`) continua SEM teto, de
-    propósito: ele tem 11 chamadores (DDL de boot, agregações do overview,
-    retenção diária, 4 rotas), e um teto único ali cortaria DDL, agregação e
-    purga. Preso por
+    propósito: ele é COMPARTILHADO entre DDL de boot, agregações do overview,
+    retenção diária e rotas do painel, e um teto único ali cortaria DDL,
+    agregação e purga. Preso por
     `tests/test_admin_log_system_event_teto.py::test_db_connect_do_painel_continua_sem_teto`.
     """
     database_url = _database_url()
