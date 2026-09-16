@@ -514,6 +514,7 @@ test("conta já assinante entra no fluxo de troca em vez de repetir o 409", asyn
 test("continuação não consulta assinatura nem perde a intenção em sessão expirada", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   let subscriptionCalls = 0;
+  let authMeCalls = 0;
   let checkoutCalls = 0;
   await page.addInitScript(() => {
     sessionStorage.setItem("pb_purchase_intent_v1", JSON.stringify({
@@ -546,6 +547,15 @@ test("continuação não consulta assinatura nem perde a intenção em sessão e
       body: "{}",
     });
   });
+  await page.route("**/auth/me", (route) => {
+    authMeCalls += 1;
+    return route.fulfill({
+      status: 401,
+      headers: { "WWW-Authenticate": "Bearer" },
+      contentType: "application/json",
+      body: "{}",
+    });
+  });
   await page.route("**/auth/refresh", (route) => route.fulfill({ status: 401, body: "{}" }));
   await page.route("**/billing/create-checkout", (route) => {
     checkoutCalls += 1;
@@ -563,6 +573,7 @@ test("continuação não consulta assinatura nem perde a intenção em sessão e
   await page.waitForFunction(() => location.pathname === "/checkout-ok"
     || document.getElementById("purchase-continuation-actions")?.classList.contains("show"));
   assert.equal(subscriptionCalls, 0, "a rota técnica consultou a assinatura em paralelo");
+  assert.equal(authMeCalls, 0, "a rota técnica consultou /auth/me em paralelo");
   assert.equal(checkoutCalls, 1);
   assert.equal(new URL(page.url()).pathname, "/checkout-ok");
   await page.close();

@@ -1187,6 +1187,9 @@ async function cancelChange() {
 // dentro do loadPlansState: lá ele ficava serializado atrás do
 // /billing/subscription, que fala com o Stripe. O `if (sub)` também vem de lá.
 (async function applyPlanGateCopy() {
+  // A rota técnica precisa ler a intenção antes de qualquer request autenticada:
+  // se access e refresh expiraram, auth-refresh limpa a sessionStorage.
+  if (purchaseContinuationPage) return;
   let me = null;
   try {
     const r = await fetch("/auth/me", { credentials: "same-origin" });
