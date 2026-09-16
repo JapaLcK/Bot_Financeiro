@@ -63,7 +63,7 @@ FONTE_CSS = """@font-face {
   src: url("/fonts/Phosphor.woff2?v=__VERSAO__") format("woff2");
   font-weight: normal;
   font-style: normal;
-  font-display: block;
+  font-display: swap;
 }"""
 
 
