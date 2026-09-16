@@ -1,4 +1,9 @@
-import { entrar, sair, verificarMfa } from "@/services/auth";
+import {
+  EntradaSuperada,
+  entrar,
+  sair,
+  verificarMfa,
+} from "@/services/auth";
 import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
 const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
@@ -159,6 +164,41 @@ describe("entrar", () => {
     await expect(lerCredenciais()).resolves.toEqual({
       access: "a1",
       refresh: "rt_1",
+    });
+  });
+
+  it("entrada VELHA não sobrescreve a mais nova, mesmo terminando depois", async () => {
+    // Alguém erra a conta, corrige e envia de novo antes de a primeira
+    // responder. Sem senha de chegada, o resultado aplicado é o de quem TERMINA
+    // por último — e a pessoa acaba logada na conta que já tinha abandonado,
+    // com a tela mostrando a outra.
+    let soltarA: () => void = () => {};
+    const esperaA = new Promise<void>((r) => (soltarA = r));
+
+    fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
+      const corpo = JSON.parse(String(o.body)) as { email: string };
+      if (corpo.email === "a@x.com") await esperaA;
+      const sufixo = corpo.email === "a@x.com" ? "A" : "B";
+      return resposta(200, {
+        user_id: 1,
+        email: corpo.email,
+        access_token: `access-${sufixo}`,
+        refresh_token: `rt_${sufixo}`,
+        dashboard_token: "d",
+        expires_in: 900,
+      });
+    });
+
+    const a = entrar("a@x.com", "s");
+    const b = await entrar("b@x.com", "s");
+    expect(b.fase).toBe("pronta");
+    soltarA();
+
+    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+    // O cofre tem a conta B, que é a que a pessoa pediu por último.
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "access-B",
+      refresh: "rt_B",
     });
   });
 

@@ -1,4 +1,4 @@
-import { chamar } from "../api/client";
+import { ErroDeApi, chamar } from "../api/client";
 import {
   loginSchema,
   perfilSchema,
@@ -19,11 +19,31 @@ import {
  * legítimo dessas contas em erro de contrato — e a pessoa via "resposta
  * inesperada" em vez da tela de código.
  */
+/**
+ * Ordem de INÍCIO das tentativas de entrada, não de término.
+ *
+ * Duas entradas podem se sobrepor: alguém erra a conta, corrige e envia de novo
+ * antes de a primeira responder. Sem senha de chegada, o resultado aplicado é o
+ * de quem TERMINA por último — e a pessoa acaba logada na conta que ela já tinha
+ * abandonado, com a tela mostrando a outra. Com a senha, a tentativa velha
+ * descobre que foi superada e descarta o próprio resultado.
+ */
+let ultimaTentativa = 0;
+
+/** Esta entrada foi superada por outra mais nova; o resultado dela é descartado. */
+export class EntradaSuperada extends ErroDeApi {
+  constructor() {
+    super(409, "Outra tentativa de entrada assumiu.");
+    this.name = "EntradaSuperada";
+  }
+}
+
 export type Entrada =
   | { fase: "pronta"; perfil: Perfil }
   | { fase: "mfa"; desafio: string; email: string };
 
 export async function entrar(email: string, senha: string): Promise<Entrada> {
+  const minhaVez = ++ultimaTentativa;
   const r = await chamar("/auth/login", respostaLoginSchema, {
     metodo: "POST",
     corpo: { email, password: senha },
@@ -32,6 +52,9 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
   if ("mfa_required" in r) {
     return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
   }
+  // Uma tentativa mais nova começou enquanto esta estava no ar: o resultado
+  // desta está velho e não pode sobrescrever o dela.
+  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
   await guardarCredenciais({
     access: r.access_token,
     refresh: r.refresh_token,
@@ -48,11 +71,13 @@ export async function verificarMfa(
   codigo: string,
   backup = false,
 ): Promise<Perfil> {
+  const minhaVez = ++ultimaTentativa;
   const r = await chamar("/auth/mfa/verify-login", loginSchema, {
     metodo: "POST",
     corpo: { challenge: desafio, code: codigo, use_backup: backup },
     semAuth: true,
   });
+  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
   await guardarCredenciais({
     access: r.access_token,
     refresh: r.refresh_token,

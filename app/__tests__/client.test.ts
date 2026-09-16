@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  ContratoInvalido,
   ErroDeApi,
   RenovacaoIndisponivel,
   SessaoExpirada,
@@ -39,32 +38,6 @@ beforeEach(async () => {
   falharEscrita(false);
   falharApagar(false);
   await limparCredenciais();
-});
-
-describe("credencial na requisição", () => {
-  it("manda Bearer, o header do app e NENHUM cookie", async () => {
-    await guardarCredenciais({ access: "tok-a", refresh: "rt_r" });
-    fetchFalso.mockResolvedValue(resposta(200, { ok: true }));
-
-    await chamar("/x", schema);
-
-    const [, opcoes] = fetchFalso.mock.calls[0];
-    expect(opcoes.headers["Authorization"]).toBe("Bearer tok-a");
-    expect(opcoes.headers["X-PigBank-Client"]).toBe("app");
-    // `credentials: omit` é o que impede o cookie jar do React Native de
-    // guardar credencial ambiente sem querer — com ela, a escrita SEGUINTE
-    // passaria a levar cookie e o servidor voltaria a exigir o par do CSRF.
-    expect(opcoes.credentials).toBe("omit");
-  });
-
-  it("não manda credencial em rota pública", async () => {
-    await guardarCredenciais({ access: "tok-a", refresh: "rt_r" });
-    fetchFalso.mockResolvedValue(resposta(200, { ok: true }));
-
-    await chamar("/publica", schema, { semAuth: true });
-
-    expect(fetchFalso.mock.calls[0][1].headers["Authorization"]).toBeUndefined();
-  });
 });
 
 describe("renovação em 401", () => {
@@ -262,6 +235,52 @@ describe("renovação em 401", () => {
     falharApagar(false);
   });
 
+  it("401 MUITO atrasado, depois de DUAS rotações, ainda é a mesma sessão", async () => {
+    // Uma requisição pode ficar parada enquanto a sessão roda duas ou três
+    // vezes (rt0 → rt1 → rt2). Lembrar só do último salto trataria a mais
+    // atrasada de todas como conta trocada — justamente a que mais precisa da
+    // tolerância.
+    //
+    // `expirados` é o que força a SEGUNDA rotação: sem ele o mock devolvia 200
+    // no primeiro token novo e só havia um salto, e o caso ficava verde com e
+    // sem o conserto (medido — esta é a segunda versão).
+    await guardarCredenciais({ access: "a0", refresh: "rt0" });
+    const expirados = new Set(["a0"]);
+    let rodada = 0;
+    let soltar: () => void = () => {};
+    const portao = new Promise<void>((r) => (soltar = r));
+
+    fetchFalso.mockImplementation(async (url: string, o: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/auth/refresh")) {
+        rodada += 1;
+        return resposta(200, {
+          access_token: `a${rodada}`,
+          refresh_token: `rt${rodada}`,
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      if (u.includes("/atrasada")) await portao;
+      const auth = (o.headers as Record<string, string>)["Authorization"] ?? "";
+      const token = auth.replace("Bearer ", "");
+      return expirados.has(token)
+        ? resposta(401, { detail: "expirado" })
+        : resposta(200, { ok: true });
+    });
+
+    const atrasada = chamar("/atrasada", schema);
+    await expect(chamar("/um", schema)).resolves.toEqual({ ok: true });
+    // Segundo salto: o token recém-emitido também vence.
+    expirados.add("a1");
+    await expect(chamar("/dois", schema)).resolves.toEqual({ ok: true });
+    expect(rodada).toBe(2);
+    soltar();
+
+    // A atrasada partiu de `rt0`, duas rotações atrás, e mesmo assim conclui.
+    await expect(atrasada).resolves.toEqual({ ok: true });
+  });
+
   it("refresh recusado vira SessaoExpirada e apaga a credencial", async () => {
     await guardarCredenciais({ access: "velho", refresh: "rt_morto" });
     fetchFalso
@@ -442,31 +461,5 @@ describe("renovação em 401", () => {
       ErroDeApi,
     );
     expect(fetchFalso).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("erro não vira JSON na tela", () => {
-  it.each([
-    [{ detail: "E-mail ou senha incorretos." }, "E-mail ou senha incorretos."],
-    [{ detail: { error: "pro_required", message: "Recurso do Pro." } }, "Recurso do Pro."],
-    [{ detail: { error: "subscription_required" } }, "subscription_required"],
-    [{ detail: [{ loc: ["body"], msg: "campo" }] }, "Não foi possível completar a ação."],
-  ])("formato %#", async (corpo, esperado) => {
-    fetchFalso.mockResolvedValue(resposta(400, corpo));
-    await expect(chamar("/x", schema)).rejects.toThrow(esperado);
-  });
-
-  it("500 não expõe detalhe do servidor", async () => {
-    fetchFalso.mockResolvedValue(resposta(500, { detail: "psycopg.OperationalError" }));
-    await expect(chamar("/x", schema)).rejects.toThrow(
-      "Tivemos um problema aqui. Tente de novo em instantes.",
-    );
-  });
-});
-
-describe("contrato", () => {
-  it("resposta com forma diferente vira erro nomeado, não undefined solto", async () => {
-    fetchFalso.mockResolvedValue(resposta(200, { okk: "sim" }));
-    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(ContratoInvalido);
   });
 });

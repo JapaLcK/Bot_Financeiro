@@ -88,7 +88,7 @@ let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
   null;
 
 /**
- * A última rotação bem-sucedida: o token consumido E o que nasceu dele.
+ * A CADEIA recente de rotações: os tokens já consumidos e o que está em uso.
  *
  * Existe para o 401 atrasado: duas requisições saem com o mesmo access token
  * expirado, a primeira renova e termina, e só então a segunda recebe o 401 dela.
@@ -102,11 +102,32 @@ let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
  * credencial corrente entregaria a da B para repetir uma operação da A. Num
  * POST de dinheiro, escrita na conta errada.
  *
- * Com o par, a pergunta passa a ser a certa: "o cofre ainda contém exatamente o
- * sucessor daquele token?". Se contém, é a mesma sessão, só renovada por um
- * vizinho. Se não contém, alguém trocou de conta, e aí é fim de sessão mesmo.
+ * Com a cadeia, a pergunta passa a ser a certa: "este token pertence à mesma
+ * linhagem do que está guardado agora?". Se pertence, é a mesma sessão, só
+ * renovada por um vizinho. Se não, alguém trocou de conta, e é fim de sessão.
+ *
+ * **E é uma CADEIA, não um par.** Uma requisição atrasada pode ficar parada
+ * enquanto a sessão roda duas ou três vezes (`rt0 → rt1 → rt2`), e um par só
+ * lembraria do último salto — a mais atrasada de todas seria tratada como conta
+ * trocada, justamente a que mais precisa da tolerância. O teto de oito mantém
+ * isso limitado: memória de sessão, não registro histórico.
  */
-let ultimaRotacao: { consumido: string; sucessor: string } | null = null;
+const TETO_HISTORICO = 8;
+let rotacoes: { consumidos: string[]; cabeca: string } | null = null;
+
+/** Registra que `consumido` virou `sucessor`, mantendo a cadeia recente. */
+function anotarRotacao(consumido: string, sucessor: string): void {
+  const consumidos = rotacoes ? [...rotacoes.consumidos, consumido] : [consumido];
+  rotacoes = {
+    consumidos: consumidos.slice(-TETO_HISTORICO),
+    cabeca: sucessor,
+  };
+}
+
+/** `refresh` pertence à cadeia que termina no que está guardado agora? */
+function daMesmaCadeia(refresh: string, guardado: string): boolean {
+  return rotacoes?.cabeca === guardado && rotacoes.consumidos.includes(refresh);
+}
 
 async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
@@ -121,11 +142,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         // o que foi consumido, E o cofre tem de conter exatamente o sucessor
         // dele. Sem a segunda metade, uma troca de conta depois da rotação
         // devolveria a credencial da conta nova.
-        if (
-          antes &&
-          ultimaRotacao?.consumido === refreshDeOrigem &&
-          ultimaRotacao.sucessor === antes.refresh
-        ) {
+        if (antes && daMesmaCadeia(refreshDeOrigem, antes.refresh)) {
           return { ok: true, access: antes.access, refresh: antes.refresh };
         }
         return { ok: false, motivo: "sessao-trocou" };
@@ -189,10 +206,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         refresh: novas.refresh_token,
       });
       if (!trocou) return { ok: false, motivo: "sessao-trocou" };
-      ultimaRotacao = {
-        consumido: refreshDeOrigem,
-        sucessor: novas.refresh_token,
-      };
+      anotarRotacao(refreshDeOrigem, novas.refresh_token);
       return {
         ok: true,
         access: novas.access_token,
@@ -342,5 +356,5 @@ async function mensagemDeErro(resposta: Response): Promise<string> {
 /** Só para teste: zera o estado de renovação entre casos. */
 export function _resetRenovacao(): void {
   renovacaoEmVoo = null;
-  ultimaRotacao = null;
+  rotacoes = null;
 }
