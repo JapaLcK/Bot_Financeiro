@@ -1184,7 +1184,8 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # anterior deste comentário afirmava o contrário. Por quê: `connection_ui_state`
         # decide pelo ramo do `health` ANTES de olhar o `sem_sync`, e
         # `health.item_status in _UPDATING` devolve `updating` independentemente do
-        # `last_sync_at` (`core/services/pluggy_health.py:498-504`). Quem tira o
+        # `last_sync_at` (o ramo `if health:` de `connection_ui_state`,
+        # `core/services/pluggy_health.py`). Quem tira o
         # rótulo de lá é a passada seguinte do job de saúde (medido com
         # `OF_HEALTH_MAX_AGE_SEC=0`: com conta → "Atualizado", sem conta → "Sem
         # dados"), e nos defaults isso leva de 12h a 18h — 15h em média, 18h é o
