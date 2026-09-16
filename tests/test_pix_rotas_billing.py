@@ -171,6 +171,12 @@ def test_webhook_nao_precisa_de_csrf_e_o_checkout_precisa():
     sem_csrf = client.post("/billing/asaas/webhook", json=_corpo("evt_csrf"))
     assert sem_csrf.status_code in (401, 503), sem_csrf.status_code
 
+    # O checkout é do NAVEGADOR, e navegador tem jar: desde o ADR 0004 o
+    # middleware só exige o par cookie+header quando há cookie, porque é o
+    # cookie que dá credencial ambiente. Com o jar vazio o pedido é de cliente
+    # de API e morre no 401 da autenticação, não no 403 do CSRF — o que este
+    # teste quer prender é que a VENDA não roda sem o par.
+    client.cookies.set("csrf_token", "token-que-o-header-nao-vai-repetir")
     checkout = client.post("/billing/pix/checkout",
                            json={"plan": "pro", "cpf_cnpj": "12345678901"})
     assert checkout.status_code == 403, "o checkout ganhou isenção de CSRF"

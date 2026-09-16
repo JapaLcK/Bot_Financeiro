@@ -464,6 +464,20 @@ def init_db():
         create index if not exists idx_open_finance_transactions_account_date
           on open_finance_transactions(account_id, transaction_date desc)
         """,
+        # Fusão OF × lançamento manual: `MERGED_WALLET_DELTA_SQL`
+        # (db/open_finance.py) corrige a Carteira na leitura e roda em TODO
+        # dashboard, /saldo, resposta de lançamento e guarda de aporte. Sem este
+        # índice ela varre a tabela inteira — o de cima não serve, tem
+        # `account_id` como coluna líder e aqui o filtro é o vínculo.
+        # MEDIDO em 2026-09-15, 50 000 tx numa conta, 30 fundidas, EXPLAIN
+        # (ANALYZE, BUFFERS), min de 5: 3,207 ms / 670 buffers  →  0,049 ms / 25
+        # buffers (-98%). PARCIAL porque só a fração vinculada interessa (30 de
+        # 50 000 no semeio). Remedir antes de reusar o número.
+        """
+        create index if not exists idx_open_finance_transactions_imported_launch
+          on open_finance_transactions(imported_launch_id)
+          where imported_launch_id is not null
+        """,
         # Onda 1 (contenção OF): tentativa ≠ sucesso, e saúde medida no servidor.
         # `last_sync_at` passa a significar SUCESSO (o sync deixou de carimbá-lo
         # incondicionalmente), então não existe last_success_at — seria a segunda

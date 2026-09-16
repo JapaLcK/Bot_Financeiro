@@ -179,6 +179,11 @@ def _starting_balance(user_id: int) -> dict[str, Any]:
         if of_bank_count > 0 and consolidated_balance_enabled(user_id):
             saldo = float(cb.get("consolidated") or 0)
             balance_source = "consolidated"
+        else:
+            # Gate desligado congela a ORIGEM (carteira), não autoriza projetar
+            # a partir do cru: `cb["manual"]` é a mesma Carteira que a tela
+            # mostra, com o gasto fundido devolvido.
+            saldo = float(cb.get("manual") or 0)
     except Exception:
         # Falha ao consultar o consolidado (OF/gate indisponível): NÃO dá pra
         # afirmar que a carteira manual é o saldo completo — o usuário pode ter
