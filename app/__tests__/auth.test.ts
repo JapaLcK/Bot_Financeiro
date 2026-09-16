@@ -283,6 +283,36 @@ describe("entrar", () => {
     });
   });
 
+  it("FALHA de entrada superada não vira erro na tela", async () => {
+    // A conta A responde 401 depois de a entrada da conta B ter dado certo. A
+    // pessoa veria "senha incorreta" enquanto a entrada que ela pediu por
+    // último estava indo bem — escolher a falha velha é o pior dos dois.
+    let soltarA: () => void = () => {};
+    const esperaA = new Promise<void>((r) => (soltarA = r));
+    fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
+      const corpo = JSON.parse(String(o.body)) as { email: string };
+      if (corpo.email === "a@x.com") {
+        await esperaA;
+        return resposta(401, { detail: "E-mail ou senha incorretos." });
+      }
+      return resposta(200, {
+        user_id: 2,
+        email: corpo.email,
+        access_token: "access-B",
+        refresh_token: "rt_B",
+        dashboard_token: "d",
+        expires_in: 900,
+      });
+    });
+
+    const a = entrar("a@x.com", "s");
+    await entrar("b@x.com", "s");
+    soltarA();
+
+    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+    await expect(a).rejects.not.toThrow("E-mail ou senha incorretos.");
+  });
+
   it("sair invalida entrada em voo", async () => {
     // Sair é a intenção mais recente. Um login que terminasse depois gravaria
     // credencial numa sessão que o usuário acabou de encerrar.

@@ -42,17 +42,39 @@ export type Entrada =
   | { fase: "pronta"; perfil: Perfil }
   | { fase: "mfa"; desafio: string; email: string };
 
+/**
+ * Executa uma tentativa de entrada e devolve o resultado SÓ se ela ainda for a
+ * mais recente — inclusive quando ela falha.
+ *
+ * O erro de uma tentativa superada também é ruído: a conta A responde 401 e a
+ * pessoa veria "senha incorreta" enquanto a entrada da conta B, que ela pediu
+ * depois, estava indo bem. Descartar o sucesso e mostrar a falha seria escolher
+ * o pior dos dois.
+ */
+async function tentativa<T>(minhaVez: number, executar: () => Promise<T>): Promise<T> {
+  try {
+    const r = await executar();
+    if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+    return r;
+  } catch (e) {
+    if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+    throw e;
+  }
+}
+
 export async function entrar(email: string, senha: string): Promise<Entrada> {
   const minhaVez = ++ultimaTentativa;
-  const r = await chamar("/auth/login", respostaLoginSchema, {
-    metodo: "POST",
-    corpo: { email, password: senha },
-    semAuth: true,
-  });
-  // A conferência vem ANTES de qualquer retorno, inclusive o do desafio: um
-  // desafio velho levaria a tela para a etapa de código da conta ERRADA, e o
-  // usuário digitaria o token de uma conta para completar a entrada de outra.
-  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+  const r = await tentativa(minhaVez, () =>
+    chamar("/auth/login", respostaLoginSchema, {
+      metodo: "POST",
+      corpo: { email, password: senha },
+      semAuth: true,
+    }),
+  );
+  // A conferência de `tentativa` já cobriu o caminho até aqui, inclusive o do
+  // desafio: um desafio velho levaria a tela para a etapa de código da conta
+  // ERRADA, e o usuário digitaria o token de uma conta para completar a
+  // entrada de outra.
   if ("mfa_required" in r) {
     return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
   }
@@ -78,11 +100,13 @@ export async function verificarMfa(
   backup = false,
 ): Promise<Perfil> {
   const minhaVez = ++ultimaTentativa;
-  const r = await chamar("/auth/mfa/verify-login", loginSchema, {
-    metodo: "POST",
-    corpo: { challenge: desafio, code: codigo, use_backup: backup },
-    semAuth: true,
-  });
+  const r = await tentativa(minhaVez, () =>
+    chamar("/auth/mfa/verify-login", loginSchema, {
+      metodo: "POST",
+      corpo: { challenge: desafio, code: codigo, use_backup: backup },
+      semAuth: true,
+    }),
+  );
   const gravou = await guardarCredenciaisSe(
     () => minhaVez === ultimaTentativa,
     { access: r.access_token, refresh: r.refresh_token },
