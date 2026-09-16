@@ -46,9 +46,14 @@ class _DashboardHandler(logging.Handler):
     Contido em três pontos, não resolvido: (1) `connect_timeout=2` nas DUAS
     funções que abrem conexão (`log_system_event_sync` e `recent_event_exists`,
     hoje em `core/system_event_log.py`), limitando o travamento a 2s com banco
-    inalcançável (era >30s, medido); (1b) `statement_timeout` nas mesmas duas,
-    que é o que limita a ESPERA DE LOCK e a execução — sem ele a tabela travada
-    pendurava o caller pelo lock inteiro (medido: 3,00s para um lock de 3s);
+    inalcançável (era >30s, medido); (1b) `statement_timeout` nas mesmas duas —
+    e, desde a issue #429, também no gravador async `log_system_event` de
+    `core/admin_dashboard.py`, que passou a abrir conexão própria com o MESMO
+    helper (`statement_timeout_options`) em vez de ir pelo `db_connect` do
+    painel. É o que limita a ESPERA DE LOCK e a execução: sem ele a tabela
+    travada pendurava o caller pelo lock inteiro (medido: 3,00s para um lock de
+    3s). O `db_connect` do painel continua sem teto, de propósito — é
+    compartilhado com DDL de boot, agregações e a retenção diária;
     (2) os 5 call sites das 4 rotas destrutivas `async`
     (`frontend/routes/cards.py`, `frontend/finance_bot_websocket_custom.py` —
     incluindo o ramo WARNING da `/launches`) chamam o `_log_falha` por

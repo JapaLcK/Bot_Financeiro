@@ -54,8 +54,15 @@ _TETO_MAX_MS = 60_000
 _local = threading.local()
 
 
-def _statement_timeout_options() -> str:
+def statement_timeout_options() -> str:
     """`options` do connect, com config sem sentido voltando ao default.
+
+    Nome PUBLICO (era `_statement_timeout_options`) porque
+    `core/admin_dashboard.py:log_system_event` o importa: e o MESMO INSERT, na
+    MESMA tabela, com a MESMA politica de perder o log — duas versoes do numero
+    e como as duas pontas de um check-then-act passam a divergir (CLAUDE.md
+    §0.7, e o regime (B) descrito em `recent_event_exists`). Nao ha ciclo de
+    import: este modulo so importa `config.env`, `core.pg_text` e `psycopg`.
 
     Piso no molde de `_prazo_reconexao_ms` (`frontend/routes/open_finance.py`),
     e pelo mesmo motivo elevado a um grau: aqui `0` não é só "sem sentido", é
@@ -175,7 +182,7 @@ def log_system_event_sync(
         # `options`: o `connect_timeout` NÃO cobre a query nem a espera de lock —
         # o teto de execução é o `statement_timeout`, aplicado pelo SERVIDOR.
         with psycopg.connect(database_url, connect_timeout=2,
-                             options=_statement_timeout_options()) as conn:
+                             options=statement_timeout_options()) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -261,20 +268,26 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
     incluir DDL ou `vacuum full` de 2s.
 
     (B) DOIS em que a ESCRITA é o `log_system_event` de
-    `core/admin_dashboard.py:198` — as pontas falham em direções DIFERENTES, e
-    isso é criado por este PR. `frontend/finance_bot_websocket_custom.py:5399`
+    `core/admin_dashboard.py` — `frontend/finance_bot_websocket_custom.py:5399`
     (dedup genérico de billing, `_fire_email`) e `:5798`
-    (`trial_ending_email_sent`, webhook `trial_will_end`). Aquele gravador abre
-    por `core/admin_dashboard.py:56 db_connect`, que tem
-    `connect_timeout=DB_CONNECT_TIMEOUT` e NÃO tem `options` — é o irmão que
-    ficou declarado para issue. Logo, com a tabela travada: a leitura desiste
-    ABERTA (`False`) dentro do teto, e a escrita continua ESPERANDO o lock
-    inteiro e acaba gravando a linha quando ele cai (o comportamento "sem
-    `options`" medido em `tests/test_system_event_log_teto.py`). Efeito: um
-    reenvio, não o reenvio recorrente do regime (A) — a passada seguinte já
-    encontra o marcador. Não é o pior dos dois, mas é um regime diferente, e
-    descrevê-lo como uniforme é que seria a mentira. Uniformizar = dar o mesmo
-    teto ao gravador async do `admin_dashboard`.
+    (`trial_ending_email_sent`, webhook `trial_will_end`). O regime MISTO que
+    este texto descrevia FOI FECHADO (issue #429): aquele gravador deixou de
+    abrir por `db_connect` e passou a abrir conexão própria com
+    `connect_timeout=DB_CONNECT_TIMEOUT` **e** `options=statement_timeout_options()`
+    — o helper acima, uma fonte de verdade só. Com a tabela travada as duas
+    pontas agora desistem no mesmo teto e na mesma direção, igual aos oito de
+    (A): a leitura devolve `False` e a escrita do marcador é cancelada sem
+    gravar, logo o e-mail sai a cada passada enquanto o lock durar. Era um
+    reenvio só (a escrita esperava o lock e acabava gravando); passou a ser o
+    mesmo reenvio recorrente de (A). A troca é deliberada — o que se compra é
+    não pendurar o event loop, e o custo está declarado aqui e em
+    `scripts/aviso_fim_do_gratis.py:52`.
+
+    O `db_connect` do PAINEL (`core/admin_dashboard.py`) continua SEM teto, de
+    propósito: ele é COMPARTILHADO entre DDL de boot, agregações do overview,
+    retenção diária e rotas do painel, e um teto único ali cortaria DDL,
+    agregação e purga. Preso por
+    `tests/test_admin_log_system_event_teto.py::test_db_connect_do_painel_continua_sem_teto`.
     """
     database_url = _database_url()
     if not database_url:
@@ -297,7 +310,7 @@ def recent_event_exists(event_type: str, user_id: int, within_days: float = 7.0)
         # o SELECT e a espera de lock agora têm teto, e o desfecho do corte é
         # `False`, exatamente o que o `except` abaixo já devolvia.
         with psycopg.connect(database_url, connect_timeout=2,
-                             options=_statement_timeout_options()) as conn:
+                             options=statement_timeout_options()) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
