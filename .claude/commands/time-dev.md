@@ -36,35 +36,36 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
 4. **Tester**: chame com o diff/arquivos que o Coder tocou. Saída esperada:
    lista de achados, cada um com severidade e se foi provado rodando ou é
    hipótese.
-5. **Loop Coder ↔ Tester** (só na faixa **Completo**), **com teto de 2 rodadas**:
-   se o Tester achou algo real (severidade que bloqueia), volte ao Coder só com
-   os achados novos, depois rode o Tester de novo só no que mudou. Se ainda
-   houver achado bloqueante na 2ª rodada, pare e leve ao usuário a escolha entre
-   consertar e declarar como limite — não abra a 3ª sozinho.
-   - **Na faixa Leve não há segunda passada do Tester.** Achado bloqueante volta
-     ao Coder uma vez e o Manager confere a correção. Se o achado cair numa área
-     da faixa Completo, a tarefa sobe de faixa e **recomeça no passo 1**
-     (Arquiteto), com o diff atual e os achados como entrada.
-   - **Achado improvável vira limite declarado, não rodada nova — só fora das
-     áreas Completo.** Se o caso exige condição rara (dois toques no mesmo
-     quadro, recriação de tela, falha dupla de hardware) e não toca **nenhuma**
-     área da faixa Completo do `CLAUDE.md` §0, o Tester reporta, o orquestrador
-     registra no relato/PR e segue. Em área Completo, raro não dispensa conserto:
-     leve ao usuário.
-   - **Agente novo com resumo, não retomada.** Retomar um agente carrega o
-     contexto inteiro dele de novo a cada chamada. Para uma rodada nova, chame
-     um agente novo com o plano, o diff atual e os achados em aberto.
-   - **Mutação só no que mudou.** O Tester ataca e prova com mutação os
-     trechos alterados na rodada; não refaz a bateria inteira das anteriores.
-6. **Manager**: chame por último, passando o plano do Arquiteto, o diff final
-   do Coder e todos os achados do Tester (inclusive os já corrigidos). Ele
-   audita consistência entre os três, não repete achados do Tester.
-7. Se o Manager reprovar algo, volte para o agente específico que ele
-   apontou (não necessariamente o Coder) com o apontamento exato, e repita a
-   partir do passo relevante. **Na faixa Leve**, a correção pedida pelo Manager
-   volta direto ao Manager depois do Coder, sem nova passada do Tester — a
-   menos que o apontamento caia numa área Completo, e aí a tarefa sobe de faixa
-   e **recomeça no passo 1** (Arquiteto), como no loop acima.
+5. **Depois do Tester e do Manager: a tabela de eventos.** Há **um teto de passadas
+   do Tester por tarefa**, contado de qualquer caminho que leve a ele — loop com o
+   Coder, reprovação do Manager apontando o Coder, o Tester ou o Arquiteto:
+   **Completo = 2 passadas; Leve = 1 passada.** Nenhum evento abre uma passada além
+   do teto; quando o teto estiver esgotado, siga a coluna "teto esgotado".
+
+   | Evento | Com passada disponível | Teto esgotado |
+   |---|---|---|
+   | Tester acha bloqueio | Coder corrige → Tester só no que mudou | **Completo:** leve ao usuário (consertar sem nova passada, com o Manager conferindo, ou declarar limite). **Leve:** Coder corrige → Manager confere |
+   | Manager reprova apontando o Coder | Coder corrige → Tester só no que mudou → Manager | Coder corrige → Manager confere; em Completo, avise o usuário que não houve nova passada |
+   | Manager reprova apontando o Tester (achado era hipótese, teste não prova) | Tester refaz só aquele ponto → Manager | Coder corrige o teste → Manager confere; em Completo, avise o usuário |
+   | Manager reprova apontando o Arquiteto | Arquiteto revisa → usuário confirma → Coder → segue esta tabela, com a contagem que já havia | idem, sem Tester novo além do teto |
+   | Achado cai numa área Completo numa tarefa Leve | a tarefa sobe de faixa e **recomeça no passo 1** com o diff e os achados; a contagem recomeça uma única vez, já como Completo | — |
+   | Segunda reprovação do Manager sobre o mesmo ponto | leve ao usuário em vez de repetir | leve ao usuário |
+
+   Regras que valem em toda linha:
+   - **Achado improvável vira limite declarado — só fora das áreas Completo.** Se o
+     caso exige condição rara (dois toques no mesmo quadro, recriação de tela, falha
+     dupla de hardware) e não toca **nenhuma** área da faixa Completo do `CLAUDE.md`
+     §0, o Tester reporta, o orquestrador registra no relato/PR e segue. Em área
+     Completo, raro não dispensa conserto: leve ao usuário.
+   - **Agente novo com resumo, não retomada.** Retomar um agente carrega o contexto
+     inteiro dele de novo a cada chamada. Para uma passada nova, chame um agente
+     novo com o plano, o diff atual e os achados em aberto.
+   - **Mutação só no que mudou.** O Tester ataca e prova com mutação os trechos
+     alterados; não refaz a bateria inteira das passadas anteriores.
+6. **Manager**: chame depois da última passada do Tester, passando o plano do
+   Arquiteto, o diff final do Coder e todos os achados do Tester (inclusive os já
+   corrigidos). Ele audita consistência entre os três, não repete achados do Tester.
+   Se reprovar, siga a tabela do passo 5.
 
 ## Gates deste repositório
 
