@@ -5795,7 +5795,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id = _resolve_user(sub)
         if user_id:
             from core.observability import recent_event_exists
-            if not recent_event_exists("trial_ending_email_sent", user_id, within_days=6):
+            if not await asyncio.to_thread(recent_event_exists, "trial_ending_email_sent", user_id, within_days=6):
                 expires_dt = _subscription_period_end(sub)
                 # Mesma fonte do plano dos outros ramos (#351): o PRICE da
                 # assinatura, não o texto do e-mail. Quem está em trial de
