@@ -59,7 +59,10 @@ FORTE), DOIS: o `<failure>` que traz uma linha `arquivo:linha:` do proprio caso 
 da celula do traceback) e a ultima celula. (c) veredito certo com a NOTA DEFLACIONADA
 (FORTE legitima rebaixada a FRACA): o item 1 da celula do traceback e os quatro
 gatilhos do item 2 — todos subnotificam, que e a direcao segura escolhida de proposito,
-e nenhum aprova falso. Nao valem conserto enquanto nao aparecerem:
+e nenhum aprova falso. Um QUINTO gatilho desta mesma categoria ja apareceu (#430) e por
+isso esta FECHADO, nao declarado: o erro de coleta no antigo abortava a SESSAO e os
+irmaos nunca chegavam a rodar, entao FORTE legitima de irmao saia FRACA — ver a celula
+do erro de coleta. Os demais nao valem conserto enquanto nao aparecerem:
     - `T` (`.py` virou symlink) some do `--diff-filter=AMRD` -> "nada a provar",
       zero na historia; `C` so aparece com `diff.renames=copies` na config de QUEM
       roda, e a chamada o desliga com `-c diff.renames=true` — medido: mesmos SHAs,
@@ -115,6 +118,17 @@ e nenhum aprova falso. Nao valem conserto enquanto nao aparecerem:
       `test_filho.py` -> citacao `base_comum.py` -> rc=5). Nessa metade a citacao e
       o lugar onde olhar, nao um comando. Zero hoje, e o comando remede:
           grep -rn "class Test[A-Za-z_]*(" --include="*.py" tests/
+      A coluna ANTIGA (e SO ela) roda com `--continue-on-collection-errors`, senao
+      esse erro ABORTAVA a sessao inteira e os irmaos do mesmo alvo nunca rodavam —
+      FORTE legitima de irmao saia FRACA, o gatilho (c) que o #430 fechou. Medido
+      (pytest 9.1.1, um alvo que nao importa + um alvo verde): sem a flag rc=2 e
+      sessao abortada; com ela rc=1 e `1 passed, 1 error`, e o `<testcase>` do erro
+      continua `classname=""`, a forma impareavel que a `veredito` ja trata. A flag
+      NAO abre buraco de aprovacao: com tudo passando ao lado do erro o rc e 1,
+      nunca 0, entao a coluna antiga nunca vira "tautologico" por causa dela. O que
+      ela ALARGA e o limite da ultima celula ("um irmao pre-existente pode carregar
+      a nota FORTE sozinho"): irmaos que antes nem chegavam a ser coletados passam a
+      rodar, entao o caso e mais alcancavel do que era.
     - `xfail` na coluna VERDE conta como nao-passou (sai `<skipped>`): um teste que
       ficou vermelho no antigo e virou `xfail` no corrigido sai orfao -> REPROVADO.
       E o desfecho certo — `xfail` nao e conserto —, mas o relatorio o chama de
@@ -352,7 +366,8 @@ def le_junit(caminho: str) -> Desfechos | None:
     return Desfechos(total, pulados, falhados, ambiguos, errados, passados)
 
 
-def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str) -> tuple[int, Desfechos | None, str]:
+def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str, *,
+                continuar_na_coleta: bool = False) -> tuple[int, Desfechos | None, str]:
     # `PYTEST_ADDOPTS` ZERADO: o pytest o PREPENDE, entao um ALVO posto ali entra
     # ANTES do nosso `--` e nada o barra — medido, com `PYTEST_ADDOPTS=<um teste>`
     # o mesmo lab que dava REPROVADO/tautologico passou a `APROVADO, prova FORTE`
@@ -361,18 +376,35 @@ def roda_pytest(cwd: str, py: str, alvos: list[str], relatorio: str) -> tuple[in
     # gate ja a zerava pelo mesmo motivo: opcao herdada muda QUANTOS testes rodam,
     # que e justamente o que uma prova nao pode deixar variar.
     env = {**os.environ, "PYTHONPATH": ".", "PYTEST_ADDOPTS": ""}
+    # `--continue-on-collection-errors` SO onde o chamador pedir, e hoje o unico
+    # que pede e a coluna ANTIGA: la um alvo que nao coleta e ESPERADO (o teste
+    # novo importa producao que so existe no corrigido) e abortava a sessao,
+    # apagando o vermelho dos IRMAOS do mesmo alvo. O default `False` nao e estilo:
+    # `tests/test_coluna_dupla_gate.py::_pytest_em` e `::_reroda` chamam
+    # posicionalmente e MEDEM a semantica `rc=2` (coleta abortada / interrupcao).
+    # Na coluna CORRIGIDA ela ficaria fora do lugar: la erro de coleta e defeito, e
+    # rc != 0 ja REPROVA — ligar a flag so trocaria o codigo de 2 para 1 sem mudar
+    # o desfecho.
+    coleta = ["--continue-on-collection-errors"] if continuar_na_coleta else []
     # `-o junit_family=xunit1` so pelo `file=` de cada `<testcase>`.
-    # O `--` encerra o parsing de opcoes para os ALVOS: sem ele, alvo com cara de
-    # opcao era consumido COMO opcao e o pytest ficava sem alvo nenhum -> coleta a
-    # arvore inteira, o mesmo modo de falha do `--testes tests/`. Medido:
-    # `--testes=--basetemp=<x>.py` passa pela guarda de nome (termina em `.py`) e
-    # saia `APROVADO, prova FORTE` citando teste alheio; com o `--` vira alvo
-    # inexistente -> rc=4 -> REPROVADO. NAO fecha a classe inteira: o
-    # `consider_preparse` do pytest varre `args` linearmente e IGNORA o `--`, entao
-    # `-p<algo>.py` ainda chega la — medido, e os tres casos (`-p=x.py`, `-pxml.py`,
-    # `-pno:x.py`) fecham pela guarda do XML ausente ou por rc=4, nao pelo `--`.
+    # O `--` FICA, mas ele NAO e a protecao contra alvo com cara de opcao — quem
+    # protege e a guarda de `main()` que recusa alvo comecado por `-`. Esta linha
+    # ja prometeu o contrario: "com o `--` vira alvo inexistente -> rc=4 ->
+    # REPROVADO" foi medido, e deixou de valer. O pytest 9.1.1 faz o parse FINAL
+    # com `argparse.parse_intermixed_args` (`Parser.parse`,
+    # `_pytest/config/argparsing.py:121-141`), e essa funcao IGNORA o `--` —
+    # medido, com um parser de brinquedo:
+    #     parse_known_args(['--','--basetemp=x.py'])            -> files=['--basetemp=x.py']
+    #     parse_known_intermixed_args(['--','--basetemp=x.py']) -> basetemp='x.py', files=[]
+    # O `_preparse` usa a PRIMEIRA e o parse final usa a SEGUNDA: o alvo sobrevive
+    # a pre-analise e e comido no fim, sobra ZERO alvo posicional e a coleta varre a
+    # arvore inteira — o mesmo modo de falha do `--testes tests/`, e era um APROVADO
+    # falso VIVO (`tests/test_coluna_dupla_gate.py::test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira`
+    # vermelho na main, citando `tests/test_irmao.py::test_valor`).
+    # Ele continua aqui porque o `_preparse` respeita: e a segunda camada, gratis,
+    # sobre uma guarda que decide ANTES de o pytest existir.
     r = subprocess.run([py, "-m", "pytest", "-q", "-o", "junit_family=xunit1",
-                        f"--junitxml={relatorio}", "--", *alvos],
+                        f"--junitxml={relatorio}", *coleta, "--", *alvos],
                        cwd=cwd, env=env, capture_output=True, text=True)
     # O stderr continua repassado — e o unico diagnostico dos rc 3/4/5 e do
     # `No module named pytest`, que nao chegam a escrever XML. Ele nao alimenta
@@ -410,11 +442,16 @@ def veredito(rc_antes: int, antes: Desfechos | None,
         qual = "antiga" if antes is None else "corrigida"
         return 1, (f"REPROVADO: o pytest nao escreveu o relatorio XML da coluna {qual}.\n"
                    "               Sem desfecho nao ha prova — veja o stderr repassado acima.")
-    # ExitCode 2 significa INTERRUPTED, nao "erro de coleta". A coleta legitima
-    # tambem usa esse codigo, e no JUnit ela e reconhecivel: so existem `<error>`
-    # impareaveis, com `classname` vazio; nenhum teste passou nem falhou no corpo.
-    # Se uma falha vier antes de KeyboardInterrupt, o XML parcial preserva essa
-    # `<failure>` — sem esta guarda o gate carimbava FORTE uma coluna incompleta. O
+    # ExitCode 2 significa INTERRUPTED. A coleta legitima da coluna antiga NAO
+    # chega mais aqui: ela roda com `--continue-on-collection-errors` e sai rc=1
+    # (medido: `1 passed, 1 error`). Ou seja, o rc=2 hoje e INTERRUPCAO — e e por
+    # isso que a guarda FICA, nao que ela sobre: interrupcao continua deixando XML
+    # PARCIAL, e esta e a unica coisa que separa XML parcial de prova. Se uma falha
+    # vier antes do KeyboardInterrupt, o XML preserva essa `<failure>` — sem a
+    # guarda o gate carimbava FORTE uma coluna incompleta. A forma de "coleta pura"
+    # continua descrita abaixo porque ela e o que sobra alcancavel pelo rc=2 de um
+    # chamador que NAO ligue a flag (a assinatura de `roda_pytest` tem default
+    # `False`), e liberar por ela e mais estreito que liberar por rc=2. O
     # `ambiguos` entra na condicao pelo mesmo motivo que o `falhados`: uma coluna
     # interrompida com um `pytest.fail(pytrace=False)` ao lado dos erros de coleta
     # nao e coleta pura, e sem a clausula ela passaria pela guarda.
@@ -641,14 +678,31 @@ def main() -> int:
     # passaria a provar OUTRO conjunto (o padrao) sem o operador pedir. O `split`
     # aceita node id, que e alvo legitimo e carrega `::` — `tests/x.py::test_y` e
     # `tests/x.py::Classe::test_y` valem, quem decide e o arquivo antes do `::`.
-    # Uma recusa, DOIS motivos que nao se parecem: quem digita `--testes tests/` — o
+    # Uma recusa, TRES motivos que nao se parecem: quem digita `--testes tests/` — o
     # atalho humano, e o caso mais comum — nao tem o que fazer com dois paragrafos
     # sobre caminho absoluto. Cada um le o seu.
     for t in alvos:
         arq = t.split("::", 1)[0]
         fora = os.path.isabs(arq) or os.path.normpath(arq).startswith("..")
-        if not arq.endswith(".py") or fora:
-            motivo = ("Absoluto (ou com `..`) sai das DUAS colunas: o\n"
+        # Alvo comecado por `-` e a TERCEIRA recusa, e ela e a unica protecao real
+        # contra "alvo com cara de opcao": o `--` da `roda_pytest` NAO fecha isso
+        # (o pytest 9.1.1 faz o parse final com `parse_intermixed_args`, que ignora
+        # o `--` — a medicao esta la). Sem ela, `--testes=--basetemp=<x>.py` passa
+        # pela checagem de sufixo, o pytest o consome como OPCAO, sobra ZERO alvo e
+        # a coleta varre a arvore inteira: medido na main 62fdc23, exit 0 e
+        # `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor`, um
+        # teste que a mudanca nunca exercitou. A checagem e por PREFIXO e no ALVO
+        # inteiro (nao no `arq`), porque e assim que o argv chega ao pytest.
+        opcao = t.startswith("-")
+        if not arq.endswith(".py") or fora or opcao:
+            motivo = ("Comeca por `-`, entao o pytest o consome como OPCAO e\n"
+                      "                sobra ZERO alvo posicional — a coleta varre a ARVORE INTEIRA e o\n"
+                      "                vermelho de qualquer teste alheio vira 'prova'. Medido: exit 0 e\n"
+                      "                `APROVADO, prova FORTE` citando um teste nao relacionado. O `--`\n"
+                      "                NAO protege: o parse final do pytest usa `parse_intermixed_args`,\n"
+                      "                que ignora o `--` (ver `roda_pytest`)."
+                      if opcao else
+                      "Absoluto (ou com `..`) sai das DUAS colunas: o\n"
                       "                `cwd` do pytest e o worktree, entao o alvo e coletado do checkout\n"
                       "                ATUAL e uma revisao POSTERIOR do teste decide o veredito dos SHAs\n"
                       "                impressos — medido: par tautologico sai `APROVADO, prova FRACA`."
@@ -740,7 +794,13 @@ def main() -> int:
 
         # Os XML vivem no `mkdtemp`, fora das duas arvores — nenhum worktree fica
         # sujo — e morrem com ele no `rmtree` do `finally`.
-        rc_antes, desf_antes, out_antes = roda_pytest(wt_antes, py, alvos, os.path.join(tmp, "antes.xml"))
+        # `continuar_na_coleta` SO na coluna antiga: la o erro de coleta e o caminho
+        # LEGITIMO do `Uso` (teste novo importando producao que so existe no
+        # corrigido), e sem a flag ele abortava a sessao e levava junto o vermelho
+        # dos irmaos do mesmo alvo. Na corrigida, erro de coleta e defeito: rc != 0
+        # ja REPROVA, e a flag so trocaria 2 por 1.
+        rc_antes, desf_antes, out_antes = roda_pytest(wt_antes, py, alvos, os.path.join(tmp, "antes.xml"),
+                                                      continuar_na_coleta=True)
         rc_depois, desf_depois, out_depois = roda_pytest(wt_depois, py, alvos, os.path.join(tmp, "depois.xml"))
 
         # Por palavra-chave: os dois `int` e os dois `Desfechos` se alternam na

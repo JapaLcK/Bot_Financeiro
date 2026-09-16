@@ -898,20 +898,51 @@ def pluggy_items_lock(item_ids: list[str]):
         yield False
         return
     try:
-        conn = psycopg.connect(url, autocommit=True)
+        # Mesmo idioma do irmão singular (`pluggy_item_lock`, ramo COM orçamento),
+        # e NENHUM número novo: os dois saem de `_lock_wait_ms()`, que já é a fonte
+        # de verdade (`OF_SYNC_LOCK_WAIT_MS`, default 15000, piso documentado lá).
+        # Aqui não é zelo — tem CLIENTE ESPERANDO nos dois chamadores:
+        # `db/privacy.py reset_user_data` e `frontend/routes/open_finance.py
+        # _disconnect_sob_lock`, e este último roda por `asyncio.to_thread` DENTRO
+        # da rota, sem try/except. Sem `connect_timeout`, banco que aceita o socket
+        # e não responde penduraria a thread para SEMPRE, segurando uma vaga do
+        # `_lock_slots()` — e a vaga não volta nunca (issue #429).
+        # `statement_timeout` e `lock_timeout` ficam IGUAIS, então qual corta
+        # primeiro é indeterminado — e não importa: `LockNotAvailable` e
+        # `QueryCanceled` caem no MESMO `except` abaixo e produzem o mesmo
+        # `got=False`, que o chamador já traduz em 503 "tente de novo".
+        conn = psycopg.connect(
+            url, autocommit=True,
+            # libpq conta em segundos inteiros e trata 0 como "sem limite"; o piso
+            # de 1s é dele, não nosso.
+            connect_timeout=max(1, _lock_wait_ms() // 1000),
+            options=f"-c statement_timeout={_lock_wait_ms()}ms",
+        )
     except Exception:
         _lock_slots().release()
         raise
     try:
-        conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
         got = True
-        for item in itens:
-            try:
+        # O `set_config` entra no MESMO `try` dos advisory locks de propósito: ele
+        # é o PRIMEIRO statement desta conexão e agora tem teto (o `options` acima),
+        # então ele PODE ser cancelado. Fora do `except` isso subia como exceção e
+        # virava 500 na rota do disconnect (nenhum try/except no `to_thread` de
+        # `frontend/routes/open_finance.py:2075-2078`), enquanto a docstring promete
+        # 503/"tente de novo" e é o que o resto da função entrega.
+        # ALCANÇÁVEL, mas é CORRIDA e não certeza — medido com
+        # `OF_SYNC_LOCK_WAIT_MS=1` contra o Postgres local: uma execução isolada deu
+        # `QueryCanceled` sqlstate 57014 em 0,006s, e 20 seguidas completaram sem
+        # corte (o `set_config` cabe folgado em 1ms na maioria das vezes). Por isso
+        # o teste do desfecho INJETA a exceção em vez de cronometrar: teste que só
+        # fica vermelho às vezes não prende nada. Em produção quem alarga a janela
+        # é servidor sob carga, não a env.
+        try:
+            conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
+            for item in itens:
                 conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
-            except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
-                    psycopg.errors.DeadlockDetected):
-                got = False
-                break
+        except (psycopg.errors.LockNotAvailable, psycopg.errors.QueryCanceled,
+                psycopg.errors.DeadlockDetected):
+            got = False
         yield got
     finally:
         conn.close()

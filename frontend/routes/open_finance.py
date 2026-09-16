@@ -149,11 +149,15 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 #
 # Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
 # `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
-# um abre conexão async NOVA (`core.admin_dashboard.db_connect`, com o
-# `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49` — default **5**) e faz um
-# INSERT SEM `statement_timeout`. O `connect_timeout` limita o handshake e nada
-# limita o INSERT nem o commit, então o pior caso de cada log era ILIMITADO e
-# qualquer número fechado aqui era PISO. Os dois passaram a ir pelo
+# um abre conexão async NOVA (com o `DB_CONNECT_TIMEOUT` de
+# `core/admin_dashboard.py:49` — default **5**) e fazia um INSERT SEM
+# `statement_timeout`. O `connect_timeout` limita o handshake e nada limitava o
+# INSERT nem o commit, então o pior caso de cada log era ILIMITADO e qualquer
+# número fechado aqui era PISO. Desde a issue #429 aquele INSERT tem
+# `options=statement_timeout_options()` (default 2000ms), o que limita a query e
+# a espera de LOCK — mas NÃO o commit, que continua sem knob por query no libpq.
+# Ou seja: o pior caso deixou de ser ilimitado, e mesmo assim os dois continuam
+# indo pelo
 # `_log_com_teto` (`asyncio.wait_for`), e aí o número vira TETO (Codex #166, P2):
 #
 #     ≤ 20,0s   o prazo INTEIRO      = as duas tentativas + o log do RETRY
@@ -214,11 +218,19 @@ _LOG_DIAG_TIMEOUT_S = 2.0
 async def _log_com_teto(segundos: float, *args, **kwargs) -> None:
     """`log_system_event` que não pode furar o prazo da reconexão.
 
-    `log_system_event` (`core/admin_dashboard.py:180`) abre conexão async NOVA e
-    faz um INSERT sem `statement_timeout`: o `connect_timeout` limita o
-    handshake e NADA limita o INSERT nem o commit. Era o que deixava o teto do
-    `_grava_reconexao` ilimitado exatamente sob sobrecarga do banco, que é
-    quando ele importa (Codex #166, P2).
+    `log_system_event` (`core/admin_dashboard.py`) abre conexão async NOVA e faz
+    um INSERT. Antes da issue #429 ele não tinha `statement_timeout` nenhum, e
+    era o que deixava o teto do `_grava_reconexao` ilimitado exatamente sob
+    sobrecarga do banco, que é quando ele importa (Codex #166, P2).
+
+    Hoje aquele INSERT tem teto (`options=statement_timeout_options()`), e
+    mesmo assim este wrapper FICA — não é redundância. O `statement_timeout` é
+    aplicado pelo SERVIDOR e cobre a query e a espera de lock; o `asyncio.wait_for`
+    daqui cobre os DOIS furos que ele não alcança, os mesmos que
+    `core/system_event_log.py:40-46` nomeia: o COMMIT (não há knob por query no
+    libpq) e o servidor que aceita o socket e nunca responde (se ele não
+    processa, não há quem cancele). Tirar este `wait_for` reabriria o prazo
+    ilimitado por esses dois caminhos.
 
     Engolir o `TimeoutError` é deliberado: o log é DIAGNÓSTICO, e perder o
     diagnóstico não pode virar um segundo modo de falha em cima do 503. A causa
@@ -720,8 +732,9 @@ async def _grava_reconexao(
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
             # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49`, default 5) e
-            # faz INSERT SEM `statement_timeout`, dentro da janela do prazo — é o
-            # maior componente do que sobra dentro do prazo (a conta está em
+            # faz INSERT dentro da janela do prazo — desde a issue #429 com
+            # `statement_timeout`, mas o commit continua fora de qualquer teto por
+            # query; é o maior componente do que sobra dentro do prazo (a conta está em
             # `_prazo_reconexao_ms`). Medir a folga antes fazia o backoff dormir
             # POR CIMA de tempo já gasto. A recontagem NÃO é o que limita o log —
             # quem limita é o `_log_com_teto` acima, com `min(_LOG_DIAG_TIMEOUT_S,

@@ -3,7 +3,7 @@
 Sem prefixo `test_` de propósito, como `tests/_billing_grants_helpers.py`: o
 pytest não coleta este arquivo. Ele existe porque o assunto mora em DOIS
 arquivos — `test_system_event_log_teto.py` (cronômetro, lock, reentrância) e
-`test_system_event_log_config.py` (o helper `_statement_timeout_options`) — e
+`test_system_event_log_config.py` (o helper `statement_timeout_options`) — e
 duas cópias do mesmo `tabela_travada`/`_limpa` é como dois arquivos passam a
 medir coisas diferentes achando que medem a mesma (CLAUDE.md §0.7).
 

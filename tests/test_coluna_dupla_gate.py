@@ -941,6 +941,56 @@ def test_erro_de_coleta_impareavel_continua_aprovando(tmp_path):
                    tmp_path / "reroda.xml") != 4  # o pytest ACEITA o alvo (rc=4 = inexistente)
 
 
+def test_erro_de_coleta_no_antigo_nao_apaga_o_vermelho_dos_irmaos(tmp_path):
+    """Issue #430. Erro de coleta ABORTA a sessao (rc=2), e junto com ela morrem os
+    IRMAOS do mesmo alvo: o `tests/test_irmao.py`, que fica vermelho->verde de forma
+    legitima e com frame do proprio arquivo, nunca chegava a rodar na coluna antiga.
+    Sobrava so o `<error>` impareavel, e o gate rebaixava a nota — FORTE legitima
+    lida como FRACA (categoria (c) do cabecalho do script).
+
+    A flag `--continue-on-collection-errors` na coluna ANTIGA e o conserto: medido
+    (pytest 9.1.1), sem ela `rc=2` e sessao abortada; com ela `rc=1` e `1 passed,
+    1 error`, com o `<testcase>` do erro ainda em `classname=""` — a forma
+    impareavel que a `veredito` ja trata, e por isso ela nao muda.
+
+    CONTROLE NEGATIVO, injecao nomeada: tire o `continuar_na_coleta=True` da chamada
+    da coluna ANTIGA em `scripts/coluna_dupla.py`. VERMELHO, um so: este teste, que
+    volta a sair `prova FRACA`. Os dois testes que chamam `roda_pytest`
+    posicionalmente (`test_coluna_antiga_interrompida_reprova_mesmo_com_falha_no_xml`
+    e `test_texto_dos_streams_nao_alimenta_o_veredito`) medem a semantica `rc=2` e
+    dependem do default `False` da assinatura — a injecao nao os alcanca."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA, "lib_novo.py": _LIB_CORRIGIDA,
+                   "tests/test_novo.py": _TESTE_QUE_IMPORTA_MODULO_NOVO,
+                   "tests/test_irmao.py": _TESTE_DO_FIX})
+    r = _gate(lab)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "prova FORTE" in r.stdout
+    # O irmao RODOU na coluna antiga: e o que a sessao abortada apagava.
+    assert "tests/test_irmao.py::test_valor - assert 0 == 42" in r.stdout
+    # E o erro de coleta continua contado, sem parear e sem virar orfao.
+    assert "com <error> fora da fase call" in r.stdout
+    assert "nao provou o conserto" not in r.stdout
+
+
+def test_coleta_quebrada_nos_dois_lados_continua_reprovando(tmp_path):
+    """CONTROLE POSITIVO do caso acima: a flag nao pode virar "erro de coleta e de
+    graca". Aqui o modulo importado nao existe em coluna NENHUMA, entao a corrigida
+    tambem nao coleta e sai `rc != 0` — REPROVADO, sem nota. Sem este caso o grupo
+    passaria num gate que aprova qualquer coisa que nao colete.
+
+    A flag fica SO na coluna antiga justamente por isto: ligada na corrigida, o rc
+    dela iria de 2 para 1 e o desfecho seria o mesmo REPROVADO — mas o gate deixaria
+    de ter um lado em que erro de coleta interrompe de verdade."""
+    lab = _lab(tmp_path)
+    _commita(lab, {"lib.py": _LIB_CORRIGIDA,
+                   "tests/test_novo.py": _TESTE_QUE_IMPORTA_MODULO_NOVO})
+    r = _gate(lab)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "falha tambem no codigo corrigido" in r.stdout
+    assert "prova FORTE" not in r.stdout and "prova FRACA" not in r.stdout
+
+
 def test_hook_de_fase_call_que_estoura_antes_do_corpo_e_prova_FRACA(tmp_path):
     """Controle NEGATIVO da classificacao. Quem escolhe `<failure>` x `<error>` no
     JUnit e a FASE (`report.when == "call"`), nao a entrada no corpo do teste: um
@@ -1098,26 +1148,44 @@ def test_o_balde_ambiguo_entra_nas_duas_varreduras():
 
 
 def test_testes_com_cara_de_opcao_nao_libera_a_suite_inteira(tmp_path):
-    """Alvo que o pytest nao trata como ALVO. A guarda de nome checa so o SUFIXO,
-    entao `--basetemp=<x>.py` termina em `.py`, passa por ela, e o pytest o consome
-    como OPCAO — sobra ZERO alvo posicional e a coleta varre a arvore inteira,
-    palavra por palavra o bug do `--testes tests/`.
+    """Alvo que o pytest nao trata como ALVO. A guarda de nome checava so o
+    SUFIXO, entao `--basetemp=<x>.py` termina em `.py`, passava por ela, e o pytest
+    o consome como OPCAO — sobra ZERO alvo posicional e a coleta varre a arvore
+    inteira, palavra por palavra o bug do `--testes tests/`.
 
     O laboratorio e o do achado, literal: o teste PEDIDO e tautologico (verde nas
-    duas colunas) e o irmao NAO relacionado e vermelho->verde. Medido sem o `--`:
-    exit 0 e `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor` — o
-    gate carimba como provado um conserto que o teste pedido nunca exercitou.
+    duas colunas) e o irmao NAO relacionado e vermelho->verde.
 
-    A segunda metade e o controle positivo, e e obrigatoria: um `--` mal posto
-    (antes do `--junitxml`) quebraria TODOS os alvos, os dois casos sairiam rc=4 e
-    o negativo acima passaria verde do mesmo jeito."""
+    QUEM PROTEGE MUDOU, e este esperado mudou junto (#430). Este teste ficou
+    VERMELHO na main 62fdc23 porque o `--` DEIXOU de proteger: o pytest 9.1.1 faz o
+    parse final com `argparse.parse_intermixed_args` (`Parser.parse`,
+    `_pytest/config/argparsing.py:121-141`), e essa funcao ignora o `--` — medido
+    com um parser de brinquedo, `parse_known_args(['--','--basetemp=x.py'])` poe o
+    alvo em `files` e `parse_known_intermixed_args` o consome como opcao. O
+    `_preparse` usa a primeira e o parse final usa a segunda, entao o alvo
+    sobrevivia a pre-analise e era comido no fim: medido na main, exit 0 e
+    `APROVADO, prova FORTE` citando `tests/test_irmao.py::test_valor` — APROVADO
+    falso VIVO, nao teorico. Hoje quem recusa e a guarda de `--testes` (alvo
+    comecado por `-`), que decide ANTES de o pytest existir, e o desfecho e abortar
+    com o nome do alvo em vez de `pytest saiu 4`.
+
+    Controle negativo: tire o `or opcao` da guarda de `scripts/coluna_dupla.py`.
+    VERMELHO: este teste, de volta ao `APROVADO, prova FORTE` citando o irmao.
+
+    A segunda metade e o controle positivo, e e obrigatoria: uma guarda que
+    recusasse alvo demais (ou um `--` mal posto, antes do `--junitxml`) quebraria
+    TODOS os alvos e o negativo acima passaria verde do mesmo jeito."""
     lab = _lab(tmp_path, {"tests/test_irmao.py": _TESTE_DO_FIX})
     _commita(lab, {"lib.py": _LIB_CORRIGIDA,
                    "tests/test_taut.py": "def test_taut():\n    assert True\n"})
 
     r = _gate(lab, f"--testes=--basetemp={tmp_path / 'base.py'}")
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "pytest saiu 4 na coluna antiga" in r.stdout
+    assert "nao aponta para um arquivo de teste .py" in r.stderr
+    # O prefixo acima e comum aos TRES motivos; sao os dois asserts abaixo que
+    # prendem o motivo da OPCAO a este caso.
+    assert "Comeca por `-`" in r.stderr
+    assert "Um DIRETORIO" not in r.stderr
     assert "prova FORTE" not in r.stdout and "test_irmao" not in r.stdout
 
     r = _gate(lab, "--testes", "tests/test_taut.py")  # arquivo: chega ao veredito...

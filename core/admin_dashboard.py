@@ -31,6 +31,7 @@ from core.crypto import (
 )
 from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.secure_compare import constant_time_eq
+from core.system_event_log import statement_timeout_options
 
 
 load_app_env()
@@ -204,8 +205,31 @@ async def log_system_event(
     user_id: int | None = None,
     details: dict[str, Any] | None = None,
 ):
+    # Conexao PROPRIA em vez de `db_connect()`, e o teto de EXECUCAO vem do mesmo
+    # helper do gravador sincrono (issue #429). Tres coisas sustentam o recorte:
+    #   - `db_connect` NAO tem pool: ele abre uma `AsyncConnection` nova por
+    #     chamada, entao isto nao custa uma conexao a mais, so muda os kwargs dela.
+    #   - `db_connect` tem 11 chamadores (DDL de boot, agregacoes do overview,
+    #     retencao diaria, 4 rotas do painel). Um teto unico la cortaria DDL,
+    #     agregacao e purga — decisao de escopo, presa por
+    #     `tests/test_admin_log_system_event_teto.py::test_db_connect_do_painel_continua_sem_teto`.
+    #   - o `statement_timeout` e o unico que cobre ESPERA DE LOCK: o
+    #     `connect_timeout` limita so o handshake, e com `system_event_logs` em
+    #     `access exclusive` (um `alter table`/`vacuum full`) o INSERT esperava o
+    #     lock inteiro. Perder o log e o desfecho ESCOLHIDO, e ele ja era o do
+    #     `except` abaixo.
+    # Fecha o regime MISTO que `core/system_event_log.py:recent_event_exists`
+    # descreve: os dois call sites que leem por `recent_event_exists` e escrevem
+    # por aqui (`frontend/finance_bot_websocket_custom.py:5399` e `:5798`) passam a
+    # falhar na MESMA direcao que as outras oito. Sobra o que o #427 ja declarou
+    # nas duas pontas: o COMMIT (nao ha knob por query no libpq) e o servidor que
+    # aceita o socket e nunca responde (quem aplica o teto e o SERVIDOR).
     try:
-        async with await db_connect() as conn:
+        async with await psycopg.AsyncConnection.connect(
+            DATABASE_URL,
+            connect_timeout=DB_CONNECT_TIMEOUT,
+            options=statement_timeout_options(),
+        ) as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
