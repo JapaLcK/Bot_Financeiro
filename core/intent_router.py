@@ -265,6 +265,10 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         re.search(r"\b(melhor|melhores|boa|boas|bom|bons|vale a pena)\b", norm)
     ) and (
         prospective_quality or not portfolio_quality_query
+    ) and (
+        "?" in text
+        or prospective_quality
+        or re.search(r"\b(qual|quais|devo|devia|deveria)\b", norm)
     )
     sell_command = bool(
         re.search(

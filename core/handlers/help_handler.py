@@ -383,38 +383,22 @@ def _infer_precise_help(norm: str) -> str | None:
     return None
 
 
+_HELP_MARKERS = (
+    "como faco", "como faço", "como usar", "como registro", "como registrar",
+    "como crio", "como criar", "como vejo", "como consultar", "como apago",
+    "com apago", "como apagar", "como removo", "como excluir", "me ensina",
+    "me explica", "me explique", "qual comando", "quero ajuda", "tenho duvida",
+    "tenho dúvida", "nao sei como", "não sei como",
+)
+
+
 def infer_help_from_text(text: str, platform: str) -> str | None:
     raw = (text or "").strip()
     if not raw:
         return None
 
     norm = raw.casefold()
-    help_markers = (
-        "como faco",
-        "como faço",
-        "como usar",
-        "como registro",
-        "como registrar",
-        "como crio",
-        "como criar",
-        "como vejo",
-        "como consultar",
-        "como apago",
-        "com apago",
-        "como apagar",
-        "como removo",
-        "como excluir",
-        "me ensina",
-        "me explica",
-        "me explique",
-        "qual comando",
-        "quero ajuda",
-        "tenho duvida",
-        "tenho dúvida",
-        "nao sei como",
-        "não sei como",
-    )
-    if not any(marker in norm for marker in help_markers):
+    if not any(marker in norm for marker in _HELP_MARKERS):
         return None
 
     precise = _infer_precise_help(norm)
@@ -469,10 +453,18 @@ def _financial_topic(norm: str) -> str | None:
         r"\bcodigo\s+de\s+vinculacao\b", norm
     ):
         return "account"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\bcomando\s+link\b", norm
+    ):
+        return "account"
     if re.search(r"\b(saldo|lancamento|lancamentos|gasto|gastos|despesa|despesas|receita|receitas)\b", norm):
         return "launches"
     if re.search(r"\bdashboard\b", norm) or re.search(
         r"\bpainel\s+(?:financeiro|do\s+pigbank)\b", norm
+    ):
+        return "dashboard"
+    if any(marker in norm for marker in _HELP_MARKERS) and re.search(
+        r"\bpainel\s*[?.!]*$", norm
     ):
         return "dashboard"
     return None

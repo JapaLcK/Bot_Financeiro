@@ -96,6 +96,8 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre BOLO para mim",
             "compre um livro para mim",
             "compre sol para o jardim",
+            "recebi 100 de um bom investimento",
+            "recebi bons rendimentos do CDB",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])
