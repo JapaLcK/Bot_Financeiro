@@ -371,7 +371,7 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
         #     `item_registry_origins` da revalidação da adoção, mais abaixo
         #     nesta mesma função, que abre `get_conn()`
-        #     (`db/open_finance_state.py:348`).
+        #     (`db/open_finance_state.py`).
         #   • rota com item NOVO (`tinha_conexao_propria=False`,
         #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
         #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
@@ -671,7 +671,7 @@ async def _grava_reconexao(
             # diagnóstico falso que o `_prazo_reconexao_ms` já tinha registrado
             # uma vez. Ela vai para os dois `log_system_event` abaixo E para o
             # `logging` local, e a segunda parte NÃO é redundância:
-            # `log_system_event` (core/admin_dashboard.py:190-201) abre conexão
+            # `log_system_event` (`core/admin_dashboard.py`) abre conexão
             # NOVA para gravar e engole TODA exceção com um `print` que não
             # carrega nem `message` nem `details`. Na família "o banco recusa
             # conexão" — `TooManyConnections`, `DiskFull`, `AdminShutdown`,
@@ -749,7 +749,8 @@ async def _grava_reconexao(
     # sobrevive à família de erro que o `causa` existe para diagnosticar. O
     # `log_system_event` precisa de conexão NOVA para gravar (§ o comentário no
     # `except` acima), então sob `TooManyConnections`/`AdminShutdown` ele não
-    # grava nada e engole a exceção. Mesmo padrão de `frontend/routes/shared.py:695`.
+    # grava nada e engole a exceção. Mesmo padrão do `except` de
+    # `gate_plan_selection`, em `frontend/routes/shared.py`.
     logging.getLogger(__name__).warning(
         "of_reconnect_lock_timeout item_id=%s causa=%s", item_id,
         causa or "lock do item ocupado")
@@ -1608,7 +1609,8 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
         await asyncio.to_thread(item_registry_origins, new_item_id))
     if conexao_recem_adotada:
         # ...e o webhook TEM de ter auditado de verdade. `record_audit_event`
-        # ENGOLE falha de banco (core/audit.py:156) — o rastro prova a adoção, não
+        # ENGOLE falha de banco (o `except Exception` que desfecha em `print`, em
+        # `core/audit.py`) — o rastro prova a adoção, não
         # a auditoria —, então o insert dele podia falhar lá e esta guarda suprimir
         # aqui: NENHUM `OPEN_FINANCE_CONNECTED` para uma conexão que nasceu. Num
         # log de segurança duplicata é ruído e buraco é perda (Codex #313, P2).

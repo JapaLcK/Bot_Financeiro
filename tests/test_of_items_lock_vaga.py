@@ -24,11 +24,13 @@ CONTROLES NEGATIVOS DESTE ARQUIVO, rodados e com o vermelho NOMEADO:
     para sempre e o operador não vê nada) →
     `test_connect_que_estoura_devolve_got_False_e_devolve_a_vaga`, 1ª e 3ª
     afirmações;
-  • tire o `logger.warning` do `except` de DENTRO, OU tire o `if not isinstance`
-    (aí ele loga TODO `OperationalError`) → duas injeções SEPARADAS, o mesmo
-    vermelho `test_lock_nao_rotineiro_deixa_rastro_e_o_rotineiro_fica_mudo`, em
-    metades DIFERENTES: a 1ª (0 registros WARNING+, contra 1) e a 2ª/3ª (1
-    registro, contra 0);
+  • tire o `logger.warning` do não rotineiro (ele mora no `finally`, DEPOIS do
+    `release()` — ver o comentário dele), OU tire o `if not isinstance` (aí todo
+    `OperationalError` vira rastro) → duas injeções SEPARADAS, o mesmo vermelho
+    `test_lock_nao_rotineiro_deixa_rastro_e_o_rotineiro_fica_mudo`, em metades
+    DIFERENTES: a 1ª (0 registros WARNING+, contra 1) e a 2ª (1 registro, contra
+    0). A 3ª discrimina o `isinstance` sozinha também, mas só se for RODADA
+    isolada: o pytest aborta o teste na 2ª, que falha antes;
   • volte QUALQUER um dos dois `finally` para `conn.close(); release()` em
     sequência → `test_close_que_estoura_no_finally_nao_vaza_a_vaga` (ele cobre o
     plural E o singular, porque é a mesma classe nos dois).
@@ -51,8 +53,7 @@ import traceback
 import psycopg
 import pytest
 
-from _of_items_lock_helpers import (ITENS,  # noqa: F401  (fixture autouse)
-                                    sem_env_de_espera)
+from _of_items_lock_helpers import ITENS
 from db.open_finance_state import (_lock_key, _lock_slots, pluggy_item_lock,
                                    pluggy_items_lock)
 
@@ -103,10 +104,13 @@ def test_set_config_cortado_devolve_got_False_e_nao_vaza_a_vaga(monkeypatch):
     """Q4: o `set_config` é o PRIMEIRO statement desta conexão e agora roda sob o
     `statement_timeout` do `options` — logo ele PODE ser cancelado. Ele estava
     FORA do `except` dos advisory locks, então esse cancelamento subia como
-    exceção: 500 na rota do disconnect (o `asyncio.to_thread` de
-    `frontend/routes/open_finance.py:2075-2078` não tem try/except), enquanto a
-    docstring da função promete 503 "tente de novo" — que é o que o resto dela
-    entrega. Agora os dois statements dividem o mesmo `except` e o mesmo desfecho.
+    exceção: 500 na rota do disconnect (o `await asyncio.to_thread(
+    _disconnect_sob_lock, ...)` de `open_finance_disconnect_route`, em
+    `frontend/routes/open_finance.py`, não tem try/except — nome de construção e
+    não número de linha, porque a versão anterior desta citação apontava para o
+    `raise HTTPException(503)` de DENTRO do `_disconnect_sob_lock`, que é
+    justamente o contrário do que a frase ilustra), enquanto a docstring da
+    função promete 503 "tente de novo" — que é o que o resto dela entrega. Agora os dois statements dividem o mesmo `except` e o mesmo desfecho.
 
     Duas metades, e a segunda é o que um `try` mal posto quebraria sem ninguém
     ver: o `finally` tem de rodar mesmo assim, senão a vaga do `_lock_slots()`
@@ -226,12 +230,15 @@ def test_lock_nao_rotineiro_deixa_rastro_e_o_rotineiro_fica_mudo(monkeypatch, ca
     3ª, ROTINEIRO pelo MECANISMO real: outra sessão segurando a mesma chave.
     Medido com `OF_SYNC_LOCK_WAIT_MS=300`: sai `QueryCanceled` (57014), não
     `LockNotAvailable` — o `statement_timeout` conta desde o início do statement e
-    o `lock_timeout` só desde o início da espera pelo lock. Os dois são
-    rotineiros, então o ZERO não depende de quem ganhou a corrida.
+    o `lock_timeout` só desde o início da espera pelo lock — com os dois no mesmo
+    valor, o primeiro corta SEMPRE antes (60/60, e não uma corrida). Os dois
+    nomes são rotineiros de todo jeito, então o ZERO não depende disso.
 
     Negativo: tire o `logger.warning` → VERMELHO só na 1ª (0 registros WARNING+,
-    contra 1). Tire o `if not isinstance` → VERMELHO na 2ª e na 3ª, que é o
-    controle positivo do filtro."""
+    contra 1). Tire o `if not isinstance` → VERMELHO na 2ª (e a 3ª discrimina
+    sozinha, se isolada) — é o controle positivo do filtro. A 3ª não chega a
+    rodar sob essa injeção porque o pytest aborta na 2ª; recortada num arquivo
+    só, ela fica vermelha com `contenção REAL deixou rastro: 1`."""
     url = os.environ["DATABASE_URL"]
     real = psycopg.connect
     antes = _vagas()

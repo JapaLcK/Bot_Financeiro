@@ -49,8 +49,7 @@ from __future__ import annotations
 
 import psycopg
 
-from _of_items_lock_helpers import (ITENS,  # noqa: F401  (fixture autouse)
-                                    sem_env_de_espera)
+from _of_items_lock_helpers import ITENS
 from db.open_finance_state import _lock_wait_ms, pluggy_items_lock
 
 
@@ -72,9 +71,12 @@ def test_kwargs_do_teto_chegam_no_connect_real(monkeypatch):
 
     `connect_timeout` é em SEGUNDOS INTEIROS (o libpq trata 0 como "sem limite",
     daí o piso de 1 que o código aplica); `statement_timeout` é em ms. São os dois
-    o mesmo prazo — e o `lock_timeout` do `set_config` também, o que torna
-    indeterminado qual corta primeiro. Não importa: `LockNotAvailable` e
-    `QueryCanceled` caem no mesmo `except` e produzem o mesmo `got=False`."""
+    o mesmo prazo — e o `lock_timeout` do `set_config` também. Qual corta primeiro
+    NÃO é indeterminado: o `statement_timeout` conta desde o início do STATEMENT e
+    o `lock_timeout` só desde o início da ESPERA, então com valores iguais o
+    primeiro vence sempre e a contenção sai `QueryCanceled` (medido, 60/60) — o
+    `lock_timeout` daqui é inerte. Não muda o desfecho: os dois caem no mesmo
+    `except` e dão o mesmo `got=False`."""
     vistos = _espia_connect(monkeypatch)
     with pluggy_items_lock(ITENS) as got:
         assert got is True

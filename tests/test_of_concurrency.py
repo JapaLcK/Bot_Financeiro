@@ -1260,8 +1260,10 @@ def test_erro_de_bug_na_escrita_nao_vira_503(user_id, monkeypatch, erro, esperad
 
     A fronteira é a hierarquia do psycopg, medida: `UniqueViolation`,
     `ProgrammingError` e `ValueError` NÃO são `psycopg.OperationalError`. Por
-    isso continuam subindo — `ValueError` vira o 400 da rota
-    (open_finance.py:1573) e os outros dois o 500 de sempre.
+    isso continuam subindo — `ValueError` vira o 400 da rota (o `except
+    ValueError` de `open_finance_pluggy_item_route` em volta da chamada ao
+    `_grava_reconexao`, em `frontend/routes/open_finance.py`) e os outros dois o
+    500 de sempre.
 
     CONTROLE NEGATIVO: trocar o `except psycopg.OperationalError` do
     `_grava_reconexao` por `except psycopg.Error` → os dois casos de psycopg
@@ -1494,7 +1496,7 @@ def test_causa_e_a_da_ultima_tentativa(user_id, monkeypatch):
 def test_causa_sobrevive_ao_log_system_event_que_nao_grava(user_id, monkeypatch, caplog):
     """O canal que diagnostica o 503 não pode depender do banco que caiu.
 
-    `log_system_event` (core/admin_dashboard.py:190-201) abre conexão NOVA para
+    `log_system_event` (`core/admin_dashboard.py`) abre conexão NOVA para
     gravar e engole TODA exceção com um `print` que não carrega nem `message` nem
     `details`. Na família "o banco recusa conexão" — `TooManyConnections`,
     `DiskFull`, `AdminShutdown`, `InvalidPassword` — a conexão do log é
