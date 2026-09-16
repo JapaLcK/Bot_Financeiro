@@ -609,6 +609,16 @@ def test_conjunto_verde_e_o_mesmo_nos_dois_lados():
         f"verde só no JS (toast verde em cima de falha): {sorted(js - py)}")
 
 
+def test_motivo_que_nao_e_falha_e_o_mesmo_nos_dois_lados():
+    """O toast só fica neutro para `updating` SEM motivo de falha (Codex #455);
+    a lista do JS é espelho de `_REASONS_OK`, e as duas não podem divergir."""
+    from core.services.pluggy_health import _REASONS_OK
+
+    js = set(re.findall(r'"(\w*)"', _bloco("OF_REASONS_OK", "[", "]")))
+    assert set(_REASONS_OK) == js, (
+        f"só no Python: {sorted(set(_REASONS_OK) - js)}; só no JS: {sorted(js - set(_REASONS_OK))}")
+
+
 def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
     """OF_VERDICT é a tabela de gravidade: estado sem linha lá cai no genérico."""
     from core.services.pluggy_health import _LABELS

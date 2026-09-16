@@ -3365,6 +3365,12 @@ const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque
 // `refreshOpenFinance` — que é o que virava âmbar no pull-to-refresh.
 const OF_TOM_COLETANDO = "info";
 
+// Motivo que NÃO é falha: espelho de `_REASONS_OK` (core/services/pluggy_health.py),
+// preso por `test_motivo_que_nao_e_falha_e_o_mesmo_nos_dois_lados`. O backend
+// devolve `updating` também para a 1ª conexão cujo sync FALHOU (o portão não olha
+// o motivo), então neutro só vale sem motivo de falha.
+const OF_REASONS_OK = ["", "ok"];
+
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
   ["removed",           (i) => `A conexão ${ofBanco(i)} foi removida. Reconecte para voltar a sincronizar.`],
@@ -3418,8 +3424,11 @@ function refreshVerdict(sync) {
     // outras entradas continuam `error` de propósito: item sumido, removido,
     // pausado e companhia são erro de verdade, e neutralizá-las apagaria o
     // âmbar de quem precisa reconectar o banco.
-    if (achado)
-      return { tone: estado === "updating" ? OF_TOM_COLETANDO : "error", msg: msg(achado) };
+    if (achado) {
+      const coletando = estado === "updating"
+        && OF_REASONS_OK.includes(String(achado.reason ?? "").toLowerCase());
+      return { tone: coletando ? OF_TOM_COLETANDO : "error", msg: msg(achado) };
+    }
   }
   // Tom NEUTRO, não `error`: `still_updating` conta item que a Pluggy ainda
   // reporta coletando quando o servidor olha (no fim da espera, ou pelo health
