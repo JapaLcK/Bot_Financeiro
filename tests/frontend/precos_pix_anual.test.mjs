@@ -1336,8 +1336,6 @@ for (const [tela, viewport] of TELAS) {
     const { page } = await abrirForm({ viewport, pix });
     await enviarDoc(page);
     await toastVisivel(page);
-    assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-      "o 503 nem chegou a mostrar o toast: o cenário das duas mensagens não foi montado");
     pix.httpStatus = 400;
     pix.corpo = { detail: "Informe um CPF ou CNPJ válido." };
     await enviarDoc(page, CPF);            // dentro dos 3800 ms do timer do showToast
@@ -1373,8 +1371,6 @@ for (const [tela, viewport] of TELAS) {
       const { page } = await abrirForm({ viewport, pix });
       await enviarDoc(page);
       await toastVisivel(page);
-      assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-        "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
       pix.httpStatus = 200;
       pix.corpo = null;                    // volta ao corpo padrão do harness: o QR
       await enviarDoc(page, CPF);          // dentro dos 3800 ms do timer do showToast
@@ -1403,15 +1399,13 @@ for (const [tela, viewport] of TELAS) {
         const { page } = await abrirForm({ viewport, pix });
         await enviarDoc(page);
         await toastVisivel(page);
-        assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-          "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
         pix.httpStatus = 409;
         pix.corpo = corpo;
         await enviarDoc(page, CPF);
-        await page.waitForFunction((src) => new RegExp(src, "i").test(document.querySelector(".pix-box")?.textContent || ""), marca.source);
+        await page.waitForFunction((src) => new RegExp(src, "i").test(document.querySelector(".pix-box")?.textContent || ""),
+          marca.source, { timeout: 5_000 }).catch(() => assert.fail(
+            `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`));
         await toastAssentado(page);
-        assert.match(await page.textContent(".pix-box"), marca,
-          `o 409 de ${caso} não trocou o corpo do modal: o cenário não foi montado`);
         const brilho = await brilhoMax(page, "#toast");
         assert.ok(brilho < 100,
           `a caixa de ${caso} está na tela e o toast do 503 continua por cima:`
@@ -1432,8 +1426,6 @@ test("PT18g: a recusa de FORMA também apaga o toast do 503, sem POST nenhum", a
   const { page, chamadas } = await abrirForm({ pix });
   await enviarDoc(page);
   await toastVisivel(page);
-  assert.ok(await page.$eval("#toast", (e) => e.classList.contains("show")),
-    "o 503 nem mostrou o toast: o cenário das duas mensagens não foi montado");
   await enviarDoc(page, "1112223334");     // 10 dígitos: nem chega a sair
   await page.waitForFunction(() => document.getElementById("pix-doc-erro").textContent !== "");
   await toastAssentado(page);

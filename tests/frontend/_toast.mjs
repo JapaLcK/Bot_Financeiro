@@ -4,10 +4,11 @@
  *
  * Um `waitForTimeout(300)` fixo media o toast no meio da animação sob carga
  * (runner do CI; aqui, `PB_TEST_CPU_THROTTLE=50`): `top` 622 = 612 + os 10px
- * do translateY inicial, e a folga de 8px do FAB virava 5,5–6,9. O critério
- * de `toastVisivel` é `opacity === "1"` (assentou VISÍVEL) + zero animações
- * pendentes — e NÃO o `transform` final, porque cada página assenta numa
- * matriz diferente (dashboard.css:1625 `translateY(0)`; settings.html:1056
+ * do translateY inicial, e a folga de 8px do FAB saía menor que 8 (medido em
+ * 2026-09-16 sob `PB_TEST_CPU_THROTTLE=50`: 6 e 7,83; remedir antes de
+ * reusar). O critério de `toastVisivel` é `opacity === "1"` (assentou VISÍVEL)
+ * + zero animações pendentes — e NÃO o `transform` final, porque cada página
+ * assenta numa matriz diferente (dashboard.css:1627 `translateY(0)`; settings.html:1056
  * `translateX(-50%) translateY(0)`; precos.html:27 idem). `getAnimations()
  * .length === 0` cobre as propriedades sem conhecer o valor final. Não use
  * `getAnimations().map(a => a.finished)` como o bank_movements.test.mjs: o
