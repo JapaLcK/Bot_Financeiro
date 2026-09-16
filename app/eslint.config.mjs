@@ -29,11 +29,12 @@ export default tseslint.config(
   },
   {
     // Config de ferramenta roda no Node (CommonJS), não no aparelho.
-    files: ["jest.config.js", "jest.setup.js"],
+    files: ["jest.config.js", "jest.setup.js", "metro.config.js"],
     languageOptions: {
       sourceType: "commonjs",
-      globals: { module: "readonly", require: "readonly", jest: "readonly" },
+      globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly" },
     },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {
     files: ["__tests__/**/*.ts?(x)", "jest.setup.js"],
