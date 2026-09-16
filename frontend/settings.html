@@ -3397,10 +3397,10 @@ function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o b
 function ofNome(i)  { return i.institution || "banco"; }
 // O detalhe do backend começa em maiúscula ("Autorize o acesso…"); aqui ele
 // entra no meio da frase. `showToast` faz o `esc()`.
-// `String(d)` porque TRÊS estados chamam isto agora (era um), e um `detail`
+// `String(d)` porque várias entradas do `OF_VERDICT` chamam isto, e um `detail`
 // não-string — número, objeto, array — estourava `d.charAt is not a function`
 // subindo pelo `refreshVerdict`, sem `try` em nenhum ponto do caminho. Não é
-// alcançável pelo backend de hoje (as três fontes devolvem literal ou f-string).
+// alcançável pelo backend de hoje (as fontes devolvem literal ou string montada).
 // Latentes que sobram, também não alcançáveis: acrônimo é destruído ("MFA" →
 // "mFA"); detalhe terminado em ponto dá ponto duplo.
 function ofInstrucao(d) { const s = String(d); return `${s.charAt(0).toLowerCase()}${s.slice(1)}`; }
