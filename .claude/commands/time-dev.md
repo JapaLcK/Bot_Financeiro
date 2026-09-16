@@ -50,7 +50,7 @@ usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se
    | Manager reprova apontando o Coder | Coder corrige → Tester só no que mudou → Manager | Coder corrige → Manager confere; em Completo, avise o usuário que não houve nova passada |
    | Manager reprova apontando o Tester (achado era hipótese, teste não prova) | Tester refaz só aquele ponto → Manager | Coder corrige o teste → Manager confere; em Completo, avise o usuário |
    | Manager reprova apontando o Arquiteto | Arquiteto revisa → usuário confirma → Coder → segue esta tabela, com a contagem que já havia | idem, sem Tester novo além do teto |
-   | Achado cai numa área Completo numa tarefa Leve | a tarefa sobe de faixa e **recomeça no passo 1** com o diff e os achados; a contagem recomeça uma única vez, já como Completo | — |
+   | Achado cai numa área Completo numa tarefa Leve | a tarefa sobe de faixa e **recomeça no passo 1** com o diff e os achados; a contagem recomeça uma única vez, já como Completo | **igual à coluna ao lado**: a promoção vale mesmo com a passada da Leve já gasta, e a contagem recomeça como Completo |
    | Segunda reprovação do Manager sobre o mesmo ponto | leve ao usuário em vez de repetir | leve ao usuário |
 
    Regras que valem em toda linha:
