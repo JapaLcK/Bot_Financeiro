@@ -202,6 +202,67 @@ describe("entrar", () => {
     });
   });
 
+  it("DESAFIO velho também é descartado", async () => {
+    // Um desafio atrasado levaria a tela para a etapa de código da conta
+    // ERRADA, e o usuário digitaria o token de uma conta para completar a
+    // entrada de outra. A conferência tem de vir antes deste retorno também.
+    let soltarA: () => void = () => {};
+    const esperaA = new Promise<void>((r) => (soltarA = r));
+    fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
+      const corpo = JSON.parse(String(o.body)) as { email: string };
+      if (corpo.email === "a@x.com") {
+        await esperaA;
+        return resposta(200, {
+          mfa_required: true,
+          mfa_challenge: "desafio-da-A",
+          email: corpo.email,
+        });
+      }
+      return resposta(200, {
+        user_id: 2,
+        email: corpo.email,
+        access_token: "access-B",
+        refresh_token: "rt_B",
+        dashboard_token: "d",
+        expires_in: 900,
+      });
+    });
+
+    const a = entrar("a@x.com", "s");
+    await entrar("b@x.com", "s");
+    soltarA();
+    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+  });
+
+  it("sair invalida entrada em voo", async () => {
+    // Sair é a intenção mais recente. Um login que terminasse depois gravaria
+    // credencial numa sessão que o usuário acabou de encerrar.
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    let soltar: () => void = () => {};
+    const espera = new Promise<void>((r) => (soltar = r));
+    fetchFalso.mockImplementation(async (u: string) => {
+      if (String(u).includes("/auth/login")) {
+        await espera;
+        return resposta(200, {
+          user_id: 9,
+          email: "tardio@x.com",
+          access_token: "tardio",
+          refresh_token: "rt_tardio",
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      return resposta(200, {});
+    });
+
+    const entrando = entrar("tardio@x.com", "s");
+    await sair();
+    soltar();
+
+    await expect(entrando).rejects.toBeInstanceOf(EntradaSuperada);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
   it("verificarMfa completa a entrada", async () => {
     fetchFalso.mockResolvedValue(
       resposta(200, {

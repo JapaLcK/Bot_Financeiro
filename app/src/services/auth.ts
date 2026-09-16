@@ -1,4 +1,4 @@
-import { ErroDeApi, chamar } from "../api/client";
+import { ErroDeApi, _esquecerRotacoes, chamar } from "../api/client";
 import {
   loginSchema,
   perfilSchema,
@@ -49,12 +49,14 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
     corpo: { email, password: senha },
     semAuth: true,
   });
+  // A conferência vem ANTES de qualquer retorno, inclusive o do desafio: um
+  // desafio velho levaria a tela para a etapa de código da conta ERRADA, e o
+  // usuário digitaria o token de uma conta para completar a entrada de outra.
+  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
   if ("mfa_required" in r) {
     return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
   }
-  // Uma tentativa mais nova começou enquanto esta estava no ar: o resultado
-  // desta está velho e não pode sobrescrever o dela.
-  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+  _esquecerRotacoes();
   await guardarCredenciais({
     access: r.access_token,
     refresh: r.refresh_token,
@@ -78,6 +80,7 @@ export async function verificarMfa(
     semAuth: true,
   });
   if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+  _esquecerRotacoes();
   await guardarCredenciais({
     access: r.access_token,
     refresh: r.refresh_token,
@@ -108,6 +111,10 @@ export async function temSessao(): Promise<boolean> {
  * por outra tela (e não pode escapar da saída com um refresh novo).
  */
 export async function sair(): Promise<void> {
+  // Toda entrada em voo fica inválida: sair é a intenção mais recente, e um
+  // login que terminasse depois gravaria credencial numa sessão que o usuário
+  // acabou de encerrar.
+  ultimaTentativa += 1;
   const daSaida = await lerCredenciais();
   // Sem sessão capturada não há logout a fazer, e TENTAR é pior que não fazer:
   // a requisição releria o cofre e poderia sair autenticada por uma conta que
@@ -121,6 +128,7 @@ export async function sair(): Promise<void> {
   } catch {
     // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.
   } finally {
+    _esquecerRotacoes();
     await limparSessaoDe(daSaida.access, daSaida.refresh);
   }
 }

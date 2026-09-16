@@ -115,13 +115,29 @@ let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
 const TETO_HISTORICO = 8;
 let rotacoes: { consumidos: string[]; cabeca: string } | null = null;
 
-/** Registra que `consumido` virou `sucessor`, mantendo a cadeia recente. */
+/**
+ * Registra que `consumido` virou `sucessor`, mantendo a cadeia recente.
+ *
+ * A cadeia só CRESCE quando o token consumido era a cabeça dela — ou seja,
+ * quando é o mesmo fio. Qualquer outra coisa começa uma cadeia nova, e isso é o
+ * que impede a linhagem de atravessar contas: sem a verificação, `A0 → A1`
+ * seguido de `B0 → B1` deixaria `[A0, B0]` apontando para `B1`, e uma
+ * requisição atrasada da conta A receberia a credencial da B.
+ */
 function anotarRotacao(consumido: string, sucessor: string): void {
-  const consumidos = rotacoes ? [...rotacoes.consumidos, consumido] : [consumido];
+  const mesmoFio = rotacoes?.cabeca === consumido;
+  const consumidos = mesmoFio
+    ? [...rotacoes!.consumidos, consumido]
+    : [consumido];
   rotacoes = {
     consumidos: consumidos.slice(-TETO_HISTORICO),
     cabeca: sucessor,
   };
+}
+
+/** Esquece a linhagem. Chamado quando a sessão é substituída de fora. */
+export function _esquecerRotacoes(): void {
+  rotacoes = null;
 }
 
 /** `refresh` pertence à cadeia que termina no que está guardado agora? */
