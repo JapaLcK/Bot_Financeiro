@@ -58,13 +58,24 @@ def test_refresh_do_app_passa_sem_cookie_e_sem_csrf(sessao):
 
 
 def test_access_jwt_no_header_do_refresh_nao_serve_de_refresh(sessao):
-    """Só `rt_` é refresh. Um access JWT ali é credencial errada, não atalho."""
+    """Só `rt_` é refresh. Um access JWT ali é credencial errada, não atalho.
+
+    E o status é **400, não 401**, de propósito. Os dois ramos da rota já eram
+    documentados: 400 `missing_refresh_token` quer dizer "não há como renovar,
+    mas a sessão está DE PÉ"; 401 quer dizer "a sessão acabou" e faz o cliente
+    apagar o estado do aparelho. Com um access token válido no header a sessão
+    está viva, então 400 é a resposta certa — e o app não limpa nada à toa.
+
+    Este caso devolvia 401 antes do conserto do logout: o leitor de token
+    ignorava o `Authorization`, então nem o access token era visto aqui.
+    """
     client, dados = sessao
     r = client.post(
         "/auth/refresh",
         headers={"Authorization": f"Bearer {dados['access_token']}"},
     )
-    assert r.status_code == 401, r.text
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "missing_refresh_token"
 
 
 def test_replay_pelo_header_revoga_tudo_do_usuario(sessao):
@@ -184,3 +195,71 @@ def test_rate_limit_sem_token_cai_no_ip():
     assert chave_de_rate_limit(
         _req(ALVO, cookies={dashboard.DASHBOARD_COOKIE_NAME: "lixo"})
     ) == "10.0.0.1"
+
+
+# ── Logout: o app precisa conseguir SAIR ─────────────────────────────────────
+
+def test_logout_do_app_revoga_a_sessao(sessao):
+    """O defeito mais caro que a revisão achou: o logout do app era no-op TOTAL.
+
+    `get_auth_token_from_request` com `creds=None` lia só o cookie, então sem
+    cookie o token saía `None`, nada era revogado, e a rota devolvia 200 com
+    cara de sucesso. Aparelho roubado, vendido ou "sair de todos os
+    dispositivos": o usuário aperta Sair, vê sucesso, e a sessão segue de pé
+    por 14 dias.
+    """
+    from core.sessions import get_active_session
+
+    client, dados = sessao
+    jti = dashboard._decode_jwt(dados["access_token"])["jti"]
+    assert get_active_session(jti), "pré-condição: a sessão tem de existir"
+
+    r = client.post(
+        "/auth/logout",
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+    )
+    assert r.status_code == 200, r.text
+    assert not get_active_session(jti), "a sessão sobreviveu ao logout"
+
+
+def test_logout_do_app_mata_o_access_token(sessao):
+    """Sessão revogada ⇒ o token não abre mais rota de dados."""
+    client, dados = sessao
+    client.post(
+        "/auth/logout",
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+    )
+    r = client.post(
+        ALVO,
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+        json=CORPO,
+    )
+    assert r.status_code == 401, r.text
+
+
+def test_logout_do_app_mata_o_refresh_token(sessao):
+    """E o refresh junto: senão o aparelho renova a sessão que o usuário fechou."""
+    client, dados = sessao
+    client.post(
+        "/auth/logout",
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+    )
+    r = _refresh_do_app(client, dados["refresh_token"])
+    assert r.status_code == 401, r.text
+
+
+def test_rate_limit_do_admin_continua_por_ip(sessao):
+    """`/admin/auth/login` não começa com `/auth`, e a revisão pegou.
+
+    Com a chave por usuário, o teto de 10/min do painel passava a ser contado
+    pela conta do PRÓPRIO atacante — e como o cadastro é self-service, N contas
+    davam N baldes do mesmo IP para adivinhar a senha do admin.
+    """
+    _, dados = sessao
+    chave = chave_de_rate_limit(
+        _req(
+            "/admin/auth/login",
+            cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
+        )
+    )
+    assert chave == "10.0.0.1"

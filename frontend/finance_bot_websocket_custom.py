@@ -49,6 +49,7 @@ from token_utils import decode_dashboard_token_full, make_dashboard_token
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
+    ADMIN_AUTH_COOKIE_NAME,
     ensure_admin_tables,
     log_auth_login_event,
     log_system_event,
@@ -2230,33 +2231,37 @@ def _csrf_exempt(path: str) -> bool:
 
 
 def _sem_credencial_ambiente(request: Request) -> bool:
-    """True quando a requisição traz `Authorization: Bearer` e NENHUM cookie de sessão.
+    """True quando a requisição não traz NENHUM cookie de sessão.
 
     O CSRF defende contra credencial **ambiente**: o navegador anexa o cookie
     sozinho, então uma página de terceiro dispara uma escrita autenticada sem
-    precisar ler nada da vítima. Um Bearer não é ambiente — ele só entra na
-    requisição se quem a monta POSSUI o token. Sem cookie de sessão não sobra
-    credencial que o atacante consiga usar sem tê-la, e o par cookie+header
-    deixa de proteger alguma coisa.
+    precisar ler nada da vítima. Sem cookie de sessão não existe credencial
+    ambiente, e o par cookie+header deixa de proteger alguma coisa.
 
-    **O CORS não sustenta esta isenção, e não é ele o argumento.** Cliente
-    nativo não passa por CORS nenhum — o `allow_origins` de :2558 só alcança
-    navegador. Quem sustenta é a ausência de credencial ambiente, e é por isso
-    que a condição exige os TRÊS cookies de sessão ausentes: basta um no jar
-    para a requisição voltar a ser disparável por terceiro, e aí o par volta a
-    ser exigido mesmo com Bearer junto.
+    **A condição é a ausência de cookie, e só.** Nenhum cabeçalho participa
+    dela — nem `Authorization`, nem `X-PigBank-Client`. É o ponto: cabeçalho é
+    ALEGAÇÃO de quem chama, e uma isenção que dependesse dele seria contornável
+    mandando a alegação. O que o atacante não controla é o cookie: se a vítima
+    tem sessão, o navegador o envia sozinho, e aí o par volta a ser exigido.
 
-    O Bearer continua sendo validado pela autenticação da rota. Token inválido
-    passa por aqui e morre em 401 no `Depends` — que é o erro certo. Devolver
-    403 de CSRF para credencial inválida esconderia o motivo real de quem está
-    depurando um login.
+    A versão anterior exigia `Authorization: Bearer` presente, e a revisão
+    mostrou duas consequências. Uma, o app não conseguia fazer LOGIN: ali ele
+    ainda não tem token nenhum. Outra, um Bearer de lixo bastava para tirar o
+    CSRF de rota pública de escrita, porque a presença nunca foi validada.
+
+    **O CORS não sustenta esta isenção e não é ele o argumento.** A allowlist
+    estrita continua valendo e é útil, mas cliente nativo não passa por CORS —
+    quem sustenta é a ausência de credencial ambiente.
+
+    A checagem é pela PRESENÇA da chave (`in`), não pelo valor. `Cookie: x=v;
+    x=` faz o parser guardar a ÚLTIMA ocorrência, e `cookies.get("x")` devolve
+    `""`, que é falsy — uma duplicata vazia apagaria do teste uma credencial
+    que está no jar. Medido na revisão.
+
+    Credencial inválida continua morrendo em 401 no `Depends`, que é o erro
+    certo: um 403 de CSRF no lugar esconderia o motivo real de quem depura.
     """
-    if not _extract_bearer_token(request):
-        return False
-    return not any(
-        request.cookies.get(nome)
-        for nome in (AUTH_COOKIE_NAME, DASHBOARD_COOKIE_NAME, REFRESH_COOKIE_NAME)
-    )
+    return not any(nome in request.cookies for nome in COOKIES_DE_SESSAO)
 
 
 @app.middleware("http")
@@ -2611,6 +2616,18 @@ REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_MAX_AGE = 14 * 24 * 3600  # 14 dias absolutos
 REFRESH_COOKIE_PATH = "/auth/refresh"     # só vai em request específica
 
+# Os cookies que dão credencial AMBIENTE a uma requisição. São QUATRO: o quarto
+# é o do painel de admin, cujas rotas são registradas no MESMO `app`
+# (`core/admin_dashboard.register_admin_routes`) e portanto passam por este
+# mesmo middleware. A lista tinha três e a revisão pegou a ausência. O nome vem
+# IMPORTADO do módulo dono, não copiado, para não existirem duas versões (§0.7).
+COOKIES_DE_SESSAO = (
+    AUTH_COOKIE_NAME,
+    DASHBOARD_COOKIE_NAME,
+    REFRESH_COOKIE_NAME,
+    ADMIN_AUTH_COOKIE_NAME,
+)
+
 def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[str, str, str]:
     """Cria uma sessao em auth_sessions + emite access JWT + refresh token.
 
@@ -2660,20 +2677,6 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
     return token
 
 
-def _refresh_token_do_header(request: Request) -> str:
-    """O refresh token vindo de `Authorization: Bearer rt_...`, ou "".
-
-    Exige o prefixo `rt_` de propósito: sem ele, um access JWT mandado por
-    engano no header seria encaminhado a `consume_refresh_token` — que o
-    rejeitaria, mas só depois de a string inteira passear pelo log de erro
-    daquele módulo. O prefixo é o mesmo que `core/refresh_tokens.py:32`
-    declara, e a checagem lá continua valendo; esta aqui é a porta, não a
-    fechadura.
-    """
-    token = (_extract_bearer_token(request) or "").strip()
-    return token if token.startswith("rt_") else ""
-
-
 APP_CLIENT_HEADER = "x-pigbank-client"
 APP_CLIENT_APP = "app"
 
@@ -2717,6 +2720,10 @@ def _entrega_sessao(
         _set_refresh_cookie(response, refresh)
         _set_dashboard_cookie(response, int(user_id), jti=jti)
         return {}
+    # Corpo com refresh token de 14 dias não pode ser guardado por ninguém no
+    # caminho. O `/auth/refresh` já fazia `_no_store`; o login, a verificação de
+    # e-mail e o MFA não faziam, e passaram a carregar credencial no corpo.
+    _no_store(response)
     return {
         "access_token": access,
         "refresh_token": refresh,

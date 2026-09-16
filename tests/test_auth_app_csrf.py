@@ -142,3 +142,116 @@ def test_login_do_navegador_continua_recebendo_os_tres_cookies(monkeypatch):
     for cookie in ("auth_token", "dashboard_token", "refresh_token"):
         assert cookie in enviados, f"{cookie} sumiu do navegador"
 
+
+
+def test_cookie_do_admin_tambem_e_credencial_ambiente(sessao):
+    """O QUARTO cookie. As rotas de /admin moram no mesmo `app`, logo no mesmo
+    middleware — a lista tinha três e a revisão pegou a ausência."""
+    from core.admin_dashboard import ADMIN_AUTH_COOKIE_NAME
+
+    client, dados = sessao
+    client.cookies.set(ADMIN_AUTH_COOKIE_NAME, "sessao-de-admin")
+    r = client.post(
+        ALVO,
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+        json=CORPO,
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_cookie_duplicado_vazio_nao_apaga_a_credencial_ambiente(sessao):
+    """`Cookie: x=v; x=` guarda a ÚLTIMA ocorrência, e `.get()` devolve "".
+
+    Por valor, a duplicata vazia apagava do teste uma credencial que ESTÁ no
+    jar. Por presença da chave, não apaga.
+    """
+    client, dados = sessao
+    r = client.post(
+        ALVO,
+        headers={
+            "Authorization": f"Bearer {dados['access_token']}",
+            "Cookie": f"dashboard_token={dados['dashboard_token']}; dashboard_token=",
+        },
+        json=CORPO,
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_credencial_no_corpo_sai_com_no_store(monkeypatch):
+    """Refresh token de 14 dias no corpo não pode ser guardado no caminho."""
+    _, resposta = _login_http(monkeypatch, como_app=True)
+    assert "no-store" in (resposta.headers.get("cache-control") or "")
+
+
+# ── O header do app NÃO é credencial nem isenção ─────────────────────────────
+
+def test_header_do_app_falsificado_com_cookie_nao_isenta(sessao):
+    """`X-PigBank-Client` é alegação de quem chama, e não tira o CSRF.
+
+    Com um cookie de sessão no jar existe credencial ambiente, e nenhuma
+    alegação do cliente muda isso. Se o header participasse da decisão, mandá-lo
+    seria o contorno.
+    """
+    client, dados = sessao
+    client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, dados["dashboard_token"])
+    r = client.post(
+        ALVO,
+        headers={
+            "Authorization": f"Bearer {dados['access_token']}",
+            dashboard.APP_CLIENT_HEADER: "app",
+        },
+        json=CORPO,
+    )
+    assert r.status_code == 403, r.text
+
+
+def test_sem_o_header_do_app_a_isencao_continua_valendo(sessao):
+    """A isenção não depende do header — depende de não haver cookie."""
+    client, dados = sessao
+    r = client.post(
+        ALVO,
+        headers={"Authorization": f"Bearer {dados['access_token']}"},
+        json=CORPO,
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_login_do_app_passa_sem_cookie_e_sem_csrf(monkeypatch):
+    """O caso que a revisão pegou: no login o app ainda não tem token nenhum.
+
+    Sem cookie e sem CSRF, a rota tem de responder — senão o app não consegue
+    nem entrar, que é o que a versão anterior da isenção causava.
+    """
+    import db
+    from fastapi.testclient import TestClient
+    from _apoio_auth_app import EMAIL, UID, limpa_rate_limits, noop_log
+
+    db.ensure_user(UID)
+    limpa_rate_limits("login", EMAIL)
+    monkeypatch.setattr(
+        db,
+        "login_auth_user",
+        lambda e, p: {"user_id": UID, "email": e.strip().lower(), "plan": "free"},
+    )
+    monkeypatch.setattr(db, "create_link_code", lambda user_id, minutes_valid: "ABC123")
+    monkeypatch.setattr(dashboard, "log_auth_login_event", noop_log)
+
+    client = TestClient(dashboard.app)
+    r = client.post(
+        "/auth/login",
+        headers={dashboard.APP_CLIENT_HEADER: "app"},
+        json={"email": EMAIL, "password": "seja-o-que-for"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["access_token"]
+    enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
+    for cookie in ("auth_token", "dashboard_token", "refresh_token"):
+        assert cookie not in enviados
+
+
+def test_rate_limit_do_login_do_app_continua_por_ip():
+    """Entrada do app não ganha balde próprio: força bruta segue contida por IP."""
+    from frontend.routes.shared import chave_de_rate_limit
+    from _apoio_auth_app import req as _req
+
+    assert chave_de_rate_limit(_req("/auth/login")) == "10.0.0.1"

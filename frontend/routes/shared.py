@@ -100,6 +100,11 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
+# Prefixos cujo teto continua contado por IP. Ver a docstring abaixo: é onde se
+# adivinha senha, e onde a credencial sob ataque não é a do token apresentado.
+PREFIXOS_SEM_CHAVE_DE_USUARIO = ("/auth", "/admin")
+
+
 def chave_de_rate_limit(request: Request) -> str:
     """Balde do rate limit: o usuário quando dá para saber quem é, senão o IP.
 
@@ -108,16 +113,22 @@ def chave_de_rate_limit(request: Request) -> str:
     passaria a derrubar os vizinhos. O comentário de
     `frontend/routes/billing_pix.py:180` já registrava o problema.
 
-    **`/auth` continua por IP, de propósito.** É onde mora a defesa contra força
-    bruta, e ali ainda não existe usuário identificado — trocar a chave nessas
-    rotas mudaria um controle de segurança de lado, sem nada a ganhar. Assim
-    esta mudança é provadamente não-enfraquecedora: o que protegia senha
-    continua exatamente como estava.
+    **Onde se adivinha senha, a chave continua sendo o IP.** É o caso de `/auth`
+    e de `/admin`: ali ou ainda não existe usuário identificado, ou a credencial
+    sob ataque é OUTRA que não a do token apresentado. Trocar a chave nessas
+    rotas mudaria um controle de segurança de lado, sem nada a ganhar.
+
+    `/admin` estava de fora e a revisão pegou: `"/admin/auth/login"` não começa
+    com `"/auth"`, então o teto de 10/min daquela rota passou a ser contado pela
+    conta do PRÓPRIO atacante. Como o cadastro é self-service, N contas davam N
+    baldes do mesmo IP para adivinhar a senha do painel, e o teto virava
+    decorativo. Com os dois prefixos, a mudança é provadamente
+    não-enfraquecedora: o que protegia senha continua como estava.
 
     Nunca levanta. Token ilegível, expirado ou ausente cai no IP, que é o
     comportamento de antes.
     """
-    if request.url.path.startswith("/auth"):
+    if request.url.path.startswith(PREFIXOS_SEM_CHAVE_DE_USUARIO):
         return get_remote_address(request)
     try:
         token = extract_bearer_token(request) or (
@@ -905,8 +916,25 @@ def get_auth_token_from_request(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = None,
 ) -> str | None:
+    """Access token da requisição: `Authorization: Bearer` primeiro, cookie depois.
+
+    O `creds` chega preenchido quando a rota declara o `Depends(HTTPBearer)`.
+    Quem chama com `creds=None` — logout e o ramo de "sessão viva" do refresh —
+    lia SÓ o cookie, e por isso o logout do app era no-op TOTAL: sem cookie, o
+    token saía `None`, a sessão não era revogada, o refresh não era revogado, e
+    a rota devolvia 200 com cara de sucesso. Janela de 14 dias num aparelho que
+    o usuário acha que deslogou.
+
+    O `extract_bearer_token` abaixo lê o mesmo header que o `HTTPBearer` leria,
+    então a fonte passa a ser a mesma nos dois caminhos — que é o ponto: a
+    correção é aqui, na função que todos os chamadores atravessam, e não um
+    remendo no logout (§2: achar o caso não é resolver a categoria).
+    """
     if creds and creds.credentials:
         return creds.credentials
+    header_token = extract_bearer_token(request)
+    if header_token:
+        return header_token
     cookie_token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
     return cookie_token or None
 

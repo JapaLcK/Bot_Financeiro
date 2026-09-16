@@ -8,9 +8,15 @@ A escolha não é de conveniência. Com cookie jar perde-se rotação limpa de t
 
 ## A isenção de CSRF, e o que a sustenta
 
-O CSRF é dispensado quando a requisição apresenta `Authorization: Bearer` e nenhum dos três cookies de sessão. O que o CSRF protege é credencial **ambiente**: o navegador anexa o cookie sozinho, então uma página de terceiro dispara uma escrita autenticada sem precisar ler nada da vítima. Um token no cabeçalho só entra na requisição se quem a monta o possui. Sem cookie de sessão não sobra credencial que o atacante consiga usar sem tê-la, e o par deixa de proteger alguma coisa.
+O CSRF é dispensado quando a requisição não traz **nenhum** cookie de sessão. O que o CSRF protege é credencial **ambiente**: o navegador anexa o cookie sozinho, então uma página de terceiro dispara uma escrita autenticada sem precisar ler nada da vítima. Sem cookie de sessão não existe credencial ambiente, e o par deixa de proteger alguma coisa.
 
-O CORS não sustenta esta isenção e não é o argumento. Cliente nativo não passa por CORS, e tratar o `allow_origins` como a garantia seria descrever a proteção errada. A condição exige que os três cookies estejam ausentes — `auth_token`, `dashboard_token` e `refresh_token` — porque basta um no jar para a requisição voltar a ser disparável por terceiro, e aí o par volta a ser exigido mesmo com um Bearer junto.
+A condição é a ausência de cookie, e nada além dela. Nenhum cabeçalho participa da decisão, nem `Authorization`, nem `X-PigBank-Client`. Isso é deliberado: cabeçalho é alegação de quem chama, e uma isenção que dependesse dele seria contornável mandando a alegação. O que o atacante não controla é o cookie — se a vítima tem sessão, o navegador o envia sozinho, e o par volta a ser exigido.
+
+A primeira versão desta regra exigia um `Authorization: Bearer` presente, e a revisão mostrou duas consequências. A primeira é que o aplicativo não conseguia fazer login, porque ali ele ainda não tem token algum. A segunda é que um cabeçalho de lixo bastava para remover o CSRF de rota pública de escrita, já que a presença nunca era validada. A regra atual não tem nenhum dos dois problemas.
+
+São quatro os cookies que contam, e o quarto é o do painel administrativo, cujas rotas moram no mesmo aplicativo e passam pelo mesmo middleware. A verificação é pela presença da chave e não pelo valor: um cabeçalho com a mesma chave repetida e vazia faz o analisador guardar a última ocorrência, e o valor vazio apagaria do teste uma credencial que está no jar.
+
+O CORS não sustenta esta isenção e não é o argumento. A allowlist estrita permanece e é útil, mas cliente nativo não passa por CORS, e tratar isso como a garantia seria descrever a proteção errada.
 
 Credencial inválida continua morrendo na autenticação, com 401. O CSRF não pode responder antes dela: um 403 de cabeçalho ausente no lugar do 401 esconde o motivo real de quem depura um login.
 
@@ -30,6 +36,16 @@ A chave do teto passa a ser o usuário quando há credencial legível, e continu
 
 As rotas sob `/auth` continuam por endereço de rede, de propósito. É onde mora a defesa contra força bruta e onde ainda não existe usuário identificado; trocar a chave ali mudaria um controle de segurança de lado sem nada a ganhar. Com essa exceção, a mudança é provadamente não enfraquecedora.
 
+## Sair também precisa funcionar
+
+A leitura do token de acesso passa a considerar o cabeçalho `Authorization` mesmo quando a rota não declara a dependência que o injeta. Sem isso, encerrar a sessão pelo aplicativo era operação vazia com aparência de sucesso: o token saía nulo, nada era revogado, e a resposta voltava com duzentos. O usuário apertava sair, via confirmação, e a sessão seguia de pé pelos catorze dias do token de renovação. A correção fica na função que todos os chamadores atravessam, não no encerramento de sessão isoladamente.
+
+## Teto de requisições
+
+A chave do teto passa a ser o usuário quando há credencial legível, e continua o endereço de rede quando não há. O motivo é o CGNAT das operadoras móveis, onde uma antena inteira compartilha um endereço e um usuário ativo derrubaria os vizinhos — cenário em que o aplicativo entra por definição.
+
+As rotas de autenticação e as do painel administrativo continuam por endereço de rede. É onde se adivinha senha, e onde a credencial sob ataque não é a do token apresentado. O painel ficara de fora na primeira versão, porque seu caminho de entrada não começa com o prefixo de autenticação; com a chave por usuário, o teto daquela rota passava a ser contado pela conta do próprio atacante, e como o cadastro é livre isso daria tantos baldes quantas contas ele quisesse criar.
+
 ## O que isto não autoriza
 
-Não autoriza isentar gate de plano, de assinatura ou de acesso com base em cabeçalho enviado pelo cliente. O `X-PigBank-Client` escolhe o canal de entrega da credencial e nada mais; quem chega nele já passou pela autenticação, e o que recebe é a própria credencial, a mesma que sairia no cookie. A lição está registrada no `_is_pigbank_app`, onde o User-Agent chegou a conceder acesso e virou brecha justamente por ser escolhido por quem chama.
+Não autoriza isentar gate de plano, de assinatura ou de acesso com base em cabeçalho enviado pelo cliente, nem usar cabeçalho como autenticação. O `X-PigBank-Client` seleciona o fluxo de entrega da credencial e nada mais: quem chega nele já passou pela autenticação, e o que recebe é a própria credencial, a mesma que sairia no cookie. Ele não participa da decisão de CSRF, não concede acesso e não identifica ninguém. A lição está registrada no `_is_pigbank_app`, onde o User-Agent chegou a conceder acesso e virou brecha justamente por ser escolhido por quem chama.
