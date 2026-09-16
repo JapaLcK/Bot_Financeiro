@@ -85,4 +85,12 @@ describe("sair", () => {
     await sair();
     await expect(lerCredenciais()).resolves.toBeNull();
   });
+
+  it("saída sem sessão capturada não manda requisição nenhuma", async () => {
+    // Saída duplicada ou tardia. Tentar seria pior que não fazer: a requisição
+    // releria o cofre e poderia sair autenticada por uma conta que entrou
+    // depois, revogando no servidor a sessão de quem acabou de chegar.
+    await sair();
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
 });

@@ -22,16 +22,22 @@ function resposta(status: number, corpo: unknown): Response {
 
 const fetchFalso = jest.fn();
 
-/** Faz a próxima escrita no cofre falhar, como um keychain recusando. */
+/** Faz a GRAVAÇÃO no cofre falhar, como um keychain recusando. */
 const falharEscrita = (
   global as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
 ).__falharEscritaNoCofre;
+
+/** Faz a LIMPEZA no cofre falhar. Separado da gravação de propósito. */
+const falharApagar = (
+  global as unknown as { __falharApagarNoCofre: (v: boolean) => void }
+).__falharApagarNoCofre;
 
 beforeEach(async () => {
   fetchFalso.mockReset();
   global.fetch = fetchFalso as unknown as typeof fetch;
   _resetRenovacao();
   falharEscrita(false);
+  falharApagar(false);
   await limparCredenciais();
 });
 
@@ -227,6 +233,33 @@ describe("renovação em 401", () => {
     await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
     falharEscrita(false);
     await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  it("corpo MALFORMADO num 200 apaga o token: ele já foi consumido", async () => {
+    // O servidor respondeu 200 e rotacionou; o corpo é que veio truncado. O
+    // token de origem está gasto do mesmo jeito, e preservá-lo garantiria o
+    // replay na renovação seguinte — que o servidor trata como roubo.
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
+      .mockResolvedValueOnce(resposta(200, { access_token: "só isso" }));
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  it("limpeza que falha no 401 NÃO transforma fim de sessão em erro temporário", async () => {
+    // O 401 prova que a sessão morreu. Se o keychain recusar a limpeza, o
+    // veredito continua sendo o mesmo: mostrar "tente de novo" guardando
+    // credencial inútil seria a tela errada e o estado errado.
+    await guardarCredenciais({ access: "velho", refresh: "rt_morto" });
+    fetchFalso
+      .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
+      .mockResolvedValueOnce(resposta(401, { detail: "invalid_refresh_token" }));
+    falharApagar(true);
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    falharApagar(false);
   });
 
   it("refresh recusado vira SessaoExpirada e apaga a credencial", async () => {

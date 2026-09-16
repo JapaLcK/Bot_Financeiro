@@ -2,16 +2,13 @@ import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { useColorScheme } from "react-native";
 
-import { iniciarAnalytics, rastrear } from "@/services/analytics";
-import { iniciarLogging } from "@/services/logging";
+import { rastrear } from "@/services/analytics";
 import { claro, escuro } from "@/ui/tokens";
 
-// No escopo do MÓDULO, não num efeito: efeito só roda depois que a árvore
-// inicial renderizou e foi commitada, e as falhas que esta camada mais precisa
-// relatar — erro na avaliação de um módulo, erro no primeiro render — acontecem
-// antes disso. Instalar tarde é não instalar para o caso que importa.
-iniciarLogging();
-iniciarAnalytics();
+// O Sentry e o analytics NÃO sobem aqui: sobem em `index.ts`, antes do import
+// do roteador. Aqui já seria tarde — os imports deste arquivo são avaliados
+// antes do corpo dele, e uma exceção em qualquer um deles aconteceria com o
+// Sentry ainda desinstalado.
 
 export default function Layout() {
   // Segue o sistema. O site hoje força escuro por localStorage e ignora a

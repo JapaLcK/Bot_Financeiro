@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "PigBank Mobile 2.0 — app nativo (Expo/React Native). Projeto independente da raiz e de webapp/.",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "ios": "expo start --ios",

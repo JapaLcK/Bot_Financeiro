@@ -9,15 +9,22 @@ global.__cofreDeTeste = mockCofre;
 // reatribuição do método: o módulo sob teste importa o namespace, e trocar a
 // propriedade depois do import não chega até ele (medido — o teste passava
 // verde sem exercitar nada).
-const mockFalha = { escrita: false };
+// Dois sinalizadores, e não um: gravar e apagar falham por motivos diferentes,
+// e um teste que só consegue quebrar os dois juntos não distingue "o conserto
+// limpou" de "nem o conserto conseguiu limpar".
+const mockFalha = { escrita: false, apagar: false };
 global.__falharEscritaNoCofre = (v) => (mockFalha.escrita = v);
+global.__falharApagarNoCofre = (v) => (mockFalha.apagar = v);
 jest.mock("expo-secure-store", () => ({
   getItemAsync: async (k) => (mockCofre.has(k) ? mockCofre.get(k) : null),
   setItemAsync: async (k, v) => {
     if (mockFalha.escrita) throw new Error("keychain recusou");
     mockCofre.set(k, v);
   },
-  deleteItemAsync: async (k) => void mockCofre.delete(k),
+  deleteItemAsync: async (k) => {
+    if (mockFalha.apagar) throw new Error("keychain recusou apagar");
+    mockCofre.delete(k);
+  },
 }));
 
 // `Constants.expoConfig` vem do app.config.ts em tempo de build; no Jest ele

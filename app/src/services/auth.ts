@@ -43,17 +43,22 @@ export async function temSessao(): Promise<boolean> {
  */
 export async function sair(): Promise<void> {
   const daSaida = await lerCredenciais();
+  // Sem sessão capturada não há logout a fazer, e TENTAR é pior que não fazer:
+  // a requisição releria o cofre e poderia sair autenticada por uma conta que
+  // entrou depois, revogando no servidor a sessão de quem acabou de chegar.
+  // Saída duplicada ou tardia cai exatamente aqui.
+  if (!daSaida) return;
   try {
     await chamar("/auth/logout", perfilSchema.partial(), {
       metodo: "POST",
       // A requisição fala pela sessão que INICIOU a saída. Sem isto ela releria
       // o cofre por dentro, e uma conta que entrasse nesse intervalo teria a
       // própria sessão revogada no servidor pelo logout da anterior.
-      credencial: daSaida ?? undefined,
+      credencial: daSaida,
     });
   } catch {
     // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.
   } finally {
-    if (daSaida) await limparSe(daSaida.refresh);
+    await limparSe(daSaida.refresh);
   }
 }

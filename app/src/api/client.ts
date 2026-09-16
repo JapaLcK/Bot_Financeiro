@@ -112,6 +112,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
 
   const promessa = (async (): Promise<Renovacao> => {
+    let resposta: Response;
     try {
       const antes = await lerCredenciais();
       if (!antes || antes.refresh !== refreshDeOrigem) {
@@ -130,7 +131,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         return { ok: false, motivo: "sessao-trocou" };
       }
 
-      const resposta = await fetch(`${baseUrl()}/auth/refresh`, {
+      resposta = await fetch(`${baseUrl()}/auth/refresh`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshDeOrigem}`,
@@ -139,46 +140,54 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         },
         credentials: "omit",
       });
+    } catch {
+      // ANTES da resposta. Falha de REDE não apaga a sessão: o token pode estar
+      // perfeitamente vivo e o usuário só estar no elevador.
+      //
+      // ponytail: fica o caso ambíguo — a resposta pode ter se perdido DEPOIS
+      // de o servidor rotacionar, e aí a renovação seguinte reapresenta um
+      // token gasto, que o servidor trata como roubo. Decisão do dono: manter
+      // assim e medir com app em produção. A mitigação certa é do lado do
+      // servidor (janela de graça na rotação), não um sinalizador no cliente
+      // que pode ficar preso e deslogar quem está bem.
+      return { ok: false, motivo: "transitorio", status: 0 };
+    }
 
-      // Só o 401 PROVA que a sessão acabou. Um 429 ou um 500 é incidente
-      // passageiro do servidor, e tratá-lo como fim de sessão transformaria
-      // dois minutos de instabilidade em logout de todo mundo.
-      if (resposta.status === 401) {
-        // Apaga só se ainda for a MESMA sessão, e a comparação tem de ser
-        // ATÔMICA com a escrita: se outra conta entrou enquanto isto estava no
-        // ar, apagar levaria a sessão dela junto.
-        await limparSe(refreshDeOrigem);
-        return { ok: false, motivo: "terminal" };
-      }
-      if (!resposta.ok) {
-        return { ok: false, motivo: "transitorio", status: resposta.status };
-      }
+    // ── Daqui para baixo o servidor JÁ RESPONDEU, e isso muda tudo. ─────────
+    // Antes da resposta, falha é ambiguidade e preservar é o certo. Depois de
+    // um 2xx, o token de origem está COMPROVADAMENTE consumido: qualquer erro
+    // daqui — corpo truncado, esquema quebrado, keychain recusando — não pode
+    // virar "tente de novo", porque a próxima tentativa reapresenta um token
+    // gasto e o servidor revoga TUDO do usuário, em todos os aparelhos.
+    //
+    // Esta separação é o conserto da CLASSE. Havia um `try` só em volta de tudo
+    // e ele colapsava os dois mundos em "transitório" — e a revisão foi achando
+    // uma instância de cada vez: gravação, esquema, limpeza.
 
+    // Só o 401 PROVA que a sessão acabou. Um 429 ou um 500 é incidente
+    // passageiro do servidor, e tratá-lo como fim de sessão transformaria dois
+    // minutos de instabilidade em logout de todo mundo.
+    if (resposta.status === 401) {
+      // Limpeza é o melhor esforço e NÃO muda o veredito: se o keychain
+      // recusar, a sessão continua provadamente morta, e virar "erro
+      // temporário" mostraria a tela errada guardando credencial inútil.
+      await limparSe(refreshDeOrigem).catch(() => undefined);
+      return { ok: false, motivo: "terminal" };
+    }
+    if (!resposta.ok) {
+      return { ok: false, motivo: "transitorio", status: resposta.status };
+    }
+
+    try {
       const novas = credenciaisSchema.parse(await resposta.json());
-      // Daqui em diante o token de origem está COMPROVADAMENTE consumido: o
-      // servidor respondeu 200 e rotacionou. Isso separa este caso do caso
-      // ambíguo lá do `catch` — e a diferença muda o que é seguro fazer.
-      //
-      // Se a gravação falhar (keychain recusando), deixar o token velho no
-      // cofre garantiria o replay na renovação seguinte, e o servidor trata
-      // replay como roubo: revoga tudo do usuário, em todos os aparelhos.
-      // Apagar troca isso por um login a mais neste aparelho. Entre perder a
-      // sessão aqui e perder em todos, a escolha não é difícil.
-      //
       // Compara-e-troca. A conta pode ter trocado com a requisição no ar, e
       // conferir numa chamada para gravar na seguinte deixa exatamente a janela
       // em que a outra conta cabe — o resultado seria a sessão antiga
       // restaurada por cima da nova.
-      let trocou: boolean;
-      try {
-        trocou = await trocarSe(refreshDeOrigem, {
-          access: novas.access_token,
-          refresh: novas.refresh_token,
-        });
-      } catch {
-        await limparSe(refreshDeOrigem).catch(() => undefined);
-        return { ok: false, motivo: "terminal" };
-      }
+      const trocou = await trocarSe(refreshDeOrigem, {
+        access: novas.access_token,
+        refresh: novas.refresh_token,
+      });
       if (!trocou) return { ok: false, motivo: "sessao-trocou" };
       ultimaRotacao = {
         consumido: refreshDeOrigem,
@@ -190,17 +199,10 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         refresh: novas.refresh_token,
       };
     } catch {
-      // Falha de REDE não apaga a sessão: o token pode estar perfeitamente vivo
-      // e o usuário só estar no elevador. Quem apaga é o 401 acima, que é
-      // resposta do servidor.
-      //
-      // ponytail: fica o caso ambíguo — a resposta pode ter se perdido DEPOIS
-      // de o servidor rotacionar, e aí a renovação seguinte reapresenta um
-      // token gasto, que o servidor trata como roubo. Decisão do dono: manter
-      // assim e medir com app em produção. A mitigação certa é do lado do
-      // servidor (janela de graça na rotação), não um sinalizador no cliente
-      // que pode ficar preso e deslogar quem está bem.
-      return { ok: false, motivo: "transitorio", status: 0 };
+      // Corpo truncado, esquema quebrado ou gravação recusada — tanto faz qual:
+      // o token de origem está gasto e não pode continuar no cofre.
+      await limparSe(refreshDeOrigem).catch(() => undefined);
+      return { ok: false, motivo: "terminal" };
     }
   })();
 
