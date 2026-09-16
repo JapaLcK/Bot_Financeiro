@@ -197,14 +197,6 @@ def test_login_do_app_passa_sem_cookie_e_sem_csrf(monkeypatch):
         assert cookie not in enviados
 
 
-def test_rate_limit_do_login_do_app_continua_por_ip():
-    """Entrada do app não ganha balde próprio: força bruta segue contida por IP."""
-    from frontend.routes.shared import chave_de_rate_limit
-    from _apoio_auth_app import req as _req
-
-    assert chave_de_rate_limit(_req("/auth/login")) == "10.0.0.1"
-
-
 def test_formulario_cross_site_nao_ganha_isencao(sessao):
     """Login CSRF, a porta que a auditoria achou aberta.
 

@@ -38,11 +38,15 @@ O app carrega apenas o access token. A resolução de identidade das rotas de da
 
 A leitura do token de acesso passa a considerar o cabeçalho `Authorization` mesmo quando a rota não declara a dependência que o injeta. Sem isso, encerrar a sessão pelo aplicativo era operação vazia com aparência de sucesso: o token saía nulo, nada era revogado, e a resposta voltava com duzentos. O usuário apertava sair, via confirmação, e a sessão seguia de pé pelos catorze dias do token de renovação. A correção fica na função que todos os chamadores atravessam, não no encerramento de sessão isoladamente.
 
-## Teto de requisições
+## Teto de requisições: por que ficou como estava
 
-A chave do teto passa a ser o usuário quando há credencial legível, e continua o endereço de rede quando não há. O motivo é o CGNAT das operadoras móveis, onde uma antena inteira compartilha um endereço e um usuário ativo derrubaria os vizinhos — cenário em que o aplicativo entra por definição.
+A chave do teto continua sendo o endereço de rede. A tentativa de trocá-la pelo usuário foi retirada, e o motivo é a forma da solução, não o objetivo.
 
-Três famílias continuam por endereço de rede: as rotas de autenticação, as do painel administrativo e a do link mágico. É onde se adivinha segredo, e onde a credencial sob ataque não é a do token apresentado. As duas últimas ficaram de fora na primeira versão e a revisão as encontrou. O painel, porque seu caminho de entrada não começa com o prefixo de autenticação. O link mágico, porque o código de uso único que ele carrega é credencial de login: adivinhá-lo é tomar a conta, e o teto daquela rota existe por uma medição registrada nela mesma, de duzentas requisições anônimas com código bem formado virando duzentas exclusões no banco. Nos dois casos, com a chave por usuário o teto passava a ser contado pela conta do próprio atacante, e como o cadastro é livre isso daria tantos baldes quantas contas ele quisesse criar.
+O problema é real. Num CGNAT de operadora móvel uma antena inteira compartilha um endereço, e o aplicativo cai exatamente nesse cenário, de modo que um usuário ativo derrubaria os vizinhos. A tentativa foi usar a chave do usuário em tudo, menos numa lista de caminhos. A lista cresceu a cada rodada de revisão: primeiro as rotas de autenticação, depois o painel administrativo, depois o link mágico, depois o formulário público de contato e a consulta autenticada por outro cabeçalho. Quatro descobertas seguidas numa enumeração que se dizia completa.
+
+A regra que essas descobertas revelam não é um caminho, é uma condição: a chave do token só vale quando a autorização da rota usa aquele token. O contato não autentica ninguém, a consulta de prospecto autentica por outro cabeçalho, o painel por outra sessão, o link mágico pelo próprio código. Em todas, trocar a chave multiplica o teto por quantas contas o atacante quiser criar, e o cadastro é livre.
+
+Invertida, a regra é adesão por rota. O limitador aceita chave própria em cada decorador, então o dia em que uma rota de dados precisar de balde por usuário, ela pede, com evidência, e a revisão vê a decisão no lugar onde ela vale. Enquanto não houver usuário de aplicativo em produção, o ganho é zero e o risco de uma quinta rota esquecida não é.
 
 ## O que isto não autoriza
 

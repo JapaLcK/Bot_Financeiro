@@ -1,17 +1,16 @@
 """Refresh sem cookie, token único e rate limit por usuário.
 
 Controle negativo do grupo: trocar `_refresh_token_do_header` por "" deixa os
-testes de refresh do app vermelhos; devolver `get_remote_address` sempre em
-`chave_de_rate_limit` deixa `test_rate_limit_separa_usuarios_no_mesmo_ip`
-vermelho (medido). Controle positivo:
+testes de refresh do app vermelhos, e anular a resolução da sessão no logout
+deixa o caso do access expirado vermelho (medido). Controle positivo:
 `test_refresh_do_navegador_com_corpo_vazio_continua_funcionando` e
 `test_cookie_tem_precedencia_sobre_o_header` provam que o site não mudou.
 """
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
-from frontend.routes.shared import chave_de_rate_limit, payload_de_sessao
-from _apoio_auth_app import ALVO, CORPO, UID, csrf as _csrf, req as _req
+from frontend.routes.shared import payload_de_sessao
+from _apoio_auth_app import ALVO, CORPO, csrf as _csrf
 from _apoio_auth_app import sessao  # noqa: F401 — fixture, usada por injeção
 
 
@@ -174,38 +173,6 @@ def test_payload_de_sessao_recusa_token_de_outro_tipo():
     assert payload_de_sessao(intruso) is None
 
 
-# ── Rate limit por usuário ───────────────────────────────────────────────────
-
-def test_rate_limit_separa_usuarios_no_mesmo_ip(sessao):
-    """O caso do CGNAT: dois usuários atrás de um IP não dividem o balde."""
-    _, dados = sessao
-    chave = chave_de_rate_limit(
-        _req(ALVO, cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]})
-    )
-    assert chave == f"user:{UID}"
-    assert chave != chave_de_rate_limit(_req(ALVO))
-
-
-def test_rate_limit_de_auth_continua_por_ip(sessao):
-    """Força bruta continua contida por IP — o controle não mudou de lado."""
-    _, dados = sessao
-    chave = chave_de_rate_limit(
-        _req(
-            "/auth/login",
-            cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
-        )
-    )
-    assert chave == "10.0.0.1"
-
-
-def test_rate_limit_sem_token_cai_no_ip():
-    """Sem credencial legível, o comportamento é o de antes."""
-    assert chave_de_rate_limit(_req(ALVO)) == "10.0.0.1"
-    assert chave_de_rate_limit(
-        _req(ALVO, cookies={dashboard.DASHBOARD_COOKIE_NAME: "lixo"})
-    ) == "10.0.0.1"
-
-
 # ── Logout: o app precisa conseguir SAIR ─────────────────────────────────────
 
 def _logout_do_app(client: TestClient, credencial: str):
@@ -260,23 +227,6 @@ def test_logout_do_app_mata_o_refresh_token(sessao):
     assert r.status_code == 401, r.text
 
 
-def test_rate_limit_do_admin_continua_por_ip(sessao):
-    """`/admin/auth/login` não começa com `/auth`, e a revisão pegou.
-
-    Com a chave por usuário, o teto de 10/min do painel passava a ser contado
-    pela conta do PRÓPRIO atacante — e como o cadastro é self-service, N contas
-    davam N baldes do mesmo IP para adivinhar a senha do admin.
-    """
-    _, dados = sessao
-    chave = chave_de_rate_limit(
-        _req(
-            "/admin/auth/login",
-            cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
-        )
-    )
-    assert chave == "10.0.0.1"
-
-
 def test_logout_do_app_com_access_expirado_mata_o_refresh(sessao):
     """O irmão que o conserto do P0 não alcançou, e a auditoria pegou.
 
@@ -289,23 +239,6 @@ def test_logout_do_app_com_access_expirado_mata_o_refresh(sessao):
     r = _logout_do_app(client, dados["refresh_token"])
     assert r.status_code == 200, r.text
     assert _refresh_do_app(client, dados["refresh_token"]).status_code == 401
-
-
-def test_rate_limit_do_link_magico_continua_por_ip(sessao):
-    """A TERCEIRA família que adivinha segredo: `/d/{code}`.
-
-    O código do link mágico é credencial de login de uso único — adivinhá-lo é
-    tomar a conta. Com a chave por usuário, o teto de 30/min de lá passava a ser
-    contado pela conta do próprio atacante.
-    """
-    _, dados = sessao
-    chave = chave_de_rate_limit(
-        _req(
-            "/d/abcdef",
-            cookies={dashboard.DASHBOARD_COOKIE_NAME: dados["dashboard_token"]},
-        )
-    )
-    assert chave == "10.0.0.1"
 
 
 def test_logout_com_access_expirado_revoga_a_SESSAO(sessao):

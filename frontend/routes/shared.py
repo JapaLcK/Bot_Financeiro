@@ -100,54 +100,31 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
-# Prefixos cujo teto continua contado por IP. Ver a docstring abaixo: é onde se
-# adivinha SEGREDO (senha de conta, senha do painel, código de link mágico), e
-# onde a credencial sob ataque não é a do token apresentado.
-PREFIXOS_SEM_CHAVE_DE_USUARIO = ("/auth", "/admin", "/d/")
-
-
-def chave_de_rate_limit(request: Request) -> str:
-    """Balde do rate limit: o usuário quando dá para saber quem é, senão o IP.
-
-    Era só o IP, e num CGNAT de operadora móvel a antena inteira compartilha um
-    endereço — o app nativo cai exatamente nesse cenário, então um usuário ativo
-    passaria a derrubar os vizinhos. O comentário de
-    `frontend/routes/billing_pix.py:180` já registrava o problema.
-
-    **Onde se adivinha senha, a chave continua sendo o IP.** É o caso de `/auth`
-    e de `/admin`: ali ou ainda não existe usuário identificado, ou a credencial
-    sob ataque é OUTRA que não a do token apresentado. Trocar a chave nessas
-    rotas mudaria um controle de segurança de lado, sem nada a ganhar.
-
-    São TRÊS famílias, e as duas últimas a revisão pegou. `"/admin/auth/login"`
-    não começa com `"/auth"`, então o teto de 10/min do painel passou a ser
-    contado pela conta do PRÓPRIO atacante; como o cadastro é self-service, N
-    contas davam N baldes do mesmo IP para adivinhar a senha, e o teto virava
-    decorativo. `/d/{code}` é o mesmo caso com outro nome: o código do link
-    mágico é credencial de login de uso único, adivinhá-lo é tomar a conta, e o
-    teto de 30/min de lá existe porque 200 requisições anônimas com código bem
-    formado viravam 200 DELETEs no banco (medido, e registrado na própria
-    rota). Com os três prefixos, a mudança é provadamente não-enfraquecedora: o
-    que protegia segredo continua como estava.
-
-    Nunca levanta. Token ilegível, expirado ou ausente cai no IP, que é o
-    comportamento de antes.
-    """
-    if request.url.path.startswith(PREFIXOS_SEM_CHAVE_DE_USUARIO):
-        return get_remote_address(request)
-    try:
-        token = extract_bearer_token(request) or (
-            request.cookies.get(DASHBOARD_COOKIE_NAME) or ""
-        ).strip()
-        payload = payload_de_sessao(token or "")
-        if payload:
-            return f"user:{payload['user_id']}"
-    except Exception:
-        pass
-    return get_remote_address(request)
-
-
-limiter = Limiter(key_func=chave_de_rate_limit, default_limits=["200/minute"])
+# O teto continua por IP, como sempre foi.
+#
+# A chave por USUÁRIO saiu deste PR depois de quatro rodadas de revisão, e o
+# motivo é a forma da solução, não o objetivo. O problema é real: num CGNAT de
+# operadora móvel a antena inteira compartilha um endereço, e o app cai
+# exatamente nesse cenário. A tentativa foi "usuário em tudo, menos numa lista
+# de prefixos" — e a lista cresceu a cada rodada: `/auth`, depois `/admin`,
+# depois `/d/`, depois `/contact` e `/api/prospect/status`. Quatro descobertas
+# seguidas de uma enumeração que se dizia completa.
+#
+# A regra que elas revelam não é um prefixo: é "só vale a chave do token quando
+# a AUTORIZAÇÃO da rota usa aquele token". `/contact` não autentica ninguém,
+# `/api/prospect/status` autentica por outro header, `/admin` por outra sessão,
+# `/d/{code}` pelo próprio código. Em todas, trocar a chave multiplica o teto
+# por quantas contas o atacante quiser criar — e o cadastro é self-service.
+#
+# Invertido, isso é opt-in por rota: `@limiter.limit(..., key_func=...)` aceita
+# chave própria, então o dia em que uma rota de dados precisar de balde por
+# usuário ela pede, com evidência, e a revisão vê a decisão no lugar onde ela
+# vale. Enquanto não há usuário de app em produção, o ganho é zero e o risco de
+# uma quinta rota esquecida não é.
+#
+# default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
+# só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
 def meta_pixel_snippet(defer_external: bool = False) -> str:
