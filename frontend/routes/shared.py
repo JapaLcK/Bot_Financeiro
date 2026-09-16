@@ -319,12 +319,18 @@ def inject_tracking(
 
     No-op para o que não estiver configurado, ou se a página não tiver </head>.
     """
-    snippet = meta_pixel_snippet(defer_external) + ga4_snippet(defer_external)
+    # Meta e GA4 precisam registrar o page_view mesmo quando o visitante clica
+    # num CTA antes do timer da landing. As filas desses SDKs vivem apenas no
+    # documento atual e seriam destruídas pela navegação; por isso somente o
+    # Clarity (que não alimenta atribuição/conversão) pode aguardar.
+    snippet = meta_pixel_snippet() + ga4_snippet()
+    deferred_snippet = ""
     if clarity:
-        snippet += clarity_snippet(defer_external)
+        deferred_snippet = clarity_snippet(defer_external)
+        snippet += deferred_snippet
     if not snippet:
         return html_text
-    if defer_external:
+    if defer_external and deferred_snippet:
         snippet = _deferred_tracking_bootstrap() + snippet
     idx = html_text.lower().find("</head>")
     if idx == -1:
@@ -423,8 +429,9 @@ def html_file(
     estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
     sem campos sensíveis. `inline_css` elimina viagens de rede bloqueantes em
     páginas selecionadas, mantendo os mesmos arquivos como fonte única.
-    `defer_tracking=True` preserva as filas de eventos no head, mas posterga os
-    SDKs externos até a primeira interação ou depois do load. As
+    `defer_tracking=True` posterga somente o Clarity até a primeira interação
+    ou depois do load. Meta e GA4 continuam imediatos porque seus page views
+    precisam sobreviver a uma navegação rápida. As
     páginas da área logada (dashboard, settings, onboarding) passam
     `pixel=False`: o rastreio fica nas páginas públicas e na /home, que é onde a
     volta do checkout (?upgrade=success) dispara a conversão.
