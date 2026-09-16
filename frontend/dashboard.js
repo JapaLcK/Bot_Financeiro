@@ -4536,8 +4536,11 @@ async function loadRecurringOverview({ background = false } = {}) {
     </div>`;
   // Ícone do Resultado pelo `_toneClass`: com resultado exatamente zero o
   // `positivo` (`resultado >= 0`) desenhava um "+" ao lado de um "R$ 0,00"
-  // neutro. `ph-circle` porque é o neutro que já está no subset da Phosphor
-  // (não há `ph-equals` — incluí-lo exigiria regerar a fonte).
+  // neutro. `ph-circle` porque é o neutro que já está no subset da Phosphor;
+  // o sinal de igual exigiria regerar a fonte (scripts/build_phosphor_subset.py).
+  // O nome dele não se escreve aqui: o extrator do subset varre .js com
+  // `\bph-([a-z0-9-]+)` e não distingue comentário de marcação, então citá-lo
+  // reprova `tests/test_phosphor_subset.py` — foi o que derrubou o CI deste PR.
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
     ${statCard(_toneMoney(entradas), "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), _toneMoney(entradas),
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
