@@ -1381,6 +1381,19 @@ async function startCheckout(interval, btn, plan, resuming) {
       body: JSON.stringify(payload),
     });
 
+    if (resp.status === 403) {
+      await fetch(purchaseContinuationPage ? "/continuar-compra" : "/precos", {
+        credentials: "same-origin",
+      });
+      resp = await fetch("/billing/create-checkout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    // Vale para a primeira resposta e para o retry depois de renovar o CSRF.
     if (resp.status === 401) {
       preservePurchaseForAuth(plan, interval, "card");
       if (resuming && purchaseContinuationPage) {
@@ -1399,18 +1412,6 @@ async function startCheckout(interval, btn, plan, resuming) {
           : "/cadastro";
       }, 500);
       return;
-    }
-
-    if (resp.status === 403) {
-      await fetch(purchaseContinuationPage ? "/continuar-compra" : "/precos", {
-        credentials: "same-origin",
-      });
-      resp = await fetch("/billing/create-checkout", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "x-csrf-token": getCsrfToken() },
-        body: JSON.stringify(payload),
-      });
     }
 
     if (!resp.ok) {
