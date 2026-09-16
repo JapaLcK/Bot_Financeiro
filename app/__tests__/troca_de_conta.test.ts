@@ -8,7 +8,12 @@
  */
 import { z } from "zod";
 
-import { SessaoExpirada, _resetRenovacao, chamar } from "@/api/client";
+import {
+  RequisicaoSuperada,
+  SessaoExpirada,
+  _resetRenovacao,
+  chamar,
+} from "@/api/client";
 import {
   guardarCredenciais,
   lerCredenciais,
@@ -213,7 +218,29 @@ describe("corrida entre contas", () => {
     await guardarCredenciais({ access: "aB", refresh: "B" });
     soltar();
 
-    await expect(daA).rejects.toBeInstanceOf(SessaoExpirada);
+    // `RequisicaoSuperada`, não `SessaoExpirada`: a sessão da B está viva, e
+    // mandar a pessoa para o login logo depois de ela entrar seria o oposto do
+    // que aconteceu.
+    await expect(daA).rejects.toBeInstanceOf(RequisicaoSuperada);
+  });
+
+  it("ERRO da conta A também não é entregue depois de a B assumir", async () => {
+    // A pessoa veria "não foi possível" sobre uma operação que ela não pediu
+    // nesta sessão. A conferência precisa vir antes de olhar o status.
+    await guardarCredenciais({ access: "aA", refresh: "A" });
+    let soltar: () => void = () => {};
+    const portao = new Promise<void>((r) => (soltar = r));
+    fetchFalso.mockImplementation(async (url: string) => {
+      if (String(url).includes("/da-A")) await portao;
+      return resposta(500, { detail: "explodiu" });
+    });
+
+    const daA = chamar("/da-A", schema);
+    await new Promise<void>((r) => setImmediate(() => r()));
+    await guardarCredenciais({ access: "aB", refresh: "B" });
+    soltar();
+
+    await expect(daA).rejects.toBeInstanceOf(RequisicaoSuperada);
   });
 
   it("renovação legítima da PRÓPRIA sessão não é confundida com troca", async () => {

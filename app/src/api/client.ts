@@ -27,6 +27,21 @@ export class SessaoExpirada extends ErroDeApi {
   }
 }
 
+/**
+ * A sessão que fez o pedido não é mais a do aparelho.
+ *
+ * Distinta de `SessaoExpirada` de propósito: aquela quer dizer "entre de novo",
+ * esta quer dizer "esta tela era de outra conta". Colapsar as duas faria uma
+ * troca de conta bem-sucedida empurrar a pessoa para o login, logo depois de
+ * ela ter entrado.
+ */
+export class RequisicaoSuperada extends ErroDeApi {
+  constructor() {
+    super(409, "Esta tela era de outra conta.");
+    this.name = "RequisicaoSuperada";
+  }
+}
+
 /** Resposta com forma diferente da esperada — contrato quebrou, não é rede. */
 export class ContratoInvalido extends ErroDeApi {
   constructor(readonly rota: string, causa: z.ZodError) {
@@ -351,28 +366,30 @@ export async function chamar<T>(
     }
   }
 
-  if (!resposta.ok) {
-    throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
-  }
-
   // A resposta CHEGOU, mas a sessão ainda é a mesma que a pediu?
   //
-  // Entregar dado da conta A depois de a conta B assumir não é só desconforto:
-  // a tela renderiza saldo, transação e nome de outra pessoa, com o app já
-  // mostrando a conta nova. Num app financeiro isso é vazamento entre contas,
-  // mesmo sendo o próprio aparelho.
+  // A pergunta vem ANTES de olhar o status, e vale para os DOIS desfechos.
+  // Entregar dado da conta A depois de a conta B assumir renderiza saldo,
+  // transação e nome de outra pessoa na tela da conta nova — num app financeiro
+  // isso é vazamento entre contas, mesmo sendo o próprio aparelho. E entregar o
+  // ERRO da conta A não é melhor: a pessoa veria "não foi possível" sobre uma
+  // operação que ela não pediu nesta sessão.
   //
   // A conferência é para requisição AUTENTICADA: rota pública não tem sessão a
   // trair. E credencial fixa (logout) também não, porque ali o fim da sessão é
   // o objetivo.
   if (guardadas && !opcoes.credencial) {
     const agora = await lerCredenciais();
-    if (agora?.refresh !== guardadas.refresh && !daMesmaCadeia(
-      guardadas.refresh,
-      agora?.refresh ?? "",
-    )) {
-      throw new SessaoExpirada();
+    if (
+      agora?.refresh !== guardadas.refresh &&
+      !daMesmaCadeia(guardadas.refresh, agora?.refresh ?? "")
+    ) {
+      throw new RequisicaoSuperada();
     }
+  }
+
+  if (!resposta.ok) {
+    throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
   }
 
   const bruto = await resposta.json().catch(() => null);
