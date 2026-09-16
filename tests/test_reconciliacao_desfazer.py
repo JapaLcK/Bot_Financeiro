@@ -144,3 +144,15 @@ def test_desfazer_reaproveita_sombra_que_sobreviveu(uid_pro, ia_fora):
     assert r == {"ok": True, "changed": True, "launch_id": sobrevivente}
     assert _sombras(uid_pro) == 1
     assert consolidado(uid_pro) == (900.0, -50.0)
+
+
+def test_fusao_antiga_sem_match_aparece_e_desfaz(uid_pro, ia_fora):
+    """Dado antigo: `auto_merged` com imported = X e `match_launch_id` nulo."""
+    funde_a(uid_pro)
+    of_tx = _of_tx(uid_pro)
+    _q("update open_finance_transactions set match_launch_id=null where id=%s returning id", (of_tx,))
+
+    assert [r["of_tx_id"] for r in db.list_reconciliations(uid_pro)] == [of_tx]
+    assert db.undo_reconciliation(uid_pro, of_tx)["changed"] is True
+    assert consolidado(uid_pro) == (900.0, -50.0)
+    assert _sombras(uid_pro) == 1

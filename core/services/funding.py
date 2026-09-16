@@ -157,6 +157,20 @@ def nota_sync(saida: bool = True) -> str:
     )
 
 
+def carteira_txt(exibida, disponivel) -> str:
+    """A Carteira como a tela mostra, para mensagem de RECUSA. Quando a guarda
+    autoriza menos que o exibido (receita pendente de reconciliação), diz quanto
+    e por quê — senão a mesma conversa mostra R$ 100 no /saldo e R$ 0 na recusa."""
+    from utils_text import fmt_brl
+
+    txt = fmt_brl(float(_dec(exibida)))
+    a_conferir = _dec(exibida) - _dec(disponivel)
+    if a_conferir > 0:
+        txt += (f" (sendo {fmt_brl(float(a_conferir))} de entrada a conferir com o banco,"
+                " que não conta para pagar)")
+    return txt
+
+
 def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list | None = None) -> str:
     """"Saldo insuficiente na conta" era vago, e foi o que enganou: o usuário via
     R$ 1.387,76 na tela e o bot dizia que não tinha saldo. Agora a resposta nomeia
@@ -167,15 +181,16 @@ def msg_insuficiente(user_id: int, amount, acao: str = "aporte", sources: list |
     fontes = sources if sources is not None else list_sources(user_id)
     bancos = [f for f in fontes if f["kind"] == BANK]
     carteira = next((f for f in fontes if f["kind"] == CARTEIRA), None)
-    saldo_carteira = carteira["balance"] if carteira else Decimal("0")
+    saldo_carteira = (carteira_txt(carteira["espelho"], carteira["balance"])
+                      if carteira else fmt_brl(0.0))
 
     if not bancos:
         return (
-            f"Saldo insuficiente: você tem {fmt_brl(float(saldo_carteira))} na conta "
+            f"Saldo insuficiente: você tem {saldo_carteira} na conta "
             f"e o {acao} é de {fmt_brl(float(v))}."
         )
 
-    linhas = [f"• **Carteira**: {fmt_brl(float(saldo_carteira))}"]
+    linhas = [f"• **Carteira**: {saldo_carteira}"]
     tem_comprometido = False
     for b in bancos:
         comprometido = b.get("comprometido") or Decimal("0")

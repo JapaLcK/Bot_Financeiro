@@ -81,6 +81,8 @@ def test_confirmar_com_x_ja_vinculado_e_conflito(uid_pro, ia_fora):
                     from open_finance_transactions where id=%s returning id""",
                (manual, manual, of_tx))
     assert outra
+    assert of_tx not in [r["of_tx_id"] for r in db.list_reconciliations(uid_pro)]
+    assert db.reconciliation_summary(uid_pro)["pending_count"] == 0
     with pytest.raises(ValueError, match="ALREADY_LINKED"):
         db.confirm_reconciliation(uid_pro, of_tx)
     assert _estado(of_tx)["reconciliation_status"] == "pending"
@@ -127,3 +129,53 @@ def test_transacao_de_outro_usuario_nao_existe(uid_pro, ia_fora):
             fn(outro, of_tx)
     assert db.list_reconciliations(outro) == []
     assert _estado(of_tx)["reconciliation_status"] == "pending"
+
+
+# ── duas pendências no MESMO X: lista e resumo seguem uma regra só ─────────
+
+def _lista_e_contagem(uid):
+    pend = [r["of_tx_id"] for r in db.list_reconciliations(uid) if r["status"] == "pending"]
+    return sorted(pend), db.reconciliation_summary(uid)["pending_count"]
+
+
+def _duas_no_mesmo_x(uid):
+    hoje = today_tz()
+    conexao = conecta_banco(uid, "114.88")
+    manda(uid, "Gastei 1 real com a barbara")
+    manual = ultimo_launch(uid)
+    sincroniza(conexao, uid, "112.88", [
+        tx(uid, "-1.00", hoje, "COMPRA CARTAO 4412 XPTO", ident="1"),
+        tx(uid, "-1.00", hoje, "COMPRA CARTAO 9981 ABCD", ident="2"),
+    ])
+    assert db.import_open_finance_launches(uid, conexao)["pending"] == 2
+    ids = [r["id"] for r in _q("""select o.id from open_finance_transactions o
+                                    join open_finance_accounts a on a.id=o.account_id
+                                    join open_finance_connections c on c.id=a.connection_id
+                                   where c.user_id=%s and o.match_launch_id=%s order by o.id""",
+                                (uid, manual))]
+    assert len(ids) == 2
+    return conexao, manual, ids
+
+
+def test_duas_pendencias_no_mesmo_x_lista_e_contagem_batem(uid_pro, ia_fora):
+    _, _, ids = _duas_no_mesmo_x(uid_pro)
+    assert _lista_e_contagem(uid_pro) == (ids, 2)
+    assert db.reconciliation_summary(uid_pro)["delta_se_confirmar"] == 1, "X conta uma vez só"
+
+
+def test_confirmar_a_primeira_resolve_a_irma(uid_pro, ia_fora):
+    _, manual, (primeira, irma) = _duas_no_mesmo_x(uid_pro)
+    sombra_irma = _estado(irma)["imported_launch_id"]
+
+    db.confirm_reconciliation(uid_pro, primeira)
+
+    assert _lista_e_contagem(uid_pro) == ([], 0)
+    assert _estado(irma) == {"imported_launch_id": sombra_irma, "match_launch_id": None,
+                             "reconciliation_status": "imported"}
+    assert consolidado(uid_pro) == (112.88, 0.0)
+
+
+def test_conexao_pausada_some_da_lista_e_da_contagem(uid_pro, ia_fora):
+    conexao, _, _ = _duas_no_mesmo_x(uid_pro)
+    _q("update open_finance_connections set status='PAUSED' where id=%s returning id", (conexao,))
+    assert _lista_e_contagem(uid_pro) == ([], 0)

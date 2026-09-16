@@ -114,6 +114,8 @@ def test_receita_pendente_nao_autoriza(uid_pro, ia_fora, sem_autorizacao):
     with pytest.raises(HTTPException) as e:
         asyncio.run(pay_bill_route(_Req(), uid_pro, bill, PayBillPayload(amount=50.0)))
     assert e.value.status_code == 400
+    assert ("Saldo atual: R$ 100,00 (sendo R$ 100,00 de entrada a conferir com o banco"
+            in e.value.detail), e.value.detail
     assert _carteira_fonte(uid_pro) == 0
     assert consolidado(uid_pro)[1] == 100.0, "a exibição mudou"
 
@@ -141,3 +143,15 @@ def test_sem_pendencia_autoriza_como_hoje(uid_pro, ia_fora):
     conecta_banco(uid_pro, "114.88")
     _aporte(uid_pro, 100)
     assert saldo_bruto(uid_pro) == Decimal("0")
+
+
+def test_recusa_na_conversa_cita_a_carteira_da_tela(uid_pro, ia_fora):
+    """Mesma conversa: /saldo mostra 100 e a recusa não pode dizer R$ 0,00."""
+    pendencia(uid_pro, "100.00", "recebi 100 do fulano", "30.00", "CREDITO XPTO 9981")
+    db.create_pocket(uid_pro, "viagem")
+
+    assert "Carteira: R$ 100,00" in manda(uid_pro, "/saldo")
+    recusa = manda(uid_pro, "guardei 50 na caixinha viagem")
+    assert ("Carteira*: R$ 100,00 (sendo R$ 100,00 de entrada a conferir com o banco, "
+            "que não conta para pagar)") in recusa, recusa
+    assert "✅" in manda(uid_pro, "guardei 20 na caixinha viagem"), "o banco cobre 20"

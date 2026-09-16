@@ -2330,11 +2330,12 @@ BANK_ACCOUNTS_SQL = """
 # grava `delta_conta` -1 e `accounts.balance = balance + delta`
 # (db/accounts.py:94); devolver o débito é somar +1, como já faz o rollback do
 # delete (`balance - delta_conta`, db/accounts.py:1766).
-def _fused_join_sql(link_col: str, extra_where: str) -> str:
+def _fused_join_sql(link_col: str, extra_where: str,
+                    cols: str = "distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d") -> str:
     """O miolo acima: lançamentos manuais ligados por `t.<link_col>` a transações
-    das contas no recorte, um por `l.id`. Params: `merged_wallet_delta_params`."""
+    das contas no recorte. Params: `merged_wallet_delta_params`."""
     return f"""
-      select distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d
+      select {cols}
         from ({BANK_ACCOUNTS_SQL}) a
         join open_finance_accounts ra on ra.id = a.id
         join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
@@ -2351,18 +2352,24 @@ MERGED_WALLET_DELTA_SQL = f"""
     select coalesce(sum(-d), 0) as d from ({_fused_join_sql("imported_launch_id", "")}    ) x
 """
 
-# Pendências (`pending`: imported = sombra, match = X): o que mudaria na Carteira
-# exibida se o usuário confirmasse. Mesmo recorte e mesmo sinal da fusão. X já
-# ocupado por outra transação não conta — confirmar daria ALREADY_LINKED.
-# `receita_back` (≤ 0) é a receita pendente tirada da guarda de cobertura.
-PENDING_RECONCILIATION_SQL = f"""
-    select coalesce(sum(-d), 0) as delta_se_confirmar,
-           coalesce(sum(-d) filter (where d > 0), 0) as receita_back,
-           count(*) as pending_count
-      from ({_fused_join_sql("match_launch_id", '''
+# Pendência ACIONÁVEL (`pending`: imported = sombra, match = X), uma linha por
+# transação: conta no recorte, X existente e X não ocupado por outra transação
+# (confirmar daria ALREADY_LINKED). Regra única da lista e do resumo (§0.7).
+ACTIONABLE_PENDING_SQL = _fused_join_sql("match_launch_id", """
          and t.reconciliation_status = 'pending'
          and not exists (select 1 from open_finance_transactions o
-                          where o.imported_launch_id = l.id)''')}    ) x
+                          where o.imported_launch_id = l.id)""",
+                                         cols="t.id as of_tx_id, l.id, (l.efeitos ->> 'delta_conta')::numeric as d")
+
+# O que mudaria na Carteira exibida se o usuário confirmasse: mesmo sinal da
+# fusão, somado uma vez por X (duas pendências no mesmo X só fundem uma).
+# `receita_back` (≤ 0) é a receita pendente tirada da guarda de cobertura.
+PENDING_RECONCILIATION_SQL = f"""
+    select coalesce(sum(-d) filter (where rn = 1), 0) as delta_se_confirmar,
+           coalesce(sum(-d) filter (where rn = 1 and d > 0), 0) as receita_back,
+           count(*) as pending_count
+      from (select p.*, row_number() over (partition by p.id) as rn
+              from ({ACTIONABLE_PENDING_SQL}) p) x
 """
 
 

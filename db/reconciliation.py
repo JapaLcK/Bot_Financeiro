@@ -3,7 +3,8 @@
 Estados de `open_finance_transactions` que importam aqui:
   pending     imported = sombra, match = X  (o usuário ainda não decidiu)
   confirmed   imported = match = X          (o usuário confirmou)
-  auto_merged imported = match = X          (o import ou a fusão reversa juntaram)
+  auto_merged imported = X, match = X       (o import ou a fusão reversa juntaram;
+                                             dado antigo pode ter match null)
   imported    imported = sombra, match null (sem par, ou par rejeitado/desfeito)
 
 Toda escrita é uma transação só, na ordem do resto do módulo de Open Finance
@@ -22,7 +23,7 @@ from utils_date import today_tz
 from .bank_movements import _lock_user, is_of_shadow
 from .connection import get_conn
 from .open_finance import (
-    MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
+    ACTIONABLE_PENDING_SQL, MERGED_WALLET_DELTA_SQL, PENDING_RECONCILIATION_SQL, _insert_of_shadow,
     classify_open_finance_launch, merged_wallet_delta_params,
 )
 
@@ -85,6 +86,16 @@ def confirm_reconciliation(user_id: int, of_tx_id: int) -> dict:
                   set imported_launch_id=%s, reconciliation_status='confirmed'
                 where id=%s""",
             (x, o["id"]))
+        # X foi usado: as outras pendências em X virariam botão que sempre dá
+        # ALREADY_LINKED. Voltam a `imported`, com a sombra delas contando.
+        cur.execute(
+            """update open_finance_transactions t
+                  set reconciliation_status='imported', match_launch_id=null
+                 from open_finance_accounts a, open_finance_connections c
+                where a.id = t.account_id and c.id = a.connection_id and c.user_id = %s
+                  and t.match_launch_id = %s and t.reconciliation_status = 'pending'
+                  and t.id <> %s""",
+            (user_id, x, o["id"]))
         shadow_id = o["imported_launch_id"]
         if shadow_id and shadow_id != x:
             cur.execute("select source, efeitos from launches where id=%s and user_id=%s",
@@ -116,8 +127,9 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
     solta X, que volta a contar na Carteira. Vale nos dois sentidos — no reverso
     a sombra foi apagada e renasce com o mesmo `external_id` do provedor."""
     def fn(cur, o):
-        x = o["match_launch_id"]
-        if o["reconciliation_status"] not in FUSED_STATUSES or not x or o["imported_launch_id"] != x:
+        x = o["imported_launch_id"]
+        if (o["reconciliation_status"] not in FUSED_STATUSES or not x
+                or o["match_launch_id"] not in (None, x)):
             return {"ok": True, "changed": False}
         cls = classify_open_finance_launch(o["amount"], o["category"], o["description"])
         shadow_id, _ = _insert_of_shadow(cur, user_id, o, cls)
@@ -133,23 +145,24 @@ def undo_reconciliation(user_id: int, of_tx_id: int) -> dict:
 
 
 def list_reconciliations(user_id: int) -> list[dict]:
-    """Pendências e fusões dos últimos 60 dias, com os dois lados."""
+    """Pendências acionáveis (mesma regra do resumo) e fusões dos últimos 60 dias."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """select o.id, o.reconciliation_status, o.description, o.amount, o.transaction_date,
+            f"""select o.id, o.reconciliation_status, o.description, o.amount, o.transaction_date,
                       c.institution_name, l.id as launch_id, l.tipo, l.valor, l.alvo, l.nota,
                       coalesce(l.posted_at, l.criado_em::date) as launch_date
                  from open_finance_transactions o
                  join open_finance_accounts a on a.id = o.account_id
                  join open_finance_connections c on c.id = a.connection_id
-                 join launches l on l.id = o.match_launch_id
+                 join launches l on l.id = coalesce(o.match_launch_id, o.imported_launch_id)
                 where c.user_id = %s and l.user_id = %s
-                  and (o.reconciliation_status = 'pending'
+                  and (o.id in (select of_tx_id from ({ACTIONABLE_PENDING_SQL}) p)
                        or (o.reconciliation_status = any(%s)
-                           and o.imported_launch_id = o.match_launch_id
+                           and o.imported_launch_id = l.id
                            and o.transaction_date >= %s))
                 order by o.transaction_date desc, o.id desc""",
-            (user_id, user_id, list(FUSED_STATUSES), today_tz() - timedelta(days=60)),
+            (user_id, user_id, *merged_wallet_delta_params(user_id), list(FUSED_STATUSES),
+             today_tz() - timedelta(days=60)),
         )
         rows = cur.fetchall()
     return [{

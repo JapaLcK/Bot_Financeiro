@@ -51,3 +51,30 @@ def test_rotas_confere_sessao_csrf_isolamento_e_erros(uid_pro, ia_fora):
     r = client.post(f"{base}/{of_tx}/confirm", headers=H)
     assert r.status_code == 409, r.text
     assert client.post(f"{base}/{of_tx}/apagar", headers=H).status_code in (404, 422)
+
+
+def test_rota_invalida_o_cache_do_dashboard(uid_pro, ia_fora, monkeypatch):
+    from frontend.routes import shared
+    _, of_tx, _, _ = pendencia(uid_pro)
+    chamadas = []
+    monkeypatch.setattr(shared, "invalidate_dashboard_current_cache", chamadas.append)
+    r = _cliente(uid_pro).post(f"/open-finance/{uid_pro}/reconciliations/{of_tx}/confirm", headers=H)
+    assert r.status_code == 200, r.text
+    assert chamadas == [uid_pro]
+
+
+def test_teto_nao_se_contorna_variando_a_url(uid_pro):
+    """Com `limit()` cada `of_tx_id` abria balde próprio: 31 ids → zero 429.
+
+    Não crava em QUAL requisição o 429 chega: `tests/test_of_connect_token_gate.py`
+    faz `importlib.reload` deste router, cada reload soma o limite de novo e na
+    suíte inteira uma requisição gasta vários slots (medido: 429 na 7ª). O que
+    discrimina é existir 429 com URLs todas diferentes — com `limit()` não há."""
+    client = _cliente(uid_pro)
+    base = f"/open-finance/{uid_pro}/reconciliations"
+    codes = [client.post(f"{base}/{900000000 + i}/{('confirm', 'reject', 'undo')[i % 3]}",
+                         headers=H).status_code for i in range(31)]
+    assert codes[0] == 404 and 429 in codes, codes
+    codes = [client.get(f"/open-finance/{uid_pro + i}/reconciliations").status_code
+             for i in range(61)]
+    assert codes[0] == 200 and 429 in codes, codes

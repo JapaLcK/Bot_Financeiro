@@ -2153,8 +2153,11 @@ async def bank_movement_confirm_route(request: Request, user_id: int, body: Bank
     return {"ok": True}
 
 
+# `shared_limit(scope=)` e não `limit()`: com o `key_style="url"` do slowapi cada
+# `of_tx_id`/`action` abriria um balde próprio e o teto seria decorativo (ver o
+# `GET /d/{code}` no monólito e `tests/test_d_rate_limit.py`).
 @router.get("/open-finance/{user_id}/reconciliations")
-@shared.limiter.limit("60/minute")
+@shared.limiter.shared_limit("60/minute", scope="reconciliations_list")
 async def reconciliations_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
     from db.reconciliation import list_reconciliations
@@ -2163,7 +2166,7 @@ async def reconciliations_route(request: Request, user_id: int):
 
 
 @router.post("/open-finance/{user_id}/reconciliations/{of_tx_id}/{action}")
-@shared.limiter.limit("30/minute")
+@shared.limiter.shared_limit("30/minute", scope="reconciliations_action")
 async def reconciliation_action_route(
     request: Request, user_id: int, of_tx_id: int, action: Literal["confirm", "reject", "undo"],
 ):
