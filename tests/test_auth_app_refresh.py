@@ -306,3 +306,33 @@ def test_rate_limit_do_link_magico_continua_por_ip(sessao):
         )
     )
     assert chave == "10.0.0.1"
+
+
+def test_logout_com_access_expirado_revoga_a_SESSAO(sessao):
+    """Terceira vez que a mesma classe morde, e a que a revisão pegou.
+
+    Sair com o access token já expirado — app parado >15 min — significa
+    apresentar o refresh. O ramo do JWT não recupera `jti` nenhum, e revogar só
+    a LINHA daquele token deixava `auth_sessions` viva: o `dashboard_token` de
+    12h seguia abrindo as rotas de dados depois do logout, e a sessão ainda
+    aparecia ativa na lista de aparelhos.
+    """
+    from core.sessions import get_active_session
+
+    client, dados = sessao
+    jti = dashboard._decode_jwt(dados["access_token"])["jti"]
+
+    r = _logout_do_app(client, dados["refresh_token"])
+    assert r.status_code == 200, r.text
+    assert not get_active_session(jti), "a sessão sobreviveu ao logout pelo refresh"
+
+    # E o dashboard_token, que é o que dura 12h, morre junto.
+    morto = client.post(
+        ALVO,
+        headers={
+            "Authorization": f"Bearer {dados['dashboard_token']}",
+            "Content-Type": "application/json",
+        },
+        json=CORPO,
+    )
+    assert morto.status_code == 401, morto.text

@@ -2723,8 +2723,8 @@ def _entrega_sessao(
     Navegador recebe os três cookies, exatamente como sempre, e um dicionário
     vazio — a resposta sai byte a byte idêntica à de antes desta mudança.
 
-    App (`X-PigBank-Client: app`) recebe os três tokens no corpo e **nenhum
-    cookie**. As duas metades da decisão são a mesma decisão, e por isso moram
+    App (`X-PigBank-Client: app`, **e sem cookie nenhum**) recebe os três tokens
+    no corpo e nenhum cookie. As duas metades da decisão são a mesma decisão, e por isso moram
     na mesma função: um cliente que recebe token no corpo não pode receber
     cookie junto.
 
@@ -2742,8 +2742,14 @@ def _entrega_sessao(
     (`_is_pigbank_app`, em `frontend/routes/shared.py`), onde o UA CONCEDIA e
     virou brecha. Aqui ele só escolhe o canal de entrega.
     """
+    # O header ESCOLHE o canal; quem AUTORIZA o canal do corpo é a ausência de
+    # cookie. Sem a segunda metade, um script same-origin (XSS) mandava o header
+    # no `/auth/refresh`, o navegador anexava o cookie `HttpOnly` de refresh
+    # sozinho, e a resposta devolvia o refresh rotacionado de 14 dias NO CORPO —
+    # legível por JavaScript. Ou seja: o `HttpOnly` seria anulado por um header
+    # que o atacante controla. Com cookie no jar, a resposta é a de navegador.
     pedido = (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
-    if pedido != APP_CLIENT_APP:
+    if pedido != APP_CLIENT_APP or request.cookies:
         _set_auth_cookie(response, access)
         _set_refresh_cookie(response, refresh)
         _set_dashboard_cookie(response, int(user_id), jti=jti)
@@ -3397,11 +3403,31 @@ async def auth_logout(request: Request, response: Response):
     ).strip() or _refresh_token_do_header(request)
     if refresh_apresentado:
         try:
-            from core.refresh_tokens import revoke_refresh_token
+            from core.refresh_tokens import (
+                revoke_refresh_token,
+                revoke_session_refresh_tokens,
+                session_of,
+            )
             await asyncio.to_thread(revoke_refresh_token, refresh_apresentado)
+            # E a SESSÃO junto. Revogar só a linha do token deixava
+            # `auth_sessions` viva, e o `dashboard_token` de 12h seguia abrindo
+            # as rotas de dados depois do logout — o usuário via sucesso e a
+            # sessão continuava de pé. Acontece quando o access token já
+            # expirou (app parado >15 min) e a credencial apresentada é o
+            # refresh: o ramo do JWT acima não recupera `jti` nenhum.
+            #
+            # É a MESMA classe que já mordeu duas vezes neste PR: sair tem de
+            # revogar a sessão, venha o `jti` de onde vier.
+            dona = await asyncio.to_thread(session_of, refresh_apresentado)
+            if dona:
+                dono_id, jti_do_refresh = dona
+                await asyncio.to_thread(revoke_session, dono_id, jti_do_refresh)
+                await asyncio.to_thread(
+                    revoke_session_refresh_tokens, jti_do_refresh
+                )
         except Exception:
             logging.getLogger(__name__).warning(
-                "logout: falha ao revogar refresh token do cookie", exc_info=True,
+                "logout: falha ao revogar refresh token / sessão", exc_info=True,
             )
 
     _clear_session_cookies(response)

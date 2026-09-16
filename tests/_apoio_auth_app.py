@@ -110,9 +110,14 @@ def login_http(monkeypatch, *, como_app: bool):
     monkeypatch.setattr(dashboard, "log_auth_login_event", noop_log)
 
     client = TestClient(dashboard.app)
-    cabecalhos = csrf(client)
     if como_app:
-        cabecalhos[dashboard.APP_CLIENT_HEADER] = "app"
+        # O app NÃO tem cookie jar — nem o de CSRF. Pôr o cookie aqui faria o
+        # teste exercitar um cliente que não existe, e desde que a entrega no
+        # corpo passou a exigir jar vazio (para o header falsificado não anular
+        # o `HttpOnly`), seria justamente o caso que NÃO recebe token.
+        cabecalhos = {dashboard.APP_CLIENT_HEADER: "app"}
+    else:
+        cabecalhos = csrf(client)
     r = client.post(
         "/auth/login",
         headers=cabecalhos,

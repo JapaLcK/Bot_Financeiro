@@ -122,3 +122,31 @@ def test_cadastro_pelo_google_entrega_credencial_ao_app(monkeypatch):
     enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
     for cookie in ("auth_token", "dashboard_token", "refresh_token"):
         assert cookie not in enviados, f"{cookie} foi mandado para o app"
+
+
+def test_header_falsificado_com_cookie_nao_devolve_token_no_corpo(sessao):
+    """O header ESCOLHE o canal; quem AUTORIZA é a ausência de cookie.
+
+    Sem a segunda metade, um script same-origin (XSS) mandava o header no
+    `/auth/refresh`, o navegador anexava o cookie `HttpOnly` de refresh sozinho,
+    e a resposta devolvia o refresh rotacionado de 14 dias NO CORPO — legível
+    por JavaScript. O `HttpOnly` seria anulado por um header que o atacante
+    controla.
+    """
+    client, dados = sessao
+    client.cookies.set(dashboard.REFRESH_COOKIE_NAME, dados["refresh_token"])
+    client.cookies.set(dashboard.CSRF_COOKIE_NAME, "t")
+    r = client.post(
+        "/auth/refresh",
+        headers={
+            dashboard.APP_CLIENT_HEADER: "app",
+            dashboard.CSRF_HEADER_NAME: "t",
+        },
+    )
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    for chave in ("access_token", "refresh_token", "dashboard_token"):
+        assert chave not in corpo, f"{chave} vazou para o JavaScript"
+    # E a resposta é a de navegador: os cookies voltam.
+    enviados = [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
+    assert "refresh_token" in enviados
