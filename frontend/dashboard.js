@@ -841,6 +841,7 @@ async function loadCardsView(forceFresh = false, { background = false } = {}) {
     _cardsCache = data;
     renderCardsView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, grid)) { stats.innerHTML = ""; return; }
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--red)">Erro ao carregar: ${escapeHtmlSafe(String(err.message || err))}</div>`;
     stats.innerHTML = "";
   }
@@ -859,7 +860,7 @@ async function _fetchCardsSummary({ force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.cards || [];
@@ -887,13 +888,13 @@ function renderCardsView(cards) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Usado este mês</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(usedSum)}</div>
-      <div class="stat-delta down">${pct.toFixed(1).replace(".", ",")}% do limite</div>
+      <div class="stat-value" style="color:${_toneMoney(-usedSum)}">${_fmtBRL(usedSum)}</div>
+      <div class="stat-delta ${_toneClass(-usedSum, "up", "down")}">${pct.toFixed(1).replace(".", ",")}% do limite</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
       <div class="stat-label">Disponível agora</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(availSum)}</div>
-      <div class="stat-delta up">${availPct.toFixed(1).replace(".", ",")}% livre</div>
+      <div class="stat-value" style="color:${_toneMoney(availSum)}">${_fmtBRL(availSum)}</div>
+      <div class="stat-delta ${_toneClass(availSum, "up", "down")}">${availPct.toFixed(1).replace(".", ",")}% livre</div>
     </div>
     <div class="stat-tile" style="animation-delay:180ms">
       <div class="stat-label">Fatura aberta total</div>
@@ -1331,6 +1332,7 @@ async function loadInstallmentsView(forceFresh = false, { background = false } =
     _instCache = data;
     renderInstallmentsView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, list)) { stats.innerHTML = ""; return; }
     list.innerHTML = `<div class="empty" style="padding:30px;text-align:center;color:var(--red)">Erro ao carregar: ${escapeHtmlSafe(String(err.message || err))}</div>`;
     stats.innerHTML = "";
   }
@@ -1347,7 +1349,7 @@ async function _fetchInstallments({ force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.installments || [];
@@ -1411,11 +1413,11 @@ function renderInstallmentsView(groups) {
       <div class="stat-tile" style="animation-delay:0ms">
         <div class="stat-label">Parcelamentos concluídos</div>
         <div class="stat-value">${filtered.length}</div>
-        <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} paga${nParcelasPagas === 1 ? "" : "s"}</div>
+        <div class="stat-delta ${_toneClass(nParcelasPagas, "up", "down")}">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} paga${nParcelasPagas === 1 ? "" : "s"}</div>
       </div>
       <div class="stat-tile" style="animation-delay:60ms">
         <div class="stat-label">Total quitado</div>
-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
+        <div class="stat-value" style="color:${_toneMoney(totalPago)}">${_fmtBRL(totalPago)}</div>
         <div class="stat-delta" style="color:var(--text-3)">soma de tudo que já foi pago</div>
       </div>
       <div class="stat-tile" style="animation-delay:120ms">
@@ -1438,7 +1440,7 @@ function renderInstallmentsView(groups) {
       </div>
       <div class="stat-tile" style="animation-delay:60ms">
         <div class="stat-label">Total devido</div>
-        <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalDevido)}</div>
+        <div class="stat-value" style="color:${_toneMoney(-totalDevido)}">${_fmtBRL(totalDevido)}</div>
         <div class="stat-delta" style="color:var(--text-3)">${nParcelasFuturas} parcela${nParcelasFuturas === 1 ? "" : "s"} futura${nParcelasFuturas === 1 ? "" : "s"}</div>
       </div>
       <div class="stat-tile" style="animation-delay:120ms">
@@ -1448,8 +1450,8 @@ function renderInstallmentsView(groups) {
       </div>
       <div class="stat-tile" style="animation-delay:180ms">
         <div class="stat-label">Já pago</div>
-        <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalPago)}</div>
-        <div class="stat-delta up">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
+        <div class="stat-value" style="color:${_toneMoney(totalPago)}">${_fmtBRL(totalPago)}</div>
+        <div class="stat-delta ${_toneClass(nParcelasPagas, "up", "down")}">${nParcelasPagas} parcela${nParcelasPagas === 1 ? "" : "s"} concluída${nParcelasPagas === 1 ? "" : "s"}</div>
       </div>
     `;
   }
@@ -1575,7 +1577,7 @@ function openInstAnticipateModal(group_id, name, valor, installment_no, total) {
   body.innerHTML = `
     Antecipar a parcela <b>${installment_no}/${total}</b> de <b>${escapeHtmlSafe(name)}</b>?<br><br>
     Vai ser paga à vista da sua conta corrente:<br>
-    <b style="color:var(--red)">${_fmtBRL(valor)}</b> agora<br><br>
+    <b style="color:${_toneMoney(-valor)}">${_fmtBRL(valor)}</b> agora<br><br>
     <span style="color:var(--text-3);font-size:.88rem">A parcela some do parcelamento e aparece no histórico de lançamentos como "Antecipou parcela ${installment_no}/${total}".</span>
   `;
   document.getElementById("inst-anticipate-overlay").classList.add("open");
@@ -1651,7 +1653,7 @@ async function openInstDeleteModal(group_id, name) {
         Excluir <b>${escapeHtmlSafe(name)}</b>?<br><br>
         • <b>${imp.future_count}</b> parcela${futOne ? "" : "s"} futura${futOne ? "" : "s"} (${_fmtBRL(imp.future_total)}) ${futOne ? "será removida" : "serão removidas"} das faturas abertas. Saldo do mês volta.<br>
         • <b>${imp.paid_count}</b> parcela${paidOne ? "" : "s"} já paga${paidOne ? "" : "s"} (${_fmtBRL(imp.paid_total)}) ${paidOne ? "fica" : "ficam"} no histórico (faturas pagas intactas).<br><br>
-        <span style="color:var(--red);font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span>. Dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
+        <span style="color:${_toneMoney(-imp.paid_total)};font-weight:600">R$ ${imp.paid_total.toFixed(2).replace(".", ",")} já pago${paidOne ? "" : "s"} NÃO ${paidOne ? "volta" : "voltam"} pra conta</span>. Dinheiro já saiu via fatura. Se precisar corrigir, crie um lançamento manual.
       `;
     } else {
       body.innerHTML = `
@@ -1813,7 +1815,7 @@ async function _fetchCategories(includeArchived = true, { force = false, direct 
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.categories || [];
@@ -1866,6 +1868,7 @@ async function loadCategoriesView(forceFresh = false, { background = false } = {
     _categoriesCache = data;
     renderCategoriesView(data, showArchived);
   } catch (err) {
+    if (_sessaoExpirou(err, grid)) return;
     grid.innerHTML = `<div class="empty" style="padding:20px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
 }
@@ -2152,6 +2155,98 @@ function _clBox(sticker, titulo, corpo, classe = "empty-sticker") {
   </div>`;
 }
 
+/* Sessão expirada = estado FINAL com ação, nunca "Carregando…" pra sempre.
+   O 401 que chega até aqui é TERMINAL: o interceptor global
+   (`frontend/static/auth-refresh.js`) só re-tenta 401 marcado com
+   `WWW-Authenticate` e já gastou o refresh antes de a resposta voltar — quem
+   recebe o 401 não tem o que renovar.
+
+   UM caminho pra todas as cargas do dashboard, e não um remendo por painel:
+   recebe o status (das cargas que checam `r.status`) ou o erro de `_erroHttp`
+   (das que lançam), pinta o `_clBox` no elemento daquele painel e devolve true
+   — o chamador para ali. Handler por `addEventListener` e não `onclick=`:
+   atributo de evento em markup gerado entra no levantamento do
+   `handlers_inline.test.mjs`. */
+function _sessaoExpirou(motivo, el) {
+  const status = typeof motivo === "number" ? motivo : (motivo && motivo.status);
+  if (status !== 401) return false;
+  if (el) {
+    const corpo = `Entra de novo pra continuar de onde parou.
+       <div style="margin-top:14px"><button type="button" class="btn-save" data-relogin>Entrar de novo</button></div>`;
+    // Painel COM canvas usa a caixa sobreposta do `_chartVazio`, que preserva o
+    // <canvas>. `innerHTML` aqui apagava o canvas PRA SEMPRE: `buildExpenseChart`
+    // e `buildHistoryChart` passavam a achar null e voltavam em silêncio mesmo
+    // depois de a sessão voltar — só reload consertava.
+    const canvas = el.tagName === "CANVAS" ? el : el.querySelector("canvas");
+    if (canvas) _chartVazio(canvas, true, "Sua sessão expirou", corpo, "thinking");
+    else el.innerHTML = _clBox("thinking", "Sua sessão expirou", corpo);
+    const btn = (canvas ? canvas.parentElement : el).querySelector("[data-relogin]");
+    if (btn) btn.addEventListener("click", () => location.assign("/login"));
+  }
+  return true;
+}
+
+/* Erro de carga que CARREGA o status HTTP: é `err.status` que deixa o `catch`
+   distinguir sessão expirada de falha comum sem reparsear texto de mensagem.
+
+   `mensagem` existe porque a mensagem NÃO é igual em todo lugar, e num caso ela
+   é texto de produto: o histórico da caixinha joga `err.message` direto no
+   `.pkt-hist-error`, então trocar "Erro ao carregar histórico." por
+   "(HTTP 404) Erro ao carregar histórico." era regressão de produto. Quem passa
+   `mensagem` mantém o texto EXATO que já existia; os 7 chamadores que
+   compartilhavam o formato `(HTTP n) detalhe` seguem no default. */
+function _erroHttp(status, detail, mensagem) {
+  const err = new Error(mensagem != null ? mensagem : `(HTTP ${status}) ${detail}`);
+  err.status = status;
+  return err;
+}
+
+/* Gráfico sem série NÃO desenha: sem lançamento, o Chart.js pintava uma linha
+   reta em R$ 0 com eixo rotulado, que se lê como dado real ("gastei zero").
+   Cai no MESMO estado vazio dos Cartões/Parcelamentos/Metas (`_clBox`) e volta
+   sozinho ao gráfico quando o dado chega — quem chama destrói a instância
+   anterior antes, senão a troca de mês deixa canvas órfão por cima da caixa.
+   O canvas sai do fluxo (`display:none`) e a ALTURA passa a ser do wrap: sem
+   Chart instanciado o canvas volta ao intrínseco 300×150, que estoura o
+   `max-width:230px` do `.chart-wrap.donut` (sem height próprio) e ainda fica
+   mais baixo que a caixa. Devolve true quando assumiu a tela: o chamador nem
+   instancia o Chart. */
+function _chartVazio(el, vazio, titulo, corpo, sticker = "point") {
+  const wrap = el.parentElement;
+  if (!wrap) return false;
+  const box = wrap.querySelector(":scope > .chart-empty");
+  if (!vazio) {
+    if (box) box.remove();
+    el.style.display = "";
+    wrap.style.minHeight = "";
+    return false;
+  }
+  el.style.display = "none";
+  wrap.style.minHeight = "180px";
+  const alvo = box || wrap.appendChild(document.createElement("div"));
+  alvo.className = "chart-empty";
+  alvo.innerHTML = _clBox(sticker, titulo, corpo, "empty-sticker sm");
+  return true;
+}
+
+/* A MESMA regra do `_toneMoney` para os lugares que colorem por CLASSE
+   (`.stat-delta up/down`, `.tx-amt green/red` — dashboard.css:429-430 e 487-488),
+   onde não dá pra interpolar uma cor: no zero devolve classe NENHUMA, e o valor
+   fica na cor neutra do texto. Sem esta, "R$ 0,00" saía vermelho em 8 linhas que
+   a varredura por cor literal não enxerga. */
+function _toneClass(v, positiva, negativa) {
+  const cor = _toneMoney(v);
+  return cor === "var(--green)" ? positiva : (cor === "var(--red)" ? negativa : "");
+}
+
+/* "Sem dado" de gráfico é lista vazia OU série toda em zero — as duas pintam
+   a mesma reta em R$ 0. */
+function _serieVazia(nums) {
+  // `Number(n) === 0`, não `!Number(n)`: NaN (valor não-numérico) não é zero e
+  // não pode virar "sem dado" — falha pro lado de DESENHAR, que é o lado seguro.
+  return !nums || !nums.length || nums.every(n => Number(n) === 0);
+}
+
 /* Nome que a HASHTAG consegue carregar inteiro. É a MESMA classe de
    `_extract_explicit_category` (parsers.py:119, `#([a-zA-ZÀ-ÿ0-9_\-]+)`), e ela
    casa UM token: fora dela o `#` corta no primeiro caractere estranho e o resto
@@ -2266,6 +2361,7 @@ async function openCategoryLaunches(nome, opts) {
       (signal) => _catLaunchesFetch(ctx, null, signal), { force: true });
   } catch (err) {
     if (_catLaunchesCtx === ctx) {
+      if (_sessaoExpirou(err, list)) return;
       list.innerHTML = _clBox("thinking", "Não deu pra carregar",
                               escapeHtmlSafe(String(err.message || err)));
     }
@@ -2356,7 +2452,9 @@ async function _catLaunchesFetch(ctx, cursor, signal) {
   // readApiError: o 402 do gate de plano vem como
   // {"detail":{"error":"subscription_required"}} e resp.text() jogava esse
   // JSON cru na cara do usuário.
-  if (!resp.ok) throw new Error(await readApiError(resp));
+  // `_erroHttp` com `mensagem`: o texto do `readApiError` é o que vai pra tela,
+  // e o `.status` é o que deixa o catch distinguir sessão expirada.
+  if (!resp.ok) throw _erroHttp(resp.status, "", await readApiError(resp));
   return await resp.json();
 }
 
@@ -2701,7 +2799,7 @@ async function _fetchBudgetsStatus(month, { force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     return await resp.json();
   }, { force });
@@ -2749,6 +2847,7 @@ async function loadBudgetsView(forceFresh = false, { background = false } = {}) 
     _budgetsStatusCache = data;
     renderBudgetsView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, list)) { stats.innerHTML = ""; return; }
     list.innerHTML = `<div class="empty" style="padding:20px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
     stats.innerHTML = "";
   }
@@ -2786,7 +2885,7 @@ function renderBudgetsView(payload) {
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
       <div class="stat-label">Disponível</div>
-      <div class="stat-value" style="color:${t.remaining >= 0 ? "var(--green)" : "var(--red)"}">${_fmtBRL(t.remaining)}</div>
+      <div class="stat-value" style="color:${_toneMoney(t.remaining)}">${_fmtBRL(t.remaining)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${t.remaining >= 0 ? "no caminho" : "estourou"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:180ms">
@@ -3117,7 +3216,7 @@ async function _fetchGoalsStatus({ force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.goals || [];
@@ -3164,6 +3263,7 @@ async function loadGoalsView(forceFresh = false, { background = false } = {}) {
     _goalsCache = data;
     _renderGoalsView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, grid)) return;
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
 }
@@ -3192,7 +3292,7 @@ function _renderGoalsView(goals) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Total guardado</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(totalSaved)}</div>
+      <div class="stat-value" style="color:${_toneMoney(totalSaved)}">${_fmtBRL(totalSaved)}</div>
       <div class="stat-delta" style="color:var(--text-3)">em ${list.length} caixinha${list.length === 1 ? "" : "s"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
@@ -3664,7 +3764,7 @@ async function _fetchRecurring({ force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.recurring || [];
@@ -3715,6 +3815,7 @@ async function loadFixedView(forceFresh = false, { background = false } = {}) {
     _recurringCache = data;
     _renderFixedView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, stats)) return;
     stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
 }
@@ -3768,7 +3869,7 @@ function _renderFixedView(items) {
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
       <div class="stat-label">Total mensal</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(total)}</div>
+      <div class="stat-value" style="color:${_toneMoney(-total)}">${_fmtBRL(total)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${renderPct != null ? renderPct + "% da renda do mês" : active.length + " ativos"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
@@ -3811,7 +3912,7 @@ function _renderFixedView(items) {
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.payment_type === "credit_card" ? "Cartão " + escapeHtmlSafe(x.rec.card_name || "?") : "Débito automático"}</div>
           </div>
-          <div class="tx-amt red">-${_fmtBRL(x.rec.amount)}</div>
+          <div class="tx-amt ${_toneClass(-x.rec.amount, "green", "red")}">-${_fmtBRL(x.rec.amount)}</div>
         </div>
       `).join("")
     : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada nos próximos 7 dias.</div>`;
@@ -3887,7 +3988,7 @@ function _renderRecurringRow(r) {
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${payment}${adjustText}${startText}</div>
       </div>
-      <div class="tx-amt red">-${_fmtBRL(r.amount)}</div>
+      <div class="tx-amt ${_toneClass(-r.amount, "green", "red")}">-${_fmtBRL(r.amount)}</div>
     </div>
   `;
 }
@@ -4311,7 +4412,8 @@ async function loadRecurringOverview({ background = false } = {}) {
   // background (puxar pra atualizar): sem skeleton — o render bom fica na
   // tela até os dados novos chegarem.
   if (!background) {
-    wrap.innerHTML = `<div class="mock-card"><div class="empty" style="padding:16px;color:var(--text-3)">Carregando…</div></div>`;
+    // Mesmo carregando das outras telas (sticker do Piggy), não texto solto.
+    wrap.innerHTML = `<div class="mock-card">${_clBox("loading", "Carregando…", "", "loading-sticker")}</div>`;
   }
   // Canal compartilhado (abort + geração): os 3 endpoints são independentes,
   // mas DUAS invocações do overview podem correr juntas (navego pra
@@ -4321,9 +4423,14 @@ async function loadRecurringOverview({ background = false } = {}) {
   // sempre (o overview nunca deduplicou; sempre busca fresco) + os 3 fetches no
   // MESMO signal, então o abort cancela os 3 de uma vez.
   const result = await _recurringOverviewChannel.run(async (signal) => {
+    let expirou = false;
     const j = async (url) => {
       try {
         const r = await fetch(url, { credentials: "same-origin", signal });
+        // 401 aqui é TERMINAL: o interceptor global (static/auth-refresh.js) já
+        // gastou a tentativa de refresh antes de a resposta chegar. Sem marcar,
+        // os três viram null e o painel ficava em "Carregando…" pra sempre.
+        if (r.status === 401) expirou = true;
         if (!r.ok) return null;
         return await r.json();
       } catch (err) {
@@ -4343,13 +4450,16 @@ async function loadRecurringOverview({ background = false } = {}) {
     // que estavam certos na tela. Rejeita sem tocar no DOM — o indicador do
     // gesto (app-mode.js) fica âmbar e o render antigo sobrevive. (Na navegação,
     // null é tolerado: renderiza o parcial.)
-    if (background && (exp === null || inc === null || bills === null)) {
+    // Sessão expirada vence o ramo de refresh: a tela precisa chegar a um
+    // estado FINAL com ação, e não voltar pro render velho.
+    if (!expirou && background && (exp === null || inc === null || bills === null)) {
       throw new Error("recurring overview: fetch falhou no refresh");
     }
-    return { exp, inc, bills };
+    return { exp, inc, bills, expirou };
   }, { force: true });
   if (result === undefined) return;   // superado por outra invocação — deixa a tela
-  const { exp, inc, bills } = result;
+  const { exp, inc, bills, expirou } = result;
+  if (_sessaoExpirou(expirou ? 401 : 0, wrap)) return;
 
   const gastos = ((exp && exp.recurring) || []).filter(r => r.is_active && (r.payment_mode || "autopay") === "autopay");
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
@@ -4362,7 +4472,7 @@ async function loadRecurringOverview({ background = false } = {}) {
   const saidas = totalGastos + totalPend;
   const resultado = entradas - saidas;
   const positivo = resultado >= 0;
-  const resColor = positivo ? "var(--green)" : "var(--red)";
+  const resColor = _toneMoney(resultado);
   const plural = (n) => n === 1 ? "" : "s";
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4399,7 +4509,7 @@ async function loadRecurringOverview({ background = false } = {}) {
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
-          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:var(--green)">${_fmtBRL(resultado)}</span>.</div>
+          <div style="font-weight:700">Suas entradas cobrem os compromissos. Sobra <span style="color:${_toneMoney(resultado)}">${_fmtBRL(resultado)}</span>.</div>
           <div style="font-size:.82rem;color:var(--text-3)">Mês recorrente equilibrado. Bom trabalho! <i class="ph ph-piggy-bank" aria-hidden="true"></i></div>
         </div>
       </div>`
@@ -4424,12 +4534,16 @@ async function loadRecurringOverview({ background = false } = {}) {
         </div>
       </div>
     </div>`;
+  // Ícone do Resultado pelo `_toneClass`: com resultado exatamente zero o
+  // `positivo` (`resultado >= 0`) desenhava um "+" ao lado de um "R$ 0,00"
+  // neutro. `ph-circle` porque é o neutro que já está no subset da Phosphor
+  // (não há `ph-equals` — incluí-lo exigiria regerar a fonte).
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard("var(--green)", "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), "var(--green)",
+    ${statCard(_toneMoney(entradas), "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), _toneMoney(entradas),
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
-    ${statCard("#fb7185", "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), "#fb7185",
+    ${statCard(_toneMoney(-saidas), "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), _toneMoney(-saidas),
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
-    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", positivo ? '<i class="ph ph-plus" aria-hidden="true"></i>' : '<i class="ph ph-minus" aria-hidden="true"></i>', "Resultado previsto",
+    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", _toneClass(resultado, '<i class="ph ph-plus" aria-hidden="true"></i>', '<i class="ph ph-minus" aria-hidden="true"></i>') || '<i class="ph ph-circle" aria-hidden="true"></i>', "Resultado previsto",
       (positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado)), resColor, "Projeção até o fim do mês")}
   </div>`;
 
@@ -4440,7 +4554,7 @@ async function loadRecurringOverview({ background = false } = {}) {
       <div style="width:30px;text-align:center;font-size:1rem">${x.tag}</div>
       <div style="flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtmlSafe(x.name)}</div>
       <div style="font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:20px;background:${b.bg};color:${b.fg}">${b.txt}</div>
-      <div style="min-width:92px;text-align:right;font-weight:600;color:${x.amt >= 0 ? 'var(--green)' : 'var(--red)'}">${x.amt >= 0 ? '+ ' : '- '}${_fmtBRL(Math.abs(x.amt))}</div>
+      <div style="min-width:92px;text-align:right;font-weight:600;color:${_toneMoney(x.amt)}">${_toneClass(x.amt, "+ ", "- ")}${_fmtBRL(Math.abs(x.amt))}</div>
     </div>`;
   }).join("") : `<div class="empty" style="padding:16px;text-align:center;color:var(--text-3)">Nada nos próximos 30 dias.</div>`;
   const vencCard = `
@@ -4454,12 +4568,16 @@ async function loadRecurringOverview({ background = false } = {}) {
   const resumoRow = (label, val, color) => `
     <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:.88rem">
       <span style="color:var(--text-2)">${label}</span><span style="font-weight:600;color:${color}">${val}</span></div>`;
+  // Sinal pelo `_toneClass`, nunca literal: quem não tem gasto fixo nem boleto
+  // (o estado padrão de quem acabou de entrar) recebe 0, e "- R$ 0,00" em cor
+  // neutra é o texto discordando da cor — o mesmo defeito do `line()` de
+  // `_renderProjection`.
   const resumoCard = `
     <div class="mock-card">
       <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
-      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), "var(--green)")}
-      ${resumoRow("Gastos fixos", "- " + _fmtBRL(totalGastos), "#fb7185")}
-      ${resumoRow("Boletos / contas", "- " + _fmtBRL(totalPend), "#fb7185")}
+      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), _toneMoney(totalReceitas))}
+      ${resumoRow("Gastos fixos", _toneClass(-totalGastos, "+ ", "- ") + _fmtBRL(totalGastos), _toneMoney(-totalGastos))}
+      ${resumoRow("Boletos / contas", _toneClass(-totalPend, "+ ", "- ") + _fmtBRL(totalPend), _toneMoney(-totalPend))}
       <div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
         <span>Resultado do mês</span><span style="color:${resColor}">${(positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado))}</span></div>
     </div>`;
@@ -4506,7 +4624,7 @@ async function _fetchBills({ force = false } = {}) {
       signal,
     });
     if (resp.status === 403) return { pro_required: true };
-    if (!resp.ok) throw new Error(await resp.text());
+    if (!resp.ok) throw _erroHttp(resp.status, await resp.text());
     const data = await resp.json();
     return data.bills || [];
   }, { force });
@@ -4534,7 +4652,10 @@ async function loadBillsView({ background = false } = {}) {
     if (data === undefined) return;
     if (data && data.pro_required) { agendaEl.innerHTML = proMsg; return; }
     _renderBillsView(data);
-  } catch (_) {
+  } catch (err) {
+    // 401 antes do texto genérico: "Toque em Atualizar" é instrução FALSA com a
+    // sessão expirada — atualizar não pode funcionar, só entrar de novo.
+    if (_sessaoExpirou(err, agendaEl)) return;
     agendaEl.innerHTML = `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Não consegui carregar. Toque em Atualizar.</div>`;
   }
 }
@@ -4565,7 +4686,7 @@ function _renderBillsView(bills) {
 
   if (statsEl) statsEl.innerHTML = `
     <div class="stat-tile"><div class="stat-label">Em aberto</div>
-      <div class="stat-value" style="color:var(--red)">${_fmtBRL(totalPend)}</div>
+      <div class="stat-value" style="color:${_toneMoney(-totalPend)}">${_fmtBRL(totalPend)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${pending.length} boleto(s)</div></div>
     <div class="stat-tile"><div class="stat-label">Próx. 7 dias</div>
       <div class="stat-value">${_fmtBRL(sum(wk))}</div>
@@ -4574,7 +4695,7 @@ function _renderBillsView(bills) {
       <div class="stat-value">${_fmtBRL(sum(mo))}</div>
       <div class="stat-delta" style="color:var(--text-3)">${mo.length} boleto(s)</div></div>
     <div class="stat-tile"><div class="stat-label">${overdue.length ? "<i class='ph ph-warning' aria-hidden='true'></i> Vencidos" : "Próximo"}</div>
-      <div class="stat-value" style="color:${overdue.length ? 'var(--red)' : 'var(--text)'}">${overdue.length ? _fmtBRL(sum(overdue)) : proxTxt}</div>
+      <div class="stat-value" style="color:${overdue.length ? _toneMoney(-sum(overdue)) : 'var(--text)'}">${overdue.length ? _fmtBRL(sum(overdue)) : proxTxt}</div>
       <div class="stat-delta" style="color:var(--text-3)">${overdue.length ? `${overdue.length} atrasado(s)` : "a vencer"}</div></div>`;
 
   const buckets = [
@@ -4618,7 +4739,7 @@ function _renderBillRow(b) {
         <div class="tx-meta">vence ${due.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} · <span style="color:${color}">${quando}</span></div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-        <div class="tx-amt red">${amtLabel}</div>
+        <div class="tx-amt ${variavel && !temEstimativa ? "" : _toneClass(-(b.amount || 0), "green", "red")}">${amtLabel}</div>
         <div style="display:flex;gap:4px">
           <button class="mock-cta" style="padding:3px 9px;font-size:.72rem" onclick="payBill(${b.id}, ${b.amount || 0}, '${nameSafe}', ${variavel})"><i class="ph ph-check" aria-hidden="true"></i> Pago</button>
           <button class="mock-cta outline" title="Editar" style="padding:3px 8px;font-size:.72rem" onclick="editBoleto(${b.id}, '${nameSafe}', ${b.amount || 0}, '${b.due_date}')"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
@@ -4790,6 +4911,10 @@ async function simularPrazo() {
   const amount = parseFloat(amtEl.value);
   const q = new URLSearchParams({ date: d });
   if (Number.isFinite(amount) && amount > 0) q.set("amount", String(amount));
+  // MICRO-ESTADO, não painel: é a tira de resultado DENTRO do card (simulação
+  // de boleto / previsão de saldo), não a carga da view. Fica no `.empty` de uma
+  // linha de propósito — o `_clBox` com sticker é o estado vazio de PAINEL e
+  // aqui estouraria a altura do card. Decisão consciente, não pendência.
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/recurring-bills/${USER_ID}/projection?${q.toString()}`, { credentials: "same-origin" });
@@ -4805,16 +4930,22 @@ function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
   const ok = p.tranquilo;
-  const accent = ok ? "var(--green)" : "var(--red)";
+  const accent = _toneMoney(p.projetado);
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
   const header = ok
     ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
     : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo}, falta ${_fmtBRL(Math.abs(p.projetado))}`;
-  const line = (label, val, positive) => `
+  // Cor E sinal saem do `_toneMoney`/`_toneClass`, nunca da flag `positive`
+  // sozinha: "Boletos até lá" é a única linha incondicional, e quem não tem
+  // boleto nenhum recebe 0 — que saía "− R$ 0,00" em vermelho.
+  const line = (label, val, positive) => {
+    const signed = (positive ? 1 : -1) * Math.abs(val);
+    return `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
       <span style="color:var(--text-2)">${label}</span>
-      <span style="color:${positive ? 'var(--text)' : 'var(--red)'}">${positive ? '+' : '−'} ${_fmtBRL(Math.abs(val))}</span>
+      <span style="color:${_toneMoney(signed)}">${_toneClass(signed, "+ ", "− ")}${_fmtBRL(Math.abs(val))}</span>
     </div>`;
+  };
   resEl.innerHTML = `
     <div style="border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.35)' : 'rgba(255,45,45,.35)'}">
       <div style="font-weight:700;color:${accent};margin-bottom:8px">${header}</div>
@@ -4840,6 +4971,10 @@ async function loadForecast() {
   const resEl = document.getElementById("forecast-result");
   if (!resEl) return;
   if (!featureAllowed("forecast")) { resEl.innerHTML = _forecastLockedMsg; return; }
+  // MICRO-ESTADO, não painel: é a tira de resultado DENTRO do card (simulação
+  // de boleto / previsão de saldo), não a carga da view. Fica no `.empty` de uma
+  // linha de propósito — o `_clBox` com sticker é o estado vazio de PAINEL e
+  // aqui estouraria a altura do card. Decisão consciente, não pendência.
   resEl.innerHTML = `<div class="empty" style="color:var(--text-3);padding:8px">Calculando…</div>`;
   try {
     const resp = await fetch(`${API}/forecast/${USER_ID}`, { credentials: "same-origin" });
@@ -4858,12 +4993,15 @@ function _renderForecast(fc) {
   const tile = (dias, p) => {
     if (!p) return "";
     const ok = p.tranquilo;
-    const accent = ok ? "var(--green)" : "var(--red)";
+    const accent = _toneMoney(p.projetado);
+    // A LEGENDA segue o valor mostrado, não a flag `tranquilo`: projeção de
+    // R$ 0,00 não está "no positivo" — está zerada. (A tinta de FUNDO da caixa
+    // continua na flag: fora do escopo decidido para esta rodada.)
     return `
       <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
         <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
         <div style="font-weight:700;font-size:1.05rem;color:${accent};margin-top:2px">${_fmtBRL(p.projetado)}</div>
-        <div style="font-size:.72rem;color:var(--text-2);margin-top:2px">${ok ? "no positivo" : "no vermelho"}</div>
+        <div style="font-size:.72rem;color:var(--text-2);margin-top:2px">${_toneClass(p.projetado, "no positivo", "no vermelho") || "zerado"}</div>
       </div>`;
   };
   const h = fc.horizons || {};
@@ -4906,7 +5044,7 @@ async function _fetchRecurringIncomes({ force = false } = {}) {
       const txt = await resp.text();
       let detail = txt;
       try { detail = JSON.parse(txt).detail || txt; } catch(_) {}
-      throw new Error(`(HTTP ${resp.status}) ${detail}`);
+      throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
     return data.incomes || [];
@@ -4978,6 +5116,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
     // se o user entrou direto na aba de receitas.
     _hydrateRecurringIncomeSobra();
   } catch (err) {
+    if (_sessaoExpirou(err, stats)) return;
     stats.innerHTML = `<div class="empty" style="grid-column:1/-1;color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
 }
@@ -5035,7 +5174,7 @@ function _renderRecurringIncomeView(items) {
   stats.innerHTML = `
     <div class="stat-tile" style="animation-delay:0ms">
       <div class="stat-label">Total mensal</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(total)}</div>
+      <div class="stat-value" style="color:${_toneMoney(total)}">${_fmtBRL(total)}</div>
       <div class="stat-delta" style="color:var(--text-3)">${active.length} recorrente${active.length === 1 ? "" : "s"}</div>
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
@@ -5050,7 +5189,7 @@ function _renderRecurringIncomeView(items) {
     </div>
     <div class="stat-tile" style="animation-delay:180ms">
       <div class="stat-label">Sobra prevista</div>
-      <div class="stat-value" style="color:${!hasExpenseData ? "var(--text-3)" : (leftover >= 0 ? "var(--green)" : "var(--red)")}">${hasExpenseData ? _fmtBRL(leftover) : "—"}</div>
+      <div class="stat-value" style="color:${!hasExpenseData ? "var(--text-3)" : _toneMoney(leftover)}">${hasExpenseData ? _fmtBRL(leftover) : "—"}</div>
       <div class="stat-delta" style="color:var(--text-3)">${hasExpenseData ? "receitas fixas − gastos fixos" : "calculando…"}</div>
     </div>
   `;
@@ -5075,7 +5214,7 @@ function _renderRecurringIncomeView(items) {
             <div class="tx-desc">${escapeHtmlSafe(x.rec.name)} · ${x.date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</div>
             <div class="tx-meta">${_formatDueIn(x.date)} · ${x.rec.is_primary ? "Renda principal" : "Renda extra"}</div>
           </div>
-          <div class="tx-amt green">+${_fmtBRL(x.rec.amount)}</div>
+          <div class="tx-amt ${_toneClass(x.rec.amount, "green", "red")}">+${_fmtBRL(x.rec.amount)}</div>
         </div>
       `).join("")
     : `<div class="empty" style="padding:20px;text-align:center;color:var(--text-3)">Nada nos próximos 7 dias.</div>`;
@@ -5133,7 +5272,7 @@ function _renderRecurringIncomeRow(r) {
         <div class="tx-desc">${escapeHtmlSafe(r.name)}</div>
         <div class="tx-meta">${when}${adjustText}${_futureStartHint(r.start_date)}</div>
       </div>
-      <div class="tx-amt green">+${_fmtBRL(r.amount)}</div>
+      <div class="tx-amt ${_toneClass(r.amount, "green", "red")}">+${_fmtBRL(r.amount)}</div>
     </div>
   `;
 }
@@ -5413,6 +5552,7 @@ async function loadAnalyticsView(forceFresh = false, months = null, { background
     _analyticsCache = data;
     renderAnalyticsView(data);
   } catch (err) {
+    if (_sessaoExpirou(err, statsEl)) return;
     statsEl.innerHTML = `<div class="empty" style="grid-column:1/-1;padding:30px;text-align:center;color:var(--red)">Erro ao carregar análises: ${escapeHtmlSafe(String(err.message || err))}</div>`;
   }
 }
@@ -5428,7 +5568,7 @@ async function _fetchAnalyticsAll(months, { force = false } = {}) {
       // e o render pintaria KPIs/gráficos vazios COMO SUCESSO — no puxão, apagando
       // o render bom e reportando sucesso. Lança nos obrigatórios; os opcionais
       // (optional() abaixo) engolem esse throw e viram {}.
-      if (!r.ok) throw new Error(`analytics (HTTP ${r.status}) ${url}`);
+      if (!r.ok) throw _erroHttp(r.status, "", `analytics (HTTP ${r.status}) ${url}`);
       return r.json();
     };
     // patterns/insights são opcionais: falha de rede/HTTP vira {} (não derruba a
@@ -5471,6 +5611,31 @@ function renderAnalyticsView(data) {
   renderAnalyticsMerchants(data.merchants, data.months);
   renderAnalyticsInsights(data.insights);
   renderAnalyticsPatterns(data.patterns);
+}
+
+/* A cor de um VALOR de dinheiro, uma regra só pra todas as telas: verde é
+   ganho, vermelho é perda e ZERO não é nenhum dos dois — sai neutro. Antes
+   cada tela repetia `x >= 0 ? verde : vermelho`, e o zero (parcelamento
+   quitado, orçamento não usado, sobra exata) saía verde com cara de notícia
+   boa. Tokens, nunca hex: `--green`/`--red` são redefinidos no tema claro.
+   NÃO confundir com `catColors()`, que é cor de CATEGORIA e de estouro de
+   orçamento — outro conceito. */
+function _toneMoney(v) {
+  // Decide pelo que a tela MOSTRA, não pelo valor bruto. `_fmtBRL` arredonda em
+  // centavos e os valores chegam de reduce com divisão (`_recMonthlyEquiv` faz
+  // v*52/12, v*365/12): 1500.20 + 300.10 - 1800.30 dá 2.27e-13, que é > 0 e
+  // saía VERDE embaixo de um "R$ 0,00" — o bug que este helper existe pra
+  // matar. O espelho, -0.004 vermelho num "R$ -0,00", morre no mesmo corte.
+  //
+  // SIMÉTRICO (`sign * round(abs)`), nunca `Math.round` cru: `Math.round` é
+  // meio-pra-CIMA e o `toLocaleString` do `_fmtBRL` é halfExpand (meio pra LONGE
+  // do zero, ECMA-402). Divergem no meio-centavo negativo — `-0.005*100` é
+  // exatamente -0.5, `Math.round(-0.5)` dá -0 (neutro) e a tela escreve
+  // "R$ -0,01". Cor e texto discordando é o mesmo defeito, de novo.
+  // NaN (valor não-numérico) cai no neutro: nenhum ramo de comparação aceita.
+  const n = Number(v);
+  const centavos = Math.sign(n) * Math.round(Math.abs(n) * 100);
+  return centavos > 0 ? "var(--green)" : (centavos < 0 ? "var(--red)" : "var(--text-2)");
 }
 
 function _fmtBRL(v) {
@@ -5524,7 +5689,7 @@ function renderAnalyticsKPIs(k, months) {
   const peak = k.peak_day;
   const peakHTML = peak
     ? `<div class="stat-value">${_fmtDateBR(peak.date)}</div>
-       <div class="stat-delta down">${_fmtBRL(peak.total)} em gastos</div>`
+       <div class="stat-delta ${_toneClass(-peak.total, "up", "down")}">${_fmtBRL(peak.total)} em gastos</div>`
     : `<div class="stat-value" style="color:var(--text-3)">—</div>
        <div class="stat-delta">sem gastos no período</div>`;
 
@@ -5536,7 +5701,7 @@ function renderAnalyticsKPIs(k, months) {
     </div>
     <div class="stat-tile">
       <div class="stat-label">Receita média</div>
-      <div class="stat-value" style="color:var(--green)">${_fmtBRL(avgIncome)}</div>
+      <div class="stat-value" style="color:${_toneMoney(avgIncome)}">${_fmtBRL(avgIncome)}</div>
       <div class="stat-delta ${dIncome.cls}">${dIncome.text}</div>
     </div>
     <div class="stat-tile">
@@ -5564,6 +5729,9 @@ function renderAnalyticsEvolution(evolution) {
   Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
   const labels  = evolution.map(b => _fmtMonthLabel(b.month));
   const expense = evolution.map(b => b.expense);
+  if (_chartVazio(el, _serieVazia(expense),
+                  "Sem gastos no período",
+                  "Manda teus gastos pro Piggy no WhatsApp pra ver a evolução.")) return;
   _trackAnalyticsChart(el, {
     type: "line",
     data: {
@@ -5595,6 +5763,9 @@ function renderAnalyticsIncomeExpense(evolution) {
   if (!el || typeof Chart === "undefined") return;
   const t = _analyticsTheme();
   const labels  = evolution.map(b => _fmtMonthLabel(b.month));
+  if (_chartVazio(el, _serieVazia((evolution || []).flatMap(b => [b.income || 0, b.expense || 0])),
+                  "Sem entradas nem saídas no período",
+                  "Quando houver movimento, a comparação aparece aqui.")) return;
   _trackAnalyticsChart(el, {
     type: "bar",
     data: {
@@ -5626,11 +5797,9 @@ function renderAnalyticsCategoryDonut(categories) {
   const el = document.getElementById("mock-category-donut");
   if (!el || typeof Chart === "undefined") return;
   const t = _analyticsTheme();
-  if (!categories || !categories.length) {
-    const ctx = el.getContext("2d");
-    ctx.clearRect(0, 0, el.width, el.height);
-    return;
-  }
+  if (_chartVazio(el, _serieVazia((categories || []).map(c => c.total)),
+                  "Sem gastos por categoria",
+                  "Manda o gasto pro Piggy no WhatsApp e ele já entra numa categoria.")) return;
   const labels = categories.map(c => c.name);
   const data   = categories.map(c => c.total);
   // Ignora c.color de propósito: a maioria das categorias herda o default roxo
@@ -5663,6 +5832,9 @@ function renderAnalyticsWeekday(weekday) {
   const t = _analyticsTheme();
   const labels  = weekday.map(w => w.label[0].toUpperCase() + w.label.slice(1));
   const data    = weekday.map(w => w.avg);
+  if (_chartVazio(el, _serieVazia(data),
+                  "Sem gastos pra comparar os dias",
+                  "Com alguns lançamentos dá pra ver em que dia você gasta mais.")) return;
   const max     = Math.max(...data, 1);
   const colors  = weekday.map(w => {
     // Idem: estas cores vao para o backgroundColor do Chart.js, em canvas.
@@ -5882,7 +6054,7 @@ function renderAnalyticsMerchants(merchants, months) {
           <div class="tx-desc" title="${escapeHtmlSafe(rawName)}">${escapeHtmlSafe(displayName)}</div>
           <div class="tx-meta">${escapeHtmlSafe(debCred)}</div>
         </div>
-        <div class="tx-amt red">-${_fmtBRL(m.total)}</div>
+        <div class="tx-amt ${_toneClass(-m.total, "green", "red")}">-${_fmtBRL(m.total)}</div>
       </div>`;
   }).join("");
 }
@@ -6121,6 +6293,7 @@ async function loadHistoryView(forceFresh = false, { background = false } = {}) 
     // navegação/filtro: renderiza o estado de erro, então o contador passa a 1.
     if (background) throw err;
     _historyFilters.page = 1;
+    if (_sessaoExpirou(err, document.getElementById("history-timeline"))) return;
     renderHistoryTimeline(null, /*append=*/false);
   } finally {
     _historyReloadsInFlight--;   // solto quando a LISTA assenta — nunca preso no stats
@@ -6146,7 +6319,7 @@ async function _fetchHistoryList(filters, opts = {}) {
     // Sem checar r.ok, um 401/500 voltaria como payload de erro e o
     // renderHistoryTimeline substituiria a timeline boa por "Erro ao carregar",
     // reportando o puxão como sucesso. Lança pra falha REAL subir pelo canal.
-    if (!r.ok) throw new Error(`histórico (HTTP ${r.status})`);
+    if (!r.ok) throw _erroHttp(r.status, "", `histórico (HTTP ${r.status})`);
     return await r.json();
   };
   // allowParallel = busca concorrente (ex.: digitação incremental futura): sem
@@ -6350,7 +6523,7 @@ function _historyRowHTML(i) {
   const isDespesa = i.tipo === "despesa" || i.tipo === "saida";
   const valor = Number(i.valor || 0);
   const sign = isReceita ? "+" : (isCredito || isDespesa ? "-" : "");
-  const amtClass = isReceita ? "green" : "red";
+  const amtClass = _toneClass(isReceita ? valor : -valor, "green", "red");
   const icon = isReceita ? "<i class='ph ph-trend-down' aria-hidden='true'></i>" : (isCredito ? "<i class='ph ph-credit-card' aria-hidden='true'></i>" : "<i class='ph ph-receipt' aria-hidden='true'></i>");
   const time = (i.criado_em || "").slice(11, 16);
   const desc = i.alvo || i.nota || "—";
@@ -6486,7 +6659,7 @@ function applyTheme(theme) {
   const overviewVisible = document.getElementById("overview-view")?.classList.contains("active");
   if (overviewVisible && lastData) {
     const d = lastData;
-    renderCatChart(d.expense_categories);
+    buildCatChart(d.expense_categories || []);   // idem render(): sem guarda de .length
     if (_expenseSeries) buildExpenseChart(_expenseSeries, _expensePeriod);
     if (_lastHistory && _lastHistory.length) buildHistoryChart(_lastHistory);
   }
@@ -7497,7 +7670,7 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
         signal: monthAbortController.signal,
       }
     );
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw _erroHttp(r.status, "", `HTTP ${r.status}`);
     const data = await r.json();
     if (seq !== monthRequestSeq) return;
     if (!isCurrentViewData(data)) {
@@ -7519,6 +7692,9 @@ async function fetchMonthHttp(year, month, page = 1, limit = LAUNCHES_LIMIT, { b
     if (seq === monthRequestSeq && !background) {
       stopSpin();
       setLaunchesLoading(false);
+      // Sessão expirada: estado final com ação no card, em vez de deixar o
+      // render anterior (ou o vazio) com cara de tela carregada.
+      if (_sessaoExpirou(err, document.getElementById("launches-card"))) return false;
     }
     // O render antigo fica (certo), mas quem chamou precisa saber que nada
     // veio — o puxar pra atualizar usa isto pra ficar âmbar em vez de
@@ -9131,7 +9307,7 @@ async function openPocketHistory(pocketName) {
   if (actionsEl) actionsEl.style.display = "none";
   const ofNoteEl = document.getElementById("pkt-of-note");
   if (ofNoteEl) ofNoteEl.style.display = "none";
-  bodyEl.innerHTML    = `<div class="pkt-hist-loading">Carregando…</div>`;
+  bodyEl.innerHTML    = _clBox("loading", "Carregando…", "", "loading-sticker");
   overlay.classList.add("open");
 
   try {
@@ -9141,7 +9317,7 @@ async function openPocketHistory(pocketName) {
       headers: csrfHeaders({}),
     });
     const data = await readResponsePayload(res);
-    if (!res.ok) throw new Error(data.detail || "Erro ao carregar histórico.");
+    if (!res.ok) throw _erroHttp(res.status, "", data.detail || "Erro ao carregar histórico.");
 
     const p = data.pocket || {};
     const t = data.totals || {};
@@ -9183,6 +9359,7 @@ async function openPocketHistory(pocketName) {
       }).join("")
     }</div>`;
   } catch (err) {
+    if (_sessaoExpirou(err, bodyEl)) return;
     bodyEl.innerHTML = `<div class="pkt-hist-error">${esc(err.message || "Erro ao carregar histórico.")}</div>`;
   }
 }
@@ -9416,7 +9593,10 @@ async function openBillDetailModal(billId, opts = {}) {
   }
 
   const overlay = document.getElementById("bill-detail-overlay");
-  document.getElementById("bill-detail-title").textContent = "Carregando...";
+  // Micro-estado: é o TÍTULO do modal virando placeholder enquanto a fatura
+  // carrega, não um painel — por isso texto puro e não `_clBox`. Reticências
+  // tipográficas, como o resto do app.
+  document.getElementById("bill-detail-title").textContent = "Carregando…";
   document.getElementById("bill-detail-sub").textContent = "—";
   document.getElementById("bill-detail-total").textContent = "—";
   document.getElementById("bill-detail-paid").textContent = "—";
@@ -9687,7 +9867,8 @@ async function openPayBillModal(opts) {
   opts = opts || {};
   const overlay = document.getElementById("pay-bill-overlay");
   document.getElementById("pay-bill-balance").textContent = "—";
-  document.getElementById("pay-bill-list").innerHTML = '<div class="empty" style="padding:14px;text-align:center;font-size:.78rem;color:var(--text-3)">Carregando...</div>';
+  // Micro-estado dentro do modal de pagamento (a lista de faturas), não painel.
+  document.getElementById("pay-bill-list").innerHTML = '<div class="empty" style="padding:14px;text-align:center;font-size:.78rem;color:var(--text-3)">Carregando…</div>';
   document.getElementById("pay-bill-empty").style.display = "none";
   document.getElementById("pay-bill-form").style.display = "none";
   document.getElementById("pay-bill-submit-btn").disabled = true;
@@ -10074,31 +10255,16 @@ window.pigModalKeys && pigModalKeys("export-overlay", closeExportModal);
 /* ═══════════════════════════════════════════════════════════════════════
    CHARTS
 ═══════════════════════════════════════════════════════════════════════ */
-/* Ponto ÚNICO de decisão do gráfico de categorias: sem a destruição, o mês
-   vazio mantinha na tela o donut do mês anterior (a guarda antiga só pulava a
-   chamada). Mesma classe de bug segue em chartHistory (:10278) e chartDay
-   (:10165) — fora do escopo desta ficha. */
-function renderCatChart(cats) {
-  const vazio = !(cats || []).length;
-  const el = document.getElementById("chart-cat");
-  const empty = document.getElementById("chart-cat-empty");
-  if (vazio) {
-    if (chartCat) { chartCat.destroy(); chartCat = null; }
-    if (el) el.hidden = true;
-    if (empty) empty.hidden = false;
-    return;
-  }
-  if (el) el.hidden = false;
-  if (empty) empty.hidden = true;
-  buildCatChart(cats);
-}
 function buildCatChart(cats) {
   const el = document.getElementById("chart-cat"); if (!el) return;
+  if (chartCat) { chartCat.destroy(); chartCat = null; }
+  if (_chartVazio(el, _serieVazia((cats || []).map(c => c.total)),
+                  "Sem gastos neste mês",
+                  "Manda o gasto pro Piggy no WhatsApp que a rosquinha aparece aqui.")) return;
   const labels = cats.map(c => c.categoria === "sem categoria" ? " Sem Cat." : c.categoria);
   const data   = cats.map(c => c.total);
   const _pal = catColors();
   const colors = cats.map((_, i) => _pal[i % _pal.length]);
-  if (chartCat) chartCat.destroy();
   chartCat = new Chart(el, {
     type:"doughnut",
     data:{ labels, datasets:[{ data, backgroundColor:colors.map(c=>c+"bb"), borderColor:colors, borderWidth:1.5, hoverOffset:8 }] },
@@ -10136,6 +10302,10 @@ let _expenseSeries = null;
 
 function buildExpenseChart(series, days) {
   const el = document.getElementById("chart-day"); if (!el) return;
+  if (chartDay) { chartDay.destroy(); chartDay = null; }
+  if (_chartVazio(el, _serieVazia((series || []).map(r => r.total)),
+                  "Nada lançado nesse período",
+                  "Escolhe outro período ou manda um gasto pro Piggy no WhatsApp.")) return;
   const byDate = {};
   (series || []).forEach(r => { byDate[r.date] = r.total; });
   const pad = n => String(n).padStart(2, "0");
@@ -10149,7 +10319,6 @@ function buildExpenseChart(series, days) {
   }
   const step = days <= 7 ? 1 : days <= 30 ? 5 : 15;
   const light = _isLightMode();
-  if (chartDay) chartDay.destroy();
   chartDay = new Chart(el, {
     type:"line",
     data:{ labels, datasets:[{
@@ -10190,6 +10359,11 @@ function loadExpenseChart(days) {
   const promise = (async () => {
     try {
       const r = await fetch(`${API}/expenses/daily/${USER_ID}?days=${days}`, { credentials: "same-origin" });
+      if (r.status === 401) {
+        const el = document.getElementById("chart-day");
+        _sessaoExpirou(401, el && el.parentElement);
+        return;
+      }
       if (!r.ok) return;
       const payload = await r.json();
       // Pedido superado não sobrescreve resposta mais nova — mesmo princípio
@@ -10221,7 +10395,18 @@ function setExpensePeriod(days, btn) {
 ═══════════════════════════════════════════════════════════════════════ */
 function buildHistoryChart(history) {
   const el = document.getElementById("chart-history");
-  if (!el || !history || !history.length) return;
+  if (!el) return;
+  if (chartHistory) { chartHistory.destroy(); chartHistory = null; }
+  // ANTÍDOTO do estado sobreposto: o 401 deste painel pinta a caixa do
+  // `_chartVazio` (canvas display:none + minHeight no wrap), e este é o único
+  // caminho que a desfaz. Sem ele, depois de um 401 a sessão voltava, o Chart
+  // era instanciado num canvas invisível e o gráfico só voltava com reload.
+  _chartVazio(el, false);
+  // SEM estado vazio aqui, e é medição, não esquecimento: o backend só cria a
+  // chave de um mês quando existe linha em `launches`, e `fetchHistory` devolve
+  // cedo com lista vazia (a seção nem aparece). Não há série toda em zero que
+  // chegue até aqui — o texto que estava aqui era código morto.
+  if (!history || !history.length) return;
 
   const labels   = history.map(h => {
     const [y, m] = h.month.split("-");
@@ -10230,7 +10415,6 @@ function buildHistoryChart(history) {
   const incomes  = history.map(h => h.income  || 0);
   const expenses = history.map(h => h.expense || 0);
 
-  if (chartHistory) chartHistory.destroy();
   chartHistory = new Chart(el, {
     type: "bar",
     data: {
@@ -10302,16 +10486,34 @@ async function fetchHistory() {
     const r = await fetch(`${API}/history/${USER_ID}`, {
       credentials: "same-origin"
     });
+    if (r.status === 401) {
+      const titulo = document.getElementById("history-title");
+      if (titulo) titulo.style.display = "";
+      const wrap = document.getElementById("history-wrap");
+      if (wrap) wrap.style.display = "";
+      _sessaoExpirou(401, wrap);
+      return;
+    }
     if (!r.ok) return;
 
     const payload = await r.json();
     const history = payload.data || [];
     _lastHistory = history;
 
-    if (!history.length) return;
+    const titulo = document.getElementById("history-title");
+    const wrap   = document.getElementById("history-wrap");
+    // Sem dado, a seção volta a sumir — inclusive a que o ramo de 401 acima
+    // revelou. `buildHistoryChart([])` limpa a caixa sobreposta antes disso,
+    // senão ela ficava escondida dentro do wrap esperando o próximo 401.
+    if (!history.length) {
+      buildHistoryChart([]);
+      if (titulo) titulo.style.display = "none";
+      if (wrap)   wrap.style.display   = "none";
+      return;
+    }
 
-    document.getElementById("history-title").style.display = "";
-    document.getElementById("history-wrap").style.display  = "";
+    if (titulo) titulo.style.display = "";
+    if (wrap)   wrap.style.display   = "";
 
     setTimeout(() => buildHistoryChart(history), 50);
   } catch(e) {
@@ -10623,7 +10825,10 @@ function render(d) {
   document.getElementById("charts-title").style.display = "";
   document.getElementById("charts-grid").style.display  = "";
   setTimeout(() => {
-    renderCatChart(d.expense_categories);
+    // Sem guarda de `.length`: mês sem gasto precisa CHEGAR ao buildCatChart
+    // pra cair no estado vazio — a guarda antiga deixava a rosquinha do mês
+    // anterior na tela depois da troca de mês.
+    buildCatChart(d.expense_categories || []);
     // Gráfico de evolução: janela rolante via /expenses/daily (7D/30D/3M).
     loadExpenseChart(_expensePeriod);
   }, 50);
@@ -10740,7 +10945,7 @@ function _renderAffiliateView(data) {
     </div>
     <div class="stat-tile" style="animation-delay:60ms">
       <div class="stat-label">Disponível pra saque</div>
-      <div class="stat-value" style="color:var(--green)">${fmt(s.available || 0)}</div>
+      <div class="stat-value" style="color:${_toneMoney(s.available)}">${fmt(s.available || 0)}</div>
       <div class="stat-delta" style="color:var(--text-3)">mínimo ${fmt(data.min_payout || 50)}</div>
     </div>
     <div class="stat-tile" style="animation-delay:120ms">
