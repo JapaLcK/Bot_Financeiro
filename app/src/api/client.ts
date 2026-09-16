@@ -2,11 +2,7 @@ import Constants from "expo-constants";
 import { z } from "zod";
 
 import { credenciaisSchema } from "./schemas/auth";
-import {
-  guardarCredenciais,
-  lerCredenciais,
-  limparCredenciais,
-} from "../storage/secure";
+import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
 /** Header que faz o servidor entregar token no corpo e NENHUM cookie. */
 const HEADER_CLIENTE = "X-PigBank-Client";
@@ -64,7 +60,7 @@ export class RenovacaoIndisponivel extends ErroDeApi {
  * continuar", que é mentir sobre o estado da conta.
  */
 type Renovacao =
-  | { ok: true; access: string }
+  | { ok: true; access: string; refresh: string }
   | { ok: false; motivo: "terminal" }
   | { ok: false; motivo: "transitorio"; status: number }
   | { ok: false; motivo: "sessao-trocou" };
@@ -115,10 +111,10 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
       // passageiro do servidor, e tratá-lo como fim de sessão transformaria
       // dois minutos de instabilidade em logout de todo mundo.
       if (resposta.status === 401) {
-        const atual = await lerCredenciais();
-        // Apaga só se ainda for a MESMA sessão: se outra conta entrou enquanto
-        // isto estava no ar, apagar levaria a sessão dela junto.
-        if (atual?.refresh === refreshDeOrigem) await limparCredenciais();
+        // Apaga só se ainda for a MESMA sessão, e a comparação tem de ser
+        // ATÔMICA com a escrita: se outra conta entrou enquanto isto estava no
+        // ar, apagar levaria a sessão dela junto.
+        await limparSe(refreshDeOrigem);
         return { ok: false, motivo: "terminal" };
       }
       if (!resposta.ok) {
@@ -126,17 +122,20 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
       }
 
       const novas = credenciaisSchema.parse(await resposta.json());
-      // A segunda conferência. A conta pode ter trocado com a requisição no ar;
-      // gravar sem olhar restauraria a sessão antiga por cima da nova.
-      const agora = await lerCredenciais();
-      if (agora?.refresh !== refreshDeOrigem) {
-        return { ok: false, motivo: "sessao-trocou" };
-      }
-      await guardarCredenciais({
+      // Compara-e-troca. A conta pode ter trocado com a requisição no ar, e
+      // conferir numa chamada para gravar na seguinte deixa exatamente a janela
+      // em que a outra conta cabe — o resultado seria a sessão antiga
+      // restaurada por cima da nova.
+      const trocou = await trocarSe(refreshDeOrigem, {
         access: novas.access_token,
         refresh: novas.refresh_token,
       });
-      return { ok: true, access: novas.access_token };
+      if (!trocou) return { ok: false, motivo: "sessao-trocou" };
+      return {
+        ok: true,
+        access: novas.access_token,
+        refresh: novas.refresh_token,
+      };
     } catch {
       // Falha de REDE não apaga a sessão: o token pode estar perfeitamente vivo
       // e o usuário só estar no elevador. Quem apaga é o 401 acima, que é
@@ -227,8 +226,7 @@ export async function chamar<T>(
       //
       // E só apaga se ainda for a mesma sessão: outra conta pode ter entrado
       // enquanto isto estava no ar, e apagar levaria a sessão dela junto.
-      const atual = await lerCredenciais();
-      if (atual?.access === renovada.access) await limparCredenciais();
+      await limparSe(renovada.refresh);
       throw new SessaoExpirada();
     }
   }

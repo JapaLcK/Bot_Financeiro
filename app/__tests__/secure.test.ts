@@ -2,13 +2,21 @@ import {
   guardarCredenciais,
   lerCredenciais,
   limparCredenciais,
+  limparSe,
+  trocarSe,
 } from "@/storage/secure";
 
 /** O cofre em memória do dublê de `expo-secure-store` (ver `jest.setup.js`). */
 const cofre = (global as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 
+/** Faz a próxima escrita no cofre falhar, como um keychain recusando. */
+const falharEscrita = (
+  global as unknown as { __falharEscritaNoCofre: (v: boolean) => void }
+).__falharEscritaNoCofre;
+
 beforeEach(async () => {
+  falharEscrita(false);
   cofre.clear();
   await limparCredenciais();
 });
@@ -63,5 +71,73 @@ describe("o par de credenciais é atômico", () => {
     await guardarCredenciais({ access: "a1", refresh: "rt_1" });
     await limparCredenciais();
     expect([...cofre.keys()]).toHaveLength(0);
+  });
+});
+
+describe("as operações de sessão são serializadas", () => {
+  it("trocarSe recusa quando a sessão já é de outro dono", async () => {
+    await guardarCredenciais({ access: "a1", refresh: "rt_A" });
+    await guardarCredenciais({ access: "b1", refresh: "rt_B" });
+
+    const trocou = await trocarSe("rt_A", { access: "a2", refresh: "rt_A2" });
+    expect(trocou).toBe(false);
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "b1",
+      refresh: "rt_B",
+    });
+  });
+
+  it("trocarSe grava quando a sessão ainda é a mesma", async () => {
+    await guardarCredenciais({ access: "a1", refresh: "rt_A" });
+    await expect(
+      trocarSe("rt_A", { access: "a2", refresh: "rt_A2" }),
+    ).resolves.toBe(true);
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "a2",
+      refresh: "rt_A2",
+    });
+  });
+
+  it("uma troca em voo NÃO sobrescreve a conta que entrou no meio", async () => {
+    // Sem a fila, "ler, comparar e gravar" tem dois pontos de `await` no meio,
+    // e a entrada de outra conta cabe em qualquer um deles: a sessão antiga
+    // voltaria por cima da nova. É o caso que a revisão apontou.
+    await guardarCredenciais({ access: "a1", refresh: "rt_A" });
+
+    const trocaDaA = trocarSe("rt_A", { access: "a2", refresh: "rt_A2" });
+    const entradaDaB = guardarCredenciais({ access: "b1", refresh: "rt_B" });
+    const [trocou] = await Promise.all([trocaDaA, entradaDaB]);
+
+    const guardado = await lerCredenciais();
+    // Ou a troca da A aconteceu ANTES da entrada da B (e a B venceu, porque
+    // veio depois), ou ela foi recusada. Em nenhum caso a A volta por cima.
+    expect(guardado).toEqual({ access: "b1", refresh: "rt_B" });
+    expect(typeof trocou).toBe("boolean");
+  });
+
+  it("limparSe só apaga a própria sessão", async () => {
+    await guardarCredenciais({ access: "b1", refresh: "rt_B" });
+    await expect(limparSe("rt_A")).resolves.toBe(false);
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "b1",
+      refresh: "rt_B",
+    });
+    await expect(limparSe("rt_B")).resolves.toBe(true);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
+  it("uma falha não mata a fila", async () => {
+    falharEscrita(true);
+    await expect(
+      guardarCredenciais({ access: "x", refresh: "rt_x" }),
+    ).rejects.toThrow();
+    falharEscrita(false);
+
+    // A corrente continua viva: a operação seguinte roda normalmente.
+    await guardarCredenciais({ access: "ok", refresh: "rt_ok" });
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "ok",
+      refresh: "rt_ok",
+    });
   });
 });

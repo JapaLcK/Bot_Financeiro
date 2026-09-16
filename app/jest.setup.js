@@ -5,9 +5,18 @@
 // referenciadas dentro dela.
 const mockCofre = new Map();
 global.__cofreDeTeste = mockCofre;
+// A falha é injetada por SINALIZADOR lido dentro do dublê, não por
+// reatribuição do método: o módulo sob teste importa o namespace, e trocar a
+// propriedade depois do import não chega até ele (medido — o teste passava
+// verde sem exercitar nada).
+const mockFalha = { escrita: false };
+global.__falharEscritaNoCofre = (v) => (mockFalha.escrita = v);
 jest.mock("expo-secure-store", () => ({
   getItemAsync: async (k) => (mockCofre.has(k) ? mockCofre.get(k) : null),
-  setItemAsync: async (k, v) => void mockCofre.set(k, v),
+  setItemAsync: async (k, v) => {
+    if (mockFalha.escrita) throw new Error("keychain recusou");
+    mockCofre.set(k, v);
+  },
   deleteItemAsync: async (k) => void mockCofre.delete(k),
 }));
 
