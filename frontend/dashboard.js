@@ -68,6 +68,7 @@ function _loadScriptOnce(src) {
 function ensureSortable() {
   if (typeof window.Sortable !== "undefined") return Promise.resolve();
   return _loadScriptOnce("https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js")
+    // silencio-ok: CDN fora não é sessão expirada; sem Sortable a lista só não arrasta.
     .catch(() => {});
 }
 
@@ -822,7 +823,7 @@ async function loadCardsView(forceFresh = false, { background = false } = {}) {
         _cardsCache = fresh;
         renderCardsView(fresh);
       }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(grid));
     return;
   }
 
@@ -1314,7 +1315,7 @@ async function loadInstallmentsView(forceFresh = false, { background = false } =
         _instCache = fresh;
         renderInstallmentsView(fresh);
       }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(list));
     return;
   }
 
@@ -1855,7 +1856,7 @@ async function loadCategoriesView(forceFresh = false, { background = false } = {
     renderCategoriesView(_categoriesCache, showArchived);
     _fetchCategories(true).then(fresh => {
       if (fresh) { _categoriesCache = fresh; renderCategoriesView(fresh, showArchived); }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(grid));
     return;
   }
 
@@ -2178,12 +2179,45 @@ function _sessaoExpirou(motivo, el) {
     // e `buildHistoryChart` passavam a achar null e voltavam em silêncio mesmo
     // depois de a sessão voltar — só reload consertava.
     const canvas = el.tagName === "CANVAS" ? el : el.querySelector("canvas");
-    if (canvas) _chartVazio(canvas, true, "Sua sessão expirou", corpo, "thinking");
-    else el.innerHTML = _clBox("thinking", "Sua sessão expirou", corpo);
+    if (canvas) {
+      _chartVazio(canvas, true, "Sua sessão expirou", corpo, "thinking");
+      // A caixa fica MARCADA como terminal, e é isso que a protege do
+      // `applyTheme`: trocar o tema reconstruía os gráficos a partir do cache
+      // (`_lastHistory`, `_expenseSeries`, `_analyticsCache`), e o
+      // `_chartVazio(el, false)` de dentro do build* apagava a caixa e
+      // instanciava o Chart com a série VELHA — a sessão expirada sumia da tela
+      // sozinha, por uma troca de tema. Medido nos dois gráficos do overview.
+      const box = canvas.parentElement && canvas.parentElement.querySelector(":scope > .chart-empty");
+      if (box) box.dataset.terminal = "1";
+    } else el.innerHTML = _clBox("thinking", "Sua sessão expirou", corpo);
     const btn = (canvas ? canvas.parentElement : el).querySelector("[data-relogin]");
     if (btn) btn.addEventListener("click", () => location.assign("/login"));
   }
   return true;
+}
+
+/* Revalidação de cache que leva 401 = MESMO estado terminal do caminho sem
+   cache, e não silêncio. O ramo stale-while-revalidate engolia a rejeição num
+   `.catch(() => {})`: cache quente → números velhos na tela, sem caixa, sem
+   botão, para sempre — e não há rede de segurança fora daqui (o interceptor de
+   `frontend/static/auth-refresh.js` não redireciona pro /login). É o caminho
+   MAIS comum: `switchView` chama sem `forceFresh`, então toda re-entrada numa
+   view já visitada cai no cache.
+
+   SIM, a caixa cobre dado bom em cache, e é decisão tomada: aqui o usuário
+   acabou de NAVEGAR pra view e a promessa é estado final com ação — número
+   velho sem aviso lê-se como saldo de agora. Diferente do puxar-pra-atualizar
+   (`{background:true}`), que segue SEM estado terminal por decisão declarada:
+   lá a rejeição vai ao dispatcher do gesto e acende âmbar.
+
+   NÃO limpa o painel irmão: o irmão só é limpo quando o que está nele é
+   esqueleto DESTA carga (os `stats.innerHTML = ""` dos catch sem cache), e no
+   ramo de cache ele tem dado renderizado.
+
+   Um ponto só pros 8 loaders com cache — `tests/frontend/revalidacao_401.test.mjs`
+   reprova `.catch(() => {})` novo em revalidação. */
+function _revalidacaoExpirou(el) {
+  return err => { _sessaoExpirou(err, el); };
 }
 
 /* Erro de carga que CARREGA o status HTTP: é `err.status` que deixa o `catch`
@@ -2829,7 +2863,7 @@ async function loadBudgetsView(forceFresh = false, { background = false } = {}) 
     renderBudgetsView(_budgetsStatusCache);
     _fetchBudgetsStatus().then(fresh => {
       if (fresh) { _budgetsStatusCache = fresh; renderBudgetsView(fresh); }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(list));
     return;
   }
 
@@ -3245,7 +3279,7 @@ async function loadGoalsView(forceFresh = false, { background = false } = {}) {
     _renderGoalsView(_goalsCache);
     _fetchGoalsStatus().then(fresh => {
       if (fresh) { _goalsCache = fresh; _renderGoalsView(fresh); }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(grid));
     return;
   }
 
@@ -3795,7 +3829,7 @@ async function loadFixedView(forceFresh = false, { background = false } = {}) {
     _renderFixedView(_recurringCache);
     _fetchRecurring().then(fresh => {
       if (fresh && !fresh.pro_required) { _recurringCache = fresh; _renderFixedView(fresh); }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(stats));
     return;
   }
 
@@ -5066,6 +5100,9 @@ function _hydrateRecurringIncomeSobra() {
       _recurringCache = exp;
       if (_recurringIncomeCache === snapshot) _renderRecurringIncomeView(_recurringIncomeCache);
     }
+    // silencio-ok: hidratação secundária de um número. O 401 desta view já vira
+    // caixa terminal pela carga principal (`loadRecurringIncomeView`), que usa o
+    // MESMO cookie — pintar duas vezes o mesmo painel não acrescenta nada.
   }).catch(() => {});
 }
 
@@ -5096,7 +5133,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
         _recurringIncomeCache = fresh;
         _renderRecurringIncomeView(fresh);
       }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(stats));
     return;
   }
 
@@ -5545,7 +5582,7 @@ async function loadAnalyticsView(forceFresh = false, months = null, { background
         _analyticsCache = fresh;
         renderAnalyticsView(fresh);
       }
-    }).catch(() => {});
+    }).catch(_revalidacaoExpirou(statsEl));
     return;
   }
 
@@ -6648,6 +6685,16 @@ function applyTheme(theme) {
     ? '<i class="ph ph-sun" aria-hidden="true"></i>'
     : '<i class="ph ph-moon" aria-hidden="true"></i>';
   if (label) label.textContent = isLight ? "Modo claro" : "Modo escuro";
+
+  // Sessão expirada não se repinta com cache: enquanto existir caixa terminal
+  // na tela, o toggle de tema NÃO reconstrói gráfico nenhum. Um ponto só, e
+  // vale pros seis gráficos (overview + Análises) e pros futuros — o alternativo
+  // seria zerar `_lastHistory`/`_expenseSeries`/`_analyticsCache` no 401, que
+  // pede uma linha nova a cada gráfico que nascer. A marca some sozinha quando
+  // a sessão volta: a carga com 200 chama `_chartVazio(el, false)`, que REMOVE
+  // a caixa — por isso o teste "quando a sessão volta, o gráfico volta" segue
+  // verde sem nenhum código de limpeza aqui.
+  if (document.querySelector(".chart-empty[data-terminal]")) return;
 
   // Re-renderiza os gráficos da view Análises pra pegar as cores novas do tema.
   // Se o user está na view Análises, força re-fetch (cores dependem de tema,
@@ -11256,6 +11303,7 @@ async function _fetchAgentes({ force = false } = {}) {
 function _markAgentesFeedSeen() {
   fetch(`${API}/agents/${USER_ID}/feed/seen`, {
     method: "POST", credentials: "same-origin", headers: csrfHeaders(),
+    // silencio-ok: marcar como lido é fire-and-forget, não tem tela pra pintar.
   }).catch(() => {});
 }
 

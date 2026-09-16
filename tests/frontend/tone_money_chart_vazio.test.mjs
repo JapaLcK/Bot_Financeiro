@@ -299,6 +299,188 @@ test("401 no histórico: quando a sessão volta, o gráfico volta", async () => 
   await page.close();
 });
 
+test("revalidação com cache quente: 401 vira estado final, e o irmão com DADO não é limpo", async () => {
+  // Achado do Codex/Tester no #435: no ramo stale-while-revalidate o
+  // `.catch(() => {})` engolia o 401 e a tela ficava com número velho, sem
+  // caixa e sem botão — e não há redirect global pro /login
+  // (`frontend/static/auth-refresh.js`). É o caminho mais comum que existe:
+  // `switchView` chama sem `forceFresh`.
+  // NEGATIVO: troque `.catch(_revalidacaoExpirou(stats))` de volta por
+  // `.catch(() => {})` em `loadFixedView` e `temCaixa`/`temBotao` caem.
+  // POSITIVO: `antes` prova que o caminho legítimo (200) continua renderizando,
+  // e `irmaoIntacto` prova que a regra do painel irmão não regrediu — quem tem
+  // dado RENDERIZADO não é apagado pelo 401 da revalidação.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="recurring-stats"></div><div id="recurring-essentials-list"></div>' +
+      '<div id="recurring-leisure-list"></div><div id="recurring-upcoming-list"></div>' +
+      '<div id="recurring-adjustments-list"></div>');
+    USER_ID = 1;
+    // `document.cookie` lança em about:blank (setContent), e o `_fetchRecurring`
+    // manda header de CSRF. Não é o que este teste mede.
+    window.csrfHeaders = () => ({});
+    const ok = {
+      ok: true, status: 200, text: async () => "{}",
+      json: async () => ({ recurring: [
+        { id: 1, description: "Netflix", amount: 39.9, frequency: "monthly",
+          due_day: 10, category: "lazer", active: true },
+      ] }),
+    };
+    window.fetch = async () => ok;
+    await loadFixedView(true);          // popula o cache e renderiza
+    const stats = document.getElementById("recurring-stats");
+    const irmao = document.getElementById("recurring-essentials-list");
+    const antes = { stats: stats.textContent.trim().length > 0,
+                    irmao: irmao.innerHTML };
+
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadFixedView();              // ramo de cache: render + revalidação
+    await new Promise((res) => setTimeout(res, 50));
+    return {
+      renderouCom200: antes.stats,
+      texto: stats.textContent.replace(/\s+/g, " ").trim(),
+      temBotao: !!stats.querySelector("[data-relogin]"),
+      semOnclick: !stats.querySelector("[onclick]"),
+      irmaoIntacto: irmao.innerHTML === antes.irmao && antes.irmao.length > 0,
+    };
+  });
+  assert.equal(r.renderouCom200, true, "premissa: o 200 renderiza os números (caminho legítimo)");
+  assert.match(r.texto, /sessão expirou/i,
+    `401 na revalidação sumiu sem rastro — o painel mostra "${r.texto}"`);
+  assert.equal(r.temBotao, true, "estado final sem AÇÃO não fecha o achado");
+  assert.equal(r.semOnclick, true, "handler é addEventListener, não atributo inline");
+  assert.equal(r.irmaoIntacto, true,
+    "o painel irmão tinha DADO renderizado: o 401 da revalidação não pode limpá-lo");
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("o puxar-pra-atualizar continua SEM estado terminal (decisão declarada)", async () => {
+  // A correção acima passa perto: o ramo `{background:true}` do MESMO loader
+  // tem de seguir REJEITANDO sem tocar o DOM — quem sinaliza ali é o âmbar do
+  // indicador do gesto, não uma caixa por cima do dado que o usuário está
+  // puxando. NEGATIVO deste caso: roteie o background pro `_sessaoExpirou` e
+  // `pintou`/`rejeitou` caem.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="recurring-stats"></div><div id="recurring-essentials-list"></div>' +
+      '<div id="recurring-leisure-list"></div><div id="recurring-upcoming-list"></div>' +
+      '<div id="recurring-adjustments-list"></div>');
+    USER_ID = 1;
+    window.csrfHeaders = () => ({});
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    let rejeitou = false;
+    try { await loadFixedView(false, { background: true }); } catch { rejeitou = true; }
+    const stats = document.getElementById("recurring-stats");
+    return { rejeitou, pintou: /sessão expirou/i.test(stats.textContent) };
+  });
+  assert.equal(r.rejeitou, true, "o puxão precisa REJEITAR pro indicador do gesto assentar em âmbar");
+  assert.equal(r.pintou, false, "o puxão não pinta estado terminal por cima do dado (decisão do PR)");
+  await semErros(page, errs);
+  await page.close();
+});
+
+test("nenhuma revalidação nova volta a engolir o 401 em silêncio", () => {
+  // Prende a CLASSE, não a instância: eram OITO loaders com o mesmo
+  // `.catch(() => {})`. Quem quiser silêncio declara por escrito (`silencio-ok`)
+  // na linha de cima, com o motivo — e o revisor vê a declaração no diff.
+  // NEGATIVO: tire um `silencio-ok` (ou acrescente um `.catch(() => {})` sem
+  // ele) e este teste lista o arquivo:linha.
+  const js = readFileSync(DASHBOARD_JS, "utf-8").split("\n");
+  const achados = js
+    .map((l, i) => [i + 1, l])
+    // `[^`]` antes: o próprio comentário do `_revalidacaoExpirou` CITA o
+    // construto entre crases, e citação não é código.
+    .filter(([n, l]) => /[^`]\.catch\(\(\) => \{\}\)/.test(l) &&
+      !/silencio-ok/.test(js.slice(Math.max(0, n - 6), n).join("\n")))
+    .map(([n, l]) => `dashboard.js:${n}  ${l.trim().slice(0, 110)}`);
+  assert.deepEqual(achados, [],
+    "rejeição engolida sem sinal ao usuário: roteie pro `_sessaoExpirou` (`_revalidacaoExpirou`) ou declare `silencio-ok` com o motivo");
+});
+
+test("trocar o tema NÃO apaga a caixa de sessão expirada (chart-day e chart-history)", async () => {
+  // Achado do Codex/Tester: `applyTheme` reconstrói os gráficos do overview a
+  // partir do cache (`_expenseSeries`, `_lastHistory`) e o `_chartVazio(el,
+  // false)` de dentro do build* — o ANTÍDOTO do teste acima — apagava a caixa e
+  // instanciava o Chart com a série VELHA. A sessão expirada sumia da tela por
+  // uma troca de tema, nos DOIS gráficos.
+  // NEGATIVO: tire o `if (document.querySelector(".chart-empty[data-terminal]")) return;`
+  // do `applyTheme` (ou o `dataset.terminal` do `_sessaoExpirou`) e os quatro
+  // `depois.*` caem.
+  // POSITIVO: `curado` prova que a marca não prende nada — o 200 seguinte
+  // devolve os dois gráficos.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(async () => {
+    document.body.insertAdjacentHTML("beforeend", '<div id="overview-view" class="active"></div>');
+    USER_ID = 1;
+    lastData = { expense_categories: [] };
+    const dia = document.getElementById("chart-day");
+    const hist = document.getElementById("chart-history");
+    const caixa = (el) => !!el.parentElement.querySelector(":scope > .chart-empty");
+    const foto = () => ({
+      caixaDia: caixa(dia), caixaHist: caixa(hist),
+      displayDia: dia.style.display, displayHist: hist.style.display,
+    });
+
+    // 200 primeiro: é ele que popula `_expenseSeries` e `_lastHistory` — sem
+    // cache, `applyTheme` não reconstrói nada e o teste não mediria nada.
+    window.fetch = async (u) => ({
+      ok: true, status: 200,
+      json: async () => (String(u).includes("/history/")
+        ? { data: [{ month: "2026-01", income: 9, expense: 3 }] }
+        : { data: [{ date: "2026-01-01", total: 12 }] }),
+    });
+    await loadExpenseChart(7);
+    await fetchHistory();
+    await new Promise((res) => setTimeout(res, 120));
+    const comCache = { series: !!_expenseSeries, history: !!(_lastHistory && _lastHistory.length) };
+
+    window.fetch = async () => ({ ok: false, status: 401, json: async () => ({}), text: async () => "" });
+    await loadExpenseChart(7);
+    await fetchHistory();
+    const antes = foto();
+
+    window._charts = [];
+    applyTheme("light");
+    applyTheme("dark");
+    const depois = { ...foto(), instanciou: window._charts.slice() };
+
+    // Sessão volta: a marca terminal não pode prender o gráfico.
+    window.fetch = async (u) => ({
+      ok: true, status: 200,
+      json: async () => (String(u).includes("/history/")
+        ? { data: [{ month: "2026-02", income: 4, expense: 1 }] }
+        : { data: [{ date: "2026-02-01", total: 7 }] }),
+    });
+    window._charts = [];
+    await loadExpenseChart(7);
+    await fetchHistory();
+    await new Promise((res) => setTimeout(res, 120));
+    const curado = { ...foto(), instanciou: window._charts.slice() };
+    return { comCache, antes, depois, curado };
+  });
+  assert.deepEqual(r.comCache, { series: true, history: true },
+    "premissa: o 200 populou os caches que o applyTheme reconstrói");
+  assert.equal(r.antes.caixaDia, true, "premissa: o 401 pinta a caixa do chart-day");
+  assert.equal(r.antes.caixaHist, true, "premissa: o 401 pinta a caixa do chart-history");
+
+  assert.equal(r.depois.caixaDia, true, "o tema apagou a caixa de sessão expirada do chart-day");
+  assert.equal(r.depois.caixaHist, true, "o tema apagou a caixa de sessão expirada do chart-history");
+  assert.equal(r.depois.displayDia, "none", "o canvas do chart-day voltou por cima da caixa");
+  assert.equal(r.depois.displayHist, "none", "o canvas do chart-history voltou por cima da caixa");
+  assert.deepEqual(r.depois.instanciou, [],
+    `o tema instanciou Chart com a série velha: ${JSON.stringify(r.depois.instanciou)}`);
+
+  assert.equal(r.curado.caixaDia, false, "com a sessão de volta, a caixa do chart-day tem de sair");
+  assert.equal(r.curado.caixaHist, false, "com a sessão de volta, a caixa do chart-history tem de sair");
+  assert.ok(r.curado.instanciou.includes("chart-day") && r.curado.instanciou.includes("chart-history"),
+    `a marca terminal prendeu o gráfico na volta: ${JSON.stringify(r.curado.instanciou)}`);
+  await semErros(page, errs);
+  await page.close();
+});
+
 test("projeção de caixa: linha zerada não sai vermelha (comportamento, não texto)", async () => {
   // A varredura estática do teste seguinte é CEGA a este defeito quando o
   // ternário mora fora do template (`const cor = positive ? … : 'var(--red)'`),
