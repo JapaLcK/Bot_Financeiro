@@ -44,7 +44,13 @@ export async function temSessao(): Promise<boolean> {
 export async function sair(): Promise<void> {
   const daSaida = await lerCredenciais();
   try {
-    await chamar("/auth/logout", perfilSchema.partial(), { metodo: "POST" });
+    await chamar("/auth/logout", perfilSchema.partial(), {
+      metodo: "POST",
+      // A requisição fala pela sessão que INICIOU a saída. Sem isto ela releria
+      // o cofre por dentro, e uma conta que entrasse nesse intervalo teria a
+      // própria sessão revogada no servidor pelo logout da anterior.
+      credencial: daSaida ?? undefined,
+    });
   } catch {
     // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.
   } finally {

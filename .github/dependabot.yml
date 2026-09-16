@@ -108,12 +108,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-      # `react` e `react-dom` são versionados EM PAR pelo próprio projeto, igual
-      # ao webapp/: um em 19.3 com o outro em 19.4 o React não suporta.
-      react:
-        patterns:
-          - "react"
-          - "react-dom"
       # O SDK do Expo versiona os `expo-*` em bloco: subir um sozinho para uma
       # versão de outro SDK quebra o build nativo. Andam juntos ou não andam.
       expo:
@@ -135,6 +129,14 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "expo-*"
         update-types: ["version-update:semver-major"]
+      # `react` e `react-dom` NÃO andam sozinhos, em nenhum eixo. O React Native
+      # embute uma versão EXATA do renderer e a compara no primeiro render: um
+      # PR que suba só o React recria a falha de inicialização que já aconteceu
+      # neste projeto (react 19.3.0 contra o renderer 19.2.3). E o CI do app não
+      # monta componente nem gera binário, então mergearia verde.
+      # Quem escolhe a versão é o SDK do Expo; subir React é migração de SDK.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
       # `react-native` está em 0.x, e em 0.x o TREM é o minor: 0.84 → 0.85 é
       # mudança de versão do React Native, não correção. Ignorar só o major
       # deixaria o Dependabot subir o trem sozinho, com o `expo` parado — o

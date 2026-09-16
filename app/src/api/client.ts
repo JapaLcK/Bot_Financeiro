@@ -88,7 +88,7 @@ let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
   null;
 
 /**
- * O último refresh token CONSUMIDO com sucesso.
+ * A última rotação bem-sucedida: o token consumido E o que nasceu dele.
  *
  * Existe para o 401 atrasado: duas requisições saem com o mesmo access token
  * expirado, a primeira renova e termina, e só então a segunda recebe o 401 dela.
@@ -96,12 +96,17 @@ let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
  * modo que a conferência de dono acusaria "a sessão trocou" — e a tela mandaria
  * o usuário para o login com a sessão perfeitamente viva.
  *
- * Guardar qual token acabou de ser trocado distingue os dois casos que a
- * conferência confundia: "outra conta entrou" e "esta mesma sessão já foi
- * renovada por um vizinho". O segundo não é erro, é corrida normal de tela que
- * carrega várias coisas de uma vez.
+ * **Os dois lados são necessários, e guardar só o consumido abria uma brecha
+ * pior que o problema.** Se a conta A renova, a conta B entra, e só então chega
+ * o 401 atrasado da A, o token da A ainda casa com o consumido — e devolver a
+ * credencial corrente entregaria a da B para repetir uma operação da A. Num
+ * POST de dinheiro, escrita na conta errada.
+ *
+ * Com o par, a pergunta passa a ser a certa: "o cofre ainda contém exatamente o
+ * sucessor daquele token?". Se contém, é a mesma sessão, só renovada por um
+ * vizinho. Se não contém, alguém trocou de conta, e aí é fim de sessão mesmo.
  */
-let ultimoConsumido: string | null = null;
+let ultimaRotacao: { consumido: string; sucessor: string } | null = null;
 
 async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
@@ -110,9 +115,16 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
     try {
       const antes = await lerCredenciais();
       if (!antes || antes.refresh !== refreshDeOrigem) {
-        // Esta MESMA sessão já foi renovada por um vizinho? Então não há erro:
-        // devolve a credencial corrente e a requisição segue.
-        if (antes && refreshDeOrigem === ultimoConsumido) {
+        // Esta MESMA sessão já foi renovada por um vizinho? Só então não há
+        // erro. A conferência é pelos DOIS lados: o token de origem tem de ser
+        // o que foi consumido, E o cofre tem de conter exatamente o sucessor
+        // dele. Sem a segunda metade, uma troca de conta depois da rotação
+        // devolveria a credencial da conta nova.
+        if (
+          antes &&
+          ultimaRotacao?.consumido === refreshDeOrigem &&
+          ultimaRotacao.sucessor === antes.refresh
+        ) {
           return { ok: true, access: antes.access, refresh: antes.refresh };
         }
         return { ok: false, motivo: "sessao-trocou" };
@@ -152,7 +164,10 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         refresh: novas.refresh_token,
       });
       if (!trocou) return { ok: false, motivo: "sessao-trocou" };
-      ultimoConsumido = refreshDeOrigem;
+      ultimaRotacao = {
+        consumido: refreshDeOrigem,
+        sucessor: novas.refresh_token,
+      };
       return {
         ok: true,
         access: novas.access_token,
@@ -186,6 +201,19 @@ type Opcoes = {
   corpo?: unknown;
   /** Rotas públicas (config do app, por exemplo) não mandam credencial. */
   semAuth?: boolean;
+  /**
+   * Credencial FIXA, em vez da que estiver no cofre na hora.
+   *
+   * É o que o logout precisa: ele captura a sessão que iniciou a saída, e entre
+   * essa captura e a leitura interna daqui outra conta pode entrar — aí a
+   * requisição sairia autenticada como ela e revogaria a sessão de quem acabou
+   * de chegar. Com a credencial fixa, a requisição fala pela sessão que a
+   * originou, e só por ela.
+   *
+   * Quem passa isto também abre mão da renovação: não faz sentido renovar uma
+   * sessão que se está encerrando.
+   */
+  credencial?: { access: string; refresh: string };
   sinal?: AbortSignal;
 };
 
@@ -221,10 +249,12 @@ export async function chamar<T>(
   schema: z.ZodType<T>,
   opcoes: Opcoes = {},
 ): Promise<T> {
-  const guardadas = opcoes.semAuth ? null : await lerCredenciais();
+  const guardadas = opcoes.semAuth
+    ? null
+    : (opcoes.credencial ?? (await lerCredenciais()));
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
 
-  if (resposta.status === 401 && !opcoes.semAuth) {
+  if (resposta.status === 401 && !opcoes.semAuth && !opcoes.credencial) {
     // Sem credencial de origem não há o que renovar — e renovar com a de outro
     // dono é justamente o que a amarração impede.
     if (!guardadas) throw new SessaoExpirada();
@@ -292,5 +322,5 @@ async function mensagemDeErro(resposta: Response): Promise<string> {
 /** Só para teste: zera o estado de renovação entre casos. */
 export function _resetRenovacao(): void {
   renovacaoEmVoo = null;
-  ultimoConsumido = null;
+  ultimaRotacao = null;
 }

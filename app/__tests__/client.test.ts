@@ -154,6 +154,49 @@ describe("renovação em 401", () => {
     await expect(atrasada).resolves.toEqual({ ok: true });
   });
 
+  it("401 atrasado DEPOIS de outra conta entrar não usa a credencial dela", async () => {
+    // A conta A renova, a conta B entra, e só então chega o 401 atrasado da A.
+    // Guardar apenas o token consumido faria o teste de dono passar e devolver
+    // a credencial da B para repetir uma operação da A — num POST de dinheiro,
+    // escrita na conta errada. É por isso que a memória guarda o PAR.
+    await guardarCredenciais({ access: "a1", refresh: "rt_A" });
+    let abrirPortao: () => void = () => {};
+    const portao = new Promise<void>((r) => (abrirPortao = r));
+
+    fetchFalso.mockImplementation(async (url: string, o: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/auth/refresh")) {
+        return resposta(200, {
+          access_token: "a2",
+          refresh_token: "rt_A2",
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      const auth = (o.headers as Record<string, string>)["Authorization"];
+      if (auth === "Bearer a2") return resposta(200, { ok: true });
+      if (u.includes("/atrasada")) await portao;
+      return resposta(401, { detail: "expirado" });
+    });
+
+    const atrasada = chamar("/atrasada", schema);
+    await expect(chamar("/primeira", schema)).resolves.toEqual({ ok: true });
+    // A conta B entra DEPOIS da rotação da A e ANTES do 401 atrasado chegar.
+    await guardarCredenciais({ access: "b1", refresh: "rt_B" });
+    abrirPortao();
+
+    await expect(atrasada).rejects.toBeInstanceOf(SessaoExpirada);
+    const usados = fetchFalso.mock.calls.map(
+      ([, o]: [string, RequestInit]) =>
+        (o.headers as Record<string, string>)["Authorization"],
+    );
+    expect(usados).not.toContain("Bearer b1");
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "b1",
+      refresh: "rt_B",
+    });
+  });
+
   it("refresh recusado vira SessaoExpirada e apaga a credencial", async () => {
     await guardarCredenciais({ access: "velho", refresh: "rt_morto" });
     fetchFalso

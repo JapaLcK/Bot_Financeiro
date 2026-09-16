@@ -46,6 +46,35 @@ describe("sair", () => {
     });
   });
 
+  it("o logout fala pela sessão que o INICIOU, não pela que estiver no cofre", async () => {
+    // A captura acontece no começo do `sair()`; a requisição sai depois. Se ela
+    // relesse o cofre, uma conta que entrasse nesse intervalo teria a própria
+    // sessão revogada NO SERVIDOR pelo logout da anterior — e a limpeza local
+    // condicional não desfaria isso.
+    //
+    // A fila do cofre é o que torna a corrida determinística aqui: a leitura do
+    // `sair()` entra primeiro, a entrada da B em seguida, e só então a leitura
+    // que o `chamar()` faria. Sem o portão a B entraria tarde demais e o caso
+    // ficaria verde com e sem o conserto (medido — esta é a segunda versão).
+    await guardarCredenciais({ access: "a1", refresh: "rt_A" });
+    fetchFalso.mockResolvedValue(resposta(200, {}));
+
+    const saida = sair();
+    await guardarCredenciais({ access: "b1", refresh: "rt_B" });
+    await saida;
+
+    const usados = fetchFalso.mock.calls.map(
+      ([, o]: [string, RequestInit]) =>
+        (o.headers as Record<string, string>)["Authorization"],
+    );
+    expect(usados).toEqual(["Bearer a1"]);
+    // E a sessão da B continua no cofre: a limpeza também é condicional.
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "b1",
+      refresh: "rt_B",
+    });
+  });
+
   it("apaga mesmo quando o servidor não responde", async () => {
     // Se a limpeza dependesse da rede, um logout no metrô deixaria a credencial
     // no keychain e o próximo a abrir o app entraria na conta de quem achou que
