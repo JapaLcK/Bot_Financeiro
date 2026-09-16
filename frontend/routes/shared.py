@@ -100,6 +100,30 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
+# O teto continua por IP, como sempre foi.
+#
+# A chave por USUÁRIO saiu deste PR depois de quatro rodadas de revisão, e o
+# motivo é a forma da solução, não o objetivo. O problema é real: num CGNAT de
+# operadora móvel a antena inteira compartilha um endereço, e o app cai
+# exatamente nesse cenário. A tentativa foi "usuário em tudo, menos numa lista
+# de prefixos" — e a lista cresceu a cada rodada: `/auth`, depois `/admin`,
+# depois `/d/`, depois `/contact` e `/api/prospect/status`. Quatro descobertas
+# seguidas de uma enumeração que se dizia completa.
+#
+# A regra que elas revelam não é um prefixo: é "só vale a chave do token quando
+# a AUTORIZAÇÃO da rota usa aquele token". `/contact` não autentica ninguém,
+# `/api/prospect/status` autentica por outro header, `/admin` por outra sessão,
+# `/d/{code}` pelo próprio código. Em todas, trocar a chave multiplica o teto
+# por quantas contas o atacante quiser criar — e o cadastro é self-service.
+#
+# Invertido, isso é opt-in por rota: `@limiter.limit(..., key_func=...)` aceita
+# chave própria, então o dia em que uma rota de dados precisar de balde por
+# usuário ela pede, com evidência, e a revisão vê a decisão no lugar onde ela
+# vale. Enquanto não há usuário de app em produção, o ganho é zero e o risco de
+# uma quinta rota esquecida não é.
+#
+# default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
+# só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
@@ -874,8 +898,25 @@ def get_auth_token_from_request(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = None,
 ) -> str | None:
+    """Access token da requisição: `Authorization: Bearer` primeiro, cookie depois.
+
+    O `creds` chega preenchido quando a rota declara o `Depends(HTTPBearer)`.
+    Quem chama com `creds=None` — logout e o ramo de "sessão viva" do refresh —
+    lia SÓ o cookie, e por isso o logout do app era no-op TOTAL: sem cookie, o
+    token saía `None`, a sessão não era revogada, o refresh não era revogado, e
+    a rota devolvia 200 com cara de sucesso. Janela de 14 dias num aparelho que
+    o usuário acha que deslogou.
+
+    O `extract_bearer_token` abaixo lê o mesmo header que o `HTTPBearer` leria,
+    então a fonte passa a ser a mesma nos dois caminhos — que é o ponto: a
+    correção é aqui, na função que todos os chamadores atravessam, e não um
+    remendo no logout (§2: achar o caso não é resolver a categoria).
+    """
     if creds and creds.credentials:
         return creds.credentials
+    header_token = extract_bearer_token(request)
+    if header_token:
+        return header_token
     cookie_token = (request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
     return cookie_token or None
 
@@ -905,12 +946,44 @@ def raise_if_account_scheduled_for_deletion(user_id: int) -> None:
         )
 
 
+def payload_de_sessao(token: str) -> dict | None:
+    """Identidade a partir de um token de dashboard (12h) **ou** do access JWT (15min).
+
+    O app nativo carrega UM token, não dois. Hoje o site tem os dois cookies e
+    nem percebe a diferença, mas obrigar um cliente sem cookie jar a guardar,
+    rotacionar e renovar dois segredos para o mesmo usuário e a mesma sessão é
+    complexidade sem contrapartida.
+
+    Não é ampliação de privilégio: os dois tokens são assinados pelo MESMO
+    segredo, apontam para o mesmo `sub` e carregam o mesmo `jti`, então a
+    revogação por sessão continua valendo igual para os dois — quem valida o
+    `jti` é o chamador, logo abaixo, e ele não sabe (nem precisa saber) por
+    qual dos dois formatos a identidade chegou. O access token ainda é o mais
+    curto dos dois: aceitar 15 minutos onde 12 horas já valiam não afrouxa nada.
+
+    Devolve `{"user_id": int, "jti": str | None}` ou None.
+    """
+    if not token:
+        return None
+    dashboard = decode_dashboard_token_full(token)
+    if dashboard:
+        return dashboard
+    auth = decode_jwt(token) or {}
+    if auth.get("type") != "auth":
+        return None
+    try:
+        return {"user_id": int(auth["sub"]), "jti": auth.get("jti")}
+    except (KeyError, TypeError, ValueError):
+        # `sub` ausente ou não numérico: token malformado é token inválido.
+        return None
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
     token = (
         extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     )
-    payload = decode_dashboard_token_full(token or "")
+    payload = payload_de_sessao(token or "")
     if not payload:
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.",
                             headers=WWW_AUTHENTICATE_401)
