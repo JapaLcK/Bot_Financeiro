@@ -10,6 +10,11 @@ const cofre = (globalThis as unknown as { __cofreDeTeste: Map<string, string> })
   .__cofreDeTeste;
 const fetchFalso = jest.fn();
 
+/** Prende a próxima gravação no cofre até a promessa resolver. */
+const atrasarEscrita = (
+  globalThis as unknown as { __atrasarEscritaNoCofre: (p: Promise<void>) => void }
+).__atrasarEscritaNoCofre;
+
 /** Dois access tokens da MESMA sessão: `jti` igual, conteúdo diferente. */
 const ACCESS_A = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUEifQ.assinatura";
 const ACCESS_A2 = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiAiMSIsICJqdGkiOiAic2Vzc2FvLUEifQ.assinatura".replace("assinatura", "outra");
@@ -232,6 +237,47 @@ describe("entrar", () => {
     await entrar("b@x.com", "s");
     soltarA();
     await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+  });
+
+  it("entrada superada DURANTE a gravação não vence", async () => {
+    // A janela é estreita e específica: a conta A já passou pela conferência e
+    // sua GRAVAÇÃO está em andamento quando a conta B começa. Se a conferência
+    // não estiver dentro da gravação, o aparelho fica logado como A enquanto a
+    // tela mostra a outra.
+    //
+    // O portão do cofre é o que torna essa janela alcançável no teste; sem ele
+    // a conta B terminava antes e a guarda anterior já bastava, deixando o caso
+    // verde com e sem esta proteção (medido).
+    let soltarGravacao: () => void = () => {};
+    const gravacaoPresa = new Promise<void>((r) => (soltarGravacao = r));
+    fetchFalso.mockImplementation(async (_u: string, o: RequestInit) => {
+      const corpo = JSON.parse(String(o.body)) as { email: string };
+      return resposta(200, {
+        user_id: 1,
+        email: corpo.email,
+        access_token: `access-${corpo.email[0]}`,
+        refresh_token: `rt_${corpo.email[0]}`,
+        dashboard_token: "d",
+        expires_in: 900,
+      });
+    });
+
+    atrasarEscrita(gravacaoPresa);
+    const a = entrar("a@x.com", "s");
+    // Deixa a conta A percorrer TUDO até ficar presa na gravação. Sem isto ela
+    // ainda estaria na requisição e morreria na guarda anterior, que já existe —
+    // e o caso não mediria esta proteção (medido: passava com e sem ela).
+    await new Promise<void>((r) => setImmediate(() => r()));
+    // Só agora a conta B começa, com a gravação da A presa dentro da fila.
+    const b = entrar("b@x.com", "s");
+    soltarGravacao();
+
+    await expect(a).rejects.toBeInstanceOf(EntradaSuperada);
+    await expect(b).resolves.toMatchObject({ fase: "pronta" });
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "access-b",
+      refresh: "rt_b",
+    });
   });
 
   it("sair invalida entrada em voo", async () => {

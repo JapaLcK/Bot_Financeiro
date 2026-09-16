@@ -189,3 +189,36 @@ export function limparSessaoDe(access: string, refresh: string): Promise<boolean
     return true;
   });
 }
+
+/**
+ * Grava só se `permitido()` disser que sim — e a pergunta é feita DENTRO da fila.
+ *
+ * Existe porque conferir e gravar em dois passos deixa uma janela entre eles, e
+ * o que cabe ali é uma entrada mais nova: a conta A confere, a conta B começa e
+ * para numa etapa de código, e então a gravação da A acontece. O aparelho fica
+ * logado como A enquanto a tela pede o código da B.
+ *
+ * O predicado é avaliado de forma síncrona na mesma operação da gravação, então
+ * não há ponto de `await` no meio para outra tentativa se intrometer.
+ */
+export function guardarCredenciaisSe(
+  permitido: () => boolean,
+  c: Credenciais,
+): Promise<boolean> {
+  return naFila(async () => {
+    if (!permitido()) return false;
+    await SecureStore.setItemAsync(PAR, JSON.stringify(c));
+    // E CONFERE DE NOVO. A gravação em si é assíncrona, então uma tentativa
+    // mais nova pode ter começado enquanto ela acontecia — e ela pode nem
+    // gravar nada (uma entrada que para numa etapa de código, por exemplo), o
+    // que deixaria esta aqui vencendo por não ter concorrente na fila.
+    //
+    // Desfazer é o único jeito de fechar essa janela sem inventar um mutex
+    // global: o contador vive fora do cofre, e nada aqui dentro impede alguém
+    // de incrementá-lo. Como a escrita ainda não foi lida por ninguém, apagar
+    // não perde informação.
+    if (permitido()) return true;
+    await SecureStore.deleteItemAsync(PAR).catch(() => undefined);
+    return false;
+  });
+}

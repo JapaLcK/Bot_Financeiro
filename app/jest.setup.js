@@ -13,11 +13,20 @@ global.__cofreDeTeste = mockCofre;
 // e um teste que só consegue quebrar os dois juntos não distingue "o conserto
 // limpou" de "nem o conserto conseguiu limpar".
 const mockFalha = { escrita: false, apagar: false };
+// Um portão na GRAVAÇÃO, para os testes conseguirem parar o tempo dentro da
+// fila do cofre e provar o que acontece na janela entre conferir e gravar.
+const mockAtraso = { escrita: null };
+global.__atrasarEscritaNoCofre = (p) => (mockAtraso.escrita = p);
 global.__falharEscritaNoCofre = (v) => (mockFalha.escrita = v);
 global.__falharApagarNoCofre = (v) => (mockFalha.apagar = v);
 jest.mock("expo-secure-store", () => ({
   getItemAsync: async (k) => (mockCofre.has(k) ? mockCofre.get(k) : null),
   setItemAsync: async (k, v) => {
+    if (mockAtraso.escrita) {
+      const espera = mockAtraso.escrita;
+      mockAtraso.escrita = null;
+      await espera;
+    }
     if (mockFalha.escrita) throw new Error("keychain recusou");
     mockCofre.set(k, v);
   },

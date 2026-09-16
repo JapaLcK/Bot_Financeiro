@@ -6,7 +6,7 @@ import {
   type Perfil,
 } from "../api/schemas/auth";
 import {
-  guardarCredenciais,
+  guardarCredenciaisSe,
   lerCredenciais,
   limparSessaoDe,
 } from "../storage/secure";
@@ -56,11 +56,15 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
   if ("mfa_required" in r) {
     return { fase: "mfa", desafio: r.mfa_challenge, email: r.email };
   }
+  // A conferência acontece DENTRO da gravação, não antes: entre um passo e o
+  // outro caberia uma entrada mais nova, e o aparelho ficaria logado nesta
+  // enquanto a tela mostra a outra.
+  const gravou = await guardarCredenciaisSe(
+    () => minhaVez === ultimaTentativa,
+    { access: r.access_token, refresh: r.refresh_token },
+  );
+  if (!gravou) throw new EntradaSuperada();
   _esquecerRotacoes();
-  await guardarCredenciais({
-    access: r.access_token,
-    refresh: r.refresh_token,
-  });
   return {
     fase: "pronta",
     perfil: { user_id: r.user_id, email: r.email, plan: r.plan },
@@ -79,12 +83,12 @@ export async function verificarMfa(
     corpo: { challenge: desafio, code: codigo, use_backup: backup },
     semAuth: true,
   });
-  if (minhaVez !== ultimaTentativa) throw new EntradaSuperada();
+  const gravou = await guardarCredenciaisSe(
+    () => minhaVez === ultimaTentativa,
+    { access: r.access_token, refresh: r.refresh_token },
+  );
+  if (!gravou) throw new EntradaSuperada();
   _esquecerRotacoes();
-  await guardarCredenciais({
-    access: r.access_token,
-    refresh: r.refresh_token,
-  });
   return { user_id: r.user_id, email: r.email, plan: r.plan };
 }
 
