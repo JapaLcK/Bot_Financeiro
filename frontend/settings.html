@@ -3377,11 +3377,18 @@ const OF_VERDICT = [
       : `Ação necessária no ${ofNome(i)}.`],
   // Detalhe VARIÁVEL desde que o backend anexa o porquê ("… — você não liberou
   // esse dado ao conectar o banco"): a frase fixa daqui apagava justamente o
-  // motivo que o usuário precisa. Mesma forma do `updating`/`partial` — quem
-  // escreve a explicação é o backend, esta tabela só nomeia o item.
-  ["no_accounts",       (i) => i.detail
-      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.`
-      : `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
+  // motivo que o usuário precisa.
+  // SEM ternário, ao contrário dos vizinhos, e a diferença é medida: o `detail`
+  // de `updating` PODE vir nulo (`out("updating")` sem detalhe, e "updating" não
+  // está em `_FIXED_DETAIL`), o de `no_accounts` NUNCA — `_FIXED_DETAIL` tem a
+  // chave e o `out()` sempre concatena por cima. Um `:` aqui seria ramo morto.
+  // O preço: sem warning, o toast passa de "O Nubank não devolveu nenhuma conta
+  // ou investimento." para "Nubank: o banco não devolveu contas nem
+  // investimentos." — a mesma redundância que a LINHA da conexão já mostra hoje
+  // (nome do banco em cima, "O banco não devolveu…" embaixo). A alternativa era
+  // repetir a copy do backend aqui, que é o que o comentário do
+  // `needs_user_action`, três linhas acima, proíbe.
+  ["no_accounts",       (i) => `${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
   ["updating",          (i) => i.detail
       ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
       : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],

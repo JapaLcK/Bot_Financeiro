@@ -306,31 +306,58 @@ _FIXED_DETAIL = {
 # Agrupado por AÇÃO do usuário, não por produto: o que muda a frase é o que ele
 # pode fazer, e o mesmo motivo cai em conta, cartão e investimento.
 #
-# Fonte: docs.pluggy.ai/docs/warnings-status-codes (lido em 16/09/2026; remeça
+# Fonte: docs.pluggy.ai/docs/warnings-status-codes (relido em 16/09/2026; remeça
 # antes de reusar). SÓ conector Open Finance entra: os códigos de conector
 # DIRETO são nus (`001`, `002`, `003`) e significam coisa diferente em cada
 # conector — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria
 # chutar. Eles caem no fallback do `_motivo_do_warning`, que é honesto.
 # `LOAN_*` e `ID_*` ficam de fora porque `_PRODUCT_KEYS` não lê esses produtos:
 # entrada para código inalcançável é o código morto que este módulo já proíbe.
+#
+# A LINHA QUE DECIDE QUEM ENTRA: a frase fala do PRODUTO ("o cartão não veio"),
+# então só entra código cuja linha da doc também fala do produto ou do recurso
+# inteiro. Código que fala de um SUB-DADO — `ACCT_005` (limites de cheque
+# especial), `CC_005` (faturas), `CC_006` (transações do cartão), `CC_007` (o
+# limite do cartão), `INV_002`/`INV_003`/`INV_005` ("investment product" /
+# "specific investment product type") — fica FORA e cai no fallback, junto de
+# `ACCT_006` (corte acima de 260 contas), `TXN_002` ("no accounts available") e
+# `TXN_005` ("accounts step had errors"), que não têm ação de usuário nenhuma.
+# Motivo: dizer "não adianta tentar de novo" por causa do `CC_007` condena um
+# cartão cuja fatura e cujas transações vêm normalmente. Frase que mente é pior
+# que código cru — o código cru pelo menos é honesto sobre a ignorância.
+
+# Mesma instrução que `_DETALHE_POR_STATUS` já dá para `WAITING_USER_ACTION` —
+# `ACCT_002`/`CC_002` são a mesma família ("awaiting user authorization at the
+# financial institution"). Derivada, não copiada: duas cópias da instrução são
+# duas chances de uma envelhecer (§0.7). Minúscula porque aqui ela entra no meio
+# da frase, igual ao que o `ofInstrucao` do settings.html faz no toast.
+_AUTORIZE_NO_APP = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
+
 _MOTIVO_POR_WARNING = {
     code: frase
     for frase, codes in (
+        # "User hasn't granted permission to collect <produto> (ACCOUNTS_ALL /
+        # CREDIT_CARDS_ALL / ACCOUNTS_TRANSACTIONS / INVESTMENTS_ALL)" — permissão
+        # do produto INTEIRO, e reconectar é o caminho que a repara.
         ("você não liberou esse dado ao conectar o banco, reconecte para liberar",
-         ("ACCT_001", "ACCT_005", "CC_001", "CC_005", "CC_006",
-          "TXN_001", "TXN_004", "INV_001", "INV_002")),
-        # INV_004 é "Open Finance monthly rate limit"; TXN_003/TXN_006 a doc
-        # chama só de "rate limit reached" — daí "período", e não "mês".
+         ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001")),
+        # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
+        # doc chama só de "rate limit reached" — daí "período", e não "mês".
         ("o banco bateu o limite de consultas do Open Finance, volta sozinho na "
          "virada do período",
          ("INV_004", "TXN_003", "TXN_006")),
+        # "Resource Status" tem TRÊS estados, e ler dois deles como um só foi o
+        # defeito da rodada 1: "Pending Authorization: awaiting user
+        # authorization at the financial institution" manda AGIR no app do
+        # banco; "Temporarily Unavailable (e.g. maintenance)" manda ESPERAR;
+        # "Unavailable: permanently unavailable" manda desistir. Instruções
+        # opostas — colapsá-las deixa o usuário esperando para sempre.
+        (_AUTORIZE_NO_APP[0].lower() + _AUTORIZE_NO_APP[1:],
+         ("ACCT_002", "CC_002")),
         ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
-         ("ACCT_002", "ACCT_003", "CC_002", "CC_003")),
-        # "Unavailable" é PERMANENTE na doc ("Resource Status"), e é por isso que
-        # `ACCT_004` mora aqui e não junto do `ACCT_003`: os dois parecem irmãos
-        # e só um volta sozinho.
+         ("ACCT_003", "CC_003")),
         ("o banco não envia esse dado por aqui, não adianta tentar de novo",
-         ("ACCT_004", "CC_004", "CC_007", "INV_003", "INV_005")),
+         ("ACCT_004", "CC_004")),
     )
     for code in codes
 }
@@ -340,30 +367,77 @@ _MOTIVO_POR_WARNING = {
 # propósito: `safe_code` aceita "1234-5" (6 caracteres, 5 dígitos), que é a cara
 # de um número de conta. Dormente enquanto o código só existia num JSON que
 # ninguém lia; imprimi-lo promove isso a vazamento visível.
-_CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_\d{3}|\d{3}")
+# `[0-9]` e não `\d`: `\d` casa dígito Unicode, e este repo já pagou por isso
+# (`isdigit()` não-ASCII virando 500, issue #365). Hoje o `safe_code` é ASCII, o
+# que torna o caso inalcançável; a diferença é de um caractere.
+_CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_[0-9]{3}|[0-9]{3}")
+
+
+def _frase_do_codigo(code: Any) -> str | None:
+    """A frase de UM código, ou o código cru se ele ao menos tiver forma de código."""
+    if not isinstance(code, str):
+        return None
+    frase = _MOTIVO_POR_WARNING.get(code)
+    if frase:
+        return frase
+    # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
+    # dono. Sem diagnóstico inventado, e só se tiver forma de código.
+    if _CODE_EXIBIVEL.fullmatch(code):
+        return f"o banco avisou com o código {code}, sem explicar o motivo"
+    return None
 
 
 def _motivo_do_warning(health: dict | None, produtos) -> str:
-    """Cláusula " — <por que não veio>" a partir dos warnings, ou "" se não houver.
+    """Cláusula " — <por que não veio>" para uma frase cujo sujeito é `produtos`.
+
+    O SUJEITO E O MOTIVO TÊM DE CASAR. `_stale_detail` monta um sujeito plural
+    ("Cartão e Investimentos desatualizados"), e grudar ali a frase do PRIMEIRO
+    código atribuía o motivo de um produto ao outro: com `CC_001` no cartão e
+    `INV_003` (não suportado pela instituição) nos investimentos, a linha mandava
+    reconectar para liberar um dado que nunca ia vir. Por isso:
+
+      • motivo igual para TODOS os produtos do sujeito → cláusula sem nome;
+      • qualquer outro caso (motivos diferentes, ou produto sem warning nenhum)
+        → a cláusula NOMEIA o produto de quem ela é.
 
     Sem warning a frase sai IDÊNTICA à de hoje — é o controle positivo, e
     `tests/test_of_refresh_response.py` já o prende com `==`.
+
+    Defensivo de propósito: esta função lê a coluna `health` (jsonb), e os
+    chamadores de `connection_ui_state` não têm `try` (`db/open_finance.py`,
+    `pluggy_sync.py`). É a mesma classe que o `_warning_codes` já documenta —
+    `{"warnings": 7}` estourando `TypeError` e MATANDO o sync.
     """
-    products = (health or {}).get("products") or {}
-    # ponytail: UMA cláusula, do primeiro código que a gente sabe explicar. Com
-    # dois motivos a frase vira parágrafo, e ela entra no meio do toast. Se
-    # aparecer par recorrente, virar lista. (É o que também dedupa os 30
-    # warnings iguais do item do dono: o `return` sai no primeiro.)
-    for code in (c for p in produtos
-                 for c in ((products.get(p) or {}).get("warnings") or [])):
-        frase = _MOTIVO_POR_WARNING.get(code)
-        if frase:
-            return f" — {frase}"
-        # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
-        # dono. Sem diagnóstico inventado, e só se tiver forma de código.
-        if _CODE_EXIBIVEL.fullmatch(code):
-            return f" — o banco avisou com o código {code}, sem explicar o motivo"
-    return ""
+    products = health.get("products") if isinstance(health, dict) else None
+    if not isinstance(products, dict):
+        return ""
+
+    achados = []
+    for produto in produtos:
+        if produto not in _PRODUCT_PT:
+            continue
+        detalhe = products.get(produto)
+        if detalhe is None:
+            # Produto que a Pluggy nem reportou não tem motivo a dar — e contá-lo
+            # como "sem motivo" forçava o nome do produto na cláusula de todo
+            # banco sem investimentos.
+            continue
+        codes = detalhe.get("warnings") if isinstance(detalhe, dict) else None
+        frase = next((f for f in map(_frase_do_codigo, codes) if f), None) \
+            if isinstance(codes, list) else None
+        achados.append((produto, frase))
+
+    frases = {f for _, f in achados if f}
+    if not frases:
+        return ""
+    if len(frases) == 1 and all(f for _, f in achados):
+        return f" — {frases.pop()}"
+    # ponytail: UM motivo por linha, o do primeiro produto que tem um — com dois
+    # a frase vira parágrafo, e ela entra no meio do toast. O que NÃO é aceitável
+    # é atribuí-lo a quem não o produziu, e é isso que o nome resolve. Se aparecer
+    # par recorrente, virar lista.
+    produto, frase = next((a for a in achados if a[1]))
+    return f" — {_PRODUCT_PT[produto]}: {frase}"
 
 
 # `status_reason` que NÃO impede o estado verde. Qualquer outro motivo — inclusive
@@ -652,9 +726,18 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mesmo defeito do `partial`: item vivo, espelho vazio, e o porquê
         # (`ACCT_001` = ninguém liberou contas) preso no JSON. Sem health — o
         # ramo de baixo — a frase continua exatamente a de hoje.
+        #
+        # SÓ os dois produtos que a frase NOMEIA ("não devolveu contas nem
+        # investimentos"). Varrer o health inteiro pegava warning de cartão e de
+        # transações, que não explicam espelho vazio de conta. E não dá para
+        # filtrar por `updated` aqui como o `partial` faz: a doc é explícita que
+        # o warning também vem com `isUpdated: true` ("the product was retrieved
+        # correctly, but it can be improved with some user action" — o caso do
+        # `ACCT_001`, em que a Pluggy devolve a lista VAZIA com o aviso). Filtrar
+        # por `updated` aqui apagaria justamente o único caso que existe.
         if state == "no_accounts":
             detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
-                health, (health or {}).get("products") or ())
+                health, ("BANK", "INVESTMENTS"))
         return {
             "state": state,
             "label": _LABELS[state],

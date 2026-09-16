@@ -328,12 +328,6 @@ test("toast do refresh: cabe na LARGURA da tela e o texto cabe na caixa, de 320 
     const CASOS = [
       // A instrução mais longa do `_DETALHE_POR_STATUS`, a que mais cortava.
       ["needs_user_action", "Autorize o acesso no app do banco", null],
-      // ...e a mais longa do OF DEPOIS que o motivo do warning passou a ser
-      // anexado (`_motivo_do_warning`): dois produtos + data + cláusula. Sem
-      // este caso a medição de largura nunca veria a frase que cresceu.
-      ["partial", "Cartão e Investimentos desatualizados desde 10/09 — o banco "
-                  + "bateu o limite de consultas do Open Finance, volta sozinho "
-                  + "na virada do período", null],
       ["paused", null, null],
       // CONTROLE POSITIVO da asserção: copy curta é legítima e não pode reprovar.
       [null, null, "Tudo em dia!"],

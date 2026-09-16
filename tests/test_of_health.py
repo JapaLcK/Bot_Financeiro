@@ -164,85 +164,217 @@ def test_warning_chega_ao_health_sem_pii():
 # NENHUMA superfície o mostrava. A mensagem da Pluggy continua descartada (ela
 # cita nome, conta e CPF); quem fala é a frase nossa.
 
-def _ui_parcial(warnings: list, produto: str = "creditCards") -> dict:
-    """UI de um item com UM produto atrasado desde 12/08 e estes warnings."""
+def _ui_stale(**por_produto) -> dict:
+    """UI de um item com estes produtos ATRASADOS desde 12/08 e estes warnings.
+
+    `_ui_stale(creditCards=[{"code": "CC_001"}])` → "Cartão desatualizado…".
+    """
     health = derive_item_health({
         "id": "item-w", "status": "UPDATED",
         "statusDetail": {produto: {"isUpdated": False,
                                    "lastUpdatedAt": "2026-08-12T03:10:00.000Z",
-                                   "warnings": warnings}},
+                                   "warnings": warnings}
+                         for produto, warnings in por_produto.items()},
     }, now=AGORA)
     return connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
 
 
-@pytest.mark.parametrize("code, produto, trecho", [
-    ("CC_001", "creditCards", "você não liberou esse dado ao conectar o banco"),
-    ("CC_002", "creditCards", "deve voltar sozinho em algumas horas"),
-    ("CC_004", "creditCards", "não adianta tentar de novo"),
-    ("INV_004", "investments", "volta sozinho na virada do período"),
+def _detalhe(**por_produto) -> str:
+    return _ui_stale(**por_produto)["detail"]
+
+
+@pytest.mark.parametrize("code, trecho", [
+    ("CC_001", "você não liberou esse dado ao conectar o banco"),
+    # "Pending authorization: awaiting user authorization AT THE FINANCIAL
+    # INSTITUTION" é o 1º dos TRÊS bullets de "Resource Status" — agir no app do
+    # banco. Ler os três como dois (a 1ª rodada colapsou este no "temporariamente
+    # indisponível") deixa o usuário esperando por algo que só ele destrava.
+    ("CC_002", "autorize o acesso no app do banco"),
+    ("CC_003", "deve voltar sozinho em algumas horas"),
+    ("CC_004", "não adianta tentar de novo"),
 ])
-def test_partial_diz_por_que_o_produto_nao_veio(code, produto, trecho):
-    """CONTROLE NEGATIVO: fazer `_MOTIVO_POR_WARNING.get` devolver sempre `None`
-    (ou esvaziar o dict) deixa os quatro casos vermelhos."""
-    detalhe = _ui_parcial([{"code": code}], produto)["detail"]
-    assert trecho in detalhe, detalhe
+def test_um_produto_atrasado_diz_por_que_ele_nao_veio(code, trecho):
+    """CONTROLE NEGATIVO: esvaziar `_MOTIVO_POR_WARNING` deixa os cinco vermelhos.
+
+    Os quatro `CC_00x` são de propósito: eles são a prova de que códigos VIZINHOS
+    na mesma tabela da doc dão instruções DIFERENTES. Um mapa que os colapsasse
+    passaria num teste que olhasse só um."""
+    assert trecho in _detalhe(creditCards=[{"code": code}]), code
+
+
+def test_a_instrucao_de_autorizar_no_app_e_a_mesma_do_waiting_user_action():
+    """§0.7: `ACCT_002`/`CC_002` e `WAITING_USER_ACTION` são a mesma família, e a
+    instrução tem de ser UMA. Derivada, não copiada — este teste é o que impede
+    as duas de divergirem no dia em que alguém reescrever uma delas."""
+    from core.services.pluggy_health import (
+        ITEM_STATUS_AUTORIZA_DISPOSITIVO, _DETALHE_POR_STATUS, _MOTIVO_POR_WARNING)
+
+    fixa = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
+    assert _MOTIVO_POR_WARNING["CC_002"] == fixa[0].lower() + fixa[1:]
+    assert _MOTIVO_POR_WARNING["ACCT_002"] == _MOTIVO_POR_WARNING["CC_002"]
+
+
+@pytest.mark.parametrize("code", ["ACCT_005", "CC_005", "CC_006", "CC_007",
+                                  "INV_002", "INV_003", "INV_005",
+                                  "ACCT_006", "TXN_002", "TXN_005"])
+def test_codigo_de_sub_dado_nao_vira_frase_sobre_o_produto(code):
+    """A frase fala do PRODUTO; estes códigos falam de um SUB-DADO dele ou de
+    nada acionável, então caem no fallback honesto em vez de uma instrução larga
+    demais. O caso que nomeia a classe é o `CC_007` ("Institution does not return
+    LIMIT for this credit card"): "não adianta tentar de novo" condenava um
+    cartão cuja fatura e cujas transações vêm normalmente.
+
+    CONTROLE NEGATIVO: devolver qualquer um deles ao `_MOTIVO_POR_WARNING` deixa
+    o caso dele vermelho."""
+    detalhe = _detalhe(creditCards=[{"code": code}])
+    assert f"o banco avisou com o código {code}" in detalhe, detalhe
+    for frase in ("não adianta tentar de novo", "você não liberou", "algumas horas"):
+        assert frase not in detalhe, f"{code} ganhou instrução que a doc não sustenta: {detalhe}"
 
 
 def test_partial_sem_warning_mantem_a_frase_de_hoje():
     """CONTROLE POSITIVO: o conserto ANEXA, nunca reescreve. Sem ele o grupo
     acima passaria num código que carimba frase em toda conexão parcial."""
-    assert _ui_parcial([])["detail"] == "Cartão desatualizado desde 12/08"
+    assert _detalhe(creditCards=[]) == "Cartão desatualizado desde 12/08"
 
 
 def test_codigo_desconhecido_mostra_o_codigo_cru():
     """O caso do dono: `004` não está na doc de Open Finance (conector direto usa
     código nu, que significa coisa diferente em cada conector). Mostrar o código
     é honesto; adivinhar o significado não."""
-    detalhe = _ui_parcial([{"code": "004"}])["detail"]
+    detalhe = _detalhe(creditCards=[{"code": "004"}])
     assert "004" in detalhe, detalhe
     assert "você não liberou" not in detalhe and "limite de consultas" not in detalhe, detalhe
 
 
-def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
-    """CONTROLE NEGATIVO: apagar o `fullmatch(_CODE_EXIBIVEL)` do fallback deixa
-    este vermelho com "1234-5" na tela.
+# ── o SUJEITO e o MOTIVO têm de casar ───────────────────────────────────────
+# `_stale_detail` monta sujeito plural ("Cartão e Investimentos desatualizados").
+# Grudar ali a frase do PRIMEIRO código atribuía o motivo de um produto ao outro
+# — e a atribuição errada manda o usuário fazer a coisa errada, que é pior que
+# não dizer nada.
+# CONTROLE NEGATIVO dos três: voltar `_motivo_do_warning` a "devolve a primeira
+# frase que achar, sem nomear" deixa os três vermelhos.
 
-    `safe_code` ACEITA "1234-5" (6 caracteres, 5 dígitos) — ele decide o que se
-    ARMAZENA. Enquanto isso só existia num JSON que ninguém lia, era risco
-    dormente; imprimir promove a vazamento visível de fragmento de conta."""
-    from core.services.pluggy_health import safe_code
-    assert safe_code("1234-5") == "1234-5", "o risco que esta guarda cobre sumiu"
+def test_motivos_diferentes_nomeiam_o_produto_de_quem_e_o_motivo():
+    detalhe = _detalhe(creditCards=[{"code": "CC_001"}],
+                       investments=[{"code": "INV_004"}])
+    assert detalhe.startswith("Cartão e Investimentos desatualizados desde 12/08"), detalhe
+    assert "Cartão: você não liberou esse dado" in detalhe, detalhe
 
-    detalhe = _ui_parcial([{"code": "1234-5"}])["detail"]
-    assert "1234-5" not in detalhe, detalhe
-    assert detalhe == "Cartão desatualizado desde 12/08", detalhe
+
+def test_motivo_de_um_produto_nao_e_atribuido_ao_outro():
+    """O pior dos três: `INV_003` (o tipo de investimento não é suportado pela
+    instituição) NUNCA vai vir. Com a frase do cartão colada num sujeito que
+    inclui investimentos, o usuário reconecta, refaz o consentimento e continua
+    sem investimentos — tendo feito exatamente o que a tela mandou."""
+    detalhe = _detalhe(creditCards=[{"code": "CC_001"}],
+                       investments=[{"code": "INV_003"}])
+    assert (" — Cartão: você não liberou esse dado ao conectar o banco, "
+            "reconecte para liberar") in detalhe, detalhe
+    # UMA cláusula, e ela vem nomeada: sem o nome, a mesma string diria isso
+    # sobre investimentos também.
+    assert detalhe.count(" — ") == 1, detalhe
+
+
+def test_produto_sem_warning_nenhum_nao_herda_o_motivo_do_vizinho():
+    """A conta não tem warning: dizer "não adianta tentar de novo" sobre ela faz
+    o usuário desistir de dado que voltaria sozinho."""
+    detalhe = _detalhe(accounts=[], creditCards=[{"code": "CC_004"}])
+    assert detalhe.startswith("Conta e Cartão desatualizados desde 12/08"), detalhe
+    assert "Cartão: o banco não envia esse dado por aqui" in detalhe, detalhe
+
+
+def test_motivo_igual_nos_dois_produtos_dispensa_o_nome():
+    """CONTROLE POSITIVO do par acima: quando o motivo vale para TODO o sujeito,
+    nomear produto seria ruído. É o caso do dono — 30 warnings iguais nos dois
+    produtos que não vieram."""
+    detalhe = _detalhe(creditCards=[{"code": "004"}] * 30,
+                       investments=[{"code": "004"}] * 30)
+    assert detalhe == ("Cartão e Investimentos desatualizados desde 12/08 — "
+                       "o banco avisou com o código 004, sem explicar o motivo"), detalhe
 
 
 def test_trinta_warnings_iguais_viram_uma_frase():
     """O item do dono tinha 30 warnings iguais; 30 cláusulas na mesma linha (e no
     meio do toast) seriam piores que o silêncio de hoje.
 
-    CONTROLE NEGATIVO: trocar o `return` dentro do laço por juntar as cláusulas
-    de todos os códigos deixa este vermelho com 30."""
-    detalhe = _ui_parcial([{"code": "INV_004"}] * 30, "investments")["detail"]
+    CONTROLE NEGATIVO: trocar o `next(...)` por juntar as cláusulas de todos os
+    códigos deixa este vermelho com 30."""
+    detalhe = _detalhe(investments=[{"code": "INV_004"}] * 30)
     assert detalhe.count("limite de consultas") == 1, detalhe
 
 
-def test_a_frase_do_motivo_nao_carrega_pii():
-    """Irmão do `test_warning_chega_ao_health_sem_pii`, mas sobre o `detail` —
-    que é o texto que vai PARA A TELA, e não só para o JSON."""
-    detalhe = _ui_parcial([{
-        "code": "CC_001",
-        "message": "Conta 1234-5 de JOAO DA SILVA nao pode ser lida",
-        "providerMessage": "CPF 123.456.789-01 sem permissao",
-    }])["detail"]
+def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
+    """CONTROLE NEGATIVO: trocar o `fullmatch(_CODE_EXIBIVEL)` por `if code:`
+    deixa os dois casos vermelhos, com "1234-5" e com o CPF na tela.
+
+    DOIS caminhos, porque são dois riscos:
+      • pelo `derive_item_health`, "1234-5" passa pelo `safe_code` (6 caracteres,
+        5 dígitos) e chega ao health — ele decide o que se ARMAZENA;
+      • direto na coluna `health`, que é de onde esta função lê. O teste anterior
+        montava o health SÓ pelo `derive_item_health`, que já descarta
+        `message`/`providerMessage` — ele passava com a guarda desligada, ou
+        seja, não media nada."""
+    from core.services.pluggy_health import connection_ui_state, safe_code
+
+    assert safe_code("1234-5") == "1234-5", "o risco que esta guarda cobre sumiu"
+    # `[0-9]`, não `\d`: `\d` casa dígito Unicode e este repo já pagou por isso
+    # (issue #365). CONTROLE NEGATIVO: voltar para `\d` deixa estas duas vermelhas.
+    from core.services.pluggy_health import _CODE_EXIBIVEL
+    assert _CODE_EXIBIVEL.fullmatch("٠٠٤") is None
+    assert _CODE_EXIBIVEL.fullmatch("００４") is None
+    assert _detalhe(creditCards=[{"code": "1234-5"}]) == "Cartão desatualizado desde 12/08"
+
+    pii = "Conta 1234-5 de JOAO DA SILVA CPF 123.456.789-01"
+    ui = connection_ui_state({
+        "status": "ACTIVE", "last_sync_at": AGORA, "status_reason": "",
+        "health": {"item_status": "UPDATED", "stale_products": ["CREDIT"],
+                   "products": {"CREDIT": {"updated": False, "warnings": [pii]}}},
+    })
     for vazamento in ("JOAO", "SILVA", "123.456.789", "1234-5"):
-        assert vazamento not in detalhe, f"vazou '{vazamento}': {detalhe}"
+        assert vazamento not in ui["detail"], f"vazou '{vazamento}': {ui['detail']}"
+
+
+# A chave é `BANK` nos casos abaixo, e isso é load-bearing: o ramo `no_accounts`
+# varre só `BANK`/`INVESTMENTS`, então um caso escrito com `CREDIT` NUNCA chega à
+# função e passa verde com a guarda desligada. Medido — com `CREDIT`, a mutação
+# que apaga os `isinstance` deixava 2 vermelhos em vez de 5.
+@pytest.mark.parametrize("health", [
+    {"products": 7},
+    {"products": [1, 2]},
+    {"products": {"BANK": "texto"}},
+    {"products": {"BANK": {"warnings": 7}}},
+    {"products": {"BANK": {"warnings": [None, 404, {"code": "ACCT_001"}]}}},
+    {"products": {"BANK": None}},
+    {"products": None},
+    7,
+])
+def test_health_malformado_nao_derruba_a_tela(health):
+    """`connection_ui_state` é chamado SEM `try` em `db/open_finance.py` (aba OF)
+    e em `pluggy_sync.py` (resposta do /refresh): `TypeError` aqui vira 500 nos
+    dois. É a mesma classe que o `_warning_codes` já documenta — `{"warnings": 7}`
+    matava o sync inteiro.
+
+    CONTROLE NEGATIVO: tirar os `isinstance` de `_motivo_do_warning` deixa 5 dos
+    8 casos vermelhos com TypeError/AttributeError (medido). Os outros três não
+    chegam à função: `7` e `{"products": None}` morrem no `isinstance` que o
+    `connection_ui_state` já fazia, e `{"BANK": None}` no `continue` de produto
+    ausente — eles ficam como controle POSITIVO de que a guarda não recusa o
+    que já era seguro."""
+    linha = {"status": "ACTIVE", "status_reason": "no_accounts",
+             "last_sync_at": AGORA, "health": health}
+    ui = connection_ui_state(linha)
+    assert isinstance(ui["detail"], str)
 
 
 def test_no_accounts_tambem_diz_o_motivo():
     """Mesmo defeito do `partial`: item vivo, espelho vazio, e o `ACCT_001`
-    ("ninguém liberou contas") preso no JSON."""
+    ("User hasn't granted permission to collect accounts") preso no JSON.
+
+    `isUpdated: true` de propósito: a doc diz que o warning também vem quando "the
+    product was retrieved correctly, but it can be improved with some user action"
+    — é literalmente este caso, a Pluggy devolve a lista VAZIA com o aviso. Um
+    filtro por `updated` aqui apagaria o único caso que existe."""
     ui = connection_ui_state({
         "status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
         "health": {"item_status": "UPDATED", "stale_products": [],
@@ -251,6 +383,26 @@ def test_no_accounts_tambem_diz_o_motivo():
     assert ui["state"] == "no_accounts"
     assert ui["detail"].startswith("O banco não devolveu contas nem investimentos")
     assert "você não liberou esse dado ao conectar o banco" in ui["detail"], ui["detail"]
+
+
+@pytest.mark.parametrize("produto, warnings, proibido", [
+    # Cartão e transações não explicam espelho VAZIO de conta e investimento —
+    # a frase deste estado nomeia só esses dois.
+    ("CREDIT", ["CC_001"], "você não liberou"),
+    ("TRANSACTIONS", ["TXN_001"], "você não liberou"),
+    # `ACCT_005` é a permissão dos LIMITES de cheque especial, não a das contas:
+    # mandar reconectar por causa dele faz o usuário refazer tudo e continuar sem
+    # conta nenhuma.
+    ("BANK", ["ACCT_005"], "você não liberou"),
+])
+def test_no_accounts_nao_repete_motivo_que_nao_explica_espelho_vazio(
+        produto, warnings, proibido):
+    ui = connection_ui_state({
+        "status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
+        "health": {"item_status": "UPDATED", "stale_products": [],
+                   "products": {produto: {"updated": True, "warnings": warnings}}},
+    })
+    assert proibido not in ui["detail"], ui["detail"]
 
 
 def test_no_accounts_sem_health_mantem_a_frase_de_hoje():
