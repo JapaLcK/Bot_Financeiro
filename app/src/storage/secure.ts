@@ -207,6 +207,10 @@ export function guardarCredenciaisSe(
 ): Promise<boolean> {
   return naFila(async () => {
     if (!permitido()) return false;
+    // O que estava lá ANTES, para o desfazer poder RESTAURAR em vez de apagar.
+    // Apagar destruiria a sessão de um terceiro: se a conta C já estava no
+    // cofre e a entrada da A é superada, quem não pediu nada ficaria deslogado.
+    const anterior = await SecureStore.getItemAsync(PAR);
     await SecureStore.setItemAsync(PAR, JSON.stringify(c));
     // E CONFERE DE NOVO. A gravação em si é assíncrona, então uma tentativa
     // mais nova pode ter começado enquanto ela acontecia — e ela pode nem
@@ -215,14 +219,14 @@ export function guardarCredenciaisSe(
     //
     // Desfazer é o único jeito de fechar essa janela sem inventar um mutex
     // global: o contador vive fora do cofre, e nada aqui dentro impede alguém
-    // de incrementá-lo. Como a escrita ainda não foi lida por ninguém, apagar
-    // não perde informação.
+    // de incrementá-lo.
     if (permitido()) return true;
     // Se o desfazer falhar, a falha PROPAGA. Engoli-la e devolver `false` diria
-    // "não persistiu" com a credencial velha ainda no cofre — e quem chamou
+    // "não persistiu" com a credencial nova ainda no cofre — e quem chamou
     // traduz `false` em "outra entrada assumiu", que é uma mentira tranquila
     // sobre um aparelho que ficou com a sessão errada guardada.
-    await SecureStore.deleteItemAsync(PAR);
+    if (anterior === null) await SecureStore.deleteItemAsync(PAR);
+    else await SecureStore.setItemAsync(PAR, anterior);
     return false;
   });
 }

@@ -191,6 +191,28 @@ describe("guardarCredenciaisSe", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
+  it("desfazer RESTAURA a sessão que já estava lá, não apaga", async () => {
+    // A conta C já estava no cofre, a entrada da A é superada. Apagar deixaria
+    // deslogado quem não pediu nada.
+    await guardarCredenciais({ access: "c1", refresh: "rt_C" });
+    let vezes = 0;
+    await expect(
+      guardarCredenciaisSe(() => ++vezes === 1, { access: "a1", refresh: "rt_A" }),
+    ).resolves.toBe(false);
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "c1",
+      refresh: "rt_C",
+    });
+  });
+
+  it("desfazer com cofre VAZIO antes apaga, e só", async () => {
+    let vezes = 0;
+    await expect(
+      guardarCredenciaisSe(() => ++vezes === 1, { access: "a1", refresh: "rt_A" }),
+    ).resolves.toBe(false);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
   it("falha ao DESFAZER propaga, em vez de mentir que não persistiu", async () => {
     // Devolver `false` com a credencial velha no cofre seria o pior dos dois
     // mundos: quem chamou traduz `false` em "outra entrada assumiu" e segue

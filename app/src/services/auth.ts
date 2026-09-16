@@ -132,7 +132,19 @@ export async function sair(): Promise<void> {
   } catch {
     // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.
   } finally {
-    _esquecerRotacoes();
-    await limparSessaoDe(daSaida.access, daSaida.refresh);
+    // Esquece a linhagem SÓ se a sessão apagada era mesmo a desta saída. Se
+    // outra conta assumiu o cofre no meio, a linhagem já é dela, e apagá-la
+    // faria as renovações em voo daquela conta virarem fim de sessão.
+    //
+    // ponytail: esta guarda NÃO tem teste que a discrimine, e a ausência é
+    // declarada em vez de escondida. Para alcançá-la, a outra conta precisa
+    // entrar E rotacionar dentro da janela da requisição de logout — entrar
+    // sozinho já zera a linhagem, então só a rotação seguinte a recria. Montar
+    // isso exigiria reentrância no dublê de rede, e o teste ficaria medindo o
+    // andaime. A guarda fica porque é correta e custa uma condição; quem for
+    // mexer aqui não deve confiar em vermelho para perceber que a quebrou.
+    if (await limparSessaoDe(daSaida.access, daSaida.refresh)) {
+      _esquecerRotacoes();
+    }
   }
 }
