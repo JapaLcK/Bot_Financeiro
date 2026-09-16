@@ -1,0 +1,58 @@
+# App nativo (Expo/React Native) — CI PRÓPRIO, separado do tests.yml.
+#
+# Separado de propósito: o `tests.yml` sobe Postgres, instala o requirements.txt
+# inteiro e roda 8 mil testes de backend. Nada disso serve ao app, e pendurar o
+# app lá faria cada PR de Python esperar por `npm ci` do React Native.
+#
+# `paths` restringe a execução: PR que não toca `app/` não dispara nada aqui.
+name: App
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+
+# A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
+# `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
+# caem no mesmo grupo e o segundo mata o veredito do primeiro. E, mesmo sem o
+# cancelamento, o GitHub admite um run em execução e um pendente por grupo, e
+# ao enfileirar o terceiro cancela o pendente — três merges em rajada e o do
+# meio fica sem veredito.
+#
+# Com o SHA no grupo, cada commit da main tem grupo próprio. Em PR o grupo
+# continua sendo a ref e o cancelamento continua ligado: ali o sinal que importa
+# é o do último commit.
+concurrency:
+  group: app-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  qualidade:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # `npm ci` e não `npm install`: ele exige o lockfile e falha se o
+      # package.json divergir dele. É o que impede o CI de resolver uma versão
+      # diferente da que foi testada na máquina.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test -- --ci

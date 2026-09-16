@@ -262,6 +262,13 @@ export default defineConfig([
     // contrato. Quem prende o artefato é o step de build do CI (ele reprova se o
     // `.js` commitado divergir do `webapp/src`), não o eslint.
     "webapp/**",
+    // App nativo (Expo/React Native): projeto npm PRÓPRIO, TypeScript, com
+    // `app/eslint.config.mjs` e regras que descrevem aquele código. Este
+    // arquivo aqui mira `frontend/**/*.js` (script clássico de navegador) e
+    // `**/*.mjs` — e é esse segundo padrão que alcançaria o `app/` sem esta
+    // linha, lintando config de Expo com regras de <script> do site.
+    // Mesmo motivo do `webapp/**` logo acima: dois mundos, dois configs.
+    "app/**",
     "frontend/precos-app.js",
     "frontend/precos-app.css",
     "frontend/chat-app.js",
