@@ -120,11 +120,22 @@ updates:
         patterns:
           - "expo"
           - "expo-*"
-    # ATENÇÃO: subir o SDK do Expo (major do pacote `expo`) não é atualização de
-    # dependência, é migração — mexe em build nativo, em versão de React Native e
-    # nas versões pareadas de todo `expo-*`. Merge só com build de verdade rodado.
+    # ATENÇÃO: subir o SDK do Expo não é atualização de dependência, é migração —
+    # mexe em build nativo, na versão de React Native e nas versões pareadas de
+    # todo `expo-*`. Merge só com build de verdade rodado.
+    #
+    # O bloqueio precisa cobrir o CONJUNTO, não só o pacote `expo`: agrupar não
+    # obriga ninguém a andar junto, então com só o `expo` ignorado o Dependabot
+    # subiria `expo-router` ou `expo-secure-store` para o SDK seguinte deixando
+    # o `expo` em 57 — exatamente o build misto que este comentário existe para
+    # impedir. O `react-native` entra pelo mesmo motivo: a versão dele é
+    # escolhida PELO SDK, não por nós.
     ignore:
       - dependency-name: "expo"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-native"
         update-types: ["version-update:semver-major"]
 
   # Dependências npm da ilha React da /precos (webapp/). Terceiro lockfile do

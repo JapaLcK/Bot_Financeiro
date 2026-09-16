@@ -1,13 +1,15 @@
 // SecureStore é nativo: no Jest ele não existe. O dublê guarda em memória, que
 // é o suficiente para o que os testes medem (o cliente de API, não o keychain).
-jest.mock("expo-secure-store", () => {
-  const cofre = new Map();
-  return {
-    getItemAsync: async (k) => (cofre.has(k) ? cofre.get(k) : null),
-    setItemAsync: async (k, v) => void cofre.set(k, v),
-    deleteItemAsync: async (k) => void cofre.delete(k),
-  };
-});
+// O prefixo `mock` no nome é exigência do Jest: a fábrica do `jest.mock` é
+// içada para antes das declarações, e só variáveis assim prefixadas podem ser
+// referenciadas dentro dela.
+const mockCofre = new Map();
+global.__cofreDeTeste = mockCofre;
+jest.mock("expo-secure-store", () => ({
+  getItemAsync: async (k) => (mockCofre.has(k) ? mockCofre.get(k) : null),
+  setItemAsync: async (k, v) => void mockCofre.set(k, v),
+  deleteItemAsync: async (k) => void mockCofre.delete(k),
+}));
 
 // `Constants.expoConfig` vem do app.config.ts em tempo de build; no Jest ele
 // chega vazio. O cliente de API lê `extra.apiUrl` de lá, então sem este dublê

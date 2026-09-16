@@ -14,11 +14,19 @@ on:
   pull_request:
     paths: ["app/**", ".github/workflows/app.yml"]
 
-# PR que recebe push novo cancela a execução anterior — o sinal que importa é o
-# do último commit.
+# A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
+# `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
+# caem no mesmo grupo e o segundo mata o veredito do primeiro. E, mesmo sem o
+# cancelamento, o GitHub admite um run em execução e um pendente por grupo, e
+# ao enfileirar o terceiro cancela o pendente — três merges em rajada e o do
+# meio fica sem veredito.
+#
+# Com o SHA no grupo, cada commit da main tem grupo próprio. Em PR o grupo
+# continua sendo a ref e o cancelamento continua ligado: ali o sinal que importa
+# é o do último commit.
 concurrency:
-  group: app-${{ github.ref }}
-  cancel-in-progress: true
+  group: app-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   qualidade:

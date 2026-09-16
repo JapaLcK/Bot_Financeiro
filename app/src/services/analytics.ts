@@ -25,17 +25,21 @@ export function iniciarAnalytics(): void {
 }
 
 /**
- * Propriedade de evento é `string | number | boolean` e nada mais.
+ * Evento SEM propriedade. É a fronteira, e ela é o tipo, não um comentário.
  *
- * Não é preciosismo: é o que impede alguém de mandar `{ saldo: 1234.56 }` para
- * um terceiro. Valor financeiro não sai daqui — nem em evento, nem em
- * propriedade, nem em identificação.
+ * A versão anterior aceitava `Record<string, string | number | boolean>` e o
+ * comentário prometia que valor financeiro não passaria — mas
+ * `rastrear("app.aberto", { saldo: 1234.56 })` compilava e mandava o saldo para
+ * o PostHog. Promessa que o compilador não cobra é promessa que envelhece na
+ * primeira pressa.
+ *
+ * Nenhum dos cinco eventos da Fase 1 precisa de propriedade, então o tipo mais
+ * simples é também o mais seguro. Quando um evento precisar de contexto, quem o
+ * adicionar declara o formato DAQUELE evento — uma união discriminada, com os
+ * campos permitidos escritos. Aí a regra volta a ser verificável.
  */
-export function rastrear(
-  evento: Evento,
-  props?: Record<string, string | number | boolean>,
-): void {
-  cliente?.capture(evento, props);
+export function rastrear(evento: Evento): void {
+  cliente?.capture(evento);
 }
 
 export function identificar(userId: number): void {
