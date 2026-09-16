@@ -158,6 +158,109 @@ def test_warning_chega_ao_health_sem_pii():
         assert vazamento not in texto, f"vazou '{vazamento}' no health: {texto}"
 
 
+# ── POR QUE o produto não veio: código do warning → frase nossa ─────────────
+# O item do dono voltou com `updated=false` e 30 warnings `004`, e nem ele nem o
+# suporte souberam o motivo: o código chegava ao navegador dentro do JSON e
+# NENHUMA superfície o mostrava. A mensagem da Pluggy continua descartada (ela
+# cita nome, conta e CPF); quem fala é a frase nossa.
+
+def _ui_parcial(warnings: list, produto: str = "creditCards") -> dict:
+    """UI de um item com UM produto atrasado desde 12/08 e estes warnings."""
+    health = derive_item_health({
+        "id": "item-w", "status": "UPDATED",
+        "statusDetail": {produto: {"isUpdated": False,
+                                   "lastUpdatedAt": "2026-08-12T03:10:00.000Z",
+                                   "warnings": warnings}},
+    }, now=AGORA)
+    return connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
+
+
+@pytest.mark.parametrize("code, produto, trecho", [
+    ("CC_001", "creditCards", "você não liberou esse dado ao conectar o banco"),
+    ("CC_002", "creditCards", "deve voltar sozinho em algumas horas"),
+    ("CC_004", "creditCards", "não adianta tentar de novo"),
+    ("INV_004", "investments", "volta sozinho na virada do período"),
+])
+def test_partial_diz_por_que_o_produto_nao_veio(code, produto, trecho):
+    """CONTROLE NEGATIVO: fazer `_MOTIVO_POR_WARNING.get` devolver sempre `None`
+    (ou esvaziar o dict) deixa os quatro casos vermelhos."""
+    detalhe = _ui_parcial([{"code": code}], produto)["detail"]
+    assert trecho in detalhe, detalhe
+
+
+def test_partial_sem_warning_mantem_a_frase_de_hoje():
+    """CONTROLE POSITIVO: o conserto ANEXA, nunca reescreve. Sem ele o grupo
+    acima passaria num código que carimba frase em toda conexão parcial."""
+    assert _ui_parcial([])["detail"] == "Cartão desatualizado desde 12/08"
+
+
+def test_codigo_desconhecido_mostra_o_codigo_cru():
+    """O caso do dono: `004` não está na doc de Open Finance (conector direto usa
+    código nu, que significa coisa diferente em cada conector). Mostrar o código
+    é honesto; adivinhar o significado não."""
+    detalhe = _ui_parcial([{"code": "004"}])["detail"]
+    assert "004" in detalhe, detalhe
+    assert "você não liberou" not in detalhe and "limite de consultas" not in detalhe, detalhe
+
+
+def test_codigo_com_cara_de_conta_nao_vai_pra_tela():
+    """CONTROLE NEGATIVO: apagar o `fullmatch(_CODE_EXIBIVEL)` do fallback deixa
+    este vermelho com "1234-5" na tela.
+
+    `safe_code` ACEITA "1234-5" (6 caracteres, 5 dígitos) — ele decide o que se
+    ARMAZENA. Enquanto isso só existia num JSON que ninguém lia, era risco
+    dormente; imprimir promove a vazamento visível de fragmento de conta."""
+    from core.services.pluggy_health import safe_code
+    assert safe_code("1234-5") == "1234-5", "o risco que esta guarda cobre sumiu"
+
+    detalhe = _ui_parcial([{"code": "1234-5"}])["detail"]
+    assert "1234-5" not in detalhe, detalhe
+    assert detalhe == "Cartão desatualizado desde 12/08", detalhe
+
+
+def test_trinta_warnings_iguais_viram_uma_frase():
+    """O item do dono tinha 30 warnings iguais; 30 cláusulas na mesma linha (e no
+    meio do toast) seriam piores que o silêncio de hoje.
+
+    CONTROLE NEGATIVO: trocar o `return` dentro do laço por juntar as cláusulas
+    de todos os códigos deixa este vermelho com 30."""
+    detalhe = _ui_parcial([{"code": "INV_004"}] * 30, "investments")["detail"]
+    assert detalhe.count("limite de consultas") == 1, detalhe
+
+
+def test_a_frase_do_motivo_nao_carrega_pii():
+    """Irmão do `test_warning_chega_ao_health_sem_pii`, mas sobre o `detail` —
+    que é o texto que vai PARA A TELA, e não só para o JSON."""
+    detalhe = _ui_parcial([{
+        "code": "CC_001",
+        "message": "Conta 1234-5 de JOAO DA SILVA nao pode ser lida",
+        "providerMessage": "CPF 123.456.789-01 sem permissao",
+    }])["detail"]
+    for vazamento in ("JOAO", "SILVA", "123.456.789", "1234-5"):
+        assert vazamento not in detalhe, f"vazou '{vazamento}': {detalhe}"
+
+
+def test_no_accounts_tambem_diz_o_motivo():
+    """Mesmo defeito do `partial`: item vivo, espelho vazio, e o `ACCT_001`
+    ("ninguém liberou contas") preso no JSON."""
+    ui = connection_ui_state({
+        "status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
+        "health": {"item_status": "UPDATED", "stale_products": [],
+                   "products": {"BANK": {"updated": True, "warnings": ["ACCT_001"]}}},
+    })
+    assert ui["state"] == "no_accounts"
+    assert ui["detail"].startswith("O banco não devolveu contas nem investimentos")
+    assert "você não liberou esse dado ao conectar o banco" in ui["detail"], ui["detail"]
+
+
+def test_no_accounts_sem_health_mantem_a_frase_de_hoje():
+    """CONTROLE POSITIVO do ramo sem health (`tests/test_of_connection_state.py`
+    prende o mesmo `==` passando pelo banco)."""
+    ui = connection_ui_state({"status": "ERROR", "status_reason": "no_accounts",
+                              "health": None, "last_sync_at": AGORA})
+    assert ui["detail"] == "O banco não devolveu contas nem investimentos"
+
+
 def test_linha_legada_sem_health_nao_vira_nunca_sincronizou():
     ui = connection_ui_state({"status": "ACTIVE", "health": None, "last_sync_at": AGORA})
     assert ui["state"] == "updated"
@@ -923,6 +1026,14 @@ def _detalhe_por_estado() -> dict[str, set]:
     # calculado ("Cartão desatualizado desde 12/08"), nunca fixo.
     anota({"status": "ACTIVE", "status_reason": "", "last_sync_at": AGORA,
            "reconnected_at": None, "health": derive_item_health(ITEM_PARCIAL, now=AGORA)})
+    # `no_accounts` virou detalhe VARIÁVEL quando o motivo do warning passou a
+    # ser anexado. O laço acima é cego para isso — ele só monta health com
+    # `products: {}`, e sem warning a frase é a fixa —, então a guarda ficaria
+    # verde com o JS apagando o motivo no toast. Um health COM warning fecha.
+    anota({"status": "ACTIVE", "status_reason": "no_accounts", "last_sync_at": AGORA,
+           "reconnected_at": None,
+           "health": {"item_status": "UPDATED", "stale_products": [],
+                      "products": {"BANK": {"updated": True, "warnings": ["ACCT_001"]}}}})
     return mapa
 
 

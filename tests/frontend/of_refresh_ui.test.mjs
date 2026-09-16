@@ -196,6 +196,11 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       ["needs_user_action", "Reautorize o banco", null],
       ["updating",          "Ainda não sincronizou", null],
       ["partial",           "Cartão desatualizado desde 12/08", null],
+      // O motivo do warning é o que o dono não teve: 30 avisos `004` e ninguém
+      // soube por quê. A frase fixa que estava aqui apagava exatamente isso.
+      ["no_accounts",       "O banco não devolveu contas nem investimentos — você "
+                            + "não liberou esse dado ao conectar o banco, reconecte "
+                            + "para liberar", null],
     ]) {
       const v = await page.evaluate(([s, d]) => window.refreshVerdict({ ok: false, items: [{
         item_id: "a", institution: "Nubank", state: s, label: "x", detail: d }] }), [state, detail]);
@@ -321,8 +326,14 @@ test("toast do refresh: cabe na LARGURA da tela e o texto cabe na caixa, de 320 
                   "refreshVerdict existir na página");
 
     const CASOS = [
-      // A instrução mais longa do Open Finance, a que mais cortava.
+      // A instrução mais longa do `_DETALHE_POR_STATUS`, a que mais cortava.
       ["needs_user_action", "Autorize o acesso no app do banco", null],
+      // ...e a mais longa do OF DEPOIS que o motivo do warning passou a ser
+      // anexado (`_motivo_do_warning`): dois produtos + data + cláusula. Sem
+      // este caso a medição de largura nunca veria a frase que cresceu.
+      ["partial", "Cartão e Investimentos desatualizados desde 10/09 — o banco "
+                  + "bateu o limite de consultas do Open Finance, volta sozinho "
+                  + "na virada do período", null],
       ["paused", null, null],
       // CONTROLE POSITIVO da asserção: copy curta é legítima e não pode reprovar.
       [null, null, "Tudo em dia!"],

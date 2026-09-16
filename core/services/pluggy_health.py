@@ -295,6 +295,77 @@ _FIXED_DETAIL = {
     "no_accounts": "O banco não devolveu contas nem investimentos",
 }
 
+# Código do warning → POR QUE o produto não veio, em frase NOSSA.
+#
+# A mensagem da Pluggy (`message`/`providerMessage`) cita nome, conta e documento
+# do titular e por isso é descartada no `_warning_codes` — decisão que não muda.
+# Só que aí o motivo virava um código que nenhuma superfície mostra: 30 warnings
+# `004` num item do dono, e nem ele nem o suporte souberam por que cartão e
+# investimentos não vieram. Traduzir o código é a saída que não carrega PII.
+#
+# Agrupado por AÇÃO do usuário, não por produto: o que muda a frase é o que ele
+# pode fazer, e o mesmo motivo cai em conta, cartão e investimento.
+#
+# Fonte: docs.pluggy.ai/docs/warnings-status-codes (lido em 16/09/2026; remeça
+# antes de reusar). SÓ conector Open Finance entra: os códigos de conector
+# DIRETO são nus (`001`, `002`, `003`) e significam coisa diferente em cada
+# conector — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria
+# chutar. Eles caem no fallback do `_motivo_do_warning`, que é honesto.
+# `LOAN_*` e `ID_*` ficam de fora porque `_PRODUCT_KEYS` não lê esses produtos:
+# entrada para código inalcançável é o código morto que este módulo já proíbe.
+_MOTIVO_POR_WARNING = {
+    code: frase
+    for frase, codes in (
+        ("você não liberou esse dado ao conectar o banco, reconecte para liberar",
+         ("ACCT_001", "ACCT_005", "CC_001", "CC_005", "CC_006",
+          "TXN_001", "TXN_004", "INV_001", "INV_002")),
+        # INV_004 é "Open Finance monthly rate limit"; TXN_003/TXN_006 a doc
+        # chama só de "rate limit reached" — daí "período", e não "mês".
+        ("o banco bateu o limite de consultas do Open Finance, volta sozinho na "
+         "virada do período",
+         ("INV_004", "TXN_003", "TXN_006")),
+        ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
+         ("ACCT_002", "ACCT_003", "CC_002", "CC_003")),
+        # "Unavailable" é PERMANENTE na doc ("Resource Status"), e é por isso que
+        # `ACCT_004` mora aqui e não junto do `ACCT_003`: os dois parecem irmãos
+        # e só um volta sozinho.
+        ("o banco não envia esse dado por aqui, não adianta tentar de novo",
+         ("ACCT_004", "CC_004", "CC_007", "INV_003", "INV_005")),
+    )
+    for code in codes
+}
+
+# A FORMA documentada de um código, e ela decide o que vai pra TELA — não o que
+# se armazena, que continua sendo assunto do `safe_code`. Duas regras de
+# propósito: `safe_code` aceita "1234-5" (6 caracteres, 5 dígitos), que é a cara
+# de um número de conta. Dormente enquanto o código só existia num JSON que
+# ninguém lia; imprimi-lo promove isso a vazamento visível.
+_CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_\d{3}|\d{3}")
+
+
+def _motivo_do_warning(health: dict | None, produtos) -> str:
+    """Cláusula " — <por que não veio>" a partir dos warnings, ou "" se não houver.
+
+    Sem warning a frase sai IDÊNTICA à de hoje — é o controle positivo, e
+    `tests/test_of_refresh_response.py` já o prende com `==`.
+    """
+    products = (health or {}).get("products") or {}
+    # ponytail: UMA cláusula, do primeiro código que a gente sabe explicar. Com
+    # dois motivos a frase vira parágrafo, e ela entra no meio do toast. Se
+    # aparecer par recorrente, virar lista. (É o que também dedupa os 30
+    # warnings iguais do item do dono: o `return` sai no primeiro.)
+    for code in (c for p in produtos
+                 for c in ((products.get(p) or {}).get("warnings") or [])):
+        frase = _MOTIVO_POR_WARNING.get(code)
+        if frase:
+            return f" — {frase}"
+        # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
+        # dono. Sem diagnóstico inventado, e só se tiver forma de código.
+        if _CODE_EXIBIVEL.fullmatch(code):
+            return f" — o banco avisou com o código {code}, sem explicar o motivo"
+    return ""
+
+
 # `status_reason` que NÃO impede o estado verde. Qualquer outro motivo — inclusive
 # um que este arquivo não conhece — derruba o "Atualizado" (ver `out`).
 _REASONS_OK = ("", "ok")
@@ -508,7 +579,8 @@ def _stale_detail(health: dict) -> str:
         d for d in (_dm((products.get(p) or {}).get("last_updated_at")) for p in stale) if d
     )
     texto = " e ".join(nomes) + (" desatualizados" if len(nomes) > 1 else " desatualizado")
-    return f"{texto} desde {datas[0]}" if datas else texto
+    base = f"{texto} desde {datas[0]}" if datas else texto
+    return base + _motivo_do_warning(health, stale)
 
 
 def connection_ui_state(connection_row: dict) -> dict:
@@ -577,6 +649,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
         elif state == "updated" and coletando_sem_info:
             state, detail = "updating", None
+        # Mesmo defeito do `partial`: item vivo, espelho vazio, e o porquê
+        # (`ACCT_001` = ninguém liberou contas) preso no JSON. Sem health — o
+        # ramo de baixo — a frase continua exatamente a de hoje.
+        if state == "no_accounts":
+            detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
+                health, (health or {}).get("products") or ())
         return {
             "state": state,
             "label": _LABELS[state],

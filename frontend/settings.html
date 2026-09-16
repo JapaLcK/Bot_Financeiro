@@ -3375,7 +3375,13 @@ const OF_VERDICT = [
   ["needs_user_action", (i) => i.detail
       ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Ação necessária no ${ofNome(i)}.`],
-  ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
+  // Detalhe VARIÁVEL desde que o backend anexa o porquê ("… — você não liberou
+  // esse dado ao conectar o banco"): a frase fixa daqui apagava justamente o
+  // motivo que o usuário precisa. Mesma forma do `updating`/`partial` — quem
+  // escreve a explicação é o backend, esta tabela só nomeia o item.
+  ["no_accounts",       (i) => i.detail
+      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
   ["updating",          (i) => i.detail
       ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
       : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
