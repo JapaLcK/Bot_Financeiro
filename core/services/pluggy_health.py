@@ -532,6 +532,18 @@ def connection_ui_state(connection_row: dict) -> dict:
     ultimo, religado = row.get("last_sync_at"), row.get("reconnected_at")
     sem_sync = ultimo is None or (religado is not None and ultimo < religado)
 
+    # Item em coleta cujo health não traz informação de produto NENHUMA:
+    # `derive_item_health` pula o produto cujo `statusDetail` não veio
+    # (`if not isinstance(detail, dict): continue`), então `products` vazio não é
+    # "nada atrasado", é "não sei". E o job de saúde sobrescreve `health` sem
+    # condição — um "Parcial — Cartão desatualizado desde 12/08" vira health sem
+    # `statusDetail` assim que o item entra em `UPDATING`, e o aviso do cartão
+    # sumiria com a tela dizendo "Atualizado". Só o VERDE é interceptado (no
+    # `out()`, depois do motivo pendente): "Atualizando…" é o que a base dizia
+    # e é a resposta honesta para o que não se mediu.
+    coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
+                          and not (health or {}).get("products"))
+
     def out(state: str, detail: str | None = None) -> dict:
         # DEFAULT SEGURO: estado desconhecido nunca é verde. Um `status_reason`
         # pendente que este arquivo não conhece (gravado por um caminho novo)
@@ -553,6 +565,12 @@ def connection_ui_state(connection_row: dict) -> dict:
         # motivo é que vira "Ainda não sincronizou".
         elif state == "updated" and sem_sync:
             state, detail = "updating", "Ainda não sincronizou"
+        # Mesma família da linha de cima, e no mesmo lugar de propósito: DEPOIS
+        # do motivo pendente (`no_accounts`/`read_failed`/desconhecido continuam
+        # falando primeiro) e só contra o verde. Sem `detail`: é o "Atualizando…"
+        # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
+        elif state == "updated" and coletando_sem_info:
+            state, detail = "updating", None
         return {
             "state": state,
             "label": _LABELS[state],

@@ -382,7 +382,11 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
     await page.route("**/open-finance/**", (route) => {
       const req = route.request();
       chamadas.push(`${req.method()} ${new URL(req.url()).pathname}`);
-      return route.fulfill(json({ sync: { ok: true, still_updating: 0, items: [] },
+      // `still_updating: 2` de propósito: é o caminho COMUM de um refresh que
+      // deu certo (a coleta do banco não cabe na espera do servidor), e era o
+      // único ramo do veredito que o gesto não exercitava — com `still_updating:
+      // 0` este teste dava o mesmo resultado com e sem a correção do tom.
+      return route.fulfill(json({ sync: { ok: true, still_updating: 2, items: [] },
                                   connections: [], accounts: [], transactions: [] }));
     });
 
@@ -394,7 +398,15 @@ test("PTR do OF chama o refresh real, e settings não abre WebSocket", async () 
       "a aba de Open Finance ficar ativa");
     await sleep(300);
     chamadas.length = 0;                       // ignora o load inicial
-    await page.evaluate(() => window.PBRefresh());
+    // O gesto NÃO pode rejeitar num refresh que deu certo: `refreshOpenFinance`
+    // faz `if (propagate && veredito.tone === "error") throw`, e o `finish(ok)`
+    // do app-mode.js pinta o indicador de ÂMBAR quando a promise rejeita. Este é
+    // o caminho que o veredito puro (`window.refreshVerdict`) não prova.
+    // CONTROLE NEGATIVO: repor `tone: "error"` no ramo `still_updating > 0` do
+    // settings.html deixa esta asserção vermelha.
+    const desfecho = await page.evaluate(() =>
+      window.PBRefresh().then(() => "resolveu", (e) => `rejeitou: ${e && e.message}`));
+    assert.equal(desfecho, "resolveu", "o PTR virou âmbar num refresh bem-sucedido");
 
     const refresh = chamadas.filter((c) => c.startsWith("POST") && c.endsWith("/refresh"));
     assert.equal(refresh.length, 1, `o gesto tem que pedir refresh real, veio: ${chamadas.join(", ")}`);
