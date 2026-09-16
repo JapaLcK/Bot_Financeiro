@@ -44,6 +44,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright";
+import { comToast } from "./_toast.mjs";
 
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
 const DASHBOARD_CHAT_JS = join(FRONTEND, "dashboard-chat.js");
@@ -182,45 +183,6 @@ async function abrir(pagina = "dashboard.html", fabPos = null) {
   }, { ehDash: pagina === "dashboard.html", temFabPos: !!fabPos }, { timeout: 10_000 });
   page.__ctx = ctx;
   return page;
-}
-
-/**
- * Acende o toast pelo CAMINHO REAL (`showToast`, dashboard.js:7578) e espera a
- * transição de .22s (`opacity`, `transform`; dashboard.css:1625) ASSENTAR —
- * por ESTADO, não por relógio. Um `waitForTimeout(300)` fixo media o toast no
- * meio da animação sob carga (runner do CI; aqui, `PB_TEST_CPU_THROTTLE=50`):
- * `top` 622 = 612 + os 10px do translateY inicial, e a folga de 8px virava
- * 5,5–6,9. O critério é `opacity === "1"` (assentou VISÍVEL) + zero animações
- * pendentes — e NÃO o `transform` final, porque o caso (d) usa este mesmo
- * helper no settings, cujo toast assenta em `translateX(-50%) translateY(0)`
- * (settings.html:1056), uma matriz diferente. `getAnimations().length === 0`
- * cobre as duas propriedades sem conhecer o valor final. Não use
- * `getAnimations().map(a => a.finished)` como o bank_movements.test.mjs: o
- * `.finished` REJEITA se o timer de 2s do showToast cancelar a transição.
- *
- * Escrever `textContent` + `.show` na mão parecia equivalente e não é: para
- * mensagem que começa com ✓ — que é o DEFAULT — o showToast monta `innerHTML`
- * com um `<img class="toast-sticker">` de 22px, e a caixa passa de 35px para
- * 42px de altura. Medir a caixa errada é medir outro elemento.
- *
- * O `setInterval` existe porque o toast se apaga sozinho, e são DOIS timers,
- * um por página: `toastT` no dashboard.js (~:7577, 2s) e `_toastTimer` no
- * settings.html (~:1955, 2,4s). O interval serve às duas sem conhecer nenhum.
- * Sob paralelismo uma medição podia cair depois do apagão e ler a caixa já
- * escondida. Re-adicionar `.show` já presente não cria animação, então ele não
- * atrapalha a espera acima. Morre com a página.
- */
-async function comToast(page, msg) {
-  await page.evaluate((m) => {
-    window.showToast(m);
-    const t = document.getElementById("toast");
-    clearInterval(window.__mantemToast);
-    window.__mantemToast = setInterval(() => t.classList.add("show"), 100);
-  }, msg);
-  await page.waitForFunction(() => {
-    const t = document.getElementById("toast");
-    return getComputedStyle(t).opacity === "1" && t.getAnimations().length === 0;
-  }, null, { timeout: 5_000 });
 }
 
 /** Retângulos + área de interseção, tudo medido no navegador. */
