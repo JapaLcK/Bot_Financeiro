@@ -45,7 +45,13 @@ function decodifica(bruto: string | null): Credenciais | null {
   if (!bruto) return null;
   try {
     const { access, refresh } = JSON.parse(bruto) as Partial<Credenciais>;
-    return access && refresh ? { access, refresh } : null;
+    // `typeof`, não só truthy: JSON válido com forma errada — `{"access":{}}`,
+    // um formato antigo, um valor truncado pela metade — passaria pelo teste de
+    // verdade e viraria uma "sessão" com objeto no lugar do token, que só
+    // falharia lá adiante, no cabeçalho da requisição, longe da causa.
+    return typeof access === "string" && typeof refresh === "string"
+      ? { access, refresh }
+      : null;
   } catch {
     // Valor corrompido é sessão inválida, não exceção para a tela tratar.
     return null;

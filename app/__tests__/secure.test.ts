@@ -66,6 +66,18 @@ describe("o par de credenciais é atômico", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
+  it.each([
+    ['{"access":{},"refresh":{}}', "objeto no lugar do token"],
+    ['{"access":123,"refresh":456}', "número no lugar do token"],
+    ['{"access":"a"}', "metade do par"],
+    ["null", "nulo"],
+  ])("JSON válido com forma errada (%s) não vira sessão", async (bruto) => {
+    // Só truthy deixava `{"access":{}}` passar, e a falha apareceria lá adiante
+    // no cabeçalho da requisição, longe da causa.
+    cofre.set("pb.credenciais", bruto);
+    await expect(lerCredenciais()).resolves.toBeNull();
+  });
+
   it("valor corrompido vira sessão ausente, não exceção na tela", async () => {
     cofre.set("pb.credenciais", "{isso não é json");
     await expect(lerCredenciais()).resolves.toBeNull();

@@ -262,6 +262,19 @@ type Opcoes = {
    * sessão que se está encerrando.
    */
   credencial?: { access: string; refresh: string };
+  /**
+   * Não renova em 401, e não trata o 401 como fim de sessão.
+   *
+   * Existe para as rotas que usam 401 para uma credencial SECUNDÁRIA — a senha
+   * numa configuração de dois fatores, por exemplo. Ali o 401 quer dizer "esse
+   * dado está errado", não "sua sessão acabou", e renovar não resolve nada:
+   * mandaria o usuário para a tela de entrada por ter digitado a senha errada
+   * num formulário que já estava autenticado.
+   *
+   * Nenhuma rota da Fase 1 é assim; o sinalizador existe para que a primeira
+   * que for tenha um caminho certo em vez de descobrir o problema em produção.
+   */
+  semRenovar?: boolean;
   sinal?: AbortSignal;
 };
 
@@ -302,7 +315,12 @@ export async function chamar<T>(
     : (opcoes.credencial ?? (await lerCredenciais()));
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
 
-  if (resposta.status === 401 && !opcoes.semAuth && !opcoes.credencial) {
+  if (
+    resposta.status === 401 &&
+    !opcoes.semAuth &&
+    !opcoes.credencial &&
+    !opcoes.semRenovar
+  ) {
     // Sem credencial de origem não há o que renovar — e renovar com a de outro
     // dono é justamente o que a amarração impede.
     if (!guardadas) throw new SessaoExpirada();

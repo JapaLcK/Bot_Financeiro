@@ -7,7 +7,11 @@
 import { z } from "zod";
 
 import { chamar } from "@/api/client";
-import { guardarCredenciais, limparCredenciais } from "@/storage/secure";
+import {
+  guardarCredenciais,
+  lerCredenciais,
+  limparCredenciais,
+} from "@/storage/secure";
 
 const schema = z.object({ ok: z.boolean() });
 
@@ -50,5 +54,25 @@ describe("credencial na requisição", () => {
     await chamar("/publica", schema, { semAuth: true });
 
     expect(fetchFalso.mock.calls[0][1].headers["Authorization"]).toBeUndefined();
+  });
+
+  it("semRenovar: 401 de credencial secundária não vira fim de sessão", async () => {
+    // Rotas que usam 401 para uma credencial SECUNDÁRIA — a senha numa
+    // configuração de dois fatores — não podem renovar nada: o 401 diz "esse
+    // dado está errado", e renovar mandaria o usuário para a tela de entrada
+    // por ter digitado a senha errada num formulário já autenticado.
+    await guardarCredenciais({ access: "a1", refresh: "rt_1" });
+    fetchFalso.mockResolvedValue(resposta(401, { detail: "Senha incorreta." }));
+
+    await expect(
+      chamar("/auth/mfa/setup", schema, { metodo: "POST", semRenovar: true }),
+    ).rejects.toThrow("Senha incorreta.");
+    // Uma requisição só: nenhuma renovação foi tentada.
+    expect(fetchFalso).toHaveBeenCalledTimes(1);
+    // E a sessão continua de pé.
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "a1",
+      refresh: "rt_1",
+    });
   });
 });
