@@ -180,6 +180,26 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
         reason);
       assert.equal(v.tone, "error", `updating com ${reason} saiu neutro ("${v.msg}")`);
     }
+    // Codex #455, 3º apontamento no MESMO trecho → enumeração (CLAUDE.md §4):
+    // TODO erro decide antes de QUALQUER neutro. Os três jeitos de um caminho
+    // neutro sair antes de um erro — (a) e (b) do Codex, (c) achado enumerando:
+    const COLETA = { item_id: "a", institution: "Nubank", state: "updating", reason: null, detail: null };
+    const casos = [
+      ["(a) coleta + estado desconhecido", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(b) lote coletando + estado desconhecido", { ok: false, still_updating: 2, items: [
+        { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(c) coleta sem falha antes de coleta com falha", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "updating", reason: "read_failed", detail: null }] }],
+    ];
+    for (const [nome, sync] of casos) {
+      for (const inverte of [false, true]) {
+        const s = { ...sync, items: inverte ? [...sync.items].reverse() : sync.items };
+        const v = await page.evaluate((x) => window.refreshVerdict(x), s);
+        assert.equal(v.tone, "error", `${nome}${inverte ? " (ordem invertida)" : ""} saiu "${v.tone}": "${v.msg}"`);
+      }
+    }
+
     // CONTROLE POSITIVO: sem motivo de falha, a coleta continua neutra.
     for (const reason of [null, "", "ok"]) {
       const v = await page.evaluate((r) => window.refreshVerdict({ ok: false, still_updating: 0,
