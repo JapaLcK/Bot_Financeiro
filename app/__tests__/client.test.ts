@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   ContratoInvalido,
   ErroDeApi,
+  RenovacaoIndisponivel,
   SessaoExpirada,
   chamar,
   _resetRenovacao,
@@ -145,15 +146,18 @@ describe("renovação em 401", () => {
     await expect(lerCredenciais()).resolves.toBeNull();
   });
 
-  it("falha de REDE no refresh NÃO apaga a sessão", async () => {
+  it("falha de REDE no refresh não apaga a sessão nem finge que ela acabou", async () => {
     // O token pode estar vivo e o usuário só sem sinal. Apagar aqui deslogaria
-    // quem entrou no elevador.
+    // quem entrou no elevador — e chamar de sessão expirada mandaria essa mesma
+    // pessoa para a tela de login, o que é mentir sobre o estado da conta.
     await guardarCredenciais({ access: "velho", refresh: "rt_vivo" });
     fetchFalso
       .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
       .mockRejectedValueOnce(new Error("rede fora"));
 
-    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(
+      RenovacaoIndisponivel,
+    );
     await expect(lerCredenciais()).resolves.toEqual({
       access: "velho",
       refresh: "rt_vivo",
@@ -171,13 +175,45 @@ describe("renovação em 401", () => {
         .mockResolvedValueOnce(resposta(401, { detail: "expirado" }))
         .mockResolvedValueOnce(resposta(status, { detail: "instável" }));
 
-      await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+      // E o erro NÃO é de sessão: a tela que trata `SessaoExpirada` manda para
+      // o login, e mandar alguém para lá por causa de um 500 é mentir sobre o
+      // estado da conta dele.
+      await expect(chamar("/x", schema)).rejects.toBeInstanceOf(
+        RenovacaoIndisponivel,
+      );
       await expect(lerCredenciais()).resolves.toEqual({
         access: "velho",
         refresh: "rt_vivo",
       });
     },
   );
+
+  it("a conta trocar DURANTE o refresh não restaura a sessão antiga", async () => {
+    // A conferência de entrada não basta: a troca pode acontecer com a
+    // requisição no ar, e aí gravar o resultado poria a sessão antiga por cima
+    // da nova — e a requisição da conta A seria repetida em seguida.
+    await guardarCredenciais({ access: "token-de-A", refresh: "rt_de_A" });
+    fetchFalso.mockImplementation(async (url: string) => {
+      if (String(url).includes("/auth/refresh")) {
+        // A conta B entra ENQUANTO o refresh da A está no ar.
+        await guardarCredenciais({ access: "token-de-B", refresh: "rt_de_B" });
+        return resposta(200, {
+          access_token: "token-de-A2",
+          refresh_token: "rt_de_A2",
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      return resposta(401, { detail: "expirado" });
+    });
+
+    await expect(chamar("/x", schema)).rejects.toBeInstanceOf(SessaoExpirada);
+    // O cofre continua com a sessão da B, intacta.
+    await expect(lerCredenciais()).resolves.toEqual({
+      access: "token-de-B",
+      refresh: "rt_de_B",
+    });
+  });
 
   it("401 no refresh apaga a sessão: é terminal", async () => {
     await guardarCredenciais({ access: "velho", refresh: "rt_morto" });

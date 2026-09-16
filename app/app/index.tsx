@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View, useColorScheme } from "react-native";
 
-import { SessaoExpirada } from "@/api/client";
+import { RenovacaoIndisponivel, SessaoExpirada } from "@/api/client";
 import { perfil } from "@/services/auth";
 import { claro, escuro, espaco, texto } from "@/ui/tokens";
 
@@ -30,6 +30,12 @@ export default function Inicio() {
       })
       .catch((e: unknown) => {
         if (!vivo) return;
+        // A ordem importa: `RenovacaoIndisponivel` é instabilidade do servidor,
+        // não fim de sessão. Mandar o usuário para a entrada por causa de um
+        // 500 é mentir sobre o estado da conta dele.
+        if (e instanceof RenovacaoIndisponivel) {
+          return setEstado({ fase: "erro", mensagem: e.detalhe });
+        }
         if (e instanceof SessaoExpirada) return setEstado({ fase: "sem-sessao" });
         setEstado({
           fase: "erro",

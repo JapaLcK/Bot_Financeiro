@@ -47,6 +47,28 @@ function baseUrl(): string {
   return url.replace(/\/+$/, "");
 }
 
+/** Falha de renovação temporária: o servidor respondeu, mas mal. Dá para tentar de novo. */
+export class RenovacaoIndisponivel extends ErroDeApi {
+  constructor(status: number) {
+    super(status, "Não conseguimos falar com o PigBank agora. Tente de novo.");
+    this.name = "RenovacaoIndisponivel";
+  }
+}
+
+/**
+ * O resultado de uma renovação, e o MOTIVO quando ela não acontece.
+ *
+ * Um booleano não bastava: "a sessão acabou" e "o servidor está instável" levam
+ * o usuário a telas opostas — a primeira pede login, a segunda pede paciência.
+ * Colapsar as duas em `null` fazia um 500 do backend aparecer como "Entre para
+ * continuar", que é mentir sobre o estado da conta.
+ */
+type Renovacao =
+  | { ok: true; access: string }
+  | { ok: false; motivo: "terminal" }
+  | { ok: false; motivo: "transitorio"; status: number }
+  | { ok: false; motivo: "sessao-trocou" };
+
 /**
  * Renovação DEDUPLICADA, e amarrada ao token que a originou.
  *
@@ -57,32 +79,32 @@ function baseUrl(): string {
  * servidor. É o mesmo raciocínio do `auth-refresh.js` do site.
  *
  * E a amarração ao token existe porque a deduplicação global tinha um segundo
- * problema: se o usuário sair e outra conta entrar entre o 401 e a renovação,
- * a promessa devolveria a credencial da conta NOVA para uma requisição que
- * nasceu na antiga — e num caminho de dinheiro isso escreve na conta errada.
+ * problema: se o usuário sair e outra conta entrar entre o 401 e a renovação, a
+ * promessa devolveria a credencial da conta NOVA para uma requisição que nasceu
+ * na antiga — e num caminho de dinheiro isso escreve na conta errada.
+ *
+ * A conferência acontece DUAS vezes, antes e depois da ida ao servidor, e a
+ * segunda é a que importa: a troca de conta pode acontecer com a requisição no
+ * ar, e aí a gravação do resultado restauraria a sessão antiga por cima da
+ * nova. Conferir só na entrada deixava essa janela aberta.
  */
-let renovacaoEmVoo: { refresh: string; promessa: Promise<string | null> } | null =
+let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
   null;
 
-async function renovar(refreshDeOrigem: string): Promise<string | null> {
-  // Deduplicação POR TOKEN, não global. Uma renovação em voo só serve a quem
-  // partiu do MESMO refresh: se o usuário sair e outra conta entrar no meio, a
-  // promessa da conta A não pode entregar o token da B a uma requisição da A —
-  // e num caminho de dinheiro isso escreveria na conta errada.
+async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
 
-  const promessa = (async () => {
+  const promessa = (async (): Promise<Renovacao> => {
     try {
-      const guardadas = await lerCredenciais();
-      // A sessão trocou por baixo (logout, outra conta): não renova nada, e
-      // sobretudo não devolve a credencial de outro dono para uma requisição
-      // que nasceu nesta.
-      if (!guardadas || guardadas.refresh !== refreshDeOrigem) return null;
+      const antes = await lerCredenciais();
+      if (!antes || antes.refresh !== refreshDeOrigem) {
+        return { ok: false, motivo: "sessao-trocou" };
+      }
 
       const resposta = await fetch(`${baseUrl()}/auth/refresh`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${guardadas.refresh}`,
+          Authorization: `Bearer ${refreshDeOrigem}`,
           [HEADER_CLIENTE]: CLIENTE,
           "Content-Type": "application/json",
         },
@@ -90,20 +112,31 @@ async function renovar(refreshDeOrigem: string): Promise<string | null> {
       });
 
       // Só o 401 PROVA que a sessão acabou. Um 429 ou um 500 é incidente
-      // passageiro do servidor, e apagar a credencial ali transformaria dois
-      // minutos de instabilidade em logout definitivo de todo mundo.
+      // passageiro do servidor, e tratá-lo como fim de sessão transformaria
+      // dois minutos de instabilidade em logout de todo mundo.
       if (resposta.status === 401) {
-        await limparCredenciais();
-        return null;
+        const atual = await lerCredenciais();
+        // Apaga só se ainda for a MESMA sessão: se outra conta entrou enquanto
+        // isto estava no ar, apagar levaria a sessão dela junto.
+        if (atual?.refresh === refreshDeOrigem) await limparCredenciais();
+        return { ok: false, motivo: "terminal" };
       }
-      if (!resposta.ok) return null;
+      if (!resposta.ok) {
+        return { ok: false, motivo: "transitorio", status: resposta.status };
+      }
 
       const novas = credenciaisSchema.parse(await resposta.json());
+      // A segunda conferência. A conta pode ter trocado com a requisição no ar;
+      // gravar sem olhar restauraria a sessão antiga por cima da nova.
+      const agora = await lerCredenciais();
+      if (agora?.refresh !== refreshDeOrigem) {
+        return { ok: false, motivo: "sessao-trocou" };
+      }
       await guardarCredenciais({
         access: novas.access_token,
         refresh: novas.refresh_token,
       });
-      return novas.access_token;
+      return { ok: true, access: novas.access_token };
     } catch {
       // Falha de REDE não apaga a sessão: o token pode estar perfeitamente vivo
       // e o usuário só estar no elevador. Quem apaga é o 401 acima, que é
@@ -111,11 +144,11 @@ async function renovar(refreshDeOrigem: string): Promise<string | null> {
       //
       // ponytail: fica o caso ambíguo — a resposta pode ter se perdido DEPOIS
       // de o servidor rotacionar, e aí a renovação seguinte reapresenta um
-      // token gasto, que o servidor trata como roubo. A decisão do dono é
-      // manter assim e medir com app em produção; a mitigação certa é do lado
-      // do servidor (janela de graça na rotação), não um sinalizador no cliente
-      // que pode ficar presente e deslogar quem está bem.
-      return null;
+      // token gasto, que o servidor trata como roubo. Decisão do dono: manter
+      // assim e medir com app em produção. A mitigação certa é do lado do
+      // servidor (janela de graça na rotação), não um sinalizador no cliente
+      // que pode ficar preso e deslogar quem está bem.
+      return { ok: false, motivo: "transitorio", status: 0 };
     }
   })();
 
@@ -172,18 +205,30 @@ export async function chamar<T>(
 
   if (resposta.status === 401 && !opcoes.semAuth) {
     // Sem credencial de origem não há o que renovar — e renovar com a de outro
-    // dono é justamente o que a amarração abaixo impede.
+    // dono é justamente o que a amarração impede.
     if (!guardadas) throw new SessaoExpirada();
-    const novoAccess = await renovar(guardadas.refresh);
-    if (!novoAccess) throw new SessaoExpirada();
-    resposta = await enviar(rota, opcoes, novoAccess);
+    const renovada = await renovar(guardadas.refresh);
+    if (!renovada.ok) {
+      // Instabilidade do servidor NÃO é fim de sessão. A tela que trata
+      // `SessaoExpirada` manda o usuário para o login; mandá-lo para lá por
+      // causa de um 500 é mentir sobre o estado da conta dele.
+      if (renovada.motivo === "transitorio") {
+        throw new RenovacaoIndisponivel(renovada.status);
+      }
+      throw new SessaoExpirada();
+    }
+    resposta = await enviar(rota, opcoes, renovada.access);
     if (resposta.status === 401) {
       // Renovou e AINDA assim tomou 401: a sessão morreu entre as duas
       // requisições (revogada noutro aparelho, logout, troca de senha). É
       // terminal, e a credencial recém-guardada tem de sair do keychain junto —
       // senão `temSessao()` segue dizendo que sim, o app abre como logado e
       // tenta renovar de novo a cada início, sem nunca chegar à tela de entrada.
-      await limparCredenciais();
+      //
+      // E só apaga se ainda for a mesma sessão: outra conta pode ter entrado
+      // enquanto isto estava no ar, e apagar levaria a sessão dela junto.
+      const atual = await lerCredenciais();
+      if (atual?.access === renovada.access) await limparCredenciais();
       throw new SessaoExpirada();
     }
   }
