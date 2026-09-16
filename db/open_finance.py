@@ -525,15 +525,37 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —
           -- não há entrada que chegue lá.
           --
-          -- ALCANCE: as DUAS superfícies estão fechadas agora. Esta é o AVISO
-          -- PROATIVO; a TELA é `get_open_finance_snapshot` (acima, na mesma
-          -- tabela), que passou a selecionar o MESMO derivado — o escalar do
+          -- ALCANCE, E ELE É DE UM EIXO SÓ. O que fecha é TELA × AVISO, e
+          -- DENTRO do ramo `health is null`: esta query é o AVISO PROATIVO; a
+          -- TELA é `get_open_finance_snapshot` (acima, na mesma tabela), que
+          -- passou a selecionar o MESMO derivado — o escalar do
           -- `SQL_EXECUTION_STATUS`, nunca o `raw` inteiro. Uma regra, um prazo,
           -- um parâmetro, e a condição literalmente compartilhada
           -- (`SQL_RAW_AINDA_VALE`, §0.7): as duas superfícies não podem mais
           -- divergir por alguém consertar uma só.
           --
-          -- O SILÊNCIO AGORA É LIMITADO, e essa é a mudança. Antes ele durava
+          -- O EIXO QUE CONTINUA ABERTO é o OUTRO: health-nulo × health-PRESENTE.
+          -- O `SQL_RAW_AINDA_VALE` só governa `health is null`. Assim que o tique
+          -- de saúde grava `health` com o mesmo `execution_status`, a linha passa
+          -- para o ramo de CIMA — o `if health:` de `connection_ui_state` e o
+          -- primeiro braço do `coalesce` logo acima —, e esses DOIS não têm prazo
+          -- nenhum. A oscilação real em produção tem TRÊS fases:
+          --   1. 0–60 min: instrução certa. É o conserto deste PR.
+          --   2. 60 min → tique de saúde: "Reautorize o banco", aviso de volta.
+          --   3. depois do tique, PARA SEMPRE: "Autorize o acesso no app do
+          --      banco" com o QR morto há semanas, e o aviso calado.
+          -- A fase 3 é a que DURA (o tique é ≤6 h no caso comum). Medido pelo
+          -- caminho de produção — `save_pluggy_open_finance_item`, job de saúde
+          -- gravando `health` com o mesmo `execution_status`, 30 dias depois:
+          -- detalhe "Autorize o acesso no app do banco", aviso proativo `False`.
+          -- NÃO é regressão: o ramo com `health` já era assim na `main`, e este
+          -- PR não o toca. Está FORA DE ESCOPO por decisão do dono — fechá-la é
+          -- outra máquina de estados (validade de `health` OBSERVADO, escopo da
+          -- Onda 5 inteira), outro inventário e outro PR. Aqui fica só onde ela
+          -- teria de ser fechada, sem proposta de solução.
+          --
+          -- O SILÊNCIO FICA LIMITADO NO RAMO SEM `health`, e essa é a mudança —
+          -- a fase 3 acima é o que sobra. Antes ele durava
           -- MUITO mais que a janela do QR (~30 min): quem escreve `health` de
           -- volta é o `run_of_health_check` (`core/services/pluggy_sync.py`), num
           -- tique de `OF_REFRESH_INTERVAL_SEC` — default 6 h
