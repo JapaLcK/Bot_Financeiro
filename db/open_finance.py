@@ -550,9 +550,14 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- detalhe "Autorize o acesso no app do banco", aviso proativo `False`.
           -- NÃO é regressão: o ramo com `health` já era assim na `main`, e este
           -- PR não o toca. Está FORA DE ESCOPO por decisão do dono — fechá-la é
-          -- outra máquina de estados (validade de `health` OBSERVADO, escopo da
-          -- Onda 5 inteira), outro inventário e outro PR. Aqui fica só onde ela
-          -- teria de ser fechada, sem proposta de solução.
+          -- outra máquina de estados, outro inventário e outro PR. O que precisa
+          -- ser DECIDIDO antes de codar: por quanto tempo um `health` OBSERVADO
+          -- descreve a autorização atual (hoje: para sempre), e qual é a âncora
+          -- desse prazo — `health.observed_at` é o relógio do servidor no momento
+          -- da medição, não o da autorização, então não é o mesmo problema que o
+          -- `SQL_RAW_AINDA_VALE` resolve aqui. Isso vale para TODO `item_status`
+          -- de `_NEEDS_USER`, não só para device/QR, e é o que faz disto trabalho
+          -- próprio. Aqui fica só onde ela teria de ser fechada, sem proposta.
           --
           -- O SILÊNCIO FICA LIMITADO NO RAMO SEM `health`, e essa é a mudança —
           -- a fase 3 acima é o que sobra. Antes ele durava
