@@ -9,9 +9,12 @@ CONTROLE NEGATIVO do grupo: pôr um `return {}` na 1ª linha de
 `derive_item_health` deixa vermelha boa parte do arquivo. A CONTAGEM não mora
 aqui de propósito (`CLAUDE.md` §2: número que um comando responde envelhece em
 silêncio — a que estava escrita dizia "9–13" e a medição dava mais que o dobro).
-Quem quiser o número roda a mutação e conta:
+Quem quiser o número roda a mutação e conta — com `DATABASE_URL` apontando
+para um Postgres onde o papel tenha CREATEDB (o `conftest.py` cria um database
+isolado por execução e, sem a variável, todos os testes saem como ERROR e não
+como falha):
 
-    python -m pytest -q tests/test_of_health.py
+    DATABASE_URL=postgresql://... PYTHONPATH=. python -m pytest -q tests/test_of_health.py
 """
 
 from __future__ import annotations
@@ -125,6 +128,9 @@ def test_updating_sem_informacao_de_produto_nao_pode_ficar_verde():
     ui = connection_ui_state({"status": "ACTIVE", "health": cego, "last_sync_at": AGORA})
     assert (ui["state"], ui["detail"]) == ("updating", None), ui
 
+    # LIMITE CONHECIDO, NÃO GARANTIA: `_SAUDAVEL` só traz `accounts`. Este verde
+    # vale igual para um cartão que estava atrasado na foto anterior e sumiu
+    # desta — o aviso dele desaparece. Ver o comentário de `coletando_sem_info`.
     completo = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
     assert connection_ui_state({"status": "ACTIVE", "health": completo,
                                 "last_sync_at": AGORA})["state"] == "updated"
@@ -351,16 +357,24 @@ def test_item_em_coleta_com_sync_tambem_nao_engole_o_motivo():
 
     CONTROLE NEGATIVO (medido): desligar o default seguro do `out()` (trocar
     `if state == "updated" and reason not in _REASONS_OK` por `and False`) deixa
-    os três casos vermelhos.
+    os três casos vermelhos. E pôr o `elif ... coletando_sem_info` ANTES do
+    motivo deixa vermelho o caso do health SEM produto — é o que prende a ordem
+    que o `out()` declara.
     CONTROLE POSITIVO: o mesmo health sem motivo nenhum continua chegando a
     "Atualizado" — a guarda não pode recusar tudo."""
     coletando = derive_item_health({**_SAUDAVEL, "status": "UPDATING"}, now=AGORA)
-    for motivo, esperado in (("no_accounts", "no_accounts"),
-                             ("read_failed", "error_recoverable"),
-                             ("motivo_que_ninguem_escreveu_ainda", "error_recoverable")):
-        ui = connection_ui_state({"status": "ACTIVE", "status_reason": motivo,
-                                  "health": coletando, "last_sync_at": AGORA})
-        assert ui["state"] == esperado, f"{motivo} virou {ui['state']} com o item em coleta"
+    # O health SEM informação de produto é o único em que `coletando_sem_info`
+    # vale, e portanto o único que vê a ordem entre ele e o motivo.
+    cego = derive_item_health({"status": "UPDATING"}, now=AGORA)
+    for health in (coletando, cego):
+        for motivo, esperado in (("no_accounts", "no_accounts"),
+                                 ("read_failed", "error_recoverable"),
+                                 ("motivo_que_ninguem_escreveu_ainda", "error_recoverable")):
+            ui = connection_ui_state({"status": "ACTIVE", "status_reason": motivo,
+                                      "health": health, "last_sync_at": AGORA})
+            assert ui["state"] == esperado, (
+                f"{motivo} virou {ui['state']} com o item em coleta "
+                f"(produtos: {sorted(health['products'])})")
 
     limpo = connection_ui_state({"status": "ACTIVE", "status_reason": "",
                                  "health": coletando, "last_sync_at": AGORA})

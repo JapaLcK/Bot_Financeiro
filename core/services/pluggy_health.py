@@ -541,6 +541,12 @@ def connection_ui_state(connection_row: dict) -> dict:
     # sumiria com a tela dizendo "Atualizado". Só o VERDE é interceptado (no
     # `out()`, depois do motivo pendente): "Atualizando…" é o que a base dizia
     # e é a resposta honesta para o que não se mediu.
+    # LIMITE CONHECIDO, e é o mesmo cenário por outra porta: a guarda pega
+    # "nenhuma informação de produto", não "informação a menos". Se a foto nova
+    # trouxer só `accounts`, o cartão que estava atrasado na foto ANTERIOR some
+    # dela, `stale_products` fica vazio e o card vira "Atualizado". Fechar isso
+    # exige comparar com a foto anterior — que o job de saúde sobrescreve — e
+    # ficou para issue própria.
     coletando_sem_info = (str((health or {}).get("item_status") or "").upper() in _UPDATING
                           and not (health or {}).get("products"))
 

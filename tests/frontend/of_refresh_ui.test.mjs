@@ -145,7 +145,13 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
 
     // NUNCA verde — inclusive o estado inventado, que é o ponto do teste: o
     // backend pode ganhar um caso novo antes desta tela saber dele.
-    for (const state of ["no_accounts", "paused", "removed", "item_missing",
+    // AS SETE entradas de `OF_VERDICT` que não são `updating`, por nome, mais o
+    // estado inventado. Eram quatro: `needs_user_action`, `partial` e
+    // `error_recoverable` só estavam presas como "≠ ok" num laço mais abaixo, e
+    // neutralizar as três passava com o arquivo inteiro verde — com o gesto
+    // ficando VERDE para "Ação necessária no Nubank: reautorize o acesso".
+    for (const state of ["item_missing", "removed", "paused", "needs_user_action",
+                         "no_accounts", "partial", "error_recoverable",
                          "estado_que_ninguem_implementou_ainda"]) {
       const v = await page.evaluate((s) =>
         window.refreshVerdict({ ok: true, still_updating: 0, items: [{
@@ -153,8 +159,8 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       // `error`, e não só "≠ ok": desde que a entrada `updating` virou tom
       // neutro, "não é verde" deixou de separar erro de neutro — e um refactor
       // que neutralizasse as OUTRAS SETE entradas passaria sem vermelho.
-      // Estes quatro (mais o estado inventado, que cai no default seguro) são
-      // erro de verdade: o usuário precisa reconectar, reativar ou esperar.
+      // Estas sete (mais o estado inventado, que cai no default seguro) são
+      // erro de verdade: o usuário precisa reconectar, reativar, agir ou esperar.
       assert.equal(v.tone, "error", `${state} tinha que ser erro (veio "${v.msg}")`);
       assert.notEqual(v.msg, "Tudo em dia!", `${state} devolveu "Tudo em dia!"`);
     }
