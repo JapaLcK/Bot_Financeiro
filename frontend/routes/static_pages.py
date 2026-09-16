@@ -52,6 +52,7 @@ async def serve_landing():
         FRONTEND_DIR / "index.html",
         clarity=True,
         inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
+        defer_tracking=True,
     )
 
 

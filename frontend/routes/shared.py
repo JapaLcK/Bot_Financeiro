@@ -103,7 +103,7 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
-def meta_pixel_snippet() -> str:
+def meta_pixel_snippet(defer_external: bool = False) -> str:
     """Código base do Meta Pixel pra injetar no topo do <head>.
 
     Retorna string vazia quando META_PIXEL_ID não está configurado — assim o
@@ -112,6 +112,25 @@ def meta_pixel_snippet() -> str:
     if not META_PIXEL_ID:
         return ""
     pid = META_PIXEL_ID
+    if defer_external:
+        return (
+            "<!-- Meta Pixel Code -->\n"
+            "<script>\n"
+            "!function(f,n){if(f.fbq)return;n=f.fbq=function(){n.callMethod?\n"
+            "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;\n"
+            "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window);\n"
+            "window.pbAdiarTracking(function(){\n"
+            "  var t=document.createElement('script');t.async=!0;\n"
+            "  t.src='https://connect.facebook.net/en_US/fbevents.js';\n"
+            "  document.head.appendChild(t);\n"
+            "});\n"
+            f"fbq('init', '{pid}');\n"
+            "fbq('track', 'PageView');\n"
+            "</script>\n"
+            "<noscript><img height=\"1\" width=\"1\" style=\"display:none\" "
+            f'src="https://www.facebook.com/tr?id={pid}&ev=PageView&noscript=1"/></noscript>\n'
+            "<!-- End Meta Pixel Code -->\n"
+        )
     return (
         "<!-- Meta Pixel Code -->\n"
         "<script>\n"
@@ -129,7 +148,7 @@ def meta_pixel_snippet() -> str:
     )
 
 
-def ga4_snippet() -> str:
+def ga4_snippet(defer_external: bool = False) -> str:
     """Tag base do GA4 (gtag.js). Vazia quando GA4_MEASUREMENT_ID não está setado.
 
     O `config` já dispara o `page_view` sozinho; os eventos de funil
@@ -143,10 +162,21 @@ def ga4_snippet() -> str:
     if not GA4_MEASUREMENT_ID:
         return ""
     mid = GA4_MEASUREMENT_ID
+    carregador = (
+        "<script>\n"
+        "window.pbAdiarTracking(function(){\n"
+        "  var s=document.createElement('script');s.async=!0;\n"
+        f"  s.src='https://www.googletagmanager.com/gtag/js?id={mid}';\n"
+        "  document.head.appendChild(s);\n"
+        "});\n"
+        "</script>\n"
+        if defer_external
+        else f'<script async src="https://www.googletagmanager.com/gtag/js?id={mid}"></script>\n'
+    )
     return (
         "<!-- Google Analytics (GA4) -->\n"
-        f'<script async src="https://www.googletagmanager.com/gtag/js?id={mid}"></script>\n'
-        "<script>\n"
+        + carregador
+        + "<script>\n"
         "window.dataLayer = window.dataLayer || [];\n"
         "function gtag(){dataLayer.push(arguments);}\n"
         "gtag('js', new Date());\n"
@@ -193,7 +223,7 @@ def ga4_snippet() -> str:
     )
 
 
-def clarity_snippet() -> str:
+def clarity_snippet(defer_external: bool = False) -> str:
     """Código de coleta do Clarity para páginas públicas autorizadas.
 
     O ID não é segredo, mas serializá-lo como string JavaScript impede que uma
@@ -203,6 +233,20 @@ def clarity_snippet() -> str:
     if not CLARITY_PROJECT_ID:
         return ""
     project_id = json.dumps(CLARITY_PROJECT_ID)
+    if defer_external:
+        carregador = (
+            "  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};\n"
+            "  window.pbAdiarTracking(function(){\n"
+            "    t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;\n"
+            "    y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);\n"
+            "  });\n"
+        )
+    else:
+        carregador = (
+            "  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};\n"
+            "  t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;\n"
+            "  y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);\n"
+        )
     return (
         "<!-- Microsoft Clarity -->\n"
         "<script>\n"
@@ -219,17 +263,48 @@ def clarity_snippet() -> str:
         "    } catch (e) { return; }\n"
         "  }\n"
         "  (function(c,l,a,r,i,t,y){\n"
-        "  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};\n"
-        "  t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;\n"
-        "  y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);\n"
-        f"  }})(window,document,'clarity','script',{project_id});\n"
+        + carregador
+        + f"  }})(window,document,'clarity','script',{project_id});\n"
         "})();\n"
         "</script>\n"
         "<!-- End Microsoft Clarity -->\n"
     )
 
 
-def inject_tracking(html_text: str, clarity: bool = False) -> str:
+def _deferred_tracking_bootstrap(delay_ms: int = 5_000) -> str:
+    """Agenda SDKs de marketing fora do caminho crítico da landing.
+
+    As filas (`fbq`, `dataLayer` e `clarity`) continuam sendo criadas no head;
+    somente download e execução dos SDKs externos aguardam a primeira interação
+    ou alguns segundos depois do load. Assim eventos disparados cedo ficam
+    enfileirados, sem disputar CPU e rede com FCP/LCP.
+    """
+    return (
+        '<script data-pb-tracking="deferred">\n'
+        "(function(w,d){\n"
+        "  var fila=[], liberado=false;\n"
+        "  function carregar(){\n"
+        "    if(liberado)return;liberado=true;\n"
+        "    var atual=fila.splice(0);\n"
+        "    for(var i=0;i<atual.length;i++){try{atual[i]();}catch(e){}}\n"
+        "  }\n"
+        "  w.pbAdiarTracking=function(fn){liberado?fn():fila.push(fn);};\n"
+        f"  function depoisDoLoad(){{w.setTimeout(carregar,{delay_ms});}}\n"
+        "  if(d.readyState==='complete')depoisDoLoad();\n"
+        "  else w.addEventListener('load',depoisDoLoad,{once:true});\n"
+        "  ['pointerdown','keydown','touchstart'].forEach(function(nome){\n"
+        "    w.addEventListener(nome,carregar,{once:true,passive:true,capture:true});\n"
+        "  });\n"
+        "})(window,document);\n"
+        "</script>\n"
+    )
+
+
+def inject_tracking(
+    html_text: str,
+    clarity: bool = False,
+    defer_external: bool = False,
+) -> str:
     """Insere tags de marketing antes de </head> (o mais alto possível).
 
     Meta e GA4 entram pelo mesmo ponto de propósito: enquanto o GA4 morava solto no
@@ -244,11 +319,19 @@ def inject_tracking(html_text: str, clarity: bool = False) -> str:
 
     No-op para o que não estiver configurado, ou se a página não tiver </head>.
     """
+    # Meta e GA4 precisam registrar o page_view mesmo quando o visitante clica
+    # num CTA antes do timer da landing. As filas desses SDKs vivem apenas no
+    # documento atual e seriam destruídas pela navegação; por isso somente o
+    # Clarity (que não alimenta atribuição/conversão) pode aguardar.
     snippet = meta_pixel_snippet() + ga4_snippet()
+    deferred_snippet = ""
     if clarity:
-        snippet += clarity_snippet()
+        deferred_snippet = clarity_snippet(defer_external)
+        snippet += deferred_snippet
     if not snippet:
         return html_text
+    if defer_external and deferred_snippet:
+        snippet = _deferred_tracking_bootstrap() + snippet
     idx = html_text.lower().find("</head>")
     if idx == -1:
         return html_text
@@ -338,13 +421,17 @@ def html_file(
     pixel: bool = True,
     clarity: bool = False,
     inline_css: tuple[str, ...] = (),
+    defer_tracking: bool = False,
 ) -> Response:
     """Serve um .html do frontend com cache desligado.
 
     Com `pixel=True` (padrão), injeta Meta Pixel e GA4 no <head> — cada um só se
     estiver configurado. `clarity=True` é opt-in explícito para páginas públicas
     sem campos sensíveis. `inline_css` elimina viagens de rede bloqueantes em
-    páginas selecionadas, mantendo os mesmos arquivos como fonte única. As
+    páginas selecionadas, mantendo os mesmos arquivos como fonte única.
+    `defer_tracking=True` posterga somente o Clarity até a primeira interação
+    ou depois do load. Meta e GA4 continuam imediatos porque seus page views
+    precisam sobreviver a uma navegação rápida. As
     páginas da área logada (dashboard, settings, onboarding) passam
     `pixel=False`: o rastreio fica nas páginas públicas e na /home, que é onde a
     volta do checkout (?upgrade=success) dispara a conversão.
@@ -353,7 +440,11 @@ def html_file(
     if inline_css:
         text = _inline_css_assets(text, inline_css)
     if pixel:
-        text = inject_tracking(text, clarity=clarity)
+        text = inject_tracking(
+            text,
+            clarity=clarity,
+            defer_external=defer_tracking,
+        )
     response = Response(content=stamp_asset_versions(text),
                         media_type="text/html; charset=utf-8")
     response.headers["Cache-Control"] = "no-store"
