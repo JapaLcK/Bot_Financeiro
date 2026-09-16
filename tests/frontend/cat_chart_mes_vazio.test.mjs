@@ -113,6 +113,12 @@ const sonda = (page) => page.evaluate(() => ({
   vivas: window._charts.filter((c) => !c.destroyed).length,
   destruidas: window._charts.map((c) => c.destroyed),
   emptyVisivel: !!document.querySelector(".chart-wrap.donut > .chart-empty"),
+  // O estado vazio TEM DE SER o do Piggy (`_clBox`), o mesmo dos outros 6
+  // gráficos — não o `<div id="chart-cat-empty">` de texto puro que a main
+  // trazia. Sticker + título discriminam um mecanismo do outro.
+  emptySticker: document.querySelector(".chart-empty img")?.getAttribute("src") || null,
+  emptyTitulo: document.querySelector(".chart-empty .cl-box-t")?.textContent || null,
+  divDaMain: !!document.getElementById("chart-cat-empty"),
   canvasEscondido: document.getElementById("chart-cat").style.display === "none",
 }));
 
@@ -133,6 +139,11 @@ test("render(): dados → mês VAZIO → dados (o vazio não conserva o mês ant
   assert.deepEqual(p2.destruidas, [true], "a instância anterior tinha que ser destruída");
   assert.equal(p2.vivas, 0, "nenhuma instância viva no mês vazio");
   assert.equal(p2.emptyVisivel, true, "a caixa .chart-empty do Piggy tinha que aparecer");
+  assert.equal(p2.emptySticker, "/brand/stickers/point.webp",
+    "o vazio do donut tem de ser o do Piggy (_clBox), igual aos outros 6 gráficos");
+  assert.equal(p2.emptyTitulo, "Sem gastos neste mês");
+  assert.equal(p2.divDaMain, false,
+    "o <div id=chart-cat-empty> da main não pode voltar: eram duas fontes de verdade");
   assert.equal(p2.canvasEscondido, true, "o canvas fica escondido (mas permanece no DOM)");
 
   await renderCom(page, OUTROS);
