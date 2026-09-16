@@ -407,6 +407,8 @@ def infer_help_from_text(text: str, platform: str) -> str | None:
 
     normalized = normalize_text(raw)
     topic = _financial_topic(normalized)
+    if topic == "launches" and re.search(r"\b(recebi|gastei)\b", normalized):
+        return _launches_contextual_fallback(normalized)
     section = {
         "credit": "credit",
         "pockets": "pockets",
@@ -457,7 +459,13 @@ def _financial_topic(norm: str) -> str | None:
         r"\bcomando\s+link\b", norm
     ):
         return "account"
-    if re.search(r"\b(saldo|lancamento|lancamentos|gasto|gastos|despesa|despesas|receita|receitas)\b", norm):
+    if re.search(
+        r"\b(saldo|lancamento|lancamentos|gasto|gastos|gastei|"
+        r"despesa|despesas|receita|receitas|recebi)\b",
+        norm,
+    ):
+        return "launches"
+    if re.search(r"\bhistorico\s*[?.!]*$", norm):
         return "launches"
     if re.search(r"\bdashboard\b", norm) or re.search(
         r"\bpainel\s+(?:financeiro|do\s+pigbank)\b", norm

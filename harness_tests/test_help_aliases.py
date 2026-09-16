@@ -39,9 +39,19 @@ class HelpAliasesTests(unittest.TestCase):
         for text in (
             "como usar o painel do carro?",
             "como usar o link do meu site?",
+            "como vejo o histórico do navegador?",
         ):
             with self.subTest(text=text):
                 self.assertIn("Só consigo ajudar com finanças pessoais", _response(text))
+
+    def test_ajuda_para_historico_e_registros_de_lancamentos(self) -> None:
+        for text, expected in (
+            ("como vejo meu histórico?", "listar lançamentos"),
+            ("como registro o que recebi?", "recebi 1000 salario"),
+            ("como registro o que gastei?", "gastei 50 mercado"),
+        ):
+            with self.subTest(text=text):
+                self.assertIn(expected, _response(text).lower())
 
 
 if __name__ == "__main__":

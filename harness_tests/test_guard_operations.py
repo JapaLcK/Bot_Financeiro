@@ -52,6 +52,30 @@ class GuardOperationsTests(unittest.TestCase):
             finally:
                 guards.close()
 
+    def test_symlink_para_env_nao_permite_leitura(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            allowed = directory / "allowed"
+            allowed.mkdir()
+            secret = directory / ".env"
+            secret.write_text("segredo sintético", encoding="utf-8")
+            alias = allowed / "alias"
+            alias.symlink_to(secret)
+            guards = SafetyGuards(allowed_write_root=allowed)
+            guards.install()
+            try:
+                for read in (
+                    lambda: alias.read_text(encoding="utf-8"),
+                    lambda: io.open(alias, encoding="utf-8").read(),
+                    lambda: open(alias, encoding="utf-8").read(),
+                ):
+                    with self.assertRaises(SafetyViolation):
+                        read()
+                self.assertEqual(len(guards.events), 3)
+                self.assertTrue(all(event.startswith("env:") for event in guards.events))
+            finally:
+                guards.close()
+
     def test_envio_udp_nao_alcanca_socket_real(self) -> None:
         original_sendto = socket.socket.sendto
         sends: list[object] = []
