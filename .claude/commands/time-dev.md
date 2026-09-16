@@ -59,7 +59,9 @@ pedido, em poucas linhas), faça **uma** passada do Tester e um Manager curto. N
    audita consistência entre os três, não repete achados do Tester.
 7. Se o Manager reprovar algo, volte para o agente específico que ele
    apontou (não necessariamente o Coder) com o apontamento exato, e repita a
-   partir do passo relevante.
+   partir do passo relevante. **Na faixa Leve**, a correção pedida pelo Manager
+   volta direto ao Manager depois do Coder, sem nova passada do Tester — a
+   menos que o apontamento caia numa área Completo, e aí a tarefa sobe de faixa.
 
 ## Gates deste repositório
 

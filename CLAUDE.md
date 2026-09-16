@@ -43,8 +43,8 @@ Completo. Na dúvida entre duas faixas, use a mais alta.
 | Faixa | O que entra | Processo |
 |---|---|---|
 | **Completo** | dinheiro (Pix, cobrança, saldo, fatura, Open Finance), autenticação, sessão, MFA, isolamento entre usuários, migração/schema, concorrência em código compartilhado, segurança | `Skill(skill="time-dev")` com as 4 etapas |
-| **Leve** | feature e tela comuns, correção de bug fora das áreas acima | `time-dev` sem Arquiteto: Coder → **uma** passada do Tester → Manager curto |
-| **Direto** | texto, CSS pequeno, docs, correção de uma linha, código provisório | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
+| **Leve** | feature e tela comuns, correção de bug **que muda lógica** fora das áreas acima | `time-dev` sem Arquiteto: Coder → **uma** passada do Tester → Manager curto |
+| **Direto** | texto, CSS pequeno, docs, código provisório, correção **sem mudança de lógica** (typo, nome, constante óbvia) | sem o time: teste do que mudou e `git diff` lido de ponta a ponta |
 
 O time existe para o §4 ("ataque antes de empurrar"): onde há dinheiro ou sessão ele
 pagou a conta várias vezes (PR #133, #384/#386, o logout no-op do #433). Onde o risco
