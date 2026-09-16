@@ -5328,8 +5328,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         await asyncio.to_thread(recompute_entitlement, int(uid))
         return True
 
-    async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0):
+    async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0) -> bool:
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
+
+        Devolve True SÓ quando o envio confirmou e a chave interna foi gravada;
+        o ramo `trial_will_end` usa o retorno para gravar o marcador de fora
+        (`trial_ending_email_sent`, o que o scheduler lê) — #441.
 
         **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
         Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
@@ -5397,22 +5401,24 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         try:
             from core.observability import recent_event_exists  # noqa: PLC0415
             if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
-                return
+                return False
         except Exception as exc:
             print(f"[billing] dedup de email falhou user={uid}: {exc}")
         try:
             email = await _user_email(uid)
             if not email:
-                return
+                return False
             ok = await asyncio.to_thread(fn, email, *args, DASHBOARD_URL)
             if not ok:
                 print(f"[billing] email {fn.__name__} nao enviado user={uid}"
                       " — chave de dedupe NAO gravada, a reentrega tenta de novo")
-                return
+                return False
             await log_system_event("info", chave, f"Email {fn.__name__} enviado.",
                                    source="billing", user_id=int(uid))
+            return True
         except Exception as exc:
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
+            return False
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
@@ -5802,15 +5808,15 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 # Essencial ou de Pro lia "seu trial do PigBank+".
                 plan_value = _stored_plan_for_price(_subscription_price_id(sub))
                 from core.services.email_service import send_trial_ending_email
-                await _fire_email(user_id, send_trial_ending_email,
-                                  plan_value, expires_dt)
-                await log_system_event(
-                    "info",
-                    "trial_ending_email_sent",
-                    "Email de trial ending enviado (webhook trial_will_end).",
-                    source="billing",
-                    user_id=user_id,
-                )
+                if await _fire_email(user_id, send_trial_ending_email,
+                                     plan_value, expires_dt):
+                    await log_system_event(
+                        "info",
+                        "trial_ending_email_sent",
+                        "Email de trial ending enviado (webhook trial_will_end).",
+                        source="billing",
+                        user_id=user_id,
+                    )
 
     elif event["type"] == "invoice.payment_failed":
         # Stripe vai retentar (smart retries). NAO movemos pra free aqui;
