@@ -21,6 +21,31 @@ const atual = POR_AMBIENTE[AMBIENTE] ?? POR_AMBIENTE.development!;
 // poderem conviver; a troca de id é decisão de lançamento, não de fundação.
 const ID_BASE = "com.pigbankai.mobile";
 
+/**
+ * URL do backend. O localhost só vale em desenvolvimento.
+ *
+ * Num aparelho, `localhost` é o PRÓPRIO aparelho: um build de staging ou de
+ * produção que caísse nesse padrão sairia da esteira sem conseguir falar com o
+ * backend, e o sintoma seria "o app não carrega nada" — sem erro de build, sem
+ * aviso, e já instalado em alguém. Os perfis do EAS definem só o `APP_ENV`, e
+ * os arquivos `.env` não viajam no build, então o caso é alcançável de verdade.
+ *
+ * Fora de desenvolvimento a ausência é ERRO, e é na hora de gerar a config —
+ * antes de existir binário.
+ */
+function apiUrl(): string {
+  const url = process.env.EXPO_PUBLIC_API_URL;
+  if (url) return url;
+  if (AMBIENTE !== "development") {
+    throw new Error(
+      `EXPO_PUBLIC_API_URL é obrigatória em ${AMBIENTE}: sem ela o build sai ` +
+        "apontando para o próprio aparelho. Defina no perfil do eas.json ou no " +
+        "ambiente do build.",
+    );
+  }
+  return "http://localhost:8000";
+}
+
 const config: ExpoConfig = {
   name: atual.nome,
   slug: "pigbank-mobile",
@@ -39,7 +64,7 @@ const config: ExpoConfig = {
   experiments: { typedRoutes: true },
   extra: {
     ambiente: AMBIENTE,
-    apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000",
+    apiUrl: apiUrl(),
   },
 };
 
