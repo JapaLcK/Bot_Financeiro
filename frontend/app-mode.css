@@ -607,8 +607,22 @@ html.pb-app #toast {
    reabre o `fit-content` contra o bloco-contêiner do fixo e desloca esse
    centro. (O settings usava `translate: calc(50vw - 50%)`; trocado porque a
    propriedade individual não existe no WKWebView do iOS 14.) */
+/* 92 + 58 + 8. Os três números são cópias, e mexer num deles sem os outros
+   reabre o defeito medido em 8d757be:
+     92 = RESERVE_BOTTOM de dashboard-chat.js:145 — o piso do FAB ARRASTADO,
+          mais alto que o repouso de 84px daqui (:596). É por ele que se
+          dimensiona, não pelo repouso. Lá o 92 vale por outra razão: o topo
+          da .pb-dock-bead fica a 88px do fundo (app-mode.css:281-288,
+          --pb-dock-rb 22px) e o FAB precisa passar acima da bolha.
+     58 = lado do #piggy-fab (dashboard.css:2324).
+      8 = folga.
+   Vertical, e não pelo lado como no desktop (dashboard.css:1621): aqui o
+   toast é barra de ponta a ponta (dashboard-mobile.css:61) e o arrasto
+   encaixa o FAB nos DOIS lados. Escopado a body.pb-page-app porque o
+   /settings não tem FAB — foi o que derrubou a tentativa de 8d757be. */
 html.pb-app body.pb-page-app #toast {
   right: calc(26px + env(safe-area-inset-right)) !important;
+  bottom: calc(92px + 58px + 8px + env(safe-area-inset-bottom)) !important;
 }
 /* Toasts centralizados: centralizar na horizontal não os torna seguros na
    VERTICAL — presos por bottom fixo, a borda de baixo cai no home indicator. */
