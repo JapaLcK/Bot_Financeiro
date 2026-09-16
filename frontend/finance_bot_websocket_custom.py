@@ -5584,13 +5584,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
     async def _fire_email(uid: int, fn, *args, dedup_days: float = 1.0) -> bool:
         """Envia email transacional em background — falha silenciosa pra nao quebrar webhook.
 
-        Devolve True só depois de o envio confirmar e de passar pela gravação
-        da chave interna; a gravação (`log_system_event`,
+        Devolve True quando há envio confirmado desta função para este usuário
+        dentro de `dedup_days`: o que acabou de sair, ou o que a dedupe interna
+        achou (a chave só é gravada depois de `ok`, então chave presente ⇒
+        e-mail saiu). False = nenhum envio confirmado (conta sem e-mail,
+        remetente devolveu False, exceção). A gravação (`log_system_event`,
         `core/admin_dashboard.py`, `except Exception: print(...)`) engole
-        falha de banco, então True não garante a chave. Nesse caso o marcador
-        de fora (mesmo banco) também não grava e o scheduler reenvia em até
-        6 dias. O ramo `trial_will_end` usa o retorno para gravar esse
-        marcador de fora (`trial_ending_email_sent`, o que o scheduler lê) — #441.
+        falha de banco, então True não garante a chave. O ramo `trial_will_end`
+        usa o retorno para gravar o marcador de fora (`trial_ending_email_sent`,
+        o que o scheduler lê), #441; e a dedupe interna devolver True é o que
+        deixa a reentrega REPARAR esse marcador quando a 1ª entrega gravou a
+        chave interna e perdeu a escrita de fora (Codex, PR #457).
 
         **A chave NÃO inclui os argumentos, e desde a #351 isso custa um caso.**
         Os e-mails desta família passaram a carregar o NOME DO PLANO, então dois
@@ -5658,7 +5662,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         try:
             from core.observability import recent_event_exists  # noqa: PLC0415
             if await asyncio.to_thread(recent_event_exists, chave, int(uid), dedup_days):
-                return False
+                return True
         except Exception as exc:
             print(f"[billing] dedup de email falhou user={uid}: {exc}")
         try:
