@@ -316,18 +316,15 @@ async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
 }
 
 /**
- * Uma chamada à API: manda, renova uma vez em 401, valida a forma da resposta.
- *
- * `schema` não é opcional de propósito — ver `ContratoInvalido`.
+ * O corpo de uma chamada: manda, renova uma vez em 401, valida a forma da
+ * resposta. Não faz a conferência de dono — isso é do invólucro `chamar`.
  */
-export async function chamar<T>(
+async function executar<T>(
   rota: string,
   schema: z.ZodType<T>,
-  opcoes: Opcoes = {},
+  opcoes: Opcoes,
+  guardadas: { access: string; refresh: string } | null,
 ): Promise<T> {
-  const guardadas = opcoes.semAuth
-    ? null
-    : (opcoes.credencial ?? (await lerCredenciais()));
   let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
 
   if (
@@ -366,28 +363,6 @@ export async function chamar<T>(
     }
   }
 
-  // A resposta CHEGOU, mas a sessão ainda é a mesma que a pediu?
-  //
-  // A pergunta vem ANTES de olhar o status, e vale para os DOIS desfechos.
-  // Entregar dado da conta A depois de a conta B assumir renderiza saldo,
-  // transação e nome de outra pessoa na tela da conta nova — num app financeiro
-  // isso é vazamento entre contas, mesmo sendo o próprio aparelho. E entregar o
-  // ERRO da conta A não é melhor: a pessoa veria "não foi possível" sobre uma
-  // operação que ela não pediu nesta sessão.
-  //
-  // A conferência é para requisição AUTENTICADA: rota pública não tem sessão a
-  // trair. E credencial fixa (logout) também não, porque ali o fim da sessão é
-  // o objetivo.
-  if (guardadas && !opcoes.credencial) {
-    const agora = await lerCredenciais();
-    if (
-      agora?.refresh !== guardadas.refresh &&
-      !daMesmaCadeia(guardadas.refresh, agora?.refresh ?? "")
-    ) {
-      throw new RequisicaoSuperada();
-    }
-  }
-
   if (!resposta.ok) {
     throw new ErroDeApi(resposta.status, await mensagemDeErro(resposta));
   }
@@ -396,6 +371,75 @@ export async function chamar<T>(
   const conferido = schema.safeParse(bruto);
   if (!conferido.success) throw new ContratoInvalido(rota, conferido.error);
   return conferido.data;
+}
+
+/**
+ * Uma chamada à API: `executar` por dentro, com UMA conferência de dono no
+ * fim — depois da última leitura do corpo, e não antes do status.
+ *
+ * A pergunta é: a sessão que fez o pedido ainda é a que está no cofre? Vale
+ * para os DOIS desfechos de `executar`. Entregar dado da conta A depois de a
+ * conta B assumir renderiza saldo, transação e nome de outra pessoa na tela da
+ * conta nova — num app financeiro isso é vazamento entre contas, mesmo sendo o
+ * próprio aparelho. E entregar o ERRO da conta A não é melhor: a pessoa veria
+ * "não foi possível" sobre uma operação que ela não pediu nesta sessão.
+ *
+ * A conferência fica DEPOIS de `executar` retornar ou lançar, porque é aí que
+ * a última leitura do corpo já aconteceu — e dali até o `return`/`throw` não
+ * sobra nenhum `await` em que a conta pudesse trocar de novo sem ser vista.
+ *
+ * E ela é pela CONDIÇÃO DO COFRE, não pelo `motivo` de `SessaoExpirada`: o
+ * mesmo erro quer dizer coisas diferentes dependendo de quem está lá agora. Com
+ * o cofre vazio, a conta que pediu saiu e ninguém entrou — `SessaoExpirada`
+ * fica, porque ali o login é a tela certa. Com outra linhagem no cofre, uma
+ * conta nova assumiu — o erro é `RequisicaoSuperada`, não fim de sessão dela.
+ *
+ * A conferência é para requisição AUTENTICADA: rota pública não tem sessão a
+ * trair. E credencial fixa (logout) também não, porque ali o fim da sessão é
+ * o objetivo.
+ *
+ * `schema` não é opcional de propósito — ver `ContratoInvalido`.
+ */
+export async function chamar<T>(
+  rota: string,
+  schema: z.ZodType<T>,
+  opcoes: Opcoes = {},
+): Promise<T> {
+  const guardadas = opcoes.semAuth
+    ? null
+    : (opcoes.credencial ?? (await lerCredenciais()));
+  // rota pública não tem sessão a trair; credencial fixa (logout) quer o fim dela
+  if (!guardadas || opcoes.credencial) {
+    return executar(rota, schema, opcoes, guardadas);
+  }
+  let valor: T;
+  try {
+    valor = await executar(rota, schema, opcoes, guardadas);
+  } catch (e) {
+    // Falha ao LER o cofre aqui (keychain recusou): só relança `e` se ele for
+    // `SessaoExpirada` — esse erro não carrega nada da conta A, é o motivo
+    // real e é o próprio caso que essa checagem existe para cobrir. Qualquer
+    // outro `e` pode carregar corpo/status da A, então aqui é fail-closed: a
+    // falha de leitura, o comportamento de antes desta checagem existir.
+    let trocouDeConta: boolean;
+    try {
+      trocouDeConta = await superada(guardadas.refresh, e instanceof SessaoExpirada);
+    } catch (falhaLeitura) {
+      if (e instanceof SessaoExpirada) throw e;
+      throw falhaLeitura;
+    }
+    if (trocouDeConta) throw new RequisicaoSuperada();
+    throw e;
+  }
+  if (await superada(guardadas.refresh, false)) throw new RequisicaoSuperada();
+  return valor;
+}
+
+/** O cofre não é mais desta linhagem? No fim de sessão, cofre vazio é o próprio fim, não troca. */
+async function superada(refresh: string, fimDeSessao: boolean): Promise<boolean> {
+  const agora = await lerCredenciais();
+  if (!agora) return !fimDeSessao;
+  return agora.refresh !== refresh && !daMesmaCadeia(refresh, agora.refresh);
 }
 
 /**
