@@ -938,29 +938,33 @@ def list_caixinha_candidates(user_id: int) -> list[dict]:
     return saida
 
 
-def _unbind_pocket_zerando(cur, user_id: int, pocket_id: int) -> int:
-    """Solta o vínculo de uma meta MANUAL e zera o espelho. Nome, emoji e meta ficam.
+def _unbind_pocket(cur, user_id: int, pocket_id: int) -> int:
+    """Solta o vínculo e devolve a caixinha ao SALDO PRÓPRIO dela. Nome/emoji/meta ficam.
 
-    O saldo era cópia do saldo do banco; sem zerar, o mesmo dinheiro passa a contar
-    DUAS vezes no patrimônio — aqui e na renda fixa do banco, que volta a listar a
-    posição assim que o `of_investment_id` some (`list_of_fixed_income`, db/rv.py).
-    Os lotes abertos vão junto porque o saldo do pocket é recomposto a partir deles
-    (`_sync_pocket_from_lots`): zerar só a coluna ressuscitaria o valor no primeiro
-    depósito seguinte. Só mexe em quem ESTÁ vinculado (`is not null`), pra um
-    pocket_id solto não virar apagador de saldo."""
+    Enquanto vinculada, a coluna `balance` é espelho do banco (escrita pelo sync) e
+    tem de ir embora com o vínculo: senão o mesmo dinheiro conta DUAS vezes no
+    patrimônio — aqui e na renda fixa do banco, que volta a listar a posição assim
+    que o `of_investment_id` some (`list_of_fixed_income`).
+
+    Mas o que o usuário depositou ANTES do vínculo saiu da carteira dele: está nos
+    lotes abertos, e zerar destruiria dinheiro de verdade. `_sync_pocket_from_lots`
+    (db/pockets.py) recompõe exatamente o próprio — o sync nunca cria lote (só
+    escreve a coluna) e depósito/saque são recusados enquanto vinculado
+    (db/pockets.py:354), então todo lote aberto aqui é aporte do usuário. Sem lote
+    nenhum dá 0, que é o caso do espelho puro.
+
+    Só mexe em quem ESTÁ vinculado (`is not null`), pra um pocket_id solto não virar
+    apagador de saldo."""
     cur.execute(
-        "update pockets set of_investment_id=null, of_last_seen_balance=null, balance=0 "
+        "update pockets set of_investment_id=null, of_last_seen_balance=null "
         "where id=%s and user_id=%s and of_investment_id is not null",
         (pocket_id, user_id),
     )
-    afetados = cur.rowcount
-    if afetados:
-        cur.execute(
-            "update pocket_lots set status='closed', balance=0, principal_remaining=0, "
-            "closed_at=%s where user_id=%s and pocket_id=%s and status='open'",
-            (datetime.now(_tz()).date(), user_id, pocket_id),
-        )
-    return afetados
+    if not cur.rowcount:
+        return 0
+    from .pockets import _sync_pocket_from_lots
+    _sync_pocket_from_lots(cur, user_id, pocket_id)
+    return 1
 
 
 def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int | None) -> bool:
@@ -986,7 +990,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
                     return False
                 if row["source"] == "open_finance":
                     raise ValueError("OF_POCKET_READONLY")
-                ok = _unbind_pocket_zerando(cur, user_id, pocket_id) > 0
+                ok = _unbind_pocket(cur, user_id, pocket_id) > 0
                 conn.commit()
                 return ok
             # valida que a caixinha é do usuário e pega o saldo atual
@@ -1005,7 +1009,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             # 1 caixinha OF por meta: solta o vínculo anterior DESSA caixinha. Se
             # quem o segura é um pocket do sync, soltar deixaria ele órfão — a
             # mesma coisa que o ramo de cima recusa, então recusa aqui também.
-            # Sendo manual, sai zerado (senão o saldo espelhado vira dobra).
+            # Sendo manual, volta ao saldo próprio dela (o espelho não viaja).
             cur.execute(
                 "select id, source from pockets where of_investment_id=%s and user_id=%s",
                 (of_investment_id, user_id),
@@ -1014,7 +1018,7 @@ def bind_pocket_to_caixinha(user_id: int, pocket_id: int, of_investment_id: int 
             if anterior and anterior["id"] != pocket_id:
                 if anterior["source"] == "open_finance":
                     raise ValueError("OF_POCKET_READONLY")
-                _unbind_pocket_zerando(cur, user_id, anterior["id"])
+                _unbind_pocket(cur, user_id, anterior["id"])
             cur.execute(
                 "update pockets set of_investment_id=%s, of_last_seen_balance=%s "
                 "where id=%s and user_id=%s",
@@ -2607,6 +2611,36 @@ def disconnect_open_finance_connection(
         with conn.cursor() as cur:
             from .bank_movements import _lock_user, reconcile_bank_movements
             _lock_user(cur, user_id)
+            # Caixinha vinculada é ESPELHO: o dinheiro está no banco. Indo embora a
+            # conexão, o FK só zera o `of_investment_id` (`on delete set null`,
+            # db/schema.py:734) e sobrava uma caixinha fantasma com o último saldo
+            # espelhado — que o accrual seguinte transforma em LOTE
+            # (`_ensure_pocket_lots`, db/pockets.py) e o "Sacar" credita na carteira
+            # dinheiro que está no Nubank (medido: 800 + 1000 saíram do nada).
+            # Aqui cada uma volta ao saldo próprio dela, e a criada pelo sync que
+            # fica em zero é apagada — a MESMA regra da auto-cura do sync (caixinha
+            # do banco sem posição sai, não fica zerada). O `balance <= 0` do delete
+            # é o que impede levar junto dinheiro do usuário: linha do sync que tenha
+            # recebido depósito (só dá pra isso sem vínculo) fica, com o que é dela.
+            cur.execute(
+                """
+                select p.id, p.source from pockets p
+                 join open_finance_investments i on i.id = p.of_investment_id
+                 join open_finance_connections c on c.id = i.connection_id
+                 where p.user_id = %s and c.user_id = %s
+                   and (%s::bigint is null or c.id = %s)
+                """,
+                (user_id, user_id, connection_id, connection_id),
+            )
+            espelhos = cur.fetchall()
+            for p in espelhos:
+                _unbind_pocket(cur, user_id, p["id"])
+            do_sync = [p["id"] for p in espelhos if p["source"] == "open_finance"]
+            if do_sync:
+                cur.execute(
+                    "delete from pockets where user_id=%s and id = any(%s) and balance <= 0",
+                    (user_id, do_sync),
+                )
             if connection_id is None:
                 cur.execute(
                     "delete from open_finance_connections where user_id=%s "
