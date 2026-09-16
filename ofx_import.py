@@ -264,7 +264,11 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
 
     if can_reconcile:
         new_bal = set_balance(user_id, ledger_balance)
-        result["new_balance"] = new_bal
+        # `set_balance` devolve o CRU e sobrescreveria a Carteira exibida que o
+        # `import_ofx_launches_bulk` acabou de montar — as três telas do
+        # relatório voltariam a divergir do dashboard.
+        from db.accounts import carteira_exibida
+        result["new_balance"] = carteira_exibida(user_id, new_bal)
         result["reconciled"] = True
     else:
         result["reconciled"] = False

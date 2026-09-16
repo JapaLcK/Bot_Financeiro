@@ -1220,10 +1220,29 @@ def add_from_entities(
             )
 
     emoji = "💸" if tipo == "despesa" else "💰"
+    # `new_balance` é a Carteira e foi lido ANTES da reconciliação acima — que
+    # funde o lançamento com o espelho do banco. Com banco conectado, a linha é o
+    # mesmo recorte do /saldo (core/handlers/balance.py:20), relido agora.
+    # Pós-commit: qualquer falha aqui cai na linha de hoje em vez de subir exceção
+    # (a fila de multi-lançamento devolveria o item e lançaria o gasto de novo).
+    linha_saldo = f"🏦 Saldo: {fmt_brl(float(new_balance))}"
+    try:
+        from core.services.plan_service import consolidated_balance_enabled
+        cb = db.get_consolidated_balance(user_id)
+        if int(cb.get("of_bank_count") or 0) > 0 and consolidated_balance_enabled(user_id):
+            linha_saldo = f"💰 Saldo total: {fmt_brl(float(cb['consolidated'] or 0))}"
+        else:
+            # MESMA string de hoje, número RELIDO: o gate desligado congela o
+            # formato, não autoriza imprimir a Carteira de antes da fusão.
+            linha_saldo = f"🏦 Saldo: {fmt_brl(float(cb['manual'] or 0))}"
+    except Exception:
+        logger.exception(
+            "saldo consolidado falhou depois do commit (user_id=%s, lancamento %s)",
+            user_id, launch_id, extra={"user_id": user_id})
     resposta = (
         f"{emoji} **{tipo.capitalize()} registrada**: {fmt_brl(valor)}\n"
         f"🏷️ Categoria: {categoria_final}\n"
-        f"🏦 Saldo: {fmt_brl(float(new_balance))}\n"
+        f"{linha_saldo}\n"
         f"ID: #{user_seq}"
     )
 

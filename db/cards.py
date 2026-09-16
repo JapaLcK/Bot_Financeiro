@@ -1612,7 +1612,13 @@ def pay_bill_amount(
             )
             conn.commit()
 
-    return {"paid": float(pay), "launch_id": launch_id, "new_balance": new_balance}
+    # Carteira EXIBIDA: `core/handlers/credit.py:133` ("Conta agora") e `:2718`
+    # ("Saldo da conta") mostram este número. Ninguém autoriza contra ele — a
+    # guarda do pagamento é a de `frontend/routes/cards.py`. Pós-commit, falha
+    # cai no cru em vez de subir (a fatura já foi paga).
+    from .accounts import carteira_exibida
+    return {"paid": float(pay), "launch_id": launch_id,
+            "new_balance": carteira_exibida(user_id, new_balance)}
 
 
 def close_bill(user_id: int, card_id: int):

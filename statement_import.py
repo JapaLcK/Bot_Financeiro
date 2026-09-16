@@ -705,7 +705,14 @@ def import_statement_bytes(
         can_reconcile = False
 
     if can_reconcile:
-        result["new_balance"] = set_balance(user_id, ledger_balance)
+        # Irmão idêntico de `ofx_import.py:266`: `set_balance` devolve o CRU e
+        # sobrescreveria a Carteira exibida que `import_ofx_launches_bulk`
+        # montou. Aqui agrava: a linha "✅ Saldo conferido com o saldo final
+        # informado no extrato" afirmaria conferência contra um número que a
+        # tela contradiz no mesmo instante.
+        from db.accounts import carteira_exibida
+        cru = set_balance(user_id, ledger_balance)
+        result["new_balance"] = carteira_exibida(user_id, cru)
         result["reconciled"] = True
     else:
         result["reconciled"] = False

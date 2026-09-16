@@ -653,8 +653,13 @@ def pocket_deposit_from_account(
             acc = cur.fetchone()
             if not acc:
                 raise RuntimeError("ACCOUNT_MISSING")
-            if debita_carteira and Decimal(str(acc["balance"])) < v:
-                raise ValueError("INSUFFICIENT_ACCOUNT")
+            if debita_carteira:
+                # Carteira disponível inclui o débito do manual fundido, que o
+                # espelho do banco já conta — senão a guarda recusa dentro da
+                # transação o que list_sources autorizou na tela (§0.7).
+                from .open_finance import merged_wallet_delta
+                if Decimal(str(acc["balance"])) + merged_wallet_delta(cur, user_id) < v:
+                    raise ValueError("INSUFFICIENT_ACCOUNT")
             if not debita_carteira:
                 from .open_finance import assert_bank_covers
                 assert_bank_covers(cur, user_id, funding_source.get("of_account_id"), v)

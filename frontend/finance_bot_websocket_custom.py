@@ -75,7 +75,7 @@ from db.connection import (
     TIPO_RECEITA_SQL,
     cat_key_sql,
 )
-from db.open_finance import BANK_ACCOUNTS_SQL
+from db.open_finance import BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -804,6 +804,12 @@ async def get_financial_data(
     of_bank_balance = float(of_bank_rows[0]["b"]) if of_bank_rows else 0.0
     of_bank_count = int(of_bank_rows[0]["n"]) if of_bank_rows else 0
 
+    # O dashboard NÃO passa por `get_consolidated_balance` — monta o snapshot com
+    # query própria. A mesma correção de leitura tem de valer aqui, senão a tela
+    # segue contando o gasto fundido duas vezes (§0.7: o fragmento é um só).
+    merged_delta_rows = await _q(MERGED_WALLET_DELTA_SQL, (user_id, user_id))
+    delta_fundido = float(merged_delta_rows[0]["d"]) if merged_delta_rows else 0.0
+
     # Reformat cards (era loop dentro do bloco de queries)
     cards = []
     for r in card_rows:
@@ -963,7 +969,7 @@ async def get_financial_data(
         "month":              m,
         "is_current_month":   is_current,
         "history_earliest_date": earliest_history_date.isoformat() if earliest_history_date else None,
-        "balance":            float(account["balance"]) if account else 0.0,
+        "balance":            (float(account["balance"]) if account else 0.0) + delta_fundido,
         "of_bank_balance":    of_bank_balance,  # saldo das contas bancárias conectadas (OF)
         "of_bank_count":      of_bank_count,    # nº de contas BANK conectadas (0 = sem banco)
         "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
@@ -1402,12 +1408,18 @@ def _render_xlsx(
 
 
 async def _fetch_export_balance(user_id: int) -> float:
-    """Saldo atual da conta, compartilhado pelos anexos de resumo."""
+    """Saldo atual da conta, compartilhado pelos anexos de resumo.
+
+    Carteira EXIBIDA (com o gasto fundido devolvido), a mesma do dashboard: um
+    PDF que contradiz a tela é pior que um PDF sem saldo.
+    """
+    from db.open_finance import merged_wallet_delta_async
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT balance FROM accounts WHERE user_id = %s", (user_id,))
             row = await cur.fetchone()
-    return float(row["balance"]) if row else 0.0
+            delta_fundido = await merged_wallet_delta_async(cur, user_id)
+    return (float(row["balance"]) if row else 0.0) + float(delta_fundido)
 
 
 async def build_pdf(
@@ -6717,6 +6729,7 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
 
     # ── Receita / Despesa → fluxo padrão de launches ──────────────────────
     from db import add_launch_and_update_balance
+    from db.accounts import carteira_exibida
 
     nota = nota_in or alvo or ("receita registrada pelo dashboard" if tipo == "receita" else "despesa registrada pelo dashboard")
     inferred = await asyncio.to_thread(infer_category, int(user_id), nota, explicit)
@@ -6765,7 +6778,13 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         "categoria": categoria,
         "alvo": alvo,
         "nota": nota,
-        "new_balance": float(new_balance),
+        # `new_balance` foi lido ANTES do `reconcile_manual_launch` acima, que
+        # funde o lançamento com o espelho do banco — mesma defasagem de
+        # `core/handlers/launches.py:1223` e `core/services/quick_entry.py:63`,
+        # terceiro chamador. Aqui é contrato JSON, sem copy: reusa
+        # `carteira_exibida` em vez de um helper novo.
+        "new_balance": float(await asyncio.to_thread(
+            carteira_exibida, int(user_id), new_balance)),
         "is_internal_movement": is_internal,
     }
 
@@ -7619,9 +7638,14 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     Se delta == 0, não cria nada (idempotente).
     """
     _authorize_dashboard_access(request, user_id)
-    from db.accounts import get_balance, add_launch_and_update_balance
+    from db.accounts import add_launch_and_update_balance, carteira_exibida
+    from db import get_consolidated_balance
 
-    current = await asyncio.to_thread(get_balance, user_id)
+    # A Carteira EXIBIDA, não `accounts.balance` cru: com um gasto fundido no
+    # Open Finance os dois diferem, e calcular o delta contra o cru faria quem
+    # vê 0,00 e pede alvo 0 ganhar um real do nada na tela.
+    cb = await asyncio.to_thread(get_consolidated_balance, user_id)
+    current = float(cb["manual"] or 0)
     delta = float(payload.target_balance) - float(current)
     if abs(delta) < 0.005:
         return {"ok": True, "balance": float(current), "delta": 0.0, "launch_id": None}
@@ -7630,13 +7654,21 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     valor = abs(delta)
     nota = "Ajuste de saldo manual"
 
-    launch_id, _seq, new_bal = await asyncio.to_thread(
+    launch_id, _seq, _new_bal = await asyncio.to_thread(
         add_launch_and_update_balance,
         user_id, tipo, valor, "ajuste", nota,
         categoria="ajuste", is_internal_movement=True,
     )
     _invalidate_dashboard_current_cache(user_id)
-    return {"ok": True, "balance": float(new_bal), "delta": delta, "launch_id": launch_id}
+    # RELÊ em vez de afirmar. `_new_bal` é o `accounts.balance` CRU e `delta`
+    # foi calculado contra a Carteira exibida — devolver os dois faz os campos
+    # da mesma resposta falarem de bases diferentes. Devolver `target_balance`
+    # fecharia a álgebra, mas seria verdadeiro POR CONSTRUÇÃO: com o sync
+    # fundindo entre a leitura de `current` e a escrita, a resposta declararia
+    # um saldo que nunca existiu. A releitura mede.
+    novo = await asyncio.to_thread(carteira_exibida, user_id, _new_bal)
+    return {"ok": True, "balance": float(novo),
+            "delta": delta, "launch_id": launch_id}
 
 
 # ─── Recurring expenses / Gastos Fixos (Sprint 4) ────────────────────────────
