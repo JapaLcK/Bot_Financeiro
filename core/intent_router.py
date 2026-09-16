@@ -135,6 +135,12 @@ _INVESTMENT_ASSET_PATTERN = (
     rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN})"
 )
 _INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}F?"
+# O formato genérico vale apenas na convenção maiúscula da B3; para mensagens
+# informais em minúsculas, reconheça somente símbolos conhecidos.
+_KNOWN_B3_TICKER_PATTERN = (
+    r"(?:PETR[34]F?|VALE3F?|ITUB4F?|BBDC4F?|BBAS3F?|WEGE3F?|"
+    r"MGLU3F?|ABEV3F?|B3SA3F?|MXRF11|HGLG11|GGRC11)"
+)
 # Alguns tickers alfabéticos são palavras comuns. Esses só contam como ativos
 # em maiúsculas; os demais aceitam a grafia informal usada no WhatsApp.
 _UNAMBIGUOUS_ALPHABETIC_TICKER_PATTERN = (
@@ -161,7 +167,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         norm,
     )
     ambiguous_action = (
-        r"(?:aplicar|aplique|comprar|compre|vender|venda|vende|indicar|indica|indique|"
+        r"(?:aplicar|aplique|comprar|compre|compra|vender|venda|vende|indicar|indica|indique|"
         r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
         r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
     )
@@ -208,6 +214,10 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         )
         or re.search(
             rf"\b{_INVESTMENT_TICKER_PATTERN}\b",
+            text or "",
+        )
+        or re.search(
+            rf"\b{_KNOWN_B3_TICKER_PATTERN}\b",
             text or "",
             flags=re.IGNORECASE,
         )
@@ -293,10 +303,18 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         )
         or re.search(r"\b(faca|realize|execute)\s+(?:a\s+)?venda\b", norm)
     )
+    purchase_command = bool(
+        re.search(
+            r"^(?:(?:piggy|por favor|por gentileza)\s*,?\s*){0,2}"
+            r"(?:me\s+)?compra\b",
+            norm,
+        )
+    )
 
     return bool(
         re.search(r"\b(aplicar|aplique|compre|comprar|vender|invista)\b", norm)
         or sell_command
+        or purchase_command
         or re.search(r"\bvale\s+a\s+pena\b.*\b(investir|comprar|vender)\b", norm)
         or re.search(r"\b(investir|comprar|vender)\b.*\bvale\s+a\s+pena\b", norm)
         or re.search(
