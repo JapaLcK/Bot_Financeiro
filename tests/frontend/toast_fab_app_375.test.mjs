@@ -99,8 +99,9 @@ const TIPOS = { html: "text/html", js: "application/javascript", mjs: "applicati
 /**
  * Os arquivos saem do DISCO, por rota do Playwright, e não do `_server.mjs`.
  *
- * Não é preferência de estilo: o `_server.mjs` é UM `python -m http.server`,
- * single-thread, e o `node --test` roda esta pasta em PARALELO. Este arquivo
+ * Não é preferência de estilo: o `_server.mjs` é UM `http.server` do Python,
+ * uma conexão nova por asset e uma fila de conexões que transbordava (ver o
+ * `spawn` lá), e o `node --test` roda esta pasta em PARALELO. Este arquivo
  * pede o dashboard INTEIRO (dashboard.js tem ~11k linhas) seis vezes, e sob
  * disputa o download não terminava nem em 60s — dois casos morriam com
  * `waitForFunction: Timeout`, um vermelho que não tem nada a ver com o CSS
