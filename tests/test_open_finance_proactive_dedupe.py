@@ -176,8 +176,11 @@ def test_marcador_de_um_usuario_nao_cala_outro(user_id, monkeypatch, caso):
 
 
 # (nome do parâmetro nomeado, texto esperado) — o texto vem dos detectores de `_CASOS`.
-_PARAM_ESPERADO = {"reconectar": (ofp.OF_RECONNECT_PARAM, "Nubank"),
-                   "salario": (ofp.OF_SALARY_PARAM, "R$ 3.500,00")}
+# LITERAIS de propósito: o contrato com o template da Meta é pinado AQUI, não pela
+# constante do módulo (ler `ofp.OF_*_PARAM` compararia a constante com ela mesma).
+# `banks` é o nome que `db/open_finance.py` documenta para o template de reconexão.
+_PARAM_ESPERADO = {"reconectar": ("banks", "Nubank"),
+                   "salario": ("valor", "R$ 3.500,00")}
 
 
 @pytest.mark.parametrize("caso", list(_CASOS))
@@ -204,12 +207,16 @@ def test_send_template_real_recebe_parametro_nomeado(user_id, monkeypatch, caplo
     _armar(monkeypatch, caso, [user_id], None)
     monkeypatch.setenv("WA_TOKEN", "tok")
     monkeypatch.setenv("WA_PHONE_NUMBER_ID", "123")
+    # Sem isto, quem tiver a env em `en_US` veria o assert do idioma cair.
+    monkeypatch.delenv("WA_PROACTIVE_TEMPLATE_LANGUAGE", raising=False)
     monkeypatch.setattr("requests.post", _post)
 
     with caplog.at_level(logging.WARNING, logger=ofp.logger.name):
         assert rodar()["sent"] == 1
     assert "erro=AttributeError" not in caplog.text, caplog.text
     assert len(posts) == 1 and posts[0]["to"] == _FONE, posts
-    param = posts[0]["template"]["components"][0]["parameters"][0]
+    template = posts[0]["template"]
+    assert template["name"] == "tpl" and template["language"]["code"] == "pt_BR", template
+    param = template["components"][0]["parameters"][0]
     assert param == {"type": "text", "parameter_name": nome, "text": texto}, param
     assert recent_event_exists(event, user_id, dias) is True, "marcador não gravado"
