@@ -55,7 +55,14 @@ import psycopg
 import pytest
 
 import core.observability as observability
-from core.system_event_log import log_system_event_sync, recent_event_exists
+# Pela FACHADA, não pelo módulo de origem, e por dois motivos medidos: (1) é o
+# caminho que a produção usa — nenhum dos 10 call sites de `recent_event_exists`
+# fora de `tests/` importa de `core.system_event_log` (CLAUDE.md §3, "rode a
+# conversa, não a função"); (2) com ele o arquivo COLETA na coluna antiga do
+# `scripts/coluna_dupla.py`, onde `core.system_event_log` ainda não existe — e é
+# o que tira o gate de prova FRACA (3 `<error>` de import, corpo nenhum rodou)
+# para FORTE (os três cronômetros rodam e falham lá, sem `options`).
+from core.observability import log_system_event_sync, recent_event_exists
 
 from _system_event_log_helpers import (  # noqa: F401  (fixtures autouse)
     EVENTO_INSERT,
