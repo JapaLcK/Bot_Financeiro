@@ -127,7 +127,13 @@ export async function sair(): Promise<void> {
   try {
     await chamar("/auth/logout", perfilSchema.partial(), {
       metodo: "POST",
-      credencial: daSaida,
+      // O REFRESH token como credencial, não o access. O servidor revoga a
+      // sessão por qualquer um dos dois, mas o access pode estar expirado — e é
+      // o caso mais comum de todos, um app parado por mais de quinze minutos.
+      // Com um access vencido ele não decodifica nada e não revoga nada, e o
+      // logout voltaria 200 sem ter encerrado sessão nenhuma. O refresh dura
+      // catorze dias e resolve a sessão sozinho.
+      credencial: { access: daSaida.refresh, refresh: daSaida.refresh },
     });
   } catch {
     // Silêncio de propósito: o servidor revoga por expiração de qualquer forma.

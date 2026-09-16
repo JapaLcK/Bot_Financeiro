@@ -60,7 +60,11 @@ const config: ExpoConfig = {
   android: {
     package: `${ID_BASE}${atual.sufixoId}`,
   },
-  plugins: ["expo-router", "expo-secure-store"],
+  // O plugin do Sentry não é opcional num build de produção: é ele que liga a
+  // integração nativa e sobe os source maps. Sem ele, o empacotamento do Hermes
+  // deixa a pilha de erro ilegível, e a camada de observabilidade relata sem
+  // dizer ONDE — que é metade do valor dela.
+  plugins: ["expo-router", "expo-secure-store", "@sentry/react-native/expo"],
   experiments: { typedRoutes: true },
   extra: {
     ambiente: AMBIENTE,

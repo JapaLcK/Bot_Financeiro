@@ -83,7 +83,10 @@ describe("sair", () => {
       ([, o]: [string, RequestInit]) =>
         (o.headers as Record<string, string>)["Authorization"],
     );
-    expect(usados).toEqual([`Bearer ${ACCESS_A}`]);
+    // O REFRESH token, não o access: o access pode estar expirado, e aí o
+    // servidor não decodificaria nada e o logout voltaria 200 sem encerrar
+    // sessão nenhuma.
+    expect(usados).toEqual(["Bearer rt_A"]);
     // E a sessão da B continua no cofre: a limpeza também é condicional.
     await expect(lerCredenciais()).resolves.toEqual({
       access: ACCESS_B,
