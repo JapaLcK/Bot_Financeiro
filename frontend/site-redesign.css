@@ -142,20 +142,17 @@
 @media (max-width: 900px) {
   .rd .section { padding: 72px 0; }
 }
-/* No mobile, o título da hero é o LCP. As seções seguintes têm cards, SVGs e
-   animações que não estão visíveis na primeira tela; deixar o navegador pular
-   layout e pintura delas tira esse trabalho do caminho crítico. O tamanho
-   intrínseco preserva o comprimento inicial da página e os links de âncora. */
+/* No mobile, o título da hero é o LCP. As seções mais distantes têm cards,
+   SVGs e animações que não estão visíveis na primeira tela; deixar o navegador
+   pular layout e pintura delas tira esse trabalho do caminho crítico. A seção
+   de funcionalidades continua no layout normal para que a âncora seguinte não
+   mude de posição quando o navegador materializa o conteúdo adiado. */
 @media (max-width: 760px) {
-  .rd main > section:not(.hero-grid),
+  .rd main > section:not(.hero-grid):not(#funcionalidades),
   .rd > .footer {
     content-visibility: auto;
   }
-  .rd #como-funciona {
-    scroll-margin-top: 240px;
-  }
   .rd #vsl { contain-intrinsic-size: auto 600px; }
-  .rd #funcionalidades { contain-intrinsic-size: auto 1200px; }
   .rd #como-funciona { contain-intrinsic-size: auto 1450px; }
   .rd main > .tech-split { contain-intrinsic-size: auto 850px; }
   .rd #agentes { contain-intrinsic-size: auto 1650px; }

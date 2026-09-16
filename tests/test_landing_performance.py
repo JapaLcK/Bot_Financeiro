@@ -121,7 +121,7 @@ def test_mobile_nao_renderiza_secoes_abaixo_da_dobra_no_caminho_do_lcp():
     css = (FRONTEND_DIR / "site-redesign.css").read_text(encoding="utf-8")
     regra = re.search(
         r"@media \(max-width: 760px\)\s*\{[^{}]*"
-        r"\.rd main > section:not\(\.hero-grid\),\s*"
+        r"\.rd main > section:not\(\.hero-grid\):not\(#funcionalidades\),\s*"
         r"\.rd > \.footer\s*\{([^}]+)\}",
         css,
         re.DOTALL,
@@ -129,10 +129,9 @@ def test_mobile_nao_renderiza_secoes_abaixo_da_dobra_no_caminho_do_lcp():
     assert regra
     declaracoes = regra.group(1)
     assert "content-visibility: auto" in declaracoes
-    assert ".rd #como-funciona {\n    scroll-margin-top: 240px;" in css
+    assert "scroll-margin-top: 240px" not in css
     estimativas = {
         "#vsl": 600,
-        "#funcionalidades": 1200,
         "#como-funciona": 1450,
         "main > .tech-split": 850,
         "#agentes": 1650,
