@@ -21,6 +21,12 @@ CONTROLES NEGATIVOS DECLARADOS — em `core/services/open_finance_proactive.py`:
         VERMELHO: test_falha_do_envio_nao_grava_marcador_e_deixa_rastro[<os dois>]
     tratar `None` de `send_template` como sucesso de volta (descartar o retorno)
         VERMELHO: test_recusa_401_nao_grava_marcador_e_deixa_rastro[<o laço mutado>]
+    voltar `named_body_params` de um laço a LISTA (`[banks]` / `[fmt_brl(...)]`)
+        VERMELHO: test_send_template_real_recebe_parametro_nomeado[<o laço mutado>]
+                  (`send_template` faz `.items()` → AttributeError antes do POST,
+                  o `except` do laço engole, `sent == 0` e o marcador não sai).
+                  É o ÚNICO caso deste arquivo que exercita o `send_template`
+                  REAL — os outros o mockam inteiro e eram cegos a isso.
 
 O espião devolve o dict do 2xx porque `None` é o 401 (token inválido) que o
 `wa_client` loga em `whatsapp_token_invalid` e NÃO levanta — sem isso, o laço
@@ -70,14 +76,16 @@ def _event_logs():
 def _armar(monkeypatch, caso: str, uids: list[int], enviar, alvo=lambda uid: [_FONE]):
     """Liga o template, restringe o laço a `uids` e troca detector, acesso, alvos
     e `send_template` (o laço faz `from adapters.whatsapp.wa_client import
-    send_template` a cada rodada — o atributo do módulo é o que vale)."""
+    send_template` a cada rodada — o atributo do módulo é o que vale).
+    `enviar=None` deixa o `send_template` REAL no lugar."""
     _, env, _, _, detector, resultado = _CASOS[caso]
     monkeypatch.setenv(env, "tpl")
     monkeypatch.setattr(ofp, "list_open_finance_user_ids", lambda: list(uids))
     monkeypatch.setattr(ofp, detector, resultado)
     monkeypatch.setattr(ofp, "filtrar_por_acesso", lambda ids: list(ids))
     monkeypatch.setattr(ofp, "_targets", alvo)
-    monkeypatch.setattr("adapters.whatsapp.wa_client.send_template", enviar)
+    if enviar is not None:
+        monkeypatch.setattr("adapters.whatsapp.wa_client.send_template", enviar)
 
 
 def _espiao(chamadas: list, erro: Exception | None = None, recusar: bool = False):
@@ -165,3 +173,43 @@ def test_marcador_de_um_usuario_nao_cala_outro(user_id, monkeypatch, caso):
 
     assert rodar()["sent"] == 1
     assert chamadas == [f"55{outro}"], "o marcador do 1º usuário calou o 2º"
+
+
+# (nome do parâmetro nomeado, texto esperado) — o texto vem dos detectores de `_CASOS`.
+_PARAM_ESPERADO = {"reconectar": (ofp.OF_RECONNECT_PARAM, "Nubank"),
+                   "salario": (ofp.OF_SALARY_PARAM, "R$ 3.500,00")}
+
+
+@pytest.mark.parametrize("caso", list(_CASOS))
+def test_send_template_real_recebe_parametro_nomeado(user_id, monkeypatch, caplog, caso):
+    """`send_template` REAL, só o `requests.post` mockado: o laço tem de passar
+    `named_body_params` como dict `{nome: texto}`, que vira `parameters[0]`
+    com `parameter_name`. Lista quebra em `.items()` antes do POST."""
+    rodar, _, event, dias, _, _ = _CASOS[caso]
+    nome, texto = _PARAM_ESPERADO[caso]
+    posts: list = []
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"messages": [{"id": "wamid.x"}]}
+
+    def _post(url, **kw):
+        posts.append(kw["json"])
+        return _Resp()
+
+    _armar(monkeypatch, caso, [user_id], None)
+    monkeypatch.setenv("WA_TOKEN", "tok")
+    monkeypatch.setenv("WA_PHONE_NUMBER_ID", "123")
+    monkeypatch.setattr("requests.post", _post)
+
+    with caplog.at_level(logging.WARNING, logger=ofp.logger.name):
+        assert rodar()["sent"] == 1
+    assert "erro=AttributeError" not in caplog.text, caplog.text
+    assert len(posts) == 1 and posts[0]["to"] == _FONE, posts
+    param = posts[0]["template"]["components"][0]["parameters"][0]
+    assert param == {"type": "text", "parameter_name": nome, "text": texto}, param
+    assert recent_event_exists(event, user_id, dias) is True, "marcador não gravado"

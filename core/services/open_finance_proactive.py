@@ -31,6 +31,9 @@ OF_RECONNECT_EVENT = "of_reconnect_template_sent"
 OF_RECONNECT_DEDUPE_DAYS = 7.0
 OF_SALARY_EVENT = "of_salary_template_sent"
 OF_SALARY_DEDUPE_DAYS = 25.0
+# Parâmetros NOMEADOS do corpo ({{banks}}, {{valor}}): têm de bater com o template aprovado na Meta.
+OF_RECONNECT_PARAM = "banks"
+OF_SALARY_PARAM = "valor"  # template de salário ainda não existe na Meta; criar com este nome.
 
 
 def _template_cfg(name_env: str) -> dict | None:
@@ -73,7 +76,7 @@ def run_salary_notifications() -> dict:
             continue
         if recent_event_exists(OF_SALARY_EVENT, uid, OF_SALARY_DEDUPE_DAYS):
             continue
-        params = [fmt_brl(float(cand["valor"]))]
+        params = {OF_SALARY_PARAM: fmt_brl(float(cand["valor"]))}
         enviou = False
         for to in _targets(uid):
             try:
@@ -121,7 +124,7 @@ def run_reconnect_notifications() -> dict:
         enviou = False
         for to in _targets(uid):
             try:
-                if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=[banks]) is None:
+                if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params={OF_RECONNECT_PARAM: banks}) is None:
                     # Mesmo `None` do salário: 401 (`whatsapp_token_invalid`) não levanta.
                     logger.warning("[of_proactive] reconnect: send_template recusado user_id=%s erro=token_invalido", uid)
                     continue
