@@ -86,6 +86,68 @@ updates:
         patterns:
           - "@capacitor/*"
 
+  # Dependências npm do app nativo (Expo/React Native). Quarto ecossistema do
+  # repo, e o único cuja cadeia termina num binário assinado e distribuído pelas
+  # lojas — uma dependência comprometida aqui viaja para o aparelho do usuário.
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      app-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # O SDK do Expo versiona os `expo-*` em bloco: subir um sozinho para uma
+      # versão de outro SDK quebra o build nativo. Andam juntos ou não andam.
+      expo:
+        patterns:
+          - "expo"
+          - "expo-*"
+    # ATENÇÃO: subir o SDK do Expo não é atualização de dependência, é migração —
+    # mexe em build nativo, na versão de React Native e nas versões pareadas de
+    # todo `expo-*`. Merge só com build de verdade rodado.
+    #
+    # O bloqueio precisa cobrir o CONJUNTO, não só o pacote `expo`: agrupar não
+    # obriga ninguém a andar junto, então com só o `expo` ignorado o Dependabot
+    # subiria `expo-router` ou `expo-secure-store` para o SDK seguinte deixando
+    # o `expo` em 57 — exatamente o build misto que este comentário existe para
+    # impedir. O `react-native` entra pelo mesmo motivo: a versão dele é
+    # escolhida PELO SDK, não por nós.
+    ignore:
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "expo-*"
+        update-types: ["version-update:semver-major"]
+      # `react` e `react-dom` NÃO andam sozinhos, em nenhum eixo. O React Native
+      # embute uma versão EXATA do renderer e a compara no primeiro render: um
+      # PR que suba só o React recria a falha de inicialização que já aconteceu
+      # neste projeto (react 19.3.0 contra o renderer 19.2.3). E o CI do app não
+      # monta componente nem gera binário, então mergearia verde.
+      # Quem escolhe a versão é o SDK do Expo; subir React é migração de SDK.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      # `react-native` está em 0.x, e em 0.x o TREM é o minor: 0.84 → 0.85 é
+      # mudança de versão do React Native, não correção. Ignorar só o major
+      # deixaria o Dependabot subir o trem sozinho, com o `expo` parado — o
+      # mesmo par misto que o bloqueio acima existe para impedir, por outra
+      # porta. E este workflow não faz build nativo, então a incompatibilidade
+      # mergearia verde.
+      - dependency-name: "react-native"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+
   # Dependências npm da ilha React da /precos (webapp/). Terceiro lockfile do
   # repositório, e o que produz um arquivo SERVIDO na página que vende: react,
   # react-dom, vite e a cadeia nativa de build (rolldown, lightningcss).

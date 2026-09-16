@@ -43,3 +43,10 @@ skills-lock.json
 # Harness de testes de frontend (tests/frontend/): dependência local, não viaja.
 node_modules/
 .qa_ai_cost.jsonl
+
+# Cópias que o sincronizador do macOS cria ao resolver conflito ("nome 2.ext").
+# Treze delas já entraram em commit neste repositório, uma inclusive em
+# .github/workflows/, onde viravam um runner duplicado por push. São código
+# morto e quebram lint. O padrão cobre também o nome SEM extensão.
+* [0-9].*
+* [0-9]

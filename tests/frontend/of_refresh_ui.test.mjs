@@ -170,6 +170,64 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       { item_id: "a", state: "updated" }, { item_id: "b", state: "coisa_nova" }] }));
     assert.notEqual(misto.tone, "ok", "um item desconhecido derruba o verde do outro");
 
+    // Codex #455, 2º apontamento: `updating` também sai do backend para a 1ª
+    // conexão/reconexão cujo sync FALHOU — o portão devolve `updating` sem olhar o
+    // motivo. Neutro só sem motivo de falha; com ele é erro, senão o gesto mostra
+    // sucesso em cima de `read_failed`.
+    for (const reason of ["read_failed", "refresh_failed", "motivo_que_ninguem_implementou"]) {
+      const v = await page.evaluate((r) => window.refreshVerdict({ ok: false, still_updating: 0,
+        items: [{ item_id: "a", institution: "Nubank", state: "updating", reason: r, detail: null }] }),
+        reason);
+      assert.equal(v.tone, "error", `updating com ${reason} saiu neutro ("${v.msg}")`);
+    }
+    // Codex #455, 3º apontamento no MESMO trecho → enumeração (CLAUDE.md §4):
+    // TODO erro decide antes de QUALQUER neutro. Os três jeitos de um caminho
+    // neutro sair antes de um erro — (a) e (b) do Codex, (c) achado enumerando:
+    const COLETA = { item_id: "a", institution: "Nubank", state: "updating", reason: null, detail: null };
+    const casos = [
+      ["(a) coleta + estado desconhecido", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(b) lote coletando + estado desconhecido", { ok: false, still_updating: 2, items: [
+        { item_id: "b", institution: "Itaú", state: "estado_que_ninguem_implementou" }] }],
+      ["(c) coleta sem falha antes de coleta com falha", { ok: false, still_updating: 0, items: [
+        COLETA, { item_id: "b", institution: "Itaú", state: "updating", reason: "read_failed", detail: null }] }],
+    ];
+    for (const [nome, sync] of casos) {
+      for (const inverte of [false, true]) {
+        const s = { ...sync, items: inverte ? [...sync.items].reverse() : sync.items };
+        const v = await page.evaluate((x) => window.refreshVerdict(x), s);
+        assert.equal(v.tone, "error", `${nome}${inverte ? " (ordem invertida)" : ""} saiu "${v.tone}": "${v.msg}"`);
+      }
+    }
+
+    // CONTROLE POSITIVO: sem motivo de falha, a coleta continua neutra.
+    for (const reason of [null, "", "ok"]) {
+      const v = await page.evaluate((r) => window.refreshVerdict({ ok: false, still_updating: 0,
+        items: [{ item_id: "a", institution: "Nubank", state: "updating", reason: r, detail: null }] }),
+        reason);
+      assert.notEqual(v.tone, "error", `updating sem falha (reason=${JSON.stringify(reason)}) virou erro`);
+    }
+
+    // Codex #455: com DOIS bancos, um coletando não pode esconder o erro do
+    // outro. O laço do `refreshVerdict` devolve a PRIMEIRA entrada da tabela que
+    // algum item tem; desde que `updating` virou neutro, se ela vier antes de um
+    // estado de erro, o toast sai neutro e o gesto não pinta âmbar — com o Itaú
+    // precisando de ação. Varre TODOS os estados de erro, nas duas ordens de item.
+    for (const erro of ["item_missing", "removed", "paused", "needs_user_action",
+                        "no_accounts", "partial", "error_recoverable"]) {
+      for (const inverte of [false, true]) {
+        const itens = [
+          { item_id: "a", institution: "Nubank", state: "updating", detail: null },
+          { item_id: "b", institution: "Itaú", state: erro, detail: null }];
+        if (inverte) itens.reverse();
+        const v = await page.evaluate((items) =>
+          window.refreshVerdict({ ok: false, still_updating: 1, items }), itens);
+        assert.equal(v.tone, "error",
+          `Nubank coletando escondeu ${erro} do Itaú (veio "${v.msg}")`);
+        assert.match(v.msg, /Itaú/, `a mensagem tem de falar do banco com erro: "${v.msg}"`);
+      }
+    }
+
     // CONTROLE POSITIVO: o caminho legítimo continua verde — sem isto o teste
     // passaria num código que recusa tudo.
     for (const bons of [["updated"], ["updated", "rate_limited"], ["rate_limited"]]) {

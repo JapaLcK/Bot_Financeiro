@@ -14,6 +14,17 @@ Antes de começar, se o diretório atual for um repo git com CLAUDE.md, leia-o
 — as regras desse arquivo (fluxo de PR, como rodar testes, o que não fazer)
 valem por cima deste fluxo genérico.
 
+## Faixa
+
+Antes de chamar qualquer agente, classifique a mudança pela tabela de faixas do
+`CLAUDE.md` §0 e diga ao usuário qual escolheu. Na faixa **Completo** rode a
+sequência inteira. Na **Leve**, faça **uma** passada do Tester e um Manager curto; o
+Arquiteto (passos 1 e 2) só é pulado quando a mudança já tem plano aprovado ou cabe
+num arquivo com um único comportamento possível. Nesse caso o orquestrador escreve o
+plano em poucas linhas (o pedido, o arquivo e o comportamento esperado) e o entrega ao
+Coder como plano aprovado no passo 3. Fora disso, o Arquiteto escreve o plano e o
+usuário confirma, como pede o `CLAUDE.md` §1. Na **Direto** este fluxo não se aplica.
+
 ## Sequência
 
 1. **Arquiteto**: chame com a ideia completa do usuário. Ele pode fazer
@@ -27,17 +38,36 @@ valem por cima deste fluxo genérico.
 4. **Tester**: chame com o diff/arquivos que o Coder tocou. Saída esperada:
    lista de achados, cada um com severidade e se foi provado rodando ou é
    hipótese.
-5. **Loop Coder ↔ Tester**: se o Tester achou algo real (severidade que
-   bloqueia), volte ao Coder só com os achados novos para corrigir, depois
-   rode o Tester de novo só no que mudou. Repita até o Tester não achar nada
-   novo que bloqueie, ou até 3 rodadas — se ainda houver achado bloqueante na
-   3ª rodada, pare e escale para o usuário em vez de insistir sozinho.
-6. **Manager**: chame por último, passando o plano do Arquiteto, o diff final
-   do Coder e todos os achados do Tester (inclusive os já corrigidos). Ele
-   audita consistência entre os três, não repete achados do Tester.
-7. Se o Manager reprovar algo, volte para o agente específico que ele
-   apontou (não necessariamente o Coder) com o apontamento exato, e repita a
-   partir do passo relevante.
+5. **Depois do Tester e do Manager: a tabela de eventos.** Há **um teto de passadas
+   do Tester por tarefa**, contado de qualquer caminho que leve a ele — loop com o
+   Coder, reprovação do Manager apontando o Coder, o Tester ou o Arquiteto:
+   **Completo = 2 passadas; Leve = 1 passada.** Nenhum evento abre uma passada além
+   do teto; quando o teto estiver esgotado, siga a coluna "teto esgotado".
+
+   | Evento | Com passada disponível | Teto esgotado |
+   |---|---|---|
+   | Tester acha bloqueio | Coder corrige → Tester só no que mudou | **Completo:** leve ao usuário (consertar sem nova passada, com o Manager conferindo, ou declarar limite). **Leve:** Coder corrige → Manager confere |
+   | Manager reprova apontando o Coder | Coder corrige → Tester só no que mudou → Manager | Coder corrige → Manager confere; em Completo, avise o usuário que não houve nova passada |
+   | Manager reprova apontando o Tester (achado era hipótese, teste não prova) | Tester refaz só aquele ponto → Manager | leve ao usuário: falta a evidência que só uma nova passada daria, e o Coder não a produz |
+   | Manager reprova apontando o Arquiteto | Arquiteto revisa → usuário confirma → Coder → Tester só no que mudou → Manager | Arquiteto revisa → usuário confirma → Coder → Manager confere; em Completo, avise o usuário que não houve nova passada |
+   | Achado cai numa área Completo numa tarefa Leve | a tarefa sobe de faixa e **recomeça no passo 1** com o diff e os achados; a contagem recomeça uma única vez, já como Completo | **igual à coluna ao lado**: a promoção vale mesmo com a passada da Leve já gasta, e a contagem recomeça como Completo |
+   | Segunda reprovação do Manager sobre o mesmo ponto | leve ao usuário em vez de repetir | leve ao usuário |
+
+   Regras que valem em toda linha:
+   - **Achado improvável vira limite declarado — só fora das áreas Completo.** Se o
+     caso exige condição rara (dois toques no mesmo quadro, recriação de tela, falha
+     dupla de hardware) e não toca **nenhuma** área da faixa Completo do `CLAUDE.md`
+     §0, o Tester reporta, o orquestrador registra no relato/PR e segue. Em área
+     Completo, raro não dispensa conserto: leve ao usuário.
+   - **Agente novo com resumo, não retomada.** Retomar um agente carrega o contexto
+     inteiro dele de novo a cada chamada. Para uma passada nova, chame um agente
+     novo com o plano, o diff atual e os achados em aberto.
+   - **Mutação só no que mudou.** O Tester ataca e prova com mutação os trechos
+     alterados; não refaz a bateria inteira das passadas anteriores.
+6. **Manager**: chame depois da última passada do Tester, passando o plano do
+   Arquiteto, o diff final do Coder e todos os achados do Tester (inclusive os já
+   corrigidos). Ele audita consistência entre os três, não repete achados do Tester.
+   Se reprovar, siga a tabela do passo 5.
 
 ## Gates deste repositório
 
@@ -62,9 +92,10 @@ valem por cima deste fluxo genérico.
 
 ## Regras do orquestrador
 
-- Nunca pule uma etapa para economizar tempo — o valor do time é justamente
-  ter um papel adversarial (Tester) e um auditor (Manager) que não confiam no
-  agente anterior.
+- Dentro da faixa escolhida, nunca pule uma etapa para economizar tempo — o
+  valor do time é justamente ter um papel adversarial (Tester) e um auditor
+  (Manager) que não confiam no agente anterior. Economizar é escolher a faixa
+  certa e respeitar o teto de rodadas, não cortar o Tester.
 - Nunca aja como se fosse um dos agentes — sempre delegue via Agent tool,
   mesmo quando a resposta parecer óbvia.
 - No fim, resuma para o usuário: o que foi implementado, o veredito do
