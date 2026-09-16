@@ -65,11 +65,38 @@ def test_tudo_atualizado_vira_updated():
     assert (ui["state"], ui["label"], ui["detail"]) == ("updated", "Atualizado", None)
 
 
-def test_updating_e_updating():
+def test_updating_so_e_updating_enquanto_a_conexao_nao_sincronizou():
+    """O portão de `_UPDATING` exige `sem_sync` (ramo `if health:` de
+    `connection_ui_state`). Coleta de banco real não cabe na espera do refresh,
+    então o item fica em `UPDATING` DEPOIS de o espelho já estar escrito — e o
+    card dizia "Atualizando…" para sempre em cima de dado importado e de um
+    `last_sync_at` carimbado. Este teste afirmava a linha de cima com
+    `last_sync_at=AGORA`, que é exatamente o caso consertado.
+
+    CONTROLE NEGATIVO do conserto: tirar ` and sem_sync` do `if item_status in
+    _UPDATING` deixa a 1ª asserção vermelha.
+    CONTROLE POSITIVO: as três últimas. Sem sync — 1ª conexão ou reconexão ainda
+    não espelhada — "Atualizando…" é verdade e continua saindo, inclusive por
+    cima de produto atrasado. A do produto atrasado é a que ainda DISCRIMINA o
+    portão inteiro: sem ele, ela cai em "partial"."""
     health = derive_item_health({"status": "UPDATING"}, now=AGORA)
-    ui = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
-    assert ui["state"] == "updating"
-    assert ui["label"] == "Atualizando…"
+
+    com_sync = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": AGORA})
+    assert com_sync["state"] == "updated", com_sync
+
+    parado = connection_ui_state({"status": "ACTIVE", "health": health, "last_sync_at": None})
+    assert (parado["state"], parado["label"]) == ("updating", "Atualizando…")
+
+    # Reconexão: o sync que existe é ANTERIOR à religada, então o espelho na tela
+    # é o de antes — `sem_sync` cobre os dois lados do portão.
+    religado = connection_ui_state({
+        "status": "ACTIVE", "health": health,
+        "last_sync_at": AGORA.replace(hour=9), "reconnected_at": AGORA})
+    assert religado["state"] == "updating", religado
+
+    atrasado = derive_item_health({**ITEM_PARCIAL, "status": "UPDATING"}, now=AGORA)
+    ui = connection_ui_state({"status": "ACTIVE", "health": atrasado, "last_sync_at": None})
+    assert ui["state"] == "updating", ui
 
 
 def test_login_error_e_waiting_user_input_pedem_acao_do_usuario():
@@ -549,14 +576,22 @@ def test_todo_estado_nao_verde_tem_mensagem_de_veredito():
 # alguém tirar um dos cinco de `_NEEDS_USER`/`_UPDATING` por engano.
 #
 # CONTROLE NEGATIVO (medido): tirar "OUTDATED" de `_NEEDS_USER` deixa 1 vermelho
-# (o caso OUTDATED); tirar "UPDATING" de `_UPDATING` deixa 2 (o caso UPDATING e o
-# `test_updating_e_updating`, que já existia).
+# (o caso OUTDATED). Tirar "UPDATING" de `_UPDATING` NÃO é mais pego por esta
+# tabela: o caso UPDATING aqui tem `last_sync_at` posterior à autorização, então
+# o portão não o segura nem antes nem depois — quem prende a remoção (medido: 1
+# vermelho) é a linha do produto atrasado, no fim de
+# `test_updating_so_e_updating_enquanto_a_conexao_nao_sincronizou`, que sem o
+# portão vira "partial".
 # CONTROLE POSITIVO: o caso UPDATED prova que a guarda não recusa tudo.
 
 _STATUS_DOCUMENTADOS = [
     # (item_status, (status, reason) esperados do resolve, estado da tela)
     ("UPDATED",            ("ACTIVE", ""), "updated"),
-    ("UPDATING",           ("ACTIVE", ""), "updating"),
+    # "updated", e não "updating": o `last_sync_at` abaixo é posterior à
+    # autorização atual, e o portão de `_UPDATING` só segura o card enquanto
+    # `sem_sync`. O item segue em `UPDATING` na Pluggy (coleta lenta) com o
+    # espelho já escrito — quem fala aí é o estado do DADO.
+    ("UPDATING",           ("ACTIVE", ""), "updated"),
     ("WAITING_USER_INPUT", ("ERROR",  ""), "needs_user_action"),
     ("LOGIN_ERROR",        ("ERROR",  ""), "needs_user_action"),
     ("OUTDATED",           ("ERROR",  ""), "needs_user_action"),

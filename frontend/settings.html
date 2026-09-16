@@ -3399,8 +3399,14 @@ function refreshVerdict(sync) {
     const achado = items.find((i) => i.state === estado);
     if (achado) return { tone: "error", msg: msg(achado) };
   }
+  // Tom NEUTRO, não `error`: `still_updating` conta item que a Pluggy ainda não
+  // terminou de coletar no fim da espera de 18s do servidor — coleta de banco
+  // real quase nunca cabe nela, então este ramo é o caminho COMUM de um refresh
+  // que deu certo. Como `error`, ele pintava o toast de vermelho e, no gesto,
+  // o `throw` lá em cima virava âmbar em todo pull-to-refresh bem-sucedido.
+  // A FRASE é a mesma de propósito (decisão do dono) — só o tom muda.
   if (Number(sync.still_updating) > 0)
-    return { tone: "error", msg: OF_UPDATING_LOTE };
+    return { tone: "info", msg: OF_UPDATING_LOTE };
   // Default SEGURO: qualquer estado fora da lista de permissão, ou um `ok:false`
   // sem item nenhum, não pode terminar em verde.
   const desconhecido = items.find((i) => !OF_VERDICT_OK.includes(i.state));

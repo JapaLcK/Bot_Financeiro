@@ -1197,13 +1197,14 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         #     not investments` (grep em `core/services/pluggy_sync.py`), então
         #     conta zerada com carteira cheia — o caso corretora, que o próprio
         #     gate comenta — ainda importa.
-        # O RÓTULO não muda em nenhum dos dois — segue "Atualizando…" —, e a versão
-        # anterior deste comentário afirmava o contrário. Por quê: `connection_ui_state`
-        # decide pelo ramo do `health` ANTES de olhar o `sem_sync`, e
-        # `health.item_status in _UPDATING` devolve `updating` independentemente do
-        # `last_sync_at` (o ramo `if health:` de `connection_ui_state`,
-        # `core/services/pluggy_health.py`). Quem tira o
-        # rótulo de lá é a passada seguinte do job de saúde (medido com
+        # O RÓTULO: no PRIMEIRO caso ele muda na hora. O ramo do `health` de
+        # `connection_ui_state` só devolve `updating` quando `sem_sync`
+        # (`core/services/pluggy_health.py`), então `last_sync_at` carimbado já
+        # tira o card de "Atualizando…" e passa a palavra ao estado do DADO.
+        # (Duas versões anteriores deste comentário erraram o sentido: a primeira
+        # dizia que mudava quando não mudava, a segunda que nunca mudava.)
+        # No SEGUNDO caso — `ok=False`, que não carimba — segue "Atualizando…",
+        # e quem tira o rótulo de lá é a passada seguinte do job de saúde (medido com
         # `OF_HEALTH_MAX_AGE_SEC=0`: com conta → "Atualizado", sem conta → "Sem
         # dados"), e nos defaults isso leva de 12h a 18h — 15h em média, 18h é o
         # TOPO da faixa e não o comum (`OF_HEALTH_MAX_AGE_SEC` 12h + o tick de
@@ -1212,9 +1213,9 @@ async def _adota_item_orfao(item_id: str, last_event: str | None = None) -> int 
         # tick DORME PRIMEIRO (`_open_finance_refresh`,
         # `frontend/finance_bot_websocket_custom.py`) e o Railway sobe container
         # novo a cada deploy — um redeploy pouco antes da passada reinicia as 6h
-        # e empurra o rótulo para além das 18h. Ou seja: agendar o sync é
-        # NECESSÁRIO e não é SUFICIENTE para o rótulo. O "Atualizando…" eterno da
-        # tela é o outro PR; o que este fecha é o dinheiro que não entrava.
+        # e empurra o rótulo para além das 18h. Ou seja: para quem NÃO tem conta
+        # nenhuma, agendar o sync continua sendo necessário e não suficiente
+        # para o rótulo.
         #
         # Os outros status AGENDAM nos dois caminhos: `WAITING_USER_INPUT`,
         # `WAITING_USER_ACTION`, `LOGIN_ERROR`, `OUTDATED` e `ERROR` viram um

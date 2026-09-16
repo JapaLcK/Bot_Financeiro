@@ -259,10 +259,13 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
         mostra a instrução de dispositivo. Benigna: o BALDE continua certo, só o
         detalhe é discutível;
       • `_UPDATING` (`UPDATING`/`CREATED`) + `execution_status` de device/QR →
-        esta função NEM É CHAMADA: `connection_ui_state` testa `_UPDATING` antes
-        e devolve "Atualizando…" direto. Seria a mentira de fiapo girando que
-        esta onda existe para matar — e por isso vale a pena dizer o que
-        sustenta não fechá-la.
+        esta função NÃO É CHAMADA em nenhum dos dois lados. Sem sync,
+        `connection_ui_state` testa `_UPDATING and sem_sync` antes e devolve
+        "Atualizando…" direto; COM sync ele desce para os ramos de dado, que
+        também não consultam o detalhe de ação. A instrução de dispositivo
+        continua não aparecendo — o que o `and sem_sync` mudou foi só o rótulo
+        do lado já sincronizado, que deixou de ser a mentira de fiapo girando.
+        Ainda assim vale dizer o que sustenta não fechar a diagonal.
 
     O que sustenta: a varredura das 183 páginas (`docs.pluggy.ai/llms.txt`) achou
     `USER_AUTHORIZATION_PENDING` em seis páginas, e em TODAS o `status` ao lado é
@@ -569,7 +572,15 @@ def connection_ui_state(connection_row: dict) -> dict:
         if item_status in _NEEDS_USER:
             return out("needs_user_action", _detalhe_de_acao(
                 item_status, str(health.get("execution_status") or "").upper()))
-        if item_status in _UPDATING:
+        # `and sem_sync`: coleta de banco real demora MUITO mais que o sync, então
+        # o item fica em `UPDATING` depois de o espelho já estar escrito — e o card
+        # dizia "Atualizando…" para sempre em cima de dado importado e de um
+        # `last_sync_at` carimbado. Com sync posterior à autorização atual, quem
+        # fala é o ESTADO DO DADO (ramos abaixo: "Atualizado"/"Parcial"/"Sem
+        # dados"/"Erro temporário"). Sem sync — 1ª conexão ou reconexão ainda não
+        # espelhada — "Atualizando…" é verdade e continua sendo a guarda que
+        # impede o card de dizer "tudo em dia" com espelho vazio.
+        if item_status in _UPDATING and sem_sync:
             return out("updating")
         # ERROR vem ANTES de "parcial": item em erro COM produto atrasado é erro,
         # e rotulá-lo de "Parcial" ("atualizei o que deu") subestima o estado.

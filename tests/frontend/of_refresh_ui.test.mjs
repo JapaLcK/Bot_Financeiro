@@ -228,6 +228,26 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
       ok: false, still_updating: 2, items: [] }));
     assert.equal(soContador.msg, semDetalhe.msg, "as duas frases de 'atualizando' divergiram");
 
+    // ...e o TOM desse ramo não é `error`. `still_updating` conta item que a
+    // Pluggy ainda não terminou de coletar no fim da espera de 18s do servidor:
+    // coleta de banco real quase nunca cabe nela, então este é o caminho COMUM
+    // de um refresh que deu certo. Como `error`, o toast saía vermelho e o
+    // `if (propagate && veredito.tone === "error") throw` de `refreshOpenFinance`
+    // pintava de âmbar TODO pull-to-refresh bem-sucedido.
+    // CONTROLE NEGATIVO: repor `tone: "error"` nessa linha do settings.html
+    // deixa esta asserção vermelha.
+    assert.notEqual(soContador.tone, "error", `still_updating não é erro: ${soContador.msg}`);
+    assert.notEqual(soContador.tone, "ok", "...e também não é 'tudo em dia' verde");
+
+    // CONTROLE POSITIVO: o `still_updating` não atropela item com problema — o
+    // `OF_VERDICT` roda antes e continua mandando, em vermelho e com a frase do
+    // item. Sem isto o ramo neutro poderia engolir a conexão perdida.
+    const comProblema = await page.evaluate(() => window.refreshVerdict({
+      ok: false, still_updating: 2,
+      items: [{ item_id: "a", institution: "Nubank", state: "item_missing" }] }));
+    assert.equal(comProblema.tone, "error", comProblema.msg);
+    assert.match(comProblema.msg, /Nubank/, comProblema.msg);
+
     // Só cooldown: verde, mas dizendo que não pediu coleta nova.
     const cooldown = await page.evaluate(() => window.refreshVerdict({
       ok: true, items: [{ item_id: "a", state: "rate_limited" }] }));
