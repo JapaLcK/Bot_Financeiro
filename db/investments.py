@@ -1559,7 +1559,14 @@ def investment_deposit_from_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon
+    # A guarda acima autoriza contra a Carteira CORRIGIDA (`merged_wallet_delta`);
+    # devolver o `accounts.balance` cru faria a resposta falar de outra base —
+    # cru 50 + fundido 50, aporte de 80 passava e a resposta dizia -30 com a
+    # Carteira exibindo 20 (Codex, PR #443). Relido DEPOIS do commit, fora do
+    # `with`, para a leitura enxergar a escrita. Consumidores: as rotas do
+    # dashboard (`account_balance` no JSON) e o adaptador do Discord.
+    from .accounts import carteira_exibida
+    return launch_id, carteira_exibida(user_id, new_acc), new_inv, canon
 
 
 def investment_withdraw_to_account(
@@ -1770,4 +1777,9 @@ def investment_withdraw_to_account(
 
         conn.commit()
 
-    return launch_id, new_acc, new_inv, canon, tax_summary, funding_source
+    # Mesma base da guarda e do aporte: o resgate devolve dinheiro à Carteira, e
+    # o número que a resposta mostra é o EXIBIDO, não o cru. Relido depois do
+    # commit, fora do `with`.
+    from .accounts import carteira_exibida
+    return (launch_id, carteira_exibida(user_id, new_acc), new_inv, canon,
+            tax_summary, funding_source)

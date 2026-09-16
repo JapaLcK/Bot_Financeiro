@@ -2189,9 +2189,11 @@ def carteira_exibida(user_id: int, fallback=None):
     mexer na autorização de pagamento num PR de leitura é refatoração fora de
     escopo (§0.3). Fica nomeado para quem for fechá-lo.
 
-    Chamadores: o relatório de importação (aqui e em `ofx_import.py`) e a
-    mensagem de caixinha (`core/handlers/pockets.py`). Todos pós-commit: falha
-    cai no cru em vez de subir, porque o dinheiro já andou.
+    Chamadores, TODOS na fonte e depois do commit: o relatório de importação
+    (aqui, `ofx_import.py` e `statement_import.py`), `pay_bill_amount`
+    (`db/cards.py`) e o retorno de aporte/resgate de caixinha e de investimento
+    (`db/pockets.py`, `db/investments.py`) — é a mesma base da guarda que
+    autorizou. Falha cai no cru em vez de subir, porque o dinheiro já andou.
 
     `fallback` é o que devolver SE a leitura do consolidado falhar — não uma
     base de cálculo: o caminho feliz o ignora. Sem ele, o `except` relê o cru.

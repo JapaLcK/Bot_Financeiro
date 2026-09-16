@@ -9,10 +9,6 @@ from utils_text import fmt_brl, parse_pocket_deposit_natural
 logger = logging.getLogger(__name__)
 
 
-# A mensagem saía divergindo do dashboard no mesmo instante (medido:
-# `Conta: 40,00` contra 90,00). Rótulo idêntico byte a byte, número relido —
-# copy nova é só a da resposta de LANÇAMENTO. Fonte única: db/accounts.py.
-from db.accounts import carteira_exibida as _carteira_exibida
 
 
 def list_pockets(user_id: int) -> str:
@@ -143,7 +139,7 @@ def deposita_com_origem(user_id: int, pocket_name: str, amount: float, text: str
         msg = (
             f"✅ Depósito na caixinha **{canon}**: +{fmt_brl(float(amount))}"
             f"{funding.origem_txt(source)}\n"
-            f"🏦 Conta: {fmt_brl(float(_carteira_exibida(user_id, new_acc)))}"
+            f"🏦 Conta: {fmt_brl(float(new_acc))}"
             f" • 📦 Caixinha: {fmt_brl(float(new_pocket))}\n"
             f"ID: **#{db.display_id_for(user_id, launch_id)}**"
         )
@@ -215,7 +211,7 @@ def _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes, l
     )
     return (
         f"{head}\n"
-        f"🏦 Conta: {fmt_brl(float(_carteira_exibida(user_id, new_acc)))}"
+        f"🏦 Conta: {fmt_brl(float(new_acc))}"
         f" • 📦 Caixinha: {fmt_brl(float(new_pocket))}{tax_note}\n"
         f"ID: **#{db.display_id_for(user_id, launch_id)}**{nota}"
     )
