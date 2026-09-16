@@ -75,7 +75,9 @@ from db.connection import (
     TIPO_RECEITA_SQL,
     cat_key_sql,
 )
-from db.open_finance import BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL
+from db.open_finance import (
+    BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
+)
 from db import (
     accrue_all_pockets,
     accrue_all_investments,
@@ -807,7 +809,7 @@ async def get_financial_data(
     # O dashboard NÃO passa por `get_consolidated_balance` — monta o snapshot com
     # query própria. A mesma correção de leitura tem de valer aqui, senão a tela
     # segue contando o gasto fundido duas vezes (§0.7: o fragmento é um só).
-    merged_delta_rows = await _q(MERGED_WALLET_DELTA_SQL, (user_id, user_id))
+    merged_delta_rows = await _q(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
     delta_fundido = float(merged_delta_rows[0]["d"]) if merged_delta_rows else 0.0
 
     # Reformat cards (era loop dentro do bloco de queries)

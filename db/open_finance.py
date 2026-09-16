@@ -2351,12 +2351,27 @@ BANK_ACCOUNTS_SQL = """
 # duas vezes. Em vez de escrever (zerar o delta no banco exigiria desfazer a
 # supressão em todo evento que tira o espelho do recorte — pausa por trial,
 # enforce_of_bank_limits, DELETED, type/currency — e nenhum deles passa por uma
-# porta só), soma o delta de volta aqui. Params: (user_id, user_id) — o primeiro
-# é o de BANK_ACCOUNTS_SQL, que vem antes no texto.
+# porta só), soma o delta de volta aqui. Params: `merged_wallet_delta_params`,
+# a fonte ÚNICA da contagem (§0.7) — nenhum chamador monta a tupla à mão.
 #
 # Cada cláusula tem razão:
 # - o join com BANK_ACCOUNTS_SQL é o coração: conta fora do recorte (PAUSED,
 #   DELETED, type<>BANK, currency<>BRL, conexão apagada) faz a correção evaporar;
+# - a transação casa pela IDENTIDADE da conta (`provider_account_id`), não pelo
+#   `id` da linha. `BANK_ACCOUNTS_SQL` deduplica por identidade e fica só com a
+#   linha da conexão MAIS NOVA; uma reconexão por item novo (trial vencido e
+#   assinatura de volta, adoção de item órfão) cria outra linha para a mesma
+#   conta, e a transação fundida fica presa à ANTIGA. Casando pelo `id`, ela
+#   saía do recorte e o gasto voltava a contar duas vezes (Codex, PR #443 —
+#   medido: (112.88, -1.0), igual à `main`). `ra` é a linha ATIVA do recorte;
+#   `ta` são TODAS as linhas da mesma conta, inclusive as de conexões antigas;
+# - `tc.user_id = %s`: `provider_account_id` é identificador do PROVEDOR, não
+#   nosso, e casar por ele abre `ta` para linhas de OUTROS usuários com o mesmo
+#   id. Quem impede o VAZAMENTO hoje é o `l.user_id` abaixo — MEDIDO: sem o
+#   `tc.user_id` o teste de isolamento continua verde. O filtro fica pelo §0
+#   (defesa em profundidade: a regra não pode depender de uma cláusula só) e
+#   porque limita o trabalho às transações DESTE usuário — sem ele, um id
+#   colidente varreria as transações do outro antes de o `l.user_id` descartar;
 # - `imported_launch_id` é `on delete set null` (db/schema.py), então apagar o
 #   lançamento desfaz o vínculo sem código nenhum;
 # - `l.user_id = %s` é redundante de propósito (§0, isolamento por usuário);
@@ -2374,14 +2389,24 @@ BANK_ACCOUNTS_SQL = """
 MERGED_WALLET_DELTA_SQL = f"""
     select coalesce(sum(-d), 0) as d from (
       select distinct l.id, (l.efeitos ->> 'delta_conta')::numeric as d
-        from open_finance_transactions t
-        join ({BANK_ACCOUNTS_SQL}) a on a.id = t.account_id
+        from ({BANK_ACCOUNTS_SQL}) a
+        join open_finance_accounts ra on ra.id = a.id
+        join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
+        join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
+        join open_finance_transactions t on t.account_id = ta.id
         join launches l on l.id = t.imported_launch_id
        where l.user_id = %s
          and coalesce(l.source, 'manual') <> 'open_finance'
          and jsonb_typeof(l.efeitos -> 'delta_conta') = 'number'
     ) x
 """
+
+
+def merged_wallet_delta_params(user_id: int) -> tuple:
+    """Os parâmetros de `MERGED_WALLET_DELTA_SQL`, na ordem do texto: o de
+    `BANK_ACCOUNTS_SQL`, o de `tc.user_id` e o de `l.user_id`. Fonte única da
+    contagem — os três chamadores leem daqui em vez de montar a tupla (§0.7)."""
+    return (user_id, user_id, user_id)
 
 
 def merged_wallet_delta(cur, user_id: int) -> Decimal:
@@ -2391,7 +2416,7 @@ def merged_wallet_delta(cur, user_id: int) -> Decimal:
     (db/pockets.py, db/investments.py) — sem isso elas recusariam o aporte que a
     tela autoriza. Ordem accounts → OF, a mesma de `assert_bank_covers`.
     """
-    cur.execute(MERGED_WALLET_DELTA_SQL, (user_id, user_id))
+    cur.execute(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
     row = cur.fetchone()
     return (row["d"] if row else None) or Decimal("0")
 
@@ -2402,7 +2427,7 @@ async def merged_wallet_delta_async(cur, user_id: int) -> Decimal:
     Duas implementações porque os cursores são de APIs diferentes, NUNCA duas
     versões do SQL: as duas executam a mesma `MERGED_WALLET_DELTA_SQL` (§0.7).
     """
-    await cur.execute(MERGED_WALLET_DELTA_SQL, (user_id, user_id))
+    await cur.execute(MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params(user_id))
     row = await cur.fetchone()
     return (row["d"] if row else None) or Decimal("0")
 
