@@ -134,6 +134,7 @@ from frontend.routes.shared import (
     db_connect,
     decode_jwt as _decode_jwt,
     error_page_response,
+    extract_bearer_token as _extract_bearer_token,
     get_auth_token_from_request as _get_auth_token_from_request,
     invalidate_dashboard_current_cache as _invalidate_dashboard_current_cache,
     jdump,
@@ -2228,11 +2229,45 @@ def _csrf_exempt(path: str) -> bool:
     return path in CSRF_EXEMPT_PATHS
 
 
+def _sem_credencial_ambiente(request: Request) -> bool:
+    """True quando a requisição traz `Authorization: Bearer` e NENHUM cookie de sessão.
+
+    O CSRF defende contra credencial **ambiente**: o navegador anexa o cookie
+    sozinho, então uma página de terceiro dispara uma escrita autenticada sem
+    precisar ler nada da vítima. Um Bearer não é ambiente — ele só entra na
+    requisição se quem a monta POSSUI o token. Sem cookie de sessão não sobra
+    credencial que o atacante consiga usar sem tê-la, e o par cookie+header
+    deixa de proteger alguma coisa.
+
+    **O CORS não sustenta esta isenção, e não é ele o argumento.** Cliente
+    nativo não passa por CORS nenhum — o `allow_origins` de :2558 só alcança
+    navegador. Quem sustenta é a ausência de credencial ambiente, e é por isso
+    que a condição exige os TRÊS cookies de sessão ausentes: basta um no jar
+    para a requisição voltar a ser disparável por terceiro, e aí o par volta a
+    ser exigido mesmo com Bearer junto.
+
+    O Bearer continua sendo validado pela autenticação da rota. Token inválido
+    passa por aqui e morre em 401 no `Depends` — que é o erro certo. Devolver
+    403 de CSRF para credencial inválida esconderia o motivo real de quem está
+    depurando um login.
+    """
+    if not _extract_bearer_token(request):
+        return False
+    return not any(
+        request.cookies.get(nome)
+        for nome in (AUTH_COOKIE_NAME, DASHBOARD_COOKIE_NAME, REFRESH_COOKIE_NAME)
+    )
+
+
 @app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
     token = request.cookies.get(CSRF_COOKIE_NAME) or ""
 
-    if request.method.upper() not in CSRF_SAFE_METHODS and not _csrf_exempt(request.url.path):
+    if (
+        request.method.upper() not in CSRF_SAFE_METHODS
+        and not _csrf_exempt(request.url.path)
+        and not _sem_credencial_ambiente(request)
+    ):
         header_token = request.headers.get(CSRF_HEADER_NAME) or ""
         if not token or not header_token or not constant_time_eq(header_token, token):
             # HOJE nenhum caminho conhecido cai aqui por navegação: o CSRF só
@@ -2625,6 +2660,87 @@ def _set_dashboard_cookie(response: Response, user_id: int, *, jti: str | None =
     return token
 
 
+def _refresh_token_do_header(request: Request) -> str:
+    """O refresh token vindo de `Authorization: Bearer rt_...`, ou "".
+
+    Exige o prefixo `rt_` de propósito: sem ele, um access JWT mandado por
+    engano no header seria encaminhado a `consume_refresh_token` — que o
+    rejeitaria, mas só depois de a string inteira passear pelo log de erro
+    daquele módulo. O prefixo é o mesmo que `core/refresh_tokens.py:32`
+    declara, e a checagem lá continua valendo; esta aqui é a porta, não a
+    fechadura.
+    """
+    token = (_extract_bearer_token(request) or "").strip()
+    return token if token.startswith("rt_") else ""
+
+
+APP_CLIENT_HEADER = "x-pigbank-client"
+APP_CLIENT_APP = "app"
+
+
+def _entrega_sessao(
+    request: Request,
+    response: Response,
+    *,
+    user_id: int,
+    access: str,
+    jti: str,
+    refresh: str,
+) -> dict[str, str | int]:
+    """Entrega a sessão pelo canal do cliente. Devolve o que vai no CORPO.
+
+    Navegador recebe os três cookies, exatamente como sempre, e um dicionário
+    vazio — a resposta sai byte a byte idêntica à de antes desta mudança.
+
+    App (`X-PigBank-Client: app`) recebe os três tokens no corpo e **nenhum
+    cookie**. As duas metades da decisão são a mesma decisão, e por isso moram
+    na mesma função: um cliente que recebe token no corpo não pode receber
+    cookie junto.
+
+    **Por que o app não pode receber cookie.** O `fetch` do React Native tem
+    cookie jar ligado por padrão. Se o servidor mandasse `Set-Cookie`, o app
+    guardaria os cookies sem querer e a requisição SEGUINTE carregaria
+    credencial ambiente — aí o CSRF volta a exigir o par cookie+header, que o
+    app não tem, e a segunda escrita toma 403 depois de a primeira ter
+    funcionado. É um sintoma caro de depurar (parece intermitente, e não é), e
+    `tests/test_auth_bearer_app.py` o reproduziu antes de virar bug.
+
+    **O header é ALEGAÇÃO do cliente, nunca autorização.** Quem chega aqui já
+    passou pela autenticação, e o que recebe é a própria credencial — a mesma
+    que sairia no cookie. Não isenta gate nenhum: é a lição do `_is_pigbank_app`
+    (`frontend/routes/shared.py:851`), onde o User-Agent chegou a CONCEDER e
+    virou brecha. Aqui ele só escolhe o canal de entrega.
+    """
+    pedido = (request.headers.get(APP_CLIENT_HEADER) or "").strip().lower()
+    if pedido != APP_CLIENT_APP:
+        _set_auth_cookie(response, access)
+        _set_refresh_cookie(response, refresh)
+        _set_dashboard_cookie(response, int(user_id), jti=jti)
+        return {}
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "dashboard_token": make_dashboard_token(
+            int(user_id), hours=DASHBOARD_SESSION_HOURS, jti=jti
+        ),
+        "expires_in": AUTH_COOKIE_MAX_AGE,
+    }
+
+
+def _refresh_token_do_header(request: Request) -> str:
+    """O refresh token vindo de `Authorization: Bearer rt_...`, ou "".
+
+    Exige o prefixo `rt_` de propósito: sem ele, um access JWT mandado por
+    engano no header seria encaminhado a `consume_refresh_token` — que o
+    rejeitaria, mas só depois de a string inteira passear pelo log de erro
+    daquele módulo. O prefixo é o mesmo que `core/refresh_tokens.py:32`
+    declara, e a checagem lá continua valendo; esta aqui é a porta, não a
+    fechadura.
+    """
+    token = (_extract_bearer_token(request) or "").strip()
+    return token if token.startswith("rt_") else ""
+
+
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     """Seta o refresh_token cookie com path restrito a /auth/refresh.
     Significa que esse cookie só viaja na 1 request específica de renovação —
@@ -2855,6 +2971,7 @@ class DashboardLinkBody(BaseModel):
     code: str
 
 
+
 # ─── Auth endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/auth/validate")
@@ -3051,9 +3168,9 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
     user_id    = result["user_id"]
     link_code  = result["link_code"]
     token, jti, refresh = _issue_session_token(user_id, body.email.strip().lower(), request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     await _apply_referral_attribution(request, response, int(user_id))
     await _apply_prospect_attribution(request, response, int(user_id))
@@ -3092,6 +3209,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -3157,9 +3275,9 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
 
     link_code  = create_link_code(user_id, minutes_valid=15)
     token, jti, refresh = _issue_session_token(user_id, result["email"], request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     # Fire ANTES do log_auth_login_event: senao o IP atual ja vira "conhecido".
     await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
@@ -3181,6 +3299,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 
@@ -3239,10 +3358,12 @@ async def auth_logout(request: Request, response: Response):
 @app.post("/auth/refresh")
 @limiter.limit("60/minute")
 async def auth_refresh(request: Request, response: Response):
-    """Renova o access token usando o refresh_token do cookie.
+    """Renova o access token usando o refresh_token do cookie ou do Authorization.
 
     Fluxo:
-      1. Lê refresh_token do cookie (path=/auth/refresh).
+      1. Lê refresh_token do cookie (path=/auth/refresh) ou, na falta dele, do
+         header `Authorization: Bearer rt_...` — é assim que o app nativo
+         renova, sem cookie jar.
       2. Rotaciona: marca antigo como usado, emite novo refresh com mesmo session_jti.
       3. Emite novo access token (15min) + dashboard_token.
       4. Atualiza auth_sessions.last_seen_at.
@@ -3271,9 +3392,27 @@ async def auth_refresh(request: Request, response: Response):
     cai em 400 — e tudo bem, porque chegar neste ramo exige ter perdido o cookie
     de refresh TAMBÉM. Enquanto ele estiver no jar a revogação é vista pelo
     `consume_refresh_token` e o ramo é 401, mesmo quando quem revogou foi outro
-    aparelho (reset de senha → `revoke_user_refresh_tokens`). E quem se autentica
-    por `Authorization: Bearer` cai em 401 (é o comportamento de sempre; os dois
-    clientes desta rota, `login.html` e o interceptor, são de cookie).
+    aparelho (reset de senha → `revoke_user_refresh_tokens`).
+
+    **O `Authorization` é a SEGUNDA fonte do token, nunca um atalho.** Cookie
+    primeiro, header só na ausência dele; daí em diante o caminho é um só. A
+    rotação e a detecção de replay continuam inteiras em
+    `core/refresh_tokens.py:73` (`consume_refresh_token`) — quem renova pelo
+    header apresenta o mesmo token opaco, sofre a mesma rotação, e um replay
+    revoga tudo do usuário igual. Antes disto, quem se autenticava por
+    `Authorization: Bearer` caía em 401 aqui, porque os dois clientes da rota
+    eram de cookie.
+
+    **Por que o header e não o corpo.** O app chega nesta rota justamente
+    quando o access token expirou, então ele não tem Bearer de sessão para
+    apresentar — e sem Bearer nenhum a requisição não satisfaz
+    `_sem_credencial_ambiente` e morre em 403 no CSRF antes de chegar aqui.
+    Medido por `tests/test_auth_bearer_app.py`. Pôr o refresh token no
+    `Authorization` resolve o CSRF pela porta da frente (a credencial não é
+    ambiente porque está num header que só quem a possui consegue mandar) e
+    dispensa modelo de corpo novo, que traria junto o risco de 422 nos dois
+    clientes web, que mandam JSON com corpo VAZIO (`login.html:113` e
+    `static/auth-refresh.js:57`).
 
     Os dois ramos de 401 MONTAM a resposta em vez de dar `raise`: o
     `HTTPException` descarta os headers do sub-response injetado (medido,
@@ -3281,8 +3420,10 @@ async def auth_refresh(request: Request, response: Response):
     dashboard_token (12h) sobrevivia ao refresh morto. O usuário ficava preso —
     ver o comentário no primeiro ramo.
     """
-    refresh_in_cookie = (request.cookies.get(REFRESH_COOKIE_NAME) or "").strip()
-    if not refresh_in_cookie:
+    refresh_apresentado = (
+        request.cookies.get(REFRESH_COOKIE_NAME) or ""
+    ).strip() or _refresh_token_do_header(request)
+    if not refresh_apresentado:
         token = _get_auth_token_from_request(request, None)
         sessao_viva = bool(token) and (_decode_jwt(token) or {}).get("type") == "auth"
         if sessao_viva:
@@ -3308,7 +3449,7 @@ async def auth_refresh(request: Request, response: Response):
     ip = get_remote_address(request) or None
     ua = request.headers.get("user-agent") or None
     result = await asyncio.to_thread(
-        consume_refresh_token, refresh_in_cookie, ip=ip, user_agent=ua,
+        consume_refresh_token, refresh_apresentado, ip=ip, user_agent=ua,
     )
     if not result:
         # Limpa cookies — qualquer motivo de falha vira deslogue. Mesmo motivo
@@ -3337,12 +3478,14 @@ async def auth_refresh(request: Request, response: Response):
         email = ""
 
     access = _make_jwt(user_id, email, jti=session_jti)
-    _set_auth_cookie(response, access)
-    _set_refresh_cookie(response, new_refresh)
-    # Renova dashboard_token também (mesmo jti)
-    _set_dashboard_cookie(response, user_id, jti=session_jti)
+    # Navegador: renova os três cookies (o dashboard_token com o MESMO jti).
+    # App: recebe os três no corpo, e nenhum cookie.
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=access, jti=session_jti,
+        refresh=new_refresh,
+    )
     _no_store(response)
-    return {"ok": True}
+    return {"ok": True, **credenciais}
 
 
 @app.post("/auth/forgot-password")
@@ -3739,9 +3882,9 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
 
     link_code = await asyncio.to_thread(create_link_code, user_id, 15)
     token, jti, refresh = _issue_session_token(user_id, user["email"], request)
-    _set_auth_cookie(response, token)
-    _set_refresh_cookie(response, refresh)
-    _set_dashboard_cookie(response, int(user_id), jti=jti)
+    credenciais = _entrega_sessao(
+        request, response, user_id=user_id, access=token, jti=jti, refresh=refresh
+    )
 
     # New-IP audit ANTES do log_auth_login_event de sucesso. Rows de
     # mfa_pending (criadas em /auth/login) sao filtradas pelo helper.
@@ -3763,6 +3906,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         "link_code": link_code,
         "whatsapp_link": wa_link,
         "dashboard_url": _post_login_url(user_id),
+        **credenciais,
     }
 
 

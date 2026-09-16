@@ -100,7 +100,38 @@ GA4_PARAMS_FORA_DA_URL = ("token", "sid")
 
 # default_limits exige SlowAPIMiddleware (nunca registrado) — hoje é inerte;
 # só os @limiter.limit() explícitos valem. Ligar o middleware é decisão aberta.
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+def chave_de_rate_limit(request: Request) -> str:
+    """Balde do rate limit: o usuário quando dá para saber quem é, senão o IP.
+
+    Era só o IP, e num CGNAT de operadora móvel a antena inteira compartilha um
+    endereço — o app nativo cai exatamente nesse cenário, então um usuário ativo
+    passaria a derrubar os vizinhos. O comentário de
+    `frontend/routes/billing_pix.py:180` já registrava o problema.
+
+    **`/auth` continua por IP, de propósito.** É onde mora a defesa contra força
+    bruta, e ali ainda não existe usuário identificado — trocar a chave nessas
+    rotas mudaria um controle de segurança de lado, sem nada a ganhar. Assim
+    esta mudança é provadamente não-enfraquecedora: o que protegia senha
+    continua exatamente como estava.
+
+    Nunca levanta. Token ilegível, expirado ou ausente cai no IP, que é o
+    comportamento de antes.
+    """
+    if request.url.path.startswith("/auth"):
+        return get_remote_address(request)
+    try:
+        token = extract_bearer_token(request) or (
+            request.cookies.get(DASHBOARD_COOKIE_NAME) or ""
+        ).strip()
+        payload = payload_de_sessao(token or "")
+        if payload:
+            return f"user:{payload['user_id']}"
+    except Exception:
+        pass
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=chave_de_rate_limit, default_limits=["200/minute"])
 
 
 def meta_pixel_snippet(defer_external: bool = False) -> str:
@@ -905,12 +936,44 @@ def raise_if_account_scheduled_for_deletion(user_id: int) -> None:
         )
 
 
+def payload_de_sessao(token: str) -> dict | None:
+    """Identidade a partir de um token de dashboard (12h) **ou** do access JWT (15min).
+
+    O app nativo carrega UM token, não dois. Hoje o site tem os dois cookies e
+    nem percebe a diferença, mas obrigar um cliente sem cookie jar a guardar,
+    rotacionar e renovar dois segredos para o mesmo usuário e a mesma sessão é
+    complexidade sem contrapartida.
+
+    Não é ampliação de privilégio: os dois tokens são assinados pelo MESMO
+    segredo, apontam para o mesmo `sub` e carregam o mesmo `jti`, então a
+    revogação por sessão continua valendo igual para os dois — quem valida o
+    `jti` é o chamador, logo abaixo, e ele não sabe (nem precisa saber) por
+    qual dos dois formatos a identidade chegou. O access token ainda é o mais
+    curto dos dois: aceitar 15 minutos onde 12 horas já valiam não afrouxa nada.
+
+    Devolve `{"user_id": int, "jti": str | None}` ou None.
+    """
+    if not token:
+        return None
+    dashboard = decode_dashboard_token_full(token)
+    if dashboard:
+        return dashboard
+    auth = decode_jwt(token) or {}
+    if auth.get("type") != "auth":
+        return None
+    try:
+        return {"user_id": int(auth["sub"]), "jti": auth.get("jti")}
+    except (KeyError, TypeError, ValueError):
+        # `sub` ausente ou não numérico: token malformado é token inválido.
+        return None
+
+
 def resolve_dashboard_user_id(request: Request) -> int:
     token = (
         extract_bearer_token(request)
         or (request.cookies.get(DASHBOARD_COOKIE_NAME) or "").strip()
     )
-    payload = decode_dashboard_token_full(token or "")
+    payload = payload_de_sessao(token or "")
     if not payload:
         raise HTTPException(status_code=401, detail="Token de dashboard inválido ou expirado.",
                             headers=WWW_AUTHENTICATE_401)
