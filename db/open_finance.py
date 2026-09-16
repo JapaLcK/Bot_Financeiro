@@ -518,7 +518,8 @@ def list_connections_needing_reconnect(user_id: int | None = None, within_days: 
           -- `health.execution_status` em minúscula passava pelo filtro antes e
           -- agora cala o aviso. Hoje é INALCANÇÁVEL: o único escritor de
           -- `health` é o `derive_item_health`, que já grava em maiúscula
-          -- (`core/services/pluggy_health.py:311-312`, nas DUAS chaves). Fica
+          -- (o `return` de `derive_item_health`,
+          -- `core/services/pluggy_health.py`, nas DUAS chaves). Fica
           -- assim, e não em dois `coalesce` separados, porque a direção é a
           -- barata: se um dia entrar minúscula, calar é errar para o lado de não
           -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —

@@ -34,7 +34,7 @@ import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from core.services.pluggy import PluggyApiError
-from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN, derive_item_health
+from core.services.pluggy_health import derive_item_health
 from psycopg.types.json import Jsonb
 
 from db.connection import get_conn
@@ -1218,21 +1218,30 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #         test_rota_do_snapshot_entrega_a_instrucao_de_dispositivo
 #         test_POST_pluggy_item_ja_nasce_com_a_instrucao_certa
 #         test_dentro_do_prazo_o_aviso_continua_calado
+#         test_o_piso_do_prazo_vale_60_minutos[59-…-False]
 #         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[1-…-False]
 #         test_a_folga_do_teto_vale_ate_5_minutos_exatos[299-…] e [300-…]
 #         test_as_celulas_que_mudaram_na_varredura_ficam_na_instrucao_de_dispositivo
 #           — os SETE params
-#       Verdes: casos 4, 5, 6, 7, a perna de +10 dias do 8b, a de 5m01s do 8c e o
-#       do vazamento.
+#       O call site é UM SÓ: o do ramo SEM `health` (`_detalhe_de_acao(status)`).
+#       O ramo COM `health` já passava os dois argumentos na `main` — injetar lá
+#       também derruba `test_caixa_com_health_medido_diz_a_MESMA_coisa_que_sem_health`,
+#       que este PR não mudou, e a injeção passa a acusar código alheio.
+#       Verdes: casos 4, 5, 6, 7, a perna de 61 min do 8a, a de +10 dias do 8b, a
+#       de 5m01s do 8c e o do vazamento.
 #       O caso 7 fica VERDE de propósito e isso NÃO é buraco: ele afirma
 #       "Reautorize o banco", que é justamente o que o código quebrado devolve.
 #       Quem o discrimina é a injeção (B).
 #   (B) desligar o PISO do prazo: trocar
 #       `coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s)`
 #       por uma tautologia que consome o mesmo `%s` (`(%s::int is not null)`).
-#       Vermelho:
+#       Vermelhos:
 #         test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar
-#       e SÓ ele.
+#         test_o_piso_do_prazo_vale_60_minutos[61-…-True]
+#       Esta injeção prova que o piso EXISTE, e não que ele vale 60 — quem prende
+#       o VALOR é o caso 8a, e a prova dele é mutar a CONSTANTE, não o predicado
+#       (`JANELA_DEVICE_AUTH_MIN` em 1 → a perna de 59 vermelha; em 1440 → a de
+#       61). As duas pernas do 8a estão nas duas listas por isso.
 #   (B') desligar o TETO do prazo: ALARGAR o literal, de `interval '5 minutes'`
 #       para `interval '10 years'`. Vermelhos:
 #         test_carimbo_no_futuro_nao_reabre_o_silencio_permanente[14400-…-True]
@@ -1463,6 +1472,15 @@ def test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar(user_id):
     # `updated_at`/`last_attempt_at` sem que o `raw` mude. Sem prazo, uma linha
     # que nunca mais fosse medida ficaria para sempre mandando ler um QR morto —
     # e o aviso proativo, calado para sempre.
+    #
+    # IMPORT LOCAL, e NÃO mova para o topo do arquivo: a constante não existe no
+    # código ANTIGO, e no topo o `ImportError` derruba a COLETA do arquivo
+    # inteiro — a coluna antiga do `scripts/coluna_dupla.py` vira um `<error>`
+    # sem nenhuma asserção vista, e o gate rebaixa a prova a FRACA. Aqui dentro,
+    # a coluna antiga roda os corpos e vermelha pelo motivo certo. É o mesmo
+    # adiamento que a PRODUÇÃO faz (`janela_device_auth_min`,
+    # `db/open_finance_state.py`), lá por mão única de pacote, aqui por isto.
+    from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN
     conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
     _envelhece_autorizacao(conexao["id"], JANELA_DEVICE_AUTH_MIN + 5)
 
@@ -1479,12 +1497,49 @@ def test_passado_o_prazo_a_tela_e_o_aviso_voltam_a_mandar_reautorizar(user_id):
 def test_dentro_do_prazo_o_aviso_continua_calado(user_id):
     # CONTROLE do prazo pelo outro lado, e preserva o conserto do #166: um prazo
     # curto demais (ou uma âncora errada) reabriria o aviso dentro da janela.
+    from core.services.pluggy_health import JANELA_DEVICE_AUTH_MIN  # local: ver caso 7
     conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
     _envelhece_autorizacao(conexao["id"], JANELA_DEVICE_AUTH_MIN - 5)
 
     assert _ui_da_tela(user_id, "item-tela-caixa")["detail"] == DETALHE_DISPOSITIVO
     assert "item-tela-caixa" not in _avisadas(user_id), (
         "dentro da janela, 'reconecte seu banco' é o que faz PERDER o QR (#166)")
+
+
+# ── caso 8a: a FRONTEIRA do piso, nos 60 minutos ────────────────────────────
+#
+# Os casos 7 e 8 escrevem a idade como `JANELA_DEVICE_AUTH_MIN ± 5`: eles são
+# DERIVADOS da constante e por isso não prendem o VALOR dela, só a existência do
+# piso. Medido: com a constante em 1, 5, 1440 ou 525600 os dois seguem VERDES —
+# e nenhum outro teste da árvore usa a constante. É a patologia que o
+# `docs/controles_declarados.md` nomeia ("se o caso do teste se escreve em função
+# da constante, ele não pode ser o único caso"), e o remédio já estava aplicado
+# no TETO (o 8c, em segundos absolutos) e faltava no piso.
+#
+# A assimetria é o contrário do risco: um piso curto demais mata a instrução
+# CERTA com o QR ainda aberto (com a constante em 5, ela morre 5 min depois de
+# conectar) — o bug do #166 de volta, sem uma linha vermelha.
+#
+# Estes dois casos prendem o 60 pelas duas pontas, em minutos ABSOLUTOS (medido:
+# com a constante em 1 a perna de 59 fica vermelha; em 1440, a de 61).
+
+@pytest.mark.parametrize("minutos_de_idade,detalhe,avisado", [
+    (59, DETALHE_DISPOSITIVO, False),
+    (61, DETALHE_REAUTORIZA, True),
+])
+def test_o_piso_do_prazo_vale_60_minutos(
+    user_id, minutos_de_idade, detalhe, avisado
+):
+    conexao = db.save_pluggy_open_finance_item(user_id, ITEM_CAIXA_QR)
+    _envelhece_autorizacao(conexao["id"], minutos_de_idade)
+
+    assert _ui_da_tela(user_id, "item-tela-caixa")["detail"] == detalhe, (
+        f"carimbo com {minutos_de_idade} min de idade: o piso é de 60 min. Um "
+        "piso mais curto tira a instrução certa de quem ainda tem QR aberto; um "
+        "mais longo manda esperar um QR morto")
+    assert ("item-tela-caixa" in _avisadas(user_id)) is avisado, (
+        "o piso vale nas DUAS superfícies: a tela e o aviso proativo leem a "
+        "MESMA condição, por dois selects diferentes")
 
 
 # ── caso 8b: o OUTRO LADO do intervalo — carimbo no FUTURO ───────────────────

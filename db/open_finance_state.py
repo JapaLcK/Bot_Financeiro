@@ -61,8 +61,10 @@ _TERMINAL = ("PAUSED", "DELETED")
 # A ÂNCORA é `coalesce(reconnected_at, created_at)`, e não `updated_at` nem
 # `last_attempt_at`: `mark_sync_attempt` empurra esses dois para frente SEM que o
 # `raw` mude, o que renovaria a validade de um valor congelado. `reconnected_at`
-# tem um escritor só em toda a árvore (o `on conflict` de
-# `save_pluggy_open_finance_item`) e é gravado JUNTO com o `raw` que ele data;
+# tem um escritor só em PRODUÇÃO (o `on conflict` de
+# `save_pluggy_open_finance_item`) e é gravado JUNTO com o `raw` que ele data —
+# "em toda a árvore" seria falso, e por um: `scripts/of_corrida_dois_processos.py`
+# também escreve a coluna (`reconnected_at=null`), e é script de laboratório;
 # `created_at` é `default now()` e o `on conflict` nunca o toca.
 #
 # O `health is null` é obrigatório, não enfeite (mesmo precedente medido do
