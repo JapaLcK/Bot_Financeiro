@@ -3376,9 +3376,6 @@ const OF_VERDICT = [
       ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Ação necessária no ${ofNome(i)}.`],
   ["no_accounts",       (i) => `O ${ofNome(i)} não devolveu nenhuma conta ou investimento.`],
-  ["updating",          (i) => i.detail
-      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
-      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
   // O `ofNome(i)` NÃO é enfeite: com dois bancos conectados, "cartão
   // desatualizado desde 12/08" não diz de qual. **As oito entradas desta tabela
   // falam de UM item e as oito nomeiam o item** — a única frase sem nome é a do
@@ -3388,6 +3385,12 @@ const OF_VERDICT = [
       ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
       : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
   ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)} agora. Tente de novo em instantes.`],
+  // ÚLTIMA de propósito: é a única entrada neutra, e o laço do `refreshVerdict`
+  // devolve a primeira que algum item tem. Antes de um erro, um banco coletando
+  // esconderia o erro de outro banco (toast neutro, gesto sem âmbar).
+  ["updating",          (i) => i.detail
+      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
+      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
 ];
 
 function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
