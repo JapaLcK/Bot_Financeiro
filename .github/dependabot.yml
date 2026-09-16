@@ -86,6 +86,47 @@ updates:
         patterns:
           - "@capacitor/*"
 
+  # Dependências npm do app nativo (Expo/React Native). Quarto ecossistema do
+  # repo, e o único cuja cadeia termina num binário assinado e distribuído pelas
+  # lojas — uma dependência comprometida aqui viaja para o aparelho do usuário.
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+    groups:
+      app-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      # `react` e `react-dom` são versionados EM PAR pelo próprio projeto, igual
+      # ao webapp/: um em 19.3 com o outro em 19.4 o React não suporta.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+      # O SDK do Expo versiona os `expo-*` em bloco: subir um sozinho para uma
+      # versão de outro SDK quebra o build nativo. Andam juntos ou não andam.
+      expo:
+        patterns:
+          - "expo"
+          - "expo-*"
+    # ATENÇÃO: subir o SDK do Expo (major do pacote `expo`) não é atualização de
+    # dependência, é migração — mexe em build nativo, em versão de React Native e
+    # nas versões pareadas de todo `expo-*`. Merge só com build de verdade rodado.
+    ignore:
+      - dependency-name: "expo"
+        update-types: ["version-update:semver-major"]
+
   # Dependências npm da ilha React da /precos (webapp/). Terceiro lockfile do
   # repositório, e o que produz um arquivo SERVIDO na página que vende: react,
   # react-dom, vite e a cadeia nativa de build (rolldown, lightningcss).
