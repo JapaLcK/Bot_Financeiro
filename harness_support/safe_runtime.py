@@ -141,9 +141,14 @@ def install_runtime_boundaries(
     send_behavior: str = "reply",
 ) -> None:
     """Substitui somente I/O; o parser e o fluxo do adaptador continuam reais."""
+    send_attempts = 0
 
     def send_text(*, to: str, body: str, **_: Any) -> dict[str, Any]:
-        if send_behavior == "error":
+        nonlocal send_attempts
+        send_attempts += 1
+        if send_behavior == "error" or (
+            send_behavior == "error-once" and send_attempts == 1
+        ):
             raise TimeoutError("falha sintética de envio")
         replies.append({"to": to, "body": body})
         return {"contacts": [{"wa_id": to}], "messages": [{"id": "harness-out-1"}]}

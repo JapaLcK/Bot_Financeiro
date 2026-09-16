@@ -256,7 +256,8 @@ def _account_contextual_fallback(norm: str) -> str:
 
 def _ofx_contextual_fallback() -> str:
     return (
-        "🧾 Para importar um OFX, envie ou anexe o arquivo no chat. "
+        "🧾 Para importar um OFX, envie ou anexe o arquivo no chat.\n"
+        "• `importar ofx`\n"
         "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
     )
 
@@ -365,7 +366,8 @@ def _infer_precise_help(norm: str) -> str | None:
         and any(expr in norm for expr in import_terms)
     ) or _is_statement_file_help(norm):
         return (
-            "🧾 Para importar um OFX, envie ou anexe o arquivo no chat. "
+            "🧾 Para importar um OFX, envie ou anexe o arquivo no chat.\n"
+            "• `importar ofx`\n"
             "Extratos também aceitam `.csv` ou `.pdf`; para faturas, use `.ofx`."
         )
 

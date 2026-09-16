@@ -26,6 +26,7 @@ def main() -> int:
     )
     parser.add_argument("--event-log-error", action="store_true")
     parser.add_argument("--send-error", action="store_true")
+    parser.add_argument("--send-error-once", action="store_true")
     parser.add_argument("--core-error", action="store_true")
     args = parser.parse_args()
 
@@ -75,7 +76,11 @@ def main() -> int:
                         args.text,
                         handler_behavior=args.handler_behavior,
                         event_log_error=args.event_log_error,
-                        send_behavior="error" if args.send_error else "reply",
+                        send_behavior=(
+                            "error"
+                            if args.send_error
+                            else "error-once" if args.send_error_once else "reply"
+                        ),
                     )
                 result["cwd_is_temporary"] = Path.cwd() != REPO
                 result["environment_sanitized"] = not any(

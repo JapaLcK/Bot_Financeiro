@@ -84,6 +84,10 @@ _SEEN_TTL = 180
 _PROCESSING_FAILURE_MESSAGE = (
     "Não consegui processar sua mensagem agora. Tente novamente em instantes."
 )
+_DELIVERY_FAILURE_MESSAGE = (
+    "Não consegui confirmar a resposta. Sua solicitação pode ter sido concluída; "
+    "confira seus dados antes de reenviar."
+)
 
 
 @dataclass
@@ -1358,7 +1362,7 @@ def process_message(message: InboundMessage) -> None:
             )
         traceback.print_exc()
         try:
-            _send_reply(message.wa_id, _PROCESSING_FAILURE_MESSAGE)
+            _send_reply(message.wa_id, _DELIVERY_FAILURE_MESSAGE)
         except Exception as send_exc:
             logger.error(
                 "WA failure notice could not be sent wa_id=%s error=%s",

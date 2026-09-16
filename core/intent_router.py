@@ -116,12 +116,22 @@ NOT_UNDERSTOOD_MSG = (
     "Ou digite *ajuda* pra ver tudo que eu faço."
 )
 
-_INVESTMENT_ASSET_PATTERN = (
-    r"(?:acao|acoes|ativo|ativos|investimento|investimentos|bitcoin|bitcoins|"
-    r"cripto|criptos|criptomoeda|criptomoedas|petrobras|fundo|fundos|"
+_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
+    r"(?:acao|acoes|investimento|investimentos|bitcoin|bitcoins|"
+    r"cripto|criptos|criptomoeda|criptomoedas|petrobras|"
     r"fii|fiis|etf|etfs|tesouro|tesouros|cdb|cdbs|lci|lcis|lca|lcas|"
-    r"debenture|debentures|ouro|prata|commodity|commodities|moeda|moedas|"
+    r"debenture|debentures|commodity|commodities|"
+    r"fundo imobiliario|fundo multimercado|fundo cambial|fundo di|"
+    r"fundo de investimento|fundo de credito privado|"
+    r"ativo financeiro|moeda estrangeira|"
     r"dolar|dolares|euro|euros|cambio|forex|renda fixa)"
+)
+_AMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
+    r"(?:ativo|ativos|fundo|fundos|ouro|prata|moeda|moedas)"
+)
+_INVESTMENT_ASSET_PATTERN = (
+    rf"(?:{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}|"
+    rf"{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN})"
 )
 _INVESTMENT_TICKER_PATTERN = r"[A-Z]{4}\d{1,2}"
 
@@ -133,9 +143,61 @@ def _contextual_help_message(text: str, platform: str) -> str:
 def _is_investment_action_or_advice_request(text: str) -> bool:
     """Reconhece pedido para operar ou indicar um ativo, fora do papel do bot."""
     norm = normalize_text(text)
-    asset_hint = re.search(
-        rf"\b{_INVESTMENT_ASSET_PATTERN}\b", norm
-    ) or re.search(rf"\b{_INVESTMENT_TICKER_PATTERN}\b", text or "", flags=re.IGNORECASE)
+    financial_context = re.search(
+        r"\b(investir|investimento|carteira|aporte|resgate|rendimento|"
+        r"rentabilidade|cota)\b",
+        norm,
+    )
+    ambiguous_action = (
+        r"(?:aplicar|aplique|comprar|compre|vender|venda|vende|indicar|indica|indique|"
+        r"indicaria|recomendar|recomenda|recomende|recomendaria|sugerir|"
+        r"sugere|sugira|sugeriria|aconselhar|aconselha|aconselhe|aconselharia)"
+    )
+    bare_ambiguous_asset = (
+        rf"(?<!de )(?<!da )(?<!do )\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b"
+    )
+    polite_ending = r"(?:\s+(?:para mim|por favor))?\s*[?.!]*$"
+    ambiguous_action_context = (
+        re.search(
+            rf"\b{ambiguous_action}\b\s+"
+            rf"(?:(?:me|em|um|uma|o|a|meu|minha|uns|umas|algum|alguma|"
+            rf"qual|que)\s+){{0,3}}"
+            rf"{bare_ambiguous_asset}{polite_ending}",
+            norm,
+        )
+        or re.search(
+            rf"{bare_ambiguous_asset}\s+"
+            rf"(?:(?:voce|me|eu|devo|devia|deveria)\s+){{0,3}}"
+            rf"\b{ambiguous_action}\b{polite_ending}",
+            norm,
+        )
+    )
+    ambiguous_quality_context = (
+        re.search(
+            rf"\b(?:melhor|melhores|bom|bons|boa|boas)\s+"
+            rf"{bare_ambiguous_asset}\s*[?.!]*$",
+            norm,
+        )
+        or re.search(
+            rf"{bare_ambiguous_asset}\s+"
+            rf"(?:(?:e|sao|seria|sera|parece)\s+)?"
+            rf"(?:(?:o|a|os|as)\s+)?"
+            rf"(?:melhor|melhores|bom|bons|boa|boas|vale a pena)\b\s*[?.!]*$",
+            norm,
+        )
+    )
+    asset_hint = (
+        re.search(rf"\b{_UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
+        or (
+            (financial_context or ambiguous_action_context or ambiguous_quality_context)
+            and re.search(rf"\b{_AMBIGUOUS_INVESTMENT_ASSET_PATTERN}\b", norm)
+        )
+        or re.search(
+            rf"\b{_INVESTMENT_TICKER_PATTERN}\b",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+    )
     if not asset_hint:
         return False
 
@@ -147,8 +209,17 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+    possessive_owned_asset = bool(
+        re.search(
+            rf"\b(?:meu|minha|meus|minhas)\s+"
+            rf"(?:{_INVESTMENT_ASSET_PATTERN}|{_INVESTMENT_TICKER_PATTERN})\b",
+            norm,
+            flags=re.IGNORECASE,
+        )
+    )
     portfolio_quality_query = bool(
         owned_asset_in_portfolio
+        or possessive_owned_asset
         or re.search(
             r"\b(meu|minha)\s+melhor\s+"
             r"(investimento|acao|ativo|fundo|fii|etf)\b",
@@ -180,7 +251,9 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
             norm,
         )
     )
-    quality_advice = bool(re.search(r"\b(melhor|boa|bom)\b", norm)) and (
+    quality_advice = bool(
+        re.search(r"\b(melhor|melhores|boa|boas|bom|bons|vale a pena)\b", norm)
+    ) and (
         prospective_quality or not portfolio_quality_query
     )
     sell_command = bool(
@@ -196,12 +269,14 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     )
 
     return bool(
-        re.search(r"\b(compre|comprar|vender|invista)\b", norm)
+        re.search(r"\b(aplicar|aplique|compre|comprar|vender|invista)\b", norm)
         or sell_command
         or re.search(r"\bvale\s+a\s+pena\b.*\b(investir|comprar|vender)\b", norm)
         or re.search(r"\b(investir|comprar|vender)\b.*\bvale\s+a\s+pena\b", norm)
         or re.search(
-            r"\b(indica|indique|recomenda|recomende|sugere|sugira|aconselha|aconselhe)\b",
+            r"\b(indicar|indica|indique|indicaria|recomendar|recomenda|"
+            r"recomende|recomendaria|sugerir|sugere|sugira|sugeriria|"
+            r"aconselhar|aconselha|aconselhe|aconselharia)\b",
             norm,
         )
         or quality_advice

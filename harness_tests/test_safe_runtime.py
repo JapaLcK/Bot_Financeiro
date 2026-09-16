@@ -132,7 +132,6 @@ class SafeRuntimeTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "policy", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertFalse(payload["refused"])
@@ -152,7 +151,6 @@ class SafeRuntimeTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "policy", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertTrue(payload["refused"])
@@ -184,6 +182,8 @@ class SafeRuntimeTests(unittest.TestCase):
             "qual PETR4 da minha carteira foi o melhor?",
             "PETR4 da minha carteira é boa?",
             "como registrar no PigBank que comecei a investir em CDB?",
+            "meu CDB é bom?",
+            "minha LCI é boa?",
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
@@ -218,7 +218,6 @@ class SafeRuntimeTests(unittest.TestCase):
         for text, expected in cases.items():
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["intent"], "out_of_scope")
@@ -243,7 +242,6 @@ class SafeRuntimeTests(unittest.TestCase):
         for text, expected in cases.items():
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["intent"], "out_of_scope")
@@ -264,6 +262,10 @@ class SafeRuntimeTests(unittest.TestCase):
             "como anexar um PDF em um e-mail?",
             "como importar CSV no Google Sheets?",
             "como anexar PDF no Slack?",
+            "qual fundo de tela é melhor?",
+            "qual fundo de tela devo comprar?",
+            "compre um fundo azul para mim",
+            "qual ativo do jogo devo comprar?",
             "como chamar uma pessoa baixinha?",
             "PigBank, conte uma piada",
             "vale a pena comprar um carro?",
@@ -271,7 +273,6 @@ class SafeRuntimeTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 result = _run("--layer", "core", "--text", text)
-
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
                 self.assertIn("só consigo ajudar com finanças", payload["response"].lower())
@@ -339,7 +340,6 @@ class SafeRuntimeTests(unittest.TestCase):
 
     def test_controle_positivo_bloqueia_escrita_fora_do_temporario(self) -> None:
         result = _run("--probe", "write")
-
         self.assertEqual(result.returncode, 70, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["error"], "SAFETY_VIOLATION")
