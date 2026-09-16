@@ -72,6 +72,12 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre ETH para mim",
             "venda Solana",
             "compre SOL",
+            "Piggy, eu deveria investir em CDB?",
+            "eu deveria comprar PETR4?",
+            "qual ativo eu deveria comprar?",
+            "Piggy, venda todos os meus ativos",
+            "venda os meus fundos",
+            "venda 3 ativos",
         ):
             with self.subTest(text=text):
                 self.assertTrue(_policy(text)["refused"])
@@ -98,6 +104,9 @@ class InvestmentPolicyMatrixTests(unittest.TestCase):
             "compre sol para o jardim",
             "recebi 100 de um bom investimento",
             "recebi bons rendimentos do CDB",
+            "recebi 100 pela venda de todos os meus ativos",
+            "todos os meus ativos estão registrados?",
+            "qual CDB eu deveria registrar na minha carteira?",
         ):
             with self.subTest(text=text):
                 self.assertFalse(_policy(text)["refused"])

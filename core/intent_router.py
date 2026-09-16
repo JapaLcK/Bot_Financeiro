@@ -167,8 +167,9 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
     ambiguous_action_context = (
         re.search(
             rf"\b{ambiguous_action}\b\s+"
-            rf"(?:(?:me|em|um|uma|o|a|meu|minha|uns|umas|algum|alguma|"
-            rf"qual|que)\s+){{0,3}}"
+            rf"(?:(?:me|em|um|uma|o|a|os|as|meu|minha|meus|minhas|"
+            rf"todo|toda|todos|todas|uns|umas|algum|alguma|"
+            rf"qual|que|\d+)\s+){{0,4}}"
             rf"{bare_ambiguous_asset}{polite_ending}",
             norm,
         )
@@ -295,7 +296,7 @@ def _is_investment_action_or_advice_request(text: str) -> bool:
         )
         or quality_advice
         or re.search(r"\b(quais?|qual|que)\b.*\b(devo|devia)\b", norm)
-        or re.search(r"\b(devo|devia)\b.*\b(comprar|vender|investir)\b", norm)
+        or re.search(r"\b(devo|devia|deveria)\b.*\b(comprar|vender|investir)\b", norm)
     )
 
 
