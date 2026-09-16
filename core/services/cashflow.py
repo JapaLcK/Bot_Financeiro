@@ -11,8 +11,8 @@ projetado(D) = saldo_atual
              − (opcional) um boleto novo que ele está considerando
 
 `tranquilo` = projetado >= 0. É uma estimativa: não conta gastos avulsos futuros
-nem recorrentes semanais/diários/únicos (raros); a ideia é dar visão de fôlego,
-não fechamento contábil.
+nem receitas e gastos fixos semanais/diários/únicos; a ideia é dar visão de
+fôlego, não fechamento contábil.
 """
 from __future__ import annotations
 
@@ -34,7 +34,12 @@ def _as_date(v: Any) -> date | None:
 
 def _recurring_value_in_window(day: Any, freq: str, month: Any, start: date | None,
                                amount: float, after: date, until: date) -> float:
-    """Soma o valor das ocorrências de um recorrente MENSAL/ANUAL em (after, until]."""
+    """Soma o valor das ocorrências de um recorrente MENSAL/ANUAL em (after, until].
+    Semanal/diário/único vale 0: ficam fora da projeção."""
+    if freq not in ("monthly", "annual"):
+        # O cobrador de receitas só lança mensal e anual, e o laço abaixo só sabe
+        # essas duas: tratar once/weekly/daily como mensal inflava a previsão.
+        return 0.0
     if until <= after or amount <= 0:
         return 0.0
     try:

@@ -23,6 +23,10 @@ from .connection import get_conn
 from .recurring import _parse_start_date, validate_frequency
 from .users import ensure_user
 
+# O cobrador (`core/services/recurring_charger.py`) só credita receita mensal e
+# anual; única/semanal/diária seria gravada e nunca creditada.
+INCOME_FREQUENCIES = ("monthly", "annual")
+
 
 def list_recurring_incomes(user_id: int, include_inactive: bool = False) -> list[dict[str, Any]]:
     """Lista todas as receitas recorrentes do user."""
@@ -124,7 +128,7 @@ def create_recurring_income(
         raise ValueError("VALOR_INVALIDO")
     if pay_day < 1 or pay_day > 31:
         raise ValueError("DIA_INVALIDO")
-    freq, month = validate_frequency(frequency, pay_month)
+    freq, month = validate_frequency(frequency, pay_month, allowed=INCOME_FREQUENCIES)
     start = _parse_start_date(start_date, default=date.today())
 
     # #147: espelho de `create_recurring_expense` — o usuário DIGITA a categoria e o
@@ -221,7 +225,7 @@ def update_recurring_income(
         params.append(_parse_start_date(start_date, default=date.today()))
     if frequency is not None:
         month_src = pay_month if pay_month is not None else current.get("pay_month")
-        freq, month = validate_frequency(frequency, month_src)
+        freq, month = validate_frequency(frequency, month_src, allowed=INCOME_FREQUENCIES)
         sets.append("frequency = %s")
         params.append(freq)
         sets.append("pay_month = %s")
