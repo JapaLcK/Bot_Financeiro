@@ -114,6 +114,46 @@ describe("renovação em 401", () => {
     expect(refreshes).toHaveLength(1);
   });
 
+  it("401 ATRASADO não manda o usuário para o login com a sessão viva", async () => {
+    // Duas requisições saem com o MESMO access expirado. A primeira renova e
+    // termina; só então a segunda recebe o 401 dela. Nesse instante o cofre já
+    // tem o token novo, e a conferência de dono acusaria "a sessão trocou" —
+    // com a sessão perfeitamente viva. O sintoma seria a tela de login
+    // aparecendo de forma intermitente em tela que carrega várias coisas juntas.
+    //
+    // O portão abaixo é o que força a ORDEM: sem ele as duas leem o cofre antes
+    // da rotação e a corrida não acontece, e o teste passa com e sem o conserto
+    // (medido — esta é a segunda versão).
+    await guardarCredenciais({ access: "velho", refresh: "rt_velho" });
+    let abrirPortao: () => void = () => {};
+    const portao = new Promise<void>((r) => (abrirPortao = r));
+
+    fetchFalso.mockImplementation(async (url: string, o: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/auth/refresh")) {
+        return resposta(200, {
+          access_token: "novo",
+          refresh_token: "rt_novo",
+          dashboard_token: "d",
+          expires_in: 900,
+        });
+      }
+      const auth = (o.headers as Record<string, string>)["Authorization"];
+      if (auth === "Bearer novo") return resposta(200, { ok: true });
+      // O 401 da segunda requisição só chega depois que a primeira terminou.
+      if (u.includes("/atrasada")) await portao;
+      return resposta(401, { detail: "expirado" });
+    });
+
+    const atrasada = chamar("/atrasada", schema);
+    await expect(chamar("/primeira", schema)).resolves.toEqual({ ok: true });
+    abrirPortao();
+
+    // A atrasada renova com um token já consumido e, mesmo assim, conclui: a
+    // sessão está viva, só foi renovada por um vizinho.
+    await expect(atrasada).resolves.toEqual({ ok: true });
+  });
+
   it("refresh recusado vira SessaoExpirada e apaga a credencial", async () => {
     await guardarCredenciais({ access: "velho", refresh: "rt_morto" });
     fetchFalso

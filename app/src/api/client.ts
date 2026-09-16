@@ -87,6 +87,22 @@ type Renovacao =
 let renovacaoEmVoo: { refresh: string; promessa: Promise<Renovacao> } | null =
   null;
 
+/**
+ * O último refresh token CONSUMIDO com sucesso.
+ *
+ * Existe para o 401 atrasado: duas requisições saem com o mesmo access token
+ * expirado, a primeira renova e termina, e só então a segunda recebe o 401 dela.
+ * Nesse instante `renovacaoEmVoo` já foi limpo e o cofre já tem o token novo, de
+ * modo que a conferência de dono acusaria "a sessão trocou" — e a tela mandaria
+ * o usuário para o login com a sessão perfeitamente viva.
+ *
+ * Guardar qual token acabou de ser trocado distingue os dois casos que a
+ * conferência confundia: "outra conta entrou" e "esta mesma sessão já foi
+ * renovada por um vizinho". O segundo não é erro, é corrida normal de tela que
+ * carrega várias coisas de uma vez.
+ */
+let ultimoConsumido: string | null = null;
+
 async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
   if (renovacaoEmVoo?.refresh === refreshDeOrigem) return renovacaoEmVoo.promessa;
 
@@ -94,6 +110,11 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
     try {
       const antes = await lerCredenciais();
       if (!antes || antes.refresh !== refreshDeOrigem) {
+        // Esta MESMA sessão já foi renovada por um vizinho? Então não há erro:
+        // devolve a credencial corrente e a requisição segue.
+        if (antes && refreshDeOrigem === ultimoConsumido) {
+          return { ok: true, access: antes.access, refresh: antes.refresh };
+        }
         return { ok: false, motivo: "sessao-trocou" };
       }
 
@@ -131,6 +152,7 @@ async function renovar(refreshDeOrigem: string): Promise<Renovacao> {
         refresh: novas.refresh_token,
       });
       if (!trocou) return { ok: false, motivo: "sessao-trocou" };
+      ultimoConsumido = refreshDeOrigem;
       return {
         ok: true,
         access: novas.access_token,
@@ -267,7 +289,8 @@ async function mensagemDeErro(resposta: Response): Promise<string> {
   return "Não foi possível completar a ação.";
 }
 
-/** Só para teste: zera a renovação em voo entre casos. */
+/** Só para teste: zera o estado de renovação entre casos. */
 export function _resetRenovacao(): void {
   renovacaoEmVoo = null;
+  ultimoConsumido = null;
 }
