@@ -295,6 +295,193 @@ _FIXED_DETAIL = {
     "no_accounts": "O banco não devolveu contas nem investimentos",
 }
 
+# Código do warning → POR QUE o produto não veio, em frase NOSSA.
+#
+# A mensagem da Pluggy (`message`/`providerMessage`) cita nome, conta e documento
+# do titular e por isso é descartada no `_warning_codes` — decisão que não muda.
+# Só que aí o motivo virava um código que nenhuma superfície mostra. Relato do
+# dono (não medido — o SELECT em produção foi negado): investimentos com 30
+# warnings de código relatado como `004`, prefixo não confirmado, e ninguém soube
+# por que não vieram. Traduzir o código é a saída que não carrega PII.
+#
+# Agrupado por AÇÃO do usuário, não por produto: o que muda a frase é o que ele
+# pode fazer, e o mesmo motivo cai em conta, cartão e investimento.
+#
+# Fonte: docs.pluggy.ai/docs/warnings-status-codes (relido em 16/09/2026; remeça
+# antes de reusar). SÓ conector Open Finance entra: os códigos de conector
+# DIRETO são nus (`001`, `002`, `003`) e significam coisa diferente em cada
+# conector — o `001` do Itaú PJ não é o do Santander PJ —, então mapeá-los seria
+# chutar. Eles caem no fallback do `_frase_do_codigo`, que é honesto.
+# `LOAN_*` e `ID_*` ficam de fora porque `_PRODUCT_KEYS` não lê esses produtos:
+# entrada para código inalcançável é o código morto que este módulo já proíbe.
+#
+# A LINHA QUE DECIDE QUEM ENTRA: a frase fala do PRODUTO ("o cartão não veio"),
+# então só entra código cuja linha da doc também fala do produto ou do recurso
+# inteiro — ou tem frase ESTREITA o bastante para dizer só o que a doc diz
+# (`INV_003`/`INV_005`). Código que fala de um SUB-DADO que a frase não nomeia —
+# `ACCT_005` (limites de cheque especial), `CC_005` (faturas), `CC_006`
+# (transações do cartão), `CC_007` (o limite do cartão) — fica FORA e cai no
+# fallback, junto de `ACCT_006` (corte acima de 260 contas), `TXN_002` ("no
+# accounts available") e `TXN_005` ("accounts step had errors"), que não têm
+# ação de usuário nenhuma.
+# Motivo: dizer "não adianta tentar de novo" por causa do `CC_007` condena um
+# cartão cuja fatura e cujas transações vêm normalmente. Frase que mente é pior
+# que código cru — o código cru pelo menos é honesto sobre a ignorância.
+
+# Mesma instrução que `_DETALHE_POR_STATUS` já dá para `WAITING_USER_ACTION` —
+# `ACCT_002`/`CC_002` são a mesma família ("awaiting user authorization at the
+# financial institution"). Derivada, não copiada: duas cópias da instrução são
+# duas chances de uma envelhecer (§0.7). Minúscula porque aqui ela entra no meio
+# da frase, igual ao que o `ofInstrucao` do settings.html faz no toast.
+_AUTORIZE_NO_APP = _DETALHE_POR_STATUS[ITEM_STATUS_AUTORIZA_DISPOSITIVO]
+
+# A ORDEM DOS GRUPOS É A PRIORIDADE quando um produto (ou o sujeito) traz mais de
+# um código: vence a instrução que ainda RECUPERA dado. Esconder "autorize" atrás
+# de "não adianta" faz perder um cartão que viria. Por isso: agir agora >
+# reconectar > esperar > desistir — com UMA exceção dentro do mesmo produto, que
+# mora no `_motivo_do_warning` porque reconectar ali não é "um passo a mais": gasta
+# a cota do mês (ver `_RECONECTE`).
+_RECONECTE = "você não liberou esse dado ao conectar o banco, reconecte para liberar"
+_LIMITE_DE_CONSULTAS = ("o banco bateu o limite de consultas do Open Finance, volta "
+                        "sozinho na virada do período")
+
+_MOTIVO_POR_WARNING = {
+    code: frase
+    for frase, codes in (
+        # "Resource Status" tem TRÊS estados, e ler dois deles como um só foi o
+        # defeito da rodada 1: "Pending Authorization: awaiting user
+        # authorization at the financial institution" manda AGIR no app do
+        # banco; "Temporarily Unavailable (e.g. maintenance)" manda ESPERAR;
+        # "Unavailable: permanently unavailable" manda desistir. Instruções
+        # opostas — colapsá-las deixa o usuário esperando para sempre.
+        (_AUTORIZE_NO_APP[0].lower() + _AUTORIZE_NO_APP[1:],
+         ("ACCT_002", "CC_002")),
+        # "User hasn't granted permission to collect <produto> (ACCOUNTS_ALL /
+        # CREDIT_CARDS_ALL / ACCOUNTS_TRANSACTIONS / INVESTMENTS_ALL)" e
+        # `INV_002` "Investment product permission has not been granted" — é
+        # permissão, e reconectar é o caminho que a repara.
+        # `INV_002` entra e `CC_005`/`CC_006`/`ACCT_005` não. O que é da doc: os
+        # três nomeiam a permissão de um DADO ANEXO a um registro que vem pela
+        # `_ALL` (CREDIT_CARDS_BILLS, CREDIT_CARDS_TRANSACTIONS, ACCOUNTS_LIMITS),
+        # então não explicam o cartão/conta atrasado; `INV_002` não nomeia dado
+        # anexo nenhum, só "investment product". O que é LEITURA nossa, não da
+        # doc: que esse "product" é o tipo da própria posição de investimento, e
+        # por isso sem a permissão é o dado do produto que falta.
+        (_RECONECTE,
+         ("ACCT_001", "CC_001", "TXN_001", "TXN_004", "INV_001", "INV_002")),
+        # INV_004 é "Open Finance monthly rate limit reached"; TXN_003/TXN_006 a
+        # doc chama só de "rate limit reached" — daí "período", e não "mês".
+        (_LIMITE_DE_CONSULTAS,
+         ("INV_004", "TXN_003", "TXN_006")),
+        ("o banco não liberou esse dado agora, deve voltar sozinho em algumas horas",
+         ("ACCT_003", "CC_003")),
+        ("o banco não envia esse dado por aqui, não adianta tentar de novo",
+         ("ACCT_004", "CC_004")),
+        # "Investment product not supported by the financial institution" /
+        # "Specific investment product type not supported": nunca vem, mas é um
+        # TIPO de investimento — a frase de cima condenaria os investimentos todos.
+        ("o banco não oferece esse tipo de investimento por aqui",
+         ("INV_003", "INV_005")),
+    )
+    for code in codes
+}
+_ORDEM_DAS_FRASES = list(dict.fromkeys(_MOTIVO_POR_WARNING.values()))
+
+# A FORMA documentada de um código, e ela decide o que vai pra TELA — não o que
+# se armazena, que continua sendo assunto do `safe_code`. Duas regras de
+# propósito: `safe_code` aceita "1234-5" (6 caracteres, 5 dígitos), que é a cara
+# de um número de conta. Dormente enquanto o código só existia num JSON que
+# ninguém lia; imprimi-lo promove isso a vazamento visível.
+# `[0-9]` e não `\d`: `\d` casa dígito Unicode, e este repo já pagou por isso
+# (`isdigit()` não-ASCII virando 500, issue #365). Hoje o `safe_code` é ASCII, o
+# que torna o caso inalcançável; a diferença é de um caractere.
+_CODE_EXIBIVEL = re.compile(r"[A-Z]{2,5}_[0-9]{3}|[0-9]{3}")
+
+
+def _frase_do_codigo(code: Any) -> tuple[int, str] | None:
+    """`(prioridade, frase)` de UM código — menor vence —, ou None.
+
+    O código CRU tem a pior prioridade de todas: ele só aparece quando não há
+    motivo que a gente saiba explicar. E a escolha é por prioridade, não pela
+    posição: o resultado não pode depender da ORDEM em que a Pluggy manda a lista
+    — com "o primeiro que achar", `[004, CC_001]` e `[CC_001, 004]` davam frases
+    diferentes para o mesmo produto.
+    """
+    if not isinstance(code, str):
+        return None
+    frase = _MOTIVO_POR_WARNING.get(code)
+    if frase:
+        return _ORDEM_DAS_FRASES.index(frase), frase
+    # Código desconhecido aparece CRU: foi exatamente o que faltou no caso do
+    # dono. Sem diagnóstico inventado, e só se tiver forma de código.
+    if _CODE_EXIBIVEL.fullmatch(code):
+        return len(_ORDEM_DAS_FRASES), f"o banco avisou com o código {code}, sem explicar o motivo"
+    return None
+
+
+def _motivo_do_warning(health: dict | None, produtos) -> str:
+    """Cláusula " — <por que não veio>" para uma frase cujo sujeito é `produtos`.
+
+    O SUJEITO E O MOTIVO TÊM DE CASAR. `_stale_detail` monta um sujeito plural
+    ("Cartão e Investimentos desatualizados"), e grudar ali a frase do PRIMEIRO
+    código atribuía o motivo de um produto ao outro: com `CC_001` no cartão e
+    `INV_003` (não suportado pela instituição) nos investimentos, a linha mandava
+    reconectar para liberar um dado que nunca ia vir. Por isso:
+
+      • motivo igual para TODOS os produtos do sujeito → cláusula sem nome;
+      • qualquer outro caso (motivos diferentes, ou produto sem warning nenhum)
+        → a cláusula NOMEIA o produto de quem ela é.
+
+    Sem warning a frase sai IDÊNTICA à de hoje — é o controle positivo, e
+    `tests/test_of_refresh_response.py` já o prende com `==`.
+
+    Defensivo de propósito: esta função lê a coluna `health` (jsonb), e os
+    chamadores de `connection_ui_state` não têm `try` (`db/open_finance.py`,
+    `pluggy_sync.py`). É a mesma classe que o `_warning_codes` já documenta —
+    `{"warnings": 7}` estourando `TypeError` e MATANDO o sync.
+    """
+    products = health.get("products") if isinstance(health, dict) else None
+    if not isinstance(products, dict):
+        return ""
+
+    achados = []
+    for produto in produtos:
+        detalhe = products.get(produto)
+        if detalhe is None:
+            # Produto que a Pluggy nem reportou não tem motivo a dar — e contá-lo
+            # como "sem motivo" forçava o nome do produto na cláusula de todo
+            # banco sem investimentos.
+            continue
+        codes = detalhe.get("warnings") if isinstance(detalhe, dict) else None
+        candidatos = [c for c in map(_frase_do_codigo, codes) if c] \
+            if isinstance(codes, list) else []
+        # EXCEÇÃO, só dentro do mesmo produto: limite vence "reconecte". A cota é
+        # por CPF + instituição + produto, CRIAR ITEM a consome, e a doc
+        # (docs.pluggy.ai/en/docs/open-finance/rate-limits) diz que conectar o
+        # mesmo CPF à mesma instituição com vários itens "you will reach the
+        # limitation of Open Finance faster". Com o produto parado pelo limite,
+        # reconectar não o traz de volta e gasta a cota. Entre produtos NÃO vale
+        # (decisão do dono): o outro produto precisa mesmo da permissão, e a frase
+        # já sai nomeada.
+        if any(frase == _LIMITE_DE_CONSULTAS for _, frase in candidatos):
+            candidatos = [c for c in candidatos if c[1] != _RECONECTE]
+        # `min`, não "o primeiro": a ordem da lista é da Pluggy, a prioridade é nossa.
+        melhor = min(candidatos, default=None)
+        achados.append((produto, melhor))
+
+    frases = {m[1] for _, m in achados if m}
+    if not frases:
+        return ""
+    if len(frases) == 1 and all(m for _, m in achados):
+        return f" — {frases.pop()}"
+    # ponytail: UM motivo por linha, o de maior prioridade entre os produtos — com
+    # dois a frase vira parágrafo, e ela entra no meio do toast. O que NÃO é
+    # aceitável é atribuí-lo a quem não o produziu, e é isso que o nome resolve.
+    # Se aparecer par recorrente, virar lista.
+    produto, (_, frase) = min(((p, m) for p, m in achados if m), key=lambda a: a[1][0])
+    return f" — {_PRODUCT_PT[produto]}: {frase}"
+
+
 # `status_reason` que NÃO impede o estado verde. Qualquer outro motivo — inclusive
 # um que este arquivo não conhece — derruba o "Atualizado" (ver `out`).
 _REASONS_OK = ("", "ok")
@@ -508,7 +695,8 @@ def _stale_detail(health: dict) -> str:
         d for d in (_dm((products.get(p) or {}).get("last_updated_at")) for p in stale) if d
     )
     texto = " e ".join(nomes) + (" desatualizados" if len(nomes) > 1 else " desatualizado")
-    return f"{texto} desde {datas[0]}" if datas else texto
+    base = f"{texto} desde {datas[0]}" if datas else texto
+    return base + _motivo_do_warning(health, stale)
 
 
 def connection_ui_state(connection_row: dict) -> dict:
@@ -577,6 +765,22 @@ def connection_ui_state(connection_row: dict) -> dict:
         # seco da base, não o "Ainda não sincronizou" — aqui já se sincronizou.
         elif state == "updated" and coletando_sem_info:
             state, detail = "updating", None
+        # Mesmo defeito do `partial`: item vivo, espelho vazio, e o porquê
+        # (`ACCT_001` = ninguém liberou contas) preso no JSON. Sem health — o
+        # ramo de baixo — a frase continua exatamente a de hoje.
+        #
+        # SÓ os dois produtos que a frase NOMEIA ("não devolveu contas nem
+        # investimentos"). Varrer o health inteiro pegava warning de cartão e de
+        # transações, que não explicam espelho vazio de conta. E não dá para
+        # filtrar por `updated` aqui como o `partial` faz: a doc é explícita que
+        # o warning também vem com `isUpdated: true` ("the product was retrieved
+        # correctly, but it can be improved with some user action"), e o exemplo
+        # dela é de TRANSAÇÕES devolvidas vazias com o aviso — o análogo do
+        # `ACCT_001` numa conta, não uma citação sobre contas. Filtrar por
+        # `updated` aqui apagaria o caso que este ramo existe para explicar.
+        if state == "no_accounts":
+            detail = (detail or _FIXED_DETAIL[state]) + _motivo_do_warning(
+                health, ("BANK", "INVESTMENTS"))
         return {
             "state": state,
             "label": _LABELS[state],
