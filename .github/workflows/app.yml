@@ -1,0 +1,50 @@
+# App nativo (Expo/React Native) — CI PRÓPRIO, separado do tests.yml.
+#
+# Separado de propósito: o `tests.yml` sobe Postgres, instala o requirements.txt
+# inteiro e roda 8 mil testes de backend. Nada disso serve ao app, e pendurar o
+# app lá faria cada PR de Python esperar por `npm ci` do React Native.
+#
+# `paths` restringe a execução: PR que não toca `app/` não dispara nada aqui.
+name: App
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+
+# PR que recebe push novo cancela a execução anterior — o sinal que importa é o
+# do último commit.
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualidade:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # `npm ci` e não `npm install`: ele exige o lockfile e falha se o
+      # package.json divergir dele. É o que impede o CI de resolver uma versão
+      # diferente da que foi testada na máquina.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test -- --ci
