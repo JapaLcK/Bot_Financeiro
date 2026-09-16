@@ -19,8 +19,15 @@ CONTROLES NEGATIVOS DECLARADOS — em `core/services/open_finance_proactive.py`:
                   a leitura, o 1º usuário também recebe)
     remover o `if enviou:` (gravar o marcador incondicionalmente)
         VERMELHO: test_falha_do_envio_nao_grava_marcador_e_deixa_rastro[<os dois>]
+    tratar `None` de `send_template` como sucesso de volta (descartar o retorno)
+        VERMELHO: test_recusa_401_nao_grava_marcador_e_deixa_rastro[<o laço mutado>]
+
+O espião devolve o dict do 2xx porque `None` é o 401 (token inválido) que o
+`wa_client` loga em `whatsapp_token_invalid` e NÃO levanta — sem isso, o laço
+contava o 401 como enviado e gravava o marcador de um usuário que ficou calado.
 
 CONTROLE POSITIVO: a 2ª chamada de `test_falha_do_envio_nao_grava_marcador_e_deixa_rastro`
+e de `test_recusa_401_nao_grava_marcador_e_deixa_rastro`
 (envio volta a funcionar → o template sai) e `test_marcador_de_um_usuario_nao_cala_outro`
 (isolamento do §0 do CLAUDE.md na LEITURA: o marcador de um usuário não cala
 outro). Esse teste NÃO prova que a escrita usa o `user_id` certo — um marcador
@@ -73,11 +80,17 @@ def _armar(monkeypatch, caso: str, uids: list[int], enviar, alvo=lambda uid: [_F
     monkeypatch.setattr("adapters.whatsapp.wa_client.send_template", enviar)
 
 
-def _espiao(chamadas: list, erro: Exception | None = None):
+def _espiao(chamadas: list, erro: Exception | None = None, recusar: bool = False):
+    """Devolve o formato real do 2xx (`{"messages": [{"id": ...}]}`) porque `None`
+    é o 401 da Meta, que `send_template` NÃO levanta — um espião sem `return`
+    deixaria a suíte cega a esse desfecho. `recusar=True` simula o 401."""
     def _send(to, name, **kw):
         if erro:
             raise erro
         chamadas.append(to)
+        if recusar:
+            return None
+        return {"messages": [{"id": f"wamid.{len(chamadas)}"}]}
     return _send
 
 
@@ -110,6 +123,30 @@ def test_falha_do_envio_nao_grava_marcador_e_deixa_rastro(user_id, monkeypatch, 
     assert _FONE not in texto and "meta fora" not in texto, texto
 
     # Rodada seguinte, envio OK → o template sai.
+    _armar(monkeypatch, caso, [user_id], _espiao(chamadas))
+    assert rodar()["sent"] == 1
+    assert chamadas == [_FONE]
+
+
+@pytest.mark.parametrize("caso", list(_CASOS))
+def test_recusa_401_nao_grava_marcador_e_deixa_rastro(user_id, monkeypatch, caplog, caso):
+    """401 da Meta: `send_template` devolve `None` sem levantar. Não é envio."""
+    rodar, _, event, dias, _, _ = _CASOS[caso]
+    chamadas: list = []
+    _armar(monkeypatch, caso, [user_id], _espiao(chamadas, recusar=True))
+
+    with caplog.at_level(logging.WARNING, logger=ofp.logger.name):
+        assert rodar()["sent"] == 0, "401 contado como enviado"
+    assert recent_event_exists(event, user_id, dias) is False, (
+        "marcador gravado no 401 — o usuário ficaria calado pela janela inteira")
+    avisos = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(avisos) == 1, [r.getMessage() for r in caplog.records]
+    texto = avisos[0].getMessage()
+    assert f"user_id={user_id}" in texto and "token_invalido" in texto, texto
+    assert _FONE not in texto, texto
+
+    # Token renovado, envio OK → o template sai.
+    chamadas.clear()
     _armar(monkeypatch, caso, [user_id], _espiao(chamadas))
     assert rodar()["sent"] == 1
     assert chamadas == [_FONE]

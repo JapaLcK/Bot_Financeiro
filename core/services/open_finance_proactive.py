@@ -77,7 +77,11 @@ def run_salary_notifications() -> dict:
         enviou = False
         for to in _targets(uid):
             try:
-                send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=params)
+                if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=params) is None:
+                    # `None` é o 401 da Meta (token inválido/expirado), que `send_template` NÃO levanta
+                    # (`adapters/whatsapp/wa_client.py`, ramo `whatsapp_token_invalid`); todo outro erro chega no `except`.
+                    logger.warning("[of_proactive] salario: send_template recusado user_id=%s erro=token_invalido", uid)
+                    continue
                 sent += 1
                 enviou = True
             except Exception as exc:
@@ -117,7 +121,10 @@ def run_reconnect_notifications() -> dict:
         enviou = False
         for to in _targets(uid):
             try:
-                send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=[banks])
+                if send_template(to, cfg["name"], language_code=cfg["language_code"], named_body_params=[banks]) is None:
+                    # Mesmo `None` do salário: 401 (`whatsapp_token_invalid`) não levanta.
+                    logger.warning("[of_proactive] reconnect: send_template recusado user_id=%s erro=token_invalido", uid)
+                    continue
                 sent += 1
                 enviou = True
             except Exception as exc:
