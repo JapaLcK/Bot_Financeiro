@@ -691,8 +691,10 @@ def test_prazo_nao_reinicia_a_cada_tentativa(user_id, monkeypatch):
 def test_backoff_nao_dorme_por_cima_do_que_o_log_gastou(user_id, monkeypatch):
     """A folga do backoff é recontada DEPOIS do `log_system_event` do retry.
 
-    Aquele log abre conexão async NOVA e faz INSERT SEM `statement_timeout`,
-    DENTRO da janela do prazo — é o maior componente do que sobra dela. A conta e
+    Aquele log abre conexão async NOVA e faz um INSERT DENTRO da janela do prazo
+    — desde a issue #429 com `statement_timeout` (`options=
+    statement_timeout_options()`), mas o COMMIT continua sem knob por query no
+    libpq, e ele segue sendo o maior componente do que sobra dela. A conta e
     as constantes ficam num lugar só, no comentário de `_prazo_reconexao_ms`
     (frontend/routes/open_finance.py). Não se repete número solto aqui, porque a
     versão anterior deste arquivo dizia "~82s" enquanto o comentário dizia
@@ -1588,9 +1590,12 @@ def test_infra_na_1a_que_some_na_2a_ainda_deixa_rastro(user_id, monkeypatch, cap
 def test_log_do_diagnostico_nao_fura_o_prazo(user_id, monkeypatch, caplog):
     """Banco que aceita a conexão do log e trava no INSERT não pendura o 503.
 
-    `log_system_event` (`core/admin_dashboard.py:180`) não tem
-    `statement_timeout`: o `connect_timeout` limita o handshake e nada limita o
-    INSERT nem o commit. Sem o `_log_com_teto`, os DOIS logs
+    `log_system_event` (`core/admin_dashboard.py`) ganhou `statement_timeout` na
+    issue #429, e MESMO ASSIM este teto continua valendo: o `statement_timeout` é
+    aplicado pelo SERVIDOR e não alcança o COMMIT (sem knob por query no libpq)
+    nem o servidor que aceita o socket e nunca responde. Medido nesta rodada:
+    com o `asyncio.wait_for` do `_log_com_teto` removido, este teste fica VERMELHO
+    — o 503 levou 10,03s contra o limite de 1,0s. Sem o wrapper, os DOIS logs
     (`of_reconnect_lock_retry` e `of_reconnect_lock_timeout`) eram aguardados
     síncronos, e o teto anunciado de 20s continuava ILIMITADO exatamente sob
     sobrecarga do banco — que é quando o teto importa.

@@ -142,15 +142,18 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # onda fecha é a etapa 4, que estava SEM teto nenhum e escrevia no banco.
 #
 # CUIDADO com `DB_CONNECT_TIMEOUT`: são QUATRO definições da mesma env var com
-# DOIS defaults. `db/connection.py:78` = "30" (o pool sync, o da tabela acima);
-# `core/admin_dashboard.py:49`, `frontend/routes/shared.py:51` e
-# `frontend/finance_bot_websocket_custom.py:304` = "5". Ler o número do vizinho
-# errado já produziu uma conta 3× maior neste mesmo comentário.
+# DOIS defaults. Em `db/connection.py` = "30" (o pool sync, o da tabela acima);
+# em `core/admin_dashboard.py`, `frontend/routes/shared.py` e
+# `frontend/finance_bot_websocket_custom.py` = "5". Ler o número do vizinho
+# errado já produziu uma conta 3× maior neste mesmo comentário. Sem número de
+# linha de propósito: os quatro ponteiros já envelheceram (medido: dois estavam
+# errados, um por 2). A lista se refaz com um `grep -rn --include='*.py'` pelo
+# nome da env dentro de um `getenv(` — quatro acertos, e nenhum deles mente.
 #
 # Os dois `log_system_event` da etapa 4 (`of_reconnect_lock_retry` e
 # `of_reconnect_lock_timeout`) ficavam FORA do prazo, e era o buraco maior: cada
 # um abre conexão async NOVA (com o `DB_CONNECT_TIMEOUT` de
-# `core/admin_dashboard.py:49` — default **5**) e fazia um INSERT SEM
+# `core/admin_dashboard.py` — default **5**) e fazia um INSERT SEM
 # `statement_timeout`. O `connect_timeout` limita o handshake e nada limitava o
 # INSERT nem o commit, então o pior caso de cada log era ILIMITADO e qualquer
 # número fechado aqui era PISO. Desde a issue #429 aquele INSERT tem
@@ -178,7 +181,7 @@ _RECONNECT_LOCK_ATTEMPTS = 2
 # (`folga // 2`), ≤ 2,0s o log do retry, ~0,4s de backoff (`_backoff_sec(1)`,
 # 0,375–0,625s) e o resto na 2ª.
 #
-# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py:49` SAIU da conta: o
+# O `DB_CONNECT_TIMEOUT` do `core/admin_dashboard.py` SAIU da conta: o
 # `wait_for` corta em 2,0s independentemente dele. Era dele que vinham o piso de
 # 25,0s desta conta (5 + 5 nos dois logs) e o de 70s da versão anterior dela — o
 # cenário "e se o Railway definir 30?", que `.env.example` não define (grep vazio)
@@ -731,7 +734,7 @@ async def _grava_reconexao(
                          "erro": causa},
             )
             # RECONTA depois do log. Ele abre conexão async NOVA (o
-            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py:49`, default 5) e
+            # `DB_CONNECT_TIMEOUT` de `core/admin_dashboard.py`, default 5) e
             # faz INSERT dentro da janela do prazo — desde a issue #429 com
             # `statement_timeout`, mas o commit continua fora de qualquer teto por
             # query; é o maior componente do que sobra dentro do prazo (a conta está em

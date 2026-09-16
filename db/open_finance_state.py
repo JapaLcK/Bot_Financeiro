@@ -979,8 +979,10 @@ def pluggy_items_lock(item_ids: list[str]):
         # O `set_config` entra no MESMO `try` dos advisory locks de propósito: ele
         # é o PRIMEIRO statement desta conexão e agora tem teto (o `options` acima).
         # Fora do `except`, qualquer morte dele subia como exceção e virava 500 na
-        # rota do disconnect (nenhum try/except no `to_thread` de
-        # `frontend/routes/open_finance.py:2075-2078`), enquanto a docstring promete
+        # rota do disconnect (o `await asyncio.to_thread(_disconnect_sob_lock, ...)`
+        # de `open_finance_disconnect_route`, em `frontend/routes/open_finance.py`,
+        # não tem try/except — nome de construção e não número de linha, porque o
+        # número desta citação já envelheceu uma vez), enquanto a docstring promete
         # 503/"tente de novo" e é o que o resto da função entrega.
         # O modo de morte PROVÁVEL deste statement não é o cancelamento: é a conexão
         # morrer (servidor fechou o socket, blip de rede, restart, pgbouncer). O
@@ -999,7 +1001,31 @@ def pluggy_items_lock(item_ids: list[str]):
             conn.execute("select set_config('lock_timeout', %s, false)", (f"{_lock_wait_ms()}ms",))
             for item in itens:
                 conn.execute("select pg_advisory_lock(hashtext(%s))", (_lock_key(item),))
-        except psycopg.OperationalError:
+        except psycopg.OperationalError as exc:
+            # ASSIMÉTRICO com o `except` do `connect` lá em cima, e de propósito:
+            #   • lá, TODO `OperationalError` vira WARNING, porque o defeito
+            #     PERMANENTE (base/usuário inexistente, credencial errada) cai
+            #     justamente nele — mudo ali significa 503 eterno sem rastro;
+            #   • aqui, o defeito permanente NÃO passa por este `except`: config
+            #     quebrada destes dois statements é `ProgrammingError`
+            #     (`InvalidParameterValue` num `lock_timeout` inválido,
+            #     `UndefinedObject`/`UndefinedFunction` se `hashtext` sumir), que
+            #     já sobe e vira 500 com traceback.
+            # Por isso o filtro: as TRÊS rotineiras abaixo são o desfecho
+            # PROJETADO desta função — outro sync segurando a mesma chave —, e um
+            # WARNING por sync contendido seria laço quente no log. O resto
+            # (`AdminShutdown`, `DiskFull`, `TooManyConnections`,
+            # `ConnectionFailure`…) é infra morrendo e deixa de ser mudo.
+            # `exc_info=True` pela mesma razão do `connect`: o `sqlstate` sozinho
+            # não discrimina, e a mensagem do libpq é infraestrutura — sem senha,
+            # sem URL, sem `DETAIL: Key (…)=(…)` (medido).
+            if not isinstance(exc, (psycopg.errors.LockNotAvailable,
+                                    psycopg.errors.QueryCanceled,
+                                    psycopg.errors.DeadlockDetected)):
+                logger.warning(
+                    "pluggy_items_lock: lock falhou por causa NÃO rotineira, "
+                    "devolvendo 503 (itens=%d)", len(itens), exc_info=True,
+                )
             got = False
         yield got
     finally:

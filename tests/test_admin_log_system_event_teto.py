@@ -27,7 +27,7 @@ VERMELHOS, TRÊS e todos daqui — `test_insert_async_com_tabela_travada_desiste
 (medido na injeção: pendurou 3,00s num lock de 3s, contra <0,3s com o conserto),
 `test_options_chega_no_connect_async` e o portão
 `test_connect_do_log_system_event_tem_timeout_e_teto`. Injetado onde DISCRIMINA:
-os três estavam verdes com o conserto, e os outros dois do arquivo continuam
+os três estavam verdes com o conserto, e os demais deste arquivo continuam
 verdes (é o que separa "fechou o furo" de "quebrou tudo").
 
 CONTROLE POSITIVO: a mudança RESTRINGE (passa a cancelar query), então sem
